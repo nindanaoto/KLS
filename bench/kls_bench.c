@@ -286,7 +286,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--no-btf] [--no-fast-factor] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--json]\n",
           argv0);
 }
 
@@ -329,6 +329,8 @@ int main(int argc, char **argv) {
       options.use_btf = 0;
     } else if (strcmp(argv[i], "--no-fast-factor") == 0) {
       options.fast_factor = 0;
+    } else if (strcmp(argv[i], "--no-static-pivoting") == 0) {
+      options.static_pivoting = 0;
     } else {
       usage(argv[0]);
       return EXIT_FAILURE;
@@ -454,6 +456,7 @@ int main(int argc, char **argv) {
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
            ",\"pivot_tolerance\":%.9g,\"selected_pivot_tolerance\":%.9g"
            ",\"requested_btf\":%s,\"btf\":%s,\"fast_factor\":%s"
+           ",\"static_pivoting\":%s,\"selected_static_pivoting\":%s"
            ",\"analysis_seconds\":%.9g"
            ",\"initial_factor_seconds\":%.9g"
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
@@ -475,6 +478,8 @@ int main(int argc, char **argv) {
            options.use_btf ? "true" : "false",
            stats.selected_btf ? "true" : "false",
            options.fast_factor ? "true" : "false",
+           options.static_pivoting ? "true" : "false",
+           stats.selected_static_pivoting ? "true" : "false",
            stats.analysis_seconds, initial_factor_seconds,
            factor_avg, refactor_avg, solve_avg, tsolve_avg,
            residual, rel_residual, stats.nblocks, stats.max_block,
@@ -497,6 +502,9 @@ int main(int argc, char **argv) {
     printf("requested btf: %s\n", options.use_btf ? "on" : "off");
     printf("selected btf: %s\n", stats.selected_btf ? "on" : "off");
     printf("fast factor: %s\n", options.fast_factor ? "on" : "off");
+    printf("static pivoting: %s\n", options.static_pivoting ? "on" : "off");
+    printf("selected static pivoting: %s\n",
+           stats.selected_static_pivoting ? "on" : "off");
     printf("analysis: %.6f s\n", stats.analysis_seconds);
     printf("initial factor: %.6f s\n", initial_factor_seconds);
     printf("factor avg: %.6f s\n", factor_avg);

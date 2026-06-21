@@ -54,6 +54,7 @@ typedef struct kls_options {
   double memory_growth;
   int halt_if_singular;
   int fast_factor;
+  int static_pivoting;
 } kls_options;
 
 typedef struct kls_stats {
@@ -86,6 +87,7 @@ typedef struct kls_stats {
   int selected_scale;
   int selected_btf;
   double selected_pivot_tolerance;
+  int selected_static_pivoting;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

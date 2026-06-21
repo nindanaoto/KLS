@@ -40,6 +40,7 @@ def main() -> int:
     parser.add_argument("--pivot-tol", type=float, default=None)
     parser.add_argument("--no-btf", action="store_true")
     parser.add_argument("--no-fast-factor", action="store_true")
+    parser.add_argument("--no-static-pivoting", action="store_true")
     args = parser.parse_args()
 
     matrices = sorted(args.matrix_dir.rglob("*.mtx"))
@@ -78,6 +79,8 @@ def main() -> int:
                 cmd.append("--no-btf")
             if args.no_fast_factor:
                 cmd.append("--no-fast-factor")
+            if args.no_static_pivoting:
+                cmd.append("--no-static-pivoting")
             if args.pivot_tol is not None:
                 cmd.extend(["--pivot-tol", str(args.pivot_tol)])
             proc = subprocess.run(cmd, text=True, capture_output=True, check=False)

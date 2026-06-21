@@ -1177,10 +1177,17 @@ static int numeric_candidate_is_better(const trilinos_klu_l_common *current_comm
   const double candidate_flops = candidate_common->flops;
   const double current_fill = (double)(current_numeric->lnz + current_numeric->unz);
   const double candidate_fill = (double)(candidate_numeric->lnz + candidate_numeric->unz);
+  const UF_long current_offdiag = current_common->noffdiag;
+  const UF_long candidate_offdiag = candidate_common->noffdiag;
 
   if (current_flops > 0.0 && candidate_flops > 0.0 &&
       candidate_flops < 0.75 * current_flops &&
       candidate_fill <= 1.10 * current_fill) {
+    return 1;
+  }
+  if (current_offdiag >= 16 && candidate_offdiag * 4u <= current_offdiag &&
+      candidate_fill <= 1.05 * current_fill &&
+      (current_flops <= 0.0 || candidate_flops <= 1.10 * current_flops)) {
     return 1;
   }
   return candidate_fill < 0.80 * current_fill;
@@ -1632,16 +1639,22 @@ static int build_sorted_row_permuted_pattern(UF_long n,
 }
 
 static int should_try_auto_row_match(const kls_solver *solver) {
-  /* Static row matching is useful only when off-diagonal pivoting is both
-     severe and likely fixable; keep the trial narrow to avoid analysis cost. */
-  if (solver == NULL || solver->numeric == NULL || solver->row_perm != NULL ||
+  /* Weighted static pivoting is currently a reactive medium-matrix trial.  On
+     larger matrices the O(nnz log nnz) matching/reanalysis cost needs a cheaper
+     precheck before it is worth paying by default. */
+  if (solver == NULL || !solver->options.static_pivoting ||
+      solver->numeric == NULL || solver->row_perm != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       solver->options.ordering != KLS_ORDERING_AUTO || solver->n < 3000 ||
-      solver->n > 20000 || solver->common.noffdiag < 128) {
+      solver->n > 20000 || solver->common.noffdiag < 16) {
     return 0;
   }
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return fill >= 50000 && solver->common.flops >= 5.0e5;
+  if (fill < 50000 || solver->common.flops < 5.0e5) {
+    return 0;
+  }
+  const double offdiag_ratio = (double)solver->common.noffdiag / (double)solver->n;
+  return solver->common.noffdiag >= 128 || offdiag_ratio >= 0.005;
 }
 
 static void maybe_select_auto_row_match(kls_solver *solver,
@@ -1713,7 +1726,7 @@ static void maybe_select_auto_row_match(kls_solver *solver,
   }
 
   UF_long matched = 0;
-  const int improve_matching = solver->common.noffdiag < 230;
+  const int improve_matching = solver->n <= 50000 && solver->nnz <= 1000000;
   int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
                                               base_col_ptr, base_row_idx,
                                               base_values, improve_matching,
@@ -2170,6 +2183,9 @@ static int validate_options(const kls_options *options) {
   if (options->fast_factor != 0 && options->fast_factor != 1) {
     return 0;
   }
+  if (options->static_pivoting != 0 && options->static_pivoting != 1) {
+    return 0;
+  }
   return 1;
 }
 
@@ -2408,6 +2424,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.selected_orientation = solver->orientation;
   solver->stats.selected_scale = (int)solver->common.scale;
   solver->stats.selected_pivot_tolerance = solver->common.tol;
+  solver->stats.selected_static_pivoting = solver->row_perm != NULL;
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
     solver->stats.selected_btf = solver->symbolic->do_btf ? 1 : 0;
@@ -2426,6 +2443,7 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.last_kernel_status = (int)solver->common.status;
   solver->stats.selected_scale = (int)solver->common.scale;
   solver->stats.selected_pivot_tolerance = solver->common.tol;
+  solver->stats.selected_static_pivoting = solver->row_perm != NULL;
   solver->stats.selected_btf =
     (solver->symbolic != NULL && solver->symbolic->do_btf) ? 1 : 0;
   solver->stats.numerical_rank = (int64_t)solver->common.numerical_rank;
@@ -2459,6 +2477,7 @@ void kls_default_options(kls_options *options) {
   options->memory_growth = 1.5;
   options->halt_if_singular = 1;
   options->fast_factor = 1;
+  options->static_pivoting = 1;
 }
 
 int kls_create(kls_solver **solver_out) {
