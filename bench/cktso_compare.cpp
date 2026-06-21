@@ -138,24 +138,38 @@ static void matvec(const Matrix &a, const std::vector<double> &x, std::vector<do
   }
 }
 
-static double residual(const Matrix &a, const std::vector<double> &x, const std::vector<double> &b) {
+static double residual(const Matrix &a,
+                       const std::vector<double> &x,
+                       const std::vector<double> &b,
+                       double *relative_out) {
   std::vector<double> ax(static_cast<size_t>(a.n), 0.0);
   matvec(a, x, ax);
   double r2 = 0.0;
+  double b2 = 0.0;
   for (int i = 0; i < a.n; ++i) {
     const double r = ax[static_cast<size_t>(i)] - b[static_cast<size_t>(i)];
     r2 += r * r;
+    b2 += b[static_cast<size_t>(i)] * b[static_cast<size_t>(i)];
   }
-  return std::sqrt(r2);
+  const double rnorm = std::sqrt(r2);
+  if (relative_out != nullptr) {
+    *relative_out = b2 > 0.0 ? rnorm / std::sqrt(b2) : rnorm;
+  }
+  return rnorm;
 }
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat]\n", argv[0]);
+    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat]\n", argv[0]);
     return EXIT_FAILURE;
   }
   const int threads = argc > 2 ? std::atoi(argv[2]) : 16;
   const int repeat = argc > 3 ? std::atoi(argv[3]) : 5;
+  const int refactor_repeat = argc > 4 ? std::atoi(argv[4]) : repeat;
+  if (threads <= 0 || repeat <= 0 || refactor_repeat < 0) {
+    std::fprintf(stderr, "threads/repeat arguments must be positive\n");
+    return EXIT_FAILURE;
+  }
 
   Matrix a;
   if (!read_matrix_market(argv[1], a)) {
@@ -182,6 +196,15 @@ int main(int argc, char **argv) {
     CKTSO_DestroySolver(inst);
     return EXIT_FAILURE;
   }
+  const long long analysis_us = oparm[0];
+
+  ret = CKTSO_Factorize(inst, a.values.data(), true);
+  if (ret < 0) {
+    std::fprintf(stderr, "CKTSO initial Factorize failed: %d\n", ret);
+    CKTSO_DestroySolver(inst);
+    return EXIT_FAILURE;
+  }
+  const long long initial_factor_us = oparm[1];
 
   long long factor_total = 0;
   long long refactor_total = 0;
@@ -191,7 +214,7 @@ int main(int argc, char **argv) {
     if (ret < 0) break;
     factor_total += oparm[1];
   }
-  for (int i = 0; i < repeat && ret >= 0; ++i) {
+  for (int i = 0; i < refactor_repeat && ret >= 0; ++i) {
     ret = CKTSO_Refactorize(inst, a.values.data());
     if (ret < 0) break;
     refactor_total += oparm[1];
@@ -207,17 +230,37 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
+  const double factor_us_avg = static_cast<double>(factor_total) / static_cast<double>(repeat);
+  const double refactor_us_avg = refactor_repeat > 0
+    ? static_cast<double>(refactor_total) / static_cast<double>(refactor_repeat)
+    : 0.0;
+  const double solve_us_avg = static_cast<double>(solve_total) / static_cast<double>(repeat);
+  const double spice_cycle_seconds =
+    1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
+              solve_us_avg + 99.0 * (refactor_us_avg + solve_us_avg));
+  double relative_residual = 0.0;
+  const double residual_l2 = residual(a, x, b, &relative_residual);
+
   std::printf("{\"matrix\":\"%s\",\"n\":%d,\"nnz\":%d,"
-              "\"threads\":%d,\"analysis_us\":%lld,"
-              "\"factor_us_avg\":%lld,\"refactor_us_avg\":%lld,"
-              "\"solve_us_avg\":%lld,\"residual_l2\":%.9g,"
+              "\"threads\":%d,\"repeat\":%d,\"refactor_repeat\":%d,"
+              "\"analysis_us\":%lld,\"initial_factor_us\":%lld,"
+              "\"factor_us_avg\":%.9g,\"refactor_us_avg\":%.9g,"
+              "\"solve_us_avg\":%.9g,"
+              "\"analysis_seconds\":%.9g,\"initial_factor_seconds\":%.9g,"
+              "\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g,"
+              "\"solve_seconds_avg\":%.9g,\"spice_cycle_seconds\":%.9g,"
+              "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
               "\"nnz_l\":%lld,\"nnz_u\":%lld,"
               "\"memory_bytes\":%lld,\"memory_peak_bytes\":%lld}\n",
               argv[1], a.n, a.col_ptr[static_cast<size_t>(a.n)], threads,
-              oparm[0], factor_total / repeat, refactor_total / repeat,
-              solve_total / repeat, residual(a, x, b), oparm[5], oparm[6],
+              repeat, refactor_repeat, analysis_us, initial_factor_us,
+              factor_us_avg, refactor_us_avg, solve_us_avg,
+              1.0e-6 * static_cast<double>(analysis_us),
+              1.0e-6 * static_cast<double>(initial_factor_us),
+              1.0e-6 * factor_us_avg, 1.0e-6 * refactor_us_avg,
+              1.0e-6 * solve_us_avg, spice_cycle_seconds,
+              residual_l2, relative_residual, oparm[5], oparm[6],
               oparm[12], oparm[13]);
   CKTSO_DestroySolver(inst);
   return EXIT_SUCCESS;
 }
-

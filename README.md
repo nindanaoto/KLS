@@ -91,8 +91,11 @@ distribution:
 ```sh
 cmake -S . -B build-cktso -DKLS_BUILD_CKTSO_COMPARE=ON -DCKTSO_ROOT=/path/to/cktso
 cmake --build build-cktso -j --target cktso_compare
-LD_LIBRARY_PATH=/path/to/cktso/rocky8_x64_gcc850 ./build-cktso/cktso_compare matrix.mtx 16 10
+LD_LIBRARY_PATH=/path/to/cktso/rocky8_x64_gcc850 ./build-cktso/cktso_compare matrix.mtx 16 10 10
 ```
+
+The CKTSO harness emits the same `spice_cycle_seconds` formula as `kls_bench`,
+so JSON rows can be compared directly on the repeated-SPICE metric.
 
 CKTSO must be licensed correctly according to its own distribution
 requirements, usually by colocating the license file with the selected shared
