@@ -58,8 +58,9 @@ Use `--threads N` to enable KLS-owned parallel work where it is currently
 available. The first threaded path is repeated numeric refactorization across
 independent BTF diagonal blocks for large, high-flop cases, including existing
 KLU row-scaling modes when reusable scale storage and enough independent BTF
-block work are present. Small matrices, single-block matrices, and factor/solve
-kernels still use the serial path.
+block work are present. KLS keeps a solver-owned worker pool for this path, so
+repeated SPICE refactors do not relaunch threads every cycle. Small matrices,
+single-block matrices, and factor/solve kernels still use the serial path.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium
@@ -185,12 +186,12 @@ library.
 ## Status
 
 This is a functional implementation with KLS-level analysis choices for
-repeated SPICE-style solves and an initial KLS-owned threaded refactor path for
-BTF block parallelism on a narrow class of large unscaled cases. It is not yet a
-generally CKTSO-beating solver across broad circuit corpora. The next
-algorithmic work is to evolve the numeric factor/refactor/solve kernels toward
-deeper KLS-owned sparse kernels with better pivot reuse and parallelism while
-keeping the public API and benchmark harness stable.
+repeated SPICE-style solves and a KLS-owned threaded refactor path for BTF block
+parallelism on a narrow class of large cases. It is not yet a generally
+CKTSO-beating solver across broad circuit corpora. The next algorithmic work is
+to evolve the numeric factor/refactor/solve kernels toward deeper KLS-owned
+sparse kernels with better pivot reuse and parallelism while keeping the public
+API and benchmark harness stable.
 
 ## License
 

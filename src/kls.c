@@ -19,6 +19,8 @@
 
 #define KLS_KLU_EMPTY ((UF_long)-1)
 
+typedef struct kls_refactor_pool kls_refactor_pool;
+
 typedef enum kls_input_format {
   KLS_INPUT_NONE = 0,
   KLS_INPUT_CSC = 1,
@@ -42,6 +44,7 @@ struct kls_solver {
   trilinos_klu_l_common common;
   trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_numeric *numeric;
+  kls_refactor_pool *refactor_pool;
   int auto_metis_checked;
   int auto_pivot_checked;
   int auto_scale_checked;
@@ -80,6 +83,7 @@ typedef struct kls_parallel_refactor_shared {
 
 typedef struct kls_parallel_refactor_worker {
   kls_parallel_refactor_shared *shared;
+  kls_refactor_pool *pool;
   double *x;
   int invalid;
   int pivot_rejected;
@@ -87,6 +91,23 @@ typedef struct kls_parallel_refactor_worker {
   UF_long numerical_rank;
   UF_long singular_col;
 } kls_parallel_refactor_worker;
+
+struct kls_refactor_pool {
+  kls_parallel_refactor_shared shared;
+  pthread_cond_t work_cond;
+  pthread_cond_t done_cond;
+  pthread_t *threads;
+  kls_parallel_refactor_worker *workers;
+  UF_long maxblock;
+  unsigned long generation;
+  int thread_count;
+  int created_count;
+  int active_workers;
+  int shutdown;
+  int scratch_dirty;
+  int conds_initialized;
+  int lock_initialized;
+};
 
 typedef struct kls_match_entry {
   double weight;
@@ -314,28 +335,245 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
   }
 }
 
-static void *kls_parallel_refactor_worker_main(void *arg) {
+static void *kls_refactor_pool_worker_main(void *arg) {
   kls_parallel_refactor_worker *worker = (kls_parallel_refactor_worker *)arg;
+  kls_refactor_pool *pool = worker->pool;
   kls_parallel_refactor_shared *shared = worker->shared;
+  unsigned long seen_generation = 0;
+
+  pthread_mutex_lock(&shared->lock);
   for (;;) {
-    pthread_mutex_lock(&shared->lock);
-    if (shared->stop || shared->next_block >= shared->symbolic->nblocks) {
-      pthread_mutex_unlock(&shared->lock);
-      break;
+    while (!pool->shutdown && pool->generation == seen_generation) {
+      pthread_cond_wait(&pool->work_cond, &shared->lock);
     }
-    const UF_long block = shared->next_block++;
+    if (pool->shutdown) {
+      pthread_mutex_unlock(&shared->lock);
+      return NULL;
+    }
+    seen_generation = pool->generation;
     pthread_mutex_unlock(&shared->lock);
 
-    kls_parallel_refactor_block(worker, block);
-    if (worker->invalid || worker->pivot_rejected ||
-        (worker->singular && shared->halt_if_singular)) {
+    for (;;) {
       pthread_mutex_lock(&shared->lock);
-      shared->stop = 1;
+      if (shared->stop || shared->next_block >= shared->symbolic->nblocks) {
+        pthread_mutex_unlock(&shared->lock);
+        break;
+      }
+      const UF_long block = shared->next_block++;
       pthread_mutex_unlock(&shared->lock);
-      break;
+
+      kls_parallel_refactor_block(worker, block);
+      if (worker->invalid || worker->pivot_rejected ||
+          (worker->singular && shared->halt_if_singular)) {
+        pthread_mutex_lock(&shared->lock);
+        shared->stop = 1;
+        pthread_mutex_unlock(&shared->lock);
+        break;
+      }
+    }
+
+    pthread_mutex_lock(&shared->lock);
+    pool->active_workers--;
+    if (pool->active_workers == 0) {
+      pthread_cond_signal(&pool->done_cond);
     }
   }
-  return NULL;
+}
+
+static void destroy_refactor_pool(kls_solver *solver) {
+  if (solver == NULL || solver->refactor_pool == NULL) {
+    return;
+  }
+  kls_refactor_pool *pool = solver->refactor_pool;
+  if (pool->lock_initialized) {
+    pthread_mutex_lock(&pool->shared.lock);
+    pool->shutdown = 1;
+    if (pool->conds_initialized) {
+      pthread_cond_broadcast(&pool->work_cond);
+    }
+    pthread_mutex_unlock(&pool->shared.lock);
+  }
+  if (pool->threads != NULL) {
+    for (int i = 0; i < pool->created_count; ++i) {
+      pthread_join(pool->threads[i], NULL);
+    }
+  }
+  if (pool->conds_initialized) {
+    pthread_cond_destroy(&pool->work_cond);
+    pthread_cond_destroy(&pool->done_cond);
+  }
+  if (pool->lock_initialized) {
+    pthread_mutex_destroy(&pool->shared.lock);
+  }
+  if (pool->workers != NULL) {
+    for (int i = 0; i < pool->thread_count; ++i) {
+      free(pool->workers[i].x);
+    }
+  }
+  free(pool->threads);
+  free(pool->workers);
+  free(pool);
+  solver->refactor_pool = NULL;
+}
+
+static int ensure_refactor_pool(kls_solver *solver, int thread_count) {
+  if (solver == NULL || solver->symbolic == NULL || thread_count < 2) {
+    return 0;
+  }
+  if (solver->refactor_pool != NULL &&
+      (solver->refactor_pool->thread_count != thread_count ||
+       solver->refactor_pool->maxblock < solver->symbolic->maxblock)) {
+    destroy_refactor_pool(solver);
+  }
+  if (solver->refactor_pool != NULL) {
+    return 1;
+  }
+
+  kls_refactor_pool *pool = (kls_refactor_pool *)calloc(1, sizeof(*pool));
+  if (pool == NULL) {
+    return 0;
+  }
+  pool->thread_count = thread_count;
+  pool->maxblock = solver->symbolic->maxblock;
+  pool->threads = (pthread_t *)calloc((size_t)thread_count, sizeof(*pool->threads));
+  pool->workers =
+    (kls_parallel_refactor_worker *)calloc((size_t)thread_count, sizeof(*pool->workers));
+  if (pool->threads == NULL || pool->workers == NULL) {
+    free(pool->threads);
+    free(pool->workers);
+    free(pool);
+    return 0;
+  }
+  if (pthread_mutex_init(&pool->shared.lock, NULL) != 0) {
+    free(pool->threads);
+    free(pool->workers);
+    free(pool);
+    return 0;
+  }
+  pool->lock_initialized = 1;
+  if (pthread_cond_init(&pool->work_cond, NULL) != 0) {
+    pthread_mutex_destroy(&pool->shared.lock);
+    free(pool->threads);
+    free(pool->workers);
+    free(pool);
+    return 0;
+  }
+  if (pthread_cond_init(&pool->done_cond, NULL) != 0) {
+    pthread_cond_destroy(&pool->work_cond);
+    pthread_mutex_destroy(&pool->shared.lock);
+    free(pool->threads);
+    free(pool->workers);
+    free(pool);
+    return 0;
+  }
+  pool->conds_initialized = 1;
+
+  for (int i = 0; i < thread_count; ++i) {
+    pool->workers[i].shared = &pool->shared;
+    pool->workers[i].pool = pool;
+    pool->workers[i].x =
+      (double *)calloc((size_t)solver->symbolic->maxblock, sizeof(double));
+    if (pool->workers[i].x == NULL ||
+        pthread_create(&pool->threads[i], NULL, kls_refactor_pool_worker_main,
+                       &pool->workers[i]) != 0) {
+      break;
+    }
+    pool->created_count++;
+  }
+  if (pool->created_count != thread_count) {
+    solver->refactor_pool = pool;
+    destroy_refactor_pool(solver);
+    return 0;
+  }
+  solver->refactor_pool = pool;
+  return 1;
+}
+
+static int run_refactor_pool(kls_solver *solver,
+                             double *numeric_values,
+                             int thread_count,
+                             int check_pivots,
+                             int *invalid_out,
+                             int *pivot_rejected_out,
+                             int *singular_out,
+                             UF_long *numerical_rank_out,
+                             UF_long *singular_col_out) {
+  if (!ensure_refactor_pool(solver, thread_count)) {
+    return 0;
+  }
+  kls_refactor_pool *pool = solver->refactor_pool;
+  kls_parallel_refactor_shared *shared = &pool->shared;
+
+  pthread_mutex_lock(&shared->lock);
+  if (pool->active_workers != 0) {
+    pthread_mutex_unlock(&shared->lock);
+    return 0;
+  }
+
+  shared->col_ptr = solver->col_ptr;
+  shared->row_idx = solver->row_idx;
+  shared->values = numeric_values;
+  shared->symbolic = solver->symbolic;
+  shared->numeric = solver->numeric;
+  shared->n = solver->n;
+  shared->rs = solver->numeric->Rs;
+  shared->scale = (int)solver->common.scale;
+  shared->halt_if_singular = solver->common.halt_if_singular;
+  shared->check_pivots = check_pivots;
+  shared->pivot_tolerance = solver->common.tol;
+  shared->next_block = 0;
+  shared->stop = 0;
+  pool->active_workers = thread_count;
+
+  for (int i = 0; i < thread_count; ++i) {
+    kls_parallel_refactor_worker *worker = &pool->workers[i];
+    worker->invalid = 0;
+    worker->pivot_rejected = 0;
+    worker->singular = 0;
+    worker->numerical_rank = UF_long_max;
+    worker->singular_col = KLS_KLU_EMPTY;
+    /* Successful KLU-style refactors clear touched X slots as they go. */
+    if (pool->scratch_dirty) {
+      memset(worker->x, 0, (size_t)solver->symbolic->maxblock * sizeof(*worker->x));
+    }
+  }
+  pool->scratch_dirty = 0;
+
+  pool->generation++;
+  pthread_cond_broadcast(&pool->work_cond);
+  while (pool->active_workers > 0) {
+    pthread_cond_wait(&pool->done_cond, &shared->lock);
+  }
+  pthread_mutex_unlock(&shared->lock);
+
+  int invalid = 0;
+  int pivot_rejected = 0;
+  int singular = 0;
+  UF_long numerical_rank = UF_long_max;
+  UF_long singular_col = KLS_KLU_EMPTY;
+  for (int i = 0; i < thread_count; ++i) {
+    const kls_parallel_refactor_worker *worker = &pool->workers[i];
+    if (worker->invalid) {
+      invalid = 1;
+    }
+    if (worker->pivot_rejected) {
+      pivot_rejected = 1;
+    }
+    if (worker->singular && worker->numerical_rank < numerical_rank) {
+      singular = 1;
+      numerical_rank = worker->numerical_rank;
+      singular_col = worker->singular_col;
+    }
+  }
+
+  *invalid_out = invalid;
+  *pivot_rejected_out = pivot_rejected;
+  *singular_out = singular;
+  *numerical_rank_out = numerical_rank;
+  *singular_col_out = singular_col;
+  pool->scratch_dirty = invalid || pivot_rejected ||
+                        (singular && solver->common.halt_if_singular);
+  return 1;
 }
 
 static int64_t read_index(kls_index_type type, const void *data, int64_t i) {
@@ -362,6 +600,7 @@ static void free_numeric(kls_solver *solver) {
 }
 
 static void clear_matrix(kls_solver *solver) {
+  destroy_refactor_pool(solver);
   free_numeric(solver);
   free_symbolic(solver);
   free(solver->col_ptr);
@@ -3417,87 +3656,20 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     return ok;
   }
 
-  pthread_t *threads = (pthread_t *)calloc((size_t)thread_count, sizeof(*threads));
-  kls_parallel_refactor_worker *workers =
-    (kls_parallel_refactor_worker *)calloc((size_t)thread_count, sizeof(*workers));
-  if (threads == NULL || workers == NULL) {
-    free(threads);
-    free(workers);
-    common->status = TRILINOS_KLU_OUT_OF_MEMORY;
-    return 0;
-  }
-
-  kls_parallel_refactor_shared shared;
-  memset(&shared, 0, sizeof(shared));
-  shared.col_ptr = solver->col_ptr;
-  shared.row_idx = solver->row_idx;
-  shared.values = numeric_values;
-  shared.symbolic = symbolic;
-  shared.numeric = solver->numeric;
-  shared.n = solver->n;
-  shared.rs = solver->numeric->Rs;
-  shared.scale = (int)common->scale;
-  shared.halt_if_singular = common->halt_if_singular;
-  shared.check_pivots = check_pivots;
-  shared.pivot_tolerance = common->tol;
-  if (pthread_mutex_init(&shared.lock, NULL) != 0) {
-    free(threads);
-    free(workers);
-    common->status = TRILINOS_KLU_OUT_OF_MEMORY;
-    return 0;
-  }
-
-  int created = 0;
-  for (int i = 0; i < thread_count; ++i) {
-    workers[i].shared = &shared;
-    workers[i].x = (double *)calloc((size_t)symbolic->maxblock, sizeof(double));
-    if (workers[i].x == NULL) {
-      pthread_mutex_lock(&shared.lock);
-      shared.stop = 1;
-      pthread_mutex_unlock(&shared.lock);
-      break;
-    }
-    if (pthread_create(&threads[i], NULL, kls_parallel_refactor_worker_main,
-                       &workers[i]) != 0) {
-      pthread_mutex_lock(&shared.lock);
-      shared.stop = 1;
-      pthread_mutex_unlock(&shared.lock);
-      break;
-    }
-    created++;
-  }
-
-  for (int i = 0; i < created; ++i) {
-    pthread_join(threads[i], NULL);
-  }
-  pthread_mutex_destroy(&shared.lock);
-
-  const int launch_failed = created != thread_count;
   int invalid = 0;
   int pivot_rejected = 0;
   int singular = 0;
   UF_long numerical_rank = UF_long_max;
   UF_long singular_col = KLS_KLU_EMPTY;
-  for (int i = 0; i < thread_count; ++i) {
-    if (workers[i].invalid) {
-      invalid = 1;
-    }
-    if (workers[i].pivot_rejected) {
-      pivot_rejected = 1;
-    }
-    if (workers[i].singular && workers[i].numerical_rank < numerical_rank) {
-      singular = 1;
-      numerical_rank = workers[i].numerical_rank;
-      singular_col = workers[i].singular_col;
-    }
-    free(workers[i].x);
+  if (!run_refactor_pool(solver, numeric_values, thread_count, check_pivots,
+                         &invalid, &pivot_rejected, &singular,
+                         &numerical_rank, &singular_col)) {
+    common->status = TRILINOS_KLU_OUT_OF_MEMORY;
+    return 0;
   }
-  free(threads);
-  free(workers);
 
-  if (launch_failed || invalid) {
-    common->status = launch_failed ? TRILINOS_KLU_OUT_OF_MEMORY
-                                   : TRILINOS_KLU_INVALID;
+  if (invalid) {
+    common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
   if (pivot_rejected) {

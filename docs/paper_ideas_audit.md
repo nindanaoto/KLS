@@ -10,7 +10,8 @@ KLS has **not** implemented every paper idea that is still worth trying. It has
 implemented the ideas that can be layered around the current KLU-derived
 Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, CAMD refinement,
 auto scaling policy, pivot-checked reuse, static row-pivoting trials with
-matching-derived equilibration, and BTF-block parallel refactorization.
+matching-derived equilibration, and BTF-block parallel refactorization with a
+solver-owned worker pool.
 
 The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
@@ -71,7 +72,9 @@ design work, not benchmark-specific tuning.
   candidate only when numeric quality and cost evidence justify it.
 - Initial KLS-owned parallelism: repeated refactorization can run across
   independent BTF diagonal blocks for large high-flop cases where the block work
-  is wide enough to offset thread overhead.
+  is wide enough to offset thread overhead. The threaded path keeps a persistent
+  worker pool on the solver instance so repeated SPICE refactors reuse workers
+  and scratch storage instead of relaunching threads each cycle.
 - SPICE-cycle orientation policy: KLS can analyze normal and transposed storage
   orientations and select the faster internal form for repeated solve cycles.
 - LGPL project licensing and third-party notices: KLS itself is
