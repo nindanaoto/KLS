@@ -28,6 +28,20 @@ Several smaller dispatch experiments were tried and rejected because they helped
 some benchmark cases while regressing others. Those are documented below so the
 project does not drift toward benchmark-name-specific heuristics.
 
+## Paper-by-Paper Coverage
+
+| Reference | Implemented in KLS | Partial or open coverage |
+| --- | --- | --- |
+| Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
+| NICSLU | AMD-style ordering, optional static-pivoting preprocessing, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. | Full MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and EGraph-guided refactorization are not implemented. A levelized EGraph refactor prototype was tried and rejected because it was not a general win on the current kernel/storage. |
+| CKTSO | METIS nested-dissection ordering, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, and matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is only approximated. The dual cluster/pipeline EGraph scheduler, pipelined tail restart with pivoting after a failed pivot check, and structure-adaptive triangular solve are not implemented. KLS currently falls back to full pivoting factorization after unsafe reused pivots. |
+| SubtreeLU | KLS vendors reproducible METIS/GKlib submodules and uses METIS plus CAMD refinement, which overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. | KLS does not retain a separator tree, collapse/partition it into private and pipeline task queues, constrain pivot search within separator-tree subdomains, perform FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
+
+This means KLS has implemented or prototyped the ideas that can be layered
+around the current KLU-derived data structures. It has **not** implemented all
+paper ideas that are still worth trying. The remaining items are general solver
+design work, not benchmark-specific tuning.
+
 ## Implemented
 
 - KLU Algorithm 907 baseline: BTF preprocessing, AMD/COLAMD ordering,
