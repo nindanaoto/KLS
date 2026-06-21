@@ -55,9 +55,10 @@ memory statistics.
 
 Use `--threads N` to enable KLS-owned parallel work where it is currently
 available. The first threaded path is repeated numeric refactorization across
-independent BTF diagonal blocks for large, unscaled, high-flop cases. Small
-matrices, scaled matrices, single-block matrices, and factor/solve kernels
-still use the serial path.
+independent BTF diagonal blocks for large, high-flop cases, including existing
+KLU row-scaling modes when reusable scale storage and enough independent BTF
+block work are present. Small matrices, single-block matrices, and factor/solve
+kernels still use the serial path.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium

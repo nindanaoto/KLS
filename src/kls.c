@@ -60,11 +60,14 @@ typedef struct kls_pattern_candidate {
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
+  UF_long n;
   const UF_long *col_ptr;
   const UF_long *row_idx;
   const double *values;
   const trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_numeric *numeric;
+  const double *rs;
+  int scale;
   int halt_if_singular;
   UF_long next_block;
   int stop;
@@ -147,6 +150,21 @@ static void kls_worker_record_singular(kls_parallel_refactor_worker *worker,
   }
 }
 
+static int kls_parallel_refactor_value(const kls_parallel_refactor_shared *shared,
+                                       UF_long oldrow,
+                                       double raw_value,
+                                       double *value_out) {
+  if (shared->scale <= 0) {
+    *value_out = raw_value;
+    return 1;
+  }
+  if (oldrow >= shared->n || shared->rs == NULL || shared->rs[oldrow] == 0.0) {
+    return 0;
+  }
+  *value_out = raw_value / shared->rs[oldrow];
+  return 1;
+}
+
 static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
                                         UF_long block) {
   kls_parallel_refactor_shared *shared = worker->shared;
@@ -175,15 +193,20 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
     double s = 0.0;
     for (UF_long p = ap[oldcol]; p < pend; ++p) {
       const UF_long oldrow = ai[p];
+      double value = 0.0;
+      if (!kls_parallel_refactor_value(shared, oldrow, ax[p], &value)) {
+        worker->invalid = 1;
+        return;
+      }
       const UF_long newrow = pinv[oldrow];
       if (newrow < k1) {
         if (poff >= poff_end) {
           worker->invalid = 1;
           return;
         }
-        offx[poff++] = ax[p];
+        offx[poff++] = value;
       } else if (newrow == k1) {
-        s = ax[p];
+        s = value;
       } else {
         worker->invalid = 1;
         return;
@@ -215,15 +238,20 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
 
     for (UF_long p = ap[oldcol]; p < pend; ++p) {
       const UF_long oldrow = ai[p];
+      double value = 0.0;
+      if (!kls_parallel_refactor_value(shared, oldrow, ax[p], &value)) {
+        worker->invalid = 1;
+        return;
+      }
       const UF_long global_row = pinv[oldrow];
       if (global_row < k1) {
         if (poff >= poff_end) {
           worker->invalid = 1;
           return;
         }
-        offx[poff++] = ax[p];
+        offx[poff++] = value;
       } else if (global_row < k2) {
-        x[global_row - k1] = ax[p];
+        x[global_row - k1] = value;
       } else {
         worker->invalid = 1;
         return;
@@ -2909,7 +2937,7 @@ static int kls_parallel_refactor_is_eligible(const kls_solver *solver) {
   if (solver->n < 5000u || solver->symbolic->maxblock == solver->n) {
     return 0;
   }
-  if (solver->common.scale > 0 || solver->common.flops < 2.0e7) {
+  if (solver->common.flops < 2.0e7) {
     return 0;
   }
   if (solver->symbolic->nblocks < 64u ||
@@ -2920,8 +2948,39 @@ static int kls_parallel_refactor_is_eligible(const kls_solver *solver) {
       solver->numeric->Pinv == NULL || solver->numeric->Udiag == NULL) {
     return 0;
   }
+  if (solver->common.scale > 0) {
+    const UF_long independent_rows = solver->n - solver->symbolic->maxblock;
+    /* Scaled refactor pays O(n) scale recomputation and Rs permutation before
+       any threaded block work, so require enough non-dominant BTF rows. */
+    if (independent_rows < 2048u ||
+        (double)independent_rows < 0.02 * (double)solver->n) {
+      return 0;
+    }
+    return solver->numeric->Rs != NULL && solver->numeric->Pnum != NULL &&
+           solver->numeric->Xwork != NULL;
+  }
   if (solver->numeric->Rs != NULL) {
     return 0;
+  }
+  return 1;
+}
+
+static int kls_parallel_refactor_permute_scale(kls_solver *solver) {
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  double *rs = numeric->Rs;
+  double *xwork = (double *)numeric->Xwork;
+  if (rs == NULL || xwork == NULL || numeric->Pnum == NULL) {
+    return 0;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    const UF_long row = numeric->Pnum[k];
+    if (row >= solver->n) {
+      return 0;
+    }
+    xwork[k] = rs[row];
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    rs[k] = xwork[k];
   }
   return 1;
 }
@@ -2940,6 +2999,12 @@ static UF_long kls_parallel_refactor(kls_solver *solver, double *numeric_values)
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
   common->nrealloc = 0;
+  if (common->scale > 0 &&
+      !trilinos_klu_l_scale((UF_long)common->scale, solver->n, solver->col_ptr,
+                            solver->row_idx, numeric_values, solver->numeric->Rs,
+                            NULL, common)) {
+    return 0;
+  }
 
   int thread_count = solver->options.threads;
   if ((UF_long)thread_count > symbolic->nblocks) {
@@ -2968,6 +3033,9 @@ static UF_long kls_parallel_refactor(kls_solver *solver, double *numeric_values)
   shared.values = numeric_values;
   shared.symbolic = symbolic;
   shared.numeric = solver->numeric;
+  shared.n = solver->n;
+  shared.rs = solver->numeric->Rs;
+  shared.scale = (int)common->scale;
   shared.halt_if_singular = common->halt_if_singular;
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {
     free(threads);
@@ -3030,10 +3098,19 @@ static UF_long kls_parallel_refactor(kls_solver *solver, double *numeric_values)
     common->status = TRILINOS_KLU_SINGULAR;
     common->numerical_rank = numerical_rank;
     common->singular_col = singular_col;
-    return common->halt_if_singular ? 0 : 1;
+    if (common->halt_if_singular) {
+      return 0;
+    }
   }
 
-  common->status = TRILINOS_KLU_OK;
+  if (common->scale > 0 && !kls_parallel_refactor_permute_scale(solver)) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+
+  if (!singular) {
+    common->status = TRILINOS_KLU_OK;
+  }
   return 1;
 }
 
