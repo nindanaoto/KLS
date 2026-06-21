@@ -42,6 +42,10 @@ The benchmark reports analysis, factorization, refactorization, solve,
 transpose-solve, residual, selected orientation, fill, flop, and memory
 statistics.
 
+Use `--scale -1|0|1|2` to compare KLS/KLU row scaling modes when studying
+pivoting and refactorization behavior. KLS defaults to `2`, matching KLU's max
+row scaling default.
+
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 
 ```sh

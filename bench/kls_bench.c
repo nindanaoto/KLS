@@ -247,9 +247,19 @@ static kls_orientation parse_orientation(const char *s) {
   return KLS_ORIENTATION_AUTO;
 }
 
+static int parse_scale(const char *s, int *scale_out) {
+  char *end = NULL;
+  const long value = strtol(s, &end, 10);
+  if (end == s || *end != '\0' || value < -1 || value > 2) {
+    return 0;
+  }
+  *scale_out = (int)value;
+  return 1;
+}
+
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural] [--orientation auto|normal|transpose] [--no-fast-factor] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural] [--orientation auto|normal|transpose] [--scale -1|0|1|2] [--no-fast-factor] [--json]\n",
           argv0);
 }
 
@@ -276,6 +286,11 @@ int main(int argc, char **argv) {
       options.ordering = parse_ordering(argv[++i]);
     } else if (strcmp(argv[i], "--orientation") == 0 && i + 1 < argc) {
       options.orientation = parse_orientation(argv[++i]);
+    } else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
+      if (!parse_scale(argv[++i], &options.scale)) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+      }
     } else if (strcmp(argv[i], "--no-fast-factor") == 0) {
       options.fast_factor = 0;
     } else {
@@ -396,7 +411,7 @@ int main(int argc, char **argv) {
   if (json) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
-           ",\"ordering\":\"%s\",\"fast_factor\":%s"
+           ",\"ordering\":\"%s\",\"scale\":%d,\"fast_factor\":%s"
            ",\"analysis_seconds\":%.9g"
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
            ",\"solve_seconds_avg\":%.9g,\"transpose_solve_seconds_avg\":%.9g"
@@ -407,7 +422,7 @@ int main(int argc, char **argv) {
            path, a.n, a.nnz, kls_orientation_name(options.orientation),
            kls_orientation_name(stats.selected_orientation),
            kls_ordering_name(stats.selected_ordering),
-           options.fast_factor ? "true" : "false",
+           options.scale, options.fast_factor ? "true" : "false",
            stats.analysis_seconds, factor_avg, refactor_avg, solve_avg, tsolve_avg,
            residual, rel_residual, stats.nnz_l, stats.nnz_u,
            stats.estimated_flops, stats.factor_flops,
@@ -418,6 +433,7 @@ int main(int argc, char **argv) {
     printf("requested orientation: %s\n", kls_orientation_name(options.orientation));
     printf("selected orientation: %s\n", kls_orientation_name(stats.selected_orientation));
     printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
+    printf("scale: %d\n", options.scale);
     printf("fast factor: %s\n", options.fast_factor ? "on" : "off");
     printf("analysis: %.6f s\n", stats.analysis_seconds);
     printf("factor avg: %.6f s\n", factor_avg);
