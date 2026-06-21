@@ -61,6 +61,9 @@ expensive cases, `auto` can still try other numeric scaling modes when actual
 flop/fill evidence justifies the extra work. Explicit numeric scale values
 remain fixed.
 
+Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
+decomposition.
+
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
 `--ordering auto` first compares AMD and COLAMD by symbolic fill estimate. When
 METIS is enabled, `auto` can then promote large, expensive first numeric

@@ -36,6 +36,7 @@ def main() -> int:
     parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural", "metis"], default="auto")
     parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")
     parser.add_argument("--scale", choices=["auto", "-1", "0", "1", "2"], default="auto")
+    parser.add_argument("--no-btf", action="store_true")
     parser.add_argument("--no-fast-factor", action="store_true")
     args = parser.parse_args()
 
@@ -69,6 +70,8 @@ def main() -> int:
                 args.scale,
                 "--json",
             ]
+            if args.no_btf:
+                cmd.append("--no-btf")
             if args.no_fast_factor:
                 cmd.append("--no-fast-factor")
             proc = subprocess.run(cmd, text=True, capture_output=True, check=False)

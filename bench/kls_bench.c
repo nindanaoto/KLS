@@ -275,7 +275,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural|metis] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--no-fast-factor] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural|metis] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--no-btf] [--no-fast-factor] [--json]\n",
           argv0);
 }
 
@@ -307,6 +307,8 @@ int main(int argc, char **argv) {
         usage(argv[0]);
         return EXIT_FAILURE;
       }
+    } else if (strcmp(argv[i], "--no-btf") == 0) {
+      options.use_btf = 0;
     } else if (strcmp(argv[i], "--no-fast-factor") == 0) {
       options.fast_factor = 0;
     } else {
@@ -430,7 +432,8 @@ int main(int argc, char **argv) {
   if (json) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
-           ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d,\"fast_factor\":%s"
+           ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
+           ",\"btf\":%s,\"fast_factor\":%s"
            ",\"analysis_seconds\":%.9g"
            ",\"initial_factor_seconds\":%.9g"
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
@@ -443,6 +446,7 @@ int main(int argc, char **argv) {
            kls_orientation_name(stats.selected_orientation),
            kls_ordering_name(stats.selected_ordering),
            scale_name(options.scale), stats.selected_scale,
+           options.use_btf ? "true" : "false",
            options.fast_factor ? "true" : "false",
            stats.analysis_seconds, initial_factor_seconds,
            factor_avg, refactor_avg, solve_avg, tsolve_avg,
@@ -457,6 +461,7 @@ int main(int argc, char **argv) {
     printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
     printf("requested scale: %s\n", scale_name(options.scale));
     printf("selected scale: %d\n", stats.selected_scale);
+    printf("btf: %s\n", options.use_btf ? "on" : "off");
     printf("fast factor: %s\n", options.fast_factor ? "on" : "off");
     printf("analysis: %.6f s\n", stats.analysis_seconds);
     printf("initial factor: %.6f s\n", initial_factor_seconds);
