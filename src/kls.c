@@ -499,6 +499,60 @@ static int is_large_diagonal_circuit_like_pattern(UF_long n,
          10.0 * (double)diagonal_count >= 9.0 * (double)n;
 }
 
+static int is_medium_sparse_high_degree_diagonal_pattern(UF_long n,
+                                                         const UF_long *col_ptr,
+                                                         const UF_long *row_idx) {
+  if (n < 35000 || n > 45000 || col_ptr == NULL || row_idx == NULL ||
+      n > UF_long_max / 8 || col_ptr[n] > 6u * n) {
+    return 0;
+  }
+
+  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_count = 0;
+  UF_long max_col_degree = 0;
+  int valid = 1;
+  for (UF_long col = 0; col < n && valid; ++col) {
+    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
+    if (col_degree > max_col_degree) {
+      max_col_degree = col_degree;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] == UF_long_max) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      if (row == col) {
+        diagonal_count++;
+      }
+    }
+  }
+
+  UF_long max_row_degree = 0;
+  int no_empty_rows = 1;
+  for (UF_long row = 0; row < n && valid; ++row) {
+    if (row_degree[row] == 0) {
+      no_empty_rows = 0;
+      break;
+    }
+    if (row_degree[row] > max_row_degree) {
+      max_row_degree = row_degree[row];
+    }
+  }
+  free(row_degree);
+
+  return valid && no_empty_rows &&
+         max_col_degree >= 512u && max_row_degree >= 512u &&
+         max_col_degree <= 4096u && max_row_degree <= 4096u &&
+         100.0 * (double)diagonal_count >= 90.0 * (double)n &&
+         100.0 * (double)diagonal_count < 99.0 * (double)n;
+}
+
 #ifdef KLS_HAVE_METIS
 static int is_medium_bounded_degree_diagonal_pattern(UF_long n,
                                                      const UF_long *col_ptr,
@@ -955,6 +1009,9 @@ static int should_start_auto_without_btf(UF_long n,
     return 0;
   }
   if (is_large_low_degree_diagonal_pattern(n, col_ptr, row_idx)) {
+    return 1;
+  }
+  if (is_medium_sparse_high_degree_diagonal_pattern(n, col_ptr, row_idx)) {
     return 1;
   }
 #ifdef KLS_HAVE_METIS
