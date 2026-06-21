@@ -61,6 +61,9 @@ KLU row-scaling modes when reusable scale storage and enough independent BTF
 block work are present. KLS keeps a solver-owned worker pool for this path, so
 repeated SPICE refactors do not relaunch threads every cycle. Small matrices,
 single-block matrices, and factor/solve kernels still use the serial path.
+For unscaled single-block matrices, KLS also precomputes a refactor scatter map
+from the fixed pivot order so repeated refactors do not redo the same `Q` and
+`Pinv` structure lookups every cycle.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium
@@ -187,11 +190,12 @@ library.
 
 This is a functional implementation with KLS-level analysis choices for
 repeated SPICE-style solves and a KLS-owned threaded refactor path for BTF block
-parallelism on a narrow class of large cases. It is not yet a generally
-CKTSO-beating solver across broad circuit corpora. The next algorithmic work is
-to evolve the numeric factor/refactor/solve kernels toward deeper KLS-owned
-sparse kernels with better pivot reuse and parallelism while keeping the public
-API and benchmark harness stable.
+parallelism on a narrow class of large cases. KLS also has a precomputed
+single-block refactor scatter path for unscaled repeated refactors. It is not
+yet a generally CKTSO-beating solver across broad circuit corpora. The next
+algorithmic work is to evolve the numeric factor/refactor/solve kernels toward
+deeper KLS-owned sparse kernels with better pivot reuse and parallelism while
+keeping the public API and benchmark harness stable.
 
 ## License
 

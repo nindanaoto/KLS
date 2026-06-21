@@ -11,7 +11,8 @@ implemented the ideas that can be layered around the current KLU-derived
 Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, CAMD refinement,
 auto scaling policy, pivot-checked reuse, static row-pivoting trials with
 matching-derived equilibration, and BTF-block parallel refactorization with a
-solver-owned worker pool.
+solver-owned worker pool. KLS now also keeps a precomputed single-block
+refactor scatter map for unscaled repeated refactors.
 
 The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
@@ -75,6 +76,11 @@ design work, not benchmark-specific tuning.
   is wide enough to offset thread overhead. The threaded path keeps a persistent
   worker pool on the solver instance so repeated SPICE refactors reuse workers
   and scratch storage instead of relaunching threads each cycle.
+- KLS-owned single-block refactor metadata: for unscaled one-block numeric
+  patterns, KLS precomputes the fixed scatter from factor-order columns to
+  pivotal rows and input value positions. This removes repeated `Q`/`Pinv`
+  structure lookups from SPICE refactor cycles while preserving the existing
+  KLU-derived LU storage.
 - SPICE-cycle orientation policy: KLS can analyze normal and transposed storage
   orientations and select the faster internal form for repeated solve cycles.
 - LGPL project licensing and third-party notices: KLS itself is
@@ -87,7 +93,8 @@ design work, not benchmark-specific tuning.
   permutation and matching-derived row/column equilibration, but not a full
   MC64-style maximum-product matching algorithm with assignment dual scaling.
 - NICSLU/CKTSO parallel scheduling is only present at BTF-block granularity.
-  KLS does not yet have an intra-block EGraph/ETree cluster/pipeline scheduler.
+  KLS now has a small piece of persistent intra-block refactor metadata for
+  single-block matrices, but not an EGraph/ETree cluster/pipeline scheduler.
 - CKTSO fast factorization is present as pivot-checked reuse plus full fallback.
   KLS does not yet implement CKTSO's pipelined tail factorization that restarts
   from the ETree descendants after a failed pivot check.
