@@ -33,6 +33,7 @@ def main() -> int:
     parser.add_argument("--jsonl", type=pathlib.Path)
     parser.add_argument("--repeat", type=int, default=5)
     parser.add_argument("--refactor-repeat", type=int, default=5)
+    parser.add_argument("--passes", type=int, default=1)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural", "metis"], default="auto")
     parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")
@@ -47,6 +48,9 @@ def main() -> int:
     if not matrices:
         print(f"no .mtx files found under {args.matrix_dir}", file=sys.stderr)
         return 1
+    if args.passes <= 0:
+        print("--passes must be positive", file=sys.stderr)
+        return 1
 
     rows: list[dict[str, object]] = []
     failures: list[tuple[pathlib.Path, str]] = []
@@ -58,42 +62,62 @@ def main() -> int:
 
     try:
         for matrix in matrices:
-            cmd = [
-                str(args.kls_bench),
-                str(matrix),
-                "--repeat",
-                str(args.repeat),
-                "--refactor-repeat",
-                str(args.refactor_repeat),
-                "--threads",
-                str(args.threads),
-                "--ordering",
-                args.ordering,
-                "--orientation",
-                args.orientation,
-                "--scale",
-                args.scale,
-                "--json",
-            ]
-            if args.no_btf:
-                cmd.append("--no-btf")
-            if args.no_fast_factor:
-                cmd.append("--no-fast-factor")
-            if args.no_static_pivoting:
-                cmd.append("--no-static-pivoting")
-            if args.pivot_tol is not None:
-                cmd.extend(["--pivot-tol", str(args.pivot_tol)])
-            proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
-            if proc.returncode != 0:
-                failures.append((matrix, proc.stderr.strip()))
+            samples: list[dict[str, object]] = []
+            sample_failures: list[str] = []
+            for _ in range(args.passes):
+                cmd = [
+                    str(args.kls_bench),
+                    str(matrix),
+                    "--repeat",
+                    str(args.repeat),
+                    "--refactor-repeat",
+                    str(args.refactor_repeat),
+                    "--threads",
+                    str(args.threads),
+                    "--ordering",
+                    args.ordering,
+                    "--orientation",
+                    args.orientation,
+                    "--scale",
+                    args.scale,
+                    "--json",
+                ]
+                if args.no_btf:
+                    cmd.append("--no-btf")
+                if args.no_fast_factor:
+                    cmd.append("--no-fast-factor")
+                if args.no_static_pivoting:
+                    cmd.append("--no-static-pivoting")
+                if args.pivot_tol is not None:
+                    cmd.extend(["--pivot-tol", str(args.pivot_tol)])
+                proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+                if proc.returncode != 0:
+                    sample_failures.append(proc.stderr.strip())
+                    continue
+                sample = json.loads(proc.stdout)
+                sample["spice_cycle_seconds"] = spice_cycle_seconds(sample)
+                samples.append(sample)
+            if not samples:
+                failures.append((matrix, "; ".join(sample_failures)))
                 continue
-            row = json.loads(proc.stdout)
-            row["spice_cycle_seconds"] = spice_cycle_seconds(row)
+            samples.sort(key=lambda row: float(row["spice_cycle_seconds"]))
+            row = dict(samples[len(samples) // 2])
+            cycle_samples = [float(sample["spice_cycle_seconds"]) for sample in samples]
+            row["spice_cycle_seconds_samples"] = cycle_samples
+            row["spice_cycle_seconds_median"] = row["spice_cycle_seconds"]
+            row["passes_ok"] = len(samples)
+            row["passes_failed"] = len(sample_failures)
             rows.append(row)
             if out is not None:
                 out.write(json.dumps(row, sort_keys=True) + "\n")
                 out.flush()
-            print(f"{matrix}: {row['spice_cycle_seconds']:.6g}s")
+            if args.passes == 1:
+                print(f"{matrix}: {row['spice_cycle_seconds']:.6g}s")
+            else:
+                print(
+                    f"{matrix}: {row['spice_cycle_seconds']:.6g}s "
+                    f"median of {len(samples)} pass(es)"
+                )
     finally:
         if out is not None:
             out.close()

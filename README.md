@@ -140,6 +140,10 @@ To run every downloaded matrix and compute the SPICE-cycle geometric mean:
 python3 scripts/run_bench_suite.py --kls-bench build/kls_bench --matrix-dir data/suitesparse --orientation auto --jsonl build/kls_suite.jsonl
 ```
 
+Add `--passes N` to run each matrix multiple times and record the median
+SPICE-cycle sample, which is useful when comparing small solver-policy changes.
+Use an odd `N` when you need an exact median sample.
+
 The suite metric is:
 
 ```text
