@@ -110,6 +110,12 @@ LD_LIBRARY_PATH=/path/to/cktso/rocky8_x64_gcc850 ./build-cktso/cktso_compare mat
 The CKTSO harness emits the same `spice_cycle_seconds` formula as `kls_bench`,
 so JSON rows can be compared directly on the repeated-SPICE metric.
 
+Run a CKTSO JSONL suite with:
+
+```sh
+python3 scripts/run_cktso_suite.py --cktso-compare build-cktso/cktso_compare --matrix-dir data/suitesparse --threads 1 --jsonl build/cktso_suite.jsonl
+```
+
 CKTSO must be licensed correctly according to its own distribution
 requirements, usually by colocating the license file with the selected shared
 library.
