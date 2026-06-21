@@ -411,6 +411,43 @@ static double symbolic_score(const trilinos_klu_l_symbolic *symbolic) {
   return DBL_MAX;
 }
 
+static void maybe_retry_single_block_without_btf(UF_long n,
+                                                 UF_long *col_ptr,
+                                                 UF_long *row_idx,
+                                                 const kls_options *options,
+                                                 kls_ordering ordering,
+                                                 trilinos_klu_l_symbolic **symbolic,
+                                                 trilinos_klu_l_common *common,
+                                                 double *score) {
+  if (options == NULL || !options->use_btf || n < 20000 || symbolic == NULL ||
+      *symbolic == NULL || common == NULL || score == NULL ||
+      (*symbolic)->nblocks != 1 || (*symbolic)->maxblock != n) {
+    return;
+  }
+
+  kls_options no_btf_options = *options;
+  no_btf_options.use_btf = 0;
+  trilinos_klu_l_symbolic *no_btf_symbolic = NULL;
+  trilinos_klu_l_common no_btf_common;
+  int status = analyze_with_ordering(n, col_ptr, row_idx, &no_btf_options, ordering,
+                                     &no_btf_symbolic, &no_btf_common);
+  if (status != KLS_OK) {
+    return;
+  }
+
+  const double no_btf_score = symbolic_score(no_btf_symbolic);
+  const double current_score = *score;
+  if (no_btf_score <= 1.02 * current_score) {
+    trilinos_klu_l_free_symbolic(symbolic, common);
+    *symbolic = no_btf_symbolic;
+    *common = no_btf_common;
+    *score = no_btf_score;
+    return;
+  }
+
+  trilinos_klu_l_free_symbolic(&no_btf_symbolic, &no_btf_common);
+}
+
 static int numeric_candidate_is_better(const trilinos_klu_l_common *current_common,
                                        const trilinos_klu_l_numeric *current_numeric,
                                        const trilinos_klu_l_common *candidate_common,
@@ -585,6 +622,9 @@ static int choose_symbolic_for_pattern(UF_long n,
     if (status == KLS_OK) {
       *selected_ordering_out = options->ordering;
       *score_out = symbolic_score(*symbolic_out);
+      maybe_retry_single_block_without_btf(n, col_ptr, row_idx, options,
+                                           options->ordering, symbolic_out,
+                                           common_out, score_out);
     }
     return status;
   }
@@ -605,14 +645,18 @@ static int choose_symbolic_for_pattern(UF_long n,
       continue;
     }
     const double score = symbolic_score(candidate_symbolic);
-    if (!any_ok || score < best_score) {
+    double selected_score = score;
+    maybe_retry_single_block_without_btf(n, col_ptr, row_idx, options,
+                                         candidates[i], &candidate_symbolic,
+                                         &candidate_common, &selected_score);
+    if (!any_ok || selected_score < best_score) {
       if (best_symbolic != NULL) {
         trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
       }
       best_symbolic = candidate_symbolic;
       best_common = candidate_common;
       best_ordering = candidates[i];
-      best_score = score;
+      best_score = selected_score;
       any_ok = 1;
     } else {
       trilinos_klu_l_free_symbolic(&candidate_symbolic, &candidate_common);
@@ -864,6 +908,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.analysis_seconds = elapsed;
   solver->stats.selected_orientation = solver->orientation;
   solver->stats.selected_scale = (int)solver->common.scale;
+  solver->stats.selected_btf = solver->common.btf ? 1 : 0;
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
     solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
@@ -880,6 +925,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
 static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.last_kernel_status = (int)solver->common.status;
   solver->stats.selected_scale = (int)solver->common.scale;
+  solver->stats.selected_btf = solver->common.btf ? 1 : 0;
   solver->stats.numerical_rank = (int64_t)solver->common.numerical_rank;
   solver->stats.singular_col = (int64_t)solver->common.singular_col;
   solver->stats.offdiag_pivots = (int64_t)solver->common.noffdiag;

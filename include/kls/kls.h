@@ -84,6 +84,7 @@ typedef struct kls_stats {
   kls_orientation selected_orientation;
   int last_kernel_status;
   int selected_scale;
+  int selected_btf;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

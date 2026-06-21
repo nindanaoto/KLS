@@ -66,12 +66,21 @@ static int test_csr_and_refactor(void) {
   kls_options options;
   kls_default_options(&options);
   options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
 
   if (!require_ok(kls_create(&solver), "create")) return 0;
   if (!require_ok(kls_analyze_csr(solver, KLS_INDEX_INT64, 3, rp, ci, 0, &options), "analyze csr")) return 0;
   if (!require_ok(kls_factor(solver, ax), "factor csr")) return 0;
   if (!require_ok(kls_refactor(solver, ax), "refactor csr")) return 0;
   if (!require_ok(kls_solve(solver, 1, b, 0, x, 0), "solve csr")) return 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats), "stats csr")) return 0;
+  if (stats.selected_btf != 0) {
+    fprintf(stderr, "unexpected selected btf for no-btf solve: %d\n", stats.selected_btf);
+    return 0;
+  }
 
   const int ok = close_enough(x[0], 1.0) && close_enough(x[1], 2.0) && close_enough(x[2], 3.0);
   if (!ok) {

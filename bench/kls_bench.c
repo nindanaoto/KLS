@@ -433,7 +433,7 @@ int main(int argc, char **argv) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
-           ",\"btf\":%s,\"fast_factor\":%s"
+           ",\"requested_btf\":%s,\"btf\":%s,\"fast_factor\":%s"
            ",\"analysis_seconds\":%.9g"
            ",\"initial_factor_seconds\":%.9g"
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
@@ -449,6 +449,7 @@ int main(int argc, char **argv) {
            kls_ordering_name(stats.selected_ordering),
            scale_name(options.scale), stats.selected_scale,
            options.use_btf ? "true" : "false",
+           stats.selected_btf ? "true" : "false",
            options.fast_factor ? "true" : "false",
            stats.analysis_seconds, initial_factor_seconds,
            factor_avg, refactor_avg, solve_avg, tsolve_avg,
@@ -464,7 +465,8 @@ int main(int argc, char **argv) {
     printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
     printf("requested scale: %s\n", scale_name(options.scale));
     printf("selected scale: %d\n", stats.selected_scale);
-    printf("btf: %s\n", options.use_btf ? "on" : "off");
+    printf("requested btf: %s\n", options.use_btf ? "on" : "off");
+    printf("selected btf: %s\n", stats.selected_btf ? "on" : "off");
     printf("fast factor: %s\n", options.fast_factor ? "on" : "off");
     printf("analysis: %.6f s\n", stats.analysis_seconds);
     printf("initial factor: %.6f s\n", initial_factor_seconds);
