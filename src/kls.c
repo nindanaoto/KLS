@@ -133,6 +133,7 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
   const double row_spread_limit = 1.0e4;
   const double row_p90_p10_limit = 5.5;
   UF_long diag_count = 0;
+  UF_long diag_unit_count = 0;
   double min_diag = DBL_MAX;
   double max_diag = 0.0;
 
@@ -152,6 +153,9 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
     }
     if (diag_abs > 0.0) {
       diag_count++;
+      if (diag_abs >= 0.5 && diag_abs <= 2.0) {
+        diag_unit_count++;
+      }
       if (diag_abs < min_diag) {
         min_diag = diag_abs;
       }
@@ -168,14 +172,17 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
   }
 
   size_t row_count = 0;
+  size_t row_unit_count = 0;
   for (UF_long row = 0; row < solver->n; ++row) {
     if (row_max[(size_t)row] > 0.0) {
+      if (row_max[(size_t)row] >= 0.5 && row_max[(size_t)row] <= 2.0) {
+        row_unit_count++;
+      }
       row_max[row_count++] = row_max[(size_t)row];
     }
   }
 
-  if ((double)diag_count < min_diag_fraction * (double)solver->n &&
-      (double)row_count >= min_diag_fraction * (double)solver->n && row_count > 1u) {
+  if ((double)row_count >= min_diag_fraction * (double)solver->n && row_count > 1u) {
     qsort(row_max, row_count, sizeof(*row_max), compare_double);
     const double row_min = row_max[0];
     const double row_maximum = row_max[row_count - 1u];
@@ -183,7 +190,23 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
     const size_t p90_index = ((row_count - 1u) * 9u) / 10u;
     const double row_p10 = row_max[p10_index];
     const double row_p90 = row_max[p90_index];
-    if (row_min > 0.0 && row_p10 > 0.0 &&
+    const double row_unit_fraction = (double)row_unit_count / (double)row_count;
+    const double diag_unit_fraction = diag_count > 0
+      ? (double)diag_unit_count / (double)diag_count
+      : 0.0;
+    if ((double)diag_count >= min_diag_fraction * (double)solver->n &&
+        row_p10 > 0.0 && row_unit_fraction >= 0.80 && row_p90 / row_p10 <= 10.0) {
+      free(row_max);
+      return 0;
+    }
+    if ((double)diag_count >= min_diag_fraction * (double)solver->n &&
+        row_p10 > 0.0 && diag_unit_fraction >= 0.02 &&
+        diag_unit_fraction <= 0.08 && row_p90 / row_p10 >= 1000.0) {
+      free(row_max);
+      return 0;
+    }
+    if ((double)diag_count < min_diag_fraction * (double)solver->n &&
+        row_min > 0.0 && row_p10 > 0.0 &&
         row_maximum / row_min <= row_spread_limit &&
         row_p90 / row_p10 <= row_p90_p10_limit) {
       free(row_max);
@@ -473,7 +496,7 @@ static int should_try_auto_scale(const kls_solver *solver) {
 
   const double flops = solver->common.flops;
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return flops >= 5.0e6 && fill >= 300000;
+  return flops >= 1.0e8 && fill >= 1500000;
 }
 
 static void maybe_select_auto_scale(kls_solver *solver,
