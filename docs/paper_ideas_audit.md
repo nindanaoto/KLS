@@ -136,6 +136,22 @@ and refactorization trial cost; `rajat27` accepted a better numeric pattern but
 lost on the repeated-SPICE metric because the one-time trial cost dominated.
 The gate was restored to avoid converting matching into a broad overhead.
 
+An auction-style weighted assignment pass was prototyped to move the current
+greedy row matching closer to MC64's maximum-weight matching. It was removed
+because the only current extended-suite matrices that select static pivoting
+(`gemat11` and `gemat12`) already have good enough matched patterns; the extra
+auction and dual-scaling work increased first-factor cost without improving
+fill, refactor time, or residuals. A cheap weighted-gap guard avoided the
+largest regression, but the guarded implementation still did not improve the
+suite enough to justify the additional code.
+
+The BTF-block threaded refactor scheduler was also changed from a mutex-protected
+block counter to a C11 atomic work counter. This reduced scheduler overhead on
+some BTF-threaded samples such as `ckt11752_tr_0`, but same-session median
+suite testing showed no aggregate improvement and small regressions on other
+cases. The mutex scheduler was kept until a broader scheduling change has a
+clearer win.
+
 ## Recommended General Work
 
 1. Implement a real matching/scaling stage first, because MC64-style static
