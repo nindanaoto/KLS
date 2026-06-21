@@ -1813,7 +1813,7 @@ static void maybe_select_auto_scale(kls_solver *solver,
 static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
   if (solver->auto_pivot_checked || solver->numeric == NULL || solver->n < 30000 ||
       fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
-      solver->common.noffdiag < 64) {
+      solver->common.noffdiag < 16) {
     return 0;
   }
 

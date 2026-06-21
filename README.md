@@ -81,9 +81,9 @@ remain fixed.
 Use `--pivot-tol T` to benchmark the diagonal pivot tolerance exposed by the
 KLS API. The default is `0.001`, matching the underlying KLU default. With that
 default, KLS can trial a lower `1e-4` tolerance on large high-fill matrices with
-many off-diagonal pivots, keeping it only when fill and pivoting improve without
-a large reciprocal-condition drop. Benchmark JSON reports both requested and
-selected pivot tolerance.
+noticeable off-diagonal pivoting, keeping it only when fill and pivoting improve
+without a large reciprocal-condition drop. Benchmark JSON reports both requested
+and selected pivot tolerance.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF
