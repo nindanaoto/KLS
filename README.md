@@ -69,11 +69,12 @@ pivoting and refactorization behavior. KLS defaults to `auto`, which can start
 unscaled using KLU's `-1` no-scale/no-recheck mode for patterns already
 validated by KLS, or sum-scaled when the diagonal is sparse but row magnitudes
 are already balanced. Otherwise it starts from KLU's max row scaling mode (`2`).
-Large low-degree, nearly diagonal circuit patterns and METIS-started
-medium dense-diagonal patterns also start in no-scale mode to avoid repeated
-row-scale work once KLS has validated the structure. For large expensive cases,
-`auto` can still try other numeric scaling modes when actual flop/fill evidence
-justifies the extra work. Explicit numeric scale values remain fixed.
+Large low-degree, nearly diagonal circuit patterns and METIS-started medium
+bounded-degree or dense-diagonal patterns also start in no-scale mode to avoid
+repeated row-scale work once KLS has validated the structure. For large
+expensive cases, `auto` can still try other numeric scaling modes when actual
+flop/fill evidence justifies the extra work. Explicit numeric scale values
+remain fixed.
 
 Use `--pivot-tol T` to benchmark the diagonal pivot tolerance exposed by the
 KLS API. The default is `0.001`, matching the underlying KLU default. With that
