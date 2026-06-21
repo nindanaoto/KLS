@@ -2985,6 +2985,50 @@ static int kls_parallel_refactor_permute_scale(kls_solver *solver) {
   return 1;
 }
 
+static int kls_numeric_pivots_pass_threshold(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
+    return 0;
+  }
+  const double tol = solver->common.tol;
+  if (tol <= DBL_MIN) {
+    return 1;
+  }
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  const trilinos_klu_l_numeric *numeric = solver->numeric;
+  if (numeric->Lip == NULL || numeric->Llen == NULL || numeric->LUbx == NULL) {
+    return 0;
+  }
+
+  for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+    const UF_long k1 = symbolic->R[block];
+    const UF_long k2 = symbolic->R[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (nk <= 1u) {
+      continue;
+    }
+    double *lu = (double *)numeric->LUbx[block];
+    if (lu == NULL) {
+      return 0;
+    }
+    const UF_long *lip = numeric->Lip + k1;
+    const UF_long *llen = numeric->Llen + k1;
+    for (UF_long k = 0; k < nk; ++k) {
+      UF_long *li = NULL;
+      double *lx = NULL;
+      UF_long lcol_len = 0;
+      kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
+      (void)li;
+      for (UF_long p = 0; p < lcol_len; ++p) {
+        const double value_abs = fabs(lx[p]);
+        if (!isfinite(value_abs) || value_abs * tol > 1.0 + 1.0e-12) {
+          return 0;
+        }
+      }
+    }
+  }
+  return 1;
+}
+
 static UF_long kls_parallel_refactor(kls_solver *solver, double *numeric_values) {
   if (!kls_parallel_refactor_is_eligible(solver)) {
     return trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
@@ -3140,7 +3184,8 @@ int kls_factor(kls_solver *solver, const double *values) {
     const UF_long ok = kls_parallel_refactor(solver, numeric_values);
     elapsed += kls_now_seconds() - start;
     if (ok && solver->common.status >= 0 &&
-        solver->common.status != TRILINOS_KLU_SINGULAR) {
+        solver->common.status != TRILINOS_KLU_SINGULAR &&
+        kls_numeric_pivots_pass_threshold(solver)) {
       solver->stats.factor_seconds = elapsed;
       (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
       (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);

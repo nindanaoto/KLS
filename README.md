@@ -15,7 +15,7 @@ This repository currently contains the first working KLS implementation:
   explicit orientation controls
 - Factor, refactor, solve, transpose-solve, and statistics APIs
 - Fast repeated factorization that reuses the existing numeric pattern before
-  falling back to full pivoting factorization
+  checking pivot quality and falling back to full pivoting factorization
 - Value-aware static row pivoting trials for high off-diagonal-pivot cases
 - A MatrixMarket benchmark tool
 - A small correctness smoke test
@@ -86,6 +86,11 @@ default, KLS can trial a lower `1e-4` tolerance on large high-fill matrices with
 noticeable off-diagonal pivoting, keeping it only when fill and pivoting improve
 without a large reciprocal-condition drop. Benchmark JSON reports both requested
 and selected pivot tolerance.
+
+When `fast_factor` reuses an existing factor pattern, KLS also checks the
+resulting L multipliers against the selected pivot tolerance. A reused pivot
+order whose multipliers violate the threshold pivot rule is discarded and the
+call falls back to full pivoting factorization.
 
 Use `--no-static-pivoting` to disable KLS's value-aware static row-pivoting
 trial. When enabled, `auto` can preemptively build a weighted row permutation

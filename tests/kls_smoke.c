@@ -238,6 +238,51 @@ static int test_solve_strides_and_in_place(void) {
   return ok;
 }
 
+static int test_fast_factor_pivot_check_fallback(void) {
+  const int32_t ap[] = {0, 2, 4};
+  const int32_t ai[] = {0, 1, 0, 1};
+  const double ax0[] = {2.0, 1.0, 1.0, 2.0};
+  const double ax1[] = {1.0e-12, 1.0, 1.0, 2.0};
+  const double b[] = {2.000000000001, 5.0};
+  double x[2] = {0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+
+  int ok = 1;
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 2, ap, ai, 0,
+                                        &options),
+                        "analyze pivot-check fallback")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0), "factor pivot-check base")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1), "factor pivot-check fallback")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve pivot-check fallback")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats), "stats pivot-check fallback")) {
+    ok = 0;
+  }
+  if (ok && stats.offdiag_pivots < 1) {
+    fprintf(stderr, "fast factor did not fall back to pivoting factorization\n");
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
+    fprintf(stderr, "unexpected pivot-check fallback solution: %.17g %.17g\n",
+            x[0], x[1]);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
 static int test_pre_static_pivoting(void) {
   const int32_t n = 3000;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
@@ -327,6 +372,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_solve_strides_and_in_place()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_fast_factor_pivot_check_fallback()) {
     return EXIT_FAILURE;
   }
   if (!test_pre_static_pivoting()) {
