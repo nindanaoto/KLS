@@ -34,6 +34,7 @@ struct kls_solver {
   trilinos_klu_l_common common;
   trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_numeric *numeric;
+  int auto_metis_checked;
 };
 
 typedef struct kls_pattern_candidate {
@@ -94,6 +95,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->nnz = 0;
   solver->input_format = KLS_INPUT_NONE;
   solver->orientation = KLS_ORIENTATION_NORMAL;
+  solver->auto_metis_checked = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
 }
@@ -313,6 +315,95 @@ static double symbolic_score(const trilinos_klu_l_symbolic *symbolic) {
   }
   return DBL_MAX;
 }
+
+#ifdef KLS_HAVE_METIS
+static int should_try_auto_metis(const kls_solver *solver) {
+  if (solver->auto_metis_checked || solver->options.ordering != KLS_ORDERING_AUTO ||
+      solver->stats.selected_ordering == KLS_ORDERING_METIS ||
+      solver->numeric == NULL || solver->n < 20000) {
+    return 0;
+  }
+
+  const double flops = solver->common.flops;
+  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
+  return flops >= 1.0e8 && fill >= 1000000;
+}
+
+static int metis_numeric_is_better(const kls_solver *solver,
+                                   const trilinos_klu_l_common *metis_common,
+                                   const trilinos_klu_l_numeric *metis_numeric) {
+  const double current_flops = solver->common.flops;
+  const double metis_flops = metis_common->flops;
+  const double current_fill = (double)(solver->numeric->lnz + solver->numeric->unz);
+  const double metis_fill = (double)(metis_numeric->lnz + metis_numeric->unz);
+
+  if (current_flops > 0.0 && metis_flops > 0.0 &&
+      metis_flops < 0.75 * current_flops && metis_fill <= 1.10 * current_fill) {
+    return 1;
+  }
+  return metis_fill < 0.80 * current_fill;
+}
+
+static void maybe_promote_auto_metis(kls_solver *solver,
+                                     double *elapsed,
+                                     const double *numeric_values) {
+  if (!should_try_auto_metis(solver)) {
+    return;
+  }
+  solver->auto_metis_checked = 1;
+
+  kls_options metis_options = solver->options;
+  metis_options.ordering = KLS_ORDERING_METIS;
+
+  trilinos_klu_l_symbolic *metis_symbolic = NULL;
+  trilinos_klu_l_common metis_common;
+  double start = kls_now_seconds();
+  int status = analyze_with_ordering(solver->n, solver->col_ptr, solver->row_idx,
+                                     &metis_options, KLS_ORDERING_METIS,
+                                     &metis_symbolic, &metis_common);
+  *elapsed += kls_now_seconds() - start;
+  if (status != KLS_OK) {
+    return;
+  }
+
+  start = kls_now_seconds();
+  trilinos_klu_l_numeric *metis_numeric =
+    trilinos_klu_l_factor(solver->col_ptr, solver->row_idx, (double *)numeric_values,
+                          metis_symbolic, &metis_common);
+  *elapsed += kls_now_seconds() - start;
+  if (metis_numeric == NULL || metis_common.status < 0 ||
+      metis_common.status == TRILINOS_KLU_SINGULAR) {
+    if (metis_numeric != NULL) {
+      trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
+    }
+    trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+    return;
+  }
+
+  (void)trilinos_klu_l_flops(metis_symbolic, metis_numeric, &metis_common);
+  if (!metis_numeric_is_better(solver, &metis_common, metis_numeric)) {
+    trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
+    trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+    return;
+  }
+
+  trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *old_numeric = solver->numeric;
+  trilinos_klu_l_common old_common = solver->common;
+
+  solver->symbolic = metis_symbolic;
+  solver->numeric = metis_numeric;
+  solver->common = metis_common;
+  solver->stats.selected_ordering = KLS_ORDERING_METIS;
+  solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
+  solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
+  solver->stats.structural_rank = (int64_t)solver->symbolic->structural_rank;
+  solver->stats.estimated_flops = solver->symbolic->est_flops;
+
+  trilinos_klu_l_free_numeric(&old_numeric, &old_common);
+  trilinos_klu_l_free_symbolic(&old_symbolic, &old_common);
+}
+#endif
 
 static int choose_symbolic_for_pattern(UF_long n,
                                        UF_long *col_ptr,
@@ -882,6 +973,12 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
   (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
+#ifdef KLS_HAVE_METIS
+  maybe_promote_auto_metis(solver, &elapsed, numeric_values);
+  (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
+  (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
+#endif
+  solver->stats.factor_seconds = elapsed;
   fill_numeric_stats(solver);
   if (solver->common.status == TRILINOS_KLU_SINGULAR) {
     return KLS_ERR_SINGULAR;

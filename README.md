@@ -57,8 +57,11 @@ pivoting and refactorization behavior. KLS defaults to `2`, matching KLU's max
 row scaling default.
 
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
-`--ordering auto` currently compares AMD and COLAMD only, because METIS enters
-KLU as a user ordering without a comparable symbolic fill estimate.
+`--ordering auto` first compares AMD and COLAMD by symbolic fill estimate. When
+METIS is enabled, `auto` can then promote large, expensive first numeric
+factorizations to METIS if the trial factorization materially reduces actual
+numeric flop/fill cost. This keeps METIS available for hard nested-dissection
+cases without paying its analysis cost on small circuit matrices.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 
