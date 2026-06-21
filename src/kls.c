@@ -85,6 +85,12 @@ typedef struct kls_match_entry {
   UF_long col;
 } kls_match_entry;
 
+typedef struct kls_row_match_graph {
+  UF_long *row_ptr;
+  UF_long *col_idx;
+  double *log_weight;
+} kls_row_match_graph;
+
 typedef struct kls_row_permuted_entry {
   UF_long col;
   UF_long row;
@@ -813,11 +819,212 @@ static int compare_row_permuted_entries(const void *a, const void *b) {
   return 0;
 }
 
+static void free_row_match_graph(kls_row_match_graph *graph) {
+  if (graph == NULL) {
+    return;
+  }
+  free(graph->row_ptr);
+  free(graph->col_idx);
+  free(graph->log_weight);
+  memset(graph, 0, sizeof(*graph));
+}
+
+static int build_row_match_graph(UF_long n,
+                                 UF_long entry_count,
+                                 const kls_match_entry *entries,
+                                 kls_row_match_graph *graph) {
+  if (n <= 0 || entries == NULL || graph == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  memset(graph, 0, sizeof(*graph));
+
+  UF_long *row_ptr = (UF_long *)calloc((size_t)n + 1u, sizeof(*row_ptr));
+  UF_long *col_idx = (UF_long *)malloc((size_t)entry_count * sizeof(*col_idx));
+  double *log_weight = (double *)malloc((size_t)entry_count * sizeof(*log_weight));
+  UF_long *next = (UF_long *)malloc((size_t)n * sizeof(*next));
+  if (row_ptr == NULL || col_idx == NULL || log_weight == NULL || next == NULL) {
+    free(row_ptr);
+    free(col_idx);
+    free(log_weight);
+    free(next);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+
+  for (UF_long i = 0; i < entry_count; ++i) {
+    row_ptr[entries[i].row + 1u]++;
+  }
+  for (UF_long row = 0; row < n; ++row) {
+    row_ptr[row + 1u] += row_ptr[row];
+  }
+  memcpy(next, row_ptr, (size_t)n * sizeof(*next));
+  for (UF_long i = 0; i < entry_count; ++i) {
+    const UF_long row = entries[i].row;
+    const UF_long dst = next[row]++;
+    col_idx[dst] = entries[i].col;
+    log_weight[dst] = log(entries[i].weight);
+  }
+
+  free(next);
+  graph->row_ptr = row_ptr;
+  graph->col_idx = col_idx;
+  graph->log_weight = log_weight;
+  return KLS_OK;
+}
+
+static double row_match_log_weight(const kls_row_match_graph *graph,
+                                   UF_long row,
+                                   UF_long col) {
+  for (UF_long p = graph->row_ptr[row]; p < graph->row_ptr[row + 1u]; ++p) {
+    if (graph->col_idx[p] == col) {
+      return graph->log_weight[p];
+    }
+  }
+  return -DBL_MAX;
+}
+
+static UF_long augment_numeric_row_match(UF_long n,
+                                         const kls_row_match_graph *graph,
+                                         UF_long *row_perm,
+                                         UF_long *col_match) {
+  UF_long matched = 0;
+  for (UF_long row = 0; row < n; ++row) {
+    if (row_perm[row] != KLS_KLU_EMPTY) {
+      matched++;
+    }
+  }
+  if (matched == n) {
+    return matched;
+  }
+
+  UF_long *queue = (UF_long *)malloc((size_t)n * sizeof(*queue));
+  UF_long *prev_row_for_col = (UF_long *)malloc((size_t)n * sizeof(*prev_row_for_col));
+  unsigned char *seen_row = (unsigned char *)malloc((size_t)n * sizeof(*seen_row));
+  unsigned char *seen_col = (unsigned char *)malloc((size_t)n * sizeof(*seen_col));
+  if (queue == NULL || prev_row_for_col == NULL ||
+      seen_row == NULL || seen_col == NULL) {
+    free(queue);
+    free(prev_row_for_col);
+    free(seen_row);
+    free(seen_col);
+    return matched;
+  }
+
+  for (UF_long root = 0; root < n && matched < n; ++root) {
+    if (row_perm[root] != KLS_KLU_EMPTY) {
+      continue;
+    }
+    memset(seen_row, 0, (size_t)n * sizeof(*seen_row));
+    memset(seen_col, 0, (size_t)n * sizeof(*seen_col));
+    for (UF_long col = 0; col < n; ++col) {
+      prev_row_for_col[col] = KLS_KLU_EMPTY;
+    }
+
+    UF_long head = 0;
+    UF_long tail = 0;
+    UF_long end_col = KLS_KLU_EMPTY;
+    queue[tail++] = root;
+    seen_row[root] = 1;
+    while (head < tail && end_col == KLS_KLU_EMPTY) {
+      const UF_long row = queue[head++];
+      for (UF_long p = graph->row_ptr[row]; p < graph->row_ptr[row + 1u]; ++p) {
+        const UF_long col = graph->col_idx[p];
+        if (seen_col[col]) {
+          continue;
+        }
+        seen_col[col] = 1;
+        prev_row_for_col[col] = row;
+        const UF_long mate = col_match[col];
+        if (mate == KLS_KLU_EMPTY) {
+          end_col = col;
+          break;
+        }
+        if (!seen_row[mate]) {
+          seen_row[mate] = 1;
+          queue[tail++] = mate;
+        }
+      }
+    }
+
+    UF_long col = end_col;
+    if (col == KLS_KLU_EMPTY) {
+      continue;
+    }
+    while (col != KLS_KLU_EMPTY) {
+      const UF_long row = prev_row_for_col[col];
+      const UF_long old_col = row_perm[row];
+      row_perm[row] = col;
+      col_match[col] = row;
+      col = old_col;
+    }
+    matched++;
+  }
+
+  free(queue);
+  free(prev_row_for_col);
+  free(seen_row);
+  free(seen_col);
+  return matched;
+}
+
+static void improve_numeric_row_match_by_swaps(UF_long n,
+                                               const kls_row_match_graph *graph,
+                                               UF_long *row_perm,
+                                               UF_long *col_match) {
+  const UF_long max_candidates_per_row = 16;
+  const int max_rounds = 5;
+  for (int round = 0; round < max_rounds; ++round) {
+    UF_long changes = 0;
+    for (UF_long row = 0; row < n; ++row) {
+      const UF_long current_col = row_perm[row];
+      if (current_col == KLS_KLU_EMPTY) {
+        continue;
+      }
+      const double current_weight =
+        row_match_log_weight(graph, row, current_col);
+      UF_long candidates = 0;
+      for (UF_long p = graph->row_ptr[row];
+           p < graph->row_ptr[row + 1u] && candidates < max_candidates_per_row;
+           ++p, ++candidates) {
+        const UF_long trial_col = graph->col_idx[p];
+        const UF_long other_row = col_match[trial_col];
+        if (other_row == KLS_KLU_EMPTY || other_row == row) {
+          continue;
+        }
+        const UF_long other_col = row_perm[other_row];
+        if (other_col == KLS_KLU_EMPTY) {
+          continue;
+        }
+        const double other_to_current =
+          row_match_log_weight(graph, other_row, current_col);
+        if (other_to_current == -DBL_MAX) {
+          continue;
+        }
+        const double other_weight =
+          row_match_log_weight(graph, other_row, other_col);
+        const double gain =
+          graph->log_weight[p] + other_to_current - current_weight - other_weight;
+        if (gain > 1.0e-12) {
+          row_perm[row] = trial_col;
+          row_perm[other_row] = current_col;
+          col_match[trial_col] = row;
+          col_match[current_col] = other_row;
+          changes++;
+          break;
+        }
+      }
+    }
+    if (changes == 0) {
+      break;
+    }
+  }
+}
+
 static int build_greedy_numeric_row_match(UF_long n,
                                           UF_long nnz,
                                           const UF_long *col_ptr,
                                           const UF_long *row_idx,
                                           const double *numeric_values,
+                                          int improve_matching,
                                           UF_long **row_perm_out,
                                           UF_long *matched_out) {
   if (n <= 0 || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
@@ -830,11 +1037,14 @@ static int build_greedy_numeric_row_match(UF_long n,
   kls_match_entry *entries =
     (kls_match_entry *)malloc((size_t)nnz * sizeof(*entries));
   UF_long *row_perm = (UF_long *)malloc((size_t)n * sizeof(*row_perm));
+  UF_long *col_match = (UF_long *)malloc((size_t)n * sizeof(*col_match));
   unsigned char *row_used = (unsigned char *)calloc((size_t)n, sizeof(*row_used));
   unsigned char *col_used = (unsigned char *)calloc((size_t)n, sizeof(*col_used));
-  if (entries == NULL || row_perm == NULL || row_used == NULL || col_used == NULL) {
+  if (entries == NULL || row_perm == NULL || col_match == NULL ||
+      row_used == NULL || col_used == NULL) {
     free(entries);
     free(row_perm);
+    free(col_match);
     free(row_used);
     free(col_used);
     return KLS_ERR_OUT_OF_MEMORY;
@@ -856,6 +1066,7 @@ static int build_greedy_numeric_row_match(UF_long n,
 
   for (UF_long row = 0; row < n; ++row) {
     row_perm[row] = KLS_KLU_EMPTY;
+    col_match[row] = KLS_KLU_EMPTY;
   }
 
   UF_long matched = 0;
@@ -866,7 +1077,27 @@ static int build_greedy_numeric_row_match(UF_long n,
       row_used[row] = 1;
       col_used[col] = 1;
       row_perm[row] = col;
+      col_match[col] = row;
       matched++;
+    }
+  }
+
+  if (improve_matching) {
+    kls_row_match_graph graph;
+    int status = build_row_match_graph(n, entry_count, entries, &graph);
+    if (status == KLS_OK) {
+      matched = augment_numeric_row_match(n, &graph, row_perm, col_match);
+      if (matched == n) {
+        improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
+      }
+      free_row_match_graph(&graph);
+    } else if (status == KLS_ERR_OUT_OF_MEMORY) {
+      free(entries);
+      free(row_perm);
+      free(col_match);
+      free(row_used);
+      free(col_used);
+      return status;
     }
   }
 
@@ -875,21 +1106,23 @@ static int build_greedy_numeric_row_match(UF_long n,
     if (row_perm[row] != KLS_KLU_EMPTY) {
       continue;
     }
-    while (next_col < n && col_used[next_col]) {
+    while (next_col < n && col_match[next_col] != KLS_KLU_EMPTY) {
       next_col++;
     }
     if (next_col >= n) {
       free(entries);
       free(row_perm);
+      free(col_match);
       free(row_used);
       free(col_used);
       return KLS_ERR_INVALID_ARGUMENT;
     }
     row_perm[row] = next_col;
-    col_used[next_col] = 1;
+    col_match[next_col] = row;
   }
 
   free(entries);
+  free(col_match);
   free(row_used);
   free(col_used);
   *row_perm_out = row_perm;
@@ -1007,7 +1240,7 @@ static int should_try_auto_row_match(const kls_solver *solver) {
   if (solver == NULL || solver->numeric == NULL || solver->row_perm != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       solver->options.ordering != KLS_ORDERING_AUTO || solver->n < 3000 ||
-      solver->n > 20000 || solver->common.noffdiag < 230) {
+      solver->n > 20000 || solver->common.noffdiag < 128) {
     return 0;
   }
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
@@ -1083,9 +1316,11 @@ static void maybe_select_auto_row_match(kls_solver *solver,
   }
 
   UF_long matched = 0;
+  const int improve_matching = solver->common.noffdiag < 230;
   int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
                                               base_col_ptr, base_row_idx,
-                                              base_values, &row_perm, &matched);
+                                              base_values, improve_matching,
+                                              &row_perm, &matched);
   if (status != KLS_OK) {
     goto done;
   }
