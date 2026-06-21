@@ -238,6 +238,78 @@ static int test_solve_strides_and_in_place(void) {
   return ok;
 }
 
+static int test_pre_static_pivoting(void) {
+  const int32_t n = 3000;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)n * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)n * sizeof(*ax));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax == NULL || b == NULL ||
+      x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  for (int32_t col = 0; col <= n; ++col) {
+    ap[col] = col;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    ai[col] = (col + n - 1) % n;
+    ax[col] = 1.0;
+    expected[col] = 1.0 + (double)(col % 17);
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    b[row] = expected[(row + 1) % n];
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_AUTO;
+
+  int ok = 1;
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze pre-static pivot")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax), "factor pre-static pivot")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve pre-static pivot")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats), "stats pre-static pivot")) {
+    ok = 0;
+  }
+  if (ok && !stats.selected_static_pivoting) {
+    fprintf(stderr, "pre-static pivoting was not selected\n");
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr, "unexpected pre-static solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(b);
+  free(x);
+  free(expected);
+  return ok;
+}
+
 int main(void) {
   if (!test_csc()) {
     return EXIT_FAILURE;
@@ -255,6 +327,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_solve_strides_and_in_place()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_pre_static_pivoting()) {
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

@@ -87,11 +87,13 @@ without a large reciprocal-condition drop. Benchmark JSON reports both requested
 and selected pivot tolerance.
 
 Use `--no-static-pivoting` to disable KLS's value-aware static row-pivoting
-trial. When enabled, `auto` can respond to high off-diagonal pivot counts by
-building a weighted row permutation that moves large entries onto the diagonal,
-then reanalyzing/refactoring and keeping the permutation only when numeric
-fill/flop, pivoting, and reciprocal-condition evidence improve. Benchmark JSON
-reports both whether static pivoting was enabled and whether KLS selected it.
+trial. When enabled, `auto` can preemptively build a weighted row permutation
+for medium matrices whose input values show a mostly weak or missing diagonal,
+or react after a high off-diagonal pivot count. The permutation moves large
+entries onto the diagonal; KLS keeps it only when the factorization succeeds
+with acceptable pivoting and conditioning, or when numeric fill/flop, pivoting,
+and reciprocal-condition evidence improve. Benchmark JSON reports both whether
+static pivoting was enabled and whether KLS selected it.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF
