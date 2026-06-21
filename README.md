@@ -66,12 +66,12 @@ symbolic fill estimates before choosing.
 
 Use `--scale auto|-1|0|1|2` to compare KLS/KLU row scaling modes when studying
 pivoting and refactorization behavior. KLS defaults to `auto`, which can start
-unscaled for mostly diagonal circuit matrices with moderate diagonal magnitude
-spread, or sum-scaled when the diagonal is sparse but row magnitudes are already
-balanced. Otherwise it starts from KLU's max row scaling mode (`2`). For large
-expensive cases, `auto` can still try other numeric scaling modes when actual
-flop/fill evidence justifies the extra work. Explicit numeric scale values
-remain fixed.
+unscaled using KLU's `-1` no-scale/no-recheck mode for patterns already
+validated by KLS, or sum-scaled when the diagonal is sparse but row magnitudes
+are already balanced. Otherwise it starts from KLU's max row scaling mode (`2`).
+For large expensive cases, `auto` can still try other numeric scaling modes when
+actual flop/fill evidence justifies the extra work. Explicit numeric scale
+values remain fixed.
 
 Use `--pivot-tol T` to benchmark the diagonal pivot tolerance exposed by the
 KLS API. The default is `0.001`, matching the underlying KLU default. With that

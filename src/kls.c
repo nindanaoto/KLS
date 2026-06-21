@@ -402,7 +402,7 @@ static int choose_auto_scale_from_pattern(UF_long n,
   if ((double)diag_count >= min_diag_fraction * (double)n &&
       min_diag > 0.0 && max_diag > 0.0 && max_diag / min_diag <= diag_spread_limit) {
     free(row_max);
-    return 0;
+    return -1;
   }
 
   size_t row_count = 0;
@@ -431,13 +431,13 @@ static int choose_auto_scale_from_pattern(UF_long n,
     if ((double)diag_count >= min_diag_fraction * (double)n &&
         row_p10 > 0.0 && row_unit_fraction >= 0.80 && row_p90 / row_p10 <= 10.0) {
       free(row_max);
-      return 0;
+      return -1;
     }
     if ((double)diag_count >= min_diag_fraction * (double)n &&
         row_p10 > 0.0 && diag_unit_fraction >= 0.02 &&
         diag_unit_fraction <= 0.08 && row_p90 / row_p10 >= 1000.0) {
       free(row_max);
-      return 0;
+      return -1;
     }
     if ((double)diag_count < min_diag_fraction * (double)n &&
         row_min > 0.0 && row_p10 > 0.0 &&
@@ -1215,7 +1215,7 @@ static void maybe_select_auto_scale(kls_solver *solver,
   }
   solver->auto_scale_checked = 1;
 
-  const int candidates[] = {0, 1, 2};
+  const int candidates[] = {-1, 1, 2};
   for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
     if (candidates[i] == (int)solver->common.scale) {
       continue;
@@ -2010,7 +2010,7 @@ static int kls_parallel_refactor_is_eligible(const kls_solver *solver) {
   if (solver->n < 5000u || solver->symbolic->maxblock == solver->n) {
     return 0;
   }
-  if (solver->common.scale != 0 || solver->common.flops < 2.0e7) {
+  if (solver->common.scale > 0 || solver->common.flops < 2.0e7) {
     return 0;
   }
   if (solver->symbolic->nblocks < 64u ||

@@ -46,7 +46,7 @@ static int test_csc(void) {
     fprintf(stderr, "unexpected selected ordering: %s\n", kls_ordering_name(stats.selected_ordering));
     return 0;
   }
-  if (stats.selected_scale != 0) {
+  if (stats.selected_scale != -1) {
     fprintf(stderr, "unexpected auto-selected scale: %d\n", stats.selected_scale);
     return 0;
   }
