@@ -4,6 +4,30 @@ This note records which ideas from the reference papers are present in KLS and
 which remain open. The intent is to keep KLS development focused on general
 solver algorithms instead of tuning individual benchmark matrices.
 
+## Current Conclusion
+
+KLS has **not** implemented every paper idea that is still worth trying. It has
+implemented the ideas that can be layered around the current KLU-derived
+Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, CAMD refinement,
+auto scaling policy, pivot-checked reuse, static row-pivoting trials, and
+BTF-block parallel refactorization.
+
+The remaining worthwhile ideas are not per-matrix tuning knobs. They require
+new KLS-owned symbolic/numeric machinery:
+
+- MC64-equivalent maximum-weight matching with row and column scaling.
+- Persistent EGraph/ETree or separator-tree metadata for intra-block parallel
+  factor/refactor scheduling.
+- CKTSO-style fast factorization tail restart after a failed pivot check, rather
+  than full fallback from the beginning.
+- SubtreeLU-style private/pipeline scheduling from a retained separator tree.
+- A structure-adaptive triangular solve built on LU storage that exposes cheap
+  row/segment access.
+
+Several smaller dispatch experiments were tried and rejected because they helped
+some benchmark cases while regressing others. Those are documented below so the
+project does not drift toward benchmark-name-specific heuristics.
+
 ## Implemented
 
 - KLU Algorithm 907 baseline: BTF preprocessing, AMD/COLAMD ordering,
@@ -77,6 +101,12 @@ EGraph refactorization idea. It was removed before commit because the general
 implementation regressed dominant-block circuit cases where the current
 BTF-block threaded refactor is faster. Keeping it would have required
 case-specific dispatch, which is not the desired direction for KLS.
+
+A KLS-owned serial no-pivot refactor path was also prototyped by reusing the
+threaded BTF-block refactor kernel when thread-level parallelism was not
+eligible. It passed correctness tests and helped some no-scale cases, but it
+regressed other representative circuit cases such as `bcircuit` and `rajat03`.
+The prototype was removed because it did not represent a general improvement.
 
 ## Recommended General Work
 
