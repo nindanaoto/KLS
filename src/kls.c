@@ -471,6 +471,58 @@ static void maybe_retry_single_block_without_btf(UF_long n,
   trilinos_klu_l_free_symbolic(&no_btf_symbolic, &no_btf_common);
 }
 
+#ifdef KLS_HAVE_METIS
+static int should_start_auto_with_metis(UF_long n,
+                                        const UF_long *col_ptr,
+                                        const UF_long *row_idx) {
+  if (n < 7000 || n > 12000 || col_ptr == NULL || row_idx == NULL ||
+      col_ptr[n] > (UF_long)(5 * n)) {
+    return 0;
+  }
+
+  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_count = 0;
+  UF_long max_col_degree = 0;
+  int low_degree = 1;
+  for (UF_long col = 0; col < n && low_degree; ++col) {
+    const UF_long col_degree = col_ptr[col + 1] - col_ptr[col];
+    if (col_degree > max_col_degree) {
+      max_col_degree = col_degree;
+    }
+    if (col_degree > 128) {
+      low_degree = 0;
+      break;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] >= 128) {
+        low_degree = 0;
+        break;
+      }
+      row_degree[row]++;
+      if (row == col) {
+        diagonal_count++;
+      }
+    }
+  }
+
+  UF_long max_row_degree = 0;
+  for (UF_long row = 0; row < n && low_degree; ++row) {
+    if (row_degree[row] > max_row_degree) {
+      max_row_degree = row_degree[row];
+    }
+  }
+  free(row_degree);
+
+  return low_degree && max_col_degree <= 128 && max_row_degree <= 128 &&
+         10 * diagonal_count >= 9 * n;
+}
+#endif
+
 static int numeric_candidate_is_better(const trilinos_klu_l_common *current_common,
                                        const trilinos_klu_l_numeric *current_numeric,
                                        const trilinos_klu_l_common *candidate_common,
@@ -648,6 +700,19 @@ static int choose_symbolic_for_pattern(UF_long n,
     }
     return status;
   }
+
+#ifdef KLS_HAVE_METIS
+  if (should_start_auto_with_metis(n, col_ptr, row_idx)) {
+    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
+                                       KLS_ORDERING_METIS, symbolic_out,
+                                       common_out);
+    if (status == KLS_OK) {
+      *selected_ordering_out = KLS_ORDERING_METIS;
+      *score_out = symbolic_score(*symbolic_out);
+      return KLS_OK;
+    }
+  }
+#endif
 
   const kls_ordering candidates[] = {KLS_ORDERING_AMD, KLS_ORDERING_COLAMD};
   trilinos_klu_l_symbolic *best_symbolic = NULL;

@@ -74,11 +74,13 @@ symbolic retry keeps the fill estimate within tolerance; benchmark JSON reports
 both `requested_btf` and selected `btf`.
 
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
-`--ordering auto` first compares AMD and COLAMD by symbolic fill estimate. When
-METIS is enabled, `auto` can then promote large, expensive first numeric
-factorizations to METIS if the trial factorization materially reduces actual
-numeric flop/fill cost. This keeps METIS available for hard nested-dissection
-cases without paying its analysis cost on small circuit matrices.
+`--ordering auto` can start with METIS for medium, bounded-degree structures
+that resemble mesh-style nested-dissection cases. Otherwise it compares AMD and
+COLAMD by symbolic fill estimate. When METIS is enabled, `auto` can also
+promote large, expensive first numeric factorizations to METIS if the trial
+factorization materially reduces actual numeric flop/fill cost. This keeps
+METIS available for hard nested-dissection cases without paying its analysis
+cost on small circuit matrices.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 
