@@ -61,8 +61,10 @@ still use the serial path.
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium
 matrices where avoiding a second symbolic analysis is usually faster in a
-repeated SPICE solve cycle. Larger matrices still compare normal and transposed
-symbolic fill estimates before choosing.
+repeated SPICE solve cycle. Large sparse, strongly diagonal circuit-like
+patterns use normal storage directly to avoid a redundant transposed symbolic
+analysis. Other larger matrices still compare normal and transposed symbolic
+fill estimates before choosing.
 
 Use `--scale auto|-1|0|1|2` to compare KLS/KLU row scaling modes when studying
 pivoting and refactorization behavior. KLS defaults to `auto`, which can start

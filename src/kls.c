@@ -457,6 +457,48 @@ static int is_medium_dense_diagonal_high_degree_pattern(UF_long n,
          1000.0 * (double)diagonal_count >= 995.0 * (double)n;
 }
 
+static int is_large_diagonal_circuit_like_pattern(UF_long n,
+                                                  const UF_long *col_ptr,
+                                                  const UF_long *row_idx) {
+  if (n < 35000 || col_ptr == NULL || row_idx == NULL ||
+      n > UF_long_max / 16 || col_ptr[n] > 16u * n) {
+    return 0;
+  }
+
+  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_count = 0;
+  int valid = 1;
+  for (UF_long col = 0; col < n && valid; ++col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] == UF_long_max) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      if (row == col) {
+        diagonal_count++;
+      }
+    }
+  }
+
+  int no_empty_rows = 1;
+  for (UF_long row = 0; row < n && valid; ++row) {
+    if (row_degree[row] == 0) {
+      no_empty_rows = 0;
+      break;
+    }
+  }
+  free(row_degree);
+
+  return valid && no_empty_rows &&
+         10.0 * (double)diagonal_count >= 9.0 * (double)n;
+}
+
 #ifdef KLS_HAVE_METIS
 static int is_medium_bounded_degree_diagonal_pattern(UF_long n,
                                                      const UF_long *col_ptr,
@@ -2046,6 +2088,12 @@ static int auto_orientation_prefers_transpose(UF_long n) {
   return n <= 30000;
 }
 
+static int auto_orientation_prefers_normal(UF_long n,
+                                           const UF_long *col_ptr,
+                                           const UF_long *row_idx) {
+  return is_large_diagonal_circuit_like_pattern(n, col_ptr, row_idx);
+}
+
 static int select_candidate(kls_pattern_candidate *normal,
                             kls_pattern_candidate *transpose,
                             const kls_options *options,
@@ -2265,7 +2313,10 @@ int kls_analyze_csc(kls_solver *solver,
     return status;
   }
 
-  if (normalized.orientation != KLS_ORIENTATION_NORMAL) {
+  const int prefer_auto_normal =
+    normalized.orientation == KLS_ORIENTATION_AUTO &&
+    auto_orientation_prefers_normal(normal.n, normal.col_ptr, normal.row_idx);
+  if (normalized.orientation != KLS_ORIENTATION_NORMAL && !prefer_auto_normal) {
     status = transpose_candidate(&normal, KLS_ORIENTATION_TRANSPOSE, &transpose);
     if (status != KLS_OK) {
       free_candidate(&normal);
@@ -2275,7 +2326,8 @@ int kls_analyze_csc(kls_solver *solver,
   }
 
   status = select_candidate(&normal,
-                            normalized.orientation == KLS_ORIENTATION_NORMAL ? NULL : &transpose,
+                            (normalized.orientation == KLS_ORIENTATION_NORMAL ||
+                             prefer_auto_normal) ? NULL : &transpose,
                             &normalized, &chosen);
   const double elapsed = kls_now_seconds() - start;
   if (status != KLS_OK) {
@@ -2347,7 +2399,11 @@ int kls_analyze_csr(kls_solver *solver,
     }
   }
 
-  status = select_candidate(normal.col_ptr == NULL ? NULL : &normal, &transpose,
+  const int prefer_auto_normal =
+    normalized.orientation == KLS_ORIENTATION_AUTO && normal.col_ptr != NULL &&
+    auto_orientation_prefers_normal(normal.n, normal.col_ptr, normal.row_idx);
+  status = select_candidate(normal.col_ptr == NULL ? NULL : &normal,
+                            prefer_auto_normal ? NULL : &transpose,
                             &normalized, &chosen);
   const double elapsed = kls_now_seconds() - start;
   if (status != KLS_OK) {
