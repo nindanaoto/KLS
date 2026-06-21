@@ -32,6 +32,8 @@ struct kls_solver {
   UF_long *row_idx;
   UF_long *input_to_csc;
   UF_long *row_perm;
+  double *row_scale;
+  double *col_scale;
   double *values;
   kls_input_format input_format;
   kls_orientation orientation;
@@ -366,11 +368,15 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->row_idx);
   free(solver->input_to_csc);
   free(solver->row_perm);
+  free(solver->row_scale);
+  free(solver->col_scale);
   free(solver->values);
   solver->col_ptr = NULL;
   solver->row_idx = NULL;
   solver->input_to_csc = NULL;
   solver->row_perm = NULL;
+  solver->row_scale = NULL;
+  solver->col_scale = NULL;
   solver->values = NULL;
   solver->n = 0;
   solver->nnz = 0;
@@ -1680,6 +1686,269 @@ static int build_sorted_row_permuted_pattern(UF_long n,
   return KLS_OK;
 }
 
+static double clamp_matching_scale(double value) {
+  const double min_scale = 1.0e-12;
+  const double max_scale = 1.0e12;
+  if (!isfinite(value) || value <= 0.0) {
+    return 1.0;
+  }
+  if (value < min_scale) {
+    return min_scale;
+  }
+  if (value > max_scale) {
+    return max_scale;
+  }
+  return value;
+}
+
+static int build_matching_equilibration(UF_long n,
+                                        const UF_long *base_col_ptr,
+                                        const UF_long *base_row_idx,
+                                        const double *base_values,
+                                        const UF_long *row_perm,
+                                        double **row_scale_out,
+                                        double **col_scale_out) {
+  if (n <= 0 || base_col_ptr == NULL || base_row_idx == NULL ||
+      base_values == NULL || row_perm == NULL ||
+      row_scale_out == NULL || col_scale_out == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  *row_scale_out = NULL;
+  *col_scale_out = NULL;
+
+  double *diag = (double *)calloc((size_t)n, sizeof(*diag));
+  double *row_scale = (double *)malloc((size_t)n * sizeof(*row_scale));
+  double *col_scale = (double *)malloc((size_t)n * sizeof(*col_scale));
+  double *row_max = (double *)malloc((size_t)n * sizeof(*row_max));
+  if (diag == NULL || row_scale == NULL || col_scale == NULL || row_max == NULL) {
+    free(diag);
+    free(row_scale);
+    free(col_scale);
+    free(row_max);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+
+  for (UF_long i = 0; i < n; ++i) {
+    row_scale[i] = 1.0;
+    col_scale[i] = 1.0;
+  }
+
+  for (UF_long col = 0; col < n; ++col) {
+    for (UF_long p = base_col_ptr[col]; p < base_col_ptr[col + 1u]; ++p) {
+      const UF_long row = base_row_idx[p];
+      if (row < n && row_perm[row] == col) {
+        const double value_abs = fabs(base_values[p]);
+        if (isfinite(value_abs) && value_abs > diag[col]) {
+          diag[col] = value_abs;
+        }
+      }
+    }
+  }
+
+  double min_diag = DBL_MAX;
+  double max_diag = 0.0;
+  for (UF_long i = 0; i < n; ++i) {
+    if (diag[i] <= 0.0 || !isfinite(diag[i])) {
+      free(diag);
+      free(row_scale);
+      free(col_scale);
+      free(row_max);
+      return KLS_OK;
+    }
+    if (diag[i] < min_diag) {
+      min_diag = diag[i];
+    }
+    if (diag[i] > max_diag) {
+      max_diag = diag[i];
+    }
+  }
+
+  if (min_diag <= 0.0 || max_diag / min_diag < 1.0e4) {
+    free(diag);
+    free(row_scale);
+    free(col_scale);
+    free(row_max);
+    return KLS_OK;
+  }
+
+  for (UF_long i = 0; i < n; ++i) {
+    const double scale = clamp_matching_scale(exp(-0.5 * log(diag[i])));
+    row_scale[i] = scale;
+    col_scale[i] = scale;
+  }
+
+  for (int round = 0; round < 6; ++round) {
+    for (UF_long i = 0; i < n; ++i) {
+      row_max[i] = 0.0;
+    }
+    for (UF_long col = 0; col < n; ++col) {
+      const double cs = col_scale[col];
+      for (UF_long p = base_col_ptr[col]; p < base_col_ptr[col + 1u]; ++p) {
+        const UF_long row = base_row_idx[p];
+        if (row >= n || row_perm[row] >= n) {
+          continue;
+        }
+        const UF_long scaled_row = row_perm[row];
+        const double scaled = fabs(base_values[p]) * row_scale[scaled_row] * cs;
+        if (isfinite(scaled) && scaled > row_max[scaled_row]) {
+          row_max[scaled_row] = scaled;
+        }
+      }
+    }
+
+    UF_long changed = 0;
+    for (UF_long i = 0; i < n; ++i) {
+      if (row_max[i] > 4.0) {
+        const double factor = sqrt(row_max[i]);
+        row_scale[i] = clamp_matching_scale(row_scale[i] / factor);
+        col_scale[i] = clamp_matching_scale(col_scale[i] * factor);
+        changed++;
+      }
+    }
+    if (changed == 0) {
+      break;
+    }
+  }
+
+  free(diag);
+  free(row_max);
+  *row_scale_out = row_scale;
+  *col_scale_out = col_scale;
+  return KLS_OK;
+}
+
+static void apply_value_scaling(UF_long n,
+                                const UF_long *col_ptr,
+                                const UF_long *row_idx,
+                                const double *row_scale,
+                                const double *col_scale,
+                                double *values) {
+  if (n <= 0 || col_ptr == NULL || row_idx == NULL || values == NULL ||
+      (row_scale == NULL && col_scale == NULL)) {
+    return;
+  }
+  for (UF_long col = 0; col < n; ++col) {
+    const double cs = col_scale != NULL ? col_scale[col] : 1.0;
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      const double rs = (row_scale != NULL && row < n) ? row_scale[row] : 1.0;
+      values[p] *= rs * cs;
+    }
+  }
+}
+
+static int matching_equilibration_is_better(
+  const trilinos_klu_l_common *base_common,
+  const trilinos_klu_l_numeric *base_numeric,
+  const trilinos_klu_l_common *scaled_common,
+  const trilinos_klu_l_numeric *scaled_numeric) {
+  const double base_fill = (double)(base_numeric->lnz + base_numeric->unz);
+  const double scaled_fill = (double)(scaled_numeric->lnz + scaled_numeric->unz);
+  const double base_flops = base_common->flops;
+  const double scaled_flops = scaled_common->flops;
+
+  if (scaled_common->noffdiag > base_common->noffdiag ||
+      scaled_fill > 1.02 * base_fill ||
+      (base_flops > 0.0 && scaled_flops > 1.05 * base_flops)) {
+    return 0;
+  }
+  if (base_common->rcond <= 0.0 && scaled_common->rcond > 0.0) {
+    return 1;
+  }
+  if (base_common->rcond > 0.0 && scaled_common->rcond > 10.0 * base_common->rcond) {
+    return 1;
+  }
+  if (base_common->scale > 0 &&
+      (base_common->rcond <= 0.0 ||
+       scaled_common->rcond >= 0.10 * base_common->rcond)) {
+    return 1;
+  }
+  return scaled_fill < 0.98 * base_fill ||
+         scaled_common->noffdiag < base_common->noffdiag;
+}
+
+static void maybe_use_matching_equilibration(
+  UF_long n,
+  UF_long nnz,
+  UF_long *col_ptr,
+  UF_long *row_idx,
+  const kls_options *options,
+  trilinos_klu_l_symbolic *symbolic,
+  double **values_io,
+  double **row_scale_io,
+  double **col_scale_io,
+  trilinos_klu_l_numeric **numeric_io,
+  trilinos_klu_l_common *common_io) {
+  if (n <= 0 || nnz <= 0 || col_ptr == NULL || row_idx == NULL ||
+      options == NULL || symbolic == NULL || values_io == NULL ||
+      row_scale_io == NULL || col_scale_io == NULL || numeric_io == NULL ||
+      common_io == NULL || *values_io == NULL || *row_scale_io == NULL ||
+      *col_scale_io == NULL || *numeric_io == NULL) {
+    return;
+  }
+
+  double *scaled_values = (double *)malloc((size_t)nnz * sizeof(*scaled_values));
+  if (scaled_values == NULL) {
+    free(*row_scale_io);
+    free(*col_scale_io);
+    *row_scale_io = NULL;
+    *col_scale_io = NULL;
+    return;
+  }
+  memcpy(scaled_values, *values_io, (size_t)nnz * sizeof(*scaled_values));
+  apply_value_scaling(n, col_ptr, row_idx, *row_scale_io, *col_scale_io,
+                      scaled_values);
+
+  kls_options scaled_options = *options;
+  scaled_options.scale = -1;
+  trilinos_klu_l_common scaled_common;
+  if (apply_options_to_common(&scaled_common, &scaled_options) != KLS_OK) {
+    free(scaled_values);
+    free(*row_scale_io);
+    free(*col_scale_io);
+    *row_scale_io = NULL;
+    *col_scale_io = NULL;
+    return;
+  }
+
+  trilinos_klu_l_numeric *scaled_numeric =
+    trilinos_klu_l_factor(col_ptr, row_idx, scaled_values, symbolic,
+                          &scaled_common);
+  if (scaled_numeric == NULL || scaled_common.status < 0 ||
+      scaled_common.status == TRILINOS_KLU_SINGULAR) {
+    if (scaled_numeric != NULL) {
+      trilinos_klu_l_free_numeric(&scaled_numeric, &scaled_common);
+    }
+    free(scaled_values);
+    free(*row_scale_io);
+    free(*col_scale_io);
+    *row_scale_io = NULL;
+    *col_scale_io = NULL;
+    return;
+  }
+
+  (void)trilinos_klu_l_flops(symbolic, scaled_numeric, &scaled_common);
+  (void)trilinos_klu_l_rcond(symbolic, scaled_numeric, &scaled_common);
+  if (!matching_equilibration_is_better(common_io, *numeric_io,
+                                        &scaled_common, scaled_numeric)) {
+    trilinos_klu_l_free_numeric(&scaled_numeric, &scaled_common);
+    free(scaled_values);
+    free(*row_scale_io);
+    free(*col_scale_io);
+    *row_scale_io = NULL;
+    *col_scale_io = NULL;
+    return;
+  }
+
+  trilinos_klu_l_numeric *old_numeric = *numeric_io;
+  trilinos_klu_l_common old_common = *common_io;
+  trilinos_klu_l_free_numeric(&old_numeric, &old_common);
+  free(*values_io);
+  *values_io = scaled_values;
+  *numeric_io = scaled_numeric;
+  *common_io = scaled_common;
+}
+
 static UF_long count_weak_diagonal_rows(UF_long n,
                                         const UF_long *col_ptr,
                                         const UF_long *row_idx,
@@ -1760,6 +2029,8 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   UF_long *trial_row_idx = NULL;
   UF_long *trial_input_to_csc = NULL;
   double *trial_values = NULL;
+  double *trial_row_scale = NULL;
+  double *trial_col_scale = NULL;
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_numeric *trial_numeric = NULL;
   trilinos_klu_l_common trial_common;
@@ -1832,6 +2103,14 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   }
 
   kls_options trial_options = solver->options;
+  if (trial_options.scale == KLS_SCALE_AUTO) {
+    status = build_matching_equilibration(solver->n, base_col_ptr, base_row_idx,
+                                          base_values, row_perm,
+                                          &trial_row_scale, &trial_col_scale);
+    if (status != KLS_OK) {
+      goto done;
+    }
+  }
   kls_ordering trial_ordering = KLS_ORDERING_AUTO;
   double trial_score = 0.0;
   status = choose_symbolic_for_pattern(solver->n, trial_col_ptr, trial_row_idx,
@@ -1842,7 +2121,8 @@ static int maybe_select_auto_row_match(kls_solver *solver,
     goto done;
   }
   trial_common.scale = choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
-                                                      trial_row_idx, &trial_options,
+                                                      trial_row_idx,
+                                                      &trial_options,
                                                       trial_values);
 
   trial_numeric =
@@ -1855,6 +2135,11 @@ static int maybe_select_auto_row_match(kls_solver *solver,
 
   (void)trilinos_klu_l_flops(trial_symbolic, trial_numeric, &trial_common);
   (void)trilinos_klu_l_rcond(trial_symbolic, trial_numeric, &trial_common);
+  maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
+                                   trial_row_idx, &solver->options,
+                                   trial_symbolic, &trial_values,
+                                   &trial_row_scale, &trial_col_scale,
+                                   &trial_numeric, &trial_common);
   if (!numeric_candidate_is_better(&solver->common, solver->numeric,
                                    &trial_common, trial_numeric) ||
       (solver->common.rcond > 0.0 && trial_common.rcond > 0.0 &&
@@ -1868,11 +2153,15 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   UF_long *old_col_ptr = solver->col_ptr;
   UF_long *old_row_idx = solver->row_idx;
   UF_long *old_input_to_csc = solver->input_to_csc;
+  double *old_row_scale = solver->row_scale;
+  double *old_col_scale = solver->col_scale;
   double *old_values = solver->values;
 
   solver->col_ptr = trial_col_ptr;
   solver->row_idx = trial_row_idx;
   solver->input_to_csc = trial_input_to_csc;
+  solver->row_scale = trial_row_scale;
+  solver->col_scale = trial_col_scale;
   solver->values = trial_values;
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->row_perm = row_perm;
@@ -1891,12 +2180,16 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   free(old_col_ptr);
   free(old_row_idx);
   free(old_input_to_csc);
+  free(old_row_scale);
+  free(old_col_scale);
   free(old_values);
 
   trial_col_ptr = NULL;
   trial_row_idx = NULL;
   trial_input_to_csc = NULL;
   trial_values = NULL;
+  trial_row_scale = NULL;
+  trial_col_scale = NULL;
   row_perm = NULL;
   trial_symbolic = NULL;
   trial_numeric = NULL;
@@ -1915,6 +2208,8 @@ done:
     free(trial_row_idx);
     free(trial_input_to_csc);
     free(trial_values);
+    free(trial_row_scale);
+    free(trial_col_scale);
   }
   free(owned_col_ptr);
   free(owned_row_idx);
@@ -1949,6 +2244,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   UF_long *trial_row_idx = NULL;
   UF_long *trial_input_to_csc = NULL;
   double *trial_values = NULL;
+  double *trial_row_scale = NULL;
+  double *trial_col_scale = NULL;
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_numeric *trial_numeric = NULL;
   trilinos_klu_l_common trial_common;
@@ -2024,6 +2321,14 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
 
   kls_options trial_options = solver->options;
+  if (trial_options.scale == KLS_SCALE_AUTO) {
+    status = build_matching_equilibration(solver->n, base_col_ptr, base_row_idx,
+                                          base_values, row_perm,
+                                          &trial_row_scale, &trial_col_scale);
+    if (status != KLS_OK) {
+      goto done;
+    }
+  }
   kls_ordering trial_ordering = KLS_ORDERING_AUTO;
   double trial_score = 0.0;
   status = choose_symbolic_for_pattern(solver->n, trial_col_ptr, trial_row_idx,
@@ -2034,7 +2339,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     goto done;
   }
   trial_common.scale = choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
-                                                      trial_row_idx, &trial_options,
+                                                      trial_row_idx,
+                                                      &trial_options,
                                                       trial_values);
 
   trial_numeric =
@@ -2047,6 +2353,11 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
   (void)trilinos_klu_l_flops(trial_symbolic, trial_numeric, &trial_common);
   (void)trilinos_klu_l_rcond(trial_symbolic, trial_numeric, &trial_common);
+  maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
+                                   trial_row_idx, &solver->options,
+                                   trial_symbolic, &trial_values,
+                                   &trial_row_scale, &trial_col_scale,
+                                   &trial_numeric, &trial_common);
   if (trial_common.noffdiag > weak / 20u + 16u ||
       trial_common.rcond <= 0.0) {
     goto done;
@@ -2057,11 +2368,15 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   free(solver->col_ptr);
   free(solver->row_idx);
   free(solver->input_to_csc);
+  free(solver->row_scale);
+  free(solver->col_scale);
   free(solver->values);
 
   solver->col_ptr = trial_col_ptr;
   solver->row_idx = trial_row_idx;
   solver->input_to_csc = trial_input_to_csc;
+  solver->row_scale = trial_row_scale;
+  solver->col_scale = trial_col_scale;
   solver->values = trial_values;
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->row_perm = row_perm;
@@ -2080,6 +2395,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   trial_row_idx = NULL;
   trial_input_to_csc = NULL;
   trial_values = NULL;
+  trial_row_scale = NULL;
+  trial_col_scale = NULL;
   row_perm = NULL;
   trial_symbolic = NULL;
   trial_numeric = NULL;
@@ -2098,6 +2415,8 @@ done:
     free(trial_row_idx);
     free(trial_input_to_csc);
     free(trial_values);
+    free(trial_row_scale);
+    free(trial_col_scale);
   }
   free(owned_col_ptr);
   free(owned_row_idx);
@@ -2928,16 +3247,23 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
   if (solver->input_format == KLS_INPUT_NONE) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-  if (solver->input_to_csc == NULL) {
+  if (solver->input_to_csc == NULL &&
+      solver->row_scale == NULL && solver->col_scale == NULL) {
     *values_out = (double *)values;
     return KLS_OK;
   }
   if (solver->values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-  for (int64_t p = 0; p < solver->nnz; ++p) {
-    solver->values[solver->input_to_csc[p]] = values[p];
+  if (solver->input_to_csc == NULL) {
+    memcpy(solver->values, values, (size_t)solver->nnz * sizeof(*solver->values));
+  } else {
+    for (int64_t p = 0; p < solver->nnz; ++p) {
+      solver->values[solver->input_to_csc[p]] = values[p];
+    }
   }
+  apply_value_scaling(solver->n, solver->col_ptr, solver->row_idx,
+                      solver->row_scale, solver->col_scale, solver->values);
   *values_out = solver->values;
   return KLS_OK;
 }
@@ -3321,6 +3647,8 @@ static int solve_impl(kls_solver *solver,
   const double start = kls_now_seconds();
   const int kernel_transpose =
     (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
+  const int has_row_scale = solver->row_scale != NULL;
+  const int has_col_scale = solver->col_scale != NULL;
   double *perm_workspace = NULL;
   if (solver->row_perm != NULL) {
     perm_workspace = (double *)malloc((size_t)solver->n * sizeof(*perm_workspace));
@@ -3334,9 +3662,27 @@ static int solve_impl(kls_solver *solver,
       const double *src = b + rhs * ldb;
       double *dst = x + rhs * ldx;
       for (UF_long row = 0; row < solver->n; ++row) {
-        perm_workspace[solver->row_perm[row]] = src[row];
+        const UF_long scaled_row = solver->row_perm[row];
+        const double rs = has_row_scale ? solver->row_scale[scaled_row] : 1.0;
+        perm_workspace[scaled_row] = src[row] * rs;
       }
       memcpy(dst, perm_workspace, (size_t)solver->n * sizeof(double));
+    }
+  } else if (!kernel_transpose && has_row_scale) {
+    for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
+      const double *src = b + rhs * ldb;
+      double *dst = x + rhs * ldx;
+      for (UF_long row = 0; row < solver->n; ++row) {
+        dst[row] = src[row] * solver->row_scale[row];
+      }
+    }
+  } else if (kernel_transpose && has_col_scale) {
+    for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
+      const double *src = b + rhs * ldb;
+      double *dst = x + rhs * ldx;
+      for (UF_long row = 0; row < solver->n; ++row) {
+        dst[row] = src[row] * solver->col_scale[row];
+      }
     }
   } else if (b != x || ldb != ldx) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
@@ -3349,13 +3695,30 @@ static int solve_impl(kls_solver *solver,
                             (UF_long)nrhs, x, &solver->common)
     : trilinos_klu_l_solve(solver->symbolic, solver->numeric, (UF_long)ldx,
                            (UF_long)nrhs, x, &solver->common);
+  if (ok && !kernel_transpose && has_col_scale) {
+    for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
+      double *dst = x + rhs * ldx;
+      for (UF_long row = 0; row < solver->n; ++row) {
+        dst[row] *= solver->col_scale[row];
+      }
+    }
+  }
   if (ok && solver->row_perm != NULL && kernel_transpose) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       double *dst = x + rhs * ldx;
       for (UF_long row = 0; row < solver->n; ++row) {
-        perm_workspace[row] = dst[solver->row_perm[row]];
+        const UF_long scaled_row = solver->row_perm[row];
+        const double rs = has_row_scale ? solver->row_scale[scaled_row] : 1.0;
+        perm_workspace[row] = dst[scaled_row] * rs;
       }
       memcpy(dst, perm_workspace, (size_t)solver->n * sizeof(double));
+    }
+  } else if (ok && kernel_transpose && has_row_scale) {
+    for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
+      double *dst = x + rhs * ldx;
+      for (UF_long row = 0; row < solver->n; ++row) {
+        dst[row] *= solver->row_scale[row];
+      }
     }
   }
   free(perm_workspace);

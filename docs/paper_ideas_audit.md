@@ -9,13 +9,13 @@ solver algorithms instead of tuning individual benchmark matrices.
 KLS has **not** implemented every paper idea that is still worth trying. It has
 implemented the ideas that can be layered around the current KLU-derived
 Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, CAMD refinement,
-auto scaling policy, pivot-checked reuse, static row-pivoting trials, and
-BTF-block parallel refactorization.
+auto scaling policy, pivot-checked reuse, static row-pivoting trials with
+matching-derived equilibration, and BTF-block parallel refactorization.
 
 The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
 
-- MC64-equivalent maximum-weight matching with row and column scaling.
+- Full MC64-equivalent maximum-weight matching with dual row/column scaling.
 - Persistent EGraph/ETree or separator-tree metadata for intra-block parallel
   factor/refactor scheduling.
 - CKTSO-style fast factorization tail restart after a failed pivot check, rather
@@ -52,8 +52,9 @@ project does not drift toward benchmark-name-specific heuristics.
   multipliers, and falls back to full pivoting factorization if the reused order
   is unsafe.
 - Static pivoting trial: KLS has value-aware greedy row matching and swap
-  improvement for weak or high-off-diagonal-pivot medium matrices, and keeps the
-  permutation only when numeric quality and cost evidence justify it.
+  improvement for weak or high-off-diagonal-pivot medium matrices. It can also
+  trial matching-derived row/column equilibration and keeps the transformed
+  candidate only when numeric quality and cost evidence justify it.
 - Initial KLS-owned parallelism: repeated refactorization can run across
   independent BTF diagonal blocks for large high-flop cases where the block work
   is wide enough to offset thread overhead.
@@ -66,8 +67,8 @@ project does not drift toward benchmark-name-specific heuristics.
 ## Partially Implemented
 
 - CKTSO-style static pivoting is only partial. KLS has a practical weighted row
-  permutation, but not a full MC64-style maximum product matching with both row
-  and column scaling vectors.
+  permutation and matching-derived row/column equilibration, but not a full
+  MC64-style maximum-product matching algorithm with assignment dual scaling.
 - NICSLU/CKTSO parallel scheduling is only present at BTF-block granularity.
   KLS does not yet have an intra-block EGraph/ETree cluster/pipeline scheduler.
 - CKTSO fast factorization is present as pivot-checked reuse plus full fallback.
@@ -79,7 +80,7 @@ project does not drift toward benchmark-name-specific heuristics.
 
 ## Not Implemented Yet
 
-- Full MC64-equivalent weighted matching and diagonal row/column scaling.
+- Full MC64-equivalent weighted matching and assignment-dual row/column scaling.
 - NICSLU static-symbolic R1/R2 performance model for choosing sequential versus
   parallel numeric kernels before factorization.
 - Intra-block parallel factorization with pivoting scheduled by an ETree.

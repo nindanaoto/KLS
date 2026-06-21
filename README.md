@@ -16,7 +16,8 @@ This repository currently contains the first working KLS implementation:
 - Factor, refactor, solve, transpose-solve, and statistics APIs
 - Fast repeated factorization that reuses the existing numeric pattern before
   checking pivot quality and falling back to full pivoting factorization
-- Value-aware static row pivoting trials for high off-diagonal-pivot cases
+- Value-aware static row pivoting and row/column equilibration trials for high
+  off-diagonal-pivot cases
 - A MatrixMarket benchmark tool
 - A small correctness smoke test
 - A SuiteSparse Matrix Collection downloader script for public benchmark cases
@@ -96,9 +97,12 @@ Use `--no-static-pivoting` to disable KLS's value-aware static row-pivoting
 trial. When enabled, `auto` can preemptively build a weighted row permutation
 for medium matrices whose input values show a mostly weak or missing diagonal,
 or react after a high off-diagonal pivot count. The permutation moves large
-entries onto the diagonal; KLS keeps it only when the factorization succeeds
-with acceptable pivoting and conditioning, or when numeric fill/flop, pivoting,
-and reciprocal-condition evidence improve. Benchmark JSON reports both whether
+entries onto the diagonal. For matched diagonals with large numeric spread, KLS
+can also trial matching-derived row/column equilibration and keep it in
+no-scale mode when it is at least as good numerically as KLU row scaling. KLS
+keeps the transformed candidate only when the factorization succeeds with
+acceptable pivoting and conditioning, or when numeric fill/flop, pivoting, and
+reciprocal-condition evidence improve. Benchmark JSON reports both whether
 static pivoting was enabled and whether KLS selected it.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
