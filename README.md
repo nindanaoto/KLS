@@ -80,7 +80,7 @@ python3 scripts/run_bench_suite.py --kls-bench build/kls_bench --matrix-dir data
 The suite metric is:
 
 ```text
-analysis + factor + solve + 99 * (refactor + solve)
+analysis + initial_factor + solve + 99 * (refactor + solve)
 ```
 
 An optional CKTSO comparison tool can be built when you provide a local CKTSO

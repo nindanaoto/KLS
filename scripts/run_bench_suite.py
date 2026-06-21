@@ -13,7 +13,7 @@ import sys
 
 def spice_cycle_seconds(row: dict[str, object]) -> float:
     analysis = float(row["analysis_seconds"])
-    factor = float(row["factor_seconds_avg"])
+    factor = float(row.get("initial_factor_seconds", row["factor_seconds_avg"]))
     refactor = float(row["refactor_seconds_avg"])
     solve = float(row["solve_seconds_avg"])
     return analysis + factor + solve + 99.0 * (refactor + solve)

@@ -359,12 +359,15 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  kls_get_stats(solver, &stats);
+  const double initial_factor_seconds = stats.factor_seconds;
+
   double factor_total = 0.0;
   double refactor_total = 0.0;
   double solve_total = 0.0;
   double tsolve_total = 0.0;
-  kls_stats stats;
-  stats.struct_size = sizeof(stats);
 
   for (int i = 0; i < repeat; ++i) {
     status = kls_factor(solver, a.values);
@@ -429,6 +432,7 @@ int main(int argc, char **argv) {
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d,\"fast_factor\":%s"
            ",\"analysis_seconds\":%.9g"
+           ",\"initial_factor_seconds\":%.9g"
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
            ",\"solve_seconds_avg\":%.9g,\"transpose_solve_seconds_avg\":%.9g"
            ",\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g"
@@ -440,7 +444,8 @@ int main(int argc, char **argv) {
            kls_ordering_name(stats.selected_ordering),
            scale_name(options.scale), stats.selected_scale,
            options.fast_factor ? "true" : "false",
-           stats.analysis_seconds, factor_avg, refactor_avg, solve_avg, tsolve_avg,
+           stats.analysis_seconds, initial_factor_seconds,
+           factor_avg, refactor_avg, solve_avg, tsolve_avg,
            residual, rel_residual, stats.nnz_l, stats.nnz_u,
            stats.estimated_flops, stats.factor_flops,
            stats.memory_bytes, stats.memory_peak_bytes);
@@ -454,6 +459,7 @@ int main(int argc, char **argv) {
     printf("selected scale: %d\n", stats.selected_scale);
     printf("fast factor: %s\n", options.fast_factor ? "on" : "off");
     printf("analysis: %.6f s\n", stats.analysis_seconds);
+    printf("initial factor: %.6f s\n", initial_factor_seconds);
     printf("factor avg: %.6f s\n", factor_avg);
     printf("refactor avg: %.6f s\n", refactor_avg);
     printf("solve avg: %.6f s\n", solve_avg);
