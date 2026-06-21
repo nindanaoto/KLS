@@ -92,6 +92,12 @@ The suite metric is:
 analysis + initial_factor + solve + 99 * (refactor + solve)
 ```
 
+Compare two JSONL runs by matrix basename:
+
+```sh
+python3 scripts/compare_bench_runs.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/klu_defaults.jsonl --reference-name klu-defaults
+```
+
 An optional CKTSO comparison tool can be built when you provide a local CKTSO
 distribution:
 
