@@ -1,0 +1,89 @@
+#include "kls/kls.h"
+
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static int require_ok(int status, const char *what) {
+  if (status != KLS_OK) {
+    fprintf(stderr, "%s failed: %s (%d)\n", what, kls_status_string(status), status);
+    return 0;
+  }
+  return 1;
+}
+
+static int close_enough(double a, double b) {
+  return fabs(a - b) < 1e-10;
+}
+
+static int test_csc(void) {
+  const int32_t ap[] = {0, 2, 5, 7};
+  const int32_t ai[] = {0, 1, 0, 1, 2, 1, 2};
+  const double ax[] = {4.0, 1.0, 1.0, 3.0, 1.0, 1.0, 2.0};
+  const double b[] = {6.0, 10.0, 8.0};
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_AUTO;
+
+  if (!require_ok(kls_create(&solver), "create")) return 0;
+  if (!require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0, &options), "analyze csc")) return 0;
+  if (!require_ok(kls_factor(solver, ax), "factor")) return 0;
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0), "solve")) return 0;
+
+  const int ok = close_enough(x[0], 1.0) && close_enough(x[1], 2.0) && close_enough(x[2], 3.0);
+  if (!ok) {
+    fprintf(stderr, "unexpected csc solution: %.17g %.17g %.17g\n", x[0], x[1], x[2]);
+  }
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats), "stats")) return 0;
+  if (stats.selected_ordering != KLS_ORDERING_AMD && stats.selected_ordering != KLS_ORDERING_COLAMD) {
+    fprintf(stderr, "unexpected selected ordering: %s\n", kls_ordering_name(stats.selected_ordering));
+    return 0;
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
+static int test_csr_and_refactor(void) {
+  const int64_t rp[] = {0, 2, 5, 7};
+  const int64_t ci[] = {0, 1, 0, 1, 2, 1, 2};
+  const double ax[] = {4.0, 1.0, 1.0, 3.0, 1.0, 1.0, 2.0};
+  const double b[] = {6.0, 10.0, 8.0};
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+
+  if (!require_ok(kls_create(&solver), "create")) return 0;
+  if (!require_ok(kls_analyze_csr(solver, KLS_INDEX_INT64, 3, rp, ci, 0, &options), "analyze csr")) return 0;
+  if (!require_ok(kls_factor(solver, ax), "factor csr")) return 0;
+  if (!require_ok(kls_refactor(solver, ax), "refactor csr")) return 0;
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0), "solve csr")) return 0;
+
+  const int ok = close_enough(x[0], 1.0) && close_enough(x[1], 2.0) && close_enough(x[2], 3.0);
+  if (!ok) {
+    fprintf(stderr, "unexpected csr solution: %.17g %.17g %.17g\n", x[0], x[1], x[2]);
+  }
+  kls_destroy(solver);
+  return ok;
+}
+
+int main(void) {
+  if (!test_csc()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_csr_and_refactor()) {
+    return EXIT_FAILURE;
+  }
+  return EXIT_SUCCESS;
+}
+
