@@ -3283,8 +3283,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   solver->stats.refactor_seconds = kls_now_seconds() - start;
-  (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
-  (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
   fill_numeric_stats(solver);
   if (!ok || solver->common.status < 0) {
     return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
