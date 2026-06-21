@@ -52,9 +52,11 @@ The benchmark reports analysis, factorization, refactorization, solve,
 transpose-solve, residual, selected orientation, fill, flop, and memory
 statistics.
 
-Use `--scale -1|0|1|2` to compare KLS/KLU row scaling modes when studying
-pivoting and refactorization behavior. KLS defaults to `2`, matching KLU's max
-row scaling default.
+Use `--scale auto|-1|0|1|2` to compare KLS/KLU row scaling modes when studying
+pivoting and refactorization behavior. KLS defaults to `auto`, which starts
+from KLU's max row scaling mode (`2`) and can try unscaled/sum-scaled numeric
+factorizations for large expensive cases when actual flop/fill evidence
+justifies the extra work. Explicit numeric scale values remain fixed.
 
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
 `--ordering auto` first compares AMD and COLAMD by symbolic fill estimate. When

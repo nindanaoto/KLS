@@ -41,6 +41,8 @@ typedef enum kls_orientation {
   KLS_ORIENTATION_TRANSPOSE = 2
 } kls_orientation;
 
+#define KLS_SCALE_AUTO (-2)
+
 typedef struct kls_options {
   size_t struct_size;
   int threads;
@@ -81,6 +83,7 @@ typedef struct kls_stats {
   kls_ordering selected_ordering;
   kls_orientation selected_orientation;
   int last_kernel_status;
+  int selected_scale;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
