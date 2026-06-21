@@ -53,10 +53,12 @@ transpose-solve, residual, selected orientation, fill, flop, and memory
 statistics.
 
 Use `--scale auto|-1|0|1|2` to compare KLS/KLU row scaling modes when studying
-pivoting and refactorization behavior. KLS defaults to `auto`, which starts
-from KLU's max row scaling mode (`2`) and can try unscaled/sum-scaled numeric
-factorizations for large expensive cases when actual flop/fill evidence
-justifies the extra work. Explicit numeric scale values remain fixed.
+pivoting and refactorization behavior. KLS defaults to `auto`, which can start
+unscaled for mostly diagonal circuit matrices with moderate diagonal magnitude
+spread, otherwise starts from KLU's max row scaling mode (`2`). For large
+expensive cases, `auto` can still try other numeric scaling modes when actual
+flop/fill evidence justifies the extra work. Explicit numeric scale values
+remain fixed.
 
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
 `--ordering auto` first compares AMD and COLAMD by symbolic fill estimate. When

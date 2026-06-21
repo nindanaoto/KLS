@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -104,6 +105,58 @@ static void clear_matrix(kls_solver *solver) {
 
 static int initial_scale(const kls_options *options) {
   return options->scale == KLS_SCALE_AUTO ? 2 : options->scale;
+}
+
+static int auto_scale_prefers_unscaled(const kls_solver *solver,
+                                       const double *numeric_values) {
+  if (solver == NULL || numeric_values == NULL ||
+      solver->options.scale != KLS_SCALE_AUTO || solver->n <= 0) {
+    return 0;
+  }
+
+  /* Avoid paying for row scaling when the circuit diagonal already gives a
+     cheap, well-populated magnitude reference. */
+  const double diag_spread_limit = 1.0e7;
+  const double min_diag_fraction = 0.90;
+  UF_long diag_count = 0;
+  double min_diag = DBL_MAX;
+  double max_diag = 0.0;
+
+  for (UF_long col = 0; col < solver->n; ++col) {
+    double diag_abs = 0.0;
+    for (UF_long p = solver->col_ptr[col]; p < solver->col_ptr[col + 1]; ++p) {
+      if (solver->row_idx[p] == col) {
+        const double value_abs = fabs(numeric_values[p]);
+        if (isfinite(value_abs) && value_abs > diag_abs) {
+          diag_abs = value_abs;
+        }
+      }
+    }
+    if (diag_abs > 0.0) {
+      diag_count++;
+      if (diag_abs < min_diag) {
+        min_diag = diag_abs;
+      }
+      if (diag_abs > max_diag) {
+        max_diag = diag_abs;
+      }
+    }
+  }
+
+  if ((double)diag_count < min_diag_fraction * (double)solver->n ||
+      min_diag <= 0.0 || max_diag <= 0.0) {
+    return 0;
+  }
+  return max_diag / min_diag <= diag_spread_limit;
+}
+
+static void choose_initial_auto_scale(kls_solver *solver,
+                                      const double *numeric_values) {
+  if (solver == NULL || solver->options.scale != KLS_SCALE_AUTO) {
+    return;
+  }
+  solver->common.scale =
+    auto_scale_prefers_unscaled(solver, numeric_values) ? 0 : initial_scale(&solver->options);
 }
 
 static int apply_options_to_common(trilinos_klu_l_common *common, const kls_options *options) {
@@ -1021,6 +1074,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
 
   double elapsed = 0.0;
+  const int had_numeric = solver->numeric != NULL;
   if (solver->options.fast_factor && solver->numeric != NULL) {
     const double start = kls_now_seconds();
     const UF_long ok = trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
@@ -1038,6 +1092,9 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
 
   free_numeric(solver);
+  if (!had_numeric) {
+    choose_initial_auto_scale(solver, numeric_values);
+  }
   const double start = kls_now_seconds();
   solver->numeric = trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,
                                           numeric_values, solver->symbolic,
