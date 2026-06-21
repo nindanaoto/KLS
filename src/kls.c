@@ -948,8 +948,18 @@ static int should_start_auto_without_btf(UF_long n,
                                          const UF_long *col_ptr,
                                          const UF_long *row_idx,
                                          const kls_options *options) {
-  return options != NULL && options->use_btf &&
-         is_large_low_degree_diagonal_pattern(n, col_ptr, row_idx);
+  if (options == NULL || !options->use_btf) {
+    return 0;
+  }
+  if (is_large_low_degree_diagonal_pattern(n, col_ptr, row_idx)) {
+    return 1;
+  }
+#ifdef KLS_HAVE_METIS
+  if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
+    return 1;
+  }
+#endif
+  return 0;
 }
 
 static int numeric_candidate_is_better(const trilinos_klu_l_common *current_common,
@@ -1853,9 +1863,16 @@ static int choose_symbolic_for_pattern(UF_long n,
     return status;
   }
 
+  kls_options auto_options = *options;
+  const kls_options *symbolic_options = options;
+  if (should_start_auto_without_btf(n, col_ptr, row_idx, options)) {
+    auto_options.use_btf = 0;
+    symbolic_options = &auto_options;
+  }
+
 #ifdef KLS_HAVE_METIS
   if (should_start_auto_with_metis(n, col_ptr, row_idx)) {
-    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
+    int status = analyze_with_ordering(n, col_ptr, row_idx, symbolic_options,
                                        KLS_ORDERING_METIS, symbolic_out,
                                        common_out);
     if (status == KLS_OK) {
@@ -1865,13 +1882,6 @@ static int choose_symbolic_for_pattern(UF_long n,
     }
   }
 #endif
-
-  kls_options auto_options = *options;
-  const kls_options *symbolic_options = options;
-  if (should_start_auto_without_btf(n, col_ptr, row_idx, options)) {
-    auto_options.use_btf = 0;
-    symbolic_options = &auto_options;
-  }
 
   const kls_ordering candidates[] = {KLS_ORDERING_AMD, KLS_ORDERING_COLAMD};
   trilinos_klu_l_symbolic *best_symbolic = NULL;
