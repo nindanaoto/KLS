@@ -69,6 +69,8 @@ typedef struct kls_parallel_refactor_shared {
   const double *rs;
   int scale;
   int halt_if_singular;
+  int check_pivots;
+  double pivot_tolerance;
   UF_long next_block;
   int stop;
   pthread_mutex_t lock;
@@ -78,6 +80,7 @@ typedef struct kls_parallel_refactor_worker {
   kls_parallel_refactor_shared *shared;
   double *x;
   int invalid;
+  int pivot_rejected;
   int singular;
   UF_long numerical_rank;
   UF_long singular_col;
@@ -293,7 +296,17 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
     kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
     for (UF_long p = 0; p < lcol_len; ++p) {
       const UF_long i = li[p];
-      lx[p] = x[i] / ukk;
+      const double lij = x[i] / ukk;
+      if (shared->check_pivots) {
+        const double lij_abs = fabs(lij);
+        if (!isfinite(lij_abs) ||
+            lij_abs * shared->pivot_tolerance > 1.0 + 1.0e-12) {
+          worker->pivot_rejected = 1;
+          x[i] = 0.0;
+          return;
+        }
+      }
+      lx[p] = lij;
       x[i] = 0.0;
     }
   }
@@ -312,7 +325,8 @@ static void *kls_parallel_refactor_worker_main(void *arg) {
     pthread_mutex_unlock(&shared->lock);
 
     kls_parallel_refactor_block(worker, block);
-    if (worker->invalid || (worker->singular && shared->halt_if_singular)) {
+    if (worker->invalid || worker->pivot_rejected ||
+        (worker->singular && shared->halt_if_singular)) {
       pthread_mutex_lock(&shared->lock);
       shared->stop = 1;
       pthread_mutex_unlock(&shared->lock);
@@ -3029,11 +3043,20 @@ static int kls_numeric_pivots_pass_threshold(const kls_solver *solver) {
   return 1;
 }
 
-static UF_long kls_parallel_refactor(kls_solver *solver, double *numeric_values) {
+static UF_long kls_parallel_refactor(kls_solver *solver,
+                                     double *numeric_values,
+                                     int check_pivots) {
   if (!kls_parallel_refactor_is_eligible(solver)) {
-    return trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
-                                   numeric_values, solver->symbolic,
-                                   solver->numeric, &solver->common);
+    const UF_long ok =
+      trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
+                              numeric_values, solver->symbolic,
+                              solver->numeric, &solver->common);
+    if (ok && check_pivots && solver->common.status >= 0 &&
+        solver->common.status != TRILINOS_KLU_SINGULAR &&
+        !kls_numeric_pivots_pass_threshold(solver)) {
+      return 0;
+    }
+    return ok;
   }
 
   trilinos_klu_l_common *common = &solver->common;
@@ -3055,9 +3078,16 @@ static UF_long kls_parallel_refactor(kls_solver *solver, double *numeric_values)
     thread_count = (int)symbolic->nblocks;
   }
   if (thread_count < 2) {
-    return trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
-                                   numeric_values, solver->symbolic,
-                                   solver->numeric, &solver->common);
+    const UF_long ok =
+      trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
+                              numeric_values, solver->symbolic,
+                              solver->numeric, &solver->common);
+    if (ok && check_pivots && solver->common.status >= 0 &&
+        solver->common.status != TRILINOS_KLU_SINGULAR &&
+        !kls_numeric_pivots_pass_threshold(solver)) {
+      return 0;
+    }
+    return ok;
   }
 
   pthread_t *threads = (pthread_t *)calloc((size_t)thread_count, sizeof(*threads));
@@ -3081,6 +3111,8 @@ static UF_long kls_parallel_refactor(kls_solver *solver, double *numeric_values)
   shared.rs = solver->numeric->Rs;
   shared.scale = (int)common->scale;
   shared.halt_if_singular = common->halt_if_singular;
+  shared.check_pivots = check_pivots;
+  shared.pivot_tolerance = common->tol;
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {
     free(threads);
     free(workers);
@@ -3115,12 +3147,16 @@ static UF_long kls_parallel_refactor(kls_solver *solver, double *numeric_values)
 
   const int launch_failed = created != thread_count;
   int invalid = 0;
+  int pivot_rejected = 0;
   int singular = 0;
   UF_long numerical_rank = UF_long_max;
   UF_long singular_col = KLS_KLU_EMPTY;
   for (int i = 0; i < thread_count; ++i) {
     if (workers[i].invalid) {
       invalid = 1;
+    }
+    if (workers[i].pivot_rejected) {
+      pivot_rejected = 1;
     }
     if (workers[i].singular && workers[i].numerical_rank < numerical_rank) {
       singular = 1;
@@ -3135,6 +3171,10 @@ static UF_long kls_parallel_refactor(kls_solver *solver, double *numeric_values)
   if (launch_failed || invalid) {
     common->status = launch_failed ? TRILINOS_KLU_OUT_OF_MEMORY
                                    : TRILINOS_KLU_INVALID;
+    return 0;
+  }
+  if (pivot_rejected) {
+    common->status = TRILINOS_KLU_OK;
     return 0;
   }
 
@@ -3181,11 +3221,10 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   if (solver->options.fast_factor && solver->numeric != NULL) {
     const double start = kls_now_seconds();
-    const UF_long ok = kls_parallel_refactor(solver, numeric_values);
+    const UF_long ok = kls_parallel_refactor(solver, numeric_values, 1);
     elapsed += kls_now_seconds() - start;
     if (ok && solver->common.status >= 0 &&
-        solver->common.status != TRILINOS_KLU_SINGULAR &&
-        kls_numeric_pivots_pass_threshold(solver)) {
+        solver->common.status != TRILINOS_KLU_SINGULAR) {
       solver->stats.factor_seconds = elapsed;
       (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
       (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
@@ -3239,7 +3278,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     return status;
   }
   const double start = kls_now_seconds();
-  const UF_long ok = kls_parallel_refactor(solver, numeric_values);
+  const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   solver->stats.refactor_seconds = kls_now_seconds() - start;
   (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
   (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
