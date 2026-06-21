@@ -439,6 +439,8 @@ int main(int argc, char **argv) {
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
            ",\"solve_seconds_avg\":%.9g,\"transpose_solve_seconds_avg\":%.9g"
            ",\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g"
+           ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
+           ",\"structural_rank\":%" PRId64 ",\"numerical_rank\":%" PRId64
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
            ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
@@ -450,7 +452,8 @@ int main(int argc, char **argv) {
            options.fast_factor ? "true" : "false",
            stats.analysis_seconds, initial_factor_seconds,
            factor_avg, refactor_avg, solve_avg, tsolve_avg,
-           residual, rel_residual, stats.nnz_l, stats.nnz_u,
+           residual, rel_residual, stats.nblocks, stats.max_block,
+           stats.structural_rank, stats.numerical_rank, stats.nnz_l, stats.nnz_u,
            stats.estimated_flops, stats.factor_flops,
            stats.memory_bytes, stats.memory_peak_bytes);
   } else {
@@ -470,6 +473,10 @@ int main(int argc, char **argv) {
     printf("solve avg: %.6f s\n", solve_avg);
     printf("transpose solve avg: %.6f s\n", tsolve_avg);
     printf("residual: %.6e, relative: %.6e\n", residual, rel_residual);
+    printf("blocks: %" PRId64 ", max block: %" PRId64 "\n",
+           stats.nblocks, stats.max_block);
+    printf("structural rank: %" PRId64 ", numerical rank: %" PRId64 "\n",
+           stats.structural_rank, stats.numerical_rank);
     printf("nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n", stats.nnz_l, stats.nnz_u);
     printf("estimated flops: %.6e, factor flops: %.6e\n", stats.estimated_flops, stats.factor_flops);
     printf("memory: %zu bytes, peak: %zu bytes\n", stats.memory_bytes, stats.memory_peak_bytes);

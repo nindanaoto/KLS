@@ -49,8 +49,8 @@ path. A system METIS install used this way must be ABI-compatible.
 ```
 
 The benchmark reports analysis, factorization, refactorization, solve,
-transpose-solve, residual, selected orientation, fill, flop, and memory
-statistics.
+transpose-solve, residual, selected orientation, BTF block/rank, fill, flop, and
+memory statistics.
 
 Use `--scale auto|-1|0|1|2` to compare KLS/KLU row scaling modes when studying
 pivoting and refactorization behavior. KLS defaults to `auto`, which can start
