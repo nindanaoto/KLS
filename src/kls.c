@@ -36,6 +36,7 @@ struct kls_solver {
   trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_numeric *numeric;
   int auto_metis_checked;
+  int auto_pivot_checked;
   int auto_scale_checked;
 };
 
@@ -98,6 +99,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->input_format = KLS_INPUT_NONE;
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->auto_metis_checked = 0;
+  solver->auto_pivot_checked = 0;
   solver->auto_scale_checked = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
@@ -600,6 +602,82 @@ static void maybe_select_auto_scale(kls_solver *solver,
   }
 }
 
+static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
+  if (solver->auto_pivot_checked || solver->numeric == NULL || solver->n < 30000 ||
+      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
+      solver->common.noffdiag < 64) {
+    return 0;
+  }
+
+  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
+  return fill >= 1000000;
+}
+
+static int pivot_tolerance_numeric_is_better(
+  const trilinos_klu_l_common *current_common,
+  const trilinos_klu_l_numeric *current_numeric,
+  const trilinos_klu_l_common *candidate_common,
+  const trilinos_klu_l_numeric *candidate_numeric) {
+  const double current_fill = (double)(current_numeric->lnz + current_numeric->unz);
+  const double candidate_fill = (double)(candidate_numeric->lnz + candidate_numeric->unz);
+  const double current_offdiag = (double)current_common->noffdiag;
+  const double candidate_offdiag = (double)candidate_common->noffdiag;
+
+  if (candidate_fill > current_fill || candidate_offdiag > 0.75 * current_offdiag) {
+    return 0;
+  }
+  if (current_common->rcond > 0.0 && candidate_common->rcond > 0.0 &&
+      candidate_common->rcond < 0.01 * current_common->rcond) {
+    return 0;
+  }
+  return candidate_fill <= 0.98 * current_fill ||
+         candidate_offdiag <= 0.50 * current_offdiag;
+}
+
+static void maybe_select_auto_pivot_tolerance(kls_solver *solver,
+                                              double *elapsed,
+                                              const double *numeric_values) {
+  if (!should_try_auto_pivot_tolerance(solver)) {
+    return;
+  }
+  solver->auto_pivot_checked = 1;
+
+  kls_options trial_options = solver->options;
+  trial_options.scale = (int)solver->common.scale;
+  trial_options.pivot_tolerance = 1.0e-4;
+  trilinos_klu_l_common trial_common;
+  if (apply_options_to_common(&trial_common, &trial_options) != KLS_OK) {
+    return;
+  }
+
+  const double start = kls_now_seconds();
+  trilinos_klu_l_numeric *trial_numeric =
+    trilinos_klu_l_factor(solver->col_ptr, solver->row_idx, (double *)numeric_values,
+                          solver->symbolic, &trial_common);
+  *elapsed += kls_now_seconds() - start;
+  if (trial_numeric == NULL || trial_common.status < 0 ||
+      trial_common.status == TRILINOS_KLU_SINGULAR) {
+    if (trial_numeric != NULL) {
+      trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
+    }
+    return;
+  }
+
+  (void)trilinos_klu_l_flops(solver->symbolic, trial_numeric, &trial_common);
+  (void)trilinos_klu_l_rcond(solver->symbolic, trial_numeric, &trial_common);
+  if (!pivot_tolerance_numeric_is_better(&solver->common, solver->numeric,
+                                         &trial_common, trial_numeric)) {
+    trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
+    return;
+  }
+
+  trilinos_klu_l_numeric *old_numeric = solver->numeric;
+  trilinos_klu_l_common old_common = solver->common;
+  solver->numeric = trial_numeric;
+  solver->common = trial_common;
+  trilinos_klu_l_free_numeric(&old_numeric, &old_common);
+}
+
 #ifdef KLS_HAVE_METIS
 static int should_try_auto_metis(const kls_solver *solver) {
   if (solver->auto_metis_checked || solver->options.ordering != KLS_ORDERING_AUTO ||
@@ -1022,6 +1100,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.analysis_seconds = elapsed;
   solver->stats.selected_orientation = solver->orientation;
   solver->stats.selected_scale = (int)solver->common.scale;
+  solver->stats.selected_pivot_tolerance = solver->common.tol;
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
     solver->stats.selected_btf = solver->symbolic->do_btf ? 1 : 0;
@@ -1039,6 +1118,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
 static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.last_kernel_status = (int)solver->common.status;
   solver->stats.selected_scale = (int)solver->common.scale;
+  solver->stats.selected_pivot_tolerance = solver->common.tol;
   solver->stats.selected_btf =
     (solver->symbolic != NULL && solver->symbolic->do_btf) ? 1 : 0;
   solver->stats.numerical_rank = (int64_t)solver->common.numerical_rank;
@@ -1314,6 +1394,9 @@ int kls_factor(kls_solver *solver, const double *values) {
 #endif
   (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
   (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
+  maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values);
+  (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
+  (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
   solver->stats.factor_seconds = elapsed;
   fill_numeric_stats(solver);
   if (solver->common.status == TRILINOS_KLU_SINGULAR) {
@@ -1414,10 +1497,15 @@ int kls_solve_transpose(kls_solver *solver,
 }
 
 int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
-  if (solver == NULL || stats == NULL || stats->struct_size < sizeof(kls_stats)) {
+  if (solver == NULL || stats == NULL || stats->struct_size == 0) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-  *stats = solver->stats;
+  const size_t requested_size = stats->struct_size;
+  const size_t copy_size = requested_size < sizeof(kls_stats)
+    ? requested_size
+    : sizeof(kls_stats);
+  memcpy(stats, &solver->stats, copy_size);
+  stats->struct_size = sizeof(kls_stats);
   return KLS_OK;
 }
 

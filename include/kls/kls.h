@@ -85,6 +85,7 @@ typedef struct kls_stats {
   int last_kernel_status;
   int selected_scale;
   int selected_btf;
+  double selected_pivot_tolerance;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

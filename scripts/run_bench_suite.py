@@ -36,6 +36,7 @@ def main() -> int:
     parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural", "metis"], default="auto")
     parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")
     parser.add_argument("--scale", choices=["auto", "-1", "0", "1", "2"], default="auto")
+    parser.add_argument("--pivot-tol", type=float, default=None)
     parser.add_argument("--no-btf", action="store_true")
     parser.add_argument("--no-fast-factor", action="store_true")
     args = parser.parse_args()
@@ -74,6 +75,8 @@ def main() -> int:
                 cmd.append("--no-btf")
             if args.no_fast_factor:
                 cmd.append("--no-fast-factor")
+            if args.pivot_tol is not None:
+                cmd.extend(["--pivot-tol", str(args.pivot_tol)])
             proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
             if proc.returncode != 0:
                 failures.append((matrix, proc.stderr.strip()))

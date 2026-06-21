@@ -262,6 +262,17 @@ static int parse_scale(const char *s, int *scale_out) {
   return 1;
 }
 
+static int parse_nonnegative_double(const char *s, double *value_out) {
+  char *end = NULL;
+  errno = 0;
+  const double value = strtod(s, &end);
+  if (errno != 0 || end == s || *end != '\0' || !isfinite(value) || value < 0.0) {
+    return 0;
+  }
+  *value_out = value;
+  return 1;
+}
+
 static const char *scale_name(int scale) {
   switch (scale) {
     case KLS_SCALE_AUTO: return "auto";
@@ -275,7 +286,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural|metis] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--no-btf] [--no-fast-factor] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural|metis] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--no-btf] [--no-fast-factor] [--json]\n",
           argv0);
 }
 
@@ -304,6 +315,11 @@ int main(int argc, char **argv) {
       options.orientation = parse_orientation(argv[++i]);
     } else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
       if (!parse_scale(argv[++i], &options.scale)) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+      }
+    } else if (strcmp(argv[i], "--pivot-tol") == 0 && i + 1 < argc) {
+      if (!parse_nonnegative_double(argv[++i], &options.pivot_tolerance)) {
         usage(argv[0]);
         return EXIT_FAILURE;
       }
@@ -433,6 +449,7 @@ int main(int argc, char **argv) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
+           ",\"pivot_tolerance\":%.9g,\"selected_pivot_tolerance\":%.9g"
            ",\"requested_btf\":%s,\"btf\":%s,\"fast_factor\":%s"
            ",\"analysis_seconds\":%.9g"
            ",\"initial_factor_seconds\":%.9g"
@@ -441,21 +458,26 @@ int main(int argc, char **argv) {
            ",\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g"
            ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
            ",\"structural_rank\":%" PRId64 ",\"numerical_rank\":%" PRId64
+           ",\"offdiag_pivots\":%" PRId64 ",\"reallocations\":%" PRId64
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
+           ",\"rcond\":%.9g,\"rgrowth\":%.9g"
            ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
            path, a.n, a.nnz, kls_orientation_name(options.orientation),
            kls_orientation_name(stats.selected_orientation),
            kls_ordering_name(stats.selected_ordering),
            scale_name(options.scale), stats.selected_scale,
+           options.pivot_tolerance, stats.selected_pivot_tolerance,
            options.use_btf ? "true" : "false",
            stats.selected_btf ? "true" : "false",
            options.fast_factor ? "true" : "false",
            stats.analysis_seconds, initial_factor_seconds,
            factor_avg, refactor_avg, solve_avg, tsolve_avg,
            residual, rel_residual, stats.nblocks, stats.max_block,
-           stats.structural_rank, stats.numerical_rank, stats.nnz_l, stats.nnz_u,
-           stats.estimated_flops, stats.factor_flops,
+           stats.structural_rank, stats.numerical_rank,
+           stats.offdiag_pivots, stats.reallocations,
+           stats.nnz_l, stats.nnz_u,
+           stats.estimated_flops, stats.factor_flops, stats.rcond, stats.rgrowth,
            stats.memory_bytes, stats.memory_peak_bytes);
   } else {
     printf("matrix: %s\n", path);
@@ -465,6 +487,8 @@ int main(int argc, char **argv) {
     printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
     printf("requested scale: %s\n", scale_name(options.scale));
     printf("selected scale: %d\n", stats.selected_scale);
+    printf("requested pivot tolerance: %.6g\n", options.pivot_tolerance);
+    printf("selected pivot tolerance: %.6g\n", stats.selected_pivot_tolerance);
     printf("requested btf: %s\n", options.use_btf ? "on" : "off");
     printf("selected btf: %s\n", stats.selected_btf ? "on" : "off");
     printf("fast factor: %s\n", options.fast_factor ? "on" : "off");
@@ -479,8 +503,11 @@ int main(int argc, char **argv) {
            stats.nblocks, stats.max_block);
     printf("structural rank: %" PRId64 ", numerical rank: %" PRId64 "\n",
            stats.structural_rank, stats.numerical_rank);
+    printf("off-diagonal pivots: %" PRId64 ", reallocations: %" PRId64 "\n",
+           stats.offdiag_pivots, stats.reallocations);
     printf("nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n", stats.nnz_l, stats.nnz_u);
     printf("estimated flops: %.6e, factor flops: %.6e\n", stats.estimated_flops, stats.factor_flops);
+    printf("rcond: %.6e, rgrowth: %.6e\n", stats.rcond, stats.rgrowth);
     printf("memory: %zu bytes, peak: %zu bytes\n", stats.memory_bytes, stats.memory_peak_bytes);
   }
 
