@@ -9,7 +9,8 @@ This repository currently contains the first working baseline:
 - A stable C API in `include/kls/kls.h`
 - A vendored SuiteSparse-derived 64-bit symbolic/numeric engine
 - CSC and CSR input paths with 32-bit or 64-bit index arrays
-- Automatic symbolic ordering selection between AMD and COLAMD
+- AMD-first automatic symbolic ordering with explicit AMD, COLAMD, and natural
+  ordering controls
 - Factor, refactor, solve, transpose-solve, and statistics APIs
 - A MatrixMarket benchmark tool
 - A small correctness smoke test
