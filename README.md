@@ -11,8 +11,8 @@ This repository currently contains the first working KLS implementation:
 - CSC and CSR input paths with 32-bit or 64-bit index arrays
 - AMD-first automatic symbolic ordering with explicit AMD, COLAMD, natural, and
   METIS nested-dissection ordering controls
-- Automatic normal-vs-transpose internal orientation selection by symbolic fill
-  estimate, with explicit orientation controls
+- SPICE-cycle-oriented normal-vs-transpose internal orientation selection, with
+  explicit orientation controls
 - Factor, refactor, solve, transpose-solve, and statistics APIs
 - Fast repeated factorization that reuses the existing numeric pattern before
   falling back to full pivoting factorization
@@ -51,6 +51,12 @@ path. A system METIS install used this way must be ABI-compatible.
 The benchmark reports analysis, factorization, refactorization, solve,
 transpose-solve, residual, selected orientation, BTF block/rank, fill, flop, and
 memory statistics.
+
+Use `--orientation auto|normal|transpose` to control KLS's internal storage
+orientation. `auto` uses the transposed pattern directly for small and medium
+matrices where avoiding a second symbolic analysis is usually faster in a
+repeated SPICE solve cycle. Larger matrices still compare normal and transposed
+symbolic fill estimates before choosing.
 
 Use `--scale auto|-1|0|1|2` to compare KLS/KLU row scaling modes when studying
 pivoting and refactorization behavior. KLS defaults to `auto`, which can start

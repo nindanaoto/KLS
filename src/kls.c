@@ -855,6 +855,12 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
                                      &candidate->score);
 }
 
+static int auto_orientation_prefers_transpose(UF_long n) {
+  /* On small and medium SPICE-like matrices, the second symbolic analysis
+     usually costs more than the normal-vs-transpose fill estimate saves. */
+  return n <= 30000;
+}
+
 static int select_candidate(kls_pattern_candidate *normal,
                             kls_pattern_candidate *transpose,
                             const kls_options *options,
@@ -881,8 +887,31 @@ static int select_candidate(kls_pattern_candidate *normal,
     return status;
   }
 
+  if (transpose != NULL && auto_orientation_prefers_transpose(transpose->n)) {
+    const int transpose_status = analyze_candidate(transpose, options);
+    if (transpose_status == KLS_OK) {
+      *chosen_out = transpose;
+      return KLS_OK;
+    }
+    if (normal != NULL) {
+      const int normal_status = analyze_candidate(normal, options);
+      if (normal_status == KLS_OK) {
+        *chosen_out = normal;
+        return KLS_OK;
+      }
+    }
+    return transpose_status;
+  }
   if (normal == NULL || transpose == NULL) {
-    return KLS_ERR_INVALID_ARGUMENT;
+    kls_pattern_candidate *candidate = normal != NULL ? normal : transpose;
+    if (candidate == NULL) {
+      return KLS_ERR_INVALID_ARGUMENT;
+    }
+    int status = analyze_candidate(candidate, options);
+    if (status == KLS_OK) {
+      *chosen_out = candidate;
+    }
+    return status;
   }
   const int normal_status = analyze_candidate(normal, options);
   const int transpose_status = analyze_candidate(transpose, options);
@@ -1119,7 +1148,10 @@ int kls_analyze_csr(kls_solver *solver,
     return status;
   }
 
-  if (normalized.orientation != KLS_ORIENTATION_TRANSPOSE) {
+  const int prefer_auto_transpose =
+    normalized.orientation == KLS_ORIENTATION_AUTO &&
+    auto_orientation_prefers_transpose((UF_long)n);
+  if (normalized.orientation != KLS_ORIENTATION_TRANSPOSE && !prefer_auto_transpose) {
     status = transpose_candidate(&transpose, KLS_ORIENTATION_NORMAL, &normal);
     if (status != KLS_OK) {
       free_candidate(&transpose);
