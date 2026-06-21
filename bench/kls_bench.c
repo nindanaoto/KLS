@@ -286,7 +286,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural|metis] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--no-btf] [--no-fast-factor] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--no-btf] [--no-fast-factor] [--json]\n",
           argv0);
 }
 
@@ -309,6 +309,8 @@ int main(int argc, char **argv) {
       repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--refactor-repeat") == 0 && i + 1 < argc) {
       refactor_repeat = atoi(argv[++i]);
+    } else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
+      options.threads = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--ordering") == 0 && i + 1 < argc) {
       options.ordering = parse_ordering(argv[++i]);
     } else if (strcmp(argv[i], "--orientation") == 0 && i + 1 < argc) {
@@ -332,7 +334,7 @@ int main(int argc, char **argv) {
       return EXIT_FAILURE;
     }
   }
-  if (repeat <= 0 || refactor_repeat < 0) {
+  if (repeat <= 0 || refactor_repeat < 0 || options.threads <= 0) {
     usage(argv[0]);
     return EXIT_FAILURE;
   }
@@ -447,6 +449,7 @@ int main(int argc, char **argv) {
 
   if (json) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
+           ",\"threads\":%d"
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
            ",\"pivot_tolerance\":%.9g,\"selected_pivot_tolerance\":%.9g"
@@ -463,7 +466,8 @@ int main(int argc, char **argv) {
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
            ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
-           path, a.n, a.nnz, kls_orientation_name(options.orientation),
+           path, a.n, a.nnz, options.threads,
+           kls_orientation_name(options.orientation),
            kls_orientation_name(stats.selected_orientation),
            kls_ordering_name(stats.selected_ordering),
            scale_name(options.scale), stats.selected_scale,
@@ -482,6 +486,7 @@ int main(int argc, char **argv) {
   } else {
     printf("matrix: %s\n", path);
     printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
+    printf("threads: %d\n", options.threads);
     printf("requested orientation: %s\n", kls_orientation_name(options.orientation));
     printf("selected orientation: %s\n", kls_orientation_name(stats.selected_orientation));
     printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));

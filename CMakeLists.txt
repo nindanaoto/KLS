@@ -19,6 +19,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 find_library(KLS_MATH_LIBRARY m)
+find_package(Threads REQUIRED)
 
 if(KLS_ENABLE_METIS)
   if(KLS_USE_SYSTEM_METIS)
@@ -198,7 +199,8 @@ target_include_directories(kls
 
 target_link_libraries(kls
   PRIVATE
-    kls_suitesparse)
+    kls_suitesparse
+    Threads::Threads)
 if(KLS_ENABLE_METIS)
   target_link_libraries(kls
     PRIVATE

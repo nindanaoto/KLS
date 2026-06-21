@@ -52,6 +52,12 @@ The benchmark reports analysis, factorization, refactorization, solve,
 transpose-solve, residual, selected orientation, BTF block/rank, fill, flop, and
 memory statistics.
 
+Use `--threads N` to enable KLS-owned parallel work where it is currently
+available. The first threaded path is repeated numeric refactorization across
+independent BTF diagonal blocks for large, unscaled, high-flop cases. Small
+matrices, scaled matrices, single-block matrices, and factor/solve kernels
+still use the serial path.
+
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium
 matrices where avoiding a second symbolic analysis is usually faster in a
@@ -137,15 +143,13 @@ library.
 
 ## Status
 
-This is a functional serial implementation with KLS-level analysis choices for
-repeated SPICE-style solves. It is not yet a generally CKTSO-beating solver
-across broad circuit corpora. The next algorithmic work is to evolve the
-numeric factor/refactor/solve kernels toward KLS-owned sparse kernels with
-better pivot reuse and parallelism while keeping the public API and benchmark
-harness stable.
-
-The `threads` option is accepted for API stability but is not used by the
-current serial KLS numeric engine.
+This is a functional implementation with KLS-level analysis choices for
+repeated SPICE-style solves and an initial KLS-owned threaded refactor path for
+BTF block parallelism on a narrow class of large unscaled cases. It is not yet a
+generally CKTSO-beating solver across broad circuit corpora. The next
+algorithmic work is to evolve the numeric factor/refactor/solve kernels toward
+deeper KLS-owned sparse kernels with better pivot reuse and parallelism while
+keeping the public API and benchmark harness stable.
 
 ## License
 

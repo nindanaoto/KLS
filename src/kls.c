@@ -11,9 +11,12 @@
 #include <float.h>
 #include <limits.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#define KLS_KLU_EMPTY ((UF_long)-1)
 
 typedef enum kls_input_format {
   KLS_INPUT_NONE = 0,
@@ -54,10 +57,207 @@ typedef struct kls_pattern_candidate {
   double score;
 } kls_pattern_candidate;
 
+typedef struct kls_parallel_refactor_shared {
+  const UF_long *col_ptr;
+  const UF_long *row_idx;
+  const double *values;
+  const trilinos_klu_l_symbolic *symbolic;
+  trilinos_klu_l_numeric *numeric;
+  int halt_if_singular;
+  UF_long next_block;
+  int stop;
+  pthread_mutex_t lock;
+} kls_parallel_refactor_shared;
+
+typedef struct kls_parallel_refactor_worker {
+  kls_parallel_refactor_shared *shared;
+  double *x;
+  int invalid;
+  int singular;
+  UF_long numerical_rank;
+  UF_long singular_col;
+} kls_parallel_refactor_worker;
+
 static double kls_now_seconds(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
+
+static size_t kls_klu_units_for_indices(UF_long length) {
+  const size_t bytes = (size_t)length * sizeof(UF_long);
+  return (bytes + sizeof(double) - 1u) / sizeof(double);
+}
+
+static void kls_klu_get_pointer(double *lu,
+                                const UF_long *offsets,
+                                const UF_long *lengths,
+                                UF_long k,
+                                UF_long **indices_out,
+                                double **values_out,
+                                UF_long *length_out) {
+  const UF_long length = lengths[k];
+  double *base = lu + offsets[k];
+  *indices_out = (UF_long *)base;
+  *values_out = (double *)(base + kls_klu_units_for_indices(length));
+  *length_out = length;
+}
+
+static void kls_worker_record_singular(kls_parallel_refactor_worker *worker,
+                                       UF_long numerical_rank,
+                                       UF_long singular_col) {
+  if (!worker->singular || numerical_rank < worker->numerical_rank) {
+    worker->singular = 1;
+    worker->numerical_rank = numerical_rank;
+    worker->singular_col = singular_col;
+  }
+}
+
+static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
+                                        UF_long block) {
+  kls_parallel_refactor_shared *shared = worker->shared;
+  const UF_long *ap = shared->col_ptr;
+  const UF_long *ai = shared->row_idx;
+  const double *ax = shared->values;
+  const trilinos_klu_l_symbolic *symbolic = shared->symbolic;
+  trilinos_klu_l_numeric *numeric = shared->numeric;
+  const UF_long *q = symbolic->Q;
+  const UF_long *r = symbolic->R;
+  const UF_long *pinv = numeric->Pinv;
+  const UF_long *offp = numeric->Offp;
+  double *offx = (double *)numeric->Offx;
+  double *udiag = (double *)numeric->Udiag;
+  double *x = worker->x;
+
+  const UF_long k1 = r[block];
+  const UF_long k2 = r[block + 1u];
+  const UF_long nk = k2 - k1;
+
+  if (nk == 1u) {
+    const UF_long oldcol = q[k1];
+    const UF_long pend = ap[oldcol + 1u];
+    UF_long poff = offp[k1];
+    const UF_long poff_end = offp[k1 + 1u];
+    double s = 0.0;
+    for (UF_long p = ap[oldcol]; p < pend; ++p) {
+      const UF_long oldrow = ai[p];
+      const UF_long newrow = pinv[oldrow];
+      if (newrow < k1) {
+        if (poff >= poff_end) {
+          worker->invalid = 1;
+          return;
+        }
+        offx[poff++] = ax[p];
+      } else if (newrow == k1) {
+        s = ax[p];
+      } else {
+        worker->invalid = 1;
+        return;
+      }
+    }
+    udiag[k1] = s;
+    if (s == 0.0) {
+      kls_worker_record_singular(worker, k1, oldcol);
+    }
+    return;
+  }
+
+  UF_long *lip = numeric->Lip + k1;
+  UF_long *llen = numeric->Llen + k1;
+  UF_long *uip = numeric->Uip + k1;
+  UF_long *ulen = numeric->Ulen + k1;
+  double *lu = (double *)numeric->LUbx[block];
+  if (lu == NULL) {
+    worker->invalid = 1;
+    return;
+  }
+
+  for (UF_long k = 0; k < nk; ++k) {
+    const UF_long global_col = k + k1;
+    const UF_long oldcol = q[global_col];
+    const UF_long pend = ap[oldcol + 1u];
+    UF_long poff = offp[global_col];
+    const UF_long poff_end = offp[global_col + 1u];
+
+    for (UF_long p = ap[oldcol]; p < pend; ++p) {
+      const UF_long oldrow = ai[p];
+      const UF_long global_row = pinv[oldrow];
+      if (global_row < k1) {
+        if (poff >= poff_end) {
+          worker->invalid = 1;
+          return;
+        }
+        offx[poff++] = ax[p];
+      } else if (global_row < k2) {
+        x[global_row - k1] = ax[p];
+      } else {
+        worker->invalid = 1;
+        return;
+      }
+    }
+
+    UF_long *ui = NULL;
+    double *ux = NULL;
+    UF_long ucol_len = 0;
+    kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+    for (UF_long up = 0; up < ucol_len; ++up) {
+      const UF_long j = ui[up];
+      const double ujk = x[j];
+      x[j] = 0.0;
+      ux[up] = ujk;
+
+      UF_long *li = NULL;
+      double *lx = NULL;
+      UF_long lcol_len = 0;
+      kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
+      for (UF_long p = 0; p < lcol_len; ++p) {
+        x[li[p]] -= lx[p] * ujk;
+      }
+    }
+
+    const double ukk = x[k];
+    x[k] = 0.0;
+    if (ukk == 0.0) {
+      kls_worker_record_singular(worker, global_col, q[global_col]);
+      if (shared->halt_if_singular) {
+        return;
+      }
+    }
+    udiag[global_col] = ukk;
+
+    UF_long *li = NULL;
+    double *lx = NULL;
+    UF_long lcol_len = 0;
+    kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
+    for (UF_long p = 0; p < lcol_len; ++p) {
+      const UF_long i = li[p];
+      lx[p] = x[i] / ukk;
+      x[i] = 0.0;
+    }
+  }
+}
+
+static void *kls_parallel_refactor_worker_main(void *arg) {
+  kls_parallel_refactor_worker *worker = (kls_parallel_refactor_worker *)arg;
+  kls_parallel_refactor_shared *shared = worker->shared;
+  for (;;) {
+    pthread_mutex_lock(&shared->lock);
+    if (shared->stop || shared->next_block >= shared->symbolic->nblocks) {
+      pthread_mutex_unlock(&shared->lock);
+      break;
+    }
+    const UF_long block = shared->next_block++;
+    pthread_mutex_unlock(&shared->lock);
+
+    kls_parallel_refactor_block(worker, block);
+    if (worker->invalid || (worker->singular && shared->halt_if_singular)) {
+      pthread_mutex_lock(&shared->lock);
+      shared->stop = 1;
+      pthread_mutex_unlock(&shared->lock);
+      break;
+    }
+  }
+  return NULL;
 }
 
 static int64_t read_index(kls_index_type type, const void *data, int64_t i) {
@@ -850,6 +1050,9 @@ static int validate_n(int64_t n) {
 }
 
 static int validate_options(const kls_options *options) {
+  if (options->threads <= 0) {
+    return 0;
+  }
   if (options->ordering < KLS_ORDERING_AUTO || options->ordering > KLS_ORDERING_METIS) {
     return 0;
   }
@@ -1343,6 +1546,144 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
   return KLS_OK;
 }
 
+static int kls_parallel_refactor_is_eligible(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
+    return 0;
+  }
+  if (solver->options.threads <= 1 || solver->symbolic->nblocks < 8u) {
+    return 0;
+  }
+  if (solver->n < 5000u || solver->symbolic->maxblock == solver->n) {
+    return 0;
+  }
+  if (solver->common.scale != 0 || solver->common.flops < 2.0e7) {
+    return 0;
+  }
+  if (solver->symbolic->nblocks < 64u ||
+      solver->symbolic->maxblock * 4u < solver->n * 3u) {
+    return 0;
+  }
+  if (solver->numeric->Offp == NULL || solver->numeric->Offx == NULL ||
+      solver->numeric->Pinv == NULL || solver->numeric->Udiag == NULL) {
+    return 0;
+  }
+  if (solver->numeric->Rs != NULL) {
+    return 0;
+  }
+  return 1;
+}
+
+static UF_long kls_parallel_refactor(kls_solver *solver, double *numeric_values) {
+  if (!kls_parallel_refactor_is_eligible(solver)) {
+    return trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
+                                   numeric_values, solver->symbolic,
+                                   solver->numeric, &solver->common);
+  }
+
+  trilinos_klu_l_common *common = &solver->common;
+  trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+
+  common->status = TRILINOS_KLU_OK;
+  common->numerical_rank = KLS_KLU_EMPTY;
+  common->singular_col = KLS_KLU_EMPTY;
+  common->nrealloc = 0;
+
+  int thread_count = solver->options.threads;
+  if ((UF_long)thread_count > symbolic->nblocks) {
+    thread_count = (int)symbolic->nblocks;
+  }
+  if (thread_count < 2) {
+    return trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
+                                   numeric_values, solver->symbolic,
+                                   solver->numeric, &solver->common);
+  }
+
+  pthread_t *threads = (pthread_t *)calloc((size_t)thread_count, sizeof(*threads));
+  kls_parallel_refactor_worker *workers =
+    (kls_parallel_refactor_worker *)calloc((size_t)thread_count, sizeof(*workers));
+  if (threads == NULL || workers == NULL) {
+    free(threads);
+    free(workers);
+    common->status = TRILINOS_KLU_OUT_OF_MEMORY;
+    return 0;
+  }
+
+  kls_parallel_refactor_shared shared;
+  memset(&shared, 0, sizeof(shared));
+  shared.col_ptr = solver->col_ptr;
+  shared.row_idx = solver->row_idx;
+  shared.values = numeric_values;
+  shared.symbolic = symbolic;
+  shared.numeric = solver->numeric;
+  shared.halt_if_singular = common->halt_if_singular;
+  if (pthread_mutex_init(&shared.lock, NULL) != 0) {
+    free(threads);
+    free(workers);
+    common->status = TRILINOS_KLU_OUT_OF_MEMORY;
+    return 0;
+  }
+
+  int created = 0;
+  for (int i = 0; i < thread_count; ++i) {
+    workers[i].shared = &shared;
+    workers[i].x = (double *)calloc((size_t)symbolic->maxblock, sizeof(double));
+    if (workers[i].x == NULL) {
+      pthread_mutex_lock(&shared.lock);
+      shared.stop = 1;
+      pthread_mutex_unlock(&shared.lock);
+      break;
+    }
+    if (pthread_create(&threads[i], NULL, kls_parallel_refactor_worker_main,
+                       &workers[i]) != 0) {
+      pthread_mutex_lock(&shared.lock);
+      shared.stop = 1;
+      pthread_mutex_unlock(&shared.lock);
+      break;
+    }
+    created++;
+  }
+
+  for (int i = 0; i < created; ++i) {
+    pthread_join(threads[i], NULL);
+  }
+  pthread_mutex_destroy(&shared.lock);
+
+  const int launch_failed = created != thread_count;
+  int invalid = 0;
+  int singular = 0;
+  UF_long numerical_rank = UF_long_max;
+  UF_long singular_col = KLS_KLU_EMPTY;
+  for (int i = 0; i < thread_count; ++i) {
+    if (workers[i].invalid) {
+      invalid = 1;
+    }
+    if (workers[i].singular && workers[i].numerical_rank < numerical_rank) {
+      singular = 1;
+      numerical_rank = workers[i].numerical_rank;
+      singular_col = workers[i].singular_col;
+    }
+    free(workers[i].x);
+  }
+  free(threads);
+  free(workers);
+
+  if (launch_failed || invalid) {
+    common->status = launch_failed ? TRILINOS_KLU_OUT_OF_MEMORY
+                                   : TRILINOS_KLU_INVALID;
+    return 0;
+  }
+
+  if (singular) {
+    common->status = TRILINOS_KLU_SINGULAR;
+    common->numerical_rank = numerical_rank;
+    common->singular_col = singular_col;
+    return common->halt_if_singular ? 0 : 1;
+  }
+
+  common->status = TRILINOS_KLU_OK;
+  return 1;
+}
+
 int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -1357,9 +1698,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   const int had_numeric = solver->numeric != NULL;
   if (solver->options.fast_factor && solver->numeric != NULL) {
     const double start = kls_now_seconds();
-    const UF_long ok = trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
-                                               numeric_values, solver->symbolic,
-                                               solver->numeric, &solver->common);
+    const UF_long ok = kls_parallel_refactor(solver, numeric_values);
     elapsed += kls_now_seconds() - start;
     if (ok && solver->common.status >= 0 &&
         solver->common.status != TRILINOS_KLU_SINGULAR) {
@@ -1415,9 +1754,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     return status;
   }
   const double start = kls_now_seconds();
-  const UF_long ok = trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
-                                             numeric_values, solver->symbolic,
-                                             solver->numeric, &solver->common);
+  const UF_long ok = kls_parallel_refactor(solver, numeric_values);
   solver->stats.refactor_seconds = kls_now_seconds() - start;
   (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
   (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
