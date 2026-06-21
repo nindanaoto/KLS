@@ -934,6 +934,9 @@ static UF_long kls_metis_order(UF_long n,
   options[METIS_OPTION_SEED] = 0;
   if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
     options[METIS_OPTION_NSEPS] = 2;
+  } else if (is_medium_bounded_degree_diagonal_pattern(n, col_ptr, row_idx)) {
+    options[METIS_OPTION_NSEPS] = 2;
+    options[METIS_OPTION_CTYPE] = METIS_CTYPE_RM;
   }
 
   idx_t nvtxs = (idx_t)n;
