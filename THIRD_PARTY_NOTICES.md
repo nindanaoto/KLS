@@ -14,3 +14,11 @@ packages; the license text is in `LICENSE` and `LICENSES/LGPL-2.1-or-later.txt`.
 KLS does not include CKTSO source or binaries. CKTSO is used only as an
 optional external benchmark when the user provides a licensed local
 installation.
+
+KLS can build METIS nested-dissection ordering from pinned submodules under
+`third_party/metis` and `third_party/gklib`. METIS is Copyright 1997, Regents
+of the University of Minnesota, and is licensed under Apache-2.0; see
+`third_party/metis/LICENSE`. GKlib is Copyright 1995-2018, Regents of the
+University of Minnesota. Its primary license is Apache-2.0 and it also carries
+LGPL-2.1-or-later and BSD-3-Clause files; see `third_party/gklib/LICENSE.txt`
+and `third_party/gklib/LICENSES.md`.

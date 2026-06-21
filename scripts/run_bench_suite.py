@@ -33,7 +33,7 @@ def main() -> int:
     parser.add_argument("--jsonl", type=pathlib.Path)
     parser.add_argument("--repeat", type=int, default=5)
     parser.add_argument("--refactor-repeat", type=int, default=5)
-    parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural"], default="auto")
+    parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural", "metis"], default="auto")
     parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")
     parser.add_argument("--scale", choices=["-1", "0", "1", "2"], default="2")
     parser.add_argument("--no-fast-factor", action="store_true")

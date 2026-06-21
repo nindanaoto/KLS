@@ -8,13 +8,108 @@ project(KLS
 option(KLS_BUILD_TESTS "Build KLS tests" ON)
 option(KLS_BUILD_BENCHMARKS "Build KLS benchmark tools" ON)
 option(KLS_BUILD_CKTSO_COMPARE "Build optional CKTSO comparison tool" OFF)
+option(KLS_ENABLE_METIS "Enable METIS nested-dissection ordering support" ON)
+option(KLS_USE_SYSTEM_METIS "Use a system METIS library instead of the bundled submodule" OFF)
 set(CKTSO_ROOT "" CACHE PATH "Path to a local CKTSO distribution")
+set(KLS_SYSTEM_METIS_INCLUDE_DIR "" CACHE PATH "Path to a system METIS include directory")
+set(KLS_SYSTEM_METIS_LIBRARY "" CACHE FILEPATH "Path to a system METIS library")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 find_library(KLS_MATH_LIBRARY m)
+
+if(KLS_ENABLE_METIS)
+  if(KLS_USE_SYSTEM_METIS)
+    find_path(KLS_SYSTEM_METIS_INCLUDE_DIR
+      NAMES metis.h
+      PATHS ${KLS_SYSTEM_METIS_INCLUDE_DIR})
+    find_library(KLS_SYSTEM_METIS_LIBRARY
+      NAMES metis
+      PATHS ${KLS_SYSTEM_METIS_LIBRARY})
+    if(NOT KLS_SYSTEM_METIS_INCLUDE_DIR OR NOT KLS_SYSTEM_METIS_LIBRARY)
+      message(FATAL_ERROR
+        "KLS_USE_SYSTEM_METIS=ON requires KLS_SYSTEM_METIS_INCLUDE_DIR and "
+        "KLS_SYSTEM_METIS_LIBRARY, or a discoverable system METIS install")
+    endif()
+
+    add_library(kls_metis INTERFACE)
+    target_include_directories(kls_metis
+      INTERFACE
+        "${KLS_SYSTEM_METIS_INCLUDE_DIR}")
+    target_link_libraries(kls_metis
+      INTERFACE
+        "${KLS_SYSTEM_METIS_LIBRARY}")
+    target_compile_definitions(kls_metis
+      INTERFACE
+        KLS_HAVE_METIS=1
+        IDXTYPEWIDTH=64
+        REALTYPEWIDTH=64)
+  else()
+    set(KLS_METIS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/metis")
+    set(KLS_GKLIB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/gklib")
+    if(NOT EXISTS "${KLS_METIS_ROOT}/include/metis.h" OR
+       NOT EXISTS "${KLS_GKLIB_ROOT}/include/GKlib.h")
+      message(FATAL_ERROR
+        "Bundled METIS support requires initialized submodules. Run: "
+        "git submodule update --init --recursive third_party/metis third_party/gklib")
+    endif()
+
+    file(GLOB KLS_GKLIB_SOURCES CONFIGURE_DEPENDS
+      "${KLS_GKLIB_ROOT}/src/*.c")
+    add_library(kls_gklib STATIC
+      ${KLS_GKLIB_SOURCES})
+    set_target_properties(kls_gklib PROPERTIES
+      POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(kls_gklib
+      PUBLIC
+        "${KLS_GKLIB_ROOT}/include")
+    target_compile_definitions(kls_gklib
+      PUBLIC
+        LINUX
+        _POSIX_C_SOURCE=200809L
+        NDEBUG
+        NDEBUG2)
+    if(KLS_MATH_LIBRARY)
+      target_link_libraries(kls_gklib
+        PUBLIC
+          "${KLS_MATH_LIBRARY}")
+    endif()
+    target_compile_options(kls_gklib PRIVATE
+      $<$<C_COMPILER_ID:GNU,Clang>:-Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unknown-pragmas -Wno-unused-label -Wno-pedantic>)
+
+    file(GLOB KLS_METIS_SOURCES CONFIGURE_DEPENDS
+      "${KLS_METIS_ROOT}/libmetis/*.c")
+    add_library(kls_metis STATIC
+      ${KLS_METIS_SOURCES})
+    set_target_properties(kls_metis PROPERTIES
+      POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(kls_metis
+      PUBLIC
+        "${KLS_METIS_ROOT}/include"
+      PRIVATE
+        "${KLS_METIS_ROOT}/libmetis")
+    target_compile_definitions(kls_metis
+      PUBLIC
+        KLS_HAVE_METIS=1
+        IDXTYPEWIDTH=64
+        REALTYPEWIDTH=64
+      PRIVATE
+        LINUX
+        _FILE_OFFSET_BITS=64)
+    target_link_libraries(kls_metis
+      PRIVATE
+        kls_gklib)
+    if(KLS_MATH_LIBRARY)
+      target_link_libraries(kls_metis
+        PRIVATE
+          "${KLS_MATH_LIBRARY}")
+    endif()
+    target_compile_options(kls_metis PRIVATE
+      $<$<C_COMPILER_ID:GNU,Clang>:-Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unknown-pragmas -Wno-unused-label -Wno-pedantic>)
+  endif()
+endif()
 
 set(KLS_SUITESPARSE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse")
 set(KLS_SUITESPARSE_INCLUDE_DIRS
@@ -104,6 +199,11 @@ target_include_directories(kls
 target_link_libraries(kls
   PRIVATE
     kls_suitesparse)
+if(KLS_ENABLE_METIS)
+  target_link_libraries(kls
+    PRIVATE
+      kls_metis)
+endif()
 
 target_compile_options(kls PRIVATE
   $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)

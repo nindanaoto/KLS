@@ -1,0 +1,6 @@
+[submodule "third_party/metis"]
+	path = third_party/metis
+	url = https://github.com/KarypisLab/METIS.git
+[submodule "third_party/gklib"]
+	path = third_party/gklib
+	url = https://github.com/KarypisLab/GKlib.git

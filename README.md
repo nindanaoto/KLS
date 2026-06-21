@@ -9,8 +9,8 @@ This repository currently contains the first working KLS implementation:
 - A stable C API in `include/kls/kls.h`
 - A vendored SuiteSparse-derived 64-bit symbolic/numeric engine
 - CSC and CSR input paths with 32-bit or 64-bit index arrays
-- AMD-first automatic symbolic ordering with explicit AMD, COLAMD, and natural
-  ordering controls
+- AMD-first automatic symbolic ordering with explicit AMD, COLAMD, natural, and
+  METIS nested-dissection ordering controls
 - Automatic normal-vs-transpose internal orientation selection by symbolic fill
   estimate, with explicit orientation controls
 - Factor, refactor, solve, transpose-solve, and statistics APIs
@@ -30,7 +30,17 @@ ctest --test-dir build --output-on-failure
 
 The main build is self-contained. KLS vendors the SuiteSparse-derived KLU,
 AMD, COLAMD, and BTF C sources from Trilinos under `third_party/suitesparse`
-as the current in-tree serial engine.
+as the current in-tree serial engine. METIS ordering is enabled by default from
+pinned submodules under `third_party/metis` and `third_party/gklib`; initialize
+them with `git submodule update --init --recursive` after cloning. To use a
+compatible system METIS instead, configure with:
+
+```sh
+cmake -S . -B build -DKLS_USE_SYSTEM_METIS=ON
+```
+
+KLS builds METIS with 64-bit `idx_t` for compatibility with the 64-bit KLS/KLU
+path. A system METIS install used this way must be ABI-compatible.
 
 ## Benchmark
 
@@ -45,6 +55,10 @@ statistics.
 Use `--scale -1|0|1|2` to compare KLS/KLU row scaling modes when studying
 pivoting and refactorization behavior. KLS defaults to `2`, matching KLU's max
 row scaling default.
+
+Use `--ordering metis` to force METIS nested-dissection ordering. The default
+`--ordering auto` currently compares AMD and COLAMD only, because METIS enters
+KLU as a user ordering without a comparable symbolic fill estimate.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 
@@ -93,4 +107,5 @@ current serial KLS numeric engine.
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
 includes SuiteSparse-derived KLU, AMD, COLAMD, BTF, and UFconfig sources from
-Trilinos; see `THIRD_PARTY_NOTICES.md` for attribution.
+Trilinos, plus optional METIS/GKlib ordering support; see
+`THIRD_PARTY_NOTICES.md` for attribution.

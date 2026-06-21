@@ -238,6 +238,7 @@ static kls_ordering parse_ordering(const char *s) {
   if (strcmp(s, "amd") == 0) return KLS_ORDERING_AMD;
   if (strcmp(s, "colamd") == 0) return KLS_ORDERING_COLAMD;
   if (strcmp(s, "natural") == 0) return KLS_ORDERING_NATURAL;
+  if (strcmp(s, "metis") == 0) return KLS_ORDERING_METIS;
   return KLS_ORDERING_AUTO;
 }
 
@@ -259,7 +260,7 @@ static int parse_scale(const char *s, int *scale_out) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural] [--orientation auto|normal|transpose] [--scale -1|0|1|2] [--no-fast-factor] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural|metis] [--orientation auto|normal|transpose] [--scale -1|0|1|2] [--no-fast-factor] [--json]\n",
           argv0);
 }
 

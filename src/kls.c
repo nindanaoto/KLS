@@ -3,6 +3,9 @@
 #include "kls/kls.h"
 
 #include "trilinos_klu_decl.h"
+#ifdef KLS_HAVE_METIS
+#include "metis.h"
+#endif
 
 #include <errno.h>
 #include <float.h>
@@ -109,6 +112,155 @@ static int apply_options_to_common(trilinos_klu_l_common *common, const kls_opti
   return KLS_OK;
 }
 
+#ifdef KLS_HAVE_METIS
+static int compare_idx_t(const void *a, const void *b) {
+  const idx_t left = *(const idx_t *)a;
+  const idx_t right = *(const idx_t *)b;
+  return (left > right) - (left < right);
+}
+
+static int metis_size_ok(UF_long n, idx_t slots_per_entry) {
+  return n >= 0 && (uint64_t)n <= (uint64_t)(SIZE_MAX / (size_t)slots_per_entry);
+}
+
+static UF_long kls_metis_order(UF_long n,
+                               UF_long *col_ptr,
+                               UF_long *row_idx,
+                               UF_long *perm_out,
+                               trilinos_klu_l_common *common) {
+  if (n <= 0 || (uint64_t)n > (uint64_t)IDX_MAX ||
+      !metis_size_ok(n, (idx_t)sizeof(idx_t)) ||
+      !metis_size_ok(n + 1, (idx_t)sizeof(idx_t))) {
+    if (common != NULL) {
+      common->status = TRILINOS_KLU_TOO_LARGE;
+    }
+    return 0;
+  }
+
+  const size_t nsize = (size_t)n;
+  idx_t *degree = (idx_t *)calloc(nsize, sizeof(*degree));
+  if (degree == NULL) {
+    if (common != NULL) {
+      common->status = TRILINOS_KLU_OUT_OF_MEMORY;
+    }
+    return 0;
+  }
+
+  idx_t edge_slots = 0;
+  int ok = 1;
+  for (UF_long col = 0; col < n && ok; ++col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row == col) {
+        continue;
+      }
+      if ((uint64_t)row > (uint64_t)IDX_MAX || row < 0 ||
+          degree[(size_t)row] == IDX_MAX || degree[(size_t)col] == IDX_MAX ||
+          edge_slots > IDX_MAX - 2) {
+        ok = 0;
+        break;
+      }
+      degree[(size_t)row]++;
+      degree[(size_t)col]++;
+      edge_slots += 2;
+    }
+  }
+  if (!ok) {
+    free(degree);
+    if (common != NULL) {
+      common->status = TRILINOS_KLU_TOO_LARGE;
+    }
+    return 0;
+  }
+
+  if (edge_slots == 0) {
+    for (UF_long i = 0; i < n; ++i) {
+      perm_out[i] = i;
+    }
+    free(degree);
+    return (UF_long)-1;
+  }
+
+  idx_t *xadj = (idx_t *)malloc((nsize + 1u) * sizeof(*xadj));
+  idx_t *adjncy = (idx_t *)malloc((size_t)edge_slots * sizeof(*adjncy));
+  idx_t *metis_perm = (idx_t *)malloc(nsize * sizeof(*metis_perm));
+  idx_t *metis_iperm = (idx_t *)malloc(nsize * sizeof(*metis_iperm));
+  if (xadj == NULL || adjncy == NULL || metis_perm == NULL || metis_iperm == NULL) {
+    free(degree);
+    free(xadj);
+    free(adjncy);
+    free(metis_perm);
+    free(metis_iperm);
+    if (common != NULL) {
+      common->status = TRILINOS_KLU_OUT_OF_MEMORY;
+    }
+    return 0;
+  }
+
+  xadj[0] = 0;
+  for (size_t i = 0; i < nsize; ++i) {
+    xadj[i + 1u] = xadj[i] + degree[i];
+    degree[i] = xadj[i];
+  }
+
+  for (UF_long col = 0; col < n; ++col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row == col) {
+        continue;
+      }
+      adjncy[degree[(size_t)row]++] = (idx_t)col;
+      adjncy[degree[(size_t)col]++] = (idx_t)row;
+    }
+  }
+
+  idx_t write = 0;
+  for (size_t vertex = 0; vertex < nsize; ++vertex) {
+    const idx_t start = xadj[vertex];
+    const idx_t end = degree[vertex];
+    if (end > start + 1) {
+      qsort(adjncy + start, (size_t)(end - start), sizeof(*adjncy), compare_idx_t);
+    }
+    xadj[vertex] = write;
+    idx_t last = -1;
+    int have_last = 0;
+    for (idx_t p = start; p < end; ++p) {
+      if (!have_last || adjncy[p] != last) {
+        last = adjncy[p];
+        adjncy[write++] = last;
+        have_last = 1;
+      }
+    }
+  }
+  xadj[nsize] = write;
+
+  idx_t options[METIS_NOPTIONS];
+  METIS_SetDefaultOptions(options);
+  options[METIS_OPTION_NUMBERING] = 0;
+  options[METIS_OPTION_SEED] = 0;
+
+  idx_t nvtxs = (idx_t)n;
+  const int metis_status = METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options,
+                                        metis_perm, metis_iperm);
+  if (metis_status == METIS_OK) {
+    for (UF_long i = 0; i < n; ++i) {
+      perm_out[i] = (UF_long)metis_perm[i];
+    }
+  } else if (common != NULL) {
+    common->status = (metis_status == METIS_ERROR_MEMORY)
+      ? TRILINOS_KLU_OUT_OF_MEMORY
+      : TRILINOS_KLU_INVALID;
+  }
+
+  free(degree);
+  free(xadj);
+  free(adjncy);
+  free(metis_perm);
+  free(metis_iperm);
+  return metis_status == METIS_OK ? (UF_long)-1 : 0;
+}
+#endif
+
 static int analyze_with_ordering(UF_long n,
                                  UF_long *col_ptr,
                                  UF_long *row_idx,
@@ -126,6 +278,14 @@ static int analyze_with_ordering(UF_long n,
   if (ordering == KLS_ORDERING_NATURAL) {
     symbolic = trilinos_klu_l_analyze_given(n, col_ptr, row_idx, NULL, NULL,
                                             &common);
+  } else if (ordering == KLS_ORDERING_METIS) {
+#ifdef KLS_HAVE_METIS
+    common.ordering = 3;
+    common.user_order = kls_metis_order;
+    symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
+#else
+    return KLS_ERR_UNSUPPORTED;
+#endif
   } else {
     common.ordering = (ordering == KLS_ORDERING_COLAMD) ? 1 : 0;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
@@ -227,7 +387,7 @@ static int validate_n(int64_t n) {
 }
 
 static int validate_options(const kls_options *options) {
-  if (options->ordering < KLS_ORDERING_AUTO || options->ordering > KLS_ORDERING_NATURAL) {
+  if (options->ordering < KLS_ORDERING_AUTO || options->ordering > KLS_ORDERING_METIS) {
     return 0;
   }
   if (options->orientation < KLS_ORIENTATION_AUTO ||
@@ -849,6 +1009,7 @@ const char *kls_ordering_name(kls_ordering ordering) {
     case KLS_ORDERING_AMD: return "amd";
     case KLS_ORDERING_COLAMD: return "colamd";
     case KLS_ORDERING_NATURAL: return "natural";
+    case KLS_ORDERING_METIS: return "metis";
     default: return "unknown";
   }
 }
