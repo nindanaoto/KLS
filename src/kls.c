@@ -27,12 +27,27 @@ struct kls_solver {
   double *solve_work;
   size_t solve_work_capacity;
   kls_input_format input_format;
+  kls_orientation orientation;
   kls_options options;
   kls_stats stats;
   trilinos_klu_l_common common;
   trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_numeric *numeric;
 };
+
+typedef struct kls_pattern_candidate {
+  UF_long n;
+  UF_long nnz;
+  UF_long *col_ptr;
+  UF_long *row_idx;
+  UF_long *input_to_csc;
+  double *values;
+  kls_orientation orientation;
+  trilinos_klu_l_common common;
+  trilinos_klu_l_symbolic *symbolic;
+  kls_ordering selected_ordering;
+  double score;
+} kls_pattern_candidate;
 
 static double kls_now_seconds(void) {
   struct timespec ts;
@@ -80,6 +95,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->n = 0;
   solver->nnz = 0;
   solver->input_format = KLS_INPUT_NONE;
+  solver->orientation = KLS_ORIENTATION_NORMAL;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
 }
@@ -98,25 +114,26 @@ static int apply_options_to_common(trilinos_klu_l_common *common, const kls_opti
   return KLS_OK;
 }
 
-static int analyze_with_ordering(kls_solver *solver,
+static int analyze_with_ordering(UF_long n,
+                                 UF_long *col_ptr,
+                                 UF_long *row_idx,
+                                 const kls_options *options,
                                  kls_ordering ordering,
                                  trilinos_klu_l_symbolic **symbolic_out,
                                  trilinos_klu_l_common *common_out) {
   trilinos_klu_l_common common;
-  int status = apply_options_to_common(&common, &solver->options);
+  int status = apply_options_to_common(&common, options);
   if (status != KLS_OK) {
     return status;
   }
 
   trilinos_klu_l_symbolic *symbolic = NULL;
   if (ordering == KLS_ORDERING_NATURAL) {
-    symbolic = trilinos_klu_l_analyze_given(solver->n, solver->col_ptr,
-                                            solver->row_idx, NULL, NULL,
+    symbolic = trilinos_klu_l_analyze_given(n, col_ptr, row_idx, NULL, NULL,
                                             &common);
   } else {
     common.ordering = (ordering == KLS_ORDERING_COLAMD) ? 1 : 0;
-    symbolic = trilinos_klu_l_analyze(solver->n, solver->col_ptr,
-                                      solver->row_idx, &common);
+    symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
   }
 
   if (symbolic == NULL || common.status < 0) {
@@ -142,12 +159,21 @@ static double symbolic_score(const trilinos_klu_l_symbolic *symbolic) {
   return DBL_MAX;
 }
 
-static int choose_symbolic(kls_solver *solver) {
-  if (solver->options.ordering != KLS_ORDERING_AUTO) {
-    int status = analyze_with_ordering(solver, solver->options.ordering,
-                                       &solver->symbolic, &solver->common);
+static int choose_symbolic_for_pattern(UF_long n,
+                                       UF_long *col_ptr,
+                                       UF_long *row_idx,
+                                       const kls_options *options,
+                                       trilinos_klu_l_symbolic **symbolic_out,
+                                       trilinos_klu_l_common *common_out,
+                                       kls_ordering *selected_ordering_out,
+                                       double *score_out) {
+  if (options->ordering != KLS_ORDERING_AUTO) {
+    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
+                                       options->ordering, symbolic_out,
+                                       common_out);
     if (status == KLS_OK) {
-      solver->stats.selected_ordering = solver->options.ordering;
+      *selected_ordering_out = options->ordering;
+      *score_out = symbolic_score(*symbolic_out);
     }
     return status;
   }
@@ -162,7 +188,7 @@ static int choose_symbolic(kls_solver *solver) {
   for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
     trilinos_klu_l_symbolic *candidate_symbolic = NULL;
     trilinos_klu_l_common candidate_common;
-    int status = analyze_with_ordering(solver, candidates[i],
+    int status = analyze_with_ordering(n, col_ptr, row_idx, options, candidates[i],
                                        &candidate_symbolic, &candidate_common);
     if (status != KLS_OK) {
       continue;
@@ -190,9 +216,10 @@ static int choose_symbolic(kls_solver *solver) {
   if (!any_ok) {
     return KLS_ERR_ANALYZE_FAILED;
   }
-  solver->symbolic = best_symbolic;
-  solver->common = best_common;
-  solver->stats.selected_ordering = best_ordering;
+  *symbolic_out = best_symbolic;
+  *common_out = best_common;
+  *selected_ordering_out = best_ordering;
+  *score_out = best_score;
   return KLS_OK;
 }
 
@@ -206,6 +233,10 @@ static int validate_n(int64_t n) {
 
 static int validate_options(const kls_options *options) {
   if (options->ordering < KLS_ORDERING_AUTO || options->ordering > KLS_ORDERING_NATURAL) {
+    return 0;
+  }
+  if (options->orientation < KLS_ORIENTATION_AUTO ||
+      options->orientation > KLS_ORIENTATION_TRANSPOSE) {
     return 0;
   }
   if (options->scale < -1 || options->scale > 2) {
@@ -223,20 +254,196 @@ static int validate_options(const kls_options *options) {
   return 1;
 }
 
-static int allocate_structure(kls_solver *solver, int64_t n, int64_t nnz, int need_map) {
-  solver->col_ptr = (UF_long *)calloc((size_t)n + 1u, sizeof(UF_long));
-  solver->row_idx = (UF_long *)calloc((size_t)nnz, sizeof(UF_long));
+static int allocate_candidate(kls_pattern_candidate *candidate,
+                              int64_t n,
+                              int64_t nnz,
+                              kls_orientation orientation,
+                              int need_map) {
+  memset(candidate, 0, sizeof(*candidate));
+  candidate->col_ptr = (UF_long *)calloc((size_t)n + 1u, sizeof(UF_long));
+  candidate->row_idx = (UF_long *)calloc((size_t)nnz, sizeof(UF_long));
   if (need_map) {
-    solver->input_to_csc = (UF_long *)calloc((size_t)nnz, sizeof(UF_long));
-    solver->values = (double *)calloc((size_t)nnz, sizeof(double));
+    candidate->input_to_csc = (UF_long *)calloc((size_t)nnz, sizeof(UF_long));
+    candidate->values = (double *)calloc((size_t)nnz, sizeof(double));
   }
-  if (solver->col_ptr == NULL || solver->row_idx == NULL ||
-      (need_map && (solver->values == NULL || solver->input_to_csc == NULL))) {
+  if (candidate->col_ptr == NULL || candidate->row_idx == NULL ||
+      (need_map && (candidate->values == NULL || candidate->input_to_csc == NULL))) {
+    free(candidate->col_ptr);
+    free(candidate->row_idx);
+    free(candidate->input_to_csc);
+    free(candidate->values);
+    memset(candidate, 0, sizeof(*candidate));
     return KLS_ERR_OUT_OF_MEMORY;
   }
-  solver->n = (UF_long)n;
-  solver->nnz = (UF_long)nnz;
+  candidate->n = (UF_long)n;
+  candidate->nnz = (UF_long)nnz;
+  candidate->orientation = orientation;
+  candidate->selected_ordering = KLS_ORDERING_AUTO;
+  candidate->score = DBL_MAX;
   return KLS_OK;
+}
+
+static void free_candidate(kls_pattern_candidate *candidate) {
+  if (candidate == NULL) {
+    return;
+  }
+  if (candidate->symbolic != NULL) {
+    trilinos_klu_l_free_symbolic(&candidate->symbolic, &candidate->common);
+  }
+  free(candidate->col_ptr);
+  free(candidate->row_idx);
+  free(candidate->input_to_csc);
+  free(candidate->values);
+  memset(candidate, 0, sizeof(*candidate));
+}
+
+static int copy_compressed_candidate(kls_pattern_candidate *candidate,
+                                     kls_index_type index_type,
+                                     int64_t n,
+                                     const void *col_ptr,
+                                     const void *row_idx,
+                                     int index_base,
+                                     kls_orientation orientation) {
+  const int64_t base = index_base;
+  const int64_t nnz = read_index(index_type, col_ptr, n) - base;
+  if (nnz < 0) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+
+  int status = allocate_candidate(candidate, n, nnz, orientation, 0);
+  if (status != KLS_OK) {
+    return status;
+  }
+
+  int64_t prev = 0;
+  for (int64_t j = 0; j <= n; ++j) {
+    const int64_t ptr = read_index(index_type, col_ptr, j) - base;
+    if (ptr < prev || ptr < 0 || ptr > nnz) {
+      free_candidate(candidate);
+      return KLS_ERR_INVALID_ARGUMENT;
+    }
+    candidate->col_ptr[j] = (UF_long)ptr;
+    prev = ptr;
+  }
+  for (int64_t p = 0; p < nnz; ++p) {
+    const int64_t row = read_index(index_type, row_idx, p) - base;
+    if (row < 0 || row >= n) {
+      free_candidate(candidate);
+      return KLS_ERR_INVALID_ARGUMENT;
+    }
+    candidate->row_idx[p] = (UF_long)row;
+  }
+  return KLS_OK;
+}
+
+static int transpose_candidate(const kls_pattern_candidate *source,
+                               kls_orientation orientation,
+                               kls_pattern_candidate *candidate) {
+  int status = allocate_candidate(candidate, (int64_t)source->n,
+                                  (int64_t)source->nnz, orientation, 1);
+  if (status != KLS_OK) {
+    return status;
+  }
+
+  for (UF_long p = 0; p < source->nnz; ++p) {
+    candidate->col_ptr[source->row_idx[p] + 1]++;
+  }
+  for (UF_long j = 0; j < source->n; ++j) {
+    candidate->col_ptr[j + 1] += candidate->col_ptr[j];
+  }
+
+  UF_long *next = (UF_long *)malloc(((size_t)source->n) * sizeof(UF_long));
+  if (next == NULL) {
+    free_candidate(candidate);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+  memcpy(next, candidate->col_ptr, ((size_t)source->n) * sizeof(UF_long));
+
+  for (UF_long col = 0; col < source->n; ++col) {
+    for (UF_long p = source->col_ptr[col]; p < source->col_ptr[col + 1]; ++p) {
+      const UF_long dst_col = source->row_idx[p];
+      const UF_long dst = next[dst_col]++;
+      candidate->row_idx[dst] = col;
+      candidate->input_to_csc[p] = dst;
+    }
+  }
+  free(next);
+  return KLS_OK;
+}
+
+static int analyze_candidate(kls_pattern_candidate *candidate,
+                             const kls_options *options) {
+  return choose_symbolic_for_pattern(candidate->n, candidate->col_ptr,
+                                     candidate->row_idx, options,
+                                     &candidate->symbolic, &candidate->common,
+                                     &candidate->selected_ordering,
+                                     &candidate->score);
+}
+
+static int select_candidate(kls_pattern_candidate *normal,
+                            kls_pattern_candidate *transpose,
+                            const kls_options *options,
+                            kls_pattern_candidate **chosen_out) {
+  *chosen_out = NULL;
+  if (options->orientation == KLS_ORIENTATION_NORMAL) {
+    if (normal == NULL) {
+      return KLS_ERR_INVALID_ARGUMENT;
+    }
+    int status = analyze_candidate(normal, options);
+    if (status == KLS_OK) {
+      *chosen_out = normal;
+    }
+    return status;
+  }
+  if (options->orientation == KLS_ORIENTATION_TRANSPOSE) {
+    if (transpose == NULL) {
+      return KLS_ERR_INVALID_ARGUMENT;
+    }
+    int status = analyze_candidate(transpose, options);
+    if (status == KLS_OK) {
+      *chosen_out = transpose;
+    }
+    return status;
+  }
+
+  if (normal == NULL || transpose == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  const int normal_status = analyze_candidate(normal, options);
+  const int transpose_status = analyze_candidate(transpose, options);
+  if (normal_status == KLS_OK && transpose_status == KLS_OK) {
+    *chosen_out = (transpose->score < normal->score) ? transpose : normal;
+    return KLS_OK;
+  }
+  if (normal_status == KLS_OK) {
+    *chosen_out = normal;
+    return KLS_OK;
+  }
+  if (transpose_status == KLS_OK) {
+    *chosen_out = transpose;
+    return KLS_OK;
+  }
+  return normal_status != KLS_OK ? normal_status : transpose_status;
+}
+
+static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate) {
+  solver->n = candidate->n;
+  solver->nnz = candidate->nnz;
+  solver->col_ptr = candidate->col_ptr;
+  solver->row_idx = candidate->row_idx;
+  solver->input_to_csc = candidate->input_to_csc;
+  solver->values = candidate->values;
+  solver->orientation = candidate->orientation;
+  solver->common = candidate->common;
+  solver->symbolic = candidate->symbolic;
+  solver->stats.selected_ordering = candidate->selected_ordering;
+  solver->stats.selected_orientation = candidate->orientation;
+
+  candidate->col_ptr = NULL;
+  candidate->row_idx = NULL;
+  candidate->input_to_csc = NULL;
+  candidate->values = NULL;
+  candidate->symbolic = NULL;
 }
 
 static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
@@ -244,6 +451,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.n = (int64_t)solver->n;
   solver->stats.nnz = (int64_t)solver->nnz;
   solver->stats.analysis_seconds = elapsed;
+  solver->stats.selected_orientation = solver->orientation;
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
     solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
@@ -283,6 +491,7 @@ void kls_default_options(kls_options *options) {
   options->struct_size = sizeof(*options);
   options->threads = 1;
   options->ordering = KLS_ORDERING_AUTO;
+  options->orientation = KLS_ORIENTATION_AUTO;
   options->use_btf = 1;
   options->scale = 2;
   options->pivot_tolerance = 0.001;
@@ -344,48 +553,46 @@ int kls_analyze_csc(kls_solver *solver,
     return KLS_ERR_INVALID_ARGUMENT;
   }
 
-  const int64_t base = index_base;
-  const int64_t nnz = read_index(index_type, col_ptr, n) - base;
-  if (nnz < 0) {
-    return KLS_ERR_INVALID_ARGUMENT;
-  }
-
   clear_matrix(solver);
   solver->options = normalized;
-  int status = allocate_structure(solver, n, nnz, 0);
-  if (status != KLS_OK) {
-    clear_matrix(solver);
-    return status;
-  }
-
-  int64_t prev = 0;
-  for (int64_t j = 0; j <= n; ++j) {
-    const int64_t ptr = read_index(index_type, col_ptr, j) - base;
-    if (ptr < prev || ptr < 0 || ptr > nnz) {
-      clear_matrix(solver);
-      return KLS_ERR_INVALID_ARGUMENT;
-    }
-    solver->col_ptr[j] = (UF_long)ptr;
-    prev = ptr;
-  }
-  for (int64_t p = 0; p < nnz; ++p) {
-    const int64_t row = read_index(index_type, row_idx, p) - base;
-    if (row < 0 || row >= n) {
-      clear_matrix(solver);
-      return KLS_ERR_INVALID_ARGUMENT;
-    }
-    solver->row_idx[p] = (UF_long)row;
-  }
-
   solver->input_format = KLS_INPUT_CSC;
   const double start = kls_now_seconds();
-  status = choose_symbolic(solver);
-  const double elapsed = kls_now_seconds() - start;
+
+  kls_pattern_candidate normal = {0};
+  kls_pattern_candidate transpose = {0};
+  kls_pattern_candidate *chosen = NULL;
+
+  int status = copy_compressed_candidate(&normal, index_type, n, col_ptr, row_idx,
+                                         index_base, KLS_ORIENTATION_NORMAL);
   if (status != KLS_OK) {
     clear_matrix(solver);
     return status;
   }
+
+  if (normalized.orientation != KLS_ORIENTATION_NORMAL) {
+    status = transpose_candidate(&normal, KLS_ORIENTATION_TRANSPOSE, &transpose);
+    if (status != KLS_OK) {
+      free_candidate(&normal);
+      clear_matrix(solver);
+      return status;
+    }
+  }
+
+  status = select_candidate(&normal,
+                            normalized.orientation == KLS_ORIENTATION_NORMAL ? NULL : &transpose,
+                            &normalized, &chosen);
+  const double elapsed = kls_now_seconds() - start;
+  if (status != KLS_OK) {
+    free_candidate(&transpose);
+    free_candidate(&normal);
+    clear_matrix(solver);
+    return status;
+  }
+
+  adopt_candidate(solver, chosen);
   fill_symbolic_stats(solver, elapsed);
+  free_candidate(&transpose);
+  free_candidate(&normal);
   return KLS_OK;
 }
 
@@ -416,70 +623,45 @@ int kls_analyze_csr(kls_solver *solver,
     return KLS_ERR_INVALID_ARGUMENT;
   }
 
-  const int64_t base = index_base;
-  const int64_t nnz = read_index(index_type, row_ptr, n) - base;
-  if (nnz < 0) {
-    return KLS_ERR_INVALID_ARGUMENT;
-  }
-
   clear_matrix(solver);
   solver->options = normalized;
-  int status = allocate_structure(solver, n, nnz, 1);
-  if (status != KLS_OK) {
-    clear_matrix(solver);
-    return status;
-  }
-
-  int64_t prev = 0;
-  for (int64_t i = 0; i <= n; ++i) {
-    const int64_t ptr = read_index(index_type, row_ptr, i) - base;
-    if (ptr < prev || ptr < 0 || ptr > nnz) {
-      clear_matrix(solver);
-      return KLS_ERR_INVALID_ARGUMENT;
-    }
-    prev = ptr;
-  }
-
-  for (int64_t p = 0; p < nnz; ++p) {
-    const int64_t col = read_index(index_type, col_idx, p) - base;
-    if (col < 0 || col >= n) {
-      clear_matrix(solver);
-      return KLS_ERR_INVALID_ARGUMENT;
-    }
-    solver->col_ptr[col + 1]++;
-  }
-  for (int64_t j = 0; j < n; ++j) {
-    solver->col_ptr[j + 1] += solver->col_ptr[j];
-  }
-
-  UF_long *next = (UF_long *)malloc(((size_t)n) * sizeof(UF_long));
-  if (next == NULL) {
-    clear_matrix(solver);
-    return KLS_ERR_OUT_OF_MEMORY;
-  }
-  memcpy(next, solver->col_ptr, ((size_t)n) * sizeof(UF_long));
-
-  for (int64_t row = 0; row < n; ++row) {
-    const int64_t begin = read_index(index_type, row_ptr, row) - base;
-    const int64_t end = read_index(index_type, row_ptr, row + 1) - base;
-    for (int64_t p = begin; p < end; ++p) {
-      const int64_t col = read_index(index_type, col_idx, p) - base;
-      const UF_long dst = next[col]++;
-      solver->row_idx[dst] = (UF_long)row;
-      solver->input_to_csc[p] = dst;
-    }
-  }
-  free(next);
-
   solver->input_format = KLS_INPUT_CSR;
   const double start = kls_now_seconds();
-  status = choose_symbolic(solver);
-  const double elapsed = kls_now_seconds() - start;
+
+  kls_pattern_candidate transpose = {0};
+  kls_pattern_candidate normal = {0};
+  kls_pattern_candidate *chosen = NULL;
+
+  int status = copy_compressed_candidate(&transpose, index_type, n, row_ptr, col_idx,
+                                         index_base, KLS_ORIENTATION_TRANSPOSE);
   if (status != KLS_OK) {
     clear_matrix(solver);
     return status;
   }
+
+  if (normalized.orientation != KLS_ORIENTATION_TRANSPOSE) {
+    status = transpose_candidate(&transpose, KLS_ORIENTATION_NORMAL, &normal);
+    if (status != KLS_OK) {
+      free_candidate(&transpose);
+      clear_matrix(solver);
+      return status;
+    }
+  }
+
+  status = select_candidate(normal.col_ptr == NULL ? NULL : &normal, &transpose,
+                            &normalized, &chosen);
+  const double elapsed = kls_now_seconds() - start;
+  if (status != KLS_OK) {
+    free_candidate(&normal);
+    free_candidate(&transpose);
+    clear_matrix(solver);
+    return status;
+  }
+
+  adopt_candidate(solver, chosen);
   fill_symbolic_stats(solver, elapsed);
+  free_candidate(&normal);
+  free_candidate(&transpose);
   return KLS_OK;
 }
 
@@ -487,21 +669,21 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
   if (solver == NULL || values == NULL || values_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-  if (solver->input_format == KLS_INPUT_CSC) {
+  if (solver->input_format == KLS_INPUT_NONE) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  if (solver->input_to_csc == NULL) {
     *values_out = (double *)values;
     return KLS_OK;
   }
-  if (solver->input_format == KLS_INPUT_CSR) {
-    if (solver->values == NULL || solver->input_to_csc == NULL) {
-      return KLS_ERR_INVALID_ARGUMENT;
-    }
-    for (int64_t p = 0; p < solver->nnz; ++p) {
-      solver->values[solver->input_to_csc[p]] = values[p];
-    }
-    *values_out = solver->values;
-    return KLS_OK;
+  if (solver->values == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
   }
-  return KLS_ERR_INVALID_ARGUMENT;
+  for (int64_t p = 0; p < solver->nnz; ++p) {
+    solver->values[solver->input_to_csc[p]] = values[p];
+  }
+  *values_out = solver->values;
+  return KLS_OK;
 }
 
 static int ensure_solve_work(kls_solver *solver, int64_t total) {
@@ -630,8 +812,10 @@ static int solve_impl(kls_solver *solver,
     memcpy(work + rhs * solver->n, b + rhs * ldb, (size_t)solver->n * sizeof(double));
   }
 
+  const int kernel_transpose =
+    (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
   const double start = kls_now_seconds();
-  const UF_long ok = transpose
+  const UF_long ok = kernel_transpose
     ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric, solver->n,
                             (UF_long)nrhs, work, &solver->common)
     : trilinos_klu_l_solve(solver->symbolic, solver->numeric, solver->n,
@@ -696,6 +880,15 @@ const char *kls_ordering_name(kls_ordering ordering) {
     case KLS_ORDERING_AMD: return "amd";
     case KLS_ORDERING_COLAMD: return "colamd";
     case KLS_ORDERING_NATURAL: return "natural";
+    default: return "unknown";
+  }
+}
+
+const char *kls_orientation_name(kls_orientation orientation) {
+  switch (orientation) {
+    case KLS_ORIENTATION_AUTO: return "auto";
+    case KLS_ORIENTATION_NORMAL: return "normal";
+    case KLS_ORIENTATION_TRANSPOSE: return "transpose";
     default: return "unknown";
   }
 }

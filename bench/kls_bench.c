@@ -24,11 +24,6 @@ typedef struct matrix {
   double *values;
 } matrix;
 
-typedef enum bench_orientation {
-  BENCH_ORIENTATION_NORMAL = 0,
-  BENCH_ORIENTATION_TRANSPOSE = 1
-} bench_orientation;
-
 static void matrix_free(matrix *a) {
   if (a == NULL) return;
   free(a->col_ptr);
@@ -212,42 +207,6 @@ static int read_matrix_market(const char *path, matrix *out) {
   return 1;
 }
 
-static int matrix_transpose(const matrix *a, matrix *at) {
-  memset(at, 0, sizeof(*at));
-  at->n = a->n;
-  at->nnz = a->nnz;
-  at->col_ptr = (int64_t *)calloc((size_t)a->n + 1u, sizeof(int64_t));
-  at->row_idx = (int64_t *)calloc((size_t)a->nnz, sizeof(int64_t));
-  at->values = (double *)calloc((size_t)a->nnz, sizeof(double));
-  if (at->col_ptr == NULL || at->row_idx == NULL || at->values == NULL) {
-    matrix_free(at);
-    return 0;
-  }
-  for (int64_t col = 0; col < a->n; ++col) {
-    for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
-      at->col_ptr[a->row_idx[p] + 1]++;
-    }
-  }
-  for (int64_t col = 0; col < a->n; ++col) {
-    at->col_ptr[col + 1] += at->col_ptr[col];
-  }
-  int64_t *next = (int64_t *)malloc((size_t)a->n * sizeof(int64_t));
-  if (next == NULL) {
-    matrix_free(at);
-    return 0;
-  }
-  memcpy(next, at->col_ptr, (size_t)a->n * sizeof(int64_t));
-  for (int64_t col = 0; col < a->n; ++col) {
-    for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
-      const int64_t dst = next[a->row_idx[p]]++;
-      at->row_idx[dst] = col;
-      at->values[dst] = a->values[p];
-    }
-  }
-  free(next);
-  return 1;
-}
-
 static void matvec(const matrix *a, const double *x, double *y) {
   memset(y, 0, (size_t)a->n * sizeof(double));
   for (int64_t col = 0; col < a->n; ++col) {
@@ -282,18 +241,15 @@ static kls_ordering parse_ordering(const char *s) {
   return KLS_ORDERING_AUTO;
 }
 
-static bench_orientation parse_orientation(const char *s) {
-  if (strcmp(s, "transpose") == 0) return BENCH_ORIENTATION_TRANSPOSE;
-  return BENCH_ORIENTATION_NORMAL;
-}
-
-static const char *orientation_name(bench_orientation orientation) {
-  return orientation == BENCH_ORIENTATION_TRANSPOSE ? "transpose" : "normal";
+static kls_orientation parse_orientation(const char *s) {
+  if (strcmp(s, "normal") == 0) return KLS_ORIENTATION_NORMAL;
+  if (strcmp(s, "transpose") == 0) return KLS_ORIENTATION_TRANSPOSE;
+  return KLS_ORIENTATION_AUTO;
 }
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural] [--orientation normal|transpose] [--no-fast-factor] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--ordering auto|amd|colamd|natural] [--orientation auto|normal|transpose] [--no-fast-factor] [--json]\n",
           argv0);
 }
 
@@ -306,7 +262,6 @@ int main(int argc, char **argv) {
   int repeat = 5;
   int refactor_repeat = 5;
   int json = 0;
-  bench_orientation orientation = BENCH_ORIENTATION_NORMAL;
   kls_options options;
   kls_default_options(&options);
 
@@ -320,7 +275,7 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--ordering") == 0 && i + 1 < argc) {
       options.ordering = parse_ordering(argv[++i]);
     } else if (strcmp(argv[i], "--orientation") == 0 && i + 1 < argc) {
-      orientation = parse_orientation(argv[++i]);
+      options.orientation = parse_orientation(argv[++i]);
     } else if (strcmp(argv[i], "--no-fast-factor") == 0) {
       options.fast_factor = 0;
     } else {
@@ -337,21 +292,11 @@ int main(int argc, char **argv) {
   if (!read_matrix_market(path, &a)) {
     return EXIT_FAILURE;
   }
-  matrix factor_matrix = a;
-  matrix at = {0};
-  if (orientation == BENCH_ORIENTATION_TRANSPOSE) {
-    if (!matrix_transpose(&a, &at)) {
-      matrix_free(&a);
-      return EXIT_FAILURE;
-    }
-    factor_matrix = at;
-  }
 
   double *x_true = (double *)malloc((size_t)a.n * sizeof(double));
   double *b = (double *)calloc((size_t)a.n, sizeof(double));
   double *x = (double *)calloc((size_t)a.n, sizeof(double));
   if (x_true == NULL || b == NULL || x == NULL) {
-    matrix_free(&at);
     matrix_free(&a);
     free(x_true);
     free(b);
@@ -366,17 +311,16 @@ int main(int argc, char **argv) {
   kls_solver *solver = NULL;
   int status = kls_create(&solver);
   if (status == KLS_OK) {
-    status = kls_analyze_csc(solver, KLS_INDEX_INT64, factor_matrix.n,
-                             factor_matrix.col_ptr, factor_matrix.row_idx, 0,
+    status = kls_analyze_csc(solver, KLS_INDEX_INT64, a.n,
+                             a.col_ptr, a.row_idx, 0,
                              &options);
   }
   if (status == KLS_OK) {
-    status = kls_factor(solver, factor_matrix.values);
+    status = kls_factor(solver, a.values);
   }
   if (status != KLS_OK) {
     fprintf(stderr, "KLS setup failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
-    matrix_free(&at);
     matrix_free(&a);
     free(x_true);
     free(b);
@@ -392,29 +336,25 @@ int main(int argc, char **argv) {
   stats.struct_size = sizeof(stats);
 
   for (int i = 0; i < repeat; ++i) {
-    status = kls_factor(solver, factor_matrix.values);
+    status = kls_factor(solver, a.values);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     factor_total += stats.factor_seconds;
   }
   for (int i = 0; i < refactor_repeat && status == KLS_OK; ++i) {
-    status = kls_refactor(solver, factor_matrix.values);
+    status = kls_refactor(solver, a.values);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     refactor_total += stats.refactor_seconds;
   }
   for (int i = 0; i < repeat && status == KLS_OK; ++i) {
-    status = orientation == BENCH_ORIENTATION_TRANSPOSE
-      ? kls_solve_transpose(solver, 1, b, 0, x, 0)
-      : kls_solve(solver, 1, b, 0, x, 0);
+    status = kls_solve(solver, 1, b, 0, x, 0);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     solve_total += stats.solve_seconds;
   }
   for (int i = 0; i < repeat && status == KLS_OK; ++i) {
-    status = orientation == BENCH_ORIENTATION_TRANSPOSE
-      ? kls_solve(solver, 1, b, 0, x, 0)
-      : kls_solve_transpose(solver, 1, b, 0, x, 0);
+    status = kls_solve_transpose(solver, 1, b, 0, x, 0);
     if (status == KLS_ERR_UNSUPPORTED) {
       status = KLS_OK;
       tsolve_total = -1.0 * (double)repeat;
@@ -427,7 +367,6 @@ int main(int argc, char **argv) {
   if (status != KLS_OK) {
     fprintf(stderr, "KLS benchmark failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
-    matrix_free(&at);
     matrix_free(&a);
     free(x_true);
     free(b);
@@ -435,13 +374,10 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  status = orientation == BENCH_ORIENTATION_TRANSPOSE
-    ? kls_solve_transpose(solver, 1, b, 0, x, 0)
-    : kls_solve(solver, 1, b, 0, x, 0);
+  status = kls_solve(solver, 1, b, 0, x, 0);
   if (status != KLS_OK) {
     fprintf(stderr, "KLS final solve failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
-    matrix_free(&at);
     matrix_free(&a);
     free(x_true);
     free(b);
@@ -459,7 +395,8 @@ int main(int argc, char **argv) {
 
   if (json) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
-           ",\"orientation\":\"%s\",\"ordering\":\"%s\",\"fast_factor\":%s"
+           ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
+           ",\"ordering\":\"%s\",\"fast_factor\":%s"
            ",\"analysis_seconds\":%.9g"
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
            ",\"solve_seconds_avg\":%.9g,\"transpose_solve_seconds_avg\":%.9g"
@@ -467,7 +404,8 @@ int main(int argc, char **argv) {
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
            ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
-           path, a.n, a.nnz, orientation_name(orientation),
+           path, a.n, a.nnz, kls_orientation_name(options.orientation),
+           kls_orientation_name(stats.selected_orientation),
            kls_ordering_name(stats.selected_ordering),
            options.fast_factor ? "true" : "false",
            stats.analysis_seconds, factor_avg, refactor_avg, solve_avg, tsolve_avg,
@@ -477,7 +415,8 @@ int main(int argc, char **argv) {
   } else {
     printf("matrix: %s\n", path);
     printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
-    printf("orientation: %s\n", orientation_name(orientation));
+    printf("requested orientation: %s\n", kls_orientation_name(options.orientation));
+    printf("selected orientation: %s\n", kls_orientation_name(stats.selected_orientation));
     printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
     printf("fast factor: %s\n", options.fast_factor ? "on" : "off");
     printf("analysis: %.6f s\n", stats.analysis_seconds);
@@ -492,7 +431,6 @@ int main(int argc, char **argv) {
   }
 
   kls_destroy(solver);
-  matrix_free(&at);
   matrix_free(&a);
   free(x_true);
   free(b);

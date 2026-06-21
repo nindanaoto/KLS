@@ -34,10 +34,17 @@ typedef enum kls_ordering {
   KLS_ORDERING_NATURAL = 3
 } kls_ordering;
 
+typedef enum kls_orientation {
+  KLS_ORIENTATION_AUTO = 0,
+  KLS_ORIENTATION_NORMAL = 1,
+  KLS_ORIENTATION_TRANSPOSE = 2
+} kls_orientation;
+
 typedef struct kls_options {
   size_t struct_size;
   int threads;
   kls_ordering ordering;
+  kls_orientation orientation;
   int use_btf;
   int scale;
   double pivot_tolerance;
@@ -71,6 +78,7 @@ typedef struct kls_stats {
   size_t memory_bytes;
   size_t memory_peak_bytes;
   kls_ordering selected_ordering;
+  kls_orientation selected_orientation;
   int last_kernel_status;
 } kls_stats;
 
@@ -114,6 +122,7 @@ int kls_solve_transpose(kls_solver *solver,
 int kls_get_stats(const kls_solver *solver, kls_stats *stats);
 const char *kls_status_string(int status);
 const char *kls_ordering_name(kls_ordering ordering);
+const char *kls_orientation_name(kls_orientation orientation);
 
 #ifdef __cplusplus
 }

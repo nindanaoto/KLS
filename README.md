@@ -4,13 +4,15 @@ KLS is a standalone sparse direct solver project targeting SPICE-style
 workloads: one symbolic analysis followed by many numeric factorizations,
 refactorizations, and solves with a fixed sparse structure.
 
-This repository currently contains the first working baseline:
+This repository currently contains the first working KLS implementation:
 
 - A stable C API in `include/kls/kls.h`
 - A vendored SuiteSparse-derived 64-bit symbolic/numeric engine
 - CSC and CSR input paths with 32-bit or 64-bit index arrays
 - AMD-first automatic symbolic ordering with explicit AMD, COLAMD, and natural
   ordering controls
+- Automatic normal-vs-transpose internal orientation selection by symbolic fill
+  estimate, with explicit orientation controls
 - Factor, refactor, solve, transpose-solve, and statistics APIs
 - Fast repeated factorization that reuses the existing numeric pattern before
   falling back to full pivoting factorization
@@ -33,11 +35,12 @@ as the current in-tree serial engine.
 ## Benchmark
 
 ```sh
-./build/kls_bench ../cktso/demo/add20.mtx --repeat 20 --refactor-repeat 20 --json
+./build/kls_bench ../cktso/demo/add20.mtx --repeat 20 --refactor-repeat 20 --orientation auto --json
 ```
 
 The benchmark reports analysis, factorization, refactorization, solve,
-transpose-solve, residual, fill, flop, and memory statistics.
+transpose-solve, residual, selected orientation, fill, flop, and memory
+statistics.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 
@@ -48,7 +51,7 @@ python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_circuit_manife
 To run every downloaded matrix and compute the SPICE-cycle geometric mean:
 
 ```sh
-python3 scripts/run_bench_suite.py --kls-bench build/kls_bench --matrix-dir data/suitesparse --jsonl build/kls_suite.jsonl
+python3 scripts/run_bench_suite.py --kls-bench build/kls_bench --matrix-dir data/suitesparse --orientation auto --jsonl build/kls_suite.jsonl
 ```
 
 The suite metric is:
@@ -72,10 +75,12 @@ library.
 
 ## Status
 
-This is a functional baseline, not yet a CKTSO-beating implementation. The next
-algorithmic work is to evolve the vendored numeric kernel into KLS-owned
-parallel factor/refactor/solve kernels while keeping the public API and
-benchmark harness stable.
+This is a functional serial implementation with KLS-level analysis choices for
+repeated SPICE-style solves. It is not yet a generally CKTSO-beating solver
+across broad circuit corpora. The next algorithmic work is to evolve the
+numeric factor/refactor/solve kernels toward KLS-owned sparse kernels with
+better pivot reuse and parallelism while keeping the public API and benchmark
+harness stable.
 
 The `threads` option is accepted for API stability but is not used by the
 current serial KLS numeric engine.

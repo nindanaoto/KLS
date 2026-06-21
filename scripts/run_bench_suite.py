@@ -33,6 +33,9 @@ def main() -> int:
     parser.add_argument("--jsonl", type=pathlib.Path)
     parser.add_argument("--repeat", type=int, default=5)
     parser.add_argument("--refactor-repeat", type=int, default=5)
+    parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural"], default="auto")
+    parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")
+    parser.add_argument("--no-fast-factor", action="store_true")
     args = parser.parse_args()
 
     matrices = sorted(args.matrix_dir.rglob("*.mtx"))
@@ -57,8 +60,14 @@ def main() -> int:
                 str(args.repeat),
                 "--refactor-repeat",
                 str(args.refactor_repeat),
+                "--ordering",
+                args.ordering,
+                "--orientation",
+                args.orientation,
                 "--json",
             ]
+            if args.no_fast_factor:
+                cmd.append("--no-fast-factor")
             proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
             if proc.returncode != 0:
                 failures.append((matrix, proc.stderr.strip()))
@@ -92,4 +101,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
