@@ -347,7 +347,7 @@ static int should_try_auto_scale(const kls_solver *solver) {
 
   const double flops = solver->common.flops;
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return flops >= 1.0e8 && fill >= 1000000;
+  return flops >= 5.0e6 && fill >= 300000;
 }
 
 static void maybe_select_auto_scale(kls_solver *solver,
