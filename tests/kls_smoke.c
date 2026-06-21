@@ -150,6 +150,46 @@ static int test_csr_forced_transpose_orientation(void) {
   return ok;
 }
 
+static int test_solve_strides_and_in_place(void) {
+  const int32_t ap[] = {0, 2, 5, 7};
+  const int32_t ai[] = {0, 1, 0, 1, 2, 1, 2};
+  const double ax[] = {4.0, 1.0, 1.0, 3.0, 1.0, 1.0, 2.0};
+  const double b_strided[] = {6.0, 10.0, 8.0, -1.0, 11.0, 15.0, 11.0, -2.0};
+  double x_strided[] = {0.0, 0.0, 0.0, 77.0, 0.0, 0.0, 0.0, 88.0};
+  double in_place[] = {6.0, 10.0, 8.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+
+  if (!require_ok(kls_create(&solver), "create")) return 0;
+  if (!require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0, &options),
+                  "analyze strides")) return 0;
+  if (!require_ok(kls_factor(solver, ax), "factor strides")) return 0;
+  if (!require_ok(kls_solve(solver, 2, b_strided, 4, x_strided, 4),
+                  "solve strided")) return 0;
+  if (!require_ok(kls_solve(solver, 1, in_place, 0, in_place, 0),
+                  "solve in-place")) return 0;
+
+  const int ok =
+    close_enough(x_strided[0], 1.0) && close_enough(x_strided[1], 2.0) &&
+    close_enough(x_strided[2], 3.0) && close_enough(x_strided[3], 77.0) &&
+    close_enough(x_strided[4], 2.0) && close_enough(x_strided[5], 3.0) &&
+    close_enough(x_strided[6], 4.0) && close_enough(x_strided[7], 88.0) &&
+    close_enough(in_place[0], 1.0) && close_enough(in_place[1], 2.0) &&
+    close_enough(in_place[2], 3.0);
+  if (!ok) {
+    fprintf(stderr,
+            "unexpected strided/in-place solution: xs=(%.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g), xi=(%.17g %.17g %.17g)\n",
+            x_strided[0], x_strided[1], x_strided[2], x_strided[3],
+            x_strided[4], x_strided[5], x_strided[6], x_strided[7],
+            in_place[0], in_place[1], in_place[2]);
+  }
+  kls_destroy(solver);
+  return ok;
+}
+
 int main(void) {
   if (!test_csc()) {
     return EXIT_FAILURE;
@@ -161,6 +201,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_csr_forced_transpose_orientation()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_solve_strides_and_in_place()) {
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

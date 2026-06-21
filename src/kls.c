@@ -24,8 +24,6 @@ struct kls_solver {
   UF_long *row_idx;
   UF_long *input_to_csc;
   double *values;
-  double *solve_work;
-  size_t solve_work_capacity;
   kls_input_format input_format;
   kls_orientation orientation;
   kls_options options;
@@ -85,13 +83,10 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->row_idx);
   free(solver->input_to_csc);
   free(solver->values);
-  free(solver->solve_work);
   solver->col_ptr = NULL;
   solver->row_idx = NULL;
   solver->input_to_csc = NULL;
   solver->values = NULL;
-  solver->solve_work = NULL;
-  solver->solve_work_capacity = 0;
   solver->n = 0;
   solver->nnz = 0;
   solver->input_format = KLS_INPUT_NONE;
@@ -686,23 +681,6 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
   return KLS_OK;
 }
 
-static int ensure_solve_work(kls_solver *solver, int64_t total) {
-  if (total <= 0 || (uint64_t)total > SIZE_MAX / sizeof(double)) {
-    return KLS_ERR_INVALID_ARGUMENT;
-  }
-  const size_t required = (size_t)total;
-  if (solver->solve_work_capacity >= required) {
-    return KLS_OK;
-  }
-  double *next = (double *)realloc(solver->solve_work, required * sizeof(double));
-  if (next == NULL) {
-    return KLS_ERR_OUT_OF_MEMORY;
-  }
-  solver->solve_work = next;
-  solver->solve_work_capacity = required;
-  return KLS_OK;
-}
-
 int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -798,37 +776,28 @@ static int solve_impl(kls_solver *solver,
   if (ldb < solver->n || ldx < solver->n) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-
-  if (nrhs > INT64_MAX / (int64_t)solver->n) {
+  if (nrhs > (int64_t)UF_long_max || ldx > (int64_t)UF_long_max) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-  const int64_t total = (int64_t)solver->n * nrhs;
-  int status = ensure_solve_work(solver, total);
-  if (status != KLS_OK) {
-    return status;
-  }
-  double *work = solver->solve_work;
-  for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
-    memcpy(work + rhs * solver->n, b + rhs * ldb, (size_t)solver->n * sizeof(double));
-  }
 
+  const double start = kls_now_seconds();
+  if (b != x || ldb != ldx) {
+    for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
+      memmove(x + rhs * ldx, b + rhs * ldb, (size_t)solver->n * sizeof(double));
+    }
+  }
   const int kernel_transpose =
     (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
-  const double start = kls_now_seconds();
   const UF_long ok = kernel_transpose
-    ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric, solver->n,
-                            (UF_long)nrhs, work, &solver->common)
-    : trilinos_klu_l_solve(solver->symbolic, solver->numeric, solver->n,
-                           (UF_long)nrhs, work, &solver->common);
+    ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric, (UF_long)ldx,
+                            (UF_long)nrhs, x, &solver->common)
+    : trilinos_klu_l_solve(solver->symbolic, solver->numeric, (UF_long)ldx,
+                           (UF_long)nrhs, x, &solver->common);
   solver->stats.solve_seconds = kls_now_seconds() - start;
   fill_numeric_stats(solver);
 
   if (!ok || solver->common.status < 0) {
     return KLS_ERR_SOLVE_FAILED;
-  }
-
-  for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
-    memcpy(x + rhs * ldx, work + rhs * solver->n, (size_t)solver->n * sizeof(double));
   }
   return KLS_OK;
 }
