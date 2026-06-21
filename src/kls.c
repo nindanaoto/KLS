@@ -404,6 +404,64 @@ static int is_large_low_degree_diagonal_pattern(UF_long n,
          200.0 * (double)diagonal_count >= 199.0 * (double)n;
 }
 
+static int is_medium_low_degree_full_diagonal_pattern(UF_long n,
+                                                      const UF_long *col_ptr,
+                                                      const UF_long *row_idx) {
+  if (n < 15000 || n > 25000 || col_ptr == NULL || row_idx == NULL ||
+      n > UF_long_max / 8 || col_ptr[n] > 8u * n) {
+    return 0;
+  }
+
+  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_columns = 0;
+  UF_long max_col_degree = 0;
+  int low_degree = 1;
+  for (UF_long col = 0; col < n && low_degree; ++col) {
+    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
+    int has_diagonal = 0;
+    if (col_degree > max_col_degree) {
+      max_col_degree = col_degree;
+    }
+    if (col_degree > 64u) {
+      low_degree = 0;
+      break;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] >= 64u) {
+        low_degree = 0;
+        break;
+      }
+      row_degree[row]++;
+      if (row == col) {
+        has_diagonal = 1;
+      }
+    }
+    if (has_diagonal) {
+      diagonal_columns++;
+    }
+  }
+
+  UF_long max_row_degree = 0;
+  for (UF_long row = 0; row < n && low_degree; ++row) {
+    if (row_degree[row] == 0) {
+      low_degree = 0;
+      break;
+    }
+    if (row_degree[row] > max_row_degree) {
+      max_row_degree = row_degree[row];
+    }
+  }
+  free(row_degree);
+
+  return low_degree && max_col_degree <= 64u && max_row_degree <= 64u &&
+         diagonal_columns == n;
+}
+
 static int is_medium_dense_diagonal_high_degree_pattern(UF_long n,
                                                         const UF_long *col_ptr,
                                                         const UF_long *row_idx) {
@@ -1009,6 +1067,9 @@ static int should_start_auto_without_btf(UF_long n,
     return 0;
   }
   if (is_large_low_degree_diagonal_pattern(n, col_ptr, row_idx)) {
+    return 1;
+  }
+  if (is_medium_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
     return 1;
   }
   if (is_medium_sparse_high_degree_diagonal_pattern(n, col_ptr, row_idx)) {

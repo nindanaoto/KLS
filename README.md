@@ -89,10 +89,11 @@ Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF
 for large matrices where BTF finds a single block and a no-BTF symbolic retry
 keeps the fill estimate within tolerance. For large, low-degree, nearly
-diagonal patterns, medium sparse high-degree mostly diagonal patterns, and for
-METIS-started medium dense-diagonal high-degree patterns, `auto` can also start
-without BTF to avoid analysis work it is likely to discard; benchmark JSON
-reports both `requested_btf` and selected `btf`.
+diagonal patterns, medium low-degree full-diagonal patterns, medium sparse
+high-degree mostly diagonal patterns, and for METIS-started medium
+dense-diagonal high-degree patterns, `auto` can also start without BTF to avoid
+analysis work it is likely to discard; benchmark JSON reports both
+`requested_btf` and selected `btf`.
 
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
 `--ordering auto` can start with METIS for medium, bounded-degree structures
