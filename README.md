@@ -190,3 +190,6 @@ KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
 includes SuiteSparse-derived KLU, AMD, COLAMD, BTF, and UFconfig sources from
 Trilinos, plus optional METIS/GKlib ordering support; see
 `THIRD_PARTY_NOTICES.md` for attribution.
+
+For a paper-by-paper implementation checklist, see
+`docs/paper_ideas_audit.md`.
