@@ -217,6 +217,9 @@ static int validate_options(const kls_options *options) {
   if (options->memory_growth <= 0.0) {
     return 0;
   }
+  if (options->fast_factor != 0 && options->fast_factor != 1) {
+    return 0;
+  }
   return 1;
 }
 
@@ -285,6 +288,7 @@ void kls_default_options(kls_options *options) {
   options->pivot_tolerance = 0.001;
   options->memory_growth = 1.5;
   options->halt_if_singular = 1;
+  options->fast_factor = 1;
 }
 
 int kls_create(kls_solver **solver_out) {
@@ -526,12 +530,31 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (status != KLS_OK) {
     return status;
   }
+
+  double elapsed = 0.0;
+  if (solver->options.fast_factor && solver->numeric != NULL) {
+    const double start = kls_now_seconds();
+    const UF_long ok = trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
+                                               numeric_values, solver->symbolic,
+                                               solver->numeric, &solver->common);
+    elapsed += kls_now_seconds() - start;
+    if (ok && solver->common.status >= 0 &&
+        solver->common.status != TRILINOS_KLU_SINGULAR) {
+      solver->stats.factor_seconds = elapsed;
+      (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
+      (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
+      fill_numeric_stats(solver);
+      return KLS_OK;
+    }
+  }
+
   free_numeric(solver);
   const double start = kls_now_seconds();
   solver->numeric = trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,
                                           numeric_values, solver->symbolic,
                                           &solver->common);
-  solver->stats.factor_seconds = kls_now_seconds() - start;
+  elapsed += kls_now_seconds() - start;
+  solver->stats.factor_seconds = elapsed;
   if (solver->numeric == NULL || solver->common.status < 0) {
     fill_numeric_stats(solver);
     return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR

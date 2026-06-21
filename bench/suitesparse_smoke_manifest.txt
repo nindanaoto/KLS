@@ -1,0 +1,6 @@
+# Small public MatrixMarket subset for quick KLS iteration.
+add20
+add32
+bcircuit
+circuit204
+rajat03

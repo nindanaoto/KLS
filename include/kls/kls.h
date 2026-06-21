@@ -43,6 +43,7 @@ typedef struct kls_options {
   double pivot_tolerance;
   double memory_growth;
   int halt_if_singular;
+  int fast_factor;
 } kls_options;
 
 typedef struct kls_stats {

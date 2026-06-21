@@ -12,6 +12,8 @@ This repository currently contains the first working baseline:
 - AMD-first automatic symbolic ordering with explicit AMD, COLAMD, and natural
   ordering controls
 - Factor, refactor, solve, transpose-solve, and statistics APIs
+- Fast repeated factorization that reuses the existing numeric pattern before
+  falling back to full pivoting factorization
 - A MatrixMarket benchmark tool
 - A small correctness smoke test
 - A SuiteSparse Matrix Collection downloader script for public benchmark cases
