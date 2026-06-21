@@ -116,7 +116,9 @@ set(KLS_SUITESPARSE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse")
 set(KLS_SUITESPARSE_INCLUDE_DIRS
   "${KLS_SUITESPARSE_ROOT}/KLU/Include"
   "${KLS_SUITESPARSE_ROOT}/AMD/Include"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Include"
   "${KLS_SUITESPARSE_ROOT}/COLAMD/Include"
+  "${KLS_SUITESPARSE_ROOT}/CCOLAMD/Include"
   "${KLS_SUITESPARSE_ROOT}/BTF/Include"
   "${KLS_SUITESPARSE_ROOT}/UFconfig")
 
@@ -140,9 +142,24 @@ set(KLS_KLU_DLONG_SOURCES
 set_source_files_properties(${KLS_KLU_DLONG_SOURCES}
   PROPERTIES COMPILE_DEFINITIONS DLONG)
 
+set(KLS_CAMD_DLONG_SOURCES
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_1.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_aat.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_control.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_defaults.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_dump.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_global.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_info.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_order.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_preprocess.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_valid.c")
+set_source_files_properties(${KLS_CAMD_DLONG_SOURCES}
+  PROPERTIES COMPILE_DEFINITIONS DLONG)
+
 set(KLS_VENDOR_SOURCES
   ${KLS_KLU_LONG_SOURCES}
   ${KLS_KLU_DLONG_SOURCES}
+  ${KLS_CAMD_DLONG_SOURCES}
   "${KLS_SUITESPARSE_ROOT}/AMD/Source/trilinos_amd_1.c"
   "${KLS_SUITESPARSE_ROOT}/AMD/Source/trilinos_amd_2.c"
   "${KLS_SUITESPARSE_ROOT}/AMD/Source/trilinos_amd_aat.c"
@@ -170,6 +187,10 @@ set(KLS_VENDOR_SOURCES
   "${KLS_SUITESPARSE_ROOT}/BTF/Source/trilinos_btf_maxtrans.c"
   "${KLS_SUITESPARSE_ROOT}/BTF/Source/trilinos_btf_order.c"
   "${KLS_SUITESPARSE_ROOT}/BTF/Source/trilinos_btf_strongcomp.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_l2.c"
+  "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_l_postorder.c"
+  "${KLS_SUITESPARSE_ROOT}/CCOLAMD/Source/trilinos_ccolamd_global.c"
+  "${KLS_SUITESPARSE_ROOT}/CCOLAMD/Source/trilinos_ccolamd_l.c"
   "${KLS_SUITESPARSE_ROOT}/COLAMD/Source/trilinos_colamd.c"
   "${KLS_SUITESPARSE_ROOT}/COLAMD/Source/trilinos_colamd_global.c"
   "${KLS_SUITESPARSE_ROOT}/COLAMD/Source/trilinos_colamd_l.c")

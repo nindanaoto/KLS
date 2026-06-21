@@ -1,8 +1,9 @@
 # Third-Party Notices
 
-KLS vendors SuiteSparse-derived KLU, BTF, AMD, COLAMD, and UFconfig sources
-from the Trilinos source tree under `third_party/suitesparse`. These sources
-are built into KLS as the current in-tree serial sparse direct solver engine.
+KLS vendors SuiteSparse-derived KLU, BTF, AMD, CAMD, COLAMD, CCOLAMD, and
+UFconfig sources from the Trilinos source tree under `third_party/suitesparse`.
+These sources are built into KLS as the current in-tree sparse direct solver
+engine and ordering toolkit.
 
 The vendored SuiteSparse-derived sources are Copyright (c) 2004-2007,
 University of Florida and their listed authors. See the per-package
