@@ -69,11 +69,11 @@ pivoting and refactorization behavior. KLS defaults to `auto`, which can start
 unscaled using KLU's `-1` no-scale/no-recheck mode for patterns already
 validated by KLS, or sum-scaled when the diagonal is sparse but row magnitudes
 are already balanced. Otherwise it starts from KLU's max row scaling mode (`2`).
-Large low-degree, nearly diagonal circuit patterns also start in no-scale mode
-to avoid repeated row-scale work once KLS has validated the structure. For large
-expensive cases, `auto` can still try other numeric scaling modes when actual
-flop/fill evidence justifies the extra work. Explicit numeric scale values
-remain fixed.
+Large low-degree, nearly diagonal circuit patterns and METIS-started
+medium dense-diagonal patterns also start in no-scale mode to avoid repeated
+row-scale work once KLS has validated the structure. For large expensive cases,
+`auto` can still try other numeric scaling modes when actual flop/fill evidence
+justifies the extra work. Explicit numeric scale values remain fixed.
 
 Use `--pivot-tol T` to benchmark the diagonal pivot tolerance exposed by the
 KLS API. The default is `0.001`, matching the underlying KLU default. With that
@@ -92,12 +92,14 @@ is likely to discard; benchmark JSON reports both `requested_btf` and selected
 
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
 `--ordering auto` can start with METIS for medium, bounded-degree structures
-that resemble mesh-style nested-dissection cases. Otherwise it compares AMD and
-COLAMD by symbolic fill estimate. When METIS is enabled, `auto` can also
-promote large, expensive first numeric factorizations to METIS if the trial
-factorization materially reduces actual numeric flop/fill cost. This keeps
-METIS available for hard nested-dissection cases without paying its analysis
-cost on small circuit matrices.
+that resemble mesh-style nested-dissection cases and for medium dense-diagonal
+high-degree patterns where delayed promotion would otherwise pay for an
+avoidable first AMD factorization. Otherwise it compares AMD and COLAMD by
+symbolic fill estimate. When METIS is enabled, `auto` can also promote large,
+expensive first numeric factorizations to METIS if the trial factorization
+materially reduces actual numeric flop/fill cost. This keeps METIS available
+for hard nested-dissection cases without paying its analysis cost on small
+circuit matrices.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 
