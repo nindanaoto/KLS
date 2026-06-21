@@ -101,11 +101,13 @@ that resemble mesh-style nested-dissection cases and for medium dense-diagonal
 high-degree patterns where delayed promotion would otherwise pay for an
 avoidable first AMD factorization. Otherwise it compares AMD and COLAMD by
 symbolic fill estimate. Dense-diagonal high-degree METIS starts ask METIS for
-two separator attempts to reduce numeric fill/flops on those harder nested
-dissection cases. Medium bounded-degree METIS starts also use two separator
-attempts with random matching coarsening to reduce nested-dissection factor
-work on mesh-like sparse diagonals. When METIS is enabled, `auto` can also
-promote large, expensive first numeric factorizations to METIS if the trial
+two separator attempts, then refine the nested-dissection rank order with
+CAMD inside coarse rank constraints. This preserves the separator-first shape
+while letting minimum degree reduce local fill/flops on post-layout style
+circuits. Medium bounded-degree METIS starts also use two separator attempts
+with random matching coarsening to reduce nested-dissection factor work on
+mesh-like sparse diagonals. When METIS is enabled, `auto` can also promote
+large, expensive first numeric factorizations to METIS if the trial
 factorization materially reduces actual numeric flop/fill cost. This keeps
 METIS available for hard nested-dissection cases without paying its analysis
 cost on small circuit matrices.

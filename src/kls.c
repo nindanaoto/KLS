@@ -3,6 +3,7 @@
 #include "kls/kls.h"
 
 #include "trilinos_klu_decl.h"
+#include "trilinos_camd.h"
 #ifdef KLS_HAVE_METIS
 #include "metis.h"
 #endif
@@ -817,6 +818,79 @@ static int metis_size_ok(UF_long n, idx_t slots_per_entry) {
   return n >= 0 && (uint64_t)n <= (uint64_t)(SIZE_MAX / (size_t)slots_per_entry);
 }
 
+static UF_long kls_metis_refine_with_camd(UF_long n,
+                                          UF_long *col_ptr,
+                                          UF_long *row_idx,
+                                          const idx_t *metis_perm,
+                                          UF_long group_size,
+                                          UF_long *perm_out) {
+  if (group_size == 0 || group_size >= n) {
+    return 0;
+  }
+
+  UF_long *rank = (UF_long *)malloc((size_t)n * sizeof(*rank));
+  UF_long *constraints = (UF_long *)malloc((size_t)n * sizeof(*constraints));
+  UF_long *camd_perm = (UF_long *)malloc((size_t)n * sizeof(*camd_perm));
+  if (rank == NULL || constraints == NULL || camd_perm == NULL) {
+    free(rank);
+    free(constraints);
+    free(camd_perm);
+    return 0;
+  }
+
+  int valid = 1;
+  for (UF_long k = 0; k < n; ++k) {
+    const idx_t vertex = metis_perm[k];
+    if (vertex < 0 || (uint64_t)vertex >= (uint64_t)n) {
+      valid = 0;
+      break;
+    }
+    rank[(size_t)vertex] = k;
+  }
+  if (!valid) {
+    free(rank);
+    free(constraints);
+    free(camd_perm);
+    return 0;
+  }
+
+  for (UF_long vertex = 0; vertex < n; ++vertex) {
+    constraints[vertex] = rank[vertex] / group_size;
+  }
+
+  double control[TRILINOS_CAMD_CONTROL];
+  double info[TRILINOS_CAMD_INFO];
+  trilinos_camd_l_defaults(control);
+  const UF_long result =
+    trilinos_camd_l_order(n, col_ptr, row_idx, camd_perm, control, info, constraints);
+  if (result < TRILINOS_CAMD_OK) {
+    free(rank);
+    free(constraints);
+    free(camd_perm);
+    return 0;
+  }
+
+  for (UF_long k = 0; k < n; ++k) {
+    perm_out[k] = camd_perm[k];
+  }
+  const double lnz = info[TRILINOS_CAMD_LNZ];
+  free(rank);
+  free(constraints);
+  free(camd_perm);
+  return lnz > 0.0 && lnz < (double)UF_long_max - (double)n
+    ? (UF_long)lnz + n
+    : (UF_long)-1;
+}
+
+static UF_long kls_metis_camd_group_size(UF_long n,
+                                         const UF_long *col_ptr,
+                                         const UF_long *row_idx) {
+  if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
+    return 1024;
+  }
+  return 0;
+}
+
 static UF_long kls_metis_order(UF_long n,
                                UF_long *col_ptr,
                                UF_long *row_idx,
@@ -942,10 +1016,19 @@ static UF_long kls_metis_order(UF_long n,
   idx_t nvtxs = (idx_t)n;
   const int metis_status = METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options,
                                         metis_perm, metis_iperm);
+  UF_long order_lnz = 0;
   if (metis_status == METIS_OK) {
-    for (UF_long i = 0; i < n; ++i) {
-      perm_out[i] = (UF_long)metis_perm[i];
+    UF_long camd_lnz =
+      kls_metis_refine_with_camd(n, col_ptr, row_idx, metis_perm,
+                                 kls_metis_camd_group_size(n, col_ptr, row_idx),
+                                 perm_out);
+    if (camd_lnz == 0) {
+      for (UF_long i = 0; i < n; ++i) {
+        perm_out[i] = (UF_long)metis_perm[i];
+      }
+      camd_lnz = (UF_long)-1;
     }
+    order_lnz = camd_lnz;
   } else if (common != NULL) {
     common->status = (metis_status == METIS_ERROR_MEMORY)
       ? TRILINOS_KLU_OUT_OF_MEMORY
@@ -957,7 +1040,7 @@ static UF_long kls_metis_order(UF_long n,
   free(adjncy);
   free(metis_perm);
   free(metis_iperm);
-  return metis_status == METIS_OK ? (UF_long)-1 : 0;
+  return metis_status == METIS_OK ? order_lnz : 0;
 }
 #endif
 
