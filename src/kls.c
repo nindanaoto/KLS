@@ -30,6 +30,7 @@ struct kls_solver {
   UF_long *col_ptr;
   UF_long *row_idx;
   UF_long *input_to_csc;
+  UF_long *row_perm;
   double *values;
   kls_input_format input_format;
   kls_orientation orientation;
@@ -77,6 +78,32 @@ typedef struct kls_parallel_refactor_worker {
   UF_long numerical_rank;
   UF_long singular_col;
 } kls_parallel_refactor_worker;
+
+typedef struct kls_match_entry {
+  double weight;
+  UF_long row;
+  UF_long col;
+} kls_match_entry;
+
+typedef struct kls_row_permuted_entry {
+  UF_long col;
+  UF_long row;
+  UF_long base_position;
+  double value;
+} kls_row_permuted_entry;
+
+static int choose_symbolic_for_pattern(UF_long n,
+                                       UF_long *col_ptr,
+                                       UF_long *row_idx,
+                                       const kls_options *options,
+                                       trilinos_klu_l_symbolic **symbolic_out,
+                                       trilinos_klu_l_common *common_out,
+                                       kls_ordering *selected_ordering_out,
+                                       double *score_out);
+static void free_candidate(kls_pattern_candidate *candidate);
+static int transpose_candidate(const kls_pattern_candidate *source,
+                               kls_orientation orientation,
+                               kls_pattern_candidate *candidate);
 
 static double kls_now_seconds(void) {
   struct timespec ts;
@@ -289,10 +316,12 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->col_ptr);
   free(solver->row_idx);
   free(solver->input_to_csc);
+  free(solver->row_perm);
   free(solver->values);
   solver->col_ptr = NULL;
   solver->row_idx = NULL;
   solver->input_to_csc = NULL;
+  solver->row_perm = NULL;
   solver->values = NULL;
   solver->n = 0;
   solver->nnz = 0;
@@ -315,16 +344,19 @@ static int compare_double(const void *a, const void *b) {
   return (left > right) - (left < right);
 }
 
-static int choose_auto_scale_from_values(const kls_solver *solver,
-                                         const double *numeric_values) {
-  if (solver == NULL || numeric_values == NULL ||
-      solver->options.scale != KLS_SCALE_AUTO || solver->n <= 0) {
-    return initial_scale(&solver->options);
+static int choose_auto_scale_from_pattern(UF_long n,
+                                          const UF_long *col_ptr,
+                                          const UF_long *row_idx,
+                                          const kls_options *options,
+                                          const double *numeric_values) {
+  if (options == NULL || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
+      options->scale != KLS_SCALE_AUTO || n <= 0) {
+    return options == NULL ? 2 : initial_scale(options);
   }
 
-  double *row_max = (double *)calloc((size_t)solver->n, sizeof(*row_max));
+  double *row_max = (double *)calloc((size_t)n, sizeof(*row_max));
   if (row_max == NULL) {
-    return initial_scale(&solver->options);
+    return initial_scale(options);
   }
 
   /* Cheap first-factor policy:
@@ -339,18 +371,18 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
   double min_diag = DBL_MAX;
   double max_diag = 0.0;
 
-  for (UF_long col = 0; col < solver->n; ++col) {
+  for (UF_long col = 0; col < n; ++col) {
     double diag_abs = 0.0;
-    for (UF_long p = solver->col_ptr[col]; p < solver->col_ptr[col + 1]; ++p) {
-      if (solver->row_idx[p] == col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1]; ++p) {
+      if (row_idx[p] == col) {
         const double value_abs = fabs(numeric_values[p]);
         if (isfinite(value_abs) && value_abs > diag_abs) {
           diag_abs = value_abs;
         }
       }
       const double value_abs = fabs(numeric_values[p]);
-      if (isfinite(value_abs) && value_abs > row_max[(size_t)solver->row_idx[p]]) {
-        row_max[(size_t)solver->row_idx[p]] = value_abs;
+      if (isfinite(value_abs) && value_abs > row_max[(size_t)row_idx[p]]) {
+        row_max[(size_t)row_idx[p]] = value_abs;
       }
     }
     if (diag_abs > 0.0) {
@@ -367,7 +399,7 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
     }
   }
 
-  if ((double)diag_count >= min_diag_fraction * (double)solver->n &&
+  if ((double)diag_count >= min_diag_fraction * (double)n &&
       min_diag > 0.0 && max_diag > 0.0 && max_diag / min_diag <= diag_spread_limit) {
     free(row_max);
     return 0;
@@ -375,7 +407,7 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
 
   size_t row_count = 0;
   size_t row_unit_count = 0;
-  for (UF_long row = 0; row < solver->n; ++row) {
+  for (UF_long row = 0; row < n; ++row) {
     if (row_max[(size_t)row] > 0.0) {
       if (row_max[(size_t)row] >= 0.5 && row_max[(size_t)row] <= 2.0) {
         row_unit_count++;
@@ -384,7 +416,7 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
     }
   }
 
-  if ((double)row_count >= min_diag_fraction * (double)solver->n && row_count > 1u) {
+  if ((double)row_count >= min_diag_fraction * (double)n && row_count > 1u) {
     qsort(row_max, row_count, sizeof(*row_max), compare_double);
     const double row_min = row_max[0];
     const double row_maximum = row_max[row_count - 1u];
@@ -396,18 +428,18 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
     const double diag_unit_fraction = diag_count > 0
       ? (double)diag_unit_count / (double)diag_count
       : 0.0;
-    if ((double)diag_count >= min_diag_fraction * (double)solver->n &&
+    if ((double)diag_count >= min_diag_fraction * (double)n &&
         row_p10 > 0.0 && row_unit_fraction >= 0.80 && row_p90 / row_p10 <= 10.0) {
       free(row_max);
       return 0;
     }
-    if ((double)diag_count >= min_diag_fraction * (double)solver->n &&
+    if ((double)diag_count >= min_diag_fraction * (double)n &&
         row_p10 > 0.0 && diag_unit_fraction >= 0.02 &&
         diag_unit_fraction <= 0.08 && row_p90 / row_p10 >= 1000.0) {
       free(row_max);
       return 0;
     }
-    if ((double)diag_count < min_diag_fraction * (double)solver->n &&
+    if ((double)diag_count < min_diag_fraction * (double)n &&
         row_min > 0.0 && row_p10 > 0.0 &&
         row_maximum / row_min <= row_spread_limit &&
         row_p90 / row_p10 <= row_p90_p10_limit) {
@@ -417,7 +449,16 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
   }
 
   free(row_max);
-  return initial_scale(&solver->options);
+  return initial_scale(options);
+}
+
+static int choose_auto_scale_from_values(const kls_solver *solver,
+                                         const double *numeric_values) {
+  if (solver == NULL) {
+    return 2;
+  }
+  return choose_auto_scale_from_pattern(solver->n, solver->col_ptr, solver->row_idx,
+                                        &solver->options, numeric_values);
 }
 
 static int apply_options_to_common(trilinos_klu_l_common *common, const kls_options *options) {
@@ -740,6 +781,419 @@ static int numeric_candidate_is_better(const trilinos_klu_l_common *current_comm
     return 1;
   }
   return candidate_fill < 0.80 * current_fill;
+}
+
+static int compare_match_entries_desc(const void *a, const void *b) {
+  const kls_match_entry *left = (const kls_match_entry *)a;
+  const kls_match_entry *right = (const kls_match_entry *)b;
+  if (left->weight != right->weight) {
+    return left->weight > right->weight ? -1 : 1;
+  }
+  if (left->row != right->row) {
+    return left->row > right->row ? -1 : 1;
+  }
+  if (left->col != right->col) {
+    return left->col > right->col ? -1 : 1;
+  }
+  return 0;
+}
+
+static int compare_row_permuted_entries(const void *a, const void *b) {
+  const kls_row_permuted_entry *left = (const kls_row_permuted_entry *)a;
+  const kls_row_permuted_entry *right = (const kls_row_permuted_entry *)b;
+  if (left->col != right->col) {
+    return left->col < right->col ? -1 : 1;
+  }
+  if (left->row != right->row) {
+    return left->row < right->row ? -1 : 1;
+  }
+  if (left->base_position != right->base_position) {
+    return left->base_position < right->base_position ? -1 : 1;
+  }
+  return 0;
+}
+
+static int build_greedy_numeric_row_match(UF_long n,
+                                          UF_long nnz,
+                                          const UF_long *col_ptr,
+                                          const UF_long *row_idx,
+                                          const double *numeric_values,
+                                          UF_long **row_perm_out,
+                                          UF_long *matched_out) {
+  if (n <= 0 || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
+      row_perm_out == NULL || matched_out == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  *row_perm_out = NULL;
+  *matched_out = 0;
+
+  kls_match_entry *entries =
+    (kls_match_entry *)malloc((size_t)nnz * sizeof(*entries));
+  UF_long *row_perm = (UF_long *)malloc((size_t)n * sizeof(*row_perm));
+  unsigned char *row_used = (unsigned char *)calloc((size_t)n, sizeof(*row_used));
+  unsigned char *col_used = (unsigned char *)calloc((size_t)n, sizeof(*col_used));
+  if (entries == NULL || row_perm == NULL || row_used == NULL || col_used == NULL) {
+    free(entries);
+    free(row_perm);
+    free(row_used);
+    free(col_used);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+
+  UF_long entry_count = 0;
+  for (UF_long col = 0; col < n; ++col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const double weight = fabs(numeric_values[p]);
+      if (weight > 0.0 && isfinite(weight) && row_idx[p] < n) {
+        entries[entry_count].weight = weight;
+        entries[entry_count].row = row_idx[p];
+        entries[entry_count].col = col;
+        entry_count++;
+      }
+    }
+  }
+  qsort(entries, (size_t)entry_count, sizeof(*entries), compare_match_entries_desc);
+
+  for (UF_long row = 0; row < n; ++row) {
+    row_perm[row] = KLS_KLU_EMPTY;
+  }
+
+  UF_long matched = 0;
+  for (UF_long i = 0; i < entry_count && matched < n; ++i) {
+    const UF_long row = entries[i].row;
+    const UF_long col = entries[i].col;
+    if (!row_used[row] && !col_used[col]) {
+      row_used[row] = 1;
+      col_used[col] = 1;
+      row_perm[row] = col;
+      matched++;
+    }
+  }
+
+  UF_long next_col = 0;
+  for (UF_long row = 0; row < n; ++row) {
+    if (row_perm[row] != KLS_KLU_EMPTY) {
+      continue;
+    }
+    while (next_col < n && col_used[next_col]) {
+      next_col++;
+    }
+    if (next_col >= n) {
+      free(entries);
+      free(row_perm);
+      free(row_used);
+      free(col_used);
+      return KLS_ERR_INVALID_ARGUMENT;
+    }
+    row_perm[row] = next_col;
+    col_used[next_col] = 1;
+  }
+
+  free(entries);
+  free(row_used);
+  free(col_used);
+  *row_perm_out = row_perm;
+  *matched_out = matched;
+  return KLS_OK;
+}
+
+static int build_sorted_row_permuted_pattern(UF_long n,
+                                             UF_long nnz,
+                                             const UF_long *base_col_ptr,
+                                             const UF_long *base_row_idx,
+                                             const double *base_values,
+                                             const UF_long *row_perm,
+                                             const UF_long *input_to_base,
+                                             UF_long **col_ptr_out,
+                                             UF_long **row_idx_out,
+                                             double **values_out,
+                                             UF_long **input_to_csc_out) {
+  if (n <= 0 || base_col_ptr == NULL || base_row_idx == NULL ||
+      base_values == NULL || row_perm == NULL || col_ptr_out == NULL ||
+      row_idx_out == NULL || values_out == NULL || input_to_csc_out == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  *col_ptr_out = NULL;
+  *row_idx_out = NULL;
+  *values_out = NULL;
+  *input_to_csc_out = NULL;
+
+  UF_long *col_ptr = (UF_long *)calloc((size_t)n + 1u, sizeof(*col_ptr));
+  UF_long *row_idx = (UF_long *)malloc((size_t)nnz * sizeof(*row_idx));
+  double *values = (double *)malloc((size_t)nnz * sizeof(*values));
+  UF_long *input_to_csc = (UF_long *)malloc((size_t)nnz * sizeof(*input_to_csc));
+  UF_long *base_to_trial = (UF_long *)malloc((size_t)nnz * sizeof(*base_to_trial));
+  kls_row_permuted_entry *entries =
+    (kls_row_permuted_entry *)malloc((size_t)nnz * sizeof(*entries));
+  if (col_ptr == NULL || row_idx == NULL || values == NULL ||
+      input_to_csc == NULL || base_to_trial == NULL || entries == NULL) {
+    free(col_ptr);
+    free(row_idx);
+    free(values);
+    free(input_to_csc);
+    free(base_to_trial);
+    free(entries);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+
+  UF_long count = 0;
+  for (UF_long col = 0; col < n; ++col) {
+    for (UF_long p = base_col_ptr[col]; p < base_col_ptr[col + 1]; ++p) {
+      const UF_long row = base_row_idx[p];
+      if (row >= n || row_perm[row] >= n) {
+        free(col_ptr);
+        free(row_idx);
+        free(values);
+        free(input_to_csc);
+        free(base_to_trial);
+        free(entries);
+        return KLS_ERR_INVALID_ARGUMENT;
+      }
+      entries[count].col = col;
+      entries[count].row = row_perm[row];
+      entries[count].base_position = p;
+      entries[count].value = base_values[p];
+      count++;
+    }
+  }
+  if (count != nnz) {
+    free(col_ptr);
+    free(row_idx);
+    free(values);
+    free(input_to_csc);
+    free(base_to_trial);
+    free(entries);
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+
+  qsort(entries, (size_t)nnz, sizeof(*entries), compare_row_permuted_entries);
+  for (UF_long p = 0; p < nnz; ++p) {
+    col_ptr[entries[p].col + 1]++;
+  }
+  for (UF_long col = 0; col < n; ++col) {
+    col_ptr[col + 1] += col_ptr[col];
+  }
+  for (UF_long p = 0; p < nnz; ++p) {
+    row_idx[p] = entries[p].row;
+    values[p] = entries[p].value;
+    base_to_trial[entries[p].base_position] = p;
+  }
+  for (UF_long p = 0; p < nnz; ++p) {
+    const UF_long base_position = input_to_base != NULL ? input_to_base[p] : p;
+    if (base_position >= nnz) {
+      free(col_ptr);
+      free(row_idx);
+      free(values);
+      free(input_to_csc);
+      free(base_to_trial);
+      free(entries);
+      return KLS_ERR_INVALID_ARGUMENT;
+    }
+    input_to_csc[p] = base_to_trial[base_position];
+  }
+
+  free(base_to_trial);
+  free(entries);
+  *col_ptr_out = col_ptr;
+  *row_idx_out = row_idx;
+  *values_out = values;
+  *input_to_csc_out = input_to_csc;
+  return KLS_OK;
+}
+
+static int should_try_auto_row_match(const kls_solver *solver) {
+  /* Static row matching is useful only when off-diagonal pivoting is both
+     severe and likely fixable; keep the trial narrow to avoid analysis cost. */
+  if (solver == NULL || solver->numeric == NULL || solver->row_perm != NULL ||
+      solver->input_format != KLS_INPUT_CSC ||
+      solver->options.ordering != KLS_ORDERING_AUTO || solver->n < 3000 ||
+      solver->n > 20000 || solver->common.noffdiag < 230) {
+    return 0;
+  }
+  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
+  return fill >= 50000 && solver->common.flops >= 5.0e5;
+}
+
+static void maybe_select_auto_row_match(kls_solver *solver,
+                                        double *elapsed,
+                                        const double *numeric_values) {
+  if (!should_try_auto_row_match(solver)) {
+    return;
+  }
+
+  const double start = kls_now_seconds();
+  const UF_long *base_col_ptr = solver->col_ptr;
+  const UF_long *base_row_idx = solver->row_idx;
+  const UF_long *base_input_to_csc = solver->input_to_csc;
+  const double *base_values = numeric_values;
+  UF_long *owned_col_ptr = NULL;
+  UF_long *owned_row_idx = NULL;
+  UF_long *owned_input_to_csc = NULL;
+  double *owned_values = NULL;
+  UF_long *row_perm = NULL;
+  UF_long *trial_col_ptr = NULL;
+  UF_long *trial_row_idx = NULL;
+  UF_long *trial_input_to_csc = NULL;
+  double *trial_values = NULL;
+  trilinos_klu_l_symbolic *trial_symbolic = NULL;
+  trilinos_klu_l_numeric *trial_numeric = NULL;
+  trilinos_klu_l_common trial_common;
+  (void)trilinos_klu_l_defaults(&trial_common);
+  int accepted = 0;
+
+  if (solver->orientation == KLS_ORIENTATION_TRANSPOSE) {
+    if (solver->input_to_csc == NULL) {
+      goto done;
+    }
+    kls_pattern_candidate source = {0};
+    source.n = solver->n;
+    source.nnz = solver->nnz;
+    source.col_ptr = solver->col_ptr;
+    source.row_idx = solver->row_idx;
+    source.orientation = solver->orientation;
+
+    kls_pattern_candidate normal = {0};
+    int status = transpose_candidate(&source, KLS_ORIENTATION_NORMAL, &normal);
+    if (status != KLS_OK) {
+      goto done;
+    }
+    owned_input_to_csc =
+      (UF_long *)malloc((size_t)solver->nnz * sizeof(*owned_input_to_csc));
+    if (owned_input_to_csc == NULL) {
+      free_candidate(&normal);
+      goto done;
+    }
+    for (UF_long p = 0; p < solver->nnz; ++p) {
+      const UF_long current_p = solver->input_to_csc[p];
+      const UF_long normal_p = normal.input_to_csc[current_p];
+      owned_input_to_csc[p] = normal_p;
+      normal.values[normal_p] = numeric_values[current_p];
+    }
+    owned_col_ptr = normal.col_ptr;
+    owned_row_idx = normal.row_idx;
+    owned_values = normal.values;
+    base_col_ptr = owned_col_ptr;
+    base_row_idx = owned_row_idx;
+    base_values = owned_values;
+    base_input_to_csc = owned_input_to_csc;
+    normal.col_ptr = NULL;
+    normal.row_idx = NULL;
+    normal.values = NULL;
+    free_candidate(&normal);
+  }
+
+  UF_long matched = 0;
+  int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
+                                              base_col_ptr, base_row_idx,
+                                              base_values, &row_perm, &matched);
+  if (status != KLS_OK) {
+    goto done;
+  }
+  if (1000u * matched < 995u * solver->n) {
+    goto done;
+  }
+
+  status = build_sorted_row_permuted_pattern(solver->n, solver->nnz,
+                                             base_col_ptr, base_row_idx,
+                                             base_values, row_perm,
+                                             base_input_to_csc,
+                                             &trial_col_ptr, &trial_row_idx,
+                                             &trial_values,
+                                             &trial_input_to_csc);
+  if (status != KLS_OK) {
+    goto done;
+  }
+
+  kls_options trial_options = solver->options;
+  kls_ordering trial_ordering = KLS_ORDERING_AUTO;
+  double trial_score = 0.0;
+  status = choose_symbolic_for_pattern(solver->n, trial_col_ptr, trial_row_idx,
+                                       &trial_options, &trial_symbolic,
+                                       &trial_common, &trial_ordering,
+                                       &trial_score);
+  if (status != KLS_OK) {
+    goto done;
+  }
+  trial_common.scale = choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
+                                                      trial_row_idx, &trial_options,
+                                                      trial_values);
+
+  trial_numeric =
+    trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
+                          trial_symbolic, &trial_common);
+  if (trial_numeric == NULL || trial_common.status < 0 ||
+      trial_common.status == TRILINOS_KLU_SINGULAR) {
+    goto done;
+  }
+
+  (void)trilinos_klu_l_flops(trial_symbolic, trial_numeric, &trial_common);
+  (void)trilinos_klu_l_rcond(trial_symbolic, trial_numeric, &trial_common);
+  if (!numeric_candidate_is_better(&solver->common, solver->numeric,
+                                   &trial_common, trial_numeric) ||
+      (solver->common.rcond > 0.0 && trial_common.rcond > 0.0 &&
+       trial_common.rcond < 0.01 * solver->common.rcond)) {
+    goto done;
+  }
+
+  trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *old_numeric = solver->numeric;
+  trilinos_klu_l_common old_common = solver->common;
+  UF_long *old_col_ptr = solver->col_ptr;
+  UF_long *old_row_idx = solver->row_idx;
+  UF_long *old_input_to_csc = solver->input_to_csc;
+  double *old_values = solver->values;
+
+  solver->col_ptr = trial_col_ptr;
+  solver->row_idx = trial_row_idx;
+  solver->input_to_csc = trial_input_to_csc;
+  solver->values = trial_values;
+  solver->orientation = KLS_ORIENTATION_NORMAL;
+  solver->row_perm = row_perm;
+  solver->symbolic = trial_symbolic;
+  solver->numeric = trial_numeric;
+  solver->common = trial_common;
+  solver->stats.selected_ordering = trial_ordering;
+  solver->stats.selected_orientation = solver->orientation;
+  solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
+  solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
+  solver->stats.structural_rank = (int64_t)solver->symbolic->structural_rank;
+  solver->stats.estimated_flops = solver->symbolic->est_flops;
+
+  trilinos_klu_l_free_numeric(&old_numeric, &old_common);
+  trilinos_klu_l_free_symbolic(&old_symbolic, &old_common);
+  free(old_col_ptr);
+  free(old_row_idx);
+  free(old_input_to_csc);
+  free(old_values);
+
+  trial_col_ptr = NULL;
+  trial_row_idx = NULL;
+  trial_input_to_csc = NULL;
+  trial_values = NULL;
+  row_perm = NULL;
+  trial_symbolic = NULL;
+  trial_numeric = NULL;
+  accepted = 1;
+
+done:
+  if (!accepted) {
+    if (trial_numeric != NULL) {
+      trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
+    }
+    if (trial_symbolic != NULL) {
+      trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
+    }
+    free(row_perm);
+    free(trial_col_ptr);
+    free(trial_row_idx);
+    free(trial_input_to_csc);
+    free(trial_values);
+  }
+  free(owned_col_ptr);
+  free(owned_row_idx);
+  free(owned_input_to_csc);
+  free(owned_values);
+  *elapsed += kls_now_seconds() - start;
 }
 
 static int should_try_auto_scale(const kls_solver *solver) {
@@ -1727,6 +2181,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
   (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
+  maybe_select_auto_row_match(solver, &elapsed, numeric_values);
   maybe_select_auto_scale(solver, &elapsed, numeric_values);
 #ifdef KLS_HAVE_METIS
   maybe_promote_auto_metis(solver, &elapsed, numeric_values);
@@ -1794,18 +2249,46 @@ static int solve_impl(kls_solver *solver,
   }
 
   const double start = kls_now_seconds();
-  if (b != x || ldb != ldx) {
+  const int kernel_transpose =
+    (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
+  double *perm_workspace = NULL;
+  if (solver->row_perm != NULL) {
+    perm_workspace = (double *)malloc((size_t)solver->n * sizeof(*perm_workspace));
+    if (perm_workspace == NULL) {
+      return KLS_ERR_OUT_OF_MEMORY;
+    }
+  }
+
+  if (solver->row_perm != NULL && !kernel_transpose) {
+    for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
+      const double *src = b + rhs * ldb;
+      double *dst = x + rhs * ldx;
+      for (UF_long row = 0; row < solver->n; ++row) {
+        perm_workspace[solver->row_perm[row]] = src[row];
+      }
+      memcpy(dst, perm_workspace, (size_t)solver->n * sizeof(double));
+    }
+  } else if (b != x || ldb != ldx) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       memmove(x + rhs * ldx, b + rhs * ldb, (size_t)solver->n * sizeof(double));
     }
   }
-  const int kernel_transpose =
-    (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
+
   const UF_long ok = kernel_transpose
     ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric, (UF_long)ldx,
                             (UF_long)nrhs, x, &solver->common)
     : trilinos_klu_l_solve(solver->symbolic, solver->numeric, (UF_long)ldx,
                            (UF_long)nrhs, x, &solver->common);
+  if (ok && solver->row_perm != NULL && kernel_transpose) {
+    for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
+      double *dst = x + rhs * ldx;
+      for (UF_long row = 0; row < solver->n; ++row) {
+        perm_workspace[row] = dst[solver->row_perm[row]];
+      }
+      memcpy(dst, perm_workspace, (size_t)solver->n * sizeof(double));
+    }
+  }
+  free(perm_workspace);
   solver->stats.solve_seconds = kls_now_seconds() - start;
   fill_numeric_stats(solver);
 
