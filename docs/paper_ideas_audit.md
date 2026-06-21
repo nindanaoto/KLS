@@ -109,6 +109,19 @@ eligible. It passed correctness tests and helped some no-scale cases, but it
 regressed other representative circuit cases such as `bcircuit` and `rajat03`.
 The prototype was removed because it did not represent a general improvement.
 
+A work-balanced BTF refactor scheduler was tested by sorting independent BTF
+blocks by an LU-length work estimate before launching worker threads. It was
+removed because the extra scheduling work did not improve the dominant-block
+cases where BTF-block threading is eligible, and it regressed representative
+threaded refactor timings on `ckt11752_tr_0` and `circuit_4`.
+
+The reactive static-pivoting gate was also widened from medium matrices to
+larger sparse matrices with high off-diagonal pivot counts. The existing
+acceptance checks rejected `rajat22`, but only after paying a large matching
+and refactorization trial cost; `rajat27` accepted a better numeric pattern but
+lost on the repeated-SPICE metric because the one-time trial cost dominated.
+The gate was restored to avoid converting matching into a broad overhead.
+
 ## Recommended General Work
 
 1. Implement a real matching/scaling stage first, because MC64-style static
