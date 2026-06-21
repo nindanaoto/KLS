@@ -55,7 +55,8 @@ statistics.
 Use `--scale auto|-1|0|1|2` to compare KLS/KLU row scaling modes when studying
 pivoting and refactorization behavior. KLS defaults to `auto`, which can start
 unscaled for mostly diagonal circuit matrices with moderate diagonal magnitude
-spread, otherwise starts from KLU's max row scaling mode (`2`). For large
+spread, or sum-scaled when the diagonal is sparse but row magnitudes are already
+balanced. Otherwise it starts from KLU's max row scaling mode (`2`). For large
 expensive cases, `auto` can still try other numeric scaling modes when actual
 flop/fill evidence justifies the extra work. Explicit numeric scale values
 remain fixed.

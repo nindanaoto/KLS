@@ -107,17 +107,31 @@ static int initial_scale(const kls_options *options) {
   return options->scale == KLS_SCALE_AUTO ? 2 : options->scale;
 }
 
-static int auto_scale_prefers_unscaled(const kls_solver *solver,
-                                       const double *numeric_values) {
+static int compare_double(const void *a, const void *b) {
+  const double left = *(const double *)a;
+  const double right = *(const double *)b;
+  return (left > right) - (left < right);
+}
+
+static int choose_auto_scale_from_values(const kls_solver *solver,
+                                         const double *numeric_values) {
   if (solver == NULL || numeric_values == NULL ||
       solver->options.scale != KLS_SCALE_AUTO || solver->n <= 0) {
-    return 0;
+    return initial_scale(&solver->options);
   }
 
-  /* Avoid paying for row scaling when the circuit diagonal already gives a
-     cheap, well-populated magnitude reference. */
+  double *row_max = (double *)calloc((size_t)solver->n, sizeof(*row_max));
+  if (row_max == NULL) {
+    return initial_scale(&solver->options);
+  }
+
+  /* Cheap first-factor policy:
+     - keep well-populated, moderately scaled circuit diagonals unscaled;
+     - use sum scaling for sparse diagonals whose row magnitudes are balanced. */
   const double diag_spread_limit = 1.0e7;
   const double min_diag_fraction = 0.90;
+  const double row_spread_limit = 1.0e4;
+  const double row_p90_p10_limit = 5.5;
   UF_long diag_count = 0;
   double min_diag = DBL_MAX;
   double max_diag = 0.0;
@@ -131,6 +145,10 @@ static int auto_scale_prefers_unscaled(const kls_solver *solver,
           diag_abs = value_abs;
         }
       }
+      const double value_abs = fabs(numeric_values[p]);
+      if (isfinite(value_abs) && value_abs > row_max[(size_t)solver->row_idx[p]]) {
+        row_max[(size_t)solver->row_idx[p]] = value_abs;
+      }
     }
     if (diag_abs > 0.0) {
       diag_count++;
@@ -143,20 +161,38 @@ static int auto_scale_prefers_unscaled(const kls_solver *solver,
     }
   }
 
-  if ((double)diag_count < min_diag_fraction * (double)solver->n ||
-      min_diag <= 0.0 || max_diag <= 0.0) {
+  if ((double)diag_count >= min_diag_fraction * (double)solver->n &&
+      min_diag > 0.0 && max_diag > 0.0 && max_diag / min_diag <= diag_spread_limit) {
+    free(row_max);
     return 0;
   }
-  return max_diag / min_diag <= diag_spread_limit;
-}
 
-static void choose_initial_auto_scale(kls_solver *solver,
-                                      const double *numeric_values) {
-  if (solver == NULL || solver->options.scale != KLS_SCALE_AUTO) {
-    return;
+  size_t row_count = 0;
+  for (UF_long row = 0; row < solver->n; ++row) {
+    if (row_max[(size_t)row] > 0.0) {
+      row_max[row_count++] = row_max[(size_t)row];
+    }
   }
-  solver->common.scale =
-    auto_scale_prefers_unscaled(solver, numeric_values) ? 0 : initial_scale(&solver->options);
+
+  if ((double)diag_count < min_diag_fraction * (double)solver->n &&
+      (double)row_count >= min_diag_fraction * (double)solver->n && row_count > 1u) {
+    qsort(row_max, row_count, sizeof(*row_max), compare_double);
+    const double row_min = row_max[0];
+    const double row_maximum = row_max[row_count - 1u];
+    const size_t p10_index = (row_count - 1u) / 10u;
+    const size_t p90_index = ((row_count - 1u) * 9u) / 10u;
+    const double row_p10 = row_max[p10_index];
+    const double row_p90 = row_max[p90_index];
+    if (row_min > 0.0 && row_p10 > 0.0 &&
+        row_maximum / row_min <= row_spread_limit &&
+        row_p90 / row_p10 <= row_p90_p10_limit) {
+      free(row_max);
+      return 1;
+    }
+  }
+
+  free(row_max);
+  return initial_scale(&solver->options);
 }
 
 static int apply_options_to_common(trilinos_klu_l_common *common, const kls_options *options) {
@@ -1093,7 +1129,7 @@ int kls_factor(kls_solver *solver, const double *values) {
 
   free_numeric(solver);
   if (!had_numeric) {
-    choose_initial_auto_scale(solver, numeric_values);
+    solver->common.scale = choose_auto_scale_from_values(solver, numeric_values);
   }
   const double start = kls_now_seconds();
   solver->numeric = trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,

@@ -81,6 +81,41 @@ static int test_csr_and_refactor(void) {
   return ok;
 }
 
+static int test_sparse_diagonal_auto_scale(void) {
+  const int32_t ap[] = {0, 1, 3, 4};
+  const int32_t ai[] = {1, 0, 1, 2};
+  const double ax[] = {1.0, 1.0, 2.0, 3.0};
+  const double b[] = {2.0, 5.0, 9.0};
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+
+  if (!require_ok(kls_create(&solver), "create")) return 0;
+  if (!require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0, &options),
+                  "analyze sparse diagonal")) return 0;
+  if (!require_ok(kls_factor(solver, ax), "factor sparse diagonal")) return 0;
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0), "solve sparse diagonal")) return 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats), "stats sparse diagonal")) return 0;
+  if (stats.selected_scale != 1) {
+    fprintf(stderr, "unexpected sparse-diagonal auto scale: %d\n", stats.selected_scale);
+    return 0;
+  }
+
+  const int ok = close_enough(x[0], 1.0) && close_enough(x[1], 2.0) && close_enough(x[2], 3.0);
+  if (!ok) {
+    fprintf(stderr, "unexpected sparse-diagonal solution: %.17g %.17g %.17g\n",
+            x[0], x[1], x[2]);
+  }
+  kls_destroy(solver);
+  return ok;
+}
+
 static int test_forced_transpose_orientation(void) {
   const int32_t ap[] = {0, 2, 5, 8};
   const int32_t ai[] = {0, 1, 0, 1, 2, 0, 1, 2};
@@ -199,6 +234,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_csr_and_refactor()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_sparse_diagonal_auto_scale()) {
     return EXIT_FAILURE;
   }
   if (!test_forced_transpose_orientation()) {
