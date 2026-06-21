@@ -820,6 +820,9 @@ static UF_long kls_metis_order(UF_long n,
   METIS_SetDefaultOptions(options);
   options[METIS_OPTION_NUMBERING] = 0;
   options[METIS_OPTION_SEED] = 0;
+  if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
+    options[METIS_OPTION_NSEPS] = 2;
+  }
 
   idx_t nvtxs = (idx_t)n;
   const int metis_status = METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options,

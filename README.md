@@ -98,7 +98,9 @@ Use `--ordering metis` to force METIS nested-dissection ordering. The default
 that resemble mesh-style nested-dissection cases and for medium dense-diagonal
 high-degree patterns where delayed promotion would otherwise pay for an
 avoidable first AMD factorization. Otherwise it compares AMD and COLAMD by
-symbolic fill estimate. When METIS is enabled, `auto` can also promote large,
+symbolic fill estimate. Dense-diagonal high-degree METIS starts ask METIS for
+two separator attempts to reduce numeric fill/flops on those harder nested
+dissection cases. When METIS is enabled, `auto` can also promote large,
 expensive first numeric factorizations to METIS if the trial factorization
 materially reduces actual numeric flop/fill cost. This keeps METIS available
 for hard nested-dissection cases without paying its analysis cost on small
