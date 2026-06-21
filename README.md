@@ -62,10 +62,10 @@ flop/fill evidence justifies the extra work. Explicit numeric scale values
 remain fixed.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
-decomposition. With BTF enabled, KLS can still bypass BTF after analysis for
-large matrices where BTF finds a single block and a no-BTF symbolic retry keeps
-the fill estimate within tolerance; benchmark JSON reports both `requested_btf`
-and selected `btf`.
+decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF
+after analysis for large matrices where BTF finds a single block and a no-BTF
+symbolic retry keeps the fill estimate within tolerance; benchmark JSON reports
+both `requested_btf` and selected `btf`.
 
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
 `--ordering auto` first compares AMD and COLAMD by symbolic fill estimate. When

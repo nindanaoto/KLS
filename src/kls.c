@@ -622,9 +622,6 @@ static int choose_symbolic_for_pattern(UF_long n,
     if (status == KLS_OK) {
       *selected_ordering_out = options->ordering;
       *score_out = symbolic_score(*symbolic_out);
-      maybe_retry_single_block_without_btf(n, col_ptr, row_idx, options,
-                                           options->ordering, symbolic_out,
-                                           common_out, score_out);
     }
     return status;
   }
@@ -908,9 +905,9 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.analysis_seconds = elapsed;
   solver->stats.selected_orientation = solver->orientation;
   solver->stats.selected_scale = (int)solver->common.scale;
-  solver->stats.selected_btf = solver->common.btf ? 1 : 0;
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
+    solver->stats.selected_btf = solver->symbolic->do_btf ? 1 : 0;
     solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
     solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
     solver->stats.structural_rank = (int64_t)solver->symbolic->structural_rank;
@@ -925,7 +922,8 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
 static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.last_kernel_status = (int)solver->common.status;
   solver->stats.selected_scale = (int)solver->common.scale;
-  solver->stats.selected_btf = solver->common.btf ? 1 : 0;
+  solver->stats.selected_btf =
+    (solver->symbolic != NULL && solver->symbolic->do_btf) ? 1 : 0;
   solver->stats.numerical_rank = (int64_t)solver->common.numerical_rank;
   solver->stats.singular_col = (int64_t)solver->common.singular_col;
   solver->stats.offdiag_pivots = (int64_t)solver->common.noffdiag;
