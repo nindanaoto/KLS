@@ -772,6 +772,62 @@ static int should_start_auto_with_metis(UF_long n,
 }
 #endif
 
+static int should_start_auto_without_btf(UF_long n,
+                                         const UF_long *col_ptr,
+                                         const UF_long *row_idx,
+                                         const kls_options *options) {
+  if (options == NULL || !options->use_btf || n < 50000 ||
+      col_ptr == NULL || row_idx == NULL || n > UF_long_max / 8 ||
+      col_ptr[n] > 8u * n) {
+    return 0;
+  }
+
+  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_count = 0;
+  UF_long max_col_degree = 0;
+  int low_degree = 1;
+  for (UF_long col = 0; col < n && low_degree; ++col) {
+    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
+    if (col_degree > max_col_degree) {
+      max_col_degree = col_degree;
+    }
+    if (col_degree > 64) {
+      low_degree = 0;
+      break;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] >= 64) {
+        low_degree = 0;
+        break;
+      }
+      row_degree[row]++;
+      if (row == col) {
+        diagonal_count++;
+      }
+    }
+  }
+
+  UF_long max_row_degree = 0;
+  for (UF_long row = 0; row < n && low_degree; ++row) {
+    if (row_degree[row] == 0) {
+      low_degree = 0;
+      break;
+    }
+    if (row_degree[row] > max_row_degree) {
+      max_row_degree = row_degree[row];
+    }
+  }
+  free(row_degree);
+
+  return low_degree && max_col_degree <= 64 && max_row_degree <= 64 &&
+         200.0 * (double)diagonal_count >= 199.0 * (double)n;
+}
+
 static int numeric_candidate_is_better(const trilinos_klu_l_common *current_common,
                                        const trilinos_klu_l_numeric *current_numeric,
                                        const trilinos_klu_l_common *candidate_common,
@@ -1681,6 +1737,13 @@ static int choose_symbolic_for_pattern(UF_long n,
   }
 #endif
 
+  kls_options auto_options = *options;
+  const kls_options *symbolic_options = options;
+  if (should_start_auto_without_btf(n, col_ptr, row_idx, options)) {
+    auto_options.use_btf = 0;
+    symbolic_options = &auto_options;
+  }
+
   const kls_ordering candidates[] = {KLS_ORDERING_AMD, KLS_ORDERING_COLAMD};
   trilinos_klu_l_symbolic *best_symbolic = NULL;
   trilinos_klu_l_common best_common;
@@ -1691,14 +1754,14 @@ static int choose_symbolic_for_pattern(UF_long n,
   for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
     trilinos_klu_l_symbolic *candidate_symbolic = NULL;
     trilinos_klu_l_common candidate_common;
-    int status = analyze_with_ordering(n, col_ptr, row_idx, options, candidates[i],
+    int status = analyze_with_ordering(n, col_ptr, row_idx, symbolic_options, candidates[i],
                                        &candidate_symbolic, &candidate_common);
     if (status != KLS_OK) {
       continue;
     }
     const double score = symbolic_score(candidate_symbolic);
     double selected_score = score;
-    maybe_retry_single_block_without_btf(n, col_ptr, row_idx, options,
+    maybe_retry_single_block_without_btf(n, col_ptr, row_idx, symbolic_options,
                                          candidates[i], &candidate_symbolic,
                                          &candidate_common, &selected_score);
     if (!any_ok || selected_score < best_score) {
