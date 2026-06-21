@@ -1739,11 +1739,11 @@ static int should_try_auto_row_match(const kls_solver *solver) {
   return solver->common.noffdiag >= 128 || offdiag_ratio >= 0.005;
 }
 
-static void maybe_select_auto_row_match(kls_solver *solver,
-                                        double *elapsed,
-                                        const double *numeric_values) {
+static int maybe_select_auto_row_match(kls_solver *solver,
+                                       double *elapsed,
+                                       const double *numeric_values) {
   if (!should_try_auto_row_match(solver)) {
-    return;
+    return 0;
   }
 
   const double start = kls_now_seconds();
@@ -1921,6 +1921,7 @@ done:
   free(owned_input_to_csc);
   free(owned_values);
   *elapsed += kls_now_seconds() - start;
+  return accepted;
 }
 
 static void maybe_select_pre_static_row_match(kls_solver *solver,
@@ -3250,7 +3251,9 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
   (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
-  maybe_select_auto_row_match(solver, &elapsed, numeric_values);
+  if (maybe_select_auto_row_match(solver, &elapsed, numeric_values)) {
+    numeric_values = solver->values != NULL ? solver->values : numeric_values;
+  }
   maybe_select_auto_scale(solver, &elapsed, numeric_values);
 #ifdef KLS_HAVE_METIS
   maybe_promote_auto_metis(solver, &elapsed, numeric_values);
