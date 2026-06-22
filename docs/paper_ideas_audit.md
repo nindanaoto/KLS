@@ -774,6 +774,17 @@ scaled single-block guard: `rajat30` was only slightly positive at about
 The block-lookup branch is therefore not the next useful source of the CKTSO
 gap.
 
+The EGraph pipeline completion array was also tested with retained per-column
+level labels so cluster-phase columns could skip atomic completion stores and
+pipeline waits for predecessors known to be before the split level. This was
+removed before commit because it helped `rajat30` and repeated-factor `nxp1`
+but regressed the largest EGraph guard: `rajat30` moved from about
+0.316s/0.314s to 0.310s/0.305s, `nxp1` moved from about 0.687s/0.673s to
+0.665s/0.674s, but `G3_circuit` regressed from about 18.39s/18.38s to
+18.73s/18.75s. The retained pipeline publication remains the simpler
+per-completed-column atomic store until a fuller scheduler changes the tail
+execution model.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
