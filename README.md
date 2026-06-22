@@ -131,11 +131,16 @@ or react after a high off-diagonal pivot count. The permutation moves large
 entries onto the diagonal. For larger weak-diagonal candidates, the matching
 augment uses a layered bipartite search so KLS can complete many independent
 augmenting paths per pass instead of restarting a search from each unmatched
-row. Medium static-pivot matches then run a bounded alternating-cycle
-improvement pass that can accept profitable three- and four-row exchanges
-missed by the pair-swap pass. For matched diagonals with large numeric spread,
-KLS can also trial matching-derived row/column equilibration. The equilibration
-first tries a
+row. For cheap small candidates, KLS can instead run an exact sparse
+augmenting-path assignment on transformed log magnitudes, equivalent to a
+maximum-product diagonal match when a full matching is found. The exact path is
+gated by matrix order and `n * nnz` work because the straightforward sparse
+min-cost assignment is not fast enough to replace production MC64 on larger
+SPICE matrices. Medium static-pivot matches then run a bounded
+alternating-cycle improvement pass that can accept profitable three- and
+four-row exchanges missed by the pair-swap pass. For matched diagonals with
+large numeric spread, KLS can also trial matching-derived row/column
+equilibration. The equilibration first tries a
 dual-potential scaling pass that mirrors MC64's diagonal-normalization
 conditions, rejecting cases whose greedy matching leaves large positive-cycle
 evidence, then falls back to the older heuristic balancing pass. KLS keeps the
@@ -145,7 +150,8 @@ and reciprocal-condition evidence improve. Medium-large static-match
 candidates with both majority missing and majority weak diagonals can keep the
 row permutation but prefer unscaled values, avoiding matching-equilibration
 setup when it would increase fill. Benchmark JSON reports both whether static
-pivoting was enabled and whether KLS selected it.
+pivoting was enabled, whether KLS selected it, and whether the accepted static
+match used exact assignment.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF

@@ -525,6 +525,7 @@ int main(int argc, char **argv) {
            ",\"pivot_tolerance\":%.9g,\"selected_pivot_tolerance\":%.9g"
            ",\"requested_btf\":%s,\"btf\":%s,\"fast_factor\":%s"
            ",\"static_pivoting\":%s,\"selected_static_pivoting\":%s"
+           ",\"selected_exact_matching\":%s"
            ",\"analysis_seconds\":%.9g"
            ",\"initial_factor_seconds\":%.9g"
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
@@ -550,6 +551,7 @@ int main(int argc, char **argv) {
            options.fast_factor ? "true" : "false",
            options.static_pivoting ? "true" : "false",
            stats.selected_static_pivoting ? "true" : "false",
+           stats.selected_exact_matching ? "true" : "false",
            stats.analysis_seconds, initial_factor_seconds,
            factor_avg, refactor_avg, solve_avg, tsolve_avg,
            residual, rel_residual, stats.nblocks, stats.max_block,
@@ -576,6 +578,8 @@ int main(int argc, char **argv) {
     printf("static pivoting: %s\n", options.static_pivoting ? "on" : "off");
     printf("selected static pivoting: %s\n",
            stats.selected_static_pivoting ? "on" : "off");
+    printf("selected exact matching: %s\n",
+           stats.selected_exact_matching ? "on" : "off");
     printf("analysis: %.6f s\n", stats.analysis_seconds);
     printf("initial factor: %.6f s\n", initial_factor_seconds);
     printf("factor avg: %.6f s\n", factor_avg);

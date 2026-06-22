@@ -57,6 +57,7 @@ struct kls_solver {
   int auto_metis_checked;
   int auto_pivot_checked;
   int auto_scale_checked;
+  int exact_matching_selected;
 };
 
 typedef struct kls_pattern_candidate {
@@ -154,6 +155,28 @@ typedef struct kls_row_match_graph {
   UF_long *col_idx;
   double *log_weight;
 } kls_row_match_graph;
+
+typedef struct kls_assignment_edge {
+  size_t to;
+  size_t next;
+  size_t rev;
+  unsigned char cap;
+  unsigned char row_col_edge;
+  UF_long row;
+  UF_long col;
+  double cost;
+} kls_assignment_edge;
+
+typedef struct kls_heap_item {
+  size_t node;
+  double key;
+} kls_heap_item;
+
+typedef struct kls_min_heap {
+  kls_heap_item *items;
+  size_t size;
+  size_t capacity;
+} kls_min_heap;
 
 typedef struct kls_row_permuted_entry {
   UF_long col;
@@ -758,6 +781,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_metis_checked = 0;
   solver->auto_pivot_checked = 0;
   solver->auto_scale_checked = 0;
+  solver->exact_matching_selected = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
   kls_clear_fast_reject_stats(solver);
@@ -2195,6 +2219,429 @@ static double row_match_log_weight(const kls_row_match_graph *graph,
   return -DBL_MAX;
 }
 
+static int exact_weighted_match_is_affordable(UF_long n, UF_long nnz) {
+  if (n <= 0 || nnz <= 0 || n > 4000u || nnz > 75000u) {
+    return 0;
+  }
+  return (double)n * (double)nnz <= 5.0e7;
+}
+
+static void kls_heap_free(kls_min_heap *heap) {
+  if (heap == NULL) {
+    return;
+  }
+  free(heap->items);
+  heap->items = NULL;
+  heap->size = 0;
+  heap->capacity = 0;
+}
+
+static int kls_heap_push(kls_min_heap *heap, size_t node, double key) {
+  if (heap == NULL) {
+    return 0;
+  }
+  if (heap->size == heap->capacity) {
+    const size_t next_capacity = heap->capacity == 0 ? 1024u : heap->capacity * 2u;
+    if (next_capacity <= heap->capacity) {
+      return 0;
+    }
+    kls_heap_item *next =
+      (kls_heap_item *)realloc(heap->items, next_capacity * sizeof(*next));
+    if (next == NULL) {
+      return 0;
+    }
+    heap->items = next;
+    heap->capacity = next_capacity;
+  }
+
+  size_t pos = heap->size++;
+  while (pos > 0) {
+    const size_t parent = (pos - 1u) / 2u;
+    if (heap->items[parent].key <= key) {
+      break;
+    }
+    heap->items[pos] = heap->items[parent];
+    pos = parent;
+  }
+  heap->items[pos].node = node;
+  heap->items[pos].key = key;
+  return 1;
+}
+
+static int kls_heap_pop(kls_min_heap *heap, kls_heap_item *item_out) {
+  if (heap == NULL || item_out == NULL || heap->size == 0) {
+    return 0;
+  }
+  *item_out = heap->items[0];
+  const kls_heap_item last = heap->items[--heap->size];
+  size_t pos = 0;
+  while (1) {
+    const size_t left = 2u * pos + 1u;
+    const size_t right = left + 1u;
+    if (left >= heap->size) {
+      break;
+    }
+    size_t child = left;
+    if (right < heap->size &&
+        heap->items[right].key < heap->items[left].key) {
+      child = right;
+    }
+    if (heap->items[child].key >= last.key) {
+      break;
+    }
+    heap->items[pos] = heap->items[child];
+    pos = child;
+  }
+  if (heap->size > 0) {
+    heap->items[pos] = last;
+  }
+  return 1;
+}
+
+static int kls_assignment_add_edge(size_t from,
+                                   size_t to,
+                                   double cost,
+                                   unsigned char row_col_edge,
+                                   UF_long row,
+                                   UF_long col,
+                                   size_t *head,
+                                   kls_assignment_edge *edges,
+                                   size_t edge_capacity,
+                                   size_t *edge_count) {
+  if (head == NULL || edges == NULL || edge_count == NULL ||
+      *edge_count + 2u > edge_capacity) {
+    return 0;
+  }
+  const size_t forward = *edge_count;
+  const size_t reverse = forward + 1u;
+
+  edges[forward].to = to;
+  edges[forward].next = head[from];
+  edges[forward].rev = reverse;
+  edges[forward].cap = 1;
+  edges[forward].row_col_edge = row_col_edge;
+  edges[forward].row = row;
+  edges[forward].col = col;
+  edges[forward].cost = cost;
+  head[from] = forward;
+
+  edges[reverse].to = from;
+  edges[reverse].next = head[to];
+  edges[reverse].rev = forward;
+  edges[reverse].cap = 0;
+  edges[reverse].row_col_edge = 0;
+  edges[reverse].row = KLS_KLU_EMPTY;
+  edges[reverse].col = KLS_KLU_EMPTY;
+  edges[reverse].cost = -cost;
+  head[to] = reverse;
+
+  *edge_count += 2u;
+  return 1;
+}
+
+static int kls_assignment_shortest_path(size_t node_count,
+                                        const size_t *head,
+                                        const kls_assignment_edge *edges,
+                                        const double *potential,
+                                        double *dist,
+                                        size_t *prev_edge,
+                                        unsigned char *done,
+                                        size_t source,
+                                        size_t sink,
+                                        kls_min_heap *heap) {
+  const double infinity = DBL_MAX / 4.0;
+  for (size_t i = 0; i < node_count; ++i) {
+    dist[i] = infinity;
+    prev_edge[i] = SIZE_MAX;
+    done[i] = 0;
+  }
+  heap->size = 0;
+  dist[source] = 0.0;
+  if (!kls_heap_push(heap, source, 0.0)) {
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+
+  kls_heap_item item;
+  while (kls_heap_pop(heap, &item)) {
+    const size_t node = item.node;
+    if (done[node] || item.key > dist[node] + 1.0e-12) {
+      continue;
+    }
+    done[node] = 1;
+    for (size_t edge_id = head[node]; edge_id != SIZE_MAX;
+         edge_id = edges[edge_id].next) {
+      const kls_assignment_edge *edge = &edges[edge_id];
+      if (edge->cap == 0) {
+        continue;
+      }
+      double reduced = edge->cost + potential[node] - potential[edge->to];
+      if (reduced < 0.0) {
+        reduced = 0.0;
+      }
+      const double next_dist = dist[node] + reduced;
+      if (next_dist + 1.0e-12 < dist[edge->to]) {
+        dist[edge->to] = next_dist;
+        prev_edge[edge->to] = edge_id;
+        if (!kls_heap_push(heap, edge->to, next_dist)) {
+          return KLS_ERR_OUT_OF_MEMORY;
+        }
+      }
+    }
+  }
+
+  return done[sink] ? KLS_OK : KLS_ERR_UNSUPPORTED;
+}
+
+static int complete_unmatched_row_match(UF_long n,
+                                        UF_long *row_perm,
+                                        UF_long *col_match) {
+  if (row_perm == NULL || col_match == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  UF_long next_col = 0;
+  for (UF_long row = 0; row < n; ++row) {
+    if (row_perm[row] != KLS_KLU_EMPTY) {
+      continue;
+    }
+    while (next_col < n && col_match[next_col] != KLS_KLU_EMPTY) {
+      next_col++;
+    }
+    if (next_col >= n) {
+      return KLS_ERR_INVALID_ARGUMENT;
+    }
+    row_perm[row] = next_col;
+    col_match[next_col] = row;
+  }
+  return KLS_OK;
+}
+
+static int build_exact_numeric_row_match(UF_long n,
+                                         UF_long nnz,
+                                         const UF_long *col_ptr,
+                                         const UF_long *row_idx,
+                                         const double *numeric_values,
+                                         UF_long **row_perm_out,
+                                         UF_long **col_match_out,
+                                         UF_long *matched_out) {
+  if (n <= 0 || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
+      row_perm_out == NULL || col_match_out == NULL || matched_out == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  *row_perm_out = NULL;
+  *col_match_out = NULL;
+  *matched_out = 0;
+  (void)nnz;
+
+  double *col_max_log = (double *)malloc((size_t)n * sizeof(*col_max_log));
+  UF_long *row_perm = (UF_long *)malloc((size_t)n * sizeof(*row_perm));
+  UF_long *col_match = (UF_long *)malloc((size_t)n * sizeof(*col_match));
+  if (col_max_log == NULL || row_perm == NULL || col_match == NULL) {
+    free(col_max_log);
+    free(row_perm);
+    free(col_match);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    col_max_log[i] = -DBL_MAX;
+    row_perm[i] = KLS_KLU_EMPTY;
+    col_match[i] = KLS_KLU_EMPTY;
+  }
+
+  UF_long valid_edges = 0;
+  for (UF_long col = 0; col < n; ++col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      const double abs_value = fabs(numeric_values[p]);
+      if (row >= n || abs_value <= 0.0 || !isfinite(abs_value)) {
+        continue;
+      }
+      const double log_value = log(abs_value);
+      if (!isfinite(log_value)) {
+        continue;
+      }
+      if (log_value > col_max_log[col]) {
+        col_max_log[col] = log_value;
+      }
+      valid_edges++;
+    }
+  }
+  if (valid_edges == 0 || !exact_weighted_match_is_affordable(n, valid_edges)) {
+    free(col_max_log);
+    free(row_perm);
+    free(col_match);
+    return KLS_ERR_UNSUPPORTED;
+  }
+
+  const size_t node_count = (size_t)2u * (size_t)n + 2u;
+  const size_t source = node_count - 2u;
+  const size_t sink = node_count - 1u;
+  const size_t arc_count = (size_t)valid_edges + (size_t)2u * (size_t)n;
+  if (arc_count > SIZE_MAX / (2u * sizeof(kls_assignment_edge))) {
+    free(col_max_log);
+    free(row_perm);
+    free(col_match);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+  const size_t edge_capacity = 2u * arc_count;
+
+  size_t *head = (size_t *)malloc(node_count * sizeof(*head));
+  kls_assignment_edge *edges =
+    (kls_assignment_edge *)malloc(edge_capacity * sizeof(*edges));
+  double *potential = (double *)calloc(node_count, sizeof(*potential));
+  double *dist = (double *)malloc(node_count * sizeof(*dist));
+  size_t *prev_edge = (size_t *)malloc(node_count * sizeof(*prev_edge));
+  unsigned char *done = (unsigned char *)malloc(node_count * sizeof(*done));
+  kls_min_heap heap;
+  memset(&heap, 0, sizeof(heap));
+  if (head == NULL || edges == NULL || potential == NULL || dist == NULL ||
+      prev_edge == NULL || done == NULL) {
+    free(head);
+    free(edges);
+    free(potential);
+    free(dist);
+    free(prev_edge);
+    free(done);
+    free(col_max_log);
+    free(row_perm);
+    free(col_match);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+  for (size_t i = 0; i < node_count; ++i) {
+    head[i] = SIZE_MAX;
+  }
+
+  size_t edge_count = 0;
+  for (UF_long row = 0; row < n; ++row) {
+    if (!kls_assignment_add_edge(source, (size_t)row, 0.0, 0,
+                                 KLS_KLU_EMPTY, KLS_KLU_EMPTY, head, edges,
+                                 edge_capacity, &edge_count)) {
+      free(head);
+      free(edges);
+      free(potential);
+      free(dist);
+      free(prev_edge);
+      free(done);
+      free(col_max_log);
+      free(row_perm);
+      free(col_match);
+      return KLS_ERR_OUT_OF_MEMORY;
+    }
+  }
+  for (UF_long col = 0; col < n; ++col) {
+    if (col_max_log[col] == -DBL_MAX) {
+      continue;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      const double abs_value = fabs(numeric_values[p]);
+      if (row >= n || abs_value <= 0.0 || !isfinite(abs_value)) {
+        continue;
+      }
+      double cost = col_max_log[col] - log(abs_value);
+      if (!isfinite(cost)) {
+        continue;
+      }
+      if (cost < 0.0) {
+        cost = 0.0;
+      }
+      if (!kls_assignment_add_edge((size_t)row, (size_t)n + (size_t)col,
+                                   cost, 1, row, col, head, edges,
+                                   edge_capacity, &edge_count)) {
+        free(head);
+        free(edges);
+        free(potential);
+        free(dist);
+        free(prev_edge);
+        free(done);
+        free(col_max_log);
+        free(row_perm);
+        free(col_match);
+        return KLS_ERR_OUT_OF_MEMORY;
+      }
+    }
+  }
+  for (UF_long col = 0; col < n; ++col) {
+    if (!kls_assignment_add_edge((size_t)n + (size_t)col, sink, 0.0, 0,
+                                 KLS_KLU_EMPTY, KLS_KLU_EMPTY, head, edges,
+                                 edge_capacity, &edge_count)) {
+      free(head);
+      free(edges);
+      free(potential);
+      free(dist);
+      free(prev_edge);
+      free(done);
+      free(col_max_log);
+      free(row_perm);
+      free(col_match);
+      return KLS_ERR_OUT_OF_MEMORY;
+    }
+  }
+
+  UF_long flow = 0;
+  while (flow < n) {
+    const int path_status =
+      kls_assignment_shortest_path(node_count, head, edges, potential, dist,
+                                   prev_edge, done, source, sink, &heap);
+    if (path_status == KLS_ERR_OUT_OF_MEMORY) {
+      kls_heap_free(&heap);
+      free(head);
+      free(edges);
+      free(potential);
+      free(dist);
+      free(prev_edge);
+      free(done);
+      free(col_max_log);
+      free(row_perm);
+      free(col_match);
+      return path_status;
+    }
+    if (path_status != KLS_OK) {
+      break;
+    }
+    for (size_t node = 0; node < node_count; ++node) {
+      if (done[node]) {
+        potential[node] += dist[node];
+      }
+    }
+    for (size_t node = sink; node != source; ) {
+      const size_t edge_id = prev_edge[node];
+      if (edge_id == SIZE_MAX) {
+        break;
+      }
+      kls_assignment_edge *edge = &edges[edge_id];
+      kls_assignment_edge *reverse = &edges[edge->rev];
+      edge->cap = 0;
+      reverse->cap = 1;
+      node = reverse->to;
+    }
+    flow++;
+  }
+
+  for (size_t edge_id = 0; edge_id < edge_count; ++edge_id) {
+    const kls_assignment_edge *edge = &edges[edge_id];
+    if (edge->row_col_edge && edge->cap == 0 &&
+        edge->row < n && edge->col < n &&
+        row_perm[edge->row] == KLS_KLU_EMPTY &&
+        col_match[edge->col] == KLS_KLU_EMPTY) {
+      row_perm[edge->row] = edge->col;
+      col_match[edge->col] = edge->row;
+      (*matched_out)++;
+    }
+  }
+
+  kls_heap_free(&heap);
+  free(head);
+  free(edges);
+  free(potential);
+  free(dist);
+  free(prev_edge);
+  free(done);
+  free(col_max_log);
+  *row_perm_out = row_perm;
+  *col_match_out = col_match;
+  return KLS_OK;
+}
+
 static UF_long augment_numeric_row_match(UF_long n,
                                          const kls_row_match_graph *graph,
                                          UF_long *row_perm,
@@ -2599,13 +3046,42 @@ static int build_greedy_numeric_row_match(UF_long n,
                                           const double *numeric_values,
                                           int improve_matching,
                                           UF_long **row_perm_out,
-                                          UF_long *matched_out) {
+                                          UF_long *matched_out,
+                                          int *exact_matching_out) {
   if (n <= 0 || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
-      row_perm_out == NULL || matched_out == NULL) {
+      row_perm_out == NULL || matched_out == NULL ||
+      exact_matching_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   *row_perm_out = NULL;
   *matched_out = 0;
+  *exact_matching_out = 0;
+
+  if (improve_matching && exact_weighted_match_is_affordable(n, nnz)) {
+    UF_long *exact_row_perm = NULL;
+    UF_long *exact_col_match = NULL;
+    UF_long exact_matched = 0;
+    const int exact_status =
+      build_exact_numeric_row_match(n, nnz, col_ptr, row_idx, numeric_values,
+                                    &exact_row_perm, &exact_col_match,
+                                    &exact_matched);
+    if (exact_status == KLS_OK) {
+      const int complete_status =
+        complete_unmatched_row_match(n, exact_row_perm, exact_col_match);
+      free(exact_col_match);
+      if (complete_status != KLS_OK) {
+        free(exact_row_perm);
+        return complete_status;
+      }
+      *row_perm_out = exact_row_perm;
+      *matched_out = exact_matched;
+      *exact_matching_out = 1;
+      return KLS_OK;
+    }
+    if (exact_status == KLS_ERR_OUT_OF_MEMORY) {
+      return exact_status;
+    }
+  }
 
   kls_match_entry *entries =
     (kls_match_entry *)malloc((size_t)nnz * sizeof(*entries));
@@ -2680,24 +3156,15 @@ static int build_greedy_numeric_row_match(UF_long n,
     }
   }
 
-  UF_long next_col = 0;
-  for (UF_long row = 0; row < n; ++row) {
-    if (row_perm[row] != KLS_KLU_EMPTY) {
-      continue;
-    }
-    while (next_col < n && col_match[next_col] != KLS_KLU_EMPTY) {
-      next_col++;
-    }
-    if (next_col >= n) {
-      free(entries);
-      free(row_perm);
-      free(col_match);
-      free(row_used);
-      free(col_used);
-      return KLS_ERR_INVALID_ARGUMENT;
-    }
-    row_perm[row] = next_col;
-    col_match[next_col] = row;
+  const int complete_status =
+    complete_unmatched_row_match(n, row_perm, col_match);
+  if (complete_status != KLS_OK) {
+    free(entries);
+    free(row_perm);
+    free(col_match);
+    free(row_used);
+    free(col_used);
+    return complete_status;
   }
 
   free(entries);
@@ -3370,11 +3837,13 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   }
 
   UF_long matched = 0;
+  int exact_matching = 0;
   const int improve_matching = solver->n <= 50000 && solver->nnz <= 1000000;
   int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
                                               base_col_ptr, base_row_idx,
                                               base_values, improve_matching,
-                                              &row_perm, &matched);
+                                              &row_perm, &matched,
+                                              &exact_matching);
   if (status != KLS_OK) {
     goto done;
   }
@@ -3456,6 +3925,7 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   solver->values = trial_values;
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->row_perm = row_perm;
+  solver->exact_matching_selected = exact_matching;
   solver->symbolic = trial_symbolic;
   solver->numeric = trial_numeric;
   solver->common = trial_common;
@@ -3614,13 +4084,15 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
 
   UF_long matched = 0;
+  int exact_matching = 0;
   const int improve_matching =
     small_candidate || (solver->n <= 150000 && solver->nnz <= 1500000);
   int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
                                               base_col_ptr, base_row_idx,
                                               base_values, improve_matching,
                                               &row_perm,
-                                              &matched);
+                                              &matched,
+                                              &exact_matching);
   if (status != KLS_OK || 1000u * matched < 995u * solver->n) {
     goto done;
   }
@@ -3699,6 +4171,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   solver->values = trial_values;
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->row_perm = row_perm;
+  solver->exact_matching_selected = exact_matching;
   solver->symbolic = trial_symbolic;
   solver->numeric = trial_numeric;
   solver->common = trial_common;
@@ -4367,6 +4840,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.selected_scale = (int)solver->common.scale;
   solver->stats.selected_pivot_tolerance = solver->common.tol;
   solver->stats.selected_static_pivoting = solver->row_perm != NULL;
+  solver->stats.selected_exact_matching = solver->exact_matching_selected;
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
     solver->stats.selected_btf = solver->symbolic->do_btf ? 1 : 0;
@@ -4386,6 +4860,7 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.selected_scale = (int)solver->common.scale;
   solver->stats.selected_pivot_tolerance = solver->common.tol;
   solver->stats.selected_static_pivoting = solver->row_perm != NULL;
+  solver->stats.selected_exact_matching = solver->exact_matching_selected;
   solver->stats.selected_btf =
     (solver->symbolic != NULL && solver->symbolic->do_btf) ? 1 : 0;
   solver->stats.numerical_rank = (int64_t)solver->common.numerical_rank;

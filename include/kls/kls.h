@@ -91,6 +91,7 @@ typedef struct kls_stats {
   int selected_static_pivoting;
   int64_t fast_rejected_pivot;
   int64_t fast_rejected_pivot_col;
+  int selected_exact_matching;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

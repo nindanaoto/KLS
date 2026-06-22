@@ -16,6 +16,10 @@ KLS does not include CKTSO source or binaries. CKTSO is used only as an
 optional external benchmark when the user provides a licensed local
 installation.
 
+KLS does not vendor HSL MC64 or any external MC64 implementation. The bounded
+exact static-pivot assignment code in `src/kls.c` is KLS in-tree code under the
+project LGPL-2.1-or-later license.
+
 KLS can build METIS nested-dissection ordering from pinned submodules under
 `third_party/metis` and `third_party/gklib`. METIS is Copyright 1997, Regents
 of the University of Minnesota, and is licensed under Apache-2.0; see

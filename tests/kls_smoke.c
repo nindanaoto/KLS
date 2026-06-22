@@ -399,6 +399,10 @@ static int test_pre_static_pivoting(void) {
     fprintf(stderr, "pre-static pivoting was not selected\n");
     ok = 0;
   }
+  if (ok && !stats.selected_exact_matching) {
+    fprintf(stderr, "pre-static pivoting did not use exact matching\n");
+    ok = 0;
+  }
   for (int32_t i = 0; ok && i < n; ++i) {
     if (!close_enough(x[i], expected[i])) {
       fprintf(stderr, "unexpected pre-static solution at %d: %.17g != %.17g\n",
@@ -481,6 +485,10 @@ static int test_pre_static_pivoting_with_scaling(void) {
   }
   if (ok && !stats.selected_static_pivoting) {
     fprintf(stderr, "scaled pre-static pivoting was not selected\n");
+    ok = 0;
+  }
+  if (ok && !stats.selected_exact_matching) {
+    fprintf(stderr, "scaled pre-static pivoting did not use exact matching\n");
     ok = 0;
   }
   if (ok && stats.selected_scale != -1) {

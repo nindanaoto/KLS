@@ -13,9 +13,10 @@ ordering, CAMD refinement, auto scaling policy, pivot-checked reuse, static
 row-pivoting trials with dual-potential matching-derived equilibration, and
 BTF-block parallel refactorization with a solver-owned worker pool. KLS now
 also keeps precomputed refactor scatter metadata for unscaled serial repeated
-refactors, covering both single-block and serial BTF cases, and it can improve
-medium static-pivot row matchings with bounded alternating cycles beyond the
-pair-swap pass.
+refactors, covering both single-block and serial BTF cases. Its static-pivot
+preprocessing has a cheap exact sparse maximum-log-product assignment path for
+small candidates and can improve medium row matchings with bounded alternating
+cycles beyond the pair-swap pass.
 
 The remaining CKTSO gap is large enough that it should be treated as a missing
 major algorithm, not an ordering-backend tuning problem. On the selected large
@@ -30,7 +31,8 @@ another separator package alone.
 The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
 
-- Full MC64-equivalent maximum-weight matching with dual row/column scaling.
+- Production-scale MC64-equivalent maximum-weight matching with dual
+  row/column scaling.
 - Persistent EGraph/ETree or separator-tree metadata for intra-block parallel
   factor/refactor scheduling.
 - CKTSO-style fast factorization tail restart after a failed pivot check, rather
@@ -445,6 +447,19 @@ large static-pivot candidates stay on the lower-fill layered/swap pattern. A
 large `pre2` analyze-only check still shows a dominant 629628-row block and
 about `2.08e11` estimated flops under the current AMD/BTF symbolic path, so the
 remaining CKTSO gap is still a missing numeric-kernel/scheduler issue.
+
+A cheap exact sparse assignment stage was then added ahead of the greedy
+static row matcher for small candidates. It solves a min-cost augmenting-path
+problem on `col_max - log(abs(a_ij))`, which is equivalent to maximum-product
+matching when a full assignment is found. The path is intentionally gated to
+`n <= 4000`, `nnz <= 75000`, and `n * nnz <= 5e7`; a same-session HB/gemat
+experiment with a wider gate improved `gemat12` off-diagonal pivots from 7 to
+3, but raised initial factor/preprocessing time from about 0.034s to about
+5.2s. With the retained gate, `gemat11` and `gemat12` stay on the previous
+fast matcher, while synthetic 3000-row static-pivot smoke tests exercise exact
+matching. This closes a small piece of MC64 functionality but confirms that
+KLS still needs an optimized production MC64-equivalent matcher, not the
+straightforward min-cost implementation, before the CKTSO-scale gap can close.
 
 The fast-factor pivot-check path was then made more diagnostic by recording the
 first rejected factor-order pivot and original matrix column in `kls_stats` and
