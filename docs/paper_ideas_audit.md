@@ -683,17 +683,20 @@ The MC64 compatibility boundary was rechecked after allowing existing code if
 it remains LGPL-compatible. The retained vendored route is still SPRAL's
 BSD-3-Clause scaling subset: it is redistribution-compatible with KLS's
 LGPL-2.1-or-later license, whereas HSL MC64 itself and restricted MC64 copies
-from solver trees remain out of scope for vendoring. A small BSD Rust `mc64`
-crate exists as a partial SPRAL translation, but it does not improve KLS's C
-integration story over the already pinned SPRAL Fortran/C interface. Fresh
-SPRAL-enabled checks also confirm the policy should stay guarded rather than
-become an unconditional default: `rajat30` selected SPRAL matching, reduced
-off-diagonal pivots to one, and cut initial factor time to about 5.7s, but its
-repeat-heavy factor/refactor averages were about 0.67s/0.66s versus the faster
-current no-SPRAL EGraph path. `nxp1` did not select SPRAL and stayed roughly
-neutral-to-slightly-worse. This keeps license-compatible MC64-style code in
-KLS, but points the large remaining CKTSO gap back to numeric scheduling and
-pivoting machinery rather than merely importing another MC64 copy.
+from solver trees remain out of scope for vendoring. The policy does not
+require every MC64-style implementation to originate in KLS; it requires any
+copied or vendored implementation to be redistributable inside an LGPL KLS
+distribution. A small BSD Rust `mc64` crate exists as a partial SPRAL
+translation, but it does not improve KLS's C integration story over the already
+pinned SPRAL Fortran/C interface. Fresh SPRAL-enabled checks also confirm the
+policy should stay guarded rather than become an unconditional default:
+`rajat30` selected SPRAL matching, reduced off-diagonal pivots to one, and cut
+initial factor time to about 5.7s, but its repeat-heavy factor/refactor
+averages were about 0.67s/0.66s versus the faster current no-SPRAL EGraph path.
+`nxp1` did not select SPRAL and stayed roughly neutral-to-slightly-worse. This
+keeps license-compatible MC64-style code in KLS, but points the large remaining
+CKTSO gap back to numeric scheduling and pivoting machinery rather than merely
+importing another MC64 copy.
 
 The EGraph refactor consumer was then generalized from hard-coded single-block
 indices to block-local BTF indices. The same guarded cluster/pipeline schedule
@@ -798,6 +801,29 @@ but regressed the largest EGraph guard: `rajat30` moved from about
 18.73s/18.75s. The retained pipeline publication remains the simpler
 per-completed-column atomic store until a fuller scheduler changes the tail
 execution model.
+
+The remaining `pre2` timeout was rechecked after the MC64 licensing boundary
+was clarified. A SPRAL-enabled build, using the retained BSD-licensed
+Hungarian/scaling path, still timed out under a 180s one-factor cap. Lowering
+the initial pivot tolerance also did not provide a usable CKTSO-style
+pivot-reuse substitute: `--pivot-tol 0` reached a singular factor quickly,
+while `1e-8` and `1e-4` still timed out under 120s. On completed large guards,
+lower tolerances were not a general win: `rajat30` at `1e-4` slowed initial
+factor and repeated refactor, `rajat30` at `1e-8` improved only refactor while
+worsening initial factor and conditioning, and both `nxp1` lower-tolerance
+checks regressed. This keeps `pre2` in the missing pivoting-tail/numeric-kernel
+bucket rather than the tuning bucket.
+
+A narrow many-block BTF worker-map retry was also prototyped for ASIC-style
+structures after the CKTSO comparison showed a large `ASIC_680k` gap. The
+prototype made the worker map path scale-aware and built the precomputed
+input-position map only for non-dominant BTF patterns with at least 100k blocks
+and at least half as many blocks as rows. It was removed because it was not a
+general win: `ASIC_680k` had only a small refactor improvement but slower
+repeated factor and setup, while `ASIC_680ks` regressed in both factor and
+refactor. This confirms the previous broad worker-map rejection and points
+ASIC-style gaps toward a different small-block numeric/storage kernel rather
+than passing the existing map through the worker pool.
 
 ## Recommended General Work
 
