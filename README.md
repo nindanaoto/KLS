@@ -120,20 +120,22 @@ each column's off-block entries separate from diagonal-block entries so the
 numeric refactor loop avoids reclassifying the same structure on every SPICE
 step. For threaded runs, KLS also records the exact no-pivot refactor EGraph
 level schedule from the numeric U pattern; this metadata is exposed in
-benchmark output and is used by a guarded large unscaled single-block
-level-sliced refactor path when there is enough dependency work and level
-width to offset thread and scratch overhead. KLS only builds this schedule for
-single-block or dominant-block shapes with enough numeric work to consume it;
-ordinary many-block BTF and low-work dominant-BTF cases skip the setup and stay
-on their existing refactor paths. Barriered cluster levels are split
+benchmark output and is used by a guarded large unscaled single-block or
+high-flop dominant-BTF level-sliced refactor path when there is enough
+dependency work and level width to offset thread and scratch overhead. KLS only
+builds this schedule for single-block or dominant-block shapes with enough
+numeric work to consume it; ordinary many-block BTF and low-work dominant-BTF
+cases skip the setup and stay on their existing refactor paths. Barriered
+cluster levels are split
 by KLS's per-column no-pivot work estimate instead of equal column counts, and
 above the CKTSO-style split level KLS can switch to a no-pivot pipeline tail
 that waits only for actual U-pattern predecessors. This avoids thousands of
 narrow-level barriers on high-work tails while preserving the existing
-fixed-pivot LU storage. The same EGraph consumer can also run inside a large
-dominant BTF block, updating that block's local LU and off-block entries while
-leaving ordinary many-block BTF cases on the existing worker-pool path. For
-large cases that use KLU row scaling, the same path recomputes the row scale
+fixed-pivot LU storage. The same EGraph consumer can also run inside a
+dominant BTF block with a large enough high-flop diagonal block, updating that
+block's local LU and off-block entries while leaving ordinary many-block BTF
+cases on the existing worker-pool path. For large cases that use KLU row scaling,
+the same path recomputes the row scale
 factors, divides the mapped entries by the unpermuted row scales, and then
 permutes `Rs` back to pivot order after the refactor. Small cases and
 non-dominant BTF cases still use the existing mapped or BTF-worker paths.

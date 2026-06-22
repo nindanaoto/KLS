@@ -175,9 +175,9 @@ design work, not benchmark-specific tuning.
   edge count in `kls_stats` and benchmark JSON. It also reports the
   CKTSO-style cluster/pipeline split point, pipeline-column count, approximate
   no-pivot update work, and tail work implied by the current level widths.
-  Large single-block matrices with enough dependency work and level width can
-  now consume this schedule through a work-estimated per-thread cluster-mode
-  refactor,
+  Large single-block and high-flop dominant-BTF matrices with enough dependency
+  work and level width can now consume this schedule through a work-estimated
+  per-thread cluster-mode refactor,
   then switch to a no-pivot pipeline tail where each worker waits only for
   actual U-pattern predecessors. The same block-aware EGraph kernel can run
   inside a large dominant BTF block and update Offx for entries above that
@@ -834,6 +834,20 @@ modest but consistent wins on the EGraph path: `rajat30` moved from about
 improves the retained no-pivot refactor consumer, but it does not address the
 remaining first-factor timeout on `pre2` or implement CKTSO's pivoting tail
 restart.
+
+The dominant-BTF EGraph gate was then lowered for medium ASIC-style matrices
+whose largest diagonal block is at least 90k rows, covers at least 95% of the
+matrix, and has at least `5e8` actual factor flops. The EGraph consumer itself
+still requires at least `2.5e8` no-pivot dependency work and enough level width,
+so low-work dominant-BTF cases such as `rajat29` skip schedule construction.
+This lets the retained cluster/pipeline refactor run inside the dominant block
+of the `ASIC_100k` and `ASIC_320k` families while ordinary many-block
+`ASIC_680k`/`ASIC_680ks` shapes remain on their existing paths. Focused checks
+showed the largest wins on `ASIC_320k` and `ASIC_320ks`: repeated refactor time
+moved from roughly 0.35s/0.29s to about 0.11s/0.08s with valid residuals.
+`ASIC_100k` and `ASIC_100ks` improved more modestly, while the retained guard
+kept `rajat29` schedule metrics at zero. This is a useful CKTSO-inspired
+coverage extension, but CKTSO remains faster on these ASIC rows.
 
 The EGraph worker launch path was also retried with a solver-owned persistent
 worker/scratch pool, analogous to the retained BTF refactor pool. This was

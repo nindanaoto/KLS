@@ -7234,8 +7234,7 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
 
 static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->options.threads <= 1 || solver->n < 100000u ||
-      solver->refactor_dependency_work < 1.0e9 ||
+      solver->options.threads <= 1 || solver->n < 90000u ||
       solver->refactor_level_ptr == NULL ||
       solver->refactor_level_cols == NULL ||
       solver->refactor_level_count == 0u ||
@@ -7245,9 +7244,13 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   const int single_block = solver->symbolic->nblocks == 1u;
   const int dominant_btf =
     solver->symbolic->nblocks > 1u &&
-    solver->symbolic->maxblock >= 100000u &&
-    (double)solver->symbolic->maxblock >= 0.75 * (double)solver->n;
+    solver->symbolic->maxblock >= 90000u &&
+    (double)solver->symbolic->maxblock >= 0.95 * (double)solver->n;
   if (!single_block && !dominant_btf) {
+    return 0;
+  }
+  const double min_dependency_work = dominant_btf ? 2.5e8 : 1.0e9;
+  if (solver->refactor_dependency_work < min_dependency_work) {
     return 0;
   }
   if (!single_block &&
@@ -7655,10 +7658,13 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
   const int single_block = solver->symbolic->nblocks == 1u;
   const int dominant_btf =
     solver->symbolic->nblocks > 1u &&
-    solver->symbolic->maxblock >= 100000u &&
-    (double)solver->symbolic->maxblock >= 0.75 * (double)solver->n;
+    solver->symbolic->maxblock >= 90000u &&
+    (double)solver->symbolic->maxblock >= 0.95 * (double)solver->n;
   if (!single_block && !dominant_btf) {
     return 0;
+  }
+  if (dominant_btf) {
+    return solver->common.flops >= 5.0e8;
   }
   if (solver->common.flops >= 1.0e9) {
     return 1;
