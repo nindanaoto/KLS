@@ -108,6 +108,7 @@ typedef struct kls_parallel_refactor_shared {
   int check_pivots;
   double pivot_tolerance;
   UF_long next_block;
+  UF_long block_chunk;
   int stop;
   pthread_mutex_t lock;
 } kls_parallel_refactor_shared;
@@ -549,15 +550,26 @@ static void *kls_refactor_pool_worker_main(void *arg) {
         pthread_mutex_unlock(&shared->lock);
         break;
       }
-      const UF_long block = shared->next_block++;
+      const UF_long begin = shared->next_block;
+      UF_long end = begin + shared->block_chunk;
+      if (end < begin || end > shared->symbolic->nblocks) {
+        end = shared->symbolic->nblocks;
+      }
+      shared->next_block = end;
       pthread_mutex_unlock(&shared->lock);
 
-      kls_parallel_refactor_block(worker, block);
+      for (UF_long block = begin; block < end; ++block) {
+        kls_parallel_refactor_block(worker, block);
+        if (worker->invalid || worker->pivot_rejected ||
+            (worker->singular && shared->halt_if_singular)) {
+          pthread_mutex_lock(&shared->lock);
+          shared->stop = 1;
+          pthread_mutex_unlock(&shared->lock);
+          break;
+        }
+      }
       if (worker->invalid || worker->pivot_rejected ||
           (worker->singular && shared->halt_if_singular)) {
-        pthread_mutex_lock(&shared->lock);
-        shared->stop = 1;
-        pthread_mutex_unlock(&shared->lock);
         break;
       }
     }
@@ -679,6 +691,27 @@ static int ensure_refactor_pool(kls_solver *solver, int thread_count) {
   return 1;
 }
 
+static UF_long kls_refactor_pool_block_chunk(const kls_solver *solver,
+                                             int thread_count) {
+  if (solver == NULL || solver->symbolic == NULL || thread_count <= 0) {
+    return 1u;
+  }
+  const UF_long nblocks = solver->symbolic->nblocks;
+  if (nblocks < 4096u ||
+      (double)solver->symbolic->maxblock > 0.50 * (double)solver->n) {
+    return 1u;
+  }
+  const UF_long target_ranges = (UF_long)thread_count * 4096u;
+  UF_long chunk = target_ranges > 0u ? nblocks / target_ranges : 1u;
+  if (chunk < 1u) {
+    chunk = 1u;
+  }
+  if (chunk > 64u) {
+    chunk = 64u;
+  }
+  return chunk;
+}
+
 static int run_refactor_pool(kls_solver *solver,
                              double *numeric_values,
                              int thread_count,
@@ -718,6 +751,7 @@ static int run_refactor_pool(kls_solver *solver,
   shared->check_pivots = check_pivots;
   shared->pivot_tolerance = solver->common.tol;
   shared->next_block = 0;
+  shared->block_chunk = kls_refactor_pool_block_chunk(solver, thread_count);
   shared->stop = 0;
   pool->active_workers = thread_count;
 

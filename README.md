@@ -100,9 +100,11 @@ available. The first threaded path is repeated numeric refactorization across
 independent BTF diagonal blocks for large, high-flop cases, including existing
 KLU row-scaling modes when reusable scale storage and enough independent BTF
 block work are present. KLS keeps a solver-owned worker pool for this path, so
-repeated SPICE refactors do not relaunch threads every cycle. Small matrices,
-factor kernels, solve kernels, and BTF cases that are not wide enough for the
-threaded path still use serial execution. For unscaled serial refactors, KLS
+repeated SPICE refactors do not relaunch threads every cycle; for matrices with
+hundreds of thousands of small BTF blocks, workers claim short block ranges to
+reduce scheduler mutex traffic. Small matrices, factor kernels, solve kernels,
+and BTF cases that are not wide enough for the threaded path still use serial
+execution. For unscaled serial refactors, KLS
 also precomputes a scatter map from the fixed pivot order so repeated
 single-block and serial BTF refactors do not redo the same `Q` and `Pinv`
 structure lookups every cycle. For serial BTF refactors, this map also keeps

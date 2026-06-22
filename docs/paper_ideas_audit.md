@@ -699,6 +699,34 @@ focused repeated runs; `G3_circuit` stayed around 19.1s/19.1s. This is useful
 dominant-block coverage, but not the missing major CKTSO algorithm: `pre2`
 still timed out under a 125s cap.
 
+A current large-recon run after the dominant-BTF change still shows the
+remaining gap clearly. KLS completed six of the eight selected large cases and
+timed out on `pre2` and `Hamrle3` under a 120s per-matrix cap. Against the
+existing CKTSO four-thread run, KLS still lost all six common completed cases,
+with the largest ratios on `nxp1`, `ASIC_680k`, `G3_circuit`, and `rajat30`.
+The same run beat KLU2 on the larger common cases `ASIC_680k` and `rajat30`,
+but still lost `rajat29`. A factor-only `pre2` probe also timed out under
+125s, confirming that the unresolved `pre2` gap is first-factor numeric
+machinery, not repeated-refactor scheduling.
+
+A CKTSO-style dynamic atomic assignment prototype for the EGraph pipeline tail
+was tested and rejected. It replaced the static per-thread tail stride with a
+shared atomic cursor, but `nxp1` and `rajat30` were neutral-to-slightly worse
+and `G3_circuit` regressed to about 19.45s/19.41s factor/refactor. The
+existing static tail assignment therefore remains the better fit for KLS's
+current column storage and scratch model.
+
+The BTF worker pool was then adjusted to fetch small ranges of diagonal blocks
+per mutex acquisition when a matrix has many thousands of non-dominant BTF
+blocks. This targets scheduler overhead on ASIC-style matrices with hundreds
+of thousands of tiny blocks, while dominant-block and smaller-BTF cases still
+fetch one block at a time for load balance. On same-session checks against a
+clean baseline, `ASIC_680k` moved from about 0.173s/0.157s repeated
+factor/refactor averages to about 0.159s/0.156s, while `ASIC_680ks` moved from
+about 0.163s/0.170s to about 0.173s/0.163s. The net SPICE-cycle effect is
+small but positive on the many-block ASIC guards, so this is a retained
+scheduler-overhead cleanup, not a CKTSO-scale algorithmic fix.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
