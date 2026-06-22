@@ -24,6 +24,7 @@
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -142,6 +143,7 @@ typedef struct kls_egraph_refactor_shared {
   pthread_cond_t start_cond;
   int start;
   int launch_failed;
+  atomic_uchar *pipeline_done;
   pthread_barrier_t barrier;
 } kls_egraph_refactor_shared;
 
@@ -6670,8 +6672,44 @@ static void kls_egraph_refactor_record_singular(
   pthread_mutex_unlock(&shared->lock);
 }
 
+static int kls_egraph_refactor_should_stop(
+  kls_egraph_refactor_shared *shared) {
+  int stopped = 0;
+  pthread_mutex_lock(&shared->lock);
+  stopped = shared->stop;
+  pthread_mutex_unlock(&shared->lock);
+  return stopped;
+}
+
+static void kls_egraph_refactor_mark_done(
+  kls_egraph_refactor_shared *shared,
+  UF_long col) {
+  if (shared->pipeline_done != NULL) {
+    atomic_store_explicit(&shared->pipeline_done[col], 1u,
+                          memory_order_release);
+  }
+}
+
+static int kls_egraph_refactor_wait_done(
+  kls_egraph_refactor_shared *shared,
+  UF_long col) {
+  if (shared->pipeline_done == NULL) {
+    return 1;
+  }
+  unsigned spin = 0;
+  while (atomic_load_explicit(&shared->pipeline_done[col],
+                              memory_order_acquire) == 0u) {
+    if ((spin++ & 1023u) == 0u &&
+        kls_egraph_refactor_should_stop(shared)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
-                                      UF_long k) {
+                                      UF_long k,
+                                      int wait_for_dependencies) {
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
   trilinos_klu_l_numeric *numeric = solver->numeric;
@@ -6707,6 +6745,10 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     const UF_long j = ui[up];
     if (j >= k) {
       kls_egraph_refactor_record_invalid(shared);
+      return 0;
+    }
+    if (wait_for_dependencies &&
+        !kls_egraph_refactor_wait_done(shared, j)) {
       return 0;
     }
     const double ujk = x[j];
@@ -6769,7 +6811,13 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
   }
   pthread_mutex_unlock(&shared->start_lock);
 
-  for (UF_long level = 0; level < solver->refactor_level_count; ++level) {
+  UF_long cluster_levels = solver->refactor_level_count;
+  if (shared->pipeline_done != NULL &&
+      solver->refactor_cluster_level_count < solver->refactor_level_count) {
+    cluster_levels = solver->refactor_cluster_level_count;
+  }
+
+  for (UF_long level = 0; level < cluster_levels; ++level) {
     int stopped = 0;
     pthread_mutex_lock(&shared->lock);
     stopped = shared->stop;
@@ -6781,9 +6829,10 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
       for (UF_long pos = begin + (UF_long)worker->tid;
            pos < end; pos += (UF_long)shared->thread_count) {
         const UF_long col = solver->refactor_level_cols[pos];
-        if (!kls_egraph_refactor_column(worker, col)) {
+        if (!kls_egraph_refactor_column(worker, col, 0)) {
           break;
         }
+        kls_egraph_refactor_mark_done(shared, col);
       }
     }
 
@@ -6794,6 +6843,23 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
     pthread_mutex_unlock(&shared->lock);
     if (stopped) {
       break;
+    }
+  }
+
+  if (shared->pipeline_done != NULL &&
+      cluster_levels < solver->refactor_level_count &&
+      !kls_egraph_refactor_should_stop(shared)) {
+    const UF_long begin = solver->refactor_level_ptr[cluster_levels];
+    for (UF_long pos = begin + (UF_long)worker->tid;
+         pos < solver->n; pos += (UF_long)shared->thread_count) {
+      if (kls_egraph_refactor_should_stop(shared)) {
+        break;
+      }
+      const UF_long col = solver->refactor_level_cols[pos];
+      if (!kls_egraph_refactor_column(worker, col, 1)) {
+        break;
+      }
+      kls_egraph_refactor_mark_done(shared, col);
     }
   }
   return NULL;
@@ -6838,6 +6904,18 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   if (thread_count < 2) {
     return -1;
   }
+  atomic_uchar *pipeline_done = NULL;
+  if (solver->refactor_cluster_level_count < solver->refactor_level_count &&
+      solver->refactor_pipeline_column_count >= (UF_long)(2 * thread_count) &&
+      solver->refactor_pipeline_work >= 0.10 * solver->refactor_dependency_work) {
+    pipeline_done =
+      (atomic_uchar *)malloc((size_t)solver->n * sizeof(*pipeline_done));
+    if (pipeline_done != NULL) {
+      for (UF_long k = 0; k < solver->n; ++k) {
+        atomic_init(&pipeline_done[k], 0u);
+      }
+    }
+  }
 
   kls_egraph_refactor_shared shared;
   memset(&shared, 0, sizeof(shared));
@@ -6845,23 +6923,28 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared.values = numeric_values;
   shared.check_pivots = check_pivots;
   shared.thread_count = thread_count;
+  shared.pipeline_done = pipeline_done;
   shared.rejected_pivot = KLS_KLU_EMPTY;
   shared.rejected_pivot_col = KLS_KLU_EMPTY;
   shared.numerical_rank = UF_long_max;
   shared.singular_col = KLS_KLU_EMPTY;
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {
+    free(pipeline_done);
     return -1;
   }
   if (pthread_mutex_init(&shared.start_lock, NULL) != 0) {
+    free(pipeline_done);
     pthread_mutex_destroy(&shared.lock);
     return -1;
   }
   if (pthread_cond_init(&shared.start_cond, NULL) != 0) {
+    free(pipeline_done);
     pthread_mutex_destroy(&shared.start_lock);
     pthread_mutex_destroy(&shared.lock);
     return -1;
   }
   if (pthread_barrier_init(&shared.barrier, NULL, (unsigned)thread_count) != 0) {
+    free(pipeline_done);
     pthread_cond_destroy(&shared.start_cond);
     pthread_mutex_destroy(&shared.start_lock);
     pthread_mutex_destroy(&shared.lock);
@@ -6875,6 +6958,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   if (threads == NULL || workers == NULL) {
     free(threads);
     free(workers);
+    free(pipeline_done);
     pthread_barrier_destroy(&shared.barrier);
     pthread_cond_destroy(&shared.start_cond);
     pthread_mutex_destroy(&shared.start_lock);
@@ -6899,6 +6983,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     }
     free(workers);
     free(threads);
+    free(pipeline_done);
     pthread_barrier_destroy(&shared.barrier);
     pthread_cond_destroy(&shared.start_cond);
     pthread_mutex_destroy(&shared.start_lock);
@@ -6931,6 +7016,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
   free(workers);
   free(threads);
+  free(pipeline_done);
   pthread_barrier_destroy(&shared.barrier);
   pthread_cond_destroy(&shared.start_cond);
   pthread_mutex_destroy(&shared.start_lock);
