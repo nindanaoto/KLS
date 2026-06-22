@@ -55,6 +55,8 @@ struct kls_solver {
   UF_long *refactor_block_start;
   UF_long *refactor_level_ptr;
   UF_long *refactor_level_cols;
+  UF_long *refactor_level_thread_ptr;
+  int refactor_level_thread_count;
   UF_long refactor_level_count;
   UF_long refactor_level_max_width;
   UF_long refactor_dependency_edges;
@@ -282,8 +284,11 @@ static void free_refactor_schedule(kls_solver *solver) {
   }
   free(solver->refactor_level_ptr);
   free(solver->refactor_level_cols);
+  free(solver->refactor_level_thread_ptr);
   solver->refactor_level_ptr = NULL;
   solver->refactor_level_cols = NULL;
+  solver->refactor_level_thread_ptr = NULL;
+  solver->refactor_level_thread_count = 0;
   solver->refactor_level_count = 0;
   solver->refactor_level_max_width = 0;
   solver->refactor_dependency_edges = 0;
@@ -6988,13 +6993,28 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
     if (!stopped) {
       const UF_long begin = solver->refactor_level_ptr[level];
       const UF_long end = solver->refactor_level_ptr[level + 1u];
-      for (UF_long pos = begin + (UF_long)worker->tid;
-           pos < end; pos += (UF_long)shared->thread_count) {
-        const UF_long col = solver->refactor_level_cols[pos];
-        if (!kls_egraph_refactor_column(worker, col, 0)) {
-          break;
+      if (solver->refactor_level_thread_ptr != NULL &&
+          solver->refactor_level_thread_count == shared->thread_count) {
+        const UF_long *parts =
+          solver->refactor_level_thread_ptr +
+          level * (UF_long)(shared->thread_count + 1);
+        for (UF_long pos = parts[worker->tid];
+             pos < parts[worker->tid + 1]; ++pos) {
+          const UF_long col = solver->refactor_level_cols[pos];
+          if (!kls_egraph_refactor_column(worker, col, 0)) {
+            break;
+          }
+          kls_egraph_refactor_mark_done(shared, col);
         }
-        kls_egraph_refactor_mark_done(shared, col);
+      } else {
+        for (UF_long pos = begin + (UF_long)worker->tid;
+             pos < end; pos += (UF_long)shared->thread_count) {
+          const UF_long col = solver->refactor_level_cols[pos];
+          if (!kls_egraph_refactor_column(worker, col, 0)) {
+            break;
+          }
+          kls_egraph_refactor_mark_done(shared, col);
+        }
       }
     }
 
@@ -7523,7 +7543,24 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     (UF_long *)malloc(((size_t)level_count + 1u) * sizeof(*level_ptr));
   UF_long *level_cols =
     (UF_long *)malloc((size_t)solver->n * sizeof(*level_cols));
+  const int thread_count = solver->options.threads;
+  UF_long *level_thread_ptr = NULL;
+  if (thread_count > 1) {
+    level_thread_ptr =
+      (UF_long *)malloc((size_t)level_count *
+                        ((size_t)thread_count + 1u) *
+                        sizeof(*level_thread_ptr));
+  }
   if (counts == NULL || level_ptr == NULL || level_cols == NULL) {
+    free(levels);
+    free(column_work);
+    free(counts);
+    free(level_ptr);
+    free(level_cols);
+    free(level_thread_ptr);
+    return 0;
+  }
+  if (thread_count > 1 && level_thread_ptr == NULL) {
     free(levels);
     free(column_work);
     free(counts);
@@ -7539,6 +7576,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       free(counts);
       free(level_ptr);
       free(level_cols);
+      free(level_thread_ptr);
       return 0;
     }
     counts[levels[k] + 1u]++;
@@ -7572,9 +7610,48 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       free(counts);
       free(level_ptr);
       free(level_cols);
+      free(level_thread_ptr);
       return 0;
     }
     level_cols[dst] = k;
+  }
+
+  if (level_thread_ptr != NULL) {
+    for (UF_long level = 0; level < level_count; ++level) {
+      const UF_long begin = level_ptr[level];
+      const UF_long end = level_ptr[level + 1u];
+      UF_long *parts =
+        level_thread_ptr + level * (UF_long)(thread_count + 1);
+      parts[0] = begin;
+      parts[thread_count] = end;
+      /* Cluster levels keep barriers, but split contiguous slices by the
+       * existing no-pivot column-work estimate instead of column count. */
+      double level_work = 0.0;
+      for (UF_long pos = begin; pos < end; ++pos) {
+        const UF_long col = level_cols[pos];
+        if (col >= solver->n) {
+          free(levels);
+          free(column_work);
+          free(counts);
+          free(level_ptr);
+          free(level_cols);
+          free(level_thread_ptr);
+          return 0;
+        }
+        level_work += column_work[col];
+      }
+      UF_long pos = begin;
+      double prefix_work = 0.0;
+      for (int t = 1; t < thread_count; ++t) {
+        const double target =
+          level_work * (double)t / (double)thread_count;
+        while (pos < end && prefix_work < target) {
+          prefix_work += column_work[level_cols[pos]];
+          pos++;
+        }
+        parts[t] = pos;
+      }
+    }
   }
 
   UF_long pipeline_columns = 0;
@@ -7588,6 +7665,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
         free(counts);
         free(level_ptr);
         free(level_cols);
+        free(level_thread_ptr);
         return 0;
       }
       pipeline_columns++;
@@ -7600,6 +7678,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   free(counts);
   solver->refactor_level_ptr = level_ptr;
   solver->refactor_level_cols = level_cols;
+  solver->refactor_level_thread_ptr = level_thread_ptr;
+  solver->refactor_level_thread_count = thread_count;
   solver->refactor_level_count = level_count;
   solver->refactor_level_max_width = max_width;
   solver->refactor_dependency_edges = edges;
