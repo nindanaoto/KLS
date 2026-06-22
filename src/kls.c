@@ -4929,6 +4929,92 @@ static int kls_mapped_refactor(kls_solver *solver,
   return 1;
 }
 
+static int kls_serial_checked_scaled_refactor(kls_solver *solver,
+                                              double *numeric_values) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      numeric_values == NULL || solver->common.scale <= 0 ||
+      solver->numeric->Rs == NULL || solver->numeric->Pnum == NULL ||
+      solver->numeric->Pinv == NULL || solver->numeric->Udiag == NULL ||
+      solver->numeric->Offp == NULL || solver->numeric->Offx == NULL ||
+      solver->numeric->Lip == NULL || solver->numeric->Llen == NULL ||
+      solver->numeric->Uip == NULL || solver->numeric->Ulen == NULL ||
+      solver->numeric->LUbx == NULL || solver->numeric->Xwork == NULL) {
+    return -1;
+  }
+
+  trilinos_klu_l_common *common = &solver->common;
+  if (!trilinos_klu_l_scale((UF_long)common->scale, solver->n,
+                            solver->col_ptr, solver->row_idx,
+                            numeric_values, solver->numeric->Rs, NULL,
+                            common)) {
+    return 0;
+  }
+
+  common->status = TRILINOS_KLU_OK;
+  common->numerical_rank = KLS_KLU_EMPTY;
+  common->singular_col = KLS_KLU_EMPTY;
+  common->nrealloc = 0;
+
+  kls_parallel_refactor_shared shared;
+  memset(&shared, 0, sizeof(shared));
+  shared.col_ptr = solver->col_ptr;
+  shared.row_idx = solver->row_idx;
+  shared.values = numeric_values;
+  shared.symbolic = solver->symbolic;
+  shared.numeric = solver->numeric;
+  shared.rs = solver->numeric->Rs;
+  shared.n = solver->n;
+  shared.scale = (int)common->scale;
+  shared.halt_if_singular = common->halt_if_singular;
+  shared.check_pivots = 1;
+  shared.pivot_tolerance = common->tol;
+
+  kls_parallel_refactor_worker worker;
+  memset(&worker, 0, sizeof(worker));
+  worker.shared = &shared;
+  worker.x = (double *)solver->numeric->Xwork;
+  worker.rejected_pivot = KLS_KLU_EMPTY;
+  worker.rejected_pivot_col = KLS_KLU_EMPTY;
+  worker.numerical_rank = UF_long_max;
+  worker.singular_col = KLS_KLU_EMPTY;
+
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    kls_parallel_refactor_block(&worker, block);
+    if (worker.invalid || worker.pivot_rejected ||
+        (worker.singular && common->halt_if_singular)) {
+      memset(worker.x, 0, (size_t)solver->symbolic->maxblock * sizeof(*worker.x));
+      break;
+    }
+  }
+
+  if (worker.invalid) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+  if (worker.pivot_rejected) {
+    kls_record_fast_reject(solver, worker.rejected_pivot,
+                           worker.rejected_pivot_col);
+    common->status = TRILINOS_KLU_OK;
+    return 0;
+  }
+  if (worker.singular) {
+    common->status = TRILINOS_KLU_SINGULAR;
+    common->numerical_rank = worker.numerical_rank;
+    common->singular_col = worker.singular_col;
+    if (common->halt_if_singular) {
+      return 0;
+    }
+  }
+  if (!kls_parallel_refactor_permute_scale(solver)) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+  if (!worker.singular) {
+    common->status = TRILINOS_KLU_OK;
+  }
+  return 1;
+}
+
 static void maybe_prepare_refactor_map(kls_solver *solver,
                                        double *elapsed) {
   if (solver == NULL || elapsed == NULL ||
@@ -4949,6 +5035,13 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     const int mapped = kls_mapped_refactor(solver, numeric_values, check_pivots);
     if (mapped >= 0) {
       return (UF_long)mapped;
+    }
+    if (check_pivots && solver->common.scale > 0) {
+      const int checked = kls_serial_checked_scaled_refactor(solver,
+                                                            numeric_values);
+      if (checked >= 0) {
+        return (UF_long)checked;
+      }
     }
     const UF_long ok =
       trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,

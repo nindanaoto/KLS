@@ -435,6 +435,14 @@ factorizations reject near the tail, where an ETree-descendant restart could
 avoid recomputing the whole matrix, or near the front, where full fallback is
 still expected.
 
+The same fast-factor path was then extended for scaled serial refactors. When a
+scaled pattern is using fast factorization with pivot checks, KLS now runs its
+own checked refactor loop and interrupts at the first unsafe multiplier instead
+of running a complete KLU refactor and scanning the completed factors
+afterward. This is still not CKTSO tail restart because fallback remains a full
+pivoting factorization, but it narrows the wasted work before fallback and uses
+the same rejected-pivot coordinate needed by a future ETree-descendant restart.
+
 The selected-large KLU2 comparison was also run with the same 120s cap and one
 factor/refactor repeat. KLU2 completed only `rajat29`, `rajat30`, and
 `ASIC_680k`; it timed out on `G3_circuit`, `pre2`, `nxp1`, `Hamrle3`, and

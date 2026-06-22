@@ -115,11 +115,14 @@ and selected pivot tolerance.
 When `fast_factor` reuses an existing factor pattern, KLS also checks the
 resulting L multipliers against the selected pivot tolerance. A reused pivot
 order whose multipliers violate the threshold pivot rule is discarded and the
-call falls back to full pivoting factorization. Benchmark stats report
-`fast_rejected_pivot` and `fast_rejected_pivot_col` for the first rejected
-factor-order pivot and its original matrix column, or `-1` when no fast-path
-pivot check failed. These fields are intended to guide CKTSO-style tail-restart
-work without accepting an unsafe reused pivot order.
+call falls back to full pivoting factorization. For scaled serial fast-factor
+calls, KLS uses its pivot-checking refactor kernel so it can stop at the first
+unsafe multiplier instead of completing a full KLU refactor and checking only
+afterward. Benchmark stats report `fast_rejected_pivot` and
+`fast_rejected_pivot_col` for the first rejected factor-order pivot and its
+original matrix column, or `-1` when no fast-path pivot check failed. These
+fields are intended to guide CKTSO-style tail-restart work without accepting an
+unsafe reused pivot order.
 
 Use `--no-static-pivoting` to disable KLS's value-aware static row-pivoting
 trial. When enabled, `auto` can preemptively build a weighted row permutation
