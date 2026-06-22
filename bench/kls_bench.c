@@ -540,6 +540,10 @@ int main(int argc, char **argv) {
            ",\"refactor_dependency_levels\":%" PRId64
            ",\"refactor_dependency_max_width\":%" PRId64
            ",\"refactor_dependency_edges\":%" PRId64
+           ",\"refactor_dependency_cluster_levels\":%" PRId64
+           ",\"refactor_dependency_pipeline_columns\":%" PRId64
+           ",\"refactor_dependency_work\":%.9g"
+           ",\"refactor_dependency_pipeline_work\":%.9g"
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
@@ -566,6 +570,10 @@ int main(int argc, char **argv) {
            stats.refactor_dependency_levels,
            stats.refactor_dependency_max_width,
            stats.refactor_dependency_edges,
+           stats.refactor_dependency_cluster_levels,
+           stats.refactor_dependency_pipeline_columns,
+           stats.refactor_dependency_work,
+           stats.refactor_dependency_pipeline_work,
            stats.nnz_l, stats.nnz_u,
            stats.estimated_flops, stats.factor_flops, stats.rcond, stats.rgrowth,
            stats.memory_bytes, stats.memory_peak_bytes);
@@ -609,6 +617,13 @@ int main(int argc, char **argv) {
            stats.refactor_dependency_levels,
            stats.refactor_dependency_max_width,
            stats.refactor_dependency_edges);
+    printf("refactor dependency cluster levels: %" PRId64
+           ", pipeline columns: %" PRId64 "\n",
+           stats.refactor_dependency_cluster_levels,
+           stats.refactor_dependency_pipeline_columns);
+    printf("refactor dependency work: %.6g, pipeline work: %.6g\n",
+           stats.refactor_dependency_work,
+           stats.refactor_dependency_pipeline_work);
     printf("nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n", stats.nnz_l, stats.nnz_u);
     printf("estimated flops: %.6e, factor flops: %.6e\n", stats.estimated_flops, stats.factor_flops);
     printf("rcond: %.6e, rgrowth: %.6e\n", stats.rcond, stats.rgrowth);

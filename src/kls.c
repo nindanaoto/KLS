@@ -57,6 +57,10 @@ struct kls_solver {
   UF_long refactor_level_count;
   UF_long refactor_level_max_width;
   UF_long refactor_dependency_edges;
+  UF_long refactor_cluster_level_count;
+  UF_long refactor_pipeline_column_count;
+  double refactor_dependency_work;
+  double refactor_pipeline_work;
   kls_input_format input_format;
   kls_orientation orientation;
   kls_options options;
@@ -249,6 +253,10 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_level_count = 0;
   solver->refactor_level_max_width = 0;
   solver->refactor_dependency_edges = 0;
+  solver->refactor_cluster_level_count = 0;
+  solver->refactor_pipeline_column_count = 0;
+  solver->refactor_dependency_work = 0.0;
+  solver->refactor_pipeline_work = 0.0;
 }
 
 static void kls_worker_record_singular(kls_parallel_refactor_worker *worker,
@@ -5692,6 +5700,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_level_max_width;
   solver->stats.refactor_dependency_edges =
     (int64_t)solver->refactor_dependency_edges;
+  solver->stats.refactor_dependency_cluster_levels =
+    (int64_t)solver->refactor_cluster_level_count;
+  solver->stats.refactor_dependency_pipeline_columns =
+    (int64_t)solver->refactor_pipeline_column_count;
+  solver->stats.refactor_dependency_work =
+    solver->refactor_dependency_work;
+  solver->stats.refactor_dependency_pipeline_work =
+    solver->refactor_pipeline_work;
 }
 
 void kls_default_options(kls_options *options) {
@@ -6789,12 +6805,17 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
 
   free_refactor_schedule(solver);
   UF_long *levels = (UF_long *)calloc((size_t)solver->n, sizeof(*levels));
-  if (levels == NULL) {
+  double *column_work =
+    (double *)calloc((size_t)solver->n, sizeof(*column_work));
+  if (levels == NULL || column_work == NULL) {
+    free(levels);
+    free(column_work);
     return 0;
   }
 
   UF_long max_level = 0;
   UF_long edges = 0;
+  double total_work = 0.0;
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
     const UF_long k1 = solver->symbolic->R[block];
     const UF_long k2 = solver->symbolic->R[block + 1u];
@@ -6805,6 +6826,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     double *lu = (double *)solver->numeric->LUbx[block];
     if (lu == NULL) {
       free(levels);
+      free(column_work);
       return 0;
     }
     const UF_long *uip = solver->numeric->Uip + k1;
@@ -6816,19 +6838,24 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
       (void)ux;
       UF_long level = 0;
+      double work = 1.0;
       for (UF_long p = 0; p < ucol_len; ++p) {
         const UF_long dep = ui[p];
         if (dep >= k) {
           free(levels);
+          free(column_work);
           return 0;
         }
         const UF_long dep_level = levels[k1 + dep] + 1u;
         if (dep_level > level) {
           level = dep_level;
         }
+        work += 1.0 + (double)solver->numeric->Llen[k1 + dep];
         edges++;
       }
       levels[k1 + k] = level;
+      column_work[k1 + k] = work;
+      total_work += work;
       if (level > max_level) {
         max_level = level;
       }
@@ -6844,6 +6871,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     (UF_long *)malloc((size_t)solver->n * sizeof(*level_cols));
   if (counts == NULL || level_ptr == NULL || level_cols == NULL) {
     free(levels);
+    free(column_work);
     free(counts);
     free(level_ptr);
     free(level_cols);
@@ -6853,6 +6881,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   for (UF_long k = 0; k < solver->n; ++k) {
     if (levels[k] >= level_count) {
       free(levels);
+      free(column_work);
       free(counts);
       free(level_ptr);
       free(level_cols);
@@ -6866,10 +6895,16 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   }
   level_ptr[level_count] = counts[level_count];
   UF_long max_width = 0;
+  UF_long cluster_levels = level_count;
+  const double cluster_width_limit = 2.0 * (double)solver->options.threads;
   for (UF_long level = 0; level < level_count; ++level) {
     const UF_long width = level_ptr[level + 1u] - level_ptr[level];
     if (width > max_width) {
       max_width = width;
+    }
+    if (cluster_levels == level_count &&
+        (double)width < cluster_width_limit) {
+      cluster_levels = level;
     }
   }
 
@@ -6879,6 +6914,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     const UF_long dst = next[level]++;
     if (dst >= solver->n) {
       free(levels);
+      free(column_work);
       free(counts);
       free(level_ptr);
       free(level_cols);
@@ -6887,13 +6923,36 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     level_cols[dst] = k;
   }
 
+  UF_long pipeline_columns = 0;
+  double pipeline_work = 0.0;
+  if (cluster_levels < level_count) {
+    for (UF_long pos = level_ptr[cluster_levels]; pos < solver->n; ++pos) {
+      const UF_long col = level_cols[pos];
+      if (col >= solver->n) {
+        free(levels);
+        free(column_work);
+        free(counts);
+        free(level_ptr);
+        free(level_cols);
+        return 0;
+      }
+      pipeline_columns++;
+      pipeline_work += column_work[col];
+    }
+  }
+
   free(levels);
+  free(column_work);
   free(counts);
   solver->refactor_level_ptr = level_ptr;
   solver->refactor_level_cols = level_cols;
   solver->refactor_level_count = level_count;
   solver->refactor_level_max_width = max_width;
   solver->refactor_dependency_edges = edges;
+  solver->refactor_cluster_level_count = cluster_levels;
+  solver->refactor_pipeline_column_count = pipeline_columns;
+  solver->refactor_dependency_work = total_work;
+  solver->refactor_pipeline_work = pipeline_work;
   return 1;
 }
 

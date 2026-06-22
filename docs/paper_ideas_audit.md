@@ -149,8 +149,11 @@ design work, not benchmark-specific tuning.
   exact no-pivot refactor dependency graph from the actual U pattern after
   factorization. It retains level pointers and column lists and reports the
   level count, maximum level width, and dependency edge count in `kls_stats`
-  and benchmark JSON. This is CKTSO/NICSLU-aligned scheduling metadata, but the
-  intra-block parallel refactor kernel that consumes it is still open.
+  and benchmark JSON. It also reports the CKTSO-style cluster/pipeline split
+  point, pipeline-column count, approximate no-pivot update work, and tail work
+  implied by the current level widths. This is CKTSO/NICSLU-aligned scheduling
+  metadata, but the intra-block parallel refactor kernel that consumes it is
+  still open.
 - SPICE-cycle orientation policy: KLS can analyze normal and transposed storage
   orientations and select the faster internal form for repeated solve cycles.
 - LGPL project licensing and third-party notices: KLS itself is

@@ -96,6 +96,10 @@ typedef struct kls_stats {
   int64_t refactor_dependency_levels;
   int64_t refactor_dependency_max_width;
   int64_t refactor_dependency_edges;
+  int64_t refactor_dependency_cluster_levels;
+  int64_t refactor_dependency_pipeline_columns;
+  double refactor_dependency_work;
+  double refactor_dependency_pipeline_work;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
