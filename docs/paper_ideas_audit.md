@@ -1278,6 +1278,22 @@ decomposition after this change still shows the remaining largest losses are
 dominated by repeated refactor throughput (`G2_circuit`, ASIC, `mc2depi`, and
 Rajat rows), not by another MC64-compatible matching import.
 
+The EGraph floor was then lowered for a compact unscaled dominant-BTF shape:
+95%+ largest-block coverage, 8-512 BTF blocks, a 10k-30k largest block, and at
+least `2e7` measured factor flops. This is the smaller analogue of the retained
+low-work dominant-BTF EGraph policy and intentionally excludes the TSOPF rows
+with only two BTF blocks and the scaled `ckt11752_dc_1` shape. On the saved
+medium artifact this selector matches only `coupled`. A focused three-pass run
+with ten repeated refactors moved `coupled` from the prior `0.6345s` saved
+SPICE-cycle estimate to a median `0.3783s`; the new row records 540 dependency
+levels and about `1.19e7` dependency-work units. A one-pass full-medium run was
+noise dominated overall (`0.3108s` geomean versus `0.3096s` in the previous
+artifact), but the only row whose dependency schedule changed was `coupled`,
+and that row improved from `0.6345s` to `0.3858s` in the full run. The retained
+conclusion is narrow: compact dominant-BTF refactors can consume the exact
+EGraph path, but this still does not address the much larger single-block and
+ASIC refactor-kernel gap.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
