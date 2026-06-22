@@ -757,6 +757,14 @@ regressed from about 18.40s/18.49s to about 18.73s/18.69s. The evidence points
 back to numeric update structure, pivoting-tail machinery, or separator-tree
 scheduling rather than thread-launch overhead.
 
+The EGraph cluster/pipeline split threshold was also checked after the
+work-balanced cluster slices. The retained policy switches to pipeline mode at
+the first level narrower than `2 * threads`. A later handoff at `1 * threads`
+cut the `rajat30` pipeline tail to 1156 columns but worsened factor/refactor
+averages to about 0.346s/0.330s. An earlier handoff at `4 * threads` expanded
+the tail to 3715 columns and measured about 0.328s/0.317s. The current
+middle split remains the better general setting in this quick check.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
