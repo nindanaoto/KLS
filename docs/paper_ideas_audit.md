@@ -93,7 +93,9 @@ design work, not benchmark-specific tuning.
 - Fast repeated factorization with pivot check: KLS reuses an existing numeric
   pattern, checks reused pivots against the selected threshold via L
   multipliers, and falls back to full pivoting factorization if the reused order
-  is unsafe.
+  is unsafe. KLS now records the first rejected factor-order pivot and original
+  matrix column so future tail-restart work can distinguish late-tail failures
+  from early failures.
 - Static pivoting trial: KLS has value-aware greedy row matching, layered
   augmenting-path search for larger weak-diagonal candidates, and swap
   improvement for weak or high-off-diagonal-pivot medium matrices. It can also
@@ -424,6 +426,14 @@ mainline. A temporary large-gate experiment also let `pre2` try this
 preprocessing path with layered matching, but the factor-only run still timed
 out at 120s. This makes the dual-potential pass a bounded MC64-adjacent
 preprocessing cleanup, not the missing CKTSO-scale algorithm.
+
+The fast-factor pivot-check path was then made more diagnostic by recording the
+first rejected factor-order pivot and original matrix column in `kls_stats` and
+benchmark JSON. This does not implement CKTSO's pipelined tail factorization,
+but it is a required prerequisite: KLS can now measure whether failed fast
+factorizations reject near the tail, where an ETree-descendant restart could
+avoid recomputing the whole matrix, or near the front, where full fallback is
+still expected.
 
 The selected-large KLU2 comparison was also run with the same 120s cap and one
 factor/refactor repeat. KLU2 completed only `rajat29`, `rajat30`, and

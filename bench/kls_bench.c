@@ -533,6 +533,8 @@ int main(int argc, char **argv) {
            ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
            ",\"structural_rank\":%" PRId64 ",\"numerical_rank\":%" PRId64
            ",\"offdiag_pivots\":%" PRId64 ",\"reallocations\":%" PRId64
+           ",\"fast_rejected_pivot\":%" PRId64
+           ",\"fast_rejected_pivot_col\":%" PRId64
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
@@ -553,6 +555,7 @@ int main(int argc, char **argv) {
            residual, rel_residual, stats.nblocks, stats.max_block,
            stats.structural_rank, stats.numerical_rank,
            stats.offdiag_pivots, stats.reallocations,
+           stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,
            stats.nnz_l, stats.nnz_u,
            stats.estimated_flops, stats.factor_flops, stats.rcond, stats.rgrowth,
            stats.memory_bytes, stats.memory_peak_bytes);
@@ -586,6 +589,8 @@ int main(int argc, char **argv) {
            stats.structural_rank, stats.numerical_rank);
     printf("off-diagonal pivots: %" PRId64 ", reallocations: %" PRId64 "\n",
            stats.offdiag_pivots, stats.reallocations);
+    printf("fast rejected pivot: %" PRId64 ", original column: %" PRId64 "\n",
+           stats.fast_rejected_pivot, stats.fast_rejected_pivot_col);
     printf("nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n", stats.nnz_l, stats.nnz_u);
     printf("estimated flops: %.6e, factor flops: %.6e\n", stats.estimated_flops, stats.factor_flops);
     printf("rcond: %.6e, rgrowth: %.6e\n", stats.rcond, stats.rgrowth);

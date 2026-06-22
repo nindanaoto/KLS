@@ -101,6 +101,8 @@ typedef struct kls_parallel_refactor_worker {
   int invalid;
   int pivot_rejected;
   int singular;
+  UF_long rejected_pivot;
+  UF_long rejected_pivot_col;
   UF_long numerical_rank;
   UF_long singular_col;
 } kls_parallel_refactor_worker;
@@ -201,6 +203,25 @@ static void kls_worker_record_singular(kls_parallel_refactor_worker *worker,
     worker->numerical_rank = numerical_rank;
     worker->singular_col = singular_col;
   }
+}
+
+static void kls_clear_fast_reject_stats(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->stats.fast_rejected_pivot = -1;
+  solver->stats.fast_rejected_pivot_col = -1;
+}
+
+static void kls_record_fast_reject(kls_solver *solver,
+                                   UF_long rejected_pivot,
+                                   UF_long rejected_pivot_col) {
+  if (solver == NULL || rejected_pivot == KLS_KLU_EMPTY) {
+    return;
+  }
+  solver->stats.fast_rejected_pivot = (int64_t)rejected_pivot;
+  solver->stats.fast_rejected_pivot_col =
+    rejected_pivot_col == KLS_KLU_EMPTY ? -1 : (int64_t)rejected_pivot_col;
 }
 
 static int kls_parallel_refactor_value(const kls_parallel_refactor_shared *shared,
@@ -393,6 +414,8 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
         if (!isfinite(lij_abs) ||
             lij_abs * shared->pivot_tolerance > 1.0 + 1.0e-12) {
           worker->pivot_rejected = 1;
+          worker->rejected_pivot = global_col;
+          worker->rejected_pivot_col = q[global_col];
           x[i] = 0.0;
           return;
         }
@@ -563,6 +586,8 @@ static int run_refactor_pool(kls_solver *solver,
                              int check_pivots,
                              int *invalid_out,
                              int *pivot_rejected_out,
+                             UF_long *rejected_pivot_out,
+                             UF_long *rejected_pivot_col_out,
                              int *singular_out,
                              UF_long *numerical_rank_out,
                              UF_long *singular_col_out) {
@@ -602,6 +627,8 @@ static int run_refactor_pool(kls_solver *solver,
     worker->invalid = 0;
     worker->pivot_rejected = 0;
     worker->singular = 0;
+    worker->rejected_pivot = KLS_KLU_EMPTY;
+    worker->rejected_pivot_col = KLS_KLU_EMPTY;
     worker->numerical_rank = UF_long_max;
     worker->singular_col = KLS_KLU_EMPTY;
     /* Successful KLU-style refactors clear touched X slots as they go. */
@@ -620,6 +647,8 @@ static int run_refactor_pool(kls_solver *solver,
 
   int invalid = 0;
   int pivot_rejected = 0;
+  UF_long rejected_pivot = KLS_KLU_EMPTY;
+  UF_long rejected_pivot_col = KLS_KLU_EMPTY;
   int singular = 0;
   UF_long numerical_rank = UF_long_max;
   UF_long singular_col = KLS_KLU_EMPTY;
@@ -630,6 +659,12 @@ static int run_refactor_pool(kls_solver *solver,
     }
     if (worker->pivot_rejected) {
       pivot_rejected = 1;
+      if (worker->rejected_pivot != KLS_KLU_EMPTY &&
+          (rejected_pivot == KLS_KLU_EMPTY ||
+           worker->rejected_pivot < rejected_pivot)) {
+        rejected_pivot = worker->rejected_pivot;
+        rejected_pivot_col = worker->rejected_pivot_col;
+      }
     }
     if (worker->singular && worker->numerical_rank < numerical_rank) {
       singular = 1;
@@ -640,6 +675,12 @@ static int run_refactor_pool(kls_solver *solver,
 
   *invalid_out = invalid;
   *pivot_rejected_out = pivot_rejected;
+  if (rejected_pivot_out != NULL) {
+    *rejected_pivot_out = rejected_pivot;
+  }
+  if (rejected_pivot_col_out != NULL) {
+    *rejected_pivot_col_out = rejected_pivot_col;
+  }
   *singular_out = singular;
   *numerical_rank_out = numerical_rank;
   *singular_col_out = singular_col;
@@ -700,6 +741,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_scale_checked = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
+  kls_clear_fast_reject_stats(solver);
 }
 
 static int initial_scale(const kls_options *options) {
@@ -4210,6 +4252,7 @@ int kls_create(kls_solver **solver_out) {
   }
   kls_default_options(&solver->options);
   solver->stats.struct_size = sizeof(solver->stats);
+  kls_clear_fast_reject_stats(solver);
   if (!trilinos_klu_l_defaults(&solver->common)) {
     free(solver);
     return KLS_ERR_ANALYZE_FAILED;
@@ -4462,7 +4505,15 @@ static int kls_parallel_refactor_permute_scale(kls_solver *solver) {
   return 1;
 }
 
-static int kls_numeric_pivots_pass_threshold(const kls_solver *solver) {
+static int kls_numeric_pivots_pass_threshold(const kls_solver *solver,
+                                             UF_long *rejected_pivot_out,
+                                             UF_long *rejected_pivot_col_out) {
+  if (rejected_pivot_out != NULL) {
+    *rejected_pivot_out = KLS_KLU_EMPTY;
+  }
+  if (rejected_pivot_col_out != NULL) {
+    *rejected_pivot_col_out = KLS_KLU_EMPTY;
+  }
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
     return 0;
   }
@@ -4498,6 +4549,14 @@ static int kls_numeric_pivots_pass_threshold(const kls_solver *solver) {
       for (UF_long p = 0; p < lcol_len; ++p) {
         const double value_abs = fabs(lx[p]);
         if (!isfinite(value_abs) || value_abs * tol > 1.0 + 1.0e-12) {
+          const UF_long global_col = k1 + k;
+          if (rejected_pivot_out != NULL) {
+            *rejected_pivot_out = global_col;
+          }
+          if (rejected_pivot_col_out != NULL) {
+            *rejected_pivot_col_out =
+              symbolic->Q != NULL ? symbolic->Q[global_col] : KLS_KLU_EMPTY;
+          }
           return 0;
         }
       }
@@ -4776,6 +4835,7 @@ static int kls_single_block_mapped_refactor(kls_solver *solver,
             lij_abs * common->tol > 1.0 + 1.0e-12) {
           x[i] = 0.0;
           memset(x, 0, (size_t)solver->n * sizeof(*x));
+          kls_record_fast_reject(solver, k, q[k]);
           common->status = TRILINOS_KLU_OK;
           return 0;
         }
@@ -4835,6 +4895,8 @@ static int kls_mapped_refactor(kls_solver *solver,
   worker.x = (double *)solver->numeric->Xwork;
 
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    worker.rejected_pivot = KLS_KLU_EMPTY;
+    worker.rejected_pivot_col = KLS_KLU_EMPTY;
     kls_parallel_refactor_block(&worker, block);
     if (worker.invalid || worker.pivot_rejected ||
         (worker.singular && common->halt_if_singular)) {
@@ -4848,6 +4910,8 @@ static int kls_mapped_refactor(kls_solver *solver,
     return 0;
   }
   if (worker.pivot_rejected) {
+    kls_record_fast_reject(solver, worker.rejected_pivot,
+                           worker.rejected_pivot_col);
     common->status = TRILINOS_KLU_OK;
     return 0;
   }
@@ -4891,9 +4955,14 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                               numeric_values, solver->symbolic,
                               solver->numeric, &solver->common);
     if (ok && check_pivots && solver->common.status >= 0 &&
-        solver->common.status != TRILINOS_KLU_SINGULAR &&
-        !kls_numeric_pivots_pass_threshold(solver)) {
-      return 0;
+        solver->common.status != TRILINOS_KLU_SINGULAR) {
+      UF_long rejected_pivot = KLS_KLU_EMPTY;
+      UF_long rejected_pivot_col = KLS_KLU_EMPTY;
+      if (!kls_numeric_pivots_pass_threshold(solver, &rejected_pivot,
+                                             &rejected_pivot_col)) {
+        kls_record_fast_reject(solver, rejected_pivot, rejected_pivot_col);
+        return 0;
+      }
     }
     return ok;
   }
@@ -4922,20 +4991,28 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                               numeric_values, solver->symbolic,
                               solver->numeric, &solver->common);
     if (ok && check_pivots && solver->common.status >= 0 &&
-        solver->common.status != TRILINOS_KLU_SINGULAR &&
-        !kls_numeric_pivots_pass_threshold(solver)) {
-      return 0;
+        solver->common.status != TRILINOS_KLU_SINGULAR) {
+      UF_long rejected_pivot = KLS_KLU_EMPTY;
+      UF_long rejected_pivot_col = KLS_KLU_EMPTY;
+      if (!kls_numeric_pivots_pass_threshold(solver, &rejected_pivot,
+                                             &rejected_pivot_col)) {
+        kls_record_fast_reject(solver, rejected_pivot, rejected_pivot_col);
+        return 0;
+      }
     }
     return ok;
   }
 
   int invalid = 0;
   int pivot_rejected = 0;
+  UF_long rejected_pivot = KLS_KLU_EMPTY;
+  UF_long rejected_pivot_col = KLS_KLU_EMPTY;
   int singular = 0;
   UF_long numerical_rank = UF_long_max;
   UF_long singular_col = KLS_KLU_EMPTY;
   if (!run_refactor_pool(solver, numeric_values, thread_count, check_pivots,
-                         &invalid, &pivot_rejected, &singular,
+                         &invalid, &pivot_rejected,
+                         &rejected_pivot, &rejected_pivot_col, &singular,
                          &numerical_rank, &singular_col)) {
     common->status = TRILINOS_KLU_OUT_OF_MEMORY;
     return 0;
@@ -4946,6 +5023,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     return 0;
   }
   if (pivot_rejected) {
+    kls_record_fast_reject(solver, rejected_pivot, rejected_pivot_col);
     common->status = TRILINOS_KLU_OK;
     return 0;
   }
@@ -4974,6 +5052,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+  kls_clear_fast_reject_stats(solver);
   double *numeric_values = NULL;
   int status = prepare_numeric_values(solver, values, &numeric_values);
   if (status != KLS_OK) {
@@ -5048,6 +5127,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+  kls_clear_fast_reject_stats(solver);
   double *numeric_values = NULL;
   int status = prepare_numeric_values(solver, values, &numeric_values);
   if (status != KLS_OK) {

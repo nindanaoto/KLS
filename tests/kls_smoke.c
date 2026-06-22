@@ -1,6 +1,7 @@
 #include "kls/kls.h"
 
 #include <math.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -271,6 +272,12 @@ static int test_fast_factor_pivot_check_fallback(void) {
   }
   if (ok && stats.offdiag_pivots < 1) {
     fprintf(stderr, "fast factor did not fall back to pivoting factorization\n");
+    ok = 0;
+  }
+  if (ok && (stats.fast_rejected_pivot != 0 || stats.fast_rejected_pivot_col != 0)) {
+    fprintf(stderr,
+            "unexpected fast rejected pivot: pivot=%" PRId64 ", col=%" PRId64 "\n",
+            stats.fast_rejected_pivot, stats.fast_rejected_pivot_col);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {

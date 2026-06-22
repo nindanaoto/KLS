@@ -89,6 +89,8 @@ typedef struct kls_stats {
   int selected_btf;
   double selected_pivot_tolerance;
   int selected_static_pivoting;
+  int64_t fast_rejected_pivot;
+  int64_t fast_rejected_pivot_col;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
