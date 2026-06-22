@@ -26,10 +26,36 @@ def geometric_mean(values: list[float]) -> float:
     return math.exp(sum(math.log(v) for v in positives) / len(positives))
 
 
+def read_manifest(path: pathlib.Path) -> list[str]:
+    names: list[str] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            names.append(line.lower())
+    return names
+
+
+def select_matrices(matrix_dir: pathlib.Path, manifest: pathlib.Path | None) -> list[pathlib.Path]:
+    matrices = sorted(matrix_dir.rglob("*.mtx"))
+    if manifest is None:
+        return matrices
+    wanted = read_manifest(manifest)
+    wanted_set = set(wanted)
+    selected = [matrix for matrix in matrices if matrix.stem.lower() in wanted_set]
+    found = {matrix.stem.lower() for matrix in selected}
+    missing = [name for name in wanted if name not in found]
+    if missing:
+        raise ValueError(
+            f"manifest entries not found under {matrix_dir}: {', '.join(missing)}"
+        )
+    return selected
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--kls-bench", type=pathlib.Path, required=True)
     parser.add_argument("--matrix-dir", type=pathlib.Path, required=True)
+    parser.add_argument("--manifest", type=pathlib.Path)
     parser.add_argument("--jsonl", type=pathlib.Path)
     parser.add_argument("--repeat", type=int, default=5)
     parser.add_argument("--refactor-repeat", type=int, default=5)
@@ -45,7 +71,11 @@ def main() -> int:
     parser.add_argument("--no-static-pivoting", action="store_true")
     args = parser.parse_args()
 
-    matrices = sorted(args.matrix_dir.rglob("*.mtx"))
+    try:
+        matrices = select_matrices(args.matrix_dir, args.manifest)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if not matrices:
         print(f"no .mtx files found under {args.matrix_dir}", file=sys.stderr)
         return 1

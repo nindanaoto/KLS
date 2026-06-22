@@ -1,0 +1,12 @@
+# Selected large paper-derived SuiteSparse cases for 120s reconnaissance.
+# This is not the full large gate; it is the smaller high-signal subset used to
+# compare KLS and CKTSO before an overnight run.
+
+TSOPF_FS_b39_c30
+nxp1
+G3_circuit
+ASIC_680k
+pre2
+Hamrle3
+rajat29
+rajat30

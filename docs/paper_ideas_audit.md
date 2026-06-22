@@ -347,6 +347,26 @@ improvement, not a CKTSO win: the existing CKTSO artifacts are about 349s and
 also reduced `G2_circuit` initial factor time from about 2.8s to about 1.0s and
 modestly improved `mc2depi`.
 
+A selected large-supplement reconnaissance manifest was added for the smaller
+large paper cases that are practical under a 120s per-process cap before an
+overnight full-large run. In same-session KLS/CKTSO runs with one factor and
+one refactor repeat, KLS beat CKTSO on `rajat29` by about 5%, but lost the
+other common successful cases: about 3.1x on `ASIC_680k`, 4.0x on `rajat30`,
+4.5x on `G3_circuit`, and 4.7x on `nxp1`. KLS also timed out on
+`TSOPF_FS_b39_c30` and `pre2`, both of which CKTSO completed within the same
+120s cap; both solvers timed out on `Hamrle3`. The result reinforces that the
+remaining large-case gap is mostly very large single-block or near-single-block
+numeric/refactor throughput, not the many-small-BTF-block class.
+
+Extending the existing mapped refactor metadata to scaled refactors was
+retested against current mainline using a clean `HEAD` worktree. The scaled
+map was KLU-semantics-compatible after recomputing row scale factors before
+the mapped scatter and permuting them afterward, but it did not improve the
+focused scaled large/medium cases. On the seven-case focused set the candidate
+geomean regressed by about 1%, with no wins over 2%, so the experiment was
+removed again. This keeps the retained refactor map limited to unscaled serial
+patterns until a broader EGraph/separator-tree numeric kernel exists.
+
 ## Recommended General Work
 
 1. Implement a real matching/scaling stage first, because MC64-style static
