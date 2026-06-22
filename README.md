@@ -112,15 +112,17 @@ step. For threaded runs, KLS also records the exact no-pivot refactor EGraph
 level schedule from the numeric U pattern; this metadata is exposed in
 benchmark output and is used by a guarded large unscaled single-block
 level-sliced refactor path when there is enough dependency work and level
-width to offset thread and scratch overhead. Above the CKTSO-style split
-level, KLS can switch from barriered cluster levels to a no-pivot pipeline tail
-that waits only for actual U-pattern predecessors. This avoids thousands of
-narrow-level barriers on high-work tails while preserving the existing
-fixed-pivot LU storage. For large single-block cases that use KLU row scaling,
-the same path recomputes the row scale factors, divides the mapped entries by
-the unpermuted row scales, and then permutes `Rs` back to pivot order after the
-refactor. Small cases and many-block BTF cases still use the existing mapped
-or BTF-worker paths.
+width to offset thread and scratch overhead. The same EGraph consumer can also
+run inside a large dominant BTF block, updating that block's local LU and
+off-block entries while leaving ordinary many-block BTF cases on the existing
+worker-pool path. Above the CKTSO-style split level, KLS can switch from
+barriered cluster levels to a no-pivot pipeline tail that waits only for actual
+U-pattern predecessors. This avoids thousands of narrow-level barriers on
+high-work tails while preserving the existing fixed-pivot LU storage. For large
+cases that use KLU row scaling, the same path recomputes the row scale factors,
+divides the mapped entries by the unpermuted row scales, and then permutes
+`Rs` back to pivot order after the refactor. Small cases and non-dominant BTF
+cases still use the existing mapped or BTF-worker paths.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium

@@ -6676,6 +6676,26 @@ static int kls_egraph_refactor_should_stop(
   return atomic_load_explicit(&shared->stop, memory_order_acquire) != 0;
 }
 
+static int kls_egraph_refactor_value(kls_egraph_refactor_shared *shared,
+                                     UF_long input_pos,
+                                     double *value_out) {
+  kls_solver *solver = shared->solver;
+  if (input_pos >= solver->nnz) {
+    return 0;
+  }
+  double value = shared->values[input_pos];
+  if (shared->scale > 0) {
+    const UF_long oldrow = solver->row_idx[input_pos];
+    if (oldrow >= solver->n || shared->rs == NULL ||
+        shared->rs[oldrow] == 0.0) {
+      return 0;
+    }
+    value /= shared->rs[oldrow];
+  }
+  *value_out = value;
+  return 1;
+}
+
 static void kls_egraph_refactor_mark_done(
   kls_egraph_refactor_shared *shared,
   UF_long col) {
@@ -6711,50 +6731,155 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   double *x = worker->x;
   double *udiag = (double *)numeric->Udiag;
-  UF_long *lip = numeric->Lip;
-  UF_long *llen = numeric->Llen;
-  UF_long *uip = numeric->Uip;
-  UF_long *ulen = numeric->Ulen;
-  double *lu = (double *)numeric->LUbx[0];
-
-  if (k >= solver->n || lu == NULL) {
+  const UF_long block = kls_block_for_pivot(solver, k);
+  if (block == KLS_KLU_EMPTY || block >= symbolic->nblocks ||
+      k >= solver->n || symbolic->R == NULL || symbolic->Q == NULL) {
     kls_egraph_refactor_record_invalid(shared);
     return 0;
   }
 
-  for (UF_long p = solver->refactor_col_ptr[k];
-       p < solver->refactor_col_ptr[k + 1u]; ++p) {
-    const UF_long row = solver->refactor_row_idx[p];
-    const UF_long input_pos = solver->refactor_input_pos[p];
-    if (row >= solver->n || input_pos >= solver->nnz) {
+  const UF_long k1 = symbolic->R[block];
+  const UF_long k2 = symbolic->R[block + 1u];
+  const UF_long nk = k2 - k1;
+  const UF_long local_k = k - k1;
+  const int btf_block = symbolic->nblocks != 1u;
+
+  if (local_k >= nk ||
+      solver->refactor_col_ptr == NULL ||
+      solver->refactor_row_idx == NULL ||
+      solver->refactor_input_pos == NULL ||
+      (btf_block && solver->refactor_block_start == NULL)) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+
+  if (nk == 1u) {
+    if (!btf_block || numeric->Offp == NULL || numeric->Offx == NULL) {
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
-    double value = shared->values[input_pos];
-    if (shared->scale > 0) {
-      const UF_long oldrow = solver->row_idx[input_pos];
-      if (oldrow >= solver->n || shared->rs == NULL ||
-          shared->rs[oldrow] == 0.0) {
+    UF_long poff = numeric->Offp[k];
+    const UF_long poff_end = numeric->Offp[k + 1u];
+    double *offx = (double *)numeric->Offx;
+    double pivot = 0.0;
+    for (UF_long p = solver->refactor_col_ptr[k];
+         p < solver->refactor_block_start[k]; ++p) {
+      if (poff >= poff_end) {
         kls_egraph_refactor_record_invalid(shared);
         return 0;
       }
-      value /= shared->rs[oldrow];
+      double value = 0.0;
+      if (!kls_egraph_refactor_value(shared, solver->refactor_input_pos[p],
+                                     &value)) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      offx[poff++] = value;
     }
-    x[row] = value;
+    for (UF_long p = solver->refactor_block_start[k];
+         p < solver->refactor_col_ptr[k + 1u]; ++p) {
+      if (solver->refactor_row_idx[p] != k) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      if (!kls_egraph_refactor_value(shared, solver->refactor_input_pos[p],
+                                     &pivot)) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+    }
+    udiag[k] = pivot;
+    if (pivot == 0.0) {
+      kls_egraph_refactor_record_singular(shared, k, symbolic->Q[k]);
+      if (solver->common.halt_if_singular) {
+        return 0;
+      }
+    }
+    return 1;
+  }
+
+  UF_long *lip = numeric->Lip + k1;
+  UF_long *llen = numeric->Llen + k1;
+  UF_long *uip = numeric->Uip + k1;
+  UF_long *ulen = numeric->Ulen + k1;
+  double *lu = (double *)numeric->LUbx[block];
+  if (lu == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+
+  if (btf_block) {
+    if (numeric->Offp == NULL || numeric->Offx == NULL) {
+      kls_egraph_refactor_record_invalid(shared);
+      return 0;
+    }
+    UF_long poff = numeric->Offp[k];
+    const UF_long poff_end = numeric->Offp[k + 1u];
+    double *offx = (double *)numeric->Offx;
+    for (UF_long p = solver->refactor_col_ptr[k];
+         p < solver->refactor_block_start[k]; ++p) {
+      if (poff >= poff_end) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      double value = 0.0;
+      if (!kls_egraph_refactor_value(shared, solver->refactor_input_pos[p],
+                                     &value)) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      offx[poff++] = value;
+    }
+    for (UF_long p = solver->refactor_block_start[k];
+         p < solver->refactor_col_ptr[k + 1u]; ++p) {
+      const UF_long global_row = solver->refactor_row_idx[p];
+      if (global_row < k1 || global_row >= k2) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      double value = 0.0;
+      if (!kls_egraph_refactor_value(shared, solver->refactor_input_pos[p],
+                                     &value)) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      x[global_row - k1] = value;
+    }
+  } else {
+    for (UF_long p = solver->refactor_col_ptr[k];
+         p < solver->refactor_col_ptr[k + 1u]; ++p) {
+      const UF_long row = solver->refactor_row_idx[p];
+      const UF_long input_pos = solver->refactor_input_pos[p];
+      if (row >= solver->n || input_pos >= solver->nnz) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      double value = shared->values[input_pos];
+      if (shared->scale > 0) {
+        const UF_long oldrow = solver->row_idx[input_pos];
+        if (oldrow >= solver->n || shared->rs == NULL ||
+            shared->rs[oldrow] == 0.0) {
+          kls_egraph_refactor_record_invalid(shared);
+          return 0;
+        }
+        value /= shared->rs[oldrow];
+      }
+      x[row] = value;
+    }
   }
 
   UF_long *ui = NULL;
   double *ux = NULL;
   UF_long ucol_len = 0;
-  kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+  kls_klu_get_pointer(lu, uip, ulen, local_k, &ui, &ux, &ucol_len);
   for (UF_long up = 0; up < ucol_len; ++up) {
     const UF_long j = ui[up];
-    if (j >= k) {
+    if (j >= local_k) {
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
     if (wait_for_dependencies &&
-        !kls_egraph_refactor_wait_done(shared, j)) {
+        !kls_egraph_refactor_wait_done(shared, k1 + j)) {
       return 0;
     }
     const double ujk = x[j];
@@ -6770,8 +6895,8 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     }
   }
 
-  const double ukk = x[k];
-  x[k] = 0.0;
+  const double ukk = x[local_k];
+  x[local_k] = 0.0;
   if (ukk == 0.0) {
     kls_egraph_refactor_record_singular(shared, k, symbolic->Q[k]);
     if (solver->common.halt_if_singular) {
@@ -6783,7 +6908,7 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   UF_long *li = NULL;
   double *lx = NULL;
   UF_long lcol_len = 0;
-  kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
+  kls_klu_get_pointer(lu, lip, llen, local_k, &li, &lx, &lcol_len);
   for (UF_long p = 0; p < lcol_len; ++p) {
     const UF_long i = li[p];
     const double lij = x[i] / ukk;
@@ -6867,12 +6992,25 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
 
 static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->options.threads <= 1 || solver->symbolic->nblocks != 1u ||
-      solver->n < 100000u || solver->refactor_dependency_work < 1.0e9 ||
+      solver->options.threads <= 1 || solver->n < 100000u ||
+      solver->refactor_dependency_work < 1.0e9 ||
       solver->refactor_level_ptr == NULL ||
       solver->refactor_level_cols == NULL ||
       solver->refactor_level_count == 0u ||
       solver->refactor_level_max_width < (UF_long)(4 * solver->options.threads)) {
+    return 0;
+  }
+  const int single_block = solver->symbolic->nblocks == 1u;
+  const int dominant_btf =
+    solver->symbolic->nblocks > 1u &&
+    solver->symbolic->maxblock >= 100000u &&
+    (double)solver->symbolic->maxblock >= 0.75 * (double)solver->n;
+  if (!single_block && !dominant_btf) {
+    return 0;
+  }
+  if (!single_block &&
+      (solver->refactor_block_start == NULL ||
+       solver->numeric->Offp == NULL || solver->numeric->Offx == NULL)) {
     return 0;
   }
   if (solver->common.scale > 0) {
@@ -6886,7 +7024,8 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   return solver->numeric->Udiag != NULL && solver->numeric->Lip != NULL &&
          solver->numeric->Llen != NULL && solver->numeric->Uip != NULL &&
          solver->numeric->Ulen != NULL && solver->numeric->LUbx != NULL &&
-         solver->numeric->LUbx[0] != NULL && kls_refactor_map_is_eligible(solver);
+         (single_block ? solver->numeric->LUbx[0] != NULL : 1) &&
+         kls_refactor_map_is_eligible(solver);
 }
 
 static int kls_egraph_mapped_refactor(kls_solver *solver,
@@ -6894,7 +7033,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
                                       int check_pivots) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->options.threads <= 1 ||
-      solver->symbolic->nblocks != 1u || solver->n < 100000u) {
+      solver->n < 100000u) {
     return -1;
   }
   if (solver->common.scale <= 0 && solver->numeric->Rs != NULL) {
@@ -7452,12 +7591,13 @@ static void maybe_prepare_refactor_schedule(kls_solver *solver,
 static UF_long kls_parallel_refactor(kls_solver *solver,
                                      double *numeric_values,
                                      int check_pivots) {
+  const int egraph =
+    kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
+  if (egraph >= 0) {
+    return (UF_long)egraph;
+  }
+
   if (!kls_parallel_refactor_is_eligible(solver)) {
-    const int egraph =
-      kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
-    if (egraph >= 0) {
-      return (UF_long)egraph;
-    }
     const int mapped = kls_mapped_refactor(solver, numeric_values, check_pivots);
     if (mapped >= 0) {
       return (UF_long)mapped;
