@@ -658,6 +658,29 @@ boundaries. Same-session focused checks improved `G3_circuit` to about
 19.0s/18.9s factor/refactor, `nxp1` to about 0.72s/0.71s, and `rajat30` to
 about 0.37s/0.36s, with valid residuals.
 
+A follow-up attempt to cache the per-worker EGraph dense scratch vectors was
+rejected. A dedicated solver-owned scratch cache improved repeated `rajat30`
+factor/refactor averages to about 0.34s/0.34s, but `nxp1` regressed slightly
+to about 0.72s/0.72s and the long `G3_circuit` guard regressed to about
+19.0s/19.2s. Since the effect was not a general win, the experiment was
+removed instead of adding a size or matrix-shape gate.
+
+The MC64 compatibility boundary was rechecked after allowing existing code if
+it remains LGPL-compatible. The retained vendored route is still SPRAL's
+BSD-3-Clause scaling subset: it is redistribution-compatible with KLS's
+LGPL-2.1-or-later license, whereas HSL MC64 itself and restricted MC64 copies
+from solver trees remain out of scope for vendoring. A small BSD Rust `mc64`
+crate exists as a partial SPRAL translation, but it does not improve KLS's C
+integration story over the already pinned SPRAL Fortran/C interface. Fresh
+SPRAL-enabled checks also confirm the policy should stay guarded rather than
+become an unconditional default: `rajat30` selected SPRAL matching, reduced
+off-diagonal pivots to one, and cut initial factor time to about 5.7s, but its
+repeat-heavy factor/refactor averages were about 0.67s/0.66s versus the faster
+current no-SPRAL EGraph path. `nxp1` did not select SPRAL and stayed roughly
+neutral-to-slightly-worse. This keeps license-compatible MC64-style code in
+KLS, but points the large remaining CKTSO gap back to numeric scheduling and
+pivoting machinery rather than merely importing another MC64 copy.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
