@@ -1091,6 +1091,19 @@ geomean gap moved from about 2.91x to about 2.68x. CKTSO is still materially
 faster, so the remaining gap still points to the larger pivoting-tail,
 numeric-kernel, and solve-scheduler items rather than more ordering backends.
 
+The single-block EGraph column fast path was then revisited with a narrower
+scope than the earlier rejected scaled experiment. The retained version only
+applies when the factor has one BTF block and no active KLU row scaling, so the
+previous `nxp1`/`rajat30` scaled guards remain on the generic column kernel. In
+that unscaled class, the hot loop bypasses repeated BTF-block lookup, BTF
+off-block checks, and scaling branches. Same-session focused checks showed a
+small net gain: the nine-row hard-focus JSONL improved by about 0.7% geomean
+over the medium-dominant-block artifact, with `G2_circuit` moving from about
+48.8s to about 47.8s and `HTC_336_4438` from about 8.64s to about 8.25s on the
+SPICE-cycle estimate. A one-refactor `mc2depi` guard stayed in the same
+refactor class, about 2.23s. This is retained as a minor EGraph kernel cleanup,
+not as the missing CKTSO-scale scheduler.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric

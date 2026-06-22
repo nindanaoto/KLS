@@ -151,7 +151,9 @@ is modest but whose dependency graph still has enough independent work to consum
 the threaded EGraph path. Moderate single-block cases can also consume the
 EGraph refactor once their measured factor work, LU fill, and dependency work
 clear the general floors, which covers matrices such as `HTC_336_4438` without
-using matrix-name tuning. The path updates that block's local LU and off-block
+using matrix-name tuning. Unscaled single-block EGraph refactors use a slimmer
+column kernel that bypasses BTF and scaling checks in the hot loop. The path
+updates that block's local LU and off-block
 entries while leaving ordinary many-block BTF cases on the existing worker-pool
 path. For large cases that use KLU row scaling, the same path recomputes the row
 scale factors, divides the mapped entries by the unpermuted row scales, and then
