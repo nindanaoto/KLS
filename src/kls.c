@@ -130,6 +130,25 @@ typedef struct kls_match_entry {
   UF_long col;
 } kls_match_entry;
 
+#define KLS_MATCH_PATH_MAX_DEPTH 4u
+
+typedef struct kls_weighted_path_search {
+  const struct kls_row_match_graph *graph;
+  const UF_long *row_perm;
+  const UF_long *col_match;
+  const double *current_log_weight;
+  UF_long max_candidates_per_row;
+  UF_long max_depth;
+  UF_long path_rows[KLS_MATCH_PATH_MAX_DEPTH];
+  UF_long path_cols[KLS_MATCH_PATH_MAX_DEPTH];
+  double path_weights[KLS_MATCH_PATH_MAX_DEPTH];
+  UF_long best_rows[KLS_MATCH_PATH_MAX_DEPTH];
+  UF_long best_cols[KLS_MATCH_PATH_MAX_DEPTH];
+  double best_weights[KLS_MATCH_PATH_MAX_DEPTH];
+  UF_long best_len;
+  double best_gain;
+} kls_weighted_path_search;
+
 typedef struct kls_row_match_graph {
   UF_long *row_ptr;
   UF_long *col_idx;
@@ -2413,6 +2432,166 @@ static void improve_numeric_row_match_by_swaps(UF_long n,
   }
 }
 
+static int weighted_path_contains_row(const UF_long *rows,
+                                      UF_long len,
+                                      UF_long row) {
+  for (UF_long i = 0; i < len; ++i) {
+    if (rows[i] == row) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static void weighted_path_record_best(kls_weighted_path_search *search,
+                                      UF_long len,
+                                      double gain) {
+  if (search == NULL || len == 0 || len > KLS_MATCH_PATH_MAX_DEPTH ||
+      gain <= search->best_gain + 1.0e-12) {
+    return;
+  }
+  search->best_gain = gain;
+  search->best_len = len;
+  for (UF_long i = 0; i < len; ++i) {
+    search->best_rows[i] = search->path_rows[i];
+    search->best_cols[i] = search->path_cols[i];
+    search->best_weights[i] = search->path_weights[i];
+  }
+}
+
+static void search_weighted_match_cycle(kls_weighted_path_search *search,
+                                        UF_long depth,
+                                        double gain_so_far) {
+  if (search == NULL || search->graph == NULL ||
+      depth >= search->max_depth ||
+      depth >= KLS_MATCH_PATH_MAX_DEPTH) {
+    return;
+  }
+
+  const kls_row_match_graph *graph = search->graph;
+  const UF_long row = search->path_rows[depth];
+  const UF_long current_col = search->row_perm[row];
+  const UF_long start_col = search->row_perm[search->path_rows[0]];
+  const double current_weight = search->current_log_weight[row];
+  UF_long candidates = 0;
+  for (UF_long p = graph->row_ptr[row];
+       p < graph->row_ptr[row + 1u] &&
+       candidates < search->max_candidates_per_row;
+       ++p, ++candidates) {
+    const UF_long col = graph->col_idx[p];
+    if (col == current_col) {
+      continue;
+    }
+    const double gain =
+      gain_so_far + graph->log_weight[p] - current_weight;
+    search->path_cols[depth] = col;
+    search->path_weights[depth] = graph->log_weight[p];
+    if (col == start_col) {
+      if (depth > 0) {
+        weighted_path_record_best(search, depth + 1u, gain);
+      }
+      continue;
+    }
+
+    const UF_long owner = search->col_match[col];
+    if (owner == KLS_KLU_EMPTY ||
+        weighted_path_contains_row(search->path_rows, depth + 1u, owner) ||
+        depth + 1u >= search->max_depth ||
+        depth + 1u >= KLS_MATCH_PATH_MAX_DEPTH) {
+      continue;
+    }
+
+    search->path_rows[depth + 1u] = owner;
+    search_weighted_match_cycle(search, depth + 1u, gain);
+  }
+}
+
+static void improve_numeric_row_match_by_paths(UF_long n,
+                                               const kls_row_match_graph *graph,
+                                               UF_long *row_perm,
+                                               UF_long *col_match) {
+  if (n < 3u || graph == NULL || row_perm == NULL || col_match == NULL) {
+    return;
+  }
+  /* Larger static-pivot cases are fill-sensitive: local weight cycles improved
+     pivot counts but raised fill/flops in same-session twotone/rajat25 checks. */
+  if (n > 50000u) {
+    return;
+  }
+
+  double *current_weight =
+    (double *)malloc((size_t)n * sizeof(*current_weight));
+  if (current_weight == NULL) {
+    return;
+  }
+  for (UF_long row = 0; row < n; ++row) {
+    if (row_perm[row] == KLS_KLU_EMPTY) {
+      free(current_weight);
+      return;
+    }
+    current_weight[row] = row_match_log_weight(graph, row, row_perm[row]);
+    if (current_weight[row] == -DBL_MAX) {
+      free(current_weight);
+      return;
+    }
+  }
+
+  const UF_long max_candidates =
+    n >= 20000u ? 8u : 12u;
+  const UF_long max_depth = KLS_MATCH_PATH_MAX_DEPTH;
+  const int max_rounds = 2;
+  const UF_long max_changes =
+    n >= 20000u ? 1024u : 4096u;
+  const UF_long max_roots = n;
+
+  for (int round = 0; round < max_rounds; ++round) {
+    UF_long changes = 0;
+    UF_long roots = 0;
+    for (UF_long row = 0; row < n; ++row) {
+      if (roots >= max_roots || changes >= max_changes) {
+        break;
+      }
+      if (graph->row_ptr[row] >= graph->row_ptr[row + 1u]) {
+        continue;
+      }
+      if (graph->log_weight[graph->row_ptr[row]] <=
+          current_weight[row] + 1.0e-12) {
+        continue;
+      }
+      roots++;
+
+      kls_weighted_path_search search;
+      memset(&search, 0, sizeof(search));
+      search.graph = graph;
+      search.row_perm = row_perm;
+      search.col_match = col_match;
+      search.current_log_weight = current_weight;
+      search.max_candidates_per_row = max_candidates;
+      search.max_depth = max_depth;
+      search.path_rows[0] = row;
+      search.best_gain = 0.0;
+      search_weighted_match_cycle(&search, 0u, 0.0);
+      if (search.best_len == 0 || search.best_gain <= 1.0e-12) {
+        continue;
+      }
+
+      for (UF_long i = 0; i < search.best_len; ++i) {
+        const UF_long matched_row = search.best_rows[i];
+        const UF_long matched_col = search.best_cols[i];
+        row_perm[matched_row] = matched_col;
+        col_match[matched_col] = matched_row;
+        current_weight[matched_row] = search.best_weights[i];
+      }
+      changes++;
+    }
+    if (changes == 0) {
+      break;
+    }
+  }
+
+  free(current_weight);
+}
+
 static int build_greedy_numeric_row_match(UF_long n,
                                           UF_long nnz,
                                           const UF_long *col_ptr,
@@ -2488,6 +2667,7 @@ static int build_greedy_numeric_row_match(UF_long n,
       }
       if (matched == n) {
         improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
+        improve_numeric_row_match_by_paths(n, &graph, row_perm, col_match);
       }
       free_row_match_graph(&graph);
     } else if (status == KLS_ERR_OUT_OF_MEMORY) {

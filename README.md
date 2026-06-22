@@ -131,8 +131,11 @@ or react after a high off-diagonal pivot count. The permutation moves large
 entries onto the diagonal. For larger weak-diagonal candidates, the matching
 augment uses a layered bipartite search so KLS can complete many independent
 augmenting paths per pass instead of restarting a search from each unmatched
-row. For matched diagonals with large numeric spread, KLS can also trial
-matching-derived row/column equilibration. The equilibration first tries a
+row. Medium static-pivot matches then run a bounded alternating-cycle
+improvement pass that can accept profitable three- and four-row exchanges
+missed by the pair-swap pass. For matched diagonals with large numeric spread,
+KLS can also trial matching-derived row/column equilibration. The equilibration
+first tries a
 dual-potential scaling pass that mirrors MC64's diagonal-normalization
 conditions, rejecting cases whose greedy matching leaves large positive-cycle
 evidence, then falls back to the older heuristic balancing pass. KLS keeps the

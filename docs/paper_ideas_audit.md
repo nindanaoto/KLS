@@ -13,7 +13,9 @@ ordering, CAMD refinement, auto scaling policy, pivot-checked reuse, static
 row-pivoting trials with dual-potential matching-derived equilibration, and
 BTF-block parallel refactorization with a solver-owned worker pool. KLS now
 also keeps precomputed refactor scatter metadata for unscaled serial repeated
-refactors, covering both single-block and serial BTF cases.
+refactors, covering both single-block and serial BTF cases, and it can improve
+medium static-pivot row matchings with bounded alternating cycles beyond the
+pair-swap pass.
 
 The remaining CKTSO gap is large enough that it should be treated as a missing
 major algorithm, not an ordering-backend tuning problem. On the selected large
@@ -98,11 +100,14 @@ design work, not benchmark-specific tuning.
   from early failures.
 - Static pivoting trial: KLS has value-aware greedy row matching, layered
   augmenting-path search for larger weak-diagonal candidates, and swap
-  improvement for weak or high-off-diagonal-pivot medium matrices. It can also
+  improvement for weak or high-off-diagonal-pivot medium matrices. Medium
+  static-pivot candidates also run a bounded alternating-cycle pass that can
+  apply profitable three- and four-row exchanges missed by pair swaps, while
+  larger candidates keep the lower-fill layered/swap pattern. KLS can also
   trial dual-potential matching-derived row/column equilibration and keeps the
   transformed candidate only when numeric quality and cost evidence justify it.
-  The pre-factor static-pivoting gate also covers moderately sized matrices whose
-  input values show a majority of weak or missing diagonal entries, plus
+  The pre-factor static-pivoting gate also covers moderately sized matrices
+  whose input values show a majority of weak or missing diagonal entries, plus
   medium-large mostly diagonal matrices with thousands of weak diagonal rows.
   These are general numeric-structure rules used by the frequency-domain and
   Rajat-family paper cases without naming individual benchmarks.
@@ -426,6 +431,20 @@ mainline. A temporary large-gate experiment also let `pre2` try this
 preprocessing path with layered matching, but the factor-only run still timed
 out at 120s. This makes the dual-potential pass a bounded MC64-adjacent
 preprocessing cleanup, not the missing CKTSO-scale algorithm.
+
+A bounded alternating-cycle improvement was then added after the existing
+layered cardinality augment and pair-swap pass. This is not a full MC64
+shortest-augmenting-path implementation: it only accepts profitable local
+cycles of up to four rows, and it is intentionally limited to `n <= 50000`.
+Same-session A/B against the previous commit showed useful medium effects:
+`gemat12` reduced off-diagonal pivots from 11 to 7 and improved reciprocal
+condition evidence, and `onetone2` reduced actual fill/flops. The same ungated
+pass was rejected for larger static-pivot cases because `twotone` and
+`rajat25` increased fill/flops despite comparable or better pivot counts, so
+large static-pivot candidates stay on the lower-fill layered/swap pattern. A
+large `pre2` analyze-only check still shows a dominant 629628-row block and
+about `2.08e11` estimated flops under the current AMD/BTF symbolic path, so the
+remaining CKTSO gap is still a missing numeric-kernel/scheduler issue.
 
 The fast-factor pivot-check path was then made more diagnostic by recording the
 first rejected factor-order pivot and original matrix column in `kls_stats` and
