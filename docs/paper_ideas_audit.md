@@ -71,7 +71,11 @@ design work, not benchmark-specific tuning.
 - Static pivoting trial: KLS has value-aware greedy row matching and swap
   improvement for weak or high-off-diagonal-pivot medium matrices. It can also
   trial matching-derived row/column equilibration and keeps the transformed
-  candidate only when numeric quality and cost evidence justify it.
+  candidate only when numeric quality and cost evidence justify it. The
+  pre-factor static-pivoting gate also covers moderately sized matrices whose
+  input values show a majority of weak or missing diagonal entries, which
+  targets the frequency-domain circuit cases used in the NICSLU paper without
+  naming individual benchmarks.
 - Initial KLS-owned parallelism: repeated refactorization can run across
   independent BTF diagonal blocks for large high-flop cases where the block work
   is wide enough to offset thread overhead. The threaded path keeps a persistent
@@ -229,6 +233,17 @@ matching. This reduced setup cost on some static-pivot samples, but after
 rebuilding a clean baseline the 25-matrix extended suite regressed from
 0.03798s to 0.03869s. The full improvement pass remains enabled for pre-static
 matching.
+
+After adding the paper-derived benchmark corpus, the pre-factor static
+row-matching gate was widened for moderately sized matrices with at least half
+of rows having weak or missing diagonal entries. This retained the full
+augmenting/swap improvement pass and is a general numeric-structure rule, not a
+benchmark-name rule. On the AT&T `onetone1`/`onetone2` paper cases, the
+focused SPICE-cycle geomean improved from about 99.5s to 9.3s and both cases
+selected the static row permutation. A broader attempt to cover larger
+weak-diagonal cases such as `twotone` with greedy-only or wider augmenting
+matching was not retained because the transformed candidate was still rejected
+and the run remained dominated by the original KLU-style factorization.
 
 ## Recommended General Work
 

@@ -2534,7 +2534,14 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       solver->numeric != NULL || solver->row_perm != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
-      solver->n < 3000 || solver->n > 20000) {
+      solver->n < 3000) {
+    return;
+  }
+
+  const int small_candidate = solver->n <= 20000;
+  const int large_weak_candidate =
+    solver->n <= 50000 && solver->nnz <= 1000000;
+  if (!small_candidate && !large_weak_candidate) {
     return;
   }
 
@@ -2607,11 +2614,17 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   if (weak * 2u < solver->n) {
     goto done;
   }
+  if (!small_candidate && weak < 5000) {
+    goto done;
+  }
 
   UF_long matched = 0;
+  const int improve_matching =
+    small_candidate || (solver->n <= 50000 && solver->nnz <= 1000000);
   int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
                                               base_col_ptr, base_row_idx,
-                                              base_values, 1, &row_perm,
+                                              base_values, improve_matching,
+                                              &row_perm,
                                               &matched);
   if (status != KLS_OK || 1000u * matched < 995u * solver->n) {
     goto done;
