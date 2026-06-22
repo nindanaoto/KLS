@@ -7413,7 +7413,7 @@ static int kls_egraph_medium_heavy_dominant_btf_shape(
   return coverage >= 0.85 && coverage < 0.95 &&
          solver->symbolic->maxblock >= 30000u &&
          solver->symbolic->nblocks <= 5000u &&
-         solver->common.flops >= 5.0e8;
+         solver->common.flops >= 1.5e8;
 }
 
 static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
@@ -7455,13 +7455,16 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   }
   const int single_block = solver->symbolic->nblocks == 1u;
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
+  const int medium_heavy_btf =
+    kls_egraph_medium_heavy_dominant_btf_shape(solver);
   if (solver->n < kls_egraph_refactor_size_floor(solver)) {
     return 0;
   }
   if (!single_block && !dominant_btf) {
     return 0;
   }
-  const double min_dependency_work = dominant_btf ? 1.0e8 : 1.5e8;
+  const double min_dependency_work =
+    dominant_btf ? (medium_heavy_btf ? 8.0e7 : 1.0e8) : 1.5e8;
   if (solver->refactor_dependency_work < min_dependency_work) {
     return 0;
   }
@@ -7875,6 +7878,9 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
   if (!single_block && !dominant_btf) {
     return 0;
+  }
+  if (kls_egraph_medium_heavy_dominant_btf_shape(solver)) {
+    return solver->common.flops >= 1.5e8;
   }
   if (dominant_btf) {
     return solver->common.flops >= 2.0e8;

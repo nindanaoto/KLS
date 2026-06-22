@@ -954,14 +954,15 @@ many-small-block worker path, preserved `G2_circuit`, and restored
 no-BTF retry fix.
 
 The same coverage-bounded idea was then extended to medium-heavy dominant BTF
-blocks. The retained branch requires 85-95% dominant-block coverage, at least a
-30k-row largest block, at most 5k BTF blocks, and at least `5e8` actual factor
-flops; the upper coverage bound is deliberate so the previously rejected 95%+
-Rajat class remains excluded. In clean focused checks, `onetone1` built 1705
-EGraph levels and reduced repeated refactor from about 0.18s to about
-0.06-0.065s, cutting the SPICE-cycle estimate from roughly 19s to about 7s.
-`onetone2` stayed below the work threshold with zero schedule metrics, `rajat28`
-remained excluded, and `twotone` stayed on the large-heavy EGraph path.
+blocks. The initial retained branch required 85-95% dominant-block coverage, at
+least a 30k-row largest block, at most 5k BTF blocks, and at least `5e8` actual
+factor flops; the upper coverage bound was deliberate so the previously
+rejected 95%+ Rajat class remained excluded. In clean focused checks,
+`onetone1` built 1705 EGraph levels and reduced repeated refactor from about
+0.18s to about 0.06-0.065s, cutting the SPICE-cycle estimate from roughly 19s
+to about 7s. `onetone2` stayed below that first work threshold with zero
+schedule metrics, `rajat28` remained excluded, and `twotone` stayed on the
+large-heavy EGraph path.
 
 The high-coverage dominant-BTF schedule floor was then lowered separately from
 the 85-95% medium-heavy branch. The retained rule still requires at least
@@ -970,9 +971,10 @@ computed dependency work before the consumer runs. This activates a lower-work
 95%+ dominant-block case without reopening the rejected Rajat class: `transient`
 built 807 EGraph levels and reduced repeated refactor from about 0.057s to about
 0.024s, cutting the focused SPICE-cycle estimate from about 7.0s to about
-3.8s. `onetone2` remained below the `2e8` factor-work floor with zero schedule
-metrics, `rajat28` remained excluded, `onetone1` stayed on the medium-heavy
-EGraph branch, and `ASIC_320k` stayed on the existing high-coverage path.
+3.8s. At that point `onetone2` remained below the `2e8` high-coverage
+factor-work floor with zero schedule metrics, `rajat28` remained excluded,
+`onetone1` stayed on the medium-heavy EGraph branch, and `ASIC_320k` stayed on
+the existing high-coverage path.
 
 The EGraph worker launch path was also retried with a solver-owned persistent
 worker/scratch pool, analogous to the retained BTF refactor pool. This was
@@ -1073,6 +1075,21 @@ The same comparison against CKTSO still leaves a large gap, about 2.91x
 geomean on those focused rows, so this is retained as a useful KLS-owned
 refactor threshold improvement rather than mistaken for CKTSO's full pivoting
 tail scheduler.
+
+The medium-heavy dominant-BTF gate was then rechecked after the newer EGraph
+cluster/pipeline scheduler and the single-block threshold work. The current
+retained branch lowers the 85-95% coverage class to about `1.5e8` actual
+factor flops and lets that class consume the EGraph path when measured
+dependency work reaches about `8e7`. This brings `onetone2` into the same
+structural policy as `onetone1`, without reopening the rejected 95%+ Rajat
+class: `rajat28` still reports zero EGraph schedule metrics. In same-session
+SPRAL-enabled focused checks with four threads, `onetone2` built 1010 EGraph
+levels and repeated refactor dropped from about 0.040s to about 0.015s. The
+nine-row hard-focus JSONL improved geomean SPICE-cycle time by about 1.09x
+over the previous single-block-threshold artifact, and the KLS/CKTSO focused
+geomean gap moved from about 2.91x to about 2.68x. CKTSO is still materially
+faster, so the remaining gap still points to the larger pivoting-tail,
+numeric-kernel, and solve-scheduler items rather than more ordering backends.
 
 ## Recommended General Work
 

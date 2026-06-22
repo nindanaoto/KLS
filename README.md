@@ -143,8 +143,9 @@ block whose measured factor work is high enough to amortize the schedule. A
 large-heavy dominant-block class can also use this path when the largest block is
 at least 100k rows, covers at least 85% of the matrix, and has high actual
 factor work. A medium-heavy class covers smaller dominant blocks when coverage is
-between 85% and 95%, the largest block has at least 30k rows, and actual factor
-work is high enough; this excludes the previously rejected 95% Rajat class. The
+between 85% and 95%, the largest block has at least 30k rows, and measured
+factor/dependency work is high enough; this excludes the previously rejected
+95% Rajat class while covering lower-work AT&T-style dominant blocks. The
 schedule floor is lower for 95%+ dominant-block cases whose measured factor work
 is modest but whose dependency graph still has enough independent work to consume
 the threaded EGraph path. Moderate single-block cases can also consume the
