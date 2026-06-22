@@ -4170,6 +4170,255 @@ static void maybe_use_matching_equilibration(
   *common_io = scaled_common;
 }
 
+#ifdef KLS_HAVE_SPRAL_SCALING
+static int maybe_accept_spral_hungarian_numeric_trial(
+  kls_solver *solver,
+  const UF_long *base_col_ptr,
+  const UF_long *base_row_idx,
+  const double *base_values,
+  const UF_long *base_input_to_csc) {
+  if (solver == NULL || solver->numeric == NULL || solver->symbolic == NULL ||
+      base_col_ptr == NULL || base_row_idx == NULL || base_values == NULL) {
+    return 0;
+  }
+
+  UF_long *row_perm = NULL;
+  UF_long matched = 0;
+  double *row_scale = NULL;
+  double *col_scale = NULL;
+  UF_long *trial_col_ptr = NULL;
+  UF_long *trial_row_idx = NULL;
+  UF_long *trial_input_to_csc = NULL;
+  double *trial_values = NULL;
+  trilinos_klu_l_symbolic *trial_symbolic = NULL;
+  trilinos_klu_l_numeric *trial_numeric = NULL;
+  trilinos_klu_l_common trial_common;
+  (void)trilinos_klu_l_defaults(&trial_common);
+  int accepted = 0;
+
+  int status =
+    build_spral_hungarian_row_match_scaling(solver->n, solver->nnz,
+                                            base_col_ptr, base_row_idx,
+                                            base_values, &row_perm, &matched,
+                                            &row_scale, &col_scale);
+  if (status != KLS_OK || matched != solver->n ||
+      row_scale == NULL || col_scale == NULL) {
+    goto done;
+  }
+
+  status = build_sorted_row_permuted_pattern(solver->n, solver->nnz,
+                                             base_col_ptr, base_row_idx,
+                                             base_values, row_perm,
+                                             base_input_to_csc,
+                                             &trial_col_ptr, &trial_row_idx,
+                                             &trial_values,
+                                             &trial_input_to_csc);
+  if (status != KLS_OK) {
+    goto done;
+  }
+
+  kls_options trial_options = solver->options;
+  kls_ordering trial_ordering = KLS_ORDERING_AUTO;
+  double trial_score = 0.0;
+  status = choose_symbolic_for_pattern(solver->n, trial_col_ptr, trial_row_idx,
+                                       &trial_options, &trial_symbolic,
+                                       &trial_common, &trial_ordering,
+                                       &trial_score);
+  if (status != KLS_OK) {
+    goto done;
+  }
+  trial_common.scale = choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
+                                                      trial_row_idx,
+                                                      &trial_options,
+                                                      trial_values);
+
+  trial_numeric =
+    trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
+                          trial_symbolic, &trial_common);
+  if (trial_numeric == NULL || trial_common.status < 0 ||
+      trial_common.status == TRILINOS_KLU_SINGULAR) {
+    goto done;
+  }
+
+  (void)trilinos_klu_l_flops(trial_symbolic, trial_numeric, &trial_common);
+  (void)trilinos_klu_l_rcond(trial_symbolic, trial_numeric, &trial_common);
+  maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
+                                   trial_row_idx, &solver->options,
+                                   trial_symbolic, &trial_values,
+                                   &row_scale, &col_scale, &trial_numeric,
+                                   &trial_common);
+  if (!numeric_candidate_is_better(&solver->common, solver->numeric,
+                                   &trial_common, trial_numeric) ||
+      (solver->common.rcond > 0.0 && trial_common.rcond > 0.0 &&
+       trial_common.rcond < 0.01 * solver->common.rcond)) {
+    goto done;
+  }
+
+  trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *old_numeric = solver->numeric;
+  trilinos_klu_l_common old_common = solver->common;
+  UF_long *old_col_ptr = solver->col_ptr;
+  UF_long *old_row_idx = solver->row_idx;
+  UF_long *old_input_to_csc = solver->input_to_csc;
+  UF_long *old_row_perm = solver->row_perm;
+  double *old_row_scale = solver->row_scale;
+  double *old_col_scale = solver->col_scale;
+  double *old_values = solver->values;
+
+  solver->col_ptr = trial_col_ptr;
+  solver->row_idx = trial_row_idx;
+  solver->input_to_csc = trial_input_to_csc;
+  solver->row_perm = row_perm;
+  solver->row_scale = row_scale;
+  solver->col_scale = col_scale;
+  solver->values = trial_values;
+  solver->orientation = KLS_ORIENTATION_NORMAL;
+  solver->exact_matching_selected = 1;
+  solver->symbolic = trial_symbolic;
+  solver->numeric = trial_numeric;
+  solver->common = trial_common;
+  solver->stats.selected_ordering = trial_ordering;
+  solver->stats.selected_orientation = solver->orientation;
+  solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
+  solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
+  solver->stats.structural_rank = (int64_t)solver->symbolic->structural_rank;
+  solver->stats.estimated_flops = solver->symbolic->est_flops;
+
+  trilinos_klu_l_free_numeric(&old_numeric, &old_common);
+  trilinos_klu_l_free_symbolic(&old_symbolic, &old_common);
+  free(old_col_ptr);
+  free(old_row_idx);
+  free(old_input_to_csc);
+  free(old_row_perm);
+  free(old_row_scale);
+  free(old_col_scale);
+  free(old_values);
+
+  trial_col_ptr = NULL;
+  trial_row_idx = NULL;
+  trial_input_to_csc = NULL;
+  row_perm = NULL;
+  row_scale = NULL;
+  col_scale = NULL;
+  trial_values = NULL;
+  trial_symbolic = NULL;
+  trial_numeric = NULL;
+  accepted = 1;
+
+done:
+  if (!accepted) {
+    if (trial_numeric != NULL) {
+      trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
+    }
+    if (trial_symbolic != NULL) {
+      trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
+    }
+    free(row_perm);
+    free(row_scale);
+    free(col_scale);
+    free(trial_col_ptr);
+    free(trial_row_idx);
+    free(trial_input_to_csc);
+    free(trial_values);
+  }
+  return accepted;
+}
+
+static int should_try_spral_hungarian_numeric_trial(
+  const kls_solver *solver) {
+  if (solver == NULL || !solver->options.static_pivoting ||
+      solver->numeric == NULL || solver->symbolic == NULL ||
+      solver->row_perm != NULL || solver->input_format != KLS_INPUT_CSC ||
+      solver->options.ordering != KLS_ORDERING_AUTO ||
+      solver->n < 4000u || solver->n > 150000u ||
+      solver->nnz > 1500000u || solver->common.noffdiag < 16u) {
+    return 0;
+  }
+  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
+  if (solver->common.flops < 2.0e8 || fill < 2000000u) {
+    return 0;
+  }
+  const double offdiag_ratio =
+    (double)solver->common.noffdiag / (double)solver->n;
+  return solver->common.noffdiag >= 128u || offdiag_ratio >= 0.005;
+}
+
+static int maybe_select_spral_hungarian_row_match(
+  kls_solver *solver,
+  double *elapsed,
+  const double *numeric_values) {
+  if (elapsed == NULL || numeric_values == NULL ||
+      !should_try_spral_hungarian_numeric_trial(solver)) {
+    return 0;
+  }
+
+  const double start = kls_now_seconds();
+  const UF_long *base_col_ptr = solver->col_ptr;
+  const UF_long *base_row_idx = solver->row_idx;
+  const UF_long *base_input_to_csc = solver->input_to_csc;
+  const double *base_values = numeric_values;
+  UF_long *owned_col_ptr = NULL;
+  UF_long *owned_row_idx = NULL;
+  UF_long *owned_input_to_csc = NULL;
+  double *owned_values = NULL;
+  int accepted = 0;
+
+  if (solver->orientation == KLS_ORIENTATION_TRANSPOSE) {
+    if (solver->input_to_csc == NULL) {
+      goto done;
+    }
+    kls_pattern_candidate source = {0};
+    source.n = solver->n;
+    source.nnz = solver->nnz;
+    source.col_ptr = solver->col_ptr;
+    source.row_idx = solver->row_idx;
+    source.orientation = solver->orientation;
+
+    kls_pattern_candidate normal = {0};
+    int status = transpose_candidate(&source, KLS_ORIENTATION_NORMAL, &normal);
+    if (status != KLS_OK) {
+      goto done;
+    }
+    owned_input_to_csc =
+      (UF_long *)malloc((size_t)solver->nnz * sizeof(*owned_input_to_csc));
+    if (owned_input_to_csc == NULL) {
+      free_candidate(&normal);
+      goto done;
+    }
+    for (UF_long p = 0; p < solver->nnz; ++p) {
+      const UF_long current_p = solver->input_to_csc[p];
+      const UF_long normal_p = normal.input_to_csc[current_p];
+      owned_input_to_csc[p] = normal_p;
+      normal.values[normal_p] = numeric_values[current_p];
+    }
+    owned_col_ptr = normal.col_ptr;
+    owned_row_idx = normal.row_idx;
+    owned_values = normal.values;
+    base_col_ptr = owned_col_ptr;
+    base_row_idx = owned_row_idx;
+    base_values = owned_values;
+    base_input_to_csc = owned_input_to_csc;
+    normal.col_ptr = NULL;
+    normal.row_idx = NULL;
+    normal.values = NULL;
+    free_candidate(&normal);
+  }
+
+  accepted =
+    maybe_accept_spral_hungarian_numeric_trial(solver, base_col_ptr,
+                                               base_row_idx, base_values,
+                                               base_input_to_csc);
+
+done:
+  free(owned_col_ptr);
+  free(owned_row_idx);
+  free(owned_input_to_csc);
+  free(owned_values);
+  *elapsed += kls_now_seconds() - start;
+  return accepted;
+}
+#endif
+
 static UF_long count_weak_diagonal_rows(UF_long n,
                                         const UF_long *col_ptr,
                                         const UF_long *row_idx,
@@ -6820,6 +7069,12 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (maybe_select_auto_row_match(solver, &elapsed, numeric_values)) {
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
   }
+#ifdef KLS_HAVE_SPRAL_SCALING
+  else if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
+                                                  numeric_values)) {
+    numeric_values = solver->values != NULL ? solver->values : numeric_values;
+  }
+#endif
   maybe_select_auto_scale(solver, &elapsed, numeric_values);
 #ifdef KLS_HAVE_METIS
   maybe_promote_auto_metis(solver, &elapsed, numeric_values);

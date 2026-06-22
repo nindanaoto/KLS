@@ -509,12 +509,15 @@ builds just its scaling subset for reproducible LGPL-compatible MC64-adjacent
 experiments. A wider same-cardinality Hungarian replacement was tested on the
 AT&T `onetone2` and `twotone` static-pivot cases: it could reduce off-diagonal
 pivots on `twotone`, but increased fill and refactor time, and it worsened
-`onetone2`. The retained policy therefore uses optional SPRAL Hungarian only
-when it improves matching cardinality over the in-tree matcher, and passes any
-returned scaling through KLS's existing numeric acceptance trial. This keeps a
-license-compatible MC64-adjacent source available for hard structural-deficit
-cases without letting a maximum-product match replace already accepted KLS row
-matchings solely on weight.
+`onetone2`. The retained policy therefore uses optional SPRAL Hungarian when
+it improves matching cardinality over the in-tree matcher, and can also factor
+a same-cardinality SPRAL Hungarian candidate after the first numeric factor
+only for expensive high-off-diagonal-pivot cases. The latter path is gated by
+actual factor work/fill and still keeps the SPRAL candidate only when the
+factored numeric evidence improves. This keeps a license-compatible
+MC64-adjacent source available for hard structural-deficit and expensive
+dynamic-pivot cases without letting a maximum-product match replace already
+accepted KLS row matchings solely on weight.
 
 The fast-factor pivot-check path was then made more diagnostic by recording the
 first rejected factor-order pivot and original matrix column in `kls_stats` and

@@ -61,7 +61,8 @@ matching/scaling support from the pinned `third_party/spral` submodule:
 
 ```sh
 git submodule update --init --recursive third_party/spral
-cmake -S . -B build -DKLS_ENABLE_SPRAL_SCALING=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DKLS_ENABLE_SPRAL_SCALING=ON
 cmake --build build
 ```
 
@@ -69,15 +70,17 @@ To use a system SPRAL library instead of the bundled submodule:
 
 ```sh
 cmake -S . -B build -DKLS_ENABLE_SPRAL_SCALING=ON \
+  -DCMAKE_BUILD_TYPE=Release \
   -DKLS_USE_SYSTEM_SPRAL=ON \
   -DKLS_SYSTEM_SPRAL_INCLUDE_DIR=/path/to/spral/include \
   -DKLS_SYSTEM_SPRAL_LIBRARY=/path/to/libspral.so
 ```
 
-This is not a solver backend and is not enabled by default. KLS uses it only
-as a static-pivot matching fallback when the in-tree matcher is short of a full
-cardinality match; accepted factorization candidates still have to pass KLS's
-normal numeric checks.
+This is not a solver backend and is not enabled by default. KLS uses it as a
+static-pivot matching fallback when the in-tree matcher is short of a full
+cardinality match, and as a guarded post-factor Hungarian trial for expensive
+high-off-diagonal-pivot cases. Accepted factorization candidates still have to
+pass KLS's normal numeric checks.
 
 ## Benchmark
 
@@ -183,7 +186,10 @@ pivoting was enabled, whether KLS selected it, and whether the accepted static
 match used exact assignment. KLS does not vendor HSL MC64 or the MC64 copies
 carried by some solver projects. When `KLS_ENABLE_SPRAL_SCALING=ON`, KLS
 builds or links BSD-licensed SPRAL Hungarian/auction matching as an
-LGPL-compatible MC64-adjacent backend.
+LGPL-compatible MC64-adjacent backend. SPRAL same-cardinality Hungarian
+matches are not installed blindly; KLS factors them as separate candidates
+only for expensive high-off-diagonal-pivot cases and keeps them only when the
+actual numeric fill/flop/pivot evidence improves.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF
