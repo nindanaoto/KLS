@@ -78,9 +78,10 @@ cmake -S . -B build -DKLS_ENABLE_SPRAL_SCALING=ON \
 
 This is not a solver backend and is not enabled by default. KLS uses it as a
 static-pivot matching fallback when the in-tree matcher is short of a full
-cardinality match, and as a guarded post-factor Hungarian trial for expensive
-high-off-diagonal-pivot cases. Accepted factorization candidates still have to
-pass KLS's normal numeric checks.
+cardinality match, as a guarded pre-factor Hungarian/scaling path for large
+weak-diagonal dominant-block matrices, and as a guarded post-factor Hungarian
+trial for expensive high-off-diagonal-pivot cases. Accepted factorization
+candidates still have to pass KLS's normal numeric checks.
 
 ## Benchmark
 
@@ -187,9 +188,11 @@ match used exact assignment. KLS does not vendor HSL MC64 or the MC64 copies
 carried by some solver projects. When `KLS_ENABLE_SPRAL_SCALING=ON`, KLS
 builds or links BSD-licensed SPRAL Hungarian/auction matching as an
 LGPL-compatible MC64-adjacent backend. SPRAL same-cardinality Hungarian
-matches are not installed blindly; KLS factors them as separate candidates
-only for expensive high-off-diagonal-pivot cases and keeps them only when the
-actual numeric fill/flop/pivot evidence improves.
+matches are not installed blindly; KLS uses them before factorization only for
+large weak-diagonal dominant-block candidates, or after the first factorization
+for expensive high-off-diagonal-pivot cases, and keeps them only when the
+accepted numeric path passes KLS's pivoting, conditioning, fill, and flop
+checks.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF

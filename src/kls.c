@@ -4743,10 +4743,18 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     return;
   }
 
-  const int small_candidate = solver->n <= 20000;
-  const int large_weak_candidate =
-    solver->n <= 150000 && solver->nnz <= 1500000;
-  if (!small_candidate && !large_weak_candidate) {
+  const int small_candidate = solver->n <= 20000u;
+  const int medium_weak_candidate =
+    solver->n <= 150000u && solver->nnz <= 1500000u;
+#ifdef KLS_HAVE_SPRAL_SCALING
+  const int large_spral_candidate =
+    solver->n > 150000u && solver->n <= 750000u &&
+    solver->nnz <= 8000000u;
+#else
+  const int large_spral_candidate = 0;
+#endif
+  if (!small_candidate && !medium_weak_candidate &&
+      !large_spral_candidate) {
     return;
   }
 
@@ -4823,6 +4831,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   const int prefer_unscaled_static_match =
     static_match_prefers_unscaled(solver->n, solver->nnz, weak,
                                   missing_diagonal);
+#ifdef KLS_HAVE_SPRAL_SCALING
+  int use_large_spral_match = 0;
+#endif
   if (!small_candidate) {
     const int majority_weak = weak * 2u >= solver->n && weak >= 5000;
     const int partial_weak =
@@ -4830,7 +4841,19 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       solver->nnz <= 1000000 &&
       missing_diagonal * 100u <= 3u * solver->n &&
       weak >= 2000 && weak * 100u >= solver->n;
-    if (!majority_weak && !partial_weak) {
+#ifdef KLS_HAVE_SPRAL_SCALING
+    const int large_spral_weak =
+      large_spral_candidate &&
+      (solver->symbolic == NULL || !solver->symbolic->do_btf ||
+       solver->symbolic->maxblock * 4u >= solver->n * 3u) &&
+      ((weak >= 32768u && weak * 100u >= solver->n) ||
+       (missing_diagonal >= 4096u && missing_diagonal * 200u >= solver->n));
+    use_large_spral_match = large_spral_weak &&
+                            !medium_weak_candidate;
+#else
+    const int large_spral_weak = 0;
+#endif
+    if (!majority_weak && !partial_weak && !large_spral_weak) {
       goto done;
     }
   } else if (weak * 2u < solver->n) {
@@ -4839,16 +4862,30 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
   UF_long matched = 0;
   int exact_matching = 0;
-  const int improve_matching =
-    small_candidate || (solver->n <= 150000 && solver->nnz <= 1500000);
-  int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
-                                              base_col_ptr, base_row_idx,
-                                              base_values, improve_matching,
-                                              &row_perm,
-                                              &matched,
-                                              &exact_matching,
-                                              &match_row_scale,
-                                              &match_col_scale);
+#ifdef KLS_HAVE_SPRAL_SCALING
+  int status = KLS_OK;
+  if (use_large_spral_match) {
+    status = build_spral_hungarian_row_match_scaling(
+      solver->n, solver->nnz, base_col_ptr, base_row_idx, base_values,
+      &row_perm, &matched, &match_row_scale, &match_col_scale);
+    exact_matching = (status == KLS_OK && matched == solver->n &&
+                      match_row_scale != NULL && match_col_scale != NULL);
+  } else
+#else
+  int status = KLS_OK;
+#endif
+  {
+    const int improve_matching =
+      small_candidate || medium_weak_candidate;
+    status = build_greedy_numeric_row_match(solver->n, solver->nnz,
+                                            base_col_ptr, base_row_idx,
+                                            base_values, improve_matching,
+                                            &row_perm,
+                                            &matched,
+                                            &exact_matching,
+                                            &match_row_scale,
+                                            &match_col_scale);
+  }
   if (status != KLS_OK || 1000u * matched < 995u * solver->n) {
     goto done;
   }
