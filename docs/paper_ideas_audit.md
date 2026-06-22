@@ -747,6 +747,16 @@ improves the retained no-pivot refactor consumer, but it does not address the
 remaining first-factor timeout on `pre2` or implement CKTSO's pivoting tail
 restart.
 
+The EGraph worker launch path was also retried with a solver-owned persistent
+worker/scratch pool, analogous to the retained BTF refactor pool. This was
+removed before commit because it was not a general win after the cluster
+work-balancing change: `rajat30` improved slightly from about 0.325s/0.313s
+to about 0.316s/0.310s factor/refactor averages, `nxp1` was neutral to
+slightly worse at about 0.685s/0.686s versus 0.684s/0.685s, and `G3_circuit`
+regressed from about 18.40s/18.49s to about 18.73s/18.69s. The evidence points
+back to numeric update structure, pivoting-tail machinery, or separator-tree
+scheduling rather than thread-launch overhead.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
