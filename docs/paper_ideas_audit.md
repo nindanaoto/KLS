@@ -650,6 +650,14 @@ remained on their existing paths: `ASIC_680k` stayed a many-block BTF case,
 `rajat29` stayed below the high-work EGraph gate, and small `bcircuit` remained
 below the size threshold.
 
+The EGraph pipeline tail then replaced mutex-based stop polling with an atomic
+stop flag while keeping error details protected by the existing mutex. This is
+a small synchronization reduction in the common no-error path: workers no
+longer take a mutex while polling predecessor completion or checking level
+boundaries. Same-session focused checks improved `G3_circuit` to about
+19.0s/18.9s factor/refactor, `nxp1` to about 0.72s/0.71s, and `rajat30` to
+about 0.37s/0.36s, with valid residuals.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric

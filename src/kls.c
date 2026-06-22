@@ -132,7 +132,7 @@ typedef struct kls_egraph_refactor_shared {
   int check_pivots;
   int scale;
   int thread_count;
-  int stop;
+  atomic_int stop;
   int invalid;
   int pivot_rejected;
   int singular;
@@ -6635,7 +6635,7 @@ static void kls_egraph_refactor_record_invalid(
   kls_egraph_refactor_shared *shared) {
   pthread_mutex_lock(&shared->lock);
   shared->invalid = 1;
-  shared->stop = 1;
+  atomic_store_explicit(&shared->stop, 1, memory_order_release);
   pthread_mutex_unlock(&shared->lock);
 }
 
@@ -6651,7 +6651,7 @@ static void kls_egraph_refactor_record_reject(
     shared->rejected_pivot = rejected_pivot;
     shared->rejected_pivot_col = rejected_pivot_col;
   }
-  shared->stop = 1;
+  atomic_store_explicit(&shared->stop, 1, memory_order_release);
   pthread_mutex_unlock(&shared->lock);
 }
 
@@ -6666,18 +6666,14 @@ static void kls_egraph_refactor_record_singular(
     shared->singular_col = singular_col;
   }
   if (shared->solver->common.halt_if_singular) {
-    shared->stop = 1;
+    atomic_store_explicit(&shared->stop, 1, memory_order_release);
   }
   pthread_mutex_unlock(&shared->lock);
 }
 
 static int kls_egraph_refactor_should_stop(
   kls_egraph_refactor_shared *shared) {
-  int stopped = 0;
-  pthread_mutex_lock(&shared->lock);
-  stopped = shared->stop;
-  pthread_mutex_unlock(&shared->lock);
-  return stopped;
+  return atomic_load_explicit(&shared->stop, memory_order_acquire) != 0;
 }
 
 static void kls_egraph_refactor_mark_done(
@@ -6828,10 +6824,7 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
   }
 
   for (UF_long level = 0; level < cluster_levels; ++level) {
-    int stopped = 0;
-    pthread_mutex_lock(&shared->lock);
-    stopped = shared->stop;
-    pthread_mutex_unlock(&shared->lock);
+    const int stopped = kls_egraph_refactor_should_stop(shared);
 
     if (!stopped) {
       const UF_long begin = solver->refactor_level_ptr[level];
@@ -6848,10 +6841,7 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
 
     (void)pthread_barrier_wait(&shared->barrier);
 
-    pthread_mutex_lock(&shared->lock);
-    stopped = shared->stop;
-    pthread_mutex_unlock(&shared->lock);
-    if (stopped) {
+    if (kls_egraph_refactor_should_stop(shared)) {
       break;
     }
   }
@@ -6946,6 +6936,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
 
   kls_egraph_refactor_shared shared;
   memset(&shared, 0, sizeof(shared));
+  atomic_init(&shared.stop, 0);
   shared.solver = solver;
   shared.values = numeric_values;
   shared.rs = solver->numeric->Rs;
