@@ -68,7 +68,7 @@ design work, not benchmark-specific tuning.
   the paper corpus: very low-degree full diagonals, sparse full diagonals with
   bounded but meaningful row/column degree, and nearly full diagonals with a
   large dense degree spike. Medium spiked low-diagonal patterns with a large
-  row/column degree spike also start directly with METIS and no scaling for
+  row/column degree spike also start directly with METIS and max scaling for
   TSOPF-style power-grid structures. This preserves the papers'
   nested-dissection motivation without naming individual matrices.
 - Constrained nested-dissection refinement: KLS can refine METIS rank groups
@@ -322,14 +322,18 @@ with no off-diagonal pivot pressure, BTF disabled, or many BTF blocks stayed on
 the existing AMD path.
 
 A medium spiked low-diagonal structural METIS start was retained for the large
-TSOPF-style paper case. The rule requires a 50k-120k order matrix, about 20-32
-entries per column on average, a 20-35% diagonal fraction, no empty rows, and
-one large row/column degree spike covering about 40-60% of the matrix. It starts
-with METIS and no scaling while keeping BTF enabled. This rescued
-`TSOPF_FS_b39_c19` from the 120s per-process timeout and produced a
-SPICE-cycle estimate of about 568s versus the existing CKTSO artifact at about
-603s. Smaller TSOPF/QY guard cases retained their previous policies, and the
-25-matrix extended suite still passed.
+TSOPF-style paper cases. The rule requires a 50k-125k order matrix, about
+20-32 entries per column on average, a 20-35% diagonal fraction, no empty rows,
+and one large row/column degree spike covering about 40-60% of the matrix. It
+starts with METIS while keeping BTF enabled, and now leaves auto scaling on the
+default max-scaling path rather than forcing no-scale. In same-session checks,
+`TSOPF_FS_b39_c19` improved from the earlier about-568s SPICE-cycle estimate to
+about 546s, and the widened bound rescued the large-supplement
+`TSOPF_FS_b39_c30` from the 120s per-process timeout with a SPICE-cycle
+estimate of about 920s. This is still much slower than CKTSO on `c30`, whose
+same-session artifact is about 333s, but it turns a KLS timeout into a
+completed structural paper case. Smaller TSOPF/QY guard cases retained their
+previous policies.
 
 Two additional low-degree structural METIS starts were retained to remove the
 last current-auto 120s paper-medium timeouts. The very-low-degree full-diagonal
@@ -354,8 +358,10 @@ one refactor repeat, KLS beat CKTSO on `rajat29` by about 5%, but lost the
 other common successful cases: about 3.1x on `ASIC_680k`, 4.0x on `rajat30`,
 4.5x on `G3_circuit`, and 4.7x on `nxp1`. KLS also timed out on
 `TSOPF_FS_b39_c30` and `pre2`, both of which CKTSO completed within the same
-120s cap; both solvers timed out on `Hamrle3`. The result reinforces that the
-remaining large-case gap is mostly very large single-block or near-single-block
+120s cap; both solvers timed out on `Hamrle3`. The later widened TSOPF
+spiked-low-diagonal rule removes the `c30` timeout, but `pre2` remains an
+unresolved large-case timeout. The result reinforces that the remaining
+large-case gap is mostly very large single-block or near-single-block
 numeric/refactor throughput, not the many-small-BTF-block class.
 
 Extending the existing mapped refactor metadata to scaled refactors was

@@ -876,7 +876,7 @@ static int is_medium_dense_diagonal_high_degree_pattern(UF_long n,
 static int is_medium_spiked_low_diagonal_pattern(UF_long n,
                                                  const UF_long *col_ptr,
                                                  const UF_long *row_idx) {
-  if (n < 50000 || n > 120000 || col_ptr == NULL || row_idx == NULL ||
+  if (n < 50000 || n > 125000 || col_ptr == NULL || row_idx == NULL ||
       n > UF_long_max / 32 || col_ptr[n] < 20u * n || col_ptr[n] > 32u * n) {
     return 0;
   }
@@ -1278,7 +1278,7 @@ static int choose_auto_scale_from_pattern(UF_long n,
     return -1;
   }
   if (is_medium_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
-    return -1;
+    return 2;
   }
   if (is_medium_bounded_degree_diagonal_pattern(n, col_ptr, row_idx)) {
     return -1;

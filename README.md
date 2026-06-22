@@ -83,10 +83,11 @@ unscaled using KLU's `-1` no-scale/no-recheck mode for patterns already
 validated by KLS, or sum-scaled when the diagonal is sparse but row magnitudes
 are already balanced. Otherwise it starts from KLU's max row scaling mode (`2`).
 Large low-degree, nearly diagonal circuit patterns and METIS-started medium
-bounded-degree, dense-diagonal, or spiked low-diagonal patterns also start in
-no-scale mode to avoid repeated row-scale work once KLS has validated the
-structure. Large sparse-diagonal low-degree patterns can start with sum scaling
-when that avoids more expensive max-scaling behavior. For large expensive
+bounded-degree or dense-diagonal patterns also start in no-scale mode to avoid
+repeated row-scale work once KLS has validated the structure. TSOPF-style
+spiked low-diagonal METIS starts use max scaling, and large sparse-diagonal
+low-degree patterns can start with sum scaling when that avoids more expensive
+max-scaling behavior. For large expensive
 cases, `auto` can still try other numeric scaling modes when actual flop/fill
 evidence justifies the extra work, but structural METIS starts that are already
 known to need a specific scale mode skip redundant scale trials. Explicit
