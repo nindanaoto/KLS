@@ -124,10 +124,13 @@ design work, not benchmark-specific tuning.
   no KLU row scaling, avoiding the scale recomputation cost while preserving
   the useful BTF decomposition. Large high-work METIS/no-BTF single-block paths
   that already selected max scaling skip redundant post-factor scale trial
-  factorizations. TSOPF-style spiked low-diagonal METIS starts begin with sum
-  scaling and a lower `1e-4` pivot tolerance once their structural dominant-BTF
-  shape is known, avoiding the earlier max-scale/default-tolerance discovery
-  factorizations.
+  factorizations. Medium and large TSOPF-style spiked low-diagonal METIS starts
+  begin with sum scaling and a lower `1e-4` pivot tolerance once their
+  structural dominant-BTF shape is known, avoiding the earlier
+  max-scale/default-tolerance discovery factorizations. Small spiked
+  low-diagonal METIS starts use unscaled `0` mode with the same lower pivot
+  tolerance and skip static-pivot trials that do not improve that structural
+  class.
 - Fast repeated factorization with pivot check: KLS reuses an existing numeric
   pattern, checks reused pivots against the selected threshold via L
   multipliers, and falls back to full pivoting factorization if the reused order
@@ -792,6 +795,19 @@ about 86s to about 12s while preserving the about 2.6s refactor path and valid
 residual, moving the SPICE-cycle estimate from about 370s to about 290s versus
 the saved CKTSO artifact at about 333s.
 
+The same structural idea was then extended downward to small spiked
+low-diagonal TSOPF/QY cases. Across the medium manifest, the small rule matches
+the `TSOPF_FS_b9_c1`, `TSOPF_FS_b9_c6`, and `case9` shapes: 2k-20k rows,
+about 8-14 nonzeros per row, 20-35% diagonal coverage, and row/column degree
+spikes around 40-60% of the matrix order. Focused sweeps showed these cases
+prefer METIS/BTF, KLU's unscaled `0` mode, and `1e-4` pivot tolerance. The
+static-pivot trial was also skipped for this class because it added setup cost
+without being selected. Current auto checks moved `TSOPF_FS_b9_c1` to about
+0.13s on the SPICE-cycle estimate, `TSOPF_FS_b9_c6` to about 1.9s, and
+`case9` to about 1.9s with valid residuals. The saved CKTSO artifact is still
+faster on `TSOPF_FS_b9_c1` at about 0.061s, but KLS is ahead on the larger
+`b9_c6` and `case9` rows.
+
 EGraph schedule construction was then tightened to the same structural class
 as the retained EGraph consumer. KLS had been building dependency-level
 metadata for many-block and low-work BTF cases that could not use the
@@ -848,6 +864,14 @@ moved from roughly 0.35s/0.29s to about 0.11s/0.08s with valid residuals.
 `ASIC_100k` and `ASIC_100ks` improved more modestly, while the retained guard
 kept `rajat29` schedule metrics at zero. This is a useful CKTSO-inspired
 coverage extension, but CKTSO remains faster on these ASIC rows.
+
+The dominant-BTF EGraph gate was also probed down to 80k rows and 80k-row
+largest blocks to see if the same policy should cover high-flop Rajat
+dominant-BTF rows. It activated on `rajat20`, `rajat25`, and `rajat28`, but
+slowed repeated refactors from the existing roughly 0.15s class to roughly
+0.18-0.19s. The 90k retained floor remains the better general rule; the Rajat
+rows need different numeric scheduling or pivoting work, not more EGraph
+coverage with the current kernel.
 
 The EGraph worker launch path was also retried with a solver-owned persistent
 worker/scratch pool, analogous to the retained BTF refactor pool. This was

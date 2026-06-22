@@ -156,9 +156,11 @@ are already balanced. Otherwise it starts from KLU's max row scaling mode (`2`).
 Large low-degree, nearly diagonal circuit patterns, METIS-started medium
 bounded-degree or dense-diagonal patterns, and low-work dominant-BTF patterns
 also start without row scaling to avoid repeated scale work once KLS has
-validated the structure. TSOPF-style spiked low-diagonal METIS starts use sum
-scaling, and large sparse-diagonal low-degree patterns can also start with sum
-scaling when that avoids more expensive max-scaling behavior. For large
+validated the structure. Medium and large TSOPF-style spiked low-diagonal METIS
+starts use sum scaling, while small spiked low-diagonal METIS starts use KLU's
+unscaled `0` mode and skip the static-pivot trial that only adds setup cost
+for that shape. Large sparse-diagonal low-degree patterns can also start with
+sum scaling when that avoids more expensive max-scaling behavior. For large
 expensive cases, `auto` can still try other numeric scaling modes when actual
 flop/fill evidence justifies the extra work, but structural METIS starts that
 are already known to need a specific scale mode skip redundant scale trials.
@@ -172,10 +174,9 @@ KLS API. The default is `0.001`, matching the underlying KLU default. With that
 default, KLS can trial a lower `1e-4` tolerance on large high-fill matrices with
 noticeable off-diagonal pivoting, keeping it only when fill and pivoting improve
 without a large reciprocal-condition drop. TSOPF-style spiked low-diagonal
-METIS starts that already match the accepted sum-scaled dominant-BTF policy
-start directly at `1e-4` to avoid paying for a rejected default-tolerance
-factorization. Benchmark JSON reports both requested and selected pivot
-tolerance.
+METIS starts that already match accepted dominant-BTF policies start directly
+at `1e-4` to avoid paying for a rejected default-tolerance factorization.
+Benchmark JSON reports both requested and selected pivot tolerance.
 
 When `fast_factor` reuses an existing factor pattern, KLS also checks the
 resulting L multipliers against the selected pivot tolerance. On unscaled BTF
@@ -244,8 +245,8 @@ Use `--ordering metis` to force METIS nested-dissection ordering. The default
 `--ordering auto` can start with METIS for medium, bounded-degree structures
 that resemble mesh-style nested-dissection cases and for medium dense-diagonal
 high-degree patterns where delayed promotion would otherwise pay for an
-avoidable first AMD factorization. It can also start with METIS for medium
-spiked low-diagonal patterns that resemble TSOPF-style paper cases where the
+avoidable first AMD factorization. It can also start with METIS for small and
+medium spiked low-diagonal patterns that resemble TSOPF-style paper cases where the
 symbolic estimate understates nested-dissection benefit. Otherwise it compares
 AMD and COLAMD by symbolic fill estimate. For large high-work no-BTF
 single-block analyses, `auto` can also try a METIS symbolic before numeric

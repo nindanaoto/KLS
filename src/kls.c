@@ -1117,6 +1117,62 @@ static int is_medium_spiked_low_diagonal_pattern(UF_long n,
          10.0 * (double)max_col_degree <= 6.0 * (double)n &&
          10.0 * (double)max_row_degree <= 6.0 * (double)n;
 }
+
+static int is_small_spiked_low_diagonal_pattern(UF_long n,
+                                                const UF_long *col_ptr,
+                                                const UF_long *row_idx) {
+  if (n < 2000 || n > 20000 || col_ptr == NULL || row_idx == NULL ||
+      n > UF_long_max / 14 || col_ptr[n] < 8u * n || col_ptr[n] > 14u * n) {
+    return 0;
+  }
+
+  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_count = 0;
+  UF_long max_col_degree = 0;
+  int valid = 1;
+  for (UF_long col = 0; col < n && valid; ++col) {
+    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
+    if (col_degree > max_col_degree) {
+      max_col_degree = col_degree;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] == UF_long_max) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      if (row == col) {
+        diagonal_count++;
+      }
+    }
+  }
+
+  UF_long max_row_degree = 0;
+  int no_empty_rows = 1;
+  for (UF_long row = 0; row < n && valid; ++row) {
+    if (row_degree[row] == 0) {
+      no_empty_rows = 0;
+      break;
+    }
+    if (row_degree[row] > max_row_degree) {
+      max_row_degree = row_degree[row];
+    }
+  }
+  free(row_degree);
+
+  return valid && no_empty_rows &&
+         100.0 * (double)diagonal_count >= 20.0 * (double)n &&
+         100.0 * (double)diagonal_count <= 35.0 * (double)n &&
+         10.0 * (double)max_col_degree >= 4.0 * (double)n &&
+         10.0 * (double)max_row_degree >= 4.0 * (double)n &&
+         10.0 * (double)max_col_degree <= 6.0 * (double)n &&
+         10.0 * (double)max_row_degree <= 6.0 * (double)n;
+}
 #endif
 
 static int is_large_diagonal_circuit_like_pattern(UF_long n,
@@ -1541,6 +1597,9 @@ static int choose_auto_scale_from_pattern(UF_long n,
   if (is_medium_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
     return 1;
   }
+  if (is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
+    return 0;
+  }
   if (is_medium_bounded_degree_diagonal_pattern(n, col_ptr, row_idx)) {
     return -1;
   }
@@ -1668,9 +1727,12 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
       solver->stats.selected_ordering == KLS_ORDERING_METIS &&
       solver->symbolic->do_btf && solver->symbolic->nblocks <= 4u &&
       (double)solver->symbolic->maxblock >= 0.95 * (double)solver->n &&
-      solver->common.scale == 1 &&
-      is_medium_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
-                                            solver->row_idx)) {
+      ((solver->common.scale == 1 &&
+        is_medium_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
+                                              solver->row_idx)) ||
+       (solver->common.scale == 0 &&
+        is_small_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
+                                             solver->row_idx)))) {
     return 1.0e-4;
   }
 #endif
@@ -2289,6 +2351,9 @@ static int should_start_auto_with_metis(UF_long n,
     return 1;
   }
   if (is_medium_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
+    return 1;
+  }
+  if (is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
     return 1;
   }
   return is_medium_bounded_degree_diagonal_pattern(n, col_ptr, row_idx);
@@ -4710,6 +4775,12 @@ static int should_try_auto_row_match(const kls_solver *solver) {
       solver->n > 20000 || solver->common.noffdiag < 16) {
     return 0;
   }
+#ifdef KLS_HAVE_METIS
+  if (is_small_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
+                                           solver->row_idx)) {
+    return 0;
+  }
+#endif
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
   if (fill < 50000 || solver->common.flops < 5.0e5) {
     return 0;
@@ -4960,6 +5031,12 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       solver->n < 3000) {
     return;
   }
+#ifdef KLS_HAVE_METIS
+  if (is_small_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
+                                           solver->row_idx)) {
+    return;
+  }
+#endif
 
   const int small_candidate = solver->n <= 20000u;
   const int medium_weak_candidate =
