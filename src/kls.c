@@ -6368,6 +6368,12 @@ static int kls_parallel_refactor_is_eligible(const kls_solver *solver) {
       solver->symbolic->maxblock * 4u < solver->n * 3u) {
     return 0;
   }
+  if (solver->symbolic->nblocks >= 1024u &&
+      solver->symbolic->maxblock * 20u >= solver->n * 19u &&
+      solver->symbolic->maxblock < 90000u &&
+      solver->common.flops < 1.0e9) {
+    return 0;
+  }
   if (solver->numeric->Offp == NULL || solver->numeric->Offx == NULL ||
       solver->numeric->Pinv == NULL || solver->numeric->Udiag == NULL) {
     return 0;

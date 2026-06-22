@@ -1158,6 +1158,26 @@ boundary remains unchanged: use the pinned BSD-licensed SPRAL scaling subset,
 a compatible system SPRAL, or independent KLS code; do not vendor HSL MC64 or
 solver-tree copies that retain HSL redistribution restrictions.
 
+The BTF worker-pool gate was then narrowed for low-work dominant decompositions
+that have one 95%+ diagonal block, thousands of tiny fringe blocks, a largest
+block below the current EGraph size floor, and less than `1e9` measured factor
+flops. This is not matrix-name tuning: it is the structural case where the
+dominant block still runs in one worker and the remaining fringe work is too
+small to pay for threaded block scheduling. A broad first version also caught
+`ckt11752_dc_1`, whose 172 BTF blocks still benefited from the pool, so the
+retained gate requires at least 1024 BTF blocks. On the affected target set
+(`ckt11752_dc_1`, `LeGresley_87936`, `rajat20`, `rajat25`, `rajat28`) the
+narrow gate kept `ckt11752_dc_1` neutral, had no losses above 2%, and improved
+geomean SPICE-cycle time by about 2.5% versus the prior dynamic-pipeline medium
+artifact. The hard-focus run stayed essentially neutral against the second
+dynamic-pipeline baseline (`9.07s` versus `9.04s` geomean) while improving
+`rajat28` from about `17.36s` to about `15.84s` in that comparison. This is a
+small policy cleanup. It does not change the main conclusion that the large
+CKTSO gap on `rajat20/25/28`, `G2_circuit`, and similar rows requires a
+CKTSO/SubtreeLU-style row-oriented numeric kernel, pivoting-tail restart, or
+separator-tree/private-pipeline scheduler rather than another ordering or MC64
+import.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric

@@ -86,10 +86,11 @@ trial for expensive high-off-diagonal-pivot cases. Accepted factorization
 candidates still have to pass KLS's normal numeric checks.
 
 KLS keeps this as the only vendored MC64-adjacent external implementation.
-Existing MC64-style code is acceptable only when its license remains compatible
-with KLS's LGPL distribution goal. HSL MC64 itself, and solver-tree copies that
-retain HSL redistribution restrictions, are not compatible with that boundary.
-A permissively licensed translation of SPRAL's scaling code can be used as a
+Existing MC64-style code is acceptable when its license remains compatible with
+KLS's LGPL distribution goal and allows redistribution in source and binary
+form with KLS. HSL MC64 itself, and solver-tree copies that retain HSL
+redistribution restrictions, are not compatible with that boundary. A
+permissively licensed translation of SPRAL's scaling code can be used as a
 reference, but the pinned SPRAL submodule is the preferred reproducible source
 for the C/Fortran build.
 
@@ -131,7 +132,11 @@ high-work dominant-BTF level-sliced refactor path when there is enough
 dependency work and level width to offset thread and scratch overhead. KLS only
 builds this schedule for single-block or dominant-block shapes with enough
 numeric work to consume it; ordinary many-block BTF and low-work dominant-BTF
-cases skip the setup and stay on their existing refactor paths. Barriered
+cases skip the setup and stay on their existing refactor paths. When a
+low-work dominant BTF decomposition has one 95%+ block plus thousands of tiny
+fringe blocks below the EGraph size floor, KLS also keeps repeated refactors on
+the serial mapped path because the BTF worker pool has too little useful
+off-dominant work to amortize synchronization. Barriered
 cluster levels are split
 by KLS's per-column no-pivot work estimate instead of equal column counts, and
 above the CKTSO-style split level KLS can switch to a no-pivot pipeline tail
