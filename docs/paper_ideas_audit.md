@@ -32,8 +32,10 @@ small candidates and can improve medium row matchings with bounded alternating
 cycles beyond the pair-swap pass. KLS now enables the pinned BSD-licensed SPRAL
 scaling subset by default, so it can use Hungarian matching/scaling as a
 pre-factor MC64-adjacent candidate for large weak-diagonal dominant-block
-matrices while still allowing `KLS_ENABLE_SPRAL_SCALING=OFF` builds. Fast
-factorization can now repair an unsafe unscaled BTF diagonal block by
+matrices and as a post-factor value-gated trial for dense
+high-off-diagonal-pivot cases while still allowing
+`KLS_ENABLE_SPRAL_SCALING=OFF` builds. Fast factorization can now repair an
+unsafe unscaled BTF diagonal block by
 restarting that block with pivoting and then retrying the checked no-pivot
 factorization.
 
@@ -47,15 +49,26 @@ range, so the current evidence points more strongly at MC64-quality
 matching/scaling and CKTSO's KLS-owned numeric/scheduling machinery than at
 another separator package alone.
 
+The retained broader SPRAL post-factor trial is deliberately value-gated. A
+plain broad gate improved several MC64-sensitive cases but regressed the medium
+corpus because rejected or small accepted trials added setup cost. The retained
+gate requires dense off-diagonal pivot evidence and accepts only when the SPRAL
+candidate removes substantial pivoting pressure or materially reduces
+factorization work/fill. On the 93-matrix medium paper corpus this moved KLS
+geomean from 0.32198s to 0.31410s with the same three known failures. The new
+exact-match wins were `hvdc1`, `OPF_10000`, `LeGresley_87936`, `rajat22`,
+`rajat23`, `rajat24`, `mult_dcop_03`, and `TSOPF_FS_b39_c19`.
+
 The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
 
 - Production-scale MC64-equivalent maximum-weight matching with dual
   row/column scaling. KLS now builds BSD-licensed SPRAL Hungarian/auction
   matching from a pinned submodule by default, or can link to a system SPRAL
-  install, and uses it for bounded pre-factor large weak-diagonal trials. This
-  is still not a full production MC64-equivalent preprocessing stage. HSL MC64 and
-  non-redistributable MC64 copies are out of scope for vendoring.
+  install, and uses it for bounded pre-factor large weak-diagonal trials plus
+  a value-gated post-factor trial for dense high-off-diagonal-pivot cases. This
+  is still not a full production MC64-equivalent preprocessing stage. HSL MC64
+  and non-redistributable MC64 copies are out of scope for vendoring.
 - A full intra-block parallel factor/refactor scheduler that consumes retained
   EGraph/ETree or separator-tree metadata with pivoting tail restart, beyond
   the current guarded no-pivot EGraph cluster/pipeline refactor.
@@ -162,7 +175,13 @@ design work, not benchmark-specific tuning.
   With default SPRAL scaling enabled, large weak-diagonal candidates whose BTF
   analysis leaves one dominant block can run BSD-licensed SPRAL Hungarian
   matching/scaling before the first factorization; many-block BTF cases are
-  excluded because the existing BTF path is already efficient there.
+  excluded because the existing BTF path is already efficient there. After
+  cheaper scale, ordering, and pivot-tolerance trials have run, KLS can also
+  run a SPRAL Hungarian/scaling trial for dense high-off-diagonal-pivot cases.
+  The accepted candidate must pass the normal numeric comparison plus a
+  matching-specific value gate: it must remove substantial pivoting pressure or
+  materially reduce factor work/fill, which rejects small cases where matching
+  setup costs more than the repeated-refactor saving.
   The pre-factor static-pivoting gate also covers moderately sized matrices
   whose input values show a majority of weak or missing diagonal entries, plus
   medium-large mostly diagonal matrices with thousands of weak diagonal rows.

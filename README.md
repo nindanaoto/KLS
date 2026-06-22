@@ -82,8 +82,11 @@ This is not a solver replacement. KLS uses it as a
 static-pivot matching fallback when the in-tree matcher is short of a full
 cardinality match, as a guarded pre-factor Hungarian/scaling path for large
 weak-diagonal dominant-BTF matrices, and as a guarded post-factor Hungarian
-trial for expensive high-off-diagonal-pivot cases. Accepted factorization
-candidates still have to pass KLS's normal numeric checks.
+trial for dense high-off-diagonal-pivot cases after cheaper scale, ordering,
+and pivot-tolerance fixes have run. Accepted factorization candidates still
+have to pass KLS's normal numeric checks and a value gate that requires the
+matching to remove substantial pivoting pressure or materially reduce factor
+work/fill.
 
 KLS keeps this as the only vendored MC64-adjacent external implementation.
 Existing MC64-style code is acceptable when its license remains compatible with
@@ -261,9 +264,10 @@ builds or links BSD-licensed SPRAL Hungarian/auction matching as an
 LGPL-compatible MC64-adjacent component. SPRAL same-cardinality Hungarian
 matches are not installed blindly; KLS uses them before factorization only for
 large weak-diagonal dominant-BTF candidates, or after the first factorization
-for expensive high-off-diagonal-pivot cases, and keeps them only when the
-accepted numeric path passes KLS's pivoting, conditioning, fill, and flop
-checks.
+for dense high-off-diagonal-pivot cases, and keeps them only when the accepted
+numeric path passes KLS's pivoting, conditioning, fill, flop, and setup-value
+checks. The post-factor trial runs after cheaper KLS policy trials so rejected
+SPRAL candidates do not mask a simpler scale or pivot-tolerance fix.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF

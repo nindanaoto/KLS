@@ -2494,6 +2494,38 @@ static int numeric_candidate_is_better(const trilinos_klu_l_common *current_comm
   return candidate_fill < 0.80 * current_fill;
 }
 
+#ifdef KLS_HAVE_SPRAL_SCALING
+static int spral_hungarian_candidate_has_value(
+  const trilinos_klu_l_common *current_common,
+  const trilinos_klu_l_numeric *current_numeric,
+  const trilinos_klu_l_common *candidate_common,
+  const trilinos_klu_l_numeric *candidate_numeric) {
+  const double current_flops = current_common->flops;
+  const double candidate_flops = candidate_common->flops;
+  const double current_fill = (double)(current_numeric->lnz + current_numeric->unz);
+  const double candidate_fill =
+    (double)(candidate_numeric->lnz + candidate_numeric->unz);
+  const UF_long current_offdiag = current_common->noffdiag;
+  const UF_long candidate_offdiag = candidate_common->noffdiag;
+
+  if (current_offdiag < 512u) {
+    return 0;
+  }
+  if (candidate_offdiag <= 16u && candidate_offdiag * 10u <= current_offdiag) {
+    return 1;
+  }
+  if (candidate_offdiag > current_offdiag) {
+    return 0;
+  }
+  if (current_flops > 0.0 && candidate_flops > 0.0 &&
+      candidate_flops <= 0.75 * current_flops &&
+      candidate_fill <= 0.95 * current_fill) {
+    return 1;
+  }
+  return candidate_fill <= 0.80 * current_fill;
+}
+#endif
+
 static int compare_match_entries_desc(const void *a, const void *b) {
   const kls_match_entry *left = (const kls_match_entry *)a;
   const kls_match_entry *right = (const kls_match_entry *)b;
@@ -4580,6 +4612,7 @@ static int maybe_accept_spral_hungarian_numeric_trial(
                                                       trial_row_idx,
                                                       &trial_options,
                                                       trial_values);
+  trial_common.tol = solver->common.tol;
 
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
@@ -4598,6 +4631,8 @@ static int maybe_accept_spral_hungarian_numeric_trial(
                                    &trial_common);
   if (!numeric_candidate_is_better(&solver->common, solver->numeric,
                                    &trial_common, trial_numeric) ||
+      !spral_hungarian_candidate_has_value(&solver->common, solver->numeric,
+                                           &trial_common, trial_numeric) ||
       (solver->common.rcond > 0.0 && trial_common.rcond > 0.0 &&
        trial_common.rcond < 0.01 * solver->common.rcond)) {
     goto done;
@@ -4679,17 +4714,20 @@ static int should_try_spral_hungarian_numeric_trial(
       solver->numeric == NULL || solver->symbolic == NULL ||
       solver->row_perm != NULL || solver->input_format != KLS_INPUT_CSC ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
-      solver->n < 4000u || solver->n > 150000u ||
-      solver->nnz > 1500000u || solver->common.noffdiag < 16u) {
+      solver->n < 20000u || solver->n > 750000u ||
+      solver->nnz > 8000000u || solver->common.noffdiag < 16u) {
     return 0;
   }
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  if (solver->common.flops < 2.0e8 || fill < 2000000u) {
-    return 0;
-  }
   const double offdiag_ratio =
     (double)solver->common.noffdiag / (double)solver->n;
-  return solver->common.noffdiag >= 128u || offdiag_ratio >= 0.005;
+  if (solver->common.noffdiag < 1024u && offdiag_ratio < 0.02) {
+    return 0;
+  }
+  if (solver->common.flops >= 2.0e8 && fill >= 2000000u) {
+    return 1;
+  }
+  return solver->common.noffdiag >= 1024u || offdiag_ratio >= 0.02;
 }
 
 static int maybe_select_spral_hungarian_row_match(
@@ -8540,12 +8578,6 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (maybe_select_auto_row_match(solver, &elapsed, numeric_values)) {
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
   }
-#ifdef KLS_HAVE_SPRAL_SCALING
-  else if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
-                                                  numeric_values)) {
-    numeric_values = solver->values != NULL ? solver->values : numeric_values;
-  }
-#endif
   maybe_select_auto_scale(solver, &elapsed, numeric_values);
 #ifdef KLS_HAVE_METIS
   maybe_promote_auto_metis(solver, &elapsed, numeric_values);
@@ -8553,6 +8585,12 @@ int kls_factor(kls_solver *solver, const double *values) {
   (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
   (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
   maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values);
+#ifdef KLS_HAVE_SPRAL_SCALING
+  if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
+                                             numeric_values)) {
+    numeric_values = solver->values != NULL ? solver->values : numeric_values;
+  }
+#endif
   (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
   (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
   maybe_prepare_refactor_map(solver, &elapsed);
