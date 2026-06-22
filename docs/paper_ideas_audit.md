@@ -865,6 +865,18 @@ moved from roughly 0.35s/0.29s to about 0.11s/0.08s with valid residuals.
 kept `rajat29` schedule metrics at zero. This is a useful CKTSO-inspired
 coverage extension, but CKTSO remains faster on these ASIC rows.
 
+The same gate was then extended below the 90k dominant-block floor only for
+high-work dominant-BTF shapes whose largest block covers at least 95% of the
+matrix and whose measured factorization has at least `5e9` flops. This keeps
+the rule tied to general work evidence rather than TSOPF names. On
+`TSOPF_FS_b39_c19`, which has a 76215-row dominant block and about `1.54e10`
+factor flops, the retained EGraph path reduced repeated factor/refactor
+averages from about 4.9s/4.8s to about 1.5s/1.5s with valid residuals, cutting
+the SPICE-cycle estimate to about 167s versus the saved CKTSO result near
+603s. The previously rejected Rajat 80k-row class stays excluded because it
+does not meet the high-work gate; focused `rajat28` checks still recorded zero
+EGraph schedule metrics and stayed on the existing path.
+
 The dominant-BTF EGraph gate was also probed down to 80k rows and 80k-row
 largest blocks to see if the same policy should cover high-flop Rajat
 dominant-BTF rows. It activated on `rajat20`, `rajat25`, and `rajat28`, but

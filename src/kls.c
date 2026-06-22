@@ -7309,9 +7309,21 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
   return NULL;
 }
 
+static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+         solver->symbolic->nblocks > 1u &&
+         (double)solver->symbolic->maxblock >= 0.95 * (double)solver->n &&
+         (solver->symbolic->maxblock >= 90000u ||
+          solver->common.flops >= 5.0e9);
+}
+
+static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {
+  return kls_egraph_dominant_btf_shape(solver) ? 50000u : 100000u;
+}
+
 static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->options.threads <= 1 || solver->n < 90000u ||
+      solver->options.threads <= 1 ||
       solver->refactor_level_ptr == NULL ||
       solver->refactor_level_cols == NULL ||
       solver->refactor_level_count == 0u ||
@@ -7319,10 +7331,10 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     return 0;
   }
   const int single_block = solver->symbolic->nblocks == 1u;
-  const int dominant_btf =
-    solver->symbolic->nblocks > 1u &&
-    solver->symbolic->maxblock >= 90000u &&
-    (double)solver->symbolic->maxblock >= 0.95 * (double)solver->n;
+  const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
+  if (solver->n < kls_egraph_refactor_size_floor(solver)) {
+    return 0;
+  }
   if (!single_block && !dominant_btf) {
     return 0;
   }
@@ -7355,7 +7367,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
                                       int check_pivots) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->options.threads <= 1 ||
-      solver->n < 100000u) {
+      solver->n < kls_egraph_refactor_size_floor(solver)) {
     return -1;
   }
   if (solver->common.scale <= 0 && solver->numeric->Rs != NULL) {
@@ -7733,10 +7745,7 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
     return 0;
   }
   const int single_block = solver->symbolic->nblocks == 1u;
-  const int dominant_btf =
-    solver->symbolic->nblocks > 1u &&
-    solver->symbolic->maxblock >= 90000u &&
-    (double)solver->symbolic->maxblock >= 0.95 * (double)solver->n;
+  const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
   if (!single_block && !dominant_btf) {
     return 0;
   }
