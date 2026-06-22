@@ -933,6 +933,16 @@ many-small-block worker path, preserved `G2_circuit`, and restored
 `ASIC_320k`/`ASIC_320ks` to their existing METIS/BTF EGraph path after the
 no-BTF retry fix.
 
+The same coverage-bounded idea was then extended to medium-heavy dominant BTF
+blocks. The retained branch requires 85-95% dominant-block coverage, at least a
+30k-row largest block, at most 5k BTF blocks, and at least `5e8` actual factor
+flops; the upper coverage bound is deliberate so the previously rejected 95%+
+Rajat class remains excluded. In clean focused checks, `onetone1` built 1705
+EGraph levels and reduced repeated refactor from about 0.18s to about
+0.06-0.065s, cutting the SPICE-cycle estimate from roughly 19s to about 7s.
+`onetone2` stayed below the work threshold with zero schedule metrics, `rajat28`
+remained excluded, and `twotone` stayed on the large-heavy EGraph path.
+
 The EGraph worker launch path was also retried with a solver-owned persistent
 worker/scratch pool, analogous to the retained BTF refactor pool. This was
 removed before commit because it was not a general win after the cluster

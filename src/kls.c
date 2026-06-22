@@ -7397,6 +7397,20 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
   return NULL;
 }
 
+static int kls_egraph_medium_heavy_dominant_btf_shape(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->nblocks <= 1u || solver->n == 0u) {
+    return 0;
+  }
+  const double coverage =
+    (double)solver->symbolic->maxblock / (double)solver->n;
+  return coverage >= 0.85 && coverage < 0.95 &&
+         solver->symbolic->maxblock >= 30000u &&
+         solver->symbolic->nblocks <= 5000u &&
+         solver->common.flops >= 5.0e8;
+}
+
 static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->nblocks <= 1u || solver->n == 0u) {
@@ -7409,6 +7423,9 @@ static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
        solver->common.flops >= 5.0e9)) {
     return 1;
   }
+  if (kls_egraph_medium_heavy_dominant_btf_shape(solver)) {
+    return 1;
+  }
   return coverage >= 0.85 &&
          solver->symbolic->maxblock >= 100000u &&
          solver->symbolic->nblocks <= 20000u &&
@@ -7416,6 +7433,9 @@ static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
 }
 
 static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {
+  if (kls_egraph_medium_heavy_dominant_btf_shape(solver)) {
+    return 30000u;
+  }
   return kls_egraph_dominant_btf_shape(solver) ? 50000u : 100000u;
 }
 
