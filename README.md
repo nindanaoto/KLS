@@ -143,6 +143,12 @@ small BTF-dominant matrices whose first AMD/COLAMD factorization shows both
 many off-diagonal pivots and high actual fill/flop growth; this catches
 power-grid-style cases where the symbolic estimate alone understates the
 benefit of nested dissection.
+For large paper-style diagonal patterns, `auto` can start directly with METIS
+when the structure is a very-low-degree full diagonal, a sparse full diagonal
+with bounded but nontrivial row/column degree, or a near-full diagonal with a
+large dense row/column spike. These predicates are structural, not
+matrix-name-based, and are deliberately narrow so cases such as `ss1` and the
+IBM `dc`/`trans` family stay on the cheaper AMD/COLAMD path.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 
@@ -161,6 +167,14 @@ practical corpus:
 
 ```sh
 python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_paper_medium_manifest.txt --out data/suitesparse-paper-medium
+```
+
+For deeper tuning against the remaining paper matrices, use the large
+supplement. It contains the 17 public SuiteSparse paper cases excluded by the
+medium caps, including the largest KLU/NICSLU/SubtreeLU labels:
+
+```sh
+python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_paper_large_manifest.txt --out data/suitesparse-paper-large
 ```
 
 To regenerate a metadata-bounded subset from the full paper corpus and record

@@ -59,7 +59,12 @@ design work, not benchmark-specific tuning.
   and promote expensive numeric factorizations to METIS when actual fill/flop
   evidence is better. The METIS promotion gate also covers small
   BTF-dominant matrices when the first factorization shows many off-diagonal
-  pivots and high actual fill/flop growth.
+  pivots and high actual fill/flop growth. KLS also starts directly with METIS
+  for narrow large-diagonal structural classes from the paper corpus: very
+  low-degree full diagonals, sparse full diagonals with bounded but meaningful
+  row/column degree, and nearly full diagonals with a large dense degree spike.
+  This preserves the papers' nested-dissection motivation without naming
+  individual matrices.
 - Constrained nested-dissection refinement: KLS can refine METIS rank groups
   with CAMD constraints, preserving nested-dissection rank shape while reducing
   local fill and flops.
@@ -98,6 +103,11 @@ design work, not benchmark-specific tuning.
 - LGPL project licensing and third-party notices: KLS itself is
   LGPL-2.1-or-later, with vendored-source attribution separated from the KLS
   license.
+- Paper-derived benchmark manifests: the full public SuiteSparse union from
+  the local KLU, NICSLU, SubtreeLU, CKTSO papers and CKTSO ordering supplement
+  resolves to 110 matrices. The routine medium subset contains 93 matrices, and
+  the large supplement records the 17 excluded public paper cases for deliberate
+  overnight tuning.
 
 ## Partially Implemented
 

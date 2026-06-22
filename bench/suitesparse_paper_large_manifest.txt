@@ -1,0 +1,23 @@
+# Large paper-derived SuiteSparse supplement for deliberate overnight tuning.
+# This is the complement of suitesparse_paper_medium_manifest.txt under the
+# routine caps:
+#   --max-rows 700000 --max-cols 700000 --max-nnz 2500000
+# The source of truth remains suitesparse_paper_manifest.txt.
+
+asic_680k
+freescale1
+rajat30
+tsopf_rs_b2383
+tsopf_rs_b2383_c1
+circuit5m
+circuit5m_dc
+g3_circuit
+hamrle3
+memchip
+pre2
+rajat31
+nxp1
+rajat29
+fullchip
+freescale2
+tsopf_fs_b39_c30
