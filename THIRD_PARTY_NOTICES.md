@@ -21,10 +21,10 @@ solver-tree copies that retain HSL redistribution restrictions are not suitable
 for vendoring into this LGPL project. The bounded exact static-pivot assignment
 code in `src/kls.c` is KLS in-tree code under the project LGPL-2.1-or-later
 license. KLS can optionally link to an external SPRAL installation for
-BSD-licensed auction matching support; SPRAL is not vendored by KLS. Future
-in-tree MC64-equivalent matching/scaling code must be LGPL-compatible, such as
-independent KLS code or permissively licensed SPRAL-derived code with its own
-attribution.
+BSD-licensed Hungarian/auction matching and scaling support; SPRAL is not
+vendored by KLS. Future in-tree MC64-equivalent matching/scaling code must be
+LGPL-compatible, such as independent KLS code or permissively licensed
+SPRAL-derived code with its own attribution.
 
 KLS can build METIS nested-dissection ordering from pinned submodules under
 `third_party/metis` and `third_party/gklib`. METIS is Copyright 1997, Regents

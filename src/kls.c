@@ -2225,6 +2225,8 @@ static int exact_weighted_match_is_affordable(UF_long n, UF_long nnz) {
   return (double)n * (double)nnz <= 5.0e7;
 }
 
+static double clamp_matching_scale(double value);
+
 static void kls_heap_free(kls_min_heap *heap) {
   if (heap == NULL) {
     return;
@@ -3092,6 +3094,187 @@ static void improve_numeric_row_match_by_paths(UF_long n,
 }
 
 #ifdef KLS_HAVE_SPRAL_SCALING
+static int build_spral_hungarian_row_match_scaling(
+  UF_long n,
+  UF_long nnz,
+  const UF_long *col_ptr,
+  const UF_long *row_idx,
+  const double *numeric_values,
+  UF_long **row_perm_out,
+  UF_long *matched_out,
+  double **row_scale_out,
+  double **col_scale_out) {
+  if (n <= 0 || nnz <= 0 || col_ptr == NULL || row_idx == NULL ||
+      numeric_values == NULL || row_perm_out == NULL ||
+      matched_out == NULL || row_scale_out == NULL ||
+      col_scale_out == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  *row_perm_out = NULL;
+  *matched_out = 0;
+  *row_scale_out = NULL;
+  *col_scale_out = NULL;
+  if (n > (UF_long)INT_MAX) {
+    return KLS_ERR_UNSUPPORTED;
+  }
+
+  int64_t *spral_col_ptr =
+    (int64_t *)malloc(((size_t)n + 1u) * sizeof(*spral_col_ptr));
+  int *spral_row_idx = (int *)malloc((size_t)nnz * sizeof(*spral_row_idx));
+  int *spral_match = (int *)malloc((size_t)n * sizeof(*spral_match));
+  double *spral_row_scale =
+    (double *)malloc((size_t)n * sizeof(*spral_row_scale));
+  double *spral_col_scale =
+    (double *)malloc((size_t)n * sizeof(*spral_col_scale));
+  UF_long *row_perm = (UF_long *)malloc((size_t)n * sizeof(*row_perm));
+  UF_long *col_match = (UF_long *)malloc((size_t)n * sizeof(*col_match));
+  double *row_scale = (double *)malloc((size_t)n * sizeof(*row_scale));
+  double *col_scale = (double *)malloc((size_t)n * sizeof(*col_scale));
+  if (spral_col_ptr == NULL || spral_row_idx == NULL ||
+      spral_match == NULL || spral_row_scale == NULL ||
+      spral_col_scale == NULL || row_perm == NULL || col_match == NULL ||
+      row_scale == NULL || col_scale == NULL) {
+    free(spral_col_ptr);
+    free(spral_row_idx);
+    free(spral_match);
+    free(spral_row_scale);
+    free(spral_col_scale);
+    free(row_perm);
+    free(col_match);
+    free(row_scale);
+    free(col_scale);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+
+  for (UF_long col = 0; col <= n; ++col) {
+    if (col_ptr[col] > (UF_long)INT64_MAX) {
+      free(spral_col_ptr);
+      free(spral_row_idx);
+      free(spral_match);
+      free(spral_row_scale);
+      free(spral_col_scale);
+      free(row_perm);
+      free(col_match);
+      free(row_scale);
+      free(col_scale);
+      return KLS_ERR_UNSUPPORTED;
+    }
+    spral_col_ptr[col] = (int64_t)col_ptr[col];
+  }
+  for (UF_long p = 0; p < nnz; ++p) {
+    if (row_idx[p] >= n || row_idx[p] > (UF_long)INT_MAX) {
+      free(spral_col_ptr);
+      free(spral_row_idx);
+      free(spral_match);
+      free(spral_row_scale);
+      free(spral_col_scale);
+      free(row_perm);
+      free(col_match);
+      free(row_scale);
+      free(col_scale);
+      return KLS_ERR_UNSUPPORTED;
+    }
+    spral_row_idx[p] = (int)row_idx[p];
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    row_perm[i] = KLS_KLU_EMPTY;
+    col_match[i] = KLS_KLU_EMPTY;
+    row_scale[i] = 1.0;
+    col_scale[i] = 1.0;
+  }
+
+  struct spral_scaling_hungarian_options options;
+  struct spral_scaling_hungarian_inform inform;
+  spral_scaling_hungarian_default_options(&options);
+  options.array_base = 0;
+  options.scale_if_singular = false;
+  spral_scaling_hungarian_unsym_long((int)n, (int)n, spral_col_ptr,
+                                     spral_row_idx, numeric_values,
+                                     spral_row_scale, spral_col_scale,
+                                     spral_match, &options, &inform);
+
+  free(spral_col_ptr);
+  free(spral_row_idx);
+  if (inform.flag != 0 && inform.flag != -2) {
+    free(spral_match);
+    free(spral_row_scale);
+    free(spral_col_scale);
+    free(row_perm);
+    free(col_match);
+    free(row_scale);
+    free(col_scale);
+    return inform.flag == -1 ? KLS_ERR_OUT_OF_MEMORY : KLS_ERR_UNSUPPORTED;
+  }
+
+  UF_long matched = 0;
+  for (UF_long row = 0; row < n; ++row) {
+    const int col_int = spral_match[row];
+    if (col_int < 0 || col_int >= (int)n) {
+      continue;
+    }
+    const UF_long col = (UF_long)col_int;
+    if (col_match[col] != KLS_KLU_EMPTY) {
+      free(spral_match);
+      free(spral_row_scale);
+      free(spral_col_scale);
+      free(row_perm);
+      free(col_match);
+      free(row_scale);
+      free(col_scale);
+      return KLS_ERR_UNSUPPORTED;
+    }
+    row_perm[row] = col;
+    col_match[col] = row;
+    matched++;
+  }
+  free(spral_match);
+
+  const int complete_status =
+    complete_unmatched_row_match(n, row_perm, col_match);
+  free(col_match);
+  if (complete_status != KLS_OK) {
+    free(spral_row_scale);
+    free(spral_col_scale);
+    free(row_perm);
+    free(row_scale);
+    free(col_scale);
+    return complete_status;
+  }
+
+  int scaling_usable = inform.flag == 0 && matched == n;
+  for (UF_long col = 0; col < n && scaling_usable; ++col) {
+    if (!isfinite(spral_col_scale[col]) || spral_col_scale[col] <= 0.0) {
+      scaling_usable = 0;
+      break;
+    }
+    col_scale[col] = clamp_matching_scale(spral_col_scale[col]);
+  }
+  for (UF_long row = 0; row < n && scaling_usable; ++row) {
+    const UF_long scaled_row = row_perm[row];
+    if (scaled_row >= n || !isfinite(spral_row_scale[row]) ||
+        spral_row_scale[row] <= 0.0) {
+      scaling_usable = 0;
+      break;
+    }
+    row_scale[scaled_row] = clamp_matching_scale(spral_row_scale[row]);
+  }
+  free(spral_row_scale);
+  free(spral_col_scale);
+
+  if (!scaling_usable) {
+    free(row_scale);
+    free(col_scale);
+    row_scale = NULL;
+    col_scale = NULL;
+  }
+
+  *row_perm_out = row_perm;
+  *matched_out = matched;
+  *row_scale_out = row_scale;
+  *col_scale_out = col_scale;
+  return KLS_OK;
+}
+
 static int build_spral_auction_row_match(UF_long n,
                                          UF_long nnz,
                                          const UF_long *col_ptr,
@@ -3223,15 +3406,20 @@ static int build_greedy_numeric_row_match(UF_long n,
                                           int improve_matching,
                                           UF_long **row_perm_out,
                                           UF_long *matched_out,
-                                          int *exact_matching_out) {
+                                          int *exact_matching_out,
+                                          double **row_scale_out,
+                                          double **col_scale_out) {
   if (n <= 0 || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
       row_perm_out == NULL || matched_out == NULL ||
-      exact_matching_out == NULL) {
+      exact_matching_out == NULL || row_scale_out == NULL ||
+      col_scale_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   *row_perm_out = NULL;
   *matched_out = 0;
   *exact_matching_out = 0;
+  *row_scale_out = NULL;
+  *col_scale_out = NULL;
 
   if (improve_matching && exact_weighted_match_is_affordable(n, nnz)) {
     UF_long *exact_row_perm = NULL;
@@ -3321,6 +3509,65 @@ static int build_greedy_numeric_row_match(UF_long n,
         improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
         improve_numeric_row_match_by_paths(n, &graph, row_perm, col_match);
       }
+#ifdef KLS_HAVE_SPRAL_SCALING
+      if (matched < n && n >= 4000u && n <= 150000u && nnz <= 1500000u) {
+        UF_long *spral_row_perm = NULL;
+        UF_long spral_matched = 0;
+        double *spral_row_scale = NULL;
+        double *spral_col_scale = NULL;
+        const int spral_status =
+          build_spral_hungarian_row_match_scaling(n, nnz, col_ptr, row_idx,
+                                                  numeric_values,
+                                                  &spral_row_perm,
+                                                  &spral_matched,
+                                                  &spral_row_scale,
+                                                  &spral_col_scale);
+        if (spral_status == KLS_OK) {
+          const int better_cardinality =
+            spral_matched > matched && matched < n;
+          if (better_cardinality) {
+            free(row_perm);
+            row_perm = spral_row_perm;
+            matched = spral_matched;
+            spral_row_perm = NULL;
+            for (UF_long col = 0; col < n; ++col) {
+              col_match[col] = KLS_KLU_EMPTY;
+            }
+            for (UF_long row = 0; row < n; ++row) {
+              const UF_long col = row_perm[row];
+              if (col >= n || col_match[col] != KLS_KLU_EMPTY) {
+                free(entries);
+                free(row_perm);
+                free(col_match);
+                free(row_used);
+                free(col_used);
+                free(spral_row_scale);
+                free(spral_col_scale);
+                return KLS_ERR_INVALID_ARGUMENT;
+              }
+              col_match[col] = row;
+            }
+            if (spral_row_scale != NULL && spral_col_scale != NULL) {
+              *row_scale_out = spral_row_scale;
+              *col_scale_out = spral_col_scale;
+              spral_row_scale = NULL;
+              spral_col_scale = NULL;
+            }
+            *exact_matching_out = 1;
+          }
+          free(spral_row_perm);
+          free(spral_row_scale);
+          free(spral_col_scale);
+        } else if (spral_status == KLS_ERR_OUT_OF_MEMORY) {
+          free(entries);
+          free(row_perm);
+          free(col_match);
+          free(row_used);
+          free(col_used);
+          return spral_status;
+        }
+      }
+#endif
       free_row_match_graph(&graph);
     } else if (status == KLS_ERR_OUT_OF_MEMORY) {
       free(entries);
@@ -4007,6 +4254,8 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   double *trial_values = NULL;
   double *trial_row_scale = NULL;
   double *trial_col_scale = NULL;
+  double *match_row_scale = NULL;
+  double *match_col_scale = NULL;
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_numeric *trial_numeric = NULL;
   trilinos_klu_l_common trial_common;
@@ -4061,7 +4310,9 @@ static int maybe_select_auto_row_match(kls_solver *solver,
                                               base_col_ptr, base_row_idx,
                                               base_values, improve_matching,
                                               &row_perm, &matched,
-                                              &exact_matching);
+                                              &exact_matching,
+                                              &match_row_scale,
+                                              &match_col_scale);
   if (status != KLS_OK) {
     goto done;
   }
@@ -4082,11 +4333,19 @@ static int maybe_select_auto_row_match(kls_solver *solver,
 
   kls_options trial_options = solver->options;
   if (trial_options.scale == KLS_SCALE_AUTO) {
-    status = build_matching_equilibration(solver->n, base_col_ptr, base_row_idx,
-                                          base_values, row_perm,
-                                          &trial_row_scale, &trial_col_scale);
-    if (status != KLS_OK) {
-      goto done;
+    if (match_row_scale != NULL && match_col_scale != NULL) {
+      trial_row_scale = match_row_scale;
+      trial_col_scale = match_col_scale;
+      match_row_scale = NULL;
+      match_col_scale = NULL;
+    } else {
+      status = build_matching_equilibration(solver->n, base_col_ptr,
+                                            base_row_idx, base_values,
+                                            row_perm, &trial_row_scale,
+                                            &trial_col_scale);
+      if (status != KLS_OK) {
+        goto done;
+      }
     }
   }
   kls_ordering trial_ordering = KLS_ORDERING_AUTO;
@@ -4172,6 +4431,10 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   row_perm = NULL;
   trial_symbolic = NULL;
   trial_numeric = NULL;
+  free(match_row_scale);
+  free(match_col_scale);
+  match_row_scale = NULL;
+  match_col_scale = NULL;
   accepted = 1;
 
 done:
@@ -4189,6 +4452,8 @@ done:
     free(trial_values);
     free(trial_row_scale);
     free(trial_col_scale);
+    free(match_row_scale);
+    free(match_col_scale);
   }
   free(owned_col_ptr);
   free(owned_row_idx);
@@ -4232,6 +4497,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   double *trial_values = NULL;
   double *trial_row_scale = NULL;
   double *trial_col_scale = NULL;
+  double *match_row_scale = NULL;
+  double *match_col_scale = NULL;
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_numeric *trial_numeric = NULL;
   trilinos_klu_l_common trial_common;
@@ -4310,7 +4577,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               base_values, improve_matching,
                                               &row_perm,
                                               &matched,
-                                              &exact_matching);
+                                              &exact_matching,
+                                              &match_row_scale,
+                                              &match_col_scale);
   if (status != KLS_OK || 1000u * matched < 995u * solver->n) {
     goto done;
   }
@@ -4328,11 +4597,19 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
   kls_options trial_options = solver->options;
   if (trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match) {
-    status = build_matching_equilibration(solver->n, base_col_ptr, base_row_idx,
-                                          base_values, row_perm,
-                                          &trial_row_scale, &trial_col_scale);
-    if (status != KLS_OK) {
-      goto done;
+    if (match_row_scale != NULL && match_col_scale != NULL) {
+      trial_row_scale = match_row_scale;
+      trial_col_scale = match_col_scale;
+      match_row_scale = NULL;
+      match_col_scale = NULL;
+    } else {
+      status = build_matching_equilibration(solver->n, base_col_ptr,
+                                            base_row_idx, base_values,
+                                            row_perm, &trial_row_scale,
+                                            &trial_col_scale);
+      if (status != KLS_OK) {
+        goto done;
+      }
     }
   }
   kls_ordering trial_ordering = KLS_ORDERING_AUTO;
@@ -4410,6 +4687,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   row_perm = NULL;
   trial_symbolic = NULL;
   trial_numeric = NULL;
+  free(match_row_scale);
+  free(match_col_scale);
+  match_row_scale = NULL;
+  match_col_scale = NULL;
   accepted = 1;
 
 done:
@@ -4427,6 +4708,8 @@ done:
     free(trial_values);
     free(trial_row_scale);
     free(trial_col_scale);
+    free(match_row_scale);
+    free(match_col_scale);
   }
   free(owned_col_ptr);
   free(owned_row_idx);

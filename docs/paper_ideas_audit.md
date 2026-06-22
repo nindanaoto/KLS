@@ -491,15 +491,19 @@ medium/large default; KLS still needs MC64-quality scaling and acceptance plus
 a more optimized assignment implementation before this can close the CKTSO
 gap.
 
-An optional system-SPRAL hook was then added for BSD-licensed auction matching
-support. It is deliberately not a default dependency and not a solver backend:
-KLS calls it only for large static-pivot candidates where the in-tree
-cardinality matcher is thousands of rows short and below the normal acceptance
-threshold. Medium representative checks with a Release SPRAL-enabled build
-left `gemat12` and `onetone2` on the in-tree path with the same pivot/fill
-choices. This keeps a license-compatible MC64-adjacent source available for
-hard structural-deficit cases without letting approximate auction matching
-replace already accepted KLS row matchings.
+An optional system-SPRAL hook was then added for BSD-licensed matching/scaling
+support. It is deliberately not a default dependency and not a solver backend.
+KLS first wired SPRAL auction matching as a large structural-deficit fallback,
+then added SPRAL's MC64-like Hungarian unsymmetric matcher/scaler under the
+same optional dependency. A wider same-cardinality Hungarian replacement was
+tested on the AT&T `onetone2` and `twotone` static-pivot cases: it could reduce
+off-diagonal pivots on `twotone`, but increased fill and refactor time, and it
+worsened `onetone2`. The retained policy therefore uses optional SPRAL
+Hungarian only when it improves matching cardinality over the in-tree matcher,
+and passes any returned scaling through KLS's existing numeric acceptance
+trial. This keeps a license-compatible MC64-adjacent source available for hard
+structural-deficit cases without letting a maximum-product match replace
+already accepted KLS row matchings solely on weight.
 
 The fast-factor pivot-check path was then made more diagnostic by recording the
 first rejected factor-order pivot and original matrix column in `kls_stats` and
