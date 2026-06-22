@@ -116,8 +116,11 @@ matching-derived row/column equilibration and keep it in no-scale mode when it
 is at least as good numerically as KLU row scaling. KLS keeps the transformed
 candidate only when the factorization succeeds with acceptable pivoting and
 conditioning, or when numeric fill/flop, pivoting, and reciprocal-condition
-evidence improve. Benchmark JSON reports both whether static pivoting was
-enabled and whether KLS selected it.
+evidence improve. Medium-large static-match candidates with both majority
+missing and majority weak diagonals can keep the row permutation but prefer
+unscaled values, avoiding matching-equilibration setup when it would increase
+fill. Benchmark JSON reports both whether static pivoting was enabled and
+whether KLS selected it.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF

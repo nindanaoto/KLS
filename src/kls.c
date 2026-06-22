@@ -2694,6 +2694,17 @@ static UF_long count_weak_diagonal_rows(UF_long n,
   return weak;
 }
 
+static int static_match_prefers_unscaled(UF_long n,
+                                         UF_long nnz,
+                                         UF_long weak_diagonal,
+                                         UF_long missing_diagonal) {
+  /* Majority-missing medium circuit blocks can lose sparsity from matching
+     equilibration; keep the static row permutation but leave values unscaled. */
+  return n >= 80000u && n <= 150000u && nnz <= 1500000u &&
+         missing_diagonal * 2u >= n &&
+         weak_diagonal * 2u >= n;
+}
+
 static int should_try_auto_row_match(const kls_solver *solver) {
   /* Weighted static pivoting is currently a reactive medium-matrix trial.  On
      larger matrices the O(nnz log nnz) matching/reanalysis cost needs a cheaper
@@ -3010,6 +3021,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     count_weak_diagonal_rows(solver->n, base_col_ptr, base_row_idx,
                              base_values, solver->common.tol,
                              &missing_diagonal);
+  const int prefer_unscaled_static_match =
+    static_match_prefers_unscaled(solver->n, solver->nnz, weak,
+                                  missing_diagonal);
   if (!small_candidate) {
     const int majority_weak = weak * 2u >= solver->n && weak >= 5000;
     const int partial_weak =
@@ -3048,7 +3062,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
 
   kls_options trial_options = solver->options;
-  if (trial_options.scale == KLS_SCALE_AUTO) {
+  if (trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match) {
     status = build_matching_equilibration(solver->n, base_col_ptr, base_row_idx,
                                           base_values, row_perm,
                                           &trial_row_scale, &trial_col_scale);
@@ -3069,6 +3083,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                                       trial_row_idx,
                                                       &trial_options,
                                                       trial_values);
+  if (trial_options.scale == KLS_SCALE_AUTO && prefer_unscaled_static_match) {
+    trial_common.scale = -1;
+  }
 
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,

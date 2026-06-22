@@ -296,6 +296,18 @@ matched-METIS refactor time from about 22s to about 16s, but that remained far
 behind the CKTSO artifact at about 2.5s, so the `mac_econ_fwd500` gate was not
 widened.
 
+For medium-large static-row-matched matrices whose diagonal is both weak and
+mostly missing, the matching-equilibration trial was narrowed to keep the row
+permutation but prefer no numeric scaling. This is a structural rule for
+80k-150k order, at most 1.5M nonzeros, at least half missing diagonal entries,
+and at least half weak-or-missing diagonal rows. On AT&T `twotone`, it selected
+`scale=-1`, reduced off-diagonal pivots from about 1514 to 219, skipped the
+matching-equilibration setup, and improved the focused SPICE-cycle estimate
+from about 124s to about 96-98s. It deliberately does not apply to the Rajat
+static-pivot cases, whose diagonals are almost complete and were slower when
+forced unscaled. This remains far behind the CKTSO artifact at about 26s on
+the same SPICE-cycle formula.
+
 After expanding the paper-medium corpus with the public CKTSO ordering
 supplement cases, the post-factor METIS promotion gate was widened for small
 BTF-dominant matrices whose initial AMD/COLAMD factorization produces both
