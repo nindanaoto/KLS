@@ -1056,6 +1056,24 @@ timeouts and the known singular `bips07_1998`; common rows versus the previous
 broad KLS artifact improved geomean by about 2%, though one-pass noise still
 dominates many sub-millisecond rows.
 
+The single-block EGraph schedule/consumer gate was then lowered from the
+previous very-large-only floor to cover moderate single-block cases whose
+actual factor work, LU fill, and measured dependency work are already high
+enough to amortize schedule construction and worker scratch setup. This is a
+paper-derived generalization of the CKTSO/NICSLU intra-block dependency-graph
+idea, not a matrix-name rule: single-block scheduling now starts at about
+`3e8` factor flops or 3M factor nonzeros, and the no-pivot EGraph consumer
+requires about `1.5e8` dependency-work units. In same-session SPRAL-enabled
+focused checks with four threads, `HTC_336_4438` changed from schedule-only
+metadata to actual EGraph consumption and its repeated refactor average dropped
+from about 0.105s to 0.041s; `rajat24` similarly dropped to about 0.096s
+refactor average. A nine-row hard-focus JSONL improved geomean SPICE-cycle time
+by about 1.17x versus the previous default-on artifact, with no loss over 2%.
+The same comparison against CKTSO still leaves a large gap, about 2.91x
+geomean on those focused rows, so this is retained as a useful KLS-owned
+refactor threshold improvement rather than mistaken for CKTSO's full pivoting
+tail scheduler.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
