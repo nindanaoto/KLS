@@ -93,7 +93,9 @@ design work, not benchmark-specific tuning.
   evidence is better. The no-BTF retry covers both single-block BTF analyses
   and large dominant-block BTF analyses when the stripped fringe is small and
   the no-BTF symbolic estimate is materially better, matching KLU's warning
-  that BTF can occasionally increase factor fill. The METIS promotion gate also
+  that BTF can occasionally increase factor fill. Low-work dominant-BTF cases
+  are excluded from this retry because keeping BTF is cheaper when the symbolic
+  work estimate is already low. The METIS promotion gate also
   covers small BTF-dominant matrices when the first factorization shows many
   off-diagonal pivots and high actual fill/flop growth, and preserves the
   selected BTF/no-BTF mode when comparing a METIS promotion candidate. KLS also
@@ -111,7 +113,9 @@ design work, not benchmark-specific tuning.
   medium structural class.
 - Scaling policy: KLS exposes KLU scale modes and has auto scale selection based
   on pattern and numeric evidence, including no-scale reuse where repeated
-  SPICE refactorization benefits.
+  SPICE refactorization benefits. Low-work dominant-BTF cases also start with
+  no KLU row scaling, avoiding the scale recomputation cost while preserving
+  the useful BTF decomposition.
 - Fast repeated factorization with pivot check: KLS reuses an existing numeric
   pattern, checks reused pivots against the selected threshold via L
   multipliers, and falls back to full pivoting factorization if the reused order
@@ -715,6 +719,16 @@ The same run beat KLU2 on the larger common cases `ASIC_680k` and `rajat30`,
 but still lost `rajat29`. A factor-only `pre2` probe also timed out under
 125s, confirming that the unresolved `pre2` gap is first-factor numeric
 machinery, not repeated-refactor scheduling.
+
+A low-work dominant-BTF guard was then retained for Rajat-family large cases:
+if BTF finds one block covering at least 95% of the matrix, the stripped fringe
+is at most 5% but still nontrivial, and the symbolic flop estimate is below
+`1e9`, auto keeps BTF and starts with no KLU row scaling. On `rajat29`, this
+changed auto from AMD/no-BTF/max-scale to AMD/BTF/no-scale, reducing the
+SPICE-cycle estimate from the old about 5.67s to about 3.74s. That now beats
+the saved CKTSO artifact at about 5.28s and the saved KLU2 artifact at about
+4.29s. Higher-work guards such as `rajat30`, `nxp1`, `Raj1`, and `rajat24`
+still take the no-BTF retry when their symbolic evidence supports it.
 
 A CKTSO-style dynamic atomic assignment prototype for the EGraph pipeline tail
 was tested and rejected. It replaced the static per-thread tail stride with a

@@ -1443,6 +1443,10 @@ static int is_medium_bounded_degree_diagonal_pattern(UF_long n,
 }
 #endif
 
+static int symbolic_is_low_work_dominant_btf(
+  UF_long n,
+  const trilinos_klu_l_symbolic *symbolic);
+
 static int choose_auto_scale_from_pattern(UF_long n,
                                           const UF_long *col_ptr,
                                           const UF_long *row_idx,
@@ -1576,6 +1580,10 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
                                          const double *numeric_values) {
   if (solver == NULL) {
     return 2;
+  }
+  if (solver->options.scale == KLS_SCALE_AUTO &&
+      symbolic_is_low_work_dominant_btf(solver->n, solver->symbolic)) {
+    return 0;
   }
   return choose_auto_scale_from_pattern(solver->n, solver->col_ptr, solver->row_idx,
                                         &solver->options, numeric_values);
@@ -2091,6 +2099,19 @@ static double symbolic_score(const trilinos_klu_l_symbolic *symbolic) {
   return DBL_MAX;
 }
 
+static int symbolic_is_low_work_dominant_btf(
+  UF_long n,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (symbolic == NULL || symbolic->nblocks <= 1 || n < 200000 ||
+      symbolic->maxblock < (UF_long)(0.95 * (double)n) ||
+      symbolic->est_flops <= 0.0 || symbolic->est_flops >= 1.0e9) {
+    return 0;
+  }
+  const UF_long outside_largest = n - symbolic->maxblock;
+  return outside_largest >= 64u &&
+         20.0 * (double)outside_largest <= (double)n;
+}
+
 static int btf_dominant_block_retry_shape_is_allowed(
   UF_long n,
   const trilinos_klu_l_symbolic *symbolic) {
@@ -2102,6 +2123,10 @@ static int btf_dominant_block_retry_shape_is_allowed(
   const UF_long outside_largest = n - symbolic->maxblock;
   if (outside_largest < 64u ||
       20.0 * (double)outside_largest > (double)n) {
+    return 0;
+  }
+
+  if (symbolic_is_low_work_dominant_btf(n, symbolic)) {
     return 0;
   }
 

@@ -84,9 +84,10 @@ trial for expensive high-off-diagonal-pivot cases. Accepted factorization
 candidates still have to pass KLS's normal numeric checks.
 
 KLS keeps this as the only vendored MC64-adjacent external implementation.
-HSL MC64 itself, and solver-tree copies that retain HSL redistribution
-restrictions, are not compatible with KLS's LGPL distribution goal. A
-permissively licensed translation of SPRAL's scaling code can be used as a
+Existing MC64-style code is acceptable only when its license remains compatible
+with KLS's LGPL distribution goal. HSL MC64 itself, and solver-tree copies that
+retain HSL redistribution restrictions, are not compatible with that boundary.
+A permissively licensed translation of SPRAL's scaling code can be used as a
 reference, but the pinned SPRAL submodule is the preferred reproducible source
 for the C/Fortran build.
 
@@ -147,12 +148,12 @@ pivoting and refactorization behavior. KLS defaults to `auto`, which can start
 unscaled using KLU's `-1` no-scale/no-recheck mode for patterns already
 validated by KLS, or sum-scaled when the diagonal is sparse but row magnitudes
 are already balanced. Otherwise it starts from KLU's max row scaling mode (`2`).
-Large low-degree, nearly diagonal circuit patterns and METIS-started medium
-bounded-degree or dense-diagonal patterns also start in no-scale mode to avoid
-repeated row-scale work once KLS has validated the structure. TSOPF-style
-spiked low-diagonal METIS starts use max scaling, and large sparse-diagonal
-low-degree patterns can start with sum scaling when that avoids more expensive
-max-scaling behavior. For large expensive
+Large low-degree, nearly diagonal circuit patterns, METIS-started medium
+bounded-degree or dense-diagonal patterns, and low-work dominant-BTF patterns
+also start without row scaling to avoid repeated scale work once KLS has
+validated the structure. TSOPF-style spiked low-diagonal METIS starts use max
+scaling, and large sparse-diagonal low-degree patterns can start with sum
+scaling when that avoids more expensive max-scaling behavior. For large expensive
 cases, `auto` can still try other numeric scaling modes when actual flop/fill
 evidence justifies the extra work, but structural METIS starts that are already
 known to need a specific scale mode skip redundant scale trials. Explicit
@@ -219,7 +220,9 @@ Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF
 for large matrices where BTF finds either a single block or one dominant block
 with a small fringe, and a no-BTF symbolic retry gives enough evidence to keep
-or improve the fill estimate. For large, low-degree, nearly
+or improve the fill estimate. The retry is skipped for low-work dominant-BTF
+patterns where keeping the decomposition is already the cheaper SPICE-cycle
+choice. For large, low-degree, nearly
 diagonal patterns, medium low-degree full-diagonal patterns, medium sparse
 high-degree mostly diagonal patterns, and for METIS-started medium
 dense-diagonal high-degree patterns, `auto` can also start without BTF to avoid
