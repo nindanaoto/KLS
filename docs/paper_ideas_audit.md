@@ -104,7 +104,10 @@ design work, not benchmark-specific tuning.
   bounded but meaningful row/column degree, and nearly full diagonals with a
   large dense degree spike. Medium spiked low-diagonal patterns with a large
   row/column degree spike also start directly with METIS and max scaling for
-  TSOPF-style power-grid structures. This preserves the papers'
+  TSOPF-style power-grid structures. For large high-work no-BTF single-block
+  analyses, auto can also try METIS symbolically before the first numeric
+  factorization and keep it when the symbolic fill score is clearly lower,
+  avoiding a delayed post-factor METIS promotion. This preserves the papers'
   nested-dissection motivation without naming individual matrices.
 - Constrained nested-dissection refinement: KLS can refine METIS rank groups
   with CAMD constraints, preserving nested-dissection rank shape while reducing
@@ -732,6 +735,17 @@ SPICE-cycle estimate from the old about 5.67s to about 3.74s. That now beats
 the saved CKTSO artifact at about 5.28s and the saved KLU2 artifact at about
 4.29s. Higher-work guards such as `rajat30`, `nxp1`, `Raj1`, and `rajat24`
 still take the no-BTF retry when their symbolic evidence supports it.
+
+A symbolic METIS retry was then retained before numeric factorization for
+large high-work single-block no-BTF analyses. This is the same CKTSO/SubtreeLU
+nested-dissection direction as the existing post-factor METIS promotion, but
+it avoids first paying for an AMD numeric factorization when METIS already has
+a clearly lower symbolic fill score. On same-session serial checks, `nxp1`
+kept the same METIS/no-BTF numeric path but reduced the SPICE-cycle estimate
+from the saved about 89.6s to about 78.9s, and `rajat30` moved from about
+49.2s to about 42.4s. The low-work dominant-BTF guard stayed on `rajat29`, and
+the many-block BTF guard stayed on `ASIC_680k`, so this is a general
+symbolic-cost improvement rather than a benchmark-name policy.
 
 A CKTSO-style dynamic atomic assignment prototype for the EGraph pipeline tail
 was tested and rejected. It replaced the static per-thread tail stride with a

@@ -2200,6 +2200,19 @@ static int should_start_auto_with_metis(UF_long n,
   }
   return is_medium_bounded_degree_diagonal_pattern(n, col_ptr, row_idx);
 }
+
+static int should_try_symbolic_metis_before_numeric(
+  UF_long n,
+  const trilinos_klu_l_symbolic *symbolic,
+  kls_ordering selected_ordering,
+  double score) {
+  if (selected_ordering == KLS_ORDERING_METIS || symbolic == NULL ||
+      n < 200000 || symbolic->do_btf || symbolic->nblocks != 1 ||
+      symbolic->maxblock != n || symbolic->est_flops < 1.0e9) {
+    return 0;
+  }
+  return isfinite(score) && score > 0.0;
+}
 #endif
 
 static int should_start_auto_without_btf(UF_long n,
@@ -5467,6 +5480,32 @@ static int choose_symbolic_for_pattern(UF_long n,
   if (!any_ok) {
     return KLS_ERR_ANALYZE_FAILED;
   }
+
+#ifdef KLS_HAVE_METIS
+  if (should_try_symbolic_metis_before_numeric(n, best_symbolic,
+                                               best_ordering, best_score)) {
+    kls_options metis_options = *symbolic_options;
+    metis_options.use_btf = best_symbolic->do_btf ? 1 : 0;
+    trilinos_klu_l_symbolic *metis_symbolic = NULL;
+    trilinos_klu_l_common metis_common;
+    int status = analyze_with_ordering(n, col_ptr, row_idx, &metis_options,
+                                       KLS_ORDERING_METIS, &metis_symbolic,
+                                       &metis_common);
+    if (status == KLS_OK) {
+      const double metis_score = symbolic_score(metis_symbolic);
+      if (isfinite(metis_score) && metis_score <= 0.90 * best_score) {
+        trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
+        best_symbolic = metis_symbolic;
+        best_common = metis_common;
+        best_ordering = KLS_ORDERING_METIS;
+        best_score = metis_score;
+      } else {
+        trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+      }
+    }
+  }
+#endif
+
   *symbolic_out = best_symbolic;
   *common_out = best_common;
   *selected_ordering_out = best_ordering;

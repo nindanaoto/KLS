@@ -236,7 +236,11 @@ high-degree patterns where delayed promotion would otherwise pay for an
 avoidable first AMD factorization. It can also start with METIS for medium
 spiked low-diagonal patterns that resemble TSOPF-style paper cases where the
 symbolic estimate understates nested-dissection benefit. Otherwise it compares
-AMD and COLAMD by symbolic fill estimate. Dense-diagonal high-degree METIS
+AMD and COLAMD by symbolic fill estimate. For large high-work no-BTF
+single-block analyses, `auto` can also try a METIS symbolic before numeric
+factorization and keep it when the symbolic fill score is clearly lower. This
+avoids paying for an AMD numeric factorization only to promote to METIS
+afterward. Dense-diagonal high-degree METIS
 starts ask METIS for two separator attempts, then refine the nested-dissection
 rank order with CAMD inside coarse rank constraints. This preserves the
 separator-first shape while letting minimum degree reduce local fill/flops on
