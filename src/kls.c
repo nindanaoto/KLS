@@ -1944,6 +1944,106 @@ static UF_long augment_numeric_row_match(UF_long n,
   return matched;
 }
 
+static int hopcroft_karp_bfs(UF_long n,
+                             const kls_row_match_graph *graph,
+                             const UF_long *row_perm,
+                             const UF_long *col_match,
+                             UF_long *queue,
+                             UF_long *distance) {
+  const UF_long infinity = UF_long_max;
+  UF_long head = 0;
+  UF_long tail = 0;
+  int found_free_column = 0;
+
+  for (UF_long row = 0; row < n; ++row) {
+    if (row_perm[row] == KLS_KLU_EMPTY) {
+      distance[row] = 0;
+      queue[tail++] = row;
+    } else {
+      distance[row] = infinity;
+    }
+  }
+
+  while (head < tail) {
+    const UF_long row = queue[head++];
+    for (UF_long p = graph->row_ptr[row]; p < graph->row_ptr[row + 1u]; ++p) {
+      const UF_long col = graph->col_idx[p];
+      const UF_long mate = col_match[col];
+      if (mate == KLS_KLU_EMPTY) {
+        found_free_column = 1;
+      } else if (distance[mate] == infinity) {
+        distance[mate] = distance[row] + 1u;
+        queue[tail++] = mate;
+      }
+    }
+  }
+
+  return found_free_column;
+}
+
+static int hopcroft_karp_dfs(UF_long row,
+                             const kls_row_match_graph *graph,
+                             UF_long *row_perm,
+                             UF_long *col_match,
+                             UF_long *distance) {
+  const UF_long infinity = UF_long_max;
+  for (UF_long p = graph->row_ptr[row]; p < graph->row_ptr[row + 1u]; ++p) {
+    const UF_long col = graph->col_idx[p];
+    const UF_long mate = col_match[col];
+    if (mate == KLS_KLU_EMPTY ||
+        (distance[mate] == distance[row] + 1u &&
+         hopcroft_karp_dfs(mate, graph, row_perm, col_match, distance))) {
+      row_perm[row] = col;
+      col_match[col] = row;
+      return 1;
+    }
+  }
+  distance[row] = infinity;
+  return 0;
+}
+
+static UF_long augment_numeric_row_match_layered(UF_long n,
+                                                 const kls_row_match_graph *graph,
+                                                 UF_long *row_perm,
+                                                 UF_long *col_match) {
+  UF_long matched = 0;
+  for (UF_long row = 0; row < n; ++row) {
+    if (row_perm[row] != KLS_KLU_EMPTY) {
+      matched++;
+    }
+  }
+  if (matched == n) {
+    return matched;
+  }
+
+  UF_long *queue = (UF_long *)malloc((size_t)n * sizeof(*queue));
+  UF_long *distance = (UF_long *)malloc((size_t)n * sizeof(*distance));
+  if (queue == NULL || distance == NULL) {
+    free(queue);
+    free(distance);
+    return matched;
+  }
+
+  while (matched < n &&
+         hopcroft_karp_bfs(n, graph, row_perm, col_match, queue, distance)) {
+    UF_long augmented = 0;
+    for (UF_long row = 0; row < n; ++row) {
+      if (row_perm[row] == KLS_KLU_EMPTY &&
+          hopcroft_karp_dfs(row, graph, row_perm, col_match, distance)) {
+        matched++;
+        augmented++;
+      }
+    }
+    if (augmented == 0) {
+      break;
+    }
+  }
+
+  free(queue);
+  free(distance);
+  return matched;
+}
+
 static void improve_numeric_row_match_by_swaps(UF_long n,
                                                const kls_row_match_graph *graph,
                                                UF_long *row_perm,
@@ -2064,7 +2164,12 @@ static int build_greedy_numeric_row_match(UF_long n,
     kls_row_match_graph graph;
     int status = build_row_match_graph(n, entry_count, entries, &graph);
     if (status == KLS_OK) {
-      matched = augment_numeric_row_match(n, &graph, row_perm, col_match);
+      if (n >= 50000u && n - matched >= 1024u) {
+        matched = augment_numeric_row_match_layered(n, &graph, row_perm,
+                                                    col_match);
+      } else {
+        matched = augment_numeric_row_match(n, &graph, row_perm, col_match);
+      }
       if (matched == n) {
         improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
       }

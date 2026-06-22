@@ -81,7 +81,8 @@ design work, not benchmark-specific tuning.
   pattern, checks reused pivots against the selected threshold via L
   multipliers, and falls back to full pivoting factorization if the reused order
   is unsafe.
-- Static pivoting trial: KLS has value-aware greedy row matching and swap
+- Static pivoting trial: KLS has value-aware greedy row matching, layered
+  augmenting-path search for larger weak-diagonal candidates, and swap
   improvement for weak or high-off-diagonal-pivot medium matrices. It can also
   trial matching-derived row/column equilibration and keeps the transformed
   candidate only when numeric quality and cost evidence justify it. The
@@ -280,6 +281,20 @@ Rajat cases' off-diagonal pivots to 1-3. KLS is still much slower than CKTSO on
 these cases, so this is a partial static-pivoting improvement rather than a
 replacement for full MC64-style matching/scaling or a faster KLS-owned numeric
 kernel.
+
+The large-matrix static row-matching augment was then changed from one
+independent breadth-first search per unmatched row to a Hopcroft-Karp-style
+layered augment. This is a retained MC64-adjacent improvement to the existing
+greedy matcher, not full weighted MC64 dual scaling. It improved the AT&T
+`twotone` paper case in a same-session focused run from about 273s to about
+124s on the 100-step SPICE-cycle estimate by finding a lower-fill static row
+permutation, while leaving `onetone1`, `onetone2`, and the large Rajat static
+cases essentially neutral. The 25-matrix extended suite still passed, with a
+geomean of about 0.04409s versus about 0.04421s for the previous mainline run.
+A prototype greedy-plus-layered perfect matching for `mac_econ_fwd500` reduced
+matched-METIS refactor time from about 22s to about 16s, but that remained far
+behind the CKTSO artifact at about 2.5s, so the `mac_econ_fwd500` gate was not
+widened.
 
 After expanding the paper-medium corpus with the public CKTSO ordering
 supplement cases, the post-factor METIS promotion gate was widened for small
