@@ -67,8 +67,10 @@ design work, not benchmark-specific tuning.
   starts directly with METIS for narrow large-diagonal structural classes from
   the paper corpus: very low-degree full diagonals, sparse full diagonals with
   bounded but meaningful row/column degree, and nearly full diagonals with a
-  large dense degree spike. This preserves the papers' nested-dissection
-  motivation without naming individual matrices.
+  large dense degree spike. Medium spiked low-diagonal patterns with a large
+  row/column degree spike also start directly with METIS and no scaling for
+  TSOPF-style power-grid structures. This preserves the papers'
+  nested-dissection motivation without naming individual matrices.
 - Constrained nested-dissection refinement: KLS can refine METIS rank groups
   with CAMD constraints, preserving nested-dissection rank shape while reducing
   local fill and flops.
@@ -291,6 +293,18 @@ medium suite, improving the 87-common-row KLS geomean from about 0.333s to
 0.322s and the common KLS/CKTSO ratio from about 1.48x to 1.43x. Guard cases
 with no off-diagonal pivot pressure, BTF disabled, or many BTF blocks stayed on
 the existing AMD path.
+
+A medium spiked low-diagonal structural METIS start was retained for the large
+TSOPF-style paper case. The rule requires a 50k-120k order matrix, about 20-32
+entries per column on average, a 20-35% diagonal fraction, no empty rows, and
+one large row/column degree spike covering about 40-60% of the matrix. It starts
+with METIS and no scaling while keeping BTF enabled. This rescued
+`TSOPF_FS_b39_c19` from the 120s per-process timeout and produced a
+SPICE-cycle estimate of about 568s versus the existing CKTSO artifact at about
+603s. Smaller TSOPF/QY guard cases retained their previous policies, and the
+25-matrix extended suite still passed. The large `ss1` and `mac_econ_fwd500`
+paper cases remain unresolved and still need a more general numeric/symbolic
+improvement rather than a broader benchmark-specific dispatch rule.
 
 ## Recommended General Work
 
