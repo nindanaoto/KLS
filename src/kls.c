@@ -2261,9 +2261,13 @@ static UF_long count_weak_diagonal_rows(UF_long n,
                                         const UF_long *col_ptr,
                                         const UF_long *row_idx,
                                         const double *values,
-                                        double tolerance) {
+                                        double tolerance,
+                                        UF_long *missing_diagonal_out) {
   double *row_max = (double *)calloc((size_t)n, sizeof(*row_max));
   double *diag = (double *)calloc((size_t)n, sizeof(*diag));
+  if (missing_diagonal_out != NULL) {
+    *missing_diagonal_out = 0;
+  }
   if (row_max == NULL || diag == NULL) {
     free(row_max);
     free(diag);
@@ -2287,10 +2291,17 @@ static UF_long count_weak_diagonal_rows(UF_long n,
   }
 
   UF_long weak = 0;
+  UF_long missing = 0;
   for (UF_long row = 0; row < n; ++row) {
+    if (diag[row] == 0.0) {
+      missing++;
+    }
     if (row_max[row] > 0.0 && diag[row] < tolerance * row_max[row]) {
       weak++;
     }
+  }
+  if (missing_diagonal_out != NULL) {
+    *missing_diagonal_out = missing;
   }
   free(row_max);
   free(diag);
@@ -2608,13 +2619,22 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     free_candidate(&normal);
   }
 
+  UF_long missing_diagonal = 0;
   const UF_long weak =
     count_weak_diagonal_rows(solver->n, base_col_ptr, base_row_idx,
-                             base_values, solver->common.tol);
-  if (weak * 2u < solver->n) {
-    goto done;
-  }
-  if (!small_candidate && weak < 5000) {
+                             base_values, solver->common.tol,
+                             &missing_diagonal);
+  if (!small_candidate) {
+    const int majority_weak = weak * 2u >= solver->n && weak >= 5000;
+    const int partial_weak =
+      solver->n >= 80000 && solver->n <= 100000 &&
+      solver->nnz <= 1000000 &&
+      missing_diagonal * 100u <= 3u * solver->n &&
+      weak >= 2000 && weak * 100u >= solver->n;
+    if (!majority_weak && !partial_weak) {
+      goto done;
+    }
+  } else if (weak * 2u < solver->n) {
     goto done;
   }
 

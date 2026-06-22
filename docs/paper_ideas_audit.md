@@ -73,9 +73,10 @@ design work, not benchmark-specific tuning.
   trial matching-derived row/column equilibration and keeps the transformed
   candidate only when numeric quality and cost evidence justify it. The
   pre-factor static-pivoting gate also covers moderately sized matrices whose
-  input values show a majority of weak or missing diagonal entries, which
-  targets the frequency-domain circuit cases used in the NICSLU paper without
-  naming individual benchmarks.
+  input values show a majority of weak or missing diagonal entries, plus
+  medium-large mostly diagonal matrices with thousands of weak diagonal rows.
+  These are general numeric-structure rules used by the frequency-domain and
+  Rajat-family paper cases without naming individual benchmarks.
 - Initial KLS-owned parallelism: repeated refactorization can run across
   independent BTF diagonal blocks for large high-flop cases where the block work
   is wide enough to offset thread overhead. The threaded path keeps a persistent
@@ -245,6 +246,17 @@ cover the AT&T `twotone` scale as well; `twotone` now completes the paper-medium
 suite run and selects static pivoting, reducing off-diagonal pivots from about
 9500 to about 1600. A still-broader attempt to cover `mac_econ_fwd500` scale
 was not retained because it timed out with multi-GB memory use.
+
+The same pre-factor static row-matching gate was then extended to
+medium-large mostly diagonal matrices with thousands of weak diagonal rows and
+very few missing diagonals. This retained a structural diagonal-completeness
+guard, so earlier Rajat-family cases with fewer weak diagonals remain on the
+normal dynamic-pivot path. On the paper-medium corpus, the retained gate
+improved the KLS geomean from about 1.57s to 1.51s and reduced the affected
+Rajat cases' off-diagonal pivots to 1-3. KLS is still much slower than CKTSO on
+these cases, so this is a partial static-pivoting improvement rather than a
+replacement for full MC64-style matching/scaling or a faster KLS-owned numeric
+kernel.
 
 ## Recommended General Work
 
