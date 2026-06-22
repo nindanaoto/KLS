@@ -2323,6 +2323,26 @@ static int btf_dominant_block_retry_shape_is_allowed(
   return 1;
 }
 
+static int btf_inflated_many_block_retry_shape_is_allowed(
+  UF_long n,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (symbolic == NULL || symbolic->nblocks < 1024 || n < 100000 ||
+      symbolic->maxblock == 0) {
+    return 0;
+  }
+
+  if (symbolic->maxblock < (UF_long)(0.80 * (double)n) ||
+      symbolic->maxblock >= (UF_long)(0.95 * (double)n)) {
+    return 0;
+  }
+
+  if (symbolic->est_flops > 0.0 && symbolic->est_flops < 1.0e8) {
+    return 0;
+  }
+
+  return 1;
+}
+
 static void maybe_retry_without_btf(UF_long n,
                                     UF_long *col_ptr,
                                     UF_long *row_idx,
@@ -2330,17 +2350,20 @@ static void maybe_retry_without_btf(UF_long n,
                                     kls_ordering ordering,
                                     trilinos_klu_l_symbolic **symbolic,
                                     trilinos_klu_l_common *common,
-                                    double *score) {
+                                    double *score,
+                                    int allow_single_block) {
   if (options == NULL || !options->use_btf || n < 20000 || symbolic == NULL ||
       *symbolic == NULL || common == NULL || score == NULL) {
     return;
   }
 
   const int single_block =
-    (*symbolic)->nblocks == 1 && (*symbolic)->maxblock == n;
+    allow_single_block && (*symbolic)->nblocks == 1 && (*symbolic)->maxblock == n;
   const int dominant_block =
     btf_dominant_block_retry_shape_is_allowed(n, *symbolic);
-  if (!single_block && !dominant_block) {
+  const int inflated_many_block =
+    btf_inflated_many_block_retry_shape_is_allowed(n, *symbolic);
+  if (!single_block && !dominant_block && !inflated_many_block) {
     return;
   }
 
@@ -2358,7 +2381,9 @@ static void maybe_retry_without_btf(UF_long n,
   const double current_score = *score;
   if ((single_block && no_btf_score <= 1.02 * current_score) ||
       (dominant_block && isfinite(current_score) && isfinite(no_btf_score) &&
-       no_btf_score <= 0.80 * current_score)) {
+       no_btf_score <= 0.80 * current_score) ||
+      (inflated_many_block && isfinite(current_score) &&
+       isfinite(no_btf_score) && no_btf_score <= 0.50 * current_score)) {
     trilinos_klu_l_free_symbolic(symbolic, common);
     *symbolic = no_btf_symbolic;
     *common = no_btf_common;
@@ -5644,7 +5669,11 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        common_out);
     if (status == KLS_OK) {
       *selected_ordering_out = KLS_ORDERING_METIS;
-      *score_out = symbolic_score(*symbolic_out);
+      double selected_score = symbolic_score(*symbolic_out);
+      maybe_retry_without_btf(n, col_ptr, row_idx, options,
+                              KLS_ORDERING_METIS, symbolic_out, common_out,
+                              &selected_score, 0);
+      *score_out = selected_score;
       return KLS_OK;
     }
   }
@@ -5672,7 +5701,11 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        common_out);
     if (status == KLS_OK) {
       *selected_ordering_out = KLS_ORDERING_METIS;
-      *score_out = symbolic_score(*symbolic_out);
+      double selected_score = symbolic_score(*symbolic_out);
+      maybe_retry_without_btf(n, col_ptr, row_idx, symbolic_options,
+                              KLS_ORDERING_METIS, symbolic_out, common_out,
+                              &selected_score, 0);
+      *score_out = selected_score;
       return KLS_OK;
     }
   }
@@ -5697,7 +5730,7 @@ static int choose_symbolic_for_pattern(UF_long n,
     double selected_score = score;
     maybe_retry_without_btf(n, col_ptr, row_idx, symbolic_options,
                             candidates[i], &candidate_symbolic,
-                            &candidate_common, &selected_score);
+                            &candidate_common, &selected_score, 1);
     if (!any_ok || selected_score < best_score) {
       if (best_symbolic != NULL) {
         trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
@@ -5732,7 +5765,10 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        KLS_ORDERING_METIS, &metis_symbolic,
                                        &metis_common);
     if (status == KLS_OK) {
-      const double metis_score = symbolic_score(metis_symbolic);
+      double metis_score = symbolic_score(metis_symbolic);
+      maybe_retry_without_btf(n, col_ptr, row_idx, &metis_options,
+                              KLS_ORDERING_METIS, &metis_symbolic,
+                              &metis_common, &metis_score, 0);
       if (isfinite(metis_score) && metis_score <= 0.90 * best_score) {
         trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
         best_symbolic = metis_symbolic;

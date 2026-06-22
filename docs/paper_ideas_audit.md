@@ -91,11 +91,13 @@ design work, not benchmark-specific tuning.
   retry no-BTF symbolic analysis for structural cases where BTF is not useful,
   and promote expensive numeric factorizations to METIS when actual fill/flop
   evidence is better. The no-BTF retry covers both single-block BTF analyses
-  and large dominant-block BTF analyses when the stripped fringe is small and
-  the no-BTF symbolic estimate is materially better, matching KLU's warning
-  that BTF can occasionally increase factor fill. Low-work dominant-BTF cases
-  are excluded from this retry because keeping BTF is cheaper when the symbolic
-  work estimate is already low. The METIS promotion gate also
+  and large dominant-block BTF analyses when the stripped fringe is small; it
+  also covers many-block analyses whose large block leaves an inflated symbolic
+  estimate and whose no-BTF retry cuts the symbolic score at least in half,
+  matching KLU's warning that BTF can occasionally increase factor fill.
+  Low-work dominant-BTF cases are excluded from this retry because keeping BTF
+  is cheaper when the symbolic work estimate is already low. The METIS promotion
+  gate also
   covers small BTF-dominant matrices when the first factorization shows many
   off-diagonal pivots and high actual fill/flop growth, and preserves the
   selected BTF/no-BTF mode when comparing a METIS promotion candidate. KLS also
@@ -350,6 +352,24 @@ rescued the KLU-paper `Raj1` and `rajat24` cases from timeout/missing status
 under the paper-medium run while keeping ASIC-style dominant-block cases on BTF.
 The METIS promotion trial was also fixed to preserve the selected BTF/no-BTF
 mode, which lets `Raj1` promote from no-BTF AMD to no-BTF METIS.
+
+The retry was later extended only for many-block BTF analyses with a large but
+not overwhelming dominant block. This targets cases like the IPSO HTC matrices,
+where BTF created about 29k blocks but still left an 87% dominant block and a
+much larger symbolic estimate than the no-BTF structure. The retained gate
+requires at least 1024 BTF blocks, at least 100k rows, a largest block covering
+80-95% of the matrix, no low symbolic-work estimate, and a no-BTF symbolic score
+at most half of the BTF score. The METIS-started auto path now runs this strict
+retry before returning; it still skips the older single-block retry to avoid
+extra symbolic work on already-good METIS/BTF single-block cases. In same-session
+checks, `HTC_336_4438` moved from the saved METIS/BTF scale-1 path
+(`initial=13.14s`, `refactor=0.082s`) to METIS/no-BTF no-scale
+(`initial=3.52s`, `refactor=0.103s`), while `HTC_336_9129` moved from
+`initial=8.37s` to `1.93s`. Guard cases kept their earlier BTF decisions:
+`G2_circuit` remained METIS/BTF, `transient` and `power197k` remained AMD/BTF,
+and `ASIC_680ks` remained METIS/BTF. A parallel SCOTCH sweep did not justify an
+auto SCOTCH policy: it was much slower than METIS on `rajat30` and `nxp1`, and
+mixed or worse on `G2_circuit`, `transient`, and `power197k`.
 
 The pre-factor static row-matching path was also tested without the augmenting
 and swap-improvement pass, leaving only the initial greedy maximum-value

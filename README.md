@@ -235,11 +235,14 @@ checks.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF
-for large matrices where BTF finds either a single block or one dominant block
-with a small fringe, and a no-BTF symbolic retry gives enough evidence to keep
-or improve the fill estimate. The retry is skipped for low-work dominant-BTF
-patterns where keeping the decomposition is already the cheaper SPICE-cycle
-choice. For large, low-degree, nearly
+for large matrices where BTF finds a single block, one dominant block with a
+small fringe, or a many-block decomposition whose large block produces an
+inflated symbolic estimate, and a no-BTF symbolic retry gives enough evidence to
+keep or improve the fill estimate. METIS-started auto paths skip the single-block
+retry and only use the stricter dominant/inflated-block retries, avoiding extra
+symbolic work on already-good single-block circuit cases. The retry is skipped
+for low-work dominant-BTF patterns where keeping the decomposition is already the
+cheaper SPICE-cycle choice. For large, low-degree, nearly
 diagonal patterns, medium low-degree full-diagonal patterns, medium sparse
 high-degree mostly diagonal patterns, and for METIS-started medium
 dense-diagonal high-degree patterns, `auto` can also start without BTF to avoid
