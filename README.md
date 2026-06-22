@@ -56,6 +56,19 @@ cmake -S . -B build -DKLS_USE_SYSTEM_SCOTCH=ON
 A static system SCOTCH build may also require `scotcherr`; pass
 `KLS_SYSTEM_SCOTCHERR_LIBRARY` if it is not discoverable.
 
+KLS can optionally link to a compatible external SPRAL install for BSD-licensed
+auction matching support:
+
+```sh
+cmake -S . -B build -DKLS_ENABLE_SPRAL_SCALING=ON \
+  -DKLS_SYSTEM_SPRAL_INCLUDE_DIR=/path/to/spral/include \
+  -DKLS_SYSTEM_SPRAL_LIBRARY=/path/to/libspral.so
+```
+
+This is not a solver backend and is not enabled by default. KLS uses it only
+as a large-matrix fallback when the in-tree static matcher is far below the
+normal cardinality acceptance threshold.
+
 ## Benchmark
 
 ```sh
@@ -154,9 +167,9 @@ row permutation but prefer unscaled values, avoiding matching-equilibration
 setup when it would increase fill. Benchmark JSON reports both whether static
 pivoting was enabled, whether KLS selected it, and whether the accepted static
 match used exact assignment. KLS does not vendor HSL MC64 or the MC64 copies
-carried by some solver projects; future MC64-equivalent code must be
-LGPL-compatible, for example BSD-licensed SPRAL-derived scaling/matching code
-or independent KLS code.
+carried by some solver projects. Optional SPRAL auction matching can be linked
+from a compatible external install; otherwise MC64-equivalent code must be
+LGPL-compatible in-tree KLS code.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF

@@ -35,7 +35,9 @@ new KLS-owned symbolic/numeric machinery:
 
 - Production-scale MC64-equivalent maximum-weight matching with dual
   row/column scaling, using only LGPL-compatible sources such as independent
-  KLS code or BSD-licensed SPRAL-derived code. HSL MC64 and non-redistributable
+  KLS code or BSD-licensed SPRAL-derived code. KLS can optionally link to an
+  external SPRAL install for auction matching fallback, but this is not the
+  retained production MC64-equivalent path. HSL MC64 and non-redistributable
   MC64 copies are out of scope for vendoring.
 - Persistent EGraph/ETree or separator-tree metadata for intra-block parallel
   factor/refactor scheduling.
@@ -488,6 +490,16 @@ lesson is that maximum-product matching alone is too expensive to use as a
 medium/large default; KLS still needs MC64-quality scaling and acceptance plus
 a more optimized assignment implementation before this can close the CKTSO
 gap.
+
+An optional system-SPRAL hook was then added for BSD-licensed auction matching
+support. It is deliberately not a default dependency and not a solver backend:
+KLS calls it only for large static-pivot candidates where the in-tree
+cardinality matcher is thousands of rows short and below the normal acceptance
+threshold. Medium representative checks with a Release SPRAL-enabled build
+left `gemat12` and `onetone2` on the in-tree path with the same pivot/fill
+choices. This keeps a license-compatible MC64-adjacent source available for
+hard structural-deficit cases without letting approximate auction matching
+replace already accepted KLS row matchings.
 
 The fast-factor pivot-check path was then made more diagnostic by recording the
 first rejected factor-order pivot and original matrix column in `kls_stats` and

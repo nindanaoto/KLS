@@ -13,6 +13,7 @@ option(KLS_ENABLE_METIS "Enable METIS nested-dissection ordering support" ON)
 option(KLS_USE_SYSTEM_METIS "Use a system METIS library instead of the bundled submodule" OFF)
 option(KLS_ENABLE_SCOTCH "Enable SCOTCH nested-dissection ordering support" ON)
 option(KLS_USE_SYSTEM_SCOTCH "Use a system SCOTCH library instead of the bundled submodule" OFF)
+option(KLS_ENABLE_SPRAL_SCALING "Enable optional SPRAL matching/scaling support" OFF)
 set(CKTSO_ROOT "" CACHE PATH "Path to a local CKTSO distribution")
 set(KLU2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/amesos2/src/KLU2" CACHE PATH "Path to a Trilinos Amesos2 KLU2 source directory")
 set(TEUCHOS_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/rol/src/compatibility/teuchos-lite" CACHE PATH "Path to Trilinos Teuchos-compatible headers for KLU2")
@@ -21,6 +22,8 @@ set(KLS_SYSTEM_METIS_LIBRARY "" CACHE FILEPATH "Path to a system METIS library")
 set(KLS_SYSTEM_SCOTCH_INCLUDE_DIR "" CACHE PATH "Path to a system SCOTCH include directory")
 set(KLS_SYSTEM_SCOTCH_LIBRARY "" CACHE FILEPATH "Path to a system SCOTCH library")
 set(KLS_SYSTEM_SCOTCHERR_LIBRARY "" CACHE FILEPATH "Path to an optional system SCOTCH error library")
+set(KLS_SYSTEM_SPRAL_INCLUDE_DIR "" CACHE PATH "Path to a system SPRAL include directory")
+set(KLS_SYSTEM_SPRAL_LIBRARY "" CACHE FILEPATH "Path to a system SPRAL library")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -191,6 +194,31 @@ if(KLS_ENABLE_SCOTCH)
   endif()
 endif()
 
+if(KLS_ENABLE_SPRAL_SCALING)
+  find_path(KLS_SYSTEM_SPRAL_INCLUDE_DIR
+    NAMES spral_scaling.h
+    PATHS ${KLS_SYSTEM_SPRAL_INCLUDE_DIR})
+  find_library(KLS_SYSTEM_SPRAL_LIBRARY
+    NAMES spral
+    PATHS ${KLS_SYSTEM_SPRAL_LIBRARY})
+  if(NOT KLS_SYSTEM_SPRAL_INCLUDE_DIR OR NOT KLS_SYSTEM_SPRAL_LIBRARY)
+    message(FATAL_ERROR
+      "KLS_ENABLE_SPRAL_SCALING=ON requires KLS_SYSTEM_SPRAL_INCLUDE_DIR "
+      "and KLS_SYSTEM_SPRAL_LIBRARY, or a discoverable system SPRAL install")
+  endif()
+
+  add_library(kls_spral_scaling INTERFACE)
+  target_include_directories(kls_spral_scaling
+    INTERFACE
+      "${KLS_SYSTEM_SPRAL_INCLUDE_DIR}")
+  target_link_libraries(kls_spral_scaling
+    INTERFACE
+      "${KLS_SYSTEM_SPRAL_LIBRARY}")
+  target_compile_definitions(kls_spral_scaling
+    INTERFACE
+      KLS_HAVE_SPRAL_SCALING=1)
+endif()
+
 set(KLS_SUITESPARSE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse")
 set(KLS_SUITESPARSE_INCLUDE_DIRS
   "${KLS_SUITESPARSE_ROOT}/KLU/Include"
@@ -310,6 +338,11 @@ if(KLS_ENABLE_SCOTCH)
   target_link_libraries(kls
     PRIVATE
       kls_scotch)
+endif()
+if(KLS_ENABLE_SPRAL_SCALING)
+  target_link_libraries(kls
+    PRIVATE
+      kls_spral_scaling)
 endif()
 
 target_compile_options(kls PRIVATE

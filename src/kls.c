@@ -15,6 +15,9 @@
 #ifdef KLS_HAVE_SCOTCH
 #include "scotch.h"
 #endif
+#ifdef KLS_HAVE_SPRAL_SCALING
+#include "spral_scaling.h"
+#endif
 
 #include <errno.h>
 #include <float.h>
@@ -3088,6 +3091,130 @@ static void improve_numeric_row_match_by_paths(UF_long n,
   free(current_weight);
 }
 
+#ifdef KLS_HAVE_SPRAL_SCALING
+static int build_spral_auction_row_match(UF_long n,
+                                         UF_long nnz,
+                                         const UF_long *col_ptr,
+                                         const UF_long *row_idx,
+                                         const double *numeric_values,
+                                         UF_long **row_perm_out,
+                                         UF_long *matched_out) {
+  if (n <= 0 || nnz <= 0 || col_ptr == NULL || row_idx == NULL ||
+      numeric_values == NULL || row_perm_out == NULL ||
+      matched_out == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  *row_perm_out = NULL;
+  *matched_out = 0;
+  if (n > (UF_long)INT_MAX) {
+    return KLS_ERR_UNSUPPORTED;
+  }
+
+  int64_t *spral_col_ptr =
+    (int64_t *)malloc(((size_t)n + 1u) * sizeof(*spral_col_ptr));
+  int *spral_row_idx = (int *)malloc((size_t)nnz * sizeof(*spral_row_idx));
+  int *spral_match = (int *)malloc((size_t)n * sizeof(*spral_match));
+  double *row_scale = (double *)malloc((size_t)n * sizeof(*row_scale));
+  double *col_scale = (double *)malloc((size_t)n * sizeof(*col_scale));
+  UF_long *row_perm = (UF_long *)malloc((size_t)n * sizeof(*row_perm));
+  UF_long *col_match = (UF_long *)malloc((size_t)n * sizeof(*col_match));
+  if (spral_col_ptr == NULL || spral_row_idx == NULL ||
+      spral_match == NULL || row_scale == NULL || col_scale == NULL ||
+      row_perm == NULL || col_match == NULL) {
+    free(spral_col_ptr);
+    free(spral_row_idx);
+    free(spral_match);
+    free(row_scale);
+    free(col_scale);
+    free(row_perm);
+    free(col_match);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+
+  for (UF_long col = 0; col <= n; ++col) {
+    if (col_ptr[col] > (UF_long)INT64_MAX) {
+      free(spral_col_ptr);
+      free(spral_row_idx);
+      free(spral_match);
+      free(row_scale);
+      free(col_scale);
+      free(row_perm);
+      free(col_match);
+      return KLS_ERR_UNSUPPORTED;
+    }
+    spral_col_ptr[col] = (int64_t)col_ptr[col];
+  }
+  for (UF_long p = 0; p < nnz; ++p) {
+    if (row_idx[p] >= n || row_idx[p] > (UF_long)INT_MAX) {
+      free(spral_col_ptr);
+      free(spral_row_idx);
+      free(spral_match);
+      free(row_scale);
+      free(col_scale);
+      free(row_perm);
+      free(col_match);
+      return KLS_ERR_UNSUPPORTED;
+    }
+    spral_row_idx[p] = (int)row_idx[p];
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    row_perm[i] = KLS_KLU_EMPTY;
+    col_match[i] = KLS_KLU_EMPTY;
+  }
+
+  struct spral_scaling_auction_options options;
+  struct spral_scaling_auction_inform inform;
+  spral_scaling_auction_default_options(&options);
+  options.array_base = 0;
+  spral_scaling_auction_unsym_long((int)n, (int)n, spral_col_ptr,
+                                   spral_row_idx, numeric_values,
+                                   row_scale, col_scale, spral_match,
+                                   &options, &inform);
+
+  free(spral_col_ptr);
+  free(spral_row_idx);
+  free(row_scale);
+  free(col_scale);
+  if (inform.flag < 0) {
+    free(spral_match);
+    free(row_perm);
+    free(col_match);
+    return inform.flag == -1 ? KLS_ERR_OUT_OF_MEMORY : KLS_ERR_UNSUPPORTED;
+  }
+
+  UF_long matched = 0;
+  for (UF_long row = 0; row < n; ++row) {
+    const int col_int = spral_match[row];
+    if (col_int < 0 || col_int >= (int)n) {
+      continue;
+    }
+    const UF_long col = (UF_long)col_int;
+    if (col_match[col] != KLS_KLU_EMPTY) {
+      free(spral_match);
+      free(row_perm);
+      free(col_match);
+      return KLS_ERR_UNSUPPORTED;
+    }
+    row_perm[row] = col;
+    col_match[col] = row;
+    matched++;
+  }
+  free(spral_match);
+
+  const int complete_status =
+    complete_unmatched_row_match(n, row_perm, col_match);
+  free(col_match);
+  if (complete_status != KLS_OK) {
+    free(row_perm);
+    return complete_status;
+  }
+
+  *row_perm_out = row_perm;
+  *matched_out = matched;
+  return KLS_OK;
+}
+#endif
+
 static int build_greedy_numeric_row_match(UF_long n,
                                           UF_long nnz,
                                           const UF_long *col_ptr,
@@ -3204,6 +3331,48 @@ static int build_greedy_numeric_row_match(UF_long n,
       return status;
     }
   }
+
+#ifdef KLS_HAVE_SPRAL_SCALING
+  if (improve_matching && n >= 200000u && n - matched >= 4096u &&
+      1000.0 * (double)matched < 995.0 * (double)n) {
+    UF_long *spral_row_perm = NULL;
+    UF_long spral_matched = 0;
+    const int spral_status =
+      build_spral_auction_row_match(n, nnz, col_ptr, row_idx, numeric_values,
+                                    &spral_row_perm, &spral_matched);
+    if (spral_status == KLS_OK) {
+      if (spral_matched > matched) {
+        free(row_perm);
+        row_perm = spral_row_perm;
+        matched = spral_matched;
+        for (UF_long col = 0; col < n; ++col) {
+          col_match[col] = KLS_KLU_EMPTY;
+        }
+        for (UF_long row = 0; row < n; ++row) {
+          const UF_long col = row_perm[row];
+          if (col >= n || col_match[col] != KLS_KLU_EMPTY) {
+            free(entries);
+            free(row_perm);
+            free(col_match);
+            free(row_used);
+            free(col_used);
+            return KLS_ERR_INVALID_ARGUMENT;
+          }
+          col_match[col] = row;
+        }
+      } else {
+        free(spral_row_perm);
+      }
+    } else if (spral_status == KLS_ERR_OUT_OF_MEMORY) {
+      free(entries);
+      free(row_perm);
+      free(col_match);
+      free(row_used);
+      free(col_used);
+      return spral_status;
+    }
+  }
+#endif
 
   const int complete_status =
     complete_unmatched_row_match(n, row_perm, col_match);
