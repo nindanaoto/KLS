@@ -950,6 +950,17 @@ EGraph levels and reduced repeated refactor from about 0.18s to about
 `onetone2` stayed below the work threshold with zero schedule metrics, `rajat28`
 remained excluded, and `twotone` stayed on the large-heavy EGraph path.
 
+The high-coverage dominant-BTF schedule floor was then lowered separately from
+the 85-95% medium-heavy branch. The retained rule still requires at least
+`2e8` actual factor flops before building EGraph metadata and at least `1e8`
+computed dependency work before the consumer runs. This activates a lower-work
+95%+ dominant-block case without reopening the rejected Rajat class: `transient`
+built 807 EGraph levels and reduced repeated refactor from about 0.057s to about
+0.024s, cutting the focused SPICE-cycle estimate from about 7.0s to about
+3.8s. `onetone2` remained below the `2e8` factor-work floor with zero schedule
+metrics, `rajat28` remained excluded, `onetone1` stayed on the medium-heavy
+EGraph branch, and `ASIC_320k` stayed on the existing high-coverage path.
+
 The EGraph worker launch path was also retried with a solver-owned persistent
 worker/scratch pool, analogous to the retained BTF refactor pool. This was
 removed before commit because it was not a general win after the cluster

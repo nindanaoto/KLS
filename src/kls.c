@@ -7461,7 +7461,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   if (!single_block && !dominant_btf) {
     return 0;
   }
-  const double min_dependency_work = dominant_btf ? 2.5e8 : 1.0e9;
+  const double min_dependency_work = dominant_btf ? 1.0e8 : 1.0e9;
   if (solver->refactor_dependency_work < min_dependency_work) {
     return 0;
   }
@@ -7877,7 +7877,7 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
     return 0;
   }
   if (dominant_btf) {
-    return solver->common.flops >= 5.0e8;
+    return solver->common.flops >= 2.0e8;
   }
   if (solver->common.flops >= 1.0e9) {
     return 1;

@@ -143,12 +143,14 @@ at least 100k rows, covers at least 85% of the matrix, and has high actual
 factor work. A medium-heavy class covers smaller dominant blocks when coverage is
 between 85% and 95%, the largest block has at least 30k rows, and actual factor
 work is high enough; this excludes the previously rejected 95% Rajat class. The
-path updates that block's local LU and off-block entries while leaving ordinary
-many-block BTF cases on the existing worker-pool path. For large cases that use
-KLU row scaling, the same path recomputes the row scale factors, divides the
-mapped entries by the unpermuted row scales, and then permutes `Rs` back to pivot
-order after the refactor. Small cases and non-dominant BTF cases still use the
-existing mapped or BTF-worker paths.
+schedule floor is lower for 95%+ dominant-block cases whose measured factor work
+is modest but whose dependency graph still has enough independent work to consume
+the threaded EGraph path. The path updates that block's local LU and off-block
+entries while leaving ordinary many-block BTF cases on the existing worker-pool
+path. For large cases that use KLU row scaling, the same path recomputes the row
+scale factors, divides the mapped entries by the unpermuted row scales, and then
+permutes `Rs` back to pivot order after the refactor. Small cases and
+non-dominant BTF cases still use the existing mapped or BTF-worker paths.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium
