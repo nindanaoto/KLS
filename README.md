@@ -122,7 +122,10 @@ step. For threaded runs, KLS also records the exact no-pivot refactor EGraph
 level schedule from the numeric U pattern; this metadata is exposed in
 benchmark output and is used by a guarded large unscaled single-block
 level-sliced refactor path when there is enough dependency work and level
-width to offset thread and scratch overhead. Barriered cluster levels are split
+width to offset thread and scratch overhead. KLS only builds this schedule for
+single-block or dominant-block shapes with enough numeric work to consume it;
+ordinary many-block BTF and low-work dominant-BTF cases skip the setup and stay
+on their existing refactor paths. Barriered cluster levels are split
 by KLS's per-column no-pivot work estimate instead of equal column counts, and
 above the CKTSO-style split level KLS can switch to a no-pivot pipeline tail
 that waits only for actual U-pattern predecessors. This avoids thousands of

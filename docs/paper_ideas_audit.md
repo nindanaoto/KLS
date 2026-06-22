@@ -172,7 +172,10 @@ design work, not benchmark-specific tuning.
   then switch to a no-pivot pipeline tail where each worker waits only for
   actual U-pattern predecessors. The same block-aware EGraph kernel can run
   inside a large dominant BTF block and update Offx for entries above that
-  block, while non-dominant many-block BTF cases stay on the BTF worker pool.
+  block. Schedule construction is now limited to single-block or dominant-BTF
+  shapes with enough numeric work to consume it, while non-dominant many-block
+  BTF and low-work dominant-BTF cases skip the setup and stay on the BTF worker
+  pool or mapped refactor paths.
   This is still narrower than CKTSO's production pivoting machinery, but it is
   the first retained intra-block EGraph cluster/pipeline refactor path.
 - SPICE-cycle orientation policy: KLS can analyze normal and transposed storage
@@ -746,6 +749,18 @@ from the saved about 89.6s to about 78.9s, and `rajat30` moved from about
 49.2s to about 42.4s. The low-work dominant-BTF guard stayed on `rajat29`, and
 the many-block BTF guard stayed on `ASIC_680k`, so this is a general
 symbolic-cost improvement rather than a benchmark-name policy.
+
+EGraph schedule construction was then tightened to the same structural class
+as the retained EGraph consumer. KLS had been building dependency-level
+metadata for many-block and low-work BTF cases that could not use the
+cluster/pipeline path, including `ASIC_680k` and the retained `rajat29`
+low-work dominant-BTF policy. The new gate keeps schedules for high-work
+single-block cases such as `nxp1` and `rajat30`, but skips them for the BTF
+worker-pool and low-work mapped paths. Same-session checks showed schedule
+metrics dropping to zero for `ASIC_680k` and `rajat29`, with `ASIC_680k`
+initial factor/setup moving from about 1.59s to about 1.54s and `rajat29`
+from about 0.26s to about 0.24s, while the high-work EGraph guards retained
+their schedule metadata.
 
 A CKTSO-style dynamic atomic assignment prototype for the EGraph pipeline tail
 was tested and rejected. It replaced the static per-thread tail stride with a

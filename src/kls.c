@@ -7528,8 +7528,18 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
       solver->numeric->LUbx == NULL || solver->symbolic->R == NULL) {
     return 0;
   }
-  return solver->common.flops >= 1.0e7 ||
-         (solver->numeric->unz + solver->numeric->lnz) >= 500000u;
+  const int single_block = solver->symbolic->nblocks == 1u;
+  const int dominant_btf =
+    solver->symbolic->nblocks > 1u &&
+    solver->symbolic->maxblock >= 100000u &&
+    (double)solver->symbolic->maxblock >= 0.75 * (double)solver->n;
+  if (!single_block && !dominant_btf) {
+    return 0;
+  }
+  if (solver->common.flops >= 1.0e9) {
+    return 1;
+  }
+  return (solver->numeric->unz + solver->numeric->lnz) >= 10000000u;
 }
 
 static int kls_build_refactor_schedule(kls_solver *solver) {
