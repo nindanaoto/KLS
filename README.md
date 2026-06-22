@@ -138,7 +138,10 @@ fringe blocks below the EGraph size floor, KLS also keeps repeated refactors on
 the serial mapped path because the BTF worker pool has too little useful
 off-dominant work to amortize synchronization. In the scaled subset of that
 class, KLS recomputes KLU row scales, applies the same fixed input-position map,
-and permutes the scale vector back to pivot order after each refactor. Barriered
+and permutes the scale vector back to pivot order after each refactor. When that
+same many-fringe class has enough measured dependency work, KLS can instead run
+the whole exact EGraph as a no-barrier pipeline: workers claim columns in
+topological order and wait only on actual U-pattern predecessors. Barriered
 cluster levels are split
 by KLS's per-column no-pivot work estimate instead of equal column counts, and
 above the CKTSO-style split level KLS can switch to a no-pivot pipeline tail

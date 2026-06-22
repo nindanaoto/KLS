@@ -152,6 +152,7 @@ typedef struct kls_egraph_refactor_shared {
   atomic_uchar *pipeline_done;
   atomic_ulong next_pipeline_pos;
   UF_long pipeline_pos_end;
+  UF_long cluster_level_count;
   pthread_barrier_t barrier;
 } kls_egraph_refactor_shared;
 
@@ -7462,10 +7463,9 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
   }
   pthread_mutex_unlock(&shared->start_lock);
 
-  UF_long cluster_levels = solver->refactor_level_count;
-  if (shared->pipeline_done != NULL &&
-      solver->refactor_cluster_level_count < solver->refactor_level_count) {
-    cluster_levels = solver->refactor_cluster_level_count;
+  UF_long cluster_levels = shared->cluster_level_count;
+  if (cluster_levels > solver->refactor_level_count) {
+    cluster_levels = solver->refactor_level_count;
   }
 
   for (UF_long level = 0; level < cluster_levels; ++level) {
@@ -7543,6 +7543,23 @@ static int kls_egraph_medium_heavy_dominant_btf_shape(
          solver->common.flops >= 1.5e8;
 }
 
+static int kls_egraph_all_pipeline_dominant_btf_shape(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->nblocks <= 1u || solver->n == 0u) {
+    return 0;
+  }
+  const double coverage =
+    (double)solver->symbolic->maxblock / (double)solver->n;
+  /* Thousands of tiny fringe blocks around one 95%+ block do not amortize
+     BTF block scheduling, but the exact EGraph is wide enough to run without
+     cluster barriers by waiting only on actual U-pattern predecessors. */
+  return coverage >= 0.95 &&
+         solver->symbolic->nblocks >= 1024u &&
+         solver->symbolic->maxblock < 90000u &&
+         solver->common.flops >= 1.0e8;
+}
+
 static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->nblocks <= 1u || solver->n == 0u) {
@@ -7565,6 +7582,9 @@ static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
 }
 
 static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {
+  if (kls_egraph_all_pipeline_dominant_btf_shape(solver)) {
+    return 30000u;
+  }
   if (kls_egraph_medium_heavy_dominant_btf_shape(solver)) {
     return 30000u;
   }
@@ -7582,16 +7602,20 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   }
   const int single_block = solver->symbolic->nblocks == 1u;
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
+  const int all_pipeline_btf =
+    kls_egraph_all_pipeline_dominant_btf_shape(solver);
   const int medium_heavy_btf =
     kls_egraph_medium_heavy_dominant_btf_shape(solver);
   if (solver->n < kls_egraph_refactor_size_floor(solver)) {
     return 0;
   }
-  if (!single_block && !dominant_btf) {
+  if (!single_block && !dominant_btf && !all_pipeline_btf) {
     return 0;
   }
   const double min_dependency_work =
-    dominant_btf ? (medium_heavy_btf ? 8.0e7 : 1.0e8) : 1.5e8;
+    (dominant_btf || all_pipeline_btf)
+      ? (medium_heavy_btf || all_pipeline_btf ? 8.0e7 : 1.0e8)
+      : 1.5e8;
   if (solver->refactor_dependency_work < min_dependency_work) {
     return 0;
   }
@@ -7647,10 +7671,16 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   if (thread_count < 2) {
     return -1;
   }
+  const int all_pipeline =
+    kls_egraph_all_pipeline_dominant_btf_shape(solver);
+  const UF_long cluster_level_count =
+    all_pipeline ? 0u : solver->refactor_cluster_level_count;
   atomic_uchar *pipeline_done = NULL;
-  if (solver->refactor_cluster_level_count < solver->refactor_level_count &&
-      solver->refactor_pipeline_column_count >= (UF_long)(2 * thread_count) &&
-      solver->refactor_pipeline_work >= 0.10 * solver->refactor_dependency_work) {
+  if (all_pipeline ||
+      (solver->refactor_cluster_level_count < solver->refactor_level_count &&
+       solver->refactor_pipeline_column_count >= (UF_long)(2 * thread_count) &&
+       solver->refactor_pipeline_work >=
+         0.10 * solver->refactor_dependency_work)) {
     pipeline_done =
       (atomic_uchar *)malloc((size_t)solver->n * sizeof(*pipeline_done));
     if (pipeline_done != NULL) {
@@ -7673,9 +7703,11 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   atomic_init(&shared.next_pipeline_pos,
               (unsigned long)(pipeline_done != NULL
                                 ? solver->refactor_level_ptr[
-                                    solver->refactor_cluster_level_count]
+                                    cluster_level_count]
                                 : solver->n));
   shared.pipeline_pos_end = solver->n;
+  shared.cluster_level_count =
+    pipeline_done != NULL ? cluster_level_count : solver->refactor_level_count;
   shared.rejected_pivot = KLS_KLU_EMPTY;
   shared.rejected_pivot_col = KLS_KLU_EMPTY;
   shared.numerical_rank = UF_long_max;
@@ -8037,6 +8069,9 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
   }
   const int single_block = solver->symbolic->nblocks == 1u;
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
+  if (kls_egraph_all_pipeline_dominant_btf_shape(solver)) {
+    return solver->common.flops >= 1.0e8;
+  }
   if (!single_block && !dominant_btf) {
     return 0;
   }
@@ -8172,16 +8207,22 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   level_ptr[level_count] = counts[level_count];
   UF_long max_width = 0;
   UF_long cluster_levels = level_count;
+  const int all_pipeline =
+    kls_egraph_all_pipeline_dominant_btf_shape(solver);
   const double cluster_width_limit = 2.0 * (double)solver->options.threads;
   for (UF_long level = 0; level < level_count; ++level) {
     const UF_long width = level_ptr[level + 1u] - level_ptr[level];
     if (width > max_width) {
       max_width = width;
     }
-    if (cluster_levels == level_count &&
+    if (!all_pipeline &&
+        cluster_levels == level_count &&
         (double)width < cluster_width_limit) {
       cluster_levels = level;
     }
+  }
+  if (all_pipeline) {
+    cluster_levels = 0u;
   }
 
   UF_long *next = counts;

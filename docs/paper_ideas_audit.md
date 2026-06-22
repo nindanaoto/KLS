@@ -18,7 +18,10 @@ exact no-pivot EGraph level schedule from the numeric U pattern, and consumes
 that schedule in a guarded cluster/pipeline intra-block refactor path for large
 single-block matrices, including KLU row-scaled cases whose scale factors can
 be recomputed and permuted safely, and inside large dominant BTF blocks whose
-off-block entries can be refreshed from the retained map. The barriered EGraph
+off-block entries can be refreshed from the retained map. A narrow many-fringe
+dominant-BTF shape can also consume the same exact EGraph in an all-pipeline
+mode, avoiding cluster barriers and waiting only on actual U-pattern
+predecessors. The barriered EGraph
 cluster levels now use FLOP-estimated per-thread slices instead of equal column
 slices, and the no-pivot pipeline tail now uses an atomic dynamic work cursor
 instead of static per-thread strides, which are retained pieces of the
@@ -198,6 +201,10 @@ design work, not benchmark-specific tuning.
   limited to single-block or dominant-BTF shapes with enough numeric work to
   consume it, while non-dominant many-block BTF and low-work dominant-BTF cases
   skip the setup and stay on the BTF worker pool or mapped refactor paths.
+  For the high-coverage many-fringe dominant-BTF class below the normal EGraph
+  size floor, KLS can run the whole exact EGraph as an atomic topological
+  pipeline with no cluster barriers. This is a retained SubtreeLU/CKTSO-aligned
+  scheduler improvement for the current fixed-pivot LU storage.
   This is still narrower than CKTSO's production pivoting machinery, but it is
   the first retained intra-block EGraph cluster/pipeline refactor path.
 - SPICE-cycle orientation policy: KLS can analyze normal and transposed storage
@@ -1210,6 +1217,24 @@ previous KLS artifact, with the known singular `bips07_1998` and the known
 is still about `1.28x` slower geomean and `rajat28` remains about `9.3x` slower,
 so this is another small fixed-pattern refactor cleanup rather than the missing
 CKTSO-scale mechanism.
+
+That same many-fringe dominant-BTF class was then revisited using the paper
+idea that cluster barriers can dominate when exact dependencies are already
+known. Instead of lowering the old barriered EGraph gate again, KLS now runs
+this class through an all-pipeline exact-EGraph consumer: workers claim columns
+in topological order and wait only for actual U-pattern predecessors. In the
+current 93-row medium artifact this structural gate selects `rajat20`,
+`rajat25`, and `rajat28`. On the repeat-heavy target set it improved geomean
+SPICE-cycle time by about `1.71x` versus the previous guarded-scaled-map
+artifact, with `rajat20/25/28` each moving to roughly 40% of their prior cycle
+time. The full medium manifest kept the same 90 completed rows and the same
+three failures, improving KLS one-pass geomean from about `0.3372s` to
+`0.3275s`. Against CKTSO, the medium geomean gap moved from about `1.28x` to
+about `1.24x`, and `rajat28` moved from about `9.3x` slower to about `3.8x`
+slower. This is meaningful scheduler progress, but the remaining gap on
+`G2_circuit`, ASIC rows, and the Rajat rows still points to the larger
+row-oriented numeric kernel, pivot-aware scheduler, and separator/supernode
+work described in the papers.
 
 ## Recommended General Work
 
