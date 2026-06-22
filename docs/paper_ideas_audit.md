@@ -198,13 +198,19 @@ design work, not benchmark-specific tuning.
   from an atomic cursor and waits only for actual U-pattern predecessors. The
   same block-aware EGraph kernel can run inside a large dominant BTF block and
   update Offx for entries above that block. Schedule construction is now
-  limited to single-block or dominant-BTF shapes with enough numeric work to
-  consume it, while non-dominant many-block BTF and low-work dominant-BTF cases
-  skip the setup and stay on the BTF worker pool or mapped refactor paths.
+  limited to single-block or dominant-BTF shapes with enough numeric or measured
+  dependency work to consume it, while non-dominant many-block BTF and low-work
+  dominant-BTF cases without enough dependency work skip the setup and stay on
+  the BTF worker pool or mapped refactor paths.
   For the high-coverage many-fringe dominant-BTF class below the normal EGraph
   size floor, KLS can run the whole exact EGraph as an atomic topological
   pipeline with no cluster barriers. This is a retained SubtreeLU/CKTSO-aligned
   scheduler improvement for the current fixed-pivot LU storage.
+  A later retained low-work dominant-BTF gate lowers the EGraph schedule floor
+  when measured dependency work is still material. On the 93-matrix medium
+  paper corpus this moved KLS geomean from 0.32749s to 0.32198s with the same
+  three known failures, mainly by cutting IBM `dc1/dc2/dc3/trans4/trans5`
+  cycles by about 22-30% and `scircuit` by about 20%.
   This is still narrower than CKTSO's production pivoting machinery, but it is
   the first retained intra-block EGraph cluster/pipeline refactor path.
 - SPICE-cycle orientation policy: KLS can analyze normal and transposed storage

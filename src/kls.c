@@ -7612,9 +7612,13 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   if (!single_block && !dominant_btf && !all_pipeline_btf) {
     return 0;
   }
+  const int low_work_dominant_btf =
+    dominant_btf && !medium_heavy_btf && !all_pipeline_btf &&
+    solver->common.flops < 1.0e8;
   const double min_dependency_work =
     (dominant_btf || all_pipeline_btf)
-      ? (medium_heavy_btf || all_pipeline_btf ? 8.0e7 : 1.0e8)
+      ? (medium_heavy_btf || all_pipeline_btf ? 8.0e7 :
+         low_work_dominant_btf ? 1.0e7 : 1.0e8)
       : 1.5e8;
   if (solver->refactor_dependency_work < min_dependency_work) {
     return 0;
@@ -8079,7 +8083,7 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
     return solver->common.flops >= 1.5e8;
   }
   if (dominant_btf) {
-    return solver->common.flops >= 2.0e8;
+    return solver->common.flops >= 2.0e7;
   }
   if (solver->common.flops >= 3.0e8) {
     return 1;

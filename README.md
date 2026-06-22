@@ -131,8 +131,10 @@ benchmark output and is used by a guarded large unscaled single-block or
 high-work dominant-BTF level-sliced refactor path when there is enough
 dependency work and level width to offset thread and scratch overhead. KLS only
 builds this schedule for single-block or dominant-block shapes with enough
-numeric work to consume it; ordinary many-block BTF and low-work dominant-BTF
-cases skip the setup and stay on their existing refactor paths. When a
+numeric work to consume it; ordinary many-block BTF cases skip the setup and
+stay on their existing refactor paths. Most low-work dominant-BTF cases also
+stay on the mapped serial path, but those with enough measured dependency work
+can consume the same EGraph path. When a
 low-work dominant BTF decomposition has one 95%+ block plus thousands of tiny
 fringe blocks below the EGraph size floor, KLS also keeps repeated refactors on
 the serial mapped path because the BTF worker pool has too little useful
@@ -161,7 +163,9 @@ factor/dependency work is high enough; this excludes the previously rejected
 95% Rajat class while covering lower-work AT&T-style dominant blocks. The
 schedule floor is lower for 95%+ dominant-block cases whose measured factor work
 is modest but whose dependency graph still has enough independent work to consume
-the threaded EGraph path. Moderate single-block cases can also consume the
+the threaded EGraph path; this covers low-work dominant-BTF circuit matrices
+such as the IBM `dc*`, `trans*`, and `scircuit` cases without naming them in the
+dispatch policy. Moderate single-block cases can also consume the
 EGraph refactor once their measured factor work, LU fill, and dependency work
 clear the general floors, which covers matrices such as `HTC_336_4438` without
 using matrix-name tuning. Unscaled single-block EGraph refactors use a slimmer
