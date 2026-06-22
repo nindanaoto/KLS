@@ -5,7 +5,8 @@
 # - Algorithm 907 / KLU: scaling and largest-case comparison tables.
 # - NICSLU: Table I, Table II, and Table III benchmark sets.
 # - SubtreeLU: Fig. 7 public circuit benchmark labels.
-# - CKTSO: public SuiteSparse matrix names visible in the ordering/fill discussion.
+# - CKTSO: public SuiteSparse matrix names visible in the paper figures and
+#   the local ordering supplement.
 
 # KLU Algorithm 907
 asic_100ks
@@ -74,3 +75,58 @@ trans5
 # CKTSO visible public SuiteSparse names
 fullchip
 meg1
+
+# Additional public SuiteSparse names from the CKTSO ordering supplement.
+# The supplement also names dinesh, hans, leo, steffen, steve_mem, sushil, and
+# totyo_bsimcmg, but those labels are not present in the current SuiteSparse
+# index and are omitted from this fetchable manifest.
+1138_bus
+activsg10k
+activsg2000
+activsg70k
+adder_dcop_01
+adder_trans_01
+bips07_1693
+bips07_1998
+bips98_1142
+bips98_1450
+bips98_606
+case9
+circuit204
+fpga_dcop_01
+fpga_trans_01
+freescale2
+gemat11
+gemat12
+hamrle2
+htc_336_4438
+htc_336_9129
+hvdc1
+hvdc2
+legresley_2508
+legresley_4908
+legresley_87936
+memplus
+mimo28x28_system
+mimo46x46_system
+mimo8x8_system
+mult_dcop_01
+mult_dcop_02
+mult_dcop_03
+nopss_11k
+opf_10000
+opf_3754
+power197k
+powersim
+qh1484
+rajat12
+rajat13
+rajat27
+tsopf_fs_b39_c19
+tsopf_fs_b39_c30
+tsopf_fs_b9_c1
+tsopf_fs_b9_c6
+tsopf_rs_b9_c6
+ww_vref_6405
+xingo_afonso_itaipu
+zeros_nopss_13k

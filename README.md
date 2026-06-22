@@ -148,8 +148,12 @@ python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_circuit_manife
 
 For paper-driven tuning, `bench/suitesparse_paper_manifest.txt` is the
 traceable union of public SuiteSparse matrices named in the local KLU, NICSLU,
-SubtreeLU, and CKTSO reference papers. It includes very large matrices, so the
-medium manifest is the default practical corpus:
+SubtreeLU, CKTSO reference papers, and the CKTSO ordering supplement. It
+currently resolves to 110 public SuiteSparse matrices. The CKTSO supplement also
+names a few non-public or renamed labels that are not in the current
+SuiteSparse index; those are documented as comments in the manifest. The full
+manifest includes very large matrices, so the medium manifest is the default
+practical corpus:
 
 ```sh
 python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_paper_medium_manifest.txt --out data/suitesparse-paper-medium
