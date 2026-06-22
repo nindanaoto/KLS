@@ -2911,12 +2911,22 @@ static void maybe_select_auto_pivot_tolerance(kls_solver *solver,
 static int should_try_auto_metis(const kls_solver *solver) {
   if (solver->auto_metis_checked || solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->stats.selected_ordering == KLS_ORDERING_METIS ||
-      solver->numeric == NULL || solver->n < 20000) {
+      solver->numeric == NULL) {
     return 0;
   }
 
   const double flops = solver->common.flops;
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
+  if (solver->symbolic != NULL && solver->symbolic->do_btf &&
+      solver->symbolic->nblocks <= 4 &&
+      (double)solver->symbolic->maxblock >= 0.90 * (double)solver->n &&
+      solver->common.noffdiag >= 128 &&
+      flops >= 1.0e7 && fill >= 150000) {
+    return 1;
+  }
+  if (solver->n < 20000) {
+    return 0;
+  }
   return flops >= 1.0e8 && fill >= 1000000;
 }
 

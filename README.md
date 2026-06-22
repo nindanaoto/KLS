@@ -138,7 +138,11 @@ mesh-like sparse diagonals. When METIS is enabled, `auto` can also promote
 large, expensive first numeric factorizations to METIS if the trial
 factorization materially reduces actual numeric flop/fill cost. This keeps
 METIS available for hard nested-dissection cases without paying its analysis
-cost on small circuit matrices.
+cost on small circuit matrices. A narrower post-factor promotion also covers
+small BTF-dominant matrices whose first AMD/COLAMD factorization shows both
+many off-diagonal pivots and high actual fill/flop growth; this catches
+power-grid-style cases where the symbolic estimate alone understates the
+benefit of nested dissection.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 

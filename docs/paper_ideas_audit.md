@@ -57,7 +57,9 @@ design work, not benchmark-specific tuning.
 - Combined ordering policy: KLS auto mode can choose AMD, COLAMD, or METIS,
   retry no-BTF symbolic analysis for structural cases where BTF is not useful,
   and promote expensive numeric factorizations to METIS when actual fill/flop
-  evidence is better.
+  evidence is better. The METIS promotion gate also covers small
+  BTF-dominant matrices when the first factorization shows many off-diagonal
+  pivots and high actual fill/flop growth.
 - Constrained nested-dissection refinement: KLS can refine METIS rank groups
   with CAMD constraints, preserving nested-dissection rank shape while reducing
   local fill and flops.
@@ -257,6 +259,19 @@ Rajat cases' off-diagonal pivots to 1-3. KLS is still much slower than CKTSO on
 these cases, so this is a partial static-pivoting improvement rather than a
 replacement for full MC64-style matching/scaling or a faster KLS-owned numeric
 kernel.
+
+After expanding the paper-medium corpus with the public CKTSO ordering
+supplement cases, the post-factor METIS promotion gate was widened for small
+BTF-dominant matrices whose initial AMD/COLAMD factorization produces both
+many off-diagonal pivots and high fill/flops. This is a retained combined
+ordering rule, not a matrix-name rule: the gate requires at most four BTF
+blocks, a dominant block covering at least 90% of the matrix, at least 128
+off-diagonal pivots, and enough actual factor work to amortize the METIS trial.
+It selected METIS on the TSOPF/QY power-grid-style cases in the expanded paper
+medium suite, improving the 87-common-row KLS geomean from about 0.333s to
+0.322s and the common KLS/CKTSO ratio from about 1.48x to 1.43x. Guard cases
+with no off-diagonal pivot pressure, BTF disabled, or many BTF blocks stayed on
+the existing AMD path.
 
 ## Recommended General Work
 
