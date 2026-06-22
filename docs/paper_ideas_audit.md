@@ -1261,6 +1261,23 @@ slower. This is meaningful scheduler progress, but the remaining gap on
 row-oriented numeric kernel, pivot-aware scheduler, and separator/supernode
 work described in the papers.
 
+A small reactive static-pivoting payback gate was then retained. Earlier KLS
+policy could launch the post-factor static row-matching trial on small,
+low-work matrices where the accepted permutation improved pivoting and fill but
+did not recover its setup cost over the 99-refactor SPICE-cycle estimate. The
+new gate applies only after a first factorization has succeeded, only below
+20k rows, and only when diagonal weakness is not severe; severe missing-diagonal
+cases still use the pre-static path, and larger or higher-work cases keep the
+existing matching policy. On the full medium paper manifest this kept the same
+90 completed rows and the same known `bips07_1998`, `ss1`, and
+`mac_econ_fwd500` failures, while improving KLS geomean from about `0.3141s`
+to about `0.3096s`. Against the saved CKTSO artifact the geomean ratio moved
+from about `1.190x` slower to about `1.173x` slower. The largest retained wins
+were low-work `OPF_3754`, `bips98_*`, and `nopss_11k` cases; the phase
+decomposition after this change still shows the remaining largest losses are
+dominated by repeated refactor throughput (`G2_circuit`, ASIC, `mc2depi`, and
+Rajat rows), not by another MC64-compatible matching import.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric

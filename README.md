@@ -235,10 +235,14 @@ Use `--no-static-pivoting` to disable KLS's value-aware static row-pivoting
 trial. When enabled, `auto` can preemptively build a weighted row permutation
 for medium matrices whose input values show a mostly weak or missing diagonal,
 or react after a high off-diagonal pivot count. The permutation moves large
-entries onto the diagonal. For larger weak-diagonal candidates, the matching
-augment uses a layered bipartite search so KLS can complete many independent
-augmenting paths per pass instead of restarting a search from each unmatched
-row. For cheap small candidates, KLS can instead run an exact sparse
+entries onto the diagonal. The reactive post-factor trial is skipped for small,
+low-work cases where the first factorization already succeeded and the diagonal
+weakness is not severe enough for the static-match setup cost to pay back over
+the default repeated-refactor SPICE-cycle model. For larger weak-diagonal
+candidates, the matching augment uses a layered bipartite search so KLS can
+complete many independent augmenting paths per pass instead of restarting a
+search from each unmatched row. For cheap small candidates, KLS can instead run
+an exact sparse
 augmenting-path assignment on transformed log magnitudes, equivalent to a
 maximum-product diagonal match when a full matching is found. The exact path is
 gated by matrix order and `n * nnz` work because even the KLS-owned

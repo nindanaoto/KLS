@@ -4868,7 +4868,40 @@ static int static_match_prefers_unscaled(UF_long n,
          weak_diagonal * 2u >= n;
 }
 
-static int should_try_auto_row_match(const kls_solver *solver) {
+static int reactive_static_match_setup_is_unlikely_to_pay(
+  const kls_solver *solver,
+  UF_long weak_diagonal,
+  UF_long missing_diagonal) {
+  if (solver == NULL || solver->symbolic == NULL || solver->n > 20000u ||
+      solver->common.flops <= 0.0) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  const int severe_weak_diagonal =
+    weak_diagonal * 10u >= 9u * n || missing_diagonal * 10u >= 9u * n;
+  if (severe_weak_diagonal) {
+    return 0;
+  }
+
+  if (solver->symbolic->nblocks == 1u && solver->symbolic->maxblock == n &&
+      solver->common.flops < 3.0e6 && weak_diagonal * 5u < 3u * n) {
+    return 1;
+  }
+
+  if (solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+      solver->symbolic->nblocks >= 512u &&
+      solver->common.flops < 2.0e6 &&
+      weak_diagonal * 5u < n &&
+      solver->common.noffdiag < 256u) {
+    return 1;
+  }
+
+  return 0;
+}
+
+static int should_try_auto_row_match(const kls_solver *solver,
+                                     const double *numeric_values) {
   /* Weighted static pivoting is currently a reactive medium-matrix trial.  On
      larger matrices the O(nnz log nnz) matching/reanalysis cost needs a cheaper
      precheck before it is worth paying by default. */
@@ -4876,7 +4909,8 @@ static int should_try_auto_row_match(const kls_solver *solver) {
       solver->numeric == NULL || solver->row_perm != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       solver->options.ordering != KLS_ORDERING_AUTO || solver->n < 3000 ||
-      solver->n > 20000 || solver->common.noffdiag < 16) {
+      solver->n > 20000 || solver->common.noffdiag < 16 ||
+      numeric_values == NULL) {
     return 0;
   }
 #ifdef KLS_HAVE_METIS
@@ -4885,6 +4919,15 @@ static int should_try_auto_row_match(const kls_solver *solver) {
     return 0;
   }
 #endif
+  UF_long missing_diagonal = 0;
+  const UF_long weak_diagonal =
+    count_weak_diagonal_rows(solver->n, solver->col_ptr, solver->row_idx,
+                             numeric_values, solver->common.tol,
+                             &missing_diagonal);
+  if (reactive_static_match_setup_is_unlikely_to_pay(
+        solver, weak_diagonal, missing_diagonal)) {
+    return 0;
+  }
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
   if (fill < 50000 || solver->common.flops < 5.0e5) {
     return 0;
@@ -4896,7 +4939,7 @@ static int should_try_auto_row_match(const kls_solver *solver) {
 static int maybe_select_auto_row_match(kls_solver *solver,
                                        double *elapsed,
                                        const double *numeric_values) {
-  if (!should_try_auto_row_match(solver)) {
+  if (!should_try_auto_row_match(solver, numeric_values)) {
     return 0;
   }
 
