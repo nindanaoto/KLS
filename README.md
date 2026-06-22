@@ -31,11 +31,13 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-The main build is self-contained. KLS vendors the SuiteSparse-derived KLU,
-AMD, COLAMD, and BTF C sources from Trilinos under `third_party/suitesparse`
-as the current in-tree serial engine. METIS ordering is enabled by default from
-pinned submodules under `third_party/metis` and `third_party/gklib`, and SCOTCH
-ordering is enabled by default from `third_party/scotch`; initialize them with
+The main build is reproducible from pinned submodules. KLS vendors the
+SuiteSparse-derived KLU, AMD, COLAMD, and BTF C sources from Trilinos under
+`third_party/suitesparse` as the current in-tree serial engine. METIS ordering
+is enabled by default from pinned submodules under `third_party/metis` and
+`third_party/gklib`, SCOTCH ordering is enabled by default from
+`third_party/scotch`, and BSD-licensed SPRAL matching/scaling is enabled by
+default from `third_party/spral`; initialize them with
 `git submodule update --init --recursive` after cloning. To use a compatible
 system METIS instead, configure with:
 
@@ -56,13 +58,13 @@ cmake -S . -B build -DKLS_USE_SYSTEM_SCOTCH=ON
 A static system SCOTCH build may also require `scotcherr`; pass
 `KLS_SYSTEM_SCOTCHERR_LIBRARY` if it is not discoverable.
 
-KLS can optionally build BSD-licensed SPRAL Hungarian/auction
-matching/scaling support from the pinned `third_party/spral` submodule:
+KLS builds BSD-licensed SPRAL Hungarian/auction matching/scaling support from
+the pinned `third_party/spral` submodule by default. To disable this MC64-adjacent
+component and keep a C-only build, configure with:
 
 ```sh
-git submodule update --init --recursive third_party/spral
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DKLS_ENABLE_SPRAL_SCALING=ON
+  -DKLS_ENABLE_SPRAL_SCALING=OFF
 cmake --build build
 ```
 
@@ -76,7 +78,7 @@ cmake -S . -B build -DKLS_ENABLE_SPRAL_SCALING=ON \
   -DKLS_SYSTEM_SPRAL_LIBRARY=/path/to/libspral.so
 ```
 
-This is not a solver replacement and is not enabled by default. KLS uses it as a
+This is not a solver replacement. KLS uses it as a
 static-pivot matching fallback when the in-tree matcher is short of a full
 cardinality match, as a guarded pre-factor Hungarian/scaling path for large
 weak-diagonal dominant-BTF matrices, and as a guarded post-factor Hungarian
@@ -439,7 +441,7 @@ parallelism while keeping the public API and benchmark harness stable.
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
 includes SuiteSparse-derived KLU, AMD, COLAMD, BTF, and UFconfig sources from
-Trilinos, plus optional METIS/GKlib, SCOTCH, and SPRAL scaling support; see
+Trilinos, plus METIS/GKlib, SCOTCH, and SPRAL scaling support; see
 `THIRD_PARTY_NOTICES.md` for attribution.
 
 For a paper-by-paper implementation checklist, see

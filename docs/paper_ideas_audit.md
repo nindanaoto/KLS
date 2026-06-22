@@ -24,9 +24,10 @@ slices, which is a retained piece of the CKTSO/SubtreeLU load-balance idea.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
-cycles beyond the pair-swap pass. When optional SPRAL support is enabled, KLS
-can also use BSD-licensed Hungarian matching/scaling as a pre-factor
-MC64-adjacent candidate for large weak-diagonal dominant-block matrices. Fast
+cycles beyond the pair-swap pass. KLS now enables the pinned BSD-licensed SPRAL
+scaling subset by default, so it can use Hungarian matching/scaling as a
+pre-factor MC64-adjacent candidate for large weak-diagonal dominant-block
+matrices while still allowing `KLS_ENABLE_SPRAL_SCALING=OFF` builds. Fast
 factorization can now repair an unsafe unscaled BTF diagonal block by
 restarting that block with pivoting and then retrying the checked no-pivot
 factorization.
@@ -45,10 +46,10 @@ The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
 
 - Production-scale MC64-equivalent maximum-weight matching with dual
-  row/column scaling. KLS can now build BSD-licensed SPRAL Hungarian/auction
-  matching from a pinned submodule or link to a system SPRAL install and uses
-  it for bounded pre-factor large weak-diagonal trials, but this is still not
-  a full production MC64-equivalent preprocessing stage. HSL MC64 and
+  row/column scaling. KLS now builds BSD-licensed SPRAL Hungarian/auction
+  matching from a pinned submodule by default, or can link to a system SPRAL
+  install, and uses it for bounded pre-factor large weak-diagonal trials. This
+  is still not a full production MC64-equivalent preprocessing stage. HSL MC64 and
   non-redistributable MC64 copies are out of scope for vendoring.
 - A full intra-block parallel factor/refactor scheduler that consumes retained
   EGraph/ETree or separator-tree metadata with pivoting tail restart, beyond
@@ -153,7 +154,7 @@ design work, not benchmark-specific tuning.
   larger candidates keep the lower-fill layered/swap pattern. KLS can also
   trial dual-potential matching-derived row/column equilibration and keeps the
   transformed candidate only when numeric quality and cost evidence justify it.
-  With `KLS_ENABLE_SPRAL_SCALING=ON`, large weak-diagonal candidates whose BTF
+  With default SPRAL scaling enabled, large weak-diagonal candidates whose BTF
   analysis leaves one dominant block can run BSD-licensed SPRAL Hungarian
   matching/scaling before the first factorization; many-block BTF cases are
   excluded because the existing BTF path is already efficient there.
@@ -636,6 +637,18 @@ MC64-adjacent preprocessing is useful and worth keeping, but it does not
 replace the missing CKTSO/SubtreeLU-style intra-block numeric/scheduling
 machinery.
 
+Because the retained SPRAL path is now guarded and materially improves a
+paper-medium hard row, the pinned BSD scaling subset was promoted from an
+opt-in component to the default build, while keeping
+`KLS_ENABLE_SPRAL_SCALING=OFF` for C-only builds and
+`KLS_USE_SYSTEM_SPRAL=ON` for system installations. Fresh default-vs-SPRAL
+checks show why this is aligned with the solver goal: `power197k` moves from
+the no-SPRAL default path with about 51k off-diagonal pivots and roughly 0.057s
+refactors to the SPRAL static-match path with about 1.8k off-diagonal pivots
+and about 0.008s refactors. The same guard keeps `HTC_336_4438` on its
+METIS/no-BTF path, while `transient`, `onetone1`, `onetone2`, and `rajat28`
+remain on their existing accepted paths.
+
 The fast-factor pivot-check path was then made more diagnostic by recording the
 first rejected factor-order pivot and original matrix column in `kls_stats` and
 benchmark JSON. This does not implement CKTSO's pipelined tail factorization,
@@ -1053,8 +1066,8 @@ dominates many sub-millisecond rows.
    the target is ETree-descendant tail restart inside large blocks.
 2. Continue turning matching/scaling into a production MC64-equivalent stage,
    but keep it inside the LGPL-compatible boundary: use the BSD-licensed SPRAL
-   scaling submodule or independent KLS code, not HSL MC64 or restricted MC64
-   copies from other solver trees. The retained SPRAL path now helps large
+   scaling submodule, system SPRAL, or independent KLS code, not HSL MC64 or
+   restricted MC64 copies from other solver trees. The retained SPRAL path now helps large
    weak-diagonal dominant-BTF cases and avoids replacing no-BTF ordering wins,
    but `pre2` still times out, so matching quality alone is not the remaining
    CKTSO-scale gap.

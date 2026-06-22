@@ -19,11 +19,12 @@ installation.
 KLS does not vendor HSL MC64 or solver-tree MC64 copies that retain HSL
 redistribution restrictions. The bounded exact static-pivot assignment code in
 `src/kls.c` is KLS in-tree code under the project LGPL-2.1-or-later license.
-KLS can optionally build BSD-licensed SPRAL Hungarian/auction matching and
-scaling support from the pinned `third_party/spral` submodule, or link to a
+KLS builds BSD-licensed SPRAL Hungarian/auction matching and scaling support
+from the pinned `third_party/spral` submodule by default, or can link to a
 compatible system SPRAL installation. The bundled KLS build uses only SPRAL's
 scaling subset: `src/matrix_util.f90`, `src/scaling.f90`, and
-`interfaces/C/scaling.f90`, plus `include/spral_scaling.h`.
+`interfaces/C/scaling.f90`, plus `include/spral_scaling.h`. Builds configured
+with `KLS_ENABLE_SPRAL_SCALING=OFF` omit this component.
 
 SPRAL is Copyright (c) 2014-2025, The Science and Technology Facilities
 Council (STFC), and is licensed under BSD-3-Clause; see
