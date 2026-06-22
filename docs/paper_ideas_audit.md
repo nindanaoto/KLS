@@ -144,6 +144,21 @@ and passing the map through the worker pool regressed representative threaded
 BTF cases. KLS therefore keeps the map on the unscaled serial path and leaves
 the threaded worker-pool scatter path separate.
 
+A second layer of persistent refactor metadata was prototyped by precomputing
+per-column L/U value and index pointers for mapped serial refactors. Focused
+tests helped some repeated-refactor losses, but full-suite same-session testing
+regressed the geometric mean because low-arithmetic and memory-sensitive cases
+lost more than the hard cases gained. A structural gate based on flop count,
+BTF shape, orientation, and arithmetic density reduced the regression but still
+did not beat the committed baseline.
+
+A narrower scaled single-block scatter map was also retried with a structural
+gate for high off-diagonal-pivot cases. It repeatedly improved the targeted
+scaled single-block case, but the added scaled path still perturbed unscaled
+single-block hot cases enough to fail the no-regression bar. That prototype was
+removed as well; scaled refactors still use the KLU-derived path unless they are
+handled by the existing threaded BTF worker path.
+
 A work-balanced BTF refactor scheduler was tested by sorting independent BTF
 blocks by an LU-length work estimate before launching worker threads. It was
 removed because the extra scheduling work did not improve the dominant-block
