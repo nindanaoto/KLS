@@ -537,6 +537,9 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivot\":%" PRId64
            ",\"fast_rejected_pivot_col\":%" PRId64
            ",\"fast_block_restarts\":%d"
+           ",\"refactor_dependency_levels\":%" PRId64
+           ",\"refactor_dependency_max_width\":%" PRId64
+           ",\"refactor_dependency_edges\":%" PRId64
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
@@ -560,6 +563,9 @@ int main(int argc, char **argv) {
            stats.offdiag_pivots, stats.reallocations,
            stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,
            stats.fast_block_restarts,
+           stats.refactor_dependency_levels,
+           stats.refactor_dependency_max_width,
+           stats.refactor_dependency_edges,
            stats.nnz_l, stats.nnz_u,
            stats.estimated_flops, stats.factor_flops, stats.rcond, stats.rgrowth,
            stats.memory_bytes, stats.memory_peak_bytes);
@@ -598,6 +604,11 @@ int main(int argc, char **argv) {
     printf("fast rejected pivot: %" PRId64 ", original column: %" PRId64 "\n",
            stats.fast_rejected_pivot, stats.fast_rejected_pivot_col);
     printf("fast block restarts: %d\n", stats.fast_block_restarts);
+    printf("refactor dependency levels: %" PRId64
+           ", max width: %" PRId64 ", edges: %" PRId64 "\n",
+           stats.refactor_dependency_levels,
+           stats.refactor_dependency_max_width,
+           stats.refactor_dependency_edges);
     printf("nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n", stats.nnz_l, stats.nnz_u);
     printf("estimated flops: %.6e, factor flops: %.6e\n", stats.estimated_flops, stats.factor_flops);
     printf("rcond: %.6e, rgrowth: %.6e\n", stats.rcond, stats.rgrowth);

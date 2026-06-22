@@ -77,9 +77,10 @@ normal numeric checks.
 ```
 
 The benchmark reports analysis, factorization, refactorization, solve,
-transpose-solve, residual, selected orientation, BTF block/rank, fill, flop, and
-memory statistics. Use `--analyze-only` to measure symbolic analysis and
-ordering decisions without running numeric factorization.
+transpose-solve, residual, selected orientation, BTF block/rank, fill, flop,
+refactor dependency-level metrics, and memory statistics. Use `--analyze-only`
+to measure symbolic analysis and ordering decisions without running numeric
+factorization.
 
 Use `--threads N` to enable KLS-owned parallel work where it is currently
 available. The first threaded path is repeated numeric refactorization across
@@ -94,7 +95,10 @@ single-block and serial BTF refactors do not redo the same `Q` and `Pinv`
 structure lookups every cycle. For serial BTF refactors, this map also keeps
 each column's off-block entries separate from diagonal-block entries so the
 numeric refactor loop avoids reclassifying the same structure on every SPICE
-step.
+step. For threaded runs, KLS also records the exact no-pivot refactor EGraph
+level schedule from the numeric U pattern; this metadata is exposed in
+benchmark output and is retained as the scheduling substrate for future
+intra-block parallel refactors.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium

@@ -13,7 +13,9 @@ ordering, CAMD refinement, auto scaling policy, pivot-checked reuse, static
 row-pivoting trials with dual-potential matching-derived equilibration, and
 BTF-block parallel refactorization with a solver-owned worker pool. KLS now
 also keeps precomputed refactor scatter metadata for unscaled serial repeated
-refactors, covering both single-block and serial BTF cases. Its static-pivot
+refactors, covering both single-block and serial BTF cases, and records an
+exact no-pivot EGraph level schedule from the numeric U pattern for threaded
+runs. Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
 cycles beyond the pair-swap pass. Fast factorization can now repair an unsafe
@@ -39,8 +41,8 @@ new KLS-owned symbolic/numeric machinery:
   external SPRAL install for auction matching fallback, but this is not the
   retained production MC64-equivalent path. HSL MC64 and non-redistributable
   MC64 copies are out of scope for vendoring.
-- Persistent EGraph/ETree or separator-tree metadata for intra-block parallel
-  factor/refactor scheduling.
+- An intra-block parallel factor/refactor scheduler that consumes retained
+  EGraph/ETree or separator-tree metadata.
 - Full CKTSO-style fast factorization tail restart after a failed pivot check,
   beyond the current unscaled block-local repair.
 - SubtreeLU-style private/pipeline scheduling from a retained separator tree.
@@ -55,9 +57,9 @@ project does not drift toward benchmark-name-specific heuristics.
 
 | Reference | Implemented in KLS | Partial or open coverage |
 | --- | --- | --- |
-| Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection and serial refactor scatter metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
-| NICSLU | AMD-style ordering, optional static-pivoting preprocessing, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. | Full MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and EGraph-guided refactorization are not implemented. A levelized EGraph refactor prototype was tried and rejected because it was not a general win on the current kernel/storage. |
-| CKTSO | METIS nested-dissection ordering, explicit SCOTCH ordering for experiments, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, unscaled block-local restart after a failed fast-factor pivot check, and dual-potential matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only approximated because KLS does not have full MC64-equivalent weighted assignment. The dual cluster/pipeline EGraph scheduler, pipelined ETree-descendant tail restart with pivoting after a failed pivot check, and structure-adaptive triangular solve are not implemented. Scaled or otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
+| Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection, serial refactor scatter metadata, and exact EGraph level metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
+| NICSLU | AMD-style ordering, optional static-pivoting preprocessing, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. KLS now records exact no-pivot EGraph levels from the numeric U pattern. | Full MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and an EGraph-guided intra-block refactor scheduler are not implemented. A levelized EGraph refactor prototype was tried and rejected because it was not a general win on the current kernel/storage. |
+| CKTSO | METIS nested-dissection ordering, explicit SCOTCH ordering for experiments, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, unscaled block-local restart after a failed fast-factor pivot check, EGraph level metadata for no-pivot refactors, and dual-potential matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only approximated because KLS does not have full MC64-equivalent weighted assignment. The dual cluster/pipeline EGraph scheduler, pipelined ETree-descendant tail restart with pivoting after a failed pivot check, and structure-adaptive triangular solve are not implemented. Scaled or otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
 | SubtreeLU | KLS vendors reproducible METIS/GKlib submodules and uses METIS plus CAMD refinement, which overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. | KLS does not retain a separator tree, collapse/partition it into private and pipeline task queues, constrain pivot search within separator-tree subdomains, perform FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
 
 This means KLS has implemented or prototyped the ideas that can be layered
@@ -136,6 +138,12 @@ design work, not benchmark-specific tuning.
   prepartitions each mapped column into off-block and diagonal-block entries, so
   repeated refactors do not reclassify the same BTF structure in the numeric
   scatter loop.
+- KLS-owned EGraph metadata: for threaded numeric runs, KLS can levelize the
+  exact no-pivot refactor dependency graph from the actual U pattern after
+  factorization. It retains level pointers and column lists and reports the
+  level count, maximum level width, and dependency edge count in `kls_stats`
+  and benchmark JSON. This is CKTSO/NICSLU-aligned scheduling metadata, but the
+  intra-block parallel refactor kernel that consumes it is still open.
 - SPICE-cycle orientation policy: KLS can analyze normal and transposed storage
   orientations and select the faster internal form for repeated solve cycles.
 - LGPL project licensing and third-party notices: KLS itself is
@@ -157,8 +165,9 @@ design work, not benchmark-specific tuning.
   not a full MC64-style maximum-product matching algorithm with assignment dual
   scaling.
 - NICSLU/CKTSO parallel scheduling is only present at BTF-block granularity.
-  KLS now has persistent serial scatter metadata for unscaled refactors, but
-  not an EGraph/ETree cluster/pipeline scheduler.
+  KLS now has persistent serial scatter metadata and exact EGraph level
+  metadata for unscaled refactors, but not an EGraph/ETree cluster/pipeline
+  scheduler.
 - CKTSO fast factorization is present as pivot-checked reuse plus an unscaled
   BTF-block repair path. KLS does not yet implement CKTSO's pipelined tail
   factorization that restarts from the ETree descendants after a failed pivot
@@ -560,8 +569,8 @@ patterns until a broader EGraph/separator-tree numeric kernel exists.
    matching/scaling code, not HSL MC64 or restricted MC64 copies from other
    solver trees. The `pre2` evidence is now strong enough that more ordering
    backends should be lower priority than this.
-2. Build persistent dependency metadata for one KLS-owned numeric engine:
-   either CKTSO's EGraph/ETree cluster/pipeline scheduler or SubtreeLU's
+2. Consume the retained EGraph metadata in one KLS-owned numeric engine:
+   implement CKTSO's EGraph/ETree cluster/pipeline scheduler or SubtreeLU's
    separator-tree private/pipeline scheduler, not isolated benchmark guards.
    The current unscaled block-local restart is a useful precursor, but the
    target is ETree-descendant tail restart inside large blocks.
