@@ -1178,6 +1178,19 @@ CKTSO/SubtreeLU-style row-oriented numeric kernel, pivoting-tail restart, or
 separator-tree/private-pipeline scheduler rather than another ordering or MC64
 import.
 
+To keep that diagnosis reproducible, `scripts/decompose_solver_gap.py` now
+compares two benchmark JSONL files by phase contribution. On the current
+nine-row hard-focus comparison against the saved CKTSO medium artifact, KLS is
+still dominated by repeated refactorization: `rajat28` spends about 94% of its
+SPICE-cycle estimate in repeated refactor work and that refactor component is
+about 13.6x CKTSO's; `G2_circuit` spends about 93% there and is about 6.7x
+CKTSO's; `onetone1`, `onetone2`, `rajat24`, and `transient` also have
+refactor-component ratios around 2.7x to 3.4x. Solve ratios on those same rows
+are only about 1.0x to 1.3x, and `twotone`/`power197k` solve is already faster
+than CKTSO. This confirms that a CKTSO-style solve rewrite is secondary for the
+current hard gap; the larger missing mechanism is the row-oriented
+factor/refactor engine and its pivot-aware scheduler.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric

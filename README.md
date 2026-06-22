@@ -404,6 +404,14 @@ Compare two JSONL runs by matrix basename:
 python3 scripts/compare_bench_runs.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/klu_defaults.jsonl --reference-name klu-defaults
 ```
 
+To see which phase explains a solver gap, decompose the same JSONL pair into
+analysis, initial factorization, repeated refactorization, and repeated solve
+contributions:
+
+```sh
+python3 scripts/decompose_solver_gap.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/cktso_suite.jsonl --reference-name cktso
+```
+
 An optional CKTSO comparison tool can be built when you provide a local CKTSO
 distribution:
 
