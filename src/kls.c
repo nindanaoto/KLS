@@ -5163,6 +5163,13 @@ static int should_try_auto_scale(const kls_solver *solver) {
 
   const double flops = solver->common.flops;
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
+  if (solver->options.ordering == KLS_ORDERING_AUTO &&
+      solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+      solver->symbolic != NULL && !solver->symbolic->do_btf &&
+      solver->symbolic->nblocks == 1u && solver->common.scale == 2 &&
+      solver->n >= 200000u && flops >= 1.0e9 && fill >= 10000000u) {
+    return 0;
+  }
   return flops >= 1.0e8 && fill >= 1500000;
 }
 

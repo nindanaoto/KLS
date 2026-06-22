@@ -159,8 +159,11 @@ scaling, and large sparse-diagonal low-degree patterns can start with sum
 scaling when that avoids more expensive max-scaling behavior. For large expensive
 cases, `auto` can still try other numeric scaling modes when actual flop/fill
 evidence justifies the extra work, but structural METIS starts that are already
-known to need a specific scale mode skip redundant scale trials. Explicit
-numeric scale values remain fixed.
+known to need a specific scale mode skip redundant scale trials. Large
+high-work METIS/no-BTF single-block paths that already selected max scaling
+also skip those trial factorizations, preserving the chosen numeric factors
+without paying for rejected scale candidates. Explicit numeric scale values
+remain fixed.
 
 Use `--pivot-tol T` to benchmark the diagonal pivot tolerance exposed by the
 KLS API. The default is `0.001`, matching the underlying KLU default. With that

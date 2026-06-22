@@ -118,7 +118,9 @@ design work, not benchmark-specific tuning.
   on pattern and numeric evidence, including no-scale reuse where repeated
   SPICE refactorization benefits. Low-work dominant-BTF cases also start with
   no KLU row scaling, avoiding the scale recomputation cost while preserving
-  the useful BTF decomposition.
+  the useful BTF decomposition. Large high-work METIS/no-BTF single-block paths
+  that already selected max scaling skip redundant post-factor scale trial
+  factorizations.
 - Fast repeated factorization with pivot check: KLS reuses an existing numeric
   pattern, checks reused pivots against the selected threshold via L
   multipliers, and falls back to full pivoting factorization if the reused order
@@ -749,6 +751,16 @@ from the saved about 89.6s to about 78.9s, and `rajat30` moved from about
 49.2s to about 42.4s. The low-work dominant-BTF guard stayed on `rajat29`, and
 the many-block BTF guard stayed on `ASIC_680k`, so this is a general
 symbolic-cost improvement rather than a benchmark-name policy.
+
+The auto-scale gate was then tightened for the same large high-work
+METIS/no-BTF single-block class. Earlier sweeps had already shown the completed
+hard large cases should keep max row scaling, but auto mode still tried other
+scale modes after the first factorization and rejected them. Skipping those
+post-factor scale trials preserves the final factors and residuals while
+cutting setup time: `rajat30` auto initial factor moved from about 4.06s to
+about 1.89s, matching explicit METIS/no-BTF/max-scale, and `nxp1` moved to
+about 2.77s while keeping the same METIS/no-BTF/max-scale EGraph path.
+`rajat29` and `ASIC_680k` remained on their retained BTF policies.
 
 EGraph schedule construction was then tightened to the same structural class
 as the retained EGraph consumer. KLS had been building dependency-level
