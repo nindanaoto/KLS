@@ -280,6 +280,11 @@ static int test_fast_factor_pivot_check_fallback(void) {
             stats.fast_rejected_pivot, stats.fast_rejected_pivot_col);
     ok = 0;
   }
+  if (ok && stats.fast_block_restarts != 1) {
+    fprintf(stderr, "unexpected fast block restarts: %d\n",
+            stats.fast_block_restarts);
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
     fprintf(stderr, "unexpected pivot-check fallback solution: %.17g %.17g\n",
             x[0], x[1]);
@@ -335,9 +340,146 @@ static int test_scaled_fast_factor_pivot_check_fallback(void) {
             stats.fast_rejected_pivot, stats.fast_rejected_pivot_col);
     ok = 0;
   }
+  if (ok && stats.fast_block_restarts != 0) {
+    fprintf(stderr, "scaled path unexpectedly used block restarts: %d\n",
+            stats.fast_block_restarts);
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
     fprintf(stderr, "unexpected scaled pivot-check fallback solution: %.17g %.17g\n",
             x[0], x[1]);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
+static int test_btf_fast_factor_block_restart(void) {
+  const int32_t ap[] = {0, 2, 4, 7, 9};
+  const int32_t ai[] = {0, 1, 0, 1, 0, 2, 3, 2, 3};
+  const double ax0[] = {2.0, 1.0, 1.0, 2.0,
+                        0.5, 2.0, 1.0, 1.0, 2.0};
+  const double ax1[] = {2.0, 1.0, 1.0, 2.0,
+                        0.5, 1.0e-12, 1.0, 1.0, 2.0};
+  const double b[] = {5.5, 5.0, 4.000000000003, 11.0};
+  double x[4] = {0.0, 0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+
+  int ok = 1;
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 4, ap, ai, 0,
+                                        &options),
+                        "analyze btf block restart")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor btf block restart base")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor btf block restart repair")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve btf block restart")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats btf block restart")) {
+    ok = 0;
+  }
+  if (ok && stats.nblocks < 2) {
+    fprintf(stderr, "btf restart test did not form multiple blocks: %" PRId64 "\n",
+            stats.nblocks);
+    ok = 0;
+  }
+  if (ok && stats.fast_block_restarts < 1) {
+    fprintf(stderr, "btf restart test did not use block restart\n");
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0) || !close_enough(x[3], 4.0))) {
+    fprintf(stderr,
+            "unexpected btf block restart solution: %.17g %.17g %.17g %.17g\n",
+            x[0], x[1], x[2], x[3]);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
+static int test_fast_factor_restart_after_prior_pivot(void) {
+  const int32_t ap[] = {0, 3, 6, 9};
+  const int32_t ai[] = {0, 1, 2, 0, 1, 2, 0, 1, 2};
+  const double ax0[] = {
+    5.8113162339081946e-4, 4.6413198306709501e-2,
+    1.5278393799834244e-12, 8.4541227476277784e5,
+    6.7324793225895394e-2, 3.0341635684366865e-3,
+    5.7525546837879347e1, 1.0034706005124141e4,
+    7.5697097316485318e-9
+  };
+  const double ax1[] = {
+    4.2033293705135975e3, 7.3244855455671168e-9,
+    1.8481368028583987e-3, 3.7564831178168104e-12,
+    9.9130486746531957e-12, 4.0619351468812578e-11,
+    4.7736904569941925e2, 8.9161242869151965e-10,
+    1.5076094143845339e2
+  };
+  const double b[] = {
+    5.6354365076118629e3, 1.0019148928990983e-8,
+    4.5228467245224425e2
+  };
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+
+  int ok = 1;
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0,
+                                        &options),
+                        "analyze prior-pivot restart")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor prior-pivot base")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor prior-pivot repair")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve prior-pivot repair")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats prior-pivot restart")) {
+    ok = 0;
+  }
+  if (ok && stats.fast_block_restarts != 1) {
+    fprintf(stderr,
+            "prior-pivot restart count was %d, rejected=%" PRId64
+            ", col=%" PRId64 ", offdiag=%" PRId64 "\n",
+            stats.fast_block_restarts, stats.fast_rejected_pivot,
+            stats.fast_rejected_pivot_col, stats.offdiag_pivots);
+    ok = 0;
+  }
+  if (ok && (stats.fast_rejected_pivot != 0 ||
+             stats.fast_rejected_pivot_col != 0)) {
+    fprintf(stderr,
+            "unexpected prior-pivot rejected pivot: pivot=%" PRId64
+            ", col=%" PRId64 "\n",
+            stats.fast_rejected_pivot, stats.fast_rejected_pivot_col);
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0))) {
+    fprintf(stderr, "unexpected prior-pivot restart solution: %.17g %.17g %.17g\n",
+            x[0], x[1], x[2]);
     ok = 0;
   }
 
@@ -545,6 +687,12 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_scaled_fast_factor_pivot_check_fallback()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_btf_fast_factor_block_restart()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_fast_factor_restart_after_prior_pivot()) {
     return EXIT_FAILURE;
   }
   if (!test_pre_static_pivoting()) {

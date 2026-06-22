@@ -16,7 +16,9 @@ also keeps precomputed refactor scatter metadata for unscaled serial repeated
 refactors, covering both single-block and serial BTF cases. Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
-cycles beyond the pair-swap pass.
+cycles beyond the pair-swap pass. Fast factorization can now repair an unsafe
+unscaled BTF diagonal block by restarting that block with pivoting and then
+retrying the checked no-pivot factorization.
 
 The remaining CKTSO gap is large enough that it should be treated as a missing
 major algorithm, not an ordering-backend tuning problem. On the selected large
@@ -32,11 +34,13 @@ The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
 
 - Production-scale MC64-equivalent maximum-weight matching with dual
-  row/column scaling.
+  row/column scaling, using only LGPL-compatible sources such as independent
+  KLS code or BSD-licensed SPRAL-derived code. HSL MC64 and non-redistributable
+  MC64 copies are out of scope for vendoring.
 - Persistent EGraph/ETree or separator-tree metadata for intra-block parallel
   factor/refactor scheduling.
-- CKTSO-style fast factorization tail restart after a failed pivot check, rather
-  than full fallback from the beginning.
+- Full CKTSO-style fast factorization tail restart after a failed pivot check,
+  beyond the current unscaled block-local repair.
 - SubtreeLU-style private/pipeline scheduling from a retained separator tree.
 - A structure-adaptive triangular solve built on LU storage that exposes cheap
   row/segment access.
@@ -51,7 +55,7 @@ project does not drift toward benchmark-name-specific heuristics.
 | --- | --- | --- |
 | Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection and serial refactor scatter metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
 | NICSLU | AMD-style ordering, optional static-pivoting preprocessing, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. | Full MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and EGraph-guided refactorization are not implemented. A levelized EGraph refactor prototype was tried and rejected because it was not a general win on the current kernel/storage. |
-| CKTSO | METIS nested-dissection ordering, explicit SCOTCH ordering for experiments, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, and dual-potential matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only approximated because KLS does not have full MC64-equivalent weighted assignment. The dual cluster/pipeline EGraph scheduler, pipelined tail restart with pivoting after a failed pivot check, and structure-adaptive triangular solve are not implemented. KLS currently falls back to full pivoting factorization after unsafe reused pivots. |
+| CKTSO | METIS nested-dissection ordering, explicit SCOTCH ordering for experiments, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, unscaled block-local restart after a failed fast-factor pivot check, and dual-potential matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only approximated because KLS does not have full MC64-equivalent weighted assignment. The dual cluster/pipeline EGraph scheduler, pipelined ETree-descendant tail restart with pivoting after a failed pivot check, and structure-adaptive triangular solve are not implemented. Scaled or otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
 | SubtreeLU | KLS vendors reproducible METIS/GKlib submodules and uses METIS plus CAMD refinement, which overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. | KLS does not retain a separator tree, collapse/partition it into private and pipeline task queues, constrain pivot search within separator-tree subdomains, perform FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
 
 This means KLS has implemented or prototyped the ideas that can be layered
@@ -97,9 +101,12 @@ design work, not benchmark-specific tuning.
 - Fast repeated factorization with pivot check: KLS reuses an existing numeric
   pattern, checks reused pivots against the selected threshold via L
   multipliers, and falls back to full pivoting factorization if the reused order
-  is unsafe. KLS now records the first rejected factor-order pivot and original
-  matrix column so future tail-restart work can distinguish late-tail failures
-  from early failures.
+  is unsafe and cannot be repaired locally. For unscaled BTF patterns, KLS can
+  restart the rejected diagonal block with pivoting, rebuild the global row
+  permutation/off-diagonal entries around that block repair, and retry the
+  checked fast factorization. KLS records the first rejected factor-order pivot,
+  original matrix column, and number of block restarts so future tail-restart
+  work can distinguish late-tail failures from early failures.
 - Static pivoting trial: KLS has value-aware greedy row matching, layered
   augmenting-path search for larger weak-diagonal candidates, and swap
   improvement for weak or high-off-diagonal-pivot medium matrices. Medium
@@ -131,7 +138,10 @@ design work, not benchmark-specific tuning.
   orientations and select the faster internal form for repeated solve cycles.
 - LGPL project licensing and third-party notices: KLS itself is
   LGPL-2.1-or-later, with vendored-source attribution separated from the KLS
-  license.
+  license. MC64-equivalent preprocessing must stay inside that licensing
+  boundary: HSL MC64 and solver-tree copies that retain HSL redistribution
+  restrictions are not vendorable, while BSD-licensed SPRAL-derived code or
+  independent KLS code remains eligible.
 - Paper-derived benchmark manifests: the full public SuiteSparse union from
   the local KLU, NICSLU, SubtreeLU, CKTSO papers and CKTSO ordering supplement
   resolves to 110 matrices. The routine medium subset contains 93 matrices, and
@@ -147,9 +157,10 @@ design work, not benchmark-specific tuning.
 - NICSLU/CKTSO parallel scheduling is only present at BTF-block granularity.
   KLS now has persistent serial scatter metadata for unscaled refactors, but
   not an EGraph/ETree cluster/pipeline scheduler.
-- CKTSO fast factorization is present as pivot-checked reuse plus full fallback.
-  KLS does not yet implement CKTSO's pipelined tail factorization that restarts
-  from the ETree descendants after a failed pivot check.
+- CKTSO fast factorization is present as pivot-checked reuse plus an unscaled
+  BTF-block repair path. KLS does not yet implement CKTSO's pipelined tail
+  factorization that restarts from the ETree descendants after a failed pivot
+  check, and scaled fast-factor failures still use full fallback.
 - SubtreeLU-style nested-dissection metadata is only used indirectly through
   METIS orderings and CAMD refinement. KLS does not yet preserve a separator
   tree for private/pipeline task queues.
@@ -162,7 +173,8 @@ design work, not benchmark-specific tuning.
 - Intra-block parallel factorization with pivoting scheduled by an ETree.
 - Intra-block parallel no-pivot refactorization scheduled by an exact EGraph.
 - CKTSO dual-mode cluster/pipeline fast factorization with pivot check.
-- CKTSO pipelined tail factorization with pivoting after a pivot-check failure.
+- CKTSO pipelined ETree-descendant tail factorization with pivoting after a
+  pivot-check failure.
 - CKTSO structure-adaptive hybrid parallel triangular solve.
 - SubtreeLU separator-tree collapse for pivoting factorization.
 - SubtreeLU FLOP-balanced separator-tree partitioning for refactorization.
@@ -477,6 +489,19 @@ afterward. This is still not CKTSO tail restart because fallback remains a full
 pivoting factorization, but it narrows the wasted work before fallback and uses
 the same rejected-pivot coordinate needed by a future ETree-descendant restart.
 
+The unscaled fast-factor path was then extended with a block-local restart
+primitive. When a checked no-pivot fast factorization rejects a reused pivot in
+a BTF diagonal block, KLS can refactor only that BTF block with pivoting,
+splice the block's new row order into the global numeric permutation, rebuild
+the unscaled off-diagonal entries from the updated inverse permutation, and
+retry the checked fast factorization. Smoke tests now cover both the unscaled
+repair and the scaled fallback path, and representative static-pivot cases
+(`gemat12`, `onetone2`, `twotone`, and `rajat25`) did not trigger unexpected
+block restarts. This is useful CKTSO-aligned infrastructure, but it is still
+not CKTSO's production tail restart: it does not retain an ETree/EGraph tail,
+does not restart only descendant work inside a large single block, and does
+not handle scaled repairs.
+
 The selected-large KLU2 comparison was also run with the same 120s cap and one
 factor/refactor repeat. KLU2 completed only `rajat29`, `rajat30`, and
 `ASIC_680k`; it timed out on `G3_circuit`, `pre2`, `nxp1`, `Hamrle3`, and
@@ -498,11 +523,16 @@ patterns until a broader EGraph/separator-tree numeric kernel exists.
 
 1. Implement a real matching/scaling stage first, because MC64-style static
    pivoting appears in both NICSLU and CKTSO and can reduce dynamic pivoting
-   before any parallel scheduler is added. The `pre2` evidence is now strong
-   enough that more ordering backends should be lower priority than this.
+   before any parallel scheduler is added. The source must be LGPL-compatible:
+   use independent KLS code or a permissive source such as SPRAL-derived BSD
+   matching/scaling code, not HSL MC64 or restricted MC64 copies from other
+   solver trees. The `pre2` evidence is now strong enough that more ordering
+   backends should be lower priority than this.
 2. Build persistent dependency metadata for one KLS-owned numeric engine:
    either CKTSO's EGraph/ETree cluster/pipeline scheduler or SubtreeLU's
    separator-tree private/pipeline scheduler, not isolated benchmark guards.
+   The current unscaled block-local restart is a useful precursor, but the
+   target is ETree-descendant tail restart inside large blocks.
 3. Add a structure-adaptive triangular solve only after the LU storage owned by
    KLS exposes row-oriented or segmented access cheaply.
 4. Use static symbolic and numeric-cost models to decide whether a parallel

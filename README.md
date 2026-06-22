@@ -14,8 +14,9 @@ This repository currently contains the first working KLS implementation:
 - SPICE-cycle-oriented normal-vs-transpose internal orientation selection, with
   explicit orientation controls
 - Factor, refactor, solve, transpose-solve, and statistics APIs
-- Fast repeated factorization that reuses the existing numeric pattern before
-  checking pivot quality and falling back to full pivoting factorization
+- Fast repeated factorization that reuses the existing numeric pattern, checks
+  pivot quality, and can repair unscaled rejected BTF blocks before falling
+  back to full pivoting factorization
 - Value-aware static row pivoting and row/column equilibration trials for high
   off-diagonal-pivot cases
 - A MatrixMarket benchmark tool
@@ -113,16 +114,17 @@ without a large reciprocal-condition drop. Benchmark JSON reports both requested
 and selected pivot tolerance.
 
 When `fast_factor` reuses an existing factor pattern, KLS also checks the
-resulting L multipliers against the selected pivot tolerance. A reused pivot
-order whose multipliers violate the threshold pivot rule is discarded and the
-call falls back to full pivoting factorization. For scaled serial fast-factor
-calls, KLS uses its pivot-checking refactor kernel so it can stop at the first
-unsafe multiplier instead of completing a full KLU refactor and checking only
-afterward. Benchmark stats report `fast_rejected_pivot` and
-`fast_rejected_pivot_col` for the first rejected factor-order pivot and its
-original matrix column, or `-1` when no fast-path pivot check failed. These
-fields are intended to guide CKTSO-style tail-restart work without accepting an
-unsafe reused pivot order.
+resulting L multipliers against the selected pivot tolerance. On unscaled BTF
+patterns, a rejected reused pivot can restart the rejected diagonal block with
+pivoting, splice the repaired block permutation back into the numeric object,
+and retry the checked fast factorization. Scaled fast-factor calls still use
+the pivot-checking refactor kernel so they can stop at the first unsafe
+multiplier, but they fall back to full pivoting factorization when a repair is
+needed. Benchmark stats report `fast_rejected_pivot`,
+`fast_rejected_pivot_col`, and `fast_block_restarts` for the first rejected
+factor-order pivot, its original matrix column, and the number of repaired BTF
+blocks. These fields are intended to guide fuller CKTSO-style tail-restart
+work without accepting an unsafe reused pivot order.
 
 Use `--no-static-pivoting` to disable KLS's value-aware static row-pivoting
 trial. When enabled, `auto` can preemptively build a weighted row permutation
@@ -151,7 +153,10 @@ candidates with both majority missing and majority weak diagonals can keep the
 row permutation but prefer unscaled values, avoiding matching-equilibration
 setup when it would increase fill. Benchmark JSON reports both whether static
 pivoting was enabled, whether KLS selected it, and whether the accepted static
-match used exact assignment.
+match used exact assignment. KLS does not vendor HSL MC64 or the MC64 copies
+carried by some solver projects; future MC64-equivalent code must be
+LGPL-compatible, for example BSD-licensed SPRAL-derived scaling/matching code
+or independent KLS code.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF
@@ -321,17 +326,17 @@ This is a functional implementation with KLS-level analysis choices for
 repeated SPICE-style solves and a KLS-owned threaded refactor path for BTF block
 parallelism on a narrow class of large cases. KLS also has a precomputed
 single-block and serial BTF refactor scatter path for unscaled repeated
-refactors. It is not
-yet a generally CKTSO-beating solver across broad circuit corpora. The next
-algorithmic work is to evolve the numeric factor/refactor/solve kernels toward
-deeper KLS-owned sparse kernels with better pivot reuse and parallelism while
-keeping the public API and benchmark harness stable.
+refactors, plus an unscaled block-local pivot restart for fast-factor failures.
+It is not yet a generally CKTSO-beating solver across broad circuit corpora.
+The next algorithmic work is to evolve the numeric factor/refactor/solve
+kernels toward deeper KLS-owned sparse kernels with better pivot reuse and
+parallelism while keeping the public API and benchmark harness stable.
 
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
 includes SuiteSparse-derived KLU, AMD, COLAMD, BTF, and UFconfig sources from
-Trilinos, plus optional METIS/GKlib ordering support; see
+Trilinos, plus optional METIS/GKlib and SCOTCH ordering support; see
 `THIRD_PARTY_NOTICES.md` for attribution.
 
 For a paper-by-paper implementation checklist, see

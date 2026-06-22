@@ -4,6 +4,9 @@
 
 #include <stdio.h>
 
+#define DLONG 1
+#include "trilinos_klu_internal.h"
+#undef DLONG
 #include "trilinos_klu_decl.h"
 #include "trilinos_camd.h"
 #ifdef KLS_HAVE_METIS
@@ -58,6 +61,7 @@ struct kls_solver {
   int auto_pivot_checked;
   int auto_scale_checked;
   int exact_matching_selected;
+  int fast_block_restarts;
 };
 
 typedef struct kls_pattern_candidate {
@@ -253,6 +257,8 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   }
   solver->stats.fast_rejected_pivot = -1;
   solver->stats.fast_rejected_pivot_col = -1;
+  solver->stats.fast_block_restarts = 0;
+  solver->fast_block_restarts = 0;
 }
 
 static void kls_record_fast_reject(kls_solver *solver,
@@ -782,6 +788,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_pivot_checked = 0;
   solver->auto_scale_checked = 0;
   solver->exact_matching_selected = 0;
+  solver->fast_block_restarts = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
   kls_clear_fast_reject_stats(solver);
@@ -4841,6 +4848,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.selected_pivot_tolerance = solver->common.tol;
   solver->stats.selected_static_pivoting = solver->row_perm != NULL;
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
+  solver->stats.fast_block_restarts = solver->fast_block_restarts;
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
     solver->stats.selected_btf = solver->symbolic->do_btf ? 1 : 0;
@@ -4861,6 +4869,7 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.selected_pivot_tolerance = solver->common.tol;
   solver->stats.selected_static_pivoting = solver->row_perm != NULL;
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
+  solver->stats.fast_block_restarts = solver->fast_block_restarts;
   solver->stats.selected_btf =
     (solver->symbolic != NULL && solver->symbolic->do_btf) ? 1 : 0;
   solver->stats.numerical_rank = (int64_t)solver->common.numerical_rank;
@@ -5217,6 +5226,272 @@ static int kls_numeric_pivots_pass_threshold(const kls_solver *solver,
       }
     }
   }
+  return 1;
+}
+
+static UF_long kls_block_for_pivot(const kls_solver *solver, UF_long pivot) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->R == NULL || pivot >= solver->n) {
+    return KLS_KLU_EMPTY;
+  }
+  UF_long lo = 0;
+  UF_long hi = solver->symbolic->nblocks;
+  while (lo + 1u < hi) {
+    const UF_long mid = lo + (hi - lo) / 2u;
+    if (solver->symbolic->R[mid] <= pivot) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return pivot >= solver->symbolic->R[lo] &&
+         pivot < solver->symbolic->R[lo + 1u] ? lo : KLS_KLU_EMPTY;
+}
+
+static int kls_recompute_offdiag_from_pinv(kls_solver *solver,
+                                           const double *numeric_values) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      numeric_values == NULL || solver->symbolic->Q == NULL ||
+      solver->symbolic->R == NULL || solver->numeric->Pinv == NULL ||
+      solver->numeric->Offp == NULL || solver->numeric->Offi == NULL ||
+      solver->numeric->Offx == NULL || solver->common.scale > 0 ||
+      solver->numeric->Rs != NULL) {
+    return 0;
+  }
+
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  UF_long poff = 0;
+  UF_long block = 0;
+  for (UF_long k = 0; k < solver->n; ++k) {
+    while (block + 1u < symbolic->nblocks &&
+           symbolic->R[block + 1u] <= k) {
+      block++;
+    }
+    const UF_long k1 = symbolic->R[block];
+    const UF_long k2 = symbolic->R[block + 1u];
+    const UF_long oldcol = symbolic->Q[k];
+    if (oldcol >= solver->n) {
+      return 0;
+    }
+    numeric->Offp[k] = poff;
+    for (UF_long p = solver->col_ptr[oldcol];
+         p < solver->col_ptr[oldcol + 1u]; ++p) {
+      const UF_long oldrow = solver->row_idx[p];
+      if (oldrow >= solver->n) {
+        return 0;
+      }
+      const UF_long row = numeric->Pinv[oldrow];
+      if (row >= solver->n) {
+        return 0;
+      }
+      if (row < k1) {
+        if (poff >= numeric->nzoff) {
+          return 0;
+        }
+        numeric->Offi[poff] = row;
+        ((double *)numeric->Offx)[poff] = numeric_values[p];
+        poff++;
+      } else if (row >= k2) {
+        return 0;
+      }
+    }
+  }
+  numeric->Offp[solver->n] = poff;
+  return poff == numeric->nzoff;
+}
+
+static int kls_pivot_restart_rejected_block(kls_solver *solver,
+                                            double *numeric_values,
+                                            UF_long rejected_pivot) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      numeric_values == NULL || rejected_pivot == KLS_KLU_EMPTY ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      solver->symbolic->R == NULL || solver->symbolic->P == NULL ||
+      solver->symbolic->Q == NULL ||
+      solver->symbolic->Lnz == NULL || solver->numeric->LUbx == NULL ||
+      solver->numeric->LUsize == NULL || solver->numeric->Udiag == NULL ||
+      solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
+      solver->numeric->Lip == NULL || solver->numeric->Uip == NULL ||
+      solver->numeric->Pnum == NULL || solver->numeric->Pinv == NULL ||
+      solver->numeric->Xwork == NULL || solver->numeric->Iwork == NULL) {
+    return 0;
+  }
+
+  const UF_long block = kls_block_for_pivot(solver, rejected_pivot);
+  if (block == KLS_KLU_EMPTY) {
+    return 0;
+  }
+  const UF_long k1 = solver->symbolic->R[block];
+  const UF_long k2 = solver->symbolic->R[block + 1u];
+  const UF_long nk = k2 - k1;
+  if (nk <= 1u || nk > solver->symbolic->maxblock) {
+    return 0;
+  }
+
+  UF_long *psinv =
+    (UF_long *)malloc((size_t)solver->n * sizeof(*psinv));
+  if (psinv == NULL) {
+    return 0;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    psinv[k] = KLS_KLU_EMPTY;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    const UF_long row = solver->symbolic->P[k];
+    if (row >= solver->n) {
+      free(psinv);
+      return 0;
+    }
+    psinv[row] = k;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    if (psinv[k] == KLS_KLU_EMPTY) {
+      free(psinv);
+      return 0;
+    }
+  }
+
+  UF_long old_lnz_block = 0;
+  UF_long old_unz_block = 0;
+  for (UF_long k = k1; k < k2; ++k) {
+    old_lnz_block += solver->numeric->Llen[k] + 1u;
+    old_unz_block += solver->numeric->Ulen[k] + 1u;
+  }
+
+  double lsize = 0.0;
+  if (solver->symbolic->Lnz[block] < 0.0) {
+    lsize = -(solver->common.initmem);
+  } else {
+    lsize = solver->common.initmem_amd * solver->symbolic->Lnz[block] +
+            (double)nk;
+  }
+
+  Unit *new_lu = NULL;
+  UF_long lnz_block = 0;
+  UF_long unz_block = 0;
+  UF_long *pblock =
+    solver->numeric->Iwork + 5u * (size_t)solver->symbolic->maxblock;
+  const int old_status = (int)solver->common.status;
+  const UF_long old_numerical_rank = (UF_long)solver->common.numerical_rank;
+  const UF_long old_singular_col = (UF_long)solver->common.singular_col;
+  const UF_long old_noffdiag = (UF_long)solver->common.noffdiag;
+  solver->common.status = TRILINOS_KLU_OK;
+  solver->common.numerical_rank = KLS_KLU_EMPTY;
+  solver->common.singular_col = KLS_KLU_EMPTY;
+
+  const size_t new_size =
+    TRILINOS_KLU_kernel_factor(nk, solver->col_ptr, solver->row_idx,
+                               numeric_values, solver->symbolic->Q,
+                               lsize, &new_lu,
+                               ((double *)solver->numeric->Udiag) + k1,
+                               solver->numeric->Llen + k1,
+                               solver->numeric->Ulen + k1,
+                               solver->numeric->Lip + k1,
+                               solver->numeric->Uip + k1,
+                               pblock, &lnz_block, &unz_block,
+                               (double *)solver->numeric->Xwork,
+                               solver->numeric->Iwork, k1,
+                               psinv, NULL,
+                               solver->numeric->Offp,
+                               solver->numeric->Offi,
+                               (double *)solver->numeric->Offx,
+                               &solver->common);
+  if (new_size == 0 || new_lu == NULL || solver->common.status < 0 ||
+      (solver->common.status == TRILINOS_KLU_SINGULAR &&
+       solver->common.halt_if_singular)) {
+    if (new_lu != NULL) {
+      (void)TRILINOS_KLU_free(new_lu, new_size, sizeof(Unit), &solver->common);
+    }
+    solver->common.status = old_status;
+    solver->common.numerical_rank = old_numerical_rank;
+    solver->common.singular_col = old_singular_col;
+    solver->common.noffdiag = old_noffdiag;
+    free(psinv);
+    return 0;
+  }
+
+  (void)TRILINOS_KLU_free(solver->numeric->LUbx[block],
+                          solver->numeric->LUsize[block],
+                          sizeof(Unit), &solver->common);
+  solver->numeric->LUbx[block] = new_lu;
+  solver->numeric->LUsize[block] = new_size;
+
+  for (UF_long k = 0; k < nk; ++k) {
+    const UF_long local_row = pblock[k];
+    if (local_row >= nk) {
+      solver->common.status = old_status;
+      solver->common.numerical_rank = old_numerical_rank;
+      solver->common.singular_col = old_singular_col;
+      solver->common.noffdiag = old_noffdiag;
+      free(psinv);
+      return 0;
+    }
+    solver->numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + local_row];
+  }
+
+  for (UF_long k = 0; k < solver->n; ++k) {
+    solver->numeric->Pinv[k] = KLS_KLU_EMPTY;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    const UF_long row = solver->numeric->Pnum[k];
+    if (row >= solver->n) {
+      solver->common.status = old_status;
+      solver->common.numerical_rank = old_numerical_rank;
+      solver->common.singular_col = old_singular_col;
+      solver->common.noffdiag = old_noffdiag;
+      free(psinv);
+      return 0;
+    }
+    solver->numeric->Pinv[row] = k;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    if (solver->numeric->Pinv[k] == KLS_KLU_EMPTY) {
+      solver->common.status = old_status;
+      solver->common.numerical_rank = old_numerical_rank;
+      solver->common.singular_col = old_singular_col;
+      solver->common.noffdiag = old_noffdiag;
+      free(psinv);
+      return 0;
+    }
+  }
+
+  if (!kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
+    solver->common.status = old_status;
+    solver->common.numerical_rank = old_numerical_rank;
+    solver->common.singular_col = old_singular_col;
+    solver->common.noffdiag = old_noffdiag;
+    free(psinv);
+    return 0;
+  }
+
+  solver->numeric->lnz =
+    solver->numeric->lnz - old_lnz_block + lnz_block;
+  solver->numeric->unz =
+    solver->numeric->unz - old_unz_block + unz_block;
+  solver->numeric->max_lnz_block =
+    solver->numeric->max_lnz_block < lnz_block
+      ? lnz_block : solver->numeric->max_lnz_block;
+  solver->numeric->max_unz_block =
+    solver->numeric->max_unz_block < unz_block
+      ? unz_block : solver->numeric->max_unz_block;
+  if (solver->symbolic->Lnz[block] < 0.0) {
+    solver->symbolic->Lnz[block] =
+      (double)(lnz_block > unz_block ? lnz_block : unz_block);
+  }
+  UF_long offdiag = 0;
+  for (UF_long k = 0; k < solver->n; ++k) {
+    if (solver->numeric->Pnum[k] != solver->symbolic->P[k]) {
+      offdiag++;
+    }
+  }
+  solver->common.noffdiag = offdiag;
+  solver->fast_block_restarts++;
+  free_refactor_map(solver);
+  solver->common.status = TRILINOS_KLU_OK;
+  solver->common.numerical_rank = KLS_KLU_EMPTY;
+  solver->common.singular_col = KLS_KLU_EMPTY;
+  free(psinv);
   return 1;
 }
 
@@ -5796,6 +6071,29 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   return 1;
 }
 
+static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
+                                                   double *numeric_values) {
+  const int max_restarts = 4;
+  for (int attempt = 0; attempt <= max_restarts; ++attempt) {
+    const UF_long ok = kls_parallel_refactor(solver, numeric_values, 1);
+    if (ok || solver->common.status < 0 ||
+        solver->common.status == TRILINOS_KLU_SINGULAR) {
+      return ok;
+    }
+    if (solver->stats.fast_rejected_pivot < 0 ||
+        solver->common.scale > 0 || solver->numeric == NULL ||
+        attempt == max_restarts) {
+      return 0;
+    }
+    if (!kls_pivot_restart_rejected_block(
+          solver, numeric_values,
+          (UF_long)solver->stats.fast_rejected_pivot)) {
+      return 0;
+    }
+  }
+  return 0;
+}
+
 int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -5821,7 +6119,8 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   if (solver->options.fast_factor && solver->numeric != NULL) {
     const double start = kls_now_seconds();
-    const UF_long ok = kls_parallel_refactor(solver, numeric_values, 1);
+    const UF_long ok = kls_fast_factor_with_block_restarts(solver,
+                                                           numeric_values);
     elapsed += kls_now_seconds() - start;
     if (ok && solver->common.status >= 0 &&
         solver->common.status != TRILINOS_KLU_SINGULAR) {
