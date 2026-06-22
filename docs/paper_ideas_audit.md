@@ -1122,6 +1122,19 @@ improvement on `rajat28`, which does not consume that cache. These results
 make it unlikely that more small EGraph bookkeeping reductions will close the
 remaining CKTSO gap.
 
+A follow-up `rajat28` policy sweep also confirmed that the remaining worst
+focused-row gap is not a missing scale-mode or static-pivoting toggle. With the
+retained static-pivoted AMD/BTF path, auto, no-scale, sum-scale, and max-scale
+variants all stayed in the roughly 0.15-0.17s repeated-refactor class, while
+CKTSO's saved four-thread artifact is about 0.011s. Disabling static pivoting
+was worse: METIS/scale-auto paid about 10.37s initial factor and stayed around
+0.21s repeated refactor, and METIS/no-scale paid about 13.93s initial factor
+and about 1.54s repeated refactor. This keeps `rajat28` in the dominant-block
+numeric-kernel bucket, not the MC64/preprocessing bucket. The MC64-compatible
+boundary remains unchanged: use the pinned BSD-licensed SPRAL scaling subset,
+a compatible system SPRAL, or independent KLS code; do not vendor HSL MC64 or
+solver-tree copies that retain HSL redistribution restrictions.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
