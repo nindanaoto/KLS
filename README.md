@@ -60,10 +60,11 @@ independent BTF diagonal blocks for large, high-flop cases, including existing
 KLU row-scaling modes when reusable scale storage and enough independent BTF
 block work are present. KLS keeps a solver-owned worker pool for this path, so
 repeated SPICE refactors do not relaunch threads every cycle. Small matrices,
-single-block matrices, and factor/solve kernels still use the serial path.
-For unscaled single-block matrices, KLS also precomputes a refactor scatter map
-from the fixed pivot order so repeated refactors do not redo the same `Q` and
-`Pinv` structure lookups every cycle.
+factor kernels, solve kernels, and BTF cases that are not wide enough for the
+threaded path still use serial execution. For unscaled serial refactors, KLS
+also precomputes a scatter map from the fixed pivot order so repeated
+single-block and serial BTF refactors do not redo the same `Q` and `Pinv`
+structure lookups every cycle.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium

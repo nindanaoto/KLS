@@ -11,8 +11,9 @@ implemented the ideas that can be layered around the current KLU-derived
 Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, CAMD refinement,
 auto scaling policy, pivot-checked reuse, static row-pivoting trials with
 matching-derived equilibration, and BTF-block parallel refactorization with a
-solver-owned worker pool. KLS now also keeps a precomputed single-block
-refactor scatter map for unscaled repeated refactors.
+solver-owned worker pool. KLS now also keeps precomputed refactor scatter
+metadata for unscaled serial repeated refactors, covering both single-block and
+serial BTF cases.
 
 The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
@@ -34,7 +35,7 @@ project does not drift toward benchmark-name-specific heuristics.
 
 | Reference | Implemented in KLS | Partial or open coverage |
 | --- | --- | --- |
-| Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
+| Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection and serial refactor scatter metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
 | NICSLU | AMD-style ordering, optional static-pivoting preprocessing, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. | Full MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and EGraph-guided refactorization are not implemented. A levelized EGraph refactor prototype was tried and rejected because it was not a general win on the current kernel/storage. |
 | CKTSO | METIS nested-dissection ordering, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, and matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is only approximated. The dual cluster/pipeline EGraph scheduler, pipelined tail restart with pivoting after a failed pivot check, and structure-adaptive triangular solve are not implemented. KLS currently falls back to full pivoting factorization after unsafe reused pivots. |
 | SubtreeLU | KLS vendors reproducible METIS/GKlib submodules and uses METIS plus CAMD refinement, which overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. | KLS does not retain a separator tree, collapse/partition it into private and pipeline task queues, constrain pivot search within separator-tree subdomains, perform FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
@@ -76,11 +77,12 @@ design work, not benchmark-specific tuning.
   is wide enough to offset thread overhead. The threaded path keeps a persistent
   worker pool on the solver instance so repeated SPICE refactors reuse workers
   and scratch storage instead of relaunching threads each cycle.
-- KLS-owned single-block refactor metadata: for unscaled one-block numeric
-  patterns, KLS precomputes the fixed scatter from factor-order columns to
-  pivotal rows and input value positions. This removes repeated `Q`/`Pinv`
-  structure lookups from SPICE refactor cycles while preserving the existing
-  KLU-derived LU storage.
+- KLS-owned serial refactor metadata: for unscaled numeric patterns that are
+  not handled by the threaded BTF worker pool, KLS precomputes the fixed
+  scatter from factor-order columns to pivotal rows and input value positions.
+  This removes repeated `Q`/`Pinv` structure lookups from SPICE refactor cycles
+  while preserving the existing KLU-derived LU storage. It covers both
+  single-block and serial BTF refactors.
 - SPICE-cycle orientation policy: KLS can analyze normal and transposed storage
   orientations and select the faster internal form for repeated solve cycles.
 - LGPL project licensing and third-party notices: KLS itself is
@@ -93,8 +95,8 @@ design work, not benchmark-specific tuning.
   permutation and matching-derived row/column equilibration, but not a full
   MC64-style maximum-product matching algorithm with assignment dual scaling.
 - NICSLU/CKTSO parallel scheduling is only present at BTF-block granularity.
-  KLS now has a small piece of persistent intra-block refactor metadata for
-  single-block matrices, but not an EGraph/ETree cluster/pipeline scheduler.
+  KLS now has persistent serial scatter metadata for unscaled refactors, but
+  not an EGraph/ETree cluster/pipeline scheduler.
 - CKTSO fast factorization is present as pivot-checked reuse plus full fallback.
   KLS does not yet implement CKTSO's pipelined tail factorization that restarts
   from the ETree descendants after a failed pivot check.
@@ -127,11 +129,20 @@ implementation regressed dominant-block circuit cases where the current
 BTF-block threaded refactor is faster. Keeping it would have required
 case-specific dispatch, which is not the desired direction for KLS.
 
-A KLS-owned serial no-pivot refactor path was also prototyped by reusing the
-threaded BTF-block refactor kernel when thread-level parallelism was not
-eligible. It passed correctness tests and helped some no-scale cases, but it
+A broader KLS-owned serial no-pivot refactor path was also prototyped by
+reusing the threaded BTF-block refactor kernel when thread-level parallelism was
+not eligible. It passed correctness tests and helped some no-scale cases, but it
 regressed other representative circuit cases such as `bcircuit` and `rajat03`.
-The prototype was removed because it did not represent a general improvement.
+The broad prototype was removed because it did not represent a general
+improvement. A later narrower version kept only the precomputed unscaled serial
+scatter metadata; same-session suite testing showed that subset as a modest
+general win.
+
+The refactor scatter map was also tried in scaled and threaded-worker forms.
+The scaled extension improved a focused hard case but regressed the full suite,
+and passing the map through the worker pool regressed representative threaded
+BTF cases. KLS therefore keeps the map on the unscaled serial path and leaves
+the threaded worker-pool scatter path separate.
 
 A work-balanced BTF refactor scheduler was tested by sorting independent BTF
 blocks by an LU-length work estimate before launching worker threads. It was
