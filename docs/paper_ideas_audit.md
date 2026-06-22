@@ -473,6 +473,22 @@ matching. This closes a small piece of MC64 functionality but confirms that
 KLS still needs an optimized production MC64-equivalent matcher, not the
 straightforward min-cost implementation, before the CKTSO-scale gap can close.
 
+The exact assignment implementation was then changed from a generic
+source/sink residual graph to a KLS-owned sparse row/column
+shortest-augmenting-path matcher. This removes the extra source/sink edges and
+keeps the code LGPL-compatible, but the policy gate remains conservative. A
+same-machine wider-gate retest with the corrected source/sink semantics
+selected exact matching for `gemat11` and `gemat12`. `gemat12` improved from 7
+to 3 off-diagonal pivots, but initial factor/preprocessing time was still about
+4.24s; `gemat11` stayed at 0 off-diagonal pivots and also paid about 4.24s.
+Restoring the small gate returned `gemat11`/`gemat12` to the prior fast path
+(`selected_exact_matching=false`, 0 and 7 off-diagonal pivots), while
+`onetone2`, `twotone`, and `rajat25` also stayed off the exact path. The
+lesson is that maximum-product matching alone is too expensive to use as a
+medium/large default; KLS still needs MC64-quality scaling and acceptance plus
+a more optimized assignment implementation before this can close the CKTSO
+gap.
+
 The fast-factor pivot-check path was then made more diagnostic by recording the
 first rejected factor-order pivot and original matrix column in `kls_stats` and
 benchmark JSON. This does not implement CKTSO's pipelined tail factorization,

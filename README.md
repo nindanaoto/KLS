@@ -136,11 +136,11 @@ augmenting paths per pass instead of restarting a search from each unmatched
 row. For cheap small candidates, KLS can instead run an exact sparse
 augmenting-path assignment on transformed log magnitudes, equivalent to a
 maximum-product diagonal match when a full matching is found. The exact path is
-gated by matrix order and `n * nnz` work because the straightforward sparse
-min-cost assignment is not fast enough to replace production MC64 on larger
-SPICE matrices. Medium static-pivot matches then run a bounded
-alternating-cycle improvement pass that can accept profitable three- and
-four-row exchanges missed by the pair-swap pass. For matched diagonals with
+gated by matrix order and `n * nnz` work because even the KLS-owned
+assignment-specific path is not a substitute for production MC64 acceptance
+and scaling on larger SPICE matrices. Medium static-pivot matches then run a
+bounded alternating-cycle improvement pass that can accept profitable three-
+and four-row exchanges missed by the pair-swap pass. For matched diagonals with
 large numeric spread, KLS can also trial matching-derived row/column
 equilibration. The equilibration first tries a
 dual-potential scaling pass that mirrors MC64's diagonal-normalization
