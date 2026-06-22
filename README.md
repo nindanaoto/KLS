@@ -115,8 +115,9 @@ static pivoting was enabled and whether KLS selected it.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF
-for large matrices where BTF finds a single block and a no-BTF symbolic retry
-keeps the fill estimate within tolerance. For large, low-degree, nearly
+for large matrices where BTF finds either a single block or one dominant block
+with a small fringe, and a no-BTF symbolic retry gives enough evidence to keep
+or improve the fill estimate. For large, low-degree, nearly
 diagonal patterns, medium low-degree full-diagonal patterns, medium sparse
 high-degree mostly diagonal patterns, and for METIS-started medium
 dense-diagonal high-degree patterns, `auto` can also start without BTF to avoid

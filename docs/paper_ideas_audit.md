@@ -57,14 +57,18 @@ design work, not benchmark-specific tuning.
 - Combined ordering policy: KLS auto mode can choose AMD, COLAMD, or METIS,
   retry no-BTF symbolic analysis for structural cases where BTF is not useful,
   and promote expensive numeric factorizations to METIS when actual fill/flop
-  evidence is better. The METIS promotion gate also covers small
-  BTF-dominant matrices when the first factorization shows many off-diagonal
-  pivots and high actual fill/flop growth. KLS also starts directly with METIS
-  for narrow large-diagonal structural classes from the paper corpus: very
-  low-degree full diagonals, sparse full diagonals with bounded but meaningful
-  row/column degree, and nearly full diagonals with a large dense degree spike.
-  This preserves the papers' nested-dissection motivation without naming
-  individual matrices.
+  evidence is better. The no-BTF retry covers both single-block BTF analyses
+  and large dominant-block BTF analyses when the stripped fringe is small and
+  the no-BTF symbolic estimate is materially better, matching KLU's warning
+  that BTF can occasionally increase factor fill. The METIS promotion gate also
+  covers small BTF-dominant matrices when the first factorization shows many
+  off-diagonal pivots and high actual fill/flop growth, and preserves the
+  selected BTF/no-BTF mode when comparing a METIS promotion candidate. KLS also
+  starts directly with METIS for narrow large-diagonal structural classes from
+  the paper corpus: very low-degree full diagonals, sparse full diagonals with
+  bounded but meaningful row/column degree, and nearly full diagonals with a
+  large dense degree spike. This preserves the papers' nested-dissection
+  motivation without naming individual matrices.
 - Constrained nested-dissection refinement: KLS can refine METIS rank groups
   with CAMD constraints, preserving nested-dissection rank shape while reducing
   local fill and flops.
@@ -231,14 +235,19 @@ path. The change passed correctness tests, but focused A/B timings were mixed
 and did not show a general win; the simpler shared loop remains in place until a
 larger KLS-owned numeric kernel makes this separation worthwhile.
 
-The no-BTF symbolic retry was widened from single-block BTF cases to
+The no-BTF symbolic retry was initially widened from single-block BTF cases to
 dominant-block BTF cases, including METIS-started auto orderings. This is
-consistent with KLU's observation that BTF can occasionally hurt, and it
-improved `rajat03` once static row matching was prevented from adding a
-one-time trial cost. The full 25-matrix same-session extended suite still
-regressed, with the candidate geomean at 0.03816s versus the baseline at
-0.03799s. The broader retry was removed; KLS keeps only the current
-single-block no-BTF retry.
+consistent with KLU's observation that BTF can occasionally hurt, but the broad
+version paid extra symbolic-analysis cost on unrelated multi-block matrices and
+regressed the full 25-matrix same-session extended suite, with the candidate
+geomean at 0.03816s versus the baseline at 0.03799s. A later narrower version
+was retained: it only retries no-BTF for large BTF analyses whose largest block
+covers at least 95% of the matrix with a small stripped fringe, and it only
+accepts the no-BTF symbolic when the score improves by at least 20%. That
+rescued the KLU-paper `Raj1` and `rajat24` cases from timeout/missing status
+under the paper-medium run while keeping ASIC-style dominant-block cases on BTF.
+The METIS promotion trial was also fixed to preserve the selected BTF/no-BTF
+mode, which lets `Raj1` promote from no-BTF AMD to no-BTF METIS.
 
 The pre-factor static row-matching path was also tested without the augmenting
 and swap-improvement pass, leaving only the initial greedy maximum-value
