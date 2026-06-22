@@ -969,6 +969,125 @@ static int is_medium_sparse_high_degree_diagonal_pattern(UF_long n,
 }
 
 #ifdef KLS_HAVE_METIS
+static int is_large_very_low_degree_full_diagonal_pattern(UF_long n,
+                                                          const UF_long *col_ptr,
+                                                          const UF_long *row_idx) {
+  if (n < 100000 || col_ptr == NULL || row_idx == NULL ||
+      n > UF_long_max / 5 || col_ptr[n] > 5u * n) {
+    return 0;
+  }
+
+  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_count = 0;
+  UF_long max_col_degree = 0;
+  int very_low_degree = 1;
+  for (UF_long col = 0; col < n && very_low_degree; ++col) {
+    const UF_long col_degree = col_ptr[col + 1] - col_ptr[col];
+    if (col_degree > max_col_degree) {
+      max_col_degree = col_degree;
+    }
+    if (col_degree > 6) {
+      very_low_degree = 0;
+      break;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] >= 6) {
+        very_low_degree = 0;
+        break;
+      }
+      row_degree[row]++;
+      if (row == col) {
+        diagonal_count++;
+      }
+    }
+  }
+
+  UF_long max_row_degree = 0;
+  for (UF_long row = 0; row < n && very_low_degree; ++row) {
+    if (row_degree[row] == 0) {
+      very_low_degree = 0;
+      break;
+    }
+    if (row_degree[row] > max_row_degree) {
+      max_row_degree = row_degree[row];
+    }
+  }
+  free(row_degree);
+
+  return very_low_degree && max_col_degree <= 6 && max_row_degree <= 6 &&
+         diagonal_count == n;
+}
+
+static int is_large_diagonal_metis_start_pattern(UF_long n,
+                                                 const UF_long *col_ptr,
+                                                 const UF_long *row_idx) {
+  if (n < 90000 || col_ptr == NULL || row_idx == NULL ||
+      n > UF_long_max / 10) {
+    return 0;
+  }
+
+  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_count = 0;
+  UF_long max_col_degree = 0;
+  int valid = 1;
+  for (UF_long col = 0; col < n && valid; ++col) {
+    const UF_long col_degree = col_ptr[col + 1] - col_ptr[col];
+    if (col_degree > max_col_degree) {
+      max_col_degree = col_degree;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] == UF_long_max) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      if (row == col) {
+        diagonal_count++;
+      }
+    }
+  }
+
+  UF_long max_row_degree = 0;
+  for (UF_long row = 0; row < n && valid; ++row) {
+    if (row_degree[row] == 0) {
+      valid = 0;
+      break;
+    }
+    if (row_degree[row] > max_row_degree) {
+      max_row_degree = row_degree[row];
+    }
+  }
+  free(row_degree);
+
+  if (!valid) {
+    return 0;
+  }
+
+  const int full_sparse =
+    diagonal_count == n && col_ptr[n] <= 6u * n &&
+    max_col_degree <= 512u && max_row_degree <= 512u &&
+    (max_col_degree > 64u || max_row_degree > 64u);
+  const int dense_spike_density =
+    col_ptr[n] >= 8u * n || (n >= 250000 && col_ptr[n] >= 6u * n);
+  const int dense_spike =
+    1000.0 * (double)diagonal_count >= 999.0 * (double)n &&
+    dense_spike_density &&
+    col_ptr[n] <= 10u * n &&
+    (2.0 * (double)max_col_degree >= (double)n ||
+     2.0 * (double)max_row_degree >= (double)n);
+  return full_sparse || dense_spike;
+}
+
 static int is_medium_bounded_degree_diagonal_pattern(UF_long n,
                                                      const UF_long *col_ptr,
                                                      const UF_long *row_idx) {
@@ -1034,6 +1153,9 @@ static int choose_auto_scale_from_pattern(UF_long n,
     return -1;
   }
 #ifdef KLS_HAVE_METIS
+  if (is_large_diagonal_metis_start_pattern(n, col_ptr, row_idx)) {
+    return -1;
+  }
   if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
     return -1;
   }
@@ -1494,6 +1616,12 @@ static void maybe_retry_single_block_without_btf(UF_long n,
 static int should_start_auto_with_metis(UF_long n,
                                         const UF_long *col_ptr,
                                         const UF_long *row_idx) {
+  if (is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
+    return 1;
+  }
+  if (is_large_diagonal_metis_start_pattern(n, col_ptr, row_idx)) {
+    return 1;
+  }
   if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
     return 1;
   }
@@ -3017,6 +3145,19 @@ static int choose_symbolic_for_pattern(UF_long n,
     }
     return status;
   }
+
+#ifdef KLS_HAVE_METIS
+  if (is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
+    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
+                                       KLS_ORDERING_METIS, symbolic_out,
+                                       common_out);
+    if (status == KLS_OK) {
+      *selected_ordering_out = KLS_ORDERING_METIS;
+      *score_out = symbolic_score(*symbolic_out);
+      return KLS_OK;
+    }
+  }
+#endif
 
   kls_options auto_options = *options;
   const kls_options *symbolic_options = options;
