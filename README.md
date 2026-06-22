@@ -177,6 +177,15 @@ medium caps, including the largest KLU/NICSLU/SubtreeLU labels:
 python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_paper_large_manifest.txt --out data/suitesparse-paper-large
 ```
 
+Use the medium paper suite as the normal inner loop for solver-policy changes.
+Use the large supplement as an overnight or pre-merge generalization gate with
+explicit timeouts; a retained change should improve the paper geomean or a
+defensible structural class, not just one large matrix name:
+
+```sh
+python3 scripts/run_bench_suite.py --kls-bench build/kls_bench --matrix-dir data/suitesparse-paper-large --orientation auto --threads 4 --timeout 900 --jsonl build/kls_paper_large.jsonl
+```
+
 To regenerate a metadata-bounded subset from the full paper corpus and record
 the exact canonical SuiteSparse names used:
 
@@ -229,6 +238,19 @@ python3 scripts/run_cktso_suite.py --cktso-compare build-cktso/cktso_compare --m
 CKTSO must be licensed correctly according to its own distribution
 requirements, usually by colocating the license file with the selected shared
 library.
+
+An optional Trilinos KLU2 comparison tool can be built against a local Trilinos
+checkout. It calls the Amesos2 KLU2 headers directly and emits the same
+SPICE-cycle JSON metric:
+
+```sh
+cmake -S . -B build-klu2 -DKLS_BUILD_KLU2_COMPARE=ON \
+  -DKLU2_ROOT=/path/to/Trilinos/packages/amesos2/src/KLU2 \
+  -DTEUCHOS_CORE_ROOT=/path/to/Trilinos/packages/rol/src/compatibility/teuchos-lite
+cmake --build build-klu2 -j --target klu2_compare
+./build-klu2/klu2_compare matrix.mtx 10 10
+python3 scripts/run_klu2_suite.py --klu2-compare build-klu2/klu2_compare --matrix-dir data/suitesparse-paper-medium --jsonl build/klu2_suite.jsonl --timeout 120
+```
 
 ## Status
 

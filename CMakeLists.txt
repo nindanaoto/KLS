@@ -8,9 +8,12 @@ project(KLS
 option(KLS_BUILD_TESTS "Build KLS tests" ON)
 option(KLS_BUILD_BENCHMARKS "Build KLS benchmark tools" ON)
 option(KLS_BUILD_CKTSO_COMPARE "Build optional CKTSO comparison tool" OFF)
+option(KLS_BUILD_KLU2_COMPARE "Build optional Trilinos KLU2 comparison tool" OFF)
 option(KLS_ENABLE_METIS "Enable METIS nested-dissection ordering support" ON)
 option(KLS_USE_SYSTEM_METIS "Use a system METIS library instead of the bundled submodule" OFF)
 set(CKTSO_ROOT "" CACHE PATH "Path to a local CKTSO distribution")
+set(KLU2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/amesos2/src/KLU2" CACHE PATH "Path to a Trilinos Amesos2 KLU2 source directory")
+set(TEUCHOS_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/rol/src/compatibility/teuchos-lite" CACHE PATH "Path to Trilinos Teuchos-compatible headers for KLU2")
 set(KLS_SYSTEM_METIS_INCLUDE_DIR "" CACHE PATH "Path to a system METIS include directory")
 set(KLS_SYSTEM_METIS_LIBRARY "" CACHE FILEPATH "Path to a system METIS library")
 
@@ -263,6 +266,36 @@ if(KLS_BUILD_CKTSO_COMPARE)
   target_link_libraries(cktso_compare PRIVATE "${CKTSO_LIBRARY}" m)
   target_compile_features(cktso_compare PRIVATE cxx_std_17)
   target_compile_options(cktso_compare PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+endif()
+
+if(KLS_BUILD_KLU2_COMPARE)
+  if(NOT EXISTS "${KLU2_ROOT}/Include/klu2.h" OR
+     NOT EXISTS "${KLU2_ROOT}/Source/klu2_factor.hpp")
+    message(FATAL_ERROR
+      "KLS_BUILD_KLU2_COMPARE requires -DKLU2_ROOT=/path/to/Trilinos/packages/amesos2/src/KLU2")
+  endif()
+  if(NOT EXISTS "${TEUCHOS_CORE_ROOT}/Teuchos_ScalarTraits.hpp")
+    message(FATAL_ERROR
+      "KLS_BUILD_KLU2_COMPARE requires -DTEUCHOS_CORE_ROOT=/path/to/Teuchos-compatible headers")
+  endif()
+  enable_language(CXX)
+  add_executable(klu2_compare
+    bench/klu2_compare.cpp)
+  target_include_directories(klu2_compare
+    PRIVATE
+      ${KLS_SUITESPARSE_INCLUDE_DIRS})
+  target_include_directories(klu2_compare
+    SYSTEM PRIVATE
+      "${KLU2_ROOT}/Include"
+      "${KLU2_ROOT}/Source"
+      "${TEUCHOS_CORE_ROOT}")
+  target_link_libraries(klu2_compare PRIVATE kls_suitesparse)
+  if(KLS_MATH_LIBRARY)
+    target_link_libraries(klu2_compare PRIVATE "${KLS_MATH_LIBRARY}")
+  endif()
+  target_compile_features(klu2_compare PRIVATE cxx_std_17)
+  target_compile_options(klu2_compare PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
 endif()
 
