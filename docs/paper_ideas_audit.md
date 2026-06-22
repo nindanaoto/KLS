@@ -621,13 +621,20 @@ same command timed out at 120s in the no-SPRAL build. `rajat30` selected the
 SPRAL static match, reduced off-diagonal pivots to one, and modestly improved
 repeated factor/refactor times to about 0.74s/0.73s. A broad version also
 matched `ASIC_680k`, but that regressed an already fast many-block BTF case
-from about 0.15s repeated refactors to about 0.27s, so the retained gate now
-requires no BTF or a dominant BTF block. `pre2` still timed out at 120s after
-trying the SPRAL path; its analyze-only evidence remains a dominant
-629628-row block with about `2.08e11` estimated flops. This confirms that
-license-compatible MC64-adjacent preprocessing is useful and worth keeping, but
-it does not replace the missing CKTSO/SubtreeLU-style intra-block
-numeric/scheduling machinery.
+from about 0.15s repeated refactors to about 0.27s, so the retained gate was
+narrowed toward dominant BTF structure. Later focused checks with the pinned
+SPRAL submodule showed the same boundary on paper-medium cases: `power197k`
+selected SPRAL matching, cut off-diagonal pivots from about 51k to about 1.8k,
+and reduced repeated refactor from about 0.055s to about 0.008s, while
+`HTC_336_4438` moved from the intended METIS/no-BTF path to AMD/BTF and
+regressed from about 0.103s to about 0.190s. The large SPRAL pre-static gate
+therefore now requires an existing BTF symbolic analysis with a dominant block,
+preserving no-BTF ordering choices. `pre2` still timed out at 120s after trying
+the SPRAL path; its analyze-only evidence remains a dominant 629628-row block
+with about `2.08e11` estimated flops. This confirms that license-compatible
+MC64-adjacent preprocessing is useful and worth keeping, but it does not
+replace the missing CKTSO/SubtreeLU-style intra-block numeric/scheduling
+machinery.
 
 The fast-factor pivot-check path was then made more diagnostic by recording the
 first rejected factor-order pivot and original matrix column in `kls_stats` and
@@ -1037,8 +1044,9 @@ dominates many sub-millisecond rows.
    but keep it inside the LGPL-compatible boundary: use the BSD-licensed SPRAL
    scaling submodule or independent KLS code, not HSL MC64 or restricted MC64
    copies from other solver trees. The retained SPRAL path now helps large
-   weak-diagonal dominant-block cases, but `pre2` still times out, so matching
-   quality alone is not the remaining CKTSO-scale gap.
+   weak-diagonal dominant-BTF cases and avoids replacing no-BTF ordering wins,
+   but `pre2` still times out, so matching quality alone is not the remaining
+   CKTSO-scale gap.
 3. Add a structure-adaptive triangular solve only after the LU storage owned by
    KLS exposes row-oriented or segmented access cheaply.
 4. Use static symbolic and numeric-cost models to decide whether a parallel

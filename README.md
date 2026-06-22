@@ -79,7 +79,7 @@ cmake -S . -B build -DKLS_ENABLE_SPRAL_SCALING=ON \
 This is not a solver replacement and is not enabled by default. KLS uses it as a
 static-pivot matching fallback when the in-tree matcher is short of a full
 cardinality match, as a guarded pre-factor Hungarian/scaling path for large
-weak-diagonal dominant-block matrices, and as a guarded post-factor Hungarian
+weak-diagonal dominant-BTF matrices, and as a guarded post-factor Hungarian
 trial for expensive high-off-diagonal-pivot cases. Accepted factorization
 candidates still have to pass KLS's normal numeric checks.
 
@@ -233,7 +233,7 @@ carried by some solver projects. When `KLS_ENABLE_SPRAL_SCALING=ON`, KLS
 builds or links BSD-licensed SPRAL Hungarian/auction matching as an
 LGPL-compatible MC64-adjacent component. SPRAL same-cardinality Hungarian
 matches are not installed blindly; KLS uses them before factorization only for
-large weak-diagonal dominant-block candidates, or after the first factorization
+large weak-diagonal dominant-BTF candidates, or after the first factorization
 for expensive high-off-diagonal-pivot cases, and keeps them only when the
 accepted numeric path passes KLS's pivoting, conditioning, fill, and flop
 checks.
