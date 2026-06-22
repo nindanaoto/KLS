@@ -209,6 +209,13 @@ regressed, with the candidate geomean at 0.03816s versus the baseline at
 0.03799s. The broader retry was removed; KLS keeps only the current
 single-block no-BTF retry.
 
+The pre-factor static row-matching path was also tested without the augmenting
+and swap-improvement pass, leaving only the initial greedy maximum-value
+matching. This reduced setup cost on some static-pivot samples, but after
+rebuilding a clean baseline the 25-matrix extended suite regressed from
+0.03798s to 0.03869s. The full improvement pass remains enabled for pre-static
+matching.
+
 ## Recommended General Work
 
 1. Implement a real matching/scaling stage first, because MC64-style static
