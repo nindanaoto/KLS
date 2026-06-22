@@ -200,6 +200,15 @@ path. The change passed correctness tests, but focused A/B timings were mixed
 and did not show a general win; the simpler shared loop remains in place until a
 larger KLS-owned numeric kernel makes this separation worthwhile.
 
+The no-BTF symbolic retry was widened from single-block BTF cases to
+dominant-block BTF cases, including METIS-started auto orderings. This is
+consistent with KLU's observation that BTF can occasionally hurt, and it
+improved `rajat03` once static row matching was prevented from adding a
+one-time trial cost. The full 25-matrix same-session extended suite still
+regressed, with the candidate geomean at 0.03816s versus the baseline at
+0.03799s. The broader retry was removed; KLS keeps only the current
+single-block no-BTF retry.
+
 ## Recommended General Work
 
 1. Implement a real matching/scaling stage first, because MC64-style static
