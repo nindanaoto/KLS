@@ -8,12 +8,22 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 KLS has **not** implemented every paper idea that is still worth trying. It has
 implemented the ideas that can be layered around the current KLU-derived
-Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, CAMD refinement,
-auto scaling policy, pivot-checked reuse, static row-pivoting trials with
-matching-derived equilibration, and BTF-block parallel refactorization with a
-solver-owned worker pool. KLS now also keeps precomputed refactor scatter
-metadata for unscaled serial repeated refactors, covering both single-block and
-serial BTF cases.
+Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, explicit SCOTCH
+ordering, CAMD refinement, auto scaling policy, pivot-checked reuse, static
+row-pivoting trials with matching-derived equilibration, and BTF-block parallel
+refactorization with a solver-owned worker pool. KLS now also keeps precomputed
+refactor scatter metadata for unscaled serial repeated refactors, covering both
+single-block and serial BTF cases.
+
+The remaining CKTSO gap is large enough that it should be treated as a missing
+major algorithm, not an ordering-backend tuning problem. On the selected large
+`pre2` case, CKTSO completed the factor-only comparison inside the 120s cap
+with about 28.4s cycle time, while KLS timed out under AMD/BTF, METIS/no-BTF,
+SCOTCH/BTF, and auto policy variants. The CKTSO ordering supplement reports
+`pre2` operation counts for CKTSO nested dissection and METIS in the same
+range, so the current evidence points more strongly at MC64-quality
+matching/scaling and CKTSO's KLS-owned numeric/scheduling machinery than at
+another separator package alone.
 
 The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
@@ -37,7 +47,7 @@ project does not drift toward benchmark-name-specific heuristics.
 | --- | --- | --- |
 | Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection and serial refactor scatter metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
 | NICSLU | AMD-style ordering, optional static-pivoting preprocessing, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. | Full MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and EGraph-guided refactorization are not implemented. A levelized EGraph refactor prototype was tried and rejected because it was not a general win on the current kernel/storage. |
-| CKTSO | METIS nested-dissection ordering, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, and matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is only approximated. The dual cluster/pipeline EGraph scheduler, pipelined tail restart with pivoting after a failed pivot check, and structure-adaptive triangular solve are not implemented. KLS currently falls back to full pivoting factorization after unsafe reused pivots. |
+| CKTSO | METIS nested-dissection ordering, explicit SCOTCH ordering for experiments, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, and matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is only approximated. The dual cluster/pipeline EGraph scheduler, pipelined tail restart with pivoting after a failed pivot check, and structure-adaptive triangular solve are not implemented. KLS currently falls back to full pivoting factorization after unsafe reused pivots. |
 | SubtreeLU | KLS vendors reproducible METIS/GKlib submodules and uses METIS plus CAMD refinement, which overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. | KLS does not retain a separator tree, collapse/partition it into private and pipeline task queues, constrain pivot search within separator-tree subdomains, perform FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
 
 This means KLS has implemented or prototyped the ideas that can be layered
@@ -52,8 +62,9 @@ design work, not benchmark-specific tuning.
   pivoting, no-pivot refactorization, block back substitution, diagnostics, and
   pivot tolerance controls are available through the vendored Trilinos
   SuiteSparse-derived sources.
-- Nested-dissection ordering option: KLS vendors METIS/GKlib as pinned
-  submodules by default and can optionally use a compatible system METIS.
+- Nested-dissection ordering option: KLS vendors METIS/GKlib and SCOTCH as
+  pinned submodules by default, and can optionally use compatible system METIS
+  or SCOTCH installs.
 - Combined ordering policy: KLS auto mode can choose AMD, COLAMD, or METIS,
   retry no-BTF symbolic analysis for structural cases where BTF is not useful,
   and promote expensive numeric factorizations to METIS when actual fill/flop
@@ -73,7 +84,9 @@ design work, not benchmark-specific tuning.
   nested-dissection motivation without naming individual matrices.
 - Constrained nested-dissection refinement: KLS can refine METIS rank groups
   with CAMD constraints, preserving nested-dissection rank shape while reducing
-  local fill and flops.
+  local fill and flops. Large METIS orderings now use coarse rank-group CAMD
+  refinement by default instead of limiting the CKTSO-style refinement to one
+  medium structural class.
 - Scaling policy: KLS exposes KLU scale modes and has auto scale selection based
   on pattern and numeric evidence, including no-scale reuse where repeated
   SPICE refactorization benefits.
@@ -377,6 +390,26 @@ poor candidates for another ordering/scale/BTF heuristic. They need the open
 paper ideas around faster single-block numeric/refactor kernels, matching
 quality, or EGraph/separator-tree scheduling.
 
+SCOTCH was then added as a pinned, reproducible optional ordering backend and
+tested as an explicit `--ordering scotch` path. SCOTCH symbolic analysis
+completed on `pre2`, but numeric factorization still timed out at 120s; a
+`rajat30` SCOTCH numeric run was also not competitive before interruption near
+the same cap. The result does not justify adding SCOTCH to auto ordering yet.
+ParMETIS was deliberately not added in this pass because it is an
+MPI/distributed-memory package, while the current KLS benchmark and solver path
+is shared-memory and single-process.
+
+The CKTSO paper's nested-dissection-plus-constrained-minimum-degree idea was
+then strengthened for KLS METIS orderings by applying coarse rank-group CAMD
+refinement to large METIS orderings, not only one medium structural class.
+This helped the completed large cases: same-session `--ordering metis --no-btf`
+runs finished `nxp1` with about 1.16s factor and 1.13s refactor averages, and
+`rajat30` with about 0.70s factor and 0.70s refactor averages. Auto selected
+the same METIS/no-BTF path for those cases. The change did not fix `pre2`:
+both explicit METIS/no-BTF and auto still timed out at 120s. This reinforces
+that `pre2` is a missing-major-algorithm case rather than a separator-backend
+case.
+
 The selected-large KLU2 comparison was also run with the same 120s cap and one
 factor/refactor repeat. KLU2 completed only `rajat29`, `rajat30`, and
 `ASIC_680k`; it timed out on `G3_circuit`, `pre2`, `nxp1`, `Hamrle3`, and
@@ -398,7 +431,8 @@ patterns until a broader EGraph/separator-tree numeric kernel exists.
 
 1. Implement a real matching/scaling stage first, because MC64-style static
    pivoting appears in both NICSLU and CKTSO and can reduce dynamic pivoting
-   before any parallel scheduler is added.
+   before any parallel scheduler is added. The `pre2` evidence is now strong
+   enough that more ordering backends should be lower priority than this.
 2. Build persistent dependency metadata for one KLS-owned numeric engine:
    either CKTSO's EGraph/ETree cluster/pipeline scheduler or SubtreeLU's
    separator-tree private/pipeline scheduler, not isolated benchmark guards.

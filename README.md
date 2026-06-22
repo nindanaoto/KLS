@@ -9,8 +9,8 @@ This repository currently contains the first working KLS implementation:
 - A stable C API in `include/kls/kls.h`
 - A vendored SuiteSparse-derived 64-bit symbolic/numeric engine
 - CSC and CSR input paths with 32-bit or 64-bit index arrays
-- AMD-first automatic symbolic ordering with explicit AMD, COLAMD, natural, and
-  METIS nested-dissection ordering controls
+- AMD-first automatic symbolic ordering with explicit AMD, COLAMD, natural,
+  METIS, and SCOTCH nested-dissection ordering controls
 - SPICE-cycle-oriented normal-vs-transpose internal orientation selection, with
   explicit orientation controls
 - Factor, refactor, solve, transpose-solve, and statistics APIs
@@ -33,9 +33,10 @@ ctest --test-dir build --output-on-failure
 The main build is self-contained. KLS vendors the SuiteSparse-derived KLU,
 AMD, COLAMD, and BTF C sources from Trilinos under `third_party/suitesparse`
 as the current in-tree serial engine. METIS ordering is enabled by default from
-pinned submodules under `third_party/metis` and `third_party/gklib`; initialize
-them with `git submodule update --init --recursive` after cloning. To use a
-compatible system METIS instead, configure with:
+pinned submodules under `third_party/metis` and `third_party/gklib`, and SCOTCH
+ordering is enabled by default from `third_party/scotch`; initialize them with
+`git submodule update --init --recursive` after cloning. To use a compatible
+system METIS instead, configure with:
 
 ```sh
 cmake -S . -B build -DKLS_USE_SYSTEM_METIS=ON
@@ -43,6 +44,16 @@ cmake -S . -B build -DKLS_USE_SYSTEM_METIS=ON
 
 KLS builds METIS with 64-bit `idx_t` for compatibility with the 64-bit KLS/KLU
 path. A system METIS install used this way must be ABI-compatible.
+
+To use a compatible system SCOTCH instead of the pinned submodule, configure
+with:
+
+```sh
+cmake -S . -B build -DKLS_USE_SYSTEM_SCOTCH=ON
+```
+
+A static system SCOTCH build may also require `scotcherr`; pass
+`KLS_SYSTEM_SCOTCHERR_LIBRARY` if it is not discoverable.
 
 ## Benchmark
 
@@ -52,7 +63,8 @@ path. A system METIS install used this way must be ABI-compatible.
 
 The benchmark reports analysis, factorization, refactorization, solve,
 transpose-solve, residual, selected orientation, BTF block/rank, fill, flop, and
-memory statistics.
+memory statistics. Use `--analyze-only` to measure symbolic analysis and
+ordering decisions without running numeric factorization.
 
 Use `--threads N` to enable KLS-owned parallel work where it is currently
 available. The first threaded path is repeated numeric refactorization across
@@ -145,10 +157,12 @@ AMD and COLAMD by symbolic fill estimate. Dense-diagonal high-degree METIS
 starts ask METIS for two separator attempts, then refine the nested-dissection
 rank order with CAMD inside coarse rank constraints. This preserves the
 separator-first shape while letting minimum degree reduce local fill/flops on
-post-layout style circuits. Medium bounded-degree METIS starts also use two
-separator attempts with random matching coarsening to reduce nested-dissection
-factor work on mesh-like sparse diagonals. When METIS is enabled, `auto` can
-also promote
+post-layout style circuits. Large METIS orderings also use coarse rank-group
+CAMD refinement, matching the CKTSO paper's nested-dissection plus constrained
+minimum-degree structure more closely than raw METIS. Medium bounded-degree
+METIS starts also use two separator attempts with random matching coarsening to
+reduce nested-dissection factor work on mesh-like sparse diagonals. When METIS
+is enabled, `auto` can also promote
 large, expensive first numeric factorizations to METIS if the trial
 factorization materially reduces actual numeric flop/fill cost. This keeps
 METIS available for hard nested-dissection cases without paying its analysis
@@ -164,6 +178,12 @@ matrix with no empty rows or columns, or a near-full diagonal with a large dense
 row/column spike. These predicates are structural, not matrix-name-based, and
 are deliberately narrow so unrelated IBM `dc`/`trans` cases stay on the cheaper
 AMD/COLAMD path.
+
+Use `--ordering scotch` to force SCOTCH nested-dissection ordering. SCOTCH is
+kept as an explicit experimental backend rather than part of `auto` until it
+shows a general win over the current AMD/METIS policy. ParMETIS is not wired
+into KLS yet; it is a distributed-memory MPI package and should be treated as a
+separate future backend if KLS grows an MPI/distributed solver path.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 

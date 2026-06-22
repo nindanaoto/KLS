@@ -23,3 +23,9 @@ of the University of Minnesota, and is licensed under Apache-2.0; see
 University of Minnesota. Its primary license is Apache-2.0 and it also carries
 LGPL-2.1-or-later and BSD-3-Clause files; see `third_party/gklib/LICENSE.txt`
 and `third_party/gklib/LICENSES.md`.
+
+KLS can build SCOTCH nested-dissection ordering from the pinned submodule under
+`third_party/scotch`. SCOTCH is Copyright 2004-2021 by the listed SCOTCH
+contributors and is licensed under CeCILL-C; see
+`third_party/scotch/LICENSE_en.txt` and
+`third_party/scotch/doc/CeCILL-C_V1-en.txt`.
