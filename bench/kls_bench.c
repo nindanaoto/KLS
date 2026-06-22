@@ -239,6 +239,7 @@ static kls_ordering parse_ordering(const char *s) {
   if (strcmp(s, "colamd") == 0) return KLS_ORDERING_COLAMD;
   if (strcmp(s, "natural") == 0) return KLS_ORDERING_NATURAL;
   if (strcmp(s, "metis") == 0) return KLS_ORDERING_METIS;
+  if (strcmp(s, "scotch") == 0) return KLS_ORDERING_SCOTCH;
   return KLS_ORDERING_AUTO;
 }
 
@@ -286,7 +287,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -299,12 +300,15 @@ int main(int argc, char **argv) {
   int repeat = 5;
   int refactor_repeat = 5;
   int json = 0;
+  int analyze_only = 0;
   kls_options options;
   kls_default_options(&options);
 
   for (int i = 2; i < argc; ++i) {
     if (strcmp(argv[i], "--json") == 0) {
       json = 1;
+    } else if (strcmp(argv[i], "--analyze-only") == 0) {
+      analyze_only = 1;
     } else if (strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) {
       repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--refactor-repeat") == 0 && i + 1 < argc) {
@@ -344,6 +348,70 @@ int main(int argc, char **argv) {
   matrix a = {0};
   if (!read_matrix_market(path, &a)) {
     return EXIT_FAILURE;
+  }
+
+  if (analyze_only) {
+    kls_solver *solver = NULL;
+    int status = kls_create(&solver);
+    if (status == KLS_OK) {
+      status = kls_analyze_csc(solver, KLS_INDEX_INT64, a.n,
+                               a.col_ptr, a.row_idx, 0,
+                               &options);
+    }
+    if (status != KLS_OK) {
+      fprintf(stderr, "KLS analyze failed: %s (%d)\n",
+              kls_status_string(status), status);
+      kls_destroy(solver);
+      matrix_free(&a);
+      return EXIT_FAILURE;
+    }
+    kls_stats stats;
+    stats.struct_size = sizeof(stats);
+    kls_get_stats(solver, &stats);
+    if (json) {
+      printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
+             ",\"threads\":%d"
+             ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
+             ",\"ordering\":\"%s\",\"requested_scale\":\"%s\""
+             ",\"requested_btf\":%s,\"btf\":%s"
+             ",\"analysis_seconds\":%.9g"
+             ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
+             ",\"structural_rank\":%" PRId64
+             ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
+             ",\"estimated_flops\":%.9g"
+             ",\"analyze_only\":true}\n",
+             path, a.n, a.nnz, options.threads,
+             kls_orientation_name(options.orientation),
+             kls_orientation_name(stats.selected_orientation),
+             kls_ordering_name(stats.selected_ordering),
+             scale_name(options.scale),
+             options.use_btf ? "true" : "false",
+             stats.selected_btf ? "true" : "false",
+             stats.analysis_seconds, stats.nblocks, stats.max_block,
+             stats.structural_rank, stats.nnz_l, stats.nnz_u,
+             stats.estimated_flops);
+    } else {
+      printf("matrix: %s\n", path);
+      printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
+      printf("requested orientation: %s\n",
+             kls_orientation_name(options.orientation));
+      printf("selected orientation: %s\n",
+             kls_orientation_name(stats.selected_orientation));
+      printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
+      printf("requested scale: %s\n", scale_name(options.scale));
+      printf("requested btf: %s\n", options.use_btf ? "on" : "off");
+      printf("selected btf: %s\n", stats.selected_btf ? "on" : "off");
+      printf("analysis: %.6f s\n", stats.analysis_seconds);
+      printf("blocks: %" PRId64 ", max block: %" PRId64 "\n",
+             stats.nblocks, stats.max_block);
+      printf("structural rank: %" PRId64 "\n", stats.structural_rank);
+      printf("estimated nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n",
+             stats.nnz_l, stats.nnz_u);
+      printf("estimated flops: %.6e\n", stats.estimated_flops);
+    }
+    kls_destroy(solver);
+    matrix_free(&a);
+    return EXIT_SUCCESS;
   }
 
   double *x_true = (double *)malloc((size_t)a.n * sizeof(double));

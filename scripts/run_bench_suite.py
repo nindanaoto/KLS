@@ -62,7 +62,7 @@ def main() -> int:
     parser.add_argument("--passes", type=int, default=1)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--timeout", type=float)
-    parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural", "metis"], default="auto")
+    parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural", "metis", "scotch"], default="auto")
     parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")
     parser.add_argument("--scale", choices=["auto", "-1", "0", "1", "2"], default="auto")
     parser.add_argument("--pivot-tol", type=float, default=None)

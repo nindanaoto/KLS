@@ -4,3 +4,6 @@
 [submodule "third_party/gklib"]
 	path = third_party/gklib
 	url = https://github.com/KarypisLab/GKlib.git
+[submodule "third_party/scotch"]
+	path = third_party/scotch
+	url = https://github.com/live-clones/scotch.git

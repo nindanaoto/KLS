@@ -2,10 +2,15 @@
 
 #include "kls/kls.h"
 
+#include <stdio.h>
+
 #include "trilinos_klu_decl.h"
 #include "trilinos_camd.h"
 #ifdef KLS_HAVE_METIS
 #include "metis.h"
+#endif
+#ifdef KLS_HAVE_SCOTCH
+#include "scotch.h"
 #endif
 
 #include <errno.h>
@@ -1487,6 +1492,15 @@ static UF_long kls_metis_camd_group_size(UF_long n,
   if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
     return 1024;
   }
+  if (n >= 200000) {
+    if (n >= 3000000) {
+      return 16384;
+    }
+    if (n >= 1000000) {
+      return 8192;
+    }
+    return 4096;
+  }
   return 0;
 }
 
@@ -1643,6 +1657,195 @@ static UF_long kls_metis_order(UF_long n,
 }
 #endif
 
+#ifdef KLS_HAVE_SCOTCH
+static int compare_scotch_num(const void *a, const void *b) {
+  const SCOTCH_Num left = *(const SCOTCH_Num *)a;
+  const SCOTCH_Num right = *(const SCOTCH_Num *)b;
+  return (left > right) - (left < right);
+}
+
+static int scotch_size_ok(UF_long n, size_t slots_per_entry) {
+  return n >= 0 && (uint64_t)n <= (uint64_t)(SIZE_MAX / slots_per_entry);
+}
+
+static UF_long kls_scotch_order(UF_long n,
+                                UF_long *col_ptr,
+                                UF_long *row_idx,
+                                UF_long *perm_out,
+                                trilinos_klu_l_common *common) {
+  if (n <= 0 || (uint64_t)n > (uint64_t)SCOTCH_NUMMAX ||
+      !scotch_size_ok(n, sizeof(SCOTCH_Num)) ||
+      !scotch_size_ok(n + 1, sizeof(SCOTCH_Num))) {
+    if (common != NULL) {
+      common->status = TRILINOS_KLU_TOO_LARGE;
+    }
+    return 0;
+  }
+
+  const size_t nsize = (size_t)n;
+  SCOTCH_Num *degree = (SCOTCH_Num *)calloc(nsize, sizeof(*degree));
+  if (degree == NULL) {
+    if (common != NULL) {
+      common->status = TRILINOS_KLU_OUT_OF_MEMORY;
+    }
+    return 0;
+  }
+
+  SCOTCH_Num edge_slots = 0;
+  int ok = 1;
+  for (UF_long col = 0; col < n && ok; ++col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row == col) {
+        continue;
+      }
+      if ((uint64_t)row > (uint64_t)SCOTCH_NUMMAX ||
+          degree[(size_t)row] == SCOTCH_NUMMAX ||
+          degree[(size_t)col] == SCOTCH_NUMMAX ||
+          edge_slots > SCOTCH_NUMMAX - 2) {
+        ok = 0;
+        break;
+      }
+      degree[(size_t)row]++;
+      degree[(size_t)col]++;
+      edge_slots += 2;
+    }
+  }
+  if (!ok) {
+    free(degree);
+    if (common != NULL) {
+      common->status = TRILINOS_KLU_TOO_LARGE;
+    }
+    return 0;
+  }
+
+  if (edge_slots == 0) {
+    for (UF_long i = 0; i < n; ++i) {
+      perm_out[i] = i;
+    }
+    free(degree);
+    return (UF_long)-1;
+  }
+
+  SCOTCH_Num *verttab =
+    (SCOTCH_Num *)malloc((nsize + 1u) * sizeof(*verttab));
+  SCOTCH_Num *edgetab =
+    (SCOTCH_Num *)malloc((size_t)edge_slots * sizeof(*edgetab));
+  SCOTCH_Num *permtab =
+    (SCOTCH_Num *)malloc(nsize * sizeof(*permtab));
+  SCOTCH_Num *peritab =
+    (SCOTCH_Num *)malloc(nsize * sizeof(*peritab));
+  if (verttab == NULL || edgetab == NULL || permtab == NULL || peritab == NULL) {
+    free(degree);
+    free(verttab);
+    free(edgetab);
+    free(permtab);
+    free(peritab);
+    if (common != NULL) {
+      common->status = TRILINOS_KLU_OUT_OF_MEMORY;
+    }
+    return 0;
+  }
+
+  verttab[0] = 0;
+  for (size_t i = 0; i < nsize; ++i) {
+    verttab[i + 1u] = verttab[i] + degree[i];
+    degree[i] = verttab[i];
+  }
+
+  for (UF_long col = 0; col < n; ++col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row == col) {
+        continue;
+      }
+      edgetab[degree[(size_t)row]++] = (SCOTCH_Num)col;
+      edgetab[degree[(size_t)col]++] = (SCOTCH_Num)row;
+    }
+  }
+
+  SCOTCH_Num write = 0;
+  for (size_t vertex = 0; vertex < nsize; ++vertex) {
+    const SCOTCH_Num start = verttab[vertex];
+    const SCOTCH_Num end = degree[vertex];
+    if (end > start + 1) {
+      qsort(edgetab + start, (size_t)(end - start), sizeof(*edgetab),
+            compare_scotch_num);
+    }
+    verttab[vertex] = write;
+    SCOTCH_Num last = -1;
+    int have_last = 0;
+    for (SCOTCH_Num p = start; p < end; ++p) {
+      if (!have_last || edgetab[p] != last) {
+        last = edgetab[p];
+        edgetab[write++] = last;
+        have_last = 1;
+      }
+    }
+  }
+  verttab[nsize] = write;
+
+  SCOTCH_Graph graph;
+  SCOTCH_Strat strategy;
+  int graph_initialized = 0;
+  int strategy_initialized = 0;
+  int scotch_status = SCOTCH_graphInit(&graph);
+  if (scotch_status == 0) {
+    graph_initialized = 1;
+    scotch_status =
+      SCOTCH_graphBuild(&graph, 0, (SCOTCH_Num)n, verttab, NULL, NULL, NULL,
+                        write, edgetab, NULL);
+  }
+  if (scotch_status == 0) {
+    scotch_status = SCOTCH_graphCheck(&graph);
+  }
+  if (scotch_status == 0) {
+    scotch_status = SCOTCH_stratInit(&strategy);
+    if (scotch_status == 0) {
+      strategy_initialized = 1;
+      scotch_status =
+        SCOTCH_stratGraphOrderBuild(&strategy, SCOTCH_STRATQUALITY, 0, 0.2);
+    }
+  }
+  if (scotch_status == 0) {
+    scotch_status =
+      SCOTCH_graphOrder(&graph, strategy_initialized ? &strategy : NULL,
+                        permtab, peritab, NULL, NULL, NULL);
+  }
+
+  UF_long order_lnz = 0;
+  if (scotch_status == 0) {
+    for (UF_long i = 0; i < n; ++i) {
+      const SCOTCH_Num vertex = peritab[i];
+      if (vertex < 0 || (uint64_t)vertex >= (uint64_t)n) {
+        scotch_status = 1;
+        break;
+      }
+      perm_out[i] = (UF_long)vertex;
+    }
+    if (scotch_status == 0) {
+      order_lnz = (UF_long)-1;
+    }
+  }
+
+  if (strategy_initialized) {
+    SCOTCH_stratExit(&strategy);
+  }
+  if (graph_initialized) {
+    SCOTCH_graphExit(&graph);
+  }
+  free(degree);
+  free(verttab);
+  free(edgetab);
+  free(permtab);
+  free(peritab);
+  if (scotch_status != 0 && common != NULL) {
+    common->status = TRILINOS_KLU_INVALID;
+  }
+  return order_lnz;
+}
+#endif
+
 static int analyze_with_ordering(UF_long n,
                                  UF_long *col_ptr,
                                  UF_long *row_idx,
@@ -1664,6 +1867,14 @@ static int analyze_with_ordering(UF_long n,
 #ifdef KLS_HAVE_METIS
     common.ordering = 3;
     common.user_order = kls_metis_order;
+    symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
+#else
+    return KLS_ERR_UNSUPPORTED;
+#endif
+  } else if (ordering == KLS_ORDERING_SCOTCH) {
+#ifdef KLS_HAVE_SCOTCH
+    common.ordering = 3;
+    common.user_order = kls_scotch_order;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
 #else
     return KLS_ERR_UNSUPPORTED;
@@ -3526,7 +3737,7 @@ static int validate_options(const kls_options *options) {
   if (options->threads <= 0) {
     return 0;
   }
-  if (options->ordering < KLS_ORDERING_AUTO || options->ordering > KLS_ORDERING_METIS) {
+  if (options->ordering < KLS_ORDERING_AUTO || options->ordering > KLS_ORDERING_SCOTCH) {
     return 0;
   }
   if (options->orientation < KLS_ORIENTATION_AUTO ||
@@ -4878,6 +5089,7 @@ const char *kls_ordering_name(kls_ordering ordering) {
     case KLS_ORDERING_COLAMD: return "colamd";
     case KLS_ORDERING_NATURAL: return "natural";
     case KLS_ORDERING_METIS: return "metis";
+    case KLS_ORDERING_SCOTCH: return "scotch";
     default: return "unknown";
   }
 }

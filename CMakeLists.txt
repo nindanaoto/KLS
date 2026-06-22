@@ -11,11 +11,16 @@ option(KLS_BUILD_CKTSO_COMPARE "Build optional CKTSO comparison tool" OFF)
 option(KLS_BUILD_KLU2_COMPARE "Build optional Trilinos KLU2 comparison tool" OFF)
 option(KLS_ENABLE_METIS "Enable METIS nested-dissection ordering support" ON)
 option(KLS_USE_SYSTEM_METIS "Use a system METIS library instead of the bundled submodule" OFF)
+option(KLS_ENABLE_SCOTCH "Enable SCOTCH nested-dissection ordering support" ON)
+option(KLS_USE_SYSTEM_SCOTCH "Use a system SCOTCH library instead of the bundled submodule" OFF)
 set(CKTSO_ROOT "" CACHE PATH "Path to a local CKTSO distribution")
 set(KLU2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/amesos2/src/KLU2" CACHE PATH "Path to a Trilinos Amesos2 KLU2 source directory")
 set(TEUCHOS_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/rol/src/compatibility/teuchos-lite" CACHE PATH "Path to Trilinos Teuchos-compatible headers for KLU2")
 set(KLS_SYSTEM_METIS_INCLUDE_DIR "" CACHE PATH "Path to a system METIS include directory")
 set(KLS_SYSTEM_METIS_LIBRARY "" CACHE FILEPATH "Path to a system METIS library")
+set(KLS_SYSTEM_SCOTCH_INCLUDE_DIR "" CACHE PATH "Path to a system SCOTCH include directory")
+set(KLS_SYSTEM_SCOTCH_LIBRARY "" CACHE FILEPATH "Path to a system SCOTCH library")
+set(KLS_SYSTEM_SCOTCHERR_LIBRARY "" CACHE FILEPATH "Path to an optional system SCOTCH error library")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -112,6 +117,77 @@ if(KLS_ENABLE_METIS)
     endif()
     target_compile_options(kls_metis PRIVATE
       $<$<C_COMPILER_ID:GNU,Clang>:-Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unknown-pragmas -Wno-unused-label -Wno-pedantic>)
+  endif()
+endif()
+
+if(KLS_ENABLE_SCOTCH)
+  if(KLS_USE_SYSTEM_SCOTCH)
+    find_path(KLS_SYSTEM_SCOTCH_INCLUDE_DIR
+      NAMES scotch.h
+      PATHS ${KLS_SYSTEM_SCOTCH_INCLUDE_DIR})
+    find_library(KLS_SYSTEM_SCOTCH_LIBRARY
+      NAMES scotch
+      PATHS ${KLS_SYSTEM_SCOTCH_LIBRARY})
+    find_library(KLS_SYSTEM_SCOTCHERR_LIBRARY
+      NAMES scotcherr
+      PATHS ${KLS_SYSTEM_SCOTCHERR_LIBRARY})
+    if(NOT KLS_SYSTEM_SCOTCH_INCLUDE_DIR OR NOT KLS_SYSTEM_SCOTCH_LIBRARY)
+      message(FATAL_ERROR
+        "KLS_USE_SYSTEM_SCOTCH=ON requires KLS_SYSTEM_SCOTCH_INCLUDE_DIR and "
+        "KLS_SYSTEM_SCOTCH_LIBRARY, or a discoverable system SCOTCH install")
+    endif()
+
+    add_library(kls_scotch INTERFACE)
+    target_include_directories(kls_scotch
+      INTERFACE
+        "${KLS_SYSTEM_SCOTCH_INCLUDE_DIR}")
+    target_link_libraries(kls_scotch
+      INTERFACE
+        "${KLS_SYSTEM_SCOTCH_LIBRARY}")
+    if(KLS_SYSTEM_SCOTCHERR_LIBRARY)
+      target_link_libraries(kls_scotch
+        INTERFACE
+          "${KLS_SYSTEM_SCOTCHERR_LIBRARY}")
+    endif()
+    if(KLS_MATH_LIBRARY)
+      target_link_libraries(kls_scotch
+        INTERFACE
+          "${KLS_MATH_LIBRARY}")
+    endif()
+    target_compile_definitions(kls_scotch
+      INTERFACE
+        KLS_HAVE_SCOTCH=1)
+  else()
+    set(KLS_SCOTCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/scotch")
+    if(NOT EXISTS "${KLS_SCOTCH_ROOT}/CMakeLists.txt")
+      message(FATAL_ERROR
+        "Bundled SCOTCH support requires initialized submodules. Run: "
+        "git submodule update --init --recursive third_party/scotch")
+    endif()
+
+    set(BUILD_FORTRAN OFF CACHE BOOL "" FORCE)
+    set(BUILD_PTSCOTCH OFF CACHE BOOL "" FORCE)
+    set(BUILD_LIBESMUMPS OFF CACHE BOOL "" FORCE)
+    set(BUILD_LIBSCOTCHMETIS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+    set(USE_ZLIB OFF CACHE BOOL "" FORCE)
+    set(USE_BZ2 OFF CACHE BOOL "" FORCE)
+    set(USE_LZMA OFF CACHE BOOL "" FORCE)
+    set(INTSIZE 64 CACHE STRING "" FORCE)
+    set(IDXSIZE 64 CACHE STRING "" FORCE)
+    set(THREADS ON CACHE BOOL "" FORCE)
+    set(SCOTCH_DETERMINISTIC "FIXED_SEED" CACHE STRING "" FORCE)
+    add_subdirectory("${KLS_SCOTCH_ROOT}" third_party/scotch EXCLUDE_FROM_ALL)
+    add_library(kls_scotch INTERFACE)
+    target_link_libraries(kls_scotch
+      INTERFACE
+        SCOTCH::scotch
+        SCOTCH::scotcherr)
+    target_compile_definitions(kls_scotch
+      INTERFACE
+        KLS_HAVE_SCOTCH=1)
+    set_target_properties(scotch scotcherr PROPERTIES
+      POSITION_INDEPENDENT_CODE ON)
   endif()
 endif()
 
@@ -229,6 +305,11 @@ if(KLS_ENABLE_METIS)
   target_link_libraries(kls
     PRIVATE
       kls_metis)
+endif()
+if(KLS_ENABLE_SCOTCH)
+  target_link_libraries(kls
+    PRIVATE
+      kls_scotch)
 endif()
 
 target_compile_options(kls PRIVATE
