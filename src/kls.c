@@ -2540,7 +2540,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
   const int small_candidate = solver->n <= 20000;
   const int large_weak_candidate =
-    solver->n <= 50000 && solver->nnz <= 1000000;
+    solver->n <= 150000 && solver->nnz <= 1500000;
   if (!small_candidate && !large_weak_candidate) {
     return;
   }
@@ -2620,7 +2620,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
   UF_long matched = 0;
   const int improve_matching =
-    small_candidate || (solver->n <= 50000 && solver->nnz <= 1000000);
+    small_candidate || (solver->n <= 150000 && solver->nnz <= 1500000);
   int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
                                               base_col_ptr, base_row_idx,
                                               base_values, improve_matching,

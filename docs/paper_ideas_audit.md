@@ -240,10 +240,11 @@ of rows having weak or missing diagonal entries. This retained the full
 augmenting/swap improvement pass and is a general numeric-structure rule, not a
 benchmark-name rule. On the AT&T `onetone1`/`onetone2` paper cases, the
 focused SPICE-cycle geomean improved from about 99.5s to 9.3s and both cases
-selected the static row permutation. A broader attempt to cover larger
-weak-diagonal cases such as `twotone` with greedy-only or wider augmenting
-matching was not retained because the transformed candidate was still rejected
-and the run remained dominated by the original KLU-style factorization.
+selected the static row permutation. The retained gate was later widened to
+cover the AT&T `twotone` scale as well; `twotone` now completes the paper-medium
+suite run and selects static pivoting, reducing off-diagonal pivots from about
+9500 to about 1600. A still-broader attempt to cover `mac_econ_fwd500` scale
+was not retained because it timed out with multi-GB memory use.
 
 ## Recommended General Work
 
