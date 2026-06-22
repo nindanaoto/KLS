@@ -1104,6 +1104,24 @@ SPICE-cycle estimate. A one-refactor `mc2depi` guard stayed in the same
 refactor class, about 2.23s. This is retained as a minor EGraph kernel cleanup,
 not as the missing CKTSO-scale scheduler.
 
+Two follow-up EGraph hot-loop/scheduler probes were rejected after the retained
+single-block fast path. First, the unscaled single-block fast path was changed
+to trust the previously validated refactor map and U-pattern schedule, removing
+per-entry bounds and dependency-order checks from the hot loop. This did not
+help `G2_circuit`: refactor stayed in the same noisy 0.45s class, so the
+validation branches are not the visible CKTSO gap. Second, the pipeline tail was
+changed from the retained round-robin static assignment to contiguous
+work-balanced ranges over the tail columns. This was a clear regression on
+`G2_circuit`, moving refactor to about 0.94s because later contiguous ranges
+wait behind earlier dependency ranges. The retained round-robin tail assignment
+therefore remains the right fit for the current EGraph representation. A
+separate LU pointer-cache prototype was also removed: caching L/U index and
+value pointers with the schedule added memory and regressed the primary
+unscaled EGraph guards (`G2_circuit` and `HTC_336_4438`) despite noise-driven
+improvement on `rajat28`, which does not consume that cache. These results
+make it unlikely that more small EGraph bookkeeping reductions will close the
+remaining CKTSO gap.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
