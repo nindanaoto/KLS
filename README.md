@@ -85,10 +85,12 @@ are already balanced. Otherwise it starts from KLU's max row scaling mode (`2`).
 Large low-degree, nearly diagonal circuit patterns and METIS-started medium
 bounded-degree, dense-diagonal, or spiked low-diagonal patterns also start in
 no-scale mode to avoid repeated row-scale work once KLS has validated the
-structure. For large
-expensive cases, `auto` can still try other numeric scaling modes when actual
-flop/fill evidence justifies the extra work. Explicit numeric scale values
-remain fixed.
+structure. Large sparse-diagonal low-degree patterns can start with sum scaling
+when that avoids more expensive max-scaling behavior. For large expensive
+cases, `auto` can still try other numeric scaling modes when actual flop/fill
+evidence justifies the extra work, but structural METIS starts that are already
+known to need a specific scale mode skip redundant scale trials. Explicit
+numeric scale values remain fixed.
 
 Use `--pivot-tol T` to benchmark the diagonal pivot tolerance exposed by the
 KLS API. The default is `0.001`, matching the underlying KLU default. With that
@@ -153,10 +155,11 @@ power-grid-style cases where the symbolic estimate alone understates the
 benefit of nested dissection.
 For large paper-style diagonal patterns, `auto` can start directly with METIS
 when the structure is a very-low-degree full diagonal, a sparse full diagonal
-with bounded but nontrivial row/column degree, or a near-full diagonal with a
-large dense row/column spike. These predicates are structural, not
-matrix-name-based, and are deliberately narrow so cases such as `ss1` and the
-IBM `dc`/`trans` family stay on the cheaper AMD/COLAMD path.
+with bounded but nontrivial row/column degree, a sparse-diagonal low-degree
+matrix with no empty rows or columns, or a near-full diagonal with a large dense
+row/column spike. These predicates are structural, not matrix-name-based, and
+are deliberately narrow so unrelated IBM `dc`/`trans` cases stay on the cheaper
+AMD/COLAMD path.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 

@@ -317,9 +317,23 @@ with METIS and no scaling while keeping BTF enabled. This rescued
 `TSOPF_FS_b39_c19` from the 120s per-process timeout and produced a
 SPICE-cycle estimate of about 568s versus the existing CKTSO artifact at about
 603s. Smaller TSOPF/QY guard cases retained their previous policies, and the
-25-matrix extended suite still passed. The large `ss1` and `mac_econ_fwd500`
-paper cases remain unresolved and still need a more general numeric/symbolic
-improvement rather than a broader benchmark-specific dispatch rule.
+25-matrix extended suite still passed.
+
+Two additional low-degree structural METIS starts were retained to remove the
+last current-auto 120s paper-medium timeouts. The very-low-degree full-diagonal
+METIS start now allows row/column degree up to 8, covering `ss1` while still
+leaving broader low-degree circuit families on their existing policies. A
+separate sparse-diagonal low-degree class covers 150k-250k order matrices with
+5-8 entries per column on average, 5-20% diagonal coverage, no empty rows or
+columns, and row/column degree at most 64; it starts with METIS and sum scaling.
+Both classes skip redundant post-factor auto scale trials. In same-session
+120s-capped runs, `ss1` completed in about 104s wall time with a SPICE-cycle
+estimate of about 3413s, and `mac_econ_fwd500` completed in about 107s wall
+time with a SPICE-cycle estimate of about 2252s. This is a timeout/completeness
+improvement, not a CKTSO win: the existing CKTSO artifacts are about 349s and
+265s respectively on the same SPICE-cycle formula. The same scale-trial gate
+also reduced `G2_circuit` initial factor time from about 2.8s to about 1.0s and
+modestly improved `mc2depi`.
 
 ## Recommended General Work
 
