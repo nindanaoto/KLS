@@ -946,6 +946,27 @@ refactor. This confirms the previous broad worker-map rejection and points
 ASIC-style gaps toward a different small-block numeric/storage kernel rather
 than passing the existing map through the worker pool.
 
+A separate worker-map policy was then retained for the opposite many-block
+shape: dominant BTF matrices with a bounded block count and bounded input
+size. KLS now builds the existing fixed-pivot input-position map for
+pool-eligible dominant BTF cases when the largest block covers at least 75% of
+the matrix, the block count is at most 20k, and the input has at most 3M
+nonzeros. The worker-pool map path is scale-aware, so scaled Rajat cases can
+reuse it without falling back to the original `Q`/`Pinv` scan. This is still
+not the CKTSO numeric kernel, but it removes a general repeated-refactor
+overhead from Rajat/AT&T-style dominant-block patterns while preserving the
+previous ASIC tiny-block rejection. Focused one-pass checks improved
+`twotone` from about 129s to about 101s on the SPICE-cycle estimate,
+`onetone2` from about 5.3s to about 4.6s, and `rajat20`/`rajat25`/`rajat28`
+from about 16.6s/18.2s/17.6s to about 14.7s/15.3s/15.5s. The large guards
+remain on their intended paths: `rajat29` is excluded by the 3M-nnz gate and
+stays near the 4.1s class, while `ASIC_680k` remains an extreme many-block
+case. A full one-pass medium manifest with the retained policy completed 90 of
+93 rows under the 120s cap, with the expected `ss1`/`mac_econ_fwd500`
+timeouts and the known singular `bips07_1998`; common rows versus the previous
+broad KLS artifact improved geomean by about 2%, though one-pass noise still
+dominates many sub-millisecond rows.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric

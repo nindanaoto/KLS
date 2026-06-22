@@ -95,6 +95,7 @@ typedef struct kls_pattern_candidate {
 
 typedef struct kls_parallel_refactor_shared {
   UF_long n;
+  UF_long nnz;
   const UF_long *col_ptr;
   const UF_long *row_idx;
   const UF_long *map_col_ptr;
@@ -344,6 +345,21 @@ static int kls_parallel_refactor_value(const kls_parallel_refactor_shared *share
   return 1;
 }
 
+static int kls_parallel_refactor_mapped_value(
+  const kls_parallel_refactor_shared *shared,
+  UF_long input_pos,
+  double *value_out) {
+  if (input_pos >= shared->nnz) {
+    return 0;
+  }
+  if (shared->scale <= 0) {
+    *value_out = shared->values[input_pos];
+    return 1;
+  }
+  return kls_parallel_refactor_value(shared, shared->row_idx[input_pos],
+                                     shared->values[input_pos], value_out);
+}
+
 static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
                                         UF_long block) {
   kls_parallel_refactor_shared *shared = worker->shared;
@@ -379,14 +395,24 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
           worker->invalid = 1;
           return;
         }
-        offx[poff++] = ax[map_input_pos[p]];
+        const UF_long input_pos = map_input_pos[p];
+        double value = 0.0;
+        if (!kls_parallel_refactor_mapped_value(shared, input_pos, &value)) {
+          worker->invalid = 1;
+          return;
+        }
+        offx[poff++] = value;
       }
       for (UF_long p = map_block_start[k1]; p < map_col_ptr[k1 + 1u]; ++p) {
         if (map_row_idx[p] != k1) {
           worker->invalid = 1;
           return;
         }
-        s = ax[map_input_pos[p]];
+        const UF_long input_pos = map_input_pos[p];
+        if (!kls_parallel_refactor_mapped_value(shared, input_pos, &s)) {
+          worker->invalid = 1;
+          return;
+        }
       }
     } else {
       const UF_long pend = ap[oldcol + 1u];
@@ -442,7 +468,13 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
           worker->invalid = 1;
           return;
         }
-        offx[poff++] = ax[map_input_pos[p]];
+        const UF_long input_pos = map_input_pos[p];
+        double value = 0.0;
+        if (!kls_parallel_refactor_mapped_value(shared, input_pos, &value)) {
+          worker->invalid = 1;
+          return;
+        }
+        offx[poff++] = value;
       }
       for (UF_long p = map_block_start[global_col];
            p < map_col_ptr[global_col + 1u]; ++p) {
@@ -451,7 +483,13 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
           worker->invalid = 1;
           return;
         }
-        x[global_row - k1] = ax[map_input_pos[p]];
+        const UF_long input_pos = map_input_pos[p];
+        double value = 0.0;
+        if (!kls_parallel_refactor_mapped_value(shared, input_pos, &value)) {
+          worker->invalid = 1;
+          return;
+        }
+        x[global_row - k1] = value;
       }
     } else {
       const UF_long pend = ap[oldcol + 1u];
@@ -742,10 +780,11 @@ static int run_refactor_pool(kls_solver *solver,
 
   shared->col_ptr = solver->col_ptr;
   shared->row_idx = solver->row_idx;
-  shared->map_col_ptr = NULL;
-  shared->map_row_idx = NULL;
-  shared->map_input_pos = NULL;
-  shared->map_block_start = NULL;
+  shared->nnz = solver->nnz;
+  shared->map_col_ptr = solver->refactor_col_ptr;
+  shared->map_row_idx = solver->refactor_row_idx;
+  shared->map_input_pos = solver->refactor_input_pos;
+  shared->map_block_start = solver->refactor_block_start;
   shared->values = numeric_values;
   shared->symbolic = solver->symbolic;
   shared->numeric = solver->numeric;
@@ -6308,6 +6347,20 @@ static int kls_parallel_refactor_is_eligible(const kls_solver *solver) {
   return 1;
 }
 
+static int kls_refactor_pool_map_is_worthwhile(const kls_solver *solver) {
+  if (!kls_parallel_refactor_is_eligible(solver) ||
+      solver->symbolic == NULL || solver->symbolic->nblocks <= 1u) {
+    return 0;
+  }
+  if ((double)solver->symbolic->maxblock < 0.75 * (double)solver->n) {
+    return 0;
+  }
+  if (solver->symbolic->nblocks > 20000u || solver->nnz > 3000000u) {
+    return 0;
+  }
+  return 1;
+}
+
 static int kls_parallel_refactor_permute_scale(kls_solver *solver) {
   trilinos_klu_l_numeric *numeric = solver->numeric;
   double *rs = numeric->Rs;
@@ -7581,6 +7634,7 @@ static int kls_mapped_refactor(kls_solver *solver,
   memset(&shared, 0, sizeof(shared));
   shared.col_ptr = solver->col_ptr;
   shared.row_idx = solver->row_idx;
+  shared.nnz = solver->nnz;
   shared.map_col_ptr = solver->refactor_col_ptr;
   shared.map_row_idx = solver->refactor_row_idx;
   shared.map_input_pos = solver->refactor_input_pos;
@@ -7664,6 +7718,7 @@ static int kls_serial_checked_scaled_refactor(kls_solver *solver,
   memset(&shared, 0, sizeof(shared));
   shared.col_ptr = solver->col_ptr;
   shared.row_idx = solver->row_idx;
+  shared.nnz = solver->nnz;
   shared.values = numeric_values;
   shared.symbolic = solver->symbolic;
   shared.numeric = solver->numeric;
@@ -7722,11 +7777,13 @@ static int kls_serial_checked_scaled_refactor(kls_solver *solver,
 
 static void maybe_prepare_refactor_map(kls_solver *solver,
                                        double *elapsed) {
+  const int pool_map = kls_refactor_pool_map_is_worthwhile(solver);
   if (solver == NULL || elapsed == NULL ||
       solver->refactor_col_ptr != NULL ||
       solver->numeric == NULL ||
-      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
-      kls_parallel_refactor_is_eligible(solver) ||
+      (!pool_map && (solver->common.scale > 0 ||
+                     solver->numeric->Rs != NULL ||
+                     kls_parallel_refactor_is_eligible(solver))) ||
       !kls_refactor_map_is_eligible(solver)) {
     return;
   }
@@ -8064,6 +8121,11 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       }
     }
     return ok;
+  }
+
+  if (kls_refactor_pool_map_is_worthwhile(solver) &&
+      solver->refactor_col_ptr == NULL) {
+    (void)kls_build_refactor_map(solver);
   }
 
   int invalid = 0;
