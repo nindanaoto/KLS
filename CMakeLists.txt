@@ -14,6 +14,7 @@ option(KLS_USE_SYSTEM_METIS "Use a system METIS library instead of the bundled s
 option(KLS_ENABLE_SCOTCH "Enable SCOTCH nested-dissection ordering support" ON)
 option(KLS_USE_SYSTEM_SCOTCH "Use a system SCOTCH library instead of the bundled submodule" OFF)
 option(KLS_ENABLE_SPRAL_SCALING "Enable optional SPRAL matching/scaling support" OFF)
+option(KLS_USE_SYSTEM_SPRAL "Use a system SPRAL library instead of the bundled submodule" OFF)
 set(CKTSO_ROOT "" CACHE PATH "Path to a local CKTSO distribution")
 set(KLU2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/amesos2/src/KLU2" CACHE PATH "Path to a Trilinos Amesos2 KLU2 source directory")
 set(TEUCHOS_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/rol/src/compatibility/teuchos-lite" CACHE PATH "Path to Trilinos Teuchos-compatible headers for KLU2")
@@ -195,28 +196,55 @@ if(KLS_ENABLE_SCOTCH)
 endif()
 
 if(KLS_ENABLE_SPRAL_SCALING)
-  find_path(KLS_SYSTEM_SPRAL_INCLUDE_DIR
-    NAMES spral_scaling.h
-    PATHS ${KLS_SYSTEM_SPRAL_INCLUDE_DIR})
-  find_library(KLS_SYSTEM_SPRAL_LIBRARY
-    NAMES spral
-    PATHS ${KLS_SYSTEM_SPRAL_LIBRARY})
-  if(NOT KLS_SYSTEM_SPRAL_INCLUDE_DIR OR NOT KLS_SYSTEM_SPRAL_LIBRARY)
-    message(FATAL_ERROR
-      "KLS_ENABLE_SPRAL_SCALING=ON requires KLS_SYSTEM_SPRAL_INCLUDE_DIR "
-      "and KLS_SYSTEM_SPRAL_LIBRARY, or a discoverable system SPRAL install")
-  endif()
+  if(KLS_USE_SYSTEM_SPRAL)
+    find_path(KLS_SYSTEM_SPRAL_INCLUDE_DIR
+      NAMES spral_scaling.h
+      PATHS ${KLS_SYSTEM_SPRAL_INCLUDE_DIR})
+    find_library(KLS_SYSTEM_SPRAL_LIBRARY
+      NAMES spral
+      PATHS ${KLS_SYSTEM_SPRAL_LIBRARY})
+    if(NOT KLS_SYSTEM_SPRAL_INCLUDE_DIR OR NOT KLS_SYSTEM_SPRAL_LIBRARY)
+      message(FATAL_ERROR
+        "KLS_USE_SYSTEM_SPRAL=ON requires KLS_SYSTEM_SPRAL_INCLUDE_DIR "
+        "and KLS_SYSTEM_SPRAL_LIBRARY, or a discoverable system SPRAL install")
+    endif()
 
-  add_library(kls_spral_scaling INTERFACE)
-  target_include_directories(kls_spral_scaling
-    INTERFACE
-      "${KLS_SYSTEM_SPRAL_INCLUDE_DIR}")
-  target_link_libraries(kls_spral_scaling
-    INTERFACE
-      "${KLS_SYSTEM_SPRAL_LIBRARY}")
-  target_compile_definitions(kls_spral_scaling
-    INTERFACE
-      KLS_HAVE_SPRAL_SCALING=1)
+    add_library(kls_spral_scaling INTERFACE)
+    target_include_directories(kls_spral_scaling
+      INTERFACE
+        "${KLS_SYSTEM_SPRAL_INCLUDE_DIR}")
+    target_link_libraries(kls_spral_scaling
+      INTERFACE
+        "${KLS_SYSTEM_SPRAL_LIBRARY}")
+    target_compile_definitions(kls_spral_scaling
+      INTERFACE
+        KLS_HAVE_SPRAL_SCALING=1)
+  else()
+    enable_language(Fortran)
+    set(KLS_SPRAL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/spral")
+    if(NOT EXISTS "${KLS_SPRAL_ROOT}/include/spral_scaling.h" OR
+       NOT EXISTS "${KLS_SPRAL_ROOT}/src/scaling.f90" OR
+       NOT EXISTS "${KLS_SPRAL_ROOT}/src/matrix_util.f90" OR
+       NOT EXISTS "${KLS_SPRAL_ROOT}/interfaces/C/scaling.f90")
+      message(FATAL_ERROR
+        "Bundled SPRAL scaling support requires an initialized submodule. Run: "
+        "git submodule update --init --recursive third_party/spral")
+    endif()
+
+    add_library(kls_spral_scaling STATIC
+      "${KLS_SPRAL_ROOT}/src/matrix_util.f90"
+      "${KLS_SPRAL_ROOT}/src/scaling.f90"
+      "${KLS_SPRAL_ROOT}/interfaces/C/scaling.f90")
+    set_target_properties(kls_spral_scaling PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/spral_modules")
+    target_include_directories(kls_spral_scaling
+      INTERFACE
+        "${KLS_SPRAL_ROOT}/include")
+    target_compile_definitions(kls_spral_scaling
+      INTERFACE
+        KLS_HAVE_SPRAL_SCALING=1)
+  endif()
 endif()
 
 set(KLS_SUITESPARSE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse")

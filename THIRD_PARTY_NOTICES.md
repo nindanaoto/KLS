@@ -16,15 +16,18 @@ KLS does not include CKTSO source or binaries. CKTSO is used only as an
 optional external benchmark when the user provides a licensed local
 installation.
 
-KLS does not vendor HSL MC64 or any external MC64 implementation. HSL MC64 and
-solver-tree copies that retain HSL redistribution restrictions are not suitable
-for vendoring into this LGPL project. The bounded exact static-pivot assignment
-code in `src/kls.c` is KLS in-tree code under the project LGPL-2.1-or-later
-license. KLS can optionally link to an external SPRAL installation for
-BSD-licensed Hungarian/auction matching and scaling support; SPRAL is not
-vendored by KLS. Future in-tree MC64-equivalent matching/scaling code must be
-LGPL-compatible, such as independent KLS code or permissively licensed
-SPRAL-derived code with its own attribution.
+KLS does not vendor HSL MC64 or solver-tree MC64 copies that retain HSL
+redistribution restrictions. The bounded exact static-pivot assignment code in
+`src/kls.c` is KLS in-tree code under the project LGPL-2.1-or-later license.
+KLS can optionally build BSD-licensed SPRAL Hungarian/auction matching and
+scaling support from the pinned `third_party/spral` submodule, or link to a
+compatible system SPRAL installation. The bundled KLS build uses only SPRAL's
+scaling subset: `src/matrix_util.f90`, `src/scaling.f90`, and
+`interfaces/C/scaling.f90`, plus `include/spral_scaling.h`.
+
+SPRAL is Copyright (c) 2014-2025, The Science and Technology Facilities
+Council (STFC), and is licensed under BSD-3-Clause; see
+`third_party/spral/LICENCE`.
 
 KLS can build METIS nested-dissection ordering from pinned submodules under
 `third_party/metis` and `third_party/gklib`. METIS is Copyright 1997, Regents

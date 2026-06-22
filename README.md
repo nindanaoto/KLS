@@ -56,11 +56,20 @@ cmake -S . -B build -DKLS_USE_SYSTEM_SCOTCH=ON
 A static system SCOTCH build may also require `scotcherr`; pass
 `KLS_SYSTEM_SCOTCHERR_LIBRARY` if it is not discoverable.
 
-KLS can optionally link to a compatible external SPRAL install for BSD-licensed
-matching/scaling support:
+KLS can optionally build BSD-licensed SPRAL Hungarian/auction
+matching/scaling support from the pinned `third_party/spral` submodule:
+
+```sh
+git submodule update --init --recursive third_party/spral
+cmake -S . -B build -DKLS_ENABLE_SPRAL_SCALING=ON
+cmake --build build
+```
+
+To use a system SPRAL library instead of the bundled submodule:
 
 ```sh
 cmake -S . -B build -DKLS_ENABLE_SPRAL_SCALING=ON \
+  -DKLS_USE_SYSTEM_SPRAL=ON \
   -DKLS_SYSTEM_SPRAL_INCLUDE_DIR=/path/to/spral/include \
   -DKLS_SYSTEM_SPRAL_LIBRARY=/path/to/libspral.so
 ```
@@ -172,9 +181,9 @@ row permutation but prefer unscaled values, avoiding matching-equilibration
 setup when it would increase fill. Benchmark JSON reports both whether static
 pivoting was enabled, whether KLS selected it, and whether the accepted static
 match used exact assignment. KLS does not vendor HSL MC64 or the MC64 copies
-carried by some solver projects. Optional SPRAL Hungarian/auction matching can
-be linked from a compatible external install; otherwise MC64-equivalent code
-must be LGPL-compatible in-tree KLS code.
+carried by some solver projects. When `KLS_ENABLE_SPRAL_SCALING=ON`, KLS
+builds or links BSD-licensed SPRAL Hungarian/auction matching as an
+LGPL-compatible MC64-adjacent backend.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF
@@ -354,7 +363,7 @@ parallelism while keeping the public API and benchmark harness stable.
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
 includes SuiteSparse-derived KLU, AMD, COLAMD, BTF, and UFconfig sources from
-Trilinos, plus optional METIS/GKlib and SCOTCH ordering support; see
+Trilinos, plus optional METIS/GKlib, SCOTCH, and SPRAL scaling support; see
 `THIRD_PARTY_NOTICES.md` for attribution.
 
 For a paper-by-paper implementation checklist, see

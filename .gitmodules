@@ -7,3 +7,6 @@
 [submodule "third_party/scotch"]
 	path = third_party/scotch
 	url = https://github.com/live-clones/scotch.git
+[submodule "third_party/spral"]
+	path = third_party/spral
+	url = https://github.com/ralna/spral.git

@@ -36,11 +36,11 @@ The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
 
 - Production-scale MC64-equivalent maximum-weight matching with dual
-  row/column scaling, using only LGPL-compatible sources such as independent
-  KLS code or BSD-licensed SPRAL-derived code. KLS can optionally link to an
-  external SPRAL install for auction matching fallback, but this is not the
-  retained production MC64-equivalent path. HSL MC64 and non-redistributable
-  MC64 copies are out of scope for vendoring.
+  row/column scaling. KLS can now build BSD-licensed SPRAL Hungarian/auction
+  matching from a pinned submodule or link to a system SPRAL install, but the
+  retained policy still uses it conservatively rather than as a full
+  production MC64-equivalent preprocessing stage. HSL MC64 and
+  non-redistributable MC64 copies are out of scope for vendoring.
 - An intra-block parallel factor/refactor scheduler that consumes retained
   EGraph/ETree or separator-tree metadata.
 - Full CKTSO-style fast factorization tail restart after a failed pivot check,
@@ -150,8 +150,8 @@ design work, not benchmark-specific tuning.
   LGPL-2.1-or-later, with vendored-source attribution separated from the KLS
   license. MC64-equivalent preprocessing must stay inside that licensing
   boundary: HSL MC64 and solver-tree copies that retain HSL redistribution
-  restrictions are not vendorable, while BSD-licensed SPRAL-derived code or
-  independent KLS code remains eligible.
+  restrictions are not vendorable, while KLS can build the BSD-licensed SPRAL
+  scaling subset from `third_party/spral` or use independent KLS code.
 - Paper-derived benchmark manifests: the full public SuiteSparse union from
   the local KLU, NICSLU, SubtreeLU, CKTSO papers and CKTSO ordering supplement
   resolves to 110 matrices. The routine medium subset contains 93 matrices, and
@@ -500,19 +500,21 @@ medium/large default; KLS still needs MC64-quality scaling and acceptance plus
 a more optimized assignment implementation before this can close the CKTSO
 gap.
 
-An optional system-SPRAL hook was then added for BSD-licensed matching/scaling
+An optional SPRAL hook was then added for BSD-licensed matching/scaling
 support. It is deliberately not a default dependency and not a solver backend.
 KLS first wired SPRAL auction matching as a large structural-deficit fallback,
-then added SPRAL's MC64-like Hungarian unsymmetric matcher/scaler under the
-same optional dependency. A wider same-cardinality Hungarian replacement was
-tested on the AT&T `onetone2` and `twotone` static-pivot cases: it could reduce
-off-diagonal pivots on `twotone`, but increased fill and refactor time, and it
-worsened `onetone2`. The retained policy therefore uses optional SPRAL
-Hungarian only when it improves matching cardinality over the in-tree matcher,
-and passes any returned scaling through KLS's existing numeric acceptance
-trial. This keeps a license-compatible MC64-adjacent source available for hard
-structural-deficit cases without letting a maximum-product match replace
-already accepted KLS row matchings solely on weight.
+then added SPRAL's MC64-like Hungarian unsymmetric matcher/scaler. The hook was
+initially system-SPRAL only; KLS now also pins upstream SPRAL as a submodule and
+builds just its scaling subset for reproducible LGPL-compatible MC64-adjacent
+experiments. A wider same-cardinality Hungarian replacement was tested on the
+AT&T `onetone2` and `twotone` static-pivot cases: it could reduce off-diagonal
+pivots on `twotone`, but increased fill and refactor time, and it worsened
+`onetone2`. The retained policy therefore uses optional SPRAL Hungarian only
+when it improves matching cardinality over the in-tree matcher, and passes any
+returned scaling through KLS's existing numeric acceptance trial. This keeps a
+license-compatible MC64-adjacent source available for hard structural-deficit
+cases without letting a maximum-product match replace already accepted KLS row
+matchings solely on weight.
 
 The fast-factor pivot-check path was then made more diagnostic by recording the
 first rejected factor-order pivot and original matrix column in `kls_stats` and
@@ -564,10 +566,11 @@ patterns until a broader EGraph/separator-tree numeric kernel exists.
 
 1. Implement a real matching/scaling stage first, because MC64-style static
    pivoting appears in both NICSLU and CKTSO and can reduce dynamic pivoting
-   before any parallel scheduler is added. The source must be LGPL-compatible:
-   use independent KLS code or a permissive source such as SPRAL-derived BSD
-   matching/scaling code, not HSL MC64 or restricted MC64 copies from other
-   solver trees. The `pre2` evidence is now strong enough that more ordering
+   before any parallel scheduler is added. KLS now has an LGPL-compatible
+   source path through the BSD-licensed SPRAL scaling submodule; the open work
+   is a general acceptance and integration policy, not vendoring HSL MC64 or
+   restricted MC64 copies from other solver trees. The `pre2` evidence is now
+   strong enough that more ordering
    backends should be lower priority than this.
 2. Consume the retained EGraph metadata in one KLS-owned numeric engine:
    implement CKTSO's EGraph/ETree cluster/pipeline scheduler or SubtreeLU's
