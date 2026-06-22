@@ -135,7 +135,10 @@ cases skip the setup and stay on their existing refactor paths. Barriered
 cluster levels are split
 by KLS's per-column no-pivot work estimate instead of equal column counts, and
 above the CKTSO-style split level KLS can switch to a no-pivot pipeline tail
-that waits only for actual U-pattern predecessors. This avoids thousands of
+that waits only for actual U-pattern predecessors. Pipeline-tail columns are
+claimed through an atomic work cursor instead of a fixed per-thread stride, so
+threads that finish a ready tail column can continue with later tail work
+instead of idling behind another thread's blocked dependency. This avoids thousands of
 narrow-level barriers on high-work tails while preserving the existing
 fixed-pivot LU storage. The same EGraph consumer can also run inside a
 dominant BTF block with a large enough diagonal block, or a smaller dominant

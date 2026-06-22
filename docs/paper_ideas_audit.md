@@ -20,7 +20,9 @@ single-block matrices, including KLU row-scaled cases whose scale factors can
 be recomputed and permuted safely, and inside large dominant BTF blocks whose
 off-block entries can be refreshed from the retained map. The barriered EGraph
 cluster levels now use FLOP-estimated per-thread slices instead of equal column
-slices, which is a retained piece of the CKTSO/SubtreeLU load-balance idea.
+slices, and the no-pivot pipeline tail now uses an atomic dynamic work cursor
+instead of static per-thread strides, which are retained pieces of the
+CKTSO/SubtreeLU load-balance idea.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -187,13 +189,13 @@ design work, not benchmark-specific tuning.
   Large single-block and high-flop dominant-BTF matrices with enough dependency
   work and level width can now consume this schedule through a work-estimated
   per-thread cluster-mode refactor,
-  then switch to a no-pivot pipeline tail where each worker waits only for
-  actual U-pattern predecessors. The same block-aware EGraph kernel can run
-  inside a large dominant BTF block and update Offx for entries above that
-  block. Schedule construction is now limited to single-block or dominant-BTF
-  shapes with enough numeric work to consume it, while non-dominant many-block
-  BTF and low-work dominant-BTF cases skip the setup and stay on the BTF worker
-  pool or mapped refactor paths.
+  then switch to a no-pivot pipeline tail where each worker claims tail columns
+  from an atomic cursor and waits only for actual U-pattern predecessors. The
+  same block-aware EGraph kernel can run inside a large dominant BTF block and
+  update Offx for entries above that block. Schedule construction is now
+  limited to single-block or dominant-BTF shapes with enough numeric work to
+  consume it, while non-dominant many-block BTF and low-work dominant-BTF cases
+  skip the setup and stay on the BTF worker pool or mapped refactor paths.
   This is still narrower than CKTSO's production pivoting machinery, but it is
   the first retained intra-block EGraph cluster/pipeline refactor path.
 - SPICE-cycle orientation policy: KLS can analyze normal and transposed storage
@@ -263,6 +265,15 @@ scheduling with static per-thread level slices, closer to CKTSO cluster mode,
 but still regressed the intended single-block case (`rajat15`) by about 16% on
 the focused repeated-refactor sample. Keeping those broad dispatch rules would
 have required case-specific tuning, which is not the desired direction for KLS.
+After the EGraph path was narrowed and retained, the pipeline tail scheduler
+was changed from fixed per-thread strides to an atomic dynamic work cursor,
+matching CKTSO's on-the-fly tail assignment more closely while preserving KLS's
+existing fixed-pivot column kernel. On the nine-row hard focus set, same-session
+4-thread runs moved from about 9.07s geomean for the saved KLS artifact to
+about 8.91-9.04s. A 90-common-row paper-medium run kept the same failure set as
+the recent KLS medium baseline and improved geomean on common rows versus that
+baseline, while KLS still trailed the CKTSO artifact by about 1.29x geomean on
+the 90 common medium rows.
 
 A broader KLS-owned serial no-pivot refactor path was also prototyped by
 reusing the threaded BTF-block refactor kernel when thread-level parallelism was
@@ -545,6 +556,18 @@ mainline. A temporary large-gate experiment also let `pre2` try this
 preprocessing path with layered matching, but the factor-only run still timed
 out at 120s. This makes the dual-potential pass a bounded MC64-adjacent
 preprocessing cleanup, not the missing CKTSO-scale algorithm.
+
+An LGPL-compatible medium-matrix SPRAL Hungarian-first static-pivot experiment
+was also tested on the hard paper focus set. The structural gate targeted
+50k-plus mostly complete diagonals with thousands of weak diagonal entries, so
+majority-missing AT&T-style cases stayed on the retained greedy unscaled path.
+It made `rajat28` select exact SPRAL matching, switch from KLU max scaling to
+matching-derived no-scale values, and reduce off-diagonal pivots from 1 to 0,
+but its refactor time worsened from about 0.162s to about 0.169s and the
+9-row KLS/CKTSO focus ratio regressed from about 2.66x to about 2.72x. The
+experiment was removed. This reinforces that BSD/LGPL-compatible MC64-style
+matching is allowed and present through SPRAL, but widening it over medium
+mostly diagonal cases is not enough to close the large CKTSO gap.
 
 A bounded alternating-cycle improvement was then added after the existing
 layered cardinality augment and pair-swap pass. This is not a full MC64

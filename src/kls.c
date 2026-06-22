@@ -150,6 +150,8 @@ typedef struct kls_egraph_refactor_shared {
   int start;
   int launch_failed;
   atomic_uchar *pipeline_done;
+  atomic_ulong next_pipeline_pos;
+  UF_long pipeline_pos_end;
   pthread_barrier_t barrier;
 } kls_egraph_refactor_shared;
 
@@ -7487,10 +7489,14 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
   if (shared->pipeline_done != NULL &&
       cluster_levels < solver->refactor_level_count &&
       !kls_egraph_refactor_should_stop(shared)) {
-    const UF_long begin = solver->refactor_level_ptr[cluster_levels];
-    for (UF_long pos = begin + (UF_long)worker->tid;
-         pos < solver->n; pos += (UF_long)shared->thread_count) {
+    for (;;) {
       if (kls_egraph_refactor_should_stop(shared)) {
+        break;
+      }
+      const UF_long pos =
+        (UF_long)atomic_fetch_add_explicit(&shared->next_pipeline_pos, 1ul,
+                                           memory_order_relaxed);
+      if (pos >= shared->pipeline_pos_end) {
         break;
       }
       const UF_long col = solver->refactor_level_cols[pos];
@@ -7644,6 +7650,12 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared.scale = (int)common->scale;
   shared.thread_count = thread_count;
   shared.pipeline_done = pipeline_done;
+  atomic_init(&shared.next_pipeline_pos,
+              (unsigned long)(pipeline_done != NULL
+                                ? solver->refactor_level_ptr[
+                                    solver->refactor_cluster_level_count]
+                                : solver->n));
+  shared.pipeline_pos_end = solver->n;
   shared.rejected_pivot = KLS_KLU_EMPTY;
   shared.rejected_pivot_col = KLS_KLU_EMPTY;
   shared.numerical_rank = UF_long_max;
