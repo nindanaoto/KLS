@@ -765,6 +765,15 @@ averages to about 0.346s/0.330s. An earlier handoff at `4 * threads` expanded
 the tail to 3715 columns and measured about 0.328s/0.317s. The current
 middle split remains the better general setting in this quick check.
 
+The generic EGraph column kernel was also tested with a single-block fast path
+that bypassed the per-column BTF block lookup and `R` checks when
+`nblocks == 1`. This was removed before commit because it did not help the
+scaled single-block guard: `rajat30` was only slightly positive at about
+0.317s/0.313s versus 0.322s/0.314s, while `nxp1` regressed from about
+0.671s/0.675s to repeated samples around 0.693s/0.675s and 0.696s/0.693s.
+The block-lookup branch is therefore not the next useful source of the CKTSO
+gap.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
