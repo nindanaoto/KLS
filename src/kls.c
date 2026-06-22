@@ -2379,11 +2379,13 @@ static void maybe_retry_without_btf(UF_long n,
 
   const double no_btf_score = symbolic_score(no_btf_symbolic);
   const double current_score = *score;
+  const int current_score_known =
+    isfinite(current_score) && current_score < DBL_MAX / 4.0;
   if ((single_block && no_btf_score <= 1.02 * current_score) ||
-      (dominant_block && isfinite(current_score) && isfinite(no_btf_score) &&
+      (dominant_block && current_score_known && isfinite(no_btf_score) &&
        no_btf_score <= 0.80 * current_score) ||
-      (inflated_many_block && isfinite(current_score) &&
-       isfinite(no_btf_score) && no_btf_score <= 0.50 * current_score)) {
+      (inflated_many_block && current_score_known && isfinite(no_btf_score) &&
+       no_btf_score <= 0.50 * current_score)) {
     trilinos_klu_l_free_symbolic(symbolic, common);
     *symbolic = no_btf_symbolic;
     *common = no_btf_common;
@@ -2447,9 +2449,6 @@ static int should_start_auto_without_btf(UF_long n,
 #endif
   if (options == NULL || !options->use_btf) {
     return 0;
-  }
-  if (is_large_low_degree_diagonal_pattern(n, col_ptr, row_idx)) {
-    return 1;
   }
   if (is_medium_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
     return 1;
@@ -7399,11 +7398,21 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
 }
 
 static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-         solver->symbolic->nblocks > 1u &&
-         (double)solver->symbolic->maxblock >= 0.95 * (double)solver->n &&
-         (solver->symbolic->maxblock >= 90000u ||
-          solver->common.flops >= 5.0e9);
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->nblocks <= 1u || solver->n == 0u) {
+    return 0;
+  }
+  const double coverage =
+    (double)solver->symbolic->maxblock / (double)solver->n;
+  if (coverage >= 0.95 &&
+      (solver->symbolic->maxblock >= 90000u ||
+       solver->common.flops >= 5.0e9)) {
+    return 1;
+  }
+  return coverage >= 0.85 &&
+         solver->symbolic->maxblock >= 100000u &&
+         solver->symbolic->nblocks <= 20000u &&
+         solver->common.flops >= 2.0e9;
 }
 
 static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {

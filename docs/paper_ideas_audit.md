@@ -95,6 +95,9 @@ design work, not benchmark-specific tuning.
   also covers many-block analyses whose large block leaves an inflated symbolic
   estimate and whose no-BTF retry cuts the symbolic score at least in half,
   matching KLU's warning that BTF can occasionally increase factor fill.
+  Dominant/inflated METIS-start retries now require a known BTF symbolic score;
+  otherwise KLS preserves BTF, because an unknown BTF estimate can make a bad
+  no-BTF single-block symbolic look artificially preferable.
   Low-work dominant-BTF cases are excluded from this retry because keeping BTF
   is cheaper when the symbolic work estimate is already low. The METIS promotion
   gate also
@@ -370,6 +373,18 @@ checks, `HTC_336_4438` moved from the saved METIS/BTF scale-1 path
 and `ASIC_680ks` remained METIS/BTF. A parallel SCOTCH sweep did not justify an
 auto SCOTCH policy: it was much slower than METIS on `rajat30` and `nxp1`, and
 mixed or worse on `G2_circuit`, `transient`, and `power197k`.
+
+The direct METIS retry was then tightened after guard checks showed a harmful
+interaction with the ASIC 320k family. Those matrices have a very useful BTF
+decomposition, but their METIS/BTF symbolic score is unknown while the no-BTF
+symbolic has a huge explicit fill estimate. Accepting that no-BTF candidate sent
+`ASIC_320k` to a 27M+27M single-block symbolic and caused a timeout, while the
+retained METIS/BTF path has about 2.0M+2.0M numeric fill and refactors near
+0.10s. KLS now requires a known current BTF score before accepting dominant or
+inflated many-block no-BTF retries, and the broad large-low-degree structural
+shortcut no longer starts no-BTF blindly. Clean checks restored `ASIC_320k` and
+`ASIC_320ks` to METIS/BTF, while `HTC_336_4438` still selects METIS/no-BTF and
+`power197k` keeps AMD/BTF.
 
 The pre-factor static row-matching path was also tested without the augmenting
 and swap-improvement pass, leaving only the initial greedy maximum-value
@@ -904,6 +919,19 @@ slowed repeated refactors from the existing roughly 0.15s class to roughly
 0.18-0.19s. The 90k retained floor remains the better general rule; the Rajat
 rows need different numeric scheduling or pivoting work, not more EGraph
 coverage with the current kernel.
+
+The retained EGraph gate was later extended to a different dominant-BTF shape:
+large-heavy blocks below the 95% coverage floor. The new branch requires the
+largest block to cover at least 85% of the matrix, contain at least 100k rows,
+have at most 20k total BTF blocks, and show at least `2e9` actual factor flops.
+This activates on AT&T `twotone` but not on the previously rejected 80k-row
+Rajat class. In clean checks, `twotone` built 2391 EGraph levels and moved
+repeated refactor from the current worker-path class around 0.97-1.26s to about
+0.34s, reducing the 100-cycle SPICE estimate from roughly 101s to roughly 38s.
+Guards kept `rajat28` schedule metrics at zero, kept `ASIC_680ks` on the
+many-small-block worker path, preserved `G2_circuit`, and restored
+`ASIC_320k`/`ASIC_320ks` to their existing METIS/BTF EGraph path after the
+no-BTF retry fix.
 
 The EGraph worker launch path was also retried with a solver-owned persistent
 worker/scratch pool, analogous to the retained BTF refactor pool. This was

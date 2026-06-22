@@ -137,13 +137,15 @@ that waits only for actual U-pattern predecessors. This avoids thousands of
 narrow-level barriers on high-work tails while preserving the existing
 fixed-pivot LU storage. The same EGraph consumer can also run inside a
 dominant BTF block with a large enough diagonal block, or a smaller dominant
-block whose measured factor work is high enough to amortize the schedule,
-updating that block's local LU and off-block entries while leaving ordinary
-many-block BTF cases on the existing worker-pool path. For large cases that
-use KLU row scaling, the same path recomputes the row scale factors, divides
-the mapped entries by the unpermuted row scales, and then permutes `Rs` back
-to pivot order after the refactor. Small cases and
-non-dominant BTF cases still use the existing mapped or BTF-worker paths.
+block whose measured factor work is high enough to amortize the schedule. A
+large-heavy dominant-block class can also use this path when the largest block is
+at least 100k rows, covers at least 85% of the matrix, and has high actual
+factor work. The path updates that block's local LU and off-block entries while
+leaving ordinary many-block BTF cases on the existing worker-pool path. For large
+cases that use KLU row scaling, the same path recomputes the row scale factors,
+divides the mapped entries by the unpermuted row scales, and then permutes `Rs`
+back to pivot order after the refactor. Small cases and non-dominant BTF cases
+still use the existing mapped or BTF-worker paths.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium
@@ -240,11 +242,13 @@ small fringe, or a many-block decomposition whose large block produces an
 inflated symbolic estimate, and a no-BTF symbolic retry gives enough evidence to
 keep or improve the fill estimate. METIS-started auto paths skip the single-block
 retry and only use the stricter dominant/inflated-block retries, avoiding extra
-symbolic work on already-good single-block circuit cases. The retry is skipped
-for low-work dominant-BTF patterns where keeping the decomposition is already the
-cheaper SPICE-cycle choice. For large, low-degree, nearly
-diagonal patterns, medium low-degree full-diagonal patterns, medium sparse
-high-degree mostly diagonal patterns, and for METIS-started medium
+symbolic work on already-good single-block circuit cases. Dominant and inflated
+many-block retries require a known BTF symbolic score; when BTF's score is
+unknown, KLS keeps the decomposition instead of accepting a misleading no-BTF
+single-block estimate. The retry is skipped for low-work dominant-BTF patterns
+where keeping the decomposition is already the cheaper SPICE-cycle choice. For
+large nearly diagonal spike patterns, medium low-degree full-diagonal patterns,
+medium sparse high-degree mostly diagonal patterns, and for METIS-started medium
 dense-diagonal high-degree patterns, `auto` can also start without BTF to avoid
 analysis work it is likely to discard; benchmark JSON reports both
 `requested_btf` and selected `btf`.
