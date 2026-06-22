@@ -125,15 +125,17 @@ entries onto the diagonal. For larger weak-diagonal candidates, the matching
 augment uses a layered bipartite search so KLS can complete many independent
 augmenting paths per pass instead of restarting a search from each unmatched
 row. For matched diagonals with large numeric spread, KLS can also trial
-matching-derived row/column equilibration and keep it in no-scale mode when it
-is at least as good numerically as KLU row scaling. KLS keeps the transformed
-candidate only when the factorization succeeds with acceptable pivoting and
-conditioning, or when numeric fill/flop, pivoting, and reciprocal-condition
-evidence improve. Medium-large static-match candidates with both majority
-missing and majority weak diagonals can keep the row permutation but prefer
-unscaled values, avoiding matching-equilibration setup when it would increase
-fill. Benchmark JSON reports both whether static pivoting was enabled and
-whether KLS selected it.
+matching-derived row/column equilibration. The equilibration first tries a
+dual-potential scaling pass that mirrors MC64's diagonal-normalization
+conditions, rejecting cases whose greedy matching leaves large positive-cycle
+evidence, then falls back to the older heuristic balancing pass. KLS keeps the
+transformed candidate in no-scale mode only when the factorization succeeds
+with acceptable pivoting and conditioning, or when numeric fill/flop, pivoting,
+and reciprocal-condition evidence improve. Medium-large static-match
+candidates with both majority missing and majority weak diagonals can keep the
+row permutation but prefer unscaled values, avoiding matching-equilibration
+setup when it would increase fill. Benchmark JSON reports both whether static
+pivoting was enabled and whether KLS selected it.
 
 Use `--no-btf` to measure the same ordering/scaling policy without KLU's BTF
 decomposition. With `--ordering auto` and BTF enabled, KLS can still bypass BTF

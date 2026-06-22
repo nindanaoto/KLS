@@ -2606,6 +2606,145 @@ static double clamp_matching_scale(double value) {
   return value;
 }
 
+static int build_matching_dual_scaling(UF_long n,
+                                       const UF_long *base_col_ptr,
+                                       const UF_long *base_row_idx,
+                                       const double *base_values,
+                                       const UF_long *row_perm,
+                                       const double *diag,
+                                       double *row_scale,
+                                       double *col_scale) {
+  if (n <= 0 || base_col_ptr == NULL || base_row_idx == NULL ||
+      base_values == NULL || row_perm == NULL || diag == NULL ||
+      row_scale == NULL || col_scale == NULL) {
+    return 0;
+  }
+
+  double *matched_log = (double *)malloc((size_t)n * sizeof(*matched_log));
+  double *col_potential = (double *)calloc((size_t)n, sizeof(*col_potential));
+  if (matched_log == NULL || col_potential == NULL) {
+    free(matched_log);
+    free(col_potential);
+    return 0;
+  }
+
+  for (UF_long i = 0; i < n; ++i) {
+    if (diag[i] <= 0.0 || !isfinite(diag[i])) {
+      free(matched_log);
+      free(col_potential);
+      return 0;
+    }
+    matched_log[i] = log(diag[i]);
+  }
+
+  const int max_rounds = n >= 200000 ? 32 : 64;
+  const double update_tol = 1.0e-10;
+  int converged = 0;
+  /* MC64-style dual potentials: x[col] is -log(col_scale[col]).  If the
+     matched diagonal is normalized to one, every nonmatched entry gives a
+     lower-bound constraint on x[col]. */
+  for (int round = 0; round < max_rounds; ++round) {
+    UF_long changes = 0;
+    for (UF_long col = 0; col < n; ++col) {
+      for (UF_long p = base_col_ptr[col]; p < base_col_ptr[col + 1u]; ++p) {
+        const UF_long row = base_row_idx[p];
+        if (row >= n || row_perm[row] >= n) {
+          continue;
+        }
+        const double abs_value = fabs(base_values[p]);
+        if (abs_value <= 0.0 || !isfinite(abs_value)) {
+          continue;
+        }
+        const UF_long matched_col = row_perm[row];
+        const double lower_bound =
+          col_potential[matched_col] + log(abs_value) - matched_log[matched_col];
+        if (lower_bound > col_potential[col] + update_tol) {
+          col_potential[col] = lower_bound;
+          changes++;
+        }
+      }
+    }
+
+    double min_potential = DBL_MAX;
+    double max_potential = -DBL_MAX;
+    for (UF_long i = 0; i < n; ++i) {
+      if (col_potential[i] < min_potential) {
+        min_potential = col_potential[i];
+      }
+      if (col_potential[i] > max_potential) {
+        max_potential = col_potential[i];
+      }
+    }
+    if (!isfinite(min_potential) || !isfinite(max_potential) ||
+        max_potential - min_potential > 120.0) {
+      free(matched_log);
+      free(col_potential);
+      return 0;
+    }
+    if (min_potential != 0.0 && isfinite(min_potential)) {
+      for (UF_long i = 0; i < n; ++i) {
+        col_potential[i] -= min_potential;
+      }
+    }
+    if (changes == 0) {
+      converged = 1;
+      break;
+    }
+  }
+
+  double max_excess = -DBL_MAX;
+  for (UF_long col = 0; col < n; ++col) {
+    for (UF_long p = base_col_ptr[col]; p < base_col_ptr[col + 1u]; ++p) {
+      const UF_long row = base_row_idx[p];
+      if (row >= n || row_perm[row] >= n) {
+        continue;
+      }
+      const double abs_value = fabs(base_values[p]);
+      if (abs_value <= 0.0 || !isfinite(abs_value)) {
+        continue;
+      }
+      const UF_long matched_col = row_perm[row];
+      const double excess = log(abs_value) - matched_log[matched_col] -
+                            col_potential[col] + col_potential[matched_col];
+      if (excess > max_excess) {
+        max_excess = excess;
+      }
+    }
+  }
+  if (!converged && max_excess > log(4.0)) {
+    free(matched_log);
+    free(col_potential);
+    return 0;
+  }
+
+  double row_log_sum = 0.0;
+  double col_log_sum = 0.0;
+  for (UF_long i = 0; i < n; ++i) {
+    row_log_sum += col_potential[i] - matched_log[i];
+    col_log_sum += -col_potential[i];
+  }
+  const double shift =
+    0.5 * (col_log_sum - row_log_sum) / (double)n;
+  const double max_log_scale = log(1.0e12);
+  for (UF_long i = 0; i < n; ++i) {
+    const double row_log_scale = col_potential[i] - matched_log[i] + shift;
+    const double col_log_scale = -col_potential[i] - shift;
+    if (!isfinite(row_log_scale) || !isfinite(col_log_scale) ||
+        fabs(row_log_scale) > max_log_scale ||
+        fabs(col_log_scale) > max_log_scale) {
+      free(matched_log);
+      free(col_potential);
+      return 0;
+    }
+    row_scale[i] = clamp_matching_scale(exp(row_log_scale));
+    col_scale[i] = clamp_matching_scale(exp(col_log_scale));
+  }
+
+  free(matched_log);
+  free(col_potential);
+  return 1;
+}
+
 static int build_matching_equilibration(UF_long n,
                                         const UF_long *base_col_ptr,
                                         const UF_long *base_row_idx,
@@ -2676,42 +2815,45 @@ static int build_matching_equilibration(UF_long n,
     return KLS_OK;
   }
 
-  for (UF_long i = 0; i < n; ++i) {
-    const double scale = clamp_matching_scale(exp(-0.5 * log(diag[i])));
-    row_scale[i] = scale;
-    col_scale[i] = scale;
-  }
-
-  for (int round = 0; round < 6; ++round) {
+  if (!build_matching_dual_scaling(n, base_col_ptr, base_row_idx, base_values,
+                                   row_perm, diag, row_scale, col_scale)) {
     for (UF_long i = 0; i < n; ++i) {
-      row_max[i] = 0.0;
-    }
-    for (UF_long col = 0; col < n; ++col) {
-      const double cs = col_scale[col];
-      for (UF_long p = base_col_ptr[col]; p < base_col_ptr[col + 1u]; ++p) {
-        const UF_long row = base_row_idx[p];
-        if (row >= n || row_perm[row] >= n) {
-          continue;
-        }
-        const UF_long scaled_row = row_perm[row];
-        const double scaled = fabs(base_values[p]) * row_scale[scaled_row] * cs;
-        if (isfinite(scaled) && scaled > row_max[scaled_row]) {
-          row_max[scaled_row] = scaled;
-        }
-      }
+      const double scale = clamp_matching_scale(exp(-0.5 * log(diag[i])));
+      row_scale[i] = scale;
+      col_scale[i] = scale;
     }
 
-    UF_long changed = 0;
-    for (UF_long i = 0; i < n; ++i) {
-      if (row_max[i] > 4.0) {
-        const double factor = sqrt(row_max[i]);
-        row_scale[i] = clamp_matching_scale(row_scale[i] / factor);
-        col_scale[i] = clamp_matching_scale(col_scale[i] * factor);
-        changed++;
+    for (int round = 0; round < 6; ++round) {
+      for (UF_long i = 0; i < n; ++i) {
+        row_max[i] = 0.0;
       }
-    }
-    if (changed == 0) {
-      break;
+      for (UF_long col = 0; col < n; ++col) {
+        const double cs = col_scale[col];
+        for (UF_long p = base_col_ptr[col]; p < base_col_ptr[col + 1u]; ++p) {
+          const UF_long row = base_row_idx[p];
+          if (row >= n || row_perm[row] >= n) {
+            continue;
+          }
+          const UF_long scaled_row = row_perm[row];
+          const double scaled = fabs(base_values[p]) * row_scale[scaled_row] * cs;
+          if (isfinite(scaled) && scaled > row_max[scaled_row]) {
+            row_max[scaled_row] = scaled;
+          }
+        }
+      }
+
+      UF_long changed = 0;
+      for (UF_long i = 0; i < n; ++i) {
+        if (row_max[i] > 4.0) {
+          const double factor = sqrt(row_max[i]);
+          row_scale[i] = clamp_matching_scale(row_scale[i] / factor);
+          col_scale[i] = clamp_matching_scale(col_scale[i] * factor);
+          changed++;
+        }
+      }
+      if (changed == 0) {
+        break;
+      }
     }
   }
 

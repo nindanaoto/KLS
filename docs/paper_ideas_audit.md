@@ -10,10 +10,10 @@ KLS has **not** implemented every paper idea that is still worth trying. It has
 implemented the ideas that can be layered around the current KLU-derived
 Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, explicit SCOTCH
 ordering, CAMD refinement, auto scaling policy, pivot-checked reuse, static
-row-pivoting trials with matching-derived equilibration, and BTF-block parallel
-refactorization with a solver-owned worker pool. KLS now also keeps precomputed
-refactor scatter metadata for unscaled serial repeated refactors, covering both
-single-block and serial BTF cases.
+row-pivoting trials with dual-potential matching-derived equilibration, and
+BTF-block parallel refactorization with a solver-owned worker pool. KLS now
+also keeps precomputed refactor scatter metadata for unscaled serial repeated
+refactors, covering both single-block and serial BTF cases.
 
 The remaining CKTSO gap is large enough that it should be treated as a missing
 major algorithm, not an ordering-backend tuning problem. On the selected large
@@ -47,7 +47,7 @@ project does not drift toward benchmark-name-specific heuristics.
 | --- | --- | --- |
 | Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection and serial refactor scatter metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
 | NICSLU | AMD-style ordering, optional static-pivoting preprocessing, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. | Full MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and EGraph-guided refactorization are not implemented. A levelized EGraph refactor prototype was tried and rejected because it was not a general win on the current kernel/storage. |
-| CKTSO | METIS nested-dissection ordering, explicit SCOTCH ordering for experiments, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, and matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is only approximated. The dual cluster/pipeline EGraph scheduler, pipelined tail restart with pivoting after a failed pivot check, and structure-adaptive triangular solve are not implemented. KLS currently falls back to full pivoting factorization after unsafe reused pivots. |
+| CKTSO | METIS nested-dissection ordering, explicit SCOTCH ordering for experiments, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, and dual-potential matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only approximated because KLS does not have full MC64-equivalent weighted assignment. The dual cluster/pipeline EGraph scheduler, pipelined tail restart with pivoting after a failed pivot check, and structure-adaptive triangular solve are not implemented. KLS currently falls back to full pivoting factorization after unsafe reused pivots. |
 | SubtreeLU | KLS vendors reproducible METIS/GKlib submodules and uses METIS plus CAMD refinement, which overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. | KLS does not retain a separator tree, collapse/partition it into private and pipeline task queues, constrain pivot search within separator-tree subdomains, perform FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
 
 This means KLS has implemented or prototyped the ideas that can be layered
@@ -97,9 +97,9 @@ design work, not benchmark-specific tuning.
 - Static pivoting trial: KLS has value-aware greedy row matching, layered
   augmenting-path search for larger weak-diagonal candidates, and swap
   improvement for weak or high-off-diagonal-pivot medium matrices. It can also
-  trial matching-derived row/column equilibration and keeps the transformed
-  candidate only when numeric quality and cost evidence justify it. The
-  pre-factor static-pivoting gate also covers moderately sized matrices whose
+  trial dual-potential matching-derived row/column equilibration and keeps the
+  transformed candidate only when numeric quality and cost evidence justify it.
+  The pre-factor static-pivoting gate also covers moderately sized matrices whose
   input values show a majority of weak or missing diagonal entries, plus
   medium-large mostly diagonal matrices with thousands of weak diagonal rows.
   These are general numeric-structure rules used by the frequency-domain and
@@ -132,8 +132,9 @@ design work, not benchmark-specific tuning.
 ## Partially Implemented
 
 - CKTSO-style static pivoting is only partial. KLS has a practical weighted row
-  permutation and matching-derived row/column equilibration, but not a full
-  MC64-style maximum-product matching algorithm with assignment dual scaling.
+  permutation and dual-potential matching-derived row/column equilibration, but
+  not a full MC64-style maximum-product matching algorithm with assignment dual
+  scaling.
 - NICSLU/CKTSO parallel scheduling is only present at BTF-block granularity.
   KLS now has persistent serial scatter metadata for unscaled refactors, but
   not an EGraph/ETree cluster/pipeline scheduler.
@@ -409,6 +410,20 @@ the same METIS/no-BTF path for those cases. The change did not fix `pre2`:
 both explicit METIS/no-BTF and auto still timed out at 120s. This reinforces
 that `pre2` is a missing-major-algorithm case rather than a separator-backend
 case.
+
+The matching-derived equilibration pass was then moved closer to the
+MC64/NICSLU/CKTSO preprocessing contract by first solving dual-potential
+scaling constraints for the current greedy row match. When the constraints are
+consistent, the matched diagonal is normalized to one and nonmatched entries
+are bounded by the matched diagonal; when the greedy match leaves large
+positive-cycle evidence, KLS falls back to the older heuristic balancing pass.
+Same-machine checks on the retained static-pivot representatives (`gemat11`,
+`gemat12`, `twotone`, and `rajat25`) produced the same fill, flops,
+off-diagonal pivot counts, conditioning, and residuals as the previous
+mainline. A temporary large-gate experiment also let `pre2` try this
+preprocessing path with layered matching, but the factor-only run still timed
+out at 120s. This makes the dual-potential pass a bounded MC64-adjacent
+preprocessing cleanup, not the missing CKTSO-scale algorithm.
 
 The selected-large KLU2 comparison was also run with the same 120s cap and one
 factor/refactor repeat. KLU2 completed only `rajat29`, `rajat30`, and
