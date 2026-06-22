@@ -128,7 +128,9 @@ typedef struct kls_parallel_refactor_worker {
 typedef struct kls_egraph_refactor_shared {
   kls_solver *solver;
   const double *values;
+  const double *rs;
   int check_pivots;
+  int scale;
   int thread_count;
   int stop;
   int invalid;
@@ -6359,9 +6361,6 @@ static int kls_refactor_map_is_eligible(const kls_solver *solver) {
       solver->symbolic->R[solver->symbolic->nblocks] != solver->n) {
     return 0;
   }
-  if (solver->common.scale > 0 || solver->numeric->Rs != NULL) {
-    return 0;
-  }
   return solver->numeric->Pinv != NULL;
 }
 
@@ -6730,11 +6729,22 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   for (UF_long p = solver->refactor_col_ptr[k];
        p < solver->refactor_col_ptr[k + 1u]; ++p) {
     const UF_long row = solver->refactor_row_idx[p];
-    if (row >= solver->n || solver->refactor_input_pos[p] >= solver->nnz) {
+    const UF_long input_pos = solver->refactor_input_pos[p];
+    if (row >= solver->n || input_pos >= solver->nnz) {
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
-    x[row] = shared->values[solver->refactor_input_pos[p]];
+    double value = shared->values[input_pos];
+    if (shared->scale > 0) {
+      const UF_long oldrow = solver->row_idx[input_pos];
+      if (oldrow >= solver->n || shared->rs == NULL ||
+          shared->rs[oldrow] == 0.0) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      value /= shared->rs[oldrow];
+    }
+    x[row] = value;
   }
 
   UF_long *ui = NULL;
@@ -6868,12 +6878,19 @@ static void *kls_egraph_refactor_worker_main(void *arg) {
 static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->options.threads <= 1 || solver->symbolic->nblocks != 1u ||
-      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
       solver->n < 100000u || solver->refactor_dependency_work < 1.0e9 ||
       solver->refactor_level_ptr == NULL ||
       solver->refactor_level_cols == NULL ||
       solver->refactor_level_count == 0u ||
       solver->refactor_level_max_width < (UF_long)(4 * solver->options.threads)) {
+    return 0;
+  }
+  if (solver->common.scale > 0) {
+    if (solver->numeric->Rs == NULL || solver->numeric->Pnum == NULL ||
+        solver->numeric->Xwork == NULL) {
+      return 0;
+    }
+  } else if (solver->numeric->Rs != NULL) {
     return 0;
   }
   return solver->numeric->Udiag != NULL && solver->numeric->Lip != NULL &&
@@ -6887,14 +6904,24 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
                                       int check_pivots) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->options.threads <= 1 ||
-      solver->symbolic->nblocks != 1u || solver->common.scale > 0 ||
-      solver->numeric->Rs != NULL || solver->n < 100000u) {
+      solver->symbolic->nblocks != 1u || solver->n < 100000u) {
+    return -1;
+  }
+  if (solver->common.scale <= 0 && solver->numeric->Rs != NULL) {
     return -1;
   }
   if (!kls_build_refactor_schedule(solver) ||
       !kls_build_refactor_map(solver) ||
       !kls_egraph_refactor_is_eligible(solver)) {
     return -1;
+  }
+  trilinos_klu_l_common *common = &solver->common;
+  if (common->scale > 0 &&
+      !trilinos_klu_l_scale((UF_long)common->scale, solver->n,
+                            solver->col_ptr, solver->row_idx,
+                            numeric_values, solver->numeric->Rs, NULL,
+                            common)) {
+    return 0;
   }
 
   int thread_count = solver->options.threads;
@@ -6921,7 +6948,9 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   memset(&shared, 0, sizeof(shared));
   shared.solver = solver;
   shared.values = numeric_values;
+  shared.rs = solver->numeric->Rs;
   shared.check_pivots = check_pivots;
+  shared.scale = (int)common->scale;
   shared.thread_count = thread_count;
   shared.pipeline_done = pipeline_done;
   shared.rejected_pivot = KLS_KLU_EMPTY;
@@ -7022,7 +7051,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   pthread_mutex_destroy(&shared.start_lock);
   pthread_mutex_destroy(&shared.lock);
 
-  trilinos_klu_l_common *common = &solver->common;
   if (created != thread_count) {
     return -1;
   }
@@ -7040,12 +7068,23 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     common->status = TRILINOS_KLU_SINGULAR;
     common->numerical_rank = shared.numerical_rank;
     common->singular_col = shared.singular_col;
-    return common->halt_if_singular ? 0 : 1;
+    if (common->halt_if_singular) {
+      return 0;
+    }
+    if (common->scale > 0 && !kls_parallel_refactor_permute_scale(solver)) {
+      common->status = TRILINOS_KLU_INVALID;
+      return 0;
+    }
+    return 1;
   }
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
   common->nrealloc = 0;
+  if (common->scale > 0 && !kls_parallel_refactor_permute_scale(solver)) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
   return 1;
 }
 
@@ -7053,7 +7092,8 @@ static int kls_mapped_refactor(kls_solver *solver,
                                double *numeric_values,
                                int check_pivots) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      numeric_values == NULL || !kls_build_refactor_map(solver)) {
+      numeric_values == NULL || solver->common.scale > 0 ||
+      solver->numeric->Rs != NULL || !kls_build_refactor_map(solver)) {
     return -1;
   }
   if (solver->symbolic->nblocks == 1u) {
@@ -7220,6 +7260,8 @@ static void maybe_prepare_refactor_map(kls_solver *solver,
                                        double *elapsed) {
   if (solver == NULL || elapsed == NULL ||
       solver->refactor_col_ptr != NULL ||
+      solver->numeric == NULL ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
       kls_parallel_refactor_is_eligible(solver) ||
       !kls_refactor_map_is_eligible(solver)) {
     return;

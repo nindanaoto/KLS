@@ -16,7 +16,8 @@ also keeps precomputed refactor scatter metadata for unscaled serial repeated
 refactors, covering both single-block and serial BTF cases, records an exact
 no-pivot EGraph level schedule from the numeric U pattern, and consumes that
 schedule in a guarded cluster/pipeline intra-block refactor path for large
-unscaled single-block matrices. Its static-pivot
+single-block matrices, including KLU row-scaled cases whose scale factors can
+be recomputed and permuted safely. Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
 cycles beyond the pair-swap pass. When optional SPRAL support is enabled, KLS
@@ -63,7 +64,7 @@ project does not drift toward benchmark-name-specific heuristics.
 | Reference | Implemented in KLS | Partial or open coverage |
 | --- | --- | --- |
 | Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection, serial refactor scatter metadata, and exact EGraph level metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
-| NICSLU | AMD-style ordering, optional static-pivoting preprocessing, optional SPRAL Hungarian/scaling trials, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. KLS now records exact no-pivot EGraph levels from the numeric U pattern and uses them in a guarded large unscaled single-block cluster/pipeline refactor path. | Full production MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and full pivoting-aware ETree scheduling are not implemented. Earlier broader EGraph prototypes were rejected because they were not general wins on the current kernel/storage. |
+| NICSLU | AMD-style ordering, optional static-pivoting preprocessing, optional SPRAL Hungarian/scaling trials, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. KLS now records exact no-pivot EGraph levels from the numeric U pattern and uses them in a guarded large single-block cluster/pipeline refactor path, including KLU row-scaled cases. | Full production MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and full pivoting-aware ETree scheduling are not implemented. Earlier broader EGraph prototypes were rejected because they were not general wins on the current kernel/storage. |
 | CKTSO | METIS nested-dissection ordering, explicit SCOTCH ordering for experiments, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, unscaled block-local restart after a failed fast-factor pivot check, guarded EGraph cluster/pipeline no-pivot refactors, and dual-potential plus optional SPRAL matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only partially approximated because KLS does not have an always-on production MC64-equivalent weighted assignment stage. Pipelined ETree-descendant tail restart with pivoting after a failed pivot check and structure-adaptive triangular solve are not implemented. Scaled or otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
 | SubtreeLU | KLS vendors reproducible METIS/GKlib submodules and uses METIS plus CAMD refinement, which overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. | KLS does not retain a separator tree, collapse/partition it into private and pipeline task queues, constrain pivot search within separator-tree subdomains, perform FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
 
@@ -181,8 +182,10 @@ design work, not benchmark-specific tuning.
   optional SPRAL Hungarian/scaling trials, but not an always-on production
   MC64-style maximum-product matching algorithm with assignment dual scaling.
 - NICSLU/CKTSO parallel scheduling is present at BTF-block granularity and, for
-  large unscaled single-block cases, as a guarded exact-EGraph cluster/pipeline
-  no-pivot refactor. KLS still does not have the ETree descendant scheduler
+  large single-block cases, as a guarded exact-EGraph cluster/pipeline
+  no-pivot refactor. This path now covers both unscaled factors and KLU
+  row-scaled factors whose scale vector is recomputed before the EGraph refactor
+  and permuted afterward. KLS still does not have the ETree descendant scheduler
   used by CKTSO-style pivoting tail restart.
 - CKTSO fast factorization is present as pivot-checked reuse plus an unscaled
   BTF-block repair path. KLS does not yet implement CKTSO's pipelined tail
@@ -633,6 +636,19 @@ cases (`nxp1`, `rajat30`, `ASIC_680k`, and small `bcircuit`) stayed on their
 existing paths. This closes the no-pivot EGraph cluster/pipeline piece for the
 current KLS-owned storage, but not CKTSO's ETree-descendant restart with
 pivoting after a failed pivot check.
+
+The same EGraph cluster/pipeline refactor was then extended to large
+single-block KLU row-scaled factors. The scaled path recomputes KLU's row
+scale vector before the EGraph numeric update, divides each mapped matrix entry
+by the unpermuted scale for its original row, and then permutes `Rs` back into
+pivot order after the refactor. The normal mapped refactor path still rejects
+scaled factors, so scaled maps are built lazily only when the EGraph path runs.
+On same-session focused checks, `nxp1` improved from about 1.02s/1.01s
+factor/refactor averages to about 0.73s/0.71s, and `rajat30` improved from
+about 0.65s/0.64s to about 0.38s/0.39s, all with valid residuals. Guard cases
+remained on their existing paths: `ASIC_680k` stayed a many-block BTF case,
+`rajat29` stayed below the high-work EGraph gate, and small `bcircuit` remained
+below the size threshold.
 
 ## Recommended General Work
 

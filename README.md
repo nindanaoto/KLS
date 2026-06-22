@@ -116,8 +116,11 @@ width to offset thread and scratch overhead. Above the CKTSO-style split
 level, KLS can switch from barriered cluster levels to a no-pivot pipeline tail
 that waits only for actual U-pattern predecessors. This avoids thousands of
 narrow-level barriers on high-work tails while preserving the existing
-fixed-pivot LU storage. Scaled refactors, small cases, and many-block BTF cases
-still use the existing mapped or BTF-worker paths.
+fixed-pivot LU storage. For large single-block cases that use KLU row scaling,
+the same path recomputes the row scale factors, divides the mapped entries by
+the unpermuted row scales, and then permutes `Rs` back to pivot order after the
+refactor. Small cases and many-block BTF cases still use the existing mapped
+or BTF-worker paths.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium
