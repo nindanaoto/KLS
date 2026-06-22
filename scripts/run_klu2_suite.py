@@ -67,11 +67,13 @@ def main() -> int:
         return 1
 
     rows: list[dict[str, object]] = []
-    failures: list[tuple[pathlib.Path, str]] = []
+    failures: list[dict[str, object]] = []
     out = None
+    failure_out = None
     if args.jsonl is not None:
         args.jsonl.parent.mkdir(parents=True, exist_ok=True)
         out = args.jsonl.open("w", encoding="utf-8")
+        failure_out = args.jsonl.with_suffix(".failures").open("w", encoding="utf-8")
 
     try:
         for matrix in matrices:
@@ -90,10 +92,26 @@ def main() -> int:
                     timeout=args.timeout,
                 )
             except subprocess.TimeoutExpired:
-                failures.append((matrix, f"timeout after {args.timeout:g}s"))
+                failure = {
+                    "matrix": str(matrix),
+                    "reason": f"timeout after {args.timeout:g}s",
+                    "returncode": None,
+                }
+                failures.append(failure)
+                if failure_out is not None:
+                    failure_out.write(json.dumps(failure, sort_keys=True) + "\n")
+                    failure_out.flush()
                 continue
             if proc.returncode != 0:
-                failures.append((matrix, proc.stderr.strip()))
+                failure = {
+                    "matrix": str(matrix),
+                    "reason": proc.stderr.strip(),
+                    "returncode": proc.returncode,
+                }
+                failures.append(failure)
+                if failure_out is not None:
+                    failure_out.write(json.dumps(failure, sort_keys=True) + "\n")
+                    failure_out.flush()
                 continue
             row = json.loads(proc.stdout)
             rows.append(row)
@@ -104,6 +122,8 @@ def main() -> int:
     finally:
         if out is not None:
             out.close()
+        if failure_out is not None:
+            failure_out.close()
 
     cycle_values = [float(row["spice_cycle_seconds"]) for row in rows]
     print(json.dumps({
@@ -114,8 +134,8 @@ def main() -> int:
     }, indent=2, sort_keys=True))
     if failures:
         print("failures:", file=sys.stderr)
-        for matrix, reason in failures:
-            print(f"  {matrix}: {reason}", file=sys.stderr)
+        for failure in failures:
+            print(f"  {failure['matrix']}: {failure['reason']}", file=sys.stderr)
     return 0 if rows else 1
 
 

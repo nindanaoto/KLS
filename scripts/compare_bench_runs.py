@@ -35,11 +35,39 @@ def load_rows(path: pathlib.Path) -> dict[str, dict[str, object]]:
     return rows
 
 
+def load_failures(path: pathlib.Path) -> dict[str, dict[str, object]]:
+    failure_path = path.with_suffix(".failures")
+    rows: dict[str, dict[str, object]] = {}
+    if not failure_path.exists():
+        return rows
+    with failure_path.open("r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            matrix = pathlib.Path(str(row["matrix"])).name
+            if matrix in rows:
+                raise ValueError(
+                    f"{failure_path}:{line_no}: duplicate matrix basename {matrix}"
+                )
+            rows[matrix] = row
+    return rows
+
+
 def geometric_mean(values: list[float]) -> float:
     positives = [v for v in values if v > 0.0 and math.isfinite(v)]
     if not positives:
         return math.nan
     return math.exp(sum(math.log(v) for v in positives) / len(positives))
+
+
+def print_failures(name: str, failures: dict[str, dict[str, object]]) -> None:
+    if not failures:
+        return
+    print(f"\nFailures in {name}:")
+    for matrix in sorted(failures):
+        reason = failures[matrix].get("reason", "")
+        print(f"  {matrix}: {reason}")
 
 
 def main() -> int:
@@ -53,8 +81,12 @@ def main() -> int:
 
     candidate = load_rows(args.candidate)
     reference = load_rows(args.reference)
+    candidate_failures = load_failures(args.candidate)
+    reference_failures = load_failures(args.reference)
     common = sorted(set(candidate) & set(reference))
     if not common:
+        print_failures(args.candidate_name, candidate_failures)
+        print_failures(args.reference_name, reference_failures)
         raise SystemExit("no common matrix basenames")
 
     ratios: list[float] = []
@@ -108,6 +140,8 @@ def main() -> int:
         print(f"\nMissing from {args.candidate_name}: {', '.join(missing_candidate)}")
     if missing_reference:
         print(f"\nMissing from {args.reference_name}: {', '.join(missing_reference)}")
+    print_failures(args.candidate_name, candidate_failures)
+    print_failures(args.reference_name, reference_failures)
     return 0
 
 

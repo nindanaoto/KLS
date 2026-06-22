@@ -84,12 +84,14 @@ def main() -> int:
         return 1
 
     rows: list[dict[str, object]] = []
-    failures: list[tuple[pathlib.Path, str]] = []
+    failures: list[dict[str, object]] = []
     if args.jsonl is not None:
         args.jsonl.parent.mkdir(parents=True, exist_ok=True)
         out = args.jsonl.open("w", encoding="utf-8")
+        failure_out = args.jsonl.with_suffix(".failures").open("w", encoding="utf-8")
     else:
         out = None
+        failure_out = None
 
     try:
         for matrix in matrices:
@@ -139,7 +141,15 @@ def main() -> int:
                 sample["spice_cycle_seconds"] = spice_cycle_seconds(sample)
                 samples.append(sample)
             if not samples:
-                failures.append((matrix, "; ".join(sample_failures)))
+                failure = {
+                    "matrix": str(matrix),
+                    "reason": "; ".join(sample_failures),
+                    "sample_failures": sample_failures,
+                }
+                failures.append(failure)
+                if failure_out is not None:
+                    failure_out.write(json.dumps(failure, sort_keys=True) + "\n")
+                    failure_out.flush()
                 continue
             samples.sort(key=lambda row: float(row["spice_cycle_seconds"]))
             row = dict(samples[len(samples) // 2])
@@ -162,6 +172,8 @@ def main() -> int:
     finally:
         if out is not None:
             out.close()
+        if failure_out is not None:
+            failure_out.close()
 
     cycle_values = [float(row["spice_cycle_seconds"]) for row in rows]
     summary = {
@@ -173,8 +185,8 @@ def main() -> int:
     print(json.dumps(summary, indent=2, sort_keys=True))
     if failures:
         print("failures:", file=sys.stderr)
-        for matrix, err in failures:
-            print(f"  {matrix}: {err}", file=sys.stderr)
+        for failure in failures:
+            print(f"  {failure['matrix']}: {failure['reason']}", file=sys.stderr)
         return 2
     return 0
 

@@ -329,6 +329,12 @@ SPICE-cycle sample, which is useful when comparing small solver-policy changes.
 Use an odd `N` when you need an exact median sample.
 For broad paper suites, add `--timeout SECONDS` so one pathological matrix is
 recorded as a failure instead of blocking the rest of the run.
+When `--jsonl` is used, successful rows are written to that file and timeout or
+process-failure records are written to the adjacent `.failures` sidecar. For
+example, `build/kls_paper_large_recon.jsonl` records completed matrices and
+`build/kls_paper_large_recon.failures` records timed-out or failed matrices.
+`scripts/compare_bench_runs.py` reads those sidecars when present so large-case
+comparisons show both timing ratios and missing rows caused by failures.
 
 The suite metric is:
 
