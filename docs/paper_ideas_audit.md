@@ -32,7 +32,7 @@ restarting that block with pivoting and then retrying the checked no-pivot
 factorization.
 
 The remaining CKTSO gap is large enough that it should be treated as a missing
-major algorithm, not an ordering-backend tuning problem. On the selected large
+major algorithm, not an ordering-package tuning problem. On the selected large
 `pre2` case, CKTSO completed the factor-only comparison inside the 120s cap
 with about 28.4s cycle time, while KLS timed out under AMD/BTF, METIS/no-BTF,
 SCOTCH/BTF, and auto policy variants. The CKTSO ordering supplement reports
@@ -101,14 +101,18 @@ design work, not benchmark-specific tuning.
   selected BTF/no-BTF mode when comparing a METIS promotion candidate. KLS also
   starts directly with METIS for narrow large-diagonal structural classes from
   the paper corpus: very low-degree full diagonals, sparse full diagonals with
-  bounded but meaningful row/column degree, and nearly full diagonals with a
-  large dense degree spike. Medium spiked low-diagonal patterns with a large
+  bounded but meaningful row/column degree, nearly full diagonals with a large
+  dense degree spike, and large nearly diagonal sparse-spike or dense-spike
+  patterns. The nearly diagonal spike class also starts without BTF so KLS does
+  not first pay for an AMD symbolic analysis before settling on the same
+  METIS/no-BTF numeric path. Medium spiked low-diagonal patterns with a large
   row/column degree spike also start directly with METIS and max scaling for
   TSOPF-style power-grid structures. For large high-work no-BTF single-block
-  analyses, auto can also try METIS symbolically before the first numeric
-  factorization and keep it when the symbolic fill score is clearly lower,
-  avoiding a delayed post-factor METIS promotion. This preserves the papers'
-  nested-dissection motivation without naming individual matrices.
+  analyses outside those direct-start classes, auto can also try METIS
+  symbolically before the first numeric factorization and keep it when the
+  symbolic fill score is clearly lower, avoiding a delayed post-factor METIS
+  promotion. This preserves the papers' nested-dissection motivation without
+  naming individual matrices.
 - Constrained nested-dissection refinement: KLS can refine METIS rank groups
   with CAMD constraints, preserving nested-dissection rank shape while reducing
   local fill and flops. Large METIS orderings now use coarse rank-group CAMD
@@ -466,7 +470,7 @@ poor candidates for another ordering/scale/BTF heuristic. They need the open
 paper ideas around faster single-block numeric/refactor kernels, matching
 quality, or EGraph/separator-tree scheduling.
 
-SCOTCH was then added as a pinned, reproducible optional ordering backend and
+SCOTCH was then added as a pinned, reproducible optional ordering package and
 tested as an explicit `--ordering scotch` path. SCOTCH symbolic analysis
 completed on `pre2`, but numeric factorization still timed out at 120s; a
 `rajat30` SCOTCH numeric run was also not competitive before interruption near
@@ -483,7 +487,7 @@ runs finished `nxp1` with about 1.16s factor and 1.13s refactor averages, and
 `rajat30` with about 0.70s factor and 0.70s refactor averages. Auto selected
 the same METIS/no-BTF path for those cases. The change did not fix `pre2`:
 both explicit METIS/no-BTF and auto still timed out at 120s. This reinforces
-that `pre2` is a missing-major-algorithm case rather than a separator-backend
+that `pre2` is a missing-major-algorithm case rather than a separator-package
 case.
 
 The matching-derived equilibration pass was then moved closer to the
@@ -544,7 +548,8 @@ a more optimized assignment implementation before this can close the CKTSO
 gap.
 
 An optional SPRAL hook was then added for BSD-licensed matching/scaling
-support. It is deliberately not a default dependency and not a solver backend.
+support. It is deliberately not a default dependency and not a solver
+replacement.
 KLS first wired SPRAL auction matching as a large structural-deficit fallback,
 then added SPRAL's MC64-like Hungarian unsymmetric matcher/scaler. The hook was
 initially system-SPRAL only; KLS now also pins upstream SPRAL as a submodule and
@@ -761,6 +766,17 @@ cutting setup time: `rajat30` auto initial factor moved from about 4.06s to
 about 1.89s, matching explicit METIS/no-BTF/max-scale, and `nxp1` moved to
 about 2.77s while keeping the same METIS/no-BTF/max-scale EGraph path.
 `rajat29` and `ASIC_680k` remained on their retained BTF policies.
+
+The high-work METIS/no-BTF class was then moved one step earlier in analysis.
+A structural direct-start gate now recognizes large nearly diagonal matrices
+with a meaningful row/column spike in either a sparse-spike or dense-spike
+density band. This lets `nxp1` and `rajat30` start directly with METIS/no-BTF
+instead of first doing AMD symbolic analysis and then a METIS symbolic retry.
+Same-session checks reduced `rajat30` analysis from about 3.9s to about 3.0s
+while preserving the about 1.86s initial factor and about 0.31s refactor path,
+and reduced `nxp1` analysis from about 2.6s to about 1.84s while preserving
+the max-scale EGraph path. The low-work `rajat29` BTF guard and many-block
+`ASIC_680k` guard stayed on their retained policies.
 
 EGraph schedule construction was then tightened to the same structural class
 as the retained EGraph consumer. KLS had been building dependency-level

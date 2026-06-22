@@ -76,7 +76,7 @@ cmake -S . -B build -DKLS_ENABLE_SPRAL_SCALING=ON \
   -DKLS_SYSTEM_SPRAL_LIBRARY=/path/to/libspral.so
 ```
 
-This is not a solver backend and is not enabled by default. KLS uses it as a
+This is not a solver replacement and is not enabled by default. KLS uses it as a
 static-pivot matching fallback when the in-tree matcher is short of a full
 cardinality match, as a guarded pre-factor Hungarian/scaling path for large
 weak-diagonal dominant-block matrices, and as a guarded post-factor Hungarian
@@ -215,7 +215,7 @@ pivoting was enabled, whether KLS selected it, and whether the accepted static
 match used exact assignment. KLS does not vendor HSL MC64 or the MC64 copies
 carried by some solver projects. When `KLS_ENABLE_SPRAL_SCALING=ON`, KLS
 builds or links BSD-licensed SPRAL Hungarian/auction matching as an
-LGPL-compatible MC64-adjacent backend. SPRAL same-cardinality Hungarian
+LGPL-compatible MC64-adjacent component. SPRAL same-cardinality Hungarian
 matches are not installed blindly; KLS uses them before factorization only for
 large weak-diagonal dominant-block candidates, or after the first factorization
 for expensive high-off-diagonal-pivot cases, and keeps them only when the
@@ -267,16 +267,20 @@ benefit of nested dissection.
 For large paper-style diagonal patterns, `auto` can start directly with METIS
 when the structure is a very-low-degree full diagonal, a sparse full diagonal
 with bounded but nontrivial row/column degree, a sparse-diagonal low-degree
-matrix with no empty rows or columns, or a near-full diagonal with a large dense
-row/column spike. These predicates are structural, not matrix-name-based, and
-are deliberately narrow so unrelated IBM `dc`/`trans` cases stay on the cheaper
-AMD/COLAMD path.
+matrix with no empty rows or columns, a near-full diagonal with a large dense
+row/column spike, or a large nearly diagonal matrix in a sparse-spike or
+dense-spike density band. The nearly diagonal spike class also starts without
+BTF so KLS does not first pay for an AMD symbolic pass before keeping the same
+METIS/no-BTF numeric path. These predicates are structural, not
+matrix-name-based, and are deliberately narrow so unrelated IBM `dc`/`trans`
+cases and low-work dominant-BTF cases stay on the cheaper AMD/COLAMD path.
 
 Use `--ordering scotch` to force SCOTCH nested-dissection ordering. SCOTCH is
-kept as an explicit experimental backend rather than part of `auto` until it
-shows a general win over the current AMD/METIS policy. ParMETIS is not wired
-into KLS yet; it is a distributed-memory MPI package and should be treated as a
-separate future backend if KLS grows an MPI/distributed solver path.
+kept as an explicit experimental ordering option rather than part of `auto`
+until it shows a general win over the current AMD/METIS policy. ParMETIS is not
+wired into KLS yet; it is a distributed-memory MPI package and should be
+treated as a separate future component if KLS grows an MPI/distributed solver
+path.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 
