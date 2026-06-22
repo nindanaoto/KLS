@@ -124,6 +124,9 @@ design work, not benchmark-specific tuning.
   no KLU row scaling, avoiding the scale recomputation cost while preserving
   the useful BTF decomposition. Large high-work METIS/no-BTF single-block paths
   that already selected max scaling skip redundant post-factor scale trial
+  factorizations. TSOPF-style spiked low-diagonal METIS starts begin with sum
+  scaling and a lower `1e-4` pivot tolerance once their structural dominant-BTF
+  shape is known, avoiding the earlier max-scale/default-tolerance discovery
   factorizations.
 - Fast repeated factorization with pivot check: KLS reuses an existing numeric
   pattern, checks reused pivots against the selected threshold via L
@@ -418,8 +421,8 @@ A medium spiked low-diagonal structural METIS start was retained for the large
 TSOPF-style paper cases. The rule requires a 50k-125k order matrix, about
 20-32 entries per column on average, a 20-35% diagonal fraction, no empty rows,
 and one large row/column degree spike covering about 40-60% of the matrix. It
-starts with METIS while keeping BTF enabled, and now leaves auto scaling on the
-default max-scaling path rather than forcing no-scale. In same-session checks,
+initially started with METIS while keeping BTF enabled, and left auto scaling
+on the default max-scaling path rather than forcing no-scale. In same-session checks,
 `TSOPF_FS_b39_c19` improved from the earlier about-568s SPICE-cycle estimate to
 about 546s, and the widened bound rescued the large-supplement
 `TSOPF_FS_b39_c30` from the 120s per-process timeout with a SPICE-cycle
@@ -777,6 +780,17 @@ while preserving the about 1.86s initial factor and about 0.31s refactor path,
 and reduced `nxp1` analysis from about 2.6s to about 1.84s while preserving
 the max-scale EGraph path. The low-work `rajat29` BTF guard and many-block
 `ASIC_680k` guard stayed on their retained policies.
+
+The same "start with the already accepted policy" idea was applied to
+TSOPF-style spiked low-diagonal matrices. Auto mode had already learned that
+`TSOPF_FS_b39_c30` wanted METIS/BTF, sum scaling, and `1e-4` pivot tolerance,
+but it reached that state by first paying for max-scale/default-tolerance
+factorizations. The structural dominant-BTF gate now starts this class directly
+with sum scaling and `1e-4` tolerance and skips the redundant scale and pivot
+trials. A focused `TSOPF_FS_b39_c30` check reduced initial factor time from
+about 86s to about 12s while preserving the about 2.6s refactor path and valid
+residual, moving the SPICE-cycle estimate from about 370s to about 290s versus
+the saved CKTSO artifact at about 333s.
 
 EGraph schedule construction was then tightened to the same structural class
 as the retained EGraph consumer. KLS had been building dependency-level

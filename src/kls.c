@@ -1539,7 +1539,7 @@ static int choose_auto_scale_from_pattern(UF_long n,
     return -1;
   }
   if (is_medium_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
-    return 2;
+    return 1;
   }
   if (is_medium_bounded_degree_diagonal_pattern(n, col_ptr, row_idx)) {
     return -1;
@@ -1655,6 +1655,27 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
   }
   return choose_auto_scale_from_pattern(solver->n, solver->col_ptr, solver->row_idx,
                                         &solver->options, numeric_values);
+}
+
+static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12) {
+    return solver == NULL ? 0.001 : solver->options.pivot_tolerance;
+  }
+
+#ifdef KLS_HAVE_METIS
+  if (solver->options.ordering == KLS_ORDERING_AUTO &&
+      solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+      solver->symbolic->do_btf && solver->symbolic->nblocks <= 4u &&
+      (double)solver->symbolic->maxblock >= 0.95 * (double)solver->n &&
+      solver->common.scale == 1 &&
+      is_medium_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
+                                            solver->row_idx)) {
+    return 1.0e-4;
+  }
+#endif
+
+  return solver->options.pivot_tolerance;
 }
 
 static int apply_options_to_common(trilinos_klu_l_common *common, const kls_options *options) {
@@ -2292,6 +2313,9 @@ static int should_start_auto_without_btf(UF_long n,
                                          const UF_long *row_idx,
                                          const kls_options *options,
                                          int large_spiked_metis_no_btf) {
+#ifndef KLS_HAVE_METIS
+  (void)large_spiked_metis_no_btf;
+#endif
   if (options == NULL || !options->use_btf) {
     return 0;
   }
@@ -5237,6 +5261,14 @@ static int should_try_auto_scale(const kls_solver *solver) {
   }
 #endif
 
+#ifdef KLS_HAVE_METIS
+  if (solver->common.scale == 1 &&
+      is_medium_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
+                                            solver->row_idx)) {
+    return 0;
+  }
+#endif
+
   const double flops = solver->common.flops;
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
   if (solver->options.ordering == KLS_ORDERING_AUTO &&
@@ -5301,6 +5333,7 @@ static void maybe_select_auto_scale(kls_solver *solver,
 static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
   if (solver->auto_pivot_checked || solver->numeric == NULL || solver->n < 30000 ||
       fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
+      fabs(solver->common.tol - 0.001) > 1.0e-12 ||
       solver->common.noffdiag < 16) {
     return 0;
   }
@@ -8053,6 +8086,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   free_numeric(solver);
   if (!had_numeric) {
     solver->common.scale = choose_auto_scale_from_values(solver, numeric_values);
+    solver->common.tol = choose_initial_auto_pivot_tolerance(solver);
   }
   const double start = kls_now_seconds();
   solver->numeric = trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,

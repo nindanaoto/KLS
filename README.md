@@ -154,23 +154,26 @@ are already balanced. Otherwise it starts from KLU's max row scaling mode (`2`).
 Large low-degree, nearly diagonal circuit patterns, METIS-started medium
 bounded-degree or dense-diagonal patterns, and low-work dominant-BTF patterns
 also start without row scaling to avoid repeated scale work once KLS has
-validated the structure. TSOPF-style spiked low-diagonal METIS starts use max
-scaling, and large sparse-diagonal low-degree patterns can start with sum
-scaling when that avoids more expensive max-scaling behavior. For large expensive
-cases, `auto` can still try other numeric scaling modes when actual flop/fill
-evidence justifies the extra work, but structural METIS starts that are already
-known to need a specific scale mode skip redundant scale trials. Large
-high-work METIS/no-BTF single-block paths that already selected max scaling
-also skip those trial factorizations, preserving the chosen numeric factors
-without paying for rejected scale candidates. Explicit numeric scale values
-remain fixed.
+validated the structure. TSOPF-style spiked low-diagonal METIS starts use sum
+scaling, and large sparse-diagonal low-degree patterns can also start with sum
+scaling when that avoids more expensive max-scaling behavior. For large
+expensive cases, `auto` can still try other numeric scaling modes when actual
+flop/fill evidence justifies the extra work, but structural METIS starts that
+are already known to need a specific scale mode skip redundant scale trials.
+Large high-work METIS/no-BTF single-block paths that already selected max
+scaling also skip those trial factorizations, preserving the chosen numeric
+factors without paying for rejected scale candidates. Explicit numeric scale
+values remain fixed.
 
 Use `--pivot-tol T` to benchmark the diagonal pivot tolerance exposed by the
 KLS API. The default is `0.001`, matching the underlying KLU default. With that
 default, KLS can trial a lower `1e-4` tolerance on large high-fill matrices with
 noticeable off-diagonal pivoting, keeping it only when fill and pivoting improve
-without a large reciprocal-condition drop. Benchmark JSON reports both requested
-and selected pivot tolerance.
+without a large reciprocal-condition drop. TSOPF-style spiked low-diagonal
+METIS starts that already match the accepted sum-scaled dominant-BTF policy
+start directly at `1e-4` to avoid paying for a rejected default-tolerance
+factorization. Benchmark JSON reports both requested and selected pivot
+tolerance.
 
 When `fast_factor` reuses an existing factor pattern, KLS also checks the
 resulting L multipliers against the selected pivot tolerance. On unscaled BTF
