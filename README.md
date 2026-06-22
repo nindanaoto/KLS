@@ -110,11 +110,14 @@ each column's off-block entries separate from diagonal-block entries so the
 numeric refactor loop avoids reclassifying the same structure on every SPICE
 step. For threaded runs, KLS also records the exact no-pivot refactor EGraph
 level schedule from the numeric U pattern; this metadata is exposed in
-benchmark output and is retained as the scheduling substrate for future
-intra-block parallel refactors. The same metadata reports the CKTSO-style
-cluster/pipeline split level and approximate no-pivot refactor work in the
-pipeline tail, so new threaded kernels can be selected by structural work
-evidence rather than matrix names.
+benchmark output and is used by a guarded large unscaled single-block
+level-sliced refactor path when there is enough dependency work and level
+width to offset thread and scratch overhead. The same metadata reports the
+CKTSO-style cluster/pipeline split level and approximate no-pivot refactor
+work in the pipeline tail, so deeper threaded kernels can be selected by
+structural work evidence rather than matrix names. Scaled refactors, small
+cases, and many-block BTF cases still use the existing mapped or BTF-worker
+paths.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium
