@@ -6409,6 +6409,20 @@ static int kls_refactor_pool_map_is_worthwhile(const kls_solver *solver) {
   return 1;
 }
 
+static int kls_scaled_serial_mapped_btf_is_worthwhile(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->n == 0u ||
+      solver->common.scale <= 0 || solver->symbolic->nblocks < 1024u ||
+      solver->symbolic->nblocks == 1u) {
+    return 0;
+  }
+  const double coverage =
+    (double)solver->symbolic->maxblock / (double)solver->n;
+  return coverage >= 0.95 &&
+         solver->symbolic->maxblock < 90000u &&
+         solver->common.flops >= 1.0e8;
+}
+
 static int kls_parallel_refactor_permute_scale(kls_solver *solver) {
   trilinos_klu_l_numeric *numeric = solver->numeric;
   double *rs = numeric->Rs;
@@ -7801,8 +7815,23 @@ static int kls_mapped_refactor(kls_solver *solver,
                                double *numeric_values,
                                int check_pivots) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      numeric_values == NULL || solver->common.scale > 0 ||
-      solver->numeric->Rs != NULL || !kls_build_refactor_map(solver)) {
+      numeric_values == NULL) {
+    return -1;
+  }
+  const int scaled = solver->common.scale > 0;
+  if (scaled) {
+    if (solver->symbolic->nblocks == 1u ||
+        solver->numeric->Rs == NULL || solver->numeric->Pnum == NULL ||
+        solver->numeric->Xwork == NULL) {
+      return -1;
+    }
+    if (!kls_scaled_serial_mapped_btf_is_worthwhile(solver)) {
+      return -1;
+    }
+  } else if (solver->numeric->Rs != NULL) {
+    return -1;
+  }
+  if (!kls_build_refactor_map(solver)) {
     return -1;
   }
   if (solver->symbolic->nblocks == 1u) {
@@ -7817,6 +7846,14 @@ static int kls_mapped_refactor(kls_solver *solver,
   }
 
   trilinos_klu_l_common *common = &solver->common;
+  if (scaled &&
+      !trilinos_klu_l_scale((UF_long)common->scale, solver->n,
+                            solver->col_ptr, solver->row_idx,
+                            numeric_values, solver->numeric->Rs, NULL,
+                            common)) {
+    return 0;
+  }
+
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
@@ -7834,6 +7871,7 @@ static int kls_mapped_refactor(kls_solver *solver,
   shared.values = numeric_values;
   shared.symbolic = solver->symbolic;
   shared.numeric = solver->numeric;
+  shared.rs = scaled ? solver->numeric->Rs : NULL;
   shared.n = solver->n;
   shared.scale = (int)common->scale;
   shared.halt_if_singular = common->halt_if_singular;
@@ -7873,6 +7911,10 @@ static int kls_mapped_refactor(kls_solver *solver,
     if (common->halt_if_singular) {
       return 0;
     }
+  }
+  if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
   }
   if (!worker.singular) {
     common->status = TRILINOS_KLU_OK;

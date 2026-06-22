@@ -13,9 +13,9 @@ ordering, CAMD refinement, auto scaling policy, pivot-checked reuse, static
 row-pivoting trials with dual-potential matching-derived equilibration, and
 BTF-block parallel refactorization with a solver-owned worker pool. KLS now
 also keeps precomputed refactor scatter metadata for unscaled serial repeated
-refactors, covering both single-block and serial BTF cases, records an exact
-no-pivot EGraph level schedule from the numeric U pattern, and consumes that
-schedule in a guarded cluster/pipeline intra-block refactor path for large
+refactors and for a narrow scaled many-fringe dominant-BTF subset, records an
+exact no-pivot EGraph level schedule from the numeric U pattern, and consumes
+that schedule in a guarded cluster/pipeline intra-block refactor path for large
 single-block matrices, including KLU row-scaled cases whose scale factors can
 be recomputed and permuted safely, and inside large dominant BTF blocks whose
 off-block entries can be refreshed from the retained map. The barriered EGraph
@@ -178,7 +178,9 @@ design work, not benchmark-specific tuning.
   single-block and serial BTF refactors. For serial BTF refactors, KLS also
   prepartitions each mapped column into off-block and diagonal-block entries, so
   repeated refactors do not reclassify the same BTF structure in the numeric
-  scatter loop.
+  scatter loop. A narrow scaled many-fringe dominant-BTF subset uses the same
+  serial map after recomputing row scales and then permuting the scale vector
+  back to pivot order.
 - KLS-owned EGraph metadata and guarded refactor consumption: for threaded
   numeric runs, KLS can levelize the exact no-pivot refactor dependency graph
   from the actual U pattern after factorization. It retains level pointers and
@@ -1190,6 +1192,24 @@ are only about 1.0x to 1.3x, and `twotone`/`power197k` solve is already faster
 than CKTSO. This confirms that a CKTSO-style solve rewrite is secondary for the
 current hard gap; the larger missing mechanism is the row-oriented
 factor/refactor engine and its pivot-aware scheduler.
+
+The scaled serial mapped BTF refactor was then enabled for the narrow
+many-fringe dominant-BTF shape that the worker-pool narrowing intentionally
+left serial: at least 1024 BTF blocks, a 95%+ largest block below the EGraph
+floor, and at least `1e8` measured factor flops. The broad scale-aware mapped
+prototype was rejected because it regressed unrelated low-work or small-fringe
+scaled rows such as `dc1` and `ckt11752_dc_1`. The retained guard is structural
+and, on the current medium paper artifact, selects only `rajat20` and
+`rajat28`. On the targeted dominant-fringe set it improved geomean SPICE-cycle
+time by about 2.4% with no losses over 2%; on the nine-row hard-focus set it was
+about 1.2% faster than the previous many-fringe-serial artifact, mostly from
+`rajat28`. The full 93-row medium manifest completed the same 90 rows as the
+previous KLS artifact, with the known singular `bips07_1998` and the known
+`ss1`/`mac_econ_fwd500` timeouts, and improved one-pass geomean from about
+`0.3407s` to `0.3372s`. Against the saved CKTSO medium artifact, however, KLS
+is still about `1.28x` slower geomean and `rajat28` remains about `9.3x` slower,
+so this is another small fixed-pattern refactor cleanup rather than the missing
+CKTSO-scale mechanism.
 
 ## Recommended General Work
 

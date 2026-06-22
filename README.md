@@ -136,7 +136,9 @@ cases skip the setup and stay on their existing refactor paths. When a
 low-work dominant BTF decomposition has one 95%+ block plus thousands of tiny
 fringe blocks below the EGraph size floor, KLS also keeps repeated refactors on
 the serial mapped path because the BTF worker pool has too little useful
-off-dominant work to amortize synchronization. Barriered
+off-dominant work to amortize synchronization. In the scaled subset of that
+class, KLS recomputes KLU row scales, applies the same fixed input-position map,
+and permutes the scale vector back to pivot order after each refactor. Barriered
 cluster levels are split
 by KLS's per-column no-pivot work estimate instead of equal column counts, and
 above the CKTSO-style split level KLS can switch to a no-pivot pipeline tail
@@ -453,7 +455,8 @@ This is a functional implementation with KLS-level analysis choices for
 repeated SPICE-style solves and a KLS-owned threaded refactor path for BTF block
 parallelism on a narrow class of large cases. KLS also has a precomputed
 single-block and serial BTF refactor scatter path for unscaled repeated
-refactors, plus an unscaled block-local pivot restart for fast-factor failures.
+refactors and a narrow scaled dominant-BTF subset, plus an unscaled block-local
+pivot restart for fast-factor failures.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The next algorithmic work is to evolve the numeric factor/refactor/solve
 kernels toward deeper KLS-owned sparse kernels with better pivot reuse and
