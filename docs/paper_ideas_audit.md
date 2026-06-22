@@ -364,6 +364,27 @@ unresolved large-case timeout. The result reinforces that the remaining
 large-case gap is mostly very large single-block or near-single-block
 numeric/refactor throughput, not the many-small-BTF-block class.
 
+The remaining `pre2` selected-large timeout was then checked as a simple policy
+question before attempting new numeric-kernel work. Eight 120s-capped variants
+all timed out with one factor and one refactor repeat: AMD/max-scale,
+AMD/no-scale, COLAMD/max-scale, METIS with max/sum/no-scale, AMD/no-BTF
+max-scale, and METIS/no-BTF max-scale. Focused sweeps on the completed but
+slow `nxp1` and `rajat30` cases also found no better simple dispatch: `nxp1`
+needs the current auto no-BTF METIS path, while AMD/COLAMD time out and
+BTF-enabled METIS is much worse; `rajat30` remains best under current auto
+METIS/no-BTF max-scaling. These results make `pre2`, `nxp1`, and `rajat30`
+poor candidates for another ordering/scale/BTF heuristic. They need the open
+paper ideas around faster single-block numeric/refactor kernels, matching
+quality, or EGraph/separator-tree scheduling.
+
+The selected-large KLU2 comparison was also run with the same 120s cap and one
+factor/refactor repeat. KLU2 completed only `rajat29`, `rajat30`, and
+`ASIC_680k`; it timed out on `G3_circuit`, `pre2`, `nxp1`, `Hamrle3`, and
+`TSOPF_FS_b39_c30`. On successful common rows, KLU2 was faster than KLS on
+`rajat29` but slower on `rajat30` and `ASIC_680k`. After the widened TSOPF
+spiked rule, KLS also completes `TSOPF_FS_b39_c30` where KLU2 timed out. The
+remaining large-case primary competitor is therefore CKTSO rather than KLU2.
+
 Extending the existing mapped refactor metadata to scaled refactors was
 retested against current mainline using a clean `HEAD` worktree. The scaled
 map was KLU-semantics-compatible after recomputing row scale factors before
