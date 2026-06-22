@@ -83,6 +83,13 @@ weak-diagonal dominant-block matrices, and as a guarded post-factor Hungarian
 trial for expensive high-off-diagonal-pivot cases. Accepted factorization
 candidates still have to pass KLS's normal numeric checks.
 
+KLS keeps this as the only vendored MC64-adjacent external implementation.
+HSL MC64 itself, and solver-tree copies that retain HSL redistribution
+restrictions, are not compatible with KLS's LGPL distribution goal. A
+permissively licensed translation of SPRAL's scaling code can be used as a
+reference, but the pinned SPRAL submodule is the preferred reproducible source
+for the C/Fortran build.
+
 ## Benchmark
 
 ```sh

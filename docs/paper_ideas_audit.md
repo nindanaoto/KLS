@@ -171,7 +171,10 @@ design work, not benchmark-specific tuning.
   license. MC64-equivalent preprocessing must stay inside that licensing
   boundary: HSL MC64 and solver-tree copies that retain HSL redistribution
   restrictions are not vendorable, while KLS can build the BSD-licensed SPRAL
-  scaling subset from `third_party/spral` or use independent KLS code.
+  scaling subset from `third_party/spral` or use independent KLS code. The
+  Rust `rwl/mc64` package is also BSD-licensed and useful as a reference, but
+  it is a partial SPRAL translation and is not a better fit than the pinned
+  SPRAL submodule for KLS's C/Fortran build.
 - Paper-derived benchmark manifests: the full public SuiteSparse union from
   the local KLU, NICSLU, SubtreeLU, CKTSO papers and CKTSO ordering supplement
   resolves to 110 matrices. The routine medium subset contains 93 matrices, and
