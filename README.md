@@ -146,6 +146,22 @@ To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_circuit_manifest.txt --out data/suitesparse
 ```
 
+For paper-driven tuning, `bench/suitesparse_paper_manifest.txt` is the
+traceable union of public SuiteSparse matrices named in the local KLU, NICSLU,
+SubtreeLU, and CKTSO reference papers. It includes very large matrices, so the
+medium manifest is the default practical corpus:
+
+```sh
+python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_paper_medium_manifest.txt --out data/suitesparse-paper-medium
+```
+
+To regenerate a metadata-bounded subset from the full paper corpus and record
+the exact canonical SuiteSparse names used:
+
+```sh
+python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_paper_manifest.txt --out data/suitesparse-paper-medium --max-rows 700000 --max-cols 700000 --max-nnz 2500000 --write-resolved-manifest build/suitesparse_paper_medium_resolved.txt
+```
+
 To run every downloaded matrix and compute the SPICE-cycle geometric mean:
 
 ```sh
@@ -155,6 +171,8 @@ python3 scripts/run_bench_suite.py --kls-bench build/kls_bench --matrix-dir data
 Add `--passes N` to run each matrix multiple times and record the median
 SPICE-cycle sample, which is useful when comparing small solver-policy changes.
 Use an odd `N` when you need an exact median sample.
+For broad paper suites, add `--timeout SECONDS` so one pathological matrix is
+recorded as a failure instead of blocking the rest of the run.
 
 The suite metric is:
 

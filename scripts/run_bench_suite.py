@@ -35,6 +35,7 @@ def main() -> int:
     parser.add_argument("--refactor-repeat", type=int, default=5)
     parser.add_argument("--passes", type=int, default=1)
     parser.add_argument("--threads", type=int, default=1)
+    parser.add_argument("--timeout", type=float)
     parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural", "metis"], default="auto")
     parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")
     parser.add_argument("--scale", choices=["auto", "-1", "0", "1", "2"], default="auto")
@@ -90,7 +91,17 @@ def main() -> int:
                     cmd.append("--no-static-pivoting")
                 if args.pivot_tol is not None:
                     cmd.extend(["--pivot-tol", str(args.pivot_tol)])
-                proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+                try:
+                    proc = subprocess.run(
+                        cmd,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                        timeout=args.timeout,
+                    )
+                except subprocess.TimeoutExpired:
+                    sample_failures.append(f"timeout after {args.timeout:g}s")
+                    continue
                 if proc.returncode != 0:
                     sample_failures.append(proc.stderr.strip())
                     continue

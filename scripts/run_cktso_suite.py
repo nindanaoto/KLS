@@ -26,6 +26,7 @@ def main() -> int:
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--repeat", type=int, default=5)
     parser.add_argument("--refactor-repeat", type=int, default=5)
+    parser.add_argument("--timeout", type=float)
     args = parser.parse_args()
 
     matrices = sorted(args.matrix_dir.rglob("*.mtx"))
@@ -52,7 +53,17 @@ def main() -> int:
                 str(args.repeat),
                 str(args.refactor_repeat),
             ]
-            proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=args.timeout,
+                )
+            except subprocess.TimeoutExpired:
+                failures.append((matrix, f"timeout after {args.timeout:g}s"))
+                continue
             if proc.returncode != 0:
                 failures.append((matrix, proc.stderr.strip()))
                 continue

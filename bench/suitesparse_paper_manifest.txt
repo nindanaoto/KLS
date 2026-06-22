@@ -1,0 +1,76 @@
+# Public SuiteSparse Matrix Collection matrices named in the local reference papers.
+# The downloader resolves canonical group/name pairs from sparse.tamu.edu/files/ssstats.csv.
+#
+# Sources covered:
+# - Algorithm 907 / KLU: scaling and largest-case comparison tables.
+# - NICSLU: Table I, Table II, and Table III benchmark sets.
+# - SubtreeLU: Fig. 7 public circuit benchmark labels.
+# - CKTSO: public SuiteSparse matrix names visible in the ordering/fill discussion.
+
+# KLU Algorithm 907
+asic_100ks
+asic_320k
+asic_320ks
+asic_680k
+asic_680ks
+ckt11752_dc_1
+freescale1
+raj1
+rajat20
+rajat24
+rajat25
+rajat28
+rajat30
+tsopf_rs_b2383
+tsopf_rs_b2383_c1
+
+# NICSLU
+add20
+add32
+asic_100k
+circuit5m
+circuit5m_dc
+circuit_1
+circuit_2
+circuit_3
+circuit_4
+coupled
+dc1
+g2_circuit
+g3_circuit
+hamrle3
+hcircuit
+mac_econ_fwd500
+mc2depi
+memchip
+onetone1
+onetone2
+pre2
+rajat03
+rajat31
+trans4
+transient
+twotone
+
+# SubtreeLU
+bcircuit
+ckt11752_tr_0
+dc2
+dc3
+nxp1
+rajat15
+rajat16
+rajat17
+rajat18
+rajat21
+rajat22
+rajat23
+rajat26
+rajat29
+scircuit
+ss1
+trans5
+
+# CKTSO visible public SuiteSparse names
+fullchip
+meg1
