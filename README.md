@@ -64,7 +64,10 @@ factor kernels, solve kernels, and BTF cases that are not wide enough for the
 threaded path still use serial execution. For unscaled serial refactors, KLS
 also precomputes a scatter map from the fixed pivot order so repeated
 single-block and serial BTF refactors do not redo the same `Q` and `Pinv`
-structure lookups every cycle.
+structure lookups every cycle. For serial BTF refactors, this map also keeps
+each column's off-block entries separate from diagonal-block entries so the
+numeric refactor loop avoids reclassifying the same structure on every SPICE
+step.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
 orientation. `auto` uses the transposed pattern directly for small and medium
@@ -192,7 +195,8 @@ library.
 This is a functional implementation with KLS-level analysis choices for
 repeated SPICE-style solves and a KLS-owned threaded refactor path for BTF block
 parallelism on a narrow class of large cases. KLS also has a precomputed
-single-block refactor scatter path for unscaled repeated refactors. It is not
+single-block and serial BTF refactor scatter path for unscaled repeated
+refactors. It is not
 yet a generally CKTSO-beating solver across broad circuit corpora. The next
 algorithmic work is to evolve the numeric factor/refactor/solve kernels toward
 deeper KLS-owned sparse kernels with better pivot reuse and parallelism while

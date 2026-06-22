@@ -40,6 +40,7 @@ struct kls_solver {
   UF_long *refactor_col_ptr;
   UF_long *refactor_row_idx;
   UF_long *refactor_input_pos;
+  UF_long *refactor_block_start;
   kls_input_format input_format;
   kls_orientation orientation;
   kls_options options;
@@ -74,6 +75,7 @@ typedef struct kls_parallel_refactor_shared {
   const UF_long *map_col_ptr;
   const UF_long *map_row_idx;
   const UF_long *map_input_pos;
+  const UF_long *map_block_start;
   const double *values;
   const trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_numeric *numeric;
@@ -179,9 +181,11 @@ static void free_refactor_map(kls_solver *solver) {
   free(solver->refactor_col_ptr);
   free(solver->refactor_row_idx);
   free(solver->refactor_input_pos);
+  free(solver->refactor_block_start);
   solver->refactor_col_ptr = NULL;
   solver->refactor_row_idx = NULL;
   solver->refactor_input_pos = NULL;
+  solver->refactor_block_start = NULL;
 }
 
 static void kls_worker_record_singular(kls_parallel_refactor_worker *worker,
@@ -217,6 +221,7 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
   const UF_long *map_col_ptr = shared->map_col_ptr;
   const UF_long *map_row_idx = shared->map_row_idx;
   const UF_long *map_input_pos = shared->map_input_pos;
+  const UF_long *map_block_start = shared->map_block_start;
   const double *ax = shared->values;
   const trilinos_klu_l_symbolic *symbolic = shared->symbolic;
   trilinos_klu_l_numeric *numeric = shared->numeric;
@@ -237,22 +242,20 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
     UF_long poff = offp[k1];
     const UF_long poff_end = offp[k1 + 1u];
     double s = 0.0;
-    if (map_col_ptr != NULL) {
-      for (UF_long p = map_col_ptr[k1]; p < map_col_ptr[k1 + 1u]; ++p) {
-        const UF_long newrow = map_row_idx[p];
-        const double value = ax[map_input_pos[p]];
-        if (newrow < k1) {
-          if (poff >= poff_end) {
-            worker->invalid = 1;
-            return;
-          }
-          offx[poff++] = value;
-        } else if (newrow == k1) {
-          s = value;
-        } else {
+    if (map_col_ptr != NULL && map_block_start != NULL) {
+      for (UF_long p = map_col_ptr[k1]; p < map_block_start[k1]; ++p) {
+        if (poff >= poff_end) {
           worker->invalid = 1;
           return;
         }
+        offx[poff++] = ax[map_input_pos[p]];
+      }
+      for (UF_long p = map_block_start[k1]; p < map_col_ptr[k1 + 1u]; ++p) {
+        if (map_row_idx[p] != k1) {
+          worker->invalid = 1;
+          return;
+        }
+        s = ax[map_input_pos[p]];
       }
     } else {
       const UF_long pend = ap[oldcol + 1u];
@@ -301,23 +304,23 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
     UF_long poff = offp[global_col];
     const UF_long poff_end = offp[global_col + 1u];
 
-    if (map_col_ptr != NULL) {
+    if (map_col_ptr != NULL && map_block_start != NULL) {
       for (UF_long p = map_col_ptr[global_col];
-           p < map_col_ptr[global_col + 1u]; ++p) {
-        const UF_long global_row = map_row_idx[p];
-        const double value = ax[map_input_pos[p]];
-        if (global_row < k1) {
-          if (poff >= poff_end) {
-            worker->invalid = 1;
-            return;
-          }
-          offx[poff++] = value;
-        } else if (global_row < k2) {
-          x[global_row - k1] = value;
-        } else {
+           p < map_block_start[global_col]; ++p) {
+        if (poff >= poff_end) {
           worker->invalid = 1;
           return;
         }
+        offx[poff++] = ax[map_input_pos[p]];
+      }
+      for (UF_long p = map_block_start[global_col];
+           p < map_col_ptr[global_col + 1u]; ++p) {
+        const UF_long global_row = map_row_idx[p];
+        if (global_row < k1 || global_row >= k2) {
+          worker->invalid = 1;
+          return;
+        }
+        x[global_row - k1] = ax[map_input_pos[p]];
       }
     } else {
       const UF_long pend = ap[oldcol + 1u];
@@ -575,6 +578,7 @@ static int run_refactor_pool(kls_solver *solver,
   shared->map_col_ptr = NULL;
   shared->map_row_idx = NULL;
   shared->map_input_pos = NULL;
+  shared->map_block_start = NULL;
   shared->values = numeric_values;
   shared->symbolic = solver->symbolic;
   shared->numeric = solver->numeric;
@@ -3695,7 +3699,9 @@ static int kls_build_refactor_map(kls_solver *solver) {
     return 0;
   }
   if (solver->refactor_col_ptr != NULL && solver->refactor_row_idx != NULL &&
-      solver->refactor_input_pos != NULL) {
+      solver->refactor_input_pos != NULL &&
+      (solver->symbolic->nblocks == 1u ||
+       solver->refactor_block_start != NULL)) {
     return 1;
   }
 
@@ -3713,24 +3719,91 @@ static int kls_build_refactor_map(kls_solver *solver) {
     return 0;
   }
 
+  if (solver->symbolic->nblocks == 1u) {
+    const UF_long *q = solver->symbolic->Q;
+    const UF_long *pinv = solver->numeric->Pinv;
+    UF_long count = 0;
+    for (UF_long k = 0; k < solver->n; ++k) {
+      col_ptr[k] = count;
+      const UF_long oldcol = q[k];
+      if (oldcol >= solver->n) {
+        free(col_ptr);
+        free(row_idx);
+        free(input_pos);
+        return 0;
+      }
+      for (UF_long p = solver->col_ptr[oldcol]; p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long oldrow = solver->row_idx[p];
+        if (oldrow >= solver->n || count >= solver->nnz) {
+          free(col_ptr);
+          free(row_idx);
+          free(input_pos);
+          return 0;
+        }
+        const UF_long row = pinv[oldrow];
+        if (row >= solver->n) {
+          free(col_ptr);
+          free(row_idx);
+          free(input_pos);
+          return 0;
+        }
+        row_idx[count] = row;
+        input_pos[count] = p;
+        count++;
+      }
+    }
+    col_ptr[solver->n] = count;
+    if (count != solver->nnz) {
+      free(col_ptr);
+      free(row_idx);
+      free(input_pos);
+      return 0;
+    }
+    solver->refactor_col_ptr = col_ptr;
+    solver->refactor_row_idx = row_idx;
+    solver->refactor_input_pos = input_pos;
+    return 1;
+  }
+
+  UF_long *block_start =
+    (UF_long *)malloc((size_t)solver->n * sizeof(*block_start));
+  if (block_start == NULL) {
+    free(block_start);
+    free(col_ptr);
+    free(row_idx);
+    free(input_pos);
+    return 0;
+  }
+
   const UF_long *q = solver->symbolic->Q;
   const UF_long *pinv = solver->numeric->Pinv;
   UF_long count = 0;
+  UF_long block = 0;
   for (UF_long k = 0; k < solver->n; ++k) {
+    while (block + 1u < solver->symbolic->nblocks &&
+           solver->symbolic->R[block + 1u] <= k) {
+      block++;
+    }
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
     col_ptr[k] = count;
     const UF_long oldcol = q[k];
     if (oldcol >= solver->n) {
       free(col_ptr);
       free(row_idx);
       free(input_pos);
+      free(block_start);
       return 0;
     }
+    UF_long off_count = 0;
+    UF_long block_count = 0;
     for (UF_long p = solver->col_ptr[oldcol]; p < solver->col_ptr[oldcol + 1u]; ++p) {
       const UF_long oldrow = solver->row_idx[p];
-      if (oldrow >= solver->n || count >= solver->nnz) {
+      if (oldrow >= solver->n) {
         free(col_ptr);
         free(row_idx);
         free(input_pos);
+        free(block_start);
         return 0;
       }
       const UF_long row = pinv[oldrow];
@@ -3738,24 +3811,57 @@ static int kls_build_refactor_map(kls_solver *solver) {
         free(col_ptr);
         free(row_idx);
         free(input_pos);
+        free(block_start);
         return 0;
       }
-      row_idx[count] = row;
-      input_pos[count] = p;
-      count++;
+      if (row < k1) {
+        off_count++;
+      } else if (row < k2) {
+        block_count++;
+      } else {
+        free(col_ptr);
+        free(row_idx);
+        free(input_pos);
+        free(block_start);
+        return 0;
+      }
     }
+    if (solver->nnz - count < off_count + block_count) {
+      free(col_ptr);
+      free(row_idx);
+      free(input_pos);
+      free(block_start);
+      return 0;
+    }
+    block_start[k] = count + off_count;
+    UF_long off_pos = count;
+    UF_long block_pos = block_start[k];
+    for (UF_long p = solver->col_ptr[oldcol]; p < solver->col_ptr[oldcol + 1u]; ++p) {
+      const UF_long row = pinv[solver->row_idx[p]];
+      UF_long dst = 0;
+      if (row < k1) {
+        dst = off_pos++;
+      } else {
+        dst = block_pos++;
+      }
+      row_idx[dst] = row;
+      input_pos[dst] = p;
+    }
+    count += off_count + block_count;
   }
   col_ptr[solver->n] = count;
   if (count != solver->nnz) {
     free(col_ptr);
     free(row_idx);
     free(input_pos);
+    free(block_start);
     return 0;
   }
 
   solver->refactor_col_ptr = col_ptr;
   solver->refactor_row_idx = row_idx;
   solver->refactor_input_pos = input_pos;
+  solver->refactor_block_start = block_start;
   return 1;
 }
 
@@ -3885,6 +3991,7 @@ static int kls_mapped_refactor(kls_solver *solver,
   shared.map_col_ptr = solver->refactor_col_ptr;
   shared.map_row_idx = solver->refactor_row_idx;
   shared.map_input_pos = solver->refactor_input_pos;
+  shared.map_block_start = solver->refactor_block_start;
   shared.values = numeric_values;
   shared.symbolic = solver->symbolic;
   shared.numeric = solver->numeric;

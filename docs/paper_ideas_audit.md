@@ -82,7 +82,10 @@ design work, not benchmark-specific tuning.
   scatter from factor-order columns to pivotal rows and input value positions.
   This removes repeated `Q`/`Pinv` structure lookups from SPICE refactor cycles
   while preserving the existing KLU-derived LU storage. It covers both
-  single-block and serial BTF refactors.
+  single-block and serial BTF refactors. For serial BTF refactors, KLS also
+  prepartitions each mapped column into off-block and diagonal-block entries, so
+  repeated refactors do not reclassify the same BTF structure in the numeric
+  scatter loop.
 - SPICE-cycle orientation policy: KLS can analyze normal and transposed storage
   orientations and select the faster internal form for repeated solve cycles.
 - LGPL project licensing and third-party notices: KLS itself is
@@ -126,7 +129,10 @@ An intra-block levelized no-pivot refactor prototype was tested using the
 existing U structure as the exact dependency graph, matching the NICSLU/CKTSO
 EGraph refactorization idea. It was removed before commit because the general
 implementation regressed dominant-block circuit cases where the current
-BTF-block threaded refactor is faster. Keeping it would have required
+BTF-block threaded refactor is faster. A later version replaced per-column
+mutex scheduling with static per-thread level slices, closer to CKTSO cluster
+mode, but still regressed the intended single-block case (`rajat15`) by about
+16% on the focused repeated-refactor sample. Keeping it would have required
 case-specific dispatch, which is not the desired direction for KLS.
 
 A broader KLS-owned serial no-pivot refactor path was also prototyped by
@@ -143,6 +149,14 @@ The scaled extension improved a focused hard case but regressed the full suite,
 and passing the map through the worker pool regressed representative threaded
 BTF cases. KLS therefore keeps the map on the unscaled serial path and leaves
 the threaded worker-pool scatter path separate.
+
+The unscaled serial BTF scatter map was extended with a per-column boundary
+between off-block entries and diagonal-block entries. This is a retained
+general metadata improvement: a 25-matrix, 5-pass same-session extended-suite
+A/B run improved the geomean from 0.03665s to 0.03651s and the median ratio to
+0.993, with the largest win on `ckt11752_tr_0`. The single-block map path was
+left in its original one-pass layout because single-block refactors have no
+off-block entries and the partitioning setup did not help them.
 
 A second layer of persistent refactor metadata was prototyped by precomputing
 per-column L/U value and index pointers for mapped serial refactors. Focused
