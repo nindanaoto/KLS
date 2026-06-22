@@ -188,6 +188,18 @@ suite testing showed no aggregate improvement and small regressions on other
 cases. The mutex scheduler was kept until a broader scheduling change has a
 clearer win.
 
+The BTF-block parallel eligibility gate was relaxed to try more medium and
+dominant-block structures. This was a general structural dispatch experiment,
+not a matrix-name rule, but the added thread scheduling overhead regressed the
+focused repeated-refactor samples that motivated the test. The conservative
+high-flop, many-block eligibility gate was kept.
+
+The no-pivot refactor update loops were also split into pivot-checking and
+non-checking variants to reduce branch work in the fast repeated-factorization
+path. The change passed correctness tests, but focused A/B timings were mixed
+and did not show a general win; the simpler shared loop remains in place until a
+larger KLS-owned numeric kernel makes this separation worthwhile.
+
 ## Recommended General Work
 
 1. Implement a real matching/scaling stage first, because MC64-style static
