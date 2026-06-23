@@ -701,6 +701,9 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_multiplier_abs = -1.0;
   solver->stats.fast_rejected_pivot_abs = -1.0;
   solver->stats.fast_rejected_candidate_abs = -1.0;
+  solver->stats.fast_rejected_tail_candidate_row = -1;
+  solver->stats.fast_rejected_tail_candidate_abs = -1.0;
+  solver->stats.fast_rejected_tail_candidate_count = 0;
   solver->stats.fast_block_restarts = 0;
   solver->stats.fast_rejected_block_start = -1;
   solver->stats.fast_rejected_block_size = 0;
@@ -7809,6 +7812,172 @@ static void kls_fill_fast_reject_row_tail_stats(kls_solver *solver,
   solver->stats.fast_rejected_row_tail_work = work;
 }
 
+static int kls_row_refactor_touch(UF_long col,
+                                  unsigned char *touched,
+                                  UF_long *touched_cols,
+                                  UF_long *touched_count,
+                                  UF_long n) {
+  if (col >= n || touched == NULL || touched_cols == NULL ||
+      touched_count == NULL) {
+    return 0;
+  }
+  if (!touched[col]) {
+    touched[col] = 1u;
+    touched_cols[(*touched_count)++] = col;
+  }
+  return 1;
+}
+
+static int kls_row_refactor_prefix_candidate_value(
+  const kls_solver *solver,
+  const double *numeric_values,
+  UF_long row,
+  UF_long col,
+  double *x,
+  unsigned char *touched,
+  UF_long *touched_cols,
+  double *value_out) {
+  if (solver == NULL || numeric_values == NULL || row >= solver->n ||
+      col >= solver->n || x == NULL || touched == NULL ||
+      touched_cols == NULL || value_out == NULL ||
+      solver->row_refactor_input_ptr == NULL ||
+      solver->row_refactor_input_cols == NULL ||
+      solver->row_refactor_input_pos == NULL ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_l_cols == NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_cols == NULL ||
+      solver->row_refactor_u_row_values == NULL ||
+      solver->numeric == NULL || solver->numeric->Udiag == NULL) {
+    return 0;
+  }
+
+  UF_long touched_count = 0;
+  int ok = 1;
+  for (UF_long p = solver->row_refactor_input_ptr[row];
+       ok && p < solver->row_refactor_input_ptr[row + 1u]; ++p) {
+    const UF_long input_col = solver->row_refactor_input_cols[p];
+    if (!kls_row_refactor_touch(input_col, touched, touched_cols,
+                                &touched_count, solver->n)) {
+      ok = 0;
+      break;
+    }
+    x[input_col] = numeric_values[solver->row_refactor_input_pos[p]];
+  }
+
+  const double *udiag = (const double *)solver->numeric->Udiag;
+  for (UF_long p = solver->row_refactor_l_ptr[row];
+       ok && p < solver->row_refactor_l_ptr[row + 1u]; ++p) {
+    const UF_long dep = solver->row_refactor_l_cols[p];
+    if (dep >= col) {
+      break;
+    }
+    if (dep >= solver->n || udiag[dep] == 0.0) {
+      ok = 0;
+      break;
+    }
+    if (!kls_row_refactor_touch(dep, touched, touched_cols,
+                                &touched_count, solver->n)) {
+      ok = 0;
+      break;
+    }
+    const double lij = x[dep] / udiag[dep];
+    x[dep] = 0.0;
+    const UF_long u_begin = solver->row_refactor_u_ptr[dep];
+    const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
+    const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
+    const double *u_values =
+      solver->row_refactor_u_row_values + u_begin;
+    for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
+      const UF_long target = u_cols[offset];
+      if (target > col) {
+        continue;
+      }
+      if (!kls_row_refactor_touch(target, touched, touched_cols,
+                                  &touched_count, solver->n)) {
+        ok = 0;
+        break;
+      }
+      x[target] -= lij * u_values[offset];
+    }
+  }
+
+  if (ok) {
+    if (!kls_row_refactor_touch(col, touched, touched_cols,
+                                &touched_count, solver->n)) {
+      ok = 0;
+    } else {
+      *value_out = x[col];
+    }
+  }
+
+  for (UF_long p = 0; p < touched_count; ++p) {
+    const UF_long touched_col = touched_cols[p];
+    x[touched_col] = 0.0;
+    touched[touched_col] = 0u;
+  }
+  return ok;
+}
+
+static void kls_fill_fast_reject_row_tail_candidate_stats(
+  kls_solver *solver,
+  const double *numeric_values,
+  UF_long rejected_pivot,
+  double *x) {
+  if (solver == NULL || numeric_values == NULL || x == NULL ||
+      rejected_pivot >= solver->n ||
+      solver->row_refactor_tail_rows == NULL ||
+      solver->row_refactor_tail_count == 0u ||
+      solver->stats.fast_rejected_pivot_abs < 0.0) {
+    return;
+  }
+
+  unsigned char *touched =
+    (unsigned char *)calloc((size_t)solver->n, sizeof(*touched));
+  UF_long *touched_cols =
+    (UF_long *)malloc((size_t)solver->n * sizeof(*touched_cols));
+  if (touched == NULL || touched_cols == NULL) {
+    free(touched);
+    free(touched_cols);
+    return;
+  }
+
+  UF_long best_row = KLS_KLU_EMPTY;
+  double best_abs = solver->stats.fast_rejected_pivot_abs;
+  UF_long candidate_count = 0;
+  const double pivot_abs = solver->stats.fast_rejected_pivot_abs;
+  const double tol = solver->common.tol;
+  for (UF_long pos = 0; pos < solver->row_refactor_tail_count; ++pos) {
+    const UF_long row = solver->row_refactor_tail_rows[pos];
+    if (row <= rejected_pivot || row >= solver->n) {
+      continue;
+    }
+    double value = 0.0;
+    if (!kls_row_refactor_prefix_candidate_value(
+          solver, numeric_values, row, rejected_pivot, x, touched,
+          touched_cols, &value)) {
+      continue;
+    }
+    const double value_abs = fabs(value);
+    if (tol > DBL_MIN && value_abs * tol > pivot_abs) {
+      candidate_count++;
+    }
+    if (best_row == KLS_KLU_EMPTY || value_abs > best_abs) {
+      best_row = row;
+      best_abs = value_abs;
+    }
+  }
+
+  if (best_row != KLS_KLU_EMPTY) {
+    solver->stats.fast_rejected_tail_candidate_row = (int64_t)best_row;
+    solver->stats.fast_rejected_tail_candidate_abs = best_abs;
+    solver->stats.fast_rejected_tail_candidate_count =
+      (int64_t)candidate_count;
+  }
+  free(touched);
+  free(touched_cols);
+}
+
 static void kls_fill_fast_reject_etree_tail_stats(kls_solver *solver,
                                                   UF_long block,
                                                   UF_long k1,
@@ -9339,6 +9508,8 @@ static int kls_single_block_row_refactor(kls_solver *solver,
           solver, dep,
           symbolic->Q != NULL ? symbolic->Q[dep] : KLS_KLU_EMPTY,
           i, lij_abs, fabs(udiag[dep]), candidate_abs);
+        kls_fill_fast_reject_row_tail_candidate_stats(
+          solver, numeric_values, dep, x);
         common->status = TRILINOS_KLU_OK;
         return 0;
       }

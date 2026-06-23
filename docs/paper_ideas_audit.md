@@ -1902,7 +1902,10 @@ pivot, KLS marks the exact row-successor tail, compacts it into increasing
 row order, and reports the `fast_rejected_row_tail_*` diagnostics from that
 retained topological list. KLS-owned pivot checks also record the factor row,
 multiplier magnitude, accepted pivot magnitude, and candidate entry magnitude
-that tripped the reject, giving a future pivoting tail kernel the local row
+that tripped the reject. For checked row-major rejects, KLS also scans the
+retained row-tail list using the current prefix state and records the strongest
+tail candidate row/value plus the number of tail rows that challenge the
+current pivot tolerance. This gives a future pivoting tail kernel the local row
 candidate and value comparison that the older pivot-only diagnostics lacked.
 This keeps the CKTSO restart target tied to KLS row storage rather than only
 the KLU-column U-pattern or an ETree upper bound; the actual pivoting tail
