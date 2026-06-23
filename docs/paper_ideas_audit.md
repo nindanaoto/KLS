@@ -2314,6 +2314,19 @@ kernel that worsens the remaining CKTSO-gap rows. KLS therefore keeps the
 generic scaled EGraph value path until the larger row/segment numeric engine
 can improve scaled and unscaled hard rows together.
 
+A fallback row-segment compact-scratch probe was also rejected. Dense-eligible
+segments already keep their compact dense/trailing panel path, but the broader
+prototype packed every executable exact-U-pattern multirow segment into
+worker-local row-major scratch so later rows could read internal and trailing
+U values without KLU double-pointer indirection. It built cleanly and stayed
+valid, but the intended four-thread `G2_circuit` guard moved the gated row
+path back to about `0.797s` repeated refactor, versus about `0.739s` before
+the probe and about `0.233s` for the default column EGraph path in the same
+session. The result reinforces the current diagnosis: shallow packing around
+KLU storage is not the CKTSO/SubtreeLU mechanism; KLS needs persistent
+row/segment numeric storage and scheduler semantics that make segment updates
+the native operation rather than a copied side path.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
