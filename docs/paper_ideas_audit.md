@@ -2707,6 +2707,19 @@ median repeated-refactor time, kept `OPF_10000` essentially neutral at
 CKTSO-style scheduler metadata for the experimental row path, not as a claim
 that the default KLU-storage solver has closed the CKTSO row-engine gap.
 
+Two follow-up row-group scheduler metadata shortcuts were rejected. First,
+retaining a precomputed per-group work estimate avoided repeated scans in
+pipeline-scope reporting and level-slice construction, but same-session Release
+A/B on the explicit row-refactor path regressed `OPF_10000` repeated refactor
+to `1.157x` new/base and `xingo_afonso_itaipu` to `1.076x`, despite a small
+`G2_circuit` win at `0.975x`. Second, retaining the generic-only prewait
+eligibility byte avoided recomputing the prewait predicate in the pipeline
+loop, but regressed `OPF_10000` to `1.110x` and `xingo_afonso_itaipu` to
+`1.067x`, while `G2_circuit` was neutral at `1.001x`. Both probes are too
+shallow: the remaining CKTSO gap still points to native row/segment numeric
+storage and pivoting-tail restart semantics, not more cached scalar scheduler
+decisions around the current KLU-backed row experiment.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
