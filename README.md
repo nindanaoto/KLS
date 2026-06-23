@@ -488,6 +488,18 @@ defensible structural class, not just one large matrix name:
 python3 scripts/run_bench_suite.py --kls-bench build/kls_bench --matrix-dir data/suitesparse-paper-large --orientation auto --threads 4 --timeout 900 --jsonl build/kls_paper_large.jsonl
 ```
 
+For focused CKTSO-gap work, `bench/suitesparse_cktso_gap_manifest.txt` records
+the current hard public medium rows from the latest KLS/CKTSO decomposition.
+It is a tuning loop, not a replacement for the full medium manifest:
+
+```sh
+python3 scripts/run_bench_suite.py --kls-bench build/kls_bench \
+  --matrix-dir data/suitesparse-paper-medium \
+  --manifest bench/suitesparse_cktso_gap_manifest.txt \
+  --orientation auto --threads 4 --repeat 1 --refactor-repeat 3 \
+  --timeout 120 --jsonl build/kls_cktso_gap_focus.jsonl
+```
+
 For a shorter large-case reconnaissance before an overnight run, use the
 selected large manifest. It covers the high-signal large paper cases that have
 already shown KLS/CKTSO differences under a 120s per-process cap:

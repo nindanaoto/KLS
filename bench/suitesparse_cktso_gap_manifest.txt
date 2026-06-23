@@ -1,0 +1,41 @@
+# Current hard CKTSO-gap focus set from the refreshed four-thread medium paper
+# comparison. These are public SuiteSparse paper matrices where current KLS
+# still loses materially to the saved CKTSO artifact, mostly through repeated
+# refactor throughput rather than ordering or solve time.
+#
+# Regenerate the comparison with:
+# python3 scripts/run_bench_suite.py --kls-bench build-default-on/kls_bench \
+#   --matrix-dir data/suitesparse-paper-medium \
+#   --manifest bench/suitesparse_paper_medium_manifest.txt \
+#   --orientation auto --threads 4 --repeat 1 --refactor-repeat 3 \
+#   --passes 1 --timeout 120 \
+#   --jsonl build-default-on/kls_medium93_current_head_t4_r3_timeout120.jsonl
+# python3 scripts/decompose_solver_gap.py \
+#   --candidate build-default-on/kls_medium93_current_head_t4_r3_timeout120.jsonl \
+#   --candidate-name kls-head \
+#   --reference build/cktso_paper_medium93_t4_timeout120.jsonl \
+#   --reference-name cktso --max-rows 20
+rajat28
+rajat25
+ASIC_320k
+ASIC_320ks
+rajat20
+G2_circuit
+rajat03
+ASIC_100ks
+onetone2
+transient
+gemat12
+coupled
+onetone1
+rajat24
+TSOPF_FS_b9_c1
+ASIC_100k
+mc2depi
+Raj1
+dc1
+OPF_10000
+
+# Keep timeout/failure rows in the focus set for large-case policy checks.
+mac_econ_fwd500
+ss1

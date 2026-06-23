@@ -1821,6 +1821,21 @@ broader attempt to split the BTF value/scaling helper was rejected because it
 pushed the scaled `rajat28` guard outside its timing band; that path stays on
 the conservative helper logic.
 
+A fresh four-thread medium paper-suite run was recorded after those EGraph
+cleanups so future work uses current evidence instead of stale artifacts. With
+`--repeat 1 --refactor-repeat 3 --timeout 120`, current KLS completed 90 of 93
+medium rows, with `bips07_1998` singular and `ss1`/`mac_econ_fwd500` timing out
+as before. Against the saved CKTSO medium artifact on the 90 common completed
+rows, KLS is now `1.022x` slower geomean (`0.2698s` versus `0.2639s`), with 40
+wins and 49 losses over 2%. Against the saved KLU2 artifact on 88 common rows,
+KLS is `2.26x` faster geomean (`0.2385s` versus `0.5399s`) and wins 82 rows
+over 2%. The remaining CKTSO losses are still dominated by repeated refactor
+throughput: `rajat28`, `rajat25`, `ASIC_320k/320ks`, `rajat20`, `G2_circuit`,
+`rajat03`, `ASIC_100ks`, `onetone2`, and `transient` lead the current gap.
+Those rows, plus the timeout rows, are now tracked in
+`bench/suitesparse_cktso_gap_manifest.txt` for focused regression checks before
+rerunning the full medium suite.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
