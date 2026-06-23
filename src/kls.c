@@ -8261,10 +8261,16 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
 
   int allocated = 1;
+  const int single_block = solver->symbolic->nblocks == 1u;
+  const UF_long scratch_size =
+    single_block ? solver->n : solver->symbolic->maxblock;
+  if (scratch_size == 0u) {
+    allocated = 0;
+  }
   for (int i = 0; i < thread_count; ++i) {
     workers[i].shared = &shared;
     workers[i].tid = i;
-    workers[i].x = (double *)calloc((size_t)solver->n, sizeof(double));
+    workers[i].x = (double *)calloc((size_t)scratch_size, sizeof(double));
     if (workers[i].x == NULL) {
       allocated = 0;
       break;

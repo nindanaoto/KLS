@@ -1585,6 +1585,17 @@ stressed `rajat03` from about `0.44s` to about `0.21s`. Other multi-block
 repairs still retry the checked fast factorization because blocks after the
 rejected block may not have been refreshed when the fast path stopped.
 
+The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
+single-block refactors still allocate one dense `n`-entry vector per worker,
+but BTF EGraph workers only need block-local indices and now allocate
+`maxblock` entries. This targets the fragmented-BTF/ASIC class where `n` can be
+far larger than the largest diagonal block, reducing transient allocation and
+zeroing without changing the numeric kernel or matrix-specific dispatch.
+Focused post-change checks kept valid residuals; `ASIC_680k` refactor stayed
+around `0.07-0.075s` and `rajat28` around `0.051-0.056s`, so this should be
+treated as a memory-footprint cleanup rather than the missing CKTSO-scale timing
+fix.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
