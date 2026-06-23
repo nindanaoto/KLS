@@ -2694,6 +2694,19 @@ retained as row-engine groundwork for the future CKTSO-style row/segment
 numeric kernel; the row path remains explicit or environment-gated and is still
 not a default solver policy.
 
+The next row-scheduler metadata step retained each row group's external
+dependency rows. During the dynamic pipeline tail, generic-only row patterns
+can now wait once on those external rows before entering the group kernel,
+instead of testing predecessor completion inside every row update. The broader
+version that also pre-waited dense row-segment groups was rejected because it
+regressed `G2_circuit`; dense segments keep their old in-kernel wait behavior.
+With the generic-only gate, the same-session Release A/B on the explicit
+`--row-refactor refactor` path improved `G2_circuit` to `0.969x` new/base
+median repeated-refactor time, kept `OPF_10000` essentially neutral at
+`1.003x`, and improved `xingo_afonso_itaipu` to `0.929x`. This is retained as
+CKTSO-style scheduler metadata for the experimental row path, not as a claim
+that the default KLU-storage solver has closed the CKTSO row-engine gap.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

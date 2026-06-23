@@ -89,6 +89,8 @@ struct kls_solver {
   UF_long *row_refactor_level_ptr;
   UF_long *row_refactor_level_rows;
   UF_long *row_refactor_group_ptr;
+  UF_long *row_refactor_group_dep_ptr;
+  UF_long *row_refactor_group_dep_rows;
   UF_long *row_refactor_group_level_ptr;
   UF_long *row_refactor_level_groups;
   UF_long *row_refactor_group_level_thread_ptr;
@@ -550,6 +552,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_level_ptr);
   free(solver->row_refactor_level_rows);
   free(solver->row_refactor_group_ptr);
+  free(solver->row_refactor_group_dep_ptr);
+  free(solver->row_refactor_group_dep_rows);
   free(solver->row_refactor_group_level_ptr);
   free(solver->row_refactor_level_groups);
   free(solver->row_refactor_group_level_thread_ptr);
@@ -576,6 +580,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_level_ptr = NULL;
   solver->row_refactor_level_rows = NULL;
   solver->row_refactor_group_ptr = NULL;
+  solver->row_refactor_group_dep_ptr = NULL;
+  solver->row_refactor_group_dep_rows = NULL;
   solver->row_refactor_group_level_ptr = NULL;
   solver->row_refactor_level_groups = NULL;
   solver->row_refactor_group_level_thread_ptr = NULL;
@@ -10603,7 +10609,10 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
       solver->row_refactor_input_ptr != NULL &&
       solver->row_refactor_successor_ptr != NULL &&
       (solver->row_refactor_successor_ptr[solver->n] == 0u ||
-       solver->row_refactor_successor_rows != NULL)) {
+       solver->row_refactor_successor_rows != NULL) &&
+      solver->row_refactor_group_dep_ptr != NULL &&
+      (solver->row_refactor_group_dep_ptr[solver->row_refactor_group_count] == 0u ||
+       solver->row_refactor_group_dep_rows != NULL)) {
     return 1;
   }
   if (!kls_build_refactor_map(solver) ||
@@ -10983,6 +10992,85 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     group_kind[g] = KLS_ROW_REFACTOR_GROUP_SINGLE;
   }
 
+  UF_long *group_dep_ptr =
+    (UF_long *)calloc((size_t)group_count + 1u, sizeof(*group_dep_ptr));
+  UF_long *group_dep_rows = NULL;
+  UF_long *dep_marks = n > 0u
+    ? (UF_long *)malloc((size_t)n * sizeof(*dep_marks)) : NULL;
+  if (group_dep_ptr == NULL || (n > 0u && dep_marks == NULL)) {
+    free(row_group);
+    free(group_ptr);
+    free(l_internal_ptr);
+    free(group_trailing_len);
+    free(group_dense);
+    free(group_kind);
+    free(group_dep_ptr);
+    free(dep_marks);
+    free_row_refactor_pattern(solver);
+    return 0;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    dep_marks[i] = KLS_KLU_EMPTY;
+  }
+  for (UF_long g = 0; g < group_count; ++g) {
+    for (UF_long i = group_ptr[g]; i < group_ptr[g + 1u]; ++i) {
+      for (UF_long p = l_ptr[i]; p < l_ptr[i + 1u]; ++p) {
+        const UF_long dep = l_cols[p];
+        if (dep >= n || row_group[dep] == g || dep_marks[dep] == g) {
+          continue;
+        }
+        dep_marks[dep] = g;
+        group_dep_ptr[g + 1u]++;
+      }
+    }
+  }
+  for (UF_long g = 0; g < group_count; ++g) {
+    group_dep_ptr[g + 1u] += group_dep_ptr[g];
+  }
+  const UF_long group_dep_count = group_dep_ptr[group_count];
+  group_dep_rows = group_dep_count > 0u
+    ? (UF_long *)malloc((size_t)group_dep_count * sizeof(*group_dep_rows))
+    : NULL;
+  UF_long *group_dep_write = group_count > 0u
+    ? (UF_long *)malloc((size_t)group_count * sizeof(*group_dep_write))
+    : NULL;
+  if ((group_dep_count > 0u && group_dep_rows == NULL) ||
+      (group_count > 0u && group_dep_write == NULL)) {
+    free(row_group);
+    free(group_ptr);
+    free(l_internal_ptr);
+    free(group_trailing_len);
+    free(group_dense);
+    free(group_kind);
+    free(group_dep_ptr);
+    free(group_dep_rows);
+    free(group_dep_write);
+    free(dep_marks);
+    free_row_refactor_pattern(solver);
+    return 0;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    dep_marks[i] = KLS_KLU_EMPTY;
+  }
+  if (group_count > 0u) {
+    memcpy(group_dep_write, group_dep_ptr,
+           (size_t)group_count * sizeof(*group_dep_write));
+  }
+  for (UF_long g = 0; g < group_count; ++g) {
+    for (UF_long i = group_ptr[g]; i < group_ptr[g + 1u]; ++i) {
+      for (UF_long p = l_ptr[i]; p < l_ptr[i + 1u]; ++p) {
+        const UF_long dep = l_cols[p];
+        if (dep >= n || row_group[dep] == g || dep_marks[dep] == g) {
+          continue;
+        }
+        dep_marks[dep] = g;
+        group_dep_rows[group_dep_write[g]++] = dep;
+      }
+    }
+  }
+  free(group_dep_write);
+  free(dep_marks);
+
   UF_long segment_count = 0;
   UF_long segment_rows = 0;
   UF_long segment_max_width = 0;
@@ -11081,6 +11169,8 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     free(group_trailing_len);
     free(group_dense);
     free(group_kind);
+    free(group_dep_ptr);
+    free(group_dep_rows);
     free_row_refactor_pattern(solver);
     return 0;
   }
@@ -11101,6 +11191,8 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
           free(group_trailing_len);
           free(group_dense);
           free(group_kind);
+          free(group_dep_ptr);
+          free(group_dep_rows);
           free_row_refactor_pattern(solver);
           return 0;
         }
@@ -11131,6 +11223,8 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     free(group_trailing_len);
     free(group_dense);
     free(group_kind);
+    free(group_dep_ptr);
+    free(group_dep_rows);
     free(group_level_ptr);
     free(level_groups);
     free_row_refactor_pattern(solver);
@@ -11153,6 +11247,8 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     free(group_trailing_len);
     free(group_dense);
     free(group_kind);
+    free(group_dep_ptr);
+    free(group_dep_rows);
     free(group_level_ptr);
     free(level_groups);
     free_row_refactor_pattern(solver);
@@ -11175,6 +11271,8 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   free(row_group);
 
   solver->row_refactor_group_ptr = group_ptr;
+  solver->row_refactor_group_dep_ptr = group_dep_ptr;
+  solver->row_refactor_group_dep_rows = group_dep_rows;
   solver->row_refactor_group_count = group_count;
   solver->row_refactor_group_level_ptr = group_level_ptr;
   solver->row_refactor_level_groups = level_groups;
@@ -12310,6 +12408,65 @@ static void kls_parallel_row_refactor_mark_group_done(
   }
 }
 
+static int kls_parallel_row_refactor_wait_group_dependencies(
+  kls_egraph_refactor_worker *worker,
+  UF_long group) {
+  if (worker == NULL || worker->shared == NULL) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (shared->pipeline_done == NULL) {
+    return 1;
+  }
+  if (solver == NULL || solver->row_refactor_group_dep_ptr == NULL ||
+      group >= solver->row_refactor_group_count) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  const UF_long begin = solver->row_refactor_group_dep_ptr[group];
+  const UF_long end = solver->row_refactor_group_dep_ptr[group + 1u];
+  if (begin == end) {
+    return 1;
+  }
+  if (solver->row_refactor_group_dep_rows == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  for (UF_long pos = begin; pos < end; ++pos) {
+    if (!kls_egraph_refactor_wait_done(
+          shared, solver->row_refactor_group_dep_rows[pos])) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int kls_row_refactor_group_prefers_external_prewait(
+  const kls_solver *solver,
+  UF_long group) {
+  if (solver == NULL || solver->row_refactor_group_ptr == NULL ||
+      solver->row_refactor_group_dep_ptr == NULL ||
+      group >= solver->row_refactor_group_count) {
+    return 0;
+  }
+  if (solver->row_refactor_dense_segment_count > 0u) {
+    return 0;
+  }
+  if (solver->row_refactor_group_dep_ptr[group] ==
+      solver->row_refactor_group_dep_ptr[group + 1u]) {
+    return 0;
+  }
+  const UF_long row_begin = solver->row_refactor_group_ptr[group];
+  const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
+  if (row_begin >= row_end || row_end > solver->n) {
+    return 0;
+  }
+  const UF_long width = row_end - row_begin;
+  return kls_row_refactor_group_kind_for(solver, group, width) !=
+         KLS_ROW_REFACTOR_GROUP_DENSE;
+}
+
 static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
@@ -12377,7 +12534,13 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           break;
         }
         const UF_long group = solver->row_refactor_level_groups[pos];
-        if (!kls_parallel_row_refactor_process_group(worker, group, 1)) {
+        const int prewait =
+          kls_row_refactor_group_prefers_external_prewait(solver, group);
+        if ((prewait &&
+             !kls_parallel_row_refactor_wait_group_dependencies(worker,
+                                                                group)) ||
+            !kls_parallel_row_refactor_process_group(worker, group,
+                                                     prewait ? 0 : 1)) {
           break;
         }
         kls_parallel_row_refactor_mark_group_done(shared, solver, group);
