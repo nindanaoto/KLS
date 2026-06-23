@@ -2099,6 +2099,19 @@ reverse-edge ready queue layered on KLU column storage; KLS needs a different
 row/segment numeric representation or separator/private-pipeline engine where
 successor scheduling does not add another high-overhead synchronization layer.
 
+The opposite scheduling probe was also rejected: disabling partial EGraph
+pipeline tails and forcing the remaining exact-EGraph tail through level
+barriers while preserving all-pipeline shapes. Against commit `eac177b`, the
+intended ASIC rows regressed sharply in same-session tests with three passes
+and ten refactors: `ASIC_320k` cycle median `13.58s -> 30.24s` and refactor
+median `0.0976s -> 0.265s`; `ASIC_320ks` cycle median `11.43s -> 25.75s`
+and refactor median `0.0797s -> 0.224s`. This confirms that KLS's current
+pipeline tail is necessary on these rows, even though it remains much slower
+than CKTSO. The remaining gap is therefore not fixed by choosing between
+coarse level barriers and KLS's current fetch-and-wait tail; it points back to
+the numeric representation and update granularity inside the heavy tail
+columns.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
