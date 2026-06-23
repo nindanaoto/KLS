@@ -63,6 +63,16 @@ struct kls_solver {
   UF_long **refactor_u_indices;
   double **refactor_u_values;
   UF_long refactor_lu_pointer_count;
+  UF_long *row_refactor_l_ptr;
+  UF_long *row_refactor_l_cols;
+  double **row_refactor_l_values;
+  UF_long *row_refactor_u_ptr;
+  UF_long *row_refactor_u_cols;
+  double **row_refactor_u_values;
+  UF_long *row_refactor_input_ptr;
+  UF_long *row_refactor_input_cols;
+  UF_long *row_refactor_input_pos;
+  UF_long row_refactor_pattern_n;
   UF_long *refactor_level_ptr;
   UF_long *refactor_level_cols;
   UF_long *refactor_level_thread_ptr;
@@ -398,6 +408,31 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_u_indices = NULL;
   solver->refactor_u_values = NULL;
   solver->refactor_lu_pointer_count = 0;
+}
+
+static void free_row_refactor_pattern(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->row_refactor_l_ptr);
+  free(solver->row_refactor_l_cols);
+  free(solver->row_refactor_l_values);
+  free(solver->row_refactor_u_ptr);
+  free(solver->row_refactor_u_cols);
+  free(solver->row_refactor_u_values);
+  free(solver->row_refactor_input_ptr);
+  free(solver->row_refactor_input_cols);
+  free(solver->row_refactor_input_pos);
+  solver->row_refactor_l_ptr = NULL;
+  solver->row_refactor_l_cols = NULL;
+  solver->row_refactor_l_values = NULL;
+  solver->row_refactor_u_ptr = NULL;
+  solver->row_refactor_u_cols = NULL;
+  solver->row_refactor_u_values = NULL;
+  solver->row_refactor_input_ptr = NULL;
+  solver->row_refactor_input_cols = NULL;
+  solver->row_refactor_input_pos = NULL;
+  solver->row_refactor_pattern_n = 0;
 }
 
 static void free_refactor_schedule(kls_solver *solver) {
@@ -1139,6 +1174,7 @@ static void free_numeric(kls_solver *solver) {
   destroy_egraph_refactor_pool(solver);
   free_egraph_worker_scratch(solver);
   free_egraph_pipeline_done(solver);
+  free_row_refactor_pattern(solver);
   free_refactor_lu_pointer_cache(solver);
   if (solver->numeric != NULL) {
     free_refactor_map(solver);
@@ -7852,6 +7888,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   solver->fast_block_restarts++;
   free_refactor_map(solver);
   free_refactor_schedule(solver);
+  free_row_refactor_pattern(solver);
   free_refactor_lu_pointer_cache(solver);
   solver->common.status = TRILINOS_KLU_OK;
   solver->common.numerical_rank = KLS_KLU_EMPTY;
@@ -8123,6 +8160,277 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_u_indices = u_indices;
   solver->refactor_u_values = u_values;
   solver->refactor_lu_pointer_count = solver->n;
+  return 1;
+}
+
+static int kls_row_refactor_pattern_is_eligible(const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+         solver->numeric != NULL && solver->symbolic->nblocks == 1u &&
+         solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
+         solver->numeric->Udiag != NULL && solver->numeric->Xwork != NULL &&
+         solver->refactor_lu_pointer_count == solver->n &&
+         solver->refactor_col_ptr != NULL &&
+         solver->refactor_row_idx != NULL &&
+         solver->refactor_input_pos != NULL &&
+         solver->refactor_l_indices != NULL &&
+         solver->refactor_l_values != NULL &&
+         solver->refactor_u_indices != NULL &&
+         solver->refactor_u_values != NULL;
+}
+
+static int kls_build_row_refactor_pattern(kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      solver->symbolic->nblocks != 1u) {
+    return 0;
+  }
+  if (solver->row_refactor_pattern_n == solver->n &&
+      solver->row_refactor_l_ptr != NULL &&
+      solver->row_refactor_u_ptr != NULL &&
+      solver->row_refactor_input_ptr != NULL) {
+    return 1;
+  }
+  if (!kls_build_refactor_map(solver) ||
+      !kls_build_refactor_lu_pointer_cache(solver) ||
+      !kls_row_refactor_pattern_is_eligible(solver)) {
+    return 0;
+  }
+
+  free_row_refactor_pattern(solver);
+  const UF_long n = solver->n;
+  UF_long *l_ptr = (UF_long *)calloc((size_t)n + 1u, sizeof(*l_ptr));
+  UF_long *u_ptr = (UF_long *)calloc((size_t)n + 1u, sizeof(*u_ptr));
+  UF_long *input_ptr =
+    (UF_long *)calloc((size_t)n + 1u, sizeof(*input_ptr));
+  UF_long *next = (UF_long *)malloc((size_t)n * sizeof(*next));
+  if (l_ptr == NULL || u_ptr == NULL || input_ptr == NULL ||
+      (n > 0u && next == NULL)) {
+    free(l_ptr);
+    free(u_ptr);
+    free(input_ptr);
+    free(next);
+    return 0;
+  }
+
+  for (UF_long j = 0; j < n; ++j) {
+    UF_long *li = solver->refactor_l_indices[j];
+    const UF_long len = solver->numeric->Llen[j];
+    if (len > 0u && li == NULL) {
+      free(l_ptr);
+      free(u_ptr);
+      free(input_ptr);
+      free(next);
+      return 0;
+    }
+    for (UF_long p = 0; p < len; ++p) {
+      const UF_long row = li[p];
+      if (row <= j || row >= n) {
+        free(l_ptr);
+        free(u_ptr);
+        free(input_ptr);
+        free(next);
+        return 0;
+      }
+      l_ptr[row + 1u]++;
+    }
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    UF_long *ui = solver->refactor_u_indices[k];
+    const UF_long len = solver->numeric->Ulen[k];
+    if (len > 0u && ui == NULL) {
+      free(l_ptr);
+      free(u_ptr);
+      free(input_ptr);
+      free(next);
+      return 0;
+    }
+    for (UF_long p = 0; p < len; ++p) {
+      const UF_long row = ui[p];
+      if (row >= k || row >= n) {
+        free(l_ptr);
+        free(u_ptr);
+        free(input_ptr);
+        free(next);
+        return 0;
+      }
+      u_ptr[row + 1u]++;
+    }
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    for (UF_long p = solver->refactor_col_ptr[k];
+         p < solver->refactor_col_ptr[k + 1u]; ++p) {
+      const UF_long row = solver->refactor_row_idx[p];
+      if (row >= n || solver->refactor_input_pos[p] >= solver->nnz) {
+        free(l_ptr);
+        free(u_ptr);
+        free(input_ptr);
+        free(next);
+        return 0;
+      }
+      input_ptr[row + 1u]++;
+    }
+  }
+
+  for (UF_long i = 0; i < n; ++i) {
+    l_ptr[i + 1u] += l_ptr[i];
+    u_ptr[i + 1u] += u_ptr[i];
+    input_ptr[i + 1u] += input_ptr[i];
+  }
+  const UF_long l_nnz = l_ptr[n];
+  const UF_long u_nnz = u_ptr[n];
+  const UF_long input_nnz = input_ptr[n];
+  UF_long *l_cols = l_nnz > 0u
+    ? (UF_long *)malloc((size_t)l_nnz * sizeof(*l_cols)) : NULL;
+  double **l_values = l_nnz > 0u
+    ? (double **)malloc((size_t)l_nnz * sizeof(*l_values)) : NULL;
+  UF_long *u_cols = u_nnz > 0u
+    ? (UF_long *)malloc((size_t)u_nnz * sizeof(*u_cols)) : NULL;
+  double **u_values = u_nnz > 0u
+    ? (double **)malloc((size_t)u_nnz * sizeof(*u_values)) : NULL;
+  UF_long *input_cols = input_nnz > 0u
+    ? (UF_long *)malloc((size_t)input_nnz * sizeof(*input_cols)) : NULL;
+  UF_long *input_pos = input_nnz > 0u
+    ? (UF_long *)malloc((size_t)input_nnz * sizeof(*input_pos)) : NULL;
+  if ((l_nnz > 0u && (l_cols == NULL || l_values == NULL)) ||
+      (u_nnz > 0u && (u_cols == NULL || u_values == NULL)) ||
+      (input_nnz > 0u && (input_cols == NULL || input_pos == NULL))) {
+    free(l_ptr);
+    free(u_ptr);
+    free(input_ptr);
+    free(next);
+    free(l_cols);
+    free(l_values);
+    free(u_cols);
+    free(u_values);
+    free(input_cols);
+    free(input_pos);
+    return 0;
+  }
+
+  memcpy(next, l_ptr, (size_t)n * sizeof(*next));
+  for (UF_long j = 0; j < n; ++j) {
+    UF_long *li = solver->refactor_l_indices[j];
+    double *lx = solver->refactor_l_values[j];
+    const UF_long len = solver->numeric->Llen[j];
+    for (UF_long p = 0; p < len; ++p) {
+      const UF_long row = li[p];
+      const UF_long dst = next[row]++;
+      l_cols[dst] = j;
+      l_values[dst] = lx + p;
+    }
+  }
+  memcpy(next, u_ptr, (size_t)n * sizeof(*next));
+  for (UF_long k = 0; k < n; ++k) {
+    UF_long *ui = solver->refactor_u_indices[k];
+    double *ux = solver->refactor_u_values[k];
+    const UF_long len = solver->numeric->Ulen[k];
+    for (UF_long p = 0; p < len; ++p) {
+      const UF_long row = ui[p];
+      const UF_long dst = next[row]++;
+      u_cols[dst] = k;
+      u_values[dst] = ux + p;
+    }
+  }
+  memcpy(next, input_ptr, (size_t)n * sizeof(*next));
+  for (UF_long k = 0; k < n; ++k) {
+    for (UF_long p = solver->refactor_col_ptr[k];
+         p < solver->refactor_col_ptr[k + 1u]; ++p) {
+      const UF_long row = solver->refactor_row_idx[p];
+      const UF_long dst = next[row]++;
+      input_cols[dst] = k;
+      input_pos[dst] = solver->refactor_input_pos[p];
+    }
+  }
+  free(next);
+
+  solver->row_refactor_l_ptr = l_ptr;
+  solver->row_refactor_l_cols = l_cols;
+  solver->row_refactor_l_values = l_values;
+  solver->row_refactor_u_ptr = u_ptr;
+  solver->row_refactor_u_cols = u_cols;
+  solver->row_refactor_u_values = u_values;
+  solver->row_refactor_input_ptr = input_ptr;
+  solver->row_refactor_input_cols = input_cols;
+  solver->row_refactor_input_pos = input_pos;
+  solver->row_refactor_pattern_n = n;
+  return 1;
+}
+
+static int kls_row_refactor_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static int kls_single_block_row_refactor(kls_solver *solver,
+                                         double *numeric_values) {
+  if (numeric_values == NULL || solver == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || solver->symbolic->nblocks != 1u ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      solver->numeric->Udiag == NULL || solver->numeric->Xwork == NULL ||
+      !kls_build_row_refactor_pattern(solver)) {
+    return -1;
+  }
+
+  trilinos_klu_l_common *common = &solver->common;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  double *x = (double *)numeric->Xwork;
+  double *udiag = (double *)numeric->Udiag;
+  const UF_long n = solver->n;
+
+  memset(x, 0, (size_t)n * sizeof(*x));
+  common->status = TRILINOS_KLU_OK;
+  common->numerical_rank = KLS_KLU_EMPTY;
+  common->singular_col = KLS_KLU_EMPTY;
+  common->nrealloc = 0;
+
+  for (UF_long i = 0; i < n; ++i) {
+    for (UF_long p = solver->row_refactor_input_ptr[i];
+         p < solver->row_refactor_input_ptr[i + 1u]; ++p) {
+      const UF_long col = solver->row_refactor_input_cols[p];
+      x[col] = numeric_values[solver->row_refactor_input_pos[p]];
+    }
+
+    for (UF_long p = solver->row_refactor_l_ptr[i];
+         p < solver->row_refactor_l_ptr[i + 1u]; ++p) {
+      const UF_long dep = solver->row_refactor_l_cols[p];
+      const double lij = x[dep] / udiag[dep];
+      *solver->row_refactor_l_values[p] = lij;
+      x[dep] = 0.0;
+      for (UF_long up = solver->row_refactor_u_ptr[dep];
+           up < solver->row_refactor_u_ptr[dep + 1u]; ++up) {
+        const UF_long col = solver->row_refactor_u_cols[up];
+        x[col] -= lij * (*solver->row_refactor_u_values[up]);
+      }
+    }
+
+    const double pivot = x[i];
+    x[i] = 0.0;
+    if (pivot == 0.0) {
+      common->status = TRILINOS_KLU_SINGULAR;
+      if (common->numerical_rank == KLS_KLU_EMPTY) {
+        common->numerical_rank = i;
+        common->singular_col = symbolic->Q[i];
+      }
+      if (common->halt_if_singular) {
+        memset(x, 0, (size_t)n * sizeof(*x));
+        return 0;
+      }
+    }
+    udiag[i] = pivot;
+
+    for (UF_long p = solver->row_refactor_u_ptr[i];
+         p < solver->row_refactor_u_ptr[i + 1u]; ++p) {
+      const UF_long col = solver->row_refactor_u_cols[p];
+      *solver->row_refactor_u_values[p] = x[col];
+      x[col] = 0.0;
+    }
+    for (UF_long p = solver->row_refactor_input_ptr[i];
+         p < solver->row_refactor_input_ptr[i + 1u]; ++p) {
+      x[solver->row_refactor_input_cols[p]] = 0.0;
+    }
+  }
   return 1;
 }
 
@@ -9475,6 +9783,13 @@ static int kls_mapped_refactor(kls_solver *solver,
     return -1;
   }
   if (solver->symbolic->nblocks == 1u) {
+    if (!check_pivots && kls_row_refactor_env_enabled()) {
+      const int row_status =
+        kls_single_block_row_refactor(solver, numeric_values);
+      if (row_status >= 0) {
+        return row_status;
+      }
+    }
     return kls_single_block_mapped_refactor(solver, numeric_values, check_pivots);
   }
   if (solver->numeric->Udiag == NULL || solver->numeric->Offp == NULL ||

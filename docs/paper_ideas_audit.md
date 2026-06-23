@@ -1614,6 +1614,17 @@ The broad CKTSO gap on `G2_circuit`, `mc2depi`, `rajat20`, `rajat25`,
 new KLS-owned row/segment-oriented numeric layer, not another matrix-specific
 ordering, scaling, MC64 import, or EGraph micro-optimization.
 
+KLS now has a first KLS-owned scalar row-major no-pivot refactor scaffold behind
+`KLS_ENABLE_ROW_REFACTOR=1` for unscaled single-block factors. It builds row
+views of the fixed L pattern, U pattern, and factor-order input pattern, then
+recomputes L row entries before writing each U row. Smoke checks on `add20` and
+`G2_circuit` kept valid residuals, but the scalar row order is not a default
+policy: on same-session one-thread checks, `add20` refactor was about
+`0.00013s` versus the default `0.00006s`, and `G2_circuit` was about `1.19s`
+versus `0.82s` over five repeated refactors. This narrows the missing paper
+work: the row layer needs parallel scheduling and supernode/segment updates, not
+just a scalar transposition of the KLU column kernel.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
