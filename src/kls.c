@@ -7834,9 +7834,16 @@ static int kls_egraph_all_pipeline_dominant_btf_shape(
 static int kls_egraph_all_pipeline_huge_single_shape(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
-      solver->symbolic->nblocks != 1u || solver->common.scale > 0 ||
-      solver->numeric == NULL || solver->numeric->Rs != NULL ||
+      solver->symbolic->nblocks != 1u || solver->numeric == NULL ||
       solver->n < 100000u) {
+    return 0;
+  }
+  if (solver->common.scale > 0) {
+    if (solver->numeric->Rs == NULL || solver->numeric->Pnum == NULL ||
+        solver->numeric->Xwork == NULL) {
+      return 0;
+    }
+  } else if (solver->numeric->Rs != NULL) {
     return 0;
   }
   return solver->common.flops >= 1.0e9;

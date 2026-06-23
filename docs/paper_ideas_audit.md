@@ -248,6 +248,10 @@ design work, not benchmark-specific tuning.
   size floor, KLS can run the whole exact EGraph as an atomic topological
   pipeline with no cluster barriers. This is a retained SubtreeLU/CKTSO-aligned
   scheduler improvement for the current fixed-pivot LU storage.
+  Very high-work single-block row-scaled factors can also use that full
+  all-pipeline EGraph path once the existing scale recomputation/permutation
+  support is available, so the scheduler does not leave a tiny barriered tail
+  after hundreds of narrow cluster levels.
   A later fragmented many-block gate applies the same CKTSO-style lesson to
   unscaled BTF decompositions whose largest block covers less than half the
   matrix but still carries enough numeric work to justify intra-block
@@ -1468,6 +1472,18 @@ for `G2_circuit` and `mc2depi`; geomean moved from about `0.2869s` to about
 `0.2859s`. The saved CKTSO comparison still shows KLS materially behind on
 these rows, so this is a narrow scheduler improvement, not the missing
 pivot-aware row-oriented numeric engine.
+
+The same all-pipeline single-block selector was then widened to very high-work
+row-scaled factors when KLU row scales and `Pnum` are already present, so KLS
+can recompute `Rs`, execute the exact EGraph without cluster barriers, and
+permute `Rs` back to pivot order after refactor. This keeps the same one-block,
+100k-row, `1e9` factor-flop floor and does not affect lower-work scaled cases.
+In the saved medium and large paper artifacts this structural gate matches only
+`nxp1`. A same-session three-pass comparison against a clean baseline moved
+`nxp1` median repeated refactor from about `0.677s` to about `0.649s`, median
+fast-factor refactor from about `0.708s` to about `0.670s`, and the 100-step
+SPICE-cycle estimate from about `75.7s` to about `73.4s`, while the solve time
+stayed neutral.
 
 ## Recommended General Work
 
