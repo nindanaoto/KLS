@@ -1509,6 +1509,18 @@ at `1.121x`, `nxp1` at `1.020x`, and `ASIC_680k` at `1.016x`. The extra
 metadata load and changed publication pattern are therefore not a general
 substitute for a larger CKTSO-style pivoting scheduler change.
 
+A scaled refactor-map hot-loop probe was also rejected. The prototype stored the
+original input row beside each retained refactor-map entry so scaled mapped
+refactors could divide by `Rs[oldrow]` without chasing `row_idx[input_pos]`.
+This looked like a cheap CKTSO-style row/segment metadata step, but the extra
+map memory and load did not pay for itself on the current KLU storage. A
+same-session focused comparison against `989360b` regressed repeated refactor by
+`1.026x` geomean across `nxp1`, `rajat20`, `rajat28`, `Raj1`, `dc2`,
+`G2_circuit`, `mc2depi`, `rajat25`, `rajat30`, and `ASIC_680k`; the scaled rows
+alone regressed by `1.032x`, and the unscaled guards by `1.021x`. The prototype
+was removed, leaving the retained refactor map limited to the map data that has
+shown a general win.
+
 The CKTSO paper was re-read after these scheduler probes because the remaining
 gap is too large to explain by small EGraph bookkeeping. The missing mechanism
 is larger and architectural: CKTSO's fast factorization is a row-oriented
