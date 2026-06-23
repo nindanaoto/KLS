@@ -401,6 +401,9 @@ static int test_checked_row_fast_factor_block_restart(void) {
              stats.fast_repaired_prefix_changed_pivots != 0 ||
              stats.fast_repaired_suffix_changed_pivots < 1 ||
              stats.fast_repaired_tail_restart_ready != 1 ||
+             stats.fast_repaired_block_work <= 0.0 ||
+             stats.fast_repaired_tail_restart_columns < 1 ||
+             stats.fast_repaired_tail_restart_work <= 0.0 ||
              stats.fast_block_restarts != 1 ||
              stats.fast_rejected_refresh_state !=
                KLS_FAST_REJECT_REFRESH_PREFIX)) {
@@ -413,7 +416,9 @@ static int test_checked_row_fast_factor_block_restart(void) {
             ", tail_ready=%d, repaired_row=%" PRId64
             ", repaired_match=%d, first_changed=%" PRId64
             ", prefix_changed=%" PRId64 ", suffix_changed=%" PRId64
-            ", tail_restart_ready=%d, restarts=%d, refresh=%d\n",
+            ", tail_restart_ready=%d, block_work=%.6g"
+            ", tail_cols=%" PRId64 ", tail_work=%.6g"
+            ", saved_work=%.6g, restarts=%d, refresh=%d\n",
             stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,
             stats.fast_rejected_row, stats.fast_rejected_multiplier_abs,
             stats.fast_rejected_pivot_abs,
@@ -429,6 +434,10 @@ static int test_checked_row_fast_factor_block_restart(void) {
             stats.fast_repaired_prefix_changed_pivots,
             stats.fast_repaired_suffix_changed_pivots,
             stats.fast_repaired_tail_restart_ready,
+            stats.fast_repaired_block_work,
+            stats.fast_repaired_tail_restart_columns,
+            stats.fast_repaired_tail_restart_work,
+            stats.fast_repaired_tail_restart_saved_work,
             stats.fast_block_restarts, stats.fast_rejected_refresh_state);
     ok = 0;
   }

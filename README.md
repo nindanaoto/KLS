@@ -329,6 +329,10 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_repaired_prefix_changed_pivots`,
 `fast_repaired_suffix_changed_pivots`,
 `fast_repaired_tail_restart_ready`,
+`fast_repaired_block_work`,
+`fast_repaired_tail_restart_columns`,
+`fast_repaired_tail_restart_work`,
+`fast_repaired_tail_restart_saved_work`,
 `fast_rejected_block_start`, `fast_rejected_block_size`,
 `fast_rejected_suffix_columns`,
 `fast_rejected_descendant_columns`, `fast_rejected_descendant_work`,
@@ -345,8 +349,9 @@ original reused pivot, the row chosen by the fallback pivoting block repair at
 that pivot, whether it matches the retained tail candidate, the first pivot
 whose row changed in the fallback repair, how many changed pivots were before
 and at/after the rejected pivot, whether the robust repair outcome preserved
-the prefix and is compatible with a future local tail restart, the rejected
-BTF block, the suffix from that pivot to the end
+the prefix and is compatible with a future local tail restart, the estimated
+full-block repair work and strict ETree-tail restart work/saved work, the
+rejected BTF block, the suffix from that pivot to the end
 of the block, the exact U-pattern descendant tail inside that block, the
 row-refactor successor tail when row-major metadata is available, the
 ordered-block ETree successor path that a pivoting tail-restart upper-bound

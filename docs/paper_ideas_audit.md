@@ -1926,14 +1926,17 @@ provide. KLS summarizes the strict compatible subset as
 `fast_repaired_tail_restart_ready`, which requires a prefix-current checked
 row-major reject, a tolerance-valid row-tail candidate, a fallback repair that
 selects that candidate at the rejected pivot, and zero changed pivots before
-the rejected pivot.
+the rejected pivot. When that strict flag is true, KLS also records the
+fallback full-block repair work, the ETree-tail restart column/work upper
+bound, and the saved-work estimate a local tail restart would target.
 The first focused stress probe shows why that distinction matters: stressed
 `add20` chose the retained row-tail candidate at the rejected pivot, but the
 full KLU block repair also changed one pivot before the rejected pivot, so a
 future local tail kernel cannot treat tail-candidate availability alone as a
 safe replacement for the fallback repair; its strict tail-restart-ready flag is
-therefore false. The ordinary non-reject `G2_circuit` row-refactor path leaves
-these fields at their sentinels.
+therefore false even though the full repaired-block work is about `1.66e6`.
+The ordinary non-reject `G2_circuit` row-refactor path leaves these fields at
+their sentinels.
 
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,

@@ -112,6 +112,10 @@ typedef struct kls_stats {
   int64_t fast_repaired_prefix_changed_pivots;
   int64_t fast_repaired_suffix_changed_pivots;
   int fast_repaired_tail_restart_ready;
+  double fast_repaired_block_work;
+  int64_t fast_repaired_tail_restart_columns;
+  double fast_repaired_tail_restart_work;
+  double fast_repaired_tail_restart_saved_work;
   int selected_exact_matching;
   int selected_spral_matching;
   int fast_block_restarts;

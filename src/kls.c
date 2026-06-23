@@ -712,6 +712,10 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_prefix_changed_pivots = 0;
   solver->stats.fast_repaired_suffix_changed_pivots = 0;
   solver->stats.fast_repaired_tail_restart_ready = 0;
+  solver->stats.fast_repaired_block_work = 0.0;
+  solver->stats.fast_repaired_tail_restart_columns = 0;
+  solver->stats.fast_repaired_tail_restart_work = 0.0;
+  solver->stats.fast_repaired_tail_restart_saved_work = 0.0;
   solver->stats.fast_block_restarts = 0;
   solver->stats.fast_rejected_block_start = -1;
   solver->stats.fast_rejected_block_size = 0;
@@ -7593,6 +7597,27 @@ static int kls_fast_reject_column_work(const kls_solver *solver,
   return 1;
 }
 
+static int kls_fast_reject_block_work(const kls_solver *solver,
+                                      UF_long block,
+                                      UF_long k1,
+                                      UF_long nk,
+                                      double *work_out) {
+  if (solver == NULL || work_out == NULL) {
+    return 0;
+  }
+  double work = 0.0;
+  for (UF_long k = 0; k < nk; ++k) {
+    double column_work = 0.0;
+    if (!kls_fast_reject_column_work(solver, block, k1, nk, k,
+                                     &column_work)) {
+      return 0;
+    }
+    work += column_work;
+  }
+  *work_out = work;
+  return 1;
+}
+
 static int kls_build_ordered_block_etree(const kls_solver *solver,
                                          UF_long k1,
                                          UF_long k2,
@@ -8220,6 +8245,7 @@ static int kls_recompute_offdiag_from_pinv(kls_solver *solver,
 }
 
 static void kls_record_fast_repaired_block_stats(kls_solver *solver,
+                                                 UF_long block,
                                                  UF_long k1,
                                                  UF_long nk,
                                                  UF_long rejected_pivot,
@@ -8271,7 +8297,21 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     solver->stats.fast_repaired_pivot_matches_tail_candidate &&
     prefix_changed == 0u &&
     (first_changed == KLS_KLU_EMPTY || first_changed >= rejected_pivot) &&
-    suffix_changed > 0u;
+    suffix_changed > 0u &&
+    solver->stats.fast_rejected_etree_columns > 0 &&
+    solver->stats.fast_rejected_etree_work > 0.0;
+  double block_work = 0.0;
+  if (kls_fast_reject_block_work(solver, block, k1, nk, &block_work)) {
+    solver->stats.fast_repaired_block_work = block_work;
+    if (solver->stats.fast_repaired_tail_restart_ready) {
+      const double tail_work = solver->stats.fast_rejected_etree_work;
+      solver->stats.fast_repaired_tail_restart_columns =
+        solver->stats.fast_rejected_etree_columns;
+      solver->stats.fast_repaired_tail_restart_work = tail_work;
+      solver->stats.fast_repaired_tail_restart_saved_work =
+        block_work > tail_work ? block_work - tail_work : 0.0;
+    }
+  }
 }
 
 static int kls_pivot_restart_rejected_block(kls_solver *solver,
@@ -8410,7 +8450,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     }
     solver->numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + local_row];
   }
-  kls_record_fast_repaired_block_stats(solver, k1, nk, rejected_pivot,
+  kls_record_fast_repaired_block_stats(solver, block, k1, nk, rejected_pivot,
                                        pblock);
 
   for (UF_long k = 0; k < solver->n; ++k) {
