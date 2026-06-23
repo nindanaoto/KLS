@@ -2359,6 +2359,46 @@ static int btf_fragmented_retry_shape_is_allowed(
   return symbolic->est_flops >= 5.0e7;
 }
 
+static UF_long count_pattern_diagonal(UF_long n,
+                                      const UF_long *col_ptr,
+                                      const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal = 0;
+  for (UF_long col = 0; col < n; ++col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n) {
+        return 0;
+      }
+      if (row == col) {
+        diagonal++;
+      }
+    }
+  }
+  return diagonal;
+}
+
+static int btf_low_work_many_block_retry_shape_is_allowed(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (symbolic == NULL || n < 4000u || n > 90000u ||
+      symbolic->nblocks < 1024u || symbolic->maxblock == 0u ||
+      symbolic->est_flops <= 0.0 || symbolic->est_flops > 2.0e7) {
+    return 0;
+  }
+
+  const double largest = (double)symbolic->maxblock;
+  const UF_long diagonal = count_pattern_diagonal(n, col_ptr, row_idx);
+  return largest >= 0.05 * (double)n &&
+         largest <= 0.80 * (double)n &&
+         200.0 * (double)diagonal >= 191.0 * (double)n;
+}
+
 static void maybe_retry_without_btf(UF_long n,
                                     UF_long *col_ptr,
                                     UF_long *row_idx,
@@ -2368,21 +2408,25 @@ static void maybe_retry_without_btf(UF_long n,
                                     trilinos_klu_l_common *common,
                                     double *score,
                                     int allow_single_block) {
-  if (options == NULL || !options->use_btf || n < 20000 || symbolic == NULL ||
+  if (options == NULL || !options->use_btf || n < 4000 || symbolic == NULL ||
       *symbolic == NULL || common == NULL || score == NULL) {
     return;
   }
 
   const int single_block =
-    allow_single_block && (*symbolic)->nblocks == 1 && (*symbolic)->maxblock == n;
+    n >= 20000u && allow_single_block &&
+    (*symbolic)->nblocks == 1 && (*symbolic)->maxblock == n;
   const int dominant_block =
     btf_dominant_block_retry_shape_is_allowed(n, *symbolic);
   const int inflated_many_block =
     btf_inflated_many_block_retry_shape_is_allowed(n, *symbolic);
   const int fragmented_block =
     btf_fragmented_retry_shape_is_allowed(n, *symbolic);
+  const int low_work_many_block =
+    btf_low_work_many_block_retry_shape_is_allowed(n, col_ptr, row_idx,
+                                                   *symbolic);
   if (!single_block && !dominant_block && !inflated_many_block &&
-      !fragmented_block) {
+      !fragmented_block && !low_work_many_block) {
     return;
   }
 
@@ -2406,7 +2450,11 @@ static void maybe_retry_without_btf(UF_long n,
       (inflated_many_block && current_score_known && isfinite(no_btf_score) &&
        no_btf_score <= 0.50 * current_score) ||
       (fragmented_block && current_score_known && isfinite(no_btf_score) &&
-       no_btf_score <= 0.90 * current_score)) {
+       no_btf_score <= 0.90 * current_score) ||
+      (low_work_many_block && current_score_known && isfinite(no_btf_score) &&
+       no_btf_score <= 1.75 * current_score &&
+       no_btf_symbolic->est_flops > 0.0 &&
+       no_btf_symbolic->est_flops <= 1.50 * (*symbolic)->est_flops)) {
     trilinos_klu_l_free_symbolic(symbolic, common);
     *symbolic = no_btf_symbolic;
     *common = no_btf_common;

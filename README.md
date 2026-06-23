@@ -311,6 +311,15 @@ it when the symbolic fill score is substantially lower. This handles cases
 where BTF exposes many off-block entries and worsens repeated refactor
 throughput even though the fixed-pivot no-BTF factor remains stable.
 
+For low-work medium many-block analyses, `auto` can also retry without BTF when
+the largest BTF block is moderate, the diagonal is nearly complete, symbolic
+work is bounded, and the no-BTF symbolic keeps fill growth and estimated flop
+growth within guarded limits. This targets small circuit and Rommes-style
+power-grid matrices where BTF's thousands of blocks add repeated-refactor
+overhead without enough numeric work to amortize the decomposition. Dense
+dominant-block and weak-diagonal cases stay on the existing BTF/static-matching
+paths.
+
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
 `--ordering auto` can start with METIS for medium, bounded-degree structures
 only when the diagonal is nearly complete, preserving mesh-style

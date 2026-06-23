@@ -1364,6 +1364,20 @@ medium run kept the same three known failures (`bips07_1998`, `ss1`, and
 and against saved KLU2 the common-row geomean speedup improved to about
 `2.06x`.
 
+The BTF retry was then extended downward to a low-work medium many-block class:
+4k-90k rows, at least 1024 BTF blocks, a 5-80% largest block, at most `2e7`
+estimated BTF flops, and at least 95.5% structural diagonal coverage. The
+no-BTF candidate is accepted only when symbolic fill stays within 1.75x and
+estimated flops within 1.5x of the BTF symbolic. Focused checks showed forced
+no-BTF wins for Bomhof `circuit_2/3/4`, Rommes BIPS/MIMO/NOPSS variants, and a
+small `rajat22` improvement, while the diagonal-completeness gate kept the
+noisy `rajat26/27` edge cases on the older BTF/static paths. The full 93-row
+medium run again had the same three known failures and moved KLS geomean from
+about `0.2952s` to about `0.2877s`. On the 90 rows common with saved CKTSO,
+KLS is still about `1.09x` slower; on the 88 rows common with saved KLU2, KLS
+is about `2.12x` faster. This is a retained general low-work BTF-overhead
+reduction, not evidence that ordering alone closes the remaining CKTSO gap.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
