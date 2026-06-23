@@ -543,11 +543,11 @@ static int test_checked_row_fast_factor_block_restart(void) {
 }
 
 static int test_parallel_checked_row_fast_factor_block_restart(void) {
-  const int32_t ap[] = {0, 2, 4, 5, 6};
-  const int32_t ai[] = {0, 1, 0, 1, 2, 3};
-  const double ax0[] = {2.0, 1.0, 1.0, 2.0, 3.0, 4.0};
-  const double ax1[] = {1.0e-12, 1.0, 1.0, 2.0, 3.0, 4.0};
-  const double b[] = {2.000000000001, 5.0, 9.0, 16.0};
+  const int32_t ap[] = {0, 1, 3, 5, 6};
+  const int32_t ai[] = {0, 1, 2, 1, 2, 3};
+  const double ax0[] = {2.0, 2.0, 1.0, 1.0, 2.0, 4.0};
+  const double ax1[] = {2.0, 1.0e-12, 1.0, 1.0, 2.0, 4.0};
+  const double b[] = {2.0, 3.000000000002, 8.0, 16.0};
   double x[4] = {0.0, 0.0, 0.0, 0.0};
 
   kls_solver *solver = NULL;
@@ -600,14 +600,14 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
                         "stats parallel checked-row restart")) {
     ok = 0;
   }
-  if (ok && (stats.fast_rejected_pivot != 0 ||
-             stats.fast_rejected_pivot_col != 0 ||
-             stats.fast_rejected_row != 1 ||
+  if (ok && (stats.fast_rejected_pivot != 1 ||
+             stats.fast_rejected_pivot_col != 1 ||
+             stats.fast_rejected_row != 2 ||
              stats.fast_rejected_refresh_state !=
-               KLS_FAST_REJECT_REFRESH_UNKNOWN ||
-             stats.fast_rejected_tail_repair_ready != 0 ||
+               KLS_FAST_REJECT_REFRESH_PREFIX ||
+             stats.fast_rejected_tail_repair_ready != 1 ||
              stats.fast_block_restarts != 1 ||
-             stats.fast_tail_restarts != 0 ||
+             stats.fast_tail_restarts != 1 ||
              stats.fast_rejected_pivoting_tail_columns < 1 ||
              stats.fast_rejected_pivoting_tail_topological != 1)) {
     fprintf(stderr,

@@ -313,6 +313,12 @@ static void kls_egraph_refactor_record_singular(
   UF_long singular_col);
 static int kls_egraph_refactor_should_stop(
   kls_egraph_refactor_shared *shared);
+static void kls_egraph_refactor_mark_done(
+  kls_egraph_refactor_shared *shared,
+  UF_long col);
+static int kls_egraph_refreshed_prefix(
+  const kls_egraph_refactor_shared *shared,
+  UF_long rejected_pivot);
 static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   kls_solver *solver,
   int thread_count);
@@ -11918,6 +11924,26 @@ static int kls_parallel_row_refactor_process_group(
   return 1;
 }
 
+static void kls_parallel_row_refactor_mark_group_done(
+  kls_egraph_refactor_shared *shared,
+  const kls_solver *solver,
+  UF_long group) {
+  if (shared == NULL || solver == NULL ||
+      shared->pipeline_done == NULL ||
+      solver->row_refactor_group_ptr == NULL ||
+      group >= solver->row_refactor_group_count) {
+    return;
+  }
+  const UF_long row_begin = solver->row_refactor_group_ptr[group];
+  const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
+  if (row_begin >= row_end || row_end > solver->n) {
+    return;
+  }
+  for (UF_long row = row_begin; row < row_end; ++row) {
+    kls_egraph_refactor_mark_done(shared, row);
+  }
+}
+
 static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
@@ -11948,6 +11974,7 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
             if (!kls_parallel_row_refactor_process_group(worker, group)) {
               break;
             }
+            kls_parallel_row_refactor_mark_group_done(shared, solver, group);
           }
         } else {
           for (UF_long pos = begin + (UF_long)worker->tid;
@@ -11956,6 +11983,7 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
             if (!kls_parallel_row_refactor_process_group(worker, group)) {
               break;
             }
+            kls_parallel_row_refactor_mark_group_done(shared, solver, group);
           }
         }
       }
@@ -11985,6 +12013,7 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
             !kls_parallel_row_refactor_process_row(worker, row)) {
           break;
         }
+        kls_egraph_refactor_mark_done(shared, row);
       }
     }
 
@@ -12016,6 +12045,15 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   }
   if (!kls_build_row_refactor_group_thread_slices(solver, thread_count)) {
     return -1;
+  }
+  atomic_uint *pipeline_done = NULL;
+  unsigned int pipeline_generation = 0;
+  if (check_pivots) {
+    pipeline_done =
+      ensure_egraph_pipeline_done(solver, &pipeline_generation);
+    if (pipeline_done == NULL) {
+      return -1;
+    }
   }
 
   double **scratch =
@@ -12063,8 +12101,8 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   shared->rejected_candidate_abs = -1.0;
   shared->numerical_rank = UF_long_max;
   shared->singular_col = KLS_KLU_EMPTY;
-  shared->pipeline_done = NULL;
-  shared->pipeline_generation = 0;
+  shared->pipeline_done = pipeline_done;
+  shared->pipeline_generation = pipeline_generation;
   shared->pipeline_natural_order = 0;
   atomic_store_explicit(&shared->next_pipeline_pos, 0ul,
                         memory_order_release);
@@ -12094,7 +12132,11 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
     return 0;
   }
   if (shared->pivot_rejected) {
-    solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
+    solver->fast_reject_refresh_state =
+      (!shared->row_refactor_defer_value_scatter &&
+       kls_egraph_refreshed_prefix(shared, shared->rejected_pivot))
+        ? KLS_FAST_REJECT_REFRESH_PREFIX
+        : KLS_FAST_REJECT_REFRESH_UNKNOWN;
     kls_record_fast_reject_detail(solver, shared->rejected_pivot,
                                   shared->rejected_pivot_col,
                                   shared->rejected_row,

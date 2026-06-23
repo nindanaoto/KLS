@@ -326,8 +326,11 @@ With `KLS_ENABLE_CHECKED_ROW_REFACTOR=1`, the experimental KLS-owned
 row/segment refactor can also run the checked fast-factor pass through its
 parallel row scheduler when multiple threads are available. A rejected
 parallel row pass records the unsafe dependency pivot and falls back through
-the same block-repair path, but conservatively reports an unknown refresh state
-because rows in the active level may have completed out of factor-order prefix.
+the same block-repair path. The parallel pass now reuses the retained
+completion bitmap to report a prefix-current refresh state only when all rows
+before the rejected pivot have finished and row values were published directly;
+otherwise it keeps the conservative unknown refresh state because rows in the
+active level may have completed out of factor-order prefix.
 Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_row`,
 `fast_rejected_multiplier_abs`, `fast_rejected_pivot_abs`,

@@ -1899,14 +1899,19 @@ That checked row pass can now use the experimental parallel row/segment
 scheduler when multiple threads are available. The threaded row tasks share the
 same earliest-rejected-pivot recorder as the EGraph refactor path; dense and
 non-dense row-segment kernels all check the same multiplier predicate. A
-parallel checked-row rejection is deliberately classified as
+parallel checked-row rejection now reports
+`KLS_FAST_REJECT_REFRESH_PREFIX` only when the retained completion bitmap proves
+all rows before the rejected pivot have finished and the row pass published
+values directly. Otherwise it remains
 `KLS_FAST_REJECT_REFRESH_UNKNOWN`, because rows in the active level may finish
-out of factor-order prefix before the stop flag is observed. A new smoke case
-uses a known weak-pivot 2x2 block plus independent diagonal work to force a
-two-thread row schedule, records the rejected dependency pivot, repairs the
-block, and verifies the final solution. This is a real CKTSO-style
-fast-factor-with-pivot-check execution slice, but it still falls back to full
-block repair rather than consuming the verified ETree tail worklist.
+out of factor-order prefix before the stop flag is observed or values may be
+deferred in row-major mirrors. A new smoke case uses a known weak-pivot 3-row
+prefix plus independent diagonal work to force a two-thread row schedule,
+records the rejected dependency pivot, repairs the block, verifies that the
+serial pivoting-tail restart can consume the proven prefix state, and checks
+the final solution. This is a real CKTSO-style fast-factor-with-pivot-check
+execution slice, but it still falls back to full block repair when the prefix
+proof is unavailable rather than consuming the full ETree tail worklist.
 
 The row-refactor pattern can now also retain the ordered-block ETree parent
 array lazily for single-block row-major checked rejects. Rejected-pivot
