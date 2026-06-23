@@ -1331,6 +1331,21 @@ conclusion is narrow: compact dominant-BTF refactors can consume the exact
 EGraph path, but this still does not address the much larger single-block and
 ASIC refactor-kernel gap.
 
+A scaled medium-dominant BTF EGraph gate was then retained for the adjacent
+scaled shape that the unscaled compact gate deliberately skipped. The retained
+selector requires BTF, 8-512 blocks, 95%+ largest-block coverage, a 30k-60k
+largest block, active KLU scaling, at least `3e7` measured factor flops, at
+least 1M LU entries, and at least `1.5e7` measured dependency-work units before
+the consumer runs. In the current medium artifact this matches only
+`ckt11752_dc_1`; a three-pass focused check built 1360 levels and reduced
+repeated refactor from about `0.0100s` to about `0.0071s`, moving the focused
+SPICE-cycle median from about `1.16s` to about `0.91s`. A full one-pass medium
+run kept the same three known failures and moved geomean from about `0.3023s`
+to about `0.3014s`; the CKTSO ratio improved to about `1.142x` slower and the
+KLU2 comparison improved to about a `2.02x` geomean speedup. Nearby IBM
+`dc*`/`trans*` scaled dominant-BTF guards keep their existing large-dominant
+EGraph path.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
