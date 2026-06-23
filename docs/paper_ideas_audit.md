@@ -1509,21 +1509,39 @@ at `1.121x`, `nxp1` at `1.020x`, and `ASIC_680k` at `1.016x`. The extra
 metadata load and changed publication pattern are therefore not a general
 substitute for a larger CKTSO-style pivoting scheduler change.
 
+The CKTSO paper was re-read after these scheduler probes because the remaining
+gap is too large to explain by small EGraph bookkeeping. The missing mechanism
+is larger and architectural: CKTSO's fast factorization is a row-oriented
+up-looking kernel that first assumes the previous pivot order, schedules the
+guessed EGraph in cluster/pipeline modes, checks the pivot against the current
+row maximum, and, if the check fails, restarts only the ETree-descendant tail
+with pivoting. KLS currently approximates only the no-pivot EGraph half on top
+of KLU's column-oriented LU storage; the retained restart path invokes KLU's
+serial pivoting kernel on the whole rejected BTF block. That is robust and
+LGPL-compatible, but it cannot express CKTSO's partially recomputed
+ETree-descendant tail or SubtreeLU's separator-tree private/pipeline queues.
+The broad CKTSO gap on `G2_circuit`, `mc2depi`, `rajat20`, `rajat25`,
+`rajat28`, `rajat30`, and `nxp1` should therefore be treated as evidence for a
+new KLS-owned row/segment-oriented numeric layer, not another matrix-specific
+ordering, scaling, MC64 import, or EGraph micro-optimization.
+
 ## Recommended General Work
 
-1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
-   engine: implement CKTSO's ETree-descendant pivoting tail restart or
-   SubtreeLU's separator-tree private/pipeline scheduler, not isolated
-   benchmark guards. The current unscaled block-local restart and large
-   single-block no-pivot cluster/pipeline refactor are useful precursors, but
-   the target is ETree-descendant tail restart inside large blocks.
+1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
+   wrapper-level gates around KLU storage. It should preserve enough row-major
+   `L`/`U` access to run CKTSO-style no-pivot fast factorization with pivot
+   checks, identify the ETree-descendant restart tail after a failed check, and
+   later support SubtreeLU-style separator-tree private/pipeline queues. The
+   current unscaled block-local restart and large single-block no-pivot
+   cluster/pipeline refactor are useful precursors, but the target is a
+   pivoting tail restart inside large blocks.
 2. Continue turning matching/scaling into a production MC64-equivalent stage,
    but keep it inside the LGPL-compatible boundary: use the BSD-licensed SPRAL
    scaling submodule, system SPRAL, or independent KLS code, not HSL MC64 or
-   restricted MC64 copies from other solver trees. The retained SPRAL path now helps large
-   weak-diagonal dominant-BTF cases and avoids replacing no-BTF ordering wins,
-   but `pre2` still times out, so matching quality alone is not the remaining
-   CKTSO-scale gap.
+   restricted MC64 copies from other solver trees. The retained SPRAL path now
+   helps large weak-diagonal dominant-BTF cases and avoids replacing no-BTF
+   ordering wins, but `pre2` still times out, so matching quality alone is not
+   the remaining CKTSO-scale gap.
 3. Add a structure-adaptive triangular solve only after the LU storage owned by
    KLS exposes row-oriented or segmented access cheaply.
 4. Use static symbolic and numeric-cost models to decide whether a parallel
