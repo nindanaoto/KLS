@@ -362,6 +362,10 @@ experimental row pipeline can consume that graph as a bounded successor-ready
 queue, reporting `row_refactor_last_ready_queue`,
 `row_refactor_ready_queue_run_count`, and
 `row_refactor_ready_queue_group_count` when the queued group tail is used.
+Unchecked queued row tails can run without the per-row completion bitmap; stats
+report `row_refactor_last_done_bitmap` and
+`row_refactor_done_bitmap_run_count` so checked pivot-prefix validation remains
+visible.
 Because checked row fast-factor probes and
 unchecked row refactors are selected independently, stats also report
 `row_refactor_last_run`, `row_refactor_last_checked`,

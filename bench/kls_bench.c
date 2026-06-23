@@ -805,6 +805,8 @@ int main(int argc, char **argv) {
            ",\"row_refactor_parallel_run_count\":%" PRId64
            ",\"row_refactor_ready_queue_run_count\":%" PRId64
            ",\"row_refactor_ready_queue_group_count\":%" PRId64
+           ",\"row_refactor_last_done_bitmap\":%d"
+           ",\"row_refactor_done_bitmap_run_count\":%" PRId64
            ",\"row_refactor_segment_count\":%" PRId64
            ",\"row_refactor_segment_rows\":%" PRId64
            ",\"row_refactor_segment_max_width\":%" PRId64
@@ -856,6 +858,8 @@ int main(int argc, char **argv) {
            stats.row_refactor_parallel_run_count,
            stats.row_refactor_ready_queue_run_count,
            stats.row_refactor_ready_queue_group_count,
+           stats.row_refactor_last_done_bitmap,
+           stats.row_refactor_done_bitmap_run_count,
            stats.row_refactor_segment_count,
            stats.row_refactor_segment_rows,
            stats.row_refactor_segment_max_width,
@@ -1002,7 +1006,9 @@ int main(int argc, char **argv) {
            ", runs: %" PRId64 ", checked runs: %" PRId64
            ", parallel runs: %" PRId64
            ", ready queue runs: %" PRId64
-           ", ready queue groups: %" PRId64 "\n",
+           ", ready queue groups: %" PRId64
+           ", last done bitmap: %d"
+           ", done bitmap runs: %" PRId64 "\n",
            stats.row_refactor_group_count,
            stats.row_refactor_group_level_count,
            stats.row_refactor_group_level_max_width,
@@ -1022,7 +1028,9 @@ int main(int argc, char **argv) {
            stats.row_refactor_checked_run_count,
            stats.row_refactor_parallel_run_count,
            stats.row_refactor_ready_queue_run_count,
-           stats.row_refactor_ready_queue_group_count);
+           stats.row_refactor_ready_queue_group_count,
+           stats.row_refactor_last_done_bitmap,
+           stats.row_refactor_done_bitmap_run_count);
     printf("row refactor segments: %" PRId64
            ", rows: %" PRId64 ", max width: %" PRId64
            ", dense entries: %.6g, trailing entries: %.6g\n",

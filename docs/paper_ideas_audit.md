@@ -55,8 +55,10 @@ giving the row/segment layer the explicit task graph needed by future
 SubtreeLU-style private/pipeline queues and CKTSO-style tail schedulers. The
 experimental row pipeline can now consume that graph through a bounded
 successor-ready queue for the pipeline tail, and reports whether the last row
-run used that queue plus cumulative queued group counts. These pieces do not
-change the current default KLU-column numeric kernel.
+run used that queue plus cumulative queued group counts. Unchecked queued row
+tails also skip the per-row completion bitmap, while checked row runs still keep
+it for prefix-reject validation and report that usage separately. These pieces
+do not change the current default KLU-column numeric kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -2762,6 +2764,15 @@ queued execution while preserving a bounded residual. This is closer to the
 SubtreeLU private/pipeline scheduler contract than the previous level-list
 cursor, but it still runs the current KLU-backed row numeric updates and is not
 the missing CKTSO row/segment kernel by itself.
+
+The queued row tail then stopped allocating and publishing the per-row
+completion bitmap for unchecked refactors. The queue already carries the
+tail-local group predecessor counts, so the bitmap is only needed by checked
+row fast-factor runs that may need prefix-current reject validation. Smoke
+coverage now proves the split: the checked queued pass uses the bitmap, while
+the later unchecked queued pass reports no last-run bitmap use. This removes a
+KLU-wrapper bookkeeping artifact from the experimental row scheduler without
+changing default KLS policy.
 
 ## Recommended General Work
 

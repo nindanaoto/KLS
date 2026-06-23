@@ -1893,24 +1893,29 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              checked_stats.row_refactor_last_checked != 1 ||
              checked_stats.row_refactor_last_parallel != 1 ||
              checked_stats.row_refactor_last_ready_queue != 1 ||
+             checked_stats.row_refactor_last_done_bitmap != 1 ||
              checked_stats.row_refactor_run_count != 1 ||
              checked_stats.row_refactor_checked_run_count != 1 ||
              checked_stats.row_refactor_parallel_run_count != 1 ||
              checked_stats.row_refactor_ready_queue_run_count != 1 ||
-             checked_stats.row_refactor_ready_queue_group_count < 3)) {
+             checked_stats.row_refactor_ready_queue_group_count < 3 ||
+             checked_stats.row_refactor_done_bitmap_run_count != 1)) {
     fprintf(stderr,
-            "unexpected checked row stats: last=%d/%d/%d/%d"
+            "unexpected checked row stats: last=%d/%d/%d/%d/%d"
             ", runs=%" PRId64 "/%" PRId64 "/%" PRId64
-            ", ready=%" PRId64 "/%" PRId64 "\n",
+            ", ready=%" PRId64 "/%" PRId64
+            ", done_bitmap=%" PRId64 "\n",
             checked_stats.row_refactor_last_run,
             checked_stats.row_refactor_last_checked,
             checked_stats.row_refactor_last_parallel,
             checked_stats.row_refactor_last_ready_queue,
+            checked_stats.row_refactor_last_done_bitmap,
             checked_stats.row_refactor_run_count,
             checked_stats.row_refactor_checked_run_count,
             checked_stats.row_refactor_parallel_run_count,
             checked_stats.row_refactor_ready_queue_run_count,
-            checked_stats.row_refactor_ready_queue_group_count);
+            checked_stats.row_refactor_ready_queue_group_count,
+            checked_stats.row_refactor_done_bitmap_run_count);
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -1924,13 +1929,15 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
   }
   if (ok && (checked_only_refactor_stats.row_refactor_last_run != 0 ||
              checked_only_refactor_stats.row_refactor_last_ready_queue != 0 ||
+             checked_only_refactor_stats.row_refactor_last_done_bitmap != 0 ||
              checked_only_refactor_stats.row_refactor_run_count != 1 ||
              checked_only_refactor_stats.row_refactor_checked_run_count != 1)) {
     fprintf(stderr,
-            "checked-only refactor incorrectly used row path: last=%d/%d"
+            "checked-only refactor incorrectly used row path: last=%d/%d/%d"
             ", runs=%" PRId64 ", checked=%" PRId64 "\n",
             checked_only_refactor_stats.row_refactor_last_run,
             checked_only_refactor_stats.row_refactor_last_ready_queue,
+            checked_only_refactor_stats.row_refactor_last_done_bitmap,
             checked_only_refactor_stats.row_refactor_run_count,
             checked_only_refactor_stats.row_refactor_checked_run_count);
     ok = 0;
@@ -1994,21 +2001,24 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_last_checked != 0 ||
              stats.row_refactor_last_parallel != 1 ||
              stats.row_refactor_last_ready_queue != 1 ||
+             stats.row_refactor_last_done_bitmap != 0 ||
              stats.row_refactor_run_count != 2 ||
              stats.row_refactor_checked_run_count != 1 ||
              stats.row_refactor_parallel_run_count != 2 ||
              stats.row_refactor_ready_queue_run_count != 2 ||
              stats.row_refactor_ready_queue_group_count <
-               stats.row_refactor_group_pipeline_groups)) {
+               stats.row_refactor_group_pipeline_groups ||
+             stats.row_refactor_done_bitmap_run_count != 1)) {
     fprintf(stderr,
             "unexpected row pipeline stats: groups=%" PRId64
             ", levels=%" PRId64 ", cluster=%" PRId64
             ", pipe_groups=%" PRId64 ", pipe_rows=%" PRId64
             ", pipe_work=%.6g, edges=%" PRId64
             ", roots=%" PRId64 ", leaves=%" PRId64
-            ", max_fanout=%" PRId64 ", last=%d/%d/%d/%d"
+            ", max_fanout=%" PRId64 ", last=%d/%d/%d/%d/%d"
             ", runs=%" PRId64 "/%" PRId64 "/%" PRId64
-            ", ready=%" PRId64 "/%" PRId64 "\n",
+            ", ready=%" PRId64 "/%" PRId64
+            ", done_bitmap=%" PRId64 "\n",
             stats.row_refactor_group_count,
             stats.row_refactor_group_level_count,
             stats.row_refactor_group_cluster_levels,
@@ -2023,11 +2033,13 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             stats.row_refactor_last_checked,
             stats.row_refactor_last_parallel,
             stats.row_refactor_last_ready_queue,
+            stats.row_refactor_last_done_bitmap,
             stats.row_refactor_run_count,
             stats.row_refactor_checked_run_count,
             stats.row_refactor_parallel_run_count,
             stats.row_refactor_ready_queue_run_count,
-            stats.row_refactor_ready_queue_group_count);
+            stats.row_refactor_ready_queue_group_count,
+            stats.row_refactor_done_bitmap_run_count);
     ok = 0;
   }
   const size_t legacy_stats_size =

@@ -183,6 +183,8 @@ typedef struct kls_stats {
   int row_refactor_last_ready_queue;
   int64_t row_refactor_ready_queue_run_count;
   int64_t row_refactor_ready_queue_group_count;
+  int row_refactor_last_done_bitmap;
+  int64_t row_refactor_done_bitmap_run_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
