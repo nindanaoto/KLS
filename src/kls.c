@@ -42,6 +42,12 @@ typedef enum kls_input_format {
   KLS_INPUT_CSR = 2
 } kls_input_format;
 
+typedef enum kls_row_refactor_group_kind {
+  KLS_ROW_REFACTOR_GROUP_SINGLE = 0,
+  KLS_ROW_REFACTOR_GROUP_GENERIC = 1,
+  KLS_ROW_REFACTOR_GROUP_DENSE = 2
+} kls_row_refactor_group_kind;
+
 struct kls_solver {
   UF_long n;
   UF_long nnz;
@@ -91,6 +97,7 @@ struct kls_solver {
   UF_long *row_refactor_etree_parent;
   UF_long *row_refactor_group_trailing_len;
   unsigned char *row_refactor_group_dense;
+  unsigned char *row_refactor_group_kind;
   UF_long row_refactor_pattern_n;
   UF_long row_refactor_group_count;
   UF_long row_refactor_level_count;
@@ -550,6 +557,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_etree_parent);
   free(solver->row_refactor_group_trailing_len);
   free(solver->row_refactor_group_dense);
+  free(solver->row_refactor_group_kind);
   solver->row_refactor_l_ptr = NULL;
   solver->row_refactor_l_cols = NULL;
   solver->row_refactor_l_values = NULL;
@@ -576,6 +584,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_etree_parent = NULL;
   solver->row_refactor_group_trailing_len = NULL;
   solver->row_refactor_group_dense = NULL;
+  solver->row_refactor_group_kind = NULL;
   solver->row_refactor_pattern_n = 0;
   solver->row_refactor_group_count = 0;
   solver->row_refactor_level_count = 0;
@@ -10953,16 +10962,25 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   unsigned char *group_dense = group_count > 0u
     ? (unsigned char *)calloc((size_t)group_count, sizeof(*group_dense))
     : NULL;
+  unsigned char *group_kind = group_count > 0u
+    ? (unsigned char *)calloc((size_t)group_count, sizeof(*group_kind))
+    : NULL;
   if ((n > 0u && l_internal_ptr == NULL) ||
       (group_count > 0u &&
-       (group_trailing_len == NULL || group_dense == NULL))) {
+       (group_trailing_len == NULL || group_dense == NULL ||
+        group_kind == NULL))) {
     free(row_group);
     free(group_ptr);
     free(l_internal_ptr);
     free(group_trailing_len);
     free(group_dense);
+    free(group_kind);
     free_row_refactor_pattern(solver);
     return 0;
+  }
+
+  for (UF_long g = 0; g < group_count; ++g) {
+    group_kind[g] = KLS_ROW_REFACTOR_GROUP_SINGLE;
   }
 
   UF_long segment_count = 0;
@@ -10982,6 +11000,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     if (width <= 1u) {
       continue;
     }
+    group_kind[g] = KLS_ROW_REFACTOR_GROUP_GENERIC;
     const UF_long trailing_len =
       u_ptr[row_end] - u_ptr[row_end - 1u];
     const double dense_entries =
@@ -11043,6 +11062,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
       continue;
     }
     group_dense[g] = 1u;
+    group_kind[g] = KLS_ROW_REFACTOR_GROUP_DENSE;
     dense_segment_count++;
     dense_segment_rows += width;
     if (width > dense_segment_max_width) {
@@ -11060,6 +11080,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     free(l_internal_ptr);
     free(group_trailing_len);
     free(group_dense);
+    free(group_kind);
     free_row_refactor_pattern(solver);
     return 0;
   }
@@ -11079,6 +11100,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
           free(l_internal_ptr);
           free(group_trailing_len);
           free(group_dense);
+          free(group_kind);
           free_row_refactor_pattern(solver);
           return 0;
         }
@@ -11108,6 +11130,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     free(l_internal_ptr);
     free(group_trailing_len);
     free(group_dense);
+    free(group_kind);
     free(group_level_ptr);
     free(level_groups);
     free_row_refactor_pattern(solver);
@@ -11129,6 +11152,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     free(l_internal_ptr);
     free(group_trailing_len);
     free(group_dense);
+    free(group_kind);
     free(group_level_ptr);
     free(level_groups);
     free_row_refactor_pattern(solver);
@@ -11157,6 +11181,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_l_internal_ptr = l_internal_ptr;
   solver->row_refactor_group_trailing_len = group_trailing_len;
   solver->row_refactor_group_dense = group_dense;
+  solver->row_refactor_group_kind = group_kind;
   solver->row_refactor_level_count = group_level_count;
   solver->row_refactor_level_max_width = group_max_width;
   solver->row_refactor_cluster_level_count = group_level_count;
@@ -12080,6 +12105,31 @@ static int kls_parallel_row_refactor_process_dense_group(
   return 1;
 }
 
+static kls_row_refactor_group_kind kls_row_refactor_group_kind_for(
+  const kls_solver *solver,
+  UF_long group,
+  UF_long width) {
+  if (width <= 1u) {
+    return KLS_ROW_REFACTOR_GROUP_SINGLE;
+  }
+  if (solver != NULL && solver->row_refactor_group_kind != NULL &&
+      group < solver->row_refactor_group_count) {
+    const unsigned char kind = solver->row_refactor_group_kind[group];
+    if (kind == KLS_ROW_REFACTOR_GROUP_DENSE) {
+      return KLS_ROW_REFACTOR_GROUP_DENSE;
+    }
+    if (kind == KLS_ROW_REFACTOR_GROUP_GENERIC) {
+      return KLS_ROW_REFACTOR_GROUP_GENERIC;
+    }
+  }
+  if (solver != NULL && solver->row_refactor_group_dense != NULL &&
+      group < solver->row_refactor_group_count &&
+      solver->row_refactor_group_dense[group]) {
+    return KLS_ROW_REFACTOR_GROUP_DENSE;
+  }
+  return KLS_ROW_REFACTOR_GROUP_GENERIC;
+}
+
 static int kls_parallel_row_refactor_process_group(
   kls_egraph_refactor_worker *worker,
   UF_long group,
@@ -12097,7 +12147,10 @@ static int kls_parallel_row_refactor_process_group(
     kls_egraph_refactor_record_invalid(shared);
     return 0;
   }
-  if (row_end == row_begin + 1u) {
+  const UF_long width = row_end - row_begin;
+  const kls_row_refactor_group_kind group_kind =
+    kls_row_refactor_group_kind_for(solver, group, width);
+  if (group_kind == KLS_ROW_REFACTOR_GROUP_SINGLE) {
     return kls_parallel_row_refactor_process_row(worker, row_begin,
                                                 wait_for_dependencies);
   }
@@ -12107,17 +12160,21 @@ static int kls_parallel_row_refactor_process_group(
   double *x = worker->x;
   double *udiag = (double *)numeric->Udiag;
   const UF_long trailing_begin = solver->row_refactor_u_ptr[row_end - 1u];
-  const UF_long trailing_end = solver->row_refactor_u_ptr[row_end];
-  const UF_long trailing_len = trailing_end - trailing_begin;
+  const UF_long trailing_len =
+    solver->row_refactor_group_trailing_len != NULL
+      ? solver->row_refactor_group_trailing_len[group]
+      : solver->row_refactor_u_ptr[row_end] - trailing_begin;
   const UF_long *trailing_cols =
     solver->row_refactor_u_cols + trailing_begin;
 
-  const int dense_status =
-    kls_parallel_row_refactor_process_dense_group(
-      worker, group, row_begin, row_end, trailing_len, trailing_cols,
-      wait_for_dependencies);
-  if (dense_status >= 0) {
-    return dense_status;
+  if (group_kind == KLS_ROW_REFACTOR_GROUP_DENSE) {
+    const int dense_status =
+      kls_parallel_row_refactor_process_dense_group(
+        worker, group, row_begin, row_end, trailing_len, trailing_cols,
+        wait_for_dependencies);
+    if (dense_status >= 0) {
+      return dense_status;
+    }
   }
 
   for (UF_long row = row_begin; row < row_end; ++row) {

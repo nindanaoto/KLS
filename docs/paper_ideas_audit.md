@@ -2682,6 +2682,18 @@ median repeated refactor on `G2_circuit` by about `1.4%`, `ASIC_320k` by about
 the existing exact-EGraph refactor consumer, not as evidence that dispatch
 cleanup can close the CKTSO-scale row/segment gap.
 
+The experimental parallel row-refactor pattern then started retaining a group
+execution kind: single-row, generic multi-row, or dense multi-row. The row
+scheduler consumes that persistent metadata directly and reuses each group's
+precomputed trailing length, so it no longer probes the dense-group path for
+groups that were already classified as generic. Same-session A/B checks of the
+explicit `--row-refactor refactor` path showed `G2_circuit` essentially neutral
+to improved at `0.981x` new/base median repeated-refactor time, `OPF_10000`
+neutral at `1.000x`, and `xingo_afonso_itaipu` improved to `0.838x`. This is
+retained as row-engine groundwork for the future CKTSO-style row/segment
+numeric kernel; the row path remains explicit or environment-gated and is still
+not a default solver policy.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

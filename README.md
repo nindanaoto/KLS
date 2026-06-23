@@ -340,7 +340,9 @@ the KLU numeric object before reporting prefix-current; otherwise it keeps the
 conservative unknown refresh state because rows in the active level may have
 completed out of factor-order prefix. The experimental row scheduler also
 splits precomputed row-group levels into barriered cluster levels and a
-dynamic topological pipeline tail; stats report
+dynamic topological pipeline tail. Row groups carry a retained execution kind
+so single-row, generic multi-row, and dense multi-row groups dispatch without
+rediscovering that shape during each numeric pass; stats report
 `row_refactor_group_cluster_levels`, `row_refactor_group_pipeline_groups`,
 `row_refactor_group_pipeline_rows`, and
 `row_refactor_group_pipeline_work`. Because checked row fast-factor probes and
