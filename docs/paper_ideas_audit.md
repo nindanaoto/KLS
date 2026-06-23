@@ -2112,6 +2112,17 @@ coarse level barriers and KLS's current fetch-and-wait tail; it points back to
 the numeric representation and update granularity inside the heavy tail
 columns.
 
+All-pipeline single-block scheduling was also probed by replacing natural
+column fetch order with exact EGraph level order for huge single-block
+refactors. This was meant to expose more independent G2/mc2depi work without
+adding a reverse-edge ready queue. It was rejected immediately on the intended
+guard: with three passes and five refactors, `G2_circuit` regressed from a
+`25.39s` cycle median and `0.220s` refactor median to `43.57s` and `0.404s`.
+The natural all-pipeline order is therefore retained for huge single-block
+cases. The result further narrows the scheduler diagnosis: changing the order
+in which KLS feeds KLU-column kernels is not enough; the missing improvement
+needs different per-column update granularity or storage.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
