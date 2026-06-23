@@ -333,6 +333,8 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_suffix_columns = 0;
   solver->stats.fast_rejected_descendant_columns = 0;
   solver->stats.fast_rejected_descendant_work = 0.0;
+  solver->stats.fast_rejected_etree_columns = 0;
+  solver->stats.fast_rejected_etree_work = 0.0;
   solver->stats.fast_rejected_refresh_state =
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_block_restarts = 0;
@@ -6930,6 +6932,163 @@ static UF_long kls_block_for_pivot(const kls_solver *solver, UF_long pivot) {
          pivot < solver->symbolic->R[lo + 1u] ? lo : KLS_KLU_EMPTY;
 }
 
+static int kls_fast_reject_column_work(const kls_solver *solver,
+                                       UF_long block,
+                                       UF_long k1,
+                                       UF_long nk,
+                                       UF_long local_col,
+                                       double *work_out) {
+  if (solver == NULL || solver->numeric == NULL || work_out == NULL ||
+      block >= solver->numeric->nblocks || local_col >= nk ||
+      solver->numeric->Uip == NULL || solver->numeric->Ulen == NULL ||
+      solver->numeric->Llen == NULL || solver->numeric->LUbx == NULL ||
+      solver->numeric->LUbx[block] == NULL) {
+    return 0;
+  }
+  double *lu = (double *)solver->numeric->LUbx[block];
+  const UF_long *uip = solver->numeric->Uip + k1;
+  const UF_long *ulen = solver->numeric->Ulen + k1;
+  UF_long *ui = NULL;
+  double *ux = NULL;
+  UF_long ucol_len = 0;
+  kls_klu_get_pointer(lu, uip, ulen, local_col, &ui, &ux, &ucol_len);
+  (void)ux;
+
+  double work = 1.0;
+  for (UF_long p = 0; p < ucol_len; ++p) {
+    const UF_long dep = ui[p];
+    if (dep >= local_col || dep >= nk) {
+      return 0;
+    }
+    work += 1.0 + (double)solver->numeric->Llen[k1 + dep];
+  }
+  *work_out = work;
+  return 1;
+}
+
+static int kls_build_ordered_block_etree(const kls_solver *solver,
+                                         UF_long k1,
+                                         UF_long k2,
+                                         UF_long *parent) {
+  if (solver == NULL || solver->symbolic == NULL || parent == NULL ||
+      solver->col_ptr == NULL || solver->row_idx == NULL ||
+      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
+      k1 > k2 || k2 > solver->n) {
+    return 0;
+  }
+  const UF_long nk = k2 - k1;
+  UF_long *pinv = (UF_long *)malloc((size_t)solver->n * sizeof(*pinv));
+  UF_long *ancestor = (UF_long *)malloc((size_t)nk * sizeof(*ancestor));
+  UF_long *prev = (UF_long *)malloc((size_t)nk * sizeof(*prev));
+  if (pinv == NULL || ancestor == NULL || prev == NULL) {
+    free(pinv);
+    free(ancestor);
+    free(prev);
+    return 0;
+  }
+
+  for (UF_long k = 0; k < solver->n; ++k) {
+    pinv[k] = KLS_KLU_EMPTY;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    const UF_long row = solver->symbolic->P[k];
+    if (row >= solver->n) {
+      free(pinv);
+      free(ancestor);
+      free(prev);
+      return 0;
+    }
+    pinv[row] = k;
+  }
+  for (UF_long k = 0; k < nk; ++k) {
+    parent[k] = KLS_KLU_EMPTY;
+    ancestor[k] = KLS_KLU_EMPTY;
+    prev[k] = KLS_KLU_EMPTY;
+  }
+
+  for (UF_long local_col = 0; local_col < nk; ++local_col) {
+    const UF_long old_col = solver->symbolic->Q[k1 + local_col];
+    if (old_col >= solver->n) {
+      free(pinv);
+      free(ancestor);
+      free(prev);
+      return 0;
+    }
+    for (UF_long p = solver->col_ptr[old_col];
+         p < solver->col_ptr[old_col + 1u]; ++p) {
+      const UF_long old_row = solver->row_idx[p];
+      if (old_row >= solver->n) {
+        free(pinv);
+        free(ancestor);
+        free(prev);
+        return 0;
+      }
+      const UF_long ordered_row = pinv[old_row];
+      if (ordered_row < k1 || ordered_row >= k2) {
+        continue;
+      }
+      const UF_long local_row = ordered_row - k1;
+      UF_long j = prev[local_row];
+      while (j != KLS_KLU_EMPTY && j < local_col) {
+        const UF_long next = ancestor[j];
+        ancestor[j] = local_col;
+        if (parent[j] == KLS_KLU_EMPTY) {
+          parent[j] = local_col;
+        }
+        j = next;
+      }
+      prev[local_row] = local_col;
+    }
+  }
+
+  free(pinv);
+  free(ancestor);
+  free(prev);
+  return 1;
+}
+
+static void kls_fill_fast_reject_etree_tail_stats(kls_solver *solver,
+                                                  UF_long block,
+                                                  UF_long k1,
+                                                  UF_long k2,
+                                                  UF_long local_reject) {
+  if (solver == NULL || local_reject >= k2 - k1) {
+    return;
+  }
+  const UF_long nk = k2 - k1;
+  UF_long *parent = (UF_long *)malloc((size_t)nk * sizeof(*parent));
+  if (parent == NULL) {
+    return;
+  }
+  if (!kls_build_ordered_block_etree(solver, k1, k2, parent)) {
+    free(parent);
+    return;
+  }
+
+  UF_long columns = 0;
+  double work = 0.0;
+  UF_long col = local_reject;
+  while (col != KLS_KLU_EMPTY && col < nk) {
+    double column_work = 0.0;
+    if (!kls_fast_reject_column_work(solver, block, k1, nk, col,
+                                     &column_work)) {
+      free(parent);
+      return;
+    }
+    columns++;
+    work += column_work;
+    const UF_long next = parent[col];
+    if (next == col) {
+      break;
+    }
+    col = next;
+  }
+
+  solver->stats.fast_rejected_etree_columns = (int64_t)columns;
+  solver->stats.fast_rejected_etree_work = work;
+  free(parent);
+}
+
 static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
                                             UF_long rejected_pivot) {
   if (solver == NULL || solver->symbolic == NULL ||
@@ -6951,6 +7110,9 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
   solver->stats.fast_rejected_block_size = (int64_t)nk;
   solver->stats.fast_rejected_suffix_columns =
     (int64_t)(k2 - rejected_pivot);
+
+  kls_fill_fast_reject_etree_tail_stats(solver, block, k1, k2,
+                                        local_reject);
 
   if (nk == 0u || solver->numeric->Uip == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->Llen == NULL ||
@@ -6979,14 +7141,18 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
     (void)ux;
 
     int is_affected = (k == local_reject);
-    double column_work = 1.0;
+    double column_work = 0.0;
+    if (!kls_fast_reject_column_work(solver, block, k1, nk, k,
+                                     &column_work)) {
+      valid = 0;
+      break;
+    }
     for (UF_long p = 0; p < ucol_len; ++p) {
       const UF_long dep = ui[p];
       if (dep >= k || dep >= nk) {
         valid = 0;
         break;
       }
-      column_work += 1.0 + (double)solver->numeric->Llen[k1 + dep];
       if (affected[dep]) {
         is_affected = 1;
       }

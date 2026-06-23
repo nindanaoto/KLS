@@ -298,13 +298,15 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_block_start`,
 `fast_rejected_block_size`, `fast_rejected_suffix_columns`,
 `fast_rejected_descendant_columns`, `fast_rejected_descendant_work`,
+`fast_rejected_etree_columns`, `fast_rejected_etree_work`,
 `fast_rejected_refresh_state`, and `fast_block_restarts` for the first rejected
 factor-order pivot, its original matrix column, the rejected BTF block, the
 suffix from that pivot to the end of the block, the exact U-pattern descendant
-tail inside that block, whether the failed pass left an unknown, prefix-current,
-or all-current numeric state, and the number of repaired BTF blocks. These
-fields are intended to guide fuller CKTSO-style tail-restart work without
-accepting an unsafe reused pivot order.
+tail inside that block, the ordered-block ETree successor path that a pivoting
+tail-restart upper-bound scheduler would at least have to revisit, whether the
+failed pass left an unknown, prefix-current, or all-current numeric state, and
+the number of repaired BTF blocks. These fields are intended to guide fuller
+CKTSO-style tail-restart work without accepting an unsafe reused pivot order.
 
 Use `--no-static-pivoting` to disable KLS's value-aware static row-pivoting
 trial. When enabled, `auto` can preemptively build a weighted row permutation
