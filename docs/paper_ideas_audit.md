@@ -1765,6 +1765,17 @@ refactor, while the same-session default column EGraph path measured about
 `0.000269s` to about `0.000291s`, confirming that this mirror is useful for
 large row/update-heavy cases rather than as a low-work dispatch policy.
 
+For patterns with dense-eligible row segments, the row-major `U` mirror then
+became authoritative during the gated row refactor: KLS writes KLU's existing
+`U` value slots only after the refactor succeeds. Sparse/no-dense row patterns
+keep immediate KLU mirroring to avoid adding a final scatter pass where it is
+not useful. This structurally gated policy preserves current solve semantics
+while reducing pointer writes inside dense-segment hot loops. Focused checks
+stayed valid: the four-thread `G2_circuit` gated row path measured about
+`0.457s` repeated refactor, while longer no-dense checks remained stable
+(`bcircuit` about `0.0050s`, `rajat22` about `0.00164s`, and `add20` about
+`0.000209s` repeated refactor in same-session long-repeat samples).
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first

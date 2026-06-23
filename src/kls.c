@@ -217,6 +217,7 @@ typedef struct kls_egraph_refactor_shared {
   UF_long cluster_level_count;
   int pipeline_natural_order;
   int row_refactor_mode;
+  int row_refactor_defer_u_scatter;
   pthread_barrier_t barrier;
 } kls_egraph_refactor_shared;
 
@@ -8917,6 +8918,29 @@ static int kls_row_refactor_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_refactor_should_defer_u_scatter(const kls_solver *solver) {
+  return solver != NULL && solver->row_refactor_dense_segment_count > 0u;
+}
+
+static int kls_scatter_row_refactor_u_values(kls_solver *solver) {
+  if (solver == NULL || solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_values == NULL) {
+    return 0;
+  }
+  const UF_long u_nnz = solver->row_refactor_u_ptr[solver->n];
+  if (u_nnz == 0u) {
+    return 1;
+  }
+  if (solver->row_refactor_u_row_values == NULL) {
+    return 0;
+  }
+  for (UF_long p = 0; p < u_nnz; ++p) {
+    *solver->row_refactor_u_values[p] =
+      solver->row_refactor_u_row_values[p];
+  }
+  return 1;
+}
+
 static int kls_single_block_row_refactor(kls_solver *solver,
                                          double *numeric_values) {
   if (numeric_values == NULL || solver == NULL || solver->symbolic == NULL ||
@@ -8939,6 +8963,7 @@ static int kls_single_block_row_refactor(kls_solver *solver,
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
   common->nrealloc = 0;
+  const int defer_u_scatter = kls_row_refactor_should_defer_u_scatter(solver);
 
   for (UF_long i = 0; i < n; ++i) {
     for (UF_long p = solver->row_refactor_input_ptr[i];
@@ -8980,20 +9005,33 @@ static int kls_single_block_row_refactor(kls_solver *solver,
 
     const UF_long u_begin = solver->row_refactor_u_ptr[i];
     const UF_long u_end = solver->row_refactor_u_ptr[i + 1u];
-    double **klu_u_values = solver->row_refactor_u_values + u_begin;
     double *row_u_values = solver->row_refactor_u_row_values + u_begin;
-    for (UF_long p = u_begin; p < u_end; ++p) {
-      const UF_long offset = p - u_begin;
-      const UF_long col = solver->row_refactor_u_cols[p];
-      const double value = x[col];
-      *klu_u_values[offset] = value;
-      row_u_values[offset] = value;
-      x[col] = 0.0;
+    if (defer_u_scatter) {
+      for (UF_long p = u_begin; p < u_end; ++p) {
+        const UF_long offset = p - u_begin;
+        const UF_long col = solver->row_refactor_u_cols[p];
+        row_u_values[offset] = x[col];
+        x[col] = 0.0;
+      }
+    } else {
+      double **klu_u_values = solver->row_refactor_u_values + u_begin;
+      for (UF_long p = u_begin; p < u_end; ++p) {
+        const UF_long offset = p - u_begin;
+        const UF_long col = solver->row_refactor_u_cols[p];
+        const double value = x[col];
+        row_u_values[offset] = value;
+        *klu_u_values[offset] = value;
+        x[col] = 0.0;
+      }
     }
     for (UF_long p = solver->row_refactor_input_ptr[i];
          p < solver->row_refactor_input_ptr[i + 1u]; ++p) {
       x[solver->row_refactor_input_cols[p]] = 0.0;
     }
+  }
+  if (defer_u_scatter && !kls_scatter_row_refactor_u_values(solver)) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
   }
   return 1;
 }
@@ -9042,15 +9080,24 @@ static int kls_parallel_row_refactor_process_row(
 
   const UF_long u_begin = solver->row_refactor_u_ptr[row];
   const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
-  double **klu_u_values = solver->row_refactor_u_values + u_begin;
   double *row_u_values = solver->row_refactor_u_row_values + u_begin;
-  for (UF_long p = u_begin; p < u_end; ++p) {
-    const UF_long offset = p - u_begin;
-    const UF_long col = solver->row_refactor_u_cols[p];
-    const double value = x[col];
-    *klu_u_values[offset] = value;
-    row_u_values[offset] = value;
-    x[col] = 0.0;
+  if (shared->row_refactor_defer_u_scatter) {
+    for (UF_long p = u_begin; p < u_end; ++p) {
+      const UF_long offset = p - u_begin;
+      const UF_long col = solver->row_refactor_u_cols[p];
+      row_u_values[offset] = x[col];
+      x[col] = 0.0;
+    }
+  } else {
+    double **klu_u_values = solver->row_refactor_u_values + u_begin;
+    for (UF_long p = u_begin; p < u_end; ++p) {
+      const UF_long offset = p - u_begin;
+      const UF_long col = solver->row_refactor_u_cols[p];
+      const double value = x[col];
+      row_u_values[offset] = value;
+      *klu_u_values[offset] = value;
+      x[col] = 0.0;
+    }
   }
   for (UF_long p = solver->row_refactor_input_ptr[row];
        p < solver->row_refactor_input_ptr[row + 1u]; ++p) {
@@ -9245,19 +9292,31 @@ static int kls_parallel_row_refactor_process_dense_group(
 
     const UF_long row_dense_len = row_end - row - 1u;
     const UF_long row_u_begin = solver->row_refactor_u_ptr[row];
-    double **row_u_values = solver->row_refactor_u_values + row_u_begin;
     double *row_u_row_values =
       solver->row_refactor_u_row_values + row_u_begin;
-    for (UF_long offset = 0; offset < row_dense_len; ++offset) {
-      const double value = row_dense_panel[local_row + 1u + offset];
-      *row_u_values[offset] = value;
-      row_u_row_values[offset] = value;
-    }
-    if (trailing_len > 0u) {
-      for (UF_long offset = 0; offset < trailing_len; ++offset) {
-        const double value = row_panel[offset];
-        *row_u_values[row_dense_len + offset] = value;
-        row_u_row_values[row_dense_len + offset] = value;
+    if (shared->row_refactor_defer_u_scatter) {
+      for (UF_long offset = 0; offset < row_dense_len; ++offset) {
+        row_u_row_values[offset] =
+          row_dense_panel[local_row + 1u + offset];
+      }
+      if (trailing_len > 0u) {
+        for (UF_long offset = 0; offset < trailing_len; ++offset) {
+          row_u_row_values[row_dense_len + offset] = row_panel[offset];
+        }
+      }
+    } else {
+      double **row_u_values = solver->row_refactor_u_values + row_u_begin;
+      for (UF_long offset = 0; offset < row_dense_len; ++offset) {
+        const double value = row_dense_panel[local_row + 1u + offset];
+        row_u_row_values[offset] = value;
+        *row_u_values[offset] = value;
+      }
+      if (trailing_len > 0u) {
+        for (UF_long offset = 0; offset < trailing_len; ++offset) {
+          const double value = row_panel[offset];
+          row_u_row_values[row_dense_len + offset] = value;
+          *row_u_values[row_dense_len + offset] = value;
+        }
       }
     }
   }
@@ -9362,21 +9421,34 @@ static int kls_parallel_row_refactor_process_group(
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
-    double **u_values = solver->row_refactor_u_values + u_begin;
     double *row_u_values = solver->row_refactor_u_row_values + u_begin;
-    for (UF_long offset = 0; offset < dense_len; ++offset) {
-      const UF_long col = row + 1u + offset;
-      const double value = x[col];
-      *u_values[offset] = value;
-      row_u_values[offset] = value;
-      x[col] = 0.0;
-    }
-    for (UF_long offset = 0; offset < trailing_len; ++offset) {
-      const UF_long col = trailing_cols[offset];
-      const double value = x[col];
-      *u_values[dense_len + offset] = value;
-      row_u_values[dense_len + offset] = value;
-      x[col] = 0.0;
+    if (shared->row_refactor_defer_u_scatter) {
+      for (UF_long offset = 0; offset < dense_len; ++offset) {
+        const UF_long col = row + 1u + offset;
+        row_u_values[offset] = x[col];
+        x[col] = 0.0;
+      }
+      for (UF_long offset = 0; offset < trailing_len; ++offset) {
+        const UF_long col = trailing_cols[offset];
+        row_u_values[dense_len + offset] = x[col];
+        x[col] = 0.0;
+      }
+    } else {
+      double **klu_u_values = solver->row_refactor_u_values + u_begin;
+      for (UF_long offset = 0; offset < dense_len; ++offset) {
+        const UF_long col = row + 1u + offset;
+        const double value = x[col];
+        row_u_values[offset] = value;
+        *klu_u_values[offset] = value;
+        x[col] = 0.0;
+      }
+      for (UF_long offset = 0; offset < trailing_len; ++offset) {
+        const UF_long col = trailing_cols[offset];
+        const double value = x[col];
+        row_u_values[dense_len + offset] = value;
+        *klu_u_values[dense_len + offset] = value;
+        x[col] = 0.0;
+      }
     }
     for (UF_long p = solver->row_refactor_input_ptr[row];
          p < solver->row_refactor_input_ptr[row + 1u]; ++p) {
@@ -9516,6 +9588,8 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   shared->scale = 0;
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 1;
+  shared->row_refactor_defer_u_scatter =
+    kls_row_refactor_should_defer_u_scatter(solver);
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   shared->invalid = 0;
   shared->pivot_rejected = 0;
@@ -9562,6 +9636,11 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
     }
   } else {
     common->status = TRILINOS_KLU_OK;
+  }
+  if (shared->row_refactor_defer_u_scatter &&
+      !kls_scatter_row_refactor_u_values(solver)) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
   }
   return 1;
 }
@@ -10826,6 +10905,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->scale = (int)common->scale;
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 0;
+  shared->row_refactor_defer_u_scatter = 0;
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   shared->invalid = 0;
   shared->pivot_rejected = 0;
