@@ -302,16 +302,21 @@ static int test_fast_factor_pivot_check_fallback(void) {
                stats.fast_rejected_suffix_columns ||
              stats.fast_rejected_etree_columns < 1 ||
              stats.fast_rejected_etree_columns >
+               stats.fast_rejected_suffix_columns ||
+             stats.fast_rejected_pivoting_tail_columns < 1 ||
+             stats.fast_rejected_pivoting_tail_columns >
                stats.fast_rejected_suffix_columns)) {
     fprintf(stderr,
             "unexpected fast reject tail stats: start=%" PRId64
             ", size=%" PRId64 ", suffix=%" PRId64
-            ", descendants=%" PRId64 ", etree=%" PRId64 "\n",
+            ", descendants=%" PRId64 ", etree=%" PRId64
+            ", pivoting_tail=%" PRId64 "\n",
             stats.fast_rejected_block_start,
             stats.fast_rejected_block_size,
             stats.fast_rejected_suffix_columns,
             stats.fast_rejected_descendant_columns,
-            stats.fast_rejected_etree_columns);
+            stats.fast_rejected_etree_columns,
+            stats.fast_rejected_pivoting_tail_columns);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
@@ -453,18 +458,22 @@ static int test_checked_row_fast_factor_block_restart(void) {
              stats.fast_rejected_row_tail_work <= 0.0 ||
              stats.fast_rejected_etree_columns < 1 ||
              stats.fast_rejected_etree_columns >
+               stats.fast_rejected_suffix_columns ||
+             stats.fast_rejected_pivoting_tail_columns < 1 ||
+             stats.fast_rejected_pivoting_tail_columns >
                stats.fast_rejected_suffix_columns)) {
     fprintf(stderr,
             "unexpected checked-row tail stats: start=%" PRId64
             ", size=%" PRId64 ", suffix=%" PRId64
             ", descendants=%" PRId64 ", row_tail=%" PRId64
-            ", etree=%" PRId64 "\n",
+            ", etree=%" PRId64 ", pivoting_tail=%" PRId64 "\n",
             stats.fast_rejected_block_start,
             stats.fast_rejected_block_size,
             stats.fast_rejected_suffix_columns,
             stats.fast_rejected_descendant_columns,
             stats.fast_rejected_row_tail_columns,
-            stats.fast_rejected_etree_columns);
+            stats.fast_rejected_etree_columns,
+            stats.fast_rejected_pivoting_tail_columns);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
@@ -543,16 +552,21 @@ static int test_scaled_fast_factor_block_restart(void) {
                stats.fast_rejected_suffix_columns ||
              stats.fast_rejected_etree_columns < 1 ||
              stats.fast_rejected_etree_columns >
+               stats.fast_rejected_suffix_columns ||
+             stats.fast_rejected_pivoting_tail_columns < 1 ||
+             stats.fast_rejected_pivoting_tail_columns >
                stats.fast_rejected_suffix_columns)) {
     fprintf(stderr,
             "unexpected scaled reject tail stats: start=%" PRId64
             ", size=%" PRId64 ", suffix=%" PRId64
-            ", descendants=%" PRId64 ", etree=%" PRId64 "\n",
+            ", descendants=%" PRId64 ", etree=%" PRId64
+            ", pivoting_tail=%" PRId64 "\n",
             stats.fast_rejected_block_start,
             stats.fast_rejected_block_size,
             stats.fast_rejected_suffix_columns,
             stats.fast_rejected_descendant_columns,
-            stats.fast_rejected_etree_columns);
+            stats.fast_rejected_etree_columns,
+            stats.fast_rejected_pivoting_tail_columns);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
@@ -627,16 +641,21 @@ static int test_btf_fast_factor_block_restart(void) {
                stats.fast_rejected_suffix_columns ||
              stats.fast_rejected_etree_columns < 1 ||
              stats.fast_rejected_etree_columns >
+               stats.fast_rejected_suffix_columns ||
+             stats.fast_rejected_pivoting_tail_columns < 1 ||
+             stats.fast_rejected_pivoting_tail_columns >
                stats.fast_rejected_suffix_columns)) {
     fprintf(stderr,
             "unexpected btf reject tail stats: start=%" PRId64
             ", size=%" PRId64 ", suffix=%" PRId64
-            ", descendants=%" PRId64 ", etree=%" PRId64 "\n",
+            ", descendants=%" PRId64 ", etree=%" PRId64
+            ", pivoting_tail=%" PRId64 "\n",
             stats.fast_rejected_block_start,
             stats.fast_rejected_block_size,
             stats.fast_rejected_suffix_columns,
             stats.fast_rejected_descendant_columns,
-            stats.fast_rejected_etree_columns);
+            stats.fast_rejected_etree_columns,
+            stats.fast_rejected_pivoting_tail_columns);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
@@ -724,16 +743,21 @@ static int test_fast_factor_restart_after_prior_pivot(void) {
                stats.fast_rejected_suffix_columns ||
              stats.fast_rejected_etree_columns < 1 ||
              stats.fast_rejected_etree_columns >
+               stats.fast_rejected_suffix_columns ||
+             stats.fast_rejected_pivoting_tail_columns < 1 ||
+             stats.fast_rejected_pivoting_tail_columns >
                stats.fast_rejected_suffix_columns)) {
     fprintf(stderr,
             "unexpected prior-pivot tail stats: start=%" PRId64
             ", size=%" PRId64 ", suffix=%" PRId64
-            ", descendants=%" PRId64 ", etree=%" PRId64 "\n",
+            ", descendants=%" PRId64 ", etree=%" PRId64
+            ", pivoting_tail=%" PRId64 "\n",
             stats.fast_rejected_block_start,
             stats.fast_rejected_block_size,
             stats.fast_rejected_suffix_columns,
             stats.fast_rejected_descendant_columns,
-            stats.fast_rejected_etree_columns);
+            stats.fast_rejected_etree_columns,
+            stats.fast_rejected_pivoting_tail_columns);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||

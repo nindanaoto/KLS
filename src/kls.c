@@ -150,6 +150,11 @@ struct kls_solver {
   int spral_matching_selected;
   int fast_block_restarts;
   int fast_reject_refresh_state;
+  UF_long *fast_reject_tail_cols;
+  unsigned int *fast_reject_tail_marks;
+  UF_long fast_reject_tail_capacity;
+  unsigned int fast_reject_tail_mark;
+  UF_long fast_reject_tail_count;
 };
 
 typedef struct kls_pattern_candidate {
@@ -468,6 +473,19 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_lu_pointer_count = 0;
 }
 
+static void free_fast_reject_tail_plan(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->fast_reject_tail_cols);
+  free(solver->fast_reject_tail_marks);
+  solver->fast_reject_tail_cols = NULL;
+  solver->fast_reject_tail_marks = NULL;
+  solver->fast_reject_tail_capacity = 0;
+  solver->fast_reject_tail_mark = 0u;
+  solver->fast_reject_tail_count = 0;
+}
+
 static void free_row_refactor_pattern(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -727,10 +745,13 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_row_tail_work = 0.0;
   solver->stats.fast_rejected_etree_columns = 0;
   solver->stats.fast_rejected_etree_work = 0.0;
+  solver->stats.fast_rejected_pivoting_tail_columns = 0;
+  solver->stats.fast_rejected_pivoting_tail_work = 0.0;
   solver->stats.fast_rejected_refresh_state =
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_block_restarts = 0;
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
+  solver->fast_reject_tail_count = 0;
 }
 
 static void kls_record_fast_reject_detail(kls_solver *solver,
@@ -1426,6 +1447,7 @@ static void free_numeric(kls_solver *solver) {
   free_egraph_worker_scratch(solver);
   free_egraph_pipeline_done(solver);
   free_row_refactor_pattern(solver);
+  free_fast_reject_tail_plan(solver);
   free_refactor_lu_pointer_cache(solver);
   if (solver->numeric != NULL) {
     free_refactor_map(solver);
@@ -7794,6 +7816,198 @@ static int kls_ensure_row_refactor_etree_parent(kls_solver *solver) {
   return 1;
 }
 
+static int kls_get_ordered_block_etree_parent(kls_solver *solver,
+                                              UF_long block,
+                                              UF_long k1,
+                                              UF_long k2,
+                                              const UF_long **parent_out,
+                                              UF_long **owned_parent_out) {
+  if (parent_out != NULL) {
+    *parent_out = NULL;
+  }
+  if (owned_parent_out != NULL) {
+    *owned_parent_out = NULL;
+  }
+  if (solver == NULL || solver->symbolic == NULL || parent_out == NULL ||
+      owned_parent_out == NULL || k1 > k2 || k2 > solver->n) {
+    return 0;
+  }
+
+  if (block == 0u && k1 == 0u && k2 == solver->n &&
+      kls_ensure_row_refactor_etree_parent(solver)) {
+    *parent_out = solver->row_refactor_etree_parent;
+    return *parent_out != NULL || solver->n == 0u;
+  }
+
+  const UF_long nk = k2 - k1;
+  UF_long *owned_parent =
+    (UF_long *)malloc((size_t)nk * sizeof(*owned_parent));
+  if (owned_parent == NULL) {
+    return 0;
+  }
+  if (!kls_build_ordered_block_etree(solver, k1, k2, owned_parent)) {
+    free(owned_parent);
+    return 0;
+  }
+  *parent_out = owned_parent;
+  *owned_parent_out = owned_parent;
+  return 1;
+}
+
+static int kls_ensure_fast_reject_tail_plan_storage(kls_solver *solver,
+                                                    UF_long capacity) {
+  if (solver == NULL) {
+    return 0;
+  }
+  if (capacity == 0u) {
+    return 1;
+  }
+  if (solver->fast_reject_tail_capacity >= capacity &&
+      solver->fast_reject_tail_cols != NULL &&
+      solver->fast_reject_tail_marks != NULL) {
+    return 1;
+  }
+  if (capacity > (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_cols)) ||
+      capacity > (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_marks))) {
+    return 0;
+  }
+
+  UF_long *cols =
+    (UF_long *)malloc((size_t)capacity *
+                      sizeof(*solver->fast_reject_tail_cols));
+  unsigned int *marks =
+    (unsigned int *)calloc((size_t)capacity,
+                           sizeof(*solver->fast_reject_tail_marks));
+  if (cols == NULL || marks == NULL) {
+    free(cols);
+    free(marks);
+    return 0;
+  }
+  free(solver->fast_reject_tail_cols);
+  free(solver->fast_reject_tail_marks);
+  solver->fast_reject_tail_cols = cols;
+  solver->fast_reject_tail_marks = marks;
+  solver->fast_reject_tail_capacity = capacity;
+  solver->fast_reject_tail_mark = 0u;
+  solver->fast_reject_tail_count = 0;
+  return 1;
+}
+
+static int kls_mark_fast_reject_tail_col(kls_solver *solver,
+                                         UF_long nk,
+                                         UF_long local_col,
+                                         unsigned int mark,
+                                         UF_long *tail_count) {
+  if (solver == NULL || local_col >= nk || tail_count == NULL ||
+      solver->fast_reject_tail_cols == NULL ||
+      solver->fast_reject_tail_marks == NULL) {
+    return 0;
+  }
+  if (solver->fast_reject_tail_marks[local_col] == mark) {
+    return 1;
+  }
+  solver->fast_reject_tail_marks[local_col] = mark;
+  solver->fast_reject_tail_cols[(*tail_count)++] = local_col;
+  return 1;
+}
+
+static int kls_build_fast_reject_pivoting_tail_plan(
+  kls_solver *solver,
+  UF_long block,
+  UF_long k1,
+  UF_long k2,
+  UF_long local_reject,
+  const UF_long **tail_cols_out,
+  UF_long *tail_count_out,
+  double *tail_work_out) {
+  if (tail_cols_out != NULL) {
+    *tail_cols_out = NULL;
+  }
+  if (tail_count_out != NULL) {
+    *tail_count_out = 0;
+  }
+  if (tail_work_out != NULL) {
+    *tail_work_out = 0.0;
+  }
+  if (solver == NULL || tail_cols_out == NULL || tail_count_out == NULL ||
+      tail_work_out == NULL || local_reject >= k2 - k1) {
+    return 0;
+  }
+
+  const UF_long nk = k2 - k1;
+  if (!kls_ensure_fast_reject_tail_plan_storage(solver, nk)) {
+    return 0;
+  }
+  if (solver->fast_reject_tail_mark == UINT_MAX) {
+    memset(solver->fast_reject_tail_marks, 0,
+           (size_t)solver->fast_reject_tail_capacity *
+             sizeof(*solver->fast_reject_tail_marks));
+    solver->fast_reject_tail_mark = 0u;
+  }
+
+  const UF_long *parent = NULL;
+  UF_long *owned_parent = NULL;
+  if (!kls_get_ordered_block_etree_parent(solver, block, k1, k2, &parent,
+                                          &owned_parent) ||
+      parent == NULL) {
+    free(owned_parent);
+    return 0;
+  }
+
+  const unsigned int mark = ++solver->fast_reject_tail_mark;
+  UF_long queued = 0;
+  if (solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX) {
+    for (UF_long local_col = local_reject; local_col < nk; ++local_col) {
+      if (!kls_mark_fast_reject_tail_col(solver, nk, local_col, mark,
+                                         &queued)) {
+        free(owned_parent);
+        return 0;
+      }
+    }
+  } else if (!kls_mark_fast_reject_tail_col(solver, nk, local_reject, mark,
+                                            &queued)) {
+    free(owned_parent);
+    return 0;
+  }
+
+  UF_long head = 0;
+  while (head < queued) {
+    const UF_long local_col = solver->fast_reject_tail_cols[head++];
+    const UF_long next = parent[local_col];
+    if (next == KLS_KLU_EMPTY || next == local_col) {
+      continue;
+    }
+    if (next >= nk ||
+        !kls_mark_fast_reject_tail_col(solver, nk, next, mark, &queued)) {
+      free(owned_parent);
+      return 0;
+    }
+  }
+
+  UF_long columns = 0;
+  double work = 0.0;
+  for (UF_long local_col = 0; local_col < nk; ++local_col) {
+    if (solver->fast_reject_tail_marks[local_col] != mark) {
+      continue;
+    }
+    double column_work = 0.0;
+    if (!kls_fast_reject_column_work(solver, block, k1, nk, local_col,
+                                     &column_work)) {
+      free(owned_parent);
+      return 0;
+    }
+    solver->fast_reject_tail_cols[columns++] = k1 + local_col;
+    work += column_work;
+  }
+
+  solver->fast_reject_tail_count = columns;
+  *tail_cols_out = solver->fast_reject_tail_cols;
+  *tail_count_out = columns;
+  *tail_work_out = work;
+  free(owned_parent);
+  return 1;
+}
+
 static double kls_row_refactor_tail_row_work(const kls_solver *solver,
                                              UF_long row) {
   if (solver == NULL || row >= solver->n ||
@@ -8226,19 +8440,11 @@ static void kls_fill_fast_reject_etree_tail_stats(kls_solver *solver,
   const UF_long nk = k2 - k1;
   const UF_long *parent = NULL;
   UF_long *owned_parent = NULL;
-  if (block == 0u && k1 == 0u && k2 == solver->n &&
-      kls_ensure_row_refactor_etree_parent(solver)) {
-    parent = solver->row_refactor_etree_parent;
-  } else {
-    owned_parent = (UF_long *)malloc((size_t)nk * sizeof(*owned_parent));
-    if (owned_parent == NULL) {
-      return;
-    }
-    if (!kls_build_ordered_block_etree(solver, k1, k2, owned_parent)) {
-      free(owned_parent);
-      return;
-    }
-    parent = owned_parent;
+  if (!kls_get_ordered_block_etree_parent(solver, block, k1, k2, &parent,
+                                          &owned_parent) ||
+      parent == NULL) {
+    free(owned_parent);
+    return;
   }
 
   UF_long columns = 0;
@@ -8263,6 +8469,18 @@ static void kls_fill_fast_reject_etree_tail_stats(kls_solver *solver,
   solver->stats.fast_rejected_etree_columns = (int64_t)columns;
   solver->stats.fast_rejected_etree_work = work;
   free(owned_parent);
+
+  const UF_long *tail_cols = NULL;
+  UF_long tail_columns = 0;
+  double tail_work = 0.0;
+  if (kls_build_fast_reject_pivoting_tail_plan(
+        solver, block, k1, k2, local_reject, &tail_cols, &tail_columns,
+        &tail_work)) {
+    (void)tail_cols;
+    solver->stats.fast_rejected_pivoting_tail_columns =
+      (int64_t)tail_columns;
+    solver->stats.fast_rejected_pivoting_tail_work = tail_work;
+  }
 }
 
 static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
@@ -8292,6 +8510,9 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
   solver->stats.fast_rejected_row_tail_work = 0.0;
   solver->stats.fast_rejected_etree_columns = 0;
   solver->stats.fast_rejected_etree_work = 0.0;
+  solver->stats.fast_rejected_pivoting_tail_columns = 0;
+  solver->stats.fast_rejected_pivoting_tail_work = 0.0;
+  solver->fast_reject_tail_count = 0;
 
   kls_fill_fast_reject_row_tail_stats(solver, block, k1, k2,
                                       local_reject);
@@ -8517,15 +8738,16 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     prefix_changed == 0u &&
     (first_changed == KLS_KLU_EMPTY || first_changed >= rejected_pivot) &&
     suffix_changed > 0u &&
-    solver->stats.fast_rejected_etree_columns > 0 &&
-    solver->stats.fast_rejected_etree_work > 0.0;
+    solver->stats.fast_rejected_pivoting_tail_columns > 0 &&
+    solver->stats.fast_rejected_pivoting_tail_work > 0.0;
   double block_work = 0.0;
   if (kls_fast_reject_block_work(solver, block, k1, nk, &block_work)) {
     solver->stats.fast_repaired_block_work = block_work;
     if (solver->stats.fast_repaired_tail_restart_ready) {
-      const double tail_work = solver->stats.fast_rejected_etree_work;
+      const double tail_work =
+        solver->stats.fast_rejected_pivoting_tail_work;
       solver->stats.fast_repaired_tail_restart_columns =
-        solver->stats.fast_rejected_etree_columns;
+        solver->stats.fast_rejected_pivoting_tail_columns;
       solver->stats.fast_repaired_tail_restart_work = tail_work;
       solver->stats.fast_repaired_tail_restart_saved_work =
         block_work > tail_work ? block_work - tail_work : 0.0;

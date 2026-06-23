@@ -338,6 +338,8 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_descendant_columns`, `fast_rejected_descendant_work`,
 `fast_rejected_row_tail_columns`, `fast_rejected_row_tail_work`,
 `fast_rejected_etree_columns`, `fast_rejected_etree_work`,
+`fast_rejected_pivoting_tail_columns`,
+`fast_rejected_pivoting_tail_work`,
 `fast_rejected_refresh_state`, and `fast_block_restarts` for the first rejected
 factor-order pivot, its original matrix column, the strongest factor-row
 candidate and multiplier among entries that violated a KLS-owned pivot check
@@ -351,12 +353,13 @@ that pivot, whether it matches the retained tail candidate, the first pivot
 whose row changed in the fallback repair, how many changed pivots were before
 and at/after the rejected pivot, whether the robust repair outcome preserved
 the prefix and is compatible with a future local tail restart, the estimated
-full-block repair work and strict ETree-tail restart work/saved work, the
+full-block repair work and strict pivoting-tail restart work/saved work, the
 rejected BTF block, the suffix from that pivot to the end
 of the block, the exact U-pattern descendant tail inside that block, the
 row-refactor successor tail when row-major metadata is available, the
 ordered-block ETree successor path that a pivoting tail-restart upper-bound
-scheduler would at least have to revisit, whether the
+scheduler would at least have to revisit, the sorted pivoting-tail worklist
+scope seeded from the current refresh state, whether the
 failed pass left an unknown, prefix-current, or all-current numeric state, and
 the number of repaired BTF blocks. These fields are intended to guide fuller
 CKTSO-style tail-restart work without accepting an unsafe reused pivot order.

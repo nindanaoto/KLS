@@ -217,9 +217,10 @@ design work, not benchmark-specific tuning.
   permutation/off-diagonal entries around that block repair, and retry the
   checked fast factorization. KLS records the first rejected factor-order pivot,
   original matrix column, rejected block suffix, exact U-pattern descendant
-  tail, ordered-block ETree successor path, and number of block restarts so
-  future tail-restart work can distinguish late-tail failures from early
-  failures and compare no-pivot versus pivoting-tail recomputation scopes.
+  tail, ordered-block ETree successor path, sorted pivoting-tail worklist scope,
+  and number of block restarts so future tail-restart work can distinguish
+  late-tail failures from early failures and compare no-pivot versus
+  pivoting-tail recomputation scopes.
 - Static pivoting trial: KLS has value-aware greedy row matching, layered
   augmenting-path search for larger weak-diagonal candidates, and swap
   improvement for weak or high-off-diagonal-pivot medium matrices. Medium
@@ -806,13 +807,14 @@ benchmark JSON. It now also records the rejected BTF block start/size, the
 simple suffix length from the rejected pivot to the end of the block, and the
 exact U-pattern descendant tail size/work inside that block. It now also
 records an ordered-block ETree successor-path size/work estimate for the first
-rejected pivot, matching the CKTSO paper's pivoting-tail upper-bound
+rejected pivot, and a sorted pivoting-tail worklist scope seeded from the
+current refresh state, matching the CKTSO paper's pivoting-tail upper-bound
 dependency idea more closely. This does not implement CKTSO's pipelined tail
 factorization, but it is a required prerequisite: KLS can now measure whether
-failed fast factorizations reject near the tail, where an ETree-descendant
-restart could avoid recomputing the whole matrix, or near the front, where full
-fallback is still expected, and can distinguish a true no-pivot dependency tail
-from a broad suffix or ETree restart.
+failed fast factorizations reject near the tail, where a pivoting-tail restart
+could avoid recomputing the whole block, or near the front, where full fallback
+is still expected, and can distinguish a true no-pivot dependency tail from a
+broad suffix, a single ETree successor path, and the actual pivoting-tail plan.
 
 The same fast-factor path was then extended for scaled serial refactors. When a
 scaled pattern is using fast factorization with pivot checks, KLS now runs its
@@ -1831,10 +1833,11 @@ restart gap on real paper sparsity patterns without editing MatrixMarket files.
 factorization on the original values, then run repeated factor/refactor/solve
 passes on values with selected diagonal entries scaled. With
 `--repeat 1 --refactor-repeat 0`, the JSON `fast_rejected_*` fields can expose
-the whole rejected BTF block, the suffix from the failed pivot, and the exact
-U-pattern descendant tail plus ordered-block ETree successor path that a
-CKTSO-style pivoting tail restart would target. This is a diagnostic for
-architectural work, not a tuning path for specific matrices.
+the whole rejected BTF block, the suffix from the failed pivot, the exact
+U-pattern descendant tail, the ordered-block ETree successor path, and the
+refresh-state-seeded pivoting-tail scope that a CKTSO-style pivoting tail
+restart would target. This is a diagnostic for architectural work, not a tuning
+path for specific matrices.
 The same diagnostic now also reports `fast_rejected_refresh_state`: unknown,
 prefix-current, or all-current. This makes the benchmark artifact distinguish
 KLS paths that can safely do block/tail continuation from parallel or KLU
@@ -2532,6 +2535,20 @@ Focused stressed restart checks on `coupled`, `onetone2`, and `hvdc1` kept
 valid residuals and the same restart diagnostics. This reduces current
 full-block fallback overhead, but it is still a cleanup around KLU's block
 repair path rather than the missing CKTSO pivoting-tail factorization.
+
+The tail-restart diagnostic was then corrected to retain an executable
+pivoting-tail plan, not only the old single ETree successor path. For
+prefix-current rejects, the new `fast_rejected_pivoting_tail_*` fields seed the
+plan with the rejected block suffix and close it through the ordered-block
+ETree; for all-current or unknown-refresh rejects, they seed the plan from the
+rejected pivot. The strict tail-restart saved-work estimate now uses this
+pivoting-tail scope. A focused `coupled` diagonal-stress probe reported a
+prefix-current reject at pivot `24`, a suffix/pivoting-tail scope of `11293`
+columns and about `1.193e7` work, versus the older single ETree path of `8194`
+columns and about `1.191e7` work; the full repaired-block work remained about
+`3.650e8`. This keeps the opportunity estimate tied to the CKTSO restart set
+and gives the future row/segment numeric kernel a concrete ordered worklist to
+consume.
 
 ## Recommended General Work
 

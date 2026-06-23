@@ -660,6 +660,8 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_row_tail_work\":%.9g"
            ",\"fast_rejected_etree_columns\":%" PRId64
            ",\"fast_rejected_etree_work\":%.9g"
+           ",\"fast_rejected_pivoting_tail_columns\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_work\":%.9g"
            ",\"fast_rejected_refresh_state\":%d"
            ",\"refactor_dependency_levels\":%" PRId64
            ",\"refactor_dependency_max_width\":%" PRId64
@@ -746,6 +748,8 @@ int main(int argc, char **argv) {
            stats.fast_rejected_row_tail_work,
            stats.fast_rejected_etree_columns,
            stats.fast_rejected_etree_work,
+           stats.fast_rejected_pivoting_tail_columns,
+           stats.fast_rejected_pivoting_tail_work,
            stats.fast_rejected_refresh_state,
            stats.refactor_dependency_levels,
            stats.refactor_dependency_max_width,
@@ -854,7 +858,8 @@ int main(int argc, char **argv) {
            ", suffix %" PRId64 ", descendants %" PRId64
            ", descendant work %.6g, row tail %" PRId64
            ", row-tail work %.6g, etree %" PRId64
-           ", etree work %.6g, refresh state %d\n",
+           ", etree work %.6g, pivoting tail %" PRId64
+           ", pivoting-tail work %.6g, refresh state %d\n",
            stats.fast_rejected_block_start,
            stats.fast_rejected_block_size,
            stats.fast_rejected_suffix_columns,
@@ -864,6 +869,8 @@ int main(int argc, char **argv) {
            stats.fast_rejected_row_tail_work,
            stats.fast_rejected_etree_columns,
            stats.fast_rejected_etree_work,
+           stats.fast_rejected_pivoting_tail_columns,
+           stats.fast_rejected_pivoting_tail_work,
            stats.fast_rejected_refresh_state);
     printf("refactor dependency levels: %" PRId64
            ", max width: %" PRId64 ", edges: %" PRId64 "\n",
