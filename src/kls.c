@@ -25,6 +25,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -221,6 +222,8 @@ typedef struct kls_egraph_refactor_worker {
   kls_egraph_refactor_pool *pool;
   int tid;
   double *x;
+  double *segment_panel;
+  UF_long segment_panel_size;
 } kls_egraph_refactor_worker;
 
 struct kls_egraph_refactor_pool {
@@ -8920,6 +8923,32 @@ static int kls_parallel_row_refactor_process_row(
   return 1;
 }
 
+static double *kls_egraph_worker_segment_panel(
+  kls_egraph_refactor_worker *worker,
+  UF_long entry_count) {
+  if (entry_count == 0u) {
+    return NULL;
+  }
+  if (worker == NULL ||
+      entry_count > (UF_long)(SIZE_MAX / sizeof(*worker->segment_panel))) {
+    return NULL;
+  }
+  if (worker->segment_panel != NULL &&
+      worker->segment_panel_size >= entry_count) {
+    return worker->segment_panel;
+  }
+
+  double *panel =
+    (double *)realloc(worker->segment_panel,
+                      (size_t)entry_count * sizeof(*panel));
+  if (panel == NULL) {
+    return NULL;
+  }
+  worker->segment_panel = panel;
+  worker->segment_panel_size = entry_count;
+  return panel;
+}
+
 static int kls_parallel_row_refactor_process_dense_group(
   kls_egraph_refactor_worker *worker,
   UF_long group,
@@ -8941,6 +8970,19 @@ static int kls_parallel_row_refactor_process_dense_group(
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   double *x = worker->x;
   double *udiag = (double *)numeric->Udiag;
+  const UF_long width = row_end - row_begin;
+  double *trailing_panel = NULL;
+  if (trailing_len > 0u) {
+    if (width > (UF_long)(SIZE_MAX / (size_t)trailing_len /
+                          sizeof(*trailing_panel))) {
+      return -1;
+    }
+    trailing_panel =
+      kls_egraph_worker_segment_panel(worker, width * trailing_len);
+    if (trailing_panel == NULL) {
+      return -1;
+    }
+  }
 
   for (UF_long row = row_begin; row < row_end; ++row) {
     for (UF_long p = solver->row_refactor_input_ptr[row];
@@ -8974,6 +9016,8 @@ static int kls_parallel_row_refactor_process_dense_group(
     const UF_long dense_len = row_end - row - 1u;
     const UF_long u_begin = solver->row_refactor_u_ptr[row];
     double **u_values = solver->row_refactor_u_values + u_begin;
+    double *row_panel = trailing_panel != NULL
+      ? trailing_panel + (row - row_begin) * trailing_len : NULL;
     for (UF_long offset = 0; offset < dense_len; ++offset) {
       const UF_long col = row + 1u + offset;
       *u_values[offset] = x[col];
@@ -8981,7 +9025,7 @@ static int kls_parallel_row_refactor_process_dense_group(
     }
     for (UF_long offset = 0; offset < trailing_len; ++offset) {
       const UF_long col = trailing_cols[offset];
-      *u_values[dense_len + offset] = x[col];
+      row_panel[offset] = x[col];
       x[col] = 0.0;
     }
     for (UF_long p = solver->row_refactor_input_ptr[row];
@@ -9029,28 +9073,34 @@ static int kls_parallel_row_refactor_process_dense_group(
     }
   }
 
-  /* Keep the shared trailing panel as a separate triangular update so this
-     path can move to compact row/segment storage without changing semantics. */
-  for (UF_long row = row_begin; row < row_end; ++row) {
-    const UF_long l_dense_begin =
-      solver->row_refactor_l_internal_ptr[row];
-    const UF_long row_dense_len = row_end - row - 1u;
-    const UF_long row_u_begin = solver->row_refactor_u_ptr[row];
-    double **row_l_values =
-      solver->row_refactor_l_values + l_dense_begin;
-    double **row_trailing_values =
-      solver->row_refactor_u_values + row_u_begin + row_dense_len;
+  if (trailing_len > 0u) {
+    /* Keep the shared trailing panel in compact row-major scratch so this
+       path can move to persistent row/segment storage without changing
+       semantics. */
+    for (UF_long row = row_begin; row < row_end; ++row) {
+      const UF_long l_dense_begin =
+        solver->row_refactor_l_internal_ptr[row];
+      double **row_l_values =
+        solver->row_refactor_l_values + l_dense_begin;
+      double *row_panel =
+        trailing_panel + (row - row_begin) * trailing_len;
 
-    for (UF_long dep = row_begin; dep < row; ++dep) {
-      const double lij = *row_l_values[dep - row_begin];
-      const UF_long dep_dense_len = row_end - dep - 1u;
-      const UF_long dep_u_begin = solver->row_refactor_u_ptr[dep];
-      double **dep_trailing_values =
-        solver->row_refactor_u_values + dep_u_begin + dep_dense_len;
+      for (UF_long dep = row_begin; dep < row; ++dep) {
+        const double lij = *row_l_values[dep - row_begin];
+        double *dep_panel =
+          trailing_panel + (dep - row_begin) * trailing_len;
 
+        for (UF_long offset = 0; offset < trailing_len; ++offset) {
+          row_panel[offset] -= lij * dep_panel[offset];
+        }
+      }
+
+      const UF_long row_dense_len = row_end - row - 1u;
+      const UF_long row_u_begin = solver->row_refactor_u_ptr[row];
+      double **row_trailing_values =
+        solver->row_refactor_u_values + row_u_begin + row_dense_len;
       for (UF_long offset = 0; offset < trailing_len; ++offset) {
-        *row_trailing_values[offset] -=
-          lij * (*dep_trailing_values[offset]);
+        *row_trailing_values[offset] = row_panel[offset];
       }
     }
   }
@@ -10097,6 +10147,11 @@ static void destroy_egraph_refactor_pool(kls_solver *solver) {
   }
   if (pool->lock_initialized) {
     pthread_mutex_destroy(&pool->shared.lock);
+  }
+  if (pool->workers != NULL) {
+    for (int i = 0; i < pool->thread_count; ++i) {
+      free(pool->workers[i].segment_panel);
+    }
   }
   free(pool->threads);
   free(pool->workers);

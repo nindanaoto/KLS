@@ -1713,6 +1713,19 @@ the gated row path while the default column EGraph path measured about
 `0.000274s`. The result is retained as row/segment scaffolding, not a
 production dispatch candidate.
 
+The separated trailing-panel step then gained worker-local compact storage.
+Dense-eligible row segments now gather the shared trailing rows into a compact
+row-major scratch panel, apply the triangular update there, and scatter the
+finished panel back to the current KLU-owned value slots. This is still a
+temporary bridge rather than persistent KLS-owned segment storage, but it
+removes one layer of pointer chasing from the panel update and matches the
+SubtreeLU supernode-storage direction more closely. Same-session checks stayed
+valid: a clean `G2_circuit` gated row-refactor sample moved to about `0.798s`
+repeated refactor with the same 662 dense-eligible segments covering 17070 rows,
+while the default column EGraph path in a same-session check measured about
+`0.223s`. The row path therefore remains gated, but this is the first retained
+compact-panel step that measurably improves the experimental segment kernel.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
