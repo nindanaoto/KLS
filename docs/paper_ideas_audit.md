@@ -1671,6 +1671,22 @@ about `0.906s` versus about `0.239s` for the default column EGraph path in the
 same short run, so the counters expose real segment opportunity without
 claiming the scalar row kernel is competitive yet.
 
+A first dense internal segment mini-solve was then added behind the same gated
+row-refactor path. For exact multirow segments whose internal `L` pattern is a
+dense lower block and whose dense/trailing work is large enough to amortize the
+extra passes, KLS now gathers each row's external-update result into the
+segment's own `L`/`U` value slots and applies the internal triangular updates
+directly there. Smaller or non-dense-`L` segments keep the existing scalar
+segment kernel. This is closer to the SubtreeLU supernode update shape than the
+previous per-row scratch update, but it is still not default policy and not a
+CKTSO-gap closer by itself: with four threads and five repeated refactors,
+`G2_circuit` stayed valid but measured about `0.887s` for the gated row path
+versus about `0.224s` for the default column EGraph path. A ten-refactor
+`add20` smoke run also stayed valid at about `0.000236s`. The result indicates
+that KLS now has an executable in-place dense segment solve scaffold, while the
+larger missing piece is still compact row/segment numeric storage and batched
+trailing updates with much higher arithmetic intensity.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
