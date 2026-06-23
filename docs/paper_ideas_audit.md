@@ -1645,6 +1645,15 @@ far behind the current column EGraph path. This confirms that merely coarsening
 row tasks is not the missing paper mechanism; KLS needs a real segment kernel
 that reuses shared trailing structure and eventually BLAS-style updates.
 
+The grouped row path then gained a first true segment kernel: rows inside an
+adjacent supernode-candidate segment use computed dense-block columns and one
+shared trailing pattern instead of re-reading each row's full U pattern. This
+kept valid residuals and moved `G2_circuit` from about `0.88s` to about `0.84s`
+in the gated row path, but it remains far slower than the default column EGraph
+path. The retained lesson is that the segment representation is now executable,
+but the kernel still needs higher arithmetic intensity, such as dense triangular
+mini-solves and batched trailing updates, before it can close the CKTSO gap.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
