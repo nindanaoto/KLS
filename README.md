@@ -318,14 +318,16 @@ serial checked continuation over only the later BTF blocks instead of
 restarting from the first block.
 Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_row`,
-`fast_rejected_multiplier_abs`, `fast_rejected_block_start`,
+`fast_rejected_multiplier_abs`, `fast_rejected_pivot_abs`,
+`fast_rejected_candidate_abs`, `fast_rejected_block_start`,
 `fast_rejected_block_size`, `fast_rejected_suffix_columns`,
 `fast_rejected_descendant_columns`, `fast_rejected_descendant_work`,
 `fast_rejected_row_tail_columns`, `fast_rejected_row_tail_work`,
 `fast_rejected_etree_columns`, `fast_rejected_etree_work`,
 `fast_rejected_refresh_state`, and `fast_block_restarts` for the first rejected
 factor-order pivot, its original matrix column, the factor row and multiplier
-that tripped a KLS-owned pivot check when available, the rejected BTF block,
+that tripped a KLS-owned pivot check when available, the accepted pivot
+magnitude and candidate entry magnitude at the reject, the rejected BTF block,
 the suffix from that pivot to the end of the block, the exact U-pattern
 descendant tail inside that block, the row-refactor successor tail when
 row-major metadata is available, the ordered-block ETree successor path that a

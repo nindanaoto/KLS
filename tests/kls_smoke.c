@@ -388,15 +388,20 @@ static int test_checked_row_fast_factor_block_restart(void) {
              stats.fast_rejected_pivot_col != 0 ||
              stats.fast_rejected_row != 1 ||
              stats.fast_rejected_multiplier_abs <= 1.0e6 ||
+             stats.fast_rejected_pivot_abs >= 1.0e-9 ||
+             stats.fast_rejected_candidate_abs <= 0.5 ||
              stats.fast_block_restarts != 1 ||
              stats.fast_rejected_refresh_state !=
                KLS_FAST_REJECT_REFRESH_PREFIX)) {
     fprintf(stderr,
             "unexpected checked-row reject stats: pivot=%" PRId64
             ", col=%" PRId64 ", row=%" PRId64 ", |L|=%.6g"
+            ", |pivot|=%.6g, |candidate|=%.6g"
             ", restarts=%d, refresh=%d\n",
             stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,
             stats.fast_rejected_row, stats.fast_rejected_multiplier_abs,
+            stats.fast_rejected_pivot_abs,
+            stats.fast_rejected_candidate_abs,
             stats.fast_block_restarts, stats.fast_rejected_refresh_state);
     ok = 0;
   }

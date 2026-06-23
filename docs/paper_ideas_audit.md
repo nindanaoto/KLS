@@ -1900,9 +1900,10 @@ The checked row-refactor metadata now also retains reverse row dependencies
 derived from the row-major `L` mirror. When a checked row refactor rejects a
 pivot, KLS marks the exact row-successor tail, compacts it into increasing
 row order, and reports the `fast_rejected_row_tail_*` diagnostics from that
-retained topological list. KLS-owned pivot checks also record the factor row
-and multiplier magnitude that tripped the reject, giving a future pivoting tail
-kernel the local row candidate that the older pivot-only diagnostics lacked.
+retained topological list. KLS-owned pivot checks also record the factor row,
+multiplier magnitude, accepted pivot magnitude, and candidate entry magnitude
+that tripped the reject, giving a future pivoting tail kernel the local row
+candidate and value comparison that the older pivot-only diagnostics lacked.
 This keeps the CKTSO restart target tied to KLS row storage rather than only
 the KLU-column U-pattern or an ETree upper bound; the actual pivoting tail
 factor kernel is still missing.

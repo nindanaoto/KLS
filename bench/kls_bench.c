@@ -633,6 +633,8 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivot_col\":%" PRId64
            ",\"fast_rejected_row\":%" PRId64
            ",\"fast_rejected_multiplier_abs\":%.9g"
+           ",\"fast_rejected_pivot_abs\":%.9g"
+           ",\"fast_rejected_candidate_abs\":%.9g"
            ",\"fast_block_restarts\":%d"
            ",\"fast_rejected_block_start\":%" PRId64
            ",\"fast_rejected_block_size\":%" PRId64
@@ -702,6 +704,8 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,
            stats.fast_rejected_row,
            stats.fast_rejected_multiplier_abs,
+           stats.fast_rejected_pivot_abs,
+           stats.fast_rejected_candidate_abs,
            stats.fast_block_restarts,
            stats.fast_rejected_block_start,
            stats.fast_rejected_block_size,
@@ -786,9 +790,12 @@ int main(int argc, char **argv) {
     printf("off-diagonal pivots: %" PRId64 ", reallocations: %" PRId64 "\n",
            stats.offdiag_pivots, stats.reallocations);
     printf("fast rejected pivot: %" PRId64 ", original column: %" PRId64
-           ", row: %" PRId64 ", |L|: %.6g\n",
+           ", row: %" PRId64 ", |L|: %.6g, |pivot|: %.6g"
+           ", |candidate|: %.6g\n",
            stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,
-           stats.fast_rejected_row, stats.fast_rejected_multiplier_abs);
+           stats.fast_rejected_row, stats.fast_rejected_multiplier_abs,
+           stats.fast_rejected_pivot_abs,
+           stats.fast_rejected_candidate_abs);
     printf("fast block restarts: %d\n", stats.fast_block_restarts);
     printf("fast rejected block: start %" PRId64 ", size %" PRId64
            ", suffix %" PRId64 ", descendants %" PRId64
