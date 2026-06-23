@@ -1943,6 +1943,23 @@ predicate kept zero new EGraph dependency work. This is still a threshold
 coverage improvement on the existing no-pivot EGraph refactor, not a
 replacement for CKTSO's pivot-aware row-oriented factorization.
 
+A narrow dense-fringe dominant-BTF scale policy was then retained for the IBM
+`dc*` shape that still selected KLU max scaling despite having stable pivots
+and valid unscaled residuals. The structural predicate is 100k-150k rows, 8-64
+BTF blocks, a 99%+ dominant block, and 5-8 nonzeros per row; it only overrides
+the scale when the existing value-based pattern policy would otherwise keep
+max scaling (`2`). This last condition keeps the same-structure `trans4` and
+`trans5` rows on their prior unscaled `-1` path. A five-pass scale-policy probe
+with ten refactors per sample moved `dc1` from max scaling to scale `0` and
+cut repeated refactor from `0.00810s` to `0.00629s`; `dc2` moved from
+`0.00772s` to `0.00645s`; and `dc3` moved from `0.00836s` to `0.00648s`.
+Relative residuals stayed around `1e-11` and off-diagonal pivots stayed zero
+except for `dc1`, where the faster scale-0 candidate introduced five
+off-diagonal pivots but remained numerically valid. Nearby scaled guards
+(`ckt11752_dc_1`, `Raj1`, `rajat20`, and `rajat28`) did not change selected
+scale. This is a scale-cost cleanup for a repeated-refactor class, not an MC64
+import or a substitute for the missing CKTSO row-oriented kernel.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
