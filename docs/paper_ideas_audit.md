@@ -1929,6 +1929,9 @@ selects that candidate at the rejected pivot, and zero changed pivots before
 the rejected pivot. When that strict flag is true, KLS also records the
 fallback full-block repair work, the ETree-tail restart column/work upper
 bound, and the saved-work estimate a local tail restart would target.
+`scripts/summarize_tail_restart_opportunities.py` now turns those JSONL fields
+into suite-level counts, blocker reasons, and largest saved-work opportunities
+so the tail-kernel work can be prioritized from broad benchmark evidence.
 The first focused stress probe shows why that distinction matters: stressed
 `add20` chose the retained row-tail candidate at the rejected pivot, but the
 full KLU block repair also changed one pivot before the rejected pivot, so a

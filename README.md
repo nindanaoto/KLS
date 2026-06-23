@@ -617,6 +617,16 @@ dependency-work estimates when those fields are present in the benchmark JSONL:
 python3 scripts/decompose_solver_gap.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/cktso_suite.jsonl --reference-name cktso
 ```
 
+To summarize the CKTSO-style tail-restart opportunity fields across a KLS JSONL
+run, use:
+
+```sh
+python3 scripts/summarize_tail_restart_opportunities.py --jsonl build/kls_suite.jsonl
+```
+
+The same script accepts `--jsonl -` for a single piped `kls_bench --json` row
+when inspecting a focused fast-reject case.
+
 An optional CKTSO comparison tool can be built when you provide a local CKTSO
 distribution:
 
