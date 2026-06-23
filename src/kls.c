@@ -8782,6 +8782,82 @@ static int kls_recompute_offdiag_from_pinv(kls_solver *solver,
   return poff == numeric->nzoff;
 }
 
+static int kls_recompute_offdiag_suffix_from_pinv(kls_solver *solver,
+                                                  const double *numeric_values,
+                                                  UF_long col_begin) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      numeric_values == NULL || solver->symbolic->Q == NULL ||
+      solver->symbolic->R == NULL || solver->numeric->Pinv == NULL ||
+      solver->numeric->Offp == NULL || solver->numeric->Offi == NULL ||
+      solver->numeric->Offx == NULL ||
+      col_begin > solver->n ||
+      (solver->common.scale > 0 && solver->numeric->Rs == NULL) ||
+      (solver->common.scale <= 0 && solver->numeric->Rs != NULL)) {
+    return 0;
+  }
+
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  if (col_begin == solver->n) {
+    return numeric->Offp[col_begin] == numeric->nzoff;
+  }
+  UF_long poff = numeric->Offp[col_begin];
+  if (poff > numeric->nzoff) {
+    return 0;
+  }
+
+  UF_long block = 0;
+  while (block + 1u < symbolic->nblocks &&
+         symbolic->R[block + 1u] <= col_begin) {
+    block++;
+  }
+
+  for (UF_long k = col_begin; k < solver->n; ++k) {
+    while (block + 1u < symbolic->nblocks &&
+           symbolic->R[block + 1u] <= k) {
+      block++;
+    }
+    const UF_long k1 = symbolic->R[block];
+    const UF_long k2 = symbolic->R[block + 1u];
+    const UF_long oldcol = symbolic->Q[k];
+    if (oldcol >= solver->n) {
+      return 0;
+    }
+    numeric->Offp[k] = poff;
+    for (UF_long p = solver->col_ptr[oldcol];
+         p < solver->col_ptr[oldcol + 1u]; ++p) {
+      const UF_long oldrow = solver->row_idx[p];
+      if (oldrow >= solver->n) {
+        return 0;
+      }
+      const UF_long row = numeric->Pinv[oldrow];
+      if (row >= solver->n) {
+        return 0;
+      }
+      if (row < k1) {
+        if (poff >= numeric->nzoff) {
+          return 0;
+        }
+        double value = numeric_values[p];
+        if (solver->common.scale > 0) {
+          const double rs = numeric->Rs[oldrow];
+          if (rs == 0.0) {
+            return 0;
+          }
+          value /= rs;
+        }
+        numeric->Offi[poff] = row;
+        ((double *)numeric->Offx)[poff] = value;
+        poff++;
+      } else if (row >= k2) {
+        return 0;
+      }
+    }
+  }
+  numeric->Offp[solver->n] = poff;
+  return poff == numeric->nzoff;
+}
+
 static int kls_rebuild_numeric_pinv(kls_solver *solver) {
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Pnum == NULL || solver->numeric->Pinv == NULL) {
@@ -10083,7 +10159,16 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     return 0;
   }
 
-  if (!kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
+  int offdiag_refreshed = 0;
+  if (tail_restart_used && !scaled) {
+    offdiag_refreshed =
+      kls_recompute_offdiag_suffix_from_pinv(solver, numeric_values,
+                                             rejected_pivot);
+  }
+  if (!offdiag_refreshed) {
+    offdiag_refreshed = kls_recompute_offdiag_from_pinv(solver, numeric_values);
+  }
+  if (!offdiag_refreshed) {
     solver->common.status = old_status;
     solver->common.numerical_rank = old_numerical_rank;
     solver->common.singular_col = old_singular_col;

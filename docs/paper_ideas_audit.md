@@ -2629,6 +2629,14 @@ from the final `Pinv` anyway. This removes a full `nzoff` copy from every
 serial tail attempt without changing pivot choices or the published numeric
 state.
 
+Accepted serial tail retries then stopped doing a full global off-diagonal
+rebuild when the already-refreshed prefix can be preserved. KLS now rebuilds the
+off-diagonal suffix from the rejected column through the end of the matrix from
+the rebuilt `Pinv`, preserving only the proven-good prefix `Offp` count and
+falling back to the full rebuild if the suffix shape proof fails. The BTF
+off-block tail smoke changes suffix off-block values between the base and
+repaired matrices, so stale values in that suffix are observable in the solve.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

@@ -1074,8 +1074,8 @@ static int test_btf_prefix_tail_restart_with_offblock(void) {
   const double ax1[] = {
     4.0,
     0.1, 8.0, 0.01, 0.02,
-    0.2, 0.01, 1.0e-12, 2.0,
-    0.3, 0.02, 0.03, 8.0
+    1.2, 0.01, 1.0e-12, 2.0,
+    -0.4, 0.02, 0.03, 8.0
   };
   const double expected[] = {1.0, 2.0, 3.0, 4.0};
   double b[4] = {0.0, 0.0, 0.0, 0.0};
