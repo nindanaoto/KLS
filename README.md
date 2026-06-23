@@ -168,7 +168,10 @@ many-block shapes with enough numeric work to consume it; ordinary many-block
 BTF cases skip the setup and stay on their existing refactor paths. EGraph
 consumers reuse a solver-owned worker pool and dense scratch vectors across
 repeated SPICE refactors, so the retained schedule no longer relaunches threads
-or reallocates per-worker scratch on every accepted refactor step. Most
+or reallocates per-worker scratch on every accepted refactor step. The pipeline
+dependency markers are also solver-owned generation-stamped atomics, so
+pipeline passes do not allocate and clear an `n`-entry done array every cycle.
+Most
 low-work dominant-BTF cases also stay on the mapped serial path, but those with
 enough measured dependency work can consume the same EGraph path. When a
 low-work dominant BTF decomposition has one 95%+ block plus thousands of tiny

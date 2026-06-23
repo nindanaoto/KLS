@@ -73,6 +73,9 @@ struct kls_solver {
   UF_long egraph_worker_scratch_size;
   int egraph_worker_scratch_count;
   int egraph_worker_scratch_dirty;
+  atomic_uint *egraph_pipeline_done;
+  UF_long egraph_pipeline_done_size;
+  unsigned int egraph_pipeline_generation;
   kls_input_format input_format;
   kls_orientation orientation;
   kls_options options;
@@ -155,7 +158,8 @@ typedef struct kls_egraph_refactor_shared {
   UF_long numerical_rank;
   UF_long singular_col;
   pthread_mutex_t lock;
-  atomic_uchar *pipeline_done;
+  atomic_uint *pipeline_done;
+  unsigned int pipeline_generation;
   atomic_ulong next_pipeline_pos;
   UF_long pipeline_pos_end;
   UF_long cluster_level_count;
@@ -393,6 +397,53 @@ static double **ensure_egraph_worker_scratch(kls_solver *solver,
   solver->egraph_worker_scratch_size = scratch_size;
   solver->egraph_worker_scratch_dirty = 0;
   return scratch;
+}
+
+static void free_egraph_pipeline_done(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->egraph_pipeline_done);
+  solver->egraph_pipeline_done = NULL;
+  solver->egraph_pipeline_done_size = 0;
+  solver->egraph_pipeline_generation = 0;
+}
+
+static atomic_uint *ensure_egraph_pipeline_done(
+  kls_solver *solver,
+  unsigned int *generation_out) {
+  if (generation_out != NULL) {
+    *generation_out = 0;
+  }
+  if (solver == NULL || solver->n == 0u) {
+    return NULL;
+  }
+  if (solver->egraph_pipeline_done == NULL ||
+      solver->egraph_pipeline_done_size != solver->n) {
+    free_egraph_pipeline_done(solver);
+    solver->egraph_pipeline_done =
+      (atomic_uint *)malloc((size_t)solver->n *
+                            sizeof(*solver->egraph_pipeline_done));
+    if (solver->egraph_pipeline_done == NULL) {
+      return NULL;
+    }
+    solver->egraph_pipeline_done_size = solver->n;
+    for (UF_long k = 0; k < solver->n; ++k) {
+      atomic_init(&solver->egraph_pipeline_done[k], 0u);
+    }
+  } else if (solver->egraph_pipeline_generation == UINT_MAX) {
+    for (UF_long k = 0; k < solver->egraph_pipeline_done_size; ++k) {
+      atomic_store_explicit(&solver->egraph_pipeline_done[k], 0u,
+                            memory_order_relaxed);
+    }
+    solver->egraph_pipeline_generation = 0;
+  }
+
+  solver->egraph_pipeline_generation++;
+  if (generation_out != NULL) {
+    *generation_out = solver->egraph_pipeline_generation;
+  }
+  return solver->egraph_pipeline_done;
 }
 
 static void kls_worker_record_singular(kls_parallel_refactor_worker *worker,
@@ -994,6 +1045,7 @@ static void free_symbolic(kls_solver *solver) {
 static void free_numeric(kls_solver *solver) {
   destroy_egraph_refactor_pool(solver);
   free_egraph_worker_scratch(solver);
+  free_egraph_pipeline_done(solver);
   if (solver->numeric != NULL) {
     free_refactor_map(solver);
     free_refactor_schedule(solver);
@@ -1006,6 +1058,7 @@ static void clear_matrix(kls_solver *solver) {
   destroy_refactor_pool(solver);
   free_numeric(solver);
   free_egraph_worker_scratch(solver);
+  free_egraph_pipeline_done(solver);
   free_symbolic(solver);
   free(solver->col_ptr);
   free(solver->row_idx);
@@ -7917,7 +7970,8 @@ static void kls_egraph_refactor_mark_done(
   kls_egraph_refactor_shared *shared,
   UF_long col) {
   if (shared->pipeline_done != NULL) {
-    atomic_store_explicit(&shared->pipeline_done[col], 1u,
+    atomic_store_explicit(&shared->pipeline_done[col],
+                          shared->pipeline_generation,
                           memory_order_release);
   }
 }
@@ -7928,9 +7982,10 @@ static int kls_egraph_refactor_wait_done(
   if (shared->pipeline_done == NULL) {
     return 1;
   }
+  const unsigned int generation = shared->pipeline_generation;
   unsigned spin = 0;
   while (atomic_load_explicit(&shared->pipeline_done[col],
-                              memory_order_acquire) == 0u) {
+                              memory_order_acquire) != generation) {
     if ((spin++ & 1023u) == 0u &&
         kls_egraph_refactor_should_stop(shared)) {
       return 0;
@@ -8743,19 +8798,15 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_egraph_all_pipeline_huge_single_shape(solver);
   const UF_long cluster_level_count =
     all_pipeline ? 0u : solver->refactor_cluster_level_count;
-  atomic_uchar *pipeline_done = NULL;
+  atomic_uint *pipeline_done = NULL;
+  unsigned int pipeline_generation = 0;
   if (all_pipeline ||
       (solver->refactor_cluster_level_count < solver->refactor_level_count &&
        solver->refactor_pipeline_column_count >= (UF_long)(2 * thread_count) &&
        solver->refactor_pipeline_work >=
          0.10 * solver->refactor_dependency_work)) {
     pipeline_done =
-      (atomic_uchar *)malloc((size_t)solver->n * sizeof(*pipeline_done));
-    if (pipeline_done != NULL) {
-      for (UF_long k = 0; k < solver->n; ++k) {
-        atomic_init(&pipeline_done[k], 0u);
-      }
-    }
+      ensure_egraph_pipeline_done(solver, &pipeline_generation);
   }
 
   const int single_block = solver->symbolic->nblocks == 1u;
@@ -8764,14 +8815,12 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   double **scratch =
     ensure_egraph_worker_scratch(solver, thread_count, scratch_size);
   if (scratch == NULL) {
-    free(pipeline_done);
     return -1;
   }
 
   kls_egraph_refactor_pool *pool =
     ensure_egraph_refactor_pool(solver, thread_count);
   if (pool == NULL) {
-    free(pipeline_done);
     return -1;
   }
   kls_egraph_refactor_shared *shared = &pool->shared;
@@ -8779,7 +8828,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   pthread_mutex_lock(&shared->lock);
   if (pool->active_workers != 0) {
     pthread_mutex_unlock(&shared->lock);
-    free(pipeline_done);
     return -1;
   }
 
@@ -8798,6 +8846,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->numerical_rank = UF_long_max;
   shared->singular_col = KLS_KLU_EMPTY;
   shared->pipeline_done = pipeline_done;
+  shared->pipeline_generation = pipeline_generation;
   atomic_store_explicit(
     &shared->next_pipeline_pos,
     (unsigned long)(pipeline_done != NULL
@@ -8825,7 +8874,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       (shared->singular && common->halt_if_singular)) {
     solver->egraph_worker_scratch_dirty = 1;
   }
-  free(pipeline_done);
 
   if (shared->invalid) {
     common->status = TRILINOS_KLU_INVALID;

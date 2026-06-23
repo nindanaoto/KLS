@@ -264,8 +264,10 @@ design work, not benchmark-specific tuning.
   same block-aware EGraph kernel can run inside a large dominant BTF block and
   update Offx for entries above that block. The EGraph consumer now keeps a
   solver-owned worker pool and dense worker scratch across repeated refactors,
-  matching the CKTSO/NICSLU emphasis on retained scheduling state instead of
-  relaunching threads on every SPICE step. Schedule construction is now
+  plus generation-stamped solver-owned pipeline dependency markers, matching
+  the CKTSO/NICSLU emphasis on retained scheduling state instead of relaunching
+  threads or clearing a fresh done array on every SPICE step. Schedule
+  construction is now
   limited to single-block, dominant-BTF, or high-work fragmented non-dominant
   many-block shapes with enough numeric or measured dependency work to consume
   it, while ordinary non-dominant many-block BTF and low-work dominant-BTF cases
@@ -1772,6 +1774,19 @@ saved pre-pool blockmap artifact, `rajat28` moved from `6.3837s` to `5.3433s`
 and `onetone2` from `1.8011s` to `1.7070s`, while the mostly initial-factor
 `power197k` row stayed neutral. This is retained as a general repeated-refactor
 overhead cleanup for EGraph-active SPICE rows.
+
+The same retained EGraph state was then extended to the pipeline dependency
+markers. Instead of allocating and zero-initializing an `n`-entry
+`pipeline_done` array for every pipeline-capable refactor, KLS now keeps a
+solver-owned atomic generation array and marks completed columns with the
+current generation. Waiting workers compare against that generation, and the
+array is cleared only if the unsigned generation counter wraps. This preserves
+the existing dependency protocol while removing a repeated O(n) setup pass from
+all-pipeline and pipeline-tail EGraph refactors. On the same four-row focused
+probe, geomean cycle time improved from the worker-pool artifact's `3.3196s`
+to `3.2480s`; `onetone2` moved from `1.7070s` to `1.5491s`, `transient`
+nudged from `3.5853s` to `3.5510s`, and `power197k` stayed neutral because it
+does not use the EGraph pipeline path in this run.
 
 ## Recommended General Work
 
