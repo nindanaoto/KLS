@@ -2086,6 +2086,19 @@ intended to quantify the opportunity for a successor-driven ready scheduler or
 row/segment engine on the CKTSO-gap rows, rather than to tune on matrix names
 or infer the gap from total edge count alone.
 
+A bounded successor-ready queue was then prototyped for modest EGraph pipeline
+tails by retaining reverse U-pattern edges and running eligible pipeline
+columns only after their pipeline predecessors completed. The design was
+rejected. Same-session A/B against commit `ba8758c` with three passes and ten
+refactors per pass showed broad regressions: `onetone1` cycle median
+`6.06s -> 18.97s`, `onetone2` `1.60s -> 3.52s`, `ASIC_320k`
+`13.62s -> 29.74s`, and `ASIC_320ks` `11.43s -> 25.02s`. Refactor medians
+regressed similarly (`ASIC_320k` `0.097s -> 0.261s`, `ASIC_320ks`
+`0.079s -> 0.216s`). This means the missing CKTSO mechanism is not a simple
+reverse-edge ready queue layered on KLU column storage; KLS needs a different
+row/segment numeric representation or separator/private-pipeline engine where
+successor scheduling does not add another high-overhead synchronization layer.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
