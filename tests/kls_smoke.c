@@ -312,7 +312,7 @@ static int test_fast_factor_pivot_check_fallback(void) {
   return ok;
 }
 
-static int test_scaled_fast_factor_pivot_check_fallback(void) {
+static int test_scaled_fast_factor_block_restart(void) {
   const int32_t ap[] = {0, 2, 4};
   const int32_t ai[] = {0, 1, 0, 1};
   const double ax0[] = {2.0, 1.0, 1.0, 2.0};
@@ -336,18 +336,18 @@ static int test_scaled_fast_factor_pivot_check_fallback(void) {
   if (ok && !require_ok(kls_factor(solver, ax0),
                         "factor scaled pivot-check base")) ok = 0;
   if (ok && !require_ok(kls_factor(solver, ax1),
-                        "factor scaled pivot-check fallback")) ok = 0;
+                        "factor scaled pivot-check block restart")) ok = 0;
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                        "solve scaled pivot-check fallback")) ok = 0;
+                        "solve scaled pivot-check block restart")) ok = 0;
 
   kls_stats stats;
   stats.struct_size = sizeof(stats);
   if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats scaled pivot-check fallback")) {
+                        "stats scaled pivot-check block restart")) {
     ok = 0;
   }
   if (ok && stats.offdiag_pivots < 1) {
-    fprintf(stderr, "scaled fast factor did not fall back to pivoting factorization\n");
+    fprintf(stderr, "scaled block restart did not pivot the rejected block\n");
     ok = 0;
   }
   if (ok && (stats.fast_rejected_pivot != 0 || stats.fast_rejected_pivot_col != 0)) {
@@ -357,8 +357,8 @@ static int test_scaled_fast_factor_pivot_check_fallback(void) {
             stats.fast_rejected_pivot, stats.fast_rejected_pivot_col);
     ok = 0;
   }
-  if (ok && stats.fast_block_restarts != 0) {
-    fprintf(stderr, "scaled path unexpectedly used block restarts: %d\n",
+  if (ok && stats.fast_block_restarts != 1) {
+    fprintf(stderr, "scaled path restart count was %d\n",
             stats.fast_block_restarts);
     ok = 0;
   }
@@ -379,7 +379,7 @@ static int test_scaled_fast_factor_pivot_check_fallback(void) {
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
-    fprintf(stderr, "unexpected scaled pivot-check fallback solution: %.17g %.17g\n",
+    fprintf(stderr, "unexpected scaled pivot-check restart solution: %.17g %.17g\n",
             x[0], x[1]);
     ok = 0;
   }
@@ -763,7 +763,7 @@ int main(void) {
   if (!test_fast_factor_pivot_check_fallback()) {
     return EXIT_FAILURE;
   }
-  if (!test_scaled_fast_factor_pivot_check_fallback()) {
+  if (!test_scaled_fast_factor_block_restart()) {
     return EXIT_FAILURE;
   }
   if (!test_btf_fast_factor_block_restart()) {
