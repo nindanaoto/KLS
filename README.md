@@ -274,7 +274,7 @@ pivoting, splice the repaired block permutation back into the numeric object,
 and retry the checked fast factorization when some columns may not have been
 refreshed. If the failed pass had already refreshed all columns, or if a serial
 BTF refactor reached the final block before rejection, KLS validates the
-repaired multipliers and skips the redundant checked retry. Scaled fast-factor
+repaired block tail and skips the redundant checked retry. Scaled fast-factor
 calls still use the pivot-checking refactor kernel so they can stop at the
 first unsafe multiplier, but they fall back to full pivoting factorization when
 a repair is needed. Benchmark stats report `fast_rejected_pivot`,

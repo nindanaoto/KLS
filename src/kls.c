@@ -6729,9 +6729,11 @@ static int kls_parallel_refactor_permute_scale(kls_solver *solver) {
   return 1;
 }
 
-static int kls_numeric_pivots_pass_threshold(const kls_solver *solver,
-                                             UF_long *rejected_pivot_out,
-                                             UF_long *rejected_pivot_col_out) {
+static int kls_numeric_pivots_pass_threshold_from_block(
+  const kls_solver *solver,
+  UF_long start_block,
+  UF_long *rejected_pivot_out,
+  UF_long *rejected_pivot_col_out) {
   if (rejected_pivot_out != NULL) {
     *rejected_pivot_out = KLS_KLU_EMPTY;
   }
@@ -6750,8 +6752,11 @@ static int kls_numeric_pivots_pass_threshold(const kls_solver *solver,
   if (numeric->Lip == NULL || numeric->Llen == NULL || numeric->LUbx == NULL) {
     return 0;
   }
+  if (start_block > symbolic->nblocks) {
+    return 0;
+  }
 
-  for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+  for (UF_long block = start_block; block < symbolic->nblocks; ++block) {
     const UF_long k1 = symbolic->R[block];
     const UF_long k2 = symbolic->R[block + 1u];
     const UF_long nk = k2 - k1;
@@ -6787,6 +6792,13 @@ static int kls_numeric_pivots_pass_threshold(const kls_solver *solver,
     }
   }
   return 1;
+}
+
+static int kls_numeric_pivots_pass_threshold(const kls_solver *solver,
+                                             UF_long *rejected_pivot_out,
+                                             UF_long *rejected_pivot_col_out) {
+  return kls_numeric_pivots_pass_threshold_from_block(
+    solver, 0u, rejected_pivot_out, rejected_pivot_col_out);
 }
 
 static UF_long kls_block_for_pivot(const kls_solver *solver, UF_long pivot) {
@@ -8987,10 +8999,15 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
       return 0;
     }
     if (kls_fast_repair_covers_remaining_columns(solver, rejected_pivot)) {
+      const UF_long repaired_block = kls_block_for_pivot(solver, rejected_pivot);
+      if (repaired_block == KLS_KLU_EMPTY) {
+        return 0;
+      }
       UF_long next_rejected_pivot = KLS_KLU_EMPTY;
       UF_long rejected_pivot_col = KLS_KLU_EMPTY;
-      if (!kls_numeric_pivots_pass_threshold(solver, &next_rejected_pivot,
-                                             &rejected_pivot_col)) {
+      if (!kls_numeric_pivots_pass_threshold_from_block(
+            solver, repaired_block, &next_rejected_pivot,
+            &rejected_pivot_col)) {
         kls_record_fast_reject(solver, next_rejected_pivot,
                                rejected_pivot_col);
         return 0;

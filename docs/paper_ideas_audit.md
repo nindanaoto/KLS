@@ -47,8 +47,8 @@ unsafe unscaled BTF diagonal block by
 restarting that block with pivoting and then retrying the checked no-pivot
 factorization when later columns may not have been refreshed. If the failed
 pass had refreshed all columns, or if a serial BTF pass rejected in the final
-block, KLS validates the pivoted repair directly and skips the redundant
-checked refactor pass.
+block, KLS validates the pivoted repair block tail directly and skips the
+redundant checked refactor pass.
 
 The remaining CKTSO gap is large enough that it should be treated as a missing
 major algorithm, not an ordering-package tuning problem. On the selected large
@@ -771,7 +771,7 @@ the unscaled off-diagonal entries from the updated inverse permutation, and
 retry the checked fast factorization when later columns may not have been
 refreshed. When the rejected fast pass had already refreshed all columns, or
 when a serial BTF pass rejected in the final block, KLS now validates the
-repaired multipliers directly and returns without a second full checked
+repaired block tail directly and returns without a second full checked
 refactor. Smoke tests now cover both the unscaled repair and the scaled
 fallback path, and representative static-pivot cases (`gemat12`, `onetone2`,
 `twotone`, and `rajat25`) did not trigger unexpected block restarts. This is
@@ -1576,13 +1576,14 @@ repairs whose surrounding numeric state is already current. After a failed
 checked fast factorization, KLS tracks whether the failed pass refreshed all
 columns, only a serial prefix, or stopped in an unknown parallel/EGraph state.
 If all columns are current, or if the serial prefix reached the final BTF
-block, KLS validates the repaired multipliers and returns without immediately
-refactoring the same block again with the new fixed order. Same-session
-diagonal-stress checks kept valid residuals and reduced the stressed `add20`
-factor path from the earlier `3.50s` to about `1.34s`, and stressed `rajat03`
-from about `0.44s` to about `0.21s`. Other multi-block repairs still retry the
-checked fast factorization because blocks after the rejected block may not have
-been refreshed when the fast path stopped.
+block, KLS validates the repaired block and later block tail and returns
+without immediately refactoring the same block again with the new fixed order;
+unchanged earlier blocks are no longer rescanned on that shortcut path.
+Same-session diagonal-stress checks kept valid residuals and reduced the
+stressed `add20` factor path from the earlier `3.50s` to about `1.34s`, and
+stressed `rajat03` from about `0.44s` to about `0.21s`. Other multi-block
+repairs still retry the checked fast factorization because blocks after the
+rejected block may not have been refreshed when the fast path stopped.
 
 ## Recommended General Work
 
