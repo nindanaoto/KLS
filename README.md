@@ -284,19 +284,24 @@ refreshed. If the failed pass had already refreshed all columns, or if a serial
 BTF refactor reached the final block before rejection, KLS validates the
 repaired block tail and skips the redundant checked retry. Scaled fast-factor
 calls still use the pivot-checking refactor kernel so they can stop at the
-first unsafe multiplier, but they fall back to full pivoting factorization when
-a repair is needed. When an unscaled serial BTF refactor rejects a non-final
-block, the repaired block can now be followed by a serial checked continuation
-over only the later BTF blocks instead of restarting from the first block.
+first unsafe multiplier; KLS can repair the scaled rejected block when the
+repaired block covers all remaining columns and the row scale vector is still
+in input-row order. Scaled multi-block tails and scaled all-refresh KLU
+refactor rejects still fall back conservatively. When an unscaled serial BTF
+refactor rejects a non-final block, the repaired block can now be followed by a
+serial checked continuation over only the later BTF blocks instead of
+restarting from the first block.
 Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_block_start`,
 `fast_rejected_block_size`, `fast_rejected_suffix_columns`,
-`fast_rejected_descendant_columns`, `fast_rejected_descendant_work`, and
-`fast_block_restarts` for the first rejected factor-order pivot, its original
-matrix column, the rejected BTF block, the suffix from that pivot to the end of
-the block, the exact U-pattern descendant tail inside that block, and the number
-of repaired BTF blocks. These fields are intended to guide fuller CKTSO-style
-tail-restart work without accepting an unsafe reused pivot order.
+`fast_rejected_descendant_columns`, `fast_rejected_descendant_work`,
+`fast_rejected_refresh_state`, and `fast_block_restarts` for the first rejected
+factor-order pivot, its original matrix column, the rejected BTF block, the
+suffix from that pivot to the end of the block, the exact U-pattern descendant
+tail inside that block, whether the failed pass left an unknown, prefix-current,
+or all-current numeric state, and the number of repaired BTF blocks. These
+fields are intended to guide fuller CKTSO-style tail-restart work without
+accepting an unsafe reused pivot order.
 
 Use `--no-static-pivoting` to disable KLS's value-aware static row-pivoting
 trial. When enabled, `auto` can preemptively build a weighted row permutation

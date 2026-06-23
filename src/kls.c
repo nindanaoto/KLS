@@ -30,9 +30,6 @@
 #include <time.h>
 
 #define KLS_KLU_EMPTY ((UF_long)-1)
-#define KLS_FAST_REJECT_REFRESH_UNKNOWN 0
-#define KLS_FAST_REJECT_REFRESH_PREFIX 1
-#define KLS_FAST_REJECT_REFRESH_ALL 2
 
 typedef struct kls_refactor_pool kls_refactor_pool;
 
@@ -333,6 +330,8 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_suffix_columns = 0;
   solver->stats.fast_rejected_descendant_columns = 0;
   solver->stats.fast_rejected_descendant_work = 0.0;
+  solver->stats.fast_rejected_refresh_state =
+    KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_block_restarts = 0;
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
 }
@@ -346,6 +345,8 @@ static void kls_record_fast_reject(kls_solver *solver,
   solver->stats.fast_rejected_pivot = (int64_t)rejected_pivot;
   solver->stats.fast_rejected_pivot_col =
     rejected_pivot_col == KLS_KLU_EMPTY ? -1 : (int64_t)rejected_pivot_col;
+  solver->stats.fast_rejected_refresh_state =
+    solver->fast_reject_refresh_state;
   kls_fill_fast_reject_tail_stats(solver, rejected_pivot);
 }
 
@@ -6443,6 +6444,8 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.selected_static_pivoting = solver->row_perm != NULL;
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
+  solver->stats.fast_rejected_refresh_state =
+    solver->fast_reject_refresh_state;
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
     solver->stats.selected_btf = solver->symbolic->do_btf ? 1 : 0;
@@ -6464,6 +6467,8 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.selected_static_pivoting = solver->row_perm != NULL;
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
+  solver->stats.fast_rejected_refresh_state =
+    solver->fast_reject_refresh_state;
   solver->stats.selected_btf =
     (solver->symbolic != NULL && solver->symbolic->do_btf) ? 1 : 0;
   solver->stats.numerical_rank = (int64_t)solver->common.numerical_rank;
@@ -7560,6 +7565,8 @@ static int kls_single_block_mapped_refactor(kls_solver *solver,
             lij_abs * common->tol > 1.0 + 1.0e-12) {
           x[i] = 0.0;
           memset(x, 0, (size_t)solver->n * sizeof(*x));
+          solver->fast_reject_refresh_state =
+            KLS_FAST_REJECT_REFRESH_PREFIX;
           kls_record_fast_reject(solver, k, q[k]);
           common->status = TRILINOS_KLU_OK;
           return 0;

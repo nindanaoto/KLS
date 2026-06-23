@@ -44,6 +44,12 @@ typedef enum kls_orientation {
 
 #define KLS_SCALE_AUTO (-2)
 
+typedef enum kls_fast_reject_refresh_state {
+  KLS_FAST_REJECT_REFRESH_UNKNOWN = 0,
+  KLS_FAST_REJECT_REFRESH_PREFIX = 1,
+  KLS_FAST_REJECT_REFRESH_ALL = 2
+} kls_fast_reject_refresh_state;
+
 typedef struct kls_options {
   size_t struct_size;
   int threads;
@@ -105,6 +111,7 @@ typedef struct kls_stats {
   int64_t fast_rejected_suffix_columns;
   int64_t fast_rejected_descendant_columns;
   double fast_rejected_descendant_work;
+  int fast_rejected_refresh_state;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

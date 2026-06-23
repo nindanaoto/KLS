@@ -286,6 +286,12 @@ static int test_fast_factor_pivot_check_fallback(void) {
             stats.fast_block_restarts);
     ok = 0;
   }
+  if (ok && stats.fast_rejected_refresh_state !=
+              KLS_FAST_REJECT_REFRESH_PREFIX) {
+    fprintf(stderr, "unexpected fast reject refresh state: %d\n",
+            stats.fast_rejected_refresh_state);
+    ok = 0;
+  }
   if (ok && (stats.fast_rejected_block_start != 0 ||
              stats.fast_rejected_block_size != 2 ||
              stats.fast_rejected_suffix_columns != 2 ||
@@ -362,6 +368,12 @@ static int test_scaled_fast_factor_block_restart(void) {
             stats.fast_block_restarts);
     ok = 0;
   }
+  if (ok && stats.fast_rejected_refresh_state !=
+              KLS_FAST_REJECT_REFRESH_PREFIX) {
+    fprintf(stderr, "unexpected scaled reject refresh state: %d\n",
+            stats.fast_rejected_refresh_state);
+    ok = 0;
+  }
   if (ok && (stats.fast_rejected_block_start != 0 ||
              stats.fast_rejected_block_size != 2 ||
              stats.fast_rejected_suffix_columns != 2 ||
@@ -430,6 +442,12 @@ static int test_btf_fast_factor_block_restart(void) {
   }
   if (ok && stats.fast_block_restarts < 1) {
     fprintf(stderr, "btf restart test did not use block restart\n");
+    ok = 0;
+  }
+  if (ok && stats.fast_rejected_refresh_state !=
+              KLS_FAST_REJECT_REFRESH_PREFIX) {
+    fprintf(stderr, "unexpected btf reject refresh state: %d\n",
+            stats.fast_rejected_refresh_state);
     ok = 0;
   }
   if (ok && (stats.fast_rejected_block_start < 0 ||

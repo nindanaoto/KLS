@@ -636,6 +636,7 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_suffix_columns\":%" PRId64
            ",\"fast_rejected_descendant_columns\":%" PRId64
            ",\"fast_rejected_descendant_work\":%.9g"
+           ",\"fast_rejected_refresh_state\":%d"
            ",\"refactor_dependency_levels\":%" PRId64
            ",\"refactor_dependency_max_width\":%" PRId64
            ",\"refactor_dependency_edges\":%" PRId64
@@ -674,6 +675,7 @@ int main(int argc, char **argv) {
            stats.fast_rejected_suffix_columns,
            stats.fast_rejected_descendant_columns,
            stats.fast_rejected_descendant_work,
+           stats.fast_rejected_refresh_state,
            stats.refactor_dependency_levels,
            stats.refactor_dependency_max_width,
            stats.refactor_dependency_edges,
@@ -726,12 +728,13 @@ int main(int argc, char **argv) {
     printf("fast block restarts: %d\n", stats.fast_block_restarts);
     printf("fast rejected block: start %" PRId64 ", size %" PRId64
            ", suffix %" PRId64 ", descendants %" PRId64
-           ", descendant work %.6g\n",
+           ", descendant work %.6g, refresh state %d\n",
            stats.fast_rejected_block_start,
            stats.fast_rejected_block_size,
            stats.fast_rejected_suffix_columns,
            stats.fast_rejected_descendant_columns,
-           stats.fast_rejected_descendant_work);
+           stats.fast_rejected_descendant_work,
+           stats.fast_rejected_refresh_state);
     printf("refactor dependency levels: %" PRId64
            ", max width: %" PRId64 ", edges: %" PRId64 "\n",
            stats.refactor_dependency_levels,

@@ -1605,6 +1605,11 @@ the whole rejected BTF block, the suffix from the failed pivot, and the exact
 U-pattern descendant tail that a CKTSO-style pivoting tail restart would target.
 This is a diagnostic for architectural work, not a tuning path for specific
 matrices.
+The same diagnostic now also reports `fast_rejected_refresh_state`: unknown,
+prefix-current, or all-current. This makes the benchmark artifact distinguish
+KLS paths that can safely do block/tail continuation from parallel or KLU
+all-refresh paths that must remain conservative until KLS owns the row/segment
+numeric state needed for CKTSO-style ETree-descendant restart.
 
 A follow-up removed redundant passes from that diagnostic path for unscaled
 repairs whose surrounding numeric state is already current. After a failed
@@ -1708,6 +1713,14 @@ continuation and scaled KLU-refactor all-refresh rejects still fall back.
 Default focused checks (`onetone2`, `rajat30`) stayed in the previous timing
 band. This is a CKTSO-aligned coverage improvement for pivot-check restarts,
 not a solution to the large `pre2`/`nxp1` gap.
+
+KLS then exposed the fast-reject refresh-state classification in `kls_stats`
+and benchmark JSON, and corrected the serial single-block mapped refactor to
+record its pivot-check reject as prefix-current instead of unknown. Smoke
+coverage now checks the prefix-current state for single-block, scaled
+checked-refactor, and BTF block-restart repairs. This does not make KLS faster
+by itself, but it turns the CKTSO tail-restart boundary into explicit benchmark
+evidence instead of hidden control-flow knowledge.
 
 A direct single-block row-major solve prototype was then tested and rejected.
 The prototype built reusable row views of KLU's L and U factors with offsets
