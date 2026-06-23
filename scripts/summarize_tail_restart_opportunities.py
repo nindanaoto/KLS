@@ -62,8 +62,20 @@ def classify(row: dict[str, object]) -> str:
         return "no_block_repair"
     if as_int(row, "fast_repaired_tail_restart_ready", 0) == 1:
         return "strict_ready"
-    if as_int(row, "fast_rejected_tail_repair_ready", 0) != 1:
+    if (
+        as_int(row, "fast_rejected_tail_candidate_row", -1) < 0
+        or as_int(row, "fast_rejected_tail_candidate_count", 0) <= 0
+    ):
         return "no_tolerance_valid_tail_candidate"
+    refresh_state = as_int(row, "fast_rejected_refresh_state", 0)
+    if refresh_state == 0:
+        return "unknown_refresh_state"
+    if refresh_state == 2:
+        return "all_current_reject_state"
+    if refresh_state != 1:
+        return "non_prefix_reject_state"
+    if as_int(row, "fast_rejected_tail_repair_ready", 0) != 1:
+        return "tail_candidate_not_repair_ready"
     if as_int(row, "fast_repaired_pivot_matches_tail_candidate", 0) != 1:
         return "repair_picked_different_row"
     if as_int(row, "fast_repaired_prefix_changed_pivots", 0) > 0:

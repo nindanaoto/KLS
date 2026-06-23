@@ -812,6 +812,58 @@ static int kls_parallel_refactor_mapped_value(
                                      shared->values[input_pos], value_out);
 }
 
+static int kls_checked_refactor_best_reject_candidate(
+  const UF_long *rows,
+  UF_long row_count,
+  const double *x,
+  double pivot,
+  double tolerance,
+  UF_long row_base,
+  UF_long *rejected_row_out,
+  UF_long *rejected_local_row_out,
+  double *rejected_multiplier_abs_out,
+  double *rejected_pivot_abs_out,
+  double *rejected_candidate_abs_out) {
+  if (rows == NULL || x == NULL || rejected_row_out == NULL ||
+      rejected_local_row_out == NULL || rejected_multiplier_abs_out == NULL ||
+      rejected_pivot_abs_out == NULL ||
+      rejected_candidate_abs_out == NULL) {
+    return 0;
+  }
+
+  const double pivot_abs = fabs(pivot);
+  UF_long best_local_row = KLS_KLU_EMPTY;
+  double best_candidate_abs = -1.0;
+  double best_multiplier_abs = -1.0;
+  for (UF_long p = 0; p < row_count; ++p) {
+    const UF_long local_row = rows[p];
+    const double candidate_abs = fabs(x[local_row]);
+    const double multiplier_abs = fabs(x[local_row] / pivot);
+    if (isfinite(multiplier_abs) &&
+        multiplier_abs * tolerance <= 1.0 + 1.0e-12) {
+      continue;
+    }
+    if (best_local_row == KLS_KLU_EMPTY ||
+        (!isnan(candidate_abs) &&
+         (isnan(best_candidate_abs) ||
+          candidate_abs > best_candidate_abs))) {
+      best_local_row = local_row;
+      best_candidate_abs = candidate_abs;
+      best_multiplier_abs = multiplier_abs;
+    }
+  }
+  if (best_local_row == KLS_KLU_EMPTY) {
+    return 0;
+  }
+
+  *rejected_row_out = row_base + best_local_row;
+  *rejected_local_row_out = best_local_row;
+  *rejected_multiplier_abs_out = best_multiplier_abs;
+  *rejected_pivot_abs_out = pivot_abs;
+  *rejected_candidate_abs_out = best_candidate_abs;
+  return 1;
+}
+
 static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
                                         UF_long block) {
   kls_parallel_refactor_shared *shared = worker->shared;
@@ -999,24 +1051,29 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
     double *lx = NULL;
     UF_long lcol_len = 0;
     kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
+    UF_long rejected_row = KLS_KLU_EMPTY;
+    UF_long rejected_local_row = KLS_KLU_EMPTY;
+    double rejected_multiplier_abs = -1.0;
+    double rejected_pivot_abs = -1.0;
+    double rejected_candidate_abs = -1.0;
+    if (shared->check_pivots &&
+        kls_checked_refactor_best_reject_candidate(
+          li, lcol_len, x, ukk, shared->pivot_tolerance, k1,
+          &rejected_row, &rejected_local_row, &rejected_multiplier_abs,
+          &rejected_pivot_abs, &rejected_candidate_abs)) {
+      worker->pivot_rejected = 1;
+      worker->rejected_pivot = global_col;
+      worker->rejected_pivot_col = q[global_col];
+      worker->rejected_row = rejected_row;
+      worker->rejected_multiplier_abs = rejected_multiplier_abs;
+      worker->rejected_pivot_abs = rejected_pivot_abs;
+      worker->rejected_candidate_abs = rejected_candidate_abs;
+      x[rejected_local_row] = 0.0;
+      return;
+    }
     for (UF_long p = 0; p < lcol_len; ++p) {
       const UF_long i = li[p];
       const double lij = x[i] / ukk;
-      if (shared->check_pivots) {
-        const double lij_abs = fabs(lij);
-        if (!isfinite(lij_abs) ||
-            lij_abs * shared->pivot_tolerance > 1.0 + 1.0e-12) {
-          worker->pivot_rejected = 1;
-          worker->rejected_pivot = global_col;
-          worker->rejected_pivot_col = q[global_col];
-          worker->rejected_row = k1 + i;
-          worker->rejected_multiplier_abs = lij_abs;
-          worker->rejected_pivot_abs = fabs(ukk);
-          worker->rejected_candidate_abs = fabs(x[i]);
-          x[i] = 0.0;
-          return;
-        }
-      }
       lx[p] = lij;
       x[i] = 0.0;
     }
@@ -10689,24 +10746,29 @@ static int kls_single_block_mapped_refactor(kls_solver *solver,
     double *lx = NULL;
     UF_long lcol_len = 0;
     kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
+    UF_long rejected_row = KLS_KLU_EMPTY;
+    UF_long rejected_local_row = KLS_KLU_EMPTY;
+    double rejected_multiplier_abs = -1.0;
+    double rejected_pivot_abs = -1.0;
+    double rejected_candidate_abs = -1.0;
+    if (check_pivots &&
+        kls_checked_refactor_best_reject_candidate(
+          li, lcol_len, x, ukk, common->tol, 0u, &rejected_row,
+          &rejected_local_row, &rejected_multiplier_abs,
+          &rejected_pivot_abs, &rejected_candidate_abs)) {
+      memset(x, 0, (size_t)solver->n * sizeof(*x));
+      solver->fast_reject_refresh_state =
+        KLS_FAST_REJECT_REFRESH_PREFIX;
+      kls_record_fast_reject_detail(solver, k, q[k], rejected_row,
+                                    rejected_multiplier_abs,
+                                    rejected_pivot_abs,
+                                    rejected_candidate_abs);
+      common->status = TRILINOS_KLU_OK;
+      return 0;
+    }
     for (UF_long p = 0; p < lcol_len; ++p) {
       const UF_long i = li[p];
       const double lij = x[i] / ukk;
-      if (check_pivots) {
-        const double lij_abs = fabs(lij);
-        if (!isfinite(lij_abs) ||
-            lij_abs * common->tol > 1.0 + 1.0e-12) {
-          const double candidate_abs = fabs(x[i]);
-          x[i] = 0.0;
-          memset(x, 0, (size_t)solver->n * sizeof(*x));
-          solver->fast_reject_refresh_state =
-            KLS_FAST_REJECT_REFRESH_PREFIX;
-          kls_record_fast_reject_detail(solver, k, q[k], i, lij_abs,
-                                        fabs(ukk), candidate_abs);
-          common->status = TRILINOS_KLU_OK;
-          return 0;
-        }
-      }
       lx[p] = lij;
       x[i] = 0.0;
     }
@@ -10898,21 +10960,27 @@ static int kls_egraph_refactor_single_unscaled_column(
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
   UF_long lcol_len = numeric->Llen[k];
+  UF_long rejected_row = KLS_KLU_EMPTY;
+  UF_long rejected_local_row = KLS_KLU_EMPTY;
+  double rejected_multiplier_abs = -1.0;
+  double rejected_pivot_abs = -1.0;
+  double rejected_candidate_abs = -1.0;
+  if (shared->check_pivots &&
+      kls_checked_refactor_best_reject_candidate(
+        li, lcol_len, x, ukk, solver->common.tol, 0u, &rejected_row,
+        &rejected_local_row, &rejected_multiplier_abs, &rejected_pivot_abs,
+        &rejected_candidate_abs)) {
+    x[rejected_local_row] = 0.0;
+    kls_egraph_refactor_record_reject(shared, k, symbolic->Q[k],
+                                      rejected_row,
+                                      rejected_multiplier_abs,
+                                      rejected_pivot_abs,
+                                      rejected_candidate_abs);
+    return 0;
+  }
   for (UF_long p = 0; p < lcol_len; ++p) {
     const UF_long i = li[p];
     const double lij = x[i] / ukk;
-    if (shared->check_pivots) {
-      const double lij_abs = fabs(lij);
-      if (!isfinite(lij_abs) ||
-          lij_abs * solver->common.tol > 1.0 + 1.0e-12) {
-        const double candidate_abs = fabs(x[i]);
-        x[i] = 0.0;
-        kls_egraph_refactor_record_reject(shared, k, symbolic->Q[k],
-                                          i, lij_abs, fabs(ukk),
-                                          candidate_abs);
-        return 0;
-      }
-    }
     lx[p] = lij;
     x[i] = 0.0;
   }
@@ -11015,21 +11083,27 @@ static int kls_egraph_refactor_btf_unscaled_column(
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
   UF_long lcol_len = numeric->Llen[k];
+  UF_long rejected_row = KLS_KLU_EMPTY;
+  UF_long rejected_local_row = KLS_KLU_EMPTY;
+  double rejected_multiplier_abs = -1.0;
+  double rejected_pivot_abs = -1.0;
+  double rejected_candidate_abs = -1.0;
+  if (shared->check_pivots &&
+      kls_checked_refactor_best_reject_candidate(
+        li, lcol_len, x, ukk, solver->common.tol, k1, &rejected_row,
+        &rejected_local_row, &rejected_multiplier_abs, &rejected_pivot_abs,
+        &rejected_candidate_abs)) {
+    x[rejected_local_row] = 0.0;
+    kls_egraph_refactor_record_reject(shared, k, symbolic->Q[k],
+                                      rejected_row,
+                                      rejected_multiplier_abs,
+                                      rejected_pivot_abs,
+                                      rejected_candidate_abs);
+    return 0;
+  }
   for (UF_long p = 0; p < lcol_len; ++p) {
     const UF_long i = li[p];
     const double lij = x[i] / ukk;
-    if (shared->check_pivots) {
-      const double lij_abs = fabs(lij);
-      if (!isfinite(lij_abs) ||
-          lij_abs * solver->common.tol > 1.0 + 1.0e-12) {
-        const double candidate_abs = fabs(x[i]);
-        x[i] = 0.0;
-        kls_egraph_refactor_record_reject(shared, k, symbolic->Q[k],
-                                          k1 + i, lij_abs, fabs(ukk),
-                                          candidate_abs);
-        return 0;
-      }
-    }
     lx[p] = lij;
     x[i] = 0.0;
   }
@@ -11247,21 +11321,27 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
   UF_long lcol_len = llen[local_k];
+  UF_long rejected_row = KLS_KLU_EMPTY;
+  UF_long rejected_local_row = KLS_KLU_EMPTY;
+  double rejected_multiplier_abs = -1.0;
+  double rejected_pivot_abs = -1.0;
+  double rejected_candidate_abs = -1.0;
+  if (shared->check_pivots &&
+      kls_checked_refactor_best_reject_candidate(
+        li, lcol_len, x, ukk, solver->common.tol, k1, &rejected_row,
+        &rejected_local_row, &rejected_multiplier_abs, &rejected_pivot_abs,
+        &rejected_candidate_abs)) {
+    x[rejected_local_row] = 0.0;
+    kls_egraph_refactor_record_reject(shared, k, symbolic->Q[k],
+                                      rejected_row,
+                                      rejected_multiplier_abs,
+                                      rejected_pivot_abs,
+                                      rejected_candidate_abs);
+    return 0;
+  }
   for (UF_long p = 0; p < lcol_len; ++p) {
     const UF_long i = li[p];
     const double lij = x[i] / ukk;
-    if (shared->check_pivots) {
-      const double lij_abs = fabs(lij);
-      if (!isfinite(lij_abs) ||
-          lij_abs * solver->common.tol > 1.0 + 1.0e-12) {
-        const double candidate_abs = fabs(x[i]);
-        x[i] = 0.0;
-        kls_egraph_refactor_record_reject(shared, k, symbolic->Q[k],
-                                          k1 + i, lij_abs, fabs(ukk),
-                                          candidate_abs);
-        return 0;
-      }
-    }
     lx[p] = lij;
     x[i] = 0.0;
   }

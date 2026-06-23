@@ -339,9 +339,10 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_row_tail_columns`, `fast_rejected_row_tail_work`,
 `fast_rejected_etree_columns`, `fast_rejected_etree_work`,
 `fast_rejected_refresh_state`, and `fast_block_restarts` for the first rejected
-factor-order pivot, its original matrix column, the factor row and multiplier
-that tripped a KLS-owned pivot check when available, the accepted pivot
-magnitude and candidate entry magnitude at the reject, the best row-tail
+factor-order pivot, its original matrix column, the strongest factor-row
+candidate and multiplier among entries that violated a KLS-owned pivot check
+when available, the accepted pivot magnitude and candidate entry magnitude at
+the reject, the best row-tail
 candidate that can be computed from current prefix state in the checked
 row-major path, its retained row-tail position, whether that prefix-current
 candidate satisfies the same pivot-tolerance predicate that rejected the

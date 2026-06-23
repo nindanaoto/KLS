@@ -1969,16 +1969,27 @@ change the numeric repair yet, but it exposes the row-tail scope on real
 multi-block EGraph rejects. Repeated focused stress checks kept valid
 residuals and reported nonzero row-tail scopes for `coupled` and `onetone2`,
 where the previous JSON fields were zero.
-The same diagnostic now preserves the observed row/value that actually tripped
-the pivot check as a tail-candidate row when that row lies in the recorded
-row-tail scope. The candidate is marked repair-ready only for prefix-current
-rejects; unknown partial-refresh rejects keep the conservative not-ready
-classification. Per-reject candidate and repair fields are reset before each
-new reject so multi-restart stress rows do not mix diagnostics from different
-attempts. In focused `coupled` samples, prefix-current rejects now show that
-the observed tail candidate is tolerance-valid but the robust full-block repair
-selects a different row, which is the next concrete boundary for a local
-pivoting tail kernel.
+The same diagnostic now preserves a checked-pivot row/value as a tail-candidate
+row when that row lies in the recorded row-tail scope. The candidate is marked
+repair-ready only for prefix-current rejects; unknown partial-refresh rejects
+keep the conservative not-ready classification. Per-reject candidate and repair
+fields are reset before each new reject so multi-restart stress rows do not mix
+diagnostics from different attempts. The KLU-storage checked refactor kernels
+now record the strongest violating entry in the rejected column instead of the
+first entry visited by the sparse `L` pattern. This does not change the
+accepted success-path factors or the fallback decision, but it makes the
+CKTSO-tail diagnostic sharper: if the fallback pivot row still differs from
+this strongest current-column candidate, then the missing paper mechanism is
+broader pivoting-tail state, not merely an early-exit artifact of KLS's
+diagnostic loop. The tail-opportunity summarizer now separates missing or
+non-tolerance-valid candidates from unknown refresh state, all-current reject
+state, and other not-ready cases so the paper-derived restart blocker is not
+misreported as a pivot-search failure. A focused stressed probe on `coupled`,
+`onetone2`, and `hvdc1` kept valid residuals; the two large repaired blockers
+reported `tail_row == repair_row` and were instead classified as
+`unknown_refresh_state`, confirming that the next missing CKTSO mechanism is
+prefix-safe pivoting-tail execution rather than merely finding a local row
+candidate.
 
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,
