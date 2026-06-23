@@ -315,14 +315,16 @@ calls still use the pivot-checking refactor kernel so they can stop at the
 first unsafe multiplier; KLS can repair a KLS-owned scaled rejected block,
 recompute row scales, and continue with a serial checked refactor over only
 later BTF blocks when the rejected pass left a valid prefix-current state.
-Scaled all-refresh KLU refactor rejects still fall back conservatively because
-the row scale vector may already be pivot-permuted. When an unscaled serial BTF
-refactor rejects a non-final block, the repaired block can now be followed by a
-serial checked continuation over only the later BTF blocks instead of
-restarting from the first block. For unscaled prefix-current or all-current
-rejects whose validated repair preserves a non-empty live prefix state, KLS
-can execute a conservative serial suffix restart of the rejected block with
-pivoting before falling back to full block repair. This executable tail path is
+Scaled prefix-current rejects whose validated repair preserves a non-empty
+live prefix state can also execute the conservative serial suffix restart of
+the rejected block with pivoting. Scaled all-refresh KLU refactor rejects still
+fall back conservatively because the row scale vector may already be
+pivot-permuted. When an unscaled serial BTF refactor rejects a non-final block,
+the repaired block can now be followed by a serial checked continuation over
+only the later BTF blocks instead of restarting from the first block. For
+unscaled prefix-current or all-current rejects whose validated repair preserves
+a non-empty live prefix state, KLS can execute the same conservative serial
+suffix restart before falling back to full block repair. This executable tail path is
 not limited to the checked row-refactor candidate diagnostic; the diagnostic is
 retained only to explain row-major candidate quality when that metadata exists.
 Root-of-block rejects remain classified as CKTSO

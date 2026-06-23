@@ -964,6 +964,87 @@ static int test_scaled_fast_factor_block_restart(void) {
   return ok;
 }
 
+static int test_scaled_fast_factor_prefix_tail_restart(void) {
+  const int32_t ap[] = {0, 1, 3, 5};
+  const int32_t ai[] = {0, 1, 2, 1, 2};
+  const double ax0[] = {2.0, 2.0, 1.0, 1.0, 2.0};
+  const double ax1[] = {2.0, 1.0e-12, 1.0, 1.0, 2.0};
+  const double b[] = {2.0, 3.000000000002, 8.0};
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = 2;
+  options.pivot_tolerance = 0.001;
+
+  int ok = 1;
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0,
+                                        &options),
+                        "analyze scaled prefix-tail restart")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor scaled prefix-tail base")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor scaled prefix-tail repair")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve scaled prefix-tail repair")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats scaled prefix-tail restart")) {
+    ok = 0;
+  }
+  if (ok && (stats.fast_rejected_pivot != 1 ||
+             stats.fast_rejected_block_start != 0 ||
+             stats.fast_rejected_block_size != 3 ||
+             stats.fast_rejected_refresh_state !=
+               KLS_FAST_REJECT_REFRESH_PREFIX ||
+             stats.fast_repaired_prefix_changed_pivots != 0 ||
+             stats.fast_repaired_suffix_changed_pivots < 1 ||
+             stats.fast_repaired_tail_restart_ready != 1 ||
+             stats.fast_repaired_tail_restart_columns < 1 ||
+             stats.fast_repaired_tail_restart_work <= 0.0 ||
+             stats.fast_block_restarts != 1 ||
+             stats.fast_tail_restarts != 1)) {
+    fprintf(stderr,
+            "unexpected scaled prefix-tail stats: pivot=%" PRId64
+            ", start=%" PRId64 ", size=%" PRId64 ", refresh=%d"
+            ", prefix_changed=%" PRId64 ", suffix_changed=%" PRId64
+            ", tail_ready=%d, tail_cols=%" PRId64 ", tail_work=%.6g"
+            ", block_restarts=%d, tail_restarts=%d\n",
+            stats.fast_rejected_pivot,
+            stats.fast_rejected_block_start,
+            stats.fast_rejected_block_size,
+            stats.fast_rejected_refresh_state,
+            stats.fast_repaired_prefix_changed_pivots,
+            stats.fast_repaired_suffix_changed_pivots,
+            stats.fast_repaired_tail_restart_ready,
+            stats.fast_repaired_tail_restart_columns,
+            stats.fast_repaired_tail_restart_work,
+            stats.fast_block_restarts,
+            stats.fast_tail_restarts);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats,
+                                        "scaled prefix-tail restart")) {
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0))) {
+    fprintf(stderr,
+            "unexpected scaled prefix-tail solution: %.17g %.17g %.17g\n",
+            x[0], x[1], x[2]);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
 static int test_scaled_btf_fast_factor_tail_continuation(void) {
   const int32_t ap[] = {0, 2, 4, 7, 9};
   const int32_t ai[] = {0, 1, 0, 1, 0, 2, 3, 2, 3};
@@ -1980,6 +2061,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_scaled_fast_factor_block_restart()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_scaled_fast_factor_prefix_tail_restart()) {
     return EXIT_FAILURE;
   }
   if (!test_scaled_btf_fast_factor_tail_continuation()) {

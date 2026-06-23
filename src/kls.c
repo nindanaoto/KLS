@@ -9733,12 +9733,12 @@ static int kls_try_pivot_tail_restart_rejected_block(
     solver != NULL &&
     (solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX ||
      solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL);
+  const int scaled = solver != NULL && solver->common.scale > 0;
   if (solver == NULL || solver->numeric == NULL ||
       solver->symbolic == NULL || numeric_values == NULL ||
       old_pblock == NULL || psinv == NULL || new_lu_out == NULL ||
       new_size_out == NULL || lnz_block_out == NULL ||
       unz_block_out == NULL || pblock == NULL ||
-      solver->common.scale > 0 ||
       !reusable_prefix_state ||
       local_reject == 0u || local_reject >= nk ||
       block >= solver->numeric->nblocks ||
@@ -9751,6 +9751,12 @@ static int kls_try_pivot_tail_restart_rejected_block(
       solver->numeric->Lip == NULL || solver->numeric->Uip == NULL ||
       solver->numeric->Udiag == NULL || solver->numeric->Offp == NULL ||
       solver->numeric->Offi == NULL || solver->numeric->Offx == NULL) {
+    return 0;
+  }
+  if ((scaled && (solver->numeric->Rs == NULL ||
+                  solver->fast_reject_refresh_state !=
+                    KLS_FAST_REJECT_REFRESH_PREFIX)) ||
+      (!scaled && solver->numeric->Rs != NULL)) {
     return 0;
   }
 
@@ -9875,7 +9881,10 @@ static int kls_try_pivot_tail_restart_rejected_block(
     if (!kls_tail_construct_column(
           k, solver->col_ptr, solver->row_idx, numeric_values,
           solver->symbolic->Q, (Entry *)solver->numeric->Xwork, (Int)nk,
-          (Int)k1, (Int *)psinv, NULL, 0, offp, NULL, NULL,
+          (Int)k1, (Int *)psinv,
+          scaled ? solver->numeric->Rs : NULL,
+          scaled ? (Int)solver->common.scale : 0,
+          offp, NULL, NULL,
           (Int)solver->numeric->nzoff)) {
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
