@@ -99,6 +99,12 @@ struct kls_solver {
   UF_long row_refactor_pipeline_group_count;
   UF_long row_refactor_pipeline_row_count;
   double row_refactor_pipeline_work;
+  int row_refactor_last_run;
+  int row_refactor_last_checked;
+  int row_refactor_last_parallel;
+  UF_long row_refactor_run_count;
+  UF_long row_refactor_checked_run_count;
+  UF_long row_refactor_parallel_run_count;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_segment_rows;
   UF_long row_refactor_segment_max_width;
@@ -571,6 +577,12 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_pipeline_group_count = 0;
   solver->row_refactor_pipeline_row_count = 0;
   solver->row_refactor_pipeline_work = 0.0;
+  solver->row_refactor_last_run = 0;
+  solver->row_refactor_last_checked = 0;
+  solver->row_refactor_last_parallel = 0;
+  solver->row_refactor_run_count = 0;
+  solver->row_refactor_checked_run_count = 0;
+  solver->row_refactor_parallel_run_count = 0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_segment_rows = 0;
   solver->row_refactor_segment_max_width = 0;
@@ -784,6 +796,36 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_tail_restarts = 0;
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_reject_tail_count = 0;
+}
+
+static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_last_run = 0;
+  solver->row_refactor_last_checked = 0;
+  solver->row_refactor_last_parallel = 0;
+  solver->stats.row_refactor_last_run = 0;
+  solver->stats.row_refactor_last_checked = 0;
+  solver->stats.row_refactor_last_parallel = 0;
+}
+
+static void kls_record_row_refactor_run(kls_solver *solver,
+                                        int check_pivots,
+                                        int parallel) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_last_run = 1;
+  solver->row_refactor_last_checked = check_pivots ? 1 : 0;
+  solver->row_refactor_last_parallel = parallel ? 1 : 0;
+  solver->row_refactor_run_count++;
+  if (check_pivots) {
+    solver->row_refactor_checked_run_count++;
+  }
+  if (parallel) {
+    solver->row_refactor_parallel_run_count++;
+  }
 }
 
 static void kls_record_fast_reject_detail(kls_solver *solver,
@@ -7246,6 +7288,15 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_pipeline_row_count;
   solver->stats.row_refactor_group_pipeline_work =
     solver->row_refactor_pipeline_work;
+  solver->stats.row_refactor_last_run = solver->row_refactor_last_run;
+  solver->stats.row_refactor_last_checked = solver->row_refactor_last_checked;
+  solver->stats.row_refactor_last_parallel = solver->row_refactor_last_parallel;
+  solver->stats.row_refactor_run_count =
+    (int64_t)solver->row_refactor_run_count;
+  solver->stats.row_refactor_checked_run_count =
+    (int64_t)solver->row_refactor_checked_run_count;
+  solver->stats.row_refactor_parallel_run_count =
+    (int64_t)solver->row_refactor_parallel_run_count;
   solver->stats.row_refactor_segment_count =
     (int64_t)solver->row_refactor_segment_count;
   solver->stats.row_refactor_segment_rows =
@@ -11394,6 +11445,7 @@ static int kls_single_block_row_refactor(kls_solver *solver,
     kls_row_refactor_should_defer_value_scatter(solver);
   kls_row_refactor_record_pipeline_scope(solver,
                                          solver->row_refactor_level_count);
+  kls_record_row_refactor_run(solver, check_pivots, 0);
 
   for (UF_long i = 0; i < n; ++i) {
     for (UF_long p = solver->row_refactor_input_ptr[i];
@@ -12400,6 +12452,7 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   shared->pipeline_pos_end =
     use_group_pipeline ? solver->row_refactor_group_count : 0u;
   shared->cluster_level_count = cluster_levels;
+  kls_record_row_refactor_run(solver, check_pivots, 1);
 
   for (int i = 0; i < thread_count; ++i) {
     pool->workers[i].shared = shared;
@@ -14858,6 +14911,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   kls_clear_fast_reject_stats(solver);
+  kls_clear_row_refactor_last_stats(solver);
   double *numeric_values = NULL;
   int status = prepare_numeric_values(solver, values, &numeric_values);
   if (status != KLS_OK) {
@@ -14963,6 +15017,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   kls_clear_fast_reject_stats(solver);
+  kls_clear_row_refactor_last_stats(solver);
   double *numeric_values = NULL;
   int status = prepare_numeric_values(solver, values, &numeric_values);
   if (status != KLS_OK) {

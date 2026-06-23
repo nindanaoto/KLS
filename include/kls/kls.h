@@ -170,6 +170,12 @@ typedef struct kls_stats {
   int64_t row_refactor_group_pipeline_groups;
   int64_t row_refactor_group_pipeline_rows;
   double row_refactor_group_pipeline_work;
+  int row_refactor_last_run;
+  int row_refactor_last_checked;
+  int row_refactor_last_parallel;
+  int64_t row_refactor_run_count;
+  int64_t row_refactor_checked_run_count;
+  int64_t row_refactor_parallel_run_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

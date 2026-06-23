@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "kls/kls.h"
 
 #include <ctype.h>
@@ -288,6 +290,33 @@ static int parse_int64_arg(const char *s, int64_t *value_out) {
   return 1;
 }
 
+static int valid_row_refactor_control(const char *s) {
+  return strcmp(s, "env") == 0 ||
+         strcmp(s, "off") == 0 ||
+         strcmp(s, "refactor") == 0 ||
+         strcmp(s, "checked") == 0 ||
+         strcmp(s, "all") == 0;
+}
+
+static int apply_row_refactor_control(const char *s) {
+  if (strcmp(s, "env") == 0) {
+    return 1;
+  }
+  const int enable_refactor =
+    strcmp(s, "refactor") == 0 || strcmp(s, "all") == 0;
+  const int enable_checked =
+    strcmp(s, "checked") == 0 || strcmp(s, "all") == 0;
+  if (setenv("KLS_ENABLE_ROW_REFACTOR",
+             enable_refactor ? "1" : "0", 1) != 0) {
+    return 0;
+  }
+  if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+             enable_checked ? "1" : "0", 1) != 0) {
+    return 0;
+  }
+  return 1;
+}
+
 static double *make_stressed_values(const matrix *a,
                                     double diagonal_scale,
                                     int64_t diagonal_column,
@@ -334,7 +363,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -350,6 +379,7 @@ int main(int argc, char **argv) {
   int analyze_only = 0;
   double stress_diagonal_scale = 1.0;
   int64_t stress_diagonal_column = -1;
+  const char *row_refactor_control = "env";
   kls_options options;
   kls_default_options(&options);
 
@@ -375,6 +405,12 @@ int main(int argc, char **argv) {
       }
     } else if (strcmp(argv[i], "--pivot-tol") == 0 && i + 1 < argc) {
       if (!parse_nonnegative_double(argv[++i], &options.pivot_tolerance)) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+      }
+    } else if (strcmp(argv[i], "--row-refactor") == 0 && i + 1 < argc) {
+      row_refactor_control = argv[++i];
+      if (!valid_row_refactor_control(row_refactor_control)) {
         usage(argv[0]);
         return EXIT_FAILURE;
       }
@@ -404,6 +440,10 @@ int main(int argc, char **argv) {
   }
   if (repeat <= 0 || refactor_repeat < 0 || options.threads <= 0) {
     usage(argv[0]);
+    return EXIT_FAILURE;
+  }
+  if (!apply_row_refactor_control(row_refactor_control)) {
+    perror("apply row-refactor control");
     return EXIT_FAILURE;
   }
 
@@ -442,6 +482,7 @@ int main(int argc, char **argv) {
              ",\"threads\":%d"
              ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
              ",\"ordering\":\"%s\",\"requested_scale\":\"%s\""
+             ",\"row_refactor_control\":\"%s\""
              ",\"requested_btf\":%s,\"btf\":%s"
              ",\"analysis_seconds\":%.9g"
              ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
@@ -454,6 +495,7 @@ int main(int argc, char **argv) {
              kls_orientation_name(stats.selected_orientation),
              kls_ordering_name(stats.selected_ordering),
              scale_name(options.scale),
+             row_refactor_control,
              options.use_btf ? "true" : "false",
              stats.selected_btf ? "true" : "false",
              stats.analysis_seconds, stats.nblocks, stats.max_block,
@@ -468,6 +510,7 @@ int main(int argc, char **argv) {
              kls_orientation_name(stats.selected_orientation));
       printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
       printf("requested scale: %s\n", scale_name(options.scale));
+      printf("row refactor control: %s\n", row_refactor_control);
       printf("requested btf: %s\n", options.use_btf ? "on" : "off");
       printf("selected btf: %s\n", stats.selected_btf ? "on" : "off");
       printf("analysis: %.6f s\n", stats.analysis_seconds);
@@ -614,6 +657,7 @@ int main(int argc, char **argv) {
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
            ",\"pivot_tolerance\":%.9g,\"selected_pivot_tolerance\":%.9g"
+           ",\"row_refactor_control\":\"%s\""
            ",\"stress_diagonal_scale\":%.9g"
            ",\"stress_diagonal_column\":%" PRId64
            ",\"stress_diagonal_entries\":%" PRId64
@@ -688,6 +732,12 @@ int main(int argc, char **argv) {
            ",\"row_refactor_group_pipeline_groups\":%" PRId64
            ",\"row_refactor_group_pipeline_rows\":%" PRId64
            ",\"row_refactor_group_pipeline_work\":%.9g"
+           ",\"row_refactor_last_run\":%d"
+           ",\"row_refactor_last_checked\":%d"
+           ",\"row_refactor_last_parallel\":%d"
+           ",\"row_refactor_run_count\":%" PRId64
+           ",\"row_refactor_checked_run_count\":%" PRId64
+           ",\"row_refactor_parallel_run_count\":%" PRId64
            ",\"row_refactor_segment_count\":%" PRId64
            ",\"row_refactor_segment_rows\":%" PRId64
            ",\"row_refactor_segment_max_width\":%" PRId64
@@ -712,6 +762,7 @@ int main(int argc, char **argv) {
            kls_ordering_name(stats.selected_ordering),
            scale_name(options.scale), stats.selected_scale,
            options.pivot_tolerance, stats.selected_pivot_tolerance,
+           row_refactor_control,
            stress_requested ? stress_diagonal_scale : 1.0,
            stress_requested ? stress_diagonal_column : -1,
            stress_entries,
@@ -785,6 +836,12 @@ int main(int argc, char **argv) {
            stats.row_refactor_group_pipeline_groups,
            stats.row_refactor_group_pipeline_rows,
            stats.row_refactor_group_pipeline_work,
+           stats.row_refactor_last_run,
+           stats.row_refactor_last_checked,
+           stats.row_refactor_last_parallel,
+           stats.row_refactor_run_count,
+           stats.row_refactor_checked_run_count,
+           stats.row_refactor_parallel_run_count,
            stats.row_refactor_segment_count,
            stats.row_refactor_segment_rows,
            stats.row_refactor_segment_max_width,
@@ -813,6 +870,7 @@ int main(int argc, char **argv) {
     printf("selected scale: %d\n", stats.selected_scale);
     printf("requested pivot tolerance: %.6g\n", options.pivot_tolerance);
     printf("selected pivot tolerance: %.6g\n", stats.selected_pivot_tolerance);
+    printf("row refactor control: %s\n", row_refactor_control);
     if (stress_requested) {
       printf("stress diagonal scale: %.6g, column: %" PRId64
              ", entries: %" PRId64 "\n",
@@ -922,14 +980,23 @@ int main(int argc, char **argv) {
     printf("row refactor groups: %" PRId64
            ", levels: %" PRId64 ", max level width: %" PRId64
            ", cluster levels: %" PRId64 ", pipeline groups: %" PRId64
-           ", pipeline rows: %" PRId64 ", pipeline work: %.6g\n",
+           ", pipeline rows: %" PRId64 ", pipeline work: %.6g"
+           ", last run: %d, last checked: %d, last parallel: %d"
+           ", runs: %" PRId64 ", checked runs: %" PRId64
+           ", parallel runs: %" PRId64 "\n",
            stats.row_refactor_group_count,
            stats.row_refactor_group_level_count,
            stats.row_refactor_group_level_max_width,
            stats.row_refactor_group_cluster_levels,
            stats.row_refactor_group_pipeline_groups,
            stats.row_refactor_group_pipeline_rows,
-           stats.row_refactor_group_pipeline_work);
+           stats.row_refactor_group_pipeline_work,
+           stats.row_refactor_last_run,
+           stats.row_refactor_last_checked,
+           stats.row_refactor_last_parallel,
+           stats.row_refactor_run_count,
+           stats.row_refactor_checked_run_count,
+           stats.row_refactor_parallel_run_count);
     printf("row refactor segments: %" PRId64
            ", rows: %" PRId64 ", max width: %" PRId64
            ", dense entries: %.6g, trailing entries: %.6g\n",

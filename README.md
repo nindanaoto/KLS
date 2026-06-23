@@ -340,7 +340,11 @@ splits precomputed row-group levels into barriered cluster levels and a
 dynamic topological pipeline tail; stats report
 `row_refactor_group_cluster_levels`, `row_refactor_group_pipeline_groups`,
 `row_refactor_group_pipeline_rows`, and
-`row_refactor_group_pipeline_work`.
+`row_refactor_group_pipeline_work`. Because checked row fast-factor probes and
+unchecked row refactors are selected independently, stats also report
+`row_refactor_last_run`, `row_refactor_last_checked`,
+`row_refactor_last_parallel`, and row-refactor run counters to identify the
+last numeric kernel actually used.
 Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_row`,
 `fast_rejected_multiplier_abs`, `fast_rejected_pivot_abs`,
@@ -651,7 +655,11 @@ analysis, initial factorization, repeated refactorization, and repeated solve
 contributions. For KLS candidate rows, the report also includes EGraph
 dependency levels, root/leaf/max-fanout counts, cluster levels, pipeline
 columns, max per-column work, pipeline max per-column work, and
-dependency-work estimates when those fields are present in the benchmark JSONL:
+dependency-work estimates when those fields are present in the benchmark JSONL.
+For row-engine experiments, `kls_bench` and `run_bench_suite.py` accept
+`--row-refactor env|off|refactor|checked|all`; the emitted
+`row_refactor_last_*` fields show whether the last numeric pass really used the
+row kernel:
 
 ```sh
 python3 scripts/decompose_solver_gap.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/cktso_suite.jsonl --reference-name cktso
@@ -728,8 +736,8 @@ refactors and a narrow scaled dominant-BTF subset, plus an unscaled block-local
 pivot restart for fast-factor failures. Benchmark stats also report
 row-major U-pattern supernode candidates and detailed rejected-row/multiplier
 coordinates from KLS-owned pivot checks, plus row-refactor cluster/pipeline
-counters, so the remaining SubtreeLU/CKTSO row-segment work can be evaluated
-on the same slow-case artifacts.
+counters and last-run markers, so the remaining SubtreeLU/CKTSO row-segment
+work can be evaluated on the same slow-case artifacts.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The next algorithmic work is to evolve the numeric factor/refactor/solve
 kernels toward deeper KLS-owned sparse kernels with better pivot reuse and

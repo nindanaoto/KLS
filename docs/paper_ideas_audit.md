@@ -1849,15 +1849,19 @@ wide group levels with barriers, and lets workers claim the remaining
 topological group sequence from an atomic cursor while waiting on predecessor
 rows through the retained completion bitmap. Benchmark stats now report
 row-refactor cluster levels, pipeline groups, pipeline rows, and pipeline work.
-A constructed smoke matrix forces this path. On a focused same-session
-four-thread `G2_circuit` probe the checked row path reported 34 cluster levels
-and 32 pipeline groups covering 2619 rows, with valid residuals; repeated
-refactor averaged about `0.241s` versus about `0.304s` for the default column
-EGraph path in that sample, while the checked row factor pass remained slower
-at about `0.603s` versus about `0.263s`. The default KLS path is unchanged;
-this remains experimental row-engine scaffolding until the row numeric
-factor/refactor path is validated and faster across the broader paper matrix
-set.
+A constructed smoke matrix forces this path. A later instrumentation pass fixed
+an important measurement ambiguity in this paragraph: enabling the checked row
+fast-factor path does not by itself make the following unchecked `kls_refactor`
+call use the row kernel. The row-pattern counters can therefore describe a
+retained checked factor pass while the measured repeated refactor is still the
+default column EGraph kernel. Benchmark JSON now reports
+`row_refactor_last_run`, `row_refactor_last_checked`,
+`row_refactor_last_parallel`, and row-refactor run counters, and `kls_bench`
+accepts `--row-refactor env|off|refactor|checked|all` so future paper-suite
+artifacts can separate checked-row factor probes from actual row-refactor
+probes. The default KLS path is unchanged; this remains experimental
+row-engine scaffolding until the row numeric factor/refactor path is validated
+and faster across the broader paper matrix set.
 
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
@@ -2654,6 +2658,19 @@ the rebuilt `Pinv`, preserving only the proven-good prefix `Offp` count and
 falling back to the full rebuild if the suffix shape proof fails. The BTF
 off-block tail smoke changes suffix off-block values between the base and
 repaired matrices, so stale values in that suffix are observable in the solve.
+
+The row-refactor benchmark controls were then made explicit after the
+checked-row/refactor ambiguity above was found. `kls_bench` now accepts
+`--row-refactor env|off|refactor|checked|all`, `run_bench_suite.py` forwards
+the same option, and stats report both retained row-pattern shape and actual
+last numeric row-kernel execution. A focused four-thread `G2_circuit` check
+confirmed the distinction: `--row-refactor checked` ran one checked row
+fast-factor pass but reported `row_refactor_last_run=0` after the subsequent
+unchecked refactor, while `--row-refactor refactor` reported
+`row_refactor_last_run=1` and `row_refactor_last_checked=0` for the final
+refactor. In that same noisy sample the explicit row refactor was slower than
+the default EGraph refactor, so this is retained as measurement cleanup and
+benchmark reproducibility, not as a default policy change.
 
 ## Recommended General Work
 
