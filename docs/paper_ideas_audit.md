@@ -1365,7 +1365,7 @@ and against saved KLU2 the common-row geomean speedup improved to about
 `2.06x`.
 
 The BTF retry was then extended downward to a low-work medium many-block class:
-4k-90k rows, at least 1024 BTF blocks, a 5-80% largest block, at most `2e7`
+4k-90k rows, at least 1024 BTF blocks, a 5-82% largest block, at most `2e7`
 estimated BTF flops, and at least 95.5% structural diagonal coverage. The
 no-BTF candidate is accepted only when symbolic fill stays within 1.75x and
 estimated flops within 1.5x of the BTF symbolic. Focused checks showed forced
@@ -1377,6 +1377,15 @@ about `0.2952s` to about `0.2877s`. On the 90 rows common with saved CKTSO,
 KLS is still about `1.09x` slower; on the 88 rows common with saved KLU2, KLS
 is about `2.12x` faster. This is a retained general low-work BTF-overhead
 reduction, not evidence that ordering alone closes the remaining CKTSO gap.
+
+The largest-block ceiling was then widened from 80% to 82%, still under the
+same low-work and diagonal-completeness guards. In the current medium corpus
+this adds only `bips98_606`, another Rommes low-work matrix whose no-BTF
+symbolic roughly halves the estimated flops without the tiny-block blow-up seen
+on Sandia `mult_dcop_*` and `TSOPF_RS_b9_c6`. The full medium artifact again
+kept the same three failures, moved KLS geomean to about `0.2853s`, narrowed
+the CKTSO common-row ratio to about `1.081x`, and improved the KLU2 common-row
+speedup to about `2.14x`.
 
 ## Recommended General Work
 

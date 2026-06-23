@@ -2395,7 +2395,7 @@ static int btf_low_work_many_block_retry_shape_is_allowed(
   const double largest = (double)symbolic->maxblock;
   const UF_long diagonal = count_pattern_diagonal(n, col_ptr, row_idx);
   return largest >= 0.05 * (double)n &&
-         largest <= 0.80 * (double)n &&
+         largest <= 0.82 * (double)n &&
          200.0 * (double)diagonal >= 191.0 * (double)n;
 }
 
