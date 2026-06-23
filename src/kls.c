@@ -3893,14 +3893,19 @@ static int build_spral_auction_row_match(UF_long n,
                                          const UF_long *row_idx,
                                          const double *numeric_values,
                                          UF_long **row_perm_out,
-                                         UF_long *matched_out) {
+                                         UF_long *matched_out,
+                                         double **row_scale_out,
+                                         double **col_scale_out) {
   if (n <= 0 || nnz <= 0 || col_ptr == NULL || row_idx == NULL ||
       numeric_values == NULL || row_perm_out == NULL ||
-      matched_out == NULL) {
+      matched_out == NULL || row_scale_out == NULL ||
+      col_scale_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   *row_perm_out = NULL;
   *matched_out = 0;
+  *row_scale_out = NULL;
+  *col_scale_out = NULL;
   if (n > (UF_long)INT_MAX) {
     return KLS_ERR_UNSUPPORTED;
   }
@@ -3968,10 +3973,10 @@ static int build_spral_auction_row_match(UF_long n,
 
   free(spral_col_ptr);
   free(spral_row_idx);
-  free(row_scale);
-  free(col_scale);
   if (inform.flag < 0) {
     free(spral_match);
+    free(row_scale);
+    free(col_scale);
     free(row_perm);
     free(col_match);
     return inform.flag == -1 ? KLS_ERR_OUT_OF_MEMORY : KLS_ERR_UNSUPPORTED;
@@ -3986,6 +3991,8 @@ static int build_spral_auction_row_match(UF_long n,
     const UF_long col = (UF_long)col_int;
     if (col_match[col] != KLS_KLU_EMPTY) {
       free(spral_match);
+      free(row_scale);
+      free(col_scale);
       free(row_perm);
       free(col_match);
       return KLS_ERR_UNSUPPORTED;
@@ -4000,12 +4007,60 @@ static int build_spral_auction_row_match(UF_long n,
     complete_unmatched_row_match(n, row_perm, col_match);
   free(col_match);
   if (complete_status != KLS_OK) {
+    free(row_scale);
+    free(col_scale);
     free(row_perm);
     return complete_status;
   }
 
+  int scaling_usable = inform.flag == 0 && matched == n;
+  if (scaling_usable) {
+    double *mapped_row_scale =
+      (double *)malloc((size_t)n * sizeof(*mapped_row_scale));
+    if (mapped_row_scale == NULL) {
+      free(row_scale);
+      free(col_scale);
+      free(row_perm);
+      return KLS_ERR_OUT_OF_MEMORY;
+    }
+    for (UF_long i = 0; i < n; ++i) {
+      mapped_row_scale[i] = 1.0;
+    }
+    for (UF_long col = 0; col < n && scaling_usable; ++col) {
+      if (!isfinite(col_scale[col]) || col_scale[col] <= 0.0) {
+        scaling_usable = 0;
+      } else {
+        col_scale[col] = clamp_matching_scale(col_scale[col]);
+      }
+    }
+    for (UF_long row = 0; row < n && scaling_usable; ++row) {
+      const UF_long scaled_row = row_perm[row];
+      if (scaled_row >= n || !isfinite(row_scale[row]) ||
+          row_scale[row] <= 0.0) {
+        scaling_usable = 0;
+      } else {
+        mapped_row_scale[scaled_row] =
+          clamp_matching_scale(row_scale[row]);
+      }
+    }
+    if (scaling_usable) {
+      free(row_scale);
+      row_scale = mapped_row_scale;
+    } else {
+      free(mapped_row_scale);
+    }
+  }
+  if (!scaling_usable) {
+    free(row_scale);
+    free(col_scale);
+    row_scale = NULL;
+    col_scale = NULL;
+  }
+
   *row_perm_out = row_perm;
   *matched_out = matched;
+  *row_scale_out = row_scale;
+  *col_scale_out = col_scale;
   return KLS_OK;
 }
 #endif
@@ -4198,7 +4253,8 @@ static int build_greedy_numeric_row_match(UF_long n,
     UF_long spral_matched = 0;
     const int spral_status =
       build_spral_auction_row_match(n, nnz, col_ptr, row_idx, numeric_values,
-                                    &spral_row_perm, &spral_matched);
+                                    &spral_row_perm, &spral_matched,
+                                    row_scale_out, col_scale_out);
     if (spral_status == KLS_OK) {
       if (spral_matched > matched) {
         free(row_perm);
@@ -4221,6 +4277,10 @@ static int build_greedy_numeric_row_match(UF_long n,
         }
       } else {
         free(spral_row_perm);
+        free(*row_scale_out);
+        free(*col_scale_out);
+        *row_scale_out = NULL;
+        *col_scale_out = NULL;
       }
     } else if (spral_status == KLS_ERR_OUT_OF_MEMORY) {
       free(entries);
@@ -5529,11 +5589,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 #ifdef KLS_HAVE_SPRAL_SCALING
   int status = KLS_OK;
   if (use_large_spral_match) {
-    status = build_spral_hungarian_row_match_scaling(
+    status = build_spral_auction_row_match(
       solver->n, solver->nnz, base_col_ptr, base_row_idx, base_values,
       &row_perm, &matched, &match_row_scale, &match_col_scale);
-    exact_matching = (status == KLS_OK && matched == solver->n &&
-                      match_row_scale != NULL && match_col_scale != NULL);
+    exact_matching = 0;
   } else
 #else
   int status = KLS_OK;

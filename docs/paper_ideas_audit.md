@@ -39,8 +39,9 @@ preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
 cycles beyond the pair-swap pass. KLS now enables the pinned BSD-licensed SPRAL
 scaling subset by default, so it can use Hungarian matching/scaling as a
-pre-factor MC64-adjacent candidate for large weak-diagonal dominant-block
-matrices and as a post-factor value-gated trial for dense
+pre-factor MC64-adjacent candidate for small and medium weak-diagonal matrices,
+SPRAL auction matching/scaling for very large weak-diagonal dominant-block
+matrices, and a post-factor value-gated Hungarian trial for dense
 high-off-diagonal-pivot cases while still allowing
 `KLS_ENABLE_SPRAL_SCALING=OFF` builds. Fast factorization can now repair an
 unsafe unscaled BTF diagonal block by

@@ -94,6 +94,11 @@ have to pass KLS's normal numeric checks and a value gate that requires the
 matching to remove substantial pivoting pressure or materially reduce factor
 work/fill.
 
+For very large pre-static candidates, KLS uses SPRAL's auction
+matching/scaling path instead of exact Hungarian matching. This keeps the
+MC64-adjacent step on LGPL-compatible redistributed code while avoiding an
+unbounded exact-assignment setup cost on large circuit matrices.
+
 KLS keeps this as the only vendored MC64-adjacent external implementation.
 Existing MC64-style code is acceptable when its license remains compatible with
 KLS's LGPL distribution goal, allows redistribution in source and binary form
