@@ -1700,6 +1700,19 @@ and moved to about `0.846s`, while the default column EGraph path measured
 about `0.201s`. On the `add20` ten-refactor smoke run, no segment crossed the
 dense-work threshold and the path stayed valid at about `0.000223s`.
 
+The dense segment mini-solve then split internal segment factorization from the
+shared trailing-panel update. The dense path now first normalizes and applies
+the internal lower/dense-upper block, checks pivots, and then runs the shared
+trailing rows as a separate triangular update over the segment. This does not
+change the flop count or make the gated row path competitive, but it matches
+the paper direction more closely by isolating the panel operation that compact
+row/segment storage or BLAS-style packing would later batch. Same-session
+checks stayed valid: `G2_circuit` measured about `0.839s` repeated refactor for
+the gated row path while the default column EGraph path measured about
+`0.232s`, and `add20` stayed valid with no dense-eligible segments at about
+`0.000274s`. The result is retained as row/segment scaffolding, not a
+production dispatch candidate.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
