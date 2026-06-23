@@ -178,6 +178,9 @@ level-column list and lets workers claim columns in natural factor order; the
 U-pattern dependency waits still enforce correctness. Dominant-BTF
 all-pipeline schedules keep the level-column list, because level order provides
 better structural balance across the large block and its fringe.
+The huge single-block unscaled EGraph column kernel also relies on that
+prevalidated map and schedule instead of repeating structural pointer,
+row-bound, and U-order checks inside every column.
 Most low-work dominant-BTF cases also stay on the mapped serial path, but those with
 enough measured dependency work can consume the same EGraph path. When a
 low-work dominant BTF decomposition has one 95%+ block plus thousands of tiny

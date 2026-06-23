@@ -1810,6 +1810,17 @@ versus the saved `0.0457s` no-thread-slices sample), while three `G2_circuit`
 direct samples moved repeated refactor to about `0.218-0.241s` versus the saved
 `0.398s` no-thread-slices sample.
 
+The huge single-block unscaled EGraph column kernel then stopped repeating
+structural checks that are already proven by the retained refactor map, exact
+U-pattern schedule, and EGraph eligibility gate before worker launch. Numeric
+singularity and pivot-threshold checks remain in the kernel. Three direct
+`G2_circuit` samples moved median repeated refactor from the saved
+natural-order sample's `0.2383s` to `0.2188s`, while direct `rajat28` guard
+samples stayed in the same scaled dominant-BTF band at about `0.048s`. A
+broader attempt to split the BTF value/scaling helper was rejected because it
+pushed the scaled `rajat28` guard outside its timing band; that path stays on
+the conservative helper logic.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

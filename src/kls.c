@@ -8006,27 +8006,12 @@ static int kls_egraph_refactor_single_unscaled_column(
   double *x = worker->x;
   double *udiag = (double *)numeric->Udiag;
 
-  if (k >= solver->n ||
-      solver->refactor_col_ptr == NULL ||
-      solver->refactor_row_idx == NULL ||
-      solver->refactor_input_pos == NULL ||
-      numeric->LUbx == NULL || numeric->LUbx[0] == NULL ||
-      numeric->Lip == NULL || numeric->Llen == NULL ||
-      numeric->Uip == NULL || numeric->Ulen == NULL ||
-      symbolic->Q == NULL) {
-    kls_egraph_refactor_record_invalid(shared);
-    return 0;
-  }
-
+  /* The EGraph dispatcher validates the map, LU arrays, and U topological
+     order once before launching workers; keep this hot kernel branch-light. */
   for (UF_long p = solver->refactor_col_ptr[k];
        p < solver->refactor_col_ptr[k + 1u]; ++p) {
-    const UF_long row = solver->refactor_row_idx[p];
-    const UF_long input_pos = solver->refactor_input_pos[p];
-    if (row >= solver->n || input_pos >= solver->nnz) {
-      kls_egraph_refactor_record_invalid(shared);
-      return 0;
-    }
-    x[row] = shared->values[input_pos];
+    x[solver->refactor_row_idx[p]] =
+      shared->values[solver->refactor_input_pos[p]];
   }
 
   double *lu = (double *)numeric->LUbx[0];
@@ -8037,10 +8022,6 @@ static int kls_egraph_refactor_single_unscaled_column(
                       &ui, &ux, &ucol_len);
   for (UF_long up = 0; up < ucol_len; ++up) {
     const UF_long j = ui[up];
-    if (j >= k) {
-      kls_egraph_refactor_record_invalid(shared);
-      return 0;
-    }
     if (wait_for_dependencies &&
         !kls_egraph_refactor_wait_done(shared, j)) {
       return 0;
