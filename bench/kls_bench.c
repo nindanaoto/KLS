@@ -645,6 +645,7 @@ int main(int argc, char **argv) {
            ",\"fast_repaired_first_changed_pivot\":%" PRId64
            ",\"fast_repaired_prefix_changed_pivots\":%" PRId64
            ",\"fast_repaired_suffix_changed_pivots\":%" PRId64
+           ",\"fast_repaired_tail_restart_ready\":%d"
            ",\"fast_block_restarts\":%d"
            ",\"fast_rejected_block_start\":%" PRId64
            ",\"fast_rejected_block_size\":%" PRId64
@@ -726,6 +727,7 @@ int main(int argc, char **argv) {
            stats.fast_repaired_first_changed_pivot,
            stats.fast_repaired_prefix_changed_pivots,
            stats.fast_repaired_suffix_changed_pivots,
+           stats.fast_repaired_tail_restart_ready,
            stats.fast_block_restarts,
            stats.fast_rejected_block_start,
            stats.fast_rejected_block_size,
@@ -826,12 +828,13 @@ int main(int argc, char **argv) {
            stats.fast_rejected_tail_candidate_position);
     printf("fast repaired pivot: row %" PRId64 ", matches tail candidate %d"
            ", first changed pivot %" PRId64 ", prefix changes %" PRId64
-           ", suffix changes %" PRId64 "\n",
+           ", suffix changes %" PRId64 ", tail restart ready %d\n",
            stats.fast_repaired_pivot_row,
            stats.fast_repaired_pivot_matches_tail_candidate,
            stats.fast_repaired_first_changed_pivot,
            stats.fast_repaired_prefix_changed_pivots,
-           stats.fast_repaired_suffix_changed_pivots);
+           stats.fast_repaired_suffix_changed_pivots,
+           stats.fast_repaired_tail_restart_ready);
     printf("fast block restarts: %d\n", stats.fast_block_restarts);
     printf("fast rejected block: start %" PRId64 ", size %" PRId64
            ", suffix %" PRId64 ", descendants %" PRId64

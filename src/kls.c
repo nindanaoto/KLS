@@ -711,6 +711,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_first_changed_pivot = -1;
   solver->stats.fast_repaired_prefix_changed_pivots = 0;
   solver->stats.fast_repaired_suffix_changed_pivots = 0;
+  solver->stats.fast_repaired_tail_restart_ready = 0;
   solver->stats.fast_block_restarts = 0;
   solver->stats.fast_rejected_block_start = -1;
   solver->stats.fast_rejected_block_size = 0;
@@ -8265,6 +8266,12 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     (int64_t)prefix_changed;
   solver->stats.fast_repaired_suffix_changed_pivots =
     (int64_t)suffix_changed;
+  solver->stats.fast_repaired_tail_restart_ready =
+    solver->stats.fast_rejected_tail_repair_ready &&
+    solver->stats.fast_repaired_pivot_matches_tail_candidate &&
+    prefix_changed == 0u &&
+    (first_changed == KLS_KLU_EMPTY || first_changed >= rejected_pivot) &&
+    suffix_changed > 0u;
 }
 
 static int kls_pivot_restart_rejected_block(kls_solver *solver,

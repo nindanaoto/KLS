@@ -1922,13 +1922,18 @@ pivots occur before versus at/after the rejected pivot. These repair-delta
 fields separate cases where the robust full-block KLU repair already preserves
 the checked prefix and chooses the row-tail candidate from cases that would
 need broader repivoting than a CKTSO-style local tail restart can safely
-provide.
+provide. KLS summarizes the strict compatible subset as
+`fast_repaired_tail_restart_ready`, which requires a prefix-current checked
+row-major reject, a tolerance-valid row-tail candidate, a fallback repair that
+selects that candidate at the rejected pivot, and zero changed pivots before
+the rejected pivot.
 The first focused stress probe shows why that distinction matters: stressed
 `add20` chose the retained row-tail candidate at the rejected pivot, but the
 full KLU block repair also changed one pivot before the rejected pivot, so a
 future local tail kernel cannot treat tail-candidate availability alone as a
-safe replacement for the fallback repair. The ordinary non-reject
-`G2_circuit` row-refactor path leaves these fields at their sentinels.
+safe replacement for the fallback repair; its strict tail-restart-ready flag is
+therefore false. The ordinary non-reject `G2_circuit` row-refactor path leaves
+these fields at their sentinels.
 
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,
