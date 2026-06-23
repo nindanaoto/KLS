@@ -312,10 +312,11 @@ refreshed. If the failed pass had already refreshed all columns, or if a serial
 BTF refactor reached the final block before rejection, KLS validates the
 repaired block tail and skips the redundant checked retry. Scaled fast-factor
 calls still use the pivot-checking refactor kernel so they can stop at the
-first unsafe multiplier; KLS can repair the scaled rejected block when the
-repaired block covers all remaining columns and the row scale vector is still
-in input-row order. Scaled multi-block tails and scaled all-refresh KLU
-refactor rejects still fall back conservatively. When an unscaled serial BTF
+first unsafe multiplier; KLS can repair a KLS-owned scaled rejected block,
+recompute row scales, and continue with a serial checked refactor over only
+later BTF blocks when the rejected pass left a valid prefix-current state.
+Scaled all-refresh KLU refactor rejects still fall back conservatively because
+the row scale vector may already be pivot-permuted. When an unscaled serial BTF
 refactor rejects a non-final block, the repaired block can now be followed by a
 serial checked continuation over only the later BTF blocks instead of
 restarting from the first block. For unscaled prefix-current or all-current

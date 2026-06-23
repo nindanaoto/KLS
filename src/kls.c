@@ -14434,8 +14434,10 @@ static int kls_serial_refactor_tail_from_block(kls_solver *solver,
   return 1;
 }
 
-static int kls_serial_checked_scaled_refactor(kls_solver *solver,
-                                              double *numeric_values) {
+static int kls_serial_checked_scaled_refactor_from_block(
+  kls_solver *solver,
+  double *numeric_values,
+  UF_long start_block) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->common.scale <= 0 ||
       solver->numeric->Rs == NULL || solver->numeric->Pnum == NULL ||
@@ -14443,7 +14445,8 @@ static int kls_serial_checked_scaled_refactor(kls_solver *solver,
       solver->numeric->Offp == NULL || solver->numeric->Offx == NULL ||
       solver->numeric->Lip == NULL || solver->numeric->Llen == NULL ||
       solver->numeric->Uip == NULL || solver->numeric->Ulen == NULL ||
-      solver->numeric->LUbx == NULL || solver->numeric->Xwork == NULL) {
+      solver->numeric->LUbx == NULL || solver->numeric->Xwork == NULL ||
+      start_block > solver->symbolic->nblocks) {
     return -1;
   }
 
@@ -14487,8 +14490,9 @@ static int kls_serial_checked_scaled_refactor(kls_solver *solver,
   worker.rejected_candidate_abs = -1.0;
   worker.numerical_rank = UF_long_max;
   worker.singular_col = KLS_KLU_EMPTY;
+  memset(worker.x, 0, (size_t)solver->symbolic->maxblock * sizeof(*worker.x));
 
-  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+  for (UF_long block = start_block; block < solver->symbolic->nblocks; ++block) {
     kls_parallel_refactor_block(&worker, block);
     if (worker.invalid || worker.pivot_rejected ||
         (worker.singular && common->halt_if_singular)) {
@@ -14528,6 +14532,12 @@ static int kls_serial_checked_scaled_refactor(kls_solver *solver,
     common->status = TRILINOS_KLU_OK;
   }
   return 1;
+}
+
+static int kls_serial_checked_scaled_refactor(kls_solver *solver,
+                                              double *numeric_values) {
+  return kls_serial_checked_scaled_refactor_from_block(solver, numeric_values,
+                                                       0u);
 }
 
 static void maybe_prepare_refactor_map(kls_solver *solver,
@@ -15118,8 +15128,10 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     const int repair_covers_remaining =
       kls_fast_repair_covers_remaining_columns(solver, rejected_pivot);
     if (solver->common.scale > 0) {
-      if (!repair_covers_remaining ||
-          solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL) {
+      if (solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL ||
+          (!repair_covers_remaining &&
+           solver->fast_reject_refresh_state !=
+             KLS_FAST_REJECT_REFRESH_PREFIX)) {
         return 0;
       }
     }
@@ -15145,8 +15157,11 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     }
     if (solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX) {
       const int tail_ok =
-        kls_serial_refactor_tail_from_block(solver, numeric_values,
-                                            repaired_block + 1u, 1);
+        solver->common.scale > 0
+          ? kls_serial_checked_scaled_refactor_from_block(
+              solver, numeric_values, repaired_block + 1u)
+          : kls_serial_refactor_tail_from_block(solver, numeric_values,
+                                                repaired_block + 1u, 1);
       if (tail_ok < 0 || solver->common.status < 0 ||
           solver->common.status == TRILINOS_KLU_SINGULAR) {
         return 0;
