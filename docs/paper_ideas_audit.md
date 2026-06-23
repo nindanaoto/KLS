@@ -2047,6 +2047,19 @@ helped some ASIC samples but regressed low-work/scaled guards such as
 `LeGresley_87936`, `onetone2`, and `rajat28` under repeated same-session
 probes.
 
+Two follow-up BTF bookkeeping probes were also rejected. First, a cached
+block-local row map avoided `global_row - block_start` inside the BTF EGraph
+kernel, but the extra map memory did not pay back: the nine-row BTF focus
+regressed by about `0.5%` geomean versus the retained validation-trim commit,
+with clear losses on `LeGresley_87936` and `ckt11752_tr_0`. Second, removing
+the remaining per-column LU-pointer-cache validation from the BTF specialized
+kernel also regressed the same focus set by about `0.7%` geomean and slowed the
+large ASIC rows. The retained BTF specialization therefore keeps the pointer
+cache guard and computes block-local row indices directly. The broader signal
+is unchanged: small KLU-storage bookkeeping trims are now yielding mixed or
+single-digit effects, while the CKTSO gap still requires a row/segment numeric
+engine with pivoting-tail restart semantics.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
