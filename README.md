@@ -353,7 +353,12 @@ patterns, pipeline groups also retain their external dependency rows so the
 scheduler can wait on them once before running the group kernel; stats report
 `row_refactor_group_cluster_levels`, `row_refactor_group_pipeline_groups`,
 `row_refactor_group_pipeline_rows`, and
-`row_refactor_group_pipeline_work`. Because checked row fast-factor probes and
+`row_refactor_group_pipeline_work`. The same row-group metadata now also retains
+the reverse group graph and reports `row_refactor_group_dependency_edges`,
+`row_refactor_group_root_count`, `row_refactor_group_leaf_count`, and
+`row_refactor_group_max_fanout`, which are the row-segment task-graph counters
+needed by future private/pipeline partitioning and tail-restart schedulers.
+Because checked row fast-factor probes and
 unchecked row refactors are selected independently, stats also report
 `row_refactor_last_run`, `row_refactor_last_checked`,
 `row_refactor_last_parallel`, and row-refactor run counters to identify the

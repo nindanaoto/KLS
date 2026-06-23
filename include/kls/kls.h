@@ -176,6 +176,10 @@ typedef struct kls_stats {
   int64_t row_refactor_run_count;
   int64_t row_refactor_checked_run_count;
   int64_t row_refactor_parallel_run_count;
+  int64_t row_refactor_group_dependency_edges;
+  int64_t row_refactor_group_root_count;
+  int64_t row_refactor_group_leaf_count;
+  int64_t row_refactor_group_max_fanout;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

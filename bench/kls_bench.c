@@ -732,6 +732,10 @@ int main(int argc, char **argv) {
            ",\"row_refactor_group_pipeline_groups\":%" PRId64
            ",\"row_refactor_group_pipeline_rows\":%" PRId64
            ",\"row_refactor_group_pipeline_work\":%.9g"
+           ",\"row_refactor_group_dependency_edges\":%" PRId64
+           ",\"row_refactor_group_root_count\":%" PRId64
+           ",\"row_refactor_group_leaf_count\":%" PRId64
+           ",\"row_refactor_group_max_fanout\":%" PRId64
            ",\"row_refactor_last_run\":%d"
            ",\"row_refactor_last_checked\":%d"
            ",\"row_refactor_last_parallel\":%d"
@@ -836,6 +840,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_group_pipeline_groups,
            stats.row_refactor_group_pipeline_rows,
            stats.row_refactor_group_pipeline_work,
+           stats.row_refactor_group_dependency_edges,
+           stats.row_refactor_group_root_count,
+           stats.row_refactor_group_leaf_count,
+           stats.row_refactor_group_max_fanout,
            stats.row_refactor_last_run,
            stats.row_refactor_last_checked,
            stats.row_refactor_last_parallel,
@@ -981,6 +989,8 @@ int main(int argc, char **argv) {
            ", levels: %" PRId64 ", max level width: %" PRId64
            ", cluster levels: %" PRId64 ", pipeline groups: %" PRId64
            ", pipeline rows: %" PRId64 ", pipeline work: %.6g"
+           ", edges: %" PRId64 ", roots: %" PRId64
+           ", leaves: %" PRId64 ", max fanout: %" PRId64
            ", last run: %d, last checked: %d, last parallel: %d"
            ", runs: %" PRId64 ", checked runs: %" PRId64
            ", parallel runs: %" PRId64 "\n",
@@ -991,6 +1001,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_group_pipeline_groups,
            stats.row_refactor_group_pipeline_rows,
            stats.row_refactor_group_pipeline_work,
+           stats.row_refactor_group_dependency_edges,
+           stats.row_refactor_group_root_count,
+           stats.row_refactor_group_leaf_count,
+           stats.row_refactor_group_max_fanout,
            stats.row_refactor_last_run,
            stats.row_refactor_last_checked,
            stats.row_refactor_last_parallel,

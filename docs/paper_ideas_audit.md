@@ -49,8 +49,11 @@ diagnostic bridges toward SubtreeLU-style row/segment storage and BLAS-friendly
 updates. Dense-eligible gated row-refactor groups now also compute their
 internal dense `L` block, dense `U` block, and shared trailing `U` block
 directly in KLS-owned row-major mirrors before scattering back to KLU on
-success. These pieces do not change the current default KLU-column numeric
-kernel.
+success. Row-refactor groups now also retain a reverse group graph and report
+group dependency edges, root groups, leaf groups, and maximum group fanout,
+giving the row/segment layer the explicit task graph needed by future
+SubtreeLU-style private/pipeline queues and CKTSO-style tail schedulers. These
+pieces do not change the current default KLU-column numeric kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -1706,6 +1709,14 @@ entries, and 5033104 shared trailing entries. Its repeated refactor remained
 about `0.906s` versus about `0.239s` for the default column EGraph path in the
 same short run, so the counters expose real segment opportunity without
 claiming the scalar row kernel is competitive yet.
+
+The retained row-group pattern now also builds the reverse group dependency
+graph, including unique group-to-group edges, root/leaf group counts, and
+maximum group fanout. This is the row-segment analogue of the EGraph
+root/leaf/fanout counters and is a direct bridge toward SubtreeLU-style
+private/pipeline partitioning. It is intentionally metadata-only for now:
+default KLS still uses the proven column/EGraph or KLU-backed refactor paths
+unless the experimental row-refactor environment gates are enabled.
 
 A first dense internal segment mini-solve was then added behind the same gated
 row-refactor path. For exact multirow segments whose internal `L` pattern is a

@@ -1963,6 +1963,16 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_group_pipeline_groups < 2 ||
              stats.row_refactor_group_pipeline_rows != n ||
              stats.row_refactor_group_pipeline_work <= 0.0 ||
+             stats.row_refactor_group_root_count <= 0 ||
+             stats.row_refactor_group_root_count >
+               stats.row_refactor_group_count ||
+             stats.row_refactor_group_leaf_count <= 0 ||
+             stats.row_refactor_group_leaf_count >
+               stats.row_refactor_group_count ||
+             (stats.row_refactor_group_dependency_edges == 0 &&
+              stats.row_refactor_group_max_fanout != 0) ||
+             (stats.row_refactor_group_dependency_edges > 0 &&
+              stats.row_refactor_group_max_fanout <= 0) ||
              stats.row_refactor_last_run != 1 ||
              stats.row_refactor_last_checked != 0 ||
              stats.row_refactor_last_parallel != 1 ||
@@ -1973,7 +1983,9 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             "unexpected row pipeline stats: groups=%" PRId64
             ", levels=%" PRId64 ", cluster=%" PRId64
             ", pipe_groups=%" PRId64 ", pipe_rows=%" PRId64
-            ", pipe_work=%.6g, last=%d/%d/%d"
+            ", pipe_work=%.6g, edges=%" PRId64
+            ", roots=%" PRId64 ", leaves=%" PRId64
+            ", max_fanout=%" PRId64 ", last=%d/%d/%d"
             ", runs=%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
             stats.row_refactor_group_count,
             stats.row_refactor_group_level_count,
@@ -1981,6 +1993,10 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             stats.row_refactor_group_pipeline_groups,
             stats.row_refactor_group_pipeline_rows,
             stats.row_refactor_group_pipeline_work,
+            stats.row_refactor_group_dependency_edges,
+            stats.row_refactor_group_root_count,
+            stats.row_refactor_group_leaf_count,
+            stats.row_refactor_group_max_fanout,
             stats.row_refactor_last_run,
             stats.row_refactor_last_checked,
             stats.row_refactor_last_parallel,

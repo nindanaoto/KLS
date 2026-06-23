@@ -91,6 +91,8 @@ struct kls_solver {
   UF_long *row_refactor_group_ptr;
   UF_long *row_refactor_group_dep_ptr;
   UF_long *row_refactor_group_dep_rows;
+  UF_long *row_refactor_group_successor_ptr;
+  UF_long *row_refactor_group_successor_groups;
   UF_long *row_refactor_group_level_ptr;
   UF_long *row_refactor_level_groups;
   UF_long *row_refactor_group_level_thread_ptr;
@@ -102,6 +104,10 @@ struct kls_solver {
   unsigned char *row_refactor_group_kind;
   UF_long row_refactor_pattern_n;
   UF_long row_refactor_group_count;
+  UF_long row_refactor_group_dependency_edges;
+  UF_long row_refactor_group_root_count;
+  UF_long row_refactor_group_leaf_count;
+  UF_long row_refactor_group_max_fanout;
   UF_long row_refactor_level_count;
   UF_long row_refactor_level_max_width;
   UF_long row_refactor_cluster_level_count;
@@ -557,6 +563,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_group_ptr);
   free(solver->row_refactor_group_dep_ptr);
   free(solver->row_refactor_group_dep_rows);
+  free(solver->row_refactor_group_successor_ptr);
+  free(solver->row_refactor_group_successor_groups);
   free(solver->row_refactor_group_level_ptr);
   free(solver->row_refactor_level_groups);
   free(solver->row_refactor_group_level_thread_ptr);
@@ -585,6 +593,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_ptr = NULL;
   solver->row_refactor_group_dep_ptr = NULL;
   solver->row_refactor_group_dep_rows = NULL;
+  solver->row_refactor_group_successor_ptr = NULL;
+  solver->row_refactor_group_successor_groups = NULL;
   solver->row_refactor_group_level_ptr = NULL;
   solver->row_refactor_level_groups = NULL;
   solver->row_refactor_group_level_thread_ptr = NULL;
@@ -596,6 +606,10 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_kind = NULL;
   solver->row_refactor_pattern_n = 0;
   solver->row_refactor_group_count = 0;
+  solver->row_refactor_group_dependency_edges = 0;
+  solver->row_refactor_group_root_count = 0;
+  solver->row_refactor_group_leaf_count = 0;
+  solver->row_refactor_group_max_fanout = 0;
   solver->row_refactor_level_count = 0;
   solver->row_refactor_level_max_width = 0;
   solver->row_refactor_cluster_level_count = 0;
@@ -7373,6 +7387,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_checked_run_count;
   solver->stats.row_refactor_parallel_run_count =
     (int64_t)solver->row_refactor_parallel_run_count;
+  solver->stats.row_refactor_group_dependency_edges =
+    (int64_t)solver->row_refactor_group_dependency_edges;
+  solver->stats.row_refactor_group_root_count =
+    (int64_t)solver->row_refactor_group_root_count;
+  solver->stats.row_refactor_group_leaf_count =
+    (int64_t)solver->row_refactor_group_leaf_count;
+  solver->stats.row_refactor_group_max_fanout =
+    (int64_t)solver->row_refactor_group_max_fanout;
   solver->stats.row_refactor_segment_count =
     (int64_t)solver->row_refactor_segment_count;
   solver->stats.row_refactor_segment_rows =
@@ -10656,6 +10678,150 @@ static int kls_row_refactor_pattern_is_eligible(const kls_solver *solver) {
          solver->refactor_u_values != NULL;
 }
 
+static int kls_build_row_refactor_group_successors(
+  UF_long group_count,
+  const UF_long *row_group,
+  const UF_long *group_dep_ptr,
+  const UF_long *group_dep_rows,
+  UF_long **successor_ptr_out,
+  UF_long **successor_groups_out,
+  UF_long *edge_count_out,
+  UF_long *root_count_out,
+  UF_long *leaf_count_out,
+  UF_long *max_fanout_out) {
+  if (successor_ptr_out != NULL) {
+    *successor_ptr_out = NULL;
+  }
+  if (successor_groups_out != NULL) {
+    *successor_groups_out = NULL;
+  }
+  if (edge_count_out != NULL) {
+    *edge_count_out = 0;
+  }
+  if (root_count_out != NULL) {
+    *root_count_out = 0;
+  }
+  if (leaf_count_out != NULL) {
+    *leaf_count_out = 0;
+  }
+  if (max_fanout_out != NULL) {
+    *max_fanout_out = 0;
+  }
+  if (successor_ptr_out == NULL || successor_groups_out == NULL ||
+      edge_count_out == NULL || root_count_out == NULL ||
+      leaf_count_out == NULL || max_fanout_out == NULL ||
+      (group_count > 0u &&
+       (row_group == NULL || group_dep_ptr == NULL))) {
+    return 0;
+  }
+  if (group_count == 0u) {
+    return 1;
+  }
+
+  UF_long *successor_ptr =
+    (UF_long *)calloc((size_t)group_count + 1u, sizeof(*successor_ptr));
+  UF_long *indegree =
+    (UF_long *)calloc((size_t)group_count, sizeof(*indegree));
+  UF_long *marks =
+    (UF_long *)malloc((size_t)group_count * sizeof(*marks));
+  if (successor_ptr == NULL || indegree == NULL || marks == NULL) {
+    free(successor_ptr);
+    free(indegree);
+    free(marks);
+    return 0;
+  }
+  for (UF_long g = 0; g < group_count; ++g) {
+    marks[g] = KLS_KLU_EMPTY;
+  }
+
+  for (UF_long g = 0; g < group_count; ++g) {
+    const UF_long begin = group_dep_ptr[g];
+    const UF_long end = group_dep_ptr[g + 1u];
+    if (begin > end || (end > begin && group_dep_rows == NULL)) {
+      free(successor_ptr);
+      free(indegree);
+      free(marks);
+      return 0;
+    }
+    for (UF_long pos = begin; pos < end; ++pos) {
+      const UF_long dep_group = row_group[group_dep_rows[pos]];
+      if (dep_group >= group_count || dep_group == g ||
+          marks[dep_group] == g) {
+        continue;
+      }
+      marks[dep_group] = g;
+      successor_ptr[dep_group + 1u]++;
+      indegree[g]++;
+    }
+  }
+  for (UF_long g = 0; g < group_count; ++g) {
+    successor_ptr[g + 1u] += successor_ptr[g];
+    marks[g] = KLS_KLU_EMPTY;
+  }
+
+  const UF_long edge_count = successor_ptr[group_count];
+  UF_long *successor_groups = edge_count > 0u
+    ? (UF_long *)malloc((size_t)edge_count * sizeof(*successor_groups))
+    : NULL;
+  UF_long *write_pos =
+    (UF_long *)malloc((size_t)group_count * sizeof(*write_pos));
+  if ((edge_count > 0u && successor_groups == NULL) || write_pos == NULL) {
+    free(successor_ptr);
+    free(successor_groups);
+    free(write_pos);
+    free(indegree);
+    free(marks);
+    return 0;
+  }
+  memcpy(write_pos, successor_ptr, (size_t)group_count * sizeof(*write_pos));
+  for (UF_long g = 0; g < group_count; ++g) {
+    const UF_long begin = group_dep_ptr[g];
+    const UF_long end = group_dep_ptr[g + 1u];
+    for (UF_long pos = begin; pos < end; ++pos) {
+      const UF_long dep_group = row_group[group_dep_rows[pos]];
+      if (dep_group >= group_count || dep_group == g ||
+          marks[dep_group] == g) {
+        continue;
+      }
+      marks[dep_group] = g;
+      successor_groups[write_pos[dep_group]++] = g;
+    }
+    for (UF_long pos = begin; pos < end; ++pos) {
+      const UF_long dep_group = row_group[group_dep_rows[pos]];
+      if (dep_group < group_count) {
+        marks[dep_group] = KLS_KLU_EMPTY;
+      }
+    }
+  }
+  free(write_pos);
+  free(marks);
+
+  UF_long root_count = 0;
+  UF_long leaf_count = 0;
+  UF_long max_fanout = 0;
+  for (UF_long g = 0; g < group_count; ++g) {
+    if (indegree[g] == 0u) {
+      root_count++;
+    }
+    const UF_long fanout = successor_ptr[g + 1u] - successor_ptr[g];
+    if (fanout == 0u) {
+      leaf_count++;
+    }
+    if (fanout > max_fanout) {
+      max_fanout = fanout;
+    }
+  }
+  free(indegree);
+
+  *successor_ptr_out = successor_ptr;
+  *successor_groups_out = successor_groups;
+  *edge_count_out = edge_count;
+  *root_count_out = root_count;
+  *leaf_count_out = leaf_count;
+  *max_fanout_out = max_fanout;
+  return 1;
+}
+
 static int kls_build_row_refactor_pattern(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->common.scale > 0 || solver->numeric->Rs != NULL ||
@@ -10675,7 +10841,10 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
        solver->row_refactor_successor_rows != NULL) &&
       solver->row_refactor_group_dep_ptr != NULL &&
       (solver->row_refactor_group_dep_ptr[solver->row_refactor_group_count] == 0u ||
-       solver->row_refactor_group_dep_rows != NULL)) {
+       solver->row_refactor_group_dep_rows != NULL) &&
+      solver->row_refactor_group_successor_ptr != NULL &&
+      (solver->row_refactor_group_dependency_edges == 0u ||
+       solver->row_refactor_group_successor_groups != NULL)) {
     return 1;
   }
   if (!kls_build_refactor_map(solver) ||
@@ -11144,6 +11313,12 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   UF_long dense_segment_max_width = 0;
   double dense_segment_dense_entries = 0.0;
   double dense_segment_trailing_entries = 0.0;
+  UF_long *group_successor_ptr = NULL;
+  UF_long *group_successor_groups = NULL;
+  UF_long group_dependency_edges = 0;
+  UF_long group_root_count = 0;
+  UF_long group_leaf_count = 0;
+  UF_long group_max_fanout = 0;
   for (UF_long g = 0; g < group_count; ++g) {
     const UF_long row_begin = group_ptr[g];
     const UF_long row_end = group_ptr[g + 1u];
@@ -11330,13 +11505,40 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     }
   }
   free(group_write_pos);
+  if (!kls_build_row_refactor_group_successors(
+        group_count, row_group, group_dep_ptr, group_dep_rows,
+        &group_successor_ptr, &group_successor_groups,
+        &group_dependency_edges, &group_root_count, &group_leaf_count,
+        &group_max_fanout)) {
+    free(row_group);
+    free(group_ptr);
+    free(group_levels);
+    free(l_internal_ptr);
+    free(group_trailing_len);
+    free(group_dense);
+    free(group_kind);
+    free(group_dep_ptr);
+    free(group_dep_rows);
+    free(group_level_ptr);
+    free(level_groups);
+    free(group_successor_ptr);
+    free(group_successor_groups);
+    free_row_refactor_pattern(solver);
+    return 0;
+  }
   free(group_levels);
   free(row_group);
 
   solver->row_refactor_group_ptr = group_ptr;
   solver->row_refactor_group_dep_ptr = group_dep_ptr;
   solver->row_refactor_group_dep_rows = group_dep_rows;
+  solver->row_refactor_group_successor_ptr = group_successor_ptr;
+  solver->row_refactor_group_successor_groups = group_successor_groups;
   solver->row_refactor_group_count = group_count;
+  solver->row_refactor_group_dependency_edges = group_dependency_edges;
+  solver->row_refactor_group_root_count = group_root_count;
+  solver->row_refactor_group_leaf_count = group_leaf_count;
+  solver->row_refactor_group_max_fanout = group_max_fanout;
   solver->row_refactor_group_level_ptr = group_level_ptr;
   solver->row_refactor_level_groups = level_groups;
   solver->row_refactor_l_internal_ptr = l_internal_ptr;
