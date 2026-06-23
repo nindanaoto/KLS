@@ -321,7 +321,10 @@ the rejected block with pivoting. Scaled all-refresh KLU refactor rejects still
 fall back conservatively because the row scale vector may already be
 pivot-permuted. When an unscaled serial BTF refactor rejects a non-final block,
 the repaired block can now be followed by a serial checked continuation over
-only the later BTF blocks instead of restarting from the first block. For
+only the later BTF blocks instead of restarting from the first block. The
+threaded BTF worker pool also marks completed diagonal blocks and reports the
+same prefix-current state only when every earlier block finished before a
+checked pivot reject. For
 unscaled prefix-current or all-current rejects whose validated repair preserves
 a non-empty live prefix state, KLS can execute the same conservative serial
 suffix restart before falling back to full block repair. This executable tail path is

@@ -210,6 +210,7 @@ typedef struct kls_parallel_refactor_shared {
   double pivot_tolerance;
   UF_long next_block;
   UF_long block_chunk;
+  unsigned char *block_done;
   int stop;
   pthread_mutex_t lock;
 } kls_parallel_refactor_shared;
@@ -300,6 +301,8 @@ struct kls_refactor_pool {
   pthread_cond_t done_cond;
   pthread_t *threads;
   kls_parallel_refactor_worker *workers;
+  unsigned char *block_done;
+  UF_long block_done_capacity;
   UF_long maxblock;
   unsigned long generation;
   int thread_count;
@@ -1238,6 +1241,9 @@ static void *kls_refactor_pool_worker_main(void *arg) {
           pthread_mutex_unlock(&shared->lock);
           break;
         }
+        if (shared->block_done != NULL) {
+          shared->block_done[block] = 1u;
+        }
       }
       if (worker->invalid || worker->pivot_rejected ||
           (worker->singular && shared->halt_if_singular)) {
@@ -1285,6 +1291,7 @@ static void destroy_refactor_pool(kls_solver *solver) {
   }
   free(pool->threads);
   free(pool->workers);
+  free(pool->block_done);
   free(pool);
   solver->refactor_pool = NULL;
 }
@@ -1383,6 +1390,27 @@ static UF_long kls_refactor_pool_block_chunk(const kls_solver *solver,
   return chunk;
 }
 
+static int kls_refactor_pool_rejected_prefix_current(
+  const kls_solver *solver,
+  const unsigned char *block_done,
+  UF_long rejected_pivot) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->R == NULL || block_done == NULL ||
+      rejected_pivot == KLS_KLU_EMPTY) {
+    return 0;
+  }
+  const UF_long block = kls_block_for_pivot(solver, rejected_pivot);
+  if (block == KLS_KLU_EMPTY) {
+    return 0;
+  }
+  for (UF_long b = 0; b < block; ++b) {
+    if (!block_done[b]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int run_refactor_pool(kls_solver *solver,
                              double *numeric_values,
                              int thread_count,
@@ -1397,17 +1425,37 @@ static int run_refactor_pool(kls_solver *solver,
                              double *rejected_candidate_abs_out,
                              int *singular_out,
                              UF_long *numerical_rank_out,
-                             UF_long *singular_col_out) {
+                             UF_long *singular_col_out,
+                             int *prefix_current_out) {
   if (!ensure_refactor_pool(solver, thread_count)) {
     return 0;
   }
   kls_refactor_pool *pool = solver->refactor_pool;
   kls_parallel_refactor_shared *shared = &pool->shared;
+  if (prefix_current_out != NULL) {
+    *prefix_current_out = 0;
+  }
 
   pthread_mutex_lock(&shared->lock);
   if (pool->active_workers != 0) {
     pthread_mutex_unlock(&shared->lock);
     return 0;
+  }
+  if (pool->block_done_capacity < solver->symbolic->nblocks) {
+    unsigned char *done =
+      (unsigned char *)realloc(pool->block_done,
+                               (size_t)solver->symbolic->nblocks *
+                                 sizeof(*pool->block_done));
+    if (done == NULL) {
+      pthread_mutex_unlock(&shared->lock);
+      return 0;
+    }
+    pool->block_done = done;
+    pool->block_done_capacity = solver->symbolic->nblocks;
+  }
+  if (pool->block_done != NULL && solver->symbolic->nblocks > 0u) {
+    memset(pool->block_done, 0,
+           (size_t)solver->symbolic->nblocks * sizeof(*pool->block_done));
   }
 
   shared->col_ptr = solver->col_ptr;
@@ -1428,6 +1476,7 @@ static int run_refactor_pool(kls_solver *solver,
   shared->pivot_tolerance = solver->common.tol;
   shared->next_block = 0;
   shared->block_chunk = kls_refactor_pool_block_chunk(solver, thread_count);
+  shared->block_done = pool->block_done;
   shared->stop = 0;
   pool->active_workers = thread_count;
 
@@ -1517,6 +1566,11 @@ static int run_refactor_pool(kls_solver *solver,
   *singular_out = singular;
   *numerical_rank_out = numerical_rank;
   *singular_col_out = singular_col;
+  if (prefix_current_out != NULL && pivot_rejected && !invalid) {
+    *prefix_current_out =
+      kls_refactor_pool_rejected_prefix_current(solver, pool->block_done,
+                                                rejected_pivot);
+  }
   pool->scratch_dirty = invalid || pivot_rejected ||
                         (singular && solver->common.halt_if_singular);
   return 1;
@@ -15075,13 +15129,15 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   int singular = 0;
   UF_long numerical_rank = UF_long_max;
   UF_long singular_col = KLS_KLU_EMPTY;
+  int pool_prefix_current = 0;
   if (!run_refactor_pool(solver, numeric_values, thread_count, check_pivots,
                          &invalid, &pivot_rejected,
                          &rejected_pivot, &rejected_pivot_col,
                          &rejected_row, &rejected_multiplier_abs,
                          &rejected_pivot_abs, &rejected_candidate_abs,
                          &singular,
-                         &numerical_rank, &singular_col)) {
+                         &numerical_rank, &singular_col,
+                         &pool_prefix_current)) {
     common->status = TRILINOS_KLU_OUT_OF_MEMORY;
     return 0;
   }
@@ -15091,6 +15147,9 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     return 0;
   }
   if (pivot_rejected) {
+    solver->fast_reject_refresh_state =
+      pool_prefix_current ? KLS_FAST_REJECT_REFRESH_PREFIX
+                          : KLS_FAST_REJECT_REFRESH_UNKNOWN;
     kls_record_fast_reject_detail(solver, rejected_pivot,
                                   rejected_pivot_col, rejected_row,
                                   rejected_multiplier_abs,
