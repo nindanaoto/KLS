@@ -1292,6 +1292,19 @@ than CKTSO. This confirms that a CKTSO-style solve rewrite is secondary for the
 current hard gap; the larger missing mechanism is the row-oriented
 factor/refactor engine and its pivot-aware scheduler.
 
+A narrow solve-workspace cache was tested and rejected after this diagnosis. The
+prototype kept a solver-owned dense permutation buffer for the `row_perm` solve
+path so static-pivot and exact-matching cases would not allocate/free an
+`n`-entry buffer on every solve. A repeat-20 subset was tempting, with solve
+geomean `0.945x` on `power197k`, `rajat20`, `onetone2`, `OPF_10000`,
+`LeGresley_87936`, and a non-`row_perm` `G2_circuit` guard, but the broader
+row-permutation paper set rejected it: `power197k`, `rajat20`, `rajat25`,
+`rajat28`, `onetone1`, `onetone2`, `twotone`, `OPF_10000`,
+`LeGresley_87936`, `rajat22`, `rajat23`, `rajat24`, `hvdc1`, and `hvdc2`
+measured `1.007x` slower solve geomean against `a0583c5`, with the static
+non-exact rows at `1.010x` slower. The current per-call buffer stays until the
+larger KLS-owned LU storage makes a structure-adaptive solve worthwhile.
+
 The scaled serial mapped BTF refactor was then enabled for the narrow
 many-fringe dominant-BTF shape that the worker-pool narrowing intentionally
 left serial: at least 1024 BTF blocks, a 95%+ largest block below the EGraph
