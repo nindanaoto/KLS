@@ -2146,6 +2146,17 @@ with longer repeats, while tiny `gemat12` remained cycle-noisy despite a
 faster measured refactor. This is a small retained KLU-storage kernel cleanup,
 not the missing CKTSO row/segment engine.
 
+A wider scatter-unroll follow-up was rejected. Replacing the retained four-way
+helper with an eight-way loop, and then with an eight-way-only-for-long-segments
+variant, produced mixed same-session results: the six-row heavy focus was only
+about `0.6%` positive, the top-20 CKTSO-gap guard was only about `0.3%`
+positive, and repeated checks still showed row-level losses such as `rajat28`
+and `ASIC_320ks` in refactor time. More importantly, this direction is
+CPU-code-generation-specific rather than a solver algorithm improvement. KLS
+therefore keeps the simpler four-way scatter helper and leaves further
+progress to row/segment numeric storage, pivoting-tail restart, and general
+cost-model work.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
