@@ -631,6 +631,12 @@ both explicit METIS/no-BTF and auto still timed out at 120s. This reinforces
 that `pre2` is a missing-major-algorithm case rather than a separator-package
 case.
 
+A follow-up coarse-grouping probe reduced the large METIS CAMD group size from
+4096 to 1024 as a general CKTSO-style constrained-ordering experiment. It was
+rejected: `pre2` no-BTF METIS symbolic fill worsened from about 121.5M to
+124.7M nonzeros, so the retained 4096 grouping remains the better large
+default.
+
 The matching-derived equilibration pass was then moved closer to the
 MC64/NICSLU/CKTSO preprocessing contract by first solving dual-potential
 scaling constraints for the current greedy row match. When the constraints are
