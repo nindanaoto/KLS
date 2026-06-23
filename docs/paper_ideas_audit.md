@@ -2563,6 +2563,15 @@ columns and about `1.191e7` work; the full repaired-block work remained about
 and gives the future row/segment numeric kernel a concrete ordered worklist to
 consume.
 
+That pivoting-tail plan is now checked as a real scheduler contract instead of
+only a count/work estimate. KLS records the first and last global rows in the
+retained plan, whether the plan includes the rejected pivot, and whether the
+stored order is topologically safe with respect to the ordered-block ETree
+parent links. The stressed `coupled` case is still classified as a
+root-of-block reject with no reusable serial prefix, but its retained tail plan
+is now verified as the ordered worklist a CKTSO-style row/segment tail kernel
+would need to consume.
+
 The strict tail-restart readiness gate was then strengthened to compare the
 fallback repair against the old block pivot order and to replay KLU's live
 prefix bookkeeping through the rejected pivot. The validator rebuilds local

@@ -96,6 +96,16 @@ def classify(row: dict[str, object]) -> str:
     )
     if tail_columns <= 0 or tail_work <= 0.0:
         return "missing_pivoting_tail"
+    if (
+        "fast_rejected_pivoting_tail_contains_reject" in row
+        and as_int(row, "fast_rejected_pivoting_tail_contains_reject", 0) != 1
+    ):
+        return "pivoting_tail_missing_reject"
+    if (
+        "fast_rejected_pivoting_tail_topological" in row
+        and as_int(row, "fast_rejected_pivoting_tail_topological", 0) != 1
+    ):
+        return "pivoting_tail_not_topological"
     if as_int(row, "fast_repaired_suffix_changed_pivots", 0) <= 0:
         return "no_suffix_pivot_change"
     return "other_not_ready"
@@ -141,6 +151,18 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
             "fast_rejected_pivoting_tail_work",
             as_float(row, "fast_rejected_etree_work"),
         ),
+        "fast_rejected_pivoting_tail_first": as_int(
+            row, "fast_rejected_pivoting_tail_first", -1
+        ),
+        "fast_rejected_pivoting_tail_last": as_int(
+            row, "fast_rejected_pivoting_tail_last", -1
+        ),
+        "fast_rejected_pivoting_tail_contains_reject": as_int(
+            row, "fast_rejected_pivoting_tail_contains_reject", 0
+        ),
+        "fast_rejected_pivoting_tail_topological": as_int(
+            row, "fast_rejected_pivoting_tail_topological", 0
+        ),
         "fast_rejected_row_tail_columns": as_int(
             row, "fast_rejected_row_tail_columns", 0
         ),
@@ -161,6 +183,8 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
             "pivoting_tail_work={pivoting_tail:.6g} "
             "saved_work={saved:.6g} "
             "block_start={block_start} "
+            "tail_first={tail_first} tail_last={tail_last} "
+            "tail_topo={tail_topo} "
             "tail_row={tail_row} repair_row={repair_row} "
             "prefix_changes={prefix} suffix_changes={suffix}".format(
                 matrix=record["matrix"],
@@ -173,6 +197,11 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
                 ),
                 saved=float(record["fast_repaired_tail_restart_saved_work"]),
                 block_start=record["fast_rejected_block_start"],
+                tail_first=record["fast_rejected_pivoting_tail_first"],
+                tail_last=record["fast_rejected_pivoting_tail_last"],
+                tail_topo=record[
+                    "fast_rejected_pivoting_tail_topological"
+                ],
                 tail_row=record["fast_rejected_tail_candidate_row"],
                 repair_row=record["fast_repaired_pivot_row"],
                 prefix=record["fast_repaired_prefix_changed_pivots"],

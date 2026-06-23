@@ -138,6 +138,10 @@ typedef struct kls_stats {
   double fast_rejected_etree_work;
   int64_t fast_rejected_pivoting_tail_columns;
   double fast_rejected_pivoting_tail_work;
+  int64_t fast_rejected_pivoting_tail_first;
+  int64_t fast_rejected_pivoting_tail_last;
+  int fast_rejected_pivoting_tail_contains_reject;
+  int fast_rejected_pivoting_tail_topological;
   int fast_rejected_refresh_state;
   int64_t refactor_dependency_root_columns;
   int64_t refactor_dependency_leaf_columns;

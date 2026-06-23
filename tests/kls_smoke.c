@@ -21,6 +21,49 @@ static int close_enough(double a, double b) {
   return fabs(a - b) < 1e-10;
 }
 
+static int require_pivoting_tail_plan(const kls_stats *stats,
+                                      const char *what) {
+  if (stats == NULL || stats->fast_rejected_pivot < 0 ||
+      stats->fast_rejected_block_start < 0 ||
+      stats->fast_rejected_block_size <= 0 ||
+      stats->fast_rejected_pivoting_tail_columns <= 0 ||
+      stats->fast_rejected_pivoting_tail_first <
+        stats->fast_rejected_block_start ||
+      stats->fast_rejected_pivoting_tail_first >
+        stats->fast_rejected_pivot ||
+      stats->fast_rejected_pivoting_tail_last <
+        stats->fast_rejected_pivot ||
+      stats->fast_rejected_pivoting_tail_last >=
+        stats->fast_rejected_block_start +
+          stats->fast_rejected_block_size ||
+      !stats->fast_rejected_pivoting_tail_contains_reject ||
+      !stats->fast_rejected_pivoting_tail_topological) {
+    fprintf(stderr,
+            "unexpected pivoting tail plan for %s: pivot=%" PRId64
+            ", block=[%" PRId64 ",%" PRId64 "), cols=%" PRId64
+            ", first=%" PRId64 ", last=%" PRId64
+            ", contains=%d, topo=%d\n",
+            what,
+            stats != NULL ? stats->fast_rejected_pivot : -1,
+            stats != NULL ? stats->fast_rejected_block_start : -1,
+            stats != NULL
+              ? stats->fast_rejected_block_start +
+                  stats->fast_rejected_block_size
+              : -1,
+            stats != NULL ? stats->fast_rejected_pivoting_tail_columns : 0,
+            stats != NULL ? stats->fast_rejected_pivoting_tail_first : -1,
+            stats != NULL ? stats->fast_rejected_pivoting_tail_last : -1,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_contains_reject
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_topological
+              : 0);
+    return 0;
+  }
+  return 1;
+}
+
 static int test_csc(void) {
   const int32_t ap[] = {0, 2, 5, 7};
   const int32_t ai[] = {0, 1, 0, 1, 2, 1, 2};
@@ -319,6 +362,9 @@ static int test_fast_factor_pivot_check_fallback(void) {
             stats.fast_rejected_pivoting_tail_columns);
     ok = 0;
   }
+  if (ok && !require_pivoting_tail_plan(&stats, "pivot-check fallback")) {
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
     fprintf(stderr, "unexpected pivot-check fallback solution: %.17g %.17g\n",
             x[0], x[1]);
@@ -479,6 +525,9 @@ static int test_checked_row_fast_factor_block_restart(void) {
             stats.fast_rejected_pivoting_tail_columns);
     ok = 0;
   }
+  if (ok && !require_pivoting_tail_plan(&stats, "checked-row block restart")) {
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
     fprintf(stderr,
             "unexpected checked-row restart solution: %.17g %.17g\n",
@@ -588,6 +637,9 @@ static int test_fast_factor_tail_prefix_state_validation(void) {
             stats.fast_tail_restarts);
     ok = 0;
   }
+  if (ok && !require_pivoting_tail_plan(&stats, "tail-prefix validation")) {
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
              !close_enough(x[2], 3.0))) {
     fprintf(stderr,
@@ -682,6 +734,9 @@ static int test_scaled_fast_factor_block_restart(void) {
             stats.fast_rejected_pivoting_tail_columns);
     ok = 0;
   }
+  if (ok && !require_pivoting_tail_plan(&stats, "scaled block restart")) {
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
     fprintf(stderr, "unexpected scaled pivot-check restart solution: %.17g %.17g\n",
             x[0], x[1]);
@@ -769,6 +824,9 @@ static int test_btf_fast_factor_block_restart(void) {
             stats.fast_rejected_descendant_columns,
             stats.fast_rejected_etree_columns,
             stats.fast_rejected_pivoting_tail_columns);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats, "btf block restart")) {
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
@@ -871,6 +929,9 @@ static int test_fast_factor_restart_after_prior_pivot(void) {
             stats.fast_rejected_descendant_columns,
             stats.fast_rejected_etree_columns,
             stats.fast_rejected_pivoting_tail_columns);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats, "prior-pivot restart")) {
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||

@@ -346,6 +346,10 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_etree_columns`, `fast_rejected_etree_work`,
 `fast_rejected_pivoting_tail_columns`,
 `fast_rejected_pivoting_tail_work`,
+`fast_rejected_pivoting_tail_first`,
+`fast_rejected_pivoting_tail_last`,
+`fast_rejected_pivoting_tail_contains_reject`,
+`fast_rejected_pivoting_tail_topological`,
 `fast_rejected_refresh_state`, `fast_block_restarts`, and
 `fast_tail_restarts` for the first rejected
 factor-order pivot, its original matrix column, the strongest factor-row
@@ -368,7 +372,9 @@ of the block, the exact U-pattern descendant tail inside that block, the
 row-refactor successor tail when row-major metadata is available, the
 ordered-block ETree successor path that a pivoting tail-restart upper-bound
 scheduler would at least have to revisit, the sorted pivoting-tail worklist
-scope seeded from the current refresh state, whether the
+scope seeded from the current refresh state, the first and last rows in that
+worklist, whether it includes the rejected pivot, whether the retained order
+is topologically safe for a future tail kernel to consume, whether the
 failed pass left an unknown, prefix-current, or all-current numeric state, the
 number of repaired BTF blocks, and the number of serial tail restarts actually
 executed. These fields are intended to guide fuller CKTSO-style tail-restart

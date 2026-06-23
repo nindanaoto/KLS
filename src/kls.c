@@ -749,6 +749,10 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_etree_work = 0.0;
   solver->stats.fast_rejected_pivoting_tail_columns = 0;
   solver->stats.fast_rejected_pivoting_tail_work = 0.0;
+  solver->stats.fast_rejected_pivoting_tail_first = -1;
+  solver->stats.fast_rejected_pivoting_tail_last = -1;
+  solver->stats.fast_rejected_pivoting_tail_contains_reject = 0;
+  solver->stats.fast_rejected_pivoting_tail_topological = 0;
   solver->stats.fast_rejected_refresh_state =
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_block_restarts = 0;
@@ -7917,6 +7921,72 @@ static int kls_mark_fast_reject_tail_col(kls_solver *solver,
   return 1;
 }
 
+static void kls_record_fast_reject_pivoting_tail_plan(
+  kls_solver *solver,
+  UF_long k1,
+  UF_long nk,
+  UF_long local_reject,
+  const UF_long *parent,
+  unsigned int mark,
+  UF_long columns,
+  double work) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->stats.fast_rejected_pivoting_tail_columns = (int64_t)columns;
+  solver->stats.fast_rejected_pivoting_tail_work = work;
+  solver->stats.fast_rejected_pivoting_tail_first = -1;
+  solver->stats.fast_rejected_pivoting_tail_last = -1;
+  solver->stats.fast_rejected_pivoting_tail_contains_reject = 0;
+  solver->stats.fast_rejected_pivoting_tail_topological = 0;
+  if (columns == 0u || solver->fast_reject_tail_cols == NULL ||
+      solver->fast_reject_tail_marks == NULL || parent == NULL ||
+      local_reject >= nk) {
+    return;
+  }
+
+  UF_long previous = KLS_KLU_EMPTY;
+  int sorted = 1;
+  int contains_reject = 0;
+  int topological = 1;
+  for (UF_long p = 0; p < columns; ++p) {
+    const UF_long global_col = solver->fast_reject_tail_cols[p];
+    if (global_col < k1 || global_col >= k1 + nk) {
+      sorted = 0;
+      topological = 0;
+      continue;
+    }
+    const UF_long local_col = global_col - k1;
+    if (p == 0u) {
+      solver->stats.fast_rejected_pivoting_tail_first =
+        (int64_t)global_col;
+    } else if (previous >= global_col) {
+      sorted = 0;
+      topological = 0;
+    }
+    previous = global_col;
+    if (local_col == local_reject) {
+      contains_reject = 1;
+    }
+    const UF_long next = parent[local_col];
+    if (next == KLS_KLU_EMPTY || next == local_col) {
+      continue;
+    }
+    if (next >= nk) {
+      topological = 0;
+      continue;
+    }
+    if (solver->fast_reject_tail_marks[next] == mark && next <= local_col) {
+      topological = 0;
+    }
+  }
+  solver->stats.fast_rejected_pivoting_tail_last = (int64_t)previous;
+  solver->stats.fast_rejected_pivoting_tail_contains_reject =
+    contains_reject;
+  solver->stats.fast_rejected_pivoting_tail_topological =
+    sorted && contains_reject && topological;
+}
+
 static int kls_build_fast_reject_pivoting_tail_plan(
   kls_solver *solver,
   UF_long block,
@@ -8007,6 +8077,8 @@ static int kls_build_fast_reject_pivoting_tail_plan(
   }
 
   solver->fast_reject_tail_count = columns;
+  kls_record_fast_reject_pivoting_tail_plan(
+    solver, k1, nk, local_reject, parent, mark, columns, work);
   *tail_cols_out = solver->fast_reject_tail_cols;
   *tail_count_out = columns;
   *tail_work_out = work;
@@ -8518,6 +8590,10 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
   solver->stats.fast_rejected_etree_work = 0.0;
   solver->stats.fast_rejected_pivoting_tail_columns = 0;
   solver->stats.fast_rejected_pivoting_tail_work = 0.0;
+  solver->stats.fast_rejected_pivoting_tail_first = -1;
+  solver->stats.fast_rejected_pivoting_tail_last = -1;
+  solver->stats.fast_rejected_pivoting_tail_contains_reject = 0;
+  solver->stats.fast_rejected_pivoting_tail_topological = 0;
   solver->fast_reject_tail_count = 0;
 
   kls_fill_fast_reject_row_tail_stats(solver, block, k1, k2,
