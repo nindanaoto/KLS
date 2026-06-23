@@ -2060,6 +2060,15 @@ is unchanged: small KLU-storage bookkeeping trims are now yielding mixed or
 single-digit effects, while the CKTSO gap still requires a row/segment numeric
 engine with pivoting-tail restart semantics.
 
+A corresponding single-block EGraph pointer-cache validation trim was also
+rejected. Removing the per-column `refactor_lu_pointer_count`/pointer guard
+helped `G2_circuit` slightly in a same-session two-pass focus run, but
+regressed the Onetone rows by about `10-11%` in SPICE-cycle time and moved the
+four-row guard geomean about `4.9%` slower. This confirms the remaining
+single-block gap is not a simple pointer-cache guard branch; the retained
+single-block kernel should keep its current validation shape until KLS owns a
+different row/segment numeric representation.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
