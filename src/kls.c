@@ -58,6 +58,11 @@ struct kls_solver {
   UF_long *refactor_input_pos;
   UF_long *refactor_block_start;
   UF_long *refactor_col_block;
+  UF_long **refactor_l_indices;
+  double **refactor_l_values;
+  UF_long **refactor_u_indices;
+  double **refactor_u_values;
+  UF_long refactor_lu_pointer_count;
   UF_long *refactor_level_ptr;
   UF_long *refactor_level_cols;
   UF_long *refactor_level_thread_ptr;
@@ -314,6 +319,21 @@ static void free_refactor_map(kls_solver *solver) {
   solver->refactor_input_pos = NULL;
   solver->refactor_block_start = NULL;
   solver->refactor_col_block = NULL;
+}
+
+static void free_refactor_lu_pointer_cache(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->refactor_l_indices);
+  free(solver->refactor_l_values);
+  free(solver->refactor_u_indices);
+  free(solver->refactor_u_values);
+  solver->refactor_l_indices = NULL;
+  solver->refactor_l_values = NULL;
+  solver->refactor_u_indices = NULL;
+  solver->refactor_u_values = NULL;
+  solver->refactor_lu_pointer_count = 0;
 }
 
 static void free_refactor_schedule(kls_solver *solver) {
@@ -1047,6 +1067,7 @@ static void free_numeric(kls_solver *solver) {
   destroy_egraph_refactor_pool(solver);
   free_egraph_worker_scratch(solver);
   free_egraph_pipeline_done(solver);
+  free_refactor_lu_pointer_cache(solver);
   if (solver->numeric != NULL) {
     free_refactor_map(solver);
     free_refactor_schedule(solver);
@@ -7701,6 +7722,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   solver->fast_block_restarts++;
   free_refactor_map(solver);
   free_refactor_schedule(solver);
+  free_refactor_lu_pointer_cache(solver);
   solver->common.status = TRILINOS_KLU_OK;
   solver->common.numerical_rank = KLS_KLU_EMPTY;
   solver->common.singular_col = KLS_KLU_EMPTY;
@@ -7901,6 +7923,76 @@ static int kls_build_refactor_map(kls_solver *solver) {
   solver->refactor_input_pos = input_pos;
   solver->refactor_block_start = block_start;
   solver->refactor_col_block = col_block;
+  return 1;
+}
+
+static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->symbolic->R == NULL || solver->numeric->LUbx == NULL ||
+      solver->numeric->Lip == NULL || solver->numeric->Llen == NULL ||
+      solver->numeric->Uip == NULL || solver->numeric->Ulen == NULL ||
+      solver->n == 0u) {
+    return 0;
+  }
+  if (solver->refactor_lu_pointer_count == solver->n &&
+      solver->refactor_l_indices != NULL &&
+      solver->refactor_l_values != NULL &&
+      solver->refactor_u_indices != NULL &&
+      solver->refactor_u_values != NULL) {
+    return 1;
+  }
+
+  free_refactor_lu_pointer_cache(solver);
+  UF_long **l_indices =
+    (UF_long **)calloc((size_t)solver->n, sizeof(*l_indices));
+  double **l_values =
+    (double **)calloc((size_t)solver->n, sizeof(*l_values));
+  UF_long **u_indices =
+    (UF_long **)calloc((size_t)solver->n, sizeof(*u_indices));
+  double **u_values =
+    (double **)calloc((size_t)solver->n, sizeof(*u_values));
+  if (l_indices == NULL || l_values == NULL ||
+      u_indices == NULL || u_values == NULL) {
+    free(l_indices);
+    free(l_values);
+    free(u_indices);
+    free(u_values);
+    return 0;
+  }
+
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (nk <= 1u) {
+      continue;
+    }
+    double *lu = (double *)solver->numeric->LUbx[block];
+    if (lu == NULL) {
+      free(l_indices);
+      free(l_values);
+      free(u_indices);
+      free(u_values);
+      return 0;
+    }
+    const UF_long *lip = solver->numeric->Lip + k1;
+    const UF_long *llen = solver->numeric->Llen + k1;
+    const UF_long *uip = solver->numeric->Uip + k1;
+    const UF_long *ulen = solver->numeric->Ulen + k1;
+    for (UF_long k = 0; k < nk; ++k) {
+      UF_long len = 0;
+      kls_klu_get_pointer(lu, lip, llen, k,
+                          &l_indices[k1 + k], &l_values[k1 + k], &len);
+      kls_klu_get_pointer(lu, uip, ulen, k,
+                          &u_indices[k1 + k], &u_values[k1 + k], &len);
+    }
+  }
+
+  solver->refactor_l_indices = l_indices;
+  solver->refactor_l_values = l_values;
+  solver->refactor_u_indices = u_indices;
+  solver->refactor_u_values = u_values;
+  solver->refactor_lu_pointer_count = solver->n;
   return 1;
 }
 
@@ -8105,6 +8197,16 @@ static int kls_egraph_refactor_single_unscaled_column(
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   double *x = worker->x;
   double *udiag = (double *)numeric->Udiag;
+  UF_long **l_indices = solver->refactor_l_indices;
+  double **l_values = solver->refactor_l_values;
+  UF_long **u_indices = solver->refactor_u_indices;
+  double **u_values = solver->refactor_u_values;
+  if (solver->refactor_lu_pointer_count != solver->n ||
+      l_indices == NULL || l_values == NULL ||
+      u_indices == NULL || u_values == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
 
   /* The EGraph dispatcher validates the map, LU arrays, and U topological
      order once before launching workers; keep this hot kernel branch-light. */
@@ -8114,12 +8216,9 @@ static int kls_egraph_refactor_single_unscaled_column(
       shared->values[solver->refactor_input_pos[p]];
   }
 
-  double *lu = (double *)numeric->LUbx[0];
-  UF_long *ui = NULL;
-  double *ux = NULL;
-  UF_long ucol_len = 0;
-  kls_klu_get_pointer(lu, numeric->Uip, numeric->Ulen, k,
-                      &ui, &ux, &ucol_len);
+  UF_long *ui = u_indices[k];
+  double *ux = u_values[k];
+  UF_long ucol_len = numeric->Ulen[k];
   for (UF_long up = 0; up < ucol_len; ++up) {
     const UF_long j = ui[up];
     if (wait_for_dependencies &&
@@ -8130,11 +8229,9 @@ static int kls_egraph_refactor_single_unscaled_column(
     x[j] = 0.0;
     ux[up] = ujk;
 
-    UF_long *li = NULL;
-    double *lx = NULL;
-    UF_long lcol_len = 0;
-    kls_klu_get_pointer(lu, numeric->Lip, numeric->Llen, j,
-                        &li, &lx, &lcol_len);
+    UF_long *li = l_indices[j];
+    double *lx = l_values[j];
+    UF_long lcol_len = numeric->Llen[j];
     for (UF_long p = 0; p < lcol_len; ++p) {
       x[li[p]] -= lx[p] * ujk;
     }
@@ -8150,11 +8247,9 @@ static int kls_egraph_refactor_single_unscaled_column(
   }
   udiag[k] = ukk;
 
-  UF_long *li = NULL;
-  double *lx = NULL;
-  UF_long lcol_len = 0;
-  kls_klu_get_pointer(lu, numeric->Lip, numeric->Llen, k,
-                      &li, &lx, &lcol_len);
+  UF_long *li = l_indices[k];
+  double *lx = l_values[k];
+  UF_long lcol_len = numeric->Llen[k];
   for (UF_long p = 0; p < lcol_len; ++p) {
     const UF_long i = li[p];
     const double lij = x[i] / ukk;
@@ -8182,9 +8277,19 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   double *x = worker->x;
   double *udiag = (double *)numeric->Udiag;
+  UF_long **l_indices = solver->refactor_l_indices;
+  double **l_values = solver->refactor_l_values;
+  UF_long **u_indices = solver->refactor_u_indices;
+  double **u_values = solver->refactor_u_values;
   if (symbolic != NULL && symbolic->nblocks == 1u && shared->scale <= 0) {
     return kls_egraph_refactor_single_unscaled_column(
       worker, k, wait_for_dependencies);
+  }
+  if (solver->refactor_lu_pointer_count != solver->n ||
+      l_indices == NULL || l_values == NULL ||
+      u_indices == NULL || u_values == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
   }
   if (k >= solver->n || symbolic->R == NULL || symbolic->Q == NULL) {
     kls_egraph_refactor_record_invalid(shared);
@@ -8264,9 +8369,7 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     return 1;
   }
 
-  UF_long *lip = numeric->Lip + k1;
   UF_long *llen = numeric->Llen + k1;
-  UF_long *uip = numeric->Uip + k1;
   UF_long *ulen = numeric->Ulen + k1;
   double *lu = (double *)numeric->LUbx[block];
   if (lu == NULL) {
@@ -8334,10 +8437,9 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     }
   }
 
-  UF_long *ui = NULL;
-  double *ux = NULL;
-  UF_long ucol_len = 0;
-  kls_klu_get_pointer(lu, uip, ulen, local_k, &ui, &ux, &ucol_len);
+  UF_long *ui = u_indices[k];
+  double *ux = u_values[k];
+  UF_long ucol_len = ulen[local_k];
   for (UF_long up = 0; up < ucol_len; ++up) {
     const UF_long j = ui[up];
     if (j >= local_k) {
@@ -8352,10 +8454,9 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     x[j] = 0.0;
     ux[up] = ujk;
 
-    UF_long *li = NULL;
-    double *lx = NULL;
-    UF_long lcol_len = 0;
-    kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
+    UF_long *li = l_indices[k1 + j];
+    double *lx = l_values[k1 + j];
+    UF_long lcol_len = llen[j];
     for (UF_long p = 0; p < lcol_len; ++p) {
       x[li[p]] -= lx[p] * ujk;
     }
@@ -8371,10 +8472,9 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   }
   udiag[k] = ukk;
 
-  UF_long *li = NULL;
-  double *lx = NULL;
-  UF_long lcol_len = 0;
-  kls_klu_get_pointer(lu, lip, llen, local_k, &li, &lx, &lcol_len);
+  UF_long *li = l_indices[k];
+  double *lx = l_values[k];
+  UF_long lcol_len = llen[local_k];
   for (UF_long p = 0; p < lcol_len; ++p) {
     const UF_long i = li[p];
     const double lij = x[i] / ukk;
@@ -8893,6 +8993,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
   if (!kls_build_refactor_schedule(solver) ||
       !kls_build_refactor_map(solver) ||
+      !kls_build_refactor_lu_pointer_cache(solver) ||
       !kls_egraph_refactor_is_eligible(solver)) {
     return -1;
   }

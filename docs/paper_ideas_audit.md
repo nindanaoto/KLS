@@ -1873,6 +1873,27 @@ refinement. It does not explain the multi-x CKTSO refactor gap; that still
 points to a row/segment-oriented numeric kernel, pivot-checked tail restart,
 and eventually a SubtreeLU-style separator-tree/private-pipeline scheduler.
 
+The EGraph refactor kernel then cached KLU's packed L/U column index/value
+pointers at numeric-object scope. The previous worker hot loop recomputed the
+same `LUbx + Lip/Uip + aligned-index-length` split for every U dependency and
+for the output L column. The cache is rebuilt from current `LUbx` storage before
+an EGraph refactor first runs, reused across repeated SPICE refactors, and freed
+with numeric state or after a pivoting block restart that reallocates `LUbx`.
+This is still KLU-storage based, not the row-major numeric engine CKTSO uses,
+but it removes repeated wrapper-level pointer arithmetic from the exact-EGraph
+no-pivot refactor path. A 10-row focused three-pass repeated-refactor probe
+(`kls_lu_pointer_cache_probe_t4_p3_r10_timeout180.jsonl`) improved geomean by
+about `2.5%` versus the saved hot-gap baseline and about `2.2%` versus the
+current alpha=4 medium artifact on the same rows. The full 93-row medium run
+(`kls_lu_pointer_cache_medium93_t4_r3_timeout120.jsonl`) kept the same three
+known failures, improved the 27 EGraph-active rows by about `1.1%` geomean, and
+was neutral-to-slightly-positive on all 90 completed rows (`0.998x` versus the
+previous KLS artifact). The largest retained downside is `onetone2`, which was
+about `8.5%` slower in the one-pass full run and about `2%` slower in the
+focused run; an attempted structural gate for only unscaled high-work rows was
+rejected because the added fallback branch path regressed the focused set
+overall and lost the useful low-work `coupled` win.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
