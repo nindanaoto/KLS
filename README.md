@@ -365,7 +365,10 @@ queue, reporting `row_refactor_last_ready_queue`,
 Unchecked queued row tails can run without the per-row completion bitmap; stats
 report `row_refactor_last_done_bitmap` and
 `row_refactor_done_bitmap_run_count` so checked pivot-prefix validation remains
-visible.
+visible. Row-pattern analysis also records `row_refactor_input_cleanup_rows`
+and `row_refactor_input_cleanup_entries`; rows whose input columns are already
+covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in
+the row numeric kernels.
 Because checked row fast-factor probes and
 unchecked row refactors are selected independently, stats also report
 `row_refactor_last_run`, `row_refactor_last_checked`,

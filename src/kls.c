@@ -82,6 +82,7 @@ struct kls_solver {
   UF_long *row_refactor_input_ptr;
   UF_long *row_refactor_input_cols;
   UF_long *row_refactor_input_pos;
+  unsigned char *row_refactor_input_needs_cleanup;
   UF_long *row_refactor_successor_ptr;
   UF_long *row_refactor_successor_rows;
   UF_long *row_refactor_tail_rows;
@@ -125,6 +126,8 @@ struct kls_solver {
   UF_long row_refactor_ready_queue_run_count;
   UF_long row_refactor_ready_queue_group_count;
   UF_long row_refactor_done_bitmap_run_count;
+  UF_long row_refactor_input_cleanup_rows;
+  UF_long row_refactor_input_cleanup_entries;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_segment_rows;
   UF_long row_refactor_segment_max_width;
@@ -568,6 +571,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_input_ptr);
   free(solver->row_refactor_input_cols);
   free(solver->row_refactor_input_pos);
+  free(solver->row_refactor_input_needs_cleanup);
   free(solver->row_refactor_successor_ptr);
   free(solver->row_refactor_successor_rows);
   free(solver->row_refactor_tail_rows);
@@ -598,6 +602,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_input_ptr = NULL;
   solver->row_refactor_input_cols = NULL;
   solver->row_refactor_input_pos = NULL;
+  solver->row_refactor_input_needs_cleanup = NULL;
   solver->row_refactor_successor_ptr = NULL;
   solver->row_refactor_successor_rows = NULL;
   solver->row_refactor_tail_rows = NULL;
@@ -641,6 +646,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_ready_queue_run_count = 0;
   solver->row_refactor_ready_queue_group_count = 0;
   solver->row_refactor_done_bitmap_run_count = 0;
+  solver->row_refactor_input_cleanup_rows = 0;
+  solver->row_refactor_input_cleanup_entries = 0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_segment_rows = 0;
   solver->row_refactor_segment_max_width = 0;
@@ -7448,6 +7455,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_last_done_bitmap;
   solver->stats.row_refactor_done_bitmap_run_count =
     (int64_t)solver->row_refactor_done_bitmap_run_count;
+  solver->stats.row_refactor_input_cleanup_rows =
+    (int64_t)solver->row_refactor_input_cleanup_rows;
+  solver->stats.row_refactor_input_cleanup_entries =
+    (int64_t)solver->row_refactor_input_cleanup_entries;
   solver->stats.row_refactor_segment_count =
     (int64_t)solver->row_refactor_segment_count;
   solver->stats.row_refactor_segment_rows =
@@ -10731,6 +10742,87 @@ static int kls_row_refactor_pattern_is_eligible(const kls_solver *solver) {
          solver->refactor_u_values != NULL;
 }
 
+static int kls_build_row_refactor_input_cleanup_flags(
+  UF_long n,
+  const UF_long *l_ptr,
+  const UF_long *l_cols,
+  const UF_long *u_ptr,
+  const UF_long *u_cols,
+  const UF_long *input_ptr,
+  const UF_long *input_cols,
+  unsigned char **needs_cleanup_out,
+  UF_long *cleanup_rows_out,
+  UF_long *cleanup_entries_out) {
+  if (needs_cleanup_out != NULL) {
+    *needs_cleanup_out = NULL;
+  }
+  if (cleanup_rows_out != NULL) {
+    *cleanup_rows_out = 0;
+  }
+  if (cleanup_entries_out != NULL) {
+    *cleanup_entries_out = 0;
+  }
+  if (needs_cleanup_out == NULL || cleanup_rows_out == NULL ||
+      cleanup_entries_out == NULL ||
+      (n > 0u && (l_ptr == NULL || u_ptr == NULL ||
+                  input_ptr == NULL))) {
+    return 0;
+  }
+  if (n == 0u) {
+    return 1;
+  }
+
+  unsigned char *needs_cleanup =
+    (unsigned char *)calloc((size_t)n, sizeof(*needs_cleanup));
+  if (needs_cleanup == NULL) {
+    return 0;
+  }
+
+  UF_long cleanup_rows = 0;
+  UF_long cleanup_entries = 0;
+  for (UF_long row = 0; row < n; ++row) {
+    UF_long lp = l_ptr[row];
+    const UF_long lend = l_ptr[row + 1u];
+    UF_long up = u_ptr[row];
+    const UF_long uend = u_ptr[row + 1u];
+    const UF_long ibegin = input_ptr[row];
+    const UF_long iend = input_ptr[row + 1u];
+    if ((lend > lp && l_cols == NULL) ||
+        (uend > up && u_cols == NULL) ||
+        (iend > ibegin && input_cols == NULL)) {
+      free(needs_cleanup);
+      return 0;
+    }
+    for (UF_long pos = ibegin; pos < iend; ++pos) {
+      const UF_long col = input_cols[pos];
+      int covered = col == row;
+      if (col < row) {
+        while (lp < lend && l_cols[lp] < col) {
+          lp++;
+        }
+        covered = lp < lend && l_cols[lp] == col;
+      } else if (col > row) {
+        while (up < uend && u_cols[up] < col) {
+          up++;
+        }
+        covered = up < uend && u_cols[up] == col;
+      }
+      if (!covered) {
+        needs_cleanup[row] = 1u;
+      }
+    }
+    if (needs_cleanup[row]) {
+      cleanup_rows++;
+      cleanup_entries += iend - ibegin;
+    }
+  }
+
+  *needs_cleanup_out = needs_cleanup;
+  *cleanup_rows_out = cleanup_rows;
+  *cleanup_entries_out = cleanup_entries;
+  return 1;
+}
+
 static int kls_build_row_refactor_group_successors(
   UF_long group_count,
   const UF_long *row_group,
@@ -10889,6 +10981,8 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
       (solver->row_refactor_u_ptr[solver->n] == 0u ||
        solver->row_refactor_u_row_values != NULL) &&
       solver->row_refactor_input_ptr != NULL &&
+      (solver->n == 0u ||
+       solver->row_refactor_input_needs_cleanup != NULL) &&
       solver->row_refactor_successor_ptr != NULL &&
       (solver->row_refactor_successor_ptr[solver->n] == 0u ||
        solver->row_refactor_successor_rows != NULL) &&
@@ -11064,6 +11158,9 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     (UF_long *)calloc((size_t)n + 1u, sizeof(*successor_ptr));
   UF_long *successor_rows = l_nnz > 0u
     ? (UF_long *)malloc((size_t)l_nnz * sizeof(*successor_rows)) : NULL;
+  unsigned char *input_needs_cleanup = NULL;
+  UF_long input_cleanup_rows = 0;
+  UF_long input_cleanup_entries = 0;
   if (successor_ptr == NULL || (l_nnz > 0u && successor_rows == NULL)) {
     free(l_ptr);
     free(u_ptr);
@@ -11079,6 +11176,26 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     free(input_pos);
     free(successor_ptr);
     free(successor_rows);
+    return 0;
+  }
+  if (!kls_build_row_refactor_input_cleanup_flags(
+        n, l_ptr, l_cols, u_ptr, u_cols, input_ptr, input_cols,
+        &input_needs_cleanup, &input_cleanup_rows, &input_cleanup_entries)) {
+    free(l_ptr);
+    free(u_ptr);
+    free(input_ptr);
+    free(next);
+    free(l_cols);
+    free(l_values);
+    free(l_row_values);
+    free(u_cols);
+    free(u_values);
+    free(u_row_values);
+    free(input_cols);
+    free(input_pos);
+    free(successor_ptr);
+    free(successor_rows);
+    free(input_needs_cleanup);
     return 0;
   }
   for (UF_long row = 0; row < n; ++row) {
@@ -11099,6 +11216,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
         free(input_pos);
         free(successor_ptr);
         free(successor_rows);
+        free(input_needs_cleanup);
         return 0;
       }
       successor_ptr[dep + 1u]++;
@@ -11127,6 +11245,9 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_input_ptr = input_ptr;
   solver->row_refactor_input_cols = input_cols;
   solver->row_refactor_input_pos = input_pos;
+  solver->row_refactor_input_needs_cleanup = input_needs_cleanup;
+  solver->row_refactor_input_cleanup_rows = input_cleanup_rows;
+  solver->row_refactor_input_cleanup_entries = input_cleanup_entries;
   solver->row_refactor_successor_ptr = successor_ptr;
   solver->row_refactor_successor_rows = successor_rows;
   solver->row_refactor_pattern_n = n;
@@ -12003,6 +12124,25 @@ static int kls_scatter_row_refactor_u_values(kls_solver *solver) {
          kls_scatter_row_refactor_u_prefix_values(solver, solver->n);
 }
 
+static void kls_clear_row_refactor_input_residuals(kls_solver *solver,
+                                                   double *x,
+                                                   UF_long row) {
+  if (solver == NULL || x == NULL ||
+      solver->row_refactor_input_ptr == NULL ||
+      solver->row_refactor_input_cols == NULL ||
+      row >= solver->n) {
+    return;
+  }
+  if (solver->row_refactor_input_needs_cleanup != NULL &&
+      !solver->row_refactor_input_needs_cleanup[row]) {
+    return;
+  }
+  for (UF_long p = solver->row_refactor_input_ptr[row];
+       p < solver->row_refactor_input_ptr[row + 1u]; ++p) {
+    x[solver->row_refactor_input_cols[p]] = 0.0;
+  }
+}
+
 static int kls_row_refactor_multiplier_rejects(double lij, double tol) {
   if (tol <= DBL_MIN) {
     return 0;
@@ -12124,10 +12264,7 @@ static int kls_single_block_row_refactor(kls_solver *solver,
         x[col] = 0.0;
       }
     }
-    for (UF_long p = solver->row_refactor_input_ptr[i];
-         p < solver->row_refactor_input_ptr[i + 1u]; ++p) {
-      x[solver->row_refactor_input_cols[p]] = 0.0;
-    }
+    kls_clear_row_refactor_input_residuals(solver, x, i);
   }
   if (defer_value_scatter &&
       (!kls_scatter_row_refactor_l_values(solver) ||
@@ -12243,10 +12380,7 @@ static int kls_parallel_row_refactor_process_row(
       x[col] = 0.0;
     }
   }
-  for (UF_long p = solver->row_refactor_input_ptr[row];
-       p < solver->row_refactor_input_ptr[row + 1u]; ++p) {
-    x[solver->row_refactor_input_cols[p]] = 0.0;
-  }
+  kls_clear_row_refactor_input_residuals(solver, x, row);
   return 1;
 }
 
@@ -12374,10 +12508,7 @@ static int kls_parallel_row_refactor_process_dense_group_native(
       row_u_values[dense_len + offset] = x[col];
       x[col] = 0.0;
     }
-    for (UF_long p = solver->row_refactor_input_ptr[row];
-         p < solver->row_refactor_input_ptr[row + 1u]; ++p) {
-      x[solver->row_refactor_input_cols[p]] = 0.0;
-    }
+    kls_clear_row_refactor_input_residuals(solver, x, row);
   }
 
   for (UF_long row = row_begin; row < row_end; ++row) {
@@ -12553,10 +12684,7 @@ static int kls_parallel_row_refactor_process_dense_group(
       row_panel[offset] = x[col];
       x[col] = 0.0;
     }
-    for (UF_long p = solver->row_refactor_input_ptr[row];
-         p < solver->row_refactor_input_ptr[row + 1u]; ++p) {
-      x[solver->row_refactor_input_cols[p]] = 0.0;
-    }
+    kls_clear_row_refactor_input_residuals(solver, x, row);
   }
 
   for (UF_long row = row_begin; row < row_end; ++row) {
@@ -12843,10 +12971,7 @@ static int kls_parallel_row_refactor_process_group(
         x[col] = 0.0;
       }
     }
-    for (UF_long p = solver->row_refactor_input_ptr[row];
-         p < solver->row_refactor_input_ptr[row + 1u]; ++p) {
-      x[solver->row_refactor_input_cols[p]] = 0.0;
-    }
+    kls_clear_row_refactor_input_residuals(solver, x, row);
   }
   return 1;
 }

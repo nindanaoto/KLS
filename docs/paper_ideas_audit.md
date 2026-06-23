@@ -57,8 +57,11 @@ experimental row pipeline can now consume that graph through a bounded
 successor-ready queue for the pipeline tail, and reports whether the last row
 run used that queue plus cumulative queued group counts. Unchecked queued row
 tails also skip the per-row completion bitmap, while checked row runs still keep
-it for prefix-reject validation and report that usage separately. These pieces
-do not change the current default KLU-column numeric kernel.
+it for prefix-reject validation and report that usage separately. Row-pattern
+analysis also records when input columns are already structurally covered by
+`L`, the pivot, or `U`, allowing row kernels to skip redundant residual cleanup
+loops. These pieces do not change the current default KLU-column numeric
+kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -2773,6 +2776,15 @@ coverage now proves the split: the checked queued pass uses the bitmap, while
 the later unchecked queued pass reports no last-run bitmap use. This removes a
 KLU-wrapper bookkeeping artifact from the experimental row scheduler without
 changing default KLS policy.
+
+The row-pattern build then added per-row input-cleanup metadata. For each row,
+KLS checks whether every input column is already cleared naturally by the row
+numeric pass through an `L` dependency, the pivot, or a `U` entry. Rows with
+full coverage skip the old final input-column cleanup loop. The smoke fixture
+now proves zero cleanup rows on its dependent row-group pattern, and benchmark
+JSON exposes cleanup rows and entries so broad runs can confirm whether the
+optimization is structural on larger circuit matrices. This removes another
+current-row-kernel bookkeeping pass without tuning on matrix names.
 
 ## Recommended General Work
 

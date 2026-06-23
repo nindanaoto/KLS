@@ -2008,7 +2008,9 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_ready_queue_run_count != 2 ||
              stats.row_refactor_ready_queue_group_count <
                stats.row_refactor_group_pipeline_groups ||
-             stats.row_refactor_done_bitmap_run_count != 1)) {
+             stats.row_refactor_done_bitmap_run_count != 1 ||
+             stats.row_refactor_input_cleanup_rows != 0 ||
+             stats.row_refactor_input_cleanup_entries != 0)) {
     fprintf(stderr,
             "unexpected row pipeline stats: groups=%" PRId64
             ", levels=%" PRId64 ", cluster=%" PRId64
@@ -2018,7 +2020,8 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             ", max_fanout=%" PRId64 ", last=%d/%d/%d/%d/%d"
             ", runs=%" PRId64 "/%" PRId64 "/%" PRId64
             ", ready=%" PRId64 "/%" PRId64
-            ", done_bitmap=%" PRId64 "\n",
+            ", done_bitmap=%" PRId64
+            ", cleanup=%" PRId64 "/%" PRId64 "\n",
             stats.row_refactor_group_count,
             stats.row_refactor_group_level_count,
             stats.row_refactor_group_cluster_levels,
@@ -2039,7 +2042,9 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             stats.row_refactor_parallel_run_count,
             stats.row_refactor_ready_queue_run_count,
             stats.row_refactor_ready_queue_group_count,
-            stats.row_refactor_done_bitmap_run_count);
+            stats.row_refactor_done_bitmap_run_count,
+            stats.row_refactor_input_cleanup_rows,
+            stats.row_refactor_input_cleanup_entries);
     ok = 0;
   }
   const size_t legacy_stats_size =
