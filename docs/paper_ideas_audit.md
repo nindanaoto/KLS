@@ -262,7 +262,10 @@ design work, not benchmark-specific tuning.
   then switch to a no-pivot pipeline tail where each worker claims tail columns
   from an atomic cursor and waits only for actual U-pattern predecessors. The
   same block-aware EGraph kernel can run inside a large dominant BTF block and
-  update Offx for entries above that block. Schedule construction is now
+  update Offx for entries above that block. The EGraph consumer now keeps a
+  solver-owned worker pool and dense worker scratch across repeated refactors,
+  matching the CKTSO/NICSLU emphasis on retained scheduling state instead of
+  relaunching threads on every SPICE step. Schedule construction is now
   limited to single-block, dominant-BTF, or high-work fragmented non-dominant
   many-block shapes with enough numeric or measured dependency work to consume
   it, while ordinary non-dominant many-block BTF and low-work dominant-BTF cases
@@ -1753,6 +1756,22 @@ entries. The result says the next triangular-solve attempt should not simply
 transpose KLU columns into row-offset lists; it needs CKTSO's full
 structure-adaptive partitioning with sparse-block/rectangular-slice decisions
 and a storage layout designed for that access pattern.
+
+The EGraph refactor path then stopped treating every repeated refactor as a
+fresh thread launch. KLS now keeps a solver-owned EGraph worker pool plus dense
+worker scratch vectors and dispatches each accepted EGraph refactor as a new
+generation through that pool. Scratch is cleared only after early-abort paths
+that can leave dense entries live, while successful no-pivot columns retain the
+existing invariant that touched slots are zeroed as they go. This is still not
+the missing CKTSO row-oriented pivoting-tail engine, but it removes repeated
+thread launch and scratch allocation from the current exact-EGraph consumer.
+A four-row focused probe with three passes and three refactors per sample
+(`onetone2`, `rajat28`, `transient`, `power197k`) improved geomean cycle time
+from the scratch-only artifact's `3.5166s` to `3.3196s`; compared with the
+saved pre-pool blockmap artifact, `rajat28` moved from `6.3837s` to `5.3433s`
+and `onetone2` from `1.8011s` to `1.7070s`, while the mostly initial-factor
+`power197k` row stayed neutral. This is retained as a general repeated-refactor
+overhead cleanup for EGraph-active SPICE rows.
 
 ## Recommended General Work
 
