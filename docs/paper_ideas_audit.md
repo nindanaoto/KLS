@@ -1868,6 +1868,23 @@ BTF benefit with valid residuals: `coupled` moved from about `0.53-0.74s` to
 does not implement the larger missing single-block ETree-descendant pivoting
 tail inside a KLS-owned row/segment numeric engine.
 
+The experimental KLS-owned row refactor can now run a serial checked fast
+factorization pass behind `KLS_ENABLE_CHECKED_ROW_REFACTOR`. It checks the
+same no-pivot `L` multipliers used by the existing column fast factorization,
+records the dependency pivot that fails, marks the refreshed state as a serial
+prefix, and reuses the current block-restart machinery. This is intentionally
+separate from `KLS_ENABLE_ROW_REFACTOR`, so the existing unchecked repeated
+row-refactor path is unchanged. Focused checks stayed valid: normal `add20`
+used the serial checked row path with no reject, while stressed `add20`
+(`--stress-diagonal-scale 1e-9`) reported a prefix-current fast reject at
+pivot 1, one block restart, and a valid residual in about `0.0043s` factor
+time. A first parallel checked-row attempt was not retained as a dispatch path:
+the same stressed `add20` case timed out at 15s when the checked branch was
+left in the parallel row hot loops, and the existing unchecked `G2_circuit`
+row-refactor guard slowed until those branches were removed. This confirms the
+next CKTSO-aligned step is a proper pivot-aware row scheduler and restart tail,
+not a branch added to the current parallel row loop.
+
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,
 but BTF EGraph workers only need block-local indices and now allocate

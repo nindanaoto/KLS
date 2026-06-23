@@ -8928,6 +8928,12 @@ static int kls_row_refactor_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_checked_row_refactor_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_row_refactor_should_defer_value_scatter(const kls_solver *solver) {
   return solver != NULL && solver->row_refactor_dense_segment_count > 0u;
 }
@@ -8970,8 +8976,17 @@ static int kls_scatter_row_refactor_u_values(kls_solver *solver) {
   return 1;
 }
 
+static int kls_row_refactor_multiplier_rejects(double lij, double tol) {
+  if (tol <= DBL_MIN) {
+    return 0;
+  }
+  const double lij_abs = fabs(lij);
+  return !isfinite(lij_abs) || lij_abs * tol > 1.0 + 1.0e-12;
+}
+
 static int kls_single_block_row_refactor(kls_solver *solver,
-                                         double *numeric_values) {
+                                         double *numeric_values,
+                                         int check_pivots) {
   if (numeric_values == NULL || solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->symbolic->nblocks != 1u ||
       solver->common.scale > 0 || solver->numeric->Rs != NULL ||
@@ -9006,6 +9021,18 @@ static int kls_single_block_row_refactor(kls_solver *solver,
          p < solver->row_refactor_l_ptr[i + 1u]; ++p) {
       const UF_long dep = solver->row_refactor_l_cols[p];
       const double lij = x[dep] / udiag[dep];
+      if (check_pivots &&
+          kls_row_refactor_multiplier_rejects(lij, common->tol)) {
+        x[dep] = 0.0;
+        memset(x, 0, (size_t)n * sizeof(*x));
+        solver->fast_reject_refresh_state =
+          KLS_FAST_REJECT_REFRESH_PREFIX;
+        kls_record_fast_reject(solver, dep,
+                               symbolic->Q != NULL ? symbolic->Q[dep]
+                                                    : KLS_KLU_EMPTY);
+        common->status = TRILINOS_KLU_OK;
+        return 0;
+      }
       if (defer_value_scatter) {
         solver->row_refactor_l_row_values[p] = lij;
       } else {
@@ -11214,7 +11241,13 @@ static int kls_mapped_refactor(kls_solver *solver,
     return -1;
   }
   if (solver->symbolic->nblocks == 1u) {
-    if (!check_pivots && kls_row_refactor_env_enabled()) {
+    if (check_pivots && kls_checked_row_refactor_env_enabled()) {
+      const int row_status =
+        kls_single_block_row_refactor(solver, numeric_values, 1);
+      if (row_status >= 0) {
+        return row_status;
+      }
+    } else if (!check_pivots && kls_row_refactor_env_enabled()) {
       if (solver->options.threads > 1) {
         const int parallel_row_status =
           kls_single_block_parallel_row_refactor(solver, numeric_values);
@@ -11223,7 +11256,7 @@ static int kls_mapped_refactor(kls_solver *solver,
         }
       }
       const int row_status =
-        kls_single_block_row_refactor(solver, numeric_values);
+        kls_single_block_row_refactor(solver, numeric_values, 0);
       if (row_status >= 0) {
         return row_status;
       }
@@ -11900,7 +11933,13 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                                      double *numeric_values,
                                      int check_pivots) {
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
-  if (!check_pivots && kls_row_refactor_env_enabled()) {
+  if (check_pivots && kls_checked_row_refactor_env_enabled()) {
+    const int row_status =
+      kls_single_block_row_refactor(solver, numeric_values, 1);
+    if (row_status >= 0) {
+      return (UF_long)row_status;
+    }
+  } else if (!check_pivots && kls_row_refactor_env_enabled()) {
     if (solver->options.threads > 1) {
       const int parallel_row_status =
         kls_single_block_parallel_row_refactor(solver, numeric_values);
@@ -11909,7 +11948,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       }
     }
     const int row_status =
-      kls_single_block_row_refactor(solver, numeric_values);
+      kls_single_block_row_refactor(solver, numeric_values, 0);
     if (row_status >= 0) {
       return (UF_long)row_status;
     }
