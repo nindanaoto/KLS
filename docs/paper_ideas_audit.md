@@ -62,7 +62,10 @@ analysis also records when input columns are already structurally covered by
 `L`, the pivot, or `U`, allowing row kernels to skip redundant residual cleanup
 loops. Dense row segments now keep deferred all-value scatter only for checked
 pivot probes, while unchecked row refactors scatter completed dense rows
-directly. These pieces do not change the current default KLU-column numeric
+directly. The row ready queue now also orders initially ready tail groups and
+newly released successor groups by the retained FLOP-style group work estimate,
+which moves the row scheduler closer to SubtreeLU's workload-balanced queue
+generation. These pieces do not change the current default KLU-column numeric
 kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
@@ -2797,6 +2800,14 @@ after its in-group update is finalized. Smoke coverage proves the checked pass
 still reports deferred scatter while the subsequent unchecked queued refactor
 does not. This removes a broad post-pass copy from the experimental row
 refactor without changing default KLS policy.
+
+The row ready queue was then made work-aware using the existing group work
+estimate. The retained successor graph is sorted once when the row pattern is
+built, and each run sorts the initial tail-ready groups before publishing them
+to worker threads. This follows SubtreeLU's queue-balancing motivation of
+scheduling heavier refactor work earlier while preserving dependency readiness;
+it is still running the experimental KLS row layer, not a full separator-tree
+private/pipeline scheduler.
 
 ## Recommended General Work
 

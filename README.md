@@ -371,7 +371,11 @@ covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in
 the row numeric kernels. Dense row segments use deferred all-value scatter only
 for checked pivot probes; unchecked row refactors scatter each completed dense
 row directly and report `row_refactor_last_defer_value_scatter` plus
-`row_refactor_defer_value_scatter_run_count`.
+`row_refactor_defer_value_scatter_run_count`. The queued row tail orders
+ready groups by the retained FLOP-style group work estimate, including
+successors released by completed groups, and reports
+`row_refactor_last_work_ready_queue` plus
+`row_refactor_work_ready_queue_run_count`.
 Because checked row fast-factor probes and
 unchecked row refactors are selected independently, stats also report
 `row_refactor_last_run`, `row_refactor_last_checked`,
