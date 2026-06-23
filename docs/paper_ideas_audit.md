@@ -2015,6 +2015,22 @@ losses plus the timeout rows `mac_econ_fwd500` and `ss1`, so future changes
 are checked against the matrices that still expose the large gap instead of
 only the older pre-EGraph focus rows.
 
+The BTF EGraph numeric path was then given the same branch-light unscaled
+column specialization that single-block EGraph already used. The retained
+dispatch is structural: it only applies to unscaled BTF refactors whose largest
+block is at least 30k columns, leaving the small compact BTF path on the older
+generic kernel after an ungated probe regressed `coupled`. In a same-session
+large-BTF A/B with three passes and ten refactors per sample, the retained
+candidate improved the nine-row focused geomean by about `1.2%` versus the
+committed baseline. Repeated refactor improved on the intended large-block
+rows: `ASIC_320k` `0.1033s` to `0.0990s`, `ASIC_320ks` `0.0852s` to
+`0.0813s`, `trans5` `0.00665s` to `0.00624s`, and `LeGresley_87936`
+`0.00458s` to `0.00420s`. The important unchanged-path guard set
+(`G2_circuit`, `onetone1`, `onetone2`, `rajat28`) stayed neutral-to-slightly
+positive in a two-pass comparison. This is a real hot-loop cleanup for the
+existing EGraph BTF refactor, but it is still an incremental KLU-storage
+optimization rather than CKTSO's missing row-oriented pivoting-tail engine.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

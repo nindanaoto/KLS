@@ -8307,6 +8307,138 @@ static int kls_egraph_refactor_single_unscaled_column(
   return 1;
 }
 
+static int kls_egraph_refactor_btf_unscaled_column(
+  kls_egraph_refactor_worker *worker,
+  UF_long k,
+  int wait_for_dependencies) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  double *x = worker->x;
+  double *udiag = (double *)numeric->Udiag;
+  UF_long **l_indices = solver->refactor_l_indices;
+  double **l_values = solver->refactor_l_values;
+  UF_long **u_indices = solver->refactor_u_indices;
+  double **u_values = solver->refactor_u_values;
+  if (k >= solver->n || symbolic->R == NULL || symbolic->Q == NULL ||
+      solver->refactor_lu_pointer_count != solver->n ||
+      l_indices == NULL || l_values == NULL ||
+      u_indices == NULL || u_values == NULL ||
+      solver->refactor_col_ptr == NULL ||
+      solver->refactor_row_idx == NULL ||
+      solver->refactor_input_pos == NULL ||
+      solver->refactor_block_start == NULL ||
+      solver->refactor_col_block == NULL ||
+      numeric->Offp == NULL || numeric->Offx == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+
+  const UF_long block = solver->refactor_col_block[k];
+  if (block >= symbolic->nblocks) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  const UF_long k1 = symbolic->R[block];
+  const UF_long k2 = symbolic->R[block + 1u];
+  const UF_long nk = k2 - k1;
+  const UF_long local_k = k - k1;
+  if (local_k >= nk) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+
+  UF_long poff = numeric->Offp[k];
+  const UF_long poff_end = numeric->Offp[k + 1u];
+  double *offx = (double *)numeric->Offx;
+  for (UF_long p = solver->refactor_col_ptr[k];
+       p < solver->refactor_block_start[k]; ++p) {
+    if (poff >= poff_end) {
+      kls_egraph_refactor_record_invalid(shared);
+      return 0;
+    }
+    offx[poff++] = shared->values[solver->refactor_input_pos[p]];
+  }
+
+  if (nk == 1u) {
+    double pivot = 0.0;
+    for (UF_long p = solver->refactor_block_start[k];
+         p < solver->refactor_col_ptr[k + 1u]; ++p) {
+      if (solver->refactor_row_idx[p] != k) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      pivot = shared->values[solver->refactor_input_pos[p]];
+    }
+    udiag[k] = pivot;
+    if (pivot == 0.0) {
+      kls_egraph_refactor_record_singular(shared, k, symbolic->Q[k]);
+      if (solver->common.halt_if_singular) {
+        return 0;
+      }
+    }
+    return 1;
+  }
+
+  for (UF_long p = solver->refactor_block_start[k];
+       p < solver->refactor_col_ptr[k + 1u]; ++p) {
+    const UF_long global_row = solver->refactor_row_idx[p];
+    x[global_row - k1] = shared->values[solver->refactor_input_pos[p]];
+  }
+
+  UF_long *ui = u_indices[k];
+  double *ux = u_values[k];
+  UF_long ucol_len = numeric->Ulen[k];
+  for (UF_long up = 0; up < ucol_len; ++up) {
+    const UF_long j = ui[up];
+    if (wait_for_dependencies &&
+        !kls_egraph_refactor_wait_done(shared, k1 + j)) {
+      return 0;
+    }
+    const double ujk = x[j];
+    x[j] = 0.0;
+    ux[up] = ujk;
+
+    UF_long *li = l_indices[k1 + j];
+    double *lx = l_values[k1 + j];
+    UF_long lcol_len = numeric->Llen[k1 + j];
+    for (UF_long p = 0; p < lcol_len; ++p) {
+      x[li[p]] -= lx[p] * ujk;
+    }
+  }
+
+  const double ukk = x[local_k];
+  x[local_k] = 0.0;
+  if (ukk == 0.0) {
+    kls_egraph_refactor_record_singular(shared, k, symbolic->Q[k]);
+    if (solver->common.halt_if_singular) {
+      return 0;
+    }
+  }
+  udiag[k] = ukk;
+
+  UF_long *li = l_indices[k];
+  double *lx = l_values[k];
+  UF_long lcol_len = numeric->Llen[k];
+  for (UF_long p = 0; p < lcol_len; ++p) {
+    const UF_long i = li[p];
+    const double lij = x[i] / ukk;
+    if (shared->check_pivots) {
+      const double lij_abs = fabs(lij);
+      if (!isfinite(lij_abs) ||
+          lij_abs * solver->common.tol > 1.0 + 1.0e-12) {
+        x[i] = 0.0;
+        kls_egraph_refactor_record_reject(shared, k, symbolic->Q[k]);
+        return 0;
+      }
+    }
+    lx[p] = lij;
+    x[i] = 0.0;
+  }
+  return 1;
+}
+
 static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
                                       UF_long k,
                                       int wait_for_dependencies) {
@@ -8320,9 +8452,15 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   double **l_values = solver->refactor_l_values;
   UF_long **u_indices = solver->refactor_u_indices;
   double **u_values = solver->refactor_u_values;
-  if (symbolic != NULL && symbolic->nblocks == 1u && shared->scale <= 0) {
-    return kls_egraph_refactor_single_unscaled_column(
-      worker, k, wait_for_dependencies);
+  if (symbolic != NULL && shared->scale <= 0) {
+    if (symbolic->nblocks == 1u) {
+      return kls_egraph_refactor_single_unscaled_column(
+        worker, k, wait_for_dependencies);
+    }
+    if (symbolic->nblocks > 1u && symbolic->maxblock >= 30000u) {
+      return kls_egraph_refactor_btf_unscaled_column(
+        worker, k, wait_for_dependencies);
+    }
   }
   if (solver->refactor_lu_pointer_count != solver->n ||
       l_indices == NULL || l_values == NULL ||
