@@ -172,11 +172,13 @@ dispatch policy. Compact unscaled dominant-BTF matrices with a 10k-30k largest
 block, bounded fringe-block count, and at least 20M measured factor flops can
 also use the same exact EGraph path once the dependency work is high enough,
 covering smaller CKTSO-gap cases without enabling the overhead-prone TSOPF or
-scaled dominant-BTF shapes. Moderate single-block cases can also consume the
-EGraph refactor once their measured factor work, LU fill, and dependency work
-clear the general floors, which covers matrices such as `HTC_336_4438` without
-using matrix-name tuning. Unscaled single-block EGraph refactors use a slimmer
-column kernel that bypasses BTF and scaling checks in the hot loop. The path
+scaled dominant-BTF shapes. Moderate unscaled single-block cases can also
+consume the EGraph refactor once their measured factor work, LU fill, and
+dependency work clear lower single-block floors, which covers matrices such as
+`rajat15` without using matrix-name tuning. Larger single-block cases keep the
+higher general floors, which cover matrices such as `HTC_336_4438`. Unscaled
+single-block EGraph refactors use a slimmer column kernel that bypasses BTF and
+scaling checks in the hot loop. The path
 updates that block's local LU and off-block
 entries while leaving ordinary many-block BTF cases on the existing worker-pool
 path. For large cases that use KLU row scaling, the same path recomputes the row

@@ -1136,6 +1136,22 @@ geomean on those focused rows, so this is retained as a useful KLS-owned
 refactor threshold improvement rather than mistaken for CKTSO's full pivoting
 tail scheduler.
 
+A later moderate single-block refinement lowered the single-block EGraph floor
+for unscaled one-block matrices between 30k and 100k rows when the factored
+numeric object already has at least `5e7` measured flops, at least 1M LU
+entries, enough level width, and at least `2e7` measured dependency-work units.
+This is intentionally below the large single-block floor but still excludes
+low-work single-block rows such as `bcircuit`, `ACTIVSg10K`, `ACTIVSg70K`, and
+`OPF_10000`. In the current medium artifact the selector matches only
+`rajat15`; it builds 633 levels and reduces repeated refactor from about
+`0.0173s` to about `0.0101s`, moving the focused SPICE-cycle median from about
+`2.16s` to about `1.47s`. A full one-pass medium run kept the same three
+known failures and moved KLS geomean from the previous `0.3033s` artifact to
+about `0.3023s`; the CKTSO ratio improved to about `1.145x` slower on the 90
+common completed rows, and the KLU2 comparison improved to about a `2.02x`
+geomean speedup on the 88 common completed rows. Large single-block guards
+such as `G2_circuit` and `mc2depi` stay on the existing large EGraph path.
+
 The medium-heavy dominant-BTF gate was then rechecked after the newer EGraph
 cluster/pipeline scheduler and the single-block threshold work. The current
 retained branch lowers the 85-95% coverage class to about `1.5e8` actual

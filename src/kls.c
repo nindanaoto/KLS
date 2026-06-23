@@ -7662,6 +7662,16 @@ static int kls_egraph_compact_dominant_btf_shape(const kls_solver *solver) {
          solver->common.flops >= 2.0e7;
 }
 
+static int kls_egraph_moderate_single_block_shape(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->symbolic->nblocks != 1u || solver->common.scale > 0 ||
+      solver->n < 30000u || solver->n >= 100000u) {
+    return 0;
+  }
+  return solver->common.flops >= 5.0e7 &&
+         solver->numeric->lnz + solver->numeric->unz >= 1000000u;
+}
+
 static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->nblocks <= 1u || solver->n == 0u) {
@@ -7696,6 +7706,9 @@ static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {
   if (kls_egraph_compact_dominant_btf_shape(solver)) {
     return 10000u;
   }
+  if (kls_egraph_moderate_single_block_shape(solver)) {
+    return 30000u;
+  }
   return kls_egraph_dominant_btf_shape(solver) ? 50000u : 100000u;
 }
 
@@ -7714,6 +7727,8 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     kls_egraph_all_pipeline_dominant_btf_shape(solver);
   const int medium_heavy_btf =
     kls_egraph_medium_heavy_dominant_btf_shape(solver);
+  const int moderate_single =
+    kls_egraph_moderate_single_block_shape(solver);
   if (solver->n < kls_egraph_refactor_size_floor(solver)) {
     return 0;
   }
@@ -7727,7 +7742,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     (dominant_btf || all_pipeline_btf)
       ? (medium_heavy_btf || all_pipeline_btf ? 8.0e7 :
          low_work_dominant_btf ? 1.0e7 : 1.0e8)
-      : 1.5e8;
+      : (moderate_single ? 2.0e7 : 1.5e8);
   if (solver->refactor_dependency_work < min_dependency_work) {
     return 0;
   }
@@ -8192,6 +8207,9 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
   }
   if (dominant_btf) {
     return solver->common.flops >= 2.0e7;
+  }
+  if (kls_egraph_moderate_single_block_shape(solver)) {
+    return 1;
   }
   if (solver->common.flops >= 3.0e8) {
     return 1;
