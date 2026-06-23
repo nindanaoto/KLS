@@ -1485,6 +1485,19 @@ fast-factor refactor from about `0.708s` to about `0.670s`, and the 100-step
 SPICE-cycle estimate from about `75.7s` to about `73.4s`, while the solve time
 stayed neutral.
 
+Two follow-up scheduler probes were rejected after the scaled huge single-block
+all-pipeline change. First, the all-pipeline work cursor was changed to claim
+four-column dynamic chunks for modest average pipeline work. This reduced
+atomic cursor traffic but delayed dependency publication inside each chunk and
+was a major regression: on `rajat20`, `rajat25`, and `rajat28` repeated
+refactor more than doubled, `rajat30` regressed by about 34%, and `nxp1` by
+about 23%. Second, the fragmented non-dominant many-block EGraph shape used by
+the ASIC 680k class was switched from the retained cluster/pipeline split to a
+full all-pipeline run. That was neutral-to-worse: `ASIC_680k` was essentially
+flat, `ASIC_680ks` regressed by about 4%, and the focused geomean regressed
+slightly. The retained per-column dynamic cursor and barriered fragmented-BTF
+split remain the better fit for the current fixed-pivot LU representation.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
