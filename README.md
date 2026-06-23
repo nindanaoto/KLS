@@ -323,6 +323,11 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_tail_candidate_abs`, `fast_rejected_tail_candidate_count`,
 `fast_rejected_tail_candidate_position`,
 `fast_rejected_tail_repair_ready`,
+`fast_repaired_pivot_row`,
+`fast_repaired_pivot_matches_tail_candidate`,
+`fast_repaired_first_changed_pivot`,
+`fast_repaired_prefix_changed_pivots`,
+`fast_repaired_suffix_changed_pivots`,
 `fast_rejected_block_start`, `fast_rejected_block_size`,
 `fast_rejected_suffix_columns`,
 `fast_rejected_descendant_columns`, `fast_rejected_descendant_work`,
@@ -335,7 +340,10 @@ magnitude and candidate entry magnitude at the reject, the best row-tail
 candidate that can be computed from current prefix state in the checked
 row-major path, its retained row-tail position, whether that prefix-current
 candidate satisfies the same pivot-tolerance predicate that rejected the
-original reused pivot, the rejected BTF block, the suffix from that pivot to the end
+original reused pivot, the row chosen by the fallback pivoting block repair at
+that pivot, whether it matches the retained tail candidate, the first pivot
+whose row changed in the fallback repair, how many changed pivots were before
+and at/after the rejected pivot, the rejected BTF block, the suffix from that pivot to the end
 of the block, the exact U-pattern descendant tail inside that block, the
 row-refactor successor tail when row-major metadata is available, the
 ordered-block ETree successor path that a pivoting tail-restart upper-bound

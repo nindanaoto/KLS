@@ -1915,6 +1915,21 @@ This keeps the CKTSO restart target tied to KLS row storage rather than only
 the KLU-column U-pattern or an ETree upper bound; the actual pivoting tail
 factor kernel is still missing.
 
+The fallback pivoting block repair now also records the repaired row selected
+at the rejected pivot, whether it matches the retained row-tail candidate, the
+first pivot whose row changed in the repaired block, and how many changed
+pivots occur before versus at/after the rejected pivot. These repair-delta
+fields separate cases where the robust full-block KLU repair already preserves
+the checked prefix and chooses the row-tail candidate from cases that would
+need broader repivoting than a CKTSO-style local tail restart can safely
+provide.
+The first focused stress probe shows why that distinction matters: stressed
+`add20` chose the retained row-tail candidate at the rejected pivot, but the
+full KLU block repair also changed one pivot before the rejected pivot, so a
+future local tail kernel cannot treat tail-candidate availability alone as a
+safe replacement for the fallback repair. The ordinary non-reject
+`G2_circuit` row-refactor path leaves these fields at their sentinels.
+
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,
 but BTF EGraph workers only need block-local indices and now allocate

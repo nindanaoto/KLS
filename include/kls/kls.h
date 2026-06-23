@@ -106,6 +106,11 @@ typedef struct kls_stats {
   int64_t fast_rejected_tail_candidate_count;
   int64_t fast_rejected_tail_candidate_position;
   int fast_rejected_tail_repair_ready;
+  int64_t fast_repaired_pivot_row;
+  int fast_repaired_pivot_matches_tail_candidate;
+  int64_t fast_repaired_first_changed_pivot;
+  int64_t fast_repaired_prefix_changed_pivots;
+  int64_t fast_repaired_suffix_changed_pivots;
   int selected_exact_matching;
   int selected_spral_matching;
   int fast_block_restarts;

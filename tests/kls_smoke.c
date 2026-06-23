@@ -395,6 +395,11 @@ static int test_checked_row_fast_factor_block_restart(void) {
              stats.fast_rejected_tail_candidate_count < 1 ||
              stats.fast_rejected_tail_candidate_position < 0 ||
              stats.fast_rejected_tail_repair_ready != 1 ||
+             stats.fast_repaired_pivot_row != 1 ||
+             stats.fast_repaired_pivot_matches_tail_candidate != 1 ||
+             stats.fast_repaired_first_changed_pivot != 0 ||
+             stats.fast_repaired_prefix_changed_pivots != 0 ||
+             stats.fast_repaired_suffix_changed_pivots < 1 ||
              stats.fast_block_restarts != 1 ||
              stats.fast_rejected_refresh_state !=
                KLS_FAST_REJECT_REFRESH_PREFIX)) {
@@ -404,7 +409,10 @@ static int test_checked_row_fast_factor_block_restart(void) {
             ", |pivot|=%.6g, |candidate|=%.6g"
             ", tail_row=%" PRId64 ", tail_candidate=%.6g"
             ", tail_count=%" PRId64 ", tail_pos=%" PRId64
-            ", tail_ready=%d, restarts=%d, refresh=%d\n",
+            ", tail_ready=%d, repaired_row=%" PRId64
+            ", repaired_match=%d, first_changed=%" PRId64
+            ", prefix_changed=%" PRId64 ", suffix_changed=%" PRId64
+            ", restarts=%d, refresh=%d\n",
             stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,
             stats.fast_rejected_row, stats.fast_rejected_multiplier_abs,
             stats.fast_rejected_pivot_abs,
@@ -414,6 +422,11 @@ static int test_checked_row_fast_factor_block_restart(void) {
             stats.fast_rejected_tail_candidate_count,
             stats.fast_rejected_tail_candidate_position,
             stats.fast_rejected_tail_repair_ready,
+            stats.fast_repaired_pivot_row,
+            stats.fast_repaired_pivot_matches_tail_candidate,
+            stats.fast_repaired_first_changed_pivot,
+            stats.fast_repaired_prefix_changed_pivots,
+            stats.fast_repaired_suffix_changed_pivots,
             stats.fast_block_restarts, stats.fast_rejected_refresh_state);
     ok = 0;
   }
