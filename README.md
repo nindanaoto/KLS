@@ -368,7 +368,10 @@ report `row_refactor_last_done_bitmap` and
 visible. Row-pattern analysis also records `row_refactor_input_cleanup_rows`
 and `row_refactor_input_cleanup_entries`; rows whose input columns are already
 covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in
-the row numeric kernels.
+the row numeric kernels. Dense row segments use deferred all-value scatter only
+for checked pivot probes; unchecked row refactors scatter each completed dense
+row directly and report `row_refactor_last_defer_value_scatter` plus
+`row_refactor_defer_value_scatter_run_count`.
 Because checked row fast-factor probes and
 unchecked row refactors are selected independently, stats also report
 `row_refactor_last_run`, `row_refactor_last_checked`,

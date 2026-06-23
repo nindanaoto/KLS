@@ -809,6 +809,8 @@ int main(int argc, char **argv) {
            ",\"row_refactor_done_bitmap_run_count\":%" PRId64
            ",\"row_refactor_input_cleanup_rows\":%" PRId64
            ",\"row_refactor_input_cleanup_entries\":%" PRId64
+           ",\"row_refactor_last_defer_value_scatter\":%d"
+           ",\"row_refactor_defer_value_scatter_run_count\":%" PRId64
            ",\"row_refactor_segment_count\":%" PRId64
            ",\"row_refactor_segment_rows\":%" PRId64
            ",\"row_refactor_segment_max_width\":%" PRId64
@@ -864,6 +866,8 @@ int main(int argc, char **argv) {
            stats.row_refactor_done_bitmap_run_count,
            stats.row_refactor_input_cleanup_rows,
            stats.row_refactor_input_cleanup_entries,
+           stats.row_refactor_last_defer_value_scatter,
+           stats.row_refactor_defer_value_scatter_run_count,
            stats.row_refactor_segment_count,
            stats.row_refactor_segment_rows,
            stats.row_refactor_segment_max_width,
@@ -1014,7 +1018,9 @@ int main(int argc, char **argv) {
            ", last done bitmap: %d"
            ", done bitmap runs: %" PRId64
            ", input cleanup rows: %" PRId64
-           ", input cleanup entries: %" PRId64 "\n",
+           ", input cleanup entries: %" PRId64
+           ", last defer scatter: %d"
+           ", defer scatter runs: %" PRId64 "\n",
            stats.row_refactor_group_count,
            stats.row_refactor_group_level_count,
            stats.row_refactor_group_level_max_width,
@@ -1038,7 +1044,9 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_done_bitmap,
            stats.row_refactor_done_bitmap_run_count,
            stats.row_refactor_input_cleanup_rows,
-           stats.row_refactor_input_cleanup_entries);
+           stats.row_refactor_input_cleanup_entries,
+           stats.row_refactor_last_defer_value_scatter,
+           stats.row_refactor_defer_value_scatter_run_count);
     printf("row refactor segments: %" PRId64
            ", rows: %" PRId64 ", max width: %" PRId64
            ", dense entries: %.6g, trailing entries: %.6g\n",

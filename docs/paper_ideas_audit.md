@@ -60,7 +60,9 @@ tails also skip the per-row completion bitmap, while checked row runs still keep
 it for prefix-reject validation and report that usage separately. Row-pattern
 analysis also records when input columns are already structurally covered by
 `L`, the pivot, or `U`, allowing row kernels to skip redundant residual cleanup
-loops. These pieces do not change the current default KLU-column numeric
+loops. Dense row segments now keep deferred all-value scatter only for checked
+pivot probes, while unchecked row refactors scatter completed dense rows
+directly. These pieces do not change the current default KLU-column numeric
 kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
@@ -2785,6 +2787,16 @@ now proves zero cleanup rows on its dependent row-group pattern, and benchmark
 JSON exposes cleanup rows and entries so broad runs can confirm whether the
 optimization is structural on larger circuit matrices. This removes another
 current-row-kernel bookkeeping pass without tuning on matrix names.
+
+The dense row-segment path then narrowed deferred value scatter to checked
+pivot probes. Previously, the presence of any dense row segment forced the
+entire row refactor to store into row mirrors and copy all row-major `L`/`U`
+values back into KLU storage at the end. The native dense group kernel now also
+supports unchecked operation by scattering each completed dense row directly
+after its in-group update is finalized. Smoke coverage proves the checked pass
+still reports deferred scatter while the subsequent unchecked queued refactor
+does not. This removes a broad post-pass copy from the experimental row
+refactor without changing default KLS policy.
 
 ## Recommended General Work
 
