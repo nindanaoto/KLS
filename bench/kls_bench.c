@@ -651,6 +651,7 @@ int main(int argc, char **argv) {
            ",\"fast_repaired_tail_restart_work\":%.9g"
            ",\"fast_repaired_tail_restart_saved_work\":%.9g"
            ",\"fast_block_restarts\":%d"
+           ",\"fast_tail_restarts\":%d"
            ",\"fast_rejected_block_start\":%" PRId64
            ",\"fast_rejected_block_size\":%" PRId64
            ",\"fast_rejected_suffix_columns\":%" PRId64
@@ -739,6 +740,7 @@ int main(int argc, char **argv) {
            stats.fast_repaired_tail_restart_work,
            stats.fast_repaired_tail_restart_saved_work,
            stats.fast_block_restarts,
+           stats.fast_tail_restarts,
            stats.fast_rejected_block_start,
            stats.fast_rejected_block_size,
            stats.fast_rejected_suffix_columns,
@@ -853,7 +855,8 @@ int main(int argc, char **argv) {
            stats.fast_repaired_tail_restart_columns,
            stats.fast_repaired_tail_restart_work,
            stats.fast_repaired_tail_restart_saved_work);
-    printf("fast block restarts: %d\n", stats.fast_block_restarts);
+    printf("fast block restarts: %d, tail restarts: %d\n",
+           stats.fast_block_restarts, stats.fast_tail_restarts);
     printf("fast rejected block: start %" PRId64 ", size %" PRId64
            ", suffix %" PRId64 ", descendants %" PRId64
            ", descendant work %.6g, row tail %" PRId64

@@ -119,6 +119,7 @@ typedef struct kls_stats {
   int selected_exact_matching;
   int selected_spral_matching;
   int fast_block_restarts;
+  int fast_tail_restarts;
   int64_t refactor_dependency_levels;
   int64_t refactor_dependency_max_width;
   int64_t refactor_dependency_edges;

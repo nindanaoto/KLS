@@ -553,7 +553,8 @@ static int test_fast_factor_tail_prefix_state_validation(void) {
              stats.fast_repaired_tail_restart_ready != 1 ||
              stats.fast_repaired_tail_restart_columns < 1 ||
              stats.fast_repaired_tail_restart_work <= 0.0 ||
-             stats.fast_block_restarts != 1)) {
+             stats.fast_block_restarts != 1 ||
+             stats.fast_tail_restarts != 1)) {
     fprintf(stderr,
             "unexpected tail-prefix validation stats: pivot=%" PRId64
             ", start=%" PRId64 ", size=%" PRId64 ", suffix=%" PRId64
@@ -563,7 +564,7 @@ static int test_fast_factor_tail_prefix_state_validation(void) {
             ", repaired_match=%d"
             ", tail_ready=%d, tail_cols=%" PRId64 ", tail_work=%.6g"
             ", pivoting_tail_cols=%" PRId64 ", pivoting_tail_work=%.6g"
-            ", restarts=%d\n",
+            ", restarts=%d, tail_restarts=%d\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_block_start,
             stats.fast_rejected_block_size,
@@ -580,7 +581,8 @@ static int test_fast_factor_tail_prefix_state_validation(void) {
             stats.fast_repaired_tail_restart_work,
             stats.fast_rejected_pivoting_tail_columns,
             stats.fast_rejected_pivoting_tail_work,
-            stats.fast_block_restarts);
+            stats.fast_block_restarts,
+            stats.fast_tail_restarts);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||

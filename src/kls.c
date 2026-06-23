@@ -149,6 +149,7 @@ struct kls_solver {
   int exact_matching_selected;
   int spral_matching_selected;
   int fast_block_restarts;
+  int fast_tail_restarts;
   int fast_reject_refresh_state;
   UF_long *fast_reject_tail_cols;
   unsigned int *fast_reject_tail_marks;
@@ -736,6 +737,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_tail_restart_work = 0.0;
   solver->stats.fast_repaired_tail_restart_saved_work = 0.0;
   solver->stats.fast_block_restarts = 0;
+  solver->stats.fast_tail_restarts = 0;
   solver->stats.fast_rejected_block_start = -1;
   solver->stats.fast_rejected_block_size = 0;
   solver->stats.fast_rejected_suffix_columns = 0;
@@ -750,6 +752,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_refresh_state =
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_block_restarts = 0;
+  solver->fast_tail_restarts = 0;
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_reject_tail_count = 0;
 }
@@ -1492,6 +1495,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->exact_matching_selected = 0;
   solver->spral_matching_selected = 0;
   solver->fast_block_restarts = 0;
+  solver->fast_tail_restarts = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
   kls_clear_fast_reject_stats(solver);
@@ -7129,6 +7133,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
   solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
+  solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
   if (solver->symbolic != NULL) {
@@ -7153,6 +7158,7 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
   solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
+  solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
   solver->stats.selected_btf =
@@ -8996,6 +9002,721 @@ static int kls_repaired_tail_prefix_state_valid(const kls_solver *solver,
   return ok;
 }
 
+static Int kls_tail_dfs(Int j,
+                        Int k,
+                        Int pinv[],
+                        Int llen[],
+                        Int lip[],
+                        Int stack[],
+                        Int flag[],
+                        Int lpend[],
+                        Int top,
+                        Unit lu[],
+                        Int *lik,
+                        Int *plength,
+                        Int ap_pos[]) {
+  Int l_length = *plength;
+  Int head = 0;
+  stack[0] = j;
+
+  while (head >= 0) {
+    j = stack[head];
+    const Int jnew = pinv[j];
+    if (jnew < 0 || jnew >= k) {
+      return -1;
+    }
+
+    if (flag[j] != k) {
+      flag[j] = k;
+      ap_pos[head] =
+        (lpend[jnew] == TRILINOS_KLU_EMPTY) ? llen[jnew] : lpend[jnew];
+    }
+
+    Int *li = (Int *)(lu + lip[jnew]);
+    Int pos = 0;
+    for (pos = --ap_pos[head]; pos >= 0; --pos) {
+      const Int i = li[pos];
+      if (flag[i] == k) {
+        continue;
+      }
+      if (pinv[i] >= 0) {
+        ap_pos[head] = pos;
+        stack[++head] = i;
+        break;
+      }
+      flag[i] = k;
+      lik[l_length++] = i;
+    }
+
+    if (pos == -1) {
+      head--;
+      stack[--top] = j;
+    }
+  }
+
+  *plength = l_length;
+  return top;
+}
+
+static Int kls_tail_lsolve_symbolic(Int n,
+                                    Int k,
+                                    Int ap[],
+                                    Int ai[],
+                                    Int q[],
+                                    Int pinv[],
+                                    Int stack[],
+                                    Int flag[],
+                                    Int lpend[],
+                                    Int ap_pos[],
+                                    Unit lu[],
+                                    Int lup,
+                                    Int llen[],
+                                    Int lip[],
+                                    Int k1,
+                                    Int psinv[]) {
+  Int top = n;
+  Int l_length = 0;
+  Int *lik = (Int *)(lu + lup);
+  const Int kglobal = k + k1;
+  const Int oldcol = q[kglobal];
+
+  for (Int p = ap[oldcol]; p < ap[oldcol + 1]; ++p) {
+    const Int i = psinv[ai[p]] - k1;
+    if (i < 0) {
+      continue;
+    }
+    if (i >= n) {
+      return -1;
+    }
+    if (flag[i] == k) {
+      continue;
+    }
+    if (pinv[i] >= 0) {
+      top = kls_tail_dfs(i, k, pinv, llen, lip, stack, flag, lpend,
+                         top, lu, lik, &l_length, ap_pos);
+      if (top < 0) {
+        return -1;
+      }
+    } else {
+      flag[i] = k;
+      lik[l_length++] = i;
+    }
+  }
+
+  llen[k] = l_length;
+  return top;
+}
+
+static int kls_tail_construct_column(Int k,
+                                     Int ap[],
+                                     Int ai[],
+                                     Entry ax[],
+                                     Int q[],
+                                     Entry x[],
+                                     Int n,
+                                     Int k1,
+                                     Int psinv[],
+                                     double rs[],
+                                     Int scale,
+                                     Int offp[],
+                                     Int offi[],
+                                     Entry offx[],
+                                     Int nzoff) {
+  const Int kglobal = k + k1;
+  const Int oldcol = q[kglobal];
+  Int poff = offp[kglobal];
+  if (poff < 0 || poff > nzoff) {
+    return 0;
+  }
+
+  for (Int p = ap[oldcol]; p < ap[oldcol + 1]; ++p) {
+    const Int oldrow = ai[p];
+    const Int i = psinv[oldrow] - k1;
+    Entry aik = ax[p];
+    if (scale > 0) {
+      if (rs == NULL || rs[oldrow] == 0.0) {
+        return 0;
+      }
+      SCALE_DIV(aik, rs[oldrow]);
+    }
+    if (i < 0) {
+      if (poff >= nzoff) {
+        return 0;
+      }
+      offi[poff] = oldrow;
+      offx[poff] = aik;
+      poff++;
+    } else if (i >= n) {
+      return 0;
+    } else {
+      x[i] = aik;
+    }
+  }
+  offp[kglobal + 1] = poff;
+  return 1;
+}
+
+static void kls_tail_lsolve_numeric(Int pinv[],
+                                    Unit *lu,
+                                    Int stack[],
+                                    Int lip[],
+                                    Int top,
+                                    Int n,
+                                    Int llen[],
+                                    Entry x[]) {
+  for (Int s = top; s < n; ++s) {
+    const Int j = stack[s];
+    const Int jnew = pinv[j];
+    Entry xj = x[j];
+    Entry *lx = NULL;
+    Int *li = NULL;
+    Int len = 0;
+    GET_POINTER(lu, lip, llen, li, lx, jnew, len);
+    for (Int p = 0; p < len; ++p) {
+      MULT_SUB(x[li[p]], lx[p], xj);
+    }
+  }
+}
+
+static Int kls_tail_lpivot(Int diagrow,
+                           Int *p_pivrow,
+                           Entry *p_pivot,
+                           double *p_abs_pivot,
+                           double tol,
+                           Entry x[],
+                           Unit *lu,
+                           Int lip[],
+                           Int llen[],
+                           Int k,
+                           Int n,
+                           Int pinv[],
+                           Int *p_firstrow,
+                           TRILINOS_KLU_common *common) {
+  Int pivrow = TRILINOS_KLU_EMPTY;
+  if (llen[k] == 0) {
+    if (common->halt_if_singular) {
+      return FALSE;
+    }
+    for (Int firstrow = *p_firstrow; firstrow < n; ++firstrow) {
+      if (pinv[firstrow] < 0) {
+        pivrow = firstrow;
+        *p_firstrow = firstrow;
+        break;
+      }
+    }
+    if (pivrow < 0 || pivrow >= n) {
+      return FALSE;
+    }
+    *p_pivrow = pivrow;
+    *p_pivot = 0.0;
+    *p_abs_pivot = 0.0;
+    return FALSE;
+  }
+
+  Int *li = NULL;
+  Entry *lx = NULL;
+  Int len = 0;
+  Int ppivrow = TRILINOS_KLU_EMPTY;
+  Int pdiag = TRILINOS_KLU_EMPTY;
+  double abs_pivot = -1.0;
+
+  llen[k]--;
+  GET_POINTER(lu, lip, llen, li, lx, k, len);
+  const Int last_row_index = li[len];
+
+  for (Int p = 0; p < len; ++p) {
+    const Int i = li[p];
+    const Entry xi = x[i];
+    x[i] = 0.0;
+    lx[p] = xi;
+    const double xabs = fabs(xi);
+    if (i == diagrow) {
+      pdiag = p;
+    }
+    if (xabs > abs_pivot) {
+      abs_pivot = xabs;
+      ppivrow = p;
+    }
+  }
+
+  const double last_abs = fabs(x[last_row_index]);
+  if (last_abs > abs_pivot) {
+    abs_pivot = last_abs;
+    ppivrow = TRILINOS_KLU_EMPTY;
+  }
+  if (last_row_index == diagrow) {
+    if (last_abs >= tol * abs_pivot) {
+      abs_pivot = last_abs;
+      ppivrow = TRILINOS_KLU_EMPTY;
+    }
+  } else if (pdiag != TRILINOS_KLU_EMPTY) {
+    const double diag_abs = fabs(lx[pdiag]);
+    if (diag_abs >= tol * abs_pivot) {
+      abs_pivot = diag_abs;
+      ppivrow = pdiag;
+    }
+  }
+
+  Entry pivot = 0.0;
+  if (ppivrow != TRILINOS_KLU_EMPTY) {
+    pivrow = li[ppivrow];
+    pivot = lx[ppivrow];
+    li[ppivrow] = last_row_index;
+    lx[ppivrow] = x[last_row_index];
+  } else {
+    pivrow = last_row_index;
+    pivot = x[last_row_index];
+  }
+  x[last_row_index] = 0.0;
+
+  *p_pivrow = pivrow;
+  *p_pivot = pivot;
+  *p_abs_pivot = abs_pivot;
+  if (pivrow < 0 || pivrow >= n) {
+    return FALSE;
+  }
+  if (pivot == 0.0 && common->halt_if_singular) {
+    return FALSE;
+  }
+
+  for (Int p = 0; p < llen[k]; ++p) {
+    DIV(lx[p], lx[p], pivot);
+  }
+  return TRUE;
+}
+
+static void kls_tail_prune(Int lpend[],
+                           Int pinv[],
+                           Int k,
+                           Int pivrow,
+                           Unit *lu,
+                           Int uip[],
+                           Int lip[],
+                           Int ulen[],
+                           Int llen[]) {
+  Int *ui = NULL;
+  Entry *ux = NULL;
+  Int ucol_len = 0;
+  GET_POINTER(lu, uip, ulen, ui, ux, k, ucol_len);
+  (void)ux;
+  for (Int p = 0; p < ucol_len; ++p) {
+    const Int j = ui[p];
+    if (j < 0 || j >= k || lpend[j] != TRILINOS_KLU_EMPTY) {
+      continue;
+    }
+    Int *li = NULL;
+    Entry *lx = NULL;
+    Int lcol_len = 0;
+    GET_POINTER(lu, lip, llen, li, lx, j, lcol_len);
+    for (Int p2 = 0; p2 < lcol_len; ++p2) {
+      if (pivrow != li[p2]) {
+        continue;
+      }
+      Int phead = 0;
+      Int ptail = llen[j];
+      while (phead < ptail) {
+        const Int i = li[phead];
+        if (pinv[i] >= 0) {
+          phead++;
+        } else {
+          ptail--;
+          li[phead] = li[ptail];
+          li[ptail] = i;
+          const Entry tmp = lx[phead];
+          lx[phead] = lx[ptail];
+          lx[ptail] = tmp;
+        }
+      }
+      lpend[j] = ptail;
+      break;
+    }
+  }
+}
+
+static int kls_copy_live_prefix_lu(Unit *new_lu,
+                                   size_t lusize,
+                                   const Unit *old_lu,
+                                   const UF_long *old_lip,
+                                   const UF_long *old_llen,
+                                   const UF_long *old_uip,
+                                   const UF_long *old_ulen,
+                                   const Entry *old_udiag,
+                                   const UF_long *final_pblock,
+                                   UF_long nk,
+                                   UF_long prefix_cols,
+                                   UF_long *lip,
+                                   UF_long *llen,
+                                   UF_long *uip,
+                                   UF_long *ulen,
+                                   Entry *udiag,
+                                   size_t *lup_out) {
+  if (new_lu == NULL || old_lu == NULL || final_pblock == NULL ||
+      lup_out == NULL) {
+    return 0;
+  }
+  size_t lup = 0u;
+  for (UF_long k = 0; k < prefix_cols; ++k) {
+    const UF_long l_len = old_llen[k];
+    const UF_long u_len = old_ulen[k];
+    const size_t l_units = kls_klu_units_for_indices(l_len);
+    const size_t u_units = kls_klu_units_for_indices(u_len);
+    if (lup > lusize || l_units > lusize - lup ||
+        l_len > (UF_long)(lusize - lup - l_units)) {
+      return 0;
+    }
+    lip[k] = (UF_long)lup;
+    llen[k] = l_len;
+    UF_long *dst_li = (UF_long *)(new_lu + lup);
+    Entry *dst_lx = (Entry *)(new_lu + lup + l_units);
+    Int *src_li = NULL;
+    Entry *src_lx = NULL;
+    Int src_len = 0;
+    GET_POINTER((Unit *)old_lu, old_lip, old_llen, src_li, src_lx, k,
+                src_len);
+    if ((UF_long)src_len != l_len) {
+      return 0;
+    }
+    for (UF_long p = 0; p < l_len; ++p) {
+      const UF_long final_order = src_li[p];
+      if (final_order >= nk || final_pblock[final_order] >= nk) {
+        return 0;
+      }
+      dst_li[p] = final_pblock[final_order];
+      dst_lx[p] = src_lx[p];
+    }
+    lup += l_units + (size_t)l_len;
+
+    if (lup > lusize || u_units > lusize - lup ||
+        u_len > (UF_long)(lusize - lup - u_units)) {
+      return 0;
+    }
+    uip[k] = (UF_long)lup;
+    ulen[k] = u_len;
+    UF_long *dst_ui = (UF_long *)(new_lu + lup);
+    Entry *dst_ux = (Entry *)(new_lu + lup + u_units);
+    Int *src_ui = NULL;
+    Entry *src_ux = NULL;
+    src_len = 0;
+    GET_POINTER((Unit *)old_lu, old_uip, old_ulen, src_ui, src_ux, k,
+                src_len);
+    if ((UF_long)src_len != u_len) {
+      return 0;
+    }
+    for (UF_long p = 0; p < u_len; ++p) {
+      if (src_ui[p] >= (Int)k) {
+        return 0;
+      }
+      dst_ui[p] = (UF_long)src_ui[p];
+      dst_ux[p] = src_ux[p];
+    }
+    lup += u_units + (size_t)u_len;
+    udiag[k] = old_udiag[k];
+  }
+  *lup_out = lup;
+  return 1;
+}
+
+static int kls_try_pivot_tail_restart_rejected_block(
+  kls_solver *solver,
+  double *numeric_values,
+  UF_long block,
+  UF_long k1,
+  UF_long nk,
+  UF_long local_reject,
+  const UF_long *old_pblock,
+  const UF_long *psinv,
+  Unit **new_lu_out,
+  size_t *new_size_out,
+  UF_long *lnz_block_out,
+  UF_long *unz_block_out,
+  UF_long *pblock) {
+  if (new_lu_out != NULL) {
+    *new_lu_out = NULL;
+  }
+  if (new_size_out != NULL) {
+    *new_size_out = 0u;
+  }
+  if (lnz_block_out != NULL) {
+    *lnz_block_out = 0;
+  }
+  if (unz_block_out != NULL) {
+    *unz_block_out = 0;
+  }
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->symbolic == NULL || numeric_values == NULL ||
+      old_pblock == NULL || psinv == NULL || new_lu_out == NULL ||
+      new_size_out == NULL || lnz_block_out == NULL ||
+      unz_block_out == NULL || pblock == NULL ||
+      solver->common.scale > 0 ||
+      solver->fast_reject_refresh_state != KLS_FAST_REJECT_REFRESH_PREFIX ||
+      !solver->stats.fast_rejected_tail_repair_ready ||
+      local_reject == 0u || local_reject >= nk ||
+      block >= solver->numeric->nblocks ||
+      solver->numeric->LUbx == NULL ||
+      solver->numeric->LUbx[block] == NULL ||
+      solver->numeric->LUsize == NULL ||
+      solver->numeric->LUsize[block] == 0u ||
+      solver->numeric->Xwork == NULL ||
+	      solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
+	      solver->numeric->Lip == NULL || solver->numeric->Uip == NULL ||
+	      solver->numeric->Udiag == NULL || solver->numeric->Offp == NULL ||
+	      solver->numeric->Offi == NULL || solver->numeric->Offx == NULL) {
+    return 0;
+  }
+
+  if (nk > (UF_long)(SIZE_MAX / (7u * sizeof(UF_long)))) {
+    return 0;
+  }
+  UF_long *scratch =
+    (UF_long *)malloc(7u * (size_t)nk * sizeof(*scratch));
+  if (scratch == NULL) {
+    return 0;
+  }
+  UF_long *live_p = scratch;
+  UF_long *live_pinv = scratch + nk;
+  UF_long *final_pinv = scratch + 2u * nk;
+  UF_long *lpend = scratch + 3u * nk;
+  UF_long *stack = scratch + 4u * nk;
+  UF_long *flag = scratch + 5u * nk;
+  UF_long *ap_pos = scratch + 6u * nk;
+
+  size_t prefix_lup = 0u;
+  UF_long prefix_lnz = 0;
+  UF_long prefix_unz = 0;
+  if (!kls_reconstruct_block_live_prefix_state(
+        solver, block, k1, nk, local_reject, old_pblock, live_p,
+	        live_pinv, final_pinv, lpend, &prefix_lup, &prefix_lnz,
+	        &prefix_unz)) {
+    free(scratch);
+    return 0;
+  }
+  (void)final_pinv;
+
+  const size_t old_lusize = solver->numeric->LUsize[block];
+  Unit *new_lu =
+    (Unit *)TRILINOS_KLU_malloc(old_lusize, sizeof(Unit), &solver->common);
+  if (new_lu == NULL) {
+    free(scratch);
+    return 0;
+  }
+
+  UF_long *offp = (UF_long *)malloc(((size_t)solver->n + 1u) * sizeof(*offp));
+  const size_t off_capacity = (size_t)solver->numeric->nzoff + 1u;
+  UF_long *offi = (UF_long *)malloc(off_capacity * sizeof(*offi));
+  Entry *offx = (Entry *)malloc(off_capacity * sizeof(*offx));
+  if (offp == NULL || offi == NULL || offx == NULL) {
+    free(offp);
+    free(offi);
+    free(offx);
+    (void)TRILINOS_KLU_free(new_lu, old_lusize, sizeof(Unit),
+                            &solver->common);
+    free(scratch);
+    return 0;
+  }
+  memcpy(offp, solver->numeric->Offp,
+         ((size_t)solver->n + 1u) * sizeof(*offp));
+  if (solver->numeric->nzoff > 0u) {
+    memcpy(offi, solver->numeric->Offi,
+           (size_t)solver->numeric->nzoff * sizeof(*offi));
+    memcpy(offx, (Entry *)solver->numeric->Offx,
+           (size_t)solver->numeric->nzoff * sizeof(*offx));
+  }
+
+  Unit *old_lu = (Unit *)solver->numeric->LUbx[block];
+  UF_long *lip = solver->numeric->Lip + k1;
+  UF_long *llen = solver->numeric->Llen + k1;
+  UF_long *uip = solver->numeric->Uip + k1;
+  UF_long *ulen = solver->numeric->Ulen + k1;
+  Entry *udiag = ((Entry *)solver->numeric->Udiag) + k1;
+
+  size_t lup = 0u;
+  if (!kls_copy_live_prefix_lu(
+        new_lu, old_lusize, old_lu, lip, llen, uip, ulen, udiag,
+		old_pblock, nk, local_reject, lip, llen, uip, ulen, udiag,
+	        &lup) ||
+      lup != prefix_lup) {
+    free(offp);
+    free(offi);
+    free(offx);
+    (void)TRILINOS_KLU_free(new_lu, old_lusize, sizeof(Unit),
+                            &solver->common);
+    free(scratch);
+    return 0;
+  }
+
+  for (UF_long k = 0; k < nk; ++k) {
+    pblock[k] = live_p[k];
+    flag[k] = KLS_KLU_EMPTY;
+    ((Entry *)solver->numeric->Xwork)[k] = 0.0;
+  }
+
+  size_t lusize = old_lusize;
+  UF_long lnz = prefix_lnz;
+  UF_long unz = prefix_unz;
+  Int firstrow = 0;
+  while (firstrow < (Int)nk && live_pinv[firstrow] >= 0) {
+    firstrow++;
+  }
+  const double tol = solver->common.tol;
+  const double memgrow = solver->common.memgrow;
+  for (UF_long kk = local_reject; kk < nk; ++kk) {
+    const Int k = (Int)kk;
+    const double nunits =
+      DUNITS(Int, (Int)nk - k) + DUNITS(Int, k) +
+      DUNITS(Entry, (Int)nk - k) + DUNITS(Entry, k);
+    const double xsize = (double)lup + nunits;
+    if (xsize > (double)lusize) {
+      if (INT_OVERFLOW(memgrow * (double)lusize + 4.0 * (double)nk + 1.0)) {
+        solver->common.status = TRILINOS_KLU_TOO_LARGE;
+        goto fail;
+      }
+      size_t grown = (size_t)(memgrow * (double)lusize) + 2u * (size_t)nk + 1u;
+      Unit *grown_lu =
+        (Unit *)TRILINOS_KLU_realloc(grown, lusize, sizeof(Unit), new_lu,
+                                     &solver->common);
+      if (solver->common.status == TRILINOS_KLU_OUT_OF_MEMORY ||
+          grown_lu == NULL) {
+        goto fail;
+      }
+      new_lu = grown_lu;
+      lusize = grown;
+      solver->common.nrealloc++;
+    }
+
+    lip[k] = (UF_long)lup;
+    const Int top =
+      kls_tail_lsolve_symbolic((Int)nk, k, solver->col_ptr, solver->row_idx,
+                               solver->symbolic->Q, live_pinv, stack, flag,
+                               lpend, ap_pos, new_lu, (Int)lup, llen, lip,
+                               (Int)k1, (Int *)psinv);
+    if (top < 0) {
+      solver->common.status = TRILINOS_KLU_INVALID;
+      goto fail;
+    }
+    if (!kls_tail_construct_column(
+          k, solver->col_ptr, solver->row_idx, numeric_values,
+          solver->symbolic->Q, (Entry *)solver->numeric->Xwork, (Int)nk,
+	          (Int)k1, (Int *)psinv, NULL, 0, offp, offi, offx,
+	          (Int)solver->numeric->nzoff)) {
+      solver->common.status = TRILINOS_KLU_INVALID;
+      goto fail;
+    }
+    kls_tail_lsolve_numeric(live_pinv, new_lu, stack, lip, top, (Int)nk,
+                            llen, (Entry *)solver->numeric->Xwork);
+
+    const Int diagrow = pblock[k];
+    Int pivrow = TRILINOS_KLU_EMPTY;
+    Entry pivot = 0.0;
+    double abs_pivot = 0.0;
+    if (!kls_tail_lpivot(diagrow, &pivrow, &pivot, &abs_pivot, tol,
+                         (Entry *)solver->numeric->Xwork, new_lu, lip, llen,
+                         k, (Int)nk, live_pinv, &firstrow,
+                         &solver->common)) {
+      solver->common.status = TRILINOS_KLU_SINGULAR;
+      if (solver->common.numerical_rank == TRILINOS_KLU_EMPTY) {
+        solver->common.numerical_rank = k + (Int)k1;
+        solver->common.singular_col = solver->symbolic->Q[k + (Int)k1];
+      }
+      if (solver->common.halt_if_singular) {
+        goto fail;
+      }
+    }
+    if (pivrow < 0 || pivrow >= (Int)nk || live_pinv[pivrow] >= 0) {
+      solver->common.status = TRILINOS_KLU_INVALID;
+      goto fail;
+    }
+
+    uip[k] = lip[k] + (UF_long)UNITS(Int, llen[k]) +
+             (UF_long)UNITS(Entry, llen[k]);
+    lup += (size_t)UNITS(Int, llen[k]) + (size_t)UNITS(Entry, llen[k]);
+    ulen[k] = (UF_long)((Int)nk - top);
+    Int *ui = NULL;
+    Entry *ux = NULL;
+    Int u_len = 0;
+    GET_POINTER(new_lu, uip, ulen, ui, ux, k, u_len);
+    for (Int p = top, i = 0; p < (Int)nk; ++p, ++i) {
+      const Int j = stack[p];
+      ui[i] = live_pinv[j];
+      ux[i] = ((Entry *)solver->numeric->Xwork)[j];
+      ((Entry *)solver->numeric->Xwork)[j] = 0.0;
+    }
+    lup += (size_t)UNITS(Int, ulen[k]) + (size_t)UNITS(Entry, ulen[k]);
+    udiag[k] = pivot;
+
+    if (pivrow != diagrow) {
+      solver->common.noffdiag++;
+      if (live_pinv[diagrow] < 0) {
+        const Int kbar = FLIP(live_pinv[pivrow]);
+        if (kbar < 0 || kbar >= (Int)nk) {
+          solver->common.status = TRILINOS_KLU_INVALID;
+          goto fail;
+        }
+        pblock[kbar] = diagrow;
+        live_pinv[diagrow] = FLIP(kbar);
+      }
+    }
+    pblock[k] = pivrow;
+    live_pinv[pivrow] = k;
+
+    kls_tail_prune(lpend, live_pinv, k, pivrow, new_lu, uip, lip, ulen,
+                   llen);
+    lnz += llen[k] + 1u;
+    unz += ulen[k] + 1u;
+  }
+
+  for (UF_long k = 0; k < nk; ++k) {
+    Int *li = NULL;
+    Entry *lx = NULL;
+    Int l_len = 0;
+    GET_POINTER(new_lu, lip, llen, li, lx, (Int)k, l_len);
+    (void)lx;
+    for (Int p = 0; p < l_len; ++p) {
+      const Int row = li[p];
+      if (row < 0 || row >= (Int)nk || live_pinv[row] < 0) {
+        solver->common.status = TRILINOS_KLU_INVALID;
+        goto fail;
+      }
+      li[p] = live_pinv[row];
+    }
+  }
+
+  {
+    Unit *shrunk =
+      (Unit *)TRILINOS_KLU_realloc(lup, lusize, sizeof(Unit), new_lu,
+                                   &solver->common);
+    if (shrunk != NULL) {
+      new_lu = shrunk;
+      lusize = lup;
+    }
+  }
+  free(offp);
+  free(offi);
+  free(offx);
+  free(scratch);
+  *new_lu_out = new_lu;
+  *new_size_out = lusize;
+  *lnz_block_out = lnz;
+  *unz_block_out = unz;
+  return 1;
+
+fail:
+  for (UF_long k = 0; k < nk; ++k) {
+    ((Entry *)solver->numeric->Xwork)[k] = 0.0;
+  }
+  free(offp);
+  free(offi);
+  free(offx);
+  (void)TRILINOS_KLU_free(new_lu, lusize, sizeof(Unit), &solver->common);
+  free(scratch);
+  if (new_lu_out != NULL) {
+    *new_lu_out = NULL;
+  }
+  if (new_size_out != NULL) {
+    *new_size_out = 0u;
+  }
+  return 0;
+}
+
 static void kls_record_fast_repaired_block_stats(kls_solver *solver,
                                                  UF_long block,
                                                  UF_long k1,
@@ -9109,6 +9830,10 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   if (nk <= 1u || nk > solver->symbolic->maxblock) {
     return 0;
   }
+  if (rejected_pivot < k1 || rejected_pivot >= k2) {
+    return 0;
+  }
+  const UF_long local_reject = rejected_pivot - k1;
 
   UF_long *psinv = solver->numeric->Pinv;
   for (UF_long k = 0; k < solver->n; ++k) {
@@ -9165,23 +9890,34 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   solver->common.numerical_rank = KLS_KLU_EMPTY;
   solver->common.singular_col = KLS_KLU_EMPTY;
 
-  const size_t new_size =
-    TRILINOS_KLU_kernel_factor(nk, solver->col_ptr, solver->row_idx,
-                               numeric_values, solver->symbolic->Q,
-                               lsize, &new_lu,
-                               ((double *)solver->numeric->Udiag) + k1,
-                               solver->numeric->Llen + k1,
-                               solver->numeric->Ulen + k1,
-                               solver->numeric->Lip + k1,
-                               solver->numeric->Uip + k1,
-                               pblock, &lnz_block, &unz_block,
-                               (double *)solver->numeric->Xwork,
-                               solver->numeric->Iwork, k1,
-                               psinv, scaled ? solver->numeric->Rs : NULL,
-                               solver->numeric->Offp,
-                               solver->numeric->Offi,
-                               (double *)solver->numeric->Offx,
-                               &solver->common);
+  size_t new_size = 0u;
+  int tail_restart_used =
+    kls_try_pivot_tail_restart_rejected_block(
+      solver, numeric_values, block, k1, nk, local_reject, old_pblock,
+      psinv, &new_lu, &new_size, &lnz_block, &unz_block, pblock);
+  if (!tail_restart_used) {
+    solver->common.status = TRILINOS_KLU_OK;
+    solver->common.numerical_rank = KLS_KLU_EMPTY;
+    solver->common.singular_col = KLS_KLU_EMPTY;
+    solver->common.noffdiag = old_noffdiag;
+    new_size =
+      TRILINOS_KLU_kernel_factor(nk, solver->col_ptr, solver->row_idx,
+                                 numeric_values, solver->symbolic->Q,
+                                 lsize, &new_lu,
+                                 ((double *)solver->numeric->Udiag) + k1,
+                                 solver->numeric->Llen + k1,
+                                 solver->numeric->Ulen + k1,
+                                 solver->numeric->Lip + k1,
+                                 solver->numeric->Uip + k1,
+                                 pblock, &lnz_block, &unz_block,
+                                 (double *)solver->numeric->Xwork,
+                                 solver->numeric->Iwork, k1,
+                                 psinv, scaled ? solver->numeric->Rs : NULL,
+                                 solver->numeric->Offp,
+                                 solver->numeric->Offi,
+                                 (double *)solver->numeric->Offx,
+                                 &solver->common);
+  }
   if (new_size == 0 || new_lu == NULL || solver->common.status < 0 ||
       (solver->common.status == TRILINOS_KLU_SINGULAR &&
        solver->common.halt_if_singular)) {
@@ -9265,6 +10001,11 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   }
   solver->common.noffdiag = offdiag;
   solver->fast_block_restarts++;
+  if (tail_restart_used) {
+    solver->fast_tail_restarts++;
+  }
+  solver->stats.fast_block_restarts = solver->fast_block_restarts;
+  solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   free_refactor_map(solver);
   free_refactor_schedule(solver);
   free_row_refactor_pattern(solver);
