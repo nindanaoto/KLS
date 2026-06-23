@@ -318,7 +318,10 @@ serial checked continuation over only the later BTF blocks instead of
 restarting from the first block. For unscaled prefix-current rejects whose
 validated repair preserves a non-empty live prefix state, KLS can execute a
 conservative serial pivoting-tail restart of the rejected block before falling
-back to full block repair. Root-of-block rejects remain classified as CKTSO
+back to full block repair. This executable tail path is not limited to the
+checked row-refactor candidate diagnostic; the diagnostic is retained only to
+explain row-major candidate quality when that metadata exists. Root-of-block
+rejects remain classified as CKTSO
 ETree/pipeline work rather than serial-tail-ready, because no contiguous prefix
 can be reused. This is a local serial subset of CKTSO-style tail restart, not
 the full pipelined ETree-descendant scheduler.
@@ -370,13 +373,14 @@ the reject, the best row-tail
 candidate that can be computed from current prefix state in the checked
 row-major path, its retained row-tail position, whether that prefix-current
 candidate satisfies the same pivot-tolerance predicate that rejected the
-original reused pivot, the row chosen by the fallback pivoting block repair at
-that pivot, whether it matches the retained tail candidate, the first pivot
+original reused pivot, the row chosen by the pivoting block or tail repair at
+that pivot, whether it matches the retained tail candidate when one was
+available, the first pivot
 whose row changed in the fallback repair, how many changed pivots were before
 and at/after the rejected pivot, whether the robust repair outcome preserved
 the old block prefix, whether KLS can reconstruct the live KLU prefix
 `P`/`Pinv`/pruning state needed by a local serial tail restart, the estimated
-full-block repair work and strict non-root pivoting-tail restart work/saved
+full-block repair work and validated non-root pivoting-tail restart work/saved
 work, the
 rejected BTF block, the suffix from that pivot to the end
 of the block, the exact U-pattern descendant tail inside that block, the

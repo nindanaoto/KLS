@@ -60,13 +60,10 @@ def classify(row: dict[str, object]) -> str:
         return "no_reject"
     if as_int(row, "fast_block_restarts", 0) <= 0:
         return "no_block_repair"
+    if as_int(row, "fast_tail_restarts", 0) > 0:
+        return "tail_restart_executed"
     if as_int(row, "fast_repaired_tail_restart_ready", 0) == 1:
         return "strict_ready"
-    if (
-        as_int(row, "fast_rejected_tail_candidate_row", -1) < 0
-        or as_int(row, "fast_rejected_tail_candidate_count", 0) <= 0
-    ):
-        return "no_tolerance_valid_tail_candidate"
     refresh_state = as_int(row, "fast_rejected_refresh_state", 0)
     if refresh_state == 0:
         return "unknown_refresh_state"
@@ -74,6 +71,11 @@ def classify(row: dict[str, object]) -> str:
         return "all_current_reject_state"
     if refresh_state != 1:
         return "non_prefix_reject_state"
+    if (
+        as_int(row, "fast_rejected_tail_candidate_row", -1) < 0
+        or as_int(row, "fast_rejected_tail_candidate_count", 0) <= 0
+    ):
+        return "no_row_tail_candidate_diagnostic"
     if as_int(row, "fast_rejected_tail_repair_ready", 0) != 1:
         return "tail_candidate_not_repair_ready"
     if as_int(row, "fast_repaired_pivot_matches_tail_candidate", 0) != 1:
@@ -139,6 +141,7 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         "fast_repaired_tail_restart_saved_work": as_float(
             row, "fast_repaired_tail_restart_saved_work"
         ),
+        "fast_tail_restarts": as_int(row, "fast_tail_restarts", 0),
         "fast_rejected_etree_columns": as_int(row, "fast_rejected_etree_columns", 0),
         "fast_rejected_etree_work": as_float(row, "fast_rejected_etree_work"),
         "fast_rejected_pivoting_tail_columns": as_int(
@@ -243,16 +246,29 @@ def main() -> int:
         records.append(compact_record(row, reason))
 
     ready = [record for record in records if record["reason"] == "strict_ready"]
+    executed = [
+        record for record in records if record["reason"] == "tail_restart_executed"
+    ]
     rejected = [record for record in records if record["reason"] != "no_reject"]
     repaired = [
         record for record in rejected if float(record["fast_repaired_block_work"]) > 0.0
     ]
-    blocked = [record for record in repaired if record["reason"] != "strict_ready"]
+    blocked = [
+        record for record in repaired
+        if record["reason"] not in {"strict_ready", "tail_restart_executed"}
+    ]
 
     ready_block_work = sum(float(r["fast_repaired_block_work"]) for r in ready)
     ready_tail_work = sum(float(r["fast_repaired_tail_restart_work"]) for r in ready)
     ready_saved_work = sum(
         float(r["fast_repaired_tail_restart_saved_work"]) for r in ready
+    )
+    executed_block_work = sum(float(r["fast_repaired_block_work"]) for r in executed)
+    executed_tail_work = sum(
+        float(r["fast_repaired_tail_restart_work"]) for r in executed
+    )
+    executed_saved_work = sum(
+        float(r["fast_repaired_tail_restart_saved_work"]) for r in executed
     )
     repaired_block_work = sum(float(r["fast_repaired_block_work"]) for r in repaired)
     blocked_block_work = sum(float(r["fast_repaired_block_work"]) for r in blocked)
@@ -275,12 +291,20 @@ def main() -> int:
         "rejected_rows": len(rejected),
         "repaired_rows_with_block_work": len(repaired),
         "strict_ready_rows": len(ready),
+        "tail_restart_executed_rows": len(executed),
         "reason_counts": dict(sorted(reason_counts.items())),
         "strict_ready_block_work_total": ready_block_work,
         "strict_ready_tail_work_total": ready_tail_work,
         "strict_ready_saved_work_total": ready_saved_work,
         "strict_ready_saved_work_fraction": (
             ready_saved_work / ready_block_work if ready_block_work > 0.0 else 0.0
+        ),
+        "tail_restart_executed_block_work_total": executed_block_work,
+        "tail_restart_executed_tail_work_total": executed_tail_work,
+        "tail_restart_executed_saved_work_total": executed_saved_work,
+        "tail_restart_executed_saved_work_fraction": (
+            executed_saved_work / executed_block_work
+            if executed_block_work > 0.0 else 0.0
         ),
         "blocked_repaired_block_work_total": blocked_block_work,
         "repaired_block_work_total": repaired_block_work,
@@ -304,7 +328,13 @@ def main() -> int:
         key=lambda record: float(record["fast_repaired_block_work"]),
         reverse=True,
     )
+    executed_by_saved = sorted(
+        executed,
+        key=lambda record: float(record["fast_repaired_tail_restart_saved_work"]),
+        reverse=True,
+    )
     print_records("Largest strict-ready saved work", ready_by_saved, args.max_rows)
+    print_records("Largest executed tail restarts", executed_by_saved, args.max_rows)
     print_records("Largest repaired blockers", blocked_by_work, args.max_rows)
     return 0
 

@@ -9539,7 +9539,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
       unz_block_out == NULL || pblock == NULL ||
       solver->common.scale > 0 ||
       solver->fast_reject_refresh_state != KLS_FAST_REJECT_REFRESH_PREFIX ||
-      !solver->stats.fast_rejected_tail_repair_ready ||
       local_reject == 0u || local_reject >= nk ||
       block >= solver->numeric->nblocks ||
       solver->numeric->LUbx == NULL ||
@@ -9857,15 +9856,17 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     (int64_t)prefix_changed;
   solver->stats.fast_repaired_suffix_changed_pivots =
     (int64_t)suffix_changed;
+  const int pivoting_tail_ready =
+    solver->stats.fast_rejected_pivoting_tail_columns > 0 &&
+    solver->stats.fast_rejected_pivoting_tail_work > 0.0 &&
+    solver->stats.fast_rejected_pivoting_tail_contains_reject &&
+    solver->stats.fast_rejected_pivoting_tail_topological;
   solver->stats.fast_repaired_tail_restart_ready =
-    solver->stats.fast_rejected_tail_repair_ready &&
-    solver->stats.fast_repaired_pivot_matches_tail_candidate &&
     local_reject > 0u &&
     prefix_changed == 0u &&
     (first_changed == KLS_KLU_EMPTY || first_changed >= rejected_pivot) &&
     suffix_changed > 0u &&
-    solver->stats.fast_rejected_pivoting_tail_columns > 0 &&
-    solver->stats.fast_rejected_pivoting_tail_work > 0.0;
+    pivoting_tail_ready;
   if (solver->stats.fast_repaired_tail_restart_ready &&
       !kls_repaired_tail_prefix_state_valid(solver, block, k1, nk,
                                             local_reject, pblock)) {
