@@ -2157,6 +2157,19 @@ therefore keeps the simpler four-way scatter helper and leaves further
 progress to row/segment numeric storage, pivoting-tail restart, and general
 cost-model work.
 
+A branch-light scaled BTF EGraph column specialization was also rejected. The
+prototype mirrored the retained unscaled BTF specialization but divided mapped
+entries directly by `Rs[oldrow]`, bypassing the generic scaled value helper for
+scaled multi-block EGraph refactors with large blocks. It was structurally
+sound, built cleanly, and passed the smoke/license tests, but same-session
+three-pass checks showed the wrong tradeoff: the scaled-focused eight-row
+geomean was only about `0.9%` positive, while the hard scaled Rajat rows
+regressed (`rajat20` cycle `3.55s -> 3.59s`, `rajat28` `3.54s -> 3.57s`).
+The small `ckt11752_dc_1` win was not enough to justify a duplicate scaled BTF
+kernel that worsens the remaining CKTSO-gap rows. KLS therefore keeps the
+generic scaled EGraph value path until the larger row/segment numeric engine
+can improve scaled and unscaled hard rows together.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
