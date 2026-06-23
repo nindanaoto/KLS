@@ -96,9 +96,10 @@ work/fill.
 
 KLS keeps this as the only vendored MC64-adjacent external implementation.
 Existing MC64-style code is acceptable when its license remains compatible with
-KLS's LGPL distribution goal and allows redistribution in source and binary
-form with KLS. HSL MC64 itself, and solver-tree copies that retain HSL
-redistribution restrictions, are not compatible with that boundary. A
+KLS's LGPL distribution goal, allows redistribution in source and binary form
+with KLS, and allows KLS to preserve the upstream license notices in
+`THIRD_PARTY_NOTICES.md`. HSL MC64 itself, and solver-tree copies that retain
+HSL redistribution restrictions, are not compatible with that boundary. A
 permissively licensed translation of SPRAL's scaling code can be used as a
 reference, but the pinned SPRAL submodule is the preferred reproducible source
 for the C/Fortran build.

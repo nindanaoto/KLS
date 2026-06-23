@@ -84,8 +84,9 @@ new KLS-owned symbolic/numeric machinery:
   install, and uses it for bounded pre-factor large weak-diagonal trials plus
   a value-gated post-factor trial for dense high-off-diagonal-pivot cases. This
   is still not a full production MC64-equivalent preprocessing stage. Existing
-  MC64-style code can be reused only when its license is LGPL-compatible and
-  permits source and binary redistribution with KLS. HSL MC64 and
+  MC64-style code can be reused only when its license is LGPL-compatible,
+  permits source and binary redistribution with KLS, and allows preservation of
+  upstream notices in KLS's third-party notice file. HSL MC64 and
   non-redistributable MC64 copies are out of scope for vendoring.
 - A full intra-block parallel factor/refactor scheduler that consumes retained
   EGraph/ETree or separator-tree metadata with pivoting tail restart, beyond
@@ -268,10 +269,11 @@ design work, not benchmark-specific tuning.
   license. MC64-equivalent preprocessing must stay inside that licensing
   boundary: HSL MC64 and solver-tree copies that retain HSL redistribution
   restrictions are not vendorable, while KLS can build the BSD-licensed SPRAL
-  scaling subset from `third_party/spral` or use independent KLS code. The
-  Rust `rwl/mc64` package is also BSD-licensed and useful as a reference, but
-  it is a partial SPRAL translation and is not a better fit than the pinned
-  SPRAL submodule for KLS's C/Fortran build.
+  scaling subset from `third_party/spral`, use another LGPL-compatible
+  redistributable MC64-style source with preserved notices, or use independent
+  KLS code. The Rust `rwl/mc64` package is also BSD-licensed and useful as a
+  reference, but it is a partial SPRAL translation and is not a better fit than
+  the pinned SPRAL submodule for KLS's C/Fortran build.
 - Paper-derived benchmark manifests: the full public SuiteSparse union from
   the local KLU, NICSLU, SubtreeLU, CKTSO papers and CKTSO ordering supplement
   resolves to 110 matrices. The routine medium subset contains 93 matrices, and
@@ -1226,6 +1228,19 @@ unscaled EGraph guards (`G2_circuit` and `HTC_336_4438`) despite noise-driven
 improvement on `rajat28`, which does not consume that cache. These results
 make it unlikely that more small EGraph bookkeeping reductions will close the
 remaining CKTSO gap.
+
+Three later probes reached the same conclusion. Disabling the forced
+all-pipeline path for huge unscaled single-block EGraph factors moved
+`G2_circuit` and `mc2depi` backward, with only a small noisy `rajat30`
+improvement, so the retained all-pipeline shape is still the better general
+dispatch for that class. Retaining worker scratch buffers and stamped
+pipeline-completion storage across refactors was numerically correct but
+slower on the primary EGraph rows, which means per-refactor allocation is not
+the main visible overhead. A focused `nxp1` unscaled-scale trial also did not
+produce a safe general policy: no-scale candidates kept valid residuals and
+sometimes lowered repeated refactor time, but the result was noisy, estimated
+conditioning dropped by about five orders of magnitude versus max scaling, and
+post-factor trial cost erased the possible cycle gain.
 
 A follow-up `rajat28` policy sweep also confirmed that the remaining worst
 focused-row gap is not a missing scale-mode or static-pivoting toggle. With the
