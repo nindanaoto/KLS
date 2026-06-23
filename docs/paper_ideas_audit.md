@@ -131,8 +131,11 @@ design work, not benchmark-specific tuning.
   not first pay for an AMD symbolic analysis before settling on the same
   METIS/no-BTF numeric path. Medium spiked low-diagonal patterns with a large
   row/column degree spike also start directly with METIS and max scaling for
-  TSOPF-style power-grid structures. For large high-work no-BTF single-block
-  analyses outside those direct-start classes, auto can also try METIS
+  TSOPF-style power-grid structures. The medium bounded-degree METIS start is
+  limited to near-full diagonals, because Rommes/BIPS-style rows with a few
+  percent missing diagonal entries measured faster on AMD despite fitting the
+  same low-degree envelope. For large high-work no-BTF single-block analyses
+  outside those direct-start classes, auto can also try METIS
   symbolically before the first numeric factorization and keep it when the
   symbolic fill score is clearly lower, avoiding a delayed post-factor METIS
   promotion. This preserves the papers' nested-dissection motivation without
@@ -1277,6 +1280,24 @@ were low-work `OPF_3754`, `bips98_*`, and `nopss_11k` cases; the phase
 decomposition after this change still shows the remaining largest losses are
 dominated by repeated refactor throughput (`G2_circuit`, ASIC, `mc2depi`, and
 Rajat rows), not by another MC64-compatible matching import.
+
+A follow-up low-work ordering/payback refinement tightened the medium
+bounded-degree METIS-start class from 90% diagonal-present to 99%
+diagonal-present. On the medium paper corpus this only affects the
+`rajat03`/Rommes-BIPS/nopss structural class: `rajat03` remains a near-full
+diagonal METIS start, while `bips98_606`, `bips98_1142`, `bips98_1450`, and
+`nopss_11k` stay on AMD. The reactive static-match payback gate was also
+extended to small many-block low-work cases with less than 5% weak and less
+than 5% missing diagonal rows, preventing `bips98_1450` from replacing the
+faster AMD factorization with a slower static-match candidate. A focused
+five-row same-session check improved the geomean SPICE-cycle estimate from
+about `0.0874s` under the previous auto policy to about `0.0564s`, while
+keeping `rajat03` on METIS. The full 93-row medium paper run kept the same
+three known failures (`bips07_1998`, `ss1`, and `mac_econ_fwd500`) and moved
+KLS geomean from the previous saved `0.3096s` payback artifact to about
+`0.3033s`; the CKTSO comparison ratio improved to about `1.149x` slower on the
+90 common completed rows. Against the saved KLU2 artifact, KLS now wins 73 of
+88 common completed rows with about a `2.01x` geomean speedup.
 
 The EGraph floor was then lowered for a compact unscaled dominant-BTF shape:
 95%+ largest-block coverage, 8-512 BTF blocks, a 10k-30k largest block, and at

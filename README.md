@@ -198,13 +198,13 @@ unscaled using KLU's `-1` no-scale/no-recheck mode for patterns already
 validated by KLS, or sum-scaled when the diagonal is sparse but row magnitudes
 are already balanced. Otherwise it starts from KLU's max row scaling mode (`2`).
 Large low-degree, nearly diagonal circuit patterns, METIS-started medium
-bounded-degree or dense-diagonal patterns, and low-work dominant-BTF patterns
-also start without row scaling to avoid repeated scale work once KLS has
-validated the structure. Medium and large TSOPF-style spiked low-diagonal METIS
-starts use sum scaling, while small spiked low-diagonal METIS starts use KLU's
-unscaled `0` mode and skip the static-pivot trial that only adds setup cost
-for that shape. Large sparse-diagonal low-degree patterns can also start with
-sum scaling when that avoids more expensive max-scaling behavior. For large
+near-full bounded-degree or dense-diagonal patterns, and low-work dominant-BTF
+patterns also start without row scaling to avoid repeated scale work once KLS
+has validated the structure. Medium and large TSOPF-style spiked low-diagonal
+METIS starts use sum scaling, while small spiked low-diagonal METIS starts use
+KLU's unscaled `0` mode and skip the static-pivot trial that only adds setup
+cost for that shape. Large sparse-diagonal low-degree patterns can also start
+with sum scaling when that avoids more expensive max-scaling behavior. For large
 expensive cases, `auto` can still try other numeric scaling modes when actual
 flop/fill evidence justifies the extra work, but structural METIS starts that
 are already known to need a specific scale mode skip redundant scale trials.
@@ -297,12 +297,14 @@ analysis work it is likely to discard; benchmark JSON reports both
 
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
 `--ordering auto` can start with METIS for medium, bounded-degree structures
-that resemble mesh-style nested-dissection cases and for medium dense-diagonal
+only when the diagonal is nearly complete, preserving mesh-style
+nested-dissection wins without forcing sparse-missing-diagonal Rommes-style
+cases away from AMD. It also starts with METIS for medium dense-diagonal
 high-degree patterns where delayed promotion would otherwise pay for an
-avoidable first AMD factorization. It can also start with METIS for small and
-medium spiked low-diagonal patterns that resemble TSOPF-style paper cases where the
-symbolic estimate understates nested-dissection benefit. Otherwise it compares
-AMD and COLAMD by symbolic fill estimate. For large high-work no-BTF
+avoidable first AMD factorization, and for small and medium spiked
+low-diagonal patterns that resemble TSOPF-style paper cases where the symbolic
+estimate understates nested-dissection benefit. Otherwise it compares AMD and
+COLAMD by symbolic fill estimate. For large high-work no-BTF
 single-block analyses, `auto` can also try a METIS symbolic before numeric
 factorization and keep it when the symbolic fill score is clearly lower. This
 avoids paying for an AMD numeric factorization only to promote to METIS
@@ -312,10 +314,10 @@ rank order with CAMD inside coarse rank constraints. This preserves the
 separator-first shape while letting minimum degree reduce local fill/flops on
 post-layout style circuits. Large METIS orderings also use coarse rank-group
 CAMD refinement, matching the CKTSO paper's nested-dissection plus constrained
-minimum-degree structure more closely than raw METIS. Medium bounded-degree
-METIS starts also use two separator attempts with random matching coarsening to
-reduce nested-dissection factor work on mesh-like sparse diagonals. When METIS
-is enabled, `auto` can also promote
+minimum-degree structure more closely than raw METIS. Medium near-full
+bounded-degree METIS starts also use two separator attempts with random
+matching coarsening to reduce nested-dissection factor work on mesh-like sparse
+diagonals. When METIS is enabled, `auto` can also promote
 large, expensive first numeric factorizations to METIS if the trial
 factorization materially reduces actual numeric flop/fill cost. This keeps
 METIS available for hard nested-dissection cases without paying its analysis

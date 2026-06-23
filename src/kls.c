@@ -1605,7 +1605,7 @@ static int is_medium_bounded_degree_diagonal_pattern(UF_long n,
   free(row_degree);
 
   return low_degree && max_col_degree <= 128 && max_row_degree <= 128 &&
-         10 * diagonal_count >= 9 * n;
+         1000.0 * (double)diagonal_count >= 990.0 * (double)n;
 }
 #endif
 
@@ -4886,6 +4886,12 @@ static int reactive_static_match_setup_is_unlikely_to_pay(
 
   if (solver->symbolic->nblocks == 1u && solver->symbolic->maxblock == n &&
       solver->common.flops < 3.0e6 && weak_diagonal * 5u < 3u * n) {
+    return 1;
+  }
+
+  if (n <= 12000u && solver->symbolic->nblocks >= 512u &&
+      solver->common.flops < 1.0e6 && weak_diagonal * 20u < n &&
+      missing_diagonal * 20u < n && solver->common.noffdiag < 512u) {
     return 1;
   }
 
