@@ -2069,6 +2069,16 @@ single-block gap is not a simple pointer-cache guard branch; the retained
 single-block kernel should keep its current validation shape until KLS owns a
 different row/segment numeric representation.
 
+The MC64 import policy was converted into an executable repository audit after
+accepting that existing MC64-style code can be used when it is LGPL-compatible.
+`scripts/audit_license_boundary.py` now checks that KLS remains LGPL, that the
+only bundled MC64-adjacent implementation used by the build is SPRAL's
+BSD-licensed scaling subset, and that first-party/vendor source outside the
+vetted SPRAL path does not contain restricted HSL/MC64 markers. This does not
+close a performance gap, but it prevents future matching/scaling work from
+accidentally crossing the licensing boundary while keeping compatible existing
+code available for KLS.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

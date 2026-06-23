@@ -109,6 +109,13 @@ not compatible with that boundary. A permissively licensed translation of
 SPRAL's scaling code can be used as a reference, but the pinned SPRAL submodule
 is the preferred reproducible source for the C/Fortran build.
 
+The boundary is checked by the normal CTest suite when Python is available and
+can also be audited directly:
+
+```sh
+python3 scripts/audit_license_boundary.py
+```
+
 ## Benchmark
 
 ```sh

@@ -33,6 +33,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 find_library(KLS_MATH_LIBRARY m)
 find_package(Threads REQUIRED)
+find_package(Python3 COMPONENTS Interpreter QUIET)
 
 if(KLS_ENABLE_METIS)
   if(KLS_USE_SYSTEM_METIS)
@@ -460,6 +461,13 @@ endif()
 
 if(KLS_BUILD_TESTS)
   enable_testing()
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME kls_license_boundary
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/scripts/audit_license_boundary.py"
+              --root "${CMAKE_CURRENT_SOURCE_DIR}")
+  endif()
   add_executable(kls_smoke
     tests/kls_smoke.c)
   target_link_libraries(kls_smoke PRIVATE KLS::kls)
