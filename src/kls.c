@@ -73,6 +73,8 @@ struct kls_solver {
   UF_long refactor_dependency_root_columns;
   UF_long refactor_dependency_leaf_columns;
   UF_long refactor_dependency_max_fanout;
+  double refactor_dependency_max_column_work;
+  double refactor_dependency_pipeline_max_column_work;
   UF_long refactor_cluster_level_count;
   UF_long refactor_pipeline_column_count;
   double refactor_dependency_work;
@@ -357,6 +359,8 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_dependency_root_columns = 0;
   solver->refactor_dependency_leaf_columns = 0;
   solver->refactor_dependency_max_fanout = 0;
+  solver->refactor_dependency_max_column_work = 0.0;
+  solver->refactor_dependency_pipeline_max_column_work = 0.0;
   solver->refactor_cluster_level_count = 0;
   solver->refactor_pipeline_column_count = 0;
   solver->refactor_dependency_work = 0.0;
@@ -6809,6 +6813,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_dependency_leaf_columns;
   solver->stats.refactor_dependency_max_fanout =
     (int64_t)solver->refactor_dependency_max_fanout;
+  solver->stats.refactor_dependency_max_column_work =
+    solver->refactor_dependency_max_column_work;
+  solver->stats.refactor_dependency_pipeline_max_column_work =
+    solver->refactor_dependency_pipeline_max_column_work;
   solver->stats.refactor_dependency_cluster_levels =
     (int64_t)solver->refactor_cluster_level_count;
   solver->stats.refactor_dependency_pipeline_columns =
@@ -9763,6 +9771,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long max_level = 0;
   UF_long edges = 0;
   UF_long root_columns = 0;
+  double max_column_work = 0.0;
   double total_work = 0.0;
   const int weight_singleton_blocks =
     kls_egraph_non_dominant_many_block_shape(solver);
@@ -9773,6 +9782,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     if (nk <= 1u) {
       if (nk == 1u && weight_singleton_blocks) {
         column_work[k1] = 1.0;
+        if (max_column_work < 1.0) {
+          max_column_work = 1.0;
+        }
       }
       if (nk == 1u) {
         root_columns++;
@@ -9817,6 +9829,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       }
       levels[k1 + k] = level;
       column_work[k1 + k] = work;
+      if (work > max_column_work) {
+        max_column_work = work;
+      }
       total_work += work;
       if (level > max_level) {
         max_level = level;
@@ -9970,6 +9985,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
 
   UF_long pipeline_columns = 0;
   double pipeline_work = 0.0;
+  double pipeline_max_column_work = 0.0;
   if (cluster_levels < level_count) {
     for (UF_long pos = level_ptr[cluster_levels]; pos < solver->n; ++pos) {
       const UF_long col = natural_pipeline ? pos : level_cols[pos];
@@ -9983,7 +9999,11 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
         return 0;
       }
       pipeline_columns++;
-      pipeline_work += column_work[col];
+      const double work = column_work[col];
+      pipeline_work += work;
+      if (work > pipeline_max_column_work) {
+        pipeline_max_column_work = work;
+      }
     }
   }
 
@@ -10000,6 +10020,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   solver->refactor_dependency_root_columns = root_columns;
   solver->refactor_dependency_leaf_columns = leaf_columns;
   solver->refactor_dependency_max_fanout = max_fanout;
+  solver->refactor_dependency_max_column_work = max_column_work;
+  solver->refactor_dependency_pipeline_max_column_work =
+    pipeline_max_column_work;
   solver->refactor_cluster_level_count = cluster_levels;
   solver->refactor_pipeline_column_count = pipeline_columns;
   solver->refactor_dependency_work = total_work;

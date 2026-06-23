@@ -2123,6 +2123,12 @@ cases. The result further narrows the scheduler diagnosis: changing the order
 in which KLS feeds KLU-column kernels is not enough; the missing improvement
 needs different per-column update granularity or storage.
 
+The EGraph diagnostics were therefore extended again to report maximum
+per-column work and maximum pipeline-tail column work. These fields quantify
+when the outer schedule has exposed enough independent columns but one or a
+few KLU-column updates still dominate the tail. They are intended to guide the
+row/segment numeric-engine work rather than another column-ordering probe.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

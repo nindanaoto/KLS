@@ -580,8 +580,8 @@ To see which phase explains a solver gap, decompose the same JSONL pair into
 analysis, initial factorization, repeated refactorization, and repeated solve
 contributions. For KLS candidate rows, the report also includes EGraph
 dependency levels, root/leaf/max-fanout counts, cluster levels, pipeline
-columns, and dependency-work estimates when those fields are present in the
-benchmark JSONL:
+columns, max per-column work, pipeline max per-column work, and
+dependency-work estimates when those fields are present in the benchmark JSONL:
 
 ```sh
 python3 scripts/decompose_solver_gap.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/cktso_suite.jsonl --reference-name cktso
