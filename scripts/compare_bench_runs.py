@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import pathlib
+import re
 import statistics
 
 
@@ -70,6 +71,42 @@ def print_failures(name: str, failures: dict[str, dict[str, object]]) -> None:
         print(f"  {matrix}: {reason}")
 
 
+def parsed_timeout_seconds(row: dict[str, object]) -> float | None:
+    candidates: list[str] = []
+    reason = row.get("reason")
+    if reason is not None:
+        candidates.append(str(reason))
+    sample_failures = row.get("sample_failures")
+    if isinstance(sample_failures, list):
+        candidates.extend(str(item) for item in sample_failures)
+    pattern = re.compile(r"timeout after ([0-9]+(?:\.[0-9]+)?)s")
+    for text in candidates:
+        match = pattern.search(text)
+        if match:
+            return float(match.group(1))
+    return None
+
+
+def effective_cycle_seconds(
+    name: str,
+    rows: dict[str, dict[str, object]],
+    failures: dict[str, dict[str, object]],
+    fallback_seconds: float | None,
+) -> tuple[float, str] | None:
+    if name in rows:
+        return float(rows[name]["spice_cycle_seconds"]), "ok"
+    if name in failures:
+        seconds = fallback_seconds
+        if seconds is None:
+            seconds = parsed_timeout_seconds(failures[name])
+        if seconds is None:
+            return None
+        return seconds, "failed"
+    if fallback_seconds is None:
+        return None
+    return fallback_seconds, "missing"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate", type=pathlib.Path, required=True)
@@ -77,45 +114,94 @@ def main() -> int:
     parser.add_argument("--candidate-name", default="candidate")
     parser.add_argument("--reference-name", default="reference")
     parser.add_argument("--max-rows", type=int, default=12)
+    parser.add_argument(
+        "--include-failures",
+        action="store_true",
+        help=(
+            "Score failed or missing matrices instead of restricting the "
+            "summary to successful rows common to both runs."
+        ),
+    )
+    parser.add_argument(
+        "--failure-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Fallback cycle-time penalty for non-timeout failures or missing "
+            "rows when --include-failures is used. Timeout failures infer "
+            "their process cap from the .failures file if this is omitted; "
+            "that cap is only a lower bound for SPICE-cycle comparisons."
+        ),
+    )
     args = parser.parse_args()
 
     candidate = load_rows(args.candidate)
     reference = load_rows(args.reference)
     candidate_failures = load_failures(args.candidate)
     reference_failures = load_failures(args.reference)
-    common = sorted(set(candidate) & set(reference))
+    if args.include_failures:
+        common = sorted(
+            set(candidate)
+            | set(reference)
+            | set(candidate_failures)
+            | set(reference_failures)
+        )
+    else:
+        common = sorted(set(candidate) & set(reference))
     if not common:
         print_failures(args.candidate_name, candidate_failures)
         print_failures(args.reference_name, reference_failures)
         raise SystemExit("no common matrix basenames")
 
     ratios: list[float] = []
-    records: list[tuple[float, str, float, float]] = []
+    records: list[tuple[float, str, float, float, str, str]] = []
     for name in common:
-        c = float(candidate[name]["spice_cycle_seconds"])
-        r = float(reference[name]["spice_cycle_seconds"])
+        if args.include_failures:
+            candidate_effective = effective_cycle_seconds(
+                name, candidate, candidate_failures, args.failure_seconds
+            )
+            reference_effective = effective_cycle_seconds(
+                name, reference, reference_failures, args.failure_seconds
+            )
+            if candidate_effective is None or reference_effective is None:
+                continue
+            c, c_status = candidate_effective
+            r, r_status = reference_effective
+        else:
+            c = float(candidate[name]["spice_cycle_seconds"])
+            r = float(reference[name]["spice_cycle_seconds"])
+            c_status = "ok"
+            r_status = "ok"
         if c <= 0.0 or r <= 0.0 or not math.isfinite(c) or not math.isfinite(r):
             continue
         ratio = c / r
         ratios.append(ratio)
-        records.append((ratio, name, c, r))
+        records.append((ratio, name, c, r, c_status, r_status))
 
     if not records:
         raise SystemExit("no finite positive common timings")
 
-    wins = sum(1 for ratio, _, _, _ in records if ratio < 0.98)
-    ties = sum(1 for ratio, _, _, _ in records if 0.98 <= ratio <= 1.02)
-    losses = sum(1 for ratio, _, _, _ in records if ratio > 1.02)
+    wins = sum(1 for ratio, *_ in records if ratio < 0.98)
+    ties = sum(1 for ratio, *_ in records if 0.98 <= ratio <= 1.02)
+    losses = sum(1 for ratio, *_ in records if ratio > 1.02)
     speedups = [1.0 / ratio for ratio in ratios]
     summary = {
         "candidate": args.candidate_name,
         "reference": args.reference_name,
         "matrices_common": len(records),
+        "include_failures": args.include_failures,
+        "failure_seconds": args.failure_seconds,
+        "candidate_failed_or_missing_scored": sum(
+            1 for _, _, _, _, c_status, _ in records if c_status != "ok"
+        ),
+        "reference_failed_or_missing_scored": sum(
+            1 for _, _, _, _, _, r_status in records if r_status != "ok"
+        ),
         "candidate_geomean_seconds": geometric_mean(
-            [float(candidate[name]["spice_cycle_seconds"]) for _, name, _, _ in records]
+            [c for _, _, c, _, _, _ in records]
         ),
         "reference_geomean_seconds": geometric_mean(
-            [float(reference[name]["spice_cycle_seconds"]) for _, name, _, _ in records]
+            [r for _, _, _, r, _, _ in records]
         ),
         "geomean_ratio_candidate_over_reference": geometric_mean(ratios),
         "geomean_speedup_reference_over_candidate": geometric_mean(speedups),
@@ -127,12 +213,20 @@ def main() -> int:
     print(json.dumps(summary, indent=2, sort_keys=True))
 
     print("\nLargest candidate wins:")
-    for ratio, name, c, r in sorted(records)[: args.max_rows]:
-        print(f"  {name}: ratio={ratio:.3f} {args.candidate_name}={c:.6g}s {args.reference_name}={r:.6g}s")
+    for ratio, name, c, r, c_status, r_status in sorted(records)[: args.max_rows]:
+        print(
+            f"  {name}: ratio={ratio:.3f} "
+            f"{args.candidate_name}={c:.6g}s/{c_status} "
+            f"{args.reference_name}={r:.6g}s/{r_status}"
+        )
 
     print("\nLargest candidate losses:")
-    for ratio, name, c, r in sorted(records, reverse=True)[: args.max_rows]:
-        print(f"  {name}: ratio={ratio:.3f} {args.candidate_name}={c:.6g}s {args.reference_name}={r:.6g}s")
+    for ratio, name, c, r, c_status, r_status in sorted(records, reverse=True)[: args.max_rows]:
+        print(
+            f"  {name}: ratio={ratio:.3f} "
+            f"{args.candidate_name}={c:.6g}s/{c_status} "
+            f"{args.reference_name}={r:.6g}s/{r_status}"
+        )
 
     missing_candidate = sorted(set(reference) - set(candidate))
     missing_reference = sorted(set(candidate) - set(reference))

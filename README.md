@@ -496,7 +496,12 @@ process-failure records are written to the adjacent `.failures` sidecar. For
 example, `build/kls_paper_large_recon.jsonl` records completed matrices and
 `build/kls_paper_large_recon.failures` records timed-out or failed matrices.
 `scripts/compare_bench_runs.py` reads those sidecars when present so large-case
-comparisons show both timing ratios and missing rows caused by failures.
+comparisons show both timing ratios and missing rows caused by failures. By
+default it still computes geomeans only over successful rows common to both
+runs. Add `--include-failures --failure-seconds SECONDS` when a hard-suite
+comparison should score failed or missing rows with an explicit cycle-time
+penalty; using a process timeout value as the penalty is only a lower bound for
+SPICE-cycle comparisons.
 
 The suite metric is:
 
@@ -508,6 +513,13 @@ Compare two JSONL runs by matrix basename:
 
 ```sh
 python3 scripts/compare_bench_runs.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/klu_defaults.jsonl --reference-name klu-defaults
+```
+
+For timeout-heavy large reconnaissance runs, include sidecar failures with a
+deliberate penalty:
+
+```sh
+python3 scripts/compare_bench_runs.py --candidate build/kls_paper_large_recon.jsonl --candidate-name kls-auto --reference build/cktso_paper_large_recon.jsonl --reference-name cktso --include-failures --failure-seconds 1000
 ```
 
 To see which phase explains a solver gap, decompose the same JSONL pair into
