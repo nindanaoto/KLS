@@ -271,10 +271,13 @@ When `fast_factor` reuses an existing factor pattern, KLS also checks the
 resulting L multipliers against the selected pivot tolerance. On unscaled BTF
 patterns, a rejected reused pivot can restart the rejected diagonal block with
 pivoting, splice the repaired block permutation back into the numeric object,
-and retry the checked fast factorization. Scaled fast-factor calls still use
-the pivot-checking refactor kernel so they can stop at the first unsafe
-multiplier, but they fall back to full pivoting factorization when a repair is
-needed. Benchmark stats report `fast_rejected_pivot`,
+and retry the checked fast factorization. When the repaired block is the only
+BTF block, the repair has already recomputed the whole numeric object with
+pivoting, so KLS validates the repaired multipliers and skips the redundant
+checked retry. Scaled fast-factor calls still use the pivot-checking refactor
+kernel so they can stop at the first unsafe multiplier, but they fall back to
+full pivoting factorization when a repair is needed. Benchmark stats report
+`fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_block_start`,
 `fast_rejected_block_size`, `fast_rejected_suffix_columns`,
 `fast_rejected_descendant_columns`, `fast_rejected_descendant_work`, and

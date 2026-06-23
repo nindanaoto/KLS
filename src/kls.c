@@ -8957,6 +8957,16 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
           (UF_long)solver->stats.fast_rejected_pivot)) {
       return 0;
     }
+    if (solver->symbolic != NULL && solver->symbolic->nblocks == 1u) {
+      UF_long rejected_pivot = KLS_KLU_EMPTY;
+      UF_long rejected_pivot_col = KLS_KLU_EMPTY;
+      if (!kls_numeric_pivots_pass_threshold(solver, &rejected_pivot,
+                                             &rejected_pivot_col)) {
+        kls_record_fast_reject(solver, rejected_pivot, rejected_pivot_col);
+        return 0;
+      }
+      return 1;
+    }
   }
   return 0;
 }
@@ -8995,6 +9005,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver->stats.factor_seconds = elapsed;
       (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
       (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
+      maybe_prepare_refactor_map(solver, &elapsed);
       maybe_prepare_refactor_schedule(solver, &elapsed);
       solver->stats.factor_seconds = elapsed;
       fill_numeric_stats(solver);
