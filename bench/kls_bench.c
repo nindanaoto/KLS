@@ -703,6 +703,9 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_descendant_work\":%.9g"
            ",\"fast_rejected_row_tail_columns\":%" PRId64
            ",\"fast_rejected_row_tail_work\":%.9g"
+           ",\"fast_rejected_group_tail_groups\":%" PRId64
+           ",\"fast_rejected_group_tail_rows\":%" PRId64
+           ",\"fast_rejected_group_tail_work\":%.9g"
            ",\"fast_rejected_etree_columns\":%" PRId64
            ",\"fast_rejected_etree_work\":%.9g"
            ",\"fast_rejected_pivoting_tail_columns\":%" PRId64
@@ -763,6 +766,9 @@ int main(int argc, char **argv) {
            stats.fast_rejected_descendant_work,
            stats.fast_rejected_row_tail_columns,
            stats.fast_rejected_row_tail_work,
+           stats.fast_rejected_group_tail_groups,
+           stats.fast_rejected_group_tail_rows,
+           stats.fast_rejected_group_tail_work,
            stats.fast_rejected_etree_columns,
            stats.fast_rejected_etree_work,
            stats.fast_rejected_pivoting_tail_columns,
@@ -964,7 +970,8 @@ int main(int argc, char **argv) {
     printf("fast rejected block: start %" PRId64 ", size %" PRId64
            ", suffix %" PRId64 ", descendants %" PRId64
            ", descendant work %.6g, row tail %" PRId64
-           ", row-tail work %.6g, etree %" PRId64
+           ", row-tail work %.6g, group tail %" PRId64
+           ", group rows %" PRId64 ", group work %.6g, etree %" PRId64
            ", etree work %.6g, pivoting tail %" PRId64
            ", pivoting-tail work %.6g, first %" PRId64
            ", last %" PRId64 ", contains reject %d, topological %d"
@@ -976,6 +983,9 @@ int main(int argc, char **argv) {
            stats.fast_rejected_descendant_work,
            stats.fast_rejected_row_tail_columns,
            stats.fast_rejected_row_tail_work,
+           stats.fast_rejected_group_tail_groups,
+           stats.fast_rejected_group_tail_rows,
+           stats.fast_rejected_group_tail_work,
            stats.fast_rejected_etree_columns,
            stats.fast_rejected_etree_work,
            stats.fast_rejected_pivoting_tail_columns,

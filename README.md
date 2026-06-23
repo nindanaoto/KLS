@@ -375,7 +375,11 @@ row directly and report `row_refactor_last_defer_value_scatter` plus
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus
-`row_refactor_work_ready_queue_run_count`.
+`row_refactor_work_ready_queue_run_count`. Checked row fast-factor rejects
+also report the conservative row-group restart tail through
+`fast_rejected_group_tail_groups`, `fast_rejected_group_tail_rows`, and
+`fast_rejected_group_tail_work`, giving the row/segment task graph a visible
+scope for future CKTSO-style pivoting tail restart.
 Because checked row fast-factor probes and
 unchecked row refactors are selected independently, stats also report
 `row_refactor_last_run`, `row_refactor_last_checked`,

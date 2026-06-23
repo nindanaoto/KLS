@@ -96,6 +96,7 @@ struct kls_solver {
   UF_long *row_refactor_group_successor_groups;
   UF_long *row_refactor_group_level_ptr;
   UF_long *row_refactor_level_groups;
+  UF_long *row_refactor_row_group;
   UF_long *row_refactor_group_level_thread_ptr;
   int row_refactor_group_level_thread_count;
   UF_long *row_refactor_l_internal_ptr;
@@ -595,6 +596,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_group_successor_groups);
   free(solver->row_refactor_group_level_ptr);
   free(solver->row_refactor_level_groups);
+  free(solver->row_refactor_row_group);
   free(solver->row_refactor_group_level_thread_ptr);
   free(solver->row_refactor_l_internal_ptr);
   free(solver->row_refactor_etree_parent);
@@ -627,6 +629,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_successor_groups = NULL;
   solver->row_refactor_group_level_ptr = NULL;
   solver->row_refactor_level_groups = NULL;
+  solver->row_refactor_row_group = NULL;
   solver->row_refactor_group_level_thread_ptr = NULL;
   solver->row_refactor_group_level_thread_count = 0;
   solver->row_refactor_l_internal_ptr = NULL;
@@ -863,6 +866,9 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_descendant_work = 0.0;
   solver->stats.fast_rejected_row_tail_columns = 0;
   solver->stats.fast_rejected_row_tail_work = 0.0;
+  solver->stats.fast_rejected_group_tail_groups = 0;
+  solver->stats.fast_rejected_group_tail_rows = 0;
+  solver->stats.fast_rejected_group_tail_work = 0.0;
   solver->stats.fast_rejected_etree_columns = 0;
   solver->stats.fast_rejected_etree_work = 0.0;
   solver->stats.fast_rejected_pivoting_tail_columns = 0;
@@ -8504,6 +8510,93 @@ static int kls_build_row_refactor_tail(kls_solver *solver,
   return 1;
 }
 
+static void kls_fill_fast_reject_group_tail_stats(kls_solver *solver,
+                                                  UF_long rejected_pivot) {
+  if (solver == NULL || rejected_pivot >= solver->n ||
+      solver->row_refactor_pattern_n != solver->n ||
+      solver->row_refactor_row_group == NULL ||
+      solver->row_refactor_group_ptr == NULL ||
+      solver->row_refactor_group_successor_ptr == NULL ||
+      (solver->row_refactor_group_dependency_edges > 0u &&
+       solver->row_refactor_group_successor_groups == NULL) ||
+      solver->row_refactor_group_count <= 0) {
+    return;
+  }
+
+  const UF_long group_count = solver->row_refactor_group_count;
+  const UF_long root_group = solver->row_refactor_row_group[rejected_pivot];
+  if (root_group < 0 || root_group >= group_count) {
+    return;
+  }
+  const size_t group_count_size = (size_t)group_count;
+  if ((UF_long)group_count_size != group_count ||
+      group_count_size > SIZE_MAX / sizeof(UF_long)) {
+    return;
+  }
+  UF_long *queue =
+    (UF_long *)malloc(group_count_size * sizeof(*queue));
+  unsigned char *marks =
+    (unsigned char *)calloc(group_count_size, sizeof(*marks));
+  if (queue == NULL || marks == NULL) {
+    free(queue);
+    free(marks);
+    return;
+  }
+
+  UF_long head = 0;
+  UF_long tail = 0;
+  marks[root_group] = 1u;
+  queue[tail++] = root_group;
+  while (head < tail) {
+    const UF_long group = queue[head++];
+    const UF_long begin = solver->row_refactor_group_successor_ptr[group];
+    const UF_long end = solver->row_refactor_group_successor_ptr[group + 1u];
+    if (begin > end ||
+        end > solver->row_refactor_group_dependency_edges) {
+      free(queue);
+      free(marks);
+      return;
+    }
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long successor =
+        solver->row_refactor_group_successor_groups[p];
+      if (successor < 0 || successor >= group_count) {
+        free(queue);
+        free(marks);
+        return;
+      }
+      if (!marks[successor]) {
+        marks[successor] = 1u;
+        queue[tail++] = successor;
+      }
+    }
+  }
+
+  UF_long groups = 0;
+  UF_long rows = 0;
+  double work = 0.0;
+  for (UF_long group = root_group; group < group_count; ++group) {
+    if (!marks[group]) {
+      continue;
+    }
+    const UF_long row_begin = solver->row_refactor_group_ptr[group];
+    const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
+    if (row_begin > row_end || row_end > solver->n) {
+      free(queue);
+      free(marks);
+      return;
+    }
+    groups++;
+    rows += row_end - row_begin;
+    work += kls_row_refactor_group_work(solver, group);
+  }
+  solver->stats.fast_rejected_group_tail_groups = (int64_t)groups;
+  solver->stats.fast_rejected_group_tail_rows = (int64_t)rows;
+  solver->stats.fast_rejected_group_tail_work = work;
+  free(queue);
+  free(marks);
+}
+
 static void kls_fill_fast_reject_row_tail_stats(kls_solver *solver,
                                                 UF_long block,
                                                 UF_long k1,
@@ -8904,6 +8997,9 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
   solver->stats.fast_rejected_descendant_work = 0.0;
   solver->stats.fast_rejected_row_tail_columns = 0;
   solver->stats.fast_rejected_row_tail_work = 0.0;
+  solver->stats.fast_rejected_group_tail_groups = 0;
+  solver->stats.fast_rejected_group_tail_rows = 0;
+  solver->stats.fast_rejected_group_tail_work = 0.0;
   solver->stats.fast_rejected_etree_columns = 0;
   solver->stats.fast_rejected_etree_work = 0.0;
   solver->stats.fast_rejected_pivoting_tail_columns = 0;
@@ -8916,6 +9012,7 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
 
   kls_fill_fast_reject_row_tail_stats(solver, block, k1, k2,
                                       local_reject);
+  kls_fill_fast_reject_group_tail_stats(solver, rejected_pivot);
   kls_fill_fast_reject_etree_tail_stats(solver, block, k1, k2,
                                         local_reject);
 
@@ -11748,7 +11845,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     return 0;
   }
   free(group_levels);
-  free(row_group);
 
   solver->row_refactor_group_ptr = group_ptr;
   solver->row_refactor_group_dep_ptr = group_dep_ptr;
@@ -11762,6 +11858,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_max_fanout = group_max_fanout;
   solver->row_refactor_group_level_ptr = group_level_ptr;
   solver->row_refactor_level_groups = level_groups;
+  solver->row_refactor_row_group = row_group;
   solver->row_refactor_l_internal_ptr = l_internal_ptr;
   solver->row_refactor_group_trailing_len = group_trailing_len;
   solver->row_refactor_group_dense = group_dense;

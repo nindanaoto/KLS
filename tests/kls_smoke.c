@@ -508,6 +508,10 @@ static int test_checked_row_fast_factor_block_restart(void) {
              stats.fast_rejected_row_tail_columns >
                stats.fast_rejected_suffix_columns ||
              stats.fast_rejected_row_tail_work <= 0.0 ||
+             stats.fast_rejected_group_tail_groups < 1 ||
+             stats.fast_rejected_group_tail_rows <
+               stats.fast_rejected_row_tail_columns ||
+             stats.fast_rejected_group_tail_work <= 0.0 ||
              stats.fast_rejected_etree_columns < 1 ||
              stats.fast_rejected_etree_columns >
                stats.fast_rejected_suffix_columns ||
@@ -518,12 +522,17 @@ static int test_checked_row_fast_factor_block_restart(void) {
             "unexpected checked-row tail stats: start=%" PRId64
             ", size=%" PRId64 ", suffix=%" PRId64
             ", descendants=%" PRId64 ", row_tail=%" PRId64
-            ", etree=%" PRId64 ", pivoting_tail=%" PRId64 "\n",
+            ", group_tail=%" PRId64 ", group_rows=%" PRId64
+            ", group_work=%.6g, etree=%" PRId64
+            ", pivoting_tail=%" PRId64 "\n",
             stats.fast_rejected_block_start,
             stats.fast_rejected_block_size,
             stats.fast_rejected_suffix_columns,
             stats.fast_rejected_descendant_columns,
             stats.fast_rejected_row_tail_columns,
+            stats.fast_rejected_group_tail_groups,
+            stats.fast_rejected_group_tail_rows,
+            stats.fast_rejected_group_tail_work,
             stats.fast_rejected_etree_columns,
             stats.fast_rejected_pivoting_tail_columns);
     ok = 0;

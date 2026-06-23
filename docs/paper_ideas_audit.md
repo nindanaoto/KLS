@@ -65,7 +65,10 @@ pivot probes, while unchecked row refactors scatter completed dense rows
 directly. The row ready queue now also orders initially ready tail groups and
 newly released successor groups by the retained FLOP-style group work estimate,
 which moves the row scheduler closer to SubtreeLU's workload-balanced queue
-generation. These pieces do not change the current default KLU-column numeric
+generation. Checked row fast-factor rejects now also report a conservative
+group-tail restart scope from the retained row-group successor graph, giving
+future CKTSO-style pivoting tail work an explicit row/segment task-tail
+measurement. These pieces do not change the current default KLU-column numeric
 kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
@@ -2808,6 +2811,13 @@ to worker threads. This follows SubtreeLU's queue-balancing motivation of
 scheduling heavier refactor work earlier while preserving dependency readiness;
 it is still running the experimental KLS row layer, not a full separator-tree
 private/pipeline scheduler.
+
+The row-pattern builder now retains the row-to-group map and uses it when a
+checked row fast-factor pass rejects a pivot. KLS records the conservative
+group-tail restart scope reachable from the rejected row's group: number of
+groups, covered rows, and retained group-work estimate. This is a planning and
+diagnostic bridge to CKTSO's "rows that need to be recomputed with pivoting"
+step; it does not yet execute a parallel pivoting row-tail kernel.
 
 ## Recommended General Work
 
