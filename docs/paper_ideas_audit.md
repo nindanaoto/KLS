@@ -1776,6 +1776,17 @@ stayed valid: the four-thread `G2_circuit` gated row path measured about
 (`bcircuit` about `0.0050s`, `rajat22` about `0.00164s`, and `add20` about
 `0.000209s` repeated refactor in same-session long-repeat samples).
 
+The same dense-segment defer policy then gained a KLS-owned row-major `L` value
+mirror. Sparse/no-dense patterns still write KLU `L` values immediately, but
+dense-segment row refactors now write both `L` and `U` into KLS-owned mirrors
+inside the hot loops and scatter both factor arrays back to KLU only after a
+successful refactor. This keeps the current solve ABI while moving the
+experimental row path another step toward native CKTSO/SubtreeLU-style numeric
+storage. Focused checks stayed valid: the four-thread `G2_circuit` gated row
+path measured about `0.441s` repeated refactor, and long no-dense samples
+remained stable (`bcircuit` about `0.0046s`, `rajat22` about `0.00132s`, and
+`add20` about `0.000175s` repeated refactor in same-session checks).
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
