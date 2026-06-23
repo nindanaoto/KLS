@@ -1915,6 +1915,34 @@ redistributable with LGPL KLS, such as the pinned BSD SPRAL scaling subset or a
 verified compatible system library, not HSL MC64 or restricted solver-tree
 copies.
 
+An unscaled BTF-specific EGraph column kernel was then tested and rejected. The
+prototype bypassed the generic scaling/value helper for unscaled BTF rows and
+used the already validated refactor map directly. That looked aligned with
+CKTSO's row/segment hot-loop emphasis, but the three-pass focused probe
+(`kls_btf_unscaled_egraph_probe_t4_p3_r10_timeout180.jsonl`) regressed the
+unscaled BTF EGraph set by about `2.5%` geomean. It helped some low-work IBM
+and Rajat rows, but slowed the ASIC family by roughly 3-6% and hurt `coupled`
+by about 20%, so the source change was removed. The result reinforces that
+duplicating the current KLU-storage column kernel is not the missing
+row-oriented CKTSO engine.
+
+The single-block EGraph gate was then extended in the opposite direction:
+low-work, unscaled, nearly no-pivot single-block rows. The retained rule is
+structural: one BTF block, no KLU row scaling, 15k-250k rows, no more than
+eight off-diagonal pivots, `4e6`-`5e7` measured factor flops, and at least
+100k numeric LU entries. The EGraph consumer still requires measured
+dependency work before it runs. On the current medium artifact this matches
+`ACTIVSg10K`, `ACTIVSg70K`, `bcircuit`, `hvdc2`, and `OPF_10000`. A five-pass
+focused probe with ten refactors per sample
+(`kls_low_work_single_egraph_probe_t4_p5_r10_timeout180.jsonl`) improved every
+touched row's repeated-refactor median versus the saved pointer-cache artifact:
+`ACTIVSg10K` `0.00136s` to `0.00122s`, `ACTIVSg70K` `0.00338s` to `0.00219s`,
+`bcircuit` `0.00414s` to `0.00304s`, `hvdc2` `0.01528s` to `0.01320s`, and
+`OPF_10000` `0.00213s` to `0.00197s`. Guard rows that do not satisfy the new
+predicate kept zero new EGraph dependency work. This is still a threshold
+coverage improvement on the existing no-pivot EGraph refactor, not a
+replacement for CKTSO's pivot-aware row-oriented factorization.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

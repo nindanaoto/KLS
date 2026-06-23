@@ -8862,6 +8862,18 @@ static int kls_egraph_moderate_single_block_shape(const kls_solver *solver) {
          solver->numeric->lnz + solver->numeric->unz >= 1000000u;
 }
 
+static int kls_egraph_low_work_single_block_shape(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->symbolic->nblocks != 1u || solver->common.scale > 0 ||
+      solver->n < 15000u || solver->n > 250000u ||
+      solver->common.noffdiag > 8u) {
+    return 0;
+  }
+  return solver->common.flops >= 4.0e6 &&
+         solver->common.flops < 5.0e7 &&
+         solver->numeric->lnz + solver->numeric->unz >= 100000u;
+}
+
 static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->nblocks <= 1u || solver->n == 0u) {
@@ -8932,6 +8944,9 @@ static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {
   if (kls_egraph_moderate_single_block_shape(solver)) {
     return 30000u;
   }
+  if (kls_egraph_low_work_single_block_shape(solver)) {
+    return 15000u;
+  }
   return kls_egraph_dominant_btf_shape(solver) ? 50000u : 100000u;
 }
 
@@ -8962,6 +8977,8 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     kls_egraph_small_compact_dominant_btf_shape(solver);
   const int moderate_single =
     kls_egraph_moderate_single_block_shape(solver);
+  const int low_work_single =
+    kls_egraph_low_work_single_block_shape(solver);
   if (solver->n < kls_egraph_refactor_size_floor(solver)) {
     return 0;
   }
@@ -8980,7 +8997,8 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
          scaled_medium_btf ? 1.5e7 :
          small_compact_btf ? 5.0e5 :
          low_work_dominant_btf ? 1.0e7 : 1.0e8)
-      : (moderate_single ? 2.0e7 : 1.5e8);
+      : (moderate_single ? 2.0e7 :
+         low_work_single ? 1.0e6 : 1.5e8);
   if (solver->refactor_dependency_work < min_dependency_work) {
     return 0;
   }
@@ -9501,6 +9519,9 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
     return solver->common.flops >= 2.0e7;
   }
   if (kls_egraph_moderate_single_block_shape(solver)) {
+    return 1;
+  }
+  if (kls_egraph_low_work_single_block_shape(solver)) {
     return 1;
   }
   if (solver->common.flops >= 3.0e8) {
