@@ -1634,6 +1634,19 @@ dependency-work and pipeline-work counters and stayed in the same
 `0.0547-0.0566s` timing band. This is a general scheduling balance fix for the
 fragmented BTF class, not another ordering, scaling, or MC64 import.
 
+The initial-factor wrapper path then stopped recomputing KLU diagnostics
+unconditionally after every optional policy probe. Auto-scale, METIS promotion,
+and pivot-tolerance probes now report whether they actually replaced the
+numeric object, and KLS recomputes `flops`/`rcond` only when the current numeric
+state needs fresh diagnostics for the next decision or final stats. This removes
+redundant O(U-pattern) flop scans and O(n) reciprocal-condition scans from the
+first-factor path without changing ordering, scaling, or numeric acceptance.
+Same-session focused checks were correspondingly modest and noisy:
+`ASIC_680k` initial factor moved from about `1.72s` to `1.70s`, `rajat28` from
+about `0.676s` to `0.668s`, while `rajat30` and `coupled` were neutral within
+noise. This is retained as wrapper overhead cleanup; it does not replace the
+larger row/segment numeric engine still needed for the CKTSO-scale gap.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

@@ -2692,6 +2692,19 @@ static int numeric_candidate_is_better(const trilinos_klu_l_common *current_comm
   return candidate_fill < 0.80 * current_fill;
 }
 
+static void kls_update_numeric_diagnostics(kls_solver *solver,
+                                           int include_rcond) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
+    return;
+  }
+  (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric,
+                             &solver->common);
+  if (include_rcond) {
+    (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric,
+                               &solver->common);
+  }
+}
+
 #ifdef KLS_HAVE_SPRAL_SCALING
 static int spral_hungarian_candidate_has_value(
   const trilinos_klu_l_common *current_common,
@@ -5714,14 +5727,15 @@ static int should_try_auto_scale(const kls_solver *solver) {
   return flops >= 1.0e8 && fill >= 1500000;
 }
 
-static void maybe_select_auto_scale(kls_solver *solver,
-                                    double *elapsed,
-                                    const double *numeric_values) {
+static int maybe_select_auto_scale(kls_solver *solver,
+                                   double *elapsed,
+                                   const double *numeric_values) {
   if (!should_try_auto_scale(solver)) {
-    return;
+    return 0;
   }
   solver->auto_scale_checked = 1;
 
+  int accepted = 0;
   const int candidates[] = {-1, 1, 2};
   for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
     if (candidates[i] == (int)solver->common.scale) {
@@ -5760,7 +5774,9 @@ static void maybe_select_auto_scale(kls_solver *solver,
     solver->numeric = trial_numeric;
     solver->common = trial_common;
     trilinos_klu_l_free_numeric(&old_numeric, &old_common);
+    accepted = 1;
   }
+  return accepted;
 }
 
 static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
@@ -5796,11 +5812,11 @@ static int pivot_tolerance_numeric_is_better(
          candidate_offdiag <= 0.50 * current_offdiag;
 }
 
-static void maybe_select_auto_pivot_tolerance(kls_solver *solver,
-                                              double *elapsed,
-                                              const double *numeric_values) {
+static int maybe_select_auto_pivot_tolerance(kls_solver *solver,
+                                             double *elapsed,
+                                             const double *numeric_values) {
   if (!should_try_auto_pivot_tolerance(solver)) {
-    return;
+    return 0;
   }
   solver->auto_pivot_checked = 1;
 
@@ -5809,7 +5825,7 @@ static void maybe_select_auto_pivot_tolerance(kls_solver *solver,
   trial_options.pivot_tolerance = 1.0e-4;
   trilinos_klu_l_common trial_common;
   if (apply_options_to_common(&trial_common, &trial_options) != KLS_OK) {
-    return;
+    return 0;
   }
 
   const double start = kls_now_seconds();
@@ -5822,7 +5838,7 @@ static void maybe_select_auto_pivot_tolerance(kls_solver *solver,
     if (trial_numeric != NULL) {
       trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
     }
-    return;
+    return 0;
   }
 
   (void)trilinos_klu_l_flops(solver->symbolic, trial_numeric, &trial_common);
@@ -5830,7 +5846,7 @@ static void maybe_select_auto_pivot_tolerance(kls_solver *solver,
   if (!pivot_tolerance_numeric_is_better(&solver->common, solver->numeric,
                                          &trial_common, trial_numeric)) {
     trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
-    return;
+    return 0;
   }
 
   trilinos_klu_l_numeric *old_numeric = solver->numeric;
@@ -5838,6 +5854,7 @@ static void maybe_select_auto_pivot_tolerance(kls_solver *solver,
   solver->numeric = trial_numeric;
   solver->common = trial_common;
   trilinos_klu_l_free_numeric(&old_numeric, &old_common);
+  return 1;
 }
 
 #ifdef KLS_HAVE_METIS
@@ -5870,11 +5887,11 @@ static int metis_numeric_is_better(const kls_solver *solver,
                                      metis_common, metis_numeric);
 }
 
-static void maybe_promote_auto_metis(kls_solver *solver,
-                                     double *elapsed,
-                                     const double *numeric_values) {
+static int maybe_promote_auto_metis(kls_solver *solver,
+                                    double *elapsed,
+                                    const double *numeric_values) {
   if (!should_try_auto_metis(solver)) {
-    return;
+    return 0;
   }
   solver->auto_metis_checked = 1;
 
@@ -5893,7 +5910,7 @@ static void maybe_promote_auto_metis(kls_solver *solver,
                                      &metis_symbolic, &metis_common);
   *elapsed += kls_now_seconds() - start;
   if (status != KLS_OK) {
-    return;
+    return 0;
   }
 
   start = kls_now_seconds();
@@ -5907,14 +5924,14 @@ static void maybe_promote_auto_metis(kls_solver *solver,
       trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
     }
     trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
-    return;
+    return 0;
   }
 
   (void)trilinos_klu_l_flops(metis_symbolic, metis_numeric, &metis_common);
   if (!metis_numeric_is_better(solver, &metis_common, metis_numeric)) {
     trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
     trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
-    return;
+    return 0;
   }
 
   trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
@@ -5932,6 +5949,7 @@ static void maybe_promote_auto_metis(kls_solver *solver,
 
   trilinos_klu_l_free_numeric(&old_numeric, &old_common);
   trilinos_klu_l_free_symbolic(&old_symbolic, &old_common);
+  return 1;
 }
 #endif
 
@@ -9172,8 +9190,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     if (ok && solver->common.status >= 0 &&
         solver->common.status != TRILINOS_KLU_SINGULAR) {
       solver->stats.factor_seconds = elapsed;
-      (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
-      (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
+      kls_update_numeric_diagnostics(solver, 1);
       maybe_prepare_refactor_map(solver, &elapsed);
       maybe_prepare_refactor_schedule(solver, &elapsed);
       solver->stats.factor_seconds = elapsed;
@@ -9198,26 +9215,44 @@ int kls_factor(kls_solver *solver, const double *values) {
     return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
                                                           : KLS_ERR_FACTOR_FAILED;
   }
-  (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
-  (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
+  kls_update_numeric_diagnostics(solver, 1);
+  int diagnostics_have_flops = 1;
+  int diagnostics_have_rcond = 1;
   if (maybe_select_auto_row_match(solver, &elapsed, numeric_values)) {
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
+    diagnostics_have_flops = 1;
+    diagnostics_have_rcond = 1;
   }
-  maybe_select_auto_scale(solver, &elapsed, numeric_values);
+  if (maybe_select_auto_scale(solver, &elapsed, numeric_values)) {
+    diagnostics_have_flops = 1;
+    diagnostics_have_rcond = 0;
+  }
 #ifdef KLS_HAVE_METIS
-  maybe_promote_auto_metis(solver, &elapsed, numeric_values);
+  if (maybe_promote_auto_metis(solver, &elapsed, numeric_values)) {
+    diagnostics_have_flops = 1;
+    diagnostics_have_rcond = 0;
+  }
 #endif
-  (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
-  (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
-  maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values);
+  if (!diagnostics_have_flops || !diagnostics_have_rcond) {
+    kls_update_numeric_diagnostics(solver, 1);
+    diagnostics_have_flops = 1;
+    diagnostics_have_rcond = 1;
+  }
+  if (maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values)) {
+    diagnostics_have_flops = 1;
+    diagnostics_have_rcond = 1;
+  }
 #ifdef KLS_HAVE_SPRAL_SCALING
   if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
                                              numeric_values)) {
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
+    diagnostics_have_flops = 1;
+    diagnostics_have_rcond = 1;
   }
 #endif
-  (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric, &solver->common);
-  (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric, &solver->common);
+  if (!diagnostics_have_flops || !diagnostics_have_rcond) {
+    kls_update_numeric_diagnostics(solver, 1);
+  }
   maybe_prepare_refactor_map(solver, &elapsed);
   maybe_prepare_refactor_schedule(solver, &elapsed);
   solver->stats.factor_seconds = elapsed;
