@@ -151,10 +151,13 @@ single-block and serial BTF refactors do not redo the same `Q` and `Pinv`
 structure lookups every cycle. For serial BTF refactors, this map also keeps
 each column's off-block entries separate from diagonal-block entries so the
 numeric refactor loop avoids reclassifying the same structure on every SPICE
-step. Dominant many-block BTF refactors with bounded block count and input size
-can reuse the same map inside the worker-pool path, including row-scaled
-factors, while extreme tiny-block ASIC-style cases stay on the unmapped worker
-or serial path. For threaded runs, KLS also records the exact no-pivot
+step. The retained BTF map also stores each factor-order column's owning BTF
+block, so block-aware EGraph refactors do not binary-search the BTF boundaries
+for every column in fragmented many-block matrices. Dominant many-block BTF
+refactors with bounded block count and input size can reuse the same map inside
+the worker-pool path, including row-scaled factors, while extreme tiny-block
+ASIC-style cases stay on the unmapped worker or serial path unless they enter
+the guarded EGraph path. For threaded runs, KLS also records the exact no-pivot
 refactor EGraph level schedule from the numeric U pattern; this metadata is
 exposed in
 benchmark output and is used by a guarded large unscaled single-block or

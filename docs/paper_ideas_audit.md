@@ -1664,6 +1664,19 @@ dependency-work and pipeline-work counters and stayed in the same
 `0.0547-0.0566s` timing band. This is a general scheduling balance fix for the
 fragmented BTF class, not another ordering, scaling, or MC64 import.
 
+The fragmented-BTF EGraph path then stopped binary-searching the BTF boundary
+array for every factor-order column. KLS already retains a fixed scatter map
+for BTF refactors, so that map now also stores each column's owning BTF block
+and the block-aware EGraph column kernel uses it directly. This targets the
+same general ASIC-style shape with hundreds of thousands of BTF blocks, without
+touching single-block EGraph rows. A five-row ASIC focus comparison against the
+prior non-dominant many-block EGraph artifact improved geomean cycle time by
+about 1.09x (`9.05s -> 8.31s`), with the largest win on `ASIC_680ks`
+(`9.42s -> 6.79s`) and no >2% losses in that focus. Spot checks on `nxp1`,
+`rajat28`, `coupled`, and `onetone2` stayed in their expected timing bands.
+This is still a scheduler hot-loop cleanup, not the missing CKTSO row-oriented
+pivoting factorization engine.
+
 The initial-factor wrapper path then stopped recomputing KLU diagnostics
 unconditionally after every optional policy probe. Auto-scale, METIS promotion,
 and pivot-tolerance probes now report whether they actually replaced the

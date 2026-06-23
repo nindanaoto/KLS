@@ -55,6 +55,7 @@ struct kls_solver {
   UF_long *refactor_row_idx;
   UF_long *refactor_input_pos;
   UF_long *refactor_block_start;
+  UF_long *refactor_col_block;
   UF_long *refactor_level_ptr;
   UF_long *refactor_level_cols;
   UF_long *refactor_level_thread_ptr;
@@ -282,10 +283,12 @@ static void free_refactor_map(kls_solver *solver) {
   free(solver->refactor_row_idx);
   free(solver->refactor_input_pos);
   free(solver->refactor_block_start);
+  free(solver->refactor_col_block);
   solver->refactor_col_ptr = NULL;
   solver->refactor_row_idx = NULL;
   solver->refactor_input_pos = NULL;
   solver->refactor_block_start = NULL;
+  solver->refactor_col_block = NULL;
 }
 
 static void free_refactor_schedule(kls_solver *solver) {
@@ -7318,7 +7321,8 @@ static int kls_build_refactor_map(kls_solver *solver) {
   if (solver->refactor_col_ptr != NULL && solver->refactor_row_idx != NULL &&
       solver->refactor_input_pos != NULL &&
       (solver->symbolic->nblocks == 1u ||
-       solver->refactor_block_start != NULL)) {
+       (solver->refactor_block_start != NULL &&
+        solver->refactor_col_block != NULL))) {
     return 1;
   }
 
@@ -7384,11 +7388,14 @@ static int kls_build_refactor_map(kls_solver *solver) {
 
   UF_long *block_start =
     (UF_long *)malloc((size_t)solver->n * sizeof(*block_start));
-  if (block_start == NULL) {
-    free(block_start);
+  UF_long *col_block =
+    (UF_long *)malloc((size_t)solver->n * sizeof(*col_block));
+  if (block_start == NULL || col_block == NULL) {
     free(col_ptr);
     free(row_idx);
     free(input_pos);
+    free(block_start);
+    free(col_block);
     return 0;
   }
 
@@ -7404,12 +7411,14 @@ static int kls_build_refactor_map(kls_solver *solver) {
     const UF_long k1 = solver->symbolic->R[block];
     const UF_long k2 = solver->symbolic->R[block + 1u];
     col_ptr[k] = count;
+    col_block[k] = block;
     const UF_long oldcol = q[k];
     if (oldcol >= solver->n) {
       free(col_ptr);
       free(row_idx);
       free(input_pos);
       free(block_start);
+      free(col_block);
       return 0;
     }
     UF_long off_count = 0;
@@ -7421,6 +7430,7 @@ static int kls_build_refactor_map(kls_solver *solver) {
         free(row_idx);
         free(input_pos);
         free(block_start);
+        free(col_block);
         return 0;
       }
       const UF_long row = pinv[oldrow];
@@ -7429,6 +7439,7 @@ static int kls_build_refactor_map(kls_solver *solver) {
         free(row_idx);
         free(input_pos);
         free(block_start);
+        free(col_block);
         return 0;
       }
       if (row < k1) {
@@ -7440,6 +7451,7 @@ static int kls_build_refactor_map(kls_solver *solver) {
         free(row_idx);
         free(input_pos);
         free(block_start);
+        free(col_block);
         return 0;
       }
     }
@@ -7448,6 +7460,7 @@ static int kls_build_refactor_map(kls_solver *solver) {
       free(row_idx);
       free(input_pos);
       free(block_start);
+      free(col_block);
       return 0;
     }
     block_start[k] = count + off_count;
@@ -7472,6 +7485,7 @@ static int kls_build_refactor_map(kls_solver *solver) {
     free(row_idx);
     free(input_pos);
     free(block_start);
+    free(col_block);
     return 0;
   }
 
@@ -7479,6 +7493,7 @@ static int kls_build_refactor_map(kls_solver *solver) {
   solver->refactor_row_idx = row_idx;
   solver->refactor_input_pos = input_pos;
   solver->refactor_block_start = block_start;
+  solver->refactor_col_block = col_block;
   return 1;
 }
 
@@ -7781,9 +7796,19 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     return kls_egraph_refactor_single_unscaled_column(
       worker, k, wait_for_dependencies);
   }
-  const UF_long block = kls_block_for_pivot(solver, k);
-  if (block == KLS_KLU_EMPTY || block >= symbolic->nblocks ||
-      k >= solver->n || symbolic->R == NULL || symbolic->Q == NULL) {
+  if (k >= solver->n || symbolic->R == NULL || symbolic->Q == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  UF_long block = KLS_KLU_EMPTY;
+  if (symbolic->nblocks == 1u) {
+    block = 0u;
+  } else if (solver->refactor_col_block != NULL) {
+    block = solver->refactor_col_block[k];
+  } else {
+    block = kls_block_for_pivot(solver, k);
+  }
+  if (block == KLS_KLU_EMPTY || block >= symbolic->nblocks) {
     kls_egraph_refactor_record_invalid(shared);
     return 0;
   }
@@ -7798,7 +7823,8 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
       solver->refactor_col_ptr == NULL ||
       solver->refactor_row_idx == NULL ||
       solver->refactor_input_pos == NULL ||
-      (btf_block && solver->refactor_block_start == NULL)) {
+      (btf_block && (solver->refactor_block_start == NULL ||
+                     solver->refactor_col_block == NULL))) {
     kls_egraph_refactor_record_invalid(shared);
     return 0;
   }
@@ -8264,6 +8290,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   }
   if (!single_block &&
       (solver->refactor_block_start == NULL ||
+       solver->refactor_col_block == NULL ||
        solver->numeric->Offp == NULL || solver->numeric->Offx == NULL)) {
     return 0;
   }
