@@ -362,8 +362,11 @@ only when actual numeric fill/flops improve materially without unacceptable
 conditioning loss. This keeps CKTSO-style METIS plus static-pivoting wins
 available without forcing METIS on all weak-diagonal circuits. Benchmark JSON
 reports both whether static pivoting was enabled, whether KLS selected it, and
-whether the accepted static match used exact assignment. KLS does not vendor
-HSL MC64 or the MC64 copies carried by some solver projects. When
+whether the accepted static match used exact assignment. It also reports
+`selected_spral_matching` when the accepted row permutation came from the
+LGPL-compatible SPRAL Hungarian or auction path rather than KLS's in-tree
+matcher. KLS does not vendor HSL MC64 or the MC64 copies carried by some solver
+projects. When
 `KLS_ENABLE_SPRAL_SCALING=ON`, KLS builds or links BSD-licensed SPRAL
 Hungarian/auction matching as an LGPL-compatible MC64-adjacent component.
 SPRAL same-cardinality Hungarian

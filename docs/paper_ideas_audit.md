@@ -744,7 +744,11 @@ actual factor work/fill and still keeps the SPRAL candidate only when the
 factored numeric evidence improves. This keeps a license-compatible
 MC64-adjacent source available for hard structural-deficit and expensive
 dynamic-pivot cases without letting a maximum-product match replace already
-accepted KLS row matchings solely on weight.
+accepted KLS row matchings solely on weight. KLS now reports accepted SPRAL
+Hungarian or auction row permutations separately as
+`selected_spral_matching`, because the auction path is LGPL-compatible but not
+an exact assignment path and should not be conflated with
+`selected_exact_matching`.
 
 The SPRAL Hungarian/scaling path was then promoted to a bounded pre-factor
 large-matrix candidate for weak-diagonal matrices whose symbolic analysis

@@ -93,6 +93,7 @@ struct kls_solver {
   int auto_pivot_checked;
   int auto_scale_checked;
   int exact_matching_selected;
+  int spral_matching_selected;
   int fast_block_restarts;
   int fast_reject_refresh_state;
 };
@@ -1109,6 +1110,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_pivot_checked = 0;
   solver->auto_scale_checked = 0;
   solver->exact_matching_selected = 0;
+  solver->spral_matching_selected = 0;
   solver->fast_block_restarts = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
@@ -4270,17 +4272,19 @@ static int build_greedy_numeric_row_match(UF_long n,
                                           UF_long **row_perm_out,
                                           UF_long *matched_out,
                                           int *exact_matching_out,
+                                          int *spral_matching_out,
                                           double **row_scale_out,
                                           double **col_scale_out) {
   if (n <= 0 || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
       row_perm_out == NULL || matched_out == NULL ||
-      exact_matching_out == NULL || row_scale_out == NULL ||
-      col_scale_out == NULL) {
+      exact_matching_out == NULL || spral_matching_out == NULL ||
+      row_scale_out == NULL || col_scale_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   *row_perm_out = NULL;
   *matched_out = 0;
   *exact_matching_out = 0;
+  *spral_matching_out = 0;
   *row_scale_out = NULL;
   *col_scale_out = NULL;
 
@@ -4417,6 +4421,7 @@ static int build_greedy_numeric_row_match(UF_long n,
               spral_col_scale = NULL;
             }
             *exact_matching_out = 1;
+            *spral_matching_out = 1;
           }
           free(spral_row_perm);
           free(spral_row_scale);
@@ -4456,6 +4461,7 @@ static int build_greedy_numeric_row_match(UF_long n,
         free(row_perm);
         row_perm = spral_row_perm;
         matched = spral_matched;
+        *spral_matching_out = 1;
         for (UF_long col = 0; col < n; ++col) {
           col_match[col] = KLS_KLU_EMPTY;
         }
@@ -5125,6 +5131,7 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   solver->values = trial_values;
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->exact_matching_selected = 1;
+  solver->spral_matching_selected = 1;
   solver->symbolic = trial_symbolic;
   solver->numeric = trial_numeric;
   solver->common = trial_common;
@@ -5577,12 +5584,14 @@ static int maybe_select_auto_row_match(kls_solver *solver,
 
   UF_long matched = 0;
   int exact_matching = 0;
+  int spral_matching = 0;
   const int improve_matching = solver->n <= 50000 && solver->nnz <= 1000000;
   int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
                                               base_col_ptr, base_row_idx,
                                               base_values, improve_matching,
                                               &row_perm, &matched,
                                               &exact_matching,
+                                              &spral_matching,
                                               &match_row_scale,
                                               &match_col_scale);
   if (status != KLS_OK) {
@@ -5675,6 +5684,7 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->row_perm = row_perm;
   solver->exact_matching_selected = exact_matching;
+  solver->spral_matching_selected = spral_matching;
   solver->symbolic = trial_symbolic;
   solver->numeric = trial_numeric;
   solver->common = trial_common;
@@ -5876,6 +5886,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
   UF_long matched = 0;
   int exact_matching = 0;
+  int spral_matching = 0;
 #ifdef KLS_HAVE_SPRAL_SCALING
   int status = KLS_OK;
   if (use_large_spral_match) {
@@ -5883,6 +5894,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       solver->n, solver->nnz, base_col_ptr, base_row_idx, base_values,
       &row_perm, &matched, &match_row_scale, &match_col_scale);
     exact_matching = 0;
+    spral_matching = status == KLS_OK;
   } else
 #else
   int status = KLS_OK;
@@ -5896,6 +5908,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                             &row_perm,
                                             &matched,
                                             &exact_matching,
+                                            &spral_matching,
                                             &match_row_scale,
                                             &match_col_scale);
   }
@@ -5992,6 +6005,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->row_perm = row_perm;
   solver->exact_matching_selected = exact_matching;
+  solver->spral_matching_selected = spral_matching;
   solver->symbolic = trial_symbolic;
   solver->numeric = trial_numeric;
   solver->common = trial_common;
@@ -6733,6 +6747,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.selected_pivot_tolerance = solver->common.tol;
   solver->stats.selected_static_pivoting = solver->row_perm != NULL;
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
+  solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
@@ -6756,6 +6771,7 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.selected_pivot_tolerance = solver->common.tol;
   solver->stats.selected_static_pivoting = solver->row_perm != NULL;
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
+  solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;

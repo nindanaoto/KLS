@@ -98,6 +98,7 @@ typedef struct kls_stats {
   int64_t fast_rejected_pivot;
   int64_t fast_rejected_pivot_col;
   int selected_exact_matching;
+  int selected_spral_matching;
   int fast_block_restarts;
   int64_t refactor_dependency_levels;
   int64_t refactor_dependency_max_width;
