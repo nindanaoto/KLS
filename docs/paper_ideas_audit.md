@@ -1753,6 +1753,18 @@ EGraph path measured about `0.206s`. The small `add20` gated smoke remained
 valid but measured about `0.000269s`, so this remains a large-row/segment
 scaffolding step rather than a low-work dispatch policy.
 
+The row refactor then gained a KLS-owned contiguous row-major `U` value mirror.
+The retained KLU value slots are still updated so the existing triangular solve
+path remains unchanged, but all gated row-refactor update loops now read
+previous rows' `U` entries from KLS-owned row-major storage instead of following
+one double pointer per value. This is a direct step toward the CKTSO/SubtreeLU
+numeric format while preserving current semantics. Focused checks stayed valid:
+the four-thread `G2_circuit` gated row path moved to about `0.532s` repeated
+refactor, while the same-session default column EGraph path measured about
+`0.234s`. The small `add20` gated smoke remained valid but moved from about
+`0.000269s` to about `0.000291s`, confirming that this mirror is useful for
+large row/update-heavy cases rather than as a low-work dispatch policy.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
