@@ -2522,6 +2522,17 @@ KLU storage is not the CKTSO/SubtreeLU mechanism; KLS needs persistent
 row/segment numeric storage and scheduler semantics that make segment updates
 the native operation rather than a copied side path.
 
+The existing block-restart fallback was then tightened without changing its
+numerical semantics. `kls_pivot_restart_rejected_block` previously allocated a
+temporary `n`-entry symbolic inverse row map and made multiple full passes over
+it before calling the KLU block kernel. It now reuses `numeric->Pinv` as
+restart scratch, fills it once from the symbolic row permutation, and rebuilds
+the accepted numeric inverse after the repaired block permutation is published.
+Focused stressed restart checks on `coupled`, `onetone2`, and `hvdc1` kept
+valid residuals and the same restart diagnostics. This reduces current
+full-block fallback overhead, but it is still a cleanup around KLU's block
+repair path rather than the missing CKTSO pivoting-tail factorization.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

@@ -8440,6 +8440,29 @@ static int kls_recompute_offdiag_from_pinv(kls_solver *solver,
   return poff == numeric->nzoff;
 }
 
+static int kls_rebuild_numeric_pinv(kls_solver *solver) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Pnum == NULL || solver->numeric->Pinv == NULL) {
+    return 0;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    solver->numeric->Pinv[k] = KLS_KLU_EMPTY;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    const UF_long row = solver->numeric->Pnum[k];
+    if (row >= solver->n) {
+      return 0;
+    }
+    solver->numeric->Pinv[row] = k;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    if (solver->numeric->Pinv[k] == KLS_KLU_EMPTY) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static void kls_record_fast_repaired_block_stats(kls_solver *solver,
                                                  UF_long block,
                                                  UF_long k1,
@@ -8546,27 +8569,14 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     return 0;
   }
 
-  UF_long *psinv =
-    (UF_long *)malloc((size_t)solver->n * sizeof(*psinv));
-  if (psinv == NULL) {
-    return 0;
-  }
-  for (UF_long k = 0; k < solver->n; ++k) {
-    psinv[k] = KLS_KLU_EMPTY;
-  }
+  UF_long *psinv = solver->numeric->Pinv;
   for (UF_long k = 0; k < solver->n; ++k) {
     const UF_long row = solver->symbolic->P[k];
     if (row >= solver->n) {
-      free(psinv);
+      (void)kls_rebuild_numeric_pinv(solver);
       return 0;
     }
     psinv[row] = k;
-  }
-  for (UF_long k = 0; k < solver->n; ++k) {
-    if (psinv[k] == KLS_KLU_EMPTY) {
-      free(psinv);
-      return 0;
-    }
   }
 
   UF_long old_lnz_block = 0;
@@ -8624,7 +8634,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     solver->common.numerical_rank = old_numerical_rank;
     solver->common.singular_col = old_singular_col;
     solver->common.noffdiag = old_noffdiag;
-    free(psinv);
+    (void)kls_rebuild_numeric_pinv(solver);
     return 0;
   }
 
@@ -8641,7 +8651,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       solver->common.numerical_rank = old_numerical_rank;
       solver->common.singular_col = old_singular_col;
       solver->common.noffdiag = old_noffdiag;
-      free(psinv);
+      (void)kls_rebuild_numeric_pinv(solver);
       return 0;
     }
     solver->numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + local_row];
@@ -8649,30 +8659,12 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   kls_record_fast_repaired_block_stats(solver, block, k1, nk, rejected_pivot,
                                        pblock);
 
-  for (UF_long k = 0; k < solver->n; ++k) {
-    solver->numeric->Pinv[k] = KLS_KLU_EMPTY;
-  }
-  for (UF_long k = 0; k < solver->n; ++k) {
-    const UF_long row = solver->numeric->Pnum[k];
-    if (row >= solver->n) {
-      solver->common.status = old_status;
-      solver->common.numerical_rank = old_numerical_rank;
-      solver->common.singular_col = old_singular_col;
-      solver->common.noffdiag = old_noffdiag;
-      free(psinv);
-      return 0;
-    }
-    solver->numeric->Pinv[row] = k;
-  }
-  for (UF_long k = 0; k < solver->n; ++k) {
-    if (solver->numeric->Pinv[k] == KLS_KLU_EMPTY) {
-      solver->common.status = old_status;
-      solver->common.numerical_rank = old_numerical_rank;
-      solver->common.singular_col = old_singular_col;
-      solver->common.noffdiag = old_noffdiag;
-      free(psinv);
-      return 0;
-    }
+  if (!kls_rebuild_numeric_pinv(solver)) {
+    solver->common.status = old_status;
+    solver->common.numerical_rank = old_numerical_rank;
+    solver->common.singular_col = old_singular_col;
+    solver->common.noffdiag = old_noffdiag;
+    return 0;
   }
 
   if (!kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
@@ -8680,7 +8672,6 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     solver->common.numerical_rank = old_numerical_rank;
     solver->common.singular_col = old_singular_col;
     solver->common.noffdiag = old_noffdiag;
-    free(psinv);
     return 0;
   }
   if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
@@ -8688,7 +8679,6 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     solver->common.numerical_rank = old_numerical_rank;
     solver->common.singular_col = old_singular_col;
     solver->common.noffdiag = old_noffdiag;
-    free(psinv);
     return 0;
   }
 
@@ -8721,7 +8711,6 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   solver->common.status = TRILINOS_KLU_OK;
   solver->common.numerical_rank = KLS_KLU_EMPTY;
   solver->common.singular_col = KLS_KLU_EMPTY;
-  free(psinv);
   return 1;
 }
 
