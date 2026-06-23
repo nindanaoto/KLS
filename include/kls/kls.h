@@ -133,6 +133,11 @@ typedef struct kls_stats {
   int64_t row_refactor_segment_max_width;
   double row_refactor_segment_dense_entries;
   double row_refactor_segment_trailing_entries;
+  int64_t row_refactor_dense_segment_count;
+  int64_t row_refactor_dense_segment_rows;
+  int64_t row_refactor_dense_segment_max_width;
+  double row_refactor_dense_segment_dense_entries;
+  double row_refactor_dense_segment_trailing_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

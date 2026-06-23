@@ -1687,6 +1687,19 @@ that KLS now has an executable in-place dense segment solve scaffold, while the
 larger missing piece is still compact row/segment numeric storage and batched
 trailing updates with much higher arithmetic intensity.
 
+The dense segment scaffold then stopped rediscovering segment shape on every
+refactor. `kls_build_row_refactor_pattern` now precomputes dense-eligible group
+flags, per-group trailing lengths, and the per-row internal-`L` offset used by
+the gated mini-solve. `kls_stats`, `kls_bench`, and the gap decomposition script
+also distinguish all executable row segments from the subset that can consume
+the dense descriptor. This is a reusable row/segment descriptor step rather
+than a CPU-specific hot-loop tweak. On a four-thread, five-refactor
+`G2_circuit` check, KLS reported 8035 executable segments but only 662
+dense-eligible segments covering 17070 rows; the gated row path stayed valid
+and moved to about `0.846s`, while the default column EGraph path measured
+about `0.201s`. On the `add20` ten-refactor smoke run, no segment crossed the
+dense-work threshold and the path stayed valid at about `0.000223s`.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
