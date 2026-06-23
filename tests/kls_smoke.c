@@ -405,11 +405,12 @@ static int test_checked_row_fast_factor_block_restart(void) {
              stats.fast_repaired_first_changed_pivot != 0 ||
              stats.fast_repaired_prefix_changed_pivots != 0 ||
              stats.fast_repaired_suffix_changed_pivots < 1 ||
-             stats.fast_repaired_tail_restart_ready != 1 ||
+             stats.fast_repaired_tail_restart_ready != 0 ||
              stats.fast_repaired_block_work <= 0.0 ||
-             stats.fast_repaired_tail_restart_columns < 1 ||
-             stats.fast_repaired_tail_restart_work <= 0.0 ||
+             stats.fast_repaired_tail_restart_columns != 0 ||
+             stats.fast_repaired_tail_restart_work != 0.0 ||
              stats.fast_block_restarts != 1 ||
+             stats.fast_tail_restarts != 0 ||
              stats.fast_rejected_refresh_state !=
                KLS_FAST_REJECT_REFRESH_PREFIX)) {
     fprintf(stderr,
@@ -423,7 +424,8 @@ static int test_checked_row_fast_factor_block_restart(void) {
             ", prefix_changed=%" PRId64 ", suffix_changed=%" PRId64
             ", tail_restart_ready=%d, block_work=%.6g"
             ", tail_cols=%" PRId64 ", tail_work=%.6g"
-            ", saved_work=%.6g, restarts=%d, refresh=%d\n",
+            ", saved_work=%.6g, restarts=%d, tail_restarts=%d"
+            ", refresh=%d\n",
             stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,
             stats.fast_rejected_row, stats.fast_rejected_multiplier_abs,
             stats.fast_rejected_pivot_abs,
@@ -443,7 +445,8 @@ static int test_checked_row_fast_factor_block_restart(void) {
             stats.fast_repaired_tail_restart_columns,
             stats.fast_repaired_tail_restart_work,
             stats.fast_repaired_tail_restart_saved_work,
-            stats.fast_block_restarts, stats.fast_rejected_refresh_state);
+            stats.fast_block_restarts, stats.fast_tail_restarts,
+            stats.fast_rejected_refresh_state);
     ok = 0;
   }
   if (ok && (stats.fast_rejected_block_start != 0 ||

@@ -9457,10 +9457,10 @@ static int kls_try_pivot_tail_restart_rejected_block(
       solver->numeric->LUsize == NULL ||
       solver->numeric->LUsize[block] == 0u ||
       solver->numeric->Xwork == NULL ||
-	      solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
-	      solver->numeric->Lip == NULL || solver->numeric->Uip == NULL ||
-	      solver->numeric->Udiag == NULL || solver->numeric->Offp == NULL ||
-	      solver->numeric->Offi == NULL || solver->numeric->Offx == NULL) {
+      solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
+      solver->numeric->Lip == NULL || solver->numeric->Uip == NULL ||
+      solver->numeric->Udiag == NULL || solver->numeric->Offp == NULL ||
+      solver->numeric->Offi == NULL || solver->numeric->Offx == NULL) {
     return 0;
   }
 
@@ -9485,8 +9485,8 @@ static int kls_try_pivot_tail_restart_rejected_block(
   UF_long prefix_unz = 0;
   if (!kls_reconstruct_block_live_prefix_state(
         solver, block, k1, nk, local_reject, old_pblock, live_p,
-	        live_pinv, final_pinv, lpend, &prefix_lup, &prefix_lnz,
-	        &prefix_unz)) {
+        live_pinv, final_pinv, lpend, &prefix_lup, &prefix_lnz,
+        &prefix_unz)) {
     free(scratch);
     return 0;
   }
@@ -9532,8 +9532,8 @@ static int kls_try_pivot_tail_restart_rejected_block(
   size_t lup = 0u;
   if (!kls_copy_live_prefix_lu(
         new_lu, old_lusize, old_lu, lip, llen, uip, ulen, udiag,
-		old_pblock, nk, local_reject, lip, llen, uip, ulen, udiag,
-	        &lup) ||
+        old_pblock, nk, local_reject, lip, llen, uip, ulen, udiag,
+        &lup) ||
       lup != prefix_lup) {
     free(offp);
     free(offi);
@@ -9596,8 +9596,8 @@ static int kls_try_pivot_tail_restart_rejected_block(
     if (!kls_tail_construct_column(
           k, solver->col_ptr, solver->row_idx, numeric_values,
           solver->symbolic->Q, (Entry *)solver->numeric->Xwork, (Int)nk,
-	          (Int)k1, (Int *)psinv, NULL, 0, offp, offi, offx,
-	          (Int)solver->numeric->nzoff)) {
+          (Int)k1, (Int *)psinv, NULL, 0, offp, offi, offx,
+          (Int)solver->numeric->nzoff)) {
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
     }
@@ -9770,6 +9770,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
   solver->stats.fast_repaired_tail_restart_ready =
     solver->stats.fast_rejected_tail_repair_ready &&
     solver->stats.fast_repaired_pivot_matches_tail_candidate &&
+    local_reject > 0u &&
     prefix_changed == 0u &&
     (first_changed == KLS_KLU_EMPTY || first_changed >= rejected_pivot) &&
     suffix_changed > 0u &&

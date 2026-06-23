@@ -80,6 +80,10 @@ def classify(row: dict[str, object]) -> str:
         return "repair_picked_different_row"
     if as_int(row, "fast_repaired_prefix_changed_pivots", 0) > 0:
         return "prefix_pivots_changed"
+    if as_int(row, "fast_rejected_pivot", -1) == as_int(
+        row, "fast_rejected_block_start", -2
+    ):
+        return "root_reject_no_serial_prefix"
     tail_columns = as_int(
         row,
         "fast_rejected_pivoting_tail_columns",
@@ -102,6 +106,9 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         "matrix": matrix_name(row),
         "reason": reason,
         "fast_rejected_pivot": as_int(row, "fast_rejected_pivot", -1),
+        "fast_rejected_block_start": as_int(
+            row, "fast_rejected_block_start", -1
+        ),
         "fast_rejected_tail_candidate_row": as_int(
             row, "fast_rejected_tail_candidate_row", -1
         ),
@@ -153,6 +160,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
             "tail_work={tail:.6g} row_tail_work={row_tail:.6g} "
             "pivoting_tail_work={pivoting_tail:.6g} "
             "saved_work={saved:.6g} "
+            "block_start={block_start} "
             "tail_row={tail_row} repair_row={repair_row} "
             "prefix_changes={prefix} suffix_changes={suffix}".format(
                 matrix=record["matrix"],
@@ -164,6 +172,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
                     record["fast_rejected_pivoting_tail_work"]
                 ),
                 saved=float(record["fast_repaired_tail_restart_saved_work"]),
+                block_start=record["fast_rejected_block_start"],
                 tail_row=record["fast_rejected_tail_candidate_row"],
                 repair_row=record["fast_repaired_pivot_row"],
                 prefix=record["fast_repaired_prefix_changed_pivots"],
