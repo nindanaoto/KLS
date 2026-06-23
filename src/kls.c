@@ -222,12 +222,19 @@ typedef struct kls_parallel_refactor_worker {
   UF_long singular_col;
 } kls_parallel_refactor_worker;
 
+typedef enum kls_egraph_refactor_kernel {
+  KLS_EGRAPH_REFACTOR_KERNEL_GENERIC = 0,
+  KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED = 1,
+  KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED = 2
+} kls_egraph_refactor_kernel;
+
 typedef struct kls_egraph_refactor_shared {
   kls_solver *solver;
   const double *values;
   const double *rs;
   int check_pivots;
   int scale;
+  kls_egraph_refactor_kernel kernel;
   int thread_count;
   atomic_int stop;
   int invalid;
@@ -12426,6 +12433,7 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   shared->rs = NULL;
   shared->check_pivots = check_pivots;
   shared->scale = 0;
+  shared->kernel = KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 1;
   shared->row_refactor_defer_value_scatter =
@@ -13190,6 +13198,26 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   return 1;
 }
 
+static int kls_egraph_refactor_dispatch_column(
+  kls_egraph_refactor_worker *worker,
+  UF_long k,
+  int wait_for_dependencies) {
+  if (worker == NULL || worker->shared == NULL) {
+    return 0;
+  }
+  switch (worker->shared->kernel) {
+    case KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED:
+      return kls_egraph_refactor_single_unscaled_column(
+        worker, k, wait_for_dependencies);
+    case KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED:
+      return kls_egraph_refactor_btf_unscaled_column(
+        worker, k, wait_for_dependencies);
+    case KLS_EGRAPH_REFACTOR_KERNEL_GENERIC:
+    default:
+      return kls_egraph_refactor_column(worker, k, wait_for_dependencies);
+  }
+}
+
 static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
@@ -13219,7 +13247,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         for (UF_long pos = parts[worker->tid];
              pos < parts[worker->tid + 1]; ++pos) {
           const UF_long col = solver->refactor_level_cols[pos];
-          if (!kls_egraph_refactor_column(worker, col, 0)) {
+          if (!kls_egraph_refactor_dispatch_column(worker, col, 0)) {
             break;
           }
           kls_egraph_refactor_mark_done(shared, col);
@@ -13228,7 +13256,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         for (UF_long pos = begin + (UF_long)worker->tid;
              pos < end; pos += (UF_long)shared->thread_count) {
           const UF_long col = solver->refactor_level_cols[pos];
-          if (!kls_egraph_refactor_column(worker, col, 0)) {
+          if (!kls_egraph_refactor_dispatch_column(worker, col, 0)) {
             break;
           }
           kls_egraph_refactor_mark_done(shared, col);
@@ -13257,7 +13285,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         if (col >= shared->pipeline_pos_end) {
           break;
         }
-        if (!kls_egraph_refactor_column(worker, col, 1)) {
+        if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
           break;
         }
         kls_egraph_refactor_mark_done(shared, col);
@@ -13274,7 +13302,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           break;
         }
         const UF_long col = solver->refactor_level_cols[pos];
-        if (!kls_egraph_refactor_column(worker, col, 1)) {
+        if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
           break;
         }
         kls_egraph_refactor_mark_done(shared, col);
@@ -13756,6 +13784,22 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
          kls_refactor_map_is_eligible(solver);
 }
 
+static kls_egraph_refactor_kernel kls_egraph_refactor_kernel_for(
+  const kls_solver *solver,
+  int scale) {
+  if (solver == NULL || solver->symbolic == NULL || scale > 0) {
+    return KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
+  }
+  if (solver->symbolic->nblocks == 1u) {
+    return KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED;
+  }
+  if (solver->symbolic->nblocks > 1u &&
+      solver->symbolic->maxblock >= 30000u) {
+    return KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED;
+  }
+  return KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
+}
+
 static int kls_egraph_mapped_refactor(kls_solver *solver,
                                       double *numeric_values,
                                       int check_pivots) {
@@ -13837,6 +13881,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->rs = solver->numeric->Rs;
   shared->check_pivots = check_pivots;
   shared->scale = (int)common->scale;
+  shared->kernel =
+    kls_egraph_refactor_kernel_for(solver, shared->scale);
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 0;
   shared->row_refactor_defer_value_scatter = 0;

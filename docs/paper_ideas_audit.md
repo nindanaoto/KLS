@@ -2672,6 +2672,16 @@ refactor. In that same noisy sample the explicit row refactor was slower than
 the default EGraph refactor, so this is retained as measurement cleanup and
 benchmark reproducibility, not as a default policy change.
 
+The EGraph refactor worker then stopped re-running the unscaled single-block
+and large-BTF kernel dispatch inside every column. KLS now records the proven
+column-kernel kind in the shared worker state before launching the solver-owned
+pool, and the hot cluster/pipeline loops call the selected kernel directly. A
+same-session three-pass A/B guard with five refactors per sample improved
+median repeated refactor on `G2_circuit` by about `1.4%`, `ASIC_320k` by about
+`1.2%`, and `onetone2` by about `6.0%`. This is retained as branch cleanup for
+the existing exact-EGraph refactor consumer, not as evidence that dispatch
+cleanup can close the CKTSO-scale row/segment gap.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
