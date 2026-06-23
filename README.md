@@ -210,7 +210,10 @@ keeps lower-work single-block cases on the barriered cluster/pipeline split.
 Extremely fragmented unscaled BTF decompositions with hundreds of thousands of
 tiny blocks and one substantial but non-dominant block can also use the exact
 EGraph refactor once measured work is high enough, which prevents the large
-block from remaining serial behind an otherwise wide BTF fringe. Unscaled
+block from remaining serial behind an otherwise wide BTF fringe. Those
+fragmented-BTF schedules assign a small synthetic weight to singleton diagonal
+blocks when balancing clustered EGraph levels, while dominant-BTF all-pipeline
+and single-block schedules keep the original work model. Unscaled
 single-block EGraph refactors use a slimmer
 column kernel that bypasses BTF and scaling checks in the hot loop. The path
 updates that block's local LU and off-block

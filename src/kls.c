@@ -8639,11 +8639,16 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long max_level = 0;
   UF_long edges = 0;
   double total_work = 0.0;
+  const int weight_singleton_blocks =
+    kls_egraph_non_dominant_many_block_shape(solver);
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
     const UF_long k1 = solver->symbolic->R[block];
     const UF_long k2 = solver->symbolic->R[block + 1u];
     const UF_long nk = k2 - k1;
     if (nk <= 1u) {
+      if (nk == 1u && weight_singleton_blocks) {
+        column_work[k1] = 1.0;
+      }
       continue;
     }
     double *lu = (double *)solver->numeric->LUbx[block];

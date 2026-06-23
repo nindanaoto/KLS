@@ -1606,6 +1606,21 @@ around `0.07-0.075s` and `rajat28` around `0.051-0.056s`, so this should be
 treated as a memory-footprint cleanup rather than the missing CKTSO-scale timing
 fix.
 
+A small fragmented-BTF scheduler fix was then retained. The non-dominant
+many-block EGraph path had hundreds of thousands of singleton BTF blocks at
+level 0, but those singleton columns had zero scheduling weight because their
+numeric work is outside the multi-column block LU estimates. The clustered
+level partitioner could therefore hand a huge count of trivial-but-not-free
+singleton columns to one worker before the substantial block work started. KLS
+now assigns a unit balancing weight to singleton BTF columns only for the
+fragmented non-dominant many-block shape. A same-session comparison against a
+clean `d9f4c29` baseline moved `ASIC_680k` repeated refactor from
+`0.0689-0.0695s` to `0.0569-0.0578s` with valid residuals. The gate is not
+enabled for dominant-BTF all-pipeline schedules; `rajat28` kept the old
+dependency-work and pipeline-work counters and stayed in the same
+`0.0547-0.0566s` timing band. This is a general scheduling balance fix for the
+fragmented BTF class, not another ordering, scaling, or MC64 import.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
