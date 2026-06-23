@@ -260,10 +260,14 @@ and retry the checked fast factorization. Scaled fast-factor calls still use
 the pivot-checking refactor kernel so they can stop at the first unsafe
 multiplier, but they fall back to full pivoting factorization when a repair is
 needed. Benchmark stats report `fast_rejected_pivot`,
-`fast_rejected_pivot_col`, and `fast_block_restarts` for the first rejected
-factor-order pivot, its original matrix column, and the number of repaired BTF
-blocks. These fields are intended to guide fuller CKTSO-style tail-restart
-work without accepting an unsafe reused pivot order.
+`fast_rejected_pivot_col`, `fast_rejected_block_start`,
+`fast_rejected_block_size`, `fast_rejected_suffix_columns`,
+`fast_rejected_descendant_columns`, `fast_rejected_descendant_work`, and
+`fast_block_restarts` for the first rejected factor-order pivot, its original
+matrix column, the rejected BTF block, the suffix from that pivot to the end of
+the block, the exact U-pattern descendant tail inside that block, and the number
+of repaired BTF blocks. These fields are intended to guide fuller CKTSO-style
+tail-restart work without accepting an unsafe reused pivot order.
 
 Use `--no-static-pivoting` to disable KLS's value-aware static row-pivoting
 trial. When enabled, `auto` can preemptively build a weighted row permutation

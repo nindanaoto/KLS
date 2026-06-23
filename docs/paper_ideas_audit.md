@@ -743,11 +743,14 @@ remain on their existing accepted paths.
 
 The fast-factor pivot-check path was then made more diagnostic by recording the
 first rejected factor-order pivot and original matrix column in `kls_stats` and
-benchmark JSON. This does not implement CKTSO's pipelined tail factorization,
-but it is a required prerequisite: KLS can now measure whether failed fast
-factorizations reject near the tail, where an ETree-descendant restart could
-avoid recomputing the whole matrix, or near the front, where full fallback is
-still expected.
+benchmark JSON. It now also records the rejected BTF block start/size, the
+simple suffix length from the rejected pivot to the end of the block, and the
+exact U-pattern descendant tail size/work inside that block. This does not
+implement CKTSO's pipelined tail factorization, but it is a required
+prerequisite: KLS can now measure whether failed fast factorizations reject near
+the tail, where an ETree-descendant restart could avoid recomputing the whole
+matrix, or near the front, where full fallback is still expected, and can
+distinguish a true dependency tail from a broad suffix restart.
 
 The same fast-factor path was then extended for scaled serial refactors. When a
 scaled pattern is using fast factorization with pivot checks, KLS now runs its

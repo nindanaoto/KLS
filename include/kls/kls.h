@@ -100,6 +100,11 @@ typedef struct kls_stats {
   int64_t refactor_dependency_pipeline_columns;
   double refactor_dependency_work;
   double refactor_dependency_pipeline_work;
+  int64_t fast_rejected_block_start;
+  int64_t fast_rejected_block_size;
+  int64_t fast_rejected_suffix_columns;
+  int64_t fast_rejected_descendant_columns;
+  double fast_rejected_descendant_work;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -186,6 +186,9 @@ typedef struct kls_match_entry {
 } kls_match_entry;
 
 static int kls_build_refactor_schedule(kls_solver *solver);
+static UF_long kls_block_for_pivot(const kls_solver *solver, UF_long pivot);
+static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
+                                            UF_long rejected_pivot);
 
 #define KLS_MATCH_PATH_MAX_DEPTH 4u
 
@@ -319,6 +322,11 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_pivot = -1;
   solver->stats.fast_rejected_pivot_col = -1;
   solver->stats.fast_block_restarts = 0;
+  solver->stats.fast_rejected_block_start = -1;
+  solver->stats.fast_rejected_block_size = 0;
+  solver->stats.fast_rejected_suffix_columns = 0;
+  solver->stats.fast_rejected_descendant_columns = 0;
+  solver->stats.fast_rejected_descendant_work = 0.0;
   solver->fast_block_restarts = 0;
 }
 
@@ -331,6 +339,7 @@ static void kls_record_fast_reject(kls_solver *solver,
   solver->stats.fast_rejected_pivot = (int64_t)rejected_pivot;
   solver->stats.fast_rejected_pivot_col =
     rejected_pivot_col == KLS_KLU_EMPTY ? -1 : (int64_t)rejected_pivot_col;
+  kls_fill_fast_reject_tail_stats(solver, rejected_pivot);
 }
 
 static int kls_parallel_refactor_value(const kls_parallel_refactor_shared *shared,
@@ -6792,6 +6801,85 @@ static UF_long kls_block_for_pivot(const kls_solver *solver, UF_long pivot) {
   }
   return pivot >= solver->symbolic->R[lo] &&
          pivot < solver->symbolic->R[lo + 1u] ? lo : KLS_KLU_EMPTY;
+}
+
+static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
+                                            UF_long rejected_pivot) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || rejected_pivot == KLS_KLU_EMPTY) {
+    return;
+  }
+  const UF_long block = kls_block_for_pivot(solver, rejected_pivot);
+  if (block == KLS_KLU_EMPTY) {
+    return;
+  }
+  const UF_long k1 = solver->symbolic->R[block];
+  const UF_long k2 = solver->symbolic->R[block + 1u];
+  if (rejected_pivot < k1 || rejected_pivot >= k2) {
+    return;
+  }
+  const UF_long nk = k2 - k1;
+  const UF_long local_reject = rejected_pivot - k1;
+  solver->stats.fast_rejected_block_start = (int64_t)k1;
+  solver->stats.fast_rejected_block_size = (int64_t)nk;
+  solver->stats.fast_rejected_suffix_columns =
+    (int64_t)(k2 - rejected_pivot);
+
+  if (nk == 0u || solver->numeric->Uip == NULL ||
+      solver->numeric->Ulen == NULL || solver->numeric->Llen == NULL ||
+      solver->numeric->LUbx == NULL || solver->numeric->LUbx[block] == NULL) {
+    return;
+  }
+
+  unsigned char *affected =
+    (unsigned char *)calloc((size_t)nk, sizeof(*affected));
+  if (affected == NULL) {
+    return;
+  }
+
+  double *lu = (double *)solver->numeric->LUbx[block];
+  const UF_long *uip = solver->numeric->Uip + k1;
+  const UF_long *ulen = solver->numeric->Ulen + k1;
+  UF_long descendant_columns = 0;
+  double descendant_work = 0.0;
+  int valid = 1;
+
+  for (UF_long k = local_reject; k < nk; ++k) {
+    UF_long *ui = NULL;
+    double *ux = NULL;
+    UF_long ucol_len = 0;
+    kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+    (void)ux;
+
+    int is_affected = (k == local_reject);
+    double column_work = 1.0;
+    for (UF_long p = 0; p < ucol_len; ++p) {
+      const UF_long dep = ui[p];
+      if (dep >= k || dep >= nk) {
+        valid = 0;
+        break;
+      }
+      column_work += 1.0 + (double)solver->numeric->Llen[k1 + dep];
+      if (affected[dep]) {
+        is_affected = 1;
+      }
+    }
+    if (!valid) {
+      break;
+    }
+    if (is_affected) {
+      affected[k] = 1u;
+      descendant_columns++;
+      descendant_work += column_work;
+    }
+  }
+
+  free(affected);
+  if (valid) {
+    solver->stats.fast_rejected_descendant_columns =
+      (int64_t)descendant_columns;
+    solver->stats.fast_rejected_descendant_work = descendant_work;
+  }
 }
 
 static int kls_recompute_offdiag_from_pinv(kls_solver *solver,

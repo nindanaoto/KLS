@@ -537,6 +537,11 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivot\":%" PRId64
            ",\"fast_rejected_pivot_col\":%" PRId64
            ",\"fast_block_restarts\":%d"
+           ",\"fast_rejected_block_start\":%" PRId64
+           ",\"fast_rejected_block_size\":%" PRId64
+           ",\"fast_rejected_suffix_columns\":%" PRId64
+           ",\"fast_rejected_descendant_columns\":%" PRId64
+           ",\"fast_rejected_descendant_work\":%.9g"
            ",\"refactor_dependency_levels\":%" PRId64
            ",\"refactor_dependency_max_width\":%" PRId64
            ",\"refactor_dependency_edges\":%" PRId64
@@ -567,6 +572,11 @@ int main(int argc, char **argv) {
            stats.offdiag_pivots, stats.reallocations,
            stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,
            stats.fast_block_restarts,
+           stats.fast_rejected_block_start,
+           stats.fast_rejected_block_size,
+           stats.fast_rejected_suffix_columns,
+           stats.fast_rejected_descendant_columns,
+           stats.fast_rejected_descendant_work,
            stats.refactor_dependency_levels,
            stats.refactor_dependency_max_width,
            stats.refactor_dependency_edges,
@@ -612,6 +622,14 @@ int main(int argc, char **argv) {
     printf("fast rejected pivot: %" PRId64 ", original column: %" PRId64 "\n",
            stats.fast_rejected_pivot, stats.fast_rejected_pivot_col);
     printf("fast block restarts: %d\n", stats.fast_block_restarts);
+    printf("fast rejected block: start %" PRId64 ", size %" PRId64
+           ", suffix %" PRId64 ", descendants %" PRId64
+           ", descendant work %.6g\n",
+           stats.fast_rejected_block_start,
+           stats.fast_rejected_block_size,
+           stats.fast_rejected_suffix_columns,
+           stats.fast_rejected_descendant_columns,
+           stats.fast_rejected_descendant_work);
     printf("refactor dependency levels: %" PRId64
            ", max width: %" PRId64 ", edges: %" PRId64 "\n",
            stats.refactor_dependency_levels,
