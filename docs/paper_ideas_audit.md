@@ -1932,6 +1932,10 @@ bound, and the saved-work estimate a local tail restart would target.
 `scripts/summarize_tail_restart_opportunities.py` now turns those JSONL fields
 into suite-level counts, blocker reasons, and largest saved-work opportunities
 so the tail-kernel work can be prioritized from broad benchmark evidence.
+`scripts/run_bench_suite.py` now forwards the deterministic
+`--stress-diagonal-scale` and `--stress-diagonal-column` controls to
+`kls_bench`, so these tail-restart opportunity scans can be generated across
+paper manifests instead of only from one-off piped benchmark rows.
 The first focused stress probe shows why that distinction matters: stressed
 `add20` chose the retained row-tail candidate at the rejected pivot, but the
 full KLU block repair also changed one pivot before the rejected pivot, so a

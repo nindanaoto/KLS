@@ -66,6 +66,8 @@ def main() -> int:
     parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")
     parser.add_argument("--scale", choices=["auto", "-1", "0", "1", "2"], default="auto")
     parser.add_argument("--pivot-tol", type=float, default=None)
+    parser.add_argument("--stress-diagonal-scale", type=float, default=None)
+    parser.add_argument("--stress-diagonal-column", type=int, default=None)
     parser.add_argument("--no-btf", action="store_true")
     parser.add_argument("--no-fast-factor", action="store_true")
     parser.add_argument("--no-static-pivoting", action="store_true")
@@ -123,6 +125,14 @@ def main() -> int:
                     cmd.append("--no-static-pivoting")
                 if args.pivot_tol is not None:
                     cmd.extend(["--pivot-tol", str(args.pivot_tol)])
+                if args.stress_diagonal_scale is not None:
+                    cmd.extend(
+                        ["--stress-diagonal-scale", str(args.stress_diagonal_scale)]
+                    )
+                if args.stress_diagonal_column is not None:
+                    cmd.extend(
+                        ["--stress-diagonal-column", str(args.stress_diagonal_column)]
+                    )
                 try:
                     proc = subprocess.run(
                         cmd,

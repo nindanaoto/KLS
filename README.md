@@ -627,6 +627,22 @@ python3 scripts/summarize_tail_restart_opportunities.py --jsonl build/kls_suite.
 The same script accepts `--jsonl -` for a single piped `kls_bench --json` row
 when inspecting a focused fast-reject case.
 
+To generate those diagnostics across a manifest, `run_bench_suite.py` forwards
+the deterministic diagonal-stress controls accepted by `kls_bench`:
+
+```sh
+env KLS_ENABLE_CHECKED_ROW_REFACTOR=1 \
+python3 scripts/run_bench_suite.py --kls-bench build/kls_bench \
+  --matrix-dir data/suitesparse-paper-medium \
+  --manifest bench/suitesparse_cktso_gap_manifest.txt \
+  --orientation auto --threads 4 --repeat 1 --refactor-repeat 0 \
+  --stress-diagonal-scale 1e-9 \
+  --timeout 120 --jsonl build/kls_tail_stress_gap.jsonl
+
+python3 scripts/summarize_tail_restart_opportunities.py \
+  --jsonl build/kls_tail_stress_gap.jsonl
+```
+
 An optional CKTSO comparison tool can be built when you provide a local CKTSO
 distribution:
 
