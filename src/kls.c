@@ -9472,7 +9472,9 @@ static int solve_impl(kls_solver *solver,
     }
   }
   solver->stats.solve_seconds = kls_now_seconds() - start;
-  fill_numeric_stats(solver);
+  solver->stats.last_kernel_status = (int)solver->common.status;
+  solver->stats.memory_bytes = solver->common.memusage;
+  solver->stats.memory_peak_bytes = solver->common.mempeak;
 
   if (!ok || solver->common.status < 0) {
     return KLS_ERR_SOLVE_FAILED;

@@ -33,6 +33,9 @@ The row-permuted solve wrapper now keeps a solver-owned dense permutation
 workspace instead of allocating it on every forward or transpose solve, trimming
 repeated SPICE-cycle solve overhead for static-pivoting cases while leaving the
 KLU triangular kernels unchanged.
+Solve calls also now update only solve timing, status, and memory counters
+instead of refreshing the full numeric stats snapshot after every triangular
+solve.
 The barriered EGraph
 cluster levels now use FLOP-estimated per-thread slices instead of equal column
 slices, and the no-pivot pipeline tail now uses an atomic dynamic work cursor
@@ -1674,6 +1677,17 @@ improvements on the row-permuted focused rows (`onetone2` about
 `0.00172s -> 0.00157s`). TSOPF-style rows remained dominated by triangular
 work and were neutral within noise. This is a retained repeated-solve overhead
 cleanup, not CKTSO's missing structure-adaptive triangular solve.
+
+The solve wrapper then stopped calling the full numeric-stats refresh after
+every triangular solve. Solving does not change fill, FLOP, dependency, pivot,
+or condition-estimate metadata, so KLS now refreshes only the last kernel
+status and memory counters on the solve path. Focused checks kept residuals
+valid and showed the expected small wrapper gain: `onetone2` forward solve
+averaged about `0.00086s` in a ten-repeat run versus the previous
+`0.00101-0.00107s` band, `rajat30` stayed in the retained KLU solve band at
+about `0.0336s`, `nxp1` stayed around `0.0445s`, and `ASIC_680k` stayed around
+`0.0098s`. This is a small solve-path cleanup, not the missing CKTSO
+structure-adaptive solve.
 
 A direct single-block row-major solve prototype was then tested and rejected.
 The prototype built reusable row views of KLU's L and U factors with offsets
