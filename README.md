@@ -100,14 +100,14 @@ MC64-adjacent step on LGPL-compatible redistributed code while avoiding an
 unbounded exact-assignment setup cost on large circuit matrices.
 
 KLS keeps this as the only vendored MC64-adjacent external implementation.
-Existing MC64-style code is acceptable when its license remains compatible with
-KLS's LGPL distribution goal, allows redistribution in source and binary form
-with KLS, and allows KLS to preserve the upstream license notices in
-`THIRD_PARTY_NOTICES.md`. HSL MC64 itself, and solver-tree copies that retain
-HSL redistribution restrictions, are not compatible with that boundary. A
-permissively licensed translation of SPRAL's scaling code can be used as a
-reference, but the pinned SPRAL submodule is the preferred reproducible source
-for the C/Fortran build.
+This is a license boundary, not an authorship boundary: existing MC64-style code
+is acceptable when its license remains compatible with KLS's LGPL distribution
+goal, allows redistribution in source and binary form with KLS, and allows KLS
+to preserve the upstream license notices in `THIRD_PARTY_NOTICES.md`. HSL MC64
+itself, and solver-tree copies that retain HSL redistribution restrictions, are
+not compatible with that boundary. A permissively licensed translation of
+SPRAL's scaling code can be used as a reference, but the pinned SPRAL submodule
+is the preferred reproducible source for the C/Fortran build.
 
 ## Benchmark
 
@@ -473,8 +473,9 @@ SubtreeLU, CKTSO reference papers, and the CKTSO ordering supplement. It
 currently resolves to 110 public SuiteSparse matrices. The CKTSO supplement also
 names a few non-public or renamed labels that are not in the current
 SuiteSparse index; those are documented as comments in the manifest. The full
-manifest includes very large matrices, so the medium manifest is the default
-practical corpus:
+manifest includes very large matrices. Use `scripts/audit_paper_manifest.py`
+after editing the manifest to check the paper-derived public-name coverage. The
+medium manifest is the default practical corpus:
 
 ```sh
 python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_paper_medium_manifest.txt --out data/suitesparse-paper-medium

@@ -1979,6 +1979,42 @@ the narrowed rule. This is another measured-work scheduler coverage step for
 the existing no-pivot EGraph refactor; it does not change the conclusion that
 the remaining ASIC/G2/Rajat gap needs a different row-oriented numeric kernel.
 
+The MC64 source boundary was clarified again after accepting that existing
+implementations can be reused when they are license-compatible with LGPL KLS.
+The rule is license-based rather than authorship-based. The pinned SPRAL
+submodule remains the retained vendored source because its BSD-3-Clause license
+permits source and binary redistribution with preserved notices, while HSL's
+current no-cost licence is personal-use only and does not allow redistribution
+in source or binary form. A small BSD `mc64` translation of part of SPRAL is
+compatible as a reference, but it does not improve integration over the already
+pinned SPRAL C/Fortran interface. The current CMake guard therefore remains
+correct: bundled SPRAL checks for redistribution-compatible BSD text, and a
+system SPRAL/MC64-style library requires the builder to explicitly set
+`KLS_SYSTEM_SPRAL_LGPL_COMPATIBLE=ON` after verifying the selected library.
+This keeps MC64-quality preprocessing on the roadmap without admitting HSL
+MC64 or restricted solver-tree copies into the LGPL distribution.
+
+The latest discarded prototypes further support the larger-engine diagnosis.
+A serial single-block mapped refactor variant reused cached `L`/`U` pointer
+indices inside `kls_single_block_mapped_refactor`. It looked attractive as a
+row/segment hot-loop cleanup, but same-session A/B checks regressed key
+low-work rows (`OPF_3754` about `1.05x`, `xingo_afonso_itaipu` about `1.11x`,
+and `ww_vref_6405` about `1.08x` versus the committed baseline), so the patch
+was removed. An EGraph wait-loop CPU-relax prototype was also rejected. It
+helped some large ASIC samples in one form but regressed `G2_circuit` and
+`onetone2`, and narrowing the gate still left mixed results. These are
+bookkeeping or spin-wait effects, not the missing CKTSO-scale mechanism.
+
+A current four-thread medium-paper decomposition refresh now shows KLS only
+about `1.03x` slower than the saved CKTSO artifact in geomean on the 90 common
+completed rows, but the largest losses remain multi-x: `ASIC_320k`,
+`ASIC_320ks`, `onetone2`, `ASIC_100ks`, and `G2_circuit` are all above
+`2.6x` SPICE-cycle ratio and dominated by repeated refactor work. The refreshed
+`bench/suitesparse_cktso_gap_manifest.txt` now tracks the top 40 current
+losses plus the timeout rows `mac_econ_fwd500` and `ss1`, so future changes
+are checked against the matrices that still expose the large gap instead of
+only the older pre-EGraph focus rows.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

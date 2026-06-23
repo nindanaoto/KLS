@@ -1,7 +1,8 @@
 # Current hard CKTSO-gap focus set from the refreshed four-thread medium paper
 # comparison. These are public SuiteSparse paper matrices where current KLS
-# still loses materially to the saved CKTSO artifact, mostly through repeated
-# refactor throughput rather than ordering or solve time.
+# still loses materially to the saved CKTSO artifact. The top rows are still
+# dominated by repeated refactor throughput; several smaller rows expose setup
+# or initial-factor overhead that should remain visible during policy tuning.
 #
 # Regenerate the comparison with:
 # python3 scripts/run_bench_suite.py --kls-bench build-default-on/kls_bench \
@@ -9,32 +10,52 @@
 #   --manifest bench/suitesparse_paper_medium_manifest.txt \
 #   --orientation auto --threads 4 --repeat 1 --refactor-repeat 3 \
 #   --passes 1 --timeout 120 \
-#   --jsonl build-default-on/kls_medium93_current_head_t4_r3_timeout120.jsonl
+#   --jsonl build-default-on/kls_current_medium93_t4_r3_timeout120.jsonl
 # python3 scripts/decompose_solver_gap.py \
-#   --candidate build-default-on/kls_medium93_current_head_t4_r3_timeout120.jsonl \
+#   --candidate build-default-on/kls_current_medium93_t4_r3_timeout120.jsonl \
 #   --candidate-name kls-head \
 #   --reference build/cktso_paper_medium93_t4_timeout120.jsonl \
-#   --reference-name cktso --max-rows 20
-rajat28
-rajat25
+#   --reference-name cktso --max-rows 40
 ASIC_320k
 ASIC_320ks
-rajat20
-G2_circuit
-rajat03
-ASIC_100ks
 onetone2
-transient
-gemat12
-coupled
+ASIC_100ks
+G2_circuit
 onetone1
+gemat12
+rajat28
+transient
 rajat24
-TSOPF_FS_b9_c1
+rajat25
+rajat03
+dc2
 ASIC_100k
 mc2depi
+rajat15
+rajat20
 Raj1
 dc1
+HTC_336_4438
+TSOPF_FS_b9_c1
 OPF_10000
+OPF_3754
+LeGresley_87936
+ASIC_680ks
+coupled
+gemat11
+dc3
+trans5
+ACTIVSg10K
+power197k
+ACTIVSg70K
+twotone
+trans4
+hvdc1
+ACTIVSg2000
+ckt11752_tr_0
+HTC_336_9129
+xingo_afonso_itaipu
+rajat27
 
 # Keep timeout/failure rows in the focus set for large-case policy checks.
 mac_econ_fwd500
