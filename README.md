@@ -322,6 +322,12 @@ back to full block repair. Root-of-block rejects remain classified as CKTSO
 ETree/pipeline work rather than serial-tail-ready, because no contiguous prefix
 can be reused. This is a local serial subset of CKTSO-style tail restart, not
 the full pipelined ETree-descendant scheduler.
+With `KLS_ENABLE_CHECKED_ROW_REFACTOR=1`, the experimental KLS-owned
+row/segment refactor can also run the checked fast-factor pass through its
+parallel row scheduler when multiple threads are available. A rejected
+parallel row pass records the unsafe dependency pivot and falls back through
+the same block-repair path, but conservatively reports an unknown refresh state
+because rows in the active level may have completed out of factor-order prefix.
 Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_row`,
 `fast_rejected_multiplier_abs`, `fast_rejected_pivot_abs`,

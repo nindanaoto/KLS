@@ -300,6 +300,7 @@ static int test_fast_factor_pivot_check_fallback(void) {
   options.use_btf = 0;
   options.scale = -1;
   options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
 
   int ok = 1;
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
@@ -390,6 +391,7 @@ static int test_checked_row_fast_factor_block_restart(void) {
   options.use_btf = 0;
   options.scale = -1;
   options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
   const char *saved_env_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
   char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
   const int had_saved_env = saved_env_value != NULL;
@@ -532,6 +534,108 @@ static int test_checked_row_fast_factor_block_restart(void) {
     fprintf(stderr,
             "unexpected checked-row restart solution: %.17g %.17g\n",
             x[0], x[1]);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  free(saved_env);
+  return ok;
+}
+
+static int test_parallel_checked_row_fast_factor_block_restart(void) {
+  const int32_t ap[] = {0, 2, 4, 5, 6};
+  const int32_t ai[] = {0, 1, 0, 1, 2, 3};
+  const double ax0[] = {2.0, 1.0, 1.0, 2.0, 3.0, 4.0};
+  const double ax1[] = {1.0e-12, 1.0, 1.0, 2.0, 3.0, 4.0};
+  const double b[] = {2.000000000001, 5.0, 9.0, 16.0};
+  double x[4] = {0.0, 0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 2;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
+  const char *saved_env_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 4, ap, ai, 0,
+                                        &options),
+                        "analyze parallel checked-row restart")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor parallel checked-row base")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor parallel checked-row repair")) ok = 0;
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve parallel checked-row repair")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats parallel checked-row restart")) {
+    ok = 0;
+  }
+  if (ok && (stats.fast_rejected_pivot != 0 ||
+             stats.fast_rejected_pivot_col != 0 ||
+             stats.fast_rejected_row != 1 ||
+             stats.fast_rejected_refresh_state !=
+               KLS_FAST_REJECT_REFRESH_UNKNOWN ||
+             stats.fast_rejected_tail_repair_ready != 0 ||
+             stats.fast_block_restarts != 1 ||
+             stats.fast_tail_restarts != 0 ||
+             stats.fast_rejected_pivoting_tail_columns < 1 ||
+             stats.fast_rejected_pivoting_tail_topological != 1)) {
+    fprintf(stderr,
+            "unexpected parallel checked-row stats: pivot=%" PRId64
+            ", col=%" PRId64 ", row=%" PRId64 ", refresh=%d"
+            ", tail_ready=%d, restarts=%d, tail_restarts=%d"
+            ", tail_cols=%" PRId64
+            ", tail_topo=%d\n",
+            stats.fast_rejected_pivot,
+            stats.fast_rejected_pivot_col,
+            stats.fast_rejected_row,
+            stats.fast_rejected_refresh_state,
+            stats.fast_rejected_tail_repair_ready,
+            stats.fast_block_restarts,
+            stats.fast_tail_restarts,
+            stats.fast_rejected_pivoting_tail_columns,
+            stats.fast_rejected_pivoting_tail_topological);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats,
+                                        "parallel checked-row restart")) {
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0) || !close_enough(x[3], 4.0))) {
+    fprintf(stderr,
+            "unexpected parallel checked-row solution: %.17g %.17g %.17g %.17g\n",
+            x[0], x[1], x[2], x[3]);
     ok = 0;
   }
 
@@ -1161,6 +1265,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_checked_row_fast_factor_block_restart()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_parallel_checked_row_fast_factor_block_restart()) {
     return EXIT_FAILURE;
   }
   if (!test_fast_factor_tail_prefix_state_validation()) {

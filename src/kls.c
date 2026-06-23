@@ -299,6 +299,14 @@ static void kls_fill_fast_reject_observed_tail_candidate(kls_solver *solver);
 static void destroy_egraph_refactor_pool(kls_solver *solver);
 static void kls_egraph_refactor_record_invalid(
   kls_egraph_refactor_shared *shared);
+static void kls_egraph_refactor_record_reject(
+  kls_egraph_refactor_shared *shared,
+  UF_long rejected_pivot,
+  UF_long rejected_pivot_col,
+  UF_long rejected_row,
+  double rejected_multiplier_abs,
+  double rejected_pivot_abs,
+  double rejected_candidate_abs);
 static void kls_egraph_refactor_record_singular(
   kls_egraph_refactor_shared *shared,
   UF_long numerical_rank,
@@ -11256,6 +11264,32 @@ static int kls_single_block_row_refactor(kls_solver *solver,
   return 1;
 }
 
+static int kls_parallel_row_refactor_rejects_multiplier(
+  kls_egraph_refactor_worker *worker,
+  UF_long row,
+  UF_long dep,
+  double candidate,
+  double lij) {
+  if (worker == NULL || worker->shared == NULL ||
+      !worker->shared->check_pivots) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->Q == NULL || solver->numeric == NULL ||
+      solver->numeric->Udiag == NULL || row >= solver->n ||
+      dep >= solver->n ||
+      !kls_row_refactor_multiplier_rejects(lij, solver->common.tol)) {
+    return 0;
+  }
+  const double *udiag = (const double *)solver->numeric->Udiag;
+  kls_egraph_refactor_record_reject(
+    shared, dep, solver->symbolic->Q[dep], row, fabs(lij),
+    fabs(udiag[dep]), fabs(candidate));
+  return 1;
+}
+
 static int kls_parallel_row_refactor_process_row(
   kls_egraph_refactor_worker *worker,
   UF_long row) {
@@ -11275,7 +11309,13 @@ static int kls_parallel_row_refactor_process_row(
   for (UF_long p = solver->row_refactor_l_ptr[row];
        p < solver->row_refactor_l_ptr[row + 1u]; ++p) {
     const UF_long dep = solver->row_refactor_l_cols[p];
-    const double lij = x[dep] / udiag[dep];
+    const double candidate = x[dep];
+    const double lij = candidate / udiag[dep];
+    if (kls_parallel_row_refactor_rejects_multiplier(
+          worker, row, dep, candidate, lij)) {
+      x[dep] = 0.0;
+      return 0;
+    }
     if (shared->row_refactor_defer_value_scatter) {
       solver->row_refactor_l_row_values[p] = lij;
     } else {
@@ -11392,7 +11432,13 @@ static int kls_parallel_row_refactor_process_dense_group_native(
     const UF_long l_internal = solver->row_refactor_l_internal_ptr[row];
     for (; lp < l_internal; ++lp) {
       const UF_long dep = solver->row_refactor_l_cols[lp];
-      const double lij = x[dep] / udiag[dep];
+      const double candidate = x[dep];
+      const double lij = candidate / udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        x[dep] = 0.0;
+        return 0;
+      }
       solver->row_refactor_l_row_values[lp] = lij;
       x[dep] = 0.0;
 
@@ -11459,7 +11505,12 @@ static int kls_parallel_row_refactor_process_dense_group_native(
 
     for (UF_long dep = row_begin; dep < row; ++dep) {
       const UF_long local_dep = dep - row_begin;
-      const double lij = row_l_values[local_dep] / udiag[dep];
+      const double candidate = row_l_values[local_dep];
+      const double lij = candidate / udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        return 0;
+      }
       row_l_values[local_dep] = lij;
 
       const UF_long dep_dense_len = row_end - dep - 1u;
@@ -11565,7 +11616,13 @@ static int kls_parallel_row_refactor_process_dense_group(
     const UF_long l_internal = solver->row_refactor_l_internal_ptr[row];
     for (; lp < l_internal; ++lp) {
       const UF_long dep = solver->row_refactor_l_cols[lp];
-      const double lij = x[dep] / udiag[dep];
+      const double candidate = x[dep];
+      const double lij = candidate / udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        x[dep] = 0.0;
+        return 0;
+      }
       if (shared->row_refactor_defer_value_scatter) {
         solver->row_refactor_l_row_values[lp] = lij;
       } else {
@@ -11615,7 +11672,12 @@ static int kls_parallel_row_refactor_process_dense_group(
 
     for (UF_long dep = row_begin; dep < row; ++dep) {
       const UF_long local_dep = dep - row_begin;
-      const double lij = row_dense_panel[local_dep] / udiag[dep];
+      const double candidate = row_dense_panel[local_dep];
+      const double lij = candidate / udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        return 0;
+      }
       row_dense_panel[local_dep] = lij;
 
       double *dep_dense_panel = dense_panel + local_dep * width;
@@ -11758,7 +11820,13 @@ static int kls_parallel_row_refactor_process_group(
     for (UF_long p = solver->row_refactor_l_ptr[row];
          p < solver->row_refactor_l_ptr[row + 1u]; ++p) {
       const UF_long dep = solver->row_refactor_l_cols[p];
-      const double lij = x[dep] / udiag[dep];
+      const double candidate = x[dep];
+      const double lij = candidate / udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        x[dep] = 0.0;
+        return 0;
+      }
       if (shared->row_refactor_defer_value_scatter) {
         solver->row_refactor_l_row_values[p] = lij;
       } else {
@@ -11928,7 +11996,8 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
 }
 
 static int kls_single_block_parallel_row_refactor(kls_solver *solver,
-                                                 double *numeric_values) {
+                                                 double *numeric_values,
+                                                 int check_pivots) {
   if (numeric_values == NULL || solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->symbolic->nblocks != 1u ||
       solver->common.scale > 0 || solver->numeric->Rs != NULL ||
@@ -11976,7 +12045,7 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   shared->solver = solver;
   shared->values = numeric_values;
   shared->rs = NULL;
-  shared->check_pivots = 0;
+  shared->check_pivots = check_pivots;
   shared->scale = 0;
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 1;
@@ -12016,11 +12085,23 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   shared->row_refactor_mode = 0;
   pthread_mutex_unlock(&shared->lock);
 
-  if (shared->invalid || (shared->singular && common->halt_if_singular)) {
+  if (shared->invalid || shared->pivot_rejected ||
+      (shared->singular && common->halt_if_singular)) {
     solver->egraph_worker_scratch_dirty = 1;
   }
   if (shared->invalid) {
     common->status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+  if (shared->pivot_rejected) {
+    solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
+    kls_record_fast_reject_detail(solver, shared->rejected_pivot,
+                                  shared->rejected_pivot_col,
+                                  shared->rejected_row,
+                                  shared->rejected_multiplier_abs,
+                                  shared->rejected_pivot_abs,
+                                  shared->rejected_candidate_abs);
+    common->status = TRILINOS_KLU_OK;
     return 0;
   }
   if (shared->singular) {
@@ -13478,6 +13559,13 @@ static int kls_mapped_refactor(kls_solver *solver,
   }
   if (solver->symbolic->nblocks == 1u) {
     if (check_pivots && kls_checked_row_refactor_env_enabled()) {
+      if (solver->options.threads > 1) {
+        const int parallel_row_status =
+          kls_single_block_parallel_row_refactor(solver, numeric_values, 1);
+        if (parallel_row_status >= 0) {
+          return parallel_row_status;
+        }
+      }
       const int row_status =
         kls_single_block_row_refactor(solver, numeric_values, 1);
       if (row_status >= 0) {
@@ -13486,7 +13574,7 @@ static int kls_mapped_refactor(kls_solver *solver,
     } else if (!check_pivots && kls_row_refactor_env_enabled()) {
       if (solver->options.threads > 1) {
         const int parallel_row_status =
-          kls_single_block_parallel_row_refactor(solver, numeric_values);
+          kls_single_block_parallel_row_refactor(solver, numeric_values, 0);
         if (parallel_row_status >= 0) {
           return parallel_row_status;
         }
@@ -14194,6 +14282,13 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                                      int check_pivots) {
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
   if (check_pivots && kls_checked_row_refactor_env_enabled()) {
+    if (solver->options.threads > 1) {
+      const int parallel_row_status =
+        kls_single_block_parallel_row_refactor(solver, numeric_values, 1);
+      if (parallel_row_status >= 0) {
+        return (UF_long)parallel_row_status;
+      }
+    }
     const int row_status =
       kls_single_block_row_refactor(solver, numeric_values, 1);
     if (row_status >= 0) {
@@ -14202,7 +14297,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   } else if (!check_pivots && kls_row_refactor_env_enabled()) {
     if (solver->options.threads > 1) {
       const int parallel_row_status =
-        kls_single_block_parallel_row_refactor(solver, numeric_values);
+        kls_single_block_parallel_row_refactor(solver, numeric_values, 0);
       if (parallel_row_status >= 0) {
         return (UF_long)parallel_row_status;
       }
