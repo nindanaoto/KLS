@@ -1498,6 +1498,17 @@ flat, `ASIC_680ks` regressed by about 4%, and the focused geomean regressed
 slightly. The retained per-column dynamic cursor and barriered fragmented-BTF
 split remain the better fit for the current fixed-pivot LU representation.
 
+A third scheduler probe tried to skip `pipeline_done` publication for columns
+with no successor in the retained U-pattern dependency graph. This was correct
+but not useful on the current pipeline representation: a same-session focused
+comparison against `23253eb` produced a `1.027x` repeated-refactor geomean
+regression across `rajat20`, `rajat25`, `rajat28`, `rajat30`, `nxp1`,
+`G2_circuit`, `mc2depi`, and `ASIC_680k`. The small wins on `rajat30`,
+`G2_circuit`, and `mc2depi` did not offset `rajat25` at `1.088x`, `rajat28`
+at `1.121x`, `nxp1` at `1.020x`, and `ASIC_680k` at `1.016x`. The extra
+metadata load and changed publication pattern are therefore not a general
+substitute for a larger CKTSO-style pivoting scheduler change.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
