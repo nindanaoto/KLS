@@ -20,8 +20,9 @@ single-block matrices, including KLU row-scaled cases whose scale factors can
 be recomputed and permuted safely, and inside large dominant BTF blocks whose
 off-block entries can be refreshed from the retained map. A narrow many-fringe
 dominant-BTF shape can also consume the same exact EGraph in an all-pipeline
-mode, avoiding cluster barriers and waiting only on actual U-pattern
-predecessors. The barriered EGraph
+mode, and very high-work unscaled single-block factors can do the same,
+avoiding cluster barriers and waiting only on actual U-pattern predecessors.
+The barriered EGraph
 cluster levels now use FLOP-estimated per-thread slices instead of equal column
 slices, and the no-pivot pipeline tail now uses an atomic dynamic work cursor
 instead of static per-thread strides, which are retained pieces of the
@@ -1406,6 +1407,27 @@ rejected row-matching trial on sparse full-diagonal spike cases such as
 `1.071x`, and improved the KLU2 common-row speedup to about `2.16x`. This is
 still a preprocessing/payback refinement; the remaining large CKTSO gap is in
 the KLS numeric refactor kernel and scheduling path.
+
+The exact-EGraph all-pipeline mode was then extended from the retained
+many-fringe dominant-BTF class to very high-work unscaled single-block
+refactors. The selector is structural: one BTF block, no active KLU row
+scaling, at least 100k rows, at least `1e9` measured factor flops, and at least
+`1e9` measured no-pivot dependency-work before the EGraph consumer is allowed
+to drop all cluster barriers. This targets the CKTSO/NICSLU observation that
+pipeline mode can expose useful dependent-row overlap when the exact
+dependency graph is large enough, while keeping lower-work unscaled HTC rows
+and scaled `Raj1` on the existing barriered cluster/pipeline split. In focused
+checks, `G2_circuit` switched from 501 cluster levels and 1617 pipeline-tail
+columns to full-matrix all-pipeline execution, reducing repeated refactor from
+about `0.447s` in the saved baseline artifact to about `0.392s`; `mc2depi`
+also switched to full-matrix all-pipeline execution and moved from about
+`2.16s` to about `2.10s` repeated refactor. A same-session full 93-row medium
+comparison against a clean `HEAD` worktree kept the same known failures
+(`bips07_1998`, `ss1`, and `mac_econ_fwd500`) and changed schedule metrics only
+for `G2_circuit` and `mc2depi`; geomean moved from about `0.2869s` to about
+`0.2859s`. The saved CKTSO comparison still shows KLS materially behind on
+these rows, so this is a narrow scheduler improvement, not the missing
+pivot-aware row-oriented numeric engine.
 
 ## Recommended General Work
 

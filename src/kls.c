@@ -7813,6 +7813,17 @@ static int kls_egraph_all_pipeline_dominant_btf_shape(
          solver->common.flops >= 1.0e8;
 }
 
+static int kls_egraph_all_pipeline_huge_single_shape(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->nblocks != 1u || solver->common.scale > 0 ||
+      solver->numeric == NULL || solver->numeric->Rs != NULL ||
+      solver->n < 100000u) {
+    return 0;
+  }
+  return solver->common.flops >= 1.0e9;
+}
+
 static int kls_egraph_compact_dominant_btf_shape(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->nblocks < 8u || solver->n == 0u ||
@@ -7882,6 +7893,9 @@ static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
 }
 
 static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {
+  if (kls_egraph_all_pipeline_huge_single_shape(solver)) {
+    return 100000u;
+  }
   if (kls_egraph_all_pipeline_dominant_btf_shape(solver)) {
     return 30000u;
   }
@@ -7913,6 +7927,8 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
   const int all_pipeline_btf =
     kls_egraph_all_pipeline_dominant_btf_shape(solver);
+  const int all_pipeline_single =
+    kls_egraph_all_pipeline_huge_single_shape(solver);
   const int medium_heavy_btf =
     kls_egraph_medium_heavy_dominant_btf_shape(solver);
   const int scaled_medium_btf =
@@ -7929,6 +7945,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     dominant_btf && !medium_heavy_btf && !all_pipeline_btf &&
     solver->common.flops < 1.0e8;
   const double min_dependency_work =
+    all_pipeline_single ? 1.0e9 :
     (dominant_btf || all_pipeline_btf)
       ? (medium_heavy_btf || all_pipeline_btf ? 8.0e7 :
          scaled_medium_btf ? 1.5e7 :
@@ -7990,7 +8007,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     return -1;
   }
   const int all_pipeline =
-    kls_egraph_all_pipeline_dominant_btf_shape(solver);
+    kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
+    kls_egraph_all_pipeline_huge_single_shape(solver);
   const UF_long cluster_level_count =
     all_pipeline ? 0u : solver->refactor_cluster_level_count;
   atomic_uchar *pipeline_done = NULL;
@@ -8387,6 +8405,9 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
   }
   const int single_block = solver->symbolic->nblocks == 1u;
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
+  if (kls_egraph_all_pipeline_huge_single_shape(solver)) {
+    return solver->common.flops >= 1.0e9;
+  }
   if (kls_egraph_all_pipeline_dominant_btf_shape(solver)) {
     return solver->common.flops >= 1.0e8;
   }
@@ -8532,7 +8553,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long max_width = 0;
   UF_long cluster_levels = level_count;
   const int all_pipeline =
-    kls_egraph_all_pipeline_dominant_btf_shape(solver);
+    kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
+    kls_egraph_all_pipeline_huge_single_shape(solver);
   const double cluster_width_limit = 2.0 * (double)solver->options.threads;
   for (UF_long level = 0; level < level_count; ++level) {
     const UF_long width = level_ptr[level + 1u] - level_ptr[level];

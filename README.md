@@ -185,7 +185,12 @@ single-block cases can also consume the EGraph refactor once their measured
 factor work, LU fill, and dependency work clear lower single-block floors,
 which covers matrices such as `rajat15` without using matrix-name tuning.
 Larger single-block cases keep the higher general floors, which cover matrices
-such as `HTC_336_4438`. Unscaled single-block EGraph refactors use a slimmer
+such as `HTC_336_4438`. For very high-work unscaled single-block factors,
+KLS can also run the full exact EGraph through the no-barrier pipeline path
+instead of stopping after a narrow pipeline tail. This is limited to measured
+factor/refactor work large enough to amortize full topological waiting and
+keeps lower-work or scaled single-block cases on the barriered cluster/pipeline
+split. Unscaled single-block EGraph refactors use a slimmer
 column kernel that bypasses BTF and scaling checks in the hot loop. The path
 updates that block's local LU and off-block
 entries while leaving ordinary many-block BTF cases on the existing worker-pool
