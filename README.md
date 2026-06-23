@@ -213,8 +213,13 @@ patterns also start without row scaling to avoid repeated scale work once KLS
 has validated the structure. Medium and large TSOPF-style spiked low-diagonal
 METIS starts use sum scaling, while small spiked low-diagonal METIS starts use
 KLU's unscaled `0` mode and skip the static-pivot trial that only adds setup
-cost for that shape. Large sparse-diagonal low-degree patterns can also start
-with sum scaling when that avoids more expensive max-scaling behavior. For large
+cost for that shape. Medium many-block, mostly diagonal, high-degree spike
+patterns whose largest BTF block is large but not dominant also start in KLU's
+unscaled `0` mode when max scaling consistently increases repeated refactor
+work. OPF-style bounded-degree matrices whose numeric diagonal is about half
+missing or weak start without row scaling. Large sparse-diagonal low-degree
+patterns can also start with sum scaling when that avoids more expensive
+max-scaling behavior. For large
 expensive cases, `auto` can still try other numeric scaling modes when actual
 flop/fill evidence justifies the extra work, but structural METIS starts that
 are already known to need a specific scale mode skip redundant scale trials.
@@ -252,7 +257,10 @@ or react after a high off-diagonal pivot count. The permutation moves large
 entries onto the diagonal. The reactive post-factor trial is skipped for small,
 low-work cases where the first factorization already succeeded and the diagonal
 weakness is not severe enough for the static-match setup cost to pay back over
-the default repeated-refactor SPICE-cycle model. For larger weak-diagonal
+the default repeated-refactor SPICE-cycle model. The pre-factor partial-weak
+medium gate also requires enough nonzeros per row to pay for matching and a
+trial factorization, so sparse full-diagonal spike cases avoid a rejected setup
+trial. For larger weak-diagonal
 candidates, the matching augment uses a layered bipartite search so KLS can
 complete many independent augmenting paths per pass instead of restarting a
 search from each unmatched row. For cheap small candidates, KLS can instead run
@@ -297,7 +305,9 @@ retry and only use the stricter dominant/inflated-block retries, avoiding extra
 symbolic work on already-good single-block circuit cases. Dominant and inflated
 many-block retries require a known BTF symbolic score; when BTF's score is
 unknown, KLS keeps the decomposition instead of accepting a misleading no-BTF
-single-block estimate. The retry is skipped for low-work dominant-BTF patterns
+single-block estimate. Score-gated AMD/COLAMD single-block retries also cover
+medium OPF-style cases below the larger-circuit floor when the no-BTF symbolic
+is essentially no worse. The retry is skipped for low-work dominant-BTF patterns
 where keeping the decomposition is already the cheaper SPICE-cycle choice. For
 large nearly diagonal spike patterns, medium low-degree full-diagonal patterns,
 medium sparse high-degree mostly diagonal patterns, and for METIS-started medium

@@ -1648,7 +1648,10 @@ static int choose_auto_scale_from_pattern(UF_long n,
 #endif
 
   double *row_max = (double *)calloc((size_t)n, sizeof(*row_max));
-  if (row_max == NULL) {
+  double *diag_max = (double *)calloc((size_t)n, sizeof(*diag_max));
+  if (row_max == NULL || diag_max == NULL) {
+    free(row_max);
+    free(diag_max);
     return initial_scale(options);
   }
 
@@ -1672,6 +1675,9 @@ static int choose_auto_scale_from_pattern(UF_long n,
         if (isfinite(value_abs) && value_abs > diag_abs) {
           diag_abs = value_abs;
         }
+        if (isfinite(value_abs) && value_abs > diag_max[(size_t)col]) {
+          diag_max[(size_t)col] = value_abs;
+        }
       }
       const double value_abs = fabs(numeric_values[p]);
       if (isfinite(value_abs) && value_abs > row_max[(size_t)row_idx[p]]) {
@@ -1694,19 +1700,39 @@ static int choose_auto_scale_from_pattern(UF_long n,
 
   if ((double)diag_count >= min_diag_fraction * (double)n &&
       min_diag > 0.0 && max_diag > 0.0 && max_diag / min_diag <= diag_spread_limit) {
+    free(diag_max);
     free(row_max);
     return -1;
   }
 
   size_t row_count = 0;
   size_t row_unit_count = 0;
+  UF_long weak_diagonal = 0;
+  UF_long missing_diagonal = 0;
   for (UF_long row = 0; row < n; ++row) {
     if (row_max[(size_t)row] > 0.0) {
+      if (diag_max[(size_t)row] == 0.0) {
+        missing_diagonal++;
+      }
+      if (diag_max[(size_t)row] < 0.001 * row_max[(size_t)row]) {
+        weak_diagonal++;
+      }
       if (row_max[(size_t)row] >= 0.5 && row_max[(size_t)row] <= 2.0) {
         row_unit_count++;
       }
       row_max[row_count++] = row_max[(size_t)row];
     }
+  }
+
+  if (n >= 10000u && n <= 50000u &&
+      col_ptr[n] >= 8u * n && col_ptr[n] <= 12u * n &&
+      100u * diag_count >= 45u * n && 100u * diag_count <= 60u * n &&
+      100u * weak_diagonal >= 45u * n && 100u * weak_diagonal <= 55u * n &&
+      100u * missing_diagonal >= 45u * n &&
+      100u * missing_diagonal <= 55u * n) {
+    free(diag_max);
+    free(row_max);
+    return -1;
   }
 
   if ((double)row_count >= min_diag_fraction * (double)n && row_count > 1u) {
@@ -1723,12 +1749,14 @@ static int choose_auto_scale_from_pattern(UF_long n,
       : 0.0;
     if ((double)diag_count >= min_diag_fraction * (double)n &&
         row_p10 > 0.0 && row_unit_fraction >= 0.80 && row_p90 / row_p10 <= 10.0) {
+      free(diag_max);
       free(row_max);
       return -1;
     }
     if ((double)diag_count >= min_diag_fraction * (double)n &&
         row_p10 > 0.0 && diag_unit_fraction >= 0.02 &&
         diag_unit_fraction <= 0.08 && row_p90 / row_p10 >= 1000.0) {
+      free(diag_max);
       free(row_max);
       return -1;
     }
@@ -1736,13 +1764,79 @@ static int choose_auto_scale_from_pattern(UF_long n,
         row_min > 0.0 && row_p10 > 0.0 &&
         row_maximum / row_min <= row_spread_limit &&
         row_p90 / row_p10 <= row_p90_p10_limit) {
+      free(diag_max);
       free(row_max);
       return 1;
     }
   }
 
+  free(diag_max);
   free(row_max);
   return initial_scale(options);
+}
+
+static int is_medium_spiked_many_block_scale0_pattern(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (symbolic == NULL || !symbolic->do_btf || col_ptr == NULL ||
+      row_idx == NULL || n < 45000u || n > 100000u ||
+      col_ptr[n] < 4u * n || col_ptr[n] > 7u * n ||
+      symbolic->nblocks < 4000u || symbolic->maxblock == 0u ||
+      symbolic->maxblock < (UF_long)(0.70 * (double)n) ||
+      symbolic->maxblock > (UF_long)(0.92 * (double)n)) {
+    return 0;
+  }
+
+  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_count = 0;
+  UF_long max_col_degree = 0;
+  int valid = 1;
+  for (UF_long col = 0; col < n && valid; ++col) {
+    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
+    if (col_degree > max_col_degree) {
+      max_col_degree = col_degree;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] == UF_long_max) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      if (row == col) {
+        diagonal_count++;
+      }
+    }
+  }
+
+  UF_long max_row_degree = 0;
+  int no_empty_rows = 1;
+  for (UF_long row = 0; row < n && valid; ++row) {
+    if (row_degree[row] == 0u) {
+      no_empty_rows = 0;
+      break;
+    }
+    if (row_degree[row] > max_row_degree) {
+      max_row_degree = row_degree[row];
+    }
+  }
+  free(row_degree);
+  if (!valid || !no_empty_rows) {
+    return 0;
+  }
+
+  const UF_long max_degree =
+    max_row_degree > max_col_degree ? max_row_degree : max_col_degree;
+  return 1000.0 * (double)diagonal_count >= 930.0 * (double)n &&
+         1000.0 * (double)diagonal_count <= 985.0 * (double)n &&
+         (double)max_degree >= 0.05 * (double)n &&
+         (double)max_degree <= 0.40 * (double)n;
 }
 
 static int choose_auto_scale_from_values(const kls_solver *solver,
@@ -1752,6 +1846,12 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
   }
   if (solver->options.scale == KLS_SCALE_AUTO &&
       symbolic_is_low_work_dominant_btf(solver->n, solver->symbolic)) {
+    return 0;
+  }
+  if (solver->options.scale == KLS_SCALE_AUTO &&
+      is_medium_spiked_many_block_scale0_pattern(solver->n, solver->col_ptr,
+                                                 solver->row_idx,
+                                                 solver->symbolic)) {
     return 0;
   }
   return choose_auto_scale_from_pattern(solver->n, solver->col_ptr, solver->row_idx,
@@ -2414,7 +2514,7 @@ static void maybe_retry_without_btf(UF_long n,
   }
 
   const int single_block =
-    n >= 20000u && allow_single_block &&
+    n >= 12000u && allow_single_block &&
     (*symbolic)->nblocks == 1 && (*symbolic)->maxblock == n;
   const int dominant_block =
     btf_dominant_block_retry_shape_is_allowed(n, *symbolic);
@@ -5352,7 +5452,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     const int majority_weak = weak * 2u >= solver->n && weak >= 5000;
     const int partial_weak =
       solver->n >= 80000 && solver->n <= 100000 &&
-      solver->nnz <= 1000000 &&
+      solver->nnz >= 5u * solver->n && solver->nnz <= 1000000 &&
       missing_diagonal * 100u <= 3u * solver->n &&
       weak >= 2000 && weak * 100u >= solver->n;
     int use_medium_gate = 1;

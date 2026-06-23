@@ -1387,6 +1387,26 @@ kept the same three failures, moved KLS geomean to about `0.2853s`, narrowed
 the CKTSO common-row ratio to about `1.081x`, and improved the KLU2 common-row
 speedup to about `2.14x`.
 
+The next retained policy pass addressed three low-work preprocessing costs
+without changing the MC64 compatibility boundary. First, OPF-style bounded
+degree matrices whose numeric diagonal is roughly half missing or weak now
+start unscaled, and the score-gated single-block no-BTF retry is allowed down
+to 12k rows for AMD/COLAMD auto candidates. This lets `OPF_3754` keep a
+no-BTF/unscaled factor while still requiring symbolic evidence. Second, a
+medium many-block, mostly diagonal, high-degree spike class whose largest BTF
+block is 70-92% of the matrix now starts in KLU scale mode `0`; in the current
+medium corpus the structural predicate matches only `rajat16`, `rajat17`,
+`rajat18`, and `rajat26`, and it deliberately excludes the accepted-static
+95%+ dominant Rajat rows. Third, the partial-weak pre-static matching gate now
+requires at least five nonzeros per row on average, avoiding the expensive
+rejected row-matching trial on sparse full-diagonal spike cases such as
+`circuit_4` while preserving the denser Rajat static-match cases. The full
+93-row medium run kept the same three failures, moved KLS geomean from about
+`0.2853s` to about `0.2827s`, narrowed the CKTSO common-row ratio to about
+`1.071x`, and improved the KLU2 common-row speedup to about `2.16x`. This is
+still a preprocessing/payback refinement; the remaining large CKTSO gap is in
+the KLS numeric refactor kernel and scheduling path.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
