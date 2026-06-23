@@ -7582,6 +7582,27 @@ static int kls_build_ordered_block_etree(const kls_solver *solver,
   return 1;
 }
 
+static int kls_ensure_row_refactor_etree_parent(kls_solver *solver) {
+  if (solver == NULL || solver->row_refactor_pattern_n != solver->n ||
+      solver->symbolic == NULL || solver->symbolic->nblocks != 1u) {
+    return 0;
+  }
+  if (solver->row_refactor_etree_parent != NULL || solver->n == 0u) {
+    return 1;
+  }
+  UF_long *parent =
+    (UF_long *)malloc((size_t)solver->n * sizeof(*parent));
+  if (parent == NULL) {
+    return 0;
+  }
+  if (!kls_build_ordered_block_etree(solver, 0u, solver->n, parent)) {
+    free(parent);
+    return 0;
+  }
+  solver->row_refactor_etree_parent = parent;
+  return 1;
+}
+
 static void kls_fill_fast_reject_etree_tail_stats(kls_solver *solver,
                                                   UF_long block,
                                                   UF_long k1,
@@ -7594,8 +7615,7 @@ static void kls_fill_fast_reject_etree_tail_stats(kls_solver *solver,
   const UF_long *parent = NULL;
   UF_long *owned_parent = NULL;
   if (block == 0u && k1 == 0u && k2 == solver->n &&
-      solver->row_refactor_pattern_n == solver->n &&
-      solver->row_refactor_etree_parent != NULL) {
+      kls_ensure_row_refactor_etree_parent(solver)) {
     parent = solver->row_refactor_etree_parent;
   } else {
     owned_parent = (UF_long *)malloc((size_t)nk * sizeof(*owned_parent));
@@ -8307,8 +8327,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
       solver->row_refactor_u_ptr != NULL &&
       (solver->row_refactor_u_ptr[solver->n] == 0u ||
        solver->row_refactor_u_row_values != NULL) &&
-      solver->row_refactor_input_ptr != NULL &&
-      (solver->n == 0u || solver->row_refactor_etree_parent != NULL)) {
+      solver->row_refactor_input_ptr != NULL) {
     return 1;
   }
   if (!kls_build_refactor_map(solver) ||
@@ -8604,32 +8623,18 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
 
   UF_long *l_internal_ptr = n > 0u
     ? (UF_long *)calloc((size_t)n, sizeof(*l_internal_ptr)) : NULL;
-  UF_long *etree_parent = n > 0u
-    ? (UF_long *)malloc((size_t)n * sizeof(*etree_parent)) : NULL;
   UF_long *group_trailing_len = group_count > 0u
     ? (UF_long *)calloc((size_t)group_count, sizeof(*group_trailing_len))
     : NULL;
   unsigned char *group_dense = group_count > 0u
     ? (unsigned char *)calloc((size_t)group_count, sizeof(*group_dense))
     : NULL;
-  if ((n > 0u && (l_internal_ptr == NULL || etree_parent == NULL)) ||
+  if ((n > 0u && l_internal_ptr == NULL) ||
       (group_count > 0u &&
        (group_trailing_len == NULL || group_dense == NULL))) {
     free(row_group);
     free(group_ptr);
     free(l_internal_ptr);
-    free(etree_parent);
-    free(group_trailing_len);
-    free(group_dense);
-    free_row_refactor_pattern(solver);
-    return 0;
-  }
-  if (n > 0u &&
-      !kls_build_ordered_block_etree(solver, 0u, n, etree_parent)) {
-    free(row_group);
-    free(group_ptr);
-    free(l_internal_ptr);
-    free(etree_parent);
     free(group_trailing_len);
     free(group_dense);
     free_row_refactor_pattern(solver);
@@ -8729,7 +8734,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     free(row_group);
     free(group_ptr);
     free(l_internal_ptr);
-    free(etree_parent);
     free(group_trailing_len);
     free(group_dense);
     free_row_refactor_pattern(solver);
@@ -8749,7 +8753,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
           free(group_ptr);
           free(group_levels);
           free(l_internal_ptr);
-          free(etree_parent);
           free(group_trailing_len);
           free(group_dense);
           free_row_refactor_pattern(solver);
@@ -8779,7 +8782,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     free(group_ptr);
     free(group_levels);
     free(l_internal_ptr);
-    free(etree_parent);
     free(group_trailing_len);
     free(group_dense);
     free(group_level_ptr);
@@ -8801,7 +8803,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     free(group_ptr);
     free(group_levels);
     free(l_internal_ptr);
-    free(etree_parent);
     free(group_trailing_len);
     free(group_dense);
     free(group_level_ptr);
@@ -8830,7 +8831,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_level_ptr = group_level_ptr;
   solver->row_refactor_level_groups = level_groups;
   solver->row_refactor_l_internal_ptr = l_internal_ptr;
-  solver->row_refactor_etree_parent = etree_parent;
   solver->row_refactor_group_trailing_len = group_trailing_len;
   solver->row_refactor_group_dense = group_dense;
   solver->row_refactor_level_count = group_level_count;

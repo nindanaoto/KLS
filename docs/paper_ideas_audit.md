@@ -1885,14 +1885,16 @@ row-refactor guard slowed until those branches were removed. This confirms the
 next CKTSO-aligned step is a proper pivot-aware row scheduler and restart tail,
 not a branch added to the current parallel row loop.
 
-The row-refactor pattern now also retains the ordered-block ETree parent array
-for single-block row-major refactors. Rejected-pivot diagnostics consume that
-cached parent when a checked row refactor fails, instead of rebuilding the same
-CKTSO tail scope at reject time. The smoke test forces
-`KLS_ENABLE_CHECKED_ROW_REFACTOR` through a deterministic pivot-reject repair so
-the retained row metadata, block restart, and ETree-tail stats stay covered.
-This is a scheduler-metadata step toward the missing pivoting tail restart, not
-a replacement for the row/segment-owned pivoting factor kernel.
+The row-refactor pattern can now also retain the ordered-block ETree parent
+array lazily for single-block row-major checked rejects. Rejected-pivot
+diagnostics consume that cached parent after the first checked row-refactor
+failure, instead of rebuilding the same CKTSO tail scope on later failures, while
+the normal unchecked row-refactor path does not pay the setup cost. The smoke
+test forces `KLS_ENABLE_CHECKED_ROW_REFACTOR` through a deterministic
+pivot-reject repair so the retained row metadata, block restart, and ETree-tail
+stats stay covered. This is a scheduler-metadata step toward the missing
+pivoting tail restart, not a replacement for the row/segment-owned pivoting
+factor kernel.
 
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,
