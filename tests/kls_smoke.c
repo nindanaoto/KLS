@@ -4,6 +4,7 @@
 
 #include <math.h>
 #include <inttypes.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1620,6 +1621,142 @@ static int test_pre_static_pivoting_with_scaling(void) {
   return ok;
 }
 
+static int test_parallel_row_refactor_pipeline_scope(void) {
+  const int32_t n = 8;
+  int32_t ap[9];
+  int32_t ai[32];
+  double ax0[32];
+  double ax1[32];
+  double expected[8];
+  double b[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double x[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    expected[col] = 1.0 + 0.25 * (double)col;
+    const int32_t block = col < 4 ? 0 : 4;
+    for (int32_t row = block; row < block + 4; ++row) {
+      ai[p] = row;
+      ax0[p] = row == col
+        ? 12.0 + (double)col
+        : 0.05 * (double)(1 + ((row + 2 * col) % 5));
+      ax1[p] = ax0[p] + (row == col ? 0.125 : 0.01);
+      p++;
+    }
+  }
+  ap[n] = p;
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
+      b[ai[q]] += ax1[q] * expected[col];
+    }
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 4;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze row-pipeline refactor")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor row-pipeline base")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "row-pipeline refactor")) ok = 0;
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve row-pipeline refactor")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats row-pipeline refactor")) {
+    ok = 0;
+  }
+  if (ok && (stats.row_refactor_group_count < 2 ||
+             stats.row_refactor_group_level_count < 1 ||
+             stats.row_refactor_group_cluster_levels != 0 ||
+             stats.row_refactor_group_pipeline_groups < 2 ||
+             stats.row_refactor_group_pipeline_rows != n ||
+             stats.row_refactor_group_pipeline_work <= 0.0)) {
+    fprintf(stderr,
+            "unexpected row pipeline stats: groups=%" PRId64
+            ", levels=%" PRId64 ", cluster=%" PRId64
+            ", pipe_groups=%" PRId64 ", pipe_rows=%" PRId64
+            ", pipe_work=%.6g\n",
+            stats.row_refactor_group_count,
+            stats.row_refactor_group_level_count,
+            stats.row_refactor_group_cluster_levels,
+            stats.row_refactor_group_pipeline_groups,
+            stats.row_refactor_group_pipeline_rows,
+            stats.row_refactor_group_pipeline_work);
+    ok = 0;
+  }
+  const size_t legacy_stats_size =
+    offsetof(kls_stats, row_refactor_group_cluster_levels);
+  if (ok && legacy_stats_size <
+              offsetof(kls_stats, row_refactor_dense_segment_trailing_entries) +
+                sizeof(stats.row_refactor_dense_segment_trailing_entries)) {
+    fprintf(stderr, "row pipeline stats are not append-only\n");
+    ok = 0;
+  }
+  kls_stats legacy_stats;
+  memset(&legacy_stats, 0, sizeof(legacy_stats));
+  legacy_stats.struct_size = legacy_stats_size;
+  if (ok && !require_ok(kls_get_stats(solver, &legacy_stats),
+                        "legacy-size stats row-pipeline refactor")) {
+    ok = 0;
+  }
+  if (ok && (legacy_stats.row_refactor_group_count !=
+               stats.row_refactor_group_count ||
+             legacy_stats.row_refactor_group_level_count !=
+               stats.row_refactor_group_level_count ||
+             legacy_stats.row_refactor_group_cluster_levels != 0)) {
+    fprintf(stderr, "legacy-size row pipeline stats copy shifted fields\n");
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr, "unexpected row-pipeline solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  free(saved_env);
+  return ok;
+}
+
 int main(void) {
   if (!test_csc()) {
     return EXIT_FAILURE;
@@ -1673,6 +1810,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_pre_static_pivoting_with_scaling()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_parallel_row_refactor_pipeline_scope()) {
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

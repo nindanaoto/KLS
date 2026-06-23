@@ -335,7 +335,12 @@ before the rejected pivot have finished. When dense row segments defer writes
 in KLS-owned row-major mirrors, KLS publishes only that proven prefix back into
 the KLU numeric object before reporting prefix-current; otherwise it keeps the
 conservative unknown refresh state because rows in the active level may have
-completed out of factor-order prefix.
+completed out of factor-order prefix. The experimental row scheduler also
+splits precomputed row-group levels into barriered cluster levels and a
+dynamic topological pipeline tail; stats report
+`row_refactor_group_cluster_levels`, `row_refactor_group_pipeline_groups`,
+`row_refactor_group_pipeline_rows`, and
+`row_refactor_group_pipeline_work`.
 Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_row`,
 `fast_rejected_multiplier_abs`, `fast_rejected_pivot_abs`,
@@ -722,8 +727,9 @@ single-block and serial BTF refactor scatter path for unscaled repeated
 refactors and a narrow scaled dominant-BTF subset, plus an unscaled block-local
 pivot restart for fast-factor failures. Benchmark stats also report
 row-major U-pattern supernode candidates and detailed rejected-row/multiplier
-coordinates from KLS-owned pivot checks, so the remaining SubtreeLU/CKTSO
-row-segment work can be evaluated on the same slow-case artifacts.
+coordinates from KLS-owned pivot checks, plus row-refactor cluster/pipeline
+counters, so the remaining SubtreeLU/CKTSO row-segment work can be evaluated
+on the same slow-case artifacts.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The next algorithmic work is to evolve the numeric factor/refactor/solve
 kernels toward deeper KLS-owned sparse kernels with better pivot reuse and

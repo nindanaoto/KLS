@@ -1841,6 +1841,24 @@ the retained native-mirror samples. The checks are therefore left in place until
 KLS owns a fuller row/segment descriptor and numeric state that can make those
 invariants cheaper to consume.
 
+The experimental row/segment scheduler then gained a CKTSO-style dynamic
+pipeline tail after barriered row-group cluster levels.
+`kls_build_row_refactor_pattern` already stores levelized executable row
+groups; the parallel row path now uses a `2 * threads` width split, processes
+wide group levels with barriers, and lets workers claim the remaining
+topological group sequence from an atomic cursor while waiting on predecessor
+rows through the retained completion bitmap. Benchmark stats now report
+row-refactor cluster levels, pipeline groups, pipeline rows, and pipeline work.
+A constructed smoke matrix forces this path. On a focused same-session
+four-thread `G2_circuit` probe the checked row path reported 34 cluster levels
+and 32 pipeline groups covering 2619 rows, with valid residuals; repeated
+refactor averaged about `0.241s` versus about `0.304s` for the default column
+EGraph path in that sample, while the checked row factor pass remained slower
+at about `0.603s` versus about `0.263s`. The default KLS path is unchanged;
+this remains experimental row-engine scaffolding until the row numeric
+factor/refactor path is validated and faster across the broader paper matrix
+set.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
