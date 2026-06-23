@@ -1896,6 +1896,14 @@ stats stay covered. This is a scheduler-metadata step toward the missing
 pivoting tail restart, not a replacement for the row/segment-owned pivoting
 factor kernel.
 
+The checked row-refactor metadata now also retains reverse row dependencies
+derived from the row-major `L` mirror. When a checked row refactor rejects a
+pivot, the `fast_rejected_row_tail_*` diagnostics walk the exact row-successor
+tail that would need to be recomputed by a future KLS-owned pivoting tail
+kernel. This keeps the CKTSO restart target tied to KLS row storage rather than
+only the KLU-column U-pattern or an ETree upper bound; the actual pivoting tail
+factor kernel is still missing.
+
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,
 but BTF EGraph workers only need block-local indices and now allocate

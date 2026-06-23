@@ -112,6 +112,8 @@ typedef struct kls_stats {
   int64_t fast_rejected_suffix_columns;
   int64_t fast_rejected_descendant_columns;
   double fast_rejected_descendant_work;
+  int64_t fast_rejected_row_tail_columns;
+  double fast_rejected_row_tail_work;
   int64_t fast_rejected_etree_columns;
   double fast_rejected_etree_work;
   int fast_rejected_refresh_state;

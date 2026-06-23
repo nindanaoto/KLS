@@ -637,6 +637,8 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_suffix_columns\":%" PRId64
            ",\"fast_rejected_descendant_columns\":%" PRId64
            ",\"fast_rejected_descendant_work\":%.9g"
+           ",\"fast_rejected_row_tail_columns\":%" PRId64
+           ",\"fast_rejected_row_tail_work\":%.9g"
            ",\"fast_rejected_etree_columns\":%" PRId64
            ",\"fast_rejected_etree_work\":%.9g"
            ",\"fast_rejected_refresh_state\":%d"
@@ -702,6 +704,8 @@ int main(int argc, char **argv) {
            stats.fast_rejected_suffix_columns,
            stats.fast_rejected_descendant_columns,
            stats.fast_rejected_descendant_work,
+           stats.fast_rejected_row_tail_columns,
+           stats.fast_rejected_row_tail_work,
            stats.fast_rejected_etree_columns,
            stats.fast_rejected_etree_work,
            stats.fast_rejected_refresh_state,
@@ -782,13 +786,16 @@ int main(int argc, char **argv) {
     printf("fast block restarts: %d\n", stats.fast_block_restarts);
     printf("fast rejected block: start %" PRId64 ", size %" PRId64
            ", suffix %" PRId64 ", descendants %" PRId64
-           ", descendant work %.6g, etree %" PRId64
+           ", descendant work %.6g, row tail %" PRId64
+           ", row-tail work %.6g, etree %" PRId64
            ", etree work %.6g, refresh state %d\n",
            stats.fast_rejected_block_start,
            stats.fast_rejected_block_size,
            stats.fast_rejected_suffix_columns,
            stats.fast_rejected_descendant_columns,
            stats.fast_rejected_descendant_work,
+           stats.fast_rejected_row_tail_columns,
+           stats.fast_rejected_row_tail_work,
            stats.fast_rejected_etree_columns,
            stats.fast_rejected_etree_work,
            stats.fast_rejected_refresh_state);
