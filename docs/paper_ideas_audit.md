@@ -347,6 +347,16 @@ the recent KLS medium baseline and improved geomean on common rows versus that
 baseline, while KLS still trailed the CKTSO artifact by about 1.29x geomean on
 the 90 common medium rows.
 
+An EGraph-specific persistent worker-pool prototype was then tested to avoid
+recreating pthreads and scratch arrays on every no-pivot EGraph refactor. The
+idea matched CKTSO's emphasis on retained scheduling machinery, but
+same-session A/B checks against commit `f36bd4f` did not show a general win:
+`ASIC_680k` moved only from about 0.06887s to 0.06784s average refactor time,
+while `rajat30` moved from about 0.30470s to 0.30623s and `nxp1` from about
+0.64476s to 0.65076s. The prototype was removed because the current EGraph
+runtime is dominated by numeric scatter/update work rather than pthread launch
+overhead on the large CKTSO-gap rows.
+
 A broader KLS-owned serial no-pivot refactor path was also prototyped by
 reusing the threaded BTF-block refactor kernel when thread-level parallelism was
 not eligible. It passed correctness tests and helped some no-scale cases, but it
