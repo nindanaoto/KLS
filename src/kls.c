@@ -163,6 +163,7 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong next_pipeline_pos;
   UF_long pipeline_pos_end;
   UF_long cluster_level_count;
+  int pipeline_natural_order;
   pthread_barrier_t barrier;
 } kls_egraph_refactor_shared;
 
@@ -8367,21 +8368,41 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (shared->pipeline_done != NULL &&
       cluster_levels < solver->refactor_level_count &&
       !kls_egraph_refactor_should_stop(shared)) {
-    for (;;) {
-      if (kls_egraph_refactor_should_stop(shared)) {
-        break;
+    if (shared->pipeline_natural_order) {
+      for (;;) {
+        if (kls_egraph_refactor_should_stop(shared)) {
+          break;
+        }
+        const UF_long col =
+          (UF_long)atomic_fetch_add_explicit(&shared->next_pipeline_pos, 1ul,
+                                             memory_order_relaxed);
+        if (col >= shared->pipeline_pos_end) {
+          break;
+        }
+        if (!kls_egraph_refactor_column(worker, col, 1)) {
+          break;
+        }
+        kls_egraph_refactor_mark_done(shared, col);
       }
-      const UF_long pos =
-        (UF_long)atomic_fetch_add_explicit(&shared->next_pipeline_pos, 1ul,
-                                           memory_order_relaxed);
-      if (pos >= shared->pipeline_pos_end) {
-        break;
+    } else if (solver->refactor_level_cols != NULL) {
+      for (;;) {
+        if (kls_egraph_refactor_should_stop(shared)) {
+          break;
+        }
+        const UF_long pos =
+          (UF_long)atomic_fetch_add_explicit(&shared->next_pipeline_pos, 1ul,
+                                             memory_order_relaxed);
+        if (pos >= shared->pipeline_pos_end) {
+          break;
+        }
+        const UF_long col = solver->refactor_level_cols[pos];
+        if (!kls_egraph_refactor_column(worker, col, 1)) {
+          break;
+        }
+        kls_egraph_refactor_mark_done(shared, col);
       }
-      const UF_long col = solver->refactor_level_cols[pos];
-      if (!kls_egraph_refactor_column(worker, col, 1)) {
-        break;
-      }
-      kls_egraph_refactor_mark_done(shared, col);
+    } else {
+      kls_egraph_refactor_record_invalid(shared);
     }
   }
 }
@@ -8700,7 +8721,6 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->options.threads <= 1 ||
       solver->refactor_level_ptr == NULL ||
-      solver->refactor_level_cols == NULL ||
       solver->refactor_level_count == 0u ||
       solver->refactor_level_max_width < (UF_long)(4 * solver->options.threads)) {
     return 0;
@@ -8711,6 +8731,9 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     kls_egraph_all_pipeline_dominant_btf_shape(solver);
   const int all_pipeline_single =
     kls_egraph_all_pipeline_huge_single_shape(solver);
+  if (solver->refactor_level_cols == NULL && !all_pipeline_single) {
+    return 0;
+  }
   const int non_dominant_many_block =
     kls_egraph_non_dominant_many_block_shape(solver);
   const int medium_heavy_btf =
@@ -8796,6 +8819,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const int all_pipeline =
     kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
     kls_egraph_all_pipeline_huge_single_shape(solver);
+  const int natural_pipeline =
+    kls_egraph_all_pipeline_huge_single_shape(solver);
   const UF_long cluster_level_count =
     all_pipeline ? 0u : solver->refactor_cluster_level_count;
   atomic_uint *pipeline_done = NULL;
@@ -8807,6 +8832,9 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
          0.10 * solver->refactor_dependency_work)) {
     pipeline_done =
       ensure_egraph_pipeline_done(solver, &pipeline_generation);
+  }
+  if (natural_pipeline && pipeline_done == NULL) {
+    return -1;
   }
 
   const int single_block = solver->symbolic->nblocks == 1u;
@@ -8847,10 +8875,13 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->singular_col = KLS_KLU_EMPTY;
   shared->pipeline_done = pipeline_done;
   shared->pipeline_generation = pipeline_generation;
+  shared->pipeline_natural_order = natural_pipeline ? 1 : 0;
   atomic_store_explicit(
     &shared->next_pipeline_pos,
     (unsigned long)(pipeline_done != NULL
-                      ? solver->refactor_level_ptr[cluster_level_count]
+                      ? (all_pipeline
+                           ? 0u
+                           : solver->refactor_level_ptr[cluster_level_count])
                       : solver->n),
     memory_order_release);
   shared->pipeline_pos_end = solver->n;
@@ -9257,8 +9288,13 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   if (!kls_refactor_schedule_is_eligible(solver)) {
     return 0;
   }
+  const int all_pipeline =
+    kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
+    kls_egraph_all_pipeline_huge_single_shape(solver);
+  const int natural_pipeline =
+    kls_egraph_all_pipeline_huge_single_shape(solver);
   if (solver->refactor_level_ptr != NULL &&
-      solver->refactor_level_cols != NULL) {
+      (solver->refactor_level_cols != NULL || natural_pipeline)) {
     return 1;
   }
 
@@ -9331,12 +9367,10 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     (UF_long *)calloc((size_t)level_count + 1u, sizeof(*counts));
   UF_long *level_ptr =
     (UF_long *)malloc(((size_t)level_count + 1u) * sizeof(*level_ptr));
-  UF_long *level_cols =
-    (UF_long *)malloc((size_t)solver->n * sizeof(*level_cols));
   const int thread_count = solver->options.threads;
-  const int all_pipeline =
-    kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
-    kls_egraph_all_pipeline_huge_single_shape(solver);
+  UF_long *level_cols =
+    natural_pipeline ? NULL : (UF_long *)malloc((size_t)solver->n *
+                                                sizeof(*level_cols));
   UF_long *level_thread_ptr = NULL;
   if (thread_count > 1 && !all_pipeline) {
     level_thread_ptr =
@@ -9344,7 +9378,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
                         ((size_t)thread_count + 1u) *
                         sizeof(*level_thread_ptr));
   }
-  if (counts == NULL || level_ptr == NULL || level_cols == NULL) {
+  if (counts == NULL || level_ptr == NULL ||
+      (!natural_pipeline && level_cols == NULL)) {
     free(levels);
     free(column_work);
     free(counts);
@@ -9397,20 +9432,22 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     cluster_levels = 0u;
   }
 
-  UF_long *next = counts;
-  for (UF_long k = 0; k < solver->n; ++k) {
-    const UF_long level = levels[k];
-    const UF_long dst = next[level]++;
-    if (dst >= solver->n) {
-      free(levels);
-      free(column_work);
-      free(counts);
-      free(level_ptr);
-      free(level_cols);
-      free(level_thread_ptr);
-      return 0;
+  if (level_cols != NULL) {
+    UF_long *next = counts;
+    for (UF_long k = 0; k < solver->n; ++k) {
+      const UF_long level = levels[k];
+      const UF_long dst = next[level]++;
+      if (dst >= solver->n) {
+        free(levels);
+        free(column_work);
+        free(counts);
+        free(level_ptr);
+        free(level_cols);
+        free(level_thread_ptr);
+        return 0;
+      }
+      level_cols[dst] = k;
     }
-    level_cols[dst] = k;
   }
 
   if (level_thread_ptr != NULL) {
@@ -9455,8 +9492,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   double pipeline_work = 0.0;
   if (cluster_levels < level_count) {
     for (UF_long pos = level_ptr[cluster_levels]; pos < solver->n; ++pos) {
-      const UF_long col = level_cols[pos];
-      if (col >= solver->n) {
+      const UF_long col = natural_pipeline ? pos : level_cols[pos];
+      if (!natural_pipeline && col >= solver->n) {
         free(levels);
         free(column_work);
         free(counts);

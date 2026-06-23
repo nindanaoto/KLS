@@ -173,8 +173,12 @@ dependency markers are also solver-owned generation-stamped atomics, so
 pipeline passes do not allocate and clear an `n`-entry done array every cycle.
 All-pipeline EGraph schedules skip the per-level thread-slice table entirely,
 because they never enter the barriered cluster-mode loop that consumes it.
-Most
-low-work dominant-BTF cases also stay on the mapped serial path, but those with
+For huge single-block all-pipeline schedules, KLS also skips the `n`-entry
+level-column list and lets workers claim columns in natural factor order; the
+U-pattern dependency waits still enforce correctness. Dominant-BTF
+all-pipeline schedules keep the level-column list, because level order provides
+better structural balance across the large block and its fringe.
+Most low-work dominant-BTF cases also stay on the mapped serial path, but those with
 enough measured dependency work can consume the same EGraph path. When a
 low-work dominant BTF decomposition has one 95%+ block plus thousands of tiny
 fringe blocks below the EGraph size floor, KLS also keeps repeated refactors on

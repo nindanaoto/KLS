@@ -1797,6 +1797,19 @@ generation-marker sample's `43.2928s` to `43.0747s`, while a three-pass
 `rajat28` median was neutral within noise at `5.5145s` versus the prior
 `5.4418s` artifact.
 
+The huge single-block all-pipeline schedule then stopped storing and reading
+the level-ordered column list. In that shape, factor order is already
+topological for the no-pivot U-pattern dependencies, and the existing
+generation-stamped wait markers still enforce readiness, so workers can claim
+columns directly by factor-order index. The optimization is not used for
+dominant-BTF all-pipeline schedules: a first broader trial made `rajat28`
+noisier in the suite metric, and direct samples showed the BTF level-order path
+should remain the structural default. With the narrowed rule, five direct
+`rajat28` samples stayed in the same kernel band (`0.0446s` median refactor
+versus the saved `0.0457s` no-thread-slices sample), while three `G2_circuit`
+direct samples moved repeated refactor to about `0.218-0.241s` versus the saved
+`0.398s` no-thread-slices sample.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
