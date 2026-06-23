@@ -57,9 +57,14 @@ major algorithm, not an ordering-package tuning problem. On the selected large
 with about 28.4s cycle time, while KLS timed out under AMD/BTF, METIS/no-BTF,
 SCOTCH/BTF, and auto policy variants. The CKTSO ordering supplement reports
 `pre2` operation counts for CKTSO nested dissection and METIS in the same
-range, so the current evidence points more strongly at MC64-quality
-matching/scaling and CKTSO's KLS-owned numeric/scheduling machinery than at
-another separator package alone.
+range. After switching the very large pre-static MC64-adjacent path from exact
+SPRAL Hungarian matching to SPRAL auction matching/scaling, `pre2` still times
+out under the same 120s cap. Forced zero pivot tolerance fails as singular, and
+`1e-5`/`1e-4` pivot tolerances still time out. This makes full MC64-quality
+matching/scaling worth keeping, but not sufficient as the next expected gap
+closer by itself. The current evidence points most strongly at CKTSO's
+KLS-owned row/up-looking numeric factorization, EGraph fast factor with pivot
+checks, and ETree-descendant pipelined tail restart machinery.
 
 The retained broader SPRAL post-factor trial is deliberately value-gated. A
 plain broad gate improved several MC64-sensitive cases but regressed the medium
