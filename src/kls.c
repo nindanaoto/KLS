@@ -289,6 +289,7 @@ static int kls_build_refactor_schedule(kls_solver *solver);
 static UF_long kls_block_for_pivot(const kls_solver *solver, UF_long pivot);
 static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
                                             UF_long rejected_pivot);
+static void kls_fill_fast_reject_observed_tail_candidate(kls_solver *solver);
 static void destroy_egraph_refactor_pool(kls_solver *solver);
 static void kls_egraph_refactor_record_invalid(
   kls_egraph_refactor_shared *shared);
@@ -753,9 +754,25 @@ static void kls_record_fast_reject_detail(kls_solver *solver,
     rejected_pivot_abs >= 0.0 ? rejected_pivot_abs : -1.0;
   solver->stats.fast_rejected_candidate_abs =
     rejected_candidate_abs >= 0.0 ? rejected_candidate_abs : -1.0;
+  solver->stats.fast_rejected_tail_candidate_row = -1;
+  solver->stats.fast_rejected_tail_candidate_abs = -1.0;
+  solver->stats.fast_rejected_tail_candidate_count = 0;
+  solver->stats.fast_rejected_tail_candidate_position = -1;
+  solver->stats.fast_rejected_tail_repair_ready = 0;
+  solver->stats.fast_repaired_pivot_row = -1;
+  solver->stats.fast_repaired_pivot_matches_tail_candidate = 0;
+  solver->stats.fast_repaired_first_changed_pivot = -1;
+  solver->stats.fast_repaired_prefix_changed_pivots = 0;
+  solver->stats.fast_repaired_suffix_changed_pivots = 0;
+  solver->stats.fast_repaired_tail_restart_ready = 0;
+  solver->stats.fast_repaired_block_work = 0.0;
+  solver->stats.fast_repaired_tail_restart_columns = 0;
+  solver->stats.fast_repaired_tail_restart_work = 0.0;
+  solver->stats.fast_repaired_tail_restart_saved_work = 0.0;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
   kls_fill_fast_reject_tail_stats(solver, rejected_pivot);
+  kls_fill_fast_reject_observed_tail_candidate(solver);
 }
 
 static void kls_record_fast_reject(kls_solver *solver,
@@ -7828,6 +7845,7 @@ static void kls_fill_fast_reject_row_tail_stats(kls_solver *solver,
   if (solver == NULL || local_reject >= k2 - k1) {
     return;
   }
+  solver->row_refactor_tail_count = 0;
 
   if (block == 0u && k1 == 0u && k2 == solver->n) {
     const UF_long *tail_rows = NULL;
@@ -7917,11 +7935,53 @@ static void kls_fill_fast_reject_row_tail_stats(kls_solver *solver,
                                      &column_work)) {
       return;
     }
+    solver->row_refactor_tail_rows[columns] = k1 + local_col;
     columns++;
     work += column_work;
   }
+  solver->row_refactor_tail_count = columns;
   solver->stats.fast_rejected_row_tail_columns = (int64_t)columns;
   solver->stats.fast_rejected_row_tail_work = work;
+}
+
+static void kls_fill_fast_reject_observed_tail_candidate(
+  kls_solver *solver) {
+  if (solver == NULL ||
+      solver->stats.fast_rejected_tail_candidate_row >= 0 ||
+      solver->stats.fast_rejected_row < 0 ||
+      solver->stats.fast_rejected_candidate_abs < 0.0 ||
+      solver->stats.fast_rejected_pivot_abs < 0.0 ||
+      solver->row_refactor_tail_rows == NULL ||
+      solver->row_refactor_tail_count == 0u) {
+    return;
+  }
+
+  const UF_long row = (UF_long)solver->stats.fast_rejected_row;
+  UF_long position = KLS_KLU_EMPTY;
+  for (UF_long pos = 0; pos < solver->row_refactor_tail_count; ++pos) {
+    if (solver->row_refactor_tail_rows[pos] == row) {
+      position = pos;
+      break;
+    }
+  }
+  if (position == KLS_KLU_EMPTY) {
+    return;
+  }
+
+  const double candidate_abs = solver->stats.fast_rejected_candidate_abs;
+  const double pivot_abs = solver->stats.fast_rejected_pivot_abs;
+  const double tol = solver->common.tol;
+  const int tolerance_valid =
+    tol > DBL_MIN && candidate_abs * tol > pivot_abs;
+
+  solver->stats.fast_rejected_tail_candidate_row = (int64_t)row;
+  solver->stats.fast_rejected_tail_candidate_abs = candidate_abs;
+  solver->stats.fast_rejected_tail_candidate_count =
+    tolerance_valid ? 1 : 0;
+  solver->stats.fast_rejected_tail_candidate_position = (int64_t)position;
+  solver->stats.fast_rejected_tail_repair_ready =
+    solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX &&
+    tolerance_valid;
 }
 
 static int kls_row_refactor_touch(UF_long col,

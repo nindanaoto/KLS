@@ -123,6 +123,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
             "  {matrix}: reason={reason} block_work={block:.6g} "
             "tail_work={tail:.6g} row_tail_work={row_tail:.6g} "
             "saved_work={saved:.6g} "
+            "tail_row={tail_row} repair_row={repair_row} "
             "prefix_changes={prefix} suffix_changes={suffix}".format(
                 matrix=record["matrix"],
                 reason=record["reason"],
@@ -130,6 +131,8 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
                 tail=float(record["fast_repaired_tail_restart_work"]),
                 row_tail=float(record["fast_rejected_row_tail_work"]),
                 saved=float(record["fast_repaired_tail_restart_saved_work"]),
+                tail_row=record["fast_rejected_tail_candidate_row"],
+                repair_row=record["fast_repaired_pivot_row"],
                 prefix=record["fast_repaired_prefix_changed_pivots"],
                 suffix=record["fast_repaired_suffix_changed_pivots"],
             )

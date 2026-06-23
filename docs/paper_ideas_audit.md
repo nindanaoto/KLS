@@ -1969,6 +1969,16 @@ change the numeric repair yet, but it exposes the row-tail scope on real
 multi-block EGraph rejects. Repeated focused stress checks kept valid
 residuals and reported nonzero row-tail scopes for `coupled` and `onetone2`,
 where the previous JSON fields were zero.
+The same diagnostic now preserves the observed row/value that actually tripped
+the pivot check as a tail-candidate row when that row lies in the recorded
+row-tail scope. The candidate is marked repair-ready only for prefix-current
+rejects; unknown partial-refresh rejects keep the conservative not-ready
+classification. Per-reject candidate and repair fields are reset before each
+new reject so multi-restart stress rows do not mix diagnostics from different
+attempts. In focused `coupled` samples, prefix-current rejects now show that
+the observed tail candidate is tolerance-valid but the robust full-block repair
+selects a different row, which is the next concrete boundary for a local
+pivoting tail kernel.
 
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,
