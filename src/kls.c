@@ -8971,20 +8971,33 @@ static int kls_parallel_row_refactor_process_dense_group(
   double *x = worker->x;
   double *udiag = (double *)numeric->Udiag;
   const UF_long width = row_end - row_begin;
+  const UF_long max_panel_entries =
+    (UF_long)(SIZE_MAX / sizeof(*worker->segment_panel));
+  if (width > max_panel_entries / width) {
+    return -1;
+  }
+  const UF_long dense_panel_entries = width * width;
+  UF_long trailing_panel_entries = 0;
+  if (trailing_len > 0u) {
+    if (width > (max_panel_entries - dense_panel_entries) / trailing_len) {
+      return -1;
+    }
+    trailing_panel_entries = width * trailing_len;
+  }
+  double *dense_panel =
+    kls_egraph_worker_segment_panel(
+      worker, dense_panel_entries + trailing_panel_entries);
+  if (dense_panel == NULL) {
+    return -1;
+  }
   double *trailing_panel = NULL;
   if (trailing_len > 0u) {
-    if (width > (UF_long)(SIZE_MAX / (size_t)trailing_len /
-                          sizeof(*trailing_panel))) {
-      return -1;
-    }
-    trailing_panel =
-      kls_egraph_worker_segment_panel(worker, width * trailing_len);
-    if (trailing_panel == NULL) {
-      return -1;
-    }
+    trailing_panel = dense_panel + dense_panel_entries;
   }
 
   for (UF_long row = row_begin; row < row_end; ++row) {
+    const UF_long local_row = row - row_begin;
+    double *row_dense_panel = dense_panel + local_row * width;
     for (UF_long p = solver->row_refactor_input_ptr[row];
          p < solver->row_refactor_input_ptr[row + 1u]; ++p) {
       const UF_long col = solver->row_refactor_input_cols[p];
@@ -9006,7 +9019,7 @@ static int kls_parallel_row_refactor_process_dense_group(
     }
 
     for (UF_long dep = row_begin; dep < row; ++dep, ++lp) {
-      *solver->row_refactor_l_values[lp] = x[dep];
+      row_dense_panel[dep - row_begin] = x[dep];
       x[dep] = 0.0;
     }
 
@@ -9014,13 +9027,11 @@ static int kls_parallel_row_refactor_process_dense_group(
     x[row] = 0.0;
 
     const UF_long dense_len = row_end - row - 1u;
-    const UF_long u_begin = solver->row_refactor_u_ptr[row];
-    double **u_values = solver->row_refactor_u_values + u_begin;
     double *row_panel = trailing_panel != NULL
-      ? trailing_panel + (row - row_begin) * trailing_len : NULL;
+      ? trailing_panel + local_row * trailing_len : NULL;
     for (UF_long offset = 0; offset < dense_len; ++offset) {
       const UF_long col = row + 1u + offset;
-      *u_values[offset] = x[col];
+      row_dense_panel[local_row + 1u + offset] = x[col];
       x[col] = 0.0;
     }
     for (UF_long offset = 0; offset < trailing_len; ++offset) {
@@ -9035,31 +9046,22 @@ static int kls_parallel_row_refactor_process_dense_group(
   }
 
   for (UF_long row = row_begin; row < row_end; ++row) {
-    const UF_long l_dense_begin =
-      solver->row_refactor_l_internal_ptr[row];
-    const UF_long row_u_begin = solver->row_refactor_u_ptr[row];
-    double **row_l_values =
-      solver->row_refactor_l_values + l_dense_begin;
-    double **row_u_values =
-      solver->row_refactor_u_values + row_u_begin;
+    const UF_long local_row = row - row_begin;
+    double *row_dense_panel = dense_panel + local_row * width;
 
     for (UF_long dep = row_begin; dep < row; ++dep) {
-      const UF_long dep_l_offset = dep - row_begin;
-      const double lij = *row_l_values[dep_l_offset] / udiag[dep];
-      *row_l_values[dep_l_offset] = lij;
+      const UF_long local_dep = dep - row_begin;
+      const double lij = row_dense_panel[local_dep] / udiag[dep];
+      row_dense_panel[local_dep] = lij;
 
-      const UF_long dep_u_begin = solver->row_refactor_u_ptr[dep];
-      double **dep_u_values =
-        solver->row_refactor_u_values + dep_u_begin;
+      double *dep_dense_panel = dense_panel + local_dep * width;
 
-      for (UF_long target = dep + 1u; target < row; ++target) {
-        *row_l_values[target - row_begin] -=
-          lij * (*dep_u_values[target - dep - 1u]);
+      for (UF_long target = local_dep + 1u; target < local_row; ++target) {
+        row_dense_panel[target] -= lij * dep_dense_panel[target];
       }
-      udiag[row] -= lij * (*dep_u_values[row - dep - 1u]);
-      for (UF_long target = row + 1u; target < row_end; ++target) {
-        *row_u_values[target - row - 1u] -=
-          lij * (*dep_u_values[target - dep - 1u]);
+      udiag[row] -= lij * dep_dense_panel[local_row];
+      for (UF_long target = local_row + 1u; target < width; ++target) {
+        row_dense_panel[target] -= lij * dep_dense_panel[target];
       }
     }
 
@@ -9073,20 +9075,18 @@ static int kls_parallel_row_refactor_process_dense_group(
     }
   }
 
-  if (trailing_len > 0u) {
-    /* Keep the shared trailing panel in compact row-major scratch so this
-       path can move to persistent row/segment storage without changing
-       semantics. */
-    for (UF_long row = row_begin; row < row_end; ++row) {
-      const UF_long l_dense_begin =
-        solver->row_refactor_l_internal_ptr[row];
-      double **row_l_values =
-        solver->row_refactor_l_values + l_dense_begin;
-      double *row_panel =
-        trailing_panel + (row - row_begin) * trailing_len;
+  /* Keep the dense segment and shared trailing panel in compact row-major
+     scratch so this path can move to persistent row/segment storage without
+     changing semantics. */
+  for (UF_long row = row_begin; row < row_end; ++row) {
+    const UF_long local_row = row - row_begin;
+    double *row_dense_panel = dense_panel + local_row * width;
+    double *row_panel = trailing_panel != NULL
+      ? trailing_panel + local_row * trailing_len : NULL;
 
+    if (trailing_len > 0u) {
       for (UF_long dep = row_begin; dep < row; ++dep) {
-        const double lij = *row_l_values[dep - row_begin];
+        const double lij = row_dense_panel[dep - row_begin];
         double *dep_panel =
           trailing_panel + (dep - row_begin) * trailing_len;
 
@@ -9094,13 +9094,25 @@ static int kls_parallel_row_refactor_process_dense_group(
           row_panel[offset] -= lij * dep_panel[offset];
         }
       }
+    }
 
-      const UF_long row_dense_len = row_end - row - 1u;
-      const UF_long row_u_begin = solver->row_refactor_u_ptr[row];
-      double **row_trailing_values =
-        solver->row_refactor_u_values + row_u_begin + row_dense_len;
+    const UF_long l_dense_begin =
+      solver->row_refactor_l_internal_ptr[row];
+    double **row_l_values =
+      solver->row_refactor_l_values + l_dense_begin;
+    for (UF_long dep = row_begin; dep < row; ++dep) {
+      *row_l_values[dep - row_begin] = row_dense_panel[dep - row_begin];
+    }
+
+    const UF_long row_dense_len = row_end - row - 1u;
+    const UF_long row_u_begin = solver->row_refactor_u_ptr[row];
+    double **row_u_values = solver->row_refactor_u_values + row_u_begin;
+    for (UF_long offset = 0; offset < row_dense_len; ++offset) {
+      *row_u_values[offset] = row_dense_panel[local_row + 1u + offset];
+    }
+    if (trailing_len > 0u) {
       for (UF_long offset = 0; offset < trailing_len; ++offset) {
-        *row_trailing_values[offset] = row_panel[offset];
+        *row_u_values[row_dense_len + offset] = row_panel[offset];
       }
     }
   }

@@ -1726,6 +1726,20 @@ while the default column EGraph path in a same-session check measured about
 `0.223s`. The row path therefore remains gated, but this is the first retained
 compact-panel step that measurably improves the experimental segment kernel.
 
+The same compact scratch was then extended from the shared trailing panel to the
+internal dense segment block. Dense-eligible row segments now gather the raw
+internal lower block and dense upper block into one worker-local row-major
+panel, perform the internal triangular update there, and scatter the normalized
+`L`, dense `U`, and trailing `U` values back to the existing KLU slots only
+after the segment is complete. This is still temporary scratch rather than a
+persistent KLS numeric format, but it removes the main pointer-chasing loop from
+the dense segment mini-solve. A clean four-thread `G2_circuit` sample stayed
+valid and moved the gated row-refactor path to about `0.765s`; the default
+column EGraph path in the same session measured about `0.205s`. This confirms
+that compact segment storage is the right direction for the experimental row
+kernel, while also confirming that the row kernel still needs much more work
+before it can replace the current default.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
