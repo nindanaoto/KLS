@@ -311,6 +311,23 @@ static void kls_klu_get_pointer(double *lu,
   *length_out = length;
 }
 
+static inline void kls_scatter_subtract(double *restrict x,
+                                        const UF_long *restrict rows,
+                                        const double *restrict values,
+                                        UF_long length,
+                                        double scale) {
+  UF_long p = 0;
+  for (; p + 3u < length; p += 4u) {
+    x[rows[p]] -= values[p] * scale;
+    x[rows[p + 1u]] -= values[p + 1u] * scale;
+    x[rows[p + 2u]] -= values[p + 2u] * scale;
+    x[rows[p + 3u]] -= values[p + 3u] * scale;
+  }
+  for (; p < length; ++p) {
+    x[rows[p]] -= values[p] * scale;
+  }
+}
+
 static void free_refactor_map(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -722,9 +739,7 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
       double *lx = NULL;
       UF_long lcol_len = 0;
       kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
-      for (UF_long p = 0; p < lcol_len; ++p) {
-        x[li[p]] -= lx[p] * ujk;
-      }
+      kls_scatter_subtract(x, li, lx, lcol_len, ujk);
     }
 
     const double ukk = x[k];
@@ -8105,9 +8120,7 @@ static int kls_single_block_mapped_refactor(kls_solver *solver,
       double *lx = NULL;
       UF_long lcol_len = 0;
       kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
-      for (UF_long p = 0; p < lcol_len; ++p) {
-        x[li[p]] -= lx[p] * ujk;
-      }
+      kls_scatter_subtract(x, li, lx, lcol_len, ujk);
     }
 
     const double ukk = x[k];
@@ -8291,9 +8304,7 @@ static int kls_egraph_refactor_single_unscaled_column(
     UF_long *li = l_indices[j];
     double *lx = l_values[j];
     UF_long lcol_len = numeric->Llen[j];
-    for (UF_long p = 0; p < lcol_len; ++p) {
-      x[li[p]] -= lx[p] * ujk;
-    }
+    kls_scatter_subtract(x, li, lx, lcol_len, ujk);
   }
 
   const double ukk = x[k];
@@ -8407,9 +8418,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
     UF_long *li = l_indices[k1 + j];
     double *lx = l_values[k1 + j];
     UF_long lcol_len = numeric->Llen[k1 + j];
-    for (UF_long p = 0; p < lcol_len; ++p) {
-      x[li[p]] -= lx[p] * ujk;
-    }
+    kls_scatter_subtract(x, li, lx, lcol_len, ujk);
   }
 
   const double ukk = x[local_k];
@@ -8638,9 +8647,7 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     UF_long *li = l_indices[k1 + j];
     double *lx = l_values[k1 + j];
     UF_long lcol_len = llen[j];
-    for (UF_long p = 0; p < lcol_len; ++p) {
-      x[li[p]] -= lx[p] * ujk;
-    }
+    kls_scatter_subtract(x, li, lx, lcol_len, ujk);
   }
 
   const double ukk = x[local_k];

@@ -2129,6 +2129,23 @@ when the outer schedule has exposed enough independent columns but one or a
 few KLU-column updates still dominate the tail. They are intended to guide the
 row/segment numeric-engine work rather than another column-ordering probe.
 
+The immediate hot-loop follow-up was to centralize the repeated sparse
+scatter update `x[row] -= L(row,j) * U(j,k)` and unroll it four ways in a
+single inline helper used by the serial mapped, BTF, and EGraph refactor
+paths. This does not change ordering, matching, pivot policy, or scheduler
+semantics; it only reduces overhead in the per-column update loop exposed by
+the new maximum-column-work diagnostics. Same-session A/B against commit
+`d213eb8` retained the helper: on six heavy CKTSO-gap rows with three passes
+and ten refactors per pass, SPICE-cycle geomean improved from `7.77s` to
+`7.48s` with no row slower; refactor medians improved on `G2_circuit`,
+`onetone1`, `onetone2`, `ASIC_100ks`, `ASIC_320k`, and `ASIC_320ks`. A
+one-pass top-20 CKTSO-gap guard also completed all rows and improved geomean
+from `3.64s` to `3.55s`; a follow-up three-pass loss check showed the
+apparent `rajat28`, `onetone2`, and `ASIC_320ks` losses were noise or reversed
+with longer repeats, while tiny `gemat12` remained cycle-noisy despite a
+faster measured refactor. This is a small retained KLU-storage kernel cleanup,
+not the missing CKTSO row/segment engine.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
