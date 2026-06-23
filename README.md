@@ -225,10 +225,14 @@ KLU's unscaled `0` mode and skip the static-pivot trial that only adds setup
 cost for that shape. Medium many-block, mostly diagonal, high-degree spike
 patterns whose largest BTF block is large but not dominant also start in KLU's
 unscaled `0` mode when max scaling consistently increases repeated refactor
-work. OPF-style bounded-degree matrices whose numeric diagonal is about half
-missing or weak start without row scaling. Large sparse-diagonal low-degree
-patterns can also start with sum scaling when that avoids more expensive
-max-scaling behavior. For large
+work. Very fragmented full-rank BTF decompositions with hundreds of thousands
+of blocks and one substantial but non-dominant block start in no-scale/no-recheck
+mode so the exact EGraph refactor path remains available; KLU row-scaled modes
+hide that path behind repeated scale work for this structural class. OPF-style
+bounded-degree matrices whose numeric diagonal is about half missing or weak
+start without row scaling. Large sparse-diagonal low-degree patterns can also
+start with sum scaling when that avoids more expensive max-scaling behavior.
+For large
 expensive cases, `auto` can still try other numeric scaling modes when actual
 flop/fill evidence justifies the extra work, but structural METIS starts that
 are already known to need a specific scale mode skip redundant scale trials.

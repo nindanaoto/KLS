@@ -25,7 +25,10 @@ avoiding cluster barriers and waiting only on actual U-pattern predecessors.
 KLS also now schedules extremely fragmented unscaled BTF refactors with one
 substantial but non-dominant block through the exact EGraph path when measured
 work is high enough, so the large block is not left serial behind hundreds of
-thousands of singleton blocks.
+thousands of singleton blocks. Auto scaling now starts those full-rank
+fragmented BTF shapes in no-scale/no-recheck mode, because KLU row scaling
+prevents the EGraph refactor from running and roughly doubled repeated refactor
+time on the ASIC 680k/680ks structural class.
 The barriered EGraph
 cluster levels now use FLOP-estimated per-thread slices instead of equal column
 slices, and the no-pivot pipeline tail now uses an atomic dynamic work cursor
@@ -64,6 +67,14 @@ geomean from 0.32198s to 0.31410s with the same three known failures. The new
 exact-match wins were `hvdc1`, `OPF_10000`, `LeGresley_87936`, `rajat22`,
 `rajat23`, `rajat24`, `mult_dcop_03`, and `TSOPF_FS_b39_c19`.
 
+The fragmented-BTF scale policy improved the large recon artifact geomean over
+the preceding EGraph build from 30.58s to 27.37s on the five completed common
+rows, with the same three large timeouts. The main win was `ASIC_680k`, whose
+cycle estimate moved from 18.32s to 10.11s by selecting `scale=-1` and enabling
+the retained EGraph schedule. This is still not enough to close the CKTSO gap:
+on the same completed large rows KLS remains 1.22x slower geomean than CKTSO,
+with `nxp1`, `rajat30`, and `ASIC_680k` still the major losses.
+
 The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
 
@@ -72,8 +83,10 @@ new KLS-owned symbolic/numeric machinery:
   matching from a pinned submodule by default, or can link to a system SPRAL
   install, and uses it for bounded pre-factor large weak-diagonal trials plus
   a value-gated post-factor trial for dense high-off-diagonal-pivot cases. This
-  is still not a full production MC64-equivalent preprocessing stage. HSL MC64
-  and non-redistributable MC64 copies are out of scope for vendoring.
+  is still not a full production MC64-equivalent preprocessing stage. Existing
+  MC64-style code can be reused only when its license is LGPL-compatible and
+  permits source and binary redistribution with KLS. HSL MC64 and
+  non-redistributable MC64 copies are out of scope for vendoring.
 - A full intra-block parallel factor/refactor scheduler that consumes retained
   EGraph/ETree or separator-tree metadata with pivoting tail restart, beyond
   the current guarded no-pivot EGraph cluster/pipeline refactor.

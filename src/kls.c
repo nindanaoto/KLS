@@ -1839,6 +1839,19 @@ static int is_medium_spiked_many_block_scale0_pattern(
          (double)max_degree <= 0.40 * (double)n;
 }
 
+static int symbolic_is_fragmented_many_block_unscaled_candidate(
+  UF_long n,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (symbolic == NULL || !symbolic->do_btf || n < 500000u ||
+      symbolic->structural_rank != n ||
+      symbolic->nblocks < 100000u || symbolic->maxblock < 90000u ||
+      symbolic->maxblock * 2u >= n) {
+    return 0;
+  }
+  const UF_long fringe = n - symbolic->maxblock;
+  return symbolic->nblocks * 10u >= fringe * 8u;
+}
+
 static int choose_auto_scale_from_values(const kls_solver *solver,
                                          const double *numeric_values) {
   if (solver == NULL) {
@@ -1853,6 +1866,11 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
                                                  solver->row_idx,
                                                  solver->symbolic)) {
     return 0;
+  }
+  if (solver->options.scale == KLS_SCALE_AUTO &&
+      symbolic_is_fragmented_many_block_unscaled_candidate(solver->n,
+                                                          solver->symbolic)) {
+    return -1;
   }
   return choose_auto_scale_from_pattern(solver->n, solver->col_ptr, solver->row_idx,
                                         &solver->options, numeric_values);
