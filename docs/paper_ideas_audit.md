@@ -1856,6 +1856,23 @@ large CKTSO gap is therefore still repeated refactor throughput on
 ASIC/G2/Onetone-style rows, not a missing LGPL-compatible MC64 import or a
 single broad ordering switch.
 
+The CKTSO cluster/pipeline split was then rechecked because the CKTSO paper's
+`alpha * thread_count` handoff is one of the few remaining explicit scheduling
+knobs. KLS keeps CKTSO's `alpha=2` default, but now allows a structural
+`alpha=4` handoff for compact large dominant-BTF schedules: unscaled matrices
+with 128-512 BTF blocks, a 95%+ dominant block, max block at least 90k, and at
+least `5e8` factor flops. This moves the pipeline tail earlier only for that
+shape. A direct same-session five-pass A/B on the four touched medium rows
+(`kls_asic_cluster_alpha2_ab_t4_p5_r10_timeout180.jsonl` versus
+`kls_asic_cluster_alpha4_ab_t4_p5_r10_timeout180.jsonl`) improved geomean by
+about `1.2%`: `ASIC_100k` improved `3.0%`, `ASIC_100ks` improved `1.7%`,
+`ASIC_320k` improved `0.3%`, and `ASIC_320ks` regressed `0.3%`. Wider
+`alpha=6`/`alpha=8` probes were mixed, and a full all-pipeline probe regressed
+the same family, so this is retained only as a small structural scheduler
+refinement. It does not explain the multi-x CKTSO refactor gap; that still
+points to a row/segment-oriented numeric kernel, pivot-checked tail restart,
+and eventually a SubtreeLU-style separator-tree/private-pipeline scheduler.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

@@ -8773,6 +8773,21 @@ static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
          solver->common.flops >= 2.0e9;
 }
 
+static int kls_egraph_compact_large_dominant_btf_shape(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->nblocks < 128u ||
+      solver->symbolic->nblocks > 512u ||
+      solver->common.scale > 0 || solver->n == 0u) {
+    return 0;
+  }
+  const double coverage =
+    (double)solver->symbolic->maxblock / (double)solver->n;
+  return coverage >= 0.95 &&
+         solver->symbolic->maxblock >= 90000u &&
+         solver->common.flops >= 5.0e8;
+}
+
 static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {
   if (kls_egraph_all_pipeline_huge_single_shape(solver)) {
     return 100000u;
@@ -9497,7 +9512,12 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   level_ptr[level_count] = counts[level_count];
   UF_long max_width = 0;
   UF_long cluster_levels = level_count;
-  const double cluster_width_limit = 2.0 * (double)solver->options.threads;
+  /* CKTSO uses a width threshold of alpha * threads with alpha=2.  Compact
+     dominant-BTF schedules around one very large block retain enough tail work
+     to benefit from a slightly earlier pipeline split in KLS's exact EGraph. */
+  const double cluster_width_limit =
+    (kls_egraph_compact_large_dominant_btf_shape(solver) ? 4.0 : 2.0) *
+    (double)solver->options.threads;
   for (UF_long level = 0; level < level_count; ++level) {
     const UF_long width = level_ptr[level + 1u] - level_ptr[level];
     if (width > max_width) {
