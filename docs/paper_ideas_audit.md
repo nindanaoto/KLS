@@ -46,7 +46,11 @@ candidate counts, covered rows, maximum width, dense-block entries, and shared
 trailing entries. The gated row refactor also reports executable segment groups,
 segment-covered rows, segment maximum width, and dense/trailing work. These are
 diagnostic bridges toward SubtreeLU-style row/segment storage and BLAS-friendly
-updates; they do not change the current default KLU-column numeric kernel.
+updates. Dense-eligible gated row-refactor groups now also compute their
+internal dense `L` block, dense `U` block, and shared trailing `U` block
+directly in KLS-owned row-major mirrors before scattering back to KLU on
+success. These pieces do not change the current default KLU-column numeric
+kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -1786,6 +1790,21 @@ storage. Focused checks stayed valid: the four-thread `G2_circuit` gated row
 path measured about `0.441s` repeated refactor, and long no-dense samples
 remained stable (`bcircuit` about `0.0046s`, `rajat22` about `0.00132s`, and
 `add20` about `0.000175s` repeated refactor in same-session checks).
+
+The dense-segment mini-solve then stopped using the worker-local dense panel as
+the authoritative storage for dense-eligible row groups. For those groups, KLS
+now writes raw internal `L` candidates, dense `U`, and trailing `U` values
+directly into the persistent row-major mirrors, normalizes and updates those
+mirrors in place, and leaves the older scratch-panel path as fallback for
+non-deferred value storage. This removes one scratch-to-mirror copy layer while
+preserving the final scatter to KLU for the current triangular solve ABI.
+Focused checks stayed valid: four-thread `G2_circuit` measured about
+`0.405s` repeated refactor in a two-repeat sample, down from the previous
+retained `0.441s` row-mirror result. No-dense sanity checks still selected zero
+dense segments and stayed numerically valid (`bcircuit`, `rajat22`, and
+`add20`), while `mc2depi` exercised 1883 dense row segments with a valid
+residual. This is a retained row/segment storage step, not the missing
+CKTSO-style pivoting tail restart.
 
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
