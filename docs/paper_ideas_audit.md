@@ -1931,7 +1931,9 @@ fallback full-block repair work, the ETree-tail restart column/work upper
 bound, and the saved-work estimate a local tail restart would target.
 `scripts/summarize_tail_restart_opportunities.py` now turns those JSONL fields
 into suite-level counts, blocker reasons, and largest saved-work opportunities
-so the tail-kernel work can be prioritized from broad benchmark evidence.
+so the tail-kernel work can be prioritized from broad benchmark evidence. It
+also totals and prints row-tail scope work when `fast_rejected_row_tail_*`
+fields are present.
 `scripts/run_bench_suite.py` now forwards the deterministic
 `--stress-diagonal-scale` and `--stress-diagonal-column` controls to
 `kls_bench`, so these tail-restart opportunity scans can be generated across
@@ -1950,12 +1952,23 @@ an unknown partial refresh when the retained pipeline-done generation is
 available. KLS marks the reject as prefix-current only if every factor-order
 column before the rejected pivot completed in the same EGraph generation; the
 existing block-repair path can then continue with the serial BTF block tail
-instead of discarding the whole fast pass. A focused diagonal-stress check on
-`coupled` changed the first EGraph reject from an unknown state to a
-prefix-current block repair at the dominant block start, kept a valid residual,
-and avoided the later full checked-pass retry. Rows such as stressed
-`onetone2`, where the completed-prefix proof fails, remain classified as
-unknown and keep the conservative fallback.
+instead of discarding the whole fast pass. Focused diagonal-stress checks on
+`coupled` show that the first observed EGraph reject is schedule-dependent:
+when the dominant-block-start reject is observed after all earlier columns are
+done, KLS records a prefix-current block repair and avoids the later full
+checked-pass retry; otherwise it remains unknown and keeps the conservative
+fallback. Rows such as stressed `onetone2`, where the completed-prefix proof
+fails, remain classified as unknown.
+
+The row-tail diagnostic was then extended beyond the single-block
+row-refactor mirror. When that mirror is unavailable, KLS now scans the
+rejected BTF block's numeric `L` columns, follows exact local row-successor
+edges, and reports the affected tail work with the same per-column work
+estimator used by the U-descendant and ETree-tail counters. This does not
+change the numeric repair yet, but it exposes the row-tail scope on real
+multi-block EGraph rejects. Repeated focused stress checks kept valid
+residuals and reported nonzero row-tail scopes for `coupled` and `onetone2`,
+where the previous JSON fields were zero.
 
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,

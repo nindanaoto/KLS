@@ -105,6 +105,12 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         ),
         "fast_rejected_etree_columns": as_int(row, "fast_rejected_etree_columns", 0),
         "fast_rejected_etree_work": as_float(row, "fast_rejected_etree_work"),
+        "fast_rejected_row_tail_columns": as_int(
+            row, "fast_rejected_row_tail_columns", 0
+        ),
+        "fast_rejected_row_tail_work": as_float(
+            row, "fast_rejected_row_tail_work"
+        ),
     }
 
 
@@ -115,12 +121,14 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
     for record in records[:limit]:
         print(
             "  {matrix}: reason={reason} block_work={block:.6g} "
-            "tail_work={tail:.6g} saved_work={saved:.6g} "
+            "tail_work={tail:.6g} row_tail_work={row_tail:.6g} "
+            "saved_work={saved:.6g} "
             "prefix_changes={prefix} suffix_changes={suffix}".format(
                 matrix=record["matrix"],
                 reason=record["reason"],
                 block=float(record["fast_repaired_block_work"]),
                 tail=float(record["fast_repaired_tail_restart_work"]),
+                row_tail=float(record["fast_rejected_row_tail_work"]),
                 saved=float(record["fast_repaired_tail_restart_saved_work"]),
                 prefix=record["fast_repaired_prefix_changed_pivots"],
                 suffix=record["fast_repaired_suffix_changed_pivots"],
@@ -174,6 +182,11 @@ def main() -> int:
     )
     repaired_block_work = sum(float(r["fast_repaired_block_work"]) for r in repaired)
     blocked_block_work = sum(float(r["fast_repaired_block_work"]) for r in blocked)
+    row_tail = [
+        record for record in rejected
+        if int(record["fast_rejected_row_tail_columns"]) > 0
+    ]
+    row_tail_work = sum(float(r["fast_rejected_row_tail_work"]) for r in row_tail)
 
     summary = {
         "rows_total": len(rows),
@@ -190,6 +203,8 @@ def main() -> int:
         ),
         "blocked_repaired_block_work_total": blocked_block_work,
         "repaired_block_work_total": repaired_block_work,
+        "rows_with_row_tail_scope": len(row_tail),
+        "row_tail_work_total": row_tail_work,
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
 
