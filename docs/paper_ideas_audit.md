@@ -1740,6 +1740,19 @@ that compact segment storage is the right direction for the experimental row
 kernel, while also confirming that the row kernel still needs much more work
 before it can replace the current default.
 
+The grouped row-refactor scheduler then gained work-balanced per-thread slices
+inside each group level. The old grouped path assigned groups by static stride;
+that can leave one thread with dense segment groups while others process mostly
+singletons. KLS now builds persistent row-group level partitions from a
+structural work estimate and reuses them across gated row refactors, mirroring
+the work-balanced cluster slicing retained for the column EGraph path. This is
+still a barriered level scheduler, not CKTSO's pivot-aware pipeline tail. It
+stayed valid on the same focused checks: `G2_circuit` moved the gated row path
+to about `0.739s` repeated refactor, while the same-session default column
+EGraph path measured about `0.206s`. The small `add20` gated smoke remained
+valid but measured about `0.000269s`, so this remains a large-row/segment
+scaffolding step rather than a low-work dispatch policy.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
