@@ -8321,33 +8321,21 @@ static int kls_egraph_refactor_btf_unscaled_column(
   double **l_values = solver->refactor_l_values;
   UF_long **u_indices = solver->refactor_u_indices;
   double **u_values = solver->refactor_u_values;
-  if (k >= solver->n || symbolic->R == NULL || symbolic->Q == NULL ||
-      solver->refactor_lu_pointer_count != solver->n ||
+  if (solver->refactor_lu_pointer_count != solver->n ||
       l_indices == NULL || l_values == NULL ||
-      u_indices == NULL || u_values == NULL ||
-      solver->refactor_col_ptr == NULL ||
-      solver->refactor_row_idx == NULL ||
-      solver->refactor_input_pos == NULL ||
-      solver->refactor_block_start == NULL ||
-      solver->refactor_col_block == NULL ||
-      numeric->Offp == NULL || numeric->Offx == NULL) {
+      u_indices == NULL || u_values == NULL) {
     kls_egraph_refactor_record_invalid(shared);
     return 0;
   }
 
+  /* The dispatcher validates the map, block metadata, Offx arrays, and
+     topological U pattern before launching workers; keep this BTF hot path
+     aligned with the branch-light single-block kernel. */
   const UF_long block = solver->refactor_col_block[k];
-  if (block >= symbolic->nblocks) {
-    kls_egraph_refactor_record_invalid(shared);
-    return 0;
-  }
   const UF_long k1 = symbolic->R[block];
   const UF_long k2 = symbolic->R[block + 1u];
   const UF_long nk = k2 - k1;
   const UF_long local_k = k - k1;
-  if (local_k >= nk) {
-    kls_egraph_refactor_record_invalid(shared);
-    return 0;
-  }
 
   UF_long poff = numeric->Offp[k];
   const UF_long poff_end = numeric->Offp[k + 1u];
@@ -8365,10 +8353,6 @@ static int kls_egraph_refactor_btf_unscaled_column(
     double pivot = 0.0;
     for (UF_long p = solver->refactor_block_start[k];
          p < solver->refactor_col_ptr[k + 1u]; ++p) {
-      if (solver->refactor_row_idx[p] != k) {
-        kls_egraph_refactor_record_invalid(shared);
-        return 0;
-      }
       pivot = shared->values[solver->refactor_input_pos[p]];
     }
     udiag[k] = pivot;

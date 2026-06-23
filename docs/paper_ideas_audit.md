@@ -2031,6 +2031,22 @@ positive in a two-pass comparison. This is a real hot-loop cleanup for the
 existing EGraph BTF refactor, but it is still an incremental KLU-storage
 optimization rather than CKTSO's missing row-oriented pivoting-tail engine.
 
+That BTF-specialized kernel was tightened once more by removing validation
+branches already guaranteed by the EGraph dispatcher, refactor map builder, and
+LU-pointer-cache builder. The hot path still checks Offx bounds while writing
+off-block values, but trusts the already validated block metadata and
+topological U pattern, matching the single-block EGraph kernel's trust model.
+Against the previous retained specialization, the same nine-row BTF focus
+improved by about `1.8%` geomean with no failed rows. The refactor medians
+improved on the intended large-block cases: `ASIC_100k` `0.04441s` to
+`0.04317s`, `ASIC_100ks` `0.04496s` to `0.04354s`, `ASIC_320k` `0.09904s`
+to `0.09701s`, `ASIC_320ks` `0.08130s` to `0.07976s`, and `ASIC_680ks`
+`0.04886s` to `0.04740s`. A broader attempt to hoist the
+`shared->check_pivots` branch out of every L-update loop was rejected: it
+helped some ASIC samples but regressed low-work/scaled guards such as
+`LeGresley_87936`, `onetone2`, and `rajat28` under repeated same-session
+probes.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
