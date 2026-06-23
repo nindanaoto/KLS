@@ -76,12 +76,13 @@ Strict tail-restart readiness now also validates that the repaired block
 preserved the old prefix pivot order and that KLS can reconstruct the live KLU
 prefix state a pivoting tail kernel would need, including finalized-L row
 unfinalization, live `P`/`Pinv`, and symmetric-pruning `Lpend` boundaries.
-KLS now uses that proof to run a conservative serial pivoting-tail restart for
-unscaled prefix-current rejected blocks with a non-empty reusable prefix before
-falling back to full block repair. Root-of-block rejects are deliberately not
-reported as serial-tail-ready, because they need CKTSO's fuller row/ETree
-machinery rather than a contiguous prefix-preserving tail. This is still not
-CKTSO's full pipelined ETree-descendant tail factorization.
+KLS now uses that proof to run a conservative serial suffix restart with
+pivoting for unscaled prefix-current or all-current rejected blocks with a
+non-empty reusable prefix before falling back to full block repair.
+Root-of-block rejects are deliberately not reported as serial-tail-ready,
+because they need CKTSO's fuller row/ETree machinery rather than a contiguous
+prefix-preserving tail. This is still not CKTSO's full pipelined
+ETree-descendant tail factorization.
 
 The remaining CKTSO gap is large enough that it should be treated as a missing
 major algorithm, not an ordering-package tuning problem. On the selected large
@@ -1953,14 +1954,14 @@ fields separate cases where the robust full-block KLU repair already preserves
 the checked prefix and chooses the row-tail candidate from cases that would
 need broader repivoting than a CKTSO-style local tail restart can safely
 provide. KLS summarizes the compatible serial subset as
-`fast_repaired_tail_restart_ready`, which now requires a prefix-current
-non-root reject, zero changed pivots before the rejected pivot, a changed
-suffix pivot, a topological pivoting-tail scope containing the reject, and a
-validated live prefix replay. The checked row-tail candidate and candidate
-match fields remain diagnostics; they are no longer required before attempting
-the serial tail restart. When that flag is true, KLS also records the
-fallback full-block repair work, the pivoting-tail restart column/work upper
-bound, and the saved-work estimate a local tail restart would target.
+`fast_repaired_tail_restart_ready`, which now requires a prefix-current or
+all-current non-root reject, zero changed pivots before the rejected pivot, a
+changed suffix pivot, a topological pivoting-tail scope containing the reject,
+and a validated live prefix replay. The checked row-tail candidate and
+candidate match fields remain diagnostics; they are no longer required before
+attempting the serial tail restart. When that flag is true, KLS also records
+the fallback full-block repair work, the actual serial suffix column/work
+count, and the saved-work estimate the local restart targets.
 `scripts/summarize_tail_restart_opportunities.py` now turns those JSONL fields
 into suite-level counts, blocker reasons, and largest saved-work opportunities
 so the tail-kernel work can be prioritized from broad benchmark evidence. It
@@ -2611,6 +2612,15 @@ uses one serial tail restart, preserves the prefix, and produces a bounded
 solve. The benchmark summarizer now reports executed tail restarts separately
 from remaining strict-ready opportunities and no longer classifies a missing
 row-tail diagnostic as the first hard blocker.
+
+The same serial suffix restart was then opened to unscaled all-current
+postcheck rejects. Those failures have already refreshed the block with the
+old pivot order, but the prefix before a non-root rejected pivot is still
+replayable by the same live-prefix validator. KLS now tries the suffix restart
+before full block repair in that state too. The `fast_repaired_tail_restart_*`
+work counters now use the actual serial suffix work KLS executes, while the
+`fast_rejected_pivoting_tail_*` fields remain the CKTSO-style ETree-tail
+diagnostic target for a future row/segment scheduler.
 
 ## Recommended General Work
 

@@ -7738,6 +7738,31 @@ static int kls_fast_reject_block_work(const kls_solver *solver,
   return 1;
 }
 
+static int kls_fast_reject_suffix_work(const kls_solver *solver,
+                                       UF_long block,
+                                       UF_long k1,
+                                       UF_long nk,
+                                       UF_long local_reject,
+                                       UF_long *columns_out,
+                                       double *work_out) {
+  if (solver == NULL || columns_out == NULL || work_out == NULL ||
+      local_reject >= nk) {
+    return 0;
+  }
+  double work = 0.0;
+  for (UF_long k = local_reject; k < nk; ++k) {
+    double column_work = 0.0;
+    if (!kls_fast_reject_column_work(solver, block, k1, nk, k,
+                                     &column_work)) {
+      return 0;
+    }
+    work += column_work;
+  }
+  *columns_out = nk - local_reject;
+  *work_out = work;
+  return 1;
+}
+
 static int kls_build_ordered_block_etree(const kls_solver *solver,
                                          UF_long k1,
                                          UF_long k2,
@@ -9532,13 +9557,17 @@ static int kls_try_pivot_tail_restart_rejected_block(
   if (unz_block_out != NULL) {
     *unz_block_out = 0;
   }
+  const int reusable_prefix_state =
+    solver != NULL &&
+    (solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX ||
+     solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL);
   if (solver == NULL || solver->numeric == NULL ||
       solver->symbolic == NULL || numeric_values == NULL ||
       old_pblock == NULL || psinv == NULL || new_lu_out == NULL ||
       new_size_out == NULL || lnz_block_out == NULL ||
       unz_block_out == NULL || pblock == NULL ||
       solver->common.scale > 0 ||
-      solver->fast_reject_refresh_state != KLS_FAST_REJECT_REFRESH_PREFIX ||
+      !reusable_prefix_state ||
       local_reject == 0u || local_reject >= nk ||
       block >= solver->numeric->nblocks ||
       solver->numeric->LUbx == NULL ||
@@ -9861,7 +9890,11 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     solver->stats.fast_rejected_pivoting_tail_work > 0.0 &&
     solver->stats.fast_rejected_pivoting_tail_contains_reject &&
     solver->stats.fast_rejected_pivoting_tail_topological;
+  const int serial_tail_state =
+    solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX ||
+    solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL;
   solver->stats.fast_repaired_tail_restart_ready =
+    serial_tail_state &&
     local_reject > 0u &&
     prefix_changed == 0u &&
     (first_changed == KLS_KLU_EMPTY || first_changed >= rejected_pivot) &&
@@ -9876,13 +9909,18 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
   if (kls_fast_reject_block_work(solver, block, k1, nk, &block_work)) {
     solver->stats.fast_repaired_block_work = block_work;
     if (solver->stats.fast_repaired_tail_restart_ready) {
-      const double tail_work =
-        solver->stats.fast_rejected_pivoting_tail_work;
-      solver->stats.fast_repaired_tail_restart_columns =
-        solver->stats.fast_rejected_pivoting_tail_columns;
-      solver->stats.fast_repaired_tail_restart_work = tail_work;
-      solver->stats.fast_repaired_tail_restart_saved_work =
-        block_work > tail_work ? block_work - tail_work : 0.0;
+      UF_long tail_columns = 0;
+      double tail_work = 0.0;
+      if (kls_fast_reject_suffix_work(solver, block, k1, nk, local_reject,
+                                      &tail_columns, &tail_work)) {
+        solver->stats.fast_repaired_tail_restart_columns =
+          (int64_t)tail_columns;
+        solver->stats.fast_repaired_tail_restart_work = tail_work;
+        solver->stats.fast_repaired_tail_restart_saved_work =
+          block_work > tail_work ? block_work - tail_work : 0.0;
+      } else {
+        solver->stats.fast_repaired_tail_restart_ready = 0;
+      }
     }
   }
 }

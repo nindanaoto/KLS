@@ -315,13 +315,13 @@ in input-row order. Scaled multi-block tails and scaled all-refresh KLU
 refactor rejects still fall back conservatively. When an unscaled serial BTF
 refactor rejects a non-final block, the repaired block can now be followed by a
 serial checked continuation over only the later BTF blocks instead of
-restarting from the first block. For unscaled prefix-current rejects whose
-validated repair preserves a non-empty live prefix state, KLS can execute a
-conservative serial pivoting-tail restart of the rejected block before falling
-back to full block repair. This executable tail path is not limited to the
-checked row-refactor candidate diagnostic; the diagnostic is retained only to
-explain row-major candidate quality when that metadata exists. Root-of-block
-rejects remain classified as CKTSO
+restarting from the first block. For unscaled prefix-current or all-current
+rejects whose validated repair preserves a non-empty live prefix state, KLS
+can execute a conservative serial suffix restart of the rejected block with
+pivoting before falling back to full block repair. This executable tail path is
+not limited to the checked row-refactor candidate diagnostic; the diagnostic is
+retained only to explain row-major candidate quality when that metadata exists.
+Root-of-block rejects remain classified as CKTSO
 ETree/pipeline work rather than serial-tail-ready, because no contiguous prefix
 can be reused. This is a local serial subset of CKTSO-style tail restart, not
 the full pipelined ETree-descendant scheduler.
@@ -380,7 +380,7 @@ whose row changed in the fallback repair, how many changed pivots were before
 and at/after the rejected pivot, whether the robust repair outcome preserved
 the old block prefix, whether KLS can reconstruct the live KLU prefix
 `P`/`Pinv`/pruning state needed by a local serial tail restart, the estimated
-full-block repair work and validated non-root pivoting-tail restart work/saved
+full-block repair work and validated non-root serial suffix restart work/saved
 work, the
 rejected BTF block, the suffix from that pivot to the end
 of the block, the exact U-pattern descendant tail inside that block, the
