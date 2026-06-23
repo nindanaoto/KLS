@@ -648,6 +648,11 @@ int main(int argc, char **argv) {
            ",\"refactor_dependency_max_fanout\":%" PRId64
            ",\"refactor_dependency_max_column_work\":%.9g"
            ",\"refactor_dependency_pipeline_max_column_work\":%.9g"
+           ",\"refactor_supernode_candidate_count\":%" PRId64
+           ",\"refactor_supernode_candidate_rows\":%" PRId64
+           ",\"refactor_supernode_candidate_max_width\":%" PRId64
+           ",\"refactor_supernode_candidate_dense_entries\":%.9g"
+           ",\"refactor_supernode_candidate_trailing_entries\":%.9g"
            ",\"refactor_dependency_cluster_levels\":%" PRId64
            ",\"refactor_dependency_pipeline_columns\":%" PRId64
            ",\"refactor_dependency_work\":%.9g"
@@ -695,6 +700,11 @@ int main(int argc, char **argv) {
            stats.refactor_dependency_max_fanout,
            stats.refactor_dependency_max_column_work,
            stats.refactor_dependency_pipeline_max_column_work,
+           stats.refactor_supernode_candidate_count,
+           stats.refactor_supernode_candidate_rows,
+           stats.refactor_supernode_candidate_max_width,
+           stats.refactor_supernode_candidate_dense_entries,
+           stats.refactor_supernode_candidate_trailing_entries,
            stats.refactor_dependency_cluster_levels,
            stats.refactor_dependency_pipeline_columns,
            stats.refactor_dependency_work,
@@ -770,6 +780,14 @@ int main(int argc, char **argv) {
            ", pipeline max column work: %.6g\n",
            stats.refactor_dependency_max_column_work,
            stats.refactor_dependency_pipeline_max_column_work);
+    printf("refactor supernode candidates: %" PRId64
+           ", rows: %" PRId64 ", max width: %" PRId64
+           ", dense entries: %.6g, trailing entries: %.6g\n",
+           stats.refactor_supernode_candidate_count,
+           stats.refactor_supernode_candidate_rows,
+           stats.refactor_supernode_candidate_max_width,
+           stats.refactor_supernode_candidate_dense_entries,
+           stats.refactor_supernode_candidate_trailing_entries);
     printf("refactor dependency cluster levels: %" PRId64
            ", pipeline columns: %" PRId64 "\n",
            stats.refactor_dependency_cluster_levels,

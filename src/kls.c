@@ -75,6 +75,11 @@ struct kls_solver {
   UF_long refactor_dependency_max_fanout;
   double refactor_dependency_max_column_work;
   double refactor_dependency_pipeline_max_column_work;
+  UF_long refactor_supernode_candidate_count;
+  UF_long refactor_supernode_candidate_rows;
+  UF_long refactor_supernode_candidate_max_width;
+  double refactor_supernode_candidate_dense_entries;
+  double refactor_supernode_candidate_trailing_entries;
   UF_long refactor_cluster_level_count;
   UF_long refactor_pipeline_column_count;
   double refactor_dependency_work;
@@ -328,6 +333,42 @@ static inline void kls_scatter_subtract(double *restrict x,
   }
 }
 
+static inline uint64_t kls_mix_u64(uint64_t x) {
+  x ^= x >> 33u;
+  x *= UINT64_C(0xff51afd7ed558ccd);
+  x ^= x >> 33u;
+  x *= UINT64_C(0xc4ceb9fe1a85ec53);
+  x ^= x >> 33u;
+  return x;
+}
+
+static inline uint64_t kls_supernode_hash1(UF_long col) {
+  return kls_mix_u64((uint64_t)col + UINT64_C(0x9e3779b97f4a7c15));
+}
+
+static inline uint64_t kls_supernode_hash2(UF_long col) {
+  return kls_mix_u64((uint64_t)col ^ UINT64_C(0xd1b54a32d192ed03));
+}
+
+static void kls_record_supernode_candidate(
+  kls_solver *solver,
+  UF_long start,
+  UF_long width,
+  const UF_long *successor_counts) {
+  if (solver == NULL || successor_counts == NULL || width <= 1u) {
+    return;
+  }
+  solver->refactor_supernode_candidate_count++;
+  solver->refactor_supernode_candidate_rows += width;
+  if (width > solver->refactor_supernode_candidate_max_width) {
+    solver->refactor_supernode_candidate_max_width = width;
+  }
+  solver->refactor_supernode_candidate_dense_entries +=
+    (double)width * (double)(width - 1u) * 0.5;
+  solver->refactor_supernode_candidate_trailing_entries +=
+    (double)width * (double)successor_counts[start + width - 1u];
+}
+
 static void free_refactor_map(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -378,6 +419,11 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_dependency_max_fanout = 0;
   solver->refactor_dependency_max_column_work = 0.0;
   solver->refactor_dependency_pipeline_max_column_work = 0.0;
+  solver->refactor_supernode_candidate_count = 0;
+  solver->refactor_supernode_candidate_rows = 0;
+  solver->refactor_supernode_candidate_max_width = 0;
+  solver->refactor_supernode_candidate_dense_entries = 0.0;
+  solver->refactor_supernode_candidate_trailing_entries = 0.0;
   solver->refactor_cluster_level_count = 0;
   solver->refactor_pipeline_column_count = 0;
   solver->refactor_dependency_work = 0.0;
@@ -6832,6 +6878,16 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_dependency_max_column_work;
   solver->stats.refactor_dependency_pipeline_max_column_work =
     solver->refactor_dependency_pipeline_max_column_work;
+  solver->stats.refactor_supernode_candidate_count =
+    (int64_t)solver->refactor_supernode_candidate_count;
+  solver->stats.refactor_supernode_candidate_rows =
+    (int64_t)solver->refactor_supernode_candidate_rows;
+  solver->stats.refactor_supernode_candidate_max_width =
+    (int64_t)solver->refactor_supernode_candidate_max_width;
+  solver->stats.refactor_supernode_candidate_dense_entries =
+    solver->refactor_supernode_candidate_dense_entries;
+  solver->stats.refactor_supernode_candidate_trailing_entries =
+    solver->refactor_supernode_candidate_trailing_entries;
   solver->stats.refactor_dependency_cluster_levels =
     (int64_t)solver->refactor_cluster_level_count;
   solver->stats.refactor_dependency_pipeline_columns =
@@ -9763,16 +9819,48 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   }
 
   free_refactor_schedule(solver);
-  UF_long *levels = (UF_long *)calloc((size_t)solver->n, sizeof(*levels));
-  UF_long *successor_counts =
+  UF_long *levels = NULL;
+  UF_long *successor_counts = NULL;
+  UF_long *first_successor = NULL;
+  uint64_t *row_hash1 = NULL;
+  uint64_t *row_hash2 = NULL;
+  double *column_work = NULL;
+  UF_long *counts = NULL;
+  UF_long *level_ptr = NULL;
+  UF_long *level_cols = NULL;
+  UF_long *level_thread_ptr = NULL;
+
+#define KLS_FREE_REFACTOR_SCHEDULE_TEMP() \
+  do { \
+    free(levels); \
+    free(successor_counts); \
+    free(first_successor); \
+    free(row_hash1); \
+    free(row_hash2); \
+    free(column_work); \
+    free(counts); \
+    free(level_ptr); \
+    free(level_cols); \
+    free(level_thread_ptr); \
+  } while (0)
+
+  levels = (UF_long *)calloc((size_t)solver->n, sizeof(*levels));
+  successor_counts =
     (UF_long *)calloc((size_t)solver->n, sizeof(*successor_counts));
-  double *column_work =
+  first_successor =
+    (UF_long *)malloc((size_t)solver->n * sizeof(*first_successor));
+  row_hash1 = (uint64_t *)calloc((size_t)solver->n, sizeof(*row_hash1));
+  row_hash2 = (uint64_t *)calloc((size_t)solver->n, sizeof(*row_hash2));
+  column_work =
     (double *)calloc((size_t)solver->n, sizeof(*column_work));
-  if (levels == NULL || successor_counts == NULL || column_work == NULL) {
-    free(levels);
-    free(successor_counts);
-    free(column_work);
+  if (levels == NULL || successor_counts == NULL ||
+      first_successor == NULL || row_hash1 == NULL ||
+      row_hash2 == NULL || column_work == NULL) {
+    KLS_FREE_REFACTOR_SCHEDULE_TEMP();
     return 0;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    first_successor[k] = KLS_KLU_EMPTY;
   }
 
   UF_long max_level = 0;
@@ -9800,9 +9888,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     }
     double *lu = (double *)solver->numeric->LUbx[block];
     if (lu == NULL) {
-      free(levels);
-      free(successor_counts);
-      free(column_work);
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();
       return 0;
     }
     const UF_long *uip = solver->numeric->Uip + k1;
@@ -9818,13 +9904,18 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       for (UF_long p = 0; p < ucol_len; ++p) {
         const UF_long dep = ui[p];
         if (dep >= k) {
-          free(levels);
-          free(successor_counts);
-          free(column_work);
+          KLS_FREE_REFACTOR_SCHEDULE_TEMP();
           return 0;
         }
-        successor_counts[k1 + dep]++;
-        const UF_long dep_level = levels[k1 + dep] + 1u;
+        const UF_long global_dep = k1 + dep;
+        const UF_long global_col = k1 + k;
+        successor_counts[global_dep]++;
+        if (first_successor[global_dep] == KLS_KLU_EMPTY) {
+          first_successor[global_dep] = global_col;
+        }
+        row_hash1[global_dep] += kls_supernode_hash1(global_col);
+        row_hash2[global_dep] += kls_supernode_hash2(global_col);
+        const UF_long dep_level = levels[global_dep] + 1u;
         if (dep_level > level) {
           level = dep_level;
         }
@@ -9857,18 +9948,15 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       max_fanout = fanout;
     }
   }
-  free(successor_counts);
 
   UF_long level_count = max_level + 1u;
-  UF_long *counts =
-    (UF_long *)calloc((size_t)level_count + 1u, sizeof(*counts));
-  UF_long *level_ptr =
+  counts = (UF_long *)calloc((size_t)level_count + 1u, sizeof(*counts));
+  level_ptr =
     (UF_long *)malloc(((size_t)level_count + 1u) * sizeof(*level_ptr));
   const int thread_count = solver->options.threads;
-  UF_long *level_cols =
-    natural_pipeline ? NULL : (UF_long *)malloc((size_t)solver->n *
-                                                sizeof(*level_cols));
-  UF_long *level_thread_ptr = NULL;
+  level_cols = natural_pipeline ? NULL
+                                : (UF_long *)malloc((size_t)solver->n *
+                                                    sizeof(*level_cols));
   if (thread_count > 1 && !all_pipeline) {
     level_thread_ptr =
       (UF_long *)malloc((size_t)level_count *
@@ -9877,31 +9965,17 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   }
   if (counts == NULL || level_ptr == NULL ||
       (!natural_pipeline && level_cols == NULL)) {
-    free(levels);
-    free(column_work);
-    free(counts);
-    free(level_ptr);
-    free(level_cols);
-    free(level_thread_ptr);
+    KLS_FREE_REFACTOR_SCHEDULE_TEMP();
     return 0;
   }
   if (thread_count > 1 && !all_pipeline && level_thread_ptr == NULL) {
-    free(levels);
-    free(column_work);
-    free(counts);
-    free(level_ptr);
-    free(level_cols);
+    KLS_FREE_REFACTOR_SCHEDULE_TEMP();
     return 0;
   }
 
   for (UF_long k = 0; k < solver->n; ++k) {
     if (levels[k] >= level_count) {
-      free(levels);
-      free(column_work);
-      free(counts);
-      free(level_ptr);
-      free(level_cols);
-      free(level_thread_ptr);
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();
       return 0;
     }
     counts[levels[k] + 1u]++;
@@ -9940,12 +10014,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       const UF_long level = levels[k];
       const UF_long dst = next[level]++;
       if (dst >= solver->n) {
-        free(levels);
-        free(column_work);
-        free(counts);
-        free(level_ptr);
-        free(level_cols);
-        free(level_thread_ptr);
+        KLS_FREE_REFACTOR_SCHEDULE_TEMP();
         return 0;
       }
       level_cols[dst] = k;
@@ -9966,12 +10035,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       for (UF_long pos = begin; pos < end; ++pos) {
         const UF_long col = level_cols[pos];
         if (col >= solver->n) {
-          free(levels);
-          free(column_work);
-          free(counts);
-          free(level_ptr);
-          free(level_cols);
-          free(level_thread_ptr);
+          KLS_FREE_REFACTOR_SCHEDULE_TEMP();
           return 0;
         }
         level_work += column_work[col];
@@ -9997,12 +10061,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     for (UF_long pos = level_ptr[cluster_levels]; pos < solver->n; ++pos) {
       const UF_long col = natural_pipeline ? pos : level_cols[pos];
       if (!natural_pipeline && col >= solver->n) {
-        free(levels);
-        free(column_work);
-        free(counts);
-        free(level_ptr);
-        free(level_cols);
-        free(level_thread_ptr);
+        KLS_FREE_REFACTOR_SCHEDULE_TEMP();
         return 0;
       }
       pipeline_columns++;
@@ -10014,9 +10073,44 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     }
   }
 
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (k2 - k1 <= 1u) {
+      continue;
+    }
+    UF_long start = k1;
+    UF_long width = 1u;
+    for (UF_long k = k1; k + 1u < k2; ++k) {
+      const UF_long next = k + 1u;
+      const uint64_t next_hash1 = kls_supernode_hash1(next);
+      const uint64_t next_hash2 = kls_supernode_hash2(next);
+      const int extends =
+        first_successor[k] == next &&
+        successor_counts[k] > 0u &&
+        successor_counts[k] - 1u == successor_counts[next] &&
+        row_hash1[k] - next_hash1 == row_hash1[next] &&
+        row_hash2[k] - next_hash2 == row_hash2[next];
+      if (extends) {
+        width++;
+      } else {
+        kls_record_supernode_candidate(solver, start, width,
+                                       successor_counts);
+        start = next;
+        width = 1u;
+      }
+    }
+    kls_record_supernode_candidate(solver, start, width, successor_counts);
+  }
+
   free(levels);
+  free(successor_counts);
+  free(first_successor);
+  free(row_hash1);
+  free(row_hash2);
   free(column_work);
   free(counts);
+#undef KLS_FREE_REFACTOR_SCHEDULE_TEMP
   solver->refactor_level_ptr = level_ptr;
   solver->refactor_level_cols = level_cols;
   solver->refactor_level_thread_ptr = level_thread_ptr;

@@ -120,6 +120,11 @@ typedef struct kls_stats {
   int64_t refactor_dependency_max_fanout;
   double refactor_dependency_max_column_work;
   double refactor_dependency_pipeline_max_column_work;
+  int64_t refactor_supernode_candidate_count;
+  int64_t refactor_supernode_candidate_rows;
+  int64_t refactor_supernode_candidate_max_width;
+  double refactor_supernode_candidate_dense_entries;
+  double refactor_supernode_candidate_trailing_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

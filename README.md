@@ -629,7 +629,10 @@ repeated SPICE-style solves and a KLS-owned threaded refactor path for BTF block
 parallelism on a narrow class of large cases. KLS also has a precomputed
 single-block and serial BTF refactor scatter path for unscaled repeated
 refactors and a narrow scaled dominant-BTF subset, plus an unscaled block-local
-pivot restart for fast-factor failures.
+pivot restart for fast-factor failures. Benchmark stats also report
+row-major U-pattern supernode candidates from the refactor dependency pass, so
+the remaining SubtreeLU/CKTSO row-segment work can be evaluated on the same
+slow-case artifacts.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The next algorithmic work is to evolve the numeric factor/refactor/solve
 kernels toward deeper KLS-owned sparse kernels with better pivot reuse and
