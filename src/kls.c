@@ -78,6 +78,8 @@ struct kls_solver {
   UF_long *row_refactor_input_pos;
   UF_long *row_refactor_successor_ptr;
   UF_long *row_refactor_successor_rows;
+  UF_long *row_refactor_tail_rows;
+  unsigned int *row_refactor_tail_marks;
   UF_long *row_refactor_level_ptr;
   UF_long *row_refactor_level_rows;
   UF_long *row_refactor_group_ptr;
@@ -103,6 +105,8 @@ struct kls_solver {
   UF_long row_refactor_dense_segment_max_width;
   double row_refactor_dense_segment_dense_entries;
   double row_refactor_dense_segment_trailing_entries;
+  unsigned int row_refactor_tail_mark;
+  UF_long row_refactor_tail_count;
   UF_long *refactor_level_ptr;
   UF_long *refactor_level_cols;
   UF_long *refactor_level_thread_ptr;
@@ -472,6 +476,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_input_pos);
   free(solver->row_refactor_successor_ptr);
   free(solver->row_refactor_successor_rows);
+  free(solver->row_refactor_tail_rows);
+  free(solver->row_refactor_tail_marks);
   free(solver->row_refactor_level_ptr);
   free(solver->row_refactor_level_rows);
   free(solver->row_refactor_group_ptr);
@@ -495,6 +501,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_input_pos = NULL;
   solver->row_refactor_successor_ptr = NULL;
   solver->row_refactor_successor_rows = NULL;
+  solver->row_refactor_tail_rows = NULL;
+  solver->row_refactor_tail_marks = NULL;
   solver->row_refactor_level_ptr = NULL;
   solver->row_refactor_level_rows = NULL;
   solver->row_refactor_group_ptr = NULL;
@@ -520,6 +528,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_dense_segment_max_width = 0;
   solver->row_refactor_dense_segment_dense_entries = 0.0;
   solver->row_refactor_dense_segment_trailing_entries = 0.0;
+  solver->row_refactor_tail_mark = 0u;
+  solver->row_refactor_tail_count = 0;
 }
 
 static void free_refactor_schedule(kls_solver *solver) {
@@ -7636,60 +7646,104 @@ static double kls_row_refactor_tail_row_work(const kls_solver *solver,
   return work;
 }
 
+static int kls_build_row_refactor_tail(kls_solver *solver,
+                                       UF_long root,
+                                       const UF_long **rows_out,
+                                       UF_long *count_out) {
+  if (rows_out != NULL) {
+    *rows_out = NULL;
+  }
+  if (count_out != NULL) {
+    *count_out = 0;
+  }
+  if (solver == NULL || root >= solver->n ||
+      solver->row_refactor_pattern_n != solver->n ||
+      solver->row_refactor_successor_ptr == NULL ||
+      (solver->row_refactor_successor_ptr[solver->n] > 0u &&
+       solver->row_refactor_successor_rows == NULL) ||
+      rows_out == NULL || count_out == NULL) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  if (solver->row_refactor_tail_rows == NULL) {
+    solver->row_refactor_tail_rows =
+      (UF_long *)malloc((size_t)n * sizeof(*solver->row_refactor_tail_rows));
+  }
+  if (solver->row_refactor_tail_marks == NULL) {
+    solver->row_refactor_tail_marks =
+      (unsigned int *)calloc((size_t)n,
+                             sizeof(*solver->row_refactor_tail_marks));
+  }
+  if (solver->row_refactor_tail_rows == NULL ||
+      solver->row_refactor_tail_marks == NULL) {
+    return 0;
+  }
+
+  if (solver->row_refactor_tail_mark == UINT_MAX) {
+    memset(solver->row_refactor_tail_marks, 0,
+           (size_t)n * sizeof(*solver->row_refactor_tail_marks));
+    solver->row_refactor_tail_mark = 0u;
+  }
+  const unsigned int mark = ++solver->row_refactor_tail_mark;
+  unsigned int *marks = solver->row_refactor_tail_marks;
+  UF_long *queue = solver->row_refactor_tail_rows;
+
+  UF_long head = 0;
+  UF_long tail = 0;
+  marks[root] = mark;
+  queue[tail++] = root;
+  while (head < tail) {
+    const UF_long row = queue[head++];
+    for (UF_long p = solver->row_refactor_successor_ptr[row];
+         p < solver->row_refactor_successor_ptr[row + 1u]; ++p) {
+      const UF_long successor = solver->row_refactor_successor_rows[p];
+      if (successor >= n) {
+        solver->row_refactor_tail_count = 0;
+        return 0;
+      }
+      if (marks[successor] != mark) {
+        marks[successor] = mark;
+        queue[tail++] = successor;
+      }
+    }
+  }
+
+  UF_long count = 0;
+  for (UF_long row = root; row < n; ++row) {
+    if (marks[row] == mark) {
+      solver->row_refactor_tail_rows[count++] = row;
+    }
+  }
+  solver->row_refactor_tail_count = count;
+  *rows_out = solver->row_refactor_tail_rows;
+  *count_out = count;
+  return 1;
+}
+
 static void kls_fill_fast_reject_row_tail_stats(kls_solver *solver,
                                                 UF_long block,
                                                 UF_long k1,
                                                 UF_long k2,
                                                 UF_long local_reject) {
   if (solver == NULL || block != 0u || k1 != 0u || k2 != solver->n ||
-      local_reject >= k2 - k1 ||
-      solver->row_refactor_pattern_n != solver->n ||
-      solver->row_refactor_successor_ptr == NULL ||
-      (solver->row_refactor_successor_ptr[solver->n] > 0u &&
-       solver->row_refactor_successor_rows == NULL)) {
+      local_reject >= k2 - k1) {
     return;
   }
 
-  const UF_long n = solver->n;
-  unsigned char *seen = (unsigned char *)calloc((size_t)n, sizeof(*seen));
-  UF_long *queue = n > 0u
-    ? (UF_long *)malloc((size_t)n * sizeof(*queue)) : NULL;
-  if (seen == NULL || (n > 0u && queue == NULL)) {
-    free(seen);
-    free(queue);
-    return;
-  }
-
-  UF_long head = 0;
-  UF_long tail = 0;
-  seen[local_reject] = 1u;
-  queue[tail++] = local_reject;
+  const UF_long *tail_rows = NULL;
   UF_long columns = 0;
+  if (!kls_build_row_refactor_tail(solver, local_reject,
+                                   &tail_rows, &columns)) {
+    return;
+  }
   double work = 0.0;
-
-  while (head < tail) {
-    const UF_long row = queue[head++];
-    columns++;
-    work += kls_row_refactor_tail_row_work(solver, row);
-    for (UF_long p = solver->row_refactor_successor_ptr[row];
-         p < solver->row_refactor_successor_ptr[row + 1u]; ++p) {
-      const UF_long successor = solver->row_refactor_successor_rows[p];
-      if (successor >= n) {
-        free(seen);
-        free(queue);
-        return;
-      }
-      if (!seen[successor]) {
-        seen[successor] = 1u;
-        queue[tail++] = successor;
-      }
-    }
+  for (UF_long p = 0; p < columns; ++p) {
+    work += kls_row_refactor_tail_row_work(solver, tail_rows[p]);
   }
 
   solver->stats.fast_rejected_row_tail_columns = (int64_t)columns;
   solver->stats.fast_rejected_row_tail_work = work;
-  free(seen);
-  free(queue);
 }
 
 static void kls_fill_fast_reject_etree_tail_stats(kls_solver *solver,
