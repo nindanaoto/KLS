@@ -358,6 +358,9 @@ unchecked row refactors are selected independently, stats also report
 `row_refactor_last_run`, `row_refactor_last_checked`,
 `row_refactor_last_parallel`, and row-refactor run counters to identify the
 last numeric kernel actually used.
+Checked EGraph refactors also keep a completed-column bitmap for barriered
+cluster-only runs, so a pivot reject is reported as prefix-current when every
+earlier factor-order column is proven finished.
 Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_row`,
 `fast_rejected_multiplier_abs`, `fast_rejected_pivot_abs`,

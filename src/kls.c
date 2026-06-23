@@ -14133,7 +14133,11 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     pipeline_done =
       ensure_egraph_pipeline_done(solver, &pipeline_generation);
   }
-  if (natural_pipeline && pipeline_done == NULL) {
+  if (check_pivots && pipeline_done == NULL) {
+    pipeline_done =
+      ensure_egraph_pipeline_done(solver, &pipeline_generation);
+  }
+  if ((natural_pipeline || check_pivots) && pipeline_done == NULL) {
     return -1;
   }
 

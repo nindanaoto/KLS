@@ -80,6 +80,11 @@ reports prefix-current only when every diagonal block before a checked pivot
 reject has finished. That lets the existing block repair and later-block
 checked continuation consume more safe parallel fast-factor rejects without
 claiming the full CKTSO tail algorithm.
+Checked EGraph refactors now also retain the completed-column bitmap for
+barriered cluster-only runs, not only for all-pipeline or pipeline-tail
+schedules. A cluster-mode pivot reject can therefore be classified as
+prefix-current when every earlier factor-order column is proven finished,
+while same-level out-of-order cases remain conservative.
 Strict tail-restart readiness now also validates that the repaired block
 preserved the old prefix pivot order and that KLS can reconstruct the live KLU
 prefix state a pivoting tail kernel would need, including finalized-L row
