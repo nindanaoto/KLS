@@ -2079,6 +2079,13 @@ close a performance gap, but it prevents future matching/scaling work from
 accidentally crossing the licensing boundary while keeping compatible existing
 code available for KLS.
 
+The refactor schedule diagnostics now also record dependency root columns,
+leaf columns, and maximum successor fanout. These counters are computed while
+KLS already walks the numeric U pattern to build exact EGraph levels. They are
+intended to quantify the opportunity for a successor-driven ready scheduler or
+row/segment engine on the CKTSO-gap rows, rather than to tune on matrix names
+or infer the gap from total edge count alone.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

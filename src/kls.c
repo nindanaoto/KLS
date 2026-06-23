@@ -70,6 +70,9 @@ struct kls_solver {
   UF_long refactor_level_count;
   UF_long refactor_level_max_width;
   UF_long refactor_dependency_edges;
+  UF_long refactor_dependency_root_columns;
+  UF_long refactor_dependency_leaf_columns;
+  UF_long refactor_dependency_max_fanout;
   UF_long refactor_cluster_level_count;
   UF_long refactor_pipeline_column_count;
   double refactor_dependency_work;
@@ -351,6 +354,9 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_level_count = 0;
   solver->refactor_level_max_width = 0;
   solver->refactor_dependency_edges = 0;
+  solver->refactor_dependency_root_columns = 0;
+  solver->refactor_dependency_leaf_columns = 0;
+  solver->refactor_dependency_max_fanout = 0;
   solver->refactor_cluster_level_count = 0;
   solver->refactor_pipeline_column_count = 0;
   solver->refactor_dependency_work = 0.0;
@@ -6797,6 +6803,12 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_level_max_width;
   solver->stats.refactor_dependency_edges =
     (int64_t)solver->refactor_dependency_edges;
+  solver->stats.refactor_dependency_root_columns =
+    (int64_t)solver->refactor_dependency_root_columns;
+  solver->stats.refactor_dependency_leaf_columns =
+    (int64_t)solver->refactor_dependency_leaf_columns;
+  solver->stats.refactor_dependency_max_fanout =
+    (int64_t)solver->refactor_dependency_max_fanout;
   solver->stats.refactor_dependency_cluster_levels =
     (int64_t)solver->refactor_cluster_level_count;
   solver->stats.refactor_dependency_pipeline_columns =
@@ -9737,16 +9749,20 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
 
   free_refactor_schedule(solver);
   UF_long *levels = (UF_long *)calloc((size_t)solver->n, sizeof(*levels));
+  UF_long *successor_counts =
+    (UF_long *)calloc((size_t)solver->n, sizeof(*successor_counts));
   double *column_work =
     (double *)calloc((size_t)solver->n, sizeof(*column_work));
-  if (levels == NULL || column_work == NULL) {
+  if (levels == NULL || successor_counts == NULL || column_work == NULL) {
     free(levels);
+    free(successor_counts);
     free(column_work);
     return 0;
   }
 
   UF_long max_level = 0;
   UF_long edges = 0;
+  UF_long root_columns = 0;
   double total_work = 0.0;
   const int weight_singleton_blocks =
     kls_egraph_non_dominant_many_block_shape(solver);
@@ -9758,11 +9774,15 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       if (nk == 1u && weight_singleton_blocks) {
         column_work[k1] = 1.0;
       }
+      if (nk == 1u) {
+        root_columns++;
+      }
       continue;
     }
     double *lu = (double *)solver->numeric->LUbx[block];
     if (lu == NULL) {
       free(levels);
+      free(successor_counts);
       free(column_work);
       return 0;
     }
@@ -9780,15 +9800,20 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
         const UF_long dep = ui[p];
         if (dep >= k) {
           free(levels);
+          free(successor_counts);
           free(column_work);
           return 0;
         }
+        successor_counts[k1 + dep]++;
         const UF_long dep_level = levels[k1 + dep] + 1u;
         if (dep_level > level) {
           level = dep_level;
         }
         work += 1.0 + (double)solver->numeric->Llen[k1 + dep];
         edges++;
+      }
+      if (ucol_len == 0u) {
+        root_columns++;
       }
       levels[k1 + k] = level;
       column_work[k1 + k] = work;
@@ -9798,6 +9823,19 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       }
     }
   }
+
+  UF_long leaf_columns = 0;
+  UF_long max_fanout = 0;
+  for (UF_long k = 0; k < solver->n; ++k) {
+    const UF_long fanout = successor_counts[k];
+    if (fanout == 0u) {
+      leaf_columns++;
+    }
+    if (fanout > max_fanout) {
+      max_fanout = fanout;
+    }
+  }
+  free(successor_counts);
 
   UF_long level_count = max_level + 1u;
   UF_long *counts =
@@ -9959,6 +9997,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   solver->refactor_level_count = level_count;
   solver->refactor_level_max_width = max_width;
   solver->refactor_dependency_edges = edges;
+  solver->refactor_dependency_root_columns = root_columns;
+  solver->refactor_dependency_leaf_columns = leaf_columns;
+  solver->refactor_dependency_max_fanout = max_fanout;
   solver->refactor_cluster_level_count = cluster_levels;
   solver->refactor_pipeline_column_count = pipeline_columns;
   solver->refactor_dependency_work = total_work;

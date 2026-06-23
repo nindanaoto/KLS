@@ -115,6 +115,9 @@ typedef struct kls_stats {
   int64_t fast_rejected_etree_columns;
   double fast_rejected_etree_work;
   int fast_rejected_refresh_state;
+  int64_t refactor_dependency_root_columns;
+  int64_t refactor_dependency_leaf_columns;
+  int64_t refactor_dependency_max_fanout;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

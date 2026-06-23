@@ -643,6 +643,9 @@ int main(int argc, char **argv) {
            ",\"refactor_dependency_levels\":%" PRId64
            ",\"refactor_dependency_max_width\":%" PRId64
            ",\"refactor_dependency_edges\":%" PRId64
+           ",\"refactor_dependency_root_columns\":%" PRId64
+           ",\"refactor_dependency_leaf_columns\":%" PRId64
+           ",\"refactor_dependency_max_fanout\":%" PRId64
            ",\"refactor_dependency_cluster_levels\":%" PRId64
            ",\"refactor_dependency_pipeline_columns\":%" PRId64
            ",\"refactor_dependency_work\":%.9g"
@@ -685,6 +688,9 @@ int main(int argc, char **argv) {
            stats.refactor_dependency_levels,
            stats.refactor_dependency_max_width,
            stats.refactor_dependency_edges,
+           stats.refactor_dependency_root_columns,
+           stats.refactor_dependency_leaf_columns,
+           stats.refactor_dependency_max_fanout,
            stats.refactor_dependency_cluster_levels,
            stats.refactor_dependency_pipeline_columns,
            stats.refactor_dependency_work,
@@ -751,6 +757,11 @@ int main(int argc, char **argv) {
            stats.refactor_dependency_levels,
            stats.refactor_dependency_max_width,
            stats.refactor_dependency_edges);
+    printf("refactor dependency roots: %" PRId64
+           ", leaves: %" PRId64 ", max fanout: %" PRId64 "\n",
+           stats.refactor_dependency_root_columns,
+           stats.refactor_dependency_leaf_columns,
+           stats.refactor_dependency_max_fanout);
     printf("refactor dependency cluster levels: %" PRId64
            ", pipeline columns: %" PRId64 "\n",
            stats.refactor_dependency_cluster_levels,

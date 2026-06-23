@@ -124,9 +124,9 @@ python3 scripts/audit_license_boundary.py
 
 The benchmark reports analysis, factorization, refactorization, solve,
 transpose-solve, residual, selected orientation, BTF block/rank, fill, flop,
-refactor dependency-level metrics, and memory statistics. Use `--analyze-only`
-to measure symbolic analysis and ordering decisions without running numeric
-factorization.
+refactor dependency-level metrics, dependency root/leaf/max-fanout scheduler
+diagnostics, and memory statistics. Use `--analyze-only` to measure symbolic
+analysis and ordering decisions without running numeric factorization.
 
 To exercise fast-factor pivot rejection on an unchanged MatrixMarket sparsity
 pattern, scale diagonal entries only in the repeated numeric phase:
