@@ -125,6 +125,14 @@ typedef struct kls_stats {
   int64_t refactor_supernode_candidate_max_width;
   double refactor_supernode_candidate_dense_entries;
   double refactor_supernode_candidate_trailing_entries;
+  int64_t row_refactor_group_count;
+  int64_t row_refactor_group_level_count;
+  int64_t row_refactor_group_level_max_width;
+  int64_t row_refactor_segment_count;
+  int64_t row_refactor_segment_rows;
+  int64_t row_refactor_segment_max_width;
+  double row_refactor_segment_dense_entries;
+  double row_refactor_segment_trailing_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

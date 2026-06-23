@@ -81,6 +81,11 @@ struct kls_solver {
   UF_long row_refactor_group_count;
   UF_long row_refactor_level_count;
   UF_long row_refactor_level_max_width;
+  UF_long row_refactor_segment_count;
+  UF_long row_refactor_segment_rows;
+  UF_long row_refactor_segment_max_width;
+  double row_refactor_segment_dense_entries;
+  double row_refactor_segment_trailing_entries;
   UF_long *refactor_level_ptr;
   UF_long *refactor_level_cols;
   UF_long *refactor_level_thread_ptr;
@@ -466,6 +471,11 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_count = 0;
   solver->row_refactor_level_count = 0;
   solver->row_refactor_level_max_width = 0;
+  solver->row_refactor_segment_count = 0;
+  solver->row_refactor_segment_rows = 0;
+  solver->row_refactor_segment_max_width = 0;
+  solver->row_refactor_segment_dense_entries = 0.0;
+  solver->row_refactor_segment_trailing_entries = 0.0;
 }
 
 static void free_refactor_schedule(kls_solver *solver) {
@@ -6957,6 +6967,22 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_supernode_candidate_dense_entries;
   solver->stats.refactor_supernode_candidate_trailing_entries =
     solver->refactor_supernode_candidate_trailing_entries;
+  solver->stats.row_refactor_group_count =
+    (int64_t)solver->row_refactor_group_count;
+  solver->stats.row_refactor_group_level_count =
+    (int64_t)solver->row_refactor_level_count;
+  solver->stats.row_refactor_group_level_max_width =
+    (int64_t)solver->row_refactor_level_max_width;
+  solver->stats.row_refactor_segment_count =
+    (int64_t)solver->row_refactor_segment_count;
+  solver->stats.row_refactor_segment_rows =
+    (int64_t)solver->row_refactor_segment_rows;
+  solver->stats.row_refactor_segment_max_width =
+    (int64_t)solver->row_refactor_segment_max_width;
+  solver->stats.row_refactor_segment_dense_entries =
+    solver->row_refactor_segment_dense_entries;
+  solver->stats.row_refactor_segment_trailing_entries =
+    solver->row_refactor_segment_trailing_entries;
   solver->stats.refactor_dependency_cluster_levels =
     (int64_t)solver->refactor_cluster_level_count;
   solver->stats.refactor_dependency_pipeline_columns =
@@ -8504,6 +8530,30 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   }
   group_ptr[group_count] = n;
 
+  UF_long segment_count = 0;
+  UF_long segment_rows = 0;
+  UF_long segment_max_width = 0;
+  double segment_dense_entries = 0.0;
+  double segment_trailing_entries = 0.0;
+  for (UF_long g = 0; g < group_count; ++g) {
+    const UF_long row_begin = group_ptr[g];
+    const UF_long row_end = group_ptr[g + 1u];
+    const UF_long width = row_end - row_begin;
+    if (width <= 1u) {
+      continue;
+    }
+    const UF_long trailing_len =
+      u_ptr[row_end] - u_ptr[row_end - 1u];
+    segment_count++;
+    segment_rows += width;
+    if (width > segment_max_width) {
+      segment_max_width = width;
+    }
+    segment_dense_entries +=
+      (double)width * (double)(width - 1u) * 0.5;
+    segment_trailing_entries += (double)width * (double)trailing_len;
+  }
+
   UF_long *group_levels = group_count > 0u
     ? (UF_long *)calloc((size_t)group_count, sizeof(*group_levels)) : NULL;
   if (group_count > 0u && group_levels == NULL) {
@@ -8596,6 +8646,11 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_level_groups = level_groups;
   solver->row_refactor_level_count = group_level_count;
   solver->row_refactor_level_max_width = group_max_width;
+  solver->row_refactor_segment_count = segment_count;
+  solver->row_refactor_segment_rows = segment_rows;
+  solver->row_refactor_segment_max_width = segment_max_width;
+  solver->row_refactor_segment_dense_entries = segment_dense_entries;
+  solver->row_refactor_segment_trailing_entries = segment_trailing_entries;
   return 1;
 }
 

@@ -43,9 +43,10 @@ instead of static per-thread strides, which are retained pieces of the
 CKTSO/SubtreeLU load-balance idea.
 The same schedule pass now records adjacent row-major U-pattern supernode
 candidate counts, covered rows, maximum width, dense-block entries, and shared
-trailing entries. This is a diagnostic bridge toward SubtreeLU-style row/segment
-storage and BLAS-friendly updates; it does not change the current KLU-column
-numeric kernel.
+trailing entries. The gated row refactor also reports executable segment groups,
+segment-covered rows, segment maximum width, and dense/trailing work. These are
+diagnostic bridges toward SubtreeLU-style row/segment storage and BLAS-friendly
+updates; they do not change the current default KLU-column numeric kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -1653,6 +1654,22 @@ in the gated row path, but it remains far slower than the default column EGraph
 path. The retained lesson is that the segment representation is now executable,
 but the kernel still needs higher arithmetic intensity, such as dense triangular
 mini-solves and batched trailing updates, before it can close the CKTSO gap.
+
+The row-segment path now exposes its executable workload separately from the
+earlier adjacent-pattern candidate scan. `kls_stats`, `kls_bench` JSON/text, and
+the gap decomposition script report row-refactor group count, group schedule
+levels and maximum width, multirow segment count, covered segment rows, maximum
+segment width, and dense/trailing segment work. These counters are only
+populated when the gated row refactor pattern is built, so default benchmarks
+continue to show zero. They let the next dense mini-solve or batched trailing
+update experiment distinguish "no segment opportunity" from "segment
+opportunity exists but the scalar kernel is still too weak." On `G2_circuit`
+with four threads, the gated row path reported 113609 scheduled groups and 8035
+multirow segments covering 44528 rows, max segment width 497, 606978 dense
+entries, and 5033104 shared trailing entries. Its repeated refactor remained
+about `0.906s` versus about `0.239s` for the default column EGraph path in the
+same short run, so the counters expose real segment opportunity without
+claiming the scalar row kernel is competitive yet.
 
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.

@@ -653,6 +653,14 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_candidate_max_width\":%" PRId64
            ",\"refactor_supernode_candidate_dense_entries\":%.9g"
            ",\"refactor_supernode_candidate_trailing_entries\":%.9g"
+           ",\"row_refactor_group_count\":%" PRId64
+           ",\"row_refactor_group_level_count\":%" PRId64
+           ",\"row_refactor_group_level_max_width\":%" PRId64
+           ",\"row_refactor_segment_count\":%" PRId64
+           ",\"row_refactor_segment_rows\":%" PRId64
+           ",\"row_refactor_segment_max_width\":%" PRId64
+           ",\"row_refactor_segment_dense_entries\":%.9g"
+           ",\"row_refactor_segment_trailing_entries\":%.9g"
            ",\"refactor_dependency_cluster_levels\":%" PRId64
            ",\"refactor_dependency_pipeline_columns\":%" PRId64
            ",\"refactor_dependency_work\":%.9g"
@@ -705,6 +713,14 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_candidate_max_width,
            stats.refactor_supernode_candidate_dense_entries,
            stats.refactor_supernode_candidate_trailing_entries,
+           stats.row_refactor_group_count,
+           stats.row_refactor_group_level_count,
+           stats.row_refactor_group_level_max_width,
+           stats.row_refactor_segment_count,
+           stats.row_refactor_segment_rows,
+           stats.row_refactor_segment_max_width,
+           stats.row_refactor_segment_dense_entries,
+           stats.row_refactor_segment_trailing_entries,
            stats.refactor_dependency_cluster_levels,
            stats.refactor_dependency_pipeline_columns,
            stats.refactor_dependency_work,
@@ -788,6 +804,19 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_candidate_max_width,
            stats.refactor_supernode_candidate_dense_entries,
            stats.refactor_supernode_candidate_trailing_entries);
+    printf("row refactor groups: %" PRId64
+           ", levels: %" PRId64 ", max level width: %" PRId64 "\n",
+           stats.row_refactor_group_count,
+           stats.row_refactor_group_level_count,
+           stats.row_refactor_group_level_max_width);
+    printf("row refactor segments: %" PRId64
+           ", rows: %" PRId64 ", max width: %" PRId64
+           ", dense entries: %.6g, trailing entries: %.6g\n",
+           stats.row_refactor_segment_count,
+           stats.row_refactor_segment_rows,
+           stats.row_refactor_segment_max_width,
+           stats.row_refactor_segment_dense_entries,
+           stats.row_refactor_segment_trailing_entries);
     printf("refactor dependency cluster levels: %" PRId64
            ", pipeline columns: %" PRId64 "\n",
            stats.refactor_dependency_cluster_levels,
