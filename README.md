@@ -171,6 +171,8 @@ repeated SPICE refactors, so the retained schedule no longer relaunches threads
 or reallocates per-worker scratch on every accepted refactor step. The pipeline
 dependency markers are also solver-owned generation-stamped atomics, so
 pipeline passes do not allocate and clear an `n`-entry done array every cycle.
+All-pipeline EGraph schedules skip the per-level thread-slice table entirely,
+because they never enter the barriered cluster-mode loop that consumes it.
 Most
 low-work dominant-BTF cases also stay on the mapped serial path, but those with
 enough measured dependency work can consume the same EGraph path. When a

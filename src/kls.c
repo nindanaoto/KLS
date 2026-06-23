@@ -9334,8 +9334,11 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long *level_cols =
     (UF_long *)malloc((size_t)solver->n * sizeof(*level_cols));
   const int thread_count = solver->options.threads;
+  const int all_pipeline =
+    kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
+    kls_egraph_all_pipeline_huge_single_shape(solver);
   UF_long *level_thread_ptr = NULL;
-  if (thread_count > 1) {
+  if (thread_count > 1 && !all_pipeline) {
     level_thread_ptr =
       (UF_long *)malloc((size_t)level_count *
                         ((size_t)thread_count + 1u) *
@@ -9350,7 +9353,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     free(level_thread_ptr);
     return 0;
   }
-  if (thread_count > 1 && level_thread_ptr == NULL) {
+  if (thread_count > 1 && !all_pipeline && level_thread_ptr == NULL) {
     free(levels);
     free(column_work);
     free(counts);
@@ -9378,9 +9381,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   level_ptr[level_count] = counts[level_count];
   UF_long max_width = 0;
   UF_long cluster_levels = level_count;
-  const int all_pipeline =
-    kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
-    kls_egraph_all_pipeline_huge_single_shape(solver);
   const double cluster_width_limit = 2.0 * (double)solver->options.threads;
   for (UF_long level = 0; level < level_count; ++level) {
     const UF_long width = level_ptr[level + 1u] - level_ptr[level];

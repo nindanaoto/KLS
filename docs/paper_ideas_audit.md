@@ -1788,6 +1788,15 @@ to `3.2480s`; `onetone2` moved from `1.7070s` to `1.5491s`, `transient`
 nudged from `3.5853s` to `3.5510s`, and `power197k` stayed neutral because it
 does not use the EGraph pipeline path in this run.
 
+All-pipeline EGraph schedule setup was then narrowed by skipping the
+per-level thread-slice table. Full all-pipeline runs set the cluster split to
+zero and never enter the barriered cluster loop that consumes those slices, so
+building the table only adds setup work and memory traffic. This is a small
+setup cleanup, not a new numeric kernel: `G2_circuit` moved from the saved
+generation-marker sample's `43.2928s` to `43.0747s`, while a three-pass
+`rajat28` median was neutral within noise at `5.5145s` versus the prior
+`5.4418s` artifact.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
