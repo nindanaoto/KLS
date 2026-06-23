@@ -1806,6 +1806,25 @@ dense segments and stayed numerically valid (`bcircuit`, `rajat22`, and
 residual. This is a retained row/segment storage step, not the missing
 CKTSO-style pivoting tail restart.
 
+A selective dense-group scatter policy was then tested and rejected. The idea
+was to let non-dense parallel row-refactor groups write KLU value slots
+immediately while scattering only dense-group row mirrors after success. It was
+structurally clean, but it moved the two intended dense-segment targets in the
+wrong direction in same-session checks: `G2_circuit` regressed to about
+`0.458s` repeated refactor from the retained native-mirror sample around
+`0.405s`, and `mc2depi` regressed to about `2.39s` from about `2.19s`.
+Keeping a uniform deferred scatter when dense row groups are present therefore
+remains the better policy for the current hybrid KLS/KLU storage.
+
+The native dense-group path was also tested with its repeated L/U shape checks
+removed from the hot loop, trusting the precomputed dense-group descriptor in
+the same way the older scratch-panel path does. This was also rejected:
+same-session checks stayed numerically valid but moved `G2_circuit` to about
+`0.445s` repeated refactor and `mc2depi` to about `2.28s`, both slower than
+the retained native-mirror samples. The checks are therefore left in place until
+KLS owns a fuller row/segment descriptor and numeric state that can make those
+invariants cheaper to consume.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
