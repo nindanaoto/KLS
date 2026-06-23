@@ -299,6 +299,12 @@ dense-diagonal high-degree patterns, `auto` can also start without BTF to avoid
 analysis work it is likely to discard; benchmark JSON reports both
 `requested_btf` and selected `btf`.
 
+For large fragmented BTF analyses with a moderate block count and no dominant
+diagonal block, `--ordering auto` can also run a no-BTF symbolic retry and keep
+it when the symbolic fill score is substantially lower. This handles cases
+where BTF exposes many off-block entries and worsens repeated refactor
+throughput even though the fixed-pivot no-BTF factor remains stable.
+
 Use `--ordering metis` to force METIS nested-dissection ordering. The default
 `--ordering auto` can start with METIS for medium, bounded-degree structures
 only when the diagonal is nearly complete, preserving mesh-style

@@ -2346,6 +2346,19 @@ static int btf_inflated_many_block_retry_shape_is_allowed(
   return 1;
 }
 
+static int btf_fragmented_retry_shape_is_allowed(
+  UF_long n,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (symbolic == NULL || n < 100000u ||
+      symbolic->nblocks < 8u || symbolic->nblocks > 512u ||
+      symbolic->maxblock == 0u ||
+      symbolic->maxblock >= (UF_long)(0.50 * (double)n)) {
+    return 0;
+  }
+
+  return symbolic->est_flops >= 5.0e7;
+}
+
 static void maybe_retry_without_btf(UF_long n,
                                     UF_long *col_ptr,
                                     UF_long *row_idx,
@@ -2366,7 +2379,10 @@ static void maybe_retry_without_btf(UF_long n,
     btf_dominant_block_retry_shape_is_allowed(n, *symbolic);
   const int inflated_many_block =
     btf_inflated_many_block_retry_shape_is_allowed(n, *symbolic);
-  if (!single_block && !dominant_block && !inflated_many_block) {
+  const int fragmented_block =
+    btf_fragmented_retry_shape_is_allowed(n, *symbolic);
+  if (!single_block && !dominant_block && !inflated_many_block &&
+      !fragmented_block) {
     return;
   }
 
@@ -2388,7 +2404,9 @@ static void maybe_retry_without_btf(UF_long n,
       (dominant_block && current_score_known && isfinite(no_btf_score) &&
        no_btf_score <= 0.80 * current_score) ||
       (inflated_many_block && current_score_known && isfinite(no_btf_score) &&
-       no_btf_score <= 0.50 * current_score)) {
+       no_btf_score <= 0.50 * current_score) ||
+      (fragmented_block && current_score_known && isfinite(no_btf_score) &&
+       no_btf_score <= 0.90 * current_score)) {
     trilinos_klu_l_free_symbolic(symbolic, common);
     *symbolic = no_btf_symbolic;
     *common = no_btf_common;

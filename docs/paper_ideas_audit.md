@@ -1346,6 +1346,21 @@ KLU2 comparison improved to about a `2.02x` geomean speedup. Nearby IBM
 `dc*`/`trans*` scaled dominant-BTF guards keep their existing large-dominant
 EGraph path.
 
+The symbolic BTF retry policy was then extended to a large fragmented-BTF shape:
+at least 100k rows, 8-512 BTF blocks, largest block below half the matrix, and
+at least `5e7` estimated BTF flops. This is deliberately separate from the
+dominant-BTF and inflated-many-block retries: it targets cases where BTF leaves
+many off-block entries and the no-BTF symbolic score is at least 10% lower. In
+the full medium artifact this changed only `hvdc2`, moving it from AMD/BTF to
+AMD/no-BTF. The row's SPICE-cycle estimate dropped from about `4.88s` to about
+`2.21s`, repeated refactor from about `0.0336s` to about `0.0154s`, and
+off-diagonal pivots from 1019 to 8 with a valid residual. The full 93-row
+medium run kept the same three known failures (`bips07_1998`, `ss1`, and
+`mac_econ_fwd500`) and moved KLS geomean from about `0.3014s` to about
+`0.2952s`; against saved CKTSO the ratio improved to about `1.118x` slower,
+and against saved KLU2 the common-row geomean speedup improved to about
+`2.06x`.
+
 ## Recommended General Work
 
 1. Evolve the retained EGraph metadata consumer into a fuller KLS-owned numeric
