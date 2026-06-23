@@ -52,6 +52,8 @@ struct kls_solver {
   double *row_scale;
   double *col_scale;
   double *values;
+  double *solve_perm_workspace;
+  UF_long solve_perm_workspace_n;
   UF_long *refactor_col_ptr;
   UF_long *refactor_row_idx;
   UF_long *refactor_input_pos;
@@ -919,6 +921,7 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->row_scale);
   free(solver->col_scale);
   free(solver->values);
+  free(solver->solve_perm_workspace);
   free_refactor_map(solver);
   free_refactor_schedule(solver);
   solver->col_ptr = NULL;
@@ -928,6 +931,8 @@ static void clear_matrix(kls_solver *solver) {
   solver->row_scale = NULL;
   solver->col_scale = NULL;
   solver->values = NULL;
+  solver->solve_perm_workspace = NULL;
+  solver->solve_perm_workspace_n = 0;
   solver->n = 0;
   solver->nnz = 0;
   solver->input_format = KLS_INPUT_NONE;
@@ -6491,6 +6496,26 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_pipeline_work;
 }
 
+static double *ensure_solve_perm_workspace(kls_solver *solver) {
+  if (solver == NULL || solver->n == 0) {
+    return NULL;
+  }
+  if (solver->solve_perm_workspace != NULL &&
+      solver->solve_perm_workspace_n == solver->n) {
+    return solver->solve_perm_workspace;
+  }
+  free(solver->solve_perm_workspace);
+  solver->solve_perm_workspace = NULL;
+  solver->solve_perm_workspace_n = 0;
+  solver->solve_perm_workspace =
+    (double *)malloc((size_t)solver->n * sizeof(*solver->solve_perm_workspace));
+  if (solver->solve_perm_workspace == NULL) {
+    return NULL;
+  }
+  solver->solve_perm_workspace_n = solver->n;
+  return solver->solve_perm_workspace;
+}
+
 void kls_default_options(kls_options *options) {
   if (options == NULL) {
     return;
@@ -9375,12 +9400,11 @@ static int solve_impl(kls_solver *solver,
     (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
   const int has_row_scale = solver->row_scale != NULL;
   const int has_col_scale = solver->col_scale != NULL;
-  double *perm_workspace = NULL;
-  if (solver->row_perm != NULL) {
-    perm_workspace = (double *)malloc((size_t)solver->n * sizeof(*perm_workspace));
-    if (perm_workspace == NULL) {
-      return KLS_ERR_OUT_OF_MEMORY;
-    }
+  double *perm_workspace = solver->row_perm != NULL
+    ? ensure_solve_perm_workspace(solver)
+    : NULL;
+  if (solver->row_perm != NULL && perm_workspace == NULL) {
+    return KLS_ERR_OUT_OF_MEMORY;
   }
 
   if (solver->row_perm != NULL && !kernel_transpose) {
@@ -9447,7 +9471,6 @@ static int solve_impl(kls_solver *solver,
       }
     }
   }
-  free(perm_workspace);
   solver->stats.solve_seconds = kls_now_seconds() - start;
   fill_numeric_stats(solver);
 

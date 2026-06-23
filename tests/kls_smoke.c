@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static int require_ok(int status, const char *what) {
   if (status != KLS_OK) {
@@ -686,6 +687,14 @@ static int test_pre_static_pivoting_with_scaling(void) {
                         "solve scaled pre-static pivot")) ok = 0;
   if (ok && !require_ok(kls_solve_transpose(solver, 1, bt, 0, xt, 0),
                         "transpose solve scaled pre-static pivot")) ok = 0;
+  if (ok) {
+    memset(x, 0, (size_t)n * sizeof(*x));
+    memset(xt, 0, (size_t)n * sizeof(*xt));
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "repeat solve scaled pre-static pivot")) ok = 0;
+  if (ok && !require_ok(kls_solve_transpose(solver, 1, bt, 0, xt, 0),
+                        "repeat transpose solve scaled pre-static pivot")) ok = 0;
 
   kls_stats stats;
   stats.struct_size = sizeof(stats);
