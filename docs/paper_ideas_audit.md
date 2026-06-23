@@ -1625,6 +1625,17 @@ versus `0.82s` over five repeated refactors. This narrows the missing paper
 work: the row layer needs parallel scheduling and supernode/segment updates, not
 just a scalar transposition of the KLU column kernel.
 
+The row-major scaffold then gained an exact L-row dependency schedule and a
+gated cluster-mode threaded execution path using the existing KLS worker pool.
+This validates the CKTSO/SubtreeLU dependency direction without changing default
+policy. Same-session four-thread checks kept valid residuals, but the
+barriered scalar row tasks still lagged the retained column EGraph path:
+`G2_circuit` measured about `0.86s` refactor with
+`KLS_ENABLE_ROW_REFACTOR=1`, versus about `0.205s` for the default exact
+U-pattern EGraph refactor. This points the next row-kernel work toward
+supernode/segment updates and pipeline scheduling, not plain row-level cluster
+barriers.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
