@@ -116,6 +116,21 @@ refactor dependency-level metrics, and memory statistics. Use `--analyze-only`
 to measure symbolic analysis and ordering decisions without running numeric
 factorization.
 
+To exercise fast-factor pivot rejection on an unchanged MatrixMarket sparsity
+pattern, scale diagonal entries only in the repeated numeric phase:
+
+```sh
+./build/kls_bench matrix.mtx --repeat 1 --refactor-repeat 0 --orientation auto \
+  --stress-diagonal-scale 1e-12 --stress-diagonal-column 0 --json
+```
+
+The initial factorization still uses the original values; the repeated
+factor/refactor/solve/residual path uses the stressed values. JSON includes
+`stress_diagonal_scale`, `stress_diagonal_column`, and
+`stress_diagonal_entries`. Use `--repeat 1 --refactor-repeat 0` when inspecting
+the first rejected fast-factor tail, because later repeated calls can overwrite
+the first rejection diagnostics.
+
 Use `--threads N` to enable KLS-owned parallel work where it is currently
 available. The first threaded path is repeated numeric refactorization across
 independent BTF diagonal blocks for large, high-flop cases, including existing

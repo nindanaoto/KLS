@@ -207,20 +207,23 @@ static int read_matrix_market(const char *path, matrix *out) {
   return 1;
 }
 
-static void matvec(const matrix *a, const double *x, double *y) {
+static void matvec_values(const matrix *a, const double *values,
+                          const double *x, double *y) {
   memset(y, 0, (size_t)a->n * sizeof(double));
   for (int64_t col = 0; col < a->n; ++col) {
     const double xj = x[col];
     for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
-      y[a->row_idx[p]] += a->values[p] * xj;
+      y[a->row_idx[p]] += values[p] * xj;
     }
   }
 }
 
-static double residual_norm(const matrix *a, const double *x, const double *b, double *relative_out) {
+static double residual_norm_values(const matrix *a, const double *values,
+                                   const double *x, const double *b,
+                                   double *relative_out) {
   double *ax = (double *)calloc((size_t)a->n, sizeof(double));
   if (ax == NULL) return INFINITY;
-  matvec(a, x, ax);
+  matvec_values(a, values, x, ax);
   double r2 = 0.0;
   double b2 = 0.0;
   for (int64_t i = 0; i < a->n; ++i) {
@@ -274,6 +277,50 @@ static int parse_nonnegative_double(const char *s, double *value_out) {
   return 1;
 }
 
+static int parse_int64_arg(const char *s, int64_t *value_out) {
+  char *end = NULL;
+  errno = 0;
+  const long long value = strtoll(s, &end, 10);
+  if (errno != 0 || end == s || *end != '\0') {
+    return 0;
+  }
+  *value_out = (int64_t)value;
+  return 1;
+}
+
+static double *make_stressed_values(const matrix *a,
+                                    double diagonal_scale,
+                                    int64_t diagonal_column,
+                                    int64_t *entries_out) {
+  if (a == NULL || a->values == NULL || entries_out == NULL ||
+      !isfinite(diagonal_scale) || diagonal_scale < 0.0 ||
+      diagonal_column < -1 || diagonal_column >= a->n) {
+    return NULL;
+  }
+  *entries_out = 0;
+  double *values = (double *)malloc((size_t)a->nnz * sizeof(*values));
+  if (values == NULL) {
+    return NULL;
+  }
+  memcpy(values, a->values, (size_t)a->nnz * sizeof(*values));
+  for (int64_t col = 0; col < a->n; ++col) {
+    if (diagonal_column >= 0 && col != diagonal_column) {
+      continue;
+    }
+    for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
+      if (a->row_idx[p] == col) {
+        values[p] *= diagonal_scale;
+        ++(*entries_out);
+      }
+    }
+  }
+  if (*entries_out == 0) {
+    free(values);
+    return NULL;
+  }
+  return values;
+}
+
 static const char *scale_name(int scale) {
   switch (scale) {
     case KLS_SCALE_AUTO: return "auto";
@@ -287,7 +334,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -301,6 +348,8 @@ int main(int argc, char **argv) {
   int refactor_repeat = 5;
   int json = 0;
   int analyze_only = 0;
+  double stress_diagonal_scale = 1.0;
+  int64_t stress_diagonal_column = -1;
   kls_options options;
   kls_default_options(&options);
 
@@ -329,6 +378,19 @@ int main(int argc, char **argv) {
         usage(argv[0]);
         return EXIT_FAILURE;
       }
+    } else if (strcmp(argv[i], "--stress-diagonal-scale") == 0 &&
+               i + 1 < argc) {
+      if (!parse_nonnegative_double(argv[++i], &stress_diagonal_scale)) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+      }
+    } else if (strcmp(argv[i], "--stress-diagonal-column") == 0 &&
+               i + 1 < argc) {
+      if (!parse_int64_arg(argv[++i], &stress_diagonal_column) ||
+          stress_diagonal_column < -1) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+      }
     } else if (strcmp(argv[i], "--no-btf") == 0) {
       options.use_btf = 0;
     } else if (strcmp(argv[i], "--no-fast-factor") == 0) {
@@ -347,6 +409,13 @@ int main(int argc, char **argv) {
 
   matrix a = {0};
   if (!read_matrix_market(path, &a)) {
+    return EXIT_FAILURE;
+  }
+  if (stress_diagonal_column >= a.n) {
+    fprintf(stderr, "stress diagonal column %" PRId64
+            " is outside matrix order %" PRId64 "\n",
+            stress_diagonal_column, a.n);
+    matrix_free(&a);
     return EXIT_FAILURE;
   }
 
@@ -414,11 +483,29 @@ int main(int argc, char **argv) {
     return EXIT_SUCCESS;
   }
 
+  const int stress_requested =
+      (stress_diagonal_scale != 1.0 || stress_diagonal_column >= 0);
+  int64_t stress_entries = 0;
+  double *stressed_values = NULL;
+  const double *run_values = a.values;
+  if (stress_requested) {
+    stressed_values = make_stressed_values(&a, stress_diagonal_scale,
+                                           stress_diagonal_column,
+                                           &stress_entries);
+    if (stressed_values == NULL) {
+      fprintf(stderr, "stress diagonal selection matched no diagonal entries\n");
+      matrix_free(&a);
+      return EXIT_FAILURE;
+    }
+    run_values = stressed_values;
+  }
+
   double *x_true = (double *)malloc((size_t)a.n * sizeof(double));
   double *b = (double *)calloc((size_t)a.n, sizeof(double));
   double *x = (double *)calloc((size_t)a.n, sizeof(double));
   if (x_true == NULL || b == NULL || x == NULL) {
     matrix_free(&a);
+    free(stressed_values);
     free(x_true);
     free(b);
     free(x);
@@ -427,7 +514,7 @@ int main(int argc, char **argv) {
   for (int64_t i = 0; i < a.n; ++i) {
     x_true[i] = 1.0 + (double)(i % 17) * 0.01;
   }
-  matvec(&a, x_true, b);
+  matvec_values(&a, run_values, x_true, b);
 
   kls_solver *solver = NULL;
   int status = kls_create(&solver);
@@ -443,6 +530,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "KLS setup failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
     matrix_free(&a);
+    free(stressed_values);
     free(x_true);
     free(b);
     free(x);
@@ -460,13 +548,13 @@ int main(int argc, char **argv) {
   double tsolve_total = 0.0;
 
   for (int i = 0; i < repeat; ++i) {
-    status = kls_factor(solver, a.values);
+    status = kls_factor(solver, run_values);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     factor_total += stats.factor_seconds;
   }
   for (int i = 0; i < refactor_repeat && status == KLS_OK; ++i) {
-    status = kls_refactor(solver, a.values);
+    status = kls_refactor(solver, run_values);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     refactor_total += stats.refactor_seconds;
@@ -492,6 +580,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "KLS benchmark failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
     matrix_free(&a);
+    free(stressed_values);
     free(x_true);
     free(b);
     free(x);
@@ -503,6 +592,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "KLS final solve failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
     matrix_free(&a);
+    free(stressed_values);
     free(x_true);
     free(b);
     free(x);
@@ -511,7 +601,8 @@ int main(int argc, char **argv) {
   kls_get_stats(solver, &stats);
 
   double rel_residual = 0.0;
-  const double residual = residual_norm(&a, x, b, &rel_residual);
+  const double residual =
+      residual_norm_values(&a, run_values, x, b, &rel_residual);
   const double factor_avg = factor_total / (double)repeat;
   const double refactor_avg = refactor_repeat > 0 ? refactor_total / (double)refactor_repeat : 0.0;
   const double solve_avg = solve_total / (double)repeat;
@@ -523,6 +614,9 @@ int main(int argc, char **argv) {
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
            ",\"pivot_tolerance\":%.9g,\"selected_pivot_tolerance\":%.9g"
+           ",\"stress_diagonal_scale\":%.9g"
+           ",\"stress_diagonal_column\":%" PRId64
+           ",\"stress_diagonal_entries\":%" PRId64
            ",\"requested_btf\":%s,\"btf\":%s,\"fast_factor\":%s"
            ",\"static_pivoting\":%s,\"selected_static_pivoting\":%s"
            ",\"selected_exact_matching\":%s"
@@ -559,6 +653,9 @@ int main(int argc, char **argv) {
            kls_ordering_name(stats.selected_ordering),
            scale_name(options.scale), stats.selected_scale,
            options.pivot_tolerance, stats.selected_pivot_tolerance,
+           stress_requested ? stress_diagonal_scale : 1.0,
+           stress_requested ? stress_diagonal_column : -1,
+           stress_entries,
            options.use_btf ? "true" : "false",
            stats.selected_btf ? "true" : "false",
            options.fast_factor ? "true" : "false",
@@ -598,6 +695,11 @@ int main(int argc, char **argv) {
     printf("selected scale: %d\n", stats.selected_scale);
     printf("requested pivot tolerance: %.6g\n", options.pivot_tolerance);
     printf("selected pivot tolerance: %.6g\n", stats.selected_pivot_tolerance);
+    if (stress_requested) {
+      printf("stress diagonal scale: %.6g, column: %" PRId64
+             ", entries: %" PRId64 "\n",
+             stress_diagonal_scale, stress_diagonal_column, stress_entries);
+    }
     printf("requested btf: %s\n", options.use_btf ? "on" : "off");
     printf("selected btf: %s\n", stats.selected_btf ? "on" : "off");
     printf("fast factor: %s\n", options.fast_factor ? "on" : "off");
@@ -650,6 +752,7 @@ int main(int argc, char **argv) {
 
   kls_destroy(solver);
   matrix_free(&a);
+  free(stressed_values);
   free(x_true);
   free(b);
   free(x);

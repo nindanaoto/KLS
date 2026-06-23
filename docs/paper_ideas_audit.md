@@ -1553,6 +1553,17 @@ The broad CKTSO gap on `G2_circuit`, `mc2depi`, `rajat20`, `rajat25`,
 new KLS-owned row/segment-oriented numeric layer, not another matrix-specific
 ordering, scaling, MC64 import, or EGraph micro-optimization.
 
+`kls_bench` now has a deterministic diagonal-stress mode for measuring that
+restart gap on real paper sparsity patterns without editing MatrixMarket files.
+`--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
+factorization on the original values, then run repeated factor/refactor/solve
+passes on values with selected diagonal entries scaled. With
+`--repeat 1 --refactor-repeat 0`, the JSON `fast_rejected_*` fields can expose
+the whole rejected BTF block, the suffix from the failed pivot, and the exact
+U-pattern descendant tail that a CKTSO-style pivoting tail restart would target.
+This is a diagnostic for architectural work, not a tuning path for specific
+matrices.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
