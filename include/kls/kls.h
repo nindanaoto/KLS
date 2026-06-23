@@ -191,6 +191,7 @@ typedef struct kls_stats {
   int64_t row_refactor_defer_value_scatter_run_count;
   int row_refactor_last_work_ready_queue;
   int64_t row_refactor_work_ready_queue_run_count;
+  int64_t row_refactor_ready_queue_workspace_groups;
   int64_t fast_rejected_group_tail_groups;
   int64_t fast_rejected_group_tail_rows;
   double fast_rejected_group_tail_work;

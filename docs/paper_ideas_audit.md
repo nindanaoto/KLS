@@ -68,7 +68,12 @@ which moves the row scheduler closer to SubtreeLU's workload-balanced queue
 generation. Checked row fast-factor rejects now also report a conservative
 group-tail restart scope from the retained row-group successor graph, giving
 future CKTSO-style pivoting tail work an explicit row/segment task-tail
-measurement. These pieces do not change the current default KLU-column numeric
+measurement. The row ready queue also keeps solver-owned workspace across
+repeated row refactors, avoiding queue/bitmap/predecessor allocation churn in
+the experimental row scheduler. Checked queued rejects now refresh any missing
+prefix rows before accepting the prefix-tail repair classification, so work
+ordering cannot turn an already-repairable prefix into a scheduler-race
+miss. These pieces do not change the current default KLU-column numeric
 kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
@@ -2818,6 +2823,16 @@ group-tail restart scope reachable from the rejected row's group: number of
 groups, covered rows, and retained group-work estimate. This is a planning and
 diagnostic bridge to CKTSO's "rows that need to be recomputed with pivoting"
 step; it does not yet execute a parallel pivoting row-tail kernel.
+
+The row ready queue workspace then moved from per-run heap allocation to
+solver-owned storage tied to the row-pattern lifetime. The ready group array,
+ready-slot atomics, tail-local predecessor counters, and tail-membership bitmap
+are now resized only when the retained row task graph grows. This follows the
+SPICE repeated-refactor requirement that scheduler metadata be retained rather
+than rebuilt from scratch on every Newton step. The same chunk also made
+checked queued rejects deterministic by publishing completed generic rows
+inside multirow groups and by refreshing any missing rows before the rejected
+pivot before the existing prefix proof runs.
 
 ## Recommended General Work
 

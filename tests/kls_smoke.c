@@ -1916,14 +1916,17 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              checked_stats.row_refactor_done_bitmap_run_count != 1 ||
              checked_stats.row_refactor_defer_value_scatter_run_count !=
                checked_expect_defer ||
-             checked_stats.row_refactor_work_ready_queue_run_count != 1)) {
+             checked_stats.row_refactor_work_ready_queue_run_count != 1 ||
+             checked_stats.row_refactor_ready_queue_workspace_groups <
+               checked_stats.row_refactor_group_count)) {
     fprintf(stderr,
             "unexpected checked row stats: last=%d/%d/%d/%d/%d/%d/%d"
             ", runs=%" PRId64 "/%" PRId64 "/%" PRId64
             ", ready=%" PRId64 "/%" PRId64
             ", done_bitmap=%" PRId64
             ", defer_scatter=%" PRId64
-            ", work_queue=%" PRId64 "\n",
+            ", work_queue=%" PRId64
+            ", queue_workspace=%" PRId64 "\n",
             checked_stats.row_refactor_last_run,
             checked_stats.row_refactor_last_checked,
             checked_stats.row_refactor_last_parallel,
@@ -1938,7 +1941,8 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             checked_stats.row_refactor_ready_queue_group_count,
             checked_stats.row_refactor_done_bitmap_run_count,
             checked_stats.row_refactor_defer_value_scatter_run_count,
-            checked_stats.row_refactor_work_ready_queue_run_count);
+            checked_stats.row_refactor_work_ready_queue_run_count,
+            checked_stats.row_refactor_ready_queue_workspace_groups);
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -1955,16 +1959,20 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              checked_only_refactor_stats.row_refactor_last_done_bitmap != 0 ||
              checked_only_refactor_stats.row_refactor_last_defer_value_scatter != 0 ||
              checked_only_refactor_stats.row_refactor_last_work_ready_queue != 0 ||
+             checked_only_refactor_stats.row_refactor_ready_queue_workspace_groups !=
+               checked_stats.row_refactor_ready_queue_workspace_groups ||
              checked_only_refactor_stats.row_refactor_run_count != 1 ||
              checked_only_refactor_stats.row_refactor_checked_run_count != 1)) {
     fprintf(stderr,
             "checked-only refactor incorrectly used row path: last=%d/%d/%d/%d/%d"
+            ", workspace=%" PRId64
             ", runs=%" PRId64 ", checked=%" PRId64 "\n",
             checked_only_refactor_stats.row_refactor_last_run,
             checked_only_refactor_stats.row_refactor_last_ready_queue,
             checked_only_refactor_stats.row_refactor_last_done_bitmap,
             checked_only_refactor_stats.row_refactor_last_defer_value_scatter,
             checked_only_refactor_stats.row_refactor_last_work_ready_queue,
+            checked_only_refactor_stats.row_refactor_ready_queue_workspace_groups,
             checked_only_refactor_stats.row_refactor_run_count,
             checked_only_refactor_stats.row_refactor_checked_run_count);
     ok = 0;
@@ -2044,7 +2052,9 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_input_cleanup_entries != 0 ||
              stats.row_refactor_defer_value_scatter_run_count !=
                expect_defer ||
-             stats.row_refactor_work_ready_queue_run_count != 2)) {
+             stats.row_refactor_work_ready_queue_run_count != 2 ||
+             stats.row_refactor_ready_queue_workspace_groups <
+               stats.row_refactor_group_count)) {
     fprintf(stderr,
             "unexpected row pipeline stats: groups=%" PRId64
             ", levels=%" PRId64 ", cluster=%" PRId64
@@ -2057,7 +2067,8 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             ", done_bitmap=%" PRId64
             ", cleanup=%" PRId64 "/%" PRId64
             ", defer_scatter=%" PRId64
-            ", work_queue=%" PRId64 "\n",
+            ", work_queue=%" PRId64
+            ", queue_workspace=%" PRId64 "\n",
             stats.row_refactor_group_count,
             stats.row_refactor_group_level_count,
             stats.row_refactor_group_cluster_levels,
@@ -2084,7 +2095,8 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             stats.row_refactor_input_cleanup_rows,
             stats.row_refactor_input_cleanup_entries,
             stats.row_refactor_defer_value_scatter_run_count,
-            stats.row_refactor_work_ready_queue_run_count);
+            stats.row_refactor_work_ready_queue_run_count,
+            stats.row_refactor_ready_queue_workspace_groups);
     ok = 0;
   }
   const size_t legacy_stats_size =

@@ -375,8 +375,12 @@ row directly and report `row_refactor_last_defer_value_scatter` plus
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus
-`row_refactor_work_ready_queue_run_count`. Checked row fast-factor rejects
-also report the conservative row-group restart tail through
+`row_refactor_work_ready_queue_run_count`. The ready queue keeps solver-owned
+workspace across repeated row refactors and reports its capacity through
+`row_refactor_ready_queue_workspace_groups`. Checked queued rejects refresh any
+missing prefix rows before accepting a prefix-tail repair classification.
+Checked row fast-factor rejects also report the conservative row-group restart
+tail through
 `fast_rejected_group_tail_groups`, `fast_rejected_group_tail_rows`, and
 `fast_rejected_group_tail_work`, giving the row/segment task graph a visible
 scope for future CKTSO-style pivoting tail restart.
