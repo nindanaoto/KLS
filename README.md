@@ -280,7 +280,10 @@ BTF refactor reached the final block before rejection, KLS validates the
 repaired block tail and skips the redundant checked retry. Scaled fast-factor
 calls still use the pivot-checking refactor kernel so they can stop at the
 first unsafe multiplier, but they fall back to full pivoting factorization when
-a repair is needed. Benchmark stats report `fast_rejected_pivot`,
+a repair is needed. When an unscaled serial BTF refactor rejects a non-final
+block, the repaired block can now be followed by a serial checked continuation
+over only the later BTF blocks instead of restarting from the first block.
+Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_block_start`,
 `fast_rejected_block_size`, `fast_rejected_suffix_columns`,
 `fast_rejected_descendant_columns`, `fast_rejected_descendant_work`, and

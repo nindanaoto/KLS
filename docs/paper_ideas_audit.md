@@ -1595,6 +1595,19 @@ stressed `rajat03` from about `0.44s` to about `0.21s`. Other multi-block
 repairs still retry the checked fast factorization because blocks after the
 rejected block may not have been refreshed when the fast path stopped.
 
+A block-level tail continuation was then retained for the serial unscaled BTF
+case. If the failed checked pass stopped after a true serial prefix and the
+rejected block was not final, KLS repairs the rejected block with pivoting and
+then refactors only later BTF blocks with the checked serial block kernel. This
+keeps the conservative UNKNOWN handling for parallel pool and EGraph failures,
+and scaled repairs still fall back to full pivoting. Same-session diagonal
+stress checks against a clean `09d074a` baseline showed the intended non-final
+BTF benefit with valid residuals: `coupled` moved from about `0.53-0.74s` to
+`0.26-0.38s` factor time, and `circuit_1` moved from about `0.012-0.014s` to
+`0.0096-0.0104s`. This is a useful CKTSO-aligned block-tail step, but it still
+does not implement the larger missing single-block ETree-descendant pivoting
+tail inside a KLS-owned row/segment numeric engine.
+
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,
 but BTF EGraph workers only need block-local indices and now allocate
