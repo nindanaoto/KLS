@@ -74,7 +74,11 @@ struct kls_solver {
   UF_long *row_refactor_input_pos;
   UF_long *row_refactor_level_ptr;
   UF_long *row_refactor_level_rows;
+  UF_long *row_refactor_group_ptr;
+  UF_long *row_refactor_group_level_ptr;
+  UF_long *row_refactor_level_groups;
   UF_long row_refactor_pattern_n;
+  UF_long row_refactor_group_count;
   UF_long row_refactor_level_count;
   UF_long row_refactor_level_max_width;
   UF_long *refactor_level_ptr;
@@ -441,6 +445,9 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_input_pos);
   free(solver->row_refactor_level_ptr);
   free(solver->row_refactor_level_rows);
+  free(solver->row_refactor_group_ptr);
+  free(solver->row_refactor_group_level_ptr);
+  free(solver->row_refactor_level_groups);
   solver->row_refactor_l_ptr = NULL;
   solver->row_refactor_l_cols = NULL;
   solver->row_refactor_l_values = NULL;
@@ -452,7 +459,11 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_input_pos = NULL;
   solver->row_refactor_level_ptr = NULL;
   solver->row_refactor_level_rows = NULL;
+  solver->row_refactor_group_ptr = NULL;
+  solver->row_refactor_group_level_ptr = NULL;
+  solver->row_refactor_level_groups = NULL;
   solver->row_refactor_pattern_n = 0;
+  solver->row_refactor_group_count = 0;
   solver->row_refactor_level_count = 0;
   solver->row_refactor_level_max_width = 0;
 }
@@ -8445,6 +8456,146 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_level_rows = level_rows;
   solver->row_refactor_level_count = level_count;
   solver->row_refactor_level_max_width = max_width;
+
+  UF_long *row_group = n > 0u
+    ? (UF_long *)malloc((size_t)n * sizeof(*row_group)) : NULL;
+  UF_long *group_ptr = n > 0u
+    ? (UF_long *)malloc(((size_t)n + 1u) * sizeof(*group_ptr)) : NULL;
+  if ((n > 0u && row_group == NULL) || (n > 0u && group_ptr == NULL)) {
+    free(row_group);
+    free(group_ptr);
+    free_row_refactor_pattern(solver);
+    return 0;
+  }
+  UF_long group_count = 0;
+  UF_long row = 0;
+  while (row < n) {
+    group_ptr[group_count] = row;
+    UF_long end = row + 1u;
+    while (end < n) {
+      const UF_long prev = end - 1u;
+      const UF_long prev_begin = u_ptr[prev];
+      const UF_long prev_end = u_ptr[prev + 1u];
+      const UF_long curr_begin = u_ptr[end];
+      const UF_long curr_end = u_ptr[end + 1u];
+      const UF_long prev_len = prev_end - prev_begin;
+      const UF_long curr_len = curr_end - curr_begin;
+      int extends = 0;
+      if (prev_len == curr_len + 1u &&
+          prev_len > 0u &&
+          u_cols[prev_begin] == end) {
+        if (curr_len == 0u ||
+            memcmp(u_cols + prev_begin + 1u,
+                   u_cols + curr_begin,
+                   (size_t)curr_len * sizeof(*u_cols)) == 0) {
+          extends = 1;
+        }
+      }
+      if (!extends) {
+        break;
+      }
+      end++;
+    }
+    for (UF_long i = row; i < end; ++i) {
+      row_group[i] = group_count;
+    }
+    group_count++;
+    row = end;
+  }
+  group_ptr[group_count] = n;
+
+  UF_long *group_levels = group_count > 0u
+    ? (UF_long *)calloc((size_t)group_count, sizeof(*group_levels)) : NULL;
+  if (group_count > 0u && group_levels == NULL) {
+    free(row_group);
+    free(group_ptr);
+    free_row_refactor_pattern(solver);
+    return 0;
+  }
+  UF_long group_max_level = 0;
+  for (UF_long g = 0; g < group_count; ++g) {
+    UF_long group_level = 0;
+    for (UF_long i = group_ptr[g]; i < group_ptr[g + 1u]; ++i) {
+      for (UF_long p = l_ptr[i]; p < l_ptr[i + 1u]; ++p) {
+        const UF_long dep_group = row_group[l_cols[p]];
+        if (dep_group == g) {
+          continue;
+        }
+        if (dep_group > g) {
+          free(row_group);
+          free(group_ptr);
+          free(group_levels);
+          free_row_refactor_pattern(solver);
+          return 0;
+        }
+        const UF_long dep_level = group_levels[dep_group] + 1u;
+        if (dep_level > group_level) {
+          group_level = dep_level;
+        }
+      }
+    }
+    group_levels[g] = group_level;
+    if (group_level > group_max_level) {
+      group_max_level = group_level;
+    }
+  }
+  const UF_long group_level_count =
+    group_count > 0u ? group_max_level + 1u : 0u;
+  UF_long *group_level_ptr =
+    (UF_long *)calloc((size_t)group_level_count + 1u,
+                      sizeof(*group_level_ptr));
+  UF_long *level_groups = group_count > 0u
+    ? (UF_long *)malloc((size_t)group_count * sizeof(*level_groups)) : NULL;
+  if (group_level_ptr == NULL ||
+      (group_count > 0u && level_groups == NULL)) {
+    free(row_group);
+    free(group_ptr);
+    free(group_levels);
+    free(group_level_ptr);
+    free(level_groups);
+    free_row_refactor_pattern(solver);
+    return 0;
+  }
+  for (UF_long g = 0; g < group_count; ++g) {
+    group_level_ptr[group_levels[g] + 1u]++;
+  }
+  for (UF_long level = 0; level < group_level_count; ++level) {
+    group_level_ptr[level + 1u] += group_level_ptr[level];
+  }
+  UF_long *group_write_pos = group_level_count > 0u
+    ? (UF_long *)malloc((size_t)group_level_count *
+                        sizeof(*group_write_pos)) : NULL;
+  if (group_level_count > 0u && group_write_pos == NULL) {
+    free(row_group);
+    free(group_ptr);
+    free(group_levels);
+    free(group_level_ptr);
+    free(level_groups);
+    free_row_refactor_pattern(solver);
+    return 0;
+  }
+  memcpy(group_write_pos, group_level_ptr,
+         (size_t)group_level_count * sizeof(*group_write_pos));
+  for (UF_long g = 0; g < group_count; ++g) {
+    level_groups[group_write_pos[group_levels[g]]++] = g;
+  }
+  UF_long group_max_width = 0;
+  for (UF_long level = 0; level < group_level_count; ++level) {
+    const UF_long width = group_level_ptr[level + 1u] - group_level_ptr[level];
+    if (width > group_max_width) {
+      group_max_width = width;
+    }
+  }
+  free(group_write_pos);
+  free(group_levels);
+  free(row_group);
+
+  solver->row_refactor_group_ptr = group_ptr;
+  solver->row_refactor_group_count = group_count;
+  solver->row_refactor_group_level_ptr = group_level_ptr;
+  solver->row_refactor_level_groups = level_groups;
+  solver->row_refactor_level_count = group_level_count;
+  solver->row_refactor_level_max_width = group_max_width;
   return 1;
 }
 
@@ -8585,7 +8736,45 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   }
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
-  if (solver == NULL || solver->row_refactor_level_ptr == NULL ||
+  if (solver == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return;
+  }
+
+  if (solver->row_refactor_group_level_ptr != NULL &&
+      solver->row_refactor_level_groups != NULL &&
+      solver->row_refactor_group_ptr != NULL) {
+    for (UF_long level = 0; level < solver->row_refactor_level_count; ++level) {
+      if (!kls_egraph_refactor_should_stop(shared)) {
+        const UF_long begin = solver->row_refactor_group_level_ptr[level];
+        const UF_long end = solver->row_refactor_group_level_ptr[level + 1u];
+        for (UF_long pos = begin + (UF_long)worker->tid;
+             pos < end; pos += (UF_long)shared->thread_count) {
+          const UF_long group = solver->row_refactor_level_groups[pos];
+          if (group >= solver->row_refactor_group_count) {
+            kls_egraph_refactor_record_invalid(shared);
+            break;
+          }
+          const UF_long row_begin = solver->row_refactor_group_ptr[group];
+          const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
+          for (UF_long row = row_begin; row < row_end; ++row) {
+            if (row >= solver->n ||
+                !kls_parallel_row_refactor_process_row(worker, row)) {
+              break;
+            }
+          }
+        }
+      }
+
+      (void)pthread_barrier_wait(&shared->barrier);
+      if (kls_egraph_refactor_should_stop(shared)) {
+        break;
+      }
+    }
+    return;
+  }
+
+  if (solver->row_refactor_level_ptr == NULL ||
       solver->row_refactor_level_rows == NULL) {
     kls_egraph_refactor_record_invalid(shared);
     return;

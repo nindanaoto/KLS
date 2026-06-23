@@ -1636,6 +1636,15 @@ U-pattern EGraph refactor. This points the next row-kernel work toward
 supernode/segment updates and pipeline scheduling, not plain row-level cluster
 barriers.
 
+The row schedule was then upgraded to execute exact adjacent supernode-candidate
+segments as single tasks, removing barriers between rows in the same dense-block
+candidate. The grouped scheduler remained correct, but was still not a default
+policy: on the same four-thread `G2_circuit` check, the grouped row path measured
+about `0.88s` refactor, essentially no better than plain row-level barriers and
+far behind the current column EGraph path. This confirms that merely coarsening
+row tasks is not the missing paper mechanism; KLS needs a real segment kernel
+that reuses shared trailing structure and eventually BLAS-style updates.
+
 `kls_bench` now has a deterministic diagonal-stress mode for measuring that
 restart gap on real paper sparsity patterns without editing MatrixMarket files.
 `--stress-diagonal-scale` and `--stress-diagonal-column` keep the first
