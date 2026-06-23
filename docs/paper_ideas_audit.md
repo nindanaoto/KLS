@@ -1894,6 +1894,27 @@ focused run; an attempted structural gate for only unscaled high-work rows was
 rejected because the added fallback branch path regressed the focused set
 overall and lost the useful low-work `coupled` win.
 
+The compact dominant-BTF EGraph gate was then extended downward for genuinely
+small but still nontrivial refactor rows: unscaled matrices with 8-512 BTF
+blocks, a 90%+ dominant block, max block in the 3k-10k range, and at least
+`2e6` measured factor flops. The retained EGraph consumer still requires
+measured dependency work before it runs, so this does not turn every tiny BTF
+case into a threaded refactor. On the current medium artifact this structural
+predicate matches only `rajat03` and `ACTIVSg2000`, both of which have zero
+off-diagonal pivots and therefore are not MC64/matching failures. A five-pass
+focused probe with ten refactors per sample
+(`kls_small_compact_egraph_probe_t4_p5_r10.jsonl`) moved `rajat03` repeated
+refactor from the saved `0.00127s` class to median `0.000696s`, and
+`ACTIVSg2000` from `0.000821s` to `0.000379s`. Nearby guard rows such as
+`gemat12` and `TSOPF_FS_b9_c1` did not build an EGraph schedule under this
+gate. A one-pass CKTSO-gap focus run remained noisy on unchanged large rows,
+so this is recorded as a narrow scheduler coverage improvement rather than a
+claim that EGraph micro-gating closes the broad CKTSO gap. The MC64 boundary is
+unchanged: existing MC64-style code may be reused only when it is
+redistributable with LGPL KLS, such as the pinned BSD SPRAL scaling subset or a
+verified compatible system library, not HSL MC64 or restricted solver-tree
+copies.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
