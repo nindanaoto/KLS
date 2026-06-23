@@ -1057,6 +1057,113 @@ static int test_btf_fast_factor_block_restart(void) {
   return ok;
 }
 
+static int test_btf_prefix_tail_restart_with_offblock(void) {
+  const int32_t ap[] = {0, 1, 5, 9, 13};
+  const int32_t ai[] = {
+    0,
+    0, 1, 2, 3,
+    0, 1, 2, 3,
+    0, 1, 2, 3
+  };
+  const double ax0[] = {
+    4.0,
+    0.1, 8.0, 0.01, 0.02,
+    0.2, 0.01, 8.0, 0.03,
+    0.3, 0.02, 0.03, 8.0
+  };
+  const double ax1[] = {
+    4.0,
+    0.1, 8.0, 0.01, 0.02,
+    0.2, 0.01, 1.0e-12, 2.0,
+    0.3, 0.02, 0.03, 8.0
+  };
+  const double expected[] = {1.0, 2.0, 3.0, 4.0};
+  double b[4] = {0.0, 0.0, 0.0, 0.0};
+  double x[4] = {0.0, 0.0, 0.0, 0.0};
+  for (int32_t col = 0; col < 4; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 4, ap, ai, 0,
+                                        &options),
+                        "analyze btf offblock tail")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor btf offblock tail base")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor btf offblock tail repair")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve btf offblock tail")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats btf offblock tail")) {
+    ok = 0;
+  }
+  if (ok && (stats.nblocks < 2 ||
+             stats.fast_rejected_block_start < 0 ||
+             stats.fast_rejected_pivot <= stats.fast_rejected_block_start ||
+             stats.fast_rejected_pivot >=
+               stats.fast_rejected_block_start +
+                 stats.fast_rejected_block_size ||
+             stats.fast_rejected_refresh_state !=
+               KLS_FAST_REJECT_REFRESH_PREFIX ||
+             stats.fast_block_restarts != 1 ||
+             stats.fast_tail_restarts != 1 ||
+             stats.fast_repaired_tail_restart_ready != 1 ||
+             stats.fast_repaired_tail_restart_columns < 1 ||
+             stats.fast_repaired_tail_restart_work <= 0.0)) {
+    fprintf(stderr,
+            "unexpected btf offblock tail stats: nblocks=%" PRId64
+            ", pivot=%" PRId64 ", start=%" PRId64 ", size=%" PRId64
+            ", refresh=%d, restarts=%d, tail_restarts=%d"
+            ", tail_ready=%d, tail_cols=%" PRId64 ", tail_work=%.6g\n",
+            stats.nblocks,
+            stats.fast_rejected_pivot,
+            stats.fast_rejected_block_start,
+            stats.fast_rejected_block_size,
+            stats.fast_rejected_refresh_state,
+            stats.fast_block_restarts,
+            stats.fast_tail_restarts,
+            stats.fast_repaired_tail_restart_ready,
+            stats.fast_repaired_tail_restart_columns,
+            stats.fast_repaired_tail_restart_work);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats, "btf offblock tail")) {
+    ok = 0;
+  }
+  double max_solution_error = 0.0;
+  for (int32_t i = 0; i < 4; ++i) {
+    const double err = fabs(x[i] - expected[i]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+  }
+  if (ok && max_solution_error > 1.0e-8) {
+    fprintf(stderr,
+            "unexpected btf offblock tail solution: %.17g %.17g %.17g %.17g"
+            ", max_err=%.17g\n",
+            x[0], x[1], x[2], x[3], max_solution_error);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
 static int test_fast_factor_restart_after_prior_pivot(void) {
   const int32_t ap[] = {0, 3, 6, 9};
   const int32_t ai[] = {0, 1, 2, 0, 1, 2, 0, 1, 2};
@@ -1551,6 +1658,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_btf_fast_factor_block_restart()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_btf_prefix_tail_restart_with_offblock()) {
     return EXIT_FAILURE;
   }
   if (!test_fast_factor_restart_after_prior_pivot()) {

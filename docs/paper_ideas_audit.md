@@ -2622,6 +2622,13 @@ work counters now use the actual serial suffix work KLS executes, while the
 `fast_rejected_pivoting_tail_*` fields remain the CKTSO-style ETree-tail
 diagnostic target for a future row/segment scheduler.
 
+The serial tail retry then stopped copying the full off-block row/value arrays
+into scratch storage. The trial factor only needs mutable `Offp` offsets while
+constructing columns; after a repair is accepted, KLS rebuilds `Offi`/`Offx`
+from the final `Pinv` anyway. This removes a full `nzoff` copy from every
+serial tail attempt without changing pivot choices or the published numeric
+state.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

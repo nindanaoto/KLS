@@ -9258,8 +9258,12 @@ static int kls_tail_construct_column(Int k,
       if (poff >= nzoff) {
         return 0;
       }
-      offi[poff] = oldrow;
-      offx[poff] = aik;
+      if (offi != NULL) {
+        offi[poff] = oldrow;
+      }
+      if (offx != NULL) {
+        offx[poff] = aik;
+      }
       poff++;
     } else if (i >= n) {
       return 0;
@@ -9619,13 +9623,8 @@ static int kls_try_pivot_tail_restart_rejected_block(
   }
 
   UF_long *offp = (UF_long *)malloc(((size_t)solver->n + 1u) * sizeof(*offp));
-  const size_t off_capacity = (size_t)solver->numeric->nzoff + 1u;
-  UF_long *offi = (UF_long *)malloc(off_capacity * sizeof(*offi));
-  Entry *offx = (Entry *)malloc(off_capacity * sizeof(*offx));
-  if (offp == NULL || offi == NULL || offx == NULL) {
+  if (offp == NULL) {
     free(offp);
-    free(offi);
-    free(offx);
     (void)TRILINOS_KLU_free(new_lu, old_lusize, sizeof(Unit),
                             &solver->common);
     free(scratch);
@@ -9633,12 +9632,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
   }
   memcpy(offp, solver->numeric->Offp,
          ((size_t)solver->n + 1u) * sizeof(*offp));
-  if (solver->numeric->nzoff > 0u) {
-    memcpy(offi, solver->numeric->Offi,
-           (size_t)solver->numeric->nzoff * sizeof(*offi));
-    memcpy(offx, (Entry *)solver->numeric->Offx,
-           (size_t)solver->numeric->nzoff * sizeof(*offx));
-  }
 
   Unit *old_lu = (Unit *)solver->numeric->LUbx[block];
   UF_long *lip = solver->numeric->Lip + k1;
@@ -9654,8 +9647,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
         &lup) ||
       lup != prefix_lup) {
     free(offp);
-    free(offi);
-    free(offx);
     (void)TRILINOS_KLU_free(new_lu, old_lusize, sizeof(Unit),
                             &solver->common);
     free(scratch);
@@ -9711,10 +9702,12 @@ static int kls_try_pivot_tail_restart_rejected_block(
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
     }
+    /* Trial off-block row/value entries are discarded: accepted repairs
+       rebuild Offi/Offx from the final Pinv before publishing stats. */
     if (!kls_tail_construct_column(
           k, solver->col_ptr, solver->row_idx, numeric_values,
           solver->symbolic->Q, (Entry *)solver->numeric->Xwork, (Int)nk,
-          (Int)k1, (Int *)psinv, NULL, 0, offp, offi, offx,
+          (Int)k1, (Int *)psinv, NULL, 0, offp, NULL, NULL,
           (Int)solver->numeric->nzoff)) {
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
@@ -9808,8 +9801,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
     }
   }
   free(offp);
-  free(offi);
-  free(offx);
   free(scratch);
   *new_lu_out = new_lu;
   *new_size_out = lusize;
@@ -9822,8 +9813,6 @@ fail:
     ((Entry *)solver->numeric->Xwork)[k] = 0.0;
   }
   free(offp);
-  free(offi);
-  free(offx);
   (void)TRILINOS_KLU_free(new_lu, lusize, sizeof(Unit), &solver->common);
   free(scratch);
   if (new_lu_out != NULL) {
