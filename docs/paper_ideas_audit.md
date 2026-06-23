@@ -72,6 +72,12 @@ failures when the repaired block covers all remaining columns; scaled
 multi-block failures that would need an unsupported scaled tail continuation,
 and scaled all-refresh KLU-refactor failures whose row scale vector may already
 be pivot-permuted, still fall back conservatively.
+Strict tail-restart readiness now also validates that the repaired block
+preserved the old prefix pivot order and that KLS can reconstruct the live KLU
+prefix state a pivoting tail kernel would need, including finalized-L row
+unfinalization, live `P`/`Pinv`, and symmetric-pruning `Lpend` boundaries.
+This is still an entry-state proof around the KLU block repair, not execution
+of CKTSO's pipelined pivoting-tail factorization.
 
 The remaining CKTSO gap is large enough that it should be treated as a missing
 major algorithm, not an ordering-package tuning problem. On the selected large
@@ -337,9 +343,11 @@ design work, not benchmark-specific tuning.
   and permuted afterward. KLS still does not have the ETree descendant scheduler
   used by CKTSO-style pivoting tail restart.
 - CKTSO fast factorization is present as pivot-checked reuse plus an unscaled
-  BTF-block repair path. KLS does not yet implement CKTSO's pipelined tail
-  factorization that restarts from the ETree descendants after a failed pivot
-  check, and scaled fast-factor failures still use full fallback.
+  BTF-block repair path. KLS now validates the preserved-prefix live state
+  needed to enter a future pivoting tail kernel, but does not yet implement
+  CKTSO's pipelined tail factorization that restarts from the ETree
+  descendants after a failed pivot check, and scaled fast-factor failures still
+  use full fallback.
 - SubtreeLU-style nested-dissection metadata is only used indirectly through
   METIS orderings and CAMD refinement. KLS does not yet preserve a separator
   tree for private/pipeline task queues.
@@ -2549,6 +2557,17 @@ columns and about `1.191e7` work; the full repaired-block work remained about
 `3.650e8`. This keeps the opportunity estimate tied to the CKTSO restart set
 and gives the future row/segment numeric kernel a concrete ordered worklist to
 consume.
+
+The strict tail-restart readiness gate was then strengthened to compare the
+fallback repair against the old block pivot order and to replay KLU's live
+prefix bookkeeping through the rejected pivot. The validator rebuilds local
+final-to-live row maps, replays KLU `P`/`Pinv` pivot logging, unfinalizes stored
+`L` row indices back to local row coordinates, and reconstructs prefix
+`Lpend` pruning boundaries from the already-pruned KLU columns. A new smoke
+case covers a strict-ready nonzero-prefix repaired block. The same focused
+stressed `coupled` probe still reported one strict-ready reject, with about
+`3.531e8` saved work over full-block repair. This removes another entry-state
+ambiguity before implementing the actual CKTSO-style pivoting tail kernel.
 
 ## Recommended General Work
 

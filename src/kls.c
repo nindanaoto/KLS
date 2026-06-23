@@ -8684,14 +8684,327 @@ static int kls_rebuild_numeric_pinv(kls_solver *solver) {
   return 1;
 }
 
+static int kls_klu_column_span_end(const UF_long *offsets,
+                                   const UF_long *lengths,
+                                   UF_long k,
+                                   size_t lusize,
+                                   size_t *end_out) {
+  if (offsets == NULL || lengths == NULL || end_out == NULL ||
+      offsets[k] < 0 || lengths[k] < 0) {
+    return 0;
+  }
+  const size_t offset = (size_t)offsets[k];
+  const UF_long length = lengths[k];
+  if (length > (UF_long)(SIZE_MAX / sizeof(UF_long))) {
+    return 0;
+  }
+  const size_t index_units = kls_klu_units_for_indices(length);
+  if (offset > SIZE_MAX - index_units) {
+    return 0;
+  }
+  size_t end = offset + index_units;
+  if ((size_t)length > SIZE_MAX - end) {
+    return 0;
+  }
+  end += (size_t)length;
+  if (end > lusize) {
+    return 0;
+  }
+  *end_out = end;
+  return 1;
+}
+
+static int kls_unfinalize_l_row(const UF_long *final_pblock,
+                                UF_long nk,
+                                UF_long final_order,
+                                UF_long *local_row_out) {
+  if (final_pblock == NULL || local_row_out == NULL ||
+      final_order < 0 || final_order >= nk) {
+    return 0;
+  }
+  const UF_long local_row = final_pblock[final_order];
+  if (local_row < 0 || local_row >= nk) {
+    return 0;
+  }
+  *local_row_out = local_row;
+  return 1;
+}
+
+static int kls_prefix_l_partition_matches(const UF_long *final_pblock,
+                                          UF_long nk,
+                                          const UF_long *li,
+                                          UF_long llen,
+                                          UF_long pivoted_head,
+                                          const UF_long *live_pinv) {
+  if (final_pblock == NULL || li == NULL || live_pinv == NULL ||
+      pivoted_head > llen) {
+    return 0;
+  }
+  for (UF_long p = 0; p < llen; ++p) {
+    UF_long local_row = KLS_KLU_EMPTY;
+    if (!kls_unfinalize_l_row(final_pblock, nk, li[p], &local_row)) {
+      return 0;
+    }
+    const int pivotal = live_pinv[local_row] >= 0;
+    if ((p < pivoted_head) != pivotal) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int kls_replay_prefix_prune(const kls_solver *solver,
+                                   UF_long block,
+                                   UF_long k1,
+                                   UF_long nk,
+                                   UF_long k,
+                                   UF_long pivrow,
+                                   const UF_long *final_pblock,
+                                   const UF_long *live_pinv,
+                                   UF_long *lpend) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->LUbx == NULL || solver->numeric->LUbx[block] == NULL ||
+      solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
+      solver->numeric->Lip == NULL || solver->numeric->Uip == NULL ||
+      final_pblock == NULL || live_pinv == NULL || lpend == NULL ||
+      k >= nk || pivrow >= nk) {
+    return 0;
+  }
+
+  double *lu = (double *)solver->numeric->LUbx[block];
+  const UF_long *lip = solver->numeric->Lip + k1;
+  const UF_long *llen = solver->numeric->Llen + k1;
+  const UF_long *uip = solver->numeric->Uip + k1;
+  const UF_long *ulen = solver->numeric->Ulen + k1;
+
+  UF_long *ui = NULL;
+  double *ux = NULL;
+  UF_long ucol_len = 0;
+  kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+  (void)ux;
+  for (UF_long p = 0; p < ucol_len; ++p) {
+    const UF_long j = ui[p];
+    if (j < 0 || j >= k || j >= nk) {
+      return 0;
+    }
+    if (lpend[j] != KLS_KLU_EMPTY) {
+      continue;
+    }
+
+    UF_long *li = NULL;
+    double *lx = NULL;
+    UF_long lcol_len = 0;
+    kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
+    (void)lx;
+    int found_pivrow = 0;
+    UF_long pivotal_count = 0;
+    for (UF_long p2 = 0; p2 < lcol_len; ++p2) {
+      UF_long local_row = KLS_KLU_EMPTY;
+      if (!kls_unfinalize_l_row(final_pblock, nk, li[p2], &local_row)) {
+        return 0;
+      }
+      if (local_row == pivrow) {
+        found_pivrow = 1;
+      }
+      if (live_pinv[local_row] >= 0) {
+        pivotal_count++;
+      }
+    }
+    if (found_pivrow) {
+      if (!kls_prefix_l_partition_matches(final_pblock, nk, li, lcol_len,
+                                          pivotal_count, live_pinv)) {
+        return 0;
+      }
+      lpend[j] = pivotal_count;
+    }
+  }
+  return 1;
+}
+
+static int kls_reconstruct_block_live_prefix_state(
+  const kls_solver *solver,
+  UF_long block,
+  UF_long k1,
+  UF_long nk,
+  UF_long prefix_cols,
+  const UF_long *final_pblock,
+  UF_long *live_p,
+  UF_long *live_pinv,
+  UF_long *final_pinv,
+  UF_long *lpend,
+  size_t *prefix_lup_out,
+  UF_long *prefix_lnz_out,
+  UF_long *prefix_unz_out) {
+  if (prefix_lup_out != NULL) {
+    *prefix_lup_out = 0u;
+  }
+  if (prefix_lnz_out != NULL) {
+    *prefix_lnz_out = 0;
+  }
+  if (prefix_unz_out != NULL) {
+    *prefix_unz_out = 0;
+  }
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->LUbx == NULL || solver->numeric->LUsize == NULL ||
+      solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
+      solver->numeric->Lip == NULL || solver->numeric->Uip == NULL ||
+      final_pblock == NULL || live_p == NULL || live_pinv == NULL ||
+      final_pinv == NULL || lpend == NULL || prefix_cols > nk ||
+      k1 > solver->n || nk > solver->n - k1 ||
+      block >= solver->numeric->nblocks ||
+      solver->numeric->LUbx[block] == NULL) {
+    return 0;
+  }
+
+  const size_t lusize = solver->numeric->LUsize[block];
+  if (lusize == 0u) {
+    return 0;
+  }
+  for (UF_long k = 0; k < nk; ++k) {
+    live_p[k] = k;
+    live_pinv[k] = FLIP(k);
+    final_pinv[k] = KLS_KLU_EMPTY;
+    lpend[k] = KLS_KLU_EMPTY;
+  }
+  for (UF_long k = 0; k < nk; ++k) {
+    const UF_long row = final_pblock[k];
+    if (row < 0 || row >= nk || final_pinv[row] != KLS_KLU_EMPTY) {
+      return 0;
+    }
+    final_pinv[row] = k;
+  }
+
+  double *lu = (double *)solver->numeric->LUbx[block];
+  const UF_long *lip = solver->numeric->Lip + k1;
+  const UF_long *llen = solver->numeric->Llen + k1;
+  const UF_long *uip = solver->numeric->Uip + k1;
+  const UF_long *ulen = solver->numeric->Ulen + k1;
+
+  size_t prefix_lup = 0u;
+  UF_long prefix_lnz = 0;
+  UF_long prefix_unz = 0;
+  for (UF_long k = 0; k < prefix_cols; ++k) {
+    size_t l_end = 0u;
+    size_t u_end = 0u;
+    if (!kls_klu_column_span_end(lip, llen, k, lusize, &l_end) ||
+        !kls_klu_column_span_end(uip, ulen, k, lusize, &u_end) ||
+        uip[k] < 0 || (size_t)uip[k] != l_end ||
+        (k + 1u < nk && (lip[k + 1u] < 0 ||
+                         (size_t)lip[k + 1u] != u_end))) {
+      return 0;
+    }
+
+    UF_long *ui = NULL;
+    double *ux = NULL;
+    UF_long ucol_len = 0;
+    kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+    (void)ux;
+    for (UF_long p = 0; p < ucol_len; ++p) {
+      if (ui[p] < 0 || ui[p] >= k) {
+        return 0;
+      }
+    }
+
+    const UF_long pivrow = final_pblock[k];
+    const UF_long diagrow = live_p[k];
+    if (pivrow < 0 || pivrow >= nk || diagrow < 0 || diagrow >= nk ||
+        live_pinv[pivrow] >= 0) {
+      return 0;
+    }
+    if (pivrow != diagrow && live_pinv[diagrow] < 0) {
+      const UF_long kbar = FLIP(live_pinv[pivrow]);
+      if (kbar < 0 || kbar >= nk) {
+        return 0;
+      }
+      live_p[kbar] = diagrow;
+      live_pinv[diagrow] = FLIP(kbar);
+    }
+    live_p[k] = pivrow;
+    live_pinv[pivrow] = k;
+
+    UF_long *li = NULL;
+    double *lx = NULL;
+    UF_long lcol_len = 0;
+    kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
+    (void)lx;
+    for (UF_long p = 0; p < lcol_len; ++p) {
+      const UF_long final_order = li[p];
+      if (final_order <= k || final_order >= nk) {
+        return 0;
+      }
+      UF_long local_row = KLS_KLU_EMPTY;
+      if (!kls_unfinalize_l_row(final_pblock, nk, final_order,
+                                &local_row) ||
+          live_pinv[local_row] >= 0) {
+        return 0;
+      }
+    }
+
+    if (!kls_replay_prefix_prune(solver, block, k1, nk, k, pivrow,
+                                 final_pblock, live_pinv, lpend)) {
+      return 0;
+    }
+    prefix_lup = u_end;
+    prefix_lnz += llen[k] + 1u;
+    prefix_unz += ulen[k] + 1u;
+  }
+
+  if (prefix_lup_out != NULL) {
+    *prefix_lup_out = prefix_lup;
+  }
+  if (prefix_lnz_out != NULL) {
+    *prefix_lnz_out = prefix_lnz;
+  }
+  if (prefix_unz_out != NULL) {
+    *prefix_unz_out = prefix_unz;
+  }
+  return 1;
+}
+
+static int kls_repaired_tail_prefix_state_valid(const kls_solver *solver,
+                                                UF_long block,
+                                                UF_long k1,
+                                                UF_long nk,
+                                                UF_long prefix_cols,
+                                                const UF_long *final_pblock) {
+  if (prefix_cols == 0u) {
+    return 1;
+  }
+  if (solver == NULL || final_pblock == NULL || prefix_cols > nk ||
+      nk > (UF_long)(SIZE_MAX / (4u * sizeof(UF_long)))) {
+    return 0;
+  }
+  UF_long *scratch =
+    (UF_long *)malloc(4u * (size_t)nk * sizeof(*scratch));
+  if (scratch == NULL) {
+    return 0;
+  }
+  UF_long *live_p = scratch;
+  UF_long *live_pinv = scratch + nk;
+  UF_long *final_pinv = scratch + 2u * nk;
+  UF_long *lpend = scratch + 3u * nk;
+  size_t prefix_lup = 0u;
+  UF_long prefix_lnz = 0;
+  UF_long prefix_unz = 0;
+  const int ok = kls_reconstruct_block_live_prefix_state(
+    solver, block, k1, nk, prefix_cols, final_pblock, live_p, live_pinv,
+    final_pinv, lpend, &prefix_lup, &prefix_lnz, &prefix_unz);
+  (void)prefix_lup;
+  (void)prefix_lnz;
+  (void)prefix_unz;
+  free(scratch);
+  return ok;
+}
+
 static void kls_record_fast_repaired_block_stats(kls_solver *solver,
                                                  UF_long block,
                                                  UF_long k1,
                                                  UF_long nk,
                                                  UF_long rejected_pivot,
+                                                 const UF_long *old_pblock,
                                                  const UF_long *pblock) {
-  if (solver == NULL || pblock == NULL || rejected_pivot < k1 ||
-      rejected_pivot >= k1 + nk) {
+  if (solver == NULL || old_pblock == NULL || pblock == NULL ||
+      rejected_pivot < k1 || rejected_pivot >= k1 + nk) {
     return;
   }
 
@@ -8701,12 +9014,13 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
   UF_long suffix_changed = 0;
   int valid = 1;
   for (UF_long k = 0; k < nk; ++k) {
+    const UF_long old_local_row = old_pblock[k];
     const UF_long local_row = pblock[k];
-    if (local_row >= nk) {
+    if (old_local_row >= nk || local_row >= nk) {
       valid = 0;
       break;
     }
-    if (local_row != k) {
+    if (local_row != old_local_row) {
       if (first_changed == KLS_KLU_EMPTY) {
         first_changed = k1 + k;
       }
@@ -8740,6 +9054,11 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     suffix_changed > 0u &&
     solver->stats.fast_rejected_pivoting_tail_columns > 0 &&
     solver->stats.fast_rejected_pivoting_tail_work > 0.0;
+  if (solver->stats.fast_repaired_tail_restart_ready &&
+      !kls_repaired_tail_prefix_state_valid(solver, block, k1, nk,
+                                            local_reject, pblock)) {
+    solver->stats.fast_repaired_tail_restart_ready = 0;
+  }
   double block_work = 0.0;
   if (kls_fast_reject_block_work(solver, block, k1, nk, &block_work)) {
     solver->stats.fast_repaired_block_work = block_work;
@@ -8808,6 +9127,23 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     old_unz_block += solver->numeric->Ulen[k] + 1u;
   }
 
+  UF_long *old_pblock =
+    (UF_long *)malloc((size_t)nk * sizeof(*old_pblock));
+  if (old_pblock == NULL) {
+    (void)kls_rebuild_numeric_pinv(solver);
+    return 0;
+  }
+  for (UF_long k = 0; k < nk; ++k) {
+    const UF_long old_row = solver->numeric->Pnum[k1 + k];
+    if (old_row >= solver->n || psinv[old_row] < k1 ||
+        psinv[old_row] >= k2) {
+      free(old_pblock);
+      (void)kls_rebuild_numeric_pinv(solver);
+      return 0;
+    }
+    old_pblock[k] = psinv[old_row] - k1;
+  }
+
   double lsize = 0.0;
   if (solver->symbolic->Lnz[block] < 0.0) {
     lsize = -(solver->common.initmem);
@@ -8852,6 +9188,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     if (new_lu != NULL) {
       (void)TRILINOS_KLU_free(new_lu, new_size, sizeof(Unit), &solver->common);
     }
+    free(old_pblock);
     solver->common.status = old_status;
     solver->common.numerical_rank = old_numerical_rank;
     solver->common.singular_col = old_singular_col;
@@ -8869,6 +9206,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   for (UF_long k = 0; k < nk; ++k) {
     const UF_long local_row = pblock[k];
     if (local_row >= nk) {
+      free(old_pblock);
       solver->common.status = old_status;
       solver->common.numerical_rank = old_numerical_rank;
       solver->common.singular_col = old_singular_col;
@@ -8879,7 +9217,8 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     solver->numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + local_row];
   }
   kls_record_fast_repaired_block_stats(solver, block, k1, nk, rejected_pivot,
-                                       pblock);
+                                       old_pblock, pblock);
+  free(old_pblock);
 
   if (!kls_rebuild_numeric_pinv(solver)) {
     solver->common.status = old_status;

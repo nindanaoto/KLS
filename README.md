@@ -352,7 +352,8 @@ original reused pivot, the row chosen by the fallback pivoting block repair at
 that pivot, whether it matches the retained tail candidate, the first pivot
 whose row changed in the fallback repair, how many changed pivots were before
 and at/after the rejected pivot, whether the robust repair outcome preserved
-the prefix and is compatible with a future local tail restart, the estimated
+the old block prefix, whether KLS can reconstruct the live KLU prefix
+`P`/`Pinv`/pruning state needed by a future local tail restart, the estimated
 full-block repair work and strict pivoting-tail restart work/saved work, the
 rejected BTF block, the suffix from that pivot to the end
 of the block, the exact U-pattern descendant tail inside that block, the
