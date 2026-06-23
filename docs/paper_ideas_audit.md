@@ -52,8 +52,11 @@ directly in KLS-owned row-major mirrors before scattering back to KLU on
 success. Row-refactor groups now also retain a reverse group graph and report
 group dependency edges, root groups, leaf groups, and maximum group fanout,
 giving the row/segment layer the explicit task graph needed by future
-SubtreeLU-style private/pipeline queues and CKTSO-style tail schedulers. These
-pieces do not change the current default KLU-column numeric kernel.
+SubtreeLU-style private/pipeline queues and CKTSO-style tail schedulers. The
+experimental row pipeline can now consume that graph through a bounded
+successor-ready queue for the pipeline tail, and reports whether the last row
+run used that queue plus cumulative queued group counts. These pieces do not
+change the current default KLU-column numeric kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -2748,6 +2751,17 @@ loop, but regressed `OPF_10000` to `1.110x` and `xingo_afonso_itaipu` to
 shallow: the remaining CKTSO gap still points to native row/segment numeric
 storage and pivoting-tail restart semantics, not more cached scalar scheduler
 decisions around the current KLU-backed row experiment.
+
+The retained row-group reverse graph is now consumed by the experimental row
+pipeline tail as a bounded successor-ready queue. Queue setup marks the groups
+remaining after the cluster split, counts only tail-local predecessor groups,
+starts from zero-predecessor tail roots, and enqueues successor groups when
+their tail predecessor count reaches zero. A strengthened smoke fixture uses
+three dense row groups with a lower coupling, proving a nonzero group edge and
+queued execution while preserving a bounded residual. This is closer to the
+SubtreeLU private/pipeline scheduler contract than the previous level-list
+cursor, but it still runs the current KLU-backed row numeric updates and is not
+the missing CKTSO row/segment kernel by itself.
 
 ## Recommended General Work
 

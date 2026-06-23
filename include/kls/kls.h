@@ -180,6 +180,9 @@ typedef struct kls_stats {
   int64_t row_refactor_group_root_count;
   int64_t row_refactor_group_leaf_count;
   int64_t row_refactor_group_max_fanout;
+  int row_refactor_last_ready_queue;
+  int64_t row_refactor_ready_queue_run_count;
+  int64_t row_refactor_ready_queue_group_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

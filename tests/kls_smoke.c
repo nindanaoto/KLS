@@ -1803,26 +1803,32 @@ static int test_pre_static_pivoting_with_scaling(void) {
 }
 
 static int test_parallel_row_refactor_pipeline_scope(void) {
-  const int32_t n = 8;
-  int32_t ap[9];
-  int32_t ai[32];
-  double ax0[32];
-  double ax1[32];
-  double expected[8];
-  double b[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-  double x[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  const int32_t n = 12;
+  int32_t ap[13];
+  int32_t ai[49];
+  double ax0[49];
+  double ax1[49];
+  double expected[12];
+  double b[12] = {0.0};
+  double x[12] = {0.0};
 
   int32_t p = 0;
   for (int32_t col = 0; col < n; ++col) {
     ap[col] = p;
     expected[col] = 1.0 + 0.25 * (double)col;
-    const int32_t block = col < 4 ? 0 : 4;
-    for (int32_t row = block; row < block + 4; ++row) {
+    const int32_t row_block = col < 4 ? 0 : (col < 8 ? 4 : 8);
+    for (int32_t row = row_block; row < row_block + 4; ++row) {
       ai[p] = row;
       ax0[p] = row == col
         ? 12.0 + (double)col
         : 0.05 * (double)(1 + ((row + 2 * col) % 5));
       ax1[p] = ax0[p] + (row == col ? 0.125 : 0.01);
+      p++;
+    }
+    if (col == 0) {
+      ai[p] = 4;
+      ax0[p] = 0.035;
+      ax1[p] = 0.041;
       p++;
     }
   }
@@ -1837,6 +1843,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
   kls_options options;
   kls_default_options(&options);
   options.threads = 4;
+  options.orientation = KLS_ORIENTATION_NORMAL;
   options.ordering = KLS_ORDERING_NATURAL;
   options.use_btf = 0;
   options.scale = -1;
@@ -1885,18 +1892,25 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
   if (ok && (checked_stats.row_refactor_last_run != 1 ||
              checked_stats.row_refactor_last_checked != 1 ||
              checked_stats.row_refactor_last_parallel != 1 ||
+             checked_stats.row_refactor_last_ready_queue != 1 ||
              checked_stats.row_refactor_run_count != 1 ||
              checked_stats.row_refactor_checked_run_count != 1 ||
-             checked_stats.row_refactor_parallel_run_count != 1)) {
+             checked_stats.row_refactor_parallel_run_count != 1 ||
+             checked_stats.row_refactor_ready_queue_run_count != 1 ||
+             checked_stats.row_refactor_ready_queue_group_count < 3)) {
     fprintf(stderr,
-            "unexpected checked row stats: last=%d/%d/%d"
-            ", runs=%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
+            "unexpected checked row stats: last=%d/%d/%d/%d"
+            ", runs=%" PRId64 "/%" PRId64 "/%" PRId64
+            ", ready=%" PRId64 "/%" PRId64 "\n",
             checked_stats.row_refactor_last_run,
             checked_stats.row_refactor_last_checked,
             checked_stats.row_refactor_last_parallel,
+            checked_stats.row_refactor_last_ready_queue,
             checked_stats.row_refactor_run_count,
             checked_stats.row_refactor_checked_run_count,
-            checked_stats.row_refactor_parallel_run_count);
+            checked_stats.row_refactor_parallel_run_count,
+            checked_stats.row_refactor_ready_queue_run_count,
+            checked_stats.row_refactor_ready_queue_group_count);
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -1909,12 +1923,14 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
     ok = 0;
   }
   if (ok && (checked_only_refactor_stats.row_refactor_last_run != 0 ||
+             checked_only_refactor_stats.row_refactor_last_ready_queue != 0 ||
              checked_only_refactor_stats.row_refactor_run_count != 1 ||
              checked_only_refactor_stats.row_refactor_checked_run_count != 1)) {
     fprintf(stderr,
-            "checked-only refactor incorrectly used row path: last=%d"
+            "checked-only refactor incorrectly used row path: last=%d/%d"
             ", runs=%" PRId64 ", checked=%" PRId64 "\n",
             checked_only_refactor_stats.row_refactor_last_run,
+            checked_only_refactor_stats.row_refactor_last_ready_queue,
             checked_only_refactor_stats.row_refactor_run_count,
             checked_only_refactor_stats.row_refactor_checked_run_count);
     ok = 0;
@@ -1963,6 +1979,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_group_pipeline_groups < 2 ||
              stats.row_refactor_group_pipeline_rows != n ||
              stats.row_refactor_group_pipeline_work <= 0.0 ||
+             stats.row_refactor_group_dependency_edges <= 0 ||
              stats.row_refactor_group_root_count <= 0 ||
              stats.row_refactor_group_root_count >
                stats.row_refactor_group_count ||
@@ -1976,17 +1993,22 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_last_run != 1 ||
              stats.row_refactor_last_checked != 0 ||
              stats.row_refactor_last_parallel != 1 ||
+             stats.row_refactor_last_ready_queue != 1 ||
              stats.row_refactor_run_count != 2 ||
              stats.row_refactor_checked_run_count != 1 ||
-             stats.row_refactor_parallel_run_count != 2)) {
+             stats.row_refactor_parallel_run_count != 2 ||
+             stats.row_refactor_ready_queue_run_count != 2 ||
+             stats.row_refactor_ready_queue_group_count <
+               stats.row_refactor_group_pipeline_groups)) {
     fprintf(stderr,
             "unexpected row pipeline stats: groups=%" PRId64
             ", levels=%" PRId64 ", cluster=%" PRId64
             ", pipe_groups=%" PRId64 ", pipe_rows=%" PRId64
             ", pipe_work=%.6g, edges=%" PRId64
             ", roots=%" PRId64 ", leaves=%" PRId64
-            ", max_fanout=%" PRId64 ", last=%d/%d/%d"
-            ", runs=%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
+            ", max_fanout=%" PRId64 ", last=%d/%d/%d/%d"
+            ", runs=%" PRId64 "/%" PRId64 "/%" PRId64
+            ", ready=%" PRId64 "/%" PRId64 "\n",
             stats.row_refactor_group_count,
             stats.row_refactor_group_level_count,
             stats.row_refactor_group_cluster_levels,
@@ -2000,9 +2022,12 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             stats.row_refactor_last_run,
             stats.row_refactor_last_checked,
             stats.row_refactor_last_parallel,
+            stats.row_refactor_last_ready_queue,
             stats.row_refactor_run_count,
             stats.row_refactor_checked_run_count,
-            stats.row_refactor_parallel_run_count);
+            stats.row_refactor_parallel_run_count,
+            stats.row_refactor_ready_queue_run_count,
+            stats.row_refactor_ready_queue_group_count);
     ok = 0;
   }
   const size_t legacy_stats_size =

@@ -711,55 +711,7 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivoting_tail_last\":%" PRId64
            ",\"fast_rejected_pivoting_tail_contains_reject\":%d"
            ",\"fast_rejected_pivoting_tail_topological\":%d"
-           ",\"fast_rejected_refresh_state\":%d"
-           ",\"refactor_dependency_levels\":%" PRId64
-           ",\"refactor_dependency_max_width\":%" PRId64
-           ",\"refactor_dependency_edges\":%" PRId64
-           ",\"refactor_dependency_root_columns\":%" PRId64
-           ",\"refactor_dependency_leaf_columns\":%" PRId64
-           ",\"refactor_dependency_max_fanout\":%" PRId64
-           ",\"refactor_dependency_max_column_work\":%.9g"
-           ",\"refactor_dependency_pipeline_max_column_work\":%.9g"
-           ",\"refactor_supernode_candidate_count\":%" PRId64
-           ",\"refactor_supernode_candidate_rows\":%" PRId64
-           ",\"refactor_supernode_candidate_max_width\":%" PRId64
-           ",\"refactor_supernode_candidate_dense_entries\":%.9g"
-           ",\"refactor_supernode_candidate_trailing_entries\":%.9g"
-           ",\"row_refactor_group_count\":%" PRId64
-           ",\"row_refactor_group_level_count\":%" PRId64
-           ",\"row_refactor_group_level_max_width\":%" PRId64
-           ",\"row_refactor_group_cluster_levels\":%" PRId64
-           ",\"row_refactor_group_pipeline_groups\":%" PRId64
-           ",\"row_refactor_group_pipeline_rows\":%" PRId64
-           ",\"row_refactor_group_pipeline_work\":%.9g"
-           ",\"row_refactor_group_dependency_edges\":%" PRId64
-           ",\"row_refactor_group_root_count\":%" PRId64
-           ",\"row_refactor_group_leaf_count\":%" PRId64
-           ",\"row_refactor_group_max_fanout\":%" PRId64
-           ",\"row_refactor_last_run\":%d"
-           ",\"row_refactor_last_checked\":%d"
-           ",\"row_refactor_last_parallel\":%d"
-           ",\"row_refactor_run_count\":%" PRId64
-           ",\"row_refactor_checked_run_count\":%" PRId64
-           ",\"row_refactor_parallel_run_count\":%" PRId64
-           ",\"row_refactor_segment_count\":%" PRId64
-           ",\"row_refactor_segment_rows\":%" PRId64
-           ",\"row_refactor_segment_max_width\":%" PRId64
-           ",\"row_refactor_segment_dense_entries\":%.9g"
-           ",\"row_refactor_segment_trailing_entries\":%.9g"
-           ",\"row_refactor_dense_segment_count\":%" PRId64
-           ",\"row_refactor_dense_segment_rows\":%" PRId64
-           ",\"row_refactor_dense_segment_max_width\":%" PRId64
-           ",\"row_refactor_dense_segment_dense_entries\":%.9g"
-           ",\"row_refactor_dense_segment_trailing_entries\":%.9g"
-           ",\"refactor_dependency_cluster_levels\":%" PRId64
-           ",\"refactor_dependency_pipeline_columns\":%" PRId64
-           ",\"refactor_dependency_work\":%.9g"
-           ",\"refactor_dependency_pipeline_work\":%.9g"
-           ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
-           ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
-           ",\"rcond\":%.9g,\"rgrowth\":%.9g"
-           ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
+           ",\"fast_rejected_refresh_state\":%d",
            path, a.n, a.nnz, options.threads,
            kls_orientation_name(options.orientation),
            kls_orientation_name(stats.selected_orientation),
@@ -819,7 +771,58 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_last,
            stats.fast_rejected_pivoting_tail_contains_reject,
            stats.fast_rejected_pivoting_tail_topological,
-           stats.fast_rejected_refresh_state,
+           stats.fast_rejected_refresh_state);
+    printf(",\"refactor_dependency_levels\":%" PRId64
+           ",\"refactor_dependency_max_width\":%" PRId64
+           ",\"refactor_dependency_edges\":%" PRId64
+           ",\"refactor_dependency_root_columns\":%" PRId64
+           ",\"refactor_dependency_leaf_columns\":%" PRId64
+           ",\"refactor_dependency_max_fanout\":%" PRId64
+           ",\"refactor_dependency_max_column_work\":%.9g"
+           ",\"refactor_dependency_pipeline_max_column_work\":%.9g"
+           ",\"refactor_supernode_candidate_count\":%" PRId64
+           ",\"refactor_supernode_candidate_rows\":%" PRId64
+           ",\"refactor_supernode_candidate_max_width\":%" PRId64
+           ",\"refactor_supernode_candidate_dense_entries\":%.9g"
+           ",\"refactor_supernode_candidate_trailing_entries\":%.9g"
+           ",\"row_refactor_group_count\":%" PRId64
+           ",\"row_refactor_group_level_count\":%" PRId64
+           ",\"row_refactor_group_level_max_width\":%" PRId64
+           ",\"row_refactor_group_cluster_levels\":%" PRId64
+           ",\"row_refactor_group_pipeline_groups\":%" PRId64
+           ",\"row_refactor_group_pipeline_rows\":%" PRId64
+           ",\"row_refactor_group_pipeline_work\":%.9g"
+           ",\"row_refactor_group_dependency_edges\":%" PRId64
+           ",\"row_refactor_group_root_count\":%" PRId64
+           ",\"row_refactor_group_leaf_count\":%" PRId64
+           ",\"row_refactor_group_max_fanout\":%" PRId64
+           ",\"row_refactor_last_run\":%d"
+           ",\"row_refactor_last_checked\":%d"
+           ",\"row_refactor_last_parallel\":%d"
+           ",\"row_refactor_last_ready_queue\":%d"
+           ",\"row_refactor_run_count\":%" PRId64
+           ",\"row_refactor_checked_run_count\":%" PRId64
+           ",\"row_refactor_parallel_run_count\":%" PRId64
+           ",\"row_refactor_ready_queue_run_count\":%" PRId64
+           ",\"row_refactor_ready_queue_group_count\":%" PRId64
+           ",\"row_refactor_segment_count\":%" PRId64
+           ",\"row_refactor_segment_rows\":%" PRId64
+           ",\"row_refactor_segment_max_width\":%" PRId64
+           ",\"row_refactor_segment_dense_entries\":%.9g"
+           ",\"row_refactor_segment_trailing_entries\":%.9g"
+           ",\"row_refactor_dense_segment_count\":%" PRId64
+           ",\"row_refactor_dense_segment_rows\":%" PRId64
+           ",\"row_refactor_dense_segment_max_width\":%" PRId64
+           ",\"row_refactor_dense_segment_dense_entries\":%.9g"
+           ",\"row_refactor_dense_segment_trailing_entries\":%.9g"
+           ",\"refactor_dependency_cluster_levels\":%" PRId64
+           ",\"refactor_dependency_pipeline_columns\":%" PRId64
+           ",\"refactor_dependency_work\":%.9g"
+           ",\"refactor_dependency_pipeline_work\":%.9g"
+           ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
+           ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
+           ",\"rcond\":%.9g,\"rgrowth\":%.9g"
+           ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
            stats.refactor_dependency_levels,
            stats.refactor_dependency_max_width,
            stats.refactor_dependency_edges,
@@ -847,9 +850,12 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_run,
            stats.row_refactor_last_checked,
            stats.row_refactor_last_parallel,
+           stats.row_refactor_last_ready_queue,
            stats.row_refactor_run_count,
            stats.row_refactor_checked_run_count,
            stats.row_refactor_parallel_run_count,
+           stats.row_refactor_ready_queue_run_count,
+           stats.row_refactor_ready_queue_group_count,
            stats.row_refactor_segment_count,
            stats.row_refactor_segment_rows,
            stats.row_refactor_segment_max_width,
@@ -992,8 +998,11 @@ int main(int argc, char **argv) {
            ", edges: %" PRId64 ", roots: %" PRId64
            ", leaves: %" PRId64 ", max fanout: %" PRId64
            ", last run: %d, last checked: %d, last parallel: %d"
+           ", last ready queue: %d"
            ", runs: %" PRId64 ", checked runs: %" PRId64
-           ", parallel runs: %" PRId64 "\n",
+           ", parallel runs: %" PRId64
+           ", ready queue runs: %" PRId64
+           ", ready queue groups: %" PRId64 "\n",
            stats.row_refactor_group_count,
            stats.row_refactor_group_level_count,
            stats.row_refactor_group_level_max_width,
@@ -1008,9 +1017,12 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_run,
            stats.row_refactor_last_checked,
            stats.row_refactor_last_parallel,
+           stats.row_refactor_last_ready_queue,
            stats.row_refactor_run_count,
            stats.row_refactor_checked_run_count,
-           stats.row_refactor_parallel_run_count);
+           stats.row_refactor_parallel_run_count,
+           stats.row_refactor_ready_queue_run_count,
+           stats.row_refactor_ready_queue_group_count);
     printf("row refactor segments: %" PRId64
            ", rows: %" PRId64 ", max width: %" PRId64
            ", dense entries: %.6g, trailing entries: %.6g\n",

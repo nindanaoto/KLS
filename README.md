@@ -357,7 +357,11 @@ scheduler can wait on them once before running the group kernel; stats report
 the reverse group graph and reports `row_refactor_group_dependency_edges`,
 `row_refactor_group_root_count`, `row_refactor_group_leaf_count`, and
 `row_refactor_group_max_fanout`, which are the row-segment task-graph counters
-needed by future private/pipeline partitioning and tail-restart schedulers.
+needed by future private/pipeline partitioning and tail-restart schedulers. The
+experimental row pipeline can consume that graph as a bounded successor-ready
+queue, reporting `row_refactor_last_ready_queue`,
+`row_refactor_ready_queue_run_count`, and
+`row_refactor_ready_queue_group_count` when the queued group tail is used.
 Because checked row fast-factor probes and
 unchecked row refactors are selected independently, stats also report
 `row_refactor_last_run`, `row_refactor_last_checked`,

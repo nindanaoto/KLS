@@ -117,9 +117,12 @@ struct kls_solver {
   int row_refactor_last_run;
   int row_refactor_last_checked;
   int row_refactor_last_parallel;
+  int row_refactor_last_ready_queue;
   UF_long row_refactor_run_count;
   UF_long row_refactor_checked_run_count;
   UF_long row_refactor_parallel_run_count;
+  UF_long row_refactor_ready_queue_run_count;
+  UF_long row_refactor_ready_queue_group_count;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_segment_rows;
   UF_long row_refactor_segment_max_width;
@@ -273,6 +276,15 @@ typedef struct kls_egraph_refactor_shared {
   int pipeline_natural_order;
   int row_refactor_mode;
   int row_refactor_defer_value_scatter;
+  int row_pipeline_ready_queue;
+  UF_long *row_pipeline_ready_groups;
+  atomic_uint *row_pipeline_ready_slots;
+  atomic_ulong *row_pipeline_remaining_preds;
+  const unsigned char *row_pipeline_tail_groups;
+  UF_long row_pipeline_tail_count;
+  atomic_ulong row_pipeline_ready_head;
+  atomic_ulong row_pipeline_ready_tail;
+  atomic_ulong row_pipeline_completed_groups;
   pthread_barrier_t barrier;
 } kls_egraph_refactor_shared;
 
@@ -619,9 +631,12 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_last_run = 0;
   solver->row_refactor_last_checked = 0;
   solver->row_refactor_last_parallel = 0;
+  solver->row_refactor_last_ready_queue = 0;
   solver->row_refactor_run_count = 0;
   solver->row_refactor_checked_run_count = 0;
   solver->row_refactor_parallel_run_count = 0;
+  solver->row_refactor_ready_queue_run_count = 0;
+  solver->row_refactor_ready_queue_group_count = 0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_segment_rows = 0;
   solver->row_refactor_segment_max_width = 0;
@@ -844,9 +859,11 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_run = 0;
   solver->row_refactor_last_checked = 0;
   solver->row_refactor_last_parallel = 0;
+  solver->row_refactor_last_ready_queue = 0;
   solver->stats.row_refactor_last_run = 0;
   solver->stats.row_refactor_last_checked = 0;
   solver->stats.row_refactor_last_parallel = 0;
+  solver->stats.row_refactor_last_ready_queue = 0;
 }
 
 static void kls_record_row_refactor_run(kls_solver *solver,
@@ -858,6 +875,7 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_run = 1;
   solver->row_refactor_last_checked = check_pivots ? 1 : 0;
   solver->row_refactor_last_parallel = parallel ? 1 : 0;
+  solver->row_refactor_last_ready_queue = 0;
   solver->row_refactor_run_count++;
   if (check_pivots) {
     solver->row_refactor_checked_run_count++;
@@ -865,6 +883,16 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   if (parallel) {
     solver->row_refactor_parallel_run_count++;
   }
+}
+
+static void kls_record_row_refactor_ready_queue_run(kls_solver *solver,
+                                                    UF_long group_count) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_last_ready_queue = 1;
+  solver->row_refactor_ready_queue_run_count++;
+  solver->row_refactor_ready_queue_group_count += group_count;
 }
 
 static void kls_record_fast_reject_detail(kls_solver *solver,
@@ -7395,6 +7423,12 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_group_leaf_count;
   solver->stats.row_refactor_group_max_fanout =
     (int64_t)solver->row_refactor_group_max_fanout;
+  solver->stats.row_refactor_last_ready_queue =
+    solver->row_refactor_last_ready_queue;
+  solver->stats.row_refactor_ready_queue_run_count =
+    (int64_t)solver->row_refactor_ready_queue_run_count;
+  solver->stats.row_refactor_ready_queue_group_count =
+    (int64_t)solver->row_refactor_ready_queue_group_count;
   solver->stats.row_refactor_segment_count =
     (int64_t)solver->row_refactor_segment_count;
   solver->stats.row_refactor_segment_rows =
@@ -11666,6 +11700,151 @@ static void kls_row_refactor_record_pipeline_scope(kls_solver *solver,
   }
 }
 
+static int kls_prepare_row_refactor_ready_queue(
+  const kls_solver *solver,
+  UF_long cluster_levels,
+  UF_long **ready_groups_out,
+  atomic_uint **ready_slots_out,
+  atomic_ulong **remaining_preds_out,
+  unsigned char **tail_groups_out,
+  UF_long *tail_count_out,
+  UF_long *initial_ready_out) {
+  if (ready_groups_out != NULL) {
+    *ready_groups_out = NULL;
+  }
+  if (ready_slots_out != NULL) {
+    *ready_slots_out = NULL;
+  }
+  if (remaining_preds_out != NULL) {
+    *remaining_preds_out = NULL;
+  }
+  if (tail_groups_out != NULL) {
+    *tail_groups_out = NULL;
+  }
+  if (tail_count_out != NULL) {
+    *tail_count_out = 0;
+  }
+  if (initial_ready_out != NULL) {
+    *initial_ready_out = 0;
+  }
+  if (solver == NULL || ready_groups_out == NULL ||
+      ready_slots_out == NULL || remaining_preds_out == NULL ||
+      tail_groups_out == NULL || tail_count_out == NULL ||
+      initial_ready_out == NULL ||
+      solver->row_refactor_group_count == 0u ||
+      solver->row_refactor_group_level_ptr == NULL ||
+      solver->row_refactor_level_groups == NULL ||
+      solver->row_refactor_group_successor_ptr == NULL ||
+      (solver->row_refactor_group_dependency_edges > 0u &&
+       solver->row_refactor_group_successor_groups == NULL) ||
+      cluster_levels >= solver->row_refactor_level_count) {
+    return 0;
+  }
+
+  const UF_long group_count = solver->row_refactor_group_count;
+  const UF_long tail_begin =
+    solver->row_refactor_group_level_ptr[cluster_levels];
+  if (tail_begin >= group_count) {
+    return 0;
+  }
+  const UF_long tail_count = group_count - tail_begin;
+  UF_long *ready_groups =
+    (UF_long *)malloc((size_t)tail_count * sizeof(*ready_groups));
+  atomic_uint *ready_slots =
+    (atomic_uint *)malloc((size_t)tail_count * sizeof(*ready_slots));
+  atomic_ulong *remaining_preds =
+    (atomic_ulong *)malloc((size_t)group_count * sizeof(*remaining_preds));
+  unsigned char *tail_groups =
+    (unsigned char *)calloc((size_t)group_count, sizeof(*tail_groups));
+  if (ready_groups == NULL || ready_slots == NULL ||
+      remaining_preds == NULL || tail_groups == NULL) {
+    free(ready_groups);
+    free(ready_slots);
+    free(remaining_preds);
+    free(tail_groups);
+    return 0;
+  }
+
+  for (UF_long pos = 0; pos < tail_count; ++pos) {
+    atomic_init(&ready_slots[pos], 0u);
+  }
+  for (UF_long group = 0; group < group_count; ++group) {
+    atomic_init(&remaining_preds[group], 0ul);
+  }
+  for (UF_long pos = tail_begin; pos < group_count; ++pos) {
+    const UF_long group = solver->row_refactor_level_groups[pos];
+    if (group >= group_count) {
+      free(ready_groups);
+      free(ready_slots);
+      free(remaining_preds);
+      free(tail_groups);
+      return 0;
+    }
+    tail_groups[group] = 1u;
+  }
+
+  for (UF_long group = 0; group < group_count; ++group) {
+    const UF_long begin = solver->row_refactor_group_successor_ptr[group];
+    const UF_long end = solver->row_refactor_group_successor_ptr[group + 1u];
+    if (begin > end ||
+        end > solver->row_refactor_group_dependency_edges) {
+      free(ready_groups);
+      free(ready_slots);
+      free(remaining_preds);
+      free(tail_groups);
+      return 0;
+    }
+    if (!tail_groups[group]) {
+      continue;
+    }
+    for (UF_long pos = begin; pos < end; ++pos) {
+      const UF_long successor =
+        solver->row_refactor_group_successor_groups[pos];
+      if (successor >= group_count) {
+        free(ready_groups);
+        free(ready_slots);
+        free(remaining_preds);
+        free(tail_groups);
+        return 0;
+      }
+      if (tail_groups[successor]) {
+        const unsigned long old =
+          atomic_load_explicit(&remaining_preds[successor],
+                               memory_order_relaxed);
+        atomic_store_explicit(&remaining_preds[successor], old + 1ul,
+                              memory_order_relaxed);
+      }
+    }
+  }
+
+  UF_long ready_count = 0;
+  for (UF_long pos = tail_begin; pos < group_count; ++pos) {
+    const UF_long group = solver->row_refactor_level_groups[pos];
+    if (atomic_load_explicit(&remaining_preds[group],
+                             memory_order_relaxed) == 0ul) {
+      ready_groups[ready_count] = group;
+      atomic_store_explicit(&ready_slots[ready_count], 1u,
+                            memory_order_relaxed);
+      ready_count++;
+    }
+  }
+  if (ready_count == 0u) {
+    free(ready_groups);
+    free(ready_slots);
+    free(remaining_preds);
+    free(tail_groups);
+    return 0;
+  }
+
+  *ready_groups_out = ready_groups;
+  *ready_slots_out = ready_slots;
+  *remaining_preds_out = remaining_preds;
+  *tail_groups_out = tail_groups;
+  *tail_count_out = tail_count;
+  *initial_ready_out = ready_count;
+  return 1;
+}
+
 static int kls_build_row_refactor_group_thread_slices(kls_solver *solver,
                                                       int thread_count) {
   if (solver == NULL || thread_count <= 1 ||
@@ -12732,6 +12911,169 @@ static int kls_row_refactor_group_prefers_external_prewait(
          KLS_ROW_REFACTOR_GROUP_DENSE;
 }
 
+static int kls_row_refactor_enqueue_ready_group(
+  kls_egraph_refactor_shared *shared,
+  UF_long group) {
+  if (shared == NULL || !shared->row_pipeline_ready_queue ||
+      shared->solver == NULL ||
+      shared->row_pipeline_ready_groups == NULL ||
+      shared->row_pipeline_ready_slots == NULL ||
+      shared->row_pipeline_tail_groups == NULL ||
+      shared->row_pipeline_tail_count == 0u ||
+      group >= shared->solver->row_refactor_group_count ||
+      !shared->row_pipeline_tail_groups[group]) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  const unsigned long pos =
+    atomic_fetch_add_explicit(&shared->row_pipeline_ready_tail, 1ul,
+                              memory_order_acq_rel);
+  if ((UF_long)pos >= shared->row_pipeline_tail_count) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  shared->row_pipeline_ready_groups[pos] = group;
+  atomic_store_explicit(&shared->row_pipeline_ready_slots[pos], 1u,
+                        memory_order_release);
+  return 1;
+}
+
+static int kls_row_refactor_pop_ready_group(
+  kls_egraph_refactor_worker *worker,
+  UF_long *group_out) {
+  if (group_out != NULL) {
+    *group_out = KLS_KLU_EMPTY;
+  }
+  if (worker == NULL || worker->shared == NULL || group_out == NULL) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  if (!shared->row_pipeline_ready_queue ||
+      shared->row_pipeline_ready_groups == NULL ||
+      shared->row_pipeline_ready_slots == NULL ||
+      shared->row_pipeline_tail_count == 0u) {
+    return 0;
+  }
+
+  unsigned spin = 0;
+  for (;;) {
+    if (kls_egraph_refactor_should_stop(shared)) {
+      return 0;
+    }
+    if ((UF_long)atomic_load_explicit(
+          &shared->row_pipeline_completed_groups, memory_order_acquire) >=
+        shared->row_pipeline_tail_count) {
+      return 0;
+    }
+
+    const unsigned long head =
+      atomic_load_explicit(&shared->row_pipeline_ready_head,
+                           memory_order_acquire);
+    const unsigned long tail =
+      atomic_load_explicit(&shared->row_pipeline_ready_tail,
+                           memory_order_acquire);
+    if (head >= tail) {
+      if ((spin++ & 1023u) == 0u &&
+          kls_egraph_refactor_should_stop(shared)) {
+        return 0;
+      }
+      continue;
+    }
+
+    unsigned long expected = head;
+    if (!atomic_compare_exchange_weak_explicit(
+          &shared->row_pipeline_ready_head, &expected, head + 1ul,
+          memory_order_acq_rel, memory_order_acquire)) {
+      continue;
+    }
+    if ((UF_long)head >= shared->row_pipeline_tail_count) {
+      kls_egraph_refactor_record_invalid(shared);
+      return 0;
+    }
+    while (atomic_load_explicit(&shared->row_pipeline_ready_slots[head],
+                                memory_order_acquire) == 0u) {
+      if (kls_egraph_refactor_should_stop(shared)) {
+        return 0;
+      }
+    }
+    *group_out = shared->row_pipeline_ready_groups[head];
+    return 1;
+  }
+}
+
+static int kls_row_refactor_finish_ready_group(
+  kls_egraph_refactor_worker *worker,
+  UF_long group) {
+  if (worker == NULL || worker->shared == NULL) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL ||
+      solver->row_refactor_group_successor_ptr == NULL ||
+      (solver->row_refactor_group_dependency_edges > 0u &&
+       solver->row_refactor_group_successor_groups == NULL) ||
+      group >= solver->row_refactor_group_count ||
+      shared->row_pipeline_remaining_preds == NULL ||
+      shared->row_pipeline_tail_groups == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+
+  const UF_long begin = solver->row_refactor_group_successor_ptr[group];
+  const UF_long end = solver->row_refactor_group_successor_ptr[group + 1u];
+  if (begin > end ||
+      end > solver->row_refactor_group_dependency_edges) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  for (UF_long pos = begin; pos < end; ++pos) {
+    const UF_long successor = solver->row_refactor_group_successor_groups[pos];
+    if (successor >= solver->row_refactor_group_count) {
+      kls_egraph_refactor_record_invalid(shared);
+      return 0;
+    }
+    if (!shared->row_pipeline_tail_groups[successor]) {
+      continue;
+    }
+    const unsigned long old =
+      atomic_fetch_sub_explicit(
+        &shared->row_pipeline_remaining_preds[successor], 1ul,
+        memory_order_acq_rel);
+    if (old == 0ul) {
+      kls_egraph_refactor_record_invalid(shared);
+      return 0;
+    }
+    if (old == 1ul &&
+        !kls_row_refactor_enqueue_ready_group(shared, successor)) {
+      return 0;
+    }
+  }
+
+  atomic_fetch_add_explicit(&shared->row_pipeline_completed_groups, 1ul,
+                            memory_order_release);
+  return 1;
+}
+
+static void kls_row_refactor_worker_run_ready_pipeline(
+  kls_egraph_refactor_worker *worker) {
+  for (;;) {
+    UF_long group = KLS_KLU_EMPTY;
+    if (!kls_row_refactor_pop_ready_group(worker, &group)) {
+      break;
+    }
+    if (!kls_parallel_row_refactor_process_group(worker, group, 0)) {
+      break;
+    }
+    kls_parallel_row_refactor_mark_group_done(worker->shared,
+                                             worker->shared->solver,
+                                             group);
+    if (!kls_row_refactor_finish_ready_group(worker, group)) {
+      break;
+    }
+  }
+}
+
 static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
@@ -12788,27 +13130,31 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
     if (shared->pipeline_done != NULL &&
         cluster_levels < solver->row_refactor_level_count &&
         !kls_egraph_refactor_should_stop(shared)) {
-      for (;;) {
-        if (kls_egraph_refactor_should_stop(shared)) {
-          break;
+      if (shared->row_pipeline_ready_queue) {
+        kls_row_refactor_worker_run_ready_pipeline(worker);
+      } else {
+        for (;;) {
+          if (kls_egraph_refactor_should_stop(shared)) {
+            break;
+          }
+          const UF_long pos =
+            (UF_long)atomic_fetch_add_explicit(&shared->next_pipeline_pos, 1ul,
+                                               memory_order_relaxed);
+          if (pos >= shared->pipeline_pos_end) {
+            break;
+          }
+          const UF_long group = solver->row_refactor_level_groups[pos];
+          const int prewait =
+            kls_row_refactor_group_prefers_external_prewait(solver, group);
+          if ((prewait &&
+               !kls_parallel_row_refactor_wait_group_dependencies(worker,
+                                                                  group)) ||
+              !kls_parallel_row_refactor_process_group(worker, group,
+                                                       prewait ? 0 : 1)) {
+            break;
+          }
+          kls_parallel_row_refactor_mark_group_done(shared, solver, group);
         }
-        const UF_long pos =
-          (UF_long)atomic_fetch_add_explicit(&shared->next_pipeline_pos, 1ul,
-                                             memory_order_relaxed);
-        if (pos >= shared->pipeline_pos_end) {
-          break;
-        }
-        const UF_long group = solver->row_refactor_level_groups[pos];
-        const int prewait =
-          kls_row_refactor_group_prefers_external_prewait(solver, group);
-        if ((prewait &&
-             !kls_parallel_row_refactor_wait_group_dependencies(worker,
-                                                                group)) ||
-            !kls_parallel_row_refactor_process_group(worker, group,
-                                                     prewait ? 0 : 1)) {
-          break;
-        }
-        kls_parallel_row_refactor_mark_group_done(shared, solver, group);
       }
     }
     return;
@@ -12899,6 +13245,18 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   if (pool == NULL) {
     return -1;
   }
+  UF_long *row_ready_groups = NULL;
+  atomic_uint *row_ready_slots = NULL;
+  atomic_ulong *row_remaining_preds = NULL;
+  unsigned char *row_tail_groups = NULL;
+  UF_long row_ready_tail_count = 0;
+  UF_long row_initial_ready_count = 0;
+  const int use_row_ready_queue =
+    use_group_pipeline &&
+    kls_prepare_row_refactor_ready_queue(
+      solver, cluster_levels, &row_ready_groups, &row_ready_slots,
+      &row_remaining_preds, &row_tail_groups, &row_ready_tail_count,
+      &row_initial_ready_count);
 
   trilinos_klu_l_common *common = &solver->common;
   common->status = TRILINOS_KLU_OK;
@@ -12910,6 +13268,10 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   pthread_mutex_lock(&shared->lock);
   if (pool->active_workers != 0) {
     pthread_mutex_unlock(&shared->lock);
+    free(row_ready_groups);
+    free(row_ready_slots);
+    free(row_remaining_preds);
+    free(row_tail_groups);
     return -1;
   }
 
@@ -12938,6 +13300,21 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   shared->pipeline_done = pipeline_done;
   shared->pipeline_generation = pipeline_generation;
   shared->pipeline_natural_order = 0;
+  shared->row_pipeline_ready_queue = use_row_ready_queue;
+  shared->row_pipeline_ready_groups = row_ready_groups;
+  shared->row_pipeline_ready_slots = row_ready_slots;
+  shared->row_pipeline_remaining_preds = row_remaining_preds;
+  shared->row_pipeline_tail_groups = row_tail_groups;
+  shared->row_pipeline_tail_count =
+    use_row_ready_queue ? row_ready_tail_count : 0u;
+  atomic_store_explicit(&shared->row_pipeline_ready_head, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->row_pipeline_ready_tail,
+                        (unsigned long)(use_row_ready_queue
+                                          ? row_initial_ready_count : 0u),
+                        memory_order_release);
+  atomic_store_explicit(&shared->row_pipeline_completed_groups, 0ul,
+                        memory_order_release);
   atomic_store_explicit(&shared->next_pipeline_pos,
                         (unsigned long)(use_group_pipeline
                                           ? pipeline_group_begin : 0u),
@@ -12946,6 +13323,9 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
     use_group_pipeline ? solver->row_refactor_group_count : 0u;
   shared->cluster_level_count = cluster_levels;
   kls_record_row_refactor_run(solver, check_pivots, 1);
+  if (use_row_ready_queue) {
+    kls_record_row_refactor_ready_queue_run(solver, row_ready_tail_count);
+  }
 
   for (int i = 0; i < thread_count; ++i) {
     pool->workers[i].shared = shared;
@@ -12959,7 +13339,17 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
     pthread_cond_wait(&pool->done_cond, &shared->lock);
   }
   shared->row_refactor_mode = 0;
+  shared->row_pipeline_ready_queue = 0;
+  shared->row_pipeline_ready_groups = NULL;
+  shared->row_pipeline_ready_slots = NULL;
+  shared->row_pipeline_remaining_preds = NULL;
+  shared->row_pipeline_tail_groups = NULL;
+  shared->row_pipeline_tail_count = 0;
   pthread_mutex_unlock(&shared->lock);
+  free(row_ready_groups);
+  free(row_ready_slots);
+  free(row_remaining_preds);
+  free(row_tail_groups);
 
   if (shared->invalid || shared->pivot_rejected ||
       (shared->singular && common->halt_if_singular)) {
@@ -13936,6 +14326,9 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   pool->barrier_initialized = 1;
   atomic_init(&pool->shared.stop, 0);
   atomic_init(&pool->shared.next_pipeline_pos, 0ul);
+  atomic_init(&pool->shared.row_pipeline_ready_head, 0ul);
+  atomic_init(&pool->shared.row_pipeline_ready_tail, 0ul);
+  atomic_init(&pool->shared.row_pipeline_completed_groups, 0ul);
 
   for (int i = 0; i < thread_count; ++i) {
     pool->workers[i].shared = &pool->shared;
