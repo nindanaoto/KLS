@@ -5329,6 +5329,100 @@ static int reactive_static_match_setup_is_unlikely_to_pay(
   return 0;
 }
 
+#ifdef KLS_HAVE_METIS
+static int pre_static_metis_refinement_is_worthwhile(
+  UF_long n,
+  UF_long nnz,
+  UF_long weak_diagonal,
+  const trilinos_klu_l_symbolic *symbolic,
+  const trilinos_klu_l_common *common,
+  kls_ordering selected_ordering) {
+  if (selected_ordering == KLS_ORDERING_METIS || symbolic == NULL ||
+      common == NULL || n < 50000u || n > 150000u ||
+      nnz > 1500000u || weak_diagonal * 100u < n ||
+      !symbolic->do_btf || symbolic->nblocks < 1024u ||
+      symbolic->maxblock == 0u ||
+      symbolic->maxblock < (UF_long)(0.90 * (double)n) ||
+      symbolic->maxblock >= (UF_long)(0.99 * (double)n) ||
+      common->flops < 1.0e8) {
+    return 0;
+  }
+  return 1;
+}
+
+static int maybe_refine_pre_static_with_metis(
+  UF_long n,
+  UF_long nnz,
+  UF_long weak_diagonal,
+  UF_long *trial_col_ptr,
+  UF_long *trial_row_idx,
+  double *trial_values,
+  const kls_options *trial_options,
+  trilinos_klu_l_symbolic **trial_symbolic_io,
+  trilinos_klu_l_numeric **trial_numeric_io,
+  trilinos_klu_l_common *trial_common_io,
+  kls_ordering *trial_ordering_io,
+  double *trial_score_io) {
+  if (trial_col_ptr == NULL || trial_row_idx == NULL ||
+      trial_values == NULL || trial_options == NULL ||
+      trial_symbolic_io == NULL || *trial_symbolic_io == NULL ||
+      trial_numeric_io == NULL || *trial_numeric_io == NULL ||
+      trial_common_io == NULL || trial_ordering_io == NULL ||
+      trial_score_io == NULL ||
+      !pre_static_metis_refinement_is_worthwhile(
+        n, nnz, weak_diagonal, *trial_symbolic_io, trial_common_io,
+        *trial_ordering_io)) {
+    return 0;
+  }
+
+  kls_options metis_options = *trial_options;
+  metis_options.ordering = KLS_ORDERING_METIS;
+  metis_options.scale = (int)trial_common_io->scale;
+  metis_options.pivot_tolerance = trial_common_io->tol;
+
+  trilinos_klu_l_symbolic *metis_symbolic = NULL;
+  trilinos_klu_l_common metis_common;
+  int status = analyze_with_ordering(n, trial_col_ptr, trial_row_idx,
+                                     &metis_options, KLS_ORDERING_METIS,
+                                     &metis_symbolic, &metis_common);
+  if (status != KLS_OK) {
+    return 0;
+  }
+
+  trilinos_klu_l_numeric *metis_numeric =
+    trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
+                          metis_symbolic, &metis_common);
+  if (metis_numeric == NULL || metis_common.status < 0 ||
+      metis_common.status == TRILINOS_KLU_SINGULAR) {
+    if (metis_numeric != NULL) {
+      trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
+    }
+    trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+    return 0;
+  }
+
+  (void)trilinos_klu_l_flops(metis_symbolic, metis_numeric, &metis_common);
+  (void)trilinos_klu_l_rcond(metis_symbolic, metis_numeric, &metis_common);
+  if (!numeric_candidate_is_better(trial_common_io, *trial_numeric_io,
+                                   &metis_common, metis_numeric) ||
+      (trial_common_io->rcond > 0.0 && metis_common.rcond > 0.0 &&
+       metis_common.rcond < 0.01 * trial_common_io->rcond)) {
+    trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
+    trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+    return 0;
+  }
+
+  trilinos_klu_l_free_numeric(trial_numeric_io, trial_common_io);
+  trilinos_klu_l_free_symbolic(trial_symbolic_io, trial_common_io);
+  *trial_symbolic_io = metis_symbolic;
+  *trial_numeric_io = metis_numeric;
+  *trial_common_io = metis_common;
+  *trial_ordering_io = KLS_ORDERING_METIS;
+  *trial_score_io = symbolic_score(metis_symbolic);
+  return 1;
+}
+#endif
+
 static int should_try_auto_row_match(const kls_solver *solver,
                                      const double *numeric_values) {
   /* Weighted static pivoting is currently a reactive medium-matrix trial.  On
@@ -5820,6 +5914,12 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
   (void)trilinos_klu_l_flops(trial_symbolic, trial_numeric, &trial_common);
   (void)trilinos_klu_l_rcond(trial_symbolic, trial_numeric, &trial_common);
+#ifdef KLS_HAVE_METIS
+  (void)maybe_refine_pre_static_with_metis(
+    solver->n, solver->nnz, weak, trial_col_ptr, trial_row_idx, trial_values,
+    &trial_options, &trial_symbolic, &trial_numeric, &trial_common,
+    &trial_ordering, &trial_score);
+#endif
   maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
                                    trial_row_idx, &solver->options,
                                    trial_symbolic, &trial_values,

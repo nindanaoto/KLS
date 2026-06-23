@@ -355,12 +355,18 @@ with acceptable pivoting and conditioning, or when numeric fill/flop, pivoting,
 and reciprocal-condition evidence improve. Medium-large static-match
 candidates with both majority missing and majority weak diagonals can keep the
 row permutation but prefer unscaled values, avoiding matching-equilibration
-setup when it would increase fill. Benchmark JSON reports both whether static
-pivoting was enabled, whether KLS selected it, and whether the accepted static
-match used exact assignment. KLS does not vendor HSL MC64 or the MC64 copies
-carried by some solver projects. When `KLS_ENABLE_SPRAL_SCALING=ON`, KLS
-builds or links BSD-licensed SPRAL Hungarian/auction matching as an
-LGPL-compatible MC64-adjacent component. SPRAL same-cardinality Hungarian
+setup when it would increase fill. For medium weak-diagonal static-match
+candidates whose accepted AMD symbolic leaves a many-block BTF with one
+dominant block, KLS can factor a METIS nested-dissection candidate and keep it
+only when actual numeric fill/flops improve materially without unacceptable
+conditioning loss. This keeps CKTSO-style METIS plus static-pivoting wins
+available without forcing METIS on all weak-diagonal circuits. Benchmark JSON
+reports both whether static pivoting was enabled, whether KLS selected it, and
+whether the accepted static match used exact assignment. KLS does not vendor
+HSL MC64 or the MC64 copies carried by some solver projects. When
+`KLS_ENABLE_SPRAL_SCALING=ON`, KLS builds or links BSD-licensed SPRAL
+Hungarian/auction matching as an LGPL-compatible MC64-adjacent component.
+SPRAL same-cardinality Hungarian
 matches are not installed blindly; KLS uses them before factorization only for
 large weak-diagonal dominant-BTF candidates, or after the first factorization
 for dense high-off-diagonal-pivot cases, and keeps them only when the accepted

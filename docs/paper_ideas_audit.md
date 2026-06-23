@@ -1836,6 +1836,26 @@ Those rows, plus the timeout rows, are now tracked in
 `bench/suitesparse_cktso_gap_manifest.txt` for focused regression checks before
 rerunning the full medium suite.
 
+The CKTSO gap review then found a concrete missing combination rather than a
+generic ordering problem: the medium Rajat dominant-BTF rows benefited from
+static row matching plus METIS nested-dissection, but the default fast-factor
+path was accepting the static match with AMD. KLS now runs a narrowly gated
+numeric METIS refinement for medium weak-diagonal static-match candidates whose
+AMD symbolic leaves a many-block BTF with one dominant block. The METIS
+candidate is kept only when actual factor fill/flops improve materially and
+the reciprocal-condition estimate does not collapse. This changes only
+`rajat20`, `rajat25`, and `rajat28` on the full medium run: they switch from
+AMD/static to METIS/static, cut numeric fill by about 12-16%, and move their
+SPICE-cycle estimates from `5.23s`, `5.10s`, and `5.33s` to `3.80s`,
+`3.52s`, and `4.08s`. A 20-row CKTSO-gap guard improved by about 6% geomean
+against the previous KLS artifact. The full medium suite remains essentially
+flat within one-pass noise (`1.001x` versus the previous KLS artifact) and is
+still `1.023x` slower than the saved CKTSO artifact on the 90 common completed
+rows, while staying about `2.26x` faster than KLU2 on common rows. The remaining
+large CKTSO gap is therefore still repeated refactor throughput on
+ASIC/G2/Onetone-style rows, not a missing LGPL-compatible MC64 import or a
+single broad ordering switch.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
