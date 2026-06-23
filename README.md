@@ -317,17 +317,20 @@ refactor rejects a non-final block, the repaired block can now be followed by a
 serial checked continuation over only the later BTF blocks instead of
 restarting from the first block.
 Benchmark stats report `fast_rejected_pivot`,
-`fast_rejected_pivot_col`, `fast_rejected_block_start`,
+`fast_rejected_pivot_col`, `fast_rejected_row`,
+`fast_rejected_multiplier_abs`, `fast_rejected_block_start`,
 `fast_rejected_block_size`, `fast_rejected_suffix_columns`,
 `fast_rejected_descendant_columns`, `fast_rejected_descendant_work`,
 `fast_rejected_row_tail_columns`, `fast_rejected_row_tail_work`,
 `fast_rejected_etree_columns`, `fast_rejected_etree_work`,
 `fast_rejected_refresh_state`, and `fast_block_restarts` for the first rejected
-factor-order pivot, its original matrix column, the rejected BTF block, the
-suffix from that pivot to the end of the block, the exact U-pattern descendant
-tail inside that block, the row-refactor successor tail when row-major
-metadata is available, the ordered-block ETree successor path that a pivoting
-tail-restart upper-bound scheduler would at least have to revisit, whether the
+factor-order pivot, its original matrix column, the factor row and multiplier
+that tripped a KLS-owned pivot check when available, the rejected BTF block,
+the suffix from that pivot to the end of the block, the exact U-pattern
+descendant tail inside that block, the row-refactor successor tail when
+row-major metadata is available, the ordered-block ETree successor path that a
+pivoting tail-restart upper-bound scheduler would at least have to revisit,
+whether the
 failed pass left an unknown, prefix-current, or all-current numeric state, and
 the number of repaired BTF blocks. These fields are intended to guide fuller
 CKTSO-style tail-restart work without accepting an unsafe reused pivot order.
@@ -632,9 +635,9 @@ parallelism on a narrow class of large cases. KLS also has a precomputed
 single-block and serial BTF refactor scatter path for unscaled repeated
 refactors and a narrow scaled dominant-BTF subset, plus an unscaled block-local
 pivot restart for fast-factor failures. Benchmark stats also report
-row-major U-pattern supernode candidates from the refactor dependency pass, so
-the remaining SubtreeLU/CKTSO row-segment work can be evaluated on the same
-slow-case artifacts.
+row-major U-pattern supernode candidates and detailed rejected-row/multiplier
+coordinates from KLS-owned pivot checks, so the remaining SubtreeLU/CKTSO
+row-segment work can be evaluated on the same slow-case artifacts.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The next algorithmic work is to evolve the numeric factor/refactor/solve
 kernels toward deeper KLS-owned sparse kernels with better pivot reuse and
