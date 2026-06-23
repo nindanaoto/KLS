@@ -74,9 +74,15 @@ To use a system SPRAL library instead of the bundled submodule:
 cmake -S . -B build -DKLS_ENABLE_SPRAL_SCALING=ON \
   -DCMAKE_BUILD_TYPE=Release \
   -DKLS_USE_SYSTEM_SPRAL=ON \
+  -DKLS_SYSTEM_SPRAL_LGPL_COMPATIBLE=ON \
   -DKLS_SYSTEM_SPRAL_INCLUDE_DIR=/path/to/spral/include \
   -DKLS_SYSTEM_SPRAL_LIBRARY=/path/to/libspral.so
 ```
+
+`KLS_SYSTEM_SPRAL_LGPL_COMPATIBLE=ON` is an explicit acknowledgement that the
+selected system library is redistributable with LGPL-2.1-or-later KLS. Do not
+use it for HSL MC64 itself or for solver-tree MC64 copies that retain HSL-style
+redistribution restrictions.
 
 This is not a solver replacement. KLS uses it as a
 static-pivot matching fallback when the in-tree matcher is short of a full

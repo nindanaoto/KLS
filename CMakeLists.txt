@@ -15,6 +15,7 @@ option(KLS_ENABLE_SCOTCH "Enable SCOTCH nested-dissection ordering support" ON)
 option(KLS_USE_SYSTEM_SCOTCH "Use a system SCOTCH library instead of the bundled submodule" OFF)
 option(KLS_ENABLE_SPRAL_SCALING "Enable SPRAL matching/scaling support" ON)
 option(KLS_USE_SYSTEM_SPRAL "Use a system SPRAL library instead of the bundled submodule" OFF)
+option(KLS_SYSTEM_SPRAL_LGPL_COMPATIBLE "Acknowledge that the selected system SPRAL library is redistributable with LGPL KLS" OFF)
 set(CKTSO_ROOT "" CACHE PATH "Path to a local CKTSO distribution")
 set(KLU2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/amesos2/src/KLU2" CACHE PATH "Path to a Trilinos Amesos2 KLU2 source directory")
 set(TEUCHOS_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/rol/src/compatibility/teuchos-lite" CACHE PATH "Path to Trilinos Teuchos-compatible headers for KLU2")
@@ -197,6 +198,13 @@ endif()
 
 if(KLS_ENABLE_SPRAL_SCALING)
   if(KLS_USE_SYSTEM_SPRAL)
+    if(NOT KLS_SYSTEM_SPRAL_LGPL_COMPATIBLE)
+      message(FATAL_ERROR
+        "KLS_USE_SYSTEM_SPRAL=ON may only be used with SPRAL or MC64-style "
+        "code that is redistributable with LGPL-2.1-or-later KLS. After "
+        "verifying the selected library's license, reconfigure with "
+        "-DKLS_SYSTEM_SPRAL_LGPL_COMPATIBLE=ON.")
+    endif()
     find_path(KLS_SYSTEM_SPRAL_INCLUDE_DIR
       NAMES spral_scaling.h
       PATHS ${KLS_SYSTEM_SPRAL_INCLUDE_DIR})
@@ -225,10 +233,19 @@ if(KLS_ENABLE_SPRAL_SCALING)
     if(NOT EXISTS "${KLS_SPRAL_ROOT}/include/spral_scaling.h" OR
        NOT EXISTS "${KLS_SPRAL_ROOT}/src/scaling.f90" OR
        NOT EXISTS "${KLS_SPRAL_ROOT}/src/matrix_util.f90" OR
-       NOT EXISTS "${KLS_SPRAL_ROOT}/interfaces/C/scaling.f90")
+       NOT EXISTS "${KLS_SPRAL_ROOT}/interfaces/C/scaling.f90" OR
+       NOT EXISTS "${KLS_SPRAL_ROOT}/LICENCE")
       message(FATAL_ERROR
         "Bundled SPRAL scaling support requires an initialized submodule. Run: "
         "git submodule update --init --recursive third_party/spral")
+    endif()
+    file(READ "${KLS_SPRAL_ROOT}/LICENCE" KLS_SPRAL_LICENSE_TEXT LIMIT 4096)
+    string(FIND "${KLS_SPRAL_LICENSE_TEXT}"
+      "Redistribution and use in source and binary forms" KLS_SPRAL_BSD_TEXT)
+    if(KLS_SPRAL_BSD_TEXT EQUAL -1)
+      message(FATAL_ERROR
+        "Bundled SPRAL scaling support did not expose the expected "
+        "redistribution-compatible BSD license text in third_party/spral/LICENCE")
     endif()
 
     add_library(kls_spral_scaling STATIC

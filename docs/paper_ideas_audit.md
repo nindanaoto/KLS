@@ -820,10 +820,13 @@ LGPL-2.1-or-later license, whereas HSL MC64 itself and restricted MC64 copies
 from solver trees remain out of scope for vendoring. The policy does not
 require every MC64-style implementation to originate in KLS; it requires any
 copied or vendored implementation to be redistributable inside an LGPL KLS
-distribution. A small BSD Rust `mc64` crate exists as a partial SPRAL
-translation, but it does not improve KLS's C integration story over the already
-pinned SPRAL Fortran/C interface. Fresh SPRAL-enabled checks also confirm the
-policy should stay guarded rather than become an unconditional default:
+distribution. CMake now enforces that distinction for the system-SPRAL path by
+requiring `KLS_SYSTEM_SPRAL_LGPL_COMPATIBLE=ON`; the bundled path checks the
+pinned SPRAL `LICENCE` file before building its scaling subset. A small BSD
+Rust `mc64` crate exists as a partial SPRAL translation, but it does not
+improve KLS's C integration story over the already pinned SPRAL Fortran/C
+interface. Fresh SPRAL-enabled checks also confirm the policy should stay
+guarded rather than become an unconditional default:
 `rajat30` selected SPRAL matching, reduced off-diagonal pivots to one, and cut
 initial factor time to about 5.7s, but its repeat-heavy factor/refactor
 averages were about 0.67s/0.66s versus the faster current no-SPRAL EGraph path.

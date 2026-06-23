@@ -21,8 +21,10 @@ redistribution restrictions. The bounded exact static-pivot assignment code in
 `src/kls.c` is KLS in-tree code under the project LGPL-2.1-or-later license.
 KLS builds BSD-licensed SPRAL Hungarian/auction matching and scaling support
 from the pinned `third_party/spral` submodule by default, or can link to a
-compatible system SPRAL installation. The bundled KLS build uses only SPRAL's
-scaling subset: `src/matrix_util.f90`, `src/scaling.f90`, and
+compatible system SPRAL installation after the builder explicitly acknowledges
+that the selected system library is redistributable with LGPL-2.1-or-later KLS.
+The bundled KLS build uses only SPRAL's scaling subset: `src/matrix_util.f90`,
+`src/scaling.f90`, and
 `interfaces/C/scaling.f90`, plus `include/spral_scaling.h`. Builds configured
 with `KLS_ENABLE_SPRAL_SCALING=OFF` omit this component.
 
