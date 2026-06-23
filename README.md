@@ -328,9 +328,11 @@ parallel row scheduler when multiple threads are available. A rejected
 parallel row pass records the unsafe dependency pivot and falls back through
 the same block-repair path. The parallel pass now reuses the retained
 completion bitmap to report a prefix-current refresh state only when all rows
-before the rejected pivot have finished and row values were published directly;
-otherwise it keeps the conservative unknown refresh state because rows in the
-active level may have completed out of factor-order prefix.
+before the rejected pivot have finished. When dense row segments defer writes
+in KLS-owned row-major mirrors, KLS publishes only that proven prefix back into
+the KLU numeric object before reporting prefix-current; otherwise it keeps the
+conservative unknown refresh state because rows in the active level may have
+completed out of factor-order prefix.
 Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivot_col`, `fast_rejected_row`,
 `fast_rejected_multiplier_abs`, `fast_rejected_pivot_abs`,

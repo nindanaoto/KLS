@@ -11104,12 +11104,16 @@ static int kls_row_refactor_should_defer_value_scatter(const kls_solver *solver)
   return solver != NULL && solver->row_refactor_dense_segment_count > 0u;
 }
 
-static int kls_scatter_row_refactor_l_values(kls_solver *solver) {
+static int kls_scatter_row_refactor_l_prefix_values(kls_solver *solver,
+                                                    UF_long end_row) {
   if (solver == NULL || solver->row_refactor_l_ptr == NULL ||
       solver->row_refactor_l_values == NULL) {
     return 0;
   }
-  const UF_long l_nnz = solver->row_refactor_l_ptr[solver->n];
+  if (end_row > solver->n) {
+    return 0;
+  }
+  const UF_long l_nnz = solver->row_refactor_l_ptr[end_row];
   if (l_nnz == 0u) {
     return 1;
   }
@@ -11123,12 +11127,16 @@ static int kls_scatter_row_refactor_l_values(kls_solver *solver) {
   return 1;
 }
 
-static int kls_scatter_row_refactor_u_values(kls_solver *solver) {
+static int kls_scatter_row_refactor_u_prefix_values(kls_solver *solver,
+                                                    UF_long end_row) {
   if (solver == NULL || solver->row_refactor_u_ptr == NULL ||
       solver->row_refactor_u_values == NULL) {
     return 0;
   }
-  const UF_long u_nnz = solver->row_refactor_u_ptr[solver->n];
+  if (end_row > solver->n) {
+    return 0;
+  }
+  const UF_long u_nnz = solver->row_refactor_u_ptr[end_row];
   if (u_nnz == 0u) {
     return 1;
   }
@@ -11140,6 +11148,22 @@ static int kls_scatter_row_refactor_u_values(kls_solver *solver) {
       solver->row_refactor_u_row_values[p];
   }
   return 1;
+}
+
+static int kls_scatter_row_refactor_prefix_values(kls_solver *solver,
+                                                  UF_long end_row) {
+  return kls_scatter_row_refactor_l_prefix_values(solver, end_row) &&
+         kls_scatter_row_refactor_u_prefix_values(solver, end_row);
+}
+
+static int kls_scatter_row_refactor_l_values(kls_solver *solver) {
+  return solver != NULL &&
+         kls_scatter_row_refactor_l_prefix_values(solver, solver->n);
+}
+
+static int kls_scatter_row_refactor_u_values(kls_solver *solver) {
+  return solver != NULL &&
+         kls_scatter_row_refactor_u_prefix_values(solver, solver->n);
 }
 
 static int kls_row_refactor_multiplier_rejects(double lij, double tol) {
@@ -11193,8 +11217,12 @@ static int kls_single_block_row_refactor(kls_solver *solver,
         const double candidate_abs = fabs(x[dep]);
         x[dep] = 0.0;
         memset(x, 0, (size_t)n * sizeof(*x));
-        solver->fast_reject_refresh_state =
-          KLS_FAST_REJECT_REFRESH_PREFIX;
+        if (defer_value_scatter &&
+            !kls_scatter_row_refactor_prefix_values(solver, dep)) {
+          common->status = TRILINOS_KLU_INVALID;
+          return 0;
+        }
+        solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_PREFIX;
         kls_record_fast_reject_detail(
           solver, dep,
           symbolic->Q != NULL ? symbolic->Q[dep] : KLS_KLU_EMPTY,
@@ -12132,11 +12160,17 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
     return 0;
   }
   if (shared->pivot_rejected) {
+    const int prefix_ready =
+      kls_egraph_refreshed_prefix(shared, shared->rejected_pivot);
+    if (prefix_ready && shared->row_refactor_defer_value_scatter &&
+        !kls_scatter_row_refactor_prefix_values(solver,
+                                                shared->rejected_pivot)) {
+      common->status = TRILINOS_KLU_INVALID;
+      return 0;
+    }
     solver->fast_reject_refresh_state =
-      (!shared->row_refactor_defer_value_scatter &&
-       kls_egraph_refreshed_prefix(shared, shared->rejected_pivot))
-        ? KLS_FAST_REJECT_REFRESH_PREFIX
-        : KLS_FAST_REJECT_REFRESH_UNKNOWN;
+      prefix_ready ? KLS_FAST_REJECT_REFRESH_PREFIX
+                   : KLS_FAST_REJECT_REFRESH_UNKNOWN;
     kls_record_fast_reject_detail(solver, shared->rejected_pivot,
                                   shared->rejected_pivot_col,
                                   shared->rejected_row,

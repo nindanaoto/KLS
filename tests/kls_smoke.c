@@ -1049,6 +1049,165 @@ static int test_fast_factor_restart_after_prior_pivot(void) {
   return ok;
 }
 
+static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
+  const int32_t n = 48;
+  const size_t nnz = (size_t)n * (size_t)n;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
+  double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
+  double *ax1 = (double *)malloc(nnz * sizeof(*ax1));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
+      b == NULL || x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  for (int32_t col = 0; col <= n; ++col) {
+    ap[col] = col * n;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    expected[col] = 1.0 + 0.125 * (double)(col % 7);
+    for (int32_t row = 0; row < n; ++row) {
+      const size_t p = (size_t)col * (size_t)n + (size_t)row;
+      ai[p] = row;
+      ax0[p] = row == col
+        ? 10.0 + 0.01 * (double)col
+        : 0.001 * (1.0 + (double)((row + 3 * col) % 7));
+      ax1[p] = ax0[p];
+    }
+  }
+  ax1[0] = 20.0;
+  ax1[(size_t)10 * (size_t)n + 11u] = 2.0e3;
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.01;
+  options.static_pivoting = 0;
+
+  const char *saved_env_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze dense checked-row prefix")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor dense checked-row base")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor dense checked-row repair")) ok = 0;
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve dense checked-row prefix")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats dense checked-row prefix")) {
+    ok = 0;
+  }
+  if (ok && (stats.fast_rejected_pivot != 10 ||
+             stats.fast_rejected_refresh_state !=
+               KLS_FAST_REJECT_REFRESH_PREFIX ||
+             stats.fast_block_restarts != 1 ||
+             stats.fast_tail_restarts != 1 ||
+             stats.fast_repaired_tail_restart_ready != 1)) {
+    fprintf(stderr,
+            "unexpected dense checked-row prefix stats: pivot=%" PRId64
+            ", refresh=%d, block_restarts=%d, tail_restarts=%d"
+            ", tail_ready=%d\n",
+            stats.fast_rejected_pivot,
+            stats.fast_rejected_refresh_state,
+            stats.fast_block_restarts,
+            stats.fast_tail_restarts,
+            stats.fast_repaired_tail_restart_ready);
+    ok = 0;
+  }
+  double max_solution_error = 0.0;
+  for (int32_t i = 0; i < n; ++i) {
+    const double err = fabs(x[i] - expected[i]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+  }
+  double max_residual = 0.0;
+  double max_rhs = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    double residual = -b[row];
+    for (int32_t col = 0; col < n; ++col) {
+      residual += ax1[(size_t)col * (size_t)n + (size_t)row] * x[col];
+    }
+    const double residual_abs = fabs(residual);
+    if (residual_abs > max_residual) {
+      max_residual = residual_abs;
+    }
+    const double rhs_abs = fabs(b[row]);
+    if (rhs_abs > max_rhs) {
+      max_rhs = rhs_abs;
+    }
+  }
+  const double relative_residual =
+    max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 2.0e-1 ||
+             relative_residual > 1.0e-5)) {
+    fprintf(stderr,
+            "unexpected dense checked-row accuracy: max_x_err=%.17g"
+            ", rel_resid=%.17g\n",
+            max_solution_error, relative_residual);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  free(saved_env);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(x);
+  free(expected);
+  return ok;
+}
+
 static int test_pre_static_pivoting(void) {
   const int32_t n = 3000;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
@@ -1280,6 +1439,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_fast_factor_restart_after_prior_pivot()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_checked_row_dense_prefix_scatter_tail_restart()) {
     return EXIT_FAILURE;
   }
   if (!test_pre_static_pivoting()) {
