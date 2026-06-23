@@ -1960,6 +1960,21 @@ off-diagonal pivots but remained numerically valid. Nearby scaled guards
 scale. This is a scale-cost cleanup for a repeated-refactor class, not an MC64
 import or a substitute for the missing CKTSO row-oriented kernel.
 
+The low-work dominant-BTF EGraph gate was then probed below the older 90k
+largest-block floor. A broad first version for 80%+ dominant blocks also
+activated on `ckt11752_tr_0` and regressed that guard, so it was narrowed to
+the high-coverage no-pivot subcase: unscaled BTF, 30k-120k rows, at most 5000
+BTF blocks, a 95%+ dominant block in the 60k-90k range, zero off-diagonal
+pivots, and `1e7`-`3e7` measured factor flops. In the current medium evidence
+this matches only `LeGresley_87936`. A seven-pass focused probe with ten
+refactors per sample
+(`kls_low_work_high_coverage_btf_probe_t4_p7_r10_timeout180.jsonl`) moved
+`LeGresley_87936` repeated refactor from the current focused `0.00647s` median
+to `0.00464s`, while `ckt11752_tr_0` kept zero EGraph dependency work under
+the narrowed rule. This is another measured-work scheduler coverage step for
+the existing no-pivot EGraph refactor; it does not change the conclusion that
+the remaining ASIC/G2/Rajat gap needs a different row-oriented numeric kernel.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

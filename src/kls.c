@@ -8859,6 +8859,24 @@ static int kls_egraph_small_compact_dominant_btf_shape(
          solver->common.flops >= 2.0e6;
 }
 
+static int kls_egraph_low_work_dominant_btf_shape(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->symbolic->nblocks <= 1u ||
+      solver->symbolic->nblocks > 5000u ||
+      solver->n < 30000u || solver->n > 120000u ||
+      solver->common.scale > 0 || solver->common.noffdiag != 0u) {
+    return 0;
+  }
+  const double coverage =
+    (double)solver->symbolic->maxblock / (double)solver->n;
+  return coverage >= 0.95 &&
+         solver->symbolic->maxblock >= 60000u &&
+         solver->symbolic->maxblock < 90000u &&
+         solver->common.flops >= 1.0e7 &&
+         solver->common.flops < 3.0e7;
+}
+
 static int kls_egraph_scaled_medium_dominant_btf_shape(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
@@ -8918,6 +8936,9 @@ static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
   if (kls_egraph_small_compact_dominant_btf_shape(solver)) {
     return 1;
   }
+  if (kls_egraph_low_work_dominant_btf_shape(solver)) {
+    return 1;
+  }
   if (kls_egraph_scaled_medium_dominant_btf_shape(solver)) {
     return 1;
   }
@@ -8961,6 +8982,9 @@ static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {
   if (kls_egraph_small_compact_dominant_btf_shape(solver)) {
     return 3000u;
   }
+  if (kls_egraph_low_work_dominant_btf_shape(solver)) {
+    return 30000u;
+  }
   if (kls_egraph_scaled_medium_dominant_btf_shape(solver)) {
     return 30000u;
   }
@@ -8998,6 +9022,8 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     kls_egraph_scaled_medium_dominant_btf_shape(solver);
   const int small_compact_btf =
     kls_egraph_small_compact_dominant_btf_shape(solver);
+  const int low_work_btf =
+    kls_egraph_low_work_dominant_btf_shape(solver);
   const int moderate_single =
     kls_egraph_moderate_single_block_shape(solver);
   const int low_work_single =
@@ -9019,6 +9045,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
       ? (medium_heavy_btf || all_pipeline_btf ? 8.0e7 :
          scaled_medium_btf ? 1.5e7 :
          small_compact_btf ? 5.0e5 :
+         low_work_btf ? 1.0e6 :
          low_work_dominant_btf ? 1.0e7 : 1.0e8)
       : (moderate_single ? 2.0e7 :
          low_work_single ? 1.0e6 : 1.5e8);
@@ -9536,6 +9563,9 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
     return 1;
   }
   if (kls_egraph_small_compact_dominant_btf_shape(solver)) {
+    return 1;
+  }
+  if (kls_egraph_low_work_dominant_btf_shape(solver)) {
     return 1;
   }
   if (dominant_btf) {
