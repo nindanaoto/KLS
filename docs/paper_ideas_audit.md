@@ -22,6 +22,10 @@ off-block entries can be refreshed from the retained map. A narrow many-fringe
 dominant-BTF shape can also consume the same exact EGraph in an all-pipeline
 mode, and very high-work unscaled single-block factors can do the same,
 avoiding cluster barriers and waiting only on actual U-pattern predecessors.
+KLS also now schedules extremely fragmented unscaled BTF refactors with one
+substantial but non-dominant block through the exact EGraph path when measured
+work is high enough, so the large block is not left serial behind hundreds of
+thousands of singleton blocks.
 The barriered EGraph
 cluster levels now use FLOP-estimated per-thread slices instead of equal column
 slices, and the no-pivot pipeline tail now uses an atomic dynamic work cursor
@@ -88,8 +92,8 @@ project does not drift toward benchmark-name-specific heuristics.
 | Reference | Implemented in KLS | Partial or open coverage |
 | --- | --- | --- |
 | Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection, serial refactor scatter metadata, and exact EGraph level metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
-| NICSLU | AMD-style ordering, optional static-pivoting preprocessing, optional SPRAL Hungarian/scaling trials, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. KLS now records exact no-pivot EGraph levels from the numeric U pattern and uses them in a guarded large single-block or dominant-BTF-block cluster/pipeline refactor path, including KLU row-scaled cases and work-estimated cluster-level thread slices. | Full production MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and full pivoting-aware ETree scheduling are not implemented. Earlier broader EGraph prototypes were rejected because they were not general wins on the current kernel/storage. |
-| CKTSO | METIS nested-dissection ordering, explicit SCOTCH ordering for experiments, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, unscaled block-local restart after a failed fast-factor pivot check, guarded EGraph cluster/pipeline no-pivot refactors for single and dominant BTF blocks, work-balanced cluster-level refactor slices, and dual-potential plus optional SPRAL matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only partially approximated because KLS does not have an always-on production MC64-equivalent weighted assignment stage. Pipelined ETree-descendant tail restart with pivoting after a failed pivot check and structure-adaptive triangular solve are not implemented. Scaled or otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
+| NICSLU | AMD-style ordering, optional static-pivoting preprocessing, optional SPRAL Hungarian/scaling trials, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. KLS now records exact no-pivot EGraph levels from the numeric U pattern and uses them in guarded large single-block, dominant-BTF-block, and fragmented non-dominant many-block refactor paths, including KLU row-scaled cases where scale handling is supported and work-estimated cluster-level thread slices. | Full production MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and full pivoting-aware ETree scheduling are not implemented. Earlier broader EGraph prototypes were rejected because they were not general wins on the current kernel/storage. |
+| CKTSO | METIS nested-dissection ordering, explicit SCOTCH ordering for experiments, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, unscaled block-local restart after a failed fast-factor pivot check, guarded EGraph cluster/pipeline no-pivot refactors for single, dominant BTF, and selected fragmented many-block BTF shapes, work-balanced cluster-level refactor slices, and dual-potential plus optional SPRAL matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only partially approximated because KLS does not have an always-on production MC64-equivalent weighted assignment stage. Pipelined ETree-descendant tail restart with pivoting after a failed pivot check and structure-adaptive triangular solve are not implemented. Scaled or otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
 | SubtreeLU | KLS vendors reproducible METIS/GKlib submodules and uses METIS plus CAMD refinement, which overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. | KLS does not retain a separator tree, collapse/partition it into private and pipeline task queues, constrain pivot search within separator-tree subdomains, perform FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
 
 This means KLS has implemented or prototyped the ideas that can be layered
@@ -214,21 +218,29 @@ design work, not benchmark-specific tuning.
   edge count in `kls_stats` and benchmark JSON. It also reports the
   CKTSO-style cluster/pipeline split point, pipeline-column count, approximate
   no-pivot update work, and tail work implied by the current level widths.
-  Large single-block and high-flop dominant-BTF matrices with enough dependency
-  work and level width can now consume this schedule through a work-estimated
-  per-thread cluster-mode refactor,
+  Large single-block, high-flop dominant-BTF, and very fragmented unscaled
+  many-block matrices with enough dependency work and level width can now
+  consume this schedule through a work-estimated per-thread cluster-mode refactor,
   then switch to a no-pivot pipeline tail where each worker claims tail columns
   from an atomic cursor and waits only for actual U-pattern predecessors. The
   same block-aware EGraph kernel can run inside a large dominant BTF block and
   update Offx for entries above that block. Schedule construction is now
-  limited to single-block or dominant-BTF shapes with enough numeric or measured
-  dependency work to consume it, while non-dominant many-block BTF and low-work
-  dominant-BTF cases without enough dependency work skip the setup and stay on
-  the BTF worker pool or mapped refactor paths.
+  limited to single-block, dominant-BTF, or high-work fragmented non-dominant
+  many-block shapes with enough numeric or measured dependency work to consume
+  it, while ordinary non-dominant many-block BTF and low-work dominant-BTF cases
+  without enough dependency work skip the setup and stay on the BTF worker pool
+  or mapped refactor paths.
   For the high-coverage many-fringe dominant-BTF class below the normal EGraph
   size floor, KLS can run the whole exact EGraph as an atomic topological
   pipeline with no cluster barriers. This is a retained SubtreeLU/CKTSO-aligned
   scheduler improvement for the current fixed-pivot LU storage.
+  A later fragmented many-block gate applies the same CKTSO-style lesson to
+  unscaled BTF decompositions whose largest block covers less than half the
+  matrix but still carries enough numeric work to justify intra-block
+  scheduling. On the 93-matrix medium paper corpus this changed only
+  `ASIC_680ks` schedule counters, cutting its cycle from 17.62s to 9.42s and
+  moving KLS geomean from 0.28594s to 0.28392s with the same three known
+  failures.
   A later retained low-work dominant-BTF gate lowers the EGraph schedule floor
   when measured dependency work is still material. On the 93-matrix medium
   paper corpus this moved KLS geomean from 0.32749s to 0.32198s with the same

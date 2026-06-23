@@ -7824,6 +7824,24 @@ static int kls_egraph_all_pipeline_huge_single_shape(
   return solver->common.flops >= 1.0e9;
 }
 
+static int kls_egraph_non_dominant_many_block_shape(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->symbolic->nblocks < 100000u || solver->n == 0u ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL) {
+    return 0;
+  }
+  const double coverage =
+    (double)solver->symbolic->maxblock / (double)solver->n;
+  /* Extremely fragmented BTF can hide one expensive diagonal block behind
+     hundreds of thousands of singleton blocks.  The BTF worker pool has too
+     little off-block work to help, but the retained exact EGraph exposes
+     enough intra-block independence to run the refactor in parallel. */
+  return coverage < 0.50 &&
+         solver->symbolic->maxblock >= 90000u &&
+         solver->common.flops >= 5.0e8;
+}
+
 static int kls_egraph_compact_dominant_btf_shape(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->nblocks < 8u || solver->n == 0u ||
@@ -7896,6 +7914,9 @@ static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {
   if (kls_egraph_all_pipeline_huge_single_shape(solver)) {
     return 100000u;
   }
+  if (kls_egraph_non_dominant_many_block_shape(solver)) {
+    return 90000u;
+  }
   if (kls_egraph_all_pipeline_dominant_btf_shape(solver)) {
     return 30000u;
   }
@@ -7929,6 +7950,8 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     kls_egraph_all_pipeline_dominant_btf_shape(solver);
   const int all_pipeline_single =
     kls_egraph_all_pipeline_huge_single_shape(solver);
+  const int non_dominant_many_block =
+    kls_egraph_non_dominant_many_block_shape(solver);
   const int medium_heavy_btf =
     kls_egraph_medium_heavy_dominant_btf_shape(solver);
   const int scaled_medium_btf =
@@ -7938,7 +7961,8 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   if (solver->n < kls_egraph_refactor_size_floor(solver)) {
     return 0;
   }
-  if (!single_block && !dominant_btf && !all_pipeline_btf) {
+  if (!single_block && !dominant_btf && !all_pipeline_btf &&
+      !non_dominant_many_block) {
     return 0;
   }
   const int low_work_dominant_btf =
@@ -7946,6 +7970,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     solver->common.flops < 1.0e8;
   const double min_dependency_work =
     all_pipeline_single ? 1.0e9 :
+    non_dominant_many_block ? 2.0e8 :
     (dominant_btf || all_pipeline_btf)
       ? (medium_heavy_btf || all_pipeline_btf ? 8.0e7 :
          scaled_medium_btf ? 1.5e7 :
@@ -8407,6 +8432,9 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
   if (kls_egraph_all_pipeline_huge_single_shape(solver)) {
     return solver->common.flops >= 1.0e9;
+  }
+  if (kls_egraph_non_dominant_many_block_shape(solver)) {
+    return solver->common.flops >= 5.0e8;
   }
   if (kls_egraph_all_pipeline_dominant_btf_shape(solver)) {
     return solver->common.flops >= 1.0e8;

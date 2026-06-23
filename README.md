@@ -139,11 +139,11 @@ exposed in
 benchmark output and is used by a guarded large unscaled single-block or
 high-work dominant-BTF level-sliced refactor path when there is enough
 dependency work and level width to offset thread and scratch overhead. KLS only
-builds this schedule for single-block or dominant-block shapes with enough
-numeric work to consume it; ordinary many-block BTF cases skip the setup and
-stay on their existing refactor paths. Most low-work dominant-BTF cases also
-stay on the mapped serial path, but those with enough measured dependency work
-can consume the same EGraph path. When a
+builds this schedule for single-block, dominant-block, or extremely fragmented
+many-block shapes with enough numeric work to consume it; ordinary many-block
+BTF cases skip the setup and stay on their existing refactor paths. Most
+low-work dominant-BTF cases also stay on the mapped serial path, but those with
+enough measured dependency work can consume the same EGraph path. When a
 low-work dominant BTF decomposition has one 95%+ block plus thousands of tiny
 fringe blocks below the EGraph size floor, KLS also keeps repeated refactors on
 the serial mapped path because the BTF worker pool has too little useful
@@ -190,13 +190,17 @@ KLS can also run the full exact EGraph through the no-barrier pipeline path
 instead of stopping after a narrow pipeline tail. This is limited to measured
 factor/refactor work large enough to amortize full topological waiting and
 keeps lower-work or scaled single-block cases on the barriered cluster/pipeline
-split. Unscaled single-block EGraph refactors use a slimmer
+split. Extremely fragmented unscaled BTF decompositions with hundreds of
+thousands of tiny blocks and one substantial but non-dominant block can also use
+the exact EGraph refactor once measured work is high enough, which prevents the
+large block from remaining serial behind an otherwise wide BTF fringe. Unscaled
+single-block EGraph refactors use a slimmer
 column kernel that bypasses BTF and scaling checks in the hot loop. The path
 updates that block's local LU and off-block
 entries while leaving ordinary many-block BTF cases on the existing worker-pool
 path. For large cases that use KLU row scaling, the same path recomputes the row
 scale factors, divides the mapped entries by the unpermuted row scales, and then
-permutes `Rs` back to pivot order after the refactor. Small cases and
+permutes `Rs` back to pivot order after the refactor. Small cases and ordinary
 non-dominant BTF cases still use the existing mapped or BTF-worker paths.
 
 Use `--orientation auto|normal|transpose` to control KLS's internal storage
