@@ -62,6 +62,18 @@ def fmt_ratio(value: float) -> str:
     return f"{value:.2f}x"
 
 
+def int_value(row: dict[str, object], name: str) -> int:
+    if name not in row:
+        return 0
+    return int(row[name])
+
+
+def float_value(row: dict[str, object], name: str) -> float:
+    if name not in row:
+        return 0.0
+    return float(row[name])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate", type=pathlib.Path, required=True)
@@ -77,7 +89,15 @@ def main() -> int:
     if not common:
         raise SystemExit("no common matrix basenames")
 
-    rows: list[tuple[float, str, dict[str, float], dict[str, float]]] = []
+    rows: list[
+        tuple[
+            float,
+            str,
+            dict[str, float],
+            dict[str, float],
+            dict[str, object],
+        ]
+    ] = []
     for name in common:
         cand_cycle = cycle_seconds(candidate[name])
         ref_cycle = cycle_seconds(reference[name])
@@ -89,6 +109,7 @@ def main() -> int:
                 name,
                 components(candidate[name]),
                 components(reference[name]),
+                candidate[name],
             )
         )
     rows.sort(reverse=True)
@@ -96,10 +117,17 @@ def main() -> int:
     header = (
         "matrix,candidate_cycle,reference_cycle,cycle_ratio,"
         "dominant_candidate_phase,dominant_candidate_share,"
-        "refactor_ratio,solve_ratio,initial_factor_ratio,analysis_ratio"
+        "refactor_ratio,solve_ratio,initial_factor_ratio,analysis_ratio,"
+        "n,nblocks,max_block,scale,offdiag_pivots,"
+        "refactor_dependency_levels,refactor_dependency_max_width,"
+        "refactor_dependency_edges,refactor_dependency_root_columns,"
+        "refactor_dependency_leaf_columns,refactor_dependency_max_fanout,"
+        "refactor_dependency_cluster_levels,"
+        "refactor_dependency_pipeline_columns,refactor_dependency_work,"
+        "refactor_dependency_pipeline_work"
     )
     print(header)
-    for cycle_ratio, name, cand, ref in rows[: args.max_rows]:
+    for cycle_ratio, name, cand, ref, cand_row in rows[: args.max_rows]:
         cand_cycle = sum(cand.values())
         ref_cycle = sum(ref.values())
         dominant_phase = max(cand, key=cand.get)
@@ -110,7 +138,22 @@ def main() -> int:
             f"{fmt_ratio(ratio(cand['refactor_99'], ref['refactor_99']))},"
             f"{fmt_ratio(ratio(cand['solve_100'], ref['solve_100']))},"
             f"{fmt_ratio(ratio(cand['initial_factor'], ref['initial_factor']))},"
-            f"{fmt_ratio(ratio(cand['analysis'], ref['analysis']))}"
+            f"{fmt_ratio(ratio(cand['analysis'], ref['analysis']))},"
+            f"{int_value(cand_row, 'n')},"
+            f"{int_value(cand_row, 'nblocks')},"
+            f"{int_value(cand_row, 'max_block')},"
+            f"{int_value(cand_row, 'scale')},"
+            f"{int_value(cand_row, 'offdiag_pivots')},"
+            f"{int_value(cand_row, 'refactor_dependency_levels')},"
+            f"{int_value(cand_row, 'refactor_dependency_max_width')},"
+            f"{int_value(cand_row, 'refactor_dependency_edges')},"
+            f"{int_value(cand_row, 'refactor_dependency_root_columns')},"
+            f"{int_value(cand_row, 'refactor_dependency_leaf_columns')},"
+            f"{int_value(cand_row, 'refactor_dependency_max_fanout')},"
+            f"{int_value(cand_row, 'refactor_dependency_cluster_levels')},"
+            f"{int_value(cand_row, 'refactor_dependency_pipeline_columns')},"
+            f"{float_value(cand_row, 'refactor_dependency_work'):.6g},"
+            f"{float_value(cand_row, 'refactor_dependency_pipeline_work'):.6g}"
         )
     return 0
 
