@@ -1675,6 +1675,20 @@ improvements on the row-permuted focused rows (`onetone2` about
 work and were neutral within noise. This is a retained repeated-solve overhead
 cleanup, not CKTSO's missing structure-adaptive triangular solve.
 
+A direct single-block row-major solve prototype was then tested and rejected.
+The prototype built reusable row views of KLU's L and U factors with offsets
+back into the existing LU storage, then used row dot-products for single-RHS
+non-transpose solves. This matched the CKTSO paper's row-major triangular-solve
+direction at a small scope, but it regressed the large single-block losses:
+`rajat30` solve time rose from the retained KLU scatter-solve band of about
+`0.034-0.036s` to about `0.099s` with three repeats and still about `0.071s`
+with ten repeats, while `nxp1` rose from about `0.045s` to about `0.125s`.
+The extra row metadata also added large memory traffic for 16-23M factor
+entries. The result says the next triangular-solve attempt should not simply
+transpose KLU columns into row-offset lists; it needs CKTSO's full
+structure-adaptive partitioning with sparse-block/rectangular-slice decisions
+and a storage layout designed for that access pattern.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more
