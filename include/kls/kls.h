@@ -104,6 +104,8 @@ typedef struct kls_stats {
   int64_t fast_rejected_tail_candidate_row;
   double fast_rejected_tail_candidate_abs;
   int64_t fast_rejected_tail_candidate_count;
+  int64_t fast_rejected_tail_candidate_position;
+  int fast_rejected_tail_repair_ready;
   int selected_exact_matching;
   int selected_spral_matching;
   int fast_block_restarts;

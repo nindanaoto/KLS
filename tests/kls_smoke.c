@@ -393,6 +393,8 @@ static int test_checked_row_fast_factor_block_restart(void) {
              stats.fast_rejected_tail_candidate_row != 1 ||
              stats.fast_rejected_tail_candidate_abs <= 0.5 ||
              stats.fast_rejected_tail_candidate_count < 1 ||
+             stats.fast_rejected_tail_candidate_position < 0 ||
+             stats.fast_rejected_tail_repair_ready != 1 ||
              stats.fast_block_restarts != 1 ||
              stats.fast_rejected_refresh_state !=
                KLS_FAST_REJECT_REFRESH_PREFIX)) {
@@ -401,7 +403,8 @@ static int test_checked_row_fast_factor_block_restart(void) {
             ", col=%" PRId64 ", row=%" PRId64 ", |L|=%.6g"
             ", |pivot|=%.6g, |candidate|=%.6g"
             ", tail_row=%" PRId64 ", tail_candidate=%.6g"
-            ", tail_count=%" PRId64 ", restarts=%d, refresh=%d\n",
+            ", tail_count=%" PRId64 ", tail_pos=%" PRId64
+            ", tail_ready=%d, restarts=%d, refresh=%d\n",
             stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,
             stats.fast_rejected_row, stats.fast_rejected_multiplier_abs,
             stats.fast_rejected_pivot_abs,
@@ -409,6 +412,8 @@ static int test_checked_row_fast_factor_block_restart(void) {
             stats.fast_rejected_tail_candidate_row,
             stats.fast_rejected_tail_candidate_abs,
             stats.fast_rejected_tail_candidate_count,
+            stats.fast_rejected_tail_candidate_position,
+            stats.fast_rejected_tail_repair_ready,
             stats.fast_block_restarts, stats.fast_rejected_refresh_state);
     ok = 0;
   }

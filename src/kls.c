@@ -704,6 +704,8 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_tail_candidate_row = -1;
   solver->stats.fast_rejected_tail_candidate_abs = -1.0;
   solver->stats.fast_rejected_tail_candidate_count = 0;
+  solver->stats.fast_rejected_tail_candidate_position = -1;
+  solver->stats.fast_rejected_tail_repair_ready = 0;
   solver->stats.fast_block_restarts = 0;
   solver->stats.fast_rejected_block_start = -1;
   solver->stats.fast_rejected_block_size = 0;
@@ -7943,6 +7945,7 @@ static void kls_fill_fast_reject_row_tail_candidate_stats(
   }
 
   UF_long best_row = KLS_KLU_EMPTY;
+  UF_long best_pos = KLS_KLU_EMPTY;
   double best_abs = solver->stats.fast_rejected_pivot_abs;
   UF_long candidate_count = 0;
   const double pivot_abs = solver->stats.fast_rejected_pivot_abs;
@@ -7964,6 +7967,7 @@ static void kls_fill_fast_reject_row_tail_candidate_stats(
     }
     if (best_row == KLS_KLU_EMPTY || value_abs > best_abs) {
       best_row = row;
+      best_pos = pos;
       best_abs = value_abs;
     }
   }
@@ -7973,6 +7977,12 @@ static void kls_fill_fast_reject_row_tail_candidate_stats(
     solver->stats.fast_rejected_tail_candidate_abs = best_abs;
     solver->stats.fast_rejected_tail_candidate_count =
       (int64_t)candidate_count;
+    solver->stats.fast_rejected_tail_candidate_position =
+      (int64_t)best_pos;
+    solver->stats.fast_rejected_tail_repair_ready =
+      solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX &&
+      candidate_count > 0u && tol > DBL_MIN &&
+      best_abs * tol > pivot_abs;
   }
   free(touched);
   free(touched_cols);

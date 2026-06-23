@@ -1905,8 +1905,12 @@ multiplier magnitude, accepted pivot magnitude, and candidate entry magnitude
 that tripped the reject. For checked row-major rejects, KLS also scans the
 retained row-tail list using the current prefix state and records the strongest
 tail candidate row/value plus the number of tail rows that challenge the
-current pivot tolerance. This gives a future pivoting tail kernel the local row
-candidate and value comparison that the older pivot-only diagnostics lacked.
+current pivot tolerance. The diagnostic also records the candidate's retained
+row-tail position and a `fast_rejected_tail_repair_ready` flag when the
+checked row-major prefix is current and the best row-tail candidate satisfies
+the same pivot-tolerance predicate that rejected the reused pivot. This gives a
+future pivoting tail kernel the local row candidate, tail location, and value
+comparison that the older pivot-only diagnostics lacked.
 This keeps the CKTSO restart target tied to KLS row storage rather than only
 the KLU-column U-pattern or an ETree upper bound; the actual pivoting tail
 factor kernel is still missing.
