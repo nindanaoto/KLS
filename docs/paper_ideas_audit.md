@@ -2038,7 +2038,9 @@ count, and the saved-work estimate the local restart targets.
 into suite-level counts, blocker reasons, and largest saved-work opportunities
 so the tail-kernel work can be prioritized from broad benchmark evidence. It
 also totals and prints row-tail scope work when `fast_rejected_row_tail_*`
-fields are present.
+fields are present, and compares executed serial suffix-tail work against the
+retained CKTSO-style pivoting-tail work to expose where the current fallback
+overcomputes the planned restart set.
 `scripts/run_bench_suite.py` now forwards the deterministic
 `--stress-diagonal-scale` and `--stress-diagonal-column` controls to
 `kls_bench`, so these tail-restart opportunity scans can be generated across
@@ -2833,6 +2835,13 @@ than rebuilt from scratch on every Newton step. The same chunk also made
 checked queued rejects deterministic by publishing completed generic rows
 inside multirow groups and by refreshing any missing rows before the rejected
 pivot before the existing prefix proof runs.
+
+The tail-restart summarizer then started reporting serial-suffix overcompute:
+for executed local tail restarts it now totals the extra suffix columns and work
+above the retained CKTSO-style pivoting-tail plan. This does not change solver
+behavior, but it makes broad benchmark output rank the cases where replacing
+the conservative suffix fallback with a real pipelined pivoting-tail executor
+should remove the most work.
 
 ## Recommended General Work
 

@@ -719,6 +719,11 @@ run, use:
 python3 scripts/summarize_tail_restart_opportunities.py --jsonl build/kls_suite.jsonl
 ```
 
+For executed serial suffix restarts, the summary also reports how many columns
+and how much work the suffix path does beyond the retained CKTSO-style
+pivoting-tail plan. Large overcompute there marks cases where the full
+pipelined pivoting-tail kernel should matter most.
+
 The same script accepts `--jsonl -` for a single piped `kls_bench --json` row
 when inspecting a focused fast-reject case.
 

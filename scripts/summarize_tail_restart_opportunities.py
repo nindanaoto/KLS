@@ -114,6 +114,18 @@ def classify(row: dict[str, object]) -> str:
 
 
 def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
+    suffix_tail_work = as_float(row, "fast_repaired_tail_restart_work")
+    pivoting_tail_work = as_float(
+        row,
+        "fast_rejected_pivoting_tail_work",
+        as_float(row, "fast_rejected_etree_work"),
+    )
+    suffix_tail_columns = as_int(row, "fast_repaired_tail_restart_columns", 0)
+    pivoting_tail_columns = as_int(
+        row,
+        "fast_rejected_pivoting_tail_columns",
+        as_int(row, "fast_rejected_etree_columns", 0),
+    )
     return {
         "matrix": matrix_name(row),
         "reason": reason,
@@ -132,27 +144,21 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
             row, "fast_repaired_suffix_changed_pivots", 0
         ),
         "fast_repaired_block_work": as_float(row, "fast_repaired_block_work"),
-        "fast_repaired_tail_restart_columns": as_int(
-            row, "fast_repaired_tail_restart_columns", 0
-        ),
-        "fast_repaired_tail_restart_work": as_float(
-            row, "fast_repaired_tail_restart_work"
-        ),
+        "fast_repaired_tail_restart_columns": suffix_tail_columns,
+        "fast_repaired_tail_restart_work": suffix_tail_work,
         "fast_repaired_tail_restart_saved_work": as_float(
             row, "fast_repaired_tail_restart_saved_work"
         ),
         "fast_tail_restarts": as_int(row, "fast_tail_restarts", 0),
         "fast_rejected_etree_columns": as_int(row, "fast_rejected_etree_columns", 0),
         "fast_rejected_etree_work": as_float(row, "fast_rejected_etree_work"),
-        "fast_rejected_pivoting_tail_columns": as_int(
-            row,
-            "fast_rejected_pivoting_tail_columns",
-            as_int(row, "fast_rejected_etree_columns", 0),
+        "fast_rejected_pivoting_tail_columns": pivoting_tail_columns,
+        "fast_rejected_pivoting_tail_work": pivoting_tail_work,
+        "suffix_tail_overcompute_columns": max(
+            0, suffix_tail_columns - pivoting_tail_columns
         ),
-        "fast_rejected_pivoting_tail_work": as_float(
-            row,
-            "fast_rejected_pivoting_tail_work",
-            as_float(row, "fast_rejected_etree_work"),
+        "suffix_tail_overcompute_work": max(
+            0.0, suffix_tail_work - pivoting_tail_work
         ),
         "fast_rejected_pivoting_tail_first": as_int(
             row, "fast_rejected_pivoting_tail_first", -1
@@ -182,8 +188,11 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
     for record in records[:limit]:
         print(
             "  {matrix}: reason={reason} block_work={block:.6g} "
-            "tail_work={tail:.6g} row_tail_work={row_tail:.6g} "
+            "tail_cols={tail_cols} tail_work={tail:.6g} "
+            "row_tail_work={row_tail:.6g} "
+            "pivoting_tail_cols={pivoting_tail_cols} "
             "pivoting_tail_work={pivoting_tail:.6g} "
+            "overcompute_work={overcompute:.6g} "
             "saved_work={saved:.6g} "
             "block_start={block_start} "
             "tail_first={tail_first} tail_last={tail_last} "
@@ -193,11 +202,16 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
                 matrix=record["matrix"],
                 reason=record["reason"],
                 block=float(record["fast_repaired_block_work"]),
+                tail_cols=record["fast_repaired_tail_restart_columns"],
                 tail=float(record["fast_repaired_tail_restart_work"]),
                 row_tail=float(record["fast_rejected_row_tail_work"]),
+                pivoting_tail_cols=record[
+                    "fast_rejected_pivoting_tail_columns"
+                ],
                 pivoting_tail=float(
                     record["fast_rejected_pivoting_tail_work"]
                 ),
+                overcompute=float(record["suffix_tail_overcompute_work"]),
                 saved=float(record["fast_repaired_tail_restart_saved_work"]),
                 block_start=record["fast_rejected_block_start"],
                 tail_first=record["fast_rejected_pivoting_tail_first"],
@@ -270,6 +284,15 @@ def main() -> int:
     executed_saved_work = sum(
         float(r["fast_repaired_tail_restart_saved_work"]) for r in executed
     )
+    executed_pivoting_tail_work = sum(
+        float(r["fast_rejected_pivoting_tail_work"]) for r in executed
+    )
+    executed_overcompute_work = sum(
+        float(r["suffix_tail_overcompute_work"]) for r in executed
+    )
+    executed_overcompute_columns = sum(
+        int(r["suffix_tail_overcompute_columns"]) for r in executed
+    )
     repaired_block_work = sum(float(r["fast_repaired_block_work"]) for r in repaired)
     blocked_block_work = sum(float(r["fast_repaired_block_work"]) for r in blocked)
     row_tail = [
@@ -301,6 +324,19 @@ def main() -> int:
         ),
         "tail_restart_executed_block_work_total": executed_block_work,
         "tail_restart_executed_tail_work_total": executed_tail_work,
+        "tail_restart_executed_pivoting_tail_work_total": (
+            executed_pivoting_tail_work
+        ),
+        "tail_restart_executed_overcompute_work_total": (
+            executed_overcompute_work
+        ),
+        "tail_restart_executed_overcompute_columns_total": (
+            executed_overcompute_columns
+        ),
+        "tail_restart_executed_overcompute_work_fraction": (
+            executed_overcompute_work / executed_tail_work
+            if executed_tail_work > 0.0 else 0.0
+        ),
         "tail_restart_executed_saved_work_total": executed_saved_work,
         "tail_restart_executed_saved_work_fraction": (
             executed_saved_work / executed_block_work
