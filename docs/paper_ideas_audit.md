@@ -1945,6 +1945,18 @@ therefore false even though the full repaired-block work is about `1.66e6`.
 The ordinary non-reject `G2_circuit` row-refactor path leaves these fields at
 their sentinels.
 
+EGraph checked-refactor rejects now distinguish a provably current prefix from
+an unknown partial refresh when the retained pipeline-done generation is
+available. KLS marks the reject as prefix-current only if every factor-order
+column before the rejected pivot completed in the same EGraph generation; the
+existing block-repair path can then continue with the serial BTF block tail
+instead of discarding the whole fast pass. A focused diagonal-stress check on
+`coupled` changed the first EGraph reject from an unknown state to a
+prefix-current block repair at the dominant block start, kept a valid residual,
+and avoided the later full checked-pass retry. Rows such as stressed
+`onetone2`, where the completed-prefix proof fails, remain classified as
+unknown and keep the conservative fallback.
+
 The EGraph refactor worker scratch allocation was then narrowed for BTF paths:
 single-block refactors still allocate one dense `n`-entry vector per worker,
 but BTF EGraph workers only need block-local indices and now allocate

@@ -10677,6 +10677,27 @@ static int kls_egraph_refactor_wait_done(
   return 1;
 }
 
+static int kls_egraph_refreshed_prefix(
+  const kls_egraph_refactor_shared *shared,
+  UF_long rejected_pivot) {
+  if (shared == NULL || shared->pipeline_done == NULL ||
+      rejected_pivot == KLS_KLU_EMPTY ||
+      shared->solver == NULL || rejected_pivot >= shared->solver->n) {
+    return 0;
+  }
+  const unsigned int generation = shared->pipeline_generation;
+  if (generation == 0u) {
+    return 0;
+  }
+  for (UF_long col = 0; col < rejected_pivot; ++col) {
+    if (atomic_load_explicit(&shared->pipeline_done[col],
+                             memory_order_acquire) != generation) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int kls_egraph_refactor_single_unscaled_column(
   kls_egraph_refactor_worker *worker,
   UF_long k,
@@ -11808,6 +11829,10 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     return 0;
   }
   if (shared->pivot_rejected) {
+    solver->fast_reject_refresh_state =
+      kls_egraph_refreshed_prefix(shared, shared->rejected_pivot)
+        ? KLS_FAST_REJECT_REFRESH_PREFIX
+        : KLS_FAST_REJECT_REFRESH_UNKNOWN;
     kls_record_fast_reject_detail(solver, shared->rejected_pivot,
                                   shared->rejected_pivot_col,
                                   shared->rejected_row,
