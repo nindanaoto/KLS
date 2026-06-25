@@ -136,8 +136,11 @@ retained pattern through the checked fast path. Setting
 scaffold for no-scale and KLU row-scaled cases. It reports `kls_first` when it
 successfully assembles KLU-compatible numeric storage. It also builds KLS-owned
 row-major `L`/`U` metadata for guarded row refactor/solve experiments, but it
-copies numeric values into those mirrors only when their retained row-work
-estimate is no larger than the exact EGraph refactor work estimate. Repeated
+first runs a cheap lower-bound work scan and skips the heavier row metadata
+setup when that scan already proves the row plan cannot beat the exact EGraph
+refactor work estimate. When the cheaper scan is inconclusive, KLS builds the
+row pattern and copies numeric values into those mirrors only when their
+retained row-work estimate is no larger than the exact EGraph estimate. Repeated
 unchecked `kls_refactor` calls and checked fast-factor `kls_factor` calls then
 try those row-major update paths automatically while the mirrors remain current;
 successful checked pivot repairs reseed those mirrors so subsequent solves do

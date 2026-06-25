@@ -3324,3 +3324,15 @@ than repeatedly adapting KLU-compatible numeric storage.
    solve setup and value mirrors do not dominate repeated refactors.
 4. Use static symbolic and numeric-cost models to decide whether a parallel
    kernel should run, so KLS avoids matrix-name-specific tuning.
+
+The automatic KLS-first row-refactor handoff now applies that last rule before
+building the full row-refactor pattern: it scans retained `L`/`U` structure and
+input entries to form a conservative lower bound on row-update work, and skips
+row metadata setup when even that bound exceeds the exact EGraph refactor work.
+On the current 20-row CKTSO-gap focus guard with four threads and three
+refactors, this pre-gate skipped row metadata on 11 rows, left nine ASIC/G2/DC
+style rows to the exact post-build cost gate, and improved geomean cycle time
+by about 2.6% versus the previous copy-gate artifact. This is useful static
+cost discipline, but it also confirms the paper reading above: the worst
+ASIC/G2/mc2 rows still need the larger CKTSO/SubtreeLU row/segment numeric
+engine rather than another wrapper-level policy tweak.

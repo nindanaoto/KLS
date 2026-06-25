@@ -14446,8 +14446,118 @@ static int kls_seed_row_refactor_values_from_numeric(kls_solver *solver) {
   return kls_copy_row_refactor_values_from_numeric(solver);
 }
 
+static int kls_estimate_row_refactor_lower_bound_work(kls_solver *solver,
+                                                      double *work_out) {
+  if (work_out != NULL) {
+    *work_out = 0.0;
+  }
+  if (solver == NULL || work_out == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || solver->symbolic->R == NULL ||
+      solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
+      !kls_build_refactor_map(solver) ||
+      !kls_build_refactor_lu_pointer_cache(solver)) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  UF_long *u_row_counts =
+    n > 0u ? (UF_long *)calloc((size_t)n, sizeof(*u_row_counts)) : NULL;
+  if (n > 0u && u_row_counts == NULL) {
+    return 0;
+  }
+
+  double work = 0.0;
+  for (UF_long k = 0; k < n; ++k) {
+    UF_long input_begin = solver->refactor_col_ptr[k];
+    if (solver->symbolic->nblocks > 1u) {
+      if (solver->refactor_block_start == NULL ||
+          solver->refactor_block_start[k] < input_begin ||
+          solver->refactor_block_start[k] > solver->refactor_col_ptr[k + 1u]) {
+        free(u_row_counts);
+        return 0;
+      }
+      input_begin = solver->refactor_block_start[k];
+    }
+    if (solver->refactor_col_ptr[k + 1u] < input_begin) {
+      free(u_row_counts);
+      return 0;
+    }
+    work += (double)(solver->refactor_col_ptr[k + 1u] - input_begin);
+  }
+
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (k1 > k2 || k2 > n) {
+      free(u_row_counts);
+      return 0;
+    }
+    for (UF_long local_k = 0; local_k < k2 - k1; ++local_k) {
+      const UF_long k = k1 + local_k;
+      UF_long *ui = solver->refactor_u_indices[k];
+      const UF_long len = solver->numeric->Ulen[k];
+      if (len > 0u && ui == NULL) {
+        free(u_row_counts);
+        return 0;
+      }
+      work += (double)len;
+      for (UF_long p = 0; p < len; ++p) {
+        const UF_long local_row = ui[p];
+        const UF_long row = k1 + local_row;
+        if (local_row >= local_k || row >= n) {
+          free(u_row_counts);
+          return 0;
+        }
+        u_row_counts[row]++;
+      }
+    }
+  }
+
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    for (UF_long local_j = 0; local_j < k2 - k1; ++local_j) {
+      const UF_long j = k1 + local_j;
+      UF_long *li = solver->refactor_l_indices[j];
+      const UF_long len = solver->numeric->Llen[j];
+      if (len > 0u && li == NULL) {
+        free(u_row_counts);
+        return 0;
+      }
+      const double update_work = 1.0 + (double)u_row_counts[j];
+      for (UF_long p = 0; p < len; ++p) {
+        const UF_long local_row = li[p];
+        const UF_long row = k1 + local_row;
+        if (local_row <= local_j || local_row >= k2 - k1 || row >= n) {
+          free(u_row_counts);
+          return 0;
+        }
+        work += update_work;
+      }
+    }
+  }
+
+  free(u_row_counts);
+  *work_out = work;
+  return 1;
+}
+
 static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
-  if (solver == NULL || !kls_build_row_refactor_pattern(solver)) {
+  if (solver == NULL) {
+    return 0;
+  }
+  if (solver->refactor_dependency_work > 0.0) {
+    double lower_bound_work = 0.0;
+    if (kls_estimate_row_refactor_lower_bound_work(solver,
+                                                   &lower_bound_work) &&
+        lower_bound_work > solver->refactor_dependency_work) {
+      solver->row_refactor_auto_enabled = 0;
+      solver->row_refactor_values_ready = 0;
+      solver->row_refactor_solve_validated = 0;
+      return 1;
+    }
+  }
+  if (!kls_build_row_refactor_pattern(solver)) {
     return 0;
   }
   solver->row_refactor_auto_enabled = 1;
