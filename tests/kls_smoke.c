@@ -63,13 +63,25 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
         stats->fast_rejected_block_start +
           stats->fast_rejected_block_size ||
       !stats->fast_rejected_pivoting_tail_contains_reject ||
-      !stats->fast_rejected_pivoting_tail_topological) {
+      !stats->fast_rejected_pivoting_tail_topological ||
+      stats->fast_rejected_pivoting_tail_gap_columns < 0 ||
+      stats->fast_rejected_pivoting_tail_suffix_overcompute_columns < 0 ||
+      stats->fast_rejected_pivoting_tail_suffix_overcompute_work < 0.0 ||
+      (stats->fast_rejected_pivoting_tail_suffix_exact &&
+       (!stats->fast_rejected_pivoting_tail_contiguous ||
+        stats->fast_rejected_pivoting_tail_gap_columns != 0 ||
+        stats->fast_rejected_pivoting_tail_suffix_overcompute_columns != 0 ||
+        stats->fast_rejected_pivoting_tail_suffix_overcompute_work != 0.0)) ||
+      (!stats->fast_rejected_pivoting_tail_contiguous &&
+       stats->fast_rejected_pivoting_tail_suffix_exact)) {
     fprintf(stderr,
             "unexpected pivoting tail plan for %s: pivot=%" PRId64
             ", block=[%" PRId64 ",%" PRId64 "), cols=%" PRId64
             ", seed=%" PRId64
             ", first=%" PRId64 ", last=%" PRId64
-            ", contains=%d, topo=%d\n",
+            ", contains=%d, topo=%d, contiguous=%d, suffix_exact=%d"
+            ", gaps=%" PRId64 ", suffix_over_cols=%" PRId64
+            ", suffix_over_work=%.6g\n",
             what,
             stats != NULL ? stats->fast_rejected_pivot : -1,
             stats != NULL ? stats->fast_rejected_block_start : -1,
@@ -88,7 +100,22 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
               : 0,
             stats != NULL
               ? stats->fast_rejected_pivoting_tail_topological
-              : 0);
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_contiguous
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_suffix_exact
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_gap_columns
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_suffix_overcompute_columns
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_suffix_overcompute_work
+              : 0.0);
     return 0;
   }
   return 1;

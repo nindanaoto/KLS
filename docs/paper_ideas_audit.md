@@ -3021,6 +3021,16 @@ kept backward-compatible for older JSONL runs. This keeps the CKTSO-tail
 executor target visible in every benchmark row instead of requiring a separate
 postprocessing calculation.
 
+The retained CKTSO-style pivoting-tail plan then gained an explicit executor
+shape classification. Benchmark JSON now reports whether the ordered
+ETree-descendant restart set is contiguous, whether it exactly matches the
+contiguous suffix that KLS's current serial restart can execute, how many
+columns are gaps inside the retained plan, and how much extra suffix work the
+current serial executor would do above that plan. These fields do not execute
+the non-contiguous tail; they make broad paper-suite runs identify the cases
+where KLS needs the real CKTSO pipelined row-tail executor instead of another
+safe KLU-style suffix cleanup.
+
 The pivoting-tail plan then stopped treating every prefix-current checked
 reject as a full suffix when the checked worker bitmap can identify unfinished
 nodes. KLS records those unfinished local columns as

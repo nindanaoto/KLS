@@ -265,6 +265,11 @@ typedef struct kls_stats {
   int build_has_metis;
   int build_has_scotch;
   int build_has_spral_scaling;
+  int fast_rejected_pivoting_tail_contiguous;
+  int fast_rejected_pivoting_tail_suffix_exact;
+  int64_t fast_rejected_pivoting_tail_gap_columns;
+  int64_t fast_rejected_pivoting_tail_suffix_overcompute_columns;
+  double fast_rejected_pivoting_tail_suffix_overcompute_work;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
