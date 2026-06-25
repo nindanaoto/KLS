@@ -304,6 +304,10 @@ typedef struct kls_stats {
   int64_t row_refactor_separator_private_queue_run_count;
   int64_t row_refactor_last_separator_private_components;
   int64_t row_refactor_separator_private_component_count;
+  int64_t kls_first_last_separator_dynamic_column_pivots;
+  int64_t kls_first_separator_dynamic_column_pivot_count;
+  int64_t kls_first_last_separator_dynamic_column_fallbacks;
+  int64_t kls_first_separator_dynamic_column_fallback_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -313,6 +313,10 @@ struct kls_solver {
   UF_long kls_first_row_uplooking_column_count;
   UF_long kls_first_last_dynamic_column_pivots;
   UF_long kls_first_dynamic_column_pivot_count;
+  UF_long kls_first_last_separator_dynamic_column_pivots;
+  UF_long kls_first_separator_dynamic_column_pivot_count;
+  UF_long kls_first_last_separator_dynamic_column_fallbacks;
+  UF_long kls_first_separator_dynamic_column_fallback_count;
   int factor_etree_stats_valid;
   kls_separator_analysis separator;
 };
@@ -1526,9 +1530,13 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_tail_last_mapped_columns = 0;
   solver->kls_first_last_row_uplooking_columns = 0;
   solver->kls_first_last_dynamic_column_pivots = 0;
+  solver->kls_first_last_separator_dynamic_column_pivots = 0;
+  solver->kls_first_last_separator_dynamic_column_fallbacks = 0;
   solver->stats.kls_tail_last_mapped_columns = 0;
   solver->stats.kls_first_last_row_uplooking_columns = 0;
   solver->stats.kls_first_last_dynamic_column_pivots = 0;
+  solver->stats.kls_first_last_separator_dynamic_column_pivots = 0;
+  solver->stats.kls_first_last_separator_dynamic_column_fallbacks = 0;
 }
 
 static void kls_set_last_factor_path(kls_solver *solver,
@@ -8860,6 +8868,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->kls_first_last_dynamic_column_pivots;
   solver->stats.kls_first_dynamic_column_pivot_count =
     (int64_t)solver->kls_first_dynamic_column_pivot_count;
+  solver->stats.kls_first_last_separator_dynamic_column_pivots =
+    (int64_t)solver->kls_first_last_separator_dynamic_column_pivots;
+  solver->stats.kls_first_separator_dynamic_column_pivot_count =
+    (int64_t)solver->kls_first_separator_dynamic_column_pivot_count;
+  solver->stats.kls_first_last_separator_dynamic_column_fallbacks =
+    (int64_t)solver->kls_first_last_separator_dynamic_column_fallbacks;
+  solver->stats.kls_first_separator_dynamic_column_fallback_count =
+    (int64_t)solver->kls_first_separator_dynamic_column_fallback_count;
   solver->stats.row_refactor_last_done_bitmap =
     solver->row_refactor_last_done_bitmap;
   solver->stats.row_refactor_done_bitmap_run_count =
@@ -23715,6 +23731,12 @@ static int kls_try_first_factor_row_uplooking_blocks(
 
   const double tol = common->tol;
   UF_long dynamic_column_pivots = 0;
+  UF_long separator_dynamic_column_pivots = 0;
+  UF_long separator_dynamic_column_fallbacks = 0;
+  const int use_separator_pivot_domains =
+    solver->separator.n == n &&
+    solver->separator.component_count > 0u &&
+    solver->separator.order_component != NULL;
   UF_long total_lnz = 0;
   UF_long total_unz = 0;
   UF_long max_lnz_block = 1;
@@ -23880,12 +23902,25 @@ static int kls_try_first_factor_row_uplooking_blocks(
       double pivot = mark[i] == generation ? x[i] : 0.0;
       double row_max_abs = 0.0;
       UF_long best_col = KLS_KLU_EMPTY;
+      UF_long best_separator_col = KLS_KLU_EMPTY;
+      double best_separator_abs = -1.0;
+      const unsigned int pivot_component =
+        use_separator_pivot_domains
+          ? solver->separator.order_component[k1 + i]
+          : UINT_MAX;
       UF_long u_count = 0;
       for (UF_long p = 0; p < pattern_count; ++p) {
         const UF_long col = pattern[p];
         if (col > i) {
           dep_heap[u_count++] = col;
           const double abs_value = fabs(x[col]);
+          if (use_separator_pivot_domains &&
+              solver->separator.order_component[k1 + col] ==
+                pivot_component &&
+              abs_value > best_separator_abs) {
+            best_separator_abs = abs_value;
+            best_separator_col = col;
+          }
           if (abs_value > row_max_abs) {
             row_max_abs = abs_value;
             best_col = col;
@@ -23897,12 +23932,27 @@ static int kls_try_first_factor_row_uplooking_blocks(
         if (best_col == KLS_KLU_EMPTY || row_max_abs == 0.0) {
           goto fail_block_entries;
         }
+        UF_long selected_col = best_col;
+        if (best_separator_col != KLS_KLU_EMPTY &&
+            best_separator_abs > 0.0 &&
+            (row_max_abs == 0.0 ||
+             best_separator_abs + 1.0e-300 >= tol * row_max_abs)) {
+          selected_col = best_separator_col;
+        }
+        if (use_separator_pivot_domains) {
+          if (solver->separator.order_component[k1 + selected_col] ==
+              pivot_component) {
+            separator_dynamic_column_pivots++;
+          } else {
+            separator_dynamic_column_fallbacks++;
+          }
+        }
         if (!kls_row_first_exchange_columns(&u_entries, q_order + k1,
-                                            col_pos, i, best_col, nk, n)) {
+                                            col_pos, i, selected_col, nk, n)) {
           goto fail_block_entries;
         }
-        const double swapped_pivot = x[best_col];
-        x[best_col] = pivot;
+        const double swapped_pivot = x[selected_col];
+        x[selected_col] = pivot;
         x[i] = swapped_pivot;
         mark[i] = generation;
         dynamic_column_pivots++;
@@ -23993,6 +24043,14 @@ fail_block_entries:
   solver->kls_first_row_uplooking_column_count += n;
   solver->kls_first_last_dynamic_column_pivots = dynamic_column_pivots;
   solver->kls_first_dynamic_column_pivot_count += dynamic_column_pivots;
+  solver->kls_first_last_separator_dynamic_column_pivots =
+    separator_dynamic_column_pivots;
+  solver->kls_first_separator_dynamic_column_pivot_count +=
+    separator_dynamic_column_pivots;
+  solver->kls_first_last_separator_dynamic_column_fallbacks =
+    separator_dynamic_column_fallbacks;
+  solver->kls_first_separator_dynamic_column_fallback_count +=
+    separator_dynamic_column_fallbacks;
   free(row_counts);
   free(row_ptr);
   free(x);

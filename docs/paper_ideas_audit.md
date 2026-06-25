@@ -116,6 +116,12 @@ succeeds, seeds KLS-owned row-major `L`/`U` value mirrors for guarded solves and
 unchecked and checked repeated refactors, and falls back to the KLU first-factor
 path otherwise. This is a first KLS-owned factorization scaffold, not the
 default production row-major CKTSO-style factorization.
+When this row up-looking first-factor path performs a dynamic column pivot and
+the retained METIS `NodeNDP` map covers the full factor order, it now prefers a
+candidate in the same separator component if that candidate still satisfies the
+existing global pivot-quality test; otherwise it falls back to the prior global
+best candidate. Benchmark stats separate separator-domain dynamic pivots from
+fallbacks.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -3712,3 +3718,19 @@ retained separator tree, but it is still narrower than the paper: it does not
 constrain pivot search inside separator-tree subdomains, does not partition all
 work by separator FLOP balance, and does not implement the pivoting
 first-factor or checked-tail kernel that the slow CKTSO-gap rows still require.
+
+The KLS-first row up-looking dynamic column pivot selector also now consumes
+the retained separator map when it is available for the full factor order. On a
+weak pivot, KLS first looks for the best candidate column inside the same
+separator component and accepts it only if it still passes the existing global
+pivot-quality criterion; otherwise the prior unconstrained best-column fallback
+is used. Stats report separator-domain dynamic pivots and fallbacks through
+`kls_first_last_separator_dynamic_column_pivots`,
+`kls_first_separator_dynamic_column_pivot_count`,
+`kls_first_last_separator_dynamic_column_fallbacks`, and
+`kls_first_separator_dynamic_column_fallback_count`. The existing smoke suite
+still exercises KLS-first dynamic column pivoting, while same-session
+full-size `G2_circuit`, `ASIC_100ks`, and `mc2depi` METIS/KLS-first probes did
+not encounter first-factor dynamic column pivots, so this should be treated as
+a guarded separator-domain pivoting hook rather than evidence that the full
+SubtreeLU constrained pivot search is implemented.

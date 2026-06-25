@@ -804,6 +804,10 @@ int main(int argc, char **argv) {
            ",\"kls_first_row_uplooking_column_count\":%" PRId64
            ",\"kls_first_last_dynamic_column_pivots\":%" PRId64
            ",\"kls_first_dynamic_column_pivot_count\":%" PRId64
+           ",\"kls_first_last_separator_dynamic_column_pivots\":%" PRId64
+           ",\"kls_first_separator_dynamic_column_pivot_count\":%" PRId64
+           ",\"kls_first_last_separator_dynamic_column_fallbacks\":%" PRId64
+           ",\"kls_first_separator_dynamic_column_fallback_count\":%" PRId64
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
            ",\"solve_seconds_avg\":%.9g,\"transpose_solve_seconds_avg\":%.9g"
            ",\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g"
@@ -898,6 +902,10 @@ int main(int argc, char **argv) {
            stats.kls_first_row_uplooking_column_count,
            stats.kls_first_last_dynamic_column_pivots,
            stats.kls_first_dynamic_column_pivot_count,
+           stats.kls_first_last_separator_dynamic_column_pivots,
+           stats.kls_first_separator_dynamic_column_pivot_count,
+           stats.kls_first_last_separator_dynamic_column_fallbacks,
+           stats.kls_first_separator_dynamic_column_fallback_count,
            factor_avg, refactor_avg, solve_avg, tsolve_avg,
            residual, rel_residual, stats.nblocks, stats.max_block,
            stats.structural_rank, stats.numerical_rank,
@@ -1278,6 +1286,13 @@ int main(int argc, char **argv) {
            ", total %" PRId64 "\n",
            stats.kls_first_last_dynamic_column_pivots,
            stats.kls_first_dynamic_column_pivot_count);
+    printf("KLS row-up-looking separator dynamic pivots: last %" PRId64
+           ", total %" PRId64 ", fallbacks last/total %" PRId64 "/%" PRId64
+           "\n",
+           stats.kls_first_last_separator_dynamic_column_pivots,
+           stats.kls_first_separator_dynamic_column_pivot_count,
+           stats.kls_first_last_separator_dynamic_column_fallbacks,
+           stats.kls_first_separator_dynamic_column_fallback_count);
     printf("factor avg: %.6f s\n", factor_avg);
     printf("refactor avg: %.6f s\n", refactor_avg);
     printf("solve avg: %.6f s\n", solve_avg);
