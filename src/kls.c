@@ -3077,6 +3077,10 @@ static int apply_options_to_common(trilinos_klu_l_common *common, const kls_opti
 }
 
 #ifdef KLS_HAVE_METIS
+typedef struct kls_metis_order_context {
+  idx_t npes;
+} kls_metis_order_context;
+
 static int compare_idx_t(const void *a, const void *b) {
   const idx_t left = *(const idx_t *)a;
   const idx_t right = *(const idx_t *)b;
@@ -3231,12 +3235,31 @@ static UF_long kls_metis_order(UF_long n,
   idx_t *adjncy = (idx_t *)malloc((size_t)edge_slots * sizeof(*adjncy));
   idx_t *metis_perm = (idx_t *)malloc(nsize * sizeof(*metis_perm));
   idx_t *metis_iperm = (idx_t *)malloc(nsize * sizeof(*metis_iperm));
+  const kls_metis_order_context *metis_context =
+    common != NULL ? (const kls_metis_order_context *)common->user_data : NULL;
+  idx_t metis_ndp_npes =
+    metis_context != NULL && metis_context->npes > 1 ? metis_context->npes : 0;
+  if (n < 30000) {
+    metis_ndp_npes = 0;
+  }
+  if (metis_ndp_npes > (idx_t)n) {
+    metis_ndp_npes = (idx_t)n;
+  }
+  idx_t *metis_ndp_sizes = NULL;
+  if (metis_ndp_npes > 1) {
+    metis_ndp_sizes =
+      (idx_t *)malloc((size_t)(2 * metis_ndp_npes - 1) * sizeof(*metis_ndp_sizes));
+    if (metis_ndp_sizes == NULL) {
+      metis_ndp_npes = 0;
+    }
+  }
   if (xadj == NULL || adjncy == NULL || metis_perm == NULL || metis_iperm == NULL) {
     free(degree);
     free(xadj);
     free(adjncy);
     free(metis_perm);
     free(metis_iperm);
+    free(metis_ndp_sizes);
     if (common != NULL) {
       common->status = TRILINOS_KLU_OUT_OF_MEMORY;
     }
@@ -3292,8 +3315,12 @@ static UF_long kls_metis_order(UF_long n,
   }
 
   idx_t nvtxs = (idx_t)n;
-  const int metis_status = METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options,
-                                        metis_perm, metis_iperm);
+  const int metis_status =
+    metis_ndp_npes > 1
+      ? METIS_NodeNDP(nvtxs, xadj, adjncy, NULL, metis_ndp_npes, options,
+                      metis_perm, metis_iperm, metis_ndp_sizes)
+      : METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options,
+                     metis_perm, metis_iperm);
   UF_long order_lnz = 0;
   if (metis_status == METIS_OK) {
     UF_long camd_lnz =
@@ -3318,6 +3345,7 @@ static UF_long kls_metis_order(UF_long n,
   free(adjncy);
   free(metis_perm);
   free(metis_iperm);
+  free(metis_ndp_sizes);
   return metis_status == METIS_OK ? order_lnz : 0;
 }
 #endif
@@ -3530,9 +3558,14 @@ static int analyze_with_ordering(UF_long n,
                                             &common);
   } else if (ordering == KLS_ORDERING_METIS) {
 #ifdef KLS_HAVE_METIS
+    kls_metis_order_context metis_context;
+    metis_context.npes =
+      options != NULL && options->threads > 1 ? (idx_t)options->threads : 0;
     common.ordering = 3;
     common.user_order = kls_metis_order;
+    common.user_data = &metis_context;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
+    common.user_data = NULL;
 #else
     return KLS_ERR_UNSUPPORTED;
 #endif
