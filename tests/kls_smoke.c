@@ -2177,6 +2177,165 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
   return ok;
 }
 
+static int run_scaled_row_refactor_case(int threads, int expect_parallel) {
+  const int32_t n = 12;
+  int32_t ap[13];
+  int32_t ai[49];
+  double ax0[49];
+  double ax1[49];
+  double expected[12];
+  double b[12] = {0.0};
+  double x[12] = {0.0};
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    expected[col] = 1.0 + 0.25 * (double)col;
+    const int32_t row_block = col < 4 ? 0 : (col < 8 ? 4 : 8);
+    for (int32_t row = row_block; row < row_block + 4; ++row) {
+      ai[p] = row;
+      ax0[p] = row == col
+        ? 12.0 + (double)col
+        : 0.05 * (double)(1 + ((row + 2 * col) % 5));
+      ax1[p] = ax0[p] + (row == col ? 0.125 : 0.01);
+      p++;
+    }
+    if (col == 0) {
+      ai[p] = 4;
+      ax0[p] = 0.035;
+      ax1[p] = 0.041;
+      p++;
+    }
+  }
+  ap[n] = p;
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
+      b[ai[q]] += ax1[q] * expected[col];
+    }
+  }
+
+  const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+  const char *saved_checked_env_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked_env = saved_checked_env_value != NULL
+    ? strdup(saved_checked_env_value) : NULL;
+  const int had_saved_checked_env = saved_checked_env_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = threads;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = 2;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_checked_env && saved_checked_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create scaled row refactor")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze scaled row refactor")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor scaled row refactor base")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "scaled row refactor")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, n, x, n),
+                        "solve scaled row refactor")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats scaled row refactor")) ok = 0;
+  if (ok && (stats.selected_scale != 2 ||
+             stats.row_refactor_last_run != 1 ||
+             stats.row_refactor_last_checked != 0 ||
+             stats.row_refactor_last_parallel != expect_parallel ||
+             stats.row_refactor_last_defer_value_scatter != 1 ||
+             stats.row_refactor_values_dirty != 0 ||
+             stats.row_refactor_last_lazy_value_scatter != 1 ||
+             stats.row_refactor_last_row_solve != 0 ||
+             stats.row_refactor_run_count != 1 ||
+             stats.row_refactor_lazy_value_scatter_run_count != 1 ||
+             stats.row_refactor_row_solve_run_count != 0)) {
+    fprintf(stderr,
+            "unexpected scaled row-refactor stats for %d threads:"
+            " scale=%d, last=%d/%d/%d, defer=%d, dirty=%d"
+            ", lazy=%d/%" PRId64 ", row_solve=%d/%" PRId64
+            ", runs=%" PRId64 "\n",
+            threads, stats.selected_scale, stats.row_refactor_last_run,
+            stats.row_refactor_last_checked,
+            stats.row_refactor_last_parallel,
+            stats.row_refactor_last_defer_value_scatter,
+            stats.row_refactor_values_dirty,
+            stats.row_refactor_last_lazy_value_scatter,
+            stats.row_refactor_lazy_value_scatter_run_count,
+            stats.row_refactor_last_row_solve,
+            stats.row_refactor_row_solve_run_count,
+            stats.row_refactor_run_count);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected scaled row-refactor solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (had_saved_checked_env && saved_checked_env != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+               saved_checked_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_checked_env) {
+    if (unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  kls_destroy(solver);
+  free(saved_env);
+  free(saved_checked_env);
+  return ok;
+}
+
+static int test_scaled_row_refactor_single_block(void) {
+  return run_scaled_row_refactor_case(1, 0) &&
+         run_scaled_row_refactor_case(4, 1);
+}
+
 int main(void) {
   if (!test_csc()) {
     return EXIT_FAILURE;
@@ -2239,6 +2398,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_parallel_row_refactor_pipeline_scope()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_scaled_row_refactor_single_block()) {
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

@@ -370,12 +370,16 @@ report `row_refactor_last_done_bitmap` and
 visible. Row-pattern analysis also records `row_refactor_input_cleanup_rows`
 and `row_refactor_input_cleanup_entries`; rows whose input columns are already
 covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in
-the row numeric kernels. Row refactors can keep KLS row-major `L`/`U` values
+the row numeric kernels. Experimental single-block row refactors also handle
+KLU row-scaled factors by recomputing `Rs`, scaling fixed-position input values
+by the unpermuted row scale, and permuting `Rs` back to pivot order after an
+accepted row pass. Row refactors can keep KLS row-major `L`/`U` values
 authoritative across repeated unchecked refactors and publish them to KLU
-storage lazily only when a KLU fallback needs it. A guarded non-transpose
-single-block solve can consume the dirty row-major mirrors directly, keeping
-the KLU values stale until a transpose solve, later factor, or other non-row
-fallback publishes them. Benchmark stats
+storage lazily only when a KLU fallback needs it. The guarded dirty row solve
+remains unscaled-only; scaled dirty row values are published before the ordinary
+KLU solve. A guarded non-transpose single-block solve can consume the dirty
+row-major mirrors directly, keeping the KLU values stale until a transpose
+solve, later factor, or other non-row fallback publishes them. Benchmark stats
 report `row_refactor_last_defer_value_scatter`,
 `row_refactor_defer_value_scatter_run_count`, `row_refactor_values_dirty`,
 `row_refactor_last_lazy_value_scatter`, and
@@ -800,8 +804,9 @@ This is a functional implementation with KLS-level analysis choices for
 repeated SPICE-style solves and a KLS-owned threaded refactor path for BTF block
 parallelism on a narrow class of large cases. KLS also has a precomputed
 single-block and serial BTF refactor scatter path for unscaled repeated
-refactors and a narrow scaled dominant-BTF subset, plus an unscaled block-local
-pivot restart for fast-factor failures. Benchmark stats also report
+refactors, experimental row-scaled single-block row refactors, and a narrow
+scaled dominant-BTF subset, plus an unscaled block-local pivot restart for
+fast-factor failures. Benchmark stats also report
 row-major U-pattern supernode candidates and detailed rejected-row/multiplier
 coordinates from KLS-owned pivot checks, plus row-refactor cluster/pipeline
 counters and last-run markers, so the remaining SubtreeLU/CKTSO row-segment

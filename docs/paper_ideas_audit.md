@@ -77,7 +77,12 @@ miss. Unchecked row refactors can also hand dirty KLS-owned row-major `L`/`U`
 mirrors directly to a guarded non-transpose single-block solve, leaving KLU's
 column values stale until a transpose solve, later factorization, or other
 non-row fallback needs them. This avoids making every row-refactor solve pay an
-immediate KLU publish, but these pieces still do not change the current default
+immediate KLU publish. Experimental single-block row refactors can now also
+consume KLU row-scaled factors by recomputing `Rs`, using unpermuted row scales
+for fixed-position input loads, and restoring `Rs` to pivot order after an
+accepted pass. Scaled dirty row solves still publish before using the ordinary
+KLU triangular solve, so this is row-engine coverage rather than a full
+structure-adaptive solve. These pieces still do not change the current default
 KLU-column numeric kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
@@ -2889,6 +2894,19 @@ transpose solve forced the expected publish, while an unscaled `nxp1`
 row-refactor probe used the row solve once with about `0.029s` solve time.
 The refactor gap remains; this is a storage-ownership bridge toward the
 row/segment engine, not the missing CKTSO pivoting-tail executor.
+
+The experimental row-refactor numeric path was then opened to KLU row-scaled
+single-block factors. The row path now recomputes KLU row scales before the
+serial or threaded row pass, divides input entries by the unpermuted row scale
+using the same fixed input-position mapping as the EGraph refactor path, and
+permutes `Rs` back to pivot order only after an accepted pass. Checked rejects
+leave `Rs` in input-row order for the existing scaled repair/tail machinery, and
+the row-tail candidate diagnostic uses the same scaled input loader. A smoke
+case covers both one-thread and four-thread scaled row refactors, validates the
+constructed solution, and confirms that scaled dirty row values are published
+before solve because the direct row-major solve remains unscaled-only. This is a
+general row/segment-engine coverage step, not the full CKTSO
+ETree-descendant pivoting-tail executor.
 
 ## Recommended General Work
 
