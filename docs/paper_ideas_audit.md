@@ -3142,6 +3142,15 @@ and `Raj1`. This confirms that the current scaffold should remain
 experiment-gated; the papers point to the full row-major fast factorization and
 pivoting-tail machinery as the missing general algorithm, not to blindly
 enabling KLS-first on every pattern.
+The row-major solve experiment was then decoupled from the KLS-first factor
+experiment. `KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC=1` now seeds KLS row-major
+`L`/`U` solve mirrors from successful ordinary numeric factors/refactors when
+the factor has no external KLS row/column permutation or scaling. `kls_bench`
+and `run_bench_suite.py` expose this as `--row-solve env|off|on`, and a smoke
+test forces ordinary `klu_first` factorization while verifying both forward and
+transpose solves use the KLS row-solve path. This keeps CKTSO's row-oriented
+solve idea measurable without implying that KLS is delegating to another solver
+as a backend.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF

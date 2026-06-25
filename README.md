@@ -150,6 +150,12 @@ the exact EGraph work model. It is not enabled by default. `kls_bench` and
 `run_bench_suite.py` also accept
 `--kls-first-factor env|off|on` so this path can be compared reproducibly
 without relying on an ambient environment variable.
+`KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC=1` separately seeds the same row-major
+solve mirrors after successful ordinary numeric factors/refactors when the
+factor has no external KLS row/column permutation or scaling. This is an
+experiment switch for measuring KLS-owned row solves independent of the
+KLS-first scaffold; `kls_bench` and `run_bench_suite.py` expose it as
+`--row-solve env|off|on`.
 `factor_etree_block_start`,
 `factor_etree_block_size`, `factor_etree_levels`,
 `factor_etree_max_width`, `factor_etree_edges`,
@@ -433,7 +439,11 @@ report `row_refactor_last_defer_value_scatter`,
 `row_refactor_last_lazy_value_scatter`, and
 `row_refactor_lazy_value_scatter_run_count`, plus
 `row_refactor_last_row_solve` and `row_refactor_row_solve_run_count` for this
-row-storage solve handoff. The queued row scheduler orders
+row-storage solve handoff. When `KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC=1`, those
+mirrors can be seeded from ordinary KLU-compatible numeric storage after a
+successful factor/refactor, allowing the row solve to be benchmarked without
+also enabling the experimental KLS-first factorization path. The queued row
+scheduler orders
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus
@@ -791,9 +801,11 @@ columns, max per-column work, pipeline max per-column work, and
 dependency-work estimates when those fields are present in the benchmark JSONL.
 For row-engine experiments, `kls_bench` and `run_bench_suite.py` accept
 `--row-refactor env|off|refactor|checked|all` and
-`--kls-first-factor env|off|on`; the emitted `initial_factor_path`,
-`last_factor_path`, and `row_refactor_last_*` fields show whether the first
-factorization and later numeric passes really used KLS-owned paths. Explicit
+`--kls-first-factor env|off|on`; they also accept
+`--row-solve env|off|on` for the ordinary-factor row-solve seed gate. The
+emitted `initial_factor_path`, `last_factor_path`, and `row_refactor_last_*`
+fields show whether the first factorization, later numeric passes, and solves
+really used KLS-owned paths. Explicit
 row-refactor modes force the row engine, while the automatic KLS-first path
 uses the retained row/EGraph work estimates to skip row refactors whose static
 work model is already worse than the existing exact EGraph schedule:

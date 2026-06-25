@@ -304,6 +304,12 @@ static int valid_kls_first_factor_control(const char *s) {
          strcmp(s, "on") == 0;
 }
 
+static int valid_row_solve_control(const char *s) {
+  return strcmp(s, "env") == 0 ||
+         strcmp(s, "off") == 0 ||
+         strcmp(s, "on") == 0;
+}
+
 static int apply_row_refactor_control(const char *s) {
   if (strcmp(s, "env") == 0) {
     return 1;
@@ -328,6 +334,17 @@ static int apply_kls_first_factor_control(const char *s) {
     return 1;
   }
   if (setenv("KLS_ENABLE_KLS_FIRST_FACTOR",
+             strcmp(s, "on") == 0 ? "1" : "0", 1) != 0) {
+    return 0;
+  }
+  return 1;
+}
+
+static int apply_row_solve_control(const char *s) {
+  if (strcmp(s, "env") == 0) {
+    return 1;
+  }
+  if (setenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC",
              strcmp(s, "on") == 0 ? "1" : "0", 1) != 0) {
     return 0;
   }
@@ -380,7 +397,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -398,6 +415,7 @@ int main(int argc, char **argv) {
   int64_t stress_diagonal_column = -1;
   const char *row_refactor_control = "env";
   const char *kls_first_factor_control = "env";
+  const char *row_solve_control = "env";
   kls_options options;
   kls_default_options(&options);
 
@@ -439,6 +457,12 @@ int main(int argc, char **argv) {
         usage(argv[0]);
         return EXIT_FAILURE;
       }
+    } else if (strcmp(argv[i], "--row-solve") == 0 && i + 1 < argc) {
+      row_solve_control = argv[++i];
+      if (!valid_row_solve_control(row_solve_control)) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+      }
     } else if (strcmp(argv[i], "--stress-diagonal-scale") == 0 &&
                i + 1 < argc) {
       if (!parse_nonnegative_double(argv[++i], &stress_diagonal_scale)) {
@@ -473,6 +497,10 @@ int main(int argc, char **argv) {
   }
   if (!apply_kls_first_factor_control(kls_first_factor_control)) {
     perror("apply kls-first-factor control");
+    return EXIT_FAILURE;
+  }
+  if (!apply_row_solve_control(row_solve_control)) {
+    perror("apply row-solve control");
     return EXIT_FAILURE;
   }
 
@@ -513,6 +541,7 @@ int main(int argc, char **argv) {
              ",\"ordering\":\"%s\",\"requested_scale\":\"%s\""
              ",\"row_refactor_control\":\"%s\""
              ",\"kls_first_factor_control\":\"%s\""
+             ",\"row_solve_control\":\"%s\""
              ",\"requested_btf\":%s,\"btf\":%s"
              ",\"analysis_seconds\":%.9g"
              ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
@@ -535,6 +564,7 @@ int main(int argc, char **argv) {
              scale_name(options.scale),
              row_refactor_control,
              kls_first_factor_control,
+             row_solve_control,
              options.use_btf ? "true" : "false",
              stats.selected_btf ? "true" : "false",
              stats.analysis_seconds, stats.nblocks, stats.max_block,
@@ -560,6 +590,7 @@ int main(int argc, char **argv) {
       printf("requested scale: %s\n", scale_name(options.scale));
       printf("row refactor control: %s\n", row_refactor_control);
       printf("KLS first-factor control: %s\n", kls_first_factor_control);
+      printf("row solve control: %s\n", row_solve_control);
       printf("requested btf: %s\n", options.use_btf ? "on" : "off");
       printf("selected btf: %s\n", stats.selected_btf ? "on" : "off");
       printf("analysis: %.6f s\n", stats.analysis_seconds);
@@ -721,6 +752,7 @@ int main(int argc, char **argv) {
            ",\"pivot_tolerance\":%.9g,\"selected_pivot_tolerance\":%.9g"
            ",\"row_refactor_control\":\"%s\""
            ",\"kls_first_factor_control\":\"%s\""
+           ",\"row_solve_control\":\"%s\""
            ",\"stress_diagonal_scale\":%.9g"
            ",\"stress_diagonal_column\":%" PRId64
            ",\"stress_diagonal_entries\":%" PRId64
@@ -795,6 +827,7 @@ int main(int argc, char **argv) {
            options.pivot_tolerance, stats.selected_pivot_tolerance,
            row_refactor_control,
            kls_first_factor_control,
+           row_solve_control,
            stress_requested ? stress_diagonal_scale : 1.0,
            stress_requested ? stress_diagonal_column : -1,
            stress_entries,
@@ -1032,6 +1065,7 @@ int main(int argc, char **argv) {
     printf("selected pivot tolerance: %.6g\n", stats.selected_pivot_tolerance);
     printf("row refactor control: %s\n", row_refactor_control);
     printf("KLS first-factor control: %s\n", kls_first_factor_control);
+    printf("row solve control: %s\n", row_solve_control);
     if (stress_requested) {
       printf("stress diagonal scale: %.6g, column: %" PRId64
              ", entries: %" PRId64 "\n",

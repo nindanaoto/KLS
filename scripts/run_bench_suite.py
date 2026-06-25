@@ -105,6 +105,11 @@ def main() -> int:
         choices=["env", "off", "on"],
         default="env",
     )
+    parser.add_argument(
+        "--row-solve",
+        choices=["env", "off", "on"],
+        default="env",
+    )
     parser.add_argument("--stress-diagonal-scale", type=float, default=None)
     parser.add_argument("--stress-diagonal-column", type=int, default=None)
     parser.add_argument("--no-btf", action="store_true")
@@ -181,6 +186,8 @@ def main() -> int:
                     cmd.extend(["--row-refactor", args.row_refactor])
                 if args.kls_first_factor != "env":
                     cmd.extend(["--kls-first-factor", args.kls_first_factor])
+                if args.row_solve != "env":
+                    cmd.extend(["--row-solve", args.row_solve])
                 if args.stress_diagonal_scale is not None:
                     cmd.extend(
                         ["--stress-diagonal-scale", str(args.stress_diagonal_scale)]

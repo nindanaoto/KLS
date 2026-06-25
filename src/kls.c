@@ -13244,6 +13244,12 @@ static int kls_first_factor_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_solve_from_numeric_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static double kls_row_refactor_total_group_work(const kls_solver *solver) {
   if (solver == NULL || solver->row_refactor_group_count == 0u) {
     return 0.0;
@@ -13414,6 +13420,25 @@ static void kls_maybe_reseed_auto_row_refactor_values(kls_solver *solver,
       !solver->row_refactor_auto_enabled ||
       solver->row_refactor_values_ready ||
       !kls_auto_row_refactor_cost_allows(solver) ||
+      solver->numeric == NULL ||
+      solver->common.status < TRILINOS_KLU_OK ||
+      solver->common.status == TRILINOS_KLU_SINGULAR) {
+    return;
+  }
+  const double start = kls_now_seconds();
+  (void)kls_seed_row_refactor_values_from_numeric(solver);
+  *elapsed += kls_now_seconds() - start;
+}
+
+static void kls_maybe_seed_row_solve_values_from_numeric(kls_solver *solver,
+                                                         double *elapsed) {
+  if (solver == NULL || elapsed == NULL ||
+      !kls_row_solve_from_numeric_env_enabled() ||
+      solver->row_refactor_values_ready ||
+      solver->row_refactor_values_dirty ||
+      solver->row_perm != NULL ||
+      solver->row_scale != NULL ||
+      solver->col_scale != NULL ||
       solver->numeric == NULL ||
       solver->common.status < TRILINOS_KLU_OK ||
       solver->common.status == TRILINOS_KLU_SINGULAR) {
@@ -18498,6 +18523,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     maybe_select_pre_static_row_match(solver, &elapsed, numeric_values);
     if (solver->numeric != NULL) {
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST);
+      kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
       maybe_prepare_refactor_map(solver, &elapsed);
       maybe_prepare_refactor_schedule(solver, &elapsed);
       solver->stats.factor_seconds = elapsed;
@@ -18515,6 +18541,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         solver->common.status != TRILINOS_KLU_SINGULAR) {
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FAST_REFACTOR);
       kls_maybe_reseed_auto_row_refactor_values(solver, &elapsed);
+      kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
       solver->stats.factor_seconds = elapsed;
       kls_update_numeric_diagnostics(solver, 1);
       maybe_prepare_refactor_map(solver, &elapsed);
@@ -18603,6 +18630,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
     elapsed += kls_now_seconds() - start;
   }
+  kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
   maybe_prepare_refactor_map(solver, &elapsed);
   maybe_prepare_refactor_schedule(solver, &elapsed);
   solver->stats.factor_seconds = elapsed;
@@ -18630,6 +18658,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR) {
     kls_maybe_reseed_auto_row_refactor_values(solver, &elapsed);
+    kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
   }
   solver->stats.refactor_seconds = elapsed;
   fill_numeric_stats(solver);
