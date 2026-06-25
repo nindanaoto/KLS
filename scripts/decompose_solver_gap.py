@@ -74,6 +74,55 @@ def float_value(row: dict[str, object], name: str) -> float:
     return float(row[name])
 
 
+def str_value(row: dict[str, object], name: str) -> str:
+    value = row.get(name, "")
+    return str(value) if value is not None else ""
+
+
+def share(numerator: float, denominator: float) -> float:
+    if denominator <= 0.0 or not math.isfinite(denominator):
+        return math.nan
+    return numerator / denominator
+
+
+def fmt_share(value: float) -> str:
+    if math.isnan(value):
+        return "n/a"
+    return f"{value:.3f}"
+
+
+def paper_gap_signal(
+    cand: dict[str, float],
+    cand_row: dict[str, object],
+) -> str:
+    dominant_phase = max(cand, key=cand.get)
+    initial_path = str_value(cand_row, "initial_factor_path")
+    last_path = str_value(cand_row, "last_factor_path")
+    row_groups = int_value(cand_row, "row_refactor_group_count")
+    row_run = int_value(cand_row, "row_refactor_last_run")
+    egraph_work = float_value(cand_row, "refactor_dependency_work")
+    row_work = float_value(cand_row, "row_refactor_total_group_work")
+    compact_work = float_value(cand_row, "row_refactor_compact_dense_panel_update_work")
+
+    if dominant_phase == "refactor_99":
+        if last_path == "kls_fast_refactor":
+            if row_run:
+                if egraph_work > 0.0 and row_work > egraph_work:
+                    return "row_kernel_more_work_than_egraph"
+                if compact_work > 0.0:
+                    return "row_panel_kernel_active"
+                return "row_kernel_active"
+            if egraph_work > 0.0:
+                return "column_egraph_refactor_missing_row_engine"
+            return "fast_refactor_without_row_diagnostics"
+        return "refactor_dominant_non_kls_fast_path"
+    if dominant_phase == "initial_factor" and "klu" in initial_path:
+        return "klu_first_factor_missing_row_engine"
+    if row_groups > 0 and not row_run:
+        return "row_metadata_built_but_not_selected"
+    return "mixed"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate", type=pathlib.Path, required=True)
@@ -117,6 +166,10 @@ def main() -> int:
     header = (
         "matrix,candidate_cycle,reference_cycle,cycle_ratio,"
         "dominant_candidate_phase,dominant_candidate_share,"
+        "candidate_initial_factor_path,candidate_last_factor_path,"
+        "paper_gap_signal,refactor_dependency_pipeline_share,"
+        "row_refactor_group_work_ratio,"
+        "row_refactor_compact_panel_work_share,"
         "refactor_ratio,solve_ratio,initial_factor_ratio,analysis_ratio,"
         "n,nblocks,max_block,scale,offdiag_pivots,"
         "fast_repaired_tail_restart_overcompute_columns,"
@@ -199,9 +252,18 @@ def main() -> int:
         ref_cycle = sum(ref.values())
         dominant_phase = max(cand, key=cand.get)
         dominant_share = cand[dominant_phase] / cand_cycle if cand_cycle > 0.0 else math.nan
+        egraph_work = float_value(cand_row, "refactor_dependency_work")
+        row_work = float_value(cand_row, "row_refactor_total_group_work")
+        compact_work = float_value(cand_row, "row_refactor_compact_dense_panel_update_work")
         print(
             f"{name},{cand_cycle:.6g},{ref_cycle:.6g},{cycle_ratio:.3f},"
             f"{dominant_phase},{dominant_share:.1%},"
+            f"{str_value(cand_row, 'initial_factor_path')},"
+            f"{str_value(cand_row, 'last_factor_path')},"
+            f"{paper_gap_signal(cand, cand_row)},"
+            f"{fmt_share(share(float_value(cand_row, 'refactor_dependency_pipeline_work'), egraph_work))},"
+            f"{fmt_share(share(row_work, egraph_work))},"
+            f"{fmt_share(share(compact_work, egraph_work))},"
             f"{fmt_ratio(ratio(cand['refactor_99'], ref['refactor_99']))},"
             f"{fmt_ratio(ratio(cand['solve_100'], ref['solve_100']))},"
             f"{fmt_ratio(ratio(cand['initial_factor'], ref['initial_factor']))},"

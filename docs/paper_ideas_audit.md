@@ -244,6 +244,31 @@ METIS, or SCOTCH candidate, and the row-refactor auto gate correctly stayed off
 because the current row-group work estimate exceeded the exact EGraph work.
 That combination makes the missing piece a numeric/storage algorithm, not an
 untried ordering package or a one-matrix policy rule.
+A newer top-10 CKTSO-gap run on the default production path
+(`kls_current_gap10_t4_r3_timeout120.jsonl`) sharpens the same diagnosis after
+the compact row-panel work. The largest ratios are `ASIC_320k` at 3.013,
+`ASIC_320ks` at 2.997, `gemat12` at 2.491, `G2_circuit` at 2.477,
+`ASIC_100ks` at 2.452, `transient` at 2.337, `rajat28` at 2.233,
+`onetone2` at 2.223, `onetone1` at 2.169, and `rajat24` at 2.155. The updated
+gap decomposition labels nine of those rows as
+`column_egraph_refactor_missing_row_engine`: they use
+`last_factor_path=kls_fast_refactor`, spend about 96.5%-100% of measured
+EGraph work in the pipeline tail, and report zero row-refactor group work and
+zero compact-panel work. `gemat12` is labelled
+`klu_first_factor_missing_row_engine` because its loss is dominated by the
+prestatic KLU first-factor path. Forcing the current experimental row refactor
+does not convert this into a flag-selection issue: `G2_circuit` can build the
+row groups but its forced row refactor is slower than the default EGraph path,
+while `ASIC_100ks` and `onetone2` still do not build row groups. This matches
+the local CKTSO paper's stated distinction: CKTSO's fast path is a row-major
+sparse up-looking numeric engine scheduled from a guessed EGraph, with row-wise
+pivot checks and an ETree-descendant pipelined pivoting tail if the guess fails.
+KLS's default fast path still updates KLU-compatible column storage through an
+exact no-pivot EGraph schedule. The clear paper-backed missing part for these
+slow rows is therefore a production row/segment-oriented up-looking numeric
+engine, followed by the CKTSO/SubtreeLU pivoting-tail and separator/private-
+pipeline machinery; compact row-panel kernels layered onto the current
+experimental row mirror are only a precursor.
 
 The fragmented-BTF scale policy improved the large recon artifact geomean over
 the preceding EGraph build from 30.58s to 27.37s on the five completed common
