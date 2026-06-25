@@ -302,6 +302,8 @@ struct kls_solver {
   UF_long fast_repaired_offdiag_full_refresh_count;
   UF_long fast_repaired_parallel_tail_blocks;
   int fast_reject_refresh_state;
+  UF_long fast_rejected_prefix_refresh_columns;
+  UF_long fast_rejected_prefix_refresh_count;
   UF_long *fast_reject_tail_cols;
   unsigned int *fast_reject_tail_marks;
   UF_long fast_reject_tail_capacity;
@@ -1562,6 +1564,8 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_pivoting_tail_suffix_overcompute_work = 0.0;
   solver->stats.fast_rejected_refresh_state =
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
+  solver->stats.fast_rejected_prefix_refresh_columns = 0;
+  solver->stats.fast_rejected_prefix_refresh_count = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_tail_restarts = 0;
@@ -1570,6 +1574,8 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_repaired_offdiag_full_refresh_count = 0;
   solver->fast_repaired_parallel_tail_blocks = 0;
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
+  solver->fast_rejected_prefix_refresh_columns = 0;
+  solver->fast_rejected_prefix_refresh_count = 0;
   solver->fast_reject_tail_count = 0;
   solver->fast_reject_tail_seed_block = KLS_KLU_EMPTY;
   solver->fast_reject_tail_seed_count = 0;
@@ -2645,6 +2651,8 @@ static void clear_matrix(kls_solver *solver) {
   solver->fast_kls_block_restarts = 0;
   solver->fast_tail_restarts = 0;
   solver->fast_repaired_parallel_tail_blocks = 0;
+  solver->fast_rejected_prefix_refresh_columns = 0;
+  solver->fast_rejected_prefix_refresh_count = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
   fill_build_stats(&solver->stats);
@@ -8746,6 +8754,10 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
+  solver->stats.fast_rejected_prefix_refresh_columns =
+    (int64_t)solver->fast_rejected_prefix_refresh_columns;
+  solver->stats.fast_rejected_prefix_refresh_count =
+    (int64_t)solver->fast_rejected_prefix_refresh_count;
   solver->stats.row_refactor_total_group_work =
     kls_row_refactor_total_group_work(solver);
   solver->stats.row_refactor_auto_enabled =
@@ -8793,6 +8805,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
+  solver->stats.fast_rejected_prefix_refresh_columns =
+    (int64_t)solver->fast_rejected_prefix_refresh_columns;
+  solver->stats.fast_rejected_prefix_refresh_count =
+    (int64_t)solver->fast_rejected_prefix_refresh_count;
   solver->stats.row_refactor_total_group_work =
     kls_row_refactor_total_group_work(solver);
   solver->stats.row_refactor_auto_enabled =
@@ -20525,6 +20541,58 @@ static int kls_egraph_refactor_dispatch_column(
   }
 }
 
+static void kls_egraph_refactor_refresh_missing_prefix(
+  kls_egraph_refactor_shared *shared,
+  double *x,
+  UF_long scratch_size) {
+  if (shared == NULL || shared->solver == NULL ||
+      shared->pipeline_done == NULL || x == NULL || scratch_size == 0u ||
+      shared->pipeline_generation == 0u ||
+      shared->rejected_pivot == KLS_KLU_EMPTY) {
+    return;
+  }
+  kls_solver *solver = shared->solver;
+  if (shared->rejected_pivot > solver->n) {
+    return;
+  }
+
+  kls_egraph_refactor_worker worker;
+  memset(&worker, 0, sizeof(worker));
+  worker.shared = shared;
+  worker.x = x;
+
+  UF_long refreshed = 0;
+  UF_long rejected_pivot = shared->rejected_pivot;
+  for (UF_long col = 0; col < rejected_pivot; ++col) {
+    if (atomic_load_explicit(&shared->pipeline_done[col],
+                             memory_order_acquire) ==
+        shared->pipeline_generation) {
+      continue;
+    }
+    memset(x, 0, (size_t)scratch_size * sizeof(*x));
+    if (!kls_egraph_refactor_dispatch_column(&worker, col, 0)) {
+      break;
+    }
+    kls_egraph_refactor_mark_done(shared, col);
+    refreshed++;
+    if (shared->rejected_pivot != KLS_KLU_EMPTY &&
+        shared->rejected_pivot < rejected_pivot) {
+      rejected_pivot = shared->rejected_pivot;
+    }
+  }
+  memset(x, 0, (size_t)scratch_size * sizeof(*x));
+  free(worker.segment_panel);
+
+  if (refreshed > 0u) {
+    solver->fast_rejected_prefix_refresh_columns += refreshed;
+    solver->fast_rejected_prefix_refresh_count++;
+    solver->stats.fast_rejected_prefix_refresh_columns =
+      (int64_t)solver->fast_rejected_prefix_refresh_columns;
+    solver->stats.fast_rejected_prefix_refresh_count =
+      (int64_t)solver->fast_rejected_prefix_refresh_count;
+  }
+}
+
 static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
@@ -21932,6 +22000,12 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   if (shared->invalid || shared->pivot_rejected ||
       (shared->singular && common->halt_if_singular)) {
     solver->egraph_worker_scratch_dirty = 1;
+  }
+
+  if (!shared->invalid && shared->pivot_rejected &&
+      pipeline_done != NULL && scratch[0] != NULL) {
+    kls_egraph_refactor_refresh_missing_prefix(shared, scratch[0],
+                                               scratch_size);
   }
 
   if (shared->invalid) {

@@ -3735,3 +3735,19 @@ full-size `G2_circuit`, `ASIC_100ks`, and `mc2depi` METIS/KLS-first probes did
 not encounter first-factor dynamic column pivots, so this should be treated as
 a guarded separator-domain pivoting hook rather than evidence that the full
 SubtreeLU constrained pivot search is implemented.
+
+The mapped EGraph fast-refactor path now mirrors the CKTSO checked-reject
+prefix recovery that already existed in the row-refactor path. When a checked
+EGraph worker rejects a pivot and the pipeline completion bitmap exists, KLS
+serially recomputes any unfinished columns before the rejected pivot with the
+same mapped EGraph column kernel, marks those columns done, and only then
+classifies the reject as prefix-current or unknown. This fills a concrete
+CKTSO Section IV gap: a rejected fast factorization no longer loses the valid
+prefix just because some earlier EGraph tasks were not scheduled before the
+stop flag. Benchmark JSON now reports
+`fast_rejected_prefix_refresh_columns` and
+`fast_rejected_prefix_refresh_count` so slow-case reruns can distinguish true
+unknown-prefix failures from recovered prefix-current ETree-tail candidates.
+The implementation is still a serial prefix recovery feeding the existing
+serial pivoting-tail/block-repair path; it is not yet CKTSO's full parallel
+ETree-scheduled pivoting tail executor.

@@ -877,7 +877,9 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivoting_tail_gap_columns\":%" PRId64
            ",\"fast_rejected_pivoting_tail_suffix_overcompute_columns\":%" PRId64
            ",\"fast_rejected_pivoting_tail_suffix_overcompute_work\":%.9g"
-           ",\"fast_rejected_refresh_state\":%d",
+           ",\"fast_rejected_refresh_state\":%d"
+           ",\"fast_rejected_prefix_refresh_columns\":%" PRId64
+           ",\"fast_rejected_prefix_refresh_count\":%" PRId64,
            path, a.n, a.nnz, options.threads,
            stats.build_has_metis ? "true" : "false",
            stats.build_has_scotch ? "true" : "false",
@@ -972,7 +974,9 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_gap_columns,
            stats.fast_rejected_pivoting_tail_suffix_overcompute_columns,
            stats.fast_rejected_pivoting_tail_suffix_overcompute_work,
-           stats.fast_rejected_refresh_state);
+           stats.fast_rejected_refresh_state,
+           stats.fast_rejected_prefix_refresh_columns,
+           stats.fast_rejected_prefix_refresh_count);
     printf(",\"factor_etree_block_start\":%" PRId64
            ",\"factor_etree_block_size\":%" PRId64
            ",\"factor_etree_levels\":%" PRId64
@@ -1400,7 +1404,9 @@ int main(int argc, char **argv) {
            ", last %" PRId64 ", contains reject %d, topological %d"
            ", seed %" PRId64 ", contiguous %d, suffix exact %d"
            ", gaps %" PRId64 ", suffix overcompute columns %" PRId64
-           ", suffix overcompute work %.6g, refresh state %d\n",
+           ", suffix overcompute work %.6g, refresh state %d"
+           ", prefix refresh columns %" PRId64
+           ", prefix refreshes %" PRId64 "\n",
            stats.fast_rejected_block_start,
            stats.fast_rejected_block_size,
            stats.fast_rejected_suffix_columns,
@@ -1425,7 +1431,9 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_gap_columns,
            stats.fast_rejected_pivoting_tail_suffix_overcompute_columns,
            stats.fast_rejected_pivoting_tail_suffix_overcompute_work,
-           stats.fast_rejected_refresh_state);
+           stats.fast_rejected_refresh_state,
+           stats.fast_rejected_prefix_refresh_columns,
+           stats.fast_rejected_prefix_refresh_count);
     printf("refactor dependency levels: %" PRId64
            ", max width: %" PRId64 ", edges: %" PRId64 "\n",
            stats.refactor_dependency_levels,

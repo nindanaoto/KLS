@@ -310,6 +310,8 @@ typedef struct kls_stats {
   int64_t kls_first_separator_dynamic_column_fallback_count;
   int64_t separator_global_begin;
   int64_t separator_global_end;
+  int64_t fast_rejected_prefix_refresh_columns;
+  int64_t fast_rejected_prefix_refresh_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
