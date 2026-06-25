@@ -110,10 +110,10 @@ An env-gated `KLS_ENABLE_KLS_FIRST_FACTOR=1` path can now allocate and assemble
 KLU-compatible numeric storage itself for no-scale and KLU row-scaled first
 factorizations, handle singleton BTF blocks directly, and use the KLS-owned
 pivoted block kernel for multi-column BTF blocks. It reports `kls_first` when it
-succeeds, seeds KLS-owned row-major `L`/`U` value mirrors for guarded solves, and
-falls back to the KLU first-factor path otherwise. This is a first KLS-owned
-factorization scaffold, not the default production row-major CKTSO-style
-factorization.
+succeeds, seeds KLS-owned row-major `L`/`U` value mirrors for guarded solves and
+unchecked repeated refactors, and falls back to the KLU first-factor path
+otherwise. This is a first KLS-owned factorization scaffold, not the default
+production row-major CKTSO-style factorization.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -3097,6 +3097,12 @@ alone, and it now requires subsequent forward and transpose solves to consume th
 seeded row mirrors. This is useful ownership groundwork, but it is still
 KLU-compatible column storage plus mirrored row access, not CKTSO's production
 row-major up-looking factorization or ETree-descendant pivoting-tail executor.
+When those mirrors were seeded by `kls_first`, unchecked `kls_refactor` now
+automatically attempts the existing KLS-owned row-major refactor path even when
+`KLS_ENABLE_ROW_REFACTOR=0`, so the scaffold drives the next SPICE-style numeric
+update through KLS row storage instead of immediately returning to KLU's refactor
+kernel. The smoke suite forces the row-refactor env gate off and verifies the
+automatic row refactor plus forward/transpose solves after it.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF

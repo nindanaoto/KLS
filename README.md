@@ -135,8 +135,9 @@ retained pattern through the checked fast path. Setting
 `KLS_ENABLE_KLS_FIRST_FACTOR=1` enables an experimental KLS-owned first-factor
 scaffold for no-scale and KLU row-scaled cases. It reports `kls_first` when it
 successfully assembles KLU-compatible numeric storage and seeds KLS-owned
-row-major `L`/`U` value mirrors for guarded forward/transpose solves; it is not
-enabled by default.
+row-major `L`/`U` value mirrors for guarded forward/transpose solves. Repeated
+unchecked `kls_refactor` calls then try that row-major update path automatically
+while the mirrors remain current; it is not enabled by default.
 `factor_etree_block_start`,
 `factor_etree_block_size`, `factor_etree_levels`,
 `factor_etree_max_width`, `factor_etree_edges`,
@@ -877,9 +878,10 @@ The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 still uses the KLU column-oriented serial kernel for the default first large
 factorization. An env-gated KLS-owned first-factor scaffold now exists for
 KLU-compatible BTF block assembly in no-scale and KLU row-scaled modes, and it
-can seed KLS-owned row-major mirrors for the following solves. But CKTSO's paper
-describes a row-major up-looking factorization plus EGraph pivot checks and
-ETree-scheduled pipelined tail factorization. The next algorithmic
+can seed KLS-owned row-major mirrors for the following solves and unchecked
+numeric refactors. But CKTSO's paper describes a row-major up-looking
+factorization plus EGraph pivot checks and ETree-scheduled pipelined tail
+factorization. The next algorithmic
 work is to evolve the numeric
 factor/refactor/solve kernels toward those deeper KLS-owned sparse kernels
 while keeping the public API and benchmark harness stable.

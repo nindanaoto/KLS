@@ -141,6 +141,7 @@ struct kls_solver {
   UF_long row_refactor_input_cleanup_entries;
   int row_refactor_last_defer_value_scatter;
   UF_long row_refactor_defer_value_scatter_run_count;
+  int row_refactor_auto_enabled;
   int row_refactor_values_ready;
   int row_refactor_values_dirty;
   int row_refactor_last_lazy_value_scatter;
@@ -1846,6 +1847,7 @@ static void free_numeric(kls_solver *solver) {
   free_egraph_worker_scratch(solver);
   free_egraph_pipeline_done(solver);
   free_row_refactor_pattern(solver);
+  solver->row_refactor_auto_enabled = 0;
   free_fast_reject_tail_plan(solver);
   free_refactor_lu_pointer_cache(solver);
   if (solver->numeric != NULL) {
@@ -17828,7 +17830,10 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     if (row_status >= 0) {
       return (UF_long)row_status;
     }
-  } else if (!check_pivots && kls_row_refactor_env_enabled()) {
+  } else if (!check_pivots &&
+             (kls_row_refactor_env_enabled() ||
+              (solver->row_refactor_auto_enabled &&
+               solver->row_refactor_values_ready))) {
     if (solver->options.threads > 1) {
       const int parallel_row_status =
         kls_threaded_row_refactor_numeric(solver, numeric_values, 0);
@@ -18522,7 +18527,9 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   if (kls_first_factor_used && solver->common.status >= TRILINOS_KLU_OK) {
     const double start = kls_now_seconds();
-    (void)kls_seed_row_refactor_values_from_numeric(solver);
+    if (kls_seed_row_refactor_values_from_numeric(solver)) {
+      solver->row_refactor_auto_enabled = 1;
+    }
     elapsed += kls_now_seconds() - start;
   }
   maybe_prepare_refactor_map(solver, &elapsed);
