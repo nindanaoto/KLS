@@ -3496,3 +3496,10 @@ compact scratch, and dense segments whose arithmetic intensity is high enough to
 exercise the SubtreeLU-style compact-panel bridge. The synthetic dense checked
 and unchecked smoke cases now assert those eligibility counters, while small
 `add20` still reports zero eligible compact panels.
+
+The gap decomposition CSV now carries the same compact-panel eligibility and
+execution counters. This keeps the medium/large CKTSO comparison workflow
+aligned with the row-segment diagnostics, so future slow-row reviews can see
+whether a refactor-heavy loss has no dense segment work, dense work rejected by
+the compact arithmetic-intensity gate, or compact-panel execution that is still
+too slow because KLS lacks persistent row/segment numeric storage.
