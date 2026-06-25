@@ -2973,6 +2973,15 @@ CKTSO/SubtreeLU combined-ordering motivation without adding matrix-name
 tuning, and it still leaves the row/segment pivoting-tail executor as the main
 missing CKTSO-scale mechanism.
 
+The checked row-tail diagnostic was then tightened for BTF rejects. When the
+retained KLS row-successor graph can build a tail from the rejected global row
+and every row in that tail stays inside the rejected BTF block, KLS now reports
+that row-owned tail directly instead of first falling back to the older KLU
+numeric `L` scan. If the retained graph is missing or crosses the block
+boundary, the KLU scan remains the conservative fallback. This does not execute
+CKTSO's pipelined pivoting tail, but it makes the available row/segment
+worklist explicit for multi-block checked-row failures.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

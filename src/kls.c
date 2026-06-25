@@ -8867,20 +8867,30 @@ static void kls_fill_fast_reject_row_tail_stats(kls_solver *solver,
   }
   solver->row_refactor_tail_count = 0;
 
-  if (block == 0u && k1 == 0u && k2 == solver->n) {
-    const UF_long *tail_rows = NULL;
-    UF_long columns = 0;
-    if (kls_build_row_refactor_tail(solver, local_reject,
-                                    &tail_rows, &columns)) {
+  const UF_long global_reject = k1 + local_reject;
+  const UF_long *tail_rows = NULL;
+  UF_long row_tail_columns = 0;
+  if (kls_build_row_refactor_tail(solver, global_reject,
+                                  &tail_rows, &row_tail_columns)) {
+    int block_local_tail = 1;
+    for (UF_long p = 0; p < row_tail_columns; ++p) {
+      if (tail_rows[p] < k1 || tail_rows[p] >= k2) {
+        block_local_tail = 0;
+        break;
+      }
+    }
+    if (block_local_tail) {
       double work = 0.0;
-      for (UF_long p = 0; p < columns; ++p) {
+      for (UF_long p = 0; p < row_tail_columns; ++p) {
         work += kls_row_refactor_tail_row_work(solver, tail_rows[p]);
       }
 
-      solver->stats.fast_rejected_row_tail_columns = (int64_t)columns;
+      solver->stats.fast_rejected_row_tail_columns =
+        (int64_t)row_tail_columns;
       solver->stats.fast_rejected_row_tail_work = work;
       return;
     }
+    solver->row_refactor_tail_count = 0;
   }
 
   if (solver->numeric == NULL || block >= solver->numeric->nblocks ||

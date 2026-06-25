@@ -471,7 +471,8 @@ work, the suffix work and columns currently overcomputed relative to the
 retained CKTSO-style pivoting-tail worklist, the
 rejected BTF block, the suffix from that pivot to the end
 of the block, the exact U-pattern descendant tail inside that block, the
-row-refactor successor tail when row-major metadata is available, the
+row-refactor successor tail when row-major metadata is available, including
+block-local BTF tails retained by the checked row-major path, the
 ordered-block ETree successor path that a pivoting tail-restart upper-bound
 scheduler would at least have to revisit, the sorted pivoting-tail worklist
 scope seeded from the current refresh state, the first and last rows in that

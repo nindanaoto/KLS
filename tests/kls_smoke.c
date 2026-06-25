@@ -1324,6 +1324,124 @@ static int test_btf_fast_factor_block_restart(void) {
   return ok;
 }
 
+static int test_btf_checked_row_tail_scope(void) {
+  const int32_t ap[] = {0, 2, 4, 7, 9};
+  const int32_t ai[] = {0, 1, 0, 1, 0, 2, 3, 2, 3};
+  const double ax0[] = {2.0, 1.0, 1.0, 2.0,
+                        0.5, 2.0, 1.0, 1.0, 2.0};
+  const double ax1[] = {2.0, 1.0, 1.0, 2.0,
+                        0.5, 1.0e-12, 1.0, 1.0, 2.0};
+  const double b[] = {5.5, 5.0, 4.000000000003, 11.0};
+  double x[4] = {0.0, 0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
+
+  const char *saved_env_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 4, ap, ai, 0,
+                                        &options),
+                        "analyze btf checked-row tail")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor btf checked-row base")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor btf checked-row repair")) ok = 0;
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve btf checked-row tail")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats btf checked-row tail")) {
+    ok = 0;
+  }
+  if (ok && (stats.nblocks < 2 ||
+             stats.fast_rejected_block_start < 0 ||
+             stats.fast_rejected_pivot < stats.fast_rejected_block_start ||
+             stats.fast_rejected_pivot >=
+               stats.fast_rejected_block_start +
+                 stats.fast_rejected_block_size ||
+             stats.fast_rejected_row < stats.fast_rejected_block_start ||
+             stats.fast_rejected_row >=
+               stats.fast_rejected_block_start +
+                 stats.fast_rejected_block_size ||
+             stats.fast_rejected_block_size != 2 ||
+             stats.fast_rejected_refresh_state !=
+               KLS_FAST_REJECT_REFRESH_PREFIX ||
+             stats.fast_rejected_row_tail_columns < 1 ||
+             stats.fast_rejected_row_tail_columns >
+               stats.fast_rejected_suffix_columns ||
+             stats.fast_rejected_row_tail_work <= 0.0 ||
+             stats.fast_rejected_tail_candidate_row !=
+               stats.fast_rejected_row ||
+             stats.fast_rejected_tail_candidate_count < 1 ||
+             stats.fast_rejected_tail_candidate_position < 0 ||
+             stats.fast_rejected_tail_repair_ready != 1)) {
+    fprintf(stderr,
+            "unexpected btf checked-row tail stats: nblocks=%" PRId64
+            ", pivot=%" PRId64 ", row=%" PRId64
+            ", block=[%" PRId64 ",%" PRId64 "), refresh=%d"
+            ", row_tail=%" PRId64 ", row_work=%.6g"
+            ", tail_row=%" PRId64 ", tail_count=%" PRId64
+            ", tail_pos=%" PRId64 ", tail_ready=%d\n",
+            stats.nblocks,
+            stats.fast_rejected_pivot,
+            stats.fast_rejected_row,
+            stats.fast_rejected_block_start,
+            stats.fast_rejected_block_start + stats.fast_rejected_block_size,
+            stats.fast_rejected_refresh_state,
+            stats.fast_rejected_row_tail_columns,
+            stats.fast_rejected_row_tail_work,
+            stats.fast_rejected_tail_candidate_row,
+            stats.fast_rejected_tail_candidate_count,
+            stats.fast_rejected_tail_candidate_position,
+            stats.fast_rejected_tail_repair_ready);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats, "btf checked-row tail")) {
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0) || !close_enough(x[3], 4.0))) {
+    fprintf(stderr,
+            "unexpected btf checked-row solution: %.17g %.17g %.17g %.17g\n",
+            x[0], x[1], x[2], x[3]);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  free(saved_env);
+  return ok;
+}
+
 static int test_btf_prefix_tail_restart_with_offblock(void) {
   const int32_t ap[] = {0, 1, 5, 9, 13};
   const int32_t ai[] = {
@@ -2681,6 +2799,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_btf_fast_factor_block_restart()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_btf_checked_row_tail_scope()) {
     return EXIT_FAILURE;
   }
   if (!test_btf_prefix_tail_restart_with_offblock()) {
