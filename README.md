@@ -134,9 +134,9 @@ KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
 retained pattern through the checked fast path. Setting
 `KLS_ENABLE_KLS_FIRST_FACTOR=1` enables an experimental KLS-owned first-factor
 scaffold for no-scale and KLU row-scaled cases. It reports `kls_first` when it
-successfully assembles KLU-compatible numeric storage. For eligible unscaled
-matrices, that gate first tries a KLS-owned sparse row-major up-looking first
-factor over each BTF diagonal block, matching CKTSO Algorithm 1's row
+successfully assembles KLU-compatible numeric storage. For eligible no-scale or
+KLU row-scaled matrices, that gate first tries a KLS-owned sparse row-major
+up-looking first factor over each BTF diagonal block, matching CKTSO Algorithm 1's row
 orientation before packing the accepted factors for the existing solve/refactor
 interfaces. When a row diagonal fails the threshold against the row's largest
 U-tail entry, this bridge exchanges the active block-local column with that

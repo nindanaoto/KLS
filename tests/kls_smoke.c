@@ -3698,11 +3698,22 @@ static int run_experimental_kls_first_factor_case(int scale,
                         "transpose solve KLS first factor")) ok = 0;
 
   kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
   stats.struct_size = sizeof(stats);
   if (ok && !require_ok(kls_get_stats(solver, &stats),
                         "stats KLS first factor")) {
     ok = 0;
   }
+  const int kls_first_row_up =
+    stats.kls_first_last_row_uplooking_columns == 3 &&
+    stats.kls_first_row_uplooking_column_count >= 3;
+  const int kls_first_mapped_tail =
+    stats.kls_tail_last_mapped_columns > 0 &&
+    stats.kls_tail_mapped_column_count >=
+      stats.kls_tail_last_mapped_columns;
+  const int kls_first_path_ok =
+    scale > 0 ? kls_first_row_up
+              : (kls_first_row_up || kls_first_mapped_tail);
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
              stats.nblocks < 2 || stats.max_block < 2 ||
              stats.selected_orientation != orientation ||
@@ -3713,14 +3724,13 @@ static int run_experimental_kls_first_factor_case(int scale,
              stats.row_refactor_row_solve_run_count != 2 ||
              stats.fast_block_restarts != 0 ||
              stats.fast_kls_block_restarts != 0 ||
-             stats.kls_tail_last_mapped_columns <= 0 ||
-             stats.kls_tail_mapped_column_count <
-               stats.kls_tail_last_mapped_columns)) {
+             !kls_first_path_ok)) {
     fprintf(stderr,
             "unexpected KLS first-factor stats: path=%s, nblocks=%" PRId64
             ", max_block=%" PRId64 ", orientation=%s, scale=%d"
             ", row_dirty=%d, row_lazy=%d, row_solve=%d, row_solve_count=%" PRId64
             ", block_restarts=%d, kls_block_restarts=%d"
+            ", row_up=%" PRId64 "/%" PRId64
             ", mapped_tail=%" PRId64 "/%" PRId64 "\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.nblocks, stats.max_block,
@@ -3731,6 +3741,8 @@ static int run_experimental_kls_first_factor_case(int scale,
             stats.row_refactor_last_row_solve,
             stats.row_refactor_row_solve_run_count,
             stats.fast_block_restarts, stats.fast_kls_block_restarts,
+            stats.kls_first_last_row_uplooking_columns,
+            stats.kls_first_row_uplooking_column_count,
             stats.kls_tail_last_mapped_columns,
             stats.kls_tail_mapped_column_count);
     ok = 0;

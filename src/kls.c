@@ -22581,7 +22581,7 @@ static int kls_try_first_factor_row_uplooking_blocks(
   if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
       solver->numeric != NULL || solver->symbolic->nblocks == 0u ||
       solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
-      solver->symbolic->R == NULL || solver->common.scale != 0) {
+      solver->symbolic->R == NULL) {
     return 0;
   }
 
@@ -22612,26 +22612,39 @@ static int kls_try_first_factor_row_uplooking_blocks(
     return 0;
   }
   solver->numeric = numeric;
-
   UF_long *psinv = numeric->Pinv;
-  UF_long *row_counts =
-    (UF_long *)calloc((size_t)maxblock, sizeof(*row_counts));
-  UF_long *row_ptr =
-    (UF_long *)calloc((size_t)maxblock + 1u, sizeof(*row_ptr));
-  double *x = (double *)calloc((size_t)maxblock, sizeof(*x));
-  unsigned int *mark =
-    (unsigned int *)calloc((size_t)maxblock, sizeof(*mark));
-  UF_long *pattern =
-    (UF_long *)malloc((size_t)maxblock * sizeof(*pattern));
-  UF_long *dep_heap =
-    (UF_long *)malloc((size_t)maxblock * sizeof(*dep_heap));
-  UF_long *u_row_ptr =
-    (UF_long *)calloc((size_t)maxblock + 1u, sizeof(*u_row_ptr));
-  double *udiag_values =
-    (double *)malloc((size_t)maxblock * sizeof(*udiag_values));
-  UF_long *q_order = (UF_long *)malloc((size_t)n * sizeof(*q_order));
-  UF_long *saved_q = (UF_long *)malloc((size_t)n * sizeof(*saved_q));
-  UF_long *col_pos = (UF_long *)malloc((size_t)n * sizeof(*col_pos));
+  UF_long *row_counts = NULL;
+  UF_long *row_ptr = NULL;
+  double *x = NULL;
+  unsigned int *mark = NULL;
+  UF_long *pattern = NULL;
+  UF_long *dep_heap = NULL;
+  UF_long *u_row_ptr = NULL;
+  double *udiag_values = NULL;
+  UF_long *q_order = NULL;
+  UF_long *saved_q = NULL;
+  UF_long *col_pos = NULL;
+  const int scaled = common->scale > 0;
+  if (scaled &&
+      !trilinos_klu_l_scale((UF_long)common->scale, n,
+                            solver->col_ptr, solver->row_idx,
+                            numeric_values, numeric->Rs, NULL, common)) {
+    goto fail;
+  }
+
+  row_counts = (UF_long *)calloc((size_t)maxblock, sizeof(*row_counts));
+  row_ptr = (UF_long *)calloc((size_t)maxblock + 1u, sizeof(*row_ptr));
+  x = (double *)calloc((size_t)maxblock, sizeof(*x));
+  mark = (unsigned int *)calloc((size_t)maxblock, sizeof(*mark));
+  pattern = (UF_long *)malloc((size_t)maxblock * sizeof(*pattern));
+  dep_heap = (UF_long *)malloc((size_t)maxblock * sizeof(*dep_heap));
+  u_row_ptr = (UF_long *)calloc((size_t)maxblock + 1u,
+                                sizeof(*u_row_ptr));
+  udiag_values = (double *)malloc((size_t)maxblock *
+                                  sizeof(*udiag_values));
+  q_order = (UF_long *)malloc((size_t)n * sizeof(*q_order));
+  saved_q = (UF_long *)malloc((size_t)n * sizeof(*saved_q));
+  col_pos = (UF_long *)malloc((size_t)n * sizeof(*col_pos));
   if (row_counts == NULL || row_ptr == NULL || x == NULL ||
       mark == NULL || pattern == NULL || dep_heap == NULL ||
       u_row_ptr == NULL || udiag_values == NULL || q_order == NULL ||
@@ -22774,9 +22787,21 @@ static int kls_try_first_factor_row_uplooking_blocks(
           if (col < i) {
             kls_row_first_heap_push(dep_heap, &dep_heap_size, col);
           }
-          x[col] = numeric_values[row_input_pos[p]];
+          if (!kls_refactor_input_value(solver, numeric_values,
+                                        scaled ? numeric->Rs : NULL,
+                                        (int)common->scale,
+                                        row_input_pos[p], x + col)) {
+            goto fail_block_entries;
+          }
         } else {
-          x[col] += numeric_values[row_input_pos[p]];
+          double value = 0.0;
+          if (!kls_refactor_input_value(solver, numeric_values,
+                                        scaled ? numeric->Rs : NULL,
+                                        (int)common->scale,
+                                        row_input_pos[p], &value)) {
+            goto fail_block_entries;
+          }
+          x[col] += value;
         }
       }
 
@@ -22915,6 +22940,9 @@ fail_block_entries:
   memcpy(solver->symbolic->Q, q_order, (size_t)n * sizeof(*q_order));
   q_committed = 1;
   if (!kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
+    goto fail;
+  }
+  if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
     goto fail;
   }
   if (common->status == TRILINOS_KLU_OK) {
