@@ -403,8 +403,11 @@ successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus
 `row_refactor_work_ready_queue_run_count`. The ready queue keeps solver-owned
 workspace across repeated row refactors and reports its capacity through
-`row_refactor_ready_queue_workspace_groups`. Checked queued rejects refresh any
-missing prefix rows before accepting a prefix-tail repair classification.
+`row_refactor_ready_queue_workspace_groups`. Full-graph queued runs also reuse
+the retained group predecessor counts and root-group list instead of
+rediscovering those static task-graph facts every numeric pass. Checked queued
+rejects refresh any missing prefix rows before accepting a prefix-tail repair
+classification.
 Checked row fast-factor rejects also report the conservative row-group restart
 tail through
 `fast_rejected_group_tail_groups`, `fast_rejected_group_tail_rows`, and
