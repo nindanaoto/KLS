@@ -225,6 +225,8 @@ struct kls_solver {
   double *row_refactor_compact_panel_values;
   UF_long row_refactor_compact_dense_panel_persistent_groups;
   UF_long row_refactor_compact_dense_panel_persistent_entries;
+  int row_refactor_last_compact_dense_panel_persistent;
+  UF_long row_refactor_compact_dense_panel_persistent_run_count;
   unsigned int row_refactor_tail_mark;
   UF_long row_refactor_tail_count;
   UF_long *refactor_level_ptr;
@@ -901,6 +903,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_compact_dense_panel_entries = 0.0;
   solver->row_refactor_compact_dense_panel_persistent_groups = 0;
   solver->row_refactor_compact_dense_panel_persistent_entries = 0;
+  solver->row_refactor_last_compact_dense_panel_persistent = 0;
+  solver->row_refactor_compact_dense_panel_persistent_run_count = 0;
   solver->row_refactor_tail_mark = 0u;
   solver->row_refactor_tail_count = 0;
 }
@@ -964,6 +968,8 @@ typedef struct {
   double compact_dense_panel_entries;
   UF_long compact_dense_panel_persistent_groups;
   UF_long compact_dense_panel_persistent_entries;
+  int last_compact_dense_panel_persistent;
+  UF_long compact_dense_panel_persistent_run_count;
 } kls_row_refactor_diagnostics;
 
 static void kls_save_row_refactor_diagnostics(
@@ -1051,6 +1057,10 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_compact_dense_panel_persistent_groups;
   diag->compact_dense_panel_persistent_entries =
     solver->row_refactor_compact_dense_panel_persistent_entries;
+  diag->last_compact_dense_panel_persistent =
+    solver->row_refactor_last_compact_dense_panel_persistent;
+  diag->compact_dense_panel_persistent_run_count =
+    solver->row_refactor_compact_dense_panel_persistent_run_count;
 }
 
 static void kls_restore_row_refactor_diagnostics(
@@ -1146,6 +1156,10 @@ static void kls_restore_row_refactor_diagnostics(
     diag->compact_dense_panel_persistent_groups;
   solver->row_refactor_compact_dense_panel_persistent_entries =
     diag->compact_dense_panel_persistent_entries;
+  solver->row_refactor_last_compact_dense_panel_persistent =
+    diag->last_compact_dense_panel_persistent;
+  solver->row_refactor_compact_dense_panel_persistent_run_count =
+    diag->compact_dense_panel_persistent_run_count;
 }
 
 static void free_row_refactor_pattern_preserve_diagnostics(kls_solver *solver) {
@@ -1418,6 +1432,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_work_ready_queue = 0;
   solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_last_compact_dense_panel = 0;
+  solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_last_lazy_value_scatter = 0;
   solver->row_refactor_last_row_solve = 0;
@@ -1429,6 +1444,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_work_ready_queue = 0;
   solver->stats.row_refactor_last_local_ready_groups = 0;
   solver->stats.row_refactor_last_compact_dense_panel = 0;
+  solver->stats.row_refactor_last_compact_dense_panel_persistent = 0;
   solver->stats.row_refactor_last_defer_value_scatter = 0;
   solver->stats.row_refactor_last_lazy_value_scatter = 0;
   solver->stats.row_refactor_last_row_solve = 0;
@@ -1447,6 +1463,7 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_done_bitmap = 0;
   solver->row_refactor_last_work_ready_queue = 0;
   solver->row_refactor_last_compact_dense_panel = 0;
+  solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_run_count++;
@@ -1484,12 +1501,18 @@ static void kls_record_row_refactor_work_ready_queue_run(kls_solver *solver) {
   solver->row_refactor_work_ready_queue_run_count++;
 }
 
-static void kls_record_row_refactor_compact_dense_panel(kls_solver *solver) {
+static void kls_record_row_refactor_compact_dense_panel(
+  kls_solver *solver,
+  int persistent_panel) {
   if (solver == NULL) {
     return;
   }
   solver->row_refactor_last_compact_dense_panel = 1;
   solver->row_refactor_compact_dense_panel_count++;
+  if (persistent_panel) {
+    solver->row_refactor_last_compact_dense_panel_persistent = 1;
+    solver->row_refactor_compact_dense_panel_persistent_run_count++;
+  }
 }
 
 static void kls_record_row_refactor_local_ready_groups(kls_solver *solver,
@@ -8511,6 +8534,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_compact_dense_panel_persistent_groups;
   solver->stats.row_refactor_compact_dense_panel_persistent_entries =
     (int64_t)solver->row_refactor_compact_dense_panel_persistent_entries;
+  solver->stats.row_refactor_last_compact_dense_panel_persistent =
+    solver->row_refactor_last_compact_dense_panel_persistent;
+  solver->stats.row_refactor_compact_dense_panel_persistent_run_count =
+    (int64_t)solver->row_refactor_compact_dense_panel_persistent_run_count;
   solver->stats.refactor_dependency_cluster_levels =
     (int64_t)solver->refactor_cluster_level_count;
   solver->stats.refactor_dependency_pipeline_columns =
@@ -17209,13 +17236,14 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
   const UF_long panel_entries = dense_panel_entries + trailing_panel_entries;
   double *dense_panel =
     kls_row_refactor_compact_group_panel(solver, group, panel_entries);
+  const int persistent_panel = dense_panel != NULL;
   if (dense_panel == NULL) {
     dense_panel = kls_egraph_worker_segment_panel(worker, panel_entries);
   }
   if (dense_panel == NULL) {
     return -1;
   }
-  kls_record_row_refactor_compact_dense_panel(solver);
+  kls_record_row_refactor_compact_dense_panel(solver, persistent_panel);
   double *trailing_panel = NULL;
   if (trailing_len > 0u) {
     trailing_panel = dense_panel + dense_panel_entries;

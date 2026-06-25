@@ -3568,8 +3568,12 @@ a solver-owned compact panel slice for that group and reports the retained
 groups/entries as
 `row_refactor_compact_dense_panel_persistent_groups` and
 `row_refactor_compact_dense_panel_persistent_entries`. The compact kernel uses
-that retained slice before falling back to worker-local scratch, and the dense
-checked/unchecked smoke cases assert both execution and retained panel storage.
+that retained slice before falling back to worker-local scratch, reports actual
+retained-slice execution as
+`row_refactor_last_compact_dense_panel_persistent` and
+`row_refactor_compact_dense_panel_persistent_run_count`, and the dense
+checked/unchecked smoke cases assert both execution and retained panel
+consumption.
 This still repacks current input values on each numeric pass and scatters back
 to row mirrors, so it is not the full CKTSO/SubtreeLU row-major numeric storage
 model; it does make the compact row-segment value lifetime solver-owned rather

@@ -416,7 +416,10 @@ survives the compact-panel gate. Eligible dense groups also allocate
 solver-owned compact panel slices reported as
 `row_refactor_compact_dense_panel_persistent_groups` and
 `row_refactor_compact_dense_panel_persistent_entries`; the compact kernel uses
-those slices before falling back to worker-local scratch. Checked pivot-probe
+those slices before falling back to worker-local scratch and reports actual
+retained-slice execution as
+`row_refactor_last_compact_dense_panel_persistent` and
+`row_refactor_compact_dense_panel_persistent_run_count`. Checked pivot-probe
 row refactors use
 the same compact panel only through a row-ordered update/check/publish loop, so
 a rejected pivot leaves the same prefix-visible row-major state as the native

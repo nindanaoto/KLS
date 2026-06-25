@@ -1078,6 +1078,8 @@ int main(int argc, char **argv) {
            ",\"row_refactor_compact_dense_panel_entries\":%.9g"
            ",\"row_refactor_compact_dense_panel_persistent_groups\":%" PRId64
            ",\"row_refactor_compact_dense_panel_persistent_entries\":%" PRId64
+           ",\"row_refactor_last_compact_dense_panel_persistent\":%d"
+           ",\"row_refactor_compact_dense_panel_persistent_run_count\":%" PRId64
            ",\"refactor_dependency_cluster_levels\":%" PRId64
            ",\"refactor_dependency_pipeline_columns\":%" PRId64
            ",\"refactor_dependency_work\":%.9g"
@@ -1139,6 +1141,8 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_entries,
            stats.row_refactor_compact_dense_panel_persistent_groups,
            stats.row_refactor_compact_dense_panel_persistent_entries,
+           stats.row_refactor_last_compact_dense_panel_persistent,
+           stats.row_refactor_compact_dense_panel_persistent_run_count,
            stats.refactor_dependency_cluster_levels,
            stats.refactor_dependency_pipeline_columns,
            stats.refactor_dependency_work,
@@ -1439,7 +1443,8 @@ int main(int argc, char **argv) {
            ", compact panel: %d/%" PRId64
            ", eligible: %" PRId64 "/%" PRId64
            ", work: %.6g, entries: %.6g"
-           ", persistent: %" PRId64 " groups/%" PRId64 " entries\n",
+           ", persistent: %" PRId64 " groups/%" PRId64
+           " entries, used: %d/%" PRId64 "\n",
            stats.row_refactor_dense_segment_count,
            stats.row_refactor_dense_segment_rows,
            stats.row_refactor_dense_segment_max_width,
@@ -1452,7 +1457,9 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_update_work,
            stats.row_refactor_compact_dense_panel_entries,
            stats.row_refactor_compact_dense_panel_persistent_groups,
-           stats.row_refactor_compact_dense_panel_persistent_entries);
+           stats.row_refactor_compact_dense_panel_persistent_entries,
+           stats.row_refactor_last_compact_dense_panel_persistent,
+           stats.row_refactor_compact_dense_panel_persistent_run_count);
     printf("refactor dependency cluster levels: %" PRId64
            ", pipeline columns: %" PRId64 "\n",
            stats.refactor_dependency_cluster_levels,
