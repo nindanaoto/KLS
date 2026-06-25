@@ -3950,6 +3950,10 @@ static int run_experimental_kls_first_factor_case(int scale,
   const int kls_first_path_ok =
     scale > 0 ? kls_first_row_up
               : (kls_first_row_up || kls_first_mapped_tail);
+  const int kls_first_seed_ok =
+    !kls_first_row_up ||
+    (stats.kls_first_last_row_refactor_seeded_rows == 3 &&
+     stats.kls_first_row_refactor_seeded_row_count >= 3);
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
              stats.nblocks < 2 || stats.max_block < 2 ||
              stats.selected_orientation != orientation ||
@@ -3960,13 +3964,15 @@ static int run_experimental_kls_first_factor_case(int scale,
              stats.row_refactor_row_solve_run_count != 2 ||
              stats.fast_block_restarts != 0 ||
              stats.fast_kls_block_restarts != 0 ||
-             !kls_first_path_ok)) {
+             !kls_first_path_ok ||
+             !kls_first_seed_ok)) {
     fprintf(stderr,
             "unexpected KLS first-factor stats: path=%s, nblocks=%" PRId64
             ", max_block=%" PRId64 ", orientation=%s, scale=%d"
             ", row_dirty=%d, row_lazy=%d, row_solve=%d, row_solve_count=%" PRId64
             ", block_restarts=%d, kls_block_restarts=%d"
             ", row_up=%" PRId64 "/%" PRId64
+            ", row_seed=%" PRId64 "/%" PRId64
             ", mapped_tail=%" PRId64 "/%" PRId64 "\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.nblocks, stats.max_block,
@@ -3979,6 +3985,8 @@ static int run_experimental_kls_first_factor_case(int scale,
             stats.fast_block_restarts, stats.fast_kls_block_restarts,
             stats.kls_first_last_row_uplooking_columns,
             stats.kls_first_row_uplooking_column_count,
+            stats.kls_first_last_row_refactor_seeded_rows,
+            stats.kls_first_row_refactor_seeded_row_count,
             stats.kls_tail_last_mapped_columns,
             stats.kls_tail_mapped_column_count);
     ok = 0;
@@ -4238,13 +4246,18 @@ static int test_auto_kls_first_factor_large_block(void) {
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
              stats.kls_first_last_row_uplooking_columns != n ||
              stats.kls_first_row_uplooking_column_count < n ||
+             stats.kls_first_last_row_refactor_seeded_rows != n ||
+             stats.kls_first_row_refactor_seeded_row_count < n ||
              stats.selected_btf != 0 || stats.selected_scale != 0)) {
     fprintf(stderr,
             "unexpected auto KLS-first stats: path=%s, row_cols=%" PRId64
-            "/%" PRId64 ", btf=%d, scale=%d\n",
+            "/%" PRId64 ", row_seed=%" PRId64 "/%" PRId64
+            ", btf=%d, scale=%d\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.kls_first_last_row_uplooking_columns,
             stats.kls_first_row_uplooking_column_count,
+            stats.kls_first_last_row_refactor_seeded_rows,
+            stats.kls_first_row_refactor_seeded_row_count,
             stats.selected_btf, stats.selected_scale);
     ok = 0;
   }
@@ -4340,15 +4353,20 @@ static int test_pre_static_replays_kls_first_factor(void) {
              !stats.selected_exact_matching ||
              stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
              stats.kls_first_last_row_uplooking_columns != n ||
-             stats.kls_first_row_uplooking_column_count < n)) {
+             stats.kls_first_row_uplooking_column_count < n ||
+             stats.kls_first_last_row_refactor_seeded_rows != n ||
+             stats.kls_first_row_refactor_seeded_row_count < n)) {
     fprintf(stderr,
             "unexpected pre-static replay stats: static=%d exact=%d path=%s"
-            ", row_cols=%" PRId64 "/%" PRId64 "\n",
+            ", row_cols=%" PRId64 "/%" PRId64
+            ", row_seed=%" PRId64 "/%" PRId64 "\n",
             stats.selected_static_pivoting,
             stats.selected_exact_matching,
             kls_factor_path_name(stats.last_factor_path),
             stats.kls_first_last_row_uplooking_columns,
-            stats.kls_first_row_uplooking_column_count);
+            stats.kls_first_row_uplooking_column_count,
+            stats.kls_first_last_row_refactor_seeded_rows,
+            stats.kls_first_row_refactor_seeded_row_count);
     ok = 0;
   }
   for (int32_t i = 0; ok && i < n; ++i) {
@@ -4452,6 +4470,8 @@ static int test_experimental_row_uplooking_first_factor(void) {
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
              stats.kls_first_last_row_uplooking_columns != 3 ||
              stats.kls_first_row_uplooking_column_count < 3 ||
+             stats.kls_first_last_row_refactor_seeded_rows != 3 ||
+             stats.kls_first_row_refactor_seeded_row_count < 3 ||
              stats.kls_first_last_dynamic_column_pivots != 0 ||
              stats.kls_tail_last_mapped_columns != 0 ||
              stats.selected_scale != 0 ||
@@ -4459,11 +4479,14 @@ static int test_experimental_row_uplooking_first_factor(void) {
     fprintf(stderr,
             "unexpected row-up-looking first-factor stats: path=%s"
             ", row_cols=%" PRId64 "/%" PRId64
+            ", row_seed=%" PRId64 "/%" PRId64
             ", dyn_pivots=%" PRId64
             ", mapped_tail=%" PRId64 ", scale=%d, btf=%d\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.kls_first_last_row_uplooking_columns,
             stats.kls_first_row_uplooking_column_count,
+            stats.kls_first_last_row_refactor_seeded_rows,
+            stats.kls_first_row_refactor_seeded_row_count,
             stats.kls_first_last_dynamic_column_pivots,
             stats.kls_tail_last_mapped_columns,
             stats.selected_scale,
@@ -4592,16 +4615,21 @@ static int test_experimental_row_uplooking_dynamic_column_pivot(void) {
   }
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
              stats.kls_first_last_row_uplooking_columns != 3 ||
+             stats.kls_first_last_row_refactor_seeded_rows != 3 ||
+             stats.kls_first_row_refactor_seeded_row_count < 3 ||
              stats.kls_first_last_dynamic_column_pivots != 1 ||
              stats.kls_first_dynamic_column_pivot_count < 1 ||
              stats.selected_scale != 0 ||
              stats.selected_btf != 0)) {
     fprintf(stderr,
             "unexpected row-up-looking dynamic pivot stats: path=%s"
-            ", row_cols=%" PRId64 ", dyn_pivots=%" PRId64 "/%" PRId64
+            ", row_cols=%" PRId64 ", row_seed=%" PRId64 "/%" PRId64
+            ", dyn_pivots=%" PRId64 "/%" PRId64
             ", scale=%d, btf=%d\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.kls_first_last_row_uplooking_columns,
+            stats.kls_first_last_row_refactor_seeded_rows,
+            stats.kls_first_row_refactor_seeded_row_count,
             stats.kls_first_last_dynamic_column_pivots,
             stats.kls_first_dynamic_column_pivot_count,
             stats.selected_scale,
@@ -4736,16 +4764,21 @@ static int test_experimental_row_uplooking_btf_blocks(void) {
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
              stats.nblocks != 2 ||
              stats.kls_first_last_row_uplooking_columns != 4 ||
+             stats.kls_first_last_row_refactor_seeded_rows != 4 ||
+             stats.kls_first_row_refactor_seeded_row_count < 4 ||
              stats.kls_first_last_dynamic_column_pivots != 1 ||
              stats.selected_scale != 0 ||
              stats.selected_btf != 1)) {
     fprintf(stderr,
             "unexpected row-up-looking BTF stats: path=%s"
             ", nblocks=%" PRId64 ", row_cols=%" PRId64
+            ", row_seed=%" PRId64 "/%" PRId64
             ", dyn_pivots=%" PRId64 ", scale=%d, btf=%d\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.nblocks,
             stats.kls_first_last_row_uplooking_columns,
+            stats.kls_first_last_row_refactor_seeded_rows,
+            stats.kls_first_row_refactor_seeded_row_count,
             stats.kls_first_last_dynamic_column_pivots,
             stats.selected_scale,
             stats.selected_btf);

@@ -809,6 +809,8 @@ int main(int argc, char **argv) {
            ",\"kls_tail_mapped_column_count\":%" PRId64
            ",\"kls_first_last_row_uplooking_columns\":%" PRId64
            ",\"kls_first_row_uplooking_column_count\":%" PRId64
+           ",\"kls_first_last_row_refactor_seeded_rows\":%" PRId64
+           ",\"kls_first_row_refactor_seeded_row_count\":%" PRId64
            ",\"kls_first_last_dynamic_column_pivots\":%" PRId64
            ",\"kls_first_dynamic_column_pivot_count\":%" PRId64
            ",\"kls_first_last_separator_dynamic_column_pivots\":%" PRId64
@@ -909,6 +911,8 @@ int main(int argc, char **argv) {
            stats.kls_tail_mapped_column_count,
            stats.kls_first_last_row_uplooking_columns,
            stats.kls_first_row_uplooking_column_count,
+           stats.kls_first_last_row_refactor_seeded_rows,
+           stats.kls_first_row_refactor_seeded_row_count,
            stats.kls_first_last_dynamic_column_pivots,
            stats.kls_first_dynamic_column_pivot_count,
            stats.kls_first_last_separator_dynamic_column_pivots,
@@ -1329,6 +1333,10 @@ int main(int argc, char **argv) {
            ", total %" PRId64 "\n",
            stats.kls_first_last_row_uplooking_columns,
            stats.kls_first_row_uplooking_column_count);
+    printf("KLS first row-refactor seed rows: last %" PRId64
+           ", total %" PRId64 "\n",
+           stats.kls_first_last_row_refactor_seeded_rows,
+           stats.kls_first_row_refactor_seeded_row_count);
     printf("KLS row-up-looking dynamic column pivots: last %" PRId64
            ", total %" PRId64 "\n",
            stats.kls_first_last_dynamic_column_pivots,

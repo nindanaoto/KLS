@@ -212,10 +212,13 @@ kernel.
 The CKTSO paper in `refs/` is explicit that CKTSO's core factorization is a
 row-major sparse up-looking factorization, and that the fast path combines
 guessed EGraph pivot-checked refactorization with an ETree-scheduled pipelined
-tail factorization when repivoting is needed. KLS still hands the default first
-large factorization to KLU's column-oriented serial kernel; the current
-env-gated `kls_first` scaffold is KLU-storage-compatible, not that row-major
-production engine. A debug trace on `pre2` confirmed the timeout occurs in
+tail factorization when repivoting is needed. KLS no longer always hands large
+eligible first factorizations to KLU: the conservative automatic `kls_first`
+path can run a row-up-looking first factor and now seeds row-refactor mirrors
+directly from those row entries. The remaining gap is that accepted factors are
+still packed into a KLU-compatible numeric object for fallback coherence, and
+KLS does not yet have CKTSO's fully row-major parallel first-factor/EGraph
+executor. A debug trace on `pre2` confirmed the timeout occurs in
 `trilinos_klu_l_kernel` from the fallback first-factor call. The same trace
 showed SPRAL auction static pivoting finds 633565 weighted matches for 659033
 rows; structurally augmenting that to a full
@@ -3884,3 +3887,16 @@ score static-pivot candidates, and it does not implement CKTSO's parallel
 row-up/EGraph first-factor executor, but it removes a direct KLU-storage return
 from accepted first-factor states and makes the row-up engine a production
 candidate for the large cases the papers target.
+
+The row-up first factor now also keeps its row-oriented product alive for the
+next phase. While packing the accepted factors into the KLU-compatible numeric
+object for fallback solves and pivot repairs, KLS records the same row entries,
+factor-order input positions, and numeric value pointers into the shared
+row-refactor CSR/group metadata finisher. A successful direct handoff is
+reported by `kls_first_last_row_refactor_seeded_rows` and
+`kls_first_row_refactor_seeded_row_count`; smoke coverage requires it for the
+ordinary row-up, dynamic-column-pivot, BTF, large-auto, and pre-static replay
+first-factor cases. This still is not CKTSO's fully row-major primary numeric
+object, because BTF off-diagonal refresh and fallback coherence still require
+the retained column-oriented refactor map, but it removes the previous
+pack-then-reconstruct step for KLS-first row-refactor mirrors.

@@ -148,8 +148,17 @@ U-tail entry, this bridge exchanges the active block-local column with that
 largest entry, publishes the accepted `Q` order, and continues in KLS-owned
 row-major storage. Benchmark stats report this direct bridge as
 `kls_first_last_row_uplooking_columns` and
-`kls_first_row_uplooking_column_count`, with Algorithm 1-style dynamic column
-exchanges reported as `kls_first_last_dynamic_column_pivots` and
+`kls_first_row_uplooking_column_count`. A successful row-up-looking first
+factor also publishes its row-major `L`/`U` entries, input row positions, and
+KLU numeric value pointers directly into the row-refactor metadata finisher;
+that skip-over-numeric-scan handoff is reported as
+`kls_first_last_row_refactor_seeded_rows` and
+`kls_first_row_refactor_seeded_row_count`. BTF cases still build the retained
+factor-order input map for off-diagonal refreshes and fallback coherence, but
+the row-refactor pattern and value mirrors no longer have to be reconstructed
+from packed KLU columns after a successful KLS-first row-up factor. Algorithm
+1-style dynamic column exchanges are reported as
+`kls_first_last_dynamic_column_pivots` and
 `kls_first_dynamic_column_pivot_count`. If that row-up-looking bridge is not
 eligible or still rejects a pivot, the pivoted KLS block tail still runs; it reuses
 KLS's retained factor-order input map when available, reported as
