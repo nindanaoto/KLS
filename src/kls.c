@@ -574,6 +574,9 @@ static int kls_egraph_refactor_wait_done(
 static int kls_egraph_refreshed_prefix(
   const kls_egraph_refactor_shared *shared,
   UF_long rejected_pivot);
+static kls_egraph_refactor_kernel kls_egraph_refactor_kernel_for(
+  const kls_solver *solver,
+  int scale);
 static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   kls_solver *solver,
   int thread_count);
@@ -17072,6 +17075,32 @@ static int kls_first_factor_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_first_factor_env_disabled(void) {
+  const char *value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  return value != NULL && value[0] == '0' && value[1] == '\0';
+}
+
+static int kls_auto_first_factor_should_run(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->nblocks == 0u || solver->symbolic->maxblock < 30000u ||
+      solver->n < 30000u || solver->symbolic->R == NULL ||
+      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
+      solver->common.scale < -1 || solver->common.scale > 2) {
+    return 0;
+  }
+  return 1;
+}
+
+static int kls_should_try_first_factor(const kls_solver *solver) {
+  if (kls_first_factor_env_enabled()) {
+    return 1;
+  }
+  if (kls_first_factor_env_disabled()) {
+    return 0;
+  }
+  return kls_auto_first_factor_should_run(solver);
+}
+
 static int kls_row_solve_from_numeric_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC");
   return value != NULL && value[0] != '\0' &&
@@ -21508,16 +21537,21 @@ static int kls_egraph_refactor_dispatch_column(
 /* CKTSO tail repair can omit independent finished nodes.  For serial root
    rejects, make those omitted columns current before the pivoted tail copies
    them as preserved suffix/gap columns. */
-static int kls_refresh_root_tail_preserved_single_block_columns(
+static int kls_refresh_root_tail_preserved_block_columns(
   kls_solver *solver,
   double *numeric_values,
+  UF_long block,
+  UF_long k1,
   UF_long nk,
   const unsigned char *tail_mask) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || tail_mask == NULL ||
-      solver->symbolic->nblocks != 1u || solver->symbolic->R == NULL ||
-      solver->symbolic->R[0] != 0u || solver->symbolic->R[1] != nk ||
-      nk != solver->n || solver->common.scale > 0 ||
+      solver->symbolic->R == NULL ||
+      block >= solver->symbolic->nblocks ||
+      k1 != solver->symbolic->R[block] ||
+      k1 + nk != solver->symbolic->R[block + 1u] ||
+      k1 > solver->n || nk > solver->n - k1 ||
+      solver->common.scale > 0 ||
       solver->numeric->Rs != NULL || solver->numeric->Xwork == NULL ||
       solver->numeric->Ulen == NULL ||
       !kls_build_refactor_map(solver) ||
@@ -21525,7 +21559,12 @@ static int kls_refresh_root_tail_preserved_single_block_columns(
     return 0;
   }
   if (solver->refactor_lu_pointer_count != solver->n ||
-      solver->refactor_u_indices == NULL) {
+      solver->refactor_u_indices == NULL ||
+      (solver->symbolic->nblocks > 1u &&
+       (solver->refactor_block_start == NULL ||
+        solver->refactor_col_block == NULL ||
+        solver->numeric->Offp == NULL ||
+        solver->numeric->Offx == NULL))) {
     return 0;
   }
 
@@ -21534,8 +21573,9 @@ static int kls_refresh_root_tail_preserved_single_block_columns(
     if (tail_mask[k]) {
       continue;
     }
-    const UF_long *ui = solver->refactor_u_indices[k];
-    const UF_long ulen = solver->numeric->Ulen[k];
+    const UF_long global_k = k1 + k;
+    const UF_long *ui = solver->refactor_u_indices[global_k];
+    const UF_long ulen = solver->numeric->Ulen[global_k];
     if (ui == NULL && ulen > 0u) {
       return 0;
     }
@@ -21561,7 +21601,7 @@ static int kls_refresh_root_tail_preserved_single_block_columns(
   shared.rs = NULL;
   shared.check_pivots = 0;
   shared.scale = 0;
-  shared.kernel = KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED;
+  shared.kernel = kls_egraph_refactor_kernel_for(solver, 0);
   shared.thread_count = 1;
   shared.rejected_pivot = KLS_KLU_EMPTY;
   shared.rejected_pivot_col = KLS_KLU_EMPTY;
@@ -21584,7 +21624,7 @@ static int kls_refresh_root_tail_preserved_single_block_columns(
       continue;
     }
     memset(worker.x, 0, (size_t)nk * sizeof(*worker.x));
-    if (!kls_egraph_refactor_dispatch_column(&worker, k, 0) ||
+    if (!kls_egraph_refactor_dispatch_column(&worker, k1 + k, 0) ||
         shared.invalid || shared.pivot_rejected || shared.singular) {
       ok = 0;
       break;
@@ -21627,8 +21667,11 @@ static UF_long kls_prepare_root_pivot_tail_independent_refresh(
   UF_long nk,
   UF_long local_reject) {
   if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
-      local_reject != 0u || nk == 0u || k1 != 0u ||
-      block != 0u || solver->symbolic->nblocks != 1u ||
+      local_reject != 0u || nk == 0u ||
+      block >= solver->symbolic->nblocks ||
+      solver->symbolic->R == NULL ||
+      k1 != solver->symbolic->R[block] ||
+      k1 + nk != solver->symbolic->R[block + 1u] ||
       solver->common.scale > 0 ||
       solver->fast_reject_refresh_state != KLS_FAST_REJECT_REFRESH_PREFIX) {
     return nk;
@@ -21668,8 +21711,8 @@ static UF_long kls_prepare_root_pivot_tail_independent_refresh(
       solver, k1, nk, local_reject, restart_end, tail_mask);
   const int refresh_ok =
     mask_ok &&
-    kls_refresh_root_tail_preserved_single_block_columns(
-      solver, numeric_values, nk, tail_mask);
+    kls_refresh_root_tail_preserved_block_columns(
+      solver, numeric_values, block, k1, nk, tail_mask);
   free(tail_mask);
   if (!refresh_ok) {
     return kls_restore_pivot_tail_plan(
@@ -25570,6 +25613,49 @@ fail:
   return 0;
 }
 
+static int kls_try_rebuild_current_numeric_with_kls_first(
+  kls_solver *solver,
+  double *numeric_values,
+  double *elapsed) {
+  if (solver == NULL || numeric_values == NULL || solver->numeric == NULL ||
+      !kls_should_try_first_factor(solver)) {
+    return 0;
+  }
+
+  trilinos_klu_l_numeric *saved_numeric = solver->numeric;
+  trilinos_klu_l_common saved_common = solver->common;
+  free_refactor_map(solver);
+  free_refactor_schedule(solver);
+  free_refactor_lu_pointer_cache(solver);
+  free_fast_reject_tail_plan(solver);
+  free_row_refactor_pattern(solver);
+  solver->row_refactor_auto_enabled = 0;
+  solver->numeric = NULL;
+
+  const double start = kls_now_seconds();
+  int rebuilt = kls_try_first_factor_row_uplooking_blocks(solver,
+                                                          numeric_values);
+  if (!rebuilt) {
+    rebuilt = kls_try_first_factor_with_pivoted_blocks(solver,
+                                                       numeric_values);
+  }
+  if (elapsed != NULL) {
+    *elapsed += kls_now_seconds() - start;
+  }
+
+  if (rebuilt && solver->numeric != NULL && solver->common.status >= 0) {
+    trilinos_klu_l_free_numeric(&saved_numeric, &saved_common);
+    return 1;
+  }
+
+  if (solver->numeric != NULL) {
+    trilinos_klu_l_free_numeric(&solver->numeric, &solver->common);
+  }
+  solver->numeric = saved_numeric;
+  solver->common = saved_common;
+  return 0;
+}
+
 int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -25598,7 +25684,22 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (!had_numeric) {
     maybe_select_pre_static_row_match(solver, &elapsed, numeric_values);
     if (solver->numeric != NULL) {
-      kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST);
+      numeric_values = solver->values != NULL ? solver->values : numeric_values;
+      const int kls_first_factor_used =
+        kls_try_rebuild_current_numeric_with_kls_first(solver, numeric_values,
+                                                       &elapsed);
+      kls_set_last_factor_path(solver,
+                               kls_first_factor_used
+                                 ? KLS_FACTOR_PATH_KLS_FIRST
+                                 : KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST);
+      if (kls_first_factor_used) {
+        kls_update_numeric_diagnostics(solver, 1);
+        if (solver->common.status >= TRILINOS_KLU_OK) {
+          const double row_start = kls_now_seconds();
+          (void)kls_prepare_auto_row_refactor_from_numeric(solver);
+          elapsed += kls_now_seconds() - row_start;
+        }
+      }
       kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
       maybe_prepare_refactor_map(solver, &elapsed);
       maybe_prepare_refactor_schedule(solver, &elapsed);
@@ -25634,7 +25735,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     solver->common.tol = choose_initial_auto_pivot_tolerance(solver);
   }
   int kls_first_factor_used = 0;
-  if (!had_numeric && kls_first_factor_env_enabled()) {
+  if (!had_numeric && kls_should_try_first_factor(solver)) {
     const double start = kls_now_seconds();
     kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FIRST);
     kls_first_factor_used =

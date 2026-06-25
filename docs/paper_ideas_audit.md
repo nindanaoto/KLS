@@ -3855,13 +3855,32 @@ KLS then filled a narrower but direct CKTSO tail-restart semantic gap for
 root-of-block rejects. A prefix-current root reject normally means every later
 unstarted column belongs to the unfinished seed set, so the safe tail remains a
 full suffix. When the reject-only ETree closure is shorter, however, KLS can now
-prove that preserved single-block columns outside that closure have no U
-dependency on tail columns, refresh those preserved columns with the existing
-mapped no-pivot column kernel, and then execute the shorter pivoted tail
-envelope. The smoke fixture uses a weak root in a 2-by-2 dependent part plus an
-independent trailing singleton and asserts that the retained pivoting-tail plan
-has two columns while the block suffix has three, and that KLS counts the repair
-as `fast_tail_restarts=1`. This is still a serial envelope rather than CKTSO's
-parallel Algorithm 5 executor, but it directly applies the paper's distinction
-between unfinished EGraph nodes and ETree-descendant pivoting-tail work instead
-of treating all root rejects as whole-block repairs.
+prove that preserved columns outside that closure have no U dependency on tail
+columns, refresh those preserved columns with the existing mapped no-pivot
+column kernel, and then execute the shorter pivoted tail envelope. The refresh
+proof now works for single-block and unscaled BTF diagonal-block roots by using
+the mapped global-column dispatcher and requiring retained block/off-diagonal
+metadata before refreshing omitted block-local columns. The smoke fixture uses
+a weak root in a 2-by-2 dependent part plus an independent trailing singleton
+and asserts that the retained pivoting-tail plan has two columns while the block
+suffix has three, and that KLS counts the repair as `fast_tail_restarts=1`.
+This is still a serial envelope rather than CKTSO's parallel Algorithm 5
+executor, but it directly applies the paper's distinction between unfinished
+EGraph nodes and ETree-descendant pivoting-tail work instead of treating all
+root rejects as whole-block repairs.
+
+The first-factor path was then moved closer to the paper instead of leaving it
+as an opt-in experiment. Unset `KLS_ENABLE_KLS_FIRST_FACTOR` now means
+conservative auto: large eligible symbolic blocks try the KLS-owned sparse
+row-up-looking first factor before falling back to KLU, while `0` remains a hard
+off switch and `1` still forces the attempt. More importantly for the
+static-pivoting rows called out by the gap decomposition, an accepted pre-static
+row-matching candidate can now replay its selected symbolic/value state through
+the KLS row-up factor after the existing KLU trial has accepted the candidate.
+If the replay fails, KLS restores the accepted trial numeric; if it succeeds,
+`initial_factor_path` reports `kls_first` and row-major mirrors are prepared as
+for an ordinary KLS-first factor. This does not remove the KLU trial used to
+score static-pivot candidates, and it does not implement CKTSO's parallel
+row-up/EGraph first-factor executor, but it removes a direct KLU-storage return
+from accepted first-factor states and makes the row-up engine a production
+candidate for the large cases the papers target.

@@ -131,14 +131,19 @@ symbolic analysis and ordering decisions without running numeric factorization.
 JSON includes `initial_factor_path` and `last_factor_path`; values such as
 `klu_first` or `klu_fallback` mean the factorization was handed to the
 KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
-retained pattern through the checked fast path. Setting
-`KLS_ENABLE_KLS_FIRST_FACTOR=1` enables an experimental KLS-owned first-factor
-scaffold for no-scale and KLU row-scaled cases. It reports `kls_first` when it
-successfully assembles KLU-compatible numeric storage. For eligible no-scale or
-KLU row-scaled matrices, that gate first tries a KLS-owned sparse row-major
-up-looking first factor over each BTF diagonal block, matching CKTSO Algorithm 1's row
-orientation before packing the accepted factors for the existing solve/refactor
-interfaces. When a row diagonal fails the threshold against the row's largest
+retained pattern through the checked fast path. Unset
+`KLS_ENABLE_KLS_FIRST_FACTOR` now means a conservative automatic mode: large
+eligible first factorizations try KLS-owned row-up-looking factorization before
+KLU, `KLS_ENABLE_KLS_FIRST_FACTOR=0` keeps the old KLU-first behavior, and
+`KLS_ENABLE_KLS_FIRST_FACTOR=1` forces the KLS-owned scaffold when possible.
+It reports `kls_first` when it successfully assembles KLU-compatible numeric
+storage. For eligible no-scale or KLU row-scaled matrices, that path first
+tries a KLS-owned sparse row-major up-looking first factor over each BTF
+diagonal block, matching CKTSO Algorithm 1's row orientation before packing the
+accepted factors for the existing solve/refactor interfaces. Accepted
+pre-static row-matching candidates can also replay their selected symbolic and
+value state through this row-up factor instead of returning with the KLU-built
+trial numeric. When a row diagonal fails the threshold against the row's largest
 U-tail entry, this bridge exchanges the active block-local column with that
 largest entry, publishes the accepted `Q` order, and continues in KLS-owned
 row-major storage. Benchmark stats report this direct bridge as
@@ -920,8 +925,10 @@ For row-engine experiments, `kls_bench` and `run_bench_suite.py` accept
 `--row-solve env|off|on` for the ordinary-factor row-solve seed gate. The
 emitted `initial_factor_path`, `last_factor_path`, and `row_refactor_last_*`
 fields show whether the first factorization, later numeric passes, and solves
-really used KLS-owned paths. Explicit
-row-refactor modes force the row engine, while the automatic KLS-first path
+really used KLS-owned paths. `--kls-first-factor env` preserves the library's
+automatic first-factor decision, `off` disables it, and `on` forces the
+KLS-owned attempt. Explicit row-refactor modes force the row engine, while the
+automatic KLS-first path
 uses the retained row/EGraph work estimates to skip row refactors whose static
 work model is already worse than the existing exact EGraph schedule:
 

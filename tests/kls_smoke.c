@@ -4155,6 +4155,226 @@ static int test_experimental_kls_first_factor(void) {
                                                 KLS_ORIENTATION_TRANSPOSE);
 }
 
+static int restore_env_value(const char *name, int had_value,
+                             const char *saved_value) {
+  if (had_value) {
+    if (setenv(name, saved_value, 1) != 0) {
+      perror("restore env");
+      return 0;
+    }
+  } else if (unsetenv(name) != 0) {
+    perror("unsetenv");
+    return 0;
+  }
+  return 1;
+}
+
+static int test_auto_kls_first_factor_large_block(void) {
+  const int32_t n = 30000;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)n * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)n * sizeof(*ax));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax == NULL || b == NULL ||
+      x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  for (int32_t col = 0; col <= n; ++col) {
+    ap[col] = col;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    const double diag = 2.0 + (double)(col % 11);
+    ai[col] = col;
+    ax[col] = diag;
+    expected[col] = 1.0 + (double)(col % 13);
+    b[col] = diag * expected[col];
+  }
+
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_saved_first = saved_first_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = 0;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (had_saved_first && saved_first == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (ok && unsetenv("KLS_ENABLE_KLS_FIRST_FACTOR") != 0) {
+    perror("unsetenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze auto KLS first factor")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor auto KLS first factor")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve auto KLS first factor")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats auto KLS first factor")) ok = 0;
+  if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
+             stats.kls_first_last_row_uplooking_columns != n ||
+             stats.kls_first_row_uplooking_column_count < n ||
+             stats.selected_btf != 0 || stats.selected_scale != 0)) {
+    fprintf(stderr,
+            "unexpected auto KLS-first stats: path=%s, row_cols=%" PRId64
+            "/%" PRId64 ", btf=%d, scale=%d\n",
+            kls_factor_path_name(stats.last_factor_path),
+            stats.kls_first_last_row_uplooking_columns,
+            stats.kls_first_row_uplooking_column_count,
+            stats.selected_btf, stats.selected_scale);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected auto KLS-first solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
+                         saved_first)) {
+    ok = 0;
+  }
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(b);
+  free(x);
+  free(expected);
+  free(saved_first);
+  return ok;
+}
+
+static int test_pre_static_replays_kls_first_factor(void) {
+  const int32_t n = 3000;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)n * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)n * sizeof(*ax));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax == NULL || b == NULL ||
+      x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  for (int32_t col = 0; col <= n; ++col) {
+    ap[col] = col;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    ai[col] = (col + n - 1) % n;
+    ax[col] = 1.0;
+    expected[col] = 1.0 + (double)(col % 17);
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    b[row] = expected[(row + 1) % n];
+  }
+
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_saved_first = saved_first_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_AUTO;
+
+  int ok = 1;
+  if (had_saved_first && saved_first == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze pre-static KLS replay")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor pre-static KLS replay")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve pre-static KLS replay")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats pre-static KLS replay")) ok = 0;
+  if (ok && (!stats.selected_static_pivoting ||
+             !stats.selected_exact_matching ||
+             stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
+             stats.kls_first_last_row_uplooking_columns != n ||
+             stats.kls_first_row_uplooking_column_count < n)) {
+    fprintf(stderr,
+            "unexpected pre-static replay stats: static=%d exact=%d path=%s"
+            ", row_cols=%" PRId64 "/%" PRId64 "\n",
+            stats.selected_static_pivoting,
+            stats.selected_exact_matching,
+            kls_factor_path_name(stats.last_factor_path),
+            stats.kls_first_last_row_uplooking_columns,
+            stats.kls_first_row_uplooking_column_count);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected pre-static replay solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
+                         saved_first)) {
+    ok = 0;
+  }
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(b);
+  free(x);
+  free(expected);
+  free(saved_first);
+  return ok;
+}
+
 static int test_experimental_row_uplooking_first_factor(void) {
   const int32_t ap[] = {0, 3, 6, 9};
   const int32_t ai[] = {0, 1, 2, 0, 1, 2, 0, 1, 2};
@@ -5050,6 +5270,12 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_kls_first_factor()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_auto_kls_first_factor_large_block()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_pre_static_replays_kls_first_factor()) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_row_uplooking_first_factor()) {
