@@ -316,6 +316,10 @@ typedef struct kls_stats {
   int64_t row_refactor_last_partial_supernode_pipeline_groups;
   int64_t row_refactor_last_partial_supernode_pipeline_rows;
   int64_t row_refactor_partial_supernode_pipeline_run_count;
+  int row_refactor_last_compact_supernode_update;
+  int64_t row_refactor_compact_supernode_update_count;
+  int64_t row_refactor_compact_supernode_update_rows;
+  int64_t row_refactor_compact_supernode_update_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -3781,3 +3781,22 @@ slower than the existing ready queue on the current KLS row kernel, so the
 mechanism is available for continued paper-aligned development but is not a
 default production path. It is still not the full CKTSO pivoting-tail
 factorization.
+
+KLS now consumes retained compact dense row panels as external supernode
+update sources during row refactorization. Once a compact dense group finishes
+successfully in the current numeric pass, a per-group valid marker lets later
+rows recognize a contiguous suffix of two or more dependencies from that same
+group and update from the contiguous panel directly instead of expanding each
+predecessor row through the sparse row mirror. This implements the
+SubtreeLU/CKTSO supernode
+update idea more directly than the earlier compact-panel work, which only used
+the panel while factoring the producer group itself. The path preserves the
+same multiplier checks and row-prefix publication rules as the scalar row
+kernel, and falls back to scalar updates when a producer panel is absent,
+stale, unfinished, or belongs to the current group. Focused forced-row probes
+showed the path active with valid residuals: `coupled` used 1,770 compact
+supernode updates over 62,162 predecessor rows, `G2_circuit` used 119,130
+updates over 6,220,352 rows, and `ASIC_100ks` used 23,209 updates over
+915,915 rows. This is still not full BLAS-backed supernodal factorization or
+the CKTSO pivoting-tail executor, but it moves the current row engine from
+mere compact storage toward actually consuming supernodes in later updates.

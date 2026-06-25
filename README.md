@@ -435,8 +435,14 @@ solver-owned compact panel slices reported as
 those slices before falling back to worker-local scratch and reports actual
 retained-slice execution as
 `row_refactor_last_compact_dense_panel_persistent` and
-`row_refactor_compact_dense_panel_persistent_run_count`. Checked pivot-probe
-row refactors use
+`row_refactor_compact_dense_panel_persistent_run_count`. Later rows can consume
+a current-pass retained compact panel as a supernode update source when they
+have a contiguous suffix of dependencies on that completed dense group; stats report
+`row_refactor_last_compact_supernode_update`,
+`row_refactor_compact_supernode_update_count`,
+`row_refactor_compact_supernode_update_rows`, and
+`row_refactor_compact_supernode_update_entries`. Checked pivot-probe row
+refactors use
 the same compact panel only through a row-ordered update/check/publish loop, so
 a rejected pivot leaves the same prefix-visible row-major state as the native
 direct row-mirror kernel. For generic-only row patterns, pipeline groups also
