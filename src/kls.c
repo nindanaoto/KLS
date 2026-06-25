@@ -14446,6 +14446,19 @@ static int kls_seed_row_refactor_values_from_numeric(kls_solver *solver) {
   return kls_copy_row_refactor_values_from_numeric(solver);
 }
 
+static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
+  if (solver == NULL || !kls_build_row_refactor_pattern(solver)) {
+    return 0;
+  }
+  solver->row_refactor_auto_enabled = 1;
+  if (!kls_auto_row_refactor_cost_allows(solver)) {
+    solver->row_refactor_values_ready = 0;
+    solver->row_refactor_solve_validated = 0;
+    return 1;
+  }
+  return kls_copy_row_refactor_values_from_numeric(solver);
+}
+
 static int kls_seed_row_solve_values_from_numeric(kls_solver *solver) {
   if (solver == NULL || !kls_build_row_solve_pattern(solver)) {
     return 0;
@@ -16619,9 +16632,19 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     solver->row_refactor_group_successor_ptr != NULL &&
     solver->row_refactor_group_count > 0u;
   if (have_group_dag) {
-    use_group_pipeline = 1;
+    cluster_levels =
+      kls_row_refactor_choose_cluster_levels(solver, thread_count);
+    if (cluster_levels > solver->row_refactor_level_count) {
+      cluster_levels = solver->row_refactor_level_count;
+    }
+    use_group_pipeline = cluster_levels < solver->row_refactor_level_count;
   } else {
     cluster_levels = solver->row_refactor_level_count;
+  }
+
+  if (have_group_dag && cluster_levels > 0u &&
+      !kls_build_row_refactor_group_thread_slices(solver, thread_count)) {
+    return -1;
   }
 
   UF_long *row_ready_groups = NULL;
@@ -16632,12 +16655,12 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   UF_long row_ready_tail_count = 0;
   UF_long row_initial_ready_count = 0;
   /* Prefer consuming the whole retained row-group DAG through the ready queue.
-     This is the row-refactor analogue of the paper private/pipeline direction:
-     no cluster-level barriers are needed when all inter-group predecessors are
-     tracked explicitly.  If preparation fails, keep the older cluster/tail
-     schedule as a conservative fallback. */
+     This is the row-refactor analogue of the paper private/pipeline direction,
+     but only after the CKTSO-style wide cluster prefix has been preserved.  If
+     preparation fails, keep the older cluster/tail schedule as a conservative
+     fallback. */
   int use_row_ready_queue =
-    use_group_pipeline &&
+    have_group_dag && use_group_pipeline &&
     kls_prepare_row_refactor_ready_queue(
       solver, cluster_levels, &row_ready_groups, &row_ready_slots,
       &row_remaining_preds, &row_tail_groups, &row_private_groups,
@@ -20611,9 +20634,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   if (kls_first_factor_used && solver->common.status >= TRILINOS_KLU_OK) {
     const double start = kls_now_seconds();
-    if (kls_seed_row_refactor_values_from_numeric(solver)) {
-      solver->row_refactor_auto_enabled = 1;
-    }
+    (void)kls_prepare_auto_row_refactor_from_numeric(solver);
     elapsed += kls_now_seconds() - start;
   }
   kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);

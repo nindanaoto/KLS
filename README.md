@@ -134,12 +134,12 @@ KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
 retained pattern through the checked fast path. Setting
 `KLS_ENABLE_KLS_FIRST_FACTOR=1` enables an experimental KLS-owned first-factor
 scaffold for no-scale and KLU row-scaled cases. It reports `kls_first` when it
-successfully assembles KLU-compatible numeric storage and seeds KLS-owned
-row-major `L`/`U` value mirrors for guarded forward/transpose solves. Repeated
+successfully assembles KLU-compatible numeric storage. It also builds KLS-owned
+row-major `L`/`U` metadata for guarded row refactor/solve experiments, but it
+copies numeric values into those mirrors only when their retained row-work
+estimate is no larger than the exact EGraph refactor work estimate. Repeated
 unchecked `kls_refactor` calls and checked fast-factor `kls_factor` calls then
-try those row-major update paths automatically while the mirrors remain current
-and their retained row-work estimate is no larger than the exact EGraph
-refactor work estimate;
+try those row-major update paths automatically while the mirrors remain current;
 successful checked pivot repairs reseed those mirrors so subsequent solves do
 not have to fall back to published KLU column storage solely because the repaired
 block rebuilt its LU payload. Benchmark stats expose
@@ -404,10 +404,11 @@ the reverse group graph and reports `row_refactor_group_dependency_edges`,
 `row_refactor_group_root_count`, `row_refactor_group_leaf_count`, and
 `row_refactor_group_max_fanout`, which are the row-segment task-graph counters
 needed by future private/pipeline partitioning and tail-restart schedulers. The
-experimental row pipeline first tries to consume the whole retained row-group
-graph as a bounded successor-ready queue, removing cluster-level barriers when
-explicit predecessor counts are available. If that queue cannot be prepared, it
-falls back to the older barriered cluster levels plus queued tail. Stats report
+experimental row pipeline preserves the CKTSO-style wide cluster prefix selected
+by the `2 * threads` width rule, then consumes the remaining narrow tail through
+a bounded successor-ready queue when explicit predecessor counts are available.
+If that queue cannot be prepared, it falls back to the older barriered cluster
+levels plus queued tail. Stats report
 `row_refactor_last_ready_queue`, `row_refactor_ready_queue_run_count`, and
 `row_refactor_ready_queue_group_count` when the queued group scheduler is used.
 Unchecked queued row refactors can run without the per-row completion bitmap;
@@ -482,13 +483,13 @@ workspace across repeated row refactors and reports its capacity through
 `row_refactor_ready_queue_workspace_groups`. When the queued scheduler keeps a
 newly ready successor as a worker-local continuation instead of spilling it to
 the shared queue, stats report `row_refactor_last_local_ready_groups` and
-`row_refactor_local_ready_group_count`. Full-graph queued runs also reuse
-the retained group predecessor counts and root-group list instead of
-rediscovering those static task-graph facts every numeric pass, and hand the
-root groups out through a private-root cursor before using the shared queue for
-newly released successors. When a completed group releases multiple successors,
-the completing worker keeps one local continuation and only spills the rest to
-the shared queue. Checked queued
+`row_refactor_local_ready_group_count`. Tail queued runs reuse the retained
+group predecessor counts; when the cluster prefix is empty, full-graph queued
+runs also reuse the retained root-group list and hand the root groups out
+through a private-root cursor before using the shared queue for newly released
+successors. When a completed group releases multiple successors, the completing
+worker keeps one local continuation and only spills the rest to the shared
+queue. Checked queued
 rejects refresh any missing prefix rows before accepting a prefix-tail repair
 classification.
 Checked row fast-factor rejects also report the conservative row-group restart

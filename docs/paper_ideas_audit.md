@@ -3263,6 +3263,25 @@ forced row-solve seeding had a `3.1772s` geomean, adaptive seeding had a
 `3.0613s` geomean with no failures, and explicit `--row-solve off` was
 `3.0426s`. This is a useful cleanup, but it is not the missing CKTSO numeric
 engine.
+The same rule now applies to KLS-first row-refactor mirrors. KLS-first still
+builds row-refactor metadata so `row_refactor_total_group_work` and
+`row_refactor_auto_work_allowed` stay visible, but it copies values into
+row-major mirrors only when the retained row-work model allows the row engine
+to run. On the local top-six hard-case slice, this removed an unused setup copy
+on the rows where `row_refactor_auto_work_allowed=0`; the same-session default
+probe moved from `7.7455s` to `7.5856s` geomean. A top-12 guard with
+`--row-solve on` completed all rows at `3.0847s`, within noise of the previous
+adaptive `3.0613s` run and still faster than the older forced-seed `3.1772s`
+baseline.
+The row-refactor scheduler was also corrected to preserve CKTSO's
+cluster/pipeline split. It now runs the wide cluster prefix chosen by the
+paper's `2 * threads` width rule before building the successor-ready queue for
+the remaining narrow tail; the previous full-graph ready queue sent very wide
+ASIC/G2 levels through hundreds of thousands of tiny atomic tasks. A forced
+top-six row-refactor probe improved only from `11.4507s` to `11.3434s`
+geomean, and remained much slower than the EGraph path. This confirms that the
+current row engine still lacks the paper's production row/segment numeric
+kernel and that automatic row-refactor activation should remain cost-gated.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF

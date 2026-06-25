@@ -2674,16 +2674,15 @@ static int test_parallel_row_refactor_full_ready_queue(void) {
     ok = 0;
   }
   if (ok && (stats.row_refactor_group_level_max_width < 6 ||
-             stats.row_refactor_group_cluster_levels != 0 ||
-             stats.row_refactor_group_pipeline_groups !=
-               stats.row_refactor_group_count ||
-             stats.row_refactor_group_pipeline_rows != n ||
+             stats.row_refactor_group_cluster_levels != 1 ||
+             stats.row_refactor_group_pipeline_groups != 2 ||
+             stats.row_refactor_group_pipeline_rows != 2 ||
              stats.row_refactor_last_run != 1 ||
              stats.row_refactor_last_parallel != 1 ||
              stats.row_refactor_last_ready_queue != 1 ||
              stats.row_refactor_ready_queue_run_count != 1 ||
              stats.row_refactor_ready_queue_group_count !=
-               stats.row_refactor_group_count ||
+               stats.row_refactor_group_pipeline_groups ||
              stats.row_refactor_last_work_ready_queue != 1 ||
              stats.row_refactor_work_ready_queue_run_count != 1 ||
              stats.row_refactor_last_local_ready_groups <= 0 ||
