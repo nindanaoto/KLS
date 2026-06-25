@@ -1389,17 +1389,32 @@ static int run_btf_row_refactor_offblock_refresh(int scale) {
     2.5, 1.2, 0.8, 2.25,
     1.75, 3.0, 0.5, 0.75, 2.75
   };
-  const double expected[] = {1.0, 2.0, 3.0, 4.0};
-  const double expected_t[] = {0.75, -1.25, 1.5, 2.25};
-  double b[4] = {0.0, 0.0, 0.0, 0.0};
-  double bt[4] = {0.0, 0.0, 0.0, 0.0};
-  double x[4] = {0.0, 0.0, 0.0, 0.0};
-  double xt[4] = {0.0, 0.0, 0.0, 0.0};
+  const int32_t nrhs = 5;
+  const double expected_rhs[5][4] = {
+    {1.0, 2.0, 3.0, 4.0},
+    {-2.0, 0.5, 1.25, -0.75},
+    {0.0, 1.0, -1.0, 2.0},
+    {3.0, -3.0, 0.25, 0.5},
+    {-0.5, -1.5, 2.5, 1.0}
+  };
+  const double expected_t_rhs[5][4] = {
+    {0.75, -1.25, 1.5, 2.25},
+    {2.0, 1.0, 0.0, -1.0},
+    {-1.5, 0.25, 0.5, 3.0},
+    {1.0, -2.0, 2.0, -0.5},
+    {0.0, 0.5, -1.5, 1.25}
+  };
+  double b[20] = {0.0};
+  double bt[20] = {0.0};
+  double x[20] = {0.0};
+  double xt[20] = {0.0};
 
-  for (int32_t col = 0; col < 4; ++col) {
-    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
-      b[ai[p]] += ax1[p] * expected[col];
-      bt[col] += ax1[p] * expected_t[ai[p]];
+  for (int32_t rhs = 0; rhs < nrhs; ++rhs) {
+    for (int32_t col = 0; col < 4; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        b[rhs * 4 + ai[p]] += ax1[p] * expected_rhs[rhs][col];
+        bt[rhs * 4 + col] += ax1[p] * expected_t_rhs[rhs][ai[p]];
+      }
     }
   }
 
@@ -1469,7 +1484,7 @@ static int run_btf_row_refactor_offblock_refresh(int scale) {
             refactor_stats.row_refactor_run_count);
     ok = 0;
   }
-  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+  if (ok && !require_ok(kls_solve(solver, nrhs, b, 4, x, 4),
                         "solve btf row refactor")) ok = 0;
 
   kls_stats solve_stats;
@@ -1494,16 +1509,19 @@ static int run_btf_row_refactor_offblock_refresh(int scale) {
             solve_stats.row_refactor_row_solve_run_count);
     ok = 0;
   }
-  for (int32_t i = 0; ok && i < 4; ++i) {
-    if (!close_enough(x[i], expected[i])) {
-      fprintf(stderr,
-              "unexpected btf row-refactor solution for scale %d at %d:"
-              " %.17g != %.17g\n",
-              scale, (int)i, x[i], expected[i]);
-      ok = 0;
+  for (int32_t rhs = 0; ok && rhs < nrhs; ++rhs) {
+    for (int32_t i = 0; ok && i < 4; ++i) {
+      if (!close_enough(x[rhs * 4 + i], expected_rhs[rhs][i])) {
+        fprintf(stderr,
+                "unexpected btf row-refactor solution for scale %d"
+                " rhs %d at %d: %.17g != %.17g\n",
+                scale, (int)rhs, (int)i, x[rhs * 4 + i],
+                expected_rhs[rhs][i]);
+        ok = 0;
+      }
     }
   }
-  if (ok && !require_ok(kls_solve_transpose(solver, 1, bt, 0, xt, 0),
+  if (ok && !require_ok(kls_solve_transpose(solver, nrhs, bt, 4, xt, 4),
                         "transpose solve btf row refactor")) ok = 0;
   if (ok && !require_ok(kls_get_stats(solver, &solve_stats),
                         "transpose stats btf row refactor")) {
@@ -1526,14 +1544,16 @@ static int run_btf_row_refactor_offblock_refresh(int scale) {
             solve_stats.row_refactor_row_solve_run_count);
     ok = 0;
   }
-  for (int32_t i = 0; ok && i < 4; ++i) {
-    if (!close_enough(xt[i], expected_t[i])) {
-      fprintf(stderr,
-              "unexpected btf row-refactor transpose solution for scale %d"
-              " at %d:"
-              " %.17g != %.17g\n",
-              scale, (int)i, xt[i], expected_t[i]);
-      ok = 0;
+  for (int32_t rhs = 0; ok && rhs < nrhs; ++rhs) {
+    for (int32_t i = 0; ok && i < 4; ++i) {
+      if (!close_enough(xt[rhs * 4 + i], expected_t_rhs[rhs][i])) {
+        fprintf(stderr,
+                "unexpected btf row-refactor transpose solution for scale %d"
+                " rhs %d at %d: %.17g != %.17g\n",
+                scale, (int)rhs, (int)i, xt[rhs * 4 + i],
+                expected_t_rhs[rhs][i]);
+        ok = 0;
+      }
     }
   }
 

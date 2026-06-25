@@ -2943,6 +2943,15 @@ transpose solves and verifies that dirty row mirrors remain authoritative
 without publishing back to KLU storage. This is a storage-ownership step toward
 the CKTSO row/segment engine, not the full pivoting-tail executor.
 
+The dirty row-major solve then switched from one-RHS-at-a-time sparse traversal
+to KLU-style chunks of up to four right-hand sides. The same BTF and
+single-block row-mirror paths now load, update, and store a small RHS batch
+while traversing each `L`, `U`, and `Offx` pattern once per chunk. The BTF smoke
+now solves five forward and five transpose right-hand sides for both unscaled and
+KLU row-scaled factors. This is a structure-adaptive solve-path cleanup enabled
+by KLS-owned row storage; it does not replace the missing pivoting-tail
+factorization engine.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

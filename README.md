@@ -381,9 +381,12 @@ it. The guarded dirty row solve
 handles unscaled and KLU row-scaled normal factors in forward and transpose
 orientation by matching KLU's `P*(R\b)` and `Q'*b`/`P'*(R\x)` solve setup; for
 BTF factors it follows KLU's block solve order and applies refreshed `Offx`
-coupling without first publishing row mirrors to KLU `L`/`U` storage. External
-KLS row/column scaling or permutation, later factorization, and other non-row
-fallbacks still publish the dirty row mirrors before using KLU storage.
+coupling without first publishing row mirrors to KLU `L`/`U` storage. The dirty
+row solve traverses each sparse block once for up to four right-hand sides at a
+time, matching KLU's small-RHS batching shape while reading KLS-owned row
+mirrors. External KLS row/column scaling or permutation, later factorization,
+and other non-row fallbacks still publish the dirty row mirrors before using KLU
+storage.
 Benchmark stats
 report `row_refactor_last_defer_value_scatter`,
 `row_refactor_defer_value_scatter_run_count`, `row_refactor_values_dirty`,

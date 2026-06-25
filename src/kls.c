@@ -12898,12 +12898,17 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
 
   solver->common.status = TRILINOS_KLU_OK;
 
-  for (int64_t rhs_index = 0; rhs_index < nrhs; ++rhs_index) {
-    double *rhs = x + rhs_index * ldx;
+  for (int64_t chunk = 0; chunk < nrhs; chunk += 4) {
+    const UF_long rhs_count =
+      (UF_long)(nrhs - chunk < 4 ? nrhs - chunk : 4);
     if (!kernel_transpose) {
       for (UF_long k = 0; k < n; ++k) {
-        const double rhs_value = rhs[pnum[k]];
-        work[k] = rs != NULL ? rhs_value / rs[k] : rhs_value;
+        double *wk = work + k * rhs_count;
+        for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+          const double *rhs = x + (chunk + (int64_t)rhs_offset) * ldx;
+          const double rhs_value = rhs[pnum[k]];
+          wk[rhs_offset] = rs != NULL ? rhs_value / rs[k] : rhs_value;
+        }
       }
 
       for (UF_long remaining_block = nblocks; remaining_block > 0u;
@@ -12912,7 +12917,7 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
         const UF_long k1 = r[block];
         const UF_long k2 = r[block + 1u];
         for (UF_long row = k1; row < k2; ++row) {
-          double value = work[row];
+          double *wrow = work + row * rhs_count;
           const UF_long begin = solver->row_refactor_l_ptr[row];
           const UF_long end = solver->row_refactor_l_ptr[row + 1u];
           for (UF_long p = begin; p < end; ++p) {
@@ -12920,14 +12925,18 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
             if (col < k1 || col >= row) {
               return 0;
             }
-            value -= solver->row_refactor_l_row_values[p] * work[col];
+            const double lij = solver->row_refactor_l_row_values[p];
+            const double *wcol = work + col * rhs_count;
+            for (UF_long rhs_offset = 0; rhs_offset < rhs_count;
+                 ++rhs_offset) {
+              wrow[rhs_offset] -= lij * wcol[rhs_offset];
+            }
           }
-          work[row] = value;
         }
 
         for (UF_long remaining = k2; remaining > k1; --remaining) {
           const UF_long row = remaining - 1u;
-          double value = work[row];
+          double *wrow = work + row * rhs_count;
           const UF_long begin = solver->row_refactor_u_ptr[row];
           const UF_long end = solver->row_refactor_u_ptr[row + 1u];
           for (UF_long p = begin; p < end; ++p) {
@@ -12935,32 +12944,53 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
             if (col <= row || col >= k2) {
               return 0;
             }
-            value -= solver->row_refactor_u_row_values[p] * work[col];
+            const double uij = solver->row_refactor_u_row_values[p];
+            const double *wcol = work + col * rhs_count;
+            for (UF_long rhs_offset = 0; rhs_offset < rhs_count;
+                 ++rhs_offset) {
+              wrow[rhs_offset] -= uij * wcol[rhs_offset];
+            }
           }
-          work[row] = value / udiag[row];
+          for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+            wrow[rhs_offset] /= udiag[row];
+          }
         }
 
         if (block > 0u) {
           for (UF_long k = k1; k < k2; ++k) {
             const UF_long begin = offp[k];
             const UF_long end = offp[k + 1u];
+            const double *wk = work + k * rhs_count;
             for (UF_long p = begin; p < end; ++p) {
               const UF_long row = offi[p];
               if (row < 0 || row >= k1) {
                 return 0;
               }
-              work[row] -= offx[p] * work[k];
+              double *wrow = work + row * rhs_count;
+              const double value = offx[p];
+              for (UF_long rhs_offset = 0; rhs_offset < rhs_count;
+                   ++rhs_offset) {
+                wrow[rhs_offset] -= value * wk[rhs_offset];
+              }
             }
           }
         }
       }
 
       for (UF_long k = 0; k < n; ++k) {
-        rhs[q[k]] = work[k];
+        const double *wk = work + k * rhs_count;
+        for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+          double *rhs = x + (chunk + (int64_t)rhs_offset) * ldx;
+          rhs[q[k]] = wk[rhs_offset];
+        }
       }
     } else {
       for (UF_long k = 0; k < n; ++k) {
-        work[k] = rhs[q[k]];
+        double *wk = work + k * rhs_count;
+        for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+          const double *rhs = x + (chunk + (int64_t)rhs_offset) * ldx;
+          wk[rhs_offset] = rhs[q[k]];
+        }
       }
 
       for (UF_long block = 0; block < nblocks; ++block) {
@@ -12970,21 +13000,27 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
           for (UF_long k = k1; k < k2; ++k) {
             const UF_long begin = offp[k];
             const UF_long end = offp[k + 1u];
-            double value = work[k];
+            double *wk = work + k * rhs_count;
             for (UF_long p = begin; p < end; ++p) {
               const UF_long row = offi[p];
               if (row < 0 || row >= k1) {
                 return 0;
               }
-              value -= offx[p] * work[row];
+              const double *wrow = work + row * rhs_count;
+              const double value = offx[p];
+              for (UF_long rhs_offset = 0; rhs_offset < rhs_count;
+                   ++rhs_offset) {
+                wk[rhs_offset] -= value * wrow[rhs_offset];
+              }
             }
-            work[k] = value;
           }
         }
 
         for (UF_long row = k1; row < k2; ++row) {
-          const double value = work[row] / udiag[row];
-          work[row] = value;
+          double *wrow = work + row * rhs_count;
+          for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+            wrow[rhs_offset] /= udiag[row];
+          }
           const UF_long begin = solver->row_refactor_u_ptr[row];
           const UF_long end = solver->row_refactor_u_ptr[row + 1u];
           for (UF_long p = begin; p < end; ++p) {
@@ -12992,13 +13028,18 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
             if (col <= row || col >= k2) {
               return 0;
             }
-            work[col] -= solver->row_refactor_u_row_values[p] * value;
+            const double uij = solver->row_refactor_u_row_values[p];
+            double *wcol = work + col * rhs_count;
+            for (UF_long rhs_offset = 0; rhs_offset < rhs_count;
+                 ++rhs_offset) {
+              wcol[rhs_offset] -= uij * wrow[rhs_offset];
+            }
           }
         }
 
         for (UF_long remaining = k2; remaining > k1; --remaining) {
           const UF_long row = remaining - 1u;
-          const double value = work[row];
+          const double *wrow = work + row * rhs_count;
           const UF_long begin = solver->row_refactor_l_ptr[row];
           const UF_long end = solver->row_refactor_l_ptr[row + 1u];
           for (UF_long p = begin; p < end; ++p) {
@@ -13006,14 +13047,23 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
             if (col < k1 || col >= row) {
               return 0;
             }
-            work[col] -= solver->row_refactor_l_row_values[p] * value;
+            const double lij = solver->row_refactor_l_row_values[p];
+            double *wcol = work + col * rhs_count;
+            for (UF_long rhs_offset = 0; rhs_offset < rhs_count;
+                 ++rhs_offset) {
+              wcol[rhs_offset] -= lij * wrow[rhs_offset];
+            }
           }
         }
       }
 
       for (UF_long k = 0; k < n; ++k) {
-        const double result = work[k];
-        rhs[pnum[k]] = rs != NULL ? result / rs[k] : result;
+        const double *wk = work + k * rhs_count;
+        for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+          double *rhs = x + (chunk + (int64_t)rhs_offset) * ldx;
+          const double result = wk[rhs_offset];
+          rhs[pnum[k]] = rs != NULL ? result / rs[k] : result;
+        }
       }
     }
   }
