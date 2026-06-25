@@ -3451,3 +3451,20 @@ segment with deferred scatter. This is still only an incremental move toward
 the paper target: KLS remains tied to KLU-compatible value storage for these
 rows, so the larger missing item is still persistent compact row/segment
 numeric storage and batched trailing updates.
+
+The next CKTSO/SubtreeLU-aligned row-engine step made the compact scratch-panel
+path active for unchecked dense row groups when the estimated internal dense and
+shared trailing update work crosses a structural gate. The dense-group
+dispatcher now tries the compact row-major panel before the native direct
+row-mirror kernel for those unchecked groups, falls back to native if the
+scratch panel cannot be allocated, and reports
+`row_refactor_last_compact_dense_panel` plus
+`row_refactor_compact_dense_panel_count`. A generated 48-by-48 dense
+unchecked smoke case asserts that the compact-panel path is selected and keeps a
+small residual. A checked pivot-reject trial was deliberately not retained:
+compact-panel execution did not yet preserve the checked prefix-repair
+semantics, so checked row refactors stay on the native direct row-mirror path.
+This keeps the implementation aligned with the paper diagnosis without
+introducing a CPU-specific or matrix-specific tuning rule: the large remaining
+item is still correct compact row-major numeric state with pivot-aware tail
+semantics.

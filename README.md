@@ -400,9 +400,15 @@ so single-row, generic multi-row, and dense multi-row groups dispatch without
 rediscovering that shape during each numeric pass. Multi-row groups also retain
 the shared trailing `U` slice offset used by the dense row-segment kernels, so
 the executor consumes the compact row-segment descriptor instead of
-re-deriving that slice from adjacent rows. For generic-only row
-patterns, pipeline groups also retain their external dependency rows so the
-scheduler can wait on them once before running the group kernel; stats report
+re-deriving that slice from adjacent rows. Unchecked dense multi-row groups
+whose internal dense and shared-trailing update work is large enough first use a
+worker-local compact row-major panel before falling back to the direct
+row-mirror kernel; stats report `row_refactor_last_compact_dense_panel` and
+`row_refactor_compact_dense_panel_count`. Checked pivot-probe row refactors
+intentionally stay on the native direct row-mirror path until compact-panel
+prefix-reject semantics are proven. For generic-only row patterns, pipeline
+groups also retain their external dependency rows so the scheduler can wait on
+them once before running the group kernel; stats report
 `row_refactor_group_cluster_levels`, `row_refactor_group_pipeline_groups`,
 `row_refactor_group_pipeline_rows`, and
 `row_refactor_group_pipeline_work`. The same row-group metadata now also retains
@@ -942,8 +948,9 @@ dominant-BTF subset, plus a KLS-owned block-local pivot restart for fast-factor
 failures including root-of-block rejects. Benchmark stats also report
 row-major U-pattern supernode candidates and detailed rejected-row/multiplier
 coordinates from KLS-owned pivot checks, plus row-refactor cluster/pipeline
-counters and last-run markers, so the remaining SubtreeLU/CKTSO row-segment
-work can be evaluated on the same slow-case artifacts.
+counters, compact dense-panel markers, and last-run markers, so the remaining
+SubtreeLU/CKTSO row-segment work can be evaluated on the same slow-case
+artifacts.
 On the refreshed selected-large reconstruction, KLS is ahead of the saved KLU2
 artifact but still trails the saved CKTSO artifact, with `pre2` still timing out.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.

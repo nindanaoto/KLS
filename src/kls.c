@@ -32,6 +32,7 @@
 
 #define KLS_KLU_EMPTY ((UF_long)-1)
 #define KLS_ROW_REFACTOR_DENSE_MIN_WORK 1024.0
+#define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 4096.0
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
 #define KLS_ROW_SOLVE_TRAPEZOID_SLICES 8u
@@ -138,6 +139,7 @@ struct kls_solver {
   int row_refactor_last_ready_queue;
   int row_refactor_last_done_bitmap;
   int row_refactor_last_work_ready_queue;
+  int row_refactor_last_compact_dense_panel;
   UF_long row_refactor_last_local_ready_groups;
   UF_long row_refactor_run_count;
   UF_long row_refactor_checked_run_count;
@@ -199,6 +201,7 @@ struct kls_solver {
   UF_long *row_solve_u_sparse_level_ptr;
   UF_long *row_solve_u_sparse_level_rows;
   UF_long row_refactor_work_ready_queue_run_count;
+  UF_long row_refactor_compact_dense_panel_count;
   UF_long row_refactor_local_ready_group_count;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_segment_rows;
@@ -830,6 +833,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_last_ready_queue = 0;
   solver->row_refactor_last_done_bitmap = 0;
   solver->row_refactor_last_work_ready_queue = 0;
+  solver->row_refactor_last_compact_dense_panel = 0;
   solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_run_count = 0;
   solver->row_refactor_checked_run_count = 0;
@@ -855,6 +859,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_solve_parallel_l_sparse_level_runs = 0;
   solver->row_solve_parallel_u_sparse_level_runs = 0;
   solver->row_refactor_work_ready_queue_run_count = 0;
+  solver->row_refactor_compact_dense_panel_count = 0;
   solver->row_refactor_local_ready_group_count = 0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_segment_rows = 0;
@@ -888,6 +893,7 @@ typedef struct {
   int last_ready_queue;
   int last_done_bitmap;
   int last_work_ready_queue;
+  int last_compact_dense_panel;
   UF_long last_local_ready_groups;
   UF_long run_count;
   UF_long checked_run_count;
@@ -910,6 +916,7 @@ typedef struct {
   UF_long solve_parallel_l_sparse_level_runs;
   UF_long solve_parallel_u_sparse_level_runs;
   UF_long work_ready_queue_run_count;
+  UF_long compact_dense_panel_count;
   UF_long local_ready_group_count;
   UF_long segment_count;
   UF_long segment_rows;
@@ -946,6 +953,8 @@ static void kls_save_row_refactor_diagnostics(
   diag->last_ready_queue = solver->row_refactor_last_ready_queue;
   diag->last_done_bitmap = solver->row_refactor_last_done_bitmap;
   diag->last_work_ready_queue = solver->row_refactor_last_work_ready_queue;
+  diag->last_compact_dense_panel =
+    solver->row_refactor_last_compact_dense_panel;
   diag->last_local_ready_groups = solver->row_refactor_last_local_ready_groups;
   diag->run_count = solver->row_refactor_run_count;
   diag->checked_run_count = solver->row_refactor_checked_run_count;
@@ -977,6 +986,8 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_solve_parallel_u_sparse_level_runs;
   diag->work_ready_queue_run_count =
     solver->row_refactor_work_ready_queue_run_count;
+  diag->compact_dense_panel_count =
+    solver->row_refactor_compact_dense_panel_count;
   diag->local_ready_group_count =
     solver->row_refactor_local_ready_group_count;
   diag->segment_count = solver->row_refactor_segment_count;
@@ -1018,6 +1029,8 @@ static void kls_restore_row_refactor_diagnostics(
   solver->row_refactor_last_ready_queue = diag->last_ready_queue;
   solver->row_refactor_last_done_bitmap = diag->last_done_bitmap;
   solver->row_refactor_last_work_ready_queue = diag->last_work_ready_queue;
+  solver->row_refactor_last_compact_dense_panel =
+    diag->last_compact_dense_panel;
   solver->row_refactor_last_local_ready_groups =
     diag->last_local_ready_groups;
   solver->row_refactor_run_count = diag->run_count;
@@ -1054,6 +1067,8 @@ static void kls_restore_row_refactor_diagnostics(
     diag->solve_parallel_u_sparse_level_runs;
   solver->row_refactor_work_ready_queue_run_count =
     diag->work_ready_queue_run_count;
+  solver->row_refactor_compact_dense_panel_count =
+    diag->compact_dense_panel_count;
   solver->row_refactor_local_ready_group_count =
     diag->local_ready_group_count;
   solver->row_refactor_segment_count = diag->segment_count;
@@ -1340,6 +1355,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_done_bitmap = 0;
   solver->row_refactor_last_work_ready_queue = 0;
   solver->row_refactor_last_local_ready_groups = 0;
+  solver->row_refactor_last_compact_dense_panel = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_last_lazy_value_scatter = 0;
   solver->row_refactor_last_row_solve = 0;
@@ -1350,6 +1366,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_done_bitmap = 0;
   solver->stats.row_refactor_last_work_ready_queue = 0;
   solver->stats.row_refactor_last_local_ready_groups = 0;
+  solver->stats.row_refactor_last_compact_dense_panel = 0;
   solver->stats.row_refactor_last_defer_value_scatter = 0;
   solver->stats.row_refactor_last_lazy_value_scatter = 0;
   solver->stats.row_refactor_last_row_solve = 0;
@@ -1367,6 +1384,7 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_ready_queue = 0;
   solver->row_refactor_last_done_bitmap = 0;
   solver->row_refactor_last_work_ready_queue = 0;
+  solver->row_refactor_last_compact_dense_panel = 0;
   solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_run_count++;
@@ -1402,6 +1420,14 @@ static void kls_record_row_refactor_work_ready_queue_run(kls_solver *solver) {
   }
   solver->row_refactor_last_work_ready_queue = 1;
   solver->row_refactor_work_ready_queue_run_count++;
+}
+
+static void kls_record_row_refactor_compact_dense_panel(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_last_compact_dense_panel = 1;
+  solver->row_refactor_compact_dense_panel_count++;
 }
 
 static void kls_record_row_refactor_local_ready_groups(kls_solver *solver,
@@ -8284,6 +8310,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_last_work_ready_queue;
   solver->stats.row_refactor_work_ready_queue_run_count =
     (int64_t)solver->row_refactor_work_ready_queue_run_count;
+  solver->stats.row_refactor_last_compact_dense_panel =
+    solver->row_refactor_last_compact_dense_panel;
+  solver->stats.row_refactor_compact_dense_panel_count =
+    (int64_t)solver->row_refactor_compact_dense_panel_count;
   solver->stats.row_refactor_ready_queue_workspace_groups =
     (int64_t)solver->row_refactor_ready_queue_capacity;
   solver->stats.row_refactor_last_local_ready_groups =
@@ -16621,7 +16651,20 @@ static int kls_parallel_row_refactor_process_dense_group_native(
   return 1;
 }
 
-static int kls_parallel_row_refactor_process_dense_group(
+static double kls_row_refactor_dense_group_update_work(UF_long width,
+                                                       UF_long trailing_len) {
+  const double w = (double)width;
+  const double trailing = (double)trailing_len;
+  return (w * w * w / 3.0) + (0.5 * w * w * trailing);
+}
+
+static int kls_row_refactor_prefers_compact_dense_panel(UF_long width,
+                                                        UF_long trailing_len) {
+  return kls_row_refactor_dense_group_update_work(width, trailing_len) >=
+         KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK;
+}
+
+static int kls_parallel_row_refactor_process_dense_group_compact(
   kls_egraph_refactor_worker *worker,
   UF_long group,
   UF_long row_begin,
@@ -16637,14 +16680,6 @@ static int kls_parallel_row_refactor_process_dense_group(
       !solver->row_refactor_group_dense[group] ||
       solver->row_refactor_group_trailing_len[group] != trailing_len) {
     return -1;
-  }
-
-  const int native_status =
-    kls_parallel_row_refactor_process_dense_group_native(
-      worker, group, row_begin, row_end, trailing_len, trailing_cols,
-      wait_for_dependencies);
-  if (native_status >= 0) {
-    return native_status;
   }
 
   trilinos_klu_l_numeric *numeric = solver->numeric;
@@ -16671,6 +16706,7 @@ static int kls_parallel_row_refactor_process_dense_group(
   if (dense_panel == NULL) {
     return -1;
   }
+  kls_record_row_refactor_compact_dense_panel(solver);
   double *trailing_panel = NULL;
   if (trailing_len > 0u) {
     trailing_panel = dense_panel + dense_panel_entries;
@@ -16852,6 +16888,46 @@ static int kls_parallel_row_refactor_process_dense_group(
     }
   }
   return 1;
+}
+
+static int kls_parallel_row_refactor_process_dense_group(
+  kls_egraph_refactor_worker *worker,
+  UF_long group,
+  UF_long row_begin,
+  UF_long row_end,
+  UF_long trailing_len,
+  const UF_long *trailing_cols,
+  int wait_for_dependencies) {
+  const UF_long width = row_end - row_begin;
+  const int prefer_compact =
+    worker != NULL && worker->shared != NULL &&
+    !worker->shared->check_pivots &&
+    kls_row_refactor_prefers_compact_dense_panel(width, trailing_len);
+
+  if (prefer_compact) {
+    const int compact_status =
+      kls_parallel_row_refactor_process_dense_group_compact(
+        worker, group, row_begin, row_end, trailing_len, trailing_cols,
+        wait_for_dependencies);
+    if (compact_status >= 0) {
+      return compact_status;
+    }
+  }
+
+  const int native_status =
+    kls_parallel_row_refactor_process_dense_group_native(
+      worker, group, row_begin, row_end, trailing_len, trailing_cols,
+      wait_for_dependencies);
+  if (native_status >= 0) {
+    return native_status;
+  }
+
+  if (!prefer_compact) {
+    return kls_parallel_row_refactor_process_dense_group_compact(
+      worker, group, row_begin, row_end, trailing_len, trailing_cols,
+      wait_for_dependencies);
+  }
+  return -1;
 }
 
 static kls_row_refactor_group_kind kls_row_refactor_group_kind_for(

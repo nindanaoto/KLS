@@ -270,6 +270,8 @@ typedef struct kls_stats {
   int64_t fast_rejected_pivoting_tail_gap_columns;
   int64_t fast_rejected_pivoting_tail_suffix_overcompute_columns;
   double fast_rejected_pivoting_tail_suffix_overcompute_work;
+  int row_refactor_last_compact_dense_panel;
+  int64_t row_refactor_compact_dense_panel_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

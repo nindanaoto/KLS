@@ -2095,6 +2095,161 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
   return ok;
 }
 
+static int test_unchecked_row_dense_compact_panel(void) {
+  const int32_t n = 48;
+  const size_t nnz = (size_t)n * (size_t)n;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
+  double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
+  double *ax1 = (double *)malloc(nnz * sizeof(*ax1));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
+      b == NULL || x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  for (int32_t col = 0; col <= n; ++col) {
+    ap[col] = col * n;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    expected[col] = 0.75 + 0.03125 * (double)((5 * col) % 17);
+    for (int32_t row = 0; row < n; ++row) {
+      const size_t p = (size_t)col * (size_t)n + (size_t)row;
+      ai[p] = row;
+      ax0[p] = row == col
+        ? 12.0 + 0.02 * (double)col
+        : 0.0005 * (1.0 + (double)((row + 7 * col) % 11));
+      ax1[p] = ax0[p] + (row == col
+        ? 0.05 * (double)((col % 3) + 1)
+        : 1.0e-5 * (double)(((row + col) % 5) - 2));
+    }
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.01;
+  options.static_pivoting = 0;
+
+  const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze unchecked dense compact panel")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor unchecked dense compact panel")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "refactor unchecked dense compact panel")) ok = 0;
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve unchecked dense compact panel")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats unchecked dense compact panel")) {
+    ok = 0;
+  }
+  if (ok && (stats.row_refactor_last_run != 1 ||
+             stats.row_refactor_last_checked != 0 ||
+             stats.row_refactor_last_parallel != 0 ||
+             stats.row_refactor_dense_segment_count < 1 ||
+             stats.row_refactor_last_compact_dense_panel != 1 ||
+             stats.row_refactor_compact_dense_panel_count < 1)) {
+    fprintf(stderr,
+            "unexpected unchecked dense compact-panel stats: row=%d/%d/%d"
+            ", dense_segments=%" PRId64 ", compact=%d/%" PRId64 "\n",
+            stats.row_refactor_last_run,
+            stats.row_refactor_last_checked,
+            stats.row_refactor_last_parallel,
+            stats.row_refactor_dense_segment_count,
+            stats.row_refactor_last_compact_dense_panel,
+            stats.row_refactor_compact_dense_panel_count);
+    ok = 0;
+  }
+  double max_solution_error = 0.0;
+  for (int32_t i = 0; i < n; ++i) {
+    const double err = fabs(x[i] - expected[i]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+  }
+  double max_residual = 0.0;
+  double max_rhs = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    double residual = -b[row];
+    for (int32_t col = 0; col < n; ++col) {
+      residual += ax1[(size_t)col * (size_t)n + (size_t)row] * x[col];
+    }
+    if (fabs(residual) > max_residual) {
+      max_residual = fabs(residual);
+    }
+    if (fabs(b[row]) > max_rhs) {
+      max_rhs = fabs(b[row]);
+    }
+  }
+  const double rel_resid = max_residual / (1.0 + max_rhs);
+  if (ok && (max_solution_error > 1e-8 || rel_resid > 1e-9)) {
+    fprintf(stderr,
+            "unexpected unchecked dense compact-panel accuracy: "
+            "max_x_err=%.17g, rel_resid=%.17g\n",
+            max_solution_error, rel_resid);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(x);
+  free(expected);
+  free(saved_env);
+  return ok;
+}
+
 static int test_pre_static_pivoting(void) {
   const int32_t n = 3000;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
@@ -3786,6 +3941,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_checked_row_dense_prefix_scatter_tail_restart()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_unchecked_row_dense_compact_panel()) {
     return EXIT_FAILURE;
   }
   if (!test_pre_static_pivoting()) {
