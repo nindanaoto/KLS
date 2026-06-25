@@ -225,6 +225,7 @@ typedef struct kls_stats {
   int64_t factor_etree_root_columns;
   int64_t factor_etree_leaf_columns;
   int64_t factor_etree_max_fanout;
+  int fast_kls_block_restarts;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -729,6 +729,7 @@ int main(int argc, char **argv) {
            ",\"fast_repaired_tail_restart_overcompute_columns\":%" PRId64
            ",\"fast_repaired_tail_restart_overcompute_work\":%.9g"
            ",\"fast_block_restarts\":%d"
+           ",\"fast_kls_block_restarts\":%d"
            ",\"fast_tail_restarts\":%d"
            ",\"fast_repaired_last_offdiag_suffix_refresh\":%d"
            ",\"fast_repaired_offdiag_suffix_refresh_count\":%" PRId64
@@ -800,6 +801,7 @@ int main(int argc, char **argv) {
            stats.fast_repaired_tail_restart_overcompute_columns,
            stats.fast_repaired_tail_restart_overcompute_work,
            stats.fast_block_restarts,
+           stats.fast_kls_block_restarts,
            stats.fast_tail_restarts,
            stats.fast_repaired_last_offdiag_suffix_refresh,
            stats.fast_repaired_offdiag_suffix_refresh_count,
@@ -1062,10 +1064,12 @@ int main(int argc, char **argv) {
            stats.fast_repaired_tail_restart_saved_work,
            stats.fast_repaired_tail_restart_overcompute_columns,
            stats.fast_repaired_tail_restart_overcompute_work);
-    printf("fast block restarts: %d, tail restarts: %d"
+    printf("fast block restarts: %d, KLS block restarts: %d"
+           ", tail restarts: %d"
            ", offdiag suffix refresh last %d, suffix refreshes %" PRId64
            ", full refreshes %" PRId64 "\n",
-           stats.fast_block_restarts, stats.fast_tail_restarts,
+           stats.fast_block_restarts, stats.fast_kls_block_restarts,
+           stats.fast_tail_restarts,
            stats.fast_repaired_last_offdiag_suffix_refresh,
            stats.fast_repaired_offdiag_suffix_refresh_count,
            stats.fast_repaired_offdiag_full_refresh_count);

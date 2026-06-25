@@ -348,10 +348,10 @@ preserves a non-empty live prefix state, KLS can execute the same conservative
 serial suffix restart before falling back to full block repair. This executable tail path is
 not limited to the checked row-refactor candidate diagnostic; the diagnostic is
 retained only to explain row-major candidate quality when that metadata exists.
-Root-of-block rejects remain classified as CKTSO
-ETree/pipeline work rather than serial-tail-ready, because no contiguous prefix
-can be reused. This is a local serial subset of CKTSO-style tail restart, not
-the full pipelined ETree-descendant scheduler.
+Root-of-block rejects can now use the same KLS-owned pivoted block kernel, but
+they are counted as full KLS block restarts rather than serial-tail-ready events
+because no contiguous prefix can be reused. This is a local serial subset of
+CKTSO-style repair, not the full pipelined ETree-descendant scheduler.
 With `KLS_ENABLE_CHECKED_ROW_REFACTOR=1`, the experimental KLS-owned
 row/segment refactor can also run the checked fast-factor pass through its
 parallel row scheduler when multiple threads are available. A rejected
@@ -476,7 +476,8 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivoting_tail_contains_reject`,
 `fast_rejected_pivoting_tail_topological`,
 `fast_rejected_pivoting_tail_seed_columns`,
-`fast_rejected_refresh_state`, `fast_block_restarts`, `fast_tail_restarts`,
+`fast_rejected_refresh_state`, `fast_block_restarts`,
+`fast_kls_block_restarts`, `fast_tail_restarts`,
 `fast_repaired_last_offdiag_suffix_refresh`,
 `fast_repaired_offdiag_suffix_refresh_count`, and
 `fast_repaired_offdiag_full_refresh_count` for the first rejected
@@ -508,9 +509,10 @@ scope seeded from the current refresh state, the first and last rows in that
 worklist, whether it includes the rejected pivot, whether the retained order
 is topologically safe for a future tail kernel to consume, whether the
 failed pass left an unknown, prefix-current, or all-current numeric state, the
-number of repaired BTF blocks, and the number of serial tail restarts actually
-executed, plus whether repaired serial-tail restarts refreshed only the
-off-diagonal suffix or rebuilt all off-diagonal entries. These fields are
+number of repaired BTF blocks, how many repairs used the KLS-owned pivoted block
+kernel, and the number of serial tail restarts actually executed, plus whether
+repaired serial-tail restarts refreshed only the off-diagonal suffix or rebuilt
+all off-diagonal entries. These fields are
 intended to guide fuller CKTSO-style tail-restart work without accepting an
 unsafe reused pivot order.
 
@@ -856,8 +858,8 @@ parallelism on a narrow class of large cases. KLS also has a precomputed
 single-block and serial BTF refactor scatter path for unscaled repeated
 refactors, experimental row-major row refactors for single-block factors and
 BTF diagonal blocks, KLU row-scaled row refactors, and a narrow scaled
-dominant-BTF subset, plus an unscaled block-local pivot restart for fast-factor
-failures. Benchmark stats also report
+dominant-BTF subset, plus a KLS-owned block-local pivot restart for fast-factor
+failures including root-of-block rejects. Benchmark stats also report
 row-major U-pattern supernode candidates and detailed rejected-row/multiplier
 coordinates from KLS-owned pivot checks, plus row-refactor cluster/pipeline
 counters and last-run markers, so the remaining SubtreeLU/CKTSO row-segment

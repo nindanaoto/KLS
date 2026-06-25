@@ -202,6 +202,7 @@ struct kls_solver {
   int exact_matching_selected;
   int spral_matching_selected;
   int fast_block_restarts;
+  int fast_kls_block_restarts;
   int fast_tail_restarts;
   int fast_repaired_last_offdiag_suffix_refresh;
   UF_long fast_repaired_offdiag_suffix_refresh_count;
@@ -916,6 +917,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_tail_restart_overcompute_columns = 0;
   solver->stats.fast_repaired_tail_restart_overcompute_work = 0.0;
   solver->stats.fast_block_restarts = 0;
+  solver->stats.fast_kls_block_restarts = 0;
   solver->stats.fast_tail_restarts = 0;
   solver->stats.fast_repaired_last_offdiag_suffix_refresh = 0;
   solver->stats.fast_repaired_offdiag_suffix_refresh_count = 0;
@@ -942,6 +944,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_refresh_state =
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_block_restarts = 0;
+  solver->fast_kls_block_restarts = 0;
   solver->fast_tail_restarts = 0;
   solver->fast_repaired_last_offdiag_suffix_refresh = 0;
   solver->fast_repaired_offdiag_suffix_refresh_count = 0;
@@ -1885,6 +1888,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->exact_matching_selected = 0;
   solver->spral_matching_selected = 0;
   solver->fast_block_restarts = 0;
+  solver->fast_kls_block_restarts = 0;
   solver->fast_tail_restarts = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
@@ -7686,6 +7690,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
   solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
+  solver->stats.fast_kls_block_restarts = solver->fast_kls_block_restarts;
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   solver->stats.fast_repaired_last_offdiag_suffix_refresh =
     solver->fast_repaired_last_offdiag_suffix_refresh;
@@ -7718,6 +7723,7 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
   solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
+  solver->stats.fast_kls_block_restarts = solver->fast_kls_block_restarts;
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   solver->stats.fast_repaired_last_offdiag_suffix_refresh =
     solver->fast_repaired_last_offdiag_suffix_refresh;
@@ -10663,7 +10669,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
       new_size_out == NULL || lnz_block_out == NULL ||
       unz_block_out == NULL || pblock == NULL ||
       !reusable_prefix_state ||
-      local_reject == 0u || local_reject >= nk ||
+      local_reject >= nk ||
       block >= solver->numeric->nblocks ||
       solver->numeric->LUbx == NULL ||
       solver->numeric->LUbx[block] == NULL ||
@@ -11119,11 +11125,13 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   solver->common.singular_col = KLS_KLU_EMPTY;
 
   size_t new_size = 0u;
-  int tail_restart_used =
+  int kls_block_restart_used =
     kls_try_pivot_tail_restart_rejected_block(
       solver, numeric_values, block, k1, nk, local_reject, old_pblock,
       psinv, &new_lu, &new_size, &lnz_block, &unz_block, pblock);
-  if (!tail_restart_used) {
+  const int tail_restart_used =
+    kls_block_restart_used && local_reject > 0u;
+  if (!kls_block_restart_used) {
     solver->common.status = TRILINOS_KLU_OK;
     solver->common.numerical_rank = KLS_KLU_EMPTY;
     solver->common.singular_col = KLS_KLU_EMPTY;
@@ -11261,10 +11269,14 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   }
   solver->common.noffdiag = offdiag;
   solver->fast_block_restarts++;
+  if (kls_block_restart_used) {
+    solver->fast_kls_block_restarts++;
+  }
   if (tail_restart_used) {
     solver->fast_tail_restarts++;
   }
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
+  solver->stats.fast_kls_block_restarts = solver->fast_kls_block_restarts;
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   solver->stats.fast_repaired_last_offdiag_suffix_refresh =
     solver->fast_repaired_last_offdiag_suffix_refresh;

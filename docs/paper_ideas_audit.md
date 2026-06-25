@@ -152,10 +152,10 @@ block repair. Accepted serial suffix restarts now refresh only the off-diagonal
 column suffix whose inverse row permutation may have changed, including the
 scaled all-current subset where KLS first recomputes the row-scale vector back
 to input-row order before the final pivot-order permutation.
-Root-of-block rejects are deliberately not reported as serial-tail-ready,
-because they need CKTSO's fuller row/ETree machinery rather than a contiguous
-prefix-preserving tail. This is still not CKTSO's full pipelined
-ETree-descendant tail factorization.
+Root-of-block rejects can now use the same KLS-owned pivoted block kernel, but
+they are deliberately counted as full KLS block restarts rather than
+serial-tail-ready events because no contiguous prefix can be reused. This is
+still not CKTSO's full pipelined ETree-descendant tail factorization.
 SPRAL static-pivot matches that are already close to complete can now be
 finished with KLS's existing nonzero structural augmenting-path graph before
 the row permutation is accepted. The SPRAL scaling vectors are retained only
@@ -230,8 +230,8 @@ new KLS-owned symbolic/numeric machinery:
   EGraph/ETree or separator-tree metadata with pivoting tail restart, beyond
   the current guarded no-pivot EGraph cluster/pipeline refactor.
 - Full CKTSO-style fast factorization tail restart after a failed pivot check,
-  beyond the current block-local repair and serial prefix-current/all-current
-  tail subset.
+  beyond the current KLS-owned block-local restart and serial
+  prefix-current/all-current tail subset.
 - SubtreeLU-style private/pipeline scheduling from a retained separator tree.
 - A structure-adaptive triangular solve built on LU storage that exposes cheap
   row/segment access.
@@ -246,7 +246,7 @@ project does not drift toward benchmark-name-specific heuristics.
 | --- | --- | --- |
 | Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection, serial refactor scatter metadata, and exact EGraph level metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
 | NICSLU | AMD-style ordering, optional static-pivoting preprocessing, optional SPRAL Hungarian/scaling trials, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. KLS now records exact no-pivot EGraph levels from the numeric U pattern and uses them in guarded large single-block, dominant-BTF-block, and fragmented non-dominant many-block refactor paths, including KLU row-scaled cases where scale handling is supported and work-estimated cluster-level thread slices. | Full production MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and full pivoting-aware ETree scheduling are not implemented. Earlier broader EGraph prototypes were rejected because they were not general wins on the current kernel/storage. |
-| CKTSO | METIS nested-dissection ordering, guarded SCOTCH nested-dissection auto trials for large high-work symbolic candidates, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, CKTSO-style row-wise guessed-diagonal checks in KLS-owned checked row fast/refactor passes, unscaled block-local restart after a failed fast-factor pivot check, conservative serial prefix-current/all-current tail restart for validated non-root unscaled repaired blocks, scaled block-local restart plus scaled checked continuation over later BTF blocks, scaled prefix-current/all-current block repair, scaled in-block serial tail restart after recomputing row scales to input-row order, threaded BTF worker-pool completed-block tracking for safe prefix-current rejects, guarded EGraph cluster/pipeline no-pivot refactors for single, dominant BTF, and selected fragmented many-block BTF shapes, work-balanced cluster-level refactor slices, cached row-permutation solve scratch, and dual-potential plus optional SPRAL matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only partially approximated because KLS does not have an always-on production MC64-equivalent weighted assignment stage. Full pipelined ETree-descendant tail restart with pivoting after a failed pivot check and structure-adaptive triangular solve are not implemented. Otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
+| CKTSO | METIS nested-dissection ordering, guarded SCOTCH nested-dissection auto trials for large high-work symbolic candidates, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, CKTSO-style row-wise guessed-diagonal checks in KLS-owned checked row fast/refactor passes, KLS-owned block-local restart after a failed fast-factor pivot check including root-of-block rejects, conservative serial prefix-current/all-current tail restart for validated non-root unscaled repaired blocks, scaled block-local restart plus scaled checked continuation over later BTF blocks, scaled prefix-current/all-current block repair, scaled in-block serial tail restart after recomputing row scales to input-row order, threaded BTF worker-pool completed-block tracking for safe prefix-current rejects, guarded EGraph cluster/pipeline no-pivot refactors for single, dominant BTF, and selected fragmented many-block BTF shapes, work-balanced cluster-level refactor slices, cached row-permutation solve scratch, and dual-potential plus optional SPRAL matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only partially approximated because KLS does not have an always-on production MC64-equivalent weighted assignment stage. Full pipelined ETree-descendant tail restart with pivoting after a failed pivot check and structure-adaptive triangular solve are not implemented. Otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
 | SubtreeLU | KLS vendors reproducible METIS/GKlib and SCOTCH submodules, uses METIS plus CAMD refinement, and can keep SCOTCH from `auto` when its symbolic score is materially better on large high-work cases. This overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. KLS now records row-major U-pattern supernode candidate diagnostics from the exact no-pivot refactor dependency pass. | KLS does not retain a separator tree, collapse/partition it into private and pipeline task queues, constrain pivot search within separator-tree subdomains, perform full separator-tree FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
 
 This means KLS has implemented or prototyped the ideas that can be layered
@@ -448,12 +448,12 @@ design work, not benchmark-specific tuning.
   row-scaled factors whose scale vector is recomputed before the EGraph refactor
   and permuted afterward. KLS still does not have the ETree descendant scheduler
   used by CKTSO-style pivoting tail restart.
-- CKTSO fast factorization is present as pivot-checked reuse plus an unscaled
+- CKTSO fast factorization is present as pivot-checked reuse plus a KLS-owned
   BTF-block repair path. KLS validates the preserved-prefix live state and can
   enter a conservative serial pivoting-tail kernel for non-root rejects in that
-  subset, but does not yet implement CKTSO's pipelined tail factorization that
-  restarts from the ETree descendants after a failed pivot check, and scaled
-  fast-factor failures still use full fallback.
+  subset; root rejects can use the same KLS-owned pivoted kernel as full block
+  restarts. KLS still does not implement CKTSO's pipelined tail factorization
+  that restarts from the ETree descendants after a failed pivot check.
 - SubtreeLU-style nested-dissection metadata is only used indirectly through
   METIS orderings and CAMD refinement. KLS does not yet preserve a separator
   tree for private/pipeline task queues.
@@ -954,9 +954,8 @@ refactor. Smoke tests now cover both the unscaled repair and the scaled
 fallback path, and representative static-pivot cases (`gemat12`, `onetone2`,
 `twotone`, and `rajat25`) did not trigger unexpected block restarts. This is
 useful CKTSO-aligned infrastructure, but it is still not CKTSO's production
-tail restart: it does not retain an ETree/EGraph tail, does not restart only
-descendant work inside a large single block, and does not handle scaled
-repairs.
+tail restart: it does not retain an ETree/EGraph tail or restart only
+descendant work inside a large single block.
 
 The selected-large KLU2 comparison was also run with the same 120s cap and one
 factor/refactor repeat. KLU2 completed only `rajat29`, `rajat30`, and
@@ -2795,6 +2794,16 @@ falling back to the full rebuild if the suffix shape proof fails. The BTF
 off-block tail smoke changes suffix off-block values between the base and
 repaired matrices, so stale values in that suffix are observable in the solve.
 
+The KLS-owned pivoted block restart was then opened to root-of-block rejects.
+The serial suffix path still requires a reusable prefix and therefore does not
+count root rejects as `fast_tail_restarts`, but `local_reject == 0` can now run
+the same sparse pivoting kernel over the whole rejected block before considering
+the KLU block-kernel fallback. `fast_kls_block_restarts` records these KLS-owned
+block repairs separately from total block restarts, and the prior-pivot smoke
+case now requires a root reject to use that path. This is a direct step toward a
+KLS-owned factorization kernel, but not the CKTSO ETree-descendant pipelined
+tail executor.
+
 The row-refactor benchmark controls were then made explicit after the
 checked-row/refactor ambiguity above was found. `kls_bench` now accepts
 `--row-refactor env|off|refactor|checked|all`, `run_bench_suite.py` forwards
@@ -3071,9 +3080,9 @@ worklist explicit for multi-block checked-row failures.
    `L`/`U` access to run CKTSO-style no-pivot fast factorization with pivot
    checks, identify the ETree-descendant restart tail after a failed check, and
    later support SubtreeLU-style separator-tree private/pipeline queues. The
-   current unscaled block-local restart and large single-block no-pivot
-   cluster/pipeline refactor are useful precursors, but the target is a
-   pivoting tail restart inside large blocks.
+   current KLS-owned block-local pivot restart, suffix restart, and large
+   single-block no-pivot cluster/pipeline refactor are useful precursors, but
+   the target is a pivoting tail restart inside large blocks.
 2. Continue turning matching/scaling into a production MC64-equivalent stage,
    but keep it inside the LGPL-compatible boundary: use the BSD-licensed SPRAL
    scaling submodule, system SPRAL, or independent KLS code, not HSL MC64 or

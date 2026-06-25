@@ -1812,11 +1812,15 @@ static int test_fast_factor_restart_after_prior_pivot(void) {
                         "stats prior-pivot restart")) {
     ok = 0;
   }
-  if (ok && stats.fast_block_restarts != 1) {
+  if (ok && (stats.fast_block_restarts != 1 ||
+             stats.fast_kls_block_restarts != 1 ||
+             stats.fast_tail_restarts != 0)) {
     fprintf(stderr,
-            "prior-pivot restart count was %d, rejected=%" PRId64
+            "prior-pivot restart counts were block=%d, kls_block=%d"
+            ", tail=%d, rejected=%" PRId64
             ", col=%" PRId64 ", offdiag=%" PRId64 "\n",
-            stats.fast_block_restarts, stats.fast_rejected_pivot,
+            stats.fast_block_restarts, stats.fast_kls_block_restarts,
+            stats.fast_tail_restarts, stats.fast_rejected_pivot,
             stats.fast_rejected_pivot_col, stats.offdiag_pivots);
     ok = 0;
   }
