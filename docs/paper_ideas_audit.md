@@ -3151,6 +3151,14 @@ test forces ordinary `klu_first` factorization while verifying both forward and
 transpose solves use the KLS row-solve path. This keeps CKTSO's row-oriented
 solve idea measurable without implying that KLS is delegating to another solver
 as a backend.
+The row-solve path then gained a single-RHS scalar loop and cached solve
+metadata validation. This matches the row-by-row triangular solve form in
+CKTSO's Algorithm 2 for the common SPICE one-right-hand-side case, while
+preserving the existing four-RHS batched path for wider solves. On the local
+five-matrix smoke suite with `--row-solve on`, the geomean moved from about
+`0.0161s` before the scalar path to about `0.0123s` after scalar solve plus
+validation caching; the `--row-solve off` reference remained about `0.00946s`,
+so row solve remains experiment-gated rather than default.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF

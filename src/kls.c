@@ -144,6 +144,7 @@ struct kls_solver {
   int row_refactor_auto_enabled;
   int row_refactor_values_ready;
   int row_refactor_values_dirty;
+  int row_refactor_solve_validated;
   int row_refactor_last_lazy_value_scatter;
   UF_long row_refactor_lazy_value_scatter_run_count;
   int row_refactor_last_row_solve;
@@ -721,6 +722,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_defer_value_scatter_run_count = 0;
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_values_dirty = 0;
+  solver->row_refactor_solve_validated = 0;
   solver->row_refactor_last_lazy_value_scatter = 0;
   solver->row_refactor_lazy_value_scatter_run_count = 0;
   solver->row_refactor_last_row_solve = 0;
@@ -1082,6 +1084,7 @@ static void kls_record_row_refactor_lazy_value_scatter_run(
   }
   solver->row_refactor_values_dirty = 1;
   solver->row_refactor_values_ready = 1;
+  solver->row_refactor_solve_validated = 0;
   solver->row_refactor_last_lazy_value_scatter = 1;
   solver->row_refactor_lazy_value_scatter_run_count++;
   solver->stats.row_refactor_values_dirty = 1;
@@ -13411,6 +13414,7 @@ static int kls_seed_row_refactor_values_from_numeric(kls_solver *solver) {
   }
 
   solver->row_refactor_values_ready = 1;
+  solver->row_refactor_solve_validated = 0;
   return 1;
 }
 
@@ -13488,15 +13492,13 @@ static int kls_row_refactor_solve_is_eligible(const kls_solver *solver) {
   return 1;
 }
 
-static int kls_try_row_refactor_solve(kls_solver *solver,
-                                      int kernel_transpose,
-                                      int64_t nrhs,
-                                      double *x,
-                                      int64_t ldx) {
-  if (!kls_row_refactor_solve_is_eligible(solver)) {
+static int kls_validate_row_refactor_solve_metadata(kls_solver *solver) {
+  if (solver == NULL) {
     return 0;
   }
-
+  if (solver->row_refactor_solve_validated) {
+    return 1;
+  }
   const UF_long n = solver->n;
   const UF_long nblocks = solver->symbolic->nblocks;
   const UF_long *r = solver->symbolic->R;
@@ -13505,9 +13507,6 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
   const double *udiag = (const double *)solver->numeric->Udiag;
   const double *rs = solver->numeric->Rs;
   const UF_long *offp = solver->numeric->Offp;
-  const UF_long *offi = solver->numeric->Offi;
-  const double *offx = (const double *)solver->numeric->Offx;
-  double *work = (double *)solver->numeric->Xwork;
 
   for (UF_long k = 0; k < n; ++k) {
     if (pnum[k] < 0 || pnum[k] >= n || q[k] < 0 || q[k] >= n) {
@@ -13529,8 +13528,168 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
       return 0;
     }
   }
+  solver->row_refactor_solve_validated = 1;
+  return 1;
+}
+
+static int kls_try_row_refactor_solve_one_rhs(kls_solver *solver,
+                                              int kernel_transpose,
+                                              double *x) {
+  const UF_long n = solver->n;
+  const UF_long nblocks = solver->symbolic->nblocks;
+  const UF_long *r = solver->symbolic->R;
+  const UF_long *pnum = solver->numeric->Pnum;
+  const UF_long *q = solver->symbolic->Q;
+  const double *udiag = (const double *)solver->numeric->Udiag;
+  const double *rs = solver->numeric->Rs;
+  const UF_long *offp = solver->numeric->Offp;
+  const UF_long *offi = solver->numeric->Offi;
+  const double *offx = (const double *)solver->numeric->Offx;
+  double *work = (double *)solver->numeric->Xwork;
+
+  if (!kernel_transpose) {
+    for (UF_long k = 0; k < n; ++k) {
+      const double rhs_value = x[pnum[k]];
+      work[k] = rs != NULL ? rhs_value / rs[k] : rhs_value;
+    }
+
+    for (UF_long remaining_block = nblocks; remaining_block > 0u;
+         --remaining_block) {
+      const UF_long block = remaining_block - 1u;
+      const UF_long k1 = r[block];
+      const UF_long k2 = r[block + 1u];
+      for (UF_long row = k1; row < k2; ++row) {
+        double value = work[row];
+        const UF_long begin = solver->row_refactor_l_ptr[row];
+        const UF_long end = solver->row_refactor_l_ptr[row + 1u];
+        for (UF_long p = begin; p < end; ++p) {
+          value -= solver->row_refactor_l_row_values[p] *
+                   work[solver->row_refactor_l_cols[p]];
+        }
+        work[row] = value;
+      }
+
+      for (UF_long remaining = k2; remaining > k1; --remaining) {
+        const UF_long row = remaining - 1u;
+        double value = work[row];
+        const UF_long begin = solver->row_refactor_u_ptr[row];
+        const UF_long end = solver->row_refactor_u_ptr[row + 1u];
+        for (UF_long p = begin; p < end; ++p) {
+          value -= solver->row_refactor_u_row_values[p] *
+                   work[solver->row_refactor_u_cols[p]];
+        }
+        work[row] = value / udiag[row];
+      }
+
+      if (block > 0u) {
+        for (UF_long k = k1; k < k2; ++k) {
+          const double wk = work[k];
+          const UF_long begin = offp[k];
+          const UF_long end = offp[k + 1u];
+          for (UF_long p = begin; p < end; ++p) {
+            const UF_long row = offi[p];
+            if (row >= k1) {
+              return 0;
+            }
+            work[row] -= offx[p] * wk;
+          }
+        }
+      }
+    }
+
+    for (UF_long k = 0; k < n; ++k) {
+      x[q[k]] = work[k];
+    }
+  } else {
+    for (UF_long k = 0; k < n; ++k) {
+      work[k] = x[q[k]];
+    }
+
+    for (UF_long block = 0; block < nblocks; ++block) {
+      const UF_long k1 = r[block];
+      const UF_long k2 = r[block + 1u];
+      if (block > 0u) {
+        for (UF_long k = k1; k < k2; ++k) {
+          double value = work[k];
+          const UF_long begin = offp[k];
+          const UF_long end = offp[k + 1u];
+          for (UF_long p = begin; p < end; ++p) {
+            const UF_long row = offi[p];
+            if (row >= k1) {
+              return 0;
+            }
+            value -= offx[p] * work[row];
+          }
+          work[k] = value;
+        }
+      }
+
+      for (UF_long row = k1; row < k2; ++row) {
+        const double value = work[row] / udiag[row];
+        work[row] = value;
+        const UF_long begin = solver->row_refactor_u_ptr[row];
+        const UF_long end = solver->row_refactor_u_ptr[row + 1u];
+        for (UF_long p = begin; p < end; ++p) {
+          work[solver->row_refactor_u_cols[p]] -=
+            solver->row_refactor_u_row_values[p] * value;
+        }
+      }
+
+      for (UF_long remaining = k2; remaining > k1; --remaining) {
+        const UF_long row = remaining - 1u;
+        const double value = work[row];
+        const UF_long begin = solver->row_refactor_l_ptr[row];
+        const UF_long end = solver->row_refactor_l_ptr[row + 1u];
+        for (UF_long p = begin; p < end; ++p) {
+          work[solver->row_refactor_l_cols[p]] -=
+            solver->row_refactor_l_row_values[p] * value;
+        }
+      }
+    }
+
+    for (UF_long k = 0; k < n; ++k) {
+      const double result = work[k];
+      x[pnum[k]] = rs != NULL ? result / rs[k] : result;
+    }
+  }
+
+  return 1;
+}
+
+static int kls_try_row_refactor_solve(kls_solver *solver,
+                                      int kernel_transpose,
+                                      int64_t nrhs,
+                                      double *x,
+                                      int64_t ldx) {
+  if (!kls_row_refactor_solve_is_eligible(solver)) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  const UF_long nblocks = solver->symbolic->nblocks;
+  const UF_long *r = solver->symbolic->R;
+  const UF_long *pnum = solver->numeric->Pnum;
+  const UF_long *q = solver->symbolic->Q;
+  const double *udiag = (const double *)solver->numeric->Udiag;
+  const double *rs = solver->numeric->Rs;
+  const UF_long *offp = solver->numeric->Offp;
+  const UF_long *offi = solver->numeric->Offi;
+  const double *offx = (const double *)solver->numeric->Offx;
+  double *work = (double *)solver->numeric->Xwork;
+
+  if (!kls_validate_row_refactor_solve_metadata(solver)) {
+    return 0;
+  }
 
   solver->common.status = TRILINOS_KLU_OK;
+
+  if (nrhs == 1) {
+    if (!kls_try_row_refactor_solve_one_rhs(solver, kernel_transpose, x)) {
+      return 0;
+    }
+    kls_record_row_refactor_row_solve(solver);
+    return 1;
+  }
 
   for (int64_t chunk = 0; chunk < nrhs; chunk += 4) {
     const UF_long rhs_count =
@@ -14037,6 +14196,7 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
     return 0;
   }
   solver->row_refactor_values_ready = 1;
+  solver->row_refactor_solve_validated = 0;
   return 1;
 }
 
@@ -15592,6 +15752,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     return 0;
   }
   solver->row_refactor_values_ready = 1;
+  solver->row_refactor_solve_validated = 0;
   return 1;
 }
 
@@ -17946,6 +18107,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     return 0;
   }
   solver->row_refactor_values_ready = 0;
+  solver->row_refactor_solve_validated = 0;
   const int egraph =
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
   if (egraph >= 0) {

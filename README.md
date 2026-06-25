@@ -442,8 +442,10 @@ report `row_refactor_last_defer_value_scatter`,
 row-storage solve handoff. When `KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC=1`, those
 mirrors can be seeded from ordinary KLU-compatible numeric storage after a
 successful factor/refactor, allowing the row solve to be benchmarked without
-also enabling the experimental KLS-first factorization path. The queued row
-scheduler orders
+also enabling the experimental KLS-first factorization path. Single-RHS row
+solves use a scalar row-major loop with cached structural validation, matching
+the common SPICE solve shape while keeping the four-RHS batched path available
+for wider solves. The queued row scheduler orders
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus
