@@ -215,13 +215,17 @@ The KLS-owned row-up first-factor scaffold now retains per-column entry counts
 while generating each block, so packing no longer rescans all generated `L` and
 `U` entries just to compute KLU column lengths. This is useful staging work for
 native row/segment storage: on sampled KLS-first probes it moved `nxp1` initial
-factor time to about 3.50s and `G2_circuit` to about 1.97s. It did not close
-the CKTSO paper gap. `pre2` still times out under a 120s factor-only cap with
-`KLS_ENABLE_KLS_FIRST_FACTOR=1`, and `ASIC_320k` repeated refactor remains on
-the column EGraph path because the current row-group work model is still higher
-than the exact EGraph work. Therefore the next direct CKTSO-aligned step is
-still a production row/segment numeric engine, not simply enabling the current
-row-up scaffold by default.
+factor time to about 3.50s and `G2_circuit` to about 1.97s. The same scaffold
+now also reserves its generated row-entry buffers from KLU's symbolic block
+fill estimate before starting numeric updates, avoiding repeated large
+realloc/copy waves on high-fill blocks. A focused rerun moved `nxp1` initial
+factor time further to about 2.93-3.01s; `G2_circuit` stayed in the same rough
+range. It did not close the CKTSO paper gap. `pre2` still times out under a
+120s factor-only cap with `KLS_ENABLE_KLS_FIRST_FACTOR=1`, and `ASIC_320k`
+repeated refactor remains on the column EGraph path because the current
+row-group work model is still higher than the exact EGraph work. Therefore the
+next direct CKTSO-aligned step is still a production row/segment numeric
+engine, not simply enabling the current row-up scaffold by default.
 
 The retained broader SPRAL post-factor trial is deliberately value-gated. A
 plain broad gate improved several MC64-sensitive cases but regressed the medium

@@ -22537,6 +22537,76 @@ static int kls_row_first_entries_enable_col_links(
   return 1;
 }
 
+static int kls_row_first_entries_reserve(kls_row_first_entries *entries,
+                                         UF_long capacity) {
+  if (entries == NULL || capacity <= entries->capacity) {
+    return 1;
+  }
+  if (capacity > (UF_long)(SIZE_MAX / sizeof(*entries->row)) ||
+      capacity > (UF_long)(SIZE_MAX / sizeof(*entries->value))) {
+    return 0;
+  }
+
+  UF_long *new_row =
+    (UF_long *)malloc((size_t)capacity * sizeof(*new_row));
+  UF_long *new_col =
+    (UF_long *)malloc((size_t)capacity * sizeof(*new_col));
+  double *new_value =
+    (double *)malloc((size_t)capacity * sizeof(*new_value));
+  UF_long *new_next = entries->col_head != NULL
+    ? (UF_long *)malloc((size_t)capacity * sizeof(*new_next))
+    : NULL;
+  if (new_row == NULL || new_col == NULL || new_value == NULL ||
+      (entries->col_head != NULL && new_next == NULL)) {
+    free(new_row);
+    free(new_col);
+    free(new_next);
+    free(new_value);
+    return 0;
+  }
+
+  if (entries->count > 0u) {
+    memcpy(new_row, entries->row,
+           (size_t)entries->count * sizeof(*new_row));
+    memcpy(new_col, entries->col,
+           (size_t)entries->count * sizeof(*new_col));
+    memcpy(new_value, entries->value,
+           (size_t)entries->count * sizeof(*new_value));
+    if (entries->col_head != NULL) {
+      memcpy(new_next, entries->next,
+             (size_t)entries->count * sizeof(*new_next));
+    }
+  }
+
+  free(entries->row);
+  free(entries->col);
+  free(entries->next);
+  free(entries->value);
+  entries->row = new_row;
+  entries->col = new_col;
+  entries->next = new_next;
+  entries->value = new_value;
+  entries->capacity = capacity;
+  return 1;
+}
+
+static UF_long kls_row_first_symbolic_reserve(
+  const kls_solver *solver,
+  UF_long block,
+  UF_long nk) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->Lnz == NULL || block >= solver->symbolic->nblocks) {
+    return 0;
+  }
+  const double estimate = solver->symbolic->Lnz[block];
+  if (!isfinite(estimate) || estimate <= (double)nk ||
+      estimate > (double)UF_long_max) {
+    return 0;
+  }
+  const UF_long entries = (UF_long)(estimate - (double)nk);
+  return entries >= 64u ? entries : 0u;
+}
+
 static int kls_row_first_entries_append(kls_row_first_entries *entries,
                                         UF_long row,
                                         UF_long col,
@@ -22546,48 +22616,12 @@ static int kls_row_first_entries_append(kls_row_first_entries *entries,
   }
   if (entries->count == entries->capacity) {
     UF_long grown = entries->capacity == 0u ? 64u : 2u * entries->capacity;
-    if (grown <= entries->capacity ||
-        grown > (UF_long)(SIZE_MAX / sizeof(*entries->row))) {
+    if (grown <= entries->capacity) {
       return 0;
     }
-    UF_long *new_row =
-      (UF_long *)malloc((size_t)grown * sizeof(*new_row));
-    UF_long *new_col =
-      (UF_long *)malloc((size_t)grown * sizeof(*new_col));
-    double *new_value =
-      (double *)malloc((size_t)grown * sizeof(*new_value));
-    UF_long *new_next = entries->col_head != NULL
-      ? (UF_long *)malloc((size_t)grown * sizeof(*new_next))
-      : NULL;
-    if (new_row == NULL || new_col == NULL || new_value == NULL ||
-        (entries->col_head != NULL && new_next == NULL)) {
-      free(new_row);
-      free(new_col);
-      free(new_next);
-      free(new_value);
+    if (!kls_row_first_entries_reserve(entries, grown)) {
       return 0;
     }
-    if (entries->count > 0u) {
-      memcpy(new_row, entries->row,
-             (size_t)entries->count * sizeof(*new_row));
-      memcpy(new_col, entries->col,
-             (size_t)entries->count * sizeof(*new_col));
-      memcpy(new_value, entries->value,
-             (size_t)entries->count * sizeof(*new_value));
-      if (entries->col_head != NULL) {
-        memcpy(new_next, entries->next,
-               (size_t)entries->count * sizeof(*new_next));
-      }
-    }
-    free(entries->row);
-    free(entries->col);
-    free(entries->next);
-    free(entries->value);
-    entries->row = new_row;
-    entries->col = new_col;
-    entries->next = new_next;
-    entries->value = new_value;
-    entries->capacity = grown;
   }
   if ((entries->col_head != NULL && col >= entries->col_head_len) ||
       (entries->col_count != NULL && col >= entries->col_count_len)) {
@@ -23079,6 +23113,12 @@ static int kls_try_first_factor_row_uplooking_blocks(
         !kls_row_first_entries_enable_col_counts(&u_entries, nk) ||
         !kls_row_first_entries_enable_col_links(&u_entries, nk)) {
       goto fail_block_entries;
+    }
+    const UF_long reserve_entries =
+      kls_row_first_symbolic_reserve(solver, block, nk);
+    if (reserve_entries > 0u) {
+      (void)kls_row_first_entries_reserve(&l_entries, reserve_entries);
+      (void)kls_row_first_entries_reserve(&u_entries, reserve_entries);
     }
     for (UF_long i = 0; i < nk; ++i) {
       const unsigned int generation = (unsigned int)(i + 1u);
