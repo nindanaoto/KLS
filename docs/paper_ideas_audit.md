@@ -3362,3 +3362,16 @@ were refactor-heavy rows: `nxp1` (`1.67x`), `G3_circuit` (`1.56x`),
 implementation target aligned with the papers: persistent compact row/segment
 numeric storage, batched trailing updates, and pivot-aware tail restart, rather
 than another scheduling-only or input-copy-only tweak.
+The phase split on those same artifacts rules out triangular solve and
+rejected-pivot repair as the main explanation for these rows. Each of the four
+losses reported `fast_block_restarts=0` and `fast_tail_restarts=0`. KLS solve
+time was already faster than CKTSO on all four, while numeric factor/refactor
+was slower: `nxp1` refactor `0.3065s` versus `0.1552s`, `G3_circuit`
+`11.03s` versus `7.07s`, `rajat30` `0.2243s` versus `0.1375s`, and
+`ASIC_680k` `0.0499s` versus `0.0309s`. Initial factorization was also much
+slower on the same cases (`3.13s` versus `0.63s`, `44.16s` versus `5.28s`,
+`2.21s` versus `0.58s`, and `1.84s` versus `0.16s`). This is why the local
+CKTSO and SubtreeLU papers now point KLS toward the row-major up-looking
+factor/refactor kernel with supernode/segment updates first; the full
+ETree-descendant pivoting-tail restart remains necessary for stressed
+repivoting cases, but it is not what explains these no-reject large losses.
