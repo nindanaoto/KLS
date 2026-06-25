@@ -22376,12 +22376,14 @@ static int kls_row_first_exchange_columns(kls_row_first_entries *u_entries,
                                           UF_long *col_pos,
                                           UF_long a,
                                           UF_long b,
-                                          UF_long n) {
+                                          UF_long local_n,
+                                          UF_long global_n) {
   if (a == b) {
     return 1;
   }
   if (u_entries == NULL || q_order == NULL || col_pos == NULL ||
-      a >= n || b >= n || q_order[a] >= n || q_order[b] >= n) {
+      a >= local_n || b >= local_n ||
+      q_order[a] >= global_n || q_order[b] >= global_n) {
     return 0;
   }
   const UF_long old_a = q_order[a];
@@ -22397,19 +22399,26 @@ static int kls_row_first_exchange_columns(kls_row_first_entries *u_entries,
       u_entries->col[p] = a;
     }
     if (u_entries->col[p] <= u_entries->row[p] ||
-        u_entries->row[p] >= n || u_entries->col[p] >= n) {
+        u_entries->row[p] >= local_n || u_entries->col[p] >= local_n) {
       return 0;
     }
   }
   return 1;
 }
 
-static int kls_pack_row_first_single_block_numeric(
+static int kls_pack_row_first_block_numeric(
   kls_solver *solver,
   trilinos_klu_l_numeric *numeric,
+  UF_long block,
+  UF_long k1,
+  UF_long nk,
   const kls_row_first_entries *l_entries,
   const kls_row_first_entries *u_entries,
-  const double *udiag_values) {
+  const double *udiag_values,
+  UF_long *total_lnz,
+  UF_long *total_unz,
+  UF_long *max_lnz_block,
+  UF_long *max_unz_block) {
   if (solver == NULL || numeric == NULL || l_entries == NULL ||
       u_entries == NULL || udiag_values == NULL ||
       numeric->Lip == NULL || numeric->Llen == NULL ||
@@ -22417,22 +22426,24 @@ static int kls_pack_row_first_single_block_numeric(
       numeric->Udiag == NULL || numeric->LUbx == NULL ||
       numeric->LUsize == NULL || numeric->Pnum == NULL ||
       solver->symbolic == NULL || solver->symbolic->P == NULL ||
-      solver->symbolic->nblocks != 1u) {
+      block >= solver->symbolic->nblocks || k1 > solver->n ||
+      nk == 0u || nk > solver->n - k1 ||
+      total_lnz == NULL || total_unz == NULL ||
+      max_lnz_block == NULL || max_unz_block == NULL) {
     return 0;
   }
 
-  const UF_long n = solver->n;
   UF_long *l_count =
-    n > 0u ? (UF_long *)calloc((size_t)n, sizeof(*l_count)) : NULL;
+    nk > 0u ? (UF_long *)calloc((size_t)nk, sizeof(*l_count)) : NULL;
   UF_long *u_count =
-    n > 0u ? (UF_long *)calloc((size_t)n, sizeof(*u_count)) : NULL;
-  if ((n > 0u && (l_count == NULL || u_count == NULL))) {
+    nk > 0u ? (UF_long *)calloc((size_t)nk, sizeof(*u_count)) : NULL;
+  if (l_count == NULL || u_count == NULL) {
     free(l_count);
     free(u_count);
     return 0;
   }
   for (UF_long p = 0; p < l_entries->count; ++p) {
-    if (l_entries->col[p] >= n || l_entries->row[p] >= n) {
+    if (l_entries->col[p] >= nk || l_entries->row[p] >= nk) {
       free(l_count);
       free(u_count);
       return 0;
@@ -22440,7 +22451,7 @@ static int kls_pack_row_first_single_block_numeric(
     l_count[l_entries->col[p]]++;
   }
   for (UF_long p = 0; p < u_entries->count; ++p) {
-    if (u_entries->col[p] >= n || u_entries->row[p] >= n) {
+    if (u_entries->col[p] >= nk || u_entries->row[p] >= nk) {
       free(l_count);
       free(u_count);
       return 0;
@@ -22449,7 +22460,7 @@ static int kls_pack_row_first_single_block_numeric(
   }
 
   size_t lusize = 0u;
-  for (UF_long k = 0; k < n; ++k) {
+  for (UF_long k = 0; k < nk; ++k) {
     const size_t l_units = kls_klu_units_for_indices(l_count[k]);
     const size_t u_units = kls_klu_units_for_indices(u_count[k]);
     if (l_units > SIZE_MAX - lusize ||
@@ -22480,22 +22491,22 @@ static int kls_pack_row_first_single_block_numeric(
   }
 
   size_t lup = 0u;
-  for (UF_long k = 0; k < n; ++k) {
-    numeric->Lip[k] = (UF_long)lup;
-    numeric->Llen[k] = l_count[k];
+  for (UF_long k = 0; k < nk; ++k) {
+    numeric->Lip[k1 + k] = (UF_long)lup;
+    numeric->Llen[k1 + k] = l_count[k];
     lup += kls_klu_units_for_indices(l_count[k]) + (size_t)l_count[k];
-    numeric->Uip[k] = (UF_long)lup;
-    numeric->Ulen[k] = u_count[k];
+    numeric->Uip[k1 + k] = (UF_long)lup;
+    numeric->Ulen[k1 + k] = u_count[k];
     lup += kls_klu_units_for_indices(u_count[k]) + (size_t)u_count[k];
-    ((Entry *)numeric->Udiag)[k] = udiag_values[k];
-    numeric->Pnum[k] = solver->symbolic->P[k];
+    ((Entry *)numeric->Udiag)[k1 + k] = udiag_values[k];
+    numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + k];
   }
 
   UF_long *l_write =
-    n > 0u ? (UF_long *)malloc((size_t)n * sizeof(*l_write)) : NULL;
+    (UF_long *)malloc((size_t)nk * sizeof(*l_write));
   UF_long *u_write =
-    n > 0u ? (UF_long *)malloc((size_t)n * sizeof(*u_write)) : NULL;
-  if (n > 0u && (l_write == NULL || u_write == NULL)) {
+    (UF_long *)malloc((size_t)nk * sizeof(*u_write));
+  if (l_write == NULL || u_write == NULL) {
     (void)TRILINOS_KLU_free(lu, lusize, sizeof(Unit), &solver->common);
     free(l_count);
     free(u_count);
@@ -22503,7 +22514,7 @@ static int kls_pack_row_first_single_block_numeric(
     free(u_write);
     return 0;
   }
-  for (UF_long k = 0; k < n; ++k) {
+  for (UF_long k = 0; k < nk; ++k) {
     l_write[k] = 0;
     u_write[k] = 0;
   }
@@ -22519,9 +22530,9 @@ static int kls_pack_row_first_single_block_numeric(
       free(u_write);
       return 0;
     }
-    UF_long *li = (UF_long *)(lu + numeric->Lip[col]);
+    UF_long *li = (UF_long *)(lu + numeric->Lip[k1 + col]);
     Entry *lx =
-      (Entry *)(lu + numeric->Lip[col] +
+      (Entry *)(lu + numeric->Lip[k1 + col] +
                 kls_klu_units_for_indices(l_count[col]));
     li[offset] = l_entries->row[p];
     lx[offset] = l_entries->value[p];
@@ -22537,20 +22548,26 @@ static int kls_pack_row_first_single_block_numeric(
       free(u_write);
       return 0;
     }
-    UF_long *ui = (UF_long *)(lu + numeric->Uip[col]);
+    UF_long *ui = (UF_long *)(lu + numeric->Uip[k1 + col]);
     Entry *ux =
-      (Entry *)(lu + numeric->Uip[col] +
+      (Entry *)(lu + numeric->Uip[k1 + col] +
                 kls_klu_units_for_indices(u_count[col]));
     ui[offset] = u_entries->row[p];
     ux[offset] = u_entries->value[p];
   }
 
-  numeric->LUbx[0] = lu;
-  numeric->LUsize[0] = lusize;
-  numeric->lnz = l_entries->count + n;
-  numeric->unz = u_entries->count + n;
-  numeric->max_lnz_block = numeric->lnz;
-  numeric->max_unz_block = numeric->unz;
+  const UF_long lnz_block = l_entries->count + nk;
+  const UF_long unz_block = u_entries->count + nk;
+  numeric->LUbx[block] = lu;
+  numeric->LUsize[block] = lusize;
+  *total_lnz += lnz_block;
+  *total_unz += unz_block;
+  if (*max_lnz_block < lnz_block) {
+    *max_lnz_block = lnz_block;
+  }
+  if (*max_unz_block < unz_block) {
+    *max_unz_block = unz_block;
+  }
   free(l_count);
   free(u_count);
   free(l_write);
@@ -22558,13 +22575,19 @@ static int kls_pack_row_first_single_block_numeric(
   return 1;
 }
 
-static int kls_try_first_factor_row_uplooking_single_block(
+static int kls_try_first_factor_row_uplooking_blocks(
   kls_solver *solver,
   double *numeric_values) {
   if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
-      solver->numeric != NULL || solver->symbolic->nblocks != 1u ||
+      solver->numeric != NULL || solver->symbolic->nblocks == 0u ||
       solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
       solver->symbolic->R == NULL || solver->common.scale != 0) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  const UF_long maxblock = solver->symbolic->maxblock;
+  if (n == 0u || maxblock == 0u) {
     return 0;
   }
 
@@ -22573,6 +22596,7 @@ static int kls_try_first_factor_row_uplooking_single_block(
   const UF_long saved_numerical_rank = (UF_long)common->numerical_rank;
   const UF_long saved_singular_col = (UF_long)common->singular_col;
   const UF_long saved_noffdiag = (UF_long)common->noffdiag;
+  int q_committed = 0;
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
@@ -22589,34 +22613,29 @@ static int kls_try_first_factor_row_uplooking_single_block(
   }
   solver->numeric = numeric;
 
-  const UF_long n = solver->n;
   UF_long *psinv = numeric->Pinv;
   UF_long *row_counts =
-    n > 0u ? (UF_long *)calloc((size_t)n, sizeof(*row_counts)) : NULL;
+    (UF_long *)calloc((size_t)maxblock, sizeof(*row_counts));
   UF_long *row_ptr =
-    (UF_long *)calloc((size_t)n + 1u, sizeof(*row_ptr));
-  double *x = n > 0u ? (double *)calloc((size_t)n, sizeof(*x)) : NULL;
+    (UF_long *)calloc((size_t)maxblock + 1u, sizeof(*row_ptr));
+  double *x = (double *)calloc((size_t)maxblock, sizeof(*x));
   unsigned int *mark =
-    n > 0u ? (unsigned int *)calloc((size_t)n, sizeof(*mark)) : NULL;
+    (unsigned int *)calloc((size_t)maxblock, sizeof(*mark));
   UF_long *pattern =
-    n > 0u ? (UF_long *)malloc((size_t)n * sizeof(*pattern)) : NULL;
+    (UF_long *)malloc((size_t)maxblock * sizeof(*pattern));
   UF_long *dep_heap =
-    n > 0u ? (UF_long *)malloc((size_t)n * sizeof(*dep_heap)) : NULL;
+    (UF_long *)malloc((size_t)maxblock * sizeof(*dep_heap));
   UF_long *u_row_ptr =
-    (UF_long *)calloc((size_t)n + 1u, sizeof(*u_row_ptr));
+    (UF_long *)calloc((size_t)maxblock + 1u, sizeof(*u_row_ptr));
   double *udiag_values =
-    n > 0u ? (double *)malloc((size_t)n * sizeof(*udiag_values)) : NULL;
-  UF_long *q_order =
-    n > 0u ? (UF_long *)malloc((size_t)n * sizeof(*q_order)) : NULL;
-  UF_long *saved_q =
-    n > 0u ? (UF_long *)malloc((size_t)n * sizeof(*saved_q)) : NULL;
-  UF_long *col_pos =
-    n > 0u ? (UF_long *)malloc((size_t)n * sizeof(*col_pos)) : NULL;
-  if ((n > 0u && (row_counts == NULL || x == NULL || mark == NULL ||
-                  pattern == NULL || dep_heap == NULL ||
-                  udiag_values == NULL || q_order == NULL ||
-                  saved_q == NULL || col_pos == NULL)) ||
-      row_ptr == NULL || u_row_ptr == NULL) {
+    (double *)malloc((size_t)maxblock * sizeof(*udiag_values));
+  UF_long *q_order = (UF_long *)malloc((size_t)n * sizeof(*q_order));
+  UF_long *saved_q = (UF_long *)malloc((size_t)n * sizeof(*saved_q));
+  UF_long *col_pos = (UF_long *)malloc((size_t)n * sizeof(*col_pos));
+  if (row_counts == NULL || row_ptr == NULL || x == NULL ||
+      mark == NULL || pattern == NULL || dep_heap == NULL ||
+      u_row_ptr == NULL || udiag_values == NULL || q_order == NULL ||
+      saved_q == NULL || col_pos == NULL) {
     goto fail;
   }
 
@@ -22625,7 +22644,7 @@ static int kls_try_first_factor_row_uplooking_single_block(
   }
   for (UF_long k = 0; k < n; ++k) {
     const UF_long row = solver->symbolic->P[k];
-    if (row >= n) {
+    if (row >= n || psinv[row] != KLS_KLU_EMPTY) {
       goto fail;
     }
     psinv[row] = k;
@@ -22648,146 +22667,155 @@ static int kls_try_first_factor_row_uplooking_single_block(
     saved_q[k] = oldcol;
     col_pos[oldcol] = k;
   }
+  for (UF_long k = 0; k < n; ++k) {
+    col_pos[k] = KLS_KLU_EMPTY;
+  }
 
-  for (UF_long oldcol = 0; oldcol < n; ++oldcol) {
-    for (UF_long p = solver->col_ptr[oldcol];
-         p < solver->col_ptr[oldcol + 1u]; ++p) {
-      const UF_long oldrow = solver->row_idx[p];
-      if (oldrow >= n || psinv[oldrow] >= n) {
-        goto fail;
-      }
-      row_counts[psinv[oldrow]]++;
-    }
-  }
-  for (UF_long i = 0; i < n; ++i) {
-    row_ptr[i + 1u] = row_ptr[i] + row_counts[i];
-  }
-  const UF_long row_nnz = row_ptr[n];
-  UF_long *row_cols = row_nnz > 0u
-    ? (UF_long *)malloc((size_t)row_nnz * sizeof(*row_cols)) : NULL;
-  UF_long *row_input_pos = row_nnz > 0u
-    ? (UF_long *)malloc((size_t)row_nnz * sizeof(*row_input_pos)) : NULL;
-  UF_long *row_next =
-    n > 0u ? (UF_long *)malloc((size_t)n * sizeof(*row_next)) : NULL;
-  if ((row_nnz > 0u && (row_cols == NULL || row_input_pos == NULL)) ||
-      (n > 0u && row_next == NULL)) {
-    free(row_cols);
-    free(row_input_pos);
-    free(row_next);
-    goto fail;
-  }
-  if (n > 0u) {
-    memcpy(row_next, row_ptr, (size_t)n * sizeof(*row_next));
-  }
-  for (UF_long oldcol = 0; oldcol < n; ++oldcol) {
-    for (UF_long p = solver->col_ptr[oldcol];
-         p < solver->col_ptr[oldcol + 1u]; ++p) {
-      const UF_long row = psinv[solver->row_idx[p]];
-      const UF_long dst = row_next[row]++;
-      row_cols[dst] = oldcol;
-      row_input_pos[dst] = p;
-    }
-  }
-  free(row_next);
-  row_next = NULL;
-
-  kls_row_first_entries l_entries;
-  kls_row_first_entries u_entries;
-  memset(&l_entries, 0, sizeof(l_entries));
-  memset(&u_entries, 0, sizeof(u_entries));
   const double tol = common->tol;
   UF_long dynamic_column_pivots = 0;
-  int q_committed = 0;
-  for (UF_long i = 0; i < n; ++i) {
-    const unsigned int generation = (unsigned int)(i + 1u);
-    if (generation == 0u) {
-      goto fail_entries;
+  UF_long total_lnz = 0;
+  UF_long total_unz = 0;
+  UF_long max_lnz_block = 1;
+  UF_long max_unz_block = 1;
+
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (k2 <= k1 || k2 > n || k2 - k1 > maxblock) {
+      goto fail;
     }
-    UF_long pattern_count = 0;
-    UF_long dep_heap_size = 0;
-    for (UF_long p = row_ptr[i]; p < row_ptr[i + 1u]; ++p) {
-      const UF_long oldcol = row_cols[p];
-      if (oldcol >= n || col_pos[oldcol] >= n ||
-          row_input_pos[p] >= solver->nnz) {
-        goto fail_entries;
+    const UF_long nk = k2 - k1;
+    memset(row_counts, 0, (size_t)nk * sizeof(*row_counts));
+    memset(u_row_ptr, 0, ((size_t)nk + 1u) * sizeof(*u_row_ptr));
+
+    for (UF_long local_col = 0; local_col < nk; ++local_col) {
+      const UF_long oldcol = q_order[k1 + local_col];
+      if (oldcol >= n || col_pos[oldcol] != KLS_KLU_EMPTY) {
+        goto fail;
       }
-      const UF_long col = col_pos[oldcol];
-      if (mark[col] != generation) {
-        mark[col] = generation;
-        pattern[pattern_count++] = col;
-        if (col < i) {
-          kls_row_first_heap_push(dep_heap, &dep_heap_size, col);
-        }
-        x[col] = numeric_values[row_input_pos[p]];
-      } else {
-        x[col] += numeric_values[row_input_pos[p]];
-      }
+      col_pos[oldcol] = local_col;
     }
 
-    u_row_ptr[i] = u_entries.count;
-    while (dep_heap_size > 0u) {
-      const UF_long dep = kls_row_first_heap_pop(dep_heap, &dep_heap_size);
-      if (dep >= i || mark[dep] != generation) {
-        goto fail_entries;
-      }
-      const double pivot = udiag_values[dep];
-      if (pivot == 0.0) {
-        goto fail_entries;
-      }
-      const double lij = x[dep] / pivot;
-      if (!kls_row_first_entries_append(&l_entries, i, dep, lij)) {
-        goto fail_entries;
-      }
-      x[dep] = 0.0;
-      for (UF_long up = u_row_ptr[dep]; up < u_row_ptr[dep + 1u]; ++up) {
-        const UF_long col = u_entries.col[up];
-        if (col <= dep || col >= n) {
-          goto fail_entries;
+    for (UF_long local_col = 0; local_col < nk; ++local_col) {
+      const UF_long oldcol = q_order[k1 + local_col];
+      for (UF_long p = solver->col_ptr[oldcol];
+           p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long oldrow = solver->row_idx[p];
+        if (oldrow >= n || psinv[oldrow] >= n) {
+          goto fail;
         }
+        const UF_long row_pos = psinv[oldrow];
+        if (row_pos < k1) {
+          continue;
+        }
+        if (row_pos >= k2) {
+          goto fail;
+        }
+        row_counts[row_pos - k1]++;
+      }
+    }
+    row_ptr[0] = 0;
+    for (UF_long i = 0; i < nk; ++i) {
+      row_ptr[i + 1u] = row_ptr[i] + row_counts[i];
+    }
+    const UF_long row_nnz = row_ptr[nk];
+    UF_long *row_cols = row_nnz > 0u
+      ? (UF_long *)malloc((size_t)row_nnz * sizeof(*row_cols)) : NULL;
+    UF_long *row_input_pos = row_nnz > 0u
+      ? (UF_long *)malloc((size_t)row_nnz * sizeof(*row_input_pos)) : NULL;
+    UF_long *row_next =
+      (UF_long *)malloc((size_t)nk * sizeof(*row_next));
+    if ((row_nnz > 0u && (row_cols == NULL || row_input_pos == NULL)) ||
+        row_next == NULL) {
+      free(row_cols);
+      free(row_input_pos);
+      free(row_next);
+      goto fail;
+    }
+    memcpy(row_next, row_ptr, (size_t)nk * sizeof(*row_next));
+    for (UF_long local_col = 0; local_col < nk; ++local_col) {
+      const UF_long oldcol = q_order[k1 + local_col];
+      for (UF_long p = solver->col_ptr[oldcol];
+           p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long row_pos = psinv[solver->row_idx[p]];
+        if (row_pos < k1) {
+          continue;
+        }
+        const UF_long row = row_pos - k1;
+        const UF_long dst = row_next[row]++;
+        row_cols[dst] = oldcol;
+        row_input_pos[dst] = p;
+      }
+    }
+    free(row_next);
+    row_next = NULL;
+
+    kls_row_first_entries l_entries;
+    kls_row_first_entries u_entries;
+    memset(&l_entries, 0, sizeof(l_entries));
+    memset(&u_entries, 0, sizeof(u_entries));
+    for (UF_long i = 0; i < nk; ++i) {
+      const unsigned int generation = (unsigned int)(i + 1u);
+      if (generation == 0u) {
+        goto fail_block_entries;
+      }
+      UF_long pattern_count = 0;
+      UF_long dep_heap_size = 0;
+      for (UF_long p = row_ptr[i]; p < row_ptr[i + 1u]; ++p) {
+        const UF_long oldcol = row_cols[p];
+        if (oldcol >= n || col_pos[oldcol] >= nk ||
+            row_input_pos[p] >= solver->nnz) {
+          goto fail_block_entries;
+        }
+        const UF_long col = col_pos[oldcol];
         if (mark[col] != generation) {
           mark[col] = generation;
           pattern[pattern_count++] = col;
           if (col < i) {
             kls_row_first_heap_push(dep_heap, &dep_heap_size, col);
           }
-          x[col] = 0.0;
+          x[col] = numeric_values[row_input_pos[p]];
+        } else {
+          x[col] += numeric_values[row_input_pos[p]];
         }
-        x[col] -= lij * u_entries.value[up];
       }
-    }
 
-    double pivot = mark[i] == generation ? x[i] : 0.0;
-    double row_max_abs = 0.0;
-    UF_long best_col = KLS_KLU_EMPTY;
-    UF_long u_count = 0;
-    for (UF_long p = 0; p < pattern_count; ++p) {
-      const UF_long col = pattern[p];
-      if (col > i) {
-        dep_heap[u_count++] = col;
-        const double abs_value = fabs(x[col]);
-        if (abs_value > row_max_abs) {
-          row_max_abs = abs_value;
-          best_col = col;
+      u_row_ptr[i] = u_entries.count;
+      while (dep_heap_size > 0u) {
+        const UF_long dep = kls_row_first_heap_pop(dep_heap, &dep_heap_size);
+        if (dep >= i || mark[dep] != generation) {
+          goto fail_block_entries;
+        }
+        const double dep_pivot = udiag_values[dep];
+        if (dep_pivot == 0.0) {
+          goto fail_block_entries;
+        }
+        const double lij = x[dep] / dep_pivot;
+        if (!kls_row_first_entries_append(&l_entries, i, dep, lij)) {
+          goto fail_block_entries;
+        }
+        x[dep] = 0.0;
+        for (UF_long up = u_row_ptr[dep]; up < u_row_ptr[dep + 1u]; ++up) {
+          const UF_long col = u_entries.col[up];
+          if (col <= dep || col >= nk) {
+            goto fail_block_entries;
+          }
+          if (mark[col] != generation) {
+            mark[col] = generation;
+            pattern[pattern_count++] = col;
+            if (col < i) {
+              kls_row_first_heap_push(dep_heap, &dep_heap_size, col);
+            }
+            x[col] = 0.0;
+          }
+          x[col] -= lij * u_entries.value[up];
         }
       }
-    }
-    if (pivot == 0.0 ||
-        (row_max_abs > 0.0 && fabs(pivot) < tol * row_max_abs)) {
-      if (best_col == KLS_KLU_EMPTY || row_max_abs == 0.0) {
-        goto fail_entries;
-      }
-      if (!kls_row_first_exchange_columns(&u_entries, q_order, col_pos,
-                                          i, best_col, n)) {
-        goto fail_entries;
-      }
-      const double swapped_pivot = x[best_col];
-      x[best_col] = pivot;
-      x[i] = swapped_pivot;
-      mark[i] = generation;
-      dynamic_column_pivots++;
-      pivot = x[i];
-      row_max_abs = 0.0;
-      u_count = 0;
+
+      double pivot = mark[i] == generation ? x[i] : 0.0;
+      double row_max_abs = 0.0;
+      UF_long best_col = KLS_KLU_EMPTY;
+      UF_long u_count = 0;
       for (UF_long p = 0; p < pattern_count; ++p) {
         const UF_long col = pattern[p];
         if (col > i) {
@@ -22795,45 +22823,99 @@ static int kls_try_first_factor_row_uplooking_single_block(
           const double abs_value = fabs(x[col]);
           if (abs_value > row_max_abs) {
             row_max_abs = abs_value;
+            best_col = col;
           }
         }
       }
       if (pivot == 0.0 ||
           (row_max_abs > 0.0 && fabs(pivot) < tol * row_max_abs)) {
-        goto fail_entries;
+        if (best_col == KLS_KLU_EMPTY || row_max_abs == 0.0) {
+          goto fail_block_entries;
+        }
+        if (!kls_row_first_exchange_columns(&u_entries, q_order + k1,
+                                            col_pos, i, best_col, nk, n)) {
+          goto fail_block_entries;
+        }
+        const double swapped_pivot = x[best_col];
+        x[best_col] = pivot;
+        x[i] = swapped_pivot;
+        mark[i] = generation;
+        dynamic_column_pivots++;
+        pivot = x[i];
+        row_max_abs = 0.0;
+        u_count = 0;
+        for (UF_long p = 0; p < pattern_count; ++p) {
+          const UF_long col = pattern[p];
+          if (col > i) {
+            dep_heap[u_count++] = col;
+            const double abs_value = fabs(x[col]);
+            if (abs_value > row_max_abs) {
+              row_max_abs = abs_value;
+            }
+          }
+        }
+        if (pivot == 0.0 ||
+            (row_max_abs > 0.0 && fabs(pivot) < tol * row_max_abs)) {
+          goto fail_block_entries;
+        }
+      }
+      if (u_count > 1u) {
+        qsort(dep_heap, (size_t)u_count, sizeof(*dep_heap),
+              kls_compare_uf_long);
+      }
+      udiag_values[i] = pivot;
+      for (UF_long p = 0; p < u_count; ++p) {
+        const UF_long col = dep_heap[p];
+        if (!kls_row_first_entries_append(&u_entries, i, col, x[col])) {
+          goto fail_block_entries;
+        }
+      }
+      u_row_ptr[i + 1u] = u_entries.count;
+      for (UF_long p = 0; p < pattern_count; ++p) {
+        x[pattern[p]] = 0.0;
+      }
+      if (mark[i] == generation) {
+        x[i] = 0.0;
       }
     }
-    if (u_count > 1u) {
-      qsort(dep_heap, (size_t)u_count, sizeof(*dep_heap),
-            kls_compare_uf_long);
+    if (!kls_pack_row_first_block_numeric(
+          solver, numeric, block, k1, nk, &l_entries, &u_entries,
+          udiag_values, &total_lnz, &total_unz, &max_lnz_block,
+          &max_unz_block)) {
+      goto fail_block_entries;
     }
-    udiag_values[i] = pivot;
-    for (UF_long p = 0; p < u_count; ++p) {
-      const UF_long col = dep_heap[p];
-      if (!kls_row_first_entries_append(&u_entries, i, col, x[col])) {
-        goto fail_entries;
+    kls_row_first_entries_free(&l_entries);
+    kls_row_first_entries_free(&u_entries);
+    free(row_cols);
+    free(row_input_pos);
+    for (UF_long local_col = 0; local_col < nk; ++local_col) {
+      const UF_long oldcol = q_order[k1 + local_col];
+      if (oldcol < n) {
+        col_pos[oldcol] = KLS_KLU_EMPTY;
       }
     }
-    u_row_ptr[i + 1u] = u_entries.count;
-    for (UF_long p = 0; p < pattern_count; ++p) {
-      x[pattern[p]] = 0.0;
-    }
-    if (mark[i] == generation) {
-      x[i] = 0.0;
-    }
+    continue;
+
+fail_block_entries:
+    kls_row_first_entries_free(&l_entries);
+    kls_row_first_entries_free(&u_entries);
+    free(row_cols);
+    free(row_input_pos);
+    free(row_next);
+    goto fail;
   }
 
-  if (!kls_pack_row_first_single_block_numeric(solver, numeric, &l_entries,
-                                               &u_entries, udiag_values) ||
-      !kls_rebuild_numeric_pinv(solver)) {
-    goto fail_entries;
+  numeric->lnz = total_lnz;
+  numeric->unz = total_unz;
+  numeric->max_lnz_block = max_lnz_block;
+  numeric->max_unz_block = max_unz_block;
+  if (!kls_rebuild_numeric_pinv(solver)) {
+    goto fail;
   }
-  if (n > 0u) {
-    memcpy(solver->symbolic->Q, q_order, (size_t)n * sizeof(*q_order));
-    q_committed = 1;
-  }
+  memcpy(solver->symbolic->Q, q_order, (size_t)n * sizeof(*q_order));
+  q_committed = 1;
   if (!kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
-    goto fail_entries;
+    goto fail;
   }
   if (common->status == TRILINOS_KLU_OK) {
     common->numerical_rank = n;
@@ -22843,12 +22925,8 @@ static int kls_try_first_factor_row_uplooking_single_block(
   solver->kls_first_row_uplooking_column_count += n;
   solver->kls_first_last_dynamic_column_pivots = dynamic_column_pivots;
   solver->kls_first_dynamic_column_pivot_count += dynamic_column_pivots;
-  kls_row_first_entries_free(&l_entries);
-  kls_row_first_entries_free(&u_entries);
   free(row_counts);
   free(row_ptr);
-  free(row_cols);
-  free(row_input_pos);
   free(x);
   free(mark);
   free(pattern);
@@ -22860,17 +22938,11 @@ static int kls_try_first_factor_row_uplooking_single_block(
   free(col_pos);
   return 1;
 
-fail_entries:
+fail:
   if (q_committed && saved_q != NULL && solver->symbolic != NULL &&
       solver->symbolic->Q != NULL) {
     memcpy(solver->symbolic->Q, saved_q, (size_t)n * sizeof(*saved_q));
   }
-  kls_row_first_entries_free(&l_entries);
-  kls_row_first_entries_free(&u_entries);
-  free(row_cols);
-  free(row_input_pos);
-  free(row_next);
-fail:
   free(row_counts);
   free(row_ptr);
   free(x);
@@ -23153,8 +23225,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     const double start = kls_now_seconds();
     kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FIRST);
     kls_first_factor_used =
-      kls_try_first_factor_row_uplooking_single_block(solver,
-                                                      numeric_values);
+      kls_try_first_factor_row_uplooking_blocks(solver, numeric_values);
     if (!kls_first_factor_used) {
       kls_first_factor_used =
         kls_try_first_factor_with_pivoted_blocks(solver, numeric_values);

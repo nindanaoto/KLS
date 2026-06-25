@@ -3236,30 +3236,30 @@ tail to be exercised.
 
 The scaffold then gained a more direct CKTSO Algorithm 1 bridge instead of only
 wrapping KLU-style columns. Under the same `KLS_ENABLE_KLS_FIRST_FACTOR=1` gate,
-eligible single-block unscaled matrices first try a KLS-owned sparse row-major
-up-looking first factor with pivot checks: each factor row scatters the
-permuted input row, applies already computed row-major U updates, checks the
-diagonal against the remaining U-row maximum, records row-major L/U entries,
-and only then packs the accepted factors into KLU-compatible numeric storage for
-the existing solve/refactor API. The bridge now also implements the direct
-Algorithm 1 pivot exchange for this eligibility class: when the diagonal fails
-the threshold against the largest active U-tail entry, KLS swaps the current
-factor column with that entry, updates previously computed row-major U column
-labels, publishes the accepted `Q` permutation, and continues rather than
-falling straight back to KLU-compatible block tails. `kls_stats`, `kls_bench`,
-and the gap
+eligible unscaled matrices first try a KLS-owned sparse row-major up-looking
+first factor with pivot checks over every BTF diagonal block: each factor row
+scatters the permuted in-block input row, applies already computed row-major U
+updates, checks the diagonal against the remaining U-row maximum, records
+row-major L/U entries, and only then packs the accepted local block factors into
+KLU-compatible numeric storage for the existing solve/refactor API. The bridge
+also implements the direct Algorithm 1 pivot exchange for this eligibility
+class: when the diagonal fails the threshold against the largest active U-tail
+entry, KLS swaps the current block-local factor column with that entry, updates
+previously computed row-major U column labels, publishes the accepted `Q`
+permutation, and continues rather than falling straight back to KLU-compatible
+block tails. `kls_stats`, `kls_bench`, and the gap
 decomposition script report this through
 `kls_first_last_row_uplooking_columns` and
 `kls_first_row_uplooking_column_count`, and dynamic exchanges through
 `kls_first_last_dynamic_column_pivots` and
 `kls_first_dynamic_column_pivot_count`; smoke tests require both the no-exchange
-row-major path and a weak-diagonal dynamic column-pivot case. This is the first
-direct row-oriented first-factor kernel in KLS. It is still limited: it
-currently handles only unscaled single-block cases and falls back to the older
-KLS/KLU-compatible first-factor paths on unrecoverable pivot rejection, BTF
-multi-block structure, or scaling. The full CKTSO production target still needs
-ETree cluster/pipeline scheduling for first factorization and the
-ETree-descendant pivoting-tail executor.
+row-major path, a weak-diagonal dynamic column-pivot case, and a reducible
+two-block BTF case with an off-diagonal coupling. This is the first direct
+row-oriented first-factor kernel in KLS. It is still limited: it currently
+handles only unscaled factors and falls back to the older KLS/KLU-compatible
+first-factor paths on unrecoverable pivot rejection or scaling. The full CKTSO
+production target still needs ETree cluster/pipeline scheduling for first
+factorization and the ETree-descendant pivoting-tail executor.
 When those mirrors were seeded by `kls_first`, unchecked `kls_refactor` now
 automatically attempts the existing KLS-owned row-major refactor path even when
 `KLS_ENABLE_ROW_REFACTOR=0`, so the scaffold drives the next SPICE-style numeric
