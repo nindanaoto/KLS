@@ -370,15 +370,18 @@ report `row_refactor_last_done_bitmap` and
 visible. Row-pattern analysis also records `row_refactor_input_cleanup_rows`
 and `row_refactor_input_cleanup_entries`; rows whose input columns are already
 covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in
-the row numeric kernels. Experimental single-block row refactors also handle
-KLU row-scaled factors by recomputing `Rs`, scaling fixed-position input values
-by the unpermuted row scale, and permuting `Rs` back to pivot order after an
-accepted row pass. Row refactors can keep KLS row-major `L`/`U` values
-authoritative across repeated unchecked refactors and publish them to KLU
-storage lazily only when a KLU fallback needs it. The guarded dirty row solve
+the row numeric kernels. Experimental row refactors handle single-block factors
+and BTF diagonal blocks; BTF off-block values are refreshed into KLU `Offx`
+from the retained input map. KLU row-scaled single-block row refactors recompute
+`Rs`, scale fixed-position input values by the unpermuted row scale, and
+permute `Rs` back to pivot order after an accepted row pass. Row refactors can
+keep KLS row-major `L`/`U` values authoritative across repeated unchecked
+refactors and publish them to KLU storage lazily only when a KLU fallback needs
+it. The guarded dirty row solve
 handles unscaled and KLU row-scaled normal single-block factors in forward and
 transpose orientation by matching KLU's `P*(R\b)` and `Q'*b`/`P'*(R\x)` solve
-setup. External KLS row/column scaling or permutation, later factorization, and
+setup. BTF row refactors therefore publish dirty row mirrors before KLU solves,
+and external KLS row/column scaling or permutation, later factorization, and
 other non-row fallbacks still publish the dirty row mirrors before using KLU
 storage. Benchmark stats
 report `row_refactor_last_defer_value_scatter`,
@@ -805,9 +808,10 @@ This is a functional implementation with KLS-level analysis choices for
 repeated SPICE-style solves and a KLS-owned threaded refactor path for BTF block
 parallelism on a narrow class of large cases. KLS also has a precomputed
 single-block and serial BTF refactor scatter path for unscaled repeated
-refactors, experimental row-scaled single-block row refactors, and a narrow
-scaled dominant-BTF subset, plus an unscaled block-local pivot restart for
-fast-factor failures. Benchmark stats also report
+refactors, experimental row-major row refactors for single-block factors and
+BTF diagonal blocks, row-scaled single-block row refactors, and a narrow scaled
+dominant-BTF subset, plus an unscaled block-local pivot restart for fast-factor
+failures. Benchmark stats also report
 row-major U-pattern supernode candidates and detailed rejected-row/multiplier
 coordinates from KLS-owned pivot checks, plus row-refactor cluster/pipeline
 counters and last-run markers, so the remaining SubtreeLU/CKTSO row-segment

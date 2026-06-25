@@ -1378,6 +1378,141 @@ static int test_btf_prefix_tail_restart_with_offblock(void) {
   return ok;
 }
 
+static int test_btf_row_refactor_offblock_refresh(void) {
+  const int32_t ap[] = {0, 2, 4, 7, 9};
+  const int32_t ai[] = {0, 1, 0, 1, 0, 2, 3, 2, 3};
+  const double ax0[] = {
+    2.0, 1.0, 1.0, 2.0,
+    0.5, 2.0, 1.0, 1.0, 2.0
+  };
+  const double ax1[] = {
+    2.5, 1.2, 0.8, 2.25,
+    1.75, 3.0, 0.5, 0.75, 2.75
+  };
+  const double expected[] = {1.0, 2.0, 3.0, 4.0};
+  double b[4] = {0.0, 0.0, 0.0, 0.0};
+  double x[4] = {0.0, 0.0, 0.0, 0.0};
+
+  for (int32_t col = 0; col < 4; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 1;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create btf row refactor")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 4, ap, ai, 0,
+                                        &options),
+                        "analyze btf row refactor")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor btf row refactor base")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "btf row refactor")) ok = 0;
+
+  kls_stats refactor_stats;
+  refactor_stats.struct_size = sizeof(refactor_stats);
+  if (ok && !require_ok(kls_get_stats(solver, &refactor_stats),
+                        "stats btf row refactor")) {
+    ok = 0;
+  }
+  if (ok && (refactor_stats.nblocks < 2 ||
+             refactor_stats.row_refactor_last_run != 1 ||
+             refactor_stats.row_refactor_last_checked != 0 ||
+             refactor_stats.row_refactor_last_parallel != 0 ||
+             refactor_stats.row_refactor_values_dirty != 1 ||
+             refactor_stats.row_refactor_last_lazy_value_scatter != 1 ||
+             refactor_stats.row_refactor_last_row_solve != 0 ||
+             refactor_stats.row_refactor_run_count != 1 ||
+             refactor_stats.row_refactor_lazy_value_scatter_run_count != 1 ||
+             refactor_stats.row_refactor_row_solve_run_count != 0)) {
+    fprintf(stderr,
+            "unexpected btf row-refactor stats: nblocks=%" PRId64
+            ", last=%d/%d/%d, dirty=%d, lazy=%d/%" PRId64
+            ", row_solve=%d/%" PRId64 ", runs=%" PRId64 "\n",
+            refactor_stats.nblocks,
+            refactor_stats.row_refactor_last_run,
+            refactor_stats.row_refactor_last_checked,
+            refactor_stats.row_refactor_last_parallel,
+            refactor_stats.row_refactor_values_dirty,
+            refactor_stats.row_refactor_last_lazy_value_scatter,
+            refactor_stats.row_refactor_lazy_value_scatter_run_count,
+            refactor_stats.row_refactor_last_row_solve,
+            refactor_stats.row_refactor_row_solve_run_count,
+            refactor_stats.row_refactor_run_count);
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve btf row refactor")) ok = 0;
+
+  kls_stats solve_stats;
+  solve_stats.struct_size = sizeof(solve_stats);
+  if (ok && !require_ok(kls_get_stats(solver, &solve_stats),
+                        "solve stats btf row refactor")) {
+    ok = 0;
+  }
+  if (ok && (solve_stats.row_refactor_values_dirty != 0 ||
+             solve_stats.row_refactor_last_lazy_value_scatter != 1 ||
+             solve_stats.row_refactor_last_row_solve != 0 ||
+             solve_stats.row_refactor_lazy_value_scatter_run_count != 1 ||
+             solve_stats.row_refactor_row_solve_run_count != 0)) {
+    fprintf(stderr,
+            "unexpected btf row-refactor solve stats: dirty=%d"
+            ", lazy=%d/%" PRId64 ", row_solve=%d/%" PRId64 "\n",
+            solve_stats.row_refactor_values_dirty,
+            solve_stats.row_refactor_last_lazy_value_scatter,
+            solve_stats.row_refactor_lazy_value_scatter_run_count,
+            solve_stats.row_refactor_last_row_solve,
+            solve_stats.row_refactor_row_solve_run_count);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < 4; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected btf row-refactor solution at %d:"
+              " %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  kls_destroy(solver);
+  free(saved_env);
+  return ok;
+}
+
 static int test_fast_factor_restart_after_prior_pivot(void) {
   const int32_t ap[] = {0, 3, 6, 9};
   const int32_t ai[] = {0, 1, 2, 0, 1, 2, 0, 1, 2};
@@ -2416,6 +2551,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_btf_prefix_tail_restart_with_offblock()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_btf_row_refactor_offblock_refresh()) {
     return EXIT_FAILURE;
   }
   if (!test_fast_factor_restart_after_prior_pivot()) {

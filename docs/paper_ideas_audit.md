@@ -73,18 +73,21 @@ repeated row refactors, avoiding queue/bitmap/predecessor allocation churn in
 the experimental row scheduler. Checked queued rejects now refresh any missing
 prefix rows before accepting the prefix-tail repair classification, so work
 ordering cannot turn an already-repairable prefix into a scheduler-race
-miss. Unchecked row refactors can also hand dirty KLS-owned row-major `L`/`U`
-mirrors directly to guarded forward and transpose single-block solves, leaving
-KLU's column values stale until later factorization or other non-row fallback
-needs them. This avoids making every row-refactor solve pay an immediate KLU
-publish. Experimental single-block row refactors can now also
-consume KLU row-scaled factors by recomputing `Rs`, using unpermuted row scales
-for fixed-position input loads, and restoring `Rs` to pivot order after an
-accepted pass. Dirty row solves now consume both unscaled and KLU row-scaled
-normal single-block row mirrors directly, using KLU's pivot-order `Rs` semantics
-for the right-hand-side load and transpose output. General external KLS
-row/column scaling or permutation still publishes before using KLU storage. These
-pieces still do not change the current default KLU-column numeric kernel.
+miss. Experimental row refactors now cover single-block factors and BTF
+diagonal blocks; BTF off-block values are refreshed into KLU `Offx` from the
+retained input map. Unchecked row refactors can also hand dirty KLS-owned
+row-major `L`/`U` mirrors directly to guarded forward and transpose
+single-block solves, leaving KLU's column values stale until later factorization
+or other non-row fallback needs them. This avoids making every eligible
+row-refactor solve pay an immediate KLU publish. KLU row-scaled single-block row
+refactors can now also recompute `Rs`, use unpermuted row scales for
+fixed-position input loads, and restore `Rs` to pivot order after an accepted
+pass. Dirty row solves consume both unscaled and KLU row-scaled normal
+single-block row mirrors directly, using KLU's pivot-order `Rs` semantics for
+the right-hand-side load and transpose output. BTF row refactors, general
+external KLS row/column scaling, and permutation still publish before using KLU
+storage. These pieces still do not change the current default KLU-column
+numeric kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -2918,6 +2921,16 @@ systems from dirty row mirrors and checks that no lazy publish occurs. This keep
 the benchmark-style transpose validation from forcing KLU column storage after a
 row refactor, while external KLS row/column scaling and permutation still use the
 publish-and-KLU fallback.
+
+The row-refactor pattern and numeric pass were then opened from single-block
+factors to BTF diagonal blocks. The retained refactor map now supplies only
+diagonal-block input entries to the row-major update, translates KLU's local
+block `L`/`U` row indices into global row order, and refreshes BTF off-block
+`Offx` values separately from the original input positions. A smoke case covers
+a reducible BTF matrix whose off-block entry changes across refactor, verifies
+that the row refactor ran, and confirms that BTF solves publish the dirty row
+mirrors before using KLU's general triangular solve. This is still a prerequisite
+for CKTSO-style row/segment tails rather than the full pivoting-tail executor.
 
 ## Recommended General Work
 
