@@ -362,12 +362,14 @@ the reverse group graph and reports `row_refactor_group_dependency_edges`,
 `row_refactor_group_root_count`, `row_refactor_group_leaf_count`, and
 `row_refactor_group_max_fanout`, which are the row-segment task-graph counters
 needed by future private/pipeline partitioning and tail-restart schedulers. The
-experimental row pipeline can consume that graph as a bounded successor-ready
-queue, reporting `row_refactor_last_ready_queue`,
-`row_refactor_ready_queue_run_count`, and
-`row_refactor_ready_queue_group_count` when the queued group tail is used.
-Unchecked queued row tails can run without the per-row completion bitmap; stats
-report `row_refactor_last_done_bitmap` and
+experimental row pipeline first tries to consume the whole retained row-group
+graph as a bounded successor-ready queue, removing cluster-level barriers when
+explicit predecessor counts are available. If that queue cannot be prepared, it
+falls back to the older barriered cluster levels plus queued tail. Stats report
+`row_refactor_last_ready_queue`, `row_refactor_ready_queue_run_count`, and
+`row_refactor_ready_queue_group_count` when the queued group scheduler is used.
+Unchecked queued row refactors can run without the per-row completion bitmap;
+stats report `row_refactor_last_done_bitmap` and
 `row_refactor_done_bitmap_run_count` so checked pivot-prefix validation remains
 visible. Row-pattern analysis also records `row_refactor_input_cleanup_rows`
 and `row_refactor_input_cleanup_entries`; rows whose input columns are already
@@ -395,7 +397,7 @@ report `row_refactor_last_defer_value_scatter`,
 `row_refactor_last_lazy_value_scatter`, and
 `row_refactor_lazy_value_scatter_run_count`, plus
 `row_refactor_last_row_solve` and `row_refactor_row_solve_run_count` for this
-row-storage solve handoff. The queued row tail orders
+row-storage solve handoff. The queued row scheduler orders
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus

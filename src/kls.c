@@ -14539,16 +14539,60 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   if (thread_count < 2) {
     return -1;
   }
-  if (!kls_build_row_refactor_group_thread_slices(solver, thread_count)) {
-    return -1;
-  }
-  UF_long cluster_levels =
-    kls_row_refactor_choose_cluster_levels(solver, thread_count);
   int use_group_pipeline = 0;
   UF_long pipeline_group_begin = 0;
+  UF_long cluster_levels = 0;
+  const int have_group_dag =
+    solver->row_refactor_group_level_ptr != NULL &&
+    solver->row_refactor_level_groups != NULL &&
+    solver->row_refactor_group_ptr != NULL &&
+    solver->row_refactor_group_successor_ptr != NULL &&
+    solver->row_refactor_group_count > 0u;
+  if (have_group_dag) {
+    use_group_pipeline = 1;
+  } else {
+    cluster_levels = solver->row_refactor_level_count;
+  }
+
+  UF_long *row_ready_groups = NULL;
+  atomic_uint *row_ready_slots = NULL;
+  atomic_ulong *row_remaining_preds = NULL;
+  unsigned char *row_tail_groups = NULL;
+  UF_long row_ready_tail_count = 0;
+  UF_long row_initial_ready_count = 0;
+  /* Prefer consuming the whole retained row-group DAG through the ready queue.
+     This is the row-refactor analogue of the paper private/pipeline direction:
+     no cluster-level barriers are needed when all inter-group predecessors are
+     tracked explicitly.  If preparation fails, keep the older cluster/tail
+     schedule as a conservative fallback. */
+  int use_row_ready_queue =
+    use_group_pipeline &&
+    kls_prepare_row_refactor_ready_queue(
+      solver, cluster_levels, &row_ready_groups, &row_ready_slots,
+      &row_remaining_preds, &row_tail_groups, &row_ready_tail_count,
+      &row_initial_ready_count);
+
+  if (have_group_dag && !use_row_ready_queue) {
+    if (!kls_build_row_refactor_group_thread_slices(solver, thread_count)) {
+      return -1;
+    }
+    cluster_levels =
+      kls_row_refactor_choose_cluster_levels(solver, thread_count);
+    use_group_pipeline = 0;
+    pipeline_group_begin = 0;
+    row_ready_groups = NULL;
+    row_ready_slots = NULL;
+    row_remaining_preds = NULL;
+    row_tail_groups = NULL;
+    row_ready_tail_count = 0;
+    row_initial_ready_count = 0;
+  }
+
   if (solver->row_refactor_group_level_ptr != NULL &&
       solver->row_refactor_level_groups != NULL &&
       solver->row_refactor_group_ptr != NULL &&
+      have_group_dag &&
+      !use_row_ready_queue &&
       cluster_levels < solver->row_refactor_level_count) {
     pipeline_group_begin = solver->row_refactor_group_level_ptr[cluster_levels];
     use_group_pipeline = pipeline_group_begin < solver->row_refactor_group_count;
@@ -14557,18 +14601,13 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     cluster_levels = solver->row_refactor_level_count;
   }
   kls_row_refactor_record_pipeline_scope(solver, cluster_levels);
-  UF_long *row_ready_groups = NULL;
-  atomic_uint *row_ready_slots = NULL;
-  atomic_ulong *row_remaining_preds = NULL;
-  unsigned char *row_tail_groups = NULL;
-  UF_long row_ready_tail_count = 0;
-  UF_long row_initial_ready_count = 0;
-  const int use_row_ready_queue =
-    use_group_pipeline &&
-    kls_prepare_row_refactor_ready_queue(
-      solver, cluster_levels, &row_ready_groups, &row_ready_slots,
-      &row_remaining_preds, &row_tail_groups, &row_ready_tail_count,
-      &row_initial_ready_count);
+  if (use_group_pipeline && !use_row_ready_queue) {
+    use_row_ready_queue =
+      kls_prepare_row_refactor_ready_queue(
+        solver, cluster_levels, &row_ready_groups, &row_ready_slots,
+        &row_remaining_preds, &row_tail_groups, &row_ready_tail_count,
+        &row_initial_ready_count);
+  }
   atomic_uint *pipeline_done = NULL;
   unsigned int pipeline_generation = 0;
   if (check_pivots || (use_group_pipeline && !use_row_ready_queue)) {

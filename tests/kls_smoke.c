@@ -2563,6 +2563,144 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
   return ok;
 }
 
+static int test_parallel_row_refactor_full_ready_queue(void) {
+  const int32_t n = 8;
+  int32_t ap[9] = {0, 2, 4, 6, 8, 10, 12, 14, 15};
+  int32_t ai[15] = {
+    0, 6,
+    1, 6,
+    2, 6,
+    3, 6,
+    4, 6,
+    5, 6,
+    6, 7,
+    7
+  };
+  double ax0[15] = {
+    10.0, 0.11,
+    11.0, 0.12,
+    12.0, 0.13,
+    13.0, 0.14,
+    14.0, 0.15,
+    15.0, 0.16,
+    16.0, 0.17,
+    17.0
+  };
+  double ax1[15];
+  double expected[8];
+  double b[8] = {0.0};
+  double x[8] = {0.0};
+
+  for (int32_t p = 0; p < 15; ++p) {
+    ax1[p] = ax0[p] + ((p & 1) ? 0.005 : 0.25);
+  }
+  for (int32_t i = 0; i < n; ++i) {
+    expected[i] = 0.5 + 0.125 * (double)i;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 2;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create full-ready row")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze full-ready row")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor full-ready row base")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "refactor full-ready row")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, n, x, n),
+                        "solve full-ready row")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats full-ready row")) {
+    ok = 0;
+  }
+  if (ok && (stats.row_refactor_group_level_max_width < 6 ||
+             stats.row_refactor_group_cluster_levels != 0 ||
+             stats.row_refactor_group_pipeline_groups !=
+               stats.row_refactor_group_count ||
+             stats.row_refactor_group_pipeline_rows != n ||
+             stats.row_refactor_last_run != 1 ||
+             stats.row_refactor_last_parallel != 1 ||
+             stats.row_refactor_last_ready_queue != 1 ||
+             stats.row_refactor_ready_queue_run_count != 1 ||
+             stats.row_refactor_ready_queue_group_count !=
+               stats.row_refactor_group_count ||
+             stats.row_refactor_last_work_ready_queue != 1 ||
+             stats.row_refactor_work_ready_queue_run_count != 1)) {
+    fprintf(stderr,
+            "unexpected full-ready row stats: width=%" PRId64
+            ", groups=%" PRId64 ", cluster=%" PRId64
+            ", pipe=%" PRId64 "/%" PRId64
+            ", last=%d/%d/%d, ready=%" PRId64 "/%" PRId64
+            ", work_queue=%d/%" PRId64 "\n",
+            stats.row_refactor_group_level_max_width,
+            stats.row_refactor_group_count,
+            stats.row_refactor_group_cluster_levels,
+            stats.row_refactor_group_pipeline_groups,
+            stats.row_refactor_group_pipeline_rows,
+            stats.row_refactor_last_run,
+            stats.row_refactor_last_parallel,
+            stats.row_refactor_last_ready_queue,
+            stats.row_refactor_ready_queue_run_count,
+            stats.row_refactor_ready_queue_group_count,
+            stats.row_refactor_last_work_ready_queue,
+            stats.row_refactor_work_ready_queue_run_count);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected full-ready row solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  kls_destroy(solver);
+  free(saved_env);
+  return ok;
+}
+
 static int run_scaled_row_refactor_case(int threads, int expect_parallel) {
   const int32_t n = 12;
   int32_t ap[13];
@@ -2823,6 +2961,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_parallel_row_refactor_pipeline_scope()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_parallel_row_refactor_full_ready_queue()) {
     return EXIT_FAILURE;
   }
   if (!test_scaled_row_refactor_single_block()) {
