@@ -3158,6 +3158,19 @@ subtract those copied gaps. This is still a serial conservative subset of
 CKTSO's pipelined pivoting-tail executor, not the full non-contiguous parallel
 row-tail algorithm, but successful cases now execute less than the envelope
 instead of only diagnosing its overcompute.
+
+The row-up first-factor dynamic column-pivot path then stopped relabeling
+swapped columns by scanning every previously emitted U entry. U entries now keep
+per-column linked lists, so a dynamic column exchange only touches entries in
+the two swapped columns. This directly targets the CKTSO Algorithm 1 pivoting
+step in the KLS-owned first-factor scaffold. Focused checks stayed valid: the
+small dynamic-pivot smoke still exercises the row-up path, `nxp1` KLS-first
+initial factor time dropped from about `6.37s` to about `3.72s` with 494
+dynamic column pivots, and `rajat24` moved from about `47.2s` to about
+`44.2s` with 2355 dynamic column pivots. The modest `rajat24` change confirms
+that relabeling was not the dominant missing paper mechanism there; KLS still
+needs a parallel row-up/EGraph first-factor executor rather than only cheaper
+serial pivot bookkeeping.
 The refactor gap remains; this is a storage-ownership bridge toward the
 row/segment engine, not the missing CKTSO pivoting-tail executor.
 

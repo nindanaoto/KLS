@@ -22469,9 +22469,12 @@ static trilinos_klu_l_numeric *kls_allocate_numeric_skeleton(
 typedef struct kls_row_first_entries {
   UF_long *row;
   UF_long *col;
+  UF_long *next;
+  UF_long *col_head;
   double *value;
   UF_long count;
   UF_long capacity;
+  UF_long col_head_len;
 } kls_row_first_entries;
 
 static void kls_row_first_entries_free(kls_row_first_entries *entries) {
@@ -22480,12 +22483,37 @@ static void kls_row_first_entries_free(kls_row_first_entries *entries) {
   }
   free(entries->row);
   free(entries->col);
+  free(entries->next);
+  free(entries->col_head);
   free(entries->value);
   entries->row = NULL;
   entries->col = NULL;
+  entries->next = NULL;
+  entries->col_head = NULL;
   entries->value = NULL;
   entries->count = 0;
   entries->capacity = 0;
+  entries->col_head_len = 0;
+}
+
+static int kls_row_first_entries_enable_col_links(
+  kls_row_first_entries *entries,
+  UF_long local_n) {
+  if (entries == NULL || entries->count != 0u ||
+      entries->capacity != 0u || entries->col_head != NULL ||
+      entries->next != NULL) {
+    return 0;
+  }
+  entries->col_head =
+    (UF_long *)malloc((size_t)local_n * sizeof(*entries->col_head));
+  if (entries->col_head == NULL && local_n > 0u) {
+    return 0;
+  }
+  for (UF_long k = 0; k < local_n; ++k) {
+    entries->col_head[k] = KLS_KLU_EMPTY;
+  }
+  entries->col_head_len = local_n;
+  return 1;
 }
 
 static int kls_row_first_entries_append(kls_row_first_entries *entries,
@@ -22507,9 +22535,14 @@ static int kls_row_first_entries_append(kls_row_first_entries *entries,
       (UF_long *)malloc((size_t)grown * sizeof(*new_col));
     double *new_value =
       (double *)malloc((size_t)grown * sizeof(*new_value));
-    if (new_row == NULL || new_col == NULL || new_value == NULL) {
+    UF_long *new_next = entries->col_head != NULL
+      ? (UF_long *)malloc((size_t)grown * sizeof(*new_next))
+      : NULL;
+    if (new_row == NULL || new_col == NULL || new_value == NULL ||
+        (entries->col_head != NULL && new_next == NULL)) {
       free(new_row);
       free(new_col);
+      free(new_next);
       free(new_value);
       return 0;
     }
@@ -22520,18 +22553,32 @@ static int kls_row_first_entries_append(kls_row_first_entries *entries,
              (size_t)entries->count * sizeof(*new_col));
       memcpy(new_value, entries->value,
              (size_t)entries->count * sizeof(*new_value));
+      if (entries->col_head != NULL) {
+        memcpy(new_next, entries->next,
+               (size_t)entries->count * sizeof(*new_next));
+      }
     }
     free(entries->row);
     free(entries->col);
+    free(entries->next);
     free(entries->value);
     entries->row = new_row;
     entries->col = new_col;
+    entries->next = new_next;
     entries->value = new_value;
     entries->capacity = grown;
   }
-  entries->row[entries->count] = row;
-  entries->col[entries->count] = col;
-  entries->value[entries->count] = value;
+  if (entries->col_head != NULL && col >= entries->col_head_len) {
+    return 0;
+  }
+  const UF_long pos = entries->count;
+  entries->row[pos] = row;
+  entries->col[pos] = col;
+  entries->value[pos] = value;
+  if (entries->col_head != NULL) {
+    entries->next[pos] = entries->col_head[col];
+    entries->col_head[col] = pos;
+  }
   entries->count++;
   return 1;
 }
@@ -22604,6 +22651,39 @@ static int kls_row_first_exchange_columns(kls_row_first_entries *u_entries,
   q_order[b] = old_a;
   col_pos[old_b] = a;
   col_pos[old_a] = b;
+  if (u_entries->col_head != NULL) {
+    if ((u_entries->count > 0u && u_entries->next == NULL) ||
+        a >= u_entries->col_head_len || b >= u_entries->col_head_len) {
+      return 0;
+    }
+    const UF_long head_a = u_entries->col_head[a];
+    const UF_long head_b = u_entries->col_head[b];
+    UF_long guard = 0;
+    for (UF_long p = head_a; p != KLS_KLU_EMPTY; p = u_entries->next[p]) {
+      if (p >= u_entries->count || ++guard > u_entries->count) {
+        return 0;
+      }
+      u_entries->col[p] = b;
+      if (u_entries->col[p] <= u_entries->row[p] ||
+          u_entries->row[p] >= local_n || u_entries->col[p] >= local_n) {
+        return 0;
+      }
+    }
+    guard = 0;
+    for (UF_long p = head_b; p != KLS_KLU_EMPTY; p = u_entries->next[p]) {
+      if (p >= u_entries->count || ++guard > u_entries->count) {
+        return 0;
+      }
+      u_entries->col[p] = a;
+      if (u_entries->col[p] <= u_entries->row[p] ||
+          u_entries->row[p] >= local_n || u_entries->col[p] >= local_n) {
+        return 0;
+      }
+    }
+    u_entries->col_head[a] = head_b;
+    u_entries->col_head[b] = head_a;
+    return 1;
+  }
   for (UF_long p = 0; p < u_entries->count; ++p) {
     if (u_entries->col[p] == a) {
       u_entries->col[p] = b;
@@ -22979,6 +23059,9 @@ static int kls_try_first_factor_row_uplooking_blocks(
     kls_row_first_entries u_entries;
     memset(&l_entries, 0, sizeof(l_entries));
     memset(&u_entries, 0, sizeof(u_entries));
+    if (!kls_row_first_entries_enable_col_links(&u_entries, nk)) {
+      goto fail_block_entries;
+    }
     for (UF_long i = 0; i < nk; ++i) {
       const unsigned int generation = (unsigned int)(i + 1u);
       if (generation == 0u) {
