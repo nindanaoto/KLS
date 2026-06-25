@@ -2865,6 +2865,25 @@ checked queued rejects deterministic by publishing completed generic rows
 inside multirow groups and by refreshing any missing rows before the rejected
 pivot before the existing prefix proof runs.
 
+Full-graph queued row runs then started consuming cached root groups through a
+private-root cursor before falling back to the shared ready queue for
+successor-released groups. The completing worker also keeps one ready successor
+as a local continuation and spills the rest to the shared queue; benchmark JSON
+now reports `row_refactor_last_local_ready_groups` and
+`row_refactor_local_ready_group_count`, so broad runs can distinguish "ready
+queue active" from actual worker-local continuation use. Focused probes showed
+the path is heavily exercised: `G2_circuit` reported 64,962 local continuations
+in the last row-refactor run and `rajat24` reported 212,824.
+
+A follow-up attempt to replace the private-root cursor with static strided
+root ownership was tested and rejected. Although this looked closer to a
+SubtreeLU private-queue shape, it removed dynamic balancing from the first wave
+of root tasks. In same-session focused probes it left `rajat24` essentially
+flat (`0.27955s` versus the prior `0.27924s` average refactor) but regressed
+`G2_circuit` from the prior `0.423s` range to `0.740s`. KLS therefore keeps the
+dynamic private-root cursor until a true separator-tree or FLOP-balanced
+private-queue partitioner exists.
+
 The tail-restart summarizer then started reporting serial-suffix overcompute:
 for executed local tail restarts it now totals the extra suffix columns and work
 above the retained CKTSO-style pivoting-tail plan. This does not change solver
