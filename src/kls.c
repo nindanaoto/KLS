@@ -62,6 +62,8 @@ typedef enum kls_row_refactor_group_kind {
 
 typedef struct kls_separator_analysis {
   UF_long n;
+  UF_long global_begin;
+  UF_long global_end;
   UF_long thread_count;
   UF_long component_count;
   UF_long private_component_count;
@@ -70,6 +72,7 @@ typedef struct kls_separator_analysis {
   UF_long pipeline_rows;
   UF_long private_max_rows;
   UF_long pipeline_max_rows;
+  int global_range_valid;
   UF_long *component_ptr;
   unsigned char *component_kind;
   unsigned int *order_component;
@@ -655,6 +658,8 @@ static void kls_fill_separator_stats(kls_stats *stats,
   }
   if (separator == NULL) {
     stats->separator_analyzed_rows = 0;
+    stats->separator_global_begin = -1;
+    stats->separator_global_end = -1;
     stats->separator_thread_count = 0;
     stats->separator_component_count = 0;
     stats->separator_private_components = 0;
@@ -666,6 +671,10 @@ static void kls_fill_separator_stats(kls_stats *stats,
     return;
   }
   stats->separator_analyzed_rows = (int64_t)separator->n;
+  stats->separator_global_begin = separator->global_range_valid
+    ? (int64_t)separator->global_begin : -1;
+  stats->separator_global_end = separator->global_range_valid
+    ? (int64_t)separator->global_end : -1;
   stats->separator_thread_count = (int64_t)separator->thread_count;
   stats->separator_component_count = (int64_t)separator->component_count;
   stats->separator_private_components =
@@ -676,6 +685,50 @@ static void kls_fill_separator_stats(kls_stats *stats,
   stats->separator_pipeline_rows = (int64_t)separator->pipeline_rows;
   stats->separator_private_max_rows = (int64_t)separator->private_max_rows;
   stats->separator_pipeline_max_rows = (int64_t)separator->pipeline_max_rows;
+}
+
+static int kls_separator_analysis_has_global_range(
+  const kls_separator_analysis *separator) {
+  return separator != NULL &&
+         separator->global_range_valid &&
+         separator->global_begin <= separator->global_end &&
+         separator->global_end - separator->global_begin == separator->n;
+}
+
+static void kls_finalize_separator_global_range(
+  const trilinos_klu_l_symbolic *symbolic,
+  kls_separator_analysis *separator) {
+  if (separator == NULL) {
+    return;
+  }
+  separator->global_begin = 0;
+  separator->global_end = 0;
+  separator->global_range_valid = 0;
+  if (symbolic == NULL || symbolic->R == NULL || symbolic->nblocks == 0u ||
+      separator->n == 0u) {
+    return;
+  }
+
+  UF_long matched_begin = 0;
+  UF_long matched_end = 0;
+  UF_long matches = 0;
+  for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+    const UF_long begin = symbolic->R[block];
+    const UF_long end = symbolic->R[block + 1u];
+    if (end < begin || end > symbolic->n) {
+      continue;
+    }
+    if (end - begin == separator->n) {
+      matched_begin = begin;
+      matched_end = end;
+      matches++;
+    }
+  }
+  if (matches == 1u) {
+    separator->global_begin = matched_begin;
+    separator->global_end = matched_end;
+    separator->global_range_valid = 1;
+  }
 }
 
 static inline void kls_scatter_subtract(double *restrict x,
@@ -4313,6 +4366,7 @@ static int analyze_with_ordering(UF_long n,
     return KLS_ERR_ANALYZE_FAILED;
   }
 
+  kls_finalize_separator_global_range(symbolic, separator_out);
   *symbolic_out = symbolic;
   *common_out = common;
   return KLS_OK;
@@ -15865,7 +15919,7 @@ static int kls_row_refactor_group_separator_component(
     *component_out = UINT_MAX;
   }
   if (solver == NULL || component_out == NULL ||
-      solver->separator.n != solver->n ||
+      !kls_separator_analysis_has_global_range(&solver->separator) ||
       solver->separator.component_count == 0u ||
       solver->separator.component_kind == NULL ||
       solver->separator.order_component == NULL ||
@@ -15875,14 +15929,22 @@ static int kls_row_refactor_group_separator_component(
   }
   const UF_long row_begin = solver->row_refactor_group_ptr[group];
   const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
-  if (row_begin >= row_end || row_end > solver->n) {
+  if (row_begin >= row_end || row_end > solver->n ||
+      row_begin < solver->separator.global_begin ||
+      row_end > solver->separator.global_end) {
     return 0;
   }
-  const unsigned int component = solver->separator.order_component[row_begin];
+  const UF_long local_begin = row_begin - solver->separator.global_begin;
+  const UF_long local_end = row_end - solver->separator.global_begin;
+  if (local_end > solver->separator.n) {
+    return 0;
+  }
+  const unsigned int component =
+    solver->separator.order_component[local_begin];
   if ((UF_long)component >= solver->separator.component_count) {
     return 0;
   }
-  for (UF_long row = row_begin + 1u; row < row_end; ++row) {
+  for (UF_long row = local_begin + 1u; row < local_end; ++row) {
     if (solver->separator.order_component[row] != component) {
       return 0;
     }
@@ -15911,7 +15973,7 @@ static int kls_build_row_refactor_separator_private_thread_queues(
   if (private_groups_out == NULL || thread_ptr_out == NULL ||
       component_count_out == NULL || solver == NULL ||
       source_groups == NULL || group_count == 0u || thread_count <= 1 ||
-      solver->separator.n != solver->n ||
+      !kls_separator_analysis_has_global_range(&solver->separator) ||
       solver->separator.component_count <= 1u ||
       solver->separator.component_kind == NULL ||
       solver->separator.order_component == NULL) {
@@ -23734,7 +23796,7 @@ static int kls_try_first_factor_row_uplooking_blocks(
   UF_long separator_dynamic_column_pivots = 0;
   UF_long separator_dynamic_column_fallbacks = 0;
   const int use_separator_pivot_domains =
-    solver->separator.n == n &&
+    kls_separator_analysis_has_global_range(&solver->separator) &&
     solver->separator.component_count > 0u &&
     solver->separator.order_component != NULL;
   UF_long total_lnz = 0;
@@ -23749,6 +23811,13 @@ static int kls_try_first_factor_row_uplooking_blocks(
       goto fail;
     }
     const UF_long nk = k2 - k1;
+    const int use_separator_for_block =
+      use_separator_pivot_domains &&
+      k1 >= solver->separator.global_begin &&
+      k2 <= solver->separator.global_end;
+    const UF_long separator_block_base = use_separator_for_block
+      ? k1 - solver->separator.global_begin
+      : 0u;
     memset(row_counts, 0, (size_t)nk * sizeof(*row_counts));
     memset(u_row_ptr, 0, ((size_t)nk + 1u) * sizeof(*u_row_ptr));
 
@@ -23905,8 +23974,8 @@ static int kls_try_first_factor_row_uplooking_blocks(
       UF_long best_separator_col = KLS_KLU_EMPTY;
       double best_separator_abs = -1.0;
       const unsigned int pivot_component =
-        use_separator_pivot_domains
-          ? solver->separator.order_component[k1 + i]
+        use_separator_for_block
+          ? solver->separator.order_component[separator_block_base + i]
           : UINT_MAX;
       UF_long u_count = 0;
       for (UF_long p = 0; p < pattern_count; ++p) {
@@ -23914,8 +23983,8 @@ static int kls_try_first_factor_row_uplooking_blocks(
         if (col > i) {
           dep_heap[u_count++] = col;
           const double abs_value = fabs(x[col]);
-          if (use_separator_pivot_domains &&
-              solver->separator.order_component[k1 + col] ==
+          if (use_separator_for_block &&
+              solver->separator.order_component[separator_block_base + col] ==
                 pivot_component &&
               abs_value > best_separator_abs) {
             best_separator_abs = abs_value;
@@ -23939,9 +24008,9 @@ static int kls_try_first_factor_row_uplooking_blocks(
              best_separator_abs + 1.0e-300 >= tol * row_max_abs)) {
           selected_col = best_separator_col;
         }
-        if (use_separator_pivot_domains) {
-          if (solver->separator.order_component[k1 + selected_col] ==
-              pivot_component) {
+        if (use_separator_for_block) {
+          if (solver->separator.order_component[
+                separator_block_base + selected_col] == pivot_component) {
             separator_dynamic_column_pivots++;
           } else {
             separator_dynamic_column_fallbacks++;

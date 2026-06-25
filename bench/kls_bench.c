@@ -555,6 +555,8 @@ int main(int argc, char **argv) {
              ",\"factor_etree_leaf_columns\":%" PRId64
              ",\"factor_etree_max_fanout\":%" PRId64
              ",\"separator_analyzed_rows\":%" PRId64
+             ",\"separator_global_begin\":%" PRId64
+             ",\"separator_global_end\":%" PRId64
              ",\"separator_thread_count\":%" PRId64
              ",\"separator_component_count\":%" PRId64
              ",\"separator_private_components\":%" PRId64
@@ -587,6 +589,8 @@ int main(int argc, char **argv) {
              stats.factor_etree_leaf_columns,
              stats.factor_etree_max_fanout,
              stats.separator_analyzed_rows,
+             stats.separator_global_begin,
+             stats.separator_global_end,
              stats.separator_thread_count,
              stats.separator_component_count,
              stats.separator_private_components,
@@ -627,11 +631,14 @@ int main(int argc, char **argv) {
              stats.factor_etree_root_columns,
              stats.factor_etree_leaf_columns,
              stats.factor_etree_max_fanout);
-      printf("separator queues: rows %" PRId64 ", threads %" PRId64
+      printf("separator queues: rows %" PRId64 ", global [%" PRId64
+             ", %" PRId64 "), threads %" PRId64
              ", components %" PRId64 " (private %" PRId64
              ", pipeline %" PRId64 "), row split %" PRId64 "/%" PRId64
              ", max private/pipeline %" PRId64 "/%" PRId64 "\n",
              stats.separator_analyzed_rows,
+             stats.separator_global_begin,
+             stats.separator_global_end,
              stats.separator_thread_count,
              stats.separator_component_count,
              stats.separator_private_components,
@@ -975,6 +982,8 @@ int main(int argc, char **argv) {
            ",\"factor_etree_leaf_columns\":%" PRId64
            ",\"factor_etree_max_fanout\":%" PRId64
            ",\"separator_analyzed_rows\":%" PRId64
+           ",\"separator_global_begin\":%" PRId64
+           ",\"separator_global_end\":%" PRId64
            ",\"separator_thread_count\":%" PRId64
            ",\"separator_component_count\":%" PRId64
            ",\"separator_private_components\":%" PRId64
@@ -1041,6 +1050,8 @@ int main(int argc, char **argv) {
            stats.factor_etree_leaf_columns,
            stats.factor_etree_max_fanout,
            stats.separator_analyzed_rows,
+           stats.separator_global_begin,
+           stats.separator_global_end,
            stats.separator_thread_count,
            stats.separator_component_count,
            stats.separator_private_components,
@@ -1314,11 +1325,14 @@ int main(int argc, char **argv) {
            stats.factor_etree_root_columns,
            stats.factor_etree_leaf_columns,
            stats.factor_etree_max_fanout);
-    printf("separator queues: rows %" PRId64 ", threads %" PRId64
+    printf("separator queues: rows %" PRId64 ", global [%" PRId64
+           ", %" PRId64 "), threads %" PRId64
            ", components %" PRId64 " (private %" PRId64
            ", pipeline %" PRId64 "), row split %" PRId64 "/%" PRId64
            ", max private/pipeline %" PRId64 "/%" PRId64 "\n",
            stats.separator_analyzed_rows,
+           stats.separator_global_begin,
+           stats.separator_global_end,
            stats.separator_thread_count,
            stats.separator_component_count,
            stats.separator_private_components,
