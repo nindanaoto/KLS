@@ -10384,9 +10384,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
       solver->numeric->Offi == NULL || solver->numeric->Offx == NULL) {
     return 0;
   }
-  if ((scaled && (solver->numeric->Rs == NULL ||
-                  solver->fast_reject_refresh_state !=
-                    KLS_FAST_REJECT_REFRESH_PREFIX)) ||
+  if ((scaled && solver->numeric->Rs == NULL) ||
       (!scaled && solver->numeric->Rs != NULL)) {
     return 0;
   }
@@ -10740,11 +10738,6 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       (!scaled && solver->numeric->Rs != NULL)) {
     return 0;
   }
-  if (scaled &&
-      solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL) {
-    return 0;
-  }
-
   const UF_long block = kls_block_for_pivot(solver, rejected_pivot);
   if (block == KLS_KLU_EMPTY) {
     return 0;
@@ -10811,6 +10804,24 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   const UF_long old_numerical_rank = (UF_long)solver->common.numerical_rank;
   const UF_long old_singular_col = (UF_long)solver->common.singular_col;
   const UF_long old_noffdiag = (UF_long)solver->common.noffdiag;
+  const int scaled_all_refresh =
+    scaled &&
+    solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL;
+  /* Full KLU refactor leaves Rs in pivot order; repair kernels need input-row
+     order and the accepted path permutes it back after Pnum is installed. */
+  if (scaled_all_refresh &&
+      !trilinos_klu_l_scale((UF_long)solver->common.scale, solver->n,
+                            solver->col_ptr, solver->row_idx,
+                            numeric_values, solver->numeric->Rs, NULL,
+                            &solver->common)) {
+    free(old_pblock);
+    solver->common.status = old_status;
+    solver->common.numerical_rank = old_numerical_rank;
+    solver->common.singular_col = old_singular_col;
+    solver->common.noffdiag = old_noffdiag;
+    (void)kls_rebuild_numeric_pinv(solver);
+    return 0;
+  }
   solver->common.status = TRILINOS_KLU_OK;
   solver->common.numerical_rank = KLS_KLU_EMPTY;
   solver->common.singular_col = KLS_KLU_EMPTY;
@@ -10854,6 +10865,9 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     solver->common.numerical_rank = old_numerical_rank;
     solver->common.singular_col = old_singular_col;
     solver->common.noffdiag = old_noffdiag;
+    if (scaled_all_refresh) {
+      (void)kls_parallel_refactor_permute_scale(solver);
+    }
     (void)kls_rebuild_numeric_pinv(solver);
     return 0;
   }
@@ -10872,6 +10886,9 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       solver->common.numerical_rank = old_numerical_rank;
       solver->common.singular_col = old_singular_col;
       solver->common.noffdiag = old_noffdiag;
+      if (scaled_all_refresh) {
+        (void)kls_parallel_refactor_permute_scale(solver);
+      }
       (void)kls_rebuild_numeric_pinv(solver);
       return 0;
     }
@@ -10886,6 +10903,9 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     solver->common.numerical_rank = old_numerical_rank;
     solver->common.singular_col = old_singular_col;
     solver->common.noffdiag = old_noffdiag;
+    if (scaled_all_refresh) {
+      (void)kls_parallel_refactor_permute_scale(solver);
+    }
     return 0;
   }
 
@@ -10911,6 +10931,9 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     solver->common.numerical_rank = old_numerical_rank;
     solver->common.singular_col = old_singular_col;
     solver->common.noffdiag = old_noffdiag;
+    if (scaled_all_refresh) {
+      (void)kls_parallel_refactor_permute_scale(solver);
+    }
     return 0;
   }
   if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
@@ -10918,6 +10941,9 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     solver->common.numerical_rank = old_numerical_rank;
     solver->common.singular_col = old_singular_col;
     solver->common.noffdiag = old_noffdiag;
+    if (scaled_all_refresh) {
+      (void)kls_parallel_refactor_permute_scale(solver);
+    }
     return 0;
   }
 
@@ -17118,10 +17144,9 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     const int repair_covers_remaining =
       kls_fast_repair_covers_remaining_columns(solver, rejected_pivot);
     if (solver->common.scale > 0) {
-      if (solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL ||
-          (!repair_covers_remaining &&
+      if (!repair_covers_remaining &&
            solver->fast_reject_refresh_state !=
-             KLS_FAST_REJECT_REFRESH_PREFIX)) {
+             KLS_FAST_REJECT_REFRESH_PREFIX) {
         return 0;
       }
     }

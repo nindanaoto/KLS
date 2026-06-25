@@ -319,17 +319,19 @@ Scaled prefix-current rejects whose validated repair preserves a non-empty
 live prefix state can also execute the conservative serial suffix restart of
 the rejected block with pivoting; accepted scaled and unscaled serial suffix
 restarts refresh only the off-diagonal column suffix whose inverse row
-permutation can change. Scaled all-refresh KLU refactor rejects still fall back
-conservatively because the row scale vector may already be pivot-permuted.
+permutation can change. Scaled all-refresh KLU refactor rejects first
+recompute the row scale vector back to input-row order, so the same block
+repair and validated non-root serial suffix restart can run before the accepted
+factor is restored to KLU's pivot-order row-scale convention.
 When an unscaled serial BTF refactor rejects a non-final block,
 the repaired block can now be followed by a serial checked continuation over
 only the later BTF blocks instead of restarting from the first block. The
 threaded BTF worker pool also marks completed diagonal blocks and reports the
 same prefix-current state only when every earlier block finished before a
 checked pivot reject. For
-unscaled prefix-current or all-current rejects whose validated repair preserves
-a non-empty live prefix state, KLS can execute the same conservative serial
-suffix restart before falling back to full block repair. This executable tail path is
+unscaled or scaled prefix-current/all-current rejects whose validated repair
+preserves a non-empty live prefix state, KLS can execute the same conservative
+serial suffix restart before falling back to full block repair. This executable tail path is
 not limited to the checked row-refactor candidate diagnostic; the diagnostic is
 retained only to explain row-major candidate quality when that metadata exists.
 Root-of-block rejects remain classified as CKTSO
