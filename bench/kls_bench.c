@@ -1200,15 +1200,7 @@ int main(int argc, char **argv) {
            ",\"row_refactor_compact_supernode_batch_count\":%" PRId64
            ",\"row_refactor_compact_supernode_batch_rows\":%" PRId64
            ",\"row_refactor_compact_supernode_batch_dep_rows\":%" PRId64
-           ",\"row_refactor_compact_supernode_batch_entries\":%" PRId64
-           ",\"refactor_dependency_cluster_levels\":%" PRId64
-           ",\"refactor_dependency_pipeline_columns\":%" PRId64
-           ",\"refactor_dependency_work\":%.9g"
-           ",\"refactor_dependency_pipeline_work\":%.9g"
-           ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
-           ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
-           ",\"rcond\":%.9g,\"rgrowth\":%.9g"
-           ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
+           ",\"row_refactor_compact_supernode_batch_entries\":%" PRId64,
            stats.row_solve_parallel_run_count,
            stats.row_solve_parallel_l_slice_runs,
            stats.row_solve_parallel_u_slice_runs,
@@ -1290,7 +1282,27 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_supernode_batch_count,
            stats.row_refactor_compact_supernode_batch_rows,
            stats.row_refactor_compact_supernode_batch_dep_rows,
-           stats.row_refactor_compact_supernode_batch_entries,
+           stats.row_refactor_compact_supernode_batch_entries);
+    printf(",\"row_refactor_compact_supernode_batch_pattern_count\":%" PRId64
+           ",\"row_refactor_compact_supernode_batch_pattern_rows\":%" PRId64
+           ",\"row_refactor_compact_supernode_batch_candidate_count\":%" PRId64
+           ",\"row_refactor_compact_supernode_batch_candidate_rows\":%" PRId64
+           ",\"row_refactor_compact_supernode_batch_candidate_dep_rows\":%" PRId64
+           ",\"row_refactor_compact_supernode_batch_rejected_work_count\":%" PRId64
+           ",\"refactor_dependency_cluster_levels\":%" PRId64
+           ",\"refactor_dependency_pipeline_columns\":%" PRId64
+           ",\"refactor_dependency_work\":%.9g"
+           ",\"refactor_dependency_pipeline_work\":%.9g"
+           ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
+           ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
+           ",\"rcond\":%.9g,\"rgrowth\":%.9g"
+           ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
+           stats.row_refactor_compact_supernode_batch_pattern_count,
+           stats.row_refactor_compact_supernode_batch_pattern_rows,
+           stats.row_refactor_compact_supernode_batch_candidate_count,
+           stats.row_refactor_compact_supernode_batch_candidate_rows,
+           stats.row_refactor_compact_supernode_batch_candidate_dep_rows,
+           stats.row_refactor_compact_supernode_batch_rejected_work_count,
            stats.refactor_dependency_cluster_levels,
            stats.refactor_dependency_pipeline_columns,
            stats.refactor_dependency_work,
@@ -1662,7 +1674,10 @@ int main(int argc, char **argv) {
            ", trsv: %d/%" PRId64
            " rows/entries %" PRId64 "/%" PRId64
            ", batch: %d/%" PRId64
-           " rows/dep_rows/entries %" PRId64 "/%" PRId64 "/%" PRId64 "\n",
+           " rows/dep_rows/entries %" PRId64 "/%" PRId64 "/%" PRId64
+           ", batch patterns: %" PRId64 "/%" PRId64
+           ", candidates: %" PRId64 "/%" PRId64 "/%" PRId64
+           ", rejected work: %" PRId64 "\n",
            stats.row_refactor_dense_segment_count,
            stats.row_refactor_dense_segment_rows,
            stats.row_refactor_dense_segment_max_width,
@@ -1694,7 +1709,13 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_supernode_batch_count,
            stats.row_refactor_compact_supernode_batch_rows,
            stats.row_refactor_compact_supernode_batch_dep_rows,
-           stats.row_refactor_compact_supernode_batch_entries);
+           stats.row_refactor_compact_supernode_batch_entries,
+           stats.row_refactor_compact_supernode_batch_pattern_count,
+           stats.row_refactor_compact_supernode_batch_pattern_rows,
+           stats.row_refactor_compact_supernode_batch_candidate_count,
+           stats.row_refactor_compact_supernode_batch_candidate_rows,
+           stats.row_refactor_compact_supernode_batch_candidate_dep_rows,
+           stats.row_refactor_compact_supernode_batch_rejected_work_count);
     printf("refactor dependency cluster levels: %" PRId64
            ", pipeline columns: %" PRId64 "\n",
            stats.refactor_dependency_cluster_levels,

@@ -3403,10 +3403,20 @@ static int test_batched_compact_supernode_cblas_subrange_probe(void) {
        stats.row_refactor_compact_supernode_batch_rows != hot ||
        stats.row_refactor_compact_supernode_batch_dep_rows !=
          (int64_t)lead * (int64_t)hot ||
-       stats.row_refactor_compact_supernode_batch_entries <= 0)) {
+       stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       stats.row_refactor_compact_supernode_batch_pattern_count != 1 ||
+       stats.row_refactor_compact_supernode_batch_pattern_rows != hot ||
+       stats.row_refactor_compact_supernode_batch_candidate_count != 1 ||
+       stats.row_refactor_compact_supernode_batch_candidate_rows != hot ||
+       stats.row_refactor_compact_supernode_batch_candidate_dep_rows !=
+         (int64_t)lead * (int64_t)hot ||
+       stats.row_refactor_compact_supernode_batch_rejected_work_count != 0)) {
     fprintf(stderr,
             "unexpected subrange batched compact-supernode stats: cblas=%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", pattern=%" PRId64 "/%" PRId64
+            ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
+            ", rejected=%" PRId64
             ", compact=%d/%" PRId64 "\n",
             stats.build_has_cblas,
             stats.row_refactor_last_compact_supernode_batch,
@@ -3414,6 +3424,12 @@ static int test_batched_compact_supernode_cblas_subrange_probe(void) {
             stats.row_refactor_compact_supernode_batch_rows,
             stats.row_refactor_compact_supernode_batch_dep_rows,
             stats.row_refactor_compact_supernode_batch_entries,
+            stats.row_refactor_compact_supernode_batch_pattern_count,
+            stats.row_refactor_compact_supernode_batch_pattern_rows,
+            stats.row_refactor_compact_supernode_batch_candidate_count,
+            stats.row_refactor_compact_supernode_batch_candidate_rows,
+            stats.row_refactor_compact_supernode_batch_candidate_dep_rows,
+            stats.row_refactor_compact_supernode_batch_rejected_work_count,
             stats.row_refactor_last_compact_dense_panel,
             stats.row_refactor_compact_dense_panel_count);
     ok = 0;

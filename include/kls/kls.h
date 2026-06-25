@@ -335,6 +335,12 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_supernode_batch_rows;
   int64_t row_refactor_compact_supernode_batch_dep_rows;
   int64_t row_refactor_compact_supernode_batch_entries;
+  int64_t row_refactor_compact_supernode_batch_pattern_count;
+  int64_t row_refactor_compact_supernode_batch_pattern_rows;
+  int64_t row_refactor_compact_supernode_batch_candidate_count;
+  int64_t row_refactor_compact_supernode_batch_candidate_rows;
+  int64_t row_refactor_compact_supernode_batch_candidate_dep_rows;
+  int64_t row_refactor_compact_supernode_batch_rejected_work_count;
   int build_has_cblas;
 } kls_stats;
 

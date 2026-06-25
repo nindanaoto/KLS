@@ -3887,12 +3887,16 @@ smoke fixtures construct two dense producers feeding one dense consumer and a
 separate one-producer case where only a 60-row suffix of an 80-row dense
 consumer group is batchable; the latter verifies exact
 `row_refactor_compact_supernode_batch_rows` and dependency counters for the
-subrange. This proves the direct SubtreeLU update shape is executable in KLS for
-a broader producer/consumer pattern, but the medium SuiteSparse probes above
-did not naturally match the earlier strict one-producer precondition. The
-remaining work is therefore to make the planner form and consume these batched
-producer/consumer updates more broadly and cheaply on real matrices, not merely
-to have a local BLAS call available.
+subrange. KLS now also reports batch-pattern, batch-candidate, and
+work-rejected counters so real matrices can distinguish "no common row
+subrange" from "candidate too small for BLAS." A local generated
+`onetone2_mwmatch` probe after adding those counters reported 62 compact
+panels and 17,995 scalar compact-supernode updates over 417,868 dependency
+rows, but zero batch patterns and zero batch candidates. This proves the
+direct SubtreeLU update shape is executable in KLS for a broader
+producer/consumer pattern, while also showing that the next real-matrix gap is
+heterogeneous-row producer batching or deeper row/segment planning, not merely
+lowering the CBLAS work threshold.
 
 The unchecked producer-panel refactor experiment also uses a blocked panel
 algorithm: scalar code factors each diagonal block, `dtrsm` solves the

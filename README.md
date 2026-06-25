@@ -493,7 +493,12 @@ those later suffixes are solved; stats report
 `row_refactor_compact_supernode_batch_count`,
 `row_refactor_compact_supernode_batch_rows`,
 `row_refactor_compact_supernode_batch_dep_rows`, and
-`row_refactor_compact_supernode_batch_entries`. The unchecked producer-panel
+`row_refactor_compact_supernode_batch_entries`. The related
+`row_refactor_compact_supernode_batch_pattern_*`,
+`row_refactor_compact_supernode_batch_candidate_*`, and
+`row_refactor_compact_supernode_batch_rejected_work_count` counters distinguish
+missing same-pattern row subranges from candidates rejected by the structural
+work gate. The unchecked producer-panel
 refactor experiment uses a blocked panel algorithm
 (`dtrsm`/`dgemm`) instead of one BLAS call per row. Focused probes keep it
 default-off: the blocked CBLAS path improved on the earlier per-row CBLAS

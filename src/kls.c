@@ -279,6 +279,12 @@ struct kls_solver {
   UF_long row_refactor_compact_supernode_batch_rows;
   UF_long row_refactor_compact_supernode_batch_dep_rows;
   UF_long row_refactor_compact_supernode_batch_entries;
+  UF_long row_refactor_compact_supernode_batch_pattern_count;
+  UF_long row_refactor_compact_supernode_batch_pattern_rows;
+  UF_long row_refactor_compact_supernode_batch_candidate_count;
+  UF_long row_refactor_compact_supernode_batch_candidate_rows;
+  UF_long row_refactor_compact_supernode_batch_candidate_dep_rows;
+  UF_long row_refactor_compact_supernode_batch_rejected_work_count;
   unsigned int row_refactor_tail_mark;
   UF_long row_refactor_tail_count;
   UF_long *refactor_level_ptr;
@@ -1124,6 +1130,12 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_compact_supernode_batch_rows = 0;
   solver->row_refactor_compact_supernode_batch_dep_rows = 0;
   solver->row_refactor_compact_supernode_batch_entries = 0;
+  solver->row_refactor_compact_supernode_batch_pattern_count = 0;
+  solver->row_refactor_compact_supernode_batch_pattern_rows = 0;
+  solver->row_refactor_compact_supernode_batch_candidate_count = 0;
+  solver->row_refactor_compact_supernode_batch_candidate_rows = 0;
+  solver->row_refactor_compact_supernode_batch_candidate_dep_rows = 0;
+  solver->row_refactor_compact_supernode_batch_rejected_work_count = 0;
   solver->row_refactor_tail_mark = 0u;
   solver->row_refactor_tail_count = 0;
 }
@@ -1216,6 +1228,12 @@ typedef struct {
   UF_long compact_supernode_batch_rows;
   UF_long compact_supernode_batch_dep_rows;
   UF_long compact_supernode_batch_entries;
+  UF_long compact_supernode_batch_pattern_count;
+  UF_long compact_supernode_batch_pattern_rows;
+  UF_long compact_supernode_batch_candidate_count;
+  UF_long compact_supernode_batch_candidate_rows;
+  UF_long compact_supernode_batch_candidate_dep_rows;
+  UF_long compact_supernode_batch_rejected_work_count;
 } kls_row_refactor_diagnostics;
 
 static void kls_save_row_refactor_diagnostics(
@@ -1361,6 +1379,18 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_compact_supernode_batch_dep_rows;
   diag->compact_supernode_batch_entries =
     solver->row_refactor_compact_supernode_batch_entries;
+  diag->compact_supernode_batch_pattern_count =
+    solver->row_refactor_compact_supernode_batch_pattern_count;
+  diag->compact_supernode_batch_pattern_rows =
+    solver->row_refactor_compact_supernode_batch_pattern_rows;
+  diag->compact_supernode_batch_candidate_count =
+    solver->row_refactor_compact_supernode_batch_candidate_count;
+  diag->compact_supernode_batch_candidate_rows =
+    solver->row_refactor_compact_supernode_batch_candidate_rows;
+  diag->compact_supernode_batch_candidate_dep_rows =
+    solver->row_refactor_compact_supernode_batch_candidate_dep_rows;
+  diag->compact_supernode_batch_rejected_work_count =
+    solver->row_refactor_compact_supernode_batch_rejected_work_count;
 }
 
 static void kls_restore_row_refactor_diagnostics(
@@ -1514,6 +1544,18 @@ static void kls_restore_row_refactor_diagnostics(
     diag->compact_supernode_batch_dep_rows;
   solver->row_refactor_compact_supernode_batch_entries =
     diag->compact_supernode_batch_entries;
+  solver->row_refactor_compact_supernode_batch_pattern_count =
+    diag->compact_supernode_batch_pattern_count;
+  solver->row_refactor_compact_supernode_batch_pattern_rows =
+    diag->compact_supernode_batch_pattern_rows;
+  solver->row_refactor_compact_supernode_batch_candidate_count =
+    diag->compact_supernode_batch_candidate_count;
+  solver->row_refactor_compact_supernode_batch_candidate_rows =
+    diag->compact_supernode_batch_candidate_rows;
+  solver->row_refactor_compact_supernode_batch_candidate_dep_rows =
+    diag->compact_supernode_batch_candidate_dep_rows;
+  solver->row_refactor_compact_supernode_batch_rejected_work_count =
+    diag->compact_supernode_batch_rejected_work_count;
 }
 
 static void free_row_refactor_pattern_preserve_diagnostics(kls_solver *solver) {
@@ -1987,6 +2029,33 @@ static void kls_record_row_refactor_compact_supernode_batch(
   solver->row_refactor_compact_supernode_batch_rows += current_rows;
   solver->row_refactor_compact_supernode_batch_dep_rows += dependency_rows;
   solver->row_refactor_compact_supernode_batch_entries += entries;
+}
+
+static void kls_record_row_refactor_compact_supernode_batch_pattern(
+  kls_solver *solver,
+  UF_long rows) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_compact_supernode_batch_pattern_count++;
+  solver->row_refactor_compact_supernode_batch_pattern_rows += rows;
+}
+
+static void kls_record_row_refactor_compact_supernode_batch_candidate(
+  kls_solver *solver,
+  UF_long rows,
+  UF_long dependency_rows,
+  int rejected_work) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_compact_supernode_batch_candidate_count++;
+  solver->row_refactor_compact_supernode_batch_candidate_rows += rows;
+  solver->row_refactor_compact_supernode_batch_candidate_dep_rows +=
+    dependency_rows;
+  if (rejected_work) {
+    solver->row_refactor_compact_supernode_batch_rejected_work_count++;
+  }
 }
 #endif
 
@@ -9411,6 +9480,18 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_compact_supernode_batch_dep_rows;
   solver->stats.row_refactor_compact_supernode_batch_entries =
     (int64_t)solver->row_refactor_compact_supernode_batch_entries;
+  solver->stats.row_refactor_compact_supernode_batch_pattern_count =
+    (int64_t)solver->row_refactor_compact_supernode_batch_pattern_count;
+  solver->stats.row_refactor_compact_supernode_batch_pattern_rows =
+    (int64_t)solver->row_refactor_compact_supernode_batch_pattern_rows;
+  solver->stats.row_refactor_compact_supernode_batch_candidate_count =
+    (int64_t)solver->row_refactor_compact_supernode_batch_candidate_count;
+  solver->stats.row_refactor_compact_supernode_batch_candidate_rows =
+    (int64_t)solver->row_refactor_compact_supernode_batch_candidate_rows;
+  solver->stats.row_refactor_compact_supernode_batch_candidate_dep_rows =
+    (int64_t)solver->row_refactor_compact_supernode_batch_candidate_dep_rows;
+  solver->stats.row_refactor_compact_supernode_batch_rejected_work_count =
+    (int64_t)solver->row_refactor_compact_supernode_batch_rejected_work_count;
   solver->stats.refactor_dependency_cluster_levels =
     (int64_t)solver->refactor_cluster_level_count;
   solver->stats.refactor_dependency_pipeline_columns =
@@ -20016,8 +20097,16 @@ static int kls_compact_dense_group_try_batched_supernode_cblas(
       update_work <
         KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY *
           copied_entries) {
+    const UF_long candidate_dep_rows =
+      kls_work_to_uflong((double)batch_rows * (double)external_len);
+    kls_record_row_refactor_compact_supernode_batch_candidate(
+      solver, batch_rows, candidate_dep_rows, 1);
     goto cleanup;
   }
+  const UF_long candidate_dep_rows =
+    kls_work_to_uflong((double)batch_rows * (double)external_len);
+  kls_record_row_refactor_compact_supernode_batch_candidate(
+    solver, batch_rows, candidate_dep_rows, 0);
 
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(*worker->supernode_workspace));
@@ -20392,6 +20481,8 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
         kls_compact_dense_group_external_pattern_end(
           solver, row_begin, row_end, row);
       if (batch_end > row + 1u) {
+        kls_record_row_refactor_compact_supernode_batch_pattern(
+          solver, batch_end - row);
         const int batched_status =
           kls_compact_dense_group_try_batched_supernode_cblas(
             worker, group, row_begin, row_end, row, batch_end, trailing_len,
