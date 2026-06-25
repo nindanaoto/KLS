@@ -3751,3 +3751,17 @@ unknown-prefix failures from recovered prefix-current ETree-tail candidates.
 The implementation is still a serial prefix recovery feeding the existing
 serial pivoting-tail/block-repair path; it is not yet CKTSO's full parallel
 ETree-scheduled pivoting tail executor.
+
+The compact dense row-refactor kernel then removed a redundant panel sweep in
+the unchecked refactor path. Previously the compact dense group first factored
+the dense intra-segment panel and then made a second pass over the same
+row/dependency pairs to update the trailing panel. The unchecked path now
+updates the trailing panel while applying each dependency, matching the
+checked compact kernel's dataflow and moving the implementation closer to the
+supernode-style dense update direction in CKTSO/SubtreeLU. On the forced
+row-refactor focus probe, `G2_circuit` repeated refactor improved from about
+`0.507s` to `0.404-0.446s`, `onetone2` improved from about `0.0348s` to
+`0.0329s`, and a repeated `ASIC_100ks` probe reported about `0.116s` versus
+the previous one-pass `0.148s`, with residuals unchanged. Default automatic
+selection remains cost-gated because the row engine is still not broadly
+faster than the mapped EGraph refactor.

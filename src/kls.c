@@ -18529,6 +18529,8 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
   for (UF_long row = row_begin; row < row_end; ++row) {
     const UF_long local_row = row - row_begin;
     double *row_dense_panel = dense_panel + local_row * width;
+    double *row_panel = trailing_panel != NULL
+      ? trailing_panel + local_row * trailing_len : NULL;
 
     for (UF_long dep = row_begin; dep < row; ++dep) {
       const UF_long local_dep = dep - row_begin;
@@ -18549,24 +18551,8 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
       for (UF_long target = local_row + 1u; target < width; ++target) {
         row_dense_panel[target] -= lij * dep_dense_panel[target];
       }
-    }
-  }
-
-  /* Keep the dense segment and shared trailing panel in compact row-major
-     scratch so this path can move to persistent row/segment storage without
-     changing semantics. */
-  for (UF_long row = row_begin; row < row_end; ++row) {
-    const UF_long local_row = row - row_begin;
-    double *row_dense_panel = dense_panel + local_row * width;
-    double *row_panel = trailing_panel != NULL
-      ? trailing_panel + local_row * trailing_len : NULL;
-
-    if (trailing_len > 0u) {
-      for (UF_long dep = row_begin; dep < row; ++dep) {
-        const double lij = row_dense_panel[dep - row_begin];
-        double *dep_panel =
-          trailing_panel + (dep - row_begin) * trailing_len;
-
+      if (trailing_len > 0u) {
+        double *dep_panel = trailing_panel + local_dep * trailing_len;
         for (UF_long offset = 0; offset < trailing_len; ++offset) {
           row_panel[offset] -= lij * dep_panel[offset];
         }
