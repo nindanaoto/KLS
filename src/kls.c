@@ -432,6 +432,10 @@ typedef struct kls_match_entry {
 
 static int kls_build_refactor_schedule(kls_solver *solver);
 static void kls_update_factor_etree_stats(kls_solver *solver);
+static size_t kls_initial_block_lusize(const kls_solver *solver,
+                                       UF_long k1,
+                                       UF_long nk,
+                                       double lsize_estimate);
 static UF_long kls_block_for_pivot(const kls_solver *solver, UF_long pivot);
 static double kls_row_refactor_compute_group_work(const kls_solver *solver,
                                                   UF_long group);
@@ -10351,15 +10355,17 @@ static int kls_reconstruct_block_live_prefix_state(
       final_pblock == NULL || live_p == NULL || live_pinv == NULL ||
       final_pinv == NULL || lpend == NULL || prefix_cols > nk ||
       k1 > solver->n || nk > solver->n - k1 ||
-      block >= solver->numeric->nblocks ||
-      solver->numeric->LUbx[block] == NULL) {
+      block >= solver->numeric->nblocks) {
     return 0;
   }
 
-  const size_t lusize = solver->numeric->LUsize[block];
-  if (lusize == 0u) {
+  if (prefix_cols > 0u &&
+      (solver->numeric->LUbx[block] == NULL ||
+       solver->numeric->LUsize[block] == 0u)) {
     return 0;
   }
+  const size_t lusize =
+    prefix_cols > 0u ? solver->numeric->LUsize[block] : 0u;
   for (UF_long k = 0; k < nk; ++k) {
     live_p[k] = k;
     live_pinv[k] = FLIP(k);
@@ -10374,7 +10380,8 @@ static int kls_reconstruct_block_live_prefix_state(
     final_pinv[row] = k;
   }
 
-  double *lu = (double *)solver->numeric->LUbx[block];
+  double *lu = prefix_cols > 0u
+    ? (double *)solver->numeric->LUbx[block] : NULL;
   const UF_long *lip = solver->numeric->Lip + k1;
   const UF_long *llen = solver->numeric->Llen + k1;
   const UF_long *uip = solver->numeric->Uip + k1;
@@ -10857,8 +10864,8 @@ static int kls_copy_live_prefix_lu(Unit *new_lu,
                                    UF_long *ulen,
                                    Entry *udiag,
                                    size_t *lup_out) {
-  if (new_lu == NULL || old_lu == NULL || final_pblock == NULL ||
-      lup_out == NULL) {
+  if (new_lu == NULL || final_pblock == NULL || lup_out == NULL ||
+      (prefix_cols > 0u && old_lu == NULL)) {
     return 0;
   }
   size_t lup = 0u;
@@ -10963,9 +10970,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
       local_reject >= nk ||
       block >= solver->numeric->nblocks ||
       solver->numeric->LUbx == NULL ||
-      solver->numeric->LUbx[block] == NULL ||
       solver->numeric->LUsize == NULL ||
-      solver->numeric->LUsize[block] == 0u ||
       solver->numeric->Xwork == NULL ||
       solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
       solver->numeric->Lip == NULL || solver->numeric->Uip == NULL ||
@@ -11006,7 +11011,24 @@ static int kls_try_pivot_tail_restart_rejected_block(
   }
   (void)final_pinv;
 
-  const size_t old_lusize = solver->numeric->LUsize[block];
+  size_t old_lusize = solver->numeric->LUsize[block];
+  Unit *old_lu = (Unit *)solver->numeric->LUbx[block];
+  if (old_lu == NULL || old_lusize == 0u) {
+    if (local_reject > 0u) {
+      free(scratch);
+      return 0;
+    }
+    const double lsize =
+      solver->symbolic->Lnz[block] < 0.0
+        ? -(solver->common.initmem)
+        : solver->common.initmem_amd * solver->symbolic->Lnz[block] +
+            (double)nk;
+    old_lusize = kls_initial_block_lusize(solver, k1, nk, lsize);
+    if (old_lusize == 0u) {
+      free(scratch);
+      return 0;
+    }
+  }
   Unit *new_lu =
     (Unit *)TRILINOS_KLU_malloc(old_lusize, sizeof(Unit), &solver->common);
   if (new_lu == NULL) {
@@ -11014,7 +11036,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
     return 0;
   }
 
-  Unit *old_lu = (Unit *)solver->numeric->LUbx[block];
   UF_long *lip = solver->numeric->Lip + k1;
   UF_long *llen = solver->numeric->Llen + k1;
   UF_long *uip = solver->numeric->Uip + k1;
@@ -20536,23 +20557,6 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
       old_pblock[k] = k;
     }
 
-    const double lsize =
-      solver->symbolic->Lnz[block] < 0.0
-        ? -(common->initmem)
-        : common->initmem_amd * solver->symbolic->Lnz[block] + (double)nk;
-    const size_t initial_lusize =
-      kls_initial_block_lusize(solver, k1, nk, lsize);
-    if (initial_lusize == 0u) {
-      goto fail;
-    }
-    Unit *placeholder =
-      (Unit *)TRILINOS_KLU_malloc(initial_lusize, sizeof(Unit), common);
-    if (placeholder == NULL || common->status < TRILINOS_KLU_OK) {
-      goto fail;
-    }
-    numeric->LUbx[block] = placeholder;
-    numeric->LUsize[block] = initial_lusize;
-
     Unit *new_lu = NULL;
     size_t new_size = 0u;
     UF_long lnz_block = 0;
@@ -20565,7 +20569,6 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
          common->halt_if_singular)) {
       goto fail;
     }
-    (void)TRILINOS_KLU_free(placeholder, initial_lusize, sizeof(Unit), common);
     numeric->LUbx[block] = new_lu;
     numeric->LUsize[block] = new_size;
     for (UF_long k = 0; k < nk; ++k) {

@@ -3289,6 +3289,13 @@ blocks, rebuilds off-block values before scale permutation, and finally permutes
 `Rs` through `Pnum` for solve semantics. The smoke suite now runs the same
 2-column BTF case with no scaling and with KLU max-row scaling.
 
+The KLS-first pivoted-block path no longer allocates a fake LU payload before
+root block factorization. The shared pivoted-block kernel now accepts an empty
+block when the rejected prefix is zero and estimates its own initial LU memory;
+non-root tail restarts still require reusable prefix LU. This removes a
+wrapper-style placeholder from first factorization while preserving the existing
+block-repair semantics.
+
 Re-reading the local CKTSO, NICSLU, and SubtreeLU references leaves one clear
 large missing part for the slow cases: KLS still does not own a complete
 row/segment-oriented numeric factorization and refactorization engine. CKTSO's
