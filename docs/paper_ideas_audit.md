@@ -219,6 +219,20 @@ SPRAL-enabled build selects the low-fill AMD unscaled static-match path with
 20 off-diagonal pivots. The remaining top-row losses after that correction are
 still dominated by repeated refactor throughput, not by the missing matching
 hook.
+A refreshed 12-row CKTSO-gap run against the saved 93-row CKTSO medium-paper
+artifact makes the same point on the current code path. With `--kls-first-factor
+on` and row solves enabled, the common-row KLS/CKTSO SPICE-cycle geomean ratio
+is 2.4855, with all 12 rows still losing. The largest ratios are
+`ASIC_320ks` at 3.267, `ASIC_320k` at 3.225, `G2_circuit` at 2.810, and
+`ASIC_100ks` at 2.800. These rows report `last_factor_path=kls_fast_refactor`;
+most use `initial_factor_path=kls_first`, while several use the pre-static
+first-factor path. Their cycle time is dominated by repeated numeric refactor
+time, not triangular solve time or first-factor fallback. On the sampled hard
+rows, ordering sweeps left `auto` already choosing the best available AMD,
+METIS, or SCOTCH candidate, and the row-refactor auto gate correctly stayed off
+because the current row-group work estimate exceeded the exact EGraph work.
+That combination makes the missing piece a numeric/storage algorithm, not an
+untried ordering package or a one-matrix policy rule.
 
 The fragmented-BTF scale policy improved the large recon artifact geomean over
 the preceding EGraph build from 30.58s to 27.37s on the five completed common
@@ -528,6 +542,15 @@ while `rajat30` moved from about 0.30470s to 0.30623s and `nxp1` from about
 0.64476s to 0.65076s. The prototype was removed because the current EGraph
 runtime is dominated by numeric scatter/update work rather than pthread launch
 overhead on the large CKTSO-gap rows.
+
+Two later EGraph scheduler tweaks were also rejected on the same basis. A
+dynamic work-claim path inside wide cluster levels was neutral on `ASIC_100ks`
+but slower on `rajat24` and `transient`. Forcing clustered cases into a full
+all-pipeline EGraph schedule was also slower on `ASIC_100ks`, `rajat24`, and
+`transient`. These tests indicate that KLS is not mainly missing another
+cluster/pipeline dispatch tweak in the current column-storage EGraph kernel.
+The CKTSO and SubtreeLU papers point instead to row-major sparse up-looking
+storage and row/supernode updates as the remaining large lever.
 
 A broader KLS-owned serial no-pivot refactor path was also prototyped by
 reusing the threaded BTF-block refactor kernel when thread-level parallelism was
