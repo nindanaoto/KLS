@@ -3159,6 +3159,13 @@ five-matrix smoke suite with `--row-solve on`, the geomean moved from about
 `0.0161s` before the scalar path to about `0.0123s` after scalar solve plus
 validation caching; the `--row-solve off` reference remained about `0.00946s`,
 so row solve remains experiment-gated rather than default.
+The solve-only seed then stopped building the full row-refactor group/segment
+scheduler. It now builds just the row-major `L`/`U` pattern and value mirror
+needed by triangular solve, while KLS-first and auto row-refactor paths still
+request the full row-refactor pattern. On the same five-matrix smoke suite, the
+`--row-solve on` geomean moved again to about `0.0111s`, and solve-only rows
+report zero row-refactor groups/segments while still reporting ready row solve
+mirrors.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF

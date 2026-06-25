@@ -445,7 +445,9 @@ successful factor/refactor, allowing the row solve to be benchmarked without
 also enabling the experimental KLS-first factorization path. Single-RHS row
 solves use a scalar row-major loop with cached structural validation, matching
 the common SPICE solve shape while keeping the four-RHS batched path available
-for wider solves. The queued row scheduler orders
+for wider solves. Solve-only seeding builds only the row-major `L`/`U` solve
+mirrors; the heavier row-refactor group, segment, and scheduler metadata is
+left to the refactor paths that actually need it. The queued row scheduler orders
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus

@@ -11698,6 +11698,191 @@ static int kls_build_row_refactor_input_cleanup_flags(
   return 1;
 }
 
+static int kls_row_solve_pattern_is_ready(const kls_solver *solver) {
+  return solver != NULL &&
+         solver->row_refactor_pattern_n == solver->n &&
+         solver->row_refactor_l_ptr != NULL &&
+         (solver->row_refactor_l_ptr[solver->n] == 0u ||
+          (solver->row_refactor_l_cols != NULL &&
+           solver->row_refactor_l_values != NULL &&
+           solver->row_refactor_l_row_values != NULL)) &&
+         solver->row_refactor_u_ptr != NULL &&
+         (solver->row_refactor_u_ptr[solver->n] == 0u ||
+          (solver->row_refactor_u_cols != NULL &&
+           solver->row_refactor_u_values != NULL &&
+           solver->row_refactor_u_row_values != NULL));
+}
+
+static int kls_build_row_solve_pattern(kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->symbolic->nblocks == 0u || solver->symbolic->R == NULL) {
+    return 0;
+  }
+  if (kls_row_solve_pattern_is_ready(solver)) {
+    return 1;
+  }
+  if (!kls_build_refactor_map(solver) ||
+      !kls_build_refactor_lu_pointer_cache(solver) ||
+      !kls_row_refactor_pattern_is_eligible(solver)) {
+    return 0;
+  }
+
+  free_row_refactor_pattern(solver);
+  const UF_long n = solver->n;
+  UF_long *l_ptr = (UF_long *)calloc((size_t)n + 1u, sizeof(*l_ptr));
+  UF_long *u_ptr = (UF_long *)calloc((size_t)n + 1u, sizeof(*u_ptr));
+  UF_long *next = n > 0u
+    ? (UF_long *)malloc((size_t)n * sizeof(*next)) : NULL;
+  UF_long *l_cols = NULL;
+  double **l_values = NULL;
+  double *l_row_values = NULL;
+  UF_long *u_cols = NULL;
+  double **u_values = NULL;
+  double *u_row_values = NULL;
+  if (l_ptr == NULL || u_ptr == NULL || (n > 0u && next == NULL)) {
+    free(l_ptr);
+    free(u_ptr);
+    free(next);
+    return 0;
+  }
+
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (k1 > k2 || k2 > n) {
+      goto fail;
+    }
+    const UF_long nk = k2 - k1;
+    for (UF_long local_j = 0; local_j < nk; ++local_j) {
+      const UF_long j = k1 + local_j;
+      UF_long *li = solver->refactor_l_indices[j];
+      const UF_long len = solver->numeric->Llen[j];
+      if (len > 0u && li == NULL) {
+        goto fail;
+      }
+      for (UF_long p = 0; p < len; ++p) {
+        const UF_long local_row = li[p];
+        const UF_long row = k1 + local_row;
+        if (local_row <= local_j || local_row >= nk || row >= n) {
+          goto fail;
+        }
+        l_ptr[row + 1u]++;
+      }
+    }
+  }
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    const UF_long nk = k2 - k1;
+    for (UF_long local_k = 0; local_k < nk; ++local_k) {
+      const UF_long k = k1 + local_k;
+      UF_long *ui = solver->refactor_u_indices[k];
+      const UF_long len = solver->numeric->Ulen[k];
+      if (len > 0u && ui == NULL) {
+        goto fail;
+      }
+      for (UF_long p = 0; p < len; ++p) {
+        const UF_long local_row = ui[p];
+        const UF_long row = k1 + local_row;
+        if (local_row >= local_k || local_row >= nk || row >= n) {
+          goto fail;
+        }
+        u_ptr[row + 1u]++;
+      }
+    }
+  }
+
+  for (UF_long i = 0; i < n; ++i) {
+    l_ptr[i + 1u] += l_ptr[i];
+    u_ptr[i + 1u] += u_ptr[i];
+  }
+  const UF_long l_nnz = l_ptr[n];
+  const UF_long u_nnz = u_ptr[n];
+  l_cols = l_nnz > 0u
+    ? (UF_long *)malloc((size_t)l_nnz * sizeof(*l_cols)) : NULL;
+  l_values = l_nnz > 0u
+    ? (double **)malloc((size_t)l_nnz * sizeof(*l_values)) : NULL;
+  l_row_values = l_nnz > 0u
+    ? (double *)malloc((size_t)l_nnz * sizeof(*l_row_values)) : NULL;
+  u_cols = u_nnz > 0u
+    ? (UF_long *)malloc((size_t)u_nnz * sizeof(*u_cols)) : NULL;
+  u_values = u_nnz > 0u
+    ? (double **)malloc((size_t)u_nnz * sizeof(*u_values)) : NULL;
+  u_row_values = u_nnz > 0u
+    ? (double *)malloc((size_t)u_nnz * sizeof(*u_row_values)) : NULL;
+  if ((l_nnz > 0u &&
+       (l_cols == NULL || l_values == NULL || l_row_values == NULL)) ||
+      (u_nnz > 0u &&
+       (u_cols == NULL || u_values == NULL || u_row_values == NULL))) {
+    goto fail;
+  }
+
+  if (n > 0u) {
+    memcpy(next, l_ptr, (size_t)n * sizeof(*next));
+  }
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    const UF_long nk = k2 - k1;
+    for (UF_long local_j = 0; local_j < nk; ++local_j) {
+      const UF_long j = k1 + local_j;
+      UF_long *li = solver->refactor_l_indices[j];
+      double *lx = solver->refactor_l_values[j];
+      const UF_long len = solver->numeric->Llen[j];
+      for (UF_long p = 0; p < len; ++p) {
+        const UF_long row = k1 + li[p];
+        const UF_long dst = next[row]++;
+        l_cols[dst] = j;
+        l_values[dst] = lx + p;
+      }
+    }
+  }
+  if (n > 0u) {
+    memcpy(next, u_ptr, (size_t)n * sizeof(*next));
+  }
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    const UF_long nk = k2 - k1;
+    for (UF_long local_k = 0; local_k < nk; ++local_k) {
+      const UF_long k = k1 + local_k;
+      UF_long *ui = solver->refactor_u_indices[k];
+      double *ux = solver->refactor_u_values[k];
+      const UF_long len = solver->numeric->Ulen[k];
+      for (UF_long p = 0; p < len; ++p) {
+        const UF_long row = k1 + ui[p];
+        const UF_long dst = next[row]++;
+        u_cols[dst] = k;
+        u_values[dst] = ux + p;
+      }
+    }
+  }
+  free(next);
+
+  solver->row_refactor_l_ptr = l_ptr;
+  solver->row_refactor_l_cols = l_cols;
+  solver->row_refactor_l_values = l_values;
+  solver->row_refactor_l_row_values = l_row_values;
+  solver->row_refactor_u_ptr = u_ptr;
+  solver->row_refactor_u_cols = u_cols;
+  solver->row_refactor_u_values = u_values;
+  solver->row_refactor_u_row_values = u_row_values;
+  solver->row_refactor_pattern_n = n;
+  return 1;
+
+fail:
+  free(l_ptr);
+  free(u_ptr);
+  free(next);
+  free(l_cols);
+  free(l_values);
+  free(l_row_values);
+  free(u_cols);
+  free(u_values);
+  free(u_row_values);
+  return 0;
+}
+
 static int kls_build_row_refactor_group_successors(
   UF_long group_count,
   const UF_long *row_group,
@@ -13379,8 +13564,8 @@ static int kls_publish_row_refactor_values(kls_solver *solver) {
   return 1;
 }
 
-static int kls_seed_row_refactor_values_from_numeric(kls_solver *solver) {
-  if (solver == NULL || !kls_build_row_refactor_pattern(solver)) {
+static int kls_copy_row_refactor_values_from_numeric(kls_solver *solver) {
+  if (solver == NULL) {
     return 0;
   }
   const UF_long l_nnz =
@@ -13418,6 +13603,20 @@ static int kls_seed_row_refactor_values_from_numeric(kls_solver *solver) {
   return 1;
 }
 
+static int kls_seed_row_refactor_values_from_numeric(kls_solver *solver) {
+  if (solver == NULL || !kls_build_row_refactor_pattern(solver)) {
+    return 0;
+  }
+  return kls_copy_row_refactor_values_from_numeric(solver);
+}
+
+static int kls_seed_row_solve_values_from_numeric(kls_solver *solver) {
+  if (solver == NULL || !kls_build_row_solve_pattern(solver)) {
+    return 0;
+  }
+  return kls_copy_row_refactor_values_from_numeric(solver);
+}
+
 static void kls_maybe_reseed_auto_row_refactor_values(kls_solver *solver,
                                                       double *elapsed) {
   if (solver == NULL || elapsed == NULL ||
@@ -13449,7 +13648,7 @@ static void kls_maybe_seed_row_solve_values_from_numeric(kls_solver *solver,
     return;
   }
   const double start = kls_now_seconds();
-  (void)kls_seed_row_refactor_values_from_numeric(solver);
+  (void)kls_seed_row_solve_values_from_numeric(solver);
   *elapsed += kls_now_seconds() - start;
 }
 
