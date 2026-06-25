@@ -22,6 +22,28 @@ static int close_enough(double a, double b) {
   return fabs(a - b) < 1e-10;
 }
 
+static int require_build_feature_stats(const kls_stats *stats,
+                                       const char *what) {
+  if (stats == NULL ||
+      (stats->build_has_metis != 0 && stats->build_has_metis != 1) ||
+      (stats->build_has_scotch != 0 && stats->build_has_scotch != 1) ||
+      (stats->build_has_spral_scaling != 0 &&
+       stats->build_has_spral_scaling != 1) ||
+      (stats->selected_spral_matching &&
+       !stats->build_has_spral_scaling)) {
+    fprintf(stderr,
+            "unexpected build feature stats for %s: metis=%d scotch=%d "
+            "spral=%d selected_spral=%d\n",
+            what,
+            stats != NULL ? stats->build_has_metis : -1,
+            stats != NULL ? stats->build_has_scotch : -1,
+            stats != NULL ? stats->build_has_spral_scaling : -1,
+            stats != NULL ? stats->selected_spral_matching : -1);
+    return 0;
+  }
+  return 1;
+}
+
 static int require_pivoting_tail_plan(const kls_stats *stats,
                                       const char *what) {
   if (stats == NULL || stats->fast_rejected_pivot < 0 ||
@@ -123,6 +145,7 @@ static int test_csc(void) {
   kls_stats stats;
   stats.struct_size = sizeof(stats);
   if (!require_ok(kls_get_stats(solver, &stats), "stats")) return 0;
+  if (!require_build_feature_stats(&stats, "csc")) return 0;
   if (stats.selected_ordering != KLS_ORDERING_AMD && stats.selected_ordering != KLS_ORDERING_COLAMD) {
     fprintf(stderr, "unexpected selected ordering: %s\n", kls_ordering_name(stats.selected_ordering));
     return 0;

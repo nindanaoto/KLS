@@ -210,6 +210,15 @@ factorization work/fill. On the 93-matrix medium paper corpus this moved KLS
 geomean from 0.32198s to 0.31410s with the same three known failures. The new
 exact-match wins were `hvdc1`, `OPF_10000`, `LeGresley_87936`, `rajat22`,
 `rajat23`, `rajat24`, `mult_dcop_03`, and `TSOPF_FS_b39_c19`.
+Benchmark artifacts now report whether METIS, SCOTCH, and SPRAL scaling were
+compiled into the tested binary, and the paper-gap benchmark runner can require
+SPRAL scaling explicitly. This matters for interpreting CKTSO/NICSLU-style
+static-pivoting evidence: a no-SPRAL build on `rajat24` falls back to the
+slow `metis`/KLU-scaling path with thousands of off-diagonal pivots, while the
+SPRAL-enabled build selects the low-fill AMD unscaled static-match path with
+20 off-diagonal pivots. The remaining top-row losses after that correction are
+still dominated by repeated refactor throughput, not by the missing matching
+hook.
 
 The fragmented-BTF scale policy improved the large recon artifact geomean over
 the preceding EGraph build from 30.58s to 27.37s on the five completed common

@@ -115,6 +115,9 @@ def main() -> int:
     parser.add_argument("--no-btf", action="store_true")
     parser.add_argument("--no-fast-factor", action="store_true")
     parser.add_argument("--no-static-pivoting", action="store_true")
+    parser.add_argument("--require-metis", action="store_true")
+    parser.add_argument("--require-scotch", action="store_true")
+    parser.add_argument("--require-spral-scaling", action="store_true")
     args = parser.parse_args()
 
     try:
@@ -211,6 +214,19 @@ def main() -> int:
                     sample_failures.append(proc.stderr.strip())
                     continue
                 sample = json.loads(proc.stdout)
+                missing_features: list[str] = []
+                if args.require_metis and not sample.get("build_has_metis"):
+                    missing_features.append("METIS")
+                if args.require_scotch and not sample.get("build_has_scotch"):
+                    missing_features.append("SCOTCH")
+                if args.require_spral_scaling and not sample.get("build_has_spral_scaling"):
+                    missing_features.append("SPRAL scaling")
+                if missing_features:
+                    sample_failures.append(
+                        "benchmark binary missing required feature(s): "
+                        + ", ".join(missing_features)
+                    )
+                    continue
                 sample["spice_cycle_seconds"] = spice_cycle_seconds(sample)
                 samples.append(sample)
             if not samples:

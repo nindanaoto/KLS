@@ -756,6 +756,7 @@ python3 scripts/run_bench_suite.py --kls-bench build/kls_bench \
   --matrix-dir data/suitesparse-paper-medium \
   --manifest bench/suitesparse_cktso_gap_manifest.txt \
   --orientation auto --threads 4 --repeat 1 --refactor-repeat 3 \
+  --require-spral-scaling \
   --timeout 120 --jsonl build/kls_cktso_gap_focus.jsonl
 ```
 
@@ -863,6 +864,7 @@ python3 scripts/run_bench_suite.py --kls-bench build/kls_bench \
   --matrix-dir data/suitesparse-paper-medium \
   --manifest bench/suitesparse_cktso_gap_manifest.txt \
   --orientation auto --threads 4 --repeat 1 --refactor-repeat 0 \
+  --require-spral-scaling \
   --stress-diagonal-scale 1e-9 \
   --timeout 120 --jsonl build/kls_tail_stress_gap.jsonl
 

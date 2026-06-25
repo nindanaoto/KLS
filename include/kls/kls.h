@@ -262,6 +262,9 @@ typedef struct kls_stats {
   int row_refactor_auto_values_ready;
   int row_refactor_auto_work_allowed;
   int row_refactor_auto_should_run;
+  int build_has_metis;
+  int build_has_scotch;
+  int build_has_spral_scaling;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

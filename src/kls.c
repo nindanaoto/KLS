@@ -2003,6 +2003,27 @@ static void free_numeric(kls_solver *solver) {
   }
 }
 
+static void fill_build_stats(kls_stats *stats) {
+  if (stats == NULL) {
+    return;
+  }
+#ifdef KLS_HAVE_METIS
+  stats->build_has_metis = 1;
+#else
+  stats->build_has_metis = 0;
+#endif
+#ifdef KLS_HAVE_SCOTCH
+  stats->build_has_scotch = 1;
+#else
+  stats->build_has_scotch = 0;
+#endif
+#ifdef KLS_HAVE_SPRAL_SCALING
+  stats->build_has_spral_scaling = 1;
+#else
+  stats->build_has_spral_scaling = 0;
+#endif
+}
+
 static void clear_matrix(kls_solver *solver) {
   destroy_refactor_pool(solver);
   free_numeric(solver);
@@ -2042,6 +2063,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->fast_tail_restarts = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
+  fill_build_stats(&solver->stats);
   kls_clear_fast_reject_stats(solver);
 }
 
@@ -7834,6 +7856,7 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver);
 
 static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.struct_size = sizeof(solver->stats);
+  fill_build_stats(&solver->stats);
   solver->stats.n = (int64_t)solver->n;
   solver->stats.nnz = (int64_t)solver->nnz;
   solver->stats.analysis_seconds = elapsed;
@@ -7880,6 +7903,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
 }
 
 static void fill_numeric_stats(kls_solver *solver) {
+  fill_build_stats(&solver->stats);
   solver->stats.last_kernel_status = (int)solver->common.status;
   solver->stats.selected_scale = (int)solver->common.scale;
   solver->stats.selected_pivot_tolerance = solver->common.tol;

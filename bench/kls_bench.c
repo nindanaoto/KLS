@@ -747,6 +747,9 @@ int main(int argc, char **argv) {
   if (json) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"threads\":%d"
+           ",\"build_has_metis\":%s"
+           ",\"build_has_scotch\":%s"
+           ",\"build_has_spral_scaling\":%s"
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
            ",\"pivot_tolerance\":%.9g,\"selected_pivot_tolerance\":%.9g"
@@ -820,6 +823,9 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivoting_tail_seed_columns\":%" PRId64
            ",\"fast_rejected_refresh_state\":%d",
            path, a.n, a.nnz, options.threads,
+           stats.build_has_metis ? "true" : "false",
+           stats.build_has_scotch ? "true" : "false",
+           stats.build_has_spral_scaling ? "true" : "false",
            kls_orientation_name(options.orientation),
            kls_orientation_name(stats.selected_orientation),
            kls_ordering_name(stats.selected_ordering),
@@ -1116,6 +1122,10 @@ int main(int argc, char **argv) {
     printf("matrix: %s\n", path);
     printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
     printf("threads: %d\n", options.threads);
+    printf("build features: METIS %s, SCOTCH %s, SPRAL scaling %s\n",
+           stats.build_has_metis ? "on" : "off",
+           stats.build_has_scotch ? "on" : "off",
+           stats.build_has_spral_scaling ? "on" : "off");
     printf("requested orientation: %s\n", kls_orientation_name(options.orientation));
     printf("selected orientation: %s\n", kls_orientation_name(stats.selected_orientation));
     printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
