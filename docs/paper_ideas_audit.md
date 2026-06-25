@@ -1857,6 +1857,13 @@ in the gated row path, but it remains far slower than the default column EGraph
 path. The retained lesson is that the segment representation is now executable,
 but the kernel still needs higher arithmetic intensity, such as dense triangular
 mini-solves and batched trailing updates, before it can close the CKTSO gap.
+The row-pattern builder now also retains the shared trailing `U` slice offset
+for each executable multi-row group and the group dispatcher validates and
+consumes that compact descriptor. This is deliberately a small SubtreeLU-style
+row-supernode storage step, not a new tuning rule: the clear paper-level missing
+piece for the slow cases remains a production row/up-looking factor/refactor
+kernel with compact row-major supernode/segment updates and CKTSO's
+ETree-descendant pivoting tail, rather than another ordering or scaling switch.
 
 The row-segment path now exposes its executable workload separately from the
 earlier adjacent-pattern candidate scan. `kls_stats`, `kls_bench` JSON/text, and

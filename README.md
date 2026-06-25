@@ -397,7 +397,10 @@ completed out of factor-order prefix. The experimental row scheduler also
 splits precomputed row-group levels into barriered cluster levels and a
 dynamic topological pipeline tail. Row groups carry a retained execution kind
 so single-row, generic multi-row, and dense multi-row groups dispatch without
-rediscovering that shape during each numeric pass. For generic-only row
+rediscovering that shape during each numeric pass. Multi-row groups also retain
+the shared trailing `U` slice offset used by the dense row-segment kernels, so
+the executor consumes the compact row-segment descriptor instead of
+re-deriving that slice from adjacent rows. For generic-only row
 patterns, pipeline groups also retain their external dependency rows so the
 scheduler can wait on them once before running the group kernel; stats report
 `row_refactor_group_cluster_levels`, `row_refactor_group_pipeline_groups`,
