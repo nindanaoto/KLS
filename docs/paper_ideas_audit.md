@@ -97,9 +97,11 @@ refactors can now also recompute `Rs`, use unpermuted row scales for
 fixed-position input loads, and restore `Rs` to pivot order after an accepted
 pass. Dirty row solves consume both unscaled and KLU row-scaled normal
 row mirrors directly, using KLU's pivot-order `Rs` semantics for the
-right-hand-side load and transpose output. General external KLS row/column
-scaling and permutation still publish before using KLU storage. These pieces
-still do not change the current default KLU-column numeric kernel.
+right-hand-side load and transpose output. The guarded row-major solve also
+runs under KLS's external static-matching row permutation and matching-derived
+row/column scaling because `solve_impl` wraps the kernel solve with the same
+right-hand-side/result transforms used by KLU. These pieces still do not change
+the current default KLU-column numeric kernel.
 KLS now also records `initial_factor_path`, `last_factor_path`, and largest
 ordered diagonal-block factor ETree counters in `kls_stats`/`kls_bench`. These
 diagnostics expose whether a solve still entered the KLU-derived pivoting
@@ -3298,6 +3300,15 @@ probe moved from `7.7455s` to `7.5856s` geomean. A top-12 guard with
 `--row-solve on` completed all rows at `3.0847s`, within noise of the previous
 adaptive `3.0613s` run and still faster than the older forced-seed `3.1772s`
 baseline.
+The row-major solve eligibility was then widened for static-matching factors.
+The pre/post solve wrapper already maps normal solves through `R * P * b` and
+returns `C * y`, and maps transpose solves through `C * b` and `P' * R * y`.
+That means dirty KLS-owned row mirrors and adaptively seeded mirrors from
+ordinary numeric storage can be used without publishing to KLU just because
+the analysis selected the MC64-adjacent external row permutation or matching
+equilibration. A smoke case now refactors a scaled pre-static permutation
+matrix and requires both normal and transpose solves to consume the dirty
+row-major mirrors.
 The row-refactor scheduler was also corrected to preserve CKTSO's
 cluster/pipeline split. It now runs the wide cluster prefix chosen by the
 paper's `2 * threads` width rule before building the successor-ready queue for

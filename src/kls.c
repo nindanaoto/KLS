@@ -15209,9 +15209,6 @@ static void kls_maybe_seed_row_solve_values_from_numeric(kls_solver *solver,
       !kls_row_solve_from_numeric_env_enabled() ||
       solver->row_refactor_values_ready ||
       solver->row_refactor_values_dirty ||
-      solver->row_perm != NULL ||
-      solver->row_scale != NULL ||
-      solver->col_scale != NULL ||
       solver->numeric == NULL ||
       solver->common.status < TRILINOS_KLU_OK ||
       solver->common.status == TRILINOS_KLU_SINGULAR) {
@@ -15227,8 +15224,7 @@ static void kls_maybe_seed_row_solve_values_from_numeric(kls_solver *solver,
 static int kls_row_refactor_solve_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       !solver->row_refactor_values_ready ||
-      solver->row_perm != NULL || solver->row_scale != NULL ||
-      solver->col_scale != NULL || solver->symbolic->nblocks == 0u ||
+      solver->symbolic->nblocks == 0u ||
       solver->symbolic->R == NULL ||
       solver->row_refactor_pattern_n != solver->n ||
       solver->row_refactor_l_ptr == NULL ||

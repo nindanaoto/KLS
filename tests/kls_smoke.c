@@ -2169,17 +2169,20 @@ static int test_pre_static_pivoting_with_scaling(void) {
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
   int32_t *ai = (int32_t *)malloc((size_t)n * sizeof(*ai));
   double *ax = (double *)malloc((size_t)n * sizeof(*ax));
+  double *ax_ref = (double *)malloc((size_t)n * sizeof(*ax_ref));
   double *b = (double *)calloc((size_t)n, sizeof(*b));
   double *bt = (double *)calloc((size_t)n, sizeof(*bt));
   double *x = (double *)calloc((size_t)n, sizeof(*x));
   double *xt = (double *)calloc((size_t)n, sizeof(*xt));
   double *expected = (double *)malloc((size_t)n * sizeof(*expected));
   double *expected_t = (double *)malloc((size_t)n * sizeof(*expected_t));
-  if (ap == NULL || ai == NULL || ax == NULL || b == NULL || bt == NULL ||
-      x == NULL || xt == NULL || expected == NULL || expected_t == NULL) {
+  if (ap == NULL || ai == NULL || ax == NULL || ax_ref == NULL ||
+      b == NULL || bt == NULL || x == NULL || xt == NULL ||
+      expected == NULL || expected_t == NULL) {
     free(ap);
     free(ai);
     free(ax);
+    free(ax_ref);
     free(b);
     free(bt);
     free(x);
@@ -2197,6 +2200,7 @@ static int test_pre_static_pivoting_with_scaling(void) {
     const double magnitude = (col % 2 == 0) ? 1.0e-6 : 1.0e6;
     ai[col] = row;
     ax[col] = magnitude;
+    ax_ref[col] = magnitude * (1.0 + 0.001 * (double)(1 + (col % 7)));
     expected[col] = 1.0 + (double)(col % 19);
     expected_t[row] = 2.0 + (double)(row % 23);
     b[row] = magnitude * expected[col];
@@ -2208,7 +2212,24 @@ static int test_pre_static_pivoting_with_scaling(void) {
   kls_default_options(&options);
   options.ordering = KLS_ORDERING_AUTO;
 
+  const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+  const char *saved_checked_env_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked_env = saved_checked_env_value != NULL
+    ? strdup(saved_checked_env_value) : NULL;
+  const int had_saved_checked_env = saved_checked_env_value != NULL;
+
   int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_checked_env && saved_checked_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
   if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
                                         &options),
@@ -2263,11 +2284,96 @@ static int test_pre_static_pivoting_with_scaling(void) {
       ok = 0;
     }
   }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok) {
+    memset(b, 0, (size_t)n * sizeof(*b));
+    memset(bt, 0, (size_t)n * sizeof(*bt));
+    memset(x, 0, (size_t)n * sizeof(*x));
+    memset(xt, 0, (size_t)n * sizeof(*xt));
+    for (int32_t col = 0; col < n; ++col) {
+      const int32_t row = ai[col];
+      b[row] = ax_ref[col] * expected[col];
+      bt[col] = ax_ref[col] * expected_t[row];
+    }
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax_ref),
+                        "row refactor scaled pre-static pivot")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "row solve scaled pre-static pivot")) ok = 0;
+  if (ok && !require_ok(kls_solve_transpose(solver, 1, bt, 0, xt, 0),
+                        "row transpose solve scaled pre-static pivot")) ok = 0;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "row stats scaled pre-static pivot")) {
+    ok = 0;
+  }
+  if (ok && (stats.row_refactor_last_run != 1 ||
+             stats.row_refactor_values_dirty != 1 ||
+             stats.row_refactor_last_row_solve != 1 ||
+             stats.row_refactor_row_solve_run_count != 2)) {
+    fprintf(stderr,
+            "scaled pre-static pivoting did not use dirty row-major solves:"
+            " row_run=%d dirty=%d row_solve=%d/%" PRId64 "\n",
+            stats.row_refactor_last_run, stats.row_refactor_values_dirty,
+            stats.row_refactor_last_row_solve,
+            stats.row_refactor_row_solve_run_count);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected row-refactored scaled pre-static solution at %d:"
+              " %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+    if (ok && !close_enough(xt[i], expected_t[i])) {
+      fprintf(stderr,
+              "unexpected row-refactored scaled pre-static transpose at %d:"
+              " %.17g != %.17g\n",
+              (int)i, xt[i], expected_t[i]);
+      ok = 0;
+    }
+  }
+
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (had_saved_checked_env && saved_checked_env != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+               saved_checked_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_checked_env) {
+    if (unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
 
   kls_destroy(solver);
+  free(saved_env);
+  free(saved_checked_env);
   free(ap);
   free(ai);
   free(ax);
+  free(ax_ref);
   free(b);
   free(bt);
   free(x);
