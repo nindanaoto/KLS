@@ -70,10 +70,14 @@ group-tail restart scope from the retained row-group successor graph, giving
 future CKTSO-style pivoting tail work an explicit row/segment task-tail
 measurement. The row ready queue also keeps solver-owned workspace across
 repeated row refactors, avoiding queue/bitmap/predecessor allocation churn in
-the experimental row scheduler. Checked queued rejects now refresh any missing
-prefix rows before accepting the prefix-tail repair classification, so work
-ordering cannot turn an already-repairable prefix into a scheduler-race
-miss. Experimental row refactors now cover single-block factors and BTF
+the experimental row scheduler. Full-graph queued row runs now consume cached
+root groups through a private-root cursor before falling back to the shared
+ready queue for successor-released groups, trimming the first wave of shared
+queue traffic without changing the retained row DAG. Checked queued rejects now
+refresh any missing prefix rows before accepting the prefix-tail repair
+classification, so work ordering cannot turn an already-repairable prefix into
+a scheduler-race miss. Experimental row refactors now cover single-block
+factors and BTF
 diagonal blocks; BTF off-block values are refreshed into KLU `Offx` from the
 retained input map. Unchecked row refactors can also hand dirty KLS-owned
 row-major `L`/`U` mirrors directly to guarded forward and transpose

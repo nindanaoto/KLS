@@ -312,6 +312,9 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong *row_pipeline_remaining_preds;
   const unsigned char *row_pipeline_tail_groups;
   UF_long row_pipeline_tail_count;
+  const UF_long *row_pipeline_private_groups;
+  UF_long row_pipeline_private_count;
+  atomic_ulong row_pipeline_private_pos;
   atomic_ulong row_pipeline_ready_head;
   atomic_ulong row_pipeline_ready_tail;
   atomic_ulong row_pipeline_completed_groups;
@@ -12575,6 +12578,13 @@ static void kls_sort_row_refactor_successors_by_work(kls_solver *solver) {
       return;
     }
   }
+  if (solver->row_refactor_group_roots != NULL &&
+      solver->row_refactor_group_root_count > 1u) {
+    (void)kls_sort_row_refactor_group_list_by_cached_work(
+      solver->row_refactor_group_roots,
+      solver->row_refactor_group_root_count,
+      group_work);
+  }
   free(owned_group_work);
 }
 
@@ -12693,6 +12703,7 @@ static int kls_prepare_row_refactor_ready_queue(
   atomic_uint **ready_slots_out,
   atomic_ulong **remaining_preds_out,
   unsigned char **tail_groups_out,
+  const UF_long **private_groups_out,
   UF_long *tail_count_out,
   UF_long *initial_ready_out) {
   if (ready_groups_out != NULL) {
@@ -12707,6 +12718,9 @@ static int kls_prepare_row_refactor_ready_queue(
   if (tail_groups_out != NULL) {
     *tail_groups_out = NULL;
   }
+  if (private_groups_out != NULL) {
+    *private_groups_out = NULL;
+  }
   if (tail_count_out != NULL) {
     *tail_count_out = 0;
   }
@@ -12715,7 +12729,8 @@ static int kls_prepare_row_refactor_ready_queue(
   }
   if (solver == NULL || ready_groups_out == NULL ||
       ready_slots_out == NULL || remaining_preds_out == NULL ||
-      tail_groups_out == NULL || tail_count_out == NULL ||
+      tail_groups_out == NULL || private_groups_out == NULL ||
+      tail_count_out == NULL ||
       initial_ready_out == NULL ||
       solver->row_refactor_group_count == 0u ||
       solver->row_refactor_group_level_ptr == NULL ||
@@ -12761,14 +12776,12 @@ static int kls_prepare_row_refactor_ready_queue(
       tail_groups[group] = 1u;
     }
     ready_count = solver->row_refactor_group_root_count;
+    *private_groups_out = solver->row_refactor_group_roots;
     for (UF_long pos = 0; pos < ready_count; ++pos) {
       const UF_long group = solver->row_refactor_group_roots[pos];
       if (group >= group_count) {
         return 0;
       }
-      ready_groups[pos] = group;
-      atomic_store_explicit(&ready_slots[pos], 1u,
-                            memory_order_relaxed);
     }
   } else {
     for (UF_long group = 0; group < group_count; ++group) {
@@ -12823,7 +12836,8 @@ static int kls_prepare_row_refactor_ready_queue(
   if (ready_count == 0u) {
     return 0;
   }
-  if (!kls_sort_row_refactor_group_list_by_work(solver, ready_groups,
+  if (*private_groups_out == NULL &&
+      !kls_sort_row_refactor_group_list_by_work(solver, ready_groups,
                                                 ready_count)) {
     return 0;
   }
@@ -14458,6 +14472,32 @@ static int kls_row_refactor_finish_ready_group(
 
 static void kls_row_refactor_worker_run_ready_pipeline(
   kls_egraph_refactor_worker *worker) {
+  if (worker != NULL && worker->shared != NULL &&
+      worker->shared->row_pipeline_private_groups != NULL) {
+    kls_egraph_refactor_shared *shared = worker->shared;
+    for (;;) {
+      if (kls_egraph_refactor_should_stop(shared)) {
+        return;
+      }
+      const UF_long pos =
+        (UF_long)atomic_fetch_add_explicit(
+          &shared->row_pipeline_private_pos, 1ul, memory_order_relaxed);
+      if (pos >= shared->row_pipeline_private_count) {
+        break;
+      }
+      const UF_long group = shared->row_pipeline_private_groups[pos];
+      if (!kls_parallel_row_refactor_process_group(worker, group, 0)) {
+        return;
+      }
+      kls_parallel_row_refactor_mark_group_done(worker->shared,
+                                               worker->shared->solver,
+                                               group);
+      if (!kls_row_refactor_finish_ready_group(worker, group)) {
+        return;
+      }
+    }
+  }
+
   for (;;) {
     UF_long group = KLS_KLU_EMPTY;
     if (!kls_row_refactor_pop_ready_group(worker, &group)) {
@@ -14632,6 +14672,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   atomic_uint *row_ready_slots = NULL;
   atomic_ulong *row_remaining_preds = NULL;
   unsigned char *row_tail_groups = NULL;
+  const UF_long *row_private_groups = NULL;
   UF_long row_ready_tail_count = 0;
   UF_long row_initial_ready_count = 0;
   /* Prefer consuming the whole retained row-group DAG through the ready queue.
@@ -14643,8 +14684,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     use_group_pipeline &&
     kls_prepare_row_refactor_ready_queue(
       solver, cluster_levels, &row_ready_groups, &row_ready_slots,
-      &row_remaining_preds, &row_tail_groups, &row_ready_tail_count,
-      &row_initial_ready_count);
+      &row_remaining_preds, &row_tail_groups, &row_private_groups,
+      &row_ready_tail_count, &row_initial_ready_count);
 
   if (have_group_dag && !use_row_ready_queue) {
     if (!kls_build_row_refactor_group_thread_slices(solver, thread_count)) {
@@ -14658,6 +14699,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     row_ready_slots = NULL;
     row_remaining_preds = NULL;
     row_tail_groups = NULL;
+    row_private_groups = NULL;
     row_ready_tail_count = 0;
     row_initial_ready_count = 0;
   }
@@ -14679,8 +14721,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     use_row_ready_queue =
       kls_prepare_row_refactor_ready_queue(
         solver, cluster_levels, &row_ready_groups, &row_ready_slots,
-        &row_remaining_preds, &row_tail_groups, &row_ready_tail_count,
-        &row_initial_ready_count);
+        &row_remaining_preds, &row_tail_groups, &row_private_groups,
+        &row_ready_tail_count, &row_initial_ready_count);
   }
   atomic_uint *pipeline_done = NULL;
   unsigned int pipeline_generation = 0;
@@ -14761,11 +14803,21 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_pipeline_tail_groups = row_tail_groups;
   shared->row_pipeline_tail_count =
     use_row_ready_queue ? row_ready_tail_count : 0u;
+  shared->row_pipeline_private_groups =
+    use_row_ready_queue ? row_private_groups : NULL;
+  shared->row_pipeline_private_count =
+    use_row_ready_queue && row_private_groups != NULL
+      ? row_initial_ready_count : 0u;
+  atomic_store_explicit(&shared->row_pipeline_private_pos, 0ul,
+                        memory_order_release);
   atomic_store_explicit(&shared->row_pipeline_ready_head, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->row_pipeline_ready_tail,
                         (unsigned long)(use_row_ready_queue
-                                          ? row_initial_ready_count : 0u),
+                                          ? (row_private_groups == NULL
+                                               ? row_initial_ready_count
+                                               : 0u)
+                                          : 0u),
                         memory_order_release);
   atomic_store_explicit(&shared->row_pipeline_completed_groups, 0ul,
                         memory_order_release);
@@ -14806,6 +14858,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_pipeline_remaining_preds = NULL;
   shared->row_pipeline_tail_groups = NULL;
   shared->row_pipeline_tail_count = 0;
+  shared->row_pipeline_private_groups = NULL;
+  shared->row_pipeline_private_count = 0;
   pthread_mutex_unlock(&shared->lock);
 
   if (shared->invalid || shared->pivot_rejected ||
@@ -15784,6 +15838,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   pool->barrier_initialized = 1;
   atomic_init(&pool->shared.stop, 0);
   atomic_init(&pool->shared.next_pipeline_pos, 0ul);
+  atomic_init(&pool->shared.row_pipeline_private_pos, 0ul);
   atomic_init(&pool->shared.row_pipeline_ready_head, 0ul);
   atomic_init(&pool->shared.row_pipeline_ready_tail, 0ul);
   atomic_init(&pool->shared.row_pipeline_completed_groups, 0ul);

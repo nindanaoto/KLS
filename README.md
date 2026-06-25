@@ -405,7 +405,9 @@ successors released by completed groups, and reports
 workspace across repeated row refactors and reports its capacity through
 `row_refactor_ready_queue_workspace_groups`. Full-graph queued runs also reuse
 the retained group predecessor counts and root-group list instead of
-rediscovering those static task-graph facts every numeric pass. Checked queued
+rediscovering those static task-graph facts every numeric pass, and hand the
+root groups out through a private-root cursor before using the shared queue for
+newly released successors. Checked queued
 rejects refresh any missing prefix rows before accepting a prefix-tail repair
 classification.
 Checked row fast-factor rejects also report the conservative row-group restart
