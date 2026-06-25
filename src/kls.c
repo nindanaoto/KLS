@@ -8666,6 +8666,32 @@ static int kls_fast_reject_block_work(const kls_solver *solver,
   return 1;
 }
 
+static int kls_fast_reject_range_work(const kls_solver *solver,
+                                      UF_long block,
+                                      UF_long k1,
+                                      UF_long nk,
+                                      UF_long local_begin,
+                                      UF_long local_end,
+                                      UF_long *columns_out,
+                                      double *work_out) {
+  if (solver == NULL || columns_out == NULL || work_out == NULL ||
+      local_begin >= local_end || local_end > nk) {
+    return 0;
+  }
+  double work = 0.0;
+  for (UF_long k = local_begin; k < local_end; ++k) {
+    double column_work = 0.0;
+    if (!kls_fast_reject_column_work(solver, block, k1, nk, k,
+                                     &column_work)) {
+      return 0;
+    }
+    work += column_work;
+  }
+  *columns_out = local_end - local_begin;
+  *work_out = work;
+  return 1;
+}
+
 static int kls_fast_reject_suffix_work(const kls_solver *solver,
                                        UF_long block,
                                        UF_long k1,
@@ -8677,18 +8703,8 @@ static int kls_fast_reject_suffix_work(const kls_solver *solver,
       local_reject >= nk) {
     return 0;
   }
-  double work = 0.0;
-  for (UF_long k = local_reject; k < nk; ++k) {
-    double column_work = 0.0;
-    if (!kls_fast_reject_column_work(solver, block, k1, nk, k,
-                                     &column_work)) {
-      return 0;
-    }
-    work += column_work;
-  }
-  *columns_out = nk - local_reject;
-  *work_out = work;
-  return 1;
+  return kls_fast_reject_range_work(solver, block, k1, nk, local_reject,
+                                    nk, columns_out, work_out);
 }
 
 static int kls_build_ordered_block_etree(const kls_solver *solver,
@@ -10983,6 +10999,153 @@ static int kls_copy_live_prefix_lu(Unit *new_lu,
   return 1;
 }
 
+static int kls_copy_preserved_lu_columns(Unit **new_lu_io,
+                                         size_t *lusize_io,
+                                         const Unit *old_lu,
+                                         size_t old_lusize,
+                                         const UF_long *old_lip,
+                                         const UF_long *old_llen,
+                                         const UF_long *old_uip,
+                                         const UF_long *old_ulen,
+                                         const Entry *old_udiag,
+                                         const UF_long *old_pblock,
+                                         const UF_long *final_pinv,
+                                         UF_long nk,
+                                         UF_long begin,
+                                         UF_long end,
+                                         UF_long *lip,
+                                         UF_long *llen,
+                                         UF_long *uip,
+                                         UF_long *ulen,
+                                         Entry *udiag,
+                                         size_t *lup_io,
+                                         UF_long *lnz_io,
+                                         UF_long *unz_io,
+                                         TRILINOS_KLU_common *common) {
+  if (new_lu_io == NULL || *new_lu_io == NULL || lusize_io == NULL ||
+      old_lu == NULL || old_lip == NULL || old_llen == NULL ||
+      old_uip == NULL || old_ulen == NULL || old_udiag == NULL ||
+      old_pblock == NULL || final_pinv == NULL || lip == NULL ||
+      llen == NULL || uip == NULL || ulen == NULL || udiag == NULL ||
+      lup_io == NULL || lnz_io == NULL || unz_io == NULL ||
+      common == NULL || begin > end || end > nk) {
+    return 0;
+  }
+
+  Unit *new_lu = *new_lu_io;
+  size_t lusize = *lusize_io;
+  size_t lup = *lup_io;
+  for (UF_long k = begin; k < end; ++k) {
+    const UF_long l_len = old_llen[k];
+    const UF_long u_len = old_ulen[k];
+    const UF_long src_lip = old_lip[k];
+    const UF_long src_uip = old_uip[k];
+    const size_t l_units = kls_klu_units_for_indices(l_len);
+    const size_t u_units = kls_klu_units_for_indices(u_len);
+    if ((size_t)src_lip > old_lusize ||
+        l_units > old_lusize - (size_t)src_lip ||
+        l_len > (UF_long)(old_lusize - (size_t)src_lip - l_units) ||
+        (size_t)src_uip > old_lusize ||
+        u_units > old_lusize - (size_t)src_uip ||
+        u_len > (UF_long)(old_lusize - (size_t)src_uip - u_units)) {
+      return 0;
+    }
+    const size_t need =
+      l_units + (size_t)l_len + u_units + (size_t)u_len;
+    if (need > SIZE_MAX - lup) {
+      return 0;
+    }
+    if (lup + need > lusize) {
+      const double grown_double =
+        common->memgrow * (double)lusize + 2.0 * (double)nk +
+        (double)need + 1.0;
+      if (INT_OVERFLOW(grown_double)) {
+        common->status = TRILINOS_KLU_TOO_LARGE;
+        return 0;
+      }
+      size_t grown = (size_t)grown_double;
+      if (grown < lup + need) {
+        grown = lup + need;
+      }
+      Unit *grown_lu =
+        (Unit *)TRILINOS_KLU_realloc(grown, lusize, sizeof(Unit), new_lu,
+                                     common);
+      if (common->status == TRILINOS_KLU_OUT_OF_MEMORY ||
+          grown_lu == NULL) {
+        return 0;
+      }
+      new_lu = grown_lu;
+      lusize = grown;
+      common->nrealloc++;
+    }
+
+    lip[k] = (UF_long)lup;
+    llen[k] = l_len;
+    UF_long *dst_li = (UF_long *)(new_lu + lup);
+    Entry *dst_lx = (Entry *)(new_lu + lup + l_units);
+    Int *src_li = (Int *)((Unit *)old_lu + src_lip);
+    Entry *src_lx = (Entry *)((Unit *)old_lu + src_lip + l_units);
+    for (UF_long p = 0; p < l_len; ++p) {
+      const UF_long old_final_order = src_li[p];
+      if (old_final_order >= nk) {
+        return 0;
+      }
+      const UF_long local_row = old_pblock[old_final_order];
+      if (local_row >= nk || final_pinv[local_row] <= k ||
+          final_pinv[local_row] >= nk) {
+        return 0;
+      }
+      dst_li[p] = local_row;
+      dst_lx[p] = src_lx[p];
+    }
+    lup += l_units + (size_t)l_len;
+
+    uip[k] = (UF_long)lup;
+    ulen[k] = u_len;
+    UF_long *dst_ui = (UF_long *)(new_lu + lup);
+    Entry *dst_ux = (Entry *)(new_lu + lup + u_units);
+    Int *src_ui = (Int *)((Unit *)old_lu + src_uip);
+    Entry *src_ux = (Entry *)((Unit *)old_lu + src_uip + u_units);
+    for (UF_long p = 0; p < u_len; ++p) {
+      if (src_ui[p] >= (Int)k) {
+        return 0;
+      }
+      dst_ui[p] = (UF_long)src_ui[p];
+      dst_ux[p] = src_ux[p];
+    }
+    lup += u_units + (size_t)u_len;
+    udiag[k] = old_udiag[k];
+    *lnz_io += l_len + 1u;
+    *unz_io += u_len + 1u;
+  }
+
+  *new_lu_io = new_lu;
+  *lusize_io = lusize;
+  *lup_io = lup;
+  return 1;
+}
+
+static UF_long kls_preferred_pivot_tail_restart_end(const kls_solver *solver,
+                                                    UF_long k1,
+                                                    UF_long nk,
+                                                    UF_long local_reject) {
+  if (solver == NULL || local_reject == 0u || local_reject >= nk ||
+      !solver->stats.fast_rejected_pivoting_tail_contiguous ||
+      solver->stats.fast_rejected_pivoting_tail_suffix_exact ||
+      !solver->stats.fast_rejected_pivoting_tail_topological ||
+      solver->stats.fast_rejected_pivoting_tail_first !=
+        (int64_t)(k1 + local_reject) ||
+      solver->stats.fast_rejected_pivoting_tail_last <
+        (int64_t)(k1 + local_reject) ||
+      solver->stats.fast_rejected_pivoting_tail_last >=
+        (int64_t)(k1 + nk - 1u)) {
+    return nk;
+  }
+  const UF_long restart_end =
+    (UF_long)solver->stats.fast_rejected_pivoting_tail_last - k1 + 1u;
+  return restart_end > local_reject && restart_end < nk ? restart_end : nk;
+}
+
 static int kls_try_pivot_tail_restart_rejected_block(
   kls_solver *solver,
   double *numeric_values,
@@ -10990,6 +11153,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
   UF_long k1,
   UF_long nk,
   UF_long local_reject,
+  UF_long restart_end,
   const UF_long *old_pblock,
   const UF_long *psinv,
   Unit **new_lu_out,
@@ -11009,6 +11173,9 @@ static int kls_try_pivot_tail_restart_rejected_block(
   if (unz_block_out != NULL) {
     *unz_block_out = 0;
   }
+  if (restart_end == KLS_KLU_EMPTY) {
+    restart_end = nk;
+  }
   const int reusable_prefix_state =
     solver != NULL &&
     (solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX ||
@@ -11020,7 +11187,8 @@ static int kls_try_pivot_tail_restart_rejected_block(
       new_size_out == NULL || lnz_block_out == NULL ||
       unz_block_out == NULL || pblock == NULL ||
       (local_reject > 0u && !reusable_prefix_state) ||
-      local_reject >= nk ||
+      local_reject >= nk || restart_end <= local_reject ||
+      restart_end > nk ||
       block >= solver->numeric->nblocks ||
       solver->numeric->LUbx == NULL ||
       solver->numeric->LUsize == NULL ||
@@ -11122,7 +11290,8 @@ static int kls_try_pivot_tail_restart_rejected_block(
   }
   const double tol = solver->common.tol;
   const double memgrow = solver->common.memgrow;
-  for (UF_long kk = local_reject; kk < nk; ++kk) {
+  const int preserve_suffix = restart_end < nk;
+  for (UF_long kk = local_reject; kk < restart_end; ++kk) {
     const Int k = (Int)kk;
     const double nunits =
       DUNITS(Int, (Int)nk - k) + DUNITS(Int, k) +
@@ -11192,6 +11361,13 @@ static int kls_try_pivot_tail_restart_rejected_block(
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
     }
+    if (preserve_suffix) {
+      const UF_long old_pivot_pos = final_pinv[pivrow];
+      if (old_pivot_pos >= restart_end) {
+        solver->common.status = TRILINOS_KLU_INVALID;
+        goto fail;
+      }
+    }
 
     uip[k] = lip[k] + (UF_long)UNITS(Int, llen[k]) +
              (UF_long)UNITS(Entry, llen[k]);
@@ -11218,6 +11394,10 @@ static int kls_try_pivot_tail_restart_rejected_block(
           solver->common.status = TRILINOS_KLU_INVALID;
           goto fail;
         }
+        if (preserve_suffix && (UF_long)kbar >= restart_end) {
+          solver->common.status = TRILINOS_KLU_INVALID;
+          goto fail;
+        }
         pblock[kbar] = diagrow;
         live_pinv[diagrow] = FLIP(kbar);
       }
@@ -11229,6 +11409,31 @@ static int kls_try_pivot_tail_restart_rejected_block(
                    llen);
     lnz += llen[k] + 1u;
     unz += ulen[k] + 1u;
+  }
+
+  if (preserve_suffix) {
+    for (UF_long k = restart_end; k < nk; ++k) {
+      pblock[k] = old_pblock[k];
+    }
+  }
+  for (UF_long k = 0; k < nk; ++k) {
+    live_pinv[k] = KLS_KLU_EMPTY;
+  }
+  for (UF_long k = 0; k < nk; ++k) {
+    const UF_long local_row = pblock[k];
+    if (local_row >= nk || live_pinv[local_row] != KLS_KLU_EMPTY) {
+      solver->common.status = TRILINOS_KLU_INVALID;
+      goto fail;
+    }
+    live_pinv[local_row] = k;
+  }
+  if (preserve_suffix &&
+      !kls_copy_preserved_lu_columns(
+        &new_lu, &lusize, old_lu, old_lusize, lip, llen, uip, ulen, udiag,
+        old_pblock, live_pinv, nk, restart_end, nk, lip, llen, uip, ulen,
+        udiag, &lup, &lnz, &unz, &solver->common)) {
+    solver->common.status = TRILINOS_KLU_INVALID;
+    goto fail;
   }
 
   for (UF_long k = 0; k < nk; ++k) {
@@ -11283,6 +11488,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
                                                  UF_long k1,
                                                  UF_long nk,
                                                  UF_long rejected_pivot,
+                                                 UF_long repaired_tail_end,
                                                  const UF_long *old_pblock,
                                                  const UF_long *pblock) {
   if (solver == NULL || old_pblock == NULL || pblock == NULL ||
@@ -11315,6 +11521,9 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
   }
   if (!valid) {
     return;
+  }
+  if (repaired_tail_end <= local_reject || repaired_tail_end > nk) {
+    repaired_tail_end = nk;
   }
 
   const int64_t repaired_row = (int64_t)(k1 + pblock[local_reject]);
@@ -11354,8 +11563,9 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     if (solver->stats.fast_repaired_tail_restart_ready) {
       UF_long tail_columns = 0;
       double tail_work = 0.0;
-      if (kls_fast_reject_suffix_work(solver, block, k1, nk, local_reject,
-                                      &tail_columns, &tail_work)) {
+      if (kls_fast_reject_range_work(solver, block, k1, nk, local_reject,
+                                     repaired_tail_end, &tail_columns,
+                                     &tail_work)) {
         solver->stats.fast_repaired_tail_restart_columns =
           (int64_t)tail_columns;
         solver->stats.fast_repaired_tail_restart_work = tail_work;
@@ -11467,6 +11677,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   const UF_long old_numerical_rank = (UF_long)solver->common.numerical_rank;
   const UF_long old_singular_col = (UF_long)solver->common.singular_col;
   const UF_long old_noffdiag = (UF_long)solver->common.noffdiag;
+  const UF_long old_nrealloc = solver->common.nrealloc;
   const int scaled_all_refresh =
     scaled &&
     solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL;
@@ -11490,10 +11701,69 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   solver->common.singular_col = KLS_KLU_EMPTY;
 
   size_t new_size = 0u;
-  int kls_block_restart_used =
-    kls_try_pivot_tail_restart_rejected_block(
-      solver, numeric_values, block, k1, nk, local_reject, old_pblock,
-      psinv, &new_lu, &new_size, &lnz_block, &unz_block, pblock);
+  UF_long repaired_tail_end = nk;
+  const UF_long preferred_restart_end =
+    kls_preferred_pivot_tail_restart_end(solver, k1, nk, local_reject);
+  int kls_block_restart_used = 0;
+  if (preferred_restart_end < nk) {
+    UF_long *saved_ptrs = NULL;
+    Entry *saved_udiag = NULL;
+    if (nk <= (UF_long)(SIZE_MAX / (4u * sizeof(*saved_ptrs)))) {
+      saved_ptrs =
+        (UF_long *)malloc(4u * (size_t)nk * sizeof(*saved_ptrs));
+      saved_udiag = (Entry *)malloc((size_t)nk * sizeof(*saved_udiag));
+    }
+    if (saved_ptrs != NULL && saved_udiag != NULL) {
+      UF_long *saved_lip = saved_ptrs;
+      UF_long *saved_llen = saved_ptrs + nk;
+      UF_long *saved_uip = saved_ptrs + 2u * nk;
+      UF_long *saved_ulen = saved_ptrs + 3u * nk;
+      memcpy(saved_lip, solver->numeric->Lip + k1,
+             (size_t)nk * sizeof(*saved_lip));
+      memcpy(saved_llen, solver->numeric->Llen + k1,
+             (size_t)nk * sizeof(*saved_llen));
+      memcpy(saved_uip, solver->numeric->Uip + k1,
+             (size_t)nk * sizeof(*saved_uip));
+      memcpy(saved_ulen, solver->numeric->Ulen + k1,
+             (size_t)nk * sizeof(*saved_ulen));
+      memcpy(saved_udiag, ((Entry *)solver->numeric->Udiag) + k1,
+             (size_t)nk * sizeof(*saved_udiag));
+      kls_block_restart_used =
+        kls_try_pivot_tail_restart_rejected_block(
+          solver, numeric_values, block, k1, nk, local_reject,
+          preferred_restart_end, old_pblock, psinv, &new_lu, &new_size,
+          &lnz_block, &unz_block, pblock);
+      if (!kls_block_restart_used) {
+        solver->common.nrealloc = old_nrealloc;
+        memcpy(solver->numeric->Lip + k1, saved_lip,
+               (size_t)nk * sizeof(*saved_lip));
+        memcpy(solver->numeric->Llen + k1, saved_llen,
+               (size_t)nk * sizeof(*saved_llen));
+        memcpy(solver->numeric->Uip + k1, saved_uip,
+               (size_t)nk * sizeof(*saved_uip));
+        memcpy(solver->numeric->Ulen + k1, saved_ulen,
+               (size_t)nk * sizeof(*saved_ulen));
+        memcpy(((Entry *)solver->numeric->Udiag) + k1, saved_udiag,
+               (size_t)nk * sizeof(*saved_udiag));
+      }
+    }
+    free(saved_ptrs);
+    free(saved_udiag);
+  }
+  if (kls_block_restart_used) {
+    repaired_tail_end = preferred_restart_end;
+  } else {
+    solver->common.status = TRILINOS_KLU_OK;
+    solver->common.numerical_rank = KLS_KLU_EMPTY;
+    solver->common.singular_col = KLS_KLU_EMPTY;
+    solver->common.noffdiag = old_noffdiag;
+    kls_block_restart_used =
+      kls_try_pivot_tail_restart_rejected_block(
+        solver, numeric_values, block, k1, nk, local_reject, nk,
+        old_pblock, psinv, &new_lu, &new_size, &lnz_block, &unz_block,
+        pblock);
+    repaired_tail_end = nk;
+  }
   const int tail_restart_used =
     kls_block_restart_used && local_reject > 0u;
   if (!kls_block_restart_used) {
@@ -11560,7 +11830,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     solver->numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + local_row];
   }
   kls_record_fast_repaired_block_stats(solver, block, k1, nk, rejected_pivot,
-                                       old_pblock, pblock);
+                                       repaired_tail_end, old_pblock, pblock);
   free(old_pblock);
 
   if (!kls_rebuild_numeric_pinv(solver)) {
@@ -20783,7 +21053,7 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
     UF_long lnz_block = 0;
     UF_long unz_block = 0;
     if (!kls_try_pivot_tail_restart_rejected_block(
-          solver, numeric_values, block, k1, nk, 0u, old_pblock, psinv,
+          solver, numeric_values, block, k1, nk, 0u, nk, old_pblock, psinv,
           &new_lu, &new_size, &lnz_block, &unz_block, pblock) ||
         new_lu == NULL || new_size == 0u || common->status < 0 ||
         (common->status == TRILINOS_KLU_SINGULAR &&
