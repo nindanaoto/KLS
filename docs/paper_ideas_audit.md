@@ -3473,3 +3473,16 @@ immediately on reject. The dense checked-prefix smoke case now asserts both the
 compact-panel marker and the tail repair residual. This is still not the full
 pipelined CKTSO tail executor, but it closes a concrete semantic gap for
 compact row-major segment updates with pivot-aware prefix repair.
+
+The compact-panel gate was then tightened from a tiny absolute work floor into
+a structural arithmetic-intensity check. A dense group now uses worker-local
+compact scratch only when its estimated internal dense plus shared-trailing
+update work is large enough overall and large enough per copied panel entry.
+This avoids treating shallow panel packing as a SubtreeLU/CKTSO mechanism when
+the copied scratch has too little update work to amortize it. Focused forced-row
+checks stayed valid: `G2_circuit` still exercised 662 dense segments but compact
+panel uses dropped from 1280 to about 500 across two refactors, while `mc2depi`
+dropped from 3623 to about 1340 compact uses and improved in the same-session
+sample. The retained lesson is still that KLS needs persistent compact
+row/segment numeric storage, but the scratch bridge now follows a broader
+work-per-byte rule instead of a low absolute threshold.

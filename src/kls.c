@@ -32,7 +32,8 @@
 
 #define KLS_KLU_EMPTY ((UF_long)-1)
 #define KLS_ROW_REFACTOR_DENSE_MIN_WORK 1024.0
-#define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 4096.0
+#define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 32768.0
+#define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY 8.0
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
 #define KLS_ROW_SOLVE_TRAPEZOID_SLICES 8u
@@ -16658,10 +16659,23 @@ static double kls_row_refactor_dense_group_update_work(UF_long width,
   return (w * w * w / 3.0) + (0.5 * w * w * trailing);
 }
 
+static double kls_row_refactor_dense_group_panel_entries(
+  UF_long width,
+  UF_long trailing_len) {
+  const double w = (double)width;
+  const double trailing = (double)trailing_len;
+  return (w * w) + (w * trailing);
+}
+
 static int kls_row_refactor_prefers_compact_dense_panel(UF_long width,
                                                         UF_long trailing_len) {
-  return kls_row_refactor_dense_group_update_work(width, trailing_len) >=
-         KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK;
+  const double update_work =
+    kls_row_refactor_dense_group_update_work(width, trailing_len);
+  const double panel_entries =
+    kls_row_refactor_dense_group_panel_entries(width, trailing_len);
+  return update_work >= KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK &&
+         update_work >=
+           KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY * panel_entries;
 }
 
 static int kls_store_compact_dense_panel_row(
