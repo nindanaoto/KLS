@@ -22471,10 +22471,12 @@ typedef struct kls_row_first_entries {
   UF_long *col;
   UF_long *next;
   UF_long *col_head;
+  UF_long *col_count;
   double *value;
   UF_long count;
   UF_long capacity;
   UF_long col_head_len;
+  UF_long col_count_len;
 } kls_row_first_entries;
 
 static void kls_row_first_entries_free(kls_row_first_entries *entries) {
@@ -22485,15 +22487,34 @@ static void kls_row_first_entries_free(kls_row_first_entries *entries) {
   free(entries->col);
   free(entries->next);
   free(entries->col_head);
+  free(entries->col_count);
   free(entries->value);
   entries->row = NULL;
   entries->col = NULL;
   entries->next = NULL;
   entries->col_head = NULL;
+  entries->col_count = NULL;
   entries->value = NULL;
   entries->count = 0;
   entries->capacity = 0;
   entries->col_head_len = 0;
+  entries->col_count_len = 0;
+}
+
+static int kls_row_first_entries_enable_col_counts(
+  kls_row_first_entries *entries,
+  UF_long local_n) {
+  if (entries == NULL || entries->count != 0u ||
+      entries->capacity != 0u || entries->col_count != NULL) {
+    return 0;
+  }
+  entries->col_count =
+    (UF_long *)calloc((size_t)local_n, sizeof(*entries->col_count));
+  if (entries->col_count == NULL && local_n > 0u) {
+    return 0;
+  }
+  entries->col_count_len = local_n;
+  return 1;
 }
 
 static int kls_row_first_entries_enable_col_links(
@@ -22568,13 +22589,17 @@ static int kls_row_first_entries_append(kls_row_first_entries *entries,
     entries->value = new_value;
     entries->capacity = grown;
   }
-  if (entries->col_head != NULL && col >= entries->col_head_len) {
+  if ((entries->col_head != NULL && col >= entries->col_head_len) ||
+      (entries->col_count != NULL && col >= entries->col_count_len)) {
     return 0;
   }
   const UF_long pos = entries->count;
   entries->row[pos] = row;
   entries->col[pos] = col;
   entries->value[pos] = value;
+  if (entries->col_count != NULL) {
+    entries->col_count[col]++;
+  }
   if (entries->col_head != NULL) {
     entries->next[pos] = entries->col_head[col];
     entries->col_head[col] = pos;
@@ -22682,6 +22707,14 @@ static int kls_row_first_exchange_columns(kls_row_first_entries *u_entries,
     }
     u_entries->col_head[a] = head_b;
     u_entries->col_head[b] = head_a;
+    if (u_entries->col_count != NULL) {
+      if (a >= u_entries->col_count_len || b >= u_entries->col_count_len) {
+        return 0;
+      }
+      const UF_long count_a = u_entries->col_count[a];
+      u_entries->col_count[a] = u_entries->col_count[b];
+      u_entries->col_count[b] = count_a;
+    }
     return 1;
   }
   for (UF_long p = 0; p < u_entries->count; ++p) {
@@ -22694,6 +22727,14 @@ static int kls_row_first_exchange_columns(kls_row_first_entries *u_entries,
         u_entries->row[p] >= local_n || u_entries->col[p] >= local_n) {
       return 0;
     }
+  }
+  if (u_entries->col_count != NULL) {
+    if (a >= u_entries->col_count_len || b >= u_entries->col_count_len) {
+      return 0;
+    }
+    const UF_long count_a = u_entries->col_count[a];
+    u_entries->col_count[a] = u_entries->col_count[b];
+    u_entries->col_count[b] = count_a;
   }
   return 1;
 }
@@ -22725,31 +22766,12 @@ static int kls_pack_row_first_block_numeric(
     return 0;
   }
 
-  UF_long *l_count =
-    nk > 0u ? (UF_long *)calloc((size_t)nk, sizeof(*l_count)) : NULL;
-  UF_long *u_count =
-    nk > 0u ? (UF_long *)calloc((size_t)nk, sizeof(*u_count)) : NULL;
-  if (l_count == NULL || u_count == NULL) {
-    free(l_count);
-    free(u_count);
+  if (l_entries->col_count == NULL || u_entries->col_count == NULL ||
+      l_entries->col_count_len < nk || u_entries->col_count_len < nk) {
     return 0;
   }
-  for (UF_long p = 0; p < l_entries->count; ++p) {
-    if (l_entries->col[p] >= nk || l_entries->row[p] >= nk) {
-      free(l_count);
-      free(u_count);
-      return 0;
-    }
-    l_count[l_entries->col[p]]++;
-  }
-  for (UF_long p = 0; p < u_entries->count; ++p) {
-    if (u_entries->col[p] >= nk || u_entries->row[p] >= nk) {
-      free(l_count);
-      free(u_count);
-      return 0;
-    }
-    u_count[u_entries->col[p]]++;
-  }
+  const UF_long *l_count = l_entries->col_count;
+  const UF_long *u_count = u_entries->col_count;
 
   size_t lusize = 0u;
   for (UF_long k = 0; k < nk; ++k) {
@@ -22757,15 +22779,11 @@ static int kls_pack_row_first_block_numeric(
     const size_t u_units = kls_klu_units_for_indices(u_count[k]);
     if (l_units > SIZE_MAX - lusize ||
         (size_t)l_count[k] > SIZE_MAX - lusize - l_units) {
-      free(l_count);
-      free(u_count);
       return 0;
     }
     lusize += l_units + (size_t)l_count[k];
     if (u_units > SIZE_MAX - lusize ||
         (size_t)u_count[k] > SIZE_MAX - lusize - u_units) {
-      free(l_count);
-      free(u_count);
       return 0;
     }
     lusize += u_units + (size_t)u_count[k];
@@ -22777,8 +22795,6 @@ static int kls_pack_row_first_block_numeric(
   Unit *lu =
     (Unit *)TRILINOS_KLU_malloc(lusize, sizeof(Unit), &solver->common);
   if (lu == NULL) {
-    free(l_count);
-    free(u_count);
     return 0;
   }
 
@@ -22795,29 +22811,27 @@ static int kls_pack_row_first_block_numeric(
   }
 
   UF_long *l_write =
-    (UF_long *)malloc((size_t)nk * sizeof(*l_write));
+    (UF_long *)calloc((size_t)nk, sizeof(*l_write));
   UF_long *u_write =
-    (UF_long *)malloc((size_t)nk * sizeof(*u_write));
+    (UF_long *)calloc((size_t)nk, sizeof(*u_write));
   if (l_write == NULL || u_write == NULL) {
     (void)TRILINOS_KLU_free(lu, lusize, sizeof(Unit), &solver->common);
-    free(l_count);
-    free(u_count);
     free(l_write);
     free(u_write);
     return 0;
   }
-  for (UF_long k = 0; k < nk; ++k) {
-    l_write[k] = 0;
-    u_write[k] = 0;
-  }
 
   for (UF_long p = 0; p < l_entries->count; ++p) {
     const UF_long col = l_entries->col[p];
+    if (col >= nk || l_entries->row[p] >= nk) {
+      (void)TRILINOS_KLU_free(lu, lusize, sizeof(Unit), &solver->common);
+      free(l_write);
+      free(u_write);
+      return 0;
+    }
     const UF_long offset = l_write[col]++;
     if (offset >= l_count[col]) {
       (void)TRILINOS_KLU_free(lu, lusize, sizeof(Unit), &solver->common);
-      free(l_count);
-      free(u_count);
       free(l_write);
       free(u_write);
       return 0;
@@ -22831,11 +22845,15 @@ static int kls_pack_row_first_block_numeric(
   }
   for (UF_long p = 0; p < u_entries->count; ++p) {
     const UF_long col = u_entries->col[p];
+    if (col >= nk || u_entries->row[p] >= nk) {
+      (void)TRILINOS_KLU_free(lu, lusize, sizeof(Unit), &solver->common);
+      free(l_write);
+      free(u_write);
+      return 0;
+    }
     const UF_long offset = u_write[col]++;
     if (offset >= u_count[col]) {
       (void)TRILINOS_KLU_free(lu, lusize, sizeof(Unit), &solver->common);
-      free(l_count);
-      free(u_count);
       free(l_write);
       free(u_write);
       return 0;
@@ -22860,8 +22878,6 @@ static int kls_pack_row_first_block_numeric(
   if (*max_unz_block < unz_block) {
     *max_unz_block = unz_block;
   }
-  free(l_count);
-  free(u_count);
   free(l_write);
   free(u_write);
   return 1;
@@ -23059,7 +23075,9 @@ static int kls_try_first_factor_row_uplooking_blocks(
     kls_row_first_entries u_entries;
     memset(&l_entries, 0, sizeof(l_entries));
     memset(&u_entries, 0, sizeof(u_entries));
-    if (!kls_row_first_entries_enable_col_links(&u_entries, nk)) {
+    if (!kls_row_first_entries_enable_col_counts(&l_entries, nk) ||
+        !kls_row_first_entries_enable_col_counts(&u_entries, nk) ||
+        !kls_row_first_entries_enable_col_links(&u_entries, nk)) {
       goto fail_block_entries;
     }
     for (UF_long i = 0; i < nk; ++i) {
