@@ -567,7 +567,8 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_kls_block_restarts`, `fast_tail_restarts`,
 `fast_repaired_last_offdiag_suffix_refresh`,
 `fast_repaired_offdiag_suffix_refresh_count`, and
-`fast_repaired_offdiag_full_refresh_count` for the first rejected
+`fast_repaired_offdiag_full_refresh_count`, and
+`fast_repaired_parallel_tail_blocks` for the first rejected
 factor-order pivot, its original matrix column, the rejecting row, the
 L-multiplier or row-maximum-to-pivot ratio that violated a KLS-owned pivot
 check when available, the accepted pivot magnitude and candidate or row-maximum

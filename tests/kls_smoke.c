@@ -1613,6 +1613,122 @@ static int test_btf_prefix_tail_restart_with_offblock(void) {
   return ok;
 }
 
+static int test_parallel_btf_suffix_after_prefix_tail_restart(void) {
+  const int32_t ap[] = {0, 1, 2, 3, 9, 15, 21, 23, 25, 27};
+  const int32_t ai[] = {
+    0,
+    1,
+    2,
+    0, 1, 2, 3, 4, 5,
+    0, 1, 2, 3, 4, 5,
+    0, 1, 2, 3, 4, 5,
+    3, 6,
+    4, 7,
+    5, 8
+  };
+  const double ax0[] = {
+    4.0,
+    5.0,
+    6.0,
+    0.1, -0.1, 0.05, 8.0, 0.01, 0.02,
+    0.02, 0.1, -0.04, 0.01, 8.0, 0.03,
+    -0.03, 0.02, 0.06, 0.02, 0.03, 8.0,
+    0.2, 7.0,
+    -0.3, 7.5,
+    0.4, 8.5
+  };
+  const double ax1[] = {
+    4.0,
+    5.0,
+    6.0,
+    0.1, -0.1, 0.05, 8.0, 0.01, 0.02,
+    0.02, 0.1, -0.04, 0.01, 1.0e-12, 2.0,
+    -0.03, 0.02, 0.06, 0.02, 0.03, 8.0,
+    0.25, 7.25,
+    0.1, 7.75,
+    -0.2, 8.75
+  };
+  const double expected[] = {
+    1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0
+  };
+  double b[9] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double x[9] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  for (int32_t col = 0; col < 9; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 2;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 9, ap, ai, 0,
+                                        &options),
+                        "analyze parallel btf suffix tail")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor parallel btf suffix base")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor parallel btf suffix repair")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve parallel btf suffix")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats parallel btf suffix")) {
+    ok = 0;
+  }
+  if (ok && (stats.nblocks < 4 ||
+             stats.fast_rejected_refresh_state !=
+               KLS_FAST_REJECT_REFRESH_PREFIX ||
+             stats.fast_block_restarts != 1 ||
+             stats.fast_tail_restarts != 1 ||
+             stats.fast_repaired_tail_restart_ready != 1 ||
+             stats.fast_repaired_parallel_tail_blocks < 2)) {
+    fprintf(stderr,
+            "unexpected parallel btf suffix stats: nblocks=%" PRId64
+            ", pivot=%" PRId64 ", start=%" PRId64 ", size=%" PRId64
+            ", refresh=%d, restarts=%d, tail_restarts=%d"
+            ", tail_ready=%d, parallel_tail_blocks=%" PRId64 "\n",
+            stats.nblocks,
+            stats.fast_rejected_pivot,
+            stats.fast_rejected_block_start,
+            stats.fast_rejected_block_size,
+            stats.fast_rejected_refresh_state,
+            stats.fast_block_restarts,
+            stats.fast_tail_restarts,
+            stats.fast_repaired_tail_restart_ready,
+            stats.fast_repaired_parallel_tail_blocks);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats, "parallel btf suffix")) {
+    ok = 0;
+  }
+  if (ok && !require_tail_overcompute_bounds(&stats,
+                                             "parallel btf suffix")) {
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < 9; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected parallel btf suffix solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
 static int run_btf_row_refactor_offblock_refresh(int scale) {
   const int32_t ap[] = {0, 2, 4, 7, 9};
   const int32_t ai[] = {0, 1, 0, 1, 0, 2, 3, 2, 3};
@@ -4172,6 +4288,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_btf_prefix_tail_restart_with_offblock()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_parallel_btf_suffix_after_prefix_tail_restart()) {
     return EXIT_FAILURE;
   }
   if (!test_btf_row_refactor_offblock_refresh()) {

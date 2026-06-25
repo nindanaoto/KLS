@@ -270,6 +270,7 @@ struct kls_solver {
   int fast_repaired_last_offdiag_suffix_refresh;
   UF_long fast_repaired_offdiag_suffix_refresh_count;
   UF_long fast_repaired_offdiag_full_refresh_count;
+  UF_long fast_repaired_parallel_tail_blocks;
   int fast_reject_refresh_state;
   UF_long *fast_reject_tail_cols;
   unsigned int *fast_reject_tail_marks;
@@ -1315,6 +1316,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_tail_restart_saved_work = 0.0;
   solver->stats.fast_repaired_tail_restart_overcompute_columns = 0;
   solver->stats.fast_repaired_tail_restart_overcompute_work = 0.0;
+  solver->stats.fast_repaired_parallel_tail_blocks = 0;
   solver->stats.fast_block_restarts = 0;
   solver->stats.fast_kls_block_restarts = 0;
   solver->stats.fast_tail_restarts = 0;
@@ -1353,6 +1355,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_repaired_last_offdiag_suffix_refresh = 0;
   solver->fast_repaired_offdiag_suffix_refresh_count = 0;
   solver->fast_repaired_offdiag_full_refresh_count = 0;
+  solver->fast_repaired_parallel_tail_blocks = 0;
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_reject_tail_count = 0;
   solver->fast_reject_tail_seed_block = KLS_KLU_EMPTY;
@@ -1578,6 +1581,8 @@ static void kls_record_fast_reject_detail(kls_solver *solver,
   solver->stats.fast_repaired_tail_restart_saved_work = 0.0;
   solver->stats.fast_repaired_tail_restart_overcompute_columns = 0;
   solver->stats.fast_repaired_tail_restart_overcompute_work = 0.0;
+  solver->stats.fast_repaired_parallel_tail_blocks =
+    (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_rejected_pivoting_tail_contiguous = 0;
   solver->stats.fast_rejected_pivoting_tail_suffix_exact = 0;
   solver->stats.fast_rejected_pivoting_tail_gap_columns = 0;
@@ -2109,6 +2114,7 @@ static int kls_refactor_pool_rejected_prefix_current(
 static int run_refactor_pool(kls_solver *solver,
                              double *numeric_values,
                              int thread_count,
+                             UF_long start_block,
                              int check_pivots,
                              int *invalid_out,
                              int *pivot_rejected_out,
@@ -2123,6 +2129,9 @@ static int run_refactor_pool(kls_solver *solver,
                              UF_long *singular_col_out,
                              int *prefix_current_out) {
   if (!ensure_refactor_pool(solver, thread_count)) {
+    return 0;
+  }
+  if (start_block > solver->symbolic->nblocks) {
     return 0;
   }
   kls_refactor_pool *pool = solver->refactor_pool;
@@ -2151,6 +2160,10 @@ static int run_refactor_pool(kls_solver *solver,
   if (pool->block_done != NULL && solver->symbolic->nblocks > 0u) {
     memset(pool->block_done, 0,
            (size_t)solver->symbolic->nblocks * sizeof(*pool->block_done));
+    if (start_block > 0u) {
+      memset(pool->block_done, 1,
+             (size_t)start_block * sizeof(*pool->block_done));
+    }
   }
 
   shared->col_ptr = solver->col_ptr;
@@ -2169,7 +2182,7 @@ static int run_refactor_pool(kls_solver *solver,
   shared->halt_if_singular = solver->common.halt_if_singular;
   shared->check_pivots = check_pivots;
   shared->pivot_tolerance = solver->common.tol;
-  shared->next_block = 0;
+  shared->next_block = start_block;
   shared->block_chunk = kls_refactor_pool_block_chunk(solver, thread_count);
   shared->block_done = pool->block_done;
   shared->stop = 0;
@@ -2362,6 +2375,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_tail_restarts = 0;
+  solver->fast_repaired_parallel_tail_blocks = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
   fill_build_stats(&solver->stats);
@@ -8209,6 +8223,8 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     (int64_t)solver->fast_repaired_offdiag_suffix_refresh_count;
   solver->stats.fast_repaired_offdiag_full_refresh_count =
     (int64_t)solver->fast_repaired_offdiag_full_refresh_count;
+  solver->stats.fast_repaired_parallel_tail_blocks =
+    (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
   solver->stats.row_refactor_total_group_work =
@@ -8253,6 +8269,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->fast_repaired_offdiag_suffix_refresh_count;
   solver->stats.fast_repaired_offdiag_full_refresh_count =
     (int64_t)solver->fast_repaired_offdiag_full_refresh_count;
+  solver->stats.fast_repaired_parallel_tail_blocks =
+    (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
   solver->stats.row_refactor_total_group_work =
@@ -20808,6 +20826,105 @@ static int kls_serial_refactor_tail_from_block(kls_solver *solver,
   return 1;
 }
 
+static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
+                                                 double *numeric_values,
+                                                 UF_long start_block,
+                                                 int check_pivots) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      numeric_values == NULL || solver->common.scale > 0 ||
+      solver->col_ptr == NULL || solver->row_idx == NULL ||
+      solver->symbolic->R == NULL || solver->symbolic->Q == NULL ||
+      solver->numeric->Rs != NULL ||
+      solver->numeric->Udiag == NULL || solver->numeric->Offp == NULL ||
+      solver->numeric->Offx == NULL || solver->numeric->Lip == NULL ||
+      solver->numeric->Llen == NULL || solver->numeric->Uip == NULL ||
+      solver->numeric->Ulen == NULL || solver->numeric->LUbx == NULL ||
+      solver->numeric->Pinv == NULL ||
+      start_block > solver->symbolic->nblocks) {
+    return -1;
+  }
+
+  const UF_long nblocks = solver->symbolic->nblocks;
+  if (start_block == nblocks) {
+    return 1;
+  }
+  const UF_long remaining_blocks = nblocks - start_block;
+  int thread_count = solver->options.threads;
+  if ((UF_long)thread_count > remaining_blocks) {
+    thread_count = (int)remaining_blocks;
+  }
+  if (thread_count < 2) {
+    return -1;
+  }
+  if (kls_refactor_pool_map_is_worthwhile(solver) &&
+      solver->refactor_col_ptr == NULL) {
+    (void)kls_build_refactor_map(solver);
+  }
+
+  trilinos_klu_l_common *common = &solver->common;
+  common->status = TRILINOS_KLU_OK;
+  common->numerical_rank = KLS_KLU_EMPTY;
+  common->singular_col = KLS_KLU_EMPTY;
+  common->nrealloc = 0;
+
+  int invalid = 0;
+  int pivot_rejected = 0;
+  UF_long rejected_pivot = KLS_KLU_EMPTY;
+  UF_long rejected_pivot_col = KLS_KLU_EMPTY;
+  UF_long rejected_row = KLS_KLU_EMPTY;
+  double rejected_multiplier_abs = -1.0;
+  double rejected_pivot_abs = -1.0;
+  double rejected_candidate_abs = -1.0;
+  int singular = 0;
+  UF_long numerical_rank = UF_long_max;
+  UF_long singular_col = KLS_KLU_EMPTY;
+  int pool_prefix_current = 0;
+  if (!run_refactor_pool(solver, numeric_values, thread_count, start_block,
+                         check_pivots, &invalid, &pivot_rejected,
+                         &rejected_pivot, &rejected_pivot_col,
+                         &rejected_row, &rejected_multiplier_abs,
+                         &rejected_pivot_abs, &rejected_candidate_abs,
+                         &singular, &numerical_rank, &singular_col,
+                         &pool_prefix_current)) {
+    common->status = TRILINOS_KLU_OUT_OF_MEMORY;
+    return 0;
+  }
+
+  solver->fast_repaired_parallel_tail_blocks += remaining_blocks;
+  solver->stats.fast_repaired_parallel_tail_blocks =
+    (int64_t)solver->fast_repaired_parallel_tail_blocks;
+
+  if (invalid) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+  if (pivot_rejected) {
+    solver->fast_reject_refresh_state =
+      pool_prefix_current ? KLS_FAST_REJECT_REFRESH_PREFIX
+                          : KLS_FAST_REJECT_REFRESH_UNKNOWN;
+    kls_clear_fast_reject_tail_seed(solver);
+    kls_record_fast_reject_detail(solver, rejected_pivot,
+                                  rejected_pivot_col, rejected_row,
+                                  rejected_multiplier_abs,
+                                  rejected_pivot_abs,
+                                  rejected_candidate_abs);
+    common->status = TRILINOS_KLU_OK;
+    return 0;
+  }
+  if (singular) {
+    common->status = TRILINOS_KLU_SINGULAR;
+    common->numerical_rank = numerical_rank;
+    common->singular_col = singular_col;
+    if (common->halt_if_singular) {
+      return 0;
+    }
+  }
+  if (!singular) {
+    common->status = TRILINOS_KLU_OK;
+  }
+  return 1;
+}
+
 static int kls_serial_checked_scaled_refactor_from_block(
   kls_solver *solver,
   double *numeric_values,
@@ -21454,7 +21571,8 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   UF_long numerical_rank = UF_long_max;
   UF_long singular_col = KLS_KLU_EMPTY;
   int pool_prefix_current = 0;
-  if (!run_refactor_pool(solver, numeric_values, thread_count, check_pivots,
+  if (!run_refactor_pool(solver, numeric_values, thread_count, 0u,
+                         check_pivots,
                          &invalid, &pivot_rejected,
                          &rejected_pivot, &rejected_pivot_col,
                          &rejected_row, &rejected_multiplier_abs,
@@ -21548,12 +21666,21 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
       return 1;
     }
     if (solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX) {
-      const int tail_ok =
-        solver->common.scale > 0
-          ? kls_serial_checked_scaled_refactor_from_block(
-              solver, numeric_values, repaired_block + 1u)
-          : kls_serial_refactor_tail_from_block(solver, numeric_values,
-                                                repaired_block + 1u, 1);
+      const UF_long tail_start = repaired_block + 1u;
+      int tail_ok = -1;
+      if (solver->common.scale <= 0) {
+        tail_ok =
+          kls_parallel_refactor_tail_from_block(solver, numeric_values,
+                                                tail_start, 1);
+      }
+      if (tail_ok < 0) {
+        tail_ok =
+          solver->common.scale > 0
+            ? kls_serial_checked_scaled_refactor_from_block(
+                solver, numeric_values, tail_start)
+            : kls_serial_refactor_tail_from_block(solver, numeric_values,
+                                                  tail_start, 1);
+      }
       if (tail_ok < 0 || solver->common.status < 0 ||
           solver->common.status == TRILINOS_KLU_SINGULAR) {
         return 0;

@@ -3546,3 +3546,17 @@ aligned with the row-segment diagnostics, so future slow-row reviews can see
 whether a refactor-heavy loss has no dense segment work, dense work rejected by
 the compact arithmetic-intensity gate, or compact-panel execution that is still
 too slow because KLS lacks persistent row/segment numeric storage.
+
+Re-reading the local CKTSO Section IV algorithms also exposed one remaining
+serial bridge in the existing block-repair path: after a prefix-current BTF
+block repair, KLS recomputed all later diagonal blocks serially even though
+those BTF blocks are independent. The solver-owned refactor pool can now start
+at a later BTF block, marks earlier blocks as already current for prefix
+classification, and the unscaled prefix-current fast-factor restart path tries
+that pool before falling back to the old serial suffix. Benchmark stats report
+`fast_repaired_parallel_tail_blocks`, and a reducible smoke fixture asserts that
+an early repaired block continues over later BTF singleton blocks through the
+pool. This follows CKTSO's "continue tail work in parallel" direction only at
+BTF-block granularity; it does not implement Algorithm 5's ETree-descendant
+row-tail factorization with pivoting, nor SubtreeLU's separator-tree
+private/pipeline row queues.
