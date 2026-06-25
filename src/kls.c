@@ -215,6 +215,7 @@ struct kls_solver {
   UF_long fast_reject_tail_seed_block;
   UF_long fast_reject_tail_seed_count;
   int fast_reject_tail_seed_valid;
+  int factor_etree_stats_valid;
 };
 
 typedef struct kls_pattern_candidate {
@@ -376,6 +377,7 @@ typedef struct kls_match_entry {
 } kls_match_entry;
 
 static int kls_build_refactor_schedule(kls_solver *solver);
+static void kls_update_factor_etree_stats(kls_solver *solver);
 static UF_long kls_block_for_pivot(const kls_solver *solver, UF_long pivot);
 static double kls_row_refactor_compute_group_work(const kls_solver *solver,
                                                   UF_long group);
@@ -949,6 +951,29 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_reject_tail_seed_block = KLS_KLU_EMPTY;
   solver->fast_reject_tail_seed_count = 0;
   solver->fast_reject_tail_seed_valid = 0;
+}
+
+static void kls_set_last_factor_path(kls_solver *solver,
+                                     kls_factor_path path) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->stats.last_factor_path = path;
+}
+
+static void kls_invalidate_factor_etree_stats(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->factor_etree_stats_valid = 0;
+  solver->stats.factor_etree_block_start = -1;
+  solver->stats.factor_etree_block_size = 0;
+  solver->stats.factor_etree_levels = 0;
+  solver->stats.factor_etree_max_width = 0;
+  solver->stats.factor_etree_edges = 0;
+  solver->stats.factor_etree_root_columns = 0;
+  solver->stats.factor_etree_leaf_columns = 0;
+  solver->stats.factor_etree_max_fanout = 0;
 }
 
 static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
@@ -1807,6 +1832,7 @@ static void free_symbolic(kls_solver *solver) {
     trilinos_klu_l_free_symbolic(&solver->symbolic, &solver->common);
     solver->symbolic = NULL;
   }
+  kls_invalidate_factor_etree_stats(solver);
 }
 
 static void free_numeric(kls_solver *solver) {
@@ -6030,6 +6056,7 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   solver->exact_matching_selected = 1;
   solver->spral_matching_selected = 1;
   solver->symbolic = trial_symbolic;
+  kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
   solver->common = trial_common;
   solver->stats.selected_ordering = trial_ordering;
@@ -6583,6 +6610,7 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   solver->exact_matching_selected = exact_matching;
   solver->spral_matching_selected = spral_matching;
   solver->symbolic = trial_symbolic;
+  kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
   solver->common = trial_common;
   solver->stats.selected_ordering = trial_ordering;
@@ -6904,6 +6932,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   solver->exact_matching_selected = exact_matching;
   solver->spral_matching_selected = spral_matching;
   solver->symbolic = trial_symbolic;
+  kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
   solver->common = trial_common;
   solver->stats.selected_ordering = trial_ordering;
@@ -7205,6 +7234,7 @@ static int maybe_promote_auto_metis(kls_solver *solver,
   trilinos_klu_l_common old_common = solver->common;
 
   solver->symbolic = metis_symbolic;
+  kls_invalidate_factor_etree_stats(solver);
   solver->numeric = metis_numeric;
   solver->common = metis_common;
   solver->stats.selected_ordering = KLS_ORDERING_METIS;
@@ -7633,6 +7663,7 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   solver->orientation = candidate->orientation;
   solver->common = candidate->common;
   solver->symbolic = candidate->symbolic;
+  kls_invalidate_factor_etree_stats(solver);
   solver->stats.selected_ordering = candidate->selected_ordering;
   solver->stats.selected_orientation = candidate->orientation;
 
@@ -7674,6 +7705,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     solver->stats.nnz_l = (int64_t)solver->symbolic->lnz;
     solver->stats.nnz_u = (int64_t)solver->symbolic->unz;
   }
+  kls_update_factor_etree_stats(solver);
   solver->stats.memory_bytes = solver->common.memusage;
   solver->stats.memory_peak_bytes = solver->common.mempeak;
 }
@@ -7711,6 +7743,7 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->stats.nnz_l = (int64_t)solver->numeric->lnz;
     solver->stats.nnz_u = (int64_t)solver->numeric->unz;
   }
+  kls_update_factor_etree_stats(solver);
   solver->stats.refactor_dependency_levels =
     (int64_t)solver->refactor_level_count;
   solver->stats.refactor_dependency_max_width =
@@ -7885,6 +7918,8 @@ int kls_create(kls_solver **solver_out) {
   kls_default_options(&solver->options);
   solver->stats.struct_size = sizeof(solver->stats);
   kls_clear_fast_reject_stats(solver);
+  kls_set_last_factor_path(solver, KLS_FACTOR_PATH_NONE);
+  kls_invalidate_factor_etree_stats(solver);
   if (!trilinos_klu_l_defaults(&solver->common)) {
     free(solver);
     return KLS_ERR_ANALYZE_FAILED;
@@ -8480,6 +8515,124 @@ static int kls_get_ordered_block_etree_parent(kls_solver *solver,
   *parent_out = owned_parent;
   *owned_parent_out = owned_parent;
   return 1;
+}
+
+static void kls_update_factor_etree_stats(kls_solver *solver) {
+  if (solver == NULL || solver->factor_etree_stats_valid) {
+    return;
+  }
+  kls_invalidate_factor_etree_stats(solver);
+  if (solver->symbolic == NULL || solver->symbolic->R == NULL ||
+      solver->symbolic->nblocks == 0u || solver->n == 0u) {
+    solver->factor_etree_stats_valid = 1;
+    return;
+  }
+
+  UF_long best_block = KLS_KLU_EMPTY;
+  UF_long best_k1 = 0;
+  UF_long best_k2 = 0;
+  UF_long best_nk = 0;
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (k1 > k2 || k2 > solver->n) {
+      solver->factor_etree_stats_valid = 1;
+      return;
+    }
+    if (k2 - k1 > best_nk) {
+      best_block = block;
+      best_k1 = k1;
+      best_k2 = k2;
+      best_nk = k2 - k1;
+    }
+  }
+
+  if (best_block == KLS_KLU_EMPTY || best_nk == 0u) {
+    solver->factor_etree_stats_valid = 1;
+    return;
+  }
+  UF_long *parent = (UF_long *)malloc((size_t)best_nk * sizeof(*parent));
+  UF_long *level = (UF_long *)calloc((size_t)best_nk, sizeof(*level));
+  UF_long *width = (UF_long *)calloc((size_t)best_nk + 1u, sizeof(*width));
+  UF_long *fanout = (UF_long *)calloc((size_t)best_nk, sizeof(*fanout));
+  if (parent == NULL || level == NULL || width == NULL || fanout == NULL) {
+    free(parent);
+    free(level);
+    free(width);
+    free(fanout);
+    solver->factor_etree_stats_valid = 1;
+    return;
+  }
+  if (!kls_build_ordered_block_etree(solver, best_k1, best_k2, parent)) {
+    free(parent);
+    free(level);
+    free(width);
+    free(fanout);
+    solver->factor_etree_stats_valid = 1;
+    return;
+  }
+
+  UF_long edges = 0;
+  UF_long roots = 0;
+  UF_long max_fanout = 0;
+  for (UF_long col = 0; col < best_nk; ++col) {
+    level[col] = 1u;
+    if (parent[col] == KLS_KLU_EMPTY) {
+      roots++;
+      continue;
+    }
+    if (parent[col] >= best_nk || parent[col] <= col) {
+      free(parent);
+      free(level);
+      free(width);
+      free(fanout);
+      solver->factor_etree_stats_valid = 1;
+      return;
+    }
+    edges++;
+    fanout[parent[col]]++;
+  }
+  UF_long leaves = 0;
+  for (UF_long col = 0; col < best_nk; ++col) {
+    if (fanout[col] == 0u) {
+      leaves++;
+    }
+    if (fanout[col] > max_fanout) {
+      max_fanout = fanout[col];
+    }
+    const UF_long next = parent[col];
+    if (next != KLS_KLU_EMPTY && level[next] < level[col] + 1u) {
+      level[next] = level[col] + 1u;
+    }
+  }
+
+  UF_long level_count = 0;
+  UF_long max_width = 0;
+  for (UF_long col = 0; col < best_nk; ++col) {
+    if (level[col] > level_count) {
+      level_count = level[col];
+    }
+    if (level[col] <= best_nk) {
+      const UF_long count = ++width[level[col]];
+      if (count > max_width) {
+        max_width = count;
+      }
+    }
+  }
+
+  solver->stats.factor_etree_block_start = (int64_t)best_k1;
+  solver->stats.factor_etree_block_size = (int64_t)best_nk;
+  solver->stats.factor_etree_levels = (int64_t)level_count;
+  solver->stats.factor_etree_max_width = (int64_t)max_width;
+  solver->stats.factor_etree_edges = (int64_t)edges;
+  solver->stats.factor_etree_root_columns = (int64_t)roots;
+  solver->stats.factor_etree_leaf_columns = (int64_t)leaves;
+  solver->stats.factor_etree_max_fanout = (int64_t)max_fanout;
+  solver->factor_etree_stats_valid = 1;
+  free(parent);
+  free(level);
+  free(width);
+  free(fanout);
 }
 
 static int kls_ensure_fast_reject_tail_plan_storage(kls_solver *solver,
@@ -17850,6 +18003,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+  kls_set_last_factor_path(solver, KLS_FACTOR_PATH_NONE);
   kls_clear_fast_reject_stats(solver);
   kls_clear_row_refactor_last_stats(solver);
   double *numeric_values = NULL;
@@ -17872,6 +18026,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (!had_numeric) {
     maybe_select_pre_static_row_match(solver, &elapsed, numeric_values);
     if (solver->numeric != NULL) {
+      kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST);
       maybe_prepare_refactor_map(solver, &elapsed);
       maybe_prepare_refactor_schedule(solver, &elapsed);
       solver->stats.factor_seconds = elapsed;
@@ -17887,6 +18042,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     elapsed += kls_now_seconds() - start;
     if (ok && solver->common.status >= 0 &&
         solver->common.status != TRILINOS_KLU_SINGULAR) {
+      kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FAST_REFACTOR);
       solver->stats.factor_seconds = elapsed;
       kls_update_numeric_diagnostics(solver, 1);
       maybe_prepare_refactor_map(solver, &elapsed);
@@ -17903,6 +18059,8 @@ int kls_factor(kls_solver *solver, const double *values) {
     solver->common.tol = choose_initial_auto_pivot_tolerance(solver);
   }
   const double start = kls_now_seconds();
+  kls_set_last_factor_path(solver, had_numeric ? KLS_FACTOR_PATH_KLU_FALLBACK
+                                               : KLS_FACTOR_PATH_KLU_FIRST);
   solver->numeric = trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,
                                           numeric_values, solver->symbolic,
                                           &solver->common);
@@ -18174,6 +18332,17 @@ const char *kls_orientation_name(kls_orientation orientation) {
     case KLS_ORIENTATION_AUTO: return "auto";
     case KLS_ORIENTATION_NORMAL: return "normal";
     case KLS_ORIENTATION_TRANSPOSE: return "transpose";
+    default: return "unknown";
+  }
+}
+
+const char *kls_factor_path_name(kls_factor_path path) {
+  switch (path) {
+    case KLS_FACTOR_PATH_NONE: return "none";
+    case KLS_FACTOR_PATH_KLU_FIRST: return "klu_first";
+    case KLS_FACTOR_PATH_KLS_FAST_REFACTOR: return "kls_fast_refactor";
+    case KLS_FACTOR_PATH_KLU_FALLBACK: return "klu_fallback";
+    case KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST: return "prestatic_klu_first";
     default: return "unknown";
   }
 }

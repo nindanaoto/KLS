@@ -124,9 +124,20 @@ python3 scripts/audit_license_boundary.py
 
 The benchmark reports analysis, factorization, refactorization, solve,
 transpose-solve, residual, selected orientation, BTF block/rank, fill, flop,
-refactor dependency-level metrics, dependency root/leaf/max-fanout scheduler
-diagnostics, and memory statistics. Use `--analyze-only` to measure symbolic
-analysis and ordering decisions without running numeric factorization.
+the initial and last factorization path, largest-BTF-block factor ETree
+shape, refactor dependency-level metrics, dependency root/leaf/max-fanout
+scheduler diagnostics, and memory statistics. Use `--analyze-only` to measure
+symbolic analysis and ordering decisions without running numeric factorization.
+JSON includes `initial_factor_path` and `last_factor_path`; values such as
+`klu_first` or `klu_fallback` mean the factorization was handed to the
+KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
+retained pattern through the checked fast path. `factor_etree_block_start`,
+`factor_etree_block_size`, `factor_etree_levels`,
+`factor_etree_max_width`, `factor_etree_edges`,
+`factor_etree_root_columns`, `factor_etree_leaf_columns`, and
+`factor_etree_max_fanout` summarize the largest ordered diagonal block's
+pivoted-factor ETree upper bound, matching the dependency concept used by the
+CKTSO paper for pivoting tail work.
 
 To exercise fast-factor pivot rejection on an unchanged MatrixMarket sparsity
 pattern, scale diagonal entries only in the repeated numeric phase:

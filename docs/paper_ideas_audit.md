@@ -100,6 +100,12 @@ row mirrors directly, using KLU's pivot-order `Rs` semantics for the
 right-hand-side load and transpose output. General external KLS row/column
 scaling and permutation still publish before using KLU storage. These pieces
 still do not change the current default KLU-column numeric kernel.
+KLS now also records `initial_factor_path`, `last_factor_path`, and largest
+ordered diagonal-block factor ETree counters in `kls_stats`/`kls_bench`. These
+diagnostics expose whether a solve still entered the KLU-derived pivoting
+kernel (`klu_first` or `klu_fallback`) and the ETree upper-bound shape CKTSO
+uses for pivoting-tail scheduling; they are evidence for the remaining
+row/up-looking first-factor work, not a substitute for that kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating

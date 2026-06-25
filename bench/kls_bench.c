@@ -487,6 +487,14 @@ int main(int argc, char **argv) {
              ",\"analysis_seconds\":%.9g"
              ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
              ",\"structural_rank\":%" PRId64
+             ",\"factor_etree_block_start\":%" PRId64
+             ",\"factor_etree_block_size\":%" PRId64
+             ",\"factor_etree_levels\":%" PRId64
+             ",\"factor_etree_max_width\":%" PRId64
+             ",\"factor_etree_edges\":%" PRId64
+             ",\"factor_etree_root_columns\":%" PRId64
+             ",\"factor_etree_leaf_columns\":%" PRId64
+             ",\"factor_etree_max_fanout\":%" PRId64
              ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
              ",\"estimated_flops\":%.9g"
              ",\"analyze_only\":true}\n",
@@ -499,7 +507,16 @@ int main(int argc, char **argv) {
              options.use_btf ? "true" : "false",
              stats.selected_btf ? "true" : "false",
              stats.analysis_seconds, stats.nblocks, stats.max_block,
-             stats.structural_rank, stats.nnz_l, stats.nnz_u,
+             stats.structural_rank,
+             stats.factor_etree_block_start,
+             stats.factor_etree_block_size,
+             stats.factor_etree_levels,
+             stats.factor_etree_max_width,
+             stats.factor_etree_edges,
+             stats.factor_etree_root_columns,
+             stats.factor_etree_leaf_columns,
+             stats.factor_etree_max_fanout,
+             stats.nnz_l, stats.nnz_u,
              stats.estimated_flops);
     } else {
       printf("matrix: %s\n", path);
@@ -517,6 +534,18 @@ int main(int argc, char **argv) {
       printf("blocks: %" PRId64 ", max block: %" PRId64 "\n",
              stats.nblocks, stats.max_block);
       printf("structural rank: %" PRId64 "\n", stats.structural_rank);
+      printf("factor ETree largest block: start %" PRId64 ", size %" PRId64
+             ", levels %" PRId64 ", max width %" PRId64 ", edges %" PRId64
+             ", roots %" PRId64 ", leaves %" PRId64
+             ", max fanout %" PRId64 "\n",
+             stats.factor_etree_block_start,
+             stats.factor_etree_block_size,
+             stats.factor_etree_levels,
+             stats.factor_etree_max_width,
+             stats.factor_etree_edges,
+             stats.factor_etree_root_columns,
+             stats.factor_etree_leaf_columns,
+             stats.factor_etree_max_fanout);
       printf("estimated nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n",
              stats.nnz_l, stats.nnz_u);
       printf("estimated flops: %.6e\n", stats.estimated_flops);
@@ -584,6 +613,7 @@ int main(int argc, char **argv) {
   stats.struct_size = sizeof(stats);
   kls_get_stats(solver, &stats);
   const double initial_factor_seconds = stats.factor_seconds;
+  const kls_factor_path initial_factor_path = stats.last_factor_path;
 
   double factor_total = 0.0;
   double refactor_total = 0.0;
@@ -667,6 +697,8 @@ int main(int argc, char **argv) {
            ",\"selected_spral_matching\":%s"
            ",\"analysis_seconds\":%.9g"
            ",\"initial_factor_seconds\":%.9g"
+           ",\"initial_factor_path\":\"%s\""
+           ",\"last_factor_path\":\"%s\""
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
            ",\"solve_seconds_avg\":%.9g,\"transpose_solve_seconds_avg\":%.9g"
            ",\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g"
@@ -739,6 +771,8 @@ int main(int argc, char **argv) {
            stats.selected_exact_matching ? "true" : "false",
            stats.selected_spral_matching ? "true" : "false",
            stats.analysis_seconds, initial_factor_seconds,
+           kls_factor_path_name(initial_factor_path),
+           kls_factor_path_name(stats.last_factor_path),
            factor_avg, refactor_avg, solve_avg, tsolve_avg,
            residual, rel_residual, stats.nblocks, stats.max_block,
            stats.structural_rank, stats.numerical_rank,
@@ -790,7 +824,15 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_topological,
            stats.fast_rejected_pivoting_tail_seed_columns,
            stats.fast_rejected_refresh_state);
-    printf(",\"refactor_dependency_levels\":%" PRId64
+    printf(",\"factor_etree_block_start\":%" PRId64
+           ",\"factor_etree_block_size\":%" PRId64
+           ",\"factor_etree_levels\":%" PRId64
+           ",\"factor_etree_max_width\":%" PRId64
+           ",\"factor_etree_edges\":%" PRId64
+           ",\"factor_etree_root_columns\":%" PRId64
+           ",\"factor_etree_leaf_columns\":%" PRId64
+           ",\"factor_etree_max_fanout\":%" PRId64
+           ",\"refactor_dependency_levels\":%" PRId64
            ",\"refactor_dependency_max_width\":%" PRId64
            ",\"refactor_dependency_edges\":%" PRId64
            ",\"refactor_dependency_root_columns\":%" PRId64
@@ -857,6 +899,14 @@ int main(int argc, char **argv) {
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
            ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
+           stats.factor_etree_block_start,
+           stats.factor_etree_block_size,
+           stats.factor_etree_levels,
+           stats.factor_etree_max_width,
+           stats.factor_etree_edges,
+           stats.factor_etree_root_columns,
+           stats.factor_etree_leaf_columns,
+           stats.factor_etree_max_fanout,
            stats.refactor_dependency_levels,
            stats.refactor_dependency_max_width,
            stats.refactor_dependency_edges,
@@ -952,6 +1002,10 @@ int main(int argc, char **argv) {
            stats.selected_spral_matching ? "on" : "off");
     printf("analysis: %.6f s\n", stats.analysis_seconds);
     printf("initial factor: %.6f s\n", initial_factor_seconds);
+    printf("initial factor path: %s\n",
+           kls_factor_path_name(initial_factor_path));
+    printf("last factor path: %s\n",
+           kls_factor_path_name(stats.last_factor_path));
     printf("factor avg: %.6f s\n", factor_avg);
     printf("refactor avg: %.6f s\n", refactor_avg);
     printf("solve avg: %.6f s\n", solve_avg);
@@ -961,6 +1015,18 @@ int main(int argc, char **argv) {
            stats.nblocks, stats.max_block);
     printf("structural rank: %" PRId64 ", numerical rank: %" PRId64 "\n",
            stats.structural_rank, stats.numerical_rank);
+    printf("factor ETree largest block: start %" PRId64 ", size %" PRId64
+           ", levels %" PRId64 ", max width %" PRId64 ", edges %" PRId64
+           ", roots %" PRId64 ", leaves %" PRId64
+           ", max fanout %" PRId64 "\n",
+           stats.factor_etree_block_start,
+           stats.factor_etree_block_size,
+           stats.factor_etree_levels,
+           stats.factor_etree_max_width,
+           stats.factor_etree_edges,
+           stats.factor_etree_root_columns,
+           stats.factor_etree_leaf_columns,
+           stats.factor_etree_max_fanout);
     printf("off-diagonal pivots: %" PRId64 ", reallocations: %" PRId64 "\n",
            stats.offdiag_pivots, stats.reallocations);
     printf("fast rejected pivot: %" PRId64 ", original column: %" PRId64

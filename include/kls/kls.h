@@ -42,6 +42,14 @@ typedef enum kls_orientation {
   KLS_ORIENTATION_TRANSPOSE = 2
 } kls_orientation;
 
+typedef enum kls_factor_path {
+  KLS_FACTOR_PATH_NONE = 0,
+  KLS_FACTOR_PATH_KLU_FIRST = 1,
+  KLS_FACTOR_PATH_KLS_FAST_REFACTOR = 2,
+  KLS_FACTOR_PATH_KLU_FALLBACK = 3,
+  KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST = 4
+} kls_factor_path;
+
 #define KLS_SCALE_AUTO (-2)
 
 typedef enum kls_fast_reject_refresh_state {
@@ -208,6 +216,15 @@ typedef struct kls_stats {
   double fast_repaired_tail_restart_overcompute_work;
   int64_t row_refactor_last_local_ready_groups;
   int64_t row_refactor_local_ready_group_count;
+  kls_factor_path last_factor_path;
+  int64_t factor_etree_block_start;
+  int64_t factor_etree_block_size;
+  int64_t factor_etree_levels;
+  int64_t factor_etree_max_width;
+  int64_t factor_etree_edges;
+  int64_t factor_etree_root_columns;
+  int64_t factor_etree_leaf_columns;
+  int64_t factor_etree_max_fanout;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
@@ -251,6 +268,7 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats);
 const char *kls_status_string(int status);
 const char *kls_ordering_name(kls_ordering ordering);
 const char *kls_orientation_name(kls_orientation orientation);
+const char *kls_factor_path_name(kls_factor_path path);
 
 #ifdef __cplusplus
 }
