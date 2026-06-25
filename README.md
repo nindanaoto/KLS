@@ -478,12 +478,18 @@ itself into contiguous worker scratch and reports
 default-off because the manual dense suffix solve was slower than the current
 sparse-`x` suffix solve on ASIC/G2-style rows. Builds configured with
 `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` also compile an opt-in
-`KLS_ENABLE_CBLAS_SUPERNODE=1` compact-panel row update that uses standard
-CBLAS `trsv`/`gemv` calls with the same scalar fallback and pivot checks.
-Focused probes keep it default-off: per-row BLAS calls were much slower than
-the scalar compact kernel on `onetone2`, so the remaining paper gap is a
-coarser blocked/supernodal numeric kernel rather than simply calling BLAS in
-the current row loop. Checked pivot-probe row refactors use
+`KLS_ENABLE_CBLAS_SUPERNODE=1` supernode experiment that uses standard CBLAS
+calls with the same scalar fallback and pivot checks. Completed producer
+supernodes can update later rows with CBLAS `dtrsv` plus `dgemv`, matching the
+paper's direct update shape over the retained row-major panel when the
+structural update work is large enough to amortize BLAS calls. The unchecked
+producer-panel refactor experiment uses a blocked panel algorithm
+(`dtrsm`/`dgemm`) instead of one BLAS call per row. Focused probes keep it
+default-off: the blocked CBLAS path improved on the earlier per-row CBLAS
+attempt but was still slower than the scalar compact kernel on `onetone2`, so
+the remaining paper gap is a deeper blocked/supernodal row numeric layout
+rather than simply wrapping the current compact group in BLAS calls. Checked
+pivot-probe row refactors use
 the same compact panel only through a row-ordered update/check/publish loop, so
 a rejected pivot leaves the same prefix-visible row-major state as the native
 direct row-mirror kernel. For generic-only row patterns, pipeline groups also

@@ -372,7 +372,7 @@ project does not drift toward benchmark-name-specific heuristics.
 | Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection, serial refactor scatter metadata, and exact EGraph level metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
 | NICSLU | AMD-style ordering, optional static-pivoting preprocessing, optional SPRAL Hungarian/scaling trials, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. KLS now records exact no-pivot EGraph levels from the numeric U pattern and uses them in guarded large single-block, dominant-BTF-block, and fragmented non-dominant many-block refactor paths, including KLU row-scaled cases where scale handling is supported and work-estimated cluster-level thread slices. | Full production MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and full pivoting-aware ETree scheduling are not implemented. Earlier broader EGraph prototypes were rejected because they were not general wins on the current kernel/storage. |
 | CKTSO | METIS nested-dissection ordering, guarded SCOTCH nested-dissection auto trials for large high-work symbolic candidates, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, CKTSO-style row-wise guessed-diagonal checks in KLS-owned checked row fast/refactor passes, KLS-owned block-local restart after a failed fast-factor pivot check including root-of-block rejects, conservative serial prefix-current/all-current tail restart for validated non-root unscaled repaired blocks, scaled block-local restart plus scaled checked continuation over later BTF blocks, scaled prefix-current/all-current block repair, scaled in-block serial tail restart after recomputing row scales to input-row order, threaded BTF worker-pool completed-block tracking for safe prefix-current rejects, guarded EGraph cluster/pipeline no-pivot refactors for single, dominant BTF, and selected fragmented many-block BTF shapes, work-balanced cluster-level refactor slices, cached row-permutation solve scratch, and dual-potential plus optional SPRAL matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only partially approximated because KLS does not have an always-on production MC64-equivalent weighted assignment stage. Full pipelined ETree-descendant tail restart with pivoting after a failed pivot check and structure-adaptive triangular solve are not implemented. Otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
-| SubtreeLU | KLS vendors reproducible METIS/GKlib and SCOTCH submodules, uses METIS plus CAMD refinement, asks METIS `NodeNDP` for at least `log2(threads)` nested-dissection levels on larger threaded METIS analyses, and can keep SCOTCH from `auto` when its symbolic score is materially better on large high-work cases. KLS now retains the accepted `NodeNDP` component sequence for the largest analyzed METIS block as private leaf domains and pipeline separator components, matches that local separator map back to the accepted BTF symbolic block when the block size is unique, reports the resulting local/global queue shape in stats/bench output, and uses the component map to build separator-private initial thread queues for the experimental row-refactor ready queue when a group lies inside the retained BTF block. The KLS-first pivoting row-up-looking factorization can also prefer same-component dynamic column pivots inside the retained block while preserving the existing global pivot-quality guard. This overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. KLS also records row-major U-pattern supernode candidate diagnostics from the exact no-pivot refactor dependency pass, has a scalar compact-panel row update, and now has an opt-in CBLAS compact-panel experiment for the row update shape. | KLS does not yet consume the retained separator queues in a checked-tail factor/refactor kernel, collapse a full global BTF-aware separator forest when duplicate block sizes make a local map ambiguous, perform full separator-tree FLOP-balanced refactor queue generation, or use production SubtreeLU-style coarse supernodes/BLAS updates. |
+| SubtreeLU | KLS vendors reproducible METIS/GKlib and SCOTCH submodules, uses METIS plus CAMD refinement, asks METIS `NodeNDP` for at least `log2(threads)` nested-dissection levels on larger threaded METIS analyses, and can keep SCOTCH from `auto` when its symbolic score is materially better on large high-work cases. KLS now retains the accepted `NodeNDP` component sequence for the largest analyzed METIS block as private leaf domains and pipeline separator components, matches that local separator map back to the accepted BTF symbolic block when the block size is unique, reports the resulting local/global queue shape in stats/bench output, and uses the component map to build separator-private initial thread queues for the experimental row-refactor ready queue when a group lies inside the retained BTF block. The KLS-first pivoting row-up-looking factorization can also prefer same-component dynamic column pivots inside the retained block while preserving the existing global pivot-quality guard. This overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. KLS also records row-major U-pattern supernode candidate diagnostics from the exact no-pivot refactor dependency pass, has scalar compact-panel producer and consumer updates, and now has an opt-in CBLAS experiment for both completed-supernode `dtrsv`/`gemv` row updates and unchecked blocked producer-panel `dtrsm`/`dgemm`. | KLS does not yet consume the retained separator queues in a checked-tail factor/refactor kernel, collapse a full global BTF-aware separator forest when duplicate block sizes make a local map ambiguous, perform full separator-tree FLOP-balanced refactor queue generation, or use production SubtreeLU-style coarse supernodes/BLAS updates. |
 
 This means KLS has implemented or prototyped the ideas that can be layered
 around the current KLU-derived data structures. It has **not** implemented all
@@ -3857,16 +3857,31 @@ turning it into a production regression; a future BLAS-backed or more deeply
 blocked supernodal kernel can replace the manual loop when it produces a real
 default win.
 
-KLS now also has an opt-in CBLAS compact-panel experiment. Configure with
+KLS now also has an opt-in CBLAS supernode experiment. Configure with
 `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` and set
-`KLS_ENABLE_CBLAS_SUPERNODE=1` at runtime to use standard CBLAS `trsv`/`gemv`
-calls for the row-major compact dense-panel update. The scalar compact kernel
-remains the default because a same-session `onetone2` forced-row probe showed
-the per-row CBLAS granularity was the wrong shape: refactor average was about
-`0.219s` with CBLAS enabled versus about `0.027s` with the scalar fallback,
-with both runs residual-clean. This confirms the paper gap more precisely:
-KLS needs a coarser blocked/supernodal row numeric engine, not BLAS calls
-wrapped around each existing row update.
+`KLS_ENABLE_CBLAS_SUPERNODE=1` at runtime to use standard CBLAS calls for the
+row-major compact supernode updates. The consumer-side update now follows the
+SubtreeLU text directly for a completed producer supernode: CBLAS `dtrsv`
+solves the producer suffix multipliers and CBLAS `dgemv` applies the retained
+trailing panel to the current sparse work row, with the same row-order
+multiplier checks before publication. This consumer-side BLAS path is gated by
+a structural work-per-copied-entry rule, because an ungated `onetone2` probe
+issued thousands of tiny CBLAS calls and regressed badly despite producing a
+valid residual. Larger gated probes did exercise the external CBLAS consumer
+and stayed residual-clean, but they still did not beat the scalar row kernel in
+same-session samples: `G2_circuit` was about `2.50s` versus `0.326s`, and
+`ASIC_100ks` was about `0.181s` versus `0.156s`. The unchecked producer-panel
+refactor experiment also uses a blocked panel algorithm: scalar code factors
+each diagonal block, `dtrsm` solves the below-panel multiplier block, and
+`dgemm` updates both the dense right panel and the shared trailing panel.
+The scalar compact kernel remains the default because same-session `onetone2`
+forced-row probes still favored it: the blocked CBLAS panel path was about
+`0.072s` versus `0.029s` with the scalar fallback, with both runs
+residual-clean. This improved on the earlier per-row CBLAS attempt (`0.219s`)
+but confirms the paper gap more precisely: KLS needs batched
+row-group/supernode consumer updates and a deeper blocked row-major numeric
+layout, not BLAS calls wrapped around each current row in the existing compact
+group shape.
 
 KLS then filled a narrower but direct CKTSO tail-restart semantic gap for
 root-of-block rejects. A prefix-current root reject normally means every later
