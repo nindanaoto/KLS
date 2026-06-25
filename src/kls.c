@@ -17121,6 +17121,11 @@ static int kls_row_refactor_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_refactor_env_disabled(void) {
+  const char *value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  return value != NULL && value[0] == '0' && value[1] == '\0';
+}
+
 static int kls_checked_row_refactor_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
   return value != NULL && value[0] != '\0' &&
@@ -17209,6 +17214,7 @@ static int kls_auto_row_refactor_cost_allows(const kls_solver *solver) {
 
 static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
   return solver != NULL &&
+         !kls_row_refactor_env_disabled() &&
          solver->row_refactor_auto_enabled &&
          solver->row_refactor_values_ready &&
          kls_auto_row_refactor_cost_allows(solver);

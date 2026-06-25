@@ -936,10 +936,11 @@ emitted `initial_factor_path`, `last_factor_path`, and `row_refactor_last_*`
 fields show whether the first factorization, later numeric passes, and solves
 really used KLS-owned paths. `--kls-first-factor env` preserves the library's
 automatic first-factor decision, `off` disables it, and `on` forces the
-KLS-owned attempt. Explicit row-refactor modes force the row engine, while the
-automatic KLS-first path
-uses the retained row/EGraph work estimates to skip row refactors whose static
-work model is already worse than the existing exact EGraph schedule:
+KLS-owned attempt. Explicit row-refactor modes force the row engine, and
+`--row-refactor off` also disables the automatic KLS-first row-refactor handoff
+for reproducible column/EGraph baselines. With `env`, the automatic KLS-first
+path uses the retained row/EGraph work estimates to skip row refactors whose
+static work model is already worse than the existing exact EGraph schedule:
 
 ```sh
 python3 scripts/decompose_solver_gap.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/cktso_suite.jsonl --reference-name cktso
