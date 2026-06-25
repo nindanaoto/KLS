@@ -3336,3 +3336,29 @@ by about 2.6% versus the previous copy-gate artifact. This is useful static
 cost discipline, but it also confirms the paper reading above: the worst
 ASIC/G2/mc2 rows still need the larger CKTSO/SubtreeLU row/segment numeric
 engine rather than another wrapper-level policy tweak.
+
+The next forced-row measurements made that distinction sharper. On the top six
+current CKTSO-gap rows, explicit `--row-refactor refactor` produced an
+`11.31s` geomean cycle time versus `7.55s` for the auto-gated default, with
+ASIC/G2 rows regressing by roughly `1.36x-2.20x`. Two same-session experiments
+were rejected. First, specializing row input and off-block refresh for unscaled
+values regressed the forced-row geomean to `11.75s`; it helped `ASIC_320k` by
+about `2%` but lost `7%-11%` on `ASIC_320ks`, `ASIC_100ks`, and `G2_circuit`.
+Second, running unchecked row refactors as a full retained group-DAG ready queue
+instead of preserving the CKTSO-style cluster prefix regressed geomean to
+`11.59s`. The full ready queue did improve `onetone2`, but the large rows
+created tens of thousands of local ready continuations, so scheduler churn
+outweighed barrier savings. Both tests were reverted. The retained lesson is
+that the hard gap is inside the row/segment numeric representation and update
+kernel, not a missing unscaled input branch or a blanket full-ready scheduler.
+
+The saved large-paper reconnaissance pair tells the same story at larger scale.
+With failures scored at `120s`, KLS was slightly ahead of the saved CKTSO large
+artifact in geomean (`0.986x` candidate/reference), because it wins
+`TSOPF_FS_b39_c30` and `rajat29` and both solvers struggle on `Hamrle3`.
+However, the median ratio was still `1.18x` against KLS and the material losses
+were refactor-heavy rows: `nxp1` (`1.67x`), `G3_circuit` (`1.56x`),
+`rajat30` (`1.42x`), and `ASIC_680k` (`1.37x`). This keeps the next useful
+implementation target aligned with the papers: persistent compact row/segment
+numeric storage, batched trailing updates, and pivot-aware tail restart, rather
+than another scheduling-only or input-copy-only tweak.
