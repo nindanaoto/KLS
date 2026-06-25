@@ -132,9 +132,10 @@ JSON includes `initial_factor_path` and `last_factor_path`; values such as
 `klu_first` or `klu_fallback` mean the factorization was handed to the
 KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
 retained pattern through the checked fast path. Setting
-`KLS_ENABLE_KLS_FIRST_FACTOR=1` enables an experimental unscaled KLS-owned
-first-factor scaffold that reports `kls_first` when it successfully assembles
-KLU-compatible numeric storage; it is not enabled by default.
+`KLS_ENABLE_KLS_FIRST_FACTOR=1` enables an experimental KLS-owned first-factor
+scaffold for no-scale and KLU row-scaled cases. It reports `kls_first` when it
+successfully assembles KLU-compatible numeric storage; it is not enabled by
+default.
 `factor_etree_block_start`,
 `factor_etree_block_size`, `factor_etree_levels`,
 `factor_etree_max_width`, `factor_etree_edges`,
@@ -873,10 +874,11 @@ artifact but still trails the saved CKTSO artifact, with `pre2` still timing out
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 still uses the KLU column-oriented serial kernel for the default first large
-factorization. An env-gated unscaled KLS-owned first-factor scaffold now exists
-for KLU-compatible BTF block assembly, but CKTSO's paper describes a row-major
-up-looking factorization plus EGraph pivot checks and ETree-scheduled pipelined
-tail factorization. The next algorithmic work is to evolve the numeric
+factorization. An env-gated KLS-owned first-factor scaffold now exists for
+KLU-compatible BTF block assembly in no-scale and KLU row-scaled modes, but
+CKTSO's paper describes a row-major up-looking factorization plus EGraph pivot
+checks and ETree-scheduled pipelined tail factorization. The next algorithmic
+work is to evolve the numeric
 factor/refactor/solve kernels toward those deeper KLS-owned sparse kernels
 while keeping the public API and benchmark harness stable.
 

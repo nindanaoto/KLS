@@ -18145,8 +18145,8 @@ static trilinos_klu_l_numeric *kls_allocate_numeric_skeleton(
 static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
                                                     double *numeric_values) {
   if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
-      solver->common.scale > 0 || solver->numeric != NULL ||
-      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
+      solver->numeric != NULL || solver->symbolic->P == NULL ||
+      solver->symbolic->Q == NULL ||
       solver->symbolic->R == NULL || solver->symbolic->Lnz == NULL) {
     return 0;
   }
@@ -18176,6 +18176,14 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
     return 0;
   }
   solver->numeric = numeric;
+  const int scaled = common->scale > 0;
+  if (common->scale >= 0 &&
+      !trilinos_klu_l_scale((UF_long)common->scale, solver->n,
+                            solver->col_ptr, solver->row_idx,
+                            numeric_values, scaled ? numeric->Rs : NULL,
+                            numeric->Pnum, common)) {
+    goto fail;
+  }
 
   UF_long *psinv = numeric->Pinv;
   for (UF_long k = 0; k < solver->n; ++k) {
@@ -18227,6 +18235,13 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
         const UF_long row_pos = psinv[row];
         if (row_pos == k1) {
           pivot = numeric_values[p];
+          if (scaled) {
+            const double rs = numeric->Rs[row];
+            if (rs == 0.0) {
+              goto fail;
+            }
+            pivot /= rs;
+          }
         } else if (row_pos > k1) {
           goto fail;
         }
@@ -18315,6 +18330,9 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
   numeric->max_unz_block = max_unz_block;
   if (!kls_rebuild_numeric_pinv(solver) ||
       !kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
+    goto fail;
+  }
+  if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
     goto fail;
   }
   if (common->status == TRILINOS_KLU_OK) {

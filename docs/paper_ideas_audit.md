@@ -107,11 +107,12 @@ kernel (`klu_first` or `klu_fallback`) and the ETree upper-bound shape CKTSO
 uses for pivoting-tail scheduling; they are evidence for the remaining
 row/up-looking first-factor work, not a substitute for that kernel.
 An env-gated `KLS_ENABLE_KLS_FIRST_FACTOR=1` path can now allocate and assemble
-KLU-compatible numeric storage itself for unscaled first factorizations, handle
-singleton BTF blocks directly, and use the KLS-owned pivoted block kernel for
-multi-column BTF blocks. It reports `kls_first` when it succeeds and falls back
-to the KLU first-factor path otherwise. This is a first KLS-owned factorization
-scaffold, not the default production row-major CKTSO-style factorization.
+KLU-compatible numeric storage itself for no-scale and KLU row-scaled first
+factorizations, handle singleton BTF blocks directly, and use the KLS-owned
+pivoted block kernel for multi-column BTF blocks. It reports `kls_first` when it
+succeeds and falls back to the KLU first-factor path otherwise. This is a first
+KLS-owned factorization scaffold, not the default production row-major
+CKTSO-style factorization.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -188,11 +189,11 @@ row-major sparse up-looking factorization, and that the fast path combines
 guessed EGraph pivot-checked refactorization with an ETree-scheduled pipelined
 tail factorization when repivoting is needed. KLS still hands the default first
 large factorization to KLU's column-oriented serial kernel; the current
-env-gated `kls_first` scaffold is unscaled and KLU-storage-compatible, not that
-row-major production engine. A debug trace on `pre2` confirmed the timeout
-occurs in `trilinos_klu_l_kernel` from the fallback first-factor call. The same
-trace showed SPRAL auction static pivoting finds 633565 weighted matches for
-659033 rows; structurally augmenting that to a full
+env-gated `kls_first` scaffold is KLU-storage-compatible, not that row-major
+production engine. A debug trace on `pre2` confirmed the timeout occurs in
+`trilinos_klu_l_kernel` from the fallback first-factor call. The same trace
+showed SPRAL auction static pivoting finds 633565 weighted matches for 659033
+rows; structurally augmenting that to a full
 permutation made the static-pivoted AMD symbolic estimate worse than the
 baseline, so it did not expose a credible low-risk static-pivot-only fix for
 this slow case. A broader nested-dissection retry on that static-pivoted
@@ -241,7 +242,7 @@ new KLS-owned symbolic/numeric machinery:
   beyond the current KLS-owned block-local restart and serial
   prefix-current/all-current tail subset.
 - A production KLS-owned first-factor engine with row/segment storage, rather
-  than the current env-gated unscaled KLU-compatible scaffold.
+  than the current env-gated KLU-compatible scaffold.
 - SubtreeLU-style private/pipeline scheduling from a retained separator tree.
 - A structure-adaptive triangular solve built on LU storage that exposes cheap
   row/segment access.
@@ -3086,13 +3087,19 @@ worklist explicit for multi-block checked-row failures.
 The KLS-owned pivoted block kernel was then wired into an experimental first
 factorization scaffold behind `KLS_ENABLE_KLS_FIRST_FACTOR=1`. The scaffold
 allocates the KLU-compatible numeric object itself, handles singleton BTF blocks
-through `Udiag`/`Pnum`, runs the KLS-owned pivoted kernel for multi-column
-unscaled BTF blocks, rebuilds `Pinv` and `Offp/Offi/Offx`, and reports
+through `Udiag`/`Pnum`, runs the KLS-owned pivoted kernel for multi-column BTF
+blocks, rebuilds `Pinv` and `Offp/Offi/Offx`, and reports
 `initial_factor_path:"kls_first"` when it succeeds. The smoke suite covers a
 matrix with a 2-column BTF block so this path cannot pass by singleton handling
 alone. This is useful ownership groundwork, but it is still KLU-compatible
 column storage and not CKTSO's production row-major up-looking factorization or
 ETree-descendant pivoting-tail executor.
+
+That scaffold was then extended to KLU row-scaled first factors. It computes
+`Rs` in input-row order before constructing singleton and multi-column BTF
+blocks, rebuilds off-block values before scale permutation, and finally permutes
+`Rs` through `Pnum` for solve semantics. The smoke suite now runs the same
+2-column BTF case with no scaling and with KLU max-row scaling.
 
 ## Recommended General Work
 

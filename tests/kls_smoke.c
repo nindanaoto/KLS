@@ -2906,7 +2906,7 @@ static int test_scaled_row_refactor_single_block(void) {
          run_scaled_row_refactor_case(4, 1);
 }
 
-static int test_experimental_kls_first_factor(void) {
+static int run_experimental_kls_first_factor_case(int scale) {
   const int32_t ap[] = {0, 2, 4, 5};
   const int32_t ai[] = {0, 1, 0, 1, 2};
   const double ax[] = {4.0, 2.0, 1.0, 3.0, 5.0};
@@ -2918,7 +2918,7 @@ static int test_experimental_kls_first_factor(void) {
   kls_default_options(&options);
   options.ordering = KLS_ORDERING_NATURAL;
   options.use_btf = 1;
-  options.scale = -1;
+  options.scale = scale;
   options.static_pivoting = 0;
 
   const char *saved_env_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
@@ -2951,15 +2951,16 @@ static int test_experimental_kls_first_factor(void) {
   }
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
              stats.nblocks < 2 || stats.max_block < 2 ||
+             stats.selected_scale != scale ||
              stats.fast_block_restarts != 0 ||
              stats.fast_kls_block_restarts != 0)) {
     fprintf(stderr,
             "unexpected KLS first-factor stats: path=%s, nblocks=%" PRId64
-            ", max_block=%" PRId64
+            ", max_block=%" PRId64 ", scale=%d"
             ", block_restarts=%d, kls_block_restarts=%d\n",
             kls_factor_path_name(stats.last_factor_path),
-            stats.nblocks, stats.max_block, stats.fast_block_restarts,
-            stats.fast_kls_block_restarts);
+            stats.nblocks, stats.max_block, stats.selected_scale,
+            stats.fast_block_restarts, stats.fast_kls_block_restarts);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
@@ -2984,6 +2985,11 @@ static int test_experimental_kls_first_factor(void) {
   kls_destroy(solver);
   free(saved_env);
   return ok;
+}
+
+static int test_experimental_kls_first_factor(void) {
+  return run_experimental_kls_first_factor_case(-1) &&
+         run_experimental_kls_first_factor_case(2);
 }
 
 int main(void) {
