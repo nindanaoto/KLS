@@ -3106,6 +3106,13 @@ row-major ownership when the mirrors remain current, even with
 `KLS_ENABLE_CHECKED_ROW_REFACTOR=0`. The smoke suite forces both row-refactor env
 gates off and verifies automatic unchecked and checked row updates plus
 forward/transpose solves after each update.
+The guarded row-major solve is now allowed when analysis selected internal
+transpose orientation as well; solve dispatch already passes the required
+internal `kernel_transpose` flag, so auto-oriented benchmark runs can consume
+KLS-owned mirrors instead of publishing back to KLU solely because the stored
+pattern is transposed. `kls_bench` and `run_bench_suite.py` expose
+`--kls-first-factor env|off|on` so this experimental KLS-owned first-factor
+path can be compared reproducibly across manifest chunks.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF

@@ -2906,7 +2906,8 @@ static int test_scaled_row_refactor_single_block(void) {
          run_scaled_row_refactor_case(4, 1);
 }
 
-static int run_experimental_kls_first_factor_case(int scale) {
+static int run_experimental_kls_first_factor_case(int scale,
+                                                 kls_orientation orientation) {
   const int32_t ap[] = {0, 2, 4, 5};
   const int32_t ai[] = {0, 1, 0, 1, 2};
   const double ax[] = {4.0, 2.0, 1.0, 3.0, 5.0};
@@ -2925,7 +2926,7 @@ static int run_experimental_kls_first_factor_case(int scale) {
   kls_options options;
   kls_default_options(&options);
   options.ordering = KLS_ORDERING_NATURAL;
-  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.orientation = orientation;
   options.use_btf = 1;
   options.scale = scale;
   options.static_pivoting = 0;
@@ -2987,6 +2988,7 @@ static int run_experimental_kls_first_factor_case(int scale) {
   }
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
              stats.nblocks < 2 || stats.max_block < 2 ||
+             stats.selected_orientation != orientation ||
              stats.selected_scale != scale ||
              stats.row_refactor_values_dirty != 0 ||
              stats.row_refactor_last_lazy_value_scatter != 0 ||
@@ -2996,11 +2998,13 @@ static int run_experimental_kls_first_factor_case(int scale) {
              stats.fast_kls_block_restarts != 0)) {
     fprintf(stderr,
             "unexpected KLS first-factor stats: path=%s, nblocks=%" PRId64
-            ", max_block=%" PRId64 ", scale=%d"
+            ", max_block=%" PRId64 ", orientation=%s, scale=%d"
             ", row_dirty=%d, row_lazy=%d, row_solve=%d, row_solve_count=%" PRId64
             ", block_restarts=%d, kls_block_restarts=%d\n",
             kls_factor_path_name(stats.last_factor_path),
-            stats.nblocks, stats.max_block, stats.selected_scale,
+            stats.nblocks, stats.max_block,
+            kls_orientation_name(stats.selected_orientation),
+            stats.selected_scale,
             stats.row_refactor_values_dirty,
             stats.row_refactor_last_lazy_value_scatter,
             stats.row_refactor_last_row_solve,
@@ -3172,8 +3176,12 @@ static int run_experimental_kls_first_factor_case(int scale) {
 }
 
 static int test_experimental_kls_first_factor(void) {
-  return run_experimental_kls_first_factor_case(-1) &&
-         run_experimental_kls_first_factor_case(2);
+  return run_experimental_kls_first_factor_case(-1, KLS_ORIENTATION_NORMAL) &&
+         run_experimental_kls_first_factor_case(2, KLS_ORIENTATION_NORMAL) &&
+         run_experimental_kls_first_factor_case(-1,
+                                                KLS_ORIENTATION_TRANSPOSE) &&
+         run_experimental_kls_first_factor_case(2,
+                                                KLS_ORIENTATION_TRANSPOSE);
 }
 
 int main(void) {

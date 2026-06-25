@@ -138,7 +138,9 @@ successfully assembles KLU-compatible numeric storage and seeds KLS-owned
 row-major `L`/`U` value mirrors for guarded forward/transpose solves. Repeated
 unchecked `kls_refactor` calls and checked fast-factor `kls_factor` calls then
 try those row-major update paths automatically while the mirrors remain current;
-it is not enabled by default.
+it is not enabled by default. `kls_bench` and `run_bench_suite.py` also accept
+`--kls-first-factor env|off|on` so this path can be compared reproducibly
+without relying on an ambient environment variable.
 `factor_etree_block_start`,
 `factor_etree_block_size`, `factor_etree_levels`,
 `factor_etree_max_width`, `factor_etree_edges`,
@@ -779,9 +781,10 @@ dependency levels, root/leaf/max-fanout counts, cluster levels, pipeline
 columns, max per-column work, pipeline max per-column work, and
 dependency-work estimates when those fields are present in the benchmark JSONL.
 For row-engine experiments, `kls_bench` and `run_bench_suite.py` accept
-`--row-refactor env|off|refactor|checked|all`; the emitted
-`row_refactor_last_*` fields show whether the last numeric pass really used the
-row kernel:
+`--row-refactor env|off|refactor|checked|all` and
+`--kls-first-factor env|off|on`; the emitted `initial_factor_path`,
+`last_factor_path`, and `row_refactor_last_*` fields show whether the first
+factorization and later numeric passes really used KLS-owned paths:
 
 ```sh
 python3 scripts/decompose_solver_gap.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/cktso_suite.jsonl --reference-name cktso

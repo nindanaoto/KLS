@@ -13350,7 +13350,6 @@ static int kls_seed_row_refactor_values_from_numeric(kls_solver *solver) {
 static int kls_row_refactor_solve_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       !solver->row_refactor_values_ready ||
-      solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->row_perm != NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->symbolic->nblocks == 0u ||
       solver->symbolic->R == NULL ||

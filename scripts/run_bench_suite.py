@@ -100,6 +100,11 @@ def main() -> int:
         choices=["env", "off", "refactor", "checked", "all"],
         default="env",
     )
+    parser.add_argument(
+        "--kls-first-factor",
+        choices=["env", "off", "on"],
+        default="env",
+    )
     parser.add_argument("--stress-diagonal-scale", type=float, default=None)
     parser.add_argument("--stress-diagonal-column", type=int, default=None)
     parser.add_argument("--no-btf", action="store_true")
@@ -174,6 +179,8 @@ def main() -> int:
                     cmd.extend(["--pivot-tol", str(args.pivot_tol)])
                 if args.row_refactor != "env":
                     cmd.extend(["--row-refactor", args.row_refactor])
+                if args.kls_first_factor != "env":
+                    cmd.extend(["--kls-first-factor", args.kls_first_factor])
                 if args.stress_diagonal_scale is not None:
                     cmd.extend(
                         ["--stress-diagonal-scale", str(args.stress_diagonal_scale)]
