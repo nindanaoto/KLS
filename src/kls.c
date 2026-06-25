@@ -15782,6 +15782,11 @@ static double kls_row_refactor_abs_max_from_values(double pivot,
   return row_max_abs;
 }
 
+static int kls_parallel_row_refactor_process_group(
+  kls_egraph_refactor_worker *worker,
+  UF_long group,
+  int wait_for_dependencies);
+
 static int kls_serial_row_refactor_numeric(kls_solver *solver,
                                            double *numeric_values,
                                            int check_pivots) {
@@ -15797,10 +15802,8 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   }
 
   trilinos_klu_l_common *common = &solver->common;
-  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_numeric *numeric = solver->numeric;
   double *x = (double *)numeric->Xwork;
-  double *udiag = (double *)numeric->Udiag;
   const UF_long n = solver->n;
 
   if (scaled &&
@@ -15830,129 +15833,96 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
     kls_record_row_refactor_defer_value_scatter_run(solver);
   }
 
-  for (UF_long i = 0; i < n; ++i) {
-    for (UF_long p = solver->row_refactor_input_ptr[i];
-         p < solver->row_refactor_input_ptr[i + 1u]; ++p) {
-      const UF_long col = solver->row_refactor_input_cols[p];
-      if (!kls_refactor_input_value(
-            solver, numeric_values, scaled ? numeric->Rs : NULL,
-            (int)common->scale, solver->row_refactor_input_pos[p],
-            x + col)) {
-        memset(x, 0, (size_t)n * sizeof(*x));
-        common->status = TRILINOS_KLU_INVALID;
-        return 0;
-      }
-    }
-
-    for (UF_long p = solver->row_refactor_l_ptr[i];
-         p < solver->row_refactor_l_ptr[i + 1u]; ++p) {
-      const UF_long dep = solver->row_refactor_l_cols[p];
-      const double lij = x[dep] / udiag[dep];
-      const double lij_abs = check_pivots ? fabs(lij) : 0.0;
-      if (check_pivots &&
-          kls_row_refactor_multiplier_rejects(lij, common->tol)) {
-        const double candidate_abs = fabs(x[dep]);
-        x[dep] = 0.0;
-        memset(x, 0, (size_t)n * sizeof(*x));
-        if (defer_value_scatter &&
-            !kls_scatter_row_refactor_prefix_values(solver, dep)) {
-          common->status = TRILINOS_KLU_INVALID;
-          return 0;
-        }
-        solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_PREFIX;
-        kls_clear_fast_reject_tail_seed(solver);
-        kls_record_fast_reject_detail(
-          solver, dep,
-          symbolic->Q != NULL ? symbolic->Q[dep] : KLS_KLU_EMPTY,
-          i, lij_abs, fabs(udiag[dep]), candidate_abs);
-        kls_fill_fast_reject_row_tail_candidate_stats(
-          solver, numeric_values, dep, x);
-        common->status = TRILINOS_KLU_OK;
-        return 0;
-      }
-      solver->row_refactor_l_row_values[p] = lij;
-      if (!defer_value_scatter) {
-        *solver->row_refactor_l_values[p] = lij;
-      }
-      x[dep] = 0.0;
-      const UF_long u_begin = solver->row_refactor_u_ptr[dep];
-      const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
-      const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
-      const double *u_values =
-        solver->row_refactor_u_row_values + u_begin;
-      for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
-        x[u_cols[offset]] -= lij * u_values[offset];
-      }
-    }
-
-    const double pivot = x[i];
-    if (check_pivots) {
-      double row_max_abs = -1.0;
-      if (!kls_row_refactor_u_row_abs_max_from_x(
-            solver, i, pivot, x, &row_max_abs)) {
-        memset(x, 0, (size_t)n * sizeof(*x));
-        common->status = TRILINOS_KLU_INVALID;
-        return 0;
-      }
-      double ratio_abs = -1.0;
-      const double pivot_abs = fabs(pivot);
-      if (kls_row_refactor_pivot_rejects(pivot_abs, row_max_abs,
-                                         common->tol, &ratio_abs)) {
-        memset(x, 0, (size_t)n * sizeof(*x));
-        if (defer_value_scatter &&
-            !kls_scatter_row_refactor_prefix_values(solver, i)) {
-          common->status = TRILINOS_KLU_INVALID;
-          return 0;
-        }
-        solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_PREFIX;
-        kls_clear_fast_reject_tail_seed(solver);
-        kls_record_fast_reject_detail(
-          solver, i,
-          symbolic->Q != NULL ? symbolic->Q[i] : KLS_KLU_EMPTY,
-          i, ratio_abs, pivot_abs, row_max_abs);
-        kls_fill_fast_reject_row_tail_candidate_stats(
-          solver, numeric_values, i, x);
-        common->status = TRILINOS_KLU_OK;
-        return 0;
-      }
-    }
-    x[i] = 0.0;
-    if (pivot == 0.0) {
-      common->status = TRILINOS_KLU_SINGULAR;
-      if (common->numerical_rank == KLS_KLU_EMPTY) {
-        common->numerical_rank = i;
-        common->singular_col = symbolic->Q[i];
-      }
-      if (common->halt_if_singular) {
-        memset(x, 0, (size_t)n * sizeof(*x));
-        return 0;
-      }
-    }
-    udiag[i] = pivot;
-
-    const UF_long u_begin = solver->row_refactor_u_ptr[i];
-    const UF_long u_end = solver->row_refactor_u_ptr[i + 1u];
-    double *row_u_values = solver->row_refactor_u_row_values + u_begin;
-    if (defer_value_scatter) {
-      for (UF_long p = u_begin; p < u_end; ++p) {
-        const UF_long offset = p - u_begin;
-        const UF_long col = solver->row_refactor_u_cols[p];
-        row_u_values[offset] = x[col];
-        x[col] = 0.0;
-      }
-    } else {
-      double **klu_u_values = solver->row_refactor_u_values + u_begin;
-      for (UF_long p = u_begin; p < u_end; ++p) {
-        const UF_long offset = p - u_begin;
-        const UF_long col = solver->row_refactor_u_cols[p];
-        const double value = x[col];
-        row_u_values[offset] = value;
-        *klu_u_values[offset] = value;
-        x[col] = 0.0;
-      }
-    }
-    kls_clear_row_refactor_input_residuals(solver, x, i);
+  kls_egraph_refactor_shared shared;
+  memset(&shared, 0, sizeof(shared));
+  if (pthread_mutex_init(&shared.lock, NULL) != 0) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
   }
+  shared.solver = solver;
+  shared.values = numeric_values;
+  shared.rs = scaled ? numeric->Rs : NULL;
+  shared.check_pivots = check_pivots;
+  shared.scale = (int)common->scale;
+  shared.kernel = KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
+  shared.thread_count = 1;
+  atomic_init(&shared.stop, 0);
+  shared.rejected_pivot = KLS_KLU_EMPTY;
+  shared.rejected_pivot_col = KLS_KLU_EMPTY;
+  shared.rejected_row = KLS_KLU_EMPTY;
+  shared.rejected_multiplier_abs = -1.0;
+  shared.rejected_pivot_abs = -1.0;
+  shared.rejected_candidate_abs = -1.0;
+  shared.numerical_rank = UF_long_max;
+  shared.singular_col = KLS_KLU_EMPTY;
+  shared.row_refactor_mode = 1;
+  shared.row_refactor_defer_value_scatter = defer_value_scatter;
+  shared.row_refactor_lazy_value_scatter = lazy_value_scatter;
+
+  kls_egraph_refactor_worker worker;
+  memset(&worker, 0, sizeof(worker));
+  worker.shared = &shared;
+  worker.tid = 0;
+  worker.x = x;
+
+  int groups_ok = 1;
+  for (UF_long group = 0; group < solver->row_refactor_group_count; ++group) {
+    if (!kls_parallel_row_refactor_process_group(&worker, group, 0)) {
+      groups_ok = 0;
+      break;
+    }
+  }
+  free(worker.segment_panel);
+
+  if (!groups_ok || shared.invalid || shared.pivot_rejected ||
+      (shared.singular && common->halt_if_singular)) {
+    memset(x, 0, (size_t)n * sizeof(*x));
+  }
+
+  if (!groups_ok && !shared.invalid && !shared.pivot_rejected &&
+      !(shared.singular && common->halt_if_singular)) {
+    shared.invalid = 1;
+  }
+  if (shared.invalid) {
+    pthread_mutex_destroy(&shared.lock);
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+  if (shared.pivot_rejected) {
+    const UF_long rejected_pivot = shared.rejected_pivot;
+    if (defer_value_scatter &&
+        !kls_scatter_row_refactor_prefix_values(solver, rejected_pivot)) {
+      pthread_mutex_destroy(&shared.lock);
+      common->status = TRILINOS_KLU_INVALID;
+      return 0;
+    }
+    solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_PREFIX;
+    kls_clear_fast_reject_tail_seed(solver);
+    kls_record_fast_reject_detail(solver, rejected_pivot,
+                                  shared.rejected_pivot_col,
+                                  shared.rejected_row,
+                                  shared.rejected_multiplier_abs,
+                                  shared.rejected_pivot_abs,
+                                  shared.rejected_candidate_abs);
+    kls_fill_fast_reject_row_tail_candidate_stats(
+      solver, numeric_values, rejected_pivot, x);
+    pthread_mutex_destroy(&shared.lock);
+    common->status = TRILINOS_KLU_OK;
+    return 0;
+  }
+  if (shared.singular) {
+    common->status = TRILINOS_KLU_SINGULAR;
+    common->numerical_rank = shared.numerical_rank;
+    common->singular_col = shared.singular_col;
+    if (common->halt_if_singular) {
+      pthread_mutex_destroy(&shared.lock);
+      return 0;
+    }
+  } else {
+    common->status = TRILINOS_KLU_OK;
+  }
+  pthread_mutex_destroy(&shared.lock);
+
   if (defer_value_scatter) {
     if (lazy_value_scatter) {
       kls_record_row_refactor_lazy_value_scatter_run(solver);

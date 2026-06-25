@@ -2026,16 +2026,27 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
                KLS_FAST_REJECT_REFRESH_PREFIX ||
              stats.fast_block_restarts != 1 ||
              stats.fast_tail_restarts != 1 ||
-             stats.fast_repaired_tail_restart_ready != 1)) {
+             stats.fast_repaired_tail_restart_ready != 1 ||
+             stats.row_refactor_last_run != 1 ||
+             stats.row_refactor_last_checked != 1 ||
+             stats.row_refactor_last_parallel != 0 ||
+             stats.row_refactor_last_defer_value_scatter != 1 ||
+             stats.row_refactor_dense_segment_count < 1)) {
     fprintf(stderr,
             "unexpected dense checked-row prefix stats: pivot=%" PRId64
             ", refresh=%d, block_restarts=%d, tail_restarts=%d"
-            ", tail_ready=%d\n",
+            ", tail_ready=%d, row=%d/%d/%d, defer=%d"
+            ", dense_segments=%" PRId64 "\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_refresh_state,
             stats.fast_block_restarts,
             stats.fast_tail_restarts,
-            stats.fast_repaired_tail_restart_ready);
+            stats.fast_repaired_tail_restart_ready,
+            stats.row_refactor_last_run,
+            stats.row_refactor_last_checked,
+            stats.row_refactor_last_parallel,
+            stats.row_refactor_last_defer_value_scatter,
+            stats.row_refactor_dense_segment_count);
     ok = 0;
   }
   double max_solution_error = 0.0;

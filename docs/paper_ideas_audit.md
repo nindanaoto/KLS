@@ -3423,3 +3423,15 @@ CKTSO and SubtreeLU papers now point KLS toward the row-major up-looking
 factor/refactor kernel with supernode/segment updates first; the full
 ETree-descendant pivoting-tail restart remains necessary for stressed
 repivoting cases, but it is not what explains these no-reject large losses.
+
+As a small row-engine step after re-reading the CKTSO refactorization section,
+the serial row-refactor path now executes the retained row-group processor with
+a single local worker instead of keeping a separate scalar row loop. This makes
+the dense/generic row-segment kernels available to one-thread refactors and to
+single-thread checked fast-factor attempts, preserving the same prefix-scatter,
+singular, and rejected-pivot bookkeeping. The smoke suite now asserts that the
+dense checked-row prefix repair is a serial checked row-refactor over a dense
+segment with deferred scatter. This is still only an incremental move toward
+the paper target: KLS remains tied to KLU-compatible value storage for these
+rows, so the larger missing item is still persistent compact row/segment
+numeric storage and batched trailing updates.
