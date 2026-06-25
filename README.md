@@ -460,7 +460,13 @@ persistent worker pool to parallelize the rectangular part of those slices when
 the parallel rectangular work reaches the paper's 300,000-entry dense-tail work
 scale. Rectangular slice rows are assigned to workers by accumulated
 rectangular-entry counts, and KLS reports the max per-thread rectangular entries
-for lower/upper factors; the within-slice triangular pieces remain sequential.
+for lower/upper factors. It also levelizes the sparse triangular block before
+the dense tail and solves wide prefix levels in the same persistent worker pool,
+falling back to a sequential loop for the remaining narrow levels; the
+within-slice triangular pieces remain sequential. The parallel row-solve
+executor is conservatively gated by parallelizable work share and work per
+synchronization, so cases where barrier overhead dominates keep the scalar
+row-major solve.
 The queued
 row scheduler orders
 ready groups by the retained FLOP-style group work estimate, including

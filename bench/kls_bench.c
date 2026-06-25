@@ -949,52 +949,7 @@ int main(int argc, char **argv) {
            ",\"row_refactor_last_lazy_value_scatter\":%d"
            ",\"row_refactor_lazy_value_scatter_run_count\":%" PRId64
            ",\"row_refactor_last_row_solve\":%d"
-           ",\"row_refactor_row_solve_run_count\":%" PRId64
-           ",\"row_solve_parallel_run_count\":%" PRId64
-           ",\"row_solve_parallel_l_slice_runs\":%" PRId64
-           ",\"row_solve_parallel_u_slice_runs\":%" PRId64
-           ",\"row_solve_thread_count\":%" PRId64
-           ",\"row_solve_l_thread_max_rect_entries\":%" PRId64
-           ",\"row_solve_u_thread_max_rect_entries\":%" PRId64
-           ",\"row_solve_partition_ready\":%d"
-           ",\"row_solve_partition_slices\":%" PRId64
-           ",\"row_solve_l_dense_tail_start\":%" PRId64
-           ",\"row_solve_l_dense_tail_rows\":%" PRId64
-           ",\"row_solve_l_dense_tail_entries\":%" PRId64
-           ",\"row_solve_l_slice_max_entries\":%" PRId64
-           ",\"row_solve_l_segmented_rows\":%" PRId64
-           ",\"row_solve_l_rect_entries\":%" PRId64
-           ",\"row_solve_l_tri_entries\":%" PRId64
-           ",\"row_solve_u_dense_tail_start\":%" PRId64
-           ",\"row_solve_u_dense_tail_rows\":%" PRId64
-           ",\"row_solve_u_dense_tail_entries\":%" PRId64
-           ",\"row_solve_u_slice_max_entries\":%" PRId64
-           ",\"row_solve_u_segmented_rows\":%" PRId64
-           ",\"row_solve_u_rect_entries\":%" PRId64
-           ",\"row_solve_u_tri_entries\":%" PRId64
-           ",\"row_refactor_last_work_ready_queue\":%d"
-           ",\"row_refactor_work_ready_queue_run_count\":%" PRId64
-           ",\"row_refactor_ready_queue_workspace_groups\":%" PRId64
-           ",\"row_refactor_last_local_ready_groups\":%" PRId64
-           ",\"row_refactor_local_ready_group_count\":%" PRId64
-           ",\"row_refactor_segment_count\":%" PRId64
-           ",\"row_refactor_segment_rows\":%" PRId64
-           ",\"row_refactor_segment_max_width\":%" PRId64
-           ",\"row_refactor_segment_dense_entries\":%.9g"
-           ",\"row_refactor_segment_trailing_entries\":%.9g"
-           ",\"row_refactor_dense_segment_count\":%" PRId64
-           ",\"row_refactor_dense_segment_rows\":%" PRId64
-           ",\"row_refactor_dense_segment_max_width\":%" PRId64
-           ",\"row_refactor_dense_segment_dense_entries\":%.9g"
-           ",\"row_refactor_dense_segment_trailing_entries\":%.9g"
-           ",\"refactor_dependency_cluster_levels\":%" PRId64
-           ",\"refactor_dependency_pipeline_columns\":%" PRId64
-           ",\"refactor_dependency_work\":%.9g"
-           ",\"refactor_dependency_pipeline_work\":%.9g"
-           ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
-           ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
-           ",\"rcond\":%.9g,\"rgrowth\":%.9g"
-           ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
+           ",\"row_refactor_row_solve_run_count\":%" PRId64,
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -1051,15 +1006,73 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_lazy_value_scatter,
            stats.row_refactor_lazy_value_scatter_run_count,
            stats.row_refactor_last_row_solve,
-           stats.row_refactor_row_solve_run_count,
+           stats.row_refactor_row_solve_run_count);
+    printf(",\"row_solve_parallel_run_count\":%" PRId64
+           ",\"row_solve_parallel_l_slice_runs\":%" PRId64
+           ",\"row_solve_parallel_u_slice_runs\":%" PRId64
+           ",\"row_solve_parallel_l_sparse_level_runs\":%" PRId64
+           ",\"row_solve_parallel_u_sparse_level_runs\":%" PRId64
+           ",\"row_solve_thread_count\":%" PRId64
+           ",\"row_solve_l_thread_max_rect_entries\":%" PRId64
+           ",\"row_solve_u_thread_max_rect_entries\":%" PRId64
+           ",\"row_solve_partition_ready\":%d"
+           ",\"row_solve_partition_slices\":%" PRId64
+           ",\"row_solve_l_sparse_level_count\":%" PRId64
+           ",\"row_solve_l_sparse_cluster_levels\":%" PRId64
+           ",\"row_solve_l_sparse_level_max_width\":%" PRId64
+           ",\"row_solve_l_dense_tail_start\":%" PRId64
+           ",\"row_solve_l_dense_tail_rows\":%" PRId64
+           ",\"row_solve_l_dense_tail_entries\":%" PRId64
+           ",\"row_solve_l_slice_max_entries\":%" PRId64
+           ",\"row_solve_l_segmented_rows\":%" PRId64
+           ",\"row_solve_l_rect_entries\":%" PRId64
+           ",\"row_solve_l_tri_entries\":%" PRId64
+           ",\"row_solve_u_sparse_level_count\":%" PRId64
+           ",\"row_solve_u_sparse_cluster_levels\":%" PRId64
+           ",\"row_solve_u_sparse_level_max_width\":%" PRId64
+           ",\"row_solve_u_dense_tail_start\":%" PRId64
+           ",\"row_solve_u_dense_tail_rows\":%" PRId64
+           ",\"row_solve_u_dense_tail_entries\":%" PRId64
+           ",\"row_solve_u_slice_max_entries\":%" PRId64
+           ",\"row_solve_u_segmented_rows\":%" PRId64
+           ",\"row_solve_u_rect_entries\":%" PRId64
+           ",\"row_solve_u_tri_entries\":%" PRId64
+           ",\"row_refactor_last_work_ready_queue\":%d"
+           ",\"row_refactor_work_ready_queue_run_count\":%" PRId64
+           ",\"row_refactor_ready_queue_workspace_groups\":%" PRId64
+           ",\"row_refactor_last_local_ready_groups\":%" PRId64
+           ",\"row_refactor_local_ready_group_count\":%" PRId64
+           ",\"row_refactor_segment_count\":%" PRId64
+           ",\"row_refactor_segment_rows\":%" PRId64
+           ",\"row_refactor_segment_max_width\":%" PRId64
+           ",\"row_refactor_segment_dense_entries\":%.9g"
+           ",\"row_refactor_segment_trailing_entries\":%.9g"
+           ",\"row_refactor_dense_segment_count\":%" PRId64
+           ",\"row_refactor_dense_segment_rows\":%" PRId64
+           ",\"row_refactor_dense_segment_max_width\":%" PRId64
+           ",\"row_refactor_dense_segment_dense_entries\":%.9g"
+           ",\"row_refactor_dense_segment_trailing_entries\":%.9g"
+           ",\"refactor_dependency_cluster_levels\":%" PRId64
+           ",\"refactor_dependency_pipeline_columns\":%" PRId64
+           ",\"refactor_dependency_work\":%.9g"
+           ",\"refactor_dependency_pipeline_work\":%.9g"
+           ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
+           ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
+           ",\"rcond\":%.9g,\"rgrowth\":%.9g"
+           ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
            stats.row_solve_parallel_run_count,
            stats.row_solve_parallel_l_slice_runs,
            stats.row_solve_parallel_u_slice_runs,
+           stats.row_solve_parallel_l_sparse_level_runs,
+           stats.row_solve_parallel_u_sparse_level_runs,
            stats.row_solve_thread_count,
            stats.row_solve_l_thread_max_rect_entries,
            stats.row_solve_u_thread_max_rect_entries,
            stats.row_solve_partition_ready,
            stats.row_solve_partition_slices,
+           stats.row_solve_l_sparse_level_count,
+           stats.row_solve_l_sparse_cluster_levels,
+           stats.row_solve_l_sparse_level_max_width,
            stats.row_solve_l_dense_tail_start,
            stats.row_solve_l_dense_tail_rows,
            stats.row_solve_l_dense_tail_entries,
@@ -1067,6 +1080,9 @@ int main(int argc, char **argv) {
            stats.row_solve_l_segmented_rows,
            stats.row_solve_l_rect_entries,
            stats.row_solve_l_tri_entries,
+           stats.row_solve_u_sparse_level_count,
+           stats.row_solve_u_sparse_cluster_levels,
+           stats.row_solve_u_sparse_level_max_width,
            stats.row_solve_u_dense_tail_start,
            stats.row_solve_u_dense_tail_rows,
            stats.row_solve_u_dense_tail_entries,
@@ -1316,24 +1332,35 @@ int main(int argc, char **argv) {
            stats.row_refactor_local_ready_group_count);
     printf("row solve parallel: runs %" PRId64
            ", L slice runs %" PRId64 ", U slice runs %" PRId64
+           ", L sparse level runs %" PRId64
+           ", U sparse level runs %" PRId64
            ", threads %" PRId64
            ", max thread rect entries L/U %" PRId64 "/%" PRId64 "\n",
            stats.row_solve_parallel_run_count,
            stats.row_solve_parallel_l_slice_runs,
            stats.row_solve_parallel_u_slice_runs,
+           stats.row_solve_parallel_l_sparse_level_runs,
+           stats.row_solve_parallel_u_sparse_level_runs,
            stats.row_solve_thread_count,
            stats.row_solve_l_thread_max_rect_entries,
            stats.row_solve_u_thread_max_rect_entries);
     printf("row solve partition: ready %d, slices %" PRId64
+           ", L sparse levels %" PRId64 ", cluster levels %" PRId64
+           ", max width %" PRId64
            ", L dense tail start %" PRId64 ", rows %" PRId64
            ", entries %" PRId64 ", max slice entries %" PRId64
            ", segmented rows %" PRId64 ", rect/tri entries %" PRId64 "/%" PRId64
+           ", U sparse levels %" PRId64 ", cluster levels %" PRId64
+           ", max width %" PRId64
            ", U dense tail start %" PRId64 ", rows %" PRId64
            ", entries %" PRId64 ", max slice entries %" PRId64
            ", segmented rows %" PRId64 ", rect/tri entries %" PRId64 "/%" PRId64
            "\n",
            stats.row_solve_partition_ready,
            stats.row_solve_partition_slices,
+           stats.row_solve_l_sparse_level_count,
+           stats.row_solve_l_sparse_cluster_levels,
+           stats.row_solve_l_sparse_level_max_width,
            stats.row_solve_l_dense_tail_start,
            stats.row_solve_l_dense_tail_rows,
            stats.row_solve_l_dense_tail_entries,
@@ -1341,6 +1368,9 @@ int main(int argc, char **argv) {
            stats.row_solve_l_segmented_rows,
            stats.row_solve_l_rect_entries,
            stats.row_solve_l_tri_entries,
+           stats.row_solve_u_sparse_level_count,
+           stats.row_solve_u_sparse_cluster_levels,
+           stats.row_solve_u_sparse_level_max_width,
            stats.row_solve_u_dense_tail_start,
            stats.row_solve_u_dense_tail_rows,
            stats.row_solve_u_dense_tail_entries,

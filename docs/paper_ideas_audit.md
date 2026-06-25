@@ -3186,14 +3186,22 @@ the gate and records parallel slice runs. Rectangular rows inside each slice are
 partitioned by accumulated rectangular nonzeros, following CKTSO's thread
 workload assignment rule, and diagnostics report the max per-thread rectangular
 entries for lower and upper factors.
-This implements the trapezoid-slice half of CKTSO's hybrid triangular solve,
-but it does not yet implement the other explicit half from Section V: the
-sparse triangular block should be levelized and solved in cluster mode before
-the remaining sparse levels fall back to a sequential loop. A local
-`G2_circuit` probe showed why that omission matters: KLS parallelized about
-3.27M rectangular entries, but left roughly 9.9M lower/upper prefix plus
-triangular-piece entries serial, so the balanced slice executor alone was
-slower than scalar row solve on this machine.
+The next CKTSO Section V gap was the sparse triangular block before the dense
+tail: a local `G2_circuit` probe showed that KLS could parallelize about 3.27M
+rectangular entries but still left roughly 9.9M lower/upper prefix plus
+triangular-piece entries serial. KLS now levelizes those sparse lower/upper
+prefixes, runs wide levels in CKTSO-style cluster mode, and lets thread 0 solve
+the remaining narrow levels sequentially. The cluster cutoff uses the same
+`#threads * 2` width rule already used in the CKTSO-inspired row-refactor
+cluster/pipeline split, and the JSON/text diagnostics report sparse level
+counts, cluster levels, max widths, and sparse-level run counts.
+Validation then showed that the straightforward pthread-barrier executor still
+does not close the solve-time gap by itself: `bcircuit` and `G2_circuit` are
+too small or synchronization-heavy, and `G3_circuit` ran the sparse-level path
+but moved from about `0.199s` scalar row solve to about `0.213s` parallel row
+solve. KLS therefore keeps the implementation but only activates it when the
+parallelizable work is a substantial share of total solve work and the average
+work per synchronization reaches the paper's 300,000-entry dense-tail scale.
 These fields are visible in `kls_stats`, `kls_bench` JSON/text, and the gap
 decomposition script, giving the parallel triangular-solve path a
 structure-based gate instead of a matrix-name heuristic.

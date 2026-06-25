@@ -3322,6 +3322,8 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
              stats.row_solve_parallel_run_count != 0 ||
              stats.row_solve_parallel_l_slice_runs != 0 ||
              stats.row_solve_parallel_u_slice_runs != 0 ||
+             stats.row_solve_parallel_l_sparse_level_runs != 0 ||
+             stats.row_solve_parallel_u_sparse_level_runs != 0 ||
              stats.row_solve_thread_count != 0 ||
              stats.row_solve_l_thread_max_rect_entries != 0 ||
              stats.row_solve_u_thread_max_rect_entries != 0 ||
@@ -3329,6 +3331,7 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
     fprintf(stderr,
             "unexpected row-solve seed solve stats: row_solve=%d/%" PRId64
             ", parallel=%" PRId64 "/%" PRId64 "/%" PRId64
+            "/%" PRId64 "/%" PRId64
             ", thread_balance=%" PRId64 "/%" PRId64 "/%" PRId64
             ", dirty=%d\n",
             stats.row_refactor_last_row_solve,
@@ -3336,6 +3339,8 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
             stats.row_solve_parallel_run_count,
             stats.row_solve_parallel_l_slice_runs,
             stats.row_solve_parallel_u_slice_runs,
+            stats.row_solve_parallel_l_sparse_level_runs,
+            stats.row_solve_parallel_u_sparse_level_runs,
             stats.row_solve_thread_count,
             stats.row_solve_l_thread_max_rect_entries,
             stats.row_solve_u_thread_max_rect_entries,
