@@ -260,6 +260,10 @@ struct kls_solver {
   UF_long row_refactor_compact_supernode_update_count;
   UF_long row_refactor_compact_supernode_update_rows;
   UF_long row_refactor_compact_supernode_update_entries;
+  int row_refactor_last_compact_supernode_gemv;
+  UF_long row_refactor_compact_supernode_gemv_count;
+  UF_long row_refactor_compact_supernode_gemv_rows;
+  UF_long row_refactor_compact_supernode_gemv_entries;
   unsigned int row_refactor_tail_mark;
   UF_long row_refactor_tail_count;
   UF_long *refactor_level_ptr;
@@ -456,6 +460,8 @@ typedef struct kls_egraph_refactor_worker {
   double *x;
   double *segment_panel;
   UF_long segment_panel_size;
+  double *supernode_workspace;
+  UF_long supernode_workspace_size;
 } kls_egraph_refactor_worker;
 
 struct kls_egraph_refactor_pool {
@@ -1077,6 +1083,10 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_compact_supernode_update_count = 0;
   solver->row_refactor_compact_supernode_update_rows = 0;
   solver->row_refactor_compact_supernode_update_entries = 0;
+  solver->row_refactor_last_compact_supernode_gemv = 0;
+  solver->row_refactor_compact_supernode_gemv_count = 0;
+  solver->row_refactor_compact_supernode_gemv_rows = 0;
+  solver->row_refactor_compact_supernode_gemv_entries = 0;
   solver->row_refactor_tail_mark = 0u;
   solver->row_refactor_tail_count = 0;
 }
@@ -1156,6 +1166,10 @@ typedef struct {
   UF_long compact_supernode_update_count;
   UF_long compact_supernode_update_rows;
   UF_long compact_supernode_update_entries;
+  int last_compact_supernode_gemv;
+  UF_long compact_supernode_gemv_count;
+  UF_long compact_supernode_gemv_rows;
+  UF_long compact_supernode_gemv_entries;
 } kls_row_refactor_diagnostics;
 
 static void kls_save_row_refactor_diagnostics(
@@ -1275,6 +1289,14 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_compact_supernode_update_rows;
   diag->compact_supernode_update_entries =
     solver->row_refactor_compact_supernode_update_entries;
+  diag->last_compact_supernode_gemv =
+    solver->row_refactor_last_compact_supernode_gemv;
+  diag->compact_supernode_gemv_count =
+    solver->row_refactor_compact_supernode_gemv_count;
+  diag->compact_supernode_gemv_rows =
+    solver->row_refactor_compact_supernode_gemv_rows;
+  diag->compact_supernode_gemv_entries =
+    solver->row_refactor_compact_supernode_gemv_entries;
 }
 
 static void kls_restore_row_refactor_diagnostics(
@@ -1402,6 +1424,14 @@ static void kls_restore_row_refactor_diagnostics(
     diag->compact_supernode_update_rows;
   solver->row_refactor_compact_supernode_update_entries =
     diag->compact_supernode_update_entries;
+  solver->row_refactor_last_compact_supernode_gemv =
+    diag->last_compact_supernode_gemv;
+  solver->row_refactor_compact_supernode_gemv_count =
+    diag->compact_supernode_gemv_count;
+  solver->row_refactor_compact_supernode_gemv_rows =
+    diag->compact_supernode_gemv_rows;
+  solver->row_refactor_compact_supernode_gemv_entries =
+    diag->compact_supernode_gemv_entries;
 }
 
 static void free_row_refactor_pattern_preserve_diagnostics(kls_solver *solver) {
@@ -1702,6 +1732,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_compact_dense_panel = 0;
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_compact_supernode_update = 0;
+  solver->row_refactor_last_compact_supernode_gemv = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_last_lazy_value_scatter = 0;
   solver->row_refactor_last_row_solve = 0;
@@ -1721,6 +1752,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_compact_dense_panel = 0;
   solver->stats.row_refactor_last_compact_dense_panel_persistent = 0;
   solver->stats.row_refactor_last_compact_supernode_update = 0;
+  solver->stats.row_refactor_last_compact_supernode_gemv = 0;
   solver->stats.row_refactor_last_defer_value_scatter = 0;
   solver->stats.row_refactor_last_lazy_value_scatter = 0;
   solver->stats.row_refactor_last_row_solve = 0;
@@ -1744,6 +1776,7 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_compact_dense_panel = 0;
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_compact_supernode_update = 0;
+  solver->row_refactor_last_compact_supernode_gemv = 0;
   solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_last_private_ready_groups = 0;
   solver->row_refactor_last_separator_private_queue = 0;
@@ -1822,6 +1855,19 @@ static void kls_record_row_refactor_compact_supernode_update(
   solver->row_refactor_compact_supernode_update_count++;
   solver->row_refactor_compact_supernode_update_rows += rows;
   solver->row_refactor_compact_supernode_update_entries += entries;
+}
+
+static void kls_record_row_refactor_compact_supernode_gemv(
+  kls_solver *solver,
+  UF_long rows,
+  UF_long entries) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_last_compact_supernode_gemv = 1;
+  solver->row_refactor_compact_supernode_gemv_count++;
+  solver->row_refactor_compact_supernode_gemv_rows += rows;
+  solver->row_refactor_compact_supernode_gemv_entries += entries;
 }
 
 static void kls_reset_row_refactor_compact_panel_valid(kls_solver *solver) {
@@ -9210,6 +9256,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_compact_supernode_update_rows;
   solver->stats.row_refactor_compact_supernode_update_entries =
     (int64_t)solver->row_refactor_compact_supernode_update_entries;
+  solver->stats.row_refactor_last_compact_supernode_gemv =
+    solver->row_refactor_last_compact_supernode_gemv;
+  solver->stats.row_refactor_compact_supernode_gemv_count =
+    (int64_t)solver->row_refactor_compact_supernode_gemv_count;
+  solver->stats.row_refactor_compact_supernode_gemv_rows =
+    (int64_t)solver->row_refactor_compact_supernode_gemv_rows;
+  solver->stats.row_refactor_compact_supernode_gemv_entries =
+    (int64_t)solver->row_refactor_compact_supernode_gemv_entries;
   solver->stats.refactor_dependency_cluster_levels =
     (int64_t)solver->refactor_cluster_level_count;
   solver->stats.refactor_dependency_pipeline_columns =
@@ -18130,6 +18184,7 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
     }
   }
   free(worker.segment_panel);
+  free(worker.supernode_workspace);
 
   if (!groups_ok || shared.invalid || shared.pivot_rejected ||
       (shared.singular && common->halt_if_singular)) {
@@ -18415,9 +18470,36 @@ static double *kls_egraph_worker_segment_panel(
   return panel;
 }
 
+static double *kls_egraph_worker_supernode_workspace(
+  kls_egraph_refactor_worker *worker,
+  UF_long entry_count) {
+  if (entry_count == 0u) {
+    return NULL;
+  }
+  if (worker == NULL ||
+      entry_count >
+        (UF_long)(SIZE_MAX / sizeof(*worker->supernode_workspace))) {
+    return NULL;
+  }
+  if (worker->supernode_workspace != NULL &&
+      worker->supernode_workspace_size >= entry_count) {
+    return worker->supernode_workspace;
+  }
+
+  double *workspace =
+    (double *)realloc(worker->supernode_workspace,
+                      (size_t)entry_count * sizeof(*workspace));
+  if (workspace == NULL) {
+    return NULL;
+  }
+  worker->supernode_workspace = workspace;
+  worker->supernode_workspace_size = entry_count;
+  return workspace;
+}
+
 static double *kls_row_refactor_compact_group_panel(kls_solver *solver,
-                                                   UF_long group,
-                                                   UF_long entry_count) {
+                                                    UF_long group,
+                                                    UF_long entry_count) {
   if (solver == NULL ||
       solver->row_refactor_group_compact_panel_begin == NULL ||
       solver->row_refactor_compact_panel_values == NULL ||
@@ -18536,6 +18618,22 @@ static int kls_row_refactor_try_compact_supernode_update(
 
   double *x = worker->x;
   const double *udiag = (const double *)solver->numeric->Udiag;
+  double *lij_workspace = NULL;
+  double *trailing_workspace = NULL;
+  int use_trailing_gemv = 0;
+  const UF_long max_workspace_entries =
+    (UF_long)(SIZE_MAX / sizeof(*lij_workspace));
+  if (trailing_len > 0u && run_rows <= max_workspace_entries &&
+      trailing_len <= max_workspace_entries - run_rows) {
+    lij_workspace =
+      kls_egraph_worker_supernode_workspace(worker, run_rows + trailing_len);
+    if (lij_workspace != NULL) {
+      trailing_workspace = lij_workspace + run_rows;
+      memset(trailing_workspace, 0,
+             (size_t)trailing_len * sizeof(*trailing_workspace));
+      use_trailing_gemv = 1;
+    }
+  }
   UF_long touched_entries = 0;
   for (UF_long p = p0; p < run_end; ++p) {
     const UF_long dep = solver->row_refactor_l_cols[p];
@@ -18556,6 +18654,9 @@ static int kls_row_refactor_try_compact_supernode_update(
     if (!shared->row_refactor_defer_value_scatter) {
       *solver->row_refactor_l_values[p] = lij;
     }
+    if (use_trailing_gemv) {
+      lij_workspace[p - p0] = lij;
+    }
     x[dep] = 0.0;
 
     const double *dep_dense_panel = dense_panel + local_dep * width;
@@ -18563,13 +18664,31 @@ static int kls_row_refactor_try_compact_supernode_update(
       x[group_begin + target] -= lij * dep_dense_panel[target];
     }
     touched_entries += width - local_dep - 1u;
-    if (trailing_len > 0u) {
+    if (trailing_len > 0u && !use_trailing_gemv) {
       const double *dep_panel = trailing_panel + local_dep * trailing_len;
       for (UF_long offset = 0; offset < trailing_len; ++offset) {
         x[trailing_cols[offset]] -= lij * dep_panel[offset];
       }
       touched_entries += trailing_len;
     }
+  }
+  if (use_trailing_gemv) {
+    const UF_long gemv_entries = run_rows * trailing_len;
+    for (UF_long local = 0; local < run_rows; ++local) {
+      const UF_long dep = solver->row_refactor_l_cols[p0 + local];
+      const UF_long local_dep = dep - group_begin;
+      const double lij = lij_workspace[local];
+      const double *dep_panel = trailing_panel + local_dep * trailing_len;
+      for (UF_long offset = 0; offset < trailing_len; ++offset) {
+        trailing_workspace[offset] += lij * dep_panel[offset];
+      }
+    }
+    for (UF_long offset = 0; offset < trailing_len; ++offset) {
+      x[trailing_cols[offset]] -= trailing_workspace[offset];
+    }
+    touched_entries += gemv_entries;
+    kls_record_row_refactor_compact_supernode_gemv(
+      solver, run_rows, gemv_entries);
   }
   kls_record_row_refactor_compact_supernode_update(solver, run_rows,
                                                    touched_entries);
@@ -19505,6 +19624,7 @@ static void kls_row_refactor_refresh_missing_prefix(
   }
   memset(x, 0, (size_t)solver->n * sizeof(*x));
   free(worker.segment_panel);
+  free(worker.supernode_workspace);
 }
 
 static void kls_parallel_row_refactor_mark_group_done(
@@ -21279,6 +21399,7 @@ static void kls_egraph_refactor_refresh_missing_prefix(
   }
   memset(x, 0, (size_t)scratch_size * sizeof(*x));
   free(worker.segment_panel);
+  free(worker.supernode_workspace);
 
   if (refreshed > 0u) {
     solver->fast_rejected_prefix_refresh_columns += refreshed;
@@ -21640,6 +21761,7 @@ static void destroy_egraph_refactor_pool(kls_solver *solver) {
   if (pool->workers != NULL) {
     for (int i = 0; i < pool->thread_count; ++i) {
       free(pool->workers[i].segment_panel);
+      free(pool->workers[i].supernode_workspace);
     }
   }
   free(pool->threads);

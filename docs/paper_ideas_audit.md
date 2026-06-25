@@ -3800,3 +3800,26 @@ updates over 6,220,352 rows, and `ASIC_100ks` used 23,209 updates over
 915,915 rows. This is still not full BLAS-backed supernodal factorization or
 the CKTSO pivoting-tail executor, but it moves the current row engine from
 mere compact storage toward actually consuming supernodes in later updates.
+
+The compact supernode consumer now applies the paper's triangular-solve plus
+matrix-vector update shape for producer trailing panels. For a later row that
+depends on a completed dense producer suffix, KLS still computes and checks the
+`L` multipliers in row order, but it no longer scatters each producer row's
+trailing contribution directly into the sparse work vector. Instead, it stores
+the multipliers in worker scratch, accumulates the producer trailing panel into
+a contiguous temporary vector, and scatters that vector once to the sparse
+columns. This is an in-KLS BLAS-shaped `gemv` dataflow, not an external BLAS
+dependency and not CPU-specific tuning. The smoke fixture now separates a dense
+producer, lower consumer rows, and later trailing columns so it asserts this
+path. Focused forced-row probes showed the accumulator active with valid
+residuals: `coupled` accumulated about 1,770 updates over 62,000 rows and
+6.6 million trailing entries with residual `8.97e-16`; `G2_circuit`
+accumulated about 119,000 updates over 6.2 million rows and 2.0 billion
+trailing entries with residual `3.32e-16`; and `ASIC_100ks` accumulated about
+23,000 updates over 916,000 rows and 355 million trailing entries with residual
+`1.63e-15`. This fills a
+direct SubtreeLU supernode-update detail. The exact high-volume diagnostic
+counts can vary slightly in threaded runs because these counters are telemetry,
+not synchronization state. Full BLAS-backed supernodal
+factorization, separator FLOP-balanced queues, and CKTSO's pipelined pivoting
+tail executor remain open.

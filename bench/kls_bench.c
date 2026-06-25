@@ -1182,6 +1182,10 @@ int main(int argc, char **argv) {
            ",\"row_refactor_compact_supernode_update_count\":%" PRId64
            ",\"row_refactor_compact_supernode_update_rows\":%" PRId64
            ",\"row_refactor_compact_supernode_update_entries\":%" PRId64
+           ",\"row_refactor_last_compact_supernode_gemv\":%d"
+           ",\"row_refactor_compact_supernode_gemv_count\":%" PRId64
+           ",\"row_refactor_compact_supernode_gemv_rows\":%" PRId64
+           ",\"row_refactor_compact_supernode_gemv_entries\":%" PRId64
            ",\"refactor_dependency_cluster_levels\":%" PRId64
            ",\"refactor_dependency_pipeline_columns\":%" PRId64
            ",\"refactor_dependency_work\":%.9g"
@@ -1259,6 +1263,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_supernode_update_count,
            stats.row_refactor_compact_supernode_update_rows,
            stats.row_refactor_compact_supernode_update_entries,
+           stats.row_refactor_last_compact_supernode_gemv,
+           stats.row_refactor_compact_supernode_gemv_count,
+           stats.row_refactor_compact_supernode_gemv_rows,
+           stats.row_refactor_compact_supernode_gemv_entries,
            stats.refactor_dependency_cluster_levels,
            stats.refactor_dependency_pipeline_columns,
            stats.refactor_dependency_work,
@@ -1619,6 +1627,8 @@ int main(int argc, char **argv) {
            ", persistent: %" PRId64 " groups/%" PRId64
            " entries, used: %d/%" PRId64
            ", supernode updates: %d/%" PRId64
+           " rows/entries %" PRId64 "/%" PRId64
+           ", gemv: %d/%" PRId64
            " rows/entries %" PRId64 "/%" PRId64 "\n",
            stats.row_refactor_dense_segment_count,
            stats.row_refactor_dense_segment_rows,
@@ -1638,7 +1648,11 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_compact_supernode_update,
            stats.row_refactor_compact_supernode_update_count,
            stats.row_refactor_compact_supernode_update_rows,
-           stats.row_refactor_compact_supernode_update_entries);
+           stats.row_refactor_compact_supernode_update_entries,
+           stats.row_refactor_last_compact_supernode_gemv,
+           stats.row_refactor_compact_supernode_gemv_count,
+           stats.row_refactor_compact_supernode_gemv_rows,
+           stats.row_refactor_compact_supernode_gemv_entries);
     printf("refactor dependency cluster levels: %" PRId64
            ", pipeline columns: %" PRId64 "\n",
            stats.refactor_dependency_cluster_levels,

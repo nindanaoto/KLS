@@ -2461,9 +2461,14 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
 }
 
 static int test_unchecked_row_dense_compact_panel(void) {
-  const int32_t n = 64;
+  const int32_t n = 80;
   const int32_t lead = 48;
-  const size_t nnz = (size_t)lead * (size_t)n + (size_t)(n - lead);
+  const int32_t lower = 16;
+  const int32_t trail = n - lead - lower;
+  const size_t nnz =
+    (size_t)lead * (size_t)(lead + lower) +
+    (size_t)lower +
+    (size_t)trail * ((size_t)lead + 1u);
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
   int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
   double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
@@ -2490,7 +2495,7 @@ static int test_unchecked_row_dense_compact_panel(void) {
   for (int32_t col = 0; col < n; ++col) {
     ap[col] = (int32_t)pos;
     if (col < lead) {
-      for (int32_t row = 0; row < n; ++row) {
+      for (int32_t row = 0; row < lead + lower; ++row) {
         const size_t p = pos++;
         ai[p] = row;
         if (row < lead) {
@@ -2504,7 +2509,19 @@ static int test_unchecked_row_dense_compact_panel(void) {
           ? 0.05 * (double)((col % 3) + 1)
           : 1.0e-5 * (double)(((row + col) % 5) - 2));
       }
+    } else if (col < lead + lower) {
+      const size_t p = pos++;
+      ai[p] = col;
+      ax0[p] = 18.0 + 0.03 * (double)col;
+      ax1[p] = ax0[p] + 0.04 * (double)((col % 5) + 1);
     } else {
+      for (int32_t row = 0; row < lead; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = 0.0002 * (1.0 + (double)((row + 5 * col) % 17));
+        ax1[p] = ax0[p] +
+          1.0e-5 * (double)(((row + 2 * col) % 7) - 3);
+      }
       const size_t p = pos++;
       ai[p] = col;
       ax0[p] = 18.0 + 0.03 * (double)col;
@@ -2599,7 +2616,11 @@ static int test_unchecked_row_dense_compact_panel(void) {
              stats.row_refactor_last_compact_supernode_update != 1 ||
              stats.row_refactor_compact_supernode_update_count < 1 ||
              stats.row_refactor_compact_supernode_update_rows < lead ||
-             stats.row_refactor_compact_supernode_update_entries <= 0)) {
+             stats.row_refactor_compact_supernode_update_entries <= 0 ||
+             stats.row_refactor_last_compact_supernode_gemv != 1 ||
+             stats.row_refactor_compact_supernode_gemv_count < 1 ||
+             stats.row_refactor_compact_supernode_gemv_rows < lead ||
+             stats.row_refactor_compact_supernode_gemv_entries <= 0)) {
     fprintf(stderr,
             "unexpected unchecked dense compact-panel stats: row=%d/%d/%d"
             ", dense_segments=%" PRId64 ", compact=%d/%" PRId64
@@ -2607,7 +2628,8 @@ static int test_unchecked_row_dense_compact_panel(void) {
             ", work=%.17g, entries=%.17g"
             ", persistent=%" PRId64 "/%" PRId64
             ", persistent_used=%d/%" PRId64
-            ", supernode=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
+            ", supernode=%d/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", gemv=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
             stats.row_refactor_last_run,
             stats.row_refactor_last_checked,
             stats.row_refactor_last_parallel,
@@ -2625,7 +2647,11 @@ static int test_unchecked_row_dense_compact_panel(void) {
             stats.row_refactor_last_compact_supernode_update,
             stats.row_refactor_compact_supernode_update_count,
             stats.row_refactor_compact_supernode_update_rows,
-            stats.row_refactor_compact_supernode_update_entries);
+            stats.row_refactor_compact_supernode_update_entries,
+            stats.row_refactor_last_compact_supernode_gemv,
+            stats.row_refactor_compact_supernode_gemv_count,
+            stats.row_refactor_compact_supernode_gemv_rows,
+            stats.row_refactor_compact_supernode_gemv_entries);
     ok = 0;
   }
   double max_solution_error = 0.0;
