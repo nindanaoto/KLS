@@ -1127,6 +1127,10 @@ int main(int argc, char **argv) {
            ",\"row_refactor_local_ready_group_count\":%" PRId64
            ",\"row_refactor_last_private_ready_groups\":%" PRId64
            ",\"row_refactor_private_ready_group_count\":%" PRId64
+           ",\"row_refactor_last_separator_private_queue\":%d"
+           ",\"row_refactor_separator_private_queue_run_count\":%" PRId64
+           ",\"row_refactor_last_separator_private_components\":%" PRId64
+           ",\"row_refactor_separator_private_component_count\":%" PRId64
            ",\"row_refactor_segment_count\":%" PRId64
            ",\"row_refactor_segment_rows\":%" PRId64
            ",\"row_refactor_segment_max_width\":%" PRId64
@@ -1192,6 +1196,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_local_ready_group_count,
            stats.row_refactor_last_private_ready_groups,
            stats.row_refactor_private_ready_group_count,
+           stats.row_refactor_last_separator_private_queue,
+           stats.row_refactor_separator_private_queue_run_count,
+           stats.row_refactor_last_separator_private_components,
+           stats.row_refactor_separator_private_component_count,
            stats.row_refactor_segment_count,
            stats.row_refactor_segment_rows,
            stats.row_refactor_segment_max_width,
@@ -1439,7 +1447,9 @@ int main(int argc, char **argv) {
            ", work queue runs: %" PRId64
            ", queue workspace groups: %" PRId64
            ", local ready groups: %" PRId64 "/%" PRId64
-           ", private ready groups: %" PRId64 "/%" PRId64 "\n",
+           ", private ready groups: %" PRId64 "/%" PRId64
+           ", separator-private queue: %d, components %" PRId64 "/%" PRId64
+           "\n",
            stats.row_refactor_group_count,
            stats.row_refactor_group_level_count,
            stats.row_refactor_group_level_max_width,
@@ -1480,7 +1490,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_local_ready_groups,
            stats.row_refactor_local_ready_group_count,
            stats.row_refactor_last_private_ready_groups,
-           stats.row_refactor_private_ready_group_count);
+           stats.row_refactor_private_ready_group_count,
+           stats.row_refactor_last_separator_private_queue,
+           stats.row_refactor_last_separator_private_components,
+           stats.row_refactor_separator_private_component_count);
     printf("row solve parallel: runs %" PRId64
            ", L slice runs %" PRId64 ", U slice runs %" PRId64
            ", L sparse level runs %" PRId64

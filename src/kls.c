@@ -224,6 +224,10 @@ struct kls_solver {
   UF_long row_refactor_compact_dense_panel_count;
   UF_long row_refactor_local_ready_group_count;
   UF_long row_refactor_private_ready_group_count;
+  int row_refactor_last_separator_private_queue;
+  UF_long row_refactor_separator_private_queue_run_count;
+  UF_long row_refactor_last_separator_private_components;
+  UF_long row_refactor_separator_private_component_count;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_segment_rows;
   UF_long row_refactor_segment_max_width;
@@ -969,6 +973,10 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_compact_dense_panel_count = 0;
   solver->row_refactor_local_ready_group_count = 0;
   solver->row_refactor_private_ready_group_count = 0;
+  solver->row_refactor_last_separator_private_queue = 0;
+  solver->row_refactor_separator_private_queue_run_count = 0;
+  solver->row_refactor_last_separator_private_components = 0;
+  solver->row_refactor_separator_private_component_count = 0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_segment_rows = 0;
   solver->row_refactor_segment_max_width = 0;
@@ -1036,6 +1044,10 @@ typedef struct {
   UF_long compact_dense_panel_count;
   UF_long local_ready_group_count;
   UF_long private_ready_group_count;
+  int last_separator_private_queue;
+  UF_long separator_private_queue_run_count;
+  UF_long last_separator_private_components;
+  UF_long separator_private_component_count;
   UF_long segment_count;
   UF_long segment_rows;
   UF_long segment_max_width;
@@ -1120,6 +1132,14 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_local_ready_group_count;
   diag->private_ready_group_count =
     solver->row_refactor_private_ready_group_count;
+  diag->last_separator_private_queue =
+    solver->row_refactor_last_separator_private_queue;
+  diag->separator_private_queue_run_count =
+    solver->row_refactor_separator_private_queue_run_count;
+  diag->last_separator_private_components =
+    solver->row_refactor_last_separator_private_components;
+  diag->separator_private_component_count =
+    solver->row_refactor_separator_private_component_count;
   diag->segment_count = solver->row_refactor_segment_count;
   diag->segment_rows = solver->row_refactor_segment_rows;
   diag->segment_max_width = solver->row_refactor_segment_max_width;
@@ -1221,6 +1241,14 @@ static void kls_restore_row_refactor_diagnostics(
     diag->local_ready_group_count;
   solver->row_refactor_private_ready_group_count =
     diag->private_ready_group_count;
+  solver->row_refactor_last_separator_private_queue =
+    diag->last_separator_private_queue;
+  solver->row_refactor_separator_private_queue_run_count =
+    diag->separator_private_queue_run_count;
+  solver->row_refactor_last_separator_private_components =
+    diag->last_separator_private_components;
+  solver->row_refactor_separator_private_component_count =
+    diag->separator_private_component_count;
   solver->row_refactor_segment_count = diag->segment_count;
   solver->row_refactor_segment_rows = diag->segment_rows;
   solver->row_refactor_segment_max_width = diag->segment_max_width;
@@ -1551,6 +1579,8 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_work_ready_queue = 0;
   solver->stats.row_refactor_last_local_ready_groups = 0;
   solver->stats.row_refactor_last_private_ready_groups = 0;
+  solver->stats.row_refactor_last_separator_private_queue = 0;
+  solver->stats.row_refactor_last_separator_private_components = 0;
   solver->stats.row_refactor_last_compact_dense_panel = 0;
   solver->stats.row_refactor_last_compact_dense_panel_persistent = 0;
   solver->stats.row_refactor_last_defer_value_scatter = 0;
@@ -1574,6 +1604,8 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_last_private_ready_groups = 0;
+  solver->row_refactor_last_separator_private_queue = 0;
+  solver->row_refactor_last_separator_private_components = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_run_count++;
   if (check_pivots) {
@@ -1640,6 +1672,18 @@ static void kls_record_row_refactor_private_ready_groups(kls_solver *solver,
   }
   solver->row_refactor_last_private_ready_groups = group_count;
   solver->row_refactor_private_ready_group_count += group_count;
+}
+
+static void kls_record_row_refactor_separator_private_queue(
+  kls_solver *solver,
+  UF_long component_count) {
+  if (solver == NULL || component_count == 0u) {
+    return;
+  }
+  solver->row_refactor_last_separator_private_queue = 1;
+  solver->row_refactor_separator_private_queue_run_count++;
+  solver->row_refactor_last_separator_private_components = component_count;
+  solver->row_refactor_separator_private_component_count += component_count;
 }
 
 static void kls_record_row_refactor_defer_value_scatter_run(
@@ -8796,6 +8840,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_last_private_ready_groups;
   solver->stats.row_refactor_private_ready_group_count =
     (int64_t)solver->row_refactor_private_ready_group_count;
+  solver->stats.row_refactor_last_separator_private_queue =
+    solver->row_refactor_last_separator_private_queue;
+  solver->stats.row_refactor_separator_private_queue_run_count =
+    (int64_t)solver->row_refactor_separator_private_queue_run_count;
+  solver->stats.row_refactor_last_separator_private_components =
+    (int64_t)solver->row_refactor_last_separator_private_components;
+  solver->stats.row_refactor_separator_private_component_count =
+    (int64_t)solver->row_refactor_separator_private_component_count;
   solver->stats.kls_tail_last_mapped_columns =
     (int64_t)solver->kls_tail_last_mapped_columns;
   solver->stats.kls_tail_mapped_column_count =
@@ -15756,6 +15808,287 @@ static int kls_build_row_refactor_private_thread_queues(
   return 1;
 }
 
+typedef struct kls_separator_component_work_entry {
+  unsigned int component;
+  unsigned char kind;
+  double work;
+} kls_separator_component_work_entry;
+
+static int kls_compare_separator_component_work_desc(const void *a,
+                                                     const void *b) {
+  const kls_separator_component_work_entry *ca =
+    (const kls_separator_component_work_entry *)a;
+  const kls_separator_component_work_entry *cb =
+    (const kls_separator_component_work_entry *)b;
+  if (ca->kind < cb->kind) {
+    return -1;
+  }
+  if (ca->kind > cb->kind) {
+    return 1;
+  }
+  if (ca->work > cb->work) {
+    return -1;
+  }
+  if (ca->work < cb->work) {
+    return 1;
+  }
+  if (ca->component < cb->component) {
+    return -1;
+  }
+  if (ca->component > cb->component) {
+    return 1;
+  }
+  return 0;
+}
+
+static int kls_row_refactor_group_separator_component(
+  const kls_solver *solver,
+  UF_long group,
+  unsigned int *component_out) {
+  if (component_out != NULL) {
+    *component_out = UINT_MAX;
+  }
+  if (solver == NULL || component_out == NULL ||
+      solver->separator.n != solver->n ||
+      solver->separator.component_count == 0u ||
+      solver->separator.component_kind == NULL ||
+      solver->separator.order_component == NULL ||
+      solver->row_refactor_group_ptr == NULL ||
+      group >= solver->row_refactor_group_count) {
+    return 0;
+  }
+  const UF_long row_begin = solver->row_refactor_group_ptr[group];
+  const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
+  if (row_begin >= row_end || row_end > solver->n) {
+    return 0;
+  }
+  const unsigned int component = solver->separator.order_component[row_begin];
+  if ((UF_long)component >= solver->separator.component_count) {
+    return 0;
+  }
+  for (UF_long row = row_begin + 1u; row < row_end; ++row) {
+    if (solver->separator.order_component[row] != component) {
+      return 0;
+    }
+  }
+  *component_out = component;
+  return 1;
+}
+
+static int kls_build_row_refactor_separator_private_thread_queues(
+  const kls_solver *solver,
+  const UF_long *source_groups,
+  UF_long group_count,
+  int thread_count,
+  UF_long **private_groups_out,
+  UF_long **thread_ptr_out,
+  UF_long *component_count_out) {
+  if (private_groups_out != NULL) {
+    *private_groups_out = NULL;
+  }
+  if (thread_ptr_out != NULL) {
+    *thread_ptr_out = NULL;
+  }
+  if (component_count_out != NULL) {
+    *component_count_out = 0;
+  }
+  if (private_groups_out == NULL || thread_ptr_out == NULL ||
+      component_count_out == NULL || solver == NULL ||
+      source_groups == NULL || group_count == 0u || thread_count <= 1 ||
+      solver->separator.n != solver->n ||
+      solver->separator.component_count <= 1u ||
+      solver->separator.component_kind == NULL ||
+      solver->separator.order_component == NULL) {
+    return 0;
+  }
+
+  const UF_long component_count = solver->separator.component_count;
+  const size_t group_count_size = (size_t)group_count;
+  const size_t component_count_size = (size_t)component_count;
+  const size_t thread_count_size = (size_t)thread_count;
+  if ((UF_long)group_count_size != group_count ||
+      (UF_long)component_count_size != component_count ||
+      group_count_size > SIZE_MAX / sizeof(UF_long) ||
+      component_count_size > SIZE_MAX / sizeof(UF_long) ||
+      component_count_size > SIZE_MAX / sizeof(double) ||
+      component_count_size > SIZE_MAX / sizeof(int) ||
+      component_count_size >
+        SIZE_MAX / sizeof(kls_separator_component_work_entry) ||
+      thread_count_size > (SIZE_MAX / sizeof(UF_long)) - 1u ||
+      thread_count_size > SIZE_MAX / sizeof(double)) {
+    return 0;
+  }
+
+  UF_long *component_group_count =
+    (UF_long *)calloc(component_count_size, sizeof(*component_group_count));
+  double *component_work =
+    (double *)calloc(component_count_size, sizeof(*component_work));
+  int *component_thread =
+    (int *)malloc(component_count_size * sizeof(*component_thread));
+  kls_separator_component_work_entry *active_components =
+    (kls_separator_component_work_entry *)
+      malloc(component_count_size * sizeof(*active_components));
+  UF_long *private_groups =
+    (UF_long *)malloc(group_count_size * sizeof(*private_groups));
+  UF_long *thread_ptr =
+    (UF_long *)calloc(thread_count_size + 1u, sizeof(*thread_ptr));
+  UF_long *thread_counts =
+    (UF_long *)calloc(thread_count_size, sizeof(*thread_counts));
+  double *thread_work =
+    (double *)calloc(thread_count_size, sizeof(*thread_work));
+  if (component_group_count == NULL || component_work == NULL ||
+      component_thread == NULL || active_components == NULL ||
+      private_groups == NULL || thread_ptr == NULL ||
+      thread_counts == NULL || thread_work == NULL) {
+    free(component_group_count);
+    free(component_work);
+    free(component_thread);
+    free(active_components);
+    free(private_groups);
+    free(thread_ptr);
+    free(thread_counts);
+    free(thread_work);
+    return 0;
+  }
+  for (UF_long component = 0; component < component_count; ++component) {
+    component_thread[component] = -1;
+  }
+
+  UF_long active_count = 0;
+  for (UF_long pos = 0; pos < group_count; ++pos) {
+    const UF_long group = source_groups[pos];
+    unsigned int component = UINT_MAX;
+    if (!kls_row_refactor_group_separator_component(solver, group,
+                                                    &component)) {
+      free(component_group_count);
+      free(component_work);
+      free(component_thread);
+      free(active_components);
+      free(private_groups);
+      free(thread_ptr);
+      free(thread_counts);
+      free(thread_work);
+      return 0;
+    }
+    if (component_group_count[component] == 0u) {
+      active_components[active_count].component = component;
+      active_components[active_count].kind =
+        solver->separator.component_kind[component];
+      active_components[active_count].work = 0.0;
+      active_count++;
+    }
+    component_group_count[component]++;
+    component_work[component] += kls_row_refactor_group_work(solver, group);
+  }
+  if (active_count <= 1u) {
+    free(component_group_count);
+    free(component_work);
+    free(component_thread);
+    free(active_components);
+    free(private_groups);
+    free(thread_ptr);
+    free(thread_counts);
+    free(thread_work);
+    return 0;
+  }
+
+  for (UF_long pos = 0; pos < active_count; ++pos) {
+    active_components[pos].work =
+      component_work[active_components[pos].component];
+  }
+  qsort(active_components, (size_t)active_count,
+        sizeof(*active_components),
+        kls_compare_separator_component_work_desc);
+
+  for (UF_long pos = 0; pos < active_count; ++pos) {
+    const unsigned int component = active_components[pos].component;
+    int target = 0;
+    double target_work = thread_work[0];
+    for (int tid = 1; tid < thread_count; ++tid) {
+      if (thread_work[tid] < target_work) {
+        target = tid;
+        target_work = thread_work[tid];
+      }
+    }
+    component_thread[component] = target;
+    thread_counts[target] += component_group_count[component];
+    thread_work[target] += component_work[component];
+  }
+
+  for (int tid = 0; tid < thread_count; ++tid) {
+    thread_ptr[tid + 1] = thread_ptr[tid] + thread_counts[tid];
+    thread_counts[tid] = thread_ptr[tid];
+  }
+  if (thread_ptr[thread_count] != group_count) {
+    free(component_group_count);
+    free(component_work);
+    free(component_thread);
+    free(active_components);
+    free(private_groups);
+    free(thread_ptr);
+    free(thread_counts);
+    free(thread_work);
+    return 0;
+  }
+
+  for (UF_long pos = 0; pos < group_count; ++pos) {
+    const UF_long group = source_groups[pos];
+    unsigned int component = UINT_MAX;
+    if (!kls_row_refactor_group_separator_component(solver, group,
+                                                    &component) ||
+        component_thread[component] < 0) {
+      free(component_group_count);
+      free(component_work);
+      free(component_thread);
+      free(active_components);
+      free(private_groups);
+      free(thread_ptr);
+      free(thread_counts);
+      free(thread_work);
+      return 0;
+    }
+    const int target = component_thread[component];
+    const UF_long dst = thread_counts[target]++;
+    if (dst >= group_count) {
+      free(component_group_count);
+      free(component_work);
+      free(component_thread);
+      free(active_components);
+      free(private_groups);
+      free(thread_ptr);
+      free(thread_counts);
+      free(thread_work);
+      return 0;
+    }
+    private_groups[dst] = group;
+  }
+
+  for (int tid = 0; tid < thread_count; ++tid) {
+    if (thread_counts[tid] != thread_ptr[tid + 1]) {
+      free(component_group_count);
+      free(component_work);
+      free(component_thread);
+      free(active_components);
+      free(private_groups);
+      free(thread_ptr);
+      free(thread_counts);
+      free(thread_work);
+      return 0;
+    }
+  }
+
+  free(component_group_count);
+  free(component_work);
+  free(component_thread);
+  free(active_components);
+  free(thread_counts);
+  free(thread_work);
+  *private_groups_out = private_groups;
+  *thread_ptr_out = thread_ptr;
+  *component_count_out = active_count;
+  return 1;
+}
+
 static void kls_sort_row_refactor_successors_by_work(kls_solver *solver) {
   if (solver == NULL ||
       solver->row_refactor_group_successor_ptr == NULL ||
@@ -18995,6 +19328,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   UF_long *row_owned_private_groups = NULL;
   UF_long *row_private_thread_ptr = NULL;
   UF_long row_private_initial_count = 0;
+  UF_long row_separator_private_component_count = 0;
+  int row_separator_private_queue = 0;
   UF_long row_ready_tail_count = 0;
   UF_long row_initial_ready_count = 0;
   /* Prefer consuming the whole retained row-group DAG through the ready queue.
@@ -19048,10 +19383,34 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   }
   if (use_row_ready_queue && row_private_groups != NULL &&
       row_initial_ready_count > 0u &&
+      kls_build_row_refactor_separator_private_thread_queues(
+        solver, row_private_groups, row_initial_ready_count, thread_count,
+        &row_owned_private_groups, &row_private_thread_ptr,
+        &row_separator_private_component_count)) {
+    row_private_groups = row_owned_private_groups;
+    row_separator_private_queue = 1;
+  }
+  if (use_row_ready_queue && row_private_groups != NULL &&
+      row_owned_private_groups == NULL &&
+      row_initial_ready_count > 0u &&
       kls_build_row_refactor_private_thread_queues(
         solver, row_private_groups, row_initial_ready_count, thread_count,
         &row_owned_private_groups, &row_private_thread_ptr)) {
     row_private_groups = row_owned_private_groups;
+  }
+  if (use_row_ready_queue && row_private_groups == NULL &&
+      row_ready_groups != NULL && row_ready_slots != NULL &&
+      row_initial_ready_count > 0u &&
+      kls_build_row_refactor_separator_private_thread_queues(
+        solver, row_ready_groups, row_initial_ready_count, thread_count,
+        &row_owned_private_groups, &row_private_thread_ptr,
+        &row_separator_private_component_count)) {
+    row_private_groups = row_owned_private_groups;
+    row_separator_private_queue = 1;
+    for (UF_long pos = 0; pos < row_initial_ready_count; ++pos) {
+      atomic_store_explicit(&row_ready_slots[pos], 0u,
+                            memory_order_relaxed);
+    }
   }
   if (use_row_ready_queue && row_private_groups == NULL &&
       row_ready_groups != NULL && row_ready_slots != NULL &&
@@ -19196,6 +19555,10 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     kls_record_row_refactor_work_ready_queue_run(solver);
     kls_record_row_refactor_private_ready_groups(
       solver, row_private_initial_count);
+    if (row_separator_private_queue) {
+      kls_record_row_refactor_separator_private_queue(
+        solver, row_separator_private_component_count);
+    }
   }
   if (pipeline_done != NULL) {
     kls_record_row_refactor_done_bitmap_run(solver);

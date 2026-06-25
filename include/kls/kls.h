@@ -300,6 +300,10 @@ typedef struct kls_stats {
   int64_t separator_pipeline_rows;
   int64_t separator_private_max_rows;
   int64_t separator_pipeline_max_rows;
+  int row_refactor_last_separator_private_queue;
+  int64_t row_refactor_separator_private_queue_run_count;
+  int64_t row_refactor_last_separator_private_components;
+  int64_t row_refactor_separator_private_component_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
