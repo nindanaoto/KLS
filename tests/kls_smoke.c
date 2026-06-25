@@ -3712,12 +3712,16 @@ static int run_experimental_kls_first_factor_case(int scale,
              stats.row_refactor_last_row_solve != 1 ||
              stats.row_refactor_row_solve_run_count != 2 ||
              stats.fast_block_restarts != 0 ||
-             stats.fast_kls_block_restarts != 0)) {
+             stats.fast_kls_block_restarts != 0 ||
+             stats.kls_tail_last_mapped_columns <= 0 ||
+             stats.kls_tail_mapped_column_count <
+               stats.kls_tail_last_mapped_columns)) {
     fprintf(stderr,
             "unexpected KLS first-factor stats: path=%s, nblocks=%" PRId64
             ", max_block=%" PRId64 ", orientation=%s, scale=%d"
             ", row_dirty=%d, row_lazy=%d, row_solve=%d, row_solve_count=%" PRId64
-            ", block_restarts=%d, kls_block_restarts=%d\n",
+            ", block_restarts=%d, kls_block_restarts=%d"
+            ", mapped_tail=%" PRId64 "/%" PRId64 "\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.nblocks, stats.max_block,
             kls_orientation_name(stats.selected_orientation),
@@ -3726,7 +3730,9 @@ static int run_experimental_kls_first_factor_case(int scale,
             stats.row_refactor_last_lazy_value_scatter,
             stats.row_refactor_last_row_solve,
             stats.row_refactor_row_solve_run_count,
-            stats.fast_block_restarts, stats.fast_kls_block_restarts);
+            stats.fast_block_restarts, stats.fast_kls_block_restarts,
+            stats.kls_tail_last_mapped_columns,
+            stats.kls_tail_mapped_column_count);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||

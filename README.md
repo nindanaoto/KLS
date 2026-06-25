@@ -134,8 +134,12 @@ KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
 retained pattern through the checked fast path. Setting
 `KLS_ENABLE_KLS_FIRST_FACTOR=1` enables an experimental KLS-owned first-factor
 scaffold for no-scale and KLU row-scaled cases. It reports `kls_first` when it
-successfully assembles KLU-compatible numeric storage. It also builds KLS-owned
-row-major `L`/`U` metadata for guarded row refactor/solve experiments, but it
+successfully assembles KLU-compatible numeric storage. The pivoted KLS block
+tail now reuses KLS's retained factor-order input map when available, reported
+as `kls_tail_last_mapped_columns` and `kls_tail_mapped_column_count`, so the
+experimental first factor and accepted tail repairs can skip repeated original
+CSC row remapping for in-block entries. It also builds KLS-owned row-major
+`L`/`U` metadata for guarded row refactor/solve experiments, but it
 first runs a cheap lower-bound work scan and skips the heavier row metadata
 setup when that scan already proves the row plan cannot beat the exact EGraph
 refactor work estimate. When the cheaper scan is inconclusive, KLS builds the

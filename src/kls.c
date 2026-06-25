@@ -288,6 +288,8 @@ struct kls_solver {
   UF_long fast_reject_tail_seed_block;
   UF_long fast_reject_tail_seed_count;
   int fast_reject_tail_seed_valid;
+  UF_long kls_tail_last_mapped_columns;
+  UF_long kls_tail_mapped_column_count;
   int factor_etree_stats_valid;
 };
 
@@ -1409,6 +1411,14 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_reject_tail_seed_block = KLS_KLU_EMPTY;
   solver->fast_reject_tail_seed_count = 0;
   solver->fast_reject_tail_seed_valid = 0;
+}
+
+static void kls_clear_tail_last_stats(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->kls_tail_last_mapped_columns = 0;
+  solver->stats.kls_tail_last_mapped_columns = 0;
 }
 
 static void kls_set_last_factor_path(kls_solver *solver,
@@ -8450,6 +8460,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_last_private_ready_groups;
   solver->stats.row_refactor_private_ready_group_count =
     (int64_t)solver->row_refactor_private_ready_group_count;
+  solver->stats.kls_tail_last_mapped_columns =
+    (int64_t)solver->kls_tail_last_mapped_columns;
+  solver->stats.kls_tail_mapped_column_count =
+    (int64_t)solver->kls_tail_mapped_column_count;
   solver->stats.row_refactor_last_done_bitmap =
     solver->row_refactor_last_done_bitmap;
   solver->stats.row_refactor_done_bitmap_run_count =
@@ -11072,6 +11086,117 @@ static Int kls_tail_lsolve_symbolic(Int n,
   return top;
 }
 
+static int kls_tail_mapped_column_range(const kls_solver *solver,
+                                        UF_long global_col,
+                                        UF_long *begin_out,
+                                        UF_long *end_out) {
+  if (solver == NULL || begin_out == NULL || end_out == NULL ||
+      solver->refactor_col_ptr == NULL ||
+      solver->refactor_row_idx == NULL ||
+      solver->refactor_input_pos == NULL ||
+      solver->symbolic == NULL ||
+      global_col >= solver->n ||
+      solver->refactor_col_ptr[global_col] >
+        solver->refactor_col_ptr[global_col + 1u] ||
+      solver->refactor_col_ptr[global_col + 1u] > solver->nnz) {
+    return 0;
+  }
+
+  const UF_long col_begin = solver->refactor_col_ptr[global_col];
+  const UF_long col_end = solver->refactor_col_ptr[global_col + 1u];
+  UF_long block_begin = col_begin;
+  if (solver->symbolic->nblocks > 1u) {
+    if (solver->refactor_block_start == NULL ||
+        solver->refactor_block_start[global_col] < col_begin ||
+        solver->refactor_block_start[global_col] > col_end) {
+      return 0;
+    }
+    block_begin = solver->refactor_block_start[global_col];
+  }
+
+  *begin_out = block_begin;
+  *end_out = col_end;
+  return 1;
+}
+
+static int kls_tail_mapped_block_is_valid(const kls_solver *solver,
+                                          UF_long k1,
+                                          UF_long nk,
+                                          const UF_long *psinv) {
+  if (solver == NULL || k1 > solver->n || nk > solver->n - k1 ||
+      solver->row_idx == NULL || psinv == NULL) {
+    return 0;
+  }
+  for (UF_long kk = 0; kk < nk; ++kk) {
+    const UF_long global_col = k1 + kk;
+    UF_long begin = 0;
+    UF_long end = 0;
+    if (!kls_tail_mapped_column_range(solver, global_col, &begin, &end)) {
+      return 0;
+    }
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long global_row = solver->refactor_row_idx[p];
+      const UF_long input_pos = solver->refactor_input_pos[p];
+      if (global_row < k1 || global_row >= k1 + nk ||
+          input_pos >= solver->nnz ||
+          solver->row_idx[input_pos] >= solver->n ||
+          psinv[solver->row_idx[input_pos]] != global_row) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+static Int kls_tail_lsolve_symbolic_mapped(const kls_solver *solver,
+                                           Int n,
+                                           Int k,
+                                           Int pinv[],
+                                           Int stack[],
+                                           Int flag[],
+                                           Int lpend[],
+                                           Int ap_pos[],
+                                           Unit lu[],
+                                           Int lup,
+                                           Int llen[],
+                                           Int lip[],
+                                           Int k1) {
+  Int top = n;
+  Int l_length = 0;
+  Int *lik = (Int *)(lu + lup);
+  const UF_long global_col = (UF_long)(k + k1);
+  UF_long begin = 0;
+  UF_long end = 0;
+  if (!kls_tail_mapped_column_range(solver, global_col, &begin, &end)) {
+    return -1;
+  }
+
+  for (UF_long p = begin; p < end; ++p) {
+    const UF_long global_row = solver->refactor_row_idx[p];
+    if (global_row < (UF_long)k1 ||
+        global_row >= (UF_long)k1 + (UF_long)n) {
+      return -1;
+    }
+    const Int i = (Int)(global_row - (UF_long)k1);
+    if (flag[i] == k) {
+      continue;
+    }
+    if (pinv[i] >= 0) {
+      top = kls_tail_dfs(i, k, pinv, llen, lip, stack, flag, lpend,
+                         top, lu, lik, &l_length, ap_pos);
+      if (top < 0) {
+        return -1;
+      }
+    } else {
+      flag[i] = k;
+      lik[l_length++] = i;
+    }
+  }
+
+  llen[k] = l_length;
+  return top;
+}
+
 static int kls_tail_construct_column(Int k,
                                      Int ap[],
                                      Int ai[],
@@ -11130,6 +11255,49 @@ static int kls_tail_construct_column(Int k,
   }
   if (offp != NULL) {
     offp[kglobal + 1] = poff;
+  }
+  return 1;
+}
+
+static int kls_tail_construct_column_mapped(const kls_solver *solver,
+                                            const double *numeric_values,
+                                            Int k,
+                                            Entry x[],
+                                            Int n,
+                                            Int k1,
+                                            double rs[],
+                                            Int scale) {
+  if (solver == NULL || numeric_values == NULL || x == NULL ||
+      solver->row_idx == NULL) {
+    return 0;
+  }
+  const UF_long global_col = (UF_long)(k + k1);
+  UF_long begin = 0;
+  UF_long end = 0;
+  if (!kls_tail_mapped_column_range(solver, global_col, &begin, &end)) {
+    return 0;
+  }
+
+  for (UF_long p = begin; p < end; ++p) {
+    const UF_long global_row = solver->refactor_row_idx[p];
+    const UF_long input_pos = solver->refactor_input_pos[p];
+    if (global_row < (UF_long)k1 ||
+        global_row >= (UF_long)k1 + (UF_long)n ||
+        input_pos >= solver->nnz) {
+      return 0;
+    }
+    const UF_long oldrow = solver->row_idx[input_pos];
+    if (oldrow >= solver->n) {
+      return 0;
+    }
+    Entry aik = numeric_values[input_pos];
+    if (scale > 0) {
+      if (rs == NULL || rs[oldrow] == 0.0) {
+        return 0;
+      }
+      SCALE_DIV(aik, rs[oldrow]);
+    }
+    x[global_row - (UF_long)k1] = aik;
   }
   return 1;
 }
@@ -11714,6 +11882,9 @@ static int kls_try_pivot_tail_restart_rejected_block(
   const double tol = solver->common.tol;
   const double memgrow = solver->common.memgrow;
   const int preserve_suffix = restart_end < nk;
+  const int use_mapped_tail =
+    kls_tail_mapped_block_is_valid(solver, k1, nk, psinv);
+  UF_long mapped_columns = 0;
   for (UF_long kk = local_reject; kk < restart_end; ++kk) {
     const Int k = (Int)kk;
     const int lock_gap_pivot =
@@ -11747,25 +11918,38 @@ static int kls_try_pivot_tail_restart_rejected_block(
 
     lip[k] = (UF_long)lup;
     const Int top =
-      kls_tail_lsolve_symbolic((Int)nk, k, solver->col_ptr, solver->row_idx,
-                               solver->symbolic->Q, live_pinv, stack, flag,
-                               lpend, ap_pos, new_lu, (Int)lup, llen, lip,
-                               (Int)k1, (Int *)psinv);
+      use_mapped_tail
+        ? kls_tail_lsolve_symbolic_mapped(
+            solver, (Int)nk, k, live_pinv, stack, flag, lpend, ap_pos,
+            new_lu, (Int)lup, llen, lip, (Int)k1)
+        : kls_tail_lsolve_symbolic(
+            (Int)nk, k, solver->col_ptr, solver->row_idx,
+            solver->symbolic->Q, live_pinv, stack, flag, lpend, ap_pos,
+            new_lu, (Int)lup, llen, lip, (Int)k1, (Int *)psinv);
     if (top < 0) {
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
     }
     /* Trial off-block row/value entries are discarded: accepted repairs
        rebuild Offi/Offx from the final Pinv before publishing stats. */
-    if (!kls_tail_construct_column(
-          k, solver->col_ptr, solver->row_idx, numeric_values,
-          solver->symbolic->Q, (Entry *)solver->numeric->Xwork, (Int)nk,
-          (Int)k1, (Int *)psinv,
-          scaled ? solver->numeric->Rs : NULL,
-          scaled ? (Int)solver->common.scale : 0,
-          NULL, NULL, NULL, 0)) {
+    const int constructed =
+      use_mapped_tail
+        ? kls_tail_construct_column_mapped(
+            solver, numeric_values, k, (Entry *)solver->numeric->Xwork,
+            (Int)nk, (Int)k1, scaled ? solver->numeric->Rs : NULL,
+            scaled ? (Int)solver->common.scale : 0)
+        : kls_tail_construct_column(
+            k, solver->col_ptr, solver->row_idx, numeric_values,
+            solver->symbolic->Q, (Entry *)solver->numeric->Xwork, (Int)nk,
+            (Int)k1, (Int *)psinv, scaled ? solver->numeric->Rs : NULL,
+            scaled ? (Int)solver->common.scale : 0,
+            NULL, NULL, NULL, 0);
+    if (!constructed) {
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
+    }
+    if (use_mapped_tail) {
+      mapped_columns++;
     }
     kls_tail_lsolve_numeric(live_pinv, new_lu, stack, lip, top, (Int)nk,
                             llen, (Entry *)solver->numeric->Xwork);
@@ -11904,6 +12088,8 @@ static int kls_try_pivot_tail_restart_rejected_block(
   *new_size_out = lusize;
   *lnz_block_out = lnz;
   *unz_block_out = unz;
+  solver->kls_tail_last_mapped_columns += mapped_columns;
+  solver->kls_tail_mapped_column_count += mapped_columns;
   return 1;
 
 fail:
@@ -22111,6 +22297,7 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
       goto fail;
     }
   }
+  (void)kls_build_refactor_map(solver);
 
   UF_long total_lnz = 0;
   UF_long total_unz = 0;
@@ -22220,6 +22407,7 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
   numeric->unz = total_unz;
   numeric->max_lnz_block = max_lnz_block;
   numeric->max_unz_block = max_unz_block;
+  free_refactor_map(solver);
   if (!kls_rebuild_numeric_pinv(solver) ||
       !kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
     goto fail;
@@ -22234,6 +22422,7 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
   return 1;
 
 fail:
+  free_refactor_map(solver);
   trilinos_klu_l_free_numeric(&numeric, common);
   solver->numeric = NULL;
   common->status = saved_status;
@@ -22249,6 +22438,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   kls_set_last_factor_path(solver, KLS_FACTOR_PATH_NONE);
   kls_clear_fast_reject_stats(solver);
+  kls_clear_tail_last_stats(solver);
   kls_clear_row_refactor_last_stats(solver);
   double *numeric_values = NULL;
   int status = prepare_numeric_values(solver, values, &numeric_values);
@@ -22392,6 +22582,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   kls_clear_fast_reject_stats(solver);
+  kls_clear_tail_last_stats(solver);
   kls_clear_row_refactor_last_stats(solver);
   double *numeric_values = NULL;
   int status = prepare_numeric_values(solver, values, &numeric_values);

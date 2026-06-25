@@ -3226,7 +3226,13 @@ mirrors from the accepted numeric object, and reports
 `initial_factor_path:"kls_first"` when it succeeds. The smoke suite covers a
 matrix with a 2-column BTF block so this path cannot pass by singleton handling
 alone, and it now requires subsequent forward and transpose solves to consume the
-seeded row mirrors. This is useful ownership groundwork, but it is still
+seeded row mirrors. The same KLS-owned pivoted tail now consumes the retained
+factor-order input map when that map is valid for the current BTF block, so it
+can iterate the already split in-block input slice instead of remapping every
+original CSC row for each tail column. `kls_stats`, `kls_bench`, and the gap
+decomposition script expose this through `kls_tail_last_mapped_columns` and
+`kls_tail_mapped_column_count`; the KLS-first smoke case requires the mapped
+tail to be exercised. This is useful ownership groundwork, but it is still
 KLU-compatible column storage plus mirrored row access, not CKTSO's production
 row-major up-looking factorization or ETree-descendant pivoting-tail executor.
 When those mirrors were seeded by `kls_first`, unchecked `kls_refactor` now
