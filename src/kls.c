@@ -371,6 +371,7 @@ typedef struct kls_egraph_refactor_shared {
   const unsigned char *row_pipeline_tail_groups;
   UF_long row_pipeline_tail_count;
   const UF_long *row_pipeline_private_groups;
+  const UF_long *row_pipeline_private_thread_ptr;
   UF_long row_pipeline_private_count;
   atomic_ulong row_pipeline_private_pos;
   atomic_ulong row_pipeline_local_ready_groups;
@@ -13896,6 +13897,123 @@ static int kls_sort_row_refactor_group_list_by_cached_work(
   return 1;
 }
 
+static int kls_build_row_refactor_private_thread_queues(
+  const kls_solver *solver,
+  const UF_long *source_groups,
+  UF_long group_count,
+  int thread_count,
+  UF_long **private_groups_out,
+  UF_long **thread_ptr_out) {
+  if (private_groups_out != NULL) {
+    *private_groups_out = NULL;
+  }
+  if (thread_ptr_out != NULL) {
+    *thread_ptr_out = NULL;
+  }
+  if (private_groups_out == NULL || thread_ptr_out == NULL ||
+      solver == NULL || source_groups == NULL || group_count == 0u ||
+      thread_count <= 1) {
+    return 0;
+  }
+  const size_t group_count_size = (size_t)group_count;
+  const size_t thread_count_size = (size_t)thread_count;
+  if ((UF_long)group_count_size != group_count ||
+      group_count_size > SIZE_MAX / sizeof(UF_long) ||
+      thread_count_size > (SIZE_MAX / sizeof(UF_long)) - 1u ||
+      thread_count_size > SIZE_MAX / sizeof(double)) {
+    return 0;
+  }
+
+  UF_long *private_groups =
+    (UF_long *)malloc(group_count_size * sizeof(*private_groups));
+  UF_long *thread_ptr =
+    (UF_long *)calloc(thread_count_size + 1u, sizeof(*thread_ptr));
+  UF_long *thread_counts =
+    (UF_long *)calloc(thread_count_size, sizeof(*thread_counts));
+  double *thread_work =
+    (double *)calloc(thread_count_size, sizeof(*thread_work));
+  if (private_groups == NULL || thread_ptr == NULL ||
+      thread_counts == NULL || thread_work == NULL) {
+    free(private_groups);
+    free(thread_ptr);
+    free(thread_counts);
+    free(thread_work);
+    return 0;
+  }
+
+  for (UF_long pos = 0; pos < group_count; ++pos) {
+    const UF_long group = source_groups[pos];
+    if (group >= solver->row_refactor_group_count) {
+      free(private_groups);
+      free(thread_ptr);
+      free(thread_counts);
+      free(thread_work);
+      return 0;
+    }
+    int target = 0;
+    double target_work = thread_work[0];
+    for (int tid = 1; tid < thread_count; ++tid) {
+      if (thread_work[tid] < target_work) {
+        target = tid;
+        target_work = thread_work[tid];
+      }
+    }
+    thread_counts[target]++;
+    thread_work[target] += kls_row_refactor_group_work(solver, group);
+  }
+
+  for (int tid = 0; tid < thread_count; ++tid) {
+    thread_ptr[tid + 1] = thread_ptr[tid] + thread_counts[tid];
+    thread_counts[tid] = thread_ptr[tid];
+    thread_work[tid] = 0.0;
+  }
+  if (thread_ptr[thread_count] != group_count) {
+    free(private_groups);
+    free(thread_ptr);
+    free(thread_counts);
+    free(thread_work);
+    return 0;
+  }
+
+  for (UF_long pos = 0; pos < group_count; ++pos) {
+    const UF_long group = source_groups[pos];
+    int target = 0;
+    double target_work = thread_work[0];
+    for (int tid = 1; tid < thread_count; ++tid) {
+      if (thread_work[tid] < target_work) {
+        target = tid;
+        target_work = thread_work[tid];
+      }
+    }
+    const UF_long dst = thread_counts[target]++;
+    if (dst >= group_count) {
+      free(private_groups);
+      free(thread_ptr);
+      free(thread_counts);
+      free(thread_work);
+      return 0;
+    }
+    private_groups[dst] = group;
+    thread_work[target] += kls_row_refactor_group_work(solver, group);
+  }
+
+  for (int tid = 0; tid < thread_count; ++tid) {
+    if (thread_counts[tid] != thread_ptr[tid + 1]) {
+      free(private_groups);
+      free(thread_ptr);
+      free(thread_counts);
+      free(thread_work);
+      return 0;
+    }
+  }
+
+  free(thread_counts);
+  free(thread_work);
+  *private_groups_out = private_groups;
+  *thread_ptr_out = thread_ptr;
+  return 1;
+}
+
 static void kls_sort_row_refactor_successors_by_work(kls_solver *solver) {
   if (solver == NULL ||
       solver->row_refactor_group_successor_ptr == NULL ||
@@ -16585,20 +16703,43 @@ static void kls_row_refactor_worker_run_ready_pipeline(
   if (worker != NULL && worker->shared != NULL &&
       worker->shared->row_pipeline_private_groups != NULL) {
     kls_egraph_refactor_shared *shared = worker->shared;
-    for (;;) {
-      if (kls_egraph_refactor_should_stop(shared)) {
+    if (shared->row_pipeline_private_thread_ptr != NULL &&
+        worker->tid >= 0 && worker->tid < shared->thread_count) {
+      const UF_long begin =
+        shared->row_pipeline_private_thread_ptr[worker->tid];
+      const UF_long end =
+        shared->row_pipeline_private_thread_ptr[worker->tid + 1];
+      if (begin <= end && end <= shared->row_pipeline_private_count) {
+        for (UF_long pos = begin; pos < end; ++pos) {
+          if (kls_egraph_refactor_should_stop(shared)) {
+            return;
+          }
+          const UF_long group = shared->row_pipeline_private_groups[pos];
+          if (!kls_row_refactor_process_ready_group_with_local_tail(worker,
+                                                                   group)) {
+            return;
+          }
+        }
+      } else {
+        kls_egraph_refactor_record_invalid(shared);
         return;
       }
-      const UF_long pos =
-        (UF_long)atomic_fetch_add_explicit(
-          &shared->row_pipeline_private_pos, 1ul, memory_order_relaxed);
-      if (pos >= shared->row_pipeline_private_count) {
-        break;
-      }
-      const UF_long group = shared->row_pipeline_private_groups[pos];
-      if (!kls_row_refactor_process_ready_group_with_local_tail(worker,
-                                                               group)) {
-        return;
+    } else {
+      for (;;) {
+        if (kls_egraph_refactor_should_stop(shared)) {
+          return;
+        }
+        const UF_long pos =
+          (UF_long)atomic_fetch_add_explicit(
+            &shared->row_pipeline_private_pos, 1ul, memory_order_relaxed);
+        if (pos >= shared->row_pipeline_private_count) {
+          break;
+        }
+        const UF_long group = shared->row_pipeline_private_groups[pos];
+        if (!kls_row_refactor_process_ready_group_with_local_tail(worker,
+                                                                 group)) {
+          return;
+        }
       }
     }
   }
@@ -16783,6 +16924,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   atomic_ulong *row_remaining_preds = NULL;
   unsigned char *row_tail_groups = NULL;
   const UF_long *row_private_groups = NULL;
+  UF_long *row_owned_private_groups = NULL;
+  UF_long *row_private_thread_ptr = NULL;
   UF_long row_ready_tail_count = 0;
   UF_long row_initial_ready_count = 0;
   /* Prefer consuming the whole retained row-group DAG through the ready queue.
@@ -16834,12 +16977,21 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
         &row_remaining_preds, &row_tail_groups, &row_private_groups,
         &row_ready_tail_count, &row_initial_ready_count);
   }
+  if (use_row_ready_queue && row_private_groups != NULL &&
+      row_initial_ready_count > 0u &&
+      kls_build_row_refactor_private_thread_queues(
+        solver, row_private_groups, row_initial_ready_count, thread_count,
+        &row_owned_private_groups, &row_private_thread_ptr)) {
+    row_private_groups = row_owned_private_groups;
+  }
   atomic_uint *pipeline_done = NULL;
   unsigned int pipeline_generation = 0;
   if (check_pivots || (use_group_pipeline && !use_row_ready_queue)) {
     pipeline_done =
       ensure_egraph_pipeline_done(solver, &pipeline_generation);
     if (pipeline_done == NULL) {
+      free(row_owned_private_groups);
+      free(row_private_thread_ptr);
       return -1;
     }
   }
@@ -16847,11 +16999,15 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   double **scratch =
     ensure_egraph_worker_scratch(solver, thread_count, solver->n);
   if (scratch == NULL) {
+    free(row_owned_private_groups);
+    free(row_private_thread_ptr);
     return -1;
   }
   kls_egraph_refactor_pool *pool =
     ensure_egraph_refactor_pool(solver, thread_count);
   if (pool == NULL) {
+    free(row_owned_private_groups);
+    free(row_private_thread_ptr);
     return -1;
   }
 
@@ -16861,10 +17017,14 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
                             solver->col_ptr, solver->row_idx,
                             numeric_values, solver->numeric->Rs, NULL,
                             common)) {
+    free(row_owned_private_groups);
+    free(row_private_thread_ptr);
     return 0;
   }
   if (!kls_refresh_row_refactor_offdiag_values(solver, numeric_values)) {
     common->status = TRILINOS_KLU_INVALID;
+    free(row_owned_private_groups);
+    free(row_private_thread_ptr);
     return 0;
   }
   common->status = TRILINOS_KLU_OK;
@@ -16876,6 +17036,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   pthread_mutex_lock(&shared->lock);
   if (pool->active_workers != 0) {
     pthread_mutex_unlock(&shared->lock);
+    free(row_owned_private_groups);
+    free(row_private_thread_ptr);
     return -1;
   }
 
@@ -16917,6 +17079,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     use_row_ready_queue ? row_ready_tail_count : 0u;
   shared->row_pipeline_private_groups =
     use_row_ready_queue ? row_private_groups : NULL;
+  shared->row_pipeline_private_thread_ptr =
+    use_row_ready_queue ? row_private_thread_ptr : NULL;
   shared->row_pipeline_private_count =
     use_row_ready_queue && row_private_groups != NULL
       ? row_initial_ready_count : 0u;
@@ -16978,8 +17142,11 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_pipeline_tail_groups = NULL;
   shared->row_pipeline_tail_count = 0;
   shared->row_pipeline_private_groups = NULL;
+  shared->row_pipeline_private_thread_ptr = NULL;
   shared->row_pipeline_private_count = 0;
   pthread_mutex_unlock(&shared->lock);
+  free(row_owned_private_groups);
+  free(row_private_thread_ptr);
   if (use_row_ready_queue) {
     kls_record_row_refactor_local_ready_groups(solver,
                                                row_local_ready_groups);
@@ -18356,6 +18523,7 @@ static int kls_run_parallel_row_solve_factor(kls_solver *solver,
   shared->row_pipeline_tail_groups = NULL;
   shared->row_pipeline_tail_count = 0;
   shared->row_pipeline_private_groups = NULL;
+  shared->row_pipeline_private_thread_ptr = NULL;
   shared->row_pipeline_private_count = 0;
   shared->pipeline_done = NULL;
   shared->pipeline_generation = 0;
@@ -18467,6 +18635,7 @@ static int kls_run_parallel_row_solve_sparse_block(
   shared->row_pipeline_tail_groups = NULL;
   shared->row_pipeline_tail_count = 0;
   shared->row_pipeline_private_groups = NULL;
+  shared->row_pipeline_private_thread_ptr = NULL;
   shared->row_pipeline_private_count = 0;
   shared->pipeline_done = NULL;
   shared->pipeline_generation = 0;

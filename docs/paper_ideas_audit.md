@@ -3282,6 +3282,11 @@ top-six row-refactor probe improved only from `11.4507s` to `11.3434s`
 geomean, and remained much slower than the EGraph path. This confirms that the
 current row engine still lacks the paper's production row/segment numeric
 kernel and that automatic row-refactor activation should remain cost-gated.
+The ready-queue row-refactor tail now also gives each worker a private initial
+ready-root range balanced by cached row work before dependent successors enter
+the shared queue. This is a small SubtreeLU-style private/pipeline scheduling
+step that reduces root-queue contention without changing the row numeric
+formulas or claiming the full separator-tree scheduler.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF
