@@ -77,17 +77,17 @@ miss. Experimental row refactors now cover single-block factors and BTF
 diagonal blocks; BTF off-block values are refreshed into KLU `Offx` from the
 retained input map. Unchecked row refactors can also hand dirty KLS-owned
 row-major `L`/`U` mirrors directly to guarded forward and transpose
-single-block solves, leaving KLU's column values stale until later factorization
-or other non-row fallback needs them. This avoids making every eligible
-row-refactor solve pay an immediate KLU publish. KLU row-scaled single-block row
+solves, leaving KLU's column values stale until later factorization or other
+non-row fallback needs them. For BTF factors the dirty row solve follows KLU's
+block order and uses refreshed `Offx` coupling directly. This avoids making
+eligible row-refactor solves pay an immediate KLU publish. KLU row-scaled row
 refactors can now also recompute `Rs`, use unpermuted row scales for
 fixed-position input loads, and restore `Rs` to pivot order after an accepted
 pass. Dirty row solves consume both unscaled and KLU row-scaled normal
-single-block row mirrors directly, using KLU's pivot-order `Rs` semantics for
-the right-hand-side load and transpose output. BTF row refactors, general
-external KLS row/column scaling, and permutation still publish before using KLU
-storage. These pieces still do not change the current default KLU-column
-numeric kernel.
+row mirrors directly, using KLU's pivot-order `Rs` semantics for the
+right-hand-side load and transpose output. General external KLS row/column
+scaling and permutation still publish before using KLU storage. These pieces
+still do not change the current default KLU-column numeric kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -2928,9 +2928,20 @@ diagonal-block input entries to the row-major update, translates KLU's local
 block `L`/`U` row indices into global row order, and refreshes BTF off-block
 `Offx` values separately from the original input positions. A smoke case covers
 a reducible BTF matrix whose off-block entry changes across refactor, verifies
-that the row refactor ran, and confirms that BTF solves publish the dirty row
-mirrors before using KLU's general triangular solve. This is still a prerequisite
-for CKTSO-style row/segment tails rather than the full pivoting-tail executor.
+that the row refactor ran, and initially confirmed that BTF solves published the
+dirty row mirrors before using KLU's general triangular solve. This is still a
+prerequisite for CKTSO-style row/segment tails rather than the full
+pivoting-tail executor.
+
+The dirty row-major solve was then extended across BTF factors. Forward solves
+now process BTF blocks in KLU order from last to first, solve each diagonal
+block from KLS-owned row-major `L`/`U` mirrors, and subtract refreshed off-block
+`Offx` columns from earlier block rows. Transpose solves process blocks from
+first to last, apply `Offx'`, and then run the row-major `U'`/`L'` triangular
+passes inside the block. The BTF row-refactor smoke now checks both forward and
+transpose solves and verifies that dirty row mirrors remain authoritative
+without publishing back to KLU storage. This is a storage-ownership step toward
+the CKTSO row/segment engine, not the full pivoting-tail executor.
 
 ## Recommended General Work
 
