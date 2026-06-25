@@ -403,7 +403,10 @@ successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus
 `row_refactor_work_ready_queue_run_count`. The ready queue keeps solver-owned
 workspace across repeated row refactors and reports its capacity through
-`row_refactor_ready_queue_workspace_groups`. Full-graph queued runs also reuse
+`row_refactor_ready_queue_workspace_groups`. When the queued scheduler keeps a
+newly ready successor as a worker-local continuation instead of spilling it to
+the shared queue, stats report `row_refactor_last_local_ready_groups` and
+`row_refactor_local_ready_group_count`. Full-graph queued runs also reuse
 the retained group predecessor counts and root-group list instead of
 rediscovering those static task-graph facts every numeric pass, and hand the
 root groups out through a private-root cursor before using the shared queue for

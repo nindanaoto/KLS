@@ -206,6 +206,8 @@ typedef struct kls_stats {
   int64_t fast_repaired_offdiag_full_refresh_count;
   int64_t fast_repaired_tail_restart_overcompute_columns;
   double fast_repaired_tail_restart_overcompute_work;
+  int64_t row_refactor_last_local_ready_groups;
+  int64_t row_refactor_local_ready_group_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -130,6 +130,7 @@ struct kls_solver {
   int row_refactor_last_ready_queue;
   int row_refactor_last_done_bitmap;
   int row_refactor_last_work_ready_queue;
+  UF_long row_refactor_last_local_ready_groups;
   UF_long row_refactor_run_count;
   UF_long row_refactor_checked_run_count;
   UF_long row_refactor_parallel_run_count;
@@ -146,6 +147,7 @@ struct kls_solver {
   int row_refactor_last_row_solve;
   UF_long row_refactor_row_solve_run_count;
   UF_long row_refactor_work_ready_queue_run_count;
+  UF_long row_refactor_local_ready_group_count;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_segment_rows;
   UF_long row_refactor_segment_max_width;
@@ -315,6 +317,7 @@ typedef struct kls_egraph_refactor_shared {
   const UF_long *row_pipeline_private_groups;
   UF_long row_pipeline_private_count;
   atomic_ulong row_pipeline_private_pos;
+  atomic_ulong row_pipeline_local_ready_groups;
   atomic_ulong row_pipeline_ready_head;
   atomic_ulong row_pipeline_ready_tail;
   atomic_ulong row_pipeline_completed_groups;
@@ -699,6 +702,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_last_ready_queue = 0;
   solver->row_refactor_last_done_bitmap = 0;
   solver->row_refactor_last_work_ready_queue = 0;
+  solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_run_count = 0;
   solver->row_refactor_checked_run_count = 0;
   solver->row_refactor_parallel_run_count = 0;
@@ -715,6 +719,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_last_row_solve = 0;
   solver->row_refactor_row_solve_run_count = 0;
   solver->row_refactor_work_ready_queue_run_count = 0;
+  solver->row_refactor_local_ready_group_count = 0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_segment_rows = 0;
   solver->row_refactor_segment_max_width = 0;
@@ -955,6 +960,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_ready_queue = 0;
   solver->row_refactor_last_done_bitmap = 0;
   solver->row_refactor_last_work_ready_queue = 0;
+  solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_last_lazy_value_scatter = 0;
   solver->row_refactor_last_row_solve = 0;
@@ -964,6 +970,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_ready_queue = 0;
   solver->stats.row_refactor_last_done_bitmap = 0;
   solver->stats.row_refactor_last_work_ready_queue = 0;
+  solver->stats.row_refactor_last_local_ready_groups = 0;
   solver->stats.row_refactor_last_defer_value_scatter = 0;
   solver->stats.row_refactor_last_lazy_value_scatter = 0;
   solver->stats.row_refactor_last_row_solve = 0;
@@ -981,6 +988,7 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_ready_queue = 0;
   solver->row_refactor_last_done_bitmap = 0;
   solver->row_refactor_last_work_ready_queue = 0;
+  solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_run_count++;
   if (check_pivots) {
@@ -1015,6 +1023,15 @@ static void kls_record_row_refactor_work_ready_queue_run(kls_solver *solver) {
   }
   solver->row_refactor_last_work_ready_queue = 1;
   solver->row_refactor_work_ready_queue_run_count++;
+}
+
+static void kls_record_row_refactor_local_ready_groups(kls_solver *solver,
+                                                       UF_long group_count) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_last_local_ready_groups = group_count;
+  solver->row_refactor_local_ready_group_count += group_count;
 }
 
 static void kls_record_row_refactor_defer_value_scatter_run(
@@ -7664,6 +7681,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_work_ready_queue_run_count;
   solver->stats.row_refactor_ready_queue_workspace_groups =
     (int64_t)solver->row_refactor_ready_queue_capacity;
+  solver->stats.row_refactor_last_local_ready_groups =
+    (int64_t)solver->row_refactor_last_local_ready_groups;
+  solver->stats.row_refactor_local_ready_group_count =
+    (int64_t)solver->row_refactor_local_ready_group_count;
   solver->stats.row_refactor_last_done_bitmap =
     solver->row_refactor_last_done_bitmap;
   solver->stats.row_refactor_done_bitmap_run_count =
@@ -14467,6 +14488,8 @@ static int kls_row_refactor_finish_ready_group(
       if (local_ready_out != NULL &&
           *local_ready_out == KLS_KLU_EMPTY) {
         *local_ready_out = successor;
+        atomic_fetch_add_explicit(&shared->row_pipeline_local_ready_groups,
+                                  1ul, memory_order_relaxed);
       } else if (!kls_row_refactor_enqueue_ready_group(shared, successor)) {
         return 0;
       }
@@ -14835,6 +14858,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       ? row_initial_ready_count : 0u;
   atomic_store_explicit(&shared->row_pipeline_private_pos, 0ul,
                         memory_order_release);
+  atomic_store_explicit(&shared->row_pipeline_local_ready_groups, 0ul,
+                        memory_order_release);
   atomic_store_explicit(&shared->row_pipeline_ready_head, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->row_pipeline_ready_tail,
@@ -14876,6 +14901,11 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   while (pool->active_workers > 0) {
     pthread_cond_wait(&pool->done_cond, &shared->lock);
   }
+  const UF_long row_local_ready_groups =
+    use_row_ready_queue
+      ? (UF_long)atomic_load_explicit(
+          &shared->row_pipeline_local_ready_groups, memory_order_acquire)
+      : 0u;
   shared->row_refactor_mode = 0;
   shared->row_pipeline_ready_queue = 0;
   shared->row_pipeline_ready_groups = NULL;
@@ -14886,6 +14916,10 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_pipeline_private_groups = NULL;
   shared->row_pipeline_private_count = 0;
   pthread_mutex_unlock(&shared->lock);
+  if (use_row_ready_queue) {
+    kls_record_row_refactor_local_ready_groups(solver,
+                                               row_local_ready_groups);
+  }
 
   if (shared->invalid || shared->pivot_rejected ||
       (shared->singular && common->halt_if_singular)) {
@@ -15864,6 +15898,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->shared.stop, 0);
   atomic_init(&pool->shared.next_pipeline_pos, 0ul);
   atomic_init(&pool->shared.row_pipeline_private_pos, 0ul);
+  atomic_init(&pool->shared.row_pipeline_local_ready_groups, 0ul);
   atomic_init(&pool->shared.row_pipeline_ready_head, 0ul);
   atomic_init(&pool->shared.row_pipeline_ready_tail, 0ul);
   atomic_init(&pool->shared.row_pipeline_completed_groups, 0ul);

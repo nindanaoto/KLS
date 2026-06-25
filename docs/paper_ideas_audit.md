@@ -76,10 +76,11 @@ ready queue for successor-released groups, trimming the first wave of shared
 queue traffic without changing the retained row DAG. When a completed group
 releases successors, the worker now keeps one ready successor as a local
 continuation and enqueues the rest, moving the queued DAG scheduler another
-step toward SubtreeLU-style private/pipeline execution. Checked queued rejects
-now refresh any missing prefix rows before accepting the prefix-tail repair
-classification, so work ordering cannot turn an already-repairable prefix into
-a scheduler-race miss. Experimental row refactors now cover single-block
+step toward SubtreeLU-style private/pipeline execution; stats now expose how
+often that local continuation path is used. Checked queued rejects now refresh
+any missing prefix rows before accepting the prefix-tail repair classification,
+so work ordering cannot turn an already-repairable prefix into a scheduler-race
+miss. Experimental row refactors now cover single-block
 factors and BTF
 diagonal blocks; BTF off-block values are refreshed into KLU `Offx` from the
 retained input map. Unchecked row refactors can also hand dirty KLS-owned

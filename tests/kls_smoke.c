@@ -2655,13 +2655,17 @@ static int test_parallel_row_refactor_full_ready_queue(void) {
              stats.row_refactor_ready_queue_group_count !=
                stats.row_refactor_group_count ||
              stats.row_refactor_last_work_ready_queue != 1 ||
-             stats.row_refactor_work_ready_queue_run_count != 1)) {
+             stats.row_refactor_work_ready_queue_run_count != 1 ||
+             stats.row_refactor_last_local_ready_groups <= 0 ||
+             stats.row_refactor_local_ready_group_count <
+               stats.row_refactor_last_local_ready_groups)) {
     fprintf(stderr,
             "unexpected full-ready row stats: width=%" PRId64
             ", groups=%" PRId64 ", cluster=%" PRId64
             ", pipe=%" PRId64 "/%" PRId64
             ", last=%d/%d/%d, ready=%" PRId64 "/%" PRId64
-            ", work_queue=%d/%" PRId64 "\n",
+            ", work_queue=%d/%" PRId64
+            ", local_ready=%" PRId64 "/%" PRId64 "\n",
             stats.row_refactor_group_level_max_width,
             stats.row_refactor_group_count,
             stats.row_refactor_group_cluster_levels,
@@ -2673,7 +2677,9 @@ static int test_parallel_row_refactor_full_ready_queue(void) {
             stats.row_refactor_ready_queue_run_count,
             stats.row_refactor_ready_queue_group_count,
             stats.row_refactor_last_work_ready_queue,
-            stats.row_refactor_work_ready_queue_run_count);
+            stats.row_refactor_work_ready_queue_run_count,
+            stats.row_refactor_last_local_ready_groups,
+            stats.row_refactor_local_ready_group_count);
     ok = 0;
   }
   for (int32_t i = 0; ok && i < n; ++i) {
