@@ -3174,6 +3174,9 @@ least 70% of triangular entries and at least 300,000 entries in the suffix.
 KLS now materializes those slice boundaries internally and reports the maximum
 per-slice entry count for lower and upper triangular solves, so a future
 parallel rectangular-slice executor can gate on measured slice balance.
+It also precomputes the CKTSO row segmentation step for dense-tail rows: lower
+rows split at the slice start, and upper rows split at the slice end, yielding
+rectangular versus within-slice triangular entry counts for both factors.
 These fields are visible in `kls_stats`, `kls_bench` JSON/text, and the gap
 decomposition script, giving the next parallel triangular-solve step a
 structure-based gate instead of a matrix-name heuristic.

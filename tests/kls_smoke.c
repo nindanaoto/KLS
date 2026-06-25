@@ -3276,12 +3276,20 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
              stats.row_solve_partition_ready != 1 ||
              stats.row_solve_partition_slices != 8 ||
              stats.row_solve_l_slice_max_entries != 0 ||
-             stats.row_solve_u_slice_max_entries != 0)) {
+             stats.row_solve_u_slice_max_entries != 0 ||
+             stats.row_solve_l_segmented_rows != 0 ||
+             stats.row_solve_l_rect_entries != 0 ||
+             stats.row_solve_l_tri_entries != 0 ||
+             stats.row_solve_u_segmented_rows != 0 ||
+             stats.row_solve_u_rect_entries != 0 ||
+             stats.row_solve_u_tri_entries != 0)) {
     fprintf(stderr,
             "unexpected row-solve seed factor stats: path=%s"
             ", auto=%d, ready=%d, dirty=%d, groups=%" PRId64
             ", segments=%" PRId64 ", solve_partition=%d/%" PRId64
-            ", max_slices=%" PRId64 "/%" PRId64 "\n",
+            ", max_slices=%" PRId64 "/%" PRId64
+            ", l_seg=%" PRId64 "/%" PRId64 "/%" PRId64
+            ", u_seg=%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.row_refactor_auto_enabled,
             stats.row_refactor_auto_values_ready,
@@ -3291,7 +3299,13 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
             stats.row_solve_partition_ready,
             stats.row_solve_partition_slices,
             stats.row_solve_l_slice_max_entries,
-            stats.row_solve_u_slice_max_entries);
+            stats.row_solve_u_slice_max_entries,
+            stats.row_solve_l_segmented_rows,
+            stats.row_solve_l_rect_entries,
+            stats.row_solve_l_tri_entries,
+            stats.row_solve_u_segmented_rows,
+            stats.row_solve_u_rect_entries,
+            stats.row_solve_u_tri_entries);
     ok = 0;
   }
 

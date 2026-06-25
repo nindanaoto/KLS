@@ -158,12 +158,20 @@ struct kls_solver {
   UF_long row_solve_l_dense_tail_rows;
   UF_long row_solve_l_dense_tail_entries;
   UF_long row_solve_l_slice_max_entries;
+  UF_long row_solve_l_segmented_rows;
+  UF_long row_solve_l_rect_entries;
+  UF_long row_solve_l_tri_entries;
   UF_long row_solve_u_dense_tail_start;
   UF_long row_solve_u_dense_tail_rows;
   UF_long row_solve_u_dense_tail_entries;
   UF_long row_solve_u_slice_max_entries;
+  UF_long row_solve_u_segmented_rows;
+  UF_long row_solve_u_rect_entries;
+  UF_long row_solve_u_tri_entries;
   UF_long *row_solve_l_slice_bounds;
   UF_long *row_solve_u_slice_bounds;
+  UF_long *row_solve_l_segment_split;
+  UF_long *row_solve_u_segment_split;
   UF_long row_refactor_work_ready_queue_run_count;
   UF_long row_refactor_local_ready_group_count;
   UF_long row_refactor_segment_count;
@@ -628,18 +636,28 @@ static void kls_clear_row_solve_partition(kls_solver *solver) {
   }
   free(solver->row_solve_l_slice_bounds);
   free(solver->row_solve_u_slice_bounds);
+  free(solver->row_solve_l_segment_split);
+  free(solver->row_solve_u_segment_split);
   solver->row_solve_l_slice_bounds = NULL;
   solver->row_solve_u_slice_bounds = NULL;
+  solver->row_solve_l_segment_split = NULL;
+  solver->row_solve_u_segment_split = NULL;
   solver->row_solve_partition_ready = 0;
   solver->row_solve_partition_slices = 0;
   solver->row_solve_l_dense_tail_start = 0;
   solver->row_solve_l_dense_tail_rows = 0;
   solver->row_solve_l_dense_tail_entries = 0;
   solver->row_solve_l_slice_max_entries = 0;
+  solver->row_solve_l_segmented_rows = 0;
+  solver->row_solve_l_rect_entries = 0;
+  solver->row_solve_l_tri_entries = 0;
   solver->row_solve_u_dense_tail_start = 0;
   solver->row_solve_u_dense_tail_rows = 0;
   solver->row_solve_u_dense_tail_entries = 0;
   solver->row_solve_u_slice_max_entries = 0;
+  solver->row_solve_u_segmented_rows = 0;
+  solver->row_solve_u_rect_entries = 0;
+  solver->row_solve_u_tri_entries = 0;
 }
 
 static void free_row_refactor_pattern(kls_solver *solver) {
@@ -7925,6 +7943,12 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_solve_l_dense_tail_entries;
   solver->stats.row_solve_l_slice_max_entries =
     (int64_t)solver->row_solve_l_slice_max_entries;
+  solver->stats.row_solve_l_segmented_rows =
+    (int64_t)solver->row_solve_l_segmented_rows;
+  solver->stats.row_solve_l_rect_entries =
+    (int64_t)solver->row_solve_l_rect_entries;
+  solver->stats.row_solve_l_tri_entries =
+    (int64_t)solver->row_solve_l_tri_entries;
   solver->stats.row_solve_u_dense_tail_start =
     (int64_t)solver->row_solve_u_dense_tail_start;
   solver->stats.row_solve_u_dense_tail_rows =
@@ -7933,6 +7957,12 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_solve_u_dense_tail_entries;
   solver->stats.row_solve_u_slice_max_entries =
     (int64_t)solver->row_solve_u_slice_max_entries;
+  solver->stats.row_solve_u_segmented_rows =
+    (int64_t)solver->row_solve_u_segmented_rows;
+  solver->stats.row_solve_u_rect_entries =
+    (int64_t)solver->row_solve_u_rect_entries;
+  solver->stats.row_solve_u_tri_entries =
+    (int64_t)solver->row_solve_u_tri_entries;
   solver->stats.row_refactor_segment_count =
     (int64_t)solver->row_refactor_segment_count;
   solver->stats.row_refactor_segment_rows =
@@ -11850,6 +11880,102 @@ static UF_long *kls_build_row_solve_slice_bounds(UF_long n,
   return bounds;
 }
 
+static UF_long kls_row_solve_col_lower_bound(const UF_long *cols,
+                                             UF_long begin,
+                                             UF_long end,
+                                             UF_long threshold) {
+  UF_long lo = begin;
+  UF_long hi = end;
+  while (lo < hi) {
+    const UF_long mid = lo + (hi - lo) / 2u;
+    if (cols[mid] < threshold) {
+      lo = mid + 1u;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+static int kls_build_row_solve_segment_splits(UF_long n,
+                                              const UF_long *ptr,
+                                              const UF_long *cols,
+                                              const UF_long *bounds,
+                                              int upper,
+                                              UF_long **split_out,
+                                              UF_long *rows_out,
+                                              UF_long *rect_entries_out,
+                                              UF_long *tri_entries_out) {
+  if (split_out != NULL) {
+    *split_out = NULL;
+  }
+  if (rows_out != NULL) {
+    *rows_out = 0;
+  }
+  if (rect_entries_out != NULL) {
+    *rect_entries_out = 0;
+  }
+  if (tri_entries_out != NULL) {
+    *tri_entries_out = 0;
+  }
+  if (split_out == NULL || ptr == NULL || cols == NULL || bounds == NULL ||
+      n == 0u) {
+    return 1;
+  }
+
+  UF_long *split = (UF_long *)malloc((size_t)n * sizeof(*split));
+  if (split == NULL) {
+    return 0;
+  }
+  for (UF_long row = 0; row < n; ++row) {
+    split[row] = ptr[row];
+  }
+
+  UF_long rows = 0;
+  UF_long rect_entries = 0;
+  UF_long tri_entries = 0;
+  for (UF_long slice = 0u; slice < KLS_ROW_SOLVE_TRAPEZOID_SLICES; ++slice) {
+    const UF_long slice_begin = bounds[slice];
+    const UF_long slice_end = bounds[slice + 1u];
+    if (slice_begin > slice_end || slice_end > n) {
+      free(split);
+      return 0;
+    }
+    const UF_long threshold = upper ? slice_end : slice_begin;
+    for (UF_long row = slice_begin; row < slice_end; ++row) {
+      const UF_long row_begin = ptr[row];
+      const UF_long row_end = ptr[row + 1u];
+      if (row_begin > row_end) {
+        free(split);
+        return 0;
+      }
+      const UF_long cut =
+        kls_row_solve_col_lower_bound(cols, row_begin, row_end, threshold);
+      split[row] = cut;
+      rows++;
+      if (upper) {
+        tri_entries += cut - row_begin;
+        rect_entries += row_end - cut;
+      } else {
+        rect_entries += cut - row_begin;
+        tri_entries += row_end - cut;
+      }
+    }
+  }
+
+  *split_out = split;
+  if (rows_out != NULL) {
+    *rows_out = rows;
+  }
+  if (rect_entries_out != NULL) {
+    *rect_entries_out = rect_entries;
+  }
+  if (tri_entries_out != NULL) {
+    *tri_entries_out = tri_entries;
+  }
+  return 1;
+}
+
 static void kls_record_row_solve_partition(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -11879,6 +12005,15 @@ static void kls_record_row_solve_partition(kls_solver *solver) {
     kls_build_row_solve_slice_bounds(n, solver->row_refactor_l_ptr, l_start,
                                      l_entries,
                                      &solver->row_solve_l_slice_max_entries);
+  if (solver->row_solve_l_slice_bounds != NULL) {
+    (void)kls_build_row_solve_segment_splits(
+      n, solver->row_refactor_l_ptr, solver->row_refactor_l_cols,
+      solver->row_solve_l_slice_bounds, 0,
+      &solver->row_solve_l_segment_split,
+      &solver->row_solve_l_segmented_rows,
+      &solver->row_solve_l_rect_entries,
+      &solver->row_solve_l_tri_entries);
+  }
   solver->row_solve_u_dense_tail_start = u_start;
   solver->row_solve_u_dense_tail_rows = u_start < n ? n - u_start : 0u;
   solver->row_solve_u_dense_tail_entries = u_entries;
@@ -11886,6 +12021,15 @@ static void kls_record_row_solve_partition(kls_solver *solver) {
     kls_build_row_solve_slice_bounds(n, solver->row_refactor_u_ptr, u_start,
                                      u_entries,
                                      &solver->row_solve_u_slice_max_entries);
+  if (solver->row_solve_u_slice_bounds != NULL) {
+    (void)kls_build_row_solve_segment_splits(
+      n, solver->row_refactor_u_ptr, solver->row_refactor_u_cols,
+      solver->row_solve_u_slice_bounds, 1,
+      &solver->row_solve_u_segment_split,
+      &solver->row_solve_u_segmented_rows,
+      &solver->row_solve_u_rect_entries,
+      &solver->row_solve_u_tri_entries);
+  }
 }
 
 static int kls_build_row_solve_pattern(kls_solver *solver) {

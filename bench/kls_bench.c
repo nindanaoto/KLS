@@ -956,10 +956,16 @@ int main(int argc, char **argv) {
            ",\"row_solve_l_dense_tail_rows\":%" PRId64
            ",\"row_solve_l_dense_tail_entries\":%" PRId64
            ",\"row_solve_l_slice_max_entries\":%" PRId64
+           ",\"row_solve_l_segmented_rows\":%" PRId64
+           ",\"row_solve_l_rect_entries\":%" PRId64
+           ",\"row_solve_l_tri_entries\":%" PRId64
            ",\"row_solve_u_dense_tail_start\":%" PRId64
            ",\"row_solve_u_dense_tail_rows\":%" PRId64
            ",\"row_solve_u_dense_tail_entries\":%" PRId64
            ",\"row_solve_u_slice_max_entries\":%" PRId64
+           ",\"row_solve_u_segmented_rows\":%" PRId64
+           ",\"row_solve_u_rect_entries\":%" PRId64
+           ",\"row_solve_u_tri_entries\":%" PRId64
            ",\"row_refactor_last_work_ready_queue\":%d"
            ",\"row_refactor_work_ready_queue_run_count\":%" PRId64
            ",\"row_refactor_ready_queue_workspace_groups\":%" PRId64
@@ -1046,10 +1052,16 @@ int main(int argc, char **argv) {
            stats.row_solve_l_dense_tail_rows,
            stats.row_solve_l_dense_tail_entries,
            stats.row_solve_l_slice_max_entries,
+           stats.row_solve_l_segmented_rows,
+           stats.row_solve_l_rect_entries,
+           stats.row_solve_l_tri_entries,
            stats.row_solve_u_dense_tail_start,
            stats.row_solve_u_dense_tail_rows,
            stats.row_solve_u_dense_tail_entries,
            stats.row_solve_u_slice_max_entries,
+           stats.row_solve_u_segmented_rows,
+           stats.row_solve_u_rect_entries,
+           stats.row_solve_u_tri_entries,
            stats.row_refactor_last_work_ready_queue,
            stats.row_refactor_work_ready_queue_run_count,
            stats.row_refactor_ready_queue_workspace_groups,
@@ -1293,18 +1305,27 @@ int main(int argc, char **argv) {
     printf("row solve partition: ready %d, slices %" PRId64
            ", L dense tail start %" PRId64 ", rows %" PRId64
            ", entries %" PRId64 ", max slice entries %" PRId64
+           ", segmented rows %" PRId64 ", rect/tri entries %" PRId64 "/%" PRId64
            ", U dense tail start %" PRId64 ", rows %" PRId64
-           ", entries %" PRId64 ", max slice entries %" PRId64 "\n",
+           ", entries %" PRId64 ", max slice entries %" PRId64
+           ", segmented rows %" PRId64 ", rect/tri entries %" PRId64 "/%" PRId64
+           "\n",
            stats.row_solve_partition_ready,
            stats.row_solve_partition_slices,
            stats.row_solve_l_dense_tail_start,
            stats.row_solve_l_dense_tail_rows,
            stats.row_solve_l_dense_tail_entries,
            stats.row_solve_l_slice_max_entries,
+           stats.row_solve_l_segmented_rows,
+           stats.row_solve_l_rect_entries,
+           stats.row_solve_l_tri_entries,
            stats.row_solve_u_dense_tail_start,
            stats.row_solve_u_dense_tail_rows,
            stats.row_solve_u_dense_tail_entries,
-           stats.row_solve_u_slice_max_entries);
+           stats.row_solve_u_slice_max_entries,
+           stats.row_solve_u_segmented_rows,
+           stats.row_solve_u_rect_entries,
+           stats.row_solve_u_tri_entries);
     printf("row refactor segments: %" PRId64
            ", rows: %" PRId64 ", max width: %" PRId64
            ", dense entries: %.6g, trailing entries: %.6g\n",

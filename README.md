@@ -452,7 +452,10 @@ CKTSO-style triangular solve partition diagnostics using the paper's dense-tail
 criteria, namely a suffix with at least 70% of row-triangular entries and at
 least 300,000 entries, plus the eight trapezoid slices CKTSO uses after a dense
 tail is found. KLS retains the slice boundaries internally and reports the
-maximum per-slice triangular entries as a load-balance diagnostic. The queued
+maximum per-slice triangular entries as a load-balance diagnostic. It also
+precomputes per-row rectangular/triangular split points for dense-tail rows and
+reports the resulting lower/upper segment entry counts, matching CKTSO's
+trapezoid-slice setup before the parallel executor is enabled. The queued
 row scheduler orders
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
