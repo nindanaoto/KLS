@@ -3031,17 +3031,20 @@ the non-contiguous tail; they make broad paper-suite runs identify the cases
 where KLS needs the real CKTSO pipelined row-tail executor instead of another
 safe KLU-style suffix cleanup.
 
-KLS then started consuming the safest subset of that retained tail plan. When
-the ETree-descendant plan is a contiguous segment beginning at the rejected
-pivot but ending before the full block suffix, the KLS-owned pivoted block
-repair first tries to refactor only that segment and preserve the later
-columns. The attempt is deliberately conservative: if pivoting selects a row
-whose old pivot position lies outside the segment, if preserved `L` rows cannot
-be remapped to the new final pivot order, or if the speculative attempt fails,
-KLS restores the original block pointer metadata and falls back to the existing
-serial suffix restart. This is still not the full CKTSO non-contiguous
-pipelined tail executor, but it is the first executable use of a shorter
-ETree-tail plan rather than only a diagnostic.
+KLS then started consuming a conservative executable subset of that retained
+tail plan. When the ETree-descendant plan begins at the rejected pivot and its
+last planned column is before the full block suffix end, the KLS-owned pivoted
+block repair first tries to refactor only the contiguous envelope covering that
+plan and preserve the later columns. Internal envelope gaps that are not in the
+ETree-tail plan are locked to their old pivot rows, so a gap column cannot
+introduce a new pivot change merely because KLS is using a serial envelope
+rather than CKTSO's true non-contiguous pipeline. If pivoting selects a row
+whose old pivot position lies outside the envelope, if a locked gap changes
+pivot, if preserved `L` rows cannot be remapped to the new final pivot order,
+or if the speculative attempt fails, KLS restores the original block pointer
+metadata and falls back to the existing serial suffix restart. This is still
+not the full CKTSO non-contiguous pipelined tail executor, but it is now an
+executable tail-envelope approximation rather than only a diagnostic.
 
 The pivoting-tail plan then stopped treating every prefix-current checked
 reject as a full suffix when the checked worker bitmap can identify unfinished
