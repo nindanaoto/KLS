@@ -2270,12 +2270,12 @@ static int run_scaled_row_refactor_case(int threads, int expect_parallel) {
              stats.row_refactor_last_checked != 0 ||
              stats.row_refactor_last_parallel != expect_parallel ||
              stats.row_refactor_last_defer_value_scatter != 1 ||
-             stats.row_refactor_values_dirty != 0 ||
+             stats.row_refactor_values_dirty != 1 ||
              stats.row_refactor_last_lazy_value_scatter != 1 ||
-             stats.row_refactor_last_row_solve != 0 ||
+             stats.row_refactor_last_row_solve != 1 ||
              stats.row_refactor_run_count != 1 ||
              stats.row_refactor_lazy_value_scatter_run_count != 1 ||
-             stats.row_refactor_row_solve_run_count != 0)) {
+             stats.row_refactor_row_solve_run_count != 1)) {
     fprintf(stderr,
             "unexpected scaled row-refactor stats for %d threads:"
             " scale=%d, last=%d/%d/%d, defer=%d, dirty=%d"

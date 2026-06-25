@@ -80,10 +80,11 @@ non-row fallback needs them. This avoids making every row-refactor solve pay an
 immediate KLU publish. Experimental single-block row refactors can now also
 consume KLU row-scaled factors by recomputing `Rs`, using unpermuted row scales
 for fixed-position input loads, and restoring `Rs` to pivot order after an
-accepted pass. Scaled dirty row solves still publish before using the ordinary
-KLU triangular solve, so this is row-engine coverage rather than a full
-structure-adaptive solve. These pieces still do not change the current default
-KLU-column numeric kernel.
+accepted pass. Dirty row solves now consume both unscaled and KLU row-scaled
+normal single-block row mirrors directly, using KLU's pivot-order `Rs` semantics
+for the right-hand-side load. Transpose solves and general external KLS
+row/column scaling or permutation still publish before using KLU storage. These
+pieces still do not change the current default KLU-column numeric kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -2903,10 +2904,10 @@ permutes `Rs` back to pivot order only after an accepted pass. Checked rejects
 leave `Rs` in input-row order for the existing scaled repair/tail machinery, and
 the row-tail candidate diagnostic uses the same scaled input loader. A smoke
 case covers both one-thread and four-thread scaled row refactors, validates the
-constructed solution, and confirms that scaled dirty row values are published
-before solve because the direct row-major solve remains unscaled-only. This is a
-general row/segment-engine coverage step, not the full CKTSO
-ETree-descendant pivoting-tail executor.
+constructed solution, and now confirms that the scaled dirty row mirrors remain
+authoritative through the normal solve by dividing the RHS through pivot-order
+`Rs`, matching KLU's `P*(R\b)` solve setup. This is a general row/segment-engine
+coverage step, not the full CKTSO ETree-descendant pivoting-tail executor.
 
 ## Recommended General Work
 

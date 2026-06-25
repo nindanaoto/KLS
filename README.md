@@ -376,10 +376,10 @@ by the unpermuted row scale, and permuting `Rs` back to pivot order after an
 accepted row pass. Row refactors can keep KLS row-major `L`/`U` values
 authoritative across repeated unchecked refactors and publish them to KLU
 storage lazily only when a KLU fallback needs it. The guarded dirty row solve
-remains unscaled-only; scaled dirty row values are published before the ordinary
-KLU solve. A guarded non-transpose single-block solve can consume the dirty
-row-major mirrors directly, keeping the KLU values stale until a transpose
-solve, later factor, or other non-row fallback publishes them. Benchmark stats
+handles unscaled and KLU row-scaled normal single-block factors by matching KLU's
+`P*(R\b)` right-hand-side load. External KLS row/column scaling or permutation,
+transpose solves, later factorization, and other non-row fallbacks still publish
+the dirty row mirrors before using KLU storage. Benchmark stats
 report `row_refactor_last_defer_value_scatter`,
 `row_refactor_defer_value_scatter_run_count`, `row_refactor_values_dirty`,
 `row_refactor_last_lazy_value_scatter`, and

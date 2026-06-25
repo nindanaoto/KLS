@@ -12719,13 +12719,16 @@ static int kls_row_refactor_solve_is_eligible(const kls_solver *solver,
       !solver->row_refactor_values_dirty || kernel_transpose ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->row_perm != NULL || solver->row_scale != NULL ||
-      solver->col_scale != NULL || solver->common.scale > 0 ||
-      solver->numeric->Rs != NULL || solver->symbolic->nblocks != 1u ||
+      solver->col_scale != NULL || solver->symbolic->nblocks != 1u ||
       solver->row_refactor_pattern_n != solver->n ||
       solver->row_refactor_l_ptr == NULL ||
       solver->row_refactor_u_ptr == NULL ||
       solver->numeric->Pnum == NULL || solver->symbolic->Q == NULL ||
       solver->numeric->Udiag == NULL || solver->numeric->Xwork == NULL) {
+    return 0;
+  }
+  if ((solver->common.scale > 0 && solver->numeric->Rs == NULL) ||
+      (solver->common.scale <= 0 && solver->numeric->Rs != NULL)) {
     return 0;
   }
   if (solver->row_refactor_l_ptr[solver->n] > 0u &&
@@ -12754,13 +12757,25 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
   const UF_long *pnum = solver->numeric->Pnum;
   const UF_long *q = solver->symbolic->Q;
   const double *udiag = (const double *)solver->numeric->Udiag;
+  const double *rs = solver->numeric->Rs;
   double *work = (double *)solver->numeric->Xwork;
+
+  for (UF_long k = 0; k < n; ++k) {
+    if (pnum[k] < 0 || pnum[k] >= n || q[k] < 0 || q[k] >= n) {
+      return 0;
+    }
+    if (rs != NULL && (rs[k] == 0.0 || !isfinite(rs[k]))) {
+      return 0;
+    }
+  }
+
   solver->common.status = TRILINOS_KLU_OK;
 
   for (int64_t rhs_index = 0; rhs_index < nrhs; ++rhs_index) {
     double *rhs = x + rhs_index * ldx;
     for (UF_long k = 0; k < n; ++k) {
-      work[k] = rhs[pnum[k]];
+      const double rhs_value = rhs[pnum[k]];
+      work[k] = rs != NULL ? rhs_value / rs[k] : rhs_value;
     }
 
     for (UF_long row = 0; row < n; ++row) {
