@@ -372,7 +372,10 @@ design work, not benchmark-specific tuning.
   Very high-work single-block row-scaled factors can also use that full
   all-pipeline EGraph path once the existing scale recomputation/permutation
   support is available, so the scheduler does not leave a tiny barriered tail
-  after hundreds of narrow cluster levels.
+  after hundreds of narrow cluster levels. Those scaled single-block EGraph
+  refactors now use a dedicated column kernel that applies KLU row scales
+  directly while loading the fixed input-position map, instead of paying the
+  generic BTF-capable value-loader branch on every entry.
   A later fragmented many-block gate applies the same CKTSO-style lesson to
   unscaled BTF decompositions whose largest block covers less than half the
   matrix but still carries enough numeric work to justify intra-block
@@ -1133,6 +1136,17 @@ shared atomic cursor, but `nxp1` and `rajat30` were neutral-to-slightly worse
 and `G3_circuit` regressed to about 19.45s/19.41s factor/refactor. The
 existing static tail assignment therefore remains the better fit for KLS's
 current column storage and scratch model.
+
+A CKTSO-style topological level-order all-pipeline cursor for huge single-block
+EGraph refactors was also tested and rejected in favor of the current natural
+column-order cursor. On same-session checks it regressed `nxp1` refactor time
+to about 0.72s and `rajat30` to about 0.39s, so the missing gap is not simply
+the absence of a level-ordered all-pipeline cursor. The retained improvement in
+this area is narrower: scaled single-block EGraph refactors now dispatch to a
+dedicated hot kernel that applies row scaling directly while loading the fixed
+input-position map. Same-session probes improved `nxp1` repeated refactor from
+about 0.301s to 0.287s and `rajat30` from about 0.264s to 0.218s with valid
+residuals, while unscaled/BTF probes stayed valid.
 
 The BTF worker pool was then adjusted to fetch small ranges of diagonal blocks
 per mutex acquisition when a matrix has many thousands of non-dominant BTF

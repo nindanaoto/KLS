@@ -189,8 +189,11 @@ The huge single-block unscaled EGraph column kernel also relies on that
 prevalidated map and schedule instead of repeating structural pointer,
 row-bound, and U-order checks inside every column. The EGraph worker records
 the selected column-kernel kind once before dispatching the solver-owned worker
-pool, so large unscaled single-block and large-BTF cluster/pipeline loops do
-not re-run the same kernel selection branch for every column.
+pool, so large unscaled single-block, scaled single-block, and large-BTF
+cluster/pipeline loops do not re-run the same kernel selection branch for
+every column. The scaled single-block kernel also applies KLU row scales
+directly while loading the fixed input-position map, avoiding the generic
+BTF-capable value loader on large scaled all-pipeline refactors.
 Most low-work dominant-BTF cases also stay on the mapped serial path, but those with
 enough measured dependency work can consume the same EGraph path. When a
 low-work dominant BTF decomposition has one 95%+ block plus thousands of tiny

@@ -275,7 +275,8 @@ typedef struct kls_parallel_refactor_worker {
 typedef enum kls_egraph_refactor_kernel {
   KLS_EGRAPH_REFACTOR_KERNEL_GENERIC = 0,
   KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED = 1,
-  KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED = 2
+  KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED = 2,
+  KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_SCALED = 3
 } kls_egraph_refactor_kernel;
 
 typedef struct kls_egraph_refactor_shared {
@@ -15490,6 +15491,103 @@ static int kls_egraph_refactor_single_unscaled_column(
   return 1;
 }
 
+static int kls_egraph_refactor_single_scaled_column(
+  kls_egraph_refactor_worker *worker,
+  UF_long k,
+  int wait_for_dependencies) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  double *x = worker->x;
+  double *udiag = (double *)numeric->Udiag;
+  UF_long **l_indices = solver->refactor_l_indices;
+  double **l_values = solver->refactor_l_values;
+  UF_long **u_indices = solver->refactor_u_indices;
+  double **u_values = solver->refactor_u_values;
+  if (solver->refactor_lu_pointer_count != solver->n ||
+      l_indices == NULL || l_values == NULL ||
+      u_indices == NULL || u_values == NULL ||
+      solver->row_idx == NULL || shared->rs == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+
+  for (UF_long p = solver->refactor_col_ptr[k];
+       p < solver->refactor_col_ptr[k + 1u]; ++p) {
+    const UF_long input_pos = solver->refactor_input_pos[p];
+    if (input_pos >= solver->nnz) {
+      kls_egraph_refactor_record_invalid(shared);
+      return 0;
+    }
+    const UF_long oldrow = solver->row_idx[input_pos];
+    if (oldrow >= solver->n || shared->rs[oldrow] == 0.0) {
+      kls_egraph_refactor_record_invalid(shared);
+      return 0;
+    }
+    x[solver->refactor_row_idx[p]] =
+      shared->values[input_pos] / shared->rs[oldrow];
+  }
+
+  UF_long *ui = u_indices[k];
+  double *ux = u_values[k];
+  UF_long ucol_len = numeric->Ulen[k];
+  for (UF_long up = 0; up < ucol_len; ++up) {
+    const UF_long j = ui[up];
+    if (wait_for_dependencies &&
+        !kls_egraph_refactor_wait_done(shared, j)) {
+      return 0;
+    }
+    const double ujk = x[j];
+    x[j] = 0.0;
+    ux[up] = ujk;
+
+    UF_long *li = l_indices[j];
+    double *lx = l_values[j];
+    UF_long lcol_len = numeric->Llen[j];
+    kls_scatter_subtract(x, li, lx, lcol_len, ujk);
+  }
+
+  const double ukk = x[k];
+  x[k] = 0.0;
+  if (ukk == 0.0) {
+    kls_egraph_refactor_record_singular(shared, k, symbolic->Q[k]);
+    if (solver->common.halt_if_singular) {
+      return 0;
+    }
+  }
+  udiag[k] = ukk;
+
+  UF_long *li = l_indices[k];
+  double *lx = l_values[k];
+  UF_long lcol_len = numeric->Llen[k];
+  UF_long rejected_row = KLS_KLU_EMPTY;
+  UF_long rejected_local_row = KLS_KLU_EMPTY;
+  double rejected_multiplier_abs = -1.0;
+  double rejected_pivot_abs = -1.0;
+  double rejected_candidate_abs = -1.0;
+  if (shared->check_pivots &&
+      kls_checked_refactor_best_reject_candidate(
+        li, lcol_len, x, ukk, solver->common.tol, 0u, &rejected_row,
+        &rejected_local_row, &rejected_multiplier_abs, &rejected_pivot_abs,
+        &rejected_candidate_abs)) {
+    x[rejected_local_row] = 0.0;
+    kls_egraph_refactor_record_reject(shared, k, symbolic->Q[k],
+                                      rejected_row,
+                                      rejected_multiplier_abs,
+                                      rejected_pivot_abs,
+                                      rejected_candidate_abs);
+    return 0;
+  }
+  for (UF_long p = 0; p < lcol_len; ++p) {
+    const UF_long i = li[p];
+    const double lij = x[i] / ukk;
+    lx[p] = lij;
+    x[i] = 0.0;
+  }
+  return 1;
+}
+
 static int kls_egraph_refactor_btf_unscaled_column(
   kls_egraph_refactor_worker *worker,
   UF_long k,
@@ -15856,6 +15954,9 @@ static int kls_egraph_refactor_dispatch_column(
   switch (worker->shared->kernel) {
     case KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED:
       return kls_egraph_refactor_single_unscaled_column(
+        worker, k, wait_for_dependencies);
+    case KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_SCALED:
+      return kls_egraph_refactor_single_scaled_column(
         worker, k, wait_for_dependencies);
     case KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED:
       return kls_egraph_refactor_btf_unscaled_column(
@@ -16440,8 +16541,13 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
 static kls_egraph_refactor_kernel kls_egraph_refactor_kernel_for(
   const kls_solver *solver,
   int scale) {
-  if (solver == NULL || solver->symbolic == NULL || scale > 0) {
+  if (solver == NULL || solver->symbolic == NULL) {
     return KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
+  }
+  if (scale > 0) {
+    return solver->symbolic->nblocks == 1u
+      ? KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_SCALED
+      : KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
   }
   if (solver->symbolic->nblocks == 1u) {
     return KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED;
