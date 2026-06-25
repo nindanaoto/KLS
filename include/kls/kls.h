@@ -227,6 +227,11 @@ typedef struct kls_stats {
   int64_t factor_etree_leaf_columns;
   int64_t factor_etree_max_fanout;
   int fast_kls_block_restarts;
+  double row_refactor_total_group_work;
+  int row_refactor_auto_enabled;
+  int row_refactor_auto_values_ready;
+  int row_refactor_auto_work_allowed;
+  int row_refactor_auto_should_run;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

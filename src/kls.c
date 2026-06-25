@@ -7683,6 +7683,10 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   candidate->symbolic = NULL;
 }
 
+static double kls_row_refactor_total_group_work(const kls_solver *solver);
+static int kls_auto_row_refactor_cost_allows(const kls_solver *solver);
+static int kls_auto_row_refactor_should_run(const kls_solver *solver);
+
 static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.struct_size = sizeof(solver->stats);
   solver->stats.n = (int64_t)solver->n;
@@ -7705,6 +7709,16 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     (int64_t)solver->fast_repaired_offdiag_full_refresh_count;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
+  solver->stats.row_refactor_total_group_work =
+    kls_row_refactor_total_group_work(solver);
+  solver->stats.row_refactor_auto_enabled =
+    solver->row_refactor_auto_enabled;
+  solver->stats.row_refactor_auto_values_ready =
+    solver->row_refactor_values_ready;
+  solver->stats.row_refactor_auto_work_allowed =
+    kls_auto_row_refactor_cost_allows(solver);
+  solver->stats.row_refactor_auto_should_run =
+    kls_auto_row_refactor_should_run(solver);
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
     solver->stats.selected_btf = solver->symbolic->do_btf ? 1 : 0;
@@ -7738,6 +7752,16 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->fast_repaired_offdiag_full_refresh_count;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
+  solver->stats.row_refactor_total_group_work =
+    kls_row_refactor_total_group_work(solver);
+  solver->stats.row_refactor_auto_enabled =
+    solver->row_refactor_auto_enabled;
+  solver->stats.row_refactor_auto_values_ready =
+    solver->row_refactor_values_ready;
+  solver->stats.row_refactor_auto_work_allowed =
+    kls_auto_row_refactor_cost_allows(solver);
+  solver->stats.row_refactor_auto_should_run =
+    kls_auto_row_refactor_should_run(solver);
   solver->stats.selected_btf =
     (solver->symbolic != NULL && solver->symbolic->do_btf) ? 1 : 0;
   solver->stats.numerical_rank = (int64_t)solver->common.numerical_rank;

@@ -142,7 +142,11 @@ and their retained row-work estimate is no larger than the exact EGraph
 refactor work estimate;
 successful checked pivot repairs reseed those mirrors so subsequent solves do
 not have to fall back to published KLU column storage solely because the repaired
-block rebuilt its LU payload. It is not enabled by default. `kls_bench` and
+block rebuilt its LU payload. Benchmark stats expose
+`row_refactor_total_group_work`, `row_refactor_auto_enabled`,
+`row_refactor_auto_values_ready`, `row_refactor_auto_work_allowed`, and
+`row_refactor_auto_should_run` so this automatic handoff can be audited against
+the exact EGraph work model. It is not enabled by default. `kls_bench` and
 `run_bench_suite.py` also accept
 `--kls-first-factor env|off|on` so this path can be compared reproducibly
 without relying on an ambient environment variable.

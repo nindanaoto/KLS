@@ -888,6 +888,11 @@ int main(int argc, char **argv) {
            ",\"row_refactor_group_pipeline_groups\":%" PRId64
            ",\"row_refactor_group_pipeline_rows\":%" PRId64
            ",\"row_refactor_group_pipeline_work\":%.9g"
+           ",\"row_refactor_total_group_work\":%.9g"
+           ",\"row_refactor_auto_enabled\":%d"
+           ",\"row_refactor_auto_values_ready\":%d"
+           ",\"row_refactor_auto_work_allowed\":%d"
+           ",\"row_refactor_auto_should_run\":%d"
            ",\"row_refactor_group_dependency_edges\":%" PRId64
            ",\"row_refactor_group_root_count\":%" PRId64
            ",\"row_refactor_group_leaf_count\":%" PRId64
@@ -963,6 +968,11 @@ int main(int argc, char **argv) {
            stats.row_refactor_group_pipeline_groups,
            stats.row_refactor_group_pipeline_rows,
            stats.row_refactor_group_pipeline_work,
+           stats.row_refactor_total_group_work,
+           stats.row_refactor_auto_enabled,
+           stats.row_refactor_auto_values_ready,
+           stats.row_refactor_auto_work_allowed,
+           stats.row_refactor_auto_should_run,
            stats.row_refactor_group_dependency_edges,
            stats.row_refactor_group_root_count,
            stats.row_refactor_group_leaf_count,
@@ -1163,6 +1173,9 @@ int main(int argc, char **argv) {
            ", levels: %" PRId64 ", max level width: %" PRId64
            ", cluster levels: %" PRId64 ", pipeline groups: %" PRId64
            ", pipeline rows: %" PRId64 ", pipeline work: %.6g"
+           ", total work: %.6g"
+           ", auto enabled: %d, auto values ready: %d"
+           ", auto work allowed: %d, auto should run: %d"
            ", edges: %" PRId64 ", roots: %" PRId64
            ", leaves: %" PRId64 ", max fanout: %" PRId64
            ", last run: %d, last checked: %d, last parallel: %d"
@@ -1191,6 +1204,11 @@ int main(int argc, char **argv) {
            stats.row_refactor_group_pipeline_groups,
            stats.row_refactor_group_pipeline_rows,
            stats.row_refactor_group_pipeline_work,
+           stats.row_refactor_total_group_work,
+           stats.row_refactor_auto_enabled,
+           stats.row_refactor_auto_values_ready,
+           stats.row_refactor_auto_work_allowed,
+           stats.row_refactor_auto_should_run,
            stats.row_refactor_group_dependency_edges,
            stats.row_refactor_group_root_count,
            stats.row_refactor_group_leaf_count,

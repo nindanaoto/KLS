@@ -3128,6 +3128,20 @@ already more expensive. This follows the NICSLU/SubtreeLU recommendation to
 select parallel kernels from structure and FLOP evidence rather than matrix
 names, and prevents KLS-first scaffolding from replacing a cheaper existing
 EGraph refactor with a slower row-major mirror update on hard rows.
+The gate is now visible in `kls_stats` and benchmark JSON through
+`row_refactor_total_group_work`, `row_refactor_auto_enabled`,
+`row_refactor_auto_values_ready`, `row_refactor_auto_work_allowed`, and
+`row_refactor_auto_should_run`, so future KLS-first comparisons can explain
+whether the row-major path was skipped because the paper-style work model
+rejected it.
+A same-session 20-matrix CKTSO-gap probe compared this gated KLS-first mode
+with `--kls-first-factor off` at 4 threads and 3 refactors. The geomean ratio
+was about 1.01x, with wins on `ASIC_100k`, `rajat15`, `onetone1`, and
+`transient`, but regressions on `G2_circuit`, `HTC_336_4438`, `ASIC_100ks`,
+and `Raj1`. This confirms that the current scaffold should remain
+experiment-gated; the papers point to the full row-major fast factorization and
+pivoting-tail machinery as the missing general algorithm, not to blindly
+enabling KLS-first on every pattern.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF
