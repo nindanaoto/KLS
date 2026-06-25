@@ -2851,6 +2851,13 @@ the ordered-block ETree. This is still diagnostic/planning infrastructure, but
 it matches CKTSO's restart-point determination more closely and exposes the
 true non-suffix worklist that a pipelined pivoting-tail executor should consume.
 
+The serial suffix tail retry then stopped copying and mutating a private
+`Offp` array. Tail-column construction now supports a discard-only off-block
+mode, which is valid because accepted local repairs rebuild `Offi`/`Offx` from
+the final `Pinv` before publishing numeric state. This removes one more
+whole-matrix scratch allocation from the executable tail-restart path while
+preserving the current conservative suffix semantics.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

@@ -9821,8 +9821,13 @@ static int kls_tail_construct_column(Int k,
                                      Int nzoff) {
   const Int kglobal = k + k1;
   const Int oldcol = q[kglobal];
-  Int poff = offp[kglobal];
-  if (poff < 0 || poff > nzoff) {
+  Int poff = 0;
+  if (offp != NULL) {
+    poff = offp[kglobal];
+    if (poff < 0 || poff > nzoff) {
+      return 0;
+    }
+  } else if (offi != NULL || offx != NULL) {
     return 0;
   }
 
@@ -9837,23 +9842,27 @@ static int kls_tail_construct_column(Int k,
       SCALE_DIV(aik, rs[oldrow]);
     }
     if (i < 0) {
-      if (poff >= nzoff) {
-        return 0;
+      if (offp != NULL) {
+        if (poff >= nzoff) {
+          return 0;
+        }
+        if (offi != NULL) {
+          offi[poff] = oldrow;
+        }
+        if (offx != NULL) {
+          offx[poff] = aik;
+        }
+        poff++;
       }
-      if (offi != NULL) {
-        offi[poff] = oldrow;
-      }
-      if (offx != NULL) {
-        offx[poff] = aik;
-      }
-      poff++;
     } else if (i >= n) {
       return 0;
     } else {
       x[i] = aik;
     }
   }
-  offp[kglobal + 1] = poff;
+  if (offp != NULL) {
+    offp[kglobal + 1] = poff;
+  }
   return 1;
 }
 
@@ -10210,17 +10219,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
     return 0;
   }
 
-  UF_long *offp = (UF_long *)malloc(((size_t)solver->n + 1u) * sizeof(*offp));
-  if (offp == NULL) {
-    free(offp);
-    (void)TRILINOS_KLU_free(new_lu, old_lusize, sizeof(Unit),
-                            &solver->common);
-    free(scratch);
-    return 0;
-  }
-  memcpy(offp, solver->numeric->Offp,
-         ((size_t)solver->n + 1u) * sizeof(*offp));
-
   Unit *old_lu = (Unit *)solver->numeric->LUbx[block];
   UF_long *lip = solver->numeric->Lip + k1;
   UF_long *llen = solver->numeric->Llen + k1;
@@ -10234,7 +10232,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
         old_pblock, nk, local_reject, lip, llen, uip, ulen, udiag,
         &lup) ||
       lup != prefix_lup) {
-    free(offp);
     (void)TRILINOS_KLU_free(new_lu, old_lusize, sizeof(Unit),
                             &solver->common);
     free(scratch);
@@ -10298,8 +10295,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
           (Int)k1, (Int *)psinv,
           scaled ? solver->numeric->Rs : NULL,
           scaled ? (Int)solver->common.scale : 0,
-          offp, NULL, NULL,
-          (Int)solver->numeric->nzoff)) {
+          NULL, NULL, NULL, 0)) {
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
     }
@@ -10391,7 +10387,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
       lusize = lup;
     }
   }
-  free(offp);
   free(scratch);
   *new_lu_out = new_lu;
   *new_size_out = lusize;
@@ -10403,7 +10398,6 @@ fail:
   for (UF_long k = 0; k < nk; ++k) {
     ((Entry *)solver->numeric->Xwork)[k] = 0.0;
   }
-  free(offp);
   (void)TRILINOS_KLU_free(new_lu, lusize, sizeof(Unit), &solver->common);
   free(scratch);
   if (new_lu_out != NULL) {
