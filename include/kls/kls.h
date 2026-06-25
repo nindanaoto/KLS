@@ -342,6 +342,14 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_supernode_batch_candidate_dep_rows;
   int64_t row_refactor_compact_supernode_batch_rejected_work_count;
   int build_has_cblas;
+  int row_refactor_last_separator_flop_queue;
+  int64_t row_refactor_separator_flop_queue_run_count;
+  int64_t row_refactor_last_separator_flop_components;
+  int64_t row_refactor_separator_flop_component_count;
+  int64_t row_refactor_last_separator_flop_private_groups;
+  int64_t row_refactor_last_separator_flop_pipeline_groups;
+  int64_t row_refactor_separator_flop_private_group_count;
+  int64_t row_refactor_separator_flop_pipeline_group_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
