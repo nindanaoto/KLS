@@ -3279,17 +3279,26 @@ work per synchronization reaches the paper's 300,000-entry dense-tail scale.
 These fields are visible in `kls_stats`, `kls_bench` JSON/text, and the gap
 decomposition script, giving the parallel triangular-solve path a
 structure-based gate instead of a matrix-name heuristic.
-That cost model now also controls seeding row-solve mirrors from ordinary
+That cost model now also controls seeding row-solve structure from ordinary
 numeric storage. Earlier `--row-solve on` probes copied `L`/`U` values into
 row-major mirrors after each successful ordinary factor/refactor even when the
 parallel row-solve executor never ran, adding an `O(nnz(L+U))` tax to the
 slow repeated-refactor cases. The adaptive seed first builds the cheap
-CKTSO-style partition diagnostics and only copies values when the predicted
-parallel row-solve work is large enough. On the local top-12 hard-case probe,
+CKTSO-style partition diagnostics and only prepares row-solve values when the
+predicted parallel row-solve work is large enough. On the local top-12 hard-case probe,
 forced row-solve seeding had a `3.1772s` geomean, adaptive seeding had a
 `3.0613s` geomean with no failures, and explicit `--row-solve off` was
 `3.0426s`. This is a useful cleanup, but it is not the missing CKTSO numeric
 engine.
+The ordinary-numeric row-solve seed no longer performs that value copy even
+when the gate accepts. It now keeps the row solve's structural metadata and
+reads factor values through the same retained `double *` slots already used to
+scatter KLS row-refactor mirrors back into KLU storage. A temporary
+`4000 x 4000` lower-triangular probe with `--row-solve on` crossed both
+CKTSO-style dense-tail gate terms and reported `row_refactor_last_row_solve=1`
+with no row-refactor groups, proving the solve can run directly from ordinary
+numeric storage. This removes an `O(nnz(L+U))` setup copy from the experiment,
+but it still leaves the larger paper gap in the factor/refactor numeric engine.
 The same rule now applies to KLS-first row-refactor mirrors. KLS-first still
 builds row-refactor metadata so `row_refactor_total_group_work` and
 `row_refactor_auto_work_allowed` stay visible, but it copies values into
