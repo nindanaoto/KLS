@@ -3319,12 +3319,19 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
   }
   if (ok && (stats.row_refactor_last_row_solve != 1 ||
              stats.row_refactor_row_solve_run_count != 2 ||
+             stats.row_solve_parallel_run_count != 0 ||
+             stats.row_solve_parallel_l_slice_runs != 0 ||
+             stats.row_solve_parallel_u_slice_runs != 0 ||
              stats.row_refactor_values_dirty != 0)) {
     fprintf(stderr,
             "unexpected row-solve seed solve stats: row_solve=%d/%" PRId64
+            ", parallel=%" PRId64 "/%" PRId64 "/%" PRId64
             ", dirty=%d\n",
             stats.row_refactor_last_row_solve,
             stats.row_refactor_row_solve_run_count,
+            stats.row_solve_parallel_run_count,
+            stats.row_solve_parallel_l_slice_runs,
+            stats.row_solve_parallel_u_slice_runs,
             stats.row_refactor_values_dirty);
     ok = 0;
   }

@@ -3172,13 +3172,19 @@ tail start, rows, and entries, plus the fixed eight trapezoid slices used by
 the CKTSO paper. The dense tail criterion follows the paper's setup rule: at
 least 70% of triangular entries and at least 300,000 entries in the suffix.
 KLS now materializes those slice boundaries internally and reports the maximum
-per-slice entry count for lower and upper triangular solves, so a future
-parallel rectangular-slice executor can gate on measured slice balance.
+per-slice entry count for lower and upper triangular solves, so the parallel
+rectangular-slice executor can gate on measured slice balance.
 It also precomputes the CKTSO row segmentation step for dense-tail rows: lower
 rows split at the slice start, and upper rows split at the slice end, yielding
 rectangular versus within-slice triangular entry counts for both factors.
+For one-RHS, single-block normal solves, KLS now runs the rectangular part of
+each trapezoid slice in the persistent worker pool, with worker barriers around
+the sequential triangular piece. It only enables that executor when the
+rectangular entries reach the paper's 300,000-entry dense-tail work scale; the
+`bcircuit` structure falls back to scalar row solve, while `G2_circuit` crosses
+the gate and records parallel slice runs.
 These fields are visible in `kls_stats`, `kls_bench` JSON/text, and the gap
-decomposition script, giving the next parallel triangular-solve step a
+decomposition script, giving the parallel triangular-solve path a
 structure-based gate instead of a matrix-name heuristic.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes

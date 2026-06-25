@@ -210,6 +210,9 @@ typedef struct kls_stats {
   int64_t row_refactor_lazy_value_scatter_run_count;
   int row_refactor_last_row_solve;
   int64_t row_refactor_row_solve_run_count;
+  int64_t row_solve_parallel_run_count;
+  int64_t row_solve_parallel_l_slice_runs;
+  int64_t row_solve_parallel_u_slice_runs;
   int row_solve_partition_ready;
   int64_t row_solve_partition_slices;
   int64_t row_solve_l_dense_tail_start;

@@ -455,7 +455,10 @@ tail is found. KLS retains the slice boundaries internally and reports the
 maximum per-slice triangular entries as a load-balance diagnostic. It also
 precomputes per-row rectangular/triangular split points for dense-tail rows and
 reports the resulting lower/upper segment entry counts, matching CKTSO's
-trapezoid-slice setup before the parallel executor is enabled. The queued
+trapezoid-slice setup. Single-RHS, single-block normal solves now use the
+persistent worker pool to parallelize the rectangular part of those slices when
+the parallel rectangular work reaches the paper's 300,000-entry dense-tail work
+scale; the within-slice triangular pieces remain sequential. The queued
 row scheduler orders
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
