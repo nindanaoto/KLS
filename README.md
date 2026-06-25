@@ -851,6 +851,8 @@ row-major U-pattern supernode candidates and detailed rejected-row/multiplier
 coordinates from KLS-owned pivot checks, plus row-refactor cluster/pipeline
 counters and last-run markers, so the remaining SubtreeLU/CKTSO row-segment
 work can be evaluated on the same slow-case artifacts.
+On the refreshed selected-large reconstruction, KLS is ahead of the saved KLU2
+artifact but still trails the saved CKTSO artifact, with `pre2` still timing out.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The next algorithmic work is to evolve the numeric factor/refactor/solve
 kernels toward deeper KLS-owned sparse kernels with better pivot reuse and

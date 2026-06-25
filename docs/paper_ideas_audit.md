@@ -178,11 +178,14 @@ exact-match wins were `hvdc1`, `OPF_10000`, `LeGresley_87936`, `rajat22`,
 
 The fragmented-BTF scale policy improved the large recon artifact geomean over
 the preceding EGraph build from 30.58s to 27.37s on the five completed common
-rows. A later refreshed eight-row large reconstruction run, after the solve
-stats cleanup, still scored KLS about 1.38x slower geomean than CKTSO with
-120s timeouts penalized as 1000s. KLS timed out on `pre2` and `Hamrle3`;
-CKTSO timed out on `Hamrle3`. KLS still lost materially on `nxp1`,
-`G3_circuit`, `rajat30`, `pre2`, and `ASIC_680k`, while winning the TSOPF row.
+rows. A refreshed eight-row selected-large reconstruction at `e610226`, after
+the scaled single-block EGraph specialization, scored KLS about 1.28x slower
+geomean than CKTSO with 120s timeouts penalized as 1000s, while scoring about
+2.88x faster geomean than the saved KLU2 artifact under the same failure
+penalty. KLS now wins this selected-large set on `TSOPF_FS_b39_c30` and
+`rajat29`, ties the shared `Hamrle3` timeout, and still loses materially on
+`pre2`, `nxp1`, `G3_circuit`, `rajat30`, and `ASIC_680k`. KLS still times out
+on `pre2` and `Hamrle3`; CKTSO completes `pre2` and times out on `Hamrle3`.
 This remains far too large to explain as a missing ordering package alone.
 
 The remaining worthwhile ideas are not per-matrix tuning knobs. They require
@@ -1147,6 +1150,15 @@ dedicated hot kernel that applies row scaling directly while loading the fixed
 input-position map. Same-session probes improved `nxp1` repeated refactor from
 about 0.301s to 0.287s and `rajat30` from about 0.264s to 0.218s with valid
 residuals, while unscaled/BTF probes stayed valid.
+
+Disabling the huge-single all-pipeline gate was then tested as a direct
+cluster/pipeline split experiment. It regressed `nxp1` repeated refactor to
+about 0.65s and `G3_circuit` to about 19.43s, so the current all-pipeline
+natural cursor remains the better general choice for huge single-block factors.
+A wider eight-way scalar scatter-subtract unroll was also tested and rejected:
+it regressed `nxp1` repeated refactor to about 0.38s and did not provide a
+general win on the quick large guards. The existing four-way generic scalar
+scatter kernel is retained.
 
 The BTF worker pool was then adjusted to fetch small ranges of diagonal blocks
 per mutex acquisition when a matrix has many thousands of non-dominant BTF
