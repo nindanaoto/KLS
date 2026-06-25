@@ -3166,6 +3166,14 @@ request the full row-refactor pattern. On the same five-matrix smoke suite, the
 `--row-solve on` geomean moved again to about `0.0111s`, and solve-only rows
 report zero row-refactor groups/segments while still reporting ready row solve
 mirrors.
+The lean solve setup now also records CKTSO-style triangular partition
+diagnostics without allocating the row-refactor scheduler: lower/upper dense
+tail start, rows, and entries, plus the fixed eight trapezoid slices used by
+the CKTSO paper. The dense tail criterion follows the paper's setup rule: at
+least 70% of triangular entries and at least 300,000 entries in the suffix.
+These fields are visible in `kls_stats`, `kls_bench` JSON/text, and the gap
+decomposition script, giving the next parallel triangular-solve step a
+structure-based gate instead of a matrix-name heuristic.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF

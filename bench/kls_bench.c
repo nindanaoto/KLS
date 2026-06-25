@@ -950,6 +950,14 @@ int main(int argc, char **argv) {
            ",\"row_refactor_lazy_value_scatter_run_count\":%" PRId64
            ",\"row_refactor_last_row_solve\":%d"
            ",\"row_refactor_row_solve_run_count\":%" PRId64
+           ",\"row_solve_partition_ready\":%d"
+           ",\"row_solve_partition_slices\":%" PRId64
+           ",\"row_solve_l_dense_tail_start\":%" PRId64
+           ",\"row_solve_l_dense_tail_rows\":%" PRId64
+           ",\"row_solve_l_dense_tail_entries\":%" PRId64
+           ",\"row_solve_u_dense_tail_start\":%" PRId64
+           ",\"row_solve_u_dense_tail_rows\":%" PRId64
+           ",\"row_solve_u_dense_tail_entries\":%" PRId64
            ",\"row_refactor_last_work_ready_queue\":%d"
            ",\"row_refactor_work_ready_queue_run_count\":%" PRId64
            ",\"row_refactor_ready_queue_workspace_groups\":%" PRId64
@@ -1030,6 +1038,14 @@ int main(int argc, char **argv) {
            stats.row_refactor_lazy_value_scatter_run_count,
            stats.row_refactor_last_row_solve,
            stats.row_refactor_row_solve_run_count,
+           stats.row_solve_partition_ready,
+           stats.row_solve_partition_slices,
+           stats.row_solve_l_dense_tail_start,
+           stats.row_solve_l_dense_tail_rows,
+           stats.row_solve_l_dense_tail_entries,
+           stats.row_solve_u_dense_tail_start,
+           stats.row_solve_u_dense_tail_rows,
+           stats.row_solve_u_dense_tail_entries,
            stats.row_refactor_last_work_ready_queue,
            stats.row_refactor_work_ready_queue_run_count,
            stats.row_refactor_ready_queue_workspace_groups,
@@ -1270,6 +1286,19 @@ int main(int argc, char **argv) {
            stats.row_refactor_ready_queue_workspace_groups,
            stats.row_refactor_last_local_ready_groups,
            stats.row_refactor_local_ready_group_count);
+    printf("row solve partition: ready %d, slices %" PRId64
+           ", L dense tail start %" PRId64 ", rows %" PRId64
+           ", entries %" PRId64
+           ", U dense tail start %" PRId64 ", rows %" PRId64
+           ", entries %" PRId64 "\n",
+           stats.row_solve_partition_ready,
+           stats.row_solve_partition_slices,
+           stats.row_solve_l_dense_tail_start,
+           stats.row_solve_l_dense_tail_rows,
+           stats.row_solve_l_dense_tail_entries,
+           stats.row_solve_u_dense_tail_start,
+           stats.row_solve_u_dense_tail_rows,
+           stats.row_solve_u_dense_tail_entries);
     printf("row refactor segments: %" PRId64
            ", rows: %" PRId64 ", max width: %" PRId64
            ", dense entries: %.6g, trailing entries: %.6g\n",

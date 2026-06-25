@@ -32,6 +32,9 @@
 
 #define KLS_KLU_EMPTY ((UF_long)-1)
 #define KLS_ROW_REFACTOR_DENSE_MIN_WORK 1024.0
+#define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
+#define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
+#define KLS_ROW_SOLVE_TRAPEZOID_SLICES 8u
 
 typedef struct kls_refactor_pool kls_refactor_pool;
 typedef struct kls_egraph_refactor_pool kls_egraph_refactor_pool;
@@ -149,6 +152,14 @@ struct kls_solver {
   UF_long row_refactor_lazy_value_scatter_run_count;
   int row_refactor_last_row_solve;
   UF_long row_refactor_row_solve_run_count;
+  int row_solve_partition_ready;
+  UF_long row_solve_partition_slices;
+  UF_long row_solve_l_dense_tail_start;
+  UF_long row_solve_l_dense_tail_rows;
+  UF_long row_solve_l_dense_tail_entries;
+  UF_long row_solve_u_dense_tail_start;
+  UF_long row_solve_u_dense_tail_rows;
+  UF_long row_solve_u_dense_tail_entries;
   UF_long row_refactor_work_ready_queue_run_count;
   UF_long row_refactor_local_ready_group_count;
   UF_long row_refactor_segment_count;
@@ -727,6 +738,14 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_lazy_value_scatter_run_count = 0;
   solver->row_refactor_last_row_solve = 0;
   solver->row_refactor_row_solve_run_count = 0;
+  solver->row_solve_partition_ready = 0;
+  solver->row_solve_partition_slices = 0;
+  solver->row_solve_l_dense_tail_start = 0;
+  solver->row_solve_l_dense_tail_rows = 0;
+  solver->row_solve_l_dense_tail_entries = 0;
+  solver->row_solve_u_dense_tail_start = 0;
+  solver->row_solve_u_dense_tail_rows = 0;
+  solver->row_solve_u_dense_tail_entries = 0;
   solver->row_refactor_work_ready_queue_run_count = 0;
   solver->row_refactor_local_ready_group_count = 0;
   solver->row_refactor_segment_count = 0;
@@ -7877,6 +7896,22 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_last_row_solve;
   solver->stats.row_refactor_row_solve_run_count =
     (int64_t)solver->row_refactor_row_solve_run_count;
+  solver->stats.row_solve_partition_ready =
+    solver->row_solve_partition_ready;
+  solver->stats.row_solve_partition_slices =
+    (int64_t)solver->row_solve_partition_slices;
+  solver->stats.row_solve_l_dense_tail_start =
+    (int64_t)solver->row_solve_l_dense_tail_start;
+  solver->stats.row_solve_l_dense_tail_rows =
+    (int64_t)solver->row_solve_l_dense_tail_rows;
+  solver->stats.row_solve_l_dense_tail_entries =
+    (int64_t)solver->row_solve_l_dense_tail_entries;
+  solver->stats.row_solve_u_dense_tail_start =
+    (int64_t)solver->row_solve_u_dense_tail_start;
+  solver->stats.row_solve_u_dense_tail_rows =
+    (int64_t)solver->row_solve_u_dense_tail_rows;
+  solver->stats.row_solve_u_dense_tail_entries =
+    (int64_t)solver->row_solve_u_dense_tail_entries;
   solver->stats.row_refactor_segment_count =
     (int64_t)solver->row_refactor_segment_count;
   solver->stats.row_refactor_segment_rows =
@@ -11713,12 +11748,69 @@ static int kls_row_solve_pattern_is_ready(const kls_solver *solver) {
            solver->row_refactor_u_row_values != NULL));
 }
 
+static UF_long kls_row_solve_dense_tail_start(UF_long n,
+                                              const UF_long *ptr,
+                                              UF_long *entries_out) {
+  if (entries_out != NULL) {
+    *entries_out = 0;
+  }
+  if (n == 0u || ptr == NULL || ptr[n] == 0u ||
+      ptr[n] < KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ) {
+    return n;
+  }
+
+  const double total = (double)ptr[n];
+  UF_long suffix = 0;
+  for (UF_long remaining = n; remaining > 0u; --remaining) {
+    const UF_long row = remaining - 1u;
+    if (ptr[row] > ptr[row + 1u]) {
+      return n;
+    }
+    suffix += ptr[row + 1u] - ptr[row];
+    if (suffix >= KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ &&
+        (double)suffix >= KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION * total) {
+      if (entries_out != NULL) {
+        *entries_out = suffix;
+      }
+      return row;
+    }
+  }
+  return n;
+}
+
+static void kls_record_row_solve_partition(kls_solver *solver) {
+  if (solver == NULL || solver->row_refactor_pattern_n != solver->n ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_u_ptr == NULL) {
+    return;
+  }
+
+  const UF_long n = solver->n;
+  UF_long l_entries = 0;
+  UF_long u_entries = 0;
+  const UF_long l_start =
+    kls_row_solve_dense_tail_start(n, solver->row_refactor_l_ptr,
+                                   &l_entries);
+  const UF_long u_start =
+    kls_row_solve_dense_tail_start(n, solver->row_refactor_u_ptr,
+                                   &u_entries);
+  solver->row_solve_partition_ready = 1;
+  solver->row_solve_partition_slices = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
+  solver->row_solve_l_dense_tail_start = l_start;
+  solver->row_solve_l_dense_tail_rows = l_start < n ? n - l_start : 0u;
+  solver->row_solve_l_dense_tail_entries = l_entries;
+  solver->row_solve_u_dense_tail_start = u_start;
+  solver->row_solve_u_dense_tail_rows = u_start < n ? n - u_start : 0u;
+  solver->row_solve_u_dense_tail_entries = u_entries;
+}
+
 static int kls_build_row_solve_pattern(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->nblocks == 0u || solver->symbolic->R == NULL) {
     return 0;
   }
   if (kls_row_solve_pattern_is_ready(solver)) {
+    kls_record_row_solve_partition(solver);
     return 1;
   }
   if (!kls_build_refactor_map(solver) ||
@@ -11868,6 +11960,7 @@ static int kls_build_row_solve_pattern(kls_solver *solver) {
   solver->row_refactor_u_values = u_values;
   solver->row_refactor_u_row_values = u_row_values;
   solver->row_refactor_pattern_n = n;
+  kls_record_row_solve_partition(solver);
   return 1;
 
 fail:
@@ -12899,6 +12992,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     }
   }
   kls_sort_row_refactor_successors_by_work(solver);
+  kls_record_row_solve_partition(solver);
   return 1;
 }
 

@@ -210,6 +210,14 @@ typedef struct kls_stats {
   int64_t row_refactor_lazy_value_scatter_run_count;
   int row_refactor_last_row_solve;
   int64_t row_refactor_row_solve_run_count;
+  int row_solve_partition_ready;
+  int64_t row_solve_partition_slices;
+  int64_t row_solve_l_dense_tail_start;
+  int64_t row_solve_l_dense_tail_rows;
+  int64_t row_solve_l_dense_tail_entries;
+  int64_t row_solve_u_dense_tail_start;
+  int64_t row_solve_u_dense_tail_rows;
+  int64_t row_solve_u_dense_tail_entries;
   int fast_repaired_last_offdiag_suffix_refresh;
   int64_t fast_repaired_offdiag_suffix_refresh_count;
   int64_t fast_repaired_offdiag_full_refresh_count;

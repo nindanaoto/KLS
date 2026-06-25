@@ -3272,17 +3272,21 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
              stats.row_refactor_auto_values_ready != 1 ||
              stats.row_refactor_values_dirty != 0 ||
              stats.row_refactor_group_count != 0 ||
-             stats.row_refactor_segment_count != 0)) {
+             stats.row_refactor_segment_count != 0 ||
+             stats.row_solve_partition_ready != 1 ||
+             stats.row_solve_partition_slices != 8)) {
     fprintf(stderr,
             "unexpected row-solve seed factor stats: path=%s"
             ", auto=%d, ready=%d, dirty=%d, groups=%" PRId64
-            ", segments=%" PRId64 "\n",
+            ", segments=%" PRId64 ", solve_partition=%d/%" PRId64 "\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.row_refactor_auto_enabled,
             stats.row_refactor_auto_values_ready,
             stats.row_refactor_values_dirty,
             stats.row_refactor_group_count,
-            stats.row_refactor_segment_count);
+            stats.row_refactor_segment_count,
+            stats.row_solve_partition_ready,
+            stats.row_solve_partition_slices);
     ok = 0;
   }
 
