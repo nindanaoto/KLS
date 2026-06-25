@@ -13343,6 +13343,101 @@ static int kls_row_refactor_multiplier_rejects(double lij, double tol) {
   return !isfinite(lij_abs) || lij_abs * tol > 1.0 + 1.0e-12;
 }
 
+static int kls_row_refactor_pivot_rejects(double pivot_abs,
+                                          double row_max_abs,
+                                          double tol,
+                                          double *ratio_out) {
+  if (ratio_out != NULL) {
+    *ratio_out = -1.0;
+  }
+  if (tol <= DBL_MIN) {
+    return 0;
+  }
+  if (!isfinite(row_max_abs)) {
+    if (ratio_out != NULL) {
+      *ratio_out = DBL_MAX;
+    }
+    return 1;
+  }
+  if (row_max_abs <= 0.0) {
+    return 0;
+  }
+  if (!isfinite(pivot_abs) || pivot_abs <= DBL_MIN) {
+    if (ratio_out != NULL) {
+      *ratio_out = DBL_MAX;
+    }
+    return 1;
+  }
+  const double ratio = row_max_abs / pivot_abs;
+  if (ratio_out != NULL) {
+    *ratio_out = isfinite(ratio) ? ratio : DBL_MAX;
+  }
+  return !isfinite(ratio) || ratio * tol > 1.0 + 1.0e-12;
+}
+
+static int kls_row_refactor_u_row_abs_max_from_x(
+  const kls_solver *solver,
+  UF_long row,
+  double pivot,
+  const double *x,
+  double *row_max_abs_out) {
+  if (row_max_abs_out != NULL) {
+    *row_max_abs_out = -1.0;
+  }
+  if (solver == NULL || x == NULL || row_max_abs_out == NULL ||
+      row >= solver->n ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_cols == NULL) {
+    return 0;
+  }
+
+  double row_max_abs = fabs(pivot);
+  if (!isfinite(row_max_abs)) {
+    *row_max_abs_out = DBL_MAX;
+    return 1;
+  }
+  const UF_long begin = solver->row_refactor_u_ptr[row];
+  const UF_long end = solver->row_refactor_u_ptr[row + 1u];
+  if (begin > end) {
+    return 0;
+  }
+  for (UF_long p = begin; p < end; ++p) {
+    const UF_long col = solver->row_refactor_u_cols[p];
+    if (col >= solver->n) {
+      return 0;
+    }
+    const double value_abs = fabs(x[col]);
+    if (!isfinite(value_abs)) {
+      *row_max_abs_out = DBL_MAX;
+      return 1;
+    }
+    if (value_abs > row_max_abs) {
+      row_max_abs = value_abs;
+    }
+  }
+  *row_max_abs_out = row_max_abs;
+  return 1;
+}
+
+static double kls_row_refactor_abs_max_from_values(double pivot,
+                                                   const double *values,
+                                                   UF_long count) {
+  double row_max_abs = fabs(pivot);
+  if (!isfinite(row_max_abs)) {
+    return DBL_MAX;
+  }
+  for (UF_long p = 0; p < count; ++p) {
+    const double value_abs = fabs(values[p]);
+    if (!isfinite(value_abs)) {
+      return DBL_MAX;
+    }
+    if (value_abs > row_max_abs) {
+      row_max_abs = value_abs;
+    }
+  }
+  return row_max_abs;
+}
+
 static int kls_serial_row_refactor_numeric(kls_solver *solver,
                                            double *numeric_values,
                                            int check_pivots) {
@@ -13448,6 +13543,36 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
     }
 
     const double pivot = x[i];
+    if (check_pivots) {
+      double row_max_abs = -1.0;
+      if (!kls_row_refactor_u_row_abs_max_from_x(
+            solver, i, pivot, x, &row_max_abs)) {
+        memset(x, 0, (size_t)n * sizeof(*x));
+        common->status = TRILINOS_KLU_INVALID;
+        return 0;
+      }
+      double ratio_abs = -1.0;
+      const double pivot_abs = fabs(pivot);
+      if (kls_row_refactor_pivot_rejects(pivot_abs, row_max_abs,
+                                         common->tol, &ratio_abs)) {
+        memset(x, 0, (size_t)n * sizeof(*x));
+        if (defer_value_scatter &&
+            !kls_scatter_row_refactor_prefix_values(solver, i)) {
+          common->status = TRILINOS_KLU_INVALID;
+          return 0;
+        }
+        solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_PREFIX;
+        kls_clear_fast_reject_tail_seed(solver);
+        kls_record_fast_reject_detail(
+          solver, i,
+          symbolic->Q != NULL ? symbolic->Q[i] : KLS_KLU_EMPTY,
+          i, ratio_abs, pivot_abs, row_max_abs);
+        kls_fill_fast_reject_row_tail_candidate_stats(
+          solver, numeric_values, i, x);
+        common->status = TRILINOS_KLU_OK;
+        return 0;
+      }
+    }
     x[i] = 0.0;
     if (pivot == 0.0) {
       common->status = TRILINOS_KLU_SINGULAR;
@@ -13527,6 +13652,33 @@ static int kls_parallel_row_refactor_rejects_multiplier(
   return 1;
 }
 
+static int kls_parallel_row_refactor_rejects_pivot(
+  kls_egraph_refactor_worker *worker,
+  UF_long row,
+  double pivot,
+  double row_max_abs) {
+  if (worker == NULL || worker->shared == NULL ||
+      !worker->shared->check_pivots) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->Q == NULL || row >= solver->n) {
+    return 0;
+  }
+  double ratio_abs = -1.0;
+  const double pivot_abs = fabs(pivot);
+  if (!kls_row_refactor_pivot_rejects(pivot_abs, row_max_abs,
+                                      solver->common.tol, &ratio_abs)) {
+    return 0;
+  }
+  kls_egraph_refactor_record_reject(
+    shared, row, solver->symbolic->Q[row], row, ratio_abs,
+    pivot_abs, row_max_abs);
+  return 1;
+}
+
 static int kls_parallel_row_refactor_load_input_row(
   kls_egraph_refactor_shared *shared,
   double *x,
@@ -13602,6 +13754,19 @@ static int kls_parallel_row_refactor_process_row(
   }
 
   const double pivot = x[row];
+  if (shared->check_pivots) {
+    double row_max_abs = -1.0;
+    if (!kls_row_refactor_u_row_abs_max_from_x(
+          solver, row, pivot, x, &row_max_abs)) {
+      kls_egraph_refactor_record_invalid(shared);
+      return 0;
+    }
+    if (kls_parallel_row_refactor_rejects_pivot(worker, row, pivot,
+                                               row_max_abs)) {
+      memset(x, 0, (size_t)solver->n * sizeof(*x));
+      return 0;
+    }
+  }
   x[row] = 0.0;
   if (pivot == 0.0) {
     kls_egraph_refactor_record_singular(shared, row, symbolic->Q[row]);
@@ -13806,6 +13971,16 @@ static int kls_parallel_row_refactor_process_dense_group_native(
     }
 
     const double pivot = udiag[row];
+    if (shared->check_pivots) {
+      const double row_max_abs =
+        kls_row_refactor_abs_max_from_values(
+          pivot, row_u_values, row_dense_len + trailing_len);
+      if (kls_parallel_row_refactor_rejects_pivot(worker, row, pivot,
+                                                 row_max_abs)) {
+        memset(x, 0, (size_t)solver->n * sizeof(*x));
+        return 0;
+      }
+    }
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, row, symbolic->Q[row]);
       if (solver->common.halt_if_singular) {
@@ -13964,15 +14139,6 @@ static int kls_parallel_row_refactor_process_dense_group(
         row_dense_panel[target] -= lij * dep_dense_panel[target];
       }
     }
-
-    const double pivot = udiag[row];
-    if (pivot == 0.0) {
-      kls_egraph_refactor_record_singular(shared, row, symbolic->Q[row]);
-      if (solver->common.halt_if_singular) {
-        memset(x, 0, (size_t)solver->n * sizeof(*x));
-        return 0;
-      }
-    }
   }
 
   /* Keep the dense segment and shared trailing panel in compact row-major
@@ -13983,6 +14149,7 @@ static int kls_parallel_row_refactor_process_dense_group(
     double *row_dense_panel = dense_panel + local_row * width;
     double *row_panel = trailing_panel != NULL
       ? trailing_panel + local_row * trailing_len : NULL;
+    const UF_long row_dense_len = row_end - row - 1u;
 
     if (trailing_len > 0u) {
       for (UF_long dep = row_begin; dep < row; ++dep) {
@@ -13993,6 +14160,29 @@ static int kls_parallel_row_refactor_process_dense_group(
         for (UF_long offset = 0; offset < trailing_len; ++offset) {
           row_panel[offset] -= lij * dep_panel[offset];
         }
+      }
+    }
+
+    if (shared->check_pivots) {
+      double row_max_abs =
+        kls_row_refactor_abs_max_from_values(
+          udiag[row], row_dense_panel + local_row + 1u, row_dense_len);
+      if (trailing_len > 0u) {
+        row_max_abs =
+          kls_row_refactor_abs_max_from_values(row_max_abs, row_panel,
+                                               trailing_len);
+      }
+      if (kls_parallel_row_refactor_rejects_pivot(worker, row, udiag[row],
+                                                 row_max_abs)) {
+        memset(x, 0, (size_t)solver->n * sizeof(*x));
+        return 0;
+      }
+    }
+    if (udiag[row] == 0.0) {
+      kls_egraph_refactor_record_singular(shared, row, symbolic->Q[row]);
+      if (solver->common.halt_if_singular) {
+        memset(x, 0, (size_t)solver->n * sizeof(*x));
+        return 0;
       }
     }
 
@@ -14014,7 +14204,6 @@ static int kls_parallel_row_refactor_process_dense_group(
       }
     }
 
-    const UF_long row_dense_len = row_end - row - 1u;
     const UF_long row_u_begin = solver->row_refactor_u_ptr[row];
     double *row_u_row_values =
       solver->row_refactor_u_row_values + row_u_begin;
@@ -14176,6 +14365,19 @@ static int kls_parallel_row_refactor_process_group(
     }
 
     const double pivot = x[row];
+    if (shared->check_pivots) {
+      double row_max_abs = -1.0;
+      if (!kls_row_refactor_u_row_abs_max_from_x(
+            solver, row, pivot, x, &row_max_abs)) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      if (kls_parallel_row_refactor_rejects_pivot(worker, row, pivot,
+                                                 row_max_abs)) {
+        memset(x, 0, (size_t)solver->n * sizeof(*x));
+        return 0;
+      }
+    }
     x[row] = 0.0;
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, row, symbolic->Q[row]);

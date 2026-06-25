@@ -342,7 +342,10 @@ With `KLS_ENABLE_CHECKED_ROW_REFACTOR=1`, the experimental KLS-owned
 row/segment refactor can also run the checked fast-factor pass through its
 parallel row scheduler when multiple threads are available. A rejected
 parallel row pass records the unsafe dependency pivot and falls back through
-the same block-repair path. The parallel pass now reuses the retained
+the same block-repair path. Checked KLS-owned row passes test the guessed
+diagonal against the maximum absolute value in the current U row before
+publishing that row, matching CKTSO's row-wise pivot criterion in addition to
+the existing multiplier checks. The parallel pass now reuses the retained
 completion bitmap to report a prefix-current refresh state only when all rows
 before the rejected pivot have finished. When dense row segments defer writes
 in KLS-owned row-major mirrors, KLS publishes only that proven prefix back into
@@ -463,11 +466,11 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_repaired_last_offdiag_suffix_refresh`,
 `fast_repaired_offdiag_suffix_refresh_count`, and
 `fast_repaired_offdiag_full_refresh_count` for the first rejected
-factor-order pivot, its original matrix column, the strongest factor-row
-candidate and multiplier among entries that violated a KLS-owned pivot check
-when available, the accepted pivot magnitude and candidate entry magnitude at
-the reject, the checked-refactor unfinished seed used before ordered-ETree
-tail closure, the best row-tail
+factor-order pivot, its original matrix column, the rejecting row, the
+L-multiplier or row-maximum-to-pivot ratio that violated a KLS-owned pivot
+check when available, the accepted pivot magnitude and candidate or row-maximum
+magnitude at the reject, the checked-refactor unfinished seed used before
+ordered-ETree tail closure, the best row-tail
 candidate that can be computed from current prefix state in the checked
 row-major path, its retained row-tail position, whether that prefix-current
 candidate satisfies the same pivot-tolerance predicate that rejected the

@@ -477,7 +477,7 @@ static int test_checked_row_fast_factor_block_restart(void) {
   }
   if (ok && (stats.fast_rejected_pivot != 0 ||
              stats.fast_rejected_pivot_col != 0 ||
-             stats.fast_rejected_row != 1 ||
+             stats.fast_rejected_row != 0 ||
              stats.fast_rejected_multiplier_abs <= 1.0e6 ||
              stats.fast_rejected_pivot_abs >= 1.0e-9 ||
              stats.fast_rejected_candidate_abs <= 0.5 ||
@@ -653,7 +653,7 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
   }
   if (ok && (stats.fast_rejected_pivot != 1 ||
              stats.fast_rejected_pivot_col != 1 ||
-             stats.fast_rejected_row != 2 ||
+             stats.fast_rejected_row != 1 ||
              stats.fast_rejected_refresh_state !=
                KLS_FAST_REJECT_REFRESH_PREFIX ||
              stats.fast_rejected_tail_repair_ready != 1 ||
@@ -1400,8 +1400,11 @@ static int test_btf_checked_row_tail_scope(void) {
              stats.fast_rejected_row_tail_columns >
                stats.fast_rejected_suffix_columns ||
              stats.fast_rejected_row_tail_work <= 0.0 ||
-             stats.fast_rejected_tail_candidate_row !=
-               stats.fast_rejected_row ||
+             stats.fast_rejected_tail_candidate_row <=
+               stats.fast_rejected_pivot ||
+             stats.fast_rejected_tail_candidate_row >=
+               stats.fast_rejected_block_start +
+                 stats.fast_rejected_block_size ||
              stats.fast_rejected_tail_candidate_count < 1 ||
              stats.fast_rejected_tail_candidate_position < 0 ||
              stats.fast_rejected_tail_repair_ready != 1)) {
