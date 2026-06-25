@@ -3824,6 +3824,16 @@ not synchronization state. Full BLAS-backed supernodal
 factorization, separator FLOP-balanced queues, and CKTSO's pipelined pivoting
 tail executor remain open.
 
+The default compact-supernode trailing accumulator was then tightened to avoid
+an extra producer-suffix pass. The scalar suffix solve still uses sparse `x`
+because that was faster on ASIC/G2-style probes, but KLS now accumulates the
+contiguous trailing vector while each `L` multiplier is already live and only
+delays the final scatter. Focused forced-row probes stayed residual-clean and
+showed the default `gemv` path active with `trsv=0`: `coupled` refactor about
+`0.0050s`, `ASIC_100ks` about `0.0866s`, and `G2_circuit` about `0.238s` in
+same-session one-pass samples. This is a production-path cleanup of the
+SubtreeLU-shaped update, not another env-only experiment.
+
 KLS also has an explicit experimental compact-supernode `trsv` mode behind
 `KLS_ENABLE_COMPACT_SUPERNODE_TRSV=1`. In that mode, the same producer suffix
 is copied from sparse `x` into contiguous worker scratch, solved there with the

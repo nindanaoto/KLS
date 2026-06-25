@@ -18685,20 +18685,27 @@ static int kls_row_refactor_try_compact_supernode_update(
   int use_trailing_gemv = 0;
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(*supernode_workspace));
-  if (run_rows <= max_workspace_entries &&
+  if (shared->row_refactor_compact_supernode_trsv &&
+      run_rows <= max_workspace_entries &&
       trailing_len <= max_workspace_entries - run_rows) {
     const UF_long workspace_entries = run_rows + trailing_len;
-    if (shared->row_refactor_compact_supernode_trsv) {
-      supernode_workspace =
-        kls_egraph_worker_supernode_workspace(worker, workspace_entries);
-      use_compact_trsv = supernode_workspace != NULL;
-    }
-    if (!use_compact_trsv && trailing_len > 0u) {
-      supernode_workspace =
-        kls_egraph_worker_supernode_workspace(worker, workspace_entries);
-    }
-    if (supernode_workspace != NULL && trailing_len > 0u) {
+    supernode_workspace =
+      kls_egraph_worker_supernode_workspace(worker, workspace_entries);
+    use_compact_trsv = supernode_workspace != NULL;
+    if (use_compact_trsv && trailing_len > 0u) {
       trailing_workspace = supernode_workspace + run_rows;
+      memset(trailing_workspace, 0,
+             (size_t)trailing_len * sizeof(*trailing_workspace));
+      use_trailing_gemv = 1;
+    }
+  }
+  if (!use_compact_trsv && trailing_len > 0u &&
+      trailing_len <= max_workspace_entries) {
+    const UF_long workspace_entries = trailing_len;
+    supernode_workspace =
+      kls_egraph_worker_supernode_workspace(worker, workspace_entries);
+    if (supernode_workspace != NULL) {
+      trailing_workspace = supernode_workspace;
       memset(trailing_workspace, 0,
              (size_t)trailing_len * sizeof(*trailing_workspace));
       use_trailing_gemv = 1;
@@ -18781,9 +18788,6 @@ static int kls_row_refactor_try_compact_supernode_update(
       if (!shared->row_refactor_defer_value_scatter) {
         *solver->row_refactor_l_values[p] = lij;
       }
-      if (use_trailing_gemv) {
-        supernode_workspace[p - p0] = lij;
-      }
       x[dep] = 0.0;
 
       const double *dep_dense_panel = dense_panel + local_dep * width;
@@ -18791,7 +18795,12 @@ static int kls_row_refactor_try_compact_supernode_update(
         x[group_begin + target] -= lij * dep_dense_panel[target];
       }
       touched_entries += width - local_dep - 1u;
-      if (trailing_len > 0u && !use_trailing_gemv) {
+      if (trailing_len > 0u && use_trailing_gemv) {
+        const double *dep_panel = trailing_panel + local_dep * trailing_len;
+        for (UF_long offset = 0; offset < trailing_len; ++offset) {
+          trailing_workspace[offset] += lij * dep_panel[offset];
+        }
+      } else if (trailing_len > 0u) {
         const double *dep_panel = trailing_panel + local_dep * trailing_len;
         for (UF_long offset = 0; offset < trailing_len; ++offset) {
           x[trailing_cols[offset]] -= lij * dep_panel[offset];
@@ -18801,15 +18810,6 @@ static int kls_row_refactor_try_compact_supernode_update(
     }
     if (use_trailing_gemv) {
       const UF_long gemv_entries = run_rows * trailing_len;
-      for (UF_long local = 0; local < run_rows; ++local) {
-        const UF_long dep = solver->row_refactor_l_cols[p0 + local];
-        const UF_long local_dep = dep - group_begin;
-        const double lij = supernode_workspace[local];
-        const double *dep_panel = trailing_panel + local_dep * trailing_len;
-        for (UF_long offset = 0; offset < trailing_len; ++offset) {
-          trailing_workspace[offset] += lij * dep_panel[offset];
-        }
-      }
       for (UF_long offset = 0; offset < trailing_len; ++offset) {
         x[trailing_cols[offset]] -= trailing_workspace[offset];
       }

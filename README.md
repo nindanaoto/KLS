@@ -445,7 +445,9 @@ have a contiguous suffix of dependencies on that completed dense group; stats re
 has a shared trailing panel, KLS now accumulates that contribution in contiguous
 worker scratch and scatters it once, matching the matrix-vector update half of
 the triangular-solve plus update shape described in the SubtreeLU paper without
-adding an external BLAS dependency; stats report
+adding an external BLAS dependency. The default path accumulates the trailing
+vector while each producer multiplier is already live, so it avoids a second
+suffix pass before the final scatter; stats report
 `row_refactor_last_compact_supernode_gemv`,
 `row_refactor_compact_supernode_gemv_count`,
 `row_refactor_compact_supernode_gemv_rows`, and
