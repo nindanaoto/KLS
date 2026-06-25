@@ -213,6 +213,9 @@ typedef struct kls_stats {
   int64_t row_solve_parallel_run_count;
   int64_t row_solve_parallel_l_slice_runs;
   int64_t row_solve_parallel_u_slice_runs;
+  int64_t row_solve_thread_count;
+  int64_t row_solve_l_thread_max_rect_entries;
+  int64_t row_solve_u_thread_max_rect_entries;
   int row_solve_partition_ready;
   int64_t row_solve_partition_slices;
   int64_t row_solve_l_dense_tail_start;

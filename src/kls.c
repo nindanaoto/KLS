@@ -156,6 +156,9 @@ struct kls_solver {
   UF_long row_solve_parallel_run_count;
   UF_long row_solve_parallel_l_slice_runs;
   UF_long row_solve_parallel_u_slice_runs;
+  int row_solve_thread_count;
+  UF_long row_solve_l_thread_max_rect_entries;
+  UF_long row_solve_u_thread_max_rect_entries;
   int row_solve_partition_ready;
   UF_long row_solve_partition_slices;
   UF_long row_solve_l_dense_tail_start;
@@ -176,6 +179,8 @@ struct kls_solver {
   UF_long *row_solve_u_slice_bounds;
   UF_long *row_solve_l_segment_split;
   UF_long *row_solve_u_segment_split;
+  UF_long *row_solve_l_thread_bounds;
+  UF_long *row_solve_u_thread_bounds;
   UF_long row_refactor_work_ready_queue_run_count;
   UF_long row_refactor_local_ready_group_count;
   UF_long row_refactor_segment_count;
@@ -646,10 +651,20 @@ static void kls_clear_row_solve_partition(kls_solver *solver) {
   free(solver->row_solve_u_slice_bounds);
   free(solver->row_solve_l_segment_split);
   free(solver->row_solve_u_segment_split);
+  free(solver->row_solve_l_thread_bounds);
+  free(solver->row_solve_u_thread_bounds);
   solver->row_solve_l_slice_bounds = NULL;
   solver->row_solve_u_slice_bounds = NULL;
   solver->row_solve_l_segment_split = NULL;
   solver->row_solve_u_segment_split = NULL;
+  solver->row_solve_l_thread_bounds = NULL;
+  solver->row_solve_u_thread_bounds = NULL;
+  solver->row_solve_thread_count = 0;
+  solver->row_solve_l_thread_max_rect_entries = 0;
+  solver->row_solve_u_thread_max_rect_entries = 0;
+  solver->stats.row_solve_thread_count = 0;
+  solver->stats.row_solve_l_thread_max_rect_entries = 0;
+  solver->stats.row_solve_u_thread_max_rect_entries = 0;
   solver->row_solve_partition_ready = 0;
   solver->row_solve_partition_slices = 0;
   solver->row_solve_l_dense_tail_start = 0;
@@ -7965,6 +7980,12 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_solve_parallel_l_slice_runs;
   solver->stats.row_solve_parallel_u_slice_runs =
     (int64_t)solver->row_solve_parallel_u_slice_runs;
+  solver->stats.row_solve_thread_count =
+    (int64_t)solver->row_solve_thread_count;
+  solver->stats.row_solve_l_thread_max_rect_entries =
+    (int64_t)solver->row_solve_l_thread_max_rect_entries;
+  solver->stats.row_solve_u_thread_max_rect_entries =
+    (int64_t)solver->row_solve_u_thread_max_rect_entries;
   solver->stats.row_solve_partition_ready =
     solver->row_solve_partition_ready;
   solver->stats.row_solve_partition_slices =
@@ -12015,6 +12036,164 @@ static int kls_build_row_solve_segment_splits(UF_long n,
   if (tri_entries_out != NULL) {
     *tri_entries_out = tri_entries;
   }
+  return 1;
+}
+
+static UF_long kls_row_solve_rect_len(const UF_long *ptr,
+                                      const UF_long *split,
+                                      UF_long row,
+                                      int upper) {
+  return upper ? ptr[row + 1u] - split[row] : split[row] - ptr[row];
+}
+
+static int kls_build_one_row_solve_thread_bounds(
+  UF_long n,
+  const UF_long *ptr,
+  const UF_long *split,
+  const UF_long *slice_bounds,
+  int upper,
+  int thread_count,
+  UF_long **bounds_out,
+  UF_long *max_rect_entries_out) {
+  if (bounds_out != NULL) {
+    *bounds_out = NULL;
+  }
+  if (max_rect_entries_out != NULL) {
+    *max_rect_entries_out = 0;
+  }
+  if (bounds_out == NULL || ptr == NULL || split == NULL ||
+      slice_bounds == NULL || thread_count < 2) {
+    return 0;
+  }
+
+  const UF_long slices = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
+  const UF_long workers = (UF_long)thread_count;
+  UF_long *bounds =
+    (UF_long *)malloc((size_t)slices * ((size_t)workers + 1u) *
+                      sizeof(*bounds));
+  if (bounds == NULL) {
+    return 0;
+  }
+
+  UF_long max_rect_entries = 0;
+  for (UF_long slice = 0u; slice < slices; ++slice) {
+    const UF_long begin = slice_bounds[slice];
+    const UF_long end = slice_bounds[slice + 1u];
+    if (begin > end || end > n) {
+      free(bounds);
+      return 0;
+    }
+    UF_long total = 0;
+    for (UF_long row = begin; row < end; ++row) {
+      if (ptr[row] > split[row] || split[row] > ptr[row + 1u]) {
+        free(bounds);
+        return 0;
+      }
+      total += kls_row_solve_rect_len(ptr, split, row, upper);
+    }
+
+    UF_long *parts = bounds + slice * (workers + 1u);
+    parts[0] = begin;
+    parts[workers] = end;
+    UF_long row = begin;
+    UF_long prefix = 0;
+    for (UF_long worker = 1u; worker < workers; ++worker) {
+      const UF_long target =
+        (total / workers) * worker +
+        ((total % workers) * worker + workers - 1u) / workers;
+      while (row < end && prefix < target) {
+        prefix += kls_row_solve_rect_len(ptr, split, row, upper);
+        row++;
+      }
+      parts[worker] = row;
+    }
+
+    for (UF_long worker = 0u; worker < workers; ++worker) {
+      UF_long worker_entries = 0;
+      for (UF_long r = parts[worker]; r < parts[worker + 1u]; ++r) {
+        worker_entries += kls_row_solve_rect_len(ptr, split, r, upper);
+      }
+      if (worker_entries > max_rect_entries) {
+        max_rect_entries = worker_entries;
+      }
+    }
+  }
+
+  *bounds_out = bounds;
+  if (max_rect_entries_out != NULL) {
+    *max_rect_entries_out = max_rect_entries;
+  }
+  return 1;
+}
+
+static void kls_clear_row_solve_thread_bounds(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->row_solve_l_thread_bounds);
+  free(solver->row_solve_u_thread_bounds);
+  solver->row_solve_l_thread_bounds = NULL;
+  solver->row_solve_u_thread_bounds = NULL;
+  solver->row_solve_thread_count = 0;
+  solver->row_solve_l_thread_max_rect_entries = 0;
+  solver->row_solve_u_thread_max_rect_entries = 0;
+  solver->stats.row_solve_thread_count = 0;
+  solver->stats.row_solve_l_thread_max_rect_entries = 0;
+  solver->stats.row_solve_u_thread_max_rect_entries = 0;
+}
+
+static int kls_build_row_solve_thread_bounds(kls_solver *solver,
+                                             int thread_count) {
+  if (solver == NULL || thread_count < 2 ||
+      solver->row_solve_partition_ready == 0) {
+    return 0;
+  }
+  const int have_l = solver->row_solve_l_slice_bounds != NULL &&
+                     solver->row_solve_l_segment_split != NULL;
+  const int have_u = solver->row_solve_u_slice_bounds != NULL &&
+                     solver->row_solve_u_segment_split != NULL;
+  if (!have_l && !have_u) {
+    return 0;
+  }
+  if (solver->row_solve_thread_count == thread_count &&
+      (!have_l || solver->row_solve_l_thread_bounds != NULL) &&
+      (!have_u || solver->row_solve_u_thread_bounds != NULL)) {
+    return 1;
+  }
+
+  kls_clear_row_solve_thread_bounds(solver);
+  UF_long *l_bounds = NULL;
+  UF_long *u_bounds = NULL;
+  UF_long l_max_rect = 0;
+  UF_long u_max_rect = 0;
+  if (have_l) {
+    if (!kls_build_one_row_solve_thread_bounds(
+          solver->n, solver->row_refactor_l_ptr,
+          solver->row_solve_l_segment_split, solver->row_solve_l_slice_bounds,
+          0, thread_count, &l_bounds, &l_max_rect)) {
+      free(l_bounds);
+      return 0;
+    }
+  }
+  if (have_u) {
+    if (!kls_build_one_row_solve_thread_bounds(
+          solver->n, solver->row_refactor_u_ptr,
+          solver->row_solve_u_segment_split, solver->row_solve_u_slice_bounds,
+          1, thread_count, &u_bounds, &u_max_rect)) {
+      free(l_bounds);
+      free(u_bounds);
+      return 0;
+    }
+  }
+
+  solver->row_solve_l_thread_bounds = l_bounds;
+  solver->row_solve_u_thread_bounds = u_bounds;
+  solver->row_solve_thread_count = thread_count;
+  solver->row_solve_l_thread_max_rect_entries = l_max_rect;
+  solver->row_solve_u_thread_max_rect_entries = u_max_rect;
+  solver->stats.row_solve_thread_count = (int64_t)thread_count;
+  solver->stats.row_solve_l_thread_max_rect_entries = (int64_t)l_max_rect;
+  solver->stats.row_solve_u_thread_max_rect_entries = (int64_t)u_max_rect;
   return 1;
 }
 
@@ -17223,8 +17402,12 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
   const UF_long *split =
     upper ? solver->row_solve_u_segment_split
           : solver->row_solve_l_segment_split;
+  const UF_long *thread_bounds =
+    upper ? solver->row_solve_u_thread_bounds
+          : solver->row_solve_l_thread_bounds;
   if (bounds == NULL || ptr == NULL || cols == NULL || values == NULL ||
-      split == NULL) {
+      split == NULL || thread_bounds == NULL ||
+      solver->row_solve_thread_count != shared->thread_count) {
     return;
   }
 
@@ -17236,10 +17419,12 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
       : pass;
     const UF_long begin = bounds[slice];
     const UF_long end = bounds[slice + 1u];
+    const UF_long *parts =
+      thread_bounds + slice * ((UF_long)shared->thread_count + 1u);
+    const UF_long worker_begin = parts[worker->tid];
+    const UF_long worker_end = parts[worker->tid + 1];
 
-    for (UF_long row = begin + (UF_long)worker->tid;
-         row < end;
-         row += (UF_long)shared->thread_count) {
+    for (UF_long row = worker_begin; row < worker_end; ++row) {
       const UF_long row_begin = ptr[row];
       const UF_long row_end = ptr[row + 1u];
       const UF_long cut = split[row];
@@ -17470,8 +17655,13 @@ static int kls_run_parallel_row_solve_factor(kls_solver *solver,
   const UF_long *split =
     upper ? solver->row_solve_u_segment_split
           : solver->row_solve_l_segment_split;
+  const UF_long *thread_bounds =
+    upper ? solver->row_solve_u_thread_bounds
+          : solver->row_solve_l_thread_bounds;
   if (bounds == NULL || ptr == NULL || cols == NULL || values == NULL ||
-      split == NULL || (upper && solver->numeric->Udiag == NULL)) {
+      split == NULL || thread_bounds == NULL ||
+      solver->row_solve_thread_count != thread_count ||
+      (upper && solver->numeric->Udiag == NULL)) {
     return 0;
   }
   for (UF_long slice = 0u; slice < KLS_ROW_SOLVE_TRAPEZOID_SLICES; ++slice) {
@@ -17482,6 +17672,17 @@ static int kls_run_parallel_row_solve_factor(kls_solver *solver,
     }
     for (UF_long row = begin; row < end; ++row) {
       if (ptr[row] > split[row] || split[row] > ptr[row + 1u]) {
+        return 0;
+      }
+    }
+    const UF_long *parts =
+      thread_bounds + slice * ((UF_long)thread_count + 1u);
+    if (parts[0] != begin || parts[thread_count] != end) {
+      return 0;
+    }
+    for (int worker = 0; worker < thread_count; ++worker) {
+      if (parts[worker] > parts[worker + 1] ||
+          parts[worker + 1] > end) {
         return 0;
       }
     }
@@ -17667,6 +17868,9 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
     thread_count = (int)max_rows;
   }
   if (thread_count < 2) {
+    return 0;
+  }
+  if (!kls_build_row_solve_thread_bounds(solver, thread_count)) {
     return 0;
   }
 

@@ -3182,7 +3182,18 @@ each trapezoid slice in the persistent worker pool, with worker barriers around
 the sequential triangular piece. It only enables that executor when the
 rectangular entries reach the paper's 300,000-entry dense-tail work scale; the
 `bcircuit` structure falls back to scalar row solve, while `G2_circuit` crosses
-the gate and records parallel slice runs.
+the gate and records parallel slice runs. Rectangular rows inside each slice are
+partitioned by accumulated rectangular nonzeros, following CKTSO's thread
+workload assignment rule, and diagnostics report the max per-thread rectangular
+entries for lower and upper factors.
+This implements the trapezoid-slice half of CKTSO's hybrid triangular solve,
+but it does not yet implement the other explicit half from Section V: the
+sparse triangular block should be levelized and solved in cluster mode before
+the remaining sparse levels fall back to a sequential loop. A local
+`G2_circuit` probe showed why that omission matters: KLS parallelized about
+3.27M rectangular entries, but left roughly 9.9M lower/upper prefix plus
+triangular-piece entries serial, so the balanced slice executor alone was
+slower than scalar row solve on this machine.
 These fields are visible in `kls_stats`, `kls_bench` JSON/text, and the gap
 decomposition script, giving the parallel triangular-solve path a
 structure-based gate instead of a matrix-name heuristic.

@@ -458,7 +458,10 @@ reports the resulting lower/upper segment entry counts, matching CKTSO's
 trapezoid-slice setup. Single-RHS, single-block normal solves now use the
 persistent worker pool to parallelize the rectangular part of those slices when
 the parallel rectangular work reaches the paper's 300,000-entry dense-tail work
-scale; the within-slice triangular pieces remain sequential. The queued
+scale. Rectangular slice rows are assigned to workers by accumulated
+rectangular-entry counts, and KLS reports the max per-thread rectangular entries
+for lower/upper factors; the within-slice triangular pieces remain sequential.
+The queued
 row scheduler orders
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
