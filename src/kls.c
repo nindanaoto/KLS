@@ -13347,6 +13347,21 @@ static int kls_seed_row_refactor_values_from_numeric(kls_solver *solver) {
   return 1;
 }
 
+static void kls_maybe_reseed_auto_row_refactor_values(kls_solver *solver,
+                                                      double *elapsed) {
+  if (solver == NULL || elapsed == NULL ||
+      !solver->row_refactor_auto_enabled ||
+      solver->row_refactor_values_ready ||
+      solver->numeric == NULL ||
+      solver->common.status < TRILINOS_KLU_OK ||
+      solver->common.status == TRILINOS_KLU_SINGULAR) {
+    return;
+  }
+  const double start = kls_now_seconds();
+  (void)kls_seed_row_refactor_values_from_numeric(solver);
+  *elapsed += kls_now_seconds() - start;
+}
+
 static int kls_row_refactor_solve_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       !solver->row_refactor_values_ready ||
@@ -18437,6 +18452,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     if (ok && solver->common.status >= 0 &&
         solver->common.status != TRILINOS_KLU_SINGULAR) {
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FAST_REFACTOR);
+      kls_maybe_reseed_auto_row_refactor_values(solver, &elapsed);
       solver->stats.factor_seconds = elapsed;
       kls_update_numeric_diagnostics(solver, 1);
       maybe_prepare_refactor_map(solver, &elapsed);
@@ -18548,7 +18564,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
-  solver->stats.refactor_seconds = kls_now_seconds() - start;
+  double elapsed = kls_now_seconds() - start;
+  if (ok && solver->common.status >= 0 &&
+      solver->common.status != TRILINOS_KLU_SINGULAR) {
+    kls_maybe_reseed_auto_row_refactor_values(solver, &elapsed);
+  }
+  solver->stats.refactor_seconds = elapsed;
   fill_numeric_stats(solver);
   if (!ok || solver->common.status < 0) {
     return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR

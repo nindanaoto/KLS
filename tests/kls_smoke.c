@@ -3184,6 +3184,154 @@ static int test_experimental_kls_first_factor(void) {
                                                 KLS_ORIENTATION_TRANSPOSE);
 }
 
+static int test_kls_first_reseeds_after_pivot_repair(void) {
+  const int32_t ap[] = {0, 1, 3, 5};
+  const int32_t ai[] = {0, 1, 2, 1, 2};
+  const double ax0[] = {2.0, 2.0, 1.0, 1.0, 2.0};
+  const double ax1[] = {2.0, 1.0e-12, 1.0, 1.0, 2.0};
+  const double b[] = {2.0, 3.000000000002, 8.0};
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = 0;
+  options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
+
+  const char *saved_env_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+  const char *saved_row_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row_env =
+    saved_row_env_value != NULL ? strdup(saved_row_env_value) : NULL;
+  const int had_saved_row_env = saved_row_env_value != NULL;
+  const char *saved_checked_env_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked_env =
+    saved_checked_env_value != NULL ? strdup(saved_checked_env_value) : NULL;
+  const int had_saved_checked_env = saved_checked_env_value != NULL;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_row_env && saved_row_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_checked_env && saved_checked_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0,
+                                        &options),
+                        "analyze KLS-first repair reseed")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor KLS-first repair reseed base")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor KLS-first repair reseed pivot")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve KLS-first repair reseed")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats KLS-first repair reseed")) {
+    ok = 0;
+  }
+  if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FAST_REFACTOR ||
+             stats.fast_block_restarts != 1 ||
+             stats.fast_kls_block_restarts != 1 ||
+             stats.fast_tail_restarts != 1 ||
+             stats.row_refactor_values_dirty != 0 ||
+             stats.row_refactor_last_row_solve != 1 ||
+             stats.row_refactor_row_solve_run_count != 1)) {
+    fprintf(stderr,
+            "unexpected KLS-first repair reseed stats: path=%s"
+            ", restarts=%d, kls_restarts=%d, tail_restarts=%d"
+            ", dirty=%d, row_solve=%d/%" PRId64 "\n",
+            kls_factor_path_name(stats.last_factor_path),
+            stats.fast_block_restarts,
+            stats.fast_kls_block_restarts,
+            stats.fast_tail_restarts,
+            stats.row_refactor_values_dirty,
+            stats.row_refactor_last_row_solve,
+            stats.row_refactor_row_solve_run_count);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats,
+                                        "KLS-first repair reseed")) {
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0))) {
+    fprintf(stderr,
+            "unexpected KLS-first repair reseed solution:"
+            " %.17g %.17g %.17g\n",
+            x[0], x[1], x[2]);
+    ok = 0;
+  }
+
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_KLS_FIRST_FACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_KLS_FIRST_FACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_KLS_FIRST_FACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_KLS_FIRST_FACTOR");
+      ok = 0;
+    }
+  }
+  if (had_saved_row_env && saved_row_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_row_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_row_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (had_saved_checked_env && saved_checked_env != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+               saved_checked_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_checked_env) {
+    if (unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  free(saved_env);
+  free(saved_row_env);
+  free(saved_checked_env);
+  return ok;
+}
+
 int main(void) {
   if (!test_csc()) {
     return EXIT_FAILURE;
@@ -3261,6 +3409,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_kls_first_factor()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_kls_first_reseeds_after_pivot_repair()) {
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

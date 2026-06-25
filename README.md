@@ -138,7 +138,10 @@ successfully assembles KLU-compatible numeric storage and seeds KLS-owned
 row-major `L`/`U` value mirrors for guarded forward/transpose solves. Repeated
 unchecked `kls_refactor` calls and checked fast-factor `kls_factor` calls then
 try those row-major update paths automatically while the mirrors remain current;
-it is not enabled by default. `kls_bench` and `run_bench_suite.py` also accept
+successful checked pivot repairs reseed those mirrors so subsequent solves do
+not have to fall back to published KLU column storage solely because the repaired
+block rebuilt its LU payload. It is not enabled by default. `kls_bench` and
+`run_bench_suite.py` also accept
 `--kls-first-factor env|off|on` so this path can be compared reproducibly
 without relying on an ambient environment variable.
 `factor_etree_block_start`,

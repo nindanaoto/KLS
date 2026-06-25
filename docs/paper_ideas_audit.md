@@ -3113,6 +3113,13 @@ KLS-owned mirrors instead of publishing back to KLU solely because the stored
 pattern is transposed. `kls_bench` and `run_bench_suite.py` expose
 `--kls-first-factor env|off|on` so this experimental KLS-owned first-factor
 path can be compared reproducibly across manifest chunks.
+After a KLS-first factor has established automatic row-major ownership,
+successful checked fast-factor pivot repairs now reseed the row-major mirrors
+from the repaired numeric object when the repair path had to rebuild local LU
+storage and drop stale mirror metadata. The guarded solve/refactor lifecycle
+therefore stays on KLS-owned row storage after a local repivot, matching the
+CKTSO paper's row-major fast-factor/recompute flow more closely even though the
+full pipelined ETree pivoting-tail executor is still not implemented.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF
