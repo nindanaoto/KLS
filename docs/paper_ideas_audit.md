@@ -74,16 +74,16 @@ the experimental row scheduler. Checked queued rejects now refresh any missing
 prefix rows before accepting the prefix-tail repair classification, so work
 ordering cannot turn an already-repairable prefix into a scheduler-race
 miss. Unchecked row refactors can also hand dirty KLS-owned row-major `L`/`U`
-mirrors directly to a guarded non-transpose single-block solve, leaving KLU's
-column values stale until a transpose solve, later factorization, or other
-non-row fallback needs them. This avoids making every row-refactor solve pay an
-immediate KLU publish. Experimental single-block row refactors can now also
+mirrors directly to guarded forward and transpose single-block solves, leaving
+KLU's column values stale until later factorization or other non-row fallback
+needs them. This avoids making every row-refactor solve pay an immediate KLU
+publish. Experimental single-block row refactors can now also
 consume KLU row-scaled factors by recomputing `Rs`, using unpermuted row scales
 for fixed-position input loads, and restoring `Rs` to pivot order after an
 accepted pass. Dirty row solves now consume both unscaled and KLU row-scaled
 normal single-block row mirrors directly, using KLU's pivot-order `Rs` semantics
-for the right-hand-side load. Transpose solves and general external KLS
-row/column scaling or permutation still publish before using KLU storage. These
+for the right-hand-side load and transpose output. General external KLS
+row/column scaling or permutation still publishes before using KLU storage. These
 pieces still do not change the current default KLU-column numeric kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
@@ -2908,6 +2908,16 @@ constructed solution, and now confirms that the scaled dirty row mirrors remain
 authoritative through the normal solve by dividing the RHS through pivot-order
 `Rs`, matching KLU's `P*(R\b)` solve setup. This is a general row/segment-engine
 coverage step, not the full CKTSO ETree-descendant pivoting-tail executor.
+
+The dirty row-major solve was then extended to transpose solves for the same
+single-block eligibility class. It loads `Q' * b`, scatters along row-major `U`
+for the `U'` solve, scatters backward along row-major `L` for the `L'` solve, and
+writes through `Pnum`, dividing by pivot-order `Rs` when KLU row scaling is
+active. The scaled row-refactor smoke now solves both forward and transpose
+systems from dirty row mirrors and checks that no lazy publish occurs. This keeps
+the benchmark-style transpose validation from forcing KLU column storage after a
+row refactor, while external KLS row/column scaling and permutation still use the
+publish-and-KLU fallback.
 
 ## Recommended General Work
 

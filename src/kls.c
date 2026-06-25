@@ -12713,10 +12713,9 @@ static int kls_publish_row_refactor_values(kls_solver *solver) {
   return 1;
 }
 
-static int kls_row_refactor_solve_is_eligible(const kls_solver *solver,
-                                              int kernel_transpose) {
+static int kls_row_refactor_solve_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      !solver->row_refactor_values_dirty || kernel_transpose ||
+      !solver->row_refactor_values_dirty ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->row_perm != NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->symbolic->nblocks != 1u ||
@@ -12749,7 +12748,7 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
                                       int64_t nrhs,
                                       double *x,
                                       int64_t ldx) {
-  if (!kls_row_refactor_solve_is_eligible(solver, kernel_transpose)) {
+  if (!kls_row_refactor_solve_is_eligible(solver)) {
     return 0;
   }
 
@@ -12764,6 +12763,9 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
     if (pnum[k] < 0 || pnum[k] >= n || q[k] < 0 || q[k] >= n) {
       return 0;
     }
+    if (udiag[k] == 0.0 || !isfinite(udiag[k])) {
+      return 0;
+    }
     if (rs != NULL && (rs[k] == 0.0 || !isfinite(rs[k]))) {
       return 0;
     }
@@ -12773,36 +12775,69 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
 
   for (int64_t rhs_index = 0; rhs_index < nrhs; ++rhs_index) {
     double *rhs = x + rhs_index * ldx;
-    for (UF_long k = 0; k < n; ++k) {
-      const double rhs_value = rhs[pnum[k]];
-      work[k] = rs != NULL ? rhs_value / rs[k] : rhs_value;
-    }
-
-    for (UF_long row = 0; row < n; ++row) {
-      double value = work[row];
-      const UF_long begin = solver->row_refactor_l_ptr[row];
-      const UF_long end = solver->row_refactor_l_ptr[row + 1u];
-      for (UF_long p = begin; p < end; ++p) {
-        value -= solver->row_refactor_l_row_values[p] *
-                 work[solver->row_refactor_l_cols[p]];
+    if (!kernel_transpose) {
+      for (UF_long k = 0; k < n; ++k) {
+        const double rhs_value = rhs[pnum[k]];
+        work[k] = rs != NULL ? rhs_value / rs[k] : rhs_value;
       }
-      work[row] = value;
-    }
 
-    for (UF_long remaining = n; remaining > 0u; --remaining) {
-      const UF_long row = remaining - 1u;
-      double value = work[row];
-      const UF_long begin = solver->row_refactor_u_ptr[row];
-      const UF_long end = solver->row_refactor_u_ptr[row + 1u];
-      for (UF_long p = begin; p < end; ++p) {
-        value -= solver->row_refactor_u_row_values[p] *
-                 work[solver->row_refactor_u_cols[p]];
+      for (UF_long row = 0; row < n; ++row) {
+        double value = work[row];
+        const UF_long begin = solver->row_refactor_l_ptr[row];
+        const UF_long end = solver->row_refactor_l_ptr[row + 1u];
+        for (UF_long p = begin; p < end; ++p) {
+          value -= solver->row_refactor_l_row_values[p] *
+                   work[solver->row_refactor_l_cols[p]];
+        }
+        work[row] = value;
       }
-      work[row] = value / udiag[row];
-    }
 
-    for (UF_long k = 0; k < n; ++k) {
-      rhs[q[k]] = work[k];
+      for (UF_long remaining = n; remaining > 0u; --remaining) {
+        const UF_long row = remaining - 1u;
+        double value = work[row];
+        const UF_long begin = solver->row_refactor_u_ptr[row];
+        const UF_long end = solver->row_refactor_u_ptr[row + 1u];
+        for (UF_long p = begin; p < end; ++p) {
+          value -= solver->row_refactor_u_row_values[p] *
+                   work[solver->row_refactor_u_cols[p]];
+        }
+        work[row] = value / udiag[row];
+      }
+
+      for (UF_long k = 0; k < n; ++k) {
+        rhs[q[k]] = work[k];
+      }
+    } else {
+      for (UF_long k = 0; k < n; ++k) {
+        work[k] = rhs[q[k]];
+      }
+
+      for (UF_long row = 0; row < n; ++row) {
+        const double value = work[row] / udiag[row];
+        work[row] = value;
+        const UF_long begin = solver->row_refactor_u_ptr[row];
+        const UF_long end = solver->row_refactor_u_ptr[row + 1u];
+        for (UF_long p = begin; p < end; ++p) {
+          work[solver->row_refactor_u_cols[p]] -=
+            solver->row_refactor_u_row_values[p] * value;
+        }
+      }
+
+      for (UF_long remaining = n; remaining > 0u; --remaining) {
+        const UF_long row = remaining - 1u;
+        const double value = work[row];
+        const UF_long begin = solver->row_refactor_l_ptr[row];
+        const UF_long end = solver->row_refactor_l_ptr[row + 1u];
+        for (UF_long p = begin; p < end; ++p) {
+          work[solver->row_refactor_l_cols[p]] -=
+            solver->row_refactor_l_row_values[p] * value;
+        }
+      }
+
+      for (UF_long k = 0; k < n; ++k) {
+        const double result = work[k];
+        rhs[pnum[k]] = rs != NULL ? result / rs[k] : result;
+      }
     }
   }
 

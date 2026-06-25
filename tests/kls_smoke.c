@@ -2184,13 +2184,17 @@ static int run_scaled_row_refactor_case(int threads, int expect_parallel) {
   double ax0[49];
   double ax1[49];
   double expected[12];
+  double expected_t[12];
   double b[12] = {0.0};
+  double bt[12] = {0.0};
   double x[12] = {0.0};
+  double xt[12] = {0.0};
 
   int32_t p = 0;
   for (int32_t col = 0; col < n; ++col) {
     ap[col] = p;
     expected[col] = 1.0 + 0.25 * (double)col;
+    expected_t[col] = 0.75 + 0.125 * (double)col;
     const int32_t row_block = col < 4 ? 0 : (col < 8 ? 4 : 8);
     for (int32_t row = row_block; row < row_block + 4; ++row) {
       ai[p] = row;
@@ -2211,6 +2215,7 @@ static int run_scaled_row_refactor_case(int threads, int expect_parallel) {
   for (int32_t col = 0; col < n; ++col) {
     for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
       b[ai[q]] += ax1[q] * expected[col];
+      bt[col] += ax1[q] * expected_t[ai[q]];
     }
   }
 
@@ -2298,6 +2303,34 @@ static int run_scaled_row_refactor_case(int threads, int expect_parallel) {
       fprintf(stderr,
               "unexpected scaled row-refactor solution at %d: %.17g != %.17g\n",
               (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_solve_transpose(solver, 1, bt, n, xt, n),
+                        "transpose solve scaled row refactor")) ok = 0;
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "transpose stats scaled row refactor")) ok = 0;
+  if (ok && (stats.row_refactor_values_dirty != 1 ||
+             stats.row_refactor_last_lazy_value_scatter != 1 ||
+             stats.row_refactor_last_row_solve != 1 ||
+             stats.row_refactor_lazy_value_scatter_run_count != 1 ||
+             stats.row_refactor_row_solve_run_count != 2)) {
+    fprintf(stderr,
+            "unexpected scaled row-refactor transpose stats for %d threads:"
+            " dirty=%d, lazy=%d/%" PRId64 ", row_solve=%d/%" PRId64 "\n",
+            threads, stats.row_refactor_values_dirty,
+            stats.row_refactor_last_lazy_value_scatter,
+            stats.row_refactor_lazy_value_scatter_run_count,
+            stats.row_refactor_last_row_solve,
+            stats.row_refactor_row_solve_run_count);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(xt[i], expected_t[i])) {
+      fprintf(stderr,
+              "unexpected scaled row-refactor transpose solution at %d:"
+              " %.17g != %.17g\n",
+              (int)i, xt[i], expected_t[i]);
       ok = 0;
     }
   }
