@@ -3232,9 +3232,26 @@ can iterate the already split in-block input slice instead of remapping every
 original CSC row for each tail column. `kls_stats`, `kls_bench`, and the gap
 decomposition script expose this through `kls_tail_last_mapped_columns` and
 `kls_tail_mapped_column_count`; the KLS-first smoke case requires the mapped
-tail to be exercised. This is useful ownership groundwork, but it is still
-KLU-compatible column storage plus mirrored row access, not CKTSO's production
-row-major up-looking factorization or ETree-descendant pivoting-tail executor.
+tail to be exercised.
+
+The scaffold then gained a more direct CKTSO Algorithm 1 bridge instead of only
+wrapping KLU-style columns. Under the same `KLS_ENABLE_KLS_FIRST_FACTOR=1` gate,
+eligible single-block unscaled matrices first try a KLS-owned sparse row-major
+up-looking first factor with pivot checks: each factor row scatters the
+permuted input row, applies already computed row-major U updates, checks the
+diagonal against the remaining U-row maximum, records row-major L/U entries,
+and only then packs the accepted factors into KLU-compatible numeric storage for
+the existing solve/refactor API. `kls_stats`, `kls_bench`, and the gap
+decomposition script report this through
+`kls_first_last_row_uplooking_columns` and
+`kls_first_row_uplooking_column_count`; a smoke test requires this path on a
+single-block dense fixture. This is the first direct row-oriented first-factor
+kernel in KLS. It is still limited: it currently handles only unscaled
+single-block pivot-stable cases and falls back to the older KLS/KLU-compatible
+first-factor paths on pivot rejection, BTF multi-block structure, or scaling.
+The full CKTSO production target still needs row-major dynamic pivoting, ETree
+cluster/pipeline scheduling for first factorization, and the ETree-descendant
+pivoting-tail executor.
 When those mirrors were seeded by `kls_first`, unchecked `kls_refactor` now
 automatically attempts the existing KLS-owned row-major refactor path even when
 `KLS_ENABLE_ROW_REFACTOR=0`, so the scaffold drives the next SPICE-style numeric

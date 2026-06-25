@@ -3907,6 +3907,148 @@ static int test_experimental_kls_first_factor(void) {
                                                 KLS_ORIENTATION_TRANSPOSE);
 }
 
+static int test_experimental_row_uplooking_first_factor(void) {
+  const int32_t ap[] = {0, 3, 6, 9};
+  const int32_t ai[] = {0, 1, 2, 0, 1, 2, 0, 1, 2};
+  const double ax[] = {
+    5.0, 0.25, 0.125,
+    0.5, 6.0, 0.375,
+    0.25, 0.5, 7.0
+  };
+  const double b[] = {6.75, 13.75, 21.875};
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = 0;
+  options.static_pivoting = 0;
+  options.pivot_tolerance = 0.001;
+
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_saved_first = saved_first_value != NULL;
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_saved_row = saved_row_value != NULL;
+  const char *saved_checked_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked =
+    saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
+  const int had_saved_checked = saved_checked_value != NULL;
+
+  int ok = 1;
+  if (had_saved_first && saved_first == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_row && saved_row == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_checked && saved_checked == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0,
+                                        &options),
+                        "analyze row-up-looking first factor")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor row-up-looking first factor")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve row-up-looking first factor")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats row-up-looking first factor")) {
+    ok = 0;
+  }
+  if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
+             stats.kls_first_last_row_uplooking_columns != 3 ||
+             stats.kls_first_row_uplooking_column_count < 3 ||
+             stats.kls_tail_last_mapped_columns != 0 ||
+             stats.selected_scale != 0 ||
+             stats.selected_btf != 0)) {
+    fprintf(stderr,
+            "unexpected row-up-looking first-factor stats: path=%s"
+            ", row_cols=%" PRId64 "/%" PRId64
+            ", mapped_tail=%" PRId64 ", scale=%d, btf=%d\n",
+            kls_factor_path_name(stats.last_factor_path),
+            stats.kls_first_last_row_uplooking_columns,
+            stats.kls_first_row_uplooking_column_count,
+            stats.kls_tail_last_mapped_columns,
+            stats.selected_scale,
+            stats.selected_btf);
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0))) {
+    fprintf(stderr,
+            "unexpected row-up-looking first-factor solution:"
+            " %.17g %.17g %.17g\n",
+            x[0], x[1], x[2]);
+    ok = 0;
+  }
+
+  if (had_saved_first && saved_first != NULL) {
+    if (setenv("KLS_ENABLE_KLS_FIRST_FACTOR", saved_first, 1) != 0) {
+      perror("restore KLS_ENABLE_KLS_FIRST_FACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_first) {
+    if (unsetenv("KLS_ENABLE_KLS_FIRST_FACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_KLS_FIRST_FACTOR");
+      ok = 0;
+    }
+  }
+  if (had_saved_row && saved_row != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_row, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_row) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (had_saved_checked && saved_checked != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", saved_checked, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_checked) {
+    if (unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  free(saved_first);
+  free(saved_row);
+  free(saved_checked);
+  return ok;
+}
+
 static int test_row_solve_from_numeric_after_klu_first(void) {
   const int32_t ap[] = {0, 2, 5, 7};
   const int32_t ai[] = {0, 1, 0, 1, 2, 1, 2};
@@ -4373,6 +4515,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_kls_first_factor()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_experimental_row_uplooking_first_factor()) {
     return EXIT_FAILURE;
   }
   if (!test_row_solve_from_numeric_after_klu_first()) {
