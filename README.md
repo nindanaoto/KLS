@@ -431,6 +431,8 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_repaired_tail_restart_columns`,
 `fast_repaired_tail_restart_work`,
 `fast_repaired_tail_restart_saved_work`,
+`fast_repaired_tail_restart_overcompute_columns`,
+`fast_repaired_tail_restart_overcompute_work`,
 `fast_rejected_block_start`, `fast_rejected_block_size`,
 `fast_rejected_suffix_columns`,
 `fast_rejected_descendant_columns`, `fast_rejected_descendant_work`,
@@ -463,7 +465,8 @@ and at/after the rejected pivot, whether the robust repair outcome preserved
 the old block prefix, whether KLS can reconstruct the live KLU prefix
 `P`/`Pinv`/pruning state needed by a local serial tail restart, the estimated
 full-block repair work and validated non-root serial suffix restart work/saved
-work, the
+work, the suffix work and columns currently overcomputed relative to the
+retained CKTSO-style pivoting-tail worklist, the
 rejected BTF block, the suffix from that pivot to the end
 of the block, the exact U-pattern descendant tail inside that block, the
 row-refactor successor tail when row-major metadata is available, the

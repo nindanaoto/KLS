@@ -72,6 +72,32 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
   return 1;
 }
 
+static int require_tail_overcompute_bounds(const kls_stats *stats,
+                                           const char *what) {
+  if (stats == NULL ||
+      stats->fast_repaired_tail_restart_overcompute_columns < 0 ||
+      stats->fast_repaired_tail_restart_overcompute_work < 0.0 ||
+      stats->fast_repaired_tail_restart_overcompute_columns >
+        stats->fast_repaired_tail_restart_columns ||
+      stats->fast_repaired_tail_restart_overcompute_work >
+        stats->fast_repaired_tail_restart_work + 1.0e-9) {
+    fprintf(stderr,
+            "unexpected tail overcompute stats for %s: tail_cols=%" PRId64
+            ", over_cols=%" PRId64 ", tail_work=%.6g, over_work=%.6g\n",
+            what,
+            stats != NULL ? stats->fast_repaired_tail_restart_columns : 0,
+            stats != NULL
+              ? stats->fast_repaired_tail_restart_overcompute_columns
+              : 0,
+            stats != NULL ? stats->fast_repaired_tail_restart_work : 0.0,
+            stats != NULL
+              ? stats->fast_repaired_tail_restart_overcompute_work
+              : 0.0);
+    return 0;
+  }
+  return 1;
+}
+
 static int test_csc(void) {
   const int32_t ap[] = {0, 2, 5, 7};
   const int32_t ai[] = {0, 1, 0, 1, 2, 1, 2};
@@ -374,6 +400,10 @@ static int test_fast_factor_pivot_check_fallback(void) {
   if (ok && !require_pivoting_tail_plan(&stats, "pivot-check fallback")) {
     ok = 0;
   }
+  if (ok && !require_tail_overcompute_bounds(&stats,
+                                             "pivot-check fallback")) {
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
     fprintf(stderr, "unexpected pivot-check fallback solution: %.17g %.17g\n",
             x[0], x[1]);
@@ -547,6 +577,10 @@ static int test_checked_row_fast_factor_block_restart(void) {
   if (ok && !require_pivoting_tail_plan(&stats, "checked-row block restart")) {
     ok = 0;
   }
+  if (ok && !require_tail_overcompute_bounds(
+              &stats, "checked-row block restart")) {
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
     fprintf(stderr,
             "unexpected checked-row restart solution: %.17g %.17g\n",
@@ -646,6 +680,10 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
   }
   if (ok && !require_pivoting_tail_plan(&stats,
                                         "parallel checked-row restart")) {
+    ok = 0;
+  }
+  if (ok && !require_tail_overcompute_bounds(
+              &stats, "parallel checked-row restart")) {
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
@@ -761,6 +799,10 @@ static int test_fast_factor_tail_prefix_state_validation(void) {
   if (ok && !require_pivoting_tail_plan(&stats, "tail-prefix validation")) {
     ok = 0;
   }
+  if (ok && !require_tail_overcompute_bounds(&stats,
+                                             "tail-prefix validation")) {
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
              !close_enough(x[2], 3.0))) {
     fprintf(stderr,
@@ -873,6 +915,10 @@ static int test_mapped_fast_factor_prefix_tail_restart(void) {
                                         "mapped prefix-tail restart")) {
     ok = 0;
   }
+  if (ok && !require_tail_overcompute_bounds(
+              &stats, "mapped prefix-tail restart")) {
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
              !close_enough(x[2], 3.0))) {
     fprintf(stderr,
@@ -970,6 +1016,10 @@ static int test_scaled_fast_factor_block_restart(void) {
   if (ok && !require_pivoting_tail_plan(&stats, "scaled block restart")) {
     ok = 0;
   }
+  if (ok && !require_tail_overcompute_bounds(&stats,
+                                             "scaled block restart")) {
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
     fprintf(stderr, "unexpected scaled pivot-check restart solution: %.17g %.17g\n",
             x[0], x[1]);
@@ -1055,6 +1105,10 @@ static int test_scaled_fast_factor_prefix_tail_restart(void) {
   }
   if (ok && !require_pivoting_tail_plan(&stats,
                                         "scaled prefix-tail restart")) {
+    ok = 0;
+  }
+  if (ok && !require_tail_overcompute_bounds(
+              &stats, "scaled prefix-tail restart")) {
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
@@ -1157,6 +1211,10 @@ static int test_scaled_btf_fast_factor_tail_continuation(void) {
                                         "scaled btf tail continuation")) {
     ok = 0;
   }
+  if (ok && !require_tail_overcompute_bounds(
+              &stats, "scaled btf tail continuation")) {
+    ok = 0;
+  }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
              !close_enough(x[2], 3.0) || !close_enough(x[3], 4.0))) {
     fprintf(stderr,
@@ -1249,6 +1307,9 @@ static int test_btf_fast_factor_block_restart(void) {
     ok = 0;
   }
   if (ok && !require_pivoting_tail_plan(&stats, "btf block restart")) {
+    ok = 0;
+  }
+  if (ok && !require_tail_overcompute_bounds(&stats, "btf block restart")) {
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
@@ -1357,6 +1418,9 @@ static int test_btf_prefix_tail_restart_with_offblock(void) {
     ok = 0;
   }
   if (ok && !require_pivoting_tail_plan(&stats, "btf offblock tail")) {
+    ok = 0;
+  }
+  if (ok && !require_tail_overcompute_bounds(&stats, "btf offblock tail")) {
     ok = 0;
   }
   double max_solution_error = 0.0;
@@ -1669,6 +1733,10 @@ static int test_fast_factor_restart_after_prior_pivot(void) {
     ok = 0;
   }
   if (ok && !require_pivoting_tail_plan(&stats, "prior-pivot restart")) {
+    ok = 0;
+  }
+  if (ok && !require_tail_overcompute_bounds(&stats,
+                                             "prior-pivot restart")) {
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||

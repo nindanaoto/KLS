@@ -126,6 +126,16 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         "fast_rejected_pivoting_tail_columns",
         as_int(row, "fast_rejected_etree_columns", 0),
     )
+    overcompute_columns = as_int(
+        row,
+        "fast_repaired_tail_restart_overcompute_columns",
+        max(0, suffix_tail_columns - pivoting_tail_columns),
+    )
+    overcompute_work = as_float(
+        row,
+        "fast_repaired_tail_restart_overcompute_work",
+        max(0.0, suffix_tail_work - pivoting_tail_work),
+    )
     return {
         "matrix": matrix_name(row),
         "reason": reason,
@@ -154,12 +164,8 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         "fast_rejected_etree_work": as_float(row, "fast_rejected_etree_work"),
         "fast_rejected_pivoting_tail_columns": pivoting_tail_columns,
         "fast_rejected_pivoting_tail_work": pivoting_tail_work,
-        "suffix_tail_overcompute_columns": max(
-            0, suffix_tail_columns - pivoting_tail_columns
-        ),
-        "suffix_tail_overcompute_work": max(
-            0.0, suffix_tail_work - pivoting_tail_work
-        ),
+        "suffix_tail_overcompute_columns": overcompute_columns,
+        "suffix_tail_overcompute_work": overcompute_work,
         "fast_rejected_pivoting_tail_first": as_int(
             row, "fast_rejected_pivoting_tail_first", -1
         ),

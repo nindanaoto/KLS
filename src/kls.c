@@ -896,6 +896,8 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_tail_restart_columns = 0;
   solver->stats.fast_repaired_tail_restart_work = 0.0;
   solver->stats.fast_repaired_tail_restart_saved_work = 0.0;
+  solver->stats.fast_repaired_tail_restart_overcompute_columns = 0;
+  solver->stats.fast_repaired_tail_restart_overcompute_work = 0.0;
   solver->stats.fast_block_restarts = 0;
   solver->stats.fast_tail_restarts = 0;
   solver->stats.fast_repaired_last_offdiag_suffix_refresh = 0;
@@ -10638,6 +10640,19 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
         solver->stats.fast_repaired_tail_restart_work = tail_work;
         solver->stats.fast_repaired_tail_restart_saved_work =
           block_work > tail_work ? block_work - tail_work : 0.0;
+        const int64_t pivoting_tail_columns =
+          solver->stats.fast_rejected_pivoting_tail_columns;
+        const double pivoting_tail_work =
+          solver->stats.fast_rejected_pivoting_tail_work;
+        solver->stats.fast_repaired_tail_restart_overcompute_columns =
+          pivoting_tail_columns > 0 &&
+              tail_columns > (UF_long)pivoting_tail_columns
+            ? (int64_t)(tail_columns - (UF_long)pivoting_tail_columns)
+            : 0;
+        solver->stats.fast_repaired_tail_restart_overcompute_work =
+          pivoting_tail_work > 0.0 && tail_work > pivoting_tail_work
+            ? tail_work - pivoting_tail_work
+            : 0.0;
       } else {
         solver->stats.fast_repaired_tail_restart_ready = 0;
       }

@@ -2859,6 +2859,13 @@ behavior, but it makes broad benchmark output rank the cases where replacing
 the conservative suffix fallback with a real pipelined pivoting-tail executor
 should remove the most work.
 
+Those overcompute counters are now also published by the solver and benchmark
+JSON as `fast_repaired_tail_restart_overcompute_columns` and
+`fast_repaired_tail_restart_overcompute_work`, with the standalone summarizer
+kept backward-compatible for older JSONL runs. This keeps the CKTSO-tail
+executor target visible in every benchmark row instead of requiring a separate
+postprocessing calculation.
+
 The pivoting-tail plan then stopped treating every prefix-current checked
 reject as a full suffix when the checked worker bitmap can identify unfinished
 nodes. KLS records those unfinished local columns as
