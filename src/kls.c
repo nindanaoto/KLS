@@ -9783,12 +9783,24 @@ static int kls_fast_reject_column_work(const kls_solver *solver,
       block >= solver->numeric->nblocks || local_col >= nk ||
       solver->numeric->Uip == NULL || solver->numeric->Ulen == NULL ||
       solver->numeric->Llen == NULL || solver->numeric->LUbx == NULL ||
+      solver->numeric->LUsize == NULL ||
       solver->numeric->LUbx[block] == NULL) {
     return 0;
   }
   double *lu = (double *)solver->numeric->LUbx[block];
+  const size_t lusize = solver->numeric->LUsize[block];
   const UF_long *uip = solver->numeric->Uip + k1;
   const UF_long *ulen = solver->numeric->Ulen + k1;
+  if (uip[local_col] == KLS_KLU_EMPTY ||
+      (size_t)uip[local_col] > lusize) {
+    return 0;
+  }
+  const size_t index_units = kls_klu_units_for_indices(ulen[local_col]);
+  if (index_units > lusize - (size_t)uip[local_col] ||
+      ulen[local_col] >
+        (UF_long)(lusize - (size_t)uip[local_col] - index_units)) {
+    return 0;
+  }
   UF_long *ui = NULL;
   double *ux = NULL;
   UF_long ucol_len = 0;
@@ -9798,7 +9810,7 @@ static int kls_fast_reject_column_work(const kls_solver *solver,
   double work = 1.0;
   for (UF_long p = 0; p < ucol_len; ++p) {
     const UF_long dep = ui[p];
-    if (dep >= local_col || dep >= nk) {
+    if (dep < 0 || dep >= local_col || dep >= nk) {
       return 0;
     }
     work += 1.0 + (double)solver->numeric->Llen[k1 + dep];
@@ -12799,26 +12811,29 @@ static int kls_try_pivot_tail_restart_rejected_block(
       goto fail;
     }
     if (lock_gap_pivot) {
-      if (!kls_copy_finished_gap_lu_column(
+      if (kls_copy_finished_gap_lu_column(
             &new_lu, &lusize, old_lu, old_lusize, lip, llen, uip, ulen,
             udiag, old_pblock, restart_tail_mask, live_pinv, nk, kk, lip,
             llen, uip, ulen, udiag, &lup, &lnz, &unz,
             &solver->common)) {
-        solver->common.status = TRILINOS_KLU_INVALID;
+        const UF_long pivrow = old_pblock[kk];
+        pblock[kk] = pivrow;
+        live_pinv[pivrow] = kk;
+        kls_tail_prune(lpend, live_pinv, (Int)kk, (Int)pivrow, new_lu, uip,
+                       lip, ulen, llen);
+        skipped_columns++;
+        double column_work = 0.0;
+        if (kls_fast_reject_column_work(solver, block, k1, nk, kk,
+                                        &column_work)) {
+          skipped_work += column_work;
+        }
+        continue;
+      }
+      if (solver->common.status < TRILINOS_KLU_OK) {
         goto fail;
       }
-      const UF_long pivrow = old_pblock[kk];
-      pblock[kk] = pivrow;
-      live_pinv[pivrow] = kk;
-      kls_tail_prune(lpend, live_pinv, (Int)kk, (Int)pivrow, new_lu, uip,
-                     lip, ulen, llen);
-      skipped_columns++;
-      double column_work = 0.0;
-      if (kls_fast_reject_column_work(solver, block, k1, nk, kk,
-                                      &column_work)) {
-        skipped_work += column_work;
-      }
-      continue;
+      /* A structurally dependent gap cannot be copied; refactor it below
+         while forcing the original pivot row to preserve the suffix. */
     }
     const double nunits =
       DUNITS(Int, (Int)nk - k) + DUNITS(Int, k) +
@@ -12884,7 +12899,8 @@ static int kls_try_pivot_tail_restart_rejected_block(
     Int pivrow = TRILINOS_KLU_EMPTY;
     Entry pivot = 0.0;
     double abs_pivot = 0.0;
-    if (!kls_tail_lpivot(diagrow, &pivrow, &pivot, &abs_pivot, tol,
+    const double pivot_tol = lock_gap_pivot ? 0.0 : tol;
+    if (!kls_tail_lpivot(diagrow, &pivrow, &pivot, &abs_pivot, pivot_tol,
                          (Entry *)solver->numeric->Xwork, new_lu, lip, llen,
                          k, (Int)nk, live_pinv, &firstrow,
                          &solver->common)) {

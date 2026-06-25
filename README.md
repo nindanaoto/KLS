@@ -1036,14 +1036,14 @@ On the refreshed selected-large reconstruction, KLS is ahead of the saved KLU2
 artifact but still trails the saved CKTSO artifact, with `pre2` still timing out.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
-still uses the KLU column-oriented serial kernel for the default first large
-factorization. An env-gated KLS-owned first-factor scaffold now exists for
-KLU-compatible BTF block assembly in no-scale and KLU row-scaled modes, and it
-can seed KLS-owned row-major mirrors for the following solves and unchecked
-numeric refactors. But CKTSO's paper describes a row-major up-looking
-factorization plus EGraph pivot checks and ETree-scheduled pipelined tail
-factorization. The next algorithmic
-work is to evolve the numeric
+no longer only depends on the KLU column-oriented serial kernel for large first
+factors, but accepted first factors are still packed into KLU-compatible
+numeric storage. The KLS-owned row-up first-factor path can assemble
+KLU-compatible BTF blocks in no-scale and KLU row-scaled modes and seed
+KLS-owned row-major mirrors for following solves and unchecked numeric
+refactors. CKTSO's paper goes further: a production row-major up-looking
+factorization, EGraph pivot checks, and ETree-scheduled pipelined tail
+factorization. The next algorithmic work is to evolve the numeric
 factor/refactor/solve kernels toward those deeper KLS-owned sparse kernels
 while keeping the public API and benchmark harness stable.
 

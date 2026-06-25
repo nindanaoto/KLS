@@ -571,6 +571,122 @@ static int test_fast_factor_root_independent_tail_restart(void) {
   return ok;
 }
 
+static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
+  const int32_t ap[] = {0, 2, 5, 7, 8, 10, 12};
+  const int32_t ai[] = {
+    0, 4,
+    1, 3, 5,
+    0, 2,
+    3,
+    0, 4,
+    1, 5
+  };
+  const double ax0[] = {
+    5.0899999999999999, -0.021414242728184554,
+    5.75, -0.039117352056168508, -0.03239719157472417,
+    0.035656970912738221, 5.3899999999999997,
+    5.9399999999999995,
+    -0.024322968906720161, 5.5199999999999996,
+    0.0071213640922768301, 5.9800000000000004
+  };
+  const double ax1[] = {
+    9.9999999999999998e-13, -2.0214142427281847,
+    5.75, -0.039117352056168508, -0.03239719157472417,
+    0.035656970912738221, 5.3899999999999997,
+    5.9399999999999995,
+    -0.024322968906720161, 5.5199999999999996,
+    0.0071213640922768301, 5.9800000000000004
+  };
+  const double expected[] = {1.0, -2.0, 3.0, -4.0, 5.0, -6.0};
+  double b[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double x[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  for (int32_t col = 0; col < 6; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 6, ap, ai, 0,
+                                        &options),
+                        "analyze noncontiguous gap tail")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor noncontiguous gap base")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor noncontiguous gap repair")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve noncontiguous gap repair")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats noncontiguous gap tail")) {
+    ok = 0;
+  }
+  if (ok && (stats.fast_rejected_pivot != 0 ||
+             stats.fast_rejected_pivoting_tail_columns != 3 ||
+             stats.fast_rejected_pivoting_tail_first != 0 ||
+             stats.fast_rejected_pivoting_tail_last != 4 ||
+             stats.fast_rejected_pivoting_tail_contiguous != 0 ||
+             stats.fast_rejected_pivoting_tail_gap_columns != 2 ||
+             stats.fast_repaired_tail_restart_ready != 1 ||
+             stats.fast_repaired_tail_restart_skipped_columns != 2 ||
+             stats.fast_repaired_tail_restart_columns != 3 ||
+             stats.fast_tail_restarts != 1)) {
+    fprintf(stderr,
+            "unexpected noncontiguous gap tail stats: pivot=%" PRId64
+            ", tail_cols=%" PRId64 ", first=%" PRId64 ", last=%" PRId64
+            ", contiguous=%d, gaps=%" PRId64 ", ready=%d"
+            ", skipped=%" PRId64 ", repaired_cols=%" PRId64
+            ", tail_restarts=%d\n",
+            stats.fast_rejected_pivot,
+            stats.fast_rejected_pivoting_tail_columns,
+            stats.fast_rejected_pivoting_tail_first,
+            stats.fast_rejected_pivoting_tail_last,
+            stats.fast_rejected_pivoting_tail_contiguous,
+            stats.fast_rejected_pivoting_tail_gap_columns,
+            stats.fast_repaired_tail_restart_ready,
+            stats.fast_repaired_tail_restart_skipped_columns,
+            stats.fast_repaired_tail_restart_columns,
+            stats.fast_tail_restarts);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats, "noncontiguous gap tail")) {
+    ok = 0;
+  }
+  if (ok && !require_tail_overcompute_bounds(&stats,
+                                             "noncontiguous gap tail")) {
+    ok = 0;
+  }
+  double max_solution_error = 0.0;
+  for (int32_t i = 0; i < 6; ++i) {
+    const double err = fabs(x[i] - expected[i]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+  }
+  if (ok && max_solution_error > 1.0e-8) {
+    fprintf(stderr,
+            "unexpected noncontiguous gap solution: %.17g %.17g %.17g"
+            " %.17g %.17g %.17g, max_err=%.17g\n",
+            x[0], x[1], x[2], x[3], x[4], x[5], max_solution_error);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
 static int test_checked_row_fast_factor_block_restart(void) {
   const int32_t ap[] = {0, 2, 4};
   const int32_t ai[] = {0, 1, 0, 1};
@@ -5234,6 +5350,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_fast_factor_root_independent_tail_restart()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_fast_factor_noncontiguous_tail_gap_work_bounds()) {
     return EXIT_FAILURE;
   }
   if (!test_checked_row_fast_factor_block_restart()) {

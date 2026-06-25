@@ -3189,15 +3189,18 @@ When the retained ETree-descendant tail is non-contiguous, the preferred KLS
 block repair now tries to copy already-finished gap columns from the current
 numeric LU stream and numerically refactor only the marked tail columns. A gap
 column is copied only if its pivot row is still unchanged, its L rows are still
-unpivoted, and its U predecessors do not include a recomputed tail column; any
-violation restores the saved block metadata and falls back to the older
-contiguous envelope or suffix repair. Benchmark JSON now reports the copied
-gap columns/work as `fast_repaired_tail_restart_skipped_columns` and
-`fast_repaired_tail_restart_skipped_work`, and the tail restart work counters
-subtract those copied gaps. This is still a serial conservative subset of
+unpivoted, and its U predecessors do not include a recomputed tail column. If
+that copy is impossible because the gap depends on a recomputed tail column,
+KLS now numerically refreshes the gap column with the original pivot row locked
+before continuing the compact envelope; allocation or fixed-pivot violations
+still restore the saved block metadata and fall back to the older contiguous
+envelope or suffix repair. Benchmark JSON reports copied gap columns/work as
+`fast_repaired_tail_restart_skipped_columns` and
+`fast_repaired_tail_restart_skipped_work`, and dependent refreshed gaps remain
+visible as envelope overcompute. This is still a serial conservative subset of
 CKTSO's pipelined pivoting-tail executor, not the full non-contiguous parallel
-row-tail algorithm, but successful cases now execute less than the envelope
-instead of only diagnosing its overcompute.
+row-tail algorithm, but successful cases now execute the compact envelope
+instead of abandoning it whenever an internal gap is dependent.
 
 The row-up first-factor dynamic column-pivot path then stopped relabeling
 swapped columns by scanning every previously emitted U entry. U entries now keep
