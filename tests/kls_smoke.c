@@ -2911,12 +2911,15 @@ static int run_experimental_kls_first_factor_case(int scale) {
   const int32_t ai[] = {0, 1, 0, 1, 2};
   const double ax[] = {4.0, 2.0, 1.0, 3.0, 5.0};
   const double b[] = {6.0, 8.0, 15.0};
+  const double bt[] = {8.0, 7.0, 15.0};
   double x[3] = {0.0, 0.0, 0.0};
+  double xt[3] = {0.0, 0.0, 0.0};
 
   kls_solver *solver = NULL;
   kls_options options;
   kls_default_options(&options);
   options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
   options.use_btf = 1;
   options.scale = scale;
   options.static_pivoting = 0;
@@ -2942,6 +2945,8 @@ static int run_experimental_kls_first_factor_case(int scale) {
                         "factor KLS first factor")) ok = 0;
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
                         "solve KLS first factor")) ok = 0;
+  if (ok && !require_ok(kls_solve_transpose(solver, 1, bt, 0, xt, 0),
+                        "transpose solve KLS first factor")) ok = 0;
 
   kls_stats stats;
   stats.struct_size = sizeof(stats);
@@ -2952,14 +2957,23 @@ static int run_experimental_kls_first_factor_case(int scale) {
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
              stats.nblocks < 2 || stats.max_block < 2 ||
              stats.selected_scale != scale ||
+             stats.row_refactor_values_dirty != 0 ||
+             stats.row_refactor_last_lazy_value_scatter != 0 ||
+             stats.row_refactor_last_row_solve != 1 ||
+             stats.row_refactor_row_solve_run_count != 2 ||
              stats.fast_block_restarts != 0 ||
              stats.fast_kls_block_restarts != 0)) {
     fprintf(stderr,
             "unexpected KLS first-factor stats: path=%s, nblocks=%" PRId64
             ", max_block=%" PRId64 ", scale=%d"
+            ", row_dirty=%d, row_lazy=%d, row_solve=%d, row_solve_count=%" PRId64
             ", block_restarts=%d, kls_block_restarts=%d\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.nblocks, stats.max_block, stats.selected_scale,
+            stats.row_refactor_values_dirty,
+            stats.row_refactor_last_lazy_value_scatter,
+            stats.row_refactor_last_row_solve,
+            stats.row_refactor_row_solve_run_count,
             stats.fast_block_restarts, stats.fast_kls_block_restarts);
     ok = 0;
   }
@@ -2968,6 +2982,13 @@ static int run_experimental_kls_first_factor_case(int scale) {
     fprintf(stderr,
             "unexpected KLS first-factor solution: %.17g %.17g %.17g\n",
             x[0], x[1], x[2]);
+    ok = 0;
+  }
+  if (ok && (!close_enough(xt[0], 1.0) || !close_enough(xt[1], 2.0) ||
+             !close_enough(xt[2], 3.0))) {
+    fprintf(stderr,
+            "unexpected KLS first-factor transpose solution: %.17g %.17g %.17g\n",
+            xt[0], xt[1], xt[2]);
     ok = 0;
   }
 

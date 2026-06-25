@@ -141,6 +141,7 @@ struct kls_solver {
   UF_long row_refactor_input_cleanup_entries;
   int row_refactor_last_defer_value_scatter;
   UF_long row_refactor_defer_value_scatter_run_count;
+  int row_refactor_values_ready;
   int row_refactor_values_dirty;
   int row_refactor_last_lazy_value_scatter;
   UF_long row_refactor_lazy_value_scatter_run_count;
@@ -717,6 +718,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_input_cleanup_entries = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_defer_value_scatter_run_count = 0;
+  solver->row_refactor_values_ready = 0;
   solver->row_refactor_values_dirty = 0;
   solver->row_refactor_last_lazy_value_scatter = 0;
   solver->row_refactor_lazy_value_scatter_run_count = 0;
@@ -1078,6 +1080,7 @@ static void kls_record_row_refactor_lazy_value_scatter_run(
     return;
   }
   solver->row_refactor_values_dirty = 1;
+  solver->row_refactor_values_ready = 1;
   solver->row_refactor_last_lazy_value_scatter = 1;
   solver->row_refactor_lazy_value_scatter_run_count++;
   solver->stats.row_refactor_values_dirty = 1;
@@ -13304,9 +13307,47 @@ static int kls_publish_row_refactor_values(kls_solver *solver) {
   return 1;
 }
 
+static int kls_seed_row_refactor_values_from_numeric(kls_solver *solver) {
+  if (solver == NULL || !kls_build_row_refactor_pattern(solver)) {
+    return 0;
+  }
+  const UF_long l_nnz =
+    solver->row_refactor_l_ptr != NULL ? solver->row_refactor_l_ptr[solver->n]
+                                       : 0u;
+  if (l_nnz > 0u &&
+      (solver->row_refactor_l_values == NULL ||
+       solver->row_refactor_l_row_values == NULL)) {
+    return 0;
+  }
+  for (UF_long p = 0; p < l_nnz; ++p) {
+    if (solver->row_refactor_l_values[p] == NULL) {
+      return 0;
+    }
+    solver->row_refactor_l_row_values[p] = *solver->row_refactor_l_values[p];
+  }
+
+  const UF_long u_nnz =
+    solver->row_refactor_u_ptr != NULL ? solver->row_refactor_u_ptr[solver->n]
+                                       : 0u;
+  if (u_nnz > 0u &&
+      (solver->row_refactor_u_values == NULL ||
+       solver->row_refactor_u_row_values == NULL)) {
+    return 0;
+  }
+  for (UF_long p = 0; p < u_nnz; ++p) {
+    if (solver->row_refactor_u_values[p] == NULL) {
+      return 0;
+    }
+    solver->row_refactor_u_row_values[p] = *solver->row_refactor_u_values[p];
+  }
+
+  solver->row_refactor_values_ready = 1;
+  return 1;
+}
+
 static int kls_row_refactor_solve_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      !solver->row_refactor_values_dirty ||
+      !solver->row_refactor_values_ready ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->row_perm != NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->symbolic->nblocks == 0u ||
@@ -13893,6 +13934,7 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
+  solver->row_refactor_values_ready = 1;
   return 1;
 }
 
@@ -15455,6 +15497,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
+  solver->row_refactor_values_ready = 1;
   return 1;
 }
 
@@ -17802,6 +17845,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   if (!kls_publish_row_refactor_values(solver)) {
     return 0;
   }
+  solver->row_refactor_values_ready = 0;
   const int egraph =
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
   if (egraph >= 0) {
@@ -18437,16 +18481,19 @@ int kls_factor(kls_solver *solver, const double *values) {
   int diagnostics_have_flops = 1;
   int diagnostics_have_rcond = 1;
   if (maybe_select_auto_row_match(solver, &elapsed, numeric_values)) {
+    kls_first_factor_used = 0;
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
   if (maybe_select_auto_scale(solver, &elapsed, numeric_values)) {
+    kls_first_factor_used = 0;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
   }
 #ifdef KLS_HAVE_METIS
   if (maybe_promote_auto_metis(solver, &elapsed, numeric_values)) {
+    kls_first_factor_used = 0;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
   }
@@ -18457,12 +18504,14 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_rcond = 1;
   }
   if (maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values)) {
+    kls_first_factor_used = 0;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
 #ifdef KLS_HAVE_SPRAL_SCALING
   if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
                                              numeric_values)) {
+    kls_first_factor_used = 0;
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
@@ -18470,6 +18519,11 @@ int kls_factor(kls_solver *solver, const double *values) {
 #endif
   if (!diagnostics_have_flops || !diagnostics_have_rcond) {
     kls_update_numeric_diagnostics(solver, 1);
+  }
+  if (kls_first_factor_used && solver->common.status >= TRILINOS_KLU_OK) {
+    const double start = kls_now_seconds();
+    (void)kls_seed_row_refactor_values_from_numeric(solver);
+    elapsed += kls_now_seconds() - start;
   }
   maybe_prepare_refactor_map(solver, &elapsed);
   maybe_prepare_refactor_schedule(solver, &elapsed);

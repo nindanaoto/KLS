@@ -110,9 +110,10 @@ An env-gated `KLS_ENABLE_KLS_FIRST_FACTOR=1` path can now allocate and assemble
 KLU-compatible numeric storage itself for no-scale and KLU row-scaled first
 factorizations, handle singleton BTF blocks directly, and use the KLS-owned
 pivoted block kernel for multi-column BTF blocks. It reports `kls_first` when it
-succeeds and falls back to the KLU first-factor path otherwise. This is a first
-KLS-owned factorization scaffold, not the default production row-major
-CKTSO-style factorization.
+succeeds, seeds KLS-owned row-major `L`/`U` value mirrors for guarded solves, and
+falls back to the KLU first-factor path otherwise. This is a first KLS-owned
+factorization scaffold, not the default production row-major CKTSO-style
+factorization.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -3088,12 +3089,14 @@ The KLS-owned pivoted block kernel was then wired into an experimental first
 factorization scaffold behind `KLS_ENABLE_KLS_FIRST_FACTOR=1`. The scaffold
 allocates the KLU-compatible numeric object itself, handles singleton BTF blocks
 through `Udiag`/`Pnum`, runs the KLS-owned pivoted kernel for multi-column BTF
-blocks, rebuilds `Pinv` and `Offp/Offi/Offx`, and reports
+blocks, rebuilds `Pinv` and `Offp/Offi/Offx`, seeds KLS-owned row-major value
+mirrors from the accepted numeric object, and reports
 `initial_factor_path:"kls_first"` when it succeeds. The smoke suite covers a
 matrix with a 2-column BTF block so this path cannot pass by singleton handling
-alone. This is useful ownership groundwork, but it is still KLU-compatible
-column storage and not CKTSO's production row-major up-looking factorization or
-ETree-descendant pivoting-tail executor.
+alone, and it now requires subsequent forward and transpose solves to consume the
+seeded row mirrors. This is useful ownership groundwork, but it is still
+KLU-compatible column storage plus mirrored row access, not CKTSO's production
+row-major up-looking factorization or ETree-descendant pivoting-tail executor.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF
