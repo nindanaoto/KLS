@@ -136,8 +136,9 @@ retained pattern through the checked fast path. Setting
 scaffold for no-scale and KLU row-scaled cases. It reports `kls_first` when it
 successfully assembles KLU-compatible numeric storage and seeds KLS-owned
 row-major `L`/`U` value mirrors for guarded forward/transpose solves. Repeated
-unchecked `kls_refactor` calls then try that row-major update path automatically
-while the mirrors remain current; it is not enabled by default.
+unchecked `kls_refactor` calls and checked fast-factor `kls_factor` calls then
+try those row-major update paths automatically while the mirrors remain current;
+it is not enabled by default.
 `factor_etree_block_start`,
 `factor_etree_block_size`, `factor_etree_levels`,
 `factor_etree_max_width`, `factor_etree_edges`,

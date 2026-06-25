@@ -13839,9 +13839,8 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
         common->status = TRILINOS_KLU_OK;
         return 0;
       }
-      if (defer_value_scatter) {
-        solver->row_refactor_l_row_values[p] = lij;
-      } else {
+      solver->row_refactor_l_row_values[p] = lij;
+      if (!defer_value_scatter) {
         *solver->row_refactor_l_values[p] = lij;
       }
       x[dep] = 0.0;
@@ -14052,9 +14051,8 @@ static int kls_parallel_row_refactor_process_row(
       x[dep] = 0.0;
       return 0;
     }
-    if (shared->row_refactor_defer_value_scatter) {
-      solver->row_refactor_l_row_values[p] = lij;
-    } else {
+    solver->row_refactor_l_row_values[p] = lij;
+    if (!shared->row_refactor_defer_value_scatter) {
       *solver->row_refactor_l_values[p] = lij;
     }
     x[dep] = 0.0;
@@ -14389,9 +14387,8 @@ static int kls_parallel_row_refactor_process_dense_group(
         x[dep] = 0.0;
         return 0;
       }
-      if (shared->row_refactor_defer_value_scatter) {
-        solver->row_refactor_l_row_values[lp] = lij;
-      } else {
+      solver->row_refactor_l_row_values[lp] = lij;
+      if (!shared->row_refactor_defer_value_scatter) {
         *solver->row_refactor_l_values[lp] = lij;
       }
       x[dep] = 0.0;
@@ -14502,19 +14499,14 @@ static int kls_parallel_row_refactor_process_dense_group(
 
     const UF_long l_dense_begin =
       solver->row_refactor_l_internal_ptr[row];
-    if (shared->row_refactor_defer_value_scatter) {
-      double *row_l_values =
-        solver->row_refactor_l_row_values + l_dense_begin;
-      for (UF_long dep = row_begin; dep < row; ++dep) {
-        row_l_values[dep - row_begin] =
-          row_dense_panel[dep - row_begin];
-      }
-    } else {
-      double **row_l_values =
-        solver->row_refactor_l_values + l_dense_begin;
-      for (UF_long dep = row_begin; dep < row; ++dep) {
-        *row_l_values[dep - row_begin] =
-          row_dense_panel[dep - row_begin];
+    double *row_l_row_values =
+      solver->row_refactor_l_row_values + l_dense_begin;
+    double **row_l_values = solver->row_refactor_l_values + l_dense_begin;
+    for (UF_long dep = row_begin; dep < row; ++dep) {
+      const double value = row_dense_panel[dep - row_begin];
+      row_l_row_values[dep - row_begin] = value;
+      if (!shared->row_refactor_defer_value_scatter) {
+        *row_l_values[dep - row_begin] = value;
       }
     }
 
@@ -14642,9 +14634,8 @@ static int kls_parallel_row_refactor_process_group(
         x[dep] = 0.0;
         return 0;
       }
-      if (shared->row_refactor_defer_value_scatter) {
-        solver->row_refactor_l_row_values[p] = lij;
-      } else {
+      solver->row_refactor_l_row_values[p] = lij;
+      if (!shared->row_refactor_defer_value_scatter) {
         *solver->row_refactor_l_values[p] = lij;
       }
       x[dep] = 0.0;
@@ -17817,7 +17808,10 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                                      double *numeric_values,
                                      int check_pivots) {
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
-  if (check_pivots && kls_checked_row_refactor_env_enabled()) {
+  if (check_pivots &&
+      (kls_checked_row_refactor_env_enabled() ||
+       (solver->row_refactor_auto_enabled &&
+        solver->row_refactor_values_ready))) {
     if (solver->options.threads > 1) {
       const int parallel_row_status =
         kls_threaded_row_refactor_numeric(solver, numeric_values, 1);
