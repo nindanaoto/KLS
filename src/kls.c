@@ -13220,6 +13220,43 @@ static int kls_first_factor_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static double kls_row_refactor_total_group_work(const kls_solver *solver) {
+  if (solver == NULL || solver->row_refactor_group_count == 0u) {
+    return 0.0;
+  }
+  double work = 0.0;
+  for (UF_long group = 0; group < solver->row_refactor_group_count; ++group) {
+    work += kls_row_refactor_group_work(solver, group);
+  }
+  return work;
+}
+
+static int kls_auto_row_refactor_cost_allows(const kls_solver *solver) {
+  if (solver == NULL || !solver->row_refactor_auto_enabled) {
+    return 0;
+  }
+  if (solver->refactor_dependency_work <= 0.0) {
+    return 1;
+  }
+  if (solver->row_refactor_pattern_n != solver->n ||
+      solver->row_refactor_group_count == 0u) {
+    return 1;
+  }
+
+  const double row_work = kls_row_refactor_total_group_work(solver);
+  if (row_work <= 0.0) {
+    return 1;
+  }
+  return row_work <= solver->refactor_dependency_work;
+}
+
+static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
+  return solver != NULL &&
+         solver->row_refactor_auto_enabled &&
+         solver->row_refactor_values_ready &&
+         kls_auto_row_refactor_cost_allows(solver);
+}
+
 static int kls_row_refactor_should_defer_value_scatter(
   const kls_solver *solver,
   int check_pivots) {
@@ -13352,6 +13389,7 @@ static void kls_maybe_reseed_auto_row_refactor_values(kls_solver *solver,
   if (solver == NULL || elapsed == NULL ||
       !solver->row_refactor_auto_enabled ||
       solver->row_refactor_values_ready ||
+      !kls_auto_row_refactor_cost_allows(solver) ||
       solver->numeric == NULL ||
       solver->common.status < TRILINOS_KLU_OK ||
       solver->common.status == TRILINOS_KLU_SINGULAR) {
@@ -17822,10 +17860,11 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                                      double *numeric_values,
                                      int check_pivots) {
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
+  const int auto_row_refactor =
+    kls_auto_row_refactor_should_run(solver);
   if (check_pivots &&
       (kls_checked_row_refactor_env_enabled() ||
-       (solver->row_refactor_auto_enabled &&
-        solver->row_refactor_values_ready))) {
+       auto_row_refactor)) {
     if (solver->options.threads > 1) {
       const int parallel_row_status =
         kls_threaded_row_refactor_numeric(solver, numeric_values, 1);
@@ -17840,8 +17879,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     }
   } else if (!check_pivots &&
              (kls_row_refactor_env_enabled() ||
-              (solver->row_refactor_auto_enabled &&
-               solver->row_refactor_values_ready))) {
+              auto_row_refactor)) {
     if (solver->options.threads > 1) {
       const int parallel_row_status =
         kls_threaded_row_refactor_numeric(solver, numeric_values, 0);

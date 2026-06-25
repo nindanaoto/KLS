@@ -3120,6 +3120,14 @@ storage and drop stale mirror metadata. The guarded solve/refactor lifecycle
 therefore stays on KLS-owned row storage after a local repivot, matching the
 CKTSO paper's row-major fast-factor/recompute flow more closely even though the
 full pipelined ETree pivoting-tail executor is still not implemented.
+The automatic KLS-first row-refactor handoff then gained a static work gate:
+explicit row-refactor controls still force the row engine for experiments, but
+the automatic path now compares the retained row/group work estimate with the
+exact EGraph refactor work estimate and skips row refactor when the row plan is
+already more expensive. This follows the NICSLU/SubtreeLU recommendation to
+select parallel kernels from structure and FLOP evidence rather than matrix
+names, and prevents KLS-first scaffolding from replacing a cheaper existing
+EGraph refactor with a slower row-major mirror update on hard rows.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF

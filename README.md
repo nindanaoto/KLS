@@ -137,7 +137,9 @@ scaffold for no-scale and KLU row-scaled cases. It reports `kls_first` when it
 successfully assembles KLU-compatible numeric storage and seeds KLS-owned
 row-major `L`/`U` value mirrors for guarded forward/transpose solves. Repeated
 unchecked `kls_refactor` calls and checked fast-factor `kls_factor` calls then
-try those row-major update paths automatically while the mirrors remain current;
+try those row-major update paths automatically while the mirrors remain current
+and their retained row-work estimate is no larger than the exact EGraph
+refactor work estimate;
 successful checked pivot repairs reseed those mirrors so subsequent solves do
 not have to fall back to published KLU column storage solely because the repaired
 block rebuilt its LU payload. It is not enabled by default. `kls_bench` and
@@ -787,7 +789,10 @@ For row-engine experiments, `kls_bench` and `run_bench_suite.py` accept
 `--row-refactor env|off|refactor|checked|all` and
 `--kls-first-factor env|off|on`; the emitted `initial_factor_path`,
 `last_factor_path`, and `row_refactor_last_*` fields show whether the first
-factorization and later numeric passes really used KLS-owned paths:
+factorization and later numeric passes really used KLS-owned paths. Explicit
+row-refactor modes force the row engine, while the automatic KLS-first path
+uses the retained row/EGraph work estimates to skip row refactors whose static
+work model is already worse than the existing exact EGraph schedule:
 
 ```sh
 python3 scripts/decompose_solver_gap.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/cktso_suite.jsonl --reference-name cktso
