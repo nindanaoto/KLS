@@ -517,7 +517,11 @@ the shared queue, stats report `row_refactor_last_local_ready_groups` and
 group predecessor counts; when the cluster prefix is empty, full-graph queued
 runs also reuse the retained root-group list and hand the root groups out
 through a private-root cursor before using the shared queue for newly released
-successors. When a completed group releases multiple successors, the completing
+successors. Cluster-prefix tail queues now apply the same private first-wave
+treatment to the initially ready tail groups when per-thread queues can be
+built, reported as `row_refactor_last_private_ready_groups` and
+`row_refactor_private_ready_group_count`. When a completed group releases
+multiple successors, the completing
 worker keeps one local continuation and only spills the rest to the shared
 queue. Checked queued
 rejects refresh any missing prefix rows before accepting a prefix-tail repair

@@ -281,6 +281,8 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_dense_panel_persistent_entries;
   int row_refactor_last_compact_dense_panel_persistent;
   int64_t row_refactor_compact_dense_panel_persistent_run_count;
+  int64_t row_refactor_last_private_ready_groups;
+  int64_t row_refactor_private_ready_group_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

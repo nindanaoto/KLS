@@ -3034,6 +3034,9 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              checked_stats.row_refactor_defer_value_scatter_run_count !=
                checked_expect_defer ||
              checked_stats.row_refactor_work_ready_queue_run_count != 1 ||
+             checked_stats.row_refactor_last_private_ready_groups <= 0 ||
+             checked_stats.row_refactor_private_ready_group_count <
+               checked_stats.row_refactor_last_private_ready_groups ||
              checked_stats.row_refactor_ready_queue_workspace_groups <
                checked_stats.row_refactor_group_count)) {
     fprintf(stderr,
@@ -3043,6 +3046,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             ", done_bitmap=%" PRId64
             ", defer_scatter=%" PRId64
             ", work_queue=%" PRId64
+            ", private_ready=%" PRId64 "/%" PRId64
             ", queue_workspace=%" PRId64 "\n",
             checked_stats.row_refactor_last_run,
             checked_stats.row_refactor_last_checked,
@@ -3059,6 +3063,8 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             checked_stats.row_refactor_done_bitmap_run_count,
             checked_stats.row_refactor_defer_value_scatter_run_count,
             checked_stats.row_refactor_work_ready_queue_run_count,
+            checked_stats.row_refactor_last_private_ready_groups,
+            checked_stats.row_refactor_private_ready_group_count,
             checked_stats.row_refactor_ready_queue_workspace_groups);
     ok = 0;
   }
@@ -3076,12 +3082,13 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              checked_only_refactor_stats.row_refactor_last_done_bitmap != 0 ||
              checked_only_refactor_stats.row_refactor_last_defer_value_scatter != 0 ||
              checked_only_refactor_stats.row_refactor_last_work_ready_queue != 0 ||
+             checked_only_refactor_stats.row_refactor_last_private_ready_groups != 0 ||
              checked_only_refactor_stats.row_refactor_ready_queue_workspace_groups !=
                checked_stats.row_refactor_ready_queue_workspace_groups ||
              checked_only_refactor_stats.row_refactor_run_count != 1 ||
              checked_only_refactor_stats.row_refactor_checked_run_count != 1)) {
     fprintf(stderr,
-            "checked-only refactor incorrectly used row path: last=%d/%d/%d/%d/%d"
+            "checked-only refactor incorrectly used row path: last=%d/%d/%d/%d/%d/%" PRId64
             ", workspace=%" PRId64
             ", runs=%" PRId64 ", checked=%" PRId64 "\n",
             checked_only_refactor_stats.row_refactor_last_run,
@@ -3089,6 +3096,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             checked_only_refactor_stats.row_refactor_last_done_bitmap,
             checked_only_refactor_stats.row_refactor_last_defer_value_scatter,
             checked_only_refactor_stats.row_refactor_last_work_ready_queue,
+            checked_only_refactor_stats.row_refactor_last_private_ready_groups,
             checked_only_refactor_stats.row_refactor_ready_queue_workspace_groups,
             checked_only_refactor_stats.row_refactor_run_count,
             checked_only_refactor_stats.row_refactor_checked_run_count);
@@ -3174,6 +3182,9 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_lazy_value_scatter_run_count != 1 ||
              stats.row_refactor_row_solve_run_count != 1 ||
              stats.row_refactor_work_ready_queue_run_count != 2 ||
+             stats.row_refactor_last_private_ready_groups <= 0 ||
+             stats.row_refactor_private_ready_group_count <
+               stats.row_refactor_last_private_ready_groups ||
              stats.row_refactor_ready_queue_workspace_groups <
                stats.row_refactor_group_count)) {
     fprintf(stderr,
@@ -3190,6 +3201,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             ", defer_scatter=%" PRId64
             ", dirty/lazy/row_solve=%d/%d/%" PRId64 "/%d/%" PRId64
             ", work_queue=%" PRId64
+            ", private_ready=%" PRId64 "/%" PRId64
             ", queue_workspace=%" PRId64 "\n",
             stats.row_refactor_group_count,
             stats.row_refactor_group_level_count,
@@ -3223,6 +3235,8 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             stats.row_refactor_last_row_solve,
             stats.row_refactor_row_solve_run_count,
             stats.row_refactor_work_ready_queue_run_count,
+            stats.row_refactor_last_private_ready_groups,
+            stats.row_refactor_private_ready_group_count,
             stats.row_refactor_ready_queue_workspace_groups);
     ok = 0;
   }
@@ -3360,6 +3374,9 @@ static int test_parallel_row_refactor_full_ready_queue(void) {
                stats.row_refactor_group_pipeline_groups ||
              stats.row_refactor_last_work_ready_queue != 1 ||
              stats.row_refactor_work_ready_queue_run_count != 1 ||
+             stats.row_refactor_last_private_ready_groups <= 0 ||
+             stats.row_refactor_private_ready_group_count <
+               stats.row_refactor_last_private_ready_groups ||
              stats.row_refactor_last_local_ready_groups <= 0 ||
              stats.row_refactor_local_ready_group_count <
                stats.row_refactor_last_local_ready_groups)) {
@@ -3369,6 +3386,7 @@ static int test_parallel_row_refactor_full_ready_queue(void) {
             ", pipe=%" PRId64 "/%" PRId64
             ", last=%d/%d/%d, ready=%" PRId64 "/%" PRId64
             ", work_queue=%d/%" PRId64
+            ", private_ready=%" PRId64 "/%" PRId64
             ", local_ready=%" PRId64 "/%" PRId64 "\n",
             stats.row_refactor_group_level_max_width,
             stats.row_refactor_group_count,
@@ -3382,6 +3400,8 @@ static int test_parallel_row_refactor_full_ready_queue(void) {
             stats.row_refactor_ready_queue_group_count,
             stats.row_refactor_last_work_ready_queue,
             stats.row_refactor_work_ready_queue_run_count,
+            stats.row_refactor_last_private_ready_groups,
+            stats.row_refactor_private_ready_group_count,
             stats.row_refactor_last_local_ready_groups,
             stats.row_refactor_local_ready_group_count);
     ok = 0;

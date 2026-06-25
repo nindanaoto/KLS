@@ -3050,6 +3050,14 @@ queue active" from actual worker-local continuation use. Focused probes showed
 the path is heavily exercised: `G2_circuit` reported 64,962 local continuations
 in the last row-refactor run and `rajat24` reported 212,824.
 
+Cluster-prefix row tails now use the same private first-wave treatment when
+the initially ready tail groups can be copied into per-thread queues, leaving
+later successor releases on the shared/local pipeline queue. This is still a
+row-group DAG scheduler, not SubtreeLU's full separator-tree partitioner, but
+it removes avoidable shared-queue traffic from the private/pipeline boundary.
+Benchmark JSON reports `row_refactor_last_private_ready_groups` and
+`row_refactor_private_ready_group_count` for this path.
+
 A follow-up attempt to replace the private-root cursor with static strided
 root ownership was tested and rejected. Although this looked closer to a
 SubtreeLU private-queue shape, it removed dynamic balancing from the first wave

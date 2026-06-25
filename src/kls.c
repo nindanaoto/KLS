@@ -145,6 +145,7 @@ struct kls_solver {
   int row_refactor_last_work_ready_queue;
   int row_refactor_last_compact_dense_panel;
   UF_long row_refactor_last_local_ready_groups;
+  UF_long row_refactor_last_private_ready_groups;
   UF_long row_refactor_run_count;
   UF_long row_refactor_checked_run_count;
   UF_long row_refactor_parallel_run_count;
@@ -207,6 +208,7 @@ struct kls_solver {
   UF_long row_refactor_work_ready_queue_run_count;
   UF_long row_refactor_compact_dense_panel_count;
   UF_long row_refactor_local_ready_group_count;
+  UF_long row_refactor_private_ready_group_count;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_segment_rows;
   UF_long row_refactor_segment_max_width;
@@ -861,6 +863,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_last_work_ready_queue = 0;
   solver->row_refactor_last_compact_dense_panel = 0;
   solver->row_refactor_last_local_ready_groups = 0;
+  solver->row_refactor_last_private_ready_groups = 0;
   solver->row_refactor_run_count = 0;
   solver->row_refactor_checked_run_count = 0;
   solver->row_refactor_parallel_run_count = 0;
@@ -887,6 +890,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_work_ready_queue_run_count = 0;
   solver->row_refactor_compact_dense_panel_count = 0;
   solver->row_refactor_local_ready_group_count = 0;
+  solver->row_refactor_private_ready_group_count = 0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_segment_rows = 0;
   solver->row_refactor_segment_max_width = 0;
@@ -929,6 +933,7 @@ typedef struct {
   int last_work_ready_queue;
   int last_compact_dense_panel;
   UF_long last_local_ready_groups;
+  UF_long last_private_ready_groups;
   UF_long run_count;
   UF_long checked_run_count;
   UF_long parallel_run_count;
@@ -952,6 +957,7 @@ typedef struct {
   UF_long work_ready_queue_run_count;
   UF_long compact_dense_panel_count;
   UF_long local_ready_group_count;
+  UF_long private_ready_group_count;
   UF_long segment_count;
   UF_long segment_rows;
   UF_long segment_max_width;
@@ -998,6 +1004,8 @@ static void kls_save_row_refactor_diagnostics(
   diag->last_compact_dense_panel =
     solver->row_refactor_last_compact_dense_panel;
   diag->last_local_ready_groups = solver->row_refactor_last_local_ready_groups;
+  diag->last_private_ready_groups =
+    solver->row_refactor_last_private_ready_groups;
   diag->run_count = solver->row_refactor_run_count;
   diag->checked_run_count = solver->row_refactor_checked_run_count;
   diag->parallel_run_count = solver->row_refactor_parallel_run_count;
@@ -1032,6 +1040,8 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_compact_dense_panel_count;
   diag->local_ready_group_count =
     solver->row_refactor_local_ready_group_count;
+  diag->private_ready_group_count =
+    solver->row_refactor_private_ready_group_count;
   diag->segment_count = solver->row_refactor_segment_count;
   diag->segment_rows = solver->row_refactor_segment_rows;
   diag->segment_max_width = solver->row_refactor_segment_max_width;
@@ -1091,6 +1101,8 @@ static void kls_restore_row_refactor_diagnostics(
     diag->last_compact_dense_panel;
   solver->row_refactor_last_local_ready_groups =
     diag->last_local_ready_groups;
+  solver->row_refactor_last_private_ready_groups =
+    diag->last_private_ready_groups;
   solver->row_refactor_run_count = diag->run_count;
   solver->row_refactor_checked_run_count = diag->checked_run_count;
   solver->row_refactor_parallel_run_count = diag->parallel_run_count;
@@ -1129,6 +1141,8 @@ static void kls_restore_row_refactor_diagnostics(
     diag->compact_dense_panel_count;
   solver->row_refactor_local_ready_group_count =
     diag->local_ready_group_count;
+  solver->row_refactor_private_ready_group_count =
+    diag->private_ready_group_count;
   solver->row_refactor_segment_count = diag->segment_count;
   solver->row_refactor_segment_rows = diag->segment_rows;
   solver->row_refactor_segment_max_width = diag->segment_max_width;
@@ -1431,6 +1445,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_done_bitmap = 0;
   solver->row_refactor_last_work_ready_queue = 0;
   solver->row_refactor_last_local_ready_groups = 0;
+  solver->row_refactor_last_private_ready_groups = 0;
   solver->row_refactor_last_compact_dense_panel = 0;
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
@@ -1443,6 +1458,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_done_bitmap = 0;
   solver->stats.row_refactor_last_work_ready_queue = 0;
   solver->stats.row_refactor_last_local_ready_groups = 0;
+  solver->stats.row_refactor_last_private_ready_groups = 0;
   solver->stats.row_refactor_last_compact_dense_panel = 0;
   solver->stats.row_refactor_last_compact_dense_panel_persistent = 0;
   solver->stats.row_refactor_last_defer_value_scatter = 0;
@@ -1465,6 +1481,7 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_compact_dense_panel = 0;
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_local_ready_groups = 0;
+  solver->row_refactor_last_private_ready_groups = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_run_count++;
   if (check_pivots) {
@@ -1522,6 +1539,15 @@ static void kls_record_row_refactor_local_ready_groups(kls_solver *solver,
   }
   solver->row_refactor_last_local_ready_groups = group_count;
   solver->row_refactor_local_ready_group_count += group_count;
+}
+
+static void kls_record_row_refactor_private_ready_groups(kls_solver *solver,
+                                                         UF_long group_count) {
+  if (solver == NULL || group_count == 0u) {
+    return;
+  }
+  solver->row_refactor_last_private_ready_groups = group_count;
+  solver->row_refactor_private_ready_group_count += group_count;
 }
 
 static void kls_record_row_refactor_defer_value_scatter_run(
@@ -8420,6 +8446,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_last_local_ready_groups;
   solver->stats.row_refactor_local_ready_group_count =
     (int64_t)solver->row_refactor_local_ready_group_count;
+  solver->stats.row_refactor_last_private_ready_groups =
+    (int64_t)solver->row_refactor_last_private_ready_groups;
+  solver->stats.row_refactor_private_ready_group_count =
+    (int64_t)solver->row_refactor_private_ready_group_count;
   solver->stats.row_refactor_last_done_bitmap =
     solver->row_refactor_last_done_bitmap;
   solver->stats.row_refactor_done_bitmap_run_count =
@@ -18226,6 +18256,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   const UF_long *row_private_groups = NULL;
   UF_long *row_owned_private_groups = NULL;
   UF_long *row_private_thread_ptr = NULL;
+  UF_long row_private_initial_count = 0;
   UF_long row_ready_tail_count = 0;
   UF_long row_initial_ready_count = 0;
   /* Prefer consuming the whole retained row-group DAG through the ready queue.
@@ -18283,6 +18314,21 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
         solver, row_private_groups, row_initial_ready_count, thread_count,
         &row_owned_private_groups, &row_private_thread_ptr)) {
     row_private_groups = row_owned_private_groups;
+  }
+  if (use_row_ready_queue && row_private_groups == NULL &&
+      row_ready_groups != NULL && row_ready_slots != NULL &&
+      row_initial_ready_count > 0u &&
+      kls_build_row_refactor_private_thread_queues(
+        solver, row_ready_groups, row_initial_ready_count, thread_count,
+        &row_owned_private_groups, &row_private_thread_ptr)) {
+    row_private_groups = row_owned_private_groups;
+    for (UF_long pos = 0; pos < row_initial_ready_count; ++pos) {
+      atomic_store_explicit(&row_ready_slots[pos], 0u,
+                            memory_order_relaxed);
+    }
+  }
+  if (use_row_ready_queue && row_private_groups != NULL) {
+    row_private_initial_count = row_initial_ready_count;
   }
   atomic_uint *pipeline_done = NULL;
   unsigned int pipeline_generation = 0;
@@ -18410,6 +18456,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   if (use_row_ready_queue) {
     kls_record_row_refactor_ready_queue_run(solver, row_ready_tail_count);
     kls_record_row_refactor_work_ready_queue_run(solver);
+    kls_record_row_refactor_private_ready_groups(
+      solver, row_private_initial_count);
   }
   if (pipeline_done != NULL) {
     kls_record_row_refactor_done_bitmap_run(solver);
