@@ -1922,6 +1922,113 @@ static int test_btf_singleton_row_refactor_pattern(void) {
   return ok;
 }
 
+static int test_btf_singleton_row_refactor_batch_groups(void) {
+  const int32_t ap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+  const int32_t ai[] = {0, 1, 2, 3, 4, 5, 6, 7};
+  const double ax0[] = {2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
+  const double ax1[] = {3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
+  const double expected[] = {1.0, -2.0, 0.5, 3.0,
+                             -1.5, 2.5, -0.25, 4.0};
+  double b[8] = {0.0};
+  double x[8] = {0.0};
+
+  for (int32_t i = 0; i < 8; ++i) {
+    b[i] = ax1[i] * expected[i];
+  }
+
+  const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 1;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create btf singleton batch")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 8, ap, ai,
+                                        0, &options),
+                        "analyze btf singleton batch")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor btf singleton batch base")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "btf singleton batch refactor")) {
+    ok = 0;
+  }
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats btf singleton batch")) {
+    ok = 0;
+  }
+  if (ok && (stats.nblocks < 8 ||
+             stats.row_refactor_last_run != 1 ||
+             stats.row_refactor_group_count != 1 ||
+             stats.row_refactor_segment_count != 0 ||
+             stats.row_refactor_values_dirty != 1)) {
+    fprintf(stderr,
+            "unexpected btf singleton batch stats: nblocks=%" PRId64
+            ", last=%d, groups=%" PRId64 ", segments=%" PRId64
+            ", dirty=%d\n",
+            stats.nblocks,
+            stats.row_refactor_last_run,
+            stats.row_refactor_group_count,
+            stats.row_refactor_segment_count,
+            stats.row_refactor_values_dirty);
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve btf singleton batch")) {
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < 8; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected btf singleton batch solution at %d:"
+              " %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  kls_destroy(solver);
+  free(saved_env);
+  return ok;
+}
+
 static int test_fast_factor_restart_after_prior_pivot(void) {
   const int32_t ap[] = {0, 3, 6, 9};
   const int32_t ai[] = {0, 1, 2, 0, 1, 2, 0, 1, 2};
@@ -4071,6 +4178,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_btf_singleton_row_refactor_pattern()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_btf_singleton_row_refactor_batch_groups()) {
     return EXIT_FAILURE;
   }
   if (!test_fast_factor_restart_after_prior_pivot()) {

@@ -276,13 +276,17 @@ was a KLU-storage boundary issue: singleton BTF blocks have no per-column
 `L`/`U` pointer slices in the retained refactor cache, so row-pattern builders
 must treat their in-block lengths as zero instead of reading raw numeric
 length arrays. With that fixed, forced row refactor builds and runs on
-`ASIC_100ks` (`row_refactor_group_count=83090`) and `onetone2`
-(`row_refactor_group_count=27994`). It is still slower than the current
+the sampled slow rows. The row task builder now also coalesces long runs of
+same-level independent scalar rows into bounded row-batch tasks, preserving
+existing U-chain row segments and small-width parallel ready-queue cases. That
+reduces forced-row task count on `ASIC_100ks` from 83090 groups to 54297, and
+on `onetone2` from 27994 groups to 24409. It is still slower than the current
 default EGraph/column path on both sampled rows, and the auto work gate
 correctly leaves it off because row-group work exceeds exact EGraph dependency
-work. This confirms the row/up-looking scaffold now covers the BTF structure
-that blocked it before, but it does not change the main paper diagnosis: the
-gap needs a production row/segment numeric engine, not a flag flip.
+work. This confirms the row/up-looking scaffold now covers and coarsens the
+BTF structures that blocked it before, but it does not change the main paper
+diagnosis: the gap needs a production row/segment numeric engine, not a flag
+flip.
 
 The fragmented-BTF scale policy improved the large recon artifact geomean over
 the preceding EGraph build from 30.58s to 27.37s on the five completed common

@@ -31,6 +31,8 @@
 #include <time.h>
 
 #define KLS_KLU_EMPTY ((UF_long)-1)
+#define KLS_ROW_REFACTOR_BATCH_MIN_ROWS 8u
+#define KLS_ROW_REFACTOR_BATCH_MAX_ROWS 16u
 #define KLS_ROW_REFACTOR_DENSE_MIN_WORK 1024.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY 8.0
@@ -54,7 +56,8 @@ typedef enum kls_input_format {
 typedef enum kls_row_refactor_group_kind {
   KLS_ROW_REFACTOR_GROUP_SINGLE = 0,
   KLS_ROW_REFACTOR_GROUP_GENERIC = 1,
-  KLS_ROW_REFACTOR_GROUP_DENSE = 2
+  KLS_ROW_REFACTOR_GROUP_DENSE = 2,
+  KLS_ROW_REFACTOR_GROUP_BATCH = 3
 } kls_row_refactor_group_kind;
 
 struct kls_solver {
@@ -13606,6 +13609,71 @@ static int kls_build_row_refactor_group_successors(
   return 1;
 }
 
+static int kls_row_refactor_u_row_extends_next(const UF_long *u_ptr,
+                                               const UF_long *u_cols,
+                                               UF_long n,
+                                               UF_long prev,
+                                               UF_long curr) {
+  if (u_ptr == NULL || u_cols == NULL || prev >= n || curr >= n ||
+      prev + 1u != curr) {
+    return 0;
+  }
+  const UF_long prev_begin = u_ptr[prev];
+  const UF_long prev_end = u_ptr[prev + 1u];
+  const UF_long curr_begin = u_ptr[curr];
+  const UF_long curr_end = u_ptr[curr + 1u];
+  if (prev_begin > prev_end || curr_begin > curr_end) {
+    return 0;
+  }
+  const UF_long prev_len = prev_end - prev_begin;
+  const UF_long curr_len = curr_end - curr_begin;
+  if (prev_len != curr_len + 1u || prev_len == 0u ||
+      u_cols[prev_begin] != curr) {
+    return 0;
+  }
+  return curr_len == 0u ||
+         memcmp(u_cols + prev_begin + 1u, u_cols + curr_begin,
+                (size_t)curr_len * sizeof(*u_cols)) == 0;
+}
+
+static int kls_row_refactor_row_depends_in_range(const UF_long *l_ptr,
+                                                 const UF_long *l_cols,
+                                                 UF_long row,
+                                                 UF_long begin,
+                                                 UF_long end) {
+  if (l_ptr == NULL || begin >= end) {
+    return 0;
+  }
+  const UF_long l_begin = l_ptr[row];
+  const UF_long l_end = l_ptr[row + 1u];
+  if (l_begin > l_end || (l_begin < l_end && l_cols == NULL)) {
+    return 1;
+  }
+  for (UF_long p = l_begin; p < l_end; ++p) {
+    const UF_long dep = l_cols[p];
+    if (dep >= begin && dep < end) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int kls_row_refactor_group_has_internal_deps(const UF_long *l_ptr,
+                                                    const UF_long *l_cols,
+                                                    UF_long begin,
+                                                    UF_long end) {
+  if (begin >= end) {
+    return 0;
+  }
+  for (UF_long row = begin; row < end; ++row) {
+    if (kls_row_refactor_row_depends_in_range(l_ptr, l_cols, row,
+                                              begin, row)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int kls_build_row_refactor_pattern(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->nblocks == 0u || solver->symbolic->R == NULL) {
@@ -13998,7 +14066,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     level_rows[write_pos[levels[i]]++] = i;
   }
   free(write_pos);
-  free(levels);
   UF_long max_width = 0;
   for (UF_long level = 0; level < level_count; ++level) {
     const UF_long width = level_ptr[level + 1u] - level_ptr[level];
@@ -14016,6 +14083,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   UF_long *group_ptr = n > 0u
     ? (UF_long *)malloc(((size_t)n + 1u) * sizeof(*group_ptr)) : NULL;
   if ((n > 0u && row_group == NULL) || (n > 0u && group_ptr == NULL)) {
+    free(levels);
     free(row_group);
     free(group_ptr);
     free_row_refactor_pattern(solver);
@@ -14026,29 +14094,36 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   while (row < n) {
     group_ptr[group_count] = row;
     UF_long end = row + 1u;
+    int segment = 0;
     while (end < n) {
-      const UF_long prev = end - 1u;
-      const UF_long prev_begin = u_ptr[prev];
-      const UF_long prev_end = u_ptr[prev + 1u];
-      const UF_long curr_begin = u_ptr[end];
-      const UF_long curr_end = u_ptr[end + 1u];
-      const UF_long prev_len = prev_end - prev_begin;
-      const UF_long curr_len = curr_end - curr_begin;
-      int extends = 0;
-      if (prev_len == curr_len + 1u &&
-          prev_len > 0u &&
-          u_cols[prev_begin] == end) {
-        if (curr_len == 0u ||
-            memcmp(u_cols + prev_begin + 1u,
-                   u_cols + curr_begin,
-                   (size_t)curr_len * sizeof(*u_cols)) == 0) {
-          extends = 1;
-        }
+      if (!kls_row_refactor_u_row_extends_next(u_ptr, u_cols, n,
+                                               end - 1u, end)) {
+        break;
       }
-      if (!extends) {
+      segment = 1;
+      end++;
+    }
+    /* Coarsen only long scalar runs that live on the same dependency level.
+       That trims ready-queue/task overhead without hiding useful small-width
+       parallelism or delaying low-level rows behind later dependencies. */
+    while (!segment && end < n &&
+           end - row < KLS_ROW_REFACTOR_BATCH_MAX_ROWS) {
+      if (levels[end] != levels[row]) {
+        break;
+      }
+      if (end + 1u < n &&
+          kls_row_refactor_u_row_extends_next(u_ptr, u_cols, n,
+                                              end, end + 1u)) {
+        break;
+      }
+      if (kls_row_refactor_row_depends_in_range(l_ptr, l_cols, end,
+                                                row, end)) {
         break;
       }
       end++;
+    }
+    if (!segment && end - row < KLS_ROW_REFACTOR_BATCH_MIN_ROWS) {
+      end = row + 1u;
     }
     for (UF_long i = row; i < end; ++i) {
       row_group[i] = group_count;
@@ -14057,6 +14132,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     row = end;
   }
   group_ptr[group_count] = n;
+  free(levels);
 
   UF_long *l_internal_ptr = n > 0u
     ? (UF_long *)calloc((size_t)n, sizeof(*l_internal_ptr)) : NULL;
@@ -14200,6 +14276,11 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     const UF_long row_end = group_ptr[g + 1u];
     const UF_long width = row_end - row_begin;
     if (width <= 1u) {
+      continue;
+    }
+    if (!kls_row_refactor_group_has_internal_deps(l_ptr, l_cols,
+                                                  row_begin, row_end)) {
+      group_kind[g] = KLS_ROW_REFACTOR_GROUP_BATCH;
       continue;
     }
     group_kind[g] = KLS_ROW_REFACTOR_GROUP_GENERIC;
@@ -17179,6 +17260,9 @@ static kls_row_refactor_group_kind kls_row_refactor_group_kind_for(
     if (kind == KLS_ROW_REFACTOR_GROUP_GENERIC) {
       return KLS_ROW_REFACTOR_GROUP_GENERIC;
     }
+    if (kind == KLS_ROW_REFACTOR_GROUP_BATCH) {
+      return KLS_ROW_REFACTOR_GROUP_BATCH;
+    }
   }
   if (solver != NULL && solver->row_refactor_group_dense != NULL &&
       group < solver->row_refactor_group_count &&
@@ -17268,6 +17352,16 @@ static int kls_parallel_row_refactor_process_group(
   if (group_kind == KLS_ROW_REFACTOR_GROUP_SINGLE) {
     return kls_parallel_row_refactor_process_row(worker, row_begin,
                                                 wait_for_dependencies);
+  }
+  if (group_kind == KLS_ROW_REFACTOR_GROUP_BATCH) {
+    for (UF_long row = row_begin; row < row_end; ++row) {
+      if (!kls_parallel_row_refactor_process_row(worker, row,
+                                                wait_for_dependencies)) {
+        return 0;
+      }
+      kls_egraph_refactor_mark_done(shared, row);
+    }
+    return 1;
   }
 
   trilinos_klu_l_numeric *numeric = solver->numeric;
