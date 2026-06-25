@@ -3461,10 +3461,15 @@ scratch panel cannot be allocated, and reports
 `row_refactor_last_compact_dense_panel` plus
 `row_refactor_compact_dense_panel_count`. A generated 48-by-48 dense
 unchecked smoke case asserts that the compact-panel path is selected and keeps a
-small residual. A checked pivot-reject trial was deliberately not retained:
-compact-panel execution did not yet preserve the checked prefix-repair
-semantics, so checked row refactors stay on the native direct row-mirror path.
-This keeps the implementation aligned with the paper diagnosis without
-introducing a CPU-specific or matrix-specific tuning rule: the large remaining
-item is still correct compact row-major numeric state with pivot-aware tail
-semantics.
+small residual.
+
+A follow-up fixed the checked compact-panel semantics instead of keeping checked
+dense groups gated to the native path. The failed trial showed that computing
+the whole dense panel before testing any checked pivot can touch suffix state
+that CKTSO-style prefix/tail repair expects to remain row-ordered. KLS now uses
+a row-ordered compact checked path: after gathering the panel it updates one
+row, publishes that row into the row-major mirrors, checks the pivot, and stops
+immediately on reject. The dense checked-prefix smoke case now asserts both the
+compact-panel marker and the tail repair residual. This is still not the full
+pipelined CKTSO tail executor, but it closes a concrete semantic gap for
+compact row-major segment updates with pivot-aware prefix repair.

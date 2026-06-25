@@ -404,11 +404,12 @@ re-deriving that slice from adjacent rows. Unchecked dense multi-row groups
 whose internal dense and shared-trailing update work is large enough first use a
 worker-local compact row-major panel before falling back to the direct
 row-mirror kernel; stats report `row_refactor_last_compact_dense_panel` and
-`row_refactor_compact_dense_panel_count`. Checked pivot-probe row refactors
-intentionally stay on the native direct row-mirror path until compact-panel
-prefix-reject semantics are proven. For generic-only row patterns, pipeline
-groups also retain their external dependency rows so the scheduler can wait on
-them once before running the group kernel; stats report
+`row_refactor_compact_dense_panel_count`. Checked pivot-probe row refactors use
+the same compact panel only through a row-ordered update/check/publish loop, so
+a rejected pivot leaves the same prefix-visible row-major state as the native
+direct row-mirror kernel. For generic-only row patterns, pipeline groups also
+retain their external dependency rows so the scheduler can wait on them once
+before running the group kernel; stats report
 `row_refactor_group_cluster_levels`, `row_refactor_group_pipeline_groups`,
 `row_refactor_group_pipeline_rows`, and
 `row_refactor_group_pipeline_work`. The same row-group metadata now also retains
