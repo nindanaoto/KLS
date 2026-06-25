@@ -60,6 +60,21 @@ typedef enum kls_row_refactor_group_kind {
   KLS_ROW_REFACTOR_GROUP_BATCH = 3
 } kls_row_refactor_group_kind;
 
+typedef struct kls_separator_analysis {
+  UF_long n;
+  UF_long thread_count;
+  UF_long component_count;
+  UF_long private_component_count;
+  UF_long pipeline_component_count;
+  UF_long private_rows;
+  UF_long pipeline_rows;
+  UF_long private_max_rows;
+  UF_long pipeline_max_rows;
+  UF_long *component_ptr;
+  unsigned char *component_kind;
+  unsigned int *order_component;
+} kls_separator_analysis;
+
 struct kls_solver {
   UF_long n;
   UF_long nnz;
@@ -295,6 +310,7 @@ struct kls_solver {
   UF_long kls_first_last_dynamic_column_pivots;
   UF_long kls_first_dynamic_column_pivot_count;
   int factor_etree_stats_valid;
+  kls_separator_analysis separator;
 };
 
 typedef struct kls_pattern_candidate {
@@ -309,6 +325,7 @@ typedef struct kls_pattern_candidate {
   trilinos_klu_l_symbolic *symbolic;
   kls_ordering selected_ordering;
   double score;
+  kls_separator_analysis separator;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -567,7 +584,8 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        trilinos_klu_l_symbolic **symbolic_out,
                                        trilinos_klu_l_common *common_out,
                                        kls_ordering *selected_ordering_out,
-                                       double *score_out);
+                                       double *score_out,
+                                       kls_separator_analysis *separator_out);
 static void free_candidate(kls_pattern_candidate *candidate);
 static int transpose_candidate(const kls_pattern_candidate *source,
                                kls_orientation orientation,
@@ -596,6 +614,60 @@ static void kls_klu_get_pointer(double *lu,
   *indices_out = (UF_long *)base;
   *values_out = (double *)(base + kls_klu_units_for_indices(length));
   *length_out = length;
+}
+
+static void kls_separator_analysis_clear(kls_separator_analysis *separator) {
+  if (separator == NULL) {
+    return;
+  }
+  free(separator->component_ptr);
+  free(separator->component_kind);
+  free(separator->order_component);
+  memset(separator, 0, sizeof(*separator));
+}
+
+static void kls_separator_analysis_move(kls_separator_analysis *dst,
+                                        kls_separator_analysis *src) {
+  if (src == NULL || dst == src) {
+    return;
+  }
+  if (dst == NULL) {
+    kls_separator_analysis_clear(src);
+    return;
+  }
+  kls_separator_analysis_clear(dst);
+  *dst = *src;
+  memset(src, 0, sizeof(*src));
+}
+
+static void kls_fill_separator_stats(kls_stats *stats,
+                                     const kls_separator_analysis *separator) {
+  if (stats == NULL) {
+    return;
+  }
+  if (separator == NULL) {
+    stats->separator_analyzed_rows = 0;
+    stats->separator_thread_count = 0;
+    stats->separator_component_count = 0;
+    stats->separator_private_components = 0;
+    stats->separator_pipeline_components = 0;
+    stats->separator_private_rows = 0;
+    stats->separator_pipeline_rows = 0;
+    stats->separator_private_max_rows = 0;
+    stats->separator_pipeline_max_rows = 0;
+    return;
+  }
+  stats->separator_analyzed_rows = (int64_t)separator->n;
+  stats->separator_thread_count = (int64_t)separator->thread_count;
+  stats->separator_component_count = (int64_t)separator->component_count;
+  stats->separator_private_components =
+    (int64_t)separator->private_component_count;
+  stats->separator_pipeline_components =
+    (int64_t)separator->pipeline_component_count;
+  stats->separator_private_rows = (int64_t)separator->private_rows;
+  stats->separator_pipeline_rows = (int64_t)separator->pipeline_rows;
+  stats->separator_private_max_rows = (int64_t)separator->private_max_rows;
+  stats->separator_pipeline_max_rows = (int64_t)separator->pipeline_max_rows;
 }
 
 static inline void kls_scatter_subtract(double *restrict x,
@@ -2389,6 +2461,7 @@ static void free_symbolic(kls_solver *solver) {
     trilinos_klu_l_free_symbolic(&solver->symbolic, &solver->common);
     solver->symbolic = NULL;
   }
+  kls_separator_analysis_clear(&solver->separator);
   kls_invalidate_factor_etree_stats(solver);
 }
 
@@ -3484,7 +3557,9 @@ static int apply_options_to_common(trilinos_klu_l_common *common, const kls_opti
 
 #ifdef KLS_HAVE_METIS
 typedef struct kls_metis_order_context {
+  UF_long n;
   idx_t npes;
+  kls_separator_analysis *separator;
 } kls_metis_order_context;
 
 static int compare_idx_t(const void *a, const void *b) {
@@ -3495,6 +3570,178 @@ static int compare_idx_t(const void *a, const void *b) {
 
 static int metis_size_ok(UF_long n, idx_t slots_per_entry) {
   return n >= 0 && (uint64_t)n <= (uint64_t)(SIZE_MAX / (size_t)slots_per_entry);
+}
+
+static int kls_metis_append_separator_component(
+  idx_t npes,
+  idx_t cpos,
+  const idx_t *sizes,
+  UF_long *component_ptr,
+  unsigned char *component_kind,
+  UF_long *component_pos,
+  UF_long *private_components,
+  UF_long *pipeline_components,
+  UF_long *private_rows,
+  UF_long *pipeline_rows,
+  UF_long *private_max_rows,
+  UF_long *pipeline_max_rows) {
+  if (npes <= 0 || cpos < 0 || sizes == NULL || component_ptr == NULL ||
+      component_kind == NULL || component_pos == NULL ||
+      private_components == NULL || pipeline_components == NULL ||
+      private_rows == NULL || pipeline_rows == NULL ||
+      private_max_rows == NULL || pipeline_max_rows == NULL) {
+    return 0;
+  }
+  const idx_t component_count = 2 * npes - 1;
+  if (cpos >= component_count) {
+    return 0;
+  }
+
+  if (cpos < npes - 1) {
+    if (!kls_metis_append_separator_component(
+          npes, 2 * cpos + 2, sizes, component_ptr, component_kind,
+          component_pos, private_components, pipeline_components,
+          private_rows, pipeline_rows, private_max_rows,
+          pipeline_max_rows) ||
+        !kls_metis_append_separator_component(
+          npes, 2 * cpos + 1, sizes, component_ptr, component_kind,
+          component_pos, private_components, pipeline_components,
+          private_rows, pipeline_rows, private_max_rows,
+          pipeline_max_rows)) {
+      return 0;
+    }
+  }
+
+  const idx_t size_index = component_count - 1 - cpos;
+  if (size_index < 0 || size_index >= component_count ||
+      sizes[size_index] < 0) {
+    return 0;
+  }
+  const UF_long size = (UF_long)sizes[size_index];
+  const UF_long pos = *component_pos;
+  if (pos >= (UF_long)component_count ||
+      component_ptr[pos] > UF_long_max - size) {
+    return 0;
+  }
+  component_ptr[pos + 1u] = component_ptr[pos] + size;
+  if (cpos >= npes - 1) {
+    component_kind[pos] = 0u;
+    (*private_components)++;
+    *private_rows += size;
+    if (size > *private_max_rows) {
+      *private_max_rows = size;
+    }
+  } else {
+    component_kind[pos] = 1u;
+    (*pipeline_components)++;
+    *pipeline_rows += size;
+    if (size > *pipeline_max_rows) {
+      *pipeline_max_rows = size;
+    }
+  }
+  *component_pos = pos + 1u;
+  return 1;
+}
+
+static int kls_build_metis_separator_analysis(
+  UF_long n,
+  idx_t npes,
+  const idx_t *sizes,
+  const idx_t *metis_iperm,
+  const UF_long *final_perm,
+  kls_separator_analysis *separator_out) {
+  if (separator_out == NULL) {
+    return 0;
+  }
+  kls_separator_analysis_clear(separator_out);
+  if (n == 0u || npes <= 1 || sizes == NULL || metis_iperm == NULL ||
+      final_perm == NULL || (uint64_t)(2 * npes - 1) > (uint64_t)UINT_MAX) {
+    return 0;
+  }
+  const UF_long component_count = (UF_long)(2 * npes - 1);
+  if (component_count > (UF_long)(SIZE_MAX / sizeof(UF_long)) - 1u ||
+      n > (UF_long)(SIZE_MAX / sizeof(unsigned int))) {
+    return 0;
+  }
+
+  UF_long *component_ptr =
+    (UF_long *)calloc((size_t)component_count + 1u, sizeof(*component_ptr));
+  unsigned char *component_kind =
+    (unsigned char *)calloc((size_t)component_count, sizeof(*component_kind));
+  unsigned int *order_component =
+    (unsigned int *)malloc((size_t)n * sizeof(*order_component));
+  unsigned int *metis_pos_component =
+    (unsigned int *)malloc((size_t)n * sizeof(*metis_pos_component));
+  if (component_ptr == NULL || component_kind == NULL ||
+      order_component == NULL || metis_pos_component == NULL) {
+    free(component_ptr);
+    free(component_kind);
+    free(order_component);
+    free(metis_pos_component);
+    return 0;
+  }
+
+  UF_long component_pos = 0;
+  UF_long private_components = 0;
+  UF_long pipeline_components = 0;
+  UF_long private_rows = 0;
+  UF_long pipeline_rows = 0;
+  UF_long private_max_rows = 0;
+  UF_long pipeline_max_rows = 0;
+  if (!kls_metis_append_separator_component(
+        npes, 0, sizes, component_ptr, component_kind, &component_pos,
+        &private_components, &pipeline_components, &private_rows,
+        &pipeline_rows, &private_max_rows, &pipeline_max_rows) ||
+      component_pos != component_count || component_ptr[component_count] != n) {
+    free(component_ptr);
+    free(component_kind);
+    free(order_component);
+    free(metis_pos_component);
+    return 0;
+  }
+
+  for (UF_long component = 0; component < component_count; ++component) {
+    const UF_long begin = component_ptr[component];
+    const UF_long end = component_ptr[component + 1u];
+    if (begin > end || end > n) {
+      free(component_ptr);
+      free(component_kind);
+      free(order_component);
+      free(metis_pos_component);
+      return 0;
+    }
+    for (UF_long pos = begin; pos < end; ++pos) {
+      metis_pos_component[pos] = (unsigned int)component;
+    }
+  }
+
+  for (UF_long pos = 0; pos < n; ++pos) {
+    const UF_long vertex = final_perm[pos];
+    if (vertex >= n || metis_iperm[vertex] < 0 ||
+        (uint64_t)metis_iperm[vertex] >= (uint64_t)n) {
+      free(component_ptr);
+      free(component_kind);
+      free(order_component);
+      free(metis_pos_component);
+      return 0;
+    }
+    order_component[pos] = metis_pos_component[metis_iperm[vertex]];
+  }
+  free(metis_pos_component);
+
+  separator_out->n = n;
+  separator_out->thread_count = (UF_long)npes;
+  separator_out->component_count = component_count;
+  separator_out->private_component_count = private_components;
+  separator_out->pipeline_component_count = pipeline_components;
+  separator_out->private_rows = private_rows;
+  separator_out->pipeline_rows = pipeline_rows;
+  separator_out->private_max_rows = private_max_rows;
+  separator_out->pipeline_max_rows = pipeline_max_rows;
+  separator_out->component_ptr = component_ptr;
+  separator_out->component_kind = component_kind;
+  separator_out->order_component = order_component;
+  return 1;
 }
 
 static UF_long kls_metis_refine_with_camd(UF_long n,
@@ -3641,8 +3888,8 @@ static UF_long kls_metis_order(UF_long n,
   idx_t *adjncy = (idx_t *)malloc((size_t)edge_slots * sizeof(*adjncy));
   idx_t *metis_perm = (idx_t *)malloc(nsize * sizeof(*metis_perm));
   idx_t *metis_iperm = (idx_t *)malloc(nsize * sizeof(*metis_iperm));
-  const kls_metis_order_context *metis_context =
-    common != NULL ? (const kls_metis_order_context *)common->user_data : NULL;
+  kls_metis_order_context *metis_context =
+    common != NULL ? (kls_metis_order_context *)common->user_data : NULL;
   idx_t metis_ndp_npes =
     metis_context != NULL && metis_context->npes > 1 ? metis_context->npes : 0;
   if (n < 30000) {
@@ -3740,6 +3987,19 @@ static UF_long kls_metis_order(UF_long n,
       camd_lnz = (UF_long)-1;
     }
     order_lnz = camd_lnz;
+    if (metis_context != NULL && metis_context->separator != NULL &&
+        metis_ndp_npes > 1 && metis_ndp_sizes != NULL) {
+      kls_separator_analysis separator;
+      memset(&separator, 0, sizeof(separator));
+      if (kls_build_metis_separator_analysis(n, metis_ndp_npes,
+                                             metis_ndp_sizes, metis_iperm,
+                                             perm_out, &separator)) {
+        if (separator.n > metis_context->separator->n) {
+          kls_separator_analysis_move(metis_context->separator, &separator);
+        }
+        kls_separator_analysis_clear(&separator);
+      }
+    }
   } else if (common != NULL) {
     common->status = (metis_status == METIS_ERROR_MEMORY)
       ? TRILINOS_KLU_OUT_OF_MEMORY
@@ -3951,7 +4211,9 @@ static int analyze_with_ordering(UF_long n,
                                  const kls_options *options,
                                  kls_ordering ordering,
                                  trilinos_klu_l_symbolic **symbolic_out,
-                                 trilinos_klu_l_common *common_out) {
+                                 trilinos_klu_l_common *common_out,
+                                 kls_separator_analysis *separator_out) {
+  kls_separator_analysis_clear(separator_out);
   trilinos_klu_l_common common;
   int status = apply_options_to_common(&common, options);
   if (status != KLS_OK) {
@@ -3965,8 +4227,11 @@ static int analyze_with_ordering(UF_long n,
   } else if (ordering == KLS_ORDERING_METIS) {
 #ifdef KLS_HAVE_METIS
     kls_metis_order_context metis_context;
+    memset(&metis_context, 0, sizeof(metis_context));
+    metis_context.n = n;
     metis_context.npes =
       options != NULL && options->threads > 1 ? (idx_t)options->threads : 0;
+    metis_context.separator = separator_out;
     common.ordering = 3;
     common.user_order = kls_metis_order;
     common.user_data = &metis_context;
@@ -3992,6 +4257,7 @@ static int analyze_with_ordering(UF_long n,
     if (symbolic != NULL) {
       trilinos_klu_l_free_symbolic(&symbolic, &common);
     }
+    kls_separator_analysis_clear(separator_out);
     return KLS_ERR_ANALYZE_FAILED;
   }
 
@@ -4126,7 +4392,8 @@ static void maybe_retry_without_btf(UF_long n,
                                     trilinos_klu_l_symbolic **symbolic,
                                     trilinos_klu_l_common *common,
                                     double *score,
-                                    int allow_single_block) {
+                                    int allow_single_block,
+                                    kls_separator_analysis *separator_io) {
   if (options == NULL || !options->use_btf || n < 4000 || symbolic == NULL ||
       *symbolic == NULL || common == NULL || score == NULL) {
     return;
@@ -4153,8 +4420,11 @@ static void maybe_retry_without_btf(UF_long n,
   no_btf_options.use_btf = 0;
   trilinos_klu_l_symbolic *no_btf_symbolic = NULL;
   trilinos_klu_l_common no_btf_common;
+  kls_separator_analysis no_btf_separator;
+  memset(&no_btf_separator, 0, sizeof(no_btf_separator));
   int status = analyze_with_ordering(n, col_ptr, row_idx, &no_btf_options, ordering,
-                                     &no_btf_symbolic, &no_btf_common);
+                                     &no_btf_symbolic, &no_btf_common,
+                                     &no_btf_separator);
   if (status != KLS_OK) {
     return;
   }
@@ -4178,10 +4448,12 @@ static void maybe_retry_without_btf(UF_long n,
     *symbolic = no_btf_symbolic;
     *common = no_btf_common;
     *score = no_btf_score;
+    kls_separator_analysis_move(separator_io, &no_btf_separator);
     return;
   }
 
   trilinos_klu_l_free_symbolic(&no_btf_symbolic, &no_btf_common);
+  kls_separator_analysis_clear(&no_btf_separator);
 }
 
 #ifdef KLS_HAVE_METIS
@@ -4240,7 +4512,8 @@ static void maybe_promote_symbolic_ordering(
   trilinos_klu_l_common *best_common_io,
   kls_ordering *best_ordering_io,
   double *best_score_io,
-  double improvement_ratio) {
+  double improvement_ratio,
+  kls_separator_analysis *best_separator_io) {
   if (symbolic_options == NULL || best_symbolic_io == NULL ||
       *best_symbolic_io == NULL || best_common_io == NULL ||
       best_ordering_io == NULL || best_score_io == NULL ||
@@ -4253,9 +4526,11 @@ static void maybe_promote_symbolic_ordering(
   trial_options.use_btf = (*best_symbolic_io)->do_btf ? 1 : 0;
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_common trial_common;
+  kls_separator_analysis trial_separator;
+  memset(&trial_separator, 0, sizeof(trial_separator));
   int status = analyze_with_ordering(n, col_ptr, row_idx, &trial_options,
                                      trial_ordering, &trial_symbolic,
-                                     &trial_common);
+                                     &trial_common, &trial_separator);
   if (status != KLS_OK) {
     return;
   }
@@ -4263,7 +4538,8 @@ static void maybe_promote_symbolic_ordering(
   double trial_score = symbolic_score(trial_symbolic);
   maybe_retry_without_btf(n, col_ptr, row_idx, &trial_options,
                           trial_ordering, &trial_symbolic,
-                          &trial_common, &trial_score, 0);
+                          &trial_common, &trial_score, 0,
+                          &trial_separator);
   if (isfinite(trial_score) &&
       trial_score <= improvement_ratio * (*best_score_io)) {
     trilinos_klu_l_free_symbolic(best_symbolic_io, best_common_io);
@@ -4271,10 +4547,12 @@ static void maybe_promote_symbolic_ordering(
     *best_common_io = trial_common;
     *best_ordering_io = trial_ordering;
     *best_score_io = trial_score;
+    kls_separator_analysis_move(best_separator_io, &trial_separator);
     return;
   }
 
   trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
+  kls_separator_analysis_clear(&trial_separator);
 }
 #endif
 
@@ -6585,6 +6863,8 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_numeric *trial_numeric = NULL;
   trilinos_klu_l_common trial_common;
+  kls_separator_analysis trial_separator;
+  memset(&trial_separator, 0, sizeof(trial_separator));
   (void)trilinos_klu_l_defaults(&trial_common);
   int accepted = 0;
 
@@ -6615,7 +6895,7 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   status = choose_symbolic_for_pattern(solver->n, trial_col_ptr, trial_row_idx,
                                        &trial_options, &trial_symbolic,
                                        &trial_common, &trial_ordering,
-                                       &trial_score);
+                                       &trial_score, &trial_separator);
   if (status != KLS_OK) {
     goto done;
   }
@@ -6671,6 +6951,7 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   solver->exact_matching_selected = 1;
   solver->spral_matching_selected = 1;
   solver->symbolic = trial_symbolic;
+  kls_separator_analysis_move(&solver->separator, &trial_separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
   solver->common = trial_common;
@@ -6710,6 +6991,7 @@ done:
     if (trial_symbolic != NULL) {
       trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
     }
+    kls_separator_analysis_clear(&trial_separator);
     free(row_perm);
     free(row_scale);
     free(col_scale);
@@ -6952,7 +7234,8 @@ static int maybe_refine_pre_static_with_metis(
   trilinos_klu_l_numeric **trial_numeric_io,
   trilinos_klu_l_common *trial_common_io,
   kls_ordering *trial_ordering_io,
-  double *trial_score_io) {
+  double *trial_score_io,
+  kls_separator_analysis *trial_separator_io) {
   if (trial_col_ptr == NULL || trial_row_idx == NULL ||
       trial_values == NULL || trial_options == NULL ||
       trial_symbolic_io == NULL || *trial_symbolic_io == NULL ||
@@ -6972,10 +7255,14 @@ static int maybe_refine_pre_static_with_metis(
 
   trilinos_klu_l_symbolic *metis_symbolic = NULL;
   trilinos_klu_l_common metis_common;
+  kls_separator_analysis metis_separator;
+  memset(&metis_separator, 0, sizeof(metis_separator));
   int status = analyze_with_ordering(n, trial_col_ptr, trial_row_idx,
                                      &metis_options, KLS_ORDERING_METIS,
-                                     &metis_symbolic, &metis_common);
+                                     &metis_symbolic, &metis_common,
+                                     &metis_separator);
   if (status != KLS_OK) {
+    kls_separator_analysis_clear(&metis_separator);
     return 0;
   }
 
@@ -6988,6 +7275,7 @@ static int maybe_refine_pre_static_with_metis(
       trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
     }
     trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+    kls_separator_analysis_clear(&metis_separator);
     return 0;
   }
 
@@ -6999,11 +7287,13 @@ static int maybe_refine_pre_static_with_metis(
        metis_common.rcond < 0.01 * trial_common_io->rcond)) {
     trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
     trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+    kls_separator_analysis_clear(&metis_separator);
     return 0;
   }
 
   trilinos_klu_l_free_numeric(trial_numeric_io, trial_common_io);
   trilinos_klu_l_free_symbolic(trial_symbolic_io, trial_common_io);
+  kls_separator_analysis_move(trial_separator_io, &metis_separator);
   *trial_symbolic_io = metis_symbolic;
   *trial_numeric_io = metis_numeric;
   *trial_common_io = metis_common;
@@ -7077,6 +7367,8 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_numeric *trial_numeric = NULL;
   trilinos_klu_l_common trial_common;
+  kls_separator_analysis trial_separator;
+  memset(&trial_separator, 0, sizeof(trial_separator));
   (void)trilinos_klu_l_defaults(&trial_common);
   int accepted = 0;
 
@@ -7173,7 +7465,7 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   status = choose_symbolic_for_pattern(solver->n, trial_col_ptr, trial_row_idx,
                                        &trial_options, &trial_symbolic,
                                        &trial_common, &trial_ordering,
-                                       &trial_score);
+                                       &trial_score, &trial_separator);
   if (status != KLS_OK) {
     goto done;
   }
@@ -7225,6 +7517,7 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   solver->exact_matching_selected = exact_matching;
   solver->spral_matching_selected = spral_matching;
   solver->symbolic = trial_symbolic;
+  kls_separator_analysis_move(&solver->separator, &trial_separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
   solver->common = trial_common;
@@ -7267,6 +7560,7 @@ done:
     if (trial_symbolic != NULL) {
       trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
     }
+    kls_separator_analysis_clear(&trial_separator);
     free(row_perm);
     free(trial_col_ptr);
     free(trial_row_idx);
@@ -7338,6 +7632,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_numeric *trial_numeric = NULL;
   trilinos_klu_l_common trial_common;
+  kls_separator_analysis trial_separator;
+  memset(&trial_separator, 0, sizeof(trial_separator));
   (void)trilinos_klu_l_defaults(&trial_common);
   int accepted = 0;
 
@@ -7489,7 +7785,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   status = choose_symbolic_for_pattern(solver->n, trial_col_ptr, trial_row_idx,
                                        &trial_options, &trial_symbolic,
                                        &trial_common, &trial_ordering,
-                                       &trial_score);
+                                       &trial_score, &trial_separator);
   if (status != KLS_OK) {
     goto done;
   }
@@ -7515,7 +7811,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   (void)maybe_refine_pre_static_with_metis(
     solver->n, solver->nnz, weak, trial_col_ptr, trial_row_idx, trial_values,
     &trial_options, &trial_symbolic, &trial_numeric, &trial_common,
-    &trial_ordering, &trial_score);
+    &trial_ordering, &trial_score, &trial_separator);
 #endif
   maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
                                    trial_row_idx, &solver->options,
@@ -7547,6 +7843,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   solver->exact_matching_selected = exact_matching;
   solver->spral_matching_selected = spral_matching;
   solver->symbolic = trial_symbolic;
+  kls_separator_analysis_move(&solver->separator, &trial_separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
   solver->common = trial_common;
@@ -7581,6 +7878,7 @@ done:
     if (trial_symbolic != NULL) {
       trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
     }
+    kls_separator_analysis_clear(&trial_separator);
     free(row_perm);
     free(trial_col_ptr);
     free(trial_row_idx);
@@ -7814,12 +8112,16 @@ static int maybe_promote_auto_metis(kls_solver *solver,
 
   trilinos_klu_l_symbolic *metis_symbolic = NULL;
   trilinos_klu_l_common metis_common;
+  kls_separator_analysis metis_separator;
+  memset(&metis_separator, 0, sizeof(metis_separator));
   double start = kls_now_seconds();
   int status = analyze_with_ordering(solver->n, solver->col_ptr, solver->row_idx,
                                      &metis_options, KLS_ORDERING_METIS,
-                                     &metis_symbolic, &metis_common);
+                                     &metis_symbolic, &metis_common,
+                                     &metis_separator);
   *elapsed += kls_now_seconds() - start;
   if (status != KLS_OK) {
+    kls_separator_analysis_clear(&metis_separator);
     return 0;
   }
 
@@ -7834,6 +8136,7 @@ static int maybe_promote_auto_metis(kls_solver *solver,
       trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
     }
     trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+    kls_separator_analysis_clear(&metis_separator);
     return 0;
   }
 
@@ -7841,6 +8144,7 @@ static int maybe_promote_auto_metis(kls_solver *solver,
   if (!metis_numeric_is_better(solver, &metis_common, metis_numeric)) {
     trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
     trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+    kls_separator_analysis_clear(&metis_separator);
     return 0;
   }
 
@@ -7849,6 +8153,7 @@ static int maybe_promote_auto_metis(kls_solver *solver,
   trilinos_klu_l_common old_common = solver->common;
 
   solver->symbolic = metis_symbolic;
+  kls_separator_analysis_move(&solver->separator, &metis_separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = metis_numeric;
   solver->common = metis_common;
@@ -7871,11 +8176,13 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        trilinos_klu_l_symbolic **symbolic_out,
                                        trilinos_klu_l_common *common_out,
                                        kls_ordering *selected_ordering_out,
-                                       double *score_out) {
+                                       double *score_out,
+                                       kls_separator_analysis *separator_out) {
+  kls_separator_analysis_clear(separator_out);
   if (options->ordering != KLS_ORDERING_AUTO) {
     int status = analyze_with_ordering(n, col_ptr, row_idx, options,
                                        options->ordering, symbolic_out,
-                                       common_out);
+                                       common_out, separator_out);
     if (status == KLS_OK) {
       *selected_ordering_out = options->ordering;
       *score_out = symbolic_score(*symbolic_out);
@@ -7887,13 +8194,13 @@ static int choose_symbolic_for_pattern(UF_long n,
   if (is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
     int status = analyze_with_ordering(n, col_ptr, row_idx, options,
                                        KLS_ORDERING_METIS, symbolic_out,
-                                       common_out);
+                                       common_out, separator_out);
     if (status == KLS_OK) {
       *selected_ordering_out = KLS_ORDERING_METIS;
       double selected_score = symbolic_score(*symbolic_out);
       maybe_retry_without_btf(n, col_ptr, row_idx, options,
                               KLS_ORDERING_METIS, symbolic_out, common_out,
-                              &selected_score, 0);
+                              &selected_score, 0, separator_out);
 #ifdef KLS_HAVE_SCOTCH
       if (should_try_symbolic_nested_dissection_before_numeric(
             n, *symbolic_out, *selected_ordering_out, KLS_ORDERING_SCOTCH,
@@ -7901,7 +8208,7 @@ static int choose_symbolic_for_pattern(UF_long n,
         maybe_promote_symbolic_ordering(
           n, col_ptr, row_idx, options, KLS_ORDERING_SCOTCH,
           symbolic_out, common_out, selected_ordering_out,
-          &selected_score, 0.90);
+          &selected_score, 0.90, separator_out);
       }
 #endif
       *score_out = selected_score;
@@ -7929,13 +8236,13 @@ static int choose_symbolic_for_pattern(UF_long n,
                                    large_spiked_metis_no_btf)) {
     int status = analyze_with_ordering(n, col_ptr, row_idx, symbolic_options,
                                        KLS_ORDERING_METIS, symbolic_out,
-                                       common_out);
+                                       common_out, separator_out);
     if (status == KLS_OK) {
       *selected_ordering_out = KLS_ORDERING_METIS;
       double selected_score = symbolic_score(*symbolic_out);
       maybe_retry_without_btf(n, col_ptr, row_idx, symbolic_options,
                               KLS_ORDERING_METIS, symbolic_out, common_out,
-                              &selected_score, 0);
+                              &selected_score, 0, separator_out);
 #ifdef KLS_HAVE_SCOTCH
       if (should_try_symbolic_nested_dissection_before_numeric(
             n, *symbolic_out, *selected_ordering_out, KLS_ORDERING_SCOTCH,
@@ -7943,7 +8250,7 @@ static int choose_symbolic_for_pattern(UF_long n,
         maybe_promote_symbolic_ordering(
           n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_SCOTCH,
           symbolic_out, common_out, selected_ordering_out,
-          &selected_score, 0.90);
+          &selected_score, 0.90, separator_out);
       }
 #endif
       *score_out = selected_score;
@@ -7957,13 +8264,18 @@ static int choose_symbolic_for_pattern(UF_long n,
   trilinos_klu_l_common best_common;
   kls_ordering best_ordering = KLS_ORDERING_AMD;
   double best_score = 0.0;
+  kls_separator_analysis best_separator;
+  memset(&best_separator, 0, sizeof(best_separator));
   int any_ok = 0;
 
   for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
     trilinos_klu_l_symbolic *candidate_symbolic = NULL;
     trilinos_klu_l_common candidate_common;
+    kls_separator_analysis candidate_separator;
+    memset(&candidate_separator, 0, sizeof(candidate_separator));
     int status = analyze_with_ordering(n, col_ptr, row_idx, symbolic_options, candidates[i],
-                                       &candidate_symbolic, &candidate_common);
+                                       &candidate_symbolic, &candidate_common,
+                                       &candidate_separator);
     if (status != KLS_OK) {
       continue;
     }
@@ -7971,18 +8283,22 @@ static int choose_symbolic_for_pattern(UF_long n,
     double selected_score = score;
     maybe_retry_without_btf(n, col_ptr, row_idx, symbolic_options,
                             candidates[i], &candidate_symbolic,
-                            &candidate_common, &selected_score, 1);
+                            &candidate_common, &selected_score, 1,
+                            &candidate_separator);
     if (!any_ok || selected_score < best_score) {
       if (best_symbolic != NULL) {
         trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
       }
+      kls_separator_analysis_clear(&best_separator);
       best_symbolic = candidate_symbolic;
       best_common = candidate_common;
       best_ordering = candidates[i];
       best_score = selected_score;
+      kls_separator_analysis_move(&best_separator, &candidate_separator);
       any_ok = 1;
     } else {
       trilinos_klu_l_free_symbolic(&candidate_symbolic, &candidate_common);
+      kls_separator_analysis_clear(&candidate_separator);
     }
     /* Stop once an ordering provides a real fill estimate; unknown estimates
        should not displace a known-good circuit ordering. */
@@ -8000,7 +8316,8 @@ static int choose_symbolic_for_pattern(UF_long n,
         n, best_symbolic, best_ordering, KLS_ORDERING_METIS, best_score)) {
     maybe_promote_symbolic_ordering(
       n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_METIS,
-      &best_symbolic, &best_common, &best_ordering, &best_score, 0.90);
+      &best_symbolic, &best_common, &best_ordering, &best_score, 0.90,
+      &best_separator);
   }
 #endif
 #ifdef KLS_HAVE_SCOTCH
@@ -8008,7 +8325,8 @@ static int choose_symbolic_for_pattern(UF_long n,
         n, best_symbolic, best_ordering, KLS_ORDERING_SCOTCH, best_score)) {
     maybe_promote_symbolic_ordering(
       n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_SCOTCH,
-      &best_symbolic, &best_common, &best_ordering, &best_score, 0.90);
+      &best_symbolic, &best_common, &best_ordering, &best_score, 0.90,
+      &best_separator);
   }
 #endif
 
@@ -8016,6 +8334,7 @@ static int choose_symbolic_for_pattern(UF_long n,
   *common_out = best_common;
   *selected_ordering_out = best_ordering;
   *score_out = best_score;
+  kls_separator_analysis_move(separator_out, &best_separator);
   return KLS_OK;
 }
 
@@ -8092,6 +8411,7 @@ static void free_candidate(kls_pattern_candidate *candidate) {
   if (candidate->symbolic != NULL) {
     trilinos_klu_l_free_symbolic(&candidate->symbolic, &candidate->common);
   }
+  kls_separator_analysis_clear(&candidate->separator);
   free(candidate->col_ptr);
   free(candidate->row_idx);
   free(candidate->input_to_csc);
@@ -8179,7 +8499,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
                                      candidate->row_idx, options,
                                      &candidate->symbolic, &candidate->common,
                                      &candidate->selected_ordering,
-                                     &candidate->score);
+                                     &candidate->score,
+                                     &candidate->separator);
 }
 
 static int auto_orientation_prefers_transpose(UF_long n) {
@@ -8278,6 +8599,7 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   solver->orientation = candidate->orientation;
   solver->common = candidate->common;
   solver->symbolic = candidate->symbolic;
+  kls_separator_analysis_move(&solver->separator, &candidate->separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->stats.selected_ordering = candidate->selected_ordering;
   solver->stats.selected_orientation = candidate->orientation;
@@ -8328,6 +8650,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     kls_auto_row_refactor_cost_allows(solver);
   solver->stats.row_refactor_auto_should_run =
     kls_auto_row_refactor_should_run(solver);
+  kls_fill_separator_stats(&solver->stats, &solver->separator);
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
     solver->stats.selected_btf = solver->symbolic->do_btf ? 1 : 0;
@@ -8374,6 +8697,7 @@ static void fill_numeric_stats(kls_solver *solver) {
     kls_auto_row_refactor_cost_allows(solver);
   solver->stats.row_refactor_auto_should_run =
     kls_auto_row_refactor_should_run(solver);
+  kls_fill_separator_stats(&solver->stats, &solver->separator);
   solver->stats.selected_btf =
     (solver->symbolic != NULL && solver->symbolic->do_btf) ? 1 : 0;
   solver->stats.numerical_rank = (int64_t)solver->common.numerical_rank;

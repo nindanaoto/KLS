@@ -554,6 +554,15 @@ int main(int argc, char **argv) {
              ",\"factor_etree_root_columns\":%" PRId64
              ",\"factor_etree_leaf_columns\":%" PRId64
              ",\"factor_etree_max_fanout\":%" PRId64
+             ",\"separator_analyzed_rows\":%" PRId64
+             ",\"separator_thread_count\":%" PRId64
+             ",\"separator_component_count\":%" PRId64
+             ",\"separator_private_components\":%" PRId64
+             ",\"separator_pipeline_components\":%" PRId64
+             ",\"separator_private_rows\":%" PRId64
+             ",\"separator_pipeline_rows\":%" PRId64
+             ",\"separator_private_max_rows\":%" PRId64
+             ",\"separator_pipeline_max_rows\":%" PRId64
              ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
              ",\"estimated_flops\":%.9g"
              ",\"analyze_only\":true}\n",
@@ -577,6 +586,15 @@ int main(int argc, char **argv) {
              stats.factor_etree_root_columns,
              stats.factor_etree_leaf_columns,
              stats.factor_etree_max_fanout,
+             stats.separator_analyzed_rows,
+             stats.separator_thread_count,
+             stats.separator_component_count,
+             stats.separator_private_components,
+             stats.separator_pipeline_components,
+             stats.separator_private_rows,
+             stats.separator_pipeline_rows,
+             stats.separator_private_max_rows,
+             stats.separator_pipeline_max_rows,
              stats.nnz_l, stats.nnz_u,
              stats.estimated_flops);
     } else {
@@ -609,6 +627,19 @@ int main(int argc, char **argv) {
              stats.factor_etree_root_columns,
              stats.factor_etree_leaf_columns,
              stats.factor_etree_max_fanout);
+      printf("separator queues: rows %" PRId64 ", threads %" PRId64
+             ", components %" PRId64 " (private %" PRId64
+             ", pipeline %" PRId64 "), row split %" PRId64 "/%" PRId64
+             ", max private/pipeline %" PRId64 "/%" PRId64 "\n",
+             stats.separator_analyzed_rows,
+             stats.separator_thread_count,
+             stats.separator_component_count,
+             stats.separator_private_components,
+             stats.separator_pipeline_components,
+             stats.separator_private_rows,
+             stats.separator_pipeline_rows,
+             stats.separator_private_max_rows,
+             stats.separator_pipeline_max_rows);
       printf("estimated nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n",
              stats.nnz_l, stats.nnz_u);
       printf("estimated flops: %.6e\n", stats.estimated_flops);
@@ -935,6 +966,15 @@ int main(int argc, char **argv) {
            ",\"factor_etree_root_columns\":%" PRId64
            ",\"factor_etree_leaf_columns\":%" PRId64
            ",\"factor_etree_max_fanout\":%" PRId64
+           ",\"separator_analyzed_rows\":%" PRId64
+           ",\"separator_thread_count\":%" PRId64
+           ",\"separator_component_count\":%" PRId64
+           ",\"separator_private_components\":%" PRId64
+           ",\"separator_pipeline_components\":%" PRId64
+           ",\"separator_private_rows\":%" PRId64
+           ",\"separator_pipeline_rows\":%" PRId64
+           ",\"separator_private_max_rows\":%" PRId64
+           ",\"separator_pipeline_max_rows\":%" PRId64
            ",\"refactor_dependency_levels\":%" PRId64
            ",\"refactor_dependency_max_width\":%" PRId64
            ",\"refactor_dependency_edges\":%" PRId64
@@ -992,6 +1032,15 @@ int main(int argc, char **argv) {
            stats.factor_etree_root_columns,
            stats.factor_etree_leaf_columns,
            stats.factor_etree_max_fanout,
+           stats.separator_analyzed_rows,
+           stats.separator_thread_count,
+           stats.separator_component_count,
+           stats.separator_private_components,
+           stats.separator_pipeline_components,
+           stats.separator_private_rows,
+           stats.separator_pipeline_rows,
+           stats.separator_private_max_rows,
+           stats.separator_pipeline_max_rows,
            stats.refactor_dependency_levels,
            stats.refactor_dependency_max_width,
            stats.refactor_dependency_edges,
@@ -1242,6 +1291,19 @@ int main(int argc, char **argv) {
            stats.factor_etree_root_columns,
            stats.factor_etree_leaf_columns,
            stats.factor_etree_max_fanout);
+    printf("separator queues: rows %" PRId64 ", threads %" PRId64
+           ", components %" PRId64 " (private %" PRId64
+           ", pipeline %" PRId64 "), row split %" PRId64 "/%" PRId64
+           ", max private/pipeline %" PRId64 "/%" PRId64 "\n",
+           stats.separator_analyzed_rows,
+           stats.separator_thread_count,
+           stats.separator_component_count,
+           stats.separator_private_components,
+           stats.separator_pipeline_components,
+           stats.separator_private_rows,
+           stats.separator_pipeline_rows,
+           stats.separator_private_max_rows,
+           stats.separator_pipeline_max_rows);
     printf("off-diagonal pivots: %" PRId64 ", reallocations: %" PRId64 "\n",
            stats.offdiag_pivots, stats.reallocations);
     printf("fast rejected pivot: %" PRId64 ", original column: %" PRId64

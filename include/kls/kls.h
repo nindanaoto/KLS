@@ -291,6 +291,15 @@ typedef struct kls_stats {
   int64_t kls_first_row_uplooking_column_count;
   int64_t kls_first_last_dynamic_column_pivots;
   int64_t kls_first_dynamic_column_pivot_count;
+  int64_t separator_analyzed_rows;
+  int64_t separator_thread_count;
+  int64_t separator_component_count;
+  int64_t separator_private_components;
+  int64_t separator_pipeline_components;
+  int64_t separator_private_rows;
+  int64_t separator_pipeline_rows;
+  int64_t separator_private_max_rows;
+  int64_t separator_pipeline_max_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

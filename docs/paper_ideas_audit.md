@@ -194,8 +194,11 @@ dissection levels, matching SubtreeLU's minimum-depth separator-tree setup more
 closely than plain `METIS_NodeND`, while retaining the existing CAMD refinement
 and auto-ordering policy. A focused 12-row CKTSO-gap run showed this is neutral
 as a standalone ordering change: 3.1772s geomean versus the saved 3.1671s
-baseline, with no failures. It is therefore documented as separator-tree
-precursor work, not as evidence that ordering alone closes the gap.
+baseline, with no failures. KLS now retains the accepted `NodeNDP` top-level
+component sizes as private leaf domains plus pipeline separator components, so
+this is no longer only an ordering precursor. It is still not evidence that
+ordering alone closes the gap because the retained separator queues are not yet
+consumed by a pivoting numeric kernel.
 The CKTSO paper in `refs/` is explicit that CKTSO's core factorization is a
 row-major sparse up-looking factorization, and that the fast path combines
 guessed EGraph pivot-checked refactorization with an ETree-scheduled pipelined
@@ -336,10 +339,10 @@ new KLS-owned symbolic/numeric machinery:
   prefix-current/all-current tail subset.
 - A production KLS-owned first-factor engine with row/segment storage, rather
   than the current env-gated KLU-compatible scaffold.
-- SubtreeLU-style private/pipeline scheduling from a retained separator tree.
-  The current threaded METIS `NodeNDP` call preserves the top-level separator
-  ordering shape, but KLS still does not retain a full separator tree or consume
-  it as private and pipeline task queues.
+- SubtreeLU-style private/pipeline numeric scheduling from a retained separator
+  tree. The current threaded METIS `NodeNDP` call now preserves the accepted
+  top-level separator component sequence and private/pipeline row split, but
+  KLS still does not consume those queues in a pivoting factor/refactor kernel.
 - A structure-adaptive triangular solve built on LU storage that exposes cheap
   row/segment access.
 
@@ -354,7 +357,7 @@ project does not drift toward benchmark-name-specific heuristics.
 | Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection, serial refactor scatter metadata, and exact EGraph level metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
 | NICSLU | AMD-style ordering, optional static-pivoting preprocessing, optional SPRAL Hungarian/scaling trials, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. KLS now records exact no-pivot EGraph levels from the numeric U pattern and uses them in guarded large single-block, dominant-BTF-block, and fragmented non-dominant many-block refactor paths, including KLU row-scaled cases where scale handling is supported and work-estimated cluster-level thread slices. | Full production MC64 matching/scaling is not implemented. Static symbolic R1/R2 performance modeling, ETree/EScheduler-guided intra-block factorization, and full pivoting-aware ETree scheduling are not implemented. Earlier broader EGraph prototypes were rejected because they were not general wins on the current kernel/storage. |
 | CKTSO | METIS nested-dissection ordering, guarded SCOTCH nested-dissection auto trials for large high-work symbolic candidates, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, CKTSO-style row-wise guessed-diagonal checks in KLS-owned checked row fast/refactor passes, KLS-owned block-local restart after a failed fast-factor pivot check including root-of-block rejects, conservative serial prefix-current/all-current tail restart for validated non-root unscaled repaired blocks, scaled block-local restart plus scaled checked continuation over later BTF blocks, scaled prefix-current/all-current block repair, scaled in-block serial tail restart after recomputing row scales to input-row order, threaded BTF worker-pool completed-block tracking for safe prefix-current rejects, guarded EGraph cluster/pipeline no-pivot refactors for single, dominant BTF, and selected fragmented many-block BTF shapes, work-balanced cluster-level refactor slices, cached row-permutation solve scratch, and dual-potential plus optional SPRAL matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only partially approximated because KLS does not have an always-on production MC64-equivalent weighted assignment stage. Full pipelined ETree-descendant tail restart with pivoting after a failed pivot check and structure-adaptive triangular solve are not implemented. Otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
-| SubtreeLU | KLS vendors reproducible METIS/GKlib and SCOTCH submodules, uses METIS plus CAMD refinement, asks METIS `NodeNDP` for at least `log2(threads)` nested-dissection levels on larger threaded METIS analyses, and can keep SCOTCH from `auto` when its symbolic score is materially better on large high-work cases. This overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. KLS now records row-major U-pattern supernode candidate diagnostics from the exact no-pivot refactor dependency pass. | KLS does not retain a separator tree, collapse/partition it into private and pipeline task queues, constrain pivot search within separator-tree subdomains, perform full separator-tree FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
+| SubtreeLU | KLS vendors reproducible METIS/GKlib and SCOTCH submodules, uses METIS plus CAMD refinement, asks METIS `NodeNDP` for at least `log2(threads)` nested-dissection levels on larger threaded METIS analyses, and can keep SCOTCH from `auto` when its symbolic score is materially better on large high-work cases. KLS now retains the accepted `NodeNDP` component sequence for the largest analyzed METIS block as private leaf domains and pipeline separator components, and reports the resulting queue shape in stats/bench output. This overlaps with SubtreeLU's nested-dissection and constrained-ordering motivation. KLS also records row-major U-pattern supernode candidate diagnostics from the exact no-pivot refactor dependency pass. | KLS does not yet consume the retained separator queues in a pivoting factor/refactor kernel, collapse a full global BTF-aware separator forest, constrain pivot search within separator-tree subdomains, perform full separator-tree FLOP-balanced refactor queue generation, or use SubtreeLU-style supernodes/BLAS updates. |
 
 This means KLS has implemented or prototyped the ideas that can be layered
 around the current KLU-derived data structures. It has **not** implemented all
@@ -413,6 +416,9 @@ design work, not benchmark-specific tuning.
   Threaded METIS analyses for matrices with at least 30,000 rows now use
   `METIS_NodeNDP`, which enforces the top nested-dissection levels needed for a
   thread-count-sized separator-tree skeleton before the same CAMD refinement.
+  Accepted METIS analyses also retain the `NodeNDP` top-level component sequence
+  as private leaf domains plus pipeline separator components, including an
+  ordering-position to component map for a later SubtreeLU-style numeric queue.
 - Scaling policy: KLS exposes KLU scale modes and has auto scale selection based
   on pattern and numeric evidence, including no-scale reuse where repeated
   SPICE refactorization benefits. Low-work dominant-BTF cases also start with
@@ -564,9 +570,9 @@ design work, not benchmark-specific tuning.
   subset; root rejects can use the same KLS-owned pivoted kernel as full block
   restarts. KLS still does not implement CKTSO's pipelined tail factorization
   that restarts from the ETree descendants after a failed pivot check.
-- SubtreeLU-style nested-dissection metadata is only used indirectly through
-  METIS orderings and CAMD refinement. KLS does not yet preserve a separator
-  tree for private/pipeline task queues.
+- SubtreeLU-style nested-dissection metadata is now retained from accepted
+  METIS `NodeNDP` analyses as private/pipeline component queues. KLS does not
+  yet use those retained queues to drive pivoting factor/refactor work.
 
 ## Not Implemented Yet
 
@@ -3663,3 +3669,19 @@ This still repacks current input values on each numeric pass and scatters back
 to row mirrors, so it is not the full CKTSO/SubtreeLU row-major numeric storage
 model; it does make the compact row-segment value lifetime solver-owned rather
 than worker-scratch-owned.
+
+KLS now retains METIS `NodeNDP` separator-tree queue metadata instead of
+discarding it after ordering. For accepted METIS symbolic analyses, the
+`NodeNDP` size tree is converted to a postorder private/pipeline component
+sequence: leaf domains are private work components, internal separators are
+pipeline components, and accepted ordering positions keep a component map for a
+future numeric queue consumer. The stats and benchmark output report analyzed
+rows, component counts, private/pipeline row totals, and max component sizes.
+A focused `nxp1` analyze-only probe with four threads, METIS ordering, and BTF
+disabled reported 414604 analyzed rows, seven components, four private leaf
+components, three pipeline separator components, and a 414147/457
+private/pipeline row split. This closes the direct state-retention gap against
+SubtreeLU's separator-tree setup, but the gap that matters for CKTSO-scale slow
+cases remains the numeric consumer: pivot-constrained separator work queues,
+FLOP-balanced refactor queues, and row/supernode update kernels are still not
+implemented.
