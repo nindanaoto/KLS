@@ -12539,6 +12539,30 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   return 1;
 }
 
+static UF_long kls_numeric_l_len_in_block(const kls_solver *solver,
+                                          UF_long k1,
+                                          UF_long k2,
+                                          UF_long k) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Llen == NULL || k < k1 || k >= k2 ||
+      k2 - k1 <= 1u) {
+    return 0u;
+  }
+  return solver->numeric->Llen[k];
+}
+
+static UF_long kls_numeric_u_len_in_block(const kls_solver *solver,
+                                          UF_long k1,
+                                          UF_long k2,
+                                          UF_long k) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Ulen == NULL || k < k1 || k >= k2 ||
+      k2 - k1 <= 1u) {
+    return 0u;
+  }
+  return solver->numeric->Ulen[k];
+}
+
 static int kls_row_refactor_pattern_is_eligible(const kls_solver *solver) {
   const int scaled = solver != NULL && solver->common.scale > 0;
   const int btf = solver != NULL && solver->symbolic != NULL &&
@@ -13278,7 +13302,7 @@ static int kls_build_row_solve_pattern(kls_solver *solver) {
     for (UF_long local_j = 0; local_j < nk; ++local_j) {
       const UF_long j = k1 + local_j;
       UF_long *li = solver->refactor_l_indices[j];
-      const UF_long len = solver->numeric->Llen[j];
+      const UF_long len = kls_numeric_l_len_in_block(solver, k1, k2, j);
       if (len > 0u && li == NULL) {
         goto fail;
       }
@@ -13299,7 +13323,7 @@ static int kls_build_row_solve_pattern(kls_solver *solver) {
     for (UF_long local_k = 0; local_k < nk; ++local_k) {
       const UF_long k = k1 + local_k;
       UF_long *ui = solver->refactor_u_indices[k];
-      const UF_long len = solver->numeric->Ulen[k];
+      const UF_long len = kls_numeric_u_len_in_block(solver, k1, k2, k);
       if (len > 0u && ui == NULL) {
         goto fail;
       }
@@ -13350,7 +13374,7 @@ static int kls_build_row_solve_pattern(kls_solver *solver) {
       const UF_long j = k1 + local_j;
       UF_long *li = solver->refactor_l_indices[j];
       double *lx = solver->refactor_l_values[j];
-      const UF_long len = solver->numeric->Llen[j];
+      const UF_long len = kls_numeric_l_len_in_block(solver, k1, k2, j);
       for (UF_long p = 0; p < len; ++p) {
         const UF_long row = k1 + li[p];
         const UF_long dst = next[row]++;
@@ -13370,7 +13394,7 @@ static int kls_build_row_solve_pattern(kls_solver *solver) {
       const UF_long k = k1 + local_k;
       UF_long *ui = solver->refactor_u_indices[k];
       double *ux = solver->refactor_u_values[k];
-      const UF_long len = solver->numeric->Ulen[k];
+      const UF_long len = kls_numeric_u_len_in_block(solver, k1, k2, k);
       for (UF_long p = 0; p < len; ++p) {
         const UF_long row = k1 + ui[p];
         const UF_long dst = next[row]++;
@@ -13647,7 +13671,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     for (UF_long local_j = 0; local_j < nk; ++local_j) {
       const UF_long j = k1 + local_j;
       UF_long *li = solver->refactor_l_indices[j];
-      const UF_long len = solver->numeric->Llen[j];
+      const UF_long len = kls_numeric_l_len_in_block(solver, k1, k2, j);
       if (len > 0u && li == NULL) {
         free(l_ptr);
         free(u_ptr);
@@ -13676,7 +13700,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     for (UF_long local_k = 0; local_k < nk; ++local_k) {
       const UF_long k = k1 + local_k;
       UF_long *ui = solver->refactor_u_indices[k];
-      const UF_long len = solver->numeric->Ulen[k];
+      const UF_long len = kls_numeric_u_len_in_block(solver, k1, k2, k);
       if (len > 0u && ui == NULL) {
         free(l_ptr);
         free(u_ptr);
@@ -13778,7 +13802,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
       const UF_long j = k1 + local_j;
       UF_long *li = solver->refactor_l_indices[j];
       double *lx = solver->refactor_l_values[j];
-      const UF_long len = solver->numeric->Llen[j];
+      const UF_long len = kls_numeric_l_len_in_block(solver, k1, k2, j);
       for (UF_long p = 0; p < len; ++p) {
         const UF_long row = k1 + li[p];
         const UF_long dst = next[row]++;
@@ -13796,7 +13820,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
       const UF_long k = k1 + local_k;
       UF_long *ui = solver->refactor_u_indices[k];
       double *ux = solver->refactor_u_values[k];
-      const UF_long len = solver->numeric->Ulen[k];
+      const UF_long len = kls_numeric_u_len_in_block(solver, k1, k2, k);
       for (UF_long p = 0; p < len; ++p) {
         const UF_long row = k1 + ui[p];
         const UF_long dst = next[row]++;
@@ -15336,7 +15360,7 @@ static int kls_estimate_row_refactor_lower_bound_work(kls_solver *solver,
     for (UF_long local_k = 0; local_k < k2 - k1; ++local_k) {
       const UF_long k = k1 + local_k;
       UF_long *ui = solver->refactor_u_indices[k];
-      const UF_long len = solver->numeric->Ulen[k];
+      const UF_long len = kls_numeric_u_len_in_block(solver, k1, k2, k);
       if (len > 0u && ui == NULL) {
         free(u_row_counts);
         return 0;
@@ -15360,7 +15384,7 @@ static int kls_estimate_row_refactor_lower_bound_work(kls_solver *solver,
     for (UF_long local_j = 0; local_j < k2 - k1; ++local_j) {
       const UF_long j = k1 + local_j;
       UF_long *li = solver->refactor_l_indices[j];
-      const UF_long len = solver->numeric->Llen[j];
+      const UF_long len = kls_numeric_l_len_in_block(solver, k1, k2, j);
       if (len > 0u && li == NULL) {
         free(u_row_counts);
         return 0;

@@ -259,7 +259,8 @@ zero compact-panel work. `gemat12` is labelled
 prestatic KLU first-factor path. Forcing the current experimental row refactor
 does not convert this into a flag-selection issue: `G2_circuit` can build the
 row groups but its forced row refactor is slower than the default EGraph path,
-while `ASIC_100ks` and `onetone2` still do not build row groups. This matches
+and after the singleton-BTF fix `ASIC_100ks` and `onetone2` also build row
+groups but remain slower than the default path. This matches
 the local CKTSO paper's stated distinction: CKTSO's fast path is a row-major
 sparse up-looking numeric engine scheduled from a guessed EGraph, with row-wise
 pivot checks and an ETree-descendant pipelined pivoting tail if the guess fails.
@@ -269,6 +270,19 @@ slow rows is therefore a production row/segment-oriented up-looking numeric
 engine, followed by the CKTSO/SubtreeLU pivoting-tail and separator/private-
 pipeline machinery; compact row-panel kernels layered onto the current
 experimental row mirror are only a precursor.
+The row mirror scaffold now also handles singleton-heavy BTF partitions when
+building forced row-refactor and row-solve patterns. The previous failure mode
+was a KLU-storage boundary issue: singleton BTF blocks have no per-column
+`L`/`U` pointer slices in the retained refactor cache, so row-pattern builders
+must treat their in-block lengths as zero instead of reading raw numeric
+length arrays. With that fixed, forced row refactor builds and runs on
+`ASIC_100ks` (`row_refactor_group_count=83090`) and `onetone2`
+(`row_refactor_group_count=27994`). It is still slower than the current
+default EGraph/column path on both sampled rows, and the auto work gate
+correctly leaves it off because row-group work exceeds exact EGraph dependency
+work. This confirms the row/up-looking scaffold now covers the BTF structure
+that blocked it before, but it does not change the main paper diagnosis: the
+gap needs a production row/segment numeric engine, not a flag flip.
 
 The fragmented-BTF scale policy improved the large recon artifact geomean over
 the preceding EGraph build from 30.58s to 27.37s on the five completed common
