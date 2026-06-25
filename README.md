@@ -779,6 +779,10 @@ python3 scripts/summarize_tail_restart_opportunities.py \
   --jsonl build/kls_tail_stress_gap.jsonl
 ```
 
+For long manifests, `run_bench_suite.py` preserves manifest order and accepts
+`--skip N --limit M`, so large or CKTSO-gap suites can be run in reproducible
+chunks without treating unrun rows as solver failures in later comparisons.
+
 An optional CKTSO comparison tool can be built when you provide a local CKTSO
 distribution:
 
