@@ -16,6 +16,7 @@ option(KLS_USE_SYSTEM_SCOTCH "Use a system SCOTCH library instead of the bundled
 option(KLS_ENABLE_SPRAL_SCALING "Enable SPRAL matching/scaling support" ON)
 option(KLS_USE_SYSTEM_SPRAL "Use a system SPRAL library instead of the bundled submodule" OFF)
 option(KLS_SYSTEM_SPRAL_LGPL_COMPATIBLE "Acknowledge that the selected system SPRAL library is redistributable with LGPL KLS" OFF)
+option(KLS_ENABLE_CBLAS_SUPERNODE "Build optional CBLAS kernels for compact row-supernode experiments" OFF)
 set(CKTSO_ROOT "" CACHE PATH "Path to a local CKTSO distribution")
 set(KLU2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/amesos2/src/KLU2" CACHE PATH "Path to a Trilinos Amesos2 KLU2 source directory")
 set(TEUCHOS_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/rol/src/compatibility/teuchos-lite" CACHE PATH "Path to Trilinos Teuchos-compatible headers for KLU2")
@@ -34,6 +35,30 @@ set(CMAKE_C_EXTENSIONS OFF)
 find_library(KLS_MATH_LIBRARY m)
 find_package(Threads REQUIRED)
 find_package(Python3 COMPONENTS Interpreter QUIET)
+include(CheckIncludeFile)
+
+if(KLS_ENABLE_CBLAS_SUPERNODE)
+  find_package(BLAS QUIET)
+  check_include_file(cblas.h KLS_HAVE_CBLAS_HEADER)
+  if(BLAS_FOUND AND KLS_HAVE_CBLAS_HEADER)
+    add_library(kls_cblas INTERFACE)
+    target_compile_definitions(kls_cblas
+      INTERFACE
+        KLS_HAVE_CBLAS=1)
+    if(TARGET BLAS::BLAS)
+      target_link_libraries(kls_cblas
+        INTERFACE
+          BLAS::BLAS)
+    else()
+      target_link_libraries(kls_cblas
+        INTERFACE
+          ${BLAS_LIBRARIES})
+    endif()
+  else()
+    message(STATUS
+      "CBLAS compact row-supernode kernels disabled: cblas.h or BLAS library not found")
+  endif()
+endif()
 
 if(KLS_ENABLE_METIS)
   if(KLS_USE_SYSTEM_METIS)
@@ -389,6 +414,11 @@ if(KLS_ENABLE_SPRAL_SCALING)
   target_link_libraries(kls
     PRIVATE
       kls_spral_scaling)
+endif()
+if(TARGET kls_cblas)
+  target_link_libraries(kls
+    PRIVATE
+      kls_cblas)
 endif()
 
 target_compile_options(kls PRIVATE

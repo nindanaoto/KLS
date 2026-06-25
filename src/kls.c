@@ -18,6 +18,9 @@
 #ifdef KLS_HAVE_SPRAL_SCALING
 #include "spral_scaling.h"
 #endif
+#ifdef KLS_HAVE_CBLAS
+#include <cblas.h>
+#endif
 
 #include <errno.h>
 #include <float.h>
@@ -17144,6 +17147,14 @@ static int kls_compact_supernode_trsv_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+#ifdef KLS_HAVE_CBLAS
+static int kls_cblas_supernode_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_CBLAS_SUPERNODE");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+#endif
+
 static int kls_first_factor_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
   return value != NULL && value[0] != '\0' &&
@@ -19232,6 +19243,88 @@ static int kls_store_compact_dense_panel_row(
   return 1;
 }
 
+static int kls_compact_dense_panel_update_row_cblas(
+  kls_egraph_refactor_worker *worker,
+  UF_long row_begin,
+  UF_long row,
+  UF_long width,
+  UF_long trailing_len,
+  double *dense_panel,
+  double *trailing_panel,
+  double *udiag) {
+#ifdef KLS_HAVE_CBLAS
+  if (worker == NULL || worker->shared == NULL ||
+      dense_panel == NULL || udiag == NULL ||
+      row < row_begin || row - row_begin >= width ||
+      width == 0u || width > (UF_long)INT_MAX ||
+      trailing_len > (UF_long)INT_MAX ||
+      (trailing_len > 0u && trailing_panel == NULL) ||
+      !kls_cblas_supernode_env_enabled()) {
+    return 0;
+  }
+
+  const UF_long local_row = row - row_begin;
+  double *row_dense_panel = dense_panel + local_row * width;
+  row_dense_panel[local_row] = udiag[row];
+  if (local_row == 0u) {
+    return 1;
+  }
+  if (local_row > (UF_long)INT_MAX) {
+    return 0;
+  }
+
+  const int nprev = (int)local_row;
+  const int lda_dense = (int)width;
+  cblas_dtrsv(CblasRowMajor, CblasUpper, CblasTrans, CblasNonUnit,
+              nprev, dense_panel, lda_dense, row_dense_panel, 1);
+
+  if (worker->shared->check_pivots) {
+    for (UF_long dep = row_begin; dep < row; ++dep) {
+      const UF_long local_dep = dep - row_begin;
+      const double lij = row_dense_panel[local_dep];
+      const double candidate = lij * udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        return -1;
+      }
+    }
+  }
+
+  double pivot = udiag[row];
+  for (UF_long local_dep = 0; local_dep < local_row; ++local_dep) {
+    pivot -= row_dense_panel[local_dep] *
+             dense_panel[local_dep * width + local_row];
+  }
+  udiag[row] = pivot;
+
+  const UF_long right_len = width - local_row - 1u;
+  if (right_len > 0u) {
+    cblas_dgemv(CblasRowMajor, CblasTrans, nprev, (int)right_len,
+                -1.0, dense_panel + local_row + 1u, lda_dense,
+                row_dense_panel, 1, 1.0,
+                row_dense_panel + local_row + 1u, 1);
+  }
+  if (trailing_len > 0u) {
+    cblas_dgemv(CblasRowMajor, CblasTrans, nprev, (int)trailing_len,
+                -1.0, trailing_panel, (int)trailing_len,
+                row_dense_panel, 1, 1.0,
+                trailing_panel + local_row * trailing_len, 1);
+  }
+  row_dense_panel[local_row] = udiag[row];
+  return 1;
+#else
+  (void)worker;
+  (void)row_begin;
+  (void)row;
+  (void)width;
+  (void)trailing_len;
+  (void)dense_panel;
+  (void)trailing_panel;
+  (void)udiag;
+  return 0;
+#endif
+}
+
 static int kls_parallel_row_refactor_process_dense_group_compact_checked(
   kls_egraph_refactor_worker *worker,
   UF_long row_begin,
@@ -19254,28 +19347,37 @@ static int kls_parallel_row_refactor_process_dense_group_compact_checked(
       ? trailing_panel + local_row * trailing_len : NULL;
     const UF_long row_dense_len = row_end - row - 1u;
 
-    for (UF_long dep = row_begin; dep < row; ++dep) {
-      const UF_long local_dep = dep - row_begin;
-      const double candidate = row_dense_panel[local_dep];
-      const double lij = candidate / udiag[dep];
-      if (kls_parallel_row_refactor_rejects_multiplier(
-            worker, row, dep, candidate, lij)) {
-        return 0;
-      }
-      row_dense_panel[local_dep] = lij;
+    const int cblas_status =
+      kls_compact_dense_panel_update_row_cblas(
+        worker, row_begin, row, width, trailing_len, dense_panel,
+        trailing_panel, udiag);
+    if (cblas_status < 0) {
+      return 0;
+    }
+    if (cblas_status == 0) {
+      for (UF_long dep = row_begin; dep < row; ++dep) {
+        const UF_long local_dep = dep - row_begin;
+        const double candidate = row_dense_panel[local_dep];
+        const double lij = candidate / udiag[dep];
+        if (kls_parallel_row_refactor_rejects_multiplier(
+              worker, row, dep, candidate, lij)) {
+          return 0;
+        }
+        row_dense_panel[local_dep] = lij;
 
-      double *dep_dense_panel = dense_panel + local_dep * width;
-      for (UF_long target = local_dep + 1u; target < local_row; ++target) {
-        row_dense_panel[target] -= lij * dep_dense_panel[target];
-      }
-      udiag[row] -= lij * dep_dense_panel[local_row];
-      for (UF_long target = local_row + 1u; target < width; ++target) {
-        row_dense_panel[target] -= lij * dep_dense_panel[target];
-      }
-      if (trailing_len > 0u) {
-        double *dep_panel = trailing_panel + local_dep * trailing_len;
-        for (UF_long offset = 0; offset < trailing_len; ++offset) {
-          row_panel[offset] -= lij * dep_panel[offset];
+        double *dep_dense_panel = dense_panel + local_dep * width;
+        for (UF_long target = local_dep + 1u; target < local_row; ++target) {
+          row_dense_panel[target] -= lij * dep_dense_panel[target];
+        }
+        udiag[row] -= lij * dep_dense_panel[local_row];
+        for (UF_long target = local_row + 1u; target < width; ++target) {
+          row_dense_panel[target] -= lij * dep_dense_panel[target];
+        }
+        if (trailing_len > 0u) {
+          double *dep_panel = trailing_panel + local_dep * trailing_len;
+          for (UF_long offset = 0; offset < trailing_len; ++offset) {
+            row_panel[offset] -= lij * dep_panel[offset];
+          }
         }
       }
     }
@@ -19479,29 +19581,38 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
     double *row_panel = trailing_panel != NULL
       ? trailing_panel + local_row * trailing_len : NULL;
 
-    for (UF_long dep = row_begin; dep < row; ++dep) {
-      const UF_long local_dep = dep - row_begin;
-      const double candidate = row_dense_panel[local_dep];
-      const double lij = candidate / udiag[dep];
-      if (kls_parallel_row_refactor_rejects_multiplier(
-            worker, row, dep, candidate, lij)) {
-        return 0;
-      }
-      row_dense_panel[local_dep] = lij;
+    const int cblas_status =
+      kls_compact_dense_panel_update_row_cblas(
+        worker, row_begin, row, width, trailing_len, dense_panel,
+        trailing_panel, udiag);
+    if (cblas_status < 0) {
+      return 0;
+    }
+    if (cblas_status == 0) {
+      for (UF_long dep = row_begin; dep < row; ++dep) {
+        const UF_long local_dep = dep - row_begin;
+        const double candidate = row_dense_panel[local_dep];
+        const double lij = candidate / udiag[dep];
+        if (kls_parallel_row_refactor_rejects_multiplier(
+              worker, row, dep, candidate, lij)) {
+          return 0;
+        }
+        row_dense_panel[local_dep] = lij;
 
-      double *dep_dense_panel = dense_panel + local_dep * width;
+        double *dep_dense_panel = dense_panel + local_dep * width;
 
-      for (UF_long target = local_dep + 1u; target < local_row; ++target) {
-        row_dense_panel[target] -= lij * dep_dense_panel[target];
-      }
-      udiag[row] -= lij * dep_dense_panel[local_row];
-      for (UF_long target = local_row + 1u; target < width; ++target) {
-        row_dense_panel[target] -= lij * dep_dense_panel[target];
-      }
-      if (trailing_len > 0u) {
-        double *dep_panel = trailing_panel + local_dep * trailing_len;
-        for (UF_long offset = 0; offset < trailing_len; ++offset) {
-          row_panel[offset] -= lij * dep_panel[offset];
+        for (UF_long target = local_dep + 1u; target < local_row; ++target) {
+          row_dense_panel[target] -= lij * dep_dense_panel[target];
+        }
+        udiag[row] -= lij * dep_dense_panel[local_row];
+        for (UF_long target = local_row + 1u; target < width; ++target) {
+          row_dense_panel[target] -= lij * dep_dense_panel[target];
+        }
+        if (trailing_len > 0u) {
+          double *dep_panel = trailing_panel + local_dep * trailing_len;
+          for (UF_long offset = 0; offset < trailing_len; ++offset) {
+            row_panel[offset] -= lij * dep_panel[offset];
+          }
         }
       }
     }
