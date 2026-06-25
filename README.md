@@ -442,7 +442,12 @@ report `row_refactor_last_defer_value_scatter`,
 row-storage solve handoff. When `KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC=1`, those
 mirrors can be seeded from ordinary KLU-compatible numeric storage after a
 successful factor/refactor, allowing the row solve to be benchmarked without
-also enabling the experimental KLS-first factorization path. Single-RHS row
+also enabling the experimental KLS-first factorization path. This automatic
+seed is adaptive: KLS first builds the cheap row-solve partition diagnostics
+and copies numeric values into row-major mirrors only when the CKTSO-style
+parallel row-solve executor has enough structural work to justify the
+`O(nnz(L+U))` copy. Otherwise the ordinary numeric storage remains authoritative
+and KLS avoids a repeated mirror-copy tax on refactor-heavy runs. Single-RHS row
 solves use a scalar row-major loop with cached structural validation, matching
 the common SPICE solve shape while keeping the four-RHS batched path available
 for wider solves. Solve-only seeding builds only the row-major `L`/`U` solve

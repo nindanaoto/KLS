@@ -3252,12 +3252,36 @@ work per synchronization reaches the paper's 300,000-entry dense-tail scale.
 These fields are visible in `kls_stats`, `kls_bench` JSON/text, and the gap
 decomposition script, giving the parallel triangular-solve path a
 structure-based gate instead of a matrix-name heuristic.
+That cost model now also controls seeding row-solve mirrors from ordinary
+numeric storage. Earlier `--row-solve on` probes copied `L`/`U` values into
+row-major mirrors after each successful ordinary factor/refactor even when the
+parallel row-solve executor never ran, adding an `O(nnz(L+U))` tax to the
+slow repeated-refactor cases. The adaptive seed first builds the cheap
+CKTSO-style partition diagnostics and only copies values when the predicted
+parallel row-solve work is large enough. On the local top-12 hard-case probe,
+forced row-solve seeding had a `3.1772s` geomean, adaptive seeding had a
+`3.0613s` geomean with no failures, and explicit `--row-solve off` was
+`3.0426s`. This is a useful cleanup, but it is not the missing CKTSO numeric
+engine.
 
 That scaffold was then extended to KLU row-scaled first factors. It computes
 `Rs` in input-row order before constructing singleton and multi-column BTF
 blocks, rebuilds off-block values before scale permutation, and finally permutes
 `Rs` through `Pnum` for solve semantics. The smoke suite now runs the same
 2-column BTF case with no scaling and with KLU max-row scaling.
+
+Re-reading the local CKTSO, NICSLU, and SubtreeLU references leaves one clear
+large missing part for the slow cases: KLS still does not own a complete
+row/segment-oriented numeric factorization and refactorization engine. CKTSO's
+documented advantage is not only METIS-style ordering or MC64-style matching; it
+uses row-major sparse LU, EGraph/ETree cluster-pipeline scheduling, fast
+factorization with pivot checks, and ETree-descendant tail factorization when a
+pivot check fails. SubtreeLU pushes the same direction through separator-tree
+private/pipeline queues and row/supernode updates. KLS has implemented the
+ordering, LGPL-compatible matching/scaling boundary, diagnostics, and some
+row-solve/refactor scaffolding, but the core repeated-iteration speedup in the
+papers comes from doing numeric update in that owned row/segment schedule rather
+than repeatedly adapting KLU-compatible numeric storage.
 
 ## Recommended General Work
 
@@ -3276,7 +3300,8 @@ blocks, rebuilds off-block values before scale permutation, and finally permutes
    helps large weak-diagonal dominant-BTF cases and avoids replacing no-BTF
    ordering wins, but `pre2` still times out, so matching quality alone is not
    the remaining CKTSO-scale gap.
-3. Add a structure-adaptive triangular solve only after the LU storage owned by
-   KLS exposes row-oriented or segmented access cheaply.
+3. Finish the structure-adaptive triangular solve only after the LU storage
+   owned by KLS exposes row-oriented or segmented access cheaply enough that
+   solve setup and value mirrors do not dominate repeated refactors.
 4. Use static symbolic and numeric-cost models to decide whether a parallel
    kernel should run, so KLS avoids matrix-name-specific tuning.

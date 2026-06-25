@@ -3292,12 +3292,12 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
   }
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLU_FIRST ||
              stats.row_refactor_auto_enabled != 0 ||
-             stats.row_refactor_auto_values_ready != 1 ||
+             stats.row_refactor_auto_values_ready != 0 ||
              stats.row_refactor_values_dirty != 0 ||
              stats.row_refactor_group_count != 0 ||
              stats.row_refactor_segment_count != 0 ||
-             stats.row_solve_partition_ready != 1 ||
-             stats.row_solve_partition_slices != 8 ||
+             stats.row_solve_partition_ready != 0 ||
+             stats.row_solve_partition_slices != 0 ||
              stats.row_solve_l_slice_max_entries != 0 ||
              stats.row_solve_u_slice_max_entries != 0 ||
              stats.row_solve_l_segmented_rows != 0 ||
@@ -3340,8 +3340,8 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
                         "stats row solve seed solves")) {
     ok = 0;
   }
-  if (ok && (stats.row_refactor_last_row_solve != 1 ||
-             stats.row_refactor_row_solve_run_count != 2 ||
+  if (ok && (stats.row_refactor_last_row_solve != 0 ||
+             stats.row_refactor_row_solve_run_count != 0 ||
              stats.row_solve_parallel_run_count != 0 ||
              stats.row_solve_parallel_l_slice_runs != 0 ||
              stats.row_solve_parallel_u_slice_runs != 0 ||
