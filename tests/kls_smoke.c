@@ -2022,8 +2022,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
                         "stats row-pipeline refactor")) {
     ok = 0;
   }
-  const int expect_defer =
-    stats.row_refactor_dense_segment_count > 0;
+  const int expect_defer = checked_expect_defer + 1;
   if (ok && (stats.row_refactor_group_count < 2 ||
              stats.row_refactor_group_level_count < 1 ||
              stats.row_refactor_group_cluster_levels != 0 ||
@@ -2046,7 +2045,9 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_last_parallel != 1 ||
              stats.row_refactor_last_ready_queue != 1 ||
              stats.row_refactor_last_done_bitmap != 0 ||
-             stats.row_refactor_last_defer_value_scatter != 0 ||
+             stats.row_refactor_last_defer_value_scatter != 1 ||
+             stats.row_refactor_values_dirty != 0 ||
+             stats.row_refactor_last_lazy_value_scatter != 1 ||
              stats.row_refactor_last_work_ready_queue != 1 ||
              stats.row_refactor_run_count != 2 ||
              stats.row_refactor_checked_run_count != 1 ||
@@ -2059,6 +2060,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_input_cleanup_entries != 0 ||
              stats.row_refactor_defer_value_scatter_run_count !=
                expect_defer ||
+             stats.row_refactor_lazy_value_scatter_run_count != 1 ||
              stats.row_refactor_work_ready_queue_run_count != 2 ||
              stats.row_refactor_ready_queue_workspace_groups <
                stats.row_refactor_group_count)) {
@@ -2074,6 +2076,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             ", done_bitmap=%" PRId64
             ", cleanup=%" PRId64 "/%" PRId64
             ", defer_scatter=%" PRId64
+            ", dirty/lazy=%d/%d/%" PRId64
             ", work_queue=%" PRId64
             ", queue_workspace=%" PRId64 "\n",
             stats.row_refactor_group_count,
@@ -2102,6 +2105,9 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             stats.row_refactor_input_cleanup_rows,
             stats.row_refactor_input_cleanup_entries,
             stats.row_refactor_defer_value_scatter_run_count,
+            stats.row_refactor_values_dirty,
+            stats.row_refactor_last_lazy_value_scatter,
+            stats.row_refactor_lazy_value_scatter_run_count,
             stats.row_refactor_work_ready_queue_run_count,
             stats.row_refactor_ready_queue_workspace_groups);
     ok = 0;

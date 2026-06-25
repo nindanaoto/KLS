@@ -138,6 +138,9 @@ struct kls_solver {
   UF_long row_refactor_input_cleanup_entries;
   int row_refactor_last_defer_value_scatter;
   UF_long row_refactor_defer_value_scatter_run_count;
+  int row_refactor_values_dirty;
+  int row_refactor_last_lazy_value_scatter;
+  UF_long row_refactor_lazy_value_scatter_run_count;
   UF_long row_refactor_work_ready_queue_run_count;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_segment_rows;
@@ -295,6 +298,7 @@ typedef struct kls_egraph_refactor_shared {
   int pipeline_natural_order;
   int row_refactor_mode;
   int row_refactor_defer_value_scatter;
+  int row_refactor_lazy_value_scatter;
   int row_pipeline_ready_queue;
   UF_long *row_pipeline_ready_groups;
   atomic_uint *row_pipeline_ready_slots;
@@ -691,6 +695,9 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_input_cleanup_entries = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_defer_value_scatter_run_count = 0;
+  solver->row_refactor_values_dirty = 0;
+  solver->row_refactor_last_lazy_value_scatter = 0;
+  solver->row_refactor_lazy_value_scatter_run_count = 0;
   solver->row_refactor_work_ready_queue_run_count = 0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_segment_rows = 0;
@@ -925,6 +932,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_done_bitmap = 0;
   solver->row_refactor_last_work_ready_queue = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
+  solver->row_refactor_last_lazy_value_scatter = 0;
   solver->stats.row_refactor_last_run = 0;
   solver->stats.row_refactor_last_checked = 0;
   solver->stats.row_refactor_last_parallel = 0;
@@ -932,6 +940,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_done_bitmap = 0;
   solver->stats.row_refactor_last_work_ready_queue = 0;
   solver->stats.row_refactor_last_defer_value_scatter = 0;
+  solver->stats.row_refactor_last_lazy_value_scatter = 0;
 }
 
 static void kls_record_row_refactor_run(kls_solver *solver,
@@ -989,6 +998,20 @@ static void kls_record_row_refactor_defer_value_scatter_run(
   }
   solver->row_refactor_last_defer_value_scatter = 1;
   solver->row_refactor_defer_value_scatter_run_count++;
+}
+
+static void kls_record_row_refactor_lazy_value_scatter_run(
+  kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_values_dirty = 1;
+  solver->row_refactor_last_lazy_value_scatter = 1;
+  solver->row_refactor_lazy_value_scatter_run_count++;
+  solver->stats.row_refactor_values_dirty = 1;
+  solver->stats.row_refactor_last_lazy_value_scatter = 1;
+  solver->stats.row_refactor_lazy_value_scatter_run_count =
+    (int64_t)solver->row_refactor_lazy_value_scatter_run_count;
 }
 
 static void kls_record_fast_reject_detail(kls_solver *solver,
@@ -7544,6 +7567,12 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_last_defer_value_scatter;
   solver->stats.row_refactor_defer_value_scatter_run_count =
     (int64_t)solver->row_refactor_defer_value_scatter_run_count;
+  solver->stats.row_refactor_values_dirty =
+    solver->row_refactor_values_dirty;
+  solver->stats.row_refactor_last_lazy_value_scatter =
+    solver->row_refactor_last_lazy_value_scatter;
+  solver->stats.row_refactor_lazy_value_scatter_run_count =
+    (int64_t)solver->row_refactor_lazy_value_scatter_run_count;
   solver->stats.row_refactor_segment_count =
     (int64_t)solver->row_refactor_segment_count;
   solver->stats.row_refactor_segment_rows =
@@ -12511,9 +12540,14 @@ static int kls_checked_row_refactor_env_enabled(void) {
 static int kls_row_refactor_should_defer_value_scatter(
   const kls_solver *solver,
   int check_pivots) {
-  return check_pivots &&
-         solver != NULL &&
-         solver->row_refactor_dense_segment_count > 0u;
+  if (!check_pivots) {
+    return 1;
+  }
+  return solver != NULL && solver->row_refactor_dense_segment_count > 0u;
+}
+
+static int kls_row_refactor_should_lazy_value_scatter(int check_pivots) {
+  return !check_pivots;
 }
 
 static int kls_scatter_row_refactor_l_prefix_values(kls_solver *solver,
@@ -12576,6 +12610,20 @@ static int kls_scatter_row_refactor_l_values(kls_solver *solver) {
 static int kls_scatter_row_refactor_u_values(kls_solver *solver) {
   return solver != NULL &&
          kls_scatter_row_refactor_u_prefix_values(solver, solver->n);
+}
+
+static int kls_publish_row_refactor_values(kls_solver *solver) {
+  if (solver == NULL || !solver->row_refactor_values_dirty) {
+    return 1;
+  }
+  if (!kls_scatter_row_refactor_l_values(solver) ||
+      !kls_scatter_row_refactor_u_values(solver)) {
+    solver->common.status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+  solver->row_refactor_values_dirty = 0;
+  solver->stats.row_refactor_values_dirty = 0;
+  return 1;
 }
 
 static void kls_clear_row_refactor_input_residuals(kls_solver *solver,
@@ -12654,6 +12702,8 @@ static int kls_single_block_row_refactor(kls_solver *solver,
   common->nrealloc = 0;
   const int defer_value_scatter =
     kls_row_refactor_should_defer_value_scatter(solver, check_pivots);
+  const int lazy_value_scatter =
+    kls_row_refactor_should_lazy_value_scatter(check_pivots);
   kls_row_refactor_record_pipeline_scope(solver,
                                          solver->row_refactor_level_count);
   kls_record_row_refactor_run(solver, check_pivots, 0);
@@ -12748,11 +12798,14 @@ static int kls_single_block_row_refactor(kls_solver *solver,
     }
     kls_clear_row_refactor_input_residuals(solver, x, i);
   }
-  if (defer_value_scatter &&
-      (!kls_scatter_row_refactor_l_values(solver) ||
-       !kls_scatter_row_refactor_u_values(solver))) {
-    common->status = TRILINOS_KLU_INVALID;
-    return 0;
+  if (defer_value_scatter) {
+    if (lazy_value_scatter) {
+      kls_record_row_refactor_lazy_value_scatter_run(solver);
+    } else if (!kls_scatter_row_refactor_l_values(solver) ||
+               !kls_scatter_row_refactor_u_values(solver)) {
+      common->status = TRILINOS_KLU_INVALID;
+      return 0;
+    }
   }
   return 1;
 }
@@ -13953,6 +14006,8 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   shared->row_refactor_mode = 1;
   shared->row_refactor_defer_value_scatter =
     kls_row_refactor_should_defer_value_scatter(solver, check_pivots);
+  shared->row_refactor_lazy_value_scatter =
+    kls_row_refactor_should_lazy_value_scatter(check_pivots);
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   shared->invalid = 0;
   shared->pivot_rejected = 0;
@@ -14070,12 +14125,16 @@ static int kls_single_block_parallel_row_refactor(kls_solver *solver,
   } else {
     common->status = TRILINOS_KLU_OK;
   }
-  if (shared->row_refactor_defer_value_scatter &&
-      (!kls_scatter_row_refactor_l_values(solver) ||
-       !kls_scatter_row_refactor_u_values(solver))) {
-    common->status = TRILINOS_KLU_INVALID;
-    return 0;
+  if (shared->row_refactor_defer_value_scatter) {
+    if (shared->row_refactor_lazy_value_scatter) {
+      kls_record_row_refactor_lazy_value_scatter_run(solver);
+    } else if (!kls_scatter_row_refactor_l_values(solver) ||
+               !kls_scatter_row_refactor_u_values(solver)) {
+      common->status = TRILINOS_KLU_INVALID;
+      return 0;
+    }
   }
+  shared->row_refactor_lazy_value_scatter = 0;
   return 1;
 }
 
@@ -16330,6 +16389,9 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       return (UF_long)row_status;
     }
   }
+  if (!kls_publish_row_refactor_values(solver)) {
+    return 0;
+  }
   const int egraph =
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
   if (egraph >= 0) {
@@ -16559,6 +16621,15 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
 
   double elapsed = 0.0;
+  if (solver->row_refactor_values_dirty) {
+    const double publish_start = kls_now_seconds();
+    if (!kls_publish_row_refactor_values(solver)) {
+      solver->stats.factor_seconds = kls_now_seconds() - publish_start;
+      fill_numeric_stats(solver);
+      return KLS_ERR_FACTOR_FAILED;
+    }
+    elapsed += kls_now_seconds() - publish_start;
+  }
   const int had_numeric = solver->numeric != NULL;
   if (!had_numeric) {
     maybe_select_pre_static_row_match(solver, &elapsed, numeric_values);
@@ -16702,6 +16773,13 @@ static int solve_impl(kls_solver *solver,
   }
 
   const double start = kls_now_seconds();
+  if (!kls_publish_row_refactor_values(solver)) {
+    solver->stats.solve_seconds = kls_now_seconds() - start;
+    solver->stats.last_kernel_status = (int)solver->common.status;
+    solver->stats.memory_bytes = solver->common.memusage;
+    solver->stats.memory_peak_bytes = solver->common.mempeak;
+    return KLS_ERR_SOLVE_FAILED;
+  }
   const int kernel_transpose =
     (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
   const int has_row_scale = solver->row_scale != NULL;

@@ -196,6 +196,9 @@ typedef struct kls_stats {
   int64_t fast_rejected_group_tail_rows;
   double fast_rejected_group_tail_work;
   int64_t fast_rejected_pivoting_tail_seed_columns;
+  int row_refactor_values_dirty;
+  int row_refactor_last_lazy_value_scatter;
+  int64_t row_refactor_lazy_value_scatter_run_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

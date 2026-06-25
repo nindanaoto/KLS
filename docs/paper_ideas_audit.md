@@ -2858,6 +2858,18 @@ the final `Pinv` before publishing numeric state. This removes one more
 whole-matrix scratch allocation from the executable tail-restart path while
 preserving the current conservative suffix semantics.
 
+Unchecked row refactors then stopped publishing every completed row back into
+KLU's column storage immediately. The KLS-owned row-major `L`/`U` mirrors now
+remain authoritative across repeated unchecked row refactors, and a dirty flag
+forces a single publish before solve, before a later `kls_factor`, or before a
+non-row refactor fallback. This is a direct SPICE-cycle optimization for the
+row/segment engine: repeated Newton refactors no longer pay KLU scatter traffic
+on every step when the next step can consume the row-major mirrors directly.
+A focused four-thread `G2_circuit` row-refactor probe with three repeated
+refactors reported `0.337s` average refactor and a `0.047s` solve that included
+the delayed publish, with valid residuals. This is a row-engine throughput step,
+not yet the missing exact pivoting-tail executor.
+
 ## Recommended General Work
 
 1. Build a KLS-owned row/segment-oriented numeric engine instead of adding more

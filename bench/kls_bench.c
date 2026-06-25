@@ -819,6 +819,9 @@ int main(int argc, char **argv) {
            ",\"row_refactor_input_cleanup_entries\":%" PRId64
            ",\"row_refactor_last_defer_value_scatter\":%d"
            ",\"row_refactor_defer_value_scatter_run_count\":%" PRId64
+           ",\"row_refactor_values_dirty\":%d"
+           ",\"row_refactor_last_lazy_value_scatter\":%d"
+           ",\"row_refactor_lazy_value_scatter_run_count\":%" PRId64
            ",\"row_refactor_last_work_ready_queue\":%d"
            ",\"row_refactor_work_ready_queue_run_count\":%" PRId64
            ",\"row_refactor_ready_queue_workspace_groups\":%" PRId64
@@ -879,6 +882,9 @@ int main(int argc, char **argv) {
            stats.row_refactor_input_cleanup_entries,
            stats.row_refactor_last_defer_value_scatter,
            stats.row_refactor_defer_value_scatter_run_count,
+           stats.row_refactor_values_dirty,
+           stats.row_refactor_last_lazy_value_scatter,
+           stats.row_refactor_lazy_value_scatter_run_count,
            stats.row_refactor_last_work_ready_queue,
            stats.row_refactor_work_ready_queue_run_count,
            stats.row_refactor_ready_queue_workspace_groups,
@@ -1040,6 +1046,9 @@ int main(int argc, char **argv) {
            ", input cleanup entries: %" PRId64
            ", last defer scatter: %d"
            ", defer scatter runs: %" PRId64
+           ", values dirty: %d"
+           ", last lazy scatter: %d"
+           ", lazy scatter runs: %" PRId64
            ", last work queue: %d"
            ", work queue runs: %" PRId64
            ", queue workspace groups: %" PRId64 "\n",
@@ -1069,6 +1078,9 @@ int main(int argc, char **argv) {
            stats.row_refactor_input_cleanup_entries,
            stats.row_refactor_last_defer_value_scatter,
            stats.row_refactor_defer_value_scatter_run_count,
+           stats.row_refactor_values_dirty,
+           stats.row_refactor_last_lazy_value_scatter,
+           stats.row_refactor_lazy_value_scatter_run_count,
            stats.row_refactor_last_work_ready_queue,
            stats.row_refactor_work_ready_queue_run_count,
            stats.row_refactor_ready_queue_workspace_groups);

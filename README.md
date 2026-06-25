@@ -368,10 +368,13 @@ report `row_refactor_last_done_bitmap` and
 visible. Row-pattern analysis also records `row_refactor_input_cleanup_rows`
 and `row_refactor_input_cleanup_entries`; rows whose input columns are already
 covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in
-the row numeric kernels. Dense row segments use deferred all-value scatter only
-for checked pivot probes; unchecked row refactors scatter each completed dense
-row directly and report `row_refactor_last_defer_value_scatter` plus
-`row_refactor_defer_value_scatter_run_count`. The queued row tail orders
+the row numeric kernels. Row refactors can keep KLS row-major `L`/`U` values
+authoritative across repeated unchecked refactors and publish them to KLU
+storage lazily before solve or before a non-row fallback. Benchmark stats
+report `row_refactor_last_defer_value_scatter`,
+`row_refactor_defer_value_scatter_run_count`, `row_refactor_values_dirty`,
+`row_refactor_last_lazy_value_scatter`, and
+`row_refactor_lazy_value_scatter_run_count`. The queued row tail orders
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus
