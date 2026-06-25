@@ -2958,15 +2958,18 @@ static int test_unchecked_row_dense_compact_panel(void) {
 }
 
 static int test_batched_compact_supernode_cblas_probe(void) {
-  const int32_t lead = 40;
+  const int32_t lead0 = 40;
+  const int32_t lead1 = 40;
   const int32_t mid = 40;
-  const int32_t trail = 16;
-  const int32_t n = lead + mid + trail;
-  const int32_t trail_break_col = n - 1;
+  const int32_t trail = 20;
+  const int32_t core = lead0 + lead1 + mid;
+  const int32_t n = core + trail;
+  const int32_t trail_break_col0 = n - 2;
   const size_t nnz =
-    (size_t)(lead + mid) * (size_t)(lead + mid) +
-    (size_t)(trail - 1) * ((size_t)(lead + mid) + 1u) +
-    (size_t)lead + 1u;
+    (size_t)core * (size_t)core +
+    (size_t)(trail - 2) * ((size_t)core + 1u) +
+    ((size_t)core - (size_t)lead0 + 1u) +
+    ((size_t)core - (size_t)lead0 - (size_t)lead1 + 1u);
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
   int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
   double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
@@ -2994,28 +2997,31 @@ static int test_batched_compact_supernode_cblas_probe(void) {
     ap[col] = (int32_t)pos;
     int32_t row_start = 0;
     int32_t row_limit = 0;
-    if (col < lead + mid) {
-      row_limit = lead + mid;
-    } else if (col < trail_break_col) {
-      row_limit = lead + mid;
+    if (col < core) {
+      row_limit = core;
+    } else if (col < trail_break_col0) {
+      row_limit = core;
+    } else if (col == trail_break_col0) {
+      row_start = lead0;
+      row_limit = core;
     } else {
-      row_start = lead;
-      row_limit = lead + mid;
+      row_start = lead0 + lead1;
+      row_limit = core;
     }
     for (int32_t row = row_start; row < row_limit; ++row) {
       const size_t p = pos++;
       ai[p] = row;
       ax0[p] = row == col
-        ? 26.0 + 0.02 * (double)col
-        : 0.0004 * (1.0 + (double)((row + 5 * col) % 17));
+        ? 30.0 + 0.015 * (double)col
+        : 0.0002 * (1.0 + (double)((row + 7 * col) % 29));
       ax1[p] = ax0[p] + (row == col
         ? 0.03 * (double)((col % 5) + 1)
         : 1.0e-5 * (double)(((row + col) % 7) - 3));
     }
-    if (col >= lead + mid) {
+    if (col >= core) {
       const size_t p = pos++;
       ai[p] = col;
-      ax0[p] = 19.0 + 0.03 * (double)col;
+      ax0[p] = 22.0 + 0.02 * (double)col;
       ax1[p] = ax0[p] + 0.02 * (double)((col % 3) + 1);
     }
   }
@@ -3119,7 +3125,7 @@ static int test_batched_compact_supernode_cblas_probe(void) {
        stats.row_refactor_compact_supernode_batch_count < 1 ||
        stats.row_refactor_compact_supernode_batch_rows < mid ||
        stats.row_refactor_compact_supernode_batch_dep_rows <
-         (int64_t)lead * (int64_t)mid ||
+         (int64_t)(lead0 + lead1) * (int64_t)mid ||
        stats.row_refactor_compact_supernode_batch_entries <= 0)) {
     fprintf(stderr,
             "unexpected batched compact-supernode stats: cblas=%d"
