@@ -172,6 +172,9 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         "fast_rejected_pivoting_tail_topological": as_int(
             row, "fast_rejected_pivoting_tail_topological", 0
         ),
+        "fast_rejected_pivoting_tail_seed_columns": as_int(
+            row, "fast_rejected_pivoting_tail_seed_columns", 0
+        ),
         "fast_rejected_row_tail_columns": as_int(
             row, "fast_rejected_row_tail_columns", 0
         ),
@@ -192,6 +195,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
             "row_tail_work={row_tail:.6g} "
             "pivoting_tail_cols={pivoting_tail_cols} "
             "pivoting_tail_work={pivoting_tail:.6g} "
+            "seed_cols={seed_cols} "
             "overcompute_work={overcompute:.6g} "
             "saved_work={saved:.6g} "
             "block_start={block_start} "
@@ -211,6 +215,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
                 pivoting_tail=float(
                     record["fast_rejected_pivoting_tail_work"]
                 ),
+                seed_cols=record["fast_rejected_pivoting_tail_seed_columns"],
                 overcompute=float(record["suffix_tail_overcompute_work"]),
                 saved=float(record["fast_repaired_tail_restart_saved_work"]),
                 block_start=record["fast_rejected_block_start"],
@@ -307,6 +312,10 @@ def main() -> int:
     pivoting_tail_work = sum(
         float(r["fast_rejected_pivoting_tail_work"]) for r in pivoting_tail
     )
+    pivoting_tail_seed_columns = sum(
+        int(r["fast_rejected_pivoting_tail_seed_columns"])
+        for r in pivoting_tail
+    )
 
     summary = {
         "rows_total": len(rows),
@@ -347,6 +356,7 @@ def main() -> int:
         "rows_with_row_tail_scope": len(row_tail),
         "row_tail_work_total": row_tail_work,
         "rows_with_pivoting_tail_scope": len(pivoting_tail),
+        "pivoting_tail_seed_columns_total": pivoting_tail_seed_columns,
         "pivoting_tail_work_total": pivoting_tail_work,
     }
     print(json.dumps(summary, indent=2, sort_keys=True))

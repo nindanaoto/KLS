@@ -420,12 +420,14 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivoting_tail_last`,
 `fast_rejected_pivoting_tail_contains_reject`,
 `fast_rejected_pivoting_tail_topological`,
+`fast_rejected_pivoting_tail_seed_columns`,
 `fast_rejected_refresh_state`, `fast_block_restarts`, and
 `fast_tail_restarts` for the first rejected
 factor-order pivot, its original matrix column, the strongest factor-row
 candidate and multiplier among entries that violated a KLS-owned pivot check
 when available, the accepted pivot magnitude and candidate entry magnitude at
-the reject, the best row-tail
+the reject, the checked-refactor unfinished seed used before ordered-ETree
+tail closure, the best row-tail
 candidate that can be computed from current prefix state in the checked
 row-major path, its retained row-tail position, whether that prefix-current
 candidate satisfies the same pivot-tolerance predicate that rejected the

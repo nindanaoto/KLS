@@ -195,6 +195,7 @@ typedef struct kls_stats {
   int64_t fast_rejected_group_tail_groups;
   int64_t fast_rejected_group_tail_rows;
   double fast_rejected_group_tail_work;
+  int64_t fast_rejected_pivoting_tail_seed_columns;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

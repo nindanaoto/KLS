@@ -28,6 +28,9 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
       stats->fast_rejected_block_start < 0 ||
       stats->fast_rejected_block_size <= 0 ||
       stats->fast_rejected_pivoting_tail_columns <= 0 ||
+      stats->fast_rejected_pivoting_tail_seed_columns <= 0 ||
+      stats->fast_rejected_pivoting_tail_seed_columns >
+        stats->fast_rejected_pivoting_tail_columns ||
       stats->fast_rejected_pivoting_tail_first <
         stats->fast_rejected_block_start ||
       stats->fast_rejected_pivoting_tail_first >
@@ -42,6 +45,7 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
     fprintf(stderr,
             "unexpected pivoting tail plan for %s: pivot=%" PRId64
             ", block=[%" PRId64 ",%" PRId64 "), cols=%" PRId64
+            ", seed=%" PRId64
             ", first=%" PRId64 ", last=%" PRId64
             ", contains=%d, topo=%d\n",
             what,
@@ -52,6 +56,9 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
                   stats->fast_rejected_block_size
               : -1,
             stats != NULL ? stats->fast_rejected_pivoting_tail_columns : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_seed_columns
+              : 0,
             stats != NULL ? stats->fast_rejected_pivoting_tail_first : -1,
             stats != NULL ? stats->fast_rejected_pivoting_tail_last : -1,
             stats != NULL

@@ -2642,17 +2642,17 @@ repair path rather than the missing CKTSO pivoting-tail factorization.
 
 The tail-restart diagnostic was then corrected to retain an executable
 pivoting-tail plan, not only the old single ETree successor path. For
-prefix-current rejects, the new `fast_rejected_pivoting_tail_*` fields seed the
-plan with the rejected block suffix and close it through the ordered-block
-ETree; for all-current or unknown-refresh rejects, they seed the plan from the
-rejected pivot. The strict tail-restart saved-work estimate now uses this
-pivoting-tail scope. A focused `coupled` diagonal-stress probe reported a
-prefix-current reject at pivot `24`, a suffix/pivoting-tail scope of `11293`
-columns and about `1.193e7` work, versus the older single ETree path of `8194`
-columns and about `1.191e7` work; the full repaired-block work remained about
-`3.650e8`. This keeps the opportunity estimate tied to the CKTSO restart set
-and gives the future row/segment numeric kernel a concrete ordered worklist to
-consume.
+prefix-current rejects, KLS now seeds the `fast_rejected_pivoting_tail_*` plan
+from the checked-refactor unfinished-node bitmap when it is available, and
+falls back to the rejected block suffix otherwise; all-current or
+unknown-refresh rejects seed the plan from the rejected pivot. The strict
+tail-restart saved-work estimate uses this pivoting-tail scope. A focused
+`coupled` diagonal-stress probe reported a prefix-current reject at pivot `24`,
+a suffix/pivoting-tail scope of `11293` columns and about `1.193e7` work,
+versus the older single ETree path of `8194` columns and about `1.191e7` work;
+the full repaired-block work remained about `3.650e8`. This keeps the
+opportunity estimate tied to the CKTSO restart set and gives the future
+row/segment numeric kernel a concrete ordered worklist to consume.
 
 That pivoting-tail plan is now checked as a real scheduler contract instead of
 only a count/work estimate. KLS records the first and last global rows in the
@@ -2842,6 +2842,14 @@ above the retained CKTSO-style pivoting-tail plan. This does not change solver
 behavior, but it makes broad benchmark output rank the cases where replacing
 the conservative suffix fallback with a real pipelined pivoting-tail executor
 should remove the most work.
+
+The pivoting-tail plan then stopped treating every prefix-current checked
+reject as a full suffix when the checked worker bitmap can identify unfinished
+nodes. KLS records those unfinished local columns as
+`fast_rejected_pivoting_tail_seed_columns` and closes only that seed set through
+the ordered-block ETree. This is still diagnostic/planning infrastructure, but
+it matches CKTSO's restart-point determination more closely and exposes the
+true non-suffix worklist that a pipelined pivoting-tail executor should consume.
 
 ## Recommended General Work
 

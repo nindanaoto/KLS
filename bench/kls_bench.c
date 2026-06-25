@@ -714,6 +714,7 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivoting_tail_last\":%" PRId64
            ",\"fast_rejected_pivoting_tail_contains_reject\":%d"
            ",\"fast_rejected_pivoting_tail_topological\":%d"
+           ",\"fast_rejected_pivoting_tail_seed_columns\":%" PRId64
            ",\"fast_rejected_refresh_state\":%d",
            path, a.n, a.nnz, options.threads,
            kls_orientation_name(options.orientation),
@@ -777,6 +778,7 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_last,
            stats.fast_rejected_pivoting_tail_contains_reject,
            stats.fast_rejected_pivoting_tail_topological,
+           stats.fast_rejected_pivoting_tail_seed_columns,
            stats.fast_rejected_refresh_state);
     printf(",\"refactor_dependency_levels\":%" PRId64
            ",\"refactor_dependency_max_width\":%" PRId64
@@ -977,7 +979,7 @@ int main(int argc, char **argv) {
            ", etree work %.6g, pivoting tail %" PRId64
            ", pivoting-tail work %.6g, first %" PRId64
            ", last %" PRId64 ", contains reject %d, topological %d"
-           ", refresh state %d\n",
+           ", seed %" PRId64 ", refresh state %d\n",
            stats.fast_rejected_block_start,
            stats.fast_rejected_block_size,
            stats.fast_rejected_suffix_columns,
@@ -996,6 +998,7 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_last,
            stats.fast_rejected_pivoting_tail_contains_reject,
            stats.fast_rejected_pivoting_tail_topological,
+           stats.fast_rejected_pivoting_tail_seed_columns,
            stats.fast_rejected_refresh_state);
     printf("refactor dependency levels: %" PRId64
            ", max width: %" PRId64 ", edges: %" PRId64 "\n",
