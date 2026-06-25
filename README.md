@@ -412,7 +412,12 @@ groups stay on the direct row-mirror kernel. Stats report
 `row_refactor_compact_dense_panel_eligible_rows`,
 `row_refactor_compact_dense_panel_update_work`, and
 `row_refactor_compact_dense_panel_entries` for the structural opportunity that
-survives the compact-panel gate. Checked pivot-probe row refactors use
+survives the compact-panel gate. Eligible dense groups also allocate
+solver-owned compact panel slices reported as
+`row_refactor_compact_dense_panel_persistent_groups` and
+`row_refactor_compact_dense_panel_persistent_entries`; the compact kernel uses
+those slices before falling back to worker-local scratch. Checked pivot-probe
+row refactors use
 the same compact panel only through a row-ordered update/check/publish loop, so
 a rejected pivot leaves the same prefix-visible row-major state as the native
 direct row-mirror kernel. For generic-only row patterns, pipeline groups also

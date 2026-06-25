@@ -221,6 +221,10 @@ struct kls_solver {
   UF_long row_refactor_compact_dense_panel_eligible_rows;
   double row_refactor_compact_dense_panel_update_work;
   double row_refactor_compact_dense_panel_entries;
+  UF_long *row_refactor_group_compact_panel_begin;
+  double *row_refactor_compact_panel_values;
+  UF_long row_refactor_compact_dense_panel_persistent_groups;
+  UF_long row_refactor_compact_dense_panel_persistent_entries;
   unsigned int row_refactor_tail_mark;
   UF_long row_refactor_tail_count;
   UF_long *refactor_level_ptr;
@@ -789,6 +793,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_group_work);
   free(solver->row_refactor_group_dense);
   free(solver->row_refactor_group_kind);
+  free(solver->row_refactor_group_compact_panel_begin);
+  free(solver->row_refactor_compact_panel_values);
   solver->row_refactor_l_ptr = NULL;
   solver->row_refactor_l_cols = NULL;
   solver->row_refactor_l_values = NULL;
@@ -831,6 +837,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_work = NULL;
   solver->row_refactor_group_dense = NULL;
   solver->row_refactor_group_kind = NULL;
+  solver->row_refactor_group_compact_panel_begin = NULL;
+  solver->row_refactor_compact_panel_values = NULL;
   solver->row_refactor_pattern_n = 0;
   solver->row_refactor_group_count = 0;
   solver->row_refactor_group_dependency_edges = 0;
@@ -891,6 +899,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_compact_dense_panel_eligible_rows = 0;
   solver->row_refactor_compact_dense_panel_update_work = 0.0;
   solver->row_refactor_compact_dense_panel_entries = 0.0;
+  solver->row_refactor_compact_dense_panel_persistent_groups = 0;
+  solver->row_refactor_compact_dense_panel_persistent_entries = 0;
   solver->row_refactor_tail_mark = 0u;
   solver->row_refactor_tail_count = 0;
 }
@@ -952,6 +962,8 @@ typedef struct {
   UF_long compact_dense_panel_eligible_rows;
   double compact_dense_panel_update_work;
   double compact_dense_panel_entries;
+  UF_long compact_dense_panel_persistent_groups;
+  UF_long compact_dense_panel_persistent_entries;
 } kls_row_refactor_diagnostics;
 
 static void kls_save_row_refactor_diagnostics(
@@ -1035,6 +1047,10 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_compact_dense_panel_update_work;
   diag->compact_dense_panel_entries =
     solver->row_refactor_compact_dense_panel_entries;
+  diag->compact_dense_panel_persistent_groups =
+    solver->row_refactor_compact_dense_panel_persistent_groups;
+  diag->compact_dense_panel_persistent_entries =
+    solver->row_refactor_compact_dense_panel_persistent_entries;
 }
 
 static void kls_restore_row_refactor_diagnostics(
@@ -1126,6 +1142,10 @@ static void kls_restore_row_refactor_diagnostics(
     diag->compact_dense_panel_update_work;
   solver->row_refactor_compact_dense_panel_entries =
     diag->compact_dense_panel_entries;
+  solver->row_refactor_compact_dense_panel_persistent_groups =
+    diag->compact_dense_panel_persistent_groups;
+  solver->row_refactor_compact_dense_panel_persistent_entries =
+    diag->compact_dense_panel_persistent_entries;
 }
 
 static void free_row_refactor_pattern_preserve_diagnostics(kls_solver *solver) {
@@ -8487,6 +8507,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_compact_dense_panel_update_work;
   solver->stats.row_refactor_compact_dense_panel_entries =
     solver->row_refactor_compact_dense_panel_entries;
+  solver->stats.row_refactor_compact_dense_panel_persistent_groups =
+    (int64_t)solver->row_refactor_compact_dense_panel_persistent_groups;
+  solver->stats.row_refactor_compact_dense_panel_persistent_entries =
+    (int64_t)solver->row_refactor_compact_dense_panel_persistent_entries;
   solver->stats.refactor_dependency_cluster_levels =
     (int64_t)solver->refactor_cluster_level_count;
   solver->stats.refactor_dependency_pipeline_columns =
@@ -13692,6 +13716,88 @@ static int kls_row_refactor_group_has_internal_deps(const UF_long *l_ptr,
   return 0;
 }
 
+static void kls_try_build_row_refactor_compact_panel_storage(
+  UF_long group_count,
+  const UF_long *group_ptr,
+  const unsigned char *group_kind,
+  const UF_long *group_trailing_len,
+  UF_long **begin_out,
+  double **values_out,
+  UF_long *groups_out,
+  UF_long *entries_out) {
+  if (begin_out != NULL) {
+    *begin_out = NULL;
+  }
+  if (values_out != NULL) {
+    *values_out = NULL;
+  }
+  if (groups_out != NULL) {
+    *groups_out = 0;
+  }
+  if (entries_out != NULL) {
+    *entries_out = 0;
+  }
+  if (group_count == 0u || group_ptr == NULL || group_kind == NULL ||
+      group_trailing_len == NULL || begin_out == NULL || values_out == NULL ||
+      groups_out == NULL || entries_out == NULL ||
+      group_count >= (UF_long)(SIZE_MAX / sizeof(UF_long))) {
+    return;
+  }
+
+  UF_long *begin =
+    (UF_long *)calloc((size_t)group_count + 1u, sizeof(*begin));
+  if (begin == NULL) {
+    return;
+  }
+
+  UF_long total = 0;
+  UF_long groups = 0;
+  for (UF_long group = 0; group < group_count; ++group) {
+    if (group_kind[group] != KLS_ROW_REFACTOR_GROUP_DENSE) {
+      begin[group + 1u] = total;
+      continue;
+    }
+    const UF_long width = group_ptr[group + 1u] - group_ptr[group];
+    const UF_long trailing_len = group_trailing_len[group];
+    if (!kls_row_refactor_prefers_compact_dense_panel(width, trailing_len)) {
+      begin[group + 1u] = total;
+      continue;
+    }
+    if (width == 0u || width > UF_long_max / width) {
+      free(begin);
+      return;
+    }
+    const UF_long dense_entries = width * width;
+    if (trailing_len > 0u &&
+        width > (UF_long_max - dense_entries) / trailing_len) {
+      free(begin);
+      return;
+    }
+    const UF_long entries = dense_entries + width * trailing_len;
+    if (entries > UF_long_max - total) {
+      free(begin);
+      return;
+    }
+    total += entries;
+    begin[group + 1u] = total;
+    groups++;
+  }
+  if (total == 0u || total > (UF_long)(SIZE_MAX / sizeof(double))) {
+    free(begin);
+    return;
+  }
+
+  double *values = (double *)malloc((size_t)total * sizeof(*values));
+  if (values == NULL) {
+    free(begin);
+    return;
+  }
+  *begin_out = begin;
+  *values_out = values;
+  *groups_out = groups;
+  *entries_out = total;
+}
+
 static int kls_build_row_refactor_pattern(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->nblocks == 0u || solver->symbolic->R == NULL) {
@@ -14520,6 +14626,16 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   }
   free(group_levels);
 
+  UF_long *group_compact_panel_begin = NULL;
+  double *compact_panel_values = NULL;
+  UF_long compact_dense_panel_persistent_groups = 0;
+  UF_long compact_dense_panel_persistent_entries = 0;
+  kls_try_build_row_refactor_compact_panel_storage(
+    group_count, group_ptr, group_kind, group_trailing_len,
+    &group_compact_panel_begin, &compact_panel_values,
+    &compact_dense_panel_persistent_groups,
+    &compact_dense_panel_persistent_entries);
+
   solver->row_refactor_group_ptr = group_ptr;
   solver->row_refactor_group_dep_ptr = group_dep_ptr;
   solver->row_refactor_group_dep_rows = group_dep_rows;
@@ -14540,6 +14656,10 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_trailing_begin = group_trailing_begin;
   solver->row_refactor_group_dense = group_dense;
   solver->row_refactor_group_kind = group_kind;
+  solver->row_refactor_group_compact_panel_begin =
+    group_compact_panel_begin;
+  solver->row_refactor_compact_panel_values =
+    compact_panel_values;
   solver->row_refactor_level_count = group_level_count;
   solver->row_refactor_level_max_width = group_max_width;
   solver->row_refactor_cluster_level_count = group_level_count;
@@ -14566,6 +14686,10 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     compact_dense_panel_update_work;
   solver->row_refactor_compact_dense_panel_entries =
     compact_dense_panel_entries;
+  solver->row_refactor_compact_dense_panel_persistent_groups =
+    compact_dense_panel_persistent_groups;
+  solver->row_refactor_compact_dense_panel_persistent_entries =
+    compact_dense_panel_persistent_entries;
   if (group_count > 0u &&
       group_count <= (UF_long)(SIZE_MAX / sizeof(double))) {
     solver->row_refactor_group_work =
@@ -16669,6 +16793,24 @@ static double *kls_egraph_worker_segment_panel(
   return panel;
 }
 
+static double *kls_row_refactor_compact_group_panel(kls_solver *solver,
+                                                   UF_long group,
+                                                   UF_long entry_count) {
+  if (solver == NULL ||
+      solver->row_refactor_group_compact_panel_begin == NULL ||
+      solver->row_refactor_compact_panel_values == NULL ||
+      group >= solver->row_refactor_group_count || entry_count == 0u) {
+    return NULL;
+  }
+  const UF_long begin = solver->row_refactor_group_compact_panel_begin[group];
+  const UF_long end = solver->row_refactor_group_compact_panel_begin[group + 1u];
+  if (end < begin || end - begin != entry_count ||
+      end > solver->row_refactor_compact_dense_panel_persistent_entries) {
+    return NULL;
+  }
+  return solver->row_refactor_compact_panel_values + begin;
+}
+
 static int kls_parallel_row_refactor_process_dense_group_native(
   kls_egraph_refactor_worker *worker,
   UF_long group,
@@ -17064,9 +17206,12 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
     }
     trailing_panel_entries = width * trailing_len;
   }
+  const UF_long panel_entries = dense_panel_entries + trailing_panel_entries;
   double *dense_panel =
-    kls_egraph_worker_segment_panel(
-      worker, dense_panel_entries + trailing_panel_entries);
+    kls_row_refactor_compact_group_panel(solver, group, panel_entries);
+  if (dense_panel == NULL) {
+    dense_panel = kls_egraph_worker_segment_panel(worker, panel_entries);
+  }
   if (dense_panel == NULL) {
     return -1;
   }

@@ -3560,3 +3560,17 @@ pool. This follows CKTSO's "continue tail work in parallel" direction only at
 BTF-block granularity; it does not implement Algorithm 5's ETree-descendant
 row-tail factorization with pivoting, nor SubtreeLU's separator-tree
 private/pipeline row queues.
+
+The compact dense row-segment bridge then moved one step from transient scratch
+toward persistent row/segment storage. When a dense row group passes the same
+compact-panel arithmetic-intensity gate, the row-refactor pattern now allocates
+a solver-owned compact panel slice for that group and reports the retained
+groups/entries as
+`row_refactor_compact_dense_panel_persistent_groups` and
+`row_refactor_compact_dense_panel_persistent_entries`. The compact kernel uses
+that retained slice before falling back to worker-local scratch, and the dense
+checked/unchecked smoke cases assert both execution and retained panel storage.
+This still repacks current input values on each numeric pass and scatters back
+to row mirrors, so it is not the full CKTSO/SubtreeLU row-major numeric storage
+model; it does make the compact row-segment value lifetime solver-owned rather
+than worker-scratch-owned.

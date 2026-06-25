@@ -277,6 +277,8 @@ typedef struct kls_stats {
   double row_refactor_compact_dense_panel_update_work;
   double row_refactor_compact_dense_panel_entries;
   int64_t fast_repaired_parallel_tail_blocks;
+  int64_t row_refactor_compact_dense_panel_persistent_groups;
+  int64_t row_refactor_compact_dense_panel_persistent_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
