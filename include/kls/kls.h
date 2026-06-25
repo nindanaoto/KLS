@@ -324,6 +324,10 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_supernode_gemv_count;
   int64_t row_refactor_compact_supernode_gemv_rows;
   int64_t row_refactor_compact_supernode_gemv_entries;
+  int row_refactor_last_compact_supernode_trsv;
+  int64_t row_refactor_compact_supernode_trsv_count;
+  int64_t row_refactor_compact_supernode_trsv_rows;
+  int64_t row_refactor_compact_supernode_trsv_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

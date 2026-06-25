@@ -264,6 +264,10 @@ struct kls_solver {
   UF_long row_refactor_compact_supernode_gemv_count;
   UF_long row_refactor_compact_supernode_gemv_rows;
   UF_long row_refactor_compact_supernode_gemv_entries;
+  int row_refactor_last_compact_supernode_trsv;
+  UF_long row_refactor_compact_supernode_trsv_count;
+  UF_long row_refactor_compact_supernode_trsv_rows;
+  UF_long row_refactor_compact_supernode_trsv_entries;
   unsigned int row_refactor_tail_mark;
   UF_long row_refactor_tail_count;
   UF_long *refactor_level_ptr;
@@ -432,6 +436,7 @@ typedef struct kls_egraph_refactor_shared {
   int row_refactor_mode;
   int row_refactor_defer_value_scatter;
   int row_refactor_lazy_value_scatter;
+  int row_refactor_compact_supernode_trsv;
   int row_solve_mode;
   int row_solve_upper;
   double *row_solve_work;
@@ -1087,6 +1092,10 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_compact_supernode_gemv_count = 0;
   solver->row_refactor_compact_supernode_gemv_rows = 0;
   solver->row_refactor_compact_supernode_gemv_entries = 0;
+  solver->row_refactor_last_compact_supernode_trsv = 0;
+  solver->row_refactor_compact_supernode_trsv_count = 0;
+  solver->row_refactor_compact_supernode_trsv_rows = 0;
+  solver->row_refactor_compact_supernode_trsv_entries = 0;
   solver->row_refactor_tail_mark = 0u;
   solver->row_refactor_tail_count = 0;
 }
@@ -1170,6 +1179,10 @@ typedef struct {
   UF_long compact_supernode_gemv_count;
   UF_long compact_supernode_gemv_rows;
   UF_long compact_supernode_gemv_entries;
+  int last_compact_supernode_trsv;
+  UF_long compact_supernode_trsv_count;
+  UF_long compact_supernode_trsv_rows;
+  UF_long compact_supernode_trsv_entries;
 } kls_row_refactor_diagnostics;
 
 static void kls_save_row_refactor_diagnostics(
@@ -1297,6 +1310,14 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_compact_supernode_gemv_rows;
   diag->compact_supernode_gemv_entries =
     solver->row_refactor_compact_supernode_gemv_entries;
+  diag->last_compact_supernode_trsv =
+    solver->row_refactor_last_compact_supernode_trsv;
+  diag->compact_supernode_trsv_count =
+    solver->row_refactor_compact_supernode_trsv_count;
+  diag->compact_supernode_trsv_rows =
+    solver->row_refactor_compact_supernode_trsv_rows;
+  diag->compact_supernode_trsv_entries =
+    solver->row_refactor_compact_supernode_trsv_entries;
 }
 
 static void kls_restore_row_refactor_diagnostics(
@@ -1432,6 +1453,14 @@ static void kls_restore_row_refactor_diagnostics(
     diag->compact_supernode_gemv_rows;
   solver->row_refactor_compact_supernode_gemv_entries =
     diag->compact_supernode_gemv_entries;
+  solver->row_refactor_last_compact_supernode_trsv =
+    diag->last_compact_supernode_trsv;
+  solver->row_refactor_compact_supernode_trsv_count =
+    diag->compact_supernode_trsv_count;
+  solver->row_refactor_compact_supernode_trsv_rows =
+    diag->compact_supernode_trsv_rows;
+  solver->row_refactor_compact_supernode_trsv_entries =
+    diag->compact_supernode_trsv_entries;
 }
 
 static void free_row_refactor_pattern_preserve_diagnostics(kls_solver *solver) {
@@ -1733,6 +1762,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_compact_supernode_update = 0;
   solver->row_refactor_last_compact_supernode_gemv = 0;
+  solver->row_refactor_last_compact_supernode_trsv = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_last_lazy_value_scatter = 0;
   solver->row_refactor_last_row_solve = 0;
@@ -1753,6 +1783,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_compact_dense_panel_persistent = 0;
   solver->stats.row_refactor_last_compact_supernode_update = 0;
   solver->stats.row_refactor_last_compact_supernode_gemv = 0;
+  solver->stats.row_refactor_last_compact_supernode_trsv = 0;
   solver->stats.row_refactor_last_defer_value_scatter = 0;
   solver->stats.row_refactor_last_lazy_value_scatter = 0;
   solver->stats.row_refactor_last_row_solve = 0;
@@ -1777,6 +1808,7 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_compact_supernode_update = 0;
   solver->row_refactor_last_compact_supernode_gemv = 0;
+  solver->row_refactor_last_compact_supernode_trsv = 0;
   solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_last_private_ready_groups = 0;
   solver->row_refactor_last_separator_private_queue = 0;
@@ -1868,6 +1900,19 @@ static void kls_record_row_refactor_compact_supernode_gemv(
   solver->row_refactor_compact_supernode_gemv_count++;
   solver->row_refactor_compact_supernode_gemv_rows += rows;
   solver->row_refactor_compact_supernode_gemv_entries += entries;
+}
+
+static void kls_record_row_refactor_compact_supernode_trsv(
+  kls_solver *solver,
+  UF_long rows,
+  UF_long entries) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_last_compact_supernode_trsv = 1;
+  solver->row_refactor_compact_supernode_trsv_count++;
+  solver->row_refactor_compact_supernode_trsv_rows += rows;
+  solver->row_refactor_compact_supernode_trsv_entries += entries;
 }
 
 static void kls_reset_row_refactor_compact_panel_valid(kls_solver *solver) {
@@ -9264,6 +9309,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_compact_supernode_gemv_rows;
   solver->stats.row_refactor_compact_supernode_gemv_entries =
     (int64_t)solver->row_refactor_compact_supernode_gemv_entries;
+  solver->stats.row_refactor_last_compact_supernode_trsv =
+    solver->row_refactor_last_compact_supernode_trsv;
+  solver->stats.row_refactor_compact_supernode_trsv_count =
+    (int64_t)solver->row_refactor_compact_supernode_trsv_count;
+  solver->stats.row_refactor_compact_supernode_trsv_rows =
+    (int64_t)solver->row_refactor_compact_supernode_trsv_rows;
+  solver->stats.row_refactor_compact_supernode_trsv_entries =
+    (int64_t)solver->row_refactor_compact_supernode_trsv_entries;
   solver->stats.refactor_dependency_cluster_levels =
     (int64_t)solver->refactor_cluster_level_count;
   solver->stats.refactor_dependency_pipeline_columns =
@@ -16991,6 +17044,12 @@ static int kls_partial_supernode_pipeline_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_compact_supernode_trsv_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_first_factor_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
   return value != NULL && value[0] != '\0' &&
@@ -18169,6 +18228,8 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   shared.row_refactor_mode = 1;
   shared.row_refactor_defer_value_scatter = defer_value_scatter;
   shared.row_refactor_lazy_value_scatter = lazy_value_scatter;
+  shared.row_refactor_compact_supernode_trsv =
+    kls_compact_supernode_trsv_env_enabled();
 
   kls_egraph_refactor_worker worker;
   memset(&worker, 0, sizeof(worker));
@@ -18618,77 +18679,144 @@ static int kls_row_refactor_try_compact_supernode_update(
 
   double *x = worker->x;
   const double *udiag = (const double *)solver->numeric->Udiag;
-  double *lij_workspace = NULL;
+  double *supernode_workspace = NULL;
   double *trailing_workspace = NULL;
+  int use_compact_trsv = 0;
   int use_trailing_gemv = 0;
   const UF_long max_workspace_entries =
-    (UF_long)(SIZE_MAX / sizeof(*lij_workspace));
-  if (trailing_len > 0u && run_rows <= max_workspace_entries &&
+    (UF_long)(SIZE_MAX / sizeof(*supernode_workspace));
+  if (run_rows <= max_workspace_entries &&
       trailing_len <= max_workspace_entries - run_rows) {
-    lij_workspace =
-      kls_egraph_worker_supernode_workspace(worker, run_rows + trailing_len);
-    if (lij_workspace != NULL) {
-      trailing_workspace = lij_workspace + run_rows;
+    const UF_long workspace_entries = run_rows + trailing_len;
+    if (shared->row_refactor_compact_supernode_trsv) {
+      supernode_workspace =
+        kls_egraph_worker_supernode_workspace(worker, workspace_entries);
+      use_compact_trsv = supernode_workspace != NULL;
+    }
+    if (!use_compact_trsv && trailing_len > 0u) {
+      supernode_workspace =
+        kls_egraph_worker_supernode_workspace(worker, workspace_entries);
+    }
+    if (supernode_workspace != NULL && trailing_len > 0u) {
+      trailing_workspace = supernode_workspace + run_rows;
       memset(trailing_workspace, 0,
              (size_t)trailing_len * sizeof(*trailing_workspace));
       use_trailing_gemv = 1;
     }
   }
   UF_long touched_entries = 0;
-  for (UF_long p = p0; p < run_end; ++p) {
-    const UF_long dep = solver->row_refactor_l_cols[p];
-    if (wait_for_dependencies &&
-        !kls_egraph_refactor_wait_done(shared, dep)) {
+  if (use_compact_trsv) {
+    for (UF_long local = 0; local < run_rows; ++local) {
+      const UF_long p = p0 + local;
+      const UF_long dep = solver->row_refactor_l_cols[p];
+      if (wait_for_dependencies &&
+          !kls_egraph_refactor_wait_done(shared, dep)) {
+        x[dep] = 0.0;
+        return -1;
+      }
+      supernode_workspace[local] = x[dep];
       x[dep] = 0.0;
-      return -1;
     }
-    const UF_long local_dep = dep - group_begin;
-    const double candidate = x[dep];
-    const double lij = candidate / udiag[dep];
-    if (kls_parallel_row_refactor_rejects_multiplier(
-          worker, row, dep, candidate, lij)) {
+
+    const UF_long suffix_begin = dep0 - group_begin;
+    UF_long trsv_entries = 0;
+    for (UF_long local = 0; local < run_rows; ++local) {
+      const UF_long p = p0 + local;
+      const UF_long dep = solver->row_refactor_l_cols[p];
+      const UF_long local_dep = dep - group_begin;
+      const double candidate = supernode_workspace[local];
+      const double lij = candidate / udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        return -1;
+      }
+      solver->row_refactor_l_row_values[p] = lij;
+      if (!shared->row_refactor_defer_value_scatter) {
+        *solver->row_refactor_l_values[p] = lij;
+      }
+      supernode_workspace[local] = lij;
+
+      const double *dep_dense_panel = dense_panel + local_dep * width;
+      for (UF_long target = local_dep + 1u; target < width; ++target) {
+        supernode_workspace[target - suffix_begin] -=
+          lij * dep_dense_panel[target];
+      }
+      trsv_entries += width - local_dep - 1u;
+      if (trailing_len > 0u) {
+        const double *dep_panel = trailing_panel + local_dep * trailing_len;
+        for (UF_long offset = 0; offset < trailing_len; ++offset) {
+          trailing_workspace[offset] += lij * dep_panel[offset];
+        }
+      }
+    }
+    touched_entries += trsv_entries;
+    kls_record_row_refactor_compact_supernode_trsv(
+      solver, run_rows, trsv_entries);
+    if (trailing_len > 0u) {
+      const UF_long gemv_entries = run_rows * trailing_len;
+      for (UF_long offset = 0; offset < trailing_len; ++offset) {
+        x[trailing_cols[offset]] -= trailing_workspace[offset];
+      }
+      touched_entries += gemv_entries;
+      kls_record_row_refactor_compact_supernode_gemv(
+        solver, run_rows, gemv_entries);
+    }
+  } else {
+    for (UF_long p = p0; p < run_end; ++p) {
+      const UF_long dep = solver->row_refactor_l_cols[p];
+      if (wait_for_dependencies &&
+          !kls_egraph_refactor_wait_done(shared, dep)) {
+        x[dep] = 0.0;
+        return -1;
+      }
+      const UF_long local_dep = dep - group_begin;
+      const double candidate = x[dep];
+      const double lij = candidate / udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        x[dep] = 0.0;
+        return -1;
+      }
+      solver->row_refactor_l_row_values[p] = lij;
+      if (!shared->row_refactor_defer_value_scatter) {
+        *solver->row_refactor_l_values[p] = lij;
+      }
+      if (use_trailing_gemv) {
+        supernode_workspace[p - p0] = lij;
+      }
       x[dep] = 0.0;
-      return -1;
-    }
-    solver->row_refactor_l_row_values[p] = lij;
-    if (!shared->row_refactor_defer_value_scatter) {
-      *solver->row_refactor_l_values[p] = lij;
+
+      const double *dep_dense_panel = dense_panel + local_dep * width;
+      for (UF_long target = local_dep + 1u; target < width; ++target) {
+        x[group_begin + target] -= lij * dep_dense_panel[target];
+      }
+      touched_entries += width - local_dep - 1u;
+      if (trailing_len > 0u && !use_trailing_gemv) {
+        const double *dep_panel = trailing_panel + local_dep * trailing_len;
+        for (UF_long offset = 0; offset < trailing_len; ++offset) {
+          x[trailing_cols[offset]] -= lij * dep_panel[offset];
+        }
+        touched_entries += trailing_len;
+      }
     }
     if (use_trailing_gemv) {
-      lij_workspace[p - p0] = lij;
-    }
-    x[dep] = 0.0;
-
-    const double *dep_dense_panel = dense_panel + local_dep * width;
-    for (UF_long target = local_dep + 1u; target < width; ++target) {
-      x[group_begin + target] -= lij * dep_dense_panel[target];
-    }
-    touched_entries += width - local_dep - 1u;
-    if (trailing_len > 0u && !use_trailing_gemv) {
-      const double *dep_panel = trailing_panel + local_dep * trailing_len;
-      for (UF_long offset = 0; offset < trailing_len; ++offset) {
-        x[trailing_cols[offset]] -= lij * dep_panel[offset];
+      const UF_long gemv_entries = run_rows * trailing_len;
+      for (UF_long local = 0; local < run_rows; ++local) {
+        const UF_long dep = solver->row_refactor_l_cols[p0 + local];
+        const UF_long local_dep = dep - group_begin;
+        const double lij = supernode_workspace[local];
+        const double *dep_panel = trailing_panel + local_dep * trailing_len;
+        for (UF_long offset = 0; offset < trailing_len; ++offset) {
+          trailing_workspace[offset] += lij * dep_panel[offset];
+        }
       }
-      touched_entries += trailing_len;
-    }
-  }
-  if (use_trailing_gemv) {
-    const UF_long gemv_entries = run_rows * trailing_len;
-    for (UF_long local = 0; local < run_rows; ++local) {
-      const UF_long dep = solver->row_refactor_l_cols[p0 + local];
-      const UF_long local_dep = dep - group_begin;
-      const double lij = lij_workspace[local];
-      const double *dep_panel = trailing_panel + local_dep * trailing_len;
       for (UF_long offset = 0; offset < trailing_len; ++offset) {
-        trailing_workspace[offset] += lij * dep_panel[offset];
+        x[trailing_cols[offset]] -= trailing_workspace[offset];
       }
+      touched_entries += gemv_entries;
+      kls_record_row_refactor_compact_supernode_gemv(
+        solver, run_rows, gemv_entries);
     }
-    for (UF_long offset = 0; offset < trailing_len; ++offset) {
-      x[trailing_cols[offset]] -= trailing_workspace[offset];
-    }
-    touched_entries += gemv_entries;
-    kls_record_row_refactor_compact_supernode_gemv(
-      solver, run_rows, gemv_entries);
   }
   kls_record_row_refactor_compact_supernode_update(solver, run_rows,
                                                    touched_entries);
@@ -20324,6 +20452,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     kls_row_refactor_should_defer_value_scatter(solver, check_pivots);
   shared->row_refactor_lazy_value_scatter =
     kls_row_refactor_should_lazy_value_scatter(check_pivots);
+  shared->row_refactor_compact_supernode_trsv =
+    kls_compact_supernode_trsv_env_enabled();
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   shared->invalid = 0;
   shared->pivot_rejected = 0;
@@ -20417,6 +20547,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
           &shared->row_pipeline_local_ready_groups, memory_order_acquire)
       : 0u;
   shared->row_refactor_mode = 0;
+  shared->row_refactor_compact_supernode_trsv = 0;
   shared->row_pipeline_ready_queue = 0;
   shared->row_pipeline_row_dep_ready_queue = 0;
   shared->row_pipeline_ready_groups = NULL;

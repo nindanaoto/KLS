@@ -443,13 +443,21 @@ have a contiguous suffix of dependencies on that completed dense group; stats re
 `row_refactor_compact_supernode_update_rows`, and
 `row_refactor_compact_supernode_update_entries`. When the producer supernode
 has a shared trailing panel, KLS now accumulates that contribution in contiguous
-worker scratch and scatters it once, matching the triangular-solve plus
-matrix-vector update shape described in the SubtreeLU paper without adding an
-external BLAS dependency; stats report
+worker scratch and scatters it once, matching the matrix-vector update half of
+the triangular-solve plus update shape described in the SubtreeLU paper without
+adding an external BLAS dependency; stats report
 `row_refactor_last_compact_supernode_gemv`,
 `row_refactor_compact_supernode_gemv_count`,
 `row_refactor_compact_supernode_gemv_rows`, and
-`row_refactor_compact_supernode_gemv_entries`. Checked pivot-probe row
+`row_refactor_compact_supernode_gemv_entries`. An experimental
+`KLS_ENABLE_COMPACT_SUPERNODE_TRSV=1` mode also moves the producer suffix solve
+itself into contiguous worker scratch and reports
+`row_refactor_last_compact_supernode_trsv`,
+`row_refactor_compact_supernode_trsv_count`,
+`row_refactor_compact_supernode_trsv_rows`, and
+`row_refactor_compact_supernode_trsv_entries`; focused probes kept it
+default-off because the manual dense suffix solve was slower than the current
+sparse-`x` suffix solve on ASIC/G2-style rows. Checked pivot-probe row
 refactors use
 the same compact panel only through a row-ordered update/check/publish loop, so
 a rejected pivot leaves the same prefix-visible row-major state as the native

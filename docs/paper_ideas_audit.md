@@ -3801,8 +3801,8 @@ updates over 6,220,352 rows, and `ASIC_100ks` used 23,209 updates over
 the CKTSO pivoting-tail executor, but it moves the current row engine from
 mere compact storage toward actually consuming supernodes in later updates.
 
-The compact supernode consumer now applies the paper's triangular-solve plus
-matrix-vector update shape for producer trailing panels. For a later row that
+The compact supernode consumer now applies the paper's matrix-vector update
+shape for producer trailing panels. For a later row that
 depends on a completed dense producer suffix, KLS still computes and checks the
 `L` multipliers in row order, but it no longer scatters each producer row's
 trailing contribution directly into the sparse work vector. Instead, it stores
@@ -3823,3 +3823,20 @@ counts can vary slightly in threaded runs because these counters are telemetry,
 not synchronization state. Full BLAS-backed supernodal
 factorization, separator FLOP-balanced queues, and CKTSO's pipelined pivoting
 tail executor remain open.
+
+KLS also has an explicit experimental compact-supernode `trsv` mode behind
+`KLS_ENABLE_COMPACT_SUPERNODE_TRSV=1`. In that mode, the same producer suffix
+is copied from sparse `x` into contiguous worker scratch, solved there with the
+producer dense upper panel, and then fed to the existing trailing-panel
+accumulator. Stats report
+`row_refactor_last_compact_supernode_trsv`,
+`row_refactor_compact_supernode_trsv_count`,
+`row_refactor_compact_supernode_trsv_rows`, and
+`row_refactor_compact_supernode_trsv_entries`, and the smoke fixture enables
+the mode locally to verify the path. Same-session forced-row probes kept this
+mode default-off: the manual contiguous suffix solve was correct, but slower
+than the default sparse-`x` suffix solve on the current ASIC/G2-style row
+kernel. This records the paper's `trsv` half as executable KLS code without
+turning it into a production regression; a future BLAS-backed or more deeply
+blocked supernodal kernel can replace the manual loop when it produces a real
+default win.

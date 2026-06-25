@@ -2561,10 +2561,19 @@ static int test_unchecked_row_dense_compact_panel(void) {
   const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
   char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
   const int had_saved_env = saved_env_value != NULL;
+  const char *saved_trsv_env_value =
+    getenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
+  char *saved_trsv_env =
+    saved_trsv_env_value != NULL ? strdup(saved_trsv_env_value) : NULL;
+  const int had_saved_trsv_env = saved_trsv_env_value != NULL;
 
   int ok = 1;
   if (had_saved_env && saved_env == NULL) {
     fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_trsv_env && saved_trsv_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_COMPACT_SUPERNODE_TRSV\n");
     ok = 0;
   }
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
@@ -2577,6 +2586,10 @@ static int test_unchecked_row_dense_compact_panel(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
     ok = 0;
   }
+  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
+    ok = 0;
+  }
   if (ok && !require_ok(kls_refactor(solver, ax1),
                         "refactor unchecked dense compact panel")) ok = 0;
   if (had_saved_env && saved_env != NULL) {
@@ -2587,6 +2600,17 @@ static int test_unchecked_row_dense_compact_panel(void) {
   } else if (!had_saved_env) {
     if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
       perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (had_saved_trsv_env && saved_trsv_env != NULL) {
+    if (setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", saved_trsv_env, 1) != 0) {
+      perror("restore KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
+      ok = 0;
+    }
+  } else if (!had_saved_trsv_env) {
+    if (unsetenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV") != 0) {
+      perror("unsetenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
       ok = 0;
     }
   }
@@ -2620,7 +2644,11 @@ static int test_unchecked_row_dense_compact_panel(void) {
              stats.row_refactor_last_compact_supernode_gemv != 1 ||
              stats.row_refactor_compact_supernode_gemv_count < 1 ||
              stats.row_refactor_compact_supernode_gemv_rows < lead ||
-             stats.row_refactor_compact_supernode_gemv_entries <= 0)) {
+             stats.row_refactor_compact_supernode_gemv_entries <= 0 ||
+             stats.row_refactor_last_compact_supernode_trsv != 1 ||
+             stats.row_refactor_compact_supernode_trsv_count < 1 ||
+             stats.row_refactor_compact_supernode_trsv_rows < lead ||
+             stats.row_refactor_compact_supernode_trsv_entries <= 0)) {
     fprintf(stderr,
             "unexpected unchecked dense compact-panel stats: row=%d/%d/%d"
             ", dense_segments=%" PRId64 ", compact=%d/%" PRId64
@@ -2629,7 +2657,8 @@ static int test_unchecked_row_dense_compact_panel(void) {
             ", persistent=%" PRId64 "/%" PRId64
             ", persistent_used=%d/%" PRId64
             ", supernode=%d/%" PRId64 "/%" PRId64 "/%" PRId64
-            ", gemv=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
+            ", gemv=%d/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", trsv=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
             stats.row_refactor_last_run,
             stats.row_refactor_last_checked,
             stats.row_refactor_last_parallel,
@@ -2651,7 +2680,11 @@ static int test_unchecked_row_dense_compact_panel(void) {
             stats.row_refactor_last_compact_supernode_gemv,
             stats.row_refactor_compact_supernode_gemv_count,
             stats.row_refactor_compact_supernode_gemv_rows,
-            stats.row_refactor_compact_supernode_gemv_entries);
+            stats.row_refactor_compact_supernode_gemv_entries,
+            stats.row_refactor_last_compact_supernode_trsv,
+            stats.row_refactor_compact_supernode_trsv_count,
+            stats.row_refactor_compact_supernode_trsv_rows,
+            stats.row_refactor_compact_supernode_trsv_entries);
     ok = 0;
   }
   double max_solution_error = 0.0;
@@ -2706,6 +2739,7 @@ static int test_unchecked_row_dense_compact_panel(void) {
   free(expected);
   free(residual);
   free(saved_env);
+  free(saved_trsv_env);
   return ok;
 }
 
