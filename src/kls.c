@@ -199,6 +199,9 @@ struct kls_solver {
   int spral_matching_selected;
   int fast_block_restarts;
   int fast_tail_restarts;
+  int fast_repaired_last_offdiag_suffix_refresh;
+  UF_long fast_repaired_offdiag_suffix_refresh_count;
+  UF_long fast_repaired_offdiag_full_refresh_count;
   int fast_reject_refresh_state;
   UF_long *fast_reject_tail_cols;
   unsigned int *fast_reject_tail_marks;
@@ -895,6 +898,9 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_tail_restart_saved_work = 0.0;
   solver->stats.fast_block_restarts = 0;
   solver->stats.fast_tail_restarts = 0;
+  solver->stats.fast_repaired_last_offdiag_suffix_refresh = 0;
+  solver->stats.fast_repaired_offdiag_suffix_refresh_count = 0;
+  solver->stats.fast_repaired_offdiag_full_refresh_count = 0;
   solver->stats.fast_rejected_block_start = -1;
   solver->stats.fast_rejected_block_size = 0;
   solver->stats.fast_rejected_suffix_columns = 0;
@@ -918,6 +924,9 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_block_restarts = 0;
   solver->fast_tail_restarts = 0;
+  solver->fast_repaired_last_offdiag_suffix_refresh = 0;
+  solver->fast_repaired_offdiag_suffix_refresh_count = 0;
+  solver->fast_repaired_offdiag_full_refresh_count = 0;
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->fast_reject_tail_count = 0;
   solver->fast_reject_tail_seed_block = KLS_KLU_EMPTY;
@@ -7460,6 +7469,12 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
+  solver->stats.fast_repaired_last_offdiag_suffix_refresh =
+    solver->fast_repaired_last_offdiag_suffix_refresh;
+  solver->stats.fast_repaired_offdiag_suffix_refresh_count =
+    (int64_t)solver->fast_repaired_offdiag_suffix_refresh_count;
+  solver->stats.fast_repaired_offdiag_full_refresh_count =
+    (int64_t)solver->fast_repaired_offdiag_full_refresh_count;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
   if (solver->symbolic != NULL) {
@@ -7485,6 +7500,12 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
+  solver->stats.fast_repaired_last_offdiag_suffix_refresh =
+    solver->fast_repaired_last_offdiag_suffix_refresh;
+  solver->stats.fast_repaired_offdiag_suffix_refresh_count =
+    (int64_t)solver->fast_repaired_offdiag_suffix_refresh_count;
+  solver->stats.fast_repaired_offdiag_full_refresh_count =
+    (int64_t)solver->fast_repaired_offdiag_full_refresh_count;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
   solver->stats.selected_btf =
@@ -10719,13 +10740,21 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   }
 
   int offdiag_refreshed = 0;
-  if (tail_restart_used && !scaled) {
+  solver->fast_repaired_last_offdiag_suffix_refresh = 0;
+  if (tail_restart_used) {
     offdiag_refreshed =
       kls_recompute_offdiag_suffix_from_pinv(solver, numeric_values,
                                              rejected_pivot);
+    if (offdiag_refreshed) {
+      solver->fast_repaired_last_offdiag_suffix_refresh = 1;
+      solver->fast_repaired_offdiag_suffix_refresh_count++;
+    }
   }
   if (!offdiag_refreshed) {
     offdiag_refreshed = kls_recompute_offdiag_from_pinv(solver, numeric_values);
+    if (offdiag_refreshed) {
+      solver->fast_repaired_offdiag_full_refresh_count++;
+    }
   }
   if (!offdiag_refreshed) {
     solver->common.status = old_status;
@@ -10769,6 +10798,12 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   }
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
+  solver->stats.fast_repaired_last_offdiag_suffix_refresh =
+    solver->fast_repaired_last_offdiag_suffix_refresh;
+  solver->stats.fast_repaired_offdiag_suffix_refresh_count =
+    (int64_t)solver->fast_repaired_offdiag_suffix_refresh_count;
+  solver->stats.fast_repaired_offdiag_full_refresh_count =
+    (int64_t)solver->fast_repaired_offdiag_full_refresh_count;
   free_refactor_map(solver);
   free_refactor_schedule(solver);
   free_row_refactor_pattern(solver);

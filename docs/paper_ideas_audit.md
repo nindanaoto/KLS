@@ -120,7 +120,10 @@ unfinalization, live `P`/`Pinv`, and symmetric-pruning `Lpend` boundaries.
 KLS now uses that proof to run a conservative serial suffix restart with
 pivoting for unscaled prefix-current/all-current and scaled prefix-current
 rejected blocks with a non-empty reusable prefix before falling back to full
-block repair.
+block repair. Accepted serial suffix restarts now refresh only the off-diagonal
+column suffix whose inverse row permutation may have changed, including the
+scaled prefix-current subset where the row-scale vector is still in input-row
+order before the final pivot-order permutation.
 Root-of-block rejects are deliberately not reported as serial-tail-ready,
 because they need CKTSO's fuller row/ETree machinery rather than a contiguous
 prefix-preserving tail. This is still not CKTSO's full pipelined

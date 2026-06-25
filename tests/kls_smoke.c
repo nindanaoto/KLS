@@ -1025,13 +1025,18 @@ static int test_scaled_fast_factor_prefix_tail_restart(void) {
              stats.fast_repaired_tail_restart_columns < 1 ||
              stats.fast_repaired_tail_restart_work <= 0.0 ||
              stats.fast_block_restarts != 1 ||
-             stats.fast_tail_restarts != 1)) {
+             stats.fast_tail_restarts != 1 ||
+             stats.fast_repaired_last_offdiag_suffix_refresh != 1 ||
+             stats.fast_repaired_offdiag_suffix_refresh_count != 1 ||
+             stats.fast_repaired_offdiag_full_refresh_count != 0)) {
     fprintf(stderr,
             "unexpected scaled prefix-tail stats: pivot=%" PRId64
             ", start=%" PRId64 ", size=%" PRId64 ", refresh=%d"
             ", prefix_changed=%" PRId64 ", suffix_changed=%" PRId64
             ", tail_ready=%d, tail_cols=%" PRId64 ", tail_work=%.6g"
-            ", block_restarts=%d, tail_restarts=%d\n",
+            ", block_restarts=%d, tail_restarts=%d"
+            ", offdiag_suffix=%d, offdiag_suffix_count=%" PRId64
+            ", offdiag_full_count=%" PRId64 "\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_block_start,
             stats.fast_rejected_block_size,
@@ -1042,7 +1047,10 @@ static int test_scaled_fast_factor_prefix_tail_restart(void) {
             stats.fast_repaired_tail_restart_columns,
             stats.fast_repaired_tail_restart_work,
             stats.fast_block_restarts,
-            stats.fast_tail_restarts);
+            stats.fast_tail_restarts,
+            stats.fast_repaired_last_offdiag_suffix_refresh,
+            stats.fast_repaired_offdiag_suffix_refresh_count,
+            stats.fast_repaired_offdiag_full_refresh_count);
     ok = 0;
   }
   if (ok && !require_pivoting_tail_plan(&stats,
@@ -1322,12 +1330,17 @@ static int test_btf_prefix_tail_restart_with_offblock(void) {
              stats.fast_tail_restarts != 1 ||
              stats.fast_repaired_tail_restart_ready != 1 ||
              stats.fast_repaired_tail_restart_columns < 1 ||
-             stats.fast_repaired_tail_restart_work <= 0.0)) {
+             stats.fast_repaired_tail_restart_work <= 0.0 ||
+             stats.fast_repaired_last_offdiag_suffix_refresh != 1 ||
+             stats.fast_repaired_offdiag_suffix_refresh_count != 1 ||
+             stats.fast_repaired_offdiag_full_refresh_count != 0)) {
     fprintf(stderr,
             "unexpected btf offblock tail stats: nblocks=%" PRId64
             ", pivot=%" PRId64 ", start=%" PRId64 ", size=%" PRId64
             ", refresh=%d, restarts=%d, tail_restarts=%d"
-            ", tail_ready=%d, tail_cols=%" PRId64 ", tail_work=%.6g\n",
+            ", tail_ready=%d, tail_cols=%" PRId64 ", tail_work=%.6g"
+            ", offdiag_suffix=%d, offdiag_suffix_count=%" PRId64
+            ", offdiag_full_count=%" PRId64 "\n",
             stats.nblocks,
             stats.fast_rejected_pivot,
             stats.fast_rejected_block_start,
@@ -1337,7 +1350,10 @@ static int test_btf_prefix_tail_restart_with_offblock(void) {
             stats.fast_tail_restarts,
             stats.fast_repaired_tail_restart_ready,
             stats.fast_repaired_tail_restart_columns,
-            stats.fast_repaired_tail_restart_work);
+            stats.fast_repaired_tail_restart_work,
+            stats.fast_repaired_last_offdiag_suffix_refresh,
+            stats.fast_repaired_offdiag_suffix_refresh_count,
+            stats.fast_repaired_offdiag_full_refresh_count);
     ok = 0;
   }
   if (ok && !require_pivoting_tail_plan(&stats, "btf offblock tail")) {

@@ -696,6 +696,9 @@ int main(int argc, char **argv) {
            ",\"fast_repaired_tail_restart_saved_work\":%.9g"
            ",\"fast_block_restarts\":%d"
            ",\"fast_tail_restarts\":%d"
+           ",\"fast_repaired_last_offdiag_suffix_refresh\":%d"
+           ",\"fast_repaired_offdiag_suffix_refresh_count\":%" PRId64
+           ",\"fast_repaired_offdiag_full_refresh_count\":%" PRId64
            ",\"fast_rejected_block_start\":%" PRId64
            ",\"fast_rejected_block_size\":%" PRId64
            ",\"fast_rejected_suffix_columns\":%" PRId64
@@ -760,6 +763,9 @@ int main(int argc, char **argv) {
            stats.fast_repaired_tail_restart_saved_work,
            stats.fast_block_restarts,
            stats.fast_tail_restarts,
+           stats.fast_repaired_last_offdiag_suffix_refresh,
+           stats.fast_repaired_offdiag_suffix_refresh_count,
+           stats.fast_repaired_offdiag_full_refresh_count,
            stats.fast_rejected_block_start,
            stats.fast_rejected_block_size,
            stats.fast_rejected_suffix_columns,
@@ -979,8 +985,13 @@ int main(int argc, char **argv) {
            stats.fast_repaired_tail_restart_columns,
            stats.fast_repaired_tail_restart_work,
            stats.fast_repaired_tail_restart_saved_work);
-    printf("fast block restarts: %d, tail restarts: %d\n",
-           stats.fast_block_restarts, stats.fast_tail_restarts);
+    printf("fast block restarts: %d, tail restarts: %d"
+           ", offdiag suffix refresh last %d, suffix refreshes %" PRId64
+           ", full refreshes %" PRId64 "\n",
+           stats.fast_block_restarts, stats.fast_tail_restarts,
+           stats.fast_repaired_last_offdiag_suffix_refresh,
+           stats.fast_repaired_offdiag_suffix_refresh_count,
+           stats.fast_repaired_offdiag_full_refresh_count);
     printf("fast rejected block: start %" PRId64 ", size %" PRId64
            ", suffix %" PRId64 ", descendants %" PRId64
            ", descendant work %.6g, row tail %" PRId64

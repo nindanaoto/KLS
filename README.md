@@ -317,9 +317,11 @@ recompute row scales, and continue with a serial checked refactor over only
 later BTF blocks when the rejected pass left a valid prefix-current state.
 Scaled prefix-current rejects whose validated repair preserves a non-empty
 live prefix state can also execute the conservative serial suffix restart of
-the rejected block with pivoting. Scaled all-refresh KLU refactor rejects still
-fall back conservatively because the row scale vector may already be
-pivot-permuted. When an unscaled serial BTF refactor rejects a non-final block,
+the rejected block with pivoting; accepted scaled and unscaled serial suffix
+restarts refresh only the off-diagonal column suffix whose inverse row
+permutation can change. Scaled all-refresh KLU refactor rejects still fall back
+conservatively because the row scale vector may already be pivot-permuted.
+When an unscaled serial BTF refactor rejects a non-final block,
 the repaired block can now be followed by a serial checked continuation over
 only the later BTF blocks instead of restarting from the first block. The
 threaded BTF worker pool also marks completed diagonal blocks and reports the
@@ -429,8 +431,10 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivoting_tail_contains_reject`,
 `fast_rejected_pivoting_tail_topological`,
 `fast_rejected_pivoting_tail_seed_columns`,
-`fast_rejected_refresh_state`, `fast_block_restarts`, and
-`fast_tail_restarts` for the first rejected
+`fast_rejected_refresh_state`, `fast_block_restarts`, `fast_tail_restarts`,
+`fast_repaired_last_offdiag_suffix_refresh`,
+`fast_repaired_offdiag_suffix_refresh_count`, and
+`fast_repaired_offdiag_full_refresh_count` for the first rejected
 factor-order pivot, its original matrix column, the strongest factor-row
 candidate and multiplier among entries that violated a KLS-owned pivot check
 when available, the accepted pivot magnitude and candidate entry magnitude at
@@ -458,8 +462,10 @@ worklist, whether it includes the rejected pivot, whether the retained order
 is topologically safe for a future tail kernel to consume, whether the
 failed pass left an unknown, prefix-current, or all-current numeric state, the
 number of repaired BTF blocks, and the number of serial tail restarts actually
-executed. These fields are intended to guide fuller CKTSO-style tail-restart
-work without accepting an unsafe reused pivot order.
+executed, plus whether repaired serial-tail restarts refreshed only the
+off-diagonal suffix or rebuilt all off-diagonal entries. These fields are
+intended to guide fuller CKTSO-style tail-restart work without accepting an
+unsafe reused pivot order.
 
 Use `--no-static-pivoting` to disable KLS's value-aware static row-pivoting
 trial. When enabled, `auto` can preemptively build a weighted row permutation
