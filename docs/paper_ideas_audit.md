@@ -3171,6 +3171,9 @@ diagnostics without allocating the row-refactor scheduler: lower/upper dense
 tail start, rows, and entries, plus the fixed eight trapezoid slices used by
 the CKTSO paper. The dense tail criterion follows the paper's setup rule: at
 least 70% of triangular entries and at least 300,000 entries in the suffix.
+KLS now materializes those slice boundaries internally and reports the maximum
+per-slice entry count for lower and upper triangular solves, so a future
+parallel rectangular-slice executor can gate on measured slice balance.
 These fields are visible in `kls_stats`, `kls_bench` JSON/text, and the gap
 decomposition script, giving the next parallel triangular-solve step a
 structure-based gate instead of a matrix-name heuristic.

@@ -451,7 +451,9 @@ left to the refactor paths that actually need it. It still records
 CKTSO-style triangular solve partition diagnostics using the paper's dense-tail
 criteria, namely a suffix with at least 70% of row-triangular entries and at
 least 300,000 entries, plus the eight trapezoid slices CKTSO uses after a dense
-tail is found. The queued row scheduler orders
+tail is found. KLS retains the slice boundaries internally and reports the
+maximum per-slice triangular entries as a load-balance diagnostic. The queued
+row scheduler orders
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus
