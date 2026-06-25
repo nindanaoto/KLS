@@ -131,7 +131,11 @@ symbolic analysis and ordering decisions without running numeric factorization.
 JSON includes `initial_factor_path` and `last_factor_path`; values such as
 `klu_first` or `klu_fallback` mean the factorization was handed to the
 KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
-retained pattern through the checked fast path. `factor_etree_block_start`,
+retained pattern through the checked fast path. Setting
+`KLS_ENABLE_KLS_FIRST_FACTOR=1` enables an experimental unscaled KLS-owned
+first-factor scaffold that reports `kls_first` when it successfully assembles
+KLU-compatible numeric storage; it is not enabled by default.
+`factor_etree_block_start`,
 `factor_etree_block_size`, `factor_etree_levels`,
 `factor_etree_max_width`, `factor_etree_edges`,
 `factor_etree_root_columns`, `factor_etree_leaf_columns`, and
@@ -868,10 +872,11 @@ On the refreshed selected-large reconstruction, KLS is ahead of the saved KLU2
 artifact but still trails the saved CKTSO artifact, with `pre2` still timing out.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
-still uses the KLU column-oriented serial kernel for the first large
-factorization, while CKTSO's paper describes a row-major up-looking
-factorization plus EGraph pivot checks and ETree-scheduled pipelined tail
-factorization. The next algorithmic work is to evolve the numeric
+still uses the KLU column-oriented serial kernel for the default first large
+factorization. An env-gated unscaled KLS-owned first-factor scaffold now exists
+for KLU-compatible BTF block assembly, but CKTSO's paper describes a row-major
+up-looking factorization plus EGraph pivot checks and ETree-scheduled pipelined
+tail factorization. The next algorithmic work is to evolve the numeric
 factor/refactor/solve kernels toward those deeper KLS-owned sparse kernels
 while keeping the public API and benchmark harness stable.
 

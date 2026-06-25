@@ -10668,7 +10668,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
       old_pblock == NULL || psinv == NULL || new_lu_out == NULL ||
       new_size_out == NULL || lnz_block_out == NULL ||
       unz_block_out == NULL || pblock == NULL ||
-      !reusable_prefix_state ||
+      (local_reject > 0u && !reusable_prefix_state) ||
       local_reject >= nk ||
       block >= solver->numeric->nblocks ||
       solver->numeric->LUbx == NULL ||
@@ -13205,6 +13205,12 @@ static int kls_row_refactor_env_enabled(void) {
 
 static int kls_checked_row_refactor_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static int kls_first_factor_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -18011,6 +18017,322 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
   return 0;
 }
 
+static size_t kls_initial_block_lusize(const kls_solver *solver,
+                                       UF_long k1,
+                                       UF_long nk,
+                                       double lsize_estimate) {
+  if (solver == NULL || solver->col_ptr == NULL || nk == 0u ||
+      k1 > solver->n || nk > solver->n - k1) {
+    return 0u;
+  }
+
+  double lsize = lsize_estimate;
+  const double n = (double)nk;
+  if (lsize <= 0.0) {
+    const UF_long p1 = solver->col_ptr[k1];
+    const UF_long p2 = solver->col_ptr[k1 + nk];
+    if (p2 < p1) {
+      return 0u;
+    }
+    lsize = -lsize;
+    lsize = lsize > 1.0 ? lsize : 1.0;
+    lsize = lsize * (double)(p2 - p1) + n;
+  }
+
+  lsize = lsize > n + 1.0 ? lsize : n + 1.0;
+  double max_lnz = (n * n + n) / 2.0;
+  max_lnz = max_lnz < (double)INT_MAX ? max_lnz : (double)INT_MAX;
+  lsize = lsize < max_lnz ? lsize : max_lnz;
+  if (INT_OVERFLOW(lsize)) {
+    return 0u;
+  }
+
+  const Int entries = (Int)lsize;
+  const double units = DUNITS(Int, entries) + DUNITS(Entry, entries) +
+                       DUNITS(Int, entries) + DUNITS(Entry, entries);
+  if (INT_OVERFLOW(units) || units <= 0.0) {
+    return 0u;
+  }
+  return (size_t)units;
+}
+
+static trilinos_klu_l_numeric *kls_allocate_numeric_skeleton(
+  kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL) {
+    return NULL;
+  }
+  TRILINOS_KLU_common *common = &solver->common;
+  const UF_long n = solver->symbolic->n;
+  const UF_long nblocks = solver->symbolic->nblocks;
+  const UF_long nzoff = solver->symbolic->nzoff;
+  const UF_long maxblock = solver->symbolic->maxblock;
+
+  Int ok = TRUE;
+  const size_t n1 = TRILINOS_KLU_add_size_t((size_t)n, 1u, &ok);
+  const size_t nzoff1 = TRILINOS_KLU_add_size_t((size_t)nzoff, 1u, &ok);
+  trilinos_klu_l_numeric *numeric =
+    (trilinos_klu_l_numeric *)TRILINOS_KLU_malloc(
+      1u, sizeof(*numeric), common);
+  if (numeric == NULL || common->status < TRILINOS_KLU_OK || !ok) {
+    common->status =
+      ok ? TRILINOS_KLU_OUT_OF_MEMORY : TRILINOS_KLU_TOO_LARGE;
+    return NULL;
+  }
+  memset(numeric, 0, sizeof(*numeric));
+  numeric->n = n;
+  numeric->nblocks = nblocks;
+  numeric->nzoff = nzoff;
+  numeric->Pnum = (UF_long *)TRILINOS_KLU_malloc(n, sizeof(UF_long), common);
+  numeric->Offp = (UF_long *)TRILINOS_KLU_malloc(n1, sizeof(UF_long), common);
+  numeric->Offi =
+    (UF_long *)TRILINOS_KLU_malloc(nzoff1, sizeof(UF_long), common);
+  numeric->Offx = TRILINOS_KLU_malloc(nzoff1, sizeof(Entry), common);
+  numeric->Lip = (UF_long *)TRILINOS_KLU_malloc(n, sizeof(UF_long), common);
+  numeric->Uip = (UF_long *)TRILINOS_KLU_malloc(n, sizeof(UF_long), common);
+  numeric->Llen = (UF_long *)TRILINOS_KLU_malloc(n, sizeof(UF_long), common);
+  numeric->Ulen = (UF_long *)TRILINOS_KLU_malloc(n, sizeof(UF_long), common);
+  numeric->LUsize =
+    (size_t *)TRILINOS_KLU_malloc(nblocks, sizeof(size_t), common);
+  numeric->LUbx = (void **)TRILINOS_KLU_malloc(nblocks, sizeof(Unit *), common);
+  if (numeric->LUbx != NULL) {
+    for (UF_long block = 0; block < nblocks; ++block) {
+      numeric->LUbx[block] = NULL;
+    }
+  }
+  if (numeric->LUsize != NULL) {
+    for (UF_long block = 0; block < nblocks; ++block) {
+      numeric->LUsize[block] = 0u;
+    }
+  }
+  numeric->Udiag = TRILINOS_KLU_malloc(n, sizeof(Entry), common);
+  numeric->Rs = NULL;
+  if (common->scale > 0) {
+    numeric->Rs =
+      (double *)TRILINOS_KLU_malloc(n, sizeof(double), common);
+  }
+  numeric->Pinv = (UF_long *)TRILINOS_KLU_malloc(n, sizeof(UF_long), common);
+
+  const size_t xwork_size = TRILINOS_KLU_mult_size_t(n, sizeof(Entry), &ok);
+  const size_t solve_work_size =
+    TRILINOS_KLU_mult_size_t(n, 3u * sizeof(Entry), &ok);
+  const size_t factor_iwork_size =
+    TRILINOS_KLU_mult_size_t(maxblock, 6u * sizeof(UF_long), &ok);
+  numeric->worksize =
+    TRILINOS_KLU_add_size_t(xwork_size,
+                            solve_work_size > factor_iwork_size
+                              ? solve_work_size : factor_iwork_size,
+                            &ok);
+  numeric->Work = TRILINOS_KLU_malloc(numeric->worksize, 1u, common);
+  numeric->Xwork = numeric->Work;
+  numeric->Iwork = (UF_long *)(((Entry *)numeric->Xwork) + n);
+
+  if (!ok || common->status < TRILINOS_KLU_OK ||
+      numeric->Pnum == NULL || numeric->Offp == NULL ||
+      numeric->Offi == NULL || numeric->Offx == NULL ||
+      numeric->Lip == NULL || numeric->Uip == NULL ||
+      numeric->Llen == NULL || numeric->Ulen == NULL ||
+      numeric->LUsize == NULL || numeric->LUbx == NULL ||
+      numeric->Udiag == NULL || numeric->Pinv == NULL ||
+      numeric->Work == NULL || (common->scale > 0 && numeric->Rs == NULL)) {
+    common->status =
+      ok ? TRILINOS_KLU_OUT_OF_MEMORY : TRILINOS_KLU_TOO_LARGE;
+    trilinos_klu_l_free_numeric(&numeric, common);
+    return NULL;
+  }
+  return numeric;
+}
+
+static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
+                                                    double *numeric_values) {
+  if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
+      solver->common.scale > 0 || solver->numeric != NULL ||
+      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
+      solver->symbolic->R == NULL || solver->symbolic->Lnz == NULL) {
+    return 0;
+  }
+
+  TRILINOS_KLU_common *common = &solver->common;
+  const int saved_status = (int)common->status;
+  const UF_long saved_numerical_rank = (UF_long)common->numerical_rank;
+  const UF_long saved_singular_col = (UF_long)common->singular_col;
+  const UF_long saved_noffdiag = (UF_long)common->noffdiag;
+  common->initmem_amd = common->initmem_amd > 1.0 ? common->initmem_amd : 1.0;
+  common->initmem = common->initmem > 1.0 ? common->initmem : 1.0;
+  common->tol = common->tol < 1.0 ? common->tol : 1.0;
+  common->tol = common->tol > 0.0 ? common->tol : 0.0;
+  common->memgrow = common->memgrow > 1.0 ? common->memgrow : 1.0;
+  common->status = TRILINOS_KLU_OK;
+  common->numerical_rank = KLS_KLU_EMPTY;
+  common->singular_col = KLS_KLU_EMPTY;
+  common->noffdiag = 0;
+  common->nrealloc = 0;
+
+  trilinos_klu_l_numeric *numeric = kls_allocate_numeric_skeleton(solver);
+  if (numeric == NULL) {
+    common->status = saved_status;
+    common->numerical_rank = saved_numerical_rank;
+    common->singular_col = saved_singular_col;
+    common->noffdiag = saved_noffdiag;
+    return 0;
+  }
+  solver->numeric = numeric;
+
+  UF_long *psinv = numeric->Pinv;
+  for (UF_long k = 0; k < solver->n; ++k) {
+    psinv[k] = KLS_KLU_EMPTY;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    const UF_long row = solver->symbolic->P[k];
+    if (row >= solver->n) {
+      goto fail;
+    }
+    psinv[row] = k;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    if (psinv[k] == KLS_KLU_EMPTY) {
+      goto fail;
+    }
+  }
+
+  UF_long total_lnz = 0;
+  UF_long total_unz = 0;
+  UF_long max_lnz_block = 1;
+  UF_long max_unz_block = 1;
+  UF_long *old_pblock = numeric->Iwork;
+  UF_long *pblock =
+    numeric->Iwork + 5u * (size_t)solver->symbolic->maxblock;
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (k2 < k1 || k2 > solver->n) {
+      goto fail;
+    }
+    const UF_long nk = k2 - k1;
+    if (nk == 0u || nk > solver->symbolic->maxblock) {
+      goto fail;
+    }
+    if (nk == 1u) {
+      const UF_long oldcol = solver->symbolic->Q[k1];
+      const UF_long oldrow = solver->symbolic->P[k1];
+      if (oldcol >= solver->n || oldrow >= solver->n) {
+        goto fail;
+      }
+      double pivot = 0.0;
+      for (UF_long p = solver->col_ptr[oldcol];
+           p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long row = solver->row_idx[p];
+        if (row >= solver->n) {
+          goto fail;
+        }
+        const UF_long row_pos = psinv[row];
+        if (row_pos == k1) {
+          pivot = numeric_values[p];
+        } else if (row_pos > k1) {
+          goto fail;
+        }
+      }
+      ((Entry *)numeric->Udiag)[k1] = pivot;
+      numeric->Pnum[k1] = oldrow;
+      numeric->Lip[k1] = 0;
+      numeric->Uip[k1] = 0;
+      numeric->Llen[k1] = 0;
+      numeric->Ulen[k1] = 0;
+      total_lnz++;
+      total_unz++;
+      if (solver->symbolic->Lnz[block] < 0.0) {
+        solver->symbolic->Lnz[block] = 1.0;
+      }
+      if (pivot == 0.0) {
+        common->status = TRILINOS_KLU_SINGULAR;
+        if (common->numerical_rank == KLS_KLU_EMPTY) {
+          common->numerical_rank = k1;
+          common->singular_col = oldcol;
+        }
+        if (common->halt_if_singular) {
+          goto fail;
+        }
+      }
+      continue;
+    }
+    for (UF_long k = 0; k < nk; ++k) {
+      old_pblock[k] = k;
+    }
+
+    const double lsize =
+      solver->symbolic->Lnz[block] < 0.0
+        ? -(common->initmem)
+        : common->initmem_amd * solver->symbolic->Lnz[block] + (double)nk;
+    const size_t initial_lusize =
+      kls_initial_block_lusize(solver, k1, nk, lsize);
+    if (initial_lusize == 0u) {
+      goto fail;
+    }
+    Unit *placeholder =
+      (Unit *)TRILINOS_KLU_malloc(initial_lusize, sizeof(Unit), common);
+    if (placeholder == NULL || common->status < TRILINOS_KLU_OK) {
+      goto fail;
+    }
+    numeric->LUbx[block] = placeholder;
+    numeric->LUsize[block] = initial_lusize;
+
+    Unit *new_lu = NULL;
+    size_t new_size = 0u;
+    UF_long lnz_block = 0;
+    UF_long unz_block = 0;
+    if (!kls_try_pivot_tail_restart_rejected_block(
+          solver, numeric_values, block, k1, nk, 0u, old_pblock, psinv,
+          &new_lu, &new_size, &lnz_block, &unz_block, pblock) ||
+        new_lu == NULL || new_size == 0u || common->status < 0 ||
+        (common->status == TRILINOS_KLU_SINGULAR &&
+         common->halt_if_singular)) {
+      goto fail;
+    }
+    (void)TRILINOS_KLU_free(placeholder, initial_lusize, sizeof(Unit), common);
+    numeric->LUbx[block] = new_lu;
+    numeric->LUsize[block] = new_size;
+    for (UF_long k = 0; k < nk; ++k) {
+      const UF_long local_row = pblock[k];
+      if (local_row >= nk || k1 + local_row >= solver->n) {
+        goto fail;
+      }
+      numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + local_row];
+    }
+    total_lnz += lnz_block;
+    total_unz += unz_block;
+    max_lnz_block =
+      max_lnz_block < lnz_block ? lnz_block : max_lnz_block;
+    max_unz_block =
+      max_unz_block < unz_block ? unz_block : max_unz_block;
+    if (solver->symbolic->Lnz[block] < 0.0) {
+      solver->symbolic->Lnz[block] =
+        (double)(lnz_block > unz_block ? lnz_block : unz_block);
+    }
+  }
+
+  numeric->lnz = total_lnz;
+  numeric->unz = total_unz;
+  numeric->max_lnz_block = max_lnz_block;
+  numeric->max_unz_block = max_unz_block;
+  if (!kls_rebuild_numeric_pinv(solver) ||
+      !kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
+    goto fail;
+  }
+  if (common->status == TRILINOS_KLU_OK) {
+    common->numerical_rank = solver->n;
+    common->singular_col = solver->n;
+  }
+  return 1;
+
+fail:
+  trilinos_klu_l_free_numeric(&numeric, common);
+  solver->numeric = NULL;
+  common->status = saved_status;
+  common->numerical_rank = saved_numerical_rank;
+  common->singular_col = saved_singular_col;
+  common->noffdiag = saved_noffdiag;
+  return 0;
+}
+
 int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -18070,13 +18392,23 @@ int kls_factor(kls_solver *solver, const double *values) {
     solver->common.scale = choose_auto_scale_from_values(solver, numeric_values);
     solver->common.tol = choose_initial_auto_pivot_tolerance(solver);
   }
-  const double start = kls_now_seconds();
-  kls_set_last_factor_path(solver, had_numeric ? KLS_FACTOR_PATH_KLU_FALLBACK
-                                               : KLS_FACTOR_PATH_KLU_FIRST);
-  solver->numeric = trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,
-                                          numeric_values, solver->symbolic,
-                                          &solver->common);
-  elapsed += kls_now_seconds() - start;
+  int kls_first_factor_used = 0;
+  if (!had_numeric && kls_first_factor_env_enabled()) {
+    const double start = kls_now_seconds();
+    kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FIRST);
+    kls_first_factor_used =
+      kls_try_first_factor_with_pivoted_blocks(solver, numeric_values);
+    elapsed += kls_now_seconds() - start;
+  }
+  if (!kls_first_factor_used) {
+    const double start = kls_now_seconds();
+    kls_set_last_factor_path(solver, had_numeric ? KLS_FACTOR_PATH_KLU_FALLBACK
+                                                 : KLS_FACTOR_PATH_KLU_FIRST);
+    solver->numeric = trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,
+                                            numeric_values, solver->symbolic,
+                                            &solver->common);
+    elapsed += kls_now_seconds() - start;
+  }
   solver->stats.factor_seconds = elapsed;
   if (solver->numeric == NULL || solver->common.status < 0) {
     fill_numeric_stats(solver);
@@ -18355,6 +18687,7 @@ const char *kls_factor_path_name(kls_factor_path path) {
     case KLS_FACTOR_PATH_KLS_FAST_REFACTOR: return "kls_fast_refactor";
     case KLS_FACTOR_PATH_KLU_FALLBACK: return "klu_fallback";
     case KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST: return "prestatic_klu_first";
+    case KLS_FACTOR_PATH_KLS_FIRST: return "kls_first";
     default: return "unknown";
   }
 }

@@ -2906,6 +2906,86 @@ static int test_scaled_row_refactor_single_block(void) {
          run_scaled_row_refactor_case(4, 1);
 }
 
+static int test_experimental_kls_first_factor(void) {
+  const int32_t ap[] = {0, 2, 4, 5};
+  const int32_t ai[] = {0, 1, 0, 1, 2};
+  const double ax[] = {4.0, 2.0, 1.0, 3.0, 5.0};
+  const double b[] = {6.0, 8.0, 15.0};
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 1;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  const char *saved_env_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0,
+                                        &options),
+                        "analyze KLS first factor")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor KLS first factor")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve KLS first factor")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats KLS first factor")) {
+    ok = 0;
+  }
+  if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
+             stats.nblocks < 2 || stats.max_block < 2 ||
+             stats.fast_block_restarts != 0 ||
+             stats.fast_kls_block_restarts != 0)) {
+    fprintf(stderr,
+            "unexpected KLS first-factor stats: path=%s, nblocks=%" PRId64
+            ", max_block=%" PRId64
+            ", block_restarts=%d, kls_block_restarts=%d\n",
+            kls_factor_path_name(stats.last_factor_path),
+            stats.nblocks, stats.max_block, stats.fast_block_restarts,
+            stats.fast_kls_block_restarts);
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0))) {
+    fprintf(stderr,
+            "unexpected KLS first-factor solution: %.17g %.17g %.17g\n",
+            x[0], x[1], x[2]);
+    ok = 0;
+  }
+
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_KLS_FIRST_FACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_KLS_FIRST_FACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_KLS_FIRST_FACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_KLS_FIRST_FACTOR");
+      ok = 0;
+    }
+  }
+  kls_destroy(solver);
+  free(saved_env);
+  return ok;
+}
+
 int main(void) {
   if (!test_csc()) {
     return EXIT_FAILURE;
@@ -2980,6 +3060,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_scaled_row_refactor_single_block()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_experimental_kls_first_factor()) {
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;
