@@ -370,11 +370,16 @@ and `row_refactor_input_cleanup_entries`; rows whose input columns are already
 covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in
 the row numeric kernels. Row refactors can keep KLS row-major `L`/`U` values
 authoritative across repeated unchecked refactors and publish them to KLU
-storage lazily before solve or before a non-row fallback. Benchmark stats
+storage lazily only when a KLU fallback needs it. A guarded non-transpose
+single-block solve can consume the dirty row-major mirrors directly, keeping
+the KLU values stale until a transpose solve, later factor, or other non-row
+fallback publishes them. Benchmark stats
 report `row_refactor_last_defer_value_scatter`,
 `row_refactor_defer_value_scatter_run_count`, `row_refactor_values_dirty`,
 `row_refactor_last_lazy_value_scatter`, and
-`row_refactor_lazy_value_scatter_run_count`. The queued row tail orders
+`row_refactor_lazy_value_scatter_run_count`, plus
+`row_refactor_last_row_solve` and `row_refactor_row_solve_run_count` for this
+row-storage solve handoff. The queued row tail orders
 ready groups by the retained FLOP-style group work estimate, including
 successors released by completed groups, and reports
 `row_refactor_last_work_ready_queue` plus

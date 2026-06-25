@@ -822,6 +822,8 @@ int main(int argc, char **argv) {
            ",\"row_refactor_values_dirty\":%d"
            ",\"row_refactor_last_lazy_value_scatter\":%d"
            ",\"row_refactor_lazy_value_scatter_run_count\":%" PRId64
+           ",\"row_refactor_last_row_solve\":%d"
+           ",\"row_refactor_row_solve_run_count\":%" PRId64
            ",\"row_refactor_last_work_ready_queue\":%d"
            ",\"row_refactor_work_ready_queue_run_count\":%" PRId64
            ",\"row_refactor_ready_queue_workspace_groups\":%" PRId64
@@ -885,6 +887,8 @@ int main(int argc, char **argv) {
            stats.row_refactor_values_dirty,
            stats.row_refactor_last_lazy_value_scatter,
            stats.row_refactor_lazy_value_scatter_run_count,
+           stats.row_refactor_last_row_solve,
+           stats.row_refactor_row_solve_run_count,
            stats.row_refactor_last_work_ready_queue,
            stats.row_refactor_work_ready_queue_run_count,
            stats.row_refactor_ready_queue_workspace_groups,

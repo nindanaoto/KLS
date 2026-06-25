@@ -141,6 +141,8 @@ struct kls_solver {
   int row_refactor_values_dirty;
   int row_refactor_last_lazy_value_scatter;
   UF_long row_refactor_lazy_value_scatter_run_count;
+  int row_refactor_last_row_solve;
+  UF_long row_refactor_row_solve_run_count;
   UF_long row_refactor_work_ready_queue_run_count;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_segment_rows;
@@ -698,6 +700,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_values_dirty = 0;
   solver->row_refactor_last_lazy_value_scatter = 0;
   solver->row_refactor_lazy_value_scatter_run_count = 0;
+  solver->row_refactor_last_row_solve = 0;
+  solver->row_refactor_row_solve_run_count = 0;
   solver->row_refactor_work_ready_queue_run_count = 0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_segment_rows = 0;
@@ -933,6 +937,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_work_ready_queue = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_last_lazy_value_scatter = 0;
+  solver->row_refactor_last_row_solve = 0;
   solver->stats.row_refactor_last_run = 0;
   solver->stats.row_refactor_last_checked = 0;
   solver->stats.row_refactor_last_parallel = 0;
@@ -941,6 +946,7 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_work_ready_queue = 0;
   solver->stats.row_refactor_last_defer_value_scatter = 0;
   solver->stats.row_refactor_last_lazy_value_scatter = 0;
+  solver->stats.row_refactor_last_row_solve = 0;
 }
 
 static void kls_record_row_refactor_run(kls_solver *solver,
@@ -1012,6 +1018,17 @@ static void kls_record_row_refactor_lazy_value_scatter_run(
   solver->stats.row_refactor_last_lazy_value_scatter = 1;
   solver->stats.row_refactor_lazy_value_scatter_run_count =
     (int64_t)solver->row_refactor_lazy_value_scatter_run_count;
+}
+
+static void kls_record_row_refactor_row_solve(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_last_row_solve = 1;
+  solver->row_refactor_row_solve_run_count++;
+  solver->stats.row_refactor_last_row_solve = 1;
+  solver->stats.row_refactor_row_solve_run_count =
+    (int64_t)solver->row_refactor_row_solve_run_count;
 }
 
 static void kls_record_fast_reject_detail(kls_solver *solver,
@@ -7573,6 +7590,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_last_lazy_value_scatter;
   solver->stats.row_refactor_lazy_value_scatter_run_count =
     (int64_t)solver->row_refactor_lazy_value_scatter_run_count;
+  solver->stats.row_refactor_last_row_solve =
+    solver->row_refactor_last_row_solve;
+  solver->stats.row_refactor_row_solve_run_count =
+    (int64_t)solver->row_refactor_row_solve_run_count;
   solver->stats.row_refactor_segment_count =
     (int64_t)solver->row_refactor_segment_count;
   solver->stats.row_refactor_segment_rows =
@@ -12626,6 +12647,88 @@ static int kls_publish_row_refactor_values(kls_solver *solver) {
   return 1;
 }
 
+static int kls_row_refactor_solve_is_eligible(const kls_solver *solver,
+                                              int kernel_transpose) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      !solver->row_refactor_values_dirty || kernel_transpose ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->row_perm != NULL || solver->row_scale != NULL ||
+      solver->col_scale != NULL || solver->common.scale > 0 ||
+      solver->numeric->Rs != NULL || solver->symbolic->nblocks != 1u ||
+      solver->row_refactor_pattern_n != solver->n ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->numeric->Pnum == NULL || solver->symbolic->Q == NULL ||
+      solver->numeric->Udiag == NULL || solver->numeric->Xwork == NULL) {
+    return 0;
+  }
+  if (solver->row_refactor_l_ptr[solver->n] > 0u &&
+      (solver->row_refactor_l_cols == NULL ||
+       solver->row_refactor_l_row_values == NULL)) {
+    return 0;
+  }
+  if (solver->row_refactor_u_ptr[solver->n] > 0u &&
+      (solver->row_refactor_u_cols == NULL ||
+       solver->row_refactor_u_row_values == NULL)) {
+    return 0;
+  }
+  return 1;
+}
+
+static int kls_try_row_refactor_solve(kls_solver *solver,
+                                      int kernel_transpose,
+                                      int64_t nrhs,
+                                      double *x,
+                                      int64_t ldx) {
+  if (!kls_row_refactor_solve_is_eligible(solver, kernel_transpose)) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  const UF_long *pnum = solver->numeric->Pnum;
+  const UF_long *q = solver->symbolic->Q;
+  const double *udiag = (const double *)solver->numeric->Udiag;
+  double *work = (double *)solver->numeric->Xwork;
+  solver->common.status = TRILINOS_KLU_OK;
+
+  for (int64_t rhs_index = 0; rhs_index < nrhs; ++rhs_index) {
+    double *rhs = x + rhs_index * ldx;
+    for (UF_long k = 0; k < n; ++k) {
+      work[k] = rhs[pnum[k]];
+    }
+
+    for (UF_long row = 0; row < n; ++row) {
+      double value = work[row];
+      const UF_long begin = solver->row_refactor_l_ptr[row];
+      const UF_long end = solver->row_refactor_l_ptr[row + 1u];
+      for (UF_long p = begin; p < end; ++p) {
+        value -= solver->row_refactor_l_row_values[p] *
+                 work[solver->row_refactor_l_cols[p]];
+      }
+      work[row] = value;
+    }
+
+    for (UF_long remaining = n; remaining > 0u; --remaining) {
+      const UF_long row = remaining - 1u;
+      double value = work[row];
+      const UF_long begin = solver->row_refactor_u_ptr[row];
+      const UF_long end = solver->row_refactor_u_ptr[row + 1u];
+      for (UF_long p = begin; p < end; ++p) {
+        value -= solver->row_refactor_u_row_values[p] *
+                 work[solver->row_refactor_u_cols[p]];
+      }
+      work[row] = value / udiag[row];
+    }
+
+    for (UF_long k = 0; k < n; ++k) {
+      rhs[q[k]] = work[k];
+    }
+  }
+
+  kls_record_row_refactor_row_solve(solver);
+  return 1;
+}
+
 static void kls_clear_row_refactor_input_residuals(kls_solver *solver,
                                                    double *x,
                                                    UF_long row) {
@@ -16773,13 +16876,8 @@ static int solve_impl(kls_solver *solver,
   }
 
   const double start = kls_now_seconds();
-  if (!kls_publish_row_refactor_values(solver)) {
-    solver->stats.solve_seconds = kls_now_seconds() - start;
-    solver->stats.last_kernel_status = (int)solver->common.status;
-    solver->stats.memory_bytes = solver->common.memusage;
-    solver->stats.memory_peak_bytes = solver->common.mempeak;
-    return KLS_ERR_SOLVE_FAILED;
-  }
+  solver->row_refactor_last_row_solve = 0;
+  solver->stats.row_refactor_last_row_solve = 0;
   const int kernel_transpose =
     (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
   const int has_row_scale = solver->row_scale != NULL;
@@ -16824,11 +16922,23 @@ static int solve_impl(kls_solver *solver,
     }
   }
 
-  const UF_long ok = kernel_transpose
-    ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric, (UF_long)ldx,
-                            (UF_long)nrhs, x, &solver->common)
-    : trilinos_klu_l_solve(solver->symbolic, solver->numeric, (UF_long)ldx,
-                           (UF_long)nrhs, x, &solver->common);
+  UF_long ok = 0;
+  if (kls_try_row_refactor_solve(solver, kernel_transpose, nrhs, x, ldx)) {
+    ok = 1;
+  } else {
+    if (!kls_publish_row_refactor_values(solver)) {
+      solver->stats.solve_seconds = kls_now_seconds() - start;
+      solver->stats.last_kernel_status = (int)solver->common.status;
+      solver->stats.memory_bytes = solver->common.memusage;
+      solver->stats.memory_peak_bytes = solver->common.mempeak;
+      return KLS_ERR_SOLVE_FAILED;
+    }
+    ok = kernel_transpose
+      ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric, (UF_long)ldx,
+                              (UF_long)nrhs, x, &solver->common)
+      : trilinos_klu_l_solve(solver->symbolic, solver->numeric, (UF_long)ldx,
+                             (UF_long)nrhs, x, &solver->common);
+  }
   if (ok && !kernel_transpose && has_col_scale) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       double *dst = x + rhs * ldx;

@@ -199,6 +199,8 @@ typedef struct kls_stats {
   int row_refactor_values_dirty;
   int row_refactor_last_lazy_value_scatter;
   int64_t row_refactor_lazy_value_scatter_run_count;
+  int row_refactor_last_row_solve;
+  int64_t row_refactor_row_solve_run_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -73,8 +73,12 @@ repeated row refactors, avoiding queue/bitmap/predecessor allocation churn in
 the experimental row scheduler. Checked queued rejects now refresh any missing
 prefix rows before accepting the prefix-tail repair classification, so work
 ordering cannot turn an already-repairable prefix into a scheduler-race
-miss. These pieces do not change the current default KLU-column numeric
-kernel.
+miss. Unchecked row refactors can also hand dirty KLS-owned row-major `L`/`U`
+mirrors directly to a guarded non-transpose single-block solve, leaving KLU's
+column values stale until a transpose solve, later factorization, or other
+non-row fallback needs them. This avoids making every row-refactor solve pay an
+immediate KLU publish, but these pieces still do not change the current default
+KLU-column numeric kernel.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
 small candidates and can improve medium row matchings with bounded alternating
@@ -2861,14 +2865,27 @@ preserving the current conservative suffix semantics.
 Unchecked row refactors then stopped publishing every completed row back into
 KLU's column storage immediately. The KLS-owned row-major `L`/`U` mirrors now
 remain authoritative across repeated unchecked row refactors, and a dirty flag
-forces a single publish before solve, before a later `kls_factor`, or before a
-non-row refactor fallback. This is a direct SPICE-cycle optimization for the
-row/segment engine: repeated Newton refactors no longer pay KLU scatter traffic
-on every step when the next step can consume the row-major mirrors directly.
+forces a single publish before a KLU solve, transpose solve, later
+`kls_factor`, or non-row refactor fallback. This is a direct SPICE-cycle
+optimization for the row/segment engine: repeated Newton refactors no longer
+pay KLU scatter traffic on every step when the next step can consume the
+row-major mirrors directly.
 A focused four-thread `G2_circuit` row-refactor probe with three repeated
 refactors reported `0.337s` average refactor and a `0.047s` solve that included
 the delayed publish, with valid residuals. This is a row-engine throughput step,
 not yet the missing exact pivoting-tail executor.
+
+A guarded row-major solve then consumed those dirty row mirrors directly for
+unscaled, normal-orientation, single-block, non-transpose solves with no
+external KLS row/column scaling or permutation. It does not replace KLU's
+general triangular solve; it only skips the lazy publish when the KLS row
+mirrors are already authoritative. Focused checks kept residuals valid:
+`G2_circuit` with `--row-refactor all` reported three row solves and reduced
+the non-transpose solve average to about `0.020s` before the benchmark's
+transpose solve forced the expected publish, while an unscaled `nxp1`
+row-refactor probe used the row solve once with about `0.029s` solve time.
+The refactor gap remains; this is a storage-ownership bridge toward the
+row/segment engine, not the missing CKTSO pivoting-tail executor.
 
 ## Recommended General Work
 

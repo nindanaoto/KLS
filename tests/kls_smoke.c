@@ -1825,13 +1825,15 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
   double ax0[49];
   double ax1[49];
   double expected[12];
-  double b[12] = {0.0};
-  double x[12] = {0.0};
+  double expected2[12];
+  double b[24] = {0.0};
+  double x[24] = {0.0};
 
   int32_t p = 0;
   for (int32_t col = 0; col < n; ++col) {
     ap[col] = p;
     expected[col] = 1.0 + 0.25 * (double)col;
+    expected2[col] = -0.5 + 0.125 * (double)col;
     const int32_t row_block = col < 4 ? 0 : (col < 8 ? 4 : 8);
     for (int32_t row = row_block; row < row_block + 4; ++row) {
       ai[p] = row;
@@ -1852,6 +1854,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
   for (int32_t col = 0; col < n; ++col) {
     for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
       b[ai[q]] += ax1[q] * expected[col];
+      b[n + ai[q]] += ax1[q] * expected2[col];
     }
   }
 
@@ -2013,7 +2016,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
       ok = 0;
     }
   }
-  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+  if (ok && !require_ok(kls_solve(solver, 2, b, n, x, n),
                         "solve row-pipeline refactor")) ok = 0;
 
   kls_stats stats;
@@ -2046,8 +2049,9 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_last_ready_queue != 1 ||
              stats.row_refactor_last_done_bitmap != 0 ||
              stats.row_refactor_last_defer_value_scatter != 1 ||
-             stats.row_refactor_values_dirty != 0 ||
+             stats.row_refactor_values_dirty != 1 ||
              stats.row_refactor_last_lazy_value_scatter != 1 ||
+             stats.row_refactor_last_row_solve != 1 ||
              stats.row_refactor_last_work_ready_queue != 1 ||
              stats.row_refactor_run_count != 2 ||
              stats.row_refactor_checked_run_count != 1 ||
@@ -2061,6 +2065,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_defer_value_scatter_run_count !=
                expect_defer ||
              stats.row_refactor_lazy_value_scatter_run_count != 1 ||
+             stats.row_refactor_row_solve_run_count != 1 ||
              stats.row_refactor_work_ready_queue_run_count != 2 ||
              stats.row_refactor_ready_queue_workspace_groups <
                stats.row_refactor_group_count)) {
@@ -2076,7 +2081,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             ", done_bitmap=%" PRId64
             ", cleanup=%" PRId64 "/%" PRId64
             ", defer_scatter=%" PRId64
-            ", dirty/lazy=%d/%d/%" PRId64
+            ", dirty/lazy/row_solve=%d/%d/%" PRId64 "/%d/%" PRId64
             ", work_queue=%" PRId64
             ", queue_workspace=%" PRId64 "\n",
             stats.row_refactor_group_count,
@@ -2108,6 +2113,8 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             stats.row_refactor_values_dirty,
             stats.row_refactor_last_lazy_value_scatter,
             stats.row_refactor_lazy_value_scatter_run_count,
+            stats.row_refactor_last_row_solve,
+            stats.row_refactor_row_solve_run_count,
             stats.row_refactor_work_ready_queue_run_count,
             stats.row_refactor_ready_queue_workspace_groups);
     ok = 0;
@@ -2139,6 +2146,11 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
     if (!close_enough(x[i], expected[i])) {
       fprintf(stderr, "unexpected row-pipeline solution at %d: %.17g != %.17g\n",
               (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+    if (!close_enough(x[n + i], expected2[i])) {
+      fprintf(stderr, "unexpected row-pipeline solution rhs2 at %d: %.17g != %.17g\n",
+              (int)i, x[n + i], expected2[i]);
       ok = 0;
     }
   }
