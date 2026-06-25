@@ -580,11 +580,11 @@ high-degree patterns where delayed promotion would otherwise pay for an
 avoidable first AMD factorization, and for small and medium spiked
 low-diagonal patterns that resemble TSOPF-style paper cases where the symbolic
 estimate understates nested-dissection benefit. Otherwise it compares AMD and
-COLAMD by symbolic fill estimate. For large high-work no-BTF
-single-block analyses, `auto` can also try a METIS symbolic before numeric
-factorization and keep it when the symbolic fill score is clearly lower. This
-avoids paying for an AMD numeric factorization only to promote to METIS
-afterward. Dense-diagonal high-degree METIS
+COLAMD by symbolic fill estimate. For large high-work no-BTF single-block
+analyses, `auto` can also try METIS and SCOTCH symbolic candidates before
+numeric factorization and keep one when its symbolic fill score is clearly
+lower. This avoids paying for an AMD numeric factorization only to promote to a
+nested-dissection ordering afterward. Dense-diagonal high-degree METIS
 starts ask METIS for two separator attempts, then refine the nested-dissection
 rank order with CAMD inside coarse rank constraints. This preserves the
 separator-first shape while letting minimum degree reduce local fill/flops on
@@ -613,12 +613,14 @@ METIS/no-BTF numeric path. These predicates are structural, not
 matrix-name-based, and are deliberately narrow so unrelated IBM `dc`/`trans`
 cases and low-work dominant-BTF cases stay on the cheaper AMD/COLAMD path.
 
-Use `--ordering scotch` to force SCOTCH nested-dissection ordering. SCOTCH is
-kept as an explicit experimental ordering option rather than part of `auto`
-until it shows a general win over the current AMD/METIS policy. ParMETIS is not
-wired into KLS yet; it is a distributed-memory MPI package and should be
-treated as a separate future component if KLS grows an MPI/distributed solver
-path.
+Use `--ordering scotch` to force SCOTCH nested-dissection ordering. In `auto`,
+KLS can also compare SCOTCH as a guarded symbolic candidate for large
+single-block, high-estimated-work patterns and keep it only when its symbolic
+fill/work score materially beats the current AMD/COLAMD/METIS candidate. This
+keeps SCOTCH available as a paper-backed nested-dissection alternative without
+making it a broad default. ParMETIS is not wired into KLS yet; it is a
+distributed-memory MPI package and should be treated as a separate future
+component if KLS grows an MPI/distributed solver path.
 
 To fetch public SuiteSparse Matrix Collection matrices listed in the manifest:
 

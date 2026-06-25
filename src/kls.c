@@ -3545,17 +3545,68 @@ static int should_start_auto_with_metis(UF_long n,
   return is_medium_bounded_degree_diagonal_pattern(n, col_ptr, row_idx);
 }
 
-static int should_try_symbolic_metis_before_numeric(
+#endif
+
+#if defined(KLS_HAVE_METIS) || defined(KLS_HAVE_SCOTCH)
+static int should_try_symbolic_nested_dissection_before_numeric(
   UF_long n,
   const trilinos_klu_l_symbolic *symbolic,
   kls_ordering selected_ordering,
+  kls_ordering trial_ordering,
   double score) {
-  if (selected_ordering == KLS_ORDERING_METIS || symbolic == NULL ||
+  if (selected_ordering == trial_ordering || symbolic == NULL ||
       n < 200000 || symbolic->do_btf || symbolic->nblocks != 1 ||
       symbolic->maxblock != n || symbolic->est_flops < 1.0e9) {
     return 0;
   }
   return isfinite(score) && score > 0.0;
+}
+
+static void maybe_promote_symbolic_ordering(
+  UF_long n,
+  UF_long *col_ptr,
+  UF_long *row_idx,
+  const kls_options *symbolic_options,
+  kls_ordering trial_ordering,
+  trilinos_klu_l_symbolic **best_symbolic_io,
+  trilinos_klu_l_common *best_common_io,
+  kls_ordering *best_ordering_io,
+  double *best_score_io,
+  double improvement_ratio) {
+  if (symbolic_options == NULL || best_symbolic_io == NULL ||
+      *best_symbolic_io == NULL || best_common_io == NULL ||
+      best_ordering_io == NULL || best_score_io == NULL ||
+      !isfinite(*best_score_io) || *best_score_io <= 0.0 ||
+      improvement_ratio <= 0.0) {
+    return;
+  }
+
+  kls_options trial_options = *symbolic_options;
+  trial_options.use_btf = (*best_symbolic_io)->do_btf ? 1 : 0;
+  trilinos_klu_l_symbolic *trial_symbolic = NULL;
+  trilinos_klu_l_common trial_common;
+  int status = analyze_with_ordering(n, col_ptr, row_idx, &trial_options,
+                                     trial_ordering, &trial_symbolic,
+                                     &trial_common);
+  if (status != KLS_OK) {
+    return;
+  }
+
+  double trial_score = symbolic_score(trial_symbolic);
+  maybe_retry_without_btf(n, col_ptr, row_idx, &trial_options,
+                          trial_ordering, &trial_symbolic,
+                          &trial_common, &trial_score, 0);
+  if (isfinite(trial_score) &&
+      trial_score <= improvement_ratio * (*best_score_io)) {
+    trilinos_klu_l_free_symbolic(best_symbolic_io, best_common_io);
+    *best_symbolic_io = trial_symbolic;
+    *best_common_io = trial_common;
+    *best_ordering_io = trial_ordering;
+    *best_score_io = trial_score;
+    return;
+  }
+
+  trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
 }
 #endif
 
@@ -7073,6 +7124,16 @@ static int choose_symbolic_for_pattern(UF_long n,
       maybe_retry_without_btf(n, col_ptr, row_idx, options,
                               KLS_ORDERING_METIS, symbolic_out, common_out,
                               &selected_score, 0);
+#ifdef KLS_HAVE_SCOTCH
+      if (should_try_symbolic_nested_dissection_before_numeric(
+            n, *symbolic_out, *selected_ordering_out, KLS_ORDERING_SCOTCH,
+            selected_score)) {
+        maybe_promote_symbolic_ordering(
+          n, col_ptr, row_idx, options, KLS_ORDERING_SCOTCH,
+          symbolic_out, common_out, selected_ordering_out,
+          &selected_score, 0.90);
+      }
+#endif
       *score_out = selected_score;
       return KLS_OK;
     }
@@ -7105,6 +7166,16 @@ static int choose_symbolic_for_pattern(UF_long n,
       maybe_retry_without_btf(n, col_ptr, row_idx, symbolic_options,
                               KLS_ORDERING_METIS, symbolic_out, common_out,
                               &selected_score, 0);
+#ifdef KLS_HAVE_SCOTCH
+      if (should_try_symbolic_nested_dissection_before_numeric(
+            n, *symbolic_out, *selected_ordering_out, KLS_ORDERING_SCOTCH,
+            selected_score)) {
+        maybe_promote_symbolic_ordering(
+          n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_SCOTCH,
+          symbolic_out, common_out, selected_ordering_out,
+          &selected_score, 0.90);
+      }
+#endif
       *score_out = selected_score;
       return KLS_OK;
     }
@@ -7155,30 +7226,19 @@ static int choose_symbolic_for_pattern(UF_long n,
   }
 
 #ifdef KLS_HAVE_METIS
-  if (should_try_symbolic_metis_before_numeric(n, best_symbolic,
-                                               best_ordering, best_score)) {
-    kls_options metis_options = *symbolic_options;
-    metis_options.use_btf = best_symbolic->do_btf ? 1 : 0;
-    trilinos_klu_l_symbolic *metis_symbolic = NULL;
-    trilinos_klu_l_common metis_common;
-    int status = analyze_with_ordering(n, col_ptr, row_idx, &metis_options,
-                                       KLS_ORDERING_METIS, &metis_symbolic,
-                                       &metis_common);
-    if (status == KLS_OK) {
-      double metis_score = symbolic_score(metis_symbolic);
-      maybe_retry_without_btf(n, col_ptr, row_idx, &metis_options,
-                              KLS_ORDERING_METIS, &metis_symbolic,
-                              &metis_common, &metis_score, 0);
-      if (isfinite(metis_score) && metis_score <= 0.90 * best_score) {
-        trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
-        best_symbolic = metis_symbolic;
-        best_common = metis_common;
-        best_ordering = KLS_ORDERING_METIS;
-        best_score = metis_score;
-      } else {
-        trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
-      }
-    }
+  if (should_try_symbolic_nested_dissection_before_numeric(
+        n, best_symbolic, best_ordering, KLS_ORDERING_METIS, best_score)) {
+    maybe_promote_symbolic_ordering(
+      n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_METIS,
+      &best_symbolic, &best_common, &best_ordering, &best_score, 0.90);
+  }
+#endif
+#ifdef KLS_HAVE_SCOTCH
+  if (should_try_symbolic_nested_dissection_before_numeric(
+        n, best_symbolic, best_ordering, KLS_ORDERING_SCOTCH, best_score)) {
+    maybe_promote_symbolic_ordering(
+      n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_SCOTCH,
+      &best_symbolic, &best_common, &best_ordering, &best_score, 0.90);
   }
 #endif
 
