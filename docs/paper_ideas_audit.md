@@ -3486,3 +3486,13 @@ dropped from 3623 to about 1340 compact uses and improved in the same-session
 sample. The retained lesson is still that KLS needs persistent compact
 row/segment numeric storage, but the scratch bridge now follows a broader
 work-per-byte rule instead of a low absolute threshold.
+
+The compact-panel gate is now visible in benchmark artifacts. `kls_stats` and
+`kls_bench` report compact-panel eligible dense-group count, eligible rows,
+estimated update work, and copied panel entries in addition to the last-run
+execution counter. This separates three paper-relevant cases in future suite
+runs: no executable dense row segments, dense segments that are too shallow for
+compact scratch, and dense segments whose arithmetic intensity is high enough to
+exercise the SubtreeLU-style compact-panel bridge. The synthetic dense checked
+and unchecked smoke cases now assert those eligibility counters, while small
+`add20` still reports zero eligible compact panels.

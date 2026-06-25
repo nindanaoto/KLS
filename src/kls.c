@@ -214,6 +214,10 @@ struct kls_solver {
   UF_long row_refactor_dense_segment_max_width;
   double row_refactor_dense_segment_dense_entries;
   double row_refactor_dense_segment_trailing_entries;
+  UF_long row_refactor_compact_dense_panel_eligible_count;
+  UF_long row_refactor_compact_dense_panel_eligible_rows;
+  double row_refactor_compact_dense_panel_update_work;
+  double row_refactor_compact_dense_panel_entries;
   unsigned int row_refactor_tail_mark;
   UF_long row_refactor_tail_count;
   UF_long *refactor_level_ptr;
@@ -446,6 +450,13 @@ static size_t kls_initial_block_lusize(const kls_solver *solver,
 static UF_long kls_block_for_pivot(const kls_solver *solver, UF_long pivot);
 static double kls_row_refactor_compute_group_work(const kls_solver *solver,
                                                   UF_long group);
+static double kls_row_refactor_dense_group_update_work(UF_long width,
+                                                       UF_long trailing_len);
+static double kls_row_refactor_dense_group_panel_entries(
+  UF_long width,
+  UF_long trailing_len);
+static int kls_row_refactor_prefers_compact_dense_panel(UF_long width,
+                                                        UF_long trailing_len);
 static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x);
 static double kls_row_refactor_group_work(const kls_solver *solver,
                                           UF_long group);
@@ -872,6 +883,10 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_dense_segment_max_width = 0;
   solver->row_refactor_dense_segment_dense_entries = 0.0;
   solver->row_refactor_dense_segment_trailing_entries = 0.0;
+  solver->row_refactor_compact_dense_panel_eligible_count = 0;
+  solver->row_refactor_compact_dense_panel_eligible_rows = 0;
+  solver->row_refactor_compact_dense_panel_update_work = 0.0;
+  solver->row_refactor_compact_dense_panel_entries = 0.0;
   solver->row_refactor_tail_mark = 0u;
   solver->row_refactor_tail_count = 0;
 }
@@ -929,6 +944,10 @@ typedef struct {
   UF_long dense_segment_max_width;
   double dense_segment_dense_entries;
   double dense_segment_trailing_entries;
+  UF_long compact_dense_panel_eligible_count;
+  UF_long compact_dense_panel_eligible_rows;
+  double compact_dense_panel_update_work;
+  double compact_dense_panel_entries;
 } kls_row_refactor_diagnostics;
 
 static void kls_save_row_refactor_diagnostics(
@@ -1004,6 +1023,14 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_dense_segment_dense_entries;
   diag->dense_segment_trailing_entries =
     solver->row_refactor_dense_segment_trailing_entries;
+  diag->compact_dense_panel_eligible_count =
+    solver->row_refactor_compact_dense_panel_eligible_count;
+  diag->compact_dense_panel_eligible_rows =
+    solver->row_refactor_compact_dense_panel_eligible_rows;
+  diag->compact_dense_panel_update_work =
+    solver->row_refactor_compact_dense_panel_update_work;
+  diag->compact_dense_panel_entries =
+    solver->row_refactor_compact_dense_panel_entries;
 }
 
 static void kls_restore_row_refactor_diagnostics(
@@ -1087,6 +1114,14 @@ static void kls_restore_row_refactor_diagnostics(
     diag->dense_segment_dense_entries;
   solver->row_refactor_dense_segment_trailing_entries =
     diag->dense_segment_trailing_entries;
+  solver->row_refactor_compact_dense_panel_eligible_count =
+    diag->compact_dense_panel_eligible_count;
+  solver->row_refactor_compact_dense_panel_eligible_rows =
+    diag->compact_dense_panel_eligible_rows;
+  solver->row_refactor_compact_dense_panel_update_work =
+    diag->compact_dense_panel_update_work;
+  solver->row_refactor_compact_dense_panel_entries =
+    diag->compact_dense_panel_entries;
 }
 
 static void free_row_refactor_pattern_preserve_diagnostics(kls_solver *solver) {
@@ -8423,6 +8458,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_dense_segment_dense_entries;
   solver->stats.row_refactor_dense_segment_trailing_entries =
     solver->row_refactor_dense_segment_trailing_entries;
+  solver->stats.row_refactor_compact_dense_panel_eligible_count =
+    (int64_t)solver->row_refactor_compact_dense_panel_eligible_count;
+  solver->stats.row_refactor_compact_dense_panel_eligible_rows =
+    (int64_t)solver->row_refactor_compact_dense_panel_eligible_rows;
+  solver->stats.row_refactor_compact_dense_panel_update_work =
+    solver->row_refactor_compact_dense_panel_update_work;
+  solver->stats.row_refactor_compact_dense_panel_entries =
+    solver->row_refactor_compact_dense_panel_entries;
   solver->stats.refactor_dependency_cluster_levels =
     (int64_t)solver->refactor_cluster_level_count;
   solver->stats.refactor_dependency_pipeline_columns =
@@ -14116,6 +14159,10 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
   UF_long dense_segment_max_width = 0;
   double dense_segment_dense_entries = 0.0;
   double dense_segment_trailing_entries = 0.0;
+  UF_long compact_dense_panel_eligible_count = 0;
+  UF_long compact_dense_panel_eligible_rows = 0;
+  double compact_dense_panel_update_work = 0.0;
+  double compact_dense_panel_entries = 0.0;
   UF_long *group_successor_ptr = NULL;
   UF_long *group_successor_groups = NULL;
   UF_long *group_pred_count = NULL;
@@ -14202,6 +14249,14 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     }
     dense_segment_dense_entries += dense_entries;
     dense_segment_trailing_entries += trailing_entries;
+    if (kls_row_refactor_prefers_compact_dense_panel(width, trailing_len)) {
+      compact_dense_panel_eligible_count++;
+      compact_dense_panel_eligible_rows += width;
+      compact_dense_panel_update_work +=
+        kls_row_refactor_dense_group_update_work(width, trailing_len);
+      compact_dense_panel_entries +=
+        kls_row_refactor_dense_group_panel_entries(width, trailing_len);
+    }
   }
 
   UF_long *group_levels = group_count > 0u
@@ -14380,6 +14435,14 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
     dense_segment_dense_entries;
   solver->row_refactor_dense_segment_trailing_entries =
     dense_segment_trailing_entries;
+  solver->row_refactor_compact_dense_panel_eligible_count =
+    compact_dense_panel_eligible_count;
+  solver->row_refactor_compact_dense_panel_eligible_rows =
+    compact_dense_panel_eligible_rows;
+  solver->row_refactor_compact_dense_panel_update_work =
+    compact_dense_panel_update_work;
+  solver->row_refactor_compact_dense_panel_entries =
+    compact_dense_panel_entries;
   if (group_count > 0u &&
       group_count <= (UF_long)(SIZE_MAX / sizeof(double))) {
     solver->row_refactor_group_work =

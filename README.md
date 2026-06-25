@@ -407,7 +407,12 @@ row-mirror kernel. The compact-panel gate requires both enough total structural
 work and enough work per copied panel entry, so low-arithmetic-intensity dense
 groups stay on the direct row-mirror kernel. Stats report
 `row_refactor_last_compact_dense_panel` and
-`row_refactor_compact_dense_panel_count`. Checked pivot-probe row refactors use
+`row_refactor_compact_dense_panel_count` for executed compact panels, plus
+`row_refactor_compact_dense_panel_eligible_count`,
+`row_refactor_compact_dense_panel_eligible_rows`,
+`row_refactor_compact_dense_panel_update_work`, and
+`row_refactor_compact_dense_panel_entries` for the structural opportunity that
+survives the compact-panel gate. Checked pivot-probe row refactors use
 the same compact panel only through a row-ordered update/check/publish loop, so
 a rejected pivot leaves the same prefix-visible row-major state as the native
 direct row-mirror kernel. For generic-only row patterns, pipeline groups also
