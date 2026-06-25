@@ -150,6 +150,12 @@ Root-of-block rejects are deliberately not reported as serial-tail-ready,
 because they need CKTSO's fuller row/ETree machinery rather than a contiguous
 prefix-preserving tail. This is still not CKTSO's full pipelined
 ETree-descendant tail factorization.
+SPRAL static-pivot matches that are already close to complete can now be
+finished with KLS's existing nonzero structural augmenting-path graph before
+the row permutation is accepted. The SPRAL scaling vectors are retained only
+when SPRAL itself found a complete weighted match; structurally augmented
+matches fall back to KLS's matching-equilibration path so the scales remain
+consistent with the final diagonal choice.
 
 The remaining CKTSO gap is large enough that it should be treated as a missing
 major algorithm, not an ordering-package tuning problem. On the selected large
@@ -165,6 +171,19 @@ matching/scaling worth keeping, but not sufficient as the next expected gap
 closer by itself. The current evidence points most strongly at CKTSO's
 KLS-owned row/up-looking numeric factorization, EGraph fast factor with pivot
 checks, and ETree-descendant pipelined tail restart machinery.
+The CKTSO paper in `refs/` is explicit that CKTSO's core factorization is a
+row-major sparse up-looking factorization, and that the fast path combines
+guessed EGraph pivot-checked refactorization with an ETree-scheduled pipelined
+tail factorization when repivoting is needed. KLS still hands the first large
+factorization to KLU's column-oriented serial kernel. A debug trace on `pre2`
+confirmed the timeout occurs in `trilinos_klu_l_kernel` from the fallback
+first-factor call. The same trace showed SPRAL auction static pivoting finds
+633565 weighted matches for 659033 rows; structurally augmenting that to a full
+permutation made the static-pivoted AMD symbolic estimate worse than the
+baseline, so it did not expose a credible low-risk static-pivot-only fix for
+this slow case. A broader nested-dissection retry on that static-pivoted
+dominant-BTF shape spent the probe timeout inside ordering analysis, so it was
+not retained as a default policy.
 
 The retained broader SPRAL post-factor trial is deliberately value-gated. A
 plain broad gate improved several MC64-sensitive cases but regressed the medium

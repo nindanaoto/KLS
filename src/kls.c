@@ -4489,6 +4489,74 @@ static UF_long augment_numeric_row_match_layered(UF_long n,
   return matched;
 }
 
+#ifdef KLS_HAVE_SPRAL_SCALING
+static int augment_numeric_row_match_from_csc(UF_long n,
+                                              UF_long nnz,
+                                              const UF_long *col_ptr,
+                                              const UF_long *row_idx,
+                                              const double *numeric_values,
+                                              UF_long *row_perm,
+                                              UF_long *col_match,
+                                              UF_long *matched_io) {
+  if (n <= 0 || col_ptr == NULL || row_idx == NULL ||
+      numeric_values == NULL || row_perm == NULL || col_match == NULL ||
+      matched_io == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  if (*matched_io >= n) {
+    return KLS_OK;
+  }
+
+  kls_match_entry *entries =
+    (kls_match_entry *)malloc((size_t)nnz * sizeof(*entries));
+  if (entries == NULL) {
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+
+  UF_long entry_count = 0;
+  for (UF_long col = 0; col < n; ++col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      const double weight = fabs(numeric_values[p]);
+      if (row < n && weight > 0.0 && isfinite(weight)) {
+        entries[entry_count].weight = weight;
+        entries[entry_count].row = row;
+        entries[entry_count].col = col;
+        entry_count++;
+      }
+    }
+  }
+  if (entry_count == 0) {
+    free(entries);
+    return KLS_ERR_UNSUPPORTED;
+  }
+
+  kls_row_match_graph graph;
+  const int status = build_row_match_graph(n, entry_count, entries, &graph);
+  free(entries);
+  if (status != KLS_OK) {
+    return status;
+  }
+
+  *matched_io = augment_numeric_row_match_layered(n, &graph, row_perm,
+                                                  col_match);
+  free_row_match_graph(&graph);
+  return KLS_OK;
+}
+
+static int incomplete_spral_match_augment_is_worthwhile(UF_long n,
+                                                        UF_long matched) {
+  if (matched >= n) {
+    return 0;
+  }
+  const UF_long unmatched = n - matched;
+  if (unmatched <= 4096u) {
+    return 1;
+  }
+  return 1000u * matched >= 990u * n && unmatched <= 20000u;
+}
+#endif
+
 static void improve_numeric_row_match_by_swaps(UF_long n,
                                                const kls_row_match_graph *graph,
                                                UF_long *row_perm,
@@ -4837,6 +4905,21 @@ static int build_spral_hungarian_row_match_scaling(
     matched++;
   }
   free(spral_match);
+  const UF_long spral_matched = matched;
+
+  if (incomplete_spral_match_augment_is_worthwhile(n, matched)) {
+    const int augment_status =
+      augment_numeric_row_match_from_csc(n, nnz, col_ptr, row_idx,
+                                         numeric_values, row_perm,
+                                         col_match, &matched);
+    if (augment_status == KLS_ERR_OUT_OF_MEMORY) {
+      free(row_scale);
+      free(col_scale);
+      free(row_perm);
+      free(col_match);
+      return augment_status;
+    }
+  }
 
   const int complete_status =
     complete_unmatched_row_match(n, row_perm, col_match);
@@ -4850,7 +4933,7 @@ static int build_spral_hungarian_row_match_scaling(
     return complete_status;
   }
 
-  int scaling_usable = inform.flag == 0 && matched == n;
+  int scaling_usable = inform.flag == 0 && spral_matched == n;
   for (UF_long col = 0; col < n && scaling_usable; ++col) {
     if (!isfinite(spral_col_scale[col]) || spral_col_scale[col] <= 0.0) {
       scaling_usable = 0;
@@ -4999,6 +5082,21 @@ static int build_spral_auction_row_match(UF_long n,
     matched++;
   }
   free(spral_match);
+  const UF_long spral_matched = matched;
+
+  if (incomplete_spral_match_augment_is_worthwhile(n, matched)) {
+    const int augment_status =
+      augment_numeric_row_match_from_csc(n, nnz, col_ptr, row_idx,
+                                         numeric_values, row_perm,
+                                         col_match, &matched);
+    if (augment_status == KLS_ERR_OUT_OF_MEMORY) {
+      free(row_scale);
+      free(col_scale);
+      free(row_perm);
+      free(col_match);
+      return augment_status;
+    }
+  }
 
   const int complete_status =
     complete_unmatched_row_match(n, row_perm, col_match);
@@ -5010,7 +5108,7 @@ static int build_spral_auction_row_match(UF_long n,
     return complete_status;
   }
 
-  int scaling_usable = inform.flag == 0 && matched == n;
+  int scaling_usable = inform.flag == 0 && spral_matched == n;
   if (scaling_usable) {
     double *mapped_row_scale =
       (double *)malloc((size_t)n * sizeof(*mapped_row_scale));
