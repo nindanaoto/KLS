@@ -330,6 +330,12 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_supernode_trsv_count;
   int64_t row_refactor_compact_supernode_trsv_rows;
   int64_t row_refactor_compact_supernode_trsv_entries;
+  int row_refactor_last_compact_supernode_batch;
+  int64_t row_refactor_compact_supernode_batch_count;
+  int64_t row_refactor_compact_supernode_batch_rows;
+  int64_t row_refactor_compact_supernode_batch_dep_rows;
+  int64_t row_refactor_compact_supernode_batch_entries;
+  int build_has_cblas;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

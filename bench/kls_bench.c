@@ -788,6 +788,7 @@ int main(int argc, char **argv) {
            ",\"build_has_metis\":%s"
            ",\"build_has_scotch\":%s"
            ",\"build_has_spral_scaling\":%s"
+           ",\"build_has_cblas\":%s"
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
            ",\"pivot_tolerance\":%.9g,\"selected_pivot_tolerance\":%.9g"
@@ -886,6 +887,7 @@ int main(int argc, char **argv) {
            stats.build_has_metis ? "true" : "false",
            stats.build_has_scotch ? "true" : "false",
            stats.build_has_spral_scaling ? "true" : "false",
+           stats.build_has_cblas ? "true" : "false",
            kls_orientation_name(options.orientation),
            kls_orientation_name(stats.selected_orientation),
            kls_ordering_name(stats.selected_ordering),
@@ -1194,6 +1196,11 @@ int main(int argc, char **argv) {
            ",\"row_refactor_compact_supernode_trsv_count\":%" PRId64
            ",\"row_refactor_compact_supernode_trsv_rows\":%" PRId64
            ",\"row_refactor_compact_supernode_trsv_entries\":%" PRId64
+           ",\"row_refactor_last_compact_supernode_batch\":%d"
+           ",\"row_refactor_compact_supernode_batch_count\":%" PRId64
+           ",\"row_refactor_compact_supernode_batch_rows\":%" PRId64
+           ",\"row_refactor_compact_supernode_batch_dep_rows\":%" PRId64
+           ",\"row_refactor_compact_supernode_batch_entries\":%" PRId64
            ",\"refactor_dependency_cluster_levels\":%" PRId64
            ",\"refactor_dependency_pipeline_columns\":%" PRId64
            ",\"refactor_dependency_work\":%.9g"
@@ -1279,6 +1286,11 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_supernode_trsv_count,
            stats.row_refactor_compact_supernode_trsv_rows,
            stats.row_refactor_compact_supernode_trsv_entries,
+           stats.row_refactor_last_compact_supernode_batch,
+           stats.row_refactor_compact_supernode_batch_count,
+           stats.row_refactor_compact_supernode_batch_rows,
+           stats.row_refactor_compact_supernode_batch_dep_rows,
+           stats.row_refactor_compact_supernode_batch_entries,
            stats.refactor_dependency_cluster_levels,
            stats.refactor_dependency_pipeline_columns,
            stats.refactor_dependency_work,
@@ -1290,10 +1302,11 @@ int main(int argc, char **argv) {
     printf("matrix: %s\n", path);
     printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
     printf("threads: %d\n", options.threads);
-    printf("build features: METIS %s, SCOTCH %s, SPRAL scaling %s\n",
+    printf("build features: METIS %s, SCOTCH %s, SPRAL scaling %s, CBLAS %s\n",
            stats.build_has_metis ? "on" : "off",
            stats.build_has_scotch ? "on" : "off",
-           stats.build_has_spral_scaling ? "on" : "off");
+           stats.build_has_spral_scaling ? "on" : "off",
+           stats.build_has_cblas ? "on" : "off");
     printf("requested orientation: %s\n", kls_orientation_name(options.orientation));
     printf("selected orientation: %s\n", kls_orientation_name(stats.selected_orientation));
     printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
@@ -1647,7 +1660,9 @@ int main(int argc, char **argv) {
            ", gemv: %d/%" PRId64
            " rows/entries %" PRId64 "/%" PRId64
            ", trsv: %d/%" PRId64
-           " rows/entries %" PRId64 "/%" PRId64 "\n",
+           " rows/entries %" PRId64 "/%" PRId64
+           ", batch: %d/%" PRId64
+           " rows/dep_rows/entries %" PRId64 "/%" PRId64 "/%" PRId64 "\n",
            stats.row_refactor_dense_segment_count,
            stats.row_refactor_dense_segment_rows,
            stats.row_refactor_dense_segment_max_width,
@@ -1674,7 +1689,12 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_compact_supernode_trsv,
            stats.row_refactor_compact_supernode_trsv_count,
            stats.row_refactor_compact_supernode_trsv_rows,
-           stats.row_refactor_compact_supernode_trsv_entries);
+           stats.row_refactor_compact_supernode_trsv_entries,
+           stats.row_refactor_last_compact_supernode_batch,
+           stats.row_refactor_compact_supernode_batch_count,
+           stats.row_refactor_compact_supernode_batch_rows,
+           stats.row_refactor_compact_supernode_batch_dep_rows,
+           stats.row_refactor_compact_supernode_batch_entries);
     printf("refactor dependency cluster levels: %" PRId64
            ", pipeline columns: %" PRId64 "\n",
            stats.refactor_dependency_cluster_levels,

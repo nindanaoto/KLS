@@ -482,14 +482,22 @@ sparse-`x` suffix solve on ASIC/G2-style rows. Builds configured with
 calls with the same scalar fallback and pivot checks. Completed producer
 supernodes can update later rows with CBLAS `dtrsv` plus `dgemv`, matching the
 paper's direct update shape over the retained row-major panel when the
-structural update work is large enough to amortize BLAS calls. The unchecked
-producer-panel refactor experiment uses a blocked panel algorithm
+structural update work is large enough to amortize BLAS calls. When a whole
+unchecked dense consumer group has the same completed dense producer suffix as
+its only external dependency, the CBLAS experiment can batch that producer
+update across the consumer group with one `dtrsm` and one `dgemm`; stats report
+`row_refactor_last_compact_supernode_batch`,
+`row_refactor_compact_supernode_batch_count`,
+`row_refactor_compact_supernode_batch_rows`,
+`row_refactor_compact_supernode_batch_dep_rows`, and
+`row_refactor_compact_supernode_batch_entries`. The unchecked producer-panel
+refactor experiment uses a blocked panel algorithm
 (`dtrsm`/`dgemm`) instead of one BLAS call per row. Focused probes keep it
 default-off: the blocked CBLAS path improved on the earlier per-row CBLAS
 attempt but was still slower than the scalar compact kernel on `onetone2`, so
-the remaining paper gap is a deeper blocked/supernodal row numeric layout
-rather than simply wrapping the current compact group in BLAS calls. Checked
-pivot-probe row refactors use
+the remaining paper gap is broader row-group/supernode planning and a deeper
+blocked row-major numeric layout rather than simply wrapping the current
+compact group in BLAS calls. Checked pivot-probe row refactors use
 the same compact panel only through a row-ordered update/check/publish loop, so
 a rejected pivot leaves the same prefix-visible row-major state as the native
 direct row-mirror kernel. For generic-only row patterns, pipeline groups also

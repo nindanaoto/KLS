@@ -2957,6 +2957,253 @@ static int test_unchecked_row_dense_compact_panel(void) {
   return ok;
 }
 
+static int test_batched_compact_supernode_cblas_probe(void) {
+  const int32_t lead = 40;
+  const int32_t mid = 40;
+  const int32_t trail = 16;
+  const int32_t n = lead + mid + trail;
+  const int32_t trail_break_col = n - 1;
+  const size_t nnz =
+    (size_t)(lead + mid) * (size_t)(lead + mid) +
+    (size_t)(trail - 1) * ((size_t)(lead + mid) + 1u) +
+    (size_t)lead + 1u;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
+  double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
+  double *ax1 = (double *)malloc(nnz * sizeof(*ax1));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
+      b == NULL || x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  for (int32_t col = 0; col < n; ++col) {
+    expected[col] = 0.5 + 0.0625 * (double)((7 * col) % 19);
+  }
+  size_t pos = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = (int32_t)pos;
+    int32_t row_start = 0;
+    int32_t row_limit = 0;
+    if (col < lead + mid) {
+      row_limit = lead + mid;
+    } else if (col < trail_break_col) {
+      row_limit = lead + mid;
+    } else {
+      row_start = lead;
+      row_limit = lead + mid;
+    }
+    for (int32_t row = row_start; row < row_limit; ++row) {
+      const size_t p = pos++;
+      ai[p] = row;
+      ax0[p] = row == col
+        ? 26.0 + 0.02 * (double)col
+        : 0.0004 * (1.0 + (double)((row + 5 * col) % 17));
+      ax1[p] = ax0[p] + (row == col
+        ? 0.03 * (double)((col % 5) + 1)
+        : 1.0e-5 * (double)(((row + col) % 7) - 3));
+    }
+    if (col >= lead + mid) {
+      const size_t p = pos++;
+      ai[p] = col;
+      ax0[p] = 19.0 + 0.03 * (double)col;
+      ax1[p] = ax0[p] + 0.02 * (double)((col % 3) + 1);
+    }
+  }
+  ap[n] = (int32_t)pos;
+  if (pos != nnz) {
+    fprintf(stderr, "unexpected batched-supernode fixture nnz: %zu/%zu\n",
+            pos, nnz);
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.01;
+  options.static_pivoting = 0;
+
+  const char *saved_row_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row_env =
+    saved_row_env_value != NULL ? strdup(saved_row_env_value) : NULL;
+  const int had_saved_row_env = saved_row_env_value != NULL;
+  const char *saved_cblas_env_value = getenv("KLS_ENABLE_CBLAS_SUPERNODE");
+  char *saved_cblas_env =
+    saved_cblas_env_value != NULL ? strdup(saved_cblas_env_value) : NULL;
+  const int had_saved_cblas_env = saved_cblas_env_value != NULL;
+
+  int ok = 1;
+  if (had_saved_row_env && saved_row_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_cblas_env && saved_cblas_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CBLAS_SUPERNODE\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze batched compact supernode")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor batched compact supernode")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "refactor batched compact supernode")) ok = 0;
+  if (had_saved_row_env && saved_row_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_row_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_row_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (had_saved_cblas_env && saved_cblas_env != NULL) {
+    if (setenv("KLS_ENABLE_CBLAS_SUPERNODE", saved_cblas_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CBLAS_SUPERNODE");
+      ok = 0;
+    }
+  } else if (!had_saved_cblas_env) {
+    if (unsetenv("KLS_ENABLE_CBLAS_SUPERNODE") != 0) {
+      perror("unsetenv KLS_ENABLE_CBLAS_SUPERNODE");
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve batched compact supernode")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats batched compact supernode")) {
+    ok = 0;
+  }
+  if (ok && stats.build_has_cblas &&
+      (stats.row_refactor_last_compact_supernode_batch != 1 ||
+       stats.row_refactor_compact_supernode_batch_count < 1 ||
+       stats.row_refactor_compact_supernode_batch_rows < mid ||
+       stats.row_refactor_compact_supernode_batch_dep_rows <
+         (int64_t)lead * (int64_t)mid ||
+       stats.row_refactor_compact_supernode_batch_entries <= 0)) {
+    fprintf(stderr,
+            "unexpected batched compact-supernode stats: cblas=%d"
+            ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", compact=%d/%" PRId64 ", supernode=%d/%" PRId64 "\n",
+            stats.build_has_cblas,
+            stats.row_refactor_last_compact_supernode_batch,
+            stats.row_refactor_compact_supernode_batch_count,
+            stats.row_refactor_compact_supernode_batch_rows,
+            stats.row_refactor_compact_supernode_batch_dep_rows,
+            stats.row_refactor_compact_supernode_batch_entries,
+            stats.row_refactor_last_compact_dense_panel,
+            stats.row_refactor_compact_dense_panel_count,
+            stats.row_refactor_last_compact_supernode_update,
+            stats.row_refactor_compact_supernode_update_count);
+    ok = 0;
+  }
+  if (ok && !stats.build_has_cblas &&
+      stats.row_refactor_compact_supernode_batch_count != 0) {
+    fprintf(stderr,
+            "unexpected CBLAS batch count without CBLAS build: %" PRId64 "\n",
+            stats.row_refactor_compact_supernode_batch_count);
+    ok = 0;
+  }
+
+  double max_solution_error = 0.0;
+  for (int32_t i = 0; i < n; ++i) {
+    const double err = fabs(x[i] - expected[i]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+  }
+  double max_residual = 0.0;
+  double max_rhs = 0.0;
+  double *residual = (double *)malloc((size_t)n * sizeof(*residual));
+  if (residual == NULL) {
+    ok = 0;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (residual != NULL) {
+      residual[row] = -b[row];
+    }
+    if (fabs(b[row]) > max_rhs) {
+      max_rhs = fabs(b[row]);
+    }
+  }
+  if (residual != NULL) {
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        residual[ai[p]] += ax1[p] * x[col];
+      }
+    }
+    for (int32_t row = 0; row < n; ++row) {
+      const double residual_abs = fabs(residual[row]);
+      if (residual_abs > max_residual) {
+        max_residual = residual_abs;
+      }
+    }
+  }
+  const double relative_residual =
+    max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 1.0e-8 ||
+             relative_residual > 1.0e-10)) {
+    fprintf(stderr,
+            "unexpected batched compact-supernode accuracy:"
+            " max_x_err=%.17g, rel_resid=%.17g\n",
+            max_solution_error, relative_residual);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  free(saved_row_env);
+  free(saved_cblas_env);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(x);
+  free(expected);
+  free(residual);
+  return ok;
+}
+
 static int test_pre_static_pivoting(void) {
   const int32_t n = 3000;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
@@ -5517,6 +5764,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_unchecked_row_dense_compact_panel()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_batched_compact_supernode_cblas_probe()) {
     return EXIT_FAILURE;
   }
   if (!test_pre_static_pivoting()) {
