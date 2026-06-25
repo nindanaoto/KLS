@@ -3850,3 +3850,18 @@ kernel. This records the paper's `trsv` half as executable KLS code without
 turning it into a production regression; a future BLAS-backed or more deeply
 blocked supernodal kernel can replace the manual loop when it produces a real
 default win.
+
+KLS then filled a narrower but direct CKTSO tail-restart semantic gap for
+root-of-block rejects. A prefix-current root reject normally means every later
+unstarted column belongs to the unfinished seed set, so the safe tail remains a
+full suffix. When the reject-only ETree closure is shorter, however, KLS can now
+prove that preserved single-block columns outside that closure have no U
+dependency on tail columns, refresh those preserved columns with the existing
+mapped no-pivot column kernel, and then execute the shorter pivoted tail
+envelope. The smoke fixture uses a weak root in a 2-by-2 dependent part plus an
+independent trailing singleton and asserts that the retained pivoting-tail plan
+has two columns while the block suffix has three, and that KLS counts the repair
+as `fast_tail_restarts=1`. This is still a serial envelope rather than CKTSO's
+parallel Algorithm 5 executor, but it directly applies the paper's distinction
+between unfinished EGraph nodes and ETree-descendant pivoting-tail work instead
+of treating all root rejects as whole-block repairs.

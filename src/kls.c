@@ -538,6 +538,13 @@ static void kls_record_fast_reject_unfinished_tail_seed(
   kls_solver *solver,
   const kls_egraph_refactor_shared *shared,
   UF_long rejected_pivot);
+static UF_long kls_prepare_root_pivot_tail_independent_refresh(
+  kls_solver *solver,
+  double *numeric_values,
+  UF_long block,
+  UF_long k1,
+  UF_long nk,
+  UF_long local_reject);
 static void destroy_egraph_refactor_pool(kls_solver *solver);
 static void kls_egraph_refactor_record_invalid(
   kls_egraph_refactor_shared *shared);
@@ -12567,7 +12574,7 @@ static UF_long kls_preferred_pivot_tail_restart_end(const kls_solver *solver,
                                                     UF_long k1,
                                                     UF_long nk,
                                                     UF_long local_reject) {
-  if (solver == NULL || local_reject == 0u || local_reject >= nk ||
+  if (solver == NULL || local_reject >= nk ||
       solver->stats.fast_rejected_pivoting_tail_suffix_exact ||
       !solver->stats.fast_rejected_pivoting_tail_topological ||
       solver->stats.fast_rejected_pivoting_tail_columns <= 0 ||
@@ -13096,7 +13103,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL;
   solver->stats.fast_repaired_tail_restart_ready =
     serial_tail_state &&
-    local_reject > 0u &&
+    (local_reject > 0u || repaired_tail_end < nk) &&
     prefix_changed == 0u &&
     (first_changed == KLS_KLU_EMPTY || first_changed >= rejected_pivot) &&
     suffix_changed > 0u &&
@@ -13262,25 +13269,33 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   UF_long repaired_tail_end = nk;
   UF_long repaired_tail_skipped_columns = 0;
   double repaired_tail_skipped_work = 0.0;
-  const UF_long preferred_restart_end =
+  UF_long preferred_restart_end =
     kls_preferred_pivot_tail_restart_end(solver, k1, nk, local_reject);
+  if (preferred_restart_end == nk) {
+    preferred_restart_end =
+      kls_prepare_root_pivot_tail_independent_refresh(
+        solver, numeric_values, block, k1, nk, local_reject);
+  }
   int kls_block_restart_used = 0;
   if (preferred_restart_end < nk) {
     unsigned char *tail_mask = NULL;
     UF_long *saved_ptrs = NULL;
     Entry *saved_udiag = NULL;
-    if (nk <= (UF_long)(SIZE_MAX / sizeof(*tail_mask))) {
-      tail_mask = (unsigned char *)malloc((size_t)nk * sizeof(*tail_mask));
+    const size_t nk_size = (size_t)nk;
+    if ((UF_long)nk_size == nk) {
+      tail_mask = (unsigned char *)malloc(nk_size * sizeof(*tail_mask));
     }
-    if (nk <= (UF_long)(SIZE_MAX / (4u * sizeof(*saved_ptrs)))) {
+    if ((UF_long)nk_size == nk &&
+        nk_size <= SIZE_MAX / (4u * sizeof(*saved_ptrs))) {
       saved_ptrs =
-        (UF_long *)malloc(4u * (size_t)nk * sizeof(*saved_ptrs));
-      saved_udiag = (Entry *)malloc((size_t)nk * sizeof(*saved_udiag));
+        (UF_long *)malloc(4u * nk_size * sizeof(*saved_ptrs));
+      saved_udiag = (Entry *)malloc(nk_size * sizeof(*saved_udiag));
     }
-    if (tail_mask != NULL &&
-        kls_build_pivot_tail_restart_mask(
-          solver, k1, nk, local_reject, preferred_restart_end, tail_mask) &&
-        saved_ptrs != NULL && saved_udiag != NULL) {
+    const int main_mask_ok =
+      tail_mask != NULL &&
+      kls_build_pivot_tail_restart_mask(
+        solver, k1, nk, local_reject, preferred_restart_end, tail_mask);
+    if (main_mask_ok && saved_ptrs != NULL && saved_udiag != NULL) {
       UF_long *saved_lip = saved_ptrs;
       UF_long *saved_llen = saved_ptrs + nk;
       UF_long *saved_uip = saved_ptrs + 2u * nk;
@@ -13337,7 +13352,8 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     repaired_tail_end = nk;
   }
   const int tail_restart_used =
-    kls_block_restart_used && local_reject > 0u;
+    kls_block_restart_used &&
+    (local_reject > 0u || repaired_tail_end < nk);
   if (!kls_block_restart_used) {
     solver->common.status = TRILINOS_KLU_OK;
     solver->common.numerical_rank = KLS_KLU_EMPTY;
@@ -21487,6 +21503,179 @@ static int kls_egraph_refactor_dispatch_column(
     default:
       return kls_egraph_refactor_column(worker, k, wait_for_dependencies);
   }
+}
+
+/* CKTSO tail repair can omit independent finished nodes.  For serial root
+   rejects, make those omitted columns current before the pivoted tail copies
+   them as preserved suffix/gap columns. */
+static int kls_refresh_root_tail_preserved_single_block_columns(
+  kls_solver *solver,
+  double *numeric_values,
+  UF_long nk,
+  const unsigned char *tail_mask) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      numeric_values == NULL || tail_mask == NULL ||
+      solver->symbolic->nblocks != 1u || solver->symbolic->R == NULL ||
+      solver->symbolic->R[0] != 0u || solver->symbolic->R[1] != nk ||
+      nk != solver->n || solver->common.scale > 0 ||
+      solver->numeric->Rs != NULL || solver->numeric->Xwork == NULL ||
+      solver->numeric->Ulen == NULL ||
+      !kls_build_refactor_map(solver) ||
+      !kls_build_refactor_lu_pointer_cache(solver)) {
+    return 0;
+  }
+  if (solver->refactor_lu_pointer_count != solver->n ||
+      solver->refactor_u_indices == NULL) {
+    return 0;
+  }
+
+  UF_long refresh_columns = 0;
+  for (UF_long k = 0; k < nk; ++k) {
+    if (tail_mask[k]) {
+      continue;
+    }
+    const UF_long *ui = solver->refactor_u_indices[k];
+    const UF_long ulen = solver->numeric->Ulen[k];
+    if (ui == NULL && ulen > 0u) {
+      return 0;
+    }
+    for (UF_long p = 0; p < ulen; ++p) {
+      const UF_long dep = ui[p];
+      if (dep >= nk || tail_mask[dep]) {
+        return 0;
+      }
+    }
+    refresh_columns++;
+  }
+  if (refresh_columns == 0u) {
+    return 0;
+  }
+
+  kls_egraph_refactor_shared shared;
+  memset(&shared, 0, sizeof(shared));
+  if (pthread_mutex_init(&shared.lock, NULL) != 0) {
+    return 0;
+  }
+  shared.solver = solver;
+  shared.values = numeric_values;
+  shared.rs = NULL;
+  shared.check_pivots = 0;
+  shared.scale = 0;
+  shared.kernel = KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED;
+  shared.thread_count = 1;
+  shared.rejected_pivot = KLS_KLU_EMPTY;
+  shared.rejected_pivot_col = KLS_KLU_EMPTY;
+  shared.rejected_row = KLS_KLU_EMPTY;
+  shared.rejected_multiplier_abs = -1.0;
+  shared.rejected_pivot_abs = -1.0;
+  shared.rejected_candidate_abs = -1.0;
+  shared.numerical_rank = UF_long_max;
+  shared.singular_col = KLS_KLU_EMPTY;
+  atomic_init(&shared.stop, 0);
+
+  kls_egraph_refactor_worker worker;
+  memset(&worker, 0, sizeof(worker));
+  worker.shared = &shared;
+  worker.x = (double *)solver->numeric->Xwork;
+
+  int ok = 1;
+  for (UF_long k = 0; k < nk; ++k) {
+    if (tail_mask[k]) {
+      continue;
+    }
+    memset(worker.x, 0, (size_t)nk * sizeof(*worker.x));
+    if (!kls_egraph_refactor_dispatch_column(&worker, k, 0) ||
+        shared.invalid || shared.pivot_rejected || shared.singular) {
+      ok = 0;
+      break;
+    }
+  }
+  memset(worker.x, 0, (size_t)nk * sizeof(*worker.x));
+  free(worker.segment_panel);
+  free(worker.supernode_workspace);
+  (void)pthread_mutex_destroy(&shared.lock);
+  return ok;
+}
+
+static UF_long kls_restore_pivot_tail_plan(
+  kls_solver *solver,
+  UF_long block,
+  UF_long k1,
+  UF_long nk,
+  UF_long local_reject,
+  int refresh_state) {
+  if (solver == NULL) {
+    return nk;
+  }
+  const int saved_state = solver->fast_reject_refresh_state;
+  solver->fast_reject_refresh_state = refresh_state;
+  const UF_long *tail_cols = NULL;
+  UF_long tail_count = 0;
+  double tail_work = 0.0;
+  (void)kls_build_fast_reject_pivoting_tail_plan(
+    solver, block, k1, k1 + nk, local_reject, &tail_cols, &tail_count,
+    &tail_work);
+  solver->fast_reject_refresh_state = saved_state;
+  return nk;
+}
+
+static UF_long kls_prepare_root_pivot_tail_independent_refresh(
+  kls_solver *solver,
+  double *numeric_values,
+  UF_long block,
+  UF_long k1,
+  UF_long nk,
+  UF_long local_reject) {
+  if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
+      local_reject != 0u || nk == 0u || k1 != 0u ||
+      block != 0u || solver->symbolic->nblocks != 1u ||
+      solver->common.scale > 0 ||
+      solver->fast_reject_refresh_state != KLS_FAST_REJECT_REFRESH_PREFIX) {
+    return nk;
+  }
+
+  const int saved_state = solver->fast_reject_refresh_state;
+  solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
+  const UF_long *tail_cols = NULL;
+  UF_long tail_count = 0;
+  double tail_work = 0.0;
+  if (!kls_build_fast_reject_pivoting_tail_plan(
+        solver, block, k1, k1 + nk, local_reject, &tail_cols, &tail_count,
+        &tail_work)) {
+    solver->fast_reject_refresh_state = saved_state;
+    return nk;
+  }
+  solver->fast_reject_refresh_state = saved_state;
+
+  const UF_long restart_end =
+    kls_preferred_pivot_tail_restart_end(solver, k1, nk, local_reject);
+  if (restart_end >= nk) {
+    return nk;
+  }
+  const size_t nk_size = (size_t)nk;
+  if ((UF_long)nk_size != nk) {
+    return kls_restore_pivot_tail_plan(
+      solver, block, k1, nk, local_reject, saved_state);
+  }
+  unsigned char *tail_mask =
+    (unsigned char *)malloc(nk_size * sizeof(*tail_mask));
+  if (tail_mask == NULL) {
+    return kls_restore_pivot_tail_plan(
+      solver, block, k1, nk, local_reject, saved_state);
+  }
+  const int mask_ok =
+    kls_build_pivot_tail_restart_mask(
+      solver, k1, nk, local_reject, restart_end, tail_mask);
+  const int refresh_ok =
+    mask_ok &&
+    kls_refresh_root_tail_preserved_single_block_columns(
+      solver, numeric_values, nk, tail_mask);
+  free(tail_mask);
+  if (!refresh_ok) {
+    return kls_restore_pivot_tail_plan(
+      solver, block, k1, nk, local_reject, saved_state);
+  }
+  return restart_end;
 }
 
 static void kls_egraph_refactor_refresh_missing_prefix(

@@ -473,6 +473,104 @@ static int test_fast_factor_pivot_check_fallback(void) {
   return ok;
 }
 
+static int test_fast_factor_root_independent_tail_restart(void) {
+  const int32_t ap[] = {0, 2, 4, 5};
+  const int32_t ai[] = {0, 1, 0, 1, 2};
+  const double ax0[] = {2.0, 1.0, 1.0, 2.0, 3.0};
+  const double ax1[] = {1.0e-12, 1.0, 1.0, 2.0, 3.0};
+  const double b[] = {2.000000000001, 5.0, 9.0};
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0,
+                                        &options),
+                        "analyze root independent tail")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor root independent base")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor root independent repair")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve root independent repair")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats root independent tail")) {
+    ok = 0;
+  }
+  if (ok && (stats.fast_rejected_pivot != 0 ||
+             stats.fast_rejected_pivot_col != 0 ||
+             stats.fast_rejected_block_start != 0 ||
+             stats.fast_rejected_block_size != 3 ||
+             stats.fast_rejected_suffix_columns != 3 ||
+             stats.fast_rejected_refresh_state !=
+               KLS_FAST_REJECT_REFRESH_PREFIX ||
+             stats.fast_rejected_pivoting_tail_columns != 2 ||
+             stats.fast_rejected_pivoting_tail_last != 1 ||
+             stats.fast_rejected_pivoting_tail_suffix_exact != 0 ||
+             stats.fast_rejected_pivoting_tail_suffix_overcompute_columns != 1 ||
+             stats.fast_repaired_tail_restart_ready != 1 ||
+             stats.fast_repaired_tail_restart_columns != 2 ||
+             stats.fast_repaired_tail_restart_work <= 0.0 ||
+             stats.fast_repaired_tail_restart_saved_work <= 0.0 ||
+             stats.fast_block_restarts != 1 ||
+             stats.fast_tail_restarts != 1)) {
+    fprintf(stderr,
+            "unexpected root independent tail stats: pivot=%" PRId64
+            ", col=%" PRId64 ", block=[%" PRId64 ",%" PRId64 ")"
+            ", suffix=%" PRId64 ", refresh=%d, tail_cols=%" PRId64
+            ", tail_last=%" PRId64 ", suffix_exact=%d"
+            ", suffix_over=%" PRId64 ", repaired_ready=%d"
+            ", repaired_cols=%" PRId64 ", repaired_work=%.6g"
+            ", saved_work=%.6g, block_restarts=%d, tail_restarts=%d\n",
+            stats.fast_rejected_pivot,
+            stats.fast_rejected_pivot_col,
+            stats.fast_rejected_block_start,
+            stats.fast_rejected_block_start + stats.fast_rejected_block_size,
+            stats.fast_rejected_suffix_columns,
+            stats.fast_rejected_refresh_state,
+            stats.fast_rejected_pivoting_tail_columns,
+            stats.fast_rejected_pivoting_tail_last,
+            stats.fast_rejected_pivoting_tail_suffix_exact,
+            stats.fast_rejected_pivoting_tail_suffix_overcompute_columns,
+            stats.fast_repaired_tail_restart_ready,
+            stats.fast_repaired_tail_restart_columns,
+            stats.fast_repaired_tail_restart_work,
+            stats.fast_repaired_tail_restart_saved_work,
+            stats.fast_block_restarts,
+            stats.fast_tail_restarts);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats,
+                                        "root independent tail")) {
+    ok = 0;
+  }
+  if (ok && !require_tail_overcompute_bounds(&stats,
+                                             "root independent tail")) {
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0))) {
+    fprintf(stderr,
+            "unexpected root independent tail solution: %.17g %.17g %.17g\n",
+            x[0], x[1], x[2]);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
 static int test_checked_row_fast_factor_block_restart(void) {
   const int32_t ap[] = {0, 2, 4};
   const int32_t ai[] = {0, 1, 0, 1};
@@ -4880,6 +4978,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_fast_factor_pivot_check_fallback()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_fast_factor_root_independent_tail_restart()) {
     return EXIT_FAILURE;
   }
   if (!test_checked_row_fast_factor_block_restart()) {

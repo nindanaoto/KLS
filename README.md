@@ -392,10 +392,13 @@ preserves a non-empty live prefix state, KLS can execute the same conservative
 serial suffix restart before falling back to full block repair. This executable tail path is
 not limited to the checked row-refactor candidate diagnostic; the diagnostic is
 retained only to explain row-major candidate quality when that metadata exists.
-Root-of-block rejects can now use the same KLS-owned pivoted block kernel, but
-they are counted as full KLS block restarts rather than serial-tail-ready events
-because no contiguous prefix can be reused. This is a local serial subset of
-CKTSO-style repair, not the full pipelined ETree-descendant scheduler.
+Root-of-block rejects can use the same KLS-owned pivoted block kernel. When the
+reject-only ETree closure leaves independent single-block columns outside the
+tail, KLS first refreshes those preserved columns with the mapped no-pivot
+column kernel, then runs the shorter pivoted tail envelope and counts it as a
+tail restart. Full-suffix root rejects still remain ordinary KLS block
+restarts. This is a local serial subset of CKTSO-style repair, not the full
+pipelined ETree-descendant scheduler.
 With `KLS_ENABLE_CHECKED_ROW_REFACTOR=1`, the experimental KLS-owned
 row/segment refactor can also run the checked fast-factor pass through its
 parallel row scheduler when multiple threads are available. A rejected
