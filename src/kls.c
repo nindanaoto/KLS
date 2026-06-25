@@ -14418,7 +14418,11 @@ static int kls_row_refactor_pop_ready_group(
 
 static int kls_row_refactor_finish_ready_group(
   kls_egraph_refactor_worker *worker,
-  UF_long group) {
+  UF_long group,
+  UF_long *local_ready_out) {
+  if (local_ready_out != NULL) {
+    *local_ready_out = KLS_KLU_EMPTY;
+  }
   if (worker == NULL || worker->shared == NULL) {
     return 0;
   }
@@ -14459,15 +14463,46 @@ static int kls_row_refactor_finish_ready_group(
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
-    if (old == 1ul &&
-        !kls_row_refactor_enqueue_ready_group(shared, successor)) {
-      return 0;
+    if (old == 1ul) {
+      if (local_ready_out != NULL &&
+          *local_ready_out == KLS_KLU_EMPTY) {
+        *local_ready_out = successor;
+      } else if (!kls_row_refactor_enqueue_ready_group(shared, successor)) {
+        return 0;
+      }
     }
   }
 
   atomic_fetch_add_explicit(&shared->row_pipeline_completed_groups, 1ul,
                             memory_order_release);
   return 1;
+}
+
+static int kls_row_refactor_process_ready_group_with_local_tail(
+  kls_egraph_refactor_worker *worker,
+  UF_long group) {
+  if (worker == NULL || worker->shared == NULL) {
+    return 0;
+  }
+  for (;;) {
+    if (kls_egraph_refactor_should_stop(worker->shared)) {
+      return 0;
+    }
+    if (!kls_parallel_row_refactor_process_group(worker, group, 0)) {
+      return 0;
+    }
+    kls_parallel_row_refactor_mark_group_done(worker->shared,
+                                             worker->shared->solver,
+                                             group);
+    UF_long local_group = KLS_KLU_EMPTY;
+    if (!kls_row_refactor_finish_ready_group(worker, group, &local_group)) {
+      return 0;
+    }
+    if (local_group == KLS_KLU_EMPTY) {
+      return 1;
+    }
+    group = local_group;
+  }
 }
 
 static void kls_row_refactor_worker_run_ready_pipeline(
@@ -14486,13 +14521,8 @@ static void kls_row_refactor_worker_run_ready_pipeline(
         break;
       }
       const UF_long group = shared->row_pipeline_private_groups[pos];
-      if (!kls_parallel_row_refactor_process_group(worker, group, 0)) {
-        return;
-      }
-      kls_parallel_row_refactor_mark_group_done(worker->shared,
-                                               worker->shared->solver,
-                                               group);
-      if (!kls_row_refactor_finish_ready_group(worker, group)) {
+      if (!kls_row_refactor_process_ready_group_with_local_tail(worker,
+                                                               group)) {
         return;
       }
     }
@@ -14503,13 +14533,8 @@ static void kls_row_refactor_worker_run_ready_pipeline(
     if (!kls_row_refactor_pop_ready_group(worker, &group)) {
       break;
     }
-    if (!kls_parallel_row_refactor_process_group(worker, group, 0)) {
-      break;
-    }
-    kls_parallel_row_refactor_mark_group_done(worker->shared,
-                                             worker->shared->solver,
-                                             group);
-    if (!kls_row_refactor_finish_ready_group(worker, group)) {
+    if (!kls_row_refactor_process_ready_group_with_local_tail(worker,
+                                                             group)) {
       break;
     }
   }

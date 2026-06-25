@@ -73,8 +73,11 @@ repeated row refactors, avoiding queue/bitmap/predecessor allocation churn in
 the experimental row scheduler. Full-graph queued row runs now consume cached
 root groups through a private-root cursor before falling back to the shared
 ready queue for successor-released groups, trimming the first wave of shared
-queue traffic without changing the retained row DAG. Checked queued rejects now
-refresh any missing prefix rows before accepting the prefix-tail repair
+queue traffic without changing the retained row DAG. When a completed group
+releases successors, the worker now keeps one ready successor as a local
+continuation and enqueues the rest, moving the queued DAG scheduler another
+step toward SubtreeLU-style private/pipeline execution. Checked queued rejects
+now refresh any missing prefix rows before accepting the prefix-tail repair
 classification, so work ordering cannot turn an already-repairable prefix into
 a scheduler-race miss. Experimental row refactors now cover single-block
 factors and BTF

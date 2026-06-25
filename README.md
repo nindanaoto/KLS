@@ -407,7 +407,9 @@ workspace across repeated row refactors and reports its capacity through
 the retained group predecessor counts and root-group list instead of
 rediscovering those static task-graph facts every numeric pass, and hand the
 root groups out through a private-root cursor before using the shared queue for
-newly released successors. Checked queued
+newly released successors. When a completed group releases multiple successors,
+the completing worker keeps one local continuation and only spills the rest to
+the shared queue. Checked queued
 rejects refresh any missing prefix rows before accepting a prefix-tail repair
 classification.
 Checked row fast-factor rejects also report the conservative row-group restart
