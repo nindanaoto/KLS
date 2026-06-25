@@ -312,6 +312,10 @@ typedef struct kls_stats {
   int64_t separator_global_end;
   int64_t fast_rejected_prefix_refresh_columns;
   int64_t fast_rejected_prefix_refresh_count;
+  int row_refactor_last_partial_supernode_pipeline;
+  int64_t row_refactor_last_partial_supernode_pipeline_groups;
+  int64_t row_refactor_last_partial_supernode_pipeline_rows;
+  int64_t row_refactor_partial_supernode_pipeline_run_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

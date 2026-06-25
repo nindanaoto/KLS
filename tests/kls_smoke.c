@@ -3150,6 +3150,11 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
     ok = 0;
   }
   const int expect_defer = checked_expect_defer + 1;
+  const int used_partial_supernode =
+    stats.row_refactor_last_partial_supernode_pipeline != 0;
+  const int expected_ready_queue_runs = 2;
+  const int expected_done_bitmap_runs = used_partial_supernode ? 2 : 1;
+  const int expected_work_queue_runs = 2;
   if (ok && (stats.row_refactor_group_count < 2 ||
              stats.row_refactor_group_level_count < 1 ||
              stats.row_refactor_group_cluster_levels != 0 ||
@@ -3171,7 +3176,8 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_last_checked != 0 ||
              stats.row_refactor_last_parallel != 1 ||
              stats.row_refactor_last_ready_queue != 1 ||
-             stats.row_refactor_last_done_bitmap != 0 ||
+             stats.row_refactor_last_done_bitmap !=
+               (used_partial_supernode ? 1 : 0) ||
              stats.row_refactor_last_defer_value_scatter != 1 ||
              stats.row_refactor_values_dirty != 1 ||
              stats.row_refactor_last_lazy_value_scatter != 1 ||
@@ -3180,17 +3186,27 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_run_count != 2 ||
              stats.row_refactor_checked_run_count != 1 ||
              stats.row_refactor_parallel_run_count != 2 ||
-             stats.row_refactor_ready_queue_run_count != 2 ||
+             stats.row_refactor_ready_queue_run_count !=
+               expected_ready_queue_runs ||
              stats.row_refactor_ready_queue_group_count <
                stats.row_refactor_group_pipeline_groups ||
-             stats.row_refactor_done_bitmap_run_count != 1 ||
+             stats.row_refactor_done_bitmap_run_count !=
+               expected_done_bitmap_runs ||
              stats.row_refactor_input_cleanup_rows != 0 ||
              stats.row_refactor_input_cleanup_entries != 0 ||
              stats.row_refactor_defer_value_scatter_run_count !=
                expect_defer ||
              stats.row_refactor_lazy_value_scatter_run_count != 1 ||
              stats.row_refactor_row_solve_run_count != 1 ||
-             stats.row_refactor_work_ready_queue_run_count != 2 ||
+             stats.row_refactor_work_ready_queue_run_count !=
+               expected_work_queue_runs ||
+             (used_partial_supernode &&
+              (stats.row_refactor_last_partial_supernode_pipeline_groups <= 0 ||
+               stats.row_refactor_last_partial_supernode_pipeline_rows <
+                 stats.row_refactor_last_partial_supernode_pipeline_groups ||
+               stats.row_refactor_partial_supernode_pipeline_run_count != 1)) ||
+             (!used_partial_supernode &&
+              stats.row_refactor_partial_supernode_pipeline_run_count != 0) ||
              stats.row_refactor_last_private_ready_groups <= 0 ||
              stats.row_refactor_private_ready_group_count <
                stats.row_refactor_last_private_ready_groups ||
@@ -3210,6 +3226,7 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             ", defer_scatter=%" PRId64
             ", dirty/lazy/row_solve=%d/%d/%" PRId64 "/%d/%" PRId64
             ", work_queue=%" PRId64
+            ", partial_supernode=%d/%" PRId64 "/%" PRId64 "/%" PRId64
             ", private_ready=%" PRId64 "/%" PRId64
             ", queue_workspace=%" PRId64 "\n",
             stats.row_refactor_group_count,
@@ -3244,6 +3261,10 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
             stats.row_refactor_last_row_solve,
             stats.row_refactor_row_solve_run_count,
             stats.row_refactor_work_ready_queue_run_count,
+            stats.row_refactor_last_partial_supernode_pipeline,
+            stats.row_refactor_last_partial_supernode_pipeline_groups,
+            stats.row_refactor_last_partial_supernode_pipeline_rows,
+            stats.row_refactor_partial_supernode_pipeline_run_count,
             stats.row_refactor_last_private_ready_groups,
             stats.row_refactor_private_ready_group_count,
             stats.row_refactor_ready_queue_workspace_groups);

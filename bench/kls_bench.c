@@ -1146,6 +1146,10 @@ int main(int argc, char **argv) {
            ",\"row_refactor_last_work_ready_queue\":%d"
            ",\"row_refactor_work_ready_queue_run_count\":%" PRId64
            ",\"row_refactor_ready_queue_workspace_groups\":%" PRId64
+           ",\"row_refactor_last_partial_supernode_pipeline\":%d"
+           ",\"row_refactor_last_partial_supernode_pipeline_groups\":%" PRId64
+           ",\"row_refactor_last_partial_supernode_pipeline_rows\":%" PRId64
+           ",\"row_refactor_partial_supernode_pipeline_run_count\":%" PRId64
            ",\"row_refactor_last_local_ready_groups\":%" PRId64
            ",\"row_refactor_local_ready_group_count\":%" PRId64
            ",\"row_refactor_last_private_ready_groups\":%" PRId64
@@ -1215,6 +1219,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_work_ready_queue,
            stats.row_refactor_work_ready_queue_run_count,
            stats.row_refactor_ready_queue_workspace_groups,
+           stats.row_refactor_last_partial_supernode_pipeline,
+           stats.row_refactor_last_partial_supernode_pipeline_groups,
+           stats.row_refactor_last_partial_supernode_pipeline_rows,
+           stats.row_refactor_partial_supernode_pipeline_run_count,
            stats.row_refactor_last_local_ready_groups,
            stats.row_refactor_local_ready_group_count,
            stats.row_refactor_last_private_ready_groups,
@@ -1483,6 +1491,9 @@ int main(int argc, char **argv) {
            ", last work queue: %d"
            ", work queue runs: %" PRId64
            ", queue workspace groups: %" PRId64
+           ", partial supernode pipeline: %d"
+           ", partial supernode groups/rows: %" PRId64 "/%" PRId64
+           ", partial supernode runs: %" PRId64
            ", local ready groups: %" PRId64 "/%" PRId64
            ", private ready groups: %" PRId64 "/%" PRId64
            ", separator-private queue: %d, components %" PRId64 "/%" PRId64
@@ -1524,6 +1535,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_work_ready_queue,
            stats.row_refactor_work_ready_queue_run_count,
            stats.row_refactor_ready_queue_workspace_groups,
+           stats.row_refactor_last_partial_supernode_pipeline,
+           stats.row_refactor_last_partial_supernode_pipeline_groups,
+           stats.row_refactor_last_partial_supernode_pipeline_rows,
+           stats.row_refactor_partial_supernode_pipeline_run_count,
            stats.row_refactor_last_local_ready_groups,
            stats.row_refactor_local_ready_group_count,
            stats.row_refactor_last_private_ready_groups,

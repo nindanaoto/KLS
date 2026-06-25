@@ -3765,3 +3765,19 @@ row-refactor focus probe, `G2_circuit` repeated refactor improved from about
 the previous one-pass `0.148s`, with residuals unchanged. Default automatic
 selection remains cost-gated because the row engine is still not broadly
 faster than the mapped EGraph refactor.
+
+KLS now maps another explicit SubtreeLU Algorithm 5 detail into the
+experimental row-refactor scheduler behind
+`KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE`. When large tail row groups with
+downstream successors and width at least `2 * threads` dominate the tail by
+both group count and row count, the experimental mode prepares a
+row-dependency ready queue for no-pivot refactorization. Dense-group rows are
+marked complete immediately after each row is numerically stored and
+pivot-checked, letting consumers wait on the exact finished row prefix instead
+of the whole supernode. This matches the paper's large-unfinished-supernode
+split while preserving the default faster group-ready queue. Direct same-tree
+A/B probes on `coupled` and `G2_circuit` showed the row-dependency queue was
+slower than the existing ready queue on the current KLS row kernel, so the
+mechanism is available for continued paper-aligned development but is not a
+default production path. It is still not the full CKTSO pivoting-tail
+factorization.
