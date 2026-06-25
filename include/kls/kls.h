@@ -287,6 +287,8 @@ typedef struct kls_stats {
   int64_t kls_tail_mapped_column_count;
   int64_t kls_first_last_row_uplooking_columns;
   int64_t kls_first_row_uplooking_column_count;
+  int64_t kls_first_last_dynamic_column_pivots;
+  int64_t kls_first_dynamic_column_pivot_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

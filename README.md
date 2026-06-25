@@ -138,10 +138,15 @@ successfully assembles KLU-compatible numeric storage. For eligible single-block
 unscaled matrices, that gate first tries a KLS-owned sparse row-major
 up-looking first factor with pivot checks, matching CKTSO Algorithm 1's row
 orientation before packing the accepted factors for the existing solve/refactor
-interfaces. Benchmark stats report this direct bridge as
+interfaces. When a row diagonal fails the threshold against the row's largest
+U-tail entry, this bridge now exchanges the active column with that largest
+entry, publishes the accepted `Q` order, and continues in KLS-owned row-major
+storage. Benchmark stats report this direct bridge as
 `kls_first_last_row_uplooking_columns` and
-`kls_first_row_uplooking_column_count`. If that row-up-looking bridge is not
-eligible or rejects a pivot, the pivoted KLS block tail still runs; it reuses
+`kls_first_row_uplooking_column_count`, with Algorithm 1-style dynamic column
+exchanges reported as `kls_first_last_dynamic_column_pivots` and
+`kls_first_dynamic_column_pivot_count`. If that row-up-looking bridge is not
+eligible or still rejects a pivot, the pivoted KLS block tail still runs; it reuses
 KLS's retained factor-order input map when available, reported as
 `kls_tail_last_mapped_columns` and `kls_tail_mapped_column_count`, so the
 experimental first factor and accepted tail repairs can skip repeated original
