@@ -3143,6 +3143,21 @@ mirrors are already authoritative. Focused checks kept residuals valid:
 the non-transpose solve average to about `0.020s` before the benchmark's
 transpose solve forced the expected publish, while an unscaled `nxp1`
 row-refactor probe used the row solve once with about `0.029s` solve time.
+
+The pivoting-tail repair path then moved one step closer to CKTSO Algorithm 5.
+When the retained ETree-descendant tail is non-contiguous, the preferred KLS
+block repair now tries to copy already-finished gap columns from the current
+numeric LU stream and numerically refactor only the marked tail columns. A gap
+column is copied only if its pivot row is still unchanged, its L rows are still
+unpivoted, and its U predecessors do not include a recomputed tail column; any
+violation restores the saved block metadata and falls back to the older
+contiguous envelope or suffix repair. Benchmark JSON now reports the copied
+gap columns/work as `fast_repaired_tail_restart_skipped_columns` and
+`fast_repaired_tail_restart_skipped_work`, and the tail restart work counters
+subtract those copied gaps. This is still a serial conservative subset of
+CKTSO's pipelined pivoting-tail executor, not the full non-contiguous parallel
+row-tail algorithm, but successful cases now execute less than the envelope
+instead of only diagnosing its overcompute.
 The refactor gap remains; this is a storage-ownership bridge toward the
 row/segment engine, not the missing CKTSO pivoting-tail executor.
 

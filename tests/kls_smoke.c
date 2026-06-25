@@ -126,21 +126,30 @@ static int require_tail_overcompute_bounds(const kls_stats *stats,
   if (stats == NULL ||
       stats->fast_repaired_tail_restart_overcompute_columns < 0 ||
       stats->fast_repaired_tail_restart_overcompute_work < 0.0 ||
+      stats->fast_repaired_tail_restart_skipped_columns < 0 ||
+      stats->fast_repaired_tail_restart_skipped_work < 0.0 ||
       stats->fast_repaired_tail_restart_overcompute_columns >
         stats->fast_repaired_tail_restart_columns ||
       stats->fast_repaired_tail_restart_overcompute_work >
         stats->fast_repaired_tail_restart_work + 1.0e-9) {
     fprintf(stderr,
             "unexpected tail overcompute stats for %s: tail_cols=%" PRId64
-            ", over_cols=%" PRId64 ", tail_work=%.6g, over_work=%.6g\n",
+            ", over_cols=%" PRId64 ", skipped_cols=%" PRId64
+            ", tail_work=%.6g, over_work=%.6g, skipped_work=%.6g\n",
             what,
             stats != NULL ? stats->fast_repaired_tail_restart_columns : 0,
             stats != NULL
               ? stats->fast_repaired_tail_restart_overcompute_columns
               : 0,
+            stats != NULL
+              ? stats->fast_repaired_tail_restart_skipped_columns
+              : 0,
             stats != NULL ? stats->fast_repaired_tail_restart_work : 0.0,
             stats != NULL
               ? stats->fast_repaired_tail_restart_overcompute_work
+              : 0.0,
+            stats != NULL
+              ? stats->fast_repaired_tail_restart_skipped_work
               : 0.0);
     return 0;
   }
