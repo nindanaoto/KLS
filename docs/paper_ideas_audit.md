@@ -4417,3 +4417,15 @@ the opt-in supernode-update probe; it makes the compact panel mathematically
 closer to SubtreeLU's BLAS update shape, but does not replace the remaining
 need for broader batched producer/consumer kernels or CKTSO's pivoting tail
 executor.
+
+The KLS-owned row-up first factor now executes independent BTF diagonal blocks
+in parallel when KLS-first factorization is requested with more than one
+thread. Each worker uses private row-up scratch, performs dynamic column pivots
+inside its assigned block, and then commits the block's KLU-compatible numeric
+storage and row-refactor seed data under a short mutex. This closes the direct
+paper gap where the KLS-first bridge was purely serial across BTF blocks even
+though CKTSO/SubtreeLU treat first factorization as a row/task parallel
+problem. The smoke suite now forces a two-block BTF row-up case with two
+threads and requires `kls_first_last_parallel_btf_blocks=2`. This is still not
+the full CKTSO ETree pipeline inside one large diagonal block; it is the safe
+BTF-level parallel part of that first-factor algorithm.

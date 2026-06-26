@@ -8330,6 +8330,7 @@ static int test_experimental_row_uplooking_btf_blocks(void) {
   options.scale = 0;
   options.static_pivoting = 0;
   options.pivot_tolerance = 0.1;
+  options.threads = 2;
 
   const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
   char *saved_first =
@@ -8391,19 +8392,25 @@ static int test_experimental_row_uplooking_btf_blocks(void) {
              stats.kls_first_last_row_refactor_seeded_rows != 4 ||
              stats.kls_first_row_refactor_seeded_row_count < 4 ||
              stats.kls_first_last_dynamic_column_pivots != 1 ||
+             stats.kls_first_last_parallel_btf_blocks != 2 ||
+             stats.kls_first_parallel_btf_block_count < 2 ||
              stats.selected_scale != 0 ||
              stats.selected_btf != 1)) {
     fprintf(stderr,
             "unexpected row-up-looking BTF stats: path=%s"
             ", nblocks=%" PRId64 ", row_cols=%" PRId64
             ", row_seed=%" PRId64 "/%" PRId64
-            ", dyn_pivots=%" PRId64 ", scale=%d, btf=%d\n",
+            ", dyn_pivots=%" PRId64
+            ", parallel_btf=%" PRId64 "/%" PRId64
+            ", scale=%d, btf=%d\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.nblocks,
             stats.kls_first_last_row_uplooking_columns,
             stats.kls_first_last_row_refactor_seeded_rows,
             stats.kls_first_row_refactor_seeded_row_count,
             stats.kls_first_last_dynamic_column_pivots,
+            stats.kls_first_last_parallel_btf_blocks,
+            stats.kls_first_parallel_btf_block_count,
             stats.selected_scale,
             stats.selected_btf);
     ok = 0;

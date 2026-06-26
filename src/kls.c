@@ -460,6 +460,8 @@ struct kls_solver {
   UF_long kls_first_separator_dynamic_column_fallback_count;
   UF_long kls_first_last_separator_extent_dynamic_column_pivots;
   UF_long kls_first_separator_extent_dynamic_column_pivot_count;
+  UF_long kls_first_last_parallel_btf_blocks;
+  UF_long kls_first_parallel_btf_block_count;
   int kls_first_auto_skipped_scaled_single_block;
   UF_long kls_first_auto_skipped_scaled_single_block_count;
   int factor_etree_stats_valid;
@@ -2252,6 +2254,7 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_separator_dynamic_column_pivots = 0;
   solver->kls_first_last_separator_dynamic_column_fallbacks = 0;
   solver->kls_first_last_separator_extent_dynamic_column_pivots = 0;
+  solver->kls_first_last_parallel_btf_blocks = 0;
   solver->kls_first_auto_skipped_scaled_single_block = 0;
   solver->stats.kls_tail_last_mapped_columns = 0;
   solver->stats.kls_first_last_row_uplooking_columns = 0;
@@ -2260,6 +2263,7 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_first_last_separator_dynamic_column_pivots = 0;
   solver->stats.kls_first_last_separator_dynamic_column_fallbacks = 0;
   solver->stats.kls_first_last_separator_extent_dynamic_column_pivots = 0;
+  solver->stats.kls_first_last_parallel_btf_blocks = 0;
   solver->stats.kls_first_auto_skipped_scaled_single_block = 0;
 }
 
@@ -10490,6 +10494,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)separator_extent_pivots;
   solver->stats.kls_first_separator_extent_dynamic_column_pivot_count =
     (int64_t)solver->kls_first_separator_extent_dynamic_column_pivot_count;
+  solver->stats.kls_first_last_parallel_btf_blocks =
+    (int64_t)solver->kls_first_last_parallel_btf_blocks;
+  solver->stats.kls_first_parallel_btf_block_count =
+    (int64_t)solver->kls_first_parallel_btf_block_count;
   solver->stats.kls_first_auto_skipped_scaled_single_block =
     solver->kls_first_auto_skipped_scaled_single_block;
   solver->stats.kls_first_auto_skipped_scaled_single_block_count =
@@ -35471,6 +35479,774 @@ static int kls_row_first_refactor_seed_install(
   return 1;
 }
 
+typedef struct kls_row_first_parallel_shared {
+  kls_solver *solver;
+  trilinos_klu_l_numeric *numeric;
+  double *numeric_values;
+  const UF_long *psinv;
+  UF_long *q_order;
+  kls_row_first_refactor_seed *row_refactor_seed;
+  const UF_long *separator_component_last;
+  atomic_ulong next_block;
+  atomic_int failed;
+  pthread_mutex_t commit_lock;
+  int scaled;
+  int scale;
+  int use_separator_pivot_domains;
+  double tol;
+  UF_long total_lnz;
+  UF_long total_unz;
+  UF_long max_lnz_block;
+  UF_long max_unz_block;
+  UF_long dynamic_column_pivots;
+  UF_long separator_dynamic_column_pivots;
+  UF_long separator_extent_dynamic_column_pivots;
+  UF_long separator_dynamic_column_fallbacks;
+  UF_long committed_blocks;
+} kls_row_first_parallel_shared;
+
+typedef struct kls_row_first_parallel_worker {
+  kls_row_first_parallel_shared *shared;
+  UF_long *row_counts;
+  UF_long *row_ptr;
+  double *x;
+  unsigned int *mark;
+  UF_long *pattern;
+  UF_long *dep_heap;
+  UF_long *u_row_ptr;
+  double *udiag_values;
+  UF_long *col_pos;
+  UF_long *block_q_order;
+} kls_row_first_parallel_worker;
+
+static void kls_row_first_parallel_worker_free(
+  kls_row_first_parallel_worker *worker) {
+  if (worker == NULL) {
+    return;
+  }
+  free(worker->row_counts);
+  free(worker->row_ptr);
+  free(worker->x);
+  free(worker->mark);
+  free(worker->pattern);
+  free(worker->dep_heap);
+  free(worker->u_row_ptr);
+  free(worker->udiag_values);
+  free(worker->col_pos);
+  free(worker->block_q_order);
+  memset(worker, 0, sizeof(*worker));
+}
+
+static int kls_row_first_parallel_worker_init(
+  kls_row_first_parallel_worker *worker,
+  kls_row_first_parallel_shared *shared) {
+  if (worker == NULL || shared == NULL || shared->solver == NULL ||
+      shared->solver->symbolic == NULL) {
+    return 0;
+  }
+  memset(worker, 0, sizeof(*worker));
+  worker->shared = shared;
+  const UF_long n = shared->solver->n;
+  const UF_long maxblock = shared->solver->symbolic->maxblock;
+  worker->row_counts =
+    (UF_long *)calloc((size_t)maxblock, sizeof(*worker->row_counts));
+  worker->row_ptr =
+    (UF_long *)calloc((size_t)maxblock + 1u, sizeof(*worker->row_ptr));
+  worker->x = (double *)calloc((size_t)maxblock, sizeof(*worker->x));
+  worker->mark =
+    (unsigned int *)calloc((size_t)maxblock, sizeof(*worker->mark));
+  worker->pattern =
+    (UF_long *)malloc((size_t)maxblock * sizeof(*worker->pattern));
+  worker->dep_heap =
+    (UF_long *)malloc((size_t)maxblock * sizeof(*worker->dep_heap));
+  worker->u_row_ptr =
+    (UF_long *)calloc((size_t)maxblock + 1u,
+                      sizeof(*worker->u_row_ptr));
+  worker->udiag_values =
+    (double *)malloc((size_t)maxblock * sizeof(*worker->udiag_values));
+  worker->col_pos = (UF_long *)malloc((size_t)n * sizeof(*worker->col_pos));
+  worker->block_q_order =
+    (UF_long *)malloc((size_t)maxblock * sizeof(*worker->block_q_order));
+  if (worker->row_counts == NULL || worker->row_ptr == NULL ||
+      worker->x == NULL || worker->mark == NULL ||
+      worker->pattern == NULL || worker->dep_heap == NULL ||
+      worker->u_row_ptr == NULL || worker->udiag_values == NULL ||
+      worker->col_pos == NULL || worker->block_q_order == NULL) {
+    kls_row_first_parallel_worker_free(worker);
+    return 0;
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    worker->col_pos[k] = KLS_KLU_EMPTY;
+  }
+  return 1;
+}
+
+static int kls_row_first_parallel_commit_block(
+  kls_row_first_parallel_worker *worker,
+  UF_long block,
+  UF_long k1,
+  UF_long nk,
+  const UF_long *row_ptr,
+  const UF_long *row_cols,
+  const UF_long *row_input_pos,
+  const kls_row_first_entries *l_entries,
+  const kls_row_first_entries *u_entries,
+  UF_long dynamic_column_pivots,
+  UF_long separator_dynamic_column_pivots,
+  UF_long separator_extent_dynamic_column_pivots,
+  UF_long separator_dynamic_column_fallbacks) {
+  if (worker == NULL || worker->shared == NULL ||
+      worker->shared->solver == NULL || row_ptr == NULL ||
+      l_entries == NULL || u_entries == NULL ||
+      worker->udiag_values == NULL || worker->block_q_order == NULL ||
+      worker->col_pos == NULL) {
+    return 0;
+  }
+  kls_row_first_parallel_shared *shared = worker->shared;
+  int ok = 1;
+  pthread_mutex_lock(&shared->commit_lock);
+  if (atomic_load_explicit(&shared->failed, memory_order_acquire)) {
+    ok = 0;
+  } else if (!kls_pack_row_first_block_numeric(
+               shared->solver, shared->numeric, block, k1, nk,
+               l_entries, u_entries, worker->udiag_values,
+               &shared->total_lnz, &shared->total_unz,
+               &shared->max_lnz_block, &shared->max_unz_block)) {
+    ok = 0;
+  } else {
+    memcpy(shared->q_order + k1, worker->block_q_order,
+           (size_t)nk * sizeof(*worker->block_q_order));
+    if (shared->row_refactor_seed != NULL &&
+        shared->row_refactor_seed->enabled &&
+        !kls_row_first_refactor_seed_capture_block(
+          shared->row_refactor_seed, shared->solver, shared->numeric,
+          block, k1, nk, row_ptr, row_cols, row_input_pos,
+          worker->col_pos, l_entries, u_entries)) {
+      kls_row_first_refactor_seed_clear(shared->row_refactor_seed);
+    }
+    shared->dynamic_column_pivots += dynamic_column_pivots;
+    shared->separator_dynamic_column_pivots +=
+      separator_dynamic_column_pivots;
+    shared->separator_extent_dynamic_column_pivots +=
+      separator_extent_dynamic_column_pivots;
+    shared->separator_dynamic_column_fallbacks +=
+      separator_dynamic_column_fallbacks;
+    shared->committed_blocks++;
+  }
+  if (!ok) {
+    atomic_store_explicit(&shared->failed, 1, memory_order_release);
+  }
+  pthread_mutex_unlock(&shared->commit_lock);
+  return ok;
+}
+
+static int kls_row_first_parallel_factor_block(
+  kls_row_first_parallel_worker *worker,
+  UF_long block) {
+  if (worker == NULL || worker->shared == NULL ||
+      worker->shared->solver == NULL ||
+      worker->shared->solver->symbolic == NULL ||
+      worker->shared->numeric == NULL) {
+    return 0;
+  }
+  kls_row_first_parallel_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  const UF_long n = solver->n;
+  const UF_long k1 = solver->symbolic->R[block];
+  const UF_long k2 = solver->symbolic->R[block + 1u];
+  if (k2 <= k1 || k2 > n ||
+      k2 - k1 > solver->symbolic->maxblock) {
+    return 0;
+  }
+  const UF_long nk = k2 - k1;
+  const int use_separator_for_block =
+    shared->use_separator_pivot_domains &&
+    shared->separator_component_last != NULL &&
+    k1 >= solver->separator.global_begin &&
+    k2 <= solver->separator.global_end;
+  const UF_long separator_block_base = use_separator_for_block
+    ? k1 - solver->separator.global_begin
+    : 0u;
+
+  memset(worker->row_counts, 0,
+         (size_t)nk * sizeof(*worker->row_counts));
+  memset(worker->u_row_ptr, 0,
+         ((size_t)nk + 1u) * sizeof(*worker->u_row_ptr));
+
+  for (UF_long local_col = 0; local_col < nk; ++local_col) {
+    const UF_long oldcol = solver->symbolic->Q[k1 + local_col];
+    if (oldcol >= n || worker->col_pos[oldcol] != KLS_KLU_EMPTY) {
+      return 0;
+    }
+    worker->block_q_order[local_col] = oldcol;
+    worker->col_pos[oldcol] = local_col;
+  }
+
+  int ok = 0;
+  UF_long *row_cols = NULL;
+  UF_long *row_input_pos = NULL;
+  UF_long *row_next = NULL;
+  kls_row_first_entries l_entries;
+  kls_row_first_entries u_entries;
+  memset(&l_entries, 0, sizeof(l_entries));
+  memset(&u_entries, 0, sizeof(u_entries));
+  UF_long dynamic_column_pivots = 0;
+  UF_long separator_dynamic_column_pivots = 0;
+  UF_long separator_extent_dynamic_column_pivots = 0;
+  UF_long separator_dynamic_column_fallbacks = 0;
+
+  for (UF_long local_col = 0; local_col < nk; ++local_col) {
+    const UF_long oldcol = worker->block_q_order[local_col];
+    for (UF_long p = solver->col_ptr[oldcol];
+         p < solver->col_ptr[oldcol + 1u]; ++p) {
+      const UF_long oldrow = solver->row_idx[p];
+      if (oldrow >= n || shared->psinv[oldrow] >= n) {
+        goto cleanup;
+      }
+      const UF_long row_pos = shared->psinv[oldrow];
+      if (row_pos < k1) {
+        continue;
+      }
+      if (row_pos >= k2) {
+        goto cleanup;
+      }
+      worker->row_counts[row_pos - k1]++;
+    }
+  }
+  worker->row_ptr[0] = 0;
+  for (UF_long i = 0; i < nk; ++i) {
+    worker->row_ptr[i + 1u] =
+      worker->row_ptr[i] + worker->row_counts[i];
+  }
+  const UF_long row_nnz = worker->row_ptr[nk];
+  row_cols = row_nnz > 0u
+    ? (UF_long *)malloc((size_t)row_nnz * sizeof(*row_cols)) : NULL;
+  row_input_pos = row_nnz > 0u
+    ? (UF_long *)malloc((size_t)row_nnz * sizeof(*row_input_pos)) : NULL;
+  row_next = (UF_long *)malloc((size_t)nk * sizeof(*row_next));
+  if ((row_nnz > 0u && (row_cols == NULL || row_input_pos == NULL)) ||
+      row_next == NULL) {
+    goto cleanup;
+  }
+  memcpy(row_next, worker->row_ptr, (size_t)nk * sizeof(*row_next));
+  for (UF_long local_col = 0; local_col < nk; ++local_col) {
+    const UF_long oldcol = worker->block_q_order[local_col];
+    for (UF_long p = solver->col_ptr[oldcol];
+         p < solver->col_ptr[oldcol + 1u]; ++p) {
+      const UF_long row_pos = shared->psinv[solver->row_idx[p]];
+      if (row_pos < k1) {
+        continue;
+      }
+      const UF_long row = row_pos - k1;
+      const UF_long dst = row_next[row]++;
+      row_cols[dst] = oldcol;
+      row_input_pos[dst] = p;
+    }
+  }
+  free(row_next);
+  row_next = NULL;
+
+  if (!kls_row_first_entries_enable_col_counts(&l_entries, nk) ||
+      !kls_row_first_entries_enable_col_counts(&u_entries, nk) ||
+      !kls_row_first_entries_enable_col_links(&u_entries, nk)) {
+    goto cleanup;
+  }
+  const UF_long reserve_entries =
+    kls_row_first_symbolic_reserve(solver, block, nk);
+  if (reserve_entries > 0u) {
+    (void)kls_row_first_entries_reserve(&l_entries, reserve_entries);
+    (void)kls_row_first_entries_reserve(&u_entries, reserve_entries);
+  }
+
+  for (UF_long i = 0; i < nk; ++i) {
+    const unsigned int generation = (unsigned int)(i + 1u);
+    if (generation == 0u) {
+      goto cleanup;
+    }
+    UF_long pattern_count = 0;
+    UF_long dep_heap_size = 0;
+    for (UF_long p = worker->row_ptr[i];
+         p < worker->row_ptr[i + 1u]; ++p) {
+      const UF_long oldcol = row_cols[p];
+      if (oldcol >= n || worker->col_pos[oldcol] >= nk ||
+          row_input_pos[p] >= solver->nnz) {
+        goto cleanup;
+      }
+      const UF_long col = worker->col_pos[oldcol];
+      if (worker->mark[col] != generation) {
+        worker->mark[col] = generation;
+        worker->pattern[pattern_count++] = col;
+        if (col < i) {
+          kls_row_first_heap_push(worker->dep_heap, &dep_heap_size, col);
+        }
+        if (!kls_refactor_input_value(
+              solver, shared->numeric_values,
+              shared->scaled ? shared->numeric->Rs : NULL,
+              shared->scale, row_input_pos[p], worker->x + col)) {
+          goto cleanup;
+        }
+      } else {
+        double value = 0.0;
+        if (!kls_refactor_input_value(
+              solver, shared->numeric_values,
+              shared->scaled ? shared->numeric->Rs : NULL,
+              shared->scale, row_input_pos[p], &value)) {
+          goto cleanup;
+        }
+        worker->x[col] += value;
+      }
+    }
+
+    worker->u_row_ptr[i] = u_entries.count;
+    while (dep_heap_size > 0u) {
+      const UF_long dep =
+        kls_row_first_heap_pop(worker->dep_heap, &dep_heap_size);
+      if (dep >= i || worker->mark[dep] != generation) {
+        goto cleanup;
+      }
+      const double dep_pivot = worker->udiag_values[dep];
+      if (dep_pivot == 0.0) {
+        goto cleanup;
+      }
+      const double lij = worker->x[dep] / dep_pivot;
+      if (!kls_row_first_entries_append(&l_entries, i, dep, lij)) {
+        goto cleanup;
+      }
+      worker->x[dep] = 0.0;
+      for (UF_long up = worker->u_row_ptr[dep];
+           up < worker->u_row_ptr[dep + 1u]; ++up) {
+        const UF_long col = u_entries.col[up];
+        if (col <= dep || col >= nk) {
+          goto cleanup;
+        }
+        if (worker->mark[col] != generation) {
+          worker->mark[col] = generation;
+          worker->pattern[pattern_count++] = col;
+          if (col < i) {
+            kls_row_first_heap_push(worker->dep_heap, &dep_heap_size, col);
+          }
+          worker->x[col] = 0.0;
+        }
+        worker->x[col] -= lij * u_entries.value[up];
+      }
+    }
+
+    double pivot = worker->mark[i] == generation ? worker->x[i] : 0.0;
+    double row_max_abs = 0.0;
+    UF_long best_col = KLS_KLU_EMPTY;
+    UF_long best_separator_col = KLS_KLU_EMPTY;
+    UF_long best_separator_extent_col = KLS_KLU_EMPTY;
+    double best_separator_abs = -1.0;
+    double best_separator_extent_abs = -1.0;
+    const unsigned int pivot_component =
+      use_separator_for_block
+        ? solver->separator.order_component[separator_block_base + i]
+        : UINT_MAX;
+    const UF_long pivot_component_last =
+      use_separator_for_block &&
+          (UF_long)pivot_component < solver->separator.component_count
+        ? shared->separator_component_last[pivot_component]
+        : KLS_KLU_EMPTY;
+    UF_long u_count = 0;
+    for (UF_long p = 0; p < pattern_count; ++p) {
+      const UF_long col = worker->pattern[p];
+      if (col > i) {
+        worker->dep_heap[u_count++] = col;
+        const double abs_value = fabs(worker->x[col]);
+        if (use_separator_for_block) {
+          const UF_long separator_pos = separator_block_base + col;
+          if (separator_pos >= solver->separator.n) {
+            goto cleanup;
+          }
+          if (pivot_component_last != KLS_KLU_EMPTY &&
+              separator_pos <= pivot_component_last &&
+              abs_value > best_separator_extent_abs) {
+            best_separator_extent_abs = abs_value;
+            best_separator_extent_col = col;
+          }
+          if (solver->separator.order_component[separator_pos] ==
+                pivot_component &&
+              abs_value > best_separator_abs) {
+            best_separator_abs = abs_value;
+            best_separator_col = col;
+          }
+        }
+        if (abs_value > row_max_abs) {
+          row_max_abs = abs_value;
+          best_col = col;
+        }
+      }
+    }
+    if (pivot == 0.0 ||
+        (row_max_abs > 0.0 && fabs(pivot) < shared->tol * row_max_abs)) {
+      if (best_col == KLS_KLU_EMPTY || row_max_abs == 0.0) {
+        goto cleanup;
+      }
+      UF_long selected_col = best_col;
+      int selected_separator_exact = 0;
+      int selected_separator_extent = 0;
+      if (best_separator_col != KLS_KLU_EMPTY &&
+          best_separator_abs > 0.0 &&
+          (row_max_abs == 0.0 ||
+           best_separator_abs + 1.0e-300 >= shared->tol * row_max_abs)) {
+        selected_col = best_separator_col;
+        selected_separator_exact = 1;
+      } else if (best_separator_extent_col != KLS_KLU_EMPTY &&
+                 best_separator_extent_abs > 0.0 &&
+                 (row_max_abs == 0.0 ||
+                  best_separator_extent_abs + 1.0e-300 >=
+                    shared->tol * row_max_abs)) {
+        selected_col = best_separator_extent_col;
+        selected_separator_extent = 1;
+      }
+      if (use_separator_for_block) {
+        if (selected_separator_exact) {
+          separator_dynamic_column_pivots++;
+        } else if (selected_separator_extent) {
+          separator_extent_dynamic_column_pivots++;
+        } else {
+          separator_dynamic_column_fallbacks++;
+        }
+      }
+      if (!kls_row_first_exchange_columns(
+            &u_entries, worker->block_q_order, worker->col_pos,
+            i, selected_col, nk, n)) {
+        goto cleanup;
+      }
+      const double swapped_pivot = worker->x[selected_col];
+      worker->x[selected_col] = pivot;
+      worker->x[i] = swapped_pivot;
+      worker->mark[i] = generation;
+      dynamic_column_pivots++;
+      pivot = worker->x[i];
+      row_max_abs = 0.0;
+      u_count = 0;
+      for (UF_long p = 0; p < pattern_count; ++p) {
+        const UF_long col = worker->pattern[p];
+        if (col > i) {
+          worker->dep_heap[u_count++] = col;
+          const double abs_value = fabs(worker->x[col]);
+          if (abs_value > row_max_abs) {
+            row_max_abs = abs_value;
+          }
+        }
+      }
+      if (pivot == 0.0 ||
+          (row_max_abs > 0.0 && fabs(pivot) < shared->tol * row_max_abs)) {
+        goto cleanup;
+      }
+    }
+    if (u_count > 1u) {
+      qsort(worker->dep_heap, (size_t)u_count, sizeof(*worker->dep_heap),
+            kls_compare_uf_long);
+    }
+    worker->udiag_values[i] = pivot;
+    for (UF_long p = 0; p < u_count; ++p) {
+      const UF_long col = worker->dep_heap[p];
+      if (!kls_row_first_entries_append(&u_entries, i, col,
+                                        worker->x[col])) {
+        goto cleanup;
+      }
+    }
+    worker->u_row_ptr[i + 1u] = u_entries.count;
+    for (UF_long p = 0; p < pattern_count; ++p) {
+      worker->x[worker->pattern[p]] = 0.0;
+    }
+    if (worker->mark[i] == generation) {
+      worker->x[i] = 0.0;
+    }
+  }
+
+  ok = kls_row_first_parallel_commit_block(
+    worker, block, k1, nk, worker->row_ptr, row_cols, row_input_pos,
+    &l_entries, &u_entries, dynamic_column_pivots,
+    separator_dynamic_column_pivots, separator_extent_dynamic_column_pivots,
+    separator_dynamic_column_fallbacks);
+
+cleanup:
+  kls_row_first_entries_free(&l_entries);
+  kls_row_first_entries_free(&u_entries);
+  free(row_cols);
+  free(row_input_pos);
+  free(row_next);
+  for (UF_long local_col = 0; local_col < nk; ++local_col) {
+    const UF_long oldcol = worker->block_q_order[local_col];
+    if (oldcol < n) {
+      worker->col_pos[oldcol] = KLS_KLU_EMPTY;
+    }
+  }
+  return ok;
+}
+
+static void *kls_row_first_parallel_worker_main(void *arg) {
+  kls_row_first_parallel_worker worker;
+  kls_row_first_parallel_shared *shared =
+    (kls_row_first_parallel_shared *)arg;
+  if (!kls_row_first_parallel_worker_init(&worker, shared)) {
+    if (shared != NULL) {
+      atomic_store_explicit(&shared->failed, 1, memory_order_release);
+    }
+    return NULL;
+  }
+  const UF_long nblocks =
+    shared != NULL && shared->solver != NULL && shared->solver->symbolic != NULL
+      ? shared->solver->symbolic->nblocks : 0u;
+  for (;;) {
+    if (atomic_load_explicit(&shared->failed, memory_order_acquire)) {
+      break;
+    }
+    const UF_long block = (UF_long)atomic_fetch_add_explicit(
+      &shared->next_block, 1ul, memory_order_acq_rel);
+    if (block >= nblocks) {
+      break;
+    }
+    if (!kls_row_first_parallel_factor_block(&worker, block)) {
+      atomic_store_explicit(&shared->failed, 1, memory_order_release);
+      break;
+    }
+  }
+  kls_row_first_parallel_worker_free(&worker);
+  return NULL;
+}
+
+static int kls_try_first_factor_row_uplooking_blocks_parallel(
+  kls_solver *solver,
+  double *numeric_values) {
+  if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
+      solver->numeric != NULL || solver->symbolic->nblocks < 2u ||
+      solver->options.threads <= 1 ||
+      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
+      solver->symbolic->R == NULL || solver->symbolic->maxblock == 0u ||
+      solver->n == 0u) {
+    return -1;
+  }
+  int thread_count = solver->options.threads;
+  if ((UF_long)thread_count > solver->symbolic->nblocks) {
+    thread_count = (int)solver->symbolic->nblocks;
+  }
+  if (thread_count < 2) {
+    return -1;
+  }
+
+  TRILINOS_KLU_common *common = &solver->common;
+  const int saved_status = (int)common->status;
+  const UF_long saved_numerical_rank = (UF_long)common->numerical_rank;
+  const UF_long saved_singular_col = (UF_long)common->singular_col;
+  const UF_long saved_noffdiag = (UF_long)common->noffdiag;
+  int q_committed = 0;
+  common->status = TRILINOS_KLU_OK;
+  common->numerical_rank = KLS_KLU_EMPTY;
+  common->singular_col = KLS_KLU_EMPTY;
+  common->noffdiag = 0;
+  common->nrealloc = 0;
+
+  trilinos_klu_l_numeric *numeric = kls_allocate_numeric_skeleton(solver);
+  if (numeric == NULL) {
+    common->status = saved_status;
+    common->numerical_rank = saved_numerical_rank;
+    common->singular_col = saved_singular_col;
+    common->noffdiag = saved_noffdiag;
+    return 0;
+  }
+  solver->numeric = numeric;
+
+  UF_long *q_order = NULL;
+  UF_long *saved_q = NULL;
+  UF_long *separator_component_last = NULL;
+  kls_row_first_refactor_seed row_refactor_seed;
+  memset(&row_refactor_seed, 0, sizeof(row_refactor_seed));
+  pthread_t *threads = NULL;
+  int mutex_initialized = 0;
+  kls_row_first_parallel_shared shared;
+  memset(&shared, 0, sizeof(shared));
+
+  const UF_long n = solver->n;
+  const int scaled = common->scale > 0;
+  if (scaled &&
+      !trilinos_klu_l_scale((UF_long)common->scale, n,
+                            solver->col_ptr, solver->row_idx,
+                            numeric_values, numeric->Rs, NULL, common)) {
+    goto fail;
+  }
+
+  UF_long *psinv = numeric->Pinv;
+  for (UF_long k = 0; k < n; ++k) {
+    psinv[k] = KLS_KLU_EMPTY;
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    const UF_long row = solver->symbolic->P[k];
+    if (row >= n || psinv[row] != KLS_KLU_EMPTY) {
+      goto fail;
+    }
+    psinv[row] = k;
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    if (psinv[k] == KLS_KLU_EMPTY) {
+      goto fail;
+    }
+  }
+
+  q_order = (UF_long *)malloc((size_t)n * sizeof(*q_order));
+  saved_q = (UF_long *)malloc((size_t)n * sizeof(*saved_q));
+  if (q_order == NULL || saved_q == NULL) {
+    goto fail;
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    const UF_long oldcol = solver->symbolic->Q[k];
+    if (oldcol >= n) {
+      goto fail;
+    }
+    q_order[k] = oldcol;
+    saved_q[k] = oldcol;
+  }
+
+  const int use_separator_pivot_domains =
+    kls_separator_analysis_has_global_range(&solver->separator) &&
+    solver->separator.component_count > 0u &&
+    solver->separator.order_component != NULL;
+  if (use_separator_pivot_domains) {
+    if (solver->separator.component_count >
+        (UF_long)(SIZE_MAX / sizeof(*separator_component_last))) {
+      goto fail;
+    }
+    separator_component_last =
+      (UF_long *)malloc((size_t)solver->separator.component_count *
+                        sizeof(*separator_component_last));
+    if (separator_component_last == NULL) {
+      goto fail;
+    }
+    for (UF_long component = 0; component < solver->separator.component_count;
+         ++component) {
+      separator_component_last[component] = KLS_KLU_EMPTY;
+    }
+    for (UF_long pos = 0; pos < solver->separator.n; ++pos) {
+      const unsigned int component = solver->separator.order_component[pos];
+      if ((UF_long)component >= solver->separator.component_count) {
+        goto fail;
+      }
+      separator_component_last[component] = pos;
+    }
+  }
+
+  (void)kls_row_first_refactor_seed_init(&row_refactor_seed, n);
+  if (pthread_mutex_init(&shared.commit_lock, NULL) != 0) {
+    goto fail;
+  }
+  mutex_initialized = 1;
+  atomic_init(&shared.next_block, 0ul);
+  atomic_init(&shared.failed, 0);
+  shared.solver = solver;
+  shared.numeric = numeric;
+  shared.numeric_values = numeric_values;
+  shared.psinv = psinv;
+  shared.q_order = q_order;
+  shared.row_refactor_seed = &row_refactor_seed;
+  shared.separator_component_last = separator_component_last;
+  shared.scaled = scaled;
+  shared.scale = (int)common->scale;
+  shared.use_separator_pivot_domains = use_separator_pivot_domains;
+  shared.tol = common->tol;
+  shared.max_lnz_block = 1u;
+  shared.max_unz_block = 1u;
+
+  threads =
+    (pthread_t *)calloc((size_t)thread_count, sizeof(*threads));
+  if (threads == NULL) {
+    goto fail;
+  }
+  int created = 0;
+  for (; created < thread_count; ++created) {
+    if (pthread_create(&threads[created], NULL,
+                       kls_row_first_parallel_worker_main, &shared) != 0) {
+      atomic_store_explicit(&shared.failed, 1, memory_order_release);
+      break;
+    }
+  }
+  for (int i = 0; i < created; ++i) {
+    (void)pthread_join(threads[i], NULL);
+  }
+  if (created != thread_count ||
+      atomic_load_explicit(&shared.failed, memory_order_acquire) ||
+      shared.committed_blocks != solver->symbolic->nblocks) {
+    goto fail;
+  }
+
+  numeric->lnz = shared.total_lnz;
+  numeric->unz = shared.total_unz;
+  numeric->max_lnz_block = shared.max_lnz_block;
+  numeric->max_unz_block = shared.max_unz_block;
+  if (!kls_rebuild_numeric_pinv(solver)) {
+    goto fail;
+  }
+  memcpy(solver->symbolic->Q, q_order, (size_t)n * sizeof(*q_order));
+  q_committed = 1;
+  if (!kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
+    goto fail;
+  }
+  if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
+    goto fail;
+  }
+  if (row_refactor_seed.enabled) {
+    (void)kls_row_first_refactor_seed_install(solver, &row_refactor_seed);
+  }
+  if (common->status == TRILINOS_KLU_OK) {
+    common->numerical_rank = n;
+    common->singular_col = n;
+  }
+  solver->kls_first_last_row_uplooking_columns = n;
+  solver->kls_first_row_uplooking_column_count += n;
+  solver->kls_first_last_dynamic_column_pivots =
+    shared.dynamic_column_pivots;
+  solver->kls_first_dynamic_column_pivot_count +=
+    shared.dynamic_column_pivots;
+  solver->kls_first_last_separator_dynamic_column_pivots =
+    shared.separator_dynamic_column_pivots;
+  solver->kls_first_separator_dynamic_column_pivot_count +=
+    shared.separator_dynamic_column_pivots;
+  solver->kls_first_last_separator_extent_dynamic_column_pivots =
+    shared.separator_extent_dynamic_column_pivots;
+  solver->kls_first_separator_extent_dynamic_column_pivot_count +=
+    shared.separator_extent_dynamic_column_pivots;
+  solver->kls_first_last_separator_dynamic_column_fallbacks =
+    shared.separator_dynamic_column_fallbacks;
+  solver->kls_first_separator_dynamic_column_fallback_count +=
+    shared.separator_dynamic_column_fallbacks;
+  solver->kls_first_last_parallel_btf_blocks = shared.committed_blocks;
+  solver->kls_first_parallel_btf_block_count += shared.committed_blocks;
+
+  if (mutex_initialized) {
+    (void)pthread_mutex_destroy(&shared.commit_lock);
+  }
+  free(threads);
+  free(q_order);
+  free(saved_q);
+  free(separator_component_last);
+  return 1;
+
+fail:
+  kls_row_first_refactor_seed_clear(&row_refactor_seed);
+  if (q_committed && saved_q != NULL && solver->symbolic != NULL &&
+      solver->symbolic->Q != NULL) {
+    memcpy(solver->symbolic->Q, saved_q, (size_t)n * sizeof(*saved_q));
+  }
+  if (threads != NULL) {
+    free(threads);
+  }
+  if (mutex_initialized) {
+    (void)pthread_mutex_destroy(&shared.commit_lock);
+  }
+  free(q_order);
+  free(saved_q);
+  free(separator_component_last);
+  trilinos_klu_l_free_numeric(&numeric, common);
+  solver->numeric = NULL;
+  common->status = saved_status;
+  common->numerical_rank = saved_numerical_rank;
+  common->singular_col = saved_singular_col;
+  common->noffdiag = saved_noffdiag;
+  return 0;
+}
+
 static int kls_try_first_factor_row_uplooking_blocks(
   kls_solver *solver,
   double *numeric_values) {
@@ -35485,6 +36261,13 @@ static int kls_try_first_factor_row_uplooking_blocks(
   const UF_long maxblock = solver->symbolic->maxblock;
   if (n == 0u || maxblock == 0u) {
     return 0;
+  }
+
+  const int parallel_status =
+    kls_try_first_factor_row_uplooking_blocks_parallel(solver,
+                                                       numeric_values);
+  if (parallel_status > 0) {
+    return 1;
   }
 
   TRILINOS_KLU_common *common = &solver->common;
