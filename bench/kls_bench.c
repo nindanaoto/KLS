@@ -991,6 +991,18 @@ int main(int argc, char **argv) {
            stats.fast_repaired_offdiag_suffix_refresh_count,
            stats.fast_repaired_offdiag_full_refresh_count,
            stats.fast_repaired_parallel_tail_blocks);
+    printf(",\"fast_kls_block_restart_last_row_pipeline\":%d"
+           ",\"fast_kls_block_restart_row_pipeline_count\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_rows\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_threads\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_pivot_tail_rows\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_pivot_restarts\":%" PRId64,
+           stats.fast_kls_block_restart_last_row_pipeline,
+           stats.fast_kls_block_restart_row_pipeline_count,
+           stats.fast_kls_block_restart_last_row_pipeline_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_threads,
+           stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts);
     printf(",\"kls_first_last_row_pipeline\":%d"
            ",\"kls_first_row_pipeline_run_count\":%" PRId64
            ",\"kls_first_last_row_pipeline_rows\":%" PRId64
@@ -1930,12 +1942,21 @@ int main(int argc, char **argv) {
     printf("fast block restarts: %d, KLS block restarts: %d"
            ", KLS rebuild restarts: %d"
            ", tail restarts: %d"
+           ", KLS block repair row pipeline %d/%" PRId64
+           " rows %" PRId64 ", active threads %" PRId64
+           ", pivot-tail rows %" PRId64 ", pivot restarts %" PRId64
            ", offdiag suffix refresh last %d, suffix refreshes %" PRId64
            ", full refreshes %" PRId64
            ", parallel tail blocks %" PRId64 "\n",
            stats.fast_block_restarts, stats.fast_kls_block_restarts,
            stats.fast_kls_rebuild_restarts,
            stats.fast_tail_restarts,
+           stats.fast_kls_block_restart_last_row_pipeline,
+           stats.fast_kls_block_restart_row_pipeline_count,
+           stats.fast_kls_block_restart_last_row_pipeline_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_threads,
+           stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts,
            stats.fast_repaired_last_offdiag_suffix_refresh,
            stats.fast_repaired_offdiag_suffix_refresh_count,
            stats.fast_repaired_offdiag_full_refresh_count,

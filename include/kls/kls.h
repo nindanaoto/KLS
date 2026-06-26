@@ -261,6 +261,12 @@ typedef struct kls_stats {
   int64_t factor_etree_max_fanout;
   int fast_kls_block_restarts;
   int fast_kls_rebuild_restarts;
+  int fast_kls_block_restart_last_row_pipeline;
+  int64_t fast_kls_block_restart_row_pipeline_count;
+  int64_t fast_kls_block_restart_last_row_pipeline_rows;
+  int64_t fast_kls_block_restart_last_row_pipeline_threads;
+  int64_t fast_kls_block_restart_last_row_pipeline_pivot_tail_rows;
+  int64_t fast_kls_block_restart_last_row_pipeline_pivot_restarts;
   double row_refactor_total_group_work;
   int row_refactor_auto_enabled;
   int row_refactor_auto_values_ready;

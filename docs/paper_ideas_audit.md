@@ -5007,3 +5007,19 @@ consumption, so this closes another storage-path mismatch against the
 CKTSO/SubtreeLU row-major algorithm description. The larger open paper gap is
 unchanged: KLS still needs a production compact/batched row-major numeric engine
 and CKTSO's pipelined ETree-descendant pivoting-tail executor.
+
+The checked-reject KLS-owned block repair now attempts the restartable
+Algorithm 5-style row pipeline first when multiple threads are requested, before
+the older serial pivot-tail repair and KLU fallback. This path still works at
+BTF-block repair scope rather than CKTSO's exact ETree-descendant tail mask, but
+it removes a direct mismatch in the fast-reject recovery flow: a failed checked
+factor can continue through the row-up pipeline and, if needed, serialize only
+dynamic-pivot epochs inside that pipeline. Benchmark and
+decomposition output expose the behavior through
+`fast_kls_block_restart_last_row_pipeline`,
+`fast_kls_block_restart_row_pipeline_count`,
+`fast_kls_block_restart_last_row_pipeline_rows`,
+`fast_kls_block_restart_last_row_pipeline_threads`,
+`fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`, and
+`fast_kls_block_restart_last_row_pipeline_pivot_restarts`; the prior-pivot
+smoke fixture now requires the two-thread repair to use that pipeline.

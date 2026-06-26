@@ -875,6 +875,12 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivoting_tail_suffix_overcompute_work`,
 `fast_rejected_refresh_state`, `fast_block_restarts`,
 `fast_kls_block_restarts`, `fast_kls_rebuild_restarts`,
+`fast_kls_block_restart_last_row_pipeline`,
+`fast_kls_block_restart_row_pipeline_count`,
+`fast_kls_block_restart_last_row_pipeline_rows`,
+`fast_kls_block_restart_last_row_pipeline_threads`,
+`fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`,
+`fast_kls_block_restart_last_row_pipeline_pivot_restarts`,
 `fast_tail_restarts`,
 `fast_repaired_last_offdiag_suffix_refresh`,
 `fast_repaired_offdiag_suffix_refresh_count`, and
@@ -911,7 +917,11 @@ whether the retained order is topologically safe for a future tail kernel to
 consume, whether the failed pass left an unknown, prefix-current, or all-current
 numeric state, the
 number of repaired BTF blocks, how many repairs used the KLS-owned pivoted block
-kernel, and the number of serial tail restarts actually executed, plus whether
+kernel, whether the last multi-thread KLS-owned block repair first ran through
+the restartable row pipeline before the older serial/KLU fallbacks, the number
+of those block-repair pipeline runs, their processed rows, active worker count,
+and pivot-tail serial restart work, and
+the number of serial tail restarts actually executed, plus whether
 repaired serial-tail restarts refreshed only the off-diagonal suffix or rebuilt
 all off-diagonal entries, and whether a non-contiguous serial repair exactly
 matched the retained ETree tail mask or had to recompute promoted internal gap
