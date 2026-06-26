@@ -4755,3 +4755,20 @@ idea for the KLS-owned row-major executor and reports actual use through
 ETree-descendant pivoting-tail factorization: KLS has the guarded row-level
 prefactor step, not the full tail scheduler that retopologizes all unfinished
 descendants after a pivot exchange.
+
+The guarded prefactor step now also consumes finished dense-producer runs as
+runs, not only as scalar dependencies. If later dependencies after the blocked
+predecessor are consecutive rows from a retained dense producer, the producer
+panel prefix is already published, each dependency is finished now, and skipped
+earlier dependencies have no `U` edge into the candidate run, the worker solves
+the run's internal triangular prefix in workspace, checks all multipliers
+without recording an out-of-order rejection, and then applies the dense suffix
+and shared trailing update in one compact supernode pass. Any multiplier that
+would fail the checked threshold cancels the compact prefactor attempt and
+falls back to the existing in-order scalar path. The smoke fixture widens the
+finished producer behind a blocked predecessor and now requires
+`row_refactor_last_prefactor_supernode=1`, while benchmark output reports the
+last and cumulative `row_refactor_prefactor_supernode_*` counters. This maps
+the paper's Algorithm 5 "use supernode k:k'" waiting-phase operation more
+directly, but it remains guarded row-level prefactoring rather than CKTSO's full
+ETree-descendant pivoting-tail restart.

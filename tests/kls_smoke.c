@@ -9078,14 +9078,14 @@ static int restore_env_value(const char *name, int had_value,
 
 static int test_checked_row_prefactor_finished_dependency(void) {
   enum {
-    A_WIDTH = 240,
-    B_WIDTH = 6,
+    A_WIDTH = 360,
+    B_WIDTH = 48,
     C_WIDTH = 6,
     B_BEGIN = A_WIDTH,
     C_BEGIN = B_BEGIN + B_WIDTH,
     CONSUMER = C_BEGIN + C_WIDTH,
     PREF_N = CONSUMER + 1,
-    PREF_NNZ = A_WIDTH * A_WIDTH + 2 + B_WIDTH * B_WIDTH + 1 +
+    PREF_NNZ = A_WIDTH * A_WIDTH + 2 + B_WIDTH * B_WIDTH + 2 +
                C_WIDTH * C_WIDTH + 1 + 1
   };
   const int32_t n = PREF_N;
@@ -9130,7 +9130,7 @@ static int test_checked_row_prefactor_finished_dependency(void) {
           : 0.0009 * (1.0 + (double)((row + col) % 13));
         ax1[p] = ax0[p] + (row == col ? 0.0125 : 1.0e-6);
       }
-      if (col == A_WIDTH + 1) {
+      if (col == B_BEGIN + 1 || col == B_BEGIN + 2) {
         const size_t p = pos++;
         ai[p] = consumer;
         ax0[p] = 0.00013;
@@ -9251,12 +9251,20 @@ static int test_checked_row_prefactor_finished_dependency(void) {
              stats.row_refactor_last_prefactor != 1 ||
              stats.row_refactor_last_prefactor_rows <= 0 ||
              stats.row_refactor_last_prefactor_deps <= 0 ||
+             stats.row_refactor_last_prefactor_supernode != 1 ||
+             stats.row_refactor_last_prefactor_supernode_rows <= 0 ||
+             stats.row_refactor_last_prefactor_supernode_deps <= 0 ||
+             stats.row_refactor_prefactor_supernode_run_count <= 0 ||
+             stats.row_refactor_prefactor_supernode_deps <
+               stats.row_refactor_last_prefactor_supernode_deps ||
              stats.row_refactor_prefactor_run_count <= 0 ||
              stats.row_refactor_prefactor_deps <
                stats.row_refactor_last_prefactor_deps)) {
     fprintf(stderr,
             "unexpected row-prefactor stats: last=%d/%d/%d partial=%d"
             " done=%d prefactor=%d rows/deps=%" PRId64 "/%" PRId64
+            " supernode=%d rows/deps=%" PRId64 "/%" PRId64
+            " supernode_totals=%" PRId64 "/%" PRId64 "/%" PRId64
             " totals=%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
             stats.row_refactor_last_run,
             stats.row_refactor_last_checked,
@@ -9266,6 +9274,12 @@ static int test_checked_row_prefactor_finished_dependency(void) {
             stats.row_refactor_last_prefactor,
             stats.row_refactor_last_prefactor_rows,
             stats.row_refactor_last_prefactor_deps,
+            stats.row_refactor_last_prefactor_supernode,
+            stats.row_refactor_last_prefactor_supernode_rows,
+            stats.row_refactor_last_prefactor_supernode_deps,
+            stats.row_refactor_prefactor_supernode_run_count,
+            stats.row_refactor_prefactor_supernode_rows,
+            stats.row_refactor_prefactor_supernode_deps,
             stats.row_refactor_prefactor_run_count,
             stats.row_refactor_prefactor_rows,
             stats.row_refactor_prefactor_deps);

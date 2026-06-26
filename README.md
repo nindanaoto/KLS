@@ -633,7 +633,15 @@ dependency. This keeps the existing in-order pivot rejection semantics for
 ambiguous cases while exposing actual use through
 `row_refactor_last_prefactor`, `row_refactor_last_prefactor_rows`,
 `row_refactor_last_prefactor_deps`, and cumulative
-`row_refactor_prefactor_*` counters. Row-pattern analysis also records
+`row_refactor_prefactor_*` counters. When the later finished dependencies form
+a consecutive retained dense-producer prefix, KLS now consumes them with the
+same compact supernode update shape instead of scalarizing each dependency;
+near-threshold checked multipliers are skipped and left for the normal
+in-order reject path. Stats expose that Algorithm 5-style run consumption
+through `row_refactor_last_prefactor_supernode`,
+`row_refactor_last_prefactor_supernode_rows`,
+`row_refactor_last_prefactor_supernode_deps`, and cumulative
+`row_refactor_prefactor_supernode_*` counters. Row-pattern analysis also records
 `row_refactor_input_cleanup_rows`
 and `row_refactor_input_cleanup_entries`; rows whose input columns are already
 covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in
