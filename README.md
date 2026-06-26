@@ -481,8 +481,8 @@ preserves a non-empty live prefix state, KLS can execute the same conservative
 serial suffix restart before falling back to full block repair. This executable tail path is
 not limited to the checked row-refactor candidate diagnostic; the diagnostic is
 retained only to explain row-major candidate quality when that metadata exists.
-Root-of-block rejects can use the same KLS-owned pivoted block kernel. When the
-reject-only ETree closure leaves independent single-block columns outside the
+Root-of-block rejects can use the same KLS-owned pivoted block kernel. When a
+prefix-current ETree closure leaves independent single-block columns outside the
 tail, KLS first refreshes those preserved columns with the mapped no-pivot
 column kernel, then runs the shorter pivoted tail envelope and counts it as a
 tail restart. Internal envelope gaps that can be copied unchanged are skipped;

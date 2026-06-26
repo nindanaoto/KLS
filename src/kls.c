@@ -812,6 +812,13 @@ static UF_long kls_prepare_root_pivot_tail_independent_refresh(
   UF_long k1,
   UF_long nk,
   UF_long local_reject);
+static int kls_refresh_pivot_tail_preserved_block_columns(
+  kls_solver *solver,
+  double *numeric_values,
+  UF_long block,
+  UF_long k1,
+  UF_long nk,
+  const unsigned char *tail_mask);
 static void destroy_egraph_refactor_pool(kls_solver *solver);
 static void kls_egraph_refactor_record_invalid(
   kls_egraph_refactor_shared *shared);
@@ -15700,7 +15707,11 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       tail_mask != NULL &&
       kls_build_pivot_tail_restart_mask(
         solver, k1, nk, local_reject, preferred_restart_end, tail_mask);
-    if (main_mask_ok && saved_ptrs != NULL && saved_udiag != NULL) {
+    if (main_mask_ok && saved_ptrs != NULL && saved_udiag != NULL &&
+        (solver->fast_reject_refresh_state !=
+           KLS_FAST_REJECT_REFRESH_PREFIX ||
+         kls_refresh_pivot_tail_preserved_block_columns(
+           solver, numeric_values, block, k1, nk, tail_mask))) {
       UF_long *saved_lip = saved_ptrs;
       UF_long *saved_llen = saved_ptrs + nk;
       UF_long *saved_uip = saved_ptrs + 2u * nk;
@@ -34208,10 +34219,10 @@ static int kls_egraph_refactor_dispatch_column(
   }
 }
 
-/* CKTSO tail repair can omit independent finished nodes.  For serial root
-   rejects, make those omitted columns current before the pivoted tail copies
+/* CKTSO tail repair can omit independent nodes outside the ETree-descendant
+   tail.  Make those omitted columns current before the pivoted tail copies
    them as preserved suffix/gap columns. */
-static int kls_refresh_root_tail_preserved_block_columns(
+static int kls_refresh_pivot_tail_preserved_block_columns(
   kls_solver *solver,
   double *numeric_values,
   UF_long block,
@@ -34387,7 +34398,7 @@ static UF_long kls_prepare_root_pivot_tail_independent_refresh(
       solver, k1, nk, local_reject, restart_end, tail_mask);
   const int refresh_ok =
     mask_ok &&
-    kls_refresh_root_tail_preserved_block_columns(
+    kls_refresh_pivot_tail_preserved_block_columns(
       solver, numeric_values, block, k1, nk, tail_mask);
   free(tail_mask);
   if (!refresh_ok) {

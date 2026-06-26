@@ -1291,6 +1291,133 @@ static int test_mapped_fast_factor_prefix_tail_restart(void) {
   return ok;
 }
 
+static int test_nonroot_tail_refreshes_preserved_suffix(void) {
+  const int32_t ap[] = {0, 1, 3, 5, 6};
+  const int32_t ai[] = {0, 1, 2, 1, 2, 3};
+  const double ax0[] = {2.0, 2.0, 1.0, 1.0, 2.0, 4.0};
+  const double ax1[] = {2.0, 1.0e-12, 1.0, 1.0, 2.0, 8.0};
+  const double expected[] = {1.0, 2.0, 3.0, 4.0};
+  double b[4] = {0.0, 0.0, 0.0, 0.0};
+  double x[4] = {0.0, 0.0, 0.0, 0.0};
+  for (int32_t col = 0; col < 4; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
+  const char *saved_env_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create nonroot suffix refresh")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 4, ap, ai, 0,
+                                        &options),
+                        "analyze nonroot suffix refresh")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor nonroot suffix refresh base")) {
+    ok = 0;
+  }
+  if (ok && unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+    perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor nonroot suffix refresh repair")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR", had_saved_env,
+                         saved_env)) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve nonroot suffix refresh")) {
+    ok = 0;
+  }
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats nonroot suffix refresh")) {
+    ok = 0;
+  }
+  if (ok && (stats.fast_rejected_pivot != 1 ||
+             stats.fast_rejected_block_start != 0 ||
+             stats.fast_rejected_block_size != 4 ||
+             stats.fast_rejected_refresh_state !=
+               KLS_FAST_REJECT_REFRESH_PREFIX ||
+             stats.fast_rejected_pivoting_tail_columns != 2 ||
+             stats.fast_rejected_pivoting_tail_first != 1 ||
+             stats.fast_rejected_pivoting_tail_last != 2 ||
+             stats.fast_rejected_pivoting_tail_suffix_exact != 0 ||
+             stats.fast_rejected_pivoting_tail_suffix_overcompute_columns != 1 ||
+             stats.fast_repaired_tail_restart_ready != 1 ||
+             stats.fast_repaired_tail_restart_columns != 2 ||
+             stats.fast_repaired_tail_restart_exact_mask != 1 ||
+             stats.fast_repaired_tail_restart_skipped_columns != 0 ||
+             stats.fast_tail_restarts != 1)) {
+    fprintf(stderr,
+            "unexpected nonroot suffix-refresh stats: pivot=%" PRId64
+            ", block=[%" PRId64 ",%" PRId64 "), refresh=%d"
+            ", tail=%" PRId64 "/%" PRId64 "/%" PRId64
+            ", suffix_exact=%d, suffix_over=%" PRId64
+            ", ready=%d, repaired=%" PRId64 ", exact_mask=%d"
+            ", skipped=%" PRId64 ", tail_restarts=%d\n",
+            stats.fast_rejected_pivot,
+            stats.fast_rejected_block_start,
+            stats.fast_rejected_block_start + stats.fast_rejected_block_size,
+            stats.fast_rejected_refresh_state,
+            stats.fast_rejected_pivoting_tail_columns,
+            stats.fast_rejected_pivoting_tail_first,
+            stats.fast_rejected_pivoting_tail_last,
+            stats.fast_rejected_pivoting_tail_suffix_exact,
+            stats.fast_rejected_pivoting_tail_suffix_overcompute_columns,
+            stats.fast_repaired_tail_restart_ready,
+            stats.fast_repaired_tail_restart_columns,
+            stats.fast_repaired_tail_restart_exact_mask,
+            stats.fast_repaired_tail_restart_skipped_columns,
+            stats.fast_tail_restarts);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats, "nonroot suffix refresh")) {
+    ok = 0;
+  }
+  if (ok && !require_tail_overcompute_bounds(&stats,
+                                             "nonroot suffix refresh")) {
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < 4; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected nonroot suffix-refresh solution at %d:"
+              " %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  free(saved_env);
+  return ok;
+}
+
 static int test_scaled_fast_factor_block_restart(void) {
   const int32_t ap[] = {0, 2, 4};
   const int32_t ai[] = {0, 1, 0, 1};
@@ -12127,6 +12254,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_mapped_fast_factor_prefix_tail_restart()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_nonroot_tail_refreshes_preserved_suffix()) {
     return EXIT_FAILURE;
   }
   if (!test_scaled_fast_factor_block_restart()) {

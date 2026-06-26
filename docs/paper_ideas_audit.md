@@ -4398,22 +4398,25 @@ layout, not BLAS calls wrapped around each current row in the existing compact
 group shape.
 
 KLS then filled a narrower but direct CKTSO tail-restart semantic gap for
-root-of-block rejects. A prefix-current root reject normally means every later
-unstarted column belongs to the unfinished seed set, so the safe tail remains a
-full suffix. When the reject-only ETree closure is shorter, however, KLS can now
+prefix-current masked tails. A prefix-current root reject normally means every
+later unstarted column belongs to the unfinished seed set, so the safe tail
+remains a full suffix. When the reject-only ETree closure is shorter, however,
+KLS can now
 prove that preserved columns outside that closure have no U dependency on tail
 columns, refresh those preserved columns with the existing mapped no-pivot
 column kernel, and then execute the shorter pivoted tail envelope. The refresh
-proof now works for single-block and unscaled BTF diagonal-block roots by using
-the mapped global-column dispatcher and requiring retained block/off-diagonal
-metadata before refreshing omitted block-local columns. The smoke fixture uses
-a weak root in a 2-by-2 dependent part plus an independent trailing singleton
-and asserts that the retained pivoting-tail plan has two columns while the block
-suffix has three, and that KLS counts the repair as `fast_tail_restarts=1`.
+proof now works for single-block and unscaled BTF diagonal blocks by using the
+mapped global-column dispatcher and requiring retained block/off-diagonal
+metadata before refreshing omitted block-local columns. The smoke fixtures cover
+both a weak root in a 2-by-2 dependent part plus an independent trailing
+singleton, and a non-root weak pivot whose independent changed suffix column
+must be refreshed before KLS preserves it outside the ETree-derived tail. Both
+assert that the retained pivoting-tail plan is shorter than the block suffix and
+that KLS counts the repair as `fast_tail_restarts=1`.
 This is still a serial envelope rather than CKTSO's parallel Algorithm 5
 executor, but it directly applies the paper's distinction between unfinished
 EGraph nodes and ETree-descendant pivoting-tail work instead of treating all
-root rejects as whole-block repairs.
+safe prefix-current rejects as whole-block repairs.
 
 The first-factor path was then moved closer to the paper instead of leaving it
 as an opt-in experiment. Unset `KLS_ENABLE_KLS_FIRST_FACTOR` now means
