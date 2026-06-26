@@ -779,7 +779,8 @@ static int test_fast_factor_root_independent_tail_restart(void) {
   return ok;
 }
 
-static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
+static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
+                                                              const char *label) {
   const int32_t ap[] = {0, 2, 5, 7, 9, 11, 13};
   const int32_t ai[] = {
     0, 4,
@@ -822,7 +823,7 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
   options.scale = -1;
   options.pivot_tolerance = 0.001;
   options.static_pivoting = 0;
-  options.threads = 2;
+  options.threads = threads;
 
   int ok = 1;
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
@@ -842,6 +843,8 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
                         "stats noncontiguous gap tail")) {
     ok = 0;
   }
+  const int expect_row_pipeline = threads > 1;
+  const int expect_tail_restart = expect_row_pipeline ? 0 : 1;
   if (ok && (stats.fast_rejected_pivot != 0 ||
              stats.fast_rejected_pivoting_tail_columns != 5 ||
              stats.fast_rejected_pivoting_tail_first != 0 ||
@@ -849,12 +852,19 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
              stats.fast_rejected_pivoting_tail_contiguous != 0 ||
              stats.fast_rejected_pivoting_tail_gap_columns != 1 ||
              stats.fast_block_restarts != 1 ||
-             stats.fast_tail_restarts != 0 ||
-             stats.fast_kls_block_restart_last_row_pipeline != 1 ||
-             stats.fast_kls_block_restart_last_row_pipeline_rows != 5 ||
-             stats.fast_kls_block_restart_last_row_pipeline_gap_rows != 1 ||
-             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 0 ||
-             stats.fast_kls_block_restart_last_row_pipeline_threads < 1 ||
+             stats.fast_tail_restarts != expect_tail_restart ||
+             stats.fast_kls_block_restart_last_row_pipeline !=
+               expect_row_pipeline ||
+             (expect_row_pipeline &&
+              (stats.fast_kls_block_restart_last_row_pipeline_rows != 5 ||
+               stats.fast_kls_block_restart_last_row_pipeline_gap_rows != 1 ||
+               stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 0 ||
+               stats.fast_kls_block_restart_last_row_pipeline_threads < 1)) ||
+             (!expect_row_pipeline &&
+              (stats.fast_kls_block_restart_last_row_pipeline_rows != 0 ||
+               stats.fast_kls_block_restart_last_row_pipeline_gap_rows != 0 ||
+               stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 0 ||
+               stats.fast_kls_block_restart_last_row_pipeline_threads != 0)) ||
              stats.fast_repaired_tail_restart_exact_mask != 1 ||
              stats.fast_repaired_tail_restart_columns !=
                stats.fast_rejected_pivoting_tail_columns ||
@@ -863,10 +873,10 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
              stats.fast_repaired_offdiag_suffix_refresh_count != 1 ||
              stats.fast_repaired_offdiag_full_refresh_count != 0)) {
     fprintf(stderr,
-            "unexpected noncontiguous gap tail stats: pivot=%" PRId64
+            "unexpected %s stats: pivot=%" PRId64
             ", tail_cols=%" PRId64 ", first=%" PRId64 ", last=%" PRId64
             ", contiguous=%d, gaps=%" PRId64
-            ", block_restarts=%d, tail_restarts=%d"
+            ", block_restarts=%d, tail_restarts=%d/%d"
             ", pipeline=%d, pipeline_rows=%" PRId64
             ", pipeline_gaps=%" PRId64 ", pipeline_suffix=%" PRId64
             ", pipeline_threads=%" PRId64
@@ -877,6 +887,7 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             ", supernode_groups=%" PRId64 ", supernode_rows=%" PRId64
             ", panel_groups=%" PRId64 ", panel_rows=%" PRId64
             "\n",
+            label,
             stats.fast_rejected_pivot,
             stats.fast_rejected_pivoting_tail_columns,
             stats.fast_rejected_pivoting_tail_first,
@@ -885,6 +896,7 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             stats.fast_rejected_pivoting_tail_gap_columns,
             stats.fast_block_restarts,
             stats.fast_tail_restarts,
+            expect_tail_restart,
             stats.fast_kls_block_restart_last_row_pipeline,
             stats.fast_kls_block_restart_last_row_pipeline_rows,
             stats.fast_kls_block_restart_last_row_pipeline_gap_rows,
@@ -929,6 +941,19 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
   }
 
   kls_destroy(solver);
+  return ok;
+}
+
+static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
+  int ok = 1;
+  if (!run_fast_factor_noncontiguous_tail_gap_work_bounds(
+        2, "noncontiguous row-pipeline gap tail")) {
+    ok = 0;
+  }
+  if (!run_fast_factor_noncontiguous_tail_gap_work_bounds(
+        1, "serial noncontiguous exact-mask gap tail")) {
+    ok = 0;
+  }
   return ok;
 }
 

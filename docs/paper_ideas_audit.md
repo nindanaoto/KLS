@@ -5127,6 +5127,19 @@ Public and benchmark statistics now report
 smoke fixture requires a preserved gap row and no
 serial tail restart when two threads are enabled.
 
+The serial fallback now consumes the same retained topological tail envelope
+instead of forcing the failed pivot to be the restart boundary. When the
+retained ETree-descendant plan is non-suffix, KLS builds the exact active mask
+over that plan's first/last columns, reconstructs the current prefix only before
+the retained tail begin, and records/refreshes accepted off-diagonal data from
+that actual begin. This matters for unfinished parallel fast-factor states whose
+retained descendants can begin before the pivot that finally failed. The
+one-thread non-contiguous smoke variant requires the serial exact-mask restart,
+while the two-thread variant still requires the row-pipeline path. This closes a
+serial wrapper mismatch; the remaining paper gap is still CKTSO's full
+multi-task ETree-descendant pivoting-tail scheduler and production row/segment
+numeric storage.
+
 The masked row-pipeline repair now makes the same ready-supernode branch
 mask-aware. Packed active tail rows no longer force singleton producer rows:
 the phase initializes supernode metadata from already-preserved rows, each
