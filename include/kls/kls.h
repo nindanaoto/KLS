@@ -527,6 +527,9 @@ typedef struct kls_stats {
   int64_t fast_kls_block_restart_last_row_pipeline_gap_rows;
   int64_t fast_kls_block_restart_last_row_pipeline_supernode_update_groups;
   int64_t fast_kls_block_restart_last_row_pipeline_supernode_update_rows;
+  int64_t
+    fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups;
+  int64_t fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

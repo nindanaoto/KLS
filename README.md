@@ -886,6 +886,8 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_kls_block_restart_last_row_pipeline_pivot_restarts`,
 `fast_kls_block_restart_last_row_pipeline_supernode_update_groups`,
 `fast_kls_block_restart_last_row_pipeline_supernode_update_rows`,
+`fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups`,
+`fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows`,
 `fast_tail_restarts`,
 `fast_repaired_last_offdiag_suffix_refresh`,
 `fast_repaired_offdiag_suffix_refresh_count`, and
@@ -926,6 +928,7 @@ kernel, whether the last multi-thread KLS-owned block repair first ran through
 the restartable row pipeline before the older serial/KLU fallbacks, the number
 of those block-repair pipeline runs, their processed rows, active worker count,
 how many prefix and suffix rows were preserved around an exact tail-envelope
+pipeline, grouped supernode and cached-panel update rows used inside the
 pipeline, and pivot-tail serial restart work, and
 the number of serial tail restarts actually executed, plus whether
 repaired serial-tail restarts refreshed only the off-diagonal suffix or rebuilt

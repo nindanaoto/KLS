@@ -1001,7 +1001,9 @@ int main(int argc, char **argv) {
            ",\"fast_kls_block_restart_last_row_pipeline_pivot_tail_rows\":%" PRId64
            ",\"fast_kls_block_restart_last_row_pipeline_pivot_restarts\":%" PRId64
            ",\"fast_kls_block_restart_last_row_pipeline_supernode_update_groups\":%" PRId64
-           ",\"fast_kls_block_restart_last_row_pipeline_supernode_update_rows\":%" PRId64,
+           ",\"fast_kls_block_restart_last_row_pipeline_supernode_update_rows\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows\":%" PRId64,
            stats.fast_kls_block_restart_last_row_pipeline,
            stats.fast_kls_block_restart_row_pipeline_count,
            stats.fast_kls_block_restart_last_row_pipeline_rows,
@@ -1012,7 +1014,9 @@ int main(int argc, char **argv) {
            stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows,
            stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts,
            stats.fast_kls_block_restart_last_row_pipeline_supernode_update_groups,
-           stats.fast_kls_block_restart_last_row_pipeline_supernode_update_rows);
+           stats.fast_kls_block_restart_last_row_pipeline_supernode_update_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups,
+           stats.fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows);
     printf(",\"kls_first_last_row_pipeline\":%d"
            ",\"kls_first_row_pipeline_run_count\":%" PRId64
            ",\"kls_first_last_row_pipeline_rows\":%" PRId64
@@ -1958,6 +1962,7 @@ int main(int argc, char **argv) {
            ", gap rows %" PRId64
            ", pivot-tail rows %" PRId64 ", pivot restarts %" PRId64
            ", supernode groups %" PRId64 ", supernode rows %" PRId64
+           ", panel groups %" PRId64 ", panel rows %" PRId64
            ", offdiag suffix refresh last %d, suffix refreshes %" PRId64
            ", full refreshes %" PRId64
            ", parallel tail blocks %" PRId64 "\n",
@@ -1975,6 +1980,8 @@ int main(int argc, char **argv) {
            stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts,
            stats.fast_kls_block_restart_last_row_pipeline_supernode_update_groups,
            stats.fast_kls_block_restart_last_row_pipeline_supernode_update_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups,
+           stats.fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows,
            stats.fast_repaired_last_offdiag_suffix_refresh,
            stats.fast_repaired_offdiag_suffix_refresh_count,
            stats.fast_repaired_offdiag_full_refresh_count,

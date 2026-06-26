@@ -5025,8 +5025,10 @@ decomposition output expose the behavior through
 `fast_kls_block_restart_last_row_pipeline_gap_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_restarts`,
-`fast_kls_block_restart_last_row_pipeline_supernode_update_groups`, and
-`fast_kls_block_restart_last_row_pipeline_supernode_update_rows`; the
+`fast_kls_block_restart_last_row_pipeline_supernode_update_groups`,
+`fast_kls_block_restart_last_row_pipeline_supernode_update_rows`,
+`fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups`, and
+`fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows`; the
 prior-pivot smoke fixture now requires the two-thread repair to use that
 pipeline.
 
@@ -5070,10 +5072,17 @@ the phase initializes supernode metadata from already-preserved rows, each
 ordered active-row publish rebuilds the completed local supernode map across
 preserved gaps and active rows, and readiness checks use the active-rank map to
 stop a run at unfinished active rows while still admitting ready preserved gap
-rows. Cached dense panels remain disabled for masked tails after dynamic column
-exchanges, but the Algorithm 4/5-style grouped predecessor update is no longer
-limited to contiguous envelopes. The fast block-repair pipeline reports this
-through `fast_kls_block_restart_last_row_pipeline_supernode_update_groups` and
-`fast_kls_block_restart_last_row_pipeline_supernode_update_rows`; the
-non-contiguous gap smoke fixture now requires one grouped update over two
-producer rows.
+rows. The phase-local dense/common-tail panel cache now uses the same completed
+row map in masked tails: preserved-row panels are built at phase start, active
+row publication rebuilds the cache across preserved gaps and completed active
+rows, and dynamic column exchanges refresh against the current row-major `U`
+before speculative suffix rows retry. This closes the direct Algorithm 4/5
+panel-use gap for completed dependencies in non-contiguous tail masks, while
+still stopping at unfinished active rows through the active-rank guard. The fast
+block-repair pipeline reports this through
+`fast_kls_block_restart_last_row_pipeline_supernode_update_groups`,
+`fast_kls_block_restart_last_row_pipeline_supernode_update_rows`,
+`fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups`, and
+`fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows`; the
+non-contiguous gap smoke fixture now requires one grouped update and one
+panel-backed update over two producer rows.

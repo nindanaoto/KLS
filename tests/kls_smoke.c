@@ -743,6 +743,12 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
                1 ||
              stats
                .fast_kls_block_restart_last_row_pipeline_supernode_update_rows <
+               2 ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups <
+               1 ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows <
                2)) {
     fprintf(stderr,
             "unexpected noncontiguous gap tail stats: pivot=%" PRId64
@@ -753,6 +759,7 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             ", pipeline_gaps=%" PRId64 ", pipeline_suffix=%" PRId64
             ", pipeline_threads=%" PRId64
             ", supernode_groups=%" PRId64 ", supernode_rows=%" PRId64
+            ", panel_groups=%" PRId64 ", panel_rows=%" PRId64
             "\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_pivoting_tail_columns,
@@ -770,7 +777,11 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             stats
               .fast_kls_block_restart_last_row_pipeline_supernode_update_groups,
             stats
-              .fast_kls_block_restart_last_row_pipeline_supernode_update_rows);
+              .fast_kls_block_restart_last_row_pipeline_supernode_update_rows,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows);
     ok = 0;
   }
   if (ok && !require_pivoting_tail_plan(&stats, "noncontiguous gap tail")) {
