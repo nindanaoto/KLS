@@ -10488,6 +10488,12 @@ static int test_kls_first_separator_queue_plan(void) {
                stats.kls_first_last_separator_queue_pipeline_rows ||
              stats.kls_first_last_separator_queue_pipeline_partial_threads <=
                0 ||
+             stats.kls_first_last_separator_queue_pipeline_supernode_panel_update !=
+               1 ||
+             stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_groups <=
+               0 ||
+             stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_rows <=
+               0 ||
              stats.kls_first_last_row_uplooking_columns != n ||
              stats.selected_btf != 0 || stats.selected_scale != 0)) {
     fprintf(stderr,
@@ -10515,6 +10521,7 @@ static int test_kls_first_separator_queue_plan(void) {
             ", pipeline_supernode_update=%d/%" PRId64
             ", pipeline_supernode_update_groups=%" PRId64
             ", pipeline_supernode_update_rows=%" PRId64
+            ", pipeline_panel_update=%d/%" PRId64 "/%" PRId64
             ", pipeline_pivot_tail=%d/%" PRId64
             ", pipeline_pivot_tail_rows=%" PRId64
             ", row_cols=%" PRId64 ", btf=%d, scale=%d\n",
@@ -10554,6 +10561,9 @@ static int test_kls_first_separator_queue_plan(void) {
             stats.kls_first_separator_queue_pipeline_supernode_update_run_count,
             stats.kls_first_last_separator_queue_pipeline_supernode_update_groups,
             stats.kls_first_last_separator_queue_pipeline_supernode_update_rows,
+            stats.kls_first_last_separator_queue_pipeline_supernode_panel_update,
+            stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_groups,
+            stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_rows,
             stats.kls_first_last_separator_queue_pipeline_pivot_tail,
             stats.kls_first_separator_queue_pipeline_pivot_tail_run_count,
             stats.kls_first_last_separator_queue_pipeline_pivot_tail_rows,

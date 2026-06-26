@@ -4006,8 +4006,9 @@ the queue shape on a 30,000-row METIS-ordered tridiagonal KLS-first factor and
 the epoch recovery path on a 30,600-row METIS-ordered grid with separator-band
 weak diagonals. The queue-shape test requires more than one private worker
 thread, verifies that all planned pipeline rows are consumed by the guarded
-pipeline executor, and verifies that the private-predecessor partial pre-update
-path touches all pipeline rows. The epoch test requires a separator-pipeline
+pipeline executor, verifies that the private-predecessor partial pre-update
+path touches all pipeline rows, and now requires cached panel-backed producer
+updates in the separator pipeline. The epoch test requires a separator-pipeline
 pivot restart, cached separator-pipeline panel updates after that restart, zero
 serialized pivot rows, and a clean solve residual.
 This closes Algorithm 3's queue shape and adds race-free scalar Algorithm 4
@@ -4939,10 +4940,13 @@ producer prefixes can be used before the producer tail is available. The
 ordinary row-up path now also publishes a compact-validated producer prefix
 lazily when a consumer first uses it, so a later consumer can reuse the same
 dense/common-tail panel even before the complete producer supernode is known.
-This is still not the full paper storage layer: KLS does not proactively
-maintain mutable open-supernode panels, lazy prefix publication is intentionally
-kept out of separator-scoped pivoting, and CKTSO's full ETree-descendant
-pivoting-tail scheduler remains open. Separator pipeline pivot-tail rows that
+The same lazy prefix publication now applies inside separator private/pipeline
+row-up paths after the compact prefix has been validated under the scoped pivot
+order; dynamic pivots reset or rebuild the affected caches so stale column
+layouts are not reused. This is still not the full paper storage layer: KLS
+does not proactively maintain mutable open-supernode panels, and CKTSO's full
+ETree-descendant pivoting-tail scheduler remains open. Separator pipeline
+pivot-tail rows that
 are serialized after a restart now use the same row-up producer panel cache for
 completed-supernode publication, so the restarted suffix no longer loses those
 completed panels just because a pipeline phase fell back to a serial pivot row.

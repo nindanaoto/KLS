@@ -178,8 +178,10 @@ completed row-supernodes as cached dense/common-tail panels once the following
 row proves the supernode ended; this covers parallel BTF workers plus the
 ordinary private and serial row-up loops. In the ordinary row-up path, when a row
 first consumes a compact validated producer run before the complete producer
-supernode is known, KLS also publishes that consumed prefix lazily. Later rows
-try those panels before
+supernode is known, KLS also publishes that consumed prefix lazily; separator
+private/pipeline row-up paths now use the same lazy publication once a compact
+prefix has been validated under the scoped pivot order. Later rows try those
+panels before
 falling back to row-entry validation, and the cached consumer can use the
 published prefix of a longer dependency run while leaving the remaining suffix
 in the dependency heap. That matches the paper private/pipeline rule that
