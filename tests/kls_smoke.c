@@ -127,6 +127,17 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
       stats->fast_rejected_pivoting_tail_gap_columns < 0 ||
       stats->fast_rejected_pivoting_tail_suffix_overcompute_columns < 0 ||
       stats->fast_rejected_pivoting_tail_suffix_overcompute_work < 0.0 ||
+      stats->fast_rejected_pivoting_tail_etree_edges < 0 ||
+      stats->fast_rejected_pivoting_tail_etree_roots <= 0 ||
+      stats->fast_rejected_pivoting_tail_etree_leaves <= 0 ||
+      stats->fast_rejected_pivoting_tail_etree_max_fanout < 0 ||
+      stats->fast_rejected_pivoting_tail_etree_edges +
+        stats->fast_rejected_pivoting_tail_etree_roots !=
+        stats->fast_rejected_pivoting_tail_columns ||
+      stats->fast_rejected_pivoting_tail_etree_leaves >
+        stats->fast_rejected_pivoting_tail_columns ||
+      (stats->fast_rejected_pivoting_tail_etree_edges > 0 &&
+       stats->fast_rejected_pivoting_tail_etree_max_fanout <= 0) ||
       (stats->fast_rejected_pivoting_tail_suffix_exact &&
        (!stats->fast_rejected_pivoting_tail_contiguous ||
         stats->fast_rejected_pivoting_tail_gap_columns != 0 ||
@@ -141,7 +152,9 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
             ", first=%" PRId64 ", last=%" PRId64
             ", contains=%d, topo=%d, contiguous=%d, suffix_exact=%d"
             ", gaps=%" PRId64 ", suffix_over_cols=%" PRId64
-            ", suffix_over_work=%.6g\n",
+            ", suffix_over_work=%.6g"
+            ", etree_edges=%" PRId64 ", etree_roots=%" PRId64
+            ", etree_leaves=%" PRId64 ", etree_max_fanout=%" PRId64 "\n",
             what,
             stats != NULL ? stats->fast_rejected_pivot : -1,
             stats != NULL ? stats->fast_rejected_block_start : -1,
@@ -178,7 +191,19 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
               : 0,
             stats != NULL
               ? stats->fast_rejected_pivoting_tail_suffix_overcompute_work
-              : 0.0);
+              : 0.0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_etree_edges
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_etree_roots
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_etree_leaves
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_etree_max_fanout
+              : 0);
     return 0;
   }
   return 1;

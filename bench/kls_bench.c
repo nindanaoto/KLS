@@ -1157,6 +1157,10 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivoting_tail_gap_columns\":%" PRId64
            ",\"fast_rejected_pivoting_tail_suffix_overcompute_columns\":%" PRId64
            ",\"fast_rejected_pivoting_tail_suffix_overcompute_work\":%.9g"
+           ",\"fast_rejected_pivoting_tail_etree_edges\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_etree_roots\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_etree_leaves\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_etree_max_fanout\":%" PRId64
            ",\"fast_rejected_refresh_state\":%d"
            ",\"fast_rejected_prefix_refresh_columns\":%" PRId64
            ",\"fast_rejected_prefix_refresh_count\":%" PRId64,
@@ -1186,6 +1190,10 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_gap_columns,
            stats.fast_rejected_pivoting_tail_suffix_overcompute_columns,
            stats.fast_rejected_pivoting_tail_suffix_overcompute_work,
+           stats.fast_rejected_pivoting_tail_etree_edges,
+           stats.fast_rejected_pivoting_tail_etree_roots,
+           stats.fast_rejected_pivoting_tail_etree_leaves,
+           stats.fast_rejected_pivoting_tail_etree_max_fanout,
            stats.fast_rejected_refresh_state,
            stats.fast_rejected_prefix_refresh_columns,
            stats.fast_rejected_prefix_refresh_count);
@@ -2017,7 +2025,9 @@ int main(int argc, char **argv) {
            ", block seed %" PRId64
            ", contiguous %d, suffix exact %d"
            ", gaps %" PRId64 ", suffix overcompute columns %" PRId64
-           ", suffix overcompute work %.6g, refresh state %d"
+           ", suffix overcompute work %.6g, etree edges %" PRId64
+           ", etree roots %" PRId64 ", etree leaves %" PRId64
+           ", etree max fanout %" PRId64 ", refresh state %d"
            ", prefix refresh columns %" PRId64
            ", prefix refreshes %" PRId64 "\n",
            stats.fast_rejected_block_start,
@@ -2046,6 +2056,10 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_gap_columns,
            stats.fast_rejected_pivoting_tail_suffix_overcompute_columns,
            stats.fast_rejected_pivoting_tail_suffix_overcompute_work,
+           stats.fast_rejected_pivoting_tail_etree_edges,
+           stats.fast_rejected_pivoting_tail_etree_roots,
+           stats.fast_rejected_pivoting_tail_etree_leaves,
+           stats.fast_rejected_pivoting_tail_etree_max_fanout,
            stats.fast_rejected_refresh_state,
            stats.fast_rejected_prefix_refresh_columns,
            stats.fast_rejected_prefix_refresh_count);

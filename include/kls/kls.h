@@ -537,6 +537,10 @@ typedef struct kls_stats {
   double kls_first_last_separator_queue_min_thread_work;
   double kls_first_last_separator_queue_max_thread_work;
   int selected_exact_matching_scaling;
+  int64_t fast_rejected_pivoting_tail_etree_edges;
+  int64_t fast_rejected_pivoting_tail_etree_roots;
+  int64_t fast_rejected_pivoting_tail_etree_leaves;
+  int64_t fast_rejected_pivoting_tail_etree_max_fanout;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -3284,6 +3284,19 @@ tail envelope. It does, however, preserve the paper's "unfinished guessed
 EGraph nodes seed the ETree tail" information for the pool path instead of
 collapsing directly to an untagged suffix fallback.
 
+The retained CKTSO-style tail plan now also materializes the ETree forest
+shape that a true pipelined pivoting-tail executor would consume. Once the
+seeded worklist has been closed through ordered-block ETree parents and
+validated as topological, KLS counts retained ETree edges, roots, leaves, and
+maximum fanout as `fast_rejected_pivoting_tail_etree_edges`,
+`fast_rejected_pivoting_tail_etree_roots`,
+`fast_rejected_pivoting_tail_etree_leaves`, and
+`fast_rejected_pivoting_tail_etree_max_fanout`. Smoke tests require the
+retained tail to satisfy the forest invariant `edges + roots == columns`. This
+is still scheduler state rather than the full CKTSO tail executor, but it fills
+the paper-level representation gap between a flat suffix/envelope retry and
+Algorithm 5's ETree-descendant ready worklist.
+
 The serial suffix tail retry then stopped copying and mutating a private
 `Offp` array. Tail-column construction now supports a discard-only off-block
 mode, which is valid because accepted local repairs rebuild `Offi`/`Offx` from
