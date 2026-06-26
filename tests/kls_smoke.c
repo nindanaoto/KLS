@@ -8416,6 +8416,181 @@ static int test_auto_kls_first_skips_scaled_single_block(void) {
   return ok;
 }
 
+static int test_auto_kls_first_scaled_single_block_separator_queue(void) {
+  const int32_t n = 150000;
+  const int32_t nnz = 3 * n - 2;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax == NULL || b == NULL ||
+      x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    expected[col] = 1.0 + (double)(col % 7);
+    if (col > 0) {
+      ai[p] = col - 1;
+      ax[p] = -0.25;
+      p++;
+    }
+    ai[p] = col;
+    ax[p] = 5.0 + (double)(col % 3);
+    p++;
+    if (col + 1 < n) {
+      ai[p] = col + 1;
+      ax[p] = -0.25;
+      p++;
+    }
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected scaled separator nnz: %d/%d\n", p, nnz);
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
+      b[ai[q]] += ax[q] * expected[col];
+    }
+  }
+
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_saved_first = saved_first_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_METIS;
+  options.use_btf = 0;
+  options.scale = 1;
+  options.static_pivoting = 0;
+  options.threads = 4;
+
+  int ok = 1;
+  if (had_saved_first && saved_first == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (ok && unsetenv("KLS_ENABLE_KLS_FIRST_FACTOR") != 0) {
+    perror("unsetenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_create(&solver),
+                        "create scaled separator KLS first")) {
+    ok = 0;
+  }
+  if (ok) {
+    const int analyze_status =
+      kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0, &options);
+    if (analyze_status == KLS_ERR_UNSUPPORTED) {
+      goto cleanup;
+    }
+    if (!require_ok(analyze_status,
+                    "analyze scaled separator KLS first")) {
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor scaled separator KLS first")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve scaled separator KLS first")) {
+    ok = 0;
+  }
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats scaled separator KLS first")) {
+    ok = 0;
+  }
+  if (ok && (stats.build_has_metis != 1 ||
+             stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
+             stats.kls_first_auto_skipped_scaled_single_block != 0 ||
+             stats.kls_first_auto_skipped_scaled_single_block_count != 0 ||
+             stats.separator_analyzed_rows != n ||
+             stats.separator_private_components <= 0 ||
+             stats.separator_pipeline_components <= 0 ||
+             stats.separator_private_rows <= 0 ||
+             stats.separator_pipeline_rows <= 0 ||
+             stats.kls_first_last_separator_queue_executed != 1 ||
+             stats.kls_first_last_separator_queue_parallel_private != 1 ||
+             stats.kls_first_last_separator_queue_parallel_pipeline != 1 ||
+             stats.kls_first_last_row_uplooking_columns != n ||
+             stats.kls_first_last_row_refactor_seeded_rows != n ||
+             stats.selected_btf != 0 || stats.selected_scale != 1)) {
+    fprintf(stderr,
+            "unexpected scaled separator KLS-first stats: metis=%d"
+            ", path=%s, skip=%d/%" PRId64
+            ", sep_rows=%" PRId64 ", sep_comp=%" PRId64 "/%" PRId64
+            ", sep_rows_private_pipeline=%" PRId64 "/%" PRId64
+            ", queue_exec=%d, private_parallel=%d, pipeline_parallel=%d"
+            ", row_cols=%" PRId64 ", row_seed=%" PRId64
+            ", btf=%d, scale=%d\n",
+            stats.build_has_metis,
+            kls_factor_path_name(stats.last_factor_path),
+            stats.kls_first_auto_skipped_scaled_single_block,
+            stats.kls_first_auto_skipped_scaled_single_block_count,
+            stats.separator_analyzed_rows,
+            stats.separator_private_components,
+            stats.separator_pipeline_components,
+            stats.separator_private_rows,
+            stats.separator_pipeline_rows,
+            stats.kls_first_last_separator_queue_executed,
+            stats.kls_first_last_separator_queue_parallel_private,
+            stats.kls_first_last_separator_queue_parallel_pipeline,
+            stats.kls_first_last_row_uplooking_columns,
+            stats.kls_first_last_row_refactor_seeded_rows,
+            stats.selected_btf, stats.selected_scale);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected scaled separator solution at %d:"
+              " %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+cleanup:
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
+                         saved_first)) {
+    ok = 0;
+  }
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(b);
+  free(x);
+  free(expected);
+  free(saved_first);
+  return ok;
+}
+
 static int test_pre_static_replays_kls_first_factor(void) {
   const int32_t n = 3000;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
@@ -9629,6 +9804,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_auto_kls_first_skips_scaled_single_block()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_auto_kls_first_scaled_single_block_separator_queue()) {
     return EXIT_FAILURE;
   }
   if (!test_pre_static_replays_kls_first_factor()) {

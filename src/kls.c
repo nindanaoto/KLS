@@ -20757,6 +20757,26 @@ static int kls_first_factor_env_disabled(void) {
   return value != NULL && value[0] == '0' && value[1] == '\0';
 }
 
+static int kls_auto_first_factor_has_separator_parallel_row_up(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->options.threads <= 1 ||
+      solver->separator.order_component == NULL ||
+      solver->separator.component_kind == NULL ||
+      !kls_separator_analysis_has_global_range(&solver->separator) ||
+      solver->separator.global_begin != 0u ||
+      solver->separator.global_end != solver->n ||
+      solver->separator.component_count <= 1u ||
+      solver->separator.private_component_count == 0u ||
+      solver->separator.pipeline_component_count == 0u ||
+      solver->separator.private_rows == 0u ||
+      solver->separator.pipeline_rows == 0u) {
+    return 0;
+  }
+  return solver->symbolic->nblocks == 1u &&
+         solver->symbolic->maxblock == solver->n;
+}
+
 static int kls_auto_first_factor_scaled_single_block_risk(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL) {
@@ -20769,7 +20789,7 @@ static int kls_auto_first_factor_scaled_single_block_risk(
       solver->symbolic->maxblock != solver->n) {
     return 0;
   }
-  return 1;
+  return !kls_auto_first_factor_has_separator_parallel_row_up(solver);
 }
 
 static int kls_auto_first_factor_should_run(kls_solver *solver) {
@@ -20783,9 +20803,10 @@ static int kls_auto_first_factor_should_run(kls_solver *solver) {
   if (kls_auto_first_factor_scaled_single_block_risk(solver)) {
     /*
      * CKTSO's fast path for this class is the parallel row-up/ETree task
-     * factorization. KLS's current KLS-first bridge is still a serial row-up
-     * packer, so automatic mode must not replace an accepted KLU/static first
-     * factor with that incomplete scaffold on very large scaled single-block
+     * factorization. KLS only lets automatic mode use the KLS-first bridge
+     * here when analysis retained a global separator private/pipeline row-up
+     * queue; otherwise it must not replace an accepted KLU/static first
+     * factor with the incomplete single-block scaffold on very large scaled
      * systems. KLS_ENABLE_KLS_FIRST_FACTOR=1 still forces the experiment.
      */
     solver->kls_first_auto_skipped_scaled_single_block = 1;

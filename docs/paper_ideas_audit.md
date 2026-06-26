@@ -4403,17 +4403,19 @@ CKTSO's pivoting-tail executor as larger remaining paper gaps.
 The KLS-first automatic selector now refuses one class where the implementation
 was ahead of the paper coverage: very large scaled matrices whose accepted
 symbolic state is one BTF block. The CKTSO paper treats this class with a
-parallel row-up/ETree task factorization, while KLS's current KLS-first bridge
-is still a serial row-up packer. On the CKTSO-gap focus subset, `rajat24` was
+parallel row-up/ETree task factorization. KLS therefore keeps the automatic
+skip for this class unless the accepted analysis retained a global separator
+private/pipeline row queue that the KLS-first row-up executor can consume.
+On the CKTSO-gap focus subset, `rajat24` was
 the clear failure mode: before this guard it selected `kls_first`, spent about
 40.1 s in initial factorization, and modeled at 66.1 s versus CKTSO's 4.68 s.
 After the guard, default automatic mode reports
 `kls_first_auto_skipped_scaled_single_block_count=1`, keeps the KLU/static first
 factor, and models at 10.8 s. The 12-row focus geomean moved from 3.78 s
 to 3.34 s, reducing the CKTSO ratio from 2.96x to 2.62x. This is not the final
-paper algorithm; it prevents the incomplete serial scaffold from masking the
-actual missing piece, which is CKTSO's parallel row-up first factor and the
-matching row-oriented refactor/solve engine.
+paper algorithm; it prevents unpartitioned scaled single-block systems from
+masking the actual missing piece, which is CKTSO's parallel row-up first factor
+and the matching row-oriented refactor/solve engine.
 
 The partial-supernode pipeline split is now a structural automatic row-engine
 choice instead of an explicit experiment. With
@@ -4571,3 +4573,15 @@ problem. The smoke suite now forces a two-block BTF row-up case with two
 threads and requires `kls_first_last_parallel_btf_blocks=2`. This is still not
 the full CKTSO ETree pipeline inside one large diagonal block; it is the safe
 BTF-level parallel part of that first-factor algorithm.
+
+The automatic scaled single-block guard now recognizes the separator row-up
+executor added after the original guard. Very large scaled single-block states
+are still skipped in automatic mode when they lack retained global separator
+private/pipeline work, but a METIS `NodeNDP` analysis that preserves both
+private and pipeline separator rows may now enter KLS-first automatically. This
+fills a direct coverage gap against the papers' row-up task-factorization
+precondition without enabling the old single-block bridge broadly. The smoke
+suite keeps both sides covered: a natural-order 150,000-row scaled diagonal
+remains on `klu_first` with `kls_first_auto_skipped_scaled_single_block=1`,
+while a 150,000-row scaled METIS/no-BTF tridiagonal uses `kls_first` and
+requires the separator private and pipeline phases to execute.
