@@ -846,7 +846,8 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivoting_tail_suffix_overcompute_columns`,
 `fast_rejected_pivoting_tail_suffix_overcompute_work`,
 `fast_rejected_refresh_state`, `fast_block_restarts`,
-`fast_kls_block_restarts`, `fast_tail_restarts`,
+`fast_kls_block_restarts`, `fast_kls_rebuild_restarts`,
+`fast_tail_restarts`,
 `fast_repaired_last_offdiag_suffix_refresh`,
 `fast_repaired_offdiag_suffix_refresh_count`, and
 `fast_repaired_offdiag_full_refresh_count`, and

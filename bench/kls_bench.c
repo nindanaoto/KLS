@@ -886,6 +886,7 @@ int main(int argc, char **argv) {
            ",\"fast_repaired_tail_restart_exact_mask\":%d"
            ",\"fast_block_restarts\":%d"
            ",\"fast_kls_block_restarts\":%d"
+           ",\"fast_kls_rebuild_restarts\":%d"
            ",\"fast_tail_restarts\":%d"
            ",\"fast_repaired_last_offdiag_suffix_refresh\":%d"
            ",\"fast_repaired_offdiag_suffix_refresh_count\":%" PRId64
@@ -984,6 +985,7 @@ int main(int argc, char **argv) {
            stats.fast_repaired_tail_restart_exact_mask,
            stats.fast_block_restarts,
            stats.fast_kls_block_restarts,
+           stats.fast_kls_rebuild_restarts,
            stats.fast_tail_restarts,
            stats.fast_repaired_last_offdiag_suffix_refresh,
            stats.fast_repaired_offdiag_suffix_refresh_count,
@@ -1884,11 +1886,13 @@ int main(int argc, char **argv) {
            stats.fast_repaired_tail_restart_skipped_work,
            stats.fast_repaired_tail_restart_exact_mask);
     printf("fast block restarts: %d, KLS block restarts: %d"
+           ", KLS rebuild restarts: %d"
            ", tail restarts: %d"
            ", offdiag suffix refresh last %d, suffix refreshes %" PRId64
            ", full refreshes %" PRId64
            ", parallel tail blocks %" PRId64 "\n",
            stats.fast_block_restarts, stats.fast_kls_block_restarts,
+           stats.fast_kls_rebuild_restarts,
            stats.fast_tail_restarts,
            stats.fast_repaired_last_offdiag_suffix_refresh,
            stats.fast_repaired_offdiag_suffix_refresh_count,

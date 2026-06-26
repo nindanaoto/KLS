@@ -3012,6 +3012,16 @@ case now requires a root reject to use that path. This is a direct step toward a
 KLS-owned factorization kernel, but not the CKTSO ETree-descendant pipelined
 tail executor.
 
+KLS now also gives the independent row-up-looking factorization kernel a chance
+when an unscaled checked reject has an ETree-tail plan but the exact in-place
+tail repair cannot be realized. This moves that recovery branch toward the
+papers' "switch from invalid checked refactorization to pivoting factorization"
+rule: the exact block/tail repair remains first, but the next fallback is a
+quality-checked KLS-first rebuild before the serial full-suffix repair and KLU
+block-kernel fallback. Successful uses are reported as
+`fast_kls_rebuild_restarts`. This still rebuilds the numeric object instead of
+running CKTSO Algorithm 5's ETree-descendant pipelined tail scheduler in place.
+
 The row-refactor benchmark controls were then made explicit after the
 checked-row/refactor ambiguity above was found. `kls_bench` now accepts
 `--row-refactor env|off|refactor|checked|all`, `run_bench_suite.py` forwards

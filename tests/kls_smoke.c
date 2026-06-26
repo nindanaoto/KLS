@@ -191,6 +191,7 @@ static int require_tail_overcompute_bounds(const kls_stats *stats,
       stats->fast_repaired_tail_restart_overcompute_work < 0.0 ||
       stats->fast_repaired_tail_restart_skipped_columns < 0 ||
       stats->fast_repaired_tail_restart_skipped_work < 0.0 ||
+      stats->fast_kls_rebuild_restarts < 0 ||
       (stats->fast_repaired_tail_restart_exact_mask != 0 &&
        stats->fast_repaired_tail_restart_exact_mask != 1) ||
       (stats->fast_repaired_tail_restart_exact_mask &&
@@ -8982,6 +8983,7 @@ static int run_experimental_kls_first_factor_case(int scale,
              stats.row_refactor_row_solve_run_count != 2 ||
              stats.fast_block_restarts != 0 ||
              stats.fast_kls_block_restarts != 0 ||
+             stats.fast_kls_rebuild_restarts != 0 ||
              !kls_first_path_ok ||
              !kls_first_seed_ok)) {
     fprintf(stderr,
@@ -8989,6 +8991,7 @@ static int run_experimental_kls_first_factor_case(int scale,
             ", max_block=%" PRId64 ", orientation=%s, scale=%d"
             ", row_dirty=%d, row_lazy=%d, row_solve=%d, row_solve_count=%" PRId64
             ", block_restarts=%d, kls_block_restarts=%d"
+            ", kls_rebuild_restarts=%d"
             ", row_up=%" PRId64 "/%" PRId64
             ", row_seed=%" PRId64 "/%" PRId64
             ", mapped_tail=%" PRId64 "/%" PRId64 "\n",
@@ -9001,6 +9004,7 @@ static int run_experimental_kls_first_factor_case(int scale,
             stats.row_refactor_last_row_solve,
             stats.row_refactor_row_solve_run_count,
             stats.fast_block_restarts, stats.fast_kls_block_restarts,
+            stats.fast_kls_rebuild_restarts,
             stats.kls_first_last_row_uplooking_columns,
             stats.kls_first_row_uplooking_column_count,
             stats.kls_first_last_row_refactor_seeded_rows,

@@ -58,6 +58,8 @@ def read_jsonl(path_arg: str) -> Iterable[dict[str, object]]:
 def classify(row: dict[str, object]) -> str:
     if as_int(row, "fast_rejected_pivot", -1) < 0:
         return "no_reject"
+    if as_int(row, "fast_kls_rebuild_restarts", 0) > 0:
+        return "kls_rebuild_recovery"
     if as_int(row, "fast_block_restarts", 0) <= 0:
         return "no_block_repair"
     if as_int(row, "fast_tail_restarts", 0) > 0:
@@ -171,6 +173,9 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         ),
         "fast_repaired_tail_restart_exact_mask": as_int(
             row, "fast_repaired_tail_restart_exact_mask", 0
+        ),
+        "fast_kls_rebuild_restarts": as_int(
+            row, "fast_kls_rebuild_restarts", 0
         ),
         "fast_tail_restarts": as_int(row, "fast_tail_restarts", 0),
         "fast_rejected_etree_columns": as_int(row, "fast_rejected_etree_columns", 0),
@@ -322,6 +327,9 @@ def main() -> int:
     executed = [
         record for record in records if record["reason"] == "tail_restart_executed"
     ]
+    kls_rebuild_recovered = [
+        record for record in records if record["reason"] == "kls_rebuild_recovery"
+    ]
     rejected = [record for record in records if record["reason"] != "no_reject"]
     repaired = [
         record for record in rejected if float(record["fast_repaired_block_work"]) > 0.0
@@ -358,6 +366,9 @@ def main() -> int:
     ]
     repaired_block_work = sum(float(r["fast_repaired_block_work"]) for r in repaired)
     blocked_block_work = sum(float(r["fast_repaired_block_work"]) for r in blocked)
+    kls_rebuild_restarts = sum(
+        int(r["fast_kls_rebuild_restarts"]) for r in kls_rebuild_recovered
+    )
     row_tail = [
         record for record in rejected
         if int(record["fast_rejected_row_tail_columns"]) > 0
@@ -402,6 +413,8 @@ def main() -> int:
         "repaired_rows_with_block_work": len(repaired),
         "strict_ready_rows": len(ready),
         "tail_restart_executed_rows": len(executed),
+        "kls_rebuild_recovery_rows": len(kls_rebuild_recovered),
+        "kls_rebuild_restarts_total": kls_rebuild_restarts,
         "tail_restart_exact_mask_rows": len(executed_exact_mask),
         "reason_counts": dict(sorted(reason_counts.items())),
         "strict_ready_block_work_total": ready_block_work,
