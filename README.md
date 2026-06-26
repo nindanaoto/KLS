@@ -544,10 +544,22 @@ before running the group kernel; stats report
 the reverse group graph and reports `row_refactor_group_dependency_edges`,
 `row_refactor_group_root_count`, `row_refactor_group_leaf_count`, and
 `row_refactor_group_max_fanout`, which are the row-segment task-graph counters
-needed by future private/pipeline partitioning and tail-restart schedulers. The
-experimental row pipeline preserves the CKTSO-style wide cluster prefix selected
-by the `2 * threads` width rule, then consumes the remaining narrow tail through
-a bounded successor-ready queue when explicit predecessor counts are available.
+needed by future private/pipeline partitioning and tail-restart schedulers.
+The column EGraph refactor path also has an opt-in paper probe behind
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1`. It uses retained consecutive
+supernode-candidate ranges to solve a dependency run through a dense internal
+triangular panel and, only when the producer L columns share the same trailing
+row list, accumulates that trailing contribution in worker scratch before one
+scatter. Stats report `refactor_last_supernode_update_runs`,
+`refactor_last_supernode_update_rows`, `refactor_last_supernode_update_entries`,
+and cumulative `refactor_supernode_update_*` totals. This path is intentionally
+off by default: current focused runs show the paper semantics are present, but
+the panel is rebuilt per consumer, so the next CKTSO-scale gap is persistent
+producer-side supernode panel storage rather than enabling this probe broadly.
+The experimental row pipeline preserves the CKTSO-style wide cluster prefix
+selected by the `2 * threads` width rule, then consumes the remaining narrow
+tail through a bounded successor-ready queue when explicit predecessor counts
+are available.
 If that queue cannot be prepared, it falls back to the older barriered cluster
 levels plus queued tail. Stats report
 `row_refactor_last_ready_queue`, `row_refactor_ready_queue_run_count`, and

@@ -4172,3 +4172,29 @@ the saved 3.206 s KLS reference while still about 2.52x slower than the saved
 CKTSO reference on the same common rows. This confirms that the large CKTSO gap
 is not closed by stricter task readiness alone; the next algorithmic gap is
 still the numeric supernodal/panel update engine.
+
+KLS now has a first column-EGraph numeric supernode update probe behind
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1`. It reuses the retained consecutive
+supernode candidates, detects a contiguous dependency run, validates the dense
+internal L block, solves that dependency vector through a worker-local dense
+triangular panel, and only commits to the grouped path when the producer L
+columns also share one trailing row list so the update can be accumulated in a
+single worker-local vector before one scatter. Benchmark JSON reports
+`refactor_last_supernode_update_runs`, rows, entries, and cumulative
+`refactor_supernode_update_*` totals. This fills the direct SubtreeLU/CKTSO
+TRSV-plus-matrix-vector update semantics in the mapped EGraph refactor kernels,
+but it is still off by default because it rebuilds the dense/trailing panel for
+each consumer instead of publishing a persistent producer panel.
+
+The same-session six-row CKTSO-gap focus check makes that missing storage piece
+clear. Default KLS on the first six focus rows
+(`build/kls_default_same_focus6_t4_r3_timeout120.jsonl`) had an 8.24 s
+SPICE-cycle geomean. The common-trailing supernode update probe
+(`build/kls_egraph_supernode_updates_common_focus6_t4_r3_timeout120.jsonl`)
+completed the same rows but rose to 20.36 s. It did exercise real common
+trailing panels: `G2_circuit` reported 424,395 grouped updates, 5,541,687 rows,
+and 1.51e9 update entries; `ASIC_100ks` reported 160,646 updates and 3.06e8
+entries. The large gap therefore is not a missing task queue or lack of
+supernode detection anymore; it is the paper's production compact supernode
+storage/publish step, so KLS can build a producer panel once and let many
+consumers reuse it instead of reconstructing the panel at every dependency run.

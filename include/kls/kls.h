@@ -368,6 +368,12 @@ typedef struct kls_stats {
   int64_t refactor_last_supernode_pipeline_columns;
   int64_t refactor_supernode_pipeline_task_count;
   int64_t refactor_supernode_pipeline_column_count;
+  int64_t refactor_last_supernode_update_runs;
+  int64_t refactor_last_supernode_update_rows;
+  int64_t refactor_last_supernode_update_entries;
+  int64_t refactor_supernode_update_run_count;
+  int64_t refactor_supernode_update_rows;
+  int64_t refactor_supernode_update_entries;
   int64_t refactor_last_ready_queue_columns;
   int64_t refactor_ready_queue_run_count;
 } kls_stats;
