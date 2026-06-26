@@ -19622,6 +19622,12 @@ static int kls_compact_supernode_trsv_env_state(void) {
   return (value[0] == '0' && value[1] == '\0') ? -1 : 1;
 }
 
+static int kls_multi_producer_supernode_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 #ifdef KLS_HAVE_CBLAS
 static int kls_cblas_supernode_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_CBLAS_SUPERNODE");
@@ -24332,7 +24338,8 @@ static int kls_batch_group_try_ragged_supernode_update(
     x[row] = 0.0;
     const UF_long u_begin = solver->row_refactor_u_ptr[row];
     const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
-    double *row_u_workspace = u_workspace + u_offsets[batch_local];
+    double *row_u_workspace = total_u_entries > 0u
+      ? u_workspace + u_offsets[batch_local] : NULL;
     for (UF_long p = u_begin; p < u_end; ++p) {
       const UF_long offset = p - u_begin;
       const UF_long col = solver->row_refactor_u_cols[p];
@@ -24420,7 +24427,8 @@ static int kls_batch_group_try_ragged_supernode_update(
     udiag[row] = pivot;
     const UF_long u_begin = solver->row_refactor_u_ptr[row];
     const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
-    double *row_u_workspace = u_workspace + u_offsets[batch_local];
+    double *row_u_workspace = total_u_entries > 0u
+      ? u_workspace + u_offsets[batch_local] : NULL;
     for (UF_long p = u_begin; p < u_end; ++p) {
       const UF_long offset = p - u_begin;
       solver->row_refactor_u_row_values[p] = row_u_workspace[offset];
@@ -24454,6 +24462,709 @@ cleanup:
   free(dep_rows_by_row);
   free(u_offsets);
   free(pivots);
+  return status;
+}
+
+static int kls_independent_row_parse_dense_producer_runs(
+  const kls_solver *solver,
+  UF_long current_group,
+  UF_long row,
+  UF_long expected_run_count,
+  const UF_long *expected_groups,
+  UF_long *run_groups,
+  UF_long *run_l_offsets,
+  UF_long *run_suffixes,
+  UF_long *run_dep_rows,
+  UF_long *run_count_out,
+  UF_long *dep_rows_out) {
+  if (run_count_out != NULL) {
+    *run_count_out = 0;
+  }
+  if (dep_rows_out != NULL) {
+    *dep_rows_out = 0;
+  }
+  if (solver == NULL ||
+      row >= solver->n ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_l_cols == NULL ||
+      solver->row_refactor_row_group == NULL ||
+      solver->row_refactor_group_ptr == NULL ||
+      solver->row_refactor_group_kind == NULL ||
+      (expected_run_count > 0u && expected_groups == NULL)) {
+    return 0;
+  }
+
+  const UF_long l_begin = solver->row_refactor_l_ptr[row];
+  const UF_long l_end = solver->row_refactor_l_ptr[row + 1u];
+  if (l_begin >= l_end) {
+    return 0;
+  }
+
+  UF_long p = l_begin;
+  UF_long run_count = 0;
+  UF_long total_dep_rows = 0;
+  while (p < l_end) {
+    const UF_long dep0 = solver->row_refactor_l_cols[p];
+    if (dep0 >= row || dep0 >= solver->n) {
+      return 0;
+    }
+    const UF_long dep_group = solver->row_refactor_row_group[dep0];
+    if (dep_group >= solver->row_refactor_group_count ||
+        dep_group == current_group ||
+        solver->row_refactor_group_kind[dep_group] !=
+          KLS_ROW_REFACTOR_GROUP_DENSE) {
+      return 0;
+    }
+    if (expected_run_count > 0u) {
+      if (run_count >= expected_run_count ||
+          dep_group != expected_groups[run_count]) {
+        return 0;
+      }
+    }
+
+    const UF_long group_begin = solver->row_refactor_group_ptr[dep_group];
+    const UF_long group_end = solver->row_refactor_group_ptr[dep_group + 1u];
+    if (group_begin >= group_end ||
+        dep0 < group_begin ||
+        dep0 >= group_end ||
+        group_end > row) {
+      return 0;
+    }
+    const UF_long dep_width = group_end - group_begin;
+    if (kls_row_refactor_compact_panel_valid_prefix(solver, dep_group) <
+        dep_width) {
+      return 0;
+    }
+
+    UF_long run_end = p;
+    UF_long expected_dep = dep0;
+    while (run_end < l_end && expected_dep < group_end) {
+      const UF_long dep = solver->row_refactor_l_cols[run_end];
+      if (dep != expected_dep ||
+          dep >= row ||
+          solver->row_refactor_row_group[dep] != dep_group) {
+        return 0;
+      }
+      run_end++;
+      expected_dep++;
+    }
+    if (expected_dep != group_end || run_end <= p) {
+      return 0;
+    }
+    const UF_long dep_rows = run_end - p;
+    if (dep_rows < 2u) {
+      return 0;
+    }
+
+    if (run_groups != NULL) {
+      run_groups[run_count] = dep_group;
+    }
+    if (run_l_offsets != NULL) {
+      run_l_offsets[run_count] = p - l_begin;
+    }
+    if (run_suffixes != NULL) {
+      run_suffixes[run_count] = dep0 - group_begin;
+    }
+    if (run_dep_rows != NULL) {
+      run_dep_rows[run_count] = dep_rows;
+    }
+    if (total_dep_rows > UF_long_max - dep_rows) {
+      return 0;
+    }
+    total_dep_rows += dep_rows;
+    run_count++;
+    p = run_end;
+  }
+
+  if (expected_run_count > 0u && run_count != expected_run_count) {
+    return 0;
+  }
+  if (run_count_out != NULL) {
+    *run_count_out = run_count;
+  }
+  if (dep_rows_out != NULL) {
+    *dep_rows_out = total_dep_rows;
+  }
+  return run_count > 0u;
+}
+
+static int kls_independent_row_may_have_multi_dense_producer_runs(
+  const kls_solver *solver,
+  UF_long current_group,
+  UF_long row) {
+  if (solver == NULL ||
+      row >= solver->n ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_l_cols == NULL ||
+      solver->row_refactor_row_group == NULL ||
+      solver->row_refactor_group_ptr == NULL ||
+      solver->row_refactor_group_kind == NULL) {
+    return 0;
+  }
+  const UF_long l_begin = solver->row_refactor_l_ptr[row];
+  const UF_long l_end = solver->row_refactor_l_ptr[row + 1u];
+  if (l_begin >= l_end) {
+    return 0;
+  }
+
+  UF_long p = l_begin;
+  UF_long run_count = 0;
+  while (p < l_end && run_count < 2u) {
+    const UF_long dep0 = solver->row_refactor_l_cols[p];
+    if (dep0 >= row || dep0 >= solver->n) {
+      return 0;
+    }
+    const UF_long dep_group = solver->row_refactor_row_group[dep0];
+    if (dep_group >= solver->row_refactor_group_count ||
+        dep_group == current_group ||
+        solver->row_refactor_group_kind[dep_group] !=
+          KLS_ROW_REFACTOR_GROUP_DENSE) {
+      return 0;
+    }
+    const UF_long group_begin = solver->row_refactor_group_ptr[dep_group];
+    const UF_long group_end = solver->row_refactor_group_ptr[dep_group + 1u];
+    if (group_begin >= group_end ||
+        dep0 < group_begin ||
+        dep0 >= group_end ||
+        group_end > row) {
+      return 0;
+    }
+    const UF_long dep_width = group_end - group_begin;
+    if (kls_row_refactor_compact_panel_valid_prefix(solver, dep_group) <
+        dep_width) {
+      return 0;
+    }
+
+    UF_long run_end = p;
+    UF_long expected_dep = dep0;
+    while (run_end < l_end && expected_dep < group_end) {
+      const UF_long dep = solver->row_refactor_l_cols[run_end];
+      if (dep != expected_dep ||
+          dep >= row ||
+          solver->row_refactor_row_group[dep] != dep_group) {
+        return 0;
+      }
+      run_end++;
+      expected_dep++;
+    }
+    if (expected_dep != group_end || run_end - p < 2u) {
+      return 0;
+    }
+    run_count++;
+    p = run_end;
+  }
+  return run_count >= 2u;
+}
+
+static int kls_independent_row_try_multi_supernode_update(
+  kls_egraph_refactor_worker *worker,
+  UF_long group,
+  UF_long row_begin,
+  UF_long row_end,
+  UF_long batch_begin,
+  UF_long *batch_end_out) {
+  if (batch_end_out != NULL) {
+    *batch_end_out = batch_begin;
+  }
+  if (!kls_multi_producer_supernode_env_enabled()) {
+    return 0;
+  }
+  if (worker == NULL || worker->shared == NULL ||
+      worker->shared->check_pivots ||
+      batch_begin < row_begin ||
+      batch_begin >= row_end) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL ||
+      solver->symbolic == NULL ||
+      solver->symbolic->Q == NULL ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_l_cols == NULL ||
+      solver->row_refactor_l_row_values == NULL ||
+      solver->row_refactor_l_values == NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_cols == NULL ||
+      solver->row_refactor_u_row_values == NULL ||
+      solver->row_refactor_u_values == NULL ||
+      solver->row_refactor_input_ptr == NULL ||
+      solver->row_refactor_input_cols == NULL ||
+      solver->row_refactor_row_group == NULL ||
+      solver->row_refactor_group_ptr == NULL ||
+      solver->row_refactor_group_kind == NULL ||
+      solver->row_refactor_group_trailing_len == NULL ||
+      solver->numeric == NULL ||
+      solver->numeric->Udiag == NULL ||
+      worker->x == NULL) {
+    return 0;
+  }
+  if (!kls_independent_row_may_have_multi_dense_producer_runs(
+        solver, group, batch_begin)) {
+    return 0;
+  }
+
+  const UF_long first_l_begin = solver->row_refactor_l_ptr[batch_begin];
+  const UF_long first_l_end = solver->row_refactor_l_ptr[batch_begin + 1u];
+  if (first_l_begin >= first_l_end) {
+    return 0;
+  }
+  const UF_long first_l_len = first_l_end - first_l_begin;
+  if (first_l_len > (UF_long)(SIZE_MAX / sizeof(UF_long))) {
+    return 0;
+  }
+  UF_long *run_groups =
+    (UF_long *)malloc((size_t)first_l_len * sizeof(*run_groups));
+  UF_long *scratch_offsets =
+    (UF_long *)malloc((size_t)first_l_len * sizeof(*scratch_offsets));
+  UF_long *scratch_suffixes =
+    (UF_long *)malloc((size_t)first_l_len * sizeof(*scratch_suffixes));
+  UF_long *scratch_dep_rows =
+    (UF_long *)malloc((size_t)first_l_len * sizeof(*scratch_dep_rows));
+  if (run_groups == NULL || scratch_offsets == NULL ||
+      scratch_suffixes == NULL || scratch_dep_rows == NULL) {
+    free(run_groups);
+    free(scratch_offsets);
+    free(scratch_suffixes);
+    free(scratch_dep_rows);
+    return 0;
+  }
+
+  int status = 0;
+  UF_long run_count = 0;
+  UF_long first_dep_rows = 0;
+  if (!kls_independent_row_parse_dense_producer_runs(
+        solver, group, batch_begin, 0, NULL, run_groups, scratch_offsets,
+        scratch_suffixes, scratch_dep_rows, &run_count, &first_dep_rows) ||
+      run_count < 2u) {
+    goto cleanup_first;
+  }
+
+  double update_work = 0.0;
+  double copied_entries = 0.0;
+  double candidate_dep_rows_work = 0.0;
+  for (UF_long run_pos = 0; run_pos < run_count; ++run_pos) {
+    const UF_long dep_group = run_groups[run_pos];
+    const UF_long dep_rows = scratch_dep_rows[run_pos];
+    const UF_long dep_trailing_len =
+      solver->row_refactor_group_trailing_len[dep_group];
+    update_work +=
+      0.5 * (double)dep_rows * (double)(dep_rows - 1u) +
+      (double)dep_rows * (double)dep_trailing_len;
+    copied_entries += (double)dep_rows + (double)dep_trailing_len;
+  }
+  candidate_dep_rows_work += (double)first_dep_rows;
+
+  UF_long batch_end = batch_begin + 1u;
+  while (batch_end < row_end) {
+    UF_long row_run_count = 0;
+    UF_long row_dep_rows = 0;
+    if (!kls_independent_row_parse_dense_producer_runs(
+          solver, group, batch_end, run_count, run_groups, NULL,
+          scratch_offsets, scratch_suffixes, scratch_dep_rows,
+          &row_run_count, &row_dep_rows)) {
+      break;
+    }
+    for (UF_long run_pos = 0; run_pos < run_count; ++run_pos) {
+      const UF_long dep_group = run_groups[run_pos];
+      const UF_long dep_rows = scratch_dep_rows[run_pos];
+      const UF_long dep_trailing_len =
+        solver->row_refactor_group_trailing_len[dep_group];
+      update_work +=
+        0.5 * (double)dep_rows * (double)(dep_rows - 1u) +
+        (double)dep_rows * (double)dep_trailing_len;
+      copied_entries += (double)dep_rows + (double)dep_trailing_len;
+    }
+    candidate_dep_rows_work += (double)row_dep_rows;
+    batch_end++;
+  }
+  if (batch_end <= batch_begin + 1u) {
+    goto cleanup_first;
+  }
+
+  const UF_long batch_rows = batch_end - batch_begin;
+  const UF_long candidate_dep_rows =
+    kls_work_to_uflong(candidate_dep_rows_work);
+  if (candidate_dep_rows == 0u) {
+    goto cleanup_first;
+  }
+  if (update_work < KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK ||
+      update_work <
+        KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY *
+          copied_entries) {
+    kls_record_row_refactor_compact_supernode_batch_candidate(
+      solver, batch_rows, candidate_dep_rows, 1);
+    goto cleanup_first;
+  }
+  kls_record_row_refactor_compact_supernode_batch_candidate(
+    solver, batch_rows, candidate_dep_rows, 0);
+
+  if (batch_rows > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      run_count > (UF_long)(SIZE_MAX / sizeof(UF_long)) / batch_rows) {
+    goto cleanup_first;
+  }
+  const UF_long row_run_entries = batch_rows * run_count;
+  UF_long *row_dep_offsets =
+    (UF_long *)calloc((size_t)batch_rows + 1u, sizeof(*row_dep_offsets));
+  UF_long *row_run_offsets =
+    (UF_long *)malloc((size_t)row_run_entries * sizeof(*row_run_offsets));
+  UF_long *row_run_suffixes =
+    (UF_long *)malloc((size_t)row_run_entries * sizeof(*row_run_suffixes));
+  UF_long *row_run_dep_rows =
+    (UF_long *)malloc((size_t)row_run_entries * sizeof(*row_run_dep_rows));
+  UF_long *u_offsets =
+    (UF_long *)calloc((size_t)batch_rows + 1u, sizeof(*u_offsets));
+  double *pivots =
+    (double *)malloc((size_t)batch_rows * sizeof(*pivots));
+  if (row_dep_offsets == NULL || row_run_offsets == NULL ||
+      row_run_suffixes == NULL || row_run_dep_rows == NULL ||
+      u_offsets == NULL || pivots == NULL) {
+    free(row_dep_offsets);
+    free(row_run_offsets);
+    free(row_run_suffixes);
+    free(row_run_dep_rows);
+    free(u_offsets);
+    free(pivots);
+    goto cleanup_first;
+  }
+
+  double *u_workspace = NULL;
+  for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
+    const UF_long row = batch_begin + batch_local;
+    UF_long parsed_run_count = 0;
+    UF_long row_dep_rows = 0;
+    if (!kls_independent_row_parse_dense_producer_runs(
+          solver, group, row, run_count, run_groups, NULL,
+          row_run_offsets + batch_local * run_count,
+          row_run_suffixes + batch_local * run_count,
+          row_run_dep_rows + batch_local * run_count,
+          &parsed_run_count, &row_dep_rows)) {
+      goto cleanup_rows;
+    }
+    row_dep_offsets[batch_local + 1u] =
+      row_dep_offsets[batch_local] + row_dep_rows;
+    const UF_long u_len =
+      solver->row_refactor_u_ptr[row + 1u] -
+      solver->row_refactor_u_ptr[row];
+    if (u_offsets[batch_local] > UF_long_max - u_len) {
+      goto cleanup_rows;
+    }
+    u_offsets[batch_local + 1u] = u_offsets[batch_local] + u_len;
+  }
+  const UF_long total_dep_rows = row_dep_offsets[batch_rows];
+  const UF_long total_u_entries = u_offsets[batch_rows];
+  const UF_long max_workspace_entries =
+    (UF_long)(SIZE_MAX / sizeof(*worker->supernode_workspace));
+  if (total_dep_rows == 0u ||
+      total_dep_rows > max_workspace_entries ||
+      total_u_entries > (UF_long)(SIZE_MAX / sizeof(double))) {
+    goto cleanup_rows;
+  }
+
+  double *multipliers =
+    kls_egraph_worker_supernode_workspace(worker, total_dep_rows);
+  if (multipliers == NULL) {
+    goto cleanup_rows;
+  }
+  u_workspace = total_u_entries > 0u
+    ? (double *)malloc((size_t)total_u_entries * sizeof(*u_workspace))
+    : NULL;
+  if (total_u_entries > 0u && u_workspace == NULL) {
+    goto cleanup_rows;
+  }
+
+  typedef struct {
+    UF_long begin;
+    UF_long width;
+    UF_long trailing_len;
+    const UF_long *trailing_cols;
+    double *dense_panel;
+    double *trailing_panel;
+  } kls_independent_run_panel;
+  kls_independent_run_panel *panels =
+    (kls_independent_run_panel *)calloc((size_t)run_count, sizeof(*panels));
+  if (panels == NULL) {
+    goto cleanup_rows;
+  }
+  for (UF_long run_pos = 0; run_pos < run_count; ++run_pos) {
+    const UF_long dep_group = run_groups[run_pos];
+    const UF_long group_begin = solver->row_refactor_group_ptr[dep_group];
+    const UF_long group_end = solver->row_refactor_group_ptr[dep_group + 1u];
+    if (group_begin >= group_end) {
+      free(panels);
+      goto cleanup_rows;
+    }
+    const UF_long dep_width = group_end - group_begin;
+    const UF_long dep_trailing_len =
+      solver->row_refactor_group_trailing_len[dep_group];
+    UF_long dense_entries = 0;
+    if (dep_width > (UF_long)(SIZE_MAX / sizeof(double)) / dep_width) {
+      kls_egraph_refactor_record_invalid(shared);
+      status = -1;
+      free(panels);
+      goto cleanup_rows;
+    }
+    dense_entries = dep_width * dep_width;
+    if (dep_trailing_len > 0u &&
+        dep_width > ((UF_long)(SIZE_MAX / sizeof(double)) -
+                       dense_entries) / dep_trailing_len) {
+      kls_egraph_refactor_record_invalid(shared);
+      status = -1;
+      free(panels);
+      goto cleanup_rows;
+    }
+    const UF_long panel_entries =
+      dense_entries + dep_width * dep_trailing_len;
+    double *dense_panel =
+      kls_row_refactor_compact_group_panel(solver, dep_group,
+                                           panel_entries);
+    if (dense_panel == NULL) {
+      free(panels);
+      goto cleanup_rows;
+    }
+    const UF_long *trailing_cols = NULL;
+    if (!kls_row_refactor_group_trailing_slice(
+          solver, dep_group, group_end, NULL, NULL, &trailing_cols)) {
+      kls_egraph_refactor_record_invalid(shared);
+      status = -1;
+      free(panels);
+      goto cleanup_rows;
+    }
+    if (dep_trailing_len > 0u && trailing_cols == NULL) {
+      kls_egraph_refactor_record_invalid(shared);
+      status = -1;
+      free(panels);
+      goto cleanup_rows;
+    }
+    panels[run_pos].begin = group_begin;
+    panels[run_pos].width = dep_width;
+    panels[run_pos].trailing_len = dep_trailing_len;
+    panels[run_pos].trailing_cols = trailing_cols;
+    panels[run_pos].dense_panel = dense_panel;
+    panels[run_pos].trailing_panel =
+      dep_trailing_len > 0u ? dense_panel + dense_entries : NULL;
+  }
+
+  for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
+    const UF_long row = batch_begin + batch_local;
+    const UF_long l_begin = solver->row_refactor_l_ptr[row];
+    const UF_long l_len =
+      solver->row_refactor_l_ptr[row + 1u] - l_begin;
+    for (UF_long run_pos = 0; run_pos < run_count; ++run_pos) {
+      const kls_independent_run_panel *panel = panels + run_pos;
+      const UF_long run_offset =
+        row_run_offsets[batch_local * run_count + run_pos];
+      const UF_long run_dep_rows =
+        row_run_dep_rows[batch_local * run_count + run_pos];
+      const UF_long run_end = run_offset + run_dep_rows;
+      for (UF_long dep_col_pos = 0; dep_col_pos < panel->trailing_len;
+           ++dep_col_pos) {
+        const UF_long col = panel->trailing_cols[dep_col_pos];
+        UF_long dep_pos = KLS_KLU_EMPTY;
+        if (kls_find_uflong_sorted(solver->row_refactor_l_cols + l_begin,
+                                   l_len, col, &dep_pos) &&
+            dep_pos < run_end) {
+          free(panels);
+          goto cleanup_rows;
+        }
+      }
+    }
+  }
+
+  memset(multipliers, 0, (size_t)total_dep_rows * sizeof(*multipliers));
+  double *x = worker->x;
+  double *udiag = (double *)solver->numeric->Udiag;
+  for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
+    const UF_long row = batch_begin + batch_local;
+    if (!kls_parallel_row_refactor_load_input_row(shared, x, row)) {
+      status = -1;
+      free(panels);
+      goto cleanup_rows;
+    }
+    const UF_long l_begin = solver->row_refactor_l_ptr[row];
+    const UF_long l_end = solver->row_refactor_l_ptr[row + 1u];
+    double *row_multipliers = multipliers + row_dep_offsets[batch_local];
+    for (UF_long p = l_begin; p < l_end; ++p) {
+      const UF_long dep_pos = p - l_begin;
+      const UF_long dep = solver->row_refactor_l_cols[p];
+      row_multipliers[dep_pos] = x[dep];
+      x[dep] = 0.0;
+      solver->row_refactor_l_row_values[p] = 0.0;
+    }
+    pivots[batch_local] = x[row];
+    x[row] = 0.0;
+    const UF_long u_begin = solver->row_refactor_u_ptr[row];
+    const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
+    double *row_u_workspace = total_u_entries > 0u
+      ? u_workspace + u_offsets[batch_local] : NULL;
+    for (UF_long p = u_begin; p < u_end; ++p) {
+      const UF_long offset = p - u_begin;
+      const UF_long col = solver->row_refactor_u_cols[p];
+      row_u_workspace[offset] = x[col];
+      x[col] = 0.0;
+    }
+    kls_clear_row_refactor_input_residuals(solver, x, row);
+  }
+
+  double trsv_work = 0.0;
+  double gemv_work = 0.0;
+  for (UF_long run_pos = 0; run_pos < run_count; ++run_pos) {
+    kls_independent_run_panel *panel = panels + run_pos;
+    for (UF_long local_dep = 0; local_dep < panel->width; ++local_dep) {
+      panel->dense_panel[local_dep * panel->width + local_dep] =
+        udiag[panel->begin + local_dep];
+    }
+
+    for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
+      const UF_long row = batch_begin + batch_local;
+      const UF_long l_begin = solver->row_refactor_l_ptr[row];
+      const UF_long run_offset =
+        row_run_offsets[batch_local * run_count + run_pos];
+      const UF_long suffix_begin =
+        row_run_suffixes[batch_local * run_count + run_pos];
+      const UF_long run_dep_rows =
+        row_run_dep_rows[batch_local * run_count + run_pos];
+      double *row_multipliers =
+        multipliers + row_dep_offsets[batch_local] + run_offset;
+      for (UF_long local = 0; local < run_dep_rows; ++local) {
+        const UF_long local_dep = suffix_begin + local;
+        const UF_long dep = panel->begin + local_dep;
+        const double candidate = row_multipliers[local];
+        const double lij = candidate / udiag[dep];
+        row_multipliers[local] = lij;
+        const double *dep_dense_panel =
+          panel->dense_panel + local_dep * panel->width;
+        for (UF_long target = local + 1u; target < run_dep_rows; ++target) {
+          row_multipliers[target] -=
+            lij * dep_dense_panel[suffix_begin + target];
+        }
+        const UF_long p = l_begin + run_offset + local;
+        solver->row_refactor_l_row_values[p] = lij;
+        if (!shared->row_refactor_defer_value_scatter) {
+          *solver->row_refactor_l_values[p] = lij;
+        }
+        trsv_work += (double)(run_dep_rows - local - 1u);
+      }
+    }
+
+    if (panel->trailing_len == 0u) {
+      continue;
+    }
+    for (UF_long dep_col_pos = 0; dep_col_pos < panel->trailing_len;
+         ++dep_col_pos) {
+      const UF_long col = panel->trailing_cols[dep_col_pos];
+      for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
+        const UF_long row = batch_begin + batch_local;
+        const UF_long l_begin = solver->row_refactor_l_ptr[row];
+        const UF_long l_len =
+          solver->row_refactor_l_ptr[row + 1u] - l_begin;
+        const UF_long run_offset =
+          row_run_offsets[batch_local * run_count + run_pos];
+        const UF_long suffix_begin =
+          row_run_suffixes[batch_local * run_count + run_pos];
+        const UF_long run_dep_rows =
+          row_run_dep_rows[batch_local * run_count + run_pos];
+        const double *row_multipliers =
+          multipliers + row_dep_offsets[batch_local] + run_offset;
+        double update = 0.0;
+        for (UF_long local = 0; local < run_dep_rows; ++local) {
+          update += row_multipliers[local] *
+            panel->trailing_panel[(suffix_begin + local) *
+                                  panel->trailing_len + dep_col_pos];
+        }
+        if (update == 0.0) {
+          continue;
+        }
+        UF_long dep_pos = KLS_KLU_EMPTY;
+        if (kls_find_uflong_sorted(solver->row_refactor_l_cols + l_begin,
+                                   l_len, col, &dep_pos)) {
+          multipliers[row_dep_offsets[batch_local] + dep_pos] -= update;
+          continue;
+        }
+        if (col == row) {
+          pivots[batch_local] -= update;
+          continue;
+        }
+        const UF_long u_begin = solver->row_refactor_u_ptr[row];
+        const UF_long u_len =
+          solver->row_refactor_u_ptr[row + 1u] - u_begin;
+        UF_long u_pos = KLS_KLU_EMPTY;
+        if (kls_find_uflong_sorted(solver->row_refactor_u_cols + u_begin,
+                                   u_len, col, &u_pos) &&
+            u_pos < u_len) {
+          u_workspace[u_offsets[batch_local] + u_pos] -= update;
+        }
+      }
+    }
+    for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
+      gemv_work +=
+        (double)row_run_dep_rows[batch_local * run_count + run_pos] *
+        (double)panel->trailing_len;
+    }
+  }
+
+  for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
+    const UF_long row = batch_begin + batch_local;
+    const double pivot = pivots[batch_local];
+    if (pivot == 0.0) {
+      kls_egraph_refactor_record_singular(shared, row,
+                                          solver->symbolic->Q[row]);
+      if (solver->common.halt_if_singular) {
+        status = -1;
+        free(panels);
+        goto cleanup_rows;
+      }
+    }
+    udiag[row] = pivot;
+    const UF_long u_begin = solver->row_refactor_u_ptr[row];
+    const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
+    double *row_u_workspace = total_u_entries > 0u
+      ? u_workspace + u_offsets[batch_local] : NULL;
+    for (UF_long p = u_begin; p < u_end; ++p) {
+      const UF_long offset = p - u_begin;
+      solver->row_refactor_u_row_values[p] = row_u_workspace[offset];
+      if (!shared->row_refactor_defer_value_scatter) {
+        *solver->row_refactor_u_values[p] = row_u_workspace[offset];
+      }
+    }
+    kls_row_refactor_mark_row_done(worker, row);
+  }
+
+  const UF_long trsv_entries = kls_work_to_uflong(trsv_work);
+  const UF_long gemv_entries = kls_work_to_uflong(gemv_work);
+  const UF_long total_entries =
+    trsv_entries > UF_long_max - gemv_entries
+      ? UF_long_max : trsv_entries + gemv_entries;
+  kls_record_row_refactor_compact_supernode_batch(
+    solver, batch_rows, candidate_dep_rows, total_entries);
+  kls_record_row_refactor_compact_supernode_update(
+    solver, candidate_dep_rows, total_entries);
+  kls_record_row_refactor_compact_supernode_trsv(
+    solver, candidate_dep_rows, trsv_entries);
+  if (gemv_entries > 0u) {
+    kls_record_row_refactor_compact_supernode_gemv(
+      solver, candidate_dep_rows, gemv_entries);
+  }
+  status = 1;
+  if (batch_end_out != NULL) {
+    *batch_end_out = batch_end;
+  }
+  free(panels);
+
+cleanup_rows:
+  free(u_workspace);
+  free(row_dep_offsets);
+  free(row_run_offsets);
+  free(row_run_suffixes);
+  free(row_run_dep_rows);
+  free(u_offsets);
+  free(pivots);
+
+cleanup_first:
+  free(run_groups);
+  free(scratch_offsets);
+  free(scratch_suffixes);
+  free(scratch_dep_rows);
   return status;
 }
 
@@ -24569,6 +25280,17 @@ static int kls_parallel_row_refactor_process_group(
   if (group_kind == KLS_ROW_REFACTOR_GROUP_BATCH) {
     UF_long row = row_begin;
     while (row < row_end) {
+      UF_long multi_end = row;
+      const int multi_status =
+        kls_independent_row_try_multi_supernode_update(
+          worker, group, row_begin, row_end, row, &multi_end);
+      if (multi_status < 0) {
+        return 0;
+      }
+      if (multi_status > 0 && multi_end > row) {
+        row = multi_end;
+        continue;
+      }
       UF_long ragged_dep_group = KLS_KLU_EMPTY;
       double ragged_work = 0.0;
       double ragged_copied_entries = 0.0;
