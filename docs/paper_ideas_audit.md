@@ -3981,3 +3981,11 @@ first-factor cases. This still is not CKTSO's fully row-major primary numeric
 object, because BTF off-diagonal refresh and fallback coherence still require
 the retained column-oriented refactor map, but it removes the previous
 pack-then-reconstruct step for KLS-first row-refactor mirrors.
+
+The pivot-repair path now attempts the retained non-contiguous CKTSO-style
+ETree tail mask even when the pivoting tail reaches the end of the BTF block.
+Columns outside the unfinished ETree closure are preserved only when the
+existing structural dependency proof can lock their old pivots; otherwise KLS
+falls back to the full suffix restart. This fills a direct semantic gap in the
+current tail executor without pretending to implement CKTSO's full parallel
+pipelined tail factorization.

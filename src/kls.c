@@ -13124,6 +13124,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
   const double tol = solver->common.tol;
   const double memgrow = solver->common.memgrow;
   const int preserve_suffix = restart_end < nk;
+  const int use_restart_mask = restart_tail_mask != NULL;
   const int use_mapped_tail =
     kls_tail_mapped_block_is_valid(solver, k1, nk, psinv);
   UF_long mapped_columns = 0;
@@ -13132,8 +13133,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
   for (UF_long kk = local_reject; kk < restart_end; ++kk) {
     const Int k = (Int)kk;
     const int lock_gap_pivot =
-      preserve_suffix && restart_tail_mask != NULL &&
-      !restart_tail_mask[kk];
+      use_restart_mask && !restart_tail_mask[kk];
     if (lock_gap_pivot && pblock[kk] != old_pblock[kk]) {
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
@@ -13458,7 +13458,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL;
   solver->stats.fast_repaired_tail_restart_ready =
     serial_tail_state &&
-    (local_reject > 0u || repaired_tail_end < nk) &&
+    (local_reject > 0u || repaired_tail_end < nk || skipped_columns > 0u) &&
     prefix_changed == 0u &&
     (first_changed == KLS_KLU_EMPTY || first_changed >= rejected_pivot) &&
     suffix_changed > 0u &&
@@ -13631,8 +13631,15 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       kls_prepare_root_pivot_tail_independent_refresh(
         solver, numeric_values, block, k1, nk, local_reject);
   }
+  const int can_try_masked_tail =
+    solver->stats.fast_rejected_pivoting_tail_columns > 0 &&
+    solver->stats.fast_rejected_pivoting_tail_contains_reject &&
+    solver->stats.fast_rejected_pivoting_tail_topological &&
+    solver->stats.fast_rejected_pivoting_tail_first ==
+      (int64_t)(k1 + local_reject) &&
+    !solver->stats.fast_rejected_pivoting_tail_suffix_exact;
   int kls_block_restart_used = 0;
-  if (preferred_restart_end < nk) {
+  if (preferred_restart_end < nk || can_try_masked_tail) {
     unsigned char *tail_mask = NULL;
     UF_long *saved_ptrs = NULL;
     Entry *saved_udiag = NULL;
@@ -13708,7 +13715,8 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   }
   const int tail_restart_used =
     kls_block_restart_used &&
-    (local_reject > 0u || repaired_tail_end < nk);
+    (local_reject > 0u || repaired_tail_end < nk ||
+     repaired_tail_skipped_columns > 0u);
   if (!kls_block_restart_used) {
     solver->common.status = TRILINOS_KLU_OK;
     solver->common.numerical_rank = KLS_KLU_EMPTY;
@@ -28312,6 +28320,44 @@ fail:
   return 0;
 }
 
+static int kls_first_rebuild_quality_accepts(
+  kls_solver *solver,
+  const trilinos_klu_l_numeric *saved_numeric,
+  const trilinos_klu_l_common *saved_common) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || saved_numeric == NULL ||
+      saved_common == NULL) {
+    return 0;
+  }
+
+  trilinos_klu_l_common saved_eval = *saved_common;
+  (void)trilinos_klu_l_flops(solver->symbolic,
+                             (trilinos_klu_l_numeric *)saved_numeric,
+                             &saved_eval);
+  (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric,
+                             &solver->common);
+
+  const double saved_fill =
+    (double)saved_numeric->lnz + (double)saved_numeric->unz;
+  const double rebuilt_fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  if (saved_fill > 0.0 && rebuilt_fill > 1.01 * saved_fill) {
+    return 0;
+  }
+
+  const double saved_flops = saved_eval.flops;
+  const double rebuilt_flops = solver->common.flops;
+  if (saved_flops > 0.0 && rebuilt_flops > 1.02 * saved_flops) {
+    return 0;
+  }
+
+  if (solver->common.noffdiag > saved_eval.noffdiag &&
+      solver->common.noffdiag > 16u) {
+    return 0;
+  }
+  return 1;
+}
+
 static int kls_try_rebuild_current_numeric_with_kls_first(
   kls_solver *solver,
   double *numeric_values,
@@ -28323,6 +28369,15 @@ static int kls_try_rebuild_current_numeric_with_kls_first(
 
   trilinos_klu_l_numeric *saved_numeric = solver->numeric;
   trilinos_klu_l_common saved_common = solver->common;
+  UF_long *saved_q = NULL;
+  if (solver->symbolic->Q != NULL && solver->n > 0u) {
+    saved_q = (UF_long *)malloc((size_t)solver->n * sizeof(*saved_q));
+    if (saved_q == NULL) {
+      return 0;
+    }
+    memcpy(saved_q, solver->symbolic->Q,
+           (size_t)solver->n * sizeof(*saved_q));
+  }
   free_refactor_map(solver);
   free_refactor_schedule(solver);
   free_refactor_lu_pointer_cache(solver);
@@ -28342,14 +28397,27 @@ static int kls_try_rebuild_current_numeric_with_kls_first(
     *elapsed += kls_now_seconds() - start;
   }
 
-  if (rebuilt && solver->numeric != NULL && solver->common.status >= 0) {
+  if (rebuilt && solver->numeric != NULL && solver->common.status >= 0 &&
+      kls_first_rebuild_quality_accepts(solver, saved_numeric,
+                                        &saved_common)) {
     trilinos_klu_l_free_numeric(&saved_numeric, &saved_common);
+    free(saved_q);
     return 1;
   }
 
   if (solver->numeric != NULL) {
     trilinos_klu_l_free_numeric(&solver->numeric, &solver->common);
   }
+  free_refactor_map(solver);
+  free_refactor_schedule(solver);
+  free_refactor_lu_pointer_cache(solver);
+  free_fast_reject_tail_plan(solver);
+  free_row_refactor_pattern(solver);
+  if (saved_q != NULL && solver->symbolic->Q != NULL) {
+    memcpy(solver->symbolic->Q, saved_q,
+           (size_t)solver->n * sizeof(*saved_q));
+  }
+  free(saved_q);
   solver->numeric = saved_numeric;
   solver->common = saved_common;
   return 0;
@@ -28463,20 +28531,24 @@ int kls_factor(kls_solver *solver, const double *values) {
   kls_update_numeric_diagnostics(solver, 1);
   int diagnostics_have_flops = 1;
   int diagnostics_have_rcond = 1;
+  int promoted_numeric = 0;
   if (maybe_select_auto_row_match(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
+    promoted_numeric = 1;
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
   if (maybe_select_auto_scale(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
+    promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
   }
 #ifdef KLS_HAVE_METIS
   if (maybe_promote_auto_metis(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
+    promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
   }
@@ -28488,6 +28560,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   if (maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
+    promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
@@ -28495,11 +28568,22 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
                                              numeric_values)) {
     kls_first_factor_used = 0;
+    promoted_numeric = 1;
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
 #endif
+  if (promoted_numeric && !kls_first_factor_used &&
+      kls_should_try_first_factor(solver)) {
+    if (kls_try_rebuild_current_numeric_with_kls_first(solver, numeric_values,
+                                                       &elapsed)) {
+      kls_first_factor_used = 1;
+      kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FIRST);
+      diagnostics_have_flops = 0;
+      diagnostics_have_rcond = 0;
+    }
+  }
   if (!diagnostics_have_flops || !diagnostics_have_rcond) {
     kls_update_numeric_diagnostics(solver, 1);
   }
