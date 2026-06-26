@@ -4000,3 +4000,14 @@ reports the last-run and cumulative direct compact-input row counts. This is a
 small but direct move toward the SubtreeLU/CKTSO row/segment numeric-storage
 model: dense panel values live in the row-segment panel for the numeric pass
 instead of being staged through a KLU-shaped sparse accumulator first.
+
+The same direct-input idea now covers native dense row segments that do not use
+the retained compact-panel path. For dense groups below the compact arithmetic
+intensity gate, KLS writes current in-group lower, diagonal, upper, and shared
+trailing input values directly into the row-segment `L`/`U` mirrors and keeps
+the sparse work vector for external dependencies and their update deltas. A
+46-by-46 dense smoke fixture is deliberately large enough to form a dense
+segment and deliberately below the compact-panel gate; it now requires native
+dense direct-input rows and zero compact-panel executions. This removes another
+KLU-shaped staging step from the default row-segment kernel while preserving
+the conservative compact-panel gate.
