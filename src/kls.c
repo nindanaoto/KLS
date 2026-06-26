@@ -595,6 +595,10 @@ typedef struct kls_egraph_refactor_worker {
   UF_long segment_panel_size;
   double *supernode_workspace;
   UF_long supernode_workspace_size;
+  UF_long *index_workspace;
+  UF_long index_workspace_size;
+  unsigned char *byte_workspace;
+  UF_long byte_workspace_size;
 } kls_egraph_refactor_worker;
 
 struct kls_egraph_refactor_pool {
@@ -21412,6 +21416,8 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   }
   free(worker.segment_panel);
   free(worker.supernode_workspace);
+  free(worker.index_workspace);
+  free(worker.byte_workspace);
 
   if (!groups_ok || shared.invalid || shared.pivot_rejected ||
       (shared.singular && common->halt_if_singular)) {
@@ -21804,6 +21810,59 @@ static double *kls_egraph_worker_supernode_workspace(
   }
   worker->supernode_workspace = workspace;
   worker->supernode_workspace_size = entry_count;
+  return workspace;
+}
+
+static UF_long *kls_egraph_worker_index_workspace(
+  kls_egraph_refactor_worker *worker,
+  UF_long entry_count) {
+  if (entry_count == 0u) {
+    return NULL;
+  }
+  if (worker == NULL ||
+      entry_count > (UF_long)(SIZE_MAX / sizeof(*worker->index_workspace))) {
+    return NULL;
+  }
+  if (worker->index_workspace != NULL &&
+      worker->index_workspace_size >= entry_count) {
+    return worker->index_workspace;
+  }
+
+  UF_long *workspace =
+    (UF_long *)realloc(worker->index_workspace,
+                       (size_t)entry_count * sizeof(*workspace));
+  if (workspace == NULL) {
+    return NULL;
+  }
+  worker->index_workspace = workspace;
+  worker->index_workspace_size = entry_count;
+  return workspace;
+}
+
+static unsigned char *kls_egraph_worker_byte_workspace(
+  kls_egraph_refactor_worker *worker,
+  UF_long entry_count) {
+  if (entry_count == 0u) {
+    return NULL;
+  }
+  if (worker == NULL ||
+      (uintmax_t)entry_count >
+        (uintmax_t)SIZE_MAX / sizeof(*worker->byte_workspace)) {
+    return NULL;
+  }
+  if (worker->byte_workspace != NULL &&
+      worker->byte_workspace_size >= entry_count) {
+    return worker->byte_workspace;
+  }
+
+  unsigned char *workspace =
+    (unsigned char *)realloc(worker->byte_workspace,
+                             (size_t)entry_count * sizeof(*workspace));
+  if (workspace == NULL) {
+    return NULL;
+  }
+  worker->byte_workspace = workspace;
+  worker->byte_workspace_size = entry_count;
   return workspace;
 }
 
@@ -24359,22 +24418,19 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
   if (first_external_len > (UF_long)(SIZE_MAX / sizeof(UF_long))) {
     return 0;
   }
-  UF_long *run_groups =
-    (UF_long *)malloc((size_t)first_external_len * sizeof(*run_groups));
-  UF_long *scratch_offsets =
-    (UF_long *)malloc((size_t)first_external_len * sizeof(*scratch_offsets));
-  UF_long *scratch_suffixes =
-    (UF_long *)malloc((size_t)first_external_len * sizeof(*scratch_suffixes));
-  UF_long *scratch_dep_rows =
-    (UF_long *)malloc((size_t)first_external_len * sizeof(*scratch_dep_rows));
-  if (run_groups == NULL || scratch_offsets == NULL ||
-      scratch_suffixes == NULL || scratch_dep_rows == NULL) {
-    free(run_groups);
-    free(scratch_offsets);
-    free(scratch_suffixes);
-    free(scratch_dep_rows);
+  if (first_external_len > UF_long_max / 4u) {
     return 0;
   }
+  const UF_long first_index_entries = first_external_len * 4u;
+  UF_long *index_workspace =
+    kls_egraph_worker_index_workspace(worker, first_index_entries);
+  if (index_workspace == NULL) {
+    return 0;
+  }
+  UF_long *run_groups = index_workspace;
+  UF_long *scratch_offsets = run_groups + first_external_len;
+  UF_long *scratch_suffixes = scratch_offsets + first_external_len;
+  UF_long *scratch_dep_rows = scratch_suffixes + first_external_len;
 
   int status = 0;
   kls_dense_fragmented_run_panel *panels = NULL;
@@ -24460,25 +24516,47 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
     goto cleanup_first;
   }
   const UF_long row_run_entries = batch_rows * run_count;
-  UF_long *row_external_offsets =
-    (UF_long *)calloc((size_t)batch_rows + 1u, sizeof(*row_external_offsets));
-  UF_long *row_run_offsets =
-    (UF_long *)malloc((size_t)row_run_entries * sizeof(*row_run_offsets));
-  UF_long *row_run_suffixes =
-    (UF_long *)malloc((size_t)row_run_entries * sizeof(*row_run_suffixes));
-  UF_long *row_run_dep_rows =
-    (UF_long *)malloc((size_t)row_run_entries * sizeof(*row_run_dep_rows));
-  double *pivots = (double *)malloc((size_t)batch_rows * sizeof(*pivots));
-  if (row_external_offsets == NULL || row_run_offsets == NULL ||
-      row_run_suffixes == NULL || row_run_dep_rows == NULL ||
-      pivots == NULL) {
-    free(row_external_offsets);
-    free(row_run_offsets);
-    free(row_run_suffixes);
-    free(row_run_dep_rows);
-    free(pivots);
+  if (batch_rows == UF_long_max) {
     goto cleanup_first;
   }
+  const UF_long row_external_entries = batch_rows + 1u;
+  UF_long target_entry_count = 0;
+  if (max_run_trailing_len > 0u) {
+    if (batch_rows > UF_long_max / max_run_trailing_len) {
+      goto cleanup_first;
+    }
+    target_entry_count = batch_rows * max_run_trailing_len;
+  }
+  UF_long index_entries = first_index_entries;
+  if (index_entries > UF_long_max - row_external_entries) {
+    goto cleanup_first;
+  }
+  index_entries += row_external_entries;
+  if (row_run_entries > (UF_long_max - index_entries) / 3u) {
+    goto cleanup_first;
+  }
+  index_entries += 3u * row_run_entries;
+  if (index_entries > UF_long_max - target_entry_count) {
+    goto cleanup_first;
+  }
+  index_entries += target_entry_count;
+  index_workspace =
+    kls_egraph_worker_index_workspace(worker, index_entries);
+  if (index_workspace == NULL) {
+    goto cleanup_first;
+  }
+  run_groups = index_workspace;
+  scratch_offsets = run_groups + first_external_len;
+  scratch_suffixes = scratch_offsets + first_external_len;
+  scratch_dep_rows = scratch_suffixes + first_external_len;
+  UF_long *row_external_offsets = scratch_dep_rows + first_external_len;
+  UF_long *row_run_offsets = row_external_offsets + row_external_entries;
+  UF_long *row_run_suffixes = row_run_offsets + row_run_entries;
+  UF_long *row_run_dep_rows = row_run_suffixes + row_run_entries;
+  target_positions = target_entry_count > 0u
+    ? row_run_dep_rows + row_run_entries : NULL;
+  memset(row_external_offsets, 0,
+         (size_t)row_external_entries * sizeof(*row_external_offsets));
 
   for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
     const UF_long row = batch_begin + batch_local;
@@ -24505,14 +24583,15 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
   const UF_long total_external_entries = row_external_offsets[batch_rows];
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(*worker->supernode_workspace));
-  if (total_external_entries == 0u ||
-      total_external_entries > max_workspace_entries) {
+  if (total_external_entries == 0u || batch_rows > max_workspace_entries ||
+      total_external_entries > max_workspace_entries - batch_rows) {
     goto cleanup_rows;
   }
+  const UF_long pivot_entries = batch_rows;
   UF_long update_entries = 0;
   if (max_run_trailing_len > 0u) {
     if (batch_rows >
-        (max_workspace_entries - total_external_entries) /
+        (max_workspace_entries - pivot_entries - total_external_entries) /
           max_run_trailing_len) {
       goto cleanup_rows;
     }
@@ -24520,14 +24599,16 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
   }
   double *workspace =
     kls_egraph_worker_supernode_workspace(worker,
-                                          total_external_entries +
+                                          pivot_entries +
+                                            total_external_entries +
                                             update_entries);
   if (workspace == NULL) {
     goto cleanup_rows;
   }
-  double *multipliers = workspace;
+  double *pivots = workspace;
+  double *multipliers = pivots + pivot_entries;
   double *updates = update_entries > 0u
-    ? workspace + total_external_entries : NULL;
+    ? multipliers + total_external_entries : NULL;
 
   panels = (kls_dense_fragmented_run_panel *)calloc((size_t)run_count,
                                                     sizeof(*panels));
@@ -24586,21 +24667,9 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
       dep_trailing_len > 0u ? dep_dense_panel + dep_dense_entries : NULL;
   }
 
-  const UF_long target_entry_count = max_run_trailing_len > 0u
-    ? batch_rows * max_run_trailing_len : 0u;
   if (target_entry_count > 0u) {
-    if ((uintmax_t)target_entry_count >
-          (uintmax_t)SIZE_MAX / sizeof(*target_kinds) ||
-        (uintmax_t)target_entry_count >
-          (uintmax_t)SIZE_MAX / sizeof(*target_positions)) {
-      goto cleanup_rows;
-    }
     target_kinds =
-      (unsigned char *)malloc((size_t)target_entry_count *
-                              sizeof(*target_kinds));
-    target_positions =
-      (UF_long *)malloc((size_t)target_entry_count *
-                        sizeof(*target_positions));
+      kls_egraph_worker_byte_workspace(worker, target_entry_count);
     if (target_kinds == NULL || target_positions == NULL) {
       goto cleanup_rows;
     }
@@ -25005,20 +25074,9 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
   }
 
 cleanup_rows:
-  free(target_kinds);
-  free(target_positions);
   free(panels);
-  free(row_external_offsets);
-  free(row_run_offsets);
-  free(row_run_suffixes);
-  free(row_run_dep_rows);
-  free(pivots);
 
 cleanup_first:
-  free(run_groups);
-  free(scratch_offsets);
-  free(scratch_suffixes);
-  free(scratch_dep_rows);
   return status;
 }
 
@@ -27764,6 +27822,8 @@ static void kls_row_refactor_refresh_missing_prefix(
   memset(x, 0, (size_t)solver->n * sizeof(*x));
   free(worker.segment_panel);
   free(worker.supernode_workspace);
+  free(worker.index_workspace);
+  free(worker.byte_workspace);
 }
 
 static void kls_parallel_row_refactor_mark_group_done(
@@ -30527,6 +30587,8 @@ static int kls_refresh_root_tail_preserved_block_columns(
   memset(worker.x, 0, (size_t)nk * sizeof(*worker.x));
   free(worker.segment_panel);
   free(worker.supernode_workspace);
+  free(worker.index_workspace);
+  free(worker.byte_workspace);
   (void)pthread_mutex_destroy(&shared.lock);
   return ok;
 }
@@ -30657,6 +30719,8 @@ static void kls_egraph_refactor_refresh_missing_prefix(
   memset(x, 0, (size_t)scratch_size * sizeof(*x));
   free(worker.segment_panel);
   free(worker.supernode_workspace);
+  free(worker.index_workspace);
+  free(worker.byte_workspace);
 
   if (refreshed > 0u) {
     solver->fast_rejected_prefix_refresh_columns += refreshed;
@@ -31272,6 +31336,8 @@ static void destroy_egraph_refactor_pool(kls_solver *solver) {
     for (int i = 0; i < pool->thread_count; ++i) {
       free(pool->workers[i].segment_panel);
       free(pool->workers[i].supernode_workspace);
+      free(pool->workers[i].index_workspace);
+      free(pool->workers[i].byte_workspace);
     }
   }
   free(pool->threads);

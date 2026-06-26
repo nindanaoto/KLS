@@ -4074,6 +4074,19 @@ geomean. This is useful as a storage/scatter scaffold, but it confirms that the
 main remaining paper gap is still native row/segment panel storage and a
 production blocked update kernel, not symbolic target lookup alone.
 
+The same executor now keeps its fragmented batch metadata in worker-owned
+index/byte scratch, and keeps the per-batch pivot vector in the existing double
+workspace, instead of allocating row offsets, run offsets, target positions,
+target kinds, and pivots for each small batch. This is a production-storage
+cleanup rather than a numeric algorithm change. The focused `ASIC_320k` probe
+stayed about `0.326s`, but the five forced-row CKTSO-gap geomean improved
+slightly again from about `31.9s` to about `31.7s`. A separate temporary
+rectangular run-panel plus portable blocked multiply experiment was tested and
+rejected in the same session because it regressed the five-case geomean to
+about `32.7s`; copying tiny batches into a denser temporary panel is not enough.
+The remaining path needs broader row-panel batches and native row/segment
+storage that avoids the copy rather than just a local blocked multiply.
+
 The unchecked producer-panel refactor experiment also uses a blocked panel
 algorithm: scalar code factors each diagonal block, `dtrsm` solves the
 below-panel multiplier block, and `dgemm` updates both the dense right panel
