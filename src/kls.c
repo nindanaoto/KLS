@@ -24418,6 +24418,11 @@ static int kls_row_refactor_try_compact_supernode_update(
     return 0;
   }
   const int partial_update = valid_prefix < width;
+  const UF_long suffix_begin = dep0 - group_begin;
+  const UF_long run_prefix_end = suffix_begin + run_rows;
+  if (run_prefix_end > width || run_prefix_end > valid_prefix) {
+    return 0;
+  }
 
   UF_long dense_panel_entries = 0;
   if (width > (UF_long)(SIZE_MAX / sizeof(double)) / width) {
@@ -24473,8 +24478,7 @@ static int kls_row_refactor_try_compact_supernode_update(
   int use_trailing_gemv = 0;
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(*supernode_workspace));
-  if (!partial_update &&
-      kls_compact_supernode_trsv_should_run(shared, run_rows, trailing_len) &&
+  if (kls_compact_supernode_trsv_should_run(shared, run_rows, trailing_len) &&
       run_rows <= max_workspace_entries &&
       trailing_len <= max_workspace_entries - run_rows) {
     const UF_long workspace_entries = run_rows + trailing_len;
@@ -24514,8 +24518,8 @@ static int kls_row_refactor_try_compact_supernode_update(
       x[dep] = 0.0;
     }
 
-    const UF_long suffix_begin = dep0 - group_begin;
     UF_long trsv_entries = 0;
+    UF_long dense_tail_entries = 0;
     for (UF_long local = 0; local < run_rows; ++local) {
       const UF_long p = p0 + local;
       const UF_long dep = solver->row_refactor_l_cols[p];
@@ -24533,11 +24537,16 @@ static int kls_row_refactor_try_compact_supernode_update(
       supernode_workspace[local] = lij;
 
       const double *dep_dense_panel = dense_panel + local_dep * width;
-      for (UF_long target = local_dep + 1u; target < width; ++target) {
+      for (UF_long target = local_dep + 1u; target < run_prefix_end;
+           ++target) {
         supernode_workspace[target - suffix_begin] -=
           lij * dep_dense_panel[target];
       }
-      trsv_entries += width - local_dep - 1u;
+      trsv_entries += run_prefix_end - local_dep - 1u;
+      for (UF_long target = run_prefix_end; target < width; ++target) {
+        x[group_begin + target] -= lij * dep_dense_panel[target];
+        dense_tail_entries++;
+      }
       if (trailing_len > 0u) {
         const double *dep_panel = trailing_panel + local_dep * trailing_len;
         for (UF_long offset = 0; offset < trailing_len; ++offset) {
@@ -24546,6 +24555,8 @@ static int kls_row_refactor_try_compact_supernode_update(
       }
     }
     touched_entries += trsv_entries;
+    touched_entries = touched_entries > UF_long_max - dense_tail_entries
+      ? UF_long_max : touched_entries + dense_tail_entries;
     kls_record_row_refactor_compact_supernode_trsv(
       solver, run_rows, trsv_entries);
     if (trailing_len > 0u) {

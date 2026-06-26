@@ -7907,8 +7907,8 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "0", 1) != 0) {
-    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=0");
+  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=1");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
@@ -7953,11 +7953,15 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
              stats.row_refactor_last_done_bitmap != 1 ||
              stats.row_refactor_last_compact_dense_panel != 1 ||
              stats.row_refactor_last_compact_supernode_update != 1 ||
+             stats.row_refactor_last_compact_supernode_trsv != 1 ||
              stats.row_refactor_compact_supernode_update_rows <
+               expected_partial_rows ||
+             stats.row_refactor_compact_supernode_trsv_rows <
                expected_partial_rows)) {
     fprintf(stderr,
             "unexpected partial-prefix stats: parallel=%d partial=%d done=%d"
             ", compact=%d, update=%d/%" PRId64
+            ", trsv=%d/%" PRId64 "/%" PRId64
             ", partial_update=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
             stats.row_refactor_last_parallel,
             stats.row_refactor_last_partial_supernode_pipeline,
@@ -7965,6 +7969,9 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
             stats.row_refactor_last_compact_dense_panel,
             stats.row_refactor_last_compact_supernode_update,
             stats.row_refactor_compact_supernode_update_rows,
+            stats.row_refactor_last_compact_supernode_trsv,
+            stats.row_refactor_compact_supernode_trsv_rows,
+            stats.row_refactor_compact_supernode_trsv_entries,
             stats.row_refactor_last_compact_supernode_partial_update,
             stats.row_refactor_compact_supernode_partial_update_count,
             stats.row_refactor_compact_supernode_partial_update_rows,

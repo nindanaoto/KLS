@@ -4113,8 +4113,14 @@ the automatic choice, and `1` still forces it for probes. Stats report
 `row_refactor_compact_supernode_trsv_count`,
 `row_refactor_compact_supernode_trsv_rows`, and
 `row_refactor_compact_supernode_trsv_entries`, and the compact-panel smoke
-fixture now verifies the unset automatic mode while the partial-prefix smoke
-keeps `0` as an explicit disable. On the current forced-row top slice, this
+fixture now verifies the unset automatic mode. The partial-prefix smoke now
+also forces the same compact `trsv` executor while using SubtreeLU Algorithm 5's
+large-supernode split: KLS solves only the completed producer prefix in
+contiguous scratch, scatters dense updates that target unfinished producer rows
+back to the sparse work row, and later consumes the tail through the normal
+row-done waits. This closes the earlier gap where partial-prefix consumers
+could start early but had to use scalar per-row producer updates. On the current
+forced-row top slice, this
 reduced the completed-row geomean from 20.5 s to 18.1 s; `G2_circuit`'s
 explicit row-refactor average moved to about 0.236 s with a clean residual.
 The default CKTSO-gap focus still keeps row refactor gated off on the large
