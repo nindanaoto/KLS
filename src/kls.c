@@ -25797,7 +25797,6 @@ static int kls_compact_dense_group_try_batched_supernode_update(
   double *dense_panel,
   double *trailing_panel) {
   if (worker == NULL || worker->shared == NULL ||
-      worker->shared->check_pivots ||
       dense_panel == NULL ||
       row_begin >= row_end ||
       batch_begin < row_begin ||
@@ -26137,18 +26136,41 @@ static int kls_compact_dense_group_try_batched_supernode_update(
                   (int)run->width,
                   multipliers + run->external_offset,
                   (int)external_len);
+      for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
+        const UF_long row = batch_begin + batch_local;
+        const double *row_multipliers =
+          multipliers + batch_local * external_len + run->external_offset;
+        for (UF_long local_dep = 0; local_dep < run->dep_rows; ++local_dep) {
+          const UF_long dep =
+            run->group_begin + run->suffix_begin + local_dep;
+          const double lij = row_multipliers[local_dep];
+          const double candidate = lij * udiag[dep];
+          if (kls_parallel_row_refactor_rejects_multiplier(
+                worker, row, dep, candidate, lij)) {
+            status = -1;
+            goto cleanup;
+          }
+        }
+      }
     } else
 #endif
     {
       for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
+        const UF_long row = batch_begin + batch_local;
         double *row_multipliers =
           multipliers + batch_local * external_len + run->external_offset;
         for (UF_long local_dep = 0; local_dep < run->dep_rows; ++local_dep) {
           const UF_long panel_row = run->suffix_begin + local_dep;
+          const UF_long dep = run->group_begin + panel_row;
           const double pivot = udiag[run->group_begin + panel_row];
           const double lij = row_multipliers[local_dep] / pivot;
           const double *dep_dense_panel =
             run->dense_panel + panel_row * run->width;
+          if (kls_parallel_row_refactor_rejects_multiplier(
+                worker, row, dep, row_multipliers[local_dep], lij)) {
+            status = -1;
+            goto cleanup;
+          }
           row_multipliers[local_dep] = lij;
           for (UF_long target = local_dep + 1u;
                target < run->dep_rows; ++target) {
@@ -26300,7 +26322,6 @@ static int kls_compact_dense_group_try_ragged_supernode_update(
   double *dense_panel,
   double *trailing_panel) {
   if (worker == NULL || worker->shared == NULL ||
-      worker->shared->check_pivots ||
       dense_panel == NULL ||
       row_begin >= row_end ||
       batch_begin < row_begin ||
@@ -26541,6 +26562,11 @@ static int kls_compact_dense_group_try_ragged_supernode_update(
       const UF_long dep = dep_group_begin + local_dep;
       const double candidate = row_multipliers[local_dep];
       const double lij = candidate / udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        status = -1;
+        goto cleanup;
+      }
       row_multipliers[local_dep] = lij;
       for (UF_long target = local_dep + 1u; target < dep_width; ++target) {
         row_multipliers[target] -=

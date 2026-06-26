@@ -4313,6 +4313,21 @@ retained producer target counts, and residual-clean solve. This closes a direct
 checked-mode paper coverage gap while leaving the larger native row/segment
 numeric engine and CKTSO pipelined pivoting tail open.
 
+The exact-pattern and ragged dense-consumer batch executors now have the same
+checked-mode treatment. These executors cover the cleaner SubtreeLU-style cases
+where a dense consumer row range depends on completed dense producer suffixes
+with either identical external patterns or one ragged producer suffix. They were
+previously disabled whenever pivot checks were active, so checked fast
+factorization fell back to scalar external updates even though the later
+consumer-panel factor step already performs checked internal multiplier and pivot
+tests. KLS now runs the exact/ragged producer-suffix batch under checked row fast
+factorization and applies row-wise multiplier rejection before each external
+`L` value is published. The existing exact and ragged smoke fixtures each run a
+fresh checked factorization with CBLAS disabled and require the compact
+supernode batch counters plus a residual-clean solve. This fills another direct
+paper-coverage hole without claiming to solve the remaining production
+row/segment panel engine or CKTSO pivoting-tail executor.
+
 An exact-match requirement was deliberately kept for fragmented dense-producer
 batches. A common-prefix widening experiment was tried and rejected because it
 increased the work on `ASIC_320k` (`~0.387s` focused refactor versus the prior

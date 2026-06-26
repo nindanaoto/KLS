@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int restore_env_value(const char *name, int had_value,
+                             const char *saved_value);
+
 static int require_ok(int status, const char *what) {
   if (status != KLS_OK) {
     fprintf(stderr, "%s failed: %s (%d)\n", what, kls_status_string(status), status);
@@ -3861,6 +3864,7 @@ static int test_batched_compact_supernode_update_probe(void) {
   }
 
   kls_solver *solver = NULL;
+  kls_solver *checked_solver = NULL;
   kls_options options;
   kls_default_options(&options);
   options.threads = 1;
@@ -3879,6 +3883,11 @@ static int test_batched_compact_supernode_update_probe(void) {
   char *saved_cblas_env =
     saved_cblas_env_value != NULL ? strdup(saved_cblas_env_value) : NULL;
   const int had_saved_cblas_env = saved_cblas_env_value != NULL;
+  const char *saved_checked_env_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked_env =
+    saved_checked_env_value != NULL ? strdup(saved_checked_env_value) : NULL;
+  const int had_saved_checked_env = saved_checked_env_value != NULL;
 
   int ok = 1;
   if (had_saved_row_env && saved_row_env == NULL) {
@@ -3889,10 +3898,18 @@ static int test_batched_compact_supernode_update_probe(void) {
     fprintf(stderr, "failed to save KLS_ENABLE_CBLAS_SUPERNODE\n");
     ok = 0;
   }
+  if (had_saved_checked_env && saved_checked_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
   if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
                                         &options),
                         "analyze batched compact supernode")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
   if (ok && !require_ok(kls_factor(solver, ax0),
                         "factor batched compact supernode")) ok = 0;
   if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
@@ -3926,6 +3943,10 @@ static int test_batched_compact_supernode_update_probe(void) {
       perror("unsetenv KLS_ENABLE_CBLAS_SUPERNODE");
       ok = 0;
     }
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_saved_checked_env, saved_checked_env)) {
+    ok = 0;
   }
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
                         "solve batched compact supernode")) ok = 0;
@@ -4005,9 +4026,135 @@ static int test_batched_compact_supernode_update_probe(void) {
     ok = 0;
   }
 
+  if (ok && !require_ok(kls_create(&checked_solver),
+                        "create checked batched compact supernode")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(checked_solver, KLS_INDEX_INT32,
+                                        n, ap, ai, 0, &options),
+                        "analyze checked batched compact supernode")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(checked_solver, ax0),
+                        "factor checked batched compact supernode base")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(checked_solver, ax1),
+                        "checked factor batched compact supernode")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR",
+                         had_saved_row_env, saved_row_env)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CBLAS_SUPERNODE",
+                         had_saved_cblas_env, saved_cblas_env)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_saved_checked_env, saved_checked_env)) {
+    ok = 0;
+  }
+
+  if (ok) {
+    memset(x, 0, (size_t)n * sizeof(*x));
+  }
+  if (ok && !require_ok(kls_solve(checked_solver, 1, b, 0, x, 0),
+                        "solve checked batched compact supernode")) {
+    ok = 0;
+  }
+  kls_stats checked_stats;
+  checked_stats.struct_size = sizeof(checked_stats);
+  if (ok && !require_ok(kls_get_stats(checked_solver, &checked_stats),
+                        "stats checked batched compact supernode")) {
+    ok = 0;
+  }
+  if (ok &&
+      (checked_stats.row_refactor_last_run != 1 ||
+       checked_stats.row_refactor_last_checked != 1 ||
+       checked_stats.row_refactor_last_compact_supernode_batch != 1 ||
+       checked_stats.row_refactor_compact_supernode_batch_count < 1 ||
+       checked_stats.row_refactor_compact_supernode_batch_rows < mid ||
+       checked_stats.row_refactor_compact_supernode_batch_dep_rows <
+         (int64_t)(lead0 + lead1) * (int64_t)mid ||
+       checked_stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       checked_stats.row_refactor_last_compact_dense_panel != 1)) {
+    fprintf(stderr,
+            "unexpected checked batched compact-supernode stats: checked=%d/%d"
+            ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", compact=%d/%" PRId64 "\n",
+            checked_stats.row_refactor_last_run,
+            checked_stats.row_refactor_last_checked,
+            checked_stats.row_refactor_last_compact_supernode_batch,
+            checked_stats.row_refactor_compact_supernode_batch_count,
+            checked_stats.row_refactor_compact_supernode_batch_rows,
+            checked_stats.row_refactor_compact_supernode_batch_dep_rows,
+            checked_stats.row_refactor_compact_supernode_batch_entries,
+            checked_stats.row_refactor_last_compact_dense_panel,
+            checked_stats.row_refactor_compact_dense_panel_count);
+    ok = 0;
+  }
+
+  max_solution_error = 0.0;
+  max_residual = 0.0;
+  max_rhs = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    const double err = fabs(x[row] - expected[row]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+    if (residual != NULL) {
+      residual[row] = -b[row];
+    }
+    if (fabs(b[row]) > max_rhs) {
+      max_rhs = fabs(b[row]);
+    }
+  }
+  if (residual != NULL) {
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        residual[ai[p]] += ax1[p] * x[col];
+      }
+    }
+    for (int32_t row = 0; row < n; ++row) {
+      const double residual_abs = fabs(residual[row]);
+      if (residual_abs > max_residual) {
+        max_residual = residual_abs;
+      }
+    }
+  }
+  const double checked_relative_residual =
+    max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 1.0e-8 ||
+             checked_relative_residual > 1.0e-10)) {
+    fprintf(stderr,
+            "unexpected checked batched compact-supernode accuracy:"
+            " max_x_err=%.17g, rel_resid=%.17g\n",
+            max_solution_error, checked_relative_residual);
+    ok = 0;
+  }
+
   kls_destroy(solver);
+  kls_destroy(checked_solver);
   free(saved_row_env);
   free(saved_cblas_env);
+  free(saved_checked_env);
   free(ap);
   free(ai);
   free(ax0);
@@ -4387,6 +4534,7 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
   }
 
   kls_solver *solver = NULL;
+  kls_solver *checked_solver = NULL;
   kls_options options;
   kls_default_options(&options);
   options.threads = 1;
@@ -4405,6 +4553,11 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
   char *saved_cblas_env =
     saved_cblas_env_value != NULL ? strdup(saved_cblas_env_value) : NULL;
   const int had_saved_cblas_env = saved_cblas_env_value != NULL;
+  const char *saved_checked_env_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked_env =
+    saved_checked_env_value != NULL ? strdup(saved_checked_env_value) : NULL;
+  const int had_saved_checked_env = saved_checked_env_value != NULL;
 
   int ok = 1;
   if (had_saved_row_env && saved_row_env == NULL) {
@@ -4415,10 +4568,18 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
     fprintf(stderr, "failed to save KLS_ENABLE_CBLAS_SUPERNODE\n");
     ok = 0;
   }
+  if (had_saved_checked_env && saved_checked_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
   if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
                                         &options),
                         "analyze ragged batched compact supernode")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
   if (ok && !require_ok(kls_factor(solver, ax0),
                         "factor ragged batched compact supernode")) ok = 0;
   if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
@@ -4454,6 +4615,10 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
       perror("unsetenv KLS_ENABLE_CBLAS_SUPERNODE");
       ok = 0;
     }
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_saved_checked_env, saved_checked_env)) {
+    ok = 0;
   }
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
                         "solve ragged batched compact supernode")) ok = 0;
@@ -4540,9 +4705,145 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
     ok = 0;
   }
 
+  if (ok && !require_ok(kls_create(&checked_solver),
+                        "create checked ragged batched compact supernode")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(checked_solver, KLS_INDEX_INT32,
+                                        n, ap, ai, 0, &options),
+                        "analyze checked ragged batched compact supernode")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(checked_solver, ax0),
+                        "factor checked ragged batched compact supernode base")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(checked_solver, ax1),
+                        "checked factor ragged batched compact supernode")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR",
+                         had_saved_row_env, saved_row_env)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CBLAS_SUPERNODE",
+                         had_saved_cblas_env, saved_cblas_env)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_saved_checked_env, saved_checked_env)) {
+    ok = 0;
+  }
+
+  if (ok) {
+    memset(x, 0, (size_t)n * sizeof(*x));
+  }
+  if (ok && !require_ok(kls_solve(checked_solver, 1, b, 0, x, 0),
+                        "solve checked ragged batched compact supernode")) {
+    ok = 0;
+  }
+  kls_stats checked_stats;
+  checked_stats.struct_size = sizeof(checked_stats);
+  if (ok && !require_ok(kls_get_stats(checked_solver, &checked_stats),
+                        "stats checked ragged batched compact supernode")) {
+    ok = 0;
+  }
+  if (ok &&
+      (checked_stats.row_refactor_last_run != 1 ||
+       checked_stats.row_refactor_last_checked != 1 ||
+       checked_stats.row_refactor_last_compact_supernode_batch != 1 ||
+       checked_stats.row_refactor_compact_supernode_batch_count < 1 ||
+       checked_stats.row_refactor_compact_supernode_batch_pattern_count != 0 ||
+       checked_stats.row_refactor_compact_supernode_batch_rows < mid ||
+       checked_stats.row_refactor_compact_supernode_batch_dep_rows <=
+         (int64_t)lead * (int64_t)(mid / 2) ||
+       checked_stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       checked_stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
+       checked_stats.row_refactor_last_compact_dense_panel != 1)) {
+    fprintf(stderr,
+            "unexpected checked ragged batched compact-supernode stats:"
+            " checked=%d/%d, batch=%d/%" PRId64
+            "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", pattern=%" PRId64 "/%" PRId64
+            ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
+            ", compact=%d/%" PRId64 "\n",
+            checked_stats.row_refactor_last_run,
+            checked_stats.row_refactor_last_checked,
+            checked_stats.row_refactor_last_compact_supernode_batch,
+            checked_stats.row_refactor_compact_supernode_batch_count,
+            checked_stats.row_refactor_compact_supernode_batch_rows,
+            checked_stats.row_refactor_compact_supernode_batch_dep_rows,
+            checked_stats.row_refactor_compact_supernode_batch_entries,
+            checked_stats.row_refactor_compact_supernode_batch_pattern_count,
+            checked_stats.row_refactor_compact_supernode_batch_pattern_rows,
+            checked_stats.row_refactor_compact_supernode_batch_candidate_count,
+            checked_stats.row_refactor_compact_supernode_batch_candidate_rows,
+            checked_stats.row_refactor_compact_supernode_batch_candidate_dep_rows,
+            checked_stats.row_refactor_last_compact_dense_panel,
+            checked_stats.row_refactor_compact_dense_panel_count);
+    ok = 0;
+  }
+
+  max_solution_error = 0.0;
+  max_residual = 0.0;
+  max_rhs = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    const double err = fabs(x[row] - expected[row]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+    if (residual != NULL) {
+      residual[row] = -b[row];
+    }
+    if (fabs(b[row]) > max_rhs) {
+      max_rhs = fabs(b[row]);
+    }
+  }
+  if (residual != NULL) {
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        residual[ai[p]] += ax1[p] * x[col];
+      }
+    }
+    for (int32_t row = 0; row < n; ++row) {
+      const double residual_abs = fabs(residual[row]);
+      if (residual_abs > max_residual) {
+        max_residual = residual_abs;
+      }
+    }
+  }
+  const double checked_relative_residual =
+    max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 1.0e-8 ||
+             checked_relative_residual > 1.0e-10)) {
+    fprintf(stderr,
+            "unexpected checked ragged batched compact-supernode accuracy:"
+            " max_x_err=%.17g, rel_resid=%.17g\n",
+            max_solution_error, checked_relative_residual);
+    ok = 0;
+  }
+
   kls_destroy(solver);
+  kls_destroy(checked_solver);
   free(saved_row_env);
   free(saved_cblas_env);
+  free(saved_checked_env);
   free(ap);
   free(ai);
   free(ax0);
