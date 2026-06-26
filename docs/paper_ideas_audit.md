@@ -4240,3 +4240,14 @@ KLS column EGraph path remains faster at 8.29 s geomean, so this is still kept
 behind `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1`. The next gap remains a
 coarser compact/batched numeric update kernel; per-consumer scalar loops over
 the retained panel are not enough.
+
+The generic mapped EGraph kernel now consumes the same cached compact panels
+before falling back to its scalar dependency loop. This closes a coverage gap
+left by the earlier single-block and large unscaled-BTF specializations: scaled
+BTF and smaller BTF refactors can use retained producer panels when
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1` is set. A targeted scaled-BTF
+`ckt11752_dc_1` probe reported 313 last-run compact supernode dependency
+updates over 6,555 rows and 415,380 entries with the opt-in flag, while the
+same command without the flag reported zero such updates. This is a direct
+SubtreeLU/CKTSO compact-panel coverage step, but it still does not implement
+the coarser batched numeric kernel needed to make the probe a default win.

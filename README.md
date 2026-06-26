@@ -567,10 +567,13 @@ columns finish, so later consumers reuse the dense/internal and shared trailing
 values instead of reconstructing that structure for every dependency run. The
 same cache can consume a published prefix or suffix of a retained panel, so a
 column inside a supernode no longer has to rebuild a temporary partial panel
-just to use already completed producer columns. Focused runs show this removes
-the worst rebuild overhead, but the path is still slower than default KLS
-because it applies each consumer update with scalar loops rather than the
-paper's compact/batched panel kernels.
+just to use already completed producer columns. The cached-panel consumer now
+also runs from the generic mapped EGraph refactor kernel, so scaled BTF and
+smaller BTF states can use the same retained producer panels instead of staying
+on the scalar dependency loop. Focused runs show this removes the worst rebuild
+overhead, but the path is still slower than default KLS because it applies each
+consumer update with scalar loops rather than the paper's compact/batched panel
+kernels.
 The experimental row pipeline preserves the CKTSO-style wide cluster prefix
 selected by the `2 * threads` width rule, then consumes the remaining narrow
 tail through a bounded successor-ready queue when explicit predecessor counts

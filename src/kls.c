@@ -26136,7 +26136,18 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   UF_long *ui = u_indices[k];
   double *ux = u_values[k];
   UF_long ucol_len = ulen[local_k];
-  for (UF_long up = 0; up < ucol_len; ++up) {
+  UF_long up = 0u;
+  while (up < ucol_len) {
+    const int supernode_status =
+      kls_egraph_refactor_try_supernode_dependency_run(
+        worker, k1, k, local_k, &up, ucol_len, ui, ux, l_indices,
+        l_values, numeric->Llen, x, wait_for_dependencies);
+    if (supernode_status < 0) {
+      return 0;
+    }
+    if (supernode_status > 0) {
+      continue;
+    }
     const UF_long j = ui[up];
     if (j >= local_k) {
       kls_egraph_refactor_record_invalid(shared);
@@ -26154,6 +26165,7 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     double *lx = l_values[k1 + j];
     UF_long lcol_len = llen[j];
     kls_scatter_subtract(x, li, lx, lcol_len, ujk);
+    up++;
   }
 
   const double ukk = x[local_k];
