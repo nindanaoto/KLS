@@ -39651,6 +39651,89 @@ static int kls_row_first_partial_apply_one_dep(
   return 1;
 }
 
+static int kls_row_first_partial_apply_supernode_run(
+  const kls_row_first_block_context *ctx,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *local_l_entries,
+  const kls_row_first_entries *published_u_entries,
+  const double *udiag_values,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  kls_row_first_partial_row *state,
+  UF_long dep_begin,
+  UF_long dep_end,
+  UF_long *run_rows_out) {
+  if (run_rows_out != NULL) {
+    *run_rows_out = 0;
+  }
+  if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
+      published_u_entries == NULL || udiag_values == NULL ||
+      u_row_ptr == NULL || u_row_end == NULL || state == NULL ||
+      workspace->x == NULL || workspace->mark == NULL ||
+      workspace->pattern == NULL || workspace->dep_heap == NULL ||
+      dep_begin > dep_end || dep_end >= state->row ||
+      state->row >= ctx->nk ||
+      workspace->mark[dep_begin] != state->generation) {
+    return 0;
+  }
+
+  double *x = workspace->x;
+  unsigned int *mark = workspace->mark;
+  UF_long *pattern = workspace->pattern;
+  UF_long *dep_heap = workspace->dep_heap;
+  const unsigned int generation = state->generation;
+  UF_long run_rows = 0;
+
+  /* Later rows in the run may be discovered by the triangular prefix update. */
+  for (UF_long dep = dep_begin; dep <= dep_end; ++dep) {
+    if (dep != dep_begin) {
+      if (mark[dep] != generation) {
+        break;
+      }
+      if (state->dep_heap_size == 0u || dep_heap[0] != dep) {
+        return 0;
+      }
+      const UF_long popped =
+        kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
+      if (popped != dep) {
+        return 0;
+      }
+    }
+    const double dep_pivot = udiag_values[dep];
+    if (dep_pivot == 0.0 ||
+        u_row_ptr[dep] > u_row_end[dep] ||
+        u_row_end[dep] > published_u_entries->count) {
+      return 0;
+    }
+    const double lij = x[dep] / dep_pivot;
+    if (!kls_row_first_entries_append(local_l_entries, state->row, dep,
+                                      lij)) {
+      return 0;
+    }
+    x[dep] = 0.0;
+    for (UF_long up = u_row_ptr[dep]; up < u_row_end[dep]; ++up) {
+      const UF_long col = published_u_entries->col[up];
+      if (col <= dep || col >= ctx->nk) {
+        return 0;
+      }
+      if (mark[col] != generation) {
+        mark[col] = generation;
+        pattern[state->pattern_count++] = col;
+        if (col < state->row) {
+          kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+        }
+        x[col] = 0.0;
+      }
+      x[col] -= lij * published_u_entries->value[up];
+    }
+    run_rows++;
+  }
+  if (run_rows_out != NULL) {
+    *run_rows_out = run_rows;
+  }
+  return 1;
+}
+
 static int kls_row_first_partial_apply_ready(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
@@ -39705,27 +39788,18 @@ static int kls_row_first_partial_apply_ready(
       kls_row_first_ready_supernode_end(
         supernode_start, supernode_end, row_done, ctx->nk, ready_limit, i,
         dep);
-    UF_long run_rows = 0;
-    for (UF_long current = dep; current <= run_end; ++current) {
-      if (current != dep) {
-        if (mark[current] != state->generation) {
-          break;
-        }
-        if (state->dep_heap_size == 0u || dep_heap[0] != current) {
-          return 0;
-        }
-        const UF_long popped =
-          kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
-        if (popped != current) {
-          return 0;
-        }
-      }
-      if (!kls_row_first_partial_apply_one_dep(
+    UF_long run_rows = 1;
+    if (run_end > dep) {
+      if (!kls_row_first_partial_apply_supernode_run(
             ctx, workspace, local_l_entries, published_u_entries,
-            udiag_values, u_row_ptr, u_row_end, state, current)) {
+            udiag_values, u_row_ptr, u_row_end, state, dep, run_end,
+            &run_rows)) {
         return 0;
       }
-      run_rows++;
+    } else if (!kls_row_first_partial_apply_one_dep(
+                 ctx, workspace, local_l_entries, published_u_entries,
+                 udiag_values, u_row_ptr, u_row_end, state, dep)) {
+      return 0;
     }
     if (run_rows > 1u) {
       if (supernode_groups_out != NULL) {
