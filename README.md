@@ -777,10 +777,12 @@ row-refactor successor tail when row-major metadata is available, including
 block-local BTF tails retained by the checked row-major path, the
 ordered-block ETree successor path that a pivoting tail-restart upper-bound
 scheduler would at least have to revisit, the sorted pivoting-tail worklist
-scope seeded from the current refresh state, the first and last rows in that
-worklist, whether it includes the rejected pivot, whether the retained order
-is topologically safe for a future tail kernel to consume, whether the
-failed pass left an unknown, prefix-current, or all-current numeric state, the
+scope seeded from the current refresh state, with checked row-major row-tail
+seeds tried before the saved unfinished-worker seed and suffix fallback, the
+first and last rows in that worklist, whether it includes the rejected pivot,
+whether the retained order is topologically safe for a future tail kernel to
+consume, whether the failed pass left an unknown, prefix-current, or all-current
+numeric state, the
 number of repaired BTF blocks, how many repairs used the KLS-owned pivoted block
 kernel, and the number of serial tail restarts actually executed, plus whether
 repaired serial-tail restarts refreshed only the off-diagonal suffix or rebuilt

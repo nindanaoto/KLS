@@ -2283,9 +2283,11 @@ pivoting-tail envelope. For prefix-current checked row-major rejects, KLS first
 marks the retained block-local row tail, closes it through the ordered-block
 ETree, and records the seed size as
 `fast_rejected_pivoting_tail_row_seed_columns`. If that row-tail seed is not a
-valid topological plan, KLS falls back to the previous conservative suffix plan.
-This is still not CKTSO's full concurrent pivoting-tail executor, but it moves
-the checked row/segment metadata from diagnostics into the restart planner.
+valid topological plan, KLS now falls back to the saved unfinished-worker seed
+before the conservative suffix plan; the unfinished seed is retained in its own
+buffer so speculative row-tail planning cannot overwrite it. This is still not
+CKTSO's full concurrent pivoting-tail executor, but it moves the checked
+row/segment metadata from diagnostics into the restart planner.
 
 The fallback pivoting block repair now also records the repaired row selected
 at the rejected pivot, whether it matches the retained row-tail candidate, the
@@ -3187,10 +3189,12 @@ reject as a full suffix when a narrower restart seed is available. KLS first
 uses the retained row-refactor tail for checked row-major rejects; otherwise,
 when the checked worker bitmap can identify unfinished nodes, it records those
 unfinished local columns as `fast_rejected_pivoting_tail_seed_columns` and
-closes only that seed set through the ordered-block ETree. This is still
-diagnostic/planning infrastructure, but it matches CKTSO's restart-point
-determination more closely and exposes the true non-suffix worklist that a
-pipelined pivoting-tail executor should consume.
+closes only that seed set through the ordered-block ETree. The unfinished
+bitmap seed is retained separately from the mutable planning queue, so it
+remains available if the row-tail seed is rejected by the topological closure
+check. This is still diagnostic/planning infrastructure, but it matches CKTSO's
+restart-point determination more closely and exposes the true non-suffix
+worklist that a pipelined pivoting-tail executor should consume.
 
 The serial suffix tail retry then stopped copying and mutating a private
 `Offp` array. Tail-column construction now supports a discard-only off-block
