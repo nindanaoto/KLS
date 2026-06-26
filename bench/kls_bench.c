@@ -1457,6 +1457,10 @@ int main(int argc, char **argv) {
            ",\"row_refactor_dense_segment_direct_input_rows\":%" PRId64,
            stats.row_refactor_last_dense_segment_direct_input_rows,
            stats.row_refactor_dense_segment_direct_input_rows);
+    printf(",\"row_refactor_last_sparse_segment_direct_input_rows\":%" PRId64
+           ",\"row_refactor_sparse_segment_direct_input_rows\":%" PRId64,
+           stats.row_refactor_last_sparse_segment_direct_input_rows,
+           stats.row_refactor_sparse_segment_direct_input_rows);
     printf(",\"row_refactor_compact_supernode_batch_pattern_count\":%" PRId64
            ",\"row_refactor_compact_supernode_batch_pattern_rows\":%" PRId64
            ",\"row_refactor_compact_supernode_batch_candidate_count\":%" PRId64
@@ -2011,6 +2015,7 @@ int main(int argc, char **argv) {
            " entries, used: %d/%" PRId64
            ", direct input rows: %" PRId64 "/%" PRId64
            ", native direct input rows: %" PRId64 "/%" PRId64
+           ", sparse direct input rows: %" PRId64 "/%" PRId64
            ", supernode updates: %d/%" PRId64
            " rows/entries %" PRId64 "/%" PRId64
            ", partial: %d/%" PRId64
@@ -2051,6 +2056,8 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_direct_input_rows,
            stats.row_refactor_last_dense_segment_direct_input_rows,
            stats.row_refactor_dense_segment_direct_input_rows,
+           stats.row_refactor_last_sparse_segment_direct_input_rows,
+           stats.row_refactor_sparse_segment_direct_input_rows,
            stats.row_refactor_last_compact_supernode_update,
            stats.row_refactor_compact_supernode_update_count,
            stats.row_refactor_compact_supernode_update_rows,

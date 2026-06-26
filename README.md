@@ -557,7 +557,13 @@ blocked row-major numeric layout rather than simply wrapping the current
 compact group in BLAS calls. Checked pivot-probe row refactors use
 the same compact panel only through a row-ordered update/check/publish loop, so
 a rejected pivot leaves the same prefix-visible row-major state as the native
-direct row-mirror kernel. For generic-only row patterns, pipeline groups also
+direct row-mirror kernel. Generic sparse row segments now also direct-load raw
+input entries into the retained row-major segment mirrors when the sparse `L`
+row, pivot, in-segment `U`, and shared trailing `U` pattern can represent the
+row exactly; stats report
+`row_refactor_last_sparse_segment_direct_input_rows` and
+`row_refactor_sparse_segment_direct_input_rows`. For generic-only row patterns,
+pipeline groups also
 retain their external dependency rows so the scheduler can wait on them once
 before running the group kernel; stats report
 `row_refactor_group_cluster_levels`, `row_refactor_group_pipeline_groups`,
@@ -1169,9 +1175,10 @@ KLU-compatible BTF blocks in no-scale and KLU row-scaled modes and seed
 KLS-owned row-major mirrors for following solves and unchecked numeric
 refactors. CKTSO's paper goes further: a production row-major up-looking
 factorization, EGraph pivot checks, and ETree-scheduled pipelined tail
-factorization. The next algorithmic work is to evolve the numeric
-factor/refactor/solve kernels toward those deeper KLS-owned sparse kernels
-while keeping the public API and benchmark harness stable.
+factorization. The generic sparse segment direct-load path narrows the current
+refactor bridge, but the next larger algorithmic work is still to evolve the
+numeric factor/refactor/solve kernels toward those deeper KLS-owned sparse
+kernels while keeping the public API and benchmark harness stable.
 
 ## License
 

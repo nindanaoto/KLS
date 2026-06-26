@@ -4585,3 +4585,19 @@ suite keeps both sides covered: a natural-order 150,000-row scaled diagonal
 remains on `klu_first` with `kls_first_auto_skipped_scaled_single_block=1`,
 while a 150,000-row scaled METIS/no-BTF tridiagonal uses `kls_first` and
 requires the separator private and pipeline phases to execute.
+
+The row-refactor generic segment path now direct-loads raw input rows into
+retained sparse row-major segment storage when the existing row pattern can
+represent the row exactly: external dependencies remain in the work vector,
+internal sparse `L` entries are placed in their row mirror slots, the pivot is
+placed in `Udiag`, and in-segment/trailing `U` entries are placed in the row
+mirror before numeric updates. Checked runs compute the CKTSO-style row pivot
+test from the direct-loaded U entries plus residual updates, so this is a
+storage/algorithm bridge rather than a pivot-policy shortcut. The new smoke
+case uses a full upper shared U segment with only sparse subdiagonal L
+dependencies and requires
+`row_refactor_last_sparse_segment_direct_input_rows` to cover the whole
+segment. This narrows the SubtreeLU/CKTSO row-major storage gap for generic
+segments, but it still leaves the larger paper work item open: a production
+compact/batched row-major numeric engine and CKTSO's pipelined pivoting-tail
+executor.
