@@ -2426,6 +2426,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_tail_restart_overcompute_work = 0.0;
   solver->stats.fast_repaired_tail_restart_skipped_columns = 0;
   solver->stats.fast_repaired_tail_restart_skipped_work = 0.0;
+  solver->stats.fast_repaired_tail_restart_exact_mask = 0;
   solver->stats.fast_repaired_parallel_tail_blocks = 0;
   solver->stats.fast_block_restarts = 0;
   solver->stats.fast_kls_block_restarts = 0;
@@ -3264,6 +3265,7 @@ static void kls_record_fast_reject_detail(kls_solver *solver,
   solver->stats.fast_repaired_tail_restart_overcompute_work = 0.0;
   solver->stats.fast_repaired_tail_restart_skipped_columns = 0;
   solver->stats.fast_repaired_tail_restart_skipped_work = 0.0;
+  solver->stats.fast_repaired_tail_restart_exact_mask = 0;
   solver->stats.fast_repaired_parallel_tail_blocks =
     (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_rejected_pivoting_tail_contiguous = 0;
@@ -14715,7 +14717,8 @@ static int kls_try_pivot_tail_restart_rejected_block(
   UF_long *unz_block_out,
   UF_long *pblock,
   UF_long *skipped_columns_out,
-  double *skipped_work_out) {
+  double *skipped_work_out,
+  int *exact_mask_used_out) {
   if (new_lu_out != NULL) {
     *new_lu_out = NULL;
   }
@@ -14734,6 +14737,9 @@ static int kls_try_pivot_tail_restart_rejected_block(
   if (skipped_work_out != NULL) {
     *skipped_work_out = 0.0;
   }
+  if (exact_mask_used_out != NULL) {
+    *exact_mask_used_out = 0;
+  }
   if (restart_end == KLS_KLU_EMPTY) {
     restart_end = nk;
   }
@@ -14748,6 +14754,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
       new_size_out == NULL || lnz_block_out == NULL ||
       unz_block_out == NULL || pblock == NULL ||
       skipped_columns_out == NULL || skipped_work_out == NULL ||
+      exact_mask_used_out == NULL ||
       (local_reject > 0u && !reusable_prefix_state) ||
       local_reject >= nk || restart_end <= local_reject ||
       restart_end > nk ||
@@ -14889,8 +14896,9 @@ static int kls_try_pivot_tail_restart_rejected_block(
       if (solver->common.status < TRILINOS_KLU_OK) {
         goto fail;
       }
-      /* A structurally dependent gap cannot be copied; refactor it below
-         while forcing the original pivot row to preserve the suffix. */
+      /* A dependent gap means the exact ETree tail mask is not executable from
+         the retained LU state. Let the caller fall back to the wider restart. */
+      goto fail;
     }
     const double nunits =
       DUNITS(Int, (Int)nk - k) + DUNITS(Int, k) +
@@ -15089,6 +15097,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
   *unz_block_out = unz;
   *skipped_columns_out = skipped_columns;
   *skipped_work_out = skipped_work;
+  *exact_mask_used_out = use_restart_mask;
   solver->kls_tail_last_mapped_columns += mapped_columns;
   solver->kls_tail_mapped_column_count += mapped_columns;
   return 1;
@@ -15111,6 +15120,9 @@ fail:
   if (skipped_work_out != NULL) {
     *skipped_work_out = 0.0;
   }
+  if (exact_mask_used_out != NULL) {
+    *exact_mask_used_out = 0;
+  }
   return 0;
 }
 
@@ -15122,6 +15134,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
                                                  UF_long repaired_tail_end,
                                                  UF_long skipped_columns,
                                                  double skipped_work,
+                                                 int exact_mask_used,
                                                  const UF_long *old_pblock,
                                                  const UF_long *pblock) {
   if (solver == NULL || old_pblock == NULL || pblock == NULL ||
@@ -15165,6 +15178,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
   if (skipped_work < 0.0) {
     skipped_work = 0.0;
   }
+  solver->stats.fast_repaired_tail_restart_exact_mask = 0;
 
   const int64_t repaired_row = (int64_t)(k1 + pblock[local_reject]);
   solver->stats.fast_repaired_pivot_row = repaired_row;
@@ -15233,6 +15247,11 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
           pivoting_tail_work > 0.0 && actual_tail_work > pivoting_tail_work
             ? actual_tail_work - pivoting_tail_work
             : 0.0;
+        solver->stats.fast_repaired_tail_restart_exact_mask =
+          exact_mask_used &&
+          pivoting_tail_columns > 0 &&
+          actual_tail_columns == (UF_long)pivoting_tail_columns &&
+          solver->stats.fast_repaired_tail_restart_overcompute_columns == 0;
       } else {
         solver->stats.fast_repaired_tail_restart_ready = 0;
       }
@@ -15353,6 +15372,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   UF_long repaired_tail_end = nk;
   UF_long repaired_tail_skipped_columns = 0;
   double repaired_tail_skipped_work = 0.0;
+  int repaired_tail_exact_mask = 0;
   UF_long preferred_restart_end =
     kls_preferred_pivot_tail_restart_end(solver, k1, nk, local_reject);
   if (preferred_restart_end == nk) {
@@ -15406,10 +15426,12 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
           solver, numeric_values, block, k1, nk, local_reject,
           preferred_restart_end, tail_mask, old_pblock, psinv, &new_lu,
           &new_size, &lnz_block, &unz_block, pblock,
-          &repaired_tail_skipped_columns, &repaired_tail_skipped_work);
+          &repaired_tail_skipped_columns, &repaired_tail_skipped_work,
+          &repaired_tail_exact_mask);
       if (!kls_block_restart_used) {
         repaired_tail_skipped_columns = 0;
         repaired_tail_skipped_work = 0.0;
+        repaired_tail_exact_mask = 0;
         solver->common.nrealloc = old_nrealloc;
         memcpy(solver->numeric->Lip + k1, saved_lip,
                (size_t)nk * sizeof(*saved_lip));
@@ -15439,7 +15461,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
         solver, numeric_values, block, k1, nk, local_reject, nk,
         NULL, old_pblock, psinv, &new_lu, &new_size, &lnz_block,
         &unz_block, pblock, &repaired_tail_skipped_columns,
-        &repaired_tail_skipped_work);
+        &repaired_tail_skipped_work, &repaired_tail_exact_mask);
     repaired_tail_end = nk;
   }
   const int tail_restart_used =
@@ -15513,6 +15535,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
                                        repaired_tail_end,
                                        repaired_tail_skipped_columns,
                                        repaired_tail_skipped_work,
+                                       repaired_tail_exact_mask,
                                        old_pblock, pblock);
   free(old_pblock);
 
@@ -42574,10 +42597,11 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
     UF_long unz_block = 0;
     UF_long skipped_columns = 0;
     double skipped_work = 0.0;
+    int exact_mask_used = 0;
     if (!kls_try_pivot_tail_restart_rejected_block(
           solver, numeric_values, block, k1, nk, 0u, nk, NULL, old_pblock,
           psinv, &new_lu, &new_size, &lnz_block, &unz_block, pblock,
-          &skipped_columns, &skipped_work) ||
+          &skipped_columns, &skipped_work, &exact_mask_used) ||
         new_lu == NULL || new_size == 0u || common->status < 0 ||
         (common->status == TRILINOS_KLU_SINGULAR &&
          common->halt_if_singular)) {

@@ -191,6 +191,11 @@ static int require_tail_overcompute_bounds(const kls_stats *stats,
       stats->fast_repaired_tail_restart_overcompute_work < 0.0 ||
       stats->fast_repaired_tail_restart_skipped_columns < 0 ||
       stats->fast_repaired_tail_restart_skipped_work < 0.0 ||
+      (stats->fast_repaired_tail_restart_exact_mask != 0 &&
+       stats->fast_repaired_tail_restart_exact_mask != 1) ||
+      (stats->fast_repaired_tail_restart_exact_mask &&
+       (!stats->fast_repaired_tail_restart_ready ||
+        stats->fast_repaired_tail_restart_overcompute_columns != 0)) ||
       stats->fast_repaired_tail_restart_overcompute_columns >
         stats->fast_repaired_tail_restart_columns ||
       stats->fast_repaired_tail_restart_overcompute_work >
@@ -198,7 +203,8 @@ static int require_tail_overcompute_bounds(const kls_stats *stats,
     fprintf(stderr,
             "unexpected tail overcompute stats for %s: tail_cols=%" PRId64
             ", over_cols=%" PRId64 ", skipped_cols=%" PRId64
-            ", tail_work=%.6g, over_work=%.6g, skipped_work=%.6g\n",
+            ", exact_mask=%d, tail_work=%.6g, over_work=%.6g"
+            ", skipped_work=%.6g\n",
             what,
             stats != NULL ? stats->fast_repaired_tail_restart_columns : 0,
             stats != NULL
@@ -207,6 +213,7 @@ static int require_tail_overcompute_bounds(const kls_stats *stats,
             stats != NULL
               ? stats->fast_repaired_tail_restart_skipped_columns
               : 0,
+            stats != NULL ? stats->fast_repaired_tail_restart_exact_mask : 0,
             stats != NULL ? stats->fast_repaired_tail_restart_work : 0.0,
             stats != NULL
               ? stats->fast_repaired_tail_restart_overcompute_work
@@ -586,6 +593,7 @@ static int test_fast_factor_root_independent_tail_restart(void) {
              stats.fast_rejected_pivoting_tail_suffix_overcompute_columns != 1 ||
              stats.fast_repaired_tail_restart_ready != 1 ||
              stats.fast_repaired_tail_restart_columns != 2 ||
+             stats.fast_repaired_tail_restart_exact_mask != 1 ||
              stats.fast_repaired_tail_restart_work <= 0.0 ||
              stats.fast_repaired_tail_restart_saved_work <= 0.0 ||
              stats.fast_block_restarts != 1 ||
@@ -596,7 +604,8 @@ static int test_fast_factor_root_independent_tail_restart(void) {
             ", suffix=%" PRId64 ", refresh=%d, tail_cols=%" PRId64
             ", tail_last=%" PRId64 ", suffix_exact=%d"
             ", suffix_over=%" PRId64 ", repaired_ready=%d"
-            ", repaired_cols=%" PRId64 ", repaired_work=%.6g"
+            ", repaired_cols=%" PRId64 ", exact_mask=%d"
+            ", repaired_work=%.6g"
             ", saved_work=%.6g, block_restarts=%d, tail_restarts=%d\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_pivot_col,
@@ -610,6 +619,7 @@ static int test_fast_factor_root_independent_tail_restart(void) {
             stats.fast_rejected_pivoting_tail_suffix_overcompute_columns,
             stats.fast_repaired_tail_restart_ready,
             stats.fast_repaired_tail_restart_columns,
+            stats.fast_repaired_tail_restart_exact_mask,
             stats.fast_repaired_tail_restart_work,
             stats.fast_repaired_tail_restart_saved_work,
             stats.fast_block_restarts,
@@ -707,13 +717,14 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
              stats.fast_repaired_tail_restart_ready != 1 ||
              stats.fast_repaired_tail_restart_skipped_columns != 2 ||
              stats.fast_repaired_tail_restart_columns != 3 ||
+             stats.fast_repaired_tail_restart_exact_mask != 1 ||
              stats.fast_tail_restarts != 1)) {
     fprintf(stderr,
             "unexpected noncontiguous gap tail stats: pivot=%" PRId64
             ", tail_cols=%" PRId64 ", first=%" PRId64 ", last=%" PRId64
             ", contiguous=%d, gaps=%" PRId64 ", ready=%d"
             ", skipped=%" PRId64 ", repaired_cols=%" PRId64
-            ", tail_restarts=%d\n",
+            ", exact_mask=%d, tail_restarts=%d\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_pivoting_tail_columns,
             stats.fast_rejected_pivoting_tail_first,
@@ -723,6 +734,7 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             stats.fast_repaired_tail_restart_ready,
             stats.fast_repaired_tail_restart_skipped_columns,
             stats.fast_repaired_tail_restart_columns,
+            stats.fast_repaired_tail_restart_exact_mask,
             stats.fast_tail_restarts);
     ok = 0;
   }

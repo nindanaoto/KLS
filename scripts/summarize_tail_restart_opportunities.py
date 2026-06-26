@@ -169,6 +169,9 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         "fast_repaired_tail_restart_saved_work": as_float(
             row, "fast_repaired_tail_restart_saved_work"
         ),
+        "fast_repaired_tail_restart_exact_mask": as_int(
+            row, "fast_repaired_tail_restart_exact_mask", 0
+        ),
         "fast_tail_restarts": as_int(row, "fast_tail_restarts", 0),
         "fast_rejected_etree_columns": as_int(row, "fast_rejected_etree_columns", 0),
         "fast_rejected_etree_work": as_float(row, "fast_rejected_etree_work"),
@@ -231,6 +234,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
             "gaps={gaps} plan_overcompute_work={plan_overcompute:.6g} "
             "overcompute_work={overcompute:.6g} "
             "saved_work={saved:.6g} "
+            "exact_mask={exact_mask} "
             "block_start={block_start} "
             "tail_first={tail_first} tail_last={tail_last} "
             "tail_topo={tail_topo} "
@@ -261,6 +265,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
                 ),
                 overcompute=float(record["suffix_tail_overcompute_work"]),
                 saved=float(record["fast_repaired_tail_restart_saved_work"]),
+                exact_mask=record["fast_repaired_tail_restart_exact_mask"],
                 block_start=record["fast_rejected_block_start"],
                 tail_first=record["fast_rejected_pivoting_tail_first"],
                 tail_last=record["fast_rejected_pivoting_tail_last"],
@@ -341,6 +346,10 @@ def main() -> int:
     executed_overcompute_columns = sum(
         int(r["suffix_tail_overcompute_columns"]) for r in executed
     )
+    executed_exact_mask = [
+        record for record in executed
+        if int(record["fast_repaired_tail_restart_exact_mask"]) == 1
+    ]
     repaired_block_work = sum(float(r["fast_repaired_block_work"]) for r in repaired)
     blocked_block_work = sum(float(r["fast_repaired_block_work"]) for r in blocked)
     row_tail = [
@@ -383,6 +392,7 @@ def main() -> int:
         "repaired_rows_with_block_work": len(repaired),
         "strict_ready_rows": len(ready),
         "tail_restart_executed_rows": len(executed),
+        "tail_restart_exact_mask_rows": len(executed_exact_mask),
         "reason_counts": dict(sorted(reason_counts.items())),
         "strict_ready_block_work_total": ready_block_work,
         "strict_ready_tail_work_total": ready_tail_work,

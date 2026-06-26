@@ -247,6 +247,7 @@ typedef struct kls_stats {
   double fast_repaired_tail_restart_overcompute_work;
   int64_t fast_repaired_tail_restart_skipped_columns;
   double fast_repaired_tail_restart_skipped_work;
+  int fast_repaired_tail_restart_exact_mask;
   int64_t row_refactor_last_local_ready_groups;
   int64_t row_refactor_local_ready_group_count;
   kls_factor_path last_factor_path;
