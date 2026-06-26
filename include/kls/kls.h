@@ -447,6 +447,10 @@ typedef struct kls_stats {
   int64_t fast_rejected_pivoting_tail_row_seed_columns;
   int64_t row_refactor_last_sparse_segment_direct_input_rows;
   int64_t row_refactor_sparse_segment_direct_input_rows;
+  int64_t row_refactor_sparse_segment_input_target_rows;
+  int64_t row_refactor_sparse_segment_input_target_entries;
+  int64_t row_refactor_last_sparse_segment_target_input_rows;
+  int64_t row_refactor_sparse_segment_target_input_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

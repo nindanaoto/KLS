@@ -565,9 +565,16 @@ a rejected pivot leaves the same prefix-visible row-major state as the native
 direct row-mirror kernel. Generic sparse row segments now also direct-load raw
 input entries into the retained row-major segment mirrors when the sparse `L`
 row, pivot, in-segment `U`, and shared trailing `U` pattern can represent the
-row exactly; stats report
-`row_refactor_last_sparse_segment_direct_input_rows` and
-`row_refactor_sparse_segment_direct_input_rows`. For generic-only row patterns,
+row exactly. The row-pattern builder also retains a per-input-entry segment
+target map for those rows, so repeated refactors write raw values through
+precomputed external, `L`, pivot, and `U` destinations instead of rediscovering
+the slots in the numeric loop. Stats report
+`row_refactor_last_sparse_segment_direct_input_rows`,
+`row_refactor_sparse_segment_direct_input_rows`,
+`row_refactor_sparse_segment_input_target_rows`,
+`row_refactor_sparse_segment_input_target_entries`,
+`row_refactor_last_sparse_segment_target_input_rows`, and
+`row_refactor_sparse_segment_target_input_rows`. For generic-only row patterns,
 pipeline groups also
 retain their external dependency rows so the scheduler can wait on them once
 before running the group kernel; stats report
