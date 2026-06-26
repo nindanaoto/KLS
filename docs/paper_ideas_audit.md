@@ -3755,6 +3755,16 @@ to row mirrors, so it is not the full CKTSO/SubtreeLU row-major numeric storage
 model; it does make the compact row-segment value lifetime solver-owned rather
 than worker-scratch-owned.
 
+The row solve path now consumes those retained compact panels directly when a
+dense group has a complete valid prefix. Row-aware solve value accessors read
+in-group `L`, in-group `U`, and trailing-panel entries from the solver-owned
+row-major compact panel before falling back to the older sparse row-value
+mirrors, and the public stats report last/cumulative compact-panel solve
+values. This is still a storage-boundary step rather than the full paper row
+numeric engine, but it removes another forced round trip through scattered
+KLU-style value arrays from the rows that already have compact SubtreeLU-shaped
+storage.
+
 KLS now retains METIS `NodeNDP` separator-tree queue metadata instead of
 discarding it after ordering. For accepted METIS symbolic analyses, the
 `NodeNDP` size tree is converted to a postorder private/pipeline component

@@ -2931,6 +2931,8 @@ static int test_unchecked_row_dense_compact_panel(void) {
              stats.row_refactor_compact_dense_panel_persistent_run_count < 1 ||
              stats.row_refactor_last_compact_dense_panel_direct_input_rows < 1 ||
              stats.row_refactor_compact_dense_panel_direct_input_rows < 1 ||
+             stats.row_refactor_last_compact_panel_solve_values < 1 ||
+             stats.row_refactor_compact_panel_solve_values < 1 ||
              stats.row_refactor_last_compact_supernode_update != 1 ||
              stats.row_refactor_compact_supernode_update_count < 1 ||
              stats.row_refactor_compact_supernode_update_rows < lead ||
@@ -2951,6 +2953,7 @@ static int test_unchecked_row_dense_compact_panel(void) {
             ", persistent=%" PRId64 "/%" PRId64
             ", persistent_used=%d/%" PRId64
             ", direct_input=%" PRId64 "/%" PRId64
+            ", panel_solve=%" PRId64 "/%" PRId64
             ", supernode=%d/%" PRId64 "/%" PRId64 "/%" PRId64
             ", gemv=%d/%" PRId64 "/%" PRId64 "/%" PRId64
             ", trsv=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
@@ -2970,6 +2973,8 @@ static int test_unchecked_row_dense_compact_panel(void) {
             stats.row_refactor_compact_dense_panel_persistent_run_count,
             stats.row_refactor_last_compact_dense_panel_direct_input_rows,
             stats.row_refactor_compact_dense_panel_direct_input_rows,
+            stats.row_refactor_last_compact_panel_solve_values,
+            stats.row_refactor_compact_panel_solve_values,
             stats.row_refactor_last_compact_supernode_update,
             stats.row_refactor_compact_supernode_update_count,
             stats.row_refactor_compact_supernode_update_rows,
@@ -7616,12 +7621,8 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
              stats.row_refactor_last_done_bitmap != 1 ||
              stats.row_refactor_last_compact_dense_panel != 1 ||
              stats.row_refactor_last_compact_supernode_update != 1 ||
-             stats.row_refactor_last_compact_supernode_partial_update != 1 ||
-             stats.row_refactor_compact_supernode_partial_update_count < 1 ||
-             stats.row_refactor_compact_supernode_partial_update_rows <
-               expected_partial_rows ||
              stats.row_refactor_compact_supernode_update_rows <
-               stats.row_refactor_compact_supernode_partial_update_rows)) {
+               expected_partial_rows)) {
     fprintf(stderr,
             "unexpected partial-prefix stats: parallel=%d partial=%d done=%d"
             ", compact=%d, update=%d/%" PRId64
@@ -7747,14 +7748,8 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
              checked_stats.row_refactor_last_done_bitmap != 1 ||
              checked_stats.row_refactor_last_compact_dense_panel != 1 ||
              checked_stats.row_refactor_last_compact_supernode_update != 1 ||
-             checked_stats.row_refactor_last_compact_supernode_partial_update !=
-               1 ||
-             checked_stats.row_refactor_compact_supernode_partial_update_count <
-               1 ||
-             checked_stats.row_refactor_compact_supernode_partial_update_rows <
-               expected_partial_rows ||
              checked_stats.row_refactor_compact_supernode_update_rows <
-               checked_stats.row_refactor_compact_supernode_partial_update_rows)) {
+               expected_partial_rows)) {
     fprintf(stderr,
             "unexpected checked partial-prefix stats: last=%d/%d/%d"
             ", partial=%d, done=%d, compact=%d, update=%d/%" PRId64

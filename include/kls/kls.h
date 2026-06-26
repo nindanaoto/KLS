@@ -457,6 +457,8 @@ typedef struct kls_stats {
   int64_t row_refactor_segment_target_cleanup_rows;
   int64_t row_refactor_last_segment_target_cleanup_entries;
   int64_t row_refactor_segment_target_cleanup_entries;
+  int64_t row_refactor_last_compact_panel_solve_values;
+  int64_t row_refactor_compact_panel_solve_values;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
