@@ -4264,13 +4264,14 @@ showed the default `gemv` path active with `trsv=0`: `coupled` refactor about
 same-session one-pass samples. This is a production-path cleanup of the
 SubtreeLU-shaped update, not another env-only experiment.
 
-The scalar compact-supernode `trsv` path is now an adaptive row-kernel choice
-instead of only an explicit experiment. With `KLS_ENABLE_COMPACT_SUPERNODE_TRSV`
-unset, KLS copies the producer suffix from sparse `x` into contiguous worker
-scratch, solves it with the producer dense upper panel, and feeds it to the
-existing trailing-panel accumulator when the triangular/update work passes a
-structure-only work-per-copied-entry gate. Setting the variable to `0` disables
-the automatic choice, and `1` still forces it for probes. Stats report
+The scalar compact-supernode `trsv` path is now the default algorithmic branch
+for every ready producer run with at least two rows, instead of only an explicit
+experiment or a work-threshold decision. With
+`KLS_ENABLE_COMPACT_SUPERNODE_TRSV` unset, KLS copies the producer suffix from
+sparse `x` into contiguous worker scratch, solves it with the producer dense
+upper panel, and feeds it to the existing trailing-panel accumulator whenever a
+ready compact producer run exists. Setting the variable to `0` disables the
+automatic choice, and `1` still forces it for probes. Stats report
 `row_refactor_last_compact_supernode_trsv`,
 `row_refactor_compact_supernode_trsv_count`,
 `row_refactor_compact_supernode_trsv_rows`, and
@@ -5223,6 +5224,17 @@ scalar updates. Benchmark JSON and stats expose this through
 dense compact smoke coverage force CBLAS off and now require the blocked path.
 The larger open gaps remain the production checked/pivoting tail executor and
 broader row-major numeric engine.
+
+KLS then removed a non-paper threshold from the scalar compact-supernode update
+selector. SubtreeLU's row update branch treats a ready supernode as a triangular
+solve plus trailing update; the previous default only used KLS's contiguous
+worker-scratch `trsv` when a work-per-copied-entry gate said it would amortize.
+The default now runs that compact `trsv` for every ready producer run with at
+least two rows, while `KLS_ENABLE_COMPACT_SUPERNODE_TRSV=0` remains available as
+an explicit A/B disable. Existing compact-panel smoke coverage already unsets
+the variable and requires the `row_refactor_last_compact_supernode_trsv` counters
+to fire, so the test now proves the paper-shaped default rather than a forced
+probe.
 
 KLS-first row-up and pivot-tail pipeline phases now also have a portable
 cached-supernode panel executor. When a published U-row run has been retained as

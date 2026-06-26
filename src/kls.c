@@ -40,9 +40,6 @@
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY 8.0
 #define KLS_ROW_REFACTOR_CBLAS_BLOCK_ROWS 32u
-#define KLS_ROW_REFACTOR_SCALAR_SUPERNODE_TRSV_MIN_WORK \
-  KLS_ROW_REFACTOR_DENSE_MIN_WORK
-#define KLS_ROW_REFACTOR_SCALAR_SUPERNODE_TRSV_MIN_WORK_PER_ENTRY 8.0
 #define KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY 8.0
 #define KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK \
@@ -26644,18 +26641,8 @@ static int kls_row_refactor_try_compact_supernode_update_cblas(
 
 static int kls_compact_supernode_trsv_auto_allows(UF_long run_rows,
                                                   UF_long trailing_len) {
-  if (run_rows < 2u) {
-    return 0;
-  }
-  const double rows = (double)run_rows;
-  const double trailing = (double)trailing_len;
-  const double update_work = 0.5 * rows * (rows - 1.0) + rows * trailing;
-  const double copied_entries = rows + trailing;
-  return update_work >= KLS_ROW_REFACTOR_SCALAR_SUPERNODE_TRSV_MIN_WORK &&
-         copied_entries > 0.0 &&
-         update_work >=
-           KLS_ROW_REFACTOR_SCALAR_SUPERNODE_TRSV_MIN_WORK_PER_ENTRY *
-             copied_entries;
+  (void)trailing_len;
+  return run_rows >= 2u;
 }
 
 static int kls_compact_supernode_trsv_should_run(

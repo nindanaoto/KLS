@@ -594,10 +594,10 @@ suffix pass before the final scatter; stats report
 `row_refactor_compact_supernode_gemv_count`,
 `row_refactor_compact_supernode_gemv_rows`, and
 `row_refactor_compact_supernode_gemv_entries`. Unset
-`KLS_ENABLE_COMPACT_SUPERNODE_TRSV` now also moves the producer suffix solve
-itself into contiguous worker scratch when a structure-only work gate says the
-triangular/update work amortizes the copy; setting it to `0` disables that
-automatic choice, and `1` still forces the path for probes. It reports
+`KLS_ENABLE_COMPACT_SUPERNODE_TRSV` now also moves every ready producer run with
+at least two rows through the contiguous worker-scratch triangular solve by
+default, matching the paper supernode update shape; setting it to `0` disables
+that automatic choice, and `1` keeps forcing the path for probes. It reports
 `row_refactor_last_compact_supernode_trsv`,
 `row_refactor_compact_supernode_trsv_count`,
 `row_refactor_compact_supernode_trsv_rows`, and
