@@ -4032,11 +4032,24 @@ reported separately from separator queues through
 `kls_first_last_row_pipeline_partial`,
 `kls_first_row_pipeline_partial_run_count`,
 `kls_first_last_row_pipeline_partial_rows`, and
-`kls_first_last_row_pipeline_partial_threads`; smoke coverage verifies that
-natural-order execution does not set the separator-pipeline counters. This does
-not add CKTSO's ETree-descendant pivot-tail executor, but it removes the prior
-drop to a purely serial KLS-first row factor whenever the separator queue was
-unavailable.
+`kls_first_last_row_pipeline_partial_threads`. Dynamic pivot epochs in this
+generic row pipeline are now reported separately through
+`kls_first_last_row_pipeline_pivot_tail`,
+`kls_first_row_pipeline_pivot_tail_run_count`,
+`kls_first_last_row_pipeline_pivot_tail_rows`,
+`kls_first_last_row_pipeline_pivot_restarts`,
+`kls_first_row_pipeline_pivot_restart_count`,
+`kls_first_last_row_pipeline_pivot_serial_rows`,
+`kls_first_last_row_pipeline_prefix_panel_rebuild`,
+`kls_first_row_pipeline_prefix_panel_rebuild_count`, and
+`kls_first_last_row_pipeline_prefix_panel_rebuild_rows`, while separator
+pipeline epochs stay on the separator-prefixed counters. Smoke coverage
+verifies both a clean natural-order execution with no pivot epoch and a
+two-thread weak-pivot natural-order execution that rebuilds the committed-prefix
+panel cache without setting separator-pipeline counters. This does not add
+CKTSO's ETree-descendant pivot-tail executor, but it removes the prior drop to
+a purely serial KLS-first row factor whenever the separator queue was
+unavailable and makes the generic Algorithm 5-style epoch behavior measurable.
 
 The KLS-first row up-looking dynamic column pivot selector also now consumes
 the retained separator map when it is available for the full factor order. On a

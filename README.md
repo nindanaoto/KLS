@@ -207,7 +207,17 @@ executor is reported separately through `kls_first_last_row_pipeline`,
 `kls_first_last_row_pipeline_partial`,
 `kls_first_row_pipeline_partial_run_count`,
 `kls_first_last_row_pipeline_partial_rows`, and
-`kls_first_last_row_pipeline_partial_threads`.
+`kls_first_last_row_pipeline_partial_threads`. Generic row-pipeline dynamic
+pivot epochs are reported through `kls_first_last_row_pipeline_pivot_tail`,
+`kls_first_row_pipeline_pivot_tail_run_count`,
+`kls_first_last_row_pipeline_pivot_tail_rows`,
+`kls_first_last_row_pipeline_pivot_restarts`,
+`kls_first_row_pipeline_pivot_restart_count`,
+`kls_first_last_row_pipeline_pivot_serial_rows`,
+`kls_first_last_row_pipeline_prefix_panel_rebuild`,
+`kls_first_row_pipeline_prefix_panel_rebuild_count`, and
+`kls_first_last_row_pipeline_prefix_panel_rebuild_rows`; separator pipeline
+epochs continue to use the separator-prefixed counters below.
 Builds configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` can use the same
 runtime `KLS_ENABLE_CBLAS_SUPERNODE=1` gate to consume eligible KLS-first
 cached panels with CBLAS `dtrsv` and `dgemv`; otherwise the cached panel uses

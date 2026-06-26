@@ -11542,6 +11542,8 @@ static int test_experimental_row_uplooking_natural_pipeline(void) {
              stats.kls_first_row_pipeline_run_count < 1 ||
              stats.kls_first_last_row_pipeline_rows != n ||
              stats.kls_first_last_row_pipeline_threads <= 0 ||
+             stats.kls_first_last_row_pipeline_pivot_tail != 0 ||
+             stats.kls_first_last_row_pipeline_prefix_panel_rebuild != 0 ||
              stats.kls_first_last_separator_queue_parallel_pipeline != 0 ||
              stats.kls_first_last_separator_queue_executed != 0 ||
              stats.selected_btf != 0 ||
@@ -11550,6 +11552,8 @@ static int test_experimental_row_uplooking_natural_pipeline(void) {
             "unexpected natural row-pipeline stats: path=%s"
             ", row_cols=%" PRId64
             ", row_pipe=%d/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", row_pivot_tail=%d"
+            ", row_prefix_rebuild=%d"
             ", sep_pipe=%d, sep_exec=%d, btf=%d, scale=%d\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.kls_first_last_row_uplooking_columns,
@@ -11557,6 +11561,8 @@ static int test_experimental_row_uplooking_natural_pipeline(void) {
             stats.kls_first_row_pipeline_run_count,
             stats.kls_first_last_row_pipeline_rows,
             stats.kls_first_last_row_pipeline_threads,
+            stats.kls_first_last_row_pipeline_pivot_tail,
+            stats.kls_first_last_row_pipeline_prefix_panel_rebuild,
             stats.kls_first_last_separator_queue_parallel_pipeline,
             stats.kls_first_last_separator_queue_executed,
             stats.selected_btf,
@@ -11744,6 +11750,7 @@ static int test_experimental_row_uplooking_dynamic_column_pivot(void) {
   options.scale = 0;
   options.static_pivoting = 0;
   options.pivot_tolerance = 0.1;
+  options.threads = 2;
 
   const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
   char *saved_first =
@@ -11805,12 +11812,31 @@ static int test_experimental_row_uplooking_dynamic_column_pivot(void) {
              stats.kls_first_row_refactor_seeded_row_count < 3 ||
              stats.kls_first_last_dynamic_column_pivots != 1 ||
              stats.kls_first_dynamic_column_pivot_count < 1 ||
+             stats.kls_first_last_row_pipeline != 1 ||
+             stats.kls_first_last_row_pipeline_pivot_tail != 1 ||
+             stats.kls_first_row_pipeline_pivot_tail_run_count < 1 ||
+             stats.kls_first_last_row_pipeline_pivot_tail_rows <= 0 ||
+             stats.kls_first_last_row_pipeline_pivot_restarts <= 0 ||
+             stats.kls_first_last_row_pipeline_pivot_serial_rows != 0 ||
+             stats.kls_first_last_row_pipeline_prefix_panel_rebuild != 1 ||
+             stats.kls_first_row_pipeline_prefix_panel_rebuild_count < 1 ||
+             stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows <=
+               0 ||
+             stats.kls_first_last_separator_queue_parallel_pipeline != 0 ||
+             stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild !=
+               0 ||
              stats.selected_scale != 0 ||
              stats.selected_btf != 0)) {
     fprintf(stderr,
             "unexpected row-up-looking dynamic pivot stats: path=%s"
             ", row_cols=%" PRId64 ", row_seed=%" PRId64 "/%" PRId64
             ", dyn_pivots=%" PRId64 "/%" PRId64
+            ", row_pipe=%d"
+            ", row_pivot_tail=%d/%" PRId64 "/%" PRId64
+            ", restarts=%" PRId64
+            ", serial=%" PRId64
+            ", prefix_rebuild=%d/%" PRId64 "/%" PRId64
+            ", sep_pipe=%d/%d"
             ", scale=%d, btf=%d\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.kls_first_last_row_uplooking_columns,
@@ -11818,6 +11844,17 @@ static int test_experimental_row_uplooking_dynamic_column_pivot(void) {
             stats.kls_first_row_refactor_seeded_row_count,
             stats.kls_first_last_dynamic_column_pivots,
             stats.kls_first_dynamic_column_pivot_count,
+            stats.kls_first_last_row_pipeline,
+            stats.kls_first_last_row_pipeline_pivot_tail,
+            stats.kls_first_row_pipeline_pivot_tail_run_count,
+            stats.kls_first_last_row_pipeline_pivot_tail_rows,
+            stats.kls_first_last_row_pipeline_pivot_restarts,
+            stats.kls_first_last_row_pipeline_pivot_serial_rows,
+            stats.kls_first_last_row_pipeline_prefix_panel_rebuild,
+            stats.kls_first_row_pipeline_prefix_panel_rebuild_count,
+            stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows,
+            stats.kls_first_last_separator_queue_parallel_pipeline,
+            stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild,
             stats.selected_scale,
             stats.selected_btf);
     ok = 0;

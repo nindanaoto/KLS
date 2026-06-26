@@ -998,7 +998,16 @@ int main(int argc, char **argv) {
            ",\"kls_first_last_row_pipeline_partial\":%d"
            ",\"kls_first_row_pipeline_partial_run_count\":%" PRId64
            ",\"kls_first_last_row_pipeline_partial_rows\":%" PRId64
-           ",\"kls_first_last_row_pipeline_partial_threads\":%" PRId64,
+           ",\"kls_first_last_row_pipeline_partial_threads\":%" PRId64
+           ",\"kls_first_last_row_pipeline_pivot_tail\":%d"
+           ",\"kls_first_row_pipeline_pivot_tail_run_count\":%" PRId64
+           ",\"kls_first_last_row_pipeline_pivot_tail_rows\":%" PRId64
+           ",\"kls_first_last_row_pipeline_pivot_restarts\":%" PRId64
+           ",\"kls_first_row_pipeline_pivot_restart_count\":%" PRId64
+           ",\"kls_first_last_row_pipeline_pivot_serial_rows\":%" PRId64
+           ",\"kls_first_last_row_pipeline_prefix_panel_rebuild\":%d"
+           ",\"kls_first_row_pipeline_prefix_panel_rebuild_count\":%" PRId64
+           ",\"kls_first_last_row_pipeline_prefix_panel_rebuild_rows\":%" PRId64,
            stats.kls_first_last_row_pipeline,
            stats.kls_first_row_pipeline_run_count,
            stats.kls_first_last_row_pipeline_rows,
@@ -1006,7 +1015,16 @@ int main(int argc, char **argv) {
            stats.kls_first_last_row_pipeline_partial,
            stats.kls_first_row_pipeline_partial_run_count,
            stats.kls_first_last_row_pipeline_partial_rows,
-           stats.kls_first_last_row_pipeline_partial_threads);
+           stats.kls_first_last_row_pipeline_partial_threads,
+           stats.kls_first_last_row_pipeline_pivot_tail,
+           stats.kls_first_row_pipeline_pivot_tail_run_count,
+           stats.kls_first_last_row_pipeline_pivot_tail_rows,
+           stats.kls_first_last_row_pipeline_pivot_restarts,
+           stats.kls_first_row_pipeline_pivot_restart_count,
+           stats.kls_first_last_row_pipeline_pivot_serial_rows,
+           stats.kls_first_last_row_pipeline_prefix_panel_rebuild,
+           stats.kls_first_row_pipeline_prefix_panel_rebuild_count,
+           stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows);
     printf(",\"kls_first_last_row_supernode_update\":%d"
            ",\"kls_first_row_supernode_update_run_count\":%" PRId64
            ",\"kls_first_last_row_supernode_update_groups\":%" PRId64
@@ -1706,7 +1724,11 @@ int main(int argc, char **argv) {
     printf("KLS row-up-looking natural pipeline: last %d"
            ", runs %" PRId64 ", rows %" PRId64 ", threads %" PRId64
            ", partial last %d, partial runs %" PRId64
-           ", partial rows %" PRId64 ", partial threads %" PRId64 "\n",
+           ", partial rows %" PRId64 ", partial threads %" PRId64
+           ", pivot tail %d/%" PRId64 "/%" PRId64
+           ", restarts %" PRId64 "/%" PRId64
+           ", serial rows %" PRId64
+           ", prefix rebuild %d/%" PRId64 "/%" PRId64 "\n",
            stats.kls_first_last_row_pipeline,
            stats.kls_first_row_pipeline_run_count,
            stats.kls_first_last_row_pipeline_rows,
@@ -1714,7 +1736,16 @@ int main(int argc, char **argv) {
            stats.kls_first_last_row_pipeline_partial,
            stats.kls_first_row_pipeline_partial_run_count,
            stats.kls_first_last_row_pipeline_partial_rows,
-           stats.kls_first_last_row_pipeline_partial_threads);
+           stats.kls_first_last_row_pipeline_partial_threads,
+           stats.kls_first_last_row_pipeline_pivot_tail,
+           stats.kls_first_row_pipeline_pivot_tail_run_count,
+           stats.kls_first_last_row_pipeline_pivot_tail_rows,
+           stats.kls_first_last_row_pipeline_pivot_restarts,
+           stats.kls_first_row_pipeline_pivot_restart_count,
+           stats.kls_first_last_row_pipeline_pivot_serial_rows,
+           stats.kls_first_last_row_pipeline_prefix_panel_rebuild,
+           stats.kls_first_row_pipeline_prefix_panel_rebuild_count,
+           stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows);
     printf("KLS row-up-looking supernode updates: last %d"
            ", runs %" PRId64 ", groups %" PRId64 ", rows %" PRId64 "\n",
            stats.kls_first_last_row_supernode_update,

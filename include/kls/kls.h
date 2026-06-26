@@ -301,6 +301,15 @@ typedef struct kls_stats {
   int64_t kls_first_row_pipeline_partial_run_count;
   int64_t kls_first_last_row_pipeline_partial_rows;
   int64_t kls_first_last_row_pipeline_partial_threads;
+  int kls_first_last_row_pipeline_pivot_tail;
+  int64_t kls_first_row_pipeline_pivot_tail_run_count;
+  int64_t kls_first_last_row_pipeline_pivot_tail_rows;
+  int64_t kls_first_last_row_pipeline_pivot_restarts;
+  int64_t kls_first_row_pipeline_pivot_restart_count;
+  int64_t kls_first_last_row_pipeline_pivot_serial_rows;
+  int kls_first_last_row_pipeline_prefix_panel_rebuild;
+  int64_t kls_first_row_pipeline_prefix_panel_rebuild_count;
+  int64_t kls_first_last_row_pipeline_prefix_panel_rebuild_rows;
   int64_t kls_first_last_dynamic_column_pivots;
   int64_t kls_first_dynamic_column_pivot_count;
   int64_t separator_analyzed_rows;
