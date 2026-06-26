@@ -41399,6 +41399,8 @@ typedef struct kls_row_first_parallel_shared {
   UF_long separator_dynamic_column_pivots;
   UF_long separator_extent_dynamic_column_pivots;
   UF_long separator_dynamic_column_fallbacks;
+  UF_long row_supernode_update_groups;
+  UF_long row_supernode_update_rows;
   atomic_ulong separator_dynamic_column_rejects;
   UF_long committed_blocks;
 } kls_row_first_parallel_shared;
@@ -41408,13 +41410,16 @@ typedef struct kls_row_first_parallel_worker {
   UF_long *row_counts;
   UF_long *row_ptr;
   double *x;
+  double *supernode_workspace;
   unsigned int *mark;
   UF_long *pattern;
   UF_long *dep_heap;
   UF_long *u_row_ptr;
+  UF_long *u_row_end;
   double *udiag_values;
   UF_long *col_pos;
   UF_long *block_q_order;
+  UF_long supernode_workspace_capacity;
 } kls_row_first_parallel_worker;
 
 static void kls_row_first_parallel_worker_free(
@@ -41425,10 +41430,12 @@ static void kls_row_first_parallel_worker_free(
   free(worker->row_counts);
   free(worker->row_ptr);
   free(worker->x);
+  free(worker->supernode_workspace);
   free(worker->mark);
   free(worker->pattern);
   free(worker->dep_heap);
   free(worker->u_row_ptr);
+  free(worker->u_row_end);
   free(worker->udiag_values);
   free(worker->col_pos);
   free(worker->block_q_order);
@@ -41460,6 +41467,8 @@ static int kls_row_first_parallel_worker_init(
   worker->u_row_ptr =
     (UF_long *)calloc((size_t)maxblock + 1u,
                       sizeof(*worker->u_row_ptr));
+  worker->u_row_end =
+    (UF_long *)calloc((size_t)maxblock, sizeof(*worker->u_row_end));
   worker->udiag_values =
     (double *)malloc((size_t)maxblock * sizeof(*worker->udiag_values));
   worker->col_pos = (UF_long *)malloc((size_t)n * sizeof(*worker->col_pos));
@@ -41468,8 +41477,9 @@ static int kls_row_first_parallel_worker_init(
   if (worker->row_counts == NULL || worker->row_ptr == NULL ||
       worker->x == NULL || worker->mark == NULL ||
       worker->pattern == NULL || worker->dep_heap == NULL ||
-      worker->u_row_ptr == NULL || worker->udiag_values == NULL ||
-      worker->col_pos == NULL || worker->block_q_order == NULL) {
+      worker->u_row_ptr == NULL || worker->u_row_end == NULL ||
+      worker->udiag_values == NULL || worker->col_pos == NULL ||
+      worker->block_q_order == NULL) {
     kls_row_first_parallel_worker_free(worker);
     return 0;
   }
@@ -41492,7 +41502,9 @@ static int kls_row_first_parallel_commit_block(
   UF_long dynamic_column_pivots,
   UF_long separator_dynamic_column_pivots,
   UF_long separator_extent_dynamic_column_pivots,
-  UF_long separator_dynamic_column_fallbacks) {
+  UF_long separator_dynamic_column_fallbacks,
+  UF_long row_supernode_update_groups,
+  UF_long row_supernode_update_rows) {
   if (worker == NULL || worker->shared == NULL ||
       worker->shared->solver == NULL || row_ptr == NULL ||
       l_entries == NULL || u_entries == NULL ||
@@ -41529,6 +41541,9 @@ static int kls_row_first_parallel_commit_block(
       separator_extent_dynamic_column_pivots;
     shared->separator_dynamic_column_fallbacks +=
       separator_dynamic_column_fallbacks;
+    shared->row_supernode_update_groups +=
+      row_supernode_update_groups;
+    shared->row_supernode_update_rows += row_supernode_update_rows;
     shared->committed_blocks++;
   }
   if (!ok) {
@@ -41570,6 +41585,7 @@ static int kls_row_first_parallel_factor_block(
          (size_t)nk * sizeof(*worker->row_counts));
   memset(worker->u_row_ptr, 0,
          ((size_t)nk + 1u) * sizeof(*worker->u_row_ptr));
+  memset(worker->u_row_end, 0, (size_t)nk * sizeof(*worker->u_row_end));
 
   for (UF_long local_col = 0; local_col < nk; ++local_col) {
     const UF_long oldcol = solver->symbolic->Q[k1 + local_col];
@@ -41592,6 +41608,19 @@ static int kls_row_first_parallel_factor_block(
   UF_long separator_dynamic_column_pivots = 0;
   UF_long separator_extent_dynamic_column_pivots = 0;
   UF_long separator_dynamic_column_fallbacks = 0;
+  UF_long row_supernode_update_groups = 0;
+  UF_long row_supernode_update_rows = 0;
+  kls_row_first_workspace row_workspace;
+  memset(&row_workspace, 0, sizeof(row_workspace));
+  row_workspace.x = worker->x;
+  row_workspace.supernode_workspace = worker->supernode_workspace;
+  row_workspace.mark = worker->mark;
+  row_workspace.pattern = worker->pattern;
+  row_workspace.dep_heap = worker->dep_heap;
+  row_workspace.u_row_ptr = worker->u_row_ptr;
+  row_workspace.u_row_end = worker->u_row_end;
+  row_workspace.supernode_workspace_capacity =
+    worker->supernode_workspace_capacity;
 
   for (UF_long local_col = 0; local_col < nk; ++local_col) {
     const UF_long oldcol = worker->block_q_order[local_col];
@@ -41716,38 +41745,42 @@ static int kls_row_first_parallel_factor_block(
     }
 
     worker->u_row_ptr[i] = u_entries.count;
-    while (dep_heap_size > 0u) {
+    kls_row_first_partial_row state;
+    memset(&state, 0, sizeof(state));
+    state.row = i;
+    state.generation = generation;
+    state.pattern_count = pattern_count;
+    state.dep_heap_size = dep_heap_size;
+    while (state.dep_heap_size > 0u) {
       const UF_long dep =
-        kls_row_first_heap_pop(worker->dep_heap, &dep_heap_size);
+        kls_row_first_heap_pop(worker->dep_heap, &state.dep_heap_size);
       if (dep >= i || worker->mark[dep] != generation) {
         goto cleanup;
       }
-      const double dep_pivot = worker->udiag_values[dep];
-      if (dep_pivot == 0.0) {
-        goto cleanup;
-      }
-      const double lij = worker->x[dep] / dep_pivot;
-      if (!kls_row_first_entries_append(&l_entries, i, dep, lij)) {
-        goto cleanup;
-      }
-      worker->x[dep] = 0.0;
-      for (UF_long up = worker->u_row_ptr[dep];
-           up < worker->u_row_ptr[dep + 1u]; ++up) {
-        const UF_long col = u_entries.col[up];
-        if (col <= dep || col >= nk) {
+      const UF_long run_end =
+        kls_row_first_owned_supernode_end(
+          &u_entries, worker->u_row_ptr, worker->u_row_end, NULL, NULL,
+          -1, nk, i, dep);
+      UF_long run_rows = 1;
+      if (run_end > dep) {
+        if (!kls_row_first_partial_apply_supernode_run(
+              &row_ctx, &row_workspace, &l_entries, &u_entries,
+              worker->udiag_values, worker->u_row_ptr, worker->u_row_end,
+              &state, dep, run_end, &run_rows)) {
           goto cleanup;
         }
-        if (worker->mark[col] != generation) {
-          worker->mark[col] = generation;
-          worker->pattern[pattern_count++] = col;
-          if (col < i) {
-            kls_row_first_heap_push(worker->dep_heap, &dep_heap_size, col);
-          }
-          worker->x[col] = 0.0;
-        }
-        worker->x[col] -= lij * u_entries.value[up];
+      } else if (!kls_row_first_partial_apply_one_dep(
+                   &row_ctx, &row_workspace, &l_entries, &u_entries,
+                   worker->udiag_values, worker->u_row_ptr,
+                   worker->u_row_end, &state, dep)) {
+        goto cleanup;
+      }
+      if (run_rows > 1u) {
+        row_supernode_update_groups++;
+        row_supernode_update_rows += run_rows;
       }
     }
+    pattern_count = state.pattern_count;
 
     double pivot = worker->mark[i] == generation ? worker->x[i] : 0.0;
     UF_long u_count = 0;
@@ -41835,6 +41868,7 @@ static int kls_row_first_parallel_factor_block(
         goto cleanup;
       }
     }
+    worker->u_row_end[i] = u_entries.count;
     worker->u_row_ptr[i + 1u] = u_entries.count;
     for (UF_long p = 0; p < pattern_count; ++p) {
       worker->x[worker->pattern[p]] = 0.0;
@@ -41848,9 +41882,13 @@ static int kls_row_first_parallel_factor_block(
     worker, block, k1, nk, worker->row_ptr, row_cols, row_input_pos,
     &l_entries, &u_entries, dynamic_column_pivots,
     separator_dynamic_column_pivots, separator_extent_dynamic_column_pivots,
-    separator_dynamic_column_fallbacks);
+    separator_dynamic_column_fallbacks, row_supernode_update_groups,
+    row_supernode_update_rows);
 
 cleanup:
+  worker->supernode_workspace = row_workspace.supernode_workspace;
+  worker->supernode_workspace_capacity =
+    row_workspace.supernode_workspace_capacity;
   kls_row_first_entries_free(&l_entries);
   kls_row_first_entries_free(&u_entries);
   free(row_cols);
@@ -42083,6 +42121,14 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
   }
   solver->kls_first_last_row_uplooking_columns = n;
   solver->kls_first_row_uplooking_column_count += n;
+  if (shared.row_supernode_update_groups > 0u) {
+    solver->kls_first_last_row_supernode_update = 1;
+    solver->kls_first_row_supernode_update_run_count++;
+    solver->kls_first_last_row_supernode_update_groups =
+      shared.row_supernode_update_groups;
+    solver->kls_first_last_row_supernode_update_rows =
+      shared.row_supernode_update_rows;
+  }
   solver->kls_first_last_dynamic_column_pivots =
     shared.dynamic_column_pivots;
   solver->kls_first_dynamic_column_pivot_count +=

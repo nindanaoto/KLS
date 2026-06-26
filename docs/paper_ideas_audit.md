@@ -4814,16 +4814,18 @@ still contributes immediately. This maps the paper's partial producer-release
 idea into the KLS-first pipeline without adding a new scheduling threshold or a
 matrix-specific rule.
 
-The same KLS-first compact/prefix supernode executor is now used by the
-ordinary row-up dependency loop, including private separator rows and serial
-pivot-tail rows. A new conservative run-bound check extends a dependency only
-through adjacent row-major `U` rows that are already owned by the same private
-worker, or already published in the shared ordered suffix, and that validate as
-the same supernode pattern. The row then consumes the run through the shared
-triangular-prefix/trailing-update helper instead of re-entering the scalar
-dependency loop for each producer row. This closes the earlier mismatch where
-SubtreeLU-style supernode updates existed in the separator pipeline but not in
-the private-mode row factor path. Stats now expose actual use through
+The same KLS-first compact/prefix supernode executor is now used by ordinary
+row-up dependency loops: natural/serial rows, separator private rows, serial
+pivot-tail rows, and the BTF-level parallel first-factor worker. A new
+conservative run-bound check extends a dependency only through adjacent
+row-major `U` rows that are already owned by the same private worker, already
+published in the shared ordered suffix, or already finished inside the current
+BTF worker block, and that validate as the same supernode pattern. The row then
+consumes the run through the shared triangular-prefix/trailing-update helper
+instead of re-entering the scalar dependency loop for each producer row. This
+closes the earlier mismatch where SubtreeLU-style supernode updates existed in
+the separator pipeline but not in the private-mode or BTF-parallel row factor
+paths. Stats now expose actual use through
 `kls_first_last_row_supernode_update`,
 `kls_first_last_row_supernode_update_groups`, and
 `kls_first_last_row_supernode_update_rows`, separate from the older

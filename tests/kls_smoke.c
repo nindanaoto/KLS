@@ -11447,6 +11447,140 @@ static int test_kls_first_parallel_pivoted_btf_fallback(void) {
   return ok;
 }
 
+static int test_parallel_btf_row_supernode_update(void) {
+  const int32_t ap[] = {0, 3, 6, 9, 10};
+  const int32_t ai[] = {
+    0, 1, 2,
+    0, 1, 2,
+    0, 1, 2,
+    3
+  };
+  const double ax[] = {
+    5.0, 0.25, 0.125,
+    0.5, 6.0, 0.375,
+    0.25, 0.5, 7.0,
+    8.0
+  };
+  const double b[] = {6.75, 13.75, 21.875, 32.0};
+  double x[4] = {0.0, 0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 1;
+  options.scale = 0;
+  options.static_pivoting = 0;
+  options.pivot_tolerance = 0.001;
+  options.threads = 2;
+
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_saved_first = saved_first_value != NULL;
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_saved_row = saved_row_value != NULL;
+  const char *saved_checked_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked =
+    saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
+  const int had_saved_checked = saved_checked_value != NULL;
+
+  int ok = 1;
+  if (had_saved_first && saved_first == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_row && saved_row == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_checked && saved_checked == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_create(&solver),
+                        "create parallel BTF row supernode")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, 4, ap, ai, 0, &options),
+                        "analyze parallel BTF row supernode")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor parallel BTF row supernode")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve parallel BTF row supernode")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats parallel BTF row supernode")) {
+    ok = 0;
+  }
+  if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
+             stats.nblocks != 2 ||
+             stats.kls_first_last_parallel_btf_blocks != 2 ||
+             stats.kls_first_last_row_supernode_update != 1 ||
+             stats.kls_first_row_supernode_update_run_count < 1 ||
+             stats.kls_first_last_row_supernode_update_groups < 1 ||
+             stats.kls_first_last_row_supernode_update_rows < 2 ||
+             stats.selected_btf != 1 || stats.selected_scale != 0)) {
+    fprintf(stderr,
+            "unexpected parallel BTF row-supernode stats: path=%s"
+            ", nblocks=%" PRId64 ", parallel_btf=%" PRId64
+            ", row_supernode=%d/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", btf=%d, scale=%d\n",
+            kls_factor_path_name(stats.last_factor_path),
+            stats.nblocks,
+            stats.kls_first_last_parallel_btf_blocks,
+            stats.kls_first_last_row_supernode_update,
+            stats.kls_first_row_supernode_update_run_count,
+            stats.kls_first_last_row_supernode_update_groups,
+            stats.kls_first_last_row_supernode_update_rows,
+            stats.selected_btf,
+            stats.selected_scale);
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0) || !close_enough(x[3], 4.0))) {
+    fprintf(stderr,
+            "unexpected parallel BTF row-supernode solution:"
+            " %.17g %.17g %.17g %.17g\n",
+            x[0], x[1], x[2], x[3]);
+    ok = 0;
+  }
+
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
+                         saved_first)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_saved_row,
+                         saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_saved_checked, saved_checked)) {
+    ok = 0;
+  }
+  kls_destroy(solver);
+  free(saved_first);
+  free(saved_row);
+  free(saved_checked);
+  return ok;
+}
+
 static int test_row_solve_from_numeric_after_klu_first(void) {
   const int32_t ap[] = {0, 2, 5, 7};
   const int32_t ai[] = {0, 1, 0, 1, 2, 1, 2};
@@ -11994,6 +12128,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_row_uplooking_btf_blocks()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_parallel_btf_row_supernode_update()) {
     return EXIT_FAILURE;
   }
   if (!test_kls_first_parallel_pivoted_btf_fallback()) {
