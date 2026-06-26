@@ -3200,7 +3200,7 @@ static int test_unchecked_row_dense_native_direct_input(void) {
   return ok;
 }
 
-static int test_batched_compact_supernode_cblas_probe(void) {
+static int test_batched_compact_supernode_update_probe(void) {
   const int32_t lead0 = 40;
   const int32_t lead1 = 40;
   const int32_t mid = 40;
@@ -3326,8 +3326,8 @@ static int test_batched_compact_supernode_cblas_probe(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE");
+  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -3363,7 +3363,7 @@ static int test_batched_compact_supernode_cblas_probe(void) {
                         "stats batched compact supernode")) {
     ok = 0;
   }
-  if (ok && stats.build_has_cblas &&
+  if (ok &&
       (stats.row_refactor_last_compact_supernode_batch != 1 ||
        stats.row_refactor_compact_supernode_batch_count < 1 ||
        stats.row_refactor_compact_supernode_batch_rows < mid ||
@@ -3371,7 +3371,7 @@ static int test_batched_compact_supernode_cblas_probe(void) {
          (int64_t)(lead0 + lead1) * (int64_t)mid ||
        stats.row_refactor_compact_supernode_batch_entries <= 0)) {
     fprintf(stderr,
-            "unexpected batched compact-supernode stats: cblas=%d"
+            "unexpected batched compact-supernode stats: build_cblas=%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
             ", compact=%d/%" PRId64 ", supernode=%d/%" PRId64 "\n",
             stats.build_has_cblas,
@@ -3384,13 +3384,6 @@ static int test_batched_compact_supernode_cblas_probe(void) {
             stats.row_refactor_compact_dense_panel_count,
             stats.row_refactor_last_compact_supernode_update,
             stats.row_refactor_compact_supernode_update_count);
-    ok = 0;
-  }
-  if (ok && !stats.build_has_cblas &&
-      stats.row_refactor_compact_supernode_batch_count != 0) {
-    fprintf(stderr,
-            "unexpected CBLAS batch count without CBLAS build: %" PRId64 "\n",
-            stats.row_refactor_compact_supernode_batch_count);
     ok = 0;
   }
 
@@ -3453,7 +3446,7 @@ static int test_batched_compact_supernode_cblas_probe(void) {
   return ok;
 }
 
-static int test_batched_compact_supernode_cblas_subrange_probe(void) {
+static int test_batched_compact_supernode_subrange_update_probe(void) {
   const int32_t lead = 40;
   const int32_t cold = 20;
   const int32_t hot = 60;
@@ -3601,8 +3594,8 @@ static int test_batched_compact_supernode_cblas_subrange_probe(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE");
+  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -3640,7 +3633,7 @@ static int test_batched_compact_supernode_cblas_subrange_probe(void) {
                         "stats subrange batched compact supernode")) {
     ok = 0;
   }
-  if (ok && stats.build_has_cblas &&
+  if (ok &&
       (stats.row_refactor_last_compact_supernode_batch != 1 ||
        stats.row_refactor_compact_supernode_batch_count != 1 ||
        stats.row_refactor_compact_supernode_batch_rows != hot ||
@@ -3655,7 +3648,7 @@ static int test_batched_compact_supernode_cblas_subrange_probe(void) {
          (int64_t)lead * (int64_t)hot ||
        stats.row_refactor_compact_supernode_batch_rejected_work_count != 0)) {
     fprintf(stderr,
-            "unexpected subrange batched compact-supernode stats: cblas=%d"
+            "unexpected subrange batched compact-supernode stats: build_cblas=%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
@@ -3675,14 +3668,6 @@ static int test_batched_compact_supernode_cblas_subrange_probe(void) {
             stats.row_refactor_compact_supernode_batch_rejected_work_count,
             stats.row_refactor_last_compact_dense_panel,
             stats.row_refactor_compact_dense_panel_count);
-    ok = 0;
-  }
-  if (ok && !stats.build_has_cblas &&
-      stats.row_refactor_compact_supernode_batch_count != 0) {
-    fprintf(stderr,
-            "unexpected CBLAS subrange batch count without CBLAS build: %"
-            PRId64 "\n",
-            stats.row_refactor_compact_supernode_batch_count);
     ok = 0;
   }
 
@@ -7390,10 +7375,10 @@ int main(void) {
   if (!test_partial_compact_supernode_prefix_pipeline()) {
     return EXIT_FAILURE;
   }
-  if (!test_batched_compact_supernode_cblas_probe()) {
+  if (!test_batched_compact_supernode_update_probe()) {
     return EXIT_FAILURE;
   }
-  if (!test_batched_compact_supernode_cblas_subrange_probe()) {
+  if (!test_batched_compact_supernode_subrange_update_probe()) {
     return EXIT_FAILURE;
   }
   if (!test_pre_static_pivoting()) {
