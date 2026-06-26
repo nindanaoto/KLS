@@ -4038,24 +4038,28 @@ KLS now has an opt-in first executor for that fragmented dense-consumer shape.
 When `KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1`, unchecked compact dense consumer
 groups can batch consecutive rows whose external prefixes mix scalar
 dependencies with multiple completed dense producer suffixes. The executor
-loads the current dense consumer panel, solves each planned producer suffix
-against the retained producer panel, applies producer trailing updates into
-later external multipliers or the current dense/trailing panel, then leaves the
-consumer panel for the normal internal dense-group factor step. A smoke fixture
-constructs one scalar external row, two dense producers, and one dense consumer
-block, with producer suffix starts varying by row so the older exact-pattern
-batch path cannot explain the result.
+uses the retained compact dense input panel when possible, processes scalar
+gaps only up to the next dense producer run, then solves and applies each
+planned producer suffix as a coarse row-panel stage across the batch before
+moving to the next scalar gap. Producer trailing updates can feed later
+external multipliers or the current dense/trailing panel, and the completed
+consumer panel is still left for the normal internal dense-group factor step. A
+smoke fixture constructs one scalar external row, two dense producers, and one
+dense consumer block, with producer suffix starts varying by row so the older
+exact-pattern batch path cannot explain the result.
 
 This closes only the structural-dispatch gap, not the performance gap. On the
-same five forced-row CKTSO-gap cases, the path now fired on all matrices
+same five forced-row CKTSO-gap cases, the path fired on all matrices
 (`352-2,136` batches and `246,898-1,754,124` batched dependency rows), proving
-that the hard rows are dense-consumer fragmented producer rows. But this build
-has `build_has_cblas=false`, so the executor used scalar triangular/update
-loops and slowed the five-case geomean to about `33.2s` versus about `13-16s`
-for the surrounding scalar producer-update paths. It remains opt-in until the
-next paper-level step implements the missing coarse BLAS/row-panel update
-instead of using this scalar scaffold as if it were SubtreeLU's production
-supernodal kernel.
+that the hard rows are dense-consumer fragmented producer rows. The staged
+row-panel and compact-direct-input version improved the opt-in five-case
+geomean from about `33.2s` to about `32.1s`, and improved the focused
+`ASIC_320k` refactor probe from about `0.347s` to about `0.319s`. But the same
+five-case baseline without the opt-in path was about `13.5s`, and the focused
+baseline was about `0.223s`. It remains opt-in until the next paper-level step
+implements production symbolic scatter maps and native row/segment panel
+storage/updates instead of using this scalar scaffold as if it were SubtreeLU's
+production supernodal kernel.
 
 The unchecked producer-panel refactor experiment also uses a blocked panel
 algorithm: scalar code factors each diagonal block, `dtrsm` solves the
