@@ -929,7 +929,9 @@ the restartable row pipeline before the older serial/KLU fallbacks, the number
 of those block-repair pipeline runs, their processed rows, active worker count,
 how many prefix and suffix rows were preserved around an exact tail-envelope
 pipeline, grouped supernode and cached-panel update rows used inside the
-pipeline, and pivot-tail serial restart work, and
+pipeline, whether accepted row-first or serial tail repairs refreshed only the
+off-diagonal suffix after proving the prefix unchanged, and pivot-tail serial
+restart work, and
 the number of serial tail restarts actually executed, plus whether
 repaired serial-tail restarts refreshed only the off-diagonal suffix or rebuilt
 all off-diagonal entries, and whether a non-contiguous serial repair exactly

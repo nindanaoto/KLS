@@ -44193,6 +44193,28 @@ cleanup:
   return ok;
 }
 
+static int kls_row_first_repaired_prefix_unchanged(
+  const kls_solver *solver,
+  UF_long k1,
+  UF_long prefix_cols,
+  const UF_long *saved_pnum,
+  const UF_long *saved_q_block,
+  const UF_long *q_order) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Pnum == NULL || saved_pnum == NULL ||
+      saved_q_block == NULL || q_order == NULL ||
+      k1 > solver->n || prefix_cols > solver->n - k1) {
+    return 0;
+  }
+  for (UF_long k = 0; k < prefix_cols; ++k) {
+    if (solver->numeric->Pnum[k1 + k] != saved_pnum[k] ||
+        q_order[k1 + k] != saved_q_block[k]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int kls_try_row_first_rebuild_rejected_block(
   kls_solver *solver,
   double *numeric_values,
@@ -44499,8 +44521,29 @@ static int kls_try_row_first_rebuild_rejected_block(
   memcpy(solver->symbolic->Q + k1, q_order + k1,
          nk_size * sizeof(*q_order));
 
-  if (!kls_rebuild_numeric_pinv(solver) ||
-      !kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
+  if (!kls_rebuild_numeric_pinv(solver)) {
+    goto fail;
+  }
+  int offdiag_refreshed = 0;
+  solver->fast_repaired_last_offdiag_suffix_refresh = 0;
+  if (kls_row_first_repaired_prefix_unchanged(
+        solver, k1, local_reject, saved_pnum, saved_q_block, q_order)) {
+    offdiag_refreshed =
+      kls_recompute_offdiag_suffix_from_pinv(solver, numeric_values,
+                                             rejected_pivot);
+    if (offdiag_refreshed) {
+      solver->fast_repaired_last_offdiag_suffix_refresh = 1;
+      solver->fast_repaired_offdiag_suffix_refresh_count++;
+    }
+  }
+  if (!offdiag_refreshed) {
+    offdiag_refreshed =
+      kls_recompute_offdiag_from_pinv(solver, numeric_values);
+    if (offdiag_refreshed) {
+      solver->fast_repaired_offdiag_full_refresh_count++;
+    }
+  }
+  if (!offdiag_refreshed) {
     goto fail;
   }
   if (scaled && !kls_parallel_refactor_permute_scale(solver)) {

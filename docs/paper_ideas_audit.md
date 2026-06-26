@@ -5086,3 +5086,14 @@ block-repair pipeline reports this through
 `fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows`; the
 non-contiguous gap smoke fixture now requires one grouped update and one
 panel-backed update over two producer rows.
+
+The same KLS-owned row-first tail repair now keeps the accepted off-diagonal
+refresh inside the proven tail scope. After accepting a row-first repaired
+block, KLS compares the repaired prefix `Pnum` and block-local `Q` order against
+the saved prefix. When that prefix is unchanged, it refreshes `Offp`/`Offi`/
+`Offx` only from the rejected pivot onward; if the proof or suffix refresh
+fails, it falls back to the existing full offdiag rebuild. This applies the
+same CKTSO-tail storage boundary that the serial tail restart already used to
+the parallel row-first repair path. The non-contiguous mask and BTF suffix smoke
+fixtures now require `fast_repaired_last_offdiag_suffix_refresh=1`, one suffix
+refresh, and zero full offdiag refreshes.

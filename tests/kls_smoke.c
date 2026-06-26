@@ -738,6 +738,9 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
              stats.fast_kls_block_restart_last_row_pipeline_gap_rows != 1 ||
              stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 0 ||
              stats.fast_kls_block_restart_last_row_pipeline_threads < 1 ||
+             stats.fast_repaired_last_offdiag_suffix_refresh != 1 ||
+             stats.fast_repaired_offdiag_suffix_refresh_count != 1 ||
+             stats.fast_repaired_offdiag_full_refresh_count != 0 ||
              stats
                .fast_kls_block_restart_last_row_pipeline_supernode_update_groups <
                1 ||
@@ -758,6 +761,8 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             ", pipeline=%d, pipeline_rows=%" PRId64
             ", pipeline_gaps=%" PRId64 ", pipeline_suffix=%" PRId64
             ", pipeline_threads=%" PRId64
+            ", offdiag_suffix=%d, offdiag_suffix_count=%" PRId64
+            ", offdiag_full_count=%" PRId64
             ", supernode_groups=%" PRId64 ", supernode_rows=%" PRId64
             ", panel_groups=%" PRId64 ", panel_rows=%" PRId64
             "\n",
@@ -774,6 +779,9 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             stats.fast_kls_block_restart_last_row_pipeline_gap_rows,
             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows,
             stats.fast_kls_block_restart_last_row_pipeline_threads,
+            stats.fast_repaired_last_offdiag_suffix_refresh,
+            stats.fast_repaired_offdiag_suffix_refresh_count,
+            stats.fast_repaired_offdiag_full_refresh_count,
             stats
               .fast_kls_block_restart_last_row_pipeline_supernode_update_groups,
             stats
@@ -2199,6 +2207,9 @@ static int test_parallel_btf_suffix_after_prefix_tail_restart(void) {
              stats.fast_kls_block_restart_last_row_pipeline_prefix_rows +
                  stats.fast_kls_block_restart_last_row_pipeline_rows !=
                stats.fast_rejected_block_size ||
+             stats.fast_repaired_last_offdiag_suffix_refresh != 1 ||
+             stats.fast_repaired_offdiag_suffix_refresh_count != 1 ||
+             stats.fast_repaired_offdiag_full_refresh_count != 0 ||
              stats.fast_repaired_parallel_tail_blocks < 2)) {
     fprintf(stderr,
             "unexpected parallel btf suffix stats: nblocks=%" PRId64
@@ -2207,6 +2218,8 @@ static int test_parallel_btf_suffix_after_prefix_tail_restart(void) {
             ", tail_ready=%d, pipeline=%d/%" PRId64
             ", pipeline_rows=%" PRId64 ", pipeline_threads=%" PRId64
             ", pipeline_prefix=%" PRId64
+            ", offdiag_suffix=%d, offdiag_suffix_count=%" PRId64
+            ", offdiag_full_count=%" PRId64
             ", parallel_tail_blocks=%" PRId64 "\n",
             stats.nblocks,
             stats.fast_rejected_pivot,
@@ -2221,6 +2234,9 @@ static int test_parallel_btf_suffix_after_prefix_tail_restart(void) {
             stats.fast_kls_block_restart_last_row_pipeline_rows,
             stats.fast_kls_block_restart_last_row_pipeline_threads,
             stats.fast_kls_block_restart_last_row_pipeline_prefix_rows,
+            stats.fast_repaired_last_offdiag_suffix_refresh,
+            stats.fast_repaired_offdiag_suffix_refresh_count,
+            stats.fast_repaired_offdiag_full_refresh_count,
             stats.fast_repaired_parallel_tail_blocks);
     ok = 0;
   }
