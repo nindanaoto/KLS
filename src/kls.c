@@ -35028,6 +35028,80 @@ static int kls_row_first_entries_append(kls_row_first_entries *entries,
   return 1;
 }
 
+static int kls_row_first_entries_swap_columns(
+  kls_row_first_entries *u_entries,
+  UF_long a,
+  UF_long b,
+  UF_long local_n) {
+  if (a == b) {
+    return 1;
+  }
+  if (u_entries == NULL || a >= local_n || b >= local_n) {
+    return 0;
+  }
+  if (u_entries->col_head != NULL) {
+    if ((u_entries->count > 0u && u_entries->next == NULL) ||
+        a >= u_entries->col_head_len || b >= u_entries->col_head_len) {
+      return 0;
+    }
+    const UF_long head_a = u_entries->col_head[a];
+    const UF_long head_b = u_entries->col_head[b];
+    UF_long guard = 0;
+    for (UF_long p = head_a; p != KLS_KLU_EMPTY; p = u_entries->next[p]) {
+      if (p >= u_entries->count || ++guard > u_entries->count) {
+        return 0;
+      }
+      u_entries->col[p] = b;
+      if (u_entries->col[p] <= u_entries->row[p] ||
+          u_entries->row[p] >= local_n || u_entries->col[p] >= local_n) {
+        return 0;
+      }
+    }
+    guard = 0;
+    for (UF_long p = head_b; p != KLS_KLU_EMPTY; p = u_entries->next[p]) {
+      if (p >= u_entries->count || ++guard > u_entries->count) {
+        return 0;
+      }
+      u_entries->col[p] = a;
+      if (u_entries->col[p] <= u_entries->row[p] ||
+          u_entries->row[p] >= local_n || u_entries->col[p] >= local_n) {
+        return 0;
+      }
+    }
+    u_entries->col_head[a] = head_b;
+    u_entries->col_head[b] = head_a;
+    if (u_entries->col_count != NULL) {
+      if (a >= u_entries->col_count_len || b >= u_entries->col_count_len) {
+        return 0;
+      }
+      const UF_long count_a = u_entries->col_count[a];
+      u_entries->col_count[a] = u_entries->col_count[b];
+      u_entries->col_count[b] = count_a;
+    }
+    return 1;
+  }
+  for (UF_long p = 0; p < u_entries->count; ++p) {
+    if (u_entries->col[p] == a) {
+      u_entries->col[p] = b;
+    } else if (u_entries->col[p] == b) {
+      u_entries->col[p] = a;
+    }
+    if (u_entries->col[p] <= u_entries->row[p] ||
+        u_entries->row[p] >= local_n || u_entries->col[p] >= local_n) {
+      return 0;
+    }
+  }
+  if (u_entries->col_count != NULL) {
+    if (a >= u_entries->col_count_len || b >= u_entries->col_count_len) {
+      return 0;
+    }
+    const UF_long count_a = u_entries->col_count[a];
+    u_entries->col_count[a] = u_entries->col_count[b];
+    u_entries->col_count[b] = count_a;
+  }
+  return 1;
+}
+
 static int kls_compare_uf_long(const void *a, const void *b) {
   const UF_long av = *(const UF_long *)a;
   const UF_long bv = *(const UF_long *)b;
@@ -35096,67 +35170,7 @@ static int kls_row_first_exchange_columns(kls_row_first_entries *u_entries,
   q_order[b] = old_a;
   col_pos[old_b] = a;
   col_pos[old_a] = b;
-  if (u_entries->col_head != NULL) {
-    if ((u_entries->count > 0u && u_entries->next == NULL) ||
-        a >= u_entries->col_head_len || b >= u_entries->col_head_len) {
-      return 0;
-    }
-    const UF_long head_a = u_entries->col_head[a];
-    const UF_long head_b = u_entries->col_head[b];
-    UF_long guard = 0;
-    for (UF_long p = head_a; p != KLS_KLU_EMPTY; p = u_entries->next[p]) {
-      if (p >= u_entries->count || ++guard > u_entries->count) {
-        return 0;
-      }
-      u_entries->col[p] = b;
-      if (u_entries->col[p] <= u_entries->row[p] ||
-          u_entries->row[p] >= local_n || u_entries->col[p] >= local_n) {
-        return 0;
-      }
-    }
-    guard = 0;
-    for (UF_long p = head_b; p != KLS_KLU_EMPTY; p = u_entries->next[p]) {
-      if (p >= u_entries->count || ++guard > u_entries->count) {
-        return 0;
-      }
-      u_entries->col[p] = a;
-      if (u_entries->col[p] <= u_entries->row[p] ||
-          u_entries->row[p] >= local_n || u_entries->col[p] >= local_n) {
-        return 0;
-      }
-    }
-    u_entries->col_head[a] = head_b;
-    u_entries->col_head[b] = head_a;
-    if (u_entries->col_count != NULL) {
-      if (a >= u_entries->col_count_len || b >= u_entries->col_count_len) {
-        return 0;
-      }
-      const UF_long count_a = u_entries->col_count[a];
-      u_entries->col_count[a] = u_entries->col_count[b];
-      u_entries->col_count[b] = count_a;
-    }
-    return 1;
-  }
-  for (UF_long p = 0; p < u_entries->count; ++p) {
-    if (u_entries->col[p] == a) {
-      u_entries->col[p] = b;
-    } else if (u_entries->col[p] == b) {
-      u_entries->col[p] = a;
-    }
-    if (u_entries->col[p] <= u_entries->row[p] ||
-        u_entries->row[p] >= local_n || u_entries->col[p] >= local_n) {
-      return 0;
-    }
-  }
-  if (u_entries->col_count != NULL) {
-    if (a >= u_entries->col_count_len || b >= u_entries->col_count_len) {
-      return 0;
-    }
-    const UF_long count_a = u_entries->col_count[a];
-    u_entries->col_count[a] = u_entries->col_count[b];
-    u_entries->col_count[b] = count_a;
-  }
-  return 1;
+  return kls_row_first_entries_swap_columns(u_entries, a, b, local_n);
 }
 
 static int kls_pack_row_first_block_numeric(
@@ -36478,7 +36492,6 @@ typedef enum kls_row_first_pipeline_failure {
   KLS_ROW_FIRST_PIPELINE_FAIL_SETUP,
   KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY,
   KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT,
-  KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT_PUBLISHED,
   KLS_ROW_FIRST_PIPELINE_FAIL_APPEND,
   KLS_ROW_FIRST_PIPELINE_FAIL_THREAD
 } kls_row_first_pipeline_failure;
@@ -36491,10 +36504,19 @@ static void kls_row_first_partial_row_clear(
     return;
   }
   for (UF_long p = 0; p < state->pattern_count; ++p) {
-    workspace->x[workspace->pattern[p]] = 0.0;
+    const UF_long col = workspace->pattern[p];
+    workspace->x[col] = 0.0;
+    if (workspace->mark != NULL &&
+        workspace->mark[col] == state->generation) {
+      workspace->mark[col] = 0u;
+    }
   }
   if (state->row < UF_long_max) {
     workspace->x[state->row] = 0.0;
+    if (workspace->mark != NULL &&
+        workspace->mark[state->row] == state->generation) {
+      workspace->mark[state->row] = 0u;
+    }
   }
 }
 
@@ -36954,7 +36976,7 @@ typedef struct kls_row_first_pipeline_shared {
   kls_row_first_workspace *workspace;
   kls_row_first_entries *l_entries;
   kls_row_first_entries *u_entries;
-  const kls_row_first_entries *private_u_entries;
+  kls_row_first_entries *private_u_entries;
   const UF_long *private_u_row_ptr;
   const UF_long *private_u_row_end;
   UF_long *supernode_start;
@@ -36966,6 +36988,9 @@ typedef struct kls_row_first_pipeline_shared {
   pthread_mutex_t lock;
   pthread_cond_t cond;
   UF_long completed_pos;
+  UF_long order_epoch;
+  UF_long pivot_tail_rows;
+  UF_long pivot_restarts;
   int failed;
   kls_row_first_pipeline_failure failure_reason;
 } kls_row_first_pipeline_shared;
@@ -37050,155 +37075,200 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
     }
 
     const UF_long row = shared->row_order[pos];
-    kls_row_first_partial_row state;
-    memset(&state, 0, sizeof(state));
-    state.row = UF_long_max;
-    worker->l_entries.count = 0;
-    worker->u_entries.count = 0;
-    int blocked = 0;
-    if (row >= shared->ctx->nk ||
-        !kls_row_first_partial_row_begin(shared->ctx, &worker->workspace,
-                                         &state, row) ||
-        !kls_row_first_partial_apply_ready(
-          shared->ctx, &worker->workspace, &worker->l_entries,
-          shared->private_u_entries, shared->udiag_values,
-          shared->private_u_row_ptr, shared->private_u_row_end,
-          shared->supernode_start, shared->supernode_end,
-          shared->row_done, shared->begin, &state,
-          &worker->pipeline_supernode_update_groups,
-          &worker->pipeline_supernode_update_rows, &blocked)) {
-      kls_row_first_partial_row_clear(&state, &worker->workspace);
-      pthread_mutex_lock(&shared->lock);
-      kls_row_first_pipeline_mark_failed(
-        shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
-      pthread_cond_broadcast(&shared->cond);
-      pthread_mutex_unlock(&shared->lock);
-      break;
-    }
-    worker->partial_rows++;
+    int stop_worker = 0;
+    int retry_row = 1;
+    while (retry_row) {
+      retry_row = 0;
+      kls_row_first_partial_row state;
+      memset(&state, 0, sizeof(state));
+      state.row = UF_long_max;
+      worker->l_entries.count = 0;
+      worker->u_entries.count = 0;
+      int blocked = 0;
+      int begin_ok = 1;
+      UF_long order_epoch = 0;
 
-    pthread_mutex_lock(&shared->lock);
-    int wait_partial = 0;
-    while (!shared->failed && shared->completed_pos != pos) {
-      const UF_long before_l_count = worker->l_entries.count;
-      if (!kls_row_first_partial_apply_ready(
-            shared->ctx, &worker->workspace, &worker->l_entries,
-            shared->u_entries, shared->udiag_values,
-            shared->workspace->u_row_ptr,
-            shared->workspace->u_row_end,
-            shared->supernode_start, shared->supernode_end,
-            shared->row_done, shared->completed_pos, &state,
-            &worker->pipeline_supernode_update_groups,
-            &worker->pipeline_supernode_update_rows, NULL)) {
-        kls_row_first_pipeline_mark_failed(
-          shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
-        pthread_cond_broadcast(&shared->cond);
+      pthread_mutex_lock(&shared->lock);
+      if (shared->failed) {
+        stop_worker = 1;
+        begin_ok = 0;
+      } else {
+        order_epoch = shared->order_epoch;
+        if (row >= shared->ctx->nk ||
+            !kls_row_first_partial_row_begin(shared->ctx,
+                                             &worker->workspace,
+                                             &state, row) ||
+            !kls_row_first_partial_apply_ready(
+              shared->ctx, &worker->workspace, &worker->l_entries,
+              shared->private_u_entries, shared->udiag_values,
+              shared->private_u_row_ptr, shared->private_u_row_end,
+              shared->supernode_start, shared->supernode_end,
+              shared->row_done, shared->begin, &state,
+              &worker->pipeline_supernode_update_groups,
+              &worker->pipeline_supernode_update_rows, &blocked)) {
+          kls_row_first_pipeline_mark_failed(
+            shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
+          pthread_cond_broadcast(&shared->cond);
+          stop_worker = 1;
+          begin_ok = 0;
+        }
+      }
+      pthread_mutex_unlock(&shared->lock);
+      if (!begin_ok) {
+        kls_row_first_partial_row_clear(&state, &worker->workspace);
         break;
       }
-      if (worker->l_entries.count > before_l_count) {
-        wait_partial = 1;
-        worker->pipeline_wait_partial_deps +=
-          worker->l_entries.count - before_l_count;
+      worker->partial_rows++;
+
+      pthread_mutex_lock(&shared->lock);
+      int wait_partial = 0;
+      while (!shared->failed && shared->completed_pos != pos) {
+        if (order_epoch != shared->order_epoch) {
+          retry_row = 1;
+          break;
+        }
+        const UF_long before_l_count = worker->l_entries.count;
+        if (!kls_row_first_partial_apply_ready(
+              shared->ctx, &worker->workspace, &worker->l_entries,
+              shared->u_entries, shared->udiag_values,
+              shared->workspace->u_row_ptr,
+              shared->workspace->u_row_end,
+              shared->supernode_start, shared->supernode_end,
+              shared->row_done, shared->completed_pos, &state,
+              &worker->pipeline_supernode_update_groups,
+              &worker->pipeline_supernode_update_rows, NULL)) {
+          kls_row_first_pipeline_mark_failed(
+            shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
+          pthread_cond_broadcast(&shared->cond);
+          break;
+        }
+        if (worker->l_entries.count > before_l_count) {
+          wait_partial = 1;
+          worker->pipeline_wait_partial_deps +=
+            worker->l_entries.count - before_l_count;
+          continue;
+        }
+        if (pthread_cond_wait(&shared->cond, &shared->lock) != 0) {
+          kls_row_first_pipeline_mark_failed(
+            shared, KLS_ROW_FIRST_PIPELINE_FAIL_THREAD);
+          pthread_cond_broadcast(&shared->cond);
+          break;
+        }
+      }
+      if (!retry_row && !shared->failed &&
+          order_epoch != shared->order_epoch) {
+        retry_row = 1;
+      }
+      if (wait_partial) {
+        worker->pipeline_wait_partial_rows++;
+      }
+      if (retry_row) {
+        pthread_mutex_unlock(&shared->lock);
+        kls_row_first_partial_row_clear(&state, &worker->workspace);
         continue;
       }
-      if (pthread_cond_wait(&shared->cond, &shared->lock) != 0) {
-        kls_row_first_pipeline_mark_failed(
-          shared, KLS_ROW_FIRST_PIPELINE_FAIL_THREAD);
-        pthread_cond_broadcast(&shared->cond);
-        break;
-      }
-    }
-    if (wait_partial) {
-      worker->pipeline_wait_partial_rows++;
-    }
-    if (!shared->failed) {
-      blocked = 0;
-      int pivot_needed = 0;
-      int pivoted = 0;
-      UF_long selected_col = KLS_KLU_EMPTY;
-      int selected_separator_exact = 0;
-      int selected_separator_extent = 0;
-      if (!kls_row_first_partial_apply_ready(
-            shared->ctx, &worker->workspace, &worker->l_entries,
-            shared->u_entries, shared->udiag_values,
-            shared->workspace->u_row_ptr,
-            shared->workspace->u_row_end,
-            shared->supernode_start, shared->supernode_end,
-            shared->row_done, shared->ctx->nk, &state,
-            &worker->pipeline_supernode_update_groups,
-            &worker->pipeline_supernode_update_rows, &blocked) ||
-          blocked) {
-        kls_row_first_pipeline_mark_failed(
-          shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
-      } else if (!kls_row_first_partial_finish(
-                   shared->ctx, &worker->workspace, &worker->u_entries,
-                   &state, 1, &pivot_needed, &pivoted, &selected_col,
-                   &selected_separator_exact,
-                   &selected_separator_extent)) {
-        kls_row_first_pipeline_mark_failed(
-          shared, pivot_needed ? KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT
-                               : KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
-      } else {
-        const UF_long l_need = worker->l_entries.count;
-        const UF_long u_need = worker->u_entries.count;
-        if (l_need > UF_long_max - shared->l_entries->count ||
-            u_need > UF_long_max - shared->u_entries->count ||
-            !kls_row_first_entries_reserve(
-              shared->l_entries, shared->l_entries->count + l_need) ||
-            !kls_row_first_entries_reserve(
-              shared->u_entries, shared->u_entries->count + u_need)) {
+      if (!shared->failed) {
+        blocked = 0;
+        int pivot_needed = 0;
+        int pivoted = 0;
+        UF_long selected_col = KLS_KLU_EMPTY;
+        int selected_separator_exact = 0;
+        int selected_separator_extent = 0;
+        if (!kls_row_first_partial_apply_ready(
+              shared->ctx, &worker->workspace, &worker->l_entries,
+              shared->u_entries, shared->udiag_values,
+              shared->workspace->u_row_ptr,
+              shared->workspace->u_row_end,
+              shared->supernode_start, shared->supernode_end,
+              shared->row_done, shared->ctx->nk, &state,
+              &worker->pipeline_supernode_update_groups,
+              &worker->pipeline_supernode_update_rows, &blocked) ||
+            blocked) {
           kls_row_first_pipeline_mark_failed(
-            shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
-        } else if (pivoted &&
-                   (selected_col == KLS_KLU_EMPTY ||
-                    !kls_row_first_exchange_columns(
-                      shared->u_entries, shared->ctx->q_order,
-                      shared->ctx->col_pos, row, selected_col,
-                      shared->ctx->nk, shared->ctx->n))) {
+            shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
+        } else if (!kls_row_first_partial_finish(
+                     shared->ctx, &worker->workspace, &worker->u_entries,
+                     &state, 1, &pivot_needed, &pivoted, &selected_col,
+                     &selected_separator_exact,
+                     &selected_separator_extent)) {
           kls_row_first_pipeline_mark_failed(
-            shared, KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT);
-        } else if (!kls_row_first_append_entries(shared->l_entries,
-                                                 &worker->l_entries)) {
-          kls_row_first_pipeline_mark_failed(
-            shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
+            shared, pivot_needed ? KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT
+                                 : KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
         } else {
-          shared->workspace->u_row_ptr[row] = shared->u_entries->count;
-          if (!kls_row_first_append_entries(shared->u_entries,
-                                            &worker->u_entries)) {
+          const UF_long l_need = worker->l_entries.count;
+          const UF_long u_need = worker->u_entries.count;
+          if (l_need > UF_long_max - shared->l_entries->count ||
+              u_need > UF_long_max - shared->u_entries->count ||
+              !kls_row_first_entries_reserve(
+                shared->l_entries, shared->l_entries->count + l_need) ||
+              !kls_row_first_entries_reserve(
+                shared->u_entries, shared->u_entries->count + u_need)) {
+            kls_row_first_pipeline_mark_failed(
+              shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
+          } else if (pivoted &&
+                     (selected_col == KLS_KLU_EMPTY ||
+                      !kls_row_first_exchange_columns(
+                        shared->u_entries, shared->ctx->q_order,
+                        shared->ctx->col_pos, row, selected_col,
+                        shared->ctx->nk, shared->ctx->n) ||
+                      !kls_row_first_entries_swap_columns(
+                        shared->private_u_entries, row, selected_col,
+                        shared->ctx->nk))) {
+            kls_row_first_pipeline_mark_failed(
+              shared, KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT);
+          } else if (!kls_row_first_append_entries(shared->l_entries,
+                                                   &worker->l_entries)) {
             kls_row_first_pipeline_mark_failed(
               shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
           } else {
-            shared->workspace->u_row_end[row] = shared->u_entries->count;
-            shared->udiag_values[row] = state.pivot;
-            kls_row_first_supernodes_publish_row(
-              shared->u_entries, shared->workspace->u_row_ptr,
-              shared->workspace->u_row_end, shared->row_done,
-              shared->ctx->nk, shared->begin, row,
-              shared->supernode_start, shared->supernode_end);
-            shared->row_done[row] = 1u;
-            shared->completed_pos = pos + 1u;
-            worker->rows++;
-            if (pivoted) {
-              if (shared->stats != NULL) {
-                shared->stats->dynamic_column_pivots++;
-                if (selected_separator_exact) {
-                  shared->stats->separator_dynamic_column_pivots++;
-                } else if (selected_separator_extent) {
-                  shared->stats->separator_extent_dynamic_column_pivots++;
-                }
-              }
+            shared->workspace->u_row_ptr[row] = shared->u_entries->count;
+            if (!kls_row_first_append_entries(shared->u_entries,
+                                              &worker->u_entries)) {
               kls_row_first_pipeline_mark_failed(
-                shared, KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT_PUBLISHED);
+                shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
+            } else {
+              shared->workspace->u_row_end[row] = shared->u_entries->count;
+              shared->udiag_values[row] = state.pivot;
+              kls_row_first_supernodes_publish_row(
+                shared->u_entries, shared->workspace->u_row_ptr,
+                shared->workspace->u_row_end, shared->row_done,
+                shared->ctx->nk, shared->begin, row,
+                shared->supernode_start, shared->supernode_end);
+              shared->row_done[row] = 1u;
+              shared->completed_pos = pos + 1u;
+              worker->rows++;
+              if (pivoted) {
+                if (shared->stats != NULL) {
+                  shared->stats->dynamic_column_pivots++;
+                  if (selected_separator_exact) {
+                    shared->stats->separator_dynamic_column_pivots++;
+                  } else if (selected_separator_extent) {
+                    shared->stats->separator_extent_dynamic_column_pivots++;
+                  }
+                }
+                shared->pivot_tail_rows += shared->end - pos;
+                shared->pivot_restarts++;
+                shared->order_epoch++;
+                kls_row_first_supernodes_reset(
+                  shared->u_entries, shared->workspace->u_row_ptr,
+                  shared->workspace->u_row_end, shared->row_done,
+                  shared->ctx->nk, pos + 1u, shared->supernode_start,
+                  shared->supernode_end);
+              }
             }
           }
         }
+        pthread_cond_broadcast(&shared->cond);
       }
-      pthread_cond_broadcast(&shared->cond);
+      const int failed = shared->failed;
+      pthread_mutex_unlock(&shared->lock);
+      kls_row_first_partial_row_clear(&state, &worker->workspace);
+      if (failed) {
+        stop_worker = 1;
+        break;
+      }
     }
-    const int failed = shared->failed;
-    pthread_mutex_unlock(&shared->lock);
-    kls_row_first_partial_row_clear(&state, &worker->workspace);
-    if (failed) {
+    if (stop_worker) {
       break;
     }
   }
@@ -37226,15 +37296,19 @@ static int kls_row_first_run_parallel_pipeline_phase(
   UF_long *supernode_update_rows_out,
   UF_long *completed_pos_out,
   int *pivot_tail_ready_out,
-  int *pivot_row_published_out) {
+  UF_long *pivot_tail_rows_out,
+  UF_long *pivot_restarts_out) {
   if (completed_pos_out != NULL) {
     *completed_pos_out = begin;
   }
   if (pivot_tail_ready_out != NULL) {
     *pivot_tail_ready_out = 0;
   }
-  if (pivot_row_published_out != NULL) {
-    *pivot_row_published_out = 0;
+  if (pivot_tail_rows_out != NULL) {
+    *pivot_tail_rows_out = 0;
+  }
+  if (pivot_restarts_out != NULL) {
+    *pivot_restarts_out = 0;
   }
   if (ctx == NULL || row_order == NULL || begin >= end ||
       thread_count <= 1 || workspace == NULL || l_entries == NULL ||
@@ -37312,6 +37386,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.row_done = row_done;
   shared.stats = stats;
   shared.completed_pos = begin;
+  shared.order_epoch = 0;
   atomic_init(&shared.next_pos, (unsigned long)begin);
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {
     free(threads);
@@ -37374,24 +37449,16 @@ static int kls_row_first_run_parallel_pipeline_phase(
   }
   const int ok = created == worker_count && !shared.failed &&
     shared.completed_pos == end && processed_rows == pipeline_rows;
-  const int pivot_published =
-    shared.failure_reason == KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT_PUBLISHED;
   const int pivot_tail_ready = created == worker_count && shared.failed &&
-    (shared.failure_reason == KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT ||
-     pivot_published) &&
+    shared.failure_reason == KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT &&
     shared.completed_pos >= begin &&
-    (pivot_published ? shared.completed_pos <= end
-                     : shared.completed_pos < end) &&
+    shared.completed_pos < end &&
     processed_rows == shared.completed_pos - begin;
   if (completed_pos_out != NULL) {
     *completed_pos_out = shared.completed_pos;
   }
   if (pivot_tail_ready_out != NULL) {
     *pivot_tail_ready_out = pivot_tail_ready ? 1 : 0;
-  }
-  if (pivot_row_published_out != NULL) {
-    *pivot_row_published_out =
-      pivot_tail_ready && pivot_published ? 1 : 0;
   }
   if ((ok || pivot_tail_ready) && pipeline_rows_out != NULL) {
     *pipeline_rows_out = processed_rows;
@@ -37413,6 +37480,12 @@ static int kls_row_first_run_parallel_pipeline_phase(
   }
   if ((ok || pivot_tail_ready) && supernode_update_rows_out != NULL) {
     *supernode_update_rows_out = supernode_update_rows;
+  }
+  if ((ok || pivot_tail_ready) && pivot_tail_rows_out != NULL) {
+    *pivot_tail_rows_out = shared.pivot_tail_rows;
+  }
+  if ((ok || pivot_tail_ready) && pivot_restarts_out != NULL) {
+    *pivot_restarts_out = shared.pivot_restarts;
   }
 
   pthread_cond_destroy(&shared.cond);
@@ -37510,16 +37583,18 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     UF_long phase_wait_partial_deps = 0;
     UF_long phase_supernode_groups = 0;
     UF_long phase_supernode_rows = 0;
+    UF_long phase_pivot_tail_rows = 0;
+    UF_long phase_pivot_restarts = 0;
     UF_long completed_pos = cursor;
     int pivot_tail_ready = 0;
-    int pivot_row_published = 0;
     if (kls_row_first_run_parallel_pipeline_phase(
           ctx, row_order, cursor, end, thread_count, workspace, l_entries,
           u_entries, udiag_values, row_done, stats, &phase_rows,
           &phase_threads, &phase_partial_rows, &phase_wait_partial_rows,
           &phase_wait_partial_deps, &phase_supernode_groups,
           &phase_supernode_rows, &completed_pos, &pivot_tail_ready,
-          &pivot_row_published)) {
+          &phase_pivot_tail_rows,
+          &phase_pivot_restarts)) {
       pipeline_rows += phase_rows;
       if (phase_threads > max_threads) {
         max_threads = phase_threads;
@@ -37529,13 +37604,13 @@ static int kls_row_first_run_restartable_pipeline_suffix(
       wait_partial_deps += phase_wait_partial_deps;
       supernode_update_groups += phase_supernode_groups;
       supernode_update_rows += phase_supernode_rows;
+      pivot_tail_rows += phase_pivot_tail_rows;
+      pivot_restarts += phase_pivot_restarts;
       cursor = end;
       break;
     }
     if (!pivot_tail_ready || completed_pos < cursor ||
-        (!pivot_row_published && completed_pos >= end) ||
-        (pivot_row_published &&
-         (completed_pos <= cursor || completed_pos > end))) {
+        completed_pos >= end) {
       return 0;
     }
     pipeline_rows += phase_rows;
@@ -37547,16 +37622,10 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     wait_partial_deps += phase_wait_partial_deps;
     supernode_update_groups += phase_supernode_groups;
     supernode_update_rows += phase_supernode_rows;
-    const UF_long pivot_tail_begin =
-      pivot_row_published && completed_pos > cursor
-        ? completed_pos - 1u
-        : completed_pos;
-    pivot_tail_rows += end - pivot_tail_begin;
+    pivot_tail_rows += phase_pivot_tail_rows;
+    pivot_restarts += phase_pivot_restarts;
+    pivot_tail_rows += end - completed_pos;
     pivot_restarts++;
-    if (pivot_row_published) {
-      cursor = completed_pos;
-      continue;
-    }
     const UF_long pivot_row = row_order[completed_pos];
     if (pivot_row >= ctx->nk ||
         !kls_row_first_factor_one_row(

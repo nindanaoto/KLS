@@ -180,15 +180,17 @@ through `kls_first_last_separator_extent_dynamic_column_pivots` and
 rejections through `kls_first_last_separator_dynamic_column_fallbacks` and
 `kls_first_separator_dynamic_column_fallback_count`. If a guarded separator
 pipeline row still needs a dynamic pivot, KLS preserves the completed prefix,
-publishes the scoped pivot row while holding the ordered pipeline lock when the
-row was safely pre-updated, and relaunches the remaining suffix through the
-pipeline; benchmark stats distinguish the restart envelope from older external
-serialized rows with
+publishes the scoped pivot row while holding the ordered pipeline lock, updates
+the phase-local prefix snapshot, advances a column-order epoch, and lets
+speculative suffix rows that started under an older epoch discard and restart
+inside the same pipeline phase. Benchmark stats count these epoch recoveries
+with
 `kls_first_last_separator_queue_pipeline_pivot_restarts` and
+separate them from older external serialized rows with
 `kls_first_last_separator_queue_pipeline_pivot_serial_rows`. Partial
 pre-updates and scalar row-supernode updates completed before a pivot restart
 remain counted in the same separator-pipeline counters, matching the retained
-prefix semantics of the relaunch. If that row-up-looking bridge is not eligible
+prefix semantics of the epoch retry. If that row-up-looking bridge is not eligible
 or still rejects a pivot, the pivoted KLS block tail
 still runs; it reuses KLS's retained factor-order input map when available,
 reported as

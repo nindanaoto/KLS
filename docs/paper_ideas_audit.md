@@ -121,7 +121,13 @@ the retained METIS `NodeNDP` map covers the full factor order, it now uses
 SubtreeLU Algorithm 4's scoped `N'` maximum inside the current collapsed
 component extent instead of the whole updated row; if no safe scoped candidate
 exists for a required pivot, it rejects the row-up attempt instead of crossing
-the separator pivot domain.
+the separator pivot domain. When a separator-pipeline row has been safely
+pre-updated and then needs a scoped pivot, the pipeline now publishes that row
+under the ordered lock, updates both the committed and phase-local prefix U
+entries for the column exchange, advances a column-order epoch, and makes
+speculative suffix rows that began under an older epoch discard and restart
+inside the same worker phase instead of tearing down and relaunching the whole
+pipeline suffix.
 Benchmark stats separate separator-domain dynamic pivots, would-have-crossed
 fallback candidates, and strict rejects.
 Its static-pivot
@@ -379,12 +385,12 @@ new KLS-owned symbolic/numeric machinery:
   ready predecessor rows as scalar supernode runs, covering Algorithm 4's
   ready-supernode update branch without adding a BLAS dependency. When a
   safely pre-updated pipeline row needs a scoped dynamic pivot, KLS now
-  publishes that pivot row under the ordered pipeline lock, stops speculative
-  suffix workers, and relaunches the remaining suffix through the guarded
-  pipeline, preserving completed private/pipeline work without discarding the
-  separator schedule. KLS still lacks Algorithm 4's fully continuous
-  no-relaunch pivoting pipeline, production coarse BLAS supernode storage, and
-  a checked-tail factor/refactor queue consumer.
+  publishes that pivot row under the ordered pipeline lock, updates both
+  committed and phase-local prefix U entries for the column exchange, advances
+  a column-order epoch, and makes speculative suffix rows that began under an
+  older epoch discard and retry inside the same guarded pipeline phase. KLS
+  still lacks production coarse BLAS supernode storage and a checked-tail
+  factor/refactor queue consumer.
 - Broader supernodal row/segment updates in the sparse up-looking executor.
   KLS has exact-pattern, ragged single-producer, and opt-in fragmented
   multi-producer dense-panel updates, but these are still narrower than
@@ -401,7 +407,7 @@ project does not drift toward benchmark-name-specific heuristics.
 | Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection, serial refactor scatter metadata, and exact EGraph level metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
 | NICSLU | AMD-style ordering, optional static-pivoting preprocessing, optional SPRAL Hungarian/scaling trials, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. KLS now records exact no-pivot EGraph levels from the numeric U pattern and uses them in guarded large single-block, dominant-BTF-block, and fragmented non-dominant many-block refactor paths, including KLU row-scaled cases where scale handling is supported and work-estimated cluster-level thread slices. KLS also reports the NICSLU R1/R2 static parallel suitability model as `parallel_model_r1`, `parallel_model_r2`, and `parallel_model_recommends_parallel`, using the paper's 2.0 and 50.0 thresholds, and uses that model to seed KLS-owned row/segment refactor preparation when an exact dependency schedule and the row-work gate agree. | Full production MC64 matching/scaling is not implemented. NICSLU's detailed ETree/EScheduler-guided intra-block factorization and full pivoting-aware ETree scheduling are not implemented. Earlier broader EGraph prototypes were rejected because they were not general wins on the current kernel/storage. |
 | CKTSO | METIS nested-dissection ordering, guarded SCOTCH nested-dissection auto trials for large high-work symbolic candidates, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, CKTSO-style row-wise guessed-diagonal checks in KLS-owned checked row fast/refactor passes, KLS-owned block-local restart after a failed fast-factor pivot check including root-of-block rejects, conservative serial prefix-current/all-current tail restart for validated non-root unscaled repaired blocks, scaled block-local restart plus scaled checked continuation over later BTF blocks, scaled prefix-current/all-current block repair, scaled in-block serial tail restart after recomputing row scales to input-row order, threaded BTF worker-pool completed-block tracking for safe prefix-current rejects, guarded EGraph cluster/pipeline no-pivot refactors for single, dominant BTF, and selected fragmented many-block BTF shapes, work-balanced cluster-level refactor slices, cached row-permutation solve scratch, CKTSO Section V-style structure-adaptive triangular solve metadata/executor, and dual-potential plus optional SPRAL matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only partially approximated because KLS does not have an always-on production MC64-equivalent weighted assignment stage. Full pipelined ETree-descendant tail restart with pivoting after a failed pivot check is not implemented. Otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
-| SubtreeLU | KLS vendors reproducible METIS/GKlib and SCOTCH submodules, uses METIS plus CAMD refinement, asks METIS `NodeNDP` for at least `log2(threads)` nested-dissection levels on larger threaded METIS analyses, and can keep SCOTCH from `auto` when its symbolic score is materially better on large high-work cases. KLS now retains accepted `NodeNDP` component sequences from METIS user-order callbacks, stitches them into a global BTF-aware separator forest with synthetic private components for blocks that did not run `NodeNDP`, reports the resulting global queue shape in stats/bench output, and uses the component map to build separator-private initial thread queues for the experimental row-refactor ready queue. No-pivot and checked row refactors can now consume the retained separator tree through a SubtreeLU Algorithm 6-style FLOP-balanced private/pipeline queue, with separator-crossing row groups forced into pipeline work. The KLS-first pivoting row-up-looking factorization now builds Algorithm 3-style private row queues by greedily assigning retained private components to threads and a pipeline row queue in factor order, remaps the block-local row/column order and `Pnum` to that queue, executes private rows in worker-local entries, and consumes pipeline rows through a guarded Algorithm 3 atomic counter. It also uses SubtreeLU Algorithm 4's scoped `N'` pivot maximum inside the current collapsed component extent, rejects unsafe cross-domain exchanges, applies ready predecessor row-supernode runs during partial pipeline-row updates, and publishes a safely pre-updated weak-pivot pipeline row under the ordered pipeline lock before relaunching the remaining suffix. This matches SubtreeLU's separator-domain pivot rule while preserving KLS's fallback to the pivoted block kernel for unsafe scoped rows. KLS also records row-major U-pattern supernode candidate diagnostics from the exact no-pivot refactor dependency pass, has scalar compact-panel producer and consumer updates, has KLS-owned scalar batched producer-to-consumer-row-subrange updates for exact multi-producer patterns, ragged single-producer suffix patterns in dense and independent row groups, opt-in contiguous independent-row batches with multiple dense producer suffixes, opt-in fragmented multi-producer updates for dense consumer-group external prefixes, and keeps optional CBLAS experiments for completed-supernode row updates and unchecked blocked producer-panel `dtrsm`/`dgemm`. | KLS still does not implement SubtreeLU Algorithm 4's fully continuous no-relaunch pipeline factorization, or use production SubtreeLU-style coarse supernodes/BLAS updates broadly enough for the paper slow cases. CKTSO's full checked-tail/pivoting executor also remains open. |
+| SubtreeLU | KLS vendors reproducible METIS/GKlib and SCOTCH submodules, uses METIS plus CAMD refinement, asks METIS `NodeNDP` for at least `log2(threads)` nested-dissection levels on larger threaded METIS analyses, and can keep SCOTCH from `auto` when its symbolic score is materially better on large high-work cases. KLS now retains accepted `NodeNDP` component sequences from METIS user-order callbacks, stitches them into a global BTF-aware separator forest with synthetic private components for blocks that did not run `NodeNDP`, reports the resulting global queue shape in stats/bench output, and uses the component map to build separator-private initial thread queues for the experimental row-refactor ready queue. No-pivot and checked row refactors can now consume the retained separator tree through a SubtreeLU Algorithm 6-style FLOP-balanced private/pipeline queue, with separator-crossing row groups forced into pipeline work. The KLS-first pivoting row-up-looking factorization now builds Algorithm 3-style private row queues by greedily assigning retained private components to threads and a pipeline row queue in factor order, remaps the block-local row/column order and `Pnum` to that queue, executes private rows in worker-local entries, and consumes pipeline rows through a guarded Algorithm 3 atomic counter. It also uses SubtreeLU Algorithm 4's scoped `N'` pivot maximum inside the current collapsed component extent, rejects unsafe cross-domain exchanges, applies ready predecessor row-supernode runs during partial pipeline-row updates, and handles safely pre-updated weak-pivot pipeline rows with an ordered pivot publish plus column-order epoch retry for speculative suffix rows inside the same pipeline phase. This matches SubtreeLU's separator-domain pivot rule while preserving KLS's fallback to the pivoted block kernel for unsafe scoped rows. KLS also records row-major U-pattern supernode candidate diagnostics from the exact no-pivot refactor dependency pass, has scalar compact-panel producer and consumer updates, has KLS-owned scalar batched producer-to-consumer-row-subrange updates for exact multi-producer patterns, ragged single-producer suffix patterns in dense and independent row groups, opt-in contiguous independent-row batches with multiple dense producer suffixes, opt-in fragmented multi-producer updates for dense consumer-group external prefixes, and keeps optional CBLAS experiments for completed-supernode row updates and unchecked blocked producer-panel `dtrsm`/`dgemm`. | KLS still does not use production SubtreeLU-style coarse supernodes/BLAS updates broadly enough for the paper slow cases, and the native row/segment numeric engine remains a scaffold around KLU-compatible packing. CKTSO's full checked-tail/pivoting executor also remains open. |
 
 This means KLS has implemented or prototyped the ideas that can be layered
 around the current KLU-derived data structures. It has **not** implemented all
@@ -3829,14 +3835,15 @@ are also grouped into conservative row-supernodes when adjacent row-major `U`
 patterns have the full triangular extension and identical trailing pattern.
 Partial pipeline-row updates consume such consecutive ready predecessors as
 scalar supernode runs, matching the Algorithm 4 update control flow while still
-using the current KLS row-entry storage. The publish step still rejects dynamic
-column exchanges while other workers are active, but a weak publish-row pivot no
-longer serializes the whole remaining pipeline suffix. KLS discards only
-speculative uncommitted suffix work, factors the pivot row with the existing
-pivot-capable row-up kernel, and relaunches the remaining suffix through the
-parallel pipeline; repeated weak pivots repeat the same restart loop. This is
-still not the paper's full concurrent pivoting pipeline factorization or
-BLAS-backed supernode storage. Benchmark stats expose the last
+using the current KLS row-entry storage. The publish step can now accept a
+scoped dynamic column exchange for a safely pre-updated pipeline row: while
+holding the ordered pipeline lock, it swaps the committed U entries and the
+phase-local prefix snapshot, publishes the pivot row, increments a
+column-order epoch, and wakes workers. Any speculative suffix row that began
+under the older epoch clears its local sparse workspace and recomputes the same
+row under the new column order instead of forcing a whole suffix relaunch.
+This is still not production BLAS-backed supernode storage or the CKTSO
+checked-tail pivoting executor. Benchmark stats expose the last
 planned queue through
 `kls_first_last_separator_queue`,
 `kls_first_last_separator_queue_private_components`,
@@ -3883,15 +3890,19 @@ actually serialized pivot-row counts reported by
 `kls_first_last_separator_queue_pipeline_pivot_serial_rows`. Prefix
 private-predecessor pre-updates, waiting-prefix pre-updates, and scalar
 row-supernode updates completed before a pipeline pivot restart remain counted
-in the same counters after the suffix relaunch, including the case where the
-weak pivot row itself was published by the ordered pipeline worker before the
-relaunch. A smoke test covers this on a 30,000-row
-METIS-ordered tridiagonal KLS-first factor,
-requires more than one private worker thread, verifies that all planned
-pipeline rows are consumed by the guarded pipeline executor, and verifies that
-the private-predecessor partial pre-update path touches all pipeline rows. This
-closes Algorithm 3's queue shape and adds race-free scalar Algorithm 4
-partial-update steps for dependency-safe retained separator queues.
+in the same counters after the epoch retry, while
+`kls_first_last_separator_queue_pipeline_pivot_serial_rows` remains reserved
+for the older external serialized fallback. Smoke tests cover the queue shape
+on a 30,000-row METIS-ordered tridiagonal KLS-first factor and the epoch
+recovery path on a 30,600-row METIS-ordered grid with separator-band weak
+diagonals. The queue-shape test requires more than one private worker thread,
+verifies that all planned pipeline rows are consumed by the guarded pipeline
+executor, and verifies that the private-predecessor partial pre-update path
+touches all pipeline rows. The epoch test requires a separator-pipeline pivot
+restart, requires zero serialized pivot rows, and checks the solve residual.
+This closes Algorithm 3's queue shape and adds race-free scalar Algorithm 4
+partial-update and scoped-pivot retry steps for dependency-safe retained
+separator queues.
 
 The KLS-first row up-looking dynamic column pivot selector also now consumes
 the retained separator map when it is available for the full factor order. On a
