@@ -1265,8 +1265,9 @@ numeric storage. The KLS-owned row-up first-factor path can assemble
 KLU-compatible BTF blocks in no-scale and KLU row-scaled modes and seed
 KLS-owned row-major mirrors for following solves and unchecked numeric
 refactors, and checked rejects now try that row-first block executor in both
-unscaled and KLU row-scaled repair states before whole-numeric rebuild or KLU
-block fallback. CKTSO's paper goes further: a production row-major up-looking
+unscaled and KLU row-scaled repair states, followed by a quality-checked
+KLS-first whole-numeric rebuild, before KLU block fallback. CKTSO's paper goes
+further: a production row-major up-looking
 factorization, EGraph pivot checks, and ETree-scheduled pipelined tail
 factorization. The generic sparse segment direct-load path narrows the current
 refactor bridge, but the next larger algorithmic work is still to evolve the

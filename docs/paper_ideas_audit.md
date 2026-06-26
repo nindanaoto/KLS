@@ -168,7 +168,9 @@ attempting the same block-local repair and validated non-root serial suffix
 restart. The newer row-first rejected-block rebuild consumes that same
 input-row scale state and permutes `Rs` back to pivot order after accepting the
 KLS-owned dynamic-column-pivot block, so scaled checked rejects are no longer
-limited to the serial KLU-compatible block repair before the KLU fallback.
+limited to the serial KLU-compatible block repair before the KLU fallback. If
+that local repair ladder still fails, scaled rejects can now attempt the same
+quality-checked KLS-first whole-numeric rebuild as unscaled rejects.
 The threaded BTF worker pool now keeps a per-run completed-block bitmap and
 reports prefix-current only when every diagonal block before a checked pivot
 reject has finished. That lets the existing block repair and later-block
@@ -3031,8 +3033,9 @@ executor now covers both unscaled and KLU row-scaled repair states by consuming
 input-row `Rs` during row construction and permuting it back to pivot order
 after an accepted scaled block. The scaled preserved-column refresh now uses
 the same convention for masked ETree-tail attempts before this broader rebuild
-is considered. The whole-numeric checked-reject recovery bypasses the normal
-automatic KLS-first cost gate but still honors an explicit
+is considered. The whole-numeric checked-reject recovery now covers unscaled
+and KLU row-scaled states; it bypasses the normal automatic KLS-first cost gate
+but still honors an explicit
 `KLS_ENABLE_KLS_FIRST_FACTOR=0` disable. Successful row-first block repairs are
 reported as `fast_kls_block_restarts`; successful whole-numeric recoveries are
 reported as `fast_kls_rebuild_restarts`. This still stops short of CKTSO

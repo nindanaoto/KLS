@@ -15687,7 +15687,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
 
 static int kls_try_fast_reject_kls_first_rebuild(kls_solver *solver,
                                                  double *numeric_values) {
-  if (solver == NULL || numeric_values == NULL || solver->common.scale > 0) {
+  if (solver == NULL || numeric_values == NULL) {
     return 0;
   }
   if (!kls_try_rebuild_current_numeric_with_kls_first_mode(
