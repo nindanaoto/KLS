@@ -1481,6 +1481,10 @@ int main(int argc, char **argv) {
            ",\"row_refactor_sparse_segment_direct_input_rows\":%" PRId64,
            stats.row_refactor_last_sparse_segment_direct_input_rows,
            stats.row_refactor_sparse_segment_direct_input_rows);
+    printf(",\"row_refactor_last_batch_direct_input_rows\":%" PRId64
+           ",\"row_refactor_batch_direct_input_rows\":%" PRId64,
+           stats.row_refactor_last_batch_direct_input_rows,
+           stats.row_refactor_batch_direct_input_rows);
     printf(",\"row_refactor_segment_input_target_rows\":%" PRId64
            ",\"row_refactor_segment_input_target_entries\":%" PRId64
            ",\"row_refactor_last_segment_target_input_rows\":%" PRId64
@@ -2061,6 +2065,7 @@ int main(int argc, char **argv) {
            " rows, %" PRId64 "/%" PRId64 " entries"
            ", native direct input rows: %" PRId64 "/%" PRId64
            ", sparse direct input rows: %" PRId64 "/%" PRId64
+           ", batch direct input rows: %" PRId64 "/%" PRId64
            ", sparse input targets: %" PRId64 "/%" PRId64
            ", target direct rows: %" PRId64 "/%" PRId64
            ", target cleanup plan: %" PRId64 "/%" PRId64
@@ -2118,6 +2123,8 @@ int main(int argc, char **argv) {
            stats.row_refactor_dense_segment_direct_input_rows,
            stats.row_refactor_last_sparse_segment_direct_input_rows,
            stats.row_refactor_sparse_segment_direct_input_rows,
+           stats.row_refactor_last_batch_direct_input_rows,
+           stats.row_refactor_batch_direct_input_rows,
            stats.row_refactor_segment_input_target_rows,
            stats.row_refactor_segment_input_target_entries,
            stats.row_refactor_last_segment_target_input_rows,

@@ -354,6 +354,8 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_dense_panel_direct_input_rows;
   int64_t row_refactor_last_dense_segment_direct_input_rows;
   int64_t row_refactor_dense_segment_direct_input_rows;
+  int64_t row_refactor_last_batch_direct_input_rows;
+  int64_t row_refactor_batch_direct_input_rows;
   int64_t kls_first_last_separator_extent_dynamic_column_pivots;
   int64_t kls_first_separator_extent_dynamic_column_pivot_count;
   int row_refactor_last_compact_supernode_partial_update;

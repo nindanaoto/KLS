@@ -5036,11 +5036,16 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
        stats.row_refactor_compact_supernode_batch_dep_rows <=
          (int64_t)lead * (int64_t)(mid / 2) ||
        stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       stats.row_refactor_last_batch_direct_input_rows <
+         stats.row_refactor_compact_supernode_batch_rows ||
+       stats.row_refactor_batch_direct_input_rows <
+         stats.row_refactor_compact_supernode_batch_rows ||
        stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
        stats.row_refactor_compact_supernode_batch_rejected_work_count != 0)) {
     fprintf(stderr,
             "unexpected batch-group ragged stats: build_cblas=%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 "/%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
             ", rejected=%" PRId64 "\n",
@@ -5050,6 +5055,8 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
             stats.row_refactor_compact_supernode_batch_rows,
             stats.row_refactor_compact_supernode_batch_dep_rows,
             stats.row_refactor_compact_supernode_batch_entries,
+            stats.row_refactor_last_batch_direct_input_rows,
+            stats.row_refactor_batch_direct_input_rows,
             stats.row_refactor_compact_supernode_batch_pattern_count,
             stats.row_refactor_compact_supernode_batch_pattern_rows,
             stats.row_refactor_compact_supernode_batch_candidate_count,
@@ -5173,11 +5180,16 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
        checked_stats.row_refactor_compact_supernode_batch_dep_rows <=
          (int64_t)lead * (int64_t)(mid / 2) ||
        checked_stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       checked_stats.row_refactor_last_batch_direct_input_rows <
+         checked_stats.row_refactor_compact_supernode_batch_rows ||
+       checked_stats.row_refactor_batch_direct_input_rows <
+         checked_stats.row_refactor_compact_supernode_batch_rows ||
        checked_stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
        checked_stats.row_refactor_compact_supernode_batch_rejected_work_count != 0)) {
     fprintf(stderr,
             "unexpected checked batch-group ragged stats: checked=%d/%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 "/%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
             ", rejected=%" PRId64 "\n",
@@ -5188,6 +5200,8 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
             checked_stats.row_refactor_compact_supernode_batch_rows,
             checked_stats.row_refactor_compact_supernode_batch_dep_rows,
             checked_stats.row_refactor_compact_supernode_batch_entries,
+            checked_stats.row_refactor_last_batch_direct_input_rows,
+            checked_stats.row_refactor_batch_direct_input_rows,
             checked_stats.row_refactor_compact_supernode_batch_pattern_count,
             checked_stats.row_refactor_compact_supernode_batch_pattern_rows,
             checked_stats.row_refactor_compact_supernode_batch_candidate_count,
@@ -5484,6 +5498,10 @@ static int test_batch_group_multi_producer_supernode_update_probe(void) {
        stats.row_refactor_compact_supernode_batch_dep_rows <=
          (int64_t)(lead0 + lead1) * (int64_t)(mid / 2) ||
        stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       stats.row_refactor_last_batch_direct_input_rows <
+         stats.row_refactor_compact_supernode_batch_rows ||
+       stats.row_refactor_batch_direct_input_rows <
+         stats.row_refactor_compact_supernode_batch_rows ||
        stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
        stats.row_refactor_compact_supernode_batch_rejected_work_count != 0 ||
        stats.row_refactor_dense_producer_run_count <
@@ -5498,6 +5516,7 @@ static int test_batch_group_multi_producer_supernode_update_probe(void) {
     fprintf(stderr,
             "unexpected multi-producer stats: build_cblas=%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 "/%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
             ", rejected=%" PRId64
@@ -5513,6 +5532,8 @@ static int test_batch_group_multi_producer_supernode_update_probe(void) {
             stats.row_refactor_compact_supernode_batch_rows,
             stats.row_refactor_compact_supernode_batch_dep_rows,
             stats.row_refactor_compact_supernode_batch_entries,
+            stats.row_refactor_last_batch_direct_input_rows,
+            stats.row_refactor_batch_direct_input_rows,
             stats.row_refactor_compact_supernode_batch_pattern_count,
             stats.row_refactor_compact_supernode_batch_pattern_rows,
             stats.row_refactor_compact_supernode_batch_candidate_count,
@@ -5657,6 +5678,10 @@ static int test_batch_group_multi_producer_supernode_update_probe(void) {
        checked_stats.row_refactor_compact_supernode_batch_dep_rows <=
          (int64_t)(lead0 + lead1) * (int64_t)(mid / 2) ||
        checked_stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       checked_stats.row_refactor_last_batch_direct_input_rows <
+         checked_stats.row_refactor_compact_supernode_batch_rows ||
+       checked_stats.row_refactor_batch_direct_input_rows <
+         checked_stats.row_refactor_compact_supernode_batch_rows ||
        checked_stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
        checked_stats.row_refactor_compact_supernode_batch_rejected_work_count != 0 ||
        checked_stats.row_refactor_dense_producer_run_count <
@@ -5671,6 +5696,7 @@ static int test_batch_group_multi_producer_supernode_update_probe(void) {
     fprintf(stderr,
             "unexpected checked multi-producer stats: checked=%d/%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 "/%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
             ", rejected=%" PRId64
@@ -5685,6 +5711,8 @@ static int test_batch_group_multi_producer_supernode_update_probe(void) {
             checked_stats.row_refactor_compact_supernode_batch_rows,
             checked_stats.row_refactor_compact_supernode_batch_dep_rows,
             checked_stats.row_refactor_compact_supernode_batch_entries,
+            checked_stats.row_refactor_last_batch_direct_input_rows,
+            checked_stats.row_refactor_batch_direct_input_rows,
             checked_stats.row_refactor_compact_supernode_batch_pattern_count,
             checked_stats.row_refactor_compact_supernode_batch_pattern_rows,
             checked_stats.row_refactor_compact_supernode_batch_candidate_count,
@@ -5975,6 +6003,10 @@ static int test_batch_group_fragmented_multi_producer_update_probe(void) {
        stats.row_refactor_compact_supernode_batch_dep_rows <=
          (int64_t)(lead0 + lead1) * (int64_t)(mid / 2) ||
        stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       stats.row_refactor_last_batch_direct_input_rows <
+         stats.row_refactor_compact_supernode_batch_rows ||
+       stats.row_refactor_batch_direct_input_rows <
+         stats.row_refactor_compact_supernode_batch_rows ||
        stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
        stats.row_refactor_dense_producer_run_count <
          (int64_t)2 * (int64_t)mid ||
@@ -5985,6 +6017,7 @@ static int test_batch_group_fragmented_multi_producer_update_probe(void) {
     fprintf(stderr,
             "unexpected batch fragmented stats: batch=%d/%" PRId64
             "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 "/%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
             ", producer=%" PRId64 "/%" PRId64 " max=%" PRId64
@@ -5994,6 +6027,8 @@ static int test_batch_group_fragmented_multi_producer_update_probe(void) {
             stats.row_refactor_compact_supernode_batch_rows,
             stats.row_refactor_compact_supernode_batch_dep_rows,
             stats.row_refactor_compact_supernode_batch_entries,
+            stats.row_refactor_last_batch_direct_input_rows,
+            stats.row_refactor_batch_direct_input_rows,
             stats.row_refactor_compact_supernode_batch_pattern_count,
             stats.row_refactor_compact_supernode_batch_pattern_rows,
             stats.row_refactor_compact_supernode_batch_candidate_count,
@@ -6129,6 +6164,10 @@ static int test_batch_group_fragmented_multi_producer_update_probe(void) {
        checked_stats.row_refactor_compact_supernode_batch_dep_rows <=
          (int64_t)(lead0 + lead1) * (int64_t)(mid / 2) ||
        checked_stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       checked_stats.row_refactor_last_batch_direct_input_rows <
+         checked_stats.row_refactor_compact_supernode_batch_rows ||
+       checked_stats.row_refactor_batch_direct_input_rows <
+         checked_stats.row_refactor_compact_supernode_batch_rows ||
        checked_stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
        checked_stats.row_refactor_dense_producer_run_count <
          (int64_t)2 * (int64_t)mid ||
@@ -6139,6 +6178,7 @@ static int test_batch_group_fragmented_multi_producer_update_probe(void) {
     fprintf(stderr,
             "unexpected checked batch fragmented stats: checked=%d/%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 "/%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", producer=%" PRId64 "/%" PRId64 " max=%" PRId64
             ", multi/fragmented=%" PRId64 "/%" PRId64 "\n",
@@ -6149,6 +6189,8 @@ static int test_batch_group_fragmented_multi_producer_update_probe(void) {
             checked_stats.row_refactor_compact_supernode_batch_rows,
             checked_stats.row_refactor_compact_supernode_batch_dep_rows,
             checked_stats.row_refactor_compact_supernode_batch_entries,
+            checked_stats.row_refactor_last_batch_direct_input_rows,
+            checked_stats.row_refactor_batch_direct_input_rows,
             checked_stats.row_refactor_compact_supernode_batch_pattern_count,
             checked_stats.row_refactor_compact_supernode_batch_pattern_rows,
             checked_stats.row_refactor_dense_producer_run_count,

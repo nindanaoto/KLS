@@ -4719,6 +4719,18 @@ companions). This removes another raw KLU/CSC-style rediscovery step from the
 row-segment loop, but it remains scaffolding for the paper algorithm rather
 than the full production row-major engine.
 
+The independent row-batch executors now also direct-load refactor input rows
+into their native batch panels. Ragged, multi-producer, and fragmented
+multi-producer batches validate that each raw input entry maps exactly to the
+batch's dependency vector, pivot, or row-major U workspace, then populate those
+buffers without first staging through the sparse work vector. Rows that do not
+fit the current batch shape still fall back to the old residual-safe path. The
+smoke probes for all three independent batch shapes now require
+`row_refactor_last_batch_direct_input_rows` to cover the executed batch rows.
+This fills a direct storage-path gap versus the papers' row-major numeric
+updates; it is not yet a replacement for CKTSO's full pipelined pivot-tail
+factorization.
+
 The retained SubtreeLU Algorithm 6 queue splitter then gained the missing
 private-leaf guard. A focused checked METIS grid exposed that the earlier
 FLOP-balance loop could keep promoting separator candidates after it reached

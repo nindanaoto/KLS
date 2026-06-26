@@ -571,6 +571,8 @@ precomputed external, `L`, pivot, and `U` destinations instead of rediscovering
 the slots in the numeric loop. Stats report
 `row_refactor_last_sparse_segment_direct_input_rows`,
 `row_refactor_sparse_segment_direct_input_rows`,
+`row_refactor_last_batch_direct_input_rows`,
+`row_refactor_batch_direct_input_rows`,
 `row_refactor_segment_input_target_rows`,
 `row_refactor_segment_input_target_entries`,
 `row_refactor_last_segment_target_input_rows`, and
