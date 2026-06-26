@@ -22778,10 +22778,8 @@ static int kls_row_refactor_tail_has_large_partial_supernodes(
     return 0;
   }
   const UF_long min_width = (UF_long)(2 * thread_count);
-  const UF_long tail_count = solver->row_refactor_group_count - tail_begin;
   UF_long groups = 0;
   UF_long rows = 0;
-  UF_long tail_rows = 0;
   for (UF_long pos = tail_begin; pos < solver->row_refactor_group_count;
        ++pos) {
     const UF_long group = solver->row_refactor_level_groups[pos];
@@ -22794,7 +22792,6 @@ static int kls_row_refactor_tail_has_large_partial_supernodes(
       return 0;
     }
     const UF_long width = row_end - row_begin;
-    tail_rows += width;
     const unsigned char kind = solver->row_refactor_group_kind[group];
     if (kind != KLS_ROW_REFACTOR_GROUP_DENSE &&
         kind != KLS_ROW_REFACTOR_GROUP_GENERIC) {
@@ -22812,9 +22809,7 @@ static int kls_row_refactor_tail_has_large_partial_supernodes(
   }
   *group_count_out = groups;
   *row_count_out = rows;
-  return groups > 0u &&
-         groups >= (tail_count + 1u) / 2u &&
-         rows >= (tail_rows + 1u) / 2u;
+  return groups > 0u;
 }
 
 static int kls_row_refactor_env_enabled(void) {
@@ -34062,13 +34057,13 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   UF_long row_separator_flop_pipeline_groups = 0;
   UF_long row_separator_flop_closure_groups = 0;
   UF_long row_separator_flop_component_count = 0;
-  /* Prefer the retained separator-tree private/pipeline queue when it covers
-     the row-group DAG, except when the separator partition is pipeline-heavy
-     and the no-pivot tail is dominated by large unfinished supernodes.  In that
-     case SubtreeLU Algorithm 5's row-prefix release is the more specific paper
-     mechanism: consumers can start at the split point instead of waiting for a
-     whole producer group.  This is also prefix-safe for checked runs because
-     each producer row is marked done only after its pivot check and row-value
+  /* Preserve the retained separator-tree private/pipeline queue when it covers
+     the row-group DAG.  When the separator schedule is pipeline-heavy and a
+     large dependent producer is present, wrap its pipeline side in SubtreeLU
+     Algorithm 5's row-prefix release.  Outside the separator-private wrapper,
+     the paper condition is per unfinished supernode, not that those supernodes
+     dominate the tail.  This is prefix-safe for checked runs because each
+     producer row is marked done only after its pivot check and row-value
      publication complete.  If preparation fails, keep the older cluster/tail
      schedule as a conservative fallback. */
   int use_row_ready_queue = 0;
@@ -34835,7 +34830,10 @@ static void kls_row_refactor_mark_row_done(
         !shared->row_pipeline_tail_groups[successor_group]) {
       continue;
     }
-    if (release_successors_early) {
+    const int successor_private =
+      shared->row_pipeline_private_group_mask != NULL &&
+      shared->row_pipeline_private_group_mask[successor_group];
+    if (release_successors_early && !successor_private) {
       unsigned long current =
         atomic_load_explicit(
           &shared->row_pipeline_remaining_preds[successor_group],

@@ -4216,6 +4216,21 @@ separator queue (`row_refactor_last_partial_supernode_pipeline=0`) and reported
 a `15.29s` SPICE-cycle geomean. This closes the scheduling semantic gap without
 pretending it is a performance win on the current focus subset.
 
+KLS then removed the remaining dominance selector from the ordinary SubtreeLU
+Algorithm 5 row-tail path. The paper's condition is local to each unfinished
+dependent supernode: if the supernode has at least `2P` rows, a consumer may
+use the completed `k:(k'-P)` prefix instead of waiting for the whole producer.
+KLS now selects the row-dependency queue whenever such a dependent
+dense/generic producer exists in the pipeline tail; the large producer no
+longer needs to dominate the number of tail groups or tail rows. Separator
+Algorithm 6 private/pipeline queues still keep their stricter wrapper guard
+until private-queue row-prefix release is made fully safe. Private queue groups
+are protected from prefix-release enqueueing and receive normal row-edge
+decrements. A new non-dominant-tail smoke fixture places one large dependent
+producer behind many small dependent groups and requires the partial-supernode
+pipeline by default, covering the paper condition that the large producer need
+not dominate the tail.
+
 The compact supernode consumer now applies the paper's matrix-vector update
 shape for producer trailing panels. For a later row that
 depends on a completed dense producer suffix, KLS still computes and checks the

@@ -8421,6 +8421,8 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
     stats.row_refactor_last_partial_supernode_pipeline != 0;
   const int expected_ready_queue_runs = 2;
   const int expected_done_bitmap_runs = used_partial_supernode ? 2 : 1;
+  const int expected_partial_supernode_runs =
+    used_partial_supernode ? expected_ready_queue_runs : 0;
   const int expected_work_queue_runs = 2;
   if (ok && (stats.row_refactor_group_count < 2 ||
              stats.row_refactor_group_level_count < 1 ||
@@ -8471,9 +8473,11 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
               (stats.row_refactor_last_partial_supernode_pipeline_groups <= 0 ||
                stats.row_refactor_last_partial_supernode_pipeline_rows <
                  stats.row_refactor_last_partial_supernode_pipeline_groups ||
-               stats.row_refactor_partial_supernode_pipeline_run_count != 1)) ||
+               stats.row_refactor_partial_supernode_pipeline_run_count !=
+                 expected_partial_supernode_runs)) ||
              (!used_partial_supernode &&
-              stats.row_refactor_partial_supernode_pipeline_run_count != 0) ||
+              stats.row_refactor_partial_supernode_pipeline_run_count !=
+                expected_partial_supernode_runs) ||
              stats.row_refactor_last_private_ready_groups <= 0 ||
              stats.row_refactor_private_ready_group_count <
                stats.row_refactor_last_private_ready_groups ||
@@ -10047,6 +10051,267 @@ static int test_checked_row_prefactor_finished_dependency(void) {
   free(saved_checked);
   free(saved_trsv);
   free(saved_cblas);
+  return ok;
+}
+
+static int test_partial_supernode_non_dominant_tail(void) {
+  enum {
+    A_WIDTH = 48,
+    A_PREFIX = 24,
+    CONSUMER_WIDTH = 3,
+    SMALL_WIDTH = 2,
+    SMALL_BLOCKS = 30,
+    SMALL_CHAINS = 2,
+    CONSUMER_BEGIN = A_WIDTH,
+    SMALL_BEGIN = CONSUMER_BEGIN + CONSUMER_WIDTH,
+    SMALL_CHAIN_WIDTH = SMALL_WIDTH * SMALL_BLOCKS,
+    NONDOM_N = SMALL_BEGIN + SMALL_CHAIN_WIDTH * SMALL_CHAINS
+  };
+  const int32_t n = NONDOM_N;
+  const size_t nnz =
+    (size_t)A_WIDTH * (size_t)A_WIDTH +
+    (size_t)A_PREFIX * (size_t)CONSUMER_WIDTH +
+    (size_t)CONSUMER_WIDTH * (size_t)CONSUMER_WIDTH +
+    (size_t)CONSUMER_WIDTH * (size_t)SMALL_WIDTH +
+    (size_t)SMALL_CHAINS * (size_t)SMALL_BLOCKS *
+      (size_t)SMALL_WIDTH * (size_t)SMALL_WIDTH +
+    (size_t)SMALL_CHAINS * (size_t)(SMALL_BLOCKS - 1) *
+      (size_t)SMALL_WIDTH * (size_t)SMALL_WIDTH;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
+  double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
+  double *ax1 = (double *)malloc(nnz * sizeof(*ax1));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
+      b == NULL || x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  for (int32_t col = 0; col < n; ++col) {
+    expected[col] = 0.5 + 0.04 * (double)((3 * col) % 17);
+  }
+
+  size_t pos = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = (int32_t)pos;
+    if (col < A_WIDTH) {
+      for (int32_t row = 0; row < A_WIDTH; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 26.0 + 0.01 * (double)col
+          : 0.00018 * (1.0 + (double)((row + 5 * col) % 19));
+        ax1[p] = ax0[p] + (row == col ? 0.01 : 1.0e-6);
+      }
+      if (col < A_PREFIX) {
+        for (int32_t row = CONSUMER_BEGIN;
+             row < CONSUMER_BEGIN + CONSUMER_WIDTH; ++row) {
+          const size_t p = pos++;
+          ai[p] = row;
+          ax0[p] = 0.00011 * (1.0 + (double)((row + col) % 11));
+          ax1[p] = ax0[p] + 1.0e-6;
+        }
+      }
+    } else if (col < SMALL_BEGIN) {
+      for (int32_t row = CONSUMER_BEGIN;
+           row < CONSUMER_BEGIN + CONSUMER_WIDTH; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 21.0 + 0.01 * (double)(col - CONSUMER_BEGIN)
+          : 0.0002 * (1.0 + (double)((row + col) % 7));
+        ax1[p] = ax0[p] + (row == col ? 0.01 : 1.0e-6);
+      }
+      for (int32_t row = SMALL_BEGIN; row < SMALL_BEGIN + SMALL_WIDTH;
+           ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = 0.00013 * (1.0 + (double)((row + col) % 5));
+        ax1[p] = ax0[p] + 1.0e-6;
+      }
+    } else {
+      const int32_t small_offset = col - SMALL_BEGIN;
+      const int32_t chain = small_offset / SMALL_CHAIN_WIDTH;
+      const int32_t chain_offset = small_offset - chain * SMALL_CHAIN_WIDTH;
+      const int32_t block = chain_offset / SMALL_WIDTH;
+      const int32_t block_begin =
+        SMALL_BEGIN + chain * SMALL_CHAIN_WIDTH + block * SMALL_WIDTH;
+      for (int32_t row = block_begin; row < block_begin + SMALL_WIDTH;
+           ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 18.0 + 0.02 * (double)block
+          : 0.00021 * (1.0 + (double)((row + col) % 5));
+        ax1[p] = ax0[p] + (row == col ? 0.01 : 1.0e-6);
+      }
+      if (block + 1 < SMALL_BLOCKS) {
+        const int32_t next_begin = block_begin + SMALL_WIDTH;
+        for (int32_t row = next_begin; row < next_begin + SMALL_WIDTH;
+             ++row) {
+          const size_t p = pos++;
+          ai[p] = row;
+          ax0[p] = 0.00012 * (1.0 + (double)((row + col) % 7));
+          ax1[p] = ax0[p] + 1.0e-6;
+        }
+      }
+    }
+  }
+  ap[n] = (int32_t)pos;
+  if (pos != nnz) {
+    fprintf(stderr, "unexpected non-dominant partial fixture nnz: %zu/%zu\n",
+            pos, nnz);
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_row = saved_row_value != NULL;
+  const char *saved_partial_value =
+    getenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
+  char *saved_partial = saved_partial_value != NULL
+    ? strdup(saved_partial_value) : NULL;
+  const int had_partial = saved_partial_value != NULL;
+  const char *saved_checked_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked = saved_checked_value != NULL
+    ? strdup(saved_checked_value) : NULL;
+  const int had_checked = saved_checked_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 2;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if ((had_row && saved_row == NULL) ||
+      (had_partial && saved_partial == NULL) ||
+      (had_checked && saved_checked == NULL)) {
+    fprintf(stderr, "failed to save non-dominant partial env\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create non-dominant partial")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze non-dominant partial")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor non-dominant partial base")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=1");
+    ok = 0;
+  }
+  if (ok && unsetenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE") != 0) {
+    perror("unsetenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "refactor non-dominant partial")) {
+    ok = 0;
+  }
+
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE",
+                         had_partial, saved_partial)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_checked, saved_checked)) {
+    ok = 0;
+  }
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats non-dominant partial")) {
+    ok = 0;
+  }
+  if (ok && (stats.row_refactor_last_parallel != 1 ||
+             stats.row_refactor_last_partial_supernode_pipeline != 1 ||
+             stats.row_refactor_last_done_bitmap != 1 ||
+             stats.row_refactor_last_partial_supernode_pipeline_groups != 1 ||
+             stats.row_refactor_last_partial_supernode_pipeline_rows !=
+               A_WIDTH ||
+             stats.row_refactor_group_count <=
+               2 * stats.row_refactor_last_partial_supernode_pipeline_groups ||
+             stats.row_refactor_group_pipeline_rows <=
+               2 * stats.row_refactor_last_partial_supernode_pipeline_rows)) {
+    fprintf(stderr,
+            "unexpected non-dominant partial stats: parallel=%d"
+            ", partial=%d groups/rows=%" PRId64 "/%" PRId64
+            ", group_count=%" PRId64 ", pipe_rows=%" PRId64
+            ", done=%d\n",
+            stats.row_refactor_last_parallel,
+            stats.row_refactor_last_partial_supernode_pipeline,
+            stats.row_refactor_last_partial_supernode_pipeline_groups,
+            stats.row_refactor_last_partial_supernode_pipeline_rows,
+            stats.row_refactor_group_count,
+            stats.row_refactor_group_pipeline_rows,
+            stats.row_refactor_last_done_bitmap);
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve non-dominant partial")) {
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected non-dominant partial solution at %d:"
+              " %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  free(saved_row);
+  free(saved_partial);
+  free(saved_checked);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(x);
+  free(expected);
   return ok;
 }
 
@@ -13496,6 +13761,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_checked_row_prefactor_finished_dependency()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_partial_supernode_non_dominant_tail()) {
     return EXIT_FAILURE;
   }
   if (!test_partial_compact_supernode_prefix_pipeline()) {
