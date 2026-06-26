@@ -5149,3 +5149,12 @@ scalar updates. Benchmark JSON and stats expose this through
 dense compact smoke coverage force CBLAS off and now require the blocked path.
 The larger open gaps remain the production checked/pivoting tail executor and
 broader row-major numeric engine.
+
+KLS-first row-up and pivot-tail pipeline phases now also have a portable
+cached-supernode panel executor. When a published U-row run has been retained as
+a dense panel, the non-CBLAS path solves all ready predecessor multipliers as one
+upper-triangular run and applies the common dense/trailing update in aggregate
+before falling back to the older per-row panel walk. This moves the
+SubtreeLU/CKTSO row-first path closer to the papers' supernode update branch
+without claiming the full pipelined ETree-descendant tail factorization is
+complete.

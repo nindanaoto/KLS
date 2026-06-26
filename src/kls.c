@@ -42166,6 +42166,151 @@ static int kls_row_first_partial_apply_supernode_run_cached_cblas(
 }
 #endif
 
+static int kls_row_first_partial_apply_supernode_run_cached_portable(
+  const kls_row_first_block_context *ctx,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *local_l_entries,
+  kls_row_first_partial_row *state,
+  UF_long dep_begin,
+  UF_long start,
+  UF_long width,
+  UF_long panel_offset,
+  UF_long available_end,
+  UF_long run_limit,
+  UF_long dense_suffix_len,
+  UF_long tail_len,
+  const double *dense_panel,
+  const double *tail_values,
+  const UF_long *tail_cols,
+  UF_long *run_rows_out) {
+  if (run_rows_out != NULL) {
+    *run_rows_out = 0;
+  }
+  if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
+      state == NULL || dense_panel == NULL ||
+      workspace->x == NULL || workspace->mark == NULL ||
+      workspace->pattern == NULL || workspace->dep_heap == NULL ||
+      run_limit <= 1u || panel_offset >= width ||
+      available_end > width ||
+      run_limit != available_end - panel_offset ||
+      (tail_len > 0u && (tail_values == NULL || tail_cols == NULL))) {
+    return 0;
+  }
+  if (!kls_row_first_workspace_reserve_supernode(workspace, run_limit)) {
+    return 0;
+  }
+
+  double *x = workspace->x;
+  unsigned int *mark = workspace->mark;
+  UF_long *pattern = workspace->pattern;
+  UF_long *dep_heap = workspace->dep_heap;
+  double *rhs = workspace->supernode_workspace;
+  const unsigned int generation = state->generation;
+
+  for (UF_long local = 0; local < run_limit; ++local) {
+    const UF_long dep = dep_begin + local;
+    const UF_long panel_local = panel_offset + local;
+    if (dep >= state->row) {
+      return -1;
+    }
+    const double pivot = dense_panel[panel_local * width + panel_local];
+    if (pivot == 0.0) {
+      return -1;
+    }
+    rhs[local] = mark[dep] == generation ? x[dep] : 0.0;
+    if (mark[dep] != generation) {
+      if (local == 0u) {
+        return -1;
+      }
+      mark[dep] = generation;
+      pattern[state->pattern_count++] = dep;
+      kls_row_first_heap_push(dep_heap, &state->dep_heap_size, dep);
+      x[dep] = 0.0;
+    }
+  }
+
+  for (UF_long local = 0; local < run_limit; ++local) {
+    const UF_long panel_local = panel_offset + local;
+    double lij = rhs[local];
+    for (UF_long prev = 0; prev < local; ++prev) {
+      const UF_long prev_panel_local = panel_offset + prev;
+      lij -= rhs[prev] *
+             dense_panel[prev_panel_local * width + panel_local];
+    }
+    lij /= dense_panel[panel_local * width + panel_local];
+    rhs[local] = lij;
+  }
+
+  for (UF_long local = 0; local < run_limit; ++local) {
+    const UF_long dep = dep_begin + local;
+    if (local > 0u) {
+      if (state->dep_heap_size == 0u || dep_heap[0] != dep) {
+        return -1;
+      }
+      const UF_long popped =
+        kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
+      if (popped != dep) {
+        return -1;
+      }
+    }
+    if (!kls_row_first_entries_append(local_l_entries, state->row, dep,
+                                      rhs[local])) {
+      return -1;
+    }
+    x[dep] = 0.0;
+  }
+
+  for (UF_long offset = 0; offset < dense_suffix_len; ++offset) {
+    const UF_long panel_col = available_end + offset;
+    const UF_long col = start + panel_col;
+    if (col >= ctx->nk) {
+      return -1;
+    }
+    if (mark[col] != generation) {
+      mark[col] = generation;
+      pattern[state->pattern_count++] = col;
+      if (col < state->row) {
+        kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+      }
+      x[col] = 0.0;
+    }
+    double update = 0.0;
+    for (UF_long local = 0; local < run_limit; ++local) {
+      const UF_long panel_local = panel_offset + local;
+      update += rhs[local] *
+                dense_panel[panel_local * width + panel_col];
+    }
+    x[col] -= update;
+  }
+
+  for (UF_long offset = 0; offset < tail_len; ++offset) {
+    const UF_long col = tail_cols[offset];
+    if (col >= ctx->nk) {
+      return -1;
+    }
+    if (mark[col] != generation) {
+      mark[col] = generation;
+      pattern[state->pattern_count++] = col;
+      if (col < state->row) {
+        kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+      }
+      x[col] = 0.0;
+    }
+    double update = 0.0;
+    for (UF_long local = 0; local < run_limit; ++local) {
+      const UF_long panel_local = panel_offset + local;
+      update += rhs[local] *
+                tail_values[panel_local * tail_len + offset];
+    }
+    x[col] -= update;
+  }
+
+  if (run_rows_out != NULL) {
+    *run_rows_out = run_limit;
+  }
+  return 1;
+}
+
 static int kls_row_first_partial_apply_supernode_run_cached(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
@@ -42273,6 +42418,20 @@ static int kls_row_first_partial_apply_supernode_run_cached(
     return -1;
   }
 #endif
+  const int portable_status =
+    kls_row_first_partial_apply_supernode_run_cached_portable(
+      ctx, workspace, local_l_entries, state, dep_begin, start, width,
+      panel_offset, available_end, run_limit, dense_suffix_len, tail_len,
+      dense_panel, tail_values, tail_cols, run_rows_out);
+  if (portable_status > 0) {
+    if (used_panel_out != NULL) {
+      *used_panel_out = 1;
+    }
+    return 1;
+  }
+  if (portable_status < 0) {
+    return -1;
+  }
 
   UF_long run_rows = 0;
   for (UF_long local = 0; local < run_limit; ++local) {
