@@ -3816,20 +3816,18 @@ selection remains cost-gated because the row engine is still not broadly
 faster than the mapped EGraph refactor.
 
 KLS now maps another explicit SubtreeLU Algorithm 5 detail into the
-experimental row-refactor scheduler behind
-`KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE`. When large tail row groups with
-downstream successors and width at least `2 * threads` dominate the tail by
-both group count and row count, the experimental mode prepares a
-row-dependency ready queue for no-pivot refactorization. Dense-group rows are
-marked complete immediately after each row is numerically stored and
-pivot-checked, letting consumers wait on the exact finished row prefix instead
-of the whole supernode. This matches the paper's large-unfinished-supernode
-split while preserving the default faster group-ready queue. Direct same-tree
-A/B probes on `coupled` and `G2_circuit` showed the row-dependency queue was
-slower than the existing ready queue on the current KLS row kernel, so the
-mechanism is available for continued paper-aligned development but is not a
-default production path. It is still not the full CKTSO pivoting-tail
-factorization.
+row-refactor scheduler. When large tail row groups with downstream successors
+and width at least `2 * threads` dominate the tail by both group count and row
+count, the scheduler prepares a row-dependency ready queue. Dense-group rows
+are marked complete immediately after each row is numerically stored and, for
+checked runs, after the pivot check passes. Consumers can therefore wait on the
+exact finished row prefix instead of the whole supernode. This matches the
+paper's large-unfinished-supernode split for no-pivot refactorization and the
+checked row fast-factor/refactor path; `KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE=0`
+remains a hard disable. Direct same-tree A/B probes on `coupled` and
+`G2_circuit` showed earlier broad selectors were slower than the existing
+ready queue on the current KLS row kernel, so the strict structural selector is
+kept. It is still not the full CKTSO pivoting-tail factorization.
 
 KLS now consumes retained compact dense row panels as external supernode
 update sources during row refactorization. Once a compact dense group finishes
@@ -3871,11 +3869,10 @@ partition when applying that Algorithm 5 prefix release. A new row-dependency
 ready-queue preparation path can reuse the separator private-group mask, so
 private separator groups still run through the retained FLOP-balanced queue
 while pipeline groups may be released by row-prefix completion when the strict
-large-unfinished-supernode test passes. Checked refactorization keeps the
-separator queue by default because KLS still lacks CKTSO's full ETree-scheduled
-pivoting-tail executor; `KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE=1` explicitly
-validates the checked experimental path in the smoke fixture. A broader
-"any large supernode" selector was tested and rejected: on the six-row forced
+large-unfinished-supernode test passes. Checked refactorization now uses the
+same strict default selector: producer rows are not released until their pivot
+checks complete, and the smoke fixture validates that default checked path. A
+broader "any large supernode" selector was tested and rejected: on the six-row forced
 row-refactor focus probe it became much slower than the separator-only run and
 was interrupted after exceeding the normal short-run envelope. With the strict
 selector, `build/kls_head_gap_focus6_forced_row_sep_alg5_strict_t4_r3_timeout120.jsonl`

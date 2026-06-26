@@ -7453,8 +7453,8 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE=1");
+  if (ok && unsetenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE") != 0) {
+    perror("unsetenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {

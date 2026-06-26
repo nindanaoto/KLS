@@ -28778,7 +28778,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     kls_partial_supernode_pipeline_env_state();
   const int prefer_partial_supernode_pipeline =
     partial_supernode_pipeline_state >= 0 &&
-    (!check_pivots || partial_supernode_pipeline_state > 0) &&
     have_group_dag && use_group_pipeline &&
     kls_row_refactor_tail_has_large_partial_supernodes(
       solver, cluster_levels, thread_count, &partial_supernode_groups,
@@ -28809,10 +28808,9 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
      and the no-pivot tail is dominated by large unfinished supernodes.  In that
      case SubtreeLU Algorithm 5's row-prefix release is the more specific paper
      mechanism: consumers can start at the split point instead of waiting for a
-     whole producer group.  Checked runs keep the separator queue by default
-     until the CKTSO ETree pivoting-tail executor is implemented;
-     KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE=1 can still force this experimental
-     path for validation.  If preparation fails, keep the older cluster/tail
+     whole producer group.  This is also prefix-safe for checked runs because
+     each producer row is marked done only after its pivot check and row-value
+     publication complete.  If preparation fails, keep the older cluster/tail
      schedule as a conservative fallback. */
   int use_row_ready_queue = 0;
   int prepared_separator_flop_queue = 0;
