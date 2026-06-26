@@ -4702,6 +4702,288 @@ static int run_scaled_row_refactor_case(int threads, int expect_parallel) {
   return ok;
 }
 
+static int test_checked_separator_flop_ready_queue(void) {
+  const int32_t nx = 180;
+  const int32_t ny = 170;
+  const int32_t n = nx * ny;
+  int64_t nnz64 = 0;
+  for (int32_t y = 0; y < ny; ++y) {
+    for (int32_t x = 0; x < nx; ++x) {
+      nnz64 += 1;
+      if (x > 0) nnz64++;
+      if (x + 1 < nx) nnz64++;
+      if (y > 0) nnz64++;
+      if (y + 1 < ny) nnz64++;
+    }
+  }
+  if (nnz64 <= 0 || nnz64 > INT32_MAX) {
+    return 0;
+  }
+  const int32_t nnz = (int32_t)nnz64;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax0 = (double *)malloc((size_t)nnz * sizeof(*ax0));
+  double *ax1 = (double *)malloc((size_t)nnz * sizeof(*ax1));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *xvec = (double *)calloc((size_t)n, sizeof(*xvec));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *residual = NULL;
+  if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
+      b == NULL || xvec == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(xvec);
+    free(expected);
+    return 0;
+  }
+
+  int32_t p = 0;
+  for (int32_t y = 0; y < ny; ++y) {
+    for (int32_t x = 0; x < nx; ++x) {
+      const int32_t col = y * nx + x;
+      ap[col] = p;
+      expected[col] = 1.0 + 0.001 * (double)(col % 17);
+      if (y > 0) {
+        ai[p] = col - nx;
+        ax0[p] = -1.0;
+        ax1[p] = -1.0 - 1.0e-5 * (double)((col % 5) + 1);
+        p++;
+      }
+      if (x > 0) {
+        ai[p] = col - 1;
+        ax0[p] = -1.0;
+        ax1[p] = -1.0 + 1.0e-5 * (double)((col % 7) + 1);
+        p++;
+      }
+      ai[p] = col;
+      ax0[p] = 5.0 + 1.0e-4 * (double)(col % 13);
+      ax1[p] = ax0[p] + 1.0e-3 * (double)((col % 3) + 1);
+      p++;
+      if (x + 1 < nx) {
+        ai[p] = col + 1;
+        ax0[p] = -1.0;
+        ax1[p] = -1.0 - 1.0e-5 * (double)((col % 11) + 1);
+        p++;
+      }
+      if (y + 1 < ny) {
+        ai[p] = col + nx;
+        ax0[p] = -1.0;
+        ax1[p] = -1.0 + 1.0e-5 * (double)((col % 13) + 1);
+        p++;
+      }
+    }
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected checked separator fixture nnz: %d/%d\n",
+            p, nnz);
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(xvec);
+    free(expected);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
+      b[ai[q]] += ax1[q] * expected[col];
+    }
+  }
+
+  const char *saved_row_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row_env =
+    saved_row_env_value != NULL ? strdup(saved_row_env_value) : NULL;
+  const int had_saved_row_env = saved_row_env_value != NULL;
+  const char *saved_checked_env_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked_env = saved_checked_env_value != NULL
+    ? strdup(saved_checked_env_value) : NULL;
+  const int had_saved_checked_env = saved_checked_env_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 4;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.ordering = KLS_ORDERING_METIS;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (had_saved_row_env && saved_row_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_checked_env && saved_checked_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create checked separator queue")) {
+    ok = 0;
+  }
+  if (ok) {
+    const int analyze_status =
+      kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0, &options);
+    if (analyze_status == KLS_ERR_UNSUPPORTED) {
+      goto cleanup;
+    }
+    if (!require_ok(analyze_status, "analyze checked separator queue")) {
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor checked separator queue base")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "checked separator queue fast factor")) {
+    ok = 0;
+  }
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats checked separator queue")) {
+    ok = 0;
+  }
+  if (ok && (stats.build_has_metis != 1 ||
+             stats.separator_analyzed_rows != n ||
+             stats.separator_component_count < 3 ||
+             stats.row_refactor_group_count <= 0 ||
+             stats.row_refactor_last_run != 1 ||
+             stats.row_refactor_last_checked != 1 ||
+             stats.row_refactor_last_parallel != 1 ||
+             stats.row_refactor_last_ready_queue != 1 ||
+             stats.row_refactor_last_done_bitmap != 1 ||
+             stats.row_refactor_last_work_ready_queue != 1 ||
+             stats.row_refactor_last_separator_flop_queue != 1 ||
+             stats.row_refactor_separator_flop_queue_run_count < 1 ||
+             stats.row_refactor_last_separator_flop_components < 3 ||
+             stats.row_refactor_last_separator_flop_private_groups <= 0 ||
+             stats.row_refactor_last_separator_flop_pipeline_groups <= 0 ||
+             stats.row_refactor_checked_run_count < 1)) {
+    fprintf(stderr,
+            "unexpected checked separator queue stats: metis=%d"
+            ", sep_rows=%" PRId64 ", sep_components=%" PRId64
+            ", groups=%" PRId64 ", last=%d/%d/%d/%d/%d/%d/%d"
+            ", sep_queue=%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", checked=%" PRId64 "\n",
+            stats.build_has_metis,
+            stats.separator_analyzed_rows,
+            stats.separator_component_count,
+            stats.row_refactor_group_count,
+            stats.row_refactor_last_run,
+            stats.row_refactor_last_checked,
+            stats.row_refactor_last_parallel,
+            stats.row_refactor_last_ready_queue,
+            stats.row_refactor_last_done_bitmap,
+            stats.row_refactor_last_work_ready_queue,
+            stats.row_refactor_last_separator_flop_queue,
+            stats.row_refactor_separator_flop_queue_run_count,
+            stats.row_refactor_last_separator_flop_components,
+            stats.row_refactor_last_separator_flop_private_groups,
+            stats.row_refactor_last_separator_flop_pipeline_groups,
+            stats.row_refactor_checked_run_count);
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, xvec, 0),
+                        "solve checked separator queue")) {
+    ok = 0;
+  }
+  double max_solution_error = 0.0;
+  double max_residual = 0.0;
+  double max_rhs = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    const double err = fabs(xvec[row] - expected[row]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+    if (fabs(b[row]) > max_rhs) {
+      max_rhs = fabs(b[row]);
+    }
+  }
+  residual = (double *)malloc((size_t)n * sizeof(*residual));
+  if (residual == NULL) {
+    ok = 0;
+  } else {
+    for (int32_t row = 0; row < n; ++row) {
+      residual[row] = -b[row];
+    }
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
+        residual[ai[q]] += ax1[q] * xvec[col];
+      }
+    }
+    for (int32_t row = 0; row < n; ++row) {
+      if (fabs(residual[row]) > max_residual) {
+        max_residual = fabs(residual[row]);
+      }
+    }
+  }
+  const double relative_residual =
+    max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 1.0e-7 ||
+             relative_residual > 1.0e-8)) {
+    fprintf(stderr,
+            "unexpected checked separator queue accuracy:"
+            " max_x_err=%.17g, rel_resid=%.17g\n",
+            max_solution_error, relative_residual);
+    ok = 0;
+  }
+
+cleanup:
+  if (had_saved_row_env && saved_row_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_row_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_row_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (had_saved_checked_env && saved_checked_env != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+               saved_checked_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_checked_env) {
+    if (unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  kls_destroy(solver);
+  free(saved_row_env);
+  free(saved_checked_env);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(xvec);
+  free(expected);
+  free(residual);
+  return ok;
+}
+
 static int test_scaled_row_refactor_single_block(void) {
   return run_scaled_row_refactor_case(1, 0) &&
          run_scaled_row_refactor_case(4, 1);
@@ -6270,6 +6552,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_parallel_row_refactor_full_ready_queue()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_checked_separator_flop_ready_queue()) {
     return EXIT_FAILURE;
   }
   if (!test_scaled_row_refactor_single_block()) {

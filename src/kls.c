@@ -22775,13 +22775,13 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   UF_long row_separator_flop_private_groups = 0;
   UF_long row_separator_flop_pipeline_groups = 0;
   UF_long row_separator_flop_component_count = 0;
-  /* Prefer consuming the whole retained row-group DAG through the ready queue.
-     This is the row-refactor analogue of the paper private/pipeline direction,
-     but only after the CKTSO-style wide cluster prefix has been preserved.  If
+  /* Prefer the retained separator-tree private/pipeline queue when it covers
+     the row-group DAG.  Checked runs keep the same queue and rely on the
+     earliest-reject stop plus prefix validation before any tail repair.  If
      preparation fails, keep the older cluster/tail schedule as a conservative
      fallback. */
   int use_row_ready_queue = 0;
-  if (!check_pivots && have_group_dag &&
+  if (have_group_dag &&
       kls_prepare_row_refactor_separator_flop_ready_queue(
         solver, thread_count, &row_ready_groups, &row_ready_slots,
         &row_remaining_preds, &row_tail_groups, &row_owned_private_groups,

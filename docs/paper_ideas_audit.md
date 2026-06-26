@@ -4011,3 +4011,19 @@ segment and deliberately below the compact-panel gate; it now requires native
 dense direct-input rows and zero compact-panel executions. This removes another
 KLU-shaped staging step from the default row-segment kernel while preserving
 the conservative compact-panel gate.
+
+The retained SubtreeLU separator-tree queue is now consumed by the checked
+fast-factor row path as well as the unchecked no-pivot refactor path. Previously
+the Algorithm 6-style FLOP-balanced private/pipeline queue was explicitly
+disabled when pivot checks were active, leaving checked fast factorization on
+the older generic ready queue even when a METIS `NodeNDP` separator map covered
+the block. The checked row scheduler now keeps the same separator private
+groups and pipeline groups while relying on the existing earliest-reject stop,
+done bitmap, and prefix-refresh validation before any CKTSO tail repair is
+accepted. A generated 30,600-row sparse-grid smoke fixture uses METIS,
+no BTF, no scaling, and checked row fast factorization, and requires
+`row_refactor_last_separator_flop_queue=1` with retained separator components,
+private groups, pipeline groups, and a clean solve residual. This directly
+fills the paper gap of applying SubtreeLU's separator private/pipeline
+partition inside the pivot-aware fast path, although it is still not CKTSO's
+full ETree-descendant pivoting-tail executor.
