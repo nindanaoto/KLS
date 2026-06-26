@@ -5022,6 +5022,7 @@ decomposition output expose the behavior through
 `fast_kls_block_restart_last_row_pipeline_threads`,
 `fast_kls_block_restart_last_row_pipeline_prefix_rows`,
 `fast_kls_block_restart_last_row_pipeline_suffix_rows`,
+`fast_kls_block_restart_last_row_pipeline_gap_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`, and
 `fast_kls_block_restart_last_row_pipeline_pivot_restarts`; the prior-pivot
 smoke fixture now requires the two-thread repair to use that pipeline.
@@ -5049,3 +5050,15 @@ suffix column to satisfy the pivot check, the pipeline attempt fails and the
 existing serial/KLU fallback ladder remains responsible. The root-independent
 tail smoke fixture now runs with two threads and requires two active pipeline
 rows plus one preserved suffix row for both unscaled and scaled repairs.
+
+KLS now fills the next direct CKTSO tail gap by admitting non-contiguous
+topological pivoting-tail masks into the same restartable row pipeline. The
+pipeline packs only active ETree-descendant tail rows into topological order,
+keeps preserved gap and suffix rows seeded from the prior LU, and applies
+readiness through an active-rank map instead of raw row-number thresholds. The
+masked path intentionally disables supernode-panel grouping for those packed
+rows until panel readiness is made mask-aware; contiguous suffix/envelope paths
+keep the existing panel behavior. Public and benchmark statistics now report
+`fast_kls_block_restart_last_row_pipeline_gap_rows`, and the non-contiguous gap
+smoke fixture requires two preserved gap rows, one preserved suffix row, and no
+serial tail restart when two threads are enabled.
