@@ -38641,11 +38641,13 @@ typedef struct kls_row_first_block_context {
 
 typedef struct kls_row_first_workspace {
   double *x;
+  double *supernode_workspace;
   unsigned int *mark;
   UF_long *pattern;
   UF_long *dep_heap;
   UF_long *u_row_ptr;
   UF_long *u_row_end;
+  UF_long supernode_workspace_capacity;
 } kls_row_first_workspace;
 
 typedef struct kls_row_first_row_stats {
@@ -39066,12 +39068,38 @@ static void kls_row_first_workspace_free(
     return;
   }
   free(workspace->x);
+  free(workspace->supernode_workspace);
   free(workspace->mark);
   free(workspace->pattern);
   free(workspace->dep_heap);
   free(workspace->u_row_ptr);
   free(workspace->u_row_end);
   memset(workspace, 0, sizeof(*workspace));
+}
+
+static int kls_row_first_workspace_reserve_supernode(
+  kls_row_first_workspace *workspace,
+  UF_long entry_count) {
+  if (entry_count == 0u) {
+    return 1;
+  }
+  if (workspace == NULL ||
+      entry_count > (UF_long)(SIZE_MAX / sizeof(*workspace->supernode_workspace))) {
+    return 0;
+  }
+  if (workspace->supernode_workspace_capacity >= entry_count) {
+    return 1;
+  }
+  double *grown =
+    (double *)realloc(workspace->supernode_workspace,
+                      (size_t)entry_count *
+                        sizeof(*workspace->supernode_workspace));
+  if (grown == NULL) {
+    return 0;
+  }
+  workspace->supernode_workspace = grown;
+  workspace->supernode_workspace_capacity = entry_count;
+  return 1;
 }
 
 static int kls_row_first_workspace_init(
@@ -39651,7 +39679,7 @@ static int kls_row_first_partial_apply_one_dep(
   return 1;
 }
 
-static int kls_row_first_partial_apply_supernode_run(
+static int kls_row_first_partial_apply_supernode_run_scalar(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
   kls_row_first_entries *local_l_entries,
@@ -39732,6 +39760,177 @@ static int kls_row_first_partial_apply_supernode_run(
     *run_rows_out = run_rows;
   }
   return 1;
+}
+
+static int kls_row_first_partial_apply_supernode_run_compact(
+  const kls_row_first_block_context *ctx,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *local_l_entries,
+  const kls_row_first_entries *published_u_entries,
+  const double *udiag_values,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  kls_row_first_partial_row *state,
+  UF_long dep_begin,
+  UF_long dep_end,
+  UF_long *run_rows_out) {
+  if (run_rows_out != NULL) {
+    *run_rows_out = 0;
+  }
+  if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
+      published_u_entries == NULL || udiag_values == NULL ||
+      u_row_ptr == NULL || u_row_end == NULL || state == NULL ||
+      workspace->x == NULL || workspace->mark == NULL ||
+      workspace->pattern == NULL || workspace->dep_heap == NULL ||
+      dep_begin > dep_end || dep_end >= state->row ||
+      state->row >= ctx->nk ||
+      workspace->mark[dep_begin] != state->generation) {
+    return -1;
+  }
+  const UF_long run_limit = dep_end - dep_begin + 1u;
+  if (run_limit <= 1u) {
+    return 0;
+  }
+  if (u_row_ptr[dep_end] > u_row_end[dep_end] ||
+      u_row_end[dep_end] > published_u_entries->count) {
+    return -1;
+  }
+  const UF_long tail_begin = u_row_ptr[dep_end];
+  const UF_long tail_len = u_row_end[dep_end] - tail_begin;
+
+  for (UF_long local = 0; local < run_limit; ++local) {
+    const UF_long dep = dep_begin + local;
+    if (udiag_values[dep] == 0.0 ||
+        u_row_ptr[dep] > u_row_end[dep] ||
+        u_row_end[dep] > published_u_entries->count) {
+      return -1;
+    }
+    const UF_long row_begin = u_row_ptr[dep];
+    const UF_long row_end = u_row_end[dep];
+    const UF_long internal_len = dep_end - dep;
+    if (row_end - row_begin < internal_len ||
+        row_end - row_begin - internal_len != tail_len) {
+      return 0;
+    }
+    for (UF_long offset = 0; offset < internal_len; ++offset) {
+      const UF_long col = published_u_entries->col[row_begin + offset];
+      if (col != dep + offset + 1u || col >= ctx->nk) {
+        return 0;
+      }
+    }
+    for (UF_long offset = 0; offset < tail_len; ++offset) {
+      const UF_long col = published_u_entries->col[row_begin + internal_len +
+                                                   offset];
+      if (tail_begin + offset >= published_u_entries->count ||
+          col != published_u_entries->col[tail_begin + offset] ||
+          col <= dep_end || col >= ctx->nk) {
+        return 0;
+      }
+    }
+  }
+
+  if (!kls_row_first_workspace_reserve_supernode(workspace, tail_len)) {
+    return 0;
+  }
+
+  double *x = workspace->x;
+  unsigned int *mark = workspace->mark;
+  UF_long *pattern = workspace->pattern;
+  UF_long *dep_heap = workspace->dep_heap;
+  double *trailing_workspace = workspace->supernode_workspace;
+  const unsigned int generation = state->generation;
+  if (tail_len > 0u) {
+    memset(trailing_workspace, 0,
+           (size_t)tail_len * sizeof(*trailing_workspace));
+  }
+
+  UF_long run_rows = 0;
+  for (UF_long local = 0; local < run_limit; ++local) {
+    const UF_long dep = dep_begin + local;
+    if (local > 0u) {
+      if (mark[dep] != generation ||
+          state->dep_heap_size == 0u || dep_heap[0] != dep) {
+        return -1;
+      }
+      const UF_long popped =
+        kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
+      if (popped != dep) {
+        return -1;
+      }
+    }
+    const double dep_pivot = udiag_values[dep];
+    const double lij = x[dep] / dep_pivot;
+    if (!kls_row_first_entries_append(local_l_entries, state->row, dep,
+                                      lij)) {
+      return -1;
+    }
+    x[dep] = 0.0;
+
+    const UF_long row_begin = u_row_ptr[dep];
+    const UF_long internal_len = dep_end - dep;
+    for (UF_long offset = 0; offset < internal_len; ++offset) {
+      const UF_long col = dep + offset + 1u;
+      if (mark[col] != generation) {
+        mark[col] = generation;
+        pattern[state->pattern_count++] = col;
+        if (col < state->row) {
+          kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+        }
+        x[col] = 0.0;
+      }
+      x[col] -= lij * published_u_entries->value[row_begin + offset];
+    }
+    for (UF_long offset = 0; offset < tail_len; ++offset) {
+      trailing_workspace[offset] +=
+        lij * published_u_entries->value[row_begin + internal_len + offset];
+    }
+    run_rows++;
+  }
+
+  for (UF_long offset = 0; offset < tail_len; ++offset) {
+    const UF_long col = published_u_entries->col[tail_begin + offset];
+    if (mark[col] != generation) {
+      mark[col] = generation;
+      pattern[state->pattern_count++] = col;
+      if (col < state->row) {
+        kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+      }
+      x[col] = 0.0;
+    }
+    x[col] -= trailing_workspace[offset];
+  }
+
+  if (run_rows_out != NULL) {
+    *run_rows_out = run_rows;
+  }
+  return 1;
+}
+
+static int kls_row_first_partial_apply_supernode_run(
+  const kls_row_first_block_context *ctx,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *local_l_entries,
+  const kls_row_first_entries *published_u_entries,
+  const double *udiag_values,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  kls_row_first_partial_row *state,
+  UF_long dep_begin,
+  UF_long dep_end,
+  UF_long *run_rows_out) {
+  const int compact_status =
+    kls_row_first_partial_apply_supernode_run_compact(
+      ctx, workspace, local_l_entries, published_u_entries, udiag_values,
+      u_row_ptr, u_row_end, state, dep_begin, dep_end, run_rows_out);
+  if (compact_status > 0) {
+    return 1;
+  }
+  if (compact_status < 0) {
+    return 0;
+  }
+  return kls_row_first_partial_apply_supernode_run_scalar(
+    ctx, workspace, local_l_entries, published_u_entries, udiag_values,
+    u_row_ptr, u_row_end, state, dep_begin, dep_end, run_rows_out);
 }
 
 static int kls_row_first_partial_apply_ready(
@@ -42351,6 +42550,7 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
     row_ctx.tol = tol;
 
     kls_row_first_workspace row_workspace;
+    memset(&row_workspace, 0, sizeof(row_workspace));
     row_workspace.x = x;
     row_workspace.mark = mark;
     row_workspace.pattern = pattern;
