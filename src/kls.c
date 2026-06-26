@@ -18828,10 +18828,12 @@ static int kls_checked_row_refactor_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
-static int kls_partial_supernode_pipeline_env_enabled(void) {
+static int kls_partial_supernode_pipeline_env_state(void) {
   const char *value = getenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
+  if (value == NULL || value[0] == '\0') {
+    return 0;
+  }
+  return (value[0] == '0' && value[1] == '\0') ? -1 : 1;
 }
 
 static int kls_compact_supernode_trsv_env_state(void) {
@@ -23446,9 +23448,11 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
 
   UF_long partial_supernode_groups = 0;
   UF_long partial_supernode_rows = 0;
+  const int partial_supernode_pipeline_state =
+    kls_partial_supernode_pipeline_env_state();
   const int prefer_partial_supernode_pipeline =
-    kls_partial_supernode_pipeline_env_enabled() &&
-    !check_pivots && have_group_dag && use_group_pipeline &&
+    partial_supernode_pipeline_state >= 0 &&
+    have_group_dag && use_group_pipeline &&
     kls_row_refactor_tail_has_large_partial_supernodes(
       solver, cluster_levels, thread_count, &partial_supernode_groups,
       &partial_supernode_rows);

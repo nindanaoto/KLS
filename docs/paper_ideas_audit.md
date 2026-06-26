@@ -4094,3 +4094,15 @@ to 3.34 s, reducing the CKTSO ratio from 2.96x to 2.62x. This is not the final
 paper algorithm; it prevents the incomplete serial scaffold from masking the
 actual missing piece, which is CKTSO's parallel row-up first factor and the
 matching row-oriented refactor/solve engine.
+
+The partial-supernode pipeline split is now a structural automatic row-engine
+choice instead of an explicit experiment. With
+`KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE` unset, row refactorization uses the
+SubtreeLU/CKTSO split when the pipeline tail is dominated by large producer
+groups; setting the variable to `0` remains a hard disable. The same
+row-prefix publication is also allowed in checked row fast-factor/refactor
+runs: a producer row is marked done only after its row values and pivot check
+complete, and consumers still wait on each dependency row before applying the
+partial compact-supernode update. This fills a direct Algorithm 5 coverage gap
+for prefix-safe producer/consumer overlap, while the full CKTSO pivoting-tail
+executor and production row-major first factor remain open.

@@ -5757,8 +5757,8 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
+  if (ok && unsetenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE") != 0) {
+    perror("unsetenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
@@ -5858,7 +5858,137 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     ok = 0;
   }
 
+  kls_solver *checked_solver = NULL;
+  if (ok && !require_ok(kls_create(&checked_solver),
+                        "create checked partial-prefix")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(checked_solver, KLS_INDEX_INT32,
+                                        n, ap, ai, 0, &options),
+                        "analyze checked partial-prefix")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(checked_solver, ax0),
+                        "factor checked partial-prefix base")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && unsetenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE") != 0) {
+    perror("unsetenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=0");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(checked_solver, ax1),
+                        "checked factor partial-prefix")) {
+    ok = 0;
+  }
+
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE",
+                         had_partial, saved_partial)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_checked, saved_checked)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_COMPACT_SUPERNODE_TRSV",
+                         had_trsv, saved_trsv)) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(checked_solver, 1, b, 0, x, 0),
+                        "solve checked partial-prefix")) {
+    ok = 0;
+  }
+
+  kls_stats checked_stats;
+  checked_stats.struct_size = sizeof(checked_stats);
+  if (ok && !require_ok(kls_get_stats(checked_solver, &checked_stats),
+                        "stats checked partial-prefix")) {
+    ok = 0;
+  }
+  if (ok && (checked_stats.row_refactor_last_run != 1 ||
+             checked_stats.row_refactor_last_checked != 1 ||
+             checked_stats.row_refactor_last_parallel != 1 ||
+             checked_stats.row_refactor_last_partial_supernode_pipeline != 1 ||
+             checked_stats.row_refactor_last_done_bitmap != 1 ||
+             checked_stats.row_refactor_last_compact_dense_panel != 1 ||
+             checked_stats.row_refactor_last_compact_supernode_update != 1 ||
+             checked_stats.row_refactor_last_compact_supernode_partial_update !=
+               1 ||
+             checked_stats.row_refactor_compact_supernode_partial_update_count <
+               1 ||
+             checked_stats.row_refactor_compact_supernode_partial_update_rows <
+               expected_partial_rows ||
+             checked_stats.row_refactor_compact_supernode_update_rows <
+               checked_stats.row_refactor_compact_supernode_partial_update_rows)) {
+    fprintf(stderr,
+            "unexpected checked partial-prefix stats: last=%d/%d/%d"
+            ", partial=%d, done=%d, compact=%d, update=%d/%" PRId64
+            ", partial_update=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
+            checked_stats.row_refactor_last_run,
+            checked_stats.row_refactor_last_checked,
+            checked_stats.row_refactor_last_parallel,
+            checked_stats.row_refactor_last_partial_supernode_pipeline,
+            checked_stats.row_refactor_last_done_bitmap,
+            checked_stats.row_refactor_last_compact_dense_panel,
+            checked_stats.row_refactor_last_compact_supernode_update,
+            checked_stats.row_refactor_compact_supernode_update_rows,
+            checked_stats.row_refactor_last_compact_supernode_partial_update,
+            checked_stats.row_refactor_compact_supernode_partial_update_count,
+            checked_stats.row_refactor_compact_supernode_partial_update_rows,
+            checked_stats.row_refactor_compact_supernode_partial_update_entries);
+    ok = 0;
+  }
+
+  max_solution_error = 0.0;
+  max_residual = 0.0;
+  max_rhs = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    const double err = fabs(x[row] - expected[row]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+    double residual = -b[row];
+    if (fabs(b[row]) > max_rhs) {
+      max_rhs = fabs(b[row]);
+    }
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        if (ai[p] == row) {
+          residual += ax1[p] * x[col];
+        }
+      }
+    }
+    if (fabs(residual) > max_residual) {
+      max_residual = fabs(residual);
+    }
+  }
+  const double checked_rel_resid =
+    max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 1.0e-8 ||
+             checked_rel_resid > 1.0e-10)) {
+    fprintf(stderr,
+            "unexpected checked partial-prefix accuracy: max_x_err=%.17g"
+            ", rel_resid=%.17g\n",
+            max_solution_error, checked_rel_resid);
+    ok = 0;
+  }
+
   kls_destroy(solver);
+  kls_destroy(checked_solver);
   free(saved_row);
   free(saved_partial);
   free(saved_checked);
