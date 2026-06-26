@@ -242,6 +242,15 @@ repeated refactor remains on the column EGraph path because the current
 row-group work model is still higher than the exact EGraph work. Therefore the
 next direct CKTSO-aligned step is still a production row/segment numeric
 engine, not simply enabling the current row-up scaffold by default.
+The KLS-first pivoted fallback can now factor independent BTF diagonal blocks
+concurrently when the row-up scaffold rejects. Each worker uses private
+KLU-kernel scatter/workspace, a private precomputed `Offp` seed to avoid
+boundary races between adjacent BTF blocks, and commits only block-local
+`LUbx`/pivot/statistics into the KLS numeric object. Final off-diagonal entries
+are still rebuilt from the accepted global pivot order. This closes the safe
+BTF-level "factorization with pivoting over independent work" gap for the
+current KLU-compatible numeric object, but it is still not CKTSO's
+single-large-block ETree-descendant pipelined tail factorization.
 
 The retained broader SPRAL post-factor trial is deliberately value-gated. A
 plain broad gate improved several MC64-sensitive cases but regressed the medium

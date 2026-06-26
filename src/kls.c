@@ -36805,6 +36805,542 @@ fail:
   return 0;
 }
 
+typedef struct kls_pivot_first_parallel_shared {
+  kls_solver *solver;
+  trilinos_klu_l_numeric *numeric;
+  double *numeric_values;
+  const UF_long *psinv;
+  const UF_long *offp_seed;
+  TRILINOS_KLU_common common_template;
+  atomic_ulong next_block;
+  atomic_int failed;
+  pthread_mutex_t commit_lock;
+  UF_long total_lnz;
+  UF_long total_unz;
+  UF_long max_lnz_block;
+  UF_long max_unz_block;
+  UF_long noffdiag;
+  UF_long nrealloc;
+  UF_long committed_blocks;
+  UF_long singular_rank;
+  UF_long singular_col;
+  int singular;
+  int scaled;
+} kls_pivot_first_parallel_shared;
+
+typedef struct kls_pivot_first_parallel_worker {
+  kls_pivot_first_parallel_shared *shared;
+  double *x;
+  UF_long *iwork;
+  UF_long *pblock;
+  UF_long *offp;
+} kls_pivot_first_parallel_worker;
+
+static void kls_pivot_first_parallel_worker_free(
+  kls_pivot_first_parallel_worker *worker) {
+  if (worker == NULL) {
+    return;
+  }
+  free(worker->x);
+  free(worker->iwork);
+  free(worker->offp);
+  memset(worker, 0, sizeof(*worker));
+}
+
+static int kls_pivot_first_parallel_worker_init(
+  kls_pivot_first_parallel_worker *worker,
+  kls_pivot_first_parallel_shared *shared) {
+  if (worker == NULL || shared == NULL || shared->solver == NULL ||
+      shared->solver->symbolic == NULL || shared->offp_seed == NULL) {
+    return 0;
+  }
+  memset(worker, 0, sizeof(*worker));
+  worker->shared = shared;
+  const UF_long n = shared->solver->n;
+  const UF_long maxblock = shared->solver->symbolic->maxblock;
+  if (maxblock == 0u || n == KLS_KLU_EMPTY ||
+      maxblock > (UF_long)(SIZE_MAX / (6u * sizeof(*worker->iwork))) ||
+      n + 1u == 0u || n + 1u > (UF_long)(SIZE_MAX / sizeof(*worker->offp))) {
+    return 0;
+  }
+  worker->x = (double *)calloc((size_t)maxblock, sizeof(*worker->x));
+  worker->iwork =
+    (UF_long *)malloc(6u * (size_t)maxblock * sizeof(*worker->iwork));
+  worker->offp =
+    (UF_long *)malloc(((size_t)n + 1u) * sizeof(*worker->offp));
+  if (worker->x == NULL || worker->iwork == NULL ||
+      worker->offp == NULL) {
+    kls_pivot_first_parallel_worker_free(worker);
+    return 0;
+  }
+  worker->pblock = worker->iwork + 5u * (size_t)maxblock;
+  memcpy(worker->offp, shared->offp_seed,
+         ((size_t)n + 1u) * sizeof(*worker->offp));
+  return 1;
+}
+
+static int kls_build_pivot_first_offp_seed(
+  const kls_solver *solver,
+  const trilinos_klu_l_numeric *numeric,
+  const UF_long *psinv,
+  UF_long *offp_seed) {
+  if (solver == NULL || solver->symbolic == NULL || numeric == NULL ||
+      psinv == NULL || offp_seed == NULL || solver->symbolic->Q == NULL ||
+      solver->symbolic->R == NULL) {
+    return 0;
+  }
+  UF_long poff = 0;
+  UF_long block = 0;
+  for (UF_long k = 0; k < solver->n; ++k) {
+    while (block + 1u < solver->symbolic->nblocks &&
+           solver->symbolic->R[block + 1u] <= k) {
+      block++;
+    }
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    const UF_long oldcol = solver->symbolic->Q[k];
+    if (oldcol >= solver->n || k < k1 || k >= k2) {
+      return 0;
+    }
+    offp_seed[k] = poff;
+    for (UF_long p = solver->col_ptr[oldcol];
+         p < solver->col_ptr[oldcol + 1u]; ++p) {
+      const UF_long oldrow = solver->row_idx[p];
+      if (oldrow >= solver->n) {
+        return 0;
+      }
+      const UF_long row_pos = psinv[oldrow];
+      if (row_pos >= solver->n) {
+        return 0;
+      }
+      if (row_pos < k1) {
+        if (poff >= numeric->nzoff) {
+          return 0;
+        }
+        poff++;
+      } else if (row_pos >= k2) {
+        return 0;
+      }
+    }
+  }
+  offp_seed[solver->n] = poff;
+  return poff == numeric->nzoff;
+}
+
+static void kls_pivot_first_parallel_record_singular(
+  kls_pivot_first_parallel_shared *shared,
+  UF_long rank,
+  UF_long col) {
+  if (shared == NULL) {
+    return;
+  }
+  if (!shared->singular || rank < shared->singular_rank) {
+    shared->singular = 1;
+    shared->singular_rank = rank;
+    shared->singular_col = col;
+  }
+}
+
+static int kls_pivot_first_parallel_commit_block(
+  kls_pivot_first_parallel_worker *worker,
+  UF_long block,
+  UF_long k1,
+  UF_long nk,
+  Unit *new_lu,
+  size_t new_size,
+  UF_long lnz_block,
+  UF_long unz_block,
+  const UF_long *pblock,
+  TRILINOS_KLU_common *local_common) {
+  if (worker == NULL || worker->shared == NULL ||
+      worker->shared->solver == NULL || worker->shared->numeric == NULL ||
+      pblock == NULL || local_common == NULL ||
+      block >= worker->shared->numeric->nblocks) {
+    if (new_lu != NULL && local_common != NULL) {
+      (void)TRILINOS_KLU_free(new_lu, new_size, sizeof(Unit), local_common);
+    }
+    return 0;
+  }
+  kls_pivot_first_parallel_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  trilinos_klu_l_numeric *numeric = shared->numeric;
+  int ok = 1;
+  pthread_mutex_lock(&shared->commit_lock);
+  if (atomic_load_explicit(&shared->failed, memory_order_acquire)) {
+    ok = 0;
+  } else if (new_lu == NULL || new_size == 0u) {
+    ok = 0;
+  } else {
+    for (UF_long k = 0; k < nk; ++k) {
+      const UF_long local_row = pblock[k];
+      if (local_row >= nk || k1 + local_row >= solver->n) {
+        ok = 0;
+        break;
+      }
+    }
+  }
+  if (ok && local_common->memusage >
+              SIZE_MAX - solver->common.memusage) {
+    ok = 0;
+  }
+  if (ok) {
+    const size_t base_mem = solver->common.memusage;
+    numeric->LUbx[block] = new_lu;
+    numeric->LUsize[block] = new_size;
+    for (UF_long k = 0; k < nk; ++k) {
+      numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + pblock[k]];
+    }
+    shared->total_lnz += lnz_block;
+    shared->total_unz += unz_block;
+    shared->max_lnz_block =
+      shared->max_lnz_block < lnz_block ? lnz_block : shared->max_lnz_block;
+    shared->max_unz_block =
+      shared->max_unz_block < unz_block ? unz_block : shared->max_unz_block;
+    shared->noffdiag += (UF_long)local_common->noffdiag;
+    shared->nrealloc += (UF_long)local_common->nrealloc;
+    solver->common.memusage += local_common->memusage;
+    if (solver->common.mempeak < solver->common.memusage) {
+      solver->common.mempeak = solver->common.memusage;
+    }
+    if (local_common->mempeak > 0u &&
+        local_common->mempeak <= SIZE_MAX - base_mem &&
+        solver->common.mempeak < base_mem + local_common->mempeak) {
+      solver->common.mempeak = base_mem + local_common->mempeak;
+    }
+    if (local_common->status == TRILINOS_KLU_SINGULAR) {
+      kls_pivot_first_parallel_record_singular(
+        shared, (UF_long)local_common->numerical_rank,
+        (UF_long)local_common->singular_col);
+    }
+    if (solver->symbolic->Lnz[block] < 0.0) {
+      solver->symbolic->Lnz[block] =
+        (double)(lnz_block > unz_block ? lnz_block : unz_block);
+    }
+    shared->committed_blocks++;
+    new_lu = NULL;
+  }
+  if (!ok) {
+    atomic_store_explicit(&shared->failed, 1, memory_order_release);
+  }
+  pthread_mutex_unlock(&shared->commit_lock);
+  if (new_lu != NULL) {
+    (void)TRILINOS_KLU_free(new_lu, new_size, sizeof(Unit), local_common);
+  }
+  return ok;
+}
+
+static int kls_pivot_first_parallel_commit_singleton(
+  kls_pivot_first_parallel_worker *worker,
+  UF_long block,
+  UF_long k1,
+  double pivot,
+  int singular,
+  UF_long singular_col) {
+  if (worker == NULL || worker->shared == NULL ||
+      worker->shared->solver == NULL || worker->shared->numeric == NULL ||
+      block >= worker->shared->numeric->nblocks) {
+    return 0;
+  }
+  kls_pivot_first_parallel_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  trilinos_klu_l_numeric *numeric = shared->numeric;
+  int ok = 1;
+  pthread_mutex_lock(&shared->commit_lock);
+  if (atomic_load_explicit(&shared->failed, memory_order_acquire)) {
+    ok = 0;
+  } else {
+    ((Entry *)numeric->Udiag)[k1] = pivot;
+    numeric->Pnum[k1] = solver->symbolic->P[k1];
+    numeric->Lip[k1] = 0;
+    numeric->Uip[k1] = 0;
+    numeric->Llen[k1] = 0;
+    numeric->Ulen[k1] = 0;
+    shared->total_lnz++;
+    shared->total_unz++;
+    if (solver->symbolic->Lnz[block] < 0.0) {
+      solver->symbolic->Lnz[block] = 1.0;
+    }
+    if (singular) {
+      kls_pivot_first_parallel_record_singular(shared, k1, singular_col);
+    }
+    shared->committed_blocks++;
+  }
+  if (!ok) {
+    atomic_store_explicit(&shared->failed, 1, memory_order_release);
+  }
+  pthread_mutex_unlock(&shared->commit_lock);
+  return ok;
+}
+
+static int kls_pivot_first_parallel_factor_singleton(
+  kls_pivot_first_parallel_worker *worker,
+  UF_long block,
+  UF_long k1) {
+  if (worker == NULL || worker->shared == NULL ||
+      worker->shared->solver == NULL || worker->shared->numeric == NULL) {
+    return 0;
+  }
+  kls_pivot_first_parallel_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  trilinos_klu_l_numeric *numeric = shared->numeric;
+  const UF_long oldcol = solver->symbolic->Q[k1];
+  const UF_long oldrow = solver->symbolic->P[k1];
+  if (oldcol >= solver->n || oldrow >= solver->n) {
+    return 0;
+  }
+  double pivot = 0.0;
+  for (UF_long p = solver->col_ptr[oldcol];
+       p < solver->col_ptr[oldcol + 1u]; ++p) {
+    const UF_long row = solver->row_idx[p];
+    if (row >= solver->n) {
+      return 0;
+    }
+    const UF_long row_pos = shared->psinv[row];
+    if (row_pos == k1) {
+      pivot = shared->numeric_values[p];
+      if (shared->scaled) {
+        const double rs = numeric->Rs[row];
+        if (rs == 0.0) {
+          return 0;
+        }
+        pivot /= rs;
+      }
+    } else if (row_pos > k1) {
+      return 0;
+    }
+  }
+  const int singular = pivot == 0.0;
+  if (singular && shared->common_template.halt_if_singular) {
+    return 0;
+  }
+  return kls_pivot_first_parallel_commit_singleton(
+    worker, block, k1, pivot, singular, oldcol);
+}
+
+static int kls_pivot_first_parallel_factor_block(
+  kls_pivot_first_parallel_worker *worker,
+  UF_long block) {
+  if (worker == NULL || worker->shared == NULL ||
+      worker->shared->solver == NULL ||
+      worker->shared->solver->symbolic == NULL ||
+      worker->shared->numeric == NULL) {
+    return 0;
+  }
+  kls_pivot_first_parallel_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  trilinos_klu_l_numeric *numeric = shared->numeric;
+  if (block >= solver->symbolic->nblocks) {
+    return 0;
+  }
+  const UF_long k1 = solver->symbolic->R[block];
+  const UF_long k2 = solver->symbolic->R[block + 1u];
+  if (k2 <= k1 || k2 > solver->n ||
+      k2 - k1 > solver->symbolic->maxblock) {
+    return 0;
+  }
+  const UF_long nk = k2 - k1;
+  if (nk == 1u) {
+    return kls_pivot_first_parallel_factor_singleton(worker, block, k1);
+  }
+
+  double lsize =
+    solver->symbolic->Lnz[block] < 0.0
+      ? -(shared->common_template.initmem)
+      : shared->common_template.initmem_amd * solver->symbolic->Lnz[block] +
+          (double)nk;
+  TRILINOS_KLU_common local_common = shared->common_template;
+  local_common.status = TRILINOS_KLU_OK;
+  local_common.numerical_rank = KLS_KLU_EMPTY;
+  local_common.singular_col = KLS_KLU_EMPTY;
+  local_common.noffdiag = 0;
+  local_common.nrealloc = 0;
+  local_common.memusage = 0u;
+  local_common.mempeak = 0u;
+
+  Unit *new_lu = NULL;
+  UF_long lnz_block = 0;
+  UF_long unz_block = 0;
+  const size_t new_size =
+    TRILINOS_KLU_kernel_factor(nk, solver->col_ptr, solver->row_idx,
+                               shared->numeric_values, solver->symbolic->Q,
+                               lsize, &new_lu,
+                               ((Entry *)numeric->Udiag) + k1,
+                               numeric->Llen + k1, numeric->Ulen + k1,
+                               numeric->Lip + k1, numeric->Uip + k1,
+                               worker->pblock, &lnz_block, &unz_block,
+                               (Entry *)worker->x, worker->iwork, k1,
+                               (UF_long *)shared->psinv,
+                               shared->scaled ? numeric->Rs : NULL,
+                               worker->offp, numeric->Offi,
+                               (Entry *)numeric->Offx, &local_common);
+  if (new_size == 0u || new_lu == NULL ||
+      local_common.status < TRILINOS_KLU_OK ||
+      (local_common.status == TRILINOS_KLU_SINGULAR &&
+       local_common.halt_if_singular)) {
+    if (new_lu != NULL) {
+      (void)TRILINOS_KLU_free(new_lu, new_size, sizeof(Unit),
+                              &local_common);
+    }
+    return 0;
+  }
+  return kls_pivot_first_parallel_commit_block(
+    worker, block, k1, nk, new_lu, new_size, lnz_block, unz_block,
+    worker->pblock, &local_common);
+}
+
+static void *kls_pivot_first_parallel_worker_main(void *arg) {
+  kls_pivot_first_parallel_worker worker;
+  kls_pivot_first_parallel_shared *shared =
+    (kls_pivot_first_parallel_shared *)arg;
+  if (!kls_pivot_first_parallel_worker_init(&worker, shared)) {
+    if (shared != NULL) {
+      atomic_store_explicit(&shared->failed, 1, memory_order_release);
+    }
+    return NULL;
+  }
+  const UF_long nblocks =
+    shared != NULL && shared->solver != NULL && shared->solver->symbolic != NULL
+      ? shared->solver->symbolic->nblocks : 0u;
+  for (;;) {
+    if (atomic_load_explicit(&shared->failed, memory_order_acquire)) {
+      break;
+    }
+    const UF_long block = (UF_long)atomic_fetch_add_explicit(
+      &shared->next_block, 1ul, memory_order_acq_rel);
+    if (block >= nblocks) {
+      break;
+    }
+    if (!kls_pivot_first_parallel_factor_block(&worker, block)) {
+      atomic_store_explicit(&shared->failed, 1, memory_order_release);
+      break;
+    }
+  }
+  kls_pivot_first_parallel_worker_free(&worker);
+  return NULL;
+}
+
+static int kls_try_first_factor_with_pivoted_blocks_parallel(
+  kls_solver *solver,
+  double *numeric_values,
+  const UF_long *psinv) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      numeric_values == NULL || psinv == NULL ||
+      solver->symbolic->nblocks < 2u || solver->options.threads <= 1 ||
+      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
+      solver->symbolic->R == NULL || solver->symbolic->Lnz == NULL ||
+      solver->symbolic->maxblock == 0u || solver->n == 0u) {
+    return -1;
+  }
+  int thread_count = solver->options.threads;
+  if ((UF_long)thread_count > solver->symbolic->nblocks) {
+    thread_count = (int)solver->symbolic->nblocks;
+  }
+  if (thread_count < 2) {
+    return -1;
+  }
+
+  UF_long *offp_seed = NULL;
+  pthread_t *threads = NULL;
+  int mutex_initialized = 0;
+  kls_pivot_first_parallel_shared shared;
+  memset(&shared, 0, sizeof(shared));
+  shared.singular_rank = KLS_KLU_EMPTY;
+  shared.singular_col = KLS_KLU_EMPTY;
+  shared.max_lnz_block = 1u;
+  shared.max_unz_block = 1u;
+
+  if (solver->n + 1u == 0u ||
+      solver->n + 1u > (UF_long)(SIZE_MAX / sizeof(*offp_seed))) {
+    return 0;
+  }
+  offp_seed =
+    (UF_long *)malloc(((size_t)solver->n + 1u) * sizeof(*offp_seed));
+  if (offp_seed == NULL ||
+      !kls_build_pivot_first_offp_seed(solver, solver->numeric, psinv,
+                                       offp_seed)) {
+    free(offp_seed);
+    return 0;
+  }
+  if (pthread_mutex_init(&shared.commit_lock, NULL) != 0) {
+    free(offp_seed);
+    return 0;
+  }
+  mutex_initialized = 1;
+  threads = (pthread_t *)calloc((size_t)thread_count, sizeof(*threads));
+  if (threads == NULL) {
+    goto fail;
+  }
+
+  atomic_init(&shared.next_block, 0ul);
+  atomic_init(&shared.failed, 0);
+  shared.solver = solver;
+  shared.numeric = solver->numeric;
+  shared.numeric_values = numeric_values;
+  shared.psinv = psinv;
+  shared.offp_seed = offp_seed;
+  shared.common_template = solver->common;
+  shared.scaled = solver->common.scale > 0;
+
+  int created = 0;
+  for (; created < thread_count; ++created) {
+    if (pthread_create(&threads[created], NULL,
+                       kls_pivot_first_parallel_worker_main, &shared) != 0) {
+      atomic_store_explicit(&shared.failed, 1, memory_order_release);
+      break;
+    }
+  }
+  for (int i = 0; i < created; ++i) {
+    (void)pthread_join(threads[i], NULL);
+  }
+  if (created != thread_count ||
+      atomic_load_explicit(&shared.failed, memory_order_acquire) ||
+      shared.committed_blocks != solver->symbolic->nblocks) {
+    goto fail;
+  }
+
+  solver->numeric->lnz = shared.total_lnz;
+  solver->numeric->unz = shared.total_unz;
+  solver->numeric->max_lnz_block = shared.max_lnz_block;
+  solver->numeric->max_unz_block = shared.max_unz_block;
+  solver->common.noffdiag = shared.noffdiag;
+  solver->common.nrealloc = shared.nrealloc;
+  if (shared.singular) {
+    solver->common.status = TRILINOS_KLU_SINGULAR;
+    solver->common.numerical_rank = shared.singular_rank;
+    solver->common.singular_col = shared.singular_col;
+  } else {
+    solver->common.status = TRILINOS_KLU_OK;
+    solver->common.numerical_rank = solver->n;
+    solver->common.singular_col = solver->n;
+  }
+  if (!kls_rebuild_numeric_pinv(solver) ||
+      !kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
+    goto fail;
+  }
+  if (shared.scaled && !kls_parallel_refactor_permute_scale(solver)) {
+    goto fail;
+  }
+  solver->kls_first_last_parallel_btf_blocks = shared.committed_blocks;
+  solver->kls_first_parallel_btf_block_count += shared.committed_blocks;
+
+  if (mutex_initialized) {
+    (void)pthread_mutex_destroy(&shared.commit_lock);
+  }
+  free(threads);
+  free(offp_seed);
+  return 1;
+
+fail:
+  if (threads != NULL) {
+    free(threads);
+  }
+  if (mutex_initialized) {
+    (void)pthread_mutex_destroy(&shared.commit_lock);
+  }
+  free(offp_seed);
+  return 0;
+}
+
 static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
                                                     double *numeric_values) {
   if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
@@ -36865,6 +37401,18 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
     }
   }
   (void)kls_build_refactor_map(solver);
+
+  const int parallel_status =
+    kls_try_first_factor_with_pivoted_blocks_parallel(solver,
+                                                      numeric_values,
+                                                      psinv);
+  if (parallel_status > 0) {
+    free_refactor_map(solver);
+    return 1;
+  }
+  if (parallel_status == 0) {
+    goto fail;
+  }
 
   UF_long total_lnz = 0;
   UF_long total_unz = 0;
