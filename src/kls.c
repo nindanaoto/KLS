@@ -39750,6 +39750,7 @@ static int kls_row_first_supernode_panel_cache_build(
   const kls_row_first_entries *u_entries,
   const UF_long *u_row_ptr,
   const UF_long *u_row_end,
+  const double *udiag_values,
   const unsigned char *row_done,
   const UF_long *supernode_start,
   const UF_long *supernode_end,
@@ -39760,6 +39761,7 @@ static int kls_row_first_supernode_panel_cache_build(
   }
   kls_row_first_supernode_panel_cache_free(cache);
   if (u_entries == NULL || u_row_ptr == NULL || u_row_end == NULL ||
+      udiag_values == NULL ||
       supernode_start == NULL || supernode_end == NULL ||
       ready_count > nk ||
       !kls_row_first_supernode_panel_cache_size_fits(nk, sizeof(UF_long))) {
@@ -39912,6 +39914,7 @@ static int kls_row_first_supernode_panel_cache_build(
       const UF_long internal_len = end - dep;
       double *dense_row =
         cache->dense_values + next_dense + local * width;
+      dense_row[local] = udiag_values[dep];
       for (UF_long offset = 0; offset < internal_len; ++offset) {
         dense_row[local + offset + 1u] =
           u_entries->value[row_begin + offset];
@@ -40223,6 +40226,166 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
   return 1;
 }
 
+#ifdef KLS_HAVE_CBLAS
+static int kls_row_first_partial_apply_supernode_run_cached_cblas(
+  const kls_row_first_block_context *ctx,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *local_l_entries,
+  kls_row_first_partial_row *state,
+  UF_long dep_begin,
+  UF_long start,
+  UF_long width,
+  UF_long panel_offset,
+  UF_long available_end,
+  UF_long run_limit,
+  UF_long dense_suffix_len,
+  UF_long tail_len,
+  const double *dense_panel,
+  const double *tail_values,
+  const UF_long *tail_cols,
+  UF_long *run_rows_out) {
+  if (run_rows_out != NULL) {
+    *run_rows_out = 0;
+  }
+  if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
+      state == NULL || dense_panel == NULL ||
+      workspace->x == NULL || workspace->mark == NULL ||
+      workspace->pattern == NULL || workspace->dep_heap == NULL ||
+      run_limit <= 1u || panel_offset >= width ||
+      available_end > width ||
+      run_limit != available_end - panel_offset ||
+      run_limit > (UF_long)INT_MAX ||
+      width > (UF_long)INT_MAX ||
+      dense_suffix_len > (UF_long)INT_MAX ||
+      tail_len > (UF_long)INT_MAX ||
+      (tail_len > 0u && (tail_values == NULL || tail_cols == NULL)) ||
+      !kls_cblas_supernode_env_enabled()) {
+    return 0;
+  }
+
+  const double update_work =
+    0.5 * (double)run_limit * (double)(run_limit - 1u) +
+    (double)run_limit * (double)dense_suffix_len +
+    (double)run_limit * (double)tail_len;
+  const double copied_entries =
+    (double)run_limit + (double)dense_suffix_len + (double)tail_len;
+  if (update_work < KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK ||
+      update_work <
+        KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY *
+          copied_entries) {
+    return 0;
+  }
+  if (tail_len > UF_long_max - run_limit) {
+    return 0;
+  }
+  const UF_long workspace_len = run_limit + tail_len;
+  if (!kls_row_first_workspace_reserve_supernode(workspace,
+                                                 workspace_len)) {
+    return 0;
+  }
+
+  double *x = workspace->x;
+  unsigned int *mark = workspace->mark;
+  UF_long *pattern = workspace->pattern;
+  UF_long *dep_heap = workspace->dep_heap;
+  double *rhs = workspace->supernode_workspace;
+  double *tail_workspace = tail_len > 0u ? rhs + run_limit : NULL;
+  const unsigned int generation = state->generation;
+
+  for (UF_long local = 0; local < run_limit; ++local) {
+    const UF_long dep = dep_begin + local;
+    const UF_long panel_local = panel_offset + local;
+    const double pivot = dense_panel[panel_local * width + panel_local];
+    if (dep >= state->row || pivot == 0.0) {
+      return -1;
+    }
+    rhs[local] = mark[dep] == generation ? x[dep] : 0.0;
+    if (mark[dep] != generation) {
+      if (local == 0u) {
+        return -1;
+      }
+      mark[dep] = generation;
+      pattern[state->pattern_count++] = dep;
+      kls_row_first_heap_push(dep_heap, &state->dep_heap_size, dep);
+      x[dep] = 0.0;
+    }
+  }
+
+  cblas_dtrsv(CblasRowMajor, CblasUpper, CblasTrans, CblasNonUnit,
+              (int)run_limit,
+              dense_panel + panel_offset * width + panel_offset,
+              (int)width, rhs, 1);
+
+  for (UF_long local = 0; local < run_limit; ++local) {
+    const UF_long dep = dep_begin + local;
+    if (local > 0u) {
+      if (state->dep_heap_size == 0u || dep_heap[0] != dep) {
+        return -1;
+      }
+      const UF_long popped =
+        kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
+      if (popped != dep) {
+        return -1;
+      }
+    }
+    if (!kls_row_first_entries_append(local_l_entries, state->row, dep,
+                                      rhs[local])) {
+      return -1;
+    }
+    x[dep] = 0.0;
+  }
+
+  if (dense_suffix_len > 0u) {
+    for (UF_long offset = 0; offset < dense_suffix_len; ++offset) {
+      const UF_long col = start + available_end + offset;
+      if (col >= ctx->nk) {
+        return -1;
+      }
+      if (mark[col] != generation) {
+        mark[col] = generation;
+        pattern[state->pattern_count++] = col;
+        if (col < state->row) {
+          kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+        }
+        x[col] = 0.0;
+      }
+    }
+    cblas_dgemv(CblasRowMajor, CblasTrans, (int)run_limit,
+                (int)dense_suffix_len, -1.0,
+                dense_panel + panel_offset * width + available_end,
+                (int)width, rhs, 1, 1.0,
+                x + start + available_end, 1);
+  }
+
+  if (tail_len > 0u) {
+    cblas_dgemv(CblasRowMajor, CblasTrans, (int)run_limit,
+                (int)tail_len, 1.0,
+                tail_values + panel_offset * tail_len, (int)tail_len,
+                rhs, 1, 0.0, tail_workspace, 1);
+    for (UF_long offset = 0; offset < tail_len; ++offset) {
+      const UF_long col = tail_cols[offset];
+      if (col >= ctx->nk) {
+        return -1;
+      }
+      if (mark[col] != generation) {
+        mark[col] = generation;
+        pattern[state->pattern_count++] = col;
+        if (col < state->row) {
+          kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+        }
+        x[col] = 0.0;
+      }
+      x[col] -= tail_workspace[offset];
+    }
+  }
+
+  if (run_rows_out != NULL) {
+    *run_rows_out = run_limit;
+  }
+  return 1;
+}
+#endif
+
 static int kls_row_first_partial_apply_supernode_run_cached(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
@@ -40307,6 +40470,23 @@ static int kls_row_first_partial_apply_supernode_run_cached(
       (tail_len > 0u && (tail_values == NULL || tail_cols == NULL))) {
     return 0;
   }
+
+#ifdef KLS_HAVE_CBLAS
+  const int cblas_status =
+    kls_row_first_partial_apply_supernode_run_cached_cblas(
+      ctx, workspace, local_l_entries, state, dep_begin, start, width,
+      panel_offset, available_end, run_limit, dense_suffix_len, tail_len,
+      dense_panel, tail_values, tail_cols, run_rows_out);
+  if (cblas_status > 0) {
+    if (used_panel_out != NULL) {
+      *used_panel_out = 1;
+    }
+    return 1;
+  }
+  if (cblas_status < 0) {
+    return -1;
+  }
+#endif
 
   UF_long run_rows = 0;
   for (UF_long local = 0; local < run_limit; ++local) {
@@ -41206,8 +41386,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
          sizeof(private_supernode_panel_cache));
   (void)kls_row_first_supernode_panel_cache_build(
     &private_supernode_panel_cache, &private_u_entries, private_u_row_ptr,
-    private_u_row_end, row_done, supernode_start, supernode_end, ctx->nk,
-    begin);
+    private_u_row_end, udiag_values, row_done, supernode_start,
+    supernode_end, ctx->nk, begin);
 
   kls_row_first_pipeline_shared shared;
   memset(&shared, 0, sizeof(shared));

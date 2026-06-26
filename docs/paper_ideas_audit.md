@@ -4843,8 +4843,11 @@ panel-backed use through
 `kls_first_last_separator_queue_pipeline_supernode_panel_update`,
 `kls_first_separator_queue_pipeline_supernode_panel_update_run_count`,
 `kls_first_last_separator_queue_pipeline_supernode_panel_update_groups`, and
-`kls_first_last_separator_queue_pipeline_supernode_panel_update_rows`. This is
+`kls_first_last_separator_queue_pipeline_supernode_panel_update_rows`. In
+CBLAS builds, the existing `KLS_ENABLE_CBLAS_SUPERNODE=1` runtime gate can
+consume eligible cached KLS-first panels with CBLAS `dtrsv` over the
+non-unit upper-triangular panel and CBLAS `dgemv` for dense suffix/common-tail
+updates; otherwise the cached panel uses the scalar in-panel solver. This is
 still not the full paper storage layer: phase-local private-prefix panels do
-not yet cover every KLS-first private/BTF/serial producer, the KLS-first panel
-consumer is still scalar rather than BLAS-backed, and CKTSO's full
+not yet cover every KLS-first private/BTF/serial producer, and CKTSO's full
 ETree-descendant pivoting-tail scheduler remains open.
