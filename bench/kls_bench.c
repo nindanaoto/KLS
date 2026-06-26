@@ -1341,6 +1341,8 @@ int main(int argc, char **argv) {
            ",\"refactor_last_supernode_pipeline_columns\":%" PRId64
            ",\"refactor_supernode_pipeline_task_count\":%" PRId64
            ",\"refactor_supernode_pipeline_column_count\":%" PRId64
+           ",\"refactor_last_ready_queue_columns\":%" PRId64
+           ",\"refactor_ready_queue_run_count\":%" PRId64
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
@@ -1359,6 +1361,8 @@ int main(int argc, char **argv) {
            stats.refactor_last_supernode_pipeline_columns,
            stats.refactor_supernode_pipeline_task_count,
            stats.refactor_supernode_pipeline_column_count,
+           stats.refactor_last_ready_queue_columns,
+           stats.refactor_ready_queue_run_count,
            stats.nnz_l, stats.nnz_u,
            stats.estimated_flops, stats.factor_flops, stats.rcond, stats.rgrowth,
            stats.memory_bytes, stats.memory_peak_bytes);
@@ -1586,6 +1590,10 @@ int main(int argc, char **argv) {
            stats.refactor_last_supernode_pipeline_columns,
            stats.refactor_supernode_pipeline_task_count,
            stats.refactor_supernode_pipeline_column_count);
+    printf("refactor ready queue columns: %" PRId64
+           ", runs: %" PRId64 "\n",
+           stats.refactor_last_ready_queue_columns,
+           stats.refactor_ready_queue_run_count);
     printf("row refactor groups: %" PRId64
            ", levels: %" PRId64 ", max level width: %" PRId64
            ", cluster levels: %" PRId64 ", pipeline groups: %" PRId64

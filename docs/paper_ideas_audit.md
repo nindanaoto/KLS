@@ -4126,3 +4126,31 @@ also reproduced on the committed `d08ab35` baseline and is a pre-existing
 EGraph pipeline flake. This narrows the remaining paper gap: the useful next
 step is not more task scheduling, but production supernodal numeric storage
 and BLAS-style panel/trailing updates for these retained ranges.
+
+The intermittent 120 s `transient` timeout was traced to the clustered
+EGraph/row-refactor barrier protocol, not to the supernode-range metadata. A
+worker could observe `stop` after one level barrier and leave the clustered
+phase while another worker had already entered the next level's barrier,
+leaving the remaining workers asleep in `pthread_barrier_wait` and the main
+thread waiting on the pool completion condition. Clustered column and row
+refactor workers now drain all remaining level barriers collectively after a
+stop; once stopped, they skip numeric work but still rendezvous with peers
+until the level loop is complete. This preserves the existing fast
+fetch-and-wait EGraph pipeline while removing the mismatched-barrier timeout
+class. A 20-run `transient` stress loop with four threads completed without
+timeout in default mode, with ready-queue columns reported as zero and refactor
+time staying near the previous 0.026-0.030 s range.
+
+A true column ready-queue scheduler is also available behind
+`KLS_ENABLE_EGRAPH_READY_QUEUE=1`. It builds in-tail predecessor counts and
+successor lists from the retained EGraph schedule and only dispatches columns
+whose pipeline predecessors have completed. On `transient` it exercised all
+1,037 pipeline columns and completed reliably, but repeated refactor time rose
+to about 0.066-0.072 s, so it remains an off-by-default paper probe rather
+than the production path. The ready-queue successor graph is now also built
+only when that probe is enabled; a gated default 12-row CKTSO-gap focus run
+completed with zero failures and a 3.216 s geomean, effectively unchanged from
+the saved 3.206 s KLS reference while still about 2.52x slower than the saved
+CKTSO reference on the same common rows. This confirms that the large CKTSO gap
+is not closed by stricter task readiness alone; the next algorithmic gap is
+still the numeric supernodal/panel update engine.
