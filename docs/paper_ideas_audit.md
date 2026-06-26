@@ -4061,6 +4061,19 @@ implements production symbolic scatter maps and native row/segment panel
 storage/updates instead of using this scalar scaffold as if it were SubtreeLU's
 production supernodal kernel.
 
+The fragmented dense-consumer executor now also prebuilds a bounded symbolic
+target map for the active producer run's trailing updates. Each mapped target
+is classified once as a later external multiplier, current dense-panel entry,
+pivot, current trailing-panel entry, or no-op before the numeric panel update is
+applied. This removes the numeric apply loop's destination rediscovery while
+keeping memory bounded by `batch_rows * max_run_trailing_len`, not by all runs
+in the fragmented row. A focused `ASIC_320k` probe was mixed (`~0.326s`
+refactor versus `~0.319s` before the target map), but the same five forced-row
+CKTSO-gap probe improved slightly from about `32.1s` to about `31.9s`
+geomean. This is useful as a storage/scatter scaffold, but it confirms that the
+main remaining paper gap is still native row/segment panel storage and a
+production blocked update kernel, not symbolic target lookup alone.
+
 The unchecked producer-panel refactor experiment also uses a blocked panel
 algorithm: scalar code factors each diagonal block, `dtrsm` solves the
 below-panel multiplier block, and `dgemm` updates both the dense right panel
