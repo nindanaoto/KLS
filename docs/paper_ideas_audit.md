@@ -4938,3 +4938,15 @@ pivoting-tail scheduler remains open. Separator pipeline pivot-tail rows that
 are serialized after a restart now use the same row-up producer panel cache for
 completed-supernode publication, so the restarted suffix no longer loses those
 completed panels just because a pipeline phase fell back to a serial pivot row.
+
+The BTF-level parallel first-factor worker no longer carries its own older
+row-up numeric loop. It now calls the shared `kls_row_first_factor_one_row`
+executor used by the serial, private, separator, and pivot-tail row paths, then
+performs only the worker-specific row pointer continuation, panel publication,
+separator reject accounting, and block commit. This removes a remaining
+algorithmic fork: dynamic column exchanges, scoped separator pivot decisions,
+owned-supernode run detection, and cached panel consumption now have one
+implementation across the KLS-first row-major executors. The paper gap that
+remains is the larger one already noted above: KLS still needs the full CKTSO
+ETree-descendant pivoting-tail scheduler and a production compact/batched
+row-major numeric storage layer.
