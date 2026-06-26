@@ -473,8 +473,9 @@ BTF refactor reached the final block before rejection, KLS validates the
 repaired block tail and skips the redundant checked retry. Scaled fast-factor
 calls still use the pivot-checking refactor kernel so they can stop at the
 first unsafe multiplier; KLS can repair a KLS-owned scaled rejected block,
-recompute row scales, and continue with a serial checked refactor over only
-later BTF blocks when the rejected pass left a valid prefix-current state.
+recompute row scales, and continue with the threaded checked BTF pool, falling
+back to the serial checked refactor, over only later BTF blocks when the
+rejected pass left a valid prefix-current state.
 Scaled prefix-current rejects whose validated repair preserves a non-empty
 live prefix state can also execute the conservative serial suffix restart of
 the rejected block with pivoting; accepted scaled and unscaled serial suffix
@@ -483,12 +484,12 @@ permutation can change. Scaled all-refresh KLU refactor rejects first
 recompute the row scale vector back to input-row order, so the same block
 repair and validated non-root serial suffix restart can run before the accepted
 factor is restored to KLU's pivot-order row-scale convention.
-When an unscaled serial BTF refactor rejects a non-final block,
-the repaired block can now be followed by a serial checked continuation over
-only the later BTF blocks instead of restarting from the first block. The
-threaded BTF worker pool also marks completed diagonal blocks and reports the
-same prefix-current state only when every earlier block finished before a
-checked pivot reject. For
+When a BTF refactor rejects a non-final block, the repaired block can now be
+followed by a checked continuation over only the later BTF blocks instead of
+restarting from the first block; unscaled and KLU row-scaled states both try the
+threaded BTF worker pool before serial continuation. The threaded BTF worker
+pool also marks completed diagonal blocks and reports the same prefix-current
+state only when every earlier block finished before a checked pivot reject. For
 unscaled or scaled prefix-current/all-current rejects whose validated repair
 preserves a non-empty live prefix state, KLS can execute the same conservative
 serial suffix restart before falling back to full block repair. This executable tail path is

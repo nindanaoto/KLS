@@ -36845,10 +36845,11 @@ static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
                                                  UF_long start_block,
                                                  int check_pivots) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      numeric_values == NULL || solver->common.scale > 0 ||
+      numeric_values == NULL ||
       solver->col_ptr == NULL || solver->row_idx == NULL ||
       solver->symbolic->R == NULL || solver->symbolic->Q == NULL ||
-      solver->numeric->Rs != NULL ||
+      (solver->common.scale > 0 && solver->numeric->Rs == NULL) ||
+      (solver->common.scale <= 0 && solver->numeric->Rs != NULL) ||
       solver->numeric->Udiag == NULL || solver->numeric->Offp == NULL ||
       solver->numeric->Offx == NULL || solver->numeric->Lip == NULL ||
       solver->numeric->Llen == NULL || solver->numeric->Uip == NULL ||
@@ -36862,6 +36863,7 @@ static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
   if (start_block == nblocks) {
     return 1;
   }
+  const int scaled = solver->common.scale > 0;
   const UF_long remaining_blocks = nblocks - start_block;
   int thread_count = solver->options.threads;
   if ((UF_long)thread_count > remaining_blocks) {
@@ -36880,6 +36882,13 @@ static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
   common->nrealloc = 0;
+  if (scaled &&
+      !trilinos_klu_l_scale((UF_long)common->scale, solver->n,
+                            solver->col_ptr, solver->row_idx,
+                            numeric_values, solver->numeric->Rs, NULL,
+                            common)) {
+    return 0;
+  }
 
   int invalid = 0;
   int pivot_rejected = 0;
@@ -36936,6 +36945,10 @@ static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
     if (common->halt_if_singular) {
       return 0;
     }
+  }
+  if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
   }
   if (!singular) {
     common->status = TRILINOS_KLU_OK;
@@ -37982,11 +37995,9 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     if (solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX) {
       const UF_long tail_start = repaired_block + 1u;
       int tail_ok = -1;
-      if (solver->common.scale <= 0) {
-        tail_ok =
-          kls_parallel_refactor_tail_from_block(solver, numeric_values,
-                                                tail_start, 1);
-      }
+      tail_ok =
+        kls_parallel_refactor_tail_from_block(solver, numeric_values,
+                                              tail_start, 1);
       if (tail_ok < 0) {
         tail_ok =
           solver->common.scale > 0
