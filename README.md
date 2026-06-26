@@ -777,10 +777,13 @@ tail is found. KLS retains the slice boundaries internally and reports the
 maximum per-slice triangular entries as a load-balance diagnostic. It also
 precomputes per-row rectangular/triangular split points for dense-tail rows and
 reports the resulting lower/upper segment entry counts, matching CKTSO's
-trapezoid-slice setup. Single-RHS, single-block normal solves now use the
-persistent worker pool to parallelize the rectangular part of those slices when
-the parallel rectangular work reaches the paper's 300,000-entry dense-tail work
-scale. Rectangular slice rows are assigned to workers by accumulated
+trapezoid-slice setup. Single-RHS, single-block normal and transpose solves now
+use the persistent worker pool to parallelize the rectangular part of those
+slices when the parallel rectangular work reaches the paper's 300,000-entry
+dense-tail work scale. Transpose solves use retained transposed row views of
+`U^T` and `L^T` with source positions back to the KLU-compatible factor values,
+so they gather solved dependencies instead of racing through row-scatter
+updates. Rectangular slice rows are assigned to workers by accumulated
 rectangular-entry counts, and KLS reports the max per-thread rectangular entries
 for lower/upper factors. It also levelizes the sparse triangular block before
 the dense tail and solves wide prefix levels in the same persistent worker pool,

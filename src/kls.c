@@ -93,6 +93,51 @@ typedef enum kls_fragmented_update_target_kind {
   KLS_FRAGMENTED_UPDATE_TARGET_TRAILING = 4
 } kls_fragmented_update_target_kind;
 
+typedef struct kls_row_solve_transpose_plan {
+  UF_long *ptr;
+  UF_long *cols;
+  UF_long *source_pos;
+  UF_long *slice_bounds;
+  UF_long *segment_split;
+  UF_long *thread_bounds;
+  UF_long *sparse_level_ptr;
+  UF_long *sparse_level_rows;
+  UF_long sparse_level_count;
+  UF_long sparse_cluster_levels;
+  UF_long sparse_level_max_width;
+  UF_long dense_tail_start;
+  UF_long dense_tail_rows;
+  UF_long dense_tail_entries;
+  UF_long slice_max_entries;
+  UF_long segmented_rows;
+  UF_long rect_entries;
+  UF_long tri_entries;
+  UF_long thread_max_rect_entries;
+  int thread_count;
+  int source_upper;
+  int upper;
+  int diagonal;
+} kls_row_solve_transpose_plan;
+
+typedef struct kls_row_solve_factor_view {
+  const UF_long *ptr;
+  const UF_long *cols;
+  const UF_long *source_pos;
+  const UF_long *slice_bounds;
+  const UF_long *segment_split;
+  const UF_long *thread_bounds;
+  const UF_long *sparse_level_ptr;
+  const UF_long *sparse_level_rows;
+  UF_long sparse_level_count;
+  UF_long sparse_cluster_levels;
+  UF_long dense_tail_start;
+  UF_long rect_entries;
+  int thread_count;
+  int source_upper;
+  int upper;
+  int diagonal;
+} kls_row_solve_factor_view;
+
 typedef struct kls_separator_analysis {
   UF_long n;
   UF_long global_begin;
@@ -280,6 +325,8 @@ struct kls_solver {
   UF_long *row_solve_l_sparse_level_rows;
   UF_long *row_solve_u_sparse_level_ptr;
   UF_long *row_solve_u_sparse_level_rows;
+  kls_row_solve_transpose_plan row_solve_ut_plan;
+  kls_row_solve_transpose_plan row_solve_lt_plan;
   UF_long row_refactor_work_ready_queue_run_count;
   UF_long row_refactor_compact_dense_panel_count;
   UF_long row_refactor_local_ready_group_count;
@@ -728,6 +775,7 @@ typedef struct kls_egraph_refactor_shared {
   int row_refactor_compact_supernode_trsv;
   int row_solve_mode;
   int row_solve_upper;
+  const kls_row_solve_factor_view *row_solve_view;
   double *row_solve_work;
   int row_pipeline_ready_queue;
   int row_pipeline_row_dep_ready_queue;
@@ -825,6 +873,8 @@ static double kls_row_refactor_dense_group_panel_entries(
 static int kls_row_refactor_prefers_compact_dense_panel(UF_long width,
                                                         UF_long trailing_len);
 static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x);
+static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
+                                                        double *x);
 static int kls_independent_row_l_pos_is_run_start(
   UF_long local_pos,
   UF_long run_count,
@@ -1266,10 +1316,28 @@ static void free_fast_reject_tail_plan(kls_solver *solver) {
   solver->fast_reject_tail_seed_valid = 0;
 }
 
+static void kls_clear_row_solve_transpose_plan(
+  kls_row_solve_transpose_plan *plan) {
+  if (plan == NULL) {
+    return;
+  }
+  free(plan->ptr);
+  free(plan->cols);
+  free(plan->source_pos);
+  free(plan->slice_bounds);
+  free(plan->segment_split);
+  free(plan->thread_bounds);
+  free(plan->sparse_level_ptr);
+  free(plan->sparse_level_rows);
+  memset(plan, 0, sizeof(*plan));
+}
+
 static void kls_clear_row_solve_partition(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
+  kls_clear_row_solve_transpose_plan(&solver->row_solve_ut_plan);
+  kls_clear_row_solve_transpose_plan(&solver->row_solve_lt_plan);
   free(solver->row_solve_l_slice_bounds);
   free(solver->row_solve_u_slice_bounds);
   free(solver->row_solve_l_segment_split);
@@ -17726,6 +17794,210 @@ static UF_long kls_row_solve_sparse_cluster_levels(
   return level;
 }
 
+static int kls_build_one_row_solve_transpose_plan(
+  kls_solver *solver,
+  int source_upper,
+  kls_row_solve_transpose_plan *plan) {
+  if (solver == NULL || plan == NULL ||
+      solver->row_refactor_pattern_n != solver->n) {
+    return 0;
+  }
+  kls_clear_row_solve_transpose_plan(plan);
+
+  const UF_long n = solver->n;
+  const UF_long *src_ptr =
+    source_upper ? solver->row_refactor_u_ptr : solver->row_refactor_l_ptr;
+  const UF_long *src_cols =
+    source_upper ? solver->row_refactor_u_cols : solver->row_refactor_l_cols;
+  if (src_ptr == NULL || (src_ptr[n] > 0u && src_cols == NULL)) {
+    return 0;
+  }
+  if (n > (UF_long)(SIZE_MAX / sizeof(*plan->ptr)) - 1u) {
+    return 0;
+  }
+
+  UF_long *ptr = (UF_long *)calloc((size_t)n + 1u, sizeof(*ptr));
+  if (ptr == NULL) {
+    return 0;
+  }
+
+  for (UF_long row = 0; row < n; ++row) {
+    if (src_ptr[row] > src_ptr[row + 1u]) {
+      free(ptr);
+      return 0;
+    }
+    for (UF_long p = src_ptr[row]; p < src_ptr[row + 1u]; ++p) {
+      const UF_long col = src_cols[p];
+      if (col >= n ||
+          (source_upper ? col <= row : col >= row)) {
+        free(ptr);
+        return 0;
+      }
+      ptr[col + 1u]++;
+    }
+  }
+  for (UF_long row = 0; row < n; ++row) {
+    ptr[row + 1u] += ptr[row];
+  }
+
+  const UF_long nnz = ptr[n];
+  UF_long *cols = NULL;
+  UF_long *source_pos = NULL;
+  UF_long *next = NULL;
+  if (nnz > 0u) {
+    if (nnz > (UF_long)(SIZE_MAX / sizeof(*cols))) {
+      free(ptr);
+      return 0;
+    }
+    cols = (UF_long *)malloc((size_t)nnz * sizeof(*cols));
+    source_pos = (UF_long *)malloc((size_t)nnz * sizeof(*source_pos));
+    next = (UF_long *)malloc((size_t)n * sizeof(*next));
+    if (cols == NULL || source_pos == NULL || next == NULL) {
+      free(ptr);
+      free(cols);
+      free(source_pos);
+      free(next);
+      return 0;
+    }
+    memcpy(next, ptr, (size_t)n * sizeof(*next));
+    for (UF_long row = 0; row < n; ++row) {
+      for (UF_long p = src_ptr[row]; p < src_ptr[row + 1u]; ++p) {
+        const UF_long col = src_cols[p];
+        const UF_long dst = next[col]++;
+        cols[dst] = row;
+        source_pos[dst] = p;
+      }
+    }
+    free(next);
+  }
+
+  plan->ptr = ptr;
+  plan->cols = cols;
+  plan->source_pos = source_pos;
+  plan->source_upper = source_upper ? 1 : 0;
+  plan->upper = source_upper ? 0 : 1;
+  plan->diagonal = source_upper ? 1 : 0;
+
+  if (nnz == 0u) {
+    return 1;
+  }
+
+  UF_long tail_entries = 0;
+  const UF_long tail_start =
+    kls_row_solve_dense_tail_start(n, plan->ptr, &tail_entries);
+  plan->dense_tail_start = tail_start;
+  plan->dense_tail_rows = tail_start < n ? n - tail_start : 0u;
+  plan->dense_tail_entries = tail_entries;
+  (void)kls_build_row_solve_sparse_levels(
+    n, plan->ptr, plan->cols, tail_start, plan->upper,
+    &plan->sparse_level_ptr, &plan->sparse_level_rows,
+    &plan->sparse_level_count, &plan->sparse_level_max_width);
+  plan->slice_bounds =
+    kls_build_row_solve_slice_bounds(n, plan->ptr, tail_start,
+                                     tail_entries,
+                                     &plan->slice_max_entries);
+  if (plan->slice_bounds != NULL) {
+    (void)kls_build_row_solve_segment_splits(
+      n, plan->ptr, plan->cols, plan->slice_bounds, plan->upper,
+      &plan->segment_split, &plan->segmented_rows, &plan->rect_entries,
+      &plan->tri_entries);
+  }
+  return 1;
+}
+
+static void kls_build_row_solve_transpose_plans(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  (void)kls_build_one_row_solve_transpose_plan(
+    solver, 1, &solver->row_solve_ut_plan);
+  (void)kls_build_one_row_solve_transpose_plan(
+    solver, 0, &solver->row_solve_lt_plan);
+}
+
+static void kls_clear_row_solve_transpose_thread_bounds(
+  kls_row_solve_transpose_plan *plan) {
+  if (plan == NULL) {
+    return;
+  }
+  free(plan->thread_bounds);
+  plan->thread_bounds = NULL;
+  plan->thread_count = 0;
+  plan->thread_max_rect_entries = 0;
+  plan->sparse_cluster_levels = 0;
+}
+
+static int kls_build_one_row_solve_transpose_thread_bounds(
+  kls_row_solve_transpose_plan *plan,
+  UF_long n,
+  int thread_count) {
+  if (plan == NULL || plan->ptr == NULL || thread_count < 2) {
+    return 0;
+  }
+  const int have_dense =
+    plan->slice_bounds != NULL && plan->segment_split != NULL;
+  const int have_sparse =
+    plan->sparse_level_ptr != NULL && plan->sparse_level_rows != NULL;
+  if (!have_dense && !have_sparse) {
+    return 0;
+  }
+  if (plan->thread_count == thread_count &&
+      (!have_dense || plan->thread_bounds != NULL)) {
+    return 1;
+  }
+
+  kls_clear_row_solve_transpose_thread_bounds(plan);
+  UF_long *bounds = NULL;
+  UF_long max_rect = 0;
+  if (have_dense &&
+      !kls_build_one_row_solve_thread_bounds(
+        n, plan->ptr, plan->segment_split, plan->slice_bounds,
+        plan->upper, thread_count, &bounds, &max_rect)) {
+    free(bounds);
+    return 0;
+  }
+
+  plan->thread_bounds = bounds;
+  plan->thread_count = thread_count;
+  plan->thread_max_rect_entries = max_rect;
+  plan->sparse_cluster_levels =
+    kls_row_solve_sparse_cluster_levels(plan->sparse_level_ptr,
+                                        plan->sparse_level_count,
+                                        thread_count);
+  return 1;
+}
+
+static int kls_build_row_solve_transpose_thread_bounds(kls_solver *solver,
+                                                       int thread_count) {
+  if (solver == NULL || thread_count < 2 ||
+      solver->row_solve_partition_ready == 0) {
+    return 0;
+  }
+  const int have_ut =
+    solver->row_solve_ut_plan.ptr != NULL &&
+    (solver->row_solve_ut_plan.segment_split != NULL ||
+     solver->row_solve_ut_plan.sparse_level_ptr != NULL);
+  const int have_lt =
+    solver->row_solve_lt_plan.ptr != NULL &&
+    (solver->row_solve_lt_plan.segment_split != NULL ||
+     solver->row_solve_lt_plan.sparse_level_ptr != NULL);
+  if (!have_ut && !have_lt) {
+    return 0;
+  }
+  int ok = 1;
+  if (have_ut) {
+    ok = ok &&
+      kls_build_one_row_solve_transpose_thread_bounds(
+        &solver->row_solve_ut_plan, solver->n, thread_count);
+  }
+  if (have_lt) {
+    ok = ok &&
+      kls_build_one_row_solve_transpose_thread_bounds(
+        &solver->row_solve_lt_plan, solver->n, thread_count);
+  }
+  return ok;
+}
+
 static void kls_record_row_solve_partition(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -17792,6 +18064,7 @@ static void kls_record_row_solve_partition(kls_solver *solver) {
       &solver->row_solve_u_rect_entries,
       &solver->row_solve_u_tri_entries);
   }
+  kls_build_row_solve_transpose_plans(solver);
 }
 
 static int kls_build_row_solve_pattern(kls_solver *solver) {
@@ -22798,18 +23071,26 @@ static int kls_row_solve_from_numeric_copy_is_worthwhile(kls_solver *solver) {
   }
 
   int thread_count = solver->options.threads;
+  const kls_row_solve_transpose_plan *ut = &solver->row_solve_ut_plan;
+  const kls_row_solve_transpose_plan *lt = &solver->row_solve_lt_plan;
   const UF_long rectangular_entries =
     (solver->row_solve_l_segment_split != NULL
        ? solver->row_solve_l_rect_entries : 0u) +
     (solver->row_solve_u_segment_split != NULL
-       ? solver->row_solve_u_rect_entries : 0u);
+       ? solver->row_solve_u_rect_entries : 0u) +
+    (ut->segment_split != NULL ? ut->rect_entries : 0u) +
+    (lt->segment_split != NULL ? lt->rect_entries : 0u);
   const UF_long sparse_entries =
     (solver->row_solve_l_sparse_level_ptr != NULL
        ? solver->row_refactor_l_ptr[solver->row_solve_l_dense_tail_start]
        : 0u) +
     (solver->row_solve_u_sparse_level_ptr != NULL
        ? solver->row_refactor_u_ptr[solver->row_solve_u_dense_tail_start]
-       : 0u);
+       : 0u) +
+    (ut->sparse_level_ptr != NULL && ut->ptr != NULL
+       ? ut->ptr[ut->dense_tail_start] : 0u) +
+    (lt->sparse_level_ptr != NULL && lt->ptr != NULL
+       ? lt->ptr[lt->dense_tail_start] : 0u);
   if (rectangular_entries + sparse_entries <
       KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ) {
     return 0;
@@ -22832,6 +23113,18 @@ static int kls_row_solve_from_numeric_copy_is_worthwhile(kls_solver *solver) {
       solver->row_solve_u_dense_tail_start > max_rows) {
     max_rows = solver->row_solve_u_dense_tail_start;
   }
+  if (ut->segment_split != NULL && ut->dense_tail_rows > max_rows) {
+    max_rows = ut->dense_tail_rows;
+  }
+  if (lt->segment_split != NULL && lt->dense_tail_rows > max_rows) {
+    max_rows = lt->dense_tail_rows;
+  }
+  if (ut->sparse_level_ptr != NULL && ut->dense_tail_start > max_rows) {
+    max_rows = ut->dense_tail_start;
+  }
+  if (lt->sparse_level_ptr != NULL && lt->dense_tail_start > max_rows) {
+    max_rows = lt->dense_tail_start;
+  }
   if ((UF_long)thread_count > max_rows) {
     thread_count = (int)max_rows;
   }
@@ -22847,6 +23140,14 @@ static int kls_row_solve_from_numeric_copy_is_worthwhile(kls_solver *solver) {
     kls_row_solve_sparse_cluster_levels(
       solver->row_solve_u_sparse_level_ptr,
       solver->row_solve_u_sparse_level_count, thread_count);
+  const UF_long ut_sparse_cluster_levels =
+    kls_row_solve_sparse_cluster_levels(ut->sparse_level_ptr,
+                                        ut->sparse_level_count,
+                                        thread_count);
+  const UF_long lt_sparse_cluster_levels =
+    kls_row_solve_sparse_cluster_levels(lt->sparse_level_ptr,
+                                        lt->sparse_level_count,
+                                        thread_count);
   const UF_long active_l_rect_entries =
     solver->row_solve_l_segment_split != NULL &&
         solver->row_solve_l_rect_entries >=
@@ -22859,13 +23160,28 @@ static int kls_row_solve_from_numeric_copy_is_worthwhile(kls_solver *solver) {
           KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
       ? solver->row_solve_u_rect_entries
       : 0u;
+  const UF_long active_ut_rect_entries =
+    ut->segment_split != NULL &&
+        ut->rect_entries >= KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
+      ? ut->rect_entries : 0u;
+  const UF_long active_lt_rect_entries =
+    lt->segment_split != NULL &&
+        lt->rect_entries >= KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
+      ? lt->rect_entries : 0u;
   const UF_long active_parallel_entries =
     active_l_rect_entries + active_u_rect_entries +
+    active_ut_rect_entries + active_lt_rect_entries +
     (l_sparse_cluster_levels > 0u
        ? solver->row_refactor_l_ptr[solver->row_solve_l_dense_tail_start]
        : 0u) +
     (u_sparse_cluster_levels > 0u
        ? solver->row_refactor_u_ptr[solver->row_solve_u_dense_tail_start]
+       : 0u) +
+    (ut_sparse_cluster_levels > 0u && ut->ptr != NULL
+       ? ut->ptr[ut->dense_tail_start]
+       : 0u) +
+    (lt_sparse_cluster_levels > 0u && lt->ptr != NULL
+       ? lt->ptr[lt->dense_tail_start]
        : 0u);
   const UF_long total_solve_entries =
     solver->row_refactor_l_ptr[solver->n] +
@@ -22877,8 +23193,16 @@ static int kls_row_solve_from_numeric_copy_is_worthwhile(kls_solver *solver) {
     (active_u_rect_entries > 0u
        ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
        : 0u) +
+    (active_ut_rect_entries > 0u
+       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
+       : 0u) +
+    (active_lt_rect_entries > 0u
+       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
+       : 0u) +
     l_sparse_cluster_levels +
-    u_sparse_cluster_levels;
+    u_sparse_cluster_levels +
+    ut_sparse_cluster_levels +
+    lt_sparse_cluster_levels;
   return active_parallel_entries > 0u &&
          active_parallel_entries * 5u >= total_solve_entries * 2u &&
          sync_count > 0u &&
@@ -23883,6 +24207,10 @@ static int kls_try_row_refactor_solve_one_rhs(kls_solver *solver,
       x[q[k]] = work[k];
     }
   } else {
+    if (kls_try_parallel_row_solve_transpose_one_rhs(solver, x)) {
+      return 1;
+    }
+
     for (UF_long k = 0; k < n; ++k) {
       work[k] = x[q[k]];
     }
@@ -33771,6 +34099,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 1;
   shared->row_solve_mode = 0;
+  shared->row_solve_view = NULL;
   shared->row_solve_work = NULL;
   shared->row_refactor_defer_value_scatter =
     kls_row_refactor_should_defer_value_scatter(solver, check_pivots);
@@ -36187,29 +36516,44 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   }
 }
 
-static void kls_row_solve_lower_row(const kls_solver *solver,
-                                    double *work,
-                                    UF_long row) {
-  double value = work[row];
-  for (UF_long p = solver->row_refactor_l_ptr[row];
-       p < solver->row_refactor_l_ptr[row + 1u]; ++p) {
-    value -= kls_row_refactor_l_solve_row_value(solver, row, p) *
-             work[solver->row_refactor_l_cols[p]];
-  }
-  work[row] = value;
+static double kls_row_solve_view_value(const kls_solver *solver,
+                                       const kls_row_solve_factor_view *view,
+                                       UF_long p) {
+  const UF_long source_pos =
+    view != NULL && view->source_pos != NULL ? view->source_pos[p] : p;
+  return view != NULL && view->source_upper
+    ? kls_row_refactor_u_solve_value(solver, source_pos)
+    : kls_row_refactor_l_solve_value(solver, source_pos);
 }
 
-static void kls_row_solve_upper_row(const kls_solver *solver,
-                                    double *work,
-                                    UF_long row) {
-  const double *udiag = (const double *)solver->numeric->Udiag;
-  double value = work[row];
-  for (UF_long p = solver->row_refactor_u_ptr[row];
-       p < solver->row_refactor_u_ptr[row + 1u]; ++p) {
-    value -= kls_row_refactor_u_solve_row_value(solver, row, p) *
-             work[solver->row_refactor_u_cols[p]];
+static int kls_row_solve_view_has_values(
+  const kls_solver *solver,
+  const kls_row_solve_factor_view *view) {
+  if (solver == NULL || view == NULL || view->ptr == NULL) {
+    return 0;
   }
-  work[row] = value / udiag[row];
+  const UF_long nnz = view->ptr[solver->n];
+  if (nnz == 0u) {
+    return 1;
+  }
+  return view->cols != NULL &&
+         kls_row_refactor_solve_has_values(solver, view->source_upper);
+}
+
+static void kls_row_solve_view_row(const kls_solver *solver,
+                                   const kls_row_solve_factor_view *view,
+                                   double *work,
+                                   UF_long row) {
+  double value = work[row];
+  for (UF_long p = view->ptr[row]; p < view->ptr[row + 1u]; ++p) {
+    value -= kls_row_solve_view_value(solver, view, p) *
+             work[view->cols[p]];
+  }
+  if (view->diagonal) {
+    const double *udiag = (const double *)solver->numeric->Udiag;
+    value /= udiag[row];
+  }
+  work[row] = value;
 }
 
 static void kls_row_solve_sparse_worker_run(
@@ -36219,31 +36563,22 @@ static void kls_row_solve_sparse_worker_run(
   }
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
-  if (solver == NULL || shared->row_solve_work == NULL ||
+  const kls_row_solve_factor_view *view = shared->row_solve_view;
+  if (solver == NULL || view == NULL || shared->row_solve_work == NULL ||
       shared->thread_count <= 0 ||
-      solver->row_solve_thread_count != shared->thread_count) {
+      view->thread_count != shared->thread_count) {
     return;
   }
 
-  const int upper = shared->row_solve_upper;
-  const UF_long *level_ptr =
-    upper ? solver->row_solve_u_sparse_level_ptr
-          : solver->row_solve_l_sparse_level_ptr;
-  const UF_long *level_rows =
-    upper ? solver->row_solve_u_sparse_level_rows
-          : solver->row_solve_l_sparse_level_rows;
-  const UF_long level_count =
-    upper ? solver->row_solve_u_sparse_level_count
-          : solver->row_solve_l_sparse_level_count;
-  UF_long cluster_levels =
-    upper ? solver->row_solve_u_sparse_cluster_levels
-          : solver->row_solve_l_sparse_cluster_levels;
-  const UF_long sparse_end =
-    upper ? solver->row_solve_u_dense_tail_start
-          : solver->row_solve_l_dense_tail_start;
+  const UF_long *level_ptr = view->sparse_level_ptr;
+  const UF_long *level_rows = view->sparse_level_rows;
+  const UF_long level_count = view->sparse_level_count;
+  UF_long cluster_levels = view->sparse_cluster_levels;
+  const UF_long sparse_end = view->dense_tail_start;
   if (level_ptr == NULL || level_rows == NULL || level_count == 0u ||
       cluster_levels == 0u || sparse_end > solver->n ||
-      (upper && solver->numeric->Udiag == NULL)) {
+      !kls_row_solve_view_has_values(solver, view) ||
+      (view->diagonal && solver->numeric->Udiag == NULL)) {
     return;
   }
   if (cluster_levels > level_count) {
@@ -36258,11 +36593,7 @@ static void kls_row_solve_sparse_worker_run(
          pos < end;
          pos += (UF_long)shared->thread_count) {
       const UF_long row = level_rows[pos];
-      if (upper) {
-        kls_row_solve_upper_row(solver, work, row);
-      } else {
-        kls_row_solve_lower_row(solver, work, row);
-      }
+      kls_row_solve_view_row(solver, view, work, row);
     }
     (void)pthread_barrier_wait(&shared->barrier);
   }
@@ -36271,11 +36602,7 @@ static void kls_row_solve_sparse_worker_run(
     for (UF_long level = cluster_levels; level < level_count; ++level) {
       for (UF_long pos = level_ptr[level]; pos < level_ptr[level + 1u]; ++pos) {
         const UF_long row = level_rows[pos];
-        if (upper) {
-          kls_row_solve_upper_row(solver, work, row);
-        } else {
-          kls_row_solve_lower_row(solver, work, row);
-        }
+        kls_row_solve_view_row(solver, view, work, row);
       }
     }
   }
@@ -36291,29 +36618,23 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
     return;
   }
   kls_solver *solver = shared->solver;
-  if (solver == NULL || shared->row_solve_work == NULL ||
+  const kls_row_solve_factor_view *view = shared->row_solve_view;
+  if (solver == NULL || view == NULL || shared->row_solve_work == NULL ||
       shared->thread_count <= 0) {
     return;
   }
 
-  const int upper = shared->row_solve_upper;
-  const UF_long *bounds =
-    upper ? solver->row_solve_u_slice_bounds
-          : solver->row_solve_l_slice_bounds;
-  const UF_long *ptr =
-    upper ? solver->row_refactor_u_ptr : solver->row_refactor_l_ptr;
-  const UF_long *cols =
-    upper ? solver->row_refactor_u_cols : solver->row_refactor_l_cols;
-  const UF_long *split =
-    upper ? solver->row_solve_u_segment_split
-          : solver->row_solve_l_segment_split;
-  const UF_long *thread_bounds =
-    upper ? solver->row_solve_u_thread_bounds
-          : solver->row_solve_l_thread_bounds;
+  const int upper = view->upper;
+  const UF_long *bounds = view->slice_bounds;
+  const UF_long *ptr = view->ptr;
+  const UF_long *cols = view->cols;
+  const UF_long *split = view->segment_split;
+  const UF_long *thread_bounds = view->thread_bounds;
   if (bounds == NULL || ptr == NULL || cols == NULL ||
-      !kls_row_refactor_solve_has_values(solver, upper) ||
+      !kls_row_solve_view_has_values(solver, view) ||
       split == NULL || thread_bounds == NULL ||
-      solver->row_solve_thread_count != shared->thread_count) {
+      view->thread_count != shared->thread_count ||
+      (view->diagonal && solver->numeric->Udiag == NULL)) {
     return;
   }
 
@@ -36338,9 +36659,7 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
       const UF_long p_end = upper ? row_end : cut;
       double value = work[row];
       for (UF_long p = p_begin; p < p_end; ++p) {
-        value -= (upper
-                    ? kls_row_refactor_u_solve_row_value(solver, row, p)
-                    : kls_row_refactor_l_solve_row_value(solver, row, p)) *
+        value -= kls_row_solve_view_value(solver, view, p) *
                  work[cols[p]];
       }
       work[row] = value;
@@ -36350,24 +36669,31 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
 
     if (worker->tid == 0) {
       if (upper) {
-        const double *udiag = (const double *)solver->numeric->Udiag;
         for (UF_long remaining = end; remaining > begin; --remaining) {
           const UF_long row = remaining - 1u;
           double value = work[row];
           const UF_long cut = split[row];
           for (UF_long p = ptr[row]; p < cut; ++p) {
-            value -= kls_row_refactor_u_solve_row_value(solver, row, p) *
+            value -= kls_row_solve_view_value(solver, view, p) *
                      work[cols[p]];
           }
-          work[row] = value / udiag[row];
+          if (view->diagonal) {
+            const double *udiag = (const double *)solver->numeric->Udiag;
+            value /= udiag[row];
+          }
+          work[row] = value;
         }
       } else {
         for (UF_long row = begin; row < end; ++row) {
           double value = work[row];
           const UF_long cut = split[row];
           for (UF_long p = cut; p < ptr[row + 1u]; ++p) {
-            value -= kls_row_refactor_l_solve_row_value(solver, row, p) *
+            value -= kls_row_solve_view_value(solver, view, p) *
                      work[cols[p]];
+          }
+          if (view->diagonal) {
+            const double *udiag = (const double *)solver->numeric->Udiag;
+            value /= udiag[row];
           }
           work[row] = value;
         }
@@ -36566,30 +36892,22 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
 static int kls_run_parallel_row_solve_factor(kls_solver *solver,
                                              kls_egraph_refactor_pool *pool,
                                              int thread_count,
-                                             int upper,
+                                             const kls_row_solve_factor_view *view,
                                              double *work) {
   if (solver == NULL || pool == NULL || thread_count < 2 ||
-      work == NULL) {
+      view == NULL || work == NULL) {
     return 0;
   }
-  const UF_long *bounds =
-    upper ? solver->row_solve_u_slice_bounds
-          : solver->row_solve_l_slice_bounds;
-  const UF_long *ptr =
-    upper ? solver->row_refactor_u_ptr : solver->row_refactor_l_ptr;
-  const UF_long *cols =
-    upper ? solver->row_refactor_u_cols : solver->row_refactor_l_cols;
-  const UF_long *split =
-    upper ? solver->row_solve_u_segment_split
-          : solver->row_solve_l_segment_split;
-  const UF_long *thread_bounds =
-    upper ? solver->row_solve_u_thread_bounds
-          : solver->row_solve_l_thread_bounds;
+  const UF_long *bounds = view->slice_bounds;
+  const UF_long *ptr = view->ptr;
+  const UF_long *cols = view->cols;
+  const UF_long *split = view->segment_split;
+  const UF_long *thread_bounds = view->thread_bounds;
   if (bounds == NULL || ptr == NULL || cols == NULL ||
-      !kls_row_refactor_solve_has_values(solver, upper) ||
+      !kls_row_solve_view_has_values(solver, view) ||
       split == NULL || thread_bounds == NULL ||
-      solver->row_solve_thread_count != thread_count ||
-      (upper && solver->numeric->Udiag == NULL)) {
+      view->thread_count != thread_count ||
+      (view->diagonal && solver->numeric->Udiag == NULL)) {
     return 0;
   }
   for (UF_long slice = 0u; slice < KLS_ROW_SOLVE_TRAPEZOID_SLICES; ++slice) {
@@ -36627,7 +36945,8 @@ static int kls_run_parallel_row_solve_factor(kls_solver *solver,
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 0;
   shared->row_solve_mode = 1;
-  shared->row_solve_upper = upper ? 1 : 0;
+  shared->row_solve_upper = view->upper ? 1 : 0;
+  shared->row_solve_view = view;
   shared->row_solve_work = work;
   shared->row_refactor_defer_value_scatter = 0;
   shared->row_refactor_lazy_value_scatter = 0;
@@ -36664,6 +36983,7 @@ static int kls_run_parallel_row_solve_factor(kls_solver *solver,
   const int ok = !shared->invalid &&
                  !kls_egraph_refactor_should_stop(shared);
   shared->row_solve_mode = 0;
+  shared->row_solve_view = NULL;
   shared->row_solve_work = NULL;
   pthread_mutex_unlock(&shared->lock);
   return ok;
@@ -36673,41 +36993,29 @@ static int kls_run_parallel_row_solve_sparse_block(
   kls_solver *solver,
   kls_egraph_refactor_pool *pool,
   int thread_count,
-  int upper,
+  const kls_row_solve_factor_view *view,
   double *work,
   UF_long *level_runs_out) {
   if (level_runs_out != NULL) {
     *level_runs_out = 0;
   }
   if (solver == NULL || pool == NULL || thread_count < 2 ||
-      work == NULL) {
+      view == NULL || work == NULL) {
     return 0;
   }
-  const UF_long *level_ptr =
-    upper ? solver->row_solve_u_sparse_level_ptr
-          : solver->row_solve_l_sparse_level_ptr;
-  const UF_long *level_rows =
-    upper ? solver->row_solve_u_sparse_level_rows
-          : solver->row_solve_l_sparse_level_rows;
-  const UF_long level_count =
-    upper ? solver->row_solve_u_sparse_level_count
-          : solver->row_solve_l_sparse_level_count;
-  UF_long cluster_levels =
-    upper ? solver->row_solve_u_sparse_cluster_levels
-          : solver->row_solve_l_sparse_cluster_levels;
-  const UF_long sparse_end =
-    upper ? solver->row_solve_u_dense_tail_start
-          : solver->row_solve_l_dense_tail_start;
-  const UF_long *ptr =
-    upper ? solver->row_refactor_u_ptr : solver->row_refactor_l_ptr;
-  const UF_long *cols =
-    upper ? solver->row_refactor_u_cols : solver->row_refactor_l_cols;
+  const UF_long *level_ptr = view->sparse_level_ptr;
+  const UF_long *level_rows = view->sparse_level_rows;
+  const UF_long level_count = view->sparse_level_count;
+  UF_long cluster_levels = view->sparse_cluster_levels;
+  const UF_long sparse_end = view->dense_tail_start;
+  const UF_long *ptr = view->ptr;
+  const UF_long *cols = view->cols;
   if (level_ptr == NULL || level_rows == NULL || level_count == 0u ||
       cluster_levels == 0u || sparse_end == 0u || sparse_end > solver->n ||
       ptr == NULL || cols == NULL ||
-      !kls_row_refactor_solve_has_values(solver, upper) ||
-      solver->row_solve_thread_count != thread_count ||
-      (upper && solver->numeric->Udiag == NULL)) {
+      !kls_row_solve_view_has_values(solver, view) ||
+      view->thread_count != thread_count ||
+      (view->diagonal && solver->numeric->Udiag == NULL)) {
     return 0;
   }
   if (cluster_levels > level_count) {
@@ -36739,7 +37047,8 @@ static int kls_run_parallel_row_solve_sparse_block(
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 0;
   shared->row_solve_mode = 2;
-  shared->row_solve_upper = upper ? 1 : 0;
+  shared->row_solve_upper = view->upper ? 1 : 0;
+  shared->row_solve_view = view;
   shared->row_solve_work = work;
   shared->row_refactor_defer_value_scatter = 0;
   shared->row_refactor_lazy_value_scatter = 0;
@@ -36776,6 +37085,7 @@ static int kls_run_parallel_row_solve_sparse_block(
   const int ok = !shared->invalid &&
                  !kls_egraph_refactor_should_stop(shared);
   shared->row_solve_mode = 0;
+  shared->row_solve_view = NULL;
   shared->row_solve_work = NULL;
   pthread_mutex_unlock(&shared->lock);
   if (ok && level_runs_out != NULL) {
@@ -36785,125 +37095,192 @@ static int kls_run_parallel_row_solve_sparse_block(
 }
 
 static void kls_row_solve_forward_rows(const kls_solver *solver,
+                                       const kls_row_solve_factor_view *view,
                                        double *work,
                                        UF_long begin,
                                        UF_long end) {
   for (UF_long row = begin; row < end; ++row) {
-    kls_row_solve_lower_row(solver, work, row);
+    kls_row_solve_view_row(solver, view, work, row);
   }
 }
 
 static void kls_row_solve_backward_rows(const kls_solver *solver,
+                                        const kls_row_solve_factor_view *view,
                                         double *work,
                                         UF_long begin,
                                         UF_long end) {
   for (UF_long remaining = end; remaining > begin; --remaining) {
     const UF_long row = remaining - 1u;
-    kls_row_solve_upper_row(solver, work, row);
+    kls_row_solve_view_row(solver, view, work, row);
   }
 }
 
-static int kls_row_solve_parallel_forward(kls_solver *solver,
-                                          kls_egraph_refactor_pool *pool,
-                                          int thread_count,
-                                          double *work,
-                                          UF_long *slice_runs_out,
-                                          UF_long *sparse_level_runs_out) {
+static int kls_row_solve_parallel_view(kls_solver *solver,
+                                       kls_egraph_refactor_pool *pool,
+                                       int thread_count,
+                                       const kls_row_solve_factor_view *view,
+                                       double *work,
+                                       UF_long *slice_runs_out,
+                                       UF_long *sparse_level_runs_out) {
   if (slice_runs_out != NULL) {
     *slice_runs_out = 0;
   }
   if (sparse_level_runs_out != NULL) {
     *sparse_level_runs_out = 0;
   }
-  if (solver == NULL || work == NULL) {
+  if (solver == NULL || view == NULL || work == NULL ||
+      view->ptr == NULL ||
+      !kls_row_solve_view_has_values(solver, view) ||
+      (view->diagonal && solver->numeric->Udiag == NULL)) {
     return 0;
   }
-  const UF_long start = solver->row_solve_l_dense_tail_start;
+  const UF_long start = view->dense_tail_start;
+  if (start > solver->n) {
+    return 0;
+  }
   UF_long sparse_level_runs = 0;
-  if (start > 0u && pool != NULL &&
-      kls_run_parallel_row_solve_sparse_block(
-        solver, pool, thread_count, 0, work, &sparse_level_runs)) {
-    if (sparse_level_runs_out != NULL) {
-      *sparse_level_runs_out = sparse_level_runs;
-    }
-  } else {
-    kls_row_solve_forward_rows(solver, work, 0u, start);
-  }
-  if (pool == NULL ||
-      solver->row_solve_l_slice_bounds == NULL ||
-      solver->row_solve_l_segment_split == NULL ||
-      solver->row_solve_l_rect_entries <
-        KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ ||
-      solver->row_solve_l_dense_tail_start >= solver->n) {
-    kls_row_solve_forward_rows(solver, work, start, solver->n);
-    return 1;
-  }
-
-  if (solver->row_solve_l_slice_bounds[0] != start ||
-      !kls_run_parallel_row_solve_factor(solver, pool, thread_count, 0, work)) {
-    return 0;
-  }
-  if (slice_runs_out != NULL) {
-    *slice_runs_out = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
-  }
-  return 1;
-}
-
-static int kls_row_solve_parallel_backward(kls_solver *solver,
-                                           kls_egraph_refactor_pool *pool,
-                                           int thread_count,
-                                           double *work,
-                                           UF_long *slice_runs_out,
-                                           UF_long *sparse_level_runs_out) {
-  if (slice_runs_out != NULL) {
-    *slice_runs_out = 0;
-  }
-  if (sparse_level_runs_out != NULL) {
-    *sparse_level_runs_out = 0;
-  }
-  if (solver == NULL || work == NULL) {
-    return 0;
-  }
-  const UF_long start = solver->row_solve_u_dense_tail_start;
-  if (pool == NULL ||
-      solver->row_solve_u_slice_bounds == NULL ||
-      solver->row_solve_u_segment_split == NULL ||
-      solver->row_solve_u_rect_entries <
-        KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ ||
-      solver->row_solve_u_dense_tail_start >= solver->n) {
-    kls_row_solve_backward_rows(solver, work, start, solver->n);
-    UF_long sparse_level_runs = 0;
+  if (!view->upper) {
     if (start > 0u && pool != NULL &&
         kls_run_parallel_row_solve_sparse_block(
-          solver, pool, thread_count, 1, work, &sparse_level_runs)) {
+          solver, pool, thread_count, view, work, &sparse_level_runs)) {
       if (sparse_level_runs_out != NULL) {
         *sparse_level_runs_out = sparse_level_runs;
       }
     } else {
-      kls_row_solve_backward_rows(solver, work, 0u, start);
+      kls_row_solve_forward_rows(solver, view, work, 0u, start);
+    }
+
+    if (pool == NULL ||
+        view->slice_bounds == NULL ||
+        view->segment_split == NULL ||
+        view->rect_entries < KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ ||
+        start >= solver->n) {
+      kls_row_solve_forward_rows(solver, view, work, start, solver->n);
+      return 1;
+    }
+
+    if (view->slice_bounds[0] != start ||
+        !kls_run_parallel_row_solve_factor(
+          solver, pool, thread_count, view, work)) {
+      return 0;
+    }
+    if (slice_runs_out != NULL) {
+      *slice_runs_out = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
     }
     return 1;
   }
 
-  if (solver->row_solve_u_slice_bounds[0] !=
-        start ||
-      !kls_run_parallel_row_solve_factor(solver, pool, thread_count, 1, work)) {
+  if (pool == NULL ||
+      view->slice_bounds == NULL ||
+      view->segment_split == NULL ||
+      view->rect_entries < KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ ||
+      start >= solver->n) {
+    kls_row_solve_backward_rows(solver, view, work, start, solver->n);
+    if (start > 0u && pool != NULL &&
+        kls_run_parallel_row_solve_sparse_block(
+          solver, pool, thread_count, view, work, &sparse_level_runs)) {
+      if (sparse_level_runs_out != NULL) {
+        *sparse_level_runs_out = sparse_level_runs;
+      }
+    } else {
+      kls_row_solve_backward_rows(solver, view, work, 0u, start);
+    }
+    return 1;
+  }
+
+  if (view->slice_bounds[0] != start ||
+      !kls_run_parallel_row_solve_factor(
+        solver, pool, thread_count, view, work)) {
     return 0;
   }
-  UF_long sparse_level_runs = 0;
   if (start > 0u &&
       kls_run_parallel_row_solve_sparse_block(
-        solver, pool, thread_count, 1, work, &sparse_level_runs)) {
+        solver, pool, thread_count, view, work, &sparse_level_runs)) {
     if (sparse_level_runs_out != NULL) {
       *sparse_level_runs_out = sparse_level_runs;
     }
   } else {
-    kls_row_solve_backward_rows(solver, work, 0u, start);
+    kls_row_solve_backward_rows(solver, view, work, 0u, start);
   }
   if (slice_runs_out != NULL) {
     *slice_runs_out = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
   }
   return 1;
+}
+
+static void kls_make_normal_row_solve_view(
+  const kls_solver *solver,
+  int upper,
+  kls_row_solve_factor_view *view) {
+  if (view == NULL) {
+    return;
+  }
+  memset(view, 0, sizeof(*view));
+  if (solver == NULL) {
+    return;
+  }
+  view->ptr = upper ? solver->row_refactor_u_ptr : solver->row_refactor_l_ptr;
+  view->cols =
+    upper ? solver->row_refactor_u_cols : solver->row_refactor_l_cols;
+  view->slice_bounds =
+    upper ? solver->row_solve_u_slice_bounds
+          : solver->row_solve_l_slice_bounds;
+  view->segment_split =
+    upper ? solver->row_solve_u_segment_split
+          : solver->row_solve_l_segment_split;
+  view->thread_bounds =
+    upper ? solver->row_solve_u_thread_bounds
+          : solver->row_solve_l_thread_bounds;
+  view->sparse_level_ptr =
+    upper ? solver->row_solve_u_sparse_level_ptr
+          : solver->row_solve_l_sparse_level_ptr;
+  view->sparse_level_rows =
+    upper ? solver->row_solve_u_sparse_level_rows
+          : solver->row_solve_l_sparse_level_rows;
+  view->sparse_level_count =
+    upper ? solver->row_solve_u_sparse_level_count
+          : solver->row_solve_l_sparse_level_count;
+  view->sparse_cluster_levels =
+    upper ? solver->row_solve_u_sparse_cluster_levels
+          : solver->row_solve_l_sparse_cluster_levels;
+  view->dense_tail_start =
+    upper ? solver->row_solve_u_dense_tail_start
+          : solver->row_solve_l_dense_tail_start;
+  view->rect_entries =
+    upper ? solver->row_solve_u_rect_entries
+          : solver->row_solve_l_rect_entries;
+  view->thread_count = solver->row_solve_thread_count;
+  view->source_upper = upper ? 1 : 0;
+  view->upper = upper ? 1 : 0;
+  view->diagonal = upper ? 1 : 0;
+}
+
+static void kls_make_transpose_row_solve_view(
+  const kls_row_solve_transpose_plan *plan,
+  kls_row_solve_factor_view *view) {
+  if (view == NULL) {
+    return;
+  }
+  memset(view, 0, sizeof(*view));
+  if (plan == NULL) {
+    return;
+  }
+  view->ptr = plan->ptr;
+  view->cols = plan->cols;
+  view->source_pos = plan->source_pos;
+  view->slice_bounds = plan->slice_bounds;
+  view->segment_split = plan->segment_split;
+  view->thread_bounds = plan->thread_bounds;
+  view->sparse_level_ptr = plan->sparse_level_ptr;
+  view->sparse_level_rows = plan->sparse_level_rows;
+  view->sparse_level_count = plan->sparse_level_count;
+  view->sparse_cluster_levels = plan->sparse_cluster_levels;
+  view->dense_tail_start = plan->dense_tail_start;
+  view->rect_entries = plan->rect_entries;
+  view->thread_count = plan->thread_count;
+  view->source_upper = plan->source_upper;
+  view->upper = plan->upper;
+  view->diagonal = plan->diagonal;
 }
 
 static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
@@ -37014,6 +37391,10 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
   if (!kls_build_row_solve_thread_bounds(solver, thread_count)) {
     return 0;
   }
+  kls_row_solve_factor_view l_view;
+  kls_row_solve_factor_view u_view;
+  kls_make_normal_row_solve_view(solver, 0, &l_view);
+  kls_make_normal_row_solve_view(solver, 1, &u_view);
 
   kls_egraph_refactor_pool *pool =
     ensure_egraph_refactor_pool(solver, thread_count);
@@ -37035,10 +37416,10 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
   UF_long u_slice_runs = 0;
   UF_long l_sparse_level_runs = 0;
   UF_long u_sparse_level_runs = 0;
-  if (!kls_row_solve_parallel_forward(solver, pool, thread_count, work,
-                                      &l_slice_runs, &l_sparse_level_runs) ||
-      !kls_row_solve_parallel_backward(solver, pool, thread_count, work,
-                                       &u_slice_runs, &u_sparse_level_runs)) {
+  if (!kls_row_solve_parallel_view(solver, pool, thread_count, &l_view, work,
+                                   &l_slice_runs, &l_sparse_level_runs) ||
+      !kls_row_solve_parallel_view(solver, pool, thread_count, &u_view, work,
+                                   &u_slice_runs, &u_sparse_level_runs)) {
     return 0;
   }
 
@@ -37053,6 +37434,159 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
   }
   return l_slice_runs > 0u || u_slice_runs > 0u ||
          l_sparse_level_runs > 0u || u_sparse_level_runs > 0u;
+}
+
+static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
+                                                        double *x) {
+  if (solver == NULL || x == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || solver->options.threads <= 1 ||
+      solver->symbolic->nblocks != 1u ||
+      solver->row_solve_partition_ready == 0 ||
+      solver->numeric->Xwork == NULL || solver->numeric->Pnum == NULL ||
+      solver->symbolic->Q == NULL || solver->numeric->Udiag == NULL) {
+    return 0;
+  }
+
+  const kls_row_solve_transpose_plan *ut = &solver->row_solve_ut_plan;
+  const kls_row_solve_transpose_plan *lt = &solver->row_solve_lt_plan;
+  const int have_ut = ut->ptr != NULL &&
+                      (ut->segment_split != NULL ||
+                       ut->sparse_level_ptr != NULL);
+  const int have_lt = lt->ptr != NULL &&
+                      (lt->segment_split != NULL ||
+                       lt->sparse_level_ptr != NULL);
+  if (!have_ut && !have_lt) {
+    return 0;
+  }
+
+  int thread_count = solver->options.threads;
+  const UF_long rectangular_entries =
+    (have_ut && ut->segment_split != NULL ? ut->rect_entries : 0u) +
+    (have_lt && lt->segment_split != NULL ? lt->rect_entries : 0u);
+  const UF_long sparse_entries =
+    (have_ut && ut->sparse_level_ptr != NULL && ut->ptr != NULL
+       ? ut->ptr[ut->dense_tail_start] : 0u) +
+    (have_lt && lt->sparse_level_ptr != NULL && lt->ptr != NULL
+       ? lt->ptr[lt->dense_tail_start] : 0u);
+  if (rectangular_entries + sparse_entries <
+      KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ) {
+    return 0;
+  }
+
+  UF_long max_rows = 0;
+  if (have_ut && ut->segment_split != NULL &&
+      ut->dense_tail_rows > max_rows) {
+    max_rows = ut->dense_tail_rows;
+  }
+  if (have_lt && lt->segment_split != NULL &&
+      lt->dense_tail_rows > max_rows) {
+    max_rows = lt->dense_tail_rows;
+  }
+  if (have_ut && ut->sparse_level_ptr != NULL &&
+      ut->dense_tail_start > max_rows) {
+    max_rows = ut->dense_tail_start;
+  }
+  if (have_lt && lt->sparse_level_ptr != NULL &&
+      lt->dense_tail_start > max_rows) {
+    max_rows = lt->dense_tail_start;
+  }
+  if ((UF_long)thread_count > max_rows) {
+    thread_count = (int)max_rows;
+  }
+  if (thread_count < 2) {
+    return 0;
+  }
+
+  const UF_long ut_sparse_cluster_levels =
+    kls_row_solve_sparse_cluster_levels(ut->sparse_level_ptr,
+                                        ut->sparse_level_count,
+                                        thread_count);
+  const UF_long lt_sparse_cluster_levels =
+    kls_row_solve_sparse_cluster_levels(lt->sparse_level_ptr,
+                                        lt->sparse_level_count,
+                                        thread_count);
+  const UF_long active_ut_rect_entries =
+    have_ut && ut->segment_split != NULL &&
+        ut->rect_entries >= KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
+      ? ut->rect_entries : 0u;
+  const UF_long active_lt_rect_entries =
+    have_lt && lt->segment_split != NULL &&
+        lt->rect_entries >= KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
+      ? lt->rect_entries : 0u;
+  const UF_long active_parallel_entries =
+    active_ut_rect_entries + active_lt_rect_entries +
+    (ut_sparse_cluster_levels > 0u && ut->ptr != NULL
+       ? ut->ptr[ut->dense_tail_start] : 0u) +
+    (lt_sparse_cluster_levels > 0u && lt->ptr != NULL
+       ? lt->ptr[lt->dense_tail_start] : 0u);
+  const UF_long total_solve_entries =
+    solver->row_refactor_l_ptr[solver->n] +
+    solver->row_refactor_u_ptr[solver->n];
+  const UF_long sync_count =
+    (active_ut_rect_entries > 0u
+       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
+       : 0u) +
+    (active_lt_rect_entries > 0u
+       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
+       : 0u) +
+    ut_sparse_cluster_levels +
+    lt_sparse_cluster_levels;
+  if (active_parallel_entries == 0u ||
+      active_parallel_entries * 5u < total_solve_entries * 2u ||
+      sync_count == 0u ||
+      active_parallel_entries / sync_count <
+        KLS_ROW_SOLVE_PARALLEL_MIN_ENTRIES_PER_SYNC) {
+    return 0;
+  }
+  if (!kls_build_row_solve_transpose_thread_bounds(solver, thread_count)) {
+    return 0;
+  }
+
+  kls_row_solve_factor_view ut_view;
+  kls_row_solve_factor_view lt_view;
+  kls_make_transpose_row_solve_view(&solver->row_solve_ut_plan, &ut_view);
+  kls_make_transpose_row_solve_view(&solver->row_solve_lt_plan, &lt_view);
+
+  kls_egraph_refactor_pool *pool =
+    ensure_egraph_refactor_pool(solver, thread_count);
+  if (pool == NULL) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  const UF_long *pnum = solver->numeric->Pnum;
+  const UF_long *q = solver->symbolic->Q;
+  const double *rs = solver->numeric->Rs;
+  double *work = (double *)solver->numeric->Xwork;
+  for (UF_long k = 0; k < n; ++k) {
+    work[k] = x[q[k]];
+  }
+
+  UF_long ut_slice_runs = 0;
+  UF_long lt_slice_runs = 0;
+  UF_long ut_sparse_level_runs = 0;
+  UF_long lt_sparse_level_runs = 0;
+  if (!kls_row_solve_parallel_view(solver, pool, thread_count, &ut_view,
+                                   work, &ut_slice_runs,
+                                   &ut_sparse_level_runs) ||
+      !kls_row_solve_parallel_view(solver, pool, thread_count, &lt_view,
+                                   work, &lt_slice_runs,
+                                   &lt_sparse_level_runs)) {
+    return 0;
+  }
+
+  for (UF_long k = 0; k < n; ++k) {
+    const double result = work[k];
+    x[pnum[k]] = rs != NULL ? result / rs[k] : result;
+  }
+  if (ut_slice_runs > 0u || lt_slice_runs > 0u ||
+      ut_sparse_level_runs > 0u || lt_sparse_level_runs > 0u) {
+    kls_record_row_solve_parallel_run(solver, lt_slice_runs, ut_slice_runs,
+                                      lt_sparse_level_runs,
+                                      ut_sparse_level_runs);
+  }
+  return ut_slice_runs > 0u || lt_slice_runs > 0u ||
+         ut_sparse_level_runs > 0u || lt_sparse_level_runs > 0u;
 }
 
 static int kls_egraph_medium_heavy_dominant_btf_shape(
@@ -37537,6 +38071,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 0;
   shared->row_solve_mode = 0;
+  shared->row_solve_view = NULL;
   shared->row_solve_work = NULL;
   shared->row_refactor_defer_value_scatter = 0;
   atomic_store_explicit(&shared->stop, 0, memory_order_release);

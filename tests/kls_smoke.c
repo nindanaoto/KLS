@@ -12911,6 +12911,184 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
   return ok;
 }
 
+static int test_transpose_row_solve_from_numeric_parallel(void) {
+  const int32_t n = 4000;
+  const int64_t nnz64 = ((int64_t)n * ((int64_t)n + 1)) / 2;
+  int ok = 1;
+  int32_t *ap = NULL;
+  int32_t *ai = NULL;
+  double *ax = NULL;
+  double *b = NULL;
+  double *x = NULL;
+  double *expected = NULL;
+  kls_solver *solver = NULL;
+
+  const char *saved_row_solve_value =
+    getenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC");
+  char *saved_row_solve =
+    saved_row_solve_value != NULL ? strdup(saved_row_solve_value) : NULL;
+  const int had_row_solve = saved_row_solve_value != NULL;
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_first = saved_first_value != NULL;
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row =
+    saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_row = saved_row_value != NULL;
+  const char *saved_checked_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked =
+    saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
+  const int had_checked = saved_checked_value != NULL;
+
+  if (nnz64 > INT32_MAX) {
+    fprintf(stderr, "transpose row-solve fixture too large\n");
+    ok = 0;
+  }
+  if ((had_row_solve && saved_row_solve == NULL) ||
+      (had_first && saved_first == NULL) ||
+      (had_row && saved_row == NULL) ||
+      (had_checked && saved_checked == NULL)) {
+    fprintf(stderr, "failed to save row-solve environment\n");
+    ok = 0;
+  }
+
+  if (ok) {
+    ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+    ai = (int32_t *)malloc((size_t)nnz64 * sizeof(*ai));
+    ax = (double *)malloc((size_t)nnz64 * sizeof(*ax));
+    b = (double *)calloc((size_t)n, sizeof(*b));
+    x = (double *)calloc((size_t)n, sizeof(*x));
+    expected = (double *)malloc((size_t)n * sizeof(*expected));
+    if (ap == NULL || ai == NULL || ax == NULL || b == NULL ||
+        x == NULL || expected == NULL) {
+      fprintf(stderr, "failed to allocate transpose row-solve fixture\n");
+      ok = 0;
+    }
+  }
+
+  if (ok) {
+    for (int32_t i = 0; i < n; ++i) {
+      expected[i] = 1.0 + 0.001 * (double)(i % 23);
+    }
+    int32_t pos = 0;
+    for (int32_t col = 0; col < n; ++col) {
+      ap[col] = pos;
+      for (int32_t row = 0; row <= col; ++row) {
+        const double value =
+          row == col ? 2.0
+                     : 1.0e-4 * (double)(1 + ((row + col) % 7));
+        ai[pos] = row;
+        ax[pos] = value;
+        b[col] += value * expected[row];
+        pos++;
+      }
+    }
+    ap[n] = pos;
+  }
+
+  if (ok && setenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+    ok = 0;
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 4;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = 0;
+  options.static_pivoting = 0;
+
+  if (ok && !require_ok(kls_create(&solver),
+                        "create transpose parallel row solve")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n,
+                                        ap, ai, 0, &options),
+                        "analyze transpose parallel row solve")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor transpose parallel row solve")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "factor stats transpose parallel row solve")) ok = 0;
+  if (ok && stats.row_solve_partition_ready != 1) {
+    fprintf(stderr,
+            "transpose row-solve factor did not seed partition: ready=%d\n",
+            stats.row_solve_partition_ready);
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_solve_transpose(solver, 1, b, 0, x, 0),
+                        "transpose parallel row solve")) ok = 0;
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "transpose parallel row solve stats")) ok = 0;
+  if (ok && (stats.row_refactor_last_row_solve != 1 ||
+             stats.row_refactor_row_solve_run_count != 1 ||
+             stats.row_solve_parallel_run_count != 1 ||
+             (stats.row_solve_parallel_l_slice_runs <= 0 &&
+              stats.row_solve_parallel_l_sparse_level_runs <= 0 &&
+              stats.row_solve_parallel_u_slice_runs <= 0 &&
+              stats.row_solve_parallel_u_sparse_level_runs <= 0))) {
+    fprintf(stderr,
+            "unexpected transpose parallel row-solve stats:"
+            " row_solve=%d/%" PRId64 ", parallel=%" PRId64
+            ", l_runs=%" PRId64 "/%" PRId64
+            ", u_runs=%" PRId64 "/%" PRId64 "\n",
+            stats.row_refactor_last_row_solve,
+            stats.row_refactor_row_solve_run_count,
+            stats.row_solve_parallel_run_count,
+            stats.row_solve_parallel_l_slice_runs,
+            stats.row_solve_parallel_l_sparse_level_runs,
+            stats.row_solve_parallel_u_slice_runs,
+            stats.row_solve_parallel_u_sparse_level_runs);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (fabs(x[i] - expected[i]) > 1.0e-8) {
+      fprintf(stderr,
+              "unexpected transpose parallel row-solve solution at %d:"
+              " %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  if (!restore_env_value("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC",
+                         had_row_solve, saved_row_solve)) ok = 0;
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR",
+                         had_first, saved_first)) ok = 0;
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_checked, saved_checked)) ok = 0;
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(b);
+  free(x);
+  free(expected);
+  free(saved_row_solve);
+  free(saved_first);
+  free(saved_row);
+  free(saved_checked);
+  return ok;
+}
+
 static int test_kls_first_reseeds_after_pivot_repair(void) {
   const int32_t ap[] = {0, 1, 3, 5};
   const int32_t ai[] = {0, 1, 2, 1, 2};
@@ -13253,6 +13431,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_row_solve_from_numeric_after_klu_first()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_transpose_row_solve_from_numeric_parallel()) {
     return EXIT_FAILURE;
   }
   if (!test_kls_first_reseeds_after_pivot_repair()) {
