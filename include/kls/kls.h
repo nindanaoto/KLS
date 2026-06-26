@@ -438,6 +438,9 @@ typedef struct kls_stats {
   int64_t kls_first_separator_queue_pipeline_supernode_update_run_count;
   int64_t kls_first_last_separator_queue_pipeline_supernode_update_groups;
   int64_t kls_first_last_separator_queue_pipeline_supernode_update_rows;
+  int kls_first_last_separator_queue_pipeline_pivot_tail;
+  int64_t kls_first_separator_queue_pipeline_pivot_tail_run_count;
+  int64_t kls_first_last_separator_queue_pipeline_pivot_tail_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
