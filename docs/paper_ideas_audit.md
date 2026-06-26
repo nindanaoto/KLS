@@ -368,11 +368,11 @@ new KLS-owned symbolic/numeric machinery:
   split, the experimental row-refactor ready queue can use that map for
   separator-private initial thread queues, KLS-first row-up factorization now
   builds SubtreeLU Algorithm 3-style private thread queues plus a factor-order
-  pipeline row queue when that map covers the block, consumes that queue in a
-  guarded serial private-then-pipeline row-up attempt, and refuses
-  separator-crossing dynamic pivots. KLS still lacks the fully parallel
-  private/pipeline first-factor executor and checked-tail factor/refactor queue
-  consumer.
+  pipeline row queue when that map covers the block, runs validated private
+  rows concurrently before the serial pipeline rows, and refuses
+  separator-crossing dynamic pivots. KLS still lacks the Algorithm 3
+  atomic-counter parallel pipeline executor and checked-tail factor/refactor
+  queue consumer.
 - Broader supernodal row/segment updates in the sparse up-looking executor.
   KLS has exact-pattern, ragged single-producer, and opt-in fragmented
   multi-producer dense-panel updates, but these are still narrower than
@@ -3784,11 +3784,14 @@ corresponding first-factor queue shape from the retained separator map. For
 each covered symbolic block, KLS groups rows from retained private components
 into per-thread private queues using a greedy row-count balance and keeps
 separator/internal rows in a factor-order pipeline queue, mirroring SubtreeLU
-Algorithm 3's queue organization. The current numeric consumer is still
-serial: it executes all private rows first, then pipeline rows, with per-row
-completion checks so an unexpected dependency rejects the scheduled attempt and
-falls back to the existing natural row-up executor. Benchmark stats expose the
-last planned queue through `kls_first_last_separator_queue`,
+Algorithm 3's queue organization. The current numeric consumer validates the
+private phase before threading it: if a private row would read another private
+thread's mutable column domain, the scheduled attempt is rejected and KLS falls
+back to the existing natural row-up executor. When validation passes, each
+thread factors its assigned private rows into local row-up `L`/`U` entries,
+then KLS merges those entries and continues through the pipeline rows in serial
+factor order. Benchmark stats expose the last planned queue through
+`kls_first_last_separator_queue`,
 `kls_first_last_separator_queue_private_components`,
 `kls_first_last_separator_queue_pipeline_components`,
 `kls_first_last_separator_queue_private_rows`,
@@ -3798,12 +3801,16 @@ last planned queue through `kls_first_last_separator_queue`,
 reported by `kls_first_last_separator_queue_executed`,
 `kls_first_separator_queue_executed_run_count`,
 `kls_first_last_separator_queue_executed_private_rows`, and
-`kls_first_last_separator_queue_executed_pipeline_rows`. A smoke test covers
-this on a 30,000-row METIS-ordered tridiagonal KLS-first factor. This closes a
-direct queue-consumption gap, but not the full SubtreeLU numeric algorithm:
-the private phase is not yet run concurrently inside one large block and the
-pipeline phase is not yet the atomic-counter parallel executor from Algorithm
-3/4.
+`kls_first_last_separator_queue_executed_pipeline_rows`; threaded private
+execution is reported by `kls_first_last_separator_queue_parallel_private`,
+`kls_first_separator_queue_parallel_private_run_count`,
+`kls_first_last_separator_queue_parallel_private_rows`, and
+`kls_first_last_separator_queue_parallel_private_threads`. A smoke test covers
+this on a 30,000-row METIS-ordered tridiagonal KLS-first factor and requires
+more than one private worker thread. This closes the first-factor private-mode
+part of Algorithm 3 for dependency-safe retained separator queues. The
+remaining first-factor gap is the Algorithm 3/4 parallel pipeline executor:
+pipeline rows are still processed serially after the private barrier.
 
 The KLS-first row up-looking dynamic column pivot selector also now consumes
 the retained separator map when it is available for the full factor order. On a
