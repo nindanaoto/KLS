@@ -4112,6 +4112,25 @@ increased the work on `ASIC_320k` (`~0.387s` focused refactor versus the prior
 consistent with the paper lesson: broadened dispatch is not enough when the
 underlying row-panel storage and update kernel are still the limiting pieces.
 
+Three further local row-panel shortcuts were tested after retained target maps
+and rejected. Streaming producer trailing updates through a one-row scratch
+vector avoided the `batch_rows * trailing_len` temporary, but changed the access
+pattern without reducing arithmetic: the five forced-row CKTSO-gap geomean
+regressed from about `30.27s` to `30.55s`. Computing only retained-map targets
+whose class was not no-op also regressed (`32.59s` geomean), and the aggregate
+GEMV counters stayed essentially unchanged on the executed batches, showing
+that the global no-op target count was not the active-batch bottleneck. A
+portable batched TRSV over equal producer suffixes passed smoke but regressed
+the focused `ASIC_320k` refactor from about `0.307s` to `0.314s`, because the
+fragmented batches are too small and ragged for that loop interchange to
+amortize its overhead. Finally, retained dense-input scatter maps for compact
+dense rows also regressed (`32.82s` five-case geomean), so repeated input
+destination lookup is not the large missing paper mechanism. These rejected
+variants narrow the next useful implementation target: KLS needs a native
+row/segment numeric representation that stores and updates producer/consumer
+panels in the execution order directly, rather than more symbolic shortcuts
+around the current KLU-shaped row mirrors.
+
 The unchecked producer-panel refactor experiment also uses a blocked panel
 algorithm: scalar code factors each diagonal block, `dtrsm` solves the
 below-panel multiplier block, and `dgemm` updates both the dense right panel
