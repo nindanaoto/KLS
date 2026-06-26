@@ -4251,3 +4251,17 @@ updates over 6,555 rows and 415,380 entries with the opt-in flag, while the
 same command without the flag reported zero such updates. This is a direct
 SubtreeLU/CKTSO compact-panel coverage step, but it still does not implement
 the coarser batched numeric kernel needed to make the probe a default win.
+
+The cached EGraph-panel consumer now has the same optional CBLAS shape as the
+row-supernode experiment for sufficiently large retained panels. In CBLAS
+builds with both `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1` and
+`KLS_ENABLE_CBLAS_SUPERNODE=1`, an eligible cached dependency run solves the
+unit-diagonal internal panel with `dtrsv`, applies any dense in-panel suffix
+with `dgemv`, and applies the shared trailing rows with one more `dgemv`
+before the existing scatter. Benchmark artifacts report that BLAS-taken subset
+through `refactor_last_supernode_cblas_update_*` and cumulative
+`refactor_supernode_cblas_update_*` counters. This is still deliberately behind
+the opt-in supernode-update probe; it makes the compact panel mathematically
+closer to SubtreeLU's BLAS update shape, but does not replace the remaining
+need for broader batched producer/consumer kernels or CKTSO's pivoting tail
+executor.

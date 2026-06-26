@@ -560,8 +560,12 @@ triangular panel and, only when the producer L columns share the same trailing
 row list, accumulates that trailing contribution in worker scratch before one
 scatter. Stats report `refactor_last_supernode_update_runs`,
 `refactor_last_supernode_update_rows`, `refactor_last_supernode_update_entries`,
-and cumulative `refactor_supernode_update_*` totals. This path is intentionally
-off by default. It now builds persistent producer-side compact panels for
+and cumulative `refactor_supernode_update_*` totals; CBLAS builds additionally
+report the BLAS-taken subset as `refactor_last_supernode_cblas_update_runs`,
+`refactor_last_supernode_cblas_update_rows`,
+`refactor_last_supernode_cblas_update_entries`, and cumulative
+`refactor_supernode_cblas_update_*` totals. This path is intentionally off by
+default. It now builds persistent producer-side compact panels for
 eligible retained EGraph supernodes and publishes panel rows as producer
 columns finish, so later consumers reuse the dense/internal and shared trailing
 values instead of reconstructing that structure for every dependency run. The
@@ -570,9 +574,11 @@ column inside a supernode no longer has to rebuild a temporary partial panel
 just to use already completed producer columns. The cached-panel consumer now
 also runs from the generic mapped EGraph refactor kernel, so scaled BTF and
 smaller BTF states can use the same retained producer panels instead of staying
-on the scalar dependency loop. Focused runs show this removes the worst rebuild
-overhead, but the path is still slower than default KLS because it applies each
-consumer update with scalar loops rather than the paper's compact/batched panel
+on the scalar dependency loop. CBLAS builds can also apply an eligible cached
+EGraph panel with a unit-diagonal `dtrsv` over the retained internal panel plus
+`dgemv` updates for the dense suffix and shared trailing rows. Focused runs
+show this removes the worst rebuild overhead, but the path is still slower than
+default KLS because the broad default path still needs coarser batched panel
 kernels.
 The experimental row pipeline preserves the CKTSO-style wide cluster prefix
 selected by the `2 * threads` width rule, then consumes the remaining narrow

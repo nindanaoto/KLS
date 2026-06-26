@@ -382,6 +382,12 @@ typedef struct kls_stats {
   int row_refactor_auto_model_recommended;
   int row_refactor_auto_model_attempted;
   int row_refactor_auto_model_accepted;
+  int64_t refactor_last_supernode_cblas_update_runs;
+  int64_t refactor_last_supernode_cblas_update_rows;
+  int64_t refactor_last_supernode_cblas_update_entries;
+  int64_t refactor_supernode_cblas_update_run_count;
+  int64_t refactor_supernode_cblas_update_rows;
+  int64_t refactor_supernode_cblas_update_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
