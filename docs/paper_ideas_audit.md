@@ -3765,6 +3765,17 @@ numeric engine, but it removes another forced round trip through scattered
 KLU-style value arrays from the rows that already have compact SubtreeLU-shaped
 storage.
 
+The one-RHS row solve then moved from per-entry compact-panel reads to
+group-level compact-panel execution for complete dense groups. The normal
+forward solve validates the dense group's lower suffix layout and walks the
+row-major lower triangle directly; the backward solve validates the dense and
+shared trailing U layout and walks the retained row-major upper/trailing panel
+before dividing by the published pivots. Both paths fall back to the previous
+sparse row loops if the panel or row layout is not exact, and stats now report
+last/cumulative compact group-solve rows and panel entries. This is still a
+serial one-RHS kernel, but it is a direct step from "compact panel as storage"
+to "compact panel as triangular-solve executor."
+
 The refactor scalar fallback now follows the same storage rule for single-row
 producer dependencies. If a completed dense producer row belongs to a retained
 compact panel, scalar consumers validate that panel's dense/trailing U-row

@@ -1457,6 +1457,14 @@ int main(int argc, char **argv) {
            ",\"row_refactor_compact_panel_solve_values\":%" PRId64,
            stats.row_refactor_last_compact_panel_solve_values,
            stats.row_refactor_compact_panel_solve_values);
+    printf(",\"row_refactor_last_compact_panel_group_solve_rows\":%" PRId64
+           ",\"row_refactor_compact_panel_group_solve_rows\":%" PRId64
+           ",\"row_refactor_last_compact_panel_group_solve_entries\":%" PRId64
+           ",\"row_refactor_compact_panel_group_solve_entries\":%" PRId64,
+           stats.row_refactor_last_compact_panel_group_solve_rows,
+           stats.row_refactor_compact_panel_group_solve_rows,
+           stats.row_refactor_last_compact_panel_group_solve_entries,
+           stats.row_refactor_compact_panel_group_solve_entries);
     printf(",\"row_refactor_last_compact_panel_scalar_update_rows\":%" PRId64
            ",\"row_refactor_compact_panel_scalar_update_rows\":%" PRId64
            ",\"row_refactor_last_compact_panel_scalar_update_entries\":%" PRId64
@@ -2047,6 +2055,8 @@ int main(int argc, char **argv) {
            " entries, used: %d/%" PRId64
            ", direct input rows: %" PRId64 "/%" PRId64
            ", compact solve values: %" PRId64 "/%" PRId64
+           ", compact group solves: %" PRId64 "/%" PRId64
+           " rows, %" PRId64 "/%" PRId64 " entries"
            ", compact scalar updates: %" PRId64 "/%" PRId64
            " rows, %" PRId64 "/%" PRId64 " entries"
            ", native direct input rows: %" PRId64 "/%" PRId64
@@ -2096,6 +2106,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_direct_input_rows,
            stats.row_refactor_last_compact_panel_solve_values,
            stats.row_refactor_compact_panel_solve_values,
+           stats.row_refactor_last_compact_panel_group_solve_rows,
+           stats.row_refactor_compact_panel_group_solve_rows,
+           stats.row_refactor_last_compact_panel_group_solve_entries,
+           stats.row_refactor_compact_panel_group_solve_entries,
            stats.row_refactor_last_compact_panel_scalar_update_rows,
            stats.row_refactor_compact_panel_scalar_update_rows,
            stats.row_refactor_last_compact_panel_scalar_update_entries,
