@@ -859,34 +859,7 @@ int main(int argc, char **argv) {
            ",\"fast_repaired_last_offdiag_suffix_refresh\":%d"
            ",\"fast_repaired_offdiag_suffix_refresh_count\":%" PRId64
            ",\"fast_repaired_offdiag_full_refresh_count\":%" PRId64
-           ",\"fast_repaired_parallel_tail_blocks\":%" PRId64
-           ",\"fast_rejected_block_start\":%" PRId64
-           ",\"fast_rejected_block_size\":%" PRId64
-           ",\"fast_rejected_suffix_columns\":%" PRId64
-           ",\"fast_rejected_descendant_columns\":%" PRId64
-           ",\"fast_rejected_descendant_work\":%.9g"
-           ",\"fast_rejected_row_tail_columns\":%" PRId64
-           ",\"fast_rejected_row_tail_work\":%.9g"
-           ",\"fast_rejected_group_tail_groups\":%" PRId64
-           ",\"fast_rejected_group_tail_rows\":%" PRId64
-           ",\"fast_rejected_group_tail_work\":%.9g"
-           ",\"fast_rejected_etree_columns\":%" PRId64
-           ",\"fast_rejected_etree_work\":%.9g"
-           ",\"fast_rejected_pivoting_tail_columns\":%" PRId64
-           ",\"fast_rejected_pivoting_tail_work\":%.9g"
-           ",\"fast_rejected_pivoting_tail_first\":%" PRId64
-           ",\"fast_rejected_pivoting_tail_last\":%" PRId64
-           ",\"fast_rejected_pivoting_tail_contains_reject\":%d"
-           ",\"fast_rejected_pivoting_tail_topological\":%d"
-           ",\"fast_rejected_pivoting_tail_seed_columns\":%" PRId64
-           ",\"fast_rejected_pivoting_tail_contiguous\":%d"
-           ",\"fast_rejected_pivoting_tail_suffix_exact\":%d"
-           ",\"fast_rejected_pivoting_tail_gap_columns\":%" PRId64
-           ",\"fast_rejected_pivoting_tail_suffix_overcompute_columns\":%" PRId64
-           ",\"fast_rejected_pivoting_tail_suffix_overcompute_work\":%.9g"
-           ",\"fast_rejected_refresh_state\":%d"
-           ",\"fast_rejected_prefix_refresh_columns\":%" PRId64
-           ",\"fast_rejected_prefix_refresh_count\":%" PRId64,
+           ",\"fast_repaired_parallel_tail_blocks\":%" PRId64,
            path, a.n, a.nnz, options.threads,
            stats.build_has_metis ? "true" : "false",
            stats.build_has_scotch ? "true" : "false",
@@ -963,7 +936,34 @@ int main(int argc, char **argv) {
            stats.fast_repaired_last_offdiag_suffix_refresh,
            stats.fast_repaired_offdiag_suffix_refresh_count,
            stats.fast_repaired_offdiag_full_refresh_count,
-           stats.fast_repaired_parallel_tail_blocks,
+           stats.fast_repaired_parallel_tail_blocks);
+    printf(",\"fast_rejected_block_start\":%" PRId64
+           ",\"fast_rejected_block_size\":%" PRId64
+           ",\"fast_rejected_suffix_columns\":%" PRId64
+           ",\"fast_rejected_descendant_columns\":%" PRId64
+           ",\"fast_rejected_descendant_work\":%.9g"
+           ",\"fast_rejected_row_tail_columns\":%" PRId64
+           ",\"fast_rejected_row_tail_work\":%.9g"
+           ",\"fast_rejected_group_tail_groups\":%" PRId64
+           ",\"fast_rejected_group_tail_rows\":%" PRId64
+           ",\"fast_rejected_group_tail_work\":%.9g"
+           ",\"fast_rejected_etree_columns\":%" PRId64
+           ",\"fast_rejected_etree_work\":%.9g"
+           ",\"fast_rejected_pivoting_tail_columns\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_work\":%.9g"
+           ",\"fast_rejected_pivoting_tail_first\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_last\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_contains_reject\":%d"
+           ",\"fast_rejected_pivoting_tail_topological\":%d"
+           ",\"fast_rejected_pivoting_tail_seed_columns\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_contiguous\":%d"
+           ",\"fast_rejected_pivoting_tail_suffix_exact\":%d"
+           ",\"fast_rejected_pivoting_tail_gap_columns\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_suffix_overcompute_columns\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_suffix_overcompute_work\":%.9g"
+           ",\"fast_rejected_refresh_state\":%d"
+           ",\"fast_rejected_prefix_refresh_columns\":%" PRId64
+           ",\"fast_rejected_prefix_refresh_count\":%" PRId64,
            stats.fast_rejected_block_start,
            stats.fast_rejected_block_size,
            stats.fast_rejected_suffix_columns,
@@ -1337,6 +1337,10 @@ int main(int argc, char **argv) {
            ",\"refactor_dependency_pipeline_columns\":%" PRId64
            ",\"refactor_dependency_work\":%.9g"
            ",\"refactor_dependency_pipeline_work\":%.9g"
+           ",\"refactor_last_supernode_pipeline_tasks\":%" PRId64
+           ",\"refactor_last_supernode_pipeline_columns\":%" PRId64
+           ",\"refactor_supernode_pipeline_task_count\":%" PRId64
+           ",\"refactor_supernode_pipeline_column_count\":%" PRId64
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
@@ -1351,6 +1355,10 @@ int main(int argc, char **argv) {
            stats.refactor_dependency_pipeline_columns,
            stats.refactor_dependency_work,
            stats.refactor_dependency_pipeline_work,
+           stats.refactor_last_supernode_pipeline_tasks,
+           stats.refactor_last_supernode_pipeline_columns,
+           stats.refactor_supernode_pipeline_task_count,
+           stats.refactor_supernode_pipeline_column_count,
            stats.nnz_l, stats.nnz_u,
            stats.estimated_flops, stats.factor_flops, stats.rcond, stats.rgrowth,
            stats.memory_bytes, stats.memory_peak_bytes);
@@ -1571,6 +1579,13 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_candidate_max_width,
            stats.refactor_supernode_candidate_dense_entries,
            stats.refactor_supernode_candidate_trailing_entries);
+    printf("refactor supernode pipeline tasks: %" PRId64
+           ", columns: %" PRId64 ", cumulative tasks: %" PRId64
+           ", cumulative columns: %" PRId64 "\n",
+           stats.refactor_last_supernode_pipeline_tasks,
+           stats.refactor_last_supernode_pipeline_columns,
+           stats.refactor_supernode_pipeline_task_count,
+           stats.refactor_supernode_pipeline_column_count);
     printf("row refactor groups: %" PRId64
            ", levels: %" PRId64 ", max level width: %" PRId64
            ", cluster levels: %" PRId64 ", pipeline groups: %" PRId64

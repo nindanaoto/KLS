@@ -4106,3 +4106,23 @@ complete, and consumers still wait on each dependency row before applying the
 partial compact-supernode update. This fills a direct Algorithm 5 coverage gap
 for prefix-safe producer/consumer overlap, while the full CKTSO pivoting-tail
 executor and production row-major first factor remain open.
+
+The column EGraph refactor schedule now retains exact consecutive
+supernode-candidate ranges instead of only counting them. Benchmark JSON and
+gap decomposition output report the number of retained candidates and, when
+enabled, the number of natural-order EGraph pipeline tasks and columns that
+were coarsened. A guarded execution path exists behind
+`KLS_ENABLE_EGRAPH_SUPERNODE_TASKS=1`: it only leases candidates whose width is
+within the CKTSO-style `2 * threads` task-width bound, and still dispatches and
+marks every column through the existing dependency and pivot checks. This is
+off by default because the direct experiment showed that scheduler coarsening
+without the matching supernodal numeric panel/update kernel is not the missing
+CKTSO lever. On `G2_circuit` with four threads, default EGraph refactor stayed
+near 0.201 s while the env-enabled coarsened path leased 6,991 tasks covering
+23,328 columns and slowed to about 0.209 s. The 11 completed rows of the
+CKTSO-gap focus subset were 1.0067x slower than the previous KLS run when the
+task path was enabled; the `transient` timeout observed during that run was
+also reproduced on the committed `d08ab35` baseline and is a pre-existing
+EGraph pipeline flake. This narrows the remaining paper gap: the useful next
+step is not more task scheduling, but production supernodal numeric storage
+and BLAS-style panel/trailing updates for these retained ranges.

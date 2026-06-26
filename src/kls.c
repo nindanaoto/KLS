@@ -329,6 +329,11 @@ struct kls_solver {
   UF_long refactor_supernode_candidate_max_width;
   double refactor_supernode_candidate_dense_entries;
   double refactor_supernode_candidate_trailing_entries;
+  UF_long *refactor_supernode_pipeline_end;
+  UF_long refactor_last_supernode_pipeline_tasks;
+  UF_long refactor_last_supernode_pipeline_columns;
+  UF_long refactor_supernode_pipeline_task_count;
+  UF_long refactor_supernode_pipeline_column_count;
   UF_long refactor_cluster_level_count;
   UF_long refactor_pipeline_column_count;
   double refactor_dependency_work;
@@ -478,9 +483,12 @@ typedef struct kls_egraph_refactor_shared {
   atomic_uint *pipeline_done;
   unsigned int pipeline_generation;
   atomic_ulong next_pipeline_pos;
+  atomic_ulong supernode_pipeline_tasks;
+  atomic_ulong supernode_pipeline_columns;
   UF_long pipeline_pos_end;
   UF_long cluster_level_count;
   int pipeline_natural_order;
+  int pipeline_supernode_tasks;
   int row_refactor_mode;
   int row_refactor_defer_value_scatter;
   int row_refactor_lazy_value_scatter;
@@ -857,7 +865,8 @@ static void kls_record_supernode_candidate(
   kls_solver *solver,
   UF_long start,
   UF_long width,
-  const UF_long *successor_counts) {
+  const UF_long *successor_counts,
+  UF_long *pipeline_end) {
   if (solver == NULL || successor_counts == NULL || width <= 1u) {
     return;
   }
@@ -870,6 +879,9 @@ static void kls_record_supernode_candidate(
     (double)width * (double)(width - 1u) * 0.5;
   solver->refactor_supernode_candidate_trailing_entries +=
     (double)width * (double)successor_counts[start + width - 1u];
+  if (pipeline_end != NULL) {
+    pipeline_end[start] = start + width;
+  }
 }
 
 static void free_refactor_map(kls_solver *solver) {
@@ -1716,9 +1728,11 @@ static void free_refactor_schedule(kls_solver *solver) {
   free(solver->refactor_level_ptr);
   free(solver->refactor_level_cols);
   free(solver->refactor_level_thread_ptr);
+  free(solver->refactor_supernode_pipeline_end);
   solver->refactor_level_ptr = NULL;
   solver->refactor_level_cols = NULL;
   solver->refactor_level_thread_ptr = NULL;
+  solver->refactor_supernode_pipeline_end = NULL;
   solver->refactor_level_thread_count = 0;
   solver->refactor_level_count = 0;
   solver->refactor_level_max_width = 0;
@@ -1733,6 +1747,10 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_supernode_candidate_max_width = 0;
   solver->refactor_supernode_candidate_dense_entries = 0.0;
   solver->refactor_supernode_candidate_trailing_entries = 0.0;
+  solver->refactor_last_supernode_pipeline_tasks = 0;
+  solver->refactor_last_supernode_pipeline_columns = 0;
+  solver->refactor_supernode_pipeline_task_count = 0;
+  solver->refactor_supernode_pipeline_column_count = 0;
   solver->refactor_cluster_level_count = 0;
   solver->refactor_pipeline_column_count = 0;
   solver->refactor_dependency_work = 0.0;
@@ -2047,6 +2065,16 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_defer_value_scatter = 0;
   solver->stats.row_refactor_last_lazy_value_scatter = 0;
   solver->stats.row_refactor_last_row_solve = 0;
+}
+
+static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->refactor_last_supernode_pipeline_tasks = 0;
+  solver->refactor_last_supernode_pipeline_columns = 0;
+  solver->stats.refactor_last_supernode_pipeline_tasks = 0;
+  solver->stats.refactor_last_supernode_pipeline_columns = 0;
 }
 
 static void kls_record_row_refactor_run(kls_solver *solver,
@@ -9946,6 +9974,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_supernode_candidate_dense_entries;
   solver->stats.refactor_supernode_candidate_trailing_entries =
     solver->refactor_supernode_candidate_trailing_entries;
+  solver->stats.refactor_last_supernode_pipeline_tasks =
+    (int64_t)solver->refactor_last_supernode_pipeline_tasks;
+  solver->stats.refactor_last_supernode_pipeline_columns =
+    (int64_t)solver->refactor_last_supernode_pipeline_columns;
+  solver->stats.refactor_supernode_pipeline_task_count =
+    (int64_t)solver->refactor_supernode_pipeline_task_count;
+  solver->stats.refactor_supernode_pipeline_column_count =
+    (int64_t)solver->refactor_supernode_pipeline_column_count;
   solver->stats.row_refactor_group_count =
     (int64_t)solver->row_refactor_group_count;
   solver->stats.row_refactor_group_level_count =
@@ -23361,6 +23397,9 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
                                                                   group)) ||
               !kls_parallel_row_refactor_process_group(worker, group,
                                                        prewait ? 0 : 1)) {
+            if (!kls_egraph_refactor_should_stop(shared)) {
+              kls_egraph_refactor_record_invalid(shared);
+            }
             break;
           }
           kls_parallel_row_refactor_mark_group_done(shared, solver, group);
@@ -25048,6 +25087,67 @@ static void kls_egraph_refactor_refresh_missing_prefix(
   }
 }
 
+static UF_long kls_egraph_refactor_lease_natural_pipeline(
+  kls_egraph_refactor_shared *shared,
+  UF_long *begin_out) {
+  if (begin_out != NULL) {
+    *begin_out = 0u;
+  }
+  if (shared == NULL || shared->solver == NULL) {
+    return 0u;
+  }
+  const kls_solver *solver = shared->solver;
+  for (;;) {
+    const unsigned long loaded =
+      atomic_load_explicit(&shared->next_pipeline_pos,
+                           memory_order_relaxed);
+    const UF_long begin = (UF_long)loaded;
+    if (begin >= shared->pipeline_pos_end) {
+      if (begin_out != NULL) {
+        *begin_out = begin;
+      }
+      return begin;
+    }
+
+    UF_long end = begin + 1u;
+    if (solver->refactor_supernode_pipeline_end != NULL) {
+      const UF_long candidate_end =
+        solver->refactor_supernode_pipeline_end[begin];
+      if (candidate_end > end &&
+          candidate_end <= shared->pipeline_pos_end) {
+        const UF_long candidate_width = candidate_end - begin;
+        const UF_long max_task_width =
+          shared->thread_count > 0 ? (UF_long)(2 * shared->thread_count) : 0u;
+        if (candidate_width <= max_task_width) {
+          end = candidate_end;
+        }
+      }
+    }
+
+    unsigned long expected = loaded;
+    if (atomic_compare_exchange_weak_explicit(
+          &shared->next_pipeline_pos, &expected, (unsigned long)end,
+          memory_order_acq_rel, memory_order_relaxed)) {
+      if (begin_out != NULL) {
+        *begin_out = begin;
+      }
+      if (end > begin + 1u) {
+        atomic_fetch_add_explicit(&shared->supernode_pipeline_tasks, 1ul,
+                                  memory_order_relaxed);
+        atomic_fetch_add_explicit(
+          &shared->supernode_pipeline_columns,
+          (unsigned long)(end - begin), memory_order_relaxed);
+      }
+      return end;
+    }
+  }
+}
+
+static int kls_egraph_supernode_tasks_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_EGRAPH_SUPERNODE_TASKS");
+  return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+}
+
 static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
@@ -25109,16 +25209,40 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         if (kls_egraph_refactor_should_stop(shared)) {
           break;
         }
-        const UF_long col =
-          (UF_long)atomic_fetch_add_explicit(&shared->next_pipeline_pos, 1ul,
-                                             memory_order_relaxed);
-        if (col >= shared->pipeline_pos_end) {
-          break;
+        if (shared->pipeline_supernode_tasks) {
+          UF_long begin = 0u;
+          const UF_long end =
+            kls_egraph_refactor_lease_natural_pipeline(shared, &begin);
+          if (begin >= shared->pipeline_pos_end) {
+            break;
+          }
+          for (UF_long col = begin; col < end; ++col) {
+            if (kls_egraph_refactor_should_stop(shared)) {
+              break;
+            }
+            if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
+              if (!kls_egraph_refactor_should_stop(shared)) {
+                kls_egraph_refactor_record_invalid(shared);
+              }
+              break;
+            }
+            kls_egraph_refactor_mark_done(shared, col);
+          }
+        } else {
+          const UF_long col =
+            (UF_long)atomic_fetch_add_explicit(&shared->next_pipeline_pos,
+                                               1ul, memory_order_relaxed);
+          if (col >= shared->pipeline_pos_end) {
+            break;
+          }
+          if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
+            if (!kls_egraph_refactor_should_stop(shared)) {
+              kls_egraph_refactor_record_invalid(shared);
+            }
+            break;
+          }
+          kls_egraph_refactor_mark_done(shared, col);
         }
-        if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
-          break;
-        }
-        kls_egraph_refactor_mark_done(shared, col);
       }
     } else if (solver->refactor_level_cols != NULL) {
       for (;;) {
@@ -25133,6 +25257,9 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         }
         const UF_long col = solver->refactor_level_cols[pos];
         if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
+          if (!kls_egraph_refactor_should_stop(shared)) {
+            kls_egraph_refactor_record_invalid(shared);
+          }
           break;
         }
         kls_egraph_refactor_mark_done(shared, col);
@@ -25474,6 +25601,8 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   pool->barrier_initialized = 1;
   atomic_init(&pool->shared.stop, 0);
   atomic_init(&pool->shared.next_pipeline_pos, 0ul);
+  atomic_init(&pool->shared.supernode_pipeline_tasks, 0ul);
+  atomic_init(&pool->shared.supernode_pipeline_columns, 0ul);
   atomic_init(&pool->shared.row_pipeline_private_pos, 0ul);
   atomic_init(&pool->shared.row_pipeline_local_ready_groups, 0ul);
   atomic_init(&pool->shared.row_pipeline_ready_head, 0ul);
@@ -26433,6 +26562,12 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->pipeline_done = pipeline_done;
   shared->pipeline_generation = pipeline_generation;
   shared->pipeline_natural_order = natural_pipeline ? 1 : 0;
+  shared->pipeline_supernode_tasks =
+    (natural_pipeline && kls_egraph_supernode_tasks_env_enabled()) ? 1 : 0;
+  atomic_store_explicit(&shared->supernode_pipeline_tasks, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->supernode_pipeline_columns, 0ul,
+                        memory_order_release);
   atomic_store_explicit(
     &shared->next_pipeline_pos,
     (unsigned long)(pipeline_done != NULL
@@ -26457,6 +26592,21 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     pthread_cond_wait(&pool->done_cond, &shared->lock);
   }
   pthread_mutex_unlock(&shared->lock);
+
+  const UF_long supernode_pipeline_tasks =
+    (UF_long)atomic_load_explicit(&shared->supernode_pipeline_tasks,
+                                  memory_order_acquire);
+  const UF_long supernode_pipeline_columns =
+    (UF_long)atomic_load_explicit(&shared->supernode_pipeline_columns,
+                                  memory_order_acquire);
+  solver->refactor_last_supernode_pipeline_tasks =
+    supernode_pipeline_tasks;
+  solver->refactor_last_supernode_pipeline_columns =
+    supernode_pipeline_columns;
+  solver->refactor_supernode_pipeline_task_count +=
+    supernode_pipeline_tasks;
+  solver->refactor_supernode_pipeline_column_count +=
+    supernode_pipeline_columns;
 
   if (shared->invalid || shared->pivot_rejected ||
       (shared->singular && common->halt_if_singular)) {
@@ -27044,6 +27194,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   const int natural_pipeline =
     kls_egraph_all_pipeline_huge_single_shape(solver);
   if (solver->refactor_level_ptr != NULL &&
+      solver->refactor_supernode_pipeline_end != NULL &&
       (solver->refactor_level_cols != NULL || natural_pipeline)) {
     return 1;
   }
@@ -27059,6 +27210,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long *level_ptr = NULL;
   UF_long *level_cols = NULL;
   UF_long *level_thread_ptr = NULL;
+  UF_long *supernode_pipeline_end = NULL;
 
 #define KLS_FREE_REFACTOR_SCHEDULE_TEMP() \
   do { \
@@ -27072,6 +27224,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     free(level_ptr); \
     free(level_cols); \
     free(level_thread_ptr); \
+    free(supernode_pipeline_end); \
   } while (0)
 
   levels = (UF_long *)calloc((size_t)solver->n, sizeof(*levels));
@@ -27083,9 +27236,12 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   row_hash2 = (uint64_t *)calloc((size_t)solver->n, sizeof(*row_hash2));
   column_work =
     (double *)calloc((size_t)solver->n, sizeof(*column_work));
+  supernode_pipeline_end =
+    (UF_long *)calloc((size_t)solver->n, sizeof(*supernode_pipeline_end));
   if (levels == NULL || successor_counts == NULL ||
       first_successor == NULL || row_hash1 == NULL ||
-      row_hash2 == NULL || column_work == NULL) {
+      row_hash2 == NULL || column_work == NULL ||
+      supernode_pipeline_end == NULL) {
     KLS_FREE_REFACTOR_SCHEDULE_TEMP();
     return 0;
   }
@@ -27325,12 +27481,14 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
         width++;
       } else {
         kls_record_supernode_candidate(solver, start, width,
-                                       successor_counts);
+                                       successor_counts,
+                                       supernode_pipeline_end);
         start = next;
         width = 1u;
       }
     }
-    kls_record_supernode_candidate(solver, start, width, successor_counts);
+    kls_record_supernode_candidate(solver, start, width, successor_counts,
+                                   supernode_pipeline_end);
   }
 
   free(levels);
@@ -27344,6 +27502,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   solver->refactor_level_ptr = level_ptr;
   solver->refactor_level_cols = level_cols;
   solver->refactor_level_thread_ptr = level_thread_ptr;
+  solver->refactor_supernode_pipeline_end = supernode_pipeline_end;
   solver->refactor_level_thread_count = thread_count;
   solver->refactor_level_count = level_count;
   solver->refactor_level_max_width = max_width;
@@ -27358,6 +27517,10 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   solver->refactor_pipeline_column_count = pipeline_columns;
   solver->refactor_dependency_work = total_work;
   solver->refactor_pipeline_work = pipeline_work;
+  level_ptr = NULL;
+  level_cols = NULL;
+  level_thread_ptr = NULL;
+  supernode_pipeline_end = NULL;
   return 1;
 }
 
@@ -27377,6 +27540,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                                      double *numeric_values,
                                      int check_pivots) {
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
+  kls_clear_egraph_refactor_last_stats(solver);
   const int auto_row_refactor =
     kls_auto_row_refactor_should_run(solver);
   if (check_pivots &&

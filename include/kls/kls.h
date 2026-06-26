@@ -364,6 +364,10 @@ typedef struct kls_stats {
   int64_t row_refactor_separator_flop_closure_group_count;
   int kls_first_auto_skipped_scaled_single_block;
   int64_t kls_first_auto_skipped_scaled_single_block_count;
+  int64_t refactor_last_supernode_pipeline_tasks;
+  int64_t refactor_last_supernode_pipeline_columns;
+  int64_t refactor_supernode_pipeline_task_count;
+  int64_t refactor_supernode_pipeline_column_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
