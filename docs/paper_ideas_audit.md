@@ -392,9 +392,9 @@ new KLS-owned symbolic/numeric machinery:
   still lacks production coarse BLAS supernode storage and a checked-tail
   factor/refactor queue consumer.
 - Broader supernodal row/segment updates in the sparse up-looking executor.
-  KLS has exact-pattern, ragged single-producer, and opt-in fragmented
-  multi-producer dense-panel updates, but these are still narrower than
-  SubtreeLU's production supernodal coverage.
+  KLS has exact-pattern, ragged single-producer, and default structural and
+  work-gated fragmented multi-producer dense-panel updates, but these are
+  still narrower than SubtreeLU's production supernodal coverage.
 
 Several smaller dispatch experiments were tried and rejected because they helped
 some benchmark cases while regressing others. Those are documented below so the
@@ -407,7 +407,7 @@ project does not drift toward benchmark-name-specific heuristics.
 | Algorithm 907 / KLU | BTF preprocessing, fill-reducing ordering, row scaling modes, Gilbert-Peierls factorization with partial pivoting, no-pivot refactorization, and block back substitution are present through the vendored KLU-derived kernel. KLS adds automatic policy selection, serial refactor scatter metadata, and exact EGraph level metadata around these pieces. | KLS still inherits KLU's fundamentally sequential intra-block numeric kernel. |
 | NICSLU | AMD-style ordering, optional static-pivoting preprocessing, optional SPRAL Hungarian/scaling trials, and the idea that parallel kernels should be selected by general structural/numeric evidence are represented in KLS policies. KLS now records exact no-pivot EGraph levels from the numeric U pattern and uses them in guarded large single-block, dominant-BTF-block, and fragmented non-dominant many-block refactor paths, including KLU row-scaled cases where scale handling is supported and work-estimated cluster-level thread slices. KLS also reports the NICSLU R1/R2 static parallel suitability model as `parallel_model_r1`, `parallel_model_r2`, and `parallel_model_recommends_parallel`, using the paper's 2.0 and 50.0 thresholds, and uses that model to seed KLS-owned row/segment refactor preparation when an exact dependency schedule and the row-work gate agree. | Full production MC64 matching/scaling is not implemented. NICSLU's detailed ETree/EScheduler-guided intra-block factorization and full pivoting-aware ETree scheduling are not implemented. Earlier broader EGraph prototypes were rejected because they were not general wins on the current kernel/storage. |
 | CKTSO | METIS nested-dissection ordering, guarded SCOTCH nested-dissection auto trials for large high-work symbolic candidates, constrained-minimum-degree-style CAMD refinement, combined ordering selection, pivot-checked fast factorization, CKTSO-style row-wise guessed-diagonal checks in KLS-owned checked row fast/refactor passes, KLS-owned block-local restart after a failed fast-factor pivot check including root-of-block rejects, conservative serial prefix-current/all-current tail restart for validated non-root unscaled repaired blocks, scaled block-local restart plus scaled checked continuation over later BTF blocks, scaled prefix-current/all-current block repair, scaled in-block serial tail restart after recomputing row scales to input-row order, threaded BTF worker-pool completed-block tracking for safe prefix-current rejects, guarded EGraph cluster/pipeline no-pivot refactors for single, dominant BTF, and selected fragmented many-block BTF shapes, work-balanced cluster-level refactor slices, cached row-permutation solve scratch, CKTSO Section V-style structure-adaptive triangular solve metadata/executor, and dual-potential plus optional SPRAL matching-derived equilibration trials are implemented in KLS at the KLU-wrapper layer. | CKTSO's maximum-weight matching with dual scaling is still only partially approximated because KLS does not have an always-on production MC64-equivalent weighted assignment stage. Full pipelined ETree-descendant tail restart with pivoting after a failed pivot check is not implemented. Otherwise unsupported fast-factor failures still fall back to full pivoting factorization. |
-| SubtreeLU | KLS vendors reproducible METIS/GKlib and SCOTCH submodules, uses METIS plus CAMD refinement, asks METIS `NodeNDP` for at least `log2(threads)` nested-dissection levels on larger threaded METIS analyses, and can keep SCOTCH from `auto` when its symbolic score is materially better on large high-work cases. KLS now retains accepted `NodeNDP` component sequences from METIS user-order callbacks, stitches them into a global BTF-aware separator forest with synthetic private components for blocks that did not run `NodeNDP`, reports the resulting global queue shape in stats/bench output, and uses the component map to build separator-private initial thread queues for the experimental row-refactor ready queue. No-pivot and checked row refactors can now consume the retained separator tree through a SubtreeLU Algorithm 6-style FLOP-balanced private/pipeline queue, with separator-crossing row groups forced into pipeline work. The KLS-first pivoting row-up-looking factorization now builds Algorithm 3-style private row queues by greedily assigning retained private components to threads and a pipeline row queue in factor order, remaps the block-local row/column order and `Pnum` to that queue, executes private rows in worker-local entries, and consumes pipeline rows through a guarded Algorithm 3 atomic counter. It also uses SubtreeLU Algorithm 4's scoped `N'` pivot maximum inside the current collapsed component extent, rejects unsafe cross-domain exchanges, applies ready predecessor row-supernode runs during partial pipeline-row updates, and handles safely pre-updated weak-pivot pipeline rows with an ordered pivot publish plus column-order epoch retry for speculative suffix rows inside the same pipeline phase. This matches SubtreeLU's separator-domain pivot rule while preserving KLS's fallback to the pivoted block kernel for unsafe scoped rows. KLS also records row-major U-pattern supernode candidate diagnostics from the exact no-pivot refactor dependency pass, has scalar compact-panel producer and consumer updates, has KLS-owned scalar batched producer-to-consumer-row-subrange updates for exact multi-producer patterns, ragged single-producer suffix patterns in dense and independent row groups, opt-in contiguous independent-row batches with multiple dense producer suffixes, opt-in fragmented multi-producer updates for dense consumer-group external prefixes, and keeps optional CBLAS experiments for completed-supernode row updates and unchecked blocked producer-panel `dtrsm`/`dgemm`. | KLS still does not use production SubtreeLU-style coarse supernodes/BLAS updates broadly enough for the paper slow cases, and the native row/segment numeric engine remains a scaffold around KLU-compatible packing. CKTSO's full checked-tail/pivoting executor also remains open. |
+| SubtreeLU | KLS vendors reproducible METIS/GKlib and SCOTCH submodules, uses METIS plus CAMD refinement, asks METIS `NodeNDP` for at least `log2(threads)` nested-dissection levels on larger threaded METIS analyses, and can keep SCOTCH from `auto` when its symbolic score is materially better on large high-work cases. KLS now retains accepted `NodeNDP` component sequences from METIS user-order callbacks, stitches them into a global BTF-aware separator forest with synthetic private components for blocks that did not run `NodeNDP`, reports the resulting global queue shape in stats/bench output, and uses the component map to build separator-private initial thread queues for the experimental row-refactor ready queue. No-pivot and checked row refactors can now consume the retained separator tree through a SubtreeLU Algorithm 6-style FLOP-balanced private/pipeline queue, with separator-crossing row groups forced into pipeline work. The KLS-first pivoting row-up-looking factorization now builds Algorithm 3-style private row queues by greedily assigning retained private components to threads and a pipeline row queue in factor order, remaps the block-local row/column order and `Pnum` to that queue, executes private rows in worker-local entries, and consumes pipeline rows through a guarded Algorithm 3 atomic counter. It also uses SubtreeLU Algorithm 4's scoped `N'` pivot maximum inside the current collapsed component extent, rejects unsafe cross-domain exchanges, applies ready predecessor row-supernode runs during partial pipeline-row updates, and handles safely pre-updated weak-pivot pipeline rows with an ordered pivot publish plus column-order epoch retry for speculative suffix rows inside the same pipeline phase. This matches SubtreeLU's separator-domain pivot rule while preserving KLS's fallback to the pivoted block kernel for unsafe scoped rows. KLS also records row-major U-pattern supernode candidate diagnostics from the exact no-pivot refactor dependency pass, has scalar compact-panel producer and consumer updates, has KLS-owned scalar batched producer-to-consumer-row-subrange updates for exact multi-producer patterns, ragged single-producer suffix patterns in dense and independent row groups, and default structural/work-gated contiguous and fragmented multi-producer row-panel updates for dense producer suffixes. Optional CBLAS experiments remain separate for completed-supernode row updates and unchecked blocked producer-panel `dtrsm`/`dgemm`. | KLS still does not use production SubtreeLU-style coarse supernodes/BLAS updates broadly enough for the paper slow cases, and the native row/segment numeric engine remains a scaffold around KLU-compatible packing. CKTSO's full checked-tail/pivoting executor also remains open. |
 
 This means KLS has implemented or prototyped the ideas that can be layered
 around the current KLU-derived data structures. It has **not** implemented all
@@ -4136,22 +4136,23 @@ the slow cases are not waiting for identical-pattern or single-producer ragged
 suffix batching; they need broader multi-producer, non-contiguous row-panel
 numeric execution over the row/segment storage described by CKTSO/SubtreeLU.
 
-KLS also has an opt-in scalar executor for the next contiguous independent-row
-paper shape: `KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1` lets a `GROUP_BATCH`
-subrange whose full `L` row is an ordered sequence of completed dense producer
-suffixes use a temporary row panel. It solves each producer suffix against the
-retained compact producer panel, applies that producer's trailing panel into
-later producer multipliers, the pivot, or the row's `U` workspace, and then
-publishes the independent rows as a batch. A smoke fixture validates two dense
-producer groups feeding the same independent row batch without using CBLAS.
-The top-five CKTSO-gap probe still reported zero batch candidates with this
-path both disabled and enabled on `ASIC_320k`, `ASIC_320ks`, `onetone2`,
-`ASIC_100ks`, and `G2_circuit`; the scalar compact-supernode update counters
-remained large. This rules out contiguous independent multi-producer rows as
-the large missing slow-case feature and leaves the direct paper gap at a more
-structural level: KLS needs a broader CKTSO/SubtreeLU row/segment panel
-executor that can batch heterogeneous, non-contiguous, and internal rows rather
-than only completed-producer suffixes exposed by the current row-major storage.
+KLS also has a default scalar executor for the next contiguous independent-row
+paper shape: unless `KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=0` is set, a
+`GROUP_BATCH` subrange whose full `L` row is an ordered sequence of completed
+dense producer suffixes can use a temporary row panel. It solves each producer
+suffix against the retained compact producer panel, applies that producer's
+trailing panel into later producer multipliers, the pivot, or the row's `U`
+workspace, and then publishes the independent rows as a batch. A smoke fixture
+unsets `KLS_ENABLE_MULTI_PRODUCER_SUPERNODE` and validates two dense producer
+groups feeding the same independent row batch without using CBLAS. The top-five
+CKTSO-gap probe still reported zero batch candidates with this path both
+disabled and enabled on `ASIC_320k`, `ASIC_320ks`, `onetone2`, `ASIC_100ks`,
+and `G2_circuit`; the scalar compact-supernode update counters remained large.
+This rules out contiguous independent multi-producer rows as the large missing
+slow-case feature and leaves the direct paper gap at a more structural level:
+KLS needs a broader CKTSO/SubtreeLU row/segment panel executor that can batch
+heterogeneous, non-contiguous, and internal rows rather than only completed-
+producer suffixes exposed by the current row-major storage.
 
 KLS now records that row/segment structure explicitly during row-refactor
 symbolic setup. After dense group and compact-panel detection, each row's `L`
@@ -4173,31 +4174,33 @@ five matrices. That is a direct paper-algorithm gap: the supernode producer
 ranges are present, but KLS still lacks the row-panel executor that can consume
 them together with the scalar/non-producer pieces of the same row.
 
-KLS now has an opt-in first executor for that fragmented dense-consumer shape.
-When `KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1`, unchecked compact dense consumer
-groups can batch consecutive rows whose external prefixes mix scalar
-dependencies with multiple completed dense producer suffixes. The executor
-uses the retained compact dense input panel when possible, processes scalar
-gaps only up to the next dense producer run, then solves and applies each
-planned producer suffix as a coarse row-panel stage across the batch before
-moving to the next scalar gap. Producer trailing updates can feed later
-external multipliers or the current dense/trailing panel, and the completed
-consumer panel is still left for the normal internal dense-group factor step. A
-smoke fixture constructs one scalar external row, two dense producers, and one
-dense consumer block, with producer suffix starts varying by row so the older
-exact-pattern batch path cannot explain the result.
+KLS now enables that first fragmented dense-consumer executor by default under
+its structural and work gates. Unless `KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=0`
+is set for an A/B run, unchecked compact dense consumer groups can batch
+consecutive rows whose external prefixes mix scalar dependencies with multiple
+completed dense producer suffixes. The executor uses the retained compact
+dense input panel when possible, processes scalar gaps only up to the next
+dense producer run, then solves and applies each planned producer suffix as a
+coarse row-panel stage across the batch before moving to the next scalar gap.
+Producer trailing updates can feed later external multipliers or the current
+dense/trailing panel, and the completed consumer panel is still left for the
+normal internal dense-group factor step. Smoke fixtures unset
+`KLS_ENABLE_MULTI_PRODUCER_SUPERNODE`, construct one scalar external row, two
+dense producers, and one dense consumer block, and vary producer suffix starts
+by row so the older exact-pattern batch path cannot explain the result.
 
 This closes only the structural-dispatch gap, not the performance gap. On the
 same five forced-row CKTSO-gap cases, the path fired on all matrices
 (`352-2,136` batches and `246,898-1,754,124` batched dependency rows), proving
 that the hard rows are dense-consumer fragmented producer rows. The staged
-row-panel and compact-direct-input version improved the opt-in five-case
-geomean from about `33.2s` to about `32.1s`, and improved the focused
-`ASIC_320k` refactor probe from about `0.347s` to about `0.319s`. But the same
-five-case baseline without the opt-in path was about `13.5s`, and the focused
-baseline was about `0.223s`. It remains opt-in until the next paper-level step
-implements native row/segment panel storage and updates instead of using this
-scalar scaffold as if it were SubtreeLU's production supernodal kernel.
+row-panel and compact-direct-input version improved the five-case probe with
+this executor enabled from about `33.2s` to about `32.1s`, and improved the
+focused `ASIC_320k` refactor probe from about `0.347s` to about `0.319s`. But
+the same five-case scalar baseline without this executor was about `13.5s`,
+and the focused baseline was about `0.223s`. Promoting the executor to the
+default path fills the paper-algorithm dispatch gap; the remaining paper-level
+step is still native row/segment panel storage and updates instead of using
+this scalar scaffold as if it were SubtreeLU's production supernodal kernel.
 
 The fragmented dense-consumer executor now also prebuilds a bounded symbolic
 target map for the active producer run's trailing updates. Each mapped target
