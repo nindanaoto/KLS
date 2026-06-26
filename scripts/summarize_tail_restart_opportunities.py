@@ -194,6 +194,9 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         "fast_rejected_pivoting_tail_seed_columns": as_int(
             row, "fast_rejected_pivoting_tail_seed_columns", 0
         ),
+        "fast_rejected_pivoting_tail_block_seed_columns": as_int(
+            row, "fast_rejected_pivoting_tail_block_seed_columns", 0
+        ),
         "fast_rejected_pivoting_tail_contiguous": as_int(
             row, "fast_rejected_pivoting_tail_contiguous", 0
         ),
@@ -229,7 +232,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
             "row_tail_work={row_tail:.6g} "
             "pivoting_tail_cols={pivoting_tail_cols} "
             "pivoting_tail_work={pivoting_tail:.6g} "
-            "seed_cols={seed_cols} "
+            "seed_cols={seed_cols} block_seed_cols={block_seed_cols} "
             "contig={contig} suffix_exact={suffix_exact} "
             "gaps={gaps} plan_overcompute_work={plan_overcompute:.6g} "
             "overcompute_work={overcompute:.6g} "
@@ -253,6 +256,9 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
                     record["fast_rejected_pivoting_tail_work"]
                 ),
                 seed_cols=record["fast_rejected_pivoting_tail_seed_columns"],
+                block_seed_cols=record[
+                    "fast_rejected_pivoting_tail_block_seed_columns"
+                ],
                 contig=record["fast_rejected_pivoting_tail_contiguous"],
                 suffix_exact=record[
                     "fast_rejected_pivoting_tail_suffix_exact"
@@ -368,6 +374,10 @@ def main() -> int:
         int(r["fast_rejected_pivoting_tail_seed_columns"])
         for r in pivoting_tail
     )
+    pivoting_tail_block_seed_columns = sum(
+        int(r["fast_rejected_pivoting_tail_block_seed_columns"])
+        for r in pivoting_tail
+    )
     pivoting_tail_suffix_exact = [
         record for record in pivoting_tail
         if int(record["fast_rejected_pivoting_tail_suffix_exact"]) == 1
@@ -428,6 +438,9 @@ def main() -> int:
         "pivoting_tail_suffix_exact_rows": len(pivoting_tail_suffix_exact),
         "pivoting_tail_gapped_rows": len(pivoting_tail_gapped),
         "pivoting_tail_seed_columns_total": pivoting_tail_seed_columns,
+        "pivoting_tail_block_seed_columns_total": (
+            pivoting_tail_block_seed_columns
+        ),
         "pivoting_tail_work_total": pivoting_tail_work,
         "pivoting_tail_suffix_overcompute_columns_total": (
             pivoting_tail_suffix_overcompute_columns

@@ -502,6 +502,7 @@ typedef struct kls_stats {
   int64_t kls_first_row_supernode_panel_update_run_count;
   int64_t kls_first_last_row_supernode_panel_update_groups;
   int64_t kls_first_last_row_supernode_panel_update_rows;
+  int64_t fast_rejected_pivoting_tail_block_seed_columns;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

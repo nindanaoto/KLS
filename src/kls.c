@@ -496,6 +496,7 @@ struct kls_solver {
   UF_long fast_reject_tail_seed_block;
   UF_long fast_reject_tail_seed_count;
   int fast_reject_tail_seed_valid;
+  int fast_reject_tail_seed_block_suffix;
   UF_long kls_tail_last_mapped_columns;
   UF_long kls_tail_mapped_column_count;
   UF_long kls_first_last_row_uplooking_columns;
@@ -2557,6 +2558,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_pivoting_tail_topological = 0;
   solver->stats.fast_rejected_pivoting_tail_seed_columns = 0;
   solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
+  solver->stats.fast_rejected_pivoting_tail_block_seed_columns = 0;
   solver->stats.fast_rejected_pivoting_tail_contiguous = 0;
   solver->stats.fast_rejected_pivoting_tail_suffix_exact = 0;
   solver->stats.fast_rejected_pivoting_tail_gap_columns = 0;
@@ -3456,6 +3458,7 @@ static void kls_record_fast_reject_detail(kls_solver *solver,
   solver->stats.fast_rejected_pivoting_tail_suffix_overcompute_columns = 0;
   solver->stats.fast_rejected_pivoting_tail_suffix_overcompute_work = 0.0;
   solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
+  solver->stats.fast_rejected_pivoting_tail_block_seed_columns = 0;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
   kls_fill_fast_reject_tail_stats(solver, rejected_pivot);
@@ -12427,8 +12430,10 @@ static void kls_clear_fast_reject_tail_seed(kls_solver *solver) {
   solver->fast_reject_tail_seed_block = KLS_KLU_EMPTY;
   solver->fast_reject_tail_seed_count = 0;
   solver->fast_reject_tail_seed_valid = 0;
+  solver->fast_reject_tail_seed_block_suffix = 0;
   solver->stats.fast_rejected_pivoting_tail_seed_columns = 0;
   solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
+  solver->stats.fast_rejected_pivoting_tail_block_seed_columns = 0;
 }
 
 static void kls_record_fast_reject_unfinished_tail_seed(
@@ -12473,6 +12478,43 @@ static void kls_record_fast_reject_unfinished_tail_seed(
   solver->fast_reject_tail_seed_count = seed_count;
   solver->fast_reject_tail_seed_valid = 1;
   solver->stats.fast_rejected_pivoting_tail_seed_columns =
+    (int64_t)seed_count;
+}
+
+static void kls_record_fast_reject_block_suffix_tail_seed(
+  kls_solver *solver,
+  UF_long rejected_pivot) {
+  kls_clear_fast_reject_tail_seed(solver);
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->R == NULL || rejected_pivot == KLS_KLU_EMPTY) {
+    return;
+  }
+  const UF_long block = kls_block_for_pivot(solver, rejected_pivot);
+  if (block == KLS_KLU_EMPTY || block >= solver->symbolic->nblocks) {
+    return;
+  }
+  const UF_long k1 = solver->symbolic->R[block];
+  const UF_long k2 = solver->symbolic->R[block + 1u];
+  if (rejected_pivot < k1 || rejected_pivot >= k2) {
+    return;
+  }
+  const UF_long nk = k2 - k1;
+  if (!kls_ensure_fast_reject_tail_plan_storage(solver, nk)) {
+    return;
+  }
+
+  UF_long seed_count = 0;
+  for (UF_long col = rejected_pivot; col < k2; ++col) {
+    solver->fast_reject_tail_seed_cols[seed_count++] = col - k1;
+  }
+  solver->fast_reject_tail_seed_block = block;
+  solver->fast_reject_tail_seed_count = seed_count;
+  solver->fast_reject_tail_seed_valid = seed_count > 0u ? 1 : 0;
+  solver->fast_reject_tail_seed_block_suffix =
+    solver->fast_reject_tail_seed_valid;
+  solver->stats.fast_rejected_pivoting_tail_seed_columns =
+    (int64_t)seed_count;
+  solver->stats.fast_rejected_pivoting_tail_block_seed_columns =
     (int64_t)seed_count;
 }
 
@@ -12676,6 +12718,9 @@ static int kls_build_fast_reject_pivoting_tail_plan(
     solver->fast_reject_tail_seed_block == block &&
     solver->fast_reject_tail_seed_count > 0u &&
     solver->fast_reject_tail_seed_cols != NULL;
+  const int64_t available_block_seed_columns =
+    use_unfinished_seed && solver->fast_reject_tail_seed_block_suffix
+      ? (int64_t)solver->fast_reject_tail_seed_count : 0;
   enum {
     KLS_FAST_REJECT_TAIL_SEED_SUFFIX = 0,
     KLS_FAST_REJECT_TAIL_SEED_UNFINISHED = 1,
@@ -12686,6 +12731,8 @@ static int kls_build_fast_reject_pivoting_tail_plan(
       ? KLS_FAST_REJECT_TAIL_SEED_ROW
       : KLS_FAST_REJECT_TAIL_SEED_SUFFIX;
   solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
+  solver->stats.fast_rejected_pivoting_tail_block_seed_columns =
+    available_block_seed_columns;
   for (;;) {
     if (solver->fast_reject_tail_mark == UINT_MAX) {
       memset(solver->fast_reject_tail_marks, 0,
@@ -12722,6 +12769,8 @@ static int kls_build_fast_reject_pivoting_tail_plan(
         solver->stats.fast_rejected_pivoting_tail_seed_columns =
           (int64_t)seed_count;
         solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
+        solver->stats.fast_rejected_pivoting_tail_block_seed_columns =
+          available_block_seed_columns;
       } else {
         for (UF_long local_col = local_reject; local_col < nk; ++local_col) {
           if (!kls_mark_fast_reject_tail_col(solver, nk, local_col, mark,
@@ -12733,6 +12782,8 @@ static int kls_build_fast_reject_pivoting_tail_plan(
         solver->stats.fast_rejected_pivoting_tail_seed_columns =
           (int64_t)queued;
         solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
+        solver->stats.fast_rejected_pivoting_tail_block_seed_columns =
+          available_block_seed_columns;
       }
     } else if (!kls_mark_fast_reject_tail_col(solver, nk, local_reject, mark,
                                               &queued)) {
@@ -12741,6 +12792,8 @@ static int kls_build_fast_reject_pivoting_tail_plan(
     } else {
       solver->stats.fast_rejected_pivoting_tail_seed_columns = 1;
       solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
+      solver->stats.fast_rejected_pivoting_tail_block_seed_columns =
+        available_block_seed_columns;
     }
     if (queued == 0u) {
       free(owned_parent);
@@ -12783,6 +12836,8 @@ static int kls_build_fast_reject_pivoting_tail_plan(
     if (used_seed_mode == KLS_FAST_REJECT_TAIL_SEED_ROW &&
         !solver->stats.fast_rejected_pivoting_tail_topological) {
       solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
+      solver->stats.fast_rejected_pivoting_tail_block_seed_columns =
+        available_block_seed_columns;
       seed_mode = use_unfinished_seed
         ? KLS_FAST_REJECT_TAIL_SEED_UNFINISHED
         : KLS_FAST_REJECT_TAIL_SEED_SUFFIX;
@@ -12791,6 +12846,8 @@ static int kls_build_fast_reject_pivoting_tail_plan(
     if (used_seed_mode == KLS_FAST_REJECT_TAIL_SEED_UNFINISHED &&
         !solver->stats.fast_rejected_pivoting_tail_topological) {
       seed_mode = KLS_FAST_REJECT_TAIL_SEED_SUFFIX;
+      solver->stats.fast_rejected_pivoting_tail_block_seed_columns =
+        available_block_seed_columns;
       continue;
     }
     *tail_cols_out = solver->fast_reject_tail_cols;
@@ -13488,6 +13545,10 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
     solver->fast_reject_tail_seed_valid
       ? (int64_t)solver->fast_reject_tail_seed_count : 0;
   solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
+  solver->stats.fast_rejected_pivoting_tail_block_seed_columns =
+    solver->fast_reject_tail_seed_valid &&
+        solver->fast_reject_tail_seed_block_suffix
+      ? (int64_t)solver->fast_reject_tail_seed_count : 0;
   solver->stats.fast_rejected_pivoting_tail_contiguous = 0;
   solver->stats.fast_rejected_pivoting_tail_suffix_exact = 0;
   solver->stats.fast_rejected_pivoting_tail_gap_columns = 0;
@@ -36725,7 +36786,11 @@ static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
     solver->fast_reject_refresh_state =
       pool_prefix_current ? KLS_FAST_REJECT_REFRESH_PREFIX
                           : KLS_FAST_REJECT_REFRESH_UNKNOWN;
-    kls_clear_fast_reject_tail_seed(solver);
+    if (pool_prefix_current) {
+      kls_record_fast_reject_block_suffix_tail_seed(solver, rejected_pivot);
+    } else {
+      kls_clear_fast_reject_tail_seed(solver);
+    }
     kls_record_fast_reject_detail(solver, rejected_pivot,
                                   rejected_pivot_col, rejected_row,
                                   rejected_multiplier_abs,
@@ -37693,7 +37758,11 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     solver->fast_reject_refresh_state =
       pool_prefix_current ? KLS_FAST_REJECT_REFRESH_PREFIX
                           : KLS_FAST_REJECT_REFRESH_UNKNOWN;
-    kls_clear_fast_reject_tail_seed(solver);
+    if (pool_prefix_current) {
+      kls_record_fast_reject_block_suffix_tail_seed(solver, rejected_pivot);
+    } else {
+      kls_clear_fast_reject_tail_seed(solver);
+    }
     kls_record_fast_reject_detail(solver, rejected_pivot,
                                   rejected_pivot_col, rejected_row,
                                   rejected_multiplier_abs,

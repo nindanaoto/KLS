@@ -3215,6 +3215,18 @@ check. This is still diagnostic/planning infrastructure, but it matches CKTSO's
 restart-point determination more closely and exposes the true non-suffix
 worklist that a pipelined pivoting-tail executor should consume.
 
+The checked refactor-pool path then stopped discarding all unfinished-work
+information when it can prove the prefix is current only at BTF-block
+granularity. Those rejects now record the rejected block suffix as a
+conservative unfinished seed before the ETree tail plan is built, and
+benchmark output reports it separately as
+`fast_rejected_pivoting_tail_block_seed_columns`. This does not make the pool
+path a full CKTSO Algorithm 5 executor: row-tail seeds still take precedence
+when they are valid, and the executable repair remains the existing serial
+tail envelope. It does, however, preserve the paper's "unfinished guessed
+EGraph nodes seed the ETree tail" information for the pool path instead of
+collapsing directly to an untagged suffix fallback.
+
 The serial suffix tail retry then stopped copying and mutating a private
 `Offp` array. Tail-column construction now supports a discard-only off-block
 mode, which is valid because accepted local repairs rebuild `Offi`/`Offx` from
