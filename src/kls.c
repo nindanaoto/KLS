@@ -39611,16 +39611,31 @@ static UF_long kls_row_first_ready_supernode_end(
     return dep;
   }
   const UF_long end = supernode_end[start];
-  if (end <= dep || end >= nk || end >= ready_limit ||
-      end >= current_row) {
+  if (end <= dep || end >= nk) {
     return dep;
   }
-  for (UF_long row = dep + 1u; row <= end; ++row) {
-    if (row_done[row] == 0u) {
+  UF_long ready_end = end;
+  if (ready_end >= ready_limit) {
+    if (ready_limit == 0u) {
       return dep;
     }
+    ready_end = ready_limit - 1u;
   }
-  return end;
+  if (ready_end >= current_row) {
+    if (current_row == 0u) {
+      return dep;
+    }
+    ready_end = current_row - 1u;
+  }
+  if (ready_end <= dep) {
+    return dep;
+  }
+  for (UF_long row = dep + 1u; row <= ready_end; ++row) {
+    if (row_done[row] == 0u) {
+      return row - 1u;
+    }
+  }
+  return ready_end;
 }
 
 static int kls_row_first_partial_apply_one_dep(
