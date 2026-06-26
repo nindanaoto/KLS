@@ -178,15 +178,16 @@ completed row-supernodes as cached dense/common-tail panels once the following
 row proves the supernode ended; this covers parallel BTF workers plus the
 ordinary private and serial row-up loops. In the ordinary row-up path, when a row
 first consumes a compact validated producer run before the complete producer
-supernode is known, KLS also publishes that consumed prefix lazily; separator
-private/pipeline row-up paths now use the same lazy publication once a compact
-prefix has been validated under the scoped pivot order. Later rows try those
-panels before
-falling back to row-entry validation, and the cached consumer can use the
-published prefix of a longer dependency run while leaving the remaining suffix
-in the dependency heap. That matches the paper private/pipeline rule that
-finished producer prefixes should be consumed before waiting for or continuing
-through the producer tail. The broader row-up panel use is reported through
+supernode is known, KLS now publishes that ready prefix before falling back to
+the older compact walk, so the same first consumer can use the cached panel
+solve/update path. Separator private/pipeline row-up paths use the same lazy
+publication once a compact prefix has been validated under the scoped pivot
+order. Later rows also try those panels before falling back to row-entry
+validation, and the cached consumer can use the published prefix of a longer
+dependency run while leaving the remaining suffix in the dependency heap. That
+matches the paper private/pipeline rule that finished producer prefixes should
+be consumed before waiting for or continuing through the producer tail. The
+broader row-up panel use is reported through
 `kls_first_last_row_supernode_panel_update`,
 `kls_first_row_supernode_panel_update_run_count`,
 `kls_first_last_row_supernode_panel_update_groups`, and
@@ -1333,10 +1334,11 @@ unscaled and KLU row-scaled repair states, followed by a quality-checked
 KLS-first whole-numeric rebuild, before KLU block fallback. CKTSO's paper goes
 further: a production row-major up-looking
 factorization, EGraph pivot checks, and ETree-scheduled pipelined tail
-factorization. The generic sparse segment direct-load path narrows the current
-refactor bridge, but the next larger algorithmic work is still to evolve the
-numeric factor/refactor/solve kernels toward those deeper KLS-owned sparse
-kernels while keeping the public API and benchmark harness stable.
+factorization. The generic sparse segment direct-load path and first-consumer
+ready-panel publication narrow the current refactor bridge, but the next larger
+algorithmic work is still to evolve the numeric factor/refactor/solve kernels
+toward those deeper KLS-owned sparse kernels while keeping the public API and
+benchmark harness stable.
 
 ## License
 

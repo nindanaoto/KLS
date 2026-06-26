@@ -43618,6 +43618,21 @@ static int kls_row_first_partial_apply_supernode_run(
   if (cached_status < 0) {
     return 0;
   }
+  if (workspace != NULL && workspace->supernode_panel_cache != NULL &&
+      kls_row_first_supernode_panel_cache_append(
+        workspace->supernode_panel_cache, published_u_entries,
+        u_row_ptr, u_row_end, udiag_values, ctx->nk, dep_begin, dep_end)) {
+    const int published_cached_status =
+      kls_row_first_partial_apply_supernode_run_cached(
+        ctx, workspace, local_l_entries, udiag_values, state, dep_begin,
+        dep_end, run_rows_out, used_panel_out);
+    if (published_cached_status > 0) {
+      return 1;
+    }
+    if (published_cached_status < 0) {
+      return 0;
+    }
+  }
   if (used_panel_out != NULL) {
     *used_panel_out = 0;
   }

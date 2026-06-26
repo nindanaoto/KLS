@@ -11955,6 +11955,154 @@ static int test_experimental_row_uplooking_natural_pipeline(void) {
   return ok;
 }
 
+static int test_experimental_row_uplooking_first_consumer_panel(void) {
+  const int32_t ap[] = {0, 3, 6, 9};
+  const int32_t ai[] = {
+    0, 1, 2,
+    0, 1, 2,
+    0, 1, 2
+  };
+  const double ax[] = {
+    5.0, 0.5, 0.25,
+    1.0, 6.0, 0.5,
+    1.0, 2.0, 7.0
+  };
+  const double b[] = {10.0, 18.5, 22.25};
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = 0;
+  options.static_pivoting = 0;
+  options.pivot_tolerance = 0.001;
+
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_saved_first = saved_first_value != NULL;
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_saved_row = saved_row_value != NULL;
+  const char *saved_checked_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked =
+    saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
+  const int had_saved_checked = saved_checked_value != NULL;
+  const char *saved_cblas_value = getenv("KLS_ENABLE_CBLAS_SUPERNODE");
+  char *saved_cblas =
+    saved_cblas_value != NULL ? strdup(saved_cblas_value) : NULL;
+  const int had_saved_cblas = saved_cblas_value != NULL;
+
+  int ok = 1;
+  if (had_saved_first && saved_first == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_row && saved_row == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_checked && saved_checked == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_cblas && saved_cblas == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CBLAS_SUPERNODE\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_create(&solver),
+                        "create first-consumer panel")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, 3, ap, ai, 0, &options),
+                        "analyze first-consumer panel")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor first-consumer panel")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve first-consumer panel")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats first-consumer panel")) {
+    ok = 0;
+  }
+  if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
+             stats.kls_first_last_row_uplooking_columns != 3 ||
+             stats.kls_first_last_row_supernode_update != 1 ||
+             stats.kls_first_last_row_supernode_update_groups != 1 ||
+             stats.kls_first_last_row_supernode_update_rows != 2 ||
+             stats.kls_first_last_row_supernode_panel_update != 1 ||
+             stats.kls_first_row_supernode_panel_update_run_count != 1 ||
+             stats.kls_first_last_row_supernode_panel_update_groups != 1 ||
+             stats.kls_first_last_row_supernode_panel_update_rows != 2)) {
+    fprintf(stderr,
+            "unexpected first-consumer panel stats: path=%s"
+            ", row_cols=%" PRId64 ", supernode=%d/%" PRId64 "/%" PRId64
+            ", panel=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
+            kls_factor_path_name(stats.last_factor_path),
+            stats.kls_first_last_row_uplooking_columns,
+            stats.kls_first_last_row_supernode_update,
+            stats.kls_first_last_row_supernode_update_groups,
+            stats.kls_first_last_row_supernode_update_rows,
+            stats.kls_first_last_row_supernode_panel_update,
+            stats.kls_first_row_supernode_panel_update_run_count,
+            stats.kls_first_last_row_supernode_panel_update_groups,
+            stats.kls_first_last_row_supernode_panel_update_rows);
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0))) {
+    fprintf(stderr,
+            "unexpected first-consumer panel solution:"
+            " %.17g %.17g %.17g\n",
+            x[0], x[1], x[2]);
+    ok = 0;
+  }
+
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
+                         saved_first)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_saved_row,
+                         saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_saved_checked, saved_checked)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CBLAS_SUPERNODE", had_saved_cblas,
+                         saved_cblas)) {
+    ok = 0;
+  }
+  kls_destroy(solver);
+  free(saved_first);
+  free(saved_row);
+  free(saved_checked);
+  free(saved_cblas);
+  return ok;
+}
+
 static int test_experimental_row_uplooking_lazy_panel_prefix(void) {
   const int32_t ap[] = {0, 4, 8, 12, 16};
   const int32_t ai[] = {
@@ -13414,6 +13562,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_row_uplooking_first_factor()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_experimental_row_uplooking_first_consumer_panel()) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_row_uplooking_natural_pipeline()) {
