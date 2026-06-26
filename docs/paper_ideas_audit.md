@@ -4864,10 +4864,14 @@ updates; otherwise the cached panel uses the scalar in-panel solver. The cached
 consumer no longer requires the whole requested dependency run to fit inside the
 same panel: it consumes the published prefix and leaves the remaining suffix in
 the dependency heap, matching the papers' private/pipeline rule that completed
-producer prefixes can be used before the producer tail is available. This is
-still not the full paper storage layer: row-up panels are published only after
-the producer supernode is complete, and CKTSO's full ETree-descendant
+producer prefixes can be used before the producer tail is available. The
+ordinary row-up path now also publishes a compact-validated producer prefix
+lazily when a consumer first uses it, so a later consumer can reuse the same
+dense/common-tail panel even before the complete producer supernode is known.
+This is still not the full paper storage layer: KLS does not proactively
+maintain mutable open-supernode panels, lazy prefix publication is intentionally
+kept out of separator-scoped pivoting, and CKTSO's full ETree-descendant
 pivoting-tail scheduler remains open. Separator pipeline pivot-tail rows that
-are serialized after a restart now use the same row-up producer panel cache, so
-the restarted suffix no longer loses completed-supernode panel publication just
-because a pipeline phase fell back to a serial pivot row.
+are serialized after a restart now use the same row-up producer panel cache for
+completed-supernode publication, so the restarted suffix no longer loses those
+completed panels just because a pipeline phase fell back to a serial pivot row.

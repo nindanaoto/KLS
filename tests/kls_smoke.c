@@ -11012,6 +11012,137 @@ static int test_experimental_row_uplooking_first_factor(void) {
   return ok;
 }
 
+static int test_experimental_row_uplooking_lazy_panel_prefix(void) {
+  const int32_t ap[] = {0, 4, 8, 12, 16};
+  const int32_t ai[] = {
+    0, 1, 2, 3,
+    0, 1, 2, 3,
+    0, 1, 2, 3,
+    0, 1, 2, 3
+  };
+  const double ax[] = {
+    5.0, 0.25, 0.125, 0.0625,
+    0.5, 6.0, 0.375, 0.1875,
+    0.25, 0.5, 7.0, 0.3125,
+    0.125, 0.25, 0.5, 8.0
+  };
+  const double b[] = {7.25, 14.75, 23.875, 33.375};
+  double x[4] = {0.0, 0.0, 0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = 0;
+  options.static_pivoting = 0;
+  options.pivot_tolerance = 0.001;
+
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_saved_first = saved_first_value != NULL;
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_saved_row = saved_row_value != NULL;
+  const char *saved_checked_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked =
+    saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
+  const int had_saved_checked = saved_checked_value != NULL;
+
+  int ok = 1;
+  if (had_saved_first && saved_first == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_row && saved_row == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_checked && saved_checked == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_create(&solver),
+                        "create row-up lazy panel prefix")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, 4, ap, ai, 0, &options),
+                        "analyze row-up lazy panel prefix")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor row-up lazy panel prefix")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve row-up lazy panel prefix")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats row-up lazy panel prefix")) {
+    ok = 0;
+  }
+  if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
+             stats.kls_first_last_row_uplooking_columns != 4 ||
+             stats.kls_first_last_row_supernode_update != 1 ||
+             stats.kls_first_last_row_supernode_update_rows < 4 ||
+             stats.kls_first_last_row_supernode_panel_update != 1 ||
+             stats.kls_first_row_supernode_panel_update_run_count < 1 ||
+             stats.kls_first_last_row_supernode_panel_update_groups < 1 ||
+             stats.kls_first_last_row_supernode_panel_update_rows < 2)) {
+    fprintf(stderr,
+            "unexpected row-up lazy panel stats: path=%s, row_cols=%" PRId64
+            ", row_supernode=%d/%" PRId64 ", panel=%d/%" PRId64
+            "/%" PRId64 "/%" PRId64 "\n",
+            kls_factor_path_name(stats.last_factor_path),
+            stats.kls_first_last_row_uplooking_columns,
+            stats.kls_first_last_row_supernode_update,
+            stats.kls_first_last_row_supernode_update_rows,
+            stats.kls_first_last_row_supernode_panel_update,
+            stats.kls_first_row_supernode_panel_update_run_count,
+            stats.kls_first_last_row_supernode_panel_update_groups,
+            stats.kls_first_last_row_supernode_panel_update_rows);
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
+             !close_enough(x[2], 3.0) || !close_enough(x[3], 4.0))) {
+    fprintf(stderr,
+            "unexpected row-up lazy panel solution:"
+            " %.17g %.17g %.17g %.17g\n",
+            x[0], x[1], x[2], x[3]);
+    ok = 0;
+  }
+
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
+                         saved_first)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_saved_row,
+                         saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_saved_checked, saved_checked)) {
+    ok = 0;
+  }
+  kls_destroy(solver);
+  free(saved_first);
+  free(saved_row);
+  free(saved_checked);
+  return ok;
+}
+
 static int test_experimental_row_uplooking_dynamic_column_pivot(void) {
   const int32_t ap[] = {0, 2, 4, 5};
   const int32_t ai[] = {0, 1, 0, 1, 2};
@@ -12122,6 +12253,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_row_uplooking_first_factor()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_experimental_row_uplooking_lazy_panel_prefix()) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_row_uplooking_dynamic_column_pivot()) {

@@ -173,8 +173,11 @@ reported through `kls_first_last_row_supernode_update`,
 `kls_first_last_row_supernode_update_rows`. KLS-first row-up producers publish
 completed row-supernodes as cached dense/common-tail panels once the following
 row proves the supernode ended; this covers parallel BTF workers plus the
-ordinary private and serial row-up loops. Later rows try those panels before
-falling back to row-entry validation, and the cached consumer can now use the
+ordinary private and serial row-up loops. In the ordinary row-up path, when a row
+first consumes a compact validated producer run before the complete producer
+supernode is known, KLS also publishes that consumed prefix lazily. Later rows
+try those panels before
+falling back to row-entry validation, and the cached consumer can use the
 published prefix of a longer dependency run while leaving the remaining suffix
 in the dependency heap. That matches the paper private/pipeline rule that
 finished producer prefixes should be consumed before waiting for or continuing

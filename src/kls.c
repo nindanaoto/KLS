@@ -38821,7 +38821,7 @@ typedef struct kls_row_first_workspace {
   UF_long *u_row_ptr;
   UF_long *u_row_end;
   UF_long supernode_workspace_capacity;
-  const kls_row_first_supernode_panel_cache *supernode_panel_cache;
+  kls_row_first_supernode_panel_cache *supernode_panel_cache;
 } kls_row_first_workspace;
 
 typedef struct kls_row_first_partial_row {
@@ -41204,6 +41204,13 @@ static int kls_row_first_partial_apply_supernode_run_compact(
       x[col] = 0.0;
     }
     x[col] -= trailing_workspace[offset];
+  }
+
+  if (!ctx->use_separator_for_block &&
+      workspace->supernode_panel_cache != NULL) {
+    (void)kls_row_first_supernode_panel_cache_append(
+      workspace->supernode_panel_cache, published_u_entries, u_row_ptr,
+      u_row_end, udiag_values, ctx->nk, dep_begin, dep_end);
   }
 
   if (run_rows_out != NULL) {
