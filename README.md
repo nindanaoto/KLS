@@ -625,7 +625,16 @@ levels plus queued tail. Stats report
 Unchecked queued row refactors can run without the per-row completion bitmap;
 stats report `row_refactor_last_done_bitmap` and
 `row_refactor_done_bitmap_run_count` so checked pivot-prefix validation remains
-visible. Row-pattern analysis also records `row_refactor_input_cleanup_rows`
+visible. When a checked row waits for an unfinished predecessor, KLS now applies
+a conservative CKTSO Algorithm 5-style prefactorization step: later finished
+predecessors in the same row can be consumed early only when the row-major
+`U` pattern proves every skipped predecessor has no update into that later
+dependency. This keeps the existing in-order pivot rejection semantics for
+ambiguous cases while exposing actual use through
+`row_refactor_last_prefactor`, `row_refactor_last_prefactor_rows`,
+`row_refactor_last_prefactor_deps`, and cumulative
+`row_refactor_prefactor_*` counters. Row-pattern analysis also records
+`row_refactor_input_cleanup_rows`
 and `row_refactor_input_cleanup_entries`; rows whose input columns are already
 covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in
 the row numeric kernels. Experimental row refactors handle single-block factors

@@ -4740,3 +4740,18 @@ child subtree to return to the private candidate set. The checked separator
 grid and duplicate-BTF separator forest smoke fixtures both select the
 separator FLOP queue again, preserving the paper's private/pipeline structure
 instead of turning unbalanced leaves into separator work.
+
+KLS now fills the next direct CKTSO Algorithm 5 gap inside the checked
+row-refactor pipeline. When a row blocks on an unfinished predecessor, the
+worker scans later row dependencies and consumes any already-finished
+predecessor whose value is provably final: every skipped earlier dependency must
+lack a row-major `U` entry into that later dependency. Ambiguous pattern data,
+missing row-major mirrors, and checked multipliers that would reject are left
+for the normal in-order path, preserving the existing pivot-reject order. This
+implements the paper's "use newly detected finished predecessors while waiting"
+idea for the KLS-owned row-major executor and reports actual use through
+`row_refactor_last_prefactor`, row/dependency counts, and cumulative
+`row_refactor_prefactor_*` counters. It still does not claim CKTSO's complete
+ETree-descendant pivoting-tail factorization: KLS has the guarded row-level
+prefactor step, not the full tail scheduler that retopologizes all unfinished
+descendants after a pivot exchange.
