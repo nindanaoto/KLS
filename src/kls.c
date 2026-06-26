@@ -4186,11 +4186,101 @@ static int apply_options_to_common(trilinos_klu_l_common *common, const kls_opti
 }
 
 #ifdef KLS_HAVE_METIS
+typedef struct kls_metis_separator_capture {
+  UF_long order_call_index;
+  kls_separator_analysis separator;
+} kls_metis_separator_capture;
+
 typedef struct kls_metis_order_context {
   UF_long n;
   idx_t npes;
   kls_separator_analysis *separator;
+  UF_long order_call_count;
+  UF_long capture_count;
+  UF_long capture_capacity;
+  kls_metis_separator_capture *captures;
 } kls_metis_order_context;
+
+static void kls_metis_order_context_clear(
+  kls_metis_order_context *context) {
+  if (context == NULL) {
+    return;
+  }
+  for (UF_long pos = 0; pos < context->capture_count; ++pos) {
+    kls_separator_analysis_clear(&context->captures[pos].separator);
+  }
+  free(context->captures);
+  context->captures = NULL;
+  context->capture_count = 0;
+  context->capture_capacity = 0;
+}
+
+static int kls_metis_order_context_append_separator(
+  kls_metis_order_context *context,
+  UF_long order_call_index,
+  kls_separator_analysis *separator) {
+  if (context == NULL || separator == NULL || separator->n == 0u) {
+    return 0;
+  }
+  if (context->capture_count == context->capture_capacity) {
+    UF_long next_capacity =
+      context->capture_capacity == 0u ? 4u : 2u * context->capture_capacity;
+    if (next_capacity <= context->capture_capacity ||
+        next_capacity > (UF_long)(SIZE_MAX / sizeof(*context->captures))) {
+      return 0;
+    }
+    kls_metis_separator_capture *next =
+      (kls_metis_separator_capture *)realloc(
+        context->captures, (size_t)next_capacity * sizeof(*next));
+    if (next == NULL) {
+      return 0;
+    }
+    for (UF_long pos = context->capture_capacity; pos < next_capacity; ++pos) {
+      memset(&next[pos], 0, sizeof(next[pos]));
+    }
+    context->captures = next;
+    context->capture_capacity = next_capacity;
+  }
+  kls_metis_separator_capture *capture =
+    &context->captures[context->capture_count++];
+  capture->order_call_index = order_call_index;
+  kls_separator_analysis_move(&capture->separator, separator);
+  return 1;
+}
+
+static const kls_separator_analysis *kls_metis_order_context_capture_for_call(
+  const kls_metis_order_context *context,
+  UF_long order_call_index) {
+  if (context == NULL) {
+    return NULL;
+  }
+  for (UF_long pos = 0; pos < context->capture_count; ++pos) {
+    if (context->captures[pos].order_call_index == order_call_index) {
+      return &context->captures[pos].separator;
+    }
+  }
+  return NULL;
+}
+
+static void kls_metis_order_context_move_largest_separator(
+  kls_metis_order_context *context,
+  kls_separator_analysis *separator_out) {
+  if (context == NULL || separator_out == NULL) {
+    return;
+  }
+  UF_long best_pos = KLS_KLU_EMPTY;
+  UF_long best_n = 0;
+  for (UF_long pos = 0; pos < context->capture_count; ++pos) {
+    if (context->captures[pos].separator.n > best_n) {
+      best_n = context->captures[pos].separator.n;
+      best_pos = pos;
+    }
+  }
+  if (best_pos != KLS_KLU_EMPTY) {
+    kls_separator_analysis_move(separator_out,
+                                &context->captures[best_pos].separator);
+  }
+}
 
 static int compare_idx_t(const void *a, const void *b) {
   const idx_t left = *(const idx_t *)a;
@@ -4434,6 +4524,278 @@ static int kls_build_metis_separator_analysis(
   return 1;
 }
 
+static int kls_build_metis_separator_forest(
+  const trilinos_klu_l_symbolic *symbolic,
+  const kls_metis_order_context *context,
+  kls_separator_analysis *separator_out) {
+  if (separator_out != NULL) {
+    kls_separator_analysis_clear(separator_out);
+  }
+  if (symbolic == NULL || context == NULL || separator_out == NULL ||
+      symbolic->R == NULL || symbolic->n == 0u ||
+      symbolic->nblocks == 0u || context->capture_count == 0u) {
+    return 0;
+  }
+
+  const UF_long n = symbolic->n;
+  const UF_long nblocks = symbolic->nblocks;
+  UF_long component_count = 0;
+  UF_long captured_blocks = 0;
+  UF_long order_call_index = 0;
+  for (UF_long block = 0; block < nblocks; ++block) {
+    const UF_long begin = symbolic->R[block];
+    const UF_long end = symbolic->R[block + 1u];
+    if (end < begin || end > n) {
+      return 0;
+    }
+    const UF_long block_n = end - begin;
+    const kls_separator_analysis *capture = NULL;
+    if (block_n > 3u) {
+      capture = kls_metis_order_context_capture_for_call(
+        context, order_call_index++);
+      if (capture != NULL && capture->n != block_n) {
+        capture = NULL;
+      }
+    }
+    const UF_long add_components =
+      capture != NULL ? capture->component_count : 1u;
+    if (add_components == 0u ||
+        component_count > UF_long_max - add_components) {
+      return 0;
+    }
+    component_count += add_components;
+    if (capture != NULL) {
+      captured_blocks++;
+    }
+  }
+  if (captured_blocks == 0u) {
+    return 0;
+  }
+  if (nblocks > 1u) {
+    if (component_count > UF_long_max - (nblocks - 1u)) {
+      return 0;
+    }
+    component_count += nblocks - 1u;
+  }
+  if (component_count == 0u ||
+      component_count > (UF_long)UINT_MAX ||
+      component_count > (UF_long)(SIZE_MAX / sizeof(UF_long)) - 1u ||
+      n > (UF_long)(SIZE_MAX / sizeof(unsigned int)) ||
+      nblocks > (UF_long)(SIZE_MAX / sizeof(UF_long))) {
+    return 0;
+  }
+
+  kls_separator_analysis forest;
+  memset(&forest, 0, sizeof(forest));
+  forest.component_ptr =
+    (UF_long *)calloc((size_t)component_count + 1u,
+                      sizeof(*forest.component_ptr));
+  forest.component_kind =
+    (unsigned char *)calloc((size_t)component_count,
+                            sizeof(*forest.component_kind));
+  forest.order_component =
+    (unsigned int *)malloc((size_t)n * sizeof(*forest.order_component));
+  forest.component_left_child =
+    (UF_long *)malloc((size_t)component_count *
+                      sizeof(*forest.component_left_child));
+  forest.component_right_child =
+    (UF_long *)malloc((size_t)component_count *
+                      sizeof(*forest.component_right_child));
+  forest.component_parent =
+    (UF_long *)malloc((size_t)component_count *
+                      sizeof(*forest.component_parent));
+  UF_long *block_roots =
+    (UF_long *)malloc((size_t)nblocks * sizeof(*block_roots));
+  if (forest.component_ptr == NULL ||
+      forest.component_kind == NULL ||
+      forest.order_component == NULL ||
+      forest.component_left_child == NULL ||
+      forest.component_right_child == NULL ||
+      forest.component_parent == NULL ||
+      block_roots == NULL) {
+    free(block_roots);
+    kls_separator_analysis_clear(&forest);
+    return 0;
+  }
+  for (UF_long component = 0; component < component_count; ++component) {
+    forest.component_left_child[component] = KLS_KLU_EMPTY;
+    forest.component_right_child[component] = KLS_KLU_EMPTY;
+    forest.component_parent[component] = KLS_KLU_EMPTY;
+  }
+
+  UF_long component_pos = 0;
+  order_call_index = 0;
+  for (UF_long block = 0; block < nblocks; ++block) {
+    const UF_long begin = symbolic->R[block];
+    const UF_long end = symbolic->R[block + 1u];
+    const UF_long block_n = end - begin;
+    const kls_separator_analysis *capture = NULL;
+    if (block_n > 3u) {
+      capture = kls_metis_order_context_capture_for_call(
+        context, order_call_index++);
+      if (capture != NULL && capture->n != block_n) {
+        capture = NULL;
+      }
+    }
+
+    if (capture != NULL) {
+      const UF_long offset = component_pos;
+      for (UF_long component = 0; component < capture->component_count;
+           ++component) {
+        const UF_long global_component = offset + component;
+        if (global_component >= component_count ||
+            capture->component_ptr == NULL ||
+            capture->component_kind == NULL ||
+            capture->order_component == NULL ||
+            capture->component_left_child == NULL ||
+            capture->component_right_child == NULL ||
+            capture->component_parent == NULL ||
+            capture->component_ptr[component] >
+              capture->component_ptr[component + 1u] ||
+            capture->component_ptr[component + 1u] > capture->n) {
+          free(block_roots);
+          kls_separator_analysis_clear(&forest);
+          return 0;
+        }
+        const UF_long component_size =
+          capture->component_ptr[component + 1u] -
+          capture->component_ptr[component];
+        if (forest.component_ptr[global_component] >
+            UF_long_max - component_size) {
+          free(block_roots);
+          kls_separator_analysis_clear(&forest);
+          return 0;
+        }
+        forest.component_ptr[global_component + 1u] =
+          forest.component_ptr[global_component] + component_size;
+        forest.component_kind[global_component] =
+          capture->component_kind[component];
+        const UF_long left = capture->component_left_child[component];
+        const UF_long right = capture->component_right_child[component];
+        const UF_long parent = capture->component_parent[component];
+        if ((left != KLS_KLU_EMPTY && left >= capture->component_count) ||
+            (right != KLS_KLU_EMPTY && right >= capture->component_count) ||
+            (parent != KLS_KLU_EMPTY && parent >= capture->component_count)) {
+          free(block_roots);
+          kls_separator_analysis_clear(&forest);
+          return 0;
+        }
+        forest.component_left_child[global_component] =
+          left == KLS_KLU_EMPTY ? KLS_KLU_EMPTY : offset + left;
+        forest.component_right_child[global_component] =
+          right == KLS_KLU_EMPTY ? KLS_KLU_EMPTY : offset + right;
+        forest.component_parent[global_component] =
+          parent == KLS_KLU_EMPTY ? KLS_KLU_EMPTY : offset + parent;
+      }
+      for (UF_long row = 0; row < block_n; ++row) {
+        const unsigned int local_component = capture->order_component[row];
+        if ((UF_long)local_component >= capture->component_count ||
+            offset + (UF_long)local_component > (UF_long)UINT_MAX) {
+          free(block_roots);
+          kls_separator_analysis_clear(&forest);
+          return 0;
+        }
+        forest.order_component[begin + row] =
+          (unsigned int)(offset + (UF_long)local_component);
+      }
+      if (forest.private_component_count >
+            UF_long_max - capture->private_component_count ||
+          forest.pipeline_component_count >
+            UF_long_max - capture->pipeline_component_count ||
+          forest.private_rows > UF_long_max - capture->private_rows ||
+          forest.pipeline_rows > UF_long_max - capture->pipeline_rows) {
+        free(block_roots);
+        kls_separator_analysis_clear(&forest);
+        return 0;
+      }
+      forest.private_component_count += capture->private_component_count;
+      forest.pipeline_component_count += capture->pipeline_component_count;
+      forest.private_rows += capture->private_rows;
+      forest.pipeline_rows += capture->pipeline_rows;
+      if (capture->private_max_rows > forest.private_max_rows) {
+        forest.private_max_rows = capture->private_max_rows;
+      }
+      if (capture->pipeline_max_rows > forest.pipeline_max_rows) {
+        forest.pipeline_max_rows = capture->pipeline_max_rows;
+      }
+      block_roots[block] = offset + capture->component_count - 1u;
+      component_pos += capture->component_count;
+    } else {
+      if (component_pos >= component_count ||
+          forest.component_ptr[component_pos] > UF_long_max - block_n) {
+        free(block_roots);
+        kls_separator_analysis_clear(&forest);
+        return 0;
+      }
+      forest.component_kind[component_pos] = 0u;
+      forest.component_ptr[component_pos + 1u] =
+        forest.component_ptr[component_pos] + block_n;
+      if (component_pos > (UF_long)UINT_MAX) {
+        free(block_roots);
+        kls_separator_analysis_clear(&forest);
+        return 0;
+      }
+      for (UF_long row = begin; row < end; ++row) {
+        forest.order_component[row] = (unsigned int)component_pos;
+      }
+      if (forest.private_component_count == UF_long_max ||
+          forest.private_rows > UF_long_max - block_n) {
+        free(block_roots);
+        kls_separator_analysis_clear(&forest);
+        return 0;
+      }
+      forest.private_component_count++;
+      forest.private_rows += block_n;
+      if (block_n > forest.private_max_rows) {
+        forest.private_max_rows = block_n;
+      }
+      block_roots[block] = component_pos;
+      component_pos++;
+    }
+  }
+  if (forest.component_ptr[component_pos] != n) {
+    free(block_roots);
+    kls_separator_analysis_clear(&forest);
+    return 0;
+  }
+
+  UF_long root = block_roots[0];
+  for (UF_long block = 1u; block < nblocks; ++block) {
+    if (component_pos >= component_count ||
+        root >= component_pos ||
+        block_roots[block] >= component_pos) {
+      free(block_roots);
+      kls_separator_analysis_clear(&forest);
+      return 0;
+    }
+    const UF_long parent = component_pos;
+    forest.component_kind[parent] = 1u;
+    forest.component_left_child[parent] = root;
+    forest.component_right_child[parent] = block_roots[block];
+    forest.component_parent[root] = parent;
+    forest.component_parent[block_roots[block]] = parent;
+    forest.component_ptr[parent + 1u] = forest.component_ptr[parent];
+    forest.pipeline_component_count++;
+    root = parent;
+    component_pos++;
+  }
+  free(block_roots);
+  if (component_pos != component_count ||
+      forest.component_ptr[component_count] != n) {
+    kls_separator_analysis_clear(&forest);
+    return 0;
+  }
+
+  forest.n = n;
+  forest.global_begin = 0;
+  forest.global_end = n;
+  forest.global_range_valid = 1;
+  forest.thread_count = context->npes > 0 ? (UF_long)context->npes : 0u;
+  forest.component_count = component_count;
+  kls_separator_analysis_move(separator_out, &forest);
+  return 1;
+}
+
 static UF_long kls_metis_refine_with_camd(UF_long n,
                                           UF_long *col_ptr,
                                           UF_long *row_idx,
@@ -4521,6 +4883,12 @@ static UF_long kls_metis_order(UF_long n,
                                UF_long *row_idx,
                                UF_long *perm_out,
                                trilinos_klu_l_common *common) {
+  kls_metis_order_context *metis_context =
+    common != NULL ? (kls_metis_order_context *)common->user_data : NULL;
+  UF_long order_call_index = KLS_KLU_EMPTY;
+  if (metis_context != NULL) {
+    order_call_index = metis_context->order_call_count++;
+  }
   if (n <= 0 || (uint64_t)n > (uint64_t)IDX_MAX ||
       !metis_size_ok(n, (idx_t)sizeof(idx_t)) ||
       !metis_size_ok(n + 1, (idx_t)sizeof(idx_t))) {
@@ -4578,8 +4946,6 @@ static UF_long kls_metis_order(UF_long n,
   idx_t *adjncy = (idx_t *)malloc((size_t)edge_slots * sizeof(*adjncy));
   idx_t *metis_perm = (idx_t *)malloc(nsize * sizeof(*metis_perm));
   idx_t *metis_iperm = (idx_t *)malloc(nsize * sizeof(*metis_iperm));
-  kls_metis_order_context *metis_context =
-    common != NULL ? (kls_metis_order_context *)common->user_data : NULL;
   idx_t metis_ndp_npes =
     metis_context != NULL && metis_context->npes > 1 ? metis_context->npes : 0;
   if (n < 30000) {
@@ -4684,9 +5050,8 @@ static UF_long kls_metis_order(UF_long n,
       if (kls_build_metis_separator_analysis(n, metis_ndp_npes,
                                              metis_ndp_sizes, metis_iperm,
                                              perm_out, &separator)) {
-        if (separator.n > metis_context->separator->n) {
-          kls_separator_analysis_move(metis_context->separator, &separator);
-        }
+        (void)kls_metis_order_context_append_separator(
+          metis_context, order_call_index, &separator);
         kls_separator_analysis_clear(&separator);
       }
     }
@@ -4910,18 +5275,23 @@ static int analyze_with_ordering(UF_long n,
     return status;
   }
 
+#ifdef KLS_HAVE_METIS
+  kls_metis_order_context metis_context;
+  memset(&metis_context, 0, sizeof(metis_context));
+  int metis_context_active = 0;
+#endif
+
   trilinos_klu_l_symbolic *symbolic = NULL;
   if (ordering == KLS_ORDERING_NATURAL) {
     symbolic = trilinos_klu_l_analyze_given(n, col_ptr, row_idx, NULL, NULL,
                                             &common);
   } else if (ordering == KLS_ORDERING_METIS) {
 #ifdef KLS_HAVE_METIS
-    kls_metis_order_context metis_context;
-    memset(&metis_context, 0, sizeof(metis_context));
     metis_context.n = n;
     metis_context.npes =
       options != NULL && options->threads > 1 ? (idx_t)options->threads : 0;
     metis_context.separator = separator_out;
+    metis_context_active = 1;
     common.ordering = 3;
     common.user_order = kls_metis_order;
     common.user_data = &metis_context;
@@ -4948,10 +5318,28 @@ static int analyze_with_ordering(UF_long n,
       trilinos_klu_l_free_symbolic(&symbolic, &common);
     }
     kls_separator_analysis_clear(separator_out);
+#ifdef KLS_HAVE_METIS
+    if (metis_context_active) {
+      kls_metis_order_context_clear(&metis_context);
+    }
+#endif
     return KLS_ERR_ANALYZE_FAILED;
   }
 
-  kls_finalize_separator_global_range(symbolic, separator_out);
+#ifdef KLS_HAVE_METIS
+  if (metis_context_active) {
+    if (!kls_build_metis_separator_forest(symbolic, &metis_context,
+                                          separator_out)) {
+      kls_metis_order_context_move_largest_separator(&metis_context,
+                                                     separator_out);
+      kls_finalize_separator_global_range(symbolic, separator_out);
+    }
+    kls_metis_order_context_clear(&metis_context);
+  } else
+#endif
+  {
+    kls_finalize_separator_global_range(symbolic, separator_out);
+  }
   *symbolic_out = symbolic;
   *common_out = common;
   return KLS_OK;

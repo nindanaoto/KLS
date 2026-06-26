@@ -605,13 +605,14 @@ through a private-root cursor before using the shared queue for newly released
 successors. Cluster-prefix tail queues now apply the same private first-wave
 treatment to the initially ready tail groups when per-thread queues can be
 built, reported as `row_refactor_last_private_ready_groups` and
-`row_refactor_private_ready_group_count`. When a retained METIS `NodeNDP`
-separator tree covers the row-refactor block, no-pivot row refactors first try
-a SubtreeLU Algorithm 6-style FLOP-balanced separator queue: the dominant
-separator subtree is repeatedly split into a pipeline root plus child
-subtrees, remaining subtrees are assigned to private thread queues by retained
-group work, and separator-crossing row groups are forced into the pipeline
-queue. Stats report this path through
+`row_refactor_private_ready_group_count`. When retained METIS `NodeNDP`
+separator trees cover the factor order, including BTF analyses where local
+separator trees are stitched into a global forest, row refactors first try a
+SubtreeLU Algorithm 6-style FLOP-balanced separator queue: the dominant
+separator subtree is repeatedly split into a pipeline root plus child subtrees,
+remaining subtrees are assigned to private thread queues by retained group
+work, and separator-crossing row groups are forced into the pipeline queue.
+Stats report this path through
 `row_refactor_last_separator_flop_queue`,
 `row_refactor_separator_flop_queue_run_count`,
 `row_refactor_last_separator_flop_components`,
