@@ -2757,6 +2757,7 @@ static int test_unchecked_row_dense_compact_panel(void) {
   const int32_t lead = 48;
   const int32_t lower = 16;
   const int32_t trail = n - lead - lower;
+  const int32_t multi_rhs = 3;
   const size_t nnz =
     (size_t)lead * (size_t)(lead + lower) +
     (size_t)lower +
@@ -2768,8 +2769,16 @@ static int test_unchecked_row_dense_compact_panel(void) {
   double *b = (double *)calloc((size_t)n, sizeof(*b));
   double *x = (double *)calloc((size_t)n, sizeof(*x));
   double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b_multi =
+    (double *)calloc((size_t)n * (size_t)multi_rhs, sizeof(*b_multi));
+  double *x_multi =
+    (double *)calloc((size_t)n * (size_t)multi_rhs, sizeof(*x_multi));
+  double *expected_multi =
+    (double *)malloc((size_t)n * (size_t)multi_rhs *
+                     sizeof(*expected_multi));
   if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
-      b == NULL || x == NULL || expected == NULL) {
+      b == NULL || x == NULL || expected == NULL ||
+      b_multi == NULL || x_multi == NULL || expected_multi == NULL) {
     free(ap);
     free(ai);
     free(ax0);
@@ -2777,6 +2786,9 @@ static int test_unchecked_row_dense_compact_panel(void) {
     free(b);
     free(x);
     free(expected);
+    free(b_multi);
+    free(x_multi);
+    free(expected_multi);
     return 0;
   }
 
@@ -2831,6 +2843,9 @@ static int test_unchecked_row_dense_compact_panel(void) {
     free(b);
     free(x);
     free(expected);
+    free(b_multi);
+    free(x_multi);
+    free(expected_multi);
     return 0;
   }
   for (int32_t col = 0; col < n; ++col) {
@@ -3031,12 +3046,90 @@ static int test_unchecked_row_dense_compact_panel(void) {
       }
     }
   }
+  for (int32_t rhs = 0; rhs < multi_rhs; ++rhs) {
+    double *rhs_expected = expected_multi + (size_t)rhs * (size_t)n;
+    double *rhs_b = b_multi + (size_t)rhs * (size_t)n;
+    for (int32_t col = 0; col < n; ++col) {
+      rhs_expected[col] =
+        expected[col] * (1.0 + 0.03125 * (double)rhs) +
+        0.0125 * (double)((rhs + col) % 5);
+    }
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        rhs_b[ai[p]] += ax1[p] * rhs_expected[col];
+      }
+    }
+  }
   const double rel_resid = max_residual / (1.0 + max_rhs);
   if (ok && (max_solution_error > 1e-8 || rel_resid > 1e-9)) {
     fprintf(stderr,
             "unexpected unchecked dense compact-panel accuracy: "
             "max_x_err=%.17g, rel_resid=%.17g\n",
             max_solution_error, rel_resid);
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_solve(solver, multi_rhs, b_multi, 0, x_multi, 0),
+                        "multi-RHS solve unchecked dense compact panel")) {
+    ok = 0;
+  }
+  kls_stats multi_stats;
+  multi_stats.struct_size = sizeof(multi_stats);
+  if (ok && !require_ok(kls_get_stats(solver, &multi_stats),
+                        "multi-RHS stats unchecked dense compact panel")) {
+    ok = 0;
+  }
+  if (ok &&
+      (multi_stats.row_refactor_last_compact_panel_group_solve_rows < lead ||
+       multi_stats.row_refactor_last_compact_panel_group_solve_entries <= 0 ||
+       multi_stats.row_refactor_compact_panel_group_solve_rows <
+         stats.row_refactor_compact_panel_group_solve_rows + lead)) {
+    fprintf(stderr,
+            "unexpected multi-RHS compact-panel solve stats: rows=%" PRId64
+            "/%" PRId64 ", entries=%" PRId64 "/%" PRId64 "\n",
+            multi_stats.row_refactor_last_compact_panel_group_solve_rows,
+            multi_stats.row_refactor_compact_panel_group_solve_rows,
+            multi_stats.row_refactor_last_compact_panel_group_solve_entries,
+            multi_stats.row_refactor_compact_panel_group_solve_entries);
+    ok = 0;
+  }
+  double max_multi_solution_error = 0.0;
+  double max_multi_residual = 0.0;
+  double max_multi_rhs = 0.0;
+  for (int32_t rhs = 0; rhs < multi_rhs; ++rhs) {
+    const double *rhs_expected =
+      expected_multi + (size_t)rhs * (size_t)n;
+    const double *rhs_b = b_multi + (size_t)rhs * (size_t)n;
+    const double *rhs_x = x_multi + (size_t)rhs * (size_t)n;
+    for (int32_t row = 0; row < n; ++row) {
+      const double err = fabs(rhs_x[row] - rhs_expected[row]);
+      if (err > max_multi_solution_error) {
+        max_multi_solution_error = err;
+      }
+      double residual_value = -rhs_b[row];
+      if (fabs(rhs_b[row]) > max_multi_rhs) {
+        max_multi_rhs = fabs(rhs_b[row]);
+      }
+      for (int32_t col = 0; col < n; ++col) {
+        for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+          if (ai[p] == row) {
+            residual_value += ax1[p] * rhs_x[col];
+          }
+        }
+      }
+      if (fabs(residual_value) > max_multi_residual) {
+        max_multi_residual = fabs(residual_value);
+      }
+    }
+  }
+  const double multi_rel_resid =
+    max_multi_residual / (1.0 + max_multi_rhs);
+  if (ok &&
+      (max_multi_solution_error > 1e-8 || multi_rel_resid > 1e-9)) {
+    fprintf(stderr,
+            "unexpected multi-RHS compact-panel accuracy: "
+            "max_x_err=%.17g, rel_resid=%.17g\n",
+            max_multi_solution_error, multi_rel_resid);
     ok = 0;
   }
 
@@ -3048,6 +3141,9 @@ static int test_unchecked_row_dense_compact_panel(void) {
   free(b);
   free(x);
   free(expected);
+  free(b_multi);
+  free(x_multi);
+  free(expected_multi);
   free(residual);
   free(saved_env);
   free(saved_trsv_env);

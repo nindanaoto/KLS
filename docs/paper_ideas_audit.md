@@ -3776,6 +3776,16 @@ last/cumulative compact group-solve rows and panel entries. This is still a
 serial one-RHS kernel, but it is a direct step from "compact panel as storage"
 to "compact panel as triangular-solve executor."
 
+The same compact group-solve executor now covers the normal multi-RHS row
+solve chunks. KLS validates the retained dense group layout once per group and
+updates the chunk's row-major work slab across all RHS columns before falling
+back to sparse row loops for non-exact layouts. The compact-panel smoke fixture
+now solves three RHS after the one-RHS solve and requires fresh last-run
+compact group-solve rows, so the coverage is tied to actual multi-RHS executor
+use rather than cumulative one-RHS statistics. Transpose solves still use the
+row-aware per-entry accessors, so the solve-side panel executor is not yet
+complete.
+
 The refactor scalar fallback now follows the same storage rule for single-row
 producer dependencies. If a completed dense producer row belongs to a retained
 compact panel, scalar consumers validate that panel's dense/trailing U-row

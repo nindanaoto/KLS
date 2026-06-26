@@ -22566,6 +22566,192 @@ static int kls_try_row_refactor_compact_panel_upper_solve_group(
   return 1;
 }
 
+static int kls_try_row_refactor_compact_panel_lower_solve_group_multi(
+  kls_solver *solver,
+  UF_long block_begin,
+  UF_long block_end,
+  UF_long row,
+  double *work,
+  UF_long rhs_count,
+  UF_long *next_row_out) {
+  if (next_row_out != NULL) {
+    *next_row_out = row;
+  }
+  if (solver == NULL || work == NULL || rhs_count == 0u ||
+      row >= solver->n ||
+      solver->row_refactor_row_group == NULL ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_l_cols == NULL ||
+      solver->row_refactor_l_internal_ptr == NULL) {
+    return 0;
+  }
+  const UF_long group = solver->row_refactor_row_group[row];
+  const double *dense_panel = NULL;
+  UF_long row_begin = 0;
+  UF_long row_end = 0;
+  if (!kls_row_refactor_compact_panel_solve_group(
+        solver, group, &dense_panel, &row_begin, &row_end, NULL) ||
+      row != row_begin || row_begin < block_begin || row_end > block_end) {
+    return 0;
+  }
+  const UF_long width = row_end - row_begin;
+  for (UF_long local_row = 0; local_row < width; ++local_row) {
+    const UF_long r = row_begin + local_row;
+    const UF_long l_begin = solver->row_refactor_l_ptr[r];
+    const UF_long l_internal = solver->row_refactor_l_internal_ptr[r];
+    const UF_long l_end = solver->row_refactor_l_ptr[r + 1u];
+    if (l_begin > l_internal || l_internal > l_end ||
+        l_end - l_internal != local_row) {
+      return 0;
+    }
+    for (UF_long offset = 0; offset < local_row; ++offset) {
+      if (solver->row_refactor_l_cols[l_internal + offset] !=
+          row_begin + offset) {
+        return 0;
+      }
+    }
+  }
+
+  UF_long panel_entries = 0;
+  for (UF_long local_row = 0; local_row < width; ++local_row) {
+    const UF_long r = row_begin + local_row;
+    double *wrow = work + r * rhs_count;
+    const UF_long l_begin = solver->row_refactor_l_ptr[r];
+    const UF_long l_internal = solver->row_refactor_l_internal_ptr[r];
+    for (UF_long p = l_begin; p < l_internal; ++p) {
+      const double lij = kls_row_refactor_l_solve_row_value(solver, r, p);
+      const double *wcol =
+        work + solver->row_refactor_l_cols[p] * rhs_count;
+      for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+        wrow[rhs_offset] -= lij * wcol[rhs_offset];
+      }
+    }
+    const double *row_panel = dense_panel + local_row * width;
+    for (UF_long dep = 0; dep < local_row; ++dep) {
+      const double lij = row_panel[dep];
+      const double *wcol = work + (row_begin + dep) * rhs_count;
+      for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+        wrow[rhs_offset] -= lij * wcol[rhs_offset];
+      }
+    }
+    panel_entries = panel_entries > UF_long_max - local_row
+      ? UF_long_max : panel_entries + local_row;
+  }
+  kls_record_row_refactor_compact_panel_group_solve(
+    solver, width, panel_entries);
+  if (next_row_out != NULL) {
+    *next_row_out = row_end;
+  }
+  return 1;
+}
+
+static int kls_try_row_refactor_compact_panel_upper_solve_group_multi(
+  kls_solver *solver,
+  UF_long block_begin,
+  UF_long block_end,
+  UF_long row_end,
+  double *work,
+  UF_long rhs_count,
+  const double *udiag,
+  UF_long *next_row_end_out) {
+  if (next_row_end_out != NULL) {
+    *next_row_end_out = row_end;
+  }
+  if (solver == NULL || work == NULL || rhs_count == 0u || udiag == NULL ||
+      row_end == 0u || row_end > solver->n ||
+      solver->row_refactor_row_group == NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_cols == NULL ||
+      solver->row_refactor_group_trailing_begin == NULL) {
+    return 0;
+  }
+  const UF_long last_row = row_end - 1u;
+  const UF_long group = solver->row_refactor_row_group[last_row];
+  const double *dense_panel = NULL;
+  UF_long row_begin = 0;
+  UF_long group_end = 0;
+  UF_long trailing_len = 0;
+  if (!kls_row_refactor_compact_panel_solve_group(
+        solver, group, &dense_panel, &row_begin, &group_end, &trailing_len) ||
+      group_end != row_end || row_begin < block_begin || group_end > block_end) {
+    return 0;
+  }
+  const UF_long width = group_end - row_begin;
+  const UF_long dense_entries = width * width;
+  const double *trailing_panel =
+    trailing_len > 0u ? dense_panel + dense_entries : NULL;
+  const UF_long trailing_begin =
+    solver->row_refactor_group_trailing_begin[group];
+  const UF_long row_end_u = solver->row_refactor_u_ptr[group_end];
+  if (trailing_len > 0u &&
+      (trailing_begin > row_end_u ||
+       trailing_len > row_end_u - trailing_begin)) {
+    return 0;
+  }
+  const UF_long *trailing_cols =
+    trailing_len > 0u ? solver->row_refactor_u_cols + trailing_begin : NULL;
+  for (UF_long local_row = 0; local_row < width; ++local_row) {
+    const UF_long r = row_begin + local_row;
+    const UF_long u_begin = solver->row_refactor_u_ptr[r];
+    const UF_long u_end = solver->row_refactor_u_ptr[r + 1u];
+    const UF_long dense_len = width - local_row - 1u;
+    if (u_end < u_begin || u_end - u_begin != dense_len + trailing_len) {
+      return 0;
+    }
+    const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
+    for (UF_long offset = 0; offset < dense_len; ++offset) {
+      if (u_cols[offset] != r + 1u + offset) {
+        return 0;
+      }
+    }
+    for (UF_long offset = 0; offset < trailing_len; ++offset) {
+      if (u_cols[dense_len + offset] != trailing_cols[offset]) {
+        return 0;
+      }
+    }
+  }
+
+  UF_long panel_entries = 0;
+  for (UF_long remaining = width; remaining > 0u; --remaining) {
+    const UF_long local_row = remaining - 1u;
+    const UF_long r = row_begin + local_row;
+    double *wrow = work + r * rhs_count;
+    const double *row_panel = dense_panel + local_row * width;
+    for (UF_long target = local_row + 1u; target < width; ++target) {
+      const double uij = row_panel[target];
+      const double *wcol = work + (row_begin + target) * rhs_count;
+      for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+        wrow[rhs_offset] -= uij * wcol[rhs_offset];
+      }
+    }
+    const UF_long dense_len = width - local_row - 1u;
+    if (trailing_len > 0u) {
+      const double *row_trailing = trailing_panel + local_row * trailing_len;
+      for (UF_long offset = 0; offset < trailing_len; ++offset) {
+        const double uij = row_trailing[offset];
+        const double *wcol = work + trailing_cols[offset] * rhs_count;
+        for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+          wrow[rhs_offset] -= uij * wcol[rhs_offset];
+        }
+      }
+    }
+    for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
+      wrow[rhs_offset] /= udiag[r];
+    }
+    const UF_long row_entries =
+      dense_len > UF_long_max - trailing_len
+        ? UF_long_max : dense_len + trailing_len;
+    panel_entries = panel_entries > UF_long_max - row_entries
+      ? UF_long_max : panel_entries + row_entries;
+  }
+  kls_record_row_refactor_compact_panel_group_solve(
+    solver, width, panel_entries);
+  if (next_row_end_out != NULL) {
+    *next_row_end_out = row_begin;
+  }
+  return 1;
+}
+
 static UF_long kls_row_refactor_compact_panel_solve_value_count(
   const kls_solver *solver) {
   if (solver == NULL ||
@@ -22913,7 +23099,14 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
         const UF_long block = remaining_block - 1u;
         const UF_long k1 = r[block];
         const UF_long k2 = r[block + 1u];
-        for (UF_long row = k1; row < k2; ++row) {
+        for (UF_long row = k1; row < k2;) {
+          UF_long next_row = row;
+          if (kls_try_row_refactor_compact_panel_lower_solve_group_multi(
+                solver, k1, k2, row, work, rhs_count, &next_row) &&
+              next_row > row) {
+            row = next_row;
+            continue;
+          }
           double *wrow = work + row * rhs_count;
           const UF_long begin = solver->row_refactor_l_ptr[row];
           const UF_long end = solver->row_refactor_l_ptr[row + 1u];
@@ -22930,9 +23123,18 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
               wrow[rhs_offset] -= lij * wcol[rhs_offset];
             }
           }
+          row++;
         }
 
-        for (UF_long remaining = k2; remaining > k1; --remaining) {
+        for (UF_long remaining = k2; remaining > k1;) {
+          UF_long next_remaining = remaining;
+          if (kls_try_row_refactor_compact_panel_upper_solve_group_multi(
+                solver, k1, k2, remaining, work, rhs_count, udiag,
+                &next_remaining) &&
+              next_remaining < remaining) {
+            remaining = next_remaining;
+            continue;
+          }
           const UF_long row = remaining - 1u;
           double *wrow = work + row * rhs_count;
           const UF_long begin = solver->row_refactor_u_ptr[row];
@@ -22953,6 +23155,7 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
           for (UF_long rhs_offset = 0; rhs_offset < rhs_count; ++rhs_offset) {
             wrow[rhs_offset] /= udiag[row];
           }
+          remaining--;
         }
 
         if (block > 0u) {
