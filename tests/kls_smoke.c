@@ -11139,6 +11139,190 @@ static int test_experimental_row_uplooking_first_factor(void) {
   return ok;
 }
 
+static int test_experimental_row_uplooking_natural_pipeline(void) {
+  const int32_t n = 64;
+  const int32_t nnz = 3 * n - 2;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax == NULL || b == NULL ||
+      x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    expected[col] = 1.0 + 0.125 * (double)(col % 7);
+    if (col > 0) {
+      ai[p] = col - 1;
+      ax[p] = -0.25;
+      p++;
+    }
+    ai[p] = col;
+    ax[p] = 4.0 + 0.01 * (double)(col % 11);
+    p++;
+    if (col + 1 < n) {
+      ai[p] = col + 1;
+      ax[p] = -0.25;
+      p++;
+    }
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected natural row-pipeline nnz: %d/%d\n",
+            p, nnz);
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
+      b[ai[q]] += ax[q] * expected[col];
+    }
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 0;
+  options.scale = 0;
+  options.static_pivoting = 0;
+  options.pivot_tolerance = 0.001;
+  options.threads = 3;
+
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_saved_first = saved_first_value != NULL;
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_saved_row = saved_row_value != NULL;
+  const char *saved_checked_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked =
+    saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
+  const int had_saved_checked = saved_checked_value != NULL;
+
+  int ok = 1;
+  if (had_saved_first && saved_first == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_row && saved_row == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (had_saved_checked && saved_checked == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_create(&solver),
+                        "create natural row pipeline")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, n, ap, ai, 0, &options),
+                        "analyze natural row pipeline")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor natural row pipeline")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve natural row pipeline")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats natural row pipeline")) {
+    ok = 0;
+  }
+  if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
+             stats.kls_first_last_row_uplooking_columns != n ||
+             stats.kls_first_last_row_pipeline != 1 ||
+             stats.kls_first_row_pipeline_run_count < 1 ||
+             stats.kls_first_last_row_pipeline_rows != n ||
+             stats.kls_first_last_row_pipeline_threads <= 0 ||
+             stats.kls_first_last_separator_queue_parallel_pipeline != 0 ||
+             stats.kls_first_last_separator_queue_executed != 0 ||
+             stats.selected_btf != 0 ||
+             stats.selected_scale != 0)) {
+    fprintf(stderr,
+            "unexpected natural row-pipeline stats: path=%s"
+            ", row_cols=%" PRId64
+            ", row_pipe=%d/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", sep_pipe=%d, sep_exec=%d, btf=%d, scale=%d\n",
+            kls_factor_path_name(stats.last_factor_path),
+            stats.kls_first_last_row_uplooking_columns,
+            stats.kls_first_last_row_pipeline,
+            stats.kls_first_row_pipeline_run_count,
+            stats.kls_first_last_row_pipeline_rows,
+            stats.kls_first_last_row_pipeline_threads,
+            stats.kls_first_last_separator_queue_parallel_pipeline,
+            stats.kls_first_last_separator_queue_executed,
+            stats.selected_btf,
+            stats.selected_scale);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected natural row-pipeline solution at %d:"
+              " %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
+                         saved_first)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_saved_row,
+                         saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_saved_checked, saved_checked)) {
+    ok = 0;
+  }
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(b);
+  free(x);
+  free(expected);
+  free(saved_first);
+  free(saved_row);
+  free(saved_checked);
+  return ok;
+}
+
 static int test_experimental_row_uplooking_lazy_panel_prefix(void) {
   const int32_t ap[] = {0, 4, 8, 12, 16};
   const int32_t ai[] = {
@@ -12383,6 +12567,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_row_uplooking_first_factor()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_experimental_row_uplooking_natural_pipeline()) {
     return EXIT_FAILURE;
   }
   if (!test_experimental_row_uplooking_lazy_panel_prefix()) {

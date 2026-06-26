@@ -3967,6 +3967,23 @@ This closes Algorithm 3's queue shape and adds race-free scalar Algorithm 4
 partial-update and scoped-pivot retry steps for dependency-safe retained
 separator queues.
 
+For KLS-first blocks without a retained separator order, the row-up first factor
+now still uses the restartable Algorithm 5-style row pipeline when multiple
+threads are available. The executor builds a natural factor-order row list,
+lets workers perform partial dependency updates and ordered publication, and
+uses the same epoch retry path for dynamic column exchanges. These runs are
+reported separately from separator queues through
+`kls_first_last_row_pipeline`, `kls_first_row_pipeline_run_count`,
+`kls_first_last_row_pipeline_rows`, `kls_first_last_row_pipeline_threads`,
+`kls_first_last_row_pipeline_partial`,
+`kls_first_row_pipeline_partial_run_count`,
+`kls_first_last_row_pipeline_partial_rows`, and
+`kls_first_last_row_pipeline_partial_threads`; smoke coverage verifies that
+natural-order execution does not set the separator-pipeline counters. This does
+not add CKTSO's ETree-descendant pivot-tail executor, but it removes the prior
+drop to a purely serial KLS-first row factor whenever the separator queue was
+unavailable.
+
 The KLS-first row up-looking dynamic column pivot selector also now consumes
 the retained separator map when it is available for the full factor order. On a
 weak pivot, KLS now applies the SubtreeLU Algorithm 4 `N'` rule directly:

@@ -292,6 +292,14 @@ typedef struct kls_stats {
   int64_t kls_first_row_uplooking_column_count;
   int64_t kls_first_last_row_refactor_seeded_rows;
   int64_t kls_first_row_refactor_seeded_row_count;
+  int kls_first_last_row_pipeline;
+  int64_t kls_first_row_pipeline_run_count;
+  int64_t kls_first_last_row_pipeline_rows;
+  int64_t kls_first_last_row_pipeline_threads;
+  int kls_first_last_row_pipeline_partial;
+  int64_t kls_first_row_pipeline_partial_run_count;
+  int64_t kls_first_last_row_pipeline_partial_rows;
+  int64_t kls_first_last_row_pipeline_partial_threads;
   int64_t kls_first_last_dynamic_column_pivots;
   int64_t kls_first_dynamic_column_pivot_count;
   int64_t separator_analyzed_rows;

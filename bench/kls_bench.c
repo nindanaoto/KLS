@@ -989,6 +989,22 @@ int main(int argc, char **argv) {
            stats.fast_repaired_offdiag_suffix_refresh_count,
            stats.fast_repaired_offdiag_full_refresh_count,
            stats.fast_repaired_parallel_tail_blocks);
+    printf(",\"kls_first_last_row_pipeline\":%d"
+           ",\"kls_first_row_pipeline_run_count\":%" PRId64
+           ",\"kls_first_last_row_pipeline_rows\":%" PRId64
+           ",\"kls_first_last_row_pipeline_threads\":%" PRId64
+           ",\"kls_first_last_row_pipeline_partial\":%d"
+           ",\"kls_first_row_pipeline_partial_run_count\":%" PRId64
+           ",\"kls_first_last_row_pipeline_partial_rows\":%" PRId64
+           ",\"kls_first_last_row_pipeline_partial_threads\":%" PRId64,
+           stats.kls_first_last_row_pipeline,
+           stats.kls_first_row_pipeline_run_count,
+           stats.kls_first_last_row_pipeline_rows,
+           stats.kls_first_last_row_pipeline_threads,
+           stats.kls_first_last_row_pipeline_partial,
+           stats.kls_first_row_pipeline_partial_run_count,
+           stats.kls_first_last_row_pipeline_partial_rows,
+           stats.kls_first_last_row_pipeline_partial_threads);
     printf(",\"kls_first_last_row_supernode_update\":%d"
            ",\"kls_first_row_supernode_update_run_count\":%" PRId64
            ",\"kls_first_last_row_supernode_update_groups\":%" PRId64
@@ -1677,6 +1693,18 @@ int main(int argc, char **argv) {
            ", total %" PRId64 "\n",
            stats.kls_first_last_row_refactor_seeded_rows,
            stats.kls_first_row_refactor_seeded_row_count);
+    printf("KLS row-up-looking natural pipeline: last %d"
+           ", runs %" PRId64 ", rows %" PRId64 ", threads %" PRId64
+           ", partial last %d, partial runs %" PRId64
+           ", partial rows %" PRId64 ", partial threads %" PRId64 "\n",
+           stats.kls_first_last_row_pipeline,
+           stats.kls_first_row_pipeline_run_count,
+           stats.kls_first_last_row_pipeline_rows,
+           stats.kls_first_last_row_pipeline_threads,
+           stats.kls_first_last_row_pipeline_partial,
+           stats.kls_first_row_pipeline_partial_run_count,
+           stats.kls_first_last_row_pipeline_partial_rows,
+           stats.kls_first_last_row_pipeline_partial_threads);
     printf("KLS row-up-looking supernode updates: last %d"
            ", runs %" PRId64 ", groups %" PRId64 ", rows %" PRId64 "\n",
            stats.kls_first_last_row_supernode_update,

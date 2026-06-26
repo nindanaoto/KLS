@@ -193,6 +193,16 @@ actual panel-backed use is reported through
 `kls_first_separator_queue_pipeline_supernode_panel_update_run_count`,
 `kls_first_last_separator_queue_pipeline_supernode_panel_update_groups`, and
 `kls_first_last_separator_queue_pipeline_supernode_panel_update_rows`.
+When no retained separator queue applies and multiple threads are available,
+KLS-first runs the same restartable Algorithm 5-style row pipeline over the
+block's natural row order instead of serializing every row. That non-separator
+executor is reported separately through `kls_first_last_row_pipeline`,
+`kls_first_row_pipeline_run_count`, `kls_first_last_row_pipeline_rows`,
+`kls_first_last_row_pipeline_threads`,
+`kls_first_last_row_pipeline_partial`,
+`kls_first_row_pipeline_partial_run_count`,
+`kls_first_last_row_pipeline_partial_rows`, and
+`kls_first_last_row_pipeline_partial_threads`.
 Builds configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` can use the same
 runtime `KLS_ENABLE_CBLAS_SUPERNODE=1` gate to consume eligible KLS-first
 cached panels with CBLAS `dtrsv` and `dgemv`; otherwise the cached panel uses
