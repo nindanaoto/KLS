@@ -174,8 +174,11 @@ reported through `kls_first_last_row_supernode_update`,
 completed row-supernodes as cached dense/common-tail panels once the following
 row proves the supernode ended; this covers parallel BTF workers plus the
 ordinary private and serial row-up loops. Later rows try those panels before
-falling back to row-entry validation. That broader row-up panel use is reported
-through
+falling back to row-entry validation, and the cached consumer can now use the
+published prefix of a longer dependency run while leaving the remaining suffix
+in the dependency heap. That matches the paper private/pipeline rule that
+finished producer prefixes should be consumed before waiting for or continuing
+through the producer tail. The broader row-up panel use is reported through
 `kls_first_last_row_supernode_panel_update`,
 `kls_first_row_supernode_panel_update_run_count`,
 `kls_first_last_row_supernode_panel_update_groups`, and

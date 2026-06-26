@@ -4860,7 +4860,11 @@ for the same reason. Benchmark output reports actual panel-backed use through
 CBLAS builds, the existing `KLS_ENABLE_CBLAS_SUPERNODE=1` runtime gate can
 consume eligible cached KLS-first panels with CBLAS `dtrsv` over the
 non-unit upper-triangular panel and CBLAS `dgemv` for dense suffix/common-tail
-updates; otherwise the cached panel uses the scalar in-panel solver. This is
+updates; otherwise the cached panel uses the scalar in-panel solver. The cached
+consumer no longer requires the whole requested dependency run to fit inside the
+same panel: it consumes the published prefix and leaves the remaining suffix in
+the dependency heap, matching the papers' private/pipeline rule that completed
+producer prefixes can be used before the producer tail is available. This is
 still not the full paper storage layer: row-up panels are published only after
 the producer supernode is complete, and CKTSO's full ETree-descendant
 pivoting-tail scheduler remains open. Separator pipeline pivot-tail rows that

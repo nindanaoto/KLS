@@ -40902,28 +40902,34 @@ static int kls_row_first_partial_apply_supernode_run_cached(
   }
   const kls_row_first_supernode_panel_cache *cache =
     workspace->supernode_panel_cache;
-  const UF_long run_limit = dep_end - dep_begin + 1u;
   if (cache == NULL || !cache->enabled || cache->panel_id_by_row == NULL ||
-      run_limit <= 1u || dep_begin >= cache->row_count ||
-      dep_end >= cache->row_count) {
+      dep_begin >= cache->row_count) {
     return 0;
   }
   const UF_long panel = cache->panel_id_by_row[dep_begin];
-  if (panel == KLS_KLU_EMPTY || panel >= cache->panel_count ||
-      cache->panel_id_by_row[dep_end] != panel) {
+  if (panel == KLS_KLU_EMPTY || panel >= cache->panel_count) {
     return 0;
   }
   const UF_long start = cache->start[panel];
   const UF_long width = cache->width[panel];
   const UF_long tail_len = cache->tail_len[panel];
   if (width <= 1u || dep_begin < start || dep_end < dep_begin ||
-      dep_end >= start + width) {
+      width - 1u > UF_long_max - start) {
+    return 0;
+  }
+  const UF_long panel_end = start + width - 1u;
+  const UF_long effective_dep_end =
+    dep_end < panel_end ? dep_end : panel_end;
+  if (effective_dep_end < dep_begin ||
+      effective_dep_end >= cache->row_count) {
     return 0;
   }
   const UF_long panel_offset = dep_begin - start;
-  const UF_long available_end = dep_end - start + 1u;
+  const UF_long available_end = effective_dep_end - start + 1u;
+  const UF_long run_limit = effective_dep_end - dep_begin + 1u;
   if (available_end <= panel_offset ||
       available_end > width ||
+      run_limit <= 1u ||
       run_limit != available_end - panel_offset) {
     return 0;
   }
