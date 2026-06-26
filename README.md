@@ -168,16 +168,16 @@ from packed KLU columns after a successful KLS-first row-up factor. Algorithm
 `kls_first_last_dynamic_column_pivots` and
 `kls_first_dynamic_column_pivot_count`. When a retained METIS `NodeNDP`
 separator map covers the factor order, the dynamic selector follows
-SubtreeLU Algorithm 4 more closely: it tries the exact separator component
-first, then the strongest candidate before that component's last retained
-factor row, and only then falls back to the old global best candidate if the
-separator-scoped candidates do not satisfy the existing global pivot-quality
-guard. Stats report exact separator pivots through
+SubtreeLU Algorithm 4 more closely: it computes `N'` as the last retained
+factor row of the current collapsed component, compares the diagonal only with
+the strongest candidate in `i+1..N'`, and rejects unsafe cross-domain pivot
+needs instead of using a global outside-component maximum. Stats report exact
+separator pivots through
 `kls_first_last_separator_dynamic_column_pivots` and
 `kls_first_separator_dynamic_column_pivot_count`, component-extent pivots
 through `kls_first_last_separator_extent_dynamic_column_pivots` and
-`kls_first_separator_extent_dynamic_column_pivot_count`, and global fallbacks
-through `kls_first_last_separator_dynamic_column_fallbacks` and
+`kls_first_separator_extent_dynamic_column_pivot_count`, and cross-domain
+rejections through `kls_first_last_separator_dynamic_column_fallbacks` and
 `kls_first_separator_dynamic_column_fallback_count`. If a guarded separator
 pipeline row still needs a dynamic pivot, KLS preserves the completed prefix,
 serializes that pivot row with the pivot-capable row-up kernel, and relaunches

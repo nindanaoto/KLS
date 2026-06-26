@@ -35759,6 +35759,192 @@ typedef struct kls_row_first_row_stats {
   UF_long separator_dynamic_column_rejects;
 } kls_row_first_row_stats;
 
+typedef struct kls_row_first_pivot_choice {
+  UF_long global_col;
+  double global_abs;
+  UF_long scoped_col;
+  double scoped_abs;
+  int scoped_col_exact;
+  int scope_enabled;
+} kls_row_first_pivot_choice;
+
+static int kls_row_first_separator_position(
+  const kls_row_first_block_context *ctx,
+  UF_long local_col,
+  UF_long *separator_pos_out) {
+  if (separator_pos_out != NULL) {
+    *separator_pos_out = KLS_KLU_EMPTY;
+  }
+  if (ctx == NULL || separator_pos_out == NULL ||
+      !ctx->use_separator_for_block || ctx->solver == NULL ||
+      ctx->solver->separator.order_component == NULL ||
+      local_col >= ctx->nk) {
+    return 0;
+  }
+  const UF_long separator_local =
+    ctx->separator_local_order != NULL
+      ? ctx->separator_local_order[local_col] : local_col;
+  if (separator_local >= ctx->nk ||
+      separator_local >
+        UF_long_max - ctx->separator_block_base) {
+    return 0;
+  }
+  const UF_long separator_pos =
+    ctx->separator_block_base + separator_local;
+  if (separator_pos >= ctx->solver->separator.n) {
+    return 0;
+  }
+  *separator_pos_out = separator_pos;
+  return 1;
+}
+
+static int kls_row_first_pivot_scope(
+  const kls_row_first_block_context *ctx,
+  UF_long row,
+  unsigned int *component_out,
+  UF_long *component_last_out) {
+  if (component_out != NULL) {
+    *component_out = UINT_MAX;
+  }
+  if (component_last_out != NULL) {
+    *component_last_out = KLS_KLU_EMPTY;
+  }
+  if (ctx == NULL || component_out == NULL || component_last_out == NULL ||
+      !ctx->use_separator_for_block || ctx->solver == NULL ||
+      ctx->separator_component_last == NULL ||
+      ctx->solver->separator.order_component == NULL) {
+    return 0;
+  }
+  UF_long separator_pos = KLS_KLU_EMPTY;
+  if (!kls_row_first_separator_position(ctx, row, &separator_pos)) {
+    return 0;
+  }
+  const unsigned int component =
+    ctx->solver->separator.order_component[separator_pos];
+  if ((UF_long)component >= ctx->solver->separator.component_count) {
+    return 0;
+  }
+  const UF_long component_last = ctx->separator_component_last[component];
+  if (component_last == KLS_KLU_EMPTY ||
+      component_last >= ctx->solver->separator.n ||
+      component_last < separator_pos) {
+    return 0;
+  }
+  *component_out = component;
+  *component_last_out = component_last;
+  return 1;
+}
+
+static int kls_row_first_collect_pivot_choice(
+  const kls_row_first_block_context *ctx,
+  const UF_long *pattern,
+  UF_long pattern_count,
+  const double *x,
+  UF_long row,
+  kls_row_first_pivot_choice *choice) {
+  if (choice != NULL) {
+    choice->global_col = KLS_KLU_EMPTY;
+    choice->global_abs = 0.0;
+    choice->scoped_col = KLS_KLU_EMPTY;
+    choice->scoped_abs = 0.0;
+    choice->scoped_col_exact = 0;
+    choice->scope_enabled = 0;
+  }
+  if (ctx == NULL || pattern == NULL || x == NULL || choice == NULL ||
+      row >= ctx->nk) {
+    return 0;
+  }
+
+  unsigned int pivot_component = UINT_MAX;
+  UF_long pivot_component_last = KLS_KLU_EMPTY;
+  if (ctx->use_separator_for_block) {
+    if (!kls_row_first_pivot_scope(
+          ctx, row, &pivot_component, &pivot_component_last)) {
+      return 0;
+    }
+    choice->scope_enabled = 1;
+  }
+
+  double scoped_best_abs = -1.0;
+  for (UF_long p = 0; p < pattern_count; ++p) {
+    const UF_long col = pattern[p];
+    if (col <= row) {
+      continue;
+    }
+    const double abs_value = fabs(x[col]);
+    if (abs_value > choice->global_abs) {
+      choice->global_abs = abs_value;
+      choice->global_col = col;
+    }
+    if (choice->scope_enabled) {
+      UF_long separator_pos = KLS_KLU_EMPTY;
+      if (!kls_row_first_separator_position(ctx, col, &separator_pos)) {
+        return 0;
+      }
+      if (separator_pos <= pivot_component_last &&
+          abs_value > scoped_best_abs) {
+        scoped_best_abs = abs_value;
+        choice->scoped_abs = abs_value;
+        choice->scoped_col = col;
+        choice->scoped_col_exact =
+          ctx->solver->separator.order_component[separator_pos] ==
+          pivot_component;
+      }
+    }
+  }
+  return 1;
+}
+
+static int kls_row_first_select_pivot_exchange(
+  const kls_row_first_pivot_choice *choice,
+  double pivot,
+  double tol,
+  int *pivot_needed_out,
+  UF_long *selected_col_out,
+  int *selected_separator_exact_out,
+  int *selected_separator_extent_out) {
+  if (pivot_needed_out != NULL) {
+    *pivot_needed_out = 0;
+  }
+  if (selected_col_out != NULL) {
+    *selected_col_out = KLS_KLU_EMPTY;
+  }
+  if (selected_separator_exact_out != NULL) {
+    *selected_separator_exact_out = 0;
+  }
+  if (selected_separator_extent_out != NULL) {
+    *selected_separator_extent_out = 0;
+  }
+  if (choice == NULL || pivot_needed_out == NULL ||
+      selected_col_out == NULL) {
+    return 0;
+  }
+
+  const double max_abs =
+    choice->scope_enabled ? choice->scoped_abs : choice->global_abs;
+  const UF_long best_col =
+    choice->scope_enabled ? choice->scoped_col : choice->global_col;
+  if (pivot != 0.0 &&
+      (max_abs <= 0.0 || fabs(pivot) >= tol * max_abs)) {
+    return 1;
+  }
+  if (best_col == KLS_KLU_EMPTY || max_abs <= 0.0) {
+    return 0;
+  }
+
+  *pivot_needed_out = 1;
+  *selected_col_out = best_col;
+  if (choice->scope_enabled) {
+    if (selected_separator_exact_out != NULL) {
+      *selected_separator_exact_out = choice->scoped_col_exact;
+    }
+    if (selected_separator_extent_out != NULL) {
+      *selected_separator_extent_out = !choice->scoped_col_exact;
+    }
+  }
+  return 1;
+}
+
 static int kls_row_first_factor_one_row(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
@@ -35860,77 +36046,34 @@ static int kls_row_first_factor_one_row(
   }
 
   double pivot = mark[i] == generation ? x[i] : 0.0;
-  double row_max_abs = 0.0;
-  UF_long best_col = KLS_KLU_EMPTY;
-  UF_long best_separator_col = KLS_KLU_EMPTY;
-  UF_long best_separator_extent_col = KLS_KLU_EMPTY;
-  double best_separator_abs = -1.0;
-  double best_separator_extent_abs = -1.0;
-  const unsigned int pivot_component =
-    ctx->use_separator_for_block
-      ? solver->separator.order_component[
-          ctx->separator_block_base +
-          (ctx->separator_local_order != NULL
-             ? ctx->separator_local_order[i] : i)]
-      : UINT_MAX;
-  const UF_long pivot_component_last =
-    ctx->use_separator_for_block &&
-        (UF_long)pivot_component < solver->separator.component_count
-      ? ctx->separator_component_last[pivot_component]
-      : KLS_KLU_EMPTY;
   UF_long u_count = 0;
   for (UF_long p = 0; p < pattern_count; ++p) {
     const UF_long col = pattern[p];
     if (col > i) {
       dep_heap[u_count++] = col;
-      const double abs_value = fabs(x[col]);
-      if (ctx->use_separator_for_block) {
-        const UF_long separator_pos = ctx->separator_block_base +
-          (ctx->separator_local_order != NULL
-             ? ctx->separator_local_order[col] : col);
-        if (separator_pos >= solver->separator.n) {
-          return 0;
-        }
-        if (pivot_component_last != KLS_KLU_EMPTY &&
-            separator_pos <= pivot_component_last &&
-            abs_value > best_separator_extent_abs) {
-          best_separator_extent_abs = abs_value;
-          best_separator_extent_col = col;
-        }
-        if (solver->separator.order_component[separator_pos] ==
-              pivot_component &&
-            abs_value > best_separator_abs) {
-          best_separator_abs = abs_value;
-          best_separator_col = col;
-        }
-      }
-      if (abs_value > row_max_abs) {
-        row_max_abs = abs_value;
-        best_col = col;
-      }
     }
   }
-  if (pivot == 0.0 ||
-      (row_max_abs > 0.0 && fabs(pivot) < ctx->tol * row_max_abs)) {
-    if (best_col == KLS_KLU_EMPTY || row_max_abs == 0.0) {
-      return 0;
+  kls_row_first_pivot_choice pivot_choice;
+  if (!kls_row_first_collect_pivot_choice(
+        ctx, pattern, pattern_count, x, i, &pivot_choice)) {
+    return 0;
+  }
+  int pivot_needed = 0;
+  UF_long selected_col = KLS_KLU_EMPTY;
+  int selected_separator_exact = 0;
+  int selected_separator_extent = 0;
+  if (!kls_row_first_select_pivot_exchange(
+        &pivot_choice, pivot, ctx->tol, &pivot_needed, &selected_col,
+        &selected_separator_exact, &selected_separator_extent)) {
+    if (ctx->use_separator_for_block && stats != NULL) {
+      stats->separator_dynamic_column_fallbacks++;
+      stats->separator_dynamic_column_rejects++;
     }
-    UF_long selected_col = best_col;
-    int selected_separator_exact = 0;
-    int selected_separator_extent = 0;
-    if (best_separator_col != KLS_KLU_EMPTY &&
-        best_separator_abs > 0.0 &&
-        (row_max_abs == 0.0 ||
-         best_separator_abs + 1.0e-300 >= ctx->tol * row_max_abs)) {
-      selected_col = best_separator_col;
-      selected_separator_exact = 1;
-    } else if (best_separator_extent_col != KLS_KLU_EMPTY &&
-               best_separator_extent_abs > 0.0 &&
-               (row_max_abs == 0.0 ||
-                best_separator_extent_abs + 1.0e-300 >=
-                  ctx->tol * row_max_abs)) {
-      selected_col = best_separator_extent_col;
-      selected_separator_extent = 1;
+    return 0;
+  }
+  if (pivot_needed) {
+    if (selected_col == KLS_KLU_EMPTY) {
+      return 0;
     }
     if (row_owner != NULL && row_owner[selected_col] != owner) {
       return 0;
@@ -35965,20 +36108,19 @@ static int kls_row_first_factor_one_row(
       stats->dynamic_column_pivots++;
     }
     pivot = x[i];
-    row_max_abs = 0.0;
     u_count = 0;
     for (UF_long p = 0; p < pattern_count; ++p) {
       const UF_long col = pattern[p];
       if (col > i) {
         dep_heap[u_count++] = col;
-        const double abs_value = fabs(x[col]);
-        if (abs_value > row_max_abs) {
-          row_max_abs = abs_value;
-        }
       }
     }
-    if (pivot == 0.0 ||
-        (row_max_abs > 0.0 && fabs(pivot) < ctx->tol * row_max_abs)) {
+    if (!kls_row_first_collect_pivot_choice(
+          ctx, pattern, pattern_count, x, i, &pivot_choice) ||
+        !kls_row_first_select_pivot_exchange(
+          &pivot_choice, pivot, ctx->tol, &pivot_needed, &selected_col,
+          NULL, NULL) ||
+        pivot_needed) {
       return 0;
     }
   }
@@ -36708,29 +36850,36 @@ static int kls_row_first_partial_finish_no_pivot(
   }
 
   double *x = workspace->x;
-  unsigned int *mark = workspace->mark;
   UF_long *pattern = workspace->pattern;
   UF_long *dep_heap = workspace->dep_heap;
   const UF_long i = state->row;
-  double pivot = mark[i] == state->generation ? x[i] : 0.0;
-  double row_max_abs = 0.0;
+  double pivot =
+    workspace->mark[i] == state->generation ? x[i] : 0.0;
+  kls_row_first_pivot_choice pivot_choice;
+  int pivot_needed = 0;
+  UF_long selected_col = KLS_KLU_EMPTY;
+  if (!kls_row_first_collect_pivot_choice(
+        ctx, pattern, state->pattern_count, x, i, &pivot_choice) ||
+      !kls_row_first_select_pivot_exchange(
+        &pivot_choice, pivot, ctx->tol, &pivot_needed, &selected_col,
+        NULL, NULL)) {
+    if (pivot_needed_out != NULL) {
+      *pivot_needed_out = 1;
+    }
+    return 0;
+  }
+  if (pivot_needed) {
+    if (pivot_needed_out != NULL) {
+      *pivot_needed_out = 1;
+    }
+    return 0;
+  }
   UF_long u_count = 0;
   for (UF_long p = 0; p < state->pattern_count; ++p) {
     const UF_long col = pattern[p];
     if (col > i) {
       dep_heap[u_count++] = col;
-      const double abs_value = fabs(x[col]);
-      if (abs_value > row_max_abs) {
-        row_max_abs = abs_value;
-      }
     }
-  }
-  if (pivot == 0.0 ||
-      (row_max_abs > 0.0 && fabs(pivot) < ctx->tol * row_max_abs)) {
-    if (pivot_needed_out != NULL) {
-      *pivot_needed_out = 1;
-    }
-    return 0;
   }
   if (u_count > 1u) {
     qsort(dep_heap, (size_t)u_count, sizeof(*dep_heap),
@@ -38057,6 +38206,26 @@ static int kls_row_first_parallel_factor_block(
     (void)kls_row_first_entries_reserve(&u_entries, reserve_entries);
   }
 
+  kls_row_first_block_context row_ctx;
+  memset(&row_ctx, 0, sizeof(row_ctx));
+  row_ctx.solver = solver;
+  row_ctx.numeric = shared->numeric;
+  row_ctx.numeric_values = shared->numeric_values;
+  row_ctx.row_ptr = worker->row_ptr;
+  row_ctx.row_cols = row_cols;
+  row_ctx.row_input_pos = row_input_pos;
+  row_ctx.q_order = worker->block_q_order;
+  row_ctx.col_pos = worker->col_pos;
+  row_ctx.separator_component_last = shared->separator_component_last;
+  row_ctx.k1 = k1;
+  row_ctx.nk = nk;
+  row_ctx.n = n;
+  row_ctx.separator_block_base = separator_block_base;
+  row_ctx.scaled = shared->scaled;
+  row_ctx.scale = shared->scale;
+  row_ctx.use_separator_for_block = use_separator_for_block;
+  row_ctx.tol = shared->tol;
+
   for (UF_long i = 0; i < nk; ++i) {
     const unsigned int generation = (unsigned int)(i + 1u);
     if (generation == 0u) {
@@ -38131,72 +38300,37 @@ static int kls_row_first_parallel_factor_block(
     }
 
     double pivot = worker->mark[i] == generation ? worker->x[i] : 0.0;
-    double row_max_abs = 0.0;
-    UF_long best_col = KLS_KLU_EMPTY;
-    UF_long best_separator_col = KLS_KLU_EMPTY;
-    UF_long best_separator_extent_col = KLS_KLU_EMPTY;
-    double best_separator_abs = -1.0;
-    double best_separator_extent_abs = -1.0;
-    const unsigned int pivot_component =
-      use_separator_for_block
-        ? solver->separator.order_component[separator_block_base + i]
-        : UINT_MAX;
-    const UF_long pivot_component_last =
-      use_separator_for_block &&
-          (UF_long)pivot_component < solver->separator.component_count
-        ? shared->separator_component_last[pivot_component]
-        : KLS_KLU_EMPTY;
     UF_long u_count = 0;
     for (UF_long p = 0; p < pattern_count; ++p) {
       const UF_long col = worker->pattern[p];
       if (col > i) {
         worker->dep_heap[u_count++] = col;
-        const double abs_value = fabs(worker->x[col]);
-        if (use_separator_for_block) {
-          const UF_long separator_pos = separator_block_base + col;
-          if (separator_pos >= solver->separator.n) {
-            goto cleanup;
-          }
-          if (pivot_component_last != KLS_KLU_EMPTY &&
-              separator_pos <= pivot_component_last &&
-              abs_value > best_separator_extent_abs) {
-            best_separator_extent_abs = abs_value;
-            best_separator_extent_col = col;
-          }
-          if (solver->separator.order_component[separator_pos] ==
-                pivot_component &&
-              abs_value > best_separator_abs) {
-            best_separator_abs = abs_value;
-            best_separator_col = col;
-          }
-        }
-        if (abs_value > row_max_abs) {
-          row_max_abs = abs_value;
-          best_col = col;
-        }
       }
     }
-    if (pivot == 0.0 ||
-        (row_max_abs > 0.0 && fabs(pivot) < shared->tol * row_max_abs)) {
-      if (best_col == KLS_KLU_EMPTY || row_max_abs == 0.0) {
-        goto cleanup;
+    kls_row_first_pivot_choice pivot_choice;
+    if (!kls_row_first_collect_pivot_choice(
+          &row_ctx, worker->pattern, pattern_count, worker->x, i,
+          &pivot_choice)) {
+      goto cleanup;
+    }
+    int pivot_needed = 0;
+    UF_long selected_col = KLS_KLU_EMPTY;
+    int selected_separator_exact = 0;
+    int selected_separator_extent = 0;
+    if (!kls_row_first_select_pivot_exchange(
+          &pivot_choice, pivot, shared->tol, &pivot_needed, &selected_col,
+          &selected_separator_exact, &selected_separator_extent)) {
+      if (use_separator_for_block) {
+        separator_dynamic_column_fallbacks++;
+        atomic_fetch_add_explicit(
+          &shared->separator_dynamic_column_rejects, 1ul,
+          memory_order_relaxed);
       }
-      UF_long selected_col = best_col;
-      int selected_separator_exact = 0;
-      int selected_separator_extent = 0;
-      if (best_separator_col != KLS_KLU_EMPTY &&
-          best_separator_abs > 0.0 &&
-          (row_max_abs == 0.0 ||
-           best_separator_abs + 1.0e-300 >= shared->tol * row_max_abs)) {
-        selected_col = best_separator_col;
-        selected_separator_exact = 1;
-      } else if (best_separator_extent_col != KLS_KLU_EMPTY &&
-                 best_separator_extent_abs > 0.0 &&
-                 (row_max_abs == 0.0 ||
-                  best_separator_extent_abs + 1.0e-300 >=
-                    shared->tol * row_max_abs)) {
-        selected_col = best_separator_extent_col;
-        selected_separator_extent = 1;
+      goto cleanup;
+    }
+    if (pivot_needed) {
+      if (selected_col == KLS_KLU_EMPTY) {
+        goto cleanup;
       }
       if (use_separator_for_block) {
         if (selected_separator_exact) {
@@ -38222,20 +38356,20 @@ static int kls_row_first_parallel_factor_block(
       worker->mark[i] = generation;
       dynamic_column_pivots++;
       pivot = worker->x[i];
-      row_max_abs = 0.0;
       u_count = 0;
       for (UF_long p = 0; p < pattern_count; ++p) {
         const UF_long col = worker->pattern[p];
         if (col > i) {
           worker->dep_heap[u_count++] = col;
-          const double abs_value = fabs(worker->x[col]);
-          if (abs_value > row_max_abs) {
-            row_max_abs = abs_value;
-          }
         }
       }
-      if (pivot == 0.0 ||
-          (row_max_abs > 0.0 && fabs(pivot) < shared->tol * row_max_abs)) {
+      if (!kls_row_first_collect_pivot_choice(
+            &row_ctx, worker->pattern, pattern_count, worker->x, i,
+            &pivot_choice) ||
+          !kls_row_first_select_pivot_exchange(
+            &pivot_choice, pivot, shared->tol, &pivot_needed,
+            &selected_col, NULL, NULL) ||
+          pivot_needed) {
         goto cleanup;
       }
     }
