@@ -462,6 +462,8 @@ struct kls_solver {
   UF_long kls_first_separator_extent_dynamic_column_pivot_count;
   UF_long kls_first_last_parallel_btf_blocks;
   UF_long kls_first_parallel_btf_block_count;
+  UF_long kls_first_last_separator_dynamic_column_rejects;
+  UF_long kls_first_separator_dynamic_column_reject_count;
   int kls_first_auto_skipped_scaled_single_block;
   UF_long kls_first_auto_skipped_scaled_single_block_count;
   int factor_etree_stats_valid;
@@ -2255,6 +2257,7 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_separator_dynamic_column_fallbacks = 0;
   solver->kls_first_last_separator_extent_dynamic_column_pivots = 0;
   solver->kls_first_last_parallel_btf_blocks = 0;
+  solver->kls_first_last_separator_dynamic_column_rejects = 0;
   solver->kls_first_auto_skipped_scaled_single_block = 0;
   solver->stats.kls_tail_last_mapped_columns = 0;
   solver->stats.kls_first_last_row_uplooking_columns = 0;
@@ -2264,6 +2267,7 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_first_last_separator_dynamic_column_fallbacks = 0;
   solver->stats.kls_first_last_separator_extent_dynamic_column_pivots = 0;
   solver->stats.kls_first_last_parallel_btf_blocks = 0;
+  solver->stats.kls_first_last_separator_dynamic_column_rejects = 0;
   solver->stats.kls_first_auto_skipped_scaled_single_block = 0;
 }
 
@@ -10498,6 +10502,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->kls_first_last_parallel_btf_blocks;
   solver->stats.kls_first_parallel_btf_block_count =
     (int64_t)solver->kls_first_parallel_btf_block_count;
+  solver->stats.kls_first_last_separator_dynamic_column_rejects =
+    (int64_t)solver->kls_first_last_separator_dynamic_column_rejects;
+  solver->stats.kls_first_separator_dynamic_column_reject_count =
+    (int64_t)solver->kls_first_separator_dynamic_column_reject_count;
   solver->stats.kls_first_auto_skipped_scaled_single_block =
     solver->kls_first_auto_skipped_scaled_single_block;
   solver->stats.kls_first_auto_skipped_scaled_single_block_count =
@@ -35502,6 +35510,7 @@ typedef struct kls_row_first_parallel_shared {
   UF_long separator_dynamic_column_pivots;
   UF_long separator_extent_dynamic_column_pivots;
   UF_long separator_dynamic_column_fallbacks;
+  atomic_ulong separator_dynamic_column_rejects;
   UF_long committed_blocks;
 } kls_row_first_parallel_shared;
 
@@ -35906,6 +35915,10 @@ static int kls_row_first_parallel_factor_block(
           separator_extent_dynamic_column_pivots++;
         } else {
           separator_dynamic_column_fallbacks++;
+          atomic_fetch_add_explicit(
+            &shared->separator_dynamic_column_rejects, 1ul,
+            memory_order_relaxed);
+          goto cleanup;
         }
       }
       if (!kls_row_first_exchange_columns(
@@ -36059,6 +36072,9 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
   int mutex_initialized = 0;
   kls_row_first_parallel_shared shared;
   memset(&shared, 0, sizeof(shared));
+  atomic_init(&shared.next_block, 0ul);
+  atomic_init(&shared.failed, 0);
+  atomic_init(&shared.separator_dynamic_column_rejects, 0ul);
 
   const UF_long n = solver->n;
   const int scaled = common->scale > 0;
@@ -36133,8 +36149,6 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
     goto fail;
   }
   mutex_initialized = 1;
-  atomic_init(&shared.next_block, 0ul);
-  atomic_init(&shared.failed, 0);
   shared.solver = solver;
   shared.numeric = numeric;
   shared.numeric_values = numeric_values;
@@ -36211,6 +36225,11 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
     shared.separator_dynamic_column_fallbacks;
   solver->kls_first_separator_dynamic_column_fallback_count +=
     shared.separator_dynamic_column_fallbacks;
+  solver->kls_first_last_separator_dynamic_column_rejects =
+    (UF_long)atomic_load_explicit(&shared.separator_dynamic_column_rejects,
+                                  memory_order_relaxed);
+  solver->kls_first_separator_dynamic_column_reject_count +=
+    solver->kls_first_last_separator_dynamic_column_rejects;
   solver->kls_first_last_parallel_btf_blocks = shared.committed_blocks;
   solver->kls_first_parallel_btf_block_count += shared.committed_blocks;
 
@@ -36276,6 +36295,7 @@ static int kls_try_first_factor_row_uplooking_blocks(
   const UF_long saved_singular_col = (UF_long)common->singular_col;
   const UF_long saved_noffdiag = (UF_long)common->noffdiag;
   int q_committed = 0;
+  UF_long separator_dynamic_column_rejects = 0;
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
@@ -36644,6 +36664,8 @@ static int kls_try_first_factor_row_uplooking_blocks(
             separator_extent_dynamic_column_pivots++;
           } else {
             separator_dynamic_column_fallbacks++;
+            separator_dynamic_column_rejects++;
+            goto fail_block_entries;
           }
         }
         if (!kls_row_first_exchange_columns(&u_entries, q_order + k1,
@@ -36764,6 +36786,10 @@ fail_block_entries:
     separator_dynamic_column_fallbacks;
   solver->kls_first_separator_dynamic_column_fallback_count +=
     separator_dynamic_column_fallbacks;
+  solver->kls_first_last_separator_dynamic_column_rejects =
+    separator_dynamic_column_rejects;
+  solver->kls_first_separator_dynamic_column_reject_count +=
+    separator_dynamic_column_rejects;
   free(row_counts);
   free(row_ptr);
   free(x);
@@ -36779,6 +36805,16 @@ fail_block_entries:
   return 1;
 
 fail:
+  if (separator_dynamic_column_rejects > 0u) {
+    solver->kls_first_last_separator_dynamic_column_fallbacks =
+      separator_dynamic_column_fallbacks;
+    solver->kls_first_separator_dynamic_column_fallback_count +=
+      separator_dynamic_column_fallbacks;
+    solver->kls_first_last_separator_dynamic_column_rejects =
+      separator_dynamic_column_rejects;
+    solver->kls_first_separator_dynamic_column_reject_count +=
+      separator_dynamic_column_rejects;
+  }
   kls_row_first_refactor_seed_clear(&row_refactor_seed);
   if (q_committed && saved_q != NULL && solver->symbolic != NULL &&
       solver->symbolic->Q != NULL) {

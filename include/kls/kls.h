@@ -404,6 +404,8 @@ typedef struct kls_stats {
   int64_t row_refactor_dense_producer_target_trailing_count;
   int64_t kls_first_last_parallel_btf_blocks;
   int64_t kls_first_parallel_btf_block_count;
+  int64_t kls_first_last_separator_dynamic_column_rejects;
+  int64_t kls_first_separator_dynamic_column_reject_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
