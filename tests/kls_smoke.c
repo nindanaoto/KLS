@@ -5602,6 +5602,12 @@ static int test_dense_group_fragmented_target_map_probe(void) {
     free(expected);
     return 0;
   }
+  kls_solver *checked_solver = NULL;
+  const char *saved_checked_env_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked_env = saved_checked_env_value != NULL
+    ? strdup(saved_checked_env_value) : NULL;
+  const int had_saved_checked_env = saved_checked_env_value != NULL;
   for (int32_t col = 0; col < n; ++col) {
     for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
       b[ai[p]] += ax1[p] * expected[col];
@@ -5646,6 +5652,10 @@ static int test_dense_group_fragmented_target_map_probe(void) {
     fprintf(stderr, "failed to save KLS_ENABLE_MULTI_PRODUCER_SUPERNODE\n");
     ok = 0;
   }
+  if (had_saved_checked_env && saved_checked_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
+    ok = 0;
+  }
   if (!require_ok(kls_create(&solver), "create dense target-map")) ok = 0;
   if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
                                         &options),
@@ -5662,6 +5672,10 @@ static int test_dense_group_fragmented_target_map_probe(void) {
   }
   if (ok && unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
     perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -5697,6 +5711,18 @@ static int test_dense_group_fragmented_target_map_probe(void) {
   } else if (!had_saved_multi_env) {
     if (unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
       perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+      ok = 0;
+    }
+  }
+  if (had_saved_checked_env && saved_checked_env != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+               saved_checked_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_checked_env) {
+    if (unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
       ok = 0;
     }
   }
@@ -5811,10 +5837,192 @@ static int test_dense_group_fragmented_target_map_probe(void) {
     ok = 0;
   }
 
+  if (ok && !require_ok(kls_create(&checked_solver),
+                        "create checked dense target-map")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(checked_solver, KLS_INDEX_INT32, n,
+                                        ap, ai, 0, &options),
+                        "analyze checked dense target-map")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
+    ok = 0;
+  }
+  if (ok && unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
+    perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(checked_solver, ax0),
+                        "factor checked dense target-map base")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(checked_solver, ax1),
+                        "checked factor dense target-map")) {
+    ok = 0;
+  }
+
+  if (had_saved_row_env && saved_row_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_row_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_row_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+  if (had_saved_cblas_env && saved_cblas_env != NULL) {
+    if (setenv("KLS_ENABLE_CBLAS_SUPERNODE", saved_cblas_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CBLAS_SUPERNODE");
+      ok = 0;
+    }
+  } else if (!had_saved_cblas_env) {
+    if (unsetenv("KLS_ENABLE_CBLAS_SUPERNODE") != 0) {
+      perror("unsetenv KLS_ENABLE_CBLAS_SUPERNODE");
+      ok = 0;
+    }
+  }
+  if (had_saved_multi_env && saved_multi_env != NULL) {
+    if (setenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE",
+               saved_multi_env, 1) != 0) {
+      perror("restore KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+      ok = 0;
+    }
+  } else if (!had_saved_multi_env) {
+    if (unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
+      perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+      ok = 0;
+    }
+  }
+  if (had_saved_checked_env && saved_checked_env != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+               saved_checked_env, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_checked_env) {
+    if (unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+
+  if (ok) {
+    memset(x, 0, (size_t)n * sizeof(*x));
+  }
+  if (ok && !require_ok(kls_solve(checked_solver, 1, b, 0, x, 0),
+                        "solve checked dense target-map")) {
+    ok = 0;
+  }
+  kls_stats checked_stats;
+  checked_stats.struct_size = sizeof(checked_stats);
+  if (ok && !require_ok(kls_get_stats(checked_solver, &checked_stats),
+                        "stats checked dense target-map")) {
+    ok = 0;
+  }
+  if (ok &&
+      (checked_stats.row_refactor_last_run != 1 ||
+       checked_stats.row_refactor_last_checked != 1 ||
+       checked_stats.row_refactor_last_compact_supernode_batch != 1 ||
+       checked_stats.row_refactor_compact_supernode_batch_count < 1 ||
+       checked_stats.row_refactor_compact_supernode_batch_pattern_count != 0 ||
+       checked_stats.row_refactor_compact_supernode_batch_rows < mid - 1 ||
+       checked_stats.row_refactor_compact_supernode_batch_dep_rows <= lead0 ||
+       checked_stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       checked_stats.row_refactor_dense_producer_run_count < mid + 1 ||
+       checked_stats.row_refactor_dense_producer_run_rows < mid ||
+       checked_stats.row_refactor_dense_producer_run_max_per_row < 2 ||
+       checked_stats.row_refactor_dense_producer_multi_run_rows < 1 ||
+       checked_stats.row_refactor_dense_producer_fragmented_rows < mid ||
+       checked_stats.row_refactor_dense_producer_target_count <= 0 ||
+       checked_stats.row_refactor_last_compact_dense_panel != 1)) {
+    fprintf(stderr,
+            "unexpected checked dense target-map stats: checked=%d/%d"
+            ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", pattern=%" PRId64 "/%" PRId64
+            ", producer=%" PRId64 "/%" PRId64 " max=%" PRId64
+            ", multi/fragmented=%" PRId64 "/%" PRId64
+            ", targets=%" PRId64 ", compact=%d/%" PRId64 "\n",
+            checked_stats.row_refactor_last_run,
+            checked_stats.row_refactor_last_checked,
+            checked_stats.row_refactor_last_compact_supernode_batch,
+            checked_stats.row_refactor_compact_supernode_batch_count,
+            checked_stats.row_refactor_compact_supernode_batch_rows,
+            checked_stats.row_refactor_compact_supernode_batch_dep_rows,
+            checked_stats.row_refactor_compact_supernode_batch_entries,
+            checked_stats.row_refactor_compact_supernode_batch_pattern_count,
+            checked_stats.row_refactor_compact_supernode_batch_pattern_rows,
+            checked_stats.row_refactor_dense_producer_run_count,
+            checked_stats.row_refactor_dense_producer_run_rows,
+            checked_stats.row_refactor_dense_producer_run_max_per_row,
+            checked_stats.row_refactor_dense_producer_multi_run_rows,
+            checked_stats.row_refactor_dense_producer_fragmented_rows,
+            checked_stats.row_refactor_dense_producer_target_count,
+            checked_stats.row_refactor_last_compact_dense_panel,
+            checked_stats.row_refactor_compact_dense_panel_count);
+    ok = 0;
+  }
+
+  max_solution_error = 0.0;
+  max_residual = 0.0;
+  max_rhs = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    const double err = fabs(x[row] - expected[row]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+    if (residual != NULL) {
+      residual[row] = -b[row];
+    }
+    if (fabs(b[row]) > max_rhs) {
+      max_rhs = fabs(b[row]);
+    }
+  }
+  if (residual != NULL) {
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        residual[ai[p]] += ax1[p] * x[col];
+      }
+    }
+    for (int32_t row = 0; row < n; ++row) {
+      const double residual_abs = fabs(residual[row]);
+      if (residual_abs > max_residual) {
+        max_residual = residual_abs;
+      }
+    }
+  }
+  const double checked_relative_residual =
+    max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 1.0e-8 ||
+             checked_relative_residual > 1.0e-10)) {
+    fprintf(stderr,
+            "unexpected checked dense target-map accuracy:"
+            " max_x_err=%.17g, rel_resid=%.17g\n",
+            max_solution_error, checked_relative_residual);
+    ok = 0;
+  }
+
   kls_destroy(solver);
+  kls_destroy(checked_solver);
   free(saved_row_env);
   free(saved_cblas_env);
   free(saved_multi_env);
+  free(saved_checked_env);
   free(ap);
   free(ai);
   free(ax0);

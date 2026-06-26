@@ -26771,6 +26771,7 @@ static int kls_compact_dense_group_parse_fragmented_dense_producer_runs(
 }
 
 static int kls_compact_dense_group_process_fragmented_scalar_range(
+  kls_egraph_refactor_worker *worker,
   kls_egraph_refactor_shared *shared,
   kls_solver *solver,
   UF_long row_begin,
@@ -26815,6 +26816,10 @@ static int kls_compact_dense_group_process_fragmented_scalar_range(
     }
     const double candidate = row_multipliers[local];
     const double lij = candidate / udiag[dep];
+    if (kls_parallel_row_refactor_rejects_multiplier(
+          worker, row, dep, candidate, lij)) {
+      return 0;
+    }
     row_multipliers[local] = lij;
     solver->row_refactor_l_row_values[p] = lij;
     if (!shared->row_refactor_defer_value_scatter) {
@@ -26880,7 +26885,6 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
     return 0;
   }
   if (worker == NULL || worker->shared == NULL ||
-      worker->shared->check_pivots ||
       dense_panel == NULL ||
       batch_begin < row_begin ||
       batch_begin >= row_end ||
@@ -27365,7 +27369,7 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
       double *row_panel = trailing_len > 0u
         ? trailing_panel + local_row * trailing_len : NULL;
       if (!kls_compact_dense_group_process_fragmented_scalar_range(
-            shared, solver, row_begin, row_end, row, batch_local,
+            worker, shared, solver, row_begin, row_end, row, batch_local,
             scalar_begin, scalar_end, external_len, trailing_len,
             trailing_cols, row_multipliers, row_dense_panel, row_panel,
             pivots, udiag, &scalar_work)) {
@@ -27389,6 +27393,11 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
         const UF_long dep = panel->begin + local_dep;
         const double candidate = run_multipliers[dep_local];
         const double lij = candidate / udiag[dep];
+        if (kls_parallel_row_refactor_rejects_multiplier(
+              worker, row, dep, candidate, lij)) {
+          status = -1;
+          goto cleanup_rows;
+        }
         run_multipliers[dep_local] = lij;
         const double *dep_dense_panel =
           panel->dense_panel + local_dep * panel->width;
@@ -27579,7 +27588,7 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
     double *row_panel = trailing_len > 0u
       ? trailing_panel + local_row * trailing_len : NULL;
     if (!kls_compact_dense_group_process_fragmented_scalar_range(
-          shared, solver, row_begin, row_end, row, batch_local,
+          worker, shared, solver, row_begin, row_end, row, batch_local,
           scalar_begin, external_len, external_len, trailing_len,
           trailing_cols, row_multipliers, row_dense_panel, row_panel,
           pivots, udiag, &scalar_work)) {

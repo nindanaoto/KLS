@@ -4299,6 +4299,20 @@ gap from the paper audit but reinforces that the large remaining gap is the
 native row/segment panel representation and production blocked update executor,
 not another small matcher or CPU-specific kernel tweak.
 
+The same fragmented dense-consumer executor now participates in checked row fast
+factorization. The prior guard skipped this batch path whenever pivot checks were
+active, even though the CKTSO/SubtreeLU row-supernode update idea still applies
+to the already-completed external producer runs before the consumer group's
+internal pivot-checked panel step. KLS now performs the same row-wise multiplier
+rejection checks before publishing external `L` multipliers from scalar gaps and
+producer suffix solves, then lets the existing checked compact-panel factor code
+handle internal multipliers and pivots. The retained target-map smoke fixture now
+runs the two-producer fragmented dense-consumer shape through checked
+factorization with CBLAS disabled and requires the fragmented batch counters,
+retained producer target counts, and residual-clean solve. This closes a direct
+checked-mode paper coverage gap while leaving the larger native row/segment
+numeric engine and CKTSO pipelined pivoting tail open.
+
 An exact-match requirement was deliberately kept for fragmented dense-producer
 batches. A common-prefix widening experiment was tried and rejected because it
 increased the work on `ASIC_320k` (`~0.387s` focused refactor versus the prior
