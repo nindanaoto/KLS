@@ -4601,3 +4601,14 @@ segment. This narrows the SubtreeLU/CKTSO row-major storage gap for generic
 segments, but it still leaves the larger paper work item open: a production
 compact/batched row-major numeric engine and CKTSO's pipelined pivoting-tail
 executor.
+
+The retained SubtreeLU Algorithm 6 queue splitter then gained the missing
+private-leaf guard. A focused checked METIS grid exposed that the earlier
+FLOP-balance loop could keep promoting separator candidates after it reached
+indivisible retained components, leaving no private subtree candidates and
+falling back to the generic row-DAG queue. The splitter now only promotes a
+candidate component into the pipeline when it has at least one positive-work
+child subtree to return to the private candidate set. The checked separator
+grid and duplicate-BTF separator forest smoke fixtures both select the
+separator FLOP queue again, preserving the paper's private/pipeline structure
+instead of turning unbalanced leaves into separator work.

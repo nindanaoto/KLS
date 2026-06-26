@@ -19609,21 +19609,28 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     }
 
     const UF_long component = candidates[max_pos];
+    const UF_long left = solver->separator.component_left_child[component];
+    const UF_long right = solver->separator.component_right_child[component];
+    const int split_left =
+      left != KLS_KLU_EMPTY && left < component_count &&
+      subtree_work[left] > 0.0;
+    const int split_right =
+      right != KLS_KLU_EMPTY && right < component_count &&
+      subtree_work[right] > 0.0;
+    if (!split_left && !split_right) {
+      break;
+    }
     candidates[max_pos] = candidates[candidate_count - 1u];
     candidate_count--;
     candidate_work_sum -= subtree_work[component];
     component_pipeline[component] = 1u;
     pipeline_component_count++;
 
-    const UF_long left = solver->separator.component_left_child[component];
-    const UF_long right = solver->separator.component_right_child[component];
-    if (left != KLS_KLU_EMPTY && left < component_count &&
-        subtree_work[left] > 0.0) {
+    if (split_left) {
       candidates[candidate_count++] = left;
       candidate_work_sum += subtree_work[left];
     }
-    if (right != KLS_KLU_EMPTY && right < component_count &&
-        subtree_work[right] > 0.0) {
+    if (split_right) {
       candidates[candidate_count++] = right;
       candidate_work_sum += subtree_work[right];
     }
