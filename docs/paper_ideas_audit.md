@@ -5097,3 +5097,15 @@ same CKTSO-tail storage boundary that the serial tail restart already used to
 the parallel row-first repair path. The non-contiguous mask and BTF suffix smoke
 fixtures now require `fast_repaired_last_offdiag_suffix_refresh=1`, one suffix
 refresh, and zero full offdiag refreshes.
+
+The retained row-refactor input-target map now covers independent batch groups
+as well as dense, sparse, compact-panel, and scalar/generic rows. Batch-group
+symbolic setup classifies each raw input entry once as a batch dependency-vector
+slot, pivot, or row-major `U` workspace slot. Ragged, contiguous multi-producer,
+and fragmented multi-producer batch executors consume those destinations before
+falling back to the older per-refactor pattern search. The existing batch smoke
+fixtures now require `row_refactor_last_segment_target_input_rows` to cover the
+executed batch rows in both checked and unchecked modes. This removes another
+KLU-shaped rediscovery step from the KLS row/segment numeric path, while the
+larger paper gaps remain the production compact/batched row-major numeric engine
+and CKTSO's full ETree-descendant pivoting-tail scheduler.

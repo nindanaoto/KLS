@@ -640,11 +640,13 @@ The row-pattern builder retains a per-input-entry segment target map for dense
 and sparse segment rows, so repeated refactors write raw values through
 precomputed external, `L`, pivot, and `U` destinations instead of rediscovering
 the slots in the numeric loop. The same retained target map now covers
-single-row generic groups and compact dense panel rows as well: dependencies
-still enter the work vector for the existing up-looking update, raw pivots and
-row-major `U` tails load directly into retained row storage, and compact panel
-loads place `L`, pivot, dense-`U`, and trailing-`U` entries through the retained
-destinations instead of searching the panel columns again. Stats report
+single-row generic groups, compact dense panel rows, and independent batch
+groups as well: scalar dependencies still enter the work vector for the
+existing up-looking update, batch dependencies load into the batch dependency
+vector, raw pivots and row-major `U` tails load directly into retained row
+storage, and compact panel loads place `L`, pivot, dense-`U`, and trailing-`U`
+entries through the retained destinations instead of searching the panel
+columns again. Stats report
 `row_refactor_last_sparse_segment_direct_input_rows`,
 `row_refactor_sparse_segment_direct_input_rows`,
 `row_refactor_last_batch_direct_input_rows`,

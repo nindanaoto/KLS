@@ -18888,7 +18888,8 @@ static void kls_try_build_row_refactor_segment_input_targets(
     const unsigned char kind = group_kind[group];
     if (kind != KLS_ROW_REFACTOR_GROUP_SINGLE &&
         kind != KLS_ROW_REFACTOR_GROUP_GENERIC &&
-        kind != KLS_ROW_REFACTOR_GROUP_DENSE) {
+        kind != KLS_ROW_REFACTOR_GROUP_DENSE &&
+        kind != KLS_ROW_REFACTOR_GROUP_BATCH) {
       continue;
     }
     const UF_long row_begin = group_ptr[group];
@@ -18898,6 +18899,7 @@ static void kls_try_build_row_refactor_segment_input_targets(
       continue;
     }
     const int single_group = kind == KLS_ROW_REFACTOR_GROUP_SINGLE;
+    const int batch_group = kind == KLS_ROW_REFACTOR_GROUP_BATCH;
     if (single_group && row_end != row_begin + 1u) {
       continue;
     }
@@ -18917,10 +18919,11 @@ static void kls_try_build_row_refactor_segment_input_targets(
         continue;
       }
       const UF_long dense_len =
-        single_group ? 0u : row_end - row - 1u;
+        (single_group || batch_group) ? 0u : row_end - row - 1u;
       const UF_long trailing_len =
-        single_group ? u_end - u_begin : trailing_len_for_group;
-      const UF_long *trailing_cols = single_group
+        (single_group || batch_group) ? u_end - u_begin
+                                      : trailing_len_for_group;
+      const UF_long *trailing_cols = (single_group || batch_group)
         ? (trailing_len > 0u ? u_cols + u_begin : NULL)
         : trailing_cols_for_group;
       if (trailing_len > 0u && trailing_cols == NULL) {
@@ -18953,7 +18956,32 @@ static void kls_try_build_row_refactor_segment_input_targets(
           row_supported = 0;
           break;
         }
-        if (single_group && col < row) {
+        if (batch_group) {
+          if (col < row) {
+            UF_long l_pos = KLS_KLU_EMPTY;
+            if (!kls_find_uflong_sorted(l_cols + l_begin, l_end - l_begin,
+                                        col, &l_pos) ||
+                l_pos >= l_end - l_begin) {
+              row_supported = 0;
+              break;
+            }
+            target = KLS_ROW_SEGMENT_INPUT_TARGET_L;
+            pos = l_begin + l_pos;
+          } else if (col == row) {
+            target = KLS_ROW_SEGMENT_INPUT_TARGET_PIVOT;
+          } else {
+            UF_long u_pos = KLS_KLU_EMPTY;
+            if (trailing_len == 0u ||
+                !kls_find_uflong_sorted(trailing_cols, trailing_len, col,
+                                        &u_pos) ||
+                u_pos >= trailing_len) {
+              row_supported = 0;
+              break;
+            }
+            target = KLS_ROW_SEGMENT_INPUT_TARGET_U;
+            pos = u_pos;
+          }
+        } else if (single_group && col < row) {
           target = KLS_ROW_SEGMENT_INPUT_TARGET_EXTERNAL;
           pos = col;
         } else if (col < row_begin) {
@@ -24584,6 +24612,104 @@ static int kls_parallel_row_refactor_load_input_row(
   return 1;
 }
 
+static int kls_parallel_row_refactor_load_batch_input_row_targets(
+  kls_egraph_refactor_shared *shared,
+  UF_long row,
+  UF_long input_begin,
+  UF_long input_end,
+  UF_long dep_count,
+  double *dep_values,
+  double *pivot_out,
+  UF_long u_count,
+  double *u_values) {
+  kls_solver *solver = shared != NULL ? shared->solver : NULL;
+  if (solver == NULL || row >= solver->n || pivot_out == NULL ||
+      (dep_count > 0u && dep_values == NULL) ||
+      (u_count > 0u && u_values == NULL) ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_segment_input_target_kind == NULL ||
+      solver->row_refactor_segment_input_target_pos == NULL) {
+    return 0;
+  }
+  if (!kls_row_refactor_segment_input_targets_available(
+        solver, row, input_begin, input_end)) {
+    return 0;
+  }
+  const UF_long l_begin = solver->row_refactor_l_ptr[row];
+  const UF_long l_end = solver->row_refactor_l_ptr[row + 1u];
+  if (l_begin > l_end || dep_count != l_end - l_begin) {
+    return 0;
+  }
+
+  for (UF_long p = input_begin; p < input_end; ++p) {
+    const unsigned char target =
+      solver->row_refactor_segment_input_target_kind[p];
+    const UF_long pos = solver->row_refactor_segment_input_target_pos[p];
+    switch ((kls_row_segment_input_target_kind)target) {
+      case KLS_ROW_SEGMENT_INPUT_TARGET_L:
+        if (pos < l_begin || pos >= l_end || pos - l_begin >= dep_count) {
+          kls_egraph_refactor_record_invalid(shared);
+          return -1;
+        }
+        break;
+      case KLS_ROW_SEGMENT_INPUT_TARGET_PIVOT:
+        break;
+      case KLS_ROW_SEGMENT_INPUT_TARGET_U:
+        if (pos >= u_count) {
+          kls_egraph_refactor_record_invalid(shared);
+          return -1;
+        }
+        break;
+      case KLS_ROW_SEGMENT_INPUT_TARGET_EXTERNAL:
+      case KLS_ROW_SEGMENT_INPUT_TARGET_NONE:
+      default:
+        return 0;
+    }
+  }
+
+  if (dep_count > 0u) {
+    memset(dep_values, 0, (size_t)dep_count * sizeof(*dep_values));
+  }
+  *pivot_out = 0.0;
+  if (u_count > 0u) {
+    memset(u_values, 0, (size_t)u_count * sizeof(*u_values));
+  }
+
+  for (UF_long p = input_begin; p < input_end; ++p) {
+    double value = 0.0;
+    if (!kls_refactor_input_value(solver, shared->values, shared->rs,
+                                  shared->scale,
+                                  solver->row_refactor_input_pos[p],
+                                  &value)) {
+      kls_egraph_refactor_record_invalid(shared);
+      return -1;
+    }
+    const unsigned char target =
+      solver->row_refactor_segment_input_target_kind[p];
+    const UF_long pos = solver->row_refactor_segment_input_target_pos[p];
+    switch ((kls_row_segment_input_target_kind)target) {
+      case KLS_ROW_SEGMENT_INPUT_TARGET_L:
+        dep_values[pos - l_begin] = value;
+        break;
+      case KLS_ROW_SEGMENT_INPUT_TARGET_PIVOT:
+        *pivot_out = value;
+        break;
+      case KLS_ROW_SEGMENT_INPUT_TARGET_U:
+        u_values[pos] = value;
+        break;
+      case KLS_ROW_SEGMENT_INPUT_TARGET_EXTERNAL:
+      case KLS_ROW_SEGMENT_INPUT_TARGET_NONE:
+      default:
+        kls_egraph_refactor_record_invalid(shared);
+        return -1;
+    }
+  }
+
+  kls_record_row_refactor_segment_target_input(solver);
+  kls_record_row_refactor_batch_direct_input(solver);
+  return 1;
+}
+
 static int kls_parallel_row_refactor_load_batch_input_row(
   kls_egraph_refactor_shared *shared,
   UF_long row,
@@ -24609,6 +24735,15 @@ static int kls_parallel_row_refactor_load_batch_input_row(
 
   const UF_long input_begin = solver->row_refactor_input_ptr[row];
   const UF_long input_end = solver->row_refactor_input_ptr[row + 1u];
+  {
+    const int target_status =
+      kls_parallel_row_refactor_load_batch_input_row_targets(
+        shared, row, input_begin, input_end, dep_count, dep_values,
+        pivot_out, u_count, u_values);
+    if (target_status != 0) {
+      return target_status;
+    }
+  }
   for (UF_long p = input_begin; p < input_end; ++p) {
     const UF_long col = solver->row_refactor_input_cols[p];
     if (col >= solver->n) {
@@ -26288,6 +26423,15 @@ static int kls_parallel_row_refactor_load_targeted_input_row(
   if (!kls_row_refactor_segment_input_targets_available(
         solver, row, input_begin, input_end)) {
     return 0;
+  }
+  if (solver->row_refactor_row_group != NULL &&
+      solver->row_refactor_group_kind != NULL) {
+    const UF_long group = solver->row_refactor_row_group[row];
+    if (group < solver->row_refactor_group_count &&
+        solver->row_refactor_group_kind[group] ==
+          KLS_ROW_REFACTOR_GROUP_BATCH) {
+      return 0;
+    }
   }
 
   const UF_long l_begin = solver->row_refactor_l_ptr[row];
