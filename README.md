@@ -884,6 +884,8 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_kls_block_restart_last_row_pipeline_gap_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_restarts`,
+`fast_kls_block_restart_last_row_pipeline_supernode_update_groups`,
+`fast_kls_block_restart_last_row_pipeline_supernode_update_rows`,
 `fast_tail_restarts`,
 `fast_repaired_last_offdiag_suffix_refresh`,
 `fast_repaired_offdiag_suffix_refresh_count`, and

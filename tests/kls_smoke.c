@@ -663,12 +663,12 @@ static int test_fast_factor_root_independent_tail_restart(void) {
 }
 
 static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
-  const int32_t ap[] = {0, 2, 5, 7, 8, 10, 12};
+  const int32_t ap[] = {0, 2, 5, 7, 9, 11, 13};
   const int32_t ai[] = {
     0, 4,
     1, 3, 5,
     0, 2,
-    3,
+    2, 3,
     0, 4,
     1, 5
   };
@@ -676,7 +676,7 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
     5.0899999999999999, -0.021414242728184554,
     5.75, -0.039117352056168508, -0.03239719157472417,
     0.035656970912738221, 5.3899999999999997,
-    5.9399999999999995,
+    0.024, 5.9399999999999995,
     -0.024322968906720161, 5.5199999999999996,
     0.0071213640922768301, 5.9800000000000004
   };
@@ -684,7 +684,7 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
     9.9999999999999998e-13, -2.0214142427281847,
     5.75, -0.039117352056168508, -0.03239719157472417,
     0.035656970912738221, 5.3899999999999997,
-    5.9399999999999995,
+    0.024, 5.9399999999999995,
     -0.024322968906720161, 5.5199999999999996,
     0.0071213640922768301, 5.9800000000000004
   };
@@ -726,18 +726,24 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
     ok = 0;
   }
   if (ok && (stats.fast_rejected_pivot != 0 ||
-             stats.fast_rejected_pivoting_tail_columns != 3 ||
+             stats.fast_rejected_pivoting_tail_columns != 5 ||
              stats.fast_rejected_pivoting_tail_first != 0 ||
-             stats.fast_rejected_pivoting_tail_last != 4 ||
+             stats.fast_rejected_pivoting_tail_last != 5 ||
              stats.fast_rejected_pivoting_tail_contiguous != 0 ||
-             stats.fast_rejected_pivoting_tail_gap_columns != 2 ||
+             stats.fast_rejected_pivoting_tail_gap_columns != 1 ||
              stats.fast_block_restarts != 1 ||
              stats.fast_tail_restarts != 0 ||
              stats.fast_kls_block_restart_last_row_pipeline != 1 ||
-             stats.fast_kls_block_restart_last_row_pipeline_rows != 3 ||
-             stats.fast_kls_block_restart_last_row_pipeline_gap_rows != 2 ||
-             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 1 ||
-             stats.fast_kls_block_restart_last_row_pipeline_threads < 1)) {
+             stats.fast_kls_block_restart_last_row_pipeline_rows != 5 ||
+             stats.fast_kls_block_restart_last_row_pipeline_gap_rows != 1 ||
+             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 0 ||
+             stats.fast_kls_block_restart_last_row_pipeline_threads < 1 ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_supernode_update_groups <
+               1 ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_supernode_update_rows <
+               2)) {
     fprintf(stderr,
             "unexpected noncontiguous gap tail stats: pivot=%" PRId64
             ", tail_cols=%" PRId64 ", first=%" PRId64 ", last=%" PRId64
@@ -745,7 +751,9 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             ", block_restarts=%d, tail_restarts=%d"
             ", pipeline=%d, pipeline_rows=%" PRId64
             ", pipeline_gaps=%" PRId64 ", pipeline_suffix=%" PRId64
-            ", pipeline_threads=%" PRId64 "\n",
+            ", pipeline_threads=%" PRId64
+            ", supernode_groups=%" PRId64 ", supernode_rows=%" PRId64
+            "\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_pivoting_tail_columns,
             stats.fast_rejected_pivoting_tail_first,
@@ -758,7 +766,11 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             stats.fast_kls_block_restart_last_row_pipeline_rows,
             stats.fast_kls_block_restart_last_row_pipeline_gap_rows,
             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows,
-            stats.fast_kls_block_restart_last_row_pipeline_threads);
+            stats.fast_kls_block_restart_last_row_pipeline_threads,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_supernode_update_groups,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_supernode_update_rows);
     ok = 0;
   }
   if (ok && !require_pivoting_tail_plan(&stats, "noncontiguous gap tail")) {

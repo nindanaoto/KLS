@@ -5023,9 +5023,12 @@ decomposition output expose the behavior through
 `fast_kls_block_restart_last_row_pipeline_prefix_rows`,
 `fast_kls_block_restart_last_row_pipeline_suffix_rows`,
 `fast_kls_block_restart_last_row_pipeline_gap_rows`,
-`fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`, and
-`fast_kls_block_restart_last_row_pipeline_pivot_restarts`; the prior-pivot
-smoke fixture now requires the two-thread repair to use that pipeline.
+`fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`,
+`fast_kls_block_restart_last_row_pipeline_pivot_restarts`,
+`fast_kls_block_restart_last_row_pipeline_supernode_update_groups`, and
+`fast_kls_block_restart_last_row_pipeline_supernode_update_rows`; the
+prior-pivot smoke fixture now requires the two-thread repair to use that
+pipeline.
 
 KLS now narrows that block-repair pipeline when the retained pivoting-tail plan
 is an exact topological suffix ending at the end of the rejected BTF block. In
@@ -5055,10 +5058,22 @@ KLS now fills the next direct CKTSO tail gap by admitting non-contiguous
 topological pivoting-tail masks into the same restartable row pipeline. The
 pipeline packs only active ETree-descendant tail rows into topological order,
 keeps preserved gap and suffix rows seeded from the prior LU, and applies
-readiness through an active-rank map instead of raw row-number thresholds. The
-masked path intentionally disables supernode-panel grouping for those packed
-rows until panel readiness is made mask-aware; contiguous suffix/envelope paths
-keep the existing panel behavior. Public and benchmark statistics now report
+readiness through an active-rank map instead of raw row-number thresholds.
+Public and benchmark statistics now report
 `fast_kls_block_restart_last_row_pipeline_gap_rows`, and the non-contiguous gap
-smoke fixture requires two preserved gap rows, one preserved suffix row, and no
+smoke fixture requires a preserved gap row and no
 serial tail restart when two threads are enabled.
+
+The masked row-pipeline repair now makes the same ready-supernode branch
+mask-aware. Packed active tail rows no longer force singleton producer rows:
+the phase initializes supernode metadata from already-preserved rows, each
+ordered active-row publish rebuilds the completed local supernode map across
+preserved gaps and active rows, and readiness checks use the active-rank map to
+stop a run at unfinished active rows while still admitting ready preserved gap
+rows. Cached dense panels remain disabled for masked tails after dynamic column
+exchanges, but the Algorithm 4/5-style grouped predecessor update is no longer
+limited to contiguous envelopes. The fast block-repair pipeline reports this
+through `fast_kls_block_restart_last_row_pipeline_supernode_update_groups` and
+`fast_kls_block_restart_last_row_pipeline_supernode_update_rows`; the
+non-contiguous gap smoke fixture now requires one grouped update over two
+producer rows.
