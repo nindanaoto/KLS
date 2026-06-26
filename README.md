@@ -136,6 +136,11 @@ retained pattern through the checked fast path. Unset
 eligible first factorizations try KLS-owned row-up-looking factorization before
 KLU, `KLS_ENABLE_KLS_FIRST_FACTOR=0` keeps the old KLU-first behavior, and
 `KLS_ENABLE_KLS_FIRST_FACTOR=1` forces the KLS-owned scaffold when possible.
+Automatic mode deliberately skips very large scaled single-BTF-block states
+until KLS has CKTSO's parallel row-up/ETree first-factor engine; those states
+would otherwise run through the current serial row-up bridge and can be much
+slower than the accepted KLU/static first factor. Benchmark JSON reports that
+guard as `kls_first_auto_skipped_scaled_single_block_count`.
 It reports `kls_first` when it successfully assembles KLU-compatible numeric
 storage. For eligible no-scale or KLU row-scaled matrices, that path first
 tries a KLS-owned sparse row-major up-looking first factor over each BTF

@@ -820,6 +820,8 @@ int main(int argc, char **argv) {
            ",\"kls_first_separator_extent_dynamic_column_pivot_count\":%" PRId64
            ",\"kls_first_last_separator_dynamic_column_fallbacks\":%" PRId64
            ",\"kls_first_separator_dynamic_column_fallback_count\":%" PRId64
+           ",\"kls_first_auto_skipped_scaled_single_block\":%d"
+           ",\"kls_first_auto_skipped_scaled_single_block_count\":%" PRId64
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
            ",\"solve_seconds_avg\":%.9g,\"transpose_solve_seconds_avg\":%.9g"
            ",\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g"
@@ -925,6 +927,8 @@ int main(int argc, char **argv) {
            stats.kls_first_separator_extent_dynamic_column_pivot_count,
            stats.kls_first_last_separator_dynamic_column_fallbacks,
            stats.kls_first_separator_dynamic_column_fallback_count,
+           stats.kls_first_auto_skipped_scaled_single_block,
+           stats.kls_first_auto_skipped_scaled_single_block_count,
            factor_avg, refactor_avg, solve_avg, tsolve_avg,
            residual, rel_residual, stats.nblocks, stats.max_block,
            stats.structural_rank, stats.numerical_rank,
@@ -1415,6 +1419,10 @@ int main(int argc, char **argv) {
            stats.kls_first_separator_extent_dynamic_column_pivot_count,
            stats.kls_first_last_separator_dynamic_column_fallbacks,
            stats.kls_first_separator_dynamic_column_fallback_count);
+    printf("KLS first auto skipped scaled single-block: last %d, total %" PRId64
+           "\n",
+           stats.kls_first_auto_skipped_scaled_single_block,
+           stats.kls_first_auto_skipped_scaled_single_block_count);
     printf("factor avg: %.6f s\n", factor_avg);
     printf("refactor avg: %.6f s\n", refactor_avg);
     printf("solve avg: %.6f s\n", solve_avg);

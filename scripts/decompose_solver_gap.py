@@ -100,10 +100,15 @@ def paper_gap_signal(
     last_path = str_value(cand_row, "last_factor_path")
     row_groups = int_value(cand_row, "row_refactor_group_count")
     row_run = int_value(cand_row, "row_refactor_last_run")
+    first_skip_scaled_single = int_value(
+        cand_row, "kls_first_auto_skipped_scaled_single_block_count"
+    )
     egraph_work = float_value(cand_row, "refactor_dependency_work")
     row_work = float_value(cand_row, "row_refactor_total_group_work")
     compact_work = float_value(cand_row, "row_refactor_compact_dense_panel_update_work")
 
+    if first_skip_scaled_single:
+        return "missing_parallel_rowup_first_factor"
     if dominant_phase == "refactor_99":
         if last_path == "kls_fast_refactor":
             if row_run:
@@ -180,6 +185,8 @@ def main() -> int:
         "kls_first_separator_extent_dynamic_column_pivot_count,"
         "kls_first_last_separator_dynamic_column_fallbacks,"
         "kls_first_separator_dynamic_column_fallback_count,"
+        "kls_first_auto_skipped_scaled_single_block,"
+        "kls_first_auto_skipped_scaled_single_block_count,"
         "paper_gap_signal,refactor_dependency_pipeline_share,"
         "row_refactor_group_work_ratio,"
         "row_refactor_compact_panel_work_share,"
@@ -307,6 +314,8 @@ def main() -> int:
             f"{int_value(cand_row, 'kls_first_separator_extent_dynamic_column_pivot_count')},"
             f"{int_value(cand_row, 'kls_first_last_separator_dynamic_column_fallbacks')},"
             f"{int_value(cand_row, 'kls_first_separator_dynamic_column_fallback_count')},"
+            f"{int_value(cand_row, 'kls_first_auto_skipped_scaled_single_block')},"
+            f"{int_value(cand_row, 'kls_first_auto_skipped_scaled_single_block_count')},"
             f"{paper_gap_signal(cand, cand_row)},"
             f"{fmt_share(share(float_value(cand_row, 'refactor_dependency_pipeline_work'), egraph_work))},"
             f"{fmt_share(share(row_work, egraph_work))},"

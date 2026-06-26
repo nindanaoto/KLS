@@ -4077,3 +4077,18 @@ row fast factorization through the separator FLOP queue with a clean solve.
 This closes the earlier duplicate-block ambiguity and lets retained separator
 metadata survive BTF forests, while still leaving production supernodal BLAS and
 CKTSO's pivoting-tail executor as larger remaining paper gaps.
+
+The KLS-first automatic selector now refuses one class where the implementation
+was ahead of the paper coverage: very large scaled matrices whose accepted
+symbolic state is one BTF block. The CKTSO paper treats this class with a
+parallel row-up/ETree task factorization, while KLS's current KLS-first bridge
+is still a serial row-up packer. On the CKTSO-gap focus subset, `rajat24` was
+the clear failure mode: before this guard it selected `kls_first`, spent about
+40.1 s in initial factorization, and modeled at 66.1 s versus CKTSO's 4.68 s.
+After the guard, default automatic mode reports
+`kls_first_auto_skipped_scaled_single_block_count=1`, keeps the KLU/static first
+factor, and models at 10.8 s. The 12-row focus geomean moved from 3.78 s
+to 3.34 s, reducing the CKTSO ratio from 2.96x to 2.62x. This is not the final
+paper algorithm; it prevents the incomplete serial scaffold from masking the
+actual missing piece, which is CKTSO's parallel row-up first factor and the
+matching row-oriented refactor/solve engine.

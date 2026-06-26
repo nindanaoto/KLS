@@ -382,6 +382,8 @@ struct kls_solver {
   UF_long kls_first_separator_dynamic_column_fallback_count;
   UF_long kls_first_last_separator_extent_dynamic_column_pivots;
   UF_long kls_first_separator_extent_dynamic_column_pivot_count;
+  int kls_first_auto_skipped_scaled_single_block;
+  UF_long kls_first_auto_skipped_scaled_single_block_count;
   int factor_etree_stats_valid;
   kls_separator_analysis separator;
 };
@@ -1946,6 +1948,7 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_separator_dynamic_column_pivots = 0;
   solver->kls_first_last_separator_dynamic_column_fallbacks = 0;
   solver->kls_first_last_separator_extent_dynamic_column_pivots = 0;
+  solver->kls_first_auto_skipped_scaled_single_block = 0;
   solver->stats.kls_tail_last_mapped_columns = 0;
   solver->stats.kls_first_last_row_uplooking_columns = 0;
   solver->stats.kls_first_last_row_refactor_seeded_rows = 0;
@@ -1953,6 +1956,7 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_first_last_separator_dynamic_column_pivots = 0;
   solver->stats.kls_first_last_separator_dynamic_column_fallbacks = 0;
   solver->stats.kls_first_last_separator_extent_dynamic_column_pivots = 0;
+  solver->stats.kls_first_auto_skipped_scaled_single_block = 0;
 }
 
 static void kls_set_last_factor_path(kls_solver *solver,
@@ -10060,6 +10064,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)separator_extent_pivots;
   solver->stats.kls_first_separator_extent_dynamic_column_pivot_count =
     (int64_t)solver->kls_first_separator_extent_dynamic_column_pivot_count;
+  solver->stats.kls_first_auto_skipped_scaled_single_block =
+    solver->kls_first_auto_skipped_scaled_single_block;
+  solver->stats.kls_first_auto_skipped_scaled_single_block_count =
+    (int64_t)solver->kls_first_auto_skipped_scaled_single_block_count;
   solver->stats.row_refactor_last_done_bitmap =
     solver->row_refactor_last_done_bitmap;
   solver->stats.row_refactor_done_bitmap_run_count =
@@ -18848,7 +18856,22 @@ static int kls_first_factor_env_disabled(void) {
   return value != NULL && value[0] == '0' && value[1] == '\0';
 }
 
-static int kls_auto_first_factor_should_run(const kls_solver *solver) {
+static int kls_auto_first_factor_scaled_single_block_risk(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL) {
+    return 0;
+  }
+  if (solver->n < 150000u || solver->common.scale <= 0) {
+    return 0;
+  }
+  if (solver->symbolic->nblocks != 1u ||
+      solver->symbolic->maxblock != solver->n) {
+    return 0;
+  }
+  return 1;
+}
+
+static int kls_auto_first_factor_should_run(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->nblocks == 0u || solver->symbolic->maxblock < 30000u ||
       solver->n < 30000u || solver->symbolic->R == NULL ||
@@ -18856,10 +18879,22 @@ static int kls_auto_first_factor_should_run(const kls_solver *solver) {
       solver->common.scale < -1 || solver->common.scale > 2) {
     return 0;
   }
+  if (kls_auto_first_factor_scaled_single_block_risk(solver)) {
+    /*
+     * CKTSO's fast path for this class is the parallel row-up/ETree task
+     * factorization. KLS's current KLS-first bridge is still a serial row-up
+     * packer, so automatic mode must not replace an accepted KLU/static first
+     * factor with that incomplete scaffold on very large scaled single-block
+     * systems. KLS_ENABLE_KLS_FIRST_FACTOR=1 still forces the experiment.
+     */
+    solver->kls_first_auto_skipped_scaled_single_block = 1;
+    ++solver->kls_first_auto_skipped_scaled_single_block_count;
+    return 0;
+  }
   return 1;
 }
 
-static int kls_should_try_first_factor(const kls_solver *solver) {
+static int kls_should_try_first_factor(kls_solver *solver) {
   if (kls_first_factor_env_enabled()) {
     return 1;
   }
