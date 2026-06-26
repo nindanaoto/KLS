@@ -456,6 +456,9 @@ typedef struct kls_stats {
   int64_t kls_first_last_separator_queue_pipeline_pivot_restarts;
   int64_t kls_first_separator_queue_pipeline_pivot_restart_count;
   int64_t kls_first_last_separator_queue_pipeline_pivot_serial_rows;
+  int kls_first_last_separator_queue_pipeline_prefix_panel_rebuild;
+  int64_t kls_first_separator_queue_pipeline_prefix_panel_rebuild_count;
+  int64_t kls_first_last_separator_queue_pipeline_prefix_panel_rebuild_rows;
   int64_t fast_rejected_pivoting_tail_row_seed_columns;
   int64_t row_refactor_last_sparse_segment_direct_input_rows;
   int64_t row_refactor_sparse_segment_direct_input_rows;

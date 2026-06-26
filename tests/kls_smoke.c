@@ -10756,6 +10756,12 @@ static int test_kls_first_separator_pipeline_pivot_epoch(void) {
                0 ||
              factor_stats.kls_first_last_separator_queue_pipeline_pivot_tail_rows <=
                0 ||
+             factor_stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild !=
+               1 ||
+             factor_stats.kls_first_separator_queue_pipeline_prefix_panel_rebuild_count <=
+               0 ||
+             factor_stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild_rows <=
+               factor_stats.kls_first_last_separator_queue_private_rows ||
              factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update !=
                1 ||
              factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_groups <=
@@ -10772,6 +10778,7 @@ static int test_kls_first_separator_pipeline_pivot_epoch(void) {
             ", queue=%d, pipe=%" PRId64
             ", pipe_parallel=%d"
             ", sep_pivots=%" PRId64
+            ", prefix_panel_rebuild=%d/%" PRId64 "/%" PRId64
             ", panel_update=%d/%" PRId64 "/%" PRId64
             ", pivot_tail=%d, restarts=%" PRId64
             ", tail_rows=%" PRId64
@@ -10785,6 +10792,9 @@ static int test_kls_first_separator_pipeline_pivot_epoch(void) {
             factor_stats.kls_first_last_separator_queue_pipeline_rows,
             factor_stats.kls_first_last_separator_queue_parallel_pipeline,
             factor_stats.kls_first_last_separator_dynamic_column_pivots,
+            factor_stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild,
+            factor_stats.kls_first_separator_queue_pipeline_prefix_panel_rebuild_count,
+            factor_stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild_rows,
             factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update,
             factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_groups,
             factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_rows,
