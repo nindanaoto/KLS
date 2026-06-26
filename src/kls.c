@@ -14861,6 +14861,69 @@ static int kls_copy_finished_gap_lu_column(
   return 1;
 }
 
+static int kls_finished_gap_lu_column_depends_on_tail(
+  const Unit *old_lu,
+  size_t old_lusize,
+  const UF_long *old_lip,
+  const UF_long *old_llen,
+  const UF_long *old_uip,
+  const UF_long *old_ulen,
+  const UF_long *old_pblock,
+  const unsigned char *restart_tail_mask,
+  const UF_long *live_pinv,
+  UF_long nk,
+  UF_long k) {
+  if (old_lu == NULL || old_lip == NULL || old_llen == NULL ||
+      old_uip == NULL || old_ulen == NULL || old_pblock == NULL ||
+      restart_tail_mask == NULL || live_pinv == NULL ||
+      k >= nk || old_pblock[k] >= nk) {
+    return 0;
+  }
+  const UF_long l_len = old_llen[k];
+  const UF_long u_len = old_ulen[k];
+  const UF_long src_lip = old_lip[k];
+  const UF_long src_uip = old_uip[k];
+  const size_t l_units = kls_klu_units_for_indices(l_len);
+  const size_t u_units = kls_klu_units_for_indices(u_len);
+  if ((size_t)src_lip > old_lusize ||
+      l_units > old_lusize - (size_t)src_lip ||
+      l_len > (UF_long)(old_lusize - (size_t)src_lip - l_units) ||
+      (size_t)src_uip > old_lusize ||
+      u_units > old_lusize - (size_t)src_uip ||
+      u_len > (UF_long)(old_lusize - (size_t)src_uip - u_units)) {
+    return 0;
+  }
+
+  int depends = live_pinv[old_pblock[k]] >= 0;
+  const Int *src_ui = (const Int *)((const Unit *)old_lu + src_uip);
+  for (UF_long p = 0; p < u_len; ++p) {
+    const Int dep = src_ui[p];
+    if (dep < 0 || (UF_long)dep >= k) {
+      return 0;
+    }
+    if (restart_tail_mask[dep]) {
+      depends = 1;
+    }
+  }
+
+  const Int *src_li = (const Int *)((const Unit *)old_lu + src_lip);
+  for (UF_long p = 0; p < l_len; ++p) {
+    const Int final_order = src_li[p];
+    if (final_order <= (Int)k || final_order < 0 ||
+        (UF_long)final_order >= nk) {
+      return 0;
+    }
+    const UF_long local_row = old_pblock[final_order];
+    if (local_row >= nk) {
+      return 0;
+    }
+    if (live_pinv[local_row] >= 0) {
+      depends = 1;
+    }
+  }
+  return depends;
+}
+
 static UF_long kls_preferred_pivot_tail_restart_end(const kls_solver *solver,
                                                     UF_long k1,
                                                     UF_long nk,
@@ -15070,6 +15133,17 @@ static int kls_try_pivot_tail_restart_rejected_block(
   const double memgrow = solver->common.memgrow;
   const int preserve_suffix = restart_end < nk;
   const int use_restart_mask = restart_tail_mask != NULL;
+  int promoted_gap_columns = 0;
+  unsigned char *active_tail_mask = NULL;
+  if (use_restart_mask) {
+    active_tail_mask = (unsigned char *)malloc((size_t)nk *
+                                               sizeof(*active_tail_mask));
+    if (active_tail_mask == NULL) {
+      goto fail;
+    }
+    memcpy(active_tail_mask, restart_tail_mask,
+           (size_t)nk * sizeof(*active_tail_mask));
+  }
   const int use_mapped_tail =
     kls_tail_mapped_block_is_valid(solver, k1, nk, psinv);
   UF_long mapped_columns = 0;
@@ -15077,8 +15151,9 @@ static int kls_try_pivot_tail_restart_rejected_block(
   double skipped_work = 0.0;
   for (UF_long kk = local_reject; kk < restart_end; ++kk) {
     const Int k = (Int)kk;
-    const int lock_gap_pivot =
-      use_restart_mask && !restart_tail_mask[kk];
+    int lock_gap_pivot =
+      use_restart_mask && active_tail_mask != NULL &&
+      !active_tail_mask[kk];
     if (lock_gap_pivot && pblock[kk] != old_pblock[kk]) {
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
@@ -15086,7 +15161,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
     if (lock_gap_pivot) {
       if (kls_copy_finished_gap_lu_column(
             &new_lu, &lusize, old_lu, old_lusize, lip, llen, uip, ulen,
-            udiag, old_pblock, restart_tail_mask, live_pinv, nk, kk, lip,
+            udiag, old_pblock, active_tail_mask, live_pinv, nk, kk, lip,
             llen, uip, ulen, udiag, &lup, &lnz, &unz,
             &solver->common)) {
         const UF_long pivrow = old_pblock[kk];
@@ -15105,9 +15180,17 @@ static int kls_try_pivot_tail_restart_rejected_block(
       if (solver->common.status < TRILINOS_KLU_OK) {
         goto fail;
       }
-      /* A dependent gap means the exact ETree tail mask is not executable from
-         the retained LU state. Let the caller fall back to the wider restart. */
-      goto fail;
+      if (kls_finished_gap_lu_column_depends_on_tail(
+            old_lu, old_lusize, lip, llen, uip, ulen, old_pblock,
+            active_tail_mask, live_pinv, nk, kk)) {
+        active_tail_mask[kk] = 1u;
+        promoted_gap_columns++;
+        lock_gap_pivot = 0;
+      } else {
+        /* Non-dependency copy failures are structural or mapping failures, so
+           keep them on the wider fallback instead of speculating here. */
+        goto fail;
+      }
     }
     const double nunits =
       DUNITS(Int, (Int)nk - k) + DUNITS(Int, k) +
@@ -15300,13 +15383,14 @@ static int kls_try_pivot_tail_restart_rejected_block(
     }
   }
   free(scratch);
+  free(active_tail_mask);
   *new_lu_out = new_lu;
   *new_size_out = lusize;
   *lnz_block_out = lnz;
   *unz_block_out = unz;
   *skipped_columns_out = skipped_columns;
   *skipped_work_out = skipped_work;
-  *exact_mask_used_out = use_restart_mask;
+  *exact_mask_used_out = use_restart_mask && promoted_gap_columns == 0;
   solver->kls_tail_last_mapped_columns += mapped_columns;
   solver->kls_tail_mapped_column_count += mapped_columns;
   return 1;
@@ -15317,6 +15401,7 @@ fail:
   }
   (void)TRILINOS_KLU_free(new_lu, lusize, sizeof(Unit), &solver->common);
   free(scratch);
+  free(active_tail_mask);
   if (new_lu_out != NULL) {
     *new_lu_out = NULL;
   }

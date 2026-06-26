@@ -3251,16 +3251,20 @@ block repair now tries to copy already-finished gap columns from the current
 numeric LU stream and numerically refactor only the marked tail columns. A gap
 column is copied only if its pivot row is still unchanged, its L rows are still
 unpivoted, and its U predecessors do not include a recomputed tail column. If
-that copy is impossible because the gap depends on a recomputed tail column,
-KLS now rejects the masked attempt and falls back to the wider serial restart
-instead of forcing the old pivot inside a non-tail gap. Benchmark JSON reports
-copied gap columns/work as `fast_repaired_tail_restart_skipped_columns` and
+that copy is impossible because the gap depends on recomputed tail state, KLS
+now promotes the gap into the active tail mask and recomputes it with normal
+pivoting instead of forcing the old pivot inside a non-tail gap or immediately
+falling back to the wider serial restart. Structural/mapping copy failures still
+fall back. Benchmark JSON reports copied gap columns/work as
+`fast_repaired_tail_restart_skipped_columns` and
 `fast_repaired_tail_restart_skipped_work`, and
 `fast_repaired_tail_restart_exact_mask` identifies successful repairs whose
-executed columns exactly match the ETree-derived pivoting-tail mask. This is
-still a serial conservative subset of CKTSO's pipelined pivoting-tail executor,
-not the full non-contiguous parallel row-tail algorithm, but successful masked
-cases are no longer blended with serial gap refactors.
+executed columns exactly match the ETree-derived pivoting-tail mask; promoted
+gap repairs deliberately clear that flag and show up as tail overcompute. This
+is still a serial conservative subset of CKTSO's pipelined pivoting-tail
+executor, not the full non-contiguous parallel row-tail algorithm, but successful
+masked cases are no longer blended with serial gap refactors and dependency
+blocked internal gaps no longer force an all-or-nothing suffix fallback.
 
 The row-up first-factor dynamic column-pivot path then stopped relabeling
 swapped columns by scanning every previously emitted U entry. U entries now keep

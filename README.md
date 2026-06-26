@@ -479,9 +479,12 @@ Root-of-block rejects can use the same KLS-owned pivoted block kernel. When the
 reject-only ETree closure leaves independent single-block columns outside the
 tail, KLS first refreshes those preserved columns with the mapped no-pivot
 column kernel, then runs the shorter pivoted tail envelope and counts it as a
-tail restart. Full-suffix root rejects still remain ordinary KLS block
-restarts. This is a local serial subset of CKTSO-style repair, not the full
-pipelined ETree-descendant scheduler.
+tail restart. Internal envelope gaps that can be copied unchanged are skipped;
+dependency-blocked internal gaps are promoted into the active tail and
+recomputed with pivoting, while structural gap-copy failures still fall back.
+Full-suffix root rejects still remain ordinary KLS block restarts. This is a
+local serial subset of CKTSO-style repair, not the full pipelined
+ETree-descendant scheduler.
 With `KLS_ENABLE_CHECKED_ROW_REFACTOR=1`, the experimental KLS-owned
 row/segment refactor can also run the checked fast-factor pass through its
 parallel row scheduler when multiple threads are available. A rejected
@@ -864,7 +867,9 @@ numeric state, the
 number of repaired BTF blocks, how many repairs used the KLS-owned pivoted block
 kernel, and the number of serial tail restarts actually executed, plus whether
 repaired serial-tail restarts refreshed only the off-diagonal suffix or rebuilt
-all off-diagonal entries. These fields are
+all off-diagonal entries, and whether a non-contiguous serial repair exactly
+matched the retained ETree tail mask or had to recompute promoted internal gap
+columns as overcompute. These fields are
 intended to guide fuller CKTSO-style tail-restart work without accepting an
 unsafe reused pivot order.
 
