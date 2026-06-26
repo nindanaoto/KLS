@@ -4216,3 +4216,19 @@ panel reconstruction: `G2_circuit` still applied 424,395 grouped updates and
 piece from the papers but does not close the slow-case gap by itself. The
 remaining direct paper gap is compact or batched numerical kernels over these
 panels, not more supernode detection.
+
+The column EGraph cache now also consumes published supernode prefixes and
+suffixes, matching the partial-publication idea already present in the
+row-refactor compact panel path. The cached consumer uses `col_id` rather than
+start-only lookup, solves the available dependency subrun inside the retained
+dense panel, scatters any in-panel rows beyond the published prefix into the
+current column work vector, and accumulates the shared trailing panel once. This
+removes another direct paper gap: current columns inside a retained supernode
+can reuse already published producer columns instead of rebuilding a partial
+panel. On the same six-row focus subset, the corrected prefix/suffix path
+(`build/kls_egraph_supernode_panel_prefix_correct_focus6_t4_r3_timeout120.jsonl`)
+improved the persistent-panel probe from 10.43 s to 9.44 s geomean. The default
+KLS column EGraph path remains faster at 8.29 s geomean, so this is still kept
+behind `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1`. The next gap remains a
+coarser compact/batched numeric update kernel; per-consumer scalar loops over
+the retained panel are not enough.

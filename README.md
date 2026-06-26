@@ -556,10 +556,13 @@ and cumulative `refactor_supernode_update_*` totals. This path is intentionally
 off by default. It now builds persistent producer-side compact panels for
 eligible retained EGraph supernodes and publishes panel rows as producer
 columns finish, so later consumers reuse the dense/internal and shared trailing
-values instead of reconstructing that structure for every dependency run.
-Focused runs show this removes the worst rebuild overhead, but the path is
-still slower than default KLS because it applies each consumer update with
-scalar loops rather than the paper's compact/batched panel kernels.
+values instead of reconstructing that structure for every dependency run. The
+same cache can consume a published prefix or suffix of a retained panel, so a
+column inside a supernode no longer has to rebuild a temporary partial panel
+just to use already completed producer columns. Focused runs show this removes
+the worst rebuild overhead, but the path is still slower than default KLS
+because it applies each consumer update with scalar loops rather than the
+paper's compact/batched panel kernels.
 The experimental row pipeline preserves the CKTSO-style wide cluster prefix
 selected by the `2 * threads` width rule, then consumes the remaining narrow
 tail through a bounded successor-ready queue when explicit predecessor counts

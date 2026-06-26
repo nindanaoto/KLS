@@ -25095,7 +25095,7 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
   if (solver == NULL || !shared->supernode_numeric_updates ||
-      solver->refactor_supernode_panel_start_id == NULL ||
+      solver->refactor_supernode_panel_col_id == NULL ||
       solver->refactor_supernode_panel_start == NULL ||
       solver->refactor_supernode_panel_local_start == NULL ||
       solver->refactor_supernode_panel_width == NULL ||
@@ -25116,7 +25116,7 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
   if (dep_global >= current_global || dep_global >= solver->n) {
     return 0;
   }
-  const UF_long panel = solver->refactor_supernode_panel_start_id[dep_global];
+  const UF_long panel = solver->refactor_supernode_panel_col_id[dep_global];
   if (panel == KLS_KLU_EMPTY ||
       panel >= solver->refactor_supernode_panel_count) {
     return 0;
@@ -25127,45 +25127,63 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
   const UF_long width = solver->refactor_supernode_panel_width[panel];
   const UF_long trailing_len =
     solver->refactor_supernode_panel_trailing_len[panel];
-  if (start != dep_global || local_start != dep_local ||
-      width <= 1u || start > solver->n || width > solver->n - start ||
-      start + width > current_global ||
-      width > ucol_len - up ||
-      width > current_local - dep_local) {
+  if (width <= 1u || start > dep_global || dep_global >= start + width ||
+      start > solver->n || width > solver->n - start) {
     return 0;
   }
-  for (UF_long local = 0; local < width; ++local) {
+  const UF_long panel_offset = dep_global - start;
+  if (local_start > dep_local ||
+      dep_local - local_start != panel_offset) {
+    return 0;
+  }
+  UF_long available_end = width;
+  if (start + width > current_global) {
+    available_end = current_global - start;
+  }
+  if (available_end > width) {
+    available_end = width;
+  }
+  if (available_end <= panel_offset + 1u) {
+    return 0;
+  }
+  const UF_long run_rows = available_end - panel_offset;
+  if (run_rows > ucol_len - up ||
+      run_rows > current_local - dep_local) {
+    return 0;
+  }
+  for (UF_long local = 0; local < run_rows; ++local) {
     if (ui[up + local] != dep_local + local) {
       return 0;
     }
   }
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(double));
-  if (width > max_workspace_entries ||
-      trailing_len > max_workspace_entries - width) {
+  if (run_rows > max_workspace_entries ||
+      trailing_len > max_workspace_entries - run_rows) {
     return 0;
   }
   double *workspace =
-    kls_egraph_worker_supernode_workspace(worker, width + trailing_len);
+    kls_egraph_worker_supernode_workspace(worker, run_rows + trailing_len);
   if (workspace == NULL) {
     return 0;
   }
   double *trailing_workspace =
-    trailing_len > 0u ? workspace + width : NULL;
+    trailing_len > 0u ? workspace + run_rows : NULL;
   if (trailing_len > 0u) {
     memset(trailing_workspace, 0,
            (size_t)trailing_len * sizeof(*trailing_workspace));
   }
 
   if (wait_for_dependencies) {
-    for (UF_long local = 0; local < width; ++local) {
-      if (!kls_egraph_refactor_wait_done(shared, start + local)) {
+    for (UF_long local = 0; local < run_rows; ++local) {
+      if (!kls_egraph_refactor_wait_done(
+            shared, start + panel_offset + local)) {
         return -1;
       }
     }
   }
 
-  for (UF_long local = 0; local < width; ++local) {
+  for (UF_long local = 0; local < run_rows; ++local) {
     const UF_long row = dep_local + local;
     workspace[local] = x[row];
     x[row] = 0.0;
@@ -25182,15 +25200,21 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
   if (trailing_len > 0u && trailing_values == NULL) {
     return 0;
   }
-  for (UF_long local = 0; local < width; ++local) {
+  for (UF_long local = 0; local < run_rows; ++local) {
+    const UF_long panel_local = panel_offset + local;
     const double ujk = workspace[local];
     ux[up + local] = ujk;
-    const double *dense_row = dense_panel + local * width;
-    for (UF_long target = local + 1u; target < width; ++target) {
-      workspace[target] -= ujk * dense_row[target];
+    const double *dense_row = dense_panel + panel_local * width;
+    for (UF_long target = panel_local + 1u; target < width; ++target) {
+      if (target < available_end) {
+        workspace[target - panel_offset] -= ujk * dense_row[target];
+      } else {
+        x[local_start + target] -= ujk * dense_row[target];
+      }
     }
     if (trailing_len > 0u) {
-      const double *row_values = trailing_values + local * trailing_len;
+      const double *row_values =
+        trailing_values + panel_local * trailing_len;
       for (UF_long offset = 0; offset < trailing_len; ++offset) {
         trailing_workspace[offset] += ujk * row_values[offset];
       }
@@ -25206,11 +25230,13 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
     }
   }
 
-  const UF_long trsv_entries = (width * (width - 1u)) / 2u;
-  const UF_long trailing_entries = width * trailing_len;
-  kls_egraph_record_supernode_update(shared, width,
-                                     trsv_entries + trailing_entries);
-  *up_io = up + width;
+  const UF_long trsv_entries = (run_rows * (run_rows - 1u)) / 2u;
+  const UF_long dense_scatter_entries = run_rows * (width - available_end);
+  const UF_long trailing_entries = run_rows * trailing_len;
+  kls_egraph_record_supernode_update(shared, run_rows,
+                                     trsv_entries + dense_scatter_entries +
+                                       trailing_entries);
+  *up_io = up + run_rows;
   return 1;
 }
 
