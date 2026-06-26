@@ -37148,19 +37148,19 @@ static int kls_row_first_run_parallel_pipeline_phase(
   if ((ok || pivot_tail_ready) && thread_rows_out != NULL) {
     *thread_rows_out = active_threads;
   }
-  if (ok && partial_rows_out != NULL) {
+  if ((ok || pivot_tail_ready) && partial_rows_out != NULL) {
     *partial_rows_out = partial_rows;
   }
-  if (ok && wait_partial_rows_out != NULL) {
+  if ((ok || pivot_tail_ready) && wait_partial_rows_out != NULL) {
     *wait_partial_rows_out = wait_partial_rows;
   }
-  if (ok && wait_partial_deps_out != NULL) {
+  if ((ok || pivot_tail_ready) && wait_partial_deps_out != NULL) {
     *wait_partial_deps_out = wait_partial_deps;
   }
-  if (ok && supernode_update_groups_out != NULL) {
+  if ((ok || pivot_tail_ready) && supernode_update_groups_out != NULL) {
     *supernode_update_groups_out = supernode_update_groups;
   }
-  if (ok && supernode_update_rows_out != NULL) {
+  if ((ok || pivot_tail_ready) && supernode_update_rows_out != NULL) {
     *supernode_update_rows_out = supernode_update_rows;
   }
 
@@ -37287,6 +37287,11 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     if (phase_threads > max_threads) {
       max_threads = phase_threads;
     }
+    partial_rows += phase_partial_rows;
+    wait_partial_rows += phase_wait_partial_rows;
+    wait_partial_deps += phase_wait_partial_deps;
+    supernode_update_groups += phase_supernode_groups;
+    supernode_update_rows += phase_supernode_rows;
     pivot_tail_rows += end - completed_pos;
     pivot_restarts++;
     const UF_long pivot_row = row_order[completed_pos];

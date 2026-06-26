@@ -184,8 +184,11 @@ serializes that pivot row with the pivot-capable row-up kernel, and relaunches
 the remaining suffix through the pipeline; benchmark stats distinguish the
 restart envelope from actual serialized rows with
 `kls_first_last_separator_queue_pipeline_pivot_restarts` and
-`kls_first_last_separator_queue_pipeline_pivot_serial_rows`. If that row-up-looking
-bridge is not eligible or still rejects a pivot, the pivoted KLS block tail
+`kls_first_last_separator_queue_pipeline_pivot_serial_rows`. Partial
+pre-updates and scalar row-supernode updates completed before a pivot restart
+remain counted in the same separator-pipeline counters, matching the retained
+prefix semantics of the relaunch. If that row-up-looking bridge is not eligible
+or still rejects a pivot, the pivoted KLS block tail
 still runs; it reuses KLS's retained factor-order input map when available,
 reported as
 `kls_tail_last_mapped_columns` and `kls_tail_mapped_column_count`, so the

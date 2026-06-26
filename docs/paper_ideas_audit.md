@@ -3878,8 +3878,12 @@ pivot-tail restarts are reported by
 actually serialized pivot-row counts reported by
 `kls_first_last_separator_queue_pipeline_pivot_restarts`,
 `kls_first_separator_queue_pipeline_pivot_restart_count`, and
-`kls_first_last_separator_queue_pipeline_pivot_serial_rows`. A smoke test
-covers this on a 30,000-row METIS-ordered tridiagonal KLS-first factor,
+`kls_first_last_separator_queue_pipeline_pivot_serial_rows`. Prefix
+private-predecessor pre-updates, waiting-prefix pre-updates, and scalar
+row-supernode updates completed before a pipeline pivot restart remain counted
+in the same counters after the suffix relaunch, matching the retained prefix
+semantics of the restart. A smoke test covers this on a 30,000-row
+METIS-ordered tridiagonal KLS-first factor,
 requires more than one private worker thread, verifies that all planned
 pipeline rows are consumed by the guarded pipeline executor, and verifies that
 the private-predecessor partial pre-update path touches all pipeline rows. This
