@@ -157,7 +157,10 @@ recomputes row scales and continues with the threaded checked BTF pool over only
 later BTF blocks, falling back to the serial checked continuation when the pool
 is not applicable. Scaled prefix-current rejects can also use the conservative
 serial suffix restart inside the rejected block when the repaired block
-preserves a validated non-empty live prefix. Scaled all-refresh KLU-refactor
+preserves a validated non-empty live prefix. The preserved-column refresh used
+by masked ETree-tail repair now consumes the same input-row `Rs` state, so
+scaled exact-tail attempts can make omitted independent columns current instead
+of immediately widening to block rebuild. Scaled all-refresh KLU-refactor
 rejects now recompute the row scale vector back to input-row order before
 attempting the same block-local repair and validated non-root serial suffix
 restart. The newer row-first rejected-block rebuild consumes that same
@@ -3024,8 +3027,10 @@ dynamic-column-pivot executor, then it tries the quality-checked KLS-first
 whole-numeric rebuild before the KLU block-kernel fallback. The block-local
 executor now covers both unscaled and KLU row-scaled repair states by consuming
 input-row `Rs` during row construction and permuting it back to pivot order
-after an accepted scaled block. The whole-numeric checked-reject recovery
-bypasses the normal automatic KLS-first cost gate but still honors an explicit
+after an accepted scaled block. The scaled preserved-column refresh now uses
+the same convention for masked ETree-tail attempts before this broader rebuild
+is considered. The whole-numeric checked-reject recovery bypasses the normal
+automatic KLS-first cost gate but still honors an explicit
 `KLS_ENABLE_KLS_FIRST_FACTOR=0` disable. Successful row-first block repairs are
 reported as `fast_kls_block_restarts`; successful whole-numeric recoveries are
 reported as `fast_kls_rebuild_restarts`. This still stops short of CKTSO

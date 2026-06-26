@@ -34463,8 +34463,9 @@ static int kls_refresh_pivot_tail_preserved_block_columns(
       k1 != solver->symbolic->R[block] ||
       k1 + nk != solver->symbolic->R[block + 1u] ||
       k1 > solver->n || nk > solver->n - k1 ||
-      solver->common.scale > 0 ||
-      solver->numeric->Rs != NULL || solver->numeric->Xwork == NULL ||
+      (solver->common.scale > 0 && solver->numeric->Rs == NULL) ||
+      (solver->common.scale <= 0 && solver->numeric->Rs != NULL) ||
+      solver->numeric->Xwork == NULL ||
       solver->numeric->Ulen == NULL ||
       !kls_build_refactor_map(solver) ||
       !kls_build_refactor_lu_pointer_cache(solver)) {
@@ -34503,6 +34504,7 @@ static int kls_refresh_pivot_tail_preserved_block_columns(
     return 0;
   }
 
+  const int scaled = solver->common.scale > 0;
   kls_egraph_refactor_shared shared;
   memset(&shared, 0, sizeof(shared));
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {
@@ -34510,10 +34512,10 @@ static int kls_refresh_pivot_tail_preserved_block_columns(
   }
   shared.solver = solver;
   shared.values = numeric_values;
-  shared.rs = NULL;
+  shared.rs = scaled ? solver->numeric->Rs : NULL;
   shared.check_pivots = 0;
-  shared.scale = 0;
-  shared.kernel = kls_egraph_refactor_kernel_for(solver, 0);
+  shared.scale = scaled ? (int)solver->common.scale : 0;
+  shared.kernel = kls_egraph_refactor_kernel_for(solver, shared.scale);
   shared.thread_count = 1;
   shared.rejected_pivot = KLS_KLU_EMPTY;
   shared.rejected_pivot_col = KLS_KLU_EMPTY;
