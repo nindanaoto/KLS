@@ -422,6 +422,10 @@ typedef struct kls_stats {
   int64_t kls_first_separator_queue_parallel_private_run_count;
   int64_t kls_first_last_separator_queue_parallel_private_rows;
   int64_t kls_first_last_separator_queue_parallel_private_threads;
+  int kls_first_last_separator_queue_parallel_pipeline;
+  int64_t kls_first_separator_queue_parallel_pipeline_run_count;
+  int64_t kls_first_last_separator_queue_parallel_pipeline_rows;
+  int64_t kls_first_last_separator_queue_parallel_pipeline_threads;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -7808,7 +7808,7 @@ static int test_kls_first_separator_queue_plan(void) {
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
   int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
   double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
-  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
   double *x = (double *)calloc((size_t)n, sizeof(*x));
   double *expected = (double *)malloc((size_t)n * sizeof(*expected));
   if (ap == NULL || ai == NULL || ax == NULL || b == NULL ||
@@ -7917,6 +7917,7 @@ static int test_kls_first_separator_queue_plan(void) {
              stats.kls_first_separator_queue_run_count < 1 ||
              stats.kls_first_last_separator_queue_private_components <= 0 ||
              stats.kls_first_last_separator_queue_private_rows <= 0 ||
+             stats.kls_first_last_separator_queue_pipeline_rows <= 0 ||
              stats.kls_first_last_separator_queue_private_rows +
                stats.kls_first_last_separator_queue_pipeline_rows != n ||
              stats.kls_first_last_separator_queue_nonempty_threads <= 1 ||
@@ -7932,6 +7933,12 @@ static int test_kls_first_separator_queue_plan(void) {
              stats.kls_first_last_separator_queue_parallel_private_rows <= 0 ||
              stats.kls_first_last_separator_queue_parallel_private_threads <=
                1 ||
+             stats.kls_first_last_separator_queue_parallel_pipeline != 1 ||
+             stats.kls_first_separator_queue_parallel_pipeline_run_count < 1 ||
+             stats.kls_first_last_separator_queue_parallel_pipeline_rows !=
+               stats.kls_first_last_separator_queue_pipeline_rows ||
+             stats.kls_first_last_separator_queue_parallel_pipeline_threads <=
+               0 ||
              stats.kls_first_last_row_uplooking_columns != n ||
              stats.selected_btf != 0 || stats.selected_scale != 0)) {
     fprintf(stderr,
@@ -7947,6 +7954,9 @@ static int test_kls_first_separator_queue_plan(void) {
             ", private_parallel=%d/%" PRId64
             ", private_parallel_rows=%" PRId64
             ", private_parallel_threads=%" PRId64
+            ", pipeline_parallel=%d/%" PRId64
+            ", pipeline_parallel_rows=%" PRId64
+            ", pipeline_parallel_threads=%" PRId64
             ", row_cols=%" PRId64 ", btf=%d, scale=%d\n",
             stats.build_has_metis,
             kls_factor_path_name(stats.last_factor_path),
@@ -7968,6 +7978,10 @@ static int test_kls_first_separator_queue_plan(void) {
             stats.kls_first_separator_queue_parallel_private_run_count,
             stats.kls_first_last_separator_queue_parallel_private_rows,
             stats.kls_first_last_separator_queue_parallel_private_threads,
+            stats.kls_first_last_separator_queue_parallel_pipeline,
+            stats.kls_first_separator_queue_parallel_pipeline_run_count,
+            stats.kls_first_last_separator_queue_parallel_pipeline_rows,
+            stats.kls_first_last_separator_queue_parallel_pipeline_threads,
             stats.kls_first_last_row_uplooking_columns,
             stats.selected_btf,
             stats.selected_scale);

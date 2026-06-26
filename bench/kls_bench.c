@@ -987,6 +987,14 @@ int main(int argc, char **argv) {
            stats.fast_repaired_offdiag_suffix_refresh_count,
            stats.fast_repaired_offdiag_full_refresh_count,
            stats.fast_repaired_parallel_tail_blocks);
+    printf(",\"kls_first_last_separator_queue_parallel_pipeline\":%d"
+           ",\"kls_first_separator_queue_parallel_pipeline_run_count\":%" PRId64
+           ",\"kls_first_last_separator_queue_parallel_pipeline_rows\":%" PRId64
+           ",\"kls_first_last_separator_queue_parallel_pipeline_threads\":%" PRId64,
+           stats.kls_first_last_separator_queue_parallel_pipeline,
+           stats.kls_first_separator_queue_parallel_pipeline_run_count,
+           stats.kls_first_last_separator_queue_parallel_pipeline_rows,
+           stats.kls_first_last_separator_queue_parallel_pipeline_threads);
     printf(",\"fast_rejected_block_start\":%" PRId64
            ",\"fast_rejected_block_size\":%" PRId64
            ",\"fast_rejected_suffix_columns\":%" PRId64
@@ -1574,6 +1582,12 @@ int main(int argc, char **argv) {
            stats.kls_first_separator_queue_parallel_private_run_count,
            stats.kls_first_last_separator_queue_parallel_private_rows,
            stats.kls_first_last_separator_queue_parallel_private_threads);
+    printf("KLS row-up-looking separator pipeline parallel: last %d"
+           ", runs %" PRId64 ", rows %" PRId64 ", threads %" PRId64 "\n",
+           stats.kls_first_last_separator_queue_parallel_pipeline,
+           stats.kls_first_separator_queue_parallel_pipeline_run_count,
+           stats.kls_first_last_separator_queue_parallel_pipeline_rows,
+           stats.kls_first_last_separator_queue_parallel_pipeline_threads);
     printf("KLS row-up-looking parallel BTF blocks: last %" PRId64
            ", total %" PRId64 "\n",
            stats.kls_first_last_parallel_btf_blocks,

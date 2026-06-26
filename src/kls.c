@@ -480,6 +480,10 @@ struct kls_solver {
   UF_long kls_first_separator_queue_parallel_private_run_count;
   UF_long kls_first_last_separator_queue_parallel_private_rows;
   UF_long kls_first_last_separator_queue_parallel_private_threads;
+  int kls_first_last_separator_queue_parallel_pipeline;
+  UF_long kls_first_separator_queue_parallel_pipeline_run_count;
+  UF_long kls_first_last_separator_queue_parallel_pipeline_rows;
+  UF_long kls_first_last_separator_queue_parallel_pipeline_threads;
   int kls_first_auto_skipped_scaled_single_block;
   UF_long kls_first_auto_skipped_scaled_single_block_count;
   int factor_etree_stats_valid;
@@ -2287,6 +2291,9 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_separator_queue_parallel_private = 0;
   solver->kls_first_last_separator_queue_parallel_private_rows = 0;
   solver->kls_first_last_separator_queue_parallel_private_threads = 0;
+  solver->kls_first_last_separator_queue_parallel_pipeline = 0;
+  solver->kls_first_last_separator_queue_parallel_pipeline_rows = 0;
+  solver->kls_first_last_separator_queue_parallel_pipeline_threads = 0;
   solver->kls_first_auto_skipped_scaled_single_block = 0;
   solver->stats.kls_tail_last_mapped_columns = 0;
   solver->stats.kls_first_last_row_uplooking_columns = 0;
@@ -2310,6 +2317,9 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_first_last_separator_queue_parallel_private = 0;
   solver->stats.kls_first_last_separator_queue_parallel_private_rows = 0;
   solver->stats.kls_first_last_separator_queue_parallel_private_threads = 0;
+  solver->stats.kls_first_last_separator_queue_parallel_pipeline = 0;
+  solver->stats.kls_first_last_separator_queue_parallel_pipeline_rows = 0;
+  solver->stats.kls_first_last_separator_queue_parallel_pipeline_threads = 0;
   solver->stats.kls_first_auto_skipped_scaled_single_block = 0;
 }
 
@@ -10580,6 +10590,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->kls_first_last_separator_queue_parallel_private_rows;
   solver->stats.kls_first_last_separator_queue_parallel_private_threads =
     (int64_t)solver->kls_first_last_separator_queue_parallel_private_threads;
+  solver->stats.kls_first_last_separator_queue_parallel_pipeline =
+    solver->kls_first_last_separator_queue_parallel_pipeline;
+  solver->stats.kls_first_separator_queue_parallel_pipeline_run_count =
+    (int64_t)solver->kls_first_separator_queue_parallel_pipeline_run_count;
+  solver->stats.kls_first_last_separator_queue_parallel_pipeline_rows =
+    (int64_t)solver->kls_first_last_separator_queue_parallel_pipeline_rows;
+  solver->stats.kls_first_last_separator_queue_parallel_pipeline_threads =
+    (int64_t)solver->kls_first_last_separator_queue_parallel_pipeline_threads;
   solver->stats.kls_first_auto_skipped_scaled_single_block =
     solver->kls_first_auto_skipped_scaled_single_block;
   solver->stats.kls_first_auto_skipped_scaled_single_block_count =
@@ -34959,6 +34977,7 @@ static int kls_pack_row_first_block_numeric(
   UF_long block,
   UF_long k1,
   UF_long nk,
+  const UF_long *local_row_order,
   const kls_row_first_entries *l_entries,
   const kls_row_first_entries *u_entries,
   const double *udiag_values,
@@ -35021,7 +35040,13 @@ static int kls_pack_row_first_block_numeric(
     numeric->Ulen[k1 + k] = u_count[k];
     lup += kls_klu_units_for_indices(u_count[k]) + (size_t)u_count[k];
     ((Entry *)numeric->Udiag)[k1 + k] = udiag_values[k];
-    numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + k];
+    const UF_long symbolic_row = local_row_order != NULL
+      ? local_row_order[k] : k;
+    if (symbolic_row >= nk) {
+      (void)TRILINOS_KLU_free(lu, lusize, sizeof(Unit), &solver->common);
+      return 0;
+    }
+    numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + symbolic_row];
   }
 
   UF_long *l_write =
@@ -35518,6 +35543,7 @@ typedef struct kls_row_first_block_context {
   UF_long *q_order;
   UF_long *col_pos;
   const UF_long *separator_component_last;
+  const UF_long *separator_local_order;
   UF_long k1;
   UF_long nk;
   UF_long n;
@@ -35654,7 +35680,10 @@ static int kls_row_first_factor_one_row(
   double best_separator_extent_abs = -1.0;
   const unsigned int pivot_component =
     ctx->use_separator_for_block
-      ? solver->separator.order_component[ctx->separator_block_base + i]
+      ? solver->separator.order_component[
+          ctx->separator_block_base +
+          (ctx->separator_local_order != NULL
+             ? ctx->separator_local_order[i] : i)]
       : UINT_MAX;
   const UF_long pivot_component_last =
     ctx->use_separator_for_block &&
@@ -35668,7 +35697,9 @@ static int kls_row_first_factor_one_row(
       dep_heap[u_count++] = col;
       const double abs_value = fabs(x[col]);
       if (ctx->use_separator_for_block) {
-        const UF_long separator_pos = ctx->separator_block_base + col;
+        const UF_long separator_pos = ctx->separator_block_base +
+          (ctx->separator_local_order != NULL
+             ? ctx->separator_local_order[col] : col);
         if (separator_pos >= solver->separator.n) {
           return 0;
         }
@@ -36099,6 +36130,196 @@ static int kls_row_first_run_parallel_private_phase(
   for (int tid = 0; tid < thread_count; ++tid) {
     kls_row_first_private_worker_free(workers + tid);
   }
+  free(threads);
+  free(workers);
+  return ok;
+}
+
+typedef struct kls_row_first_pipeline_shared {
+  const kls_row_first_block_context *ctx;
+  const UF_long *row_order;
+  UF_long begin;
+  UF_long end;
+  kls_row_first_workspace *workspace;
+  kls_row_first_entries *l_entries;
+  kls_row_first_entries *u_entries;
+  double *udiag_values;
+  unsigned char *row_done;
+  kls_row_first_row_stats *stats;
+  atomic_ulong next_pos;
+  pthread_mutex_t lock;
+  pthread_cond_t cond;
+  UF_long completed_pos;
+  int failed;
+} kls_row_first_pipeline_shared;
+
+typedef struct kls_row_first_pipeline_worker {
+  kls_row_first_pipeline_shared *shared;
+  UF_long rows;
+} kls_row_first_pipeline_worker;
+
+static void *kls_row_first_pipeline_worker_main(void *arg) {
+  kls_row_first_pipeline_worker *worker =
+    (kls_row_first_pipeline_worker *)arg;
+  if (worker == NULL || worker->shared == NULL) {
+    return NULL;
+  }
+  kls_row_first_pipeline_shared *shared = worker->shared;
+  if (shared->ctx == NULL || shared->row_order == NULL ||
+      shared->workspace == NULL || shared->l_entries == NULL ||
+      shared->u_entries == NULL || shared->udiag_values == NULL ||
+      shared->row_done == NULL || shared->begin > shared->end) {
+    return NULL;
+  }
+
+  for (;;) {
+    const UF_long pos =
+      (UF_long)atomic_fetch_add_explicit(&shared->next_pos, 1ul,
+                                         memory_order_acq_rel);
+    if (pos >= shared->end) {
+      break;
+    }
+    if (pos < shared->begin) {
+      pthread_mutex_lock(&shared->lock);
+      shared->failed = 1;
+      pthread_cond_broadcast(&shared->cond);
+      pthread_mutex_unlock(&shared->lock);
+      break;
+    }
+
+    pthread_mutex_lock(&shared->lock);
+    while (!shared->failed && shared->completed_pos != pos) {
+      if (pthread_cond_wait(&shared->cond, &shared->lock) != 0) {
+        shared->failed = 1;
+        pthread_cond_broadcast(&shared->cond);
+        break;
+      }
+    }
+    if (!shared->failed) {
+      const UF_long row = shared->row_order[pos];
+      if (row >= shared->ctx->nk ||
+          !kls_row_first_factor_one_row(
+            shared->ctx, shared->workspace, shared->l_entries,
+            shared->u_entries, shared->udiag_values, row, NULL, -1,
+            shared->row_done, shared->stats)) {
+        shared->failed = 1;
+      } else {
+        shared->completed_pos = pos + 1u;
+        worker->rows++;
+      }
+      pthread_cond_broadcast(&shared->cond);
+    }
+    const int failed = shared->failed;
+    pthread_mutex_unlock(&shared->lock);
+    if (failed) {
+      break;
+    }
+  }
+  return NULL;
+}
+
+static int kls_row_first_run_parallel_pipeline_phase(
+  const kls_row_first_block_context *ctx,
+  const UF_long *row_order,
+  UF_long begin,
+  UF_long end,
+  int thread_count,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *l_entries,
+  kls_row_first_entries *u_entries,
+  double *udiag_values,
+  unsigned char *row_done,
+  kls_row_first_row_stats *stats,
+  UF_long *pipeline_rows_out,
+  UF_long *thread_rows_out) {
+  if (ctx == NULL || row_order == NULL || begin >= end ||
+      thread_count <= 1 || workspace == NULL || l_entries == NULL ||
+      u_entries == NULL || udiag_values == NULL || row_done == NULL) {
+    return 0;
+  }
+  const UF_long pipeline_rows = end - begin;
+  int worker_count = thread_count;
+  if ((UF_long)worker_count > pipeline_rows) {
+    worker_count = (int)pipeline_rows;
+  }
+  if (worker_count <= 0) {
+    return 0;
+  }
+
+  pthread_t *threads =
+    (pthread_t *)calloc((size_t)worker_count, sizeof(*threads));
+  kls_row_first_pipeline_worker *workers =
+    (kls_row_first_pipeline_worker *)
+      calloc((size_t)worker_count, sizeof(*workers));
+  if (threads == NULL || workers == NULL) {
+    free(threads);
+    free(workers);
+    return 0;
+  }
+
+  kls_row_first_pipeline_shared shared;
+  memset(&shared, 0, sizeof(shared));
+  shared.ctx = ctx;
+  shared.row_order = row_order;
+  shared.begin = begin;
+  shared.end = end;
+  shared.workspace = workspace;
+  shared.l_entries = l_entries;
+  shared.u_entries = u_entries;
+  shared.udiag_values = udiag_values;
+  shared.row_done = row_done;
+  shared.stats = stats;
+  shared.completed_pos = begin;
+  atomic_init(&shared.next_pos, (unsigned long)begin);
+  if (pthread_mutex_init(&shared.lock, NULL) != 0) {
+    free(threads);
+    free(workers);
+    return 0;
+  }
+  if (pthread_cond_init(&shared.cond, NULL) != 0) {
+    pthread_mutex_destroy(&shared.lock);
+    free(threads);
+    free(workers);
+    return 0;
+  }
+
+  int created = 0;
+  for (int tid = 0; tid < worker_count; ++tid) {
+    workers[tid].shared = &shared;
+    if (pthread_create(&threads[tid], NULL,
+                       kls_row_first_pipeline_worker_main,
+                       workers + tid) != 0) {
+      pthread_mutex_lock(&shared.lock);
+      shared.failed = 1;
+      pthread_cond_broadcast(&shared.cond);
+      pthread_mutex_unlock(&shared.lock);
+      break;
+    }
+    created++;
+  }
+  for (int tid = 0; tid < created; ++tid) {
+    (void)pthread_join(threads[tid], NULL);
+  }
+
+  UF_long processed_rows = 0;
+  UF_long active_threads = 0;
+  for (int tid = 0; tid < created; ++tid) {
+    processed_rows += workers[tid].rows;
+    if (workers[tid].rows > 0u) {
+      active_threads++;
+    }
+  }
+  const int ok = created == worker_count && !shared.failed &&
+    shared.completed_pos == end && processed_rows == pipeline_rows;
+  if (ok && pipeline_rows_out != NULL) {
+    *pipeline_rows_out = processed_rows;
+  }
+  if (ok && thread_rows_out != NULL) {
+    *thread_rows_out = active_threads;
+  }
+
+  pthread_cond_destroy(&shared.cond);
+  pthread_mutex_destroy(&shared.lock);
   free(threads);
   free(workers);
   return ok;
@@ -36674,7 +36895,7 @@ static int kls_row_first_parallel_commit_block(
     ok = 0;
   } else if (!kls_pack_row_first_block_numeric(
                shared->solver, shared->numeric, block, k1, nk,
-               l_entries, u_entries, worker->udiag_values,
+               NULL, l_entries, u_entries, worker->udiag_values,
                &shared->total_lnz, &shared->total_unz,
                &shared->max_lnz_block, &shared->max_unz_block)) {
     ok = 0;
@@ -37491,6 +37712,9 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
   int separator_queue_parallel_private = 0;
   UF_long separator_queue_parallel_private_rows = 0;
   UF_long separator_queue_parallel_private_threads = 0;
+  int separator_queue_parallel_pipeline = 0;
+  UF_long separator_queue_parallel_pipeline_rows = 0;
+  UF_long separator_queue_parallel_pipeline_threads = 0;
 
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
     const UF_long k1 = solver->symbolic->R[block];
@@ -37579,12 +37803,17 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
     memset(&l_entries, 0, sizeof(l_entries));
     memset(&u_entries, 0, sizeof(u_entries));
     UF_long *row_order = NULL;
+    UF_long *local_row_order = NULL;
+    UF_long *old_to_new_row = NULL;
     unsigned char *row_seen = NULL;
     int *row_owner = NULL;
     int use_separator_row_order = 0;
     int parallel_private_executed = 0;
+    int parallel_pipeline_executed = 0;
     UF_long block_parallel_private_rows = 0;
     UF_long block_parallel_private_threads = 0;
+    UF_long block_parallel_pipeline_rows = 0;
+    UF_long block_parallel_pipeline_threads = 0;
     UF_long block_separator_private_rows = 0;
     UF_long block_separator_pipeline_rows = 0;
     kls_first_separator_queue_plan separator_plan;
@@ -37647,6 +37876,150 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
         use_separator_row_order = 1;
       }
     }
+    if (use_separator_row_order) {
+      local_row_order = row_order;
+      row_order = (UF_long *)malloc((size_t)nk * sizeof(*row_order));
+      old_to_new_row =
+        (UF_long *)malloc((size_t)nk * sizeof(*old_to_new_row));
+      if (row_order == NULL || old_to_new_row == NULL) {
+        goto fail_block_entries;
+      }
+      for (UF_long new_row = 0; new_row < nk; ++new_row) {
+        const UF_long old_row = local_row_order[new_row];
+        if (old_row >= nk) {
+          goto fail_block_entries;
+        }
+        row_order[new_row] = new_row;
+        old_to_new_row[old_row] = new_row;
+      }
+      for (UF_long pos = 0; pos < separator_plan.private_rows_count; ++pos) {
+        const UF_long old_global = separator_plan.private_rows[pos];
+        if (old_global < k1 || old_global >= k2) {
+          goto fail_block_entries;
+        }
+        separator_plan.private_rows[pos] =
+          k1 + old_to_new_row[old_global - k1];
+      }
+      for (UF_long pos = 0; pos < separator_plan.pipeline_rows_count; ++pos) {
+        const UF_long old_global = separator_plan.pipeline_rows[pos];
+        if (old_global < k1 || old_global >= k2) {
+          goto fail_block_entries;
+        }
+        separator_plan.pipeline_rows[pos] =
+          k1 + old_to_new_row[old_global - k1];
+      }
+
+      UF_long *old_block_q =
+        (UF_long *)malloc((size_t)nk * sizeof(*old_block_q));
+      if (old_block_q == NULL) {
+        goto fail_block_entries;
+      }
+      for (UF_long local_col = 0; local_col < nk; ++local_col) {
+        old_block_q[local_col] = q_order[k1 + local_col];
+        if (old_block_q[local_col] < n) {
+          col_pos[old_block_q[local_col]] = KLS_KLU_EMPTY;
+        }
+      }
+      for (UF_long local_col = 0; local_col < nk; ++local_col) {
+        const UF_long old_local_col = local_row_order[local_col];
+        if (old_local_col >= nk) {
+          free(old_block_q);
+          goto fail_block_entries;
+        }
+        q_order[k1 + local_col] = old_block_q[old_local_col];
+      }
+      free(old_block_q);
+
+      memset(row_counts, 0, (size_t)nk * sizeof(*row_counts));
+      memset(row_ptr, 0, ((size_t)nk + 1u) * sizeof(*row_ptr));
+      for (UF_long local_col = 0; local_col < nk; ++local_col) {
+        const UF_long oldcol = q_order[k1 + local_col];
+        if (oldcol >= n || col_pos[oldcol] != KLS_KLU_EMPTY) {
+          goto fail_block_entries;
+        }
+        col_pos[oldcol] = local_col;
+      }
+
+      for (UF_long local_col = 0; local_col < nk; ++local_col) {
+        const UF_long oldcol = q_order[k1 + local_col];
+        for (UF_long p = solver->col_ptr[oldcol];
+             p < solver->col_ptr[oldcol + 1u]; ++p) {
+          const UF_long oldrow = solver->row_idx[p];
+          if (oldrow >= n || psinv[oldrow] >= n) {
+            goto fail_block_entries;
+          }
+          const UF_long row_pos = psinv[oldrow];
+          if (row_pos < k1) {
+            continue;
+          }
+          if (row_pos >= k2) {
+            goto fail_block_entries;
+          }
+          const UF_long old_local_row = row_pos - k1;
+          if (old_local_row >= nk) {
+            goto fail_block_entries;
+          }
+          row_counts[old_to_new_row[old_local_row]]++;
+        }
+      }
+      row_ptr[0] = 0;
+      for (UF_long i = 0; i < nk; ++i) {
+        row_ptr[i + 1u] = row_ptr[i] + row_counts[i];
+      }
+      const UF_long rebuilt_row_nnz = row_ptr[nk];
+      UF_long *rebuilt_row_cols = rebuilt_row_nnz > 0u
+        ? (UF_long *)malloc((size_t)rebuilt_row_nnz *
+                            sizeof(*rebuilt_row_cols)) : NULL;
+      UF_long *rebuilt_row_input_pos = rebuilt_row_nnz > 0u
+        ? (UF_long *)malloc((size_t)rebuilt_row_nnz *
+                            sizeof(*rebuilt_row_input_pos)) : NULL;
+      row_next = (UF_long *)malloc((size_t)nk * sizeof(*row_next));
+      if ((rebuilt_row_nnz > 0u &&
+           (rebuilt_row_cols == NULL || rebuilt_row_input_pos == NULL)) ||
+          row_next == NULL) {
+        free(rebuilt_row_cols);
+        free(rebuilt_row_input_pos);
+        goto fail_block_entries;
+      }
+      memcpy(row_next, row_ptr, (size_t)nk * sizeof(*row_next));
+      for (UF_long local_col = 0; local_col < nk; ++local_col) {
+        const UF_long oldcol = q_order[k1 + local_col];
+        for (UF_long p = solver->col_ptr[oldcol];
+             p < solver->col_ptr[oldcol + 1u]; ++p) {
+          const UF_long oldrow = solver->row_idx[p];
+          if (oldrow >= n || psinv[oldrow] >= n) {
+            free(rebuilt_row_cols);
+            free(rebuilt_row_input_pos);
+            goto fail_block_entries;
+          }
+          const UF_long row_pos = psinv[oldrow];
+          if (row_pos < k1) {
+            continue;
+          }
+          if (row_pos >= k2) {
+            free(rebuilt_row_cols);
+            free(rebuilt_row_input_pos);
+            goto fail_block_entries;
+          }
+          const UF_long old_local_row = row_pos - k1;
+          if (old_local_row >= nk) {
+            free(rebuilt_row_cols);
+            free(rebuilt_row_input_pos);
+            goto fail_block_entries;
+          }
+          const UF_long row = old_to_new_row[old_local_row];
+          const UF_long dst = row_next[row]++;
+          rebuilt_row_cols[dst] = oldcol;
+          rebuilt_row_input_pos[dst] = p;
+        }
+      }
+      free(row_next);
+      row_next = NULL;
+      free(row_cols);
+      free(row_input_pos);
+      row_cols = rebuilt_row_cols;
+      row_input_pos = rebuilt_row_input_pos;
+    }
 
     kls_row_first_block_context row_ctx;
     memset(&row_ctx, 0, sizeof(row_ctx));
@@ -37659,6 +38032,7 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
     row_ctx.q_order = q_order + k1;
     row_ctx.col_pos = col_pos;
     row_ctx.separator_component_last = separator_component_last;
+    row_ctx.separator_local_order = local_row_order;
     row_ctx.k1 = k1;
     row_ctx.nk = nk;
     row_ctx.n = n;
@@ -37696,15 +38070,35 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
         goto fail_block_entries;
       }
     }
-    const UF_long iter_begin =
-      parallel_private_executed ? block_separator_private_rows : 0u;
-    for (UF_long iter = iter_begin; iter < nk; ++iter) {
-      const UF_long i = use_separator_row_order ? row_order[iter] : iter;
-      if (!kls_row_first_factor_one_row(
-            &row_ctx, &row_workspace, &l_entries, &u_entries,
-            udiag_values, i, NULL, -1,
-            use_separator_row_order ? row_done : NULL, &row_stats)) {
-        goto fail_block_entries;
+    if (use_separator_row_order) {
+      if (!parallel_private_executed) {
+        for (UF_long iter = 0; iter < block_separator_private_rows; ++iter) {
+          const UF_long i = row_order[iter];
+          if (!kls_row_first_factor_one_row(
+                &row_ctx, &row_workspace, &l_entries, &u_entries,
+                udiag_values, i, NULL, -1, row_done, &row_stats)) {
+            goto fail_block_entries;
+          }
+        }
+      }
+      if (block_separator_pipeline_rows > 0u) {
+        if (!kls_row_first_run_parallel_pipeline_phase(
+              &row_ctx, row_order, block_separator_private_rows, nk,
+              solver->options.threads, &row_workspace, &l_entries,
+              &u_entries, udiag_values, row_done, &row_stats,
+              &block_parallel_pipeline_rows,
+              &block_parallel_pipeline_threads)) {
+          goto fail_block_entries;
+        }
+        parallel_pipeline_executed = 1;
+      }
+    } else {
+      for (UF_long iter = 0; iter < nk; ++iter) {
+        if (!kls_row_first_factor_one_row(
+              &row_ctx, &row_workspace, &l_entries, &u_entries,
+              udiag_values, iter, NULL, -1, NULL, &row_stats)) {
+          goto fail_block_entries;
+        }
       }
     }
     dynamic_column_pivots += row_stats.dynamic_column_pivots;
@@ -37730,8 +38124,18 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
           block_parallel_private_threads;
       }
     }
+    if (parallel_pipeline_executed) {
+      separator_queue_parallel_pipeline = 1;
+      separator_queue_parallel_pipeline_rows += block_parallel_pipeline_rows;
+      if (block_parallel_pipeline_threads >
+          separator_queue_parallel_pipeline_threads) {
+        separator_queue_parallel_pipeline_threads =
+          block_parallel_pipeline_threads;
+      }
+    }
     if (!kls_pack_row_first_block_numeric(
-          solver, numeric, block, k1, nk, &l_entries, &u_entries,
+          solver, numeric, block, k1, nk, local_row_order,
+          &l_entries, &u_entries,
           udiag_values, &total_lnz, &total_unz, &max_lnz_block,
           &max_unz_block)) {
       goto fail_block_entries;
@@ -37747,6 +38151,8 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
     kls_row_first_entries_free(&u_entries);
     kls_first_separator_queue_plan_free(&separator_plan);
     free(row_order);
+    free(local_row_order);
+    free(old_to_new_row);
     free(row_seen);
     free(row_owner);
     free(row_cols);
@@ -37764,6 +38170,8 @@ fail_block_entries:
     kls_row_first_entries_free(&u_entries);
     kls_first_separator_queue_plan_free(&separator_plan);
     free(row_order);
+    free(local_row_order);
+    free(old_to_new_row);
     free(row_seen);
     free(row_owner);
     free(row_cols);
@@ -37829,6 +38237,14 @@ fail_block_entries:
       separator_queue_parallel_private_rows;
     solver->kls_first_last_separator_queue_parallel_private_threads =
       separator_queue_parallel_private_threads;
+  }
+  if (separator_queue_parallel_pipeline) {
+    solver->kls_first_last_separator_queue_parallel_pipeline = 1;
+    solver->kls_first_separator_queue_parallel_pipeline_run_count++;
+    solver->kls_first_last_separator_queue_parallel_pipeline_rows =
+      separator_queue_parallel_pipeline_rows;
+    solver->kls_first_last_separator_queue_parallel_pipeline_threads =
+      separator_queue_parallel_pipeline_threads;
   }
   free(row_counts);
   free(row_ptr);
