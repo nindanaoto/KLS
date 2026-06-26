@@ -4435,9 +4435,11 @@ that the global no-op target count was not the active-batch bottleneck. A
 portable batched TRSV over equal producer suffixes passed smoke but regressed
 the focused `ASIC_320k` refactor from about `0.307s` to `0.314s`, because the
 fragmented batches are too small and ragged for that loop interchange to
-amortize its overhead. Finally, retained dense-input scatter maps for compact
-dense rows also regressed (`32.82s` five-case geomean), so repeated input
-destination lookup is not the large missing paper mechanism. These rejected
+amortize its overhead. A temporary retained dense-input scatter-map experiment
+for compact dense rows also regressed (`32.82s` five-case geomean), so repeated
+input destination lookup alone was not the large missing paper mechanism. KLS
+later kept the cleaned retained-target compact loader for storage-path
+completeness and coverage, not as a claimed performance lever. These rejected
 variants narrow the next useful implementation target: KLS needs a native
 row/segment numeric representation that stores and updates producer/consumer
 panels in the execution order directly, rather than more symbolic shortcuts
@@ -4964,3 +4966,14 @@ uses the sparse-segment direct-input kernel, proving the generic row path uses
 the retained destinations too. This is another storage-path step toward the
 CKTSO/SubtreeLU row-major numeric engine; it still does not replace the larger
 compact/batched engine or CKTSO's ETree-descendant pivoting-tail scheduler.
+
+The compact dense row-refactor panel loader now consumes the same retained
+per-input-entry target map. When the symbolic row target data is available, raw
+input values are placed directly into the compact row's external work-vector
+slots, dense `L` panel, pivot, dense in-panel `U`, or trailing `U` panel instead
+of rescanning trailing columns during numeric refactorization. The compact-panel
+smoke coverage now requires both compact direct-input rows and retained target
+consumption, so this closes another storage-path mismatch against the
+CKTSO/SubtreeLU row-major algorithm description. The larger open paper gap is
+unchanged: KLS still needs a production compact/batched row-major numeric engine
+and CKTSO's pipelined ETree-descendant pivoting-tail executor.

@@ -2832,7 +2832,13 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
              stats.row_refactor_last_compact_dense_panel_persistent != 1 ||
              stats.row_refactor_compact_dense_panel_persistent_run_count < 1 ||
              stats.row_refactor_last_compact_dense_panel_direct_input_rows < 1 ||
-             stats.row_refactor_compact_dense_panel_direct_input_rows < 1)) {
+             stats.row_refactor_compact_dense_panel_direct_input_rows < 1 ||
+             stats.row_refactor_segment_input_target_rows < 1 ||
+             stats.row_refactor_segment_input_target_entries < 1 ||
+             stats.row_refactor_last_segment_target_input_rows <
+               stats.row_refactor_last_compact_dense_panel_direct_input_rows ||
+             stats.row_refactor_segment_target_input_rows <
+               stats.row_refactor_compact_dense_panel_direct_input_rows)) {
     fprintf(stderr,
             "unexpected dense checked-row prefix stats: pivot=%" PRId64
             ", refresh=%d, block_restarts=%d, tail_restarts=%d"
@@ -2842,7 +2848,9 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
             ", work=%.17g, entries=%.17g"
             ", persistent=%" PRId64 "/%" PRId64
             ", persistent_used=%d/%" PRId64
-            ", direct_input=%" PRId64 "/%" PRId64 "\n",
+            ", direct_input=%" PRId64 "/%" PRId64
+            ", target_map=%" PRId64 "/%" PRId64
+            ", target_input=%" PRId64 "/%" PRId64 "\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_refresh_state,
             stats.fast_block_restarts,
@@ -2864,7 +2872,11 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
             stats.row_refactor_last_compact_dense_panel_persistent,
             stats.row_refactor_compact_dense_panel_persistent_run_count,
             stats.row_refactor_last_compact_dense_panel_direct_input_rows,
-            stats.row_refactor_compact_dense_panel_direct_input_rows);
+            stats.row_refactor_compact_dense_panel_direct_input_rows,
+            stats.row_refactor_segment_input_target_rows,
+            stats.row_refactor_segment_input_target_entries,
+            stats.row_refactor_last_segment_target_input_rows,
+            stats.row_refactor_segment_target_input_rows);
     ok = 0;
   }
   double max_solution_error = 0.0;
@@ -3107,6 +3119,12 @@ static int test_unchecked_row_dense_compact_panel(void) {
              stats.row_refactor_compact_dense_panel_persistent_run_count < 1 ||
              stats.row_refactor_last_compact_dense_panel_direct_input_rows < 1 ||
              stats.row_refactor_compact_dense_panel_direct_input_rows < 1 ||
+             stats.row_refactor_segment_input_target_rows < 1 ||
+             stats.row_refactor_segment_input_target_entries < 1 ||
+             stats.row_refactor_last_segment_target_input_rows <
+               stats.row_refactor_last_compact_dense_panel_direct_input_rows ||
+             stats.row_refactor_segment_target_input_rows <
+               stats.row_refactor_compact_dense_panel_direct_input_rows ||
              stats.row_refactor_last_compact_panel_solve_values < 1 ||
              stats.row_refactor_compact_panel_solve_values < 1 ||
              stats.row_refactor_last_compact_panel_group_solve_rows < lead ||
@@ -3133,6 +3151,8 @@ static int test_unchecked_row_dense_compact_panel(void) {
             ", persistent=%" PRId64 "/%" PRId64
             ", persistent_used=%d/%" PRId64
             ", direct_input=%" PRId64 "/%" PRId64
+            ", target_map=%" PRId64 "/%" PRId64
+            ", target_input=%" PRId64 "/%" PRId64
             ", panel_solve=%" PRId64 "/%" PRId64
             ", group_solve=%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
             ", supernode=%d/%" PRId64 "/%" PRId64 "/%" PRId64
@@ -3154,6 +3174,10 @@ static int test_unchecked_row_dense_compact_panel(void) {
             stats.row_refactor_compact_dense_panel_persistent_run_count,
             stats.row_refactor_last_compact_dense_panel_direct_input_rows,
             stats.row_refactor_compact_dense_panel_direct_input_rows,
+            stats.row_refactor_segment_input_target_rows,
+            stats.row_refactor_segment_input_target_entries,
+            stats.row_refactor_last_segment_target_input_rows,
+            stats.row_refactor_segment_target_input_rows,
             stats.row_refactor_last_compact_panel_solve_values,
             stats.row_refactor_compact_panel_solve_values,
             stats.row_refactor_last_compact_panel_group_solve_rows,
