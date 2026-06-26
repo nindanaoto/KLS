@@ -2543,7 +2543,7 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
   int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
   double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
   double *ax1 = (double *)malloc(nnz * sizeof(*ax1));
-  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
   double *x = (double *)calloc((size_t)n, sizeof(*x));
   double *expected = (double *)malloc((size_t)n * sizeof(*expected));
   if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
@@ -5258,7 +5258,7 @@ static int test_pre_static_pivoting(void) {
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
   int32_t *ai = (int32_t *)malloc((size_t)n * sizeof(*ai));
   double *ax = (double *)malloc((size_t)n * sizeof(*ax));
-  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
   double *x = (double *)calloc((size_t)n, sizeof(*x));
   double *expected = (double *)malloc((size_t)n * sizeof(*expected));
   if (ap == NULL || ai == NULL || ax == NULL || b == NULL ||
@@ -7699,7 +7699,7 @@ static int test_auto_kls_first_factor_large_block(void) {
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
   int32_t *ai = (int32_t *)malloc((size_t)n * sizeof(*ai));
   double *ax = (double *)malloc((size_t)n * sizeof(*ax));
-  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
   double *x = (double *)calloc((size_t)n, sizeof(*x));
   double *expected = (double *)malloc((size_t)n * sizeof(*expected));
   if (ap == NULL || ai == NULL || ax == NULL || b == NULL ||
@@ -7787,6 +7787,178 @@ static int test_auto_kls_first_factor_large_block(void) {
     }
   }
 
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
+                         saved_first)) {
+    ok = 0;
+  }
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(b);
+  free(x);
+  free(expected);
+  free(saved_first);
+  return ok;
+}
+
+static int test_kls_first_separator_queue_plan(void) {
+  const int32_t n = 30000;
+  const int32_t nnz = 3 * n - 2;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax == NULL || b == NULL ||
+      x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    expected[col] = 1.0 + (double)(col % 5);
+    if (col > 0) {
+      ai[p] = col - 1;
+      ax[p] = -1.0;
+      p++;
+    }
+    ai[p] = col;
+    ax[p] = 4.0;
+    p++;
+    if (col + 1 < n) {
+      ai[p] = col + 1;
+      ax[p] = -1.0;
+      p++;
+    }
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected separator queue nnz: %d/%d\n", p, nnz);
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
+      b[ai[q]] += ax[q] * expected[col];
+    }
+  }
+
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_saved_first = saved_first_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_METIS;
+  options.use_btf = 0;
+  options.scale = 0;
+  options.static_pivoting = 0;
+  options.threads = 4;
+
+  int ok = 1;
+  if (had_saved_first && saved_first == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_create(&solver), "create separator queue plan")) {
+    ok = 0;
+  }
+  if (ok) {
+    const int analyze_status =
+      kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0, &options);
+    if (analyze_status == KLS_ERR_UNSUPPORTED) {
+      goto cleanup;
+    }
+    if (!require_ok(analyze_status, "analyze separator queue plan")) {
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor separator queue plan")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve separator queue plan")) {
+    ok = 0;
+  }
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats separator queue plan")) {
+    ok = 0;
+  }
+  if (ok && (stats.build_has_metis != 1 ||
+             stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
+             stats.separator_analyzed_rows != n ||
+             stats.separator_component_count <= 1 ||
+             stats.kls_first_last_separator_queue != 1 ||
+             stats.kls_first_separator_queue_run_count < 1 ||
+             stats.kls_first_last_separator_queue_private_components <= 0 ||
+             stats.kls_first_last_separator_queue_private_rows <= 0 ||
+             stats.kls_first_last_separator_queue_private_rows +
+               stats.kls_first_last_separator_queue_pipeline_rows != n ||
+             stats.kls_first_last_separator_queue_nonempty_threads <= 1 ||
+             stats.kls_first_last_separator_queue_max_thread_rows <= 0 ||
+             stats.kls_first_last_row_uplooking_columns != n ||
+             stats.selected_btf != 0 || stats.selected_scale != 0)) {
+    fprintf(stderr,
+            "unexpected KLS-first separator queue stats: metis=%d"
+            ", path=%s, sep_rows=%" PRId64
+            ", components=%" PRId64
+            ", queue=%d/%" PRId64
+            ", comp=%" PRId64 "/%" PRId64
+            ", rows=%" PRId64 "/%" PRId64
+            ", threads=%" PRId64 ", max_thread_rows=%" PRId64
+            ", row_cols=%" PRId64 ", btf=%d, scale=%d\n",
+            stats.build_has_metis,
+            kls_factor_path_name(stats.last_factor_path),
+            stats.separator_analyzed_rows,
+            stats.separator_component_count,
+            stats.kls_first_last_separator_queue,
+            stats.kls_first_separator_queue_run_count,
+            stats.kls_first_last_separator_queue_private_components,
+            stats.kls_first_last_separator_queue_pipeline_components,
+            stats.kls_first_last_separator_queue_private_rows,
+            stats.kls_first_last_separator_queue_pipeline_rows,
+            stats.kls_first_last_separator_queue_nonempty_threads,
+            stats.kls_first_last_separator_queue_max_thread_rows,
+            stats.kls_first_last_row_uplooking_columns,
+            stats.selected_btf,
+            stats.selected_scale);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected separator queue solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+cleanup:
   if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
                          saved_first)) {
     ok = 0;
@@ -9113,6 +9285,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_auto_kls_first_factor_large_block()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_kls_first_separator_queue_plan()) {
     return EXIT_FAILURE;
   }
   if (!test_auto_kls_first_skips_scaled_single_block()) {

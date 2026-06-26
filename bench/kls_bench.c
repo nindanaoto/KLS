@@ -832,6 +832,14 @@ int main(int argc, char **argv) {
            ",\"kls_first_separator_dynamic_column_fallback_count\":%" PRId64
            ",\"kls_first_last_separator_dynamic_column_rejects\":%" PRId64
            ",\"kls_first_separator_dynamic_column_reject_count\":%" PRId64
+           ",\"kls_first_last_separator_queue\":%d"
+           ",\"kls_first_separator_queue_run_count\":%" PRId64
+           ",\"kls_first_last_separator_queue_private_components\":%" PRId64
+           ",\"kls_first_last_separator_queue_pipeline_components\":%" PRId64
+           ",\"kls_first_last_separator_queue_private_rows\":%" PRId64
+           ",\"kls_first_last_separator_queue_pipeline_rows\":%" PRId64
+           ",\"kls_first_last_separator_queue_nonempty_threads\":%" PRId64
+           ",\"kls_first_last_separator_queue_max_thread_rows\":%" PRId64
            ",\"kls_first_last_parallel_btf_blocks\":%" PRId64
            ",\"kls_first_parallel_btf_block_count\":%" PRId64
            ",\"kls_first_auto_skipped_scaled_single_block\":%d"
@@ -916,6 +924,14 @@ int main(int argc, char **argv) {
            stats.kls_first_separator_dynamic_column_fallback_count,
            stats.kls_first_last_separator_dynamic_column_rejects,
            stats.kls_first_separator_dynamic_column_reject_count,
+           stats.kls_first_last_separator_queue,
+           stats.kls_first_separator_queue_run_count,
+           stats.kls_first_last_separator_queue_private_components,
+           stats.kls_first_last_separator_queue_pipeline_components,
+           stats.kls_first_last_separator_queue_private_rows,
+           stats.kls_first_last_separator_queue_pipeline_rows,
+           stats.kls_first_last_separator_queue_nonempty_threads,
+           stats.kls_first_last_separator_queue_max_thread_rows,
            stats.kls_first_last_parallel_btf_blocks,
            stats.kls_first_parallel_btf_block_count,
            stats.kls_first_auto_skipped_scaled_single_block,
@@ -1517,6 +1533,18 @@ int main(int argc, char **argv) {
            stats.kls_first_separator_dynamic_column_fallback_count,
            stats.kls_first_last_separator_dynamic_column_rejects,
            stats.kls_first_separator_dynamic_column_reject_count);
+    printf("KLS row-up-looking separator queue: last %d, runs %" PRId64
+           ", components private/pipeline %" PRId64 "/%" PRId64
+           ", rows private/pipeline %" PRId64 "/%" PRId64
+           ", threads/max_rows %" PRId64 "/%" PRId64 "\n",
+           stats.kls_first_last_separator_queue,
+           stats.kls_first_separator_queue_run_count,
+           stats.kls_first_last_separator_queue_private_components,
+           stats.kls_first_last_separator_queue_pipeline_components,
+           stats.kls_first_last_separator_queue_private_rows,
+           stats.kls_first_last_separator_queue_pipeline_rows,
+           stats.kls_first_last_separator_queue_nonempty_threads,
+           stats.kls_first_last_separator_queue_max_thread_rows);
     printf("KLS row-up-looking parallel BTF blocks: last %" PRId64
            ", total %" PRId64 "\n",
            stats.kls_first_last_parallel_btf_blocks,
