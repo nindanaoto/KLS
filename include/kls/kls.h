@@ -396,6 +396,12 @@ typedef struct kls_stats {
   int64_t row_refactor_dense_producer_full_suffix_rows;
   int64_t row_refactor_dense_producer_multi_run_rows;
   int64_t row_refactor_dense_producer_fragmented_rows;
+  int64_t row_refactor_dense_producer_target_count;
+  int64_t row_refactor_dense_producer_target_none_count;
+  int64_t row_refactor_dense_producer_target_external_count;
+  int64_t row_refactor_dense_producer_target_dense_count;
+  int64_t row_refactor_dense_producer_target_pivot_count;
+  int64_t row_refactor_dense_producer_target_trailing_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -4057,9 +4057,8 @@ geomean from about `33.2s` to about `32.1s`, and improved the focused
 `ASIC_320k` refactor probe from about `0.347s` to about `0.319s`. But the same
 five-case baseline without the opt-in path was about `13.5s`, and the focused
 baseline was about `0.223s`. It remains opt-in until the next paper-level step
-implements production symbolic scatter maps and native row/segment panel
-storage/updates instead of using this scalar scaffold as if it were SubtreeLU's
-production supernodal kernel.
+implements native row/segment panel storage and updates instead of using this
+scalar scaffold as if it were SubtreeLU's production supernodal kernel.
 
 The fragmented dense-consumer executor now also prebuilds a bounded symbolic
 target map for the active producer run's trailing updates. Each mapped target
@@ -4086,6 +4085,32 @@ rejected in the same session because it regressed the five-case geomean to
 about `32.7s`; copying tiny batches into a denser temporary panel is not enough.
 The remaining path needs broader row-panel batches and native row/segment
 storage that avoids the copy rather than just a local blocked multiply.
+
+KLS now retains the dense-producer target maps symbolically with the producer
+run metadata instead of rebuilding them inside each fragmented dense-consumer
+batch. Each producer trailing column is classified once as no-op, later
+external multiplier, current dense-panel entry, current pivot, or current
+trailing-panel entry; the numeric executor stores the accepted global run IDs
+for the batch and reads those persistent classifications directly. A synthetic
+smoke fixture covers the retained-map path with two dense producers, a dense
+consumer block, and producer trailing columns that update the consumer trailing
+panel. This also fixed a signed-size guard that had been discarding otherwise
+valid retained maps on 64-bit platforms. On `ASIC_320k`, the retained map count
+is now nonzero (`3,205,236` entries: `1,742,094` no-op, `316,396` external,
+`305,279` dense, `4,477` pivot, and `836,990` trailing), and the focused
+four-thread refactor probe improved to about `0.307s`. The same five forced-row
+CKTSO-gap probe improved from about `31.7s` to about `30.3s` geomean, still far
+from the no-opt-in baseline near `13.5s`. This closes the symbolic target-map
+gap from the paper audit but reinforces that the large remaining gap is the
+native row/segment panel representation and production blocked update executor,
+not another small matcher or CPU-specific kernel tweak.
+
+An exact-match requirement was deliberately kept for fragmented dense-producer
+batches. A common-prefix widening experiment was tried and rejected because it
+increased the work on `ASIC_320k` (`~0.387s` focused refactor versus the prior
+`~0.329s`) by admitting extra scalar suffix work into the batch. That result is
+consistent with the paper lesson: broadened dispatch is not enough when the
+underlying row-panel storage and update kernel are still the limiting pieces.
 
 The unchecked producer-panel refactor experiment also uses a blocked panel
 algorithm: scalar code factors each diagonal block, `dtrsm` solves the

@@ -1252,6 +1252,12 @@ int main(int argc, char **argv) {
            ",\"row_refactor_dense_producer_full_suffix_rows\":%" PRId64
            ",\"row_refactor_dense_producer_multi_run_rows\":%" PRId64
            ",\"row_refactor_dense_producer_fragmented_rows\":%" PRId64
+           ",\"row_refactor_dense_producer_target_count\":%" PRId64
+           ",\"row_refactor_dense_producer_target_none_count\":%" PRId64
+           ",\"row_refactor_dense_producer_target_external_count\":%" PRId64
+           ",\"row_refactor_dense_producer_target_dense_count\":%" PRId64
+           ",\"row_refactor_dense_producer_target_pivot_count\":%" PRId64
+           ",\"row_refactor_dense_producer_target_trailing_count\":%" PRId64
            ",\"row_refactor_compact_dense_panel_persistent_groups\":%" PRId64
            ",\"row_refactor_compact_dense_panel_persistent_entries\":%" PRId64
            ",\"row_refactor_last_compact_dense_panel_persistent\":%d"
@@ -1326,6 +1332,12 @@ int main(int argc, char **argv) {
            stats.row_refactor_dense_producer_full_suffix_rows,
            stats.row_refactor_dense_producer_multi_run_rows,
            stats.row_refactor_dense_producer_fragmented_rows,
+           stats.row_refactor_dense_producer_target_count,
+           stats.row_refactor_dense_producer_target_none_count,
+           stats.row_refactor_dense_producer_target_external_count,
+           stats.row_refactor_dense_producer_target_dense_count,
+           stats.row_refactor_dense_producer_target_pivot_count,
+           stats.row_refactor_dense_producer_target_trailing_count,
            stats.row_refactor_compact_dense_panel_persistent_groups,
            stats.row_refactor_compact_dense_panel_persistent_entries,
            stats.row_refactor_last_compact_dense_panel_persistent,
