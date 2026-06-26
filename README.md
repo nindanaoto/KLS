@@ -537,7 +537,11 @@ before the rejected pivot have finished. When dense row segments defer writes
 in KLS-owned row-major mirrors, KLS publishes only that proven prefix back into
 the KLU numeric object before reporting prefix-current; otherwise it keeps the
 conservative unknown refresh state because rows in the active level may have
-completed out of factor-order prefix. The experimental row scheduler also
+completed out of factor-order prefix. KLU-compatible checked fast refactors
+now also validate finalized U rows against the same CKTSO row-wise rule before
+accepting the reused pivot order; those delayed rejects are reported as
+all-current because the column refactor has already refreshed the factor.
+The experimental row scheduler also
 splits precomputed row-group levels into barriered cluster levels and a
 dynamic topological pipeline tail. Row groups carry a retained execution kind
 so single-row, generic multi-row, and dense multi-row groups dispatch without

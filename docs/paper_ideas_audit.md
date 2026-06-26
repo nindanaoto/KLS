@@ -79,6 +79,12 @@ the current U row before publishing it, matching CKTSO's row-wise pivot check
 rather than relying only on later L-multiplier growth. The row ready queue also
 keeps solver-owned workspace across repeated row refactors, avoiding
 queue/bitmap/predecessor allocation churn in the experimental row scheduler.
+KLU-compatible checked fast-refactor paths now enforce the same row-wise U
+acceptance rule after the finalized U rows are available; a violation is
+reported as an all-current fast reject and enters the existing KLS block/tail
+repair path. This closes the pivot-acceptance mismatch for the column kernels,
+but it is still delayed validation rather than the row-major CKTSO numeric
+executor that can avoid doing rejected work in the first place.
 Full-graph queued row runs now consume cached
 root groups through a private-root cursor before falling back to the shared
 ready queue for successor-released groups, trimming the first wave of shared

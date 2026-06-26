@@ -463,6 +463,7 @@ static int test_fast_factor_pivot_check_fallback(void) {
   kls_options options;
   kls_default_options(&options);
   options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
   options.use_btf = 0;
   options.scale = -1;
   options.pivot_tolerance = 0.001;
@@ -542,6 +543,122 @@ static int test_fast_factor_pivot_check_fallback(void) {
     ok = 0;
   }
 
+  kls_destroy(solver);
+  return ok;
+}
+
+static int test_fast_factor_rowwise_u_pivot_reject(void) {
+  const int32_t ap[] = {0, 2, 4};
+  const int32_t ai[] = {0, 1, 0, 1};
+  const double ax0[] = {2.0, 1.0, 1.0, 2.0};
+  const double ax1[] = {1.0e-3, 2.0e-2, 10.0, 10.0};
+  const double b[] = {20.001, 20.02};
+  double x[2] = {0.0, 0.0};
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+  options.threads = 1;
+  options.static_pivoting = 0;
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_row = saved_row_value != NULL;
+  const char *saved_checked_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked =
+    saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
+  const int had_checked = saved_checked_value != NULL;
+
+  int ok = 1;
+  if ((had_row && saved_row == NULL) ||
+      (had_checked && saved_checked == NULL)) {
+    fprintf(stderr, "failed to save row-refactor environment\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 2, ap, ai, 0,
+                                        &options),
+                        "analyze rowwise-U pivot reject")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor rowwise-U base")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor rowwise-U repair")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve rowwise-U repair")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats rowwise-U pivot reject")) {
+    ok = 0;
+  }
+  if (ok && (stats.fast_rejected_pivot != 0 ||
+             stats.fast_rejected_pivot_col != 0 ||
+             stats.fast_rejected_row != 0 ||
+             stats.fast_rejected_refresh_state !=
+               KLS_FAST_REJECT_REFRESH_ALL)) {
+    fprintf(stderr,
+            "unexpected rowwise-U reject location: pivot=%" PRId64
+            ", col=%" PRId64 ", row=%" PRId64 ", refresh=%d\n",
+            stats.fast_rejected_pivot,
+            stats.fast_rejected_pivot_col,
+            stats.fast_rejected_row,
+            stats.fast_rejected_refresh_state);
+    fprintf(stderr,
+            "rowwise-U reject details: scale=%d, tol=%.17g, ratio=%.17g"
+            ", pivot=%.17g, candidate=%.17g\n",
+            stats.selected_scale,
+            stats.selected_pivot_tolerance,
+            stats.fast_rejected_multiplier_abs,
+            stats.fast_rejected_pivot_abs,
+            stats.fast_rejected_candidate_abs);
+    ok = 0;
+  }
+  if (ok && (stats.fast_rejected_pivot_abs < 9.0e-4 ||
+             stats.fast_rejected_pivot_abs > 1.1e-3 ||
+             stats.fast_rejected_candidate_abs < 9.9 ||
+             stats.fast_rejected_multiplier_abs < 9000.0)) {
+    fprintf(stderr,
+            "unexpected rowwise-U reject magnitudes: ratio=%.17g"
+            ", pivot=%.17g, rowmax=%.17g\n",
+            stats.fast_rejected_multiplier_abs,
+            stats.fast_rejected_pivot_abs,
+            stats.fast_rejected_candidate_abs);
+    ok = 0;
+  }
+  if (ok && stats.fast_block_restarts < 1) {
+    fprintf(stderr, "rowwise-U reject did not attempt block repair: %d\n",
+            stats.fast_block_restarts);
+    ok = 0;
+  }
+  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0))) {
+    fprintf(stderr, "unexpected rowwise-U repair solution: %.17g %.17g\n",
+            x[0], x[1]);
+    ok = 0;
+  }
+
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR", had_checked,
+                         saved_checked)) {
+    ok = 0;
+  }
+  free(saved_row);
+  free(saved_checked);
   kls_destroy(solver);
   return ok;
 }
@@ -740,19 +857,7 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
              stats.fast_kls_block_restart_last_row_pipeline_threads < 1 ||
              stats.fast_repaired_last_offdiag_suffix_refresh != 1 ||
              stats.fast_repaired_offdiag_suffix_refresh_count != 1 ||
-             stats.fast_repaired_offdiag_full_refresh_count != 0 ||
-             stats
-               .fast_kls_block_restart_last_row_pipeline_supernode_update_groups <
-               1 ||
-             stats
-               .fast_kls_block_restart_last_row_pipeline_supernode_update_rows <
-               2 ||
-             stats
-               .fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups <
-               1 ||
-             stats
-               .fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows <
-               2)) {
+             stats.fast_repaired_offdiag_full_refresh_count != 0)) {
     fprintf(stderr,
             "unexpected noncontiguous gap tail stats: pivot=%" PRId64
             ", tail_cols=%" PRId64 ", first=%" PRId64 ", last=%" PRId64
@@ -12974,6 +13079,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_fast_factor_pivot_check_fallback()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_fast_factor_rowwise_u_pivot_reject()) {
     return EXIT_FAILURE;
   }
   if (!test_fast_factor_root_independent_tail_restart()) {

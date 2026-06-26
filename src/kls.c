@@ -24284,6 +24284,189 @@ static int kls_row_refactor_pivot_rejects(double pivot_abs,
   return !isfinite(ratio) || ratio * tol > 1.0 + 1.0e-12;
 }
 
+static int kls_numeric_rowwise_u_pivots_pass_threshold_from_block(
+  const kls_solver *solver,
+  UF_long start_block,
+  UF_long *rejected_pivot_out,
+  UF_long *rejected_pivot_col_out,
+  UF_long *rejected_row_out,
+  double *rejected_ratio_abs_out,
+  double *rejected_pivot_abs_out,
+  double *rejected_row_max_abs_out) {
+  if (rejected_pivot_out != NULL) {
+    *rejected_pivot_out = KLS_KLU_EMPTY;
+  }
+  if (rejected_pivot_col_out != NULL) {
+    *rejected_pivot_col_out = KLS_KLU_EMPTY;
+  }
+  if (rejected_row_out != NULL) {
+    *rejected_row_out = KLS_KLU_EMPTY;
+  }
+  if (rejected_ratio_abs_out != NULL) {
+    *rejected_ratio_abs_out = -1.0;
+  }
+  if (rejected_pivot_abs_out != NULL) {
+    *rejected_pivot_abs_out = -1.0;
+  }
+  if (rejected_row_max_abs_out != NULL) {
+    *rejected_row_max_abs_out = -1.0;
+  }
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL) {
+    return -1;
+  }
+  const double tol = solver->common.tol;
+  if (tol <= DBL_MIN) {
+    return 1;
+  }
+
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  const trilinos_klu_l_numeric *numeric = solver->numeric;
+  if (symbolic->R == NULL || numeric->Udiag == NULL ||
+      numeric->Uip == NULL || numeric->Ulen == NULL ||
+      numeric->LUbx == NULL || start_block > symbolic->nblocks ||
+      symbolic->nblocks > numeric->nblocks) {
+    return -1;
+  }
+
+  const double *udiag = (const double *)numeric->Udiag;
+  for (UF_long block = start_block; block < symbolic->nblocks; ++block) {
+    const UF_long k1 = symbolic->R[block];
+    const UF_long k2 = symbolic->R[block + 1u];
+    if (k2 < k1 || k2 > solver->n) {
+      return -1;
+    }
+    const UF_long nk = k2 - k1;
+    if (nk == 0u) {
+      continue;
+    }
+    if (nk > (UF_long)(SIZE_MAX / sizeof(double))) {
+      return -1;
+    }
+
+    double *row_max =
+      (double *)malloc((size_t)nk * sizeof(*row_max));
+    if (row_max == NULL) {
+      return -1;
+    }
+    for (UF_long k = 0; k < nk; ++k) {
+      const double pivot_abs = fabs(udiag[k1 + k]);
+      row_max[k] = isfinite(pivot_abs) ? pivot_abs : DBL_MAX;
+    }
+
+    if (nk > 1u) {
+      double *lu = (double *)numeric->LUbx[block];
+      if (lu == NULL) {
+        free(row_max);
+        return -1;
+      }
+      const UF_long *uip = numeric->Uip + k1;
+      const UF_long *ulen = numeric->Ulen + k1;
+      for (UF_long local_col = 0; local_col < nk; ++local_col) {
+        UF_long *ui = NULL;
+        double *ux = NULL;
+        UF_long ucol_len = 0;
+        kls_klu_get_pointer(lu, uip, ulen, local_col, &ui, &ux, &ucol_len);
+        if ((ucol_len > 0u && (ui == NULL || ux == NULL)) ||
+            ucol_len > nk) {
+          free(row_max);
+          return -1;
+        }
+        for (UF_long p = 0; p < ucol_len; ++p) {
+          const UF_long local_row = ui[p];
+          if (local_row >= nk || local_row >= local_col) {
+            free(row_max);
+            return -1;
+          }
+          const double value_abs = fabs(ux[p]);
+          if (!isfinite(value_abs)) {
+            row_max[local_row] = DBL_MAX;
+          } else if (value_abs > row_max[local_row]) {
+            row_max[local_row] = value_abs;
+          }
+        }
+      }
+    }
+
+    for (UF_long local_row = 0; local_row < nk; ++local_row) {
+      const UF_long global_row = k1 + local_row;
+      const double pivot_abs = fabs(udiag[global_row]);
+      double ratio_abs = -1.0;
+      if (kls_row_refactor_pivot_rejects(
+            pivot_abs, row_max[local_row], tol, &ratio_abs)) {
+        if (rejected_pivot_out != NULL) {
+          *rejected_pivot_out = global_row;
+        }
+        if (rejected_pivot_col_out != NULL) {
+          *rejected_pivot_col_out =
+            symbolic->Q != NULL ? symbolic->Q[global_row] : KLS_KLU_EMPTY;
+        }
+        if (rejected_row_out != NULL) {
+          *rejected_row_out = global_row;
+        }
+        if (rejected_ratio_abs_out != NULL) {
+          *rejected_ratio_abs_out = ratio_abs;
+        }
+        if (rejected_pivot_abs_out != NULL) {
+          *rejected_pivot_abs_out =
+            isfinite(pivot_abs) ? pivot_abs : DBL_MAX;
+        }
+        if (rejected_row_max_abs_out != NULL) {
+          *rejected_row_max_abs_out = row_max[local_row];
+        }
+        free(row_max);
+        return 0;
+      }
+    }
+    free(row_max);
+  }
+  return 1;
+}
+
+static int kls_checked_refactor_accepts_rowwise_u_from_block(
+  kls_solver *solver,
+  UF_long start_block) {
+  if (solver == NULL) {
+    return 0;
+  }
+  if (solver->common.status < 0 ||
+      solver->common.status == TRILINOS_KLU_SINGULAR) {
+    return 1;
+  }
+
+  UF_long rejected_pivot = KLS_KLU_EMPTY;
+  UF_long rejected_pivot_col = KLS_KLU_EMPTY;
+  UF_long rejected_row = KLS_KLU_EMPTY;
+  double rejected_ratio_abs = -1.0;
+  double rejected_pivot_abs = -1.0;
+  double rejected_row_max_abs = -1.0;
+  const int status =
+    kls_numeric_rowwise_u_pivots_pass_threshold_from_block(
+      solver, start_block, &rejected_pivot, &rejected_pivot_col,
+      &rejected_row, &rejected_ratio_abs, &rejected_pivot_abs,
+      &rejected_row_max_abs);
+  if (status > 0) {
+    return 1;
+  }
+  if (status < 0 || rejected_pivot == KLS_KLU_EMPTY) {
+    solver->common.status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+
+  solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_ALL;
+  kls_clear_fast_reject_tail_seed(solver);
+  kls_record_fast_reject_detail(solver, rejected_pivot,
+                                rejected_pivot_col, rejected_row,
+                                rejected_ratio_abs, rejected_pivot_abs,
+                                rejected_row_max_abs);
+  solver->common.status = TRILINOS_KLU_OK;
+  return 0;
+}
+
+static int kls_checked_refactor_accepts_rowwise_u(kls_solver *solver) {
+  return kls_checked_refactor_accepts_rowwise_u_from_block(solver, 0u);
+}
+
 static int kls_row_refactor_u_row_abs_max_from_direct(
   const kls_solver *solver,
   UF_long row,
@@ -38759,18 +38942,31 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   const int egraph =
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
   if (egraph >= 0) {
+    if (egraph && check_pivots &&
+        !kls_checked_refactor_accepts_rowwise_u(solver)) {
+      return 0;
+    }
     return (UF_long)egraph;
   }
 
   if (!kls_parallel_refactor_is_eligible(solver)) {
     const int mapped = kls_mapped_refactor(solver, numeric_values, check_pivots);
     if (mapped >= 0) {
+      if (mapped && check_pivots &&
+          !solver->row_refactor_last_run &&
+          !kls_checked_refactor_accepts_rowwise_u(solver)) {
+        return 0;
+      }
       return (UF_long)mapped;
     }
     if (check_pivots && solver->common.scale > 0) {
       const int checked = kls_serial_checked_scaled_refactor(solver,
                                                             numeric_values);
       if (checked >= 0) {
+        if (checked &&
+            !kls_checked_refactor_accepts_rowwise_u(solver)) {
+          return 0;
+        }
         return (UF_long)checked;
       }
     }
@@ -38786,6 +38982,9 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                                              &rejected_pivot_col)) {
         solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_ALL;
         kls_record_fast_reject(solver, rejected_pivot, rejected_pivot_col);
+        return 0;
+      }
+      if (!kls_checked_refactor_accepts_rowwise_u(solver)) {
         return 0;
       }
     }
@@ -38823,6 +39022,9 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                                              &rejected_pivot_col)) {
         solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_ALL;
         kls_record_fast_reject(solver, rejected_pivot, rejected_pivot_col);
+        return 0;
+      }
+      if (!kls_checked_refactor_accepts_rowwise_u(solver)) {
         return 0;
       }
     }
@@ -38898,6 +39100,10 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   if (!singular) {
     common->status = TRILINOS_KLU_OK;
   }
+  if (check_pivots && !singular &&
+      !kls_checked_refactor_accepts_rowwise_u(solver)) {
+    return 0;
+  }
   return 1;
 }
 
@@ -38940,6 +39146,9 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
                                rejected_pivot_col);
         return 0;
       }
+      if (!kls_checked_refactor_accepts_rowwise_u(solver)) {
+        return 0;
+      }
       return 1;
     }
     const UF_long repaired_block = kls_block_for_pivot(solver, rejected_pivot);
@@ -38954,6 +39163,10 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
             &rejected_pivot_col)) {
         kls_record_fast_reject(solver, next_rejected_pivot,
                                rejected_pivot_col);
+        return 0;
+      }
+      if (!kls_checked_refactor_accepts_rowwise_u_from_block(
+            solver, repaired_block)) {
         return 0;
       }
       return 1;
@@ -38989,6 +39202,13 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
             &rejected_pivot_col)) {
         kls_record_fast_reject(solver, next_rejected_pivot,
                                rejected_pivot_col);
+        continue;
+      }
+      if (!kls_checked_refactor_accepts_rowwise_u_from_block(
+            solver, repaired_block)) {
+        if (solver->common.status < 0) {
+          return 0;
+        }
         continue;
       }
       return 1;
