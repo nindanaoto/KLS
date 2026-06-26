@@ -4198,3 +4198,21 @@ entries. The large gap therefore is not a missing task queue or lack of
 supernode detection anymore; it is the paper's production compact supernode
 storage/publish step, so KLS can build a producer panel once and let many
 consumers reuse it instead of reconstructing the panel at every dependency run.
+
+KLS now has that persistent producer-panel step for the column EGraph probe.
+When `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1` is set, the mapped EGraph refactor
+builds a compact panel cache for retained supernode candidates whose L columns
+have a dense internal block and one common trailing row list. Producer columns
+publish their finalized L values into the cache before the existing
+`pipeline_done` release, so downstream consumers reuse the panel after the
+normal dependency wait. On the same six-row CKTSO-gap focus subset, the cached
+path (`build/kls_egraph_supernode_panel_cache_focus6_t4_r3_timeout120.jsonl`)
+improved the opt-in probe from 20.36 s to 10.43 s geomean, but remained slower
+than the same-session default KLS geomean of 8.29 s
+(`build/kls_default_panel_cache_base_focus6_t4_r3_timeout120.jsonl`). The
+counters show the same high-volume updates are now covered without per-consumer
+panel reconstruction: `G2_circuit` still applied 424,395 grouped updates and
+1.51e9 entries in the last refactor. This fills the direct storage/publish
+piece from the papers but does not close the slow-case gap by itself. The
+remaining direct paper gap is compact or batched numerical kernels over these
+panels, not more supernode detection.
