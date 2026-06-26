@@ -4616,6 +4616,20 @@ narrows the SubtreeLU/CKTSO row-major storage gap for generic segments, but it
 still leaves the larger paper work item open: a production compact/batched
 row-major numeric engine and CKTSO's pipelined pivoting-tail executor.
 
+The retained segment plan now also owns residual cleanup destinations for
+supported target rows that still need post-row input cleanup. During symbolic
+row-pattern construction, KLS records the external work-vector positions from
+the retained per-input-entry target map in a compact row pointer/list. Numeric
+row cleanup consumes that retained list first and only falls back to the old raw
+input-column scan when no retained cleanup list exists. The diagnostics now
+separate planned cleanup coverage
+(`row_refactor_segment_input_cleanup_rows/entries`) from cleanup actually
+performed through retained targets
+(`row_refactor_last_segment_target_cleanup_rows/entries` and cumulative
+companions). This removes another raw KLU/CSC-style rediscovery step from the
+row-segment loop, but it remains scaffolding for the paper algorithm rather
+than the full production row-major engine.
+
 The retained SubtreeLU Algorithm 6 queue splitter then gained the missing
 private-leaf guard. A focused checked METIS grid exposed that the earlier
 FLOP-balance loop could keep promoting separator candidates after it reached

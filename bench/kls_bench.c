@@ -1464,11 +1464,23 @@ int main(int argc, char **argv) {
     printf(",\"row_refactor_segment_input_target_rows\":%" PRId64
            ",\"row_refactor_segment_input_target_entries\":%" PRId64
            ",\"row_refactor_last_segment_target_input_rows\":%" PRId64
-           ",\"row_refactor_segment_target_input_rows\":%" PRId64,
+           ",\"row_refactor_segment_target_input_rows\":%" PRId64
+           ",\"row_refactor_segment_input_cleanup_rows\":%" PRId64
+           ",\"row_refactor_segment_input_cleanup_entries\":%" PRId64
+           ",\"row_refactor_last_segment_target_cleanup_rows\":%" PRId64
+           ",\"row_refactor_segment_target_cleanup_rows\":%" PRId64
+           ",\"row_refactor_last_segment_target_cleanup_entries\":%" PRId64
+           ",\"row_refactor_segment_target_cleanup_entries\":%" PRId64,
            stats.row_refactor_segment_input_target_rows,
            stats.row_refactor_segment_input_target_entries,
            stats.row_refactor_last_segment_target_input_rows,
-           stats.row_refactor_segment_target_input_rows);
+           stats.row_refactor_segment_target_input_rows,
+           stats.row_refactor_segment_input_cleanup_rows,
+           stats.row_refactor_segment_input_cleanup_entries,
+           stats.row_refactor_last_segment_target_cleanup_rows,
+           stats.row_refactor_segment_target_cleanup_rows,
+           stats.row_refactor_last_segment_target_cleanup_entries,
+           stats.row_refactor_segment_target_cleanup_entries);
     printf(",\"row_refactor_compact_supernode_batch_pattern_count\":%" PRId64
            ",\"row_refactor_compact_supernode_batch_pattern_rows\":%" PRId64
            ",\"row_refactor_compact_supernode_batch_candidate_count\":%" PRId64
@@ -2026,6 +2038,9 @@ int main(int argc, char **argv) {
            ", sparse direct input rows: %" PRId64 "/%" PRId64
            ", sparse input targets: %" PRId64 "/%" PRId64
            ", target direct rows: %" PRId64 "/%" PRId64
+           ", target cleanup plan: %" PRId64 "/%" PRId64
+           ", target cleanup rows: %" PRId64 "/%" PRId64
+           ", target cleanup entries: %" PRId64 "/%" PRId64
            ", supernode updates: %d/%" PRId64
            " rows/entries %" PRId64 "/%" PRId64
            ", partial: %d/%" PRId64
@@ -2072,6 +2087,12 @@ int main(int argc, char **argv) {
            stats.row_refactor_segment_input_target_entries,
            stats.row_refactor_last_segment_target_input_rows,
            stats.row_refactor_segment_target_input_rows,
+           stats.row_refactor_segment_input_cleanup_rows,
+           stats.row_refactor_segment_input_cleanup_entries,
+           stats.row_refactor_last_segment_target_cleanup_rows,
+           stats.row_refactor_segment_target_cleanup_rows,
+           stats.row_refactor_last_segment_target_cleanup_entries,
+           stats.row_refactor_segment_target_cleanup_entries,
            stats.row_refactor_last_compact_supernode_update,
            stats.row_refactor_compact_supernode_update_count,
            stats.row_refactor_compact_supernode_update_rows,

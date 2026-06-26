@@ -152,6 +152,8 @@ struct kls_solver {
   unsigned char *row_refactor_segment_input_row_ready;
   unsigned char *row_refactor_segment_input_target_kind;
   UF_long *row_refactor_segment_input_target_pos;
+  UF_long *row_refactor_segment_input_cleanup_ptr;
+  UF_long *row_refactor_segment_input_cleanup_cols;
   UF_long *row_refactor_successor_ptr;
   UF_long *row_refactor_successor_rows;
   UF_long *row_refactor_tail_rows;
@@ -334,8 +336,14 @@ struct kls_solver {
   UF_long row_refactor_sparse_segment_direct_input_rows;
   UF_long row_refactor_segment_input_target_rows;
   UF_long row_refactor_segment_input_target_entries;
+  UF_long row_refactor_segment_input_cleanup_rows;
+  UF_long row_refactor_segment_input_cleanup_entries;
   UF_long row_refactor_last_segment_target_input_rows;
   UF_long row_refactor_segment_target_input_rows;
+  UF_long row_refactor_last_segment_target_cleanup_rows;
+  UF_long row_refactor_segment_target_cleanup_rows;
+  UF_long row_refactor_last_segment_target_cleanup_entries;
+  UF_long row_refactor_segment_target_cleanup_entries;
   int row_refactor_last_compact_supernode_update;
   UF_long row_refactor_compact_supernode_update_count;
   UF_long row_refactor_compact_supernode_update_rows;
@@ -1230,6 +1238,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_segment_input_row_ready);
   free(solver->row_refactor_segment_input_target_kind);
   free(solver->row_refactor_segment_input_target_pos);
+  free(solver->row_refactor_segment_input_cleanup_ptr);
+  free(solver->row_refactor_segment_input_cleanup_cols);
   free(solver->row_refactor_successor_ptr);
   free(solver->row_refactor_successor_rows);
   free(solver->row_refactor_tail_rows);
@@ -1283,6 +1293,8 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_segment_input_row_ready = NULL;
   solver->row_refactor_segment_input_target_kind = NULL;
   solver->row_refactor_segment_input_target_pos = NULL;
+  solver->row_refactor_segment_input_cleanup_ptr = NULL;
+  solver->row_refactor_segment_input_cleanup_cols = NULL;
   solver->row_refactor_successor_ptr = NULL;
   solver->row_refactor_successor_rows = NULL;
   solver->row_refactor_tail_rows = NULL;
@@ -1429,8 +1441,14 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_sparse_segment_direct_input_rows = 0;
   solver->row_refactor_segment_input_target_rows = 0;
   solver->row_refactor_segment_input_target_entries = 0;
+  solver->row_refactor_segment_input_cleanup_rows = 0;
+  solver->row_refactor_segment_input_cleanup_entries = 0;
   solver->row_refactor_last_segment_target_input_rows = 0;
   solver->row_refactor_segment_target_input_rows = 0;
+  solver->row_refactor_last_segment_target_cleanup_rows = 0;
+  solver->row_refactor_segment_target_cleanup_rows = 0;
+  solver->row_refactor_last_segment_target_cleanup_entries = 0;
+  solver->row_refactor_segment_target_cleanup_entries = 0;
   solver->row_refactor_last_compact_supernode_update = 0;
   solver->row_refactor_compact_supernode_update_count = 0;
   solver->row_refactor_compact_supernode_update_rows = 0;
@@ -1565,8 +1583,14 @@ typedef struct {
   UF_long sparse_segment_direct_input_rows;
   UF_long segment_input_target_rows;
   UF_long segment_input_target_entries;
+  UF_long segment_input_cleanup_rows;
+  UF_long segment_input_cleanup_entries;
   UF_long last_segment_target_input_rows;
   UF_long segment_target_input_rows;
+  UF_long last_segment_target_cleanup_rows;
+  UF_long segment_target_cleanup_rows;
+  UF_long last_segment_target_cleanup_entries;
+  UF_long segment_target_cleanup_entries;
   int last_compact_supernode_update;
   UF_long compact_supernode_update_count;
   UF_long compact_supernode_update_rows;
@@ -1769,10 +1793,22 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_segment_input_target_rows;
   diag->segment_input_target_entries =
     solver->row_refactor_segment_input_target_entries;
+  diag->segment_input_cleanup_rows =
+    solver->row_refactor_segment_input_cleanup_rows;
+  diag->segment_input_cleanup_entries =
+    solver->row_refactor_segment_input_cleanup_entries;
   diag->last_segment_target_input_rows =
     solver->row_refactor_last_segment_target_input_rows;
   diag->segment_target_input_rows =
     solver->row_refactor_segment_target_input_rows;
+  diag->last_segment_target_cleanup_rows =
+    solver->row_refactor_last_segment_target_cleanup_rows;
+  diag->segment_target_cleanup_rows =
+    solver->row_refactor_segment_target_cleanup_rows;
+  diag->last_segment_target_cleanup_entries =
+    solver->row_refactor_last_segment_target_cleanup_entries;
+  diag->segment_target_cleanup_entries =
+    solver->row_refactor_segment_target_cleanup_entries;
   diag->last_compact_supernode_update =
     solver->row_refactor_last_compact_supernode_update;
   diag->compact_supernode_update_count =
@@ -2010,10 +2046,22 @@ static void kls_restore_row_refactor_diagnostics(
     diag->segment_input_target_rows;
   solver->row_refactor_segment_input_target_entries =
     diag->segment_input_target_entries;
+  solver->row_refactor_segment_input_cleanup_rows =
+    diag->segment_input_cleanup_rows;
+  solver->row_refactor_segment_input_cleanup_entries =
+    diag->segment_input_cleanup_entries;
   solver->row_refactor_last_segment_target_input_rows =
     diag->last_segment_target_input_rows;
   solver->row_refactor_segment_target_input_rows =
     diag->segment_target_input_rows;
+  solver->row_refactor_last_segment_target_cleanup_rows =
+    diag->last_segment_target_cleanup_rows;
+  solver->row_refactor_segment_target_cleanup_rows =
+    diag->segment_target_cleanup_rows;
+  solver->row_refactor_last_segment_target_cleanup_entries =
+    diag->last_segment_target_cleanup_entries;
+  solver->row_refactor_segment_target_cleanup_entries =
+    diag->segment_target_cleanup_entries;
   solver->row_refactor_last_compact_supernode_update =
     diag->last_compact_supernode_update;
   solver->row_refactor_compact_supernode_update_count =
@@ -2481,6 +2529,8 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_dense_segment_direct_input_rows = 0;
   solver->row_refactor_last_sparse_segment_direct_input_rows = 0;
   solver->row_refactor_last_segment_target_input_rows = 0;
+  solver->row_refactor_last_segment_target_cleanup_rows = 0;
+  solver->row_refactor_last_segment_target_cleanup_entries = 0;
   solver->row_refactor_last_compact_supernode_update = 0;
   solver->row_refactor_last_compact_supernode_partial_update = 0;
   solver->row_refactor_last_compact_supernode_gemv = 0;
@@ -2513,6 +2563,8 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_dense_segment_direct_input_rows = 0;
   solver->stats.row_refactor_last_sparse_segment_direct_input_rows = 0;
   solver->stats.row_refactor_last_segment_target_input_rows = 0;
+  solver->stats.row_refactor_last_segment_target_cleanup_rows = 0;
+  solver->stats.row_refactor_last_segment_target_cleanup_entries = 0;
   solver->stats.row_refactor_last_compact_supernode_update = 0;
   solver->stats.row_refactor_last_compact_supernode_partial_update = 0;
   solver->stats.row_refactor_last_compact_supernode_gemv = 0;
@@ -2568,6 +2620,8 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_dense_segment_direct_input_rows = 0;
   solver->row_refactor_last_sparse_segment_direct_input_rows = 0;
   solver->row_refactor_last_segment_target_input_rows = 0;
+  solver->row_refactor_last_segment_target_cleanup_rows = 0;
+  solver->row_refactor_last_segment_target_cleanup_entries = 0;
   solver->row_refactor_last_compact_supernode_update = 0;
   solver->row_refactor_last_compact_supernode_partial_update = 0;
   solver->row_refactor_last_compact_supernode_gemv = 0;
@@ -2679,6 +2733,18 @@ static void kls_record_row_refactor_segment_target_input(
   }
   solver->row_refactor_last_segment_target_input_rows++;
   solver->row_refactor_segment_target_input_rows++;
+}
+
+static void kls_record_row_refactor_segment_target_cleanup(
+  kls_solver *solver,
+  UF_long entries) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_last_segment_target_cleanup_rows++;
+  solver->row_refactor_segment_target_cleanup_rows++;
+  solver->row_refactor_last_segment_target_cleanup_entries += entries;
+  solver->row_refactor_segment_target_cleanup_entries += entries;
 }
 
 static void kls_record_row_refactor_compact_supernode_update(
@@ -10943,6 +11009,18 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_last_segment_target_input_rows;
   solver->stats.row_refactor_segment_target_input_rows =
     (int64_t)solver->row_refactor_segment_target_input_rows;
+  solver->stats.row_refactor_segment_input_cleanup_rows =
+    (int64_t)solver->row_refactor_segment_input_cleanup_rows;
+  solver->stats.row_refactor_segment_input_cleanup_entries =
+    (int64_t)solver->row_refactor_segment_input_cleanup_entries;
+  solver->stats.row_refactor_last_segment_target_cleanup_rows =
+    (int64_t)solver->row_refactor_last_segment_target_cleanup_rows;
+  solver->stats.row_refactor_segment_target_cleanup_rows =
+    (int64_t)solver->row_refactor_segment_target_cleanup_rows;
+  solver->stats.row_refactor_last_segment_target_cleanup_entries =
+    (int64_t)solver->row_refactor_last_segment_target_cleanup_entries;
+  solver->stats.row_refactor_segment_target_cleanup_entries =
+    (int64_t)solver->row_refactor_segment_target_cleanup_entries;
   solver->stats.row_refactor_last_compact_supernode_update =
     solver->row_refactor_last_compact_supernode_update;
   solver->stats.row_refactor_compact_supernode_update_count =
@@ -17739,6 +17817,7 @@ static void kls_try_build_row_refactor_segment_input_targets(
   UF_long n,
   const UF_long *input_ptr,
   const UF_long *input_cols,
+  const unsigned char *input_needs_cleanup,
   const UF_long *l_ptr,
   const UF_long *l_cols,
   const UF_long *u_ptr,
@@ -17752,8 +17831,12 @@ static void kls_try_build_row_refactor_segment_input_targets(
   unsigned char **row_ready_out,
   unsigned char **target_kind_out,
   UF_long **target_pos_out,
+  UF_long **cleanup_ptr_out,
+  UF_long **cleanup_cols_out,
   UF_long *target_rows_out,
-  UF_long *target_entries_out) {
+  UF_long *target_entries_out,
+  UF_long *cleanup_rows_out,
+  UF_long *cleanup_entries_out) {
   if (row_ready_out != NULL) {
     *row_ready_out = NULL;
   }
@@ -17763,11 +17846,23 @@ static void kls_try_build_row_refactor_segment_input_targets(
   if (target_pos_out != NULL) {
     *target_pos_out = NULL;
   }
+  if (cleanup_ptr_out != NULL) {
+    *cleanup_ptr_out = NULL;
+  }
+  if (cleanup_cols_out != NULL) {
+    *cleanup_cols_out = NULL;
+  }
   if (target_rows_out != NULL) {
     *target_rows_out = 0;
   }
   if (target_entries_out != NULL) {
     *target_entries_out = 0;
+  }
+  if (cleanup_rows_out != NULL) {
+    *cleanup_rows_out = 0;
+  }
+  if (cleanup_entries_out != NULL) {
+    *cleanup_entries_out = 0;
   }
   if (n <= 0 || input_ptr == NULL || input_cols == NULL ||
       l_ptr == NULL || l_cols == NULL || u_ptr == NULL || u_cols == NULL ||
@@ -17775,6 +17870,7 @@ static void kls_try_build_row_refactor_segment_input_targets(
       group_kind == NULL || group_trailing_begin == NULL ||
       group_trailing_len == NULL || row_ready_out == NULL ||
       target_kind_out == NULL || target_pos_out == NULL ||
+      cleanup_ptr_out == NULL || cleanup_cols_out == NULL ||
       n > (UF_long)PTRDIFF_MAX) {
     return;
   }
@@ -17799,16 +17895,22 @@ static void kls_try_build_row_refactor_segment_input_targets(
     ? (unsigned char *)calloc(input_nnz_size, sizeof(*target_kind)) : NULL;
   UF_long *target_pos = input_nnz > 0u
     ? (UF_long *)malloc(input_nnz_size * sizeof(*target_pos)) : NULL;
+  UF_long *cleanup_ptr =
+    (UF_long *)calloc(n_size + 1u, sizeof(*cleanup_ptr));
   if (row_ready == NULL ||
-      (input_nnz > 0u && (target_kind == NULL || target_pos == NULL))) {
+      (input_nnz > 0u && (target_kind == NULL || target_pos == NULL)) ||
+      cleanup_ptr == NULL) {
     free(row_ready);
     free(target_kind);
     free(target_pos);
+    free(cleanup_ptr);
     return;
   }
 
   UF_long target_rows = 0;
   UF_long target_entries = 0;
+  UF_long cleanup_rows = 0;
+  UF_long cleanup_entries = 0;
   for (UF_long group = 0; group < group_count; ++group) {
     const unsigned char kind = group_kind[group];
     if (kind != KLS_ROW_REFACTOR_GROUP_GENERIC &&
@@ -17899,6 +18001,19 @@ static void kls_try_build_row_refactor_segment_input_targets(
       row_ready[row] = 1u;
       target_rows++;
       target_entries += input_end - input_begin;
+      if (input_needs_cleanup != NULL && input_needs_cleanup[row]) {
+        UF_long row_cleanup_entries = 0;
+        for (UF_long p = input_begin; p < input_end; ++p) {
+          if (target_kind[p] == KLS_ROW_SEGMENT_INPUT_TARGET_EXTERNAL) {
+            row_cleanup_entries++;
+          }
+        }
+        if (row_cleanup_entries > 0u) {
+          cleanup_ptr[row + 1u] = row_cleanup_entries;
+          cleanup_rows++;
+          cleanup_entries += row_cleanup_entries;
+        }
+      }
     }
   }
 
@@ -17906,16 +18021,86 @@ static void kls_try_build_row_refactor_segment_input_targets(
     free(row_ready);
     free(target_kind);
     free(target_pos);
+    free(cleanup_ptr);
     return;
+  }
+  UF_long *cleanup_cols = NULL;
+  if (cleanup_entries > 0u) {
+    if (cleanup_entries > (UF_long)(SIZE_MAX / sizeof(*cleanup_cols))) {
+      free(row_ready);
+      free(target_kind);
+      free(target_pos);
+      free(cleanup_ptr);
+      return;
+    }
+    for (UF_long row = 0; row < n; ++row) {
+      cleanup_ptr[row + 1u] += cleanup_ptr[row];
+    }
+    cleanup_cols =
+      (UF_long *)malloc((size_t)cleanup_entries * sizeof(*cleanup_cols));
+    UF_long *cleanup_write =
+      (UF_long *)malloc(n_size * sizeof(*cleanup_write));
+    if (cleanup_cols == NULL || cleanup_write == NULL) {
+      free(row_ready);
+      free(target_kind);
+      free(target_pos);
+      free(cleanup_ptr);
+      free(cleanup_cols);
+      free(cleanup_write);
+      return;
+    }
+    memcpy(cleanup_write, cleanup_ptr, n_size * sizeof(*cleanup_write));
+    for (UF_long row = 0; row < n; ++row) {
+      if (!row_ready[row] || cleanup_ptr[row] == cleanup_ptr[row + 1u]) {
+        continue;
+      }
+      for (UF_long p = input_ptr[row]; p < input_ptr[row + 1u]; ++p) {
+        if (target_kind[p] != KLS_ROW_SEGMENT_INPUT_TARGET_EXTERNAL) {
+          continue;
+        }
+        UF_long write = cleanup_write[row]++;
+        if (write >= cleanup_ptr[row + 1u]) {
+          free(row_ready);
+          free(target_kind);
+          free(target_pos);
+          free(cleanup_ptr);
+          free(cleanup_cols);
+          free(cleanup_write);
+          return;
+        }
+        cleanup_cols[write] = target_pos[p];
+      }
+      if (cleanup_write[row] != cleanup_ptr[row + 1u]) {
+        free(row_ready);
+        free(target_kind);
+        free(target_pos);
+        free(cleanup_ptr);
+        free(cleanup_cols);
+        free(cleanup_write);
+        return;
+      }
+    }
+    free(cleanup_write);
+  } else {
+    free(cleanup_ptr);
+    cleanup_ptr = NULL;
   }
   *row_ready_out = row_ready;
   *target_kind_out = target_kind;
   *target_pos_out = target_pos;
+  *cleanup_ptr_out = cleanup_ptr;
+  *cleanup_cols_out = cleanup_cols;
   if (target_rows_out != NULL) {
     *target_rows_out = target_rows;
   }
   if (target_entries_out != NULL) {
     *target_entries_out = target_entries;
+  }
+  if (cleanup_rows_out != NULL) {
+    *cleanup_rows_out = cleanup_rows;
+  }
+  if (cleanup_entries_out != NULL) {
+    *cleanup_entries_out = cleanup_entries;
   }
 }
 
@@ -18595,15 +18780,21 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   unsigned char *segment_input_row_ready = NULL;
   unsigned char *segment_input_target_kind = NULL;
   UF_long *segment_input_target_pos = NULL;
+  UF_long *segment_input_cleanup_ptr = NULL;
+  UF_long *segment_input_cleanup_cols = NULL;
   UF_long segment_input_target_rows = 0;
   UF_long segment_input_target_entries = 0;
+  UF_long segment_input_cleanup_rows = 0;
+  UF_long segment_input_cleanup_entries = 0;
   kls_try_build_row_refactor_segment_input_targets(
-    n, input_ptr, input_cols, l_ptr, l_cols, u_ptr, u_cols, row_group,
-    group_count, group_ptr, group_kind, group_trailing_begin,
-    group_trailing_len, &segment_input_row_ready,
-    &segment_input_target_kind, &segment_input_target_pos,
-    &segment_input_target_rows,
-    &segment_input_target_entries);
+    n, input_ptr, input_cols, solver->row_refactor_input_needs_cleanup,
+    l_ptr, l_cols, u_ptr, u_cols, row_group, group_count, group_ptr,
+    group_kind, group_trailing_begin, group_trailing_len,
+    &segment_input_row_ready, &segment_input_target_kind,
+    &segment_input_target_pos, &segment_input_cleanup_ptr,
+    &segment_input_cleanup_cols, &segment_input_target_rows,
+    &segment_input_target_entries, &segment_input_cleanup_rows,
+    &segment_input_cleanup_entries);
   kls_try_build_row_refactor_dense_producer_runs(
     n, l_ptr, l_cols, row_group, group_count, group_ptr, group_kind,
     group_compact_panel_begin, &dense_producer_run_ptr,
@@ -18673,6 +18864,10 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     segment_input_target_kind;
   solver->row_refactor_segment_input_target_pos =
     segment_input_target_pos;
+  solver->row_refactor_segment_input_cleanup_ptr =
+    segment_input_cleanup_ptr;
+  solver->row_refactor_segment_input_cleanup_cols =
+    segment_input_cleanup_cols;
   solver->row_refactor_level_count = group_level_count;
   solver->row_refactor_level_max_width = group_max_width;
   solver->row_refactor_cluster_level_count = group_level_count;
@@ -18731,6 +18926,10 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     segment_input_target_rows;
   solver->row_refactor_segment_input_target_entries =
     segment_input_target_entries;
+  solver->row_refactor_segment_input_cleanup_rows =
+    segment_input_cleanup_rows;
+  solver->row_refactor_segment_input_cleanup_entries =
+    segment_input_cleanup_entries;
   solver->row_refactor_compact_dense_panel_persistent_groups =
     compact_dense_panel_persistent_groups;
   solver->row_refactor_compact_dense_panel_persistent_entries =
@@ -18784,7 +18983,10 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
       (solver->row_refactor_input_ptr[solver->n] == 0u ||
        solver->row_refactor_segment_input_target_rows == 0u ||
        (solver->row_refactor_segment_input_target_kind != NULL &&
-        solver->row_refactor_segment_input_target_pos != NULL))) {
+        solver->row_refactor_segment_input_target_pos != NULL)) &&
+      (solver->row_refactor_segment_input_cleanup_entries == 0u ||
+       (solver->row_refactor_segment_input_cleanup_ptr != NULL &&
+        solver->row_refactor_segment_input_cleanup_cols != NULL))) {
     return 1;
   }
   if (!kls_build_refactor_map(solver) ||
@@ -22117,6 +22319,36 @@ static int kls_try_row_refactor_solve(kls_solver *solver,
   return 1;
 }
 
+static int kls_clear_row_refactor_segment_target_residuals(kls_solver *solver,
+                                                           double *x,
+                                                           UF_long row) {
+  if (solver == NULL || x == NULL || row >= solver->n ||
+      solver->row_refactor_segment_input_row_ready == NULL ||
+      !solver->row_refactor_segment_input_row_ready[row] ||
+      solver->row_refactor_segment_input_cleanup_ptr == NULL ||
+      solver->row_refactor_segment_input_cleanup_cols == NULL) {
+    return 0;
+  }
+  const UF_long begin = solver->row_refactor_segment_input_cleanup_ptr[row];
+  const UF_long end =
+    solver->row_refactor_segment_input_cleanup_ptr[row + 1u];
+  if (begin >= end) {
+    return 0;
+  }
+  if (end > solver->row_refactor_segment_input_cleanup_entries) {
+    return 0;
+  }
+  for (UF_long p = begin; p < end; ++p) {
+    const UF_long col = solver->row_refactor_segment_input_cleanup_cols[p];
+    if (col >= solver->n) {
+      return 0;
+    }
+    x[col] = 0.0;
+  }
+  kls_record_row_refactor_segment_target_cleanup(solver, end - begin);
+  return 1;
+}
+
 static void kls_clear_row_refactor_input_residuals(kls_solver *solver,
                                                    double *x,
                                                    UF_long row) {
@@ -22128,6 +22360,9 @@ static void kls_clear_row_refactor_input_residuals(kls_solver *solver,
   }
   if (solver->row_refactor_input_needs_cleanup != NULL &&
       !solver->row_refactor_input_needs_cleanup[row]) {
+    return;
+  }
+  if (kls_clear_row_refactor_segment_target_residuals(solver, x, row)) {
     return;
   }
   for (UF_long p = solver->row_refactor_input_ptr[row];
