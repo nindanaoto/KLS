@@ -3989,3 +3989,14 @@ existing structural dependency proof can lock their old pivots; otherwise KLS
 falls back to the full suffix restart. This fills a direct semantic gap in the
 current tail executor without pretending to implement CKTSO's full parallel
 pipelined tail factorization.
+
+The compact dense row-segment refactor path then removed another KLU-storage
+adaptation step. For dense groups with retained compact panel slices, KLS now
+loads current input values for in-panel dense columns and shared trailing
+columns directly into that compact panel, leaving the sparse work vector only
+for external dependency columns and their update deltas. Checked and unchecked
+compact dense smoke cases require this direct-input path, and benchmark JSON
+reports the last-run and cumulative direct compact-input row counts. This is a
+small but direct move toward the SubtreeLU/CKTSO row/segment numeric-storage
+model: dense panel values live in the row-segment panel for the numeric pass
+instead of being staged through a KLU-shaped sparse accumulator first.

@@ -1299,6 +1299,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_supernode_batch_rows,
            stats.row_refactor_compact_supernode_batch_dep_rows,
            stats.row_refactor_compact_supernode_batch_entries);
+    printf(",\"row_refactor_last_compact_dense_panel_direct_input_rows\":%" PRId64
+           ",\"row_refactor_compact_dense_panel_direct_input_rows\":%" PRId64,
+           stats.row_refactor_last_compact_dense_panel_direct_input_rows,
+           stats.row_refactor_compact_dense_panel_direct_input_rows);
     printf(",\"row_refactor_compact_supernode_batch_pattern_count\":%" PRId64
            ",\"row_refactor_compact_supernode_batch_pattern_rows\":%" PRId64
            ",\"row_refactor_compact_supernode_batch_candidate_count\":%" PRId64
@@ -1694,6 +1698,7 @@ int main(int argc, char **argv) {
            ", work: %.6g, entries: %.6g"
            ", persistent: %" PRId64 " groups/%" PRId64
            " entries, used: %d/%" PRId64
+           ", direct input rows: %" PRId64 "/%" PRId64
            ", supernode updates: %d/%" PRId64
            " rows/entries %" PRId64 "/%" PRId64
            ", gemv: %d/%" PRId64
@@ -1720,6 +1725,8 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_persistent_entries,
            stats.row_refactor_last_compact_dense_panel_persistent,
            stats.row_refactor_compact_dense_panel_persistent_run_count,
+           stats.row_refactor_last_compact_dense_panel_direct_input_rows,
+           stats.row_refactor_compact_dense_panel_direct_input_rows,
            stats.row_refactor_last_compact_supernode_update,
            stats.row_refactor_compact_supernode_update_count,
            stats.row_refactor_compact_supernode_update_rows,

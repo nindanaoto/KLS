@@ -350,6 +350,8 @@ typedef struct kls_stats {
   int64_t row_refactor_last_separator_flop_pipeline_groups;
   int64_t row_refactor_separator_flop_private_group_count;
   int64_t row_refactor_separator_flop_pipeline_group_count;
+  int64_t row_refactor_last_compact_dense_panel_direct_input_rows;
+  int64_t row_refactor_compact_dense_panel_direct_input_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

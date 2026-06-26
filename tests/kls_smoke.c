@@ -2596,7 +2596,9 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
              stats.row_refactor_compact_dense_panel_persistent_groups < 1 ||
              stats.row_refactor_compact_dense_panel_persistent_entries < 1 ||
              stats.row_refactor_last_compact_dense_panel_persistent != 1 ||
-             stats.row_refactor_compact_dense_panel_persistent_run_count < 1)) {
+             stats.row_refactor_compact_dense_panel_persistent_run_count < 1 ||
+             stats.row_refactor_last_compact_dense_panel_direct_input_rows < 1 ||
+             stats.row_refactor_compact_dense_panel_direct_input_rows < 1)) {
     fprintf(stderr,
             "unexpected dense checked-row prefix stats: pivot=%" PRId64
             ", refresh=%d, block_restarts=%d, tail_restarts=%d"
@@ -2605,7 +2607,8 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
             ", eligible=%" PRId64 "/%" PRId64
             ", work=%.17g, entries=%.17g"
             ", persistent=%" PRId64 "/%" PRId64
-            ", persistent_used=%d/%" PRId64 "\n",
+            ", persistent_used=%d/%" PRId64
+            ", direct_input=%" PRId64 "/%" PRId64 "\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_refresh_state,
             stats.fast_block_restarts,
@@ -2625,7 +2628,9 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
             stats.row_refactor_compact_dense_panel_persistent_groups,
             stats.row_refactor_compact_dense_panel_persistent_entries,
             stats.row_refactor_last_compact_dense_panel_persistent,
-            stats.row_refactor_compact_dense_panel_persistent_run_count);
+            stats.row_refactor_compact_dense_panel_persistent_run_count,
+            stats.row_refactor_last_compact_dense_panel_direct_input_rows,
+            stats.row_refactor_compact_dense_panel_direct_input_rows);
     ok = 0;
   }
   double max_solution_error = 0.0;
@@ -2851,6 +2856,8 @@ static int test_unchecked_row_dense_compact_panel(void) {
              stats.row_refactor_compact_dense_panel_persistent_entries < 1 ||
              stats.row_refactor_last_compact_dense_panel_persistent != 1 ||
              stats.row_refactor_compact_dense_panel_persistent_run_count < 1 ||
+             stats.row_refactor_last_compact_dense_panel_direct_input_rows < 1 ||
+             stats.row_refactor_compact_dense_panel_direct_input_rows < 1 ||
              stats.row_refactor_last_compact_supernode_update != 1 ||
              stats.row_refactor_compact_supernode_update_count < 1 ||
              stats.row_refactor_compact_supernode_update_rows < lead ||
@@ -2870,6 +2877,7 @@ static int test_unchecked_row_dense_compact_panel(void) {
             ", work=%.17g, entries=%.17g"
             ", persistent=%" PRId64 "/%" PRId64
             ", persistent_used=%d/%" PRId64
+            ", direct_input=%" PRId64 "/%" PRId64
             ", supernode=%d/%" PRId64 "/%" PRId64 "/%" PRId64
             ", gemv=%d/%" PRId64 "/%" PRId64 "/%" PRId64
             ", trsv=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
@@ -2887,6 +2895,8 @@ static int test_unchecked_row_dense_compact_panel(void) {
             stats.row_refactor_compact_dense_panel_persistent_entries,
             stats.row_refactor_last_compact_dense_panel_persistent,
             stats.row_refactor_compact_dense_panel_persistent_run_count,
+            stats.row_refactor_last_compact_dense_panel_direct_input_rows,
+            stats.row_refactor_compact_dense_panel_direct_input_rows,
             stats.row_refactor_last_compact_supernode_update,
             stats.row_refactor_compact_supernode_update_count,
             stats.row_refactor_compact_supernode_update_rows,
