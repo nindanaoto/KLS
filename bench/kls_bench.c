@@ -1569,6 +1569,14 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_supernode_batch_rows,
            stats.row_refactor_compact_supernode_batch_dep_rows,
            stats.row_refactor_compact_supernode_batch_entries);
+    printf(",\"row_refactor_last_compact_dense_panel_blocked\":%d"
+           ",\"row_refactor_compact_dense_panel_blocked_run_count\":%" PRId64
+           ",\"row_refactor_compact_dense_panel_blocked_rows\":%" PRId64
+           ",\"row_refactor_compact_dense_panel_blocked_entries\":%" PRId64,
+           stats.row_refactor_last_compact_dense_panel_blocked,
+           stats.row_refactor_compact_dense_panel_blocked_run_count,
+           stats.row_refactor_compact_dense_panel_blocked_rows,
+           stats.row_refactor_compact_dense_panel_blocked_entries);
     printf(",\"row_refactor_last_compact_dense_panel_direct_input_rows\":%" PRId64
            ",\"row_refactor_compact_dense_panel_direct_input_rows\":%" PRId64,
            stats.row_refactor_last_compact_dense_panel_direct_input_rows,
@@ -2269,6 +2277,8 @@ int main(int argc, char **argv) {
            ", multi/fragmented rows: %" PRId64 "/%" PRId64
            ", persistent: %" PRId64 " groups/%" PRId64
            " entries, used: %d/%" PRId64
+           ", blocked: %d/%" PRId64
+           " rows/entries %" PRId64 "/%" PRId64
            ", direct input rows: %" PRId64 "/%" PRId64
            ", compact solve values: %" PRId64 "/%" PRId64
            ", compact group solves: %" PRId64 "/%" PRId64
@@ -2319,6 +2329,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_persistent_entries,
            stats.row_refactor_last_compact_dense_panel_persistent,
            stats.row_refactor_compact_dense_panel_persistent_run_count,
+           stats.row_refactor_last_compact_dense_panel_blocked,
+           stats.row_refactor_compact_dense_panel_blocked_run_count,
+           stats.row_refactor_compact_dense_panel_blocked_rows,
+           stats.row_refactor_compact_dense_panel_blocked_entries,
            stats.row_refactor_last_compact_dense_panel_direct_input_rows,
            stats.row_refactor_compact_dense_panel_direct_input_rows,
            stats.row_refactor_last_compact_panel_solve_values,

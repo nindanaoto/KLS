@@ -5131,3 +5131,20 @@ rows to cover the executed compact-supernode batch rows, including the checked
 fragmented target-map case. This removes another KLU-shaped staging rule from
 the SubtreeLU-style compact batch executors without claiming to close the
 remaining production-kernel and CKTSO-tail work.
+
+Unchecked compact dense row-refactor groups now have a portable blocked panel
+factor path even when CBLAS is disabled. After the retained panel is loaded,
+KLS factors diagonal panel blocks row-by-row, solves the below-block
+multipliers against the just-factored upper block, and applies one dense/trailing
+right-looking update before publishing the row-major values. This fills a
+direct SubtreeLU/CKTSO algorithm gap: compact supernodal panel arithmetic no
+longer exists only as a CBLAS probe or as per-row scalar updates. Benchmark JSON
+and stats expose this through
+`row_refactor_last_compact_dense_panel_blocked`,
+`row_refactor_compact_dense_panel_blocked_run_count`,
+`row_refactor_compact_dense_panel_blocked_rows`, and
+`row_refactor_compact_dense_panel_blocked_entries`; the unchecked dense compact
+smoke fixture forces CBLAS off and now requires the blocked path. Checked
+refactors still use the pivot-checking row kernel, so the larger open gaps
+remain the production checked/pivoting tail executor and broader row-major
+numeric engine.

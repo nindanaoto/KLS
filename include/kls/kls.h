@@ -530,6 +530,10 @@ typedef struct kls_stats {
   int64_t
     fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups;
   int64_t fast_kls_block_restart_last_row_pipeline_supernode_panel_update_rows;
+  int row_refactor_last_compact_dense_panel_blocked;
+  int64_t row_refactor_compact_dense_panel_blocked_run_count;
+  int64_t row_refactor_compact_dense_panel_blocked_rows;
+  int64_t row_refactor_compact_dense_panel_blocked_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
