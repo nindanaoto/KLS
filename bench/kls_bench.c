@@ -1244,6 +1244,14 @@ int main(int argc, char **argv) {
            ",\"row_refactor_compact_dense_panel_eligible_rows\":%" PRId64
            ",\"row_refactor_compact_dense_panel_update_work\":%.9g"
            ",\"row_refactor_compact_dense_panel_entries\":%.9g"
+           ",\"row_refactor_dense_producer_run_count\":%" PRId64
+           ",\"row_refactor_dense_producer_run_rows\":%" PRId64
+           ",\"row_refactor_dense_producer_run_dep_rows\":%" PRId64
+           ",\"row_refactor_dense_producer_run_max_per_row\":%" PRId64
+           ",\"row_refactor_dense_producer_full_suffix_run_count\":%" PRId64
+           ",\"row_refactor_dense_producer_full_suffix_rows\":%" PRId64
+           ",\"row_refactor_dense_producer_multi_run_rows\":%" PRId64
+           ",\"row_refactor_dense_producer_fragmented_rows\":%" PRId64
            ",\"row_refactor_compact_dense_panel_persistent_groups\":%" PRId64
            ",\"row_refactor_compact_dense_panel_persistent_entries\":%" PRId64
            ",\"row_refactor_last_compact_dense_panel_persistent\":%d"
@@ -1310,6 +1318,14 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_eligible_rows,
            stats.row_refactor_compact_dense_panel_update_work,
            stats.row_refactor_compact_dense_panel_entries,
+           stats.row_refactor_dense_producer_run_count,
+           stats.row_refactor_dense_producer_run_rows,
+           stats.row_refactor_dense_producer_run_dep_rows,
+           stats.row_refactor_dense_producer_run_max_per_row,
+           stats.row_refactor_dense_producer_full_suffix_run_count,
+           stats.row_refactor_dense_producer_full_suffix_rows,
+           stats.row_refactor_dense_producer_multi_run_rows,
+           stats.row_refactor_dense_producer_fragmented_rows,
            stats.row_refactor_compact_dense_panel_persistent_groups,
            stats.row_refactor_compact_dense_panel_persistent_entries,
            stats.row_refactor_last_compact_dense_panel_persistent,
@@ -1823,6 +1839,10 @@ int main(int argc, char **argv) {
            ", compact panel: %d/%" PRId64
            ", eligible: %" PRId64 "/%" PRId64
            ", work: %.6g, entries: %.6g"
+           ", producer runs: %" PRId64 "/%" PRId64 "/%" PRId64
+           " max %" PRId64
+           ", full suffix: %" PRId64 "/%" PRId64
+           ", multi/fragmented rows: %" PRId64 "/%" PRId64
            ", persistent: %" PRId64 " groups/%" PRId64
            " entries, used: %d/%" PRId64
            ", direct input rows: %" PRId64 "/%" PRId64
@@ -1851,6 +1871,14 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_eligible_rows,
            stats.row_refactor_compact_dense_panel_update_work,
            stats.row_refactor_compact_dense_panel_entries,
+           stats.row_refactor_dense_producer_run_count,
+           stats.row_refactor_dense_producer_run_rows,
+           stats.row_refactor_dense_producer_run_dep_rows,
+           stats.row_refactor_dense_producer_run_max_per_row,
+           stats.row_refactor_dense_producer_full_suffix_run_count,
+           stats.row_refactor_dense_producer_full_suffix_rows,
+           stats.row_refactor_dense_producer_multi_run_rows,
+           stats.row_refactor_dense_producer_fragmented_rows,
            stats.row_refactor_compact_dense_panel_persistent_groups,
            stats.row_refactor_compact_dense_panel_persistent_entries,
            stats.row_refactor_last_compact_dense_panel_persistent,

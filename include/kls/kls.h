@@ -388,6 +388,14 @@ typedef struct kls_stats {
   int64_t refactor_supernode_cblas_update_run_count;
   int64_t refactor_supernode_cblas_update_rows;
   int64_t refactor_supernode_cblas_update_entries;
+  int64_t row_refactor_dense_producer_run_count;
+  int64_t row_refactor_dense_producer_run_rows;
+  int64_t row_refactor_dense_producer_run_dep_rows;
+  int64_t row_refactor_dense_producer_run_max_per_row;
+  int64_t row_refactor_dense_producer_full_suffix_run_count;
+  int64_t row_refactor_dense_producer_full_suffix_rows;
+  int64_t row_refactor_dense_producer_multi_run_rows;
+  int64_t row_refactor_dense_producer_fragmented_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

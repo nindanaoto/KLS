@@ -4013,6 +4013,26 @@ structural level: KLS needs a broader CKTSO/SubtreeLU row/segment panel
 executor that can batch heterogeneous, non-contiguous, and internal rows rather
 than only completed-producer suffixes exposed by the current row-major storage.
 
+KLS now records that row/segment structure explicitly during row-refactor
+symbolic setup. After dense group and compact-panel detection, each row's `L`
+pattern is scanned once for maximal contiguous references to completed compact
+dense producer groups. The compact-supernode update kernel consumes this
+persistent dense-producer run plan before falling back to the old runtime scan.
+`kls_stats` and `kls_bench` expose the total planned producer runs, rows,
+dependency rows, max runs per row, full-suffix producer runs, multi-run rows,
+and fragmented rows. The two-producer smoke fixture requires these counters,
+which means KLS now has a concrete symbolic substrate for the CKTSO/SubtreeLU
+"for each contributing supernode, update the current row/range" algorithm
+instead of rediscovering one suffix at a time inside the numeric kernel. The
+remaining gap should be attacked by turning the fragmented and multi-run rows
+seen on paper matrices into a broader row/segment panel executor. A forced-row
+top-five CKTSO-gap probe after this change reported 4,057-59,571 planned dense
+producer runs per matrix over 1,178-9,789 rows, with max 8-27 runs per row and
+zero current batch candidates; fragmented rows equaled producer-run rows on all
+five matrices. That is a direct paper-algorithm gap: the supernode producer
+ranges are present, but KLS still lacks the row-panel executor that can consume
+them together with the scalar/non-producer pieces of the same row.
+
 The unchecked producer-panel refactor experiment also uses a blocked panel
 algorithm: scalar code factors each diagonal block, `dtrsm` solves the
 below-panel multiplier block, and `dgemm` updates both the dense right panel

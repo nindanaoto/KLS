@@ -4441,13 +4441,26 @@ static int test_batch_group_multi_producer_supernode_update_probe(void) {
          (int64_t)(lead0 + lead1) * (int64_t)(mid / 2) ||
        stats.row_refactor_compact_supernode_batch_entries <= 0 ||
        stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
-       stats.row_refactor_compact_supernode_batch_rejected_work_count != 0)) {
+       stats.row_refactor_compact_supernode_batch_rejected_work_count != 0 ||
+       stats.row_refactor_dense_producer_run_count <
+         (int64_t)2 * (int64_t)mid ||
+       stats.row_refactor_dense_producer_run_rows < mid ||
+       stats.row_refactor_dense_producer_run_dep_rows <=
+         (int64_t)(lead0 + lead1) * (int64_t)(mid / 2) ||
+       stats.row_refactor_dense_producer_run_max_per_row < 2 ||
+       stats.row_refactor_dense_producer_full_suffix_run_count <
+         (int64_t)2 * (int64_t)mid ||
+       stats.row_refactor_dense_producer_multi_run_rows < mid)) {
     fprintf(stderr,
             "unexpected multi-producer stats: build_cblas=%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
             ", rejected=%" PRId64
+            ", producer_runs=%" PRId64 "/%" PRId64 "/%" PRId64
+            " max=%" PRId64
+            ", full_suffix=%" PRId64 "/%" PRId64
+            ", multi/fragmented=%" PRId64 "/%" PRId64
             ", groups=%" PRId64 ", dense=%" PRId64 "/%" PRId64
             ", compact=%d/%" PRId64 "\n",
             stats.build_has_cblas,
@@ -4462,6 +4475,14 @@ static int test_batch_group_multi_producer_supernode_update_probe(void) {
             stats.row_refactor_compact_supernode_batch_candidate_rows,
             stats.row_refactor_compact_supernode_batch_candidate_dep_rows,
             stats.row_refactor_compact_supernode_batch_rejected_work_count,
+            stats.row_refactor_dense_producer_run_count,
+            stats.row_refactor_dense_producer_run_rows,
+            stats.row_refactor_dense_producer_run_dep_rows,
+            stats.row_refactor_dense_producer_run_max_per_row,
+            stats.row_refactor_dense_producer_full_suffix_run_count,
+            stats.row_refactor_dense_producer_full_suffix_rows,
+            stats.row_refactor_dense_producer_multi_run_rows,
+            stats.row_refactor_dense_producer_fragmented_rows,
             stats.row_refactor_group_count,
             stats.row_refactor_dense_segment_count,
             stats.row_refactor_dense_segment_rows,
