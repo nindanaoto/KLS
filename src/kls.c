@@ -27768,7 +27768,16 @@ static int kls_compact_dense_group_try_batched_supernode_update(
   for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
     const UF_long row = batch_begin + batch_local;
     const UF_long group_local = row - row_begin;
-    if (!kls_parallel_row_refactor_load_input_row(shared, x, row)) {
+    const int direct_input =
+      kls_parallel_row_refactor_load_compact_dense_input_row(
+        shared, x, row_begin, row_end, trailing_len, trailing_cols,
+        dense_panel, trailing_panel, row);
+    if (direct_input < 0) {
+      status = -1;
+      goto cleanup;
+    }
+    if (!direct_input &&
+        !kls_parallel_row_refactor_load_input_row(shared, x, row)) {
       status = -1;
       goto cleanup;
     }
@@ -27790,7 +27799,11 @@ static int kls_compact_dense_group_try_batched_supernode_update(
         status = -1;
         goto cleanup;
       }
-      row_dense_panel[dep - row_begin] = x[dep];
+      if (direct_input) {
+        row_dense_panel[dep - row_begin] += x[dep];
+      } else {
+        row_dense_panel[dep - row_begin] = x[dep];
+      }
       x[dep] = 0.0;
     }
     if (lp != l_end) {
@@ -27799,7 +27812,8 @@ static int kls_compact_dense_group_try_batched_supernode_update(
       goto cleanup;
     }
 
-    udiag[row] = x[row];
+    udiag[row] =
+      direct_input ? row_dense_panel[group_local] + x[row] : x[row];
     x[row] = 0.0;
 
     const UF_long dense_len = row_end - row - 1u;
@@ -27812,14 +27826,22 @@ static int kls_compact_dense_group_try_batched_supernode_update(
     }
     for (UF_long offset = 0; offset < dense_len; ++offset) {
       const UF_long col = row + 1u + offset;
-      row_dense_panel[group_local + 1u + offset] = x[col];
+      if (direct_input) {
+        row_dense_panel[group_local + 1u + offset] += x[col];
+      } else {
+        row_dense_panel[group_local + 1u + offset] = x[col];
+      }
       x[col] = 0.0;
     }
     if (trailing_len > 0u) {
       double *row_panel = trailing_panel + group_local * trailing_len;
       for (UF_long offset = 0; offset < trailing_len; ++offset) {
         const UF_long col = trailing_cols[offset];
-        row_panel[offset] = x[col];
+        if (direct_input) {
+          row_panel[offset] += x[col];
+        } else {
+          row_panel[offset] = x[col];
+        }
         x[col] = 0.0;
       }
     }

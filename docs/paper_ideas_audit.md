@@ -5109,3 +5109,14 @@ executed batch rows in both checked and unchecked modes. This removes another
 KLU-shaped rediscovery step from the KLS row/segment numeric path, while the
 larger paper gaps remain the production compact/batched row-major numeric engine
 and CKTSO's full ETree-descendant pivoting-tail scheduler.
+
+The exact-pattern compact dense batch executor now consumes the same retained
+compact-panel input targets before applying producer batches. Exact dense
+consumer row batches no longer stage raw input through the sparse work vector
+only to fill the compact panel; raw external dependencies still enter `x`,
+while in-panel `L`, pivot, dense-`U`, and trailing-`U` values are direct-loaded
+into the retained panel and combined with later residual updates. The exact and
+subrange compact-supernode smoke probes require compact direct-input and
+retained target counters to cover executed batch rows. This closes another
+storage-path mismatch; the larger open items remain production batched
+row-major kernels and the full CKTSO tail scheduler.
