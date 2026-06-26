@@ -4831,12 +4831,13 @@ paths. Stats now expose actual use through
 `kls_first_last_row_supernode_update_rows`, separate from the older
 separator-pipeline-only counter.
 
-KLS now fills more of that persistent-panel storage gap. KLS-first parallel BTF
-workers publish a completed local row-supernode as a dense upper-triangular
-panel plus common trailing column list when the next row proves that the
-supernode has ended. Later rows in the same worker block try that cache before
-falling back to row-entry validation, and benchmark output reports actual use
-through `kls_first_last_row_supernode_panel_update`,
+KLS now fills more of that persistent-panel storage gap. KLS-first row-up
+producers publish a completed row-supernode as a dense upper-triangular panel
+plus common trailing column list when the next row proves that the supernode has
+ended. This covers parallel BTF workers plus the ordinary private and serial
+row-up loops. Later rows try that cache before falling back to row-entry
+validation, and benchmark output reports actual use through
+`kls_first_last_row_supernode_panel_update`,
 `kls_first_row_supernode_panel_update_run_count`,
 `kls_first_last_row_supernode_panel_update_groups`, and
 `kls_first_last_row_supernode_panel_update_rows`. At the start of each ordered
@@ -4846,8 +4847,8 @@ published as phase-local dense upper-triangular panels plus a common trailing
 column list. Pipeline workers try that cache before revalidating row entries,
 so repeated consumers no longer rebuild the same private-prefix panel. A
 dynamic column exchange disables the phase cache because the stored tail layout
-is tied to the pre-pivot column order. Benchmark output reports actual
-panel-backed use through
+is tied to the pre-pivot column order; row-up producer panel caches are reset
+for the same reason. Benchmark output reports actual panel-backed use through
 `kls_first_last_separator_queue_pipeline_supernode_panel_update`,
 `kls_first_separator_queue_pipeline_supernode_panel_update_run_count`,
 `kls_first_last_separator_queue_pipeline_supernode_panel_update_groups`, and
@@ -4856,7 +4857,7 @@ CBLAS builds, the existing `KLS_ENABLE_CBLAS_SUPERNODE=1` runtime gate can
 consume eligible cached KLS-first panels with CBLAS `dtrsv` over the
 non-unit upper-triangular panel and CBLAS `dgemv` for dense suffix/common-tail
 updates; otherwise the cached panel uses the scalar in-panel solver. This is
-still not the full paper storage layer: phase-local private-prefix panels do
-not yet cover every KLS-first private/serial producer, BTF worker panels are
-published only after the producer supernode is complete, and CKTSO's full
-ETree-descendant pivoting-tail scheduler remains open.
+still not the full paper storage layer: row-up panels are published only after
+the producer supernode is complete, pivot-tail serial rows do not maintain a
+live producer panel stream, and CKTSO's full ETree-descendant pivoting-tail
+scheduler remains open.

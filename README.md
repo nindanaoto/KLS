@@ -170,11 +170,12 @@ from packed KLU columns after a successful KLS-first row-up factor. Algorithm
 reported through `kls_first_last_row_supernode_update`,
 `kls_first_row_supernode_update_run_count`,
 `kls_first_last_row_supernode_update_groups`, and
-`kls_first_last_row_supernode_update_rows`. KLS-first parallel BTF workers
-also publish completed local row-supernodes as cached dense/common-tail panels
-once the following row proves the supernode ended; later rows in the same
-worker block consume those panels before falling back to row-entry validation.
-That broader row-up panel use is reported through
+`kls_first_last_row_supernode_update_rows`. KLS-first row-up producers publish
+completed row-supernodes as cached dense/common-tail panels once the following
+row proves the supernode ended; this covers parallel BTF workers plus the
+ordinary private and serial row-up loops. Later rows try those panels before
+falling back to row-entry validation. That broader row-up panel use is reported
+through
 `kls_first_last_row_supernode_panel_update`,
 `kls_first_row_supernode_panel_update_run_count`,
 `kls_first_last_row_supernode_panel_update_groups`, and
@@ -190,7 +191,7 @@ Builds configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` can use the same
 runtime `KLS_ENABLE_CBLAS_SUPERNODE=1` gate to consume eligible KLS-first
 cached panels with CBLAS `dtrsv` and `dgemv`; otherwise the cached panel uses
 the scalar in-panel solver. Dynamic column exchanges invalidate the phase-local
-panel cache. Algorithm
+pipeline cache and reset the row-up producer panel caches. Algorithm
 1-style dynamic column exchanges are reported as
 `kls_first_last_dynamic_column_pivots` and
 `kls_first_dynamic_column_pivot_count`. When a retained METIS `NodeNDP`
