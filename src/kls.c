@@ -54,6 +54,8 @@
 #define KLS_ROW_SOLVE_PARALLEL_MIN_ENTRIES_PER_SYNC \
   KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ
 #define KLS_ROW_SOLVE_CLUSTER_ALPHA_NUMERATOR 2u
+#define KLS_NICSLU_PARALLEL_R1_THRESHOLD 2.0
+#define KLS_NICSLU_PARALLEL_R2_THRESHOLD 50.0
 
 typedef struct kls_refactor_pool kls_refactor_pool;
 typedef struct kls_egraph_refactor_pool kls_egraph_refactor_pool;
@@ -9969,6 +9971,38 @@ static double kls_row_refactor_total_group_work(const kls_solver *solver);
 static int kls_auto_row_refactor_cost_allows(const kls_solver *solver);
 static int kls_auto_row_refactor_should_run(const kls_solver *solver);
 
+static void kls_update_parallel_model_stats(kls_solver *solver,
+                                            int prefer_numeric) {
+  if (solver == NULL) {
+    return;
+  }
+
+  double lu_nnz = 0.0;
+  if (prefer_numeric && solver->numeric != NULL) {
+    lu_nnz = (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  }
+  if (lu_nnz <= 0.0 && solver->symbolic != NULL) {
+    lu_nnz = (double)solver->symbolic->lnz + (double)solver->symbolic->unz;
+  }
+
+  double r1 = 0.0;
+  double r2 = 0.0;
+  if (lu_nnz > 0.0) {
+    if (solver->nnz > 0u) {
+      r1 = lu_nnz / (double)solver->nnz;
+    }
+    if (solver->n > 0u) {
+      r2 = lu_nnz / (double)solver->n;
+    }
+  }
+
+  solver->stats.parallel_model_r1 = r1;
+  solver->stats.parallel_model_r2 = r2;
+  solver->stats.parallel_model_recommends_parallel =
+    (r1 >= KLS_NICSLU_PARALLEL_R1_THRESHOLD ||
+     r2 >= KLS_NICSLU_PARALLEL_R2_THRESHOLD);
+}
+
 static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.struct_size = sizeof(solver->stats);
   fill_build_stats(&solver->stats);
@@ -10019,6 +10053,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     solver->stats.nnz_l = (int64_t)solver->symbolic->lnz;
     solver->stats.nnz_u = (int64_t)solver->symbolic->unz;
   }
+  kls_update_parallel_model_stats(solver, 0);
   kls_update_factor_etree_stats(solver);
   solver->stats.memory_bytes = solver->common.memusage;
   solver->stats.memory_peak_bytes = solver->common.mempeak;
@@ -10076,6 +10111,7 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->stats.nnz_l = (int64_t)solver->numeric->lnz;
     solver->stats.nnz_u = (int64_t)solver->numeric->unz;
   }
+  kls_update_parallel_model_stats(solver, 1);
   kls_update_factor_etree_stats(solver);
   solver->stats.refactor_dependency_levels =
     (int64_t)solver->refactor_level_count;

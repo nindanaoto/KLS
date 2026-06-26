@@ -126,8 +126,10 @@ The benchmark reports analysis, factorization, refactorization, solve,
 transpose-solve, residual, selected orientation, BTF block/rank, fill, flop,
 the initial and last factorization path, largest-BTF-block factor ETree
 shape, refactor dependency-level metrics, dependency root/leaf/max-fanout
-scheduler diagnostics, and memory statistics. Use `--analyze-only` to measure
-symbolic analysis and ordering decisions without running numeric factorization.
+scheduler diagnostics, NICSLU-style `parallel_model_r1`,
+`parallel_model_r2`, and `parallel_model_recommends_parallel` metrics, and
+memory statistics. Use `--analyze-only` to measure symbolic analysis and
+ordering decisions without running numeric factorization.
 JSON includes `initial_factor_path` and `last_factor_path`; values such as
 `klu_first` or `klu_fallback` mean the factorization was handed to the
 KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the

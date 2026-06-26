@@ -376,6 +376,9 @@ typedef struct kls_stats {
   int64_t refactor_supernode_update_entries;
   int64_t refactor_last_ready_queue_columns;
   int64_t refactor_ready_queue_run_count;
+  double parallel_model_r1;
+  double parallel_model_r2;
+  int parallel_model_recommends_parallel;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

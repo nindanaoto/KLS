@@ -567,6 +567,9 @@ int main(int argc, char **argv) {
              ",\"separator_pipeline_max_rows\":%" PRId64
              ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
              ",\"estimated_flops\":%.9g"
+             ",\"parallel_model_r1\":%.9g"
+             ",\"parallel_model_r2\":%.9g"
+             ",\"parallel_model_recommends_parallel\":%d"
              ",\"analyze_only\":true}\n",
              path, a.n, a.nnz, options.threads,
              kls_orientation_name(options.orientation),
@@ -600,7 +603,10 @@ int main(int argc, char **argv) {
              stats.separator_private_max_rows,
              stats.separator_pipeline_max_rows,
              stats.nnz_l, stats.nnz_u,
-             stats.estimated_flops);
+             stats.estimated_flops,
+             stats.parallel_model_r1,
+             stats.parallel_model_r2,
+             stats.parallel_model_recommends_parallel);
     } else {
       printf("matrix: %s\n", path);
       printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
@@ -650,6 +656,10 @@ int main(int argc, char **argv) {
       printf("estimated nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n",
              stats.nnz_l, stats.nnz_u);
       printf("estimated flops: %.6e\n", stats.estimated_flops);
+      printf("parallel model R1/R2: %.6g / %.6g, recommends parallel: %s\n",
+             stats.parallel_model_r1,
+             stats.parallel_model_r2,
+             stats.parallel_model_recommends_parallel ? "yes" : "no");
     }
     kls_destroy(solver);
     matrix_free(&a);
@@ -1351,6 +1361,9 @@ int main(int argc, char **argv) {
            ",\"refactor_ready_queue_run_count\":%" PRId64
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
            ",\"estimated_flops\":%.9g,\"factor_flops\":%.9g"
+           ",\"parallel_model_r1\":%.9g"
+           ",\"parallel_model_r2\":%.9g"
+           ",\"parallel_model_recommends_parallel\":%d"
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
            ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
            stats.row_refactor_compact_supernode_batch_pattern_count,
@@ -1376,7 +1389,11 @@ int main(int argc, char **argv) {
            stats.refactor_last_ready_queue_columns,
            stats.refactor_ready_queue_run_count,
            stats.nnz_l, stats.nnz_u,
-           stats.estimated_flops, stats.factor_flops, stats.rcond, stats.rgrowth,
+           stats.estimated_flops, stats.factor_flops,
+           stats.parallel_model_r1,
+           stats.parallel_model_r2,
+           stats.parallel_model_recommends_parallel,
+           stats.rcond, stats.rgrowth,
            stats.memory_bytes, stats.memory_peak_bytes);
   } else {
     printf("matrix: %s\n", path);
@@ -1846,6 +1863,10 @@ int main(int argc, char **argv) {
            stats.refactor_dependency_pipeline_work);
     printf("nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n", stats.nnz_l, stats.nnz_u);
     printf("estimated flops: %.6e, factor flops: %.6e\n", stats.estimated_flops, stats.factor_flops);
+    printf("parallel model R1/R2: %.6g / %.6g, recommends parallel: %s\n",
+           stats.parallel_model_r1,
+           stats.parallel_model_r2,
+           stats.parallel_model_recommends_parallel ? "yes" : "no");
     printf("rcond: %.6e, rgrowth: %.6e\n", stats.rcond, stats.rgrowth);
     printf("memory: %zu bytes, peak: %zu bytes\n", stats.memory_bytes, stats.memory_peak_bytes);
   }

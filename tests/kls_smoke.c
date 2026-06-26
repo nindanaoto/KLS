@@ -44,6 +44,35 @@ static int require_build_feature_stats(const kls_stats *stats,
   return 1;
 }
 
+static int require_parallel_model_stats(const kls_stats *stats,
+                                        const char *what) {
+  if (stats == NULL ||
+      stats->parallel_model_r1 <= 0.0 ||
+      stats->parallel_model_r2 <= 0.0) {
+    fprintf(stderr,
+            "missing parallel model stats for %s: r1=%.17g r2=%.17g\n",
+            what,
+            stats != NULL ? stats->parallel_model_r1 : 0.0,
+            stats != NULL ? stats->parallel_model_r2 : 0.0);
+    return 0;
+  }
+
+  const int expected = (stats->parallel_model_r1 >= 2.0 ||
+                        stats->parallel_model_r2 >= 50.0);
+  if (stats->parallel_model_recommends_parallel != expected) {
+    fprintf(stderr,
+            "parallel model recommendation mismatch for %s: "
+            "r1=%.17g r2=%.17g got=%d expected=%d\n",
+            what,
+            stats->parallel_model_r1,
+            stats->parallel_model_r2,
+            stats->parallel_model_recommends_parallel,
+            expected);
+    return 0;
+  }
+  return 1;
+}
+
 static int require_pivoting_tail_plan(const kls_stats *stats,
                                       const char *what) {
   if (stats == NULL || stats->fast_rejected_pivot < 0 ||
@@ -182,6 +211,7 @@ static int test_csc(void) {
   stats.struct_size = sizeof(stats);
   if (!require_ok(kls_get_stats(solver, &stats), "stats")) return 0;
   if (!require_build_feature_stats(&stats, "csc")) return 0;
+  if (!require_parallel_model_stats(&stats, "csc")) return 0;
   if (stats.selected_ordering != KLS_ORDERING_AMD && stats.selected_ordering != KLS_ORDERING_COLAMD) {
     fprintf(stderr, "unexpected selected ordering: %s\n", kls_ordering_name(stats.selected_ordering));
     return 0;
