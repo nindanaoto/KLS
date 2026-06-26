@@ -209,11 +209,11 @@ executor is reported separately through `kls_first_last_row_pipeline`,
 Builds configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` can use the same
 runtime `KLS_ENABLE_CBLAS_SUPERNODE=1` gate to consume eligible KLS-first
 cached panels with CBLAS `dtrsv` and `dgemv`; otherwise the cached panel uses
-the scalar in-panel solver. Dynamic column exchanges invalidate the phase-local
-pipeline cache and reset the row-up producer panel caches. Separator pipeline
-pivot-tail rows that are serialized after a restart use the same row-up
-producer cache, so a restarted suffix can still publish and consume completed
-row-supernode panels. Algorithm
+the scalar in-panel solver. Dynamic column exchanges rebuild the phase-local
+private-prefix pipeline cache from the post-exchange column order and reset the
+row-up producer panel caches. Separator pipeline pivot-tail rows that are
+serialized after a restart use the same row-up producer cache, so a restarted
+suffix can still publish and consume completed row-supernode panels. Algorithm
 1-style dynamic column exchanges are reported as
 `kls_first_last_dynamic_column_pivots` and
 `kls_first_dynamic_column_pivot_count`. When a retained METIS `NodeNDP`
@@ -239,8 +239,10 @@ with
 separate them from older external serialized rows with
 `kls_first_last_separator_queue_pipeline_pivot_serial_rows`. Partial
 pre-updates and scalar row-supernode updates completed before a pivot restart
-remain counted in the same separator-pipeline counters, matching the retained
-prefix semantics of the epoch retry. If that row-up-looking bridge is not eligible
+remain counted in the same separator-pipeline counters; phase-local cached panel
+updates after the restart remain visible through the separator-pipeline panel
+counters, matching the retained prefix semantics of the epoch retry. If that
+row-up-looking bridge is not eligible
 or still rejects a pivot, the pivoted KLS block tail
 still runs; it reuses KLS's retained factor-order input map when available,
 reported as

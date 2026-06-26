@@ -3997,14 +3997,19 @@ private-predecessor pre-updates, waiting-prefix pre-updates, and scalar
 row-supernode updates completed before a pipeline pivot restart remain counted
 in the same counters after the epoch retry, while
 `kls_first_last_separator_queue_pipeline_pivot_serial_rows` remains reserved
-for the older external serialized fallback. Smoke tests cover the queue shape
-on a 30,000-row METIS-ordered tridiagonal KLS-first factor and the epoch
-recovery path on a 30,600-row METIS-ordered grid with separator-band weak
-diagonals. The queue-shape test requires more than one private worker thread,
-verifies that all planned pipeline rows are consumed by the guarded pipeline
-executor, and verifies that the private-predecessor partial pre-update path
-touches all pipeline rows. The epoch test requires a separator-pipeline pivot
-restart, requires zero serialized pivot rows, and checks the solve residual.
+for the older external serialized fallback. After a successful dynamic pivot
+inside the separator pipeline, KLS now rebuilds the phase-local private-prefix
+panel cache from the post-exchange column order instead of disabling the cache
+for the rest of the phase; suffix rows that restart under the new epoch can
+still consume validated dense/common-tail producer panels. Smoke tests cover
+the queue shape on a 30,000-row METIS-ordered tridiagonal KLS-first factor and
+the epoch recovery path on a 30,600-row METIS-ordered grid with separator-band
+weak diagonals. The queue-shape test requires more than one private worker
+thread, verifies that all planned pipeline rows are consumed by the guarded
+pipeline executor, and verifies that the private-predecessor partial pre-update
+path touches all pipeline rows. The epoch test requires a separator-pipeline
+pivot restart, cached separator-pipeline panel updates after that restart, zero
+serialized pivot rows, and a clean solve residual.
 This closes Algorithm 3's queue shape and adds race-free scalar Algorithm 4
 partial-update and scoped-pivot retry steps for dependency-safe retained
 separator queues.
@@ -4915,9 +4920,10 @@ stable private-prefix `U` snapshot is scanned for validated row-supernodes and
 published as phase-local dense upper-triangular panels plus a common trailing
 column list. Pipeline workers try that cache before revalidating row entries,
 so repeated consumers no longer rebuild the same private-prefix panel. A
-dynamic column exchange disables the phase cache because the stored tail layout
-is tied to the pre-pivot column order; row-up producer panel caches are reset
-for the same reason. Benchmark output reports actual panel-backed use through
+dynamic column exchange rebuilds that phase cache from the post-exchange
+private-prefix `U` snapshot; row-up producer panel caches are reset because
+their open producer tail layout is tied to the old column order. Benchmark
+output reports actual panel-backed use through
 `kls_first_last_separator_queue_pipeline_supernode_panel_update`,
 `kls_first_separator_queue_pipeline_supernode_panel_update_run_count`,
 `kls_first_last_separator_queue_pipeline_supernode_panel_update_groups`, and
