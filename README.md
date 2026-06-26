@@ -170,7 +170,15 @@ from packed KLU columns after a successful KLS-first row-up factor. Algorithm
 reported through `kls_first_last_row_supernode_update`,
 `kls_first_row_supernode_update_run_count`,
 `kls_first_last_row_supernode_update_groups`, and
-`kls_first_last_row_supernode_update_rows`. The KLS-first separator pipeline
+`kls_first_last_row_supernode_update_rows`. KLS-first parallel BTF workers
+also publish completed local row-supernodes as cached dense/common-tail panels
+once the following row proves the supernode ended; later rows in the same
+worker block consume those panels before falling back to row-entry validation.
+That broader row-up panel use is reported through
+`kls_first_last_row_supernode_panel_update`,
+`kls_first_row_supernode_panel_update_run_count`,
+`kls_first_last_row_supernode_panel_update_groups`, and
+`kls_first_last_row_supernode_panel_update_rows`. The KLS-first separator pipeline
 also publishes phase-local dense/common-tail panels for the stable private
 prefix and consumes those panels before falling back to row-entry validation;
 actual panel-backed use is reported through

@@ -554,6 +554,10 @@ struct kls_solver {
   UF_long kls_first_separator_queue_pipeline_supernode_panel_update_run_count;
   UF_long kls_first_last_separator_queue_pipeline_supernode_panel_update_groups;
   UF_long kls_first_last_separator_queue_pipeline_supernode_panel_update_rows;
+  int kls_first_last_row_supernode_panel_update;
+  UF_long kls_first_row_supernode_panel_update_run_count;
+  UF_long kls_first_last_row_supernode_panel_update_groups;
+  UF_long kls_first_last_row_supernode_panel_update_rows;
   int kls_first_last_separator_queue_pipeline_pivot_tail;
   UF_long kls_first_separator_queue_pipeline_pivot_tail_run_count;
   UF_long kls_first_last_separator_queue_pipeline_pivot_tail_rows;
@@ -2573,6 +2577,9 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_row_supernode_update = 0;
   solver->kls_first_last_row_supernode_update_groups = 0;
   solver->kls_first_last_row_supernode_update_rows = 0;
+  solver->kls_first_last_row_supernode_panel_update = 0;
+  solver->kls_first_last_row_supernode_panel_update_groups = 0;
+  solver->kls_first_last_row_supernode_panel_update_rows = 0;
   solver->kls_first_last_dynamic_column_pivots = 0;
   solver->kls_first_last_separator_dynamic_column_pivots = 0;
   solver->kls_first_last_separator_dynamic_column_fallbacks = 0;
@@ -2620,6 +2627,9 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_first_last_row_supernode_update = 0;
   solver->stats.kls_first_last_row_supernode_update_groups = 0;
   solver->stats.kls_first_last_row_supernode_update_rows = 0;
+  solver->stats.kls_first_last_row_supernode_panel_update = 0;
+  solver->stats.kls_first_last_row_supernode_panel_update_groups = 0;
+  solver->stats.kls_first_last_row_supernode_panel_update_rows = 0;
   solver->stats.kls_first_last_dynamic_column_pivots = 0;
   solver->stats.kls_first_last_separator_dynamic_column_pivots = 0;
   solver->stats.kls_first_last_separator_dynamic_column_fallbacks = 0;
@@ -11084,6 +11094,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->kls_first_last_row_supernode_update_groups;
   solver->stats.kls_first_last_row_supernode_update_rows =
     (int64_t)solver->kls_first_last_row_supernode_update_rows;
+  solver->stats.kls_first_last_row_supernode_panel_update =
+    solver->kls_first_last_row_supernode_panel_update;
+  solver->stats.kls_first_row_supernode_panel_update_run_count =
+    (int64_t)solver->kls_first_row_supernode_panel_update_run_count;
+  solver->stats.kls_first_last_row_supernode_panel_update_groups =
+    (int64_t)solver->kls_first_last_row_supernode_panel_update_groups;
+  solver->stats.kls_first_last_row_supernode_panel_update_rows =
+    (int64_t)solver->kls_first_last_row_supernode_panel_update_rows;
   solver->stats.kls_first_last_dynamic_column_pivots =
     (int64_t)solver->kls_first_last_dynamic_column_pivots;
   solver->stats.kls_first_dynamic_column_pivot_count =
@@ -39635,9 +39653,13 @@ struct kls_row_first_supernode_panel_cache {
   double *tail_values;
   UF_long row_count;
   UF_long panel_count;
+  UF_long panel_capacity;
   UF_long tail_col_count;
+  UF_long tail_col_capacity;
   UF_long dense_value_count;
+  UF_long dense_value_capacity;
   UF_long tail_value_count;
+  UF_long tail_value_capacity;
   int enabled;
 };
 
@@ -39743,6 +39765,304 @@ static int kls_row_first_supernode_panel_cache_size_fits(
   size_t entry_size) {
   return count == 0u || entry_size == 0u ||
     count <= (UF_long)(SIZE_MAX / entry_size);
+}
+
+static int kls_row_first_supernode_panel_cache_init_rows(
+  kls_row_first_supernode_panel_cache *cache,
+  UF_long nk) {
+  if (cache == NULL ||
+      !kls_row_first_supernode_panel_cache_size_fits(nk, sizeof(UF_long))) {
+    return 0;
+  }
+  kls_row_first_supernode_panel_cache_free(cache);
+  cache->panel_id_by_row =
+    (UF_long *)malloc((size_t)nk * sizeof(*cache->panel_id_by_row));
+  if (cache->panel_id_by_row == NULL && nk > 0u) {
+    kls_row_first_supernode_panel_cache_free(cache);
+    return 0;
+  }
+  for (UF_long row = 0; row < nk; ++row) {
+    cache->panel_id_by_row[row] = KLS_KLU_EMPTY;
+  }
+  cache->row_count = nk;
+  return 1;
+}
+
+static UF_long kls_row_first_supernode_panel_cache_growth(
+  UF_long capacity,
+  UF_long needed) {
+  UF_long grown = capacity == 0u ? 4u : capacity;
+  while (grown < needed) {
+    const UF_long next = 2u * grown;
+    if (next <= grown) {
+      return needed;
+    }
+    grown = next;
+  }
+  return grown;
+}
+
+static int kls_row_first_supernode_panel_cache_reserve_uf(
+  UF_long **array_io,
+  UF_long used,
+  UF_long *capacity_io,
+  UF_long needed) {
+  if (array_io == NULL || capacity_io == NULL) {
+    return 0;
+  }
+  if (needed <= *capacity_io) {
+    return 1;
+  }
+  const UF_long capacity =
+    kls_row_first_supernode_panel_cache_growth(*capacity_io, needed);
+  if (!kls_row_first_supernode_panel_cache_size_fits(
+        capacity, sizeof(UF_long))) {
+    return 0;
+  }
+  UF_long *grown =
+    (UF_long *)malloc((size_t)capacity * sizeof(*grown));
+  if (grown == NULL) {
+    return 0;
+  }
+  if (*array_io != NULL && used > 0u) {
+    memcpy(grown, *array_io, (size_t)used * sizeof(*grown));
+  }
+  free(*array_io);
+  *array_io = grown;
+  *capacity_io = capacity;
+  return 1;
+}
+
+static int kls_row_first_supernode_panel_cache_reserve_double(
+  double **array_io,
+  UF_long used,
+  UF_long *capacity_io,
+  UF_long needed) {
+  if (array_io == NULL || capacity_io == NULL) {
+    return 0;
+  }
+  if (needed <= *capacity_io) {
+    return 1;
+  }
+  const UF_long capacity =
+    kls_row_first_supernode_panel_cache_growth(*capacity_io, needed);
+  if (!kls_row_first_supernode_panel_cache_size_fits(
+        capacity, sizeof(double))) {
+    return 0;
+  }
+  double *grown =
+    (double *)calloc((size_t)capacity, sizeof(*grown));
+  if (grown == NULL) {
+    return 0;
+  }
+  if (*array_io != NULL && used > 0u) {
+    memcpy(grown, *array_io, (size_t)used * sizeof(*grown));
+  }
+  free(*array_io);
+  *array_io = grown;
+  *capacity_io = capacity;
+  return 1;
+}
+
+static int kls_row_first_supernode_panel_cache_reserve_panels(
+  kls_row_first_supernode_panel_cache *cache,
+  UF_long needed) {
+  if (cache == NULL) {
+    return 0;
+  }
+  if (needed <= cache->panel_capacity) {
+    return 1;
+  }
+  const UF_long capacity =
+    kls_row_first_supernode_panel_cache_growth(cache->panel_capacity,
+                                               needed);
+  if (!kls_row_first_supernode_panel_cache_size_fits(
+        capacity, sizeof(UF_long))) {
+    return 0;
+  }
+  UF_long *start =
+    (UF_long *)malloc((size_t)capacity * sizeof(*start));
+  UF_long *width =
+    (UF_long *)malloc((size_t)capacity * sizeof(*width));
+  UF_long *tail_begin =
+    (UF_long *)malloc((size_t)capacity * sizeof(*tail_begin));
+  UF_long *tail_len =
+    (UF_long *)malloc((size_t)capacity * sizeof(*tail_len));
+  UF_long *dense_begin =
+    (UF_long *)malloc((size_t)capacity * sizeof(*dense_begin));
+  UF_long *tail_value_begin =
+    (UF_long *)malloc((size_t)capacity * sizeof(*tail_value_begin));
+  if (start == NULL || width == NULL || tail_begin == NULL ||
+      tail_len == NULL || dense_begin == NULL ||
+      tail_value_begin == NULL) {
+    free(start);
+    free(width);
+    free(tail_begin);
+    free(tail_len);
+    free(dense_begin);
+    free(tail_value_begin);
+    return 0;
+  }
+  if (cache->panel_count > 0u) {
+    memcpy(start, cache->start,
+           (size_t)cache->panel_count * sizeof(*start));
+    memcpy(width, cache->width,
+           (size_t)cache->panel_count * sizeof(*width));
+    memcpy(tail_begin, cache->tail_begin,
+           (size_t)cache->panel_count * sizeof(*tail_begin));
+    memcpy(tail_len, cache->tail_len,
+           (size_t)cache->panel_count * sizeof(*tail_len));
+    memcpy(dense_begin, cache->dense_begin,
+           (size_t)cache->panel_count * sizeof(*dense_begin));
+    memcpy(tail_value_begin, cache->tail_value_begin,
+           (size_t)cache->panel_count * sizeof(*tail_value_begin));
+  }
+  free(cache->start);
+  free(cache->width);
+  free(cache->tail_begin);
+  free(cache->tail_len);
+  free(cache->dense_begin);
+  free(cache->tail_value_begin);
+  cache->start = start;
+  cache->width = width;
+  cache->tail_begin = tail_begin;
+  cache->tail_len = tail_len;
+  cache->dense_begin = dense_begin;
+  cache->tail_value_begin = tail_value_begin;
+  cache->panel_capacity = capacity;
+  return 1;
+}
+
+static int kls_row_first_supernode_panel_cache_append(
+  kls_row_first_supernode_panel_cache *cache,
+  const kls_row_first_entries *u_entries,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  const double *udiag_values,
+  UF_long nk,
+  UF_long start,
+  UF_long end) {
+  if (cache == NULL || cache->panel_id_by_row == NULL ||
+      u_entries == NULL || u_row_ptr == NULL || u_row_end == NULL ||
+      udiag_values == NULL || cache->row_count != nk ||
+      start >= nk || end <= start || end >= nk) {
+    return 0;
+  }
+  UF_long tail_len = 0;
+  if (!kls_row_first_supernode_panel_shape(
+        u_entries, u_row_ptr, u_row_end, nk, start, end, &tail_len)) {
+    return 0;
+  }
+  const UF_long panel_count_needed = cache->panel_count + 1u;
+  if (panel_count_needed <= cache->panel_count ||
+      !kls_row_first_supernode_panel_cache_reserve_panels(
+        cache, panel_count_needed)) {
+    return 0;
+  }
+  const UF_long panel_width = end - start + 1u;
+  UF_long dense_needed = cache->dense_value_count;
+  UF_long tail_value_needed = cache->tail_value_count;
+  UF_long tail_col_needed = cache->tail_col_count;
+  if (!kls_row_first_supernode_panel_cache_add_sizes(
+        panel_width, tail_len, &dense_needed, &tail_value_needed,
+        &tail_col_needed)) {
+    return 0;
+  }
+  if (!kls_row_first_supernode_panel_cache_reserve_double(
+        &cache->dense_values, cache->dense_value_count,
+        &cache->dense_value_capacity, dense_needed) ||
+      !kls_row_first_supernode_panel_cache_reserve_double(
+        &cache->tail_values, cache->tail_value_count,
+        &cache->tail_value_capacity, tail_value_needed) ||
+      !kls_row_first_supernode_panel_cache_reserve_uf(
+        &cache->tail_cols, cache->tail_col_count,
+        &cache->tail_col_capacity, tail_col_needed)) {
+    return 0;
+  }
+
+  const UF_long panel = cache->panel_count++;
+  const UF_long dense_begin = cache->dense_value_count;
+  const UF_long tail_begin = cache->tail_col_count;
+  const UF_long tail_value_begin = cache->tail_value_count;
+  cache->start[panel] = start;
+  cache->width[panel] = panel_width;
+  cache->tail_begin[panel] = tail_begin;
+  cache->tail_len[panel] = tail_len;
+  cache->dense_begin[panel] = dense_begin;
+  cache->tail_value_begin[panel] = tail_value_begin;
+  const UF_long source_tail_begin = u_row_ptr[end];
+  for (UF_long offset = 0; offset < tail_len; ++offset) {
+    cache->tail_cols[tail_begin + offset] =
+      u_entries->col[source_tail_begin + offset];
+  }
+  for (UF_long local = 0; local < panel_width; ++local) {
+    const UF_long dep = start + local;
+    cache->panel_id_by_row[dep] = panel;
+    const UF_long row_begin = u_row_ptr[dep];
+    const UF_long internal_len = end - dep;
+    double *dense_row =
+      cache->dense_values + dense_begin + local * panel_width;
+    dense_row[local] = udiag_values[dep];
+    for (UF_long offset = 0; offset < internal_len; ++offset) {
+      dense_row[local + offset + 1u] =
+        u_entries->value[row_begin + offset];
+    }
+    double *tail_values =
+      tail_len > 0u
+        ? cache->tail_values + tail_value_begin + local * tail_len
+        : NULL;
+    for (UF_long offset = 0; offset < tail_len; ++offset) {
+      tail_values[offset] =
+        u_entries->value[row_begin + internal_len + offset];
+    }
+  }
+  cache->dense_value_count = dense_needed;
+  cache->tail_value_count = tail_value_needed;
+  cache->tail_col_count = tail_col_needed;
+  cache->enabled = 1;
+  return 1;
+}
+
+static void kls_row_first_supernode_panel_cache_publish_completed(
+  kls_row_first_supernode_panel_cache *cache,
+  const kls_row_first_entries *u_entries,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  const double *udiag_values,
+  UF_long nk,
+  UF_long *open_start_io,
+  UF_long *open_end_io,
+  UF_long row) {
+  if (open_start_io == NULL || open_end_io == NULL) {
+    return;
+  }
+  if (cache == NULL || cache->panel_id_by_row == NULL ||
+      u_entries == NULL || u_row_ptr == NULL || u_row_end == NULL ||
+      udiag_values == NULL || row >= nk) {
+    *open_start_io = row;
+    *open_end_io = row;
+    return;
+  }
+  if (*open_start_io == KLS_KLU_EMPTY ||
+      *open_end_io == KLS_KLU_EMPTY ||
+      *open_start_io >= nk || *open_end_io >= nk || row == 0u) {
+    *open_start_io = row;
+    *open_end_io = row;
+    return;
+  }
+  if (*open_end_io + 1u == row &&
+      kls_row_first_u_rows_fit_supernode(
+        u_entries, u_row_ptr, u_row_end, *open_end_io, row, nk)) {
+    *open_end_io = row;
+    return;
+  }
+  if (*open_end_io > *open_start_io) {
+    (void)kls_row_first_supernode_panel_cache_append(
+      cache, u_entries, u_row_ptr, u_row_end, udiag_values, nk,
+      *open_start_io, *open_end_io);
+  }
+  *open_start_io = row;
+  *open_end_io = row;
 }
 
 static int kls_row_first_supernode_panel_cache_build(
@@ -39934,9 +40254,13 @@ static int kls_row_first_supernode_panel_cache_build(
     row = end;
   }
   cache->panel_count = next_panel;
+  cache->panel_capacity = panel_count;
   cache->dense_value_count = next_dense;
+  cache->dense_value_capacity = dense_value_count;
   cache->tail_col_count = next_tail_col;
+  cache->tail_col_capacity = tail_col_count;
   cache->tail_value_count = next_tail_value;
+  cache->tail_value_capacity = tail_value_count;
   cache->enabled = next_panel > 0u ? 1 : 0;
   return 1;
 }
@@ -42199,6 +42523,8 @@ typedef struct kls_row_first_parallel_shared {
   UF_long separator_dynamic_column_fallbacks;
   UF_long row_supernode_update_groups;
   UF_long row_supernode_update_rows;
+  UF_long row_supernode_panel_update_groups;
+  UF_long row_supernode_panel_update_rows;
   atomic_ulong separator_dynamic_column_rejects;
   UF_long committed_blocks;
 } kls_row_first_parallel_shared;
@@ -42302,7 +42628,9 @@ static int kls_row_first_parallel_commit_block(
   UF_long separator_extent_dynamic_column_pivots,
   UF_long separator_dynamic_column_fallbacks,
   UF_long row_supernode_update_groups,
-  UF_long row_supernode_update_rows) {
+  UF_long row_supernode_update_rows,
+  UF_long row_supernode_panel_update_groups,
+  UF_long row_supernode_panel_update_rows) {
   if (worker == NULL || worker->shared == NULL ||
       worker->shared->solver == NULL || row_ptr == NULL ||
       l_entries == NULL || u_entries == NULL ||
@@ -42342,6 +42670,10 @@ static int kls_row_first_parallel_commit_block(
     shared->row_supernode_update_groups +=
       row_supernode_update_groups;
     shared->row_supernode_update_rows += row_supernode_update_rows;
+    shared->row_supernode_panel_update_groups +=
+      row_supernode_panel_update_groups;
+    shared->row_supernode_panel_update_rows +=
+      row_supernode_panel_update_rows;
     shared->committed_blocks++;
   }
   if (!ok) {
@@ -42408,6 +42740,12 @@ static int kls_row_first_parallel_factor_block(
   UF_long separator_dynamic_column_fallbacks = 0;
   UF_long row_supernode_update_groups = 0;
   UF_long row_supernode_update_rows = 0;
+  UF_long row_supernode_panel_update_groups = 0;
+  UF_long row_supernode_panel_update_rows = 0;
+  UF_long open_panel_start = KLS_KLU_EMPTY;
+  UF_long open_panel_end = KLS_KLU_EMPTY;
+  kls_row_first_supernode_panel_cache row_supernode_panel_cache;
+  memset(&row_supernode_panel_cache, 0, sizeof(row_supernode_panel_cache));
   kls_row_first_workspace row_workspace;
   memset(&row_workspace, 0, sizeof(row_workspace));
   row_workspace.x = worker->x;
@@ -42419,6 +42757,10 @@ static int kls_row_first_parallel_factor_block(
   row_workspace.u_row_end = worker->u_row_end;
   row_workspace.supernode_workspace_capacity =
     worker->supernode_workspace_capacity;
+  if (kls_row_first_supernode_panel_cache_init_rows(
+        &row_supernode_panel_cache, nk)) {
+    row_workspace.supernode_panel_cache = &row_supernode_panel_cache;
+  }
 
   for (UF_long local_col = 0; local_col < nk; ++local_col) {
     const UF_long oldcol = worker->block_q_order[local_col];
@@ -42560,11 +42902,12 @@ static int kls_row_first_parallel_factor_block(
           &u_entries, worker->u_row_ptr, worker->u_row_end, NULL, NULL,
           -1, nk, i, dep);
       UF_long run_rows = 1;
+      int used_panel = 0;
       if (run_end > dep) {
         if (!kls_row_first_partial_apply_supernode_run(
               &row_ctx, &row_workspace, &l_entries, &u_entries,
               worker->udiag_values, worker->u_row_ptr, worker->u_row_end,
-              &state, dep, run_end, &run_rows, NULL)) {
+              &state, dep, run_end, &run_rows, &used_panel)) {
           goto cleanup;
         }
       } else if (!kls_row_first_partial_apply_one_dep(
@@ -42576,6 +42919,10 @@ static int kls_row_first_parallel_factor_block(
       if (run_rows > 1u) {
         row_supernode_update_groups++;
         row_supernode_update_rows += run_rows;
+        if (used_panel) {
+          row_supernode_panel_update_groups++;
+          row_supernode_panel_update_rows += run_rows;
+        }
       }
     }
     pattern_count = state.pattern_count;
@@ -42668,6 +43015,12 @@ static int kls_row_first_parallel_factor_block(
     }
     worker->u_row_end[i] = u_entries.count;
     worker->u_row_ptr[i + 1u] = u_entries.count;
+    kls_row_first_supernode_panel_cache_publish_completed(
+      row_workspace.supernode_panel_cache != NULL
+        ? &row_supernode_panel_cache : NULL,
+      &u_entries, worker->u_row_ptr,
+      worker->u_row_end, worker->udiag_values, nk, &open_panel_start,
+      &open_panel_end, i);
     for (UF_long p = 0; p < pattern_count; ++p) {
       worker->x[worker->pattern[p]] = 0.0;
     }
@@ -42681,9 +43034,11 @@ static int kls_row_first_parallel_factor_block(
     &l_entries, &u_entries, dynamic_column_pivots,
     separator_dynamic_column_pivots, separator_extent_dynamic_column_pivots,
     separator_dynamic_column_fallbacks, row_supernode_update_groups,
-    row_supernode_update_rows);
+    row_supernode_update_rows, row_supernode_panel_update_groups,
+    row_supernode_panel_update_rows);
 
 cleanup:
+  kls_row_first_supernode_panel_cache_free(&row_supernode_panel_cache);
   worker->supernode_workspace = row_workspace.supernode_workspace;
   worker->supernode_workspace_capacity =
     row_workspace.supernode_workspace_capacity;
@@ -42926,6 +43281,14 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
       shared.row_supernode_update_groups;
     solver->kls_first_last_row_supernode_update_rows =
       shared.row_supernode_update_rows;
+  }
+  if (shared.row_supernode_panel_update_groups > 0u) {
+    solver->kls_first_last_row_supernode_panel_update = 1;
+    solver->kls_first_row_supernode_panel_update_run_count++;
+    solver->kls_first_last_row_supernode_panel_update_groups =
+      shared.row_supernode_panel_update_groups;
+    solver->kls_first_last_row_supernode_panel_update_rows =
+      shared.row_supernode_panel_update_rows;
   }
   solver->kls_first_last_dynamic_column_pivots =
     shared.dynamic_column_pivots;
