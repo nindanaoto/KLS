@@ -472,6 +472,10 @@ struct kls_solver {
   UF_long kls_first_last_separator_queue_pipeline_rows;
   UF_long kls_first_last_separator_queue_nonempty_threads;
   UF_long kls_first_last_separator_queue_max_thread_rows;
+  int kls_first_last_separator_queue_executed;
+  UF_long kls_first_separator_queue_executed_run_count;
+  UF_long kls_first_last_separator_queue_executed_private_rows;
+  UF_long kls_first_last_separator_queue_executed_pipeline_rows;
   int kls_first_auto_skipped_scaled_single_block;
   UF_long kls_first_auto_skipped_scaled_single_block_count;
   int factor_etree_stats_valid;
@@ -2273,6 +2277,9 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_separator_queue_pipeline_rows = 0;
   solver->kls_first_last_separator_queue_nonempty_threads = 0;
   solver->kls_first_last_separator_queue_max_thread_rows = 0;
+  solver->kls_first_last_separator_queue_executed = 0;
+  solver->kls_first_last_separator_queue_executed_private_rows = 0;
+  solver->kls_first_last_separator_queue_executed_pipeline_rows = 0;
   solver->kls_first_auto_skipped_scaled_single_block = 0;
   solver->stats.kls_tail_last_mapped_columns = 0;
   solver->stats.kls_first_last_row_uplooking_columns = 0;
@@ -2290,6 +2297,9 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_first_last_separator_queue_pipeline_rows = 0;
   solver->stats.kls_first_last_separator_queue_nonempty_threads = 0;
   solver->stats.kls_first_last_separator_queue_max_thread_rows = 0;
+  solver->stats.kls_first_last_separator_queue_executed = 0;
+  solver->stats.kls_first_last_separator_queue_executed_private_rows = 0;
+  solver->stats.kls_first_last_separator_queue_executed_pipeline_rows = 0;
   solver->stats.kls_first_auto_skipped_scaled_single_block = 0;
 }
 
@@ -10544,6 +10554,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->kls_first_last_separator_queue_nonempty_threads;
   solver->stats.kls_first_last_separator_queue_max_thread_rows =
     (int64_t)solver->kls_first_last_separator_queue_max_thread_rows;
+  solver->stats.kls_first_last_separator_queue_executed =
+    solver->kls_first_last_separator_queue_executed;
+  solver->stats.kls_first_separator_queue_executed_run_count =
+    (int64_t)solver->kls_first_separator_queue_executed_run_count;
+  solver->stats.kls_first_last_separator_queue_executed_private_rows =
+    (int64_t)solver->kls_first_last_separator_queue_executed_private_rows;
+  solver->stats.kls_first_last_separator_queue_executed_pipeline_rows =
+    (int64_t)solver->kls_first_last_separator_queue_executed_pipeline_rows;
   solver->stats.kls_first_auto_skipped_scaled_single_block =
     solver->kls_first_auto_skipped_scaled_single_block;
   solver->stats.kls_first_auto_skipped_scaled_single_block_count =
@@ -36690,9 +36708,10 @@ fail:
   return 0;
 }
 
-static int kls_try_first_factor_row_uplooking_blocks(
+static int kls_try_first_factor_row_uplooking_blocks_impl(
   kls_solver *solver,
-  double *numeric_values) {
+  double *numeric_values,
+  int allow_separator_schedule) {
   if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
       solver->numeric != NULL || solver->symbolic->nblocks == 0u ||
       solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
@@ -36705,8 +36724,6 @@ static int kls_try_first_factor_row_uplooking_blocks(
   if (n == 0u || maxblock == 0u) {
     return 0;
   }
-
-  kls_record_first_separator_queue_plans(solver, solver->options.threads);
 
   const int parallel_status =
     kls_try_first_factor_row_uplooking_blocks_parallel(solver,
@@ -36745,6 +36762,8 @@ static int kls_try_first_factor_row_uplooking_blocks(
   UF_long *pattern = NULL;
   UF_long *dep_heap = NULL;
   UF_long *u_row_ptr = NULL;
+  UF_long *u_row_end = NULL;
+  unsigned char *row_done = NULL;
   double *udiag_values = NULL;
   UF_long *q_order = NULL;
   UF_long *saved_q = NULL;
@@ -36768,6 +36787,8 @@ static int kls_try_first_factor_row_uplooking_blocks(
   dep_heap = (UF_long *)malloc((size_t)maxblock * sizeof(*dep_heap));
   u_row_ptr = (UF_long *)calloc((size_t)maxblock + 1u,
                                 sizeof(*u_row_ptr));
+  u_row_end = (UF_long *)calloc((size_t)maxblock, sizeof(*u_row_end));
+  row_done = (unsigned char *)calloc((size_t)maxblock, sizeof(*row_done));
   udiag_values = (double *)malloc((size_t)maxblock *
                                   sizeof(*udiag_values));
   q_order = (UF_long *)malloc((size_t)n * sizeof(*q_order));
@@ -36775,8 +36796,9 @@ static int kls_try_first_factor_row_uplooking_blocks(
   col_pos = (UF_long *)malloc((size_t)n * sizeof(*col_pos));
   if (row_counts == NULL || row_ptr == NULL || x == NULL ||
       mark == NULL || pattern == NULL || dep_heap == NULL ||
-      u_row_ptr == NULL || udiag_values == NULL || q_order == NULL ||
-      saved_q == NULL || col_pos == NULL) {
+      u_row_ptr == NULL || u_row_end == NULL || row_done == NULL ||
+      udiag_values == NULL || q_order == NULL || saved_q == NULL ||
+      col_pos == NULL) {
     goto fail;
   }
   (void)kls_row_first_refactor_seed_init(&row_refactor_seed, n);
@@ -36849,6 +36871,9 @@ static int kls_try_first_factor_row_uplooking_blocks(
   UF_long total_unz = 0;
   UF_long max_lnz_block = 1;
   UF_long max_unz_block = 1;
+  int separator_queue_executed = 0;
+  UF_long separator_queue_executed_private_rows = 0;
+  UF_long separator_queue_executed_pipeline_rows = 0;
 
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
     const UF_long k1 = solver->symbolic->R[block];
@@ -36867,6 +36892,8 @@ static int kls_try_first_factor_row_uplooking_blocks(
       : 0u;
     memset(row_counts, 0, (size_t)nk * sizeof(*row_counts));
     memset(u_row_ptr, 0, ((size_t)nk + 1u) * sizeof(*u_row_ptr));
+    memset(u_row_end, 0, (size_t)nk * sizeof(*u_row_end));
+    memset(row_done, 0, (size_t)nk * sizeof(*row_done));
 
     for (UF_long local_col = 0; local_col < nk; ++local_col) {
       const UF_long oldcol = q_order[k1 + local_col];
@@ -36934,6 +36961,13 @@ static int kls_try_first_factor_row_uplooking_blocks(
     kls_row_first_entries u_entries;
     memset(&l_entries, 0, sizeof(l_entries));
     memset(&u_entries, 0, sizeof(u_entries));
+    UF_long *row_order = NULL;
+    unsigned char *row_seen = NULL;
+    int use_separator_row_order = 0;
+    UF_long block_separator_private_rows = 0;
+    UF_long block_separator_pipeline_rows = 0;
+    kls_first_separator_queue_plan separator_plan;
+    memset(&separator_plan, 0, sizeof(separator_plan));
     if (!kls_row_first_entries_enable_col_counts(&l_entries, nk) ||
         !kls_row_first_entries_enable_col_counts(&u_entries, nk) ||
         !kls_row_first_entries_enable_col_links(&u_entries, nk)) {
@@ -36945,7 +36979,57 @@ static int kls_try_first_factor_row_uplooking_blocks(
       (void)kls_row_first_entries_reserve(&l_entries, reserve_entries);
       (void)kls_row_first_entries_reserve(&u_entries, reserve_entries);
     }
-    for (UF_long i = 0; i < nk; ++i) {
+
+    if (allow_separator_schedule && use_separator_for_block &&
+        solver->options.threads > 1 &&
+        kls_build_first_separator_queue_plan(
+          solver, k1, k2, solver->options.threads, &separator_plan)) {
+      row_order = (UF_long *)malloc((size_t)nk * sizeof(*row_order));
+      row_seen = (unsigned char *)calloc((size_t)nk, sizeof(*row_seen));
+      if (row_order == NULL || row_seen == NULL) {
+        goto fail_block_entries;
+      }
+      UF_long row_order_count = 0;
+      for (UF_long pos = 0; pos < separator_plan.private_rows_count; ++pos) {
+        const UF_long global_row = separator_plan.private_rows[pos];
+        if (global_row < k1 || global_row >= k2) {
+          goto fail_block_entries;
+        }
+        const UF_long local_row = global_row - k1;
+        if (row_seen[local_row]) {
+          goto fail_block_entries;
+        }
+        row_seen[local_row] = 1u;
+        row_order[row_order_count++] = local_row;
+      }
+      block_separator_private_rows = row_order_count;
+      qsort(row_order, (size_t)block_separator_private_rows,
+            sizeof(*row_order), kls_compare_uf_long);
+      for (UF_long pos = 0; pos < separator_plan.pipeline_rows_count; ++pos) {
+        const UF_long global_row = separator_plan.pipeline_rows[pos];
+        if (global_row < k1 || global_row >= k2) {
+          goto fail_block_entries;
+        }
+        const UF_long local_row = global_row - k1;
+        if (row_seen[local_row]) {
+          goto fail_block_entries;
+        }
+        row_seen[local_row] = 1u;
+        row_order[row_order_count++] = local_row;
+      }
+      block_separator_pipeline_rows =
+        row_order_count - block_separator_private_rows;
+      qsort(row_order + block_separator_private_rows,
+            (size_t)block_separator_pipeline_rows, sizeof(*row_order),
+            kls_compare_uf_long);
+      if (row_order_count == nk && block_separator_private_rows > 0u) {
+        use_separator_row_order = 1;
+      }
+    }
+
+    for (UF_long iter = 0; iter < nk; ++iter) {
+      const UF_long i =
+        use_separator_row_order ? row_order[iter] : iter;
       const unsigned int generation = (unsigned int)(i + 1u);
       if (generation == 0u) {
         goto fail_block_entries;
@@ -36986,7 +37070,8 @@ static int kls_try_first_factor_row_uplooking_blocks(
       u_row_ptr[i] = u_entries.count;
       while (dep_heap_size > 0u) {
         const UF_long dep = kls_row_first_heap_pop(dep_heap, &dep_heap_size);
-        if (dep >= i || mark[dep] != generation) {
+        if (dep >= i || mark[dep] != generation ||
+            (use_separator_row_order && !row_done[dep])) {
           goto fail_block_entries;
         }
         const double dep_pivot = udiag_values[dep];
@@ -36998,7 +37083,7 @@ static int kls_try_first_factor_row_uplooking_blocks(
           goto fail_block_entries;
         }
         x[dep] = 0.0;
-        for (UF_long up = u_row_ptr[dep]; up < u_row_ptr[dep + 1u]; ++up) {
+        for (UF_long up = u_row_ptr[dep]; up < u_row_end[dep]; ++up) {
           const UF_long col = u_entries.col[up];
           if (col <= dep || col >= nk) {
             goto fail_block_entries;
@@ -37132,13 +37217,19 @@ static int kls_try_first_factor_row_uplooking_blocks(
           goto fail_block_entries;
         }
       }
-      u_row_ptr[i + 1u] = u_entries.count;
+      u_row_end[i] = u_entries.count;
       for (UF_long p = 0; p < pattern_count; ++p) {
         x[pattern[p]] = 0.0;
       }
       if (mark[i] == generation) {
         x[i] = 0.0;
       }
+      row_done[i] = 1u;
+    }
+    if (use_separator_row_order) {
+      separator_queue_executed = 1;
+      separator_queue_executed_private_rows += block_separator_private_rows;
+      separator_queue_executed_pipeline_rows += block_separator_pipeline_rows;
     }
     if (!kls_pack_row_first_block_numeric(
           solver, numeric, block, k1, nk, &l_entries, &u_entries,
@@ -37155,6 +37246,9 @@ static int kls_try_first_factor_row_uplooking_blocks(
     }
     kls_row_first_entries_free(&l_entries);
     kls_row_first_entries_free(&u_entries);
+    kls_first_separator_queue_plan_free(&separator_plan);
+    free(row_order);
+    free(row_seen);
     free(row_cols);
     free(row_input_pos);
     for (UF_long local_col = 0; local_col < nk; ++local_col) {
@@ -37168,6 +37262,9 @@ static int kls_try_first_factor_row_uplooking_blocks(
 fail_block_entries:
     kls_row_first_entries_free(&l_entries);
     kls_row_first_entries_free(&u_entries);
+    kls_first_separator_queue_plan_free(&separator_plan);
+    free(row_order);
+    free(row_seen);
     free(row_cols);
     free(row_input_pos);
     free(row_next);
@@ -37216,6 +37313,14 @@ fail_block_entries:
     separator_dynamic_column_rejects;
   solver->kls_first_separator_dynamic_column_reject_count +=
     separator_dynamic_column_rejects;
+  if (separator_queue_executed) {
+    solver->kls_first_last_separator_queue_executed = 1;
+    solver->kls_first_separator_queue_executed_run_count++;
+    solver->kls_first_last_separator_queue_executed_private_rows =
+      separator_queue_executed_private_rows;
+    solver->kls_first_last_separator_queue_executed_pipeline_rows =
+      separator_queue_executed_pipeline_rows;
+  }
   free(row_counts);
   free(row_ptr);
   free(x);
@@ -37223,6 +37328,8 @@ fail_block_entries:
   free(pattern);
   free(dep_heap);
   free(u_row_ptr);
+  free(u_row_end);
+  free(row_done);
   free(udiag_values);
   free(q_order);
   free(saved_q);
@@ -37253,6 +37360,8 @@ fail:
   free(pattern);
   free(dep_heap);
   free(u_row_ptr);
+  free(u_row_end);
+  free(row_done);
   free(udiag_values);
   free(q_order);
   free(saved_q);
@@ -37265,6 +37374,32 @@ fail:
   common->singular_col = saved_singular_col;
   common->noffdiag = saved_noffdiag;
   return 0;
+}
+
+static int kls_try_first_factor_row_uplooking_blocks(
+  kls_solver *solver,
+  double *numeric_values) {
+  if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
+      solver->numeric != NULL || solver->symbolic->nblocks == 0u ||
+      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
+      solver->symbolic->R == NULL) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  const UF_long maxblock = solver->symbolic->maxblock;
+  if (n == 0u || maxblock == 0u) {
+    return 0;
+  }
+
+  kls_record_first_separator_queue_plans(solver, solver->options.threads);
+  if (solver->options.threads > 1 &&
+      kls_try_first_factor_row_uplooking_blocks_impl(solver,
+                                                     numeric_values, 1)) {
+    return 1;
+  }
+  return kls_try_first_factor_row_uplooking_blocks_impl(solver,
+                                                        numeric_values, 0);
 }
 
 typedef struct kls_pivot_first_parallel_shared {

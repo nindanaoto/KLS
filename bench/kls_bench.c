@@ -840,6 +840,10 @@ int main(int argc, char **argv) {
            ",\"kls_first_last_separator_queue_pipeline_rows\":%" PRId64
            ",\"kls_first_last_separator_queue_nonempty_threads\":%" PRId64
            ",\"kls_first_last_separator_queue_max_thread_rows\":%" PRId64
+           ",\"kls_first_last_separator_queue_executed\":%d"
+           ",\"kls_first_separator_queue_executed_run_count\":%" PRId64
+           ",\"kls_first_last_separator_queue_executed_private_rows\":%" PRId64
+           ",\"kls_first_last_separator_queue_executed_pipeline_rows\":%" PRId64
            ",\"kls_first_last_parallel_btf_blocks\":%" PRId64
            ",\"kls_first_parallel_btf_block_count\":%" PRId64
            ",\"kls_first_auto_skipped_scaled_single_block\":%d"
@@ -932,6 +936,10 @@ int main(int argc, char **argv) {
            stats.kls_first_last_separator_queue_pipeline_rows,
            stats.kls_first_last_separator_queue_nonempty_threads,
            stats.kls_first_last_separator_queue_max_thread_rows,
+           stats.kls_first_last_separator_queue_executed,
+           stats.kls_first_separator_queue_executed_run_count,
+           stats.kls_first_last_separator_queue_executed_private_rows,
+           stats.kls_first_last_separator_queue_executed_pipeline_rows,
            stats.kls_first_last_parallel_btf_blocks,
            stats.kls_first_parallel_btf_block_count,
            stats.kls_first_auto_skipped_scaled_single_block,
@@ -1545,6 +1553,13 @@ int main(int argc, char **argv) {
            stats.kls_first_last_separator_queue_pipeline_rows,
            stats.kls_first_last_separator_queue_nonempty_threads,
            stats.kls_first_last_separator_queue_max_thread_rows);
+    printf("KLS row-up-looking separator queue executed: last %d"
+           ", runs %" PRId64 ", rows private/pipeline %" PRId64 "/%" PRId64
+           "\n",
+           stats.kls_first_last_separator_queue_executed,
+           stats.kls_first_separator_queue_executed_run_count,
+           stats.kls_first_last_separator_queue_executed_private_rows,
+           stats.kls_first_last_separator_queue_executed_pipeline_rows);
     printf("KLS row-up-looking parallel BTF blocks: last %" PRId64
            ", total %" PRId64 "\n",
            stats.kls_first_last_parallel_btf_blocks,
