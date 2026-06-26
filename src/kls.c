@@ -833,6 +833,11 @@ static int kls_try_rebuild_current_numeric_with_kls_first(
   kls_solver *solver,
   double *numeric_values,
   double *elapsed);
+static int kls_try_rebuild_current_numeric_with_kls_first_mode(
+  kls_solver *solver,
+  double *numeric_values,
+  double *elapsed,
+  int force);
 static void destroy_egraph_refactor_pool(kls_solver *solver);
 static void kls_egraph_refactor_record_invalid(
   kls_egraph_refactor_shared *shared);
@@ -15674,8 +15679,8 @@ static int kls_try_fast_reject_kls_first_rebuild(kls_solver *solver,
   if (solver == NULL || numeric_values == NULL || solver->common.scale > 0) {
     return 0;
   }
-  if (!kls_try_rebuild_current_numeric_with_kls_first(
-        solver, numeric_values, NULL) ||
+  if (!kls_try_rebuild_current_numeric_with_kls_first_mode(
+        solver, numeric_values, NULL, 1) ||
       solver->common.status < TRILINOS_KLU_OK ||
       solver->common.status == TRILINOS_KLU_SINGULAR) {
     return 0;
@@ -45595,12 +45600,14 @@ static int kls_first_rebuild_quality_accepts(
   return 1;
 }
 
-static int kls_try_rebuild_current_numeric_with_kls_first(
+static int kls_try_rebuild_current_numeric_with_kls_first_mode(
   kls_solver *solver,
   double *numeric_values,
-  double *elapsed) {
+  double *elapsed,
+  int force) {
   if (solver == NULL || numeric_values == NULL || solver->numeric == NULL ||
-      !kls_should_try_first_factor(solver)) {
+      (force ? kls_first_factor_env_disabled()
+             : !kls_should_try_first_factor(solver))) {
     return 0;
   }
 
@@ -45658,6 +45665,14 @@ static int kls_try_rebuild_current_numeric_with_kls_first(
   solver->numeric = saved_numeric;
   solver->common = saved_common;
   return 0;
+}
+
+static int kls_try_rebuild_current_numeric_with_kls_first(
+  kls_solver *solver,
+  double *numeric_values,
+  double *elapsed) {
+  return kls_try_rebuild_current_numeric_with_kls_first_mode(
+    solver, numeric_values, elapsed, 0);
 }
 
 int kls_factor(kls_solver *solver, const double *values) {

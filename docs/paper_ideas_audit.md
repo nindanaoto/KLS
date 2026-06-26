@@ -3018,7 +3018,9 @@ tail repair cannot be realized. This moves that recovery branch toward the
 papers' "switch from invalid checked refactorization to pivoting factorization"
 rule: the exact block/tail repair remains first, but the next fallback is a
 quality-checked KLS-first rebuild before the serial full-suffix repair and KLU
-block-kernel fallback. Successful uses are reported as
+block-kernel fallback. That checked-reject recovery bypasses the normal
+automatic KLS-first cost gate but still honors an explicit
+`KLS_ENABLE_KLS_FIRST_FACTOR=0` disable. Successful uses are reported as
 `fast_kls_rebuild_restarts`. This still rebuilds the numeric object instead of
 running CKTSO Algorithm 5's ETree-descendant pipelined tail scheduler in place.
 

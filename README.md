@@ -138,6 +138,9 @@ retained pattern through the checked fast path. Unset
 eligible first factorizations try KLS-owned row-up-looking factorization before
 KLU, `KLS_ENABLE_KLS_FIRST_FACTOR=0` keeps the old KLU-first behavior, and
 `KLS_ENABLE_KLS_FIRST_FACTOR=1` forces the KLS-owned scaffold when possible.
+Checked fast-factor pivot-reject recovery can still try a quality-checked
+KLS-first rebuild before KLU fallback in automatic mode; set
+`KLS_ENABLE_KLS_FIRST_FACTOR=0` to disable that recovery branch too.
 Automatic mode still skips very large scaled single-BTF-block states unless
 the accepted analysis retained a global separator private/pipeline row queue.
 That keeps natural or otherwise unpartitioned scaled single-block systems on
