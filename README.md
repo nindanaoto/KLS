@@ -180,9 +180,10 @@ through `kls_first_last_separator_extent_dynamic_column_pivots` and
 rejections through `kls_first_last_separator_dynamic_column_fallbacks` and
 `kls_first_separator_dynamic_column_fallback_count`. If a guarded separator
 pipeline row still needs a dynamic pivot, KLS preserves the completed prefix,
-serializes that pivot row with the pivot-capable row-up kernel, and relaunches
-the remaining suffix through the pipeline; benchmark stats distinguish the
-restart envelope from actual serialized rows with
+publishes the scoped pivot row while holding the ordered pipeline lock when the
+row was safely pre-updated, and relaunches the remaining suffix through the
+pipeline; benchmark stats distinguish the restart envelope from older external
+serialized rows with
 `kls_first_last_separator_queue_pipeline_pivot_restarts` and
 `kls_first_last_separator_queue_pipeline_pivot_serial_rows`. Partial
 pre-updates and scalar row-supernode updates completed before a pivot restart

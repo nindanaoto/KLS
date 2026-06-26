@@ -36478,6 +36478,7 @@ typedef enum kls_row_first_pipeline_failure {
   KLS_ROW_FIRST_PIPELINE_FAIL_SETUP,
   KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY,
   KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT,
+  KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT_PUBLISHED,
   KLS_ROW_FIRST_PIPELINE_FAIL_APPEND,
   KLS_ROW_FIRST_PIPELINE_FAIL_THREAD
 } kls_row_first_pipeline_failure;
@@ -36833,14 +36834,31 @@ static int kls_row_first_partial_apply_ready(
   return 1;
 }
 
-static int kls_row_first_partial_finish_no_pivot(
+static int kls_row_first_partial_finish(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
   kls_row_first_entries *local_u_entries,
   kls_row_first_partial_row *state,
-  int *pivot_needed_out) {
+  int allow_pivot,
+  int *pivot_needed_out,
+  int *pivoted_out,
+  UF_long *selected_col_out,
+  int *selected_separator_exact_out,
+  int *selected_separator_extent_out) {
   if (pivot_needed_out != NULL) {
     *pivot_needed_out = 0;
+  }
+  if (pivoted_out != NULL) {
+    *pivoted_out = 0;
+  }
+  if (selected_col_out != NULL) {
+    *selected_col_out = KLS_KLU_EMPTY;
+  }
+  if (selected_separator_exact_out != NULL) {
+    *selected_separator_exact_out = 0;
+  }
+  if (selected_separator_extent_out != NULL) {
+    *selected_separator_extent_out = 0;
   }
   if (ctx == NULL || workspace == NULL || local_u_entries == NULL ||
       state == NULL || workspace->x == NULL || workspace->mark == NULL ||
@@ -36858,11 +36876,13 @@ static int kls_row_first_partial_finish_no_pivot(
   kls_row_first_pivot_choice pivot_choice;
   int pivot_needed = 0;
   UF_long selected_col = KLS_KLU_EMPTY;
+  int selected_separator_exact = 0;
+  int selected_separator_extent = 0;
   if (!kls_row_first_collect_pivot_choice(
         ctx, pattern, state->pattern_count, x, i, &pivot_choice) ||
       !kls_row_first_select_pivot_exchange(
         &pivot_choice, pivot, ctx->tol, &pivot_needed, &selected_col,
-        NULL, NULL)) {
+        &selected_separator_exact, &selected_separator_extent)) {
     if (pivot_needed_out != NULL) {
       *pivot_needed_out = 1;
     }
@@ -36872,7 +36892,38 @@ static int kls_row_first_partial_finish_no_pivot(
     if (pivot_needed_out != NULL) {
       *pivot_needed_out = 1;
     }
-    return 0;
+    if (!allow_pivot || selected_col == KLS_KLU_EMPTY) {
+      return 0;
+    }
+    const UF_long pivot_col = selected_col;
+    const int pivot_separator_exact = selected_separator_exact;
+    const int pivot_separator_extent = selected_separator_extent;
+    const double swapped_pivot = x[selected_col];
+    x[selected_col] = pivot;
+    x[i] = swapped_pivot;
+    workspace->mark[i] = state->generation;
+    pivot = x[i];
+    UF_long verify_selected_col = KLS_KLU_EMPTY;
+    if (!kls_row_first_collect_pivot_choice(
+          ctx, pattern, state->pattern_count, x, i, &pivot_choice) ||
+        !kls_row_first_select_pivot_exchange(
+          &pivot_choice, pivot, ctx->tol, &pivot_needed,
+          &verify_selected_col, NULL, NULL) ||
+        pivot_needed) {
+      return 0;
+    }
+    if (pivoted_out != NULL) {
+      *pivoted_out = 1;
+    }
+    if (selected_col_out != NULL) {
+      *selected_col_out = pivot_col;
+    }
+    if (selected_separator_exact_out != NULL) {
+      *selected_separator_exact_out = pivot_separator_exact;
+    }
+    if (selected_separator_extent_out != NULL) {
+      *selected_separator_extent_out = pivot_separator_extent;
+    }
   }
   UF_long u_count = 0;
   for (UF_long p = 0; p < state->pattern_count; ++p) {
@@ -37063,6 +37114,10 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
     if (!shared->failed) {
       blocked = 0;
       int pivot_needed = 0;
+      int pivoted = 0;
+      UF_long selected_col = KLS_KLU_EMPTY;
+      int selected_separator_exact = 0;
+      int selected_separator_extent = 0;
       if (!kls_row_first_partial_apply_ready(
             shared->ctx, &worker->workspace, &worker->l_entries,
             shared->u_entries, shared->udiag_values,
@@ -37075,33 +37130,67 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
           blocked) {
         kls_row_first_pipeline_mark_failed(
           shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
-      } else if (!kls_row_first_partial_finish_no_pivot(
+      } else if (!kls_row_first_partial_finish(
                    shared->ctx, &worker->workspace, &worker->u_entries,
-                   &state, &pivot_needed)) {
+                   &state, 1, &pivot_needed, &pivoted, &selected_col,
+                   &selected_separator_exact,
+                   &selected_separator_extent)) {
         kls_row_first_pipeline_mark_failed(
           shared, pivot_needed ? KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT
                                : KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
-      } else if (!kls_row_first_append_entries(shared->l_entries,
-                                               &worker->l_entries)) {
-        kls_row_first_pipeline_mark_failed(
-          shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
       } else {
-        shared->workspace->u_row_ptr[row] = shared->u_entries->count;
-        if (!kls_row_first_append_entries(shared->u_entries,
-                                          &worker->u_entries)) {
+        const UF_long l_need = worker->l_entries.count;
+        const UF_long u_need = worker->u_entries.count;
+        if (l_need > UF_long_max - shared->l_entries->count ||
+            u_need > UF_long_max - shared->u_entries->count ||
+            !kls_row_first_entries_reserve(
+              shared->l_entries, shared->l_entries->count + l_need) ||
+            !kls_row_first_entries_reserve(
+              shared->u_entries, shared->u_entries->count + u_need)) {
+          kls_row_first_pipeline_mark_failed(
+            shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
+        } else if (pivoted &&
+                   (selected_col == KLS_KLU_EMPTY ||
+                    !kls_row_first_exchange_columns(
+                      shared->u_entries, shared->ctx->q_order,
+                      shared->ctx->col_pos, row, selected_col,
+                      shared->ctx->nk, shared->ctx->n))) {
+          kls_row_first_pipeline_mark_failed(
+            shared, KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT);
+        } else if (!kls_row_first_append_entries(shared->l_entries,
+                                                 &worker->l_entries)) {
           kls_row_first_pipeline_mark_failed(
             shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
         } else {
-          shared->workspace->u_row_end[row] = shared->u_entries->count;
-          shared->udiag_values[row] = state.pivot;
-          kls_row_first_supernodes_publish_row(
-            shared->u_entries, shared->workspace->u_row_ptr,
-            shared->workspace->u_row_end, shared->row_done,
-            shared->ctx->nk, shared->begin, row,
-            shared->supernode_start, shared->supernode_end);
-          shared->row_done[row] = 1u;
-          shared->completed_pos = pos + 1u;
-          worker->rows++;
+          shared->workspace->u_row_ptr[row] = shared->u_entries->count;
+          if (!kls_row_first_append_entries(shared->u_entries,
+                                            &worker->u_entries)) {
+            kls_row_first_pipeline_mark_failed(
+              shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
+          } else {
+            shared->workspace->u_row_end[row] = shared->u_entries->count;
+            shared->udiag_values[row] = state.pivot;
+            kls_row_first_supernodes_publish_row(
+              shared->u_entries, shared->workspace->u_row_ptr,
+              shared->workspace->u_row_end, shared->row_done,
+              shared->ctx->nk, shared->begin, row,
+              shared->supernode_start, shared->supernode_end);
+            shared->row_done[row] = 1u;
+            shared->completed_pos = pos + 1u;
+            worker->rows++;
+            if (pivoted) {
+              if (shared->stats != NULL) {
+                shared->stats->dynamic_column_pivots++;
+                if (selected_separator_exact) {
+                  shared->stats->separator_dynamic_column_pivots++;
+                } else if (selected_separator_extent) {
+                  shared->stats->separator_extent_dynamic_column_pivots++;
+                }
+              }
+              kls_row_first_pipeline_mark_failed(
+                shared, KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT_PUBLISHED);
+            }
+          }
         }
       }
       pthread_cond_broadcast(&shared->cond);
@@ -37136,12 +37225,16 @@ static int kls_row_first_run_parallel_pipeline_phase(
   UF_long *supernode_update_groups_out,
   UF_long *supernode_update_rows_out,
   UF_long *completed_pos_out,
-  int *pivot_tail_ready_out) {
+  int *pivot_tail_ready_out,
+  int *pivot_row_published_out) {
   if (completed_pos_out != NULL) {
     *completed_pos_out = begin;
   }
   if (pivot_tail_ready_out != NULL) {
     *pivot_tail_ready_out = 0;
+  }
+  if (pivot_row_published_out != NULL) {
+    *pivot_row_published_out = 0;
   }
   if (ctx == NULL || row_order == NULL || begin >= end ||
       thread_count <= 1 || workspace == NULL || l_entries == NULL ||
@@ -37281,15 +37374,24 @@ static int kls_row_first_run_parallel_pipeline_phase(
   }
   const int ok = created == worker_count && !shared.failed &&
     shared.completed_pos == end && processed_rows == pipeline_rows;
+  const int pivot_published =
+    shared.failure_reason == KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT_PUBLISHED;
   const int pivot_tail_ready = created == worker_count && shared.failed &&
-    shared.failure_reason == KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT &&
-    shared.completed_pos >= begin && shared.completed_pos < end &&
+    (shared.failure_reason == KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT ||
+     pivot_published) &&
+    shared.completed_pos >= begin &&
+    (pivot_published ? shared.completed_pos <= end
+                     : shared.completed_pos < end) &&
     processed_rows == shared.completed_pos - begin;
   if (completed_pos_out != NULL) {
     *completed_pos_out = shared.completed_pos;
   }
   if (pivot_tail_ready_out != NULL) {
     *pivot_tail_ready_out = pivot_tail_ready ? 1 : 0;
+  }
+  if (pivot_row_published_out != NULL) {
+    *pivot_row_published_out =
+      pivot_tail_ready && pivot_published ? 1 : 0;
   }
   if ((ok || pivot_tail_ready) && pipeline_rows_out != NULL) {
     *pipeline_rows_out = processed_rows;
@@ -37410,12 +37512,14 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     UF_long phase_supernode_rows = 0;
     UF_long completed_pos = cursor;
     int pivot_tail_ready = 0;
+    int pivot_row_published = 0;
     if (kls_row_first_run_parallel_pipeline_phase(
           ctx, row_order, cursor, end, thread_count, workspace, l_entries,
           u_entries, udiag_values, row_done, stats, &phase_rows,
           &phase_threads, &phase_partial_rows, &phase_wait_partial_rows,
           &phase_wait_partial_deps, &phase_supernode_groups,
-          &phase_supernode_rows, &completed_pos, &pivot_tail_ready)) {
+          &phase_supernode_rows, &completed_pos, &pivot_tail_ready,
+          &pivot_row_published)) {
       pipeline_rows += phase_rows;
       if (phase_threads > max_threads) {
         max_threads = phase_threads;
@@ -37429,7 +37533,9 @@ static int kls_row_first_run_restartable_pipeline_suffix(
       break;
     }
     if (!pivot_tail_ready || completed_pos < cursor ||
-        completed_pos >= end) {
+        (!pivot_row_published && completed_pos >= end) ||
+        (pivot_row_published &&
+         (completed_pos <= cursor || completed_pos > end))) {
       return 0;
     }
     pipeline_rows += phase_rows;
@@ -37441,8 +37547,16 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     wait_partial_deps += phase_wait_partial_deps;
     supernode_update_groups += phase_supernode_groups;
     supernode_update_rows += phase_supernode_rows;
-    pivot_tail_rows += end - completed_pos;
+    const UF_long pivot_tail_begin =
+      pivot_row_published && completed_pos > cursor
+        ? completed_pos - 1u
+        : completed_pos;
+    pivot_tail_rows += end - pivot_tail_begin;
     pivot_restarts++;
+    if (pivot_row_published) {
+      cursor = completed_pos;
+      continue;
+    }
     const UF_long pivot_row = row_order[completed_pos];
     if (pivot_row >= ctx->nk ||
         !kls_row_first_factor_one_row(
