@@ -159,7 +159,10 @@ serial suffix restart inside the rejected block when the repaired block
 preserves a validated non-empty live prefix. Scaled all-refresh KLU-refactor
 rejects now recompute the row scale vector back to input-row order before
 attempting the same block-local repair and validated non-root serial suffix
-restart.
+restart. The newer row-first rejected-block rebuild consumes that same
+input-row scale state and permutes `Rs` back to pivot order after accepting the
+KLS-owned dynamic-column-pivot block, so scaled checked rejects are no longer
+limited to the serial KLU-compatible block repair before the KLU fallback.
 The threaded BTF worker pool now keeps a per-run completed-block bitmap and
 reports prefix-current only when every diagonal block before a checked pivot
 reject has finished. That lets the existing block repair and later-block
@@ -3013,19 +3016,21 @@ KLS-owned factorization kernel, but not the CKTSO ETree-descendant pipelined
 tail executor.
 
 KLS now also gives the independent row-up-looking factorization kernel a chance
-when an unscaled checked reject cannot be recovered by the exact in-place tail
-repair. This moves that recovery branch toward the papers' "switch from invalid
-checked refactorization to pivoting factorization" rule: exact block/tail repair
-remains first, then KLS rebuilds the rejected BTF block with its row-first
+when a checked reject cannot be recovered by the exact in-place tail repair.
+This moves that recovery branch toward the papers' "switch from invalid checked
+refactorization to pivoting factorization" rule: exact block/tail repair remains
+first, then KLS rebuilds the rejected BTF block with its row-first
 dynamic-column-pivot executor, then it tries the quality-checked KLS-first
-whole-numeric rebuild before the KLU block-kernel fallback. The whole-numeric
-checked-reject recovery bypasses the normal automatic KLS-first cost gate but
-still honors an explicit `KLS_ENABLE_KLS_FIRST_FACTOR=0` disable. Successful
-row-first block repairs are reported as `fast_kls_block_restarts`; successful
-whole-numeric recoveries are reported as `fast_kls_rebuild_restarts`. This
-still stops short of CKTSO Algorithm 5's ETree-descendant pipelined tail
-scheduler in place, but removes another KLU-kernel step from the checked-reject
-fallback ladder.
+whole-numeric rebuild before the KLU block-kernel fallback. The block-local
+executor now covers both unscaled and KLU row-scaled repair states by consuming
+input-row `Rs` during row construction and permuting it back to pivot order
+after an accepted scaled block. The whole-numeric checked-reject recovery
+bypasses the normal automatic KLS-first cost gate but still honors an explicit
+`KLS_ENABLE_KLS_FIRST_FACTOR=0` disable. Successful row-first block repairs are
+reported as `fast_kls_block_restarts`; successful whole-numeric recoveries are
+reported as `fast_kls_rebuild_restarts`. This still stops short of CKTSO
+Algorithm 5's ETree-descendant pipelined tail scheduler in place, but removes
+another KLU-kernel step from the checked-reject fallback ladder.
 
 The row-refactor benchmark controls were then made explicit after the
 checked-row/refactor ambiguity above was found. `kls_bench` now accepts

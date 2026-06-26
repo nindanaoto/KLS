@@ -43541,14 +43541,16 @@ static int kls_try_row_first_rebuild_rejected_block(
       solver->numeric->LUsize == NULL || block >= solver->symbolic->nblocks ||
       k1 > solver->n || nk == 0u || nk > solver->n - k1 ||
       rejected_pivot < k1 || rejected_pivot >= k1 + nk ||
-      nk > solver->symbolic->maxblock || solver->common.scale > 0 ||
-      solver->numeric->Rs != NULL ||
+      nk > solver->symbolic->maxblock ||
+      (solver->common.scale > 0 && solver->numeric->Rs == NULL) ||
+      (solver->common.scale <= 0 && solver->numeric->Rs != NULL) ||
       solver->numeric->lnz < old_lnz_block ||
       solver->numeric->unz < old_unz_block) {
     return 0;
   }
 
   const UF_long n = solver->n;
+  const int scaled = solver->common.scale > 0;
   const size_t nk_size = (size_t)nk;
   if ((UF_long)nk_size != nk) {
     return 0;
@@ -43683,8 +43685,8 @@ static int kls_try_row_first_rebuild_rejected_block(
   shared.psinv = psinv;
   shared.q_order = q_order;
   shared.separator_component_last = separator_component_last;
-  shared.scaled = 0;
-  shared.scale = 0;
+  shared.scaled = scaled;
+  shared.scale = scaled ? (int)solver->common.scale : 0;
   shared.use_separator_pivot_domains = use_separator_pivot_domains;
   shared.tol = solver->common.tol;
 
@@ -43718,6 +43720,9 @@ static int kls_try_row_first_rebuild_rejected_block(
 
   if (!kls_rebuild_numeric_pinv(solver) ||
       !kls_recompute_offdiag_from_pinv(solver, numeric_values)) {
+    goto fail;
+  }
+  if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
     goto fail;
   }
 
