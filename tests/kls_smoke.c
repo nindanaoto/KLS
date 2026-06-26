@@ -2159,7 +2159,9 @@ static int test_parallel_btf_suffix_after_prefix_tail_restart(void) {
              stats.fast_tail_restarts != 0 ||
              stats.fast_kls_block_restart_last_row_pipeline != 1 ||
              stats.fast_kls_block_restart_row_pipeline_count < 1 ||
-             stats.fast_kls_block_restart_last_row_pipeline_rows !=
+             stats.fast_kls_block_restart_last_row_pipeline_prefix_rows <= 0 ||
+             stats.fast_kls_block_restart_last_row_pipeline_prefix_rows +
+                 stats.fast_kls_block_restart_last_row_pipeline_rows !=
                stats.fast_rejected_block_size ||
              stats.fast_repaired_parallel_tail_blocks < 2)) {
     fprintf(stderr,
@@ -2168,6 +2170,7 @@ static int test_parallel_btf_suffix_after_prefix_tail_restart(void) {
             ", refresh=%d, restarts=%d, tail_restarts=%d"
             ", tail_ready=%d, pipeline=%d/%" PRId64
             ", pipeline_rows=%" PRId64 ", pipeline_threads=%" PRId64
+            ", pipeline_prefix=%" PRId64
             ", parallel_tail_blocks=%" PRId64 "\n",
             stats.nblocks,
             stats.fast_rejected_pivot,
@@ -2181,6 +2184,7 @@ static int test_parallel_btf_suffix_after_prefix_tail_restart(void) {
             stats.fast_kls_block_restart_row_pipeline_count,
             stats.fast_kls_block_restart_last_row_pipeline_rows,
             stats.fast_kls_block_restart_last_row_pipeline_threads,
+            stats.fast_kls_block_restart_last_row_pipeline_prefix_rows,
             stats.fast_repaired_parallel_tail_blocks);
     ok = 0;
   }

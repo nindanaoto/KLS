@@ -265,6 +265,7 @@ typedef struct kls_stats {
   int64_t fast_kls_block_restart_row_pipeline_count;
   int64_t fast_kls_block_restart_last_row_pipeline_rows;
   int64_t fast_kls_block_restart_last_row_pipeline_threads;
+  int64_t fast_kls_block_restart_last_row_pipeline_prefix_rows;
   int64_t fast_kls_block_restart_last_row_pipeline_pivot_tail_rows;
   int64_t fast_kls_block_restart_last_row_pipeline_pivot_restarts;
   double row_refactor_total_group_work;

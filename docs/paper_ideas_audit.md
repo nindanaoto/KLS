@@ -5020,6 +5020,19 @@ decomposition output expose the behavior through
 `fast_kls_block_restart_row_pipeline_count`,
 `fast_kls_block_restart_last_row_pipeline_rows`,
 `fast_kls_block_restart_last_row_pipeline_threads`,
+`fast_kls_block_restart_last_row_pipeline_prefix_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`, and
 `fast_kls_block_restart_last_row_pipeline_pivot_restarts`; the prior-pivot
 smoke fixture now requires the two-thread repair to use that pipeline.
+
+KLS now narrows that block-repair pipeline when the retained pivoting-tail plan
+is an exact topological suffix ending at the end of the rejected BTF block. In
+that case, the repair seeds the preserved prefix from the previous LU into
+row-major entries, marks those prefix rows finished, and starts the restartable
+row pipeline at the rejected suffix rather than at row zero. The activation is
+deliberately conservative: if the prefix has non-identity row order or the
+retained plan is a non-contiguous/shorter ETree mask, KLS leaves the repair on
+the existing serial exact-mask path where preserved later rows are explicitly
+validated. The BTF suffix smoke case now requires a nonzero preserved-prefix
+count, showing that the multi-thread repair is no longer only a full-block
+pipeline in exact-suffix cases.

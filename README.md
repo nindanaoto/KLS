@@ -879,6 +879,7 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_kls_block_restart_row_pipeline_count`,
 `fast_kls_block_restart_last_row_pipeline_rows`,
 `fast_kls_block_restart_last_row_pipeline_threads`,
+`fast_kls_block_restart_last_row_pipeline_prefix_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_restarts`,
 `fast_tail_restarts`,
@@ -920,7 +921,8 @@ number of repaired BTF blocks, how many repairs used the KLS-owned pivoted block
 kernel, whether the last multi-thread KLS-owned block repair first ran through
 the restartable row pipeline before the older serial/KLU fallbacks, the number
 of those block-repair pipeline runs, their processed rows, active worker count,
-and pivot-tail serial restart work, and
+how many prefix rows were preserved before an exact suffix-tail pipeline, and
+pivot-tail serial restart work, and
 the number of serial tail restarts actually executed, plus whether
 repaired serial-tail restarts refreshed only the off-diagonal suffix or rebuilt
 all off-diagonal entries, and whether a non-contiguous serial repair exactly
