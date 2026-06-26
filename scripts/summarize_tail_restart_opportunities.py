@@ -174,6 +174,9 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         "fast_repaired_tail_restart_exact_mask": as_int(
             row, "fast_repaired_tail_restart_exact_mask", 0
         ),
+        "fast_repaired_tail_restart_etree_mask": as_int(
+            row, "fast_repaired_tail_restart_etree_mask", 0
+        ),
         "fast_kls_rebuild_restarts": as_int(
             row, "fast_kls_rebuild_restarts", 0
         ),
@@ -255,7 +258,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
             "gaps={gaps} plan_overcompute_work={plan_overcompute:.6g} "
             "overcompute_work={overcompute:.6g} "
             "saved_work={saved:.6g} "
-            "exact_mask={exact_mask} "
+            "exact_mask={exact_mask} etree_mask={etree_mask} "
             "block_start={block_start} "
             "tail_first={tail_first} tail_last={tail_last} "
             "tail_topo={tail_topo} "
@@ -294,6 +297,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
                 overcompute=float(record["suffix_tail_overcompute_work"]),
                 saved=float(record["fast_repaired_tail_restart_saved_work"]),
                 exact_mask=record["fast_repaired_tail_restart_exact_mask"],
+                etree_mask=record["fast_repaired_tail_restart_etree_mask"],
                 block_start=record["fast_rejected_block_start"],
                 tail_first=record["fast_rejected_pivoting_tail_first"],
                 tail_last=record["fast_rejected_pivoting_tail_last"],
@@ -381,6 +385,10 @@ def main() -> int:
         record for record in executed
         if int(record["fast_repaired_tail_restart_exact_mask"]) == 1
     ]
+    executed_etree_mask = [
+        record for record in executed
+        if int(record["fast_repaired_tail_restart_etree_mask"]) == 1
+    ]
     repaired_block_work = sum(float(r["fast_repaired_block_work"]) for r in repaired)
     blocked_block_work = sum(float(r["fast_repaired_block_work"]) for r in blocked)
     kls_rebuild_restarts = sum(
@@ -433,6 +441,7 @@ def main() -> int:
         "kls_rebuild_recovery_rows": len(kls_rebuild_recovered),
         "kls_rebuild_restarts_total": kls_rebuild_restarts,
         "tail_restart_exact_mask_rows": len(executed_exact_mask),
+        "tail_restart_etree_mask_rows": len(executed_etree_mask),
         "reason_counts": dict(sorted(reason_counts.items())),
         "strict_ready_block_work_total": ready_block_work,
         "strict_ready_tail_work_total": ready_tail_work,

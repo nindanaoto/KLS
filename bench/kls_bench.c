@@ -940,6 +940,7 @@ int main(int argc, char **argv) {
            ",\"fast_repaired_tail_restart_skipped_columns\":%" PRId64
            ",\"fast_repaired_tail_restart_skipped_work\":%.9g"
            ",\"fast_repaired_tail_restart_exact_mask\":%d"
+           ",\"fast_repaired_tail_restart_etree_mask\":%d"
            ",\"fast_block_restarts\":%d"
            ",\"fast_kls_block_restarts\":%d"
            ",\"fast_kls_rebuild_restarts\":%d"
@@ -989,6 +990,7 @@ int main(int argc, char **argv) {
            stats.fast_repaired_tail_restart_skipped_columns,
            stats.fast_repaired_tail_restart_skipped_work,
            stats.fast_repaired_tail_restart_exact_mask,
+           stats.fast_repaired_tail_restart_etree_mask,
            stats.fast_block_restarts,
            stats.fast_kls_block_restarts,
            stats.fast_kls_rebuild_restarts,
@@ -1964,7 +1966,7 @@ int main(int argc, char **argv) {
            ", tail work %.6g, saved work %.6g"
            ", overcompute columns %" PRId64 ", overcompute work %.6g"
            ", skipped columns %" PRId64 ", skipped work %.6g"
-           ", exact mask %d\n",
+           ", exact mask %d, etree mask %d\n",
            stats.fast_repaired_pivot_row,
            stats.fast_repaired_pivot_matches_tail_candidate,
            stats.fast_repaired_first_changed_pivot,
@@ -1979,7 +1981,8 @@ int main(int argc, char **argv) {
            stats.fast_repaired_tail_restart_overcompute_work,
            stats.fast_repaired_tail_restart_skipped_columns,
            stats.fast_repaired_tail_restart_skipped_work,
-           stats.fast_repaired_tail_restart_exact_mask);
+           stats.fast_repaired_tail_restart_exact_mask,
+           stats.fast_repaired_tail_restart_etree_mask);
     printf("fast block restarts: %d, KLS block restarts: %d"
            ", KLS rebuild restarts: %d"
            ", tail restarts: %d"

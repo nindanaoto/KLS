@@ -2673,6 +2673,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_tail_restart_skipped_columns = 0;
   solver->stats.fast_repaired_tail_restart_skipped_work = 0.0;
   solver->stats.fast_repaired_tail_restart_exact_mask = 0;
+  solver->stats.fast_repaired_tail_restart_etree_mask = 0;
   solver->stats.fast_repaired_parallel_tail_blocks = 0;
   solver->stats.fast_block_restarts = 0;
   solver->stats.fast_kls_block_restarts = 0;
@@ -3670,6 +3671,7 @@ static void kls_record_fast_reject_detail(kls_solver *solver,
   solver->stats.fast_repaired_tail_restart_skipped_columns = 0;
   solver->stats.fast_repaired_tail_restart_skipped_work = 0.0;
   solver->stats.fast_repaired_tail_restart_exact_mask = 0;
+  solver->stats.fast_repaired_tail_restart_etree_mask = 0;
   solver->stats.fast_repaired_parallel_tail_blocks =
     (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_kls_block_restart_last_row_pipeline = 0;
@@ -15646,6 +15648,119 @@ static int kls_build_pivot_tail_restart_mask(const kls_solver *solver,
     solver, k1, nk, local_reject, local_reject, restart_end, mask);
 }
 
+static int kls_pivot_tail_restart_mask_matches_etree_forest(
+  kls_solver *solver,
+  UF_long block,
+  UF_long k1,
+  UF_long nk,
+  UF_long local_reject,
+  UF_long restart_begin,
+  UF_long restart_end,
+  const unsigned char *mask) {
+  if (solver == NULL || mask == NULL || local_reject >= nk ||
+      restart_begin > local_reject || restart_end <= local_reject ||
+      restart_end > nk ||
+      solver->fast_reject_tail_cols == NULL ||
+      solver->fast_reject_tail_count == 0u ||
+      solver->stats.fast_rejected_pivoting_tail_columns <= 0 ||
+      !solver->stats.fast_rejected_pivoting_tail_contains_reject ||
+      !solver->stats.fast_rejected_pivoting_tail_topological) {
+    return 0;
+  }
+  const UF_long expected_columns =
+    (UF_long)solver->stats.fast_rejected_pivoting_tail_columns;
+  if (expected_columns != solver->fast_reject_tail_count) {
+    return 0;
+  }
+  for (UF_long p = 0; p < solver->fast_reject_tail_count; ++p) {
+    const UF_long global_col = solver->fast_reject_tail_cols[p];
+    if (global_col < k1 || global_col >= k1 + nk) {
+      return 0;
+    }
+    const UF_long local_col = global_col - k1;
+    if (local_col < restart_begin || local_col >= restart_end ||
+        mask[local_col] == 0u) {
+      return 0;
+    }
+  }
+
+  const UF_long *parent = NULL;
+  UF_long *owned_parent = NULL;
+  if (!kls_get_ordered_block_etree_parent(solver, block, k1, k1 + nk,
+                                          &parent, &owned_parent) ||
+      parent == NULL) {
+    free(owned_parent);
+    return 0;
+  }
+  UF_long *child_count = (UF_long *)calloc((size_t)nk,
+                                           sizeof(*child_count));
+  if (child_count == NULL) {
+    free(owned_parent);
+    return 0;
+  }
+
+  UF_long columns = 0;
+  UF_long edges = 0;
+  UF_long roots = 0;
+  int contains_reject = 0;
+  int ok = 1;
+  for (UF_long local_col = 0; local_col < nk; ++local_col) {
+    if (mask[local_col] == 0u) {
+      continue;
+    }
+    if (local_col < restart_begin || local_col >= restart_end) {
+      ok = 0;
+      break;
+    }
+    columns++;
+    if (local_col == local_reject) {
+      contains_reject = 1;
+    }
+    const UF_long next = parent[local_col];
+    if (next != KLS_KLU_EMPTY && next != local_col && next < nk &&
+        mask[next] != 0u) {
+      if (next <= local_col) {
+        ok = 0;
+        break;
+      }
+      edges++;
+      child_count[next]++;
+    } else {
+      roots++;
+    }
+  }
+
+  UF_long leaves = 0;
+  UF_long max_fanout = 0;
+  if (ok) {
+    for (UF_long local_col = 0; local_col < nk; ++local_col) {
+      if (mask[local_col] == 0u) {
+        continue;
+      }
+      if (child_count[local_col] == 0u) {
+        leaves++;
+      }
+      if (child_count[local_col] > max_fanout) {
+        max_fanout = child_count[local_col];
+      }
+    }
+    ok = contains_reject &&
+         columns == expected_columns &&
+         edges + roots == columns &&
+         edges == (UF_long)
+           solver->stats.fast_rejected_pivoting_tail_etree_edges &&
+         roots == (UF_long)
+           solver->stats.fast_rejected_pivoting_tail_etree_roots &&
+         leaves == (UF_long)
+           solver->stats.fast_rejected_pivoting_tail_etree_leaves &&
+         max_fanout == (UF_long)
+           solver->stats.fast_rejected_pivoting_tail_etree_max_fanout;
+  }
+  free(child_count);
+  free(owned_parent);
+  return ok;
+}
+
 static int kls_pivot_tail_plan_local_range(
   const kls_solver *solver,
   UF_long k1,
@@ -16174,6 +16289,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
                                                  UF_long skipped_columns,
                                                  double skipped_work,
                                                  int exact_mask_used,
+                                                 int etree_mask_used,
                                                  const UF_long *old_pblock,
                                                  const UF_long *pblock) {
   if (solver == NULL || old_pblock == NULL || pblock == NULL ||
@@ -16221,6 +16337,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     skipped_work = 0.0;
   }
   solver->stats.fast_repaired_tail_restart_exact_mask = 0;
+  solver->stats.fast_repaired_tail_restart_etree_mask = 0;
 
   const int64_t repaired_row = (int64_t)(k1 + pblock[local_reject]);
   solver->stats.fast_repaired_pivot_row = repaired_row;
@@ -16295,6 +16412,9 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
           pivoting_tail_columns > 0 &&
           actual_tail_columns == (UF_long)pivoting_tail_columns &&
           solver->stats.fast_repaired_tail_restart_overcompute_columns == 0;
+        solver->stats.fast_repaired_tail_restart_etree_mask =
+          etree_mask_used &&
+          solver->stats.fast_repaired_tail_restart_exact_mask;
       } else {
         solver->stats.fast_repaired_tail_restart_ready = 0;
       }
@@ -16434,6 +16554,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   UF_long repaired_tail_skipped_columns = 0;
   double repaired_tail_skipped_work = 0.0;
   int repaired_tail_exact_mask = 0;
+  int repaired_tail_etree_mask = 0;
   UF_long tail_plan_begin = 0;
   UF_long tail_plan_end = 0;
   int tail_plan_suffix_exact = 0;
@@ -16488,7 +16609,12 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       kls_build_pivot_tail_restart_mask_range(
         solver, k1, nk, local_reject, restart_begin, restart_end,
         tail_mask);
-    if (main_mask_ok && saved_ptrs != NULL && saved_udiag != NULL &&
+    const int main_mask_etree_ok =
+      main_mask_ok &&
+      kls_pivot_tail_restart_mask_matches_etree_forest(
+        solver, block, k1, nk, local_reject, restart_begin, restart_end,
+        tail_mask);
+    if (main_mask_etree_ok && saved_ptrs != NULL && saved_udiag != NULL &&
         (solver->fast_reject_refresh_state !=
            KLS_FAST_REJECT_REFRESH_PREFIX ||
          kls_refresh_pivot_tail_preserved_block_columns(
@@ -16517,11 +16643,13 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       if (kls_block_restart_used) {
         repaired_tail_begin = restart_begin;
         repaired_tail_end = restart_end;
+        repaired_tail_etree_mask = 1;
       }
       if (!kls_block_restart_used) {
         repaired_tail_skipped_columns = 0;
         repaired_tail_skipped_work = 0.0;
         repaired_tail_exact_mask = 0;
+        repaired_tail_etree_mask = 0;
         solver->common.nrealloc = old_nrealloc;
         memcpy(solver->numeric->Lip + k1, saved_lip,
                (size_t)nk * sizeof(*saved_lip));
@@ -16709,6 +16837,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
                                        repaired_tail_skipped_columns,
                                        repaired_tail_skipped_work,
                                        repaired_tail_exact_mask,
+                                       repaired_tail_etree_mask,
                                        old_pblock, pblock);
   free(old_pblock);
 
@@ -46247,6 +46376,7 @@ static int kls_try_row_first_rebuild_rejected_block(
   int tail_contiguous = 0;
   int tail_suffix_exact = 0;
   UF_long repaired_tail_begin = local_reject;
+  int repaired_tail_etree_mask = 0;
   if (shared.force_block_pipeline &&
       kls_pivot_tail_plan_local_range(
         solver, k1, nk, local_reject, &tail_begin, &tail_end,
@@ -46267,8 +46397,13 @@ static int kls_try_row_first_rebuild_rejected_block(
         tail_mask != NULL &&
         kls_build_pivot_tail_restart_mask_range(
           solver, k1, nk, local_reject, tail_begin, tail_end, tail_mask);
-      const int refresh_ok =
+      const int mask_etree_ok =
         mask_ok &&
+        kls_pivot_tail_restart_mask_matches_etree_forest(
+          solver, block, k1, nk, local_reject, tail_begin, tail_end,
+          tail_mask);
+      const int refresh_ok =
+        mask_etree_ok &&
         (solver->fast_reject_refresh_state !=
            KLS_FAST_REJECT_REFRESH_PREFIX ||
          kls_refresh_pivot_tail_preserved_block_columns(
@@ -46278,6 +46413,7 @@ static int kls_try_row_first_rebuild_rejected_block(
         shared.block_pipeline_begin = tail_begin;
         shared.block_pipeline_end = tail_end;
         repaired_tail_begin = tail_begin;
+        repaired_tail_etree_mask = 1;
       }
     } else {
       const size_t nk_size = (size_t)nk;
@@ -46290,8 +46426,13 @@ static int kls_try_row_first_rebuild_rejected_block(
         kls_build_pivot_tail_restart_mask_range(
           solver, k1, nk, local_reject, tail_begin, tail_end,
           pipeline_active_mask);
+      const int mask_etree_ok =
+        mask_ok &&
+        kls_pivot_tail_restart_mask_matches_etree_forest(
+          solver, block, k1, nk, local_reject, tail_begin, tail_end,
+          pipeline_active_mask);
       UF_long active_rows = 0;
-      if (mask_ok) {
+      if (mask_etree_ok) {
         for (UF_long row = 0; row < nk; ++row) {
           if (pipeline_active_mask[row]) {
             if (row < tail_begin || row >= tail_end) {
@@ -46303,7 +46444,7 @@ static int kls_try_row_first_rebuild_rejected_block(
         }
       }
       const int refresh_ok =
-        mask_ok && active_rows == (UF_long)tail_columns &&
+        mask_etree_ok && active_rows == (UF_long)tail_columns &&
         active_rows > 0u &&
         (solver->fast_reject_refresh_state !=
            KLS_FAST_REJECT_REFRESH_PREFIX ||
@@ -46313,6 +46454,7 @@ static int kls_try_row_first_rebuild_rejected_block(
         shared.block_pipeline_begin = tail_begin;
         shared.block_pipeline_end = tail_end;
         repaired_tail_begin = tail_begin;
+        repaired_tail_etree_mask = 1;
         shared.block_pipeline_active_mask = pipeline_active_mask;
         shared.block_pipeline_active_rows = active_rows;
       } else {
@@ -46440,7 +46582,8 @@ static int kls_try_row_first_rebuild_rejected_block(
     solver, block, k1, nk, rejected_pivot, repaired_tail_begin,
     repaired_tail_end,
     repaired_tail_skipped_columns, repaired_tail_skipped_work,
-    repaired_tail_exact_mask, old_pblock, pblock_out);
+    repaired_tail_exact_mask, repaired_tail_etree_mask, old_pblock,
+    pblock_out);
   if (old_lu != NULL) {
     (void)TRILINOS_KLU_free(old_lu, old_lusize, sizeof(Unit),
                             &solver->common);

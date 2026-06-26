@@ -541,6 +541,7 @@ typedef struct kls_stats {
   int64_t fast_rejected_pivoting_tail_etree_roots;
   int64_t fast_rejected_pivoting_tail_etree_leaves;
   int64_t fast_rejected_pivoting_tail_etree_max_fanout;
+  int fast_repaired_tail_restart_etree_mask;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

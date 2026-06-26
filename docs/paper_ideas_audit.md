@@ -3297,6 +3297,17 @@ is still scheduler state rather than the full CKTSO tail executor, but it fills
 the paper-level representation gap between a flat suffix/envelope retry and
 Algorithm 5's ETree-descendant ready worklist.
 
+The executable exact-mask repair paths now consume that forest representation
+as a validation gate. Before the serial narrow-tail retry or the threaded
+row-first active-mask repair accepts a retained tail mask, KLS rebuilds the
+ordered-block ETree parent relation, verifies that the mask is exactly the
+retained worklist, and checks that its roots, leaves, edges, and maximum fanout
+match the retained forest counters. If the proof fails, KLS falls back to the
+existing wider repair path rather than treating a generic range mask as a
+CKTSO-style ETree tail. Accepted repairs report
+`fast_repaired_tail_restart_etree_mask` in addition to the older exact-mask
+counter.
+
 The serial suffix tail retry then stopped copying and mutating a private
 `Offp` array. Tail-column construction now supports a discard-only off-block
 mode, which is valid because accepted local repairs rebuild `Offi`/`Offx` from

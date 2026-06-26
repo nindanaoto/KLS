@@ -219,6 +219,10 @@ static int require_tail_overcompute_bounds(const kls_stats *stats,
       stats->fast_kls_rebuild_restarts < 0 ||
       (stats->fast_repaired_tail_restart_exact_mask != 0 &&
        stats->fast_repaired_tail_restart_exact_mask != 1) ||
+      (stats->fast_repaired_tail_restart_etree_mask != 0 &&
+       stats->fast_repaired_tail_restart_etree_mask != 1) ||
+      (stats->fast_repaired_tail_restart_etree_mask &&
+       !stats->fast_repaired_tail_restart_exact_mask) ||
       (stats->fast_repaired_tail_restart_exact_mask &&
        (!stats->fast_repaired_tail_restart_ready ||
         stats->fast_repaired_tail_restart_overcompute_columns != 0)) ||
@@ -229,7 +233,8 @@ static int require_tail_overcompute_bounds(const kls_stats *stats,
     fprintf(stderr,
             "unexpected tail overcompute stats for %s: tail_cols=%" PRId64
             ", over_cols=%" PRId64 ", skipped_cols=%" PRId64
-            ", exact_mask=%d, tail_work=%.6g, over_work=%.6g"
+            ", exact_mask=%d, etree_mask=%d"
+            ", tail_work=%.6g, over_work=%.6g"
             ", skipped_work=%.6g\n",
             what,
             stats != NULL ? stats->fast_repaired_tail_restart_columns : 0,
@@ -240,6 +245,7 @@ static int require_tail_overcompute_bounds(const kls_stats *stats,
               ? stats->fast_repaired_tail_restart_skipped_columns
               : 0,
             stats != NULL ? stats->fast_repaired_tail_restart_exact_mask : 0,
+            stats != NULL ? stats->fast_repaired_tail_restart_etree_mask : 0,
             stats != NULL ? stats->fast_repaired_tail_restart_work : 0.0,
             stats != NULL
               ? stats->fast_repaired_tail_restart_overcompute_work
@@ -891,6 +897,7 @@ static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
                stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 0 ||
                stats.fast_kls_block_restart_last_row_pipeline_threads != 0)) ||
              stats.fast_repaired_tail_restart_exact_mask != 1 ||
+             stats.fast_repaired_tail_restart_etree_mask != 1 ||
              stats.fast_repaired_tail_restart_columns !=
                stats.fast_rejected_pivoting_tail_columns ||
              stats.fast_repaired_tail_restart_overcompute_columns != 0 ||
@@ -905,7 +912,7 @@ static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
             ", pipeline=%d, pipeline_rows=%" PRId64
             ", pipeline_gaps=%" PRId64 ", pipeline_suffix=%" PRId64
             ", pipeline_threads=%" PRId64
-            ", exact_mask=%d, repaired_cols=%" PRId64
+            ", exact_mask=%d, etree_mask=%d, repaired_cols=%" PRId64
             ", over_cols=%" PRId64
             ", offdiag_suffix=%d, offdiag_suffix_count=%" PRId64
             ", offdiag_full_count=%" PRId64
@@ -928,6 +935,7 @@ static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows,
             stats.fast_kls_block_restart_last_row_pipeline_threads,
             stats.fast_repaired_tail_restart_exact_mask,
+            stats.fast_repaired_tail_restart_etree_mask,
             stats.fast_repaired_tail_restart_columns,
             stats.fast_repaired_tail_restart_overcompute_columns,
             stats.fast_repaired_last_offdiag_suffix_refresh,
@@ -1607,6 +1615,7 @@ static int test_nonroot_tail_refreshes_preserved_suffix(void) {
              stats.fast_repaired_tail_restart_ready != 1 ||
              stats.fast_repaired_tail_restart_columns != 2 ||
              stats.fast_repaired_tail_restart_exact_mask != 1 ||
+             stats.fast_repaired_tail_restart_etree_mask != 1 ||
              stats.fast_repaired_tail_restart_skipped_columns != 0 ||
              stats.fast_tail_restarts != 1)) {
     fprintf(stderr,
@@ -1615,7 +1624,7 @@ static int test_nonroot_tail_refreshes_preserved_suffix(void) {
             ", tail=%" PRId64 "/%" PRId64 "/%" PRId64
             ", suffix_exact=%d, suffix_over=%" PRId64
             ", ready=%d, repaired=%" PRId64 ", exact_mask=%d"
-            ", skipped=%" PRId64 ", tail_restarts=%d\n",
+            ", etree_mask=%d, skipped=%" PRId64 ", tail_restarts=%d\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_block_start,
             stats.fast_rejected_block_start + stats.fast_rejected_block_size,
@@ -1628,6 +1637,7 @@ static int test_nonroot_tail_refreshes_preserved_suffix(void) {
             stats.fast_repaired_tail_restart_ready,
             stats.fast_repaired_tail_restart_columns,
             stats.fast_repaired_tail_restart_exact_mask,
+            stats.fast_repaired_tail_restart_etree_mask,
             stats.fast_repaired_tail_restart_skipped_columns,
             stats.fast_tail_restarts);
     ok = 0;
