@@ -3724,6 +3724,205 @@ static int test_unchecked_row_dense_native_direct_input(void) {
   return ok;
 }
 
+static int test_unchecked_row_generic_target_direct_input(void) {
+  const int32_t n = 12;
+  const int32_t nnz = 3 * n - 2;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax0 = (double *)malloc((size_t)nnz * sizeof(*ax0));
+  double *ax1 = (double *)malloc((size_t)nnz * sizeof(*ax1));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
+      b == NULL || x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    if (col > 0) {
+      ai[p] = col - 1;
+      ax0[p] = -0.025 * (1.0 + (double)(col % 3));
+      ax1[p] = ax0[p] - 0.001 * (double)((col % 2) + 1);
+      p++;
+    }
+    ai[p] = col;
+    ax0[p] = 4.0 + 0.03 * (double)col;
+    ax1[p] = ax0[p] + 0.01 * (double)((col % 4) + 1);
+    p++;
+    if (col + 1 < n) {
+      ai[p] = col + 1;
+      ax0[p] = 0.02 * (1.0 + (double)(col % 5));
+      ax1[p] = ax0[p] + 0.0015 * (double)((col % 3) + 1);
+      p++;
+    }
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected generic target direct-input nnz=%d\n", p);
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    expected[col] = 0.25 + 0.05 * (double)((5 * col) % 11);
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
+      b[ai[q]] += ax1[q] * expected[col];
+    }
+  }
+
+  const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
+  const int had_saved_env = saved_env_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.01;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if (had_saved_env && saved_env == NULL) {
+    fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver),
+                  "create generic target direct input")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
+                                        0, &options),
+                        "analyze generic target direct input")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor generic target direct input")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "refactor generic target direct input")) {
+    ok = 0;
+  }
+  if (had_saved_env && saved_env != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_env, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_saved_env) {
+    if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+      perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  }
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats generic target direct input")) {
+    ok = 0;
+  }
+  if (ok && (stats.row_refactor_last_run != 1 ||
+             stats.row_refactor_last_checked != 0 ||
+             stats.row_refactor_last_parallel != 0 ||
+             stats.row_refactor_segment_input_target_rows != n ||
+             stats.row_refactor_segment_input_target_entries != nnz ||
+             stats.row_refactor_last_segment_target_input_rows != n ||
+             stats.row_refactor_segment_target_input_rows < n ||
+             stats.row_refactor_last_dense_segment_direct_input_rows != 0 ||
+             stats.row_refactor_last_sparse_segment_direct_input_rows >=
+               stats.row_refactor_last_segment_target_input_rows ||
+             stats.row_refactor_values_dirty != 1)) {
+    fprintf(stderr,
+            "unexpected generic target direct-input stats: row=%d/%d/%d"
+            ", segments=%" PRId64 ", planned=%" PRId64 "/%" PRId64
+            ", used=%" PRId64 "/%" PRId64
+            ", dense/sparse=%" PRId64 "/%" PRId64 ", dirty=%d\n",
+            stats.row_refactor_last_run,
+            stats.row_refactor_last_checked,
+            stats.row_refactor_last_parallel,
+            stats.row_refactor_segment_count,
+            stats.row_refactor_segment_input_target_rows,
+            stats.row_refactor_segment_input_target_entries,
+            stats.row_refactor_last_segment_target_input_rows,
+            stats.row_refactor_segment_target_input_rows,
+            stats.row_refactor_last_dense_segment_direct_input_rows,
+            stats.row_refactor_last_sparse_segment_direct_input_rows,
+            stats.row_refactor_values_dirty);
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve generic target direct input")) {
+    ok = 0;
+  }
+  double max_solution_error = 0.0;
+  double max_residual = 0.0;
+  double max_rhs = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    const double err = fabs(x[row] - expected[row]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+    double residual = -b[row];
+    if (fabs(b[row]) > max_rhs) {
+      max_rhs = fabs(b[row]);
+    }
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
+        if (ai[q] == row) {
+          residual += ax1[q] * x[col];
+        }
+      }
+    }
+    if (fabs(residual) > max_residual) {
+      max_residual = fabs(residual);
+    }
+  }
+  const double rel_resid = max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 1.0e-8 || rel_resid > 1.0e-10)) {
+    fprintf(stderr,
+            "unexpected generic target direct-input accuracy: max_x_err=%.17g"
+            ", rel_resid=%.17g\n",
+            max_solution_error, rel_resid);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  free(saved_env);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(x);
+  free(expected);
+  return ok;
+}
+
 static int test_unchecked_row_sparse_segment_direct_input(void) {
   const int32_t n = 48;
   const size_t nnz = ((size_t)n * ((size_t)n + 1u)) / 2u + (size_t)n - 1u;
@@ -12508,6 +12707,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_unchecked_row_dense_native_direct_input()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_unchecked_row_generic_target_direct_input()) {
     return EXIT_FAILURE;
   }
   if (!test_unchecked_row_sparse_segment_direct_input()) {

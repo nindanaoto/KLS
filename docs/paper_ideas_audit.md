@@ -4950,3 +4950,17 @@ implementation across the KLS-first row-major executors. The paper gap that
 remains is the larger one already noted above: KLS still needs the full CKTSO
 ETree-descendant pivoting-tail scheduler and a production compact/batched
 row-major numeric storage layer.
+
+The retained row-refactor input-target map now covers the scalar/generic row
+path instead of only dense and sparse segment kernels. Pattern construction
+marks single-row groups whose raw input entries can be represented by the row's
+external dependency work-vector slots, pivot, and retained row-major `U` tail.
+The scalar row executor consumes that map by loading pivots and `U` entries
+directly into row storage, leaving only true predecessor dependencies in the
+work vector, and then combines those direct values with dependency updates
+before the row-wise pivot check and publish. A new smoke fixture uses a
+tridiagonal chain where all rows have retained targets but only a small subset
+uses the sparse-segment direct-input kernel, proving the generic row path uses
+the retained destinations too. This is another storage-path step toward the
+CKTSO/SubtreeLU row-major numeric engine; it still does not replace the larger
+compact/batched engine or CKTSO's ETree-descendant pivoting-tail scheduler.

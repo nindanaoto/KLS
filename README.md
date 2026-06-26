@@ -620,7 +620,11 @@ in-segment `U`, and shared trailing `U` pattern can represent the row exactly.
 The row-pattern builder retains a per-input-entry segment target map for dense
 and sparse segment rows, so repeated refactors write raw values through
 precomputed external, `L`, pivot, and `U` destinations instead of rediscovering
-the slots in the numeric loop. Stats report
+the slots in the numeric loop. The same retained target map now covers
+single-row generic groups as well: dependencies still enter the work vector for
+the existing up-looking update, while the raw pivot and row-major `U` tail load
+directly into retained row storage and are combined with dependency updates at
+publish time. Stats report
 `row_refactor_last_sparse_segment_direct_input_rows`,
 `row_refactor_sparse_segment_direct_input_rows`,
 `row_refactor_last_batch_direct_input_rows`,
