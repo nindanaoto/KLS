@@ -107,6 +107,9 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
       stats->fast_rejected_pivoting_tail_seed_columns <= 0 ||
       stats->fast_rejected_pivoting_tail_seed_columns >
         stats->fast_rejected_pivoting_tail_columns ||
+      stats->fast_rejected_pivoting_tail_row_seed_columns < 0 ||
+      stats->fast_rejected_pivoting_tail_row_seed_columns >
+        stats->fast_rejected_pivoting_tail_seed_columns ||
       stats->fast_rejected_pivoting_tail_first <
         stats->fast_rejected_block_start ||
       stats->fast_rejected_pivoting_tail_first >
@@ -131,7 +134,7 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
     fprintf(stderr,
             "unexpected pivoting tail plan for %s: pivot=%" PRId64
             ", block=[%" PRId64 ",%" PRId64 "), cols=%" PRId64
-            ", seed=%" PRId64
+            ", seed=%" PRId64 ", row_seed=%" PRId64
             ", first=%" PRId64 ", last=%" PRId64
             ", contains=%d, topo=%d, contiguous=%d, suffix_exact=%d"
             ", gaps=%" PRId64 ", suffix_over_cols=%" PRId64
@@ -146,6 +149,9 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
             stats != NULL ? stats->fast_rejected_pivoting_tail_columns : 0,
             stats != NULL
               ? stats->fast_rejected_pivoting_tail_seed_columns
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_row_seed_columns
               : 0,
             stats != NULL ? stats->fast_rejected_pivoting_tail_first : -1,
             stats != NULL ? stats->fast_rejected_pivoting_tail_last : -1,
@@ -989,12 +995,18 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
              stats.fast_block_restarts != 1 ||
              stats.fast_tail_restarts != 1 ||
              stats.fast_rejected_pivoting_tail_columns < 1 ||
+             stats.fast_rejected_pivoting_tail_seed_columns != 2 ||
+             stats.fast_rejected_pivoting_tail_row_seed_columns !=
+               stats.fast_rejected_pivoting_tail_seed_columns ||
+             stats.fast_rejected_pivoting_tail_row_seed_columns !=
+               stats.fast_rejected_row_tail_columns ||
              stats.fast_rejected_pivoting_tail_topological != 1)) {
     fprintf(stderr,
             "unexpected parallel checked-row stats: pivot=%" PRId64
             ", col=%" PRId64 ", row=%" PRId64 ", refresh=%d"
             ", tail_ready=%d, restarts=%d, tail_restarts=%d"
-            ", tail_cols=%" PRId64
+            ", tail_cols=%" PRId64 ", seed=%" PRId64
+            ", row_seed=%" PRId64 ", row_tail=%" PRId64
             ", tail_topo=%d\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_pivot_col,
@@ -1004,6 +1016,9 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
             stats.fast_block_restarts,
             stats.fast_tail_restarts,
             stats.fast_rejected_pivoting_tail_columns,
+            stats.fast_rejected_pivoting_tail_seed_columns,
+            stats.fast_rejected_pivoting_tail_row_seed_columns,
+            stats.fast_rejected_row_tail_columns,
             stats.fast_rejected_pivoting_tail_topological);
     ok = 0;
   }
@@ -1742,6 +1757,7 @@ static int test_btf_checked_row_tail_scope(void) {
             ", pivot=%" PRId64 ", row=%" PRId64
             ", block=[%" PRId64 ",%" PRId64 "), refresh=%d"
             ", row_tail=%" PRId64 ", row_work=%.6g"
+            ", row_seed=%" PRId64
             ", tail_row=%" PRId64 ", tail_count=%" PRId64
             ", tail_pos=%" PRId64 ", tail_ready=%d\n",
             stats.nblocks,
@@ -1752,6 +1768,7 @@ static int test_btf_checked_row_tail_scope(void) {
             stats.fast_rejected_refresh_state,
             stats.fast_rejected_row_tail_columns,
             stats.fast_rejected_row_tail_work,
+            stats.fast_rejected_pivoting_tail_row_seed_columns,
             stats.fast_rejected_tail_candidate_row,
             stats.fast_rejected_tail_candidate_count,
             stats.fast_rejected_tail_candidate_position,

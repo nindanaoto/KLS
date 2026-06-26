@@ -1050,6 +1050,7 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivoting_tail_contains_reject\":%d"
            ",\"fast_rejected_pivoting_tail_topological\":%d"
            ",\"fast_rejected_pivoting_tail_seed_columns\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_row_seed_columns\":%" PRId64
            ",\"fast_rejected_pivoting_tail_contiguous\":%d"
            ",\"fast_rejected_pivoting_tail_suffix_exact\":%d"
            ",\"fast_rejected_pivoting_tail_gap_columns\":%" PRId64
@@ -1077,6 +1078,7 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_contains_reject,
            stats.fast_rejected_pivoting_tail_topological,
            stats.fast_rejected_pivoting_tail_seed_columns,
+           stats.fast_rejected_pivoting_tail_row_seed_columns,
            stats.fast_rejected_pivoting_tail_contiguous,
            stats.fast_rejected_pivoting_tail_suffix_exact,
            stats.fast_rejected_pivoting_tail_gap_columns,
@@ -1752,7 +1754,8 @@ int main(int argc, char **argv) {
            ", etree work %.6g, pivoting tail %" PRId64
            ", pivoting-tail work %.6g, first %" PRId64
            ", last %" PRId64 ", contains reject %d, topological %d"
-           ", seed %" PRId64 ", contiguous %d, suffix exact %d"
+           ", seed %" PRId64 ", row seed %" PRId64
+           ", contiguous %d, suffix exact %d"
            ", gaps %" PRId64 ", suffix overcompute columns %" PRId64
            ", suffix overcompute work %.6g, refresh state %d"
            ", prefix refresh columns %" PRId64
@@ -1776,6 +1779,7 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_contains_reject,
            stats.fast_rejected_pivoting_tail_topological,
            stats.fast_rejected_pivoting_tail_seed_columns,
+           stats.fast_rejected_pivoting_tail_row_seed_columns,
            stats.fast_rejected_pivoting_tail_contiguous,
            stats.fast_rejected_pivoting_tail_suffix_exact,
            stats.fast_rejected_pivoting_tail_gap_columns,

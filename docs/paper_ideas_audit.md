@@ -2278,6 +2278,15 @@ This keeps the CKTSO restart target tied to KLS row storage rather than only
 the KLU-column U-pattern or an ETree upper bound; the remaining missing piece
 is the full CKTSO-style pipelined row/segment tail kernel.
 
+That retained row-tail list is now also an executable seed for the conservative
+pivoting-tail envelope. For prefix-current checked row-major rejects, KLS first
+marks the retained block-local row tail, closes it through the ordered-block
+ETree, and records the seed size as
+`fast_rejected_pivoting_tail_row_seed_columns`. If that row-tail seed is not a
+valid topological plan, KLS falls back to the previous conservative suffix plan.
+This is still not CKTSO's full concurrent pivoting-tail executor, but it moves
+the checked row/segment metadata from diagnostics into the restart planner.
+
 The fallback pivoting block repair now also records the repaired row selected
 at the rejected pivot, whether it matches the retained row-tail candidate, the
 first pivot whose row changed in the repaired block, and how many changed
@@ -3174,12 +3183,14 @@ not the full CKTSO non-contiguous pipelined tail executor, but it is now an
 executable tail-envelope approximation rather than only a diagnostic.
 
 The pivoting-tail plan then stopped treating every prefix-current checked
-reject as a full suffix when the checked worker bitmap can identify unfinished
-nodes. KLS records those unfinished local columns as
-`fast_rejected_pivoting_tail_seed_columns` and closes only that seed set through
-the ordered-block ETree. This is still diagnostic/planning infrastructure, but
-it matches CKTSO's restart-point determination more closely and exposes the
-true non-suffix worklist that a pipelined pivoting-tail executor should consume.
+reject as a full suffix when a narrower restart seed is available. KLS first
+uses the retained row-refactor tail for checked row-major rejects; otherwise,
+when the checked worker bitmap can identify unfinished nodes, it records those
+unfinished local columns as `fast_rejected_pivoting_tail_seed_columns` and
+closes only that seed set through the ordered-block ETree. This is still
+diagnostic/planning infrastructure, but it matches CKTSO's restart-point
+determination more closely and exposes the true non-suffix worklist that a
+pipelined pivoting-tail executor should consume.
 
 The serial suffix tail retry then stopped copying and mutating a private
 `Offp` array. Tail-column construction now supports a discard-only off-block
