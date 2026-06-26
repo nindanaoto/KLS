@@ -1200,6 +1200,10 @@ int main(int argc, char **argv) {
            ",\"row_refactor_compact_supernode_update_count\":%" PRId64
            ",\"row_refactor_compact_supernode_update_rows\":%" PRId64
            ",\"row_refactor_compact_supernode_update_entries\":%" PRId64
+           ",\"row_refactor_last_compact_supernode_partial_update\":%d"
+           ",\"row_refactor_compact_supernode_partial_update_count\":%" PRId64
+           ",\"row_refactor_compact_supernode_partial_update_rows\":%" PRId64
+           ",\"row_refactor_compact_supernode_partial_update_entries\":%" PRId64
            ",\"row_refactor_last_compact_supernode_gemv\":%d"
            ",\"row_refactor_compact_supernode_gemv_count\":%" PRId64
            ",\"row_refactor_compact_supernode_gemv_rows\":%" PRId64
@@ -1290,6 +1294,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_supernode_update_count,
            stats.row_refactor_compact_supernode_update_rows,
            stats.row_refactor_compact_supernode_update_entries,
+           stats.row_refactor_last_compact_supernode_partial_update,
+           stats.row_refactor_compact_supernode_partial_update_count,
+           stats.row_refactor_compact_supernode_partial_update_rows,
+           stats.row_refactor_compact_supernode_partial_update_entries,
            stats.row_refactor_last_compact_supernode_gemv,
            stats.row_refactor_compact_supernode_gemv_count,
            stats.row_refactor_compact_supernode_gemv_rows,
@@ -1712,6 +1720,8 @@ int main(int argc, char **argv) {
            ", native direct input rows: %" PRId64 "/%" PRId64
            ", supernode updates: %d/%" PRId64
            " rows/entries %" PRId64 "/%" PRId64
+           ", partial: %d/%" PRId64
+           " rows/entries %" PRId64 "/%" PRId64
            ", gemv: %d/%" PRId64
            " rows/entries %" PRId64 "/%" PRId64
            ", trsv: %d/%" PRId64
@@ -1744,6 +1754,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_supernode_update_count,
            stats.row_refactor_compact_supernode_update_rows,
            stats.row_refactor_compact_supernode_update_entries,
+           stats.row_refactor_last_compact_supernode_partial_update,
+           stats.row_refactor_compact_supernode_partial_update_count,
+           stats.row_refactor_compact_supernode_partial_update_rows,
+           stats.row_refactor_compact_supernode_partial_update_entries,
            stats.row_refactor_last_compact_supernode_gemv,
            stats.row_refactor_compact_supernode_gemv_count,
            stats.row_refactor_compact_supernode_gemv_rows,

@@ -3836,6 +3836,22 @@ updates over 6,220,352 rows, and `ASIC_100ks` used 23,209 updates over
 the CKTSO pivoting-tail executor, but it moves the current row engine from
 mere compact storage toward actually consuming supernodes in later updates.
 
+The partial supernode pipeline now closes a direct Algorithm 5-style gap in
+that consumer path. Dense and generic producer groups publish the valid prefix
+of their retained compact panel as each row is completed, and the ready-queue
+scheduler can release successor groups at the SubtreeLU split point
+(`width - threads`) instead of waiting for the whole producer group. A consumer
+whose dependency suffix ends at the published prefix consumes the compact
+panel immediately and uses the existing row-done waits for any unfinished tail
+rows it later reaches. New diagnostics report
+`row_refactor_last_compact_supernode_partial_update` and the corresponding
+partial-update count, row, and entry totals. The smoke fixture forces a
+240-row producer with a 2-thread split and requires a 238-row partial compact
+supernode update with a residual-clean solve. This is still not CKTSO's full
+pivoting-tail executor or a production BLAS supernodal numeric object, but it
+fills the specific missing "start consumers from a finished producer prefix"
+semantic instead of treating every compact supernode as all-or-nothing.
+
 The compact supernode consumer now applies the paper's matrix-vector update
 shape for producer trailing panels. For a later row that
 depends on a completed dense producer suffix, KLS still computes and checks the

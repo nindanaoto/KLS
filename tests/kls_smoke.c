@@ -5586,6 +5586,293 @@ static int restore_env_value(const char *name, int had_value,
   return 1;
 }
 
+static int test_partial_compact_supernode_prefix_pipeline(void) {
+  const int32_t a_width = 240;
+  const int32_t a_prefix = 120;
+  const int32_t a_consumer = 32;
+  const int32_t b_width = 8;
+  const int32_t b_prefix = 4;
+  const int32_t b_consumer = 8;
+  const int32_t a_begin = 0;
+  const int32_t a_consumer_begin = a_begin + a_width;
+  const int32_t b_begin = a_consumer_begin + a_consumer;
+  const int32_t b_consumer_begin = b_begin + b_width;
+  const int32_t n = b_consumer_begin + b_consumer;
+  const size_t nnz =
+    (size_t)a_width * (size_t)a_width +
+    (size_t)a_prefix * (size_t)a_consumer +
+    (size_t)a_consumer * (size_t)a_consumer +
+    (size_t)b_width * (size_t)b_width +
+    (size_t)b_prefix * (size_t)b_consumer +
+    (size_t)b_consumer * (size_t)b_consumer;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
+  double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
+  double *ax1 = (double *)malloc(nnz * sizeof(*ax1));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
+      b == NULL || x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  for (int32_t col = 0; col < n; ++col) {
+    expected[col] = 0.625 + 0.03125 * (double)((7 * col) % 23);
+  }
+
+  size_t pos = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = (int32_t)pos;
+    if (col < a_begin + a_width) {
+      for (int32_t row = a_begin; row < a_begin + a_width; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 30.0 + 0.003 * (double)col
+          : 0.00012 * (1.0 + (double)((row + 7 * col) % 29));
+        ax1[p] = ax0[p] + (row == col
+          ? 0.02 * (double)((col % 5) + 1)
+          : 1.0e-6 * (double)(((row + col) % 7) - 3));
+      }
+      if (col < a_begin + a_prefix) {
+        for (int32_t row = a_consumer_begin;
+             row < a_consumer_begin + a_consumer; ++row) {
+          const size_t p = pos++;
+          ai[p] = row;
+          ax0[p] = 0.00009 * (1.0 + (double)((row + 3 * col) % 23));
+          ax1[p] = ax0[p] +
+            1.0e-6 * (double)(((row + 2 * col) % 5) - 2);
+        }
+      }
+    } else if (col < a_consumer_begin + a_consumer) {
+      for (int32_t row = a_consumer_begin;
+           row < a_consumer_begin + a_consumer; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 24.0 + 0.004 * (double)col
+          : 0.0001 * (1.0 + (double)((row + 5 * col) % 17));
+        ax1[p] = ax0[p] + (row == col
+          ? 0.015 * (double)((col % 3) + 1)
+          : 1.0e-6 * (double)(((row + col) % 5) - 2));
+      }
+    } else if (col < b_begin + b_width) {
+      for (int32_t row = b_begin; row < b_begin + b_width; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 22.0 + 0.01 * (double)col
+          : 0.0002 * (1.0 + (double)((row + 7 * col) % 11));
+        ax1[p] = ax0[p] + (row == col ? 0.01 : 1.0e-6);
+      }
+      if (col < b_begin + b_prefix) {
+        for (int32_t row = b_consumer_begin;
+             row < b_consumer_begin + b_consumer; ++row) {
+          const size_t p = pos++;
+          ai[p] = row;
+          ax0[p] = 0.00015 * (1.0 + (double)((row + 3 * col) % 13));
+          ax1[p] = ax0[p] + 1.0e-6;
+        }
+      }
+    } else {
+      for (int32_t row = b_consumer_begin;
+           row < b_consumer_begin + b_consumer; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 20.0 + 0.005 * (double)col
+          : 0.00012 * (1.0 + (double)((row + 5 * col) % 7));
+        ax1[p] = ax0[p] + (row == col ? 0.01 : 1.0e-6);
+      }
+    }
+  }
+  ap[n] = (int32_t)pos;
+  if (pos != nnz) {
+    fprintf(stderr, "unexpected partial-prefix fixture nnz: %zu/%zu\n",
+            pos, nnz);
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_row = saved_row_value != NULL;
+  const char *saved_partial_value =
+    getenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
+  char *saved_partial = saved_partial_value != NULL
+    ? strdup(saved_partial_value) : NULL;
+  const int had_partial = saved_partial_value != NULL;
+  const char *saved_checked_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked = saved_checked_value != NULL
+    ? strdup(saved_checked_value) : NULL;
+  const int had_checked = saved_checked_value != NULL;
+  const char *saved_trsv_value = getenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
+  char *saved_trsv = saved_trsv_value != NULL ? strdup(saved_trsv_value) : NULL;
+  const int had_trsv = saved_trsv_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 2;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if ((had_row && saved_row == NULL) ||
+      (had_partial && saved_partial == NULL) ||
+      (had_checked && saved_checked == NULL) ||
+      (had_trsv && saved_trsv == NULL)) {
+    fprintf(stderr, "failed to save partial-prefix env\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create partial-prefix")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze partial-prefix")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor partial-prefix base")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=0");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "refactor partial-prefix")) ok = 0;
+
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE",
+                         had_partial, saved_partial)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_checked, saved_checked)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_COMPACT_SUPERNODE_TRSV",
+                         had_trsv, saved_trsv)) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve partial-prefix")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats partial-prefix")) {
+    ok = 0;
+  }
+  const int64_t expected_partial_rows =
+    (int64_t)(a_width - options.threads);
+  if (ok && (stats.row_refactor_last_parallel != 1 ||
+             stats.row_refactor_last_partial_supernode_pipeline != 1 ||
+             stats.row_refactor_last_done_bitmap != 1 ||
+             stats.row_refactor_last_compact_dense_panel != 1 ||
+             stats.row_refactor_last_compact_supernode_update != 1 ||
+             stats.row_refactor_last_compact_supernode_partial_update != 1 ||
+             stats.row_refactor_compact_supernode_partial_update_count < 1 ||
+             stats.row_refactor_compact_supernode_partial_update_rows <
+               expected_partial_rows ||
+             stats.row_refactor_compact_supernode_update_rows <
+               stats.row_refactor_compact_supernode_partial_update_rows)) {
+    fprintf(stderr,
+            "unexpected partial-prefix stats: parallel=%d partial=%d done=%d"
+            ", compact=%d, update=%d/%" PRId64
+            ", partial_update=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
+            stats.row_refactor_last_parallel,
+            stats.row_refactor_last_partial_supernode_pipeline,
+            stats.row_refactor_last_done_bitmap,
+            stats.row_refactor_last_compact_dense_panel,
+            stats.row_refactor_last_compact_supernode_update,
+            stats.row_refactor_compact_supernode_update_rows,
+            stats.row_refactor_last_compact_supernode_partial_update,
+            stats.row_refactor_compact_supernode_partial_update_count,
+            stats.row_refactor_compact_supernode_partial_update_rows,
+            stats.row_refactor_compact_supernode_partial_update_entries);
+    ok = 0;
+  }
+
+  double max_solution_error = 0.0;
+  double max_residual = 0.0;
+  double max_rhs = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    const double err = fabs(x[row] - expected[row]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+    double residual = -b[row];
+    if (fabs(b[row]) > max_rhs) {
+      max_rhs = fabs(b[row]);
+    }
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        if (ai[p] == row) {
+          residual += ax1[p] * x[col];
+        }
+      }
+    }
+    if (fabs(residual) > max_residual) {
+      max_residual = fabs(residual);
+    }
+  }
+  const double rel_resid = max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 1.0e-8 || rel_resid > 1.0e-10)) {
+    fprintf(stderr,
+            "unexpected partial-prefix accuracy: max_x_err=%.17g"
+            ", rel_resid=%.17g\n",
+            max_solution_error, rel_resid);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  free(saved_row);
+  free(saved_partial);
+  free(saved_checked);
+  free(saved_trsv);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(x);
+  free(expected);
+  return ok;
+}
+
 static int test_row_refactor_off_blocks_auto_kls_first_refactor(void) {
   const int32_t ap[] = {0, 2, 4, 5};
   const int32_t ai[] = {0, 1, 0, 1, 2};
@@ -6805,6 +7092,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_unchecked_row_dense_native_direct_input()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_partial_compact_supernode_prefix_pipeline()) {
     return EXIT_FAILURE;
   }
   if (!test_batched_compact_supernode_cblas_probe()) {

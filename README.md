@@ -471,7 +471,16 @@ have a contiguous suffix of dependencies on that completed dense group; stats re
 `row_refactor_last_compact_supernode_update`,
 `row_refactor_compact_supernode_update_count`,
 `row_refactor_compact_supernode_update_rows`, and
-`row_refactor_compact_supernode_update_entries`. When the producer supernode
+`row_refactor_compact_supernode_update_entries`. The partial supernode pipeline
+now also publishes compact producer-panel prefixes row by row and lets the
+ready-queue scheduler release successor groups at the paper's split point
+(`width - threads`). A consumer with a contiguous dependency suffix ending at
+that valid prefix can apply the compact supernode update immediately and wait
+only on any unfinished producer tail it still touches; stats report
+`row_refactor_last_compact_supernode_partial_update`,
+`row_refactor_compact_supernode_partial_update_count`,
+`row_refactor_compact_supernode_partial_update_rows`, and
+`row_refactor_compact_supernode_partial_update_entries`. When the producer supernode
 has a shared trailing panel, KLS now accumulates that contribution in contiguous
 worker scratch and scatters it once, matching the matrix-vector update half of
 the triangular-solve plus update shape described in the SubtreeLU paper without
