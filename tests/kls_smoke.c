@@ -3150,12 +3150,17 @@ static int test_unchecked_row_dense_native_direct_input(void) {
              stats.row_refactor_compact_dense_panel_count != 0 ||
              stats.row_refactor_last_dense_segment_direct_input_rows != n ||
              stats.row_refactor_dense_segment_direct_input_rows < n ||
+             stats.row_refactor_segment_input_target_rows != n ||
+             stats.row_refactor_segment_input_target_entries <= 0 ||
+             stats.row_refactor_last_segment_target_input_rows != n ||
+             stats.row_refactor_segment_target_input_rows < n ||
              stats.row_refactor_values_dirty != 1 ||
              stats.row_refactor_last_lazy_value_scatter != 1)) {
     fprintf(stderr,
             "unexpected dense native direct-input stats: row=%d/%d/%d"
             ", dense_segments=%" PRId64 ", compact=%d/%" PRId64
             ", direct=%" PRId64 "/%" PRId64
+            ", target=%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
             ", dirty/lazy=%d/%d\n",
             stats.row_refactor_last_run,
             stats.row_refactor_last_checked,
@@ -3165,6 +3170,10 @@ static int test_unchecked_row_dense_native_direct_input(void) {
             stats.row_refactor_compact_dense_panel_count,
             stats.row_refactor_last_dense_segment_direct_input_rows,
             stats.row_refactor_dense_segment_direct_input_rows,
+            stats.row_refactor_segment_input_target_rows,
+            stats.row_refactor_segment_input_target_entries,
+            stats.row_refactor_last_segment_target_input_rows,
+            stats.row_refactor_segment_target_input_rows,
             stats.row_refactor_values_dirty,
             stats.row_refactor_last_lazy_value_scatter);
     ok = 0;
@@ -3347,10 +3356,10 @@ static int test_unchecked_row_sparse_segment_direct_input(void) {
              stats.row_refactor_dense_segment_count != 0 ||
              stats.row_refactor_last_sparse_segment_direct_input_rows != n ||
              stats.row_refactor_sparse_segment_direct_input_rows < n ||
-             stats.row_refactor_sparse_segment_input_target_rows != n ||
-             stats.row_refactor_sparse_segment_input_target_entries <= 0 ||
-             stats.row_refactor_last_sparse_segment_target_input_rows != n ||
-             stats.row_refactor_sparse_segment_target_input_rows < n ||
+             stats.row_refactor_segment_input_target_rows != n ||
+             stats.row_refactor_segment_input_target_entries <= 0 ||
+             stats.row_refactor_last_segment_target_input_rows != n ||
+             stats.row_refactor_segment_target_input_rows < n ||
              stats.row_refactor_values_dirty != 1 ||
              stats.row_refactor_last_lazy_value_scatter != 1)) {
     fprintf(stderr,
@@ -3366,10 +3375,10 @@ static int test_unchecked_row_sparse_segment_direct_input(void) {
             stats.row_refactor_dense_segment_count,
             stats.row_refactor_last_sparse_segment_direct_input_rows,
             stats.row_refactor_sparse_segment_direct_input_rows,
-            stats.row_refactor_sparse_segment_input_target_rows,
-            stats.row_refactor_sparse_segment_input_target_entries,
-            stats.row_refactor_last_sparse_segment_target_input_rows,
-            stats.row_refactor_sparse_segment_target_input_rows,
+            stats.row_refactor_segment_input_target_rows,
+            stats.row_refactor_segment_input_target_entries,
+            stats.row_refactor_last_segment_target_input_rows,
+            stats.row_refactor_segment_target_input_rows,
             stats.row_refactor_values_dirty,
             stats.row_refactor_last_lazy_value_scatter);
     ok = 0;

@@ -562,19 +562,19 @@ blocked row-major numeric layout rather than simply wrapping the current
 compact group in BLAS calls. Checked pivot-probe row refactors use
 the same compact panel only through a row-ordered update/check/publish loop, so
 a rejected pivot leaves the same prefix-visible row-major state as the native
-direct row-mirror kernel. Generic sparse row segments now also direct-load raw
-input entries into the retained row-major segment mirrors when the sparse `L`
-row, pivot, in-segment `U`, and shared trailing `U` pattern can represent the
-row exactly. The row-pattern builder also retains a per-input-entry segment
-target map for those rows, so repeated refactors write raw values through
+direct row-mirror kernel. Row segments now also direct-load raw input entries
+into the retained row-major segment mirrors when the `L` row, pivot,
+in-segment `U`, and shared trailing `U` pattern can represent the row exactly.
+The row-pattern builder retains a per-input-entry segment target map for dense
+and sparse segment rows, so repeated refactors write raw values through
 precomputed external, `L`, pivot, and `U` destinations instead of rediscovering
 the slots in the numeric loop. Stats report
 `row_refactor_last_sparse_segment_direct_input_rows`,
 `row_refactor_sparse_segment_direct_input_rows`,
-`row_refactor_sparse_segment_input_target_rows`,
-`row_refactor_sparse_segment_input_target_entries`,
-`row_refactor_last_sparse_segment_target_input_rows`, and
-`row_refactor_sparse_segment_target_input_rows`. For generic-only row patterns,
+`row_refactor_segment_input_target_rows`,
+`row_refactor_segment_input_target_entries`,
+`row_refactor_last_segment_target_input_rows`, and
+`row_refactor_segment_target_input_rows`. For generic-only row patterns,
 pipeline groups also
 retain their external dependency rows so the scheduler can wait on them once
 before running the group kernel; stats report

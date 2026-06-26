@@ -62,14 +62,15 @@ analysis also records when input columns are already structurally covered by
 `L`, the pivot, or `U`, allowing row kernels to skip redundant residual cleanup
 loops. Dense row segments now keep deferred all-value scatter only for checked
 pivot probes, while unchecked row refactors scatter completed dense rows
-directly. Sparse row segments now retain per-input-entry target maps for rows
-whose raw values can be placed exactly into external work-vector slots, sparse
-`L` row mirrors, the pivot, or in-segment/trailing `U` row mirrors; the direct
-loader consumes those maps on repeated refactors instead of rediscovering the
-segment slots. The row ready queue now also orders initially ready tail groups
-and newly released successor groups by the retained FLOP-style group work
-estimate, which moves the row scheduler closer to SubtreeLU's workload-balanced
-queue generation. Checked row fast-factor rejects now also report a
+directly. Dense and sparse row segments now retain per-input-entry target maps
+for rows whose raw values can be placed exactly into external work-vector
+slots, row-major `L` mirrors, the pivot, or in-segment/trailing `U` mirrors;
+the direct loaders consume those maps on repeated refactors instead of
+rediscovering the segment slots. The row ready queue now also orders initially
+ready tail groups and newly released successor groups by the retained
+FLOP-style group work estimate, which moves the row scheduler closer to
+SubtreeLU's workload-balanced queue generation. Checked row fast-factor rejects
+now also report a
 conservative group-tail restart scope from the retained row-group successor
 graph, giving future CKTSO-style pivoting tail work an explicit row/segment
 task-tail measurement. Checked KLS-owned row fast-factor/refactor passes also
@@ -4601,19 +4602,19 @@ placed in `Udiag`, and in-segment/trailing `U` entries are placed in the row
 mirror before numeric updates. Checked runs compute the CKTSO-style row pivot
 test from the direct-loaded U entries plus residual updates, so this is a
 storage/algorithm bridge rather than a pivot-policy shortcut. That path now
-also keeps a retained per-input-entry target map for supported sparse segment
-rows. The symbolic row-pattern builder classifies each raw input entry once as
-an external work-vector value, sparse `L` row slot, pivot, or in-segment/shared
-trailing `U` row slot; repeated refactors then direct-load through those
-retained destinations instead of searching the segment structures inside the
-numeric loop. The smoke case uses a full upper shared U segment with only
-sparse subdiagonal L dependencies and now requires both
-`row_refactor_last_sparse_segment_direct_input_rows` and
-`row_refactor_last_sparse_segment_target_input_rows` to cover the whole
-segment. This narrows the SubtreeLU/CKTSO row-major storage gap for generic
-segments, but it still leaves the larger paper work item open: a production
-compact/batched row-major numeric engine and CKTSO's pipelined pivoting-tail
-executor.
+also keeps a retained per-input-entry target map for supported dense and sparse
+segment rows. The symbolic row-pattern builder classifies each raw input entry
+once as an external work-vector value, row-major `L` slot, pivot, or
+in-segment/shared trailing `U` slot; repeated refactors then direct-load
+through those retained destinations instead of searching the segment structures
+inside the numeric loop. The dense direct-input smoke case now requires target
+loading over the dense segment, and the generic sparse smoke case uses a full
+upper shared U segment with only sparse subdiagonal L dependencies and requires
+both `row_refactor_last_sparse_segment_direct_input_rows` and
+`row_refactor_last_segment_target_input_rows` to cover the whole segment. This
+narrows the SubtreeLU/CKTSO row-major storage gap for generic segments, but it
+still leaves the larger paper work item open: a production compact/batched
+row-major numeric engine and CKTSO's pipelined pivoting-tail executor.
 
 The retained SubtreeLU Algorithm 6 queue splitter then gained the missing
 private-leaf guard. A focused checked METIS grid exposed that the earlier
