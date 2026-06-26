@@ -371,10 +371,10 @@ new KLS-owned symbolic/numeric machinery:
   pipeline row queue when that map covers the block, remaps the block-local
   row/column order and `Pnum` to that queue, runs validated private rows
   concurrently, consumes pipeline rows with an Algorithm 3 atomic counter, and
-  pre-updates pipeline rows from already-published private predecessors before
-  the ordered publish step. KLS still lacks Algorithm 4's full unfinished-
-  pipeline-predecessor/supernode partial update and a checked-tail
-  factor/refactor queue consumer.
+  pre-updates pipeline rows from already-published private predecessors and
+  earlier published pipeline-prefix predecessors before the ordered publish
+  step. KLS still lacks Algorithm 4's full supernode/skipped-predecessor
+  partial update and a checked-tail factor/refactor queue consumer.
 - Broader supernodal row/segment updates in the sparse up-looking executor.
   KLS has exact-pattern, ragged single-producer, and opt-in fragmented
   multi-producer dense-panel updates, but these are still narrower than
@@ -3796,12 +3796,13 @@ private-then-pipeline queue before numeric assembly; this fixes the earlier
 unsafe version that tried to execute queue order over the old KLU numeric row
 indices. KLS then merges private entries and consumes the pipeline rows with an
 Algorithm 3-style atomic task counter. Each pipeline worker now keeps local
-scratch and applies all ready private-row predecessors against an immutable
-private-U snapshot before waiting for its ordered publish slot. The publish
-step still rejects dynamic column exchanges in pipeline mode and waits for
-previous pipeline rows before applying pipeline predecessors, so the remaining
-Algorithm 4 gap is the paper's unfinished-pipeline-predecessor/supernode
-partial update. Benchmark stats expose the last planned queue through
+scratch, applies all ready private-row predecessors against an immutable
+private-U snapshot before waiting for its ordered publish slot, and can consume
+already-published earlier pipeline-prefix rows while waiting for intervening
+pipeline rows that it does not depend on. The publish step still rejects dynamic
+column exchanges in pipeline mode, and KLS has not yet implemented the paper's
+supernode-based skipped-predecessor update. Benchmark stats expose the last
+planned queue through
 `kls_first_last_separator_queue`,
 `kls_first_last_separator_queue_private_components`,
 `kls_first_last_separator_queue_pipeline_components`,
@@ -3826,13 +3827,18 @@ pipeline pre-updates are reported by
 `kls_first_last_separator_queue_pipeline_partial`,
 `kls_first_separator_queue_pipeline_partial_run_count`,
 `kls_first_last_separator_queue_pipeline_partial_rows`, and
-`kls_first_last_separator_queue_pipeline_partial_threads`. A smoke test covers
-this on a 30,000-row METIS-ordered tridiagonal KLS-first factor, requires more
-than one private worker thread, verifies that all planned pipeline rows are
-consumed by the guarded pipeline executor, and verifies that the partial
-pre-update path touches all pipeline rows. This closes Algorithm 3's queue
-shape and adds the first race-free Algorithm 4 partial-update step for
-dependency-safe retained separator queues.
+`kls_first_last_separator_queue_pipeline_partial_threads`; waiting-prefix
+pipeline pre-updates are reported by
+`kls_first_last_separator_queue_pipeline_wait_partial`,
+`kls_first_separator_queue_pipeline_wait_partial_run_count`,
+`kls_first_last_separator_queue_pipeline_wait_partial_rows`, and
+`kls_first_last_separator_queue_pipeline_wait_partial_deps`. A smoke test
+covers this on a 30,000-row METIS-ordered tridiagonal KLS-first factor,
+requires more than one private worker thread, verifies that all planned
+pipeline rows are consumed by the guarded pipeline executor, and verifies that
+the private-predecessor partial pre-update path touches all pipeline rows. This
+closes Algorithm 3's queue shape and adds race-free Algorithm 4 partial-update
+steps for dependency-safe retained separator queues.
 
 The KLS-first row up-looking dynamic column pivot selector also now consumes
 the retained separator map when it is available for the full factor order. On a

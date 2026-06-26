@@ -488,6 +488,10 @@ struct kls_solver {
   UF_long kls_first_separator_queue_pipeline_partial_run_count;
   UF_long kls_first_last_separator_queue_pipeline_partial_rows;
   UF_long kls_first_last_separator_queue_pipeline_partial_threads;
+  int kls_first_last_separator_queue_pipeline_wait_partial;
+  UF_long kls_first_separator_queue_pipeline_wait_partial_run_count;
+  UF_long kls_first_last_separator_queue_pipeline_wait_partial_rows;
+  UF_long kls_first_last_separator_queue_pipeline_wait_partial_deps;
   int kls_first_auto_skipped_scaled_single_block;
   UF_long kls_first_auto_skipped_scaled_single_block_count;
   int factor_etree_stats_valid;
@@ -2301,6 +2305,9 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_separator_queue_pipeline_partial = 0;
   solver->kls_first_last_separator_queue_pipeline_partial_rows = 0;
   solver->kls_first_last_separator_queue_pipeline_partial_threads = 0;
+  solver->kls_first_last_separator_queue_pipeline_wait_partial = 0;
+  solver->kls_first_last_separator_queue_pipeline_wait_partial_rows = 0;
+  solver->kls_first_last_separator_queue_pipeline_wait_partial_deps = 0;
   solver->kls_first_auto_skipped_scaled_single_block = 0;
   solver->stats.kls_tail_last_mapped_columns = 0;
   solver->stats.kls_first_last_row_uplooking_columns = 0;
@@ -2330,6 +2337,9 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_first_last_separator_queue_pipeline_partial = 0;
   solver->stats.kls_first_last_separator_queue_pipeline_partial_rows = 0;
   solver->stats.kls_first_last_separator_queue_pipeline_partial_threads = 0;
+  solver->stats.kls_first_last_separator_queue_pipeline_wait_partial = 0;
+  solver->stats.kls_first_last_separator_queue_pipeline_wait_partial_rows = 0;
+  solver->stats.kls_first_last_separator_queue_pipeline_wait_partial_deps = 0;
   solver->stats.kls_first_auto_skipped_scaled_single_block = 0;
 }
 
@@ -10616,6 +10626,15 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->kls_first_last_separator_queue_pipeline_partial_rows;
   solver->stats.kls_first_last_separator_queue_pipeline_partial_threads =
     (int64_t)solver->kls_first_last_separator_queue_pipeline_partial_threads;
+  solver->stats.kls_first_last_separator_queue_pipeline_wait_partial =
+    solver->kls_first_last_separator_queue_pipeline_wait_partial;
+  solver->stats.kls_first_separator_queue_pipeline_wait_partial_run_count =
+    (int64_t)
+      solver->kls_first_separator_queue_pipeline_wait_partial_run_count;
+  solver->stats.kls_first_last_separator_queue_pipeline_wait_partial_rows =
+    (int64_t)solver->kls_first_last_separator_queue_pipeline_wait_partial_rows;
+  solver->stats.kls_first_last_separator_queue_pipeline_wait_partial_deps =
+    (int64_t)solver->kls_first_last_separator_queue_pipeline_wait_partial_deps;
   solver->stats.kls_first_auto_skipped_scaled_single_block =
     solver->kls_first_auto_skipped_scaled_single_block;
   solver->stats.kls_first_auto_skipped_scaled_single_block_count =
@@ -36244,8 +36263,7 @@ static int kls_row_first_partial_apply_ready(
   const UF_long *u_row_ptr,
   const UF_long *u_row_end,
   const unsigned char *row_done,
-  UF_long pipeline_begin,
-  int allow_pipeline_dependencies,
+  UF_long ready_limit,
   kls_row_first_partial_row *state,
   int *blocked_out) {
   if (blocked_out != NULL) {
@@ -36267,20 +36285,17 @@ static int kls_row_first_partial_apply_ready(
   const UF_long i = state->row;
   while (state->dep_heap_size > 0u) {
     const UF_long peek = dep_heap[0];
-    if (peek >= pipeline_begin && !allow_pipeline_dependencies) {
+    if (peek >= ready_limit) {
       if (blocked_out != NULL) {
         *blocked_out = 1;
       }
       return 1;
     }
     if (row_done[peek] == 0u) {
-      if (!allow_pipeline_dependencies) {
-        if (blocked_out != NULL) {
-          *blocked_out = 1;
-        }
-        return 1;
+      if (blocked_out != NULL) {
+        *blocked_out = 1;
       }
-      return 0;
+      return 1;
     }
     const UF_long dep =
       kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
@@ -36391,6 +36406,8 @@ typedef struct kls_row_first_pipeline_worker {
   kls_row_first_entries u_entries;
   UF_long rows;
   UF_long partial_rows;
+  UF_long pipeline_wait_partial_rows;
+  UF_long pipeline_wait_partial_deps;
 } kls_row_first_pipeline_worker;
 
 static void kls_row_first_pipeline_worker_free(
@@ -36457,7 +36474,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
           shared->ctx, &worker->workspace, &worker->l_entries,
           shared->private_u_entries, shared->udiag_values,
           shared->private_u_row_ptr, shared->private_u_row_end,
-          shared->row_done, shared->begin, 0, &state, &blocked)) {
+          shared->row_done, shared->begin, &state, &blocked)) {
       kls_row_first_partial_row_clear(&state, &worker->workspace);
       pthread_mutex_lock(&shared->lock);
       shared->failed = 1;
@@ -36468,12 +36485,33 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
     worker->partial_rows++;
 
     pthread_mutex_lock(&shared->lock);
+    int wait_partial = 0;
     while (!shared->failed && shared->completed_pos != pos) {
+      const UF_long before_l_count = worker->l_entries.count;
+      if (!kls_row_first_partial_apply_ready(
+            shared->ctx, &worker->workspace, &worker->l_entries,
+            shared->u_entries, shared->udiag_values,
+            shared->workspace->u_row_ptr,
+            shared->workspace->u_row_end, shared->row_done,
+            shared->completed_pos, &state, NULL)) {
+        shared->failed = 1;
+        pthread_cond_broadcast(&shared->cond);
+        break;
+      }
+      if (worker->l_entries.count > before_l_count) {
+        wait_partial = 1;
+        worker->pipeline_wait_partial_deps +=
+          worker->l_entries.count - before_l_count;
+        continue;
+      }
       if (pthread_cond_wait(&shared->cond, &shared->lock) != 0) {
         shared->failed = 1;
         pthread_cond_broadcast(&shared->cond);
         break;
       }
+    }
+    if (wait_partial) {
+      worker->pipeline_wait_partial_rows++;
     }
     if (!shared->failed) {
       blocked = 0;
@@ -36482,7 +36520,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
             shared->u_entries, shared->udiag_values,
             shared->workspace->u_row_ptr,
             shared->workspace->u_row_end, shared->row_done,
-            shared->begin, 1, &state, &blocked) ||
+            shared->ctx->nk, &state, &blocked) ||
           blocked ||
           !kls_row_first_partial_finish_no_pivot(
             shared->ctx, &worker->workspace, &worker->u_entries,
@@ -36529,7 +36567,9 @@ static int kls_row_first_run_parallel_pipeline_phase(
   kls_row_first_row_stats *stats,
   UF_long *pipeline_rows_out,
   UF_long *thread_rows_out,
-  UF_long *partial_rows_out) {
+  UF_long *partial_rows_out,
+  UF_long *wait_partial_rows_out,
+  UF_long *wait_partial_deps_out) {
   if (ctx == NULL || row_order == NULL || begin >= end ||
       thread_count <= 1 || workspace == NULL || l_entries == NULL ||
       u_entries == NULL || udiag_values == NULL || row_done == NULL) {
@@ -36631,10 +36671,14 @@ static int kls_row_first_run_parallel_pipeline_phase(
 
   UF_long processed_rows = 0;
   UF_long partial_rows = 0;
+  UF_long wait_partial_rows = 0;
+  UF_long wait_partial_deps = 0;
   UF_long active_threads = 0;
   for (int tid = 0; tid < created; ++tid) {
     processed_rows += workers[tid].rows;
     partial_rows += workers[tid].partial_rows;
+    wait_partial_rows += workers[tid].pipeline_wait_partial_rows;
+    wait_partial_deps += workers[tid].pipeline_wait_partial_deps;
     if (workers[tid].rows > 0u) {
       active_threads++;
     }
@@ -36649,6 +36693,12 @@ static int kls_row_first_run_parallel_pipeline_phase(
   }
   if (ok && partial_rows_out != NULL) {
     *partial_rows_out = partial_rows;
+  }
+  if (ok && wait_partial_rows_out != NULL) {
+    *wait_partial_rows_out = wait_partial_rows;
+  }
+  if (ok && wait_partial_deps_out != NULL) {
+    *wait_partial_deps_out = wait_partial_deps;
   }
 
   pthread_cond_destroy(&shared.cond);
@@ -38057,6 +38107,9 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
   int separator_queue_pipeline_partial = 0;
   UF_long separator_queue_pipeline_partial_rows = 0;
   UF_long separator_queue_pipeline_partial_threads = 0;
+  int separator_queue_pipeline_wait_partial = 0;
+  UF_long separator_queue_pipeline_wait_partial_rows = 0;
+  UF_long separator_queue_pipeline_wait_partial_deps = 0;
 
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
     const UF_long k1 = solver->symbolic->R[block];
@@ -38157,6 +38210,8 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
     UF_long block_parallel_pipeline_rows = 0;
     UF_long block_parallel_pipeline_threads = 0;
     UF_long block_pipeline_partial_rows = 0;
+    UF_long block_pipeline_wait_partial_rows = 0;
+    UF_long block_pipeline_wait_partial_deps = 0;
     UF_long block_separator_private_rows = 0;
     UF_long block_separator_pipeline_rows = 0;
     kls_first_separator_queue_plan separator_plan;
@@ -38431,7 +38486,9 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
               &u_entries, udiag_values, row_done, &row_stats,
               &block_parallel_pipeline_rows,
               &block_parallel_pipeline_threads,
-              &block_pipeline_partial_rows)) {
+              &block_pipeline_partial_rows,
+              &block_pipeline_wait_partial_rows,
+              &block_pipeline_wait_partial_deps)) {
           goto fail_block_entries;
         }
         parallel_pipeline_executed = 1;
@@ -38484,6 +38541,13 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
           separator_queue_pipeline_partial_threads =
             block_parallel_pipeline_threads;
         }
+      }
+      if (block_pipeline_wait_partial_rows > 0u) {
+        separator_queue_pipeline_wait_partial = 1;
+        separator_queue_pipeline_wait_partial_rows +=
+          block_pipeline_wait_partial_rows;
+        separator_queue_pipeline_wait_partial_deps +=
+          block_pipeline_wait_partial_deps;
       }
     }
     if (!kls_pack_row_first_block_numeric(
@@ -38606,6 +38670,14 @@ fail_block_entries:
       separator_queue_pipeline_partial_rows;
     solver->kls_first_last_separator_queue_pipeline_partial_threads =
       separator_queue_pipeline_partial_threads;
+  }
+  if (separator_queue_pipeline_wait_partial) {
+    solver->kls_first_last_separator_queue_pipeline_wait_partial = 1;
+    solver->kls_first_separator_queue_pipeline_wait_partial_run_count++;
+    solver->kls_first_last_separator_queue_pipeline_wait_partial_rows =
+      separator_queue_pipeline_wait_partial_rows;
+    solver->kls_first_last_separator_queue_pipeline_wait_partial_deps =
+      separator_queue_pipeline_wait_partial_deps;
   }
   free(row_counts);
   free(row_ptr);
