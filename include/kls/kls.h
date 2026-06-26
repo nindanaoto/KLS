@@ -534,6 +534,8 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_dense_panel_blocked_run_count;
   int64_t row_refactor_compact_dense_panel_blocked_rows;
   int64_t row_refactor_compact_dense_panel_blocked_entries;
+  double kls_first_last_separator_queue_min_thread_work;
+  double kls_first_last_separator_queue_max_thread_work;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

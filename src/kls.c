@@ -562,6 +562,8 @@ struct kls_solver {
   UF_long kls_first_last_separator_queue_pipeline_rows;
   UF_long kls_first_last_separator_queue_nonempty_threads;
   UF_long kls_first_last_separator_queue_max_thread_rows;
+  double kls_first_last_separator_queue_min_thread_work;
+  double kls_first_last_separator_queue_max_thread_work;
   int kls_first_last_separator_queue_executed;
   UF_long kls_first_separator_queue_executed_run_count;
   UF_long kls_first_last_separator_queue_executed_private_rows;
@@ -2731,6 +2733,8 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_separator_queue_pipeline_rows = 0;
   solver->kls_first_last_separator_queue_nonempty_threads = 0;
   solver->kls_first_last_separator_queue_max_thread_rows = 0;
+  solver->kls_first_last_separator_queue_min_thread_work = 0.0;
+  solver->kls_first_last_separator_queue_max_thread_work = 0.0;
   solver->kls_first_last_separator_queue_executed = 0;
   solver->kls_first_last_separator_queue_executed_private_rows = 0;
   solver->kls_first_last_separator_queue_executed_pipeline_rows = 0;
@@ -2796,6 +2800,8 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_first_last_separator_queue_pipeline_rows = 0;
   solver->stats.kls_first_last_separator_queue_nonempty_threads = 0;
   solver->stats.kls_first_last_separator_queue_max_thread_rows = 0;
+  solver->stats.kls_first_last_separator_queue_min_thread_work = 0.0;
+  solver->stats.kls_first_last_separator_queue_max_thread_work = 0.0;
   solver->stats.kls_first_last_separator_queue_executed = 0;
   solver->stats.kls_first_last_separator_queue_executed_private_rows = 0;
   solver->stats.kls_first_last_separator_queue_executed_pipeline_rows = 0;
@@ -11438,6 +11444,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->kls_first_last_separator_queue_nonempty_threads;
   solver->stats.kls_first_last_separator_queue_max_thread_rows =
     (int64_t)solver->kls_first_last_separator_queue_max_thread_rows;
+  solver->stats.kls_first_last_separator_queue_min_thread_work =
+    solver->kls_first_last_separator_queue_min_thread_work;
+  solver->stats.kls_first_last_separator_queue_max_thread_work =
+    solver->kls_first_last_separator_queue_max_thread_work;
   solver->stats.kls_first_last_separator_queue_executed =
     solver->kls_first_last_separator_queue_executed;
   solver->stats.kls_first_separator_queue_executed_run_count =
@@ -39619,20 +39629,29 @@ typedef struct kls_first_separator_queue_plan {
   UF_long pipeline_component_count;
   UF_long nonempty_threads;
   UF_long max_thread_rows;
+  double min_thread_work;
+  double max_thread_work;
 } kls_first_separator_queue_plan;
 
 typedef struct kls_first_separator_component_entry {
   unsigned int component;
   UF_long rows;
+  double work;
 } kls_first_separator_component_entry;
 
-static int kls_compare_first_separator_component_rows_desc(
+static int kls_compare_first_separator_component_work_desc(
   const void *a,
   const void *b) {
   const kls_first_separator_component_entry *left =
     (const kls_first_separator_component_entry *)a;
   const kls_first_separator_component_entry *right =
     (const kls_first_separator_component_entry *)b;
+  if (left->work < right->work) {
+    return 1;
+  }
+  if (left->work > right->work) {
+    return -1;
+  }
   if (left->rows < right->rows) {
     return 1;
   }
@@ -39654,6 +39673,11 @@ static void kls_first_separator_queue_plan_free(
   memset(plan, 0, sizeof(*plan));
 }
 
+static double kls_first_separator_row_input_work(UF_long input_count) {
+  const double count = (double)input_count;
+  return count * count;
+}
+
 static int kls_build_first_separator_queue_plan(
   const kls_solver *solver,
   UF_long k1,
@@ -39665,6 +39689,8 @@ static int kls_build_first_separator_queue_plan(
   }
   if (solver == NULL || solver->symbolic == NULL || plan == NULL ||
       thread_count <= 1 || k2 <= k1 || k2 > solver->n ||
+      solver->col_ptr == NULL || solver->row_idx == NULL ||
+      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
       !kls_separator_analysis_has_global_range(&solver->separator) ||
       solver->separator.component_count <= 1u ||
       solver->separator.component_kind == NULL ||
@@ -39681,24 +39707,33 @@ static int kls_build_first_separator_queue_plan(
   if (local_end > separator->n || component_count > (UF_long)UINT_MAX) {
     return 0;
   }
+  const UF_long n = solver->n;
   const size_t component_count_size = (size_t)component_count;
   const size_t thread_count_size = (size_t)thread_count;
+  const size_t n_size = (size_t)n;
   const UF_long block_rows = k2 - k1;
   if ((UF_long)component_count_size != component_count ||
       (UF_long)thread_count_size != (UF_long)thread_count ||
+      (UF_long)n_size != n ||
       component_count_size > SIZE_MAX / sizeof(UF_long) ||
       component_count_size > SIZE_MAX / sizeof(int) ||
+      component_count_size > SIZE_MAX / sizeof(double) ||
       component_count_size >
         SIZE_MAX / sizeof(kls_first_separator_component_entry) ||
+      n_size > SIZE_MAX / sizeof(UF_long) ||
       block_rows > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
-      thread_count_size > (SIZE_MAX / sizeof(UF_long)) - 1u) {
+      thread_count_size > (SIZE_MAX / sizeof(UF_long)) - 1u ||
+      thread_count_size > SIZE_MAX / sizeof(double)) {
     return 0;
   }
 
+  int ok = 0;
   UF_long *component_private_rows =
     (UF_long *)calloc(component_count_size, sizeof(*component_private_rows));
   UF_long *component_pipeline_rows =
     (UF_long *)calloc(component_count_size, sizeof(*component_pipeline_rows));
+  double *component_work =
+    (double *)calloc(component_count_size, sizeof(*component_work));
   int *component_thread =
     (int *)malloc(component_count_size * sizeof(*component_thread));
   kls_first_separator_component_entry *private_components =
@@ -39706,21 +39741,54 @@ static int kls_build_first_separator_queue_plan(
       malloc(component_count_size * sizeof(*private_components));
   UF_long *thread_counts =
     (UF_long *)calloc(thread_count_size, sizeof(*thread_counts));
-  UF_long *thread_work =
-    (UF_long *)calloc(thread_count_size, sizeof(*thread_work));
+  double *thread_work =
+    (double *)calloc(thread_count_size, sizeof(*thread_work));
+  UF_long *symbolic_pos_by_row =
+    (UF_long *)malloc(n_size * sizeof(*symbolic_pos_by_row));
+  UF_long *row_input_count =
+    (UF_long *)calloc((size_t)block_rows, sizeof(*row_input_count));
+  UF_long *thread_ptr = NULL;
+  UF_long *private_queue = NULL;
+  UF_long *pipeline_queue = NULL;
   if (component_private_rows == NULL || component_pipeline_rows == NULL ||
-      component_thread == NULL || private_components == NULL ||
-      thread_counts == NULL || thread_work == NULL) {
-    free(component_private_rows);
-    free(component_pipeline_rows);
-    free(component_thread);
-    free(private_components);
-    free(thread_counts);
-    free(thread_work);
-    return 0;
+      component_work == NULL || component_thread == NULL ||
+      private_components == NULL || thread_counts == NULL ||
+      thread_work == NULL || symbolic_pos_by_row == NULL ||
+      row_input_count == NULL) {
+    goto cleanup;
   }
   for (UF_long component = 0; component < component_count; ++component) {
     component_thread[component] = -1;
+  }
+  for (UF_long row = 0; row < n; ++row) {
+    symbolic_pos_by_row[row] = KLS_KLU_EMPTY;
+  }
+  for (UF_long pos = 0; pos < n; ++pos) {
+    const UF_long row = solver->symbolic->P[pos];
+    if (row >= n || symbolic_pos_by_row[row] != KLS_KLU_EMPTY) {
+      goto cleanup;
+    }
+    symbolic_pos_by_row[row] = pos;
+  }
+
+  for (UF_long local_col = 0; local_col < block_rows; ++local_col) {
+    const UF_long oldcol = solver->symbolic->Q[k1 + local_col];
+    if (oldcol >= n ||
+        solver->col_ptr[oldcol] > solver->col_ptr[oldcol + 1u] ||
+        solver->col_ptr[oldcol + 1u] > solver->nnz) {
+      goto cleanup;
+    }
+    for (UF_long p = solver->col_ptr[oldcol];
+         p < solver->col_ptr[oldcol + 1u]; ++p) {
+      const UF_long oldrow = solver->row_idx[p];
+      if (oldrow >= n) {
+        goto cleanup;
+      }
+      const UF_long row_pos = symbolic_pos_by_row[oldrow];
+      if (row_pos >= k1 && row_pos < k2) {
+        row_input_count[row_pos - k1]++;
+      }
+    }
   }
 
   UF_long private_rows = 0;
@@ -39729,21 +39797,20 @@ static int kls_build_first_separator_queue_plan(
   UF_long pipeline_component_count = 0;
   for (UF_long local = local_begin; local < local_end; ++local) {
     const unsigned int component = separator->order_component[local];
-    if ((UF_long)component >= component_count) {
-      free(component_private_rows);
-      free(component_pipeline_rows);
-      free(component_thread);
-      free(private_components);
-      free(thread_counts);
-      free(thread_work);
-      return 0;
+    const UF_long global_row = separator->global_begin + local;
+    if ((UF_long)component >= component_count ||
+        global_row < k1 || global_row >= k2) {
+      goto cleanup;
     }
+    const double row_work =
+      kls_first_separator_row_input_work(row_input_count[global_row - k1]);
     if (separator->component_kind[component] == 0u) {
       if (component_private_rows[component] == 0u) {
         private_components[private_component_count].component = component;
         private_component_count++;
       }
       component_private_rows[component]++;
+      component_work[component] += row_work;
       private_rows++;
     } else {
       if (component_pipeline_rows[component] == 0u) {
@@ -39754,27 +39821,22 @@ static int kls_build_first_separator_queue_plan(
     }
   }
   if (private_rows == 0u || private_component_count == 0u) {
-    free(component_private_rows);
-    free(component_pipeline_rows);
-    free(component_thread);
-    free(private_components);
-    free(thread_counts);
-    free(thread_work);
-    return 0;
+    goto cleanup;
   }
 
   for (UF_long pos = 0; pos < private_component_count; ++pos) {
     const unsigned int component = private_components[pos].component;
     private_components[pos].rows = component_private_rows[component];
+    private_components[pos].work = component_work[component];
   }
   qsort(private_components, (size_t)private_component_count,
         sizeof(*private_components),
-        kls_compare_first_separator_component_rows_desc);
+        kls_compare_first_separator_component_work_desc);
 
   for (UF_long pos = 0; pos < private_component_count; ++pos) {
     const unsigned int component = private_components[pos].component;
     int target = 0;
-    UF_long target_work = thread_work[0];
+    double target_work = thread_work[0];
     for (int tid = 1; tid < thread_count; ++tid) {
       if (thread_work[tid] < target_work) {
         target = tid;
@@ -39783,13 +39845,21 @@ static int kls_build_first_separator_queue_plan(
     }
     component_thread[component] = target;
     thread_counts[target] += component_private_rows[component];
-    thread_work[target] += component_private_rows[component];
+    thread_work[target] += component_work[component];
   }
 
   UF_long nonempty_threads = 0;
   UF_long max_thread_rows = 0;
+  double min_thread_work = 0.0;
+  double max_thread_work = 0.0;
   for (int tid = 0; tid < thread_count; ++tid) {
     if (thread_counts[tid] > 0u) {
+      if (nonempty_threads == 0u || thread_work[tid] < min_thread_work) {
+        min_thread_work = thread_work[tid];
+      }
+      if (thread_work[tid] > max_thread_work) {
+        max_thread_work = thread_work[tid];
+      }
       nonempty_threads++;
       if (thread_counts[tid] > max_thread_rows) {
         max_thread_rows = thread_counts[tid];
@@ -39797,50 +39867,26 @@ static int kls_build_first_separator_queue_plan(
     }
   }
   if (nonempty_threads == 0u) {
-    free(component_private_rows);
-    free(component_pipeline_rows);
-    free(component_thread);
-    free(private_components);
-    free(thread_counts);
-    free(thread_work);
-    return 0;
+    goto cleanup;
   }
 
-  UF_long *thread_ptr =
+  thread_ptr =
     (UF_long *)calloc(thread_count_size + 1u, sizeof(*thread_ptr));
-  UF_long *private_queue =
+  private_queue =
     (UF_long *)malloc((size_t)private_rows * sizeof(*private_queue));
-  UF_long *pipeline_queue = pipeline_rows > 0u
+  pipeline_queue = pipeline_rows > 0u
     ? (UF_long *)malloc((size_t)pipeline_rows * sizeof(*pipeline_queue))
     : NULL;
   if (thread_ptr == NULL || private_queue == NULL ||
       (pipeline_rows > 0u && pipeline_queue == NULL)) {
-    free(component_private_rows);
-    free(component_pipeline_rows);
-    free(component_thread);
-    free(private_components);
-    free(thread_counts);
-    free(thread_work);
-    free(thread_ptr);
-    free(private_queue);
-    free(pipeline_queue);
-    return 0;
+    goto cleanup;
   }
   for (int tid = 0; tid < thread_count; ++tid) {
     thread_ptr[tid + 1] = thread_ptr[tid] + thread_counts[tid];
     thread_counts[tid] = thread_ptr[tid];
   }
   if (thread_ptr[thread_count] != private_rows) {
-    free(component_private_rows);
-    free(component_pipeline_rows);
-    free(component_thread);
-    free(private_components);
-    free(thread_counts);
-    free(thread_work);
-    free(thread_ptr);
-    free(private_queue);
-    free(pipeline_queue);
-    return 0;
+    goto cleanup;
   }
 
   UF_long pipeline_next = 0;
@@ -39850,77 +39896,27 @@ static int kls_build_first_separator_queue_plan(
     if (separator->component_kind[component] == 0u) {
       const int target = component_thread[component];
       if (target < 0 || target >= thread_count) {
-        kls_first_separator_queue_plan_free(plan);
-        free(component_private_rows);
-        free(component_pipeline_rows);
-        free(component_thread);
-        free(private_components);
-        free(thread_counts);
-        free(thread_work);
-        free(thread_ptr);
-        free(private_queue);
-        free(pipeline_queue);
-        return 0;
+        goto cleanup;
       }
       const UF_long dst = thread_counts[target]++;
       if (dst >= private_rows) {
-        kls_first_separator_queue_plan_free(plan);
-        free(component_private_rows);
-        free(component_pipeline_rows);
-        free(component_thread);
-        free(private_components);
-        free(thread_counts);
-        free(thread_work);
-        free(thread_ptr);
-        free(private_queue);
-        free(pipeline_queue);
-        return 0;
+        goto cleanup;
       }
       private_queue[dst] = global_row;
     } else {
       if (pipeline_next >= pipeline_rows) {
-        kls_first_separator_queue_plan_free(plan);
-        free(component_private_rows);
-        free(component_pipeline_rows);
-        free(component_thread);
-        free(private_components);
-        free(thread_counts);
-        free(thread_work);
-        free(thread_ptr);
-        free(private_queue);
-        free(pipeline_queue);
-        return 0;
+        goto cleanup;
       }
       pipeline_queue[pipeline_next++] = global_row;
     }
   }
   for (int tid = 0; tid < thread_count; ++tid) {
     if (thread_counts[tid] != thread_ptr[tid + 1]) {
-      kls_first_separator_queue_plan_free(plan);
-      free(component_private_rows);
-      free(component_pipeline_rows);
-      free(component_thread);
-      free(private_components);
-      free(thread_counts);
-      free(thread_work);
-      free(thread_ptr);
-      free(private_queue);
-      free(pipeline_queue);
-      return 0;
+      goto cleanup;
     }
   }
   if (pipeline_next != pipeline_rows) {
-    kls_first_separator_queue_plan_free(plan);
-    free(component_private_rows);
-    free(component_pipeline_rows);
-    free(component_thread);
-    free(private_components);
-    free(thread_counts);
-    free(thread_work);
-    free(thread_ptr);
-    free(private_queue);
-    free(pipeline_queue);
-    return 0;
+    goto cleanup;
   }
 
   plan->private_rows = private_queue;
@@ -39932,14 +39928,27 @@ static int kls_build_first_separator_queue_plan(
   plan->pipeline_component_count = pipeline_component_count;
   plan->nonempty_threads = nonempty_threads;
   plan->max_thread_rows = max_thread_rows;
+  plan->min_thread_work = min_thread_work;
+  plan->max_thread_work = max_thread_work;
+  private_queue = NULL;
+  pipeline_queue = NULL;
+  thread_ptr = NULL;
+  ok = 1;
 
+cleanup:
   free(component_private_rows);
   free(component_pipeline_rows);
+  free(component_work);
   free(component_thread);
   free(private_components);
   free(thread_counts);
   free(thread_work);
-  return 1;
+  free(symbolic_pos_by_row);
+  free(row_input_count);
+  free(thread_ptr);
+  free(private_queue);
+  free(pipeline_queue);
+  return ok;
 }
 
 static void kls_record_first_separator_queue_plans(
@@ -39957,6 +39966,8 @@ static void kls_record_first_separator_queue_plans(
   UF_long pipeline_rows = 0;
   UF_long nonempty_threads = 0;
   UF_long max_thread_rows = 0;
+  double min_thread_work = 0.0;
+  double max_thread_work = 0.0;
   int recorded = 0;
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
     const UF_long k1 = solver->symbolic->R[block];
@@ -39977,6 +39988,16 @@ static void kls_record_first_separator_queue_plans(
     if (plan.max_thread_rows > max_thread_rows) {
       max_thread_rows = plan.max_thread_rows;
     }
+    if (plan.nonempty_threads > 0u) {
+      if (min_thread_work == 0.0 ||
+          (plan.min_thread_work > 0.0 &&
+           plan.min_thread_work < min_thread_work)) {
+        min_thread_work = plan.min_thread_work;
+      }
+      if (plan.max_thread_work > max_thread_work) {
+        max_thread_work = plan.max_thread_work;
+      }
+    }
     kls_first_separator_queue_plan_free(&plan);
   }
 
@@ -39993,6 +40014,8 @@ static void kls_record_first_separator_queue_plans(
   solver->kls_first_last_separator_queue_pipeline_rows = pipeline_rows;
   solver->kls_first_last_separator_queue_nonempty_threads = nonempty_threads;
   solver->kls_first_last_separator_queue_max_thread_rows = max_thread_rows;
+  solver->kls_first_last_separator_queue_min_thread_work = min_thread_work;
+  solver->kls_first_last_separator_queue_max_thread_work = max_thread_work;
 }
 
 typedef struct kls_row_first_block_context {

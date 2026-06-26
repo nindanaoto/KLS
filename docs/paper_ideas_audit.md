@@ -3912,9 +3912,11 @@ numeric storage.
 KLS-first row-up factorization now builds and conservatively consumes the
 corresponding first-factor queue shape from the retained separator map. For
 each covered symbolic block, KLS groups rows from retained private components
-into per-thread private queues using a greedy row-count balance and keeps
-separator/internal rows in a factor-order pipeline queue, mirroring SubtreeLU
-Algorithm 3's queue organization. The current numeric consumer validates the
+into per-thread private queues using a greedy structural work balance derived
+from permuted block-local row input counts, and keeps separator/internal rows
+in a factor-order pipeline queue, mirroring SubtreeLU Algorithm 3's queue
+organization while moving the private queue weighting toward Algorithm 6's
+FLOP-balancing rule. The current numeric consumer validates the
 private phase before threading it: if a private row would read another private
 thread's mutable column domain, the scheduled attempt is rejected and KLS falls
 back to the existing natural row-up executor. When validation passes, each
@@ -3956,7 +3958,9 @@ planned queue through
 `kls_first_last_separator_queue_private_rows`,
 `kls_first_last_separator_queue_pipeline_rows`,
 `kls_first_last_separator_queue_nonempty_threads`, and
-`kls_first_last_separator_queue_max_thread_rows`; scheduled consumption is
+`kls_first_last_separator_queue_max_thread_rows`, with the structural work
+range reported by `kls_first_last_separator_queue_min_thread_work` and
+`kls_first_last_separator_queue_max_thread_work`; scheduled consumption is
 reported by `kls_first_last_separator_queue_executed`,
 `kls_first_separator_queue_executed_run_count`,
 `kls_first_last_separator_queue_executed_private_rows`, and
