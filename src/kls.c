@@ -527,6 +527,7 @@ struct kls_solver {
   int auto_pivot_checked;
   int auto_scale_checked;
   int exact_matching_selected;
+  int exact_matching_scaling_selected;
   int spral_matching_selected;
   int fast_block_restarts;
   int fast_kls_block_restarts;
@@ -4482,6 +4483,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_pivot_checked = 0;
   solver->auto_scale_checked = 0;
   solver->exact_matching_selected = 0;
+  solver->exact_matching_scaling_selected = 0;
   solver->spral_matching_selected = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
@@ -7437,6 +7439,73 @@ static int kls_sparse_assignment_shortest_path(
   return KLS_OK;
 }
 
+static int build_exact_assignment_dual_scaling(UF_long n,
+                                               const UF_long *row_perm,
+                                               const double *col_max_log,
+                                               const double *row_potential,
+                                               const double *col_potential,
+                                               double **row_scale_out,
+                                               double **col_scale_out) {
+  if (n <= 0 || row_perm == NULL || col_max_log == NULL ||
+      row_potential == NULL || col_potential == NULL ||
+      row_scale_out == NULL || col_scale_out == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  *row_scale_out = NULL;
+  *col_scale_out = NULL;
+
+  double *row_scale = (double *)malloc((size_t)n * sizeof(*row_scale));
+  double *col_scale = (double *)malloc((size_t)n * sizeof(*col_scale));
+  if (row_scale == NULL || col_scale == NULL) {
+    free(row_scale);
+    free(col_scale);
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+
+  double row_log_sum = 0.0;
+  double col_log_sum = 0.0;
+  for (UF_long i = 0; i < n; ++i) {
+    if (row_perm[i] >= n || col_max_log[i] == -DBL_MAX ||
+        !isfinite(row_potential[i]) || !isfinite(col_potential[i]) ||
+        !isfinite(col_max_log[i])) {
+      free(row_scale);
+      free(col_scale);
+      return KLS_ERR_UNSUPPORTED;
+    }
+    row_log_sum += -row_potential[i];
+    col_log_sum += -col_max_log[i] + col_potential[i];
+  }
+
+  const double shift = 0.5 * (col_log_sum - row_log_sum) / (double)n;
+  const double max_log_scale = log(1.0e12);
+  for (UF_long row = 0; row < n; ++row) {
+    const UF_long scaled_row = row_perm[row];
+    const double row_log_scale = -row_potential[row] + shift;
+    if (scaled_row >= n || !isfinite(row_log_scale) ||
+        fabs(row_log_scale) > max_log_scale) {
+      free(row_scale);
+      free(col_scale);
+      return KLS_ERR_UNSUPPORTED;
+    }
+    row_scale[scaled_row] = clamp_matching_scale(exp(row_log_scale));
+  }
+  for (UF_long col = 0; col < n; ++col) {
+    const double col_log_scale =
+      -col_max_log[col] + col_potential[col] - shift;
+    if (!isfinite(col_log_scale) ||
+        fabs(col_log_scale) > max_log_scale) {
+      free(row_scale);
+      free(col_scale);
+      return KLS_ERR_UNSUPPORTED;
+    }
+    col_scale[col] = clamp_matching_scale(exp(col_log_scale));
+  }
+
+  *row_scale_out = row_scale;
+  *col_scale_out = col_scale;
+  return KLS_OK;
+}
+
 static int build_exact_numeric_row_match(UF_long n,
                                          UF_long nnz,
                                          const UF_long *col_ptr,
@@ -7444,14 +7513,19 @@ static int build_exact_numeric_row_match(UF_long n,
                                          const double *numeric_values,
                                          UF_long **row_perm_out,
                                          UF_long **col_match_out,
-                                         UF_long *matched_out) {
+                                         UF_long *matched_out,
+                                         double **row_scale_out,
+                                         double **col_scale_out) {
   if (n <= 0 || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
-      row_perm_out == NULL || col_match_out == NULL || matched_out == NULL) {
+      row_perm_out == NULL || col_match_out == NULL || matched_out == NULL ||
+      row_scale_out == NULL || col_scale_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   *row_perm_out = NULL;
   *col_match_out = NULL;
   *matched_out = 0;
+  *row_scale_out = NULL;
+  *col_scale_out = NULL;
 
   double *col_max_log = (double *)malloc((size_t)n * sizeof(*col_max_log));
   UF_long *row_perm = (UF_long *)malloc((size_t)n * sizeof(*row_perm));
@@ -7616,6 +7690,48 @@ static int build_exact_numeric_row_match(UF_long n,
     matched++;
   }
 
+  if (matched < n) {
+    kls_heap_free(&heap);
+    free_row_match_graph(&graph);
+    free(col_max_log);
+    free(row_perm);
+    free(col_match);
+    free(row_potential);
+    free(col_potential);
+    free(dist_row);
+    free(dist_col);
+    free(matched_cost_by_col);
+    free(prev_cost_for_col);
+    free(prev_row_for_col);
+    free(seen_row);
+    free(seen_col);
+    return KLS_ERR_UNSUPPORTED;
+  }
+
+  double *row_scale = NULL;
+  double *col_scale = NULL;
+  const int scale_status =
+    build_exact_assignment_dual_scaling(n, row_perm, col_max_log,
+                                        row_potential, col_potential,
+                                        &row_scale, &col_scale);
+  if (scale_status == KLS_ERR_OUT_OF_MEMORY) {
+    kls_heap_free(&heap);
+    free_row_match_graph(&graph);
+    free(col_max_log);
+    free(row_perm);
+    free(col_match);
+    free(row_potential);
+    free(col_potential);
+    free(dist_row);
+    free(dist_col);
+    free(matched_cost_by_col);
+    free(prev_cost_for_col);
+    free(prev_row_for_col);
+    free(seen_row);
+    free(seen_col);
+    return scale_status;
+  }
+
   kls_heap_free(&heap);
   free_row_match_graph(&graph);
   free(col_max_log);
@@ -7628,14 +7744,13 @@ static int build_exact_numeric_row_match(UF_long n,
   free(prev_row_for_col);
   free(seen_row);
   free(seen_col);
-  if (matched < n) {
-    free(row_perm);
-    free(col_match);
-    return KLS_ERR_UNSUPPORTED;
-  }
   *matched_out = matched;
   *row_perm_out = row_perm;
   *col_match_out = col_match;
+  if (scale_status == KLS_OK) {
+    *row_scale_out = row_scale;
+    *col_scale_out = col_scale;
+  }
   return KLS_OK;
 }
 
@@ -8503,18 +8618,21 @@ static int build_greedy_numeric_row_match(UF_long n,
                                           UF_long **row_perm_out,
                                           UF_long *matched_out,
                                           int *exact_matching_out,
+                                          int *exact_matching_scaling_out,
                                           int *spral_matching_out,
                                           double **row_scale_out,
                                           double **col_scale_out) {
   if (n <= 0 || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
       row_perm_out == NULL || matched_out == NULL ||
-      exact_matching_out == NULL || spral_matching_out == NULL ||
+      exact_matching_out == NULL || exact_matching_scaling_out == NULL ||
+      spral_matching_out == NULL ||
       row_scale_out == NULL || col_scale_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   *row_perm_out = NULL;
   *matched_out = 0;
   *exact_matching_out = 0;
+  *exact_matching_scaling_out = 0;
   *spral_matching_out = 0;
   *row_scale_out = NULL;
   *col_scale_out = NULL;
@@ -8523,21 +8641,34 @@ static int build_greedy_numeric_row_match(UF_long n,
     UF_long *exact_row_perm = NULL;
     UF_long *exact_col_match = NULL;
     UF_long exact_matched = 0;
+    double *exact_row_scale = NULL;
+    double *exact_col_scale = NULL;
     const int exact_status =
       build_exact_numeric_row_match(n, nnz, col_ptr, row_idx, numeric_values,
                                     &exact_row_perm, &exact_col_match,
-                                    &exact_matched);
+                                    &exact_matched, &exact_row_scale,
+                                    &exact_col_scale);
     if (exact_status == KLS_OK) {
       const int complete_status =
         complete_unmatched_row_match(n, exact_row_perm, exact_col_match);
       free(exact_col_match);
       if (complete_status != KLS_OK) {
         free(exact_row_perm);
+        free(exact_row_scale);
+        free(exact_col_scale);
         return complete_status;
       }
       *row_perm_out = exact_row_perm;
       *matched_out = exact_matched;
       *exact_matching_out = 1;
+      if (exact_row_scale != NULL && exact_col_scale != NULL) {
+        *row_scale_out = exact_row_scale;
+        *col_scale_out = exact_col_scale;
+        *exact_matching_scaling_out = 1;
+      } else {
+        free(exact_row_scale);
+        free(exact_col_scale);
+      }
       return KLS_OK;
     }
     if (exact_status == KLS_ERR_OUT_OF_MEMORY) {
@@ -8652,6 +8783,7 @@ static int build_greedy_numeric_row_match(UF_long n,
               spral_col_scale = NULL;
             }
             *exact_matching_out = 1;
+            *exact_matching_scaling_out = 0;
             *spral_matching_out = 1;
           }
           free(spral_row_perm);
@@ -8692,6 +8824,7 @@ static int build_greedy_numeric_row_match(UF_long n,
         free(row_perm);
         row_perm = spral_row_perm;
         matched = spral_matched;
+        *exact_matching_scaling_out = 0;
         *spral_matching_out = 1;
         for (UF_long col = 0; col < n; ++col) {
           col_match[col] = KLS_KLU_EMPTY;
@@ -9364,6 +9497,7 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   solver->values = trial_values;
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->exact_matching_selected = 1;
+  solver->exact_matching_scaling_selected = 0;
   solver->spral_matching_selected = 1;
   solver->symbolic = trial_symbolic;
   kls_separator_analysis_move(&solver->separator, &trial_separator);
@@ -9830,6 +9964,7 @@ static int maybe_select_auto_row_match(kls_solver *solver,
 
   UF_long matched = 0;
   int exact_matching = 0;
+  int exact_matching_scaling = 0;
   int spral_matching = 0;
   const int improve_matching = solver->n <= 50000 && solver->nnz <= 1000000;
   int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
@@ -9837,6 +9972,7 @@ static int maybe_select_auto_row_match(kls_solver *solver,
                                               base_values, improve_matching,
                                               &row_perm, &matched,
                                               &exact_matching,
+                                              &exact_matching_scaling,
                                               &spral_matching,
                                               &match_row_scale,
                                               &match_col_scale);
@@ -9930,6 +10066,9 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->row_perm = row_perm;
   solver->exact_matching_selected = exact_matching;
+  solver->exact_matching_scaling_selected =
+    exact_matching_scaling && trial_row_scale != NULL &&
+    trial_col_scale != NULL;
   solver->spral_matching_selected = spral_matching;
   solver->symbolic = trial_symbolic;
   kls_separator_analysis_move(&solver->separator, &trial_separator);
@@ -10137,6 +10276,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
   UF_long matched = 0;
   int exact_matching = 0;
+  int exact_matching_scaling = 0;
   int spral_matching = 0;
 #ifdef KLS_HAVE_SPRAL_SCALING
   int status = KLS_OK;
@@ -10145,6 +10285,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       solver->n, solver->nnz, base_col_ptr, base_row_idx, base_values,
       &row_perm, &matched, &match_row_scale, &match_col_scale);
     exact_matching = 0;
+    exact_matching_scaling = 0;
     spral_matching = status == KLS_OK;
   } else
 #else
@@ -10159,6 +10300,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                             &row_perm,
                                             &matched,
                                             &exact_matching,
+                                            &exact_matching_scaling,
                                             &spral_matching,
                                             &match_row_scale,
                                             &match_col_scale);
@@ -10256,6 +10398,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->row_perm = row_perm;
   solver->exact_matching_selected = exact_matching;
+  solver->exact_matching_scaling_selected =
+    exact_matching_scaling && trial_row_scale != NULL &&
+    trial_col_scale != NULL;
   solver->spral_matching_selected = spral_matching;
   solver->symbolic = trial_symbolic;
   kls_separator_analysis_move(&solver->separator, &trial_separator);
@@ -11150,6 +11295,8 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
   solver->stats.selected_pivot_tolerance = solver->common.tol;
   solver->stats.selected_static_pivoting = solver->row_perm != NULL;
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
+  solver->stats.selected_exact_matching_scaling =
+    solver->exact_matching_scaling_selected;
   solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
   solver->stats.fast_kls_block_restarts = solver->fast_kls_block_restarts;
@@ -11205,6 +11352,8 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.selected_pivot_tolerance = solver->common.tol;
   solver->stats.selected_static_pivoting = solver->row_perm != NULL;
   solver->stats.selected_exact_matching = solver->exact_matching_selected;
+  solver->stats.selected_exact_matching_scaling =
+    solver->exact_matching_scaling_selected;
   solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
   solver->stats.fast_kls_block_restarts = solver->fast_kls_block_restarts;

@@ -970,8 +970,11 @@ complete many independent augmenting paths per pass instead of restarting a
 search from each unmatched row. For cheap small candidates, KLS can instead run
 an exact sparse
 augmenting-path assignment on transformed log magnitudes, equivalent to a
-maximum-product diagonal match when a full matching is found. The exact path is
-gated by matrix order and `n * nnz` work because even the KLS-owned
+maximum-product diagonal match when a full matching is found. When that exact
+assignment is accepted, KLS derives row/column scales from the assignment dual
+potentials so matched diagonal entries normalize to unit magnitude and
+nonmatched entries are bounded by the same transformed-cost inequalities. The
+exact path is gated by matrix order and `n * nnz` work because even the KLS-owned
 assignment-specific path is not a substitute for production MC64 acceptance
 and scaling on larger SPICE matrices. Medium static-pivot matches then run a
 bounded alternating-cycle improvement pass that can accept profitable three-
@@ -994,7 +997,9 @@ conditioning loss. This keeps CKTSO-style METIS plus static-pivoting wins
 available without forcing METIS on all weak-diagonal circuits. Benchmark JSON
 reports both whether static pivoting was enabled, whether KLS selected it, and
 whether the accepted static match used exact assignment. It also reports
-`selected_spral_matching` when the accepted row permutation came from the
+`selected_exact_matching_scaling` when the accepted KLS-owned exact assignment
+retained its dual-derived scaling, and `selected_spral_matching` when the
+accepted row permutation came from the
 LGPL-compatible SPRAL Hungarian or auction path rather than KLS's in-tree
 matcher. KLS does not vendor HSL MC64 or the MC64 copies carried by some solver
 projects. When

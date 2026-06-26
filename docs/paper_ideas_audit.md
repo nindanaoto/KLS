@@ -143,8 +143,10 @@ Benchmark stats separate separator-domain dynamic pivots, would-have-crossed
 fallback candidates, and strict rejects.
 Its static-pivot
 preprocessing has a cheap exact sparse maximum-log-product assignment path for
-small candidates and can improve medium row matchings with bounded alternating
-cycles beyond the pair-swap pass. KLS now enables the pinned BSD-licensed SPRAL
+small candidates, derives MC64-style row/column scales from that exact
+assignment's dual potentials when the scaled candidate is accepted, and can
+improve medium row matchings with bounded alternating cycles beyond the
+pair-swap pass. KLS now enables the pinned BSD-licensed SPRAL
 scaling subset by default, so it can use Hungarian matching/scaling as a
 pre-factor MC64-adjacent candidate for small and medium weak-diagonal matrices,
 SPRAL auction matching/scaling for very large weak-diagonal dominant-block
@@ -374,11 +376,13 @@ The remaining worthwhile ideas are not per-matrix tuning knobs. They require
 new KLS-owned symbolic/numeric machinery:
 
 - Production-scale MC64-equivalent maximum-weight matching with dual
-  row/column scaling. KLS now builds BSD-licensed SPRAL Hungarian/auction
-  matching from a pinned submodule by default, or can link to a system SPRAL
-  install, and uses it for bounded pre-factor large weak-diagonal trials plus
-  a value-gated post-factor trial for dense high-off-diagonal-pivot cases. This
-  is still not a full production MC64-equivalent preprocessing stage. Existing
+  row/column scaling. KLS now derives dual row/column scaling from its
+  KLS-owned exact sparse assignment path for small accepted candidates, builds
+  BSD-licensed SPRAL Hungarian/auction matching from a pinned submodule by
+  default, or can link to a system SPRAL install, and uses SPRAL for bounded
+  pre-factor large weak-diagonal trials plus a value-gated post-factor trial
+  for dense high-off-diagonal-pivot cases. This is still not a full production
+  MC64-equivalent preprocessing stage. Existing
   MC64-style code can be reused only when its license is LGPL-compatible,
   permits source and binary redistribution with KLS, and allows preservation of
   upstream notices in KLS's third-party notice file. HSL MC64 and
@@ -529,8 +533,10 @@ design work, not benchmark-specific tuning.
   improvement for weak or high-off-diagonal-pivot medium matrices. Medium
   static-pivot candidates also run a bounded alternating-cycle pass that can
   apply profitable three- and four-row exchanges missed by pair swaps, while
-  larger candidates keep the lower-fill layered/swap pattern. KLS can also
-  trial dual-potential matching-derived row/column equilibration and keeps the
+  larger candidates keep the lower-fill layered/swap pattern. Small exact
+  assignment candidates now also return assignment-dual row/column scaling, and
+  KLS can still trial dual-potential matching-derived row/column equilibration
+  for non-exact matches. It keeps the
   transformed candidate only when numeric quality and cost evidence justify it.
   With default SPRAL scaling enabled, large weak-diagonal candidates whose BTF
   analysis leaves one dominant block can run BSD-licensed SPRAL Hungarian
@@ -1060,6 +1066,20 @@ lesson is that maximum-product matching alone is too expensive to use as a
 medium/large default; KLS still needs MC64-quality scaling and acceptance plus
 a more optimized assignment implementation before this can close the CKTSO
 gap.
+
+The exact sparse assignment path now keeps the assignment dual potentials when
+the full match succeeds and converts them into row/column scaling for the
+accepted candidate. For each original row matched to column `j`, KLS stores the
+row scale at the permuted row `j` and the column scale at original column `j`;
+the resulting scaled matched diagonal has unit magnitude, while all other
+entries satisfy the dual reduced-cost bound. The smoke suite now requires the
+3000-row scaled static-pivot fixture to report
+`selected_exact_matching_scaling`, and benchmark JSON exports the same flag.
+This fills the small exact-matching part of the NICSLU/CKTSO MC64 contract
+without changing the conclusion above: larger paper cases still need an
+optimized production MC64-equivalent implementation or a retained
+LGPL-compatible SPRAL path, not a wider use of the straightforward exact
+augmenting-path code.
 
 An optional SPRAL hook was then added for BSD-licensed matching/scaling
 support. It is deliberately not a default dependency and not a solver

@@ -811,6 +811,7 @@ int main(int argc, char **argv) {
            ",\"requested_btf\":%s,\"btf\":%s,\"fast_factor\":%s"
            ",\"static_pivoting\":%s,\"selected_static_pivoting\":%s"
            ",\"selected_exact_matching\":%s"
+           ",\"selected_exact_matching_scaling\":%s"
            ",\"selected_spral_matching\":%s"
            ",\"analysis_seconds\":%.9g"
            ",\"initial_factor_seconds\":%.9g"
@@ -864,6 +865,7 @@ int main(int argc, char **argv) {
            options.static_pivoting ? "true" : "false",
            stats.selected_static_pivoting ? "true" : "false",
            stats.selected_exact_matching ? "true" : "false",
+           stats.selected_exact_matching_scaling ? "true" : "false",
            stats.selected_spral_matching ? "true" : "false",
            stats.analysis_seconds, initial_factor_seconds,
            kls_factor_path_name(initial_factor_path),
@@ -1739,6 +1741,8 @@ int main(int argc, char **argv) {
            stats.selected_static_pivoting ? "on" : "off");
     printf("selected exact matching: %s\n",
            stats.selected_exact_matching ? "on" : "off");
+    printf("selected exact matching scaling: %s\n",
+           stats.selected_exact_matching_scaling ? "on" : "off");
     printf("selected SPRAL matching: %s\n",
            stats.selected_spral_matching ? "on" : "off");
     printf("analysis: %.6f s\n", stats.analysis_seconds);

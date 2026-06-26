@@ -8072,6 +8072,10 @@ static int test_pre_static_pivoting_with_scaling(void) {
     fprintf(stderr, "small scaled pre-static pivoting unexpectedly used SPRAL\n");
     ok = 0;
   }
+  if (ok && !stats.selected_exact_matching_scaling) {
+    fprintf(stderr, "scaled pre-static pivoting did not retain exact matching scaling\n");
+    ok = 0;
+  }
   if (ok && stats.selected_scale != -1) {
     fprintf(stderr, "matching equilibration did not switch to no-scale mode: %d\n",
             stats.selected_scale);
