@@ -166,6 +166,11 @@ that skip-over-numeric-scan handoff is reported as
 factor-order input map for off-diagonal refreshes and fallback coherence, but
 the row-refactor pattern and value mirrors no longer have to be reconstructed
 from packed KLU columns after a successful KLS-first row-up factor. Algorithm
+4-style row-supernode dependency runs consumed by the KLS-first private/serial
+row updater are reported through `kls_first_last_row_supernode_update`,
+`kls_first_row_supernode_update_run_count`,
+`kls_first_last_row_supernode_update_groups`, and
+`kls_first_last_row_supernode_update_rows`. Algorithm
 1-style dynamic column exchanges are reported as
 `kls_first_last_dynamic_column_pivots` and
 `kls_first_dynamic_column_pivot_count`. When a retained METIS `NodeNDP`

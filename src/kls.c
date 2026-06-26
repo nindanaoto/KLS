@@ -502,6 +502,10 @@ struct kls_solver {
   UF_long kls_first_row_uplooking_column_count;
   UF_long kls_first_last_row_refactor_seeded_rows;
   UF_long kls_first_row_refactor_seeded_row_count;
+  int kls_first_last_row_supernode_update;
+  UF_long kls_first_row_supernode_update_run_count;
+  UF_long kls_first_last_row_supernode_update_groups;
+  UF_long kls_first_last_row_supernode_update_rows;
   UF_long kls_first_last_dynamic_column_pivots;
   UF_long kls_first_dynamic_column_pivot_count;
   UF_long kls_first_last_separator_dynamic_column_pivots;
@@ -2562,6 +2566,9 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_tail_last_mapped_columns = 0;
   solver->kls_first_last_row_uplooking_columns = 0;
   solver->kls_first_last_row_refactor_seeded_rows = 0;
+  solver->kls_first_last_row_supernode_update = 0;
+  solver->kls_first_last_row_supernode_update_groups = 0;
+  solver->kls_first_last_row_supernode_update_rows = 0;
   solver->kls_first_last_dynamic_column_pivots = 0;
   solver->kls_first_last_separator_dynamic_column_pivots = 0;
   solver->kls_first_last_separator_dynamic_column_fallbacks = 0;
@@ -2601,6 +2608,9 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_tail_last_mapped_columns = 0;
   solver->stats.kls_first_last_row_uplooking_columns = 0;
   solver->stats.kls_first_last_row_refactor_seeded_rows = 0;
+  solver->stats.kls_first_last_row_supernode_update = 0;
+  solver->stats.kls_first_last_row_supernode_update_groups = 0;
+  solver->stats.kls_first_last_row_supernode_update_rows = 0;
   solver->stats.kls_first_last_dynamic_column_pivots = 0;
   solver->stats.kls_first_last_separator_dynamic_column_pivots = 0;
   solver->stats.kls_first_last_separator_dynamic_column_fallbacks = 0;
@@ -11051,6 +11061,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->kls_first_last_row_refactor_seeded_rows;
   solver->stats.kls_first_row_refactor_seeded_row_count =
     (int64_t)solver->kls_first_row_refactor_seeded_row_count;
+  solver->stats.kls_first_last_row_supernode_update =
+    solver->kls_first_last_row_supernode_update;
+  solver->stats.kls_first_row_supernode_update_run_count =
+    (int64_t)solver->kls_first_row_supernode_update_run_count;
+  solver->stats.kls_first_last_row_supernode_update_groups =
+    (int64_t)solver->kls_first_last_row_supernode_update_groups;
+  solver->stats.kls_first_last_row_supernode_update_rows =
+    (int64_t)solver->kls_first_last_row_supernode_update_rows;
   solver->stats.kls_first_last_dynamic_column_pivots =
     (int64_t)solver->kls_first_last_dynamic_column_pivots;
   solver->stats.kls_first_dynamic_column_pivot_count =
@@ -38650,12 +38668,22 @@ typedef struct kls_row_first_workspace {
   UF_long supernode_workspace_capacity;
 } kls_row_first_workspace;
 
+typedef struct kls_row_first_partial_row {
+  UF_long row;
+  unsigned int generation;
+  UF_long pattern_count;
+  UF_long dep_heap_size;
+  double pivot;
+} kls_row_first_partial_row;
+
 typedef struct kls_row_first_row_stats {
   UF_long dynamic_column_pivots;
   UF_long separator_dynamic_column_pivots;
   UF_long separator_extent_dynamic_column_pivots;
   UF_long separator_dynamic_column_fallbacks;
   UF_long separator_dynamic_column_rejects;
+  UF_long supernode_update_groups;
+  UF_long supernode_update_rows;
 } kls_row_first_row_stats;
 
 typedef struct kls_row_first_pivot_choice {
@@ -38666,6 +38694,41 @@ typedef struct kls_row_first_pivot_choice {
   int scoped_col_exact;
   int scope_enabled;
 } kls_row_first_pivot_choice;
+
+static int kls_row_first_partial_apply_one_dep(
+  const kls_row_first_block_context *ctx,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *local_l_entries,
+  const kls_row_first_entries *published_u_entries,
+  const double *udiag_values,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  kls_row_first_partial_row *state,
+  UF_long dep);
+
+static int kls_row_first_partial_apply_supernode_run(
+  const kls_row_first_block_context *ctx,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *local_l_entries,
+  const kls_row_first_entries *published_u_entries,
+  const double *udiag_values,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  kls_row_first_partial_row *state,
+  UF_long dep_begin,
+  UF_long dep_end,
+  UF_long *run_rows_out);
+
+static UF_long kls_row_first_owned_supernode_end(
+  const kls_row_first_entries *u_entries,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  const unsigned char *row_done,
+  const int *row_owner,
+  int owner,
+  UF_long nk,
+  UF_long current_row,
+  UF_long dep);
 
 static int kls_row_first_separator_position(
   const kls_row_first_block_context *ctx,
@@ -38910,39 +38973,43 @@ static int kls_row_first_factor_one_row(
   }
 
   workspace->u_row_ptr[i] = u_entries->count;
-  while (dep_heap_size > 0u) {
-    const UF_long dep = kls_row_first_heap_pop(dep_heap, &dep_heap_size);
+  kls_row_first_partial_row state;
+  memset(&state, 0, sizeof(state));
+  state.row = i;
+  state.generation = generation;
+  state.pattern_count = pattern_count;
+  state.dep_heap_size = dep_heap_size;
+  while (state.dep_heap_size > 0u) {
+    const UF_long dep =
+      kls_row_first_heap_pop(dep_heap, &state.dep_heap_size);
     if (dep >= i || mark[dep] != generation ||
         (row_owner != NULL && row_owner[dep] != owner) ||
         (row_done != NULL && !row_done[dep])) {
       return 0;
     }
-    const double dep_pivot = udiag_values[dep];
-    if (dep_pivot == 0.0) {
-      return 0;
-    }
-    const double lij = x[dep] / dep_pivot;
-    if (!kls_row_first_entries_append(l_entries, i, dep, lij)) {
-      return 0;
-    }
-    x[dep] = 0.0;
-    for (UF_long up = workspace->u_row_ptr[dep];
-         up < workspace->u_row_end[dep]; ++up) {
-      const UF_long col = u_entries->col[up];
-      if (col <= dep || col >= ctx->nk) {
+    const UF_long run_end =
+      kls_row_first_owned_supernode_end(
+        u_entries, workspace->u_row_ptr, workspace->u_row_end, row_done,
+        row_owner, owner, ctx->nk, i, dep);
+    UF_long run_rows = 1;
+    if (run_end > dep) {
+      if (!kls_row_first_partial_apply_supernode_run(
+            ctx, workspace, l_entries, u_entries, udiag_values,
+            workspace->u_row_ptr, workspace->u_row_end, &state, dep,
+            run_end, &run_rows)) {
         return 0;
       }
-      if (mark[col] != generation) {
-        mark[col] = generation;
-        pattern[pattern_count++] = col;
-        if (col < i) {
-          kls_row_first_heap_push(dep_heap, &dep_heap_size, col);
-        }
-        x[col] = 0.0;
-      }
-      x[col] -= lij * u_entries->value[up];
+    } else if (!kls_row_first_partial_apply_one_dep(
+                 ctx, workspace, l_entries, u_entries, udiag_values,
+                 workspace->u_row_ptr, workspace->u_row_end, &state, dep)) {
+      return 0;
+    }
+    if (run_rows > 1u && stats != NULL) {
+      stats->supernode_update_groups++;
+      stats->supernode_update_rows += run_rows;
     }
   }
+  pattern_count = state.pattern_count;
 
   double pivot = mark[i] == generation ? x[i] : 0.0;
   UF_long u_count = 0;
@@ -39373,6 +39440,10 @@ static int kls_row_first_run_parallel_private_phase(
         workers[tid].stats.separator_dynamic_column_fallbacks;
       stats->separator_dynamic_column_rejects +=
         workers[tid].stats.separator_dynamic_column_rejects;
+      stats->supernode_update_groups +=
+        workers[tid].stats.supernode_update_groups;
+      stats->supernode_update_rows +=
+        workers[tid].stats.supernode_update_rows;
     }
   }
   if (ok && private_rows_out != NULL) {
@@ -39389,14 +39460,6 @@ static int kls_row_first_run_parallel_private_phase(
   free(workers);
   return ok;
 }
-
-typedef struct kls_row_first_partial_row {
-  UF_long row;
-  unsigned int generation;
-  UF_long pattern_count;
-  UF_long dep_heap_size;
-  double pivot;
-} kls_row_first_partial_row;
 
 typedef enum kls_row_first_pipeline_failure {
   KLS_ROW_FIRST_PIPELINE_FAIL_NONE = 0,
@@ -39523,6 +39586,39 @@ static int kls_row_first_u_rows_fit_supernode(
     q++;
   }
   return p == pend && q == qend;
+}
+
+static UF_long kls_row_first_owned_supernode_end(
+  const kls_row_first_entries *u_entries,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  const unsigned char *row_done,
+  const int *row_owner,
+  int owner,
+  UF_long nk,
+  UF_long current_row,
+  UF_long dep) {
+  if (u_entries == NULL || u_row_ptr == NULL || u_row_end == NULL ||
+      dep >= nk || dep >= current_row) {
+    return dep;
+  }
+
+  UF_long end = dep;
+  while (end + 1u < current_row) {
+    const UF_long next = end + 1u;
+    if (row_owner != NULL && row_owner[next] != owner) {
+      break;
+    }
+    if (row_done != NULL && row_done[next] == 0u) {
+      break;
+    }
+    if (!kls_row_first_u_rows_fit_supernode(
+          u_entries, u_row_ptr, u_row_end, end, next, nk)) {
+      break;
+    }
+    end = next;
+  }
+  return end;
 }
 
 static void kls_row_first_supernodes_reset(
@@ -42176,6 +42272,8 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
   UF_long separator_dynamic_column_pivots = 0;
   UF_long separator_extent_dynamic_column_pivots = 0;
   UF_long separator_dynamic_column_fallbacks = 0;
+  UF_long row_supernode_update_groups = 0;
+  UF_long row_supernode_update_rows = 0;
   const int use_separator_pivot_domains =
     kls_separator_analysis_has_global_range(&solver->separator) &&
     solver->separator.component_count > 0u &&
@@ -42642,6 +42740,8 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
       row_stats.separator_dynamic_column_fallbacks;
     separator_dynamic_column_rejects +=
       row_stats.separator_dynamic_column_rejects;
+    row_supernode_update_groups += row_stats.supernode_update_groups;
+    row_supernode_update_rows += row_stats.supernode_update_rows;
     if (use_separator_row_order) {
       separator_queue_executed = 1;
       separator_queue_executed_private_rows += block_separator_private_rows;
@@ -42768,6 +42868,14 @@ fail_block_entries:
   }
   solver->kls_first_last_row_uplooking_columns = n;
   solver->kls_first_row_uplooking_column_count += n;
+  if (row_supernode_update_groups > 0u) {
+    solver->kls_first_last_row_supernode_update = 1;
+    solver->kls_first_row_supernode_update_run_count++;
+    solver->kls_first_last_row_supernode_update_groups =
+      row_supernode_update_groups;
+    solver->kls_first_last_row_supernode_update_rows =
+      row_supernode_update_rows;
+  }
   solver->kls_first_last_dynamic_column_pivots = dynamic_column_pivots;
   solver->kls_first_dynamic_column_pivot_count += dynamic_column_pivots;
   solver->kls_first_last_separator_dynamic_column_pivots =

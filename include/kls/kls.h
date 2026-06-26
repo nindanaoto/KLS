@@ -482,6 +482,10 @@ typedef struct kls_stats {
   int64_t row_refactor_prefactor_supernode_run_count;
   int64_t row_refactor_prefactor_supernode_rows;
   int64_t row_refactor_prefactor_supernode_deps;
+  int kls_first_last_row_supernode_update;
+  int64_t kls_first_row_supernode_update_run_count;
+  int64_t kls_first_last_row_supernode_update_groups;
+  int64_t kls_first_last_row_supernode_update_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

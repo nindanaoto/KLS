@@ -10932,6 +10932,10 @@ static int test_experimental_row_uplooking_first_factor(void) {
              stats.kls_first_row_uplooking_column_count < 3 ||
              stats.kls_first_last_row_refactor_seeded_rows != 3 ||
              stats.kls_first_row_refactor_seeded_row_count < 3 ||
+             stats.kls_first_last_row_supernode_update != 1 ||
+             stats.kls_first_row_supernode_update_run_count < 1 ||
+             stats.kls_first_last_row_supernode_update_groups < 1 ||
+             stats.kls_first_last_row_supernode_update_rows < 2 ||
              stats.kls_first_last_dynamic_column_pivots != 0 ||
              stats.kls_tail_last_mapped_columns != 0 ||
              stats.selected_scale != 0 ||
@@ -10940,6 +10944,7 @@ static int test_experimental_row_uplooking_first_factor(void) {
             "unexpected row-up-looking first-factor stats: path=%s"
             ", row_cols=%" PRId64 "/%" PRId64
             ", row_seed=%" PRId64 "/%" PRId64
+            ", row_supernode=%d/%" PRId64 "/%" PRId64 "/%" PRId64
             ", dyn_pivots=%" PRId64
             ", mapped_tail=%" PRId64 ", scale=%d, btf=%d\n",
             kls_factor_path_name(stats.last_factor_path),
@@ -10947,6 +10952,10 @@ static int test_experimental_row_uplooking_first_factor(void) {
             stats.kls_first_row_uplooking_column_count,
             stats.kls_first_last_row_refactor_seeded_rows,
             stats.kls_first_row_refactor_seeded_row_count,
+            stats.kls_first_last_row_supernode_update,
+            stats.kls_first_row_supernode_update_run_count,
+            stats.kls_first_last_row_supernode_update_groups,
+            stats.kls_first_last_row_supernode_update_rows,
             stats.kls_first_last_dynamic_column_pivots,
             stats.kls_tail_last_mapped_columns,
             stats.selected_scale,
