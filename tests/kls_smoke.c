@@ -9076,6 +9076,240 @@ static int restore_env_value(const char *name, int had_value,
   return 1;
 }
 
+static int test_checked_row_prefactor_finished_dependency(void) {
+  enum {
+    A_WIDTH = 240,
+    B_WIDTH = 6,
+    C_WIDTH = 6,
+    B_BEGIN = A_WIDTH,
+    C_BEGIN = B_BEGIN + B_WIDTH,
+    CONSUMER = C_BEGIN + C_WIDTH,
+    PREF_N = CONSUMER + 1,
+    PREF_NNZ = A_WIDTH * A_WIDTH + 2 + B_WIDTH * B_WIDTH + 1 +
+               C_WIDTH * C_WIDTH + 1 + 1
+  };
+  const int32_t n = PREF_N;
+  const int32_t consumer = CONSUMER;
+  const size_t nnz = PREF_NNZ;
+  int32_t ap[PREF_N + 1];
+  int32_t ai[PREF_NNZ];
+  double ax0[PREF_NNZ];
+  double ax1[PREF_NNZ];
+  double expected[PREF_N];
+  double b[PREF_N] = {0.0};
+  double x[PREF_N] = {0.0};
+
+  for (int32_t i = 0; i < n; ++i) {
+    expected[i] = 0.375 + 0.0625 * (double)((5 * i) % 11);
+  }
+
+  size_t pos = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = (int32_t)pos;
+    if (col < A_WIDTH) {
+      for (int32_t row = 0; row < A_WIDTH; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 18.0 + 0.125 * (double)col
+          : 0.0007 * (1.0 + (double)((row + 3 * col) % 17));
+        ax1[p] = ax0[p] + (row == col ? 0.01 : 1.0e-6);
+      }
+      if (col == A_WIDTH - 4 || col == A_WIDTH - 3) {
+        const size_t p = pos++;
+        ai[p] = consumer;
+        ax0[p] = 0.00011 * (1.0 + (double)col);
+        ax1[p] = ax0[p] + 1.0e-6;
+      }
+    } else if (col < C_BEGIN) {
+      for (int32_t row = B_BEGIN; row < C_BEGIN; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 16.0 + 0.1 * (double)col
+          : 0.0009 * (1.0 + (double)((row + col) % 13));
+        ax1[p] = ax0[p] + (row == col ? 0.0125 : 1.0e-6);
+      }
+      if (col == A_WIDTH + 1) {
+        const size_t p = pos++;
+        ai[p] = consumer;
+        ax0[p] = 0.00013;
+        ax1[p] = ax0[p] + 1.0e-6;
+      }
+    } else if (col < CONSUMER) {
+      for (int32_t row = C_BEGIN; row < CONSUMER; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 15.0 + 0.075 * (double)col
+          : 0.0008 * (1.0 + (double)((row + 2 * col) % 11));
+        ax1[p] = ax0[p] + (row == col ? 0.011 : 1.0e-6);
+      }
+      if (col == C_BEGIN + 1) {
+        const size_t p = pos++;
+        ai[p] = consumer;
+        ax0[p] = 0.00012;
+        ax1[p] = ax0[p] + 1.0e-6;
+      }
+    } else {
+      const size_t p = pos++;
+      ai[p] = consumer;
+      ax0[p] = 14.0;
+      ax1[p] = 14.025;
+    }
+  }
+  ap[n] = (int32_t)pos;
+  if (pos != nnz) {
+    fprintf(stderr, "unexpected prefactor fixture nnz: %zu/%zu\n", pos, nnz);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_row = saved_row_value != NULL;
+  const char *saved_partial_value =
+    getenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
+  char *saved_partial = saved_partial_value != NULL
+    ? strdup(saved_partial_value) : NULL;
+  const int had_partial = saved_partial_value != NULL;
+  const char *saved_checked_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked = saved_checked_value != NULL
+    ? strdup(saved_checked_value) : NULL;
+  const int had_checked = saved_checked_value != NULL;
+  const char *saved_trsv_value = getenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
+  char *saved_trsv = saved_trsv_value != NULL ? strdup(saved_trsv_value) : NULL;
+  const int had_trsv = saved_trsv_value != NULL;
+  const char *saved_cblas_value = getenv("KLS_ENABLE_CBLAS_SUPERNODE");
+  char *saved_cblas =
+    saved_cblas_value != NULL ? strdup(saved_cblas_value) : NULL;
+  const int had_cblas = saved_cblas_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 3;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if ((had_row && saved_row == NULL) ||
+      (had_partial && saved_partial == NULL) ||
+      (had_checked && saved_checked == NULL) ||
+      (had_trsv && saved_trsv == NULL) ||
+      (had_cblas && saved_cblas == NULL)) {
+    fprintf(stderr, "failed to save prefactor env\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create row-prefactor")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze row-prefactor")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor row-prefactor base")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && unsetenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE") != 0) {
+    perror("unsetenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "checked factor row-prefactor")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats row-prefactor")) {
+    ok = 0;
+  }
+  if (ok && (stats.row_refactor_last_run != 1 ||
+             stats.row_refactor_last_checked != 1 ||
+             stats.row_refactor_last_parallel != 1 ||
+             stats.row_refactor_last_partial_supernode_pipeline != 1 ||
+             stats.row_refactor_last_done_bitmap != 1 ||
+             stats.row_refactor_last_prefactor != 1 ||
+             stats.row_refactor_last_prefactor_rows <= 0 ||
+             stats.row_refactor_last_prefactor_deps <= 0 ||
+             stats.row_refactor_prefactor_run_count <= 0 ||
+             stats.row_refactor_prefactor_deps <
+               stats.row_refactor_last_prefactor_deps)) {
+    fprintf(stderr,
+            "unexpected row-prefactor stats: last=%d/%d/%d partial=%d"
+            " done=%d prefactor=%d rows/deps=%" PRId64 "/%" PRId64
+            " totals=%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
+            stats.row_refactor_last_run,
+            stats.row_refactor_last_checked,
+            stats.row_refactor_last_parallel,
+            stats.row_refactor_last_partial_supernode_pipeline,
+            stats.row_refactor_last_done_bitmap,
+            stats.row_refactor_last_prefactor,
+            stats.row_refactor_last_prefactor_rows,
+            stats.row_refactor_last_prefactor_deps,
+            stats.row_refactor_prefactor_run_count,
+            stats.row_refactor_prefactor_rows,
+            stats.row_refactor_prefactor_deps);
+    ok = 0;
+  }
+
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE",
+                         had_partial, saved_partial)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_checked, saved_checked)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_COMPACT_SUPERNODE_TRSV",
+                         had_trsv, saved_trsv)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CBLAS_SUPERNODE", had_cblas,
+                         saved_cblas)) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve row-prefactor")) ok = 0;
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr, "unexpected row-prefactor solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  free(saved_row);
+  free(saved_partial);
+  free(saved_checked);
+  free(saved_trsv);
+  free(saved_cblas);
+  return ok;
+}
+
 static int test_partial_compact_supernode_prefix_pipeline(void) {
   const int32_t a_width = 240;
   const int32_t a_prefix = 120;
@@ -11653,6 +11887,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_unchecked_row_sparse_segment_direct_input()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_checked_row_prefactor_finished_dependency()) {
     return EXIT_FAILURE;
   }
   if (!test_partial_compact_supernode_prefix_pipeline()) {

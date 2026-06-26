@@ -470,6 +470,12 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_panel_scalar_update_rows;
   int64_t row_refactor_last_compact_panel_scalar_update_entries;
   int64_t row_refactor_compact_panel_scalar_update_entries;
+  int row_refactor_last_prefactor;
+  int64_t row_refactor_last_prefactor_rows;
+  int64_t row_refactor_last_prefactor_deps;
+  int64_t row_refactor_prefactor_run_count;
+  int64_t row_refactor_prefactor_rows;
+  int64_t row_refactor_prefactor_deps;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

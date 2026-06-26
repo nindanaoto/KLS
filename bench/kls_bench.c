@@ -1151,6 +1151,12 @@ int main(int argc, char **argv) {
            ",\"row_refactor_ready_queue_group_count\":%" PRId64
            ",\"row_refactor_last_done_bitmap\":%d"
            ",\"row_refactor_done_bitmap_run_count\":%" PRId64
+           ",\"row_refactor_last_prefactor\":%d"
+           ",\"row_refactor_last_prefactor_rows\":%" PRId64
+           ",\"row_refactor_last_prefactor_deps\":%" PRId64
+           ",\"row_refactor_prefactor_run_count\":%" PRId64
+           ",\"row_refactor_prefactor_rows\":%" PRId64
+           ",\"row_refactor_prefactor_deps\":%" PRId64
            ",\"row_refactor_input_cleanup_rows\":%" PRId64
            ",\"row_refactor_input_cleanup_entries\":%" PRId64
            ",\"row_refactor_last_defer_value_scatter\":%d"
@@ -1222,6 +1228,12 @@ int main(int argc, char **argv) {
            stats.row_refactor_ready_queue_group_count,
            stats.row_refactor_last_done_bitmap,
            stats.row_refactor_done_bitmap_run_count,
+           stats.row_refactor_last_prefactor,
+           stats.row_refactor_last_prefactor_rows,
+           stats.row_refactor_last_prefactor_deps,
+           stats.row_refactor_prefactor_run_count,
+           stats.row_refactor_prefactor_rows,
+           stats.row_refactor_prefactor_deps,
            stats.row_refactor_input_cleanup_rows,
            stats.row_refactor_input_cleanup_entries,
            stats.row_refactor_last_defer_value_scatter,
@@ -1911,6 +1923,9 @@ int main(int argc, char **argv) {
            ", ready queue groups: %" PRId64
            ", last done bitmap: %d"
            ", done bitmap runs: %" PRId64
+           ", prefactor: %d rows/deps %" PRId64 "/%" PRId64
+           ", prefactor totals: %" PRId64 " runs, rows/deps %" PRId64
+           "/%" PRId64
            ", input cleanup rows: %" PRId64
            ", input cleanup entries: %" PRId64
            ", last defer scatter: %d"
@@ -1958,6 +1973,12 @@ int main(int argc, char **argv) {
            stats.row_refactor_ready_queue_group_count,
            stats.row_refactor_last_done_bitmap,
            stats.row_refactor_done_bitmap_run_count,
+           stats.row_refactor_last_prefactor,
+           stats.row_refactor_last_prefactor_rows,
+           stats.row_refactor_last_prefactor_deps,
+           stats.row_refactor_prefactor_run_count,
+           stats.row_refactor_prefactor_rows,
+           stats.row_refactor_prefactor_deps,
            stats.row_refactor_input_cleanup_rows,
            stats.row_refactor_input_cleanup_entries,
            stats.row_refactor_last_defer_value_scatter,
