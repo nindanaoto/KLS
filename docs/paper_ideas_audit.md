@@ -4328,6 +4328,19 @@ supernode batch counters plus a residual-clean solve. This fills another direct
 paper-coverage hole without claiming to solve the remaining production
 row/segment panel engine or CKTSO pivoting-tail executor.
 
+The independent `GROUP_BATCH` row-supernode executors now have the same checked
+coverage. The ragged single-producer suffix executor, the contiguous
+multi-producer dense-suffix executor, and the fragmented scalar-gap plus
+multi-producer executor no longer skip checked row fast factorization. Each
+path rejects unsafe `L` multipliers before publication, tests the completed
+row pivot against the row's pivot/U maximum before publishing `Udiag`, and only
+then marks the independent row done. The smoke suite now runs checked
+factorizations for ragged, contiguous multi-producer, and fragmented independent
+row batches with CBLAS disabled and requires the compact-supernode batch and
+dense-producer counters. This closes the checked-mode dispatch gap for the
+paper row-supernode batch shapes while leaving the larger native row/segment
+numeric engine and CKTSO pivoting-tail executor open.
+
 An exact-match requirement was deliberately kept for fragmented dense-producer
 batches. A common-prefix widening experiment was tried and rejected because it
 increased the work on `ASIC_320k` (`~0.387s` focused refactor versus the prior

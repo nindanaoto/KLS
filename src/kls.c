@@ -28304,7 +28304,6 @@ static int kls_batch_group_try_ragged_supernode_update(
   double copied_entries,
   UF_long candidate_dep_rows) {
   if (worker == NULL || worker->shared == NULL ||
-      worker->shared->check_pivots ||
       batch_begin >= batch_end ||
       candidate_dep_rows == 0u) {
     return 0;
@@ -28515,6 +28514,11 @@ static int kls_batch_group_try_ragged_supernode_update(
       const UF_long dep = dep_group_begin + local_dep;
       const double candidate = row_multipliers[local_dep];
       const double lij = candidate / udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        status = -1;
+        goto cleanup;
+      }
       row_multipliers[local_dep] = lij;
       for (UF_long target = local_dep + 1u; target < dep_width; ++target) {
         row_multipliers[target] -=
@@ -28571,6 +28575,18 @@ static int kls_batch_group_try_ragged_supernode_update(
   for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
     const UF_long row = batch_begin + batch_local;
     const double pivot = pivots[batch_local];
+    const UF_long u_begin = solver->row_refactor_u_ptr[row];
+    const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
+    const UF_long u_len = u_end - u_begin;
+    double *row_u_workspace = total_u_entries > 0u
+      ? u_workspace + u_offsets[batch_local] : NULL;
+    const double row_max_abs =
+      kls_row_refactor_abs_max_from_values(pivot, row_u_workspace, u_len);
+    if (kls_parallel_row_refactor_rejects_pivot(worker, row, pivot,
+                                               row_max_abs)) {
+      status = -1;
+      goto cleanup;
+    }
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, row,
                                           solver->symbolic->Q[row]);
@@ -28580,10 +28596,6 @@ static int kls_batch_group_try_ragged_supernode_update(
       }
     }
     udiag[row] = pivot;
-    const UF_long u_begin = solver->row_refactor_u_ptr[row];
-    const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
-    double *row_u_workspace = total_u_entries > 0u
-      ? u_workspace + u_offsets[batch_local] : NULL;
     for (UF_long p = u_begin; p < u_end; ++p) {
       const UF_long offset = p - u_begin;
       solver->row_refactor_u_row_values[p] = row_u_workspace[offset];
@@ -28976,7 +28988,6 @@ static int kls_independent_row_try_fragmented_supernode_update(
     return 0;
   }
   if (worker == NULL || worker->shared == NULL ||
-      worker->shared->check_pivots ||
       batch_begin < row_begin ||
       batch_begin >= row_end) {
     return 0;
@@ -29386,6 +29397,12 @@ static int kls_independent_row_try_fragmented_supernode_update(
           const UF_long dep = panel->begin + local_dep;
           const double candidate = run_multipliers[dep_local];
           const double lij = candidate / udiag[dep];
+          if (kls_parallel_row_refactor_rejects_multiplier(
+                worker, row, dep, candidate, lij)) {
+            status = -1;
+            free(panels);
+            goto cleanup_rows;
+          }
           run_multipliers[dep_local] = lij;
           const double *dep_dense_panel =
             panel->dense_panel + local_dep * panel->width;
@@ -29442,6 +29459,12 @@ static int kls_independent_row_try_fragmented_supernode_update(
       const UF_long dep = solver->row_refactor_l_cols[p];
       const double candidate = row_multipliers[local];
       const double lij = candidate / udiag[dep];
+      if (kls_parallel_row_refactor_rejects_multiplier(
+            worker, row, dep, candidate, lij)) {
+        status = -1;
+        free(panels);
+        goto cleanup_rows;
+      }
       row_multipliers[local] = lij;
       solver->row_refactor_l_row_values[p] = lij;
       if (!shared->row_refactor_defer_value_scatter) {
@@ -29475,6 +29498,19 @@ static int kls_independent_row_try_fragmented_supernode_update(
   for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
     const UF_long row = batch_begin + batch_local;
     const double pivot = pivots[batch_local];
+    const UF_long u_begin = solver->row_refactor_u_ptr[row];
+    const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
+    const UF_long u_len = u_end - u_begin;
+    double *row_u_workspace = total_u_entries > 0u
+      ? u_workspace + u_offsets[batch_local] : NULL;
+    const double row_max_abs =
+      kls_row_refactor_abs_max_from_values(pivot, row_u_workspace, u_len);
+    if (kls_parallel_row_refactor_rejects_pivot(worker, row, pivot,
+                                               row_max_abs)) {
+      status = -1;
+      free(panels);
+      goto cleanup_rows;
+    }
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, row,
                                           solver->symbolic->Q[row]);
@@ -29485,10 +29521,6 @@ static int kls_independent_row_try_fragmented_supernode_update(
       }
     }
     udiag[row] = pivot;
-    const UF_long u_begin = solver->row_refactor_u_ptr[row];
-    const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
-    double *row_u_workspace = total_u_entries > 0u
-      ? u_workspace + u_offsets[batch_local] : NULL;
     for (UF_long p = u_begin; p < u_end; ++p) {
       const UF_long offset = p - u_begin;
       solver->row_refactor_u_row_values[p] = row_u_workspace[offset];
@@ -29554,7 +29586,6 @@ static int kls_independent_row_try_multi_supernode_update(
     return 0;
   }
   if (worker == NULL || worker->shared == NULL ||
-      worker->shared->check_pivots ||
       batch_begin < row_begin ||
       batch_begin >= row_end) {
     return 0;
@@ -29915,6 +29946,12 @@ static int kls_independent_row_try_multi_supernode_update(
         const UF_long dep = panel->begin + local_dep;
         const double candidate = row_multipliers[local];
         const double lij = candidate / udiag[dep];
+        if (kls_parallel_row_refactor_rejects_multiplier(
+              worker, row, dep, candidate, lij)) {
+          status = -1;
+          free(panels);
+          goto cleanup_rows;
+        }
         row_multipliers[local] = lij;
         const double *dep_dense_panel =
           panel->dense_panel + local_dep * panel->width;
@@ -29990,6 +30027,19 @@ static int kls_independent_row_try_multi_supernode_update(
   for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
     const UF_long row = batch_begin + batch_local;
     const double pivot = pivots[batch_local];
+    const UF_long u_begin = solver->row_refactor_u_ptr[row];
+    const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
+    const UF_long u_len = u_end - u_begin;
+    double *row_u_workspace = total_u_entries > 0u
+      ? u_workspace + u_offsets[batch_local] : NULL;
+    const double row_max_abs =
+      kls_row_refactor_abs_max_from_values(pivot, row_u_workspace, u_len);
+    if (kls_parallel_row_refactor_rejects_pivot(worker, row, pivot,
+                                               row_max_abs)) {
+      status = -1;
+      free(panels);
+      goto cleanup_rows;
+    }
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, row,
                                           solver->symbolic->Q[row]);
@@ -30000,10 +30050,6 @@ static int kls_independent_row_try_multi_supernode_update(
       }
     }
     udiag[row] = pivot;
-    const UF_long u_begin = solver->row_refactor_u_ptr[row];
-    const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
-    double *row_u_workspace = total_u_entries > 0u
-      ? u_workspace + u_offsets[batch_local] : NULL;
     for (UF_long p = u_begin; p < u_end; ++p) {
       const UF_long offset = p - u_begin;
       solver->row_refactor_u_row_values[p] = row_u_workspace[offset];
