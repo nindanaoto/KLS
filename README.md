@@ -159,9 +159,22 @@ the row-refactor pattern and value mirrors no longer have to be reconstructed
 from packed KLU columns after a successful KLS-first row-up factor. Algorithm
 1-style dynamic column exchanges are reported as
 `kls_first_last_dynamic_column_pivots` and
-`kls_first_dynamic_column_pivot_count`. If that row-up-looking bridge is not
-eligible or still rejects a pivot, the pivoted KLS block tail still runs; it reuses
-KLS's retained factor-order input map when available, reported as
+`kls_first_dynamic_column_pivot_count`. When a retained METIS `NodeNDP`
+separator map covers the factor order, the dynamic selector follows
+SubtreeLU Algorithm 4 more closely: it tries the exact separator component
+first, then the strongest candidate before that component's last retained
+factor row, and only then falls back to the old global best candidate if the
+separator-scoped candidates do not satisfy the existing global pivot-quality
+guard. Stats report exact separator pivots through
+`kls_first_last_separator_dynamic_column_pivots` and
+`kls_first_separator_dynamic_column_pivot_count`, component-extent pivots
+through `kls_first_last_separator_extent_dynamic_column_pivots` and
+`kls_first_separator_extent_dynamic_column_pivot_count`, and global fallbacks
+through `kls_first_last_separator_dynamic_column_fallbacks` and
+`kls_first_separator_dynamic_column_fallback_count`. If that row-up-looking
+bridge is not eligible or still rejects a pivot, the pivoted KLS block tail
+still runs; it reuses KLS's retained factor-order input map when available,
+reported as
 `kls_tail_last_mapped_columns` and `kls_tail_mapped_column_count`, so the
 experimental first factor and accepted tail repairs can skip repeated original
 CSC row remapping for in-block entries. It also builds KLS-owned row-major
