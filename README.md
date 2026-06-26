@@ -646,10 +646,12 @@ existing up-looking update, batch dependencies load into the batch dependency
 vector, raw pivots and row-major `U` tails load directly into retained row
 storage, and compact panel loads place `L`, pivot, dense-`U`, and trailing-`U`
 entries through the retained destinations instead of searching the panel
-columns again. Exact compact-supernode batch consumers use the same retained
-compact-panel loader before applying producer updates, so their `L`, pivot,
-dense-`U`, and trailing-`U` inputs no longer stage through the sparse work
-vector just to populate the row-major panel. Stats report
+columns again. Exact, ragged, and fragmented compact-supernode batch consumers
+use the same retained compact-panel loader before applying producer updates, so
+their `L`, pivot, dense-`U`, and trailing-`U` inputs no longer stage through
+the sparse work vector just to populate the row-major panel; if a residual
+work-vector value remains for the same row-major slot, it is merged into the
+retained panel before publication. Stats report
 `row_refactor_last_sparse_segment_direct_input_rows`,
 `row_refactor_sparse_segment_direct_input_rows`,
 `row_refactor_last_batch_direct_input_rows`,

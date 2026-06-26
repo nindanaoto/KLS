@@ -28237,7 +28237,9 @@ static int kls_compact_dense_group_try_ragged_supernode_update(
         status = -1;
         goto cleanup;
       }
-      if (!direct_input) {
+      if (direct_input) {
+        row_dense_panel[dep - row_begin] += x[dep];
+      } else {
         row_dense_panel[dep - row_begin] = x[dep];
       }
       x[dep] = 0.0;
@@ -28265,7 +28267,9 @@ static int kls_compact_dense_group_try_ragged_supernode_update(
     }
     for (UF_long offset = 0; offset < dense_len; ++offset) {
       const UF_long col = row + 1u + offset;
-      if (!direct_input) {
+      if (direct_input) {
+        row_dense_panel[local_row + 1u + offset] += x[col];
+      } else {
         row_dense_panel[local_row + 1u + offset] = x[col];
       }
       x[col] = 0.0;
@@ -28273,7 +28277,9 @@ static int kls_compact_dense_group_try_ragged_supernode_update(
     if (trailing_len > 0u) {
       for (UF_long offset = 0; offset < trailing_len; ++offset) {
         const UF_long col = trailing_cols[offset];
-        if (!direct_input) {
+        if (direct_input) {
+          row_panel[offset] += x[col];
+        } else {
           row_panel[offset] = x[col];
         }
         x[col] = 0.0;
@@ -29052,7 +29058,9 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
         status = -1;
         goto cleanup_rows;
       }
-      if (!direct_input) {
+      if (direct_input) {
+        row_dense_panel[dep - row_begin] += x[dep];
+      } else {
         row_dense_panel[dep - row_begin] = x[dep];
       }
       x[dep] = 0.0;
@@ -29076,7 +29084,9 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
     }
     for (UF_long offset = 0; offset < dense_len; ++offset) {
       const UF_long col = row + 1u + offset;
-      if (!direct_input) {
+      if (direct_input) {
+        row_dense_panel[local_row + 1u + offset] += x[col];
+      } else {
         row_dense_panel[local_row + 1u + offset] = x[col];
       }
       x[col] = 0.0;
@@ -29085,7 +29095,9 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
       double *row_panel = trailing_panel + local_row * trailing_len;
       for (UF_long offset = 0; offset < trailing_len; ++offset) {
         const UF_long col = trailing_cols[offset];
-        if (!direct_input) {
+        if (direct_input) {
+          row_panel[offset] += x[col];
+        } else {
           row_panel[offset] = x[col];
         }
         x[col] = 0.0;

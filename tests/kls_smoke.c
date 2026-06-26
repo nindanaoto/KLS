@@ -5134,11 +5134,16 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
        stats.row_refactor_compact_supernode_batch_dep_rows <=
          (int64_t)lead * (int64_t)(mid / 2) ||
        stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       stats.row_refactor_last_compact_dense_panel_direct_input_rows <
+         stats.row_refactor_compact_supernode_batch_rows ||
+       stats.row_refactor_last_segment_target_input_rows <
+         stats.row_refactor_last_compact_dense_panel_direct_input_rows ||
        stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
        stats.row_refactor_compact_supernode_batch_rejected_work_count != 0)) {
     fprintf(stderr,
             "unexpected ragged batched compact-supernode stats: build_cblas=%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 ", target=%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
             ", rejected=%" PRId64 "\n",
@@ -5148,6 +5153,8 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
             stats.row_refactor_compact_supernode_batch_rows,
             stats.row_refactor_compact_supernode_batch_dep_rows,
             stats.row_refactor_compact_supernode_batch_entries,
+            stats.row_refactor_last_compact_dense_panel_direct_input_rows,
+            stats.row_refactor_last_segment_target_input_rows,
             stats.row_refactor_compact_supernode_batch_pattern_count,
             stats.row_refactor_compact_supernode_batch_pattern_rows,
             stats.row_refactor_compact_supernode_batch_candidate_count,
@@ -5271,12 +5278,17 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
        checked_stats.row_refactor_compact_supernode_batch_dep_rows <=
          (int64_t)lead * (int64_t)(mid / 2) ||
        checked_stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       checked_stats.row_refactor_last_compact_dense_panel_direct_input_rows <
+         checked_stats.row_refactor_compact_supernode_batch_rows ||
+       checked_stats.row_refactor_last_segment_target_input_rows <
+         checked_stats.row_refactor_last_compact_dense_panel_direct_input_rows ||
        checked_stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
        checked_stats.row_refactor_last_compact_dense_panel != 1)) {
     fprintf(stderr,
             "unexpected checked ragged batched compact-supernode stats:"
             " checked=%d/%d, batch=%d/%" PRId64
             "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 ", target=%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
             ", compact=%d/%" PRId64 "\n",
@@ -5287,6 +5299,8 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
             checked_stats.row_refactor_compact_supernode_batch_rows,
             checked_stats.row_refactor_compact_supernode_batch_dep_rows,
             checked_stats.row_refactor_compact_supernode_batch_entries,
+            checked_stats.row_refactor_last_compact_dense_panel_direct_input_rows,
+            checked_stats.row_refactor_last_segment_target_input_rows,
             checked_stats.row_refactor_compact_supernode_batch_pattern_count,
             checked_stats.row_refactor_compact_supernode_batch_pattern_rows,
             checked_stats.row_refactor_compact_supernode_batch_candidate_count,
@@ -7027,6 +7041,10 @@ static int test_dense_group_fragmented_multi_producer_update_probe(void) {
        stats.row_refactor_compact_supernode_batch_dep_rows <=
          (int64_t)(lead0 + lead1) * (int64_t)(mid / 2) ||
        stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       stats.row_refactor_last_compact_dense_panel_direct_input_rows <
+         stats.row_refactor_compact_supernode_batch_rows ||
+       stats.row_refactor_last_segment_target_input_rows <
+         stats.row_refactor_last_compact_dense_panel_direct_input_rows ||
        stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
        stats.row_refactor_dense_producer_run_count <
          (int64_t)2 * (int64_t)mid ||
@@ -7039,6 +7057,7 @@ static int test_dense_group_fragmented_multi_producer_update_probe(void) {
     fprintf(stderr,
             "unexpected dense fragmented stats: batch=%d/%" PRId64
             "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 ", target=%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
             ", rejected=%" PRId64
@@ -7051,6 +7070,8 @@ static int test_dense_group_fragmented_multi_producer_update_probe(void) {
             stats.row_refactor_compact_supernode_batch_rows,
             stats.row_refactor_compact_supernode_batch_dep_rows,
             stats.row_refactor_compact_supernode_batch_entries,
+            stats.row_refactor_last_compact_dense_panel_direct_input_rows,
+            stats.row_refactor_last_segment_target_input_rows,
             stats.row_refactor_compact_supernode_batch_pattern_count,
             stats.row_refactor_compact_supernode_batch_pattern_rows,
             stats.row_refactor_compact_supernode_batch_candidate_count,
@@ -7412,6 +7433,10 @@ static int test_dense_group_fragmented_target_map_probe(void) {
        stats.row_refactor_compact_supernode_batch_rows < mid - 1 ||
        stats.row_refactor_compact_supernode_batch_dep_rows <= lead0 ||
        stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       stats.row_refactor_last_compact_dense_panel_direct_input_rows <
+         stats.row_refactor_compact_supernode_batch_rows ||
+       stats.row_refactor_last_segment_target_input_rows <
+         stats.row_refactor_last_compact_dense_panel_direct_input_rows ||
        stats.row_refactor_compact_supernode_batch_candidate_count < 1 ||
        stats.row_refactor_dense_producer_run_count < mid + 1 ||
        stats.row_refactor_dense_producer_run_rows < mid ||
@@ -7428,6 +7453,7 @@ static int test_dense_group_fragmented_target_map_probe(void) {
     fprintf(stderr,
             "unexpected dense target-map stats: batch=%d/%" PRId64
             "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 ", target=%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", candidate=%" PRId64 "/%" PRId64 "/%" PRId64
             ", producer=%" PRId64 "/%" PRId64 " max=%" PRId64
@@ -7441,6 +7467,8 @@ static int test_dense_group_fragmented_target_map_probe(void) {
             stats.row_refactor_compact_supernode_batch_rows,
             stats.row_refactor_compact_supernode_batch_dep_rows,
             stats.row_refactor_compact_supernode_batch_entries,
+            stats.row_refactor_last_compact_dense_panel_direct_input_rows,
+            stats.row_refactor_last_segment_target_input_rows,
             stats.row_refactor_compact_supernode_batch_pattern_count,
             stats.row_refactor_compact_supernode_batch_pattern_rows,
             stats.row_refactor_compact_supernode_batch_candidate_count,
@@ -7616,6 +7644,10 @@ static int test_dense_group_fragmented_target_map_probe(void) {
        checked_stats.row_refactor_compact_supernode_batch_rows < mid - 1 ||
        checked_stats.row_refactor_compact_supernode_batch_dep_rows <= lead0 ||
        checked_stats.row_refactor_compact_supernode_batch_entries <= 0 ||
+       checked_stats.row_refactor_last_compact_dense_panel_direct_input_rows <
+         checked_stats.row_refactor_compact_supernode_batch_rows ||
+       checked_stats.row_refactor_last_segment_target_input_rows <
+         checked_stats.row_refactor_last_compact_dense_panel_direct_input_rows ||
        checked_stats.row_refactor_dense_producer_run_count < mid + 1 ||
        checked_stats.row_refactor_dense_producer_run_rows < mid ||
        checked_stats.row_refactor_dense_producer_run_max_per_row < 2 ||
@@ -7626,6 +7658,7 @@ static int test_dense_group_fragmented_target_map_probe(void) {
     fprintf(stderr,
             "unexpected checked dense target-map stats: checked=%d/%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64 ", target=%" PRId64
             ", pattern=%" PRId64 "/%" PRId64
             ", producer=%" PRId64 "/%" PRId64 " max=%" PRId64
             ", multi/fragmented=%" PRId64 "/%" PRId64
@@ -7637,6 +7670,8 @@ static int test_dense_group_fragmented_target_map_probe(void) {
             checked_stats.row_refactor_compact_supernode_batch_rows,
             checked_stats.row_refactor_compact_supernode_batch_dep_rows,
             checked_stats.row_refactor_compact_supernode_batch_entries,
+            checked_stats.row_refactor_last_compact_dense_panel_direct_input_rows,
+            checked_stats.row_refactor_last_segment_target_input_rows,
             checked_stats.row_refactor_compact_supernode_batch_pattern_count,
             checked_stats.row_refactor_compact_supernode_batch_pattern_rows,
             checked_stats.row_refactor_dense_producer_run_count,

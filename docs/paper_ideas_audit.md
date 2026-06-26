@@ -5120,3 +5120,14 @@ subrange compact-supernode smoke probes require compact direct-input and
 retained target counters to cover executed batch rows. This closes another
 storage-path mismatch; the larger open items remain production batched
 row-major kernels and the full CKTSO tail scheduler.
+
+The same retained compact-panel input contract now covers ragged and fragmented
+dense-consumer batches. The single-producer ragged path and the fragmented
+multi-producer dense-group path both direct-load raw `L`, pivot, dense-`U`, and
+trailing-`U` entries into the retained row-major panel, then merge any residual
+work-vector value for that slot before applying producer suffix updates. Their
+smoke fixtures now require compact direct-input rows and retained target-input
+rows to cover the executed compact-supernode batch rows, including the checked
+fragmented target-map case. This removes another KLU-shaped staging rule from
+the SubtreeLU-style compact batch executors without claiming to close the
+remaining production-kernel and CKTSO-tail work.
