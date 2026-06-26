@@ -1005,7 +1005,10 @@ int main(int argc, char **argv) {
            ",\"kls_first_last_separator_queue_pipeline_supernode_update_rows\":%" PRId64
            ",\"kls_first_last_separator_queue_pipeline_pivot_tail\":%d"
            ",\"kls_first_separator_queue_pipeline_pivot_tail_run_count\":%" PRId64
-           ",\"kls_first_last_separator_queue_pipeline_pivot_tail_rows\":%" PRId64,
+           ",\"kls_first_last_separator_queue_pipeline_pivot_tail_rows\":%" PRId64
+           ",\"kls_first_last_separator_queue_pipeline_pivot_restarts\":%" PRId64
+           ",\"kls_first_separator_queue_pipeline_pivot_restart_count\":%" PRId64
+           ",\"kls_first_last_separator_queue_pipeline_pivot_serial_rows\":%" PRId64,
            stats.kls_first_last_separator_queue_parallel_pipeline,
            stats.kls_first_separator_queue_parallel_pipeline_run_count,
            stats.kls_first_last_separator_queue_parallel_pipeline_rows,
@@ -1024,7 +1027,10 @@ int main(int argc, char **argv) {
            stats.kls_first_last_separator_queue_pipeline_supernode_update_rows,
            stats.kls_first_last_separator_queue_pipeline_pivot_tail,
            stats.kls_first_separator_queue_pipeline_pivot_tail_run_count,
-           stats.kls_first_last_separator_queue_pipeline_pivot_tail_rows);
+           stats.kls_first_last_separator_queue_pipeline_pivot_tail_rows,
+           stats.kls_first_last_separator_queue_pipeline_pivot_restarts,
+           stats.kls_first_separator_queue_pipeline_pivot_restart_count,
+           stats.kls_first_last_separator_queue_pipeline_pivot_serial_rows);
     printf(",\"fast_rejected_block_start\":%" PRId64
            ",\"fast_rejected_block_size\":%" PRId64
            ",\"fast_rejected_suffix_columns\":%" PRId64
@@ -1637,10 +1643,13 @@ int main(int argc, char **argv) {
            stats.kls_first_last_separator_queue_pipeline_supernode_update_groups,
            stats.kls_first_last_separator_queue_pipeline_supernode_update_rows);
     printf("KLS row-up-looking separator pipeline pivot tail: last %d"
-           ", runs %" PRId64 ", rows %" PRId64 "\n",
+           ", runs %" PRId64 ", rows %" PRId64
+           ", restarts %" PRId64 ", serial rows %" PRId64 "\n",
            stats.kls_first_last_separator_queue_pipeline_pivot_tail,
            stats.kls_first_separator_queue_pipeline_pivot_tail_run_count,
-           stats.kls_first_last_separator_queue_pipeline_pivot_tail_rows);
+           stats.kls_first_last_separator_queue_pipeline_pivot_tail_rows,
+           stats.kls_first_last_separator_queue_pipeline_pivot_restarts,
+           stats.kls_first_last_separator_queue_pipeline_pivot_serial_rows);
     printf("KLS row-up-looking parallel BTF blocks: last %" PRId64
            ", total %" PRId64 "\n",
            stats.kls_first_last_parallel_btf_blocks,

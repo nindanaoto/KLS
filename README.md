@@ -178,7 +178,13 @@ guard. Stats report exact separator pivots through
 through `kls_first_last_separator_extent_dynamic_column_pivots` and
 `kls_first_separator_extent_dynamic_column_pivot_count`, and global fallbacks
 through `kls_first_last_separator_dynamic_column_fallbacks` and
-`kls_first_separator_dynamic_column_fallback_count`. If that row-up-looking
+`kls_first_separator_dynamic_column_fallback_count`. If a guarded separator
+pipeline row still needs a dynamic pivot, KLS preserves the completed prefix,
+serializes that pivot row with the pivot-capable row-up kernel, and relaunches
+the remaining suffix through the pipeline; benchmark stats distinguish the
+restart envelope from actual serialized rows with
+`kls_first_last_separator_queue_pipeline_pivot_restarts` and
+`kls_first_last_separator_queue_pipeline_pivot_serial_rows`. If that row-up-looking
 bridge is not eligible or still rejects a pivot, the pivoted KLS block tail
 still runs; it reuses KLS's retained factor-order input map when available,
 reported as
