@@ -15542,14 +15542,17 @@ static UF_long kls_preferred_pivot_tail_restart_end(const kls_solver *solver,
   return restart_end > local_reject && restart_end < nk ? restart_end : nk;
 }
 
-static int kls_build_pivot_tail_restart_mask(const kls_solver *solver,
-                                             UF_long k1,
-                                             UF_long nk,
-                                             UF_long local_reject,
-                                             UF_long restart_end,
-                                             unsigned char *mask) {
-  if (solver == NULL || mask == NULL || local_reject >= nk ||
-      restart_end <= local_reject || restart_end > nk ||
+static int kls_build_pivot_tail_restart_mask_range(
+  const kls_solver *solver,
+  UF_long k1,
+  UF_long nk,
+  UF_long required_local_col,
+  UF_long restart_begin,
+  UF_long restart_end,
+  unsigned char *mask) {
+  if (solver == NULL || mask == NULL || required_local_col >= nk ||
+      restart_begin > required_local_col || restart_end <= required_local_col ||
+      restart_end > nk ||
       solver->fast_reject_tail_cols == NULL ||
       solver->fast_reject_tail_count == 0u) {
     return 0;
@@ -15561,12 +15564,93 @@ static int kls_build_pivot_tail_restart_mask(const kls_solver *solver,
       return 0;
     }
     const UF_long local_col = global_col - k1;
-    if (local_col < local_reject || local_col >= restart_end) {
+    if (local_col < restart_begin || local_col >= restart_end) {
       return 0;
     }
     mask[local_col] = 1u;
   }
-  return mask[local_reject] && mask[restart_end - 1u];
+  return mask[required_local_col] && mask[restart_begin] &&
+         mask[restart_end - 1u];
+}
+
+static int kls_build_pivot_tail_restart_mask(const kls_solver *solver,
+                                             UF_long k1,
+                                             UF_long nk,
+                                             UF_long local_reject,
+                                             UF_long restart_end,
+                                             unsigned char *mask) {
+  return kls_build_pivot_tail_restart_mask_range(
+    solver, k1, nk, local_reject, local_reject, restart_end, mask);
+}
+
+static int kls_pivot_tail_plan_local_range(
+  const kls_solver *solver,
+  UF_long k1,
+  UF_long nk,
+  UF_long local_reject,
+  UF_long *begin_out,
+  UF_long *end_out,
+  UF_long *columns_out,
+  int *contiguous_out,
+  int *suffix_exact_out) {
+  if (begin_out != NULL) {
+    *begin_out = 0;
+  }
+  if (end_out != NULL) {
+    *end_out = 0;
+  }
+  if (columns_out != NULL) {
+    *columns_out = 0;
+  }
+  if (contiguous_out != NULL) {
+    *contiguous_out = 0;
+  }
+  if (suffix_exact_out != NULL) {
+    *suffix_exact_out = 0;
+  }
+  if (solver == NULL || local_reject >= nk ||
+      solver->stats.fast_rejected_pivoting_tail_columns <= 0 ||
+      !solver->stats.fast_rejected_pivoting_tail_contains_reject ||
+      !solver->stats.fast_rejected_pivoting_tail_topological ||
+      solver->stats.fast_rejected_pivoting_tail_first < (int64_t)k1 ||
+      solver->stats.fast_rejected_pivoting_tail_last <
+        solver->stats.fast_rejected_pivoting_tail_first ||
+      solver->stats.fast_rejected_pivoting_tail_last >=
+        (int64_t)(k1 + nk) ||
+      solver->stats.fast_rejected_pivoting_tail_first >
+        (int64_t)(k1 + local_reject) ||
+      solver->stats.fast_rejected_pivoting_tail_last <
+        (int64_t)(k1 + local_reject)) {
+    return 0;
+  }
+  const UF_long begin =
+    (UF_long)solver->stats.fast_rejected_pivoting_tail_first - k1;
+  const UF_long end =
+    (UF_long)solver->stats.fast_rejected_pivoting_tail_last - k1 + 1u;
+  const UF_long columns =
+    (UF_long)solver->stats.fast_rejected_pivoting_tail_columns;
+  if (begin > local_reject || end <= local_reject || end > nk ||
+      columns == 0u || columns > end - begin) {
+    return 0;
+  }
+  if (begin_out != NULL) {
+    *begin_out = begin;
+  }
+  if (end_out != NULL) {
+    *end_out = end;
+  }
+  if (columns_out != NULL) {
+    *columns_out = columns;
+  }
+  if (contiguous_out != NULL) {
+    *contiguous_out =
+      solver->stats.fast_rejected_pivoting_tail_contiguous ? 1 : 0;
+  }
+  if (suffix_exact_out != NULL) {
+    *suffix_exact_out =
+      solver->stats.fast_rejected_pivoting_tail_suffix_exact ? 1 : 0;
+  }
+  return 1;
 }
 
 static int kls_try_pivot_tail_restart_rejected_block(
@@ -16022,6 +16106,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
                                                  UF_long k1,
                                                  UF_long nk,
                                                  UF_long rejected_pivot,
+                                                 UF_long repaired_tail_begin,
                                                  UF_long repaired_tail_end,
                                                  UF_long skipped_columns,
                                                  double skipped_work,
@@ -16034,6 +16119,9 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
   }
 
   const UF_long local_reject = rejected_pivot - k1;
+  if (repaired_tail_begin > local_reject || repaired_tail_begin >= nk) {
+    repaired_tail_begin = local_reject;
+  }
   UF_long first_changed = KLS_KLU_EMPTY;
   UF_long prefix_changed = 0;
   UF_long suffix_changed = 0;
@@ -16059,7 +16147,7 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
   if (!valid) {
     return;
   }
-  if (repaired_tail_end <= local_reject || repaired_tail_end > nk) {
+  if (repaired_tail_end <= repaired_tail_begin || repaired_tail_end > nk) {
     repaired_tail_end = nk;
   }
   if (skipped_columns > nk) {
@@ -16090,16 +16178,17 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
   const int serial_tail_state =
     solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX ||
     solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_ALL;
+  const UF_long repaired_tail_global_begin = k1 + repaired_tail_begin;
   solver->stats.fast_repaired_tail_restart_ready =
     serial_tail_state &&
-    (local_reject > 0u || repaired_tail_end < nk || skipped_columns > 0u) &&
-    prefix_changed == 0u &&
-    (first_changed == KLS_KLU_EMPTY || first_changed >= rejected_pivot) &&
-    suffix_changed > 0u &&
+    (repaired_tail_begin > 0u || repaired_tail_end < nk ||
+     skipped_columns > 0u) &&
+    (first_changed == KLS_KLU_EMPTY ||
+     first_changed >= repaired_tail_global_begin) &&
     pivoting_tail_ready;
   if (solver->stats.fast_repaired_tail_restart_ready &&
       !kls_repaired_tail_prefix_state_valid(solver, block, k1, nk,
-                                            local_reject, pblock)) {
+                                            repaired_tail_begin, pblock)) {
     solver->stats.fast_repaired_tail_restart_ready = 0;
   }
   double block_work = 0.0;
@@ -16108,9 +16197,9 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
     if (solver->stats.fast_repaired_tail_restart_ready) {
       UF_long tail_columns = 0;
       double tail_work = 0.0;
-      if (kls_fast_reject_range_work(solver, block, k1, nk, local_reject,
-                                     repaired_tail_end, &tail_columns,
-                                     &tail_work)) {
+      if (kls_fast_reject_range_work(
+            solver, block, k1, nk, repaired_tail_begin, repaired_tail_end,
+            &tail_columns, &tail_work)) {
         const UF_long actual_tail_columns =
           skipped_columns < tail_columns ? tail_columns - skipped_columns
                                          : 0u;
@@ -16538,7 +16627,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     solver->numeric->Pnum[k1 + k] = solver->symbolic->P[k1 + local_row];
   }
   kls_record_fast_repaired_block_stats(solver, block, k1, nk, rejected_pivot,
-                                       repaired_tail_end,
+                                       local_reject, repaired_tail_end,
                                        repaired_tail_skipped_columns,
                                        repaired_tail_skipped_work,
                                        repaired_tail_exact_mask,
@@ -46059,40 +46148,32 @@ static int kls_try_row_first_rebuild_rejected_block(
   shared.force_block_pipeline = solver->options.threads > 1 && nk > 1u;
   shared.block_pipeline_thread_count = solver->options.threads;
   const UF_long local_reject = rejected_pivot - k1;
+  UF_long tail_begin = 0;
+  UF_long tail_end = 0;
+  UF_long tail_columns = 0;
+  int tail_contiguous = 0;
+  int tail_suffix_exact = 0;
+  UF_long repaired_tail_begin = local_reject;
   if (shared.force_block_pipeline &&
-      solver->stats.fast_rejected_pivoting_tail_suffix_exact &&
-      solver->stats.fast_rejected_pivoting_tail_topological &&
-      solver->stats.fast_rejected_pivoting_tail_first ==
-        (int64_t)rejected_pivot &&
-      solver->stats.fast_rejected_pivoting_tail_last ==
-        (int64_t)(k1 + nk - 1u) &&
-      solver->stats.fast_rejected_pivoting_tail_columns ==
-        (int64_t)(nk - local_reject)) {
-    shared.block_pipeline_begin = local_reject;
-    shared.block_pipeline_end = nk;
-  } else if (shared.force_block_pipeline &&
-             solver->stats.fast_rejected_pivoting_tail_contiguous &&
-             !solver->stats.fast_rejected_pivoting_tail_suffix_exact &&
-             solver->stats.fast_rejected_pivoting_tail_topological &&
-             solver->stats.fast_rejected_pivoting_tail_first ==
-               (int64_t)rejected_pivot &&
-             solver->stats.fast_rejected_pivoting_tail_last >=
-               (int64_t)rejected_pivot &&
-             solver->stats.fast_rejected_pivoting_tail_last <
-               (int64_t)(k1 + nk - 1u) &&
-             solver->stats.fast_rejected_pivoting_tail_columns > 0) {
-    const UF_long restart_end =
-      (UF_long)solver->stats.fast_rejected_pivoting_tail_last - k1 + 1u;
-    if (restart_end > local_reject && restart_end < nk &&
-        solver->stats.fast_rejected_pivoting_tail_columns ==
-          (int64_t)(restart_end - local_reject)) {
+      kls_pivot_tail_plan_local_range(
+        solver, k1, nk, local_reject, &tail_begin, &tail_end,
+        &tail_columns, &tail_contiguous, &tail_suffix_exact)) {
+    if (tail_suffix_exact &&
+        tail_begin == local_reject &&
+        tail_end == nk &&
+        tail_columns == nk - local_reject) {
+      shared.block_pipeline_begin = local_reject;
+      shared.block_pipeline_end = nk;
+      repaired_tail_begin = local_reject;
+    } else if (tail_contiguous &&
+               tail_columns == tail_end - tail_begin) {
       const size_t nk_size = (size_t)nk;
       unsigned char *tail_mask = (UF_long)nk_size == nk
         ? (unsigned char *)malloc(nk_size * sizeof(*tail_mask)) : NULL;
       const int mask_ok =
         tail_mask != NULL &&
-        kls_build_pivot_tail_restart_mask(
-          solver, k1, nk, local_reject, restart_end, tail_mask);
+        kls_build_pivot_tail_restart_mask_range(
+          solver, k1, nk, local_reject, tail_begin, tail_end, tail_mask);
       const int refresh_ok =
         mask_ok &&
         (solver->fast_reject_refresh_state !=
@@ -46101,27 +46182,11 @@ static int kls_try_row_first_rebuild_rejected_block(
            solver, numeric_values, block, k1, nk, tail_mask));
       free(tail_mask);
       if (refresh_ok) {
-        shared.block_pipeline_begin = local_reject;
-        shared.block_pipeline_end = restart_end;
+        shared.block_pipeline_begin = tail_begin;
+        shared.block_pipeline_end = tail_end;
+        repaired_tail_begin = tail_begin;
       }
-    }
-  } else if (shared.force_block_pipeline &&
-             !solver->stats.fast_rejected_pivoting_tail_contiguous &&
-             !solver->stats.fast_rejected_pivoting_tail_suffix_exact &&
-             solver->stats.fast_rejected_pivoting_tail_topological &&
-             solver->stats.fast_rejected_pivoting_tail_first ==
-               (int64_t)rejected_pivot &&
-             solver->stats.fast_rejected_pivoting_tail_last >=
-               (int64_t)rejected_pivot &&
-             solver->stats.fast_rejected_pivoting_tail_last <
-               (int64_t)(k1 + nk) &&
-             solver->stats.fast_rejected_pivoting_tail_columns > 0) {
-    const UF_long restart_end =
-      (UF_long)solver->stats.fast_rejected_pivoting_tail_last - k1 + 1u;
-    const int64_t tail_columns =
-      solver->stats.fast_rejected_pivoting_tail_columns;
-    if (restart_end > local_reject && restart_end <= nk &&
-        tail_columns > 0 && (uint64_t)tail_columns <= (uint64_t)nk) {
+    } else {
       const size_t nk_size = (size_t)nk;
       if ((UF_long)nk_size == nk) {
         pipeline_active_mask =
@@ -46129,13 +46194,14 @@ static int kls_try_row_first_rebuild_rejected_block(
       }
       const int mask_ok =
         pipeline_active_mask != NULL &&
-        kls_build_pivot_tail_restart_mask(
-          solver, k1, nk, local_reject, restart_end, pipeline_active_mask);
+        kls_build_pivot_tail_restart_mask_range(
+          solver, k1, nk, local_reject, tail_begin, tail_end,
+          pipeline_active_mask);
       UF_long active_rows = 0;
       if (mask_ok) {
         for (UF_long row = 0; row < nk; ++row) {
           if (pipeline_active_mask[row]) {
-            if (row < local_reject || row >= restart_end) {
+            if (row < tail_begin || row >= tail_end) {
               active_rows = UF_long_max;
               break;
             }
@@ -46151,8 +46217,9 @@ static int kls_try_row_first_rebuild_rejected_block(
          kls_refresh_pivot_tail_preserved_block_columns(
            solver, numeric_values, block, k1, nk, pipeline_active_mask));
       if (refresh_ok) {
-        shared.block_pipeline_begin = local_reject;
-        shared.block_pipeline_end = restart_end;
+        shared.block_pipeline_begin = tail_begin;
+        shared.block_pipeline_end = tail_end;
+        repaired_tail_begin = tail_begin;
         shared.block_pipeline_active_mask = pipeline_active_mask;
         shared.block_pipeline_active_rows = active_rows;
       } else {
@@ -46197,10 +46264,11 @@ static int kls_try_row_first_rebuild_rejected_block(
   int offdiag_refreshed = 0;
   solver->fast_repaired_last_offdiag_suffix_refresh = 0;
   if (kls_row_first_repaired_prefix_unchanged(
-        solver, k1, local_reject, saved_pnum, saved_q_block, q_order)) {
+        solver, k1, repaired_tail_begin, saved_pnum, saved_q_block,
+        q_order)) {
     offdiag_refreshed =
       kls_recompute_offdiag_suffix_from_pinv(solver, numeric_values,
-                                             rejected_pivot);
+                                             k1 + repaired_tail_begin);
     if (offdiag_refreshed) {
       solver->fast_repaired_last_offdiag_suffix_refresh = 1;
       solver->fast_repaired_offdiag_suffix_refresh_count++;
@@ -46250,7 +46318,7 @@ static int kls_try_row_first_rebuild_rejected_block(
   int repaired_tail_exact_mask = 0;
   if (shared.block_pipeline_active_mask != NULL) {
     repaired_tail_end = nk;
-    for (UF_long k = local_reject; k < nk; ++k) {
+    for (UF_long k = repaired_tail_begin; k < nk; ++k) {
       if (shared.block_pipeline_active_mask[k]) {
         continue;
       }
@@ -46276,7 +46344,8 @@ static int kls_try_row_first_rebuild_rejected_block(
     repaired_tail_exact_mask = 1;
   }
   kls_record_fast_repaired_block_stats(
-    solver, block, k1, nk, rejected_pivot, repaired_tail_end,
+    solver, block, k1, nk, rejected_pivot, repaired_tail_begin,
+    repaired_tail_end,
     repaired_tail_skipped_columns, repaired_tail_skipped_work,
     repaired_tail_exact_mask, old_pblock, pblock_out);
   if (old_lu != NULL) {

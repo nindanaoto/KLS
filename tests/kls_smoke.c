@@ -855,6 +855,10 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
              stats.fast_kls_block_restart_last_row_pipeline_gap_rows != 1 ||
              stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 0 ||
              stats.fast_kls_block_restart_last_row_pipeline_threads < 1 ||
+             stats.fast_repaired_tail_restart_exact_mask != 1 ||
+             stats.fast_repaired_tail_restart_columns !=
+               stats.fast_rejected_pivoting_tail_columns ||
+             stats.fast_repaired_tail_restart_overcompute_columns != 0 ||
              stats.fast_repaired_last_offdiag_suffix_refresh != 1 ||
              stats.fast_repaired_offdiag_suffix_refresh_count != 1 ||
              stats.fast_repaired_offdiag_full_refresh_count != 0)) {
@@ -866,6 +870,8 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             ", pipeline=%d, pipeline_rows=%" PRId64
             ", pipeline_gaps=%" PRId64 ", pipeline_suffix=%" PRId64
             ", pipeline_threads=%" PRId64
+            ", exact_mask=%d, repaired_cols=%" PRId64
+            ", over_cols=%" PRId64
             ", offdiag_suffix=%d, offdiag_suffix_count=%" PRId64
             ", offdiag_full_count=%" PRId64
             ", supernode_groups=%" PRId64 ", supernode_rows=%" PRId64
@@ -884,6 +890,9 @@ static int test_fast_factor_noncontiguous_tail_gap_work_bounds(void) {
             stats.fast_kls_block_restart_last_row_pipeline_gap_rows,
             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows,
             stats.fast_kls_block_restart_last_row_pipeline_threads,
+            stats.fast_repaired_tail_restart_exact_mask,
+            stats.fast_repaired_tail_restart_columns,
+            stats.fast_repaired_tail_restart_overcompute_columns,
             stats.fast_repaired_last_offdiag_suffix_refresh,
             stats.fast_repaired_offdiag_suffix_refresh_count,
             stats.fast_repaired_offdiag_full_refresh_count,

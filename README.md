@@ -944,9 +944,10 @@ the restartable row pipeline before the older serial/KLU fallbacks, the number
 of those block-repair pipeline runs, their processed rows, active worker count,
 how many prefix and suffix rows were preserved around an exact tail-envelope
 pipeline, grouped supernode and cached-panel update rows used inside the
-pipeline, whether accepted row-first or serial tail repairs refreshed only the
-off-diagonal suffix after proving the prefix unchanged, and pivot-tail serial
-restart work, and
+pipeline, whether row-first block repair used the retained pivoting-tail
+first/last row range with active masks for non-contiguous gap rows, whether
+accepted row-first or serial tail repairs refreshed only the off-diagonal suffix
+after proving the prefix unchanged, and pivot-tail serial restart work, and
 the number of serial tail restarts actually executed, plus whether
 repaired serial-tail restarts refreshed only the off-diagonal suffix or rebuilt
 all off-diagonal entries, and whether a non-contiguous serial repair exactly
@@ -1334,11 +1335,12 @@ unscaled and KLU row-scaled repair states, followed by a quality-checked
 KLS-first whole-numeric rebuild, before KLU block fallback. CKTSO's paper goes
 further: a production row-major up-looking
 factorization, EGraph pivot checks, and ETree-scheduled pipelined tail
-factorization. The generic sparse segment direct-load path and first-consumer
-ready-panel publication narrow the current refactor bridge, but the next larger
-algorithmic work is still to evolve the numeric factor/refactor/solve kernels
-toward those deeper KLS-owned sparse kernels while keeping the public API and
-benchmark harness stable.
+factorization. The generic sparse segment direct-load path, first-consumer
+ready-panel publication, and range-aware row-first use of retained pivoting-tail
+envelopes narrow the current refactor bridge, but the next larger algorithmic
+work is still to evolve the numeric factor/refactor/solve kernels toward those
+deeper KLS-owned sparse kernels while keeping the public API and benchmark
+harness stable.
 
 ## License
 
