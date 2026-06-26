@@ -170,7 +170,15 @@ from packed KLU columns after a successful KLS-first row-up factor. Algorithm
 reported through `kls_first_last_row_supernode_update`,
 `kls_first_row_supernode_update_run_count`,
 `kls_first_last_row_supernode_update_groups`, and
-`kls_first_last_row_supernode_update_rows`. Algorithm
+`kls_first_last_row_supernode_update_rows`. The KLS-first separator pipeline
+also publishes phase-local dense/common-tail panels for the stable private
+prefix and consumes those panels before falling back to row-entry validation;
+actual panel-backed use is reported through
+`kls_first_last_separator_queue_pipeline_supernode_panel_update`,
+`kls_first_separator_queue_pipeline_supernode_panel_update_run_count`,
+`kls_first_last_separator_queue_pipeline_supernode_panel_update_groups`, and
+`kls_first_last_separator_queue_pipeline_supernode_panel_update_rows`.
+Dynamic column exchanges invalidate the phase-local panel cache. Algorithm
 1-style dynamic column exchanges are reported as
 `kls_first_last_dynamic_column_pivots` and
 `kls_first_dynamic_column_pivot_count`. When a retained METIS `NodeNDP`

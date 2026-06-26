@@ -4829,7 +4829,22 @@ paths. Stats now expose actual use through
 `kls_first_last_row_supernode_update`,
 `kls_first_last_row_supernode_update_groups`, and
 `kls_first_last_row_supernode_update_rows`, separate from the older
-separator-pipeline-only counter. It still does not claim the full paper storage
-layer: KLS does not yet publish persistent BLAS panels for KLS-first
-supernodes, and CKTSO's full ETree-descendant pivoting-tail scheduler remains
-open.
+separator-pipeline-only counter.
+
+KLS now fills the first persistent-panel part of that storage gap for the
+KLS-first separator pipeline. At the start of each ordered pipeline phase, the
+stable private-prefix `U` snapshot is scanned for validated row-supernodes and
+published as phase-local dense upper-triangular panels plus a common trailing
+column list. Pipeline workers try that cache before revalidating row entries,
+so repeated consumers no longer rebuild the same private-prefix panel. A
+dynamic column exchange disables the phase cache because the stored tail layout
+is tied to the pre-pivot column order. Benchmark output reports actual
+panel-backed use through
+`kls_first_last_separator_queue_pipeline_supernode_panel_update`,
+`kls_first_separator_queue_pipeline_supernode_panel_update_run_count`,
+`kls_first_last_separator_queue_pipeline_supernode_panel_update_groups`, and
+`kls_first_last_separator_queue_pipeline_supernode_panel_update_rows`. This is
+still not the full paper storage layer: phase-local private-prefix panels do
+not yet cover every KLS-first private/BTF/serial producer, the KLS-first panel
+consumer is still scalar rather than BLAS-backed, and CKTSO's full
+ETree-descendant pivoting-tail scheduler remains open.

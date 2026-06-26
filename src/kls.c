@@ -550,6 +550,10 @@ struct kls_solver {
   UF_long kls_first_separator_queue_pipeline_supernode_update_run_count;
   UF_long kls_first_last_separator_queue_pipeline_supernode_update_groups;
   UF_long kls_first_last_separator_queue_pipeline_supernode_update_rows;
+  int kls_first_last_separator_queue_pipeline_supernode_panel_update;
+  UF_long kls_first_separator_queue_pipeline_supernode_panel_update_run_count;
+  UF_long kls_first_last_separator_queue_pipeline_supernode_panel_update_groups;
+  UF_long kls_first_last_separator_queue_pipeline_supernode_panel_update_rows;
   int kls_first_last_separator_queue_pipeline_pivot_tail;
   UF_long kls_first_separator_queue_pipeline_pivot_tail_run_count;
   UF_long kls_first_last_separator_queue_pipeline_pivot_tail_rows;
@@ -2600,6 +2604,11 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_separator_queue_pipeline_supernode_update = 0;
   solver->kls_first_last_separator_queue_pipeline_supernode_update_groups = 0;
   solver->kls_first_last_separator_queue_pipeline_supernode_update_rows = 0;
+  solver->kls_first_last_separator_queue_pipeline_supernode_panel_update = 0;
+  solver->kls_first_last_separator_queue_pipeline_supernode_panel_update_groups =
+    0;
+  solver->kls_first_last_separator_queue_pipeline_supernode_panel_update_rows =
+    0;
   solver->kls_first_last_separator_queue_pipeline_pivot_tail = 0;
   solver->kls_first_last_separator_queue_pipeline_pivot_tail_rows = 0;
   solver->kls_first_last_separator_queue_pipeline_pivot_restarts = 0;
@@ -2644,6 +2653,12 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
     0;
   solver->stats.kls_first_last_separator_queue_pipeline_supernode_update_rows =
     0;
+  solver->stats.kls_first_last_separator_queue_pipeline_supernode_panel_update =
+    0;
+  solver->stats
+    .kls_first_last_separator_queue_pipeline_supernode_panel_update_groups = 0;
+  solver->stats
+    .kls_first_last_separator_queue_pipeline_supernode_panel_update_rows = 0;
   solver->stats.kls_first_last_separator_queue_pipeline_pivot_tail = 0;
   solver->stats.kls_first_last_separator_queue_pipeline_pivot_tail_rows = 0;
   solver->stats.kls_first_last_separator_queue_pipeline_pivot_restarts = 0;
@@ -11163,6 +11178,20 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.kls_first_last_separator_queue_pipeline_supernode_update_rows =
     (int64_t)
       solver->kls_first_last_separator_queue_pipeline_supernode_update_rows;
+  solver->stats.kls_first_last_separator_queue_pipeline_supernode_panel_update =
+    solver->kls_first_last_separator_queue_pipeline_supernode_panel_update;
+  solver->stats
+    .kls_first_separator_queue_pipeline_supernode_panel_update_run_count =
+      (int64_t)solver
+        ->kls_first_separator_queue_pipeline_supernode_panel_update_run_count;
+  solver->stats
+    .kls_first_last_separator_queue_pipeline_supernode_panel_update_groups =
+      (int64_t)solver
+        ->kls_first_last_separator_queue_pipeline_supernode_panel_update_groups;
+  solver->stats
+    .kls_first_last_separator_queue_pipeline_supernode_panel_update_rows =
+      (int64_t)solver
+        ->kls_first_last_separator_queue_pipeline_supernode_panel_update_rows;
   solver->stats.kls_first_last_separator_queue_pipeline_pivot_tail =
     solver->kls_first_last_separator_queue_pipeline_pivot_tail;
   solver->stats.kls_first_separator_queue_pipeline_pivot_tail_run_count =
@@ -38657,6 +38686,9 @@ typedef struct kls_row_first_block_context {
   double tol;
 } kls_row_first_block_context;
 
+typedef struct kls_row_first_supernode_panel_cache
+  kls_row_first_supernode_panel_cache;
+
 typedef struct kls_row_first_workspace {
   double *x;
   double *supernode_workspace;
@@ -38666,6 +38698,7 @@ typedef struct kls_row_first_workspace {
   UF_long *u_row_ptr;
   UF_long *u_row_end;
   UF_long supernode_workspace_capacity;
+  const kls_row_first_supernode_panel_cache *supernode_panel_cache;
 } kls_row_first_workspace;
 
 typedef struct kls_row_first_partial_row {
@@ -38717,7 +38750,8 @@ static int kls_row_first_partial_apply_supernode_run(
   kls_row_first_partial_row *state,
   UF_long dep_begin,
   UF_long dep_end,
-  UF_long *run_rows_out);
+  UF_long *run_rows_out,
+  int *used_panel_out);
 
 static UF_long kls_row_first_owned_supernode_end(
   const kls_row_first_entries *u_entries,
@@ -38996,7 +39030,7 @@ static int kls_row_first_factor_one_row(
       if (!kls_row_first_partial_apply_supernode_run(
             ctx, workspace, l_entries, u_entries, udiag_values,
             workspace->u_row_ptr, workspace->u_row_end, &state, dep,
-            run_end, &run_rows)) {
+            run_end, &run_rows, NULL)) {
         return 0;
       }
     } else if (!kls_row_first_partial_apply_one_dep(
@@ -39588,6 +39622,322 @@ static int kls_row_first_u_rows_fit_supernode(
   return p == pend && q == qend;
 }
 
+struct kls_row_first_supernode_panel_cache {
+  UF_long *panel_id_by_row;
+  UF_long *start;
+  UF_long *width;
+  UF_long *tail_begin;
+  UF_long *tail_len;
+  UF_long *dense_begin;
+  UF_long *tail_value_begin;
+  UF_long *tail_cols;
+  double *dense_values;
+  double *tail_values;
+  UF_long row_count;
+  UF_long panel_count;
+  UF_long tail_col_count;
+  UF_long dense_value_count;
+  UF_long tail_value_count;
+  int enabled;
+};
+
+static void kls_row_first_supernode_panel_cache_free(
+  kls_row_first_supernode_panel_cache *cache) {
+  if (cache == NULL) {
+    return;
+  }
+  free(cache->panel_id_by_row);
+  free(cache->start);
+  free(cache->width);
+  free(cache->tail_begin);
+  free(cache->tail_len);
+  free(cache->dense_begin);
+  free(cache->tail_value_begin);
+  free(cache->tail_cols);
+  free(cache->dense_values);
+  free(cache->tail_values);
+  memset(cache, 0, sizeof(*cache));
+}
+
+static int kls_row_first_supernode_panel_shape(
+  const kls_row_first_entries *u_entries,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  UF_long nk,
+  UF_long start,
+  UF_long end,
+  UF_long *tail_len_out) {
+  if (tail_len_out != NULL) {
+    *tail_len_out = 0;
+  }
+  if (u_entries == NULL || u_row_ptr == NULL || u_row_end == NULL ||
+      start >= nk || end <= start || end >= nk ||
+      u_row_ptr[end] > u_row_end[end] ||
+      u_row_end[end] > u_entries->count) {
+    return 0;
+  }
+  const UF_long tail_begin = u_row_ptr[end];
+  const UF_long tail_len = u_row_end[end] - tail_begin;
+  for (UF_long dep = start; dep <= end; ++dep) {
+    if (u_row_ptr[dep] > u_row_end[dep] ||
+        u_row_end[dep] > u_entries->count) {
+      return 0;
+    }
+    const UF_long row_begin = u_row_ptr[dep];
+    const UF_long row_end = u_row_end[dep];
+    const UF_long internal_len = end - dep;
+    if (row_end - row_begin < internal_len ||
+        row_end - row_begin - internal_len != tail_len) {
+      return 0;
+    }
+    for (UF_long offset = 0; offset < internal_len; ++offset) {
+      const UF_long col = u_entries->col[row_begin + offset];
+      if (col != dep + offset + 1u || col >= nk) {
+        return 0;
+      }
+    }
+    for (UF_long offset = 0; offset < tail_len; ++offset) {
+      const UF_long col =
+        u_entries->col[row_begin + internal_len + offset];
+      if (tail_begin + offset >= u_entries->count ||
+          col != u_entries->col[tail_begin + offset] ||
+          col <= end || col >= nk) {
+        return 0;
+      }
+    }
+  }
+  if (tail_len_out != NULL) {
+    *tail_len_out = tail_len;
+  }
+  return 1;
+}
+
+static int kls_row_first_supernode_panel_cache_add_sizes(
+  UF_long width,
+  UF_long tail_len,
+  UF_long *dense_values_out,
+  UF_long *tail_values_out,
+  UF_long *tail_cols_out) {
+  if (dense_values_out == NULL || tail_values_out == NULL ||
+      tail_cols_out == NULL ||
+      width == 0u ||
+      width > UF_long_max / width ||
+      (tail_len > 0u && width > UF_long_max / tail_len)) {
+    return 0;
+  }
+  const UF_long dense_values = width * width;
+  const UF_long tail_values = width * tail_len;
+  if (*dense_values_out > UF_long_max - dense_values ||
+      *tail_values_out > UF_long_max - tail_values ||
+      *tail_cols_out > UF_long_max - tail_len) {
+    return 0;
+  }
+  *dense_values_out += dense_values;
+  *tail_values_out += tail_values;
+  *tail_cols_out += tail_len;
+  return 1;
+}
+
+static int kls_row_first_supernode_panel_cache_size_fits(
+  UF_long count,
+  size_t entry_size) {
+  return count == 0u || entry_size == 0u ||
+    count <= (UF_long)(SIZE_MAX / entry_size);
+}
+
+static int kls_row_first_supernode_panel_cache_build(
+  kls_row_first_supernode_panel_cache *cache,
+  const kls_row_first_entries *u_entries,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  const unsigned char *row_done,
+  const UF_long *supernode_start,
+  const UF_long *supernode_end,
+  UF_long nk,
+  UF_long ready_count) {
+  if (cache == NULL) {
+    return 0;
+  }
+  kls_row_first_supernode_panel_cache_free(cache);
+  if (u_entries == NULL || u_row_ptr == NULL || u_row_end == NULL ||
+      supernode_start == NULL || supernode_end == NULL ||
+      ready_count > nk ||
+      !kls_row_first_supernode_panel_cache_size_fits(nk, sizeof(UF_long))) {
+    return 0;
+  }
+
+  UF_long panel_count = 0;
+  UF_long dense_value_count = 0;
+  UF_long tail_value_count = 0;
+  UF_long tail_col_count = 0;
+  for (UF_long row = 0; row < ready_count; ++row) {
+    if (supernode_start[row] != row) {
+      continue;
+    }
+    const UF_long end = supernode_end[row];
+    if (end <= row || end >= ready_count) {
+      continue;
+    }
+    int all_done = 1;
+    if (row_done != NULL) {
+      for (UF_long dep = row; dep <= end; ++dep) {
+        if (row_done[dep] == 0u) {
+          all_done = 0;
+          break;
+        }
+      }
+    }
+    if (!all_done) {
+      continue;
+    }
+    UF_long tail_len = 0;
+    if (!kls_row_first_supernode_panel_shape(
+          u_entries, u_row_ptr, u_row_end, nk, row, end, &tail_len)) {
+      continue;
+    }
+    const UF_long width = end - row + 1u;
+    if (!kls_row_first_supernode_panel_cache_add_sizes(
+          width, tail_len, &dense_value_count, &tail_value_count,
+          &tail_col_count)) {
+      return 0;
+    }
+    panel_count++;
+    row = end;
+  }
+
+  cache->panel_id_by_row =
+    (UF_long *)malloc((size_t)nk * sizeof(*cache->panel_id_by_row));
+  if (cache->panel_id_by_row == NULL && nk > 0u) {
+    kls_row_first_supernode_panel_cache_free(cache);
+    return 0;
+  }
+  for (UF_long row = 0; row < nk; ++row) {
+    cache->panel_id_by_row[row] = KLS_KLU_EMPTY;
+  }
+  cache->row_count = nk;
+  if (panel_count == 0u) {
+    return 1;
+  }
+  if (!kls_row_first_supernode_panel_cache_size_fits(
+        panel_count, sizeof(UF_long)) ||
+      !kls_row_first_supernode_panel_cache_size_fits(
+        dense_value_count, sizeof(double)) ||
+      !kls_row_first_supernode_panel_cache_size_fits(
+        tail_value_count, sizeof(double)) ||
+      !kls_row_first_supernode_panel_cache_size_fits(
+        tail_col_count, sizeof(UF_long))) {
+    kls_row_first_supernode_panel_cache_free(cache);
+    return 0;
+  }
+
+  cache->start =
+    (UF_long *)malloc((size_t)panel_count * sizeof(*cache->start));
+  cache->width =
+    (UF_long *)malloc((size_t)panel_count * sizeof(*cache->width));
+  cache->tail_begin =
+    (UF_long *)malloc((size_t)panel_count * sizeof(*cache->tail_begin));
+  cache->tail_len =
+    (UF_long *)malloc((size_t)panel_count * sizeof(*cache->tail_len));
+  cache->dense_begin =
+    (UF_long *)malloc((size_t)panel_count * sizeof(*cache->dense_begin));
+  cache->tail_value_begin =
+    (UF_long *)malloc((size_t)panel_count *
+                      sizeof(*cache->tail_value_begin));
+  cache->tail_cols = tail_col_count > 0u
+    ? (UF_long *)malloc((size_t)tail_col_count * sizeof(*cache->tail_cols))
+    : NULL;
+  cache->dense_values =
+    (double *)calloc((size_t)dense_value_count,
+                     sizeof(*cache->dense_values));
+  cache->tail_values = tail_value_count > 0u
+    ? (double *)malloc((size_t)tail_value_count *
+                       sizeof(*cache->tail_values))
+    : NULL;
+  if (cache->start == NULL || cache->width == NULL ||
+      cache->tail_begin == NULL || cache->tail_len == NULL ||
+      cache->dense_begin == NULL || cache->tail_value_begin == NULL ||
+      (tail_col_count > 0u && cache->tail_cols == NULL) ||
+      cache->dense_values == NULL ||
+      (tail_value_count > 0u && cache->tail_values == NULL)) {
+    kls_row_first_supernode_panel_cache_free(cache);
+    return 0;
+  }
+
+  UF_long next_panel = 0;
+  UF_long next_dense = 0;
+  UF_long next_tail_col = 0;
+  UF_long next_tail_value = 0;
+  for (UF_long row = 0; row < ready_count; ++row) {
+    if (supernode_start[row] != row) {
+      continue;
+    }
+    const UF_long end = supernode_end[row];
+    if (end <= row || end >= ready_count) {
+      continue;
+    }
+    int all_done = 1;
+    if (row_done != NULL) {
+      for (UF_long dep = row; dep <= end; ++dep) {
+        if (row_done[dep] == 0u) {
+          all_done = 0;
+          break;
+        }
+      }
+    }
+    if (!all_done) {
+      continue;
+    }
+    UF_long tail_len = 0;
+    if (!kls_row_first_supernode_panel_shape(
+          u_entries, u_row_ptr, u_row_end, nk, row, end, &tail_len)) {
+      continue;
+    }
+    const UF_long width = end - row + 1u;
+    const UF_long panel = next_panel++;
+    cache->start[panel] = row;
+    cache->width[panel] = width;
+    cache->tail_begin[panel] = next_tail_col;
+    cache->tail_len[panel] = tail_len;
+    cache->dense_begin[panel] = next_dense;
+    cache->tail_value_begin[panel] = next_tail_value;
+    const UF_long source_tail_begin = u_row_ptr[end];
+    for (UF_long offset = 0; offset < tail_len; ++offset) {
+      cache->tail_cols[next_tail_col + offset] =
+        u_entries->col[source_tail_begin + offset];
+    }
+    for (UF_long local = 0; local < width; ++local) {
+      const UF_long dep = row + local;
+      cache->panel_id_by_row[dep] = panel;
+      const UF_long row_begin = u_row_ptr[dep];
+      const UF_long internal_len = end - dep;
+      double *dense_row =
+        cache->dense_values + next_dense + local * width;
+      for (UF_long offset = 0; offset < internal_len; ++offset) {
+        dense_row[local + offset + 1u] =
+          u_entries->value[row_begin + offset];
+      }
+      double *tail_values =
+        tail_len > 0u
+          ? cache->tail_values + next_tail_value + local * tail_len
+          : NULL;
+      for (UF_long offset = 0; offset < tail_len; ++offset) {
+        tail_values[offset] =
+          u_entries->value[row_begin + internal_len + offset];
+      }
+    }
+    next_dense += width * width;
+    next_tail_col += tail_len;
+    next_tail_value += width * tail_len;
+    row = end;
+  }
+  cache->panel_count = next_panel;
+  cache->dense_value_count = next_dense;
+  cache->tail_col_count = next_tail_col;
+  cache->tail_value_count = next_tail_value;
+  cache->enabled = next_panel > 0u ? 1 : 0;
+  return 1;
+}
+
 static UF_long kls_row_first_owned_supernode_end(
   const kls_row_first_entries *u_entries,
   const UF_long *u_row_ptr,
@@ -39873,6 +40223,176 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
   return 1;
 }
 
+static int kls_row_first_partial_apply_supernode_run_cached(
+  const kls_row_first_block_context *ctx,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *local_l_entries,
+  const double *udiag_values,
+  kls_row_first_partial_row *state,
+  UF_long dep_begin,
+  UF_long dep_end,
+  UF_long *run_rows_out,
+  int *used_panel_out) {
+  if (run_rows_out != NULL) {
+    *run_rows_out = 0;
+  }
+  if (used_panel_out != NULL) {
+    *used_panel_out = 0;
+  }
+  if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
+      udiag_values == NULL || state == NULL ||
+      workspace->x == NULL || workspace->mark == NULL ||
+      workspace->pattern == NULL || workspace->dep_heap == NULL ||
+      dep_begin > dep_end || dep_end >= state->row ||
+      state->row >= ctx->nk ||
+      workspace->mark[dep_begin] != state->generation) {
+    return -1;
+  }
+  const kls_row_first_supernode_panel_cache *cache =
+    workspace->supernode_panel_cache;
+  const UF_long run_limit = dep_end - dep_begin + 1u;
+  if (cache == NULL || !cache->enabled || cache->panel_id_by_row == NULL ||
+      run_limit <= 1u || dep_begin >= cache->row_count ||
+      dep_end >= cache->row_count) {
+    return 0;
+  }
+  const UF_long panel = cache->panel_id_by_row[dep_begin];
+  if (panel == KLS_KLU_EMPTY || panel >= cache->panel_count ||
+      cache->panel_id_by_row[dep_end] != panel) {
+    return 0;
+  }
+  const UF_long start = cache->start[panel];
+  const UF_long width = cache->width[panel];
+  const UF_long tail_len = cache->tail_len[panel];
+  if (width <= 1u || dep_begin < start || dep_end < dep_begin ||
+      dep_end >= start + width) {
+    return 0;
+  }
+  const UF_long panel_offset = dep_begin - start;
+  const UF_long available_end = dep_end - start + 1u;
+  if (available_end <= panel_offset ||
+      available_end > width ||
+      run_limit != available_end - panel_offset) {
+    return 0;
+  }
+  const UF_long dense_suffix_len = width - available_end;
+  if (tail_len > UF_long_max - dense_suffix_len) {
+    return 0;
+  }
+  const UF_long workspace_len = dense_suffix_len + tail_len;
+  if (!kls_row_first_workspace_reserve_supernode(workspace,
+                                                 workspace_len)) {
+    return 0;
+  }
+
+  double *x = workspace->x;
+  unsigned int *mark = workspace->mark;
+  UF_long *pattern = workspace->pattern;
+  UF_long *dep_heap = workspace->dep_heap;
+  double *trailing_workspace = workspace->supernode_workspace;
+  const unsigned int generation = state->generation;
+  if (workspace_len > 0u) {
+    memset(trailing_workspace, 0,
+           (size_t)workspace_len * sizeof(*trailing_workspace));
+  }
+  const double *dense_panel =
+    cache->dense_values + cache->dense_begin[panel];
+  const double *tail_values =
+    tail_len > 0u
+      ? cache->tail_values + cache->tail_value_begin[panel]
+      : NULL;
+  const UF_long *tail_cols =
+    tail_len > 0u ? cache->tail_cols + cache->tail_begin[panel] : NULL;
+  if (dense_panel == NULL ||
+      (tail_len > 0u && (tail_values == NULL || tail_cols == NULL))) {
+    return 0;
+  }
+
+  UF_long run_rows = 0;
+  for (UF_long local = 0; local < run_limit; ++local) {
+    const UF_long dep = dep_begin + local;
+    const UF_long panel_local = panel_offset + local;
+    if (local > 0u) {
+      if (mark[dep] != generation ||
+          state->dep_heap_size == 0u || dep_heap[0] != dep) {
+        return -1;
+      }
+      const UF_long popped =
+        kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
+      if (popped != dep) {
+        return -1;
+      }
+    }
+    const double dep_pivot = udiag_values[dep];
+    if (dep_pivot == 0.0) {
+      return -1;
+    }
+    const double lij = x[dep] / dep_pivot;
+    if (!kls_row_first_entries_append(local_l_entries, state->row, dep,
+                                      lij)) {
+      return -1;
+    }
+    x[dep] = 0.0;
+
+    const double *dense_row = dense_panel + panel_local * width;
+    for (UF_long target = panel_local + 1u; target < width; ++target) {
+      const double value = dense_row[target];
+      if (target < available_end) {
+        const UF_long col = start + target;
+        if (mark[col] != generation) {
+          mark[col] = generation;
+          pattern[state->pattern_count++] = col;
+          if (col < state->row) {
+            kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+          }
+          x[col] = 0.0;
+        }
+        x[col] -= lij * value;
+      } else {
+        trailing_workspace[target - available_end] += lij * value;
+      }
+    }
+    for (UF_long offset = 0; offset < tail_len; ++offset) {
+      trailing_workspace[dense_suffix_len + offset] +=
+        lij * tail_values[panel_local * tail_len + offset];
+    }
+    run_rows++;
+  }
+
+  for (UF_long offset = 0; offset < dense_suffix_len; ++offset) {
+    const UF_long col = start + available_end + offset;
+    if (mark[col] != generation) {
+      mark[col] = generation;
+      pattern[state->pattern_count++] = col;
+      if (col < state->row) {
+        kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+      }
+      x[col] = 0.0;
+    }
+    x[col] -= trailing_workspace[offset];
+  }
+  for (UF_long offset = 0; offset < tail_len; ++offset) {
+    const UF_long col = tail_cols[offset];
+    if (mark[col] != generation) {
+      mark[col] = generation;
+      pattern[state->pattern_count++] = col;
+      if (col < state->row) {
+        kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+      }
+      x[col] = 0.0;
+    }
+    x[col] -= trailing_workspace[dense_suffix_len + offset];
+  }
+
+  if (run_rows_out != NULL) {
+    *run_rows_out = run_rows;
+  }
+  if (used_panel_out != NULL) {
+    *used_panel_out = 1;
+  }
+  return 1;
+}
+
 static int kls_row_first_partial_apply_supernode_run_compact(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
@@ -40028,7 +40548,21 @@ static int kls_row_first_partial_apply_supernode_run(
   kls_row_first_partial_row *state,
   UF_long dep_begin,
   UF_long dep_end,
-  UF_long *run_rows_out) {
+  UF_long *run_rows_out,
+  int *used_panel_out) {
+  const int cached_status =
+    kls_row_first_partial_apply_supernode_run_cached(
+      ctx, workspace, local_l_entries, udiag_values, state, dep_begin,
+      dep_end, run_rows_out, used_panel_out);
+  if (cached_status > 0) {
+    return 1;
+  }
+  if (cached_status < 0) {
+    return 0;
+  }
+  if (used_panel_out != NULL) {
+    *used_panel_out = 0;
+  }
   const int compact_status =
     kls_row_first_partial_apply_supernode_run_compact(
       ctx, workspace, local_l_entries, published_u_entries, udiag_values,
@@ -40059,6 +40593,8 @@ static int kls_row_first_partial_apply_ready(
   kls_row_first_partial_row *state,
   UF_long *supernode_groups_out,
   UF_long *supernode_rows_out,
+  UF_long *supernode_panel_groups_out,
+  UF_long *supernode_panel_rows_out,
   int *blocked_out) {
   if (blocked_out != NULL) {
     *blocked_out = 0;
@@ -40099,11 +40635,12 @@ static int kls_row_first_partial_apply_ready(
         supernode_start, supernode_end, row_done, ctx->nk, ready_limit, i,
         dep);
     UF_long run_rows = 1;
+    int used_panel = 0;
     if (run_end > dep) {
       if (!kls_row_first_partial_apply_supernode_run(
             ctx, workspace, local_l_entries, published_u_entries,
             udiag_values, u_row_ptr, u_row_end, state, dep, run_end,
-            &run_rows)) {
+            &run_rows, &used_panel)) {
         return 0;
       }
     } else if (!kls_row_first_partial_apply_one_dep(
@@ -40117,6 +40654,14 @@ static int kls_row_first_partial_apply_ready(
       }
       if (supernode_rows_out != NULL) {
         *supernode_rows_out += run_rows;
+      }
+      if (used_panel) {
+        if (supernode_panel_groups_out != NULL) {
+          (*supernode_panel_groups_out)++;
+        }
+        if (supernode_panel_rows_out != NULL) {
+          *supernode_panel_rows_out += run_rows;
+        }
       }
     }
   }
@@ -40248,6 +40793,7 @@ typedef struct kls_row_first_pipeline_shared {
   const UF_long *private_u_row_end;
   UF_long *supernode_start;
   UF_long *supernode_end;
+  kls_row_first_supernode_panel_cache *private_supernode_panel_cache;
   double *udiag_values;
   unsigned char *row_done;
   kls_row_first_row_stats *stats;
@@ -40273,6 +40819,8 @@ typedef struct kls_row_first_pipeline_worker {
   UF_long pipeline_wait_partial_deps;
   UF_long pipeline_supernode_update_groups;
   UF_long pipeline_supernode_update_rows;
+  UF_long pipeline_supernode_panel_update_groups;
+  UF_long pipeline_supernode_panel_update_rows;
 } kls_row_first_pipeline_worker;
 
 static void kls_row_first_pipeline_worker_free(
@@ -40324,6 +40872,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
     pthread_mutex_unlock(&shared->lock);
     return NULL;
   }
+  worker->workspace.supernode_panel_cache =
+    shared->private_supernode_panel_cache;
 
   for (;;) {
     const UF_long pos =
@@ -40372,7 +40922,9 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               shared->supernode_start, shared->supernode_end,
               shared->row_done, shared->begin, &state,
               &worker->pipeline_supernode_update_groups,
-              &worker->pipeline_supernode_update_rows, &blocked)) {
+              &worker->pipeline_supernode_update_rows,
+              &worker->pipeline_supernode_panel_update_groups,
+              &worker->pipeline_supernode_panel_update_rows, &blocked)) {
           kls_row_first_pipeline_mark_failed(
             shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
           pthread_cond_broadcast(&shared->cond);
@@ -40403,7 +40955,9 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               shared->supernode_start, shared->supernode_end,
               shared->row_done, shared->completed_pos, &state,
               &worker->pipeline_supernode_update_groups,
-              &worker->pipeline_supernode_update_rows, NULL)) {
+              &worker->pipeline_supernode_update_rows,
+              &worker->pipeline_supernode_panel_update_groups,
+              &worker->pipeline_supernode_panel_update_rows, NULL)) {
           kls_row_first_pipeline_mark_failed(
             shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
           pthread_cond_broadcast(&shared->cond);
@@ -40449,7 +41003,9 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               shared->supernode_start, shared->supernode_end,
               shared->row_done, shared->ctx->nk, &state,
               &worker->pipeline_supernode_update_groups,
-              &worker->pipeline_supernode_update_rows, &blocked) ||
+              &worker->pipeline_supernode_update_rows,
+              &worker->pipeline_supernode_panel_update_groups,
+              &worker->pipeline_supernode_panel_update_rows, &blocked) ||
             blocked) {
           kls_row_first_pipeline_mark_failed(
             shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
@@ -40516,6 +41072,9 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                 shared->pivot_tail_rows += shared->end - pos;
                 shared->pivot_restarts++;
                 shared->order_epoch++;
+                if (shared->private_supernode_panel_cache != NULL) {
+                  shared->private_supernode_panel_cache->enabled = 0;
+                }
                 kls_row_first_supernodes_reset(
                   shared->u_entries, shared->workspace->u_row_ptr,
                   shared->workspace->u_row_end, shared->row_done,
@@ -40561,6 +41120,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
   UF_long *wait_partial_deps_out,
   UF_long *supernode_update_groups_out,
   UF_long *supernode_update_rows_out,
+  UF_long *supernode_panel_update_groups_out,
+  UF_long *supernode_panel_update_rows_out,
   UF_long *completed_pos_out,
   int *pivot_tail_ready_out,
   UF_long *pivot_tail_rows_out,
@@ -40576,6 +41137,12 @@ static int kls_row_first_run_parallel_pipeline_phase(
   }
   if (pivot_restarts_out != NULL) {
     *pivot_restarts_out = 0;
+  }
+  if (supernode_panel_update_groups_out != NULL) {
+    *supernode_panel_update_groups_out = 0;
+  }
+  if (supernode_panel_update_rows_out != NULL) {
+    *supernode_panel_update_rows_out = 0;
   }
   if (ctx == NULL || row_order == NULL || begin >= end ||
       thread_count <= 1 || workspace == NULL || l_entries == NULL ||
@@ -40634,6 +41201,13 @@ static int kls_row_first_run_parallel_pipeline_phase(
   kls_row_first_supernodes_reset(
     &private_u_entries, private_u_row_ptr, private_u_row_end, row_done,
     ctx->nk, begin, supernode_start, supernode_end);
+  kls_row_first_supernode_panel_cache private_supernode_panel_cache;
+  memset(&private_supernode_panel_cache, 0,
+         sizeof(private_supernode_panel_cache));
+  (void)kls_row_first_supernode_panel_cache_build(
+    &private_supernode_panel_cache, &private_u_entries, private_u_row_ptr,
+    private_u_row_end, row_done, supernode_start, supernode_end, ctx->nk,
+    begin);
 
   kls_row_first_pipeline_shared shared;
   memset(&shared, 0, sizeof(shared));
@@ -40649,6 +41223,9 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.private_u_row_end = private_u_row_end;
   shared.supernode_start = supernode_start;
   shared.supernode_end = supernode_end;
+  shared.private_supernode_panel_cache =
+    private_supernode_panel_cache.enabled
+      ? &private_supernode_panel_cache : NULL;
   shared.udiag_values = udiag_values;
   shared.row_done = row_done;
   shared.stats = stats;
@@ -40656,6 +41233,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.order_epoch = 0;
   atomic_init(&shared.next_pos, (unsigned long)begin);
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {
+    kls_row_first_supernode_panel_cache_free(
+      &private_supernode_panel_cache);
     free(threads);
     free(workers);
     kls_row_first_entries_free(&private_u_entries);
@@ -40667,6 +41246,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
   }
   if (pthread_cond_init(&shared.cond, NULL) != 0) {
     pthread_mutex_destroy(&shared.lock);
+    kls_row_first_supernode_panel_cache_free(
+      &private_supernode_panel_cache);
     free(threads);
     free(workers);
     kls_row_first_entries_free(&private_u_entries);
@@ -40701,6 +41282,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
   UF_long wait_partial_deps = 0;
   UF_long supernode_update_groups = 0;
   UF_long supernode_update_rows = 0;
+  UF_long supernode_panel_update_groups = 0;
+  UF_long supernode_panel_update_rows = 0;
   UF_long active_threads = 0;
   for (int tid = 0; tid < created; ++tid) {
     processed_rows += workers[tid].rows;
@@ -40710,6 +41293,10 @@ static int kls_row_first_run_parallel_pipeline_phase(
     supernode_update_groups +=
       workers[tid].pipeline_supernode_update_groups;
     supernode_update_rows += workers[tid].pipeline_supernode_update_rows;
+    supernode_panel_update_groups +=
+      workers[tid].pipeline_supernode_panel_update_groups;
+    supernode_panel_update_rows +=
+      workers[tid].pipeline_supernode_panel_update_rows;
     if (workers[tid].rows > 0u) {
       active_threads++;
     }
@@ -40748,6 +41335,14 @@ static int kls_row_first_run_parallel_pipeline_phase(
   if ((ok || pivot_tail_ready) && supernode_update_rows_out != NULL) {
     *supernode_update_rows_out = supernode_update_rows;
   }
+  if ((ok || pivot_tail_ready) &&
+      supernode_panel_update_groups_out != NULL) {
+    *supernode_panel_update_groups_out = supernode_panel_update_groups;
+  }
+  if ((ok || pivot_tail_ready) &&
+      supernode_panel_update_rows_out != NULL) {
+    *supernode_panel_update_rows_out = supernode_panel_update_rows;
+  }
   if ((ok || pivot_tail_ready) && pivot_tail_rows_out != NULL) {
     *pivot_tail_rows_out = shared.pivot_tail_rows;
   }
@@ -40760,6 +41355,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   for (int tid = 0; tid < worker_count; ++tid) {
     kls_row_first_pipeline_worker_free(workers + tid);
   }
+  kls_row_first_supernode_panel_cache_free(&private_supernode_panel_cache);
   kls_row_first_entries_free(&private_u_entries);
   free(private_u_row_ptr);
   free(private_u_row_end);
@@ -40789,6 +41385,8 @@ static int kls_row_first_run_restartable_pipeline_suffix(
   UF_long *wait_partial_deps_out,
   UF_long *supernode_update_groups_out,
   UF_long *supernode_update_rows_out,
+  UF_long *supernode_panel_update_groups_out,
+  UF_long *supernode_panel_update_rows_out,
   UF_long *pivot_tail_rows_out,
   UF_long *pivot_restarts_out,
   UF_long *pivot_serial_rows_out) {
@@ -40812,6 +41410,12 @@ static int kls_row_first_run_restartable_pipeline_suffix(
   }
   if (supernode_update_rows_out != NULL) {
     *supernode_update_rows_out = 0;
+  }
+  if (supernode_panel_update_groups_out != NULL) {
+    *supernode_panel_update_groups_out = 0;
+  }
+  if (supernode_panel_update_rows_out != NULL) {
+    *supernode_panel_update_rows_out = 0;
   }
   if (pivot_tail_rows_out != NULL) {
     *pivot_tail_rows_out = 0;
@@ -40839,6 +41443,8 @@ static int kls_row_first_run_restartable_pipeline_suffix(
   UF_long wait_partial_deps = 0;
   UF_long supernode_update_groups = 0;
   UF_long supernode_update_rows = 0;
+  UF_long supernode_panel_update_groups = 0;
+  UF_long supernode_panel_update_rows = 0;
   UF_long pivot_tail_rows = 0;
   UF_long pivot_restarts = 0;
   UF_long pivot_serial_rows = 0;
@@ -40850,6 +41456,8 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     UF_long phase_wait_partial_deps = 0;
     UF_long phase_supernode_groups = 0;
     UF_long phase_supernode_rows = 0;
+    UF_long phase_supernode_panel_groups = 0;
+    UF_long phase_supernode_panel_rows = 0;
     UF_long phase_pivot_tail_rows = 0;
     UF_long phase_pivot_restarts = 0;
     UF_long completed_pos = cursor;
@@ -40859,9 +41467,9 @@ static int kls_row_first_run_restartable_pipeline_suffix(
           u_entries, udiag_values, row_done, stats, &phase_rows,
           &phase_threads, &phase_partial_rows, &phase_wait_partial_rows,
           &phase_wait_partial_deps, &phase_supernode_groups,
-          &phase_supernode_rows, &completed_pos, &pivot_tail_ready,
-          &phase_pivot_tail_rows,
-          &phase_pivot_restarts)) {
+          &phase_supernode_rows, &phase_supernode_panel_groups,
+          &phase_supernode_panel_rows, &completed_pos, &pivot_tail_ready,
+          &phase_pivot_tail_rows, &phase_pivot_restarts)) {
       pipeline_rows += phase_rows;
       if (phase_threads > max_threads) {
         max_threads = phase_threads;
@@ -40871,6 +41479,8 @@ static int kls_row_first_run_restartable_pipeline_suffix(
       wait_partial_deps += phase_wait_partial_deps;
       supernode_update_groups += phase_supernode_groups;
       supernode_update_rows += phase_supernode_rows;
+      supernode_panel_update_groups += phase_supernode_panel_groups;
+      supernode_panel_update_rows += phase_supernode_panel_rows;
       pivot_tail_rows += phase_pivot_tail_rows;
       pivot_restarts += phase_pivot_restarts;
       cursor = end;
@@ -40889,6 +41499,8 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     wait_partial_deps += phase_wait_partial_deps;
     supernode_update_groups += phase_supernode_groups;
     supernode_update_rows += phase_supernode_rows;
+    supernode_panel_update_groups += phase_supernode_panel_groups;
+    supernode_panel_update_rows += phase_supernode_panel_rows;
     pivot_tail_rows += phase_pivot_tail_rows;
     pivot_restarts += phase_pivot_restarts;
     pivot_tail_rows += end - completed_pos;
@@ -40924,6 +41536,12 @@ static int kls_row_first_run_restartable_pipeline_suffix(
   }
   if (supernode_update_rows_out != NULL) {
     *supernode_update_rows_out = supernode_update_rows;
+  }
+  if (supernode_panel_update_groups_out != NULL) {
+    *supernode_panel_update_groups_out = supernode_panel_update_groups;
+  }
+  if (supernode_panel_update_rows_out != NULL) {
+    *supernode_panel_update_rows_out = supernode_panel_update_rows;
   }
   if (pivot_tail_rows_out != NULL) {
     *pivot_tail_rows_out = pivot_tail_rows;
@@ -41766,7 +42384,7 @@ static int kls_row_first_parallel_factor_block(
         if (!kls_row_first_partial_apply_supernode_run(
               &row_ctx, &row_workspace, &l_entries, &u_entries,
               worker->udiag_values, worker->u_row_ptr, worker->u_row_end,
-              &state, dep, run_end, &run_rows)) {
+              &state, dep, run_end, &run_rows, NULL)) {
           goto cleanup;
         }
       } else if (!kls_row_first_partial_apply_one_dep(
@@ -42369,6 +42987,9 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
   int separator_queue_pipeline_supernode_update = 0;
   UF_long separator_queue_pipeline_supernode_update_groups = 0;
   UF_long separator_queue_pipeline_supernode_update_rows = 0;
+  int separator_queue_pipeline_supernode_panel_update = 0;
+  UF_long separator_queue_pipeline_supernode_panel_update_groups = 0;
+  UF_long separator_queue_pipeline_supernode_panel_update_rows = 0;
   int separator_queue_pipeline_pivot_tail = 0;
   UF_long separator_queue_pipeline_pivot_tail_rows = 0;
   UF_long separator_queue_pipeline_pivot_restarts = 0;
@@ -42477,6 +43098,8 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
     UF_long block_pipeline_wait_partial_deps = 0;
     UF_long block_pipeline_supernode_update_groups = 0;
     UF_long block_pipeline_supernode_update_rows = 0;
+    UF_long block_pipeline_supernode_panel_update_groups = 0;
+    UF_long block_pipeline_supernode_panel_update_rows = 0;
     UF_long block_pipeline_pivot_tail_rows = 0;
     UF_long block_pipeline_pivot_restarts = 0;
     UF_long block_pipeline_pivot_serial_rows = 0;
@@ -42760,6 +43383,8 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
               &block_pipeline_wait_partial_deps,
               &block_pipeline_supernode_update_groups,
               &block_pipeline_supernode_update_rows,
+              &block_pipeline_supernode_panel_update_groups,
+              &block_pipeline_supernode_panel_update_rows,
               &block_pipeline_pivot_tail_rows,
               &block_pipeline_pivot_restarts,
               &block_pipeline_pivot_serial_rows)) {
@@ -42832,6 +43457,13 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
           block_pipeline_supernode_update_groups;
         separator_queue_pipeline_supernode_update_rows +=
           block_pipeline_supernode_update_rows;
+      }
+      if (block_pipeline_supernode_panel_update_groups > 0u) {
+        separator_queue_pipeline_supernode_panel_update = 1;
+        separator_queue_pipeline_supernode_panel_update_groups +=
+          block_pipeline_supernode_panel_update_groups;
+        separator_queue_pipeline_supernode_panel_update_rows +=
+          block_pipeline_supernode_panel_update_rows;
       }
       if (block_pipeline_pivot_tail_rows > 0u) {
         separator_queue_pipeline_pivot_tail = 1;
@@ -42987,6 +43619,15 @@ fail_block_entries:
       separator_queue_pipeline_supernode_update_groups;
     solver->kls_first_last_separator_queue_pipeline_supernode_update_rows =
       separator_queue_pipeline_supernode_update_rows;
+  }
+  if (separator_queue_pipeline_supernode_panel_update) {
+    solver->kls_first_last_separator_queue_pipeline_supernode_panel_update =
+      1;
+    solver->kls_first_separator_queue_pipeline_supernode_panel_update_run_count++;
+    solver->kls_first_last_separator_queue_pipeline_supernode_panel_update_groups =
+      separator_queue_pipeline_supernode_panel_update_groups;
+    solver->kls_first_last_separator_queue_pipeline_supernode_panel_update_rows =
+      separator_queue_pipeline_supernode_panel_update_rows;
   }
   if (separator_queue_pipeline_pivot_tail) {
     solver->kls_first_last_separator_queue_pipeline_pivot_tail = 1;
