@@ -27452,6 +27452,180 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
   return 1;
 }
 
+static int kls_compact_dense_panel_factor_blocked_checked(
+  kls_egraph_refactor_worker *worker,
+  UF_long group,
+  UF_long row_begin,
+  UF_long row_end,
+  UF_long trailing_len,
+  double *dense_panel,
+  double *trailing_panel,
+  int publish_prefix) {
+  if (worker == NULL || worker->shared == NULL ||
+      !worker->shared->check_pivots ||
+      dense_panel == NULL ||
+      row_begin >= row_end ||
+      (trailing_len > 0u && trailing_panel == NULL)) {
+    return 0;
+  }
+#ifdef KLS_HAVE_CBLAS
+  if (kls_cblas_supernode_env_enabled()) {
+    return 0;
+  }
+#endif
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Udiag == NULL ||
+      solver->symbolic == NULL || solver->symbolic->Q == NULL ||
+      row_end > solver->n) {
+    kls_egraph_refactor_record_invalid(shared);
+    return -1;
+  }
+  const UF_long width = row_end - row_begin;
+  if (width <= 1u) {
+    return 0;
+  }
+
+  double *x = worker->x;
+  double *udiag = (double *)solver->numeric->Udiag;
+  for (UF_long i = 0; i < width; ++i) {
+    dense_panel[i * width + i] = udiag[row_begin + i];
+  }
+
+  double update_work = 0.0;
+  for (UF_long k = 0; k < width; k += KLS_ROW_REFACTOR_CBLAS_BLOCK_ROWS) {
+    UF_long block = KLS_ROW_REFACTOR_CBLAS_BLOCK_ROWS;
+    if (block > width - k) {
+      block = width - k;
+    }
+    const UF_long kb = k + block;
+
+    for (UF_long i = k; i < kb; ++i) {
+      const UF_long row = row_begin + i;
+      double *row_dense_panel = dense_panel + i * width;
+      double *row_panel = trailing_len > 0u
+        ? trailing_panel + i * trailing_len : NULL;
+      for (UF_long dep = k; dep < i; ++dep) {
+        const UF_long dep_row = row_begin + dep;
+        const double candidate = row_dense_panel[dep];
+        const double lij = candidate / udiag[dep_row];
+        if (kls_parallel_row_refactor_rejects_multiplier(
+              worker, row, dep_row, candidate, lij)) {
+          return -1;
+        }
+        row_dense_panel[dep] = lij;
+        const double *dep_dense_panel = dense_panel + dep * width;
+        for (UF_long target = dep + 1u; target < width; ++target) {
+          row_dense_panel[target] -= lij * dep_dense_panel[target];
+        }
+        update_work += (double)(width - dep - 1u);
+        if (trailing_len > 0u) {
+          const double *dep_panel = trailing_panel + dep * trailing_len;
+          for (UF_long offset = 0; offset < trailing_len; ++offset) {
+            row_panel[offset] -= lij * dep_panel[offset];
+          }
+          update_work += (double)trailing_len;
+        }
+      }
+
+      udiag[row] = row_dense_panel[i];
+      if (!kls_store_compact_dense_panel_row(shared, row_begin, row_end,
+                                            trailing_len, dense_panel,
+                                            trailing_panel, row, 0)) {
+        kls_egraph_refactor_record_invalid(shared);
+        return -1;
+      }
+
+      const UF_long row_dense_len = width - i - 1u;
+      double row_max_abs =
+        kls_row_refactor_abs_max_from_values(
+          udiag[row], row_dense_panel + i + 1u, row_dense_len);
+      if (trailing_len > 0u) {
+        row_max_abs =
+          kls_row_refactor_abs_max_from_values(row_max_abs, row_panel,
+                                               trailing_len);
+      }
+      if (kls_parallel_row_refactor_rejects_pivot(worker, row, udiag[row],
+                                                 row_max_abs)) {
+        memset(x, 0, (size_t)solver->n * sizeof(*x));
+        return -1;
+      }
+      if (udiag[row] == 0.0) {
+        kls_egraph_refactor_record_singular(shared, row,
+                                            solver->symbolic->Q[row]);
+        if (solver->common.halt_if_singular) {
+          memset(x, 0, (size_t)solver->n * sizeof(*x));
+          return -1;
+        }
+      }
+      if (!shared->row_refactor_defer_value_scatter &&
+          !kls_scatter_row_refactor_row_values(solver, row)) {
+        kls_egraph_refactor_record_invalid(shared);
+        return -1;
+      }
+      if (publish_prefix) {
+        kls_mark_row_refactor_compact_panel_prefix_valid(
+          solver, group, i + 1u);
+      }
+      kls_row_refactor_mark_row_done(worker, row);
+    }
+
+    if (kb >= width) {
+      continue;
+    }
+
+    for (UF_long row = kb; row < width; ++row) {
+      const UF_long global_row = row_begin + row;
+      double *row_dense_panel = dense_panel + row * width;
+      for (UF_long dep = k; dep < kb; ++dep) {
+        double candidate = row_dense_panel[dep];
+        for (UF_long prev = k; prev < dep; ++prev) {
+          candidate -= row_dense_panel[prev] *
+                       dense_panel[prev * width + dep];
+          update_work += 1.0;
+        }
+        const UF_long dep_row = row_begin + dep;
+        const double lij = candidate / udiag[dep_row];
+        if (kls_parallel_row_refactor_rejects_multiplier(
+              worker, global_row, dep_row, candidate, lij)) {
+          return -1;
+        }
+        row_dense_panel[dep] = lij;
+      }
+    }
+
+    for (UF_long row = kb; row < width; ++row) {
+      double *row_dense_panel = dense_panel + row * width;
+      for (UF_long target = kb; target < width; ++target) {
+        double update = 0.0;
+        for (UF_long dep = k; dep < kb; ++dep) {
+          update += row_dense_panel[dep] *
+                    dense_panel[dep * width + target];
+        }
+        row_dense_panel[target] -= update;
+      }
+      update_work += (double)block * (double)(width - kb);
+      if (trailing_len > 0u) {
+        double *row_panel = trailing_panel + row * trailing_len;
+        for (UF_long offset = 0; offset < trailing_len; ++offset) {
+          double update = 0.0;
+          for (UF_long dep = k; dep < kb; ++dep) {
+            update += row_dense_panel[dep] *
+                      trailing_panel[dep * trailing_len + offset];
+          }
+          row_panel[offset] -= update;
+        }
+        update_work += (double)block * (double)trailing_len;
+      }
+    }
+  }
+
+  kls_record_row_refactor_compact_dense_panel_blocked(
+    solver, width, kls_work_to_uflong(update_work));
+  return 1;
+}
+
 static UF_long kls_work_to_uflong(double work) {
   if (!(work > 0.0)) {
     return 0;
@@ -29618,6 +29792,17 @@ static int kls_parallel_row_refactor_process_dense_group_compact_checked(
   double *x = worker->x;
   double *udiag = (double *)numeric->Udiag;
   const UF_long width = row_end - row_begin;
+
+  const int blocked_panel_status =
+    kls_compact_dense_panel_factor_blocked_checked(
+      worker, group, row_begin, row_end, trailing_len, dense_panel,
+      trailing_panel, publish_prefix);
+  if (blocked_panel_status > 0) {
+    return 1;
+  }
+  if (blocked_panel_status < 0) {
+    return 0;
+  }
 
   for (UF_long row = row_begin; row < row_end; ++row) {
     const UF_long local_row = row - row_begin;

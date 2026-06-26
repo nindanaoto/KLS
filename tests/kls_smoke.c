@@ -4611,6 +4611,10 @@ static int test_batched_compact_supernode_update_probe(void) {
          (int64_t)(lead0 + lead1) * (int64_t)mid ||
        checked_stats.row_refactor_compact_supernode_batch_entries <= 0 ||
        checked_stats.row_refactor_last_compact_dense_panel != 1 ||
+       checked_stats.row_refactor_last_compact_dense_panel_blocked != 1 ||
+       checked_stats.row_refactor_compact_dense_panel_blocked_run_count < 1 ||
+       checked_stats.row_refactor_compact_dense_panel_blocked_rows < mid ||
+       checked_stats.row_refactor_compact_dense_panel_blocked_entries <= 0 ||
        checked_stats.row_refactor_last_compact_dense_panel_direct_input_rows <
          checked_stats.row_refactor_compact_supernode_batch_rows ||
        checked_stats.row_refactor_last_segment_target_input_rows <
@@ -4618,7 +4622,9 @@ static int test_batched_compact_supernode_update_probe(void) {
     fprintf(stderr,
             "unexpected checked batched compact-supernode stats: checked=%d/%d"
             ", batch=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
-            ", compact=%d/%" PRId64 ", direct=%" PRId64
+            ", compact=%d/%" PRId64
+            ", blocked=%d/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", direct=%" PRId64
             ", target=%" PRId64 "\n",
             checked_stats.row_refactor_last_run,
             checked_stats.row_refactor_last_checked,
@@ -4629,6 +4635,10 @@ static int test_batched_compact_supernode_update_probe(void) {
             checked_stats.row_refactor_compact_supernode_batch_entries,
             checked_stats.row_refactor_last_compact_dense_panel,
             checked_stats.row_refactor_compact_dense_panel_count,
+            checked_stats.row_refactor_last_compact_dense_panel_blocked,
+            checked_stats.row_refactor_compact_dense_panel_blocked_run_count,
+            checked_stats.row_refactor_compact_dense_panel_blocked_rows,
+            checked_stats.row_refactor_compact_dense_panel_blocked_entries,
             checked_stats.row_refactor_last_compact_dense_panel_direct_input_rows,
             checked_stats.row_refactor_last_segment_target_input_rows);
     ok = 0;
