@@ -3857,6 +3857,24 @@ pivoting-tail executor or a production BLAS supernodal numeric object, but it
 fills the specific missing "start consumers from a finished producer prefix"
 semantic instead of treating every compact supernode as all-or-nothing.
 
+The scheduler now preserves SubtreeLU Algorithm 6's separator private/pipeline
+partition when applying that Algorithm 5 prefix release. A new row-dependency
+ready-queue preparation path can reuse the separator private-group mask, so
+private separator groups still run through the retained FLOP-balanced queue
+while pipeline groups may be released by row-prefix completion when the strict
+large-unfinished-supernode test passes. Checked refactorization keeps the
+separator queue by default because KLS still lacks CKTSO's full ETree-scheduled
+pivoting-tail executor; `KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE=1` explicitly
+validates the checked experimental path in the smoke fixture. A broader
+"any large supernode" selector was tested and rejected: on the six-row forced
+row-refactor focus probe it became much slower than the separator-only run and
+was interrupted after exceeding the normal short-run envelope. With the strict
+selector, `build/kls_head_gap_focus6_forced_row_sep_alg5_strict_t4_r3_timeout120.jsonl`
+completed all six rows without timeout, but the focus matrices stayed on the
+separator queue (`row_refactor_last_partial_supernode_pipeline=0`) and reported
+a `15.29s` SPICE-cycle geomean. This closes the scheduling semantic gap without
+pretending it is a performance win on the current focus subset.
+
 The compact supernode consumer now applies the paper's matrix-vector update
 shape for producer trailing panels. For a later row that
 depends on a completed dense producer suffix, KLS still computes and checks the
