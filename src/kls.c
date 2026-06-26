@@ -332,6 +332,10 @@ struct kls_solver {
   UF_long row_refactor_compact_dense_panel_direct_input_rows;
   UF_long row_refactor_last_compact_panel_solve_values;
   UF_long row_refactor_compact_panel_solve_values;
+  UF_long row_refactor_last_compact_panel_scalar_update_rows;
+  UF_long row_refactor_compact_panel_scalar_update_rows;
+  UF_long row_refactor_last_compact_panel_scalar_update_entries;
+  UF_long row_refactor_compact_panel_scalar_update_entries;
   UF_long row_refactor_last_dense_segment_direct_input_rows;
   UF_long row_refactor_dense_segment_direct_input_rows;
   UF_long row_refactor_last_sparse_segment_direct_input_rows;
@@ -1439,6 +1443,10 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_compact_dense_panel_direct_input_rows = 0;
   solver->row_refactor_last_compact_panel_solve_values = 0;
   solver->row_refactor_compact_panel_solve_values = 0;
+  solver->row_refactor_last_compact_panel_scalar_update_rows = 0;
+  solver->row_refactor_compact_panel_scalar_update_rows = 0;
+  solver->row_refactor_last_compact_panel_scalar_update_entries = 0;
+  solver->row_refactor_compact_panel_scalar_update_entries = 0;
   solver->row_refactor_last_dense_segment_direct_input_rows = 0;
   solver->row_refactor_dense_segment_direct_input_rows = 0;
   solver->row_refactor_last_sparse_segment_direct_input_rows = 0;
@@ -1583,6 +1591,10 @@ typedef struct {
   UF_long compact_dense_panel_direct_input_rows;
   UF_long last_compact_panel_solve_values;
   UF_long compact_panel_solve_values;
+  UF_long last_compact_panel_scalar_update_rows;
+  UF_long compact_panel_scalar_update_rows;
+  UF_long last_compact_panel_scalar_update_entries;
+  UF_long compact_panel_scalar_update_entries;
   UF_long last_dense_segment_direct_input_rows;
   UF_long dense_segment_direct_input_rows;
   UF_long last_sparse_segment_direct_input_rows;
@@ -1791,6 +1803,14 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_last_compact_panel_solve_values;
   diag->compact_panel_solve_values =
     solver->row_refactor_compact_panel_solve_values;
+  diag->last_compact_panel_scalar_update_rows =
+    solver->row_refactor_last_compact_panel_scalar_update_rows;
+  diag->compact_panel_scalar_update_rows =
+    solver->row_refactor_compact_panel_scalar_update_rows;
+  diag->last_compact_panel_scalar_update_entries =
+    solver->row_refactor_last_compact_panel_scalar_update_entries;
+  diag->compact_panel_scalar_update_entries =
+    solver->row_refactor_compact_panel_scalar_update_entries;
   diag->last_dense_segment_direct_input_rows =
     solver->row_refactor_last_dense_segment_direct_input_rows;
   diag->dense_segment_direct_input_rows =
@@ -2048,6 +2068,14 @@ static void kls_restore_row_refactor_diagnostics(
     diag->last_compact_panel_solve_values;
   solver->row_refactor_compact_panel_solve_values =
     diag->compact_panel_solve_values;
+  solver->row_refactor_last_compact_panel_scalar_update_rows =
+    diag->last_compact_panel_scalar_update_rows;
+  solver->row_refactor_compact_panel_scalar_update_rows =
+    diag->compact_panel_scalar_update_rows;
+  solver->row_refactor_last_compact_panel_scalar_update_entries =
+    diag->last_compact_panel_scalar_update_entries;
+  solver->row_refactor_compact_panel_scalar_update_entries =
+    diag->compact_panel_scalar_update_entries;
   solver->row_refactor_last_dense_segment_direct_input_rows =
     diag->last_dense_segment_direct_input_rows;
   solver->row_refactor_dense_segment_direct_input_rows =
@@ -2541,6 +2569,8 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_compact_dense_panel_direct_input_rows = 0;
   solver->row_refactor_last_compact_panel_solve_values = 0;
+  solver->row_refactor_last_compact_panel_scalar_update_rows = 0;
+  solver->row_refactor_last_compact_panel_scalar_update_entries = 0;
   solver->row_refactor_last_dense_segment_direct_input_rows = 0;
   solver->row_refactor_last_sparse_segment_direct_input_rows = 0;
   solver->row_refactor_last_segment_target_input_rows = 0;
@@ -2576,6 +2606,8 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_compact_dense_panel_persistent = 0;
   solver->stats.row_refactor_last_compact_dense_panel_direct_input_rows = 0;
   solver->stats.row_refactor_last_compact_panel_solve_values = 0;
+  solver->stats.row_refactor_last_compact_panel_scalar_update_rows = 0;
+  solver->stats.row_refactor_last_compact_panel_scalar_update_entries = 0;
   solver->stats.row_refactor_last_dense_segment_direct_input_rows = 0;
   solver->stats.row_refactor_last_sparse_segment_direct_input_rows = 0;
   solver->stats.row_refactor_last_segment_target_input_rows = 0;
@@ -2633,6 +2665,8 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_compact_dense_panel = 0;
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_compact_dense_panel_direct_input_rows = 0;
+  solver->row_refactor_last_compact_panel_scalar_update_rows = 0;
+  solver->row_refactor_last_compact_panel_scalar_update_entries = 0;
   solver->row_refactor_last_dense_segment_direct_input_rows = 0;
   solver->row_refactor_last_sparse_segment_direct_input_rows = 0;
   solver->row_refactor_last_segment_target_input_rows = 0;
@@ -3031,6 +3065,41 @@ static void kls_record_row_refactor_row_solve(kls_solver *solver) {
     (int64_t)solver->row_refactor_last_compact_panel_solve_values;
   solver->stats.row_refactor_compact_panel_solve_values =
     (int64_t)solver->row_refactor_compact_panel_solve_values;
+}
+
+static void kls_record_row_refactor_compact_panel_scalar_update(
+  kls_solver *solver,
+  UF_long entries) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_last_compact_panel_scalar_update_rows =
+    solver->row_refactor_last_compact_panel_scalar_update_rows == UF_long_max
+      ? UF_long_max
+      : solver->row_refactor_last_compact_panel_scalar_update_rows + 1u;
+  solver->row_refactor_compact_panel_scalar_update_rows =
+    solver->row_refactor_compact_panel_scalar_update_rows == UF_long_max
+      ? UF_long_max
+      : solver->row_refactor_compact_panel_scalar_update_rows + 1u;
+  solver->row_refactor_last_compact_panel_scalar_update_entries =
+    solver->row_refactor_last_compact_panel_scalar_update_entries >
+        UF_long_max - entries
+      ? UF_long_max
+      : solver->row_refactor_last_compact_panel_scalar_update_entries +
+          entries;
+  solver->row_refactor_compact_panel_scalar_update_entries =
+    solver->row_refactor_compact_panel_scalar_update_entries >
+        UF_long_max - entries
+      ? UF_long_max
+      : solver->row_refactor_compact_panel_scalar_update_entries + entries;
+  solver->stats.row_refactor_last_compact_panel_scalar_update_rows =
+    (int64_t)solver->row_refactor_last_compact_panel_scalar_update_rows;
+  solver->stats.row_refactor_compact_panel_scalar_update_rows =
+    (int64_t)solver->row_refactor_compact_panel_scalar_update_rows;
+  solver->stats.row_refactor_last_compact_panel_scalar_update_entries =
+    (int64_t)solver->row_refactor_last_compact_panel_scalar_update_entries;
+  solver->stats.row_refactor_compact_panel_scalar_update_entries =
+    (int64_t)solver->row_refactor_compact_panel_scalar_update_entries;
 }
 
 static void kls_record_row_solve_parallel_run(kls_solver *solver,
@@ -11028,6 +11097,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_last_compact_panel_solve_values;
   solver->stats.row_refactor_compact_panel_solve_values =
     (int64_t)solver->row_refactor_compact_panel_solve_values;
+  solver->stats.row_refactor_last_compact_panel_scalar_update_rows =
+    (int64_t)solver->row_refactor_last_compact_panel_scalar_update_rows;
+  solver->stats.row_refactor_compact_panel_scalar_update_rows =
+    (int64_t)solver->row_refactor_compact_panel_scalar_update_rows;
+  solver->stats.row_refactor_last_compact_panel_scalar_update_entries =
+    (int64_t)solver->row_refactor_last_compact_panel_scalar_update_entries;
+  solver->stats.row_refactor_compact_panel_scalar_update_entries =
+    (int64_t)solver->row_refactor_compact_panel_scalar_update_entries;
   solver->stats.row_refactor_last_dense_segment_direct_input_rows =
     (int64_t)solver->row_refactor_last_dense_segment_direct_input_rows;
   solver->stats.row_refactor_dense_segment_direct_input_rows =
@@ -21942,6 +22019,107 @@ static const double *kls_row_refactor_compact_panel_const(
   return solver->row_refactor_compact_panel_values + begin;
 }
 
+static int kls_row_refactor_try_compact_panel_scalar_update(
+  kls_egraph_refactor_shared *shared,
+  double *x,
+  UF_long current_group,
+  UF_long dep,
+  double lij) {
+  kls_solver *solver = shared != NULL ? shared->solver : NULL;
+  if (solver == NULL || x == NULL ||
+      dep >= solver->n ||
+      solver->row_refactor_row_group == NULL ||
+      solver->row_refactor_group_ptr == NULL ||
+      solver->row_refactor_group_kind == NULL ||
+      solver->row_refactor_group_trailing_len == NULL ||
+      solver->row_refactor_group_trailing_begin == NULL ||
+      solver->row_refactor_compact_panel_valid == NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_cols == NULL) {
+    return 0;
+  }
+  const UF_long group = solver->row_refactor_row_group[dep];
+  if (group >= solver->row_refactor_group_count ||
+      (current_group != KLS_KLU_EMPTY && group == current_group) ||
+      solver->row_refactor_group_kind[group] !=
+        KLS_ROW_REFACTOR_GROUP_DENSE) {
+    return 0;
+  }
+  const UF_long row_begin = solver->row_refactor_group_ptr[group];
+  const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
+  if (row_begin >= row_end || dep < row_begin || dep >= row_end) {
+    return 0;
+  }
+  const UF_long width = row_end - row_begin;
+  const UF_long local_dep = dep - row_begin;
+  if (kls_row_refactor_compact_panel_valid_prefix(solver, group) <=
+        local_dep ||
+      width > (UF_long)(SIZE_MAX / sizeof(double)) / width) {
+    return 0;
+  }
+  const UF_long dense_entries = width * width;
+  const UF_long trailing_len = solver->row_refactor_group_trailing_len[group];
+  if (trailing_len > 0u &&
+      width > ((UF_long)(SIZE_MAX / sizeof(double)) - dense_entries) /
+                trailing_len) {
+    return 0;
+  }
+  const UF_long panel_entries = dense_entries + width * trailing_len;
+  const double *dense_panel =
+    kls_row_refactor_compact_panel_const(solver, group, panel_entries);
+  if (dense_panel == NULL) {
+    return 0;
+  }
+
+  const UF_long u_begin = solver->row_refactor_u_ptr[dep];
+  const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
+  const UF_long dense_len = row_end - dep - 1u;
+  if (u_end < u_begin || u_end - u_begin != dense_len + trailing_len) {
+    return 0;
+  }
+  if (dense_len + trailing_len == 0u) {
+    return 0;
+  }
+  const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
+  for (UF_long offset = 0; offset < dense_len; ++offset) {
+    const UF_long col = u_cols[offset];
+    if (col != dep + 1u + offset || col >= row_end) {
+      return 0;
+    }
+  }
+  const UF_long trailing_begin =
+    solver->row_refactor_group_trailing_begin[group];
+  const UF_long row_end_u = solver->row_refactor_u_ptr[row_end];
+  if (trailing_len > 0u &&
+      (trailing_begin > row_end_u ||
+       trailing_len > row_end_u - trailing_begin)) {
+    return 0;
+  }
+  for (UF_long offset = 0; offset < trailing_len; ++offset) {
+    const UF_long col = u_cols[dense_len + offset];
+    if (solver->row_refactor_u_cols[trailing_begin + offset] != col) {
+      return 0;
+    }
+  }
+
+  const double *row_dense_panel = dense_panel + local_dep * width;
+  for (UF_long offset = 0; offset < dense_len; ++offset) {
+    const UF_long col = u_cols[offset];
+    x[col] -= lij * row_dense_panel[local_dep + 1u + offset];
+  }
+  if (trailing_len > 0u) {
+    const double *trailing_panel =
+      dense_panel + dense_entries + local_dep * trailing_len;
+    for (UF_long offset = 0; offset < trailing_len; ++offset) {
+      const UF_long col = u_cols[dense_len + offset];
+      x[col] -= lij * trailing_panel[offset];
+    }
+  }
+  kls_record_row_refactor_compact_panel_scalar_update(
+    solver, dense_len + trailing_len);
+  return 1;
+}
+
 static int kls_row_refactor_compact_panel_solve_value(
   const kls_solver *solver,
   int upper,
@@ -23185,12 +23363,15 @@ static int kls_parallel_row_refactor_process_row(
       *solver->row_refactor_l_values[p] = lij;
     }
     x[dep] = 0.0;
-    const UF_long u_begin = solver->row_refactor_u_ptr[dep];
-    const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
-    const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
-    const double *u_values = solver->row_refactor_u_row_values + u_begin;
-    for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
-      x[u_cols[offset]] -= lij * u_values[offset];
+    if (!kls_row_refactor_try_compact_panel_scalar_update(
+          shared, x, current_group, dep, lij)) {
+      const UF_long u_begin = solver->row_refactor_u_ptr[dep];
+      const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
+      const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
+      const double *u_values = solver->row_refactor_u_row_values + u_begin;
+      for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
+        x[u_cols[offset]] -= lij * u_values[offset];
+      }
     }
     p++;
   }
@@ -24370,13 +24551,16 @@ static int kls_parallel_row_refactor_process_dense_group_native(
       solver->row_refactor_l_row_values[lp] = lij;
       x[dep] = 0.0;
 
-      const UF_long u_begin = solver->row_refactor_u_ptr[dep];
-      const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
-      const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
-      const double *u_values =
-        solver->row_refactor_u_row_values + u_begin;
-      for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
-        x[u_cols[offset]] -= lij * u_values[offset];
+      if (!kls_row_refactor_try_compact_panel_scalar_update(
+            shared, x, group, dep, lij)) {
+        const UF_long u_begin = solver->row_refactor_u_ptr[dep];
+        const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
+        const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
+        const double *u_values =
+          solver->row_refactor_u_row_values + u_begin;
+        for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
+          x[u_cols[offset]] -= lij * u_values[offset];
+        }
       }
       lp++;
     }
@@ -27171,13 +27355,16 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
           *solver->row_refactor_l_values[lp] = lij;
         }
         x[dep] = 0.0;
-        const UF_long u_begin = solver->row_refactor_u_ptr[dep];
-        const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
-        const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
-        const double *u_values =
-          solver->row_refactor_u_row_values + u_begin;
-        for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
-          x[u_cols[offset]] -= lij * u_values[offset];
+        if (!kls_row_refactor_try_compact_panel_scalar_update(
+              shared, x, group, dep, lij)) {
+          const UF_long u_begin = solver->row_refactor_u_ptr[dep];
+          const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
+          const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
+          const double *u_values =
+            solver->row_refactor_u_row_values + u_begin;
+          for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
+            x[u_cols[offset]] -= lij * u_values[offset];
+          }
         }
         lp++;
       }
@@ -29537,13 +29724,16 @@ static int kls_parallel_row_refactor_process_group(
             lij * u_values[dense_len + offset];
         }
       } else {
-        const UF_long u_begin = solver->row_refactor_u_ptr[dep];
-        const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
-        const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
-        const double *u_values =
-          solver->row_refactor_u_row_values + u_begin;
-        for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
-          x[u_cols[offset]] -= lij * u_values[offset];
+        if (!kls_row_refactor_try_compact_panel_scalar_update(
+              shared, x, group, dep, lij)) {
+          const UF_long u_begin = solver->row_refactor_u_ptr[dep];
+          const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
+          const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
+          const double *u_values =
+            solver->row_refactor_u_row_values + u_begin;
+          for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
+            x[u_cols[offset]] -= lij * u_values[offset];
+          }
         }
       }
       p++;

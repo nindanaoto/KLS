@@ -3765,6 +3765,16 @@ numeric engine, but it removes another forced round trip through scattered
 KLU-style value arrays from the rows that already have compact SubtreeLU-shaped
 storage.
 
+The refactor scalar fallback now follows the same storage rule for single-row
+producer dependencies. If a completed dense producer row belongs to a retained
+compact panel, scalar consumers validate that panel's dense/trailing U-row
+layout and apply the update from the row-major panel before falling back to the
+scattered row mirror. New stats report last/cumulative scalar rows and entries
+served from compact panels, and a focused smoke fixture forces the one-row
+producer case that the multi-row compact-supernode update intentionally skips.
+This does not add the missing coarse BLAS row-panel engine, but it makes
+retained compact panels a broader numeric source for the existing row executor.
+
 KLS now retains METIS `NodeNDP` separator-tree queue metadata instead of
 discarding it after ordering. For accepted METIS symbolic analyses, the
 `NodeNDP` size tree is converted to a postorder private/pipeline component

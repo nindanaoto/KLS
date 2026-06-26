@@ -3045,6 +3045,233 @@ static int test_unchecked_row_dense_compact_panel(void) {
   return ok;
 }
 
+static int test_row_dense_compact_panel_scalar_update(void) {
+  const int32_t lead = 48;
+  const int32_t n = 65;
+  const int32_t scalar_row = lead;
+  const int32_t trail = n - lead - 1;
+  const size_t nnz =
+    (size_t)lead * (size_t)lead + 2u +
+    (size_t)trail * ((size_t)lead + 1u);
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
+  double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
+  double *ax1 = (double *)malloc(nnz * sizeof(*ax1));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
+      b == NULL || x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  for (int32_t col = 0; col < n; ++col) {
+    expected[col] = 0.5 + 0.015625 * (double)((7 * col) % 19);
+  }
+
+  size_t pos = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = (int32_t)pos;
+    if (col < lead) {
+      for (int32_t row = 0; row < lead; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 21.0 + 0.01 * (double)col
+          : 0.0004 * (1.0 + (double)((row + 11 * col) % 17));
+        ax1[p] = ax0[p] + (row == col ? 0.025 : 1.0e-6);
+      }
+      if (col == lead - 1) {
+        const size_t p = pos++;
+        ai[p] = scalar_row;
+        ax0[p] = 0.002;
+        ax1[p] = 0.0021;
+      }
+    } else if (col == scalar_row) {
+      const size_t p = pos++;
+      ai[p] = scalar_row;
+      ax0[p] = 19.0;
+      ax1[p] = 19.05;
+    } else {
+      for (int32_t row = 0; row < lead; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = 0.00025 * (1.0 + (double)((row + 3 * col) % 13));
+        ax1[p] = ax0[p] + 1.0e-6 * (double)(((row + col) % 5) - 2);
+      }
+      const size_t p = pos++;
+      ai[p] = col;
+      ax0[p] = 17.0 + 0.02 * (double)col;
+      ax1[p] = ax0[p] + 0.03;
+    }
+  }
+  ap[n] = (int32_t)pos;
+  if (pos != nnz) {
+    fprintf(stderr, "unexpected scalar compact-panel fixture nnz: %zu/%zu\n",
+            pos, nnz);
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_row = saved_row_value != NULL;
+  const char *saved_checked_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked =
+    saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
+  const int had_checked = saved_checked_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.01;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if ((had_row && saved_row == NULL) ||
+      (had_checked && saved_checked == NULL)) {
+    fprintf(stderr, "failed to save scalar compact-panel env\n");
+    ok = 0;
+  }
+  if (!require_ok(kls_create(&solver), "create scalar compact panel")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze scalar compact panel")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor scalar compact panel base")) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "refactor scalar compact panel")) {
+    ok = 0;
+  }
+  if (had_row && saved_row != NULL) {
+    if (setenv("KLS_ENABLE_ROW_REFACTOR", saved_row, 1) != 0) {
+      perror("restore KLS_ENABLE_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_row && unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
+    perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (had_checked && saved_checked != NULL) {
+    if (setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", saved_checked, 1) != 0) {
+      perror("restore KLS_ENABLE_CHECKED_ROW_REFACTOR");
+      ok = 0;
+    }
+  } else if (!had_checked && unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+    perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve scalar compact panel")) {
+    ok = 0;
+  }
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats scalar compact panel")) {
+    ok = 0;
+  }
+  if (ok &&
+      (stats.row_refactor_last_compact_dense_panel_persistent != 1 ||
+       stats.row_refactor_last_compact_panel_scalar_update_rows < 1 ||
+       stats.row_refactor_compact_panel_scalar_update_rows < 1 ||
+       stats.row_refactor_last_compact_panel_scalar_update_entries < trail ||
+       stats.row_refactor_compact_panel_scalar_update_entries < trail)) {
+    fprintf(stderr,
+            "unexpected scalar compact-panel stats: persistent=%d"
+            ", scalar_rows=%" PRId64 "/%" PRId64
+            ", scalar_entries=%" PRId64 "/%" PRId64 "\n",
+            stats.row_refactor_last_compact_dense_panel_persistent,
+            stats.row_refactor_last_compact_panel_scalar_update_rows,
+            stats.row_refactor_compact_panel_scalar_update_rows,
+            stats.row_refactor_last_compact_panel_scalar_update_entries,
+            stats.row_refactor_compact_panel_scalar_update_entries);
+    ok = 0;
+  }
+
+  double max_solution_error = 0.0;
+  double max_residual = 0.0;
+  double max_rhs = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    const double err = fabs(x[row] - expected[row]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+    double residual = -b[row];
+    if (fabs(b[row]) > max_rhs) {
+      max_rhs = fabs(b[row]);
+    }
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        if (ai[p] == row) {
+          residual += ax1[p] * x[col];
+        }
+      }
+    }
+    if (fabs(residual) > max_residual) {
+      max_residual = fabs(residual);
+    }
+  }
+  const double rel_resid = max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 1.0e-8 || rel_resid > 1.0e-10)) {
+    fprintf(stderr,
+            "unexpected scalar compact-panel accuracy: max_x_err=%.17g"
+            ", rel_resid=%.17g\n",
+            max_solution_error, rel_resid);
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  free(saved_row);
+  free(saved_checked);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(x);
+  free(expected);
+  return ok;
+}
+
 static int test_unchecked_row_dense_native_direct_input(void) {
   const int32_t n = 46;
   const size_t nnz = (size_t)n * (size_t)n;
@@ -9952,6 +10179,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_unchecked_row_dense_compact_panel()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_row_dense_compact_panel_scalar_update()) {
     return EXIT_FAILURE;
   }
   if (!test_unchecked_row_dense_native_direct_input()) {

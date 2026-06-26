@@ -1457,6 +1457,14 @@ int main(int argc, char **argv) {
            ",\"row_refactor_compact_panel_solve_values\":%" PRId64,
            stats.row_refactor_last_compact_panel_solve_values,
            stats.row_refactor_compact_panel_solve_values);
+    printf(",\"row_refactor_last_compact_panel_scalar_update_rows\":%" PRId64
+           ",\"row_refactor_compact_panel_scalar_update_rows\":%" PRId64
+           ",\"row_refactor_last_compact_panel_scalar_update_entries\":%" PRId64
+           ",\"row_refactor_compact_panel_scalar_update_entries\":%" PRId64,
+           stats.row_refactor_last_compact_panel_scalar_update_rows,
+           stats.row_refactor_compact_panel_scalar_update_rows,
+           stats.row_refactor_last_compact_panel_scalar_update_entries,
+           stats.row_refactor_compact_panel_scalar_update_entries);
     printf(",\"row_refactor_last_dense_segment_direct_input_rows\":%" PRId64
            ",\"row_refactor_dense_segment_direct_input_rows\":%" PRId64,
            stats.row_refactor_last_dense_segment_direct_input_rows,
@@ -2039,6 +2047,8 @@ int main(int argc, char **argv) {
            " entries, used: %d/%" PRId64
            ", direct input rows: %" PRId64 "/%" PRId64
            ", compact solve values: %" PRId64 "/%" PRId64
+           ", compact scalar updates: %" PRId64 "/%" PRId64
+           " rows, %" PRId64 "/%" PRId64 " entries"
            ", native direct input rows: %" PRId64 "/%" PRId64
            ", sparse direct input rows: %" PRId64 "/%" PRId64
            ", sparse input targets: %" PRId64 "/%" PRId64
@@ -2086,6 +2096,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_direct_input_rows,
            stats.row_refactor_last_compact_panel_solve_values,
            stats.row_refactor_compact_panel_solve_values,
+           stats.row_refactor_last_compact_panel_scalar_update_rows,
+           stats.row_refactor_compact_panel_scalar_update_rows,
+           stats.row_refactor_last_compact_panel_scalar_update_entries,
+           stats.row_refactor_compact_panel_scalar_update_entries,
            stats.row_refactor_last_dense_segment_direct_input_rows,
            stats.row_refactor_dense_segment_direct_input_rows,
            stats.row_refactor_last_sparse_segment_direct_input_rows,
