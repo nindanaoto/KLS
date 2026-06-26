@@ -998,7 +998,11 @@ int main(int argc, char **argv) {
            ",\"kls_first_last_separator_queue_pipeline_wait_partial\":%d"
            ",\"kls_first_separator_queue_pipeline_wait_partial_run_count\":%" PRId64
            ",\"kls_first_last_separator_queue_pipeline_wait_partial_rows\":%" PRId64
-           ",\"kls_first_last_separator_queue_pipeline_wait_partial_deps\":%" PRId64,
+           ",\"kls_first_last_separator_queue_pipeline_wait_partial_deps\":%" PRId64
+           ",\"kls_first_last_separator_queue_pipeline_supernode_update\":%d"
+           ",\"kls_first_separator_queue_pipeline_supernode_update_run_count\":%" PRId64
+           ",\"kls_first_last_separator_queue_pipeline_supernode_update_groups\":%" PRId64
+           ",\"kls_first_last_separator_queue_pipeline_supernode_update_rows\":%" PRId64,
            stats.kls_first_last_separator_queue_parallel_pipeline,
            stats.kls_first_separator_queue_parallel_pipeline_run_count,
            stats.kls_first_last_separator_queue_parallel_pipeline_rows,
@@ -1010,7 +1014,11 @@ int main(int argc, char **argv) {
            stats.kls_first_last_separator_queue_pipeline_wait_partial,
            stats.kls_first_separator_queue_pipeline_wait_partial_run_count,
            stats.kls_first_last_separator_queue_pipeline_wait_partial_rows,
-           stats.kls_first_last_separator_queue_pipeline_wait_partial_deps);
+           stats.kls_first_last_separator_queue_pipeline_wait_partial_deps,
+           stats.kls_first_last_separator_queue_pipeline_supernode_update,
+           stats.kls_first_separator_queue_pipeline_supernode_update_run_count,
+           stats.kls_first_last_separator_queue_pipeline_supernode_update_groups,
+           stats.kls_first_last_separator_queue_pipeline_supernode_update_rows);
     printf(",\"fast_rejected_block_start\":%" PRId64
            ",\"fast_rejected_block_size\":%" PRId64
            ",\"fast_rejected_suffix_columns\":%" PRId64
@@ -1616,6 +1624,12 @@ int main(int argc, char **argv) {
            stats.kls_first_separator_queue_pipeline_wait_partial_run_count,
            stats.kls_first_last_separator_queue_pipeline_wait_partial_rows,
            stats.kls_first_last_separator_queue_pipeline_wait_partial_deps);
+    printf("KLS row-up-looking separator pipeline supernode update: last %d"
+           ", runs %" PRId64 ", groups %" PRId64 ", rows %" PRId64 "\n",
+           stats.kls_first_last_separator_queue_pipeline_supernode_update,
+           stats.kls_first_separator_queue_pipeline_supernode_update_run_count,
+           stats.kls_first_last_separator_queue_pipeline_supernode_update_groups,
+           stats.kls_first_last_separator_queue_pipeline_supernode_update_rows);
     printf("KLS row-up-looking parallel BTF blocks: last %" PRId64
            ", total %" PRId64 "\n",
            stats.kls_first_last_parallel_btf_blocks,

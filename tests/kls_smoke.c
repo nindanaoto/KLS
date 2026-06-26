@@ -7969,6 +7969,9 @@ static int test_kls_first_separator_queue_plan(void) {
             ", pipeline_wait_partial=%d/%" PRId64
             ", pipeline_wait_partial_rows=%" PRId64
             ", pipeline_wait_partial_deps=%" PRId64
+            ", pipeline_supernode_update=%d/%" PRId64
+            ", pipeline_supernode_update_groups=%" PRId64
+            ", pipeline_supernode_update_rows=%" PRId64
             ", row_cols=%" PRId64 ", btf=%d, scale=%d\n",
             stats.build_has_metis,
             kls_factor_path_name(stats.last_factor_path),
@@ -8002,6 +8005,10 @@ static int test_kls_first_separator_queue_plan(void) {
             stats.kls_first_separator_queue_pipeline_wait_partial_run_count,
             stats.kls_first_last_separator_queue_pipeline_wait_partial_rows,
             stats.kls_first_last_separator_queue_pipeline_wait_partial_deps,
+            stats.kls_first_last_separator_queue_pipeline_supernode_update,
+            stats.kls_first_separator_queue_pipeline_supernode_update_run_count,
+            stats.kls_first_last_separator_queue_pipeline_supernode_update_groups,
+            stats.kls_first_last_separator_queue_pipeline_supernode_update_rows,
             stats.kls_first_last_row_uplooking_columns,
             stats.selected_btf,
             stats.selected_scale);
