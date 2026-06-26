@@ -3013,16 +3013,19 @@ KLS-owned factorization kernel, but not the CKTSO ETree-descendant pipelined
 tail executor.
 
 KLS now also gives the independent row-up-looking factorization kernel a chance
-when an unscaled checked reject has an ETree-tail plan but the exact in-place
-tail repair cannot be realized. This moves that recovery branch toward the
-papers' "switch from invalid checked refactorization to pivoting factorization"
-rule: the exact block/tail repair remains first, but the next fallback is a
-quality-checked KLS-first rebuild before the serial full-suffix repair and KLU
-block-kernel fallback. That checked-reject recovery bypasses the normal
-automatic KLS-first cost gate but still honors an explicit
-`KLS_ENABLE_KLS_FIRST_FACTOR=0` disable. Successful uses are reported as
-`fast_kls_rebuild_restarts`. This still rebuilds the numeric object instead of
-running CKTSO Algorithm 5's ETree-descendant pipelined tail scheduler in place.
+when an unscaled checked reject cannot be recovered by the exact in-place tail
+repair. This moves that recovery branch toward the papers' "switch from invalid
+checked refactorization to pivoting factorization" rule: exact block/tail repair
+remains first, then KLS rebuilds the rejected BTF block with its row-first
+dynamic-column-pivot executor, then it tries the quality-checked KLS-first
+whole-numeric rebuild before the KLU block-kernel fallback. The whole-numeric
+checked-reject recovery bypasses the normal automatic KLS-first cost gate but
+still honors an explicit `KLS_ENABLE_KLS_FIRST_FACTOR=0` disable. Successful
+row-first block repairs are reported as `fast_kls_block_restarts`; successful
+whole-numeric recoveries are reported as `fast_kls_rebuild_restarts`. This
+still stops short of CKTSO Algorithm 5's ETree-descendant pipelined tail
+scheduler in place, but removes another KLU-kernel step from the checked-reject
+fallback ladder.
 
 The row-refactor benchmark controls were then made explicit after the
 checked-row/refactor ambiguity above was found. `kls_bench` now accepts
