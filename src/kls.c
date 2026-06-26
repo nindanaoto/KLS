@@ -12956,14 +12956,19 @@ static void kls_record_fast_reject_unfinished_tail_seed(
 
   const unsigned int generation = shared->pipeline_generation;
   UF_long seed_count = 0;
-  for (UF_long col = rejected_pivot; col < k2; ++col) {
+  int contains_reject = 0;
+  for (UF_long col = k1; col < k2; ++col) {
     if (atomic_load_explicit(&shared->pipeline_done[col],
                              memory_order_acquire) == generation) {
       continue;
     }
-    solver->fast_reject_tail_seed_cols[seed_count++] = col - k1;
+    const UF_long local_col = col - k1;
+    solver->fast_reject_tail_seed_cols[seed_count++] = local_col;
+    if (col == rejected_pivot) {
+      contains_reject = 1;
+    }
   }
-  if (seed_count == 0u) {
+  if (!contains_reject) {
     solver->fast_reject_tail_seed_cols[seed_count++] = rejected_pivot - k1;
   }
 
@@ -13221,7 +13226,9 @@ static int kls_build_fast_reject_pivoting_tail_plan(
   };
   int seed_mode =
     solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX
-      ? KLS_FAST_REJECT_TAIL_SEED_ROW
+      ? (use_unfinished_seed
+           ? KLS_FAST_REJECT_TAIL_SEED_UNFINISHED
+           : KLS_FAST_REJECT_TAIL_SEED_ROW)
       : KLS_FAST_REJECT_TAIL_SEED_SUFFIX;
   solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
   solver->stats.fast_rejected_pivoting_tail_block_seed_columns =
@@ -13252,7 +13259,7 @@ static int kls_build_fast_reject_pivoting_tail_plan(
         const UF_long seed_count = solver->fast_reject_tail_seed_count;
         for (UF_long p = 0; p < seed_count; ++p) {
           const UF_long local_col = solver->fast_reject_tail_seed_cols[p];
-          if (local_col < local_reject ||
+          if (local_col >= nk ||
               !kls_mark_fast_reject_tail_col(solver, nk, local_col, mark,
                                              &queued)) {
             free(owned_parent);
@@ -34496,6 +34503,13 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       (shared->singular && common->halt_if_singular)) {
     solver->egraph_worker_scratch_dirty = 1;
   }
+  int unfinished_tail_seed_recorded = 0;
+  if (shared->pivot_rejected && pipeline_done != NULL) {
+    kls_record_fast_reject_unfinished_tail_seed(
+      solver, shared, shared->rejected_pivot);
+    unfinished_tail_seed_recorded =
+      solver->fast_reject_tail_seed_valid ? 1 : 0;
+  }
   if (shared->pivot_rejected && pipeline_done != NULL && scratch[0] != NULL) {
     kls_row_refactor_refresh_missing_prefix(shared, scratch[0]);
   }
@@ -34516,8 +34530,14 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       prefix_ready ? KLS_FAST_REJECT_REFRESH_PREFIX
                    : KLS_FAST_REJECT_REFRESH_UNKNOWN;
     if (prefix_ready) {
-      kls_record_fast_reject_unfinished_tail_seed(
-        solver, shared, shared->rejected_pivot);
+      const UF_long seed_block =
+        kls_block_for_pivot(solver, shared->rejected_pivot);
+      if (!unfinished_tail_seed_recorded ||
+          seed_block == KLS_KLU_EMPTY ||
+          solver->fast_reject_tail_seed_block != seed_block) {
+        kls_record_fast_reject_unfinished_tail_seed(
+          solver, shared, shared->rejected_pivot);
+      }
     } else {
       kls_clear_fast_reject_tail_seed(solver);
     }
@@ -38464,6 +38484,14 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     solver->egraph_worker_scratch_dirty = 1;
   }
 
+  int unfinished_tail_seed_recorded = 0;
+  if (!shared->invalid && shared->pivot_rejected &&
+      pipeline_done != NULL) {
+    kls_record_fast_reject_unfinished_tail_seed(
+      solver, shared, shared->rejected_pivot);
+    unfinished_tail_seed_recorded =
+      solver->fast_reject_tail_seed_valid ? 1 : 0;
+  }
   if (!shared->invalid && shared->pivot_rejected &&
       pipeline_done != NULL && scratch[0] != NULL) {
     kls_egraph_refactor_refresh_missing_prefix(shared, scratch[0],
@@ -38481,8 +38509,14 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       prefix_ready ? KLS_FAST_REJECT_REFRESH_PREFIX
                    : KLS_FAST_REJECT_REFRESH_UNKNOWN;
     if (prefix_ready) {
-      kls_record_fast_reject_unfinished_tail_seed(
-        solver, shared, shared->rejected_pivot);
+      const UF_long seed_block =
+        kls_block_for_pivot(solver, shared->rejected_pivot);
+      if (!unfinished_tail_seed_recorded ||
+          seed_block == KLS_KLU_EMPTY ||
+          solver->fast_reject_tail_seed_block != seed_block) {
+        kls_record_fast_reject_unfinished_tail_seed(
+          solver, shared, shared->rejected_pivot);
+      }
     } else {
       kls_clear_fast_reject_tail_seed(solver);
     }

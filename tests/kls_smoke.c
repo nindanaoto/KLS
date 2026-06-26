@@ -1186,10 +1186,10 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
                  stats.fast_kls_block_restart_last_row_pipeline_suffix_rows !=
                stats.fast_rejected_block_size ||
              stats.fast_rejected_pivoting_tail_columns < 1 ||
-             stats.fast_rejected_pivoting_tail_seed_columns != 2 ||
-             stats.fast_rejected_pivoting_tail_row_seed_columns !=
-               stats.fast_rejected_pivoting_tail_seed_columns ||
-             stats.fast_rejected_pivoting_tail_row_seed_columns !=
+             stats.fast_rejected_pivoting_tail_seed_columns !=
+               stats.fast_rejected_pivoting_tail_columns ||
+             stats.fast_rejected_pivoting_tail_row_seed_columns != 0 ||
+             stats.fast_rejected_pivoting_tail_seed_columns <
                stats.fast_rejected_row_tail_columns ||
              stats.fast_rejected_pivoting_tail_topological != 1)) {
     fprintf(stderr,

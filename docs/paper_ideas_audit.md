@@ -648,8 +648,10 @@ design work, not benchmark-specific tuning.
   large single-block cases, as a guarded exact-EGraph cluster/pipeline
   no-pivot refactor. This path now covers both unscaled factors and KLU
   row-scaled factors whose scale vector is recomputed before the EGraph refactor
-  and permuted afterward. KLS still does not have the ETree descendant scheduler
-  used by CKTSO-style pivoting tail restart.
+  and permuted afterward. Failed checked passes now seed the retained pivoting
+  tail from the interrupted guessed-EGraph unfinished set before prefix refresh,
+  but KLS still does not have CKTSO's full ETree-descendant pipelined tail
+  executor.
 - CKTSO fast factorization is present as pivot-checked reuse plus a KLS-owned
   BTF-block repair path. KLS validates the preserved-prefix live state and can
   enter a conservative serial pivoting-tail kernel for non-root rejects in that
@@ -2333,16 +2335,15 @@ This keeps the CKTSO restart target tied to KLS row storage rather than only
 the KLU-column U-pattern or an ETree upper bound; the remaining missing piece
 is the full CKTSO-style pipelined row/segment tail kernel.
 
-That retained row-tail list is now also an executable seed for the conservative
-pivoting-tail envelope. For prefix-current checked row-major rejects, KLS first
-marks the retained block-local row tail, closes it through the ordered-block
-ETree, and records the seed size as
-`fast_rejected_pivoting_tail_row_seed_columns`. If that row-tail seed is not a
-valid topological plan, KLS now falls back to the saved unfinished-worker seed
-before the conservative suffix plan; the unfinished seed is retained in its own
-buffer so speculative row-tail planning cannot overwrite it. This is still not
-CKTSO's full concurrent pivoting-tail executor, but it moves the checked
-row/segment metadata from diagnostics into the restart planner.
+The retained row-tail list remains an executable fallback seed for the
+conservative pivoting-tail envelope. For prefix-current checked row-major
+rejects with no saved interrupted worker seed, KLS can mark the retained
+block-local row tail, close it through the ordered-block ETree, and record the
+seed size as `fast_rejected_pivoting_tail_row_seed_columns`; otherwise the
+CKTSO-style unfinished guessed-EGraph seed is preferred before row-tail and
+suffix fallback plans. This is still not CKTSO's full concurrent pivoting-tail
+executor, but it moves the checked row/segment metadata from diagnostics into
+the restart planner.
 
 The fallback pivoting block repair now also records the repaired row selected
 at the rejected pivot, whether it matches the retained row-tail candidate, the
@@ -5226,3 +5227,17 @@ non-contiguous gap smoke fixture now requires an exact repaired tail mask, zero
 overcompute columns, and suffix-only off-diagonal refresh. This is a direct
 CKTSO Algorithm 5 gap closure for the current KLS-owned row-first repair path;
 it still is not the full parallel ETree-descendant pivoting-tail scheduler.
+
+KLS now fills another CKTSO Algorithm 5 semantic gap in how that retained tail
+is seeded. The CKTSO paper says that, after a pivot-check interruption, the
+tail starts from the unfinished guessed-EGraph nodes and their ETree closure.
+KLS previously refreshed missing prefix rows first and then built the seed from
+the remaining suffix or a narrower row-tail heuristic, which could erase the
+actual interrupted unfinished set. The checked row and mapped EGraph reject
+paths now snapshot the whole rejected block's unfinished done-bitmap before
+prefix refresh, guarantee that the rejected pivot is in the seed, allow seed
+columns before the rejected pivot, and prefer that seed before row-tail/suffix
+fallbacks. The parallel checked-row smoke fixture now requires the pivoting-tail
+seed to come from that unfinished set, with row-tail seeding bypassed. This
+still leaves the larger CKTSO executor gap open: the retained worklist is used
+by KLS's guarded row-first repair path, not by a full production tail scheduler.

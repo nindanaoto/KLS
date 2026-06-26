@@ -932,8 +932,8 @@ row-refactor successor tail when row-major metadata is available, including
 block-local BTF tails retained by the checked row-major path, the
 ordered-block ETree successor path that a pivoting tail-restart upper-bound
 scheduler would at least have to revisit, the sorted pivoting-tail worklist
-scope seeded from the current refresh state, with checked row-major row-tail
-seeds tried before the saved unfinished-worker seed and suffix fallback, the
+scope seeded from the interrupted guessed-EGraph unfinished set before any
+prefix refresh, with row-tail and suffix seeds kept as fallbacks, the
 first and last rows in that worklist, whether it includes the rejected pivot,
 whether the retained order is topologically safe for a future tail kernel to
 consume, whether the failed pass left an unknown, prefix-current, or all-current
@@ -1336,11 +1336,11 @@ KLS-first whole-numeric rebuild, before KLU block fallback. CKTSO's paper goes
 further: a production row-major up-looking
 factorization, EGraph pivot checks, and ETree-scheduled pipelined tail
 factorization. The generic sparse segment direct-load path, first-consumer
-ready-panel publication, and range-aware row-first use of retained pivoting-tail
-envelopes narrow the current refactor bridge, but the next larger algorithmic
-work is still to evolve the numeric factor/refactor/solve kernels toward those
-deeper KLS-owned sparse kernels while keeping the public API and benchmark
-harness stable.
+ready-panel publication, CKTSO-style unfinished-set tail seeding, and
+range-aware row-first use of retained pivoting-tail envelopes narrow the
+current refactor bridge, but the next larger algorithmic work is still to evolve
+the numeric factor/refactor/solve kernels toward those deeper KLS-owned sparse
+kernels while keeping the public API and benchmark harness stable.
 
 ## License
 
