@@ -160,7 +160,9 @@ serial suffix restart inside the rejected block when the repaired block
 preserves a validated non-empty live prefix. The preserved-column refresh used
 by masked ETree-tail repair now consumes the same input-row `Rs` state, so
 scaled exact-tail attempts can make omitted independent columns current instead
-of immediately widening to block rebuild. Scaled all-refresh KLU-refactor
+of immediately widening to block rebuild. Root rejected pivots can now use that
+same scaled refresh to derive the shorter reject-only ETree closure instead of
+being pinned to the prefix-current full suffix. Scaled all-refresh KLU-refactor
 rejects now recompute the row scale vector back to input-row order before
 attempting the same block-local repair and validated non-root serial suffix
 restart. The newer row-first rejected-block rebuild consumes that same
@@ -4459,14 +4461,15 @@ KLS can now
 prove that preserved columns outside that closure have no U dependency on tail
 columns, refresh those preserved columns with the existing mapped no-pivot
 column kernel, and then execute the shorter pivoted tail envelope. The refresh
-proof now works for single-block and unscaled BTF diagonal blocks by using the
-mapped global-column dispatcher and requiring retained block/off-diagonal
-metadata before refreshing omitted block-local columns. The smoke fixtures cover
-both a weak root in a 2-by-2 dependent part plus an independent trailing
-singleton, and a non-root weak pivot whose independent changed suffix column
-must be refreshed before KLS preserves it outside the ETree-derived tail. Both
-assert that the retained pivoting-tail plan is shorter than the block suffix and
-that KLS counts the repair as `fast_tail_restarts=1`.
+proof now works for single-block, BTF, unscaled, and KLU row-scaled diagonal
+blocks by using the mapped global-column dispatcher, requiring retained
+block/off-diagonal metadata before refreshing omitted block-local columns, and
+feeding scaled attempts with input-row `Rs`. The smoke fixtures cover both a
+weak root in a 2-by-2 dependent part plus an independent trailing singleton,
+and a non-root weak pivot whose independent changed suffix column must be
+refreshed before KLS preserves it outside the ETree-derived tail. Both assert
+that the retained pivoting-tail plan is shorter than the block suffix and that
+KLS counts the repair as `fast_tail_restarts=1`.
 This is still a serial envelope rather than CKTSO's parallel Algorithm 5
 executor, but it directly applies the paper's distinction between unfinished
 EGraph nodes and ETree-descendant pivoting-tail work instead of treating all

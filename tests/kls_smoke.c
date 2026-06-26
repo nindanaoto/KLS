@@ -546,7 +546,8 @@ static int test_fast_factor_pivot_check_fallback(void) {
   return ok;
 }
 
-static int test_fast_factor_root_independent_tail_restart(void) {
+static int run_fast_factor_root_independent_tail_restart(int scale,
+                                                         const char *label) {
   const int32_t ap[] = {0, 2, 4, 5};
   const int32_t ai[] = {0, 1, 0, 1, 2};
   const double ax0[] = {2.0, 1.0, 1.0, 2.0, 3.0};
@@ -559,7 +560,7 @@ static int test_fast_factor_root_independent_tail_restart(void) {
   kls_default_options(&options);
   options.ordering = KLS_ORDERING_NATURAL;
   options.use_btf = 0;
-  options.scale = -1;
+  options.scale = scale;
   options.pivot_tolerance = 0.001;
   options.static_pivoting = 0;
 
@@ -581,7 +582,8 @@ static int test_fast_factor_root_independent_tail_restart(void) {
                         "stats root independent tail")) {
     ok = 0;
   }
-  if (ok && (stats.fast_rejected_pivot != 0 ||
+  if (ok && (stats.selected_scale != scale ||
+             stats.fast_rejected_pivot != 0 ||
              stats.fast_rejected_pivot_col != 0 ||
              stats.fast_rejected_block_start != 0 ||
              stats.fast_rejected_block_size != 3 ||
@@ -600,7 +602,7 @@ static int test_fast_factor_root_independent_tail_restart(void) {
              stats.fast_block_restarts != 1 ||
              stats.fast_tail_restarts != 1)) {
     fprintf(stderr,
-            "unexpected root independent tail stats: pivot=%" PRId64
+            "unexpected %s stats: scale=%d/%d, pivot=%" PRId64
             ", col=%" PRId64 ", block=[%" PRId64 ",%" PRId64 ")"
             ", suffix=%" PRId64 ", refresh=%d, tail_cols=%" PRId64
             ", tail_last=%" PRId64 ", suffix_exact=%d"
@@ -608,6 +610,9 @@ static int test_fast_factor_root_independent_tail_restart(void) {
             ", repaired_cols=%" PRId64 ", exact_mask=%d"
             ", repaired_work=%.6g"
             ", saved_work=%.6g, block_restarts=%d, tail_restarts=%d\n",
+            label,
+            stats.selected_scale,
+            scale,
             stats.fast_rejected_pivot,
             stats.fast_rejected_pivot_col,
             stats.fast_rejected_block_start,
@@ -628,22 +633,35 @@ static int test_fast_factor_root_independent_tail_restart(void) {
     ok = 0;
   }
   if (ok && !require_pivoting_tail_plan(&stats,
-                                        "root independent tail")) {
+                                        label)) {
     ok = 0;
   }
   if (ok && !require_tail_overcompute_bounds(&stats,
-                                             "root independent tail")) {
+                                             label)) {
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
              !close_enough(x[2], 3.0))) {
     fprintf(stderr,
-            "unexpected root independent tail solution: %.17g %.17g %.17g\n",
-            x[0], x[1], x[2]);
+            "unexpected %s solution: %.17g %.17g %.17g\n",
+            label, x[0], x[1], x[2]);
     ok = 0;
   }
 
   kls_destroy(solver);
+  return ok;
+}
+
+static int test_fast_factor_root_independent_tail_restart(void) {
+  int ok = 1;
+  if (!run_fast_factor_root_independent_tail_restart(
+        -1, "root independent tail")) {
+    ok = 0;
+  }
+  if (!run_fast_factor_root_independent_tail_restart(
+        2, "scaled root independent tail")) {
+    ok = 0;
+  }
   return ok;
 }
 

@@ -34588,7 +34588,6 @@ static UF_long kls_prepare_root_pivot_tail_independent_refresh(
       solver->symbolic->R == NULL ||
       k1 != solver->symbolic->R[block] ||
       k1 + nk != solver->symbolic->R[block + 1u] ||
-      solver->common.scale > 0 ||
       solver->fast_reject_refresh_state != KLS_FAST_REJECT_REFRESH_PREFIX) {
     return nk;
   }
