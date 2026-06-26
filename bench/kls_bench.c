@@ -1045,6 +1045,9 @@ int main(int argc, char **argv) {
            ",\"row_refactor_auto_values_ready\":%d"
            ",\"row_refactor_auto_work_allowed\":%d"
            ",\"row_refactor_auto_should_run\":%d"
+           ",\"row_refactor_auto_model_recommended\":%d"
+           ",\"row_refactor_auto_model_attempted\":%d"
+           ",\"row_refactor_auto_model_accepted\":%d"
            ",\"row_refactor_group_dependency_edges\":%" PRId64
            ",\"row_refactor_group_root_count\":%" PRId64
            ",\"row_refactor_group_leaf_count\":%" PRId64
@@ -1113,6 +1116,9 @@ int main(int argc, char **argv) {
            stats.row_refactor_auto_values_ready,
            stats.row_refactor_auto_work_allowed,
            stats.row_refactor_auto_should_run,
+           stats.row_refactor_auto_model_recommended,
+           stats.row_refactor_auto_model_attempted,
+           stats.row_refactor_auto_model_accepted,
            stats.row_refactor_group_dependency_edges,
            stats.row_refactor_group_root_count,
            stats.row_refactor_group_leaf_count,
@@ -1640,6 +1646,7 @@ int main(int argc, char **argv) {
            ", total work: %.6g"
            ", auto enabled: %d, auto values ready: %d"
            ", auto work allowed: %d, auto should run: %d"
+           ", auto model rec/attempt/accept: %d/%d/%d"
            ", edges: %" PRId64 ", roots: %" PRId64
            ", leaves: %" PRId64 ", max fanout: %" PRId64
            ", last run: %d, last checked: %d, last parallel: %d"
@@ -1679,6 +1686,9 @@ int main(int argc, char **argv) {
            stats.row_refactor_auto_values_ready,
            stats.row_refactor_auto_work_allowed,
            stats.row_refactor_auto_should_run,
+           stats.row_refactor_auto_model_recommended,
+           stats.row_refactor_auto_model_attempted,
+           stats.row_refactor_auto_model_accepted,
            stats.row_refactor_group_dependency_edges,
            stats.row_refactor_group_root_count,
            stats.row_refactor_group_leaf_count,

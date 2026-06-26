@@ -73,6 +73,31 @@ static int require_parallel_model_stats(const kls_stats *stats,
   return 1;
 }
 
+static int require_row_auto_model_stats(const kls_stats *stats,
+                                        const char *what) {
+  if (stats == NULL ||
+      (stats->row_refactor_auto_model_recommended != 0 &&
+       stats->row_refactor_auto_model_recommended != 1) ||
+      (stats->row_refactor_auto_model_attempted != 0 &&
+       stats->row_refactor_auto_model_attempted != 1) ||
+      (stats->row_refactor_auto_model_accepted != 0 &&
+       stats->row_refactor_auto_model_accepted != 1) ||
+      (stats->row_refactor_auto_model_attempted &&
+       !stats->row_refactor_auto_model_recommended) ||
+      (stats->row_refactor_auto_model_accepted &&
+       !stats->row_refactor_auto_model_attempted)) {
+    fprintf(stderr,
+            "unexpected row auto model stats for %s: rec=%d attempted=%d "
+            "accepted=%d\n",
+            what,
+            stats != NULL ? stats->row_refactor_auto_model_recommended : -1,
+            stats != NULL ? stats->row_refactor_auto_model_attempted : -1,
+            stats != NULL ? stats->row_refactor_auto_model_accepted : -1);
+    return 0;
+  }
+  return 1;
+}
+
 static int require_pivoting_tail_plan(const kls_stats *stats,
                                       const char *what) {
   if (stats == NULL || stats->fast_rejected_pivot < 0 ||
@@ -212,6 +237,7 @@ static int test_csc(void) {
   if (!require_ok(kls_get_stats(solver, &stats), "stats")) return 0;
   if (!require_build_feature_stats(&stats, "csc")) return 0;
   if (!require_parallel_model_stats(&stats, "csc")) return 0;
+  if (!require_row_auto_model_stats(&stats, "csc")) return 0;
   if (stats.selected_ordering != KLS_ORDERING_AMD && stats.selected_ordering != KLS_ORDERING_COLAMD) {
     fprintf(stderr, "unexpected selected ordering: %s\n", kls_ordering_name(stats.selected_ordering));
     return 0;

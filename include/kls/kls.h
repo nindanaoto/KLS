@@ -379,6 +379,9 @@ typedef struct kls_stats {
   double parallel_model_r1;
   double parallel_model_r2;
   int parallel_model_recommends_parallel;
+  int row_refactor_auto_model_recommended;
+  int row_refactor_auto_model_attempted;
+  int row_refactor_auto_model_accepted;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
