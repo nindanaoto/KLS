@@ -41973,7 +41973,10 @@ static int kls_row_first_run_restartable_pipeline_suffix(
   UF_long *supernode_panel_update_rows_out,
   UF_long *pivot_tail_rows_out,
   UF_long *pivot_restarts_out,
-  UF_long *pivot_serial_rows_out) {
+  UF_long *pivot_serial_rows_out,
+  kls_row_first_supernode_panel_cache *pivot_serial_panel_cache,
+  UF_long *pivot_serial_open_panel_start_io,
+  UF_long *pivot_serial_open_panel_end_io) {
   if (pipeline_rows_out != NULL) {
     *pipeline_rows_out = 0;
   }
@@ -42090,12 +42093,26 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     pivot_tail_rows += end - completed_pos;
     pivot_restarts++;
     const UF_long pivot_row = row_order[completed_pos];
+    const UF_long pivots_before =
+      stats != NULL ? stats->dynamic_column_pivots : 0u;
     if (pivot_row >= ctx->nk ||
         !kls_row_first_factor_one_row(
           ctx, workspace, l_entries, u_entries, udiag_values, pivot_row,
           NULL, -1, row_done, stats)) {
       return 0;
     }
+    if (stats != NULL && stats->dynamic_column_pivots != pivots_before) {
+      kls_row_first_supernode_panel_cache_reset_active(
+        pivot_serial_panel_cache, workspace, ctx->nk,
+        pivot_serial_open_panel_start_io,
+        pivot_serial_open_panel_end_io);
+    }
+    kls_row_first_supernode_panel_cache_publish_completed(
+      workspace->supernode_panel_cache != NULL
+        ? pivot_serial_panel_cache : NULL,
+      u_entries, workspace->u_row_ptr, workspace->u_row_end,
+      udiag_values, ctx->nk, pivot_serial_open_panel_start_io,
+      pivot_serial_open_panel_end_io, pivot_row);
     pivot_serial_rows++;
     cursor = completed_pos + 1u;
   }
@@ -44041,7 +44058,10 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
               &block_pipeline_supernode_panel_update_rows,
               &block_pipeline_pivot_tail_rows,
               &block_pipeline_pivot_restarts,
-              &block_pipeline_pivot_serial_rows)) {
+              &block_pipeline_pivot_serial_rows,
+              row_workspace.supernode_panel_cache != NULL
+                ? &row_supernode_panel_cache : NULL,
+              &row_open_panel_start, &row_open_panel_end)) {
           parallel_pipeline_executed = 1;
         } else {
           goto fail_block_entries;

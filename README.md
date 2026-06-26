@@ -191,7 +191,10 @@ Builds configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` can use the same
 runtime `KLS_ENABLE_CBLAS_SUPERNODE=1` gate to consume eligible KLS-first
 cached panels with CBLAS `dtrsv` and `dgemv`; otherwise the cached panel uses
 the scalar in-panel solver. Dynamic column exchanges invalidate the phase-local
-pipeline cache and reset the row-up producer panel caches. Algorithm
+pipeline cache and reset the row-up producer panel caches. Separator pipeline
+pivot-tail rows that are serialized after a restart use the same row-up
+producer cache, so a restarted suffix can still publish and consume completed
+row-supernode panels. Algorithm
 1-style dynamic column exchanges are reported as
 `kls_first_last_dynamic_column_pivots` and
 `kls_first_dynamic_column_pivot_count`. When a retained METIS `NodeNDP`

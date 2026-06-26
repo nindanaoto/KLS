@@ -4858,6 +4858,8 @@ consume eligible cached KLS-first panels with CBLAS `dtrsv` over the
 non-unit upper-triangular panel and CBLAS `dgemv` for dense suffix/common-tail
 updates; otherwise the cached panel uses the scalar in-panel solver. This is
 still not the full paper storage layer: row-up panels are published only after
-the producer supernode is complete, pivot-tail serial rows do not maintain a
-live producer panel stream, and CKTSO's full ETree-descendant pivoting-tail
-scheduler remains open.
+the producer supernode is complete, and CKTSO's full ETree-descendant
+pivoting-tail scheduler remains open. Separator pipeline pivot-tail rows that
+are serialized after a restart now use the same row-up producer panel cache, so
+the restarted suffix no longer loses completed-supernode panel publication just
+because a pipeline phase fell back to a serial pivot row.
