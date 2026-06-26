@@ -562,6 +562,7 @@ static int run_fast_factor_root_independent_tail_restart(int scale,
   options.use_btf = 0;
   options.scale = scale;
   options.pivot_tolerance = 0.001;
+  options.threads = 2;
   options.static_pivoting = 0;
 
   int ok = 1;
@@ -594,22 +595,20 @@ static int run_fast_factor_root_independent_tail_restart(int scale,
              stats.fast_rejected_pivoting_tail_last != 1 ||
              stats.fast_rejected_pivoting_tail_suffix_exact != 0 ||
              stats.fast_rejected_pivoting_tail_suffix_overcompute_columns != 1 ||
-             stats.fast_repaired_tail_restart_ready != 1 ||
-             stats.fast_repaired_tail_restart_columns != 2 ||
-             stats.fast_repaired_tail_restart_exact_mask != 1 ||
-             stats.fast_repaired_tail_restart_work <= 0.0 ||
-             stats.fast_repaired_tail_restart_saved_work <= 0.0 ||
              stats.fast_block_restarts != 1 ||
-             stats.fast_tail_restarts != 1)) {
+             stats.fast_tail_restarts != 0 ||
+             stats.fast_kls_block_restart_last_row_pipeline != 1 ||
+             stats.fast_kls_block_restart_last_row_pipeline_rows != 2 ||
+             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 1)) {
     fprintf(stderr,
             "unexpected %s stats: scale=%d/%d, pivot=%" PRId64
             ", col=%" PRId64 ", block=[%" PRId64 ",%" PRId64 ")"
             ", suffix=%" PRId64 ", refresh=%d, tail_cols=%" PRId64
             ", tail_last=%" PRId64 ", suffix_exact=%d"
-            ", suffix_over=%" PRId64 ", repaired_ready=%d"
-            ", repaired_cols=%" PRId64 ", exact_mask=%d"
-            ", repaired_work=%.6g"
-            ", saved_work=%.6g, block_restarts=%d, tail_restarts=%d\n",
+            ", suffix_over=%" PRId64
+            ", block_restarts=%d, tail_restarts=%d"
+            ", pipeline=%d, pipeline_rows=%" PRId64
+            ", pipeline_suffix=%" PRId64 "\n",
             label,
             stats.selected_scale,
             scale,
@@ -623,13 +622,11 @@ static int run_fast_factor_root_independent_tail_restart(int scale,
             stats.fast_rejected_pivoting_tail_last,
             stats.fast_rejected_pivoting_tail_suffix_exact,
             stats.fast_rejected_pivoting_tail_suffix_overcompute_columns,
-            stats.fast_repaired_tail_restart_ready,
-            stats.fast_repaired_tail_restart_columns,
-            stats.fast_repaired_tail_restart_exact_mask,
-            stats.fast_repaired_tail_restart_work,
-            stats.fast_repaired_tail_restart_saved_work,
             stats.fast_block_restarts,
-            stats.fast_tail_restarts);
+            stats.fast_tail_restarts,
+            stats.fast_kls_block_restart_last_row_pipeline,
+            stats.fast_kls_block_restart_last_row_pipeline_rows,
+            stats.fast_kls_block_restart_last_row_pipeline_suffix_rows);
     ok = 0;
   }
   if (ok && !require_pivoting_tail_plan(&stats,
@@ -1030,7 +1027,12 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
              stats.fast_tail_restarts != 0 ||
              stats.fast_kls_block_restart_last_row_pipeline != 1 ||
              stats.fast_kls_block_restart_row_pipeline_count < 1 ||
-             stats.fast_kls_block_restart_last_row_pipeline_rows != 4 ||
+             stats.fast_kls_block_restart_last_row_pipeline_rows !=
+               stats.fast_rejected_pivoting_tail_columns ||
+             stats.fast_kls_block_restart_last_row_pipeline_prefix_rows +
+                 stats.fast_kls_block_restart_last_row_pipeline_rows +
+                 stats.fast_kls_block_restart_last_row_pipeline_suffix_rows !=
+               stats.fast_rejected_block_size ||
              stats.fast_rejected_pivoting_tail_columns < 1 ||
              stats.fast_rejected_pivoting_tail_seed_columns != 2 ||
              stats.fast_rejected_pivoting_tail_row_seed_columns !=
@@ -1044,6 +1046,8 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
             ", tail_ready=%d, restarts=%d, tail_restarts=%d"
             ", pipeline=%d/%" PRId64 ", pipeline_rows=%" PRId64
             ", pipeline_threads=%" PRId64
+            ", pipeline_prefix=%" PRId64
+            ", pipeline_suffix=%" PRId64
             ", tail_cols=%" PRId64 ", seed=%" PRId64
             ", row_seed=%" PRId64 ", row_tail=%" PRId64
             ", tail_topo=%d\n",
@@ -1058,6 +1062,8 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
             stats.fast_kls_block_restart_row_pipeline_count,
             stats.fast_kls_block_restart_last_row_pipeline_rows,
             stats.fast_kls_block_restart_last_row_pipeline_threads,
+            stats.fast_kls_block_restart_last_row_pipeline_prefix_rows,
+            stats.fast_kls_block_restart_last_row_pipeline_suffix_rows,
             stats.fast_rejected_pivoting_tail_columns,
             stats.fast_rejected_pivoting_tail_seed_columns,
             stats.fast_rejected_pivoting_tail_row_seed_columns,
@@ -2764,7 +2770,7 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
   int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
   double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
   double *ax1 = (double *)malloc(nnz * sizeof(*ax1));
-  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
   double *x = (double *)calloc((size_t)n, sizeof(*x));
   double *expected = (double *)malloc((size_t)n * sizeof(*expected));
   if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||

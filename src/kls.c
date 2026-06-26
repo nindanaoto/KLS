@@ -485,6 +485,7 @@ struct kls_solver {
   UF_long fast_kls_block_restart_last_row_pipeline_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_threads;
   UF_long fast_kls_block_restart_last_row_pipeline_prefix_rows;
+  UF_long fast_kls_block_restart_last_row_pipeline_suffix_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_pivot_tail_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_pivot_restarts;
   int fast_tail_restarts;
@@ -2580,6 +2581,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_kls_block_restart_last_row_pipeline_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_threads = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_prefix_rows = 0;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_suffix_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->stats.fast_tail_restarts = 0;
@@ -2624,6 +2626,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_kls_block_restart_last_row_pipeline_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_threads = 0;
   solver->fast_kls_block_restart_last_row_pipeline_prefix_rows = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_suffix_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->fast_tail_restarts = 0;
@@ -3531,6 +3534,7 @@ static void kls_record_fast_reject_detail(kls_solver *solver,
   solver->stats.fast_kls_block_restart_last_row_pipeline_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_threads = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_prefix_rows = 0;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_suffix_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->stats.fast_rejected_pivoting_tail_contiguous = 0;
@@ -4338,6 +4342,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->fast_kls_block_restart_last_row_pipeline_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_threads = 0;
   solver->fast_kls_block_restart_last_row_pipeline_prefix_rows = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_suffix_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->fast_tail_restarts = 0;
@@ -10944,6 +10949,8 @@ static void kls_fill_fast_kls_block_restart_pipeline_stats(kls_solver *solver) {
     (int64_t)solver->fast_kls_block_restart_last_row_pipeline_threads;
   solver->stats.fast_kls_block_restart_last_row_pipeline_prefix_rows =
     (int64_t)solver->fast_kls_block_restart_last_row_pipeline_prefix_rows;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_suffix_rows =
+    (int64_t)solver->fast_kls_block_restart_last_row_pipeline_suffix_rows;
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_pivot_tail_rows =
       (int64_t)
@@ -39374,9 +39381,11 @@ typedef struct kls_row_first_block_context {
   UF_long nk;
   UF_long n;
   UF_long separator_block_base;
+  UF_long pivot_col_limit;
   int scaled;
   int scale;
   int use_separator_for_block;
+  int use_pivot_col_limit;
   double tol;
 } kls_row_first_block_context;
 
@@ -39440,10 +39449,13 @@ typedef struct kls_row_first_row_stats {
 typedef struct kls_row_first_pivot_choice {
   UF_long global_col;
   double global_abs;
+  UF_long limited_col;
+  double limited_abs;
   UF_long scoped_col;
   double scoped_abs;
   int scoped_col_exact;
   int scope_enabled;
+  int limit_enabled;
 } kls_row_first_pivot_choice;
 
 static int kls_row_first_partial_apply_one_dep(
@@ -39584,10 +39596,13 @@ static int kls_row_first_collect_pivot_choice(
   if (choice != NULL) {
     choice->global_col = KLS_KLU_EMPTY;
     choice->global_abs = 0.0;
+    choice->limited_col = KLS_KLU_EMPTY;
+    choice->limited_abs = 0.0;
     choice->scoped_col = KLS_KLU_EMPTY;
     choice->scoped_abs = 0.0;
     choice->scoped_col_exact = 0;
     choice->scope_enabled = 0;
+    choice->limit_enabled = 0;
   }
   if (ctx == NULL || pattern == NULL || x == NULL || choice == NULL ||
       row >= ctx->nk) {
@@ -39603,8 +39618,14 @@ static int kls_row_first_collect_pivot_choice(
     }
     choice->scope_enabled = 1;
   }
+  const int limit_enabled =
+    ctx->use_pivot_col_limit && ctx->pivot_col_limit <= ctx->nk;
+  if (limit_enabled) {
+    choice->limit_enabled = 1;
+  }
 
   double scoped_best_abs = -1.0;
+  double limited_best_abs = -1.0;
   for (UF_long p = 0; p < pattern_count; ++p) {
     const UF_long col = pattern[p];
     if (col <= row) {
@@ -39615,12 +39636,20 @@ static int kls_row_first_collect_pivot_choice(
       choice->global_abs = abs_value;
       choice->global_col = col;
     }
+    const int within_limit =
+      !limit_enabled || col < ctx->pivot_col_limit;
+    if (within_limit && abs_value > limited_best_abs) {
+      limited_best_abs = abs_value;
+      choice->limited_abs = abs_value;
+      choice->limited_col = col;
+    }
     if (choice->scope_enabled) {
       UF_long separator_pos = KLS_KLU_EMPTY;
       if (!kls_row_first_separator_position(ctx, col, &separator_pos)) {
         return 0;
       }
-      if (separator_pos <= pivot_component_last &&
+      if (within_limit &&
+          separator_pos <= pivot_component_last &&
           abs_value > scoped_best_abs) {
         scoped_best_abs = abs_value;
         choice->scoped_abs = abs_value;
@@ -39659,15 +39688,24 @@ static int kls_row_first_select_pivot_exchange(
     return 0;
   }
 
-  const double max_abs =
-    choice->scope_enabled ? choice->scoped_abs : choice->global_abs;
+  const double check_abs =
+    choice->limit_enabled ? choice->global_abs
+                          : (choice->scope_enabled ? choice->scoped_abs
+                                                   : choice->global_abs);
+  const double candidate_abs =
+    choice->scope_enabled ? choice->scoped_abs
+                          : (choice->limit_enabled ? choice->limited_abs
+                                                   : choice->global_abs);
   const UF_long best_col =
-    choice->scope_enabled ? choice->scoped_col : choice->global_col;
+    choice->scope_enabled ? choice->scoped_col
+                          : (choice->limit_enabled ? choice->limited_col
+                                                   : choice->global_col);
   if (pivot != 0.0 &&
-      (max_abs <= 0.0 || fabs(pivot) >= tol * max_abs)) {
+      (check_abs <= 0.0 || fabs(pivot) >= tol * check_abs)) {
     return 1;
   }
-  if (best_col == KLS_KLU_EMPTY || max_abs <= 0.0) {
+  if (best_col == KLS_KLU_EMPTY || candidate_abs <= 0.0 ||
+      (choice->limit_enabled && candidate_abs < tol * check_abs)) {
     return 0;
   }
 
@@ -43340,6 +43378,7 @@ typedef struct kls_row_first_parallel_shared {
   int force_block_pipeline;
   int block_pipeline_thread_count;
   UF_long block_pipeline_begin;
+  UF_long block_pipeline_end;
   double tol;
   UF_long total_lnz;
   UF_long total_unz;
@@ -43357,6 +43396,7 @@ typedef struct kls_row_first_parallel_shared {
   UF_long row_pipeline_rows;
   UF_long row_pipeline_threads;
   UF_long row_pipeline_prefix_rows;
+  UF_long row_pipeline_suffix_rows;
   UF_long row_pipeline_pivot_tail_rows;
   UF_long row_pipeline_pivot_restarts;
   atomic_ulong separator_dynamic_column_rejects;
@@ -43468,6 +43508,7 @@ static int kls_row_first_parallel_commit_block(
   UF_long row_pipeline_rows,
   UF_long row_pipeline_threads,
   UF_long row_pipeline_prefix_rows,
+  UF_long row_pipeline_suffix_rows,
   UF_long row_pipeline_pivot_tail_rows,
   UF_long row_pipeline_pivot_restarts) {
   if (worker == NULL || worker->shared == NULL ||
@@ -43520,6 +43561,7 @@ static int kls_row_first_parallel_commit_block(
         shared->row_pipeline_threads = row_pipeline_threads;
       }
       shared->row_pipeline_prefix_rows += row_pipeline_prefix_rows;
+      shared->row_pipeline_suffix_rows += row_pipeline_suffix_rows;
       shared->row_pipeline_pivot_tail_rows += row_pipeline_pivot_tail_rows;
       shared->row_pipeline_pivot_restarts += row_pipeline_pivot_restarts;
     }
@@ -43532,12 +43574,13 @@ static int kls_row_first_parallel_commit_block(
   return ok;
 }
 
-static int kls_row_first_parallel_seed_preserved_prefix(
+static int kls_row_first_parallel_seed_preserved_rows(
   kls_row_first_parallel_worker *worker,
   UF_long block,
   UF_long k1,
   UF_long nk,
-  UF_long prefix_rows,
+  UF_long active_begin,
+  UF_long active_end,
   kls_row_first_entries *l_entries,
   kls_row_first_entries *u_entries,
   kls_row_first_workspace *workspace,
@@ -43549,11 +43592,12 @@ static int kls_row_first_parallel_seed_preserved_prefix(
       worker->shared->solver == NULL || worker->shared->numeric == NULL ||
       l_entries == NULL || u_entries == NULL || workspace == NULL ||
       row_done == NULL || worker->udiag_values == NULL ||
-      worker->shared->psinv == NULL || prefix_rows > nk ||
+      worker->shared->psinv == NULL || active_begin > active_end ||
+      active_end > nk ||
       block >= worker->shared->numeric->nblocks) {
     return 0;
   }
-  if (prefix_rows == 0u) {
+  if (active_begin == 0u && active_end == nk) {
     return 1;
   }
 
@@ -43569,7 +43613,10 @@ static int kls_row_first_parallel_seed_preserved_prefix(
     return 0;
   }
 
-  for (UF_long k = 0; k < prefix_rows; ++k) {
+  for (UF_long k = 0; k < nk; ++k) {
+    if (k >= active_begin && k < active_end) {
+      continue;
+    }
     const UF_long old_row = numeric->Pnum[k1 + k];
     if (old_row >= solver->n || shared->psinv[old_row] != k1 + k) {
       return 0;
@@ -43583,7 +43630,8 @@ static int kls_row_first_parallel_seed_preserved_prefix(
   const UF_long *ulen = numeric->Ulen + k1;
   const Entry *udiag = ((Entry *)numeric->Udiag) + k1;
 
-  for (UF_long col = 0; col < prefix_rows; ++col) {
+  for (UF_long col = 0; col < nk; ++col) {
+    const int col_active = col >= active_begin && col < active_end;
     UF_long *li = NULL;
     Entry *lx = NULL;
     UF_long l_len = 0;
@@ -43593,8 +43641,12 @@ static int kls_row_first_parallel_seed_preserved_prefix(
       if (row >= nk) {
         return 0;
       }
-      if (row >= prefix_rows) {
+      const int row_active = row >= active_begin && row < active_end;
+      if (row_active) {
         continue;
+      }
+      if (col_active) {
+        return 0;
       }
       if (row <= col ||
           !kls_row_first_entries_append(l_entries, row, col, lx[p])) {
@@ -43603,7 +43655,10 @@ static int kls_row_first_parallel_seed_preserved_prefix(
     }
   }
 
-  for (UF_long row = 0; row < prefix_rows; ++row) {
+  for (UF_long row = 0; row < nk; ++row) {
+    if (row >= active_begin && row < active_end) {
+      continue;
+    }
     workspace->u_row_ptr[row] = u_entries->count;
     for (UF_long col = row + 1u; col < nk; ++col) {
       UF_long *ui = NULL;
@@ -43692,6 +43747,7 @@ static int kls_row_first_parallel_factor_block(
   UF_long row_pipeline_rows = 0;
   UF_long row_pipeline_threads = 0;
   UF_long row_pipeline_prefix_rows = 0;
+  UF_long row_pipeline_suffix_rows = 0;
   UF_long row_pipeline_pivot_tail_rows = 0;
   UF_long row_pipeline_pivot_restarts = 0;
   UF_long open_panel_start = KLS_KLU_EMPTY;
@@ -43792,6 +43848,7 @@ static int kls_row_first_parallel_factor_block(
   row_ctx.nk = nk;
   row_ctx.n = n;
   row_ctx.separator_block_base = separator_block_base;
+  row_ctx.pivot_col_limit = nk;
   row_ctx.scaled = shared->scaled;
   row_ctx.scale = shared->scale;
   row_ctx.use_separator_for_block = use_separator_for_block;
@@ -43803,6 +43860,12 @@ static int kls_row_first_parallel_factor_block(
       shared->block_pipeline_thread_count > 1 && nk > 1u) {
     const UF_long pipeline_begin =
       shared->block_pipeline_begin <= nk ? shared->block_pipeline_begin : 0u;
+    const UF_long pipeline_end =
+      shared->block_pipeline_end > pipeline_begin &&
+          shared->block_pipeline_end <= nk
+        ? shared->block_pipeline_end : nk;
+    row_ctx.pivot_col_limit = pipeline_end;
+    row_ctx.use_pivot_col_limit = pipeline_end < nk;
     row_order = (UF_long *)malloc((size_t)nk * sizeof(*row_order));
     row_done = (unsigned char *)calloc((size_t)nk, sizeof(*row_done));
     if (row_order == NULL || row_done == NULL) {
@@ -43814,13 +43877,15 @@ static int kls_row_first_parallel_factor_block(
     kls_row_first_supernode_panel_cache_reset_active(
       &row_supernode_panel_cache, &row_workspace, nk, &open_panel_start,
       &open_panel_end);
-    if (!kls_row_first_parallel_seed_preserved_prefix(
-          worker, block, k1, nk, pipeline_begin, &l_entries, &u_entries,
+    if (!kls_row_first_parallel_seed_preserved_rows(
+          worker, block, k1, nk, pipeline_begin, pipeline_end,
+          &l_entries, &u_entries,
           &row_workspace, row_done, &row_supernode_panel_cache,
           &open_panel_start, &open_panel_end)) {
       goto cleanup;
     }
     row_pipeline_prefix_rows = pipeline_begin;
+    row_pipeline_suffix_rows = nk - pipeline_end;
     UF_long pipeline_partial_rows = 0;
     UF_long pipeline_wait_partial_rows = 0;
     UF_long pipeline_wait_partial_deps = 0;
@@ -43830,7 +43895,7 @@ static int kls_row_first_parallel_factor_block(
     UF_long pipeline_supernode_panel_update_rows = 0;
     UF_long pipeline_pivot_serial_rows = 0;
     if (!kls_row_first_run_restartable_pipeline_suffix(
-          &row_ctx, row_order, pipeline_begin, nk,
+          &row_ctx, row_order, pipeline_begin, pipeline_end,
           shared->block_pipeline_thread_count,
           &row_workspace, &l_entries, &u_entries, worker->udiag_values,
           row_done, &row_stats, &row_pipeline_rows, &row_pipeline_threads,
@@ -43909,8 +43974,8 @@ static int kls_row_first_parallel_factor_block(
     separator_dynamic_column_fallbacks, row_supernode_update_groups,
     row_supernode_update_rows, row_supernode_panel_update_groups,
     row_supernode_panel_update_rows, row_pipeline_rows, row_pipeline_threads,
-    row_pipeline_prefix_rows, row_pipeline_pivot_tail_rows,
-    row_pipeline_pivot_restarts);
+    row_pipeline_prefix_rows, row_pipeline_suffix_rows,
+    row_pipeline_pivot_tail_rows, row_pipeline_pivot_restarts);
 
 cleanup:
   kls_row_first_supernode_panel_cache_free(&row_supernode_panel_cache);
@@ -44116,6 +44181,42 @@ static int kls_try_row_first_rebuild_rejected_block(
       solver->stats.fast_rejected_pivoting_tail_columns ==
         (int64_t)(nk - local_reject)) {
     shared.block_pipeline_begin = local_reject;
+    shared.block_pipeline_end = nk;
+  } else if (shared.force_block_pipeline &&
+             solver->stats.fast_rejected_pivoting_tail_contiguous &&
+             !solver->stats.fast_rejected_pivoting_tail_suffix_exact &&
+             solver->stats.fast_rejected_pivoting_tail_topological &&
+             solver->stats.fast_rejected_pivoting_tail_first ==
+               (int64_t)rejected_pivot &&
+             solver->stats.fast_rejected_pivoting_tail_last >=
+               (int64_t)rejected_pivot &&
+             solver->stats.fast_rejected_pivoting_tail_last <
+               (int64_t)(k1 + nk - 1u) &&
+             solver->stats.fast_rejected_pivoting_tail_columns > 0) {
+    const UF_long restart_end =
+      (UF_long)solver->stats.fast_rejected_pivoting_tail_last - k1 + 1u;
+    if (restart_end > local_reject && restart_end < nk &&
+        solver->stats.fast_rejected_pivoting_tail_columns ==
+          (int64_t)(restart_end - local_reject)) {
+      const size_t nk_size = (size_t)nk;
+      unsigned char *tail_mask = (UF_long)nk_size == nk
+        ? (unsigned char *)malloc(nk_size * sizeof(*tail_mask)) : NULL;
+      const int mask_ok =
+        tail_mask != NULL &&
+        kls_build_pivot_tail_restart_mask(
+          solver, k1, nk, local_reject, restart_end, tail_mask);
+      const int refresh_ok =
+        mask_ok &&
+        (solver->fast_reject_refresh_state !=
+           KLS_FAST_REJECT_REFRESH_PREFIX ||
+         kls_refresh_pivot_tail_preserved_block_columns(
+           solver, numeric_values, block, k1, nk, tail_mask));
+      free(tail_mask);
+      if (refresh_ok) {
+        shared.block_pipeline_begin = local_reject;
+        shared.block_pipeline_end = restart_end;
+      }
+    }
   }
   shared.tol = solver->common.tol;
 
@@ -44176,9 +44277,29 @@ static int kls_try_row_first_rebuild_rejected_block(
   }
   solver->common.noffdiag = offdiag;
 
+  UF_long repaired_tail_end = nk;
+  if (shared.block_pipeline_end > 0u && shared.block_pipeline_end <= nk) {
+    repaired_tail_end = shared.block_pipeline_end;
+  }
+  UF_long repaired_tail_skipped_columns = 0;
+  double repaired_tail_skipped_work = 0.0;
+  int repaired_tail_exact_mask = 0;
+  if (repaired_tail_end < nk) {
+    for (UF_long k = repaired_tail_end; k < nk; ++k) {
+      double column_work = 0.0;
+      if (!kls_fast_reject_column_work(solver, block, k1, nk, k,
+                                       &column_work)) {
+        goto fail;
+      }
+      repaired_tail_skipped_columns++;
+      repaired_tail_skipped_work += column_work;
+    }
+    repaired_tail_exact_mask = 1;
+  }
   kls_record_fast_repaired_block_stats(
-    solver, block, k1, nk, rejected_pivot, nk, 0u, 0.0, 0,
-    old_pblock, pblock_out);
+    solver, block, k1, nk, rejected_pivot, repaired_tail_end,
+    repaired_tail_skipped_columns, repaired_tail_skipped_work,
+    repaired_tail_exact_mask, old_pblock, pblock_out);
   if (old_lu != NULL) {
     (void)TRILINOS_KLU_free(old_lu, old_lusize, sizeof(Unit),
                             &solver->common);
@@ -44195,6 +44316,8 @@ static int kls_try_row_first_rebuild_rejected_block(
       shared.row_pipeline_threads;
     solver->fast_kls_block_restart_last_row_pipeline_prefix_rows =
       shared.row_pipeline_prefix_rows;
+    solver->fast_kls_block_restart_last_row_pipeline_suffix_rows =
+      shared.row_pipeline_suffix_rows;
     solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows =
       shared.row_pipeline_pivot_tail_rows;
     solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts =

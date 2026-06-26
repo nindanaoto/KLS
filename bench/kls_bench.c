@@ -996,6 +996,7 @@ int main(int argc, char **argv) {
            ",\"fast_kls_block_restart_last_row_pipeline_rows\":%" PRId64
            ",\"fast_kls_block_restart_last_row_pipeline_threads\":%" PRId64
            ",\"fast_kls_block_restart_last_row_pipeline_prefix_rows\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_suffix_rows\":%" PRId64
            ",\"fast_kls_block_restart_last_row_pipeline_pivot_tail_rows\":%" PRId64
            ",\"fast_kls_block_restart_last_row_pipeline_pivot_restarts\":%" PRId64,
            stats.fast_kls_block_restart_last_row_pipeline,
@@ -1003,6 +1004,7 @@ int main(int argc, char **argv) {
            stats.fast_kls_block_restart_last_row_pipeline_rows,
            stats.fast_kls_block_restart_last_row_pipeline_threads,
            stats.fast_kls_block_restart_last_row_pipeline_prefix_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_suffix_rows,
            stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows,
            stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts);
     printf(",\"kls_first_last_row_pipeline\":%d"
@@ -1946,7 +1948,7 @@ int main(int argc, char **argv) {
            ", tail restarts: %d"
            ", KLS block repair row pipeline %d/%" PRId64
            " rows %" PRId64 ", active threads %" PRId64
-           ", prefix rows %" PRId64
+           ", prefix rows %" PRId64 ", suffix rows %" PRId64
            ", pivot-tail rows %" PRId64 ", pivot restarts %" PRId64
            ", offdiag suffix refresh last %d, suffix refreshes %" PRId64
            ", full refreshes %" PRId64
@@ -1959,6 +1961,7 @@ int main(int argc, char **argv) {
            stats.fast_kls_block_restart_last_row_pipeline_rows,
            stats.fast_kls_block_restart_last_row_pipeline_threads,
            stats.fast_kls_block_restart_last_row_pipeline_prefix_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_suffix_rows,
            stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows,
            stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts,
            stats.fast_repaired_last_offdiag_suffix_refresh,

@@ -5021,6 +5021,7 @@ decomposition output expose the behavior through
 `fast_kls_block_restart_last_row_pipeline_rows`,
 `fast_kls_block_restart_last_row_pipeline_threads`,
 `fast_kls_block_restart_last_row_pipeline_prefix_rows`,
+`fast_kls_block_restart_last_row_pipeline_suffix_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`, and
 `fast_kls_block_restart_last_row_pipeline_pivot_restarts`; the prior-pivot
 smoke fixture now requires the two-thread repair to use that pipeline.
@@ -5036,3 +5037,15 @@ the existing serial exact-mask path where preserved later rows are explicitly
 validated. The BTF suffix smoke case now requires a nonzero preserved-prefix
 count, showing that the multi-thread repair is no longer only a full-block
 pipeline in exact-suffix cases.
+
+The same row-pipeline repair now handles the next conservative CKTSO tail case:
+a contiguous, topological pivoting-tail envelope that stops before the end of
+the rejected BTF block. KLS builds the retained tail mask, refreshes preserved
+non-tail block columns just like the serial exact-mask path, seeds both the
+preserved prefix and suffix into row-major storage, and runs the restartable
+pipeline only on the active envelope. During that envelope, dynamic pivot
+selection is bounded to active tail columns; if a row would need a preserved
+suffix column to satisfy the pivot check, the pipeline attempt fails and the
+existing serial/KLU fallback ladder remains responsible. The root-independent
+tail smoke fixture now runs with two threads and requires two active pipeline
+rows plus one preserved suffix row for both unscaled and scaled repairs.
