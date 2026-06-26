@@ -7939,6 +7939,12 @@ static int test_kls_first_separator_queue_plan(void) {
                stats.kls_first_last_separator_queue_pipeline_rows ||
              stats.kls_first_last_separator_queue_parallel_pipeline_threads <=
                0 ||
+             stats.kls_first_last_separator_queue_pipeline_partial != 1 ||
+             stats.kls_first_separator_queue_pipeline_partial_run_count < 1 ||
+             stats.kls_first_last_separator_queue_pipeline_partial_rows !=
+               stats.kls_first_last_separator_queue_pipeline_rows ||
+             stats.kls_first_last_separator_queue_pipeline_partial_threads <=
+               0 ||
              stats.kls_first_last_row_uplooking_columns != n ||
              stats.selected_btf != 0 || stats.selected_scale != 0)) {
     fprintf(stderr,
@@ -7957,6 +7963,9 @@ static int test_kls_first_separator_queue_plan(void) {
             ", pipeline_parallel=%d/%" PRId64
             ", pipeline_parallel_rows=%" PRId64
             ", pipeline_parallel_threads=%" PRId64
+            ", pipeline_partial=%d/%" PRId64
+            ", pipeline_partial_rows=%" PRId64
+            ", pipeline_partial_threads=%" PRId64
             ", row_cols=%" PRId64 ", btf=%d, scale=%d\n",
             stats.build_has_metis,
             kls_factor_path_name(stats.last_factor_path),
@@ -7982,6 +7991,10 @@ static int test_kls_first_separator_queue_plan(void) {
             stats.kls_first_separator_queue_parallel_pipeline_run_count,
             stats.kls_first_last_separator_queue_parallel_pipeline_rows,
             stats.kls_first_last_separator_queue_parallel_pipeline_threads,
+            stats.kls_first_last_separator_queue_pipeline_partial,
+            stats.kls_first_separator_queue_pipeline_partial_run_count,
+            stats.kls_first_last_separator_queue_pipeline_partial_rows,
+            stats.kls_first_last_separator_queue_pipeline_partial_threads,
             stats.kls_first_last_row_uplooking_columns,
             stats.selected_btf,
             stats.selected_scale);

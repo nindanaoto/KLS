@@ -368,11 +368,13 @@ new KLS-owned symbolic/numeric machinery:
   split, the experimental row-refactor ready queue can use that map for
   separator-private initial thread queues, KLS-first row-up factorization now
   builds SubtreeLU Algorithm 3-style private thread queues plus a factor-order
-  pipeline row queue when that map covers the block, runs validated private
-  rows concurrently before the serial pipeline rows, and refuses
-  separator-crossing dynamic pivots. KLS still lacks the Algorithm 3
-  atomic-counter parallel pipeline executor and checked-tail factor/refactor
-  queue consumer.
+  pipeline row queue when that map covers the block, remaps the block-local
+  row/column order and `Pnum` to that queue, runs validated private rows
+  concurrently, consumes pipeline rows with an Algorithm 3 atomic counter, and
+  pre-updates pipeline rows from already-published private predecessors before
+  the ordered publish step. KLS still lacks Algorithm 4's full unfinished-
+  pipeline-predecessor/supernode partial update and a checked-tail
+  factor/refactor queue consumer.
 - Broader supernodal row/segment updates in the sparse up-looking executor.
   KLS has exact-pattern, ragged single-producer, and opt-in fragmented
   multi-producer dense-panel updates, but these are still narrower than
@@ -3793,10 +3795,13 @@ now first remaps the block-local row/column order and published `Pnum` to that
 private-then-pipeline queue before numeric assembly; this fixes the earlier
 unsafe version that tried to execute queue order over the old KLU numeric row
 indices. KLS then merges private entries and consumes the pipeline rows with an
-Algorithm 3-style atomic task counter. The KLS-first pipeline executor is still
-guarded by Algorithm 4's previous-pipeline-row completion rule and therefore
-does not yet perform the paper's partial updates while earlier pipeline rows
-are unfinished. Benchmark stats expose the last planned queue through
+Algorithm 3-style atomic task counter. Each pipeline worker now keeps local
+scratch and applies all ready private-row predecessors against an immutable
+private-U snapshot before waiting for its ordered publish slot. The publish
+step still rejects dynamic column exchanges in pipeline mode and waits for
+previous pipeline rows before applying pipeline predecessors, so the remaining
+Algorithm 4 gap is the paper's unfinished-pipeline-predecessor/supernode
+partial update. Benchmark stats expose the last planned queue through
 `kls_first_last_separator_queue`,
 `kls_first_last_separator_queue_private_components`,
 `kls_first_last_separator_queue_pipeline_components`,
@@ -3816,15 +3821,18 @@ queue consumption is reported by
 `kls_first_last_separator_queue_parallel_pipeline`,
 `kls_first_separator_queue_parallel_pipeline_run_count`,
 `kls_first_last_separator_queue_parallel_pipeline_rows`, and
-`kls_first_last_separator_queue_parallel_pipeline_threads`. A smoke test covers
+`kls_first_last_separator_queue_parallel_pipeline_threads`; private-predecessor
+pipeline pre-updates are reported by
+`kls_first_last_separator_queue_pipeline_partial`,
+`kls_first_separator_queue_pipeline_partial_run_count`,
+`kls_first_last_separator_queue_pipeline_partial_rows`, and
+`kls_first_last_separator_queue_pipeline_partial_threads`. A smoke test covers
 this on a 30,000-row METIS-ordered tridiagonal KLS-first factor, requires more
-than one private worker thread, and verifies that all planned pipeline rows are
-consumed by the guarded pipeline executor. This closes Algorithm 3's queue
-shape and private/pipeline handoff for dependency-safe retained separator
-queues. The remaining first-factor gap is Algorithm 4's partial-update
-pipeline row factorization: KLS still waits to publish each pipeline row in
-factor order instead of updating a later pipeline row from already-finished
-predecessors while earlier predecessors are still running.
+than one private worker thread, verifies that all planned pipeline rows are
+consumed by the guarded pipeline executor, and verifies that the partial
+pre-update path touches all pipeline rows. This closes Algorithm 3's queue
+shape and adds the first race-free Algorithm 4 partial-update step for
+dependency-safe retained separator queues.
 
 The KLS-first row up-looking dynamic column pivot selector also now consumes
 the retained separator map when it is available for the full factor order. On a
