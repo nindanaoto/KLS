@@ -634,12 +634,17 @@ SubtreeLU Algorithm 6-style FLOP-balanced separator queue: the dominant
 separator subtree is repeatedly split into a pipeline root plus child subtrees,
 remaining subtrees are assigned to private thread queues by retained group
 work, and separator-crossing row groups are forced into the pipeline queue.
+If a private subtree group depends on an already-pipeline group, KLS promotes
+that dependent group into the pipeline closure instead of discarding the
+separator schedule.
 Stats report this path through
 `row_refactor_last_separator_flop_queue`,
 `row_refactor_separator_flop_queue_run_count`,
 `row_refactor_last_separator_flop_components`,
 `row_refactor_last_separator_flop_private_groups`, and
-`row_refactor_last_separator_flop_pipeline_groups`. When a completed group releases
+`row_refactor_last_separator_flop_pipeline_groups`, plus closure promotions via
+`row_refactor_last_separator_flop_closure_groups` and
+`row_refactor_separator_flop_closure_group_count`. When a completed group releases
 multiple successors, the completing
 worker keeps one local continuation and only spills the rest to the shared
 queue. Checked queued

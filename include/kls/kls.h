@@ -360,6 +360,8 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_supernode_partial_update_count;
   int64_t row_refactor_compact_supernode_partial_update_rows;
   int64_t row_refactor_compact_supernode_partial_update_entries;
+  int64_t row_refactor_last_separator_flop_closure_groups;
+  int64_t row_refactor_separator_flop_closure_group_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

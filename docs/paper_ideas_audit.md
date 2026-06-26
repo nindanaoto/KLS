@@ -3735,12 +3735,17 @@ subtree root component to a pipeline queue while returning its child subtrees
 to the candidate set, then greedily assigns the remaining subtrees to private
 thread queues by work. Row-refactor groups that cross separator-component
 boundaries cannot be private-subtree work, so KLS classifies them as pipeline
-groups instead of rejecting the whole separator queue. Benchmark stats report
+groups instead of rejecting the whole separator queue. If any private subtree
+group depends on a pipeline group, KLS promotes the dependent group into the
+pipeline closure and keeps the separator schedule rather than falling back to
+the generic ready queue. Benchmark stats report
 `row_refactor_last_separator_flop_queue`,
 `row_refactor_separator_flop_queue_run_count`,
 `row_refactor_last_separator_flop_components`,
 `row_refactor_last_separator_flop_private_groups`, and
-`row_refactor_last_separator_flop_pipeline_groups`. A forced `G2_circuit`
+`row_refactor_last_separator_flop_pipeline_groups`, plus closure promotions via
+`row_refactor_last_separator_flop_closure_groups` and
+`row_refactor_separator_flop_closure_group_count`. A forced `G2_circuit`
 METIS/no-BTF/no-scale/no-pivot row-refactor probe with four threads selected
 this queue on all three refactors, using seven separator components, 69,402
 private groups and five pipeline groups per refactor, with residual
@@ -4048,6 +4053,14 @@ private groups, pipeline groups, and a clean solve residual. This directly
 fills the paper gap of applying SubtreeLU's separator private/pipeline
 partition inside the pivot-aware fast path, although it is still not CKTSO's
 full ETree-descendant pivoting-tail executor.
+
+A current CKTSO-gap forced-row probe showed the closure rule enabling the
+separator FLOP queue on `ASIC_320k`, `ASIC_320ks`, `ASIC_100ks`, and `rajat28`,
+where earlier builds rejected the schedule because pipeline groups released
+private successors. The effect was modestly positive for the ASIC cases and
+neutral to slightly negative for `rajat28`, so this is best understood as
+closing a paper-algorithm coverage gap rather than as the remaining large
+performance lever by itself.
 
 The separator map itself is now BTF-aware instead of depending on a unique
 block-size match after KLU analysis. KLU invokes the METIS user-order callback
