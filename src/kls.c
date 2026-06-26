@@ -552,9 +552,16 @@ struct kls_solver {
   UF_long fast_rejected_prefix_refresh_count;
   UF_long *fast_reject_tail_cols;
   UF_long *fast_reject_tail_seed_cols;
+  UF_long *fast_reject_tail_parent;
+  UF_long *fast_reject_tail_child_count;
+  UF_long *fast_reject_tail_level;
   unsigned int *fast_reject_tail_marks;
   UF_long fast_reject_tail_capacity;
   unsigned int fast_reject_tail_mark;
+  unsigned int fast_reject_tail_plan_mark;
+  UF_long fast_reject_tail_plan_block;
+  UF_long fast_reject_tail_plan_k1;
+  UF_long fast_reject_tail_plan_nk;
   UF_long fast_reject_tail_count;
   UF_long fast_reject_tail_seed_block;
   UF_long fast_reject_tail_seed_count;
@@ -1302,12 +1309,22 @@ static void free_fast_reject_tail_plan(kls_solver *solver) {
   }
   free(solver->fast_reject_tail_cols);
   free(solver->fast_reject_tail_seed_cols);
+  free(solver->fast_reject_tail_parent);
+  free(solver->fast_reject_tail_child_count);
+  free(solver->fast_reject_tail_level);
   free(solver->fast_reject_tail_marks);
   solver->fast_reject_tail_cols = NULL;
   solver->fast_reject_tail_seed_cols = NULL;
+  solver->fast_reject_tail_parent = NULL;
+  solver->fast_reject_tail_child_count = NULL;
+  solver->fast_reject_tail_level = NULL;
   solver->fast_reject_tail_marks = NULL;
   solver->fast_reject_tail_capacity = 0;
   solver->fast_reject_tail_mark = 0u;
+  solver->fast_reject_tail_plan_mark = 0u;
+  solver->fast_reject_tail_plan_block = KLS_KLU_EMPTY;
+  solver->fast_reject_tail_plan_k1 = KLS_KLU_EMPTY;
+  solver->fast_reject_tail_plan_nk = 0;
   solver->fast_reject_tail_count = 0;
   solver->fast_reject_tail_seed_block = KLS_KLU_EMPTY;
   solver->fast_reject_tail_seed_count = 0;
@@ -2729,6 +2746,8 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_pivoting_tail_etree_roots = 0;
   solver->stats.fast_rejected_pivoting_tail_etree_leaves = 0;
   solver->stats.fast_rejected_pivoting_tail_etree_max_fanout = 0;
+  solver->stats.fast_rejected_pivoting_tail_etree_levels = 0;
+  solver->stats.fast_rejected_pivoting_tail_etree_max_width = 0;
   solver->stats.fast_rejected_refresh_state =
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->stats.fast_rejected_prefix_refresh_columns = 0;
@@ -2761,6 +2780,10 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_rejected_prefix_refresh_columns = 0;
   solver->fast_rejected_prefix_refresh_count = 0;
   solver->fast_reject_tail_count = 0;
+  solver->fast_reject_tail_plan_mark = 0u;
+  solver->fast_reject_tail_plan_block = KLS_KLU_EMPTY;
+  solver->fast_reject_tail_plan_k1 = KLS_KLU_EMPTY;
+  solver->fast_reject_tail_plan_nk = 0;
   solver->fast_reject_tail_seed_block = KLS_KLU_EMPTY;
   solver->fast_reject_tail_seed_count = 0;
   solver->fast_reject_tail_seed_valid = 0;
@@ -3701,6 +3724,8 @@ static void kls_record_fast_reject_detail(kls_solver *solver,
   solver->stats.fast_rejected_pivoting_tail_etree_roots = 0;
   solver->stats.fast_rejected_pivoting_tail_etree_leaves = 0;
   solver->stats.fast_rejected_pivoting_tail_etree_max_fanout = 0;
+  solver->stats.fast_rejected_pivoting_tail_etree_levels = 0;
+  solver->stats.fast_rejected_pivoting_tail_etree_max_width = 0;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
   kls_fill_fast_reject_tail_stats(solver, rejected_pivot);
@@ -12868,12 +12893,21 @@ static int kls_ensure_fast_reject_tail_plan_storage(kls_solver *solver,
   if (solver->fast_reject_tail_capacity >= capacity &&
       solver->fast_reject_tail_cols != NULL &&
       solver->fast_reject_tail_seed_cols != NULL &&
+      solver->fast_reject_tail_parent != NULL &&
+      solver->fast_reject_tail_child_count != NULL &&
+      solver->fast_reject_tail_level != NULL &&
       solver->fast_reject_tail_marks != NULL) {
     return 1;
   }
   if (capacity > (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_cols)) ||
       capacity >
         (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_seed_cols)) ||
+      capacity >
+        (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_parent)) ||
+      capacity >
+        (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_child_count)) ||
+      capacity >
+        (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_level)) ||
       capacity > (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_marks))) {
     return 0;
   }
@@ -12884,23 +12918,46 @@ static int kls_ensure_fast_reject_tail_plan_storage(kls_solver *solver,
   UF_long *seed_cols =
     (UF_long *)malloc((size_t)capacity *
                       sizeof(*solver->fast_reject_tail_seed_cols));
+  UF_long *tail_parent =
+    (UF_long *)malloc((size_t)capacity *
+                      sizeof(*solver->fast_reject_tail_parent));
+  UF_long *child_count =
+    (UF_long *)malloc((size_t)capacity *
+                      sizeof(*solver->fast_reject_tail_child_count));
+  UF_long *level =
+    (UF_long *)malloc((size_t)capacity *
+                      sizeof(*solver->fast_reject_tail_level));
   unsigned int *marks =
     (unsigned int *)calloc((size_t)capacity,
                            sizeof(*solver->fast_reject_tail_marks));
-  if (cols == NULL || seed_cols == NULL || marks == NULL) {
+  if (cols == NULL || seed_cols == NULL || tail_parent == NULL ||
+      child_count == NULL || level == NULL || marks == NULL) {
     free(cols);
     free(seed_cols);
+    free(tail_parent);
+    free(child_count);
+    free(level);
     free(marks);
     return 0;
   }
   free(solver->fast_reject_tail_cols);
   free(solver->fast_reject_tail_seed_cols);
+  free(solver->fast_reject_tail_parent);
+  free(solver->fast_reject_tail_child_count);
+  free(solver->fast_reject_tail_level);
   free(solver->fast_reject_tail_marks);
   solver->fast_reject_tail_cols = cols;
   solver->fast_reject_tail_seed_cols = seed_cols;
+  solver->fast_reject_tail_parent = tail_parent;
+  solver->fast_reject_tail_child_count = child_count;
+  solver->fast_reject_tail_level = level;
   solver->fast_reject_tail_marks = marks;
   solver->fast_reject_tail_capacity = capacity;
   solver->fast_reject_tail_mark = 0u;
+  solver->fast_reject_tail_plan_mark = 0u;
+  solver->fast_reject_tail_plan_block = KLS_KLU_EMPTY;
+  solver->fast_reject_tail_plan_k1 = KLS_KLU_EMPTY;
+  solver->fast_reject_tail_plan_nk = 0;
   solver->fast_reject_tail_count = 0;
   return 1;
 }
@@ -13101,10 +13158,24 @@ static void kls_record_fast_reject_pivoting_tail_plan(
   solver->stats.fast_rejected_pivoting_tail_etree_roots = 0;
   solver->stats.fast_rejected_pivoting_tail_etree_leaves = 0;
   solver->stats.fast_rejected_pivoting_tail_etree_max_fanout = 0;
+  solver->stats.fast_rejected_pivoting_tail_etree_levels = 0;
+  solver->stats.fast_rejected_pivoting_tail_etree_max_width = 0;
+  solver->fast_reject_tail_plan_mark = 0u;
+  solver->fast_reject_tail_plan_block = KLS_KLU_EMPTY;
+  solver->fast_reject_tail_plan_k1 = KLS_KLU_EMPTY;
+  solver->fast_reject_tail_plan_nk = 0;
   if (columns == 0u || solver->fast_reject_tail_cols == NULL ||
+      solver->fast_reject_tail_parent == NULL ||
+      solver->fast_reject_tail_child_count == NULL ||
+      solver->fast_reject_tail_level == NULL ||
       solver->fast_reject_tail_marks == NULL || parent == NULL ||
       local_reject >= nk) {
     return;
+  }
+  for (UF_long local_col = 0; local_col < nk; ++local_col) {
+    solver->fast_reject_tail_parent[local_col] = KLS_KLU_EMPTY;
+    solver->fast_reject_tail_child_count[local_col] = 0;
+    solver->fast_reject_tail_level[local_col] = 0;
   }
 
   UF_long previous = KLS_KLU_EMPTY;
@@ -13177,35 +13248,65 @@ static void kls_record_fast_reject_pivoting_tail_plan(
       suffix_work > work ? suffix_work - work : 0.0;
   }
   if (solver->stats.fast_rejected_pivoting_tail_topological) {
-    UF_long *child_count = calloc((size_t)nk, sizeof(*child_count));
-    if (child_count != NULL) {
-      UF_long edge_count = 0;
-      UF_long root_count = 0;
-      for (UF_long local_col = 0; local_col < nk; ++local_col) {
-        if (solver->fast_reject_tail_marks[local_col] != mark) {
-          continue;
-        }
-        const UF_long next = parent[local_col];
-        if (next != KLS_KLU_EMPTY && next != local_col && next < nk &&
-            solver->fast_reject_tail_marks[next] == mark) {
-          edge_count++;
-          child_count[next]++;
-        } else {
-          root_count++;
-        }
+    UF_long edge_count = 0;
+    UF_long root_count = 0;
+    for (UF_long local_col = 0; local_col < nk; ++local_col) {
+      if (solver->fast_reject_tail_marks[local_col] != mark) {
+        continue;
       }
+      const UF_long next = parent[local_col];
+      if (next != KLS_KLU_EMPTY && next != local_col && next < nk &&
+          solver->fast_reject_tail_marks[next] == mark) {
+        solver->fast_reject_tail_parent[local_col] = next;
+        edge_count++;
+        solver->fast_reject_tail_child_count[next]++;
+      } else {
+        root_count++;
+      }
+    }
 
-      UF_long leaf_count = 0;
-      UF_long max_fanout = 0;
+    UF_long leaf_count = 0;
+    UF_long max_fanout = 0;
+    UF_long max_level = 0;
+    for (UF_long local_col = 0; local_col < nk; ++local_col) {
+      if (solver->fast_reject_tail_marks[local_col] != mark) {
+        continue;
+      }
+      if (solver->fast_reject_tail_child_count[local_col] == 0u) {
+        leaf_count++;
+      }
+      if (solver->fast_reject_tail_child_count[local_col] > max_fanout) {
+        max_fanout = solver->fast_reject_tail_child_count[local_col];
+      }
+      const UF_long next = solver->fast_reject_tail_parent[local_col];
+      if (next != KLS_KLU_EMPTY && next < nk &&
+          solver->fast_reject_tail_marks[next] == mark &&
+          solver->fast_reject_tail_level[next] <=
+            solver->fast_reject_tail_level[local_col]) {
+        solver->fast_reject_tail_level[next] =
+          solver->fast_reject_tail_level[local_col] + 1u;
+      }
+      if (solver->fast_reject_tail_level[local_col] > max_level) {
+        max_level = solver->fast_reject_tail_level[local_col];
+      }
+    }
+    const UF_long level_count = columns > 0u ? max_level + 1u : 0u;
+    UF_long max_width = 0;
+    UF_long *level_width = level_count > 0u
+      ? (UF_long *)calloc((size_t)level_count, sizeof(*level_width)) : NULL;
+    if (level_count == 0u || level_width != NULL) {
       for (UF_long local_col = 0; local_col < nk; ++local_col) {
         if (solver->fast_reject_tail_marks[local_col] != mark) {
           continue;
         }
-        if (child_count[local_col] == 0u) {
-          leaf_count++;
+        const UF_long level = solver->fast_reject_tail_level[local_col];
+        if (level >= level_count) {
+          max_width = 0;
+          break;
         }
-        if (child_count[local_col] > max_fanout) {
-          max_fanout = child_count[local_col];
+        level_width[level]++;
+        if (level_width[level] > max_width) {
+          max_width = level_width[level];
         }
       }
       solver->stats.fast_rejected_pivoting_tail_etree_edges =
@@ -13216,8 +13317,16 @@ static void kls_record_fast_reject_pivoting_tail_plan(
         (int64_t)leaf_count;
       solver->stats.fast_rejected_pivoting_tail_etree_max_fanout =
         (int64_t)max_fanout;
-      free(child_count);
+      solver->stats.fast_rejected_pivoting_tail_etree_levels =
+        (int64_t)level_count;
+      solver->stats.fast_rejected_pivoting_tail_etree_max_width =
+        (int64_t)max_width;
+      solver->fast_reject_tail_plan_mark = mark;
+      solver->fast_reject_tail_plan_block = block;
+      solver->fast_reject_tail_plan_k1 = k1;
+      solver->fast_reject_tail_plan_nk = nk;
     }
+    free(level_width);
   }
 }
 
@@ -14112,7 +14221,13 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
   solver->stats.fast_rejected_pivoting_tail_etree_roots = 0;
   solver->stats.fast_rejected_pivoting_tail_etree_leaves = 0;
   solver->stats.fast_rejected_pivoting_tail_etree_max_fanout = 0;
+  solver->stats.fast_rejected_pivoting_tail_etree_levels = 0;
+  solver->stats.fast_rejected_pivoting_tail_etree_max_width = 0;
   solver->fast_reject_tail_count = 0;
+  solver->fast_reject_tail_plan_mark = 0u;
+  solver->fast_reject_tail_plan_block = KLS_KLU_EMPTY;
+  solver->fast_reject_tail_plan_k1 = KLS_KLU_EMPTY;
+  solver->fast_reject_tail_plan_nk = 0;
 
   kls_fill_fast_reject_row_tail_stats(solver, block, k1, k2,
                                       local_reject);
@@ -15661,7 +15776,14 @@ static int kls_pivot_tail_restart_mask_matches_etree_forest(
       restart_begin > local_reject || restart_end <= local_reject ||
       restart_end > nk ||
       solver->fast_reject_tail_cols == NULL ||
+      solver->fast_reject_tail_parent == NULL ||
+      solver->fast_reject_tail_child_count == NULL ||
+      solver->fast_reject_tail_level == NULL ||
       solver->fast_reject_tail_count == 0u ||
+      solver->fast_reject_tail_plan_mark == 0u ||
+      solver->fast_reject_tail_plan_block != block ||
+      solver->fast_reject_tail_plan_k1 != k1 ||
+      solver->fast_reject_tail_plan_nk != nk ||
       solver->stats.fast_rejected_pivoting_tail_columns <= 0 ||
       !solver->stats.fast_rejected_pivoting_tail_contains_reject ||
       !solver->stats.fast_rejected_pivoting_tail_topological) {
@@ -15684,24 +15806,12 @@ static int kls_pivot_tail_restart_mask_matches_etree_forest(
     }
   }
 
-  const UF_long *parent = NULL;
-  UF_long *owned_parent = NULL;
-  if (!kls_get_ordered_block_etree_parent(solver, block, k1, k1 + nk,
-                                          &parent, &owned_parent) ||
-      parent == NULL) {
-    free(owned_parent);
-    return 0;
-  }
-  UF_long *child_count = (UF_long *)calloc((size_t)nk,
-                                           sizeof(*child_count));
-  if (child_count == NULL) {
-    free(owned_parent);
-    return 0;
-  }
-
   UF_long columns = 0;
   UF_long edges = 0;
   UF_long roots = 0;
+  UF_long leaves = 0;
+  UF_long max_fanout = 0;
+  UF_long max_level = 0;
   int contains_reject = 0;
   int ok = 1;
   for (UF_long local_col = 0; local_col < nk; ++local_col) {
@@ -15716,32 +15826,48 @@ static int kls_pivot_tail_restart_mask_matches_etree_forest(
     if (local_col == local_reject) {
       contains_reject = 1;
     }
-    const UF_long next = parent[local_col];
-    if (next != KLS_KLU_EMPTY && next != local_col && next < nk &&
+    const UF_long next = solver->fast_reject_tail_parent[local_col];
+    if (next != KLS_KLU_EMPTY && next < nk &&
         mask[next] != 0u) {
       if (next <= local_col) {
         ok = 0;
         break;
       }
       edges++;
-      child_count[next]++;
     } else {
       roots++;
     }
+    if (solver->fast_reject_tail_child_count[local_col] == 0u) {
+      leaves++;
+    }
+    if (solver->fast_reject_tail_child_count[local_col] > max_fanout) {
+      max_fanout = solver->fast_reject_tail_child_count[local_col];
+    }
+    if (solver->fast_reject_tail_level[local_col] > max_level) {
+      max_level = solver->fast_reject_tail_level[local_col];
+    }
   }
 
-  UF_long leaves = 0;
-  UF_long max_fanout = 0;
+  UF_long max_width = 0;
+  const UF_long level_count = ok && columns > 0u ? max_level + 1u : 0u;
+  UF_long *level_width = ok && level_count > 0u
+    ? (UF_long *)calloc((size_t)level_count, sizeof(*level_width)) : NULL;
+  if (ok && level_count > 0u && level_width == NULL) {
+    ok = 0;
+  }
   if (ok) {
     for (UF_long local_col = 0; local_col < nk; ++local_col) {
       if (mask[local_col] == 0u) {
         continue;
       }
-      if (child_count[local_col] == 0u) {
-        leaves++;
+      const UF_long level = solver->fast_reject_tail_level[local_col];
+      if (level >= level_count) {
+        ok = 0;
+        break;
       }
-      if (child_count[local_col] > max_fanout) {
-        max_fanout = child_count[local_col];
+      level_width[level]++;
+      if (level_width[level] > max_width) {
+        max_width = level_width[level];
       }
     }
     ok = contains_reject &&
@@ -15754,10 +15880,13 @@ static int kls_pivot_tail_restart_mask_matches_etree_forest(
          leaves == (UF_long)
            solver->stats.fast_rejected_pivoting_tail_etree_leaves &&
          max_fanout == (UF_long)
-           solver->stats.fast_rejected_pivoting_tail_etree_max_fanout;
+           solver->stats.fast_rejected_pivoting_tail_etree_max_fanout &&
+         level_count == (UF_long)
+           solver->stats.fast_rejected_pivoting_tail_etree_levels &&
+         max_width == (UF_long)
+           solver->stats.fast_rejected_pivoting_tail_etree_max_width;
   }
-  free(child_count);
-  free(owned_parent);
+  free(level_width);
   return ok;
 }
 

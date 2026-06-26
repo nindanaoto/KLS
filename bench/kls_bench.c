@@ -1163,6 +1163,8 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivoting_tail_etree_roots\":%" PRId64
            ",\"fast_rejected_pivoting_tail_etree_leaves\":%" PRId64
            ",\"fast_rejected_pivoting_tail_etree_max_fanout\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_etree_levels\":%" PRId64
+           ",\"fast_rejected_pivoting_tail_etree_max_width\":%" PRId64
            ",\"fast_rejected_refresh_state\":%d"
            ",\"fast_rejected_prefix_refresh_columns\":%" PRId64
            ",\"fast_rejected_prefix_refresh_count\":%" PRId64,
@@ -1196,6 +1198,8 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_etree_roots,
            stats.fast_rejected_pivoting_tail_etree_leaves,
            stats.fast_rejected_pivoting_tail_etree_max_fanout,
+           stats.fast_rejected_pivoting_tail_etree_levels,
+           stats.fast_rejected_pivoting_tail_etree_max_width,
            stats.fast_rejected_refresh_state,
            stats.fast_rejected_prefix_refresh_columns,
            stats.fast_rejected_prefix_refresh_count);
@@ -2030,7 +2034,8 @@ int main(int argc, char **argv) {
            ", gaps %" PRId64 ", suffix overcompute columns %" PRId64
            ", suffix overcompute work %.6g, etree edges %" PRId64
            ", etree roots %" PRId64 ", etree leaves %" PRId64
-           ", etree max fanout %" PRId64 ", refresh state %d"
+           ", etree max fanout %" PRId64 ", etree levels %" PRId64
+           ", etree max width %" PRId64 ", refresh state %d"
            ", prefix refresh columns %" PRId64
            ", prefix refreshes %" PRId64 "\n",
            stats.fast_rejected_block_start,
@@ -2063,6 +2068,8 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_etree_roots,
            stats.fast_rejected_pivoting_tail_etree_leaves,
            stats.fast_rejected_pivoting_tail_etree_max_fanout,
+           stats.fast_rejected_pivoting_tail_etree_levels,
+           stats.fast_rejected_pivoting_tail_etree_max_width,
            stats.fast_rejected_refresh_state,
            stats.fast_rejected_prefix_refresh_columns,
            stats.fast_rejected_prefix_refresh_count);

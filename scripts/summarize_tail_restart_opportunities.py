@@ -232,6 +232,12 @@ def compact_record(row: dict[str, object], reason: str) -> dict[str, object]:
         "fast_rejected_pivoting_tail_etree_max_fanout": as_int(
             row, "fast_rejected_pivoting_tail_etree_max_fanout", 0
         ),
+        "fast_rejected_pivoting_tail_etree_levels": as_int(
+            row, "fast_rejected_pivoting_tail_etree_levels", 0
+        ),
+        "fast_rejected_pivoting_tail_etree_max_width": as_int(
+            row, "fast_rejected_pivoting_tail_etree_max_width", 0
+        ),
         "fast_rejected_row_tail_columns": as_int(
             row, "fast_rejected_row_tail_columns", 0
         ),
@@ -254,6 +260,7 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
             "pivoting_tail_work={pivoting_tail:.6g} "
             "seed_cols={seed_cols} block_seed_cols={block_seed_cols} "
             "tail_leaves={leaves} tail_max_fanout={max_fanout} "
+            "tail_levels={levels} tail_max_width={max_width} "
             "contig={contig} suffix_exact={suffix_exact} "
             "gaps={gaps} plan_overcompute_work={plan_overcompute:.6g} "
             "overcompute_work={overcompute:.6g} "
@@ -283,6 +290,10 @@ def print_records(title: str, records: list[dict[str, object]], limit: int) -> N
                 leaves=record["fast_rejected_pivoting_tail_etree_leaves"],
                 max_fanout=record[
                     "fast_rejected_pivoting_tail_etree_max_fanout"
+                ],
+                levels=record["fast_rejected_pivoting_tail_etree_levels"],
+                max_width=record[
+                    "fast_rejected_pivoting_tail_etree_max_width"
                 ],
                 contig=record["fast_rejected_pivoting_tail_contiguous"],
                 suffix_exact=record[

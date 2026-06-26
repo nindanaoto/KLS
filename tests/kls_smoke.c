@@ -131,6 +131,14 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
       stats->fast_rejected_pivoting_tail_etree_roots <= 0 ||
       stats->fast_rejected_pivoting_tail_etree_leaves <= 0 ||
       stats->fast_rejected_pivoting_tail_etree_max_fanout < 0 ||
+      stats->fast_rejected_pivoting_tail_etree_levels <= 0 ||
+      stats->fast_rejected_pivoting_tail_etree_levels >
+        stats->fast_rejected_pivoting_tail_columns ||
+      stats->fast_rejected_pivoting_tail_etree_max_width <= 0 ||
+      stats->fast_rejected_pivoting_tail_etree_max_width >
+        stats->fast_rejected_pivoting_tail_columns ||
+      stats->fast_rejected_pivoting_tail_etree_max_width <
+        stats->fast_rejected_pivoting_tail_etree_leaves ||
       stats->fast_rejected_pivoting_tail_etree_edges +
         stats->fast_rejected_pivoting_tail_etree_roots !=
         stats->fast_rejected_pivoting_tail_columns ||
@@ -154,7 +162,8 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
             ", gaps=%" PRId64 ", suffix_over_cols=%" PRId64
             ", suffix_over_work=%.6g"
             ", etree_edges=%" PRId64 ", etree_roots=%" PRId64
-            ", etree_leaves=%" PRId64 ", etree_max_fanout=%" PRId64 "\n",
+            ", etree_leaves=%" PRId64 ", etree_max_fanout=%" PRId64
+            ", etree_levels=%" PRId64 ", etree_max_width=%" PRId64 "\n",
             what,
             stats != NULL ? stats->fast_rejected_pivot : -1,
             stats != NULL ? stats->fast_rejected_block_start : -1,
@@ -203,6 +212,12 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
               : 0,
             stats != NULL
               ? stats->fast_rejected_pivoting_tail_etree_max_fanout
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_etree_levels
+              : 0,
+            stats != NULL
+              ? stats->fast_rejected_pivoting_tail_etree_max_width
               : 0);
     return 0;
   }

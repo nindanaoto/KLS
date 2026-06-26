@@ -3287,26 +3287,30 @@ collapsing directly to an untagged suffix fallback.
 The retained CKTSO-style tail plan now also materializes the ETree forest
 shape that a true pipelined pivoting-tail executor would consume. Once the
 seeded worklist has been closed through ordered-block ETree parents and
-validated as topological, KLS counts retained ETree edges, roots, leaves, and
-maximum fanout as `fast_rejected_pivoting_tail_etree_edges`,
+validated as topological, KLS retains the tail-local parent, child-count, and
+leaf-to-root level arrays and reports retained ETree edges, roots, leaves,
+maximum fanout, level count, and maximum ready-level width as
+`fast_rejected_pivoting_tail_etree_edges`,
 `fast_rejected_pivoting_tail_etree_roots`,
 `fast_rejected_pivoting_tail_etree_leaves`, and
-`fast_rejected_pivoting_tail_etree_max_fanout`. Smoke tests require the
-retained tail to satisfy the forest invariant `edges + roots == columns`. This
-is still scheduler state rather than the full CKTSO tail executor, but it fills
-the paper-level representation gap between a flat suffix/envelope retry and
-Algorithm 5's ETree-descendant ready worklist.
+`fast_rejected_pivoting_tail_etree_max_fanout`,
+`fast_rejected_pivoting_tail_etree_levels`, and
+`fast_rejected_pivoting_tail_etree_max_width`. Smoke tests require the retained
+tail to satisfy the forest invariant `edges + roots == columns` and to expose a
+nonempty ready-level structure. This is still scheduler state rather than the
+full CKTSO tail executor, but it fills the paper-level representation gap
+between a flat suffix/envelope retry and Algorithm 5's ETree-descendant ready
+worklist.
 
 The executable exact-mask repair paths now consume that forest representation
 as a validation gate. Before the serial narrow-tail retry or the threaded
-row-first active-mask repair accepts a retained tail mask, KLS rebuilds the
-ordered-block ETree parent relation, verifies that the mask is exactly the
-retained worklist, and checks that its roots, leaves, edges, and maximum fanout
-match the retained forest counters. If the proof fails, KLS falls back to the
-existing wider repair path rather than treating a generic range mask as a
-CKTSO-style ETree tail. Accepted repairs report
-`fast_repaired_tail_restart_etree_mask` in addition to the older exact-mask
-counter.
+row-first active-mask repair accepts a retained tail mask, KLS verifies the mask
+against the retained scheduler arrays and checks that its roots, leaves, edges,
+maximum fanout, levels, and maximum width match the retained forest counters. If
+the proof fails, KLS falls back to the existing wider repair path rather than
+treating a generic range mask as a CKTSO-style ETree tail. Accepted repairs
+report `fast_repaired_tail_restart_etree_mask` in addition to the older
+exact-mask counter.
 
 The serial suffix tail retry then stopped copying and mutating a private
 `Offp` array. Tail-column construction now supports a discard-only off-block
