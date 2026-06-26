@@ -3890,22 +3890,24 @@ showed the default `gemv` path active with `trsv=0`: `coupled` refactor about
 same-session one-pass samples. This is a production-path cleanup of the
 SubtreeLU-shaped update, not another env-only experiment.
 
-KLS also has an explicit experimental compact-supernode `trsv` mode behind
-`KLS_ENABLE_COMPACT_SUPERNODE_TRSV=1`. In that mode, the same producer suffix
-is copied from sparse `x` into contiguous worker scratch, solved there with the
-producer dense upper panel, and then fed to the existing trailing-panel
-accumulator. Stats report
+The scalar compact-supernode `trsv` path is now an adaptive row-kernel choice
+instead of only an explicit experiment. With `KLS_ENABLE_COMPACT_SUPERNODE_TRSV`
+unset, KLS copies the producer suffix from sparse `x` into contiguous worker
+scratch, solves it with the producer dense upper panel, and feeds it to the
+existing trailing-panel accumulator when the triangular/update work passes a
+structure-only work-per-copied-entry gate. Setting the variable to `0` disables
+the automatic choice, and `1` still forces it for probes. Stats report
 `row_refactor_last_compact_supernode_trsv`,
 `row_refactor_compact_supernode_trsv_count`,
 `row_refactor_compact_supernode_trsv_rows`, and
-`row_refactor_compact_supernode_trsv_entries`, and the smoke fixture enables
-the mode locally to verify the path. Same-session forced-row probes kept this
-mode default-off: the manual contiguous suffix solve was correct, but slower
-than the default sparse-`x` suffix solve on the current ASIC/G2-style row
-kernel. This records the paper's `trsv` half as executable KLS code without
-turning it into a production regression; a future BLAS-backed or more deeply
-blocked supernodal kernel can replace the manual loop when it produces a real
-default win.
+`row_refactor_compact_supernode_trsv_entries`, and the compact-panel smoke
+fixture now verifies the unset automatic mode while the partial-prefix smoke
+keeps `0` as an explicit disable. On the current forced-row top slice, this
+reduced the completed-row geomean from 20.5 s to 18.1 s; `G2_circuit`'s
+explicit row-refactor average moved to about 0.236 s with a clean residual.
+The default CKTSO-gap focus still keeps row refactor gated off on the large
+ASIC/G2 rows, so this is a direct SubtreeLU supernode-kernel step rather than a
+claim that the row engine is ready to replace the exact EGraph path.
 
 KLS now also has an opt-in CBLAS supernode experiment. Configure with
 `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` and set

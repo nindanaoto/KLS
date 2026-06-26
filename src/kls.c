@@ -40,6 +40,9 @@
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY 8.0
 #define KLS_ROW_REFACTOR_CBLAS_BLOCK_ROWS 32u
+#define KLS_ROW_REFACTOR_SCALAR_SUPERNODE_TRSV_MIN_WORK \
+  KLS_ROW_REFACTOR_DENSE_MIN_WORK
+#define KLS_ROW_REFACTOR_SCALAR_SUPERNODE_TRSV_MIN_WORK_PER_ENTRY 8.0
 #define KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY 8.0
 #define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
@@ -18831,10 +18834,12 @@ static int kls_partial_supernode_pipeline_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
-static int kls_compact_supernode_trsv_env_enabled(void) {
+static int kls_compact_supernode_trsv_env_state(void) {
   const char *value = getenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
+  if (value == NULL || value[0] == '\0') {
+    return 0;
+  }
+  return (value[0] == '0' && value[1] == '\0') ? -1 : 1;
 }
 
 #ifdef KLS_HAVE_CBLAS
@@ -20115,7 +20120,7 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   shared.row_refactor_defer_value_scatter = defer_value_scatter;
   shared.row_refactor_lazy_value_scatter = lazy_value_scatter;
   shared.row_refactor_compact_supernode_trsv =
-    kls_compact_supernode_trsv_env_enabled();
+    kls_compact_supernode_trsv_env_state();
 
   kls_egraph_refactor_worker worker;
   memset(&worker, 0, sizeof(worker));
@@ -20695,6 +20700,35 @@ static int kls_row_refactor_try_compact_supernode_update_cblas(
 #endif
 }
 
+static int kls_compact_supernode_trsv_auto_allows(UF_long run_rows,
+                                                  UF_long trailing_len) {
+  if (run_rows < 2u) {
+    return 0;
+  }
+  const double rows = (double)run_rows;
+  const double trailing = (double)trailing_len;
+  const double update_work = 0.5 * rows * (rows - 1.0) + rows * trailing;
+  const double copied_entries = rows + trailing;
+  return update_work >= KLS_ROW_REFACTOR_SCALAR_SUPERNODE_TRSV_MIN_WORK &&
+         copied_entries > 0.0 &&
+         update_work >=
+           KLS_ROW_REFACTOR_SCALAR_SUPERNODE_TRSV_MIN_WORK_PER_ENTRY *
+             copied_entries;
+}
+
+static int kls_compact_supernode_trsv_should_run(
+  const kls_egraph_refactor_shared *shared,
+  UF_long run_rows,
+  UF_long trailing_len) {
+  if (shared == NULL || shared->row_refactor_compact_supernode_trsv < 0) {
+    return 0;
+  }
+  if (shared->row_refactor_compact_supernode_trsv > 0) {
+    return 1;
+  }
+  return kls_compact_supernode_trsv_auto_allows(run_rows, trailing_len);
+}
+
 static int kls_row_refactor_try_compact_supernode_update(
   kls_egraph_refactor_worker *worker,
   UF_long row,
@@ -20829,7 +20863,7 @@ static int kls_row_refactor_try_compact_supernode_update(
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(*supernode_workspace));
   if (!partial_update &&
-      shared->row_refactor_compact_supernode_trsv &&
+      kls_compact_supernode_trsv_should_run(shared, run_rows, trailing_len) &&
       run_rows <= max_workspace_entries &&
       trailing_len <= max_workspace_entries - run_rows) {
     const UF_long workspace_entries = run_rows + trailing_len;
@@ -23672,7 +23706,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_refactor_lazy_value_scatter =
     kls_row_refactor_should_lazy_value_scatter(check_pivots);
   shared->row_refactor_compact_supernode_trsv =
-    kls_compact_supernode_trsv_env_enabled();
+    kls_compact_supernode_trsv_env_state();
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   shared->invalid = 0;
   shared->pivot_rejected = 0;

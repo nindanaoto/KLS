@@ -495,15 +495,15 @@ suffix pass before the final scatter; stats report
 `row_refactor_last_compact_supernode_gemv`,
 `row_refactor_compact_supernode_gemv_count`,
 `row_refactor_compact_supernode_gemv_rows`, and
-`row_refactor_compact_supernode_gemv_entries`. An experimental
-`KLS_ENABLE_COMPACT_SUPERNODE_TRSV=1` mode also moves the producer suffix solve
-itself into contiguous worker scratch and reports
+`row_refactor_compact_supernode_gemv_entries`. Unset
+`KLS_ENABLE_COMPACT_SUPERNODE_TRSV` now also moves the producer suffix solve
+itself into contiguous worker scratch when a structure-only work gate says the
+triangular/update work amortizes the copy; setting it to `0` disables that
+automatic choice, and `1` still forces the path for probes. It reports
 `row_refactor_last_compact_supernode_trsv`,
 `row_refactor_compact_supernode_trsv_count`,
 `row_refactor_compact_supernode_trsv_rows`, and
-`row_refactor_compact_supernode_trsv_entries`; focused probes kept it
-default-off because the manual dense suffix solve was slower than the current
-sparse-`x` suffix solve on ASIC/G2-style rows. Builds configured with
+`row_refactor_compact_supernode_trsv_entries`. Builds configured with
 `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` also compile an opt-in
 `KLS_ENABLE_CBLAS_SUPERNODE=1` supernode experiment that uses standard CBLAS
 calls with the same scalar fallback and pivot checks. Completed producer
