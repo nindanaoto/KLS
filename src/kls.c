@@ -36428,7 +36428,7 @@ static void kls_row_refactor_mark_row_done(
       if (atomic_compare_exchange_weak_explicit(
             &shared->row_pipeline_remaining_preds[successor_group],
             &current, next, memory_order_acq_rel, memory_order_acquire)) {
-        if (next == 0ul &&
+        if (next == 0ul && !successor_private &&
             !kls_row_refactor_enqueue_ready_group(shared, successor_group)) {
           return;
         }

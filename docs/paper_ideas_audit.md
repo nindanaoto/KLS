@@ -4822,6 +4822,34 @@ correctness guard, not a performance threshold. Closing this gap needs a queue
 that lets private-group completion release row-dependency pipeline groups
 without starving the ready queue, not merely relaxing the selector.
 
+The row-level release path now matches the group-level private-queue invariant:
+when a completed row drops a private successor group's dependency count to zero,
+KLS leaves that successor for its private owner instead of also inserting it into
+the global ready queue. This fixes a real mixed-scheduler hazard exposed while
+auditing the failed relaxation. Re-running the broader selector relaxation after
+this fix still timed out `test_checked_separator_flop_ready_queue`; the
+debugger-owned interrupt showed workers in compact/dense group numeric
+processing, not in a private-ready wait. Thus duplicate private enqueueing was a
+bug, but it was not the only reason the dominance guard is still needed.
+
+A follow-up unified row-dependency fallback was also rejected. The experiment
+kept the mixed private/pipeline queue guarded, discarded the separator-private
+phase when that guard failed, and scheduled every row group through the
+row-level dependency queue so private completion could no longer starve pipeline
+groups. That fixed the specific mixed-queue progress hazard, but it destroyed
+the separator-private locality that Algorithm 6 exists to preserve. When enabled
+for checked runs, `test_checked_separator_flop_ready_queue` no longer completed
+within the 90 s smoke limit; a debugger-owned interrupt showed all workers in
+row-group numeric processing rather than in the old private wait. Restricting
+the fallback to unchecked row refactor made smoke pass, but the focused
+`ASIC_320k` forced-row run timed out at 120 s before writing a JSON record,
+versus the retained separator-private queue's roughly 40-45 s forced-row
+controls. This rules out an all-groups row-dependency queue as the missing
+CKTSO/SubtreeLU scheduler step. The remaining paper gap is narrower: keep the
+FLOP-balanced private queues and add a release protocol where private completed
+rows can unlock pipeline consumers without moving all private work into the
+global ready queue.
+
 The column EGraph refactor schedule now retains exact consecutive
 supernode-candidate ranges instead of only counting them. Benchmark JSON and
 gap decomposition output report the number of retained candidates and, when
