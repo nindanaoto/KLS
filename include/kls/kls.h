@@ -617,6 +617,8 @@ typedef struct kls_stats {
   int internal_index_bytes;
   int refactor_l_index32_enabled;
   int64_t refactor_l_index32_entries;
+  int refactor_u_index32_enabled;
+  int64_t refactor_u_index32_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

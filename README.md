@@ -794,8 +794,12 @@ eligible retained L row-index arrays as 32-bit integers while leaving the
 KLU-owned numeric factor and public index ABI unchanged. The EGraph and refactor
 pool scatter kernels use the narrower mirror when the matrix fits 32-bit local
 row indices and fall back per column to the original `UF_long` rows otherwise.
+`KLS_ENABLE_REFACTOR_U_INDEX32=1` mirrors the retained U dependency-index arrays
+for the same 32-bit-eligible matrices, letting the EGraph scalar dependency walk
+read narrower producer indices without changing the KLU-owned numeric factor.
 Benchmark JSON reports `refactor_l_index32_enabled` and
-`refactor_l_index32_entries` so runs can verify whether the mirror was active.
+`refactor_l_index32_entries` plus `refactor_u_index32_enabled` and
+`refactor_u_index32_entries` so runs can verify whether each mirror was active.
 A separate CKTSO Algorithm 5-style probe tried letting the column EGraph
 refactor consume later already-finished scalar dependencies while waiting for an
 earlier unfinished dependency. The structural safety scan was correct but not a

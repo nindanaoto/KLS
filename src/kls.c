@@ -197,9 +197,12 @@ struct kls_solver {
   int32_t *refactor_l_indices32_storage;
   double **refactor_l_values;
   UF_long **refactor_u_indices;
+  int32_t **refactor_u_indices32;
+  int32_t *refactor_u_indices32_storage;
   double **refactor_u_values;
   UF_long refactor_lu_pointer_count;
   UF_long refactor_l_indices32_count;
+  UF_long refactor_u_indices32_count;
   UF_long *row_refactor_l_ptr;
   UF_long *row_refactor_l_cols;
   double **row_refactor_l_values;
@@ -502,6 +505,7 @@ struct kls_solver {
   UF_long refactor_l_contiguous_suffix_entries;
   UF_long refactor_l_contiguous_suffix_max_len;
   int refactor_l_index32_enabled;
+  int refactor_u_index32_enabled;
   UF_long *refactor_pipeline_successor_ptr;
   UF_long *refactor_pipeline_successors;
   UF_long *refactor_pipeline_pred_count;
@@ -1440,16 +1444,22 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   free(solver->refactor_l_indices32_storage);
   free(solver->refactor_l_values);
   free(solver->refactor_u_indices);
+  free(solver->refactor_u_indices32);
+  free(solver->refactor_u_indices32_storage);
   free(solver->refactor_u_values);
   solver->refactor_l_indices = NULL;
   solver->refactor_l_indices32 = NULL;
   solver->refactor_l_indices32_storage = NULL;
   solver->refactor_l_values = NULL;
   solver->refactor_u_indices = NULL;
+  solver->refactor_u_indices32 = NULL;
+  solver->refactor_u_indices32_storage = NULL;
   solver->refactor_u_values = NULL;
   solver->refactor_lu_pointer_count = 0;
   solver->refactor_l_indices32_count = 0;
+  solver->refactor_u_indices32_count = 0;
   solver->refactor_l_index32_enabled = 0;
+  solver->refactor_u_index32_enabled = 0;
   solver->refactor_l_pattern_columns = 0;
   solver->refactor_l_pattern_entries = 0;
   solver->refactor_l_adjacent_run_count = 0;
@@ -4868,6 +4878,8 @@ static void fill_build_stats(kls_stats *stats) {
   stats->internal_index_bytes = (int)sizeof(UF_long);
   stats->refactor_l_index32_enabled = 0;
   stats->refactor_l_index32_entries = 0;
+  stats->refactor_u_index32_enabled = 0;
+  stats->refactor_u_index32_entries = 0;
 #ifdef KLS_HAVE_METIS
   stats->build_has_metis = 1;
 #else
@@ -12173,6 +12185,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_l_index32_enabled;
   solver->stats.refactor_l_index32_entries =
     (int64_t)solver->refactor_l_indices32_count;
+  solver->stats.refactor_u_index32_enabled =
+    solver->refactor_u_index32_enabled;
+  solver->stats.refactor_u_index32_entries =
+    (int64_t)solver->refactor_u_indices32_count;
   solver->stats.refactor_last_supernode_pipeline_tasks =
     (int64_t)solver->refactor_last_supernode_pipeline_tasks;
   solver->stats.refactor_last_supernode_pipeline_columns =
@@ -18128,6 +18144,12 @@ static int kls_refactor_l_index32_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_refactor_u_index32_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_REFACTOR_U_INDEX32");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_ensure_refactor_l_index32_cache(kls_solver *solver) {
   if (!kls_refactor_l_index32_env_enabled()) {
     return 1;
@@ -18136,7 +18158,7 @@ static int kls_ensure_refactor_l_index32_cache(kls_solver *solver) {
       solver->numeric->Llen == NULL ||
       solver->refactor_lu_pointer_count != solver->n ||
       solver->refactor_l_indices == NULL ||
-      solver->n < 0) {
+      solver->n <= 0) {
     return 0;
   }
   if (solver->n > (UF_long)INT32_MAX) {
@@ -18158,6 +18180,9 @@ static int kls_ensure_refactor_l_index32_cache(kls_solver *solver) {
     l_index32_entries += len;
   }
 
+  if (solver->n > (UF_long)(SIZE_MAX / sizeof(int32_t *))) {
+    return 0;
+  }
   int32_t **l_indices32 =
     (int32_t **)calloc((size_t)solver->n, sizeof(*l_indices32));
   if (l_indices32 == NULL) {
@@ -18211,6 +18236,92 @@ static int kls_ensure_refactor_l_index32_cache(kls_solver *solver) {
   return 1;
 }
 
+static int kls_ensure_refactor_u_index32_cache(kls_solver *solver) {
+  if (!kls_refactor_u_index32_env_enabled()) {
+    return 1;
+  }
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Ulen == NULL ||
+      solver->refactor_lu_pointer_count != solver->n ||
+      solver->refactor_u_indices == NULL ||
+      solver->n <= 0) {
+    return 0;
+  }
+  if (solver->n > (UF_long)INT32_MAX) {
+    return 1;
+  }
+  if (solver->refactor_u_indices32 != NULL) {
+    return 1;
+  }
+
+  UF_long u_index32_entries = 0;
+  for (UF_long col = 0; col < solver->n; ++col) {
+    if (solver->refactor_u_indices[col] == NULL) {
+      continue;
+    }
+    const UF_long len = solver->numeric->Ulen[col];
+    if (len > UF_long_max - u_index32_entries) {
+      return 0;
+    }
+    u_index32_entries += len;
+  }
+
+  if (solver->n > (UF_long)(SIZE_MAX / sizeof(int32_t *))) {
+    return 0;
+  }
+  int32_t **u_indices32 =
+    (int32_t **)calloc((size_t)solver->n, sizeof(*u_indices32));
+  if (u_indices32 == NULL) {
+    return 0;
+  }
+  int32_t *u_indices32_storage = NULL;
+  if (u_index32_entries > 0u) {
+    if (u_index32_entries >
+        (UF_long)(SIZE_MAX / sizeof(*u_indices32_storage))) {
+      free(u_indices32);
+      return 0;
+    }
+    u_indices32_storage =
+      (int32_t *)malloc((size_t)u_index32_entries *
+                        sizeof(*u_indices32_storage));
+    if (u_indices32_storage == NULL) {
+      free(u_indices32);
+      return 0;
+    }
+  }
+
+  UF_long offset = 0;
+  for (UF_long col = 0; col < solver->n; ++col) {
+    const UF_long len = solver->numeric->Ulen[col];
+    const UF_long *rows = solver->refactor_u_indices[col];
+    if (len == 0u || rows == NULL) {
+      u_indices32[col] = NULL;
+      continue;
+    }
+    if (offset > u_index32_entries - len) {
+      free(u_indices32_storage);
+      free(u_indices32);
+      return 0;
+    }
+    u_indices32[col] = u_indices32_storage + offset;
+    for (UF_long p = 0; p < len; ++p) {
+      if (rows[p] > (UF_long)INT32_MAX) {
+        free(u_indices32_storage);
+        free(u_indices32);
+        return 0;
+      }
+      u_indices32_storage[offset + p] = (int32_t)rows[p];
+    }
+    offset += len;
+  }
+
+  solver->refactor_u_indices32 = u_indices32;
+  solver->refactor_u_indices32_storage = u_indices32_storage;
+  solver->refactor_u_indices32_count = u_index32_entries;
+  solver->refactor_u_index32_enabled = 1;
+  return 1;
+}
+
 static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->R == NULL || solver->numeric->LUbx == NULL ||
@@ -18224,7 +18335,8 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
       solver->refactor_l_values != NULL &&
       solver->refactor_u_indices != NULL &&
       solver->refactor_u_values != NULL) {
-    return kls_ensure_refactor_l_index32_cache(solver);
+    return kls_ensure_refactor_l_index32_cache(solver) &&
+           kls_ensure_refactor_u_index32_cache(solver);
   }
 
   free_refactor_lu_pointer_cache(solver);
@@ -18249,7 +18361,11 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   const int build_l_index32 =
     kls_refactor_l_index32_env_enabled() &&
     solver->n <= (UF_long)INT32_MAX;
+  const int build_u_index32 =
+    kls_refactor_u_index32_env_enabled() &&
+    solver->n <= (UF_long)INT32_MAX;
   UF_long l_index32_entries = 0;
+  UF_long u_index32_entries = 0;
   UF_long pattern_columns = 0;
   UF_long pattern_entries = 0;
   UF_long adjacent_run_count = 0;
@@ -18336,12 +18452,32 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
       }
       kls_klu_get_pointer(lu, uip, ulen, k,
                           &u_indices[k1 + k], &u_values[k1 + k], &len);
+      const UF_long *u_rows = u_indices[k1 + k];
+      if (build_u_index32) {
+        if (u_rows != NULL && len > UF_long_max - u_index32_entries) {
+          free(l_indices);
+          free(l_values);
+          free(u_indices);
+          free(u_values);
+          return 0;
+        }
+        if (u_rows != NULL) {
+          u_index32_entries += len;
+        }
+      }
     }
   }
 
   int32_t **l_indices32 = NULL;
   int32_t *l_indices32_storage = NULL;
   if (build_l_index32) {
+    if (solver->n > (UF_long)(SIZE_MAX / sizeof(*l_indices32))) {
+      free(l_indices);
+      free(l_values);
+      free(u_indices);
+      free(u_values);
+      return 0;
+    }
     l_indices32 =
       (int32_t **)calloc((size_t)solver->n, sizeof(*l_indices32));
     if (l_indices32 == NULL) {
@@ -18407,15 +18543,106 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
     }
   }
 
+  int32_t **u_indices32 = NULL;
+  int32_t *u_indices32_storage = NULL;
+  if (build_u_index32) {
+    if (solver->n > (UF_long)(SIZE_MAX / sizeof(*u_indices32))) {
+      free(l_indices32_storage);
+      free(l_indices32);
+      free(l_indices);
+      free(l_values);
+      free(u_indices);
+      free(u_values);
+      return 0;
+    }
+    u_indices32 =
+      (int32_t **)calloc((size_t)solver->n, sizeof(*u_indices32));
+    if (u_indices32 == NULL) {
+      free(l_indices32_storage);
+      free(l_indices32);
+      free(l_indices);
+      free(l_values);
+      free(u_indices);
+      free(u_values);
+      return 0;
+    }
+    if (u_index32_entries > 0u) {
+      if (u_index32_entries >
+          (UF_long)(SIZE_MAX / sizeof(*u_indices32_storage))) {
+        free(u_indices32);
+        free(l_indices32_storage);
+        free(l_indices32);
+        free(l_indices);
+        free(l_values);
+        free(u_indices);
+        free(u_values);
+        return 0;
+      }
+      u_indices32_storage =
+        (int32_t *)malloc((size_t)u_index32_entries *
+                          sizeof(*u_indices32_storage));
+      if (u_indices32_storage == NULL) {
+        free(u_indices32);
+        free(l_indices32_storage);
+        free(l_indices32);
+        free(l_indices);
+        free(l_values);
+        free(u_indices);
+        free(u_values);
+        return 0;
+      }
+    }
+    UF_long offset = 0;
+    for (UF_long col = 0; col < solver->n; ++col) {
+      const UF_long len = solver->numeric->Ulen[col];
+      const UF_long *rows = u_indices[col];
+      if (len == 0u || rows == NULL) {
+        u_indices32[col] = NULL;
+        continue;
+      }
+      if (offset > u_index32_entries - len) {
+        free(u_indices32_storage);
+        free(u_indices32);
+        free(l_indices32_storage);
+        free(l_indices32);
+        free(l_indices);
+        free(l_values);
+        free(u_indices);
+        free(u_values);
+        return 0;
+      }
+      u_indices32[col] = u_indices32_storage + offset;
+      for (UF_long p = 0; p < len; ++p) {
+        if (rows[p] > (UF_long)INT32_MAX) {
+          free(u_indices32_storage);
+          free(u_indices32);
+          free(l_indices32_storage);
+          free(l_indices32);
+          free(l_indices);
+          free(l_values);
+          free(u_indices);
+          free(u_values);
+          return 0;
+        }
+        u_indices32_storage[offset + p] = (int32_t)rows[p];
+      }
+      offset += len;
+    }
+  }
+
   solver->refactor_l_indices = l_indices;
   solver->refactor_l_indices32 = l_indices32;
   solver->refactor_l_indices32_storage = l_indices32_storage;
   solver->refactor_l_values = l_values;
   solver->refactor_u_indices = u_indices;
+  solver->refactor_u_indices32 = u_indices32;
+  solver->refactor_u_indices32_storage = u_indices32_storage;
   solver->refactor_u_values = u_values;
   solver->refactor_lu_pointer_count = solver->n;
   solver->refactor_l_indices32_count = l_index32_entries;
+  solver->refactor_u_indices32_count = u_index32_entries;
   solver->refactor_l_index32_enabled = l_indices32 != NULL;
+  solver->refactor_u_index32_enabled = u_indices32 != NULL;
   solver->refactor_l_pattern_columns = pattern_columns;
   solver->refactor_l_pattern_entries = pattern_entries;
   solver->refactor_l_adjacent_run_count = adjacent_run_count;
@@ -37736,6 +37963,9 @@ static int kls_egraph_refactor_single_unscaled_column(
   }
 
   UF_long *ui = u_indices[k];
+  const int32_t *ui32 =
+    solver->refactor_u_indices32 != NULL
+      ? solver->refactor_u_indices32[k] : NULL;
   double *ux = u_values[k];
   UF_long ucol_len = numeric->Ulen[k];
   UF_long up = 0;
@@ -37753,7 +37983,7 @@ static int kls_egraph_refactor_single_unscaled_column(
         continue;
       }
     }
-    const UF_long j = ui[up];
+    const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
     if (wait_for_dependencies &&
         !kls_egraph_refactor_wait_done(shared, j)) {
       return 0;
@@ -37851,6 +38081,9 @@ static int kls_egraph_refactor_single_scaled_column(
   }
 
   UF_long *ui = u_indices[k];
+  const int32_t *ui32 =
+    solver->refactor_u_indices32 != NULL
+      ? solver->refactor_u_indices32[k] : NULL;
   double *ux = u_values[k];
   UF_long ucol_len = numeric->Ulen[k];
   UF_long up = 0;
@@ -37868,7 +38101,7 @@ static int kls_egraph_refactor_single_scaled_column(
         continue;
       }
     }
-    const UF_long j = ui[up];
+    const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
     if (wait_for_dependencies &&
         !kls_egraph_refactor_wait_done(shared, j)) {
       return 0;
@@ -37992,6 +38225,9 @@ static int kls_egraph_refactor_btf_unscaled_column(
   }
 
   UF_long *ui = u_indices[k];
+  const int32_t *ui32 =
+    solver->refactor_u_indices32 != NULL
+      ? solver->refactor_u_indices32[k] : NULL;
   double *ux = u_values[k];
   UF_long ucol_len = numeric->Ulen[k];
   UF_long up = 0;
@@ -38009,7 +38245,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
         continue;
       }
     }
-    const UF_long j = ui[up];
+    const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
     if (wait_for_dependencies &&
         !kls_egraph_refactor_wait_done(shared, k1 + j)) {
       return 0;
@@ -38240,6 +38476,9 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   }
 
   UF_long *ui = u_indices[k];
+  const int32_t *ui32 =
+    solver->refactor_u_indices32 != NULL
+      ? solver->refactor_u_indices32[k] : NULL;
   double *ux = u_values[k];
   UF_long ucol_len = ulen[local_k];
   UF_long up = 0u;
@@ -38257,7 +38496,7 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
         continue;
       }
     }
-    const UF_long j = ui[up];
+    const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
     if (j >= local_k) {
       kls_egraph_refactor_record_invalid(shared);
       return 0;
@@ -42074,7 +42313,8 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       solver->refactor_col_ptr == NULL) {
     (void)kls_build_refactor_map(solver);
   }
-  if (kls_refactor_l_index32_env_enabled() &&
+  if ((kls_refactor_l_index32_env_enabled() ||
+       kls_refactor_u_index32_env_enabled()) &&
       solver->n <= (UF_long)INT32_MAX) {
     (void)kls_build_refactor_lu_pointer_cache(solver);
   }
