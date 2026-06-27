@@ -570,6 +570,12 @@ int main(int argc, char **argv) {
              ",\"parallel_model_r1\":%.9g"
              ",\"parallel_model_r2\":%.9g"
              ",\"parallel_model_recommends_parallel\":%d"
+             ",\"parallel_task_flow_threads\":%" PRId64
+             ",\"parallel_task_flow_dependencies\":%" PRId64
+             ",\"parallel_task_flow_work\":%.9g"
+             ",\"parallel_task_flow_finish_time\":%.9g"
+             ",\"parallel_task_flow_speedup\":%.9g"
+             ",\"parallel_task_flow_recommends_parallel\":%d"
              ",\"analyze_only\":true}\n",
              path, a.n, a.nnz, options.threads,
              kls_orientation_name(options.orientation),
@@ -606,7 +612,13 @@ int main(int argc, char **argv) {
              stats.estimated_flops,
              stats.parallel_model_r1,
              stats.parallel_model_r2,
-             stats.parallel_model_recommends_parallel);
+             stats.parallel_model_recommends_parallel,
+             stats.parallel_task_flow_threads,
+             stats.parallel_task_flow_dependencies,
+             stats.parallel_task_flow_work,
+             stats.parallel_task_flow_finish_time,
+             stats.parallel_task_flow_speedup,
+             stats.parallel_task_flow_recommends_parallel);
     } else {
       printf("matrix: %s\n", path);
       printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
@@ -660,6 +672,15 @@ int main(int argc, char **argv) {
              stats.parallel_model_r1,
              stats.parallel_model_r2,
              stats.parallel_model_recommends_parallel ? "yes" : "no");
+      printf("NICSLU task-flow model: threads %" PRId64
+             ", deps %" PRId64 ", work %.6g, finish %.6g"
+             ", speedup %.6g, recommends parallel: %s\n",
+             stats.parallel_task_flow_threads,
+             stats.parallel_task_flow_dependencies,
+             stats.parallel_task_flow_work,
+             stats.parallel_task_flow_finish_time,
+             stats.parallel_task_flow_speedup,
+             stats.parallel_task_flow_recommends_parallel ? "yes" : "no");
     }
     kls_destroy(solver);
     matrix_free(&a);
@@ -1686,6 +1707,12 @@ int main(int argc, char **argv) {
            ",\"parallel_model_r1\":%.9g"
            ",\"parallel_model_r2\":%.9g"
            ",\"parallel_model_recommends_parallel\":%d"
+           ",\"parallel_task_flow_threads\":%" PRId64
+           ",\"parallel_task_flow_dependencies\":%" PRId64
+           ",\"parallel_task_flow_work\":%.9g"
+           ",\"parallel_task_flow_finish_time\":%.9g"
+           ",\"parallel_task_flow_speedup\":%.9g"
+           ",\"parallel_task_flow_recommends_parallel\":%d"
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
            ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
            stats.row_refactor_compact_supernode_batch_pattern_count,
@@ -1721,6 +1748,12 @@ int main(int argc, char **argv) {
            stats.parallel_model_r1,
            stats.parallel_model_r2,
            stats.parallel_model_recommends_parallel,
+           stats.parallel_task_flow_threads,
+           stats.parallel_task_flow_dependencies,
+           stats.parallel_task_flow_work,
+           stats.parallel_task_flow_finish_time,
+           stats.parallel_task_flow_speedup,
+           stats.parallel_task_flow_recommends_parallel,
            stats.rcond, stats.rgrowth,
            stats.memory_bytes, stats.memory_peak_bytes);
   } else {
@@ -2436,6 +2469,15 @@ int main(int argc, char **argv) {
            stats.parallel_model_r1,
            stats.parallel_model_r2,
            stats.parallel_model_recommends_parallel ? "yes" : "no");
+    printf("NICSLU task-flow model: threads %" PRId64
+           ", deps %" PRId64 ", work %.6g, finish %.6g"
+           ", speedup %.6g, recommends parallel: %s\n",
+           stats.parallel_task_flow_threads,
+           stats.parallel_task_flow_dependencies,
+           stats.parallel_task_flow_work,
+           stats.parallel_task_flow_finish_time,
+           stats.parallel_task_flow_speedup,
+           stats.parallel_task_flow_recommends_parallel ? "yes" : "no");
     printf("rcond: %.6e, rgrowth: %.6e\n", stats.rcond, stats.rgrowth);
     printf("memory: %zu bytes, peak: %zu bytes\n", stats.memory_bytes, stats.memory_peak_bytes);
   }

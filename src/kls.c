@@ -57,6 +57,7 @@
 #define KLS_ROW_SOLVE_CLUSTER_ALPHA_NUMERATOR 2u
 #define KLS_NICSLU_PARALLEL_R1_THRESHOLD 2.0
 #define KLS_NICSLU_PARALLEL_R2_THRESHOLD 50.0
+#define KLS_NICSLU_TASK_FLOW_SYNC_COST 1.0
 
 typedef struct kls_refactor_pool kls_refactor_pool;
 typedef struct kls_egraph_refactor_pool kls_egraph_refactor_pool;
@@ -11258,6 +11259,159 @@ static void kls_compute_parallel_model(const kls_solver *solver,
   }
 }
 
+static void kls_compute_nicslu_task_flow_model(
+  const kls_solver *solver,
+  int thread_count,
+  int64_t *threads_out,
+  int64_t *dependencies_out,
+  double *work_out,
+  double *finish_time_out,
+  double *speedup_out,
+  int *recommends_parallel_out) {
+  if (threads_out != NULL) {
+    *threads_out = 0;
+  }
+  if (dependencies_out != NULL) {
+    *dependencies_out = 0;
+  }
+  if (work_out != NULL) {
+    *work_out = 0.0;
+  }
+  if (finish_time_out != NULL) {
+    *finish_time_out = 0.0;
+  }
+  if (speedup_out != NULL) {
+    *speedup_out = 0.0;
+  }
+  if (recommends_parallel_out != NULL) {
+    *recommends_parallel_out = 0;
+  }
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || solver->symbolic->R == NULL ||
+      solver->numeric->LUbx == NULL || solver->numeric->Llen == NULL ||
+      solver->numeric->Uip == NULL || solver->numeric->Ulen == NULL ||
+      solver->n == 0u) {
+    return;
+  }
+
+  int threads = thread_count > 0 ? thread_count : 1;
+  if (threads < 1) {
+    threads = 1;
+  }
+  if ((UF_long)threads > solver->n) {
+    threads = (int)solver->n;
+  }
+  if (threads < 1 || solver->n > (UF_long)(SIZE_MAX / sizeof(double)) ||
+      (size_t)threads > SIZE_MAX / sizeof(double)) {
+    return;
+  }
+
+  double *finish =
+    (double *)calloc((size_t)solver->n, sizeof(*finish));
+  double *thread_end =
+    (double *)calloc((size_t)threads, sizeof(*thread_end));
+  if (finish == NULL || thread_end == NULL) {
+    free(finish);
+    free(thread_end);
+    return;
+  }
+
+  double work = 0.0;
+  double finish_time = 0.0;
+  int64_t dependencies = 0;
+  int valid = 1;
+  for (UF_long block = 0;
+       valid && block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (k1 > k2 || k2 > solver->n || block >= solver->numeric->nblocks) {
+      valid = 0;
+      break;
+    }
+    const UF_long nk = k2 - k1;
+    double *lu = (double *)solver->numeric->LUbx[block];
+    if (nk > 1u && lu == NULL) {
+      valid = 0;
+      break;
+    }
+    const UF_long *uip = solver->numeric->Uip + k1;
+    const UF_long *ulen = solver->numeric->Ulen + k1;
+    for (UF_long local_k = 0; valid && local_k < nk; ++local_k) {
+      const UF_long k = k1 + local_k;
+      int best_thread = 0;
+      double best_end = thread_end[0];
+      for (int p = 1; p < threads; ++p) {
+        if (thread_end[p] < best_end) {
+          best_end = thread_end[p];
+          best_thread = p;
+        }
+      }
+
+      double ft = best_end;
+      UF_long *ui = NULL;
+      double *ux = NULL;
+      UF_long ucol_len = 0;
+      if (lu != NULL) {
+        kls_klu_get_pointer(lu, uip, ulen, local_k, &ui, &ux, &ucol_len);
+      } else if (solver->numeric->Ulen[k] != 0u) {
+        valid = 0;
+        break;
+      }
+      (void)ux;
+      for (UF_long p = 0; p < ucol_len; ++p) {
+        const UF_long dep_local = ui[p];
+        if (dep_local >= local_k) {
+          valid = 0;
+          break;
+        }
+        const UF_long dep = k1 + dep_local;
+        const double update_work =
+          2.0 * ((double)solver->numeric->Llen[dep] + 1.0);
+        const double ready_time = finish[dep] > ft ? finish[dep] : ft;
+        ft = ready_time + update_work + KLS_NICSLU_TASK_FLOW_SYNC_COST;
+        work += update_work;
+        dependencies++;
+      }
+      if (!valid) {
+        break;
+      }
+      const double norm_work = (double)solver->numeric->Llen[k] + 1.0;
+      ft += norm_work;
+      work += norm_work;
+      finish[k] = ft;
+      thread_end[best_thread] = ft;
+      if (ft > finish_time) {
+        finish_time = ft;
+      }
+    }
+  }
+
+  if (valid && finish_time > 0.0 && work > 0.0) {
+    const double speedup = work / finish_time;
+    if (threads_out != NULL) {
+      *threads_out = (int64_t)threads;
+    }
+    if (dependencies_out != NULL) {
+      *dependencies_out = dependencies;
+    }
+    if (work_out != NULL) {
+      *work_out = work;
+    }
+    if (finish_time_out != NULL) {
+      *finish_time_out = finish_time;
+    }
+    if (speedup_out != NULL) {
+      *speedup_out = speedup;
+    }
+    if (recommends_parallel_out != NULL) {
+      *recommends_parallel_out = threads > 1 && speedup > 1.0;
+    }
+  }
+
+  free(finish);
+  free(thread_end);
+}
+
 static void kls_update_parallel_model_stats(kls_solver *solver,
                                             int prefer_numeric) {
   if (solver == NULL) {
@@ -11267,6 +11421,20 @@ static void kls_update_parallel_model_stats(kls_solver *solver,
     solver, prefer_numeric, &solver->stats.parallel_model_r1,
     &solver->stats.parallel_model_r2,
     &solver->stats.parallel_model_recommends_parallel);
+}
+
+static void kls_update_nicslu_task_flow_model_stats(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  kls_compute_nicslu_task_flow_model(
+    solver, solver->options.threads,
+    &solver->stats.parallel_task_flow_threads,
+    &solver->stats.parallel_task_flow_dependencies,
+    &solver->stats.parallel_task_flow_work,
+    &solver->stats.parallel_task_flow_finish_time,
+    &solver->stats.parallel_task_flow_speedup,
+    &solver->stats.parallel_task_flow_recommends_parallel);
 }
 
 static void kls_fill_fast_kls_block_restart_pipeline_stats(kls_solver *solver) {
@@ -11372,6 +11540,7 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     solver->stats.nnz_u = (int64_t)solver->symbolic->unz;
   }
   kls_update_parallel_model_stats(solver, 0);
+  kls_update_nicslu_task_flow_model_stats(solver);
   kls_update_factor_etree_stats(solver);
   solver->stats.memory_bytes = solver->common.memusage;
   solver->stats.memory_peak_bytes = solver->common.mempeak;
@@ -11435,6 +11604,7 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->stats.nnz_u = (int64_t)solver->numeric->unz;
   }
   kls_update_parallel_model_stats(solver, 1);
+  kls_update_nicslu_task_flow_model_stats(solver);
   kls_update_factor_etree_stats(solver);
   solver->stats.refactor_dependency_levels =
     (int64_t)solver->refactor_level_count;
@@ -23599,7 +23769,11 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
 
   int recommends_parallel = 0;
   kls_compute_parallel_model(solver, 1, NULL, NULL, &recommends_parallel);
-  if (!recommends_parallel) {
+  int task_flow_recommends_parallel = 0;
+  kls_compute_nicslu_task_flow_model(
+    solver, solver->options.threads, NULL, NULL, NULL, NULL, NULL,
+    &task_flow_recommends_parallel);
+  if (!recommends_parallel && !task_flow_recommends_parallel) {
     return;
   }
   solver->stats.row_refactor_auto_model_recommended = 1;

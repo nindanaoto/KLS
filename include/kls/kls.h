@@ -544,6 +544,12 @@ typedef struct kls_stats {
   int fast_repaired_tail_restart_etree_mask;
   int64_t fast_rejected_pivoting_tail_etree_levels;
   int64_t fast_rejected_pivoting_tail_etree_max_width;
+  int64_t parallel_task_flow_threads;
+  int64_t parallel_task_flow_dependencies;
+  double parallel_task_flow_work;
+  double parallel_task_flow_finish_time;
+  double parallel_task_flow_speedup;
+  int parallel_task_flow_recommends_parallel;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

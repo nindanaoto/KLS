@@ -73,6 +73,36 @@ static int require_parallel_model_stats(const kls_stats *stats,
             expected);
     return 0;
   }
+  if (stats->parallel_task_flow_threads <= 0 ||
+      stats->parallel_task_flow_work <= 0.0 ||
+      stats->parallel_task_flow_finish_time <= 0.0 ||
+      stats->parallel_task_flow_speedup <= 0.0 ||
+      stats->parallel_task_flow_dependencies < 0) {
+    fprintf(stderr,
+            "missing NICSLU task-flow stats for %s: threads=%" PRId64
+            " deps=%" PRId64 " work=%.17g finish=%.17g speedup=%.17g\n",
+            what,
+            stats->parallel_task_flow_threads,
+            stats->parallel_task_flow_dependencies,
+            stats->parallel_task_flow_work,
+            stats->parallel_task_flow_finish_time,
+            stats->parallel_task_flow_speedup);
+    return 0;
+  }
+  const int expected_task =
+    stats->parallel_task_flow_threads > 1 &&
+    stats->parallel_task_flow_speedup > 1.0;
+  if (stats->parallel_task_flow_recommends_parallel != expected_task) {
+    fprintf(stderr,
+            "NICSLU task-flow recommendation mismatch for %s: "
+            "threads=%" PRId64 " speedup=%.17g got=%d expected=%d\n",
+            what,
+            stats->parallel_task_flow_threads,
+            stats->parallel_task_flow_speedup,
+            stats->parallel_task_flow_recommends_parallel,
+            expected_task);
+    return 0;
+  }
   return 1;
 }
 
