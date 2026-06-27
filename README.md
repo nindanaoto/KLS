@@ -144,7 +144,9 @@ future 32-bit KLS backend is worth implementing:
 JSON includes `initial_factor_path` and `last_factor_path`; values such as
 `klu_first` or `klu_fallback` mean the factorization was handed to the
 KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
-retained pattern through the checked fast path. Unset
+retained pattern through the checked fast path. Repeated refactor diagnostics
+are reported separately as `last_refactor_path`, distinguishing row-refactor,
+EGraph, mapped, pool, and serial KLU refactor branches. Unset
 `KLS_ENABLE_KLS_FIRST_FACTOR` keeps the production cold first factor on the
 KLU/static path for broad large cases. `KLS_ENABLE_KLS_FIRST_FACTOR=1` forces
 the KLS-owned row-up-looking scaffold when possible, and

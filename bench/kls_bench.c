@@ -838,6 +838,7 @@ int main(int argc, char **argv) {
            ",\"initial_factor_seconds\":%.9g"
            ",\"initial_factor_path\":\"%s\""
            ",\"last_factor_path\":\"%s\""
+           ",\"last_refactor_path\":\"%s\""
            ",\"kls_tail_last_mapped_columns\":%" PRId64
            ",\"kls_tail_mapped_column_count\":%" PRId64
            ",\"kls_first_last_row_uplooking_columns\":%" PRId64
@@ -894,6 +895,7 @@ int main(int argc, char **argv) {
            stats.analysis_seconds, initial_factor_seconds,
            kls_factor_path_name(initial_factor_path),
            kls_factor_path_name(stats.last_factor_path),
+           kls_refactor_path_name(stats.last_refactor_path),
            stats.kls_tail_last_mapped_columns,
            stats.kls_tail_mapped_column_count,
            stats.kls_first_last_row_uplooking_columns,
@@ -1906,6 +1908,8 @@ int main(int argc, char **argv) {
            kls_factor_path_name(initial_factor_path));
     printf("last factor path: %s\n",
            kls_factor_path_name(stats.last_factor_path));
+    printf("last refactor path: %s\n",
+           kls_refactor_path_name(stats.last_refactor_path));
     printf("KLS tail mapped columns: last %" PRId64
            ", total %" PRId64 "\n",
            stats.kls_tail_last_mapped_columns,

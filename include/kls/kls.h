@@ -51,6 +51,15 @@ typedef enum kls_factor_path {
   KLS_FACTOR_PATH_KLS_FIRST = 5
 } kls_factor_path;
 
+typedef enum kls_refactor_path {
+  KLS_REFACTOR_PATH_NONE = 0,
+  KLS_REFACTOR_PATH_ROW = 1,
+  KLS_REFACTOR_PATH_EGRAPH = 2,
+  KLS_REFACTOR_PATH_MAPPED = 3,
+  KLS_REFACTOR_PATH_POOL = 4,
+  KLS_REFACTOR_PATH_KLU = 5
+} kls_refactor_path;
+
 #define KLS_SCALE_AUTO (-2)
 
 typedef enum kls_fast_reject_refresh_state {
@@ -253,6 +262,7 @@ typedef struct kls_stats {
   int64_t row_refactor_last_local_ready_groups;
   int64_t row_refactor_local_ready_group_count;
   kls_factor_path last_factor_path;
+  kls_refactor_path last_refactor_path;
   int64_t factor_etree_block_start;
   int64_t factor_etree_block_size;
   int64_t factor_etree_levels;
@@ -648,6 +658,7 @@ const char *kls_status_string(int status);
 const char *kls_ordering_name(kls_ordering ordering);
 const char *kls_orientation_name(kls_orientation orientation);
 const char *kls_factor_path_name(kls_factor_path path);
+const char *kls_refactor_path_name(kls_refactor_path path);
 
 #ifdef __cplusplus
 }

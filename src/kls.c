@@ -3185,6 +3185,14 @@ static void kls_set_last_factor_path(kls_solver *solver,
   solver->stats.last_factor_path = path;
 }
 
+static void kls_set_last_refactor_path(kls_solver *solver,
+                                       kls_refactor_path path) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->stats.last_refactor_path = path;
+}
+
 static void kls_invalidate_factor_etree_stats(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -41669,6 +41677,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                                      int check_pivots) {
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
   kls_clear_egraph_refactor_last_stats(solver);
+  kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_NONE);
   const int auto_row_refactor =
     kls_auto_row_refactor_should_run(solver);
   if (check_pivots && kls_checked_row_refactor_should_run()) {
@@ -41676,12 +41685,14 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       const int parallel_row_status =
         kls_threaded_row_refactor_numeric(solver, numeric_values, 1);
       if (parallel_row_status >= 0) {
+        kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
         return (UF_long)parallel_row_status;
       }
     }
     const int row_status =
       kls_serial_row_refactor_numeric(solver, numeric_values, 1);
     if (row_status >= 0) {
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
       return (UF_long)row_status;
     }
   } else if (!check_pivots &&
@@ -41691,12 +41702,14 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       const int parallel_row_status =
         kls_threaded_row_refactor_numeric(solver, numeric_values, 0);
       if (parallel_row_status >= 0) {
+        kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
         return (UF_long)parallel_row_status;
       }
     }
     const int row_status =
       kls_serial_row_refactor_numeric(solver, numeric_values, 0);
     if (row_status >= 0) {
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
       return (UF_long)row_status;
     }
   }
@@ -41709,6 +41722,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   const int egraph =
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
   if (egraph >= 0) {
+    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_EGRAPH);
     if (egraph && check_pivots &&
         !kls_checked_refactor_accepts_rowwise_u(solver)) {
       return 0;
@@ -41719,6 +41733,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   if (!kls_parallel_refactor_is_eligible(solver)) {
     const int mapped = kls_mapped_refactor(solver, numeric_values, check_pivots);
     if (mapped >= 0) {
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
       if (mapped && check_pivots &&
           !solver->row_refactor_last_run &&
           !kls_checked_refactor_accepts_rowwise_u(solver)) {
@@ -41741,6 +41756,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
                               numeric_values, solver->symbolic,
                               solver->numeric, &solver->common);
+    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
     if (!ok) {
       kls_record_fast_factor_failure(
         solver, KLS_FAST_FACTOR_FAIL_KLU_REFACTOR_FAILED,
@@ -41786,6 +41802,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
                               numeric_values, solver->symbolic,
                               solver->numeric, &solver->common);
+    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
     if (!ok) {
       kls_record_fast_factor_failure(
         solver, KLS_FAST_FACTOR_FAIL_KLU_REFACTOR_FAILED,
@@ -41834,12 +41851,14 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                          &singular,
                          &numerical_rank, &singular_col,
                          &pool_prefix_current)) {
+    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_POOL);
     kls_record_fast_factor_failure(
       solver, KLS_FAST_FACTOR_FAIL_POOL_INVALID,
       TRILINOS_KLU_OUT_OF_MEMORY);
     common->status = TRILINOS_KLU_OUT_OF_MEMORY;
     return 0;
   }
+  kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_POOL);
 
   if (invalid) {
     kls_record_fast_factor_failure(
@@ -52712,6 +52731,18 @@ const char *kls_factor_path_name(kls_factor_path path) {
     case KLS_FACTOR_PATH_KLU_FALLBACK: return "klu_fallback";
     case KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST: return "prestatic_klu_first";
     case KLS_FACTOR_PATH_KLS_FIRST: return "kls_first";
+    default: return "unknown";
+  }
+}
+
+const char *kls_refactor_path_name(kls_refactor_path path) {
+  switch (path) {
+    case KLS_REFACTOR_PATH_NONE: return "none";
+    case KLS_REFACTOR_PATH_ROW: return "row_refactor";
+    case KLS_REFACTOR_PATH_EGRAPH: return "egraph";
+    case KLS_REFACTOR_PATH_MAPPED: return "mapped";
+    case KLS_REFACTOR_PATH_POOL: return "pool";
+    case KLS_REFACTOR_PATH_KLU: return "klu_refactor";
     default: return "unknown";
   }
 }
