@@ -477,6 +477,14 @@ struct kls_solver {
   UF_long refactor_supernode_candidate_max_width;
   double refactor_supernode_candidate_dense_entries;
   double refactor_supernode_candidate_trailing_entries;
+  UF_long refactor_l_pattern_columns;
+  UF_long refactor_l_pattern_entries;
+  UF_long refactor_l_adjacent_run_count;
+  UF_long refactor_l_adjacent_run_entries;
+  UF_long refactor_l_adjacent_run_max_len;
+  UF_long refactor_l_contiguous_suffix_columns;
+  UF_long refactor_l_contiguous_suffix_entries;
+  UF_long refactor_l_contiguous_suffix_max_len;
   UF_long *refactor_pipeline_successor_ptr;
   UF_long *refactor_pipeline_successors;
   UF_long *refactor_pipeline_pred_count;
@@ -1354,6 +1362,14 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_u_indices = NULL;
   solver->refactor_u_values = NULL;
   solver->refactor_lu_pointer_count = 0;
+  solver->refactor_l_pattern_columns = 0;
+  solver->refactor_l_pattern_entries = 0;
+  solver->refactor_l_adjacent_run_count = 0;
+  solver->refactor_l_adjacent_run_entries = 0;
+  solver->refactor_l_adjacent_run_max_len = 0;
+  solver->refactor_l_contiguous_suffix_columns = 0;
+  solver->refactor_l_contiguous_suffix_entries = 0;
+  solver->refactor_l_contiguous_suffix_max_len = 0;
 }
 
 static void free_fast_reject_tail_plan(kls_solver *solver) {
@@ -12022,6 +12038,22 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_supernode_candidate_dense_entries;
   solver->stats.refactor_supernode_candidate_trailing_entries =
     solver->refactor_supernode_candidate_trailing_entries;
+  solver->stats.refactor_l_pattern_columns =
+    (int64_t)solver->refactor_l_pattern_columns;
+  solver->stats.refactor_l_pattern_entries =
+    (int64_t)solver->refactor_l_pattern_entries;
+  solver->stats.refactor_l_adjacent_run_count =
+    (int64_t)solver->refactor_l_adjacent_run_count;
+  solver->stats.refactor_l_adjacent_run_entries =
+    (int64_t)solver->refactor_l_adjacent_run_entries;
+  solver->stats.refactor_l_adjacent_run_max_len =
+    (int64_t)solver->refactor_l_adjacent_run_max_len;
+  solver->stats.refactor_l_contiguous_suffix_columns =
+    (int64_t)solver->refactor_l_contiguous_suffix_columns;
+  solver->stats.refactor_l_contiguous_suffix_entries =
+    (int64_t)solver->refactor_l_contiguous_suffix_entries;
+  solver->stats.refactor_l_contiguous_suffix_max_len =
+    (int64_t)solver->refactor_l_contiguous_suffix_max_len;
   solver->stats.refactor_last_supernode_pipeline_tasks =
     (int64_t)solver->refactor_last_supernode_pipeline_tasks;
   solver->stats.refactor_last_supernode_pipeline_columns =
@@ -17962,6 +17994,12 @@ static int kls_build_refactor_map(kls_solver *solver) {
   return 1;
 }
 
+static int kls_refactor_l_pattern_stats_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_REFACTOR_L_PATTERN_STATS");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->R == NULL || solver->numeric->LUbx == NULL ||
@@ -17996,6 +18034,16 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
     return 0;
   }
 
+  const int record_l_pattern = kls_refactor_l_pattern_stats_env_enabled();
+  UF_long pattern_columns = 0;
+  UF_long pattern_entries = 0;
+  UF_long adjacent_run_count = 0;
+  UF_long adjacent_run_entries = 0;
+  UF_long adjacent_run_max_len = 0;
+  UF_long contiguous_suffix_columns = 0;
+  UF_long contiguous_suffix_entries = 0;
+  UF_long contiguous_suffix_max_len = 0;
+
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
     const UF_long k1 = solver->symbolic->R[block];
     const UF_long k2 = solver->symbolic->R[block + 1u];
@@ -18019,6 +18067,46 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
       UF_long len = 0;
       kls_klu_get_pointer(lu, lip, llen, k,
                           &l_indices[k1 + k], &l_values[k1 + k], &len);
+      const UF_long *rows = l_indices[k1 + k];
+      if (record_l_pattern && rows != NULL && len > 0u) {
+        pattern_columns++;
+        pattern_entries += len;
+        UF_long run_len = 1u;
+        for (UF_long p = 1u; p < len; ++p) {
+          if (rows[p] == rows[p - 1u] + 1u) {
+            run_len++;
+          } else {
+            if (run_len >= 2u) {
+              adjacent_run_count++;
+              adjacent_run_entries += run_len;
+              if (run_len > adjacent_run_max_len) {
+                adjacent_run_max_len = run_len;
+              }
+            }
+            run_len = 1u;
+          }
+        }
+        if (run_len >= 2u) {
+          adjacent_run_count++;
+          adjacent_run_entries += run_len;
+          if (run_len > adjacent_run_max_len) {
+            adjacent_run_max_len = run_len;
+          }
+        }
+        UF_long suffix_len = 1u;
+        UF_long p = len;
+        while (p > 1u && rows[p - 1u] == rows[p - 2u] + 1u) {
+          suffix_len++;
+          p--;
+        }
+        if (suffix_len >= 2u) {
+          contiguous_suffix_columns++;
+          contiguous_suffix_entries += suffix_len;
+          if (suffix_len > contiguous_suffix_max_len) {
+            contiguous_suffix_max_len = suffix_len;
+          }
+        }
+      }
       kls_klu_get_pointer(lu, uip, ulen, k,
                           &u_indices[k1 + k], &u_values[k1 + k], &len);
     }
@@ -18029,6 +18117,14 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_u_indices = u_indices;
   solver->refactor_u_values = u_values;
   solver->refactor_lu_pointer_count = solver->n;
+  solver->refactor_l_pattern_columns = pattern_columns;
+  solver->refactor_l_pattern_entries = pattern_entries;
+  solver->refactor_l_adjacent_run_count = adjacent_run_count;
+  solver->refactor_l_adjacent_run_entries = adjacent_run_entries;
+  solver->refactor_l_adjacent_run_max_len = adjacent_run_max_len;
+  solver->refactor_l_contiguous_suffix_columns = contiguous_suffix_columns;
+  solver->refactor_l_contiguous_suffix_entries = contiguous_suffix_entries;
+  solver->refactor_l_contiguous_suffix_max_len = contiguous_suffix_max_len;
   return 1;
 }
 

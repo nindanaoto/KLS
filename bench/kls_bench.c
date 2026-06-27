@@ -1446,6 +1446,22 @@ int main(int argc, char **argv) {
            stats.row_refactor_lazy_value_scatter_run_count,
            stats.row_refactor_last_row_solve,
            stats.row_refactor_row_solve_run_count);
+    printf(",\"refactor_l_pattern_columns\":%" PRId64
+           ",\"refactor_l_pattern_entries\":%" PRId64
+           ",\"refactor_l_adjacent_run_count\":%" PRId64
+           ",\"refactor_l_adjacent_run_entries\":%" PRId64
+           ",\"refactor_l_adjacent_run_max_len\":%" PRId64
+           ",\"refactor_l_contiguous_suffix_columns\":%" PRId64
+           ",\"refactor_l_contiguous_suffix_entries\":%" PRId64
+           ",\"refactor_l_contiguous_suffix_max_len\":%" PRId64,
+           stats.refactor_l_pattern_columns,
+           stats.refactor_l_pattern_entries,
+           stats.refactor_l_adjacent_run_count,
+           stats.refactor_l_adjacent_run_entries,
+           stats.refactor_l_adjacent_run_max_len,
+           stats.refactor_l_contiguous_suffix_columns,
+           stats.refactor_l_contiguous_suffix_entries,
+           stats.refactor_l_contiguous_suffix_max_len);
     printf(",\"row_solve_parallel_run_count\":%" PRId64
            ",\"row_solve_parallel_l_slice_runs\":%" PRId64
            ",\"row_solve_parallel_u_slice_runs\":%" PRId64
@@ -2255,6 +2271,19 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_candidate_max_width,
            stats.refactor_supernode_candidate_dense_entries,
            stats.refactor_supernode_candidate_trailing_entries);
+    printf("refactor L pattern: columns %" PRId64
+           ", entries %" PRId64 ", adjacent runs %" PRId64
+           ", adjacent entries %" PRId64 ", max run %" PRId64
+           ", suffix columns %" PRId64 ", suffix entries %" PRId64
+           ", max suffix %" PRId64 "\n",
+           stats.refactor_l_pattern_columns,
+           stats.refactor_l_pattern_entries,
+           stats.refactor_l_adjacent_run_count,
+           stats.refactor_l_adjacent_run_entries,
+           stats.refactor_l_adjacent_run_max_len,
+           stats.refactor_l_contiguous_suffix_columns,
+           stats.refactor_l_contiguous_suffix_entries,
+           stats.refactor_l_contiguous_suffix_max_len);
     printf("refactor supernode pipeline tasks: %" PRId64
            ", columns: %" PRId64 ", cumulative tasks: %" PRId64
            ", cumulative columns: %" PRId64 "\n",

@@ -5031,6 +5031,26 @@ expensive than the scalar EGraph refactor. The missing paper-level piece remains
 a production coarse/batched supernodal numeric executor, not a simple
 small-call threshold.
 
+The same conclusion now has structural evidence from the `L` scatter pattern.
+KLS has an opt-in diagnostic,
+`KLS_ENABLE_REFACTOR_L_PATTERN_STATS=1`, which records adjacent row-index runs
+and contiguous suffixes while building the refactor LU pointer cache. On the
+KLU-first CKTSO-gap path
+(`build/kls_lpattern_gap5_auto_klufirst_t4_r1_timeout120.jsonl`), the four
+completed slow rows had very little direct-contiguous surface: adjacent-run
+coverage was 5.53% for `ASIC_320k`, 6.61% for `ASIC_320ks`, 2.58% for
+`ASIC_100ks`, and 1.84% for `G2_circuit`; contiguous-suffix coverage was only
+1.93%, 2.56%, 0.54%, and 0.09%, with max run length at most 5. `onetone2`
+timed out in that forced KLU-first diagnostic mode, but the representative
+auto/KLS-first diagnostic
+(`build/kls_lpattern_gap5_auto_t4_r1_timeout120.jsonl`) showed a different
+pattern family: 63-85% adjacent-run coverage but only 3.58-14.21%
+contiguous-suffix coverage, and it changed the initial factor path to
+`kls_first`. This rules out a BLAS-threshold guard or suffix-only direct scatter
+as the broad CKTSO closer for the current KLU-first losses. A future coarse
+row/supernodal engine would need to exploit general adjacent run blocks and
+producer/consumer batching, not just avoid small BLAS calls.
+
 A direct CKTSO Algorithm 5-style scalar prefactor was also tested in the
 column EGraph refactor path and rejected. The probe scanned later dependencies
 while an earlier predecessor was unfinished, consumed only already-published

@@ -594,6 +594,14 @@ typedef struct kls_stats {
   int64_t row_refactor_native_row_panel_blocked_entries;
   int64_t row_refactor_native_row_panel_fallback_count;
   int64_t row_refactor_native_row_panel_checked_reject_count;
+  int64_t refactor_l_pattern_columns;
+  int64_t refactor_l_pattern_entries;
+  int64_t refactor_l_adjacent_run_count;
+  int64_t refactor_l_adjacent_run_entries;
+  int64_t refactor_l_adjacent_run_max_len;
+  int64_t refactor_l_contiguous_suffix_columns;
+  int64_t refactor_l_contiguous_suffix_entries;
+  int64_t refactor_l_contiguous_suffix_max_len;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
