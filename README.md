@@ -593,11 +593,11 @@ and BTF suffix repairs still use the ordered pivot-capable row pipeline, so this
 is a guarded CKTSO Algorithm 5 prefactor/postfactorization step plus a
 SubtreeLU separator full-block repair, rather than the full production
 ETree-descendant scheduler.
-Unless `KLS_ENABLE_CHECKED_ROW_REFACTOR=0` explicitly disables it, the
-experimental KLS-owned row/segment refactor now runs as the first checked
-fast-factor attempt and can use its parallel row scheduler when multiple
-threads are available. Setting `KLS_ENABLE_CHECKED_ROW_REFACTOR=1` remains a
-compatible explicit enable, but is no longer required. A rejected
+The experimental KLS-owned row/segment checked fast-factor path is explicit
+opt-in. Set `KLS_ENABLE_CHECKED_ROW_REFACTOR=1` to run it as the first checked
+fast-factor attempt and to let it use the parallel row scheduler when multiple
+threads are available. Leaving the variable unset keeps the production checked
+fast-factor path on the column/EGraph repair ladder. A rejected
 parallel row pass records the unsafe dependency pivot and falls back through
 the same block-repair path. Checked KLS-owned row passes test the guessed
 diagonal against the maximum absolute value in the current U row before

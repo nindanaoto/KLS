@@ -537,6 +537,7 @@ int main(int argc, char **argv) {
     if (json) {
       printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
              ",\"threads\":%d"
+             ",\"internal_index_bytes\":%d"
              ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
              ",\"ordering\":\"%s\",\"requested_scale\":\"%s\""
              ",\"row_refactor_control\":\"%s\""
@@ -578,6 +579,7 @@ int main(int argc, char **argv) {
              ",\"parallel_task_flow_recommends_parallel\":%d"
              ",\"analyze_only\":true}\n",
              path, a.n, a.nnz, options.threads,
+             stats.internal_index_bytes,
              kls_orientation_name(options.orientation),
              kls_orientation_name(stats.selected_orientation),
              kls_ordering_name(stats.selected_ordering),
@@ -820,6 +822,7 @@ int main(int argc, char **argv) {
            ",\"build_has_scotch\":%s"
            ",\"build_has_spral_scaling\":%s"
            ",\"build_has_cblas\":%s"
+           ",\"internal_index_bytes\":%d"
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
            ",\"pivot_tolerance\":%.9g,\"selected_pivot_tolerance\":%.9g"
@@ -873,6 +876,7 @@ int main(int argc, char **argv) {
            stats.build_has_scotch ? "true" : "false",
            stats.build_has_spral_scaling ? "true" : "false",
            stats.build_has_cblas ? "true" : "false",
+           stats.internal_index_bytes,
            kls_orientation_name(options.orientation),
            kls_orientation_name(stats.selected_orientation),
            kls_ordering_name(stats.selected_ordering),

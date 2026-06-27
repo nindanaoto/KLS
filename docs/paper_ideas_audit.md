@@ -304,6 +304,15 @@ SPRAL-enabled build selects the low-fill AMD unscaled static-match path with
 20 off-diagonal pivots. The remaining top-row losses after that correction are
 still dominated by repeated refactor throughput, not by the missing matching
 hook.
+Benchmark artifacts now also report `internal_index_bytes`, because KLS still
+uses the SuiteSparse long-index numeric object internally even when callers
+provide 32-bit input arrays. A same-machine KLU width diagnostic on current
+slow rows showed a broad index-cache signal: system KLU32 refactor time was
+about `0.73x` KLU64 on `ASIC_100ks` and about `0.74x` KLU64 on `G2_circuit`.
+That does not close the full CKTSO gap by itself, but it is large enough to
+keep a future dual-width KLS numeric backend on the major-work list alongside
+the row/segment engine, rather than treating index width as a cosmetic API
+detail.
 A refreshed 12-row CKTSO-gap run against the saved 93-row CKTSO medium-paper
 artifact makes the same point on the current code path. With `--kls-first-factor
 on` and row solves enabled, the common-row KLS/CKTSO SPICE-cycle geomean ratio

@@ -614,6 +614,7 @@ typedef struct kls_stats {
   int64_t refactor_l_contiguous_suffix_columns;
   int64_t refactor_l_contiguous_suffix_entries;
   int64_t refactor_l_contiguous_suffix_max_len;
+  int internal_index_bytes;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

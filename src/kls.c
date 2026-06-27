@@ -4802,6 +4802,7 @@ static void fill_build_stats(kls_stats *stats) {
   if (stats == NULL) {
     return;
   }
+  stats->internal_index_bytes = (int)sizeof(UF_long);
 #ifdef KLS_HAVE_METIS
   stats->build_has_metis = 1;
 #else
