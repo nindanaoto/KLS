@@ -200,6 +200,16 @@ actual panel-backed use is reported through
 `kls_first_separator_queue_pipeline_supernode_panel_update_run_count`,
 `kls_first_last_separator_queue_pipeline_supernode_panel_update_groups`, and
 `kls_first_last_separator_queue_pipeline_supernode_panel_update_rows`.
+When a retained METIS separator tree covers a KLS-first block, the planner now
+first tries a SubtreeLU Algorithm 6-style split before using the older retained
+component queue: dominant subtrees are collapsed into pipeline roots, child
+subtrees become private-thread candidates, and the candidate subtrees are
+assigned by block-local row-input work. The factor path validates private
+ownership against the original row dependencies before remapping; unsafe
+partitions fall back to the legacy retained-component queue. Benchmark output
+reports this through `kls_first_last_separator_queue_partitioned`,
+`kls_first_separator_queue_partitioned_count`, and
+`kls_first_last_separator_queue_split_components`.
 When no retained separator queue applies and multiple threads are available,
 KLS-first runs the same restartable Algorithm 5-style row pipeline over the
 block's natural row order instead of serializing every row. That non-separator

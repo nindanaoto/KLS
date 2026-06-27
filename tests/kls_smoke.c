@@ -11192,6 +11192,9 @@ static int test_kls_first_separator_queue_plan(void) {
              stats.kls_first_last_separator_queue_min_thread_work <= 0.0 ||
              stats.kls_first_last_separator_queue_max_thread_work <
                stats.kls_first_last_separator_queue_min_thread_work ||
+             stats.kls_first_last_separator_queue_partitioned != 1 ||
+             stats.kls_first_separator_queue_partitioned_count < 1 ||
+             stats.kls_first_last_separator_queue_split_components <= 0 ||
              stats.kls_first_last_separator_queue_executed != 1 ||
              stats.kls_first_separator_queue_executed_run_count < 1 ||
              stats.kls_first_last_separator_queue_executed_private_rows <= 0 ||
@@ -11232,6 +11235,8 @@ static int test_kls_first_separator_queue_plan(void) {
             ", rows=%" PRId64 "/%" PRId64
             ", threads=%" PRId64 ", max_thread_rows=%" PRId64
             ", work=%.17g/%.17g"
+            ", partitioned=%d/%" PRId64
+            ", split_components=%" PRId64
             ", executed=%d/%" PRId64
             ", executed_rows=%" PRId64 "/%" PRId64
             ", private_parallel=%d/%" PRId64
@@ -11267,6 +11272,9 @@ static int test_kls_first_separator_queue_plan(void) {
             stats.kls_first_last_separator_queue_max_thread_rows,
             stats.kls_first_last_separator_queue_min_thread_work,
             stats.kls_first_last_separator_queue_max_thread_work,
+            stats.kls_first_last_separator_queue_partitioned,
+            stats.kls_first_separator_queue_partitioned_count,
+            stats.kls_first_last_separator_queue_split_components,
             stats.kls_first_last_separator_queue_executed,
             stats.kls_first_separator_queue_executed_run_count,
             stats.kls_first_last_separator_queue_executed_private_rows,

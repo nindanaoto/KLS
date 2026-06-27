@@ -617,6 +617,9 @@ struct kls_solver {
   UF_long kls_first_last_separator_queue_max_thread_rows;
   double kls_first_last_separator_queue_min_thread_work;
   double kls_first_last_separator_queue_max_thread_work;
+  int kls_first_last_separator_queue_partitioned;
+  UF_long kls_first_separator_queue_partitioned_count;
+  UF_long kls_first_last_separator_queue_split_components;
   int kls_first_last_separator_queue_executed;
   UF_long kls_first_separator_queue_executed_run_count;
   UF_long kls_first_last_separator_queue_executed_private_rows;
@@ -2830,6 +2833,8 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_separator_queue_max_thread_rows = 0;
   solver->kls_first_last_separator_queue_min_thread_work = 0.0;
   solver->kls_first_last_separator_queue_max_thread_work = 0.0;
+  solver->kls_first_last_separator_queue_partitioned = 0;
+  solver->kls_first_last_separator_queue_split_components = 0;
   solver->kls_first_last_separator_queue_executed = 0;
   solver->kls_first_last_separator_queue_executed_private_rows = 0;
   solver->kls_first_last_separator_queue_executed_pipeline_rows = 0;
@@ -2897,6 +2902,8 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_first_last_separator_queue_max_thread_rows = 0;
   solver->stats.kls_first_last_separator_queue_min_thread_work = 0.0;
   solver->stats.kls_first_last_separator_queue_max_thread_work = 0.0;
+  solver->stats.kls_first_last_separator_queue_partitioned = 0;
+  solver->stats.kls_first_last_separator_queue_split_components = 0;
   solver->stats.kls_first_last_separator_queue_executed = 0;
   solver->stats.kls_first_last_separator_queue_executed_private_rows = 0;
   solver->stats.kls_first_last_separator_queue_executed_pipeline_rows = 0;
@@ -11867,6 +11874,12 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->kls_first_last_separator_queue_min_thread_work;
   solver->stats.kls_first_last_separator_queue_max_thread_work =
     solver->kls_first_last_separator_queue_max_thread_work;
+  solver->stats.kls_first_last_separator_queue_partitioned =
+    solver->kls_first_last_separator_queue_partitioned;
+  solver->stats.kls_first_separator_queue_partitioned_count =
+    (int64_t)solver->kls_first_separator_queue_partitioned_count;
+  solver->stats.kls_first_last_separator_queue_split_components =
+    (int64_t)solver->kls_first_last_separator_queue_split_components;
   solver->stats.kls_first_last_separator_queue_executed =
     solver->kls_first_last_separator_queue_executed;
   solver->stats.kls_first_separator_queue_executed_run_count =
@@ -41149,6 +41162,8 @@ typedef struct kls_first_separator_queue_plan {
   UF_long max_thread_rows;
   double min_thread_work;
   double max_thread_work;
+  int partitioned;
+  UF_long split_component_count;
 } kls_first_separator_queue_plan;
 
 typedef struct kls_first_separator_component_entry {
@@ -41196,7 +41211,342 @@ static double kls_first_separator_row_input_work(UF_long input_count) {
   return count * count;
 }
 
-static int kls_build_first_separator_queue_plan(
+static int kls_build_first_separator_queue_plan_partitioned(
+  const kls_solver *solver,
+  UF_long k1,
+  UF_long k2,
+  int thread_count,
+  const UF_long *row_input_count,
+  kls_first_separator_queue_plan *plan) {
+  if (solver == NULL || plan == NULL || row_input_count == NULL ||
+      thread_count <= 1 || k2 <= k1 || k2 > solver->n ||
+      !kls_separator_analysis_has_global_range(&solver->separator) ||
+      solver->separator.component_count <= 1u ||
+      solver->separator.order_component == NULL ||
+      solver->separator.component_left_child == NULL ||
+      solver->separator.component_right_child == NULL ||
+      k1 < solver->separator.global_begin ||
+      k2 > solver->separator.global_end) {
+    return 0;
+  }
+
+  const kls_separator_analysis *separator = &solver->separator;
+  const UF_long component_count = separator->component_count;
+  const UF_long local_begin = k1 - separator->global_begin;
+  const UF_long local_end = k2 - separator->global_begin;
+  if (local_end > separator->n || component_count > (UF_long)UINT_MAX) {
+    return 0;
+  }
+  const UF_long block_rows = k2 - k1;
+  const size_t component_count_size = (size_t)component_count;
+  const size_t thread_count_size = (size_t)thread_count;
+  if ((UF_long)component_count_size != component_count ||
+      (UF_long)thread_count_size != (UF_long)thread_count ||
+      component_count_size > SIZE_MAX / sizeof(UF_long) ||
+      component_count_size > SIZE_MAX / sizeof(double) ||
+      component_count_size > SIZE_MAX / sizeof(unsigned char) ||
+      component_count_size > SIZE_MAX / sizeof(int) ||
+      component_count_size >
+        SIZE_MAX / sizeof(kls_first_separator_component_entry) ||
+      block_rows > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      thread_count_size > (SIZE_MAX / sizeof(UF_long)) - 1u ||
+      thread_count_size > SIZE_MAX / sizeof(double)) {
+    return 0;
+  }
+
+  int ok = 0;
+  UF_long *component_rows =
+    (UF_long *)calloc(component_count_size, sizeof(*component_rows));
+  double *component_work =
+    (double *)calloc(component_count_size, sizeof(*component_work));
+  UF_long *subtree_begin =
+    (UF_long *)malloc(component_count_size * sizeof(*subtree_begin));
+  UF_long *subtree_end =
+    (UF_long *)malloc(component_count_size * sizeof(*subtree_end));
+  double *subtree_work =
+    (double *)calloc(component_count_size, sizeof(*subtree_work));
+  UF_long *candidates =
+    (UF_long *)malloc(component_count_size * sizeof(*candidates));
+  unsigned char *component_pipeline =
+    (unsigned char *)calloc(component_count_size, sizeof(*component_pipeline));
+  int *component_thread =
+    (int *)malloc(component_count_size * sizeof(*component_thread));
+  kls_first_separator_component_entry *candidate_entries =
+    (kls_first_separator_component_entry *)
+      malloc(component_count_size * sizeof(*candidate_entries));
+  UF_long *thread_counts =
+    (UF_long *)calloc(thread_count_size, sizeof(*thread_counts));
+  double *thread_work =
+    (double *)calloc(thread_count_size, sizeof(*thread_work));
+  UF_long *thread_ptr = NULL;
+  UF_long *private_queue = NULL;
+  UF_long *pipeline_queue = NULL;
+  if (component_rows == NULL || component_work == NULL ||
+      subtree_begin == NULL || subtree_end == NULL ||
+      subtree_work == NULL || candidates == NULL ||
+      component_pipeline == NULL || component_thread == NULL ||
+      candidate_entries == NULL || thread_counts == NULL ||
+      thread_work == NULL) {
+    goto cleanup;
+  }
+  for (UF_long component = 0; component < component_count; ++component) {
+    component_thread[component] = -1;
+  }
+
+  for (UF_long local = local_begin; local < local_end; ++local) {
+    const unsigned int component = separator->order_component[local];
+    const UF_long global_row = separator->global_begin + local;
+    if ((UF_long)component >= component_count ||
+        global_row < k1 || global_row >= k2) {
+      goto cleanup;
+    }
+    component_rows[component]++;
+    component_work[component] +=
+      kls_first_separator_row_input_work(row_input_count[global_row - k1]);
+  }
+
+  for (UF_long component = 0; component < component_count; ++component) {
+    UF_long begin = component;
+    UF_long end = component + 1u;
+    double work = component_work[component];
+    const UF_long left = separator->component_left_child[component];
+    const UF_long right = separator->component_right_child[component];
+    if (left != KLS_KLU_EMPTY) {
+      if (left >= component || left >= component_count) {
+        goto cleanup;
+      }
+      begin = subtree_begin[left] < begin ? subtree_begin[left] : begin;
+      end = subtree_end[left] > end ? subtree_end[left] : end;
+      work += subtree_work[left];
+    }
+    if (right != KLS_KLU_EMPTY) {
+      if (right >= component || right >= component_count) {
+        goto cleanup;
+      }
+      begin = subtree_begin[right] < begin ? subtree_begin[right] : begin;
+      end = subtree_end[right] > end ? subtree_end[right] : end;
+      work += subtree_work[right];
+    }
+    subtree_begin[component] = begin;
+    subtree_end[component] = end;
+    subtree_work[component] = work;
+  }
+
+  const UF_long root_component = component_count - 1u;
+  if (subtree_work[root_component] <= 0.0) {
+    goto cleanup;
+  }
+  UF_long candidate_count = 1u;
+  UF_long pipeline_component_count = 0;
+  candidates[0] = root_component;
+  double candidate_work_sum = subtree_work[root_component];
+  while (candidate_count > 0u && candidate_work_sum > 0.0) {
+    UF_long max_pos = 0;
+    double max_work = subtree_work[candidates[0]];
+    for (UF_long pos = 1u; pos < candidate_count; ++pos) {
+      const double work = subtree_work[candidates[pos]];
+      if (work > max_work) {
+        max_pos = pos;
+        max_work = work;
+      }
+    }
+    if ((double)thread_count * max_work <
+        KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA * candidate_work_sum) {
+      break;
+    }
+    const UF_long component = candidates[max_pos];
+    const UF_long left = separator->component_left_child[component];
+    const UF_long right = separator->component_right_child[component];
+    const int split_left =
+      left != KLS_KLU_EMPTY && left < component_count &&
+      subtree_work[left] > 0.0;
+    const int split_right =
+      right != KLS_KLU_EMPTY && right < component_count &&
+      subtree_work[right] > 0.0;
+    if (!split_left && !split_right) {
+      break;
+    }
+    candidates[max_pos] = candidates[candidate_count - 1u];
+    candidate_count--;
+    candidate_work_sum -= subtree_work[component];
+    component_pipeline[component] = 1u;
+    pipeline_component_count++;
+    if (split_left) {
+      candidates[candidate_count++] = left;
+      candidate_work_sum += subtree_work[left];
+    }
+    if (split_right) {
+      candidates[candidate_count++] = right;
+      candidate_work_sum += subtree_work[right];
+    }
+  }
+  if (candidate_count == 0u || pipeline_component_count == 0u) {
+    goto cleanup;
+  }
+
+  for (UF_long pos = 0; pos < candidate_count; ++pos) {
+    if (candidates[pos] > (UF_long)UINT_MAX) {
+      goto cleanup;
+    }
+    candidate_entries[pos].component = (unsigned int)candidates[pos];
+    candidate_entries[pos].rows = 0;
+    candidate_entries[pos].work = subtree_work[candidates[pos]];
+  }
+  qsort(candidate_entries, (size_t)candidate_count,
+        sizeof(*candidate_entries),
+        kls_compare_first_separator_component_work_desc);
+
+  for (UF_long pos = 0; pos < candidate_count; ++pos) {
+    const UF_long component = candidate_entries[pos].component;
+    int target = 0;
+    double target_work = thread_work[0];
+    for (int tid = 1; tid < thread_count; ++tid) {
+      if (thread_work[tid] < target_work) {
+        target = tid;
+        target_work = thread_work[tid];
+      }
+    }
+    for (UF_long c = subtree_begin[component]; c < subtree_end[component];
+         ++c) {
+      if (c >= component_count || component_pipeline[c]) {
+        continue;
+      }
+      component_thread[c] = target;
+    }
+    thread_work[target] += subtree_work[component];
+  }
+
+  UF_long private_rows = 0;
+  UF_long pipeline_rows = 0;
+  for (UF_long local = local_begin; local < local_end; ++local) {
+    const unsigned int component = separator->order_component[local];
+    if ((UF_long)component >= component_count) {
+      goto cleanup;
+    }
+    if (component_pipeline[component]) {
+      pipeline_rows++;
+      continue;
+    }
+    const int target = component_thread[component];
+    if (target < 0 || target >= thread_count) {
+      goto cleanup;
+    }
+    thread_counts[target]++;
+    private_rows++;
+  }
+  if (private_rows == 0u || pipeline_rows == 0u ||
+      private_rows + pipeline_rows != block_rows) {
+    goto cleanup;
+  }
+
+  UF_long nonempty_threads = 0;
+  UF_long max_thread_rows = 0;
+  double min_thread_work = 0.0;
+  double max_thread_work = 0.0;
+  for (int tid = 0; tid < thread_count; ++tid) {
+    if (thread_counts[tid] == 0u) {
+      continue;
+    }
+    nonempty_threads++;
+    if (thread_counts[tid] > max_thread_rows) {
+      max_thread_rows = thread_counts[tid];
+    }
+    if (min_thread_work == 0.0 || thread_work[tid] < min_thread_work) {
+      min_thread_work = thread_work[tid];
+    }
+    if (thread_work[tid] > max_thread_work) {
+      max_thread_work = thread_work[tid];
+    }
+  }
+  if (nonempty_threads == 0u) {
+    goto cleanup;
+  }
+
+  thread_ptr =
+    (UF_long *)calloc(thread_count_size + 1u, sizeof(*thread_ptr));
+  private_queue =
+    (UF_long *)malloc((size_t)private_rows * sizeof(*private_queue));
+  pipeline_queue =
+    (UF_long *)malloc((size_t)pipeline_rows * sizeof(*pipeline_queue));
+  if (thread_ptr == NULL || private_queue == NULL ||
+      pipeline_queue == NULL) {
+    goto cleanup;
+  }
+  for (int tid = 0; tid < thread_count; ++tid) {
+    thread_ptr[tid + 1] = thread_ptr[tid] + thread_counts[tid];
+    thread_counts[tid] = thread_ptr[tid];
+  }
+  if (thread_ptr[thread_count] != private_rows) {
+    goto cleanup;
+  }
+
+  UF_long pipeline_next = 0;
+  for (UF_long local = local_begin; local < local_end; ++local) {
+    const unsigned int component = separator->order_component[local];
+    const UF_long global_row = separator->global_begin + local;
+    if (component_pipeline[component]) {
+      if (pipeline_next >= pipeline_rows) {
+        goto cleanup;
+      }
+      pipeline_queue[pipeline_next++] = global_row;
+    } else {
+      const int target = component_thread[component];
+      if (target < 0 || target >= thread_count) {
+        goto cleanup;
+      }
+      const UF_long dst = thread_counts[target]++;
+      if (dst >= private_rows) {
+        goto cleanup;
+      }
+      private_queue[dst] = global_row;
+    }
+  }
+  if (pipeline_next != pipeline_rows) {
+    goto cleanup;
+  }
+  for (int tid = 0; tid < thread_count; ++tid) {
+    if (thread_counts[tid] != thread_ptr[tid + 1]) {
+      goto cleanup;
+    }
+  }
+
+  plan->private_rows = private_queue;
+  plan->pipeline_rows = pipeline_queue;
+  plan->thread_ptr = thread_ptr;
+  plan->private_rows_count = private_rows;
+  plan->pipeline_rows_count = pipeline_rows;
+  plan->private_component_count = candidate_count;
+  plan->pipeline_component_count = pipeline_component_count;
+  plan->nonempty_threads = nonempty_threads;
+  plan->max_thread_rows = max_thread_rows;
+  plan->min_thread_work = min_thread_work;
+  plan->max_thread_work = max_thread_work;
+  plan->partitioned = 1;
+  plan->split_component_count = pipeline_component_count;
+  private_queue = NULL;
+  pipeline_queue = NULL;
+  thread_ptr = NULL;
+  ok = 1;
+
+cleanup:
+  free(component_rows);
+  free(component_work);
+  free(subtree_begin);
+  free(subtree_end);
+  free(subtree_work);
+  free(candidates);
+  free(component_pipeline);
+  free(component_thread);
+  free(candidate_entries);
+  free(thread_counts);
+  free(thread_work);
+  free(thread_ptr);
+  free(private_queue);
+  free(pipeline_queue);
+  return ok;
+}
+
+static int kls_build_first_separator_queue_plan_legacy(
   const kls_solver *solver,
   UF_long k1,
   UF_long k2,
@@ -41469,6 +41819,100 @@ cleanup:
   return ok;
 }
 
+static int kls_build_first_separator_queue_plan(
+  const kls_solver *solver,
+  UF_long k1,
+  UF_long k2,
+  int thread_count,
+  kls_first_separator_queue_plan *plan) {
+  if (plan != NULL) {
+    memset(plan, 0, sizeof(*plan));
+  }
+  if (solver == NULL || solver->symbolic == NULL || plan == NULL ||
+      thread_count <= 1 || k2 <= k1 || k2 > solver->n ||
+      solver->col_ptr == NULL || solver->row_idx == NULL ||
+      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
+      !kls_separator_analysis_has_global_range(&solver->separator) ||
+      solver->separator.component_count <= 1u ||
+      solver->separator.order_component == NULL ||
+      k1 < solver->separator.global_begin ||
+      k2 > solver->separator.global_end) {
+    return 0;
+  }
+
+  if (solver->separator.component_left_child == NULL ||
+      solver->separator.component_right_child == NULL) {
+    return kls_build_first_separator_queue_plan_legacy(
+      solver, k1, k2, thread_count, plan);
+  }
+
+  const UF_long n = solver->n;
+  const UF_long block_rows = k2 - k1;
+  const size_t n_size = (size_t)n;
+  if ((UF_long)n_size != n ||
+      n_size > SIZE_MAX / sizeof(UF_long) ||
+      block_rows > (UF_long)(SIZE_MAX / sizeof(UF_long))) {
+    return kls_build_first_separator_queue_plan_legacy(
+      solver, k1, k2, thread_count, plan);
+  }
+
+  int ok = 0;
+  UF_long *symbolic_pos_by_row =
+    (UF_long *)malloc(n_size * sizeof(*symbolic_pos_by_row));
+  UF_long *row_input_count =
+    (UF_long *)calloc((size_t)block_rows, sizeof(*row_input_count));
+  if (symbolic_pos_by_row == NULL || row_input_count == NULL) {
+    free(symbolic_pos_by_row);
+    free(row_input_count);
+    return kls_build_first_separator_queue_plan_legacy(
+      solver, k1, k2, thread_count, plan);
+  }
+
+  for (UF_long row = 0; row < n; ++row) {
+    symbolic_pos_by_row[row] = KLS_KLU_EMPTY;
+  }
+  for (UF_long pos = 0; pos < n; ++pos) {
+    const UF_long row = solver->symbolic->P[pos];
+    if (row >= n || symbolic_pos_by_row[row] != KLS_KLU_EMPTY) {
+      goto cleanup;
+    }
+    symbolic_pos_by_row[row] = pos;
+  }
+
+  for (UF_long local_col = 0; local_col < block_rows; ++local_col) {
+    const UF_long oldcol = solver->symbolic->Q[k1 + local_col];
+    if (oldcol >= n ||
+        solver->col_ptr[oldcol] > solver->col_ptr[oldcol + 1u] ||
+        solver->col_ptr[oldcol + 1u] > solver->nnz) {
+      goto cleanup;
+    }
+    for (UF_long p = solver->col_ptr[oldcol];
+         p < solver->col_ptr[oldcol + 1u]; ++p) {
+      const UF_long oldrow = solver->row_idx[p];
+      if (oldrow >= n) {
+        goto cleanup;
+      }
+      const UF_long row_pos = symbolic_pos_by_row[oldrow];
+      if (row_pos >= k1 && row_pos < k2) {
+        row_input_count[row_pos - k1]++;
+      }
+    }
+  }
+
+  ok = kls_build_first_separator_queue_plan_partitioned(
+    solver, k1, k2, thread_count, row_input_count, plan);
+
+cleanup:
+  free(symbolic_pos_by_row);
+  free(row_input_count);
+  if (ok) {
+    return 1;
+  }
+  kls_first_separator_queue_plan_free(plan);
+  return kls_build_first_separator_queue_plan_legacy(
+    solver, k1, k2, thread_count, plan);
+}
+
 static void kls_record_first_separator_queue_plans(
   kls_solver *solver,
   int thread_count) {
@@ -41484,6 +41928,8 @@ static void kls_record_first_separator_queue_plans(
   UF_long pipeline_rows = 0;
   UF_long nonempty_threads = 0;
   UF_long max_thread_rows = 0;
+  UF_long partitioned_count = 0;
+  UF_long split_components = 0;
   double min_thread_work = 0.0;
   double max_thread_work = 0.0;
   int recorded = 0;
@@ -41505,6 +41951,14 @@ static void kls_record_first_separator_queue_plans(
     }
     if (plan.max_thread_rows > max_thread_rows) {
       max_thread_rows = plan.max_thread_rows;
+    }
+    if (plan.partitioned) {
+      partitioned_count++;
+      if (split_components > UF_long_max - plan.split_component_count) {
+        split_components = UF_long_max;
+      } else {
+        split_components += plan.split_component_count;
+      }
     }
     if (plan.nonempty_threads > 0u) {
       if (min_thread_work == 0.0 ||
@@ -41534,6 +41988,17 @@ static void kls_record_first_separator_queue_plans(
   solver->kls_first_last_separator_queue_max_thread_rows = max_thread_rows;
   solver->kls_first_last_separator_queue_min_thread_work = min_thread_work;
   solver->kls_first_last_separator_queue_max_thread_work = max_thread_work;
+  solver->kls_first_last_separator_queue_partitioned =
+    partitioned_count > 0u ? 1 : 0;
+  if (solver->kls_first_separator_queue_partitioned_count >
+      UF_long_max - partitioned_count) {
+    solver->kls_first_separator_queue_partitioned_count = UF_long_max;
+  } else {
+    solver->kls_first_separator_queue_partitioned_count +=
+      partitioned_count;
+  }
+  solver->kls_first_last_separator_queue_split_components =
+    split_components;
 }
 
 typedef struct kls_row_first_block_context {
@@ -42263,6 +42728,101 @@ done:
   worker->workspace.supernode_panel_cache = NULL;
   kls_row_first_supernode_panel_cache_free(&panel_cache);
   return NULL;
+}
+
+static int kls_first_separator_private_ownership_valid(
+  UF_long k1,
+  UF_long nk,
+  UF_long n,
+  const UF_long *row_ptr,
+  const UF_long *row_cols,
+  const UF_long *col_pos,
+  const kls_first_separator_queue_plan *plan,
+  int thread_count) {
+  if (nk == 0u || k1 > UF_long_max - nk || row_ptr == NULL ||
+      row_cols == NULL || col_pos == NULL || plan == NULL ||
+      plan->thread_ptr == NULL || plan->private_rows == NULL ||
+      thread_count <= 1 || nk > (UF_long)(SIZE_MAX / sizeof(int))) {
+    return 0;
+  }
+
+  int *row_owner = (int *)malloc((size_t)nk * sizeof(*row_owner));
+  if (row_owner == NULL) {
+    return 0;
+  }
+  for (UF_long row = 0; row < nk; ++row) {
+    row_owner[row] = -1;
+  }
+
+  int ok = 1;
+  for (int tid = 0; tid < thread_count && ok; ++tid) {
+    const UF_long begin = plan->thread_ptr[tid];
+    const UF_long end = plan->thread_ptr[tid + 1];
+    if (begin > end || end > plan->private_rows_count) {
+      ok = 0;
+      break;
+    }
+    for (UF_long pos = begin; pos < end; ++pos) {
+      const UF_long global_row = plan->private_rows[pos];
+      if (global_row < k1 || global_row >= k1 + nk) {
+        ok = 0;
+        break;
+      }
+      const UF_long row = global_row - k1;
+      if (row_owner[row] != -1) {
+        ok = 0;
+        break;
+      }
+      row_owner[row] = tid;
+    }
+  }
+  for (UF_long pos = 0; pos < plan->pipeline_rows_count && ok; ++pos) {
+    const UF_long global_row = plan->pipeline_rows[pos];
+    if (global_row < k1 || global_row >= k1 + nk) {
+      ok = 0;
+      break;
+    }
+    const UF_long row = global_row - k1;
+    if (row_owner[row] != -1) {
+      ok = 0;
+      break;
+    }
+    row_owner[row] = -2;
+  }
+  for (UF_long row = 0; row < nk && ok; ++row) {
+    if (row_owner[row] == -1) {
+      ok = 0;
+    }
+  }
+
+  for (int tid = 0; tid < thread_count && ok; ++tid) {
+    for (UF_long pos = plan->thread_ptr[tid];
+         pos < plan->thread_ptr[tid + 1] && ok; ++pos) {
+      const UF_long row = plan->private_rows[pos] - k1;
+      if (row >= nk || row_owner[row] != tid ||
+          row_ptr[row] > row_ptr[row + 1u]) {
+        ok = 0;
+        break;
+      }
+      for (UF_long p = row_ptr[row]; p < row_ptr[row + 1u]; ++p) {
+        const UF_long oldcol = row_cols[p];
+        if (oldcol >= n || col_pos[oldcol] >= nk) {
+          ok = 0;
+          break;
+        }
+        const UF_long col = col_pos[oldcol];
+        const int owner = row_owner[col];
+        if (owner == -1 || (owner >= 0 && owner != tid) ||
+            (col < row && owner != tid)) {
+          ok = 0;
+          break;
+        }
+      }
+    }
+  }
+
+  free(row_owner);
+  return ok;
 }
 
 static int kls_row_first_build_private_row_owners(
@@ -47645,49 +48205,59 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
     }
 
     if (allow_separator_schedule && use_separator_for_block &&
-        solver->options.threads > 1 &&
-        kls_build_first_separator_queue_plan(
-          solver, k1, k2, solver->options.threads, &separator_plan)) {
-      row_order = (UF_long *)malloc((size_t)nk * sizeof(*row_order));
-      row_seen = (unsigned char *)calloc((size_t)nk, sizeof(*row_seen));
-      if (row_order == NULL || row_seen == NULL) {
-        goto fail_block_entries;
+        solver->options.threads > 1) {
+      int have_separator_plan = kls_build_first_separator_queue_plan(
+        solver, k1, k2, solver->options.threads, &separator_plan);
+      if (have_separator_plan && separator_plan.partitioned &&
+          !kls_first_separator_private_ownership_valid(
+            k1, nk, n, row_ptr, row_cols, col_pos, &separator_plan,
+            solver->options.threads)) {
+        kls_first_separator_queue_plan_free(&separator_plan);
+        have_separator_plan = kls_build_first_separator_queue_plan_legacy(
+          solver, k1, k2, solver->options.threads, &separator_plan);
       }
-      UF_long row_order_count = 0;
-      for (UF_long pos = 0; pos < separator_plan.private_rows_count; ++pos) {
-        const UF_long global_row = separator_plan.private_rows[pos];
-        if (global_row < k1 || global_row >= k2) {
+      if (have_separator_plan) {
+        row_order = (UF_long *)malloc((size_t)nk * sizeof(*row_order));
+        row_seen = (unsigned char *)calloc((size_t)nk, sizeof(*row_seen));
+        if (row_order == NULL || row_seen == NULL) {
           goto fail_block_entries;
         }
-        const UF_long local_row = global_row - k1;
-        if (row_seen[local_row]) {
-          goto fail_block_entries;
+        UF_long row_order_count = 0;
+        for (UF_long pos = 0; pos < separator_plan.private_rows_count; ++pos) {
+          const UF_long global_row = separator_plan.private_rows[pos];
+          if (global_row < k1 || global_row >= k2) {
+            goto fail_block_entries;
+          }
+          const UF_long local_row = global_row - k1;
+          if (row_seen[local_row]) {
+            goto fail_block_entries;
+          }
+          row_seen[local_row] = 1u;
+          row_order[row_order_count++] = local_row;
         }
-        row_seen[local_row] = 1u;
-        row_order[row_order_count++] = local_row;
-      }
-      block_separator_private_rows = row_order_count;
-      qsort(row_order, (size_t)block_separator_private_rows,
-            sizeof(*row_order), kls_compare_uf_long);
-      for (UF_long pos = 0; pos < separator_plan.pipeline_rows_count; ++pos) {
-        const UF_long global_row = separator_plan.pipeline_rows[pos];
-        if (global_row < k1 || global_row >= k2) {
-          goto fail_block_entries;
+        block_separator_private_rows = row_order_count;
+        qsort(row_order, (size_t)block_separator_private_rows,
+              sizeof(*row_order), kls_compare_uf_long);
+        for (UF_long pos = 0; pos < separator_plan.pipeline_rows_count; ++pos) {
+          const UF_long global_row = separator_plan.pipeline_rows[pos];
+          if (global_row < k1 || global_row >= k2) {
+            goto fail_block_entries;
+          }
+          const UF_long local_row = global_row - k1;
+          if (row_seen[local_row]) {
+            goto fail_block_entries;
+          }
+          row_seen[local_row] = 1u;
+          row_order[row_order_count++] = local_row;
         }
-        const UF_long local_row = global_row - k1;
-        if (row_seen[local_row]) {
-          goto fail_block_entries;
+        block_separator_pipeline_rows =
+          row_order_count - block_separator_private_rows;
+        qsort(row_order + block_separator_private_rows,
+              (size_t)block_separator_pipeline_rows, sizeof(*row_order),
+              kls_compare_uf_long);
+        if (row_order_count == nk && block_separator_private_rows > 0u) {
+          use_separator_row_order = 1;
         }
-        row_seen[local_row] = 1u;
-        row_order[row_order_count++] = local_row;
-      }
-      block_separator_pipeline_rows =
-        row_order_count - block_separator_private_rows;
-      qsort(row_order + block_separator_private_rows,
-            (size_t)block_separator_pipeline_rows, sizeof(*row_order),
-            kls_compare_uf_long);
-      if (row_order_count == nk && block_separator_private_rows > 0u) {
-        use_separator_row_order = 1;
       }
     }
     if (use_separator_row_order) {

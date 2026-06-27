@@ -550,6 +550,9 @@ typedef struct kls_stats {
   double parallel_task_flow_finish_time;
   double parallel_task_flow_speedup;
   int parallel_task_flow_recommends_parallel;
+  int kls_first_last_separator_queue_partitioned;
+  int64_t kls_first_separator_queue_partitioned_count;
+  int64_t kls_first_last_separator_queue_split_components;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

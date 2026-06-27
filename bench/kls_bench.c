@@ -863,7 +863,10 @@ int main(int argc, char **argv) {
            ",\"kls_first_last_separator_queue_nonempty_threads\":%" PRId64
            ",\"kls_first_last_separator_queue_max_thread_rows\":%" PRId64
            ",\"kls_first_last_separator_queue_min_thread_work\":%.9g"
-           ",\"kls_first_last_separator_queue_max_thread_work\":%.9g",
+           ",\"kls_first_last_separator_queue_max_thread_work\":%.9g"
+           ",\"kls_first_last_separator_queue_partitioned\":%d"
+           ",\"kls_first_separator_queue_partitioned_count\":%" PRId64
+           ",\"kls_first_last_separator_queue_split_components\":%" PRId64,
            path, a.n, a.nnz, options.threads,
            stats.build_has_metis ? "true" : "false",
            stats.build_has_scotch ? "true" : "false",
@@ -916,7 +919,10 @@ int main(int argc, char **argv) {
            stats.kls_first_last_separator_queue_nonempty_threads,
            stats.kls_first_last_separator_queue_max_thread_rows,
            stats.kls_first_last_separator_queue_min_thread_work,
-           stats.kls_first_last_separator_queue_max_thread_work);
+           stats.kls_first_last_separator_queue_max_thread_work,
+           stats.kls_first_last_separator_queue_partitioned,
+           stats.kls_first_separator_queue_partitioned_count,
+           stats.kls_first_last_separator_queue_split_components);
     printf(",\"kls_first_last_separator_queue_executed\":%d"
            ",\"kls_first_separator_queue_executed_run_count\":%" PRId64
            ",\"kls_first_last_separator_queue_executed_private_rows\":%" PRId64
@@ -1867,7 +1873,8 @@ int main(int argc, char **argv) {
            ", components private/pipeline %" PRId64 "/%" PRId64
            ", rows private/pipeline %" PRId64 "/%" PRId64
            ", threads/max_rows %" PRId64 "/%" PRId64
-           ", work min/max %.9g/%.9g\n",
+           ", work min/max %.9g/%.9g"
+           ", partitioned %d/%" PRId64 ", split components %" PRId64 "\n",
            stats.kls_first_last_separator_queue,
            stats.kls_first_separator_queue_run_count,
            stats.kls_first_last_separator_queue_private_components,
@@ -1877,7 +1884,10 @@ int main(int argc, char **argv) {
            stats.kls_first_last_separator_queue_nonempty_threads,
            stats.kls_first_last_separator_queue_max_thread_rows,
            stats.kls_first_last_separator_queue_min_thread_work,
-           stats.kls_first_last_separator_queue_max_thread_work);
+           stats.kls_first_last_separator_queue_max_thread_work,
+           stats.kls_first_last_separator_queue_partitioned,
+           stats.kls_first_separator_queue_partitioned_count,
+           stats.kls_first_last_separator_queue_split_components);
     printf("KLS row-up-looking separator queue executed: last %d"
            ", runs %" PRId64 ", rows private/pipeline %" PRId64 "/%" PRId64
            "\n",
