@@ -5096,6 +5096,22 @@ was only waiting for the worker pool to finish. That rules out metadata rebuild,
 barrier wait, and ready-queue absence as the immediate hot-path explanation for
 the current top-gap rows: the active kernel is still the sparse column scatter.
 
+The shared scatter kernel now skips the row walk when the dependency scale is
+exactly zero. This is a narrow arithmetic no-op, but it directly targets the
+sampled hot loop and benefits SPICE-style repeated values that create exact
+zero intermediate U entries. On the exact-release top-ten CKTSO-gap focus,
+`build/kls_zero_scatter_skip_gap10_t4_r1_ref3_timeout120.jsonl` improved the
+KLS geomean from `4.3966s` to `4.1762s`, a `1.0528x` speedup, with seven wins
+over 2% and no losses over 2%. The largest wins were `rajat28` at `0.882x`,
+`ASIC_320k` at `0.932x`, `ASIC_100ks` at `0.934x`, and `G2_circuit` at
+`0.944x`. A broader first-30 focus run
+(`build/kls_zero_scatter_skip_gap30_t4_r1_ref3_timeout120.jsonl`) completed
+without failures and was slightly faster than the older scatter-unroll common
+20-row artifact (`0.9857x` geomean), though it had mixed per-row movement. The
+change is therefore retained as a real default hot-path cleanup, while the
+remaining common top-ten gap is still `2.4380x` versus the saved CKTSO
+four-thread reference.
+
 Thread-count sensitivity reinforces the same point. On the exact-release
 top-ten focus, one-thread KLS
 (`build/kls_threads1_gap10_after_exact_release_r1_ref3_timeout120.jsonl`) had a

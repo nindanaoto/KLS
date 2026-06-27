@@ -1240,6 +1240,9 @@ static inline void kls_scatter_subtract(double *restrict x,
                                         const double *restrict values,
                                         UF_long length,
                                         double scale) {
+  if (scale == 0.0) {
+    return;
+  }
   UF_long p = 0;
   for (; p + 7u < length; p += 8u) {
     x[rows[p]] -= values[p] * scale;
