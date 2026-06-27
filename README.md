@@ -533,8 +533,17 @@ column kernel, then runs the shorter pivoted tail envelope and counts it as a
 tail restart. Internal envelope gaps that can be copied unchanged are skipped;
 dependency-blocked internal gaps are promoted into the active tail and
 recomputed with pivoting, while structural gap-copy failures still fall back.
-Full-suffix root rejects still remain ordinary KLS block restarts. This is a
-local serial subset of CKTSO-style repair, not the full pipelined
+Full-suffix root rejects still remain ordinary KLS block restarts. For a
+non-contiguous retained ETree mask with real gap columns, the KLS-owned repair
+now factors the boundary pivot row first and then releases the remaining active
+descendant rows from the retained ETree child counts instead of only replaying
+the linear active-row order. That guarded executor reports
+`fast_kls_block_restart_last_row_pipeline_etree_ready`,
+`fast_kls_block_restart_row_pipeline_etree_ready_count`,
+`fast_kls_block_restart_last_row_pipeline_etree_ready_rows`, and
+`fast_kls_block_restart_last_row_pipeline_etree_ready_threads`. Suffix-shaped
+and BTF suffix repairs still use the ordered pivot-capable row pipeline, so this
+is a gapped-mask CKTSO Algorithm 5 step rather than the full production
 ETree-descendant scheduler.
 Unless `KLS_ENABLE_CHECKED_ROW_REFACTOR=0` explicitly disables it, the
 experimental KLS-owned row/segment refactor now runs as the first checked
@@ -922,6 +931,10 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_kls_block_restart_last_row_pipeline_etree_tail_rows`,
 `fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows`,
 `fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask`,
+`fast_kls_block_restart_last_row_pipeline_etree_ready`,
+`fast_kls_block_restart_row_pipeline_etree_ready_count`,
+`fast_kls_block_restart_last_row_pipeline_etree_ready_rows`,
+`fast_kls_block_restart_last_row_pipeline_etree_ready_threads`,
 `fast_kls_block_restart_last_row_pipeline_separator_tail_scope`,
 `fast_kls_block_restart_row_pipeline_separator_tail_scope_count`,
 `fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows`,
