@@ -433,6 +433,30 @@ if(KLS_BUILD_BENCHMARKS)
   endif()
   target_compile_options(kls_bench PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+
+  find_path(KLS_SYSTEM_KLU_INCLUDE_DIR
+    NAMES klu.h
+    PATH_SUFFIXES suitesparse)
+  find_library(KLS_SYSTEM_KLU_LIBRARY
+    NAMES klu)
+  if(KLS_SYSTEM_KLU_INCLUDE_DIR AND KLS_SYSTEM_KLU_LIBRARY)
+    add_executable(klu_width_compare
+      bench/klu_width_compare.c)
+    target_include_directories(klu_width_compare
+      PRIVATE
+        "${KLS_SYSTEM_KLU_INCLUDE_DIR}")
+    target_link_libraries(klu_width_compare
+      PRIVATE
+        "${KLS_SYSTEM_KLU_LIBRARY}")
+    if(KLS_MATH_LIBRARY)
+      target_link_libraries(klu_width_compare PRIVATE "${KLS_MATH_LIBRARY}")
+    endif()
+    target_compile_options(klu_width_compare PRIVATE
+      $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+  else()
+    message(STATUS
+      "klu_width_compare disabled: system SuiteSparse KLU headers/library not found")
+  endif()
 endif()
 
 if(KLS_BUILD_CKTSO_COMPARE)

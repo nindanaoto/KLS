@@ -131,6 +131,16 @@ scheduler diagnostics, NICSLU-style `parallel_model_r1`,
 task-flow model metrics, and memory statistics. Use `--analyze-only` to
 measure symbolic analysis and ordering decisions without running numeric
 factorization.
+
+When system SuiteSparse KLU headers and libraries are installed, the build also
+provides `klu_width_compare` to compare system `klu_*` and `klu_l_*` on the same
+MatrixMarket input. This is a diagnostic benchmark for deciding whether a
+future 32-bit KLS backend is worth implementing:
+
+```sh
+./build/klu_width_compare matrix.mtx --repeat 3 --refactor-repeat 3 --json
+```
+
 JSON includes `initial_factor_path` and `last_factor_path`; values such as
 `klu_first` or `klu_fallback` mean the factorization was handed to the
 KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
