@@ -4932,6 +4932,26 @@ SubtreeLU/CKTSO compact-panel arithmetic gap for the column EGraph probe; the
 remaining larger gap is still broader batched producer/consumer scheduling and
 CKTSO's pivoting-tail executor.
 
+A direct CKTSO Algorithm 5-style scalar prefactor was also tested in the
+column EGraph refactor path and rejected. The probe scanned later dependencies
+while an earlier predecessor was unfinished, consumed only already-published
+later dependencies, and required the skipped earlier producers not to update
+the candidate dependency slot. This matched the paper's "use finished
+predecessors while waiting" semantics, but the safety scan was a poor fit for
+the column-packed hot path. With KLS-first auto, the run also made the initial
+factor choose the slower `kls_first` path
+(`build/kls_egraph_prefactor_gap5_t4_r3_timeout120.jsonl`). A clean
+KLU-first check (`build/kls_egraph_prefactor_klu_first_gap5_t4_r3_timeout120.jsonl`)
+was still not acceptable: `ASIC_320k` was roughly neutral, `ASIC_320ks`,
+`ASIC_100ks`, and `G2_circuit` regressed, and `onetone2` timed out at the
+120 s harness limit. Even an off-by-default guarded version disturbed the hot
+path enough to reproduce the timeout
+(`build/kls_egraph_prefactor_default_off_gap5_t4_r3_timeout120.jsonl`), so the
+code was removed rather than retained as another runtime flag. This rules out
+that small column-EGraph Algorithm 5 gap as the next likely CKTSO closer; the
+same idea remains in the row-major row-refactor executor where the dependency
+and update metadata are already row-oriented.
+
 The KLS-owned row-up first factor now executes independent BTF diagonal blocks
 in parallel when KLS-first factorization is requested with more than one
 thread. Each worker uses private row-up scratch, performs dynamic column pivots

@@ -777,6 +777,14 @@ EGraph panel with a unit-diagonal `dtrsv` over the retained internal panel plus
 show this removes the worst rebuild overhead, but the path is still slower than
 default KLS because the broad default path still needs coarser batched panel
 kernels.
+A separate CKTSO Algorithm 5-style probe tried letting the column EGraph
+refactor consume later already-finished scalar dependencies while waiting for an
+earlier unfinished dependency. The structural safety scan was correct but not a
+usable default: KLU-first focused runs regressed `ASIC_320ks`, `ASIC_100ks`, and
+`G2_circuit`, and `onetone2` timed out at the 120 s harness limit. The probe was
+removed rather than kept behind another runtime flag; the same Algorithm 5 idea
+remains implemented in the row-major row-refactor path where dependency metadata
+is already row-oriented.
 The experimental row pipeline preserves the CKTSO-style wide cluster prefix
 selected by the `2 * threads` width rule, then consumes the remaining narrow
 tail through a bounded successor-ready queue when explicit predecessor counts
