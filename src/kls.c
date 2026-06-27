@@ -36619,25 +36619,6 @@ static void kls_row_refactor_mark_row_done(
       !shared->row_pipeline_tail_groups[dep_group]) {
     return;
   }
-  int release_successors_early = 0;
-  if (solver->row_refactor_group_ptr != NULL &&
-      solver->row_refactor_group_kind != NULL &&
-      shared->thread_count > 1) {
-    const UF_long row_begin = solver->row_refactor_group_ptr[dep_group];
-    const UF_long row_end = solver->row_refactor_group_ptr[dep_group + 1u];
-    if (row_begin < row_end && row >= row_begin && row < row_end) {
-      const UF_long width = row_end - row_begin;
-      const UF_long split_tail = (UF_long)shared->thread_count;
-      const unsigned char kind = solver->row_refactor_group_kind[dep_group];
-      if (width >= 2u * split_tail &&
-          row - row_begin + 1u == width - split_tail &&
-          (kind == KLS_ROW_REFACTOR_GROUP_DENSE ||
-           kind == KLS_ROW_REFACTOR_GROUP_GENERIC)) {
-        release_successors_early = 1;
-      }
-    }
-  }
-
   const UF_long begin = solver->row_refactor_successor_ptr[row];
   const UF_long end = solver->row_refactor_successor_ptr[row + 1u];
   if (begin > end) {
@@ -36664,28 +36645,6 @@ static void kls_row_refactor_mark_row_done(
       shared->row_pipeline_private_group_mask != NULL &&
       shared->row_pipeline_private_group_mask[successor_group];
     if (successor_private) {
-      continue;
-    }
-    if (release_successors_early) {
-      unsigned long current =
-        atomic_load_explicit(
-          &shared->row_pipeline_remaining_preds[successor_group],
-          memory_order_acquire);
-      for (;;) {
-        if (current == ULONG_MAX || current == 0ul) {
-          break;
-        }
-        if (atomic_compare_exchange_weak_explicit(
-              &shared->row_pipeline_remaining_preds[successor_group],
-              &current, ULONG_MAX, memory_order_acq_rel,
-              memory_order_acquire)) {
-          if (!kls_row_refactor_enqueue_ready_group(shared,
-                                                    successor_group)) {
-            return;
-          }
-          break;
-        }
-      }
       continue;
     }
     unsigned long current =

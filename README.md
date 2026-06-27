@@ -645,11 +645,11 @@ have a contiguous suffix of dependencies on that completed dense group; stats re
 `row_refactor_compact_supernode_update_count`,
 `row_refactor_compact_supernode_update_rows`, and
 `row_refactor_compact_supernode_update_entries`. The partial supernode pipeline
-now also publishes compact producer-panel prefixes row by row and lets the
-ready-queue scheduler release successor groups at the paper's split point
-(`width - threads`). A consumer with a contiguous dependency suffix ending at
-that valid prefix can apply the compact supernode update immediately and wait
-only on any unfinished producer tail it still touches; stats report
+now also publishes compact producer-panel prefixes row by row, while the
+ready-queue scheduler releases successor groups only after their exact
+row-predecessor count reaches zero. A consumer with a contiguous dependency
+suffix ending at a valid producer prefix can apply the compact supernode update
+without rebuilding that panel; stats report
 `row_refactor_last_compact_supernode_partial_update`,
 `row_refactor_compact_supernode_partial_update_count`,
 `row_refactor_compact_supernode_partial_update_rows`, and
@@ -808,23 +808,16 @@ levels plus queued tail. Stats report
 Unchecked queued row refactors can run without the per-row completion bitmap;
 stats report `row_refactor_last_done_bitmap` and
 `row_refactor_done_bitmap_run_count` so checked pivot-prefix validation remains
-visible. When a checked row waits for an unfinished predecessor, KLS now applies
-a conservative CKTSO Algorithm 5-style prefactorization step: later finished
-predecessors in the same row can be consumed early only when the row-major
-`U` pattern proves every skipped predecessor has no update into that later
-dependency. This keeps the existing in-order pivot rejection semantics for
-ambiguous cases while exposing actual use through
-`row_refactor_last_prefactor`, `row_refactor_last_prefactor_rows`,
-`row_refactor_last_prefactor_deps`, and cumulative
-`row_refactor_prefactor_*` counters. When the later finished dependencies form
-a consecutive retained dense-producer prefix, KLS now consumes them with the
-same compact supernode update shape instead of scalarizing each dependency;
-near-threshold checked multipliers are skipped and left for the normal
-in-order reject path. Stats expose that Algorithm 5-style run consumption
-through `row_refactor_last_prefactor_supernode`,
-`row_refactor_last_prefactor_supernode_rows`,
-`row_refactor_last_prefactor_supernode_deps`, and cumulative
-`row_refactor_prefactor_supernode_*` counters. Row-pattern analysis also records
+visible. The partial row-dependency queue releases successor groups only when
+their exact row-predecessor count reaches zero. An earlier speculative
+Algorithm 5-style row-prefactor release could enqueue consumers before that
+point and forced large dense groups into expensive wait/prefactor loops; it is
+no longer used by the default row-refactor partial queue. The historical
+prefactor diagnostics remain reported through `row_refactor_last_prefactor`,
+`row_refactor_last_prefactor_rows`, `row_refactor_last_prefactor_deps`,
+cumulative `row_refactor_prefactor_*`, and the corresponding
+`row_refactor_prefactor_supernode_*` counters; exact row-dependency runs should
+leave those counters at zero. Row-pattern analysis also records
 `row_refactor_input_cleanup_rows`
 and `row_refactor_input_cleanup_entries`; rows whose input columns are already
 covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in

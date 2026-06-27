@@ -11047,20 +11047,20 @@ static int test_checked_row_prefactor_finished_dependency(void) {
              stats.row_refactor_last_parallel != 1 ||
              stats.row_refactor_last_partial_supernode_pipeline != 1 ||
              stats.row_refactor_last_done_bitmap != 1 ||
-             stats.row_refactor_last_prefactor != 1 ||
-             stats.row_refactor_last_prefactor_rows <= 0 ||
-             stats.row_refactor_last_prefactor_deps <= 0 ||
-             stats.row_refactor_last_prefactor_supernode != 1 ||
-             stats.row_refactor_last_prefactor_supernode_rows <= 0 ||
-             stats.row_refactor_last_prefactor_supernode_deps <= 0 ||
-             stats.row_refactor_prefactor_supernode_run_count <= 0 ||
-             stats.row_refactor_prefactor_supernode_deps <
-               stats.row_refactor_last_prefactor_supernode_deps ||
-             stats.row_refactor_prefactor_run_count <= 0 ||
-             stats.row_refactor_prefactor_deps <
-               stats.row_refactor_last_prefactor_deps)) {
+             stats.row_refactor_last_prefactor != 0 ||
+             stats.row_refactor_last_prefactor_rows != 0 ||
+             stats.row_refactor_last_prefactor_deps != 0 ||
+             stats.row_refactor_last_prefactor_supernode != 0 ||
+             stats.row_refactor_last_prefactor_supernode_rows != 0 ||
+             stats.row_refactor_last_prefactor_supernode_deps != 0 ||
+             stats.row_refactor_prefactor_supernode_run_count != 0 ||
+             stats.row_refactor_prefactor_supernode_rows != 0 ||
+             stats.row_refactor_prefactor_supernode_deps != 0 ||
+             stats.row_refactor_prefactor_run_count != 0 ||
+             stats.row_refactor_prefactor_rows != 0 ||
+             stats.row_refactor_prefactor_deps != 0)) {
     fprintf(stderr,
-            "unexpected row-prefactor stats: last=%d/%d/%d partial=%d"
+            "unexpected exact row-dependency stats: last=%d/%d/%d partial=%d"
             " done=%d prefactor=%d rows/deps=%" PRId64 "/%" PRId64
             " supernode=%d rows/deps=%" PRId64 "/%" PRId64
             " supernode_totals=%" PRId64 "/%" PRId64 "/%" PRId64

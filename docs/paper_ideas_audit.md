@@ -4278,11 +4278,10 @@ mere compact storage toward actually consuming supernodes in later updates.
 The partial supernode pipeline now closes a direct Algorithm 5-style gap in
 that consumer path. Dense and generic producer groups publish the valid prefix
 of their retained compact panel as each row is completed, and the ready-queue
-scheduler can release successor groups at the SubtreeLU split point
-(`width - threads`) instead of waiting for the whole producer group. A consumer
-whose dependency suffix ends at the published prefix consumes the compact
-panel immediately and uses the existing row-done waits for any unfinished tail
-rows it later reaches. New diagnostics report
+scheduler releases successor groups when the exact row-dependency predecessor
+count reaches zero. A consumer whose dependency suffix ends at the published
+prefix consumes the compact panel immediately; consumers are no longer
+speculatively enqueued at the `width - threads` split point. New diagnostics report
 `row_refactor_last_compact_supernode_partial_update` and the corresponding
 partial-update count, row, and entry totals. The smoke fixture forces a
 240-row producer with a 2-thread split and requires a 238-row partial compact
@@ -4291,12 +4290,24 @@ pivoting-tail executor or a production BLAS supernodal numeric object, but it
 fills the specific missing "start consumers from a finished producer prefix"
 semantic instead of treating every compact supernode as all-or-nothing.
 
+The speculative split-point release was removed after direct forced-row
+inspection showed it was the large-case pathology, not a scheduler deadlock.
+With the older code, `onetone2` timed out under a 35 s forced-row probe while
+workers were sampled inside dense group processing and prefactor waits. After
+keeping only exact row-dependency release, the same command completed in
+`0.203s`, matching the partial-pipeline-disabled control (`0.199s`) with clean
+residuals and zero row-prefactor counters. Larger spot checks also completed
+cleanly: `G2_circuit` in `1.028s`, `ASIC_100ks` in `0.435s`, and `ASIC_320k`
+in `0.508s`. This keeps the paper's row-prefix publication machinery but
+rejects the current KLS implementation of early consumer enqueue as too
+expensive on dense row groups.
+
 The scheduler now preserves SubtreeLU Algorithm 6's separator private/pipeline
-partition when applying that Algorithm 5 prefix release. A new row-dependency
+partition when applying row-dependency release. A new row-dependency
 ready-queue preparation path can reuse the separator private-group mask, so
 private separator groups still run through the retained FLOP-balanced queue
-while pipeline groups may be released by row-prefix completion when the strict
-large-unfinished-supernode test passes. Checked refactorization now uses the
+while pipeline groups may be released by exact row-predecessor completion when
+the strict large-unfinished-supernode test passes. Checked refactorization now uses the
 same strict default selector: producer rows are not released until their pivot
 checks complete, and the smoke fixture validates that default checked path. A
 broader "any large supernode" selector was tested and rejected: on the six-row forced
@@ -4316,8 +4327,8 @@ KLS now selects the row-dependency queue whenever such a dependent
 dense/generic producer exists in the pipeline tail; the large producer no
 longer needs to dominate the number of tail groups or tail rows. Separator
 Algorithm 6 private/pipeline queues still keep their stricter wrapper guard
-until private-queue row-prefix release is made fully safe. Private queue groups
-are protected from prefix-release enqueueing and receive normal row-edge
+until private-queue row-dependency release is made fully safe. Private queue groups
+are protected from speculative enqueueing and receive normal row-edge
 decrements. A new non-dominant-tail smoke fixture places one large dependent
 producer behind many small dependent groups and requires the partial-supernode
 pipeline by default, covering the paper condition that the large producer need
@@ -5166,37 +5177,18 @@ grid and duplicate-BTF separator forest smoke fixtures both select the
 separator FLOP queue again, preserving the paper's private/pipeline structure
 instead of turning unbalanced leaves into separator work.
 
-KLS now fills the next direct CKTSO Algorithm 5 gap inside the checked
-row-refactor pipeline. When a row blocks on an unfinished predecessor, the
-worker scans later row dependencies and consumes any already-finished
-predecessor whose value is provably final: every skipped earlier dependency must
-lack a row-major `U` entry into that later dependency. Ambiguous pattern data,
-missing row-major mirrors, and checked multipliers that would reject are left
-for the normal in-order path, preserving the existing pivot-reject order. This
-implements the paper's "use newly detected finished predecessors while waiting"
-idea for the KLS-owned row-major executor and reports actual use through
-`row_refactor_last_prefactor`, row/dependency counts, and cumulative
-`row_refactor_prefactor_*` counters. It still does not claim CKTSO's complete
-ETree-descendant pivoting-tail factorization: KLS has the guarded row-level
-prefactor step, not the full tail scheduler that retopologizes all unfinished
-descendants after a pivot exchange.
-
-The guarded prefactor step now also consumes finished dense-producer runs as
-runs, not only as scalar dependencies. If later dependencies after the blocked
-predecessor are consecutive rows from a retained dense producer, the producer
-panel prefix is already published, each dependency is finished now, and skipped
-earlier dependencies have no `U` edge into the candidate run, the worker solves
-the run's internal triangular prefix in workspace, checks all multipliers
-without recording an out-of-order rejection, and then applies the dense suffix
-and shared trailing update in one compact supernode pass. Any multiplier that
-would fail the checked threshold cancels the compact prefactor attempt and
-falls back to the existing in-order scalar path. The smoke fixture widens the
-finished producer behind a blocked predecessor and now requires
-`row_refactor_last_prefactor_supernode=1`, while benchmark output reports the
-last and cumulative `row_refactor_prefactor_supernode_*` counters. This maps
-the paper's Algorithm 5 "use supernode k:k'" waiting-phase operation more
-directly, but it remains guarded row-level prefactoring rather than CKTSO's full
-ETree-descendant pivoting-tail restart.
+KLS tested the next direct CKTSO Algorithm 5 gap inside the checked
+row-refactor pipeline: while a row blocked on an unfinished predecessor, the
+worker scanned later dependencies and consumed any already-finished predecessor
+whose value was provably final. The scalar and dense-producer-run variants
+preserved pivot-reject order and reported through `row_refactor_prefactor_*`
+and `row_refactor_prefactor_supernode_*` counters, but the broader forced-row
+probes showed that this wait-time prefactor path could dominate runtime on
+large dense groups. The default row-refactor partial queue now avoids that
+path by using exact row-dependency release; the prefactor counters are retained
+as diagnostics but the smoke fixture expects them to remain zero for the exact
+partial queue. This leaves CKTSO's full ETree-descendant pivoting-tail restart
+open rather than preserving a slow partial emulation.
 
 The KLS-first separator-pipeline factorization now has the analogous grouped
 executor for SubtreeLU Algorithm 4's ready-supernode branch. Earlier code
