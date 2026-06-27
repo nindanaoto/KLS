@@ -1241,6 +1241,16 @@ static inline void kls_scatter_subtract(double *restrict x,
                                         UF_long length,
                                         double scale) {
   UF_long p = 0;
+  for (; p + 7u < length; p += 8u) {
+    x[rows[p]] -= values[p] * scale;
+    x[rows[p + 1u]] -= values[p + 1u] * scale;
+    x[rows[p + 2u]] -= values[p + 2u] * scale;
+    x[rows[p + 3u]] -= values[p + 3u] * scale;
+    x[rows[p + 4u]] -= values[p + 4u] * scale;
+    x[rows[p + 5u]] -= values[p + 5u] * scale;
+    x[rows[p + 6u]] -= values[p + 6u] * scale;
+    x[rows[p + 7u]] -= values[p + 7u] * scale;
+  }
   for (; p + 3u < length; p += 4u) {
     x[rows[p]] -= values[p] * scale;
     x[rows[p + 1u]] -= values[p + 1u] * scale;

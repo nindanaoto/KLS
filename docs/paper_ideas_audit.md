@@ -5679,3 +5679,38 @@ wins over 2%, two ties, and one small absolute loss on `gemat12`. This is a
 cleanup around a disabled paper-level experiment, not the missing CKTSO-scale
 storage/executor change: the same top rows remain about `2.54x` slower than the
 saved CKTSO medium artifact.
+
+A follow-up CBLAS guard check confirmed that small BLAS calls are not the
+default CKTSO-gap cause. KLS's CBLAS paths are still build-time optional,
+runtime opt-in through `KLS_ENABLE_CBLAS_SUPERNODE=1`, and gated by structural
+row/panel sizes plus minimum estimated work before calling `dtrsv`, `dgemv`,
+`dtrsm`, or `dgemm`. A same-binary current-source top-ten guard with the CBLAS
+runtime gate on versus off moved from `4.8698s` to `4.7526s` geomean on one
+repeat-1/refactor-3 pass, but the small `gemat12` row still regressed and an
+older repeat-3 artifact comparing the optional CBLAS build against the normal
+default remained worse (`4.5385s` versus `4.2172s`). That makes CBLAS useful as
+an opt-in probe, not a default policy. The production default should keep using
+KLS-owned scalar/blocked panel kernels until a broader row-major storage engine
+can feed BLAS-size work without extra staging overhead.
+
+Callgrind then isolated the remaining hot default path on `onetone2`: the
+release-with-debug sample charged about 35.7% of instructions to
+`kls_egraph_refactor_btf_unscaled_column`, with the indirect
+`kls_scatter_subtract` update lines dominating inside that kernel. The scalar
+scatter loop now uses an eight-entry unroll before the existing four-entry tail
+loop. This is not a CPU-specific backend substitution; it reduces loop overhead
+in KLS's own sparse scatter kernel. Two top-ten CKTSO-gap repeat-3 guards moved
+from the retained `4.2172s` geomean to `4.0588s` and `4.1732s`, and a top-20
+one-pass guard completed all rows. The improvement is useful but still small
+relative to CKTSO: the focused common-row gap remains about `2.51x`, so the
+larger paper gap is still coarse row/supernode storage and scheduling, not this
+scatter loop alone.
+
+Several adjacent probes were rejected in the same inspection pass. Retaining
+per-column cluster level and skipping waits for cluster dependencies regressed
+the top-ten guard by about 1%. Reusing reciprocal pivots inside the EGraph
+kernel regressed by about 0.4%. Hoisting the supernode-update branch outside the
+dependency loop was unstable, with one apparent win and one repeat loss. Forcing
+the KLS-first path timed out on `rajat24` and was much worse than the auto
+policy. These failures are kept out of the default path because they do not
+close the algorithmic gap described in the CKTSO/SubtreeLU papers.
