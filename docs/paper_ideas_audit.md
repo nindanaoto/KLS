@@ -5693,6 +5693,37 @@ an opt-in probe, not a default policy. The production default should keep using
 KLS-owned scalar/blocked panel kernels until a broader row-major storage engine
 can feed BLAS-size work without extra staging overhead.
 
+The same conclusion held after splitting the lightweight scalar EGraph
+supernode-run consumer away from the retained-panel cache as a local probe.
+With scalar supernode updates enabled by default but without building the
+cached panel object, the current top-ten CKTSO-gap focus regressed to
+`6.8753s` geomean (`build/kls_scalar_supernode_auto_gap10_t4_r1_ref3_timeout120.jsonl`)
+against `4.2018s` with `KLS_ENABLE_EGRAPH_SCALAR_SUPERNODE_UPDATES=0`
+(`build/kls_scalar_supernode_off_gap10_t4_r1_ref3_timeout120.jsonl`). Adding a
+minimum four-column run precheck still measured `6.6764s` versus a disabled
+control at `4.1949s`
+(`build/kls_scalar_supernode_guarded_auto_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_scalar_supernode_guarded_off_gap10_t4_r1_ref3_timeout120.jsonl`).
+The guarded probe recorded zero accepted grouped updates on `ASIC_320k`,
+`ASIC_320ks`, `onetone2`, `ASIC_100ks`, `G2_circuit`, and `rajat28`, yet still
+roughly doubled several refactor times just by testing candidate starts that
+failed the common-trailing validation. Accepted work on the remaining rows was
+too small to help: `onetone1` had one run over 67 rows and 2,278 entries,
+`transient` had 13 runs over 52 rows and 130 entries, and `rajat24` had nine
+runs over 36 rows and 90 entries. This rejected the idea that the existing
+column-storage scalar supernode detector only needed to be decoupled from the
+panel cache.
+
+The L-column segment statistics tell the same story for a direct segment
+scatter shortcut. With `KLS_ENABLE_REFACTOR_L_PATTERN_STATS=1`, `onetone2`
+reported 49,349 adjacent-run entries out of 537,026 L entries with max run
+length 10; `G2_circuit` reported 118,454 out of 6,446,730 with max run length
+5; and `ASIC_100ks` reported 40,190 out of 1,556,952 with max run length 4.
+Those runs are too short and sparse to plausibly close a 2-3x CKTSO gap via a
+specialized scatter loop. The paper-aligned missing piece remains a production
+row/segment-oriented numeric object and executor, not more discovery on top of
+KLU-compatible column storage.
+
 Callgrind then isolated the remaining hot default path on `onetone2`: the
 release-with-debug sample charged about 35.7% of instructions to
 `kls_egraph_refactor_btf_unscaled_column`, with the indirect
