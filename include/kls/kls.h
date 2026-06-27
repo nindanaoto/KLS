@@ -417,6 +417,12 @@ typedef struct kls_stats {
   int64_t refactor_supernode_cblas_update_run_count;
   int64_t refactor_supernode_cblas_update_rows;
   int64_t refactor_supernode_cblas_update_entries;
+  int64_t refactor_last_supernode_blocked_update_runs;
+  int64_t refactor_last_supernode_blocked_update_rows;
+  int64_t refactor_last_supernode_blocked_update_entries;
+  int64_t refactor_supernode_blocked_update_run_count;
+  int64_t refactor_supernode_blocked_update_rows;
+  int64_t refactor_supernode_blocked_update_entries;
   int64_t row_refactor_dense_producer_run_count;
   int64_t row_refactor_dense_producer_run_rows;
   int64_t row_refactor_dense_producer_run_dep_rows;

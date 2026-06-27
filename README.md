@@ -718,8 +718,13 @@ and cumulative `refactor_supernode_update_*` totals; CBLAS builds additionally
 report the BLAS-taken subset as `refactor_last_supernode_cblas_update_runs`,
 `refactor_last_supernode_cblas_update_rows`,
 `refactor_last_supernode_cblas_update_entries`, and cumulative
-`refactor_supernode_cblas_update_*` totals. This path is intentionally off by
-default. It now builds persistent producer-side compact panels for
+`refactor_supernode_cblas_update_*` totals. Non-CBLAS or CBLAS-disabled runs
+use a portable blocked cached-panel update and report that subset as
+`refactor_last_supernode_blocked_update_runs`,
+`refactor_last_supernode_blocked_update_rows`,
+`refactor_last_supernode_blocked_update_entries`, and cumulative
+`refactor_supernode_blocked_update_*` totals. This path is intentionally off
+by default. It now builds persistent producer-side compact panels for
 eligible retained EGraph supernodes and publishes panel rows as producer
 columns finish, so later consumers reuse the dense/internal and shared trailing
 values instead of reconstructing that structure for every dependency run. The

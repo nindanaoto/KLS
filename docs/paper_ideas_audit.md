@@ -4899,6 +4899,21 @@ closer to SubtreeLU's BLAS update shape, but does not replace the remaining
 need for broader batched producer/consumer kernels or CKTSO's pivoting tail
 executor.
 
+The cached EGraph-panel consumer now also has a portable blocked panel update
+when CBLAS is unavailable or `KLS_ENABLE_CBLAS_SUPERNODE=0`. Instead of walking
+each producer row all the way through the dense suffix and common trailing rows,
+the fallback solves a block of the unit-diagonal internal panel, applies the
+remaining in-panel suffix as a dense block update, and accumulates the shared
+trailing rows once per block before the existing scatter. Benchmark JSON and
+stats expose this through `refactor_last_supernode_blocked_update_runs`, rows,
+entries, and cumulative `refactor_supernode_blocked_update_*` counters. The new
+smoke fixture forces the public mapped-EGraph path with retained producer
+panels, disables CBLAS, and requires the blocked counters to match the total
+cached supernode updates with a valid residual. This fills the portable
+SubtreeLU/CKTSO compact-panel arithmetic gap for the column EGraph probe; the
+remaining larger gap is still broader batched producer/consumer scheduling and
+CKTSO's pivoting-tail executor.
+
 The KLS-owned row-up first factor now executes independent BTF diagonal blocks
 in parallel when KLS-first factorization is requested with more than one
 thread. Each worker uses private row-up scratch, performs dynamic column pivots

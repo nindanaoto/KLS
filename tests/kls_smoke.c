@@ -5494,6 +5494,289 @@ static int test_batched_compact_supernode_subrange_update_probe(void) {
   return ok;
 }
 
+static int test_egraph_cached_supernode_blocked_update(void) {
+  const int32_t n = 15000;
+  const int32_t panel_width = 16;
+  const int32_t consumer_width = 32;
+  const int32_t block_width = panel_width + consumer_width;
+  size_t nnz = 0;
+  for (int32_t start = 0; start < n; start += block_width) {
+    const int32_t panel_end =
+      start + panel_width < n ? start + panel_width : n;
+    const int32_t block_end =
+      start + block_width < n ? start + block_width : n;
+    const int32_t panel = panel_end - start;
+    const int32_t consumers = block_end - panel_end;
+    nnz += (size_t)panel * (size_t)(block_end - start);
+    nnz += (size_t)consumers * ((size_t)panel + 1u);
+  }
+
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(nnz * sizeof(*ai));
+  double *ax0 = (double *)malloc(nnz * sizeof(*ax0));
+  double *ax1 = (double *)malloc(nnz * sizeof(*ax1));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *residual = (double *)malloc((size_t)n * sizeof(*residual));
+  if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
+      b == NULL || x == NULL || expected == NULL || residual == NULL) {
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    free(residual);
+    return 0;
+  }
+
+  for (int32_t i = 0; i < n; ++i) {
+    expected[i] = 0.625 + 0.03125 * (double)((13 * i) % 29);
+  }
+
+  size_t pos = 0;
+  for (int32_t start = 0; start < n; start += block_width) {
+    const int32_t panel_end =
+      start + panel_width < n ? start + panel_width : n;
+    const int32_t block_end =
+      start + block_width < n ? start + block_width : n;
+    for (int32_t col = start; col < panel_end; ++col) {
+      ap[col] = (int32_t)pos;
+      for (int32_t row = start; row < block_end; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = row == col
+          ? 30.0 + 0.0001 * (double)col
+          : 1.0e-4 * (double)(1 + ((row + 7 * col) % 17));
+        ax1[p] = ax0[p] + (row == col
+          ? 0.02 * (double)((col % 5) + 1)
+          : 1.0e-6 * (double)(((row + col) % 5) - 2));
+      }
+    }
+    for (int32_t col = panel_end; col < block_end; ++col) {
+      ap[col] = (int32_t)pos;
+      for (int32_t row = start; row < panel_end; ++row) {
+        const size_t p = pos++;
+        ai[p] = row;
+        ax0[p] = 1.0e-4 * (double)(1 + ((row + 11 * col) % 19));
+        ax1[p] =
+          ax0[p] + 1.0e-6 * (double)(((row + 3 * col) % 7) - 3);
+      }
+      const size_t p = pos++;
+      ai[p] = col;
+      ax0[p] = 25.0 + 0.0001 * (double)col;
+      ax1[p] = ax0[p] + 0.015 * (double)((col % 3) + 1);
+    }
+  }
+  ap[n] = (int32_t)pos;
+  if (pos != nnz) {
+    fprintf(stderr, "unexpected EGraph blocked fixture nnz: %zu/%zu\n",
+            pos, nnz);
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    free(residual);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_row = saved_row_value != NULL;
+  const char *saved_checked_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked =
+    saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
+  const int had_checked = saved_checked_value != NULL;
+  const char *saved_egraph_value =
+    getenv("KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES");
+  char *saved_egraph =
+    saved_egraph_value != NULL ? strdup(saved_egraph_value) : NULL;
+  const int had_egraph = saved_egraph_value != NULL;
+  const char *saved_cblas_value = getenv("KLS_ENABLE_CBLAS_SUPERNODE");
+  char *saved_cblas =
+    saved_cblas_value != NULL ? strdup(saved_cblas_value) : NULL;
+  const int had_cblas = saved_cblas_value != NULL;
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_first = saved_first_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 4;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_AUTO;
+  options.use_btf = 0;
+  options.scale = -1;
+  options.pivot_tolerance = 0.001;
+  options.static_pivoting = 0;
+
+  int ok = 1;
+  if ((had_row && saved_row == NULL) ||
+      (had_checked && saved_checked == NULL) ||
+      (had_egraph && saved_egraph == NULL) ||
+      (had_cblas && saved_cblas == NULL) ||
+      (had_first && saved_first == NULL)) {
+    fprintf(stderr, "failed to save EGraph blocked environment\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR=0");
+    ok = 0;
+  }
+
+  if (!require_ok(kls_create(&solver), "create EGraph blocked")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                        &options),
+                        "analyze EGraph blocked")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor EGraph blocked base")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "refactor EGraph blocked")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve EGraph blocked")) ok = 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats EGraph blocked")) {
+    ok = 0;
+  }
+  if (ok &&
+      (stats.row_refactor_last_run != 0 ||
+       stats.refactor_supernode_candidate_count < 1 ||
+       stats.refactor_last_supernode_update_runs < 1 ||
+       stats.refactor_last_supernode_update_rows < panel_width ||
+       stats.refactor_last_supernode_blocked_update_runs !=
+         stats.refactor_last_supernode_update_runs ||
+       stats.refactor_last_supernode_blocked_update_rows !=
+         stats.refactor_last_supernode_update_rows ||
+       stats.refactor_last_supernode_blocked_update_entries !=
+         stats.refactor_last_supernode_update_entries ||
+       stats.refactor_supernode_blocked_update_run_count <
+         stats.refactor_last_supernode_blocked_update_runs ||
+       stats.refactor_last_supernode_cblas_update_runs != 0)) {
+    fprintf(stderr,
+            "unexpected EGraph blocked stats: row=%d, candidates=%" PRId64
+            ", updates=%" PRId64 "/%" PRId64 "/%" PRId64
+            ", blocked=%" PRId64 "/%" PRId64 "/%" PRId64
+            ", blocked_total=%" PRId64 ", cblas=%" PRId64 "\n",
+            stats.row_refactor_last_run,
+            stats.refactor_supernode_candidate_count,
+            stats.refactor_last_supernode_update_runs,
+            stats.refactor_last_supernode_update_rows,
+            stats.refactor_last_supernode_update_entries,
+            stats.refactor_last_supernode_blocked_update_runs,
+            stats.refactor_last_supernode_blocked_update_rows,
+            stats.refactor_last_supernode_blocked_update_entries,
+            stats.refactor_supernode_blocked_update_run_count,
+            stats.refactor_last_supernode_cblas_update_runs);
+    ok = 0;
+  }
+
+  double max_solution_error = 0.0;
+  for (int32_t i = 0; i < n; ++i) {
+    const double err = fabs(x[i] - expected[i]);
+    if (err > max_solution_error) {
+      max_solution_error = err;
+    }
+    residual[i] = -b[i];
+  }
+  double max_rhs = 0.0;
+  for (int32_t i = 0; i < n; ++i) {
+    const double rhs_abs = fabs(b[i]);
+    if (rhs_abs > max_rhs) {
+      max_rhs = rhs_abs;
+    }
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      residual[ai[p]] += ax1[p] * x[col];
+    }
+  }
+  double max_residual = 0.0;
+  for (int32_t i = 0; i < n; ++i) {
+    const double residual_abs = fabs(residual[i]);
+    if (residual_abs > max_residual) {
+      max_residual = residual_abs;
+    }
+  }
+  const double relative_residual =
+    max_residual / (max_rhs > 0.0 ? max_rhs : 1.0);
+  if (ok && (max_solution_error > 1.0e-8 ||
+             relative_residual > 1.0e-10)) {
+    fprintf(stderr,
+            "unexpected EGraph blocked accuracy:"
+            " max_x_err=%.17g, rel_resid=%.17g\n",
+            max_solution_error, relative_residual);
+    ok = 0;
+  }
+
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR", had_checked,
+                         saved_checked)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES", had_egraph,
+                         saved_egraph)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CBLAS_SUPERNODE", had_cblas,
+                         saved_cblas)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_first,
+                         saved_first)) {
+    ok = 0;
+  }
+
+  free(saved_row);
+  free(saved_checked);
+  free(saved_egraph);
+  free(saved_cblas);
+  free(saved_first);
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(x);
+  free(expected);
+  free(residual);
+  return ok;
+}
+
 static int test_ragged_batched_compact_supernode_update_probe(void) {
   const int32_t lead = 48;
   const int32_t mid = 64;
@@ -14171,6 +14454,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_batched_compact_supernode_subrange_update_probe()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_egraph_cached_supernode_blocked_update()) {
     return EXIT_FAILURE;
   }
   if (!test_ragged_batched_compact_supernode_update_probe()) {

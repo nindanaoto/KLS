@@ -1742,6 +1742,12 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_cblas_update_run_count\":%" PRId64
            ",\"refactor_supernode_cblas_update_rows\":%" PRId64
            ",\"refactor_supernode_cblas_update_entries\":%" PRId64
+           ",\"refactor_last_supernode_blocked_update_runs\":%" PRId64
+           ",\"refactor_last_supernode_blocked_update_rows\":%" PRId64
+           ",\"refactor_last_supernode_blocked_update_entries\":%" PRId64
+           ",\"refactor_supernode_blocked_update_run_count\":%" PRId64
+           ",\"refactor_supernode_blocked_update_rows\":%" PRId64
+           ",\"refactor_supernode_blocked_update_entries\":%" PRId64
            ",\"refactor_last_ready_queue_columns\":%" PRId64
            ",\"refactor_ready_queue_run_count\":%" PRId64
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
@@ -1783,6 +1789,12 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_cblas_update_run_count,
            stats.refactor_supernode_cblas_update_rows,
            stats.refactor_supernode_cblas_update_entries,
+           stats.refactor_last_supernode_blocked_update_runs,
+           stats.refactor_last_supernode_blocked_update_rows,
+           stats.refactor_last_supernode_blocked_update_entries,
+           stats.refactor_supernode_blocked_update_run_count,
+           stats.refactor_supernode_blocked_update_rows,
+           stats.refactor_supernode_blocked_update_entries,
            stats.refactor_last_ready_queue_columns,
            stats.refactor_ready_queue_run_count,
            stats.nnz_l, stats.nnz_u,
@@ -2226,6 +2238,16 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_cblas_update_run_count,
            stats.refactor_supernode_cblas_update_rows,
            stats.refactor_supernode_cblas_update_entries);
+    printf("refactor supernode blocked updates: %" PRId64
+           ", rows: %" PRId64 ", entries: %" PRId64
+           ", cumulative updates: %" PRId64
+           ", rows: %" PRId64 ", entries: %" PRId64 "\n",
+           stats.refactor_last_supernode_blocked_update_runs,
+           stats.refactor_last_supernode_blocked_update_rows,
+           stats.refactor_last_supernode_blocked_update_entries,
+           stats.refactor_supernode_blocked_update_run_count,
+           stats.refactor_supernode_blocked_update_rows,
+           stats.refactor_supernode_blocked_update_entries);
     printf("refactor ready queue columns: %" PRId64
            ", runs: %" PRId64 "\n",
            stats.refactor_last_ready_queue_columns,
