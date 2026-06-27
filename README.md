@@ -992,7 +992,8 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_rejected_pivoting_tail_etree_max_fanout`,
 `fast_rejected_pivoting_tail_etree_levels`,
 `fast_rejected_pivoting_tail_etree_max_width`,
-`fast_rejected_refresh_state`, `fast_block_restarts`,
+`fast_rejected_refresh_state`, `fast_factor_fail_reason`,
+`fast_factor_fail_status`, `fast_block_restarts`,
 `fast_kls_block_restarts`, `fast_kls_rebuild_restarts`,
 `fast_kls_block_restart_last_row_pipeline`,
 `fast_kls_block_restart_row_pipeline_count`,
@@ -1036,8 +1037,15 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_repaired_last_offdiag_suffix_refresh`,
 `fast_repaired_offdiag_suffix_refresh_count`, and
 `fast_repaired_offdiag_full_refresh_count`, and
-`fast_repaired_parallel_tail_blocks` for the first rejected
-factor-order pivot, its original matrix column, the rejecting row, the
+`fast_repaired_parallel_tail_blocks`. `fast_factor_fail_reason` is `0` when no
+checked fast-factor failure was recorded; nonzero values distinguish row-wise U
+validation invalidation (`1`), EGraph invalidation (`2`), mapped-refactor
+invalidation (`3`), pool invalid or allocation failure (`4`), KLU refactor
+failure (`5`), exhausted repair without acceptance (`6`), invalid kernel status
+(`7`), singular status (`8`), and the dominant-BTF fast-repair guard (`9`).
+`fast_factor_fail_status` keeps the corresponding KLU status
+value. Together these fields describe the first
+rejected factor-order pivot, its original matrix column, the rejecting row, the
 L-multiplier or row-maximum-to-pivot ratio that violated a KLS-owned pivot
 check when available, the accepted pivot magnitude and candidate or row-maximum
 magnitude at the reject, the checked-refactor unfinished seed used before

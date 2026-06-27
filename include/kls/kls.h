@@ -152,6 +152,8 @@ typedef struct kls_stats {
   int fast_rejected_pivoting_tail_contains_reject;
   int fast_rejected_pivoting_tail_topological;
   int fast_rejected_refresh_state;
+  int fast_factor_fail_reason;
+  int fast_factor_fail_status;
   int64_t refactor_dependency_root_columns;
   int64_t refactor_dependency_leaf_columns;
   int64_t refactor_dependency_max_fanout;

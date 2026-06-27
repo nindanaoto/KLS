@@ -1243,6 +1243,8 @@ int main(int argc, char **argv) {
            ",\"fast_rejected_pivoting_tail_etree_levels\":%" PRId64
            ",\"fast_rejected_pivoting_tail_etree_max_width\":%" PRId64
            ",\"fast_rejected_refresh_state\":%d"
+           ",\"fast_factor_fail_reason\":%d"
+           ",\"fast_factor_fail_status\":%d"
            ",\"fast_rejected_prefix_refresh_columns\":%" PRId64
            ",\"fast_rejected_prefix_refresh_count\":%" PRId64,
            stats.fast_rejected_block_start,
@@ -1278,6 +1280,8 @@ int main(int argc, char **argv) {
            stats.fast_rejected_pivoting_tail_etree_levels,
            stats.fast_rejected_pivoting_tail_etree_max_width,
            stats.fast_rejected_refresh_state,
+           stats.fast_factor_fail_reason,
+           stats.fast_factor_fail_status,
            stats.fast_rejected_prefix_refresh_columns,
            stats.fast_rejected_prefix_refresh_count);
     printf(",\"factor_etree_block_start\":%" PRId64

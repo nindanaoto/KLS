@@ -63,6 +63,19 @@
 #define KLS_NICSLU_PARALLEL_R2_THRESHOLD 50.0
 #define KLS_NICSLU_TASK_FLOW_SYNC_COST 1.0
 
+enum {
+  KLS_FAST_FACTOR_FAIL_NONE = 0,
+  KLS_FAST_FACTOR_FAIL_ROWWISE_U_INVALID = 1,
+  KLS_FAST_FACTOR_FAIL_EGRAPH_INVALID = 2,
+  KLS_FAST_FACTOR_FAIL_MAPPED_INVALID = 3,
+  KLS_FAST_FACTOR_FAIL_POOL_INVALID = 4,
+  KLS_FAST_FACTOR_FAIL_KLU_REFACTOR_FAILED = 5,
+  KLS_FAST_FACTOR_FAIL_NO_REJECT = 6,
+  KLS_FAST_FACTOR_FAIL_INVALID_STATUS = 7,
+  KLS_FAST_FACTOR_FAIL_SINGULAR_STATUS = 8,
+  KLS_FAST_FACTOR_FAIL_DOMINANT_BTF_GUARD = 9
+};
+
 typedef struct kls_refactor_pool kls_refactor_pool;
 typedef struct kls_egraph_refactor_pool kls_egraph_refactor_pool;
 
@@ -2796,6 +2809,18 @@ static void kls_worker_record_singular(kls_parallel_refactor_worker *worker,
   }
 }
 
+static void kls_record_fast_factor_failure(kls_solver *solver,
+                                           int reason,
+                                           int status) {
+  if (solver == NULL || reason == KLS_FAST_FACTOR_FAIL_NONE) {
+    return;
+  }
+  if (solver->stats.fast_factor_fail_reason == KLS_FAST_FACTOR_FAIL_NONE) {
+    solver->stats.fast_factor_fail_reason = reason;
+    solver->stats.fast_factor_fail_status = status;
+  }
+}
+
 static void kls_clear_fast_reject_stats(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -2933,6 +2958,8 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_pivoting_tail_etree_max_width = 0;
   solver->stats.fast_rejected_refresh_state =
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
+  solver->stats.fast_factor_fail_reason = KLS_FAST_FACTOR_FAIL_NONE;
+  solver->stats.fast_factor_fail_status = TRILINOS_KLU_OK;
   solver->stats.fast_rejected_prefix_refresh_columns = 0;
   solver->stats.fast_rejected_prefix_refresh_count = 0;
   solver->fast_block_restarts = 0;
@@ -24214,6 +24241,35 @@ static int kls_should_try_first_factor_recovery(kls_solver *solver) {
   return kls_auto_first_factor_moderate_many_btf(solver);
 }
 
+static int kls_dominant_btf_fast_factor_repair_is_risky(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->stats.last_factor_path == KLS_FACTOR_PATH_KLS_FIRST ||
+      solver->n == 0u) {
+    return 0;
+  }
+  const int ordering_allows =
+    solver->options.ordering == KLS_ORDERING_AUTO ||
+    solver->options.ordering == KLS_ORDERING_AMD ||
+    solver->options.ordering == KLS_ORDERING_METIS;
+  if (!ordering_allows) {
+    return 0;
+  }
+  const double coverage =
+    (double)solver->symbolic->maxblock / (double)solver->n;
+  if (solver->row_perm != NULL &&
+      solver->symbolic->nblocks >= 1024u &&
+      solver->symbolic->maxblock >= 30000u &&
+      coverage >= 0.75) {
+    return 1;
+  }
+  return solver->row_perm == NULL &&
+         solver->symbolic->nblocks > 1u &&
+         solver->symbolic->nblocks <= 64u &&
+         solver->symbolic->maxblock >= 100000u &&
+         coverage >= 0.99;
+}
+
 static int kls_row_solve_from_numeric_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC");
   return value != NULL && value[0] != '\0' &&
@@ -26703,6 +26759,9 @@ static int kls_checked_refactor_accepts_rowwise_u_from_block(
     return 1;
   }
   if (status < 0 || rejected_pivot == KLS_KLU_EMPTY) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_ROWWISE_U_INVALID,
+      solver->common.status);
     solver->common.status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -36271,6 +36330,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     kls_row_refactor_refresh_missing_prefix(shared, scratch[0]);
   }
   if (shared->invalid) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_EGRAPH_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -40395,6 +40456,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
 
   if (shared->invalid) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_EGRAPH_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -40564,6 +40627,8 @@ static int kls_mapped_refactor(kls_solver *solver,
   }
 
   if (worker.invalid) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_MAPPED_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -40664,6 +40729,8 @@ static int kls_serial_refactor_tail_from_block(kls_solver *solver,
   }
 
   if (worker.invalid) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_MAPPED_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -40763,6 +40830,9 @@ static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
                          &rejected_pivot_abs, &rejected_candidate_abs,
                          &singular, &numerical_rank, &singular_col,
                          &pool_prefix_current)) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_POOL_INVALID,
+      TRILINOS_KLU_OUT_OF_MEMORY);
     common->status = TRILINOS_KLU_OUT_OF_MEMORY;
     return 0;
   }
@@ -40772,6 +40842,8 @@ static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
     (int64_t)solver->fast_repaired_parallel_tail_blocks;
 
   if (invalid) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_POOL_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -40878,6 +40950,8 @@ static int kls_serial_checked_scaled_refactor_from_block(
   }
 
   if (worker.invalid) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_MAPPED_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -41678,6 +41752,11 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
                               numeric_values, solver->symbolic,
                               solver->numeric, &solver->common);
+    if (!ok) {
+      kls_record_fast_factor_failure(
+        solver, KLS_FAST_FACTOR_FAIL_KLU_REFACTOR_FAILED,
+        solver->common.status);
+    }
     if (ok && check_pivots && solver->common.status >= 0 &&
         solver->common.status != TRILINOS_KLU_SINGULAR) {
       UF_long rejected_pivot = KLS_KLU_EMPTY;
@@ -41718,6 +41797,11 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
                               numeric_values, solver->symbolic,
                               solver->numeric, &solver->common);
+    if (!ok) {
+      kls_record_fast_factor_failure(
+        solver, KLS_FAST_FACTOR_FAIL_KLU_REFACTOR_FAILED,
+        solver->common.status);
+    }
     if (ok && check_pivots && solver->common.status >= 0 &&
         solver->common.status != TRILINOS_KLU_SINGULAR) {
       UF_long rejected_pivot = KLS_KLU_EMPTY;
@@ -41761,11 +41845,16 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                          &singular,
                          &numerical_rank, &singular_col,
                          &pool_prefix_current)) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_POOL_INVALID,
+      TRILINOS_KLU_OUT_OF_MEMORY);
     common->status = TRILINOS_KLU_OUT_OF_MEMORY;
     return 0;
   }
 
   if (invalid) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_POOL_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -41818,10 +41907,26 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     const UF_long ok = kls_parallel_refactor(solver, numeric_values, 1);
     if (ok || solver->common.status < 0 ||
         solver->common.status == TRILINOS_KLU_SINGULAR) {
+      if (!ok && solver->common.status < 0) {
+        kls_record_fast_factor_failure(
+          solver, KLS_FAST_FACTOR_FAIL_INVALID_STATUS,
+          solver->common.status);
+      } else if (!ok && solver->common.status == TRILINOS_KLU_SINGULAR) {
+        kls_record_fast_factor_failure(
+          solver, KLS_FAST_FACTOR_FAIL_SINGULAR_STATUS,
+          solver->common.status);
+      }
       return ok;
     }
     if (solver->stats.fast_rejected_pivot < 0 ||
-        solver->numeric == NULL || attempt == max_restarts) {
+        solver->numeric == NULL) {
+      kls_record_fast_factor_failure(
+        solver, KLS_FAST_FACTOR_FAIL_NO_REJECT, solver->common.status);
+      return 0;
+    }
+    if (attempt == max_restarts) {
+      kls_record_fast_factor_failure(
+        solver, KLS_FAST_FACTOR_FAIL_NO_REJECT, solver->common.status);
       return 0;
     }
     const UF_long rejected_pivot = (UF_long)solver->stats.fast_rejected_pivot;
@@ -52246,7 +52351,8 @@ int kls_factor(kls_solver *solver, const double *values) {
                                                             : KLS_OK;
     }
   }
-  if (solver->options.fast_factor && solver->numeric != NULL) {
+  if (solver->options.fast_factor && solver->numeric != NULL &&
+      !kls_dominant_btf_fast_factor_repair_is_risky(solver)) {
     const double start = kls_now_seconds();
     const UF_long ok = kls_fast_factor_with_block_restarts(solver,
                                                            numeric_values);
@@ -52265,6 +52371,10 @@ int kls_factor(kls_solver *solver, const double *values) {
       fill_numeric_stats(solver);
       return KLS_OK;
     }
+  } else if (solver->options.fast_factor && solver->numeric != NULL) {
+    kls_record_fast_factor_failure(
+      solver, KLS_FAST_FACTOR_FAIL_DOMINANT_BTF_GUARD,
+      solver->common.status);
   }
 
   free_numeric(solver);
