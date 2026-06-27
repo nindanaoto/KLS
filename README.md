@@ -915,6 +915,11 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_kls_block_restart_last_row_pipeline_prefix_rows`,
 `fast_kls_block_restart_last_row_pipeline_suffix_rows`,
 `fast_kls_block_restart_last_row_pipeline_gap_rows`,
+`fast_kls_block_restart_last_row_pipeline_etree_tail`,
+`fast_kls_block_restart_row_pipeline_etree_tail_count`,
+`fast_kls_block_restart_last_row_pipeline_etree_tail_rows`,
+`fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows`,
+`fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask`,
 `fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_restarts`,
 `fast_kls_block_restart_last_row_pipeline_supernode_update_groups`,
@@ -964,6 +969,8 @@ how many prefix and suffix rows were preserved around an exact tail-envelope
 pipeline, grouped supernode and cached-panel update rows used inside the
 pipeline, whether row-first block repair used the retained pivoting-tail
 first/last row range with active masks for non-contiguous gap rows, whether
+that repair consumed the retained ETree-descendant tail as its compact
+topological row worklist, whether
 accepted row-first or serial tail repairs refreshed only the off-diagonal suffix
 after proving the prefix unchanged, and pivot-tail serial restart work, and
 the number of serial tail restarts actually executed, plus whether

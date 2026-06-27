@@ -537,6 +537,11 @@ struct kls_solver {
   UF_long fast_kls_block_restart_last_row_pipeline_prefix_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_suffix_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_gap_rows;
+  int fast_kls_block_restart_last_row_pipeline_etree_tail;
+  UF_long fast_kls_block_restart_row_pipeline_etree_tail_count;
+  UF_long fast_kls_block_restart_last_row_pipeline_etree_tail_rows;
+  UF_long fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows;
+  int fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask;
   UF_long fast_kls_block_restart_last_row_pipeline_pivot_tail_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_pivot_restarts;
   UF_long fast_kls_block_restart_last_row_pipeline_supernode_update_groups;
@@ -2706,6 +2711,13 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_kls_block_restart_last_row_pipeline_prefix_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_suffix_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_gap_rows = 0;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_etree_tail = 0;
+  solver->stats.fast_kls_block_restart_row_pipeline_etree_tail_count = 0;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_etree_tail_rows = 0;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows =
+    0;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->stats
@@ -2766,6 +2778,11 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_kls_block_restart_last_row_pipeline_prefix_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_suffix_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_gap_rows = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_tail = 0;
+  solver->fast_kls_block_restart_row_pipeline_etree_tail_count = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_tail_rows = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask = 0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline_supernode_update_groups = 0;
@@ -3711,6 +3728,13 @@ static void kls_record_fast_reject_detail(kls_solver *solver,
   solver->stats.fast_kls_block_restart_last_row_pipeline_prefix_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_suffix_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_gap_rows = 0;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_etree_tail = 0;
+  solver->stats.fast_kls_block_restart_row_pipeline_etree_tail_count = 0;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_etree_tail_rows = 0;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows =
+    0;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->stats
@@ -4535,6 +4559,11 @@ static void clear_matrix(kls_solver *solver) {
   solver->fast_kls_block_restart_last_row_pipeline_prefix_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_suffix_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_gap_rows = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_tail = 0;
+  solver->fast_kls_block_restart_row_pipeline_etree_tail_count = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_tail_rows = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask = 0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline_supernode_update_groups = 0;
@@ -11462,6 +11491,20 @@ static void kls_fill_fast_kls_block_restart_pipeline_stats(kls_solver *solver) {
     (int64_t)solver->fast_kls_block_restart_last_row_pipeline_suffix_rows;
   solver->stats.fast_kls_block_restart_last_row_pipeline_gap_rows =
     (int64_t)solver->fast_kls_block_restart_last_row_pipeline_gap_rows;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_etree_tail =
+    solver->fast_kls_block_restart_last_row_pipeline_etree_tail;
+  solver->stats.fast_kls_block_restart_row_pipeline_etree_tail_count =
+    (int64_t)solver->fast_kls_block_restart_row_pipeline_etree_tail_count;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_etree_tail_rows =
+    (int64_t)
+      solver->fast_kls_block_restart_last_row_pipeline_etree_tail_rows;
+  solver->stats.fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows =
+    (int64_t)
+      solver->fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask =
+      solver
+        ->fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask;
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_pivot_tail_rows =
       (int64_t)
@@ -16071,6 +16114,102 @@ static int kls_pivot_tail_restart_mask_matches_etree_forest(
   }
   free(level_width);
   return ok;
+}
+
+static int kls_build_pivot_tail_restart_order_range(
+  const kls_solver *solver,
+  UF_long k1,
+  UF_long nk,
+  UF_long required_local_col,
+  UF_long restart_begin,
+  UF_long restart_end,
+  const unsigned char *mask,
+  UF_long *order,
+  UF_long *order_count_out) {
+  if (order_count_out != NULL) {
+    *order_count_out = 0;
+  }
+  if (solver == NULL || mask == NULL || order == NULL ||
+      order_count_out == NULL || required_local_col >= nk ||
+      restart_begin > required_local_col ||
+      restart_end <= required_local_col || restart_end > nk ||
+      solver->fast_reject_tail_cols == NULL ||
+      solver->fast_reject_tail_parent == NULL ||
+      solver->fast_reject_tail_count == 0u ||
+      solver->stats.fast_rejected_pivoting_tail_columns <= 0 ||
+      !solver->stats.fast_rejected_pivoting_tail_contains_reject ||
+      !solver->stats.fast_rejected_pivoting_tail_topological) {
+    return 0;
+  }
+  const UF_long expected =
+    (UF_long)solver->stats.fast_rejected_pivoting_tail_columns;
+  if (expected == 0u || expected > nk ||
+      expected != solver->fast_reject_tail_count) {
+    return 0;
+  }
+  UF_long *rank = (UF_long *)malloc((size_t)nk * sizeof(*rank));
+  if (rank == NULL) {
+    return 0;
+  }
+  for (UF_long k = 0; k < nk; ++k) {
+    rank[k] = KLS_KLU_EMPTY;
+  }
+
+  UF_long count = 0;
+  UF_long previous = KLS_KLU_EMPTY;
+  int contains_required = 0;
+  int ok = 1;
+  for (UF_long p = 0; p < solver->fast_reject_tail_count; ++p) {
+    const UF_long global_col = solver->fast_reject_tail_cols[p];
+    if (global_col < k1 || global_col >= k1 + nk) {
+      ok = 0;
+      break;
+    }
+    const UF_long local_col = global_col - k1;
+    if (local_col < restart_begin || local_col >= restart_end ||
+        mask[local_col] == 0u || rank[local_col] != KLS_KLU_EMPTY ||
+        (previous != KLS_KLU_EMPTY && local_col <= previous) ||
+        count >= expected) {
+      ok = 0;
+      break;
+    }
+    order[count] = local_col;
+    rank[local_col] = count;
+    count++;
+    previous = local_col;
+    if (local_col == required_local_col) {
+      contains_required = 1;
+    }
+  }
+  if (ok && (!contains_required || count != expected)) {
+    ok = 0;
+  }
+  for (UF_long local_col = restart_begin; ok && local_col < restart_end;
+       ++local_col) {
+    if (mask[local_col] != 0u &&
+        rank[local_col] == KLS_KLU_EMPTY) {
+      ok = 0;
+      break;
+    }
+  }
+  for (UF_long p = 0; ok && p < count; ++p) {
+    const UF_long local_col = order[p];
+    const UF_long next = solver->fast_reject_tail_parent[local_col];
+    if (next == KLS_KLU_EMPTY || next == local_col ||
+        next >= nk || mask[next] == 0u) {
+      continue;
+    }
+    if (rank[next] == KLS_KLU_EMPTY || rank[next] <= p) {
+      ok = 0;
+      break;
+    }
+  }
+  free(rank);
+  if (!ok) {
+    return 0;
+  }
+  *order_count_out = count;
+  return 1;
 }
 
 static int kls_pivot_tail_plan_local_range(
@@ -46351,6 +46490,9 @@ typedef struct kls_row_first_parallel_shared {
   UF_long block_pipeline_end;
   const unsigned char *block_pipeline_active_mask;
   UF_long block_pipeline_active_rows;
+  const UF_long *block_pipeline_row_order;
+  UF_long block_pipeline_order_rows;
+  int block_pipeline_etree_tail_order;
   double tol;
   UF_long total_lnz;
   UF_long total_unz;
@@ -46881,16 +47023,35 @@ static int kls_row_first_parallel_factor_block(
         active_rank[i] = KLS_KLU_EMPTY;
       }
       UF_long active_rows = 0;
-      for (UF_long i = 0; i < nk; ++i) {
-        if (!active_mask[i]) {
-          continue;
-        }
-        if (i < pipeline_begin || i >= pipeline_end) {
+      if (shared->block_pipeline_row_order != NULL &&
+          shared->block_pipeline_order_rows > 0u) {
+        if (shared->block_pipeline_order_rows !=
+            shared->block_pipeline_active_rows) {
           goto cleanup;
         }
-        row_order[active_rows] = i;
-        active_rank[i] = active_rows;
-        active_rows++;
+        for (UF_long pos = 0; pos < shared->block_pipeline_order_rows;
+             ++pos) {
+          const UF_long row = shared->block_pipeline_row_order[pos];
+          if (row >= nk || row < pipeline_begin || row >= pipeline_end ||
+              !active_mask[row] || active_rank[row] != KLS_KLU_EMPTY) {
+            goto cleanup;
+          }
+          row_order[active_rows] = row;
+          active_rank[row] = active_rows;
+          active_rows++;
+        }
+      } else {
+        for (UF_long i = 0; i < nk; ++i) {
+          if (!active_mask[i]) {
+            continue;
+          }
+          if (i < pipeline_begin || i >= pipeline_end) {
+            goto cleanup;
+          }
+          row_order[active_rows] = i;
+          active_rank[i] = active_rows;
+          active_rows++;
+        }
       }
       if (active_rows == 0u ||
           active_rows != shared->block_pipeline_active_rows ||
@@ -47104,6 +47265,7 @@ static int kls_try_row_first_rebuild_rejected_block(
   UF_long *q_order = NULL;
   UF_long *separator_component_last = NULL;
   unsigned char *pipeline_active_mask = NULL;
+  UF_long *pipeline_row_order = NULL;
   int mutex_initialized = 0;
   int snapshot_ready = 0;
   Unit *old_lu = NULL;
@@ -47236,94 +47398,61 @@ static int kls_try_row_first_rebuild_rejected_block(
   UF_long tail_begin = 0;
   UF_long tail_end = 0;
   UF_long tail_columns = 0;
-  int tail_contiguous = 0;
   int tail_suffix_exact = 0;
   UF_long repaired_tail_begin = local_reject;
   int repaired_tail_etree_mask = 0;
+  int repaired_tail_etree_order = 0;
   if (shared.force_block_pipeline &&
       kls_pivot_tail_plan_local_range(
         solver, k1, nk, local_reject, &tail_begin, &tail_end,
-        &tail_columns, &tail_contiguous, &tail_suffix_exact)) {
-    if (tail_suffix_exact &&
-        tail_begin == local_reject &&
-        tail_end == nk &&
-        tail_columns == nk - local_reject) {
-      shared.block_pipeline_begin = local_reject;
-      shared.block_pipeline_end = nk;
-      repaired_tail_begin = local_reject;
-    } else if (tail_contiguous &&
-               tail_columns == tail_end - tail_begin) {
-      const size_t nk_size = (size_t)nk;
-      unsigned char *tail_mask = (UF_long)nk_size == nk
-        ? (unsigned char *)malloc(nk_size * sizeof(*tail_mask)) : NULL;
-      const int mask_ok =
-        tail_mask != NULL &&
-        kls_build_pivot_tail_restart_mask_range(
-          solver, k1, nk, local_reject, tail_begin, tail_end, tail_mask);
-      const int mask_etree_ok =
-        mask_ok &&
-        kls_pivot_tail_restart_mask_matches_etree_forest(
-          solver, block, k1, nk, local_reject, tail_begin, tail_end,
-          tail_mask);
-      const int refresh_ok =
-        mask_etree_ok &&
-        (solver->fast_reject_refresh_state !=
-           KLS_FAST_REJECT_REFRESH_PREFIX ||
-         kls_refresh_pivot_tail_preserved_block_columns(
-           solver, numeric_values, block, k1, nk, tail_mask));
-      free(tail_mask);
-      if (refresh_ok) {
-        shared.block_pipeline_begin = tail_begin;
-        shared.block_pipeline_end = tail_end;
-        repaired_tail_begin = tail_begin;
-        repaired_tail_etree_mask = 1;
-      }
+        &tail_columns, NULL, &tail_suffix_exact)) {
+    const size_t nk_size = (size_t)nk;
+    if ((UF_long)nk_size == nk) {
+      pipeline_active_mask =
+        (unsigned char *)malloc(nk_size * sizeof(*pipeline_active_mask));
+      pipeline_row_order =
+        (UF_long *)malloc(nk_size * sizeof(*pipeline_row_order));
+    }
+    const int mask_ok =
+      pipeline_active_mask != NULL && pipeline_row_order != NULL &&
+      kls_build_pivot_tail_restart_mask_range(
+        solver, k1, nk, local_reject, tail_begin, tail_end,
+        pipeline_active_mask);
+    const int mask_etree_ok =
+      mask_ok &&
+      kls_pivot_tail_restart_mask_matches_etree_forest(
+        solver, block, k1, nk, local_reject, tail_begin, tail_end,
+        pipeline_active_mask);
+    UF_long active_rows = 0;
+    const int order_ok =
+      mask_etree_ok &&
+      kls_build_pivot_tail_restart_order_range(
+        solver, k1, nk, local_reject, tail_begin, tail_end,
+        pipeline_active_mask, pipeline_row_order, &active_rows);
+    const int refresh_ok =
+      order_ok && active_rows == (UF_long)tail_columns &&
+      active_rows > 0u &&
+      (solver->fast_reject_refresh_state !=
+         KLS_FAST_REJECT_REFRESH_PREFIX ||
+       tail_suffix_exact ||
+       kls_refresh_pivot_tail_preserved_block_columns(
+         solver, numeric_values, block, k1, nk, pipeline_active_mask));
+    if (refresh_ok) {
+      shared.block_pipeline_begin = tail_begin;
+      shared.block_pipeline_end = tail_end;
+      repaired_tail_begin = tail_begin;
+      repaired_tail_etree_mask = 1;
+      repaired_tail_etree_order = 1;
+      shared.block_pipeline_active_mask = pipeline_active_mask;
+      shared.block_pipeline_active_rows = active_rows;
+      shared.block_pipeline_row_order = pipeline_row_order;
+      shared.block_pipeline_order_rows = active_rows;
+      shared.block_pipeline_etree_tail_order = 1;
     } else {
-      const size_t nk_size = (size_t)nk;
-      if ((UF_long)nk_size == nk) {
-        pipeline_active_mask =
-          (unsigned char *)malloc(nk_size * sizeof(*pipeline_active_mask));
-      }
-      const int mask_ok =
-        pipeline_active_mask != NULL &&
-        kls_build_pivot_tail_restart_mask_range(
-          solver, k1, nk, local_reject, tail_begin, tail_end,
-          pipeline_active_mask);
-      const int mask_etree_ok =
-        mask_ok &&
-        kls_pivot_tail_restart_mask_matches_etree_forest(
-          solver, block, k1, nk, local_reject, tail_begin, tail_end,
-          pipeline_active_mask);
-      UF_long active_rows = 0;
-      if (mask_etree_ok) {
-        for (UF_long row = 0; row < nk; ++row) {
-          if (pipeline_active_mask[row]) {
-            if (row < tail_begin || row >= tail_end) {
-              active_rows = UF_long_max;
-              break;
-            }
-            active_rows++;
-          }
-        }
-      }
-      const int refresh_ok =
-        mask_etree_ok && active_rows == (UF_long)tail_columns &&
-        active_rows > 0u &&
-        (solver->fast_reject_refresh_state !=
-           KLS_FAST_REJECT_REFRESH_PREFIX ||
-         kls_refresh_pivot_tail_preserved_block_columns(
-           solver, numeric_values, block, k1, nk, pipeline_active_mask));
-      if (refresh_ok) {
-        shared.block_pipeline_begin = tail_begin;
-        shared.block_pipeline_end = tail_end;
-        repaired_tail_begin = tail_begin;
-        repaired_tail_etree_mask = 1;
-        shared.block_pipeline_active_mask = pipeline_active_mask;
-        shared.block_pipeline_active_rows = active_rows;
-      } else {
-        free(pipeline_active_mask);
-        pipeline_active_mask = NULL;
-      }
+      free(pipeline_active_mask);
+      free(pipeline_row_order);
+      pipeline_active_mask = NULL;
+      pipeline_row_order = NULL;
     }
   }
   shared.tol = solver->common.tol;
@@ -47467,6 +47596,19 @@ static int kls_try_row_first_rebuild_rejected_block(
       shared.row_pipeline_suffix_rows;
     solver->fast_kls_block_restart_last_row_pipeline_gap_rows =
       shared.row_pipeline_gap_rows;
+    if (repaired_tail_etree_order &&
+        shared.block_pipeline_etree_tail_order) {
+      solver->fast_kls_block_restart_last_row_pipeline_etree_tail = 1;
+      solver->fast_kls_block_restart_row_pipeline_etree_tail_count +=
+        shared.row_pipeline_runs;
+      solver->fast_kls_block_restart_last_row_pipeline_etree_tail_rows =
+        shared.row_pipeline_rows;
+      solver->fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows =
+        shared.row_pipeline_gap_rows;
+      solver
+        ->fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask =
+          repaired_tail_exact_mask;
+    }
     solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows =
       shared.row_pipeline_pivot_tail_rows;
     solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts =
@@ -47508,6 +47650,7 @@ static int kls_try_row_first_rebuild_rejected_block(
     (void)pthread_mutex_destroy(&shared.commit_lock);
   }
   free(pipeline_active_mask);
+  free(pipeline_row_order);
   free(saved_ptrs);
   free(saved_pnum);
   free(saved_q_block);
@@ -47567,6 +47710,7 @@ fail:
     (void)pthread_mutex_destroy(&shared.commit_lock);
   }
   free(pipeline_active_mask);
+  free(pipeline_row_order);
   free(saved_ptrs);
   free(saved_pnum);
   free(saved_q_block);

@@ -792,7 +792,17 @@ static int run_fast_factor_root_independent_tail_restart(int scale,
              stats.fast_tail_restarts != 0 ||
              stats.fast_kls_block_restart_last_row_pipeline != 1 ||
              stats.fast_kls_block_restart_last_row_pipeline_rows != 2 ||
-             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 1)) {
+             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 1 ||
+             stats.fast_kls_block_restart_last_row_pipeline_etree_tail != 1 ||
+             stats.fast_kls_block_restart_row_pipeline_etree_tail_count < 1 ||
+             stats.fast_kls_block_restart_last_row_pipeline_etree_tail_rows !=
+               2 ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows !=
+               0 ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask !=
+               1)) {
     fprintf(stderr,
             "unexpected %s stats: scale=%d/%d, pivot=%" PRId64
             ", col=%" PRId64 ", block=[%" PRId64 ",%" PRId64 ")"
@@ -801,7 +811,9 @@ static int run_fast_factor_root_independent_tail_restart(int scale,
             ", suffix_over=%" PRId64
             ", block_restarts=%d, tail_restarts=%d"
             ", pipeline=%d, pipeline_rows=%" PRId64
-            ", pipeline_suffix=%" PRId64 "\n",
+            ", pipeline_suffix=%" PRId64
+            ", etree_tail=%d/%" PRId64 ", etree_rows=%" PRId64
+            ", etree_gaps=%" PRId64 ", etree_exact=%d\n",
             label,
             stats.selected_scale,
             scale,
@@ -819,7 +831,13 @@ static int run_fast_factor_root_independent_tail_restart(int scale,
             stats.fast_tail_restarts,
             stats.fast_kls_block_restart_last_row_pipeline,
             stats.fast_kls_block_restart_last_row_pipeline_rows,
-            stats.fast_kls_block_restart_last_row_pipeline_suffix_rows);
+            stats.fast_kls_block_restart_last_row_pipeline_suffix_rows,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_tail,
+            stats.fast_kls_block_restart_row_pipeline_etree_tail_count,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_tail_rows,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask);
     ok = 0;
   }
   if (ok && !require_pivoting_tail_plan(&stats,
@@ -935,12 +953,34 @@ static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
               (stats.fast_kls_block_restart_last_row_pipeline_rows != 5 ||
                stats.fast_kls_block_restart_last_row_pipeline_gap_rows != 1 ||
                stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 0 ||
-               stats.fast_kls_block_restart_last_row_pipeline_threads < 1)) ||
+               stats.fast_kls_block_restart_last_row_pipeline_threads < 1 ||
+               stats.fast_kls_block_restart_last_row_pipeline_etree_tail != 1 ||
+               stats.fast_kls_block_restart_row_pipeline_etree_tail_count < 1 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_tail_rows !=
+                 5 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows !=
+                 1 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask !=
+                 1)) ||
              (!expect_row_pipeline &&
               (stats.fast_kls_block_restart_last_row_pipeline_rows != 0 ||
                stats.fast_kls_block_restart_last_row_pipeline_gap_rows != 0 ||
                stats.fast_kls_block_restart_last_row_pipeline_suffix_rows != 0 ||
-               stats.fast_kls_block_restart_last_row_pipeline_threads != 0)) ||
+               stats.fast_kls_block_restart_last_row_pipeline_threads != 0 ||
+               stats.fast_kls_block_restart_last_row_pipeline_etree_tail != 0 ||
+               stats.fast_kls_block_restart_row_pipeline_etree_tail_count != 0 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_tail_rows !=
+                 0 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows !=
+                 0 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask !=
+                 0)) ||
              stats.fast_repaired_tail_restart_exact_mask != 1 ||
              stats.fast_repaired_tail_restart_etree_mask != 1 ||
              stats.fast_repaired_tail_restart_columns !=
@@ -957,6 +997,8 @@ static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
             ", pipeline=%d, pipeline_rows=%" PRId64
             ", pipeline_gaps=%" PRId64 ", pipeline_suffix=%" PRId64
             ", pipeline_threads=%" PRId64
+            ", etree_tail=%d/%" PRId64 ", etree_rows=%" PRId64
+            ", etree_gaps=%" PRId64 ", etree_exact=%d"
             ", exact_mask=%d, etree_mask=%d, repaired_cols=%" PRId64
             ", over_cols=%" PRId64
             ", offdiag_suffix=%d, offdiag_suffix_count=%" PRId64
@@ -979,6 +1021,12 @@ static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
             stats.fast_kls_block_restart_last_row_pipeline_gap_rows,
             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows,
             stats.fast_kls_block_restart_last_row_pipeline_threads,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_tail,
+            stats.fast_kls_block_restart_row_pipeline_etree_tail_count,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_tail_rows,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask,
             stats.fast_repaired_tail_restart_exact_mask,
             stats.fast_repaired_tail_restart_etree_mask,
             stats.fast_repaired_tail_restart_columns,
@@ -1303,6 +1351,8 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
             ", pipeline_threads=%" PRId64
             ", pipeline_prefix=%" PRId64
             ", pipeline_suffix=%" PRId64
+            ", etree_tail=%d/%" PRId64 ", etree_rows=%" PRId64
+            ", etree_exact=%d"
             ", tail_cols=%" PRId64 ", seed=%" PRId64
             ", row_seed=%" PRId64 ", row_tail=%" PRId64
             ", tail_topo=%d\n",
@@ -1319,6 +1369,11 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
             stats.fast_kls_block_restart_last_row_pipeline_threads,
             stats.fast_kls_block_restart_last_row_pipeline_prefix_rows,
             stats.fast_kls_block_restart_last_row_pipeline_suffix_rows,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_tail,
+            stats.fast_kls_block_restart_row_pipeline_etree_tail_count,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_tail_rows,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask,
             stats.fast_rejected_pivoting_tail_columns,
             stats.fast_rejected_pivoting_tail_seed_columns,
             stats.fast_rejected_pivoting_tail_row_seed_columns,

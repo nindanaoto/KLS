@@ -553,6 +553,11 @@ typedef struct kls_stats {
   int kls_first_last_separator_queue_partitioned;
   int64_t kls_first_separator_queue_partitioned_count;
   int64_t kls_first_last_separator_queue_split_components;
+  int fast_kls_block_restart_last_row_pipeline_etree_tail;
+  int64_t fast_kls_block_restart_row_pipeline_etree_tail_count;
+  int64_t fast_kls_block_restart_last_row_pipeline_etree_tail_rows;
+  int64_t fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows;
+  int fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
