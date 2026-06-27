@@ -13645,6 +13645,8 @@ static int kls_build_fast_reject_pivoting_tail_plan(
   const int64_t available_block_seed_columns =
     use_unfinished_seed && solver->fast_reject_tail_seed_block_suffix
       ? (int64_t)solver->fast_reject_tail_seed_count : 0;
+  const int use_block_suffix_seed =
+    use_unfinished_seed && solver->fast_reject_tail_seed_block_suffix;
   enum {
     KLS_FAST_REJECT_TAIL_SEED_SUFFIX = 0,
     KLS_FAST_REJECT_TAIL_SEED_UNFINISHED = 1,
@@ -13652,9 +13654,11 @@ static int kls_build_fast_reject_pivoting_tail_plan(
   };
   int seed_mode =
     solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX
-      ? (use_unfinished_seed
-           ? KLS_FAST_REJECT_TAIL_SEED_UNFINISHED
-           : KLS_FAST_REJECT_TAIL_SEED_ROW)
+      ? (use_block_suffix_seed
+           ? KLS_FAST_REJECT_TAIL_SEED_ROW
+           : (use_unfinished_seed
+                ? KLS_FAST_REJECT_TAIL_SEED_UNFINISHED
+                : KLS_FAST_REJECT_TAIL_SEED_ROW))
       : KLS_FAST_REJECT_TAIL_SEED_SUFFIX;
   solver->stats.fast_rejected_pivoting_tail_row_seed_columns = 0;
   solver->stats.fast_rejected_pivoting_tail_block_seed_columns =
@@ -25993,7 +25997,7 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
       return 0;
     }
     solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_PREFIX;
-    kls_clear_fast_reject_tail_seed(solver);
+    kls_record_fast_reject_block_suffix_tail_seed(solver, rejected_pivot);
     kls_record_fast_reject_detail(solver, rejected_pivot,
                                   shared.rejected_pivot_col,
                                   shared.rejected_row,
@@ -35345,7 +35349,7 @@ static int kls_single_block_mapped_refactor(kls_solver *solver,
       memset(x, 0, (size_t)solver->n * sizeof(*x));
       solver->fast_reject_refresh_state =
         KLS_FAST_REJECT_REFRESH_PREFIX;
-      kls_clear_fast_reject_tail_seed(solver);
+      kls_record_fast_reject_block_suffix_tail_seed(solver, k);
       kls_record_fast_reject_detail(solver, k, q[k], rejected_row,
                                     rejected_multiplier_abs,
                                     rejected_pivot_abs,
@@ -39356,7 +39360,8 @@ static int kls_mapped_refactor(kls_solver *solver,
   }
   if (worker.pivot_rejected) {
     solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_PREFIX;
-    kls_clear_fast_reject_tail_seed(solver);
+    kls_record_fast_reject_block_suffix_tail_seed(solver,
+                                                 worker.rejected_pivot);
     kls_record_fast_reject_detail(solver, worker.rejected_pivot,
                                   worker.rejected_pivot_col,
                                   worker.rejected_row,
@@ -39455,7 +39460,8 @@ static int kls_serial_refactor_tail_from_block(kls_solver *solver,
   }
   if (worker.pivot_rejected) {
     solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_PREFIX;
-    kls_clear_fast_reject_tail_seed(solver);
+    kls_record_fast_reject_block_suffix_tail_seed(solver,
+                                                 worker.rejected_pivot);
     kls_record_fast_reject_detail(solver, worker.rejected_pivot,
                                   worker.rejected_pivot_col,
                                   worker.rejected_row,
@@ -39668,7 +39674,8 @@ static int kls_serial_checked_scaled_refactor_from_block(
   }
   if (worker.pivot_rejected) {
     solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_PREFIX;
-    kls_clear_fast_reject_tail_seed(solver);
+    kls_record_fast_reject_block_suffix_tail_seed(solver,
+                                                 worker.rejected_pivot);
     kls_record_fast_reject_detail(solver, worker.rejected_pivot,
                                   worker.rejected_pivot_col,
                                   worker.rejected_row,

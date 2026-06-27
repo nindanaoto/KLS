@@ -1622,6 +1622,8 @@ static int test_mapped_fast_factor_prefix_tail_restart(void) {
              stats.fast_repaired_tail_restart_ready != 1 ||
              stats.fast_repaired_tail_restart_columns < 1 ||
              stats.fast_repaired_tail_restart_work <= 0.0 ||
+             stats.fast_rejected_pivoting_tail_block_seed_columns !=
+               stats.fast_rejected_suffix_columns ||
              stats.fast_block_restarts != 1 ||
              stats.fast_tail_restarts != 1)) {
     fprintf(stderr,
@@ -1631,6 +1633,7 @@ static int test_mapped_fast_factor_prefix_tail_restart(void) {
             ", tail_repair_ready=%d, repaired_match=%d"
             ", prefix_changed=%" PRId64 ", suffix_changed=%" PRId64
             ", tail_ready=%d, tail_cols=%" PRId64 ", tail_work=%.6g"
+            ", seed=%" PRId64 "/%" PRId64 "/%" PRId64
             ", block_restarts=%d, tail_restarts=%d\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_block_start,
@@ -1645,6 +1648,9 @@ static int test_mapped_fast_factor_prefix_tail_restart(void) {
             stats.fast_repaired_tail_restart_ready,
             stats.fast_repaired_tail_restart_columns,
             stats.fast_repaired_tail_restart_work,
+            stats.fast_rejected_pivoting_tail_seed_columns,
+            stats.fast_rejected_pivoting_tail_row_seed_columns,
+            stats.fast_rejected_pivoting_tail_block_seed_columns,
             stats.fast_block_restarts,
             stats.fast_tail_restarts);
     ok = 0;

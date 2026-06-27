@@ -961,7 +961,8 @@ block-local BTF tails retained by the checked row-major path, the
 ordered-block ETree successor path that a pivoting tail-restart upper-bound
 scheduler would at least have to revisit, the sorted pivoting-tail worklist
 scope seeded from the interrupted guessed-EGraph unfinished set before any
-prefix refresh, with row-tail and suffix seeds kept as fallbacks, the
+prefix refresh, with row-tail, serial block-suffix, and pool block-suffix seeds
+kept as fallbacks, the
 first and last rows in that worklist, whether it includes the rejected pivot,
 whether the retained order is topologically safe for a future tail kernel to
 consume, whether the failed pass left an unknown, prefix-current, or all-current

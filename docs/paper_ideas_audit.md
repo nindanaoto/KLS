@@ -3299,6 +3299,16 @@ tail envelope. It does, however, preserve the paper's "unfinished guessed
 EGraph nodes seed the ETree tail" information for the pool path instead of
 collapsing directly to an untagged suffix fallback.
 
+The same block-suffix seed now covers serial prefix-current checked rejects.
+Serial row-major checked refactors, serial mapped checked refactors, and the
+serial scaled checked continuation all have a precise interrupted set: the
+rejected pivot through the end of its diagonal block. KLS now records that set
+with `fast_rejected_pivoting_tail_block_seed_columns` before building the
+ordered-ETree closure. A validated retained row-tail still wins when it gives a
+narrower repair with preserved-gap refresh; otherwise these paths feed the same
+conservative CKTSO Algorithm 5 planning fallback as the pool path instead of
+clearing the seed and rediscovering an anonymous suffix later.
+
 The retained CKTSO-style tail plan now also materializes the ETree forest
 shape that a true pipelined pivoting-tail executor would consume. Once the
 seeded worklist has been closed through ordered-block ETree parents and
