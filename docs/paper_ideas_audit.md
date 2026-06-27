@@ -4406,6 +4406,20 @@ did not beat the scalar row kernel in same-session samples: `G2_circuit` was
 about `2.50s` versus `0.326s`, and `ASIC_100ks` was about `0.181s` versus
 `0.156s`.
 
+The June 27, 2026 CBLAS rerun confirms that "too many small BLAS calls" is not
+the dominant current CKTSO gap. The default `build/` tree still has
+`KLS_ENABLE_CBLAS_SUPERNODE=OFF`, so the top default CKTSO-gap run cannot enter
+external CBLAS at all. In the explicit CBLAS build, the identical-binary
+runtime comparison on forced row refactor for `ASIC_320k`/`ASIC_320ks` measured
+`42.71s`/`45.39s` with `KLS_ENABLE_CBLAS_SUPERNODE=0` and
+`42.90s`/`45.42s` with `KLS_ENABLE_CBLAS_SUPERNODE=1`, a `1.0026x`
+candidate/reference ratio with no >2% wins or losses. The external BLAS entry
+points are already guarded by minimum row/vector/panel dimensions and
+multi-million-operation work thresholds; the cheap two-row threshold belongs to
+the native KLS compact triangular-run kernel, not CBLAS. This keeps BLAS as an
+opt-in large-case experiment while the remaining large gap stays with the
+checked row/scheduler algorithm rather than with BLAS call granularity.
+
 KLS then added the next, more paper-faithful batch shape: if an unchecked dense
 consumer group, or a contiguous row subrange inside it, has the same ordered
 list of completed dense producer suffixes as its external dependency pattern,
