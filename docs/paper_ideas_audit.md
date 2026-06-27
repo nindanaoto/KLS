@@ -5088,6 +5088,42 @@ and reinforces that the missing CKTSO-scale improvement is not stricter column
 readiness, but a production row/supernode numeric executor with enough coarse
 work to amortize its scheduling and panel-cache costs.
 
+An interrupted `gdb` run on `G2_circuit` with a long refactor repeat confirmed
+where the current default path is spending time. All four worker threads were
+inside `kls_egraph_refactor_single_unscaled_column`, and the sampled instruction
+addresses mapped into the inlined `kls_scatter_subtract` loop. The main thread
+was only waiting for the worker pool to finish. That rules out metadata rebuild,
+barrier wait, and ready-queue absence as the immediate hot-path explanation for
+the current top-gap rows: the active kernel is still the sparse column scatter.
+
+Thread-count sensitivity reinforces the same point. On the exact-release
+top-ten focus, one-thread KLS
+(`build/kls_threads1_gap10_after_exact_release_r1_ref3_timeout120.jsonl`) had a
+`9.5199s` geomean and two-thread KLS
+(`build/kls_threads2_gap10_after_exact_release_r1_ref3_timeout120.jsonl`) had a
+`6.5228s` geomean, both slower than the four-thread default artifact's
+`4.3966s`. Eight threads
+(`build/kls_threads8_gap10_after_exact_release_r1_ref3_timeout120.jsonl`)
+improved all ten rows and reached `3.0889s`; sixteen threads
+(`build/kls_threads16_gap10_after_exact_release_r1_ref3_timeout120.jsonl`)
+improved the geomean further to `2.8736s` but regressed `rajat28`, `onetone1`,
+and `gemat12` relative to eight threads. Even sixteen-thread KLS remained
+`1.6776x` slower than the saved four-thread CKTSO reference on the common ten
+rows. This means KLS is not losing because the four-thread default is
+over-parallelized; extra workers help the large scatter-bound cases but do not
+replace CKTSO's row/supernodal numeric executor.
+
+A local attempt to reduce pipeline atomic traffic by leasing four columns per
+worker was rejected. The patch preserved dependency waits and in-chunk order,
+but it let a worker hold later columns while waiting on an early dependency in
+the same leased chunk. The result
+(`build/kls_pipeline_chunk4_gap10_t4_r1_ref3_timeout120.jsonl`) regressed the
+top-ten geomean to `7.1159s`, `1.6185x` slower than the default one-column
+lease. `G2_circuit` refactor time rose from about `0.213s` to `0.549s`, and the
+large ASIC rows roughly doubled. The source was restored to one-column pipeline
+leasing. Any future scheduler batching must be dependency-aware at the ready
+task level or coupled to a real supernode task, not a blind contiguous lease.
+
 The same conclusion now has structural evidence from the `L` scatter pattern.
 KLS has an opt-in diagnostic,
 `KLS_ENABLE_REFACTOR_L_PATTERN_STATS=1`, which records adjacent row-index runs
