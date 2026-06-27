@@ -1002,6 +1002,24 @@ static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
                  .fast_kls_block_restart_last_row_pipeline_etree_ready_threads <
                  1 ||
                stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_prefactor !=
+                 1 ||
+               stats
+                 .fast_kls_block_restart_row_pipeline_etree_prefactor_count <
+                 1 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows !=
+                 4 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads <
+                 1 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows <
+                 0 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps <
+                 0 ||
+               stats
                  .fast_kls_block_restart_last_row_pipeline_etree_tail_rows !=
                  5 ||
                stats
@@ -1026,6 +1044,24 @@ static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
                  0 ||
                stats
                  .fast_kls_block_restart_last_row_pipeline_etree_ready_threads !=
+                 0 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_prefactor !=
+                 0 ||
+               stats
+                 .fast_kls_block_restart_row_pipeline_etree_prefactor_count !=
+                 0 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows !=
+                 0 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads !=
+                 0 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows !=
+                 0 ||
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps !=
                  0 ||
                stats
                  .fast_kls_block_restart_last_row_pipeline_etree_tail_rows !=
@@ -1055,6 +1091,8 @@ static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
             ", etree_tail=%d/%" PRId64 ", etree_rows=%" PRId64
             ", etree_gaps=%" PRId64 ", etree_exact=%d"
             ", etree_ready=%d/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", etree_prefactor=%d/%" PRId64 "/%" PRId64 "/%" PRId64
+            "/%" PRId64 "/%" PRId64
             ", exact_mask=%d, etree_mask=%d, repaired_cols=%" PRId64
             ", over_cols=%" PRId64
             ", offdiag_suffix=%d, offdiag_suffix_count=%" PRId64
@@ -1087,6 +1125,15 @@ static int run_fast_factor_noncontiguous_tail_gap_work_bounds(int threads,
             stats.fast_kls_block_restart_row_pipeline_etree_ready_count,
             stats.fast_kls_block_restart_last_row_pipeline_etree_ready_rows,
             stats.fast_kls_block_restart_last_row_pipeline_etree_ready_threads,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor,
+            stats.fast_kls_block_restart_row_pipeline_etree_prefactor_count,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps,
             stats.fast_repaired_tail_restart_exact_mask,
             stats.fast_repaired_tail_restart_etree_mask,
             stats.fast_repaired_tail_restart_columns,

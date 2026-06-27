@@ -1042,6 +1042,12 @@ int main(int argc, char **argv) {
            ",\"fast_kls_block_restart_row_pipeline_etree_ready_count\":%" PRId64
            ",\"fast_kls_block_restart_last_row_pipeline_etree_ready_rows\":%" PRId64
            ",\"fast_kls_block_restart_last_row_pipeline_etree_ready_threads\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_etree_prefactor\":%d"
+           ",\"fast_kls_block_restart_row_pipeline_etree_prefactor_count\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows\":%" PRId64
+           ",\"fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps\":%" PRId64
            ",\"fast_kls_block_restart_last_row_pipeline_separator_tail_scope\":%d"
            ",\"fast_kls_block_restart_row_pipeline_separator_tail_scope_count\":%" PRId64
            ",\"fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows\":%" PRId64
@@ -1067,6 +1073,12 @@ int main(int argc, char **argv) {
            stats.fast_kls_block_restart_row_pipeline_etree_ready_count,
            stats.fast_kls_block_restart_last_row_pipeline_etree_ready_rows,
            stats.fast_kls_block_restart_last_row_pipeline_etree_ready_threads,
+           stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor,
+           stats.fast_kls_block_restart_row_pipeline_etree_prefactor_count,
+           stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads,
+           stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps,
            stats.fast_kls_block_restart_last_row_pipeline_separator_tail_scope,
            stats.fast_kls_block_restart_row_pipeline_separator_tail_scope_count,
            stats.fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows,
@@ -2065,6 +2077,8 @@ int main(int argc, char **argv) {
            ", etree gaps %" PRId64 ", etree exact mask %d"
            ", etree ready %d/%" PRId64 " rows %" PRId64
            ", ready threads %" PRId64
+           ", etree prefactor %d/%" PRId64 " rows %" PRId64
+           ", threads %" PRId64 ", wait rows/deps %" PRId64 "/%" PRId64
            ", separator tail scope %d/%" PRId64 " rows %" PRId64
            ", pivot-tail rows %" PRId64 ", pivot restarts %" PRId64
            ", supernode groups %" PRId64 ", supernode rows %" PRId64
@@ -2091,6 +2105,12 @@ int main(int argc, char **argv) {
            stats.fast_kls_block_restart_row_pipeline_etree_ready_count,
            stats.fast_kls_block_restart_last_row_pipeline_etree_ready_rows,
            stats.fast_kls_block_restart_last_row_pipeline_etree_ready_threads,
+           stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor,
+           stats.fast_kls_block_restart_row_pipeline_etree_prefactor_count,
+           stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads,
+           stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows,
+           stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps,
            stats.fast_kls_block_restart_last_row_pipeline_separator_tail_scope,
            stats.fast_kls_block_restart_row_pipeline_separator_tail_scope_count,
            stats.fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows,

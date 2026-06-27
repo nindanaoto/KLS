@@ -535,16 +535,26 @@ dependency-blocked internal gaps are promoted into the active tail and
 recomputed with pivoting, while structural gap-copy failures still fall back.
 Full-suffix root rejects still remain ordinary KLS block restarts. For a
 non-contiguous retained ETree mask with real gap columns, the KLS-owned repair
-now factors the boundary pivot row first and then releases the remaining active
-descendant rows from the retained ETree child counts instead of only replaying
-the linear active-row order. That guarded executor reports
+now factors the boundary pivot row first and then runs the remaining active
+descendant rows through the retained row pipeline with an active ETree-rank map.
+Those descendants use the same prefactorization/postfactorization loop as the
+row-up-looking pipeline: finished dependencies are applied while earlier active
+tail rows are still completing, then skipped dependencies are finished before
+the row is published. That guarded executor reports
 `fast_kls_block_restart_last_row_pipeline_etree_ready`,
 `fast_kls_block_restart_row_pipeline_etree_ready_count`,
-`fast_kls_block_restart_last_row_pipeline_etree_ready_rows`, and
-`fast_kls_block_restart_last_row_pipeline_etree_ready_threads`. Suffix-shaped
+`fast_kls_block_restart_last_row_pipeline_etree_ready_rows`,
+`fast_kls_block_restart_last_row_pipeline_etree_ready_threads`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor`,
+`fast_kls_block_restart_row_pipeline_etree_prefactor_count`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows`, and
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps`.
+Suffix-shaped
 and BTF suffix repairs still use the ordered pivot-capable row pipeline, so this
-is a gapped-mask CKTSO Algorithm 5 step rather than the full production
-ETree-descendant scheduler.
+is a gapped-mask CKTSO Algorithm 5 prefactor/postfactorization step rather than
+the full production ETree-descendant scheduler.
 Unless `KLS_ENABLE_CHECKED_ROW_REFACTOR=0` explicitly disables it, the
 experimental KLS-owned row/segment refactor now runs as the first checked
 fast-factor attempt and can use its parallel row scheduler when multiple
@@ -935,6 +945,12 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_kls_block_restart_row_pipeline_etree_ready_count`,
 `fast_kls_block_restart_last_row_pipeline_etree_ready_rows`,
 `fast_kls_block_restart_last_row_pipeline_etree_ready_threads`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor`,
+`fast_kls_block_restart_row_pipeline_etree_prefactor_count`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps`,
 `fast_kls_block_restart_last_row_pipeline_separator_tail_scope`,
 `fast_kls_block_restart_row_pipeline_separator_tail_scope_count`,
 `fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows`,

@@ -5192,11 +5192,17 @@ Public and benchmark statistics now report
 `fast_kls_block_restart_last_row_pipeline_etree_tail_rows`,
 `fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows`, and
 `fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask`; the later
-gapped-mask ready executor adds
+gapped-mask prefactor executor adds
 `fast_kls_block_restart_last_row_pipeline_etree_ready`,
 `fast_kls_block_restart_row_pipeline_etree_ready_count`,
-`fast_kls_block_restart_last_row_pipeline_etree_ready_rows`, and
-`fast_kls_block_restart_last_row_pipeline_etree_ready_threads`; the
+`fast_kls_block_restart_last_row_pipeline_etree_ready_rows`,
+`fast_kls_block_restart_last_row_pipeline_etree_ready_threads`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor`,
+`fast_kls_block_restart_row_pipeline_etree_prefactor_count`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads`,
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows`, and
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps`; the
 non-contiguous gap smoke fixture requires a preserved gap row and no serial
 tail restart when two threads are enabled.
 
@@ -5368,14 +5374,19 @@ by KLS's guarded row-first repair path, not by a full production tail scheduler.
 KLS now consumes that retained worklist more directly for the gapped-mask case.
 When the retained topological ETree tail is non-contiguous, the row-first repair
 first factors the boundary pivot row with the existing pivot-capable row kernel,
-then removes that completed boundary from the active mask and releases the
-remaining active descendants through retained ETree child counts. The smoke
-fixture for a non-contiguous gap tail now requires
-`fast_kls_block_restart_last_row_pipeline_etree_ready=1` and four ready
-descendant rows after the boundary pivot. This fills a concrete CKTSO Algorithm
-5 executor gap for active unfinished descendants, while suffix-shaped and BTF
-suffix repairs intentionally remain on the ordered pivot-capable row pipeline
-until the ready scheduler handles those cases without changing pivot semantics.
+then removes that completed boundary from the active mask and runs the remaining
+active descendants through the retained row pipeline with an active-rank map
+over the ETree tail. The worker applies already finished dependencies before
+the row is publishable, waits for earlier active tail rows, and then applies the
+skipped dependencies before pivot check and publication. The smoke fixture for a
+non-contiguous gap tail now requires
+`fast_kls_block_restart_last_row_pipeline_etree_ready=1`, four descendant rows,
+and `fast_kls_block_restart_last_row_pipeline_etree_prefactor=1` for those
+descendants after the boundary pivot. This fills a concrete CKTSO Algorithm 5
+prefactor/postfactorization executor gap for active unfinished descendants,
+while suffix-shaped and BTF suffix repairs intentionally remain on the ordered
+pivot-capable row pipeline until the ETree scheduler handles those cases without
+changing pivot semantics.
 
 KLS now also fills the NICSLU Algorithm 4 performance-model gap. After a
 numeric factorization, it walks the actual U-dependency graph in factor order,

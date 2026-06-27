@@ -546,6 +546,12 @@ struct kls_solver {
   UF_long fast_kls_block_restart_row_pipeline_etree_ready_count;
   UF_long fast_kls_block_restart_last_row_pipeline_etree_ready_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_etree_ready_threads;
+  int fast_kls_block_restart_last_row_pipeline_etree_prefactor;
+  UF_long fast_kls_block_restart_row_pipeline_etree_prefactor_count;
+  UF_long fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows;
+  UF_long fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads;
+  UF_long fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows;
+  UF_long fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps;
   int fast_kls_block_restart_last_row_pipeline_separator_tail_scope;
   UF_long fast_kls_block_restart_row_pipeline_separator_tail_scope_count;
   UF_long fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows;
@@ -2734,6 +2740,18 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_etree_ready_threads = 0;
   solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_prefactor = 0;
+  solver->stats
+    .fast_kls_block_restart_row_pipeline_etree_prefactor_count = 0;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows = 0;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads = 0;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows = 0;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps = 0;
+  solver->stats
     .fast_kls_block_restart_last_row_pipeline_separator_tail_scope = 0;
   solver->stats
     .fast_kls_block_restart_row_pipeline_separator_tail_scope_count = 0;
@@ -2808,6 +2826,14 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_kls_block_restart_row_pipeline_etree_ready_count = 0;
   solver->fast_kls_block_restart_last_row_pipeline_etree_ready_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_etree_ready_threads = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_prefactor = 0;
+  solver->fast_kls_block_restart_row_pipeline_etree_prefactor_count = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows =
+    0;
+  solver->fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps =
+    0;
   solver->fast_kls_block_restart_last_row_pipeline_separator_tail_scope = 0;
   solver->fast_kls_block_restart_row_pipeline_separator_tail_scope_count = 0;
   solver->fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows =
@@ -11559,6 +11585,31 @@ static void kls_fill_fast_kls_block_restart_pipeline_stats(kls_solver *solver) {
     .fast_kls_block_restart_last_row_pipeline_etree_ready_threads =
       (int64_t)
         solver->fast_kls_block_restart_last_row_pipeline_etree_ready_threads;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_prefactor =
+      solver->fast_kls_block_restart_last_row_pipeline_etree_prefactor;
+  solver->stats
+    .fast_kls_block_restart_row_pipeline_etree_prefactor_count =
+      (int64_t)
+        solver->fast_kls_block_restart_row_pipeline_etree_prefactor_count;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows =
+      (int64_t)
+        solver->fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads =
+      (int64_t)
+        solver->fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows =
+      (int64_t)
+        solver
+          ->fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps =
+      (int64_t)
+        solver
+          ->fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps;
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_separator_tail_scope =
       solver
@@ -46140,215 +46191,7 @@ static int kls_row_first_run_restartable_pipeline_suffix(
   return 1;
 }
 
-typedef struct kls_row_first_tail_ready_shared {
-  const kls_row_first_block_context *ctx;
-  const UF_long *row_order;
-  const unsigned char *active_mask;
-  const UF_long *tail_parent;
-  UF_long active_rows;
-  kls_row_first_workspace *workspace;
-  kls_row_first_entries *l_entries;
-  kls_row_first_entries *u_entries;
-  double *udiag_values;
-  unsigned char *row_done;
-  UF_long *supernode_start;
-  UF_long *supernode_end;
-  UF_long *remaining_children;
-  unsigned char *claimed;
-  pthread_mutex_t lock;
-  UF_long completed_rows;
-  int failed;
-  kls_row_first_pipeline_failure failure_reason;
-} kls_row_first_tail_ready_shared;
-
-typedef struct kls_row_first_tail_ready_worker {
-  kls_row_first_tail_ready_shared *shared;
-  kls_row_first_workspace workspace;
-  kls_row_first_entries l_entries;
-  kls_row_first_entries u_entries;
-  UF_long rows;
-  UF_long supernode_update_groups;
-  UF_long supernode_update_rows;
-  UF_long supernode_panel_update_groups;
-  UF_long supernode_panel_update_rows;
-} kls_row_first_tail_ready_worker;
-
-static void kls_row_first_tail_ready_worker_free(
-  kls_row_first_tail_ready_worker *worker) {
-  if (worker == NULL) {
-    return;
-  }
-  kls_row_first_workspace_free(&worker->workspace);
-  kls_row_first_entries_free(&worker->l_entries);
-  kls_row_first_entries_free(&worker->u_entries);
-}
-
-static void kls_row_first_tail_ready_mark_failed(
-  kls_row_first_tail_ready_shared *shared,
-  kls_row_first_pipeline_failure reason) {
-  if (shared == NULL) {
-    return;
-  }
-  shared->failed = 1;
-  if (shared->failure_reason == KLS_ROW_FIRST_PIPELINE_FAIL_NONE) {
-    shared->failure_reason = reason;
-  }
-}
-
-static void *kls_row_first_tail_ready_worker_main(void *arg) {
-  kls_row_first_tail_ready_worker *worker =
-    (kls_row_first_tail_ready_worker *)arg;
-  if (worker == NULL || worker->shared == NULL) {
-    return NULL;
-  }
-  kls_row_first_tail_ready_shared *shared = worker->shared;
-  if (shared->ctx == NULL || shared->row_order == NULL ||
-      shared->active_mask == NULL || shared->tail_parent == NULL ||
-      shared->workspace == NULL || shared->l_entries == NULL ||
-      shared->u_entries == NULL || shared->udiag_values == NULL ||
-      shared->row_done == NULL || shared->supernode_start == NULL ||
-      shared->supernode_end == NULL ||
-      shared->remaining_children == NULL || shared->claimed == NULL) {
-    return NULL;
-  }
-  if (!kls_row_first_workspace_init(&worker->workspace,
-                                    shared->ctx->nk)) {
-    pthread_mutex_lock(&shared->lock);
-    kls_row_first_tail_ready_mark_failed(
-      shared, KLS_ROW_FIRST_PIPELINE_FAIL_SETUP);
-    pthread_mutex_unlock(&shared->lock);
-    return NULL;
-  }
-  worker->workspace.supernode_panel_cache =
-    shared->workspace->supernode_panel_cache;
-
-  for (;;) {
-    pthread_mutex_lock(&shared->lock);
-    if (shared->failed || shared->completed_rows >= shared->active_rows) {
-      pthread_mutex_unlock(&shared->lock);
-      break;
-    }
-
-    UF_long row = KLS_KLU_EMPTY;
-    for (UF_long pos = 0; pos < shared->active_rows; ++pos) {
-      const UF_long candidate = shared->row_order[pos];
-      if (candidate >= shared->ctx->nk ||
-          shared->active_mask[candidate] == 0u) {
-        kls_row_first_tail_ready_mark_failed(
-          shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
-        break;
-      }
-      if (shared->claimed[candidate] == 0u &&
-          shared->remaining_children[candidate] == 0u) {
-        shared->claimed[candidate] = 1u;
-        row = candidate;
-        break;
-      }
-    }
-    if (shared->failed) {
-      pthread_mutex_unlock(&shared->lock);
-      break;
-    }
-    if (row == KLS_KLU_EMPTY) {
-      kls_row_first_tail_ready_mark_failed(
-        shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
-      pthread_mutex_unlock(&shared->lock);
-      break;
-    }
-
-    kls_row_first_partial_row state;
-    memset(&state, 0, sizeof(state));
-    state.row = UF_long_max;
-    worker->l_entries.count = 0;
-    worker->u_entries.count = 0;
-    int blocked = 0;
-    int pivot_needed = 0;
-    int pivoted = 0;
-    int ok =
-      kls_row_first_partial_row_begin(shared->ctx, &worker->workspace,
-                                      &state, row) &&
-      kls_row_first_partial_apply_ready(
-        shared->ctx, &worker->workspace, &worker->l_entries,
-        shared->u_entries, shared->udiag_values,
-        shared->workspace->u_row_ptr, shared->workspace->u_row_end,
-        shared->supernode_start, shared->supernode_end,
-        shared->row_done, NULL, shared->ctx->nk, &state,
-        &worker->supernode_update_groups, &worker->supernode_update_rows,
-        &worker->supernode_panel_update_groups,
-        &worker->supernode_panel_update_rows, &blocked);
-    if (ok && blocked) {
-      ok = 0;
-      kls_row_first_tail_ready_mark_failed(
-        shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
-    }
-    if (ok && !kls_row_first_partial_finish(
-          shared->ctx, &worker->workspace, &worker->u_entries, &state,
-          0, &pivot_needed, &pivoted, NULL, NULL, NULL)) {
-      ok = 0;
-      kls_row_first_tail_ready_mark_failed(
-        shared, pivot_needed ? KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT
-                             : KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
-    }
-    if (ok && pivoted) {
-      ok = 0;
-      kls_row_first_tail_ready_mark_failed(
-        shared, KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT);
-    }
-    if (ok &&
-        (!kls_row_first_append_entries(shared->l_entries,
-                                       &worker->l_entries) ||
-         !kls_row_first_entries_reserve(
-           shared->u_entries,
-           shared->u_entries->count + worker->u_entries.count))) {
-      ok = 0;
-      kls_row_first_tail_ready_mark_failed(
-        shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
-    }
-    if (ok) {
-      shared->workspace->u_row_ptr[row] = shared->u_entries->count;
-      if (!kls_row_first_append_entries(shared->u_entries,
-                                        &worker->u_entries)) {
-        ok = 0;
-        kls_row_first_tail_ready_mark_failed(
-          shared, KLS_ROW_FIRST_PIPELINE_FAIL_APPEND);
-      } else {
-        shared->workspace->u_row_end[row] = shared->u_entries->count;
-        shared->udiag_values[row] = state.pivot;
-        shared->row_done[row] = 1u;
-        kls_row_first_supernodes_reset(
-          shared->u_entries, shared->workspace->u_row_ptr,
-          shared->workspace->u_row_end, shared->row_done,
-          shared->ctx->nk, shared->ctx->nk,
-          shared->supernode_start, shared->supernode_end);
-        if (shared->workspace->supernode_panel_cache != NULL) {
-          (void)kls_row_first_supernode_panel_cache_build(
-            shared->workspace->supernode_panel_cache,
-            shared->u_entries, shared->workspace->u_row_ptr,
-            shared->workspace->u_row_end, shared->udiag_values,
-            shared->row_done, shared->supernode_start,
-            shared->supernode_end, shared->ctx->nk, shared->ctx->nk);
-        }
-        const UF_long parent = shared->tail_parent[row];
-        if (parent < shared->ctx->nk &&
-            shared->active_mask[parent] != 0u &&
-            shared->remaining_children[parent] > 0u) {
-          shared->remaining_children[parent]--;
-        }
-        shared->completed_rows++;
-        worker->rows++;
-      }
-    }
-    const int failed = shared->failed;
-    pthread_mutex_unlock(&shared->lock);
-    kls_row_first_partial_row_clear(&state, &worker->workspace);
-    if (failed) {
-      break;
-    }
-  }
-  return NULL;
-}
-
-static int kls_row_first_run_etree_ready_tail_phase(
+static int kls_row_first_run_etree_prefactor_tail_phase(
   const kls_row_first_block_context *ctx,
   const UF_long *row_order,
   const unsigned char *active_mask,
@@ -46360,13 +46203,26 @@ static int kls_row_first_run_etree_ready_tail_phase(
   kls_row_first_entries *u_entries,
   double *udiag_values,
   unsigned char *row_done,
+  kls_row_first_row_stats *stats,
   UF_long *thread_rows_out,
+  UF_long *prefactor_rows_out,
+  UF_long *wait_partial_rows_out,
+  UF_long *wait_partial_deps_out,
   UF_long *supernode_update_groups_out,
   UF_long *supernode_update_rows_out,
   UF_long *supernode_panel_update_groups_out,
   UF_long *supernode_panel_update_rows_out) {
   if (thread_rows_out != NULL) {
     *thread_rows_out = 0;
+  }
+  if (prefactor_rows_out != NULL) {
+    *prefactor_rows_out = 0;
+  }
+  if (wait_partial_rows_out != NULL) {
+    *wait_partial_rows_out = 0;
+  }
+  if (wait_partial_deps_out != NULL) {
+    *wait_partial_deps_out = 0;
   }
   if (supernode_update_groups_out != NULL) {
     *supernode_update_groups_out = 0;
@@ -46381,170 +46237,66 @@ static int kls_row_first_run_etree_ready_tail_phase(
     *supernode_panel_update_rows_out = 0;
   }
   if (ctx == NULL || row_order == NULL || active_mask == NULL ||
-      tail_parent == NULL || active_rows == 0u || thread_count <= 1 ||
-      workspace == NULL || l_entries == NULL || u_entries == NULL ||
-      udiag_values == NULL || row_done == NULL ||
-      workspace->u_row_ptr == NULL || workspace->u_row_end == NULL) {
-    return 0;
-  }
-  int worker_count = thread_count;
-  if ((UF_long)worker_count > active_rows) {
-    worker_count = (int)active_rows;
-  }
-  if (worker_count <= 1) {
+      tail_parent == NULL ||
+      active_rows == 0u || thread_count <= 1 || workspace == NULL ||
+      l_entries == NULL || u_entries == NULL || udiag_values == NULL ||
+      row_done == NULL || workspace->u_row_ptr == NULL ||
+      workspace->u_row_end == NULL) {
     return 0;
   }
 
-  pthread_t *threads =
-    (pthread_t *)calloc((size_t)worker_count, sizeof(*threads));
-  kls_row_first_tail_ready_worker *workers =
-    (kls_row_first_tail_ready_worker *)
-      calloc((size_t)worker_count, sizeof(*workers));
-  UF_long *remaining_children =
-    (UF_long *)calloc((size_t)ctx->nk, sizeof(*remaining_children));
-  unsigned char *claimed =
-    (unsigned char *)calloc((size_t)ctx->nk, sizeof(*claimed));
-  UF_long *supernode_start =
-    (UF_long *)malloc((size_t)ctx->nk * sizeof(*supernode_start));
-  UF_long *supernode_end =
-    (UF_long *)malloc((size_t)ctx->nk * sizeof(*supernode_end));
-  if (threads == NULL || workers == NULL || remaining_children == NULL ||
-      claimed == NULL || supernode_start == NULL || supernode_end == NULL) {
-    free(threads);
-    free(workers);
-    free(remaining_children);
-    free(claimed);
-    free(supernode_start);
-    free(supernode_end);
+  UF_long *active_rank =
+    (UF_long *)malloc((size_t)ctx->nk * sizeof(*active_rank));
+  if (active_rank == NULL) {
     return 0;
   }
-
-  int ok = 1;
+  for (UF_long row = 0; row < ctx->nk; ++row) {
+    active_rank[row] = KLS_KLU_EMPTY;
+  }
   for (UF_long pos = 0; pos < active_rows; ++pos) {
     const UF_long row = row_order[pos];
-    if (row >= ctx->nk || active_mask[row] == 0u) {
-      ok = 0;
-      break;
+    if (row >= ctx->nk || active_mask[row] == 0u ||
+        active_rank[row] != KLS_KLU_EMPTY) {
+      free(active_rank);
+      return 0;
     }
+    active_rank[row] = pos;
+  }
+  for (UF_long pos = 0; pos < active_rows; ++pos) {
+    const UF_long row = row_order[pos];
     const UF_long parent = tail_parent[row];
-    if (parent == row ||
-        (parent < ctx->nk && active_mask[parent] != 0u &&
-         parent <= row)) {
-      ok = 0;
-      break;
+    if (parent == row) {
+      free(active_rank);
+      return 0;
     }
     if (parent < ctx->nk && active_mask[parent] != 0u) {
-      remaining_children[parent]++;
+      const UF_long parent_rank = active_rank[parent];
+      if (parent_rank == KLS_KLU_EMPTY || parent_rank <= pos) {
+        free(active_rank);
+        return 0;
+      }
     }
   }
-  if (!ok) {
-    free(threads);
-    free(workers);
-    free(remaining_children);
-    free(claimed);
-    free(supernode_start);
-    free(supernode_end);
-    return 0;
-  }
 
-  kls_row_first_supernodes_reset(
-    u_entries, workspace->u_row_ptr, workspace->u_row_end, row_done,
-    ctx->nk, ctx->nk, supernode_start, supernode_end);
-  if (workspace->supernode_panel_cache != NULL) {
-    (void)kls_row_first_supernode_panel_cache_build(
-      workspace->supernode_panel_cache, u_entries, workspace->u_row_ptr,
-      workspace->u_row_end, udiag_values, row_done, supernode_start,
-      supernode_end, ctx->nk, ctx->nk);
-  }
-
-  kls_row_first_tail_ready_shared shared;
-  memset(&shared, 0, sizeof(shared));
-  shared.ctx = ctx;
-  shared.row_order = row_order;
-  shared.active_mask = active_mask;
-  shared.tail_parent = tail_parent;
-  shared.active_rows = active_rows;
-  shared.workspace = workspace;
-  shared.l_entries = l_entries;
-  shared.u_entries = u_entries;
-  shared.udiag_values = udiag_values;
-  shared.row_done = row_done;
-  shared.supernode_start = supernode_start;
-  shared.supernode_end = supernode_end;
-  shared.remaining_children = remaining_children;
-  shared.claimed = claimed;
-  if (pthread_mutex_init(&shared.lock, NULL) != 0) {
-    free(threads);
-    free(workers);
-    free(remaining_children);
-    free(claimed);
-    free(supernode_start);
-    free(supernode_end);
-    return 0;
-  }
-
-  int created = 0;
-  for (int tid = 0; tid < worker_count; ++tid) {
-    workers[tid].shared = &shared;
-    if (pthread_create(&threads[tid], NULL,
-                       kls_row_first_tail_ready_worker_main,
-                       workers + tid) != 0) {
-      pthread_mutex_lock(&shared.lock);
-      kls_row_first_tail_ready_mark_failed(
-        &shared, KLS_ROW_FIRST_PIPELINE_FAIL_THREAD);
-      pthread_mutex_unlock(&shared.lock);
-      break;
-    }
-    created++;
-  }
-  for (int tid = 0; tid < created; ++tid) {
-    (void)pthread_join(threads[tid], NULL);
-  }
-
-  UF_long active_threads = 0;
-  UF_long supernode_update_groups = 0;
-  UF_long supernode_update_rows = 0;
-  UF_long supernode_panel_update_groups = 0;
-  UF_long supernode_panel_update_rows = 0;
-  for (int tid = 0; tid < created; ++tid) {
-    if (workers[tid].rows > 0u) {
-      active_threads++;
-    }
-    supernode_update_groups += workers[tid].supernode_update_groups;
-    supernode_update_rows += workers[tid].supernode_update_rows;
-    supernode_panel_update_groups +=
-      workers[tid].supernode_panel_update_groups;
-    supernode_panel_update_rows +=
-      workers[tid].supernode_panel_update_rows;
-  }
-  ok = created == worker_count && !shared.failed &&
-       shared.completed_rows == active_rows;
-  if (ok && thread_rows_out != NULL) {
-    *thread_rows_out = active_threads;
-  }
-  if (ok && supernode_update_groups_out != NULL) {
-    *supernode_update_groups_out = supernode_update_groups;
-  }
-  if (ok && supernode_update_rows_out != NULL) {
-    *supernode_update_rows_out = supernode_update_rows;
-  }
-  if (ok && supernode_panel_update_groups_out != NULL) {
-    *supernode_panel_update_groups_out = supernode_panel_update_groups;
-  }
-  if (ok && supernode_panel_update_rows_out != NULL) {
-    *supernode_panel_update_rows_out = supernode_panel_update_rows;
-  }
-
-  pthread_mutex_destroy(&shared.lock);
-  for (int tid = 0; tid < worker_count; ++tid) {
-    kls_row_first_tail_ready_worker_free(workers + tid);
-  }
-  free(threads);
-  free(workers);
-  free(remaining_children);
-  free(claimed);
-  free(supernode_start);
-  free(supernode_end);
+  UF_long pipeline_rows = 0;
+  UF_long pivot_tail_rows = 0;
+  UF_long pivot_restarts = 0;
+  int pivot_tail_ready = 0;
+  UF_long completed_pos = 0;
+  const int ok = kls_row_first_run_parallel_pipeline_phase(
+    ctx, row_order, active_rank, 0, active_rows, thread_count, workspace,
+    l_entries, u_entries, udiag_values, row_done, stats, &pipeline_rows,
+    thread_rows_out, prefactor_rows_out, wait_partial_rows_out,
+    wait_partial_deps_out, supernode_update_groups_out,
+    supernode_update_rows_out, supernode_panel_update_groups_out,
+    supernode_panel_update_rows_out, &completed_pos, &pivot_tail_ready,
+    &pivot_tail_rows, &pivot_restarts);
+  (void)pipeline_rows;
+  (void)pivot_tail_rows;
+  (void)pivot_restarts;
+  (void)pivot_tail_ready;
+  (void)completed_pos;
+  free(active_rank);
   return ok;
 }
 
@@ -47036,6 +46788,11 @@ typedef struct kls_row_first_parallel_shared {
   UF_long row_pipeline_etree_ready_runs;
   UF_long row_pipeline_etree_ready_rows;
   UF_long row_pipeline_etree_ready_threads;
+  UF_long row_pipeline_etree_prefactor_runs;
+  UF_long row_pipeline_etree_prefactor_rows;
+  UF_long row_pipeline_etree_prefactor_threads;
+  UF_long row_pipeline_etree_prefactor_wait_rows;
+  UF_long row_pipeline_etree_prefactor_wait_deps;
   atomic_ulong separator_dynamic_column_rejects;
   UF_long committed_blocks;
 } kls_row_first_parallel_shared;
@@ -47150,7 +46907,11 @@ static int kls_row_first_parallel_commit_block(
   UF_long row_pipeline_pivot_tail_rows,
   UF_long row_pipeline_pivot_restarts,
   UF_long row_pipeline_etree_ready_rows,
-  UF_long row_pipeline_etree_ready_threads) {
+  UF_long row_pipeline_etree_ready_threads,
+  UF_long row_pipeline_etree_prefactor_rows,
+  UF_long row_pipeline_etree_prefactor_threads,
+  UF_long row_pipeline_etree_prefactor_wait_rows,
+  UF_long row_pipeline_etree_prefactor_wait_deps) {
   if (worker == NULL || worker->shared == NULL ||
       worker->shared->solver == NULL || row_ptr == NULL ||
       l_entries == NULL || u_entries == NULL ||
@@ -47214,6 +46975,20 @@ static int kls_row_first_parallel_commit_block(
           shared->row_pipeline_etree_ready_threads =
             row_pipeline_etree_ready_threads;
         }
+      }
+      if (row_pipeline_etree_prefactor_rows > 0u) {
+        shared->row_pipeline_etree_prefactor_runs++;
+        shared->row_pipeline_etree_prefactor_rows +=
+          row_pipeline_etree_prefactor_rows;
+        if (row_pipeline_etree_prefactor_threads >
+            shared->row_pipeline_etree_prefactor_threads) {
+          shared->row_pipeline_etree_prefactor_threads =
+            row_pipeline_etree_prefactor_threads;
+        }
+        shared->row_pipeline_etree_prefactor_wait_rows +=
+          row_pipeline_etree_prefactor_wait_rows;
+        shared->row_pipeline_etree_prefactor_wait_deps +=
+          row_pipeline_etree_prefactor_wait_deps;
       }
     }
     shared->committed_blocks++;
@@ -47364,6 +47139,9 @@ static int kls_try_row_first_etree_ready_tail_repair(
   kls_row_first_row_stats *row_stats,
   UF_long *row_pipeline_ready_rows_out,
   UF_long *row_pipeline_threads_out,
+  UF_long *row_pipeline_prefactor_rows_out,
+  UF_long *row_pipeline_prefactor_wait_rows_out,
+  UF_long *row_pipeline_prefactor_wait_deps_out,
   UF_long *supernode_update_groups_out,
   UF_long *supernode_update_rows_out,
   UF_long *supernode_panel_update_groups_out,
@@ -47373,6 +47151,15 @@ static int kls_try_row_first_etree_ready_tail_repair(
   }
   if (row_pipeline_threads_out != NULL) {
     *row_pipeline_threads_out = 0;
+  }
+  if (row_pipeline_prefactor_rows_out != NULL) {
+    *row_pipeline_prefactor_rows_out = 0;
+  }
+  if (row_pipeline_prefactor_wait_rows_out != NULL) {
+    *row_pipeline_prefactor_wait_rows_out = 0;
+  }
+  if (row_pipeline_prefactor_wait_deps_out != NULL) {
+    *row_pipeline_prefactor_wait_deps_out = 0;
   }
   if (supernode_update_groups_out != NULL) {
     *supernode_update_groups_out = 0;
@@ -47481,17 +47268,21 @@ static int kls_try_row_first_etree_ready_tail_repair(
 
   UF_long ready_threads = 0;
   UF_long ready_rows = active_rows - 1u;
+  UF_long prefactor_rows = 0;
+  UF_long prefactor_wait_rows = 0;
+  UF_long prefactor_wait_deps = 0;
   UF_long supernode_update_groups = 0;
   UF_long supernode_update_rows = 0;
   UF_long supernode_panel_update_groups = 0;
   UF_long supernode_panel_update_rows = 0;
   if (ready_rows > 0u &&
-      !kls_row_first_run_etree_ready_tail_phase(
+      !kls_row_first_run_etree_prefactor_tail_phase(
         ctx, row_order + 1u, ready_mask,
         ctx->solver->fast_reject_tail_parent, ready_rows,
         worker->shared->block_pipeline_thread_count, &trial_workspace,
         &trial_l_entries, &trial_u_entries, trial_udiag, trial_row_done,
-        &ready_threads, &supernode_update_groups,
+        row_stats, &ready_threads, &prefactor_rows, &prefactor_wait_rows,
+        &prefactor_wait_deps, &supernode_update_groups,
         &supernode_update_rows, &supernode_panel_update_groups,
         &supernode_panel_update_rows)) {
     free(ready_mask);
@@ -47516,6 +47307,15 @@ static int kls_try_row_first_etree_ready_tail_repair(
   }
   if (row_pipeline_threads_out != NULL) {
     *row_pipeline_threads_out = ready_threads;
+  }
+  if (row_pipeline_prefactor_rows_out != NULL) {
+    *row_pipeline_prefactor_rows_out = prefactor_rows;
+  }
+  if (row_pipeline_prefactor_wait_rows_out != NULL) {
+    *row_pipeline_prefactor_wait_rows_out = prefactor_wait_rows;
+  }
+  if (row_pipeline_prefactor_wait_deps_out != NULL) {
+    *row_pipeline_prefactor_wait_deps_out = prefactor_wait_deps;
   }
   if (supernode_update_groups_out != NULL) {
     *supernode_update_groups_out = supernode_update_groups;
@@ -47618,6 +47418,10 @@ static int kls_row_first_parallel_factor_block(
   UF_long row_pipeline_pivot_restarts = 0;
   UF_long row_pipeline_etree_ready_rows = 0;
   UF_long row_pipeline_etree_ready_threads = 0;
+  UF_long row_pipeline_etree_prefactor_rows = 0;
+  UF_long row_pipeline_etree_prefactor_threads = 0;
+  UF_long row_pipeline_etree_prefactor_wait_rows = 0;
+  UF_long row_pipeline_etree_prefactor_wait_deps = 0;
   UF_long open_panel_start = KLS_KLU_EMPTY;
   UF_long open_panel_end = KLS_KLU_EMPTY;
   kls_row_first_supernode_panel_cache row_supernode_panel_cache;
@@ -47827,6 +47631,9 @@ static int kls_row_first_parallel_factor_block(
     UF_long pipeline_supernode_panel_update_rows = 0;
     UF_long pipeline_pivot_serial_rows = 0;
     UF_long pipeline_etree_ready_rows = 0;
+    UF_long pipeline_etree_prefactor_rows = 0;
+    UF_long pipeline_etree_prefactor_wait_rows = 0;
+    UF_long pipeline_etree_prefactor_wait_deps = 0;
     if (use_active_mask &&
         shared->block_pipeline_etree_tail_order &&
         solver->stats.fast_rejected_pivoting_tail_contiguous == 0 &&
@@ -47837,6 +47644,9 @@ static int kls_row_first_parallel_factor_block(
           shared->block_pipeline_end, reserve_entries, &l_entries,
           &u_entries, &row_stats, &pipeline_etree_ready_rows,
           &row_pipeline_etree_ready_threads,
+          &pipeline_etree_prefactor_rows,
+          &pipeline_etree_prefactor_wait_rows,
+          &pipeline_etree_prefactor_wait_deps,
           &pipeline_supernode_update_groups,
           &pipeline_supernode_update_rows,
           &pipeline_supernode_panel_update_groups,
@@ -47844,6 +47654,13 @@ static int kls_row_first_parallel_factor_block(
       row_pipeline_rows = active_rows;
       row_pipeline_threads = row_pipeline_etree_ready_threads;
       row_pipeline_etree_ready_rows = pipeline_etree_ready_rows;
+      row_pipeline_etree_prefactor_rows = pipeline_etree_prefactor_rows;
+      row_pipeline_etree_prefactor_threads =
+        row_pipeline_etree_ready_threads;
+      row_pipeline_etree_prefactor_wait_rows =
+        pipeline_etree_prefactor_wait_rows;
+      row_pipeline_etree_prefactor_wait_deps =
+        pipeline_etree_prefactor_wait_deps;
     } else {
       kls_row_first_supernode_panel_cache_reset_active(
         &row_supernode_panel_cache, &row_workspace, nk, &open_panel_start,
@@ -47943,7 +47760,11 @@ static int kls_row_first_parallel_factor_block(
     row_pipeline_prefix_rows, row_pipeline_suffix_rows,
     row_pipeline_gap_rows,
     row_pipeline_pivot_tail_rows, row_pipeline_pivot_restarts,
-    row_pipeline_etree_ready_rows, row_pipeline_etree_ready_threads);
+    row_pipeline_etree_ready_rows, row_pipeline_etree_ready_threads,
+    row_pipeline_etree_prefactor_rows,
+    row_pipeline_etree_prefactor_threads,
+    row_pipeline_etree_prefactor_wait_rows,
+    row_pipeline_etree_prefactor_wait_deps);
 
 cleanup:
   kls_row_first_supernode_panel_cache_free(&row_supernode_panel_cache);
@@ -48386,6 +48207,22 @@ static int kls_try_row_first_rebuild_rejected_block(
         shared.row_pipeline_etree_ready_rows;
       solver->fast_kls_block_restart_last_row_pipeline_etree_ready_threads =
         shared.row_pipeline_etree_ready_threads;
+    }
+    if (shared.row_pipeline_etree_prefactor_runs > 0u) {
+      solver->fast_kls_block_restart_last_row_pipeline_etree_prefactor = 1;
+      solver->fast_kls_block_restart_row_pipeline_etree_prefactor_count +=
+        shared.row_pipeline_etree_prefactor_runs;
+      solver->fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows =
+        shared.row_pipeline_etree_prefactor_rows;
+      solver
+        ->fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads =
+          shared.row_pipeline_etree_prefactor_threads;
+      solver
+        ->fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows =
+          shared.row_pipeline_etree_prefactor_wait_rows;
+      solver
+        ->fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps =
+          shared.row_pipeline_etree_prefactor_wait_deps;
     }
     if (shared.block_pipeline_separator_tail_scope) {
       solver
