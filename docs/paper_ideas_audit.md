@@ -239,8 +239,10 @@ ready queue and KLS-first row-up-looking pivot path can consume those retained
 components even when the separator map covers the dominant BTF block rather
 than the full matrix, provided the accepted symbolic range can be matched
 uniquely. This is still not evidence that ordering alone closes the gap because
-the retained separator queues are not yet consumed by a checked-tail numeric
-kernel.
+the retained separator queues only became useful after KLS connected them to
+the row numeric consumers; the remaining gap is no longer the queue metadata
+itself, but CKTSO's complete pivoting ETree-tail scheduler and production
+row/supernode numeric kernels.
 The CKTSO paper in `refs/` is explicit that CKTSO's core factorization is a
 row-major sparse up-looking factorization, and that the fast path combines
 guessed EGraph pivot-checked refactorization with an ETree-scheduled pipelined
@@ -667,12 +669,13 @@ design work, not benchmark-specific tuning.
   KLS-owned pivoted kernel as full block restarts. KLS still does not implement
   the complete CKTSO fast-factor scheduler around that tail executor.
 - SubtreeLU-style nested-dissection metadata is now retained from accepted
-  METIS `NodeNDP` analyses as private/pipeline component queues, and the
-  experimental row-refactor ready queue can consume the full-factor map for
-  separator-private initial queues. KLS-first pivoting row-up factorization
-  now consumes that map through a validated Algorithm 6-style
-  private/pipeline splitter, but checked-tail factor/refactor work still does
-  not use the retained queues.
+  METIS `NodeNDP` analyses as private/pipeline component queues. The
+  experimental no-pivot row-refactor ready queue, checked row fast/refactor
+  path, and KLS-first pivoting row-up factorization can all consume that map
+  through validated Algorithm 6-style private/pipeline splitters. The remaining
+  separator-side gap is not queue retention anymore; it is using comparable
+  scheduling inside CKTSO's complete ETree-descendant pivoting-tail executor and
+  broader production row/supernode numeric storage.
 
 ## Not Implemented Yet
 
