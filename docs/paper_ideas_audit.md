@@ -4683,21 +4683,33 @@ executor, but it directly applies the paper's distinction between unfinished
 EGraph nodes and ETree-descendant pivoting-tail work instead of treating all
 safe prefix-current rejects as whole-block repairs.
 
-The first-factor path was then moved closer to the paper instead of leaving it
-as an opt-in experiment. Unset `KLS_ENABLE_KLS_FIRST_FACTOR` now means
-conservative auto: large eligible symbolic blocks try the KLS-owned sparse
-row-up-looking first factor before falling back to KLU, while `0` remains a hard
-off switch and `1` still forces the attempt. More importantly for the
-static-pivoting rows called out by the gap decomposition, an accepted pre-static
-row-matching candidate can now replay its selected symbolic/value state through
-the KLS row-up factor after the existing KLU trial has accepted the candidate.
-If the replay fails, KLS restores the accepted trial numeric; if it succeeds,
+The first-factor path was then moved closer to the paper by adding an explicit
+KLS-owned row-up-looking scaffold. `KLS_ENABLE_KLS_FIRST_FACTOR=1` forces large
+eligible symbolic blocks through that scaffold before falling back to KLU, while
+`0` remains a hard off switch. The default cold first factor has since been
+moved back to the accepted KLU/static path for broad large cases: focused
+CKTSO-gap checks showed that automatic KLS-first cold starts spent substantially
+longer in the initial factor without reducing repeated EGraph refactor time
+enough to pay for it. The remaining automatic cold-start exception is
+structural rather than matrix-named: low-density moderate dominant-BTF matrices
+with thousands of fringe blocks and an AMD/auto ordering can still use the
+row-up scaffold, because disabling it sent `onetone2` into the 120 s
+first-cycle timeout while the row-up path completed. Denser many-BTF relatives
+such as `onetone1`, and larger dominant-block cases such as `rajat28`, stay on
+the KLU/static path because the row-up exception regressed them in focused
+checks. More importantly for static-pivoting and recovery states in that same
+low-density many-BTF class, an accepted pre-static row-matching candidate can
+still replay through the KLS row-up factor in automatic mode unless
+`KLS_ENABLE_KLS_FIRST_FACTOR=0` hard-disables it; this keeps those static-match
+states from returning to a KLU numeric that can stall the first SPICE cycle. If
+the replay fails, KLS restores the accepted trial numeric; if it succeeds,
 `initial_factor_path` reports `kls_first` and row-major mirrors are prepared as
 for an ordinary KLS-first factor. This does not remove the KLU trial used to
 score static-pivot candidates, and it does not implement CKTSO's parallel
-row-up/EGraph first-factor executor, but it removes a direct KLU-storage return
-from accepted first-factor states and makes the row-up engine a production
-candidate for the large cases the papers target.
+row-up/EGraph first-factor executor, but it keeps the row-up engine available
+for low-density moderate many-BTF cold starts, static-match recovery, and explicit
+production-candidate experiments rather than as a default cold replacement for
+broad CKTSO-gap runs.
 
 The row-up first factor now also keeps its row-oriented product alive for the
 next phase. While packing the accepted factors into the KLU-compatible numeric

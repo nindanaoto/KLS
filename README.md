@@ -135,28 +135,32 @@ JSON includes `initial_factor_path` and `last_factor_path`; values such as
 `klu_first` or `klu_fallback` mean the factorization was handed to the
 KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
 retained pattern through the checked fast path. Unset
-`KLS_ENABLE_KLS_FIRST_FACTOR` now means a conservative automatic mode: large
-eligible first factorizations try KLS-owned row-up-looking factorization before
-KLU, `KLS_ENABLE_KLS_FIRST_FACTOR=0` keeps the old KLU-first behavior, and
-`KLS_ENABLE_KLS_FIRST_FACTOR=1` forces the KLS-owned scaffold when possible.
-Checked fast-factor pivot-reject recovery can still try a quality-checked
-KLS-first rebuild before KLU fallback in automatic mode; set
-`KLS_ENABLE_KLS_FIRST_FACTOR=0` to disable that recovery branch too.
-Automatic mode still skips very large scaled single-BTF-block states unless
-the accepted analysis retained a global separator private/pipeline row queue.
-That keeps natural or otherwise unpartitioned scaled single-block systems on
-the accepted KLU/static first factor, while allowing the KLS-owned row-up path
-only when the SubtreeLU/CKTSO-style parallel separator executor is available.
-Benchmark JSON reports guarded skips as
-`kls_first_auto_skipped_scaled_single_block_count`.
-It reports `kls_first` when it successfully assembles KLU-compatible numeric
+`KLS_ENABLE_KLS_FIRST_FACTOR` keeps the production cold first factor on the
+KLU/static path for broad large cases, with a structural exception for
+low-density moderate dominant-BTF matrices with many fringe blocks where the
+KLU/static numeric can stall. `KLS_ENABLE_KLS_FIRST_FACTOR=1` forces the
+KLS-owned row-up-looking
+scaffold when possible, and `KLS_ENABLE_KLS_FIRST_FACTOR=0` keeps the hard
+KLU-first behavior. Checked fast-factor pivot-reject recovery can still try a
+quality-checked KLS-first rebuild before KLU fallback in automatic mode, and
+accepted pre-static row-matching candidates in the same low-density many-BTF
+class may replay through the same row-up bridge when that avoids a slow
+KLU/static numeric state. Set
+`KLS_ENABLE_KLS_FIRST_FACTOR=0` to disable those recovery branches too. The
+scaffold remains useful for paper-algorithm experiments, but it is not the
+default cold first-factor replacement for broad CKTSO-gap cases until it is
+faster than the accepted KLU/static numeric there.
+Benchmark JSON reports `kls_first` when the forced scaffold successfully
+assembles KLU-compatible numeric
 storage. For eligible no-scale or KLU row-scaled matrices, that path first
 tries a KLS-owned sparse row-major up-looking first factor over each BTF
 diagonal block, matching CKTSO Algorithm 1's row orientation before packing the
 accepted factors for the existing solve/refactor interfaces. Accepted
 pre-static row-matching candidates can also replay their selected symbolic and
-value state through this row-up factor instead of returning with the KLU-built
-trial numeric. When a row diagonal fails the threshold against the row's largest
+value state through this row-up factor when the recovery gate allows it,
+instead of returning with a KLU-built trial numeric that is slow or unsafe for
+the repeated SPICE cycle. When a row diagonal fails the threshold against the
+row's largest
 U-tail entry, this bridge exchanges the active block-local column with that
 largest entry, publishes the accepted `Q` order, and continues in KLS-owned
 row-major storage. Benchmark stats report this direct bridge as

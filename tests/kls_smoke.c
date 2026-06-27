@@ -9166,6 +9166,8 @@ static int test_pre_static_pivoting_with_scaling(void) {
       ok = 0;
     }
   }
+  const int64_t row_solve_runs_before_refactor =
+    stats.row_refactor_row_solve_run_count;
   if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
     ok = 0;
@@ -9199,13 +9201,16 @@ static int test_pre_static_pivoting_with_scaling(void) {
   if (ok && (stats.row_refactor_last_run != 1 ||
              stats.row_refactor_values_dirty != 1 ||
              stats.row_refactor_last_row_solve != 1 ||
-             stats.row_refactor_row_solve_run_count != 2)) {
+             stats.row_refactor_row_solve_run_count <
+               row_solve_runs_before_refactor + 2)) {
     fprintf(stderr,
             "scaled pre-static pivoting did not use dirty row-major solves:"
-            " row_run=%d dirty=%d row_solve=%d/%" PRId64 "\n",
+            " row_run=%d dirty=%d row_solve=%d/%" PRId64
+            " before=%" PRId64 "\n",
             stats.row_refactor_last_run, stats.row_refactor_values_dirty,
             stats.row_refactor_last_row_solve,
-            stats.row_refactor_row_solve_run_count);
+            stats.row_refactor_row_solve_run_count,
+            row_solve_runs_before_refactor);
     ok = 0;
   }
   for (int32_t i = 0; ok && i < n; ++i) {
@@ -11920,7 +11925,7 @@ static int test_row_refactor_off_blocks_auto_kls_first_refactor(void) {
   return ok;
 }
 
-static int test_auto_kls_first_factor_large_block(void) {
+static int test_default_keeps_kls_first_factor_off(void) {
   const int32_t n = 30000;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
   int32_t *ai = (int32_t *)malloc((size_t)n * sizeof(*ai));
@@ -11975,25 +11980,25 @@ static int test_auto_kls_first_factor_large_block(void) {
   if (ok && !require_ok(kls_create(&solver), "create")) ok = 0;
   if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
                                         &options),
-                        "analyze auto KLS first factor")) ok = 0;
+                        "analyze default KLU first factor")) ok = 0;
   if (ok && !require_ok(kls_factor(solver, ax),
-                        "factor auto KLS first factor")) ok = 0;
+                        "factor default KLU first factor")) ok = 0;
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                        "solve auto KLS first factor")) ok = 0;
+                        "solve default KLU first factor")) ok = 0;
 
   kls_stats stats;
   memset(&stats, 0, sizeof(stats));
   stats.struct_size = sizeof(stats);
   if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats auto KLS first factor")) ok = 0;
-  if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
-             stats.kls_first_last_row_uplooking_columns != n ||
-             stats.kls_first_row_uplooking_column_count < n ||
-             stats.kls_first_last_row_refactor_seeded_rows != n ||
-             stats.kls_first_row_refactor_seeded_row_count < n ||
+                        "stats default KLU first factor")) ok = 0;
+  if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLU_FIRST ||
+             stats.kls_first_last_row_uplooking_columns != 0 ||
+             stats.kls_first_row_uplooking_column_count != 0 ||
+             stats.kls_first_last_row_refactor_seeded_rows != 0 ||
+             stats.kls_first_row_refactor_seeded_row_count != 0 ||
              stats.selected_btf != 0 || stats.selected_scale != 0)) {
     fprintf(stderr,
-            "unexpected auto KLS-first stats: path=%s, row_cols=%" PRId64
+            "unexpected default first-factor stats: path=%s, row_cols=%" PRId64
             "/%" PRId64 ", row_seed=%" PRId64 "/%" PRId64
             ", btf=%d, scale=%d\n",
             kls_factor_path_name(stats.last_factor_path),
@@ -12007,7 +12012,8 @@ static int test_auto_kls_first_factor_large_block(void) {
   for (int32_t i = 0; ok && i < n; ++i) {
     if (!close_enough(x[i], expected[i])) {
       fprintf(stderr,
-              "unexpected auto KLS-first solution at %d: %.17g != %.17g\n",
+              "unexpected default first-factor solution at %d:"
+              " %.17g != %.17g\n",
               (int)i, x[i], expected[i]);
       ok = 0;
     }
@@ -12912,7 +12918,7 @@ static int test_auto_kls_first_skips_scaled_single_block(void) {
   return ok;
 }
 
-static int test_auto_kls_first_scaled_single_block_separator_queue(void) {
+static int test_forced_kls_first_scaled_single_block_separator_queue(void) {
   const int32_t n = 150000;
   const int32_t nnz = 3 * n - 2;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
@@ -12986,8 +12992,8 @@ static int test_auto_kls_first_scaled_single_block_separator_queue(void) {
     fprintf(stderr, "failed to save KLS_ENABLE_KLS_FIRST_FACTOR\n");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_KLS_FIRST_FACTOR") != 0) {
-    perror("unsetenv KLS_ENABLE_KLS_FIRST_FACTOR");
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
     ok = 0;
   }
   if (ok && !require_ok(kls_create(&solver),
@@ -15141,7 +15147,7 @@ int main(void) {
   if (!test_row_refactor_off_blocks_auto_kls_first_refactor()) {
     return EXIT_FAILURE;
   }
-  if (!test_auto_kls_first_factor_large_block()) {
+  if (!test_default_keeps_kls_first_factor_off()) {
     return EXIT_FAILURE;
   }
   if (!test_kls_first_separator_queue_plan()) {
@@ -15156,7 +15162,7 @@ int main(void) {
   if (!test_auto_kls_first_skips_scaled_single_block()) {
     return EXIT_FAILURE;
   }
-  if (!test_auto_kls_first_scaled_single_block_separator_queue()) {
+  if (!test_forced_kls_first_scaled_single_block_separator_queue()) {
     return EXIT_FAILURE;
   }
   if (!test_pre_static_replays_kls_first_factor()) {

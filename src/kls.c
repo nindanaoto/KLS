@@ -985,6 +985,7 @@ static int kls_try_rebuild_current_numeric_with_kls_first_mode(
   double *numeric_values,
   double *elapsed,
   int force);
+static int kls_should_try_first_factor_recovery(kls_solver *solver);
 static int kls_try_row_first_rebuild_rejected_block(
   kls_solver *solver,
   double *numeric_values,
@@ -17286,6 +17287,9 @@ static int kls_try_fast_reject_kls_first_rebuild(kls_solver *solver,
   if (solver == NULL || numeric_values == NULL) {
     return 0;
   }
+  if (!kls_should_try_first_factor_recovery(solver)) {
+    return 0;
+  }
   if (!kls_try_rebuild_current_numeric_with_kls_first_mode(
         solver, numeric_values, NULL, 1) ||
       solver->common.status < TRILINOS_KLU_OK ||
@@ -24141,6 +24145,19 @@ static int kls_auto_first_factor_scaled_single_block_risk(
   return !kls_auto_first_factor_has_separator_parallel_row_up(solver);
 }
 
+static int kls_auto_first_factor_moderate_many_btf(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->nblocks < 1024u ||
+      solver->symbolic->maxblock < 30000u ||
+      solver->symbolic->maxblock > 50000u ||
+      solver->symbolic->maxblock * 5u < solver->n * 4u ||
+      solver->nnz > 8u * solver->n) {
+    return 0;
+  }
+  return solver->options.ordering == KLS_ORDERING_AUTO ||
+         solver->options.ordering == KLS_ORDERING_AMD;
+}
+
 static int kls_auto_first_factor_should_run(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->nblocks == 0u || solver->symbolic->maxblock < 30000u ||
@@ -24162,7 +24179,19 @@ static int kls_auto_first_factor_should_run(kls_solver *solver) {
     ++solver->kls_first_auto_skipped_scaled_single_block_count;
     return 0;
   }
-  return 1;
+  if (kls_auto_first_factor_moderate_many_btf(solver)) {
+    return 1;
+  }
+  /*
+   * The row-up first-factor scaffold is still not a production replacement for
+   * the KLU/static first factor on large METIS/single-block CKTSO-gap rows.
+   * Automatic cold-start use there adds substantial initial-factor cost without
+   * reducing the repeated EGraph refactor enough to pay for it. Keep it
+   * forceable for experiments and keep the separate checked-reject rebuild path
+   * available, but do not let unset KLS_ENABLE_KLS_FIRST_FACTOR broadly replace
+   * an accepted KLU numeric.
+   */
+  return 0;
 }
 
 static int kls_should_try_first_factor(kls_solver *solver) {
@@ -24173,6 +24202,16 @@ static int kls_should_try_first_factor(kls_solver *solver) {
     return 0;
   }
   return kls_auto_first_factor_should_run(solver);
+}
+
+static int kls_should_try_first_factor_recovery(kls_solver *solver) {
+  if (kls_first_factor_env_enabled()) {
+    return 1;
+  }
+  if (kls_first_factor_env_disabled()) {
+    return 0;
+  }
+  return kls_auto_first_factor_moderate_many_btf(solver);
 }
 
 static int kls_row_solve_from_numeric_env_enabled(void) {
@@ -52182,8 +52221,9 @@ int kls_factor(kls_solver *solver, const double *values) {
     if (solver->numeric != NULL) {
       numeric_values = solver->values != NULL ? solver->values : numeric_values;
       const int kls_first_factor_used =
-        kls_try_rebuild_current_numeric_with_kls_first(solver, numeric_values,
-                                                       &elapsed);
+        kls_should_try_first_factor_recovery(solver) &&
+        kls_try_rebuild_current_numeric_with_kls_first_mode(
+          solver, numeric_values, &elapsed, 1);
       kls_set_last_factor_path(solver,
                                kls_first_factor_used
                                  ? KLS_FACTOR_PATH_KLS_FIRST
