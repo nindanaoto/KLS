@@ -428,9 +428,15 @@ new KLS-owned symbolic/numeric machinery:
   publishes that pivot row under the ordered pipeline lock, updates both
   committed and phase-local prefix U entries for the column exchange, advances
   a column-order epoch, and makes speculative suffix rows that began under an
-  older epoch discard and retry inside the same guarded pipeline phase. KLS
-  still lacks production coarse BLAS supernode storage and a checked-tail
-  factor/refactor queue consumer.
+  older epoch discard and retry inside the same guarded pipeline phase.
+  Separator-covered fast-factor block repairs now also try that Algorithm
+  6-style split directly: the repaired block is remapped into private rows plus
+  collapsed separator-pipeline roots, private ownership is validated after the
+  remap, validated private rows run concurrently, and the separator roots finish
+  through the restartable pivot-capable row pipeline. If the private proof is
+  unsafe, KLS keeps the repaired block on the ordinary full row pipeline. KLS
+  still lacks production coarse BLAS supernode storage and a complete
+  checked-tail factor/refactor queue consumer.
 - Broader supernodal row/segment updates in the sparse up-looking executor.
   KLS has exact-pattern, ragged single-producer, and default structural and
   work-gated fragmented multi-producer dense-panel updates, but these are
@@ -671,11 +677,12 @@ design work, not benchmark-specific tuning.
 - SubtreeLU-style nested-dissection metadata is now retained from accepted
   METIS `NodeNDP` analyses as private/pipeline component queues. The
   experimental no-pivot row-refactor ready queue, checked row fast/refactor
-  path, and KLS-first pivoting row-up factorization can all consume that map
-  through validated Algorithm 6-style private/pipeline splitters. The remaining
-  separator-side gap is not queue retention anymore; it is using comparable
-  scheduling inside CKTSO's complete ETree-descendant pivoting-tail executor and
-  broader production row/supernode numeric storage.
+  path, KLS-first pivoting row-up factorization, and separator-covered
+  fast-factor block repair can all consume that map through validated Algorithm
+  6-style private/pipeline splitters. The remaining separator-side gap is not
+  queue retention anymore; it is using comparable scheduling inside CKTSO's
+  complete ETree-descendant pivoting-tail executor and broader production
+  row/supernode numeric storage.
 
 ## Not Implemented Yet
 
@@ -691,7 +698,8 @@ design work, not benchmark-specific tuning.
 - CKTSO's complete guessed-EGraph interruption scheduler around pipelined
   ETree-descendant tail factorization with pivoting after a pivot-check failure.
 - SubtreeLU separator-tree collapse for checked-tail and refactor pivoting
-  kernels outside the KLS-first row-up path.
+  kernels outside the KLS-first row-up and separator-covered fast-factor
+  block-repair paths.
 - Broader/default SubtreeLU FLOP-balanced separator-tree partitioning for
   refactorization across BTF forests and checked-tail kernels.
 - SubtreeLU constrained pivot search within nested-dissection subdomains.
@@ -5249,6 +5257,27 @@ paper-algorithm overlap with
 `fast_kls_block_restart_row_pipeline_separator_tail_scope_count`, and
 `fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows`.
 
+For separator-covered rejects where the repaired block can use the whole
+retained separator tree, KLS now tries the Algorithm 6-style split more
+directly instead of immediately reducing the repair to the older retained
+ETree-tail active mask. The block-local row and column order is remapped into
+private rows followed by collapsed separator-pipeline rows, the private
+ownership proof is checked against the remapped row dependencies, validated
+private rows execute in parallel worker-local entries, and the pipeline roots
+finish through the restartable pivot-capable row pipeline. If the private proof
+or private phase is not safe, the same remapped block remains eligible for the
+ordinary full row-pipeline repair rather than accepting unsafe private work.
+The smoke suite now forces this with a METIS-ordered tridiagonal fast-factor
+reject and requires the partitioned separator queue counters. Benchmark output
+records the accepted full-block separator repair through
+`fast_kls_block_restart_last_row_pipeline_separator_queue`,
+`fast_kls_block_restart_row_pipeline_separator_queue_count`,
+`fast_kls_block_restart_last_row_pipeline_separator_private_rows`,
+`fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows`,
+`fast_kls_block_restart_last_row_pipeline_separator_private_threads`,
+`fast_kls_block_restart_last_row_pipeline_separator_partitioned`, and
+`fast_kls_block_restart_last_row_pipeline_separator_split_components`.
+
 The serial fallback now consumes the same retained topological tail envelope
 instead of forcing the failed pivot to be the restart boundary. When the
 retained ETree-descendant plan is non-suffix, KLS builds the exact active mask
@@ -5456,5 +5485,8 @@ pipeline. Benchmark JSON and smoke coverage expose the path through
 `kls_first_separator_queue_partitioned_count`, and
 `kls_first_last_separator_queue_split_components`. This closes the direct
 KLS-first gap where the pivoting first factor had Algorithm 3 execution but not
-the paper's Algorithm 6 separator split; checked-tail/refactor pivoting
-consumers and production coarse supernode storage remain open.
+the paper's Algorithm 6 separator split. Separator-covered fast-factor block
+repair now uses the same split for full-block rejected repairs, with dedicated
+`fast_kls_block_restart_*_separator_queue` counters. General refactor pivoting,
+the complete CKTSO checked-tail scheduler around guessed ETree interruption,
+and production coarse supernode storage remain open.

@@ -559,10 +559,28 @@ reports
 `fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows`, and
 `fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps`, while
 the existing pivot-epoch counters report the serialized descendant rows.
+For rejected blocks fully covered by a retained separator tree, KLS now tries
+the same SubtreeLU Algorithm 6-style private/pipeline split used by the
+KLS-first path before installing the older ETree-tail active mask. The repair
+planner remaps the block-local row/column order into private rows followed by
+collapsed separator-pipeline rows, validates private ownership after that
+remap, runs proven-private rows concurrently, and finishes the separator roots
+with the restartable pivot-capable row pipeline. If private ownership or the
+private phase cannot be proven safe, the block stays on the ordinary full
+row-pipeline repair path in the separator order. Accepted separator-queue
+repairs report
+`fast_kls_block_restart_last_row_pipeline_separator_queue`,
+`fast_kls_block_restart_row_pipeline_separator_queue_count`,
+`fast_kls_block_restart_last_row_pipeline_separator_private_rows`,
+`fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows`,
+`fast_kls_block_restart_last_row_pipeline_separator_private_threads`,
+`fast_kls_block_restart_last_row_pipeline_separator_partitioned`, and
+`fast_kls_block_restart_last_row_pipeline_separator_split_components`.
 Suffix-shaped
 and BTF suffix repairs still use the ordered pivot-capable row pipeline, so this
-is a guarded CKTSO Algorithm 5 prefactor/postfactorization step for retained
-tail worklists rather than the full production ETree-descendant scheduler.
+is a guarded CKTSO Algorithm 5 prefactor/postfactorization step plus a
+SubtreeLU separator full-block repair, rather than the full production
+ETree-descendant scheduler.
 Unless `KLS_ENABLE_CHECKED_ROW_REFACTOR=0` explicitly disables it, the
 experimental KLS-owned row/segment refactor now runs as the first checked
 fast-factor attempt and can use its parallel row scheduler when multiple
@@ -977,6 +995,13 @@ Benchmark stats report `fast_rejected_pivot`,
 `fast_kls_block_restart_last_row_pipeline_separator_tail_scope`,
 `fast_kls_block_restart_row_pipeline_separator_tail_scope_count`,
 `fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows`,
+`fast_kls_block_restart_last_row_pipeline_separator_queue`,
+`fast_kls_block_restart_row_pipeline_separator_queue_count`,
+`fast_kls_block_restart_last_row_pipeline_separator_private_rows`,
+`fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows`,
+`fast_kls_block_restart_last_row_pipeline_separator_private_threads`,
+`fast_kls_block_restart_last_row_pipeline_separator_partitioned`,
+`fast_kls_block_restart_last_row_pipeline_separator_split_components`,
 `fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`,
 `fast_kls_block_restart_last_row_pipeline_pivot_restarts`,
 `fast_kls_block_restart_last_row_pipeline_supernode_update_groups`,

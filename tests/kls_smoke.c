@@ -286,6 +286,86 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
             stats->fast_kls_block_restart_last_row_pipeline_rows);
     return 0;
   }
+  if ((stats->fast_kls_block_restart_last_row_pipeline_separator_queue != 0 &&
+       stats->fast_kls_block_restart_last_row_pipeline_separator_queue != 1) ||
+      stats->fast_kls_block_restart_row_pipeline_separator_queue_count < 0 ||
+      stats->fast_kls_block_restart_last_row_pipeline_separator_private_rows <
+        0 ||
+      stats->fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows <
+        0 ||
+      stats->fast_kls_block_restart_last_row_pipeline_separator_private_threads <
+        0 ||
+      (stats
+         ->fast_kls_block_restart_last_row_pipeline_separator_partitioned !=
+         0 &&
+       stats
+         ->fast_kls_block_restart_last_row_pipeline_separator_partitioned !=
+         1) ||
+      stats
+        ->fast_kls_block_restart_last_row_pipeline_separator_split_components <
+        0 ||
+      (stats->fast_kls_block_restart_last_row_pipeline_separator_queue &&
+       (stats->fast_kls_block_restart_row_pipeline_separator_queue_count <= 0 ||
+        stats
+          ->fast_kls_block_restart_last_row_pipeline_separator_private_rows <=
+          0 ||
+        stats
+          ->fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows <=
+          0 ||
+        stats
+          ->fast_kls_block_restart_last_row_pipeline_separator_private_threads <=
+          0 ||
+        stats->fast_kls_block_restart_last_row_pipeline != 1 ||
+        stats
+            ->fast_kls_block_restart_last_row_pipeline_separator_private_rows +
+          stats
+            ->fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows !=
+          stats->fast_kls_block_restart_last_row_pipeline_rows ||
+        (stats
+           ->fast_kls_block_restart_last_row_pipeline_separator_partitioned &&
+         stats
+           ->fast_kls_block_restart_last_row_pipeline_separator_split_components <=
+           0))) ||
+      (!stats->fast_kls_block_restart_last_row_pipeline_separator_queue &&
+       (stats->fast_kls_block_restart_row_pipeline_separator_queue_count != 0 ||
+        stats
+          ->fast_kls_block_restart_last_row_pipeline_separator_private_rows !=
+          0 ||
+        stats
+          ->fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows !=
+          0 ||
+        stats
+          ->fast_kls_block_restart_last_row_pipeline_separator_private_threads !=
+          0 ||
+        stats
+          ->fast_kls_block_restart_last_row_pipeline_separator_partitioned !=
+          0 ||
+        stats
+          ->fast_kls_block_restart_last_row_pipeline_separator_split_components !=
+          0))) {
+    fprintf(stderr,
+            "unexpected separator queue repair stats for %s: queue=%d/%" PRId64
+            ", rows=%" PRId64 "/%" PRId64 ", threads=%" PRId64
+            ", partitioned=%d, split=%" PRId64 ", pipeline=%d"
+            ", pipeline_rows=%" PRId64 "\n",
+            what,
+            stats->fast_kls_block_restart_last_row_pipeline_separator_queue,
+            stats
+              ->fast_kls_block_restart_row_pipeline_separator_queue_count,
+            stats
+              ->fast_kls_block_restart_last_row_pipeline_separator_private_rows,
+            stats
+              ->fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows,
+            stats
+              ->fast_kls_block_restart_last_row_pipeline_separator_private_threads,
+            stats
+              ->fast_kls_block_restart_last_row_pipeline_separator_partitioned,
+            stats
+              ->fast_kls_block_restart_last_row_pipeline_separator_split_components,
+            stats->fast_kls_block_restart_last_row_pipeline,
+            stats->fast_kls_block_restart_last_row_pipeline_rows);
+    return 0;
+  }
   return 1;
 }
 
@@ -12051,6 +12131,249 @@ cleanup:
   return ok;
 }
 
+static int test_fast_factor_separator_queue_repair(void) {
+  const int32_t n = 30000;
+  const int32_t nnz = 3 * n - 2;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax0 = (double *)malloc((size_t)nnz * sizeof(*ax0));
+  double *ax1 = (double *)malloc((size_t)nnz * sizeof(*ax1));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
+      b == NULL || x == NULL || expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    expected[col] = 1.0 + (double)(col % 5);
+    if (col > 0) {
+      ai[p] = col - 1;
+      ax0[p] = -1.0;
+      ax1[p] = -1.0;
+      p++;
+    }
+    ai[p] = col;
+    ax0[p] = 4.0;
+    ax1[p] = (col % 97 == 0) ? 1.0e-10 : 4.0;
+    p++;
+    if (col + 1 < n) {
+      ai[p] = col + 1;
+      ax0[p] = -1.0;
+      ax1[p] = -1.0;
+      p++;
+    }
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected separator repair nnz: %d/%d\n", p, nnz);
+    free(ap);
+    free(ai);
+    free(ax0);
+    free(ax1);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t q = ap[col]; q < ap[col + 1]; ++q) {
+      b[ai[q]] += ax1[q] * expected[col];
+    }
+  }
+
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first =
+    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
+  const int had_saved_first = saved_first_value != NULL;
+  const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
+  char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
+  const int had_saved_row = saved_row_value != NULL;
+  const char *saved_checked_value =
+    getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  char *saved_checked =
+    saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
+  const int had_saved_checked = saved_checked_value != NULL;
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_METIS;
+  options.use_btf = 0;
+  options.scale = 0;
+  options.pivot_tolerance = 0.1;
+  options.static_pivoting = 0;
+  options.threads = 4;
+
+  int ok = 1;
+  if ((had_saved_first && saved_first == NULL) ||
+      (had_saved_row && saved_row == NULL) ||
+      (had_saved_checked && saved_checked == NULL)) {
+    fprintf(stderr, "failed to save separator repair environment\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_create(&solver),
+                        "create separator repair")) {
+    ok = 0;
+  }
+  if (ok) {
+    const int analyze_status =
+      kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0, &options);
+    if (analyze_status == KLS_ERR_UNSUPPORTED) {
+      goto cleanup;
+    }
+    if (!require_ok(analyze_status, "analyze separator repair")) {
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor separator repair base")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "factor separator repair rejected")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve separator repair")) {
+    ok = 0;
+  }
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats separator repair")) {
+    ok = 0;
+  }
+  if (ok && (stats.build_has_metis != 1 ||
+             stats.last_factor_path != KLS_FACTOR_PATH_KLS_FAST_REFACTOR ||
+             stats.separator_analyzed_rows != n ||
+             stats.separator_component_count <= 1 ||
+             stats.fast_block_restarts < 1 ||
+             stats.fast_kls_block_restart_last_row_pipeline != 1 ||
+             stats.fast_kls_block_restart_last_row_pipeline_rows != n ||
+             stats.fast_kls_block_restart_last_row_pipeline_separator_queue !=
+               1 ||
+             stats.fast_kls_block_restart_row_pipeline_separator_queue_count <
+               1 ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_separator_private_rows <=
+               0 ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows <=
+               0 ||
+             stats
+                 .fast_kls_block_restart_last_row_pipeline_separator_private_rows +
+               stats
+                 .fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows !=
+               n ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_separator_private_threads <=
+               1 ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_separator_partitioned !=
+               1 ||
+             stats
+               .fast_kls_block_restart_last_row_pipeline_separator_split_components <=
+               0 ||
+             stats.selected_btf != 0 ||
+             stats.selected_scale != 0)) {
+    fprintf(stderr,
+            "unexpected separator repair stats: metis=%d, path=%s"
+            ", sep_rows=%" PRId64 ", components=%" PRId64
+            ", block_restarts=%d, rowpipe=%d/%" PRId64
+            ", sepq=%d/%" PRId64 ", rows=%" PRId64 "/%" PRId64
+            ", threads=%" PRId64 ", partitioned=%d, split=%" PRId64
+            ", btf=%d, scale=%d\n",
+            stats.build_has_metis,
+            kls_factor_path_name(stats.last_factor_path),
+            stats.separator_analyzed_rows,
+            stats.separator_component_count,
+            stats.fast_block_restarts,
+            stats.fast_kls_block_restart_last_row_pipeline,
+            stats.fast_kls_block_restart_last_row_pipeline_rows,
+            stats.fast_kls_block_restart_last_row_pipeline_separator_queue,
+            stats
+              .fast_kls_block_restart_row_pipeline_separator_queue_count,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_separator_private_rows,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_separator_private_threads,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_separator_partitioned,
+            stats
+              .fast_kls_block_restart_last_row_pipeline_separator_split_components,
+            stats.selected_btf,
+            stats.selected_scale);
+    ok = 0;
+  }
+  if (ok && !require_pivoting_tail_plan(&stats, "separator repair")) {
+    ok = 0;
+  }
+  if (ok && !require_tail_overcompute_bounds(&stats, "separator repair")) {
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "unexpected separator repair solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected[i]);
+      ok = 0;
+    }
+  }
+
+cleanup:
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
+                         saved_first)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_saved_row,
+                         saved_row)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
+                         had_saved_checked, saved_checked)) {
+    ok = 0;
+  }
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(x);
+  free(expected);
+  free(saved_first);
+  free(saved_row);
+  free(saved_checked);
+  return ok;
+}
+
 static int test_kls_first_separator_pipeline_pivot_epoch(void) {
   const int32_t nx = 180;
   const int32_t ny = 170;
@@ -14659,6 +14982,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_kls_first_separator_queue_plan()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_fast_factor_separator_queue_repair()) {
     return EXIT_FAILURE;
   }
   if (!test_kls_first_separator_pipeline_pivot_epoch()) {
