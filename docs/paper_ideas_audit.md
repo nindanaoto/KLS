@@ -5662,3 +5662,20 @@ repair now uses the same split for full-block rejected repairs, with dedicated
 `fast_kls_block_restart_*_separator_queue` counters. General refactor pivoting,
 the complete CKTSO checked-tail scheduler around guessed ETree interruption,
 and production coarse supernode storage remain open.
+
+The default EGraph refactor path now keeps the opt-in supernode numeric update
+probe out of the scalar dependency loop unless
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1` is set. Earlier CBLAS probes on the
+current CKTSO-gap focus rows recorded zero CBLAS update counters, because the
+existing BLAS gates already require large row/update shapes. The measurable
+default overhead was instead the disabled supernode hook itself: every U
+dependency called the probe only to return immediately. Hoisting the
+`supernode_numeric_updates` guard around the dependency probe and publish hook
+keeps the experimental supernode/CBLAS behavior available when requested, while
+the normal scalar EGraph kernel stays branch-light. A top-ten CKTSO-gap
+repeat-3 check improved the KLS cycle geomean from `4.3115s` to `4.2172s`
+against `build/kls_noauto_klsfirst_gap10_t4_r3_timeout120.jsonl`, with seven
+wins over 2%, two ties, and one small absolute loss on `gemat12`. This is a
+cleanup around a disabled paper-level experiment, not the missing CKTSO-scale
+storage/executor change: the same top rows remain about `2.54x` slower than the
+saved CKTSO medium artifact.

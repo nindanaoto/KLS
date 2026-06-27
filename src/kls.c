@@ -37519,16 +37519,19 @@ static int kls_egraph_refactor_single_unscaled_column(
   double *ux = u_values[k];
   UF_long ucol_len = numeric->Ulen[k];
   UF_long up = 0;
+  const int supernode_numeric_updates = shared->supernode_numeric_updates;
   while (up < ucol_len) {
-    const int supernode_status =
-      kls_egraph_refactor_try_supernode_dependency_run(
-        worker, 0u, k, k, &up, ucol_len, ui, ux, l_indices, l_values,
-        numeric->Llen, x, wait_for_dependencies);
-    if (supernode_status < 0) {
-      return 0;
-    }
-    if (supernode_status > 0) {
-      continue;
+    if (supernode_numeric_updates) {
+      const int supernode_status =
+        kls_egraph_refactor_try_supernode_dependency_run(
+          worker, 0u, k, k, &up, ucol_len, ui, ux, l_indices, l_values,
+          numeric->Llen, x, wait_for_dependencies);
+      if (supernode_status < 0) {
+        return 0;
+      }
+      if (supernode_status > 0) {
+        continue;
+      }
     }
     const UF_long j = ui[up];
     if (wait_for_dependencies &&
@@ -37583,7 +37586,9 @@ static int kls_egraph_refactor_single_unscaled_column(
     lx[p] = lij;
     x[i] = 0.0;
   }
-  kls_egraph_publish_supernode_panel_column(shared, k);
+  if (supernode_numeric_updates) {
+    kls_egraph_publish_supernode_panel_column(shared, k);
+  }
   return 1;
 }
 
@@ -37629,16 +37634,19 @@ static int kls_egraph_refactor_single_scaled_column(
   double *ux = u_values[k];
   UF_long ucol_len = numeric->Ulen[k];
   UF_long up = 0;
+  const int supernode_numeric_updates = shared->supernode_numeric_updates;
   while (up < ucol_len) {
-    const int supernode_status =
-      kls_egraph_refactor_try_supernode_dependency_run(
-        worker, 0u, k, k, &up, ucol_len, ui, ux, l_indices, l_values,
-        numeric->Llen, x, wait_for_dependencies);
-    if (supernode_status < 0) {
-      return 0;
-    }
-    if (supernode_status > 0) {
-      continue;
+    if (supernode_numeric_updates) {
+      const int supernode_status =
+        kls_egraph_refactor_try_supernode_dependency_run(
+          worker, 0u, k, k, &up, ucol_len, ui, ux, l_indices, l_values,
+          numeric->Llen, x, wait_for_dependencies);
+      if (supernode_status < 0) {
+        return 0;
+      }
+      if (supernode_status > 0) {
+        continue;
+      }
     }
     const UF_long j = ui[up];
     if (wait_for_dependencies &&
@@ -37693,7 +37701,9 @@ static int kls_egraph_refactor_single_scaled_column(
     lx[p] = lij;
     x[i] = 0.0;
   }
-  kls_egraph_publish_supernode_panel_column(shared, k);
+  if (supernode_numeric_updates) {
+    kls_egraph_publish_supernode_panel_column(shared, k);
+  }
   return 1;
 }
 
@@ -37765,16 +37775,19 @@ static int kls_egraph_refactor_btf_unscaled_column(
   double *ux = u_values[k];
   UF_long ucol_len = numeric->Ulen[k];
   UF_long up = 0;
+  const int supernode_numeric_updates = shared->supernode_numeric_updates;
   while (up < ucol_len) {
-    const int supernode_status =
-      kls_egraph_refactor_try_supernode_dependency_run(
-        worker, k1, k, local_k, &up, ucol_len, ui, ux, l_indices,
-        l_values, numeric->Llen, x, wait_for_dependencies);
-    if (supernode_status < 0) {
-      return 0;
-    }
-    if (supernode_status > 0) {
-      continue;
+    if (supernode_numeric_updates) {
+      const int supernode_status =
+        kls_egraph_refactor_try_supernode_dependency_run(
+          worker, k1, k, local_k, &up, ucol_len, ui, ux, l_indices,
+          l_values, numeric->Llen, x, wait_for_dependencies);
+      if (supernode_status < 0) {
+        return 0;
+      }
+      if (supernode_status > 0) {
+        continue;
+      }
     }
     const UF_long j = ui[up];
     if (wait_for_dependencies &&
@@ -37829,7 +37842,9 @@ static int kls_egraph_refactor_btf_unscaled_column(
     lx[p] = lij;
     x[i] = 0.0;
   }
-  kls_egraph_publish_supernode_panel_column(shared, k);
+  if (supernode_numeric_updates) {
+    kls_egraph_publish_supernode_panel_column(shared, k);
+  }
   return 1;
 }
 
@@ -38007,16 +38022,19 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   double *ux = u_values[k];
   UF_long ucol_len = ulen[local_k];
   UF_long up = 0u;
+  const int supernode_numeric_updates = shared->supernode_numeric_updates;
   while (up < ucol_len) {
-    const int supernode_status =
-      kls_egraph_refactor_try_supernode_dependency_run(
-        worker, k1, k, local_k, &up, ucol_len, ui, ux, l_indices,
-        l_values, numeric->Llen, x, wait_for_dependencies);
-    if (supernode_status < 0) {
-      return 0;
-    }
-    if (supernode_status > 0) {
-      continue;
+    if (supernode_numeric_updates) {
+      const int supernode_status =
+        kls_egraph_refactor_try_supernode_dependency_run(
+          worker, k1, k, local_k, &up, ucol_len, ui, ux, l_indices,
+          l_values, numeric->Llen, x, wait_for_dependencies);
+      if (supernode_status < 0) {
+        return 0;
+      }
+      if (supernode_status > 0) {
+        continue;
+      }
     }
     const UF_long j = ui[up];
     if (j >= local_k) {
@@ -38075,7 +38093,9 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     lx[p] = lij;
     x[i] = 0.0;
   }
-  kls_egraph_publish_supernode_panel_column(shared, k);
+  if (supernode_numeric_updates) {
+    kls_egraph_publish_supernode_panel_column(shared, k);
+  }
   return 1;
 }
 
