@@ -23511,10 +23511,13 @@ static int kls_row_refactor_env_disabled(void) {
   return value != NULL && value[0] == '0' && value[1] == '\0';
 }
 
-static int kls_checked_row_refactor_env_enabled(void) {
+static int kls_checked_row_refactor_env_disabled(void) {
   const char *value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
+  return value != NULL && value[0] == '0' && value[1] == '\0';
+}
+
+static int kls_checked_row_refactor_should_run(void) {
+  return !kls_checked_row_refactor_env_disabled();
 }
 
 static int kls_partial_supernode_pipeline_env_state(void) {
@@ -39257,7 +39260,7 @@ static int kls_mapped_refactor(kls_solver *solver,
     return -1;
   }
   if (solver->symbolic->nblocks == 1u) {
-    if (check_pivots && kls_checked_row_refactor_env_enabled()) {
+    if (check_pivots && kls_checked_row_refactor_should_run()) {
       if (solver->options.threads > 1) {
         const int parallel_row_status =
           kls_threaded_row_refactor_numeric(solver, numeric_values, 1);
@@ -40389,9 +40392,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   kls_clear_egraph_refactor_last_stats(solver);
   const int auto_row_refactor =
     kls_auto_row_refactor_should_run(solver);
-  if (check_pivots &&
-      (kls_checked_row_refactor_env_enabled() ||
-       auto_row_refactor)) {
+  if (check_pivots && kls_checked_row_refactor_should_run()) {
     if (solver->options.threads > 1) {
       const int parallel_row_status =
         kls_threaded_row_refactor_numeric(solver, numeric_values, 1);

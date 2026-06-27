@@ -8474,16 +8474,16 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  if (ok && unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
+    perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
     ok = 0;
   }
   if (ok && !require_ok(kls_factor(solver, ax1),
-                        "checked row-pipeline factor")) ok = 0;
+                        "default checked row-pipeline factor")) ok = 0;
   kls_stats checked_stats;
   checked_stats.struct_size = sizeof(checked_stats);
   if (ok && !require_ok(kls_get_stats(solver, &checked_stats),
-                        "stats checked row-pipeline factor")) {
+                        "stats default checked row-pipeline factor")) {
     ok = 0;
   }
   const int checked_expect_defer =

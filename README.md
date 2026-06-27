@@ -536,9 +536,11 @@ recomputed with pivoting, while structural gap-copy failures still fall back.
 Full-suffix root rejects still remain ordinary KLS block restarts. This is a
 local serial subset of CKTSO-style repair, not the full pipelined
 ETree-descendant scheduler.
-With `KLS_ENABLE_CHECKED_ROW_REFACTOR=1`, the experimental KLS-owned
-row/segment refactor can also run the checked fast-factor pass through its
-parallel row scheduler when multiple threads are available. A rejected
+Unless `KLS_ENABLE_CHECKED_ROW_REFACTOR=0` explicitly disables it, the
+experimental KLS-owned row/segment refactor now runs as the first checked
+fast-factor attempt and can use its parallel row scheduler when multiple
+threads are available. Setting `KLS_ENABLE_CHECKED_ROW_REFACTOR=1` remains a
+compatible explicit enable, but is no longer required. A rejected
 parallel row pass records the unsafe dependency pivot and falls back through
 the same block-repair path. Checked KLS-owned row passes test the guessed
 diagonal against the maximum absolute value in the current U row before
@@ -1281,7 +1283,6 @@ To generate those diagnostics across a manifest, `run_bench_suite.py` forwards
 the deterministic diagonal-stress controls accepted by `kls_bench`:
 
 ```sh
-env KLS_ENABLE_CHECKED_ROW_REFACTOR=1 \
 python3 scripts/run_bench_suite.py --kls-bench build/kls_bench \
   --matrix-dir data/suitesparse-paper-medium \
   --manifest bench/suitesparse_cktso_gap_manifest.txt \
