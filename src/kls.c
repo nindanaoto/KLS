@@ -37555,7 +37555,7 @@ static int kls_refresh_pivot_tail_preserved_block_columns(
     refresh_columns++;
   }
   if (refresh_columns == 0u) {
-    return 0;
+    return 1;
   }
 
   const int scaled = solver->common.scale > 0;
@@ -48350,9 +48350,8 @@ static int kls_row_first_parallel_factor_block(
     UF_long pipeline_etree_prefactor_wait_rows = 0;
     UF_long pipeline_etree_prefactor_wait_deps = 0;
     if (use_active_mask &&
+        active_rows > 1u &&
         shared->block_pipeline_etree_tail_order &&
-        solver->stats.fast_rejected_pivoting_tail_contiguous == 0 &&
-        solver->stats.fast_rejected_pivoting_tail_gap_columns > 0 &&
         kls_try_row_first_etree_ready_tail_repair(
           worker, block, k1, nk, &row_ctx, row_order, active_mask,
           active_rows, shared->block_pipeline_begin,

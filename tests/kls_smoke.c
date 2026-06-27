@@ -1569,6 +1569,19 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
              stats.fast_kls_block_restart_row_pipeline_count < 1 ||
              stats.fast_kls_block_restart_last_row_pipeline_rows !=
                stats.fast_rejected_pivoting_tail_columns ||
+             stats.fast_kls_block_restart_last_row_pipeline_etree_tail != 1 ||
+             stats.fast_kls_block_restart_row_pipeline_etree_tail_count < 1 ||
+             stats.fast_kls_block_restart_last_row_pipeline_etree_tail_rows !=
+               stats.fast_rejected_pivoting_tail_columns ||
+             stats.fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask !=
+               1 ||
+             stats.fast_rejected_pivoting_tail_columns < 2 ||
+             stats.fast_kls_block_restart_last_row_pipeline_etree_ready != 1 ||
+             stats.fast_kls_block_restart_row_pipeline_etree_ready_count < 1 ||
+             stats.fast_kls_block_restart_last_row_pipeline_etree_ready_rows !=
+               stats.fast_rejected_pivoting_tail_columns - 1 ||
+             stats.fast_kls_block_restart_last_row_pipeline_etree_ready_threads <
+               1 ||
              stats.fast_kls_block_restart_last_row_pipeline_prefix_rows +
                  stats.fast_kls_block_restart_last_row_pipeline_rows +
                  stats.fast_kls_block_restart_last_row_pipeline_suffix_rows !=
@@ -1590,6 +1603,7 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
             ", pipeline_suffix=%" PRId64
             ", etree_tail=%d/%" PRId64 ", etree_rows=%" PRId64
             ", etree_exact=%d"
+            ", etree_ready=%d/%" PRId64 "/%" PRId64 "/%" PRId64
             ", tail_cols=%" PRId64 ", seed=%" PRId64
             ", row_seed=%" PRId64 ", row_tail=%" PRId64
             ", tail_topo=%d\n",
@@ -1611,6 +1625,10 @@ static int test_parallel_checked_row_fast_factor_block_restart(void) {
             stats.fast_kls_block_restart_last_row_pipeline_etree_tail_rows,
             stats
               .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_ready,
+            stats.fast_kls_block_restart_row_pipeline_etree_ready_count,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_ready_rows,
+            stats.fast_kls_block_restart_last_row_pipeline_etree_ready_threads,
             stats.fast_rejected_pivoting_tail_columns,
             stats.fast_rejected_pivoting_tail_seed_columns,
             stats.fast_rejected_pivoting_tail_row_seed_columns,

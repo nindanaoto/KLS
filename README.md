@@ -533,10 +533,13 @@ column kernel, then runs the shorter pivoted tail envelope and counts it as a
 tail restart. Internal envelope gaps that can be copied unchanged are skipped;
 dependency-blocked internal gaps are promoted into the active tail and
 recomputed with pivoting, while structural gap-copy failures still fall back.
-Full-suffix root rejects still remain ordinary KLS block restarts. For a
-non-contiguous retained ETree mask with real gap columns, the KLS-owned repair
-now factors the boundary pivot row first and then runs the remaining active
-descendant rows through the retained row pipeline with an active ETree-rank map.
+Full-suffix root rejects still remain ordinary KLS block restarts. For any
+retained ETree mask with more than one active tail row, including contiguous
+unfinished tails, the KLS-owned repair now factors the boundary pivot row first
+and then runs the remaining active descendant rows through the retained row
+pipeline with an active ETree-rank map. When that retained mask covers the
+whole local repair envelope, the preserved-column refresh is treated as a
+successful no-op instead of rejecting the ETree-tail plan.
 Those descendants use the same prefactorization/postfactorization loop as the
 row-up-looking pipeline: finished dependencies are applied while earlier active
 tail rows are still completing, then skipped dependencies are finished before
@@ -558,8 +561,8 @@ reports
 the existing pivot-epoch counters report the serialized descendant rows.
 Suffix-shaped
 and BTF suffix repairs still use the ordered pivot-capable row pipeline, so this
-is a gapped-mask CKTSO Algorithm 5 prefactor/postfactorization step rather than
-the full production ETree-descendant scheduler.
+is a guarded CKTSO Algorithm 5 prefactor/postfactorization step for retained
+tail worklists rather than the full production ETree-descendant scheduler.
 Unless `KLS_ENABLE_CHECKED_ROW_REFACTOR=0` explicitly disables it, the
 experimental KLS-owned row/segment refactor now runs as the first checked
 fast-factor attempt and can use its parallel row scheduler when multiple

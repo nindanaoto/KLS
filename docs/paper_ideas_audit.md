@@ -5403,29 +5403,34 @@ seed to come from that unfinished set, with row-tail seeding bypassed. This
 still leaves the larger CKTSO executor gap open: the retained worklist is used
 by KLS's guarded row-first repair path, not by a full production tail scheduler.
 
-KLS now consumes that retained worklist more directly for the gapped-mask case.
-When the retained topological ETree tail is non-contiguous, the row-first repair
-first factors the boundary pivot row with the existing pivot-capable row kernel,
-then removes that completed boundary from the active mask and runs the remaining
+KLS now consumes that retained worklist more directly whenever the retained
+topological ETree tail has more than one active row. The row-first repair first
+factors the boundary pivot row with the existing pivot-capable row kernel, then
+removes that completed boundary from the active mask and runs the remaining
 active descendants through the retained row pipeline with an active-rank map
-over the ETree tail. The worker applies already finished dependencies before
-the row is publishable, waits for earlier active tail rows, and then applies the
-skipped dependencies before pivot check and publication. If a descendant row
-still needs a dynamic column exchange, the ETree-prefactor phase now treats that
-as a restartable pivot epoch: it serializes the pivot row with the same
+over the ETree tail. If the retained mask covers the whole local repair
+envelope, preserved-column refresh is now accepted as a successful no-op, so a
+full unfinished block does not fall back to the generic full-block row pipeline
+before the retained ETree executor can run. The worker applies already finished
+dependencies before the row is publishable, waits for earlier active tail rows,
+and then applies the skipped dependencies before pivot check and publication. If
+a descendant row still needs a dynamic column exchange, the ETree-prefactor
+phase treats that as a restartable pivot epoch: it serializes the pivot row with
+the same
 row-up-looking kernel, resets the row-up producer panel cache for the new column
 order, and resumes the remaining active descendants under the same retained
 ETree rank map instead of falling back out of the ETree-ready executor. The
-smoke fixture for a non-contiguous gap tail now requires
-`fast_kls_block_restart_last_row_pipeline_etree_ready=1`, four descendant rows,
-and `fast_kls_block_restart_last_row_pipeline_etree_prefactor=1` for those
-descendants after the boundary pivot, and a separate ETree-ready descendant
-pivot fixture requires both the ETree-ready counters and nonzero
+smoke fixtures now require the ETree-ready path for both a contiguous
+checked-row unfinished tail and a non-contiguous gap tail; the gapped fixture
+also requires `fast_kls_block_restart_last_row_pipeline_etree_prefactor=1`, and
+a separate ETree-ready descendant pivot fixture requires both the ETree-ready
+counters and nonzero
 `fast_kls_block_restart_last_row_pipeline_pivot_tail_rows`/restart counters.
 This fills a concrete CKTSO Algorithm 5 prefactor/postfactorization executor
-gap for active unfinished descendants, while suffix-shaped and BTF suffix
-repairs intentionally remain on the ordered pivot-capable row pipeline until
-the ETree scheduler handles those cases without changing pivot semantics.
+gap for active unfinished descendants, while singleton tails, suffix-shaped
+repairs without retained descendant work, and BTF suffix repairs intentionally
+remain on the ordered pivot-capable row pipeline until the ETree scheduler
+handles those cases without changing pivot semantics.
 
 KLS now also fills the NICSLU Algorithm 4 performance-model gap. After a
 numeric factorization, it walks the actual U-dependency graph in factor order,
