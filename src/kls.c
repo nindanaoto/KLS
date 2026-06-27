@@ -23635,6 +23635,10 @@ static int kls_prepare_row_refactor_row_dep_ready_queue_with_private(
       tail_count_out == NULL || initial_ready_out == NULL ||
       solver->row_refactor_group_count == 0u ||
       solver->row_refactor_group_ptr == NULL ||
+      solver->row_refactor_group_pred_count == NULL ||
+      solver->row_refactor_group_successor_ptr == NULL ||
+      (solver->row_refactor_group_dependency_edges > 0u &&
+       solver->row_refactor_group_successor_groups == NULL) ||
       solver->row_refactor_l_ptr == NULL ||
       solver->row_refactor_l_cols == NULL ||
       solver->row_refactor_row_group == NULL) {
@@ -23657,6 +23661,35 @@ static int kls_prepare_row_refactor_row_dep_ready_queue_with_private(
   }
 
   for (UF_long group = 0; group < group_count; ++group) {
+    const UF_long begin = solver->row_refactor_group_successor_ptr[group];
+    const UF_long end = solver->row_refactor_group_successor_ptr[group + 1u];
+    if (begin > end ||
+        end > solver->row_refactor_group_dependency_edges) {
+      return 0;
+    }
+    if (private_group_mask[group]) {
+      continue;
+    }
+    for (UF_long pos = begin; pos < end; ++pos) {
+      const UF_long successor =
+        solver->row_refactor_group_successor_groups[pos];
+      if (successor >= group_count) {
+        return 0;
+      }
+      if (private_group_mask[successor]) {
+        return 0;
+      }
+    }
+  }
+
+  for (UF_long group = 0; group < group_count; ++group) {
+    if (private_group_mask[group]) {
+      atomic_store_explicit(
+        &remaining_preds[group],
+        (unsigned long)solver->row_refactor_group_pred_count[group],
+        memory_order_relaxed);
+      continue;
+    }
     const UF_long row_begin = solver->row_refactor_group_ptr[group];
     const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
     if (row_begin >= row_end || row_end > solver->n) {
@@ -35219,6 +35252,43 @@ static int kls_row_refactor_finish_ready_group(
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
+    if (shared->row_pipeline_private_group_mask != NULL) {
+      if (solver->row_refactor_group_successor_ptr == NULL ||
+          (solver->row_refactor_group_dependency_edges > 0u &&
+           solver->row_refactor_group_successor_groups == NULL) ||
+          shared->row_pipeline_remaining_preds == NULL) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      const UF_long begin = solver->row_refactor_group_successor_ptr[group];
+      const UF_long end =
+        solver->row_refactor_group_successor_ptr[group + 1u];
+      if (begin > end ||
+          end > solver->row_refactor_group_dependency_edges) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      for (UF_long pos = begin; pos < end; ++pos) {
+        const UF_long successor =
+          solver->row_refactor_group_successor_groups[pos];
+        if (successor >= solver->row_refactor_group_count) {
+          kls_egraph_refactor_record_invalid(shared);
+          return 0;
+        }
+        if (!shared->row_pipeline_tail_groups[successor] ||
+            !shared->row_pipeline_private_group_mask[successor]) {
+          continue;
+        }
+        const unsigned long old =
+          atomic_fetch_sub_explicit(
+            &shared->row_pipeline_remaining_preds[successor], 1ul,
+            memory_order_acq_rel);
+        if (old == 0ul) {
+          kls_egraph_refactor_record_invalid(shared);
+          return 0;
+        }
+      }
+    }
     atomic_fetch_add_explicit(&shared->row_pipeline_completed_groups, 1ul,
                               memory_order_release);
     return 1;
@@ -36390,7 +36460,10 @@ static void kls_row_refactor_mark_row_done(
     const int successor_private =
       shared->row_pipeline_private_group_mask != NULL &&
       shared->row_pipeline_private_group_mask[successor_group];
-    if (release_successors_early && !successor_private) {
+    if (successor_private) {
+      continue;
+    }
+    if (release_successors_early) {
       unsigned long current =
         atomic_load_explicit(
           &shared->row_pipeline_remaining_preds[successor_group],
@@ -36428,7 +36501,7 @@ static void kls_row_refactor_mark_row_done(
       if (atomic_compare_exchange_weak_explicit(
             &shared->row_pipeline_remaining_preds[successor_group],
             &current, next, memory_order_acq_rel, memory_order_acquire)) {
-        if (next == 0ul && !successor_private &&
+        if (next == 0ul &&
             !kls_row_refactor_enqueue_ready_group(shared, successor_group)) {
           return;
         }

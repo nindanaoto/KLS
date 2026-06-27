@@ -4832,6 +4832,19 @@ debugger-owned interrupt showed workers in compact/dense group numeric
 processing, not in a private-ready wait. Thus duplicate private enqueueing was a
 bug, but it was not the only reason the dominance guard is still needed.
 
+KLS then split the mixed queue's dependency accounting by owner: private groups
+keep group-level predecessor counts and are released by private group
+completion, while pipeline groups keep row-level predecessor counts and can be
+released by completed private rows. This is closer to SubtreeLU Algorithm 6 plus
+Algorithm 5 than the earlier all-row-dependency accounting, because private
+subtrees remain private and only pipeline consumers participate in row-prefix
+release. It passes smoke under the existing dominance guard. However, using that
+hybrid queue to relax the dominance guard for unchecked row refactor still timed
+out `ASIC_320k` at 120 s before producing a JSON record, so the broad automatic
+selector remains rejected. The retained value is the corrected private/pipeline
+accounting for the already-accepted mixed queue, not a default expansion to the
+ASIC/G2 slow cases.
+
 A follow-up unified row-dependency fallback was also rejected. The experiment
 kept the mixed private/pipeline queue guarded, discarded the separator-private
 phase when that guard failed, and scheduled every row group through the
