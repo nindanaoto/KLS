@@ -2912,6 +2912,19 @@ coarse level barriers and KLS's current fetch-and-wait tail; it points back to
 the numeric representation and update granularity inside the heavy tail
 columns.
 
+A simpler scheduler-overhead probe then tried leasing eight consecutive EGraph
+pipeline positions per atomic claim. This was also rejected. The pipeline column
+array is not a strict dependency topological order inside every small range; a
+worker can lease a range, start an earlier position, and then wait for a
+dependency that sits later in the same leased range and therefore cannot be
+published by another worker. The focused KLU-first run
+(`build/kls_egraph_chunk8_klu_first_gap5_t4_r3_timeout120.jsonl`) exposed the
+problem immediately: `ASIC_320k` grew to `30.05s`, `ASIC_320ks` to `24.65s`,
+`ASIC_100ks` to `12.84s`, `G2_circuit` to `69.87s`, and `onetone2` timed out
+at the 120 s harness limit. The code was removed. Any future batching of the
+EGraph tail has to lease dependency-ready sets or provably independent chunks,
+not just contiguous positions from the current fetch-and-wait worklist.
+
 All-pipeline single-block scheduling was also probed by replacing natural
 column fetch order with exact EGraph level order for huge single-block
 refactors. This was meant to expose more independent G2/mc2depi work without
