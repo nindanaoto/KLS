@@ -789,17 +789,19 @@ EGraph panel with a unit-diagonal `dtrsv` over the retained internal panel plus
 show this removes the worst rebuild overhead, but the path is still slower than
 default KLS because the broad default path still needs coarser batched panel
 kernels.
-Eligible retained L row-index arrays are mirrored as 32-bit integers by default
-while leaving the KLU-owned numeric factor and public index ABI unchanged. The
-EGraph and refactor pool scatter kernels use the narrower mirror when the
-matrix fits 32-bit local row indices and fall back per column to the original
-`UF_long` rows otherwise. The retained U dependency-index arrays use the same
-default 32-bit mirror for eligible matrices, letting the EGraph scalar
-dependency walk read narrower producer indices without changing the KLU-owned
-numeric factor. Set `KLS_ENABLE_REFACTOR_L_INDEX32=0` or
-`KLS_ENABLE_REFACTOR_U_INDEX32=0` to disable either mirror for A/B comparisons.
-Benchmark JSON reports `refactor_l_index32_enabled` and
-`refactor_l_index32_entries` plus `refactor_u_index32_enabled` and
+Eligible retained refactor-map row/input positions and L row-index arrays are
+mirrored as 32-bit integers by default while leaving the KLU-owned numeric
+factor and public index ABI unchanged. The EGraph value-scatter path and
+refactor pool scatter kernels use the narrower mirrors when the matrix fits
+32-bit local row/input indices and fall back to the original `UF_long` arrays
+otherwise. The retained U dependency-index arrays use the same default 32-bit
+mirror for eligible matrices, letting the EGraph scalar dependency walk read
+narrower producer indices without changing the KLU-owned numeric factor. Set
+`KLS_ENABLE_REFACTOR_MAP_INDEX32=0`, `KLS_ENABLE_REFACTOR_L_INDEX32=0`, or
+`KLS_ENABLE_REFACTOR_U_INDEX32=0` to disable individual mirrors for A/B
+comparisons. Benchmark JSON reports `refactor_map_index32_enabled` and
+`refactor_map_index32_entries`, `refactor_l_index32_enabled` and
+`refactor_l_index32_entries`, plus `refactor_u_index32_enabled` and
 `refactor_u_index32_entries` so runs can verify whether each mirror was active.
 A separate CKTSO Algorithm 5-style probe tried letting the column EGraph
 refactor consume later already-finished scalar dependencies while waiting for an

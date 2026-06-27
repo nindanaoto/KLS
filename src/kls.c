@@ -190,6 +190,8 @@ struct kls_solver {
   UF_long *refactor_col_ptr;
   UF_long *refactor_row_idx;
   UF_long *refactor_input_pos;
+  int32_t *refactor_row_idx32;
+  int32_t *refactor_input_pos32;
   UF_long *refactor_block_start;
   UF_long *refactor_col_block;
   UF_long **refactor_l_indices;
@@ -201,6 +203,7 @@ struct kls_solver {
   int32_t *refactor_u_indices32_storage;
   double **refactor_u_values;
   UF_long refactor_lu_pointer_count;
+  UF_long refactor_map_indices32_count;
   UF_long refactor_l_indices32_count;
   UF_long refactor_u_indices32_count;
   UF_long *row_refactor_l_ptr;
@@ -506,6 +509,7 @@ struct kls_solver {
   UF_long refactor_l_contiguous_suffix_max_len;
   int refactor_l_index32_enabled;
   int refactor_u_index32_enabled;
+  int refactor_map_index32_enabled;
   UF_long *refactor_pipeline_successor_ptr;
   UF_long *refactor_pipeline_successors;
   UF_long *refactor_pipeline_pred_count;
@@ -1394,13 +1398,19 @@ static void free_refactor_map(kls_solver *solver) {
   free(solver->refactor_col_ptr);
   free(solver->refactor_row_idx);
   free(solver->refactor_input_pos);
+  free(solver->refactor_row_idx32);
+  free(solver->refactor_input_pos32);
   free(solver->refactor_block_start);
   free(solver->refactor_col_block);
   solver->refactor_col_ptr = NULL;
   solver->refactor_row_idx = NULL;
   solver->refactor_input_pos = NULL;
+  solver->refactor_row_idx32 = NULL;
+  solver->refactor_input_pos32 = NULL;
   solver->refactor_block_start = NULL;
   solver->refactor_col_block = NULL;
+  solver->refactor_map_indices32_count = 0;
+  solver->refactor_map_index32_enabled = 0;
 }
 
 static void free_refactor_supernode_panel_cache(kls_solver *solver) {
@@ -4876,6 +4886,8 @@ static void fill_build_stats(kls_stats *stats) {
     return;
   }
   stats->internal_index_bytes = (int)sizeof(UF_long);
+  stats->refactor_map_index32_enabled = 0;
+  stats->refactor_map_index32_entries = 0;
   stats->refactor_l_index32_enabled = 0;
   stats->refactor_l_index32_entries = 0;
   stats->refactor_u_index32_enabled = 0;
@@ -12181,6 +12193,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_l_contiguous_suffix_entries;
   solver->stats.refactor_l_contiguous_suffix_max_len =
     (int64_t)solver->refactor_l_contiguous_suffix_max_len;
+  solver->stats.refactor_map_index32_enabled =
+    solver->refactor_map_index32_enabled;
+  solver->stats.refactor_map_index32_entries =
+    (int64_t)solver->refactor_map_indices32_count;
   solver->stats.refactor_l_index32_enabled =
     solver->refactor_l_index32_enabled;
   solver->stats.refactor_l_index32_entries =
@@ -17949,6 +17965,59 @@ static int kls_refactor_map_is_eligible(const kls_solver *solver) {
   return solver->numeric->Pinv != NULL;
 }
 
+static int kls_refactor_map_index32_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_REFACTOR_MAP_INDEX32");
+  return value == NULL || value[0] == '\0' ||
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static int kls_build_refactor_map_index32(kls_solver *solver) {
+  if (!kls_refactor_map_index32_env_enabled()) {
+    return 1;
+  }
+  if (solver == NULL || solver->refactor_row_idx == NULL ||
+      solver->refactor_input_pos == NULL || solver->n <= 0 ||
+      solver->nnz == 0u) {
+    return 0;
+  }
+  if (solver->n > (UF_long)INT32_MAX ||
+      solver->nnz > (UF_long)INT32_MAX ||
+      solver->nnz > (UF_long)(SIZE_MAX / sizeof(int32_t))) {
+    return 1;
+  }
+  if (solver->refactor_row_idx32 != NULL &&
+      solver->refactor_input_pos32 != NULL) {
+    return 1;
+  }
+
+  int32_t *row_idx32 =
+    (int32_t *)malloc((size_t)solver->nnz * sizeof(*row_idx32));
+  int32_t *input_pos32 =
+    (int32_t *)malloc((size_t)solver->nnz * sizeof(*input_pos32));
+  if (row_idx32 == NULL || input_pos32 == NULL) {
+    free(row_idx32);
+    free(input_pos32);
+    return 1;
+  }
+  for (UF_long p = 0; p < solver->nnz; ++p) {
+    const UF_long row = solver->refactor_row_idx[p];
+    const UF_long input_pos = solver->refactor_input_pos[p];
+    if (row > (UF_long)INT32_MAX || input_pos > (UF_long)INT32_MAX) {
+      free(row_idx32);
+      free(input_pos32);
+      return 0;
+    }
+    row_idx32[p] = (int32_t)row;
+    input_pos32[p] = (int32_t)input_pos;
+  }
+
+  solver->refactor_row_idx32 = row_idx32;
+  solver->refactor_input_pos32 = input_pos32;
+  solver->refactor_map_indices32_count = solver->nnz;
+  solver->refactor_map_index32_enabled = 1;
+  return 1;
+}
+
 static int kls_build_refactor_map(kls_solver *solver) {
   if (!kls_refactor_map_is_eligible(solver)) {
     return 0;
@@ -17958,7 +18027,7 @@ static int kls_build_refactor_map(kls_solver *solver) {
       (solver->symbolic->nblocks == 1u ||
        (solver->refactor_block_start != NULL &&
         solver->refactor_col_block != NULL))) {
-    return 1;
+    return kls_build_refactor_map_index32(solver);
   }
 
   free_refactor_map(solver);
@@ -18018,7 +18087,7 @@ static int kls_build_refactor_map(kls_solver *solver) {
     solver->refactor_col_ptr = col_ptr;
     solver->refactor_row_idx = row_idx;
     solver->refactor_input_pos = input_pos;
-    return 1;
+    return kls_build_refactor_map_index32(solver);
   }
 
   UF_long *block_start =
@@ -18129,7 +18198,7 @@ static int kls_build_refactor_map(kls_solver *solver) {
   solver->refactor_input_pos = input_pos;
   solver->refactor_block_start = block_start;
   solver->refactor_col_block = col_block;
-  return 1;
+  return kls_build_refactor_map_index32(solver);
 }
 
 static int kls_refactor_l_pattern_stats_env_enabled(void) {
@@ -37048,6 +37117,20 @@ static int kls_egraph_refactor_value(kls_egraph_refactor_shared *shared,
                                   shared->scale, input_pos, value_out);
 }
 
+static inline UF_long kls_refactor_map_row_at(const kls_solver *solver,
+                                              UF_long pos) {
+  return solver->refactor_row_idx32 != NULL
+    ? (UF_long)solver->refactor_row_idx32[pos]
+    : solver->refactor_row_idx[pos];
+}
+
+static inline UF_long kls_refactor_map_input_at(const kls_solver *solver,
+                                                UF_long pos) {
+  return solver->refactor_input_pos32 != NULL
+    ? (UF_long)solver->refactor_input_pos32[pos]
+    : solver->refactor_input_pos[pos];
+}
+
 static int kls_egraph_refactor_mark_done_once(
   kls_egraph_refactor_shared *shared,
   UF_long col) {
@@ -37958,8 +38041,8 @@ static int kls_egraph_refactor_single_unscaled_column(
      order once before launching workers; keep this hot kernel branch-light. */
   for (UF_long p = solver->refactor_col_ptr[k];
        p < solver->refactor_col_ptr[k + 1u]; ++p) {
-    x[solver->refactor_row_idx[p]] =
-      shared->values[solver->refactor_input_pos[p]];
+    x[kls_refactor_map_row_at(solver, p)] =
+      shared->values[kls_refactor_map_input_at(solver, p)];
   }
 
   UF_long *ui = u_indices[k];
@@ -38066,7 +38149,7 @@ static int kls_egraph_refactor_single_scaled_column(
 
   for (UF_long p = solver->refactor_col_ptr[k];
        p < solver->refactor_col_ptr[k + 1u]; ++p) {
-    const UF_long input_pos = solver->refactor_input_pos[p];
+    const UF_long input_pos = kls_refactor_map_input_at(solver, p);
     if (input_pos >= solver->nnz) {
       kls_egraph_refactor_record_invalid(shared);
       return 0;
@@ -38076,7 +38159,7 @@ static int kls_egraph_refactor_single_scaled_column(
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
-    x[solver->refactor_row_idx[p]] =
+    x[kls_refactor_map_row_at(solver, p)] =
       shared->values[input_pos] / shared->rs[oldrow];
   }
 
@@ -38199,15 +38282,15 @@ static int kls_egraph_refactor_btf_unscaled_column(
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
-    offx[poff++] = shared->values[solver->refactor_input_pos[p]];
+    offx[poff++] = shared->values[kls_refactor_map_input_at(solver, p)];
   }
 
   if (nk == 1u) {
     double pivot = 0.0;
-    for (UF_long p = solver->refactor_block_start[k];
-         p < solver->refactor_col_ptr[k + 1u]; ++p) {
-      pivot = shared->values[solver->refactor_input_pos[p]];
-    }
+  for (UF_long p = solver->refactor_block_start[k];
+       p < solver->refactor_col_ptr[k + 1u]; ++p) {
+    pivot = shared->values[kls_refactor_map_input_at(solver, p)];
+  }
     udiag[k] = pivot;
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, k, symbolic->Q[k]);
@@ -38220,8 +38303,8 @@ static int kls_egraph_refactor_btf_unscaled_column(
 
   for (UF_long p = solver->refactor_block_start[k];
        p < solver->refactor_col_ptr[k + 1u]; ++p) {
-    const UF_long global_row = solver->refactor_row_idx[p];
-    x[global_row - k1] = shared->values[solver->refactor_input_pos[p]];
+    const UF_long global_row = kls_refactor_map_row_at(solver, p);
+    x[global_row - k1] = shared->values[kls_refactor_map_input_at(solver, p)];
   }
 
   UF_long *ui = u_indices[k];
@@ -38383,7 +38466,8 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
         return 0;
       }
       double value = 0.0;
-      if (!kls_egraph_refactor_value(shared, solver->refactor_input_pos[p],
+      if (!kls_egraph_refactor_value(
+            shared, kls_refactor_map_input_at(solver, p),
                                      &value)) {
         kls_egraph_refactor_record_invalid(shared);
         return 0;
@@ -38392,11 +38476,12 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     }
     for (UF_long p = solver->refactor_block_start[k];
          p < solver->refactor_col_ptr[k + 1u]; ++p) {
-      if (solver->refactor_row_idx[p] != k) {
+      if (kls_refactor_map_row_at(solver, p) != k) {
         kls_egraph_refactor_record_invalid(shared);
         return 0;
       }
-      if (!kls_egraph_refactor_value(shared, solver->refactor_input_pos[p],
+      if (!kls_egraph_refactor_value(
+            shared, kls_refactor_map_input_at(solver, p),
                                      &pivot)) {
         kls_egraph_refactor_record_invalid(shared);
         return 0;
@@ -38435,7 +38520,8 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
         return 0;
       }
       double value = 0.0;
-      if (!kls_egraph_refactor_value(shared, solver->refactor_input_pos[p],
+      if (!kls_egraph_refactor_value(
+            shared, kls_refactor_map_input_at(solver, p),
                                      &value)) {
         kls_egraph_refactor_record_invalid(shared);
         return 0;
@@ -38444,13 +38530,14 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     }
     for (UF_long p = solver->refactor_block_start[k];
          p < solver->refactor_col_ptr[k + 1u]; ++p) {
-      const UF_long global_row = solver->refactor_row_idx[p];
+      const UF_long global_row = kls_refactor_map_row_at(solver, p);
       if (global_row < k1 || global_row >= k2) {
         kls_egraph_refactor_record_invalid(shared);
         return 0;
       }
       double value = 0.0;
-      if (!kls_egraph_refactor_value(shared, solver->refactor_input_pos[p],
+      if (!kls_egraph_refactor_value(
+            shared, kls_refactor_map_input_at(solver, p),
                                      &value)) {
         kls_egraph_refactor_record_invalid(shared);
         return 0;
@@ -38460,8 +38547,8 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   } else {
     for (UF_long p = solver->refactor_col_ptr[k];
          p < solver->refactor_col_ptr[k + 1u]; ++p) {
-      const UF_long row = solver->refactor_row_idx[p];
-      const UF_long input_pos = solver->refactor_input_pos[p];
+      const UF_long row = kls_refactor_map_row_at(solver, p);
+      const UF_long input_pos = kls_refactor_map_input_at(solver, p);
       if (row >= solver->n || input_pos >= solver->nnz) {
         kls_egraph_refactor_record_invalid(shared);
         return 0;

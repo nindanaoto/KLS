@@ -1464,6 +1464,8 @@ int main(int argc, char **argv) {
            ",\"refactor_l_contiguous_suffix_columns\":%" PRId64
            ",\"refactor_l_contiguous_suffix_entries\":%" PRId64
            ",\"refactor_l_contiguous_suffix_max_len\":%" PRId64
+           ",\"refactor_map_index32_enabled\":%d"
+           ",\"refactor_map_index32_entries\":%" PRId64
            ",\"refactor_l_index32_enabled\":%d"
            ",\"refactor_l_index32_entries\":%" PRId64
            ",\"refactor_u_index32_enabled\":%d"
@@ -1476,6 +1478,8 @@ int main(int argc, char **argv) {
            stats.refactor_l_contiguous_suffix_columns,
            stats.refactor_l_contiguous_suffix_entries,
            stats.refactor_l_contiguous_suffix_max_len,
+           stats.refactor_map_index32_enabled,
+           stats.refactor_map_index32_entries,
            stats.refactor_l_index32_enabled,
            stats.refactor_l_index32_entries,
            stats.refactor_u_index32_enabled,
@@ -2296,6 +2300,7 @@ int main(int argc, char **argv) {
            ", adjacent entries %" PRId64 ", max run %" PRId64
            ", suffix columns %" PRId64 ", suffix entries %" PRId64
            ", max suffix %" PRId64
+           ", map index32 %d/%" PRId64
            ", L index32 %d/%" PRId64
            ", U index32 %d/%" PRId64 "\n",
            stats.refactor_l_pattern_columns,
@@ -2306,6 +2311,8 @@ int main(int argc, char **argv) {
            stats.refactor_l_contiguous_suffix_columns,
            stats.refactor_l_contiguous_suffix_entries,
            stats.refactor_l_contiguous_suffix_max_len,
+           stats.refactor_map_index32_enabled,
+           stats.refactor_map_index32_entries,
            stats.refactor_l_index32_enabled,
            stats.refactor_l_index32_entries,
            stats.refactor_u_index32_enabled,
