@@ -24031,13 +24031,14 @@ static int kls_row_refactor_env_disabled(void) {
   return value != NULL && value[0] == '0' && value[1] == '\0';
 }
 
-static int kls_checked_row_refactor_env_disabled(void) {
+static int kls_checked_row_refactor_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
-  return value != NULL && value[0] == '0' && value[1] == '\0';
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
 }
 
 static int kls_checked_row_refactor_should_run(void) {
-  return !kls_checked_row_refactor_env_disabled();
+  return kls_checked_row_refactor_env_enabled();
 }
 
 static int kls_partial_supernode_pipeline_env_state(void) {

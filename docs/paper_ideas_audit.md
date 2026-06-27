@@ -2297,17 +2297,15 @@ with valid residuals: `coupled` moved from about `0.53-0.74s` to
 step, but it still does not implement the larger missing single-block
 ETree-descendant pivoting tail inside a KLS-owned row/segment numeric engine.
 
-The experimental KLS-owned row refactor now runs the serial checked fast
-factorization pass by default unless `KLS_ENABLE_CHECKED_ROW_REFACTOR=0`
-explicitly disables it. It checks the
-same no-pivot `L` multipliers used by the existing column fast factorization,
-records the dependency pivot that fails, marks the refreshed state as a serial
-prefix, and reuses the current block-restart machinery. This is intentionally
-separate from `KLS_ENABLE_ROW_REFACTOR`, so the existing unchecked repeated
-row-refactor path is unchanged and the checked CKTSO-style guessed-row pass is
-the first checked fast-factor scheduler attempt rather than an opt-in
-diagnostic. Focused checks stayed valid: normal `add20` used the serial
-checked row path with no reject, while stressed `add20`
+The experimental KLS-owned row refactor gained a serial checked fast
+factorization pass. When `KLS_ENABLE_CHECKED_ROW_REFACTOR=1` explicitly enables
+it, the pass checks the same no-pivot `L` multipliers used by the existing
+column fast factorization, records the dependency pivot that fails, marks the
+refreshed state as a serial prefix, and reuses the current block-restart
+machinery. This is intentionally separate from `KLS_ENABLE_ROW_REFACTOR`, so
+the existing unchecked repeated row-refactor path is unchanged. Focused checks
+stayed valid: normal `add20` used the serial checked row path with no reject,
+while stressed `add20`
 (`--stress-diagonal-scale 1e-9`) reported a prefix-current fast reject at
 the intended dependency pivot.
 
@@ -3548,11 +3546,12 @@ When those mirrors were seeded by `kls_first`, unchecked `kls_refactor` now
 automatically attempts the existing KLS-owned row-major refactor path even when
 `KLS_ENABLE_ROW_REFACTOR=0`, so the scaffold drives the next SPICE-style numeric
 update through KLS row storage instead of immediately returning to KLU's refactor
-kernel. Checked fast-factor `kls_factor` calls now use the same automatic
-row-major ownership when the mirrors remain current, even with
-`KLS_ENABLE_CHECKED_ROW_REFACTOR=0`. The smoke suite forces both row-refactor env
-gates off and verifies automatic unchecked and checked row updates plus
-forward/transpose solves after each update.
+kernel. Checked fast-factor `kls_factor` calls can use the same row-major
+ownership when the mirrors remain current and
+`KLS_ENABLE_CHECKED_ROW_REFACTOR=1` requests the checked row executor. The smoke
+suite verifies automatic unchecked updates with both row-refactor env gates off,
+then explicitly enables the checked gate for checked row update and
+forward/transpose solve coverage.
 The guarded row-major solve is now allowed when analysis selected internal
 transpose orientation as well; solve dispatch already passes the required
 internal `kernel_transpose` flag, so auto-oriented benchmark runs can consume
@@ -4307,9 +4306,10 @@ partition when applying row-dependency release. A new row-dependency
 ready-queue preparation path can reuse the separator private-group mask, so
 private separator groups still run through the retained FLOP-balanced queue
 while pipeline groups may be released by exact row-predecessor completion when
-the strict large-unfinished-supernode test passes. Checked refactorization now uses the
-same strict default selector: producer rows are not released until their pivot
-checks complete, and the smoke fixture validates that default checked path. A
+the strict large-unfinished-supernode test passes. Checked refactorization uses
+the same strict selector when `KLS_ENABLE_CHECKED_ROW_REFACTOR=1`: producer rows
+are not released until their pivot checks complete, and the smoke fixture
+validates that explicit checked path. A
 broader "any large supernode" selector was tested and rejected: on the six-row forced
 row-refactor focus probe it became much slower than the separator-only run and
 was interrupted after exceeding the normal short-run envelope. With the strict
@@ -5851,3 +5851,21 @@ dependency loop was unstable, with one apparent win and one repeat loss. Forcing
 the KLS-first path timed out on `rajat24` and was much worse than the auto
 policy. These failures are kept out of the default path because they do not
 close the algorithmic gap described in the CKTSO/SubtreeLU papers.
+
+The checked row fast-factor executor is now explicit opt-in for the same
+reason. A current top-ten CKTSO-gap A/B with
+`KLS_ENABLE_CHECKED_ROW_REFACTOR=0`
+(`build/kls_checked_row_off_gap10_t4_r1_ref3_timeout120.jsonl`) reduced
+repeated checked `kls_factor` time sharply on matrices that had been attempting
+and then abandoning the checked row path: `ASIC_320k` moved from `0.5398s` to
+`0.1090s`, `ASIC_320ks` from `0.5760s` to `0.0880s`, `ASIC_100ks` from
+`0.4459s` to `0.0581s`, and `G2_circuit` from `1.1145s` to `0.2444s`;
+the common-row repeated-factor geomean moved to `0.4517x` of the
+zero-scatter-skip baseline.
+However the project SPICE-cycle score is dominated by initial factorization and
+99 no-pivot refactors, so the same source-default opt-in run
+(`build/kls_checked_row_optin_gap10_t4_r1_ref3_timeout120.jsonl`) was neutral
+against the zero-scatter-skip baseline: `4.1888s` versus `4.1762s` geomean.
+That keeps checked row execution available for targeted paper tests and future
+row-major work, while preventing the default production `kls_factor` path from
+paying row-pattern setup for an executor that is not yet a broad CKTSO-gap win.

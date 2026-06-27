@@ -9348,16 +9348,16 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
-    perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
     ok = 0;
   }
   if (ok && !require_ok(kls_factor(solver, ax1),
-                        "default checked row-pipeline factor")) ok = 0;
+                        "explicit checked row-pipeline factor")) ok = 0;
   kls_stats checked_stats;
   checked_stats.struct_size = sizeof(checked_stats);
   if (ok && !require_ok(kls_get_stats(solver, &checked_stats),
-                        "stats default checked row-pipeline factor")) {
+                        "stats explicit checked row-pipeline factor")) {
     ok = 0;
   }
   const int checked_expect_defer =
@@ -10753,8 +10753,12 @@ static int run_experimental_kls_first_factor_case(int scale,
             xt[0], xt[1], xt[2]);
     ok = 0;
   }
+  if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
+    ok = 0;
+  }
   if (ok && !require_ok(kls_factor(solver, ax_fast),
-                        "auto checked row fast factor after KLS first factor")) {
+                        "explicit checked row fast factor after KLS first factor")) {
     ok = 0;
   }
   x[0] = x[1] = x[2] = 0.0;
@@ -10769,7 +10773,7 @@ static int run_experimental_kls_first_factor_case(int scale,
   }
   stats.struct_size = sizeof(stats);
   if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "auto checked row fast factor stats after KLS first factor")) {
+                        "explicit checked row fast factor stats after KLS first factor")) {
     ok = 0;
   }
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FAST_REFACTOR ||
