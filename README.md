@@ -789,6 +789,13 @@ EGraph panel with a unit-diagonal `dtrsv` over the retained internal panel plus
 show this removes the worst rebuild overhead, but the path is still slower than
 default KLS because the broad default path still needs coarser batched panel
 kernels.
+`KLS_ENABLE_REFACTOR_L_INDEX32=1` enables a separate opt-in cache that mirrors
+eligible retained L row-index arrays as 32-bit integers while leaving the
+KLU-owned numeric factor and public index ABI unchanged. The EGraph and refactor
+pool scatter kernels use the narrower mirror when the matrix fits 32-bit local
+row indices and fall back per column to the original `UF_long` rows otherwise.
+Benchmark JSON reports `refactor_l_index32_enabled` and
+`refactor_l_index32_entries` so runs can verify whether the mirror was active.
 A separate CKTSO Algorithm 5-style probe tried letting the column EGraph
 refactor consume later already-finished scalar dependencies while waiting for an
 earlier unfinished dependency. The structural safety scan was correct but not a

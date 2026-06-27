@@ -1463,7 +1463,9 @@ int main(int argc, char **argv) {
            ",\"refactor_l_adjacent_run_max_len\":%" PRId64
            ",\"refactor_l_contiguous_suffix_columns\":%" PRId64
            ",\"refactor_l_contiguous_suffix_entries\":%" PRId64
-           ",\"refactor_l_contiguous_suffix_max_len\":%" PRId64,
+           ",\"refactor_l_contiguous_suffix_max_len\":%" PRId64
+           ",\"refactor_l_index32_enabled\":%d"
+           ",\"refactor_l_index32_entries\":%" PRId64,
            stats.refactor_l_pattern_columns,
            stats.refactor_l_pattern_entries,
            stats.refactor_l_adjacent_run_count,
@@ -1471,7 +1473,9 @@ int main(int argc, char **argv) {
            stats.refactor_l_adjacent_run_max_len,
            stats.refactor_l_contiguous_suffix_columns,
            stats.refactor_l_contiguous_suffix_entries,
-           stats.refactor_l_contiguous_suffix_max_len);
+           stats.refactor_l_contiguous_suffix_max_len,
+           stats.refactor_l_index32_enabled,
+           stats.refactor_l_index32_entries);
     printf(",\"row_solve_parallel_run_count\":%" PRId64
            ",\"row_solve_parallel_l_slice_runs\":%" PRId64
            ",\"row_solve_parallel_u_slice_runs\":%" PRId64
