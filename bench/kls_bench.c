@@ -1674,6 +1674,26 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_blocked_run_count,
            stats.row_refactor_compact_dense_panel_blocked_rows,
            stats.row_refactor_compact_dense_panel_blocked_entries);
+    printf(",\"row_refactor_native_row_panel_enabled\":%d"
+           ",\"row_refactor_last_native_row_panel\":%d"
+           ",\"row_refactor_native_row_panel_count\":%" PRId64
+           ",\"row_refactor_native_row_panel_rows\":%" PRId64
+           ",\"row_refactor_native_row_panel_entries\":%" PRId64
+           ",\"row_refactor_native_row_panel_blocked_count\":%" PRId64
+           ",\"row_refactor_native_row_panel_blocked_rows\":%" PRId64
+           ",\"row_refactor_native_row_panel_blocked_entries\":%" PRId64
+           ",\"row_refactor_native_row_panel_fallback_count\":%" PRId64
+           ",\"row_refactor_native_row_panel_checked_reject_count\":%" PRId64,
+           stats.row_refactor_native_row_panel_enabled,
+           stats.row_refactor_last_native_row_panel,
+           stats.row_refactor_native_row_panel_count,
+           stats.row_refactor_native_row_panel_rows,
+           stats.row_refactor_native_row_panel_entries,
+           stats.row_refactor_native_row_panel_blocked_count,
+           stats.row_refactor_native_row_panel_blocked_rows,
+           stats.row_refactor_native_row_panel_blocked_entries,
+           stats.row_refactor_native_row_panel_fallback_count,
+           stats.row_refactor_native_row_panel_checked_reject_count);
     printf(",\"row_refactor_last_compact_dense_panel_direct_input_rows\":%" PRId64
            ",\"row_refactor_compact_dense_panel_direct_input_rows\":%" PRId64,
            stats.row_refactor_last_compact_dense_panel_direct_input_rows,
@@ -2464,6 +2484,11 @@ int main(int argc, char **argv) {
            " entries, used: %d/%" PRId64
            ", blocked: %d/%" PRId64
            " rows/entries %" PRId64 "/%" PRId64
+           ", native panel: %d/%d/%" PRId64
+           " rows/entries %" PRId64 "/%" PRId64
+           ", native blocked: %" PRId64
+           " rows/entries %" PRId64 "/%" PRId64
+           ", native fallback/reject: %" PRId64 "/%" PRId64
            ", direct input rows: %" PRId64 "/%" PRId64
            ", compact solve values: %" PRId64 "/%" PRId64
            ", compact group solves: %" PRId64 "/%" PRId64
@@ -2518,6 +2543,16 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_dense_panel_blocked_run_count,
            stats.row_refactor_compact_dense_panel_blocked_rows,
            stats.row_refactor_compact_dense_panel_blocked_entries,
+           stats.row_refactor_native_row_panel_enabled,
+           stats.row_refactor_last_native_row_panel,
+           stats.row_refactor_native_row_panel_count,
+           stats.row_refactor_native_row_panel_rows,
+           stats.row_refactor_native_row_panel_entries,
+           stats.row_refactor_native_row_panel_blocked_count,
+           stats.row_refactor_native_row_panel_blocked_rows,
+           stats.row_refactor_native_row_panel_blocked_entries,
+           stats.row_refactor_native_row_panel_fallback_count,
+           stats.row_refactor_native_row_panel_checked_reject_count,
            stats.row_refactor_last_compact_dense_panel_direct_input_rows,
            stats.row_refactor_compact_dense_panel_direct_input_rows,
            stats.row_refactor_last_compact_panel_solve_values,

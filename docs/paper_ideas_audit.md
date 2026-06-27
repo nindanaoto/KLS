@@ -5375,6 +5375,17 @@ dense compact smoke coverage force CBLAS off and now require the blocked path.
 The larger open gaps remain the production checked/pivoting tail executor and
 broader row-major numeric engine.
 
+The blocked dense-panel path is now promoted behind the native row-panel
+selector rather than being treated only as an unnamed compact-panel probe.
+`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR` is tri-state: unset keeps the structural
+work gate, `1` forces retained panel use for eligible dense row groups, and `0`
+uses the direct row-major dense-group fallback. New counters
+`row_refactor_native_row_panel_*` distinguish selected native panels, blocked
+panel executions, unsupported-group fallbacks, and checked-pivot rejects. This
+does not add CPU-specific tuning; it exposes the paper-shaped retained-panel
+executor as the default candidate for CKTSO-gap refactor cases while preserving
+the scalar fallback.
+
 KLS then removed a non-paper threshold from the scalar compact-supernode update
 selector. SubtreeLU's row update branch treats a ready supernode as a triangular
 solve plus trailing update; the previous default only used KLS's contiguous

@@ -584,6 +584,16 @@ typedef struct kls_stats {
   int64_t fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads;
   int64_t fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows;
   int64_t fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps;
+  int row_refactor_native_row_panel_enabled;
+  int row_refactor_last_native_row_panel;
+  int64_t row_refactor_native_row_panel_count;
+  int64_t row_refactor_native_row_panel_rows;
+  int64_t row_refactor_native_row_panel_entries;
+  int64_t row_refactor_native_row_panel_blocked_count;
+  int64_t row_refactor_native_row_panel_blocked_rows;
+  int64_t row_refactor_native_row_panel_blocked_entries;
+  int64_t row_refactor_native_row_panel_fallback_count;
+  int64_t row_refactor_native_row_panel_checked_reject_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -106,12 +106,25 @@ def paper_gap_signal(
     egraph_work = float_value(cand_row, "refactor_dependency_work")
     row_work = float_value(cand_row, "row_refactor_total_group_work")
     compact_work = float_value(cand_row, "row_refactor_compact_dense_panel_update_work")
+    native_panel = int_value(cand_row, "row_refactor_last_native_row_panel")
+    native_fallbacks = int_value(
+        cand_row, "row_refactor_native_row_panel_fallback_count"
+    )
+    native_rejects = int_value(
+        cand_row, "row_refactor_native_row_panel_checked_reject_count"
+    )
 
     if first_skip_scaled_single:
         return "missing_parallel_rowup_first_factor"
     if dominant_phase == "refactor_99":
         if last_path == "kls_fast_refactor":
             if row_run:
+                if native_rejects:
+                    return "native_row_panel_checked_reject"
+                if native_fallbacks:
+                    return "native_row_panel_fallback"
+                if native_panel:
+                    return "native_row_panel_active"
                 if egraph_work > 0.0 and row_work > egraph_work:
                     return "row_kernel_more_work_than_egraph"
                 if compact_work > 0.0:
@@ -407,6 +420,20 @@ def main() -> int:
         "row_refactor_compact_dense_panel_persistent_run_count,"
         "row_refactor_last_compact_dense_panel,"
         "row_refactor_compact_dense_panel_count,"
+        "row_refactor_last_compact_dense_panel_blocked,"
+        "row_refactor_compact_dense_panel_blocked_run_count,"
+        "row_refactor_compact_dense_panel_blocked_rows,"
+        "row_refactor_compact_dense_panel_blocked_entries,"
+        "row_refactor_native_row_panel_enabled,"
+        "row_refactor_last_native_row_panel,"
+        "row_refactor_native_row_panel_count,"
+        "row_refactor_native_row_panel_rows,"
+        "row_refactor_native_row_panel_entries,"
+        "row_refactor_native_row_panel_blocked_count,"
+        "row_refactor_native_row_panel_blocked_rows,"
+        "row_refactor_native_row_panel_blocked_entries,"
+        "row_refactor_native_row_panel_fallback_count,"
+        "row_refactor_native_row_panel_checked_reject_count,"
         "row_refactor_last_compact_supernode_partial_update,"
         "row_refactor_compact_supernode_partial_update_count,"
         "row_refactor_compact_supernode_partial_update_rows,"
@@ -706,6 +733,20 @@ def main() -> int:
             f"{int_value(cand_row, 'row_refactor_compact_dense_panel_persistent_run_count')},"
             f"{int_value(cand_row, 'row_refactor_last_compact_dense_panel')},"
             f"{int_value(cand_row, 'row_refactor_compact_dense_panel_count')},"
+            f"{int_value(cand_row, 'row_refactor_last_compact_dense_panel_blocked')},"
+            f"{int_value(cand_row, 'row_refactor_compact_dense_panel_blocked_run_count')},"
+            f"{int_value(cand_row, 'row_refactor_compact_dense_panel_blocked_rows')},"
+            f"{int_value(cand_row, 'row_refactor_compact_dense_panel_blocked_entries')},"
+            f"{int_value(cand_row, 'row_refactor_native_row_panel_enabled')},"
+            f"{int_value(cand_row, 'row_refactor_last_native_row_panel')},"
+            f"{int_value(cand_row, 'row_refactor_native_row_panel_count')},"
+            f"{int_value(cand_row, 'row_refactor_native_row_panel_rows')},"
+            f"{int_value(cand_row, 'row_refactor_native_row_panel_entries')},"
+            f"{int_value(cand_row, 'row_refactor_native_row_panel_blocked_count')},"
+            f"{int_value(cand_row, 'row_refactor_native_row_panel_blocked_rows')},"
+            f"{int_value(cand_row, 'row_refactor_native_row_panel_blocked_entries')},"
+            f"{int_value(cand_row, 'row_refactor_native_row_panel_fallback_count')},"
+            f"{int_value(cand_row, 'row_refactor_native_row_panel_checked_reject_count')},"
             f"{int_value(cand_row, 'row_refactor_last_compact_supernode_partial_update')},"
             f"{int_value(cand_row, 'row_refactor_compact_supernode_partial_update_count')},"
             f"{int_value(cand_row, 'row_refactor_compact_supernode_partial_update_rows')},"

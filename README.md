@@ -686,17 +686,27 @@ those later suffixes are solved; stats report
 `row_refactor_compact_supernode_batch_candidate_*`, and
 `row_refactor_compact_supernode_batch_rejected_work_count` counters distinguish
 missing same-pattern row subranges from candidates rejected by the structural
-work gate. The unchecked producer-panel
-refactor experiment uses a blocked panel algorithm
-(`dtrsm`/`dgemm`) instead of one BLAS call per row. Focused probes keep it
-default-off: the blocked CBLAS path improved on the earlier per-row CBLAS
-attempt but was still slower than the scalar compact kernel on `onetone2`, so
-the remaining paper gap is broader row-group/supernode planning and a deeper
-blocked row-major numeric layout rather than simply wrapping the current
-compact group in BLAS calls. Checked pivot-probe row refactors use
-the same compact panel only through a row-ordered update/check/publish loop, so
-a rejected pivot leaves the same prefix-visible row-major state as the native
-direct row-mirror kernel. Row segments now also direct-load raw input entries
+work gate. Dense row groups now pass through a named native row-panel selector
+before falling back to the direct row-mirror kernel. Unset
+`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR` uses the existing structural work gate,
+`1` forces the retained compact panel path for eligible dense groups, and `0`
+keeps the scalar row-major dense-group path. The selected path stores the
+group in solver-owned row-major panel slices when available, applies the
+portable blocked panel factor/update kernel, and preserves the checked
+row-ordered update/check/publish loop so a rejected pivot leaves the same
+prefix-visible row-major state as the direct row-mirror kernel. Stats report
+`row_refactor_native_row_panel_enabled`,
+`row_refactor_last_native_row_panel`,
+`row_refactor_native_row_panel_count`,
+`row_refactor_native_row_panel_rows`,
+`row_refactor_native_row_panel_entries`,
+`row_refactor_native_row_panel_blocked_count`,
+`row_refactor_native_row_panel_blocked_rows`,
+`row_refactor_native_row_panel_blocked_entries`,
+`row_refactor_native_row_panel_fallback_count`, and
+`row_refactor_native_row_panel_checked_reject_count` so CKTSO-gap runs can
+distinguish native-panel use from unsupported groups and checked-pivot exits.
+Row segments now also direct-load raw input entries
 into the retained row-major segment mirrors when the `L` row, pivot,
 in-segment `U`, and shared trailing `U` pattern can represent the row exactly.
 The row-pattern builder retains a per-input-entry segment target map for dense
