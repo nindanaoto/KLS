@@ -5693,6 +5693,18 @@ an opt-in probe, not a default policy. The production default should keep using
 KLS-owned scalar/blocked panel kernels until a broader row-major storage engine
 can feed BLAS-size work without extra staging overhead.
 
+A fresh same-binary spot check on June 27, 2026 confirms the guard is active in
+current source. On `onetone2` with the production row refactor disabled, the
+CBLAS-enabled build reported zero `refactor_*_cblas_update_*` counters whether
+`KLS_ENABLE_CBLAS_SUPERNODE` was `0` or `1` (`0.01426s` versus `0.01356s`
+refactor time). On the forced row-refactor path with the known partial
+supernode pipeline disabled, `gemat12` had no compact supernode updates and
+`onetone2` used the large compact update path without a meaningful CBLAS
+penalty (`0.15971s` off versus `0.15829s` on, 4,191 compact-supernode updates
+covering 172M update entries). The remaining slow forced-row issue is therefore
+not small BLAS calls; it is still the row ready-queue/partial-supernode pipeline
+pathology exposed by the default forced-row timeout.
+
 The same conclusion held after splitting the lightweight scalar EGraph
 supernode-run consumer away from the retained-panel cache as a local probe.
 With scalar supernode updates enabled by default but without building the
