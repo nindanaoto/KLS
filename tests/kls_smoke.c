@@ -251,6 +251,41 @@ static int require_pivoting_tail_plan(const kls_stats *stats,
               : 0);
     return 0;
   }
+  if ((stats->fast_kls_block_restart_last_row_pipeline_separator_tail_scope !=
+         0 &&
+       stats->fast_kls_block_restart_last_row_pipeline_separator_tail_scope !=
+         1) ||
+      stats->fast_kls_block_restart_row_pipeline_separator_tail_scope_count <
+        0 ||
+      stats->fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows <
+        0 ||
+      (stats->fast_kls_block_restart_last_row_pipeline_separator_tail_scope &&
+       (stats->fast_kls_block_restart_row_pipeline_separator_tail_scope_count <=
+          0 ||
+        stats->fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows <=
+          0 ||
+        stats->fast_kls_block_restart_last_row_pipeline != 1 ||
+        stats->fast_kls_block_restart_last_row_pipeline_etree_tail != 1 ||
+        stats->fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows >
+          stats->fast_kls_block_restart_last_row_pipeline_rows)) ||
+      (!stats->fast_kls_block_restart_last_row_pipeline_separator_tail_scope &&
+       (stats->fast_kls_block_restart_row_pipeline_separator_tail_scope_count !=
+          0 ||
+        stats->fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows !=
+          0))) {
+    fprintf(stderr,
+            "unexpected separator tail scope stats for %s: scope=%d/%" PRId64
+            ", rows=%" PRId64 ", pipeline=%d, etree_tail=%d"
+            ", pipeline_rows=%" PRId64 "\n",
+            what,
+            stats->fast_kls_block_restart_last_row_pipeline_separator_tail_scope,
+            stats->fast_kls_block_restart_row_pipeline_separator_tail_scope_count,
+            stats->fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows,
+            stats->fast_kls_block_restart_last_row_pipeline,
+            stats->fast_kls_block_restart_last_row_pipeline_etree_tail,
+            stats->fast_kls_block_restart_last_row_pipeline_rows);
+    return 0;
+  }
   return 1;
 }
 

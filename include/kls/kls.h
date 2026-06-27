@@ -558,6 +558,9 @@ typedef struct kls_stats {
   int64_t fast_kls_block_restart_last_row_pipeline_etree_tail_rows;
   int64_t fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows;
   int fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask;
+  int fast_kls_block_restart_last_row_pipeline_separator_tail_scope;
+  int64_t fast_kls_block_restart_row_pipeline_separator_tail_scope_count;
+  int64_t fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

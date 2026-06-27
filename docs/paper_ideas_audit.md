@@ -5182,6 +5182,17 @@ Public and benchmark statistics now report
 non-contiguous gap smoke fixture requires a preserved gap row and no serial
 tail restart when two threads are enabled.
 
+The retained-tail row-pipeline repair now also validates SubtreeLU's component
+pivot domain before accepting the active ETree mask. If separator analysis
+covers the repaired BTF block, every retained active row must map to a valid
+collapsed-separator component and dynamic pivot choice remains bounded by that
+component extent intersected with the active tail mask; otherwise KLS falls back
+to the existing serial/KLU repair ladder. Benchmark output records this direct
+paper-algorithm overlap with
+`fast_kls_block_restart_last_row_pipeline_separator_tail_scope`,
+`fast_kls_block_restart_row_pipeline_separator_tail_scope_count`, and
+`fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows`.
+
 The serial fallback now consumes the same retained topological tail envelope
 instead of forcing the failed pivot to be the restart boundary. When the
 retained ETree-descendant plan is non-suffix, KLS builds the exact active mask

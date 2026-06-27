@@ -542,6 +542,9 @@ struct kls_solver {
   UF_long fast_kls_block_restart_last_row_pipeline_etree_tail_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows;
   int fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask;
+  int fast_kls_block_restart_last_row_pipeline_separator_tail_scope;
+  UF_long fast_kls_block_restart_row_pipeline_separator_tail_scope_count;
+  UF_long fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_pivot_tail_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_pivot_restarts;
   UF_long fast_kls_block_restart_last_row_pipeline_supernode_update_groups;
@@ -2718,6 +2721,12 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
     0;
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask = 0;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_separator_tail_scope = 0;
+  solver->stats
+    .fast_kls_block_restart_row_pipeline_separator_tail_scope_count = 0;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->stats
@@ -2783,6 +2792,10 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_kls_block_restart_last_row_pipeline_etree_tail_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_separator_tail_scope = 0;
+  solver->fast_kls_block_restart_row_pipeline_separator_tail_scope_count = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows =
+    0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline_supernode_update_groups = 0;
@@ -3735,6 +3748,12 @@ static void kls_record_fast_reject_detail(kls_solver *solver,
     0;
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask = 0;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_separator_tail_scope = 0;
+  solver->stats
+    .fast_kls_block_restart_row_pipeline_separator_tail_scope_count = 0;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->stats
@@ -4564,6 +4583,10 @@ static void clear_matrix(kls_solver *solver) {
   solver->fast_kls_block_restart_last_row_pipeline_etree_tail_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_etree_tail_gap_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_separator_tail_scope = 0;
+  solver->fast_kls_block_restart_row_pipeline_separator_tail_scope_count = 0;
+  solver->fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows =
+    0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
   solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline_supernode_update_groups = 0;
@@ -11505,6 +11528,20 @@ static void kls_fill_fast_kls_block_restart_pipeline_stats(kls_solver *solver) {
     .fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask =
       solver
         ->fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_separator_tail_scope =
+      solver
+        ->fast_kls_block_restart_last_row_pipeline_separator_tail_scope;
+  solver->stats
+    .fast_kls_block_restart_row_pipeline_separator_tail_scope_count =
+      (int64_t)
+        solver
+          ->fast_kls_block_restart_row_pipeline_separator_tail_scope_count;
+  solver->stats
+    .fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows =
+      (int64_t)
+        solver
+          ->fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows;
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_pivot_tail_rows =
       (int64_t)
@@ -42361,6 +42398,39 @@ static int kls_row_first_pivot_scope(
   return 1;
 }
 
+static int kls_row_first_validate_tail_separator_scope(
+  const kls_row_first_block_context *ctx,
+  const UF_long *row_order,
+  UF_long row_count,
+  UF_long nk,
+  const unsigned char *active_mask,
+  UF_long *scoped_rows_out) {
+  if (scoped_rows_out != NULL) {
+    *scoped_rows_out = 0;
+  }
+  if (ctx == NULL || row_order == NULL || active_mask == NULL ||
+      scoped_rows_out == NULL || nk > ctx->nk ||
+      !ctx->use_separator_for_block) {
+    return 0;
+  }
+  UF_long scoped_rows = 0;
+  for (UF_long pos = 0; pos < row_count; ++pos) {
+    const UF_long row = row_order[pos];
+    unsigned int component = UINT_MAX;
+    UF_long component_last = KLS_KLU_EMPTY;
+    if (row >= nk || !active_mask[row] ||
+        !kls_row_first_pivot_scope(ctx, row, &component,
+                                   &component_last)) {
+      return 0;
+    }
+    (void)component;
+    (void)component_last;
+    scoped_rows++;
+  }
+  *scoped_rows_out = scoped_rows;
+  return 1;
+}
+
 static int kls_row_first_collect_pivot_choice(
   const kls_row_first_block_context *ctx,
   const UF_long *pattern,
@@ -46493,6 +46563,8 @@ typedef struct kls_row_first_parallel_shared {
   const UF_long *block_pipeline_row_order;
   UF_long block_pipeline_order_rows;
   int block_pipeline_etree_tail_order;
+  int block_pipeline_separator_tail_scope;
+  UF_long block_pipeline_separator_tail_scope_rows;
   double tol;
   UF_long total_lnz;
   UF_long total_unz;
@@ -47059,6 +47131,17 @@ static int kls_row_first_parallel_factor_block(
           active_rows > pipeline_end - pipeline_begin) {
         goto cleanup;
       }
+      if (use_separator_for_block) {
+        UF_long scoped_rows = 0;
+        if (!kls_row_first_validate_tail_separator_scope(
+              &row_ctx, row_order, active_rows, nk, active_mask,
+              &scoped_rows) ||
+            scoped_rows != active_rows) {
+          goto cleanup;
+        }
+        shared->block_pipeline_separator_tail_scope = 1;
+        shared->block_pipeline_separator_tail_scope_rows = scoped_rows;
+      }
       row_pipeline_gap_rows = pipeline_end - pipeline_begin - active_rows;
       pipeline_begin = 0;
       pipeline_end = active_rows;
@@ -47608,6 +47691,16 @@ static int kls_try_row_first_rebuild_rejected_block(
       solver
         ->fast_kls_block_restart_last_row_pipeline_etree_tail_exact_mask =
           repaired_tail_exact_mask;
+    }
+    if (shared.block_pipeline_separator_tail_scope) {
+      solver
+        ->fast_kls_block_restart_last_row_pipeline_separator_tail_scope = 1;
+      solver
+        ->fast_kls_block_restart_row_pipeline_separator_tail_scope_count +=
+          shared.row_pipeline_runs;
+      solver
+        ->fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows =
+          shared.block_pipeline_separator_tail_scope_rows;
     }
     solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows =
       shared.row_pipeline_pivot_tail_rows;
