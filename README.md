@@ -540,7 +540,11 @@ descendant rows through the retained row pipeline with an active ETree-rank map.
 Those descendants use the same prefactorization/postfactorization loop as the
 row-up-looking pipeline: finished dependencies are applied while earlier active
 tail rows are still completing, then skipped dependencies are finished before
-the row is published. That guarded executor reports
+the row is published. If a descendant row still needs a dynamic column pivot,
+the ETree-prefactor phase now serializes just that pivot row, refreshes the
+row-up producer panel cache for the new column order, and resumes the remaining
+active descendants in the same retained ETree-rank order. That guarded executor
+reports
 `fast_kls_block_restart_last_row_pipeline_etree_ready`,
 `fast_kls_block_restart_row_pipeline_etree_ready_count`,
 `fast_kls_block_restart_last_row_pipeline_etree_ready_rows`,
@@ -550,7 +554,8 @@ the row is published. That guarded executor reports
 `fast_kls_block_restart_last_row_pipeline_etree_prefactor_rows`,
 `fast_kls_block_restart_last_row_pipeline_etree_prefactor_threads`,
 `fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_rows`, and
-`fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps`.
+`fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps`, while
+the existing pivot-epoch counters report the serialized descendant rows.
 Suffix-shaped
 and BTF suffix repairs still use the ordered pivot-capable row pipeline, so this
 is a gapped-mask CKTSO Algorithm 5 prefactor/postfactorization step rather than
