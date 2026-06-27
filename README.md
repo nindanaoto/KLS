@@ -146,17 +146,13 @@ JSON includes `initial_factor_path` and `last_factor_path`; values such as
 KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
 retained pattern through the checked fast path. Unset
 `KLS_ENABLE_KLS_FIRST_FACTOR` keeps the production cold first factor on the
-KLU/static path for broad large cases, with a structural exception for
-low-density moderate dominant-BTF matrices with many fringe blocks where the
-KLU/static numeric can stall. `KLS_ENABLE_KLS_FIRST_FACTOR=1` forces the
-KLS-owned row-up-looking
-scaffold when possible, and `KLS_ENABLE_KLS_FIRST_FACTOR=0` keeps the hard
-KLU-first behavior. Checked fast-factor pivot-reject recovery can still try a
-quality-checked KLS-first rebuild before KLU fallback in automatic mode, and
-accepted pre-static row-matching candidates in the same low-density many-BTF
-class may replay through the same row-up bridge when that avoids a slow
-KLU/static numeric state. Set
-`KLS_ENABLE_KLS_FIRST_FACTOR=0` to disable those recovery branches too. The
+KLU/static path for broad large cases. `KLS_ENABLE_KLS_FIRST_FACTOR=1` forces
+the KLS-owned row-up-looking scaffold when possible, and
+`KLS_ENABLE_KLS_FIRST_FACTOR=0` keeps the hard KLU-first behavior. Automatic
+mode also keeps successful pre-static row-matching candidates on the accepted
+KLU/static numeric instead of replaying them through the incomplete KLS-first
+bridge; forcing `KLS_ENABLE_KLS_FIRST_FACTOR=1` keeps that bridge available for
+experiments. The
 scaffold remains useful for paper-algorithm experiments, but it is not the
 default cold first-factor replacement for broad CKTSO-gap cases until it is
 faster than the accepted KLU/static numeric there.

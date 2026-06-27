@@ -24172,19 +24172,6 @@ static int kls_auto_first_factor_scaled_single_block_risk(
   return !kls_auto_first_factor_has_separator_parallel_row_up(solver);
 }
 
-static int kls_auto_first_factor_moderate_many_btf(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL ||
-      solver->symbolic->nblocks < 1024u ||
-      solver->symbolic->maxblock < 30000u ||
-      solver->symbolic->maxblock > 50000u ||
-      solver->symbolic->maxblock * 5u < solver->n * 4u ||
-      solver->nnz > 8u * solver->n) {
-    return 0;
-  }
-  return solver->options.ordering == KLS_ORDERING_AUTO ||
-         solver->options.ordering == KLS_ORDERING_AMD;
-}
-
 static int kls_auto_first_factor_should_run(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->nblocks == 0u || solver->symbolic->maxblock < 30000u ||
@@ -24206,17 +24193,12 @@ static int kls_auto_first_factor_should_run(kls_solver *solver) {
     ++solver->kls_first_auto_skipped_scaled_single_block_count;
     return 0;
   }
-  if (kls_auto_first_factor_moderate_many_btf(solver)) {
-    return 1;
-  }
   /*
    * The row-up first-factor scaffold is still not a production replacement for
-   * the KLU/static first factor on large METIS/single-block CKTSO-gap rows.
-   * Automatic cold-start use there adds substantial initial-factor cost without
-   * reducing the repeated EGraph refactor enough to pay for it. Keep it
-   * forceable for experiments and keep the separate checked-reject rebuild path
-   * available, but do not let unset KLS_ENABLE_KLS_FIRST_FACTOR broadly replace
-   * an accepted KLU numeric.
+   * the KLU/static first factor on CKTSO-gap rows. Automatic cold-start use
+   * adds substantial initial-factor cost without reducing the repeated EGraph
+   * refactor enough to pay for it. Keep it forceable for experiments, but do
+   * not let unset KLS_ENABLE_KLS_FIRST_FACTOR replace an accepted KLU numeric.
    */
   return 0;
 }
@@ -24238,7 +24220,14 @@ static int kls_should_try_first_factor_recovery(kls_solver *solver) {
   if (kls_first_factor_env_disabled()) {
     return 0;
   }
-  return kls_auto_first_factor_moderate_many_btf(solver);
+  /*
+   * Retaining a successful prestatic/KLU first factor is faster on the current
+   * low-density many-BTF gap cases than replaying through the incomplete
+   * KLS-first scaffold. The scaffold remains forceable with
+   * KLS_ENABLE_KLS_FIRST_FACTOR=1.
+   */
+  (void)solver;
+  return 0;
 }
 
 static int kls_dominant_btf_fast_factor_repair_is_risky(
