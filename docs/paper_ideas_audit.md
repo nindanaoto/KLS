@@ -5054,6 +5054,40 @@ expensive than the scalar EGraph refactor. The missing paper-level piece remains
 a production coarse/batched supernodal numeric executor, not a simple
 small-call threshold.
 
+A current top-ten CKTSO-gap retest after the exact row-dependency release fix
+keeps the same conclusion. With `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1`,
+`build/kls_egraph_supernode_updates_gap10_after_exact_release_t4_r1_ref3_timeout120.jsonl`
+completed all ten rows but measured a `4.7239s` geomean, versus `4.3966s` for
+the default KLS artifact
+`build/kls_current_gap10_after_exact_release_t4_r1_ref3_timeout120.jsonl`.
+The probe applied real cached-panel work, for example `G2_circuit` reported
+493 last-refactor grouped updates over 65,484 rows and 17.48M entries, and
+`ASIC_320ks` reported 561 updates over 49,454 rows and 10.57M entries. It was
+still slower than default on eight of ten rows, while only `gemat12` and
+`rajat28` won. Two local blocked-kernel rewrites were also rejected rather than
+committed: a row-contiguous traversal
+(`build/kls_egraph_supernode_updates_rowmajor_gap10_t4_r1_ref3_timeout120.jsonl`)
+and a tiled target accumulator
+(`build/kls_egraph_supernode_updates_tiled_gap10_t4_r1_ref3_timeout120.jsonl`).
+The tiled version improved some high-work refactor timings such as
+`G2_circuit` and `ASIC_320ks` relative to the old opt-in blocked kernel, but
+its top-ten geomean was still `4.7505s`, slightly worse than the old opt-in
+blocked-kernel geomean and `1.0805x` slower than default KLS. The source was
+therefore left on the existing portable blocked kernel.
+
+The column EGraph ready-queue probe was also rerun after the exact-release
+change. With `KLS_ENABLE_EGRAPH_READY_QUEUE=1`,
+`build/kls_egraph_ready_queue_gap10_after_exact_release_t4_r1_ref3_timeout120.jsonl`
+measured a `7.5726s` top-ten geomean, `1.7224x` slower than default. The queue
+exercised the full recorded pipeline tails on most rows, for example 2,410
+ready columns on `ASIC_320k` and 87,190 on `rajat28`, and slowed those rows by
+roughly 2x and 1.7x respectively. The apparent `G2_circuit` win is not enough
+to change policy because that run reported zero ready-queue columns and zero
+ready-queue runs. This keeps the ready queue as an off-by-default diagnostic
+and reinforces that the missing CKTSO-scale improvement is not stricter column
+readiness, but a production row/supernode numeric executor with enough coarse
+work to amortize its scheduling and panel-cache costs.
+
 The same conclusion now has structural evidence from the `L` scatter pattern.
 KLS has an opt-in diagnostic,
 `KLS_ENABLE_REFACTOR_L_PATTERN_STATS=1`, which records adjacent row-index runs
