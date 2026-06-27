@@ -18140,13 +18140,13 @@ static int kls_refactor_l_pattern_stats_env_enabled(void) {
 
 static int kls_refactor_l_index32_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_REFACTOR_L_INDEX32");
-  return value != NULL && value[0] != '\0' &&
+  return value == NULL || value[0] == '\0' ||
          !(value[0] == '0' && value[1] == '\0');
 }
 
 static int kls_refactor_u_index32_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_REFACTOR_U_INDEX32");
-  return value != NULL && value[0] != '\0' &&
+  return value == NULL || value[0] == '\0' ||
          !(value[0] == '0' && value[1] == '\0');
 }
 

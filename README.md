@@ -789,14 +789,15 @@ EGraph panel with a unit-diagonal `dtrsv` over the retained internal panel plus
 show this removes the worst rebuild overhead, but the path is still slower than
 default KLS because the broad default path still needs coarser batched panel
 kernels.
-`KLS_ENABLE_REFACTOR_L_INDEX32=1` enables a separate opt-in cache that mirrors
-eligible retained L row-index arrays as 32-bit integers while leaving the
-KLU-owned numeric factor and public index ABI unchanged. The EGraph and refactor
-pool scatter kernels use the narrower mirror when the matrix fits 32-bit local
-row indices and fall back per column to the original `UF_long` rows otherwise.
-`KLS_ENABLE_REFACTOR_U_INDEX32=1` mirrors the retained U dependency-index arrays
-for the same 32-bit-eligible matrices, letting the EGraph scalar dependency walk
-read narrower producer indices without changing the KLU-owned numeric factor.
+Eligible retained L row-index arrays are mirrored as 32-bit integers by default
+while leaving the KLU-owned numeric factor and public index ABI unchanged. The
+EGraph and refactor pool scatter kernels use the narrower mirror when the
+matrix fits 32-bit local row indices and fall back per column to the original
+`UF_long` rows otherwise. The retained U dependency-index arrays use the same
+default 32-bit mirror for eligible matrices, letting the EGraph scalar
+dependency walk read narrower producer indices without changing the KLU-owned
+numeric factor. Set `KLS_ENABLE_REFACTOR_L_INDEX32=0` or
+`KLS_ENABLE_REFACTOR_U_INDEX32=0` to disable either mirror for A/B comparisons.
 Benchmark JSON reports `refactor_l_index32_enabled` and
 `refactor_l_index32_entries` plus `refactor_u_index32_enabled` and
 `refactor_u_index32_entries` so runs can verify whether each mirror was active.
