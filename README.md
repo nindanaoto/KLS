@@ -802,12 +802,22 @@ validation, matching the common SPICE solve shape while keeping the four-RHS
 batched path available for wider solves. Solve-only seeding builds only the
 row-major `L`/`U` solve structure and KLU value-pointer arrays; the heavier
 row-refactor group, segment, and scheduler metadata is left to the refactor
-paths that actually need it. It still records
-CKTSO-style triangular solve partition diagnostics using the paper's dense-tail
-criteria, namely a suffix with at least 70% of row-triangular entries and at
-least 300,000 entries, plus the eight trapezoid slices CKTSO uses after a dense
-tail is found. KLS retains the slice boundaries internally and reports the
-maximum per-slice triangular entries as a load-balance diagnostic. It also
+paths that actually need it.
+
+When row refactor has retained exact compact dense groups, normal and transpose
+row solves consume complete groups as row-major triangular panels for one RHS
+and four-RHS chunks, falling back to scalar row loops when a group does not
+match the compact lower/upper layout exactly. The transpose path mirrors the
+normal compact executor by solving `U^T` from the retained upper panel and
+`L^T` from the retained lower panel instead of re-reading every in-panel entry
+through scalar accessors.
+
+It still records CKTSO-style triangular solve partition diagnostics using the
+paper's dense-tail criteria, namely a suffix with at least 70% of
+row-triangular entries and at least 300,000 entries, plus the eight trapezoid
+slices CKTSO uses after a dense tail is found. KLS retains the slice boundaries
+internally and reports the maximum per-slice triangular entries as a
+load-balance diagnostic. It also
 precomputes per-row rectangular/triangular split points for dense-tail rows and
 reports the resulting lower/upper segment entry counts, matching CKTSO's
 trapezoid-slice setup. Single-RHS, single-block normal and transpose solves now

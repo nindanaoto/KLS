@@ -3423,26 +3423,41 @@ static int test_unchecked_row_dense_compact_panel(void) {
   double *ax1 = (double *)malloc(nnz * sizeof(*ax1));
   double *b = (double *)calloc((size_t)n, sizeof(*b));
   double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *b_transpose = (double *)calloc((size_t)n, sizeof(*b_transpose));
+  double *x_transpose = (double *)calloc((size_t)n, sizeof(*x_transpose));
   double *expected = (double *)malloc((size_t)n * sizeof(*expected));
   double *b_multi =
     (double *)calloc((size_t)n * (size_t)multi_rhs, sizeof(*b_multi));
   double *x_multi =
     (double *)calloc((size_t)n * (size_t)multi_rhs, sizeof(*x_multi));
+  double *b_transpose_multi =
+    (double *)calloc((size_t)n * (size_t)multi_rhs,
+                     sizeof(*b_transpose_multi));
+  double *x_transpose_multi =
+    (double *)calloc((size_t)n * (size_t)multi_rhs,
+                     sizeof(*x_transpose_multi));
   double *expected_multi =
     (double *)malloc((size_t)n * (size_t)multi_rhs *
                      sizeof(*expected_multi));
   if (ap == NULL || ai == NULL || ax0 == NULL || ax1 == NULL ||
-      b == NULL || x == NULL || expected == NULL ||
-      b_multi == NULL || x_multi == NULL || expected_multi == NULL) {
+      b == NULL || x == NULL || b_transpose == NULL ||
+      x_transpose == NULL || expected == NULL ||
+      b_multi == NULL || x_multi == NULL ||
+      b_transpose_multi == NULL || x_transpose_multi == NULL ||
+      expected_multi == NULL) {
     free(ap);
     free(ai);
     free(ax0);
     free(ax1);
     free(b);
     free(x);
+    free(b_transpose);
+    free(x_transpose);
     free(expected);
     free(b_multi);
     free(x_multi);
+    free(b_transpose_multi);
+    free(x_transpose_multi);
     free(expected_multi);
     return 0;
   }
@@ -3497,15 +3512,20 @@ static int test_unchecked_row_dense_compact_panel(void) {
     free(ax1);
     free(b);
     free(x);
+    free(b_transpose);
+    free(x_transpose);
     free(expected);
     free(b_multi);
     free(x_multi);
+    free(b_transpose_multi);
+    free(x_transpose_multi);
     free(expected_multi);
     return 0;
   }
   for (int32_t col = 0; col < n; ++col) {
     for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
       b[ai[p]] += ax1[p] * expected[col];
+      b_transpose[col] += ax1[p] * expected[ai[p]];
     }
   }
 
@@ -3756,6 +3776,8 @@ static int test_unchecked_row_dense_compact_panel(void) {
     for (int32_t col = 0; col < n; ++col) {
       for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
         rhs_b[ai[p]] += ax1[p] * rhs_expected[col];
+        b_transpose_multi[(size_t)rhs * (size_t)n + (size_t)col] +=
+          ax1[p] * rhs_expected[ai[p]];
       }
     }
   }
@@ -3832,6 +3854,97 @@ static int test_unchecked_row_dense_compact_panel(void) {
     ok = 0;
   }
 
+  if (ok && !require_ok(kls_solve_transpose(solver, 1, b_transpose, 0,
+                                            x_transpose, 0),
+                        "transpose solve unchecked dense compact panel")) {
+    ok = 0;
+  }
+  kls_stats transpose_stats;
+  transpose_stats.struct_size = sizeof(transpose_stats);
+  if (ok && !require_ok(kls_get_stats(solver, &transpose_stats),
+                        "transpose stats unchecked dense compact panel")) {
+    ok = 0;
+  }
+  if (ok &&
+      (transpose_stats.row_refactor_last_compact_panel_group_solve_rows <
+         lead ||
+       transpose_stats.row_refactor_last_compact_panel_group_solve_entries <=
+         0 ||
+       transpose_stats.row_refactor_compact_panel_group_solve_rows <
+         multi_stats.row_refactor_compact_panel_group_solve_rows + lead)) {
+    fprintf(stderr,
+            "unexpected transpose compact-panel solve stats: rows=%" PRId64
+            "/%" PRId64 ", entries=%" PRId64 "/%" PRId64 "\n",
+            transpose_stats.row_refactor_last_compact_panel_group_solve_rows,
+            transpose_stats.row_refactor_compact_panel_group_solve_rows,
+            transpose_stats.row_refactor_last_compact_panel_group_solve_entries,
+            transpose_stats.row_refactor_compact_panel_group_solve_entries);
+    ok = 0;
+  }
+  double max_transpose_solution_error = 0.0;
+  for (int32_t i = 0; i < n; ++i) {
+    const double err = fabs(x_transpose[i] - expected[i]);
+    if (err > max_transpose_solution_error) {
+      max_transpose_solution_error = err;
+    }
+  }
+  if (ok && max_transpose_solution_error > 1e-8) {
+    fprintf(stderr,
+            "unexpected transpose compact-panel accuracy: max_x_err=%.17g\n",
+            max_transpose_solution_error);
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_solve_transpose(solver, multi_rhs,
+                                            b_transpose_multi, 0,
+                                            x_transpose_multi, 0),
+                        "transpose multi-RHS solve unchecked dense compact panel")) {
+    ok = 0;
+  }
+  kls_stats transpose_multi_stats;
+  transpose_multi_stats.struct_size = sizeof(transpose_multi_stats);
+  if (ok && !require_ok(kls_get_stats(solver, &transpose_multi_stats),
+                        "transpose multi-RHS stats unchecked dense compact panel")) {
+    ok = 0;
+  }
+  if (ok &&
+      (transpose_multi_stats.row_refactor_last_compact_panel_group_solve_rows <
+         lead ||
+       transpose_multi_stats.row_refactor_last_compact_panel_group_solve_entries <=
+         0 ||
+       transpose_multi_stats.row_refactor_compact_panel_group_solve_rows <
+         transpose_stats.row_refactor_compact_panel_group_solve_rows + lead)) {
+    fprintf(stderr,
+            "unexpected transpose multi-RHS compact-panel solve stats:"
+            " rows=%" PRId64 "/%" PRId64 ", entries=%" PRId64 "/%" PRId64
+            "\n",
+            transpose_multi_stats.row_refactor_last_compact_panel_group_solve_rows,
+            transpose_multi_stats.row_refactor_compact_panel_group_solve_rows,
+            transpose_multi_stats.row_refactor_last_compact_panel_group_solve_entries,
+            transpose_multi_stats.row_refactor_compact_panel_group_solve_entries);
+    ok = 0;
+  }
+  double max_transpose_multi_solution_error = 0.0;
+  for (int32_t rhs = 0; rhs < multi_rhs; ++rhs) {
+    const double *rhs_expected =
+      expected_multi + (size_t)rhs * (size_t)n;
+    const double *rhs_x =
+      x_transpose_multi + (size_t)rhs * (size_t)n;
+    for (int32_t row = 0; row < n; ++row) {
+      const double err = fabs(rhs_x[row] - rhs_expected[row]);
+      if (err > max_transpose_multi_solution_error) {
+        max_transpose_multi_solution_error = err;
+      }
+    }
+  }
+  if (ok && max_transpose_multi_solution_error > 1e-8) {
+    fprintf(stderr,
+            "unexpected transpose multi-RHS compact-panel accuracy:"
+            " max_x_err=%.17g\n",
+            max_transpose_multi_solution_error);
+    ok = 0;
+  }
+
   kls_destroy(solver);
   free(ap);
   free(ai);
@@ -3839,9 +3952,13 @@ static int test_unchecked_row_dense_compact_panel(void) {
   free(ax1);
   free(b);
   free(x);
+  free(b_transpose);
+  free(x_transpose);
   free(expected);
   free(b_multi);
   free(x_multi);
+  free(b_transpose_multi);
+  free(x_transpose_multi);
   free(expected_multi);
   free(residual);
   free(saved_env);

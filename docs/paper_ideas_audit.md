@@ -3928,9 +3928,20 @@ updates the chunk's row-major work slab across all RHS columns before falling
 back to sparse row loops for non-exact layouts. The compact-panel smoke fixture
 now solves three RHS after the one-RHS solve and requires fresh last-run
 compact group-solve rows, so the coverage is tied to actual multi-RHS executor
-use rather than cumulative one-RHS statistics. Transpose solves still use the
-row-aware per-entry accessors, so the solve-side panel executor is not yet
-complete.
+use rather than cumulative one-RHS statistics.
+
+The serial row-refactor transpose solve now consumes the same retained compact
+groups instead of walking every in-panel value through row-aware scalar
+accessors. The `U^T` phase validates the dense upper panel plus its common
+trailing strip, solves the transposed lower triangular panel in row-major form,
+and scatters only the external trailing rows. The `L^T` phase validates the
+lower-panel suffix, solves the transposed unit-upper panel backward, and
+scatters only external lower dependencies. One-RHS and four-RHS chunks share
+the same layout guards and fall back to the old scalar loops on non-exact
+groups. This closes the serial solve-side panel-executor asymmetry; the
+remaining transpose solve gap is the generic parallel transposed-row view,
+which is still source-position based rather than a compact-panel group
+executor.
 
 The refactor scalar fallback now follows the same storage rule for single-row
 producer dependencies. If a completed dense producer row belongs to a retained
