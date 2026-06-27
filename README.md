@@ -670,11 +670,13 @@ dense-consumer external prefixes without requiring CBLAS. Builds configured with
 calls with the same scalar fallback and pivot checks. Completed producer
 supernodes can update later rows with CBLAS `dtrsv` plus `dgemv`, matching the
 paper's direct update shape over the retained row-major panel when the
-structural update work is large enough to amortize BLAS calls. When a whole
-unchecked dense consumer group, or a contiguous row subrange inside it, has the
-same ordered list of completed dense producer suffixes as its external
-dependency pattern, the CBLAS experiment can batch those producer updates
-across those consumer rows with one `dtrsm` and one `dgemm` per producer.
+structural update work and row/panel dimensions are large enough to amortize
+BLAS calls. Smaller producer/consumer shapes stay on the KLS-owned scalar
+compact kernels. When a whole unchecked dense consumer group, or a contiguous
+row subrange inside it, has the same ordered list of completed dense producer
+suffixes as its external dependency pattern, the CBLAS experiment can batch
+those producer updates across those consumer rows with one `dtrsm` and one
+`dgemm` per producer.
 Earlier producer updates can flow into later producer multiplier columns before
 those later suffixes are solved; stats report
 `row_refactor_last_compact_supernode_batch`,

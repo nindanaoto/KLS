@@ -4377,12 +4377,21 @@ SubtreeLU text directly for a completed producer supernode: CBLAS `dtrsv`
 solves the producer suffix multipliers and CBLAS `dgemv` applies the retained
 trailing panel to the current sparse work row, with the same row-order
 multiplier checks before publication. This consumer-side BLAS path is gated by
-a structural work-per-copied-entry rule, because an ungated `onetone2` probe
-issued thousands of tiny CBLAS calls and regressed badly despite producing a
-valid residual. Larger gated probes did exercise the external CBLAS consumer
-and stayed residual-clean, but they still did not beat the scalar row kernel in
-same-session samples: `G2_circuit` was about `2.50s` versus `0.326s`, and
-`ASIC_100ks` was about `0.181s` versus `0.156s`.
+a structural work-per-copied-entry rule and explicit minimum row/vector/panel
+dimensions, because ungated and weakly gated probes issued thousands of tiny
+CBLAS calls and regressed badly despite producing valid residuals. The first
+large ASIC check also exposed an unfair build artifact: `build-cblas` had been
+configured without `CMAKE_BUILD_TYPE=Release`, so even
+`KLS_ENABLE_CBLAS_SUPERNODE=0` measured about `100s`. After reconfiguring the
+CBLAS tree as Release, the final guarded forced-row probe on
+`ASIC_320k`/`ASIC_320ks` measured `38.79s`/`42.87s`, matching the CBLAS-disabled
+Release control (`38.84s`/`42.15s`) and the non-CBLAS Release forced-row build
+(`39.51s`/`42.51s`). The default auto row-refactor path with CBLAS enabled
+remained at `15.81s`/`12.83s` on the same two matrices. Larger gated probes did
+exercise the external CBLAS consumer and stayed residual-clean, but they still
+did not beat the scalar row kernel in same-session samples: `G2_circuit` was
+about `2.50s` versus `0.326s`, and `ASIC_100ks` was about `0.181s` versus
+`0.156s`.
 
 KLS then added the next, more paper-faithful batch shape: if an unchecked dense
 consumer group, or a contiguous row subrange inside it, has the same ordered
@@ -4619,10 +4628,11 @@ The scalar compact kernel remains the default because same-session `onetone2`
 forced-row probes still favored it: the blocked CBLAS panel path was about
 `0.072s` versus `0.029s` with the scalar fallback, with both runs
 residual-clean. This improved on the earlier per-row CBLAS attempt (`0.219s`)
-but confirms the paper gap more precisely: KLS needs batched
-row-group/supernode consumer updates and a deeper blocked row-major numeric
-layout, not BLAS calls wrapped around each current row in the existing compact
-group shape.
+but confirms the paper gap more precisely: KLS needs batched row-group/supernode
+consumer updates and a deeper blocked row-major numeric layout, not BLAS calls
+wrapped around each current row in the existing compact group shape. The CBLAS
+probe is now restricted to large dense/vector shapes; small checked cases fall
+through to the scalar compact kernel instead of paying BLAS call overhead.
 
 KLS then filled a narrower but direct CKTSO tail-restart semantic gap for
 prefix-current masked tails. A prefix-current root reject normally means every

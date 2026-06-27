@@ -40,12 +40,16 @@
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY 8.0
 #define KLS_ROW_REFACTOR_CBLAS_BLOCK_ROWS 32u
+#define KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS 512u
+#define KLS_ROW_REFACTOR_CBLAS_MIN_BATCH_ROWS 64u
+#define KLS_ROW_REFACTOR_CBLAS_MIN_BATCH_DEP_ROWS 64u
+#define KLS_ROW_REFACTOR_CBLAS_MIN_PANEL_WIDTH 512u
 #define KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY 8.0
-#define KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK \
-  KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK
+#define KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK 5000000.0
 #define KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY \
   KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY
+#define KLS_ROW_REFACTOR_CBLAS_PANEL_MIN_WORK 20000000.0
 #define KLS_EGRAPH_SCALAR_SUPERNODE_UPDATE_MAX_WIDTH 256u
 #define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
@@ -23893,6 +23897,73 @@ static int kls_cblas_supernode_env_enabled(void) {
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
+
+static int kls_cblas_work_allows(double work, double copied_entries) {
+  return work >= KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK &&
+         work >= KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY *
+                   copied_entries;
+}
+
+static int kls_cblas_supernode_vector_update_allows(UF_long run_rows,
+                                                    UF_long dense_cols,
+                                                    UF_long trailing_len) {
+  if (run_rows < KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS ||
+      dense_cols + trailing_len < KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS) {
+    return 0;
+  }
+  const double work =
+    0.5 * (double)run_rows * (double)(run_rows - 1u) +
+    (double)run_rows * (double)dense_cols +
+    (double)run_rows * (double)trailing_len;
+  const double copied_entries =
+    (double)run_rows + (double)dense_cols + (double)trailing_len;
+  return kls_cblas_work_allows(work, copied_entries);
+}
+
+static int kls_cblas_batched_supernode_update_allows(UF_long batch_rows,
+                                                     UF_long dep_rows,
+                                                     UF_long trailing_len) {
+  if (batch_rows < KLS_ROW_REFACTOR_CBLAS_MIN_BATCH_ROWS ||
+      dep_rows < KLS_ROW_REFACTOR_CBLAS_MIN_BATCH_DEP_ROWS ||
+      dep_rows + trailing_len < KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS) {
+    return 0;
+  }
+  const double work =
+    0.5 * (double)batch_rows * (double)dep_rows *
+      (double)(dep_rows - 1u) +
+    (double)batch_rows * (double)dep_rows * (double)trailing_len;
+  const double copied_entries =
+    (double)batch_rows * (double)(dep_rows + trailing_len);
+  return kls_cblas_work_allows(work, copied_entries);
+}
+
+static int kls_cblas_dense_panel_factor_allows(UF_long width,
+                                               UF_long trailing_len) {
+  if (width < KLS_ROW_REFACTOR_CBLAS_MIN_PANEL_WIDTH) {
+    return 0;
+  }
+  const double work =
+    ((double)width * (double)width * (double)width) / 3.0 +
+    0.5 * (double)width * (double)(width - 1u) *
+      (double)trailing_len;
+  return work >= KLS_ROW_REFACTOR_CBLAS_PANEL_MIN_WORK;
+}
+
+static int kls_cblas_dense_panel_row_update_allows(UF_long local_row,
+                                                   UF_long right_len,
+                                                   UF_long trailing_len) {
+  if (local_row < KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS ||
+      right_len + trailing_len < KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS) {
+    return 0;
+  }
+  const double work =
+    0.5 * (double)local_row * (double)(local_row - 1u) +
+    (double)local_row * (double)right_len +
+    (double)local_row * (double)trailing_len;
+  const double copied_entries =
+    (double)local_row + (double)right_len + (double)trailing_len;
+  return kls_cblas_work_allows(work, copied_entries);
+}
 #endif
 
 static int kls_first_factor_env_enabled(void) {
@@ -27971,14 +28042,8 @@ static int kls_row_refactor_try_compact_supernode_update_cblas(
   if (suffix_begin >= width || run_rows != width - suffix_begin) {
     return 0;
   }
-  const double update_work =
-    0.5 * (double)run_rows * (double)(run_rows - 1u) +
-    (double)run_rows * (double)trailing_len;
-  const double copied_entries = (double)(run_rows + trailing_len);
-  if (update_work < KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK ||
-      update_work <
-        KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY *
-          copied_entries) {
+  if (!kls_cblas_supernode_vector_update_allows(run_rows, 0u,
+                                                trailing_len)) {
     return 0;
   }
   const UF_long max_workspace_entries =
@@ -29331,6 +29396,11 @@ static int kls_compact_dense_panel_update_row_cblas(
   }
 
   const UF_long local_row = row - row_begin;
+  const UF_long right_len = width - local_row - 1u;
+  if (!kls_cblas_dense_panel_row_update_allows(local_row, right_len,
+                                               trailing_len)) {
+    return 0;
+  }
   double *row_dense_panel = dense_panel + local_row * width;
   row_dense_panel[local_row] = udiag[row];
   if (local_row == 0u) {
@@ -29364,7 +29434,6 @@ static int kls_compact_dense_panel_update_row_cblas(
   }
   udiag[row] = pivot;
 
-  const UF_long right_len = width - local_row - 1u;
   if (right_len > 0u) {
     cblas_dgemv(CblasRowMajor, CblasTrans, nprev, (int)right_len,
                 -1.0, dense_panel + local_row + 1u, lda_dense,
@@ -29423,6 +29492,9 @@ static int kls_compact_dense_panel_factor_cblas_unchecked(
   if (width == 0u || width > (UF_long)INT_MAX ||
       trailing_len > (UF_long)INT_MAX ||
       (trailing_len > 0u && trailing_panel == NULL)) {
+    return 0;
+  }
+  if (!kls_cblas_dense_panel_factor_allows(width, trailing_len)) {
     return 0;
   }
 
@@ -30448,7 +30520,11 @@ static int kls_compact_dense_group_try_batched_supernode_update(
     }
 
 #ifdef KLS_HAVE_CBLAS
-    if (use_cblas) {
+    const int use_run_cblas =
+      use_cblas &&
+      kls_cblas_batched_supernode_update_allows(batch_rows, run->dep_rows,
+                                                run->trailing_len);
+    if (use_run_cblas) {
       cblas_dtrsm(CblasRowMajor, CblasRight, CblasUpper, CblasNoTrans,
                   CblasNonUnit, (int)batch_rows, (int)run->dep_rows, 1.0,
                   run->dense_panel + run->suffix_begin * run->width +
@@ -30526,7 +30602,7 @@ static int kls_compact_dense_group_try_batched_supernode_update(
            (size_t)batch_rows * (size_t)run->trailing_len *
              sizeof(*updates));
 #ifdef KLS_HAVE_CBLAS
-    if (use_cblas) {
+    if (use_run_cblas) {
       cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
                   (int)batch_rows, (int)run->trailing_len,
                   (int)run->dep_rows, 1.0,
@@ -36566,16 +36642,8 @@ static int kls_egraph_apply_cached_supernode_cblas(
   }
 
   const UF_long dense_scatter_len = width - available_end;
-  const double update_work =
-    0.5 * (double)run_rows * (double)(run_rows - 1u) +
-    (double)run_rows * (double)dense_scatter_len +
-    (double)run_rows * (double)trailing_len;
-  const double copied_entries =
-    (double)run_rows + (double)dense_scatter_len + (double)trailing_len;
-  if (update_work < KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK ||
-      update_work <
-        KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY *
-          copied_entries) {
+  if (!kls_cblas_supernode_vector_update_allows(run_rows, dense_scatter_len,
+                                                trailing_len)) {
     return 0;
   }
 
@@ -45294,16 +45362,8 @@ static int kls_row_first_partial_apply_supernode_run_cached_cblas(
     return 0;
   }
 
-  const double update_work =
-    0.5 * (double)run_limit * (double)(run_limit - 1u) +
-    (double)run_limit * (double)dense_suffix_len +
-    (double)run_limit * (double)tail_len;
-  const double copied_entries =
-    (double)run_limit + (double)dense_suffix_len + (double)tail_len;
-  if (update_work < KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK ||
-      update_work <
-        KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY *
-          copied_entries) {
+  if (!kls_cblas_supernode_vector_update_allows(run_limit, dense_suffix_len,
+                                                tail_len)) {
     return 0;
   }
   if (tail_len > UF_long_max - run_limit) {
