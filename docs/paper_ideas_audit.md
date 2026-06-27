@@ -5011,6 +5011,26 @@ SubtreeLU/CKTSO compact-panel arithmetic gap for the column EGraph probe; the
 remaining larger gap is still broader batched producer/consumer scheduling and
 CKTSO's pivoting-tail executor.
 
+A small-fragment guard for the cached EGraph-panel consumer was tested and
+rejected. The probe required at least 32 contiguous producer rows and reused the
+row-supernode `32768` work / `8x copied entries` threshold before entering the
+cached blocked/CBLAS panel path, leaving smaller fragments on the scalar
+dependency loop. This did reduce the opt-in update count substantially: on the
+five current CKTSO-gap focus rows
+(`build/kls_egraph_supernode_guarded_gap5_t4_r3_timeout120.jsonl`), the average
+grouped update grew from roughly 7-14 rows in the earlier prefix/suffix probe to
+about 24-73 rows, and the blocked subset averaged about 112-244 rows. It still
+lost badly. The guarded opt-in geomean was 12.05 s versus 7.96 s for current
+default KLS on the same five rows, and it was also slower than the previous
+unguarded prefix/suffix opt-in artifact's 9.89 s common-row geomean. `ASIC_320k`
+rose from 13.62 s default to 18.04 s guarded opt-in, and `G2_circuit` rose from
+23.23 s to 34.35 s. This rules out "too many small BLAS/panel calls" as the main
+remaining cause for these slow rows: once small calls are removed, the retained
+panel cache build plus the remaining large blocked updates are still more
+expensive than the scalar EGraph refactor. The missing paper-level piece remains
+a production coarse/batched supernodal numeric executor, not a simple
+small-call threshold.
+
 A direct CKTSO Algorithm 5-style scalar prefactor was also tested in the
 column EGraph refactor path and rejected. The probe scanned later dependencies
 while an earlier predecessor was unfinished, consumed only already-published
