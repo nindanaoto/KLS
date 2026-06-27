@@ -4797,6 +4797,17 @@ partial compact-supernode update. This fills a direct Algorithm 5 coverage gap
 for prefix-safe producer/consumer overlap, while the full CKTSO pivoting-tail
 executor and production row-major first factor remain open.
 
+A broader attempt to enable the row-dependency partial-supernode queue whenever
+the structural partial-supernode test passed, even when the separator-private
+side dominated the separator-pipeline side, was rejected. It matches the paper's
+per-unfinished-supernode wording more directly, but it broke the current KLS
+private/pipeline ready-queue invariant: smoke hung because the row-dependency
+queue may start with no ready pipeline group while private work still owns the
+unlocking dependencies. The current dominance guard therefore remains a
+correctness guard, not a performance threshold. Closing this gap needs a queue
+that lets private-group completion release row-dependency pipeline groups
+without starving the ready queue, not merely relaxing the selector.
+
 The column EGraph refactor schedule now retains exact consecutive
 supernode-candidate ranges instead of only counting them. Benchmark JSON and
 gap decomposition output report the number of retained candidates and, when
