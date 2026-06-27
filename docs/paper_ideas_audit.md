@@ -5697,6 +5697,22 @@ covering 172M update entries). The remaining slow forced-row issue is therefore
 not small BLAS calls; it is still the row ready-queue/partial-supernode pipeline
 pathology exposed by the default forced-row timeout.
 
+The same conclusion held on the current top-ten CKTSO-gap focus after the exact
+row-dependency release fix. A separate `build-cblas` binary configured with
+`-DKLS_ENABLE_CBLAS_SUPERNODE=ON` was run with `OPENBLAS_NUM_THREADS=1` to keep
+BLAS internal threading out of the comparison. With the runtime gate off,
+`build/kls_cblas_build_gate_off_gap10_t4_r1_ref3_timeout120.jsonl` measured a
+`4.2390s` geomean; with `KLS_ENABLE_CBLAS_SUPERNODE=1`,
+`build/kls_cblas_build_gate_on_gap10_t4_r1_ref3_timeout120.jsonl` measured
+`4.2850s`, a `1.0108x` slowdown. More importantly, every default EGraph row in
+that run reported zero `refactor_last_supernode_cblas_update_*` and
+`refactor_supernode_cblas_update_*` counters even when the runtime gate was on.
+So the proposed "BLAS only for large cases" guard is already present for the
+production path: the CKTSO-gap losses are occurring before KLS reaches any
+default BLAS call. The open paper gap remains durable supernode/panel storage
+and an executor that creates BLAS-sized reusable work without per-consumer
+staging, not an unguarded small-BLAS threshold.
+
 The same conclusion held after splitting the lightweight scalar EGraph
 supernode-run consumer away from the retained-panel cache as a local probe.
 With scalar supernode updates enabled by default but without building the
