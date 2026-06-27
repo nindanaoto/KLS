@@ -33,6 +33,12 @@
 #include <string.h>
 #include <time.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+#define KLS_ALWAYS_INLINE inline __attribute__((always_inline))
+#else
+#define KLS_ALWAYS_INLINE inline
+#endif
+
 #define KLS_KLU_EMPTY ((UF_long)-1)
 #define KLS_ROW_REFACTOR_BATCH_MIN_ROWS 8u
 #define KLS_ROW_REFACTOR_BATCH_MAX_ROWS 16u
@@ -1248,11 +1254,12 @@ static void kls_finalize_separator_global_range(
   }
 }
 
-static inline void kls_scatter_subtract(double *restrict x,
-                                        const UF_long *restrict rows,
-                                        const double *restrict values,
-                                        UF_long length,
-                                        double scale) {
+static KLS_ALWAYS_INLINE void kls_scatter_subtract(
+  double *restrict x,
+  const UF_long *restrict rows,
+  const double *restrict values,
+  UF_long length,
+  double scale) {
   if (scale == 0.0) {
     return;
   }
@@ -1278,11 +1285,12 @@ static inline void kls_scatter_subtract(double *restrict x,
   }
 }
 
-static inline void kls_scatter_subtract_i32(double *restrict x,
-                                            const int32_t *restrict rows,
-                                            const double *restrict values,
-                                            UF_long length,
-                                            double scale) {
+static KLS_ALWAYS_INLINE void kls_scatter_subtract_i32(
+  double *restrict x,
+  const int32_t *restrict rows,
+  const double *restrict values,
+  UF_long length,
+  double scale) {
   if (scale == 0.0) {
     return;
   }
@@ -1308,7 +1316,7 @@ static inline void kls_scatter_subtract_i32(double *restrict x,
   }
 }
 
-static inline void kls_scatter_subtract_refactor_l(
+static KLS_ALWAYS_INLINE void kls_scatter_subtract_refactor_l(
   const kls_solver *solver,
   double *restrict x,
   UF_long column,
