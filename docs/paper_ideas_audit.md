@@ -7107,3 +7107,26 @@ it avoided the reset but pushed `rajat29` back near the old slow path. A
 prefix-only reset experiment was also rejected for the same reason. The useful
 conclusion is that `pre2` needs the paper-level coarse row/supernode executor,
 not just less panel-cache rebuilding and not a small-case BLAS guard.
+
+A follow-up unlocked-snapshot experiment was also rejected. The prototype
+copied large ready scalar U rows, then ready compact supernode U runs, while
+holding the row-pipeline lock and applied the copied updates outside the lock,
+discarding and retrying the row if a later dynamic pivot changed the pipeline
+epoch. This was correctness-preserving in smoke tests but not a useful
+executor replacement. `cmake --build build -j$(nproc)` and
+`ctest --test-dir build --output-on-failure` passed, but the focused probes
+were mixed: scalar snapshots moved `ASIC_320k` from about `2.97s` to
+`3.00s` and `rajat29` from about `12.78s` to `12.12s`; adding compact
+supernode-run snapshots moved `ASIC_320k` to about `3.03s` and `rajat29` to
+about `12.61s`. Both `pre2` snapshot variants still timed out at 130s and
+left empty artifacts,
+`build/kls_pre2_snapshot_scalar_t4_factor_timeout130.json` and
+`build/kls_pre2_snapshot_supernode_t4_factor_timeout130.json`.
+
+GDB sampling of the snapshot-supernode variant showed the bottleneck simply
+moved to `kls_row_first_partial_apply_supernode_run` and worker lock waits;
+the extra copy did not create CKTSO-style coarse tasks, it mostly duplicated
+memory traffic. That rejects the lightweight snapshot route and strengthens
+the next implementation target: build a real production row/supernode numeric
+object with scheduled coarse triangular solves/trailing updates, instead of
+copying KLU-compatible row fragments around the existing scalar executor.
