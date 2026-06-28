@@ -7727,3 +7727,32 @@ close the paper gap. The durable row-major/supernode numeric object needs to
 precompute the producer-panel row-major representation and feed coarse
 triangular/update kernels without rediscovering or branching over the KLU
 column layout for every consumer.
+
+A follow-up durable ragged-panel cache was implemented and rejected on
+2026-06-28. This opt-in prototype used
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=ragged-panel`, built one cached
+row-major internal block plus per-producer-row tail slices for each retained
+EGraph supernode candidate, published each completed L column into that cache,
+and consumed only large contiguous U dependency runs. This removed the previous
+per-consumer L-column validation/scatter discovery but still kept the tail
+updates as scalar ragged row scatters. It built and passed smoke tests, but the
+top-five CKTSO-gap screen regressed from `1.6463s` to `1.7533s` geomean
+(`build/kls_ragged_panel_control_gap5_t4_r1_ref3_timeout120.jsonl` versus
+`build/kls_ragged_panel_gap5_t4_r1_ref3_timeout120.jsonl`). The mode did reach
+substantial work: `ASIC_320ks` applied `2,216` runs over `339,862` rows and
+`137,375,654` entries while refactor time moved from `0.08496s` to `0.09879s`;
+`ASIC_320k` applied `2,294` runs over `265,289` rows and `130,486,393` entries
+while refactor moved from `0.12431s` to `0.13253s`; and `ASIC_100ks` applied
+`1,391` runs over `154,944` rows and `60,814,817` entries while refactor moved
+from `0.05702s` to `0.06315s`. A repeat-20 `ASIC_100ks` amortization check
+confirmed that this was not just first-use cache construction:
+`build/kls_ragged_panel_control_asic100ks_t4_r1_ref20.json` measured
+`0.04439s` refactor, while
+`build/kls_ragged_panel_asic100ks_t4_r1_ref20.json` measured `0.05449s` after
+`29,211` grouped runs, `3,253,824` rows, and `1,277,111,157` update entries.
+The build used here had `build_has_cblas=false`, and earlier CBLAS-enabled
+guards reported zero CBLAS counters on these same default slow paths, so this is
+not evidence for a small-BLAS threshold problem. The source was reverted. The
+remaining paper gap is more specific: KLS needs a production row/segment or
+supernodal numeric engine that batches/shared-tail updates into coarse kernels,
+not merely a prepacked scalar ragged-tail cache.
