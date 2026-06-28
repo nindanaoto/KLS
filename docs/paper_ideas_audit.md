@@ -6760,3 +6760,15 @@ diagnostic for the SubtreeLU-style persistent-panel path, not a default speed
 policy. The remaining missing algorithm is coarser producer/consumer batching
 or row-major supernode execution that amortizes panel publication across larger
 work units.
+
+A direct default EGraph L-index cache hoist was tested and rejected. The patch
+passed the already-built `refactor_l_indices32` pointer into the hot scatter
+helper so each dependency update would not reload it through the solver object.
+That is a harmless storage-access cleanup, but it is not the paper-level
+executor change and did not improve the hard refactor rows. With the patch, the
+two ASIC top-gap rows measured `12.5128s` geomean in
+`build/kls_lindex_cached_scatter_gap2_t4_r1_ref20_timeout120.jsonl`; the
+same-session reverted control measured `12.5034s` in
+`build/kls_lindex_cached_scatter_control_gap2_t4_r1_ref20_timeout120.jsonl`.
+The source stayed reverted. This keeps attention on coarser row/supernode
+execution rather than per-dependency pointer plumbing.
