@@ -6555,3 +6555,30 @@ forced row-refactor baseline (`20.7554s` versus `11.8996s` geomean, `1.744x`
 candidate/reference), so the remaining paper gap is still the lower-overhead
 row-panel storage/update kernel, not just retained target lookup or small BLAS
 thresholding.
+
+A follow-up worker-scratch probe was rejected. It moved the independent
+multi-producer batch metadata (`run_groups`, per-row run offsets/suffixes,
+run lengths, run ids, L offsets, and U offsets) into the reusable worker index
+workspace and combined pivots, multipliers, and U workspaces into one reusable
+worker supernode workspace. This removed many per-batch heap allocations and
+looked closer to a persistent row-panel executor, but it regressed the same
+opt-in forced row-refactor top-ten run from `20.7554s` to `22.2698s` geomean
+with the same `6864` compact supernode batches and `2717328408` batch entries
+(`build/kls_multi_targetmap_validated_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_multi_worker_scratch_gap10_t4_r1_ref3_timeout120.jsonl`). The code
+was removed. The result narrows the gap further: ordinary heap allocation in
+these independent batches is not the main missing piece; the larger issue is
+still the arithmetic/data-layout granularity of the row-panel update itself.
+
+A row-major mapped-update probe was rejected for the same reason. In the exact
+independent multi-producer branch, retained target maps remove the need to
+search each dense-producer trailing column, so the probe inverted the mapped
+trailing update loop to process all target columns for one consumer row before
+moving to the next row. This looked more cache-local for the consumer
+multiplier/pivot/U workspace, but the same opt-in top-ten run regressed from
+`20.7554s` to `23.4976s` geomean with identical compact-supernode batch
+coverage (`6864` batches and `2717328408` entries) and zero CBLAS calls
+(`build/kls_multi_rowmajor_target_gap10_t4_r1_ref3_timeout120.jsonl`). The
+code was removed. Together with the worker-scratch probe, this points away from
+simple staging/locality rearrangements inside the current per-consumer row
+kernel and toward a more substantial packed row-panel update object.
