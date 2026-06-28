@@ -6209,3 +6209,28 @@ extra branch regressed the top-ten CKTSO-gap repeat-3 geomean to `4.1316s`
 (`build/kls_zero_l_store_div_skip_gap10_t4_r1_ref3_timeout120.jsonl`), so the
 branch was removed. The profitable exact-zero handling remains at the producer
 dependency level, where it avoids whole `L`-column metadata/scatter work.
+
+A current-source policy probe also rejected disabling static pivoting to help
+the small initial-factor-dominated `gemat12` row. `--no-static-pivoting`
+improved `gemat12` from roughly `0.059s` to `0.049s`, but it broke the general
+SPICE set: the top-ten geomean regressed to `9.3922s`, with `onetone2`
+at `31.3s`, `onetone1` at `95.2s`, `rajat28` at `20.5s`, and `rajat24` at
+`32.4s`
+(`build/kls_no_static_pivot_gap10_t4_r1_ref3_timeout120.jsonl`). Static
+pivoting therefore remains a necessary broad policy despite the small-case
+overhead; closing the `gemat12` gap needs a cheaper small-factor path, not a
+global static-pivot disable.
+
+The current source was also rechecked against the two larger paper-aligned
+opt-ins after the zero-dependency metadata improvement. EGraph cached
+supernode updates with `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1` still regressed
+the top-ten CKTSO-gap set to `4.6533s` geomean versus about `4.00s-4.02s` for
+the default (`build/kls_egraph_supernode_current_gap10_t4_r1_ref3_timeout120.jsonl`).
+The probe built and consumed panels on every EGraph row, but all such rows
+regressed; `gemat12` was the only win and it reported zero supernode panels, so
+that movement is not evidence for enabling the panel path. Forced
+row-solve-from-numeric also stayed off-policy: `--row-solve on` measured
+`4.2294s` geomean and `G2_circuit` rose to `31.5s`
+(`build/kls_row_solve_on_current_gap10_t4_r1_ref3_timeout120.jsonl`). These
+reruns keep both features as correctness/coverage scaffolding for the future
+row/supernode engine rather than current default performance levers.
