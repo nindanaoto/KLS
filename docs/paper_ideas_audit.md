@@ -7704,3 +7704,26 @@ structure and not just a wait or BLAS threshold. It is the durable
 row-major/supernode numeric object that can consume these runs without
 requiring the current common-trailing cached-panel shape or
 rebuilding/scattering through KLU-compatible column storage for each consumer.
+
+A direct ragged EGraph supernode consumer was then tried and rejected. The
+prototype added an opt-in `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=ragged` mode,
+skipped the common-trailing panel cache, validated each retained contiguous
+run, solved the internal triangular part in worker scratch, and scattered each
+producer column's ragged tail directly from the KLU-compatible L columns. It
+was residual-clean and applied substantial grouped work, which confirms the
+consumer-run diagnostic: with a 16-row gate, `ASIC_100ks` applied `14,193`
+runs over `558,741` rows and `213,794,108` update entries, but refactor time
+was `0.0934s` versus the same-session default `0.0413s` in the top-five screen
+(`build/kls_ragged_supernode_gap5_t4_r1_ref3_timeout120.jsonl` and
+`build/kls_ragged_control_gap5_t4_r1_ref3_timeout120.jsonl`). Tightening the
+gate to 64-row runs still regressed a serial same-matrix check:
+`ASIC_100ks` default refactor was `0.03796s`, while ragged-wide mode applied
+`2,074` runs over `210,696` rows and `77,517,080` entries but took `0.06573s`
+(`build/kls_ragged64_control_asic100ks_t4_r1_ref3.json` and
+`build/kls_ragged64_asic100ks_t4_r1_ref3.json`). The source was reverted.
+This is a useful negative result: simply replacing scalar scatter with a
+per-consumer ragged validation plus branchy direct L-column scatter does not
+close the paper gap. The durable row-major/supernode numeric object needs to
+precompute the producer-panel row-major representation and feed coarse
+triangular/update kernels without rediscovering or branching over the KLU
+column layout for every consumer.
