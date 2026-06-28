@@ -7035,3 +7035,44 @@ large cases therefore remains cold first-factor numeric machinery, especially
 the CKTSO/SubtreeLU row-up-looking dominant-block executor and ETree-tail
 pipeline, not another refactor-only scalar split, small-BLAS guard, or simple
 ordering selector.
+
+The small-BLAS guard hypothesis was rechecked against the current source while
+filling one direct scheduling gap from that diagnosis. The existing CBLAS paths
+remain build-time optional, runtime opt-in, and structurally gated at 512-scale
+vectors/panels plus multi-million-work thresholds; the normal build used for the
+gap runs has `KLS_ENABLE_CBLAS_SUPERNODE=OFF`, and the forced dominant-block
+probes below still report `build_has_cblas=false` and zero CBLAS counters.
+
+KLS now lets the BTF-parallel KLS-first row-up factorization route a large
+dominant BTF block through the existing intra-block row pipeline while leaving
+the fringe blocks on the BTF worker queue. The selector is structural: more
+than one BTF block, a largest block of at least 30,000 rows, and at least 75%
+matrix coverage by that largest block. The same patch also propagates the
+BTF-worker pipeline counters into the public KLS-first stats, because the
+previous parallel-BTF success path could run the row pipeline without exposing
+that fact.
+
+This is a paper-aligned scaffold improvement, but not the missing CKTSO-scale
+fix. `cmake --build build -j$(nproc)` and
+`ctest --test-dir build --output-on-failure` passed. Forced KLS-first probes
+showed that the dominant-block row pipeline activates:
+`ASIC_320k` reported `kls_first_row_pipeline_run_count=2` and
+`kls_first_parallel_btf_block_count=798` in
+`build/kls_asic320k_dominant_btf_pipeline_stats_t4_factor_timeout45.json`;
+`rajat29` reported `kls_first_row_pipeline_run_count=1` and
+`kls_first_parallel_btf_block_count=14307` in
+`build/kls_rajat29_dominant_btf_pipeline_stats_t4_factor_timeout70.json`.
+Both still fell back to KLU on the follow-up factor in the benchmark harness,
+and their forced KLS-first cold factors remained slower than the accepted
+default policy (`ASIC_320k` about `3.30s`; `rajat29` about `12.61s`). The
+current-source `pre2` forced KLS-first factor-only probe still timed out at
+130s and left an empty artifact:
+`build/kls_pre2_dominant_btf_pipeline_stats_t4_factor_timeout130.json`.
+
+The conclusion is narrower and clearer: guarding BLAS for large cases is
+already true for the tested paths, and simply exposing the existing row
+pipeline inside the dominant BTF block is not enough. The remaining large gap
+is the paper-level numeric representation/executor itself: CKTSO's production
+row/supernode storage, checked pivoting-tail scheduler, and coarse updates must
+replace more scalar row/panel-cache growth work before `pre2`-class cases can
+approach CKTSO.
