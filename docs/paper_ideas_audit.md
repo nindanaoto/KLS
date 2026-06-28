@@ -5951,6 +5951,24 @@ the KLS-first path timed out on `rajat24` and was much worse than the auto
 policy. These failures are kept out of the default path because they do not
 close the algorithmic gap described in the CKTSO/SubtreeLU papers.
 
+A June 28, 2026 same-shape rerun confirmed that rejection on the current
+source. The stable default top-ten CKTSO-gap run
+(`build/kls_current_default_gap10_t4_r1_ref3_timeout120.jsonl`) completed all
+ten matrices with a `4.1846s` SPICE-cycle geomean. Forcing the current
+KLS-first scaffold
+(`build/kls_current_klsfirst_gap10_t4_r1_ref3_timeout120.jsonl`) completed
+only nine matrices, timed out `rajat24` at 120s, and was `1.184x` slower than
+the default on the nine common successes. The loss was cold-factor dominated:
+`ASIC_320k` initial factor time moved from `1.242s` to `3.987s`,
+`ASIC_320ks` from `0.994s` to `2.452s`, `G2_circuit` from `1.055s` to
+`2.649s`, and `transient` from `1.005s` to `3.011s`, while repeated EGraph
+refactor times barely moved. The same default run remains `2.443x` slower than
+the retained CKTSO top-ten reference
+(`build/cktso_paper_medium93_t4_timeout120.jsonl`). This narrows the useful
+next step: not KLS-first policy gating or small BLAS thresholds, but the larger
+paper gap in production row/supernode numeric storage and the repeated
+refactor executor fed by that storage.
+
 The checked row fast-factor executor is now explicit opt-in for the same
 reason. A current top-ten CKTSO-gap A/B with
 `KLS_ENABLE_CHECKED_ROW_REFACTOR=0`
