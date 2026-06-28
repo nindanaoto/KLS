@@ -7802,6 +7802,15 @@ static int should_start_auto_with_metis(UF_long n,
   return is_medium_bounded_degree_diagonal_pattern(n, col_ptr, row_idx);
 }
 
+static int metis_start_should_skip_no_btf_retry(UF_long n,
+                                                const UF_long *col_ptr,
+                                                const UF_long *row_idx) {
+  /* Large full/nearly-full diagonal ASIC-style matrices use BTF to keep the
+     off-diagonal fringe cheap. Retrying no-BTF doubles METIS analysis cost and
+     has worse repeated-refactor work on this structural class. */
+  return is_large_diagonal_metis_start_pattern(n, col_ptr, row_idx);
+}
+
 #endif
 
 #if defined(KLS_HAVE_METIS) || defined(KLS_HAVE_SCOTCH)
@@ -11700,9 +11709,11 @@ static int choose_symbolic_for_pattern(UF_long n,
     if (status == KLS_OK) {
       *selected_ordering_out = KLS_ORDERING_METIS;
       double selected_score = symbolic_score(*symbolic_out);
-      maybe_retry_without_btf(n, col_ptr, row_idx, symbolic_options,
-                              KLS_ORDERING_METIS, symbolic_out, common_out,
-                              &selected_score, 0, separator_out);
+      if (!metis_start_should_skip_no_btf_retry(n, col_ptr, row_idx)) {
+        maybe_retry_without_btf(n, col_ptr, row_idx, symbolic_options,
+                                KLS_ORDERING_METIS, symbolic_out, common_out,
+                                &selected_score, 0, separator_out);
+      }
 #ifdef KLS_HAVE_SCOTCH
       if (should_try_symbolic_nested_dissection_before_numeric(
             n, *symbolic_out, *selected_ordering_out, KLS_ORDERING_SCOTCH,

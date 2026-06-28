@@ -1283,7 +1283,9 @@ CAMD refinement, matching the CKTSO paper's nested-dissection plus constrained
 minimum-degree structure more closely than raw METIS. Medium near-full
 bounded-degree METIS starts also use two separator attempts with random
 matching coarsening to reduce nested-dissection factor work on mesh-like sparse
-diagonals. When METIS is enabled, `auto` can also promote
+diagonals. Large full or nearly-full diagonal METIS starts keep the selected
+BTF symbolic directly instead of paying for a no-BTF retry that is rejected or
+slower on this ASIC-style shape. When METIS is enabled, `auto` can also promote
 large, expensive first numeric factorizations to METIS if the trial
 factorization materially reduces actual numeric flop/fill cost. This keeps
 METIS available for hard nested-dissection cases without paying its analysis

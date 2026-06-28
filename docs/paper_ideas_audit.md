@@ -7882,3 +7882,25 @@ prototype measured `1.44269s`
 `0.10562s`). The source was reverted. This keeps the next work item at the
 algorithm level: a production CKTSO/SubtreeLU-style row/supernode numeric
 executor, not a scalar EGraph scatter cleanup.
+
+The auto-ordering policy now avoids one redundant analysis pass on the large
+full/nearly-full diagonal METIS-start class. Fresh controls showed that
+`--ordering auto` already selected the same METIS/BTF symbolic as forced
+METIS on `ASIC_320ks`, but spent about twice the analysis time because the
+auto METIS-start branch also tried a guarded no-BTF symbolic and then kept the
+BTF result. Forced no-BTF on the same matrix had similar analysis cost but
+worse repeated-refactor work (`0.10059s` versus `0.08390s` refactor average in
+`build/asic320ks_metis_nobtf_ref3.json` and
+`build/asic320ks_metis_ref3.json`). KLS now skips that no-BTF retry when the
+large diagonal METIS-start structural predicate fired, preserving the retained
+BTF symbolic. The focused analyze-only check moved `ASIC_320ks` auto analysis
+from `2.01145s` to `1.01080s`
+(`build/asic320ks_auto_analyze.json`,
+`build/asic320ks_auto_skip_nobtf_analyze.json`) with the same METIS/BTF
+selection; matching post-change controls measured `1.00920s` on `ASIC_320k`
+and `0.35153s` on `ASIC_100ks`
+(`build/asic320k_auto_skip_nobtf_analyze.json`,
+`build/asic100ks_auto_skip_nobtf_analyze.json`). This improves production
+auto-analysis overhead for the current top-gap ASIC shape, but it does not
+change the main refactor diagnosis: the repeated numeric path still needs the
+paper-level row/supernode executor.
