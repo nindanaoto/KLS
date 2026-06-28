@@ -47854,11 +47854,6 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                 shared->pivot_restarts++;
                 shared->order_epoch++;
                 if (shared->active_rank == NULL) {
-                  kls_row_first_supernodes_reset(
-                    shared->u_entries, shared->workspace->u_row_ptr,
-                    shared->workspace->u_row_end, shared->row_done,
-                    shared->ctx->nk, pos + 1u, shared->supernode_start,
-                    shared->supernode_end);
                   kls_row_first_pipeline_rebuild_prefix_panel_cache(shared);
                 }
               }

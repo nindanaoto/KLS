@@ -5986,3 +5986,18 @@ empty JSON file
 (`build/kls_pre2_realloc_panel_klsfirst_factor_timeout120.json`), so this
 narrows avoidable storage-growth overhead but does not replace the missing
 dominant-block row/ETree executor.
+
+A same-source CBLAS guard rerun confirmed that adding a "large cases only"
+BLAS guard would not address the current slow case, because that guard is
+already present and the tested paths do not enter CBLAS. The CBLAS-capable
+`ASIC_680k` METIS/KLU-first control reported zero CBLAS update counters with
+`KLS_ENABLE_CBLAS_SUPERNODE=0` and with `=1`
+(`build-cblas/kls_asic680k_cblas_guard_off_current_t4_r1_ref1.json`,
+`build-cblas/kls_asic680k_cblas_guard_on_current_t4_r1_ref1.json`). The
+matching forced `pre2` run with `KLS_ENABLE_CBLAS_SUPERNODE=1` still timed out
+at 120s and left an empty JSON file
+(`build-cblas/kls_pre2_cblas_guard_current_t4_factor_timeout120.json`). The
+useful code cleanup from this pass is exact rather than heuristic: the
+row-first pivot-restart path no longer calls `kls_row_first_supernodes_reset`
+immediately before `kls_row_first_pipeline_rebuild_prefix_panel_cache`, because
+the rebuild helper resets the same prefix before rebuilding the cache.

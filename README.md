@@ -1501,7 +1501,12 @@ sampled active epoch rebuilding row-first panel-cache state under the pipeline.
 KLS now grows the row-first panel cache with allocator-preserved `realloc`
 rather than KLS-owned allocate/zero/copy/free loops, reducing avoidable storage
 growth overhead on completed large paths, but `pre2` still exceeds the 120s
-factor-only cap.
+factor-only cap. A current CBLAS-capable rerun again kept the BLAS hypothesis
+bounded: explicit `KLS_ENABLE_CBLAS_SUPERNODE=0` and `=1` `ASIC_680k` checks
+both reported zero CBLAS update counters, and forced `pre2` with the runtime
+gate on still timed out at 120s with no JSON row. KLS also removes a duplicate
+row-first supernode reset before prefix panel-cache rebuilds; the rebuild
+helper already performs the reset, so the call-site scan was redundant.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
