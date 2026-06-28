@@ -6824,3 +6824,18 @@ paper-level algorithm. Forcing the current row-refactor executor was worse:
 `--row-refactor checked` mostly declined the row path and measured `2.29421s`.
 Those runs confirm the current auto model is right to keep these rows on the
 EGraph path until the row/supernode executor is made coarser.
+
+An adaptive cached-panel disabling patch was also tried and rejected. The idea
+was to mark retained panels that actually produced cached updates in one clean
+refactor and disable the rest for later refactors, matching the repeated-SPICE
+case where the sparsity pattern is fixed. On the top-ten cached focus run,
+however, the patch regressed to `2.38995s` geomean in
+`build/kls_cached_panel_adapt_gap10_t4_r1_ref3_timeout120.jsonl` from the
+precheck-only cached `2.30940s`. A longer top-five `refactor-repeat=20` check
+also did not justify it: default measured `1.38623s` in
+`build/kls_default_panel_adapt_gap5_t4_r1_ref20_timeout120.jsonl`, while the
+adaptive cached path measured `1.42182s` in
+`build/kls_cached_panel_adapt_gap5_t4_r1_ref20_timeout120.jsonl`. The source
+was reverted. This rejects another per-panel bookkeeping fix; the remaining
+path still needs larger row/supernode work units rather than pruning more
+single-consumer panel metadata.
