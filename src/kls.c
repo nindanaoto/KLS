@@ -41813,6 +41813,17 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->row_solve_work = NULL;
   shared->row_refactor_native_row_panel_active = 0;
   shared->row_refactor_defer_value_scatter = 0;
+  shared->row_pipeline_ready_queue = 0;
+  shared->row_pipeline_row_dep_ready_queue = 0;
+  shared->row_pipeline_ready_groups = NULL;
+  shared->row_pipeline_ready_slots = NULL;
+  shared->row_pipeline_remaining_preds = NULL;
+  shared->row_pipeline_tail_groups = NULL;
+  shared->row_pipeline_tail_count = 0;
+  shared->row_pipeline_private_groups = NULL;
+  shared->row_pipeline_private_thread_ptr = NULL;
+  shared->row_pipeline_private_group_mask = NULL;
+  shared->row_pipeline_private_count = 0;
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   shared->invalid = 0;
   shared->pivot_rejected = 0;
