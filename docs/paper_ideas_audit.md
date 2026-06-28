@@ -6170,3 +6170,22 @@ Together these results point below the current row-group scheduler policy: the
 retained separator tree or numeric work model is not exposing multiple useful
 private subtrees for those matrices, and a generic dynamic/private fallback is
 not enough to recover CKTSO-level performance.
+
+The production EGraph dependency loop now also skips producer-column metadata
+loads when the dependency value is exactly zero. The earlier zero-scatter guard
+avoided the arithmetic row walk, but the hot loops still fetched the producer
+`L` pointer, values pointer, and length before entering the guarded scatter
+helper. The current cleanup keeps the stored `U` value and workspace clearing
+unchanged while bypassing those metadata loads in the serial mapped, parallel
+mapped, and threaded EGraph refactor kernels. A top-ten CKTSO-gap repeat-3 run
+measured `4.0034s` and `4.0203s` geomeans across two passes, versus the saved
+current default `4.1533s`
+(`build/kls_zero_dep_metadata_skip_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_zero_dep_metadata_skip_gap10_t4_r1_ref3_timeout120_run2.jsonl`,
+`build/kls_default_group_shape_current_gap10_t4_r1_ref3_timeout120.jsonl`).
+The common-row KLS/CKTSO geomean ratio moved from about `2.43x` to `2.34x`.
+A broader top-20 repeat-2 slice completed without failures at `3.8061s`
+geomean (`build/kls_zero_dep_metadata_skip_gap20_t4_r1_ref2_timeout120.jsonl`).
+This is a useful production-kernel cleanup for the currently dominant sparse
+scatter path, but it is still a small effect relative to CKTSO; it does not
+replace the missing paper-level row/supernode numeric executor.
