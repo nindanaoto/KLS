@@ -1494,6 +1494,14 @@ or repeated-refactor policy. A follow-up CBLAS-enabled build with
 `pre2` forced KLS-first run still timed out at 120s with no JSON row, while
 same-option `ASIC_680k` checks reported zero CBLAS update counters. The
 existing BLAS gates are therefore not the current slow-case blocker.
+The latest `pre2` stack samples instead show the current KLS-first BTF-parallel
+route leaving one worker to factor the dominant block while the other BTF
+workers exit; the no-BTF intra-block route keeps workers alive but spends the
+sampled active epoch rebuilding row-first panel-cache state under the pipeline.
+KLS now grows the row-first panel cache with allocator-preserved `realloc`
+rather than KLS-owned allocate/zero/copy/free loops, reducing avoidable storage
+growth overhead on completed large paths, but `pre2` still exceeds the 120s
+factor-only cap.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first

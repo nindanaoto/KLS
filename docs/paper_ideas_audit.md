@@ -5963,3 +5963,26 @@ KLS-first run still timed out at 120s with an empty JSON file
 proposed "BLAS only for large cases" rule already true for the tested paths;
 the unresolved `pre2` and CKTSO-gap losses are not caused by unguarded small
 BLAS calls.
+
+The follow-up `pre2` stack inspection isolated the next concrete overhead
+inside the row-first storage bridge. In the default BTF-parallel KLS-first
+factor path, three workers completed the small BTF blocks and exited; the
+surviving worker was serially factoring the 629k-row dominant block, with stack
+samples in row-first supernode panel-cache append/growth. A no-BTF sample
+reached the restartable intra-block row pipeline, but most workers were waiting
+on the pipeline condition while the active worker rebuilt or grew the same
+panel-cache storage. KLS now lets `realloc` preserve the row-first panel-cache
+metadata, dense values, tail values, and tail-column buffers instead of
+allocating fresh storage, zeroing double buffers, copying the old contents in
+KLS, and freeing the old allocation at each growth step. Same-session smoke and
+CTest passed; `ASIC_680k` forced KLS-first moved from `12.1468s` to `12.1071s`
+initial factor and from `0.1160s` to `0.0998s` repeated factor, while the
+normal METIS/KLU-first row moved from `0.8188s`/`0.0648s`/`0.0576s`
+initial/factor/refactor to `0.7139s`/`0.0577s`/`0.0410s` in a one-pass check
+(`build/kls_asic680k_realloc_panel_t4_r1_ref0.json`,
+`build/kls_asic680k_metis_klufirst_realloc_panel_t4_r1_ref1.json`). The
+bounded `pre2` forced KLS-first factor run still timed out at 120s with an
+empty JSON file
+(`build/kls_pre2_realloc_panel_klsfirst_factor_timeout120.json`), so this
+narrows avoidable storage-growth overhead but does not replace the missing
+dominant-block row/ETree executor.

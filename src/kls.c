@@ -45853,14 +45853,11 @@ static int kls_row_first_supernode_panel_cache_reserve_uf(
     return 0;
   }
   UF_long *grown =
-    (UF_long *)malloc((size_t)capacity * sizeof(*grown));
+    (UF_long *)realloc(*array_io, (size_t)capacity * sizeof(*grown));
   if (grown == NULL) {
     return 0;
   }
-  if (*array_io != NULL && used > 0u) {
-    memcpy(grown, *array_io, (size_t)used * sizeof(*grown));
-  }
-  free(*array_io);
+  (void)used;
   *array_io = grown;
   *capacity_io = capacity;
   return 1;
@@ -45884,14 +45881,11 @@ static int kls_row_first_supernode_panel_cache_reserve_double(
     return 0;
   }
   double *grown =
-    (double *)calloc((size_t)capacity, sizeof(*grown));
+    (double *)realloc(*array_io, (size_t)capacity * sizeof(*grown));
   if (grown == NULL) {
     return 0;
   }
-  if (*array_io != NULL && used > 0u) {
-    memcpy(grown, *array_io, (size_t)used * sizeof(*grown));
-  }
-  free(*array_io);
+  (void)used;
   *array_io = grown;
   *capacity_io = capacity;
   return 1;
@@ -45914,54 +45908,44 @@ static int kls_row_first_supernode_panel_cache_reserve_panels(
     return 0;
   }
   UF_long *start =
-    (UF_long *)malloc((size_t)capacity * sizeof(*start));
+    (UF_long *)realloc(cache->start, (size_t)capacity * sizeof(*start));
+  if (start != NULL) {
+    cache->start = start;
+  }
   UF_long *width =
-    (UF_long *)malloc((size_t)capacity * sizeof(*width));
+    (UF_long *)realloc(cache->width, (size_t)capacity * sizeof(*width));
+  if (width != NULL) {
+    cache->width = width;
+  }
   UF_long *tail_begin =
-    (UF_long *)malloc((size_t)capacity * sizeof(*tail_begin));
+    (UF_long *)realloc(cache->tail_begin,
+                       (size_t)capacity * sizeof(*tail_begin));
+  if (tail_begin != NULL) {
+    cache->tail_begin = tail_begin;
+  }
   UF_long *tail_len =
-    (UF_long *)malloc((size_t)capacity * sizeof(*tail_len));
+    (UF_long *)realloc(cache->tail_len,
+                       (size_t)capacity * sizeof(*tail_len));
+  if (tail_len != NULL) {
+    cache->tail_len = tail_len;
+  }
   UF_long *dense_begin =
-    (UF_long *)malloc((size_t)capacity * sizeof(*dense_begin));
+    (UF_long *)realloc(cache->dense_begin,
+                       (size_t)capacity * sizeof(*dense_begin));
+  if (dense_begin != NULL) {
+    cache->dense_begin = dense_begin;
+  }
   UF_long *tail_value_begin =
-    (UF_long *)malloc((size_t)capacity * sizeof(*tail_value_begin));
+    (UF_long *)realloc(cache->tail_value_begin,
+                       (size_t)capacity * sizeof(*tail_value_begin));
+  if (tail_value_begin != NULL) {
+    cache->tail_value_begin = tail_value_begin;
+  }
   if (start == NULL || width == NULL || tail_begin == NULL ||
       tail_len == NULL || dense_begin == NULL ||
       tail_value_begin == NULL) {
-    free(start);
-    free(width);
-    free(tail_begin);
-    free(tail_len);
-    free(dense_begin);
-    free(tail_value_begin);
     return 0;
   }
-  if (cache->panel_count > 0u) {
-    memcpy(start, cache->start,
-           (size_t)cache->panel_count * sizeof(*start));
-    memcpy(width, cache->width,
-           (size_t)cache->panel_count * sizeof(*width));
-    memcpy(tail_begin, cache->tail_begin,
-           (size_t)cache->panel_count * sizeof(*tail_begin));
-    memcpy(tail_len, cache->tail_len,
-           (size_t)cache->panel_count * sizeof(*tail_len));
-    memcpy(dense_begin, cache->dense_begin,
-           (size_t)cache->panel_count * sizeof(*dense_begin));
-    memcpy(tail_value_begin, cache->tail_value_begin,
-           (size_t)cache->panel_count * sizeof(*tail_value_begin));
-  }
-  free(cache->start);
-  free(cache->width);
-  free(cache->tail_begin);
-  free(cache->tail_len);
-  free(cache->dense_begin);
-  free(cache->tail_value_begin);
-  cache->start = start;
-  cache->width = width;
-  cache->tail_begin = tail_begin;
-  cache->tail_len = tail_len;
-  cache->dense_begin = dense_begin;
-  cache->tail_value_begin = tail_value_begin;
   cache->panel_capacity = capacity;
   return 1;
 }
@@ -46159,7 +46143,6 @@ static int kls_row_first_supernode_panel_cache_build(
     panel_count++;
     row = end;
   }
-
   cache->panel_id_by_row =
     (UF_long *)malloc((size_t)nk * sizeof(*cache->panel_id_by_row));
   if (cache->panel_id_by_row == NULL && nk > 0u) {
