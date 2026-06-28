@@ -7432,3 +7432,41 @@ completed with no failures and `1.39715503s` geomean in
 `build/kls_reserved_l_run_gap5_rerun_t4_r1_ref3_timeout120.jsonl`, after a
 noisier first pass measured `1.59194508s` in
 `build/kls_reserved_l_run_gap5_t4_r1_ref3_timeout120.jsonl`.
+
+The next `pre2` inspection confirmed that a small-BLAS guard is not the active
+problem. The CBLAS-capable top-five probes already reported zero CBLAS,
+compact GEMV/TRSV, blocked-panel, and row-panel counters with the runtime gate
+both off and on, so KLS is already guarding optional BLAS behind large-shape
+and work/copy thresholds on these paths. A GDB interrupt of the current
+`pre2` METIS KLS-first factor run instead showed one active worker in
+`kls_row_first_supernodes_reset` while other pipeline workers waited on the
+pipeline condition (`build/pre2_metis_reserved_l_run_gdb_interrupt.txt`).
+
+KLS now avoids that full reset for active-rank pipeline rows that did not
+perform a dynamic column pivot. Such rows publish only their completed row's
+supernode state with `kls_row_first_supernodes_publish_row`; pivoted rows still
+take the full reset and private panel-cache rebuild because column exchanges
+can invalidate trusted row-supernode ranges. `cmake --build build -j4`,
+`ctest --test-dir build --output-on-failure`, `cmake --build build-cblas -j4`,
+`ctest --test-dir build-cblas --output-on-failure`, and `git diff --check`
+passed. A fresh `ASIC_320k` forced KLS-first/no-fast run remained
+residual-clean in
+`build/kls_asic320k_active_rank_nonpivot_publish_nofast_t4_factor.json`
+(`2.12963904s` initial factor, `2.04287279e-15` relative residual).
+
+This retained change does not close `pre2`: the matching 120s factor-only
+probe still left an empty
+`build/kls_pre2_metis_active_rank_incremental_supernode_t4_factor_timeout120.json`,
+and the post-change interrupt still sampled `kls_row_first_supernodes_reset`
+through the dynamic-pivot branch
+(`build/pre2_metis_active_rank_incremental_supernode_gdb_interrupt.txt`). A
+stronger prototype that skipped the pivot reset by invalidating only affected
+panels and forcing later compact shape revalidation was rejected: it moved the
+`pre2` sample to `kls_row_first_partial_apply_supernode_run`, but a bounded
+`rajat29` no-fast probe failed setup as singular
+(`build/kls_rajat29_active_rank_shape_invalidate_nofast_t4_factor_timeout90.json`).
+Restoring the full pivot reset made the same `rajat29` probe complete with
+`1.06772992e-13` relative residual in
+`build/kls_rajat29_active_rank_nonpivot_publish_nofast_t4_factor_timeout90.json`.
+The remaining paper-level gap is therefore still the checked pivoting
+row-supernode executor and coarse numeric storage, not a BLAS threshold.

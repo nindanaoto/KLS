@@ -49427,19 +49427,27 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               shared->udiag_values[row] = state.pivot;
               if (shared->active_rank != NULL) {
                 shared->row_done[row] = 1u;
-                kls_row_first_supernodes_reset(
-                  shared->u_entries, shared->workspace->u_row_ptr,
-                  shared->workspace->u_row_end, shared->row_done,
-                  shared->ctx->nk, shared->ctx->nk,
-                  shared->supernode_start, shared->supernode_end);
-                if (shared->private_supernode_panel_cache != NULL) {
-                  (void)kls_row_first_supernode_panel_cache_build(
-                    shared->private_supernode_panel_cache,
+                if (pivoted) {
+                  kls_row_first_supernodes_reset(
                     shared->u_entries, shared->workspace->u_row_ptr,
-                    shared->workspace->u_row_end, shared->udiag_values,
-                    shared->row_done, shared->supernode_start,
-                    shared->supernode_end, shared->ctx->nk,
-                    shared->ctx->nk, shared->stats);
+                    shared->workspace->u_row_end, shared->row_done,
+                    shared->ctx->nk, shared->ctx->nk,
+                    shared->supernode_start, shared->supernode_end);
+                  if (shared->private_supernode_panel_cache != NULL) {
+                    (void)kls_row_first_supernode_panel_cache_build(
+                      shared->private_supernode_panel_cache,
+                      shared->u_entries, shared->workspace->u_row_ptr,
+                      shared->workspace->u_row_end, shared->udiag_values,
+                      shared->row_done, shared->supernode_start,
+                      shared->supernode_end, shared->ctx->nk,
+                      shared->ctx->nk, shared->stats);
+                  }
+                } else {
+                  kls_row_first_supernodes_publish_row(
+                    shared->u_entries, shared->workspace->u_row_ptr,
+                    shared->workspace->u_row_end, shared->row_done,
+                    shared->ctx->nk, 0u, row,
+                    shared->supernode_start, shared->supernode_end);
                 }
               } else {
                 kls_row_first_supernodes_publish_row(
