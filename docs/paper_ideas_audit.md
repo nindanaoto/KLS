@@ -4488,6 +4488,26 @@ the native KLS compact triangular-run kernel, not CBLAS. This keeps BLAS as an
 opt-in large-case experiment while the remaining large gap stays with the
 checked row/scheduler algorithm rather than with BLAS call granularity.
 
+A June 28, 2026 same-binary rerun keeps that conclusion current after the
+compact-`trsv` auto-off change. `build-cblas` was rebuilt successfully, then
+the top-five CKTSO-gap matrices were run with the runtime CBLAS experiment off
+and on:
+`build-cblas/kls_cblas_threshold_verify_off_gap5_t4_r1_ref3_timeout120.jsonl`
+reported a `7.78748s` geometric mean, while
+`build-cblas/kls_cblas_threshold_verify_on_gap5_t4_r1_ref3_timeout120.jsonl`
+reported `7.84702s`. Both runs had `build_has_cblas=true`, but all recorded
+external EGraph CBLAS and row-supernode counters were zero on every matrix, so
+the default path did not enter BLAS at all. The forced row-refactor top-two
+check likewise did not reveal a missing small-case guard:
+`KLS_ENABLE_CBLAS_SUPERNODE=0` measured `30.8739s` geomean in
+`build-cblas/kls_cblas_threshold_verify_forced_off_gap2_t4_r1_ref3_timeout120.jsonl`,
+and `KLS_ENABLE_CBLAS_SUPERNODE=1` measured `30.6218s` in
+`build-cblas/kls_cblas_threshold_verify_forced_on_gap2_t4_r1_ref3_timeout120.jsonl`.
+The retained row-supernode shape counters stayed unchanged. The current code
+already guards CBLAS with 512-row/vector or 512-width panel minima plus
+multi-million-operation work thresholds; adding another small-case BLAS guard
+would not address the observed CKTSO gap.
+
 KLS then added the next, more paper-faithful batch shape: if an unchecked dense
 consumer group, or a contiguous row subrange inside it, has the same ordered
 list of completed dense producer suffixes as its external dependency pattern,
