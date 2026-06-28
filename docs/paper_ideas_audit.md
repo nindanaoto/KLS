@@ -7366,3 +7366,36 @@ cleanup, the visible stack moved to `kls_row_first_partial_apply_one_dep` and
 (`build/pre2_metis_panel_clear_batch_l_gdb_interrupt.txt`). That narrows the
 remaining CKTSO-scale gap to the native scalar/compact row-dependency executor,
 not BLAS calls, panel-cache growth, or full-row cache resets.
+
+The same small-BLAS-guard hypothesis was rerun on the current source before
+adding any new BLAS policy. The CBLAS-capable top-five CKTSO-gap focus measured
+`1.52323303s` geomean with `KLS_ENABLE_CBLAS_SUPERNODE=0` and `1.54428317s`
+with `KLS_ENABLE_CBLAS_SUPERNODE=1`
+(`build-cblas/kls_cblas_guard_off_shape_top5_t4_r1_ref3_timeout120.jsonl` and
+`build-cblas/kls_cblas_guard_on_shape_top5_t4_r1_ref3_timeout120.jsonl`).
+Both artifacts reported `build_has_cblas=true` but zero CBLAS, compact
+GEMV/TRSV, blocked-panel, and KLS-first panel-cache counters on every row. KLS
+already has the requested "BLAS only for large cases" behavior on the exercised
+paths: CBLAS calls require the runtime gate plus 512-scale shape tests and
+work/copy thresholds before entering BLAS. The current slow case is not small
+BLAS dispatch.
+
+The retained executor change instead reuses validated row-supernode shape
+information. Private and ready row-supernode runs are formed only after adjacent
+rows have passed the exact supernode predicate, so the compact consumer no
+longer rescans internal and tail column identities for those trusted runs.
+Bounds, pivot, length, and fallback checks remain in place. `cmake --build
+build -j4`, `ctest --test-dir build --output-on-failure`, `cmake --build
+build-cblas -j4`, `ctest --test-dir build-cblas --output-on-failure`, and
+`git diff --check` passed. `ASIC_320k` forced KLS-first stayed residual-clean in
+the current shape-trust run
+(`build/kls_asic320k_trusted_shape_compact_final_t4_factor.json`) with
+`0.999742177s` initial factor and `1.50913325e-15` relative residual; an
+earlier same-change repeat measured `0.963871569s` in
+`build/kls_asic320k_trusted_shape_compact_run2_t4_factor.json`. `pre2` still
+timed out at 120s
+(`build/kls_pre2_metis_trusted_shape_compact_t4_factor_timeout120.json`), but
+the GDB sample moved from compact shape validation to compact arithmetic with
+`shape_known=1` (`build/pre2_metis_trusted_shape_compact_gdb_interrupt.txt`).
+That leaves the next paper-level issue in numeric row-supernode arithmetic and
+static private work distribution, not in BLAS call size.
