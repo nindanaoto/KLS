@@ -6738,3 +6738,25 @@ rows with 41.6M trailing entries. This rules out unguarded small BLAS calls as
 the broad CKTSO-gap cause; the missing paper-level piece is still the
 production row/supernode numeric representation and executor that can turn
 those candidates into coarse reusable update work.
+
+The EGraph supernode probe was split to isolate that durable-storage question.
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached` now builds and publishes the
+persistent retained panels but skips the older per-consumer temporary panel
+reconstruction fallback used by `=1`. Panel pruning also applies the same
+cached-update work gate as the runtime consumer, so opt-in runs do not retain
+structurally reachable panels that cannot pass the cached update threshold.
+This confirmed the fallback was extra cost but did not make the cached consumer
+production-ready: on the refreshed top-ten focus set, the default control
+measured `2.23151s` geomean in
+`build/kls_cached_workprune_control_gap10_t4_r1_ref3_timeout120.jsonl`,
+cached-only measured `2.38338s` in
+`build/kls_cached_workprune_gap10_t4_r1_ref3_timeout120.jsonl`, and full
+supernode updates measured `2.52051s` in
+`build/kls_supernode_full_workprune_gap10_t4_r1_ref3_timeout120.jsonl`. A
+higher-repeat `onetone2`/`rajat25` check also rejected the apparent noisy
+`onetone2` win: cached-only measured `1.60269s`/`3.50812s` versus the default
+`1.42445s`/`3.35944s`. The retained `cached` mode is therefore an experimental
+diagnostic for the SubtreeLU-style persistent-panel path, not a default speed
+policy. The remaining missing algorithm is coarser producer/consumer batching
+or row-major supernode execution that amortizes panel publication across larger
+work units.

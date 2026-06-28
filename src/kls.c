@@ -880,6 +880,7 @@ typedef struct kls_egraph_refactor_shared {
   int pipeline_natural_order;
   int pipeline_supernode_tasks;
   int supernode_numeric_updates;
+  int supernode_cached_updates_only;
   int pipeline_ready_queue;
   UF_long *pipeline_ready_cols;
   atomic_uint *pipeline_ready_slots;
@@ -19096,6 +19097,11 @@ static int kls_refactor_supernode_panel_candidate(
   return 1;
 }
 
+static int kls_egraph_cached_supernode_update_allows(
+  UF_long run_rows,
+  UF_long dense_cols,
+  UF_long trailing_len);
+
 static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -19112,6 +19118,7 @@ static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
       solver->refactor_supernode_panel_start == NULL ||
       solver->refactor_supernode_panel_local_start == NULL ||
       solver->refactor_supernode_panel_width == NULL ||
+      solver->refactor_supernode_panel_trailing_len == NULL ||
       panel_count > (UF_long)(SIZE_MAX / sizeof(unsigned char))) {
     solver->refactor_supernode_panel_used_count = panel_count;
     return;
@@ -19168,6 +19175,8 @@ static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
       const UF_long local_start =
         solver->refactor_supernode_panel_local_start[panel];
       const UF_long width = solver->refactor_supernode_panel_width[panel];
+      const UF_long trailing_len =
+        solver->refactor_supernode_panel_trailing_len[panel];
       if (width <= 1u || start > dep_global ||
           dep_global >= start + width || start > solver->n ||
           width > solver->n - start) {
@@ -19188,6 +19197,7 @@ static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
       if (available_end <= panel_offset + 1u) {
         continue;
       }
+      const UF_long dense_scatter_len = width - available_end;
       const UF_long run_rows = available_end - panel_offset;
       if (run_rows > ulen - up || run_rows > current_local - dep_local) {
         continue;
@@ -19199,7 +19209,9 @@ static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
           break;
         }
       }
-      if (contiguous) {
+      if (contiguous &&
+          kls_egraph_cached_supernode_update_allows(
+            run_rows, dense_scatter_len, trailing_len)) {
         used[panel] = 1u;
       }
     }
@@ -38983,6 +38995,9 @@ static int kls_egraph_refactor_try_supernode_dependency_run(
   if (cached_status != 0) {
     return cached_status;
   }
+  if (shared->supernode_cached_updates_only) {
+    return 0;
+  }
   if (solver->refactor_supernode_panel_start_id != NULL) {
     const UF_long full_end =
       solver->refactor_supernode_pipeline_end[dep_global];
@@ -40149,9 +40164,15 @@ static int kls_egraph_supernode_tasks_env_enabled(void) {
   return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
 }
 
-static int kls_egraph_supernode_numeric_updates_env_enabled(void) {
+static int kls_egraph_supernode_numeric_updates_env_mode(void) {
   const char *value = getenv("KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES");
-  return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+  if (value == NULL || value[0] == '\0' || strcmp(value, "0") == 0) {
+    return 0;
+  }
+  if (strcmp(value, "cached") == 0 || strcmp(value, "cache") == 0) {
+    return 2;
+  }
+  return 1;
 }
 
 static int kls_egraph_ready_queue_env_enabled(void) {
@@ -41867,8 +41888,10 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       !kls_egraph_refactor_is_eligible(solver)) {
     return -1;
   }
+  const int supernode_numeric_update_mode =
+    kls_egraph_supernode_numeric_updates_env_mode();
   const int supernode_numeric_updates =
-    kls_egraph_supernode_numeric_updates_env_enabled();
+    supernode_numeric_update_mode != 0;
   if (supernode_numeric_updates) {
     if (!kls_build_refactor_supernode_panel_cache(solver)) {
       return -1;
@@ -42033,6 +42056,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     (natural_pipeline && kls_egraph_supernode_tasks_env_enabled()) ? 1 : 0;
   shared->supernode_numeric_updates =
     supernode_numeric_updates ? 1 : 0;
+  shared->supernode_cached_updates_only =
+    supernode_numeric_update_mode == 2 ? 1 : 0;
   shared->pipeline_ready_queue = use_pipeline_ready_queue;
   shared->pipeline_ready_cols =
     use_pipeline_ready_queue ? solver->refactor_pipeline_ready_cols : NULL;
