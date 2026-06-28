@@ -6323,3 +6323,30 @@ top-ten guard to `4.0511s`
 This keeps the accepted loop split limited to the BTF kernel where the measured
 gain was stable; the single-block cases need the larger row/supernode executor
 rather than more branch-shape variants.
+
+A higher-repeat current-source rerun tightened the CKTSO-gap ranking after the
+medium-heavy BTF EGraph gate. The earlier top-20 guard used only two refactors
+per matrix and over-weighted timing noise on short cases; rerunning the same
+manifest with `--refactor-repeat 20` completed all rows at `3.3573s` geomean
+(`build/kls_current_gap20_t4_r1_ref20_timeout120.jsonl`), versus `3.7127s` for
+the repeat-2 artifact
+(`build/kls_medium_manyblock_egraph_gap20_t4_r1_ref2_timeout120.jsonl`). This
+does not prove parity with CKTSO: the stable decomposition still shows
+`ASIC_320k` and `ASIC_320ks` at `2.97x` CKTSO cycle time, with no-pivot EGraph
+refactors at about `3.30x` and `3.39x` CKTSO refactor time. The broader top-20
+gap is now cleaner: `Raj1` was the only repeat-20 regression versus the previous
+artifact, while `mc2depi` and `G2_circuit` were effectively unchanged. The
+stable evidence keeps the remaining large lever focused on the
+CKTSO/SubtreeLU row/supernode numeric executor rather than small BLAS-call
+guards, KLS-first broad auto policy, or noisy short-repeat samples.
+
+The same repeat-20 baseline also keeps cached EGraph supernode updates
+off-policy. The best cached-panel opt-in still regressed every common top-ten
+EGraph row against the stable default: `ASIC_320k` rose from `13.43s` to
+`14.45s`, `ASIC_320ks` from `11.30s` to `12.50s`, `G2_circuit` from `20.01s`
+to `23.98s`, and `rajat28` from `3.41s` to `4.88s`
+(`build/kls_egraph_supernode_cache_reuse_gap10_t4_r1_ref3_timeout120.jsonl`).
+The opt-in path executed thousands of panel updates on those rows, so this is
+not an inactive feature or BLAS-threshold artifact. It is the wrong granularity
+for the current column EGraph executor until the row-major/supernodal storage
+path can amortize panel construction and consumption across coarser tasks.
