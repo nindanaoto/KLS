@@ -6982,3 +6982,23 @@ on the ASIC, onetone, and rajat hard rows. The selector's complete metadata
 scan cost more than the avoided panels, so the source was reverted. This keeps
 the diagnosis pointed at a coarser row-major supernode numeric executor, not at
 another panel-retention policy or small-BLAS guard.
+
+A follow-up scalar BTF EGraph cached-index split was also rejected. The measured
+hot path on the top CKTSO-gap rows is
+`kls_egraph_refactor_btf_unscaled_column`, and those rows already report
+`build_has_cblas=false`, zero CBLAS counters, and active 32-bit L/U/map caches.
+The prototype split the BTF unscaled dependency loop into a direct 32-bit cached
+case and left the existing supernode update path untouched. It built cleanly and
+passed `ctest --test-dir build --output-on-failure`, but the same top-ten
+CKTSO-gap benchmark moved only from `2.17494s` to `2.14354s` geomean in
+`build/kls_i32_btf_fastpath_gap10_t4_r1_ref3_timeout120.jsonl`. Refactor-time
+geomean improved by only about `1.1%`, while `rajat25`, `rajat28`, `rajat03`,
+and `onetone1` regressed; `rajat25` was the clearest failure at `1.218x`
+overall and `1.372x` refactor time.
+
+That is not a robust paper-level fix and is likely CPU/compiler-sensitive. The
+source was reverted. The useful conclusion is that small BLAS calls and another
+scalar-loop specialization are not the missing CKTSO/SubtreeLU mechanism; KLS
+still needs a true row-major supernode numeric object whose triangular solves
+and trailing updates replace enough scalar dependency traversal to pay for the
+extra storage.
