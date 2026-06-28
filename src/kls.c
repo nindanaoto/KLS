@@ -62,6 +62,7 @@
   KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY
 #define KLS_EGRAPH_SCALAR_SUPERNODE_UPDATE_MAX_WIDTH 256u
 #define KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS 32768u
+#define KLS_ROW_FIRST_MISSED_PANEL_CACHE_MAX_STORED_ENTRIES 4194304u
 #define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
@@ -45702,6 +45703,41 @@ static UF_long kls_row_first_panel_cache_stored_entries(UF_long width,
   return entries > UF_long_max - tail_len ? UF_long_max : entries + tail_len;
 }
 
+static UF_long kls_row_first_panel_cache_current_entries(
+  const kls_row_first_supernode_panel_cache *cache) {
+  if (cache == NULL) {
+    return 0u;
+  }
+  UF_long entries = cache->dense_value_count;
+  if (entries > UF_long_max - cache->tail_value_count) {
+    return UF_long_max;
+  }
+  entries += cache->tail_value_count;
+  if (entries > UF_long_max - cache->tail_col_count) {
+    return UF_long_max;
+  }
+  return entries + cache->tail_col_count;
+}
+
+static int kls_row_first_panel_cache_allows_missed_append(
+  const kls_row_first_supernode_panel_cache *cache,
+  UF_long width,
+  UF_long tail_len,
+  UF_long max_stored_entries) {
+  if (max_stored_entries == UF_long_max) {
+    return 1;
+  }
+  const UF_long panel_entries =
+    kls_row_first_panel_cache_stored_entries(width, tail_len);
+  if (panel_entries == UF_long_max || panel_entries > max_stored_entries) {
+    return 0;
+  }
+  const UF_long current_entries =
+    kls_row_first_panel_cache_current_entries(cache);
+  return current_entries <= max_stored_entries &&
+         panel_entries <= max_stored_entries - current_entries;
+}
+
 static void kls_row_first_record_panel_cache_build(
   kls_row_first_row_stats *stats,
   UF_long panels,
@@ -47174,6 +47210,7 @@ static int kls_row_first_supernode_panel_cache_append(
   UF_long nk,
   UF_long start,
   UF_long end,
+  UF_long max_stored_entries,
   kls_row_first_row_stats *stats) {
   if (cache == NULL || cache->panel_id_by_row == NULL ||
       u_entries == NULL || u_row_ptr == NULL || u_row_end == NULL ||
@@ -47186,13 +47223,17 @@ static int kls_row_first_supernode_panel_cache_append(
         u_entries, u_row_ptr, u_row_end, nk, start, end, &tail_len)) {
     return 0;
   }
+  const UF_long panel_width = end - start + 1u;
+  if (!kls_row_first_panel_cache_allows_missed_append(
+        cache, panel_width, tail_len, max_stored_entries)) {
+    return 0;
+  }
   const UF_long panel_count_needed = cache->panel_count + 1u;
   if (panel_count_needed <= cache->panel_count ||
       !kls_row_first_supernode_panel_cache_reserve_panels(
         cache, panel_count_needed)) {
     return 0;
   }
-  const UF_long panel_width = end - start + 1u;
   UF_long dense_needed = cache->dense_value_count;
   UF_long tail_value_needed = cache->tail_value_count;
   UF_long tail_col_needed = cache->tail_col_count;
@@ -47295,7 +47336,7 @@ static void kls_row_first_supernode_panel_cache_publish_completed(
   if (*open_end_io > *open_start_io) {
     (void)kls_row_first_supernode_panel_cache_append(
       cache, u_entries, u_row_ptr, u_row_end, udiag_values, nk,
-      *open_start_io, *open_end_io, stats);
+      *open_start_io, *open_end_io, UF_long_max, stats);
   }
   *open_start_io = row;
   *open_end_io = row;
@@ -48411,6 +48452,7 @@ static int kls_row_first_partial_apply_supernode_run_compact(
   UF_long dep_begin,
   UF_long dep_end,
   UF_long *run_rows_out,
+  int publish_panel,
   kls_row_first_row_stats *stats) {
   if (run_rows_out != NULL) {
     *run_rows_out = 0;
@@ -48538,10 +48580,11 @@ static int kls_row_first_partial_apply_supernode_run_compact(
     x[col] -= trailing_workspace[offset];
   }
 
-  if (workspace->supernode_panel_cache != NULL) {
+  if (publish_panel && workspace->supernode_panel_cache != NULL) {
     (void)kls_row_first_supernode_panel_cache_append(
       workspace->supernode_panel_cache, published_u_entries, u_row_ptr,
-      u_row_end, udiag_values, ctx->nk, dep_begin, dep_end, stats);
+      u_row_end, udiag_values, ctx->nk, dep_begin, dep_end, UF_long_max,
+      stats);
   }
 
   if (run_rows_out != NULL) {
@@ -48574,10 +48617,12 @@ static int kls_row_first_partial_apply_supernode_run(
   if (cached_status < 0) {
     return 0;
   }
+  int publish_compact_panel = 0;
   if (workspace != NULL && workspace->supernode_panel_cache != NULL &&
       kls_row_first_supernode_panel_cache_append(
         workspace->supernode_panel_cache, published_u_entries,
         u_row_ptr, u_row_end, udiag_values, ctx->nk, dep_begin, dep_end,
+        KLS_ROW_FIRST_MISSED_PANEL_CACHE_MAX_STORED_ENTRIES,
         stats)) {
     const int published_cached_status =
       kls_row_first_partial_apply_supernode_run_cached(
@@ -48596,7 +48641,8 @@ static int kls_row_first_partial_apply_supernode_run(
   const int compact_status =
     kls_row_first_partial_apply_supernode_run_compact(
       ctx, workspace, local_l_entries, published_u_entries, udiag_values,
-      u_row_ptr, u_row_end, state, dep_begin, dep_end, run_rows_out, stats);
+      u_row_ptr, u_row_end, state, dep_begin, dep_end, run_rows_out,
+      publish_compact_panel, stats);
   if (compact_status > 0) {
     return 1;
   }

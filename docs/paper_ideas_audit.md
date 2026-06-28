@@ -7229,3 +7229,41 @@ does not close the hard `pre2` numeric gap:
 empty after the 120s timeout. The remaining bottleneck is still the actual
 row/supernode numeric executor, especially worker-local panel-cache copying and
 scalar/panel-cache updates, not the retained separator-tree depth alone.
+
+A follow-up on the BLAS hypothesis confirmed again that small BLAS calls are not
+the active slow-case mechanism. The normal build remains CBLAS-free unless the
+optional CMake flag and `KLS_ENABLE_CBLAS_SUPERNODE=1` runtime gate are both
+used, and the CBLAS path already has 512-scale plus work/copy gates. The current
+`pre2` samples were in native row-first storage, not in CBLAS. The accepted
+change instead addresses the sampled native storage bridge directly: a missed
+row-supernode panel cache append is now bounded to at most 4M retained entries
+per worker before it falls through to the direct compact/scalar update. Already
+cached panels and completed-run panel publishing are unchanged. This avoids the
+observed first-use path growing a transient worker panel cache from about 32 MB
+to 64 MB before updating the current row.
+
+The final same-source checks passed `cmake --build build -j$(nproc)` and
+`ctest --test-dir build --output-on-failure`. `ASIC_320k` forced KLS-first
+remained residual-clean in
+`build/kls_asic320k_missed_panel_cap_final_t4_factor.json` with
+`2.20894768s` initial factor, `2.61575448e-15` relative residual, and
+`2520001` row panel-cache append entries. The hard `pre2` forced KLS-first
+factor run still timed out at 120s with an empty
+`build/kls_pre2_metis_missed_panel_cap_t4_factor_timeout120.json`, so the cap is
+a storage-copy cleanup rather than the missing CKTSO-scale executor. The GDB
+sample moved from `realloc` inside `kls_row_first_supernode_panel_cache_append`
+to `kls_row_first_u_rows_fit_supernode`/private row work in
+`build/pre2_metis_missed_panel_cap_gdb_interrupt.txt`, which keeps the next
+large gap focused on repeated structural supernode validation and scalar
+row-update work.
+
+An owner-local private supernode-end cache was also prototyped and rejected. It
+cached adjacent-row fit decisions for private separator workers, but a completed
+`ASIC_320k` check slowed from the missed-panel-cap control's `2.21615628s`
+initial factor to about `2.438s` while `pre2` still timed out at 120s
+(`build/kls_asic320k_private_supernode_cache_t4_factor.json`,
+`build/kls_asic320k_private_supernode_cache_norebuild_t4_factor.json`, and
+`build/kls_pre2_metis_private_supernode_cache_t4_factor_timeout120.json`). The
+prototype also exposed that exact adjacent-row validation still has to scan long
+tails at least once per candidate pair, so this is not the direct paper-level
+replacement for the missing coarse supernode numeric executor.
