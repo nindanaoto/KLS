@@ -6839,3 +6839,21 @@ adaptive cached path measured `1.42182s` in
 was reverted. This rejects another per-panel bookkeeping fix; the remaining
 path still needs larger row/supernode work units rather than pruning more
 single-consumer panel metadata.
+
+A direct SubtreeLU cluster-mode supernode-task probe was also rejected. The
+paper points out that CKTSO only uses supernodes in pipeline mode, so KLS tried
+an opt-in extension of `KLS_ENABLE_EGRAPH_SUPERNODE_TASKS=1` that could pull a
+consecutive EGraph supernode prefix forward from later cluster levels when all
+outside U-predecessors were already marked done. This was dependency-safe and
+active, but it moved work to earlier workers without changing the scalar
+numeric executor: the top-ten CKTSO-gap control measured `2.33474s` geomean in
+`build/kls_cluster_supernode_tasks_off_gap10_t4_r1_ref3_timeout120.jsonl`,
+while the gated cluster-supernode run measured `2.42881s` in
+`build/kls_cluster_supernode_tasks_on_gap10_t4_r1_ref3_timeout120.jsonl`. The
+enabled run formed `90,924` supernode tasks covering `229,939` columns, yet it
+regressed all substantive rows (`ASIC_320ks` `1.015x`, `ASIC_320k` `1.017x`,
+`ASIC_100ks` `1.008x`, `onetone2` `1.063x`, `rajat28` `1.092x`, `rajat20`
+`1.104x`, `onetone1` `1.048x`). The source was reverted. This confirms that
+merely grouping cluster scheduling tasks is not the missing SubtreeLU piece;
+KLS still needs the row-major supernode numeric update/storage that makes the
+grouped task perform less scalar work.
