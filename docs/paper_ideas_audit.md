@@ -7267,3 +7267,28 @@ initial factor to about `2.438s` while `pre2` still timed out at 120s
 prototype also exposed that exact adjacent-row validation still has to scan long
 tails at least once per candidate pair, so this is not the direct paper-level
 replacement for the missing coarse supernode numeric executor.
+
+The narrower retained follow-up memoizes only the adjacent-row structural
+predicate inside each private row worker. The cache is tri-state per adjacent
+pair, is filled lazily by the existing `kls_row_first_u_rows_fit_supernode`
+predicate, and is dropped after a dynamic pivot instead of being rebuilt. The
+predicate also now rejects unequal tail lengths before entering the elementwise
+tail comparison. This keeps behavior tied to the existing structural test while
+avoiding repeated long scans for the same private-worker row pair.
+
+`cmake --build build -j$(nproc)`, `ctest --test-dir build --output-on-failure`,
+and `git diff --check` passed. A same-session `ASIC_320k` forced KLS-first
+control built from commit `2773488` measured `2.49741041s` initial factor in
+`build/kls_asic320k_cap_baseline_same_session_t4_factor.json`; the current
+memoized build measured `2.29454936s` and `2.32290521s` in
+`build/kls_asic320k_fit_memo_t4_factor.json` and
+`build/kls_asic320k_fit_memo_after_baseline_t4_factor.json`, all with
+`2.61575448e-15` relative residual. The hard `pre2` forced KLS-first factor run
+still timed out at 120s with an empty
+`build/kls_pre2_metis_fit_memo_t4_factor_timeout120.json`, but the interrupting
+GDB sample moved from `kls_row_first_u_rows_fit_supernode` to
+`kls_row_first_partial_apply_supernode_run_cached` / `kls_row_first_heap_pop`
+inside the private row worker
+(`build/pre2_metis_fit_memo_gdb_interrupt.txt`). The remaining visible gap is
+therefore the cached row-supernode update itself and its heap/state movement,
+not repeated adjacent-tail validation.

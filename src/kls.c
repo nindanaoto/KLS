@@ -45647,6 +45647,7 @@ typedef struct kls_row_first_workspace {
   UF_long *u_row_end;
   UF_long supernode_workspace_capacity;
   kls_row_first_supernode_panel_cache *supernode_panel_cache;
+  unsigned char *supernode_fit_status;
 } kls_row_first_workspace;
 
 typedef struct kls_row_first_partial_row {
@@ -45861,6 +45862,7 @@ static UF_long kls_row_first_owned_supernode_end(
   int owner,
   UF_long nk,
   UF_long current_row,
+  unsigned char *fit_status,
   UF_long dep);
 
 static int kls_row_first_separator_position(
@@ -46189,7 +46191,7 @@ static int kls_row_first_factor_one_row(
     const UF_long run_end =
       kls_row_first_owned_supernode_end(
         u_entries, workspace->u_row_ptr, workspace->u_row_end, row_done,
-        row_owner, owner, ctx->nk, i, dep);
+        row_owner, owner, ctx->nk, i, workspace->supernode_fit_status, dep);
     UF_long run_rows = 1;
     int used_panel = 0;
     if (run_end > dep) {
@@ -46345,7 +46347,22 @@ static void kls_row_first_workspace_free(
   free(workspace->dep_heap);
   free(workspace->u_row_ptr);
   free(workspace->u_row_end);
+  free(workspace->supernode_fit_status);
   memset(workspace, 0, sizeof(*workspace));
+}
+
+static int kls_row_first_workspace_enable_supernode_fit_cache(
+  kls_row_first_workspace *workspace,
+  UF_long nk) {
+  if (workspace == NULL ||
+      nk > (UF_long)(SIZE_MAX / sizeof(*workspace->supernode_fit_status))) {
+    return 0;
+  }
+  free(workspace->supernode_fit_status);
+  workspace->supernode_fit_status =
+    (unsigned char *)calloc((size_t)nk,
+                            sizeof(*workspace->supernode_fit_status));
+  return workspace->supernode_fit_status != NULL || nk == 0u;
 }
 
 static int kls_row_first_workspace_reserve_supernode(
@@ -46433,6 +46450,8 @@ static void *kls_row_first_private_worker_main(void *arg) {
       !kls_row_first_entries_enable_col_links(&worker->u_entries, nk)) {
     goto done;
   }
+  (void)kls_row_first_workspace_enable_supernode_fit_cache(
+    &worker->workspace, nk);
   if (kls_row_first_supernode_panel_cache_init_rows(&panel_cache, nk)) {
     worker->workspace.supernode_panel_cache = &panel_cache;
   }
@@ -46456,6 +46475,8 @@ static void *kls_row_first_private_worker_main(void *arg) {
       kls_row_first_supernode_panel_cache_reset_active(
         &panel_cache, &worker->workspace, nk, &open_panel_start,
         &open_panel_end);
+      free(worker->workspace.supernode_fit_status);
+      worker->workspace.supernode_fit_status = NULL;
     }
     kls_row_first_supernode_panel_cache_publish_completed(
       worker->workspace.supernode_panel_cache != NULL ? &panel_cache : NULL,
@@ -46903,7 +46924,11 @@ static int kls_row_first_u_rows_fit_supernode(
     return 0;
   }
   p++;
-  while (p < pend && q < qend) {
+  const UF_long prev_tail_len = pend - p;
+  if (prev_tail_len != qend - q) {
+    return 0;
+  }
+  while (p < pend) {
     const UF_long pcol = u_entries->col[p];
     const UF_long qcol = u_entries->col[q];
     if (pcol <= row || qcol <= row || pcol != qcol) {
@@ -47634,6 +47659,7 @@ static UF_long kls_row_first_owned_supernode_end(
   int owner,
   UF_long nk,
   UF_long current_row,
+  unsigned char *fit_status,
   UF_long dep) {
   if (u_entries == NULL || u_row_ptr == NULL || u_row_end == NULL ||
       dep >= nk || dep >= current_row) {
@@ -47649,8 +47675,18 @@ static UF_long kls_row_first_owned_supernode_end(
     if (row_done != NULL && row_done[next] == 0u) {
       break;
     }
-    if (!kls_row_first_u_rows_fit_supernode(
-          u_entries, u_row_ptr, u_row_end, end, next, nk)) {
+    int rows_fit = 0;
+    if (fit_status != NULL && next < nk && fit_status[next] != 0u) {
+      rows_fit = fit_status[next] == 2u;
+    } else {
+      rows_fit =
+        kls_row_first_u_rows_fit_supernode(
+          u_entries, u_row_ptr, u_row_end, end, next, nk);
+      if (fit_status != NULL && next < nk) {
+        fit_status[next] = rows_fit ? 2u : 1u;
+      }
+    }
+    if (!rows_fit) {
       break;
     }
     end = next;
