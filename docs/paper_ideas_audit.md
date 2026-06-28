@@ -5947,3 +5947,19 @@ supernode-update counters. The remaining ratios are repeated-refactor dominated
 (`2.08x` to `3.39x` CKTSO refactor ratios on the slowest refactor rows), so the
 large gap is still the paper-level numeric executor/storage issue rather than
 small BLAS calls or CSC input-width overhead.
+
+A same-source CBLAS-enabled check kept the BLAS hypothesis bounded. With
+`-DKLS_ENABLE_CBLAS_SUPERNODE=ON` and `KLS_ENABLE_CBLAS_SUPERNODE=1`,
+`ASIC_680k` using the comparable METIS/KLU-first path measured `0.8070s`
+initial factor, `0.0659s` repeated factor, and `0.0551s` refactor versus
+`0.8188s`, `0.0648s`, and `0.0576s` for the normal build
+(`build-cblas/kls_asic680k_metis_klufirst_cblas_t4_r1_ref1.json`,
+`build/kls_asic680k_metis_klufirst_baseline_t4_r1_ref1.json`). Both rows
+reported zero CBLAS supernode update, GEMV, and TRSV counters. The forced
+KLS-first AMD `ASIC_680k` stress path also reported zero CBLAS counters with
+the runtime gate both on and off, and the matching CBLAS-enabled `pre2` forced
+KLS-first run still timed out at 120s with an empty JSON file
+(`build-cblas/kls_pre2_klsfirst_cblas_factor_timeout120.json`). This makes the
+proposed "BLAS only for large cases" rule already true for the tested paths;
+the unresolved `pre2` and CKTSO-gap losses are not caused by unguarded small
+BLAS calls.

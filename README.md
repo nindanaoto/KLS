@@ -1489,7 +1489,11 @@ eight selected large rows, wins `TSOPF_FS_b39_c30`, times out on `pre2` and
 factor-only default AMD, forced KLS-first, transpose AMD, METIS, and
 no-static-pivoting all exceed 120s, so the unresolved `pre2` gap is cold
 first-factor numeric machinery rather than input width, ordering, orientation,
-or repeated-refactor policy.
+or repeated-refactor policy. A follow-up CBLAS-enabled build with
+`KLS_ENABLE_CBLAS_SUPERNODE=1` did not change that conclusion: the matching
+`pre2` forced KLS-first run still timed out at 120s with no JSON row, while
+same-option `ASIC_680k` checks reported zero CBLAS update counters. The
+existing BLAS gates are therefore not the current slow-case blocker.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
