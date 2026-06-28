@@ -6439,3 +6439,18 @@ the hot L-store loop for every published panel column. The probe was removed:
 the useful paper-level direction is still native row/supernode storage that
 avoids KLU-column staging altogether, not fusing another consumer into the
 current column-store loop.
+
+The BTF EGraph hot loop was also given a branch-light default probe that split
+the dependency walk into separate `supernode_numeric_updates` on/off loops. The
+intent was to remove a disabled opt-in branch from every U-entry in the normal
+scalar EGraph path without changing ordering or the opt-in supernode update
+semantics. It was correct but not a stable CKTSO-gap improvement: repeat-20
+top-five improved only because `onetone2` moved down, while `ASIC_320k`,
+`ASIC_100ks`, and `G2_circuit` were slightly worse; the broader repeat-20
+top-ten measured `3.8603s` geomean versus the saved `3.8514s` top-ten baseline
+(`build/kls_btf_supernode_branch_split_gap5_t4_r1_ref20_timeout120.jsonl`,
+`build/kls_btf_supernode_branch_split_gap10_t4_r1_ref20_timeout120.jsonl`,
+`build/kls_current_gap20_t4_r1_ref20_timeout120.jsonl`). The split was removed.
+This keeps the diagnosis unchanged: the large gap is not a disabled-branch
+artifact in the scalar EGraph loop; KLS still needs the paper-level
+row/supernode numeric executor.
