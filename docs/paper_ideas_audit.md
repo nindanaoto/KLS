@@ -6955,3 +6955,30 @@ later group-DAG successors. The source was reverted. A future selector would
 need explicit panel-consumer metadata from the compact batch builders and the
 checked-prefix repair path; a simple downstream-successor guard is a structural
 under-approximation, not a valid paper-gap closure.
+
+The explicit-consumer selector was then prototyped and rejected as well. The
+current build and saved gap artifacts already rule out the user's small-BLAS
+hypothesis for this path: `build/CMakeCache.txt` has
+`KLS_ENABLE_CBLAS_SUPERNODE=OFF`, the recent top-gap JSON rows report
+`build_has_cblas=false`, and all CBLAS update counters are zero. The prototype
+therefore left the existing BLAS large-case gates unchanged and instead tried
+to make native compact row panels conditional on symbolic consumers. It first
+counted dense-producer runs, then had to add scalar compact-panel consumers
+and consumer-side batched dense-group prefixes to preserve the smoke fixtures;
+with those three consumer classes included, `cmake --build build -j$(nproc)`
+and `ctest --test-dir build --output-on-failure` passed.
+
+The focused top-ten CKTSO-gap benchmark still rejected the approach. On the
+same source, `KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=0` measured `7.83104s`
+geomean in
+`build/kls_consumer_guard_native_off_gap10_t4_r1_ref3_timeout120.jsonl`, while
+the consumer-aware `auto` path measured `7.62489s` in
+`build/kls_consumer_guard_native_auto_gap10_t4_r1_ref3_timeout120.jsonl`. That
+looked like a local auto/off win, and it did correctly remove the solve-only
+`rajat03` native panels (`3` to `0`). But compared with the saved current auto
+artifact, most hard rows slowed by about `1.14x` to `1.23x`, with refactor
+averages about `1.15x` to `1.26x` higher despite identical native-panel counts
+on the ASIC, onetone, and rajat hard rows. The selector's complete metadata
+scan cost more than the avoided panels, so the source was reverted. This keeps
+the diagnosis pointed at a coarser row-major supernode numeric executor, not at
+another panel-retention policy or small-BLAS guard.
