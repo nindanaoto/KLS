@@ -6645,3 +6645,21 @@ guarded by 512-row/vector or 512-width panel minima plus multi-million-work
 thresholds. Another "BLAS only for large cases" guard would not change the
 executed code path; the remaining gap is still the production row/supernode
 numeric storage and executor that would create reusable BLAS-sized work.
+
+A schedule-side row-refactor lower-bound cache was also rejected. The idea was
+to reuse the U predecessor counts already computed by the EGraph schedule
+builder so the automatic row-refactor model would not rescan the same
+dependency graph merely to reject the row path by lower-bound work. This is a
+reasonable NICSLU-style policy cleanup, but it is not the CKTSO-scale missing
+numeric executor, and the measured result did not justify keeping it. The
+top-ten focus run regressed to `5.69422s` geomean in
+`build/kls_cached_row_lower_bound_gap10_t4_r1_ref3_timeout120.jsonl` versus
+the saved default `4.18460s`
+(`build/kls_current_default_gap10_t4_r1_ref3_timeout120.jsonl`); a top-five
+confirmation also regressed to `11.2459s` in
+`build/kls_cached_row_lower_bound_gap5_rerun_t4_r1_ref3_timeout120.jsonl`.
+The lower-bound values and rejection decisions matched the saved default
+artifacts, so the change only moved bookkeeping around and did not alter the
+default EGraph path selection. The source was reverted. This keeps the
+diagnosis focused on production row/supernode storage and arithmetic, not on
+auto-model bookkeeping.
