@@ -7631,3 +7631,22 @@ reverted. The retained conclusion is narrower: the current gap is not the cost
 of initializing not-done supernode rows, and lock-scope changes need a true
 row/supernode numeric representation that avoids shared panel-cache mutation
 rather than temporarily bypassing it.
+
+A retained-input batch-row probe was also rejected. The row-refactor symbolic
+builder already creates target maps for `KLS_ROW_REFACTOR_GROUP_BATCH`, but the
+process-row loader intentionally declined those rows because L-input targets in
+that path must remain in the scalar workspace for existing dependency and
+compact-supernode update code. A corrected probe allowed batch rows through the
+target map while mapping L targets back into `x[dep]`; this raised last-run
+targeted rows substantially (`ASIC_320ks` about 217k to 321k and `ASIC_100ks`
+about 68k to 99k), but it did not make the executor faster. Same-session
+forced-row top-five checks with `KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=0`
+regressed `ASIC_320ks` from `0.2901s` to `0.2934s`, `ASIC_320k` from
+`0.3109s` to `0.3613s`, `gemat12` from `0.000907s` to `0.000988s`,
+`rajat03` from `0.00227s` to `0.00290s`, and `ASIC_100ks` from `0.1439s` to
+`0.1529s` average refactor time. A longer two-row repeat-20 check likewise
+regressed `ASIC_320ks` from `0.2474s` to `0.2667s` and `ASIC_100ks` from
+`0.1210s` to `0.1410s`. The source was reverted. The useful conclusion is that
+retained input-target coverage is not the missing paper lever by itself; batch
+rows still need a coarser producer/consumer numeric kernel instead of more
+target-map admission into the scalar row loop.
