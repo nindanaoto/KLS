@@ -19212,6 +19212,49 @@ static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
   free(used);
 }
 
+static int kls_refactor_supernode_panel_cache_ready(kls_solver *solver) {
+  if (solver == NULL || solver->n == 0u ||
+      solver->refactor_lu_pointer_count != solver->n ||
+      solver->refactor_supernode_pipeline_end == NULL ||
+      solver->refactor_supernode_panel_count == 0u ||
+      solver->refactor_supernode_panel_start_id == NULL ||
+      solver->refactor_supernode_panel_col_id == NULL ||
+      solver->refactor_supernode_panel_start == NULL ||
+      solver->refactor_supernode_panel_local_start == NULL ||
+      solver->refactor_supernode_panel_width == NULL ||
+      solver->refactor_supernode_panel_dense_begin == NULL ||
+      solver->refactor_supernode_panel_trailing_begin == NULL ||
+      solver->refactor_supernode_panel_trailing_value_begin == NULL ||
+      solver->refactor_supernode_panel_trailing_len == NULL ||
+      solver->refactor_supernode_panel_dense_values == NULL) {
+    return 0;
+  }
+
+  UF_long used_count = 0u;
+  const UF_long panel_count = solver->refactor_supernode_panel_count;
+  for (UF_long panel = 0; panel < panel_count; ++panel) {
+    const UF_long start = solver->refactor_supernode_panel_start[panel];
+    const UF_long local_start =
+      solver->refactor_supernode_panel_local_start[panel];
+    const UF_long width = solver->refactor_supernode_panel_width[panel];
+    const UF_long trailing_len =
+      solver->refactor_supernode_panel_trailing_len[panel];
+    if (width == 0u) {
+      continue;
+    }
+    if (width <= 1u || start > solver->n || width > solver->n - start ||
+        local_start > solver->n ||
+        (trailing_len > 0u &&
+         (solver->refactor_supernode_panel_trailing_rows == NULL ||
+          solver->refactor_supernode_panel_trailing_values == NULL))) {
+      return 0;
+    }
+    used_count++;
+  }
+  solver->refactor_supernode_panel_used_count = used_count;
+  return 1;
+}
+
 static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
   if (solver == NULL || solver->n == 0u ||
       solver->refactor_supernode_pipeline_end == NULL ||
@@ -19220,6 +19263,10 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
       solver->refactor_l_indices == NULL ||
       solver->refactor_l_values == NULL) {
     return 0;
+  }
+
+  if (kls_refactor_supernode_panel_cache_ready(solver)) {
+    return 1;
   }
 
   free_refactor_supernode_panel_cache(solver);

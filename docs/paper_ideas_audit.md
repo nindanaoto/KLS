@@ -6234,3 +6234,24 @@ row-solve-from-numeric also stayed off-policy: `--row-solve on` measured
 (`build/kls_row_solve_on_current_gap10_t4_r1_ref3_timeout120.jsonl`). These
 reruns keep both features as correctness/coverage scaffolding for the future
 row/supernode engine rather than current default performance levers.
+
+The EGraph supernode-panel scaffold now keeps its structural panel cache across
+repeated fixed-pattern refactors. The old builder freed and rebuilt the panel
+map, trailing-row descriptors, dense storage, and trailing storage every time
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1` was used, even though schedule and
+LU-pointer invalidation already free the cache when the structural state
+changes. The new reuse check validates the existing schedule/pointer boundary
+and refreshes the enabled-panel count before returning; published producer rows
+still clear their own dense/trailing rows before refilling numeric values. On
+the same top-ten CKTSO-gap opt-in benchmark, the geomean improved from
+`4.6533s` to `4.5505s`
+(`build/kls_egraph_supernode_current_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_egraph_supernode_cache_reuse_gap10_t4_r1_ref3_timeout120.jsonl`).
+Panel and update counts stayed identical (`6913` panels and `41603` update
+runs), which confirms this is a staging-overhead reduction rather than a new
+numeric algorithm. A default control stayed residual-clean with zero supernode
+panel/update counters at `4.1230s`
+(`build/kls_cache_reuse_default_gap10_t4_r1_ref3_timeout120.jsonl`), so the
+policy remains unchanged: cached panels are closer to the paper storage model
+but still slower than the scalar EGraph default until the row/supernode executor
+creates larger reusable work.
