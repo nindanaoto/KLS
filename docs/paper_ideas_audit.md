@@ -7575,3 +7575,42 @@ short-run timing difference is therefore not evidence of BLAS work being used;
 it is run noise or unrelated scheduling variance. KLS should not add another
 small-BLAS guard here because the existing large-shape guard is already
 stricter than the proposed fix and the active path does not reach it.
+
+The next scalar row-supernode executor probes were also rejected. A hot-stack
+sample of current forced-METIS `pre2` again found one pipeline worker in
+`kls_row_first_partial_apply_one_dep` while peer workers waited on the pipeline
+condition, so KLS tried splitting the scalar U-row update into dependency and
+trailing-column loops. That preserved residuals but regressed the same-session
+top-five CKTSO-gap focus from `1.46905424s` to `1.52124999s` geomean in
+`build/kls_scalar_dep_control_gap5_t4_r1_ref3_timeout120.jsonl` and
+`build/kls_scalar_dep_split_gap5_t4_r1_ref3_timeout120.jsonl`; the source was
+reverted.
+
+A broader synchronization prototype then moved a pipeline row's final
+dependency application and pivot check outside the ordered mutex once the row
+reached its commit slot, disabling shared panel-cache mutation for that
+outside-lock final pass. This matched the observed wait shape more directly,
+but the evidence was too weak for a default change: three-pass top-five medians
+were effectively neutral (`1.41735016s` control versus `1.41398595s` candidate
+in `build/kls_pipeline_unlock_control_gap5_t4_r1_ref3_p3_timeout120.jsonl` and
+`build/kls_pipeline_unlock_final_gap5_t4_r1_ref3_p3_timeout120.jsonl`), while
+forced `ASIC_320k` KLS-first factor-only regressed from `3.92563111s` to
+`4.01844172s` SPICE-cycle median in
+`build/kls_asic320k_pipeline_unlock_control_t4_factor_p3.jsonl` and
+`build/kls_asic320k_pipeline_unlock_final_t4_factor_p3.jsonl`. An interrupt of
+the unresolved `pre2` run moved the sampled active worker to
+`kls_row_first_supernodes_reset`, but that stack movement did not come with a
+completed timing win, so the source was reverted.
+
+A safer active-rank pivot-reset cleanup was also rejected. Instead of skipping
+the full pivot reset, it reset supernode metadata only for rows already marked
+done and made panel-cache rebuild scans skip not-done rows before reading
+supernode metadata. This remained residual-clean on smoke tests but regressed
+the three-pass top-five focus to `1.49098394s` in
+`build/kls_done_row_reset_gap5_t4_r1_ref3_p3_timeout120.jsonl`, and forced
+`ASIC_320k` KLS-first factor-only to `4.13749417s` in
+`build/kls_asic320k_done_row_reset_t4_factor_p3.jsonl`. The source was
+reverted. The retained conclusion is narrower: the current gap is not the cost
+of initializing not-done supernode rows, and lock-scope changes need a true
+row/supernode numeric representation that avoids shared panel-cache mutation
+rather than temporarily bypassing it.
