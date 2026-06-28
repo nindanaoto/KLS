@@ -48674,22 +48674,12 @@ static int kls_row_first_partial_apply_supernode_run_cached(
   if (tail_len > UF_long_max - dense_suffix_len) {
     return 0;
   }
-  const UF_long workspace_len = dense_suffix_len + tail_len;
-  if (!kls_row_first_workspace_reserve_supernode(workspace,
-                                                 workspace_len)) {
-    return 0;
-  }
 
   double *x = workspace->x;
   unsigned int *mark = workspace->mark;
   UF_long *pattern = workspace->pattern;
   UF_long *dep_heap = workspace->dep_heap;
-  double *trailing_workspace = workspace->supernode_workspace;
   const unsigned int generation = state->generation;
-  if (workspace_len > 0u) {
-    memset(trailing_workspace, 0,
-           (size_t)workspace_len * sizeof(*trailing_workspace));
-  }
   const double *dense_panel =
     cache->dense_values + cache->dense_begin[panel];
   const double *tail_values =
@@ -48732,6 +48722,17 @@ static int kls_row_first_partial_apply_supernode_run_cached(
   }
   if (portable_status < 0) {
     return -1;
+  }
+
+  const UF_long workspace_len = dense_suffix_len + tail_len;
+  if (!kls_row_first_workspace_reserve_supernode(workspace,
+                                                 workspace_len)) {
+    return 0;
+  }
+  double *trailing_workspace = workspace->supernode_workspace;
+  if (workspace_len > 0u) {
+    memset(trailing_workspace, 0,
+           (size_t)workspace_len * sizeof(*trailing_workspace));
   }
 
   UF_long run_rows = 0;

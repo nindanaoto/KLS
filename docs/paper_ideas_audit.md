@@ -7770,3 +7770,28 @@ not evidence for a small-BLAS threshold problem. The source was reverted. The
 remaining paper gap is more specific: KLS needs a production row/segment or
 supernodal numeric engine that batches/shared-tail updates into coarse kernels,
 not merely a prepacked scalar ragged-tail cache.
+
+A retained cleanup now removes one piece of avoidable work from the existing
+row-first cached-panel executor. `kls_row_first_partial_apply_supernode_run_cached`
+previously reserved and zeroed fallback trailing scratch before trying the
+cached CBLAS/native row-major panel path, even though successful cached-panel
+runs allocate their own right-hand-side scratch and return before the fallback
+buffer is used. The reserve/memset is now deferred until after the cached
+paths decline the run, preserving all existing validation and fallback
+semantics while avoiding dead scratch clearing on accepted cached panels.
+`cmake --build build -j4`, `ctest --test-dir build --output-on-failure`,
+`cmake --build build-cblas -j4`, `ctest --test-dir build-cblas
+--output-on-failure`, and `git diff --check` passed. The same-session top-five
+default CKTSO-gap focus stayed residual-clean and moved from `1.5319s` to
+`1.5045s` geomean
+(`build/kls_defer_cached_scratch_control_gap5_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_defer_cached_scratch_gap5_t4_r1_ref3_timeout120.jsonl`), although
+that default path reported no row-panel-cache activity and should be treated
+mostly as a regression guard. The focused `ASIC_320k` forced KLS-first factor
+probe stayed residual-clean at `2.1189s` initial factor with `42,665`
+row-supernode panel groups covering `779,443` rows
+(`build/kls_asic320k_defer_cached_scratch_t4_factor.json`). The hard forced
+METIS `pre2` factor probe still timed out at 120s with an empty JSON file
+(`build/kls_pre2_metis_defer_cached_scratch_t4_factor_timeout120.json`), so
+this is a retained executor hygiene improvement, not the missing CKTSO-scale
+row/supernode numeric engine.
