@@ -45433,6 +45433,17 @@ static void kls_record_first_separator_queue_plans(
       solver->symbolic->nblocks == 0u) {
     return;
   }
+  const UF_long nblocks = solver->symbolic->nblocks;
+  const int record_only_large_blocks =
+    nblocks > 1024u &&
+    solver->symbolic->maxblock >=
+      KLS_FIRST_FACTOR_DOMINANT_BTF_PIPELINE_MIN_BLOCK;
+  /*
+   * Queue-plan recording is diagnostic; the executor rebuilds the accepted
+   * block plan before running it.  Huge BTF forests such as pre2 can have
+   * tens of thousands of fringe blocks, and each plan needs an n-row map.
+   * Keep diagnostics focused on the dominant/large executable blocks there.
+   */
 
   UF_long private_components = 0;
   UF_long pipeline_components = 0;
@@ -45445,9 +45456,18 @@ static void kls_record_first_separator_queue_plans(
   double min_thread_work = 0.0;
   double max_thread_work = 0.0;
   int recorded = 0;
-  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+  for (UF_long block = 0; block < nblocks; ++block) {
     const UF_long k1 = solver->symbolic->R[block];
     const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (k2 < k1) {
+      continue;
+    }
+    const UF_long block_rows = k2 - k1;
+    if (record_only_large_blocks &&
+        block_rows != solver->symbolic->maxblock &&
+        block_rows < KLS_FIRST_FACTOR_DOMINANT_BTF_PIPELINE_MIN_BLOCK) {
+      continue;
+    }
     kls_first_separator_queue_plan plan;
     if (!kls_build_first_separator_queue_plan(solver, k1, k2, thread_count,
                                               &plan)) {

@@ -7159,3 +7159,34 @@ an empty
 `build/kls_pre2_selective_panel_invalidate_t4_factor_timeout130.json`, so this
 is a useful storage-level cleanup but still not the missing paper-scale
 row/supernode executor.
+
+A `pre2` METIS forced KLS-first rerun exposed one large non-numeric overhead in
+that path. METIS analysis builds a retained separator forest for `pre2`
+(`659033` analyzed rows, `58569` components, and a `629628`-row dominant BTF
+block in `build/kls_pre2_metis_analyze_current_t4.json`), but the first
+bounded numeric probe timed out before useful JSON. An interrupting GDB run
+showed the process still in `kls_record_first_separator_queue_plans`, repeatedly
+building an `n`-row symbolic map for every one of the `29282` BTF blocks just
+to record queue diagnostics. KLS now keeps that diagnostic all-block behavior
+for ordinary BTF counts, but when a huge BTF forest has a dominant large block
+it records only the dominant or otherwise large executable blocks. The executor
+still rebuilds the actual selected block plan before running it.
+
+`cmake --build build -j$(nproc)` and
+`ctest --test-dir build --output-on-failure` passed. The same interrupting GDB
+probe moved past the diagnostic loop into the real private row factorization:
+active worker samples were in `kls_row_first_supernode_panel_cache_append` and
+`kls_row_first_partial_apply_supernode_run_cached`, with the parent waiting in
+`kls_row_first_run_parallel_private_phase`
+(`build/pre2_metis_gdb_after_queue_diag_gate.txt`). The fix therefore removes a
+large setup artifact from the `pre2` METIS experiment, but it does not close the
+CKTSO gap: `build/kls_pre2_metis_queue_diag_gate_t4_factor_timeout90.json` and
+`build/kls_pre2_metis_queue_diag_gate_t4_factor_timeout130.json` both remain
+empty after timing out. Focused completed-row checks stayed residual-clean:
+`ASIC_320k` still exercised the separator queue with a valid residual in
+`build/kls_asic320k_queue_diag_gate_nofast_t4_factor.json`, and `rajat29`
+remained on the non-separator KLS-first path with a valid residual in
+`build/kls_rajat29_queue_diag_gate_nofast_t4_factor.json`. The remaining
+`pre2` gap is now clearer: after setup reaches the paper-aligned separator
+private phase, KLS is still dominated by scalar/panel-cache row-supernode
+numeric work rather than by the diagnostic queue planner.
