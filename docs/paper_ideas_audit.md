@@ -6274,3 +6274,19 @@ saved `3.8061s`
 another small production-kernel cleanup in the dominant scalar EGraph path; the
 paper-level gap remains the durable row/supernode numeric executor that can
 replace these scalar dependency walks with coarser reusable work.
+
+The analogous single-block EGraph split was tested and rejected. Splitting both
+single-block kernels into waited/no-wait loops produced correct tests but did
+not generalize: two top-ten repeat-3 runs measured `3.9864s` and `3.9661s`
+geomean (`build/kls_single_nowait_split_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_single_nowait_split_gap10_t4_r1_ref3_timeout120_run2.jsonl`) versus
+the accepted BTF-only controls at `3.9789s` and `3.9548s`, and the broader
+top-20 repeat-2 guard regressed from `3.7633s` to `3.8135s`
+(`build/kls_single_nowait_split_gap20_t4_r1_ref2_timeout120.jsonl`). A
+scaled-only isolation improved `Raj1` in a focused run but still regressed the
+top-ten guard to `4.0511s`
+(`build/kls_scaled_single_nowait_split_Raj1_t4_r1_ref5_timeout120.jsonl`,
+`build/kls_scaled_single_nowait_split_gap10_t4_r1_ref3_timeout120.jsonl`).
+This keeps the accepted loop split limited to the BTF kernel where the measured
+gain was stable; the single-block cases need the larger row/supernode executor
+rather than more branch-shape variants.
