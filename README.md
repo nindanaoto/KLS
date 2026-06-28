@@ -824,6 +824,11 @@ to a retained panel, and JSON reports
 `refactor_supernode_cached_probe_*` counters so profiling can distinguish panel
 misses, contiguous producer runs, work-gate acceptance, and applied cached
 updates.
+In cached-only mode, if one completed numeric pass probes retained panels but
+finds no work-gate-accepted cached updates, later passes with the same retained
+panel cache skip the cached probe; JSON reports
+`refactor_supernode_cached_probe_disabled` and
+`refactor_supernode_cached_probe_disable_count`.
 For paper-gap diagnosis without changing execution, set
 `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_STATS=1`. Schedule construction then
 counts actual U-stream dependency runs that fall inside retained EGraph

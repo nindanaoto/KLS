@@ -7928,3 +7928,27 @@ geomean from `0.04753s` to `0.05182s`
 the paper-aligned target unchanged: KLS needs a production row-major/supernode
 numeric representation and coarse update kernels, not just different selector
 policy around the current scalar executors.
+
+A narrower cached-panel cleanup was retained after the next current-source
+rerun. The previous per-panel adaptive pruning was rejected because it added
+bookkeeping and regressed the cached opt-in path, but the current top-ten probe
+showed a simpler no-work case: `ASIC_320k`, `rajat24`, `transient`, and
+`rajat28` built retained EGraph panels and paid cached-probe attempts while
+applying zero cached updates. KLS now records a pass-level cached-only guard:
+when `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached` completes a valid numeric pass
+with cached-probe attempts but zero work-gate-accepted updates, later passes
+with the same retained panel cache skip the cached probe and report
+`refactor_supernode_cached_probe_disabled` plus
+`refactor_supernode_cached_probe_disable_count`. The focused cached top-ten
+artifact after the change
+(`build/kls_cached_disable_guard_gap10_t4_r1_ref3_timeout120.jsonl`) shows the
+guard firing once on the zero-work rows and reducing their later-pass cached
+attempts to zero (`ASIC_320k`, `rajat24`, `transient`, and `rajat28`), while
+productive cached rows such as `ASIC_320ks`, `ASIC_100ks`, `G2_circuit`,
+`onetone1`, and `onetone2` remain enabled. The same artifact is not evidence
+that cached EGraph panels should become the default: it measured `4.41862s`
+geomean versus the same-session default top-ten `4.33669s`, and the cached path
+still loses the top-ten common set to CKTSO by about `2.47x`. This is retained
+only as opt-in row/supernode executor cleanup; the missing paper-level item
+remains a coarse row-major/supernode numeric engine rather than another cached
+selector rule.

@@ -459,6 +459,8 @@ typedef struct kls_stats {
   int64_t refactor_supernode_cached_probe_allowed_rows;
   int64_t refactor_supernode_cached_probe_applied;
   int64_t refactor_supernode_cached_probe_applied_rows;
+  int refactor_supernode_cached_probe_disabled;
+  int64_t refactor_supernode_cached_probe_disable_count;
   int64_t row_refactor_dense_producer_run_count;
   int64_t row_refactor_dense_producer_run_rows;
   int64_t row_refactor_dense_producer_run_dep_rows;

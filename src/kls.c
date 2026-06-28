@@ -607,6 +607,8 @@ struct kls_solver {
   UF_long refactor_supernode_cached_probe_allowed_rows;
   UF_long refactor_supernode_cached_probe_applied;
   UF_long refactor_supernode_cached_probe_applied_rows;
+  int refactor_supernode_cached_probe_disabled;
+  UF_long refactor_supernode_cached_probe_disable_count;
   UF_long refactor_last_ready_queue_columns;
   UF_long refactor_ready_queue_run_count;
   UF_long refactor_cluster_level_count;
@@ -1652,6 +1654,7 @@ static void free_refactor_supernode_panel_cache(kls_solver *solver) {
   solver->refactor_supernode_panel_trailing_values = NULL;
   solver->refactor_supernode_panel_count = 0;
   solver->refactor_supernode_panel_used_count = 0;
+  solver->refactor_supernode_cached_probe_disabled = 0;
 }
 
 static void free_refactor_lu_pointer_cache(kls_solver *solver) {
@@ -3078,6 +3081,8 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_supernode_cached_probe_allowed_rows = 0;
   solver->refactor_supernode_cached_probe_applied = 0;
   solver->refactor_supernode_cached_probe_applied_rows = 0;
+  solver->refactor_supernode_cached_probe_disabled = 0;
+  solver->refactor_supernode_cached_probe_disable_count = 0;
   solver->refactor_last_ready_queue_columns = 0;
   solver->refactor_ready_queue_run_count = 0;
   solver->refactor_cluster_level_count = 0;
@@ -3774,6 +3779,10 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   solver->stats.refactor_last_supernode_cached_probe_allowed_rows = 0;
   solver->stats.refactor_last_supernode_cached_probe_applied = 0;
   solver->stats.refactor_last_supernode_cached_probe_applied_rows = 0;
+  solver->stats.refactor_supernode_cached_probe_disabled =
+    solver->refactor_supernode_cached_probe_disabled;
+  solver->stats.refactor_supernode_cached_probe_disable_count =
+    (int64_t)solver->refactor_supernode_cached_probe_disable_count;
   solver->stats.refactor_last_ready_queue_columns = 0;
 }
 
@@ -12738,6 +12747,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_supernode_cached_probe_applied;
   solver->stats.refactor_supernode_cached_probe_applied_rows =
     (int64_t)solver->refactor_supernode_cached_probe_applied_rows;
+  solver->stats.refactor_supernode_cached_probe_disabled =
+    solver->refactor_supernode_cached_probe_disabled;
+  solver->stats.refactor_supernode_cached_probe_disable_count =
+    (int64_t)solver->refactor_supernode_cached_probe_disable_count;
   solver->stats.refactor_last_ready_queue_columns =
     (int64_t)solver->refactor_last_ready_queue_columns;
   solver->stats.refactor_ready_queue_run_count =
@@ -42285,13 +42298,19 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
   const int supernode_numeric_update_mode =
     kls_egraph_supernode_numeric_updates_env_mode();
-  const int supernode_numeric_updates =
+  const int cached_supernode_updates_only =
+    supernode_numeric_update_mode == 2;
+  int supernode_numeric_updates =
     supernode_numeric_update_mode != 0;
+  if (cached_supernode_updates_only &&
+      solver->refactor_supernode_cached_probe_disabled) {
+    supernode_numeric_updates = 0;
+  }
   if (supernode_numeric_updates) {
     if (!kls_build_refactor_supernode_panel_cache(solver)) {
       return -1;
     }
-  } else {
+  } else if (supernode_numeric_update_mode == 0) {
     free_refactor_supernode_panel_cache(solver);
   }
   trilinos_klu_l_common *common = &solver->common;
@@ -42452,7 +42471,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->supernode_numeric_updates =
     supernode_numeric_updates ? 1 : 0;
   shared->supernode_cached_updates_only =
-    supernode_numeric_update_mode == 2 ? 1 : 0;
+    cached_supernode_updates_only ? 1 : 0;
   shared->pipeline_ready_queue = use_pipeline_ready_queue;
   shared->pipeline_ready_cols =
     use_pipeline_ready_queue ? solver->refactor_pipeline_ready_cols : NULL;
@@ -42665,6 +42684,14 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     supernode_cached_probe_applied;
   solver->refactor_supernode_cached_probe_applied_rows +=
     supernode_cached_probe_applied_rows;
+  if (!shared->invalid && !shared->pivot_rejected &&
+      !(shared->singular && common->halt_if_singular) &&
+      cached_supernode_updates_only && supernode_numeric_updates &&
+      supernode_cached_probe_attempts > 0u &&
+      supernode_cached_probe_allowed == 0u) {
+    solver->refactor_supernode_cached_probe_disabled = 1;
+    solver->refactor_supernode_cached_probe_disable_count++;
+  }
   solver->refactor_last_ready_queue_columns =
     use_pipeline_ready_queue ? solver->refactor_pipeline_column_count : 0u;
   if (use_pipeline_ready_queue) {
