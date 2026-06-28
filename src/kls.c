@@ -45545,6 +45545,7 @@ typedef struct kls_row_first_supernode_panel_cache {
   UF_long *tail_len;
   UF_long *dense_begin;
   UF_long *tail_value_begin;
+  unsigned char *active;
   UF_long *tail_cols;
   double *dense_values;
   double *tail_values;
@@ -46815,6 +46816,7 @@ static void kls_row_first_supernode_panel_cache_free(
   free(cache->tail_len);
   free(cache->dense_begin);
   free(cache->tail_value_begin);
+  free(cache->active);
   free(cache->tail_cols);
   free(cache->dense_values);
   free(cache->tail_values);
@@ -47073,9 +47075,15 @@ static int kls_row_first_supernode_panel_cache_reserve_panels(
   if (tail_value_begin != NULL) {
     cache->tail_value_begin = tail_value_begin;
   }
+  unsigned char *active =
+    (unsigned char *)realloc(cache->active,
+                             (size_t)capacity * sizeof(*active));
+  if (active != NULL) {
+    cache->active = active;
+  }
   if (start == NULL || width == NULL || tail_begin == NULL ||
       tail_len == NULL || dense_begin == NULL ||
-      tail_value_begin == NULL) {
+      tail_value_begin == NULL || active == NULL) {
     return 0;
   }
   cache->panel_capacity = capacity;
@@ -47140,6 +47148,7 @@ static int kls_row_first_supernode_panel_cache_append(
   cache->tail_len[panel] = tail_len;
   cache->dense_begin[panel] = dense_begin;
   cache->tail_value_begin[panel] = tail_value_begin;
+  cache->active[panel] = 1u;
   const UF_long source_tail_begin = u_row_ptr[end];
   for (UF_long offset = 0; offset < tail_len; ++offset) {
     cache->tail_cols[tail_begin + offset] =
@@ -47318,6 +47327,8 @@ static int kls_row_first_supernode_panel_cache_build(
   cache->tail_value_begin =
     (UF_long *)malloc((size_t)panel_count *
                       sizeof(*cache->tail_value_begin));
+  cache->active =
+    (unsigned char *)malloc((size_t)panel_count * sizeof(*cache->active));
   cache->tail_cols = tail_col_count > 0u
     ? (UF_long *)malloc((size_t)tail_col_count * sizeof(*cache->tail_cols))
     : NULL;
@@ -47331,6 +47342,7 @@ static int kls_row_first_supernode_panel_cache_build(
   if (cache->start == NULL || cache->width == NULL ||
       cache->tail_begin == NULL || cache->tail_len == NULL ||
       cache->dense_begin == NULL || cache->tail_value_begin == NULL ||
+      cache->active == NULL ||
       (tail_col_count > 0u && cache->tail_cols == NULL) ||
       cache->dense_values == NULL ||
       (tail_value_count > 0u && cache->tail_values == NULL)) {
@@ -47375,6 +47387,7 @@ static int kls_row_first_supernode_panel_cache_build(
     cache->tail_len[panel] = tail_len;
     cache->dense_begin[panel] = next_dense;
     cache->tail_value_begin[panel] = next_tail_value;
+    cache->active[panel] = 1u;
     const UF_long source_tail_begin = u_row_ptr[end];
     for (UF_long offset = 0; offset < tail_len; ++offset) {
       cache->tail_cols[next_tail_col + offset] =
@@ -47418,6 +47431,82 @@ static int kls_row_first_supernode_panel_cache_build(
   kls_row_first_record_panel_cache_build(
     stats, next_panel, next_dense, next_tail_value, next_tail_col);
   return 1;
+}
+
+static int kls_row_first_supernode_panel_cache_panel_uses_col(
+  const kls_row_first_supernode_panel_cache *cache,
+  UF_long panel,
+  UF_long col) {
+  if (cache == NULL || panel >= cache->panel_count ||
+      col == KLS_KLU_EMPTY || col >= cache->row_count ||
+      cache->start == NULL || cache->width == NULL ||
+      cache->tail_begin == NULL || cache->tail_len == NULL) {
+    return 0;
+  }
+  const UF_long start = cache->start[panel];
+  const UF_long width = cache->width[panel];
+  if (width > 0u && col >= start && col - start < width) {
+    return 1;
+  }
+  const UF_long tail_begin = cache->tail_begin[panel];
+  const UF_long tail_len = cache->tail_len[panel];
+  if (tail_len > 0u && cache->tail_cols == NULL) {
+    return 1;
+  }
+  if (tail_begin > cache->tail_col_count ||
+      tail_len > cache->tail_col_count - tail_begin) {
+    return 1;
+  }
+  for (UF_long offset = 0; offset < tail_len; ++offset) {
+    if (cache->tail_cols[tail_begin + offset] == col) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static UF_long kls_row_first_supernode_panel_cache_invalidate_columns(
+  kls_row_first_supernode_panel_cache *cache,
+  UF_long col_a,
+  UF_long col_b) {
+  if (cache == NULL || cache->active == NULL ||
+      cache->panel_id_by_row == NULL) {
+    return 0;
+  }
+  UF_long invalidated = 0;
+  UF_long still_active = 0;
+  for (UF_long panel = 0; panel < cache->panel_count; ++panel) {
+    if (cache->active[panel] == 0u) {
+      continue;
+    }
+    if (kls_row_first_supernode_panel_cache_panel_uses_col(
+          cache, panel, col_a) ||
+        kls_row_first_supernode_panel_cache_panel_uses_col(
+          cache, panel, col_b)) {
+      cache->active[panel] = 0u;
+      invalidated++;
+      const UF_long start = cache->start[panel];
+      const UF_long width = cache->width[panel];
+      if (start < cache->row_count) {
+        UF_long local_limit = cache->row_count - start;
+        if (local_limit > width) {
+          local_limit = width;
+        }
+        for (UF_long local = 0; local < local_limit; ++local) {
+          const UF_long row = start + local;
+          if (cache->panel_id_by_row[row] == panel) {
+            cache->panel_id_by_row[row] = KLS_KLU_EMPTY;
+          }
+        }
+      }
+    } else {
+      still_active++;
+    }
+  }
+  if (still_active == 0u) {
+    cache->enabled = 0;
+  }
+  return invalidated;
 }
 
 static UF_long kls_row_first_owned_supernode_end(
@@ -48058,6 +48147,9 @@ static int kls_row_first_partial_apply_supernode_run_cached(
   }
   const UF_long panel = cache->panel_id_by_row[dep_begin];
   if (panel == KLS_KLU_EMPTY || panel >= cache->panel_count) {
+    return 0;
+  }
+  if (cache->active == NULL || cache->active[panel] == 0u) {
     return 0;
   }
   const UF_long start = cache->start[panel];
@@ -48722,8 +48814,10 @@ static int kls_row_first_pipeline_should_rebuild_prefix_panel_cache(
   return 1;
 }
 
-static void kls_row_first_pipeline_reset_prefix_without_panel_cache(
-  kls_row_first_pipeline_shared *shared) {
+static void kls_row_first_pipeline_reset_prefix_after_large_pivot(
+  kls_row_first_pipeline_shared *shared,
+  UF_long pivot_col_a,
+  UF_long pivot_col_b) {
   if (shared == NULL || shared->ctx == NULL ||
       shared->workspace == NULL ||
       shared->u_entries == NULL ||
@@ -48746,14 +48840,22 @@ static void kls_row_first_pipeline_reset_prefix_without_panel_cache(
       shared->supernode_end);
   }
   if (shared->private_supernode_panel_cache != NULL) {
-    kls_row_first_supernode_panel_cache_free(
-      shared->private_supernode_panel_cache);
-    shared->private_supernode_panel_cache = NULL;
+    kls_row_first_supernode_panel_cache *cache =
+      shared->private_supernode_panel_cache;
+    if (cache->row_count == nk && cache->panel_id_by_row != NULL) {
+      (void)kls_row_first_supernode_panel_cache_invalidate_columns(
+        cache, pivot_col_a, pivot_col_b);
+    } else {
+      kls_row_first_supernode_panel_cache_free(cache);
+      (void)kls_row_first_supernode_panel_cache_init_rows(cache, nk);
+    }
   }
 }
 
 static void kls_row_first_pipeline_rebuild_prefix_panel_cache(
-  kls_row_first_pipeline_shared *shared) {
+  kls_row_first_pipeline_shared *shared,
+  UF_long pivot_col_a,
+  UF_long pivot_col_b) {
   if (shared == NULL || shared->ctx == NULL) {
     return;
   }
@@ -48761,7 +48863,8 @@ static void kls_row_first_pipeline_rebuild_prefix_panel_cache(
     return;
   }
   if (!kls_row_first_pipeline_should_rebuild_prefix_panel_cache(shared)) {
-    kls_row_first_pipeline_reset_prefix_without_panel_cache(shared);
+    kls_row_first_pipeline_reset_prefix_after_large_pivot(
+      shared, pivot_col_a, pivot_col_b);
     return;
   }
   if (shared->private_supernode_panel_cache == NULL ||
@@ -49052,7 +49155,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                 shared->pivot_restarts++;
                 shared->order_epoch++;
                 if (shared->active_rank == NULL) {
-                  kls_row_first_pipeline_rebuild_prefix_panel_cache(shared);
+                  kls_row_first_pipeline_rebuild_prefix_panel_cache(
+                    shared, row, selected_col);
                 }
               }
             }

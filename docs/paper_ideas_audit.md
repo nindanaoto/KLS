@@ -7130,3 +7130,32 @@ memory traffic. That rejects the lightweight snapshot route and strengthens
 the next implementation target: build a real production row/supernode numeric
 object with scheduled coarse triangular solves/trailing updates, instead of
 copying KLU-compatible row fragments around the existing scalar executor.
+
+A selective large-pipeline panel invalidation increment was then retained. The
+small-BLAS hypothesis still did not need a source change: the normal build has
+CBLAS disabled, and the optional CBLAS paths already require 512-row/vector or
+512-width panel minima plus multi-million-work gates before calling BLAS. The
+source change instead makes the large dynamic-pivot row pipeline preserve its
+existing row-supernode panel cache and mark only panels touching the two
+swapped local columns inactive, rather than dropping the whole prefix cache.
+Inactive panels are skipped by the cached executor, and the compact/scalar
+fallback still rebuilds a valid panel when it next proves the shape.
+
+`cmake --build build -j$(nproc)`,
+`ctest --test-dir build --output-on-failure`,
+`cmake --build build-cblas -j$(nproc)`, and
+`ctest --test-dir build-cblas --output-on-failure` passed. In the matching
+forced KLS-first/no-fast-factor first-factor probes, `ASIC_320k` improved from
+about `2.97s` to about `2.20s` and `rajat29` from about `12.78s` to about
+`4.63s`, with matching residuals, in
+`build/kls_asic320k_selective_panel_invalidate_nofast_t4_factor_timeout45.json`
+and
+`build/kls_rajat29_selective_panel_invalidate_nofast_t4_factor_timeout70.json`.
+The production default path was neutral within repeated-run noise on
+`ASIC_320k` (`13.61s` saved current policy versus a rerun at `13.67s`) and
+slightly noisy on `rajat29` (`5.52s` saved large-recon policy versus `5.82s`).
+The hard `pre2` forced KLS-first factor probe still timed out at 130s and left
+an empty
+`build/kls_pre2_selective_panel_invalidate_t4_factor_timeout130.json`, so this
+is a useful storage-level cleanup but still not the missing paper-scale
+row/supernode executor.
