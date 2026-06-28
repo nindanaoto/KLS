@@ -7650,3 +7650,25 @@ regressed `ASIC_320ks` from `0.2474s` to `0.2667s` and `ASIC_100ks` from
 retained input-target coverage is not the missing paper lever by itself; batch
 rows still need a coarser producer/consumer numeric kernel instead of more
 target-map admission into the scalar row loop.
+
+A direct EGraph supernode wait-tail probe was rejected after profiling the
+current default CKTSO-gap path. `perf` was unavailable in the container
+(`perf_event_paranoid=4`), so a long `ASIC_320k` GDB interrupt sampled the
+default four-thread refactor with two workers inside
+`kls_scatter_subtract_i32` from `kls_egraph_refactor_btf_unscaled_column`, two
+workers waiting in `kls_egraph_refactor_wait_done` on the same predecessor
+column, and the parent blocked in `kls_egraph_mapped_refactor`. The paper
+motivation was reasonable: exact adjacent supernode chains give a transitive
+done relation, so a consumer could wait for the last column in a consecutive
+dependency run and then consume the scalar L scatters without per-column waits.
+The prototype did exactly that without enabling the slower cached-panel
+numeric path, and it was residual-clean on smoke and a focused `ASIC_100ks`
+run, but it regressed `ASIC_100ks` refactor average from the saved current
+`0.0382s` to `0.0441s` while recording about `101824` wait runs over `966694`
+columns in the last run. The source was reverted. The useful conclusion is
+that tail waiting removes overlap: consumers can start scattering the first
+ready predecessor while later columns in the same supernode chain are still
+finishing. This also explains why the earlier producer-side supernode-task
+artifact (`KLS_ENABLE_EGRAPH_SUPERNODE_TASKS=1`) was not a general fix. Closing
+the CKTSO gap still requires a real coarse row/supernode numeric task, not only
+coarser waits over the existing scalar scatter loop.
