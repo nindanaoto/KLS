@@ -7832,3 +7832,34 @@ the source was reverted. The existing active-rank pipeline restart path is not
 yet semantically equivalent to the in-worker pivot path; a correct CKTSO-style
 pivot-tail restart needs explicit state transfer for the active-rank
 dependency/panel state, not just an earlier `KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT`.
+
+The retained follow-up is diagnostic rather than another small BLAS policy
+change. KLS now reports active-rank pivot reset and panel-rebuild counters via
+`kls_first_active_rank_pivot_reset_count`,
+`kls_first_active_rank_pivot_reset_rows`,
+`kls_first_active_rank_pivot_panel_rebuild_count`, and
+`kls_first_active_rank_pivot_panel_rebuild_rows`, so future `pre2`-style
+samples can distinguish full reset/rebuild cost from ordinary row-panel cache
+activity. The current top-five CKTSO-gap rerun with this instrumentation stayed
+residual-clean, reported zero active-rank pivot resets on all five matrices,
+and measured `1.5481s` geomean in
+`build/kls_active_rank_pivot_stats_gap5_t4_r1_ref3_timeout120.jsonl`. A focused
+`ASIC_320k` KLS-first factor probe also reported zero active-rank reset and
+panel-rebuild counters (`build/kls_asic320k_active_rank_pivot_stats_t4_factor.json`,
+`2.4361s` initial factor, `1.509e-15` relative residual). The sensitive
+`rajat29` no-fast pivot probe failed setup as singular in this diagnostic build,
+so it was not used as a pass criterion.
+
+The same rerun closes the small-BLAS guard hypothesis for the current focus
+set. The CBLAS-capable binary already requires the runtime
+`KLS_ENABLE_CBLAS_SUPERNODE=1` gate plus 512-scale vector/panel or minimum-work
+tests before calling BLAS. With `OPENBLAS_NUM_THREADS=1`, the CBLAS-capable
+top-five control measured `1.4519s` geomean with
+`KLS_ENABLE_CBLAS_SUPERNODE=0` and `1.5900s` with
+`KLS_ENABLE_CBLAS_SUPERNODE=1`
+(`build-cblas/kls_cblas_guard_active_rank_off_gap5_t4_r1_ref3_timeout120.jsonl`
+and `build-cblas/kls_cblas_guard_active_rank_on_gap5_t4_r1_ref3_timeout120.jsonl`).
+Both runs had `build_has_cblas=true`, but every matrix reported zero CBLAS
+update runs, rows, and entries. Adding a stricter "large cases only" BLAS guard
+would therefore not affect the observed CKTSO-gap path; the active issue remains
+the native row-first/pivot-aware numeric executor shape.

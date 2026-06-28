@@ -1272,6 +1272,10 @@ int main(int argc, char **argv) {
            ",\"kls_first_last_row_pipeline_prefix_panel_rebuild\":%d"
            ",\"kls_first_row_pipeline_prefix_panel_rebuild_count\":%" PRId64
            ",\"kls_first_last_row_pipeline_prefix_panel_rebuild_rows\":%" PRId64
+           ",\"kls_first_active_rank_pivot_reset_count\":%" PRId64
+           ",\"kls_first_active_rank_pivot_reset_rows\":%" PRId64
+           ",\"kls_first_active_rank_pivot_panel_rebuild_count\":%" PRId64
+           ",\"kls_first_active_rank_pivot_panel_rebuild_rows\":%" PRId64
            ",\"kls_first_row_panel_cache_build_count\":%" PRId64
            ",\"kls_first_row_panel_cache_build_panels\":%" PRId64
            ",\"kls_first_row_panel_cache_build_entries\":%" PRId64
@@ -1295,6 +1299,10 @@ int main(int argc, char **argv) {
            stats.kls_first_last_row_pipeline_prefix_panel_rebuild,
            stats.kls_first_row_pipeline_prefix_panel_rebuild_count,
            stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows,
+           stats.kls_first_active_rank_pivot_reset_count,
+           stats.kls_first_active_rank_pivot_reset_rows,
+           stats.kls_first_active_rank_pivot_panel_rebuild_count,
+           stats.kls_first_active_rank_pivot_panel_rebuild_rows,
            stats.kls_first_row_panel_cache_build_count,
            stats.kls_first_row_panel_cache_build_panels,
            stats.kls_first_row_panel_cache_build_entries,
@@ -2204,6 +2212,13 @@ int main(int argc, char **argv) {
            stats.kls_first_last_row_pipeline_prefix_panel_rebuild,
            stats.kls_first_row_pipeline_prefix_panel_rebuild_count,
            stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows);
+    printf("KLS row-up-looking active-rank pivot resets: resets %" PRId64
+           ", reset rows %" PRId64 ", panel rebuilds %" PRId64
+           ", rebuild rows %" PRId64 "\n",
+           stats.kls_first_active_rank_pivot_reset_count,
+           stats.kls_first_active_rank_pivot_reset_rows,
+           stats.kls_first_active_rank_pivot_panel_rebuild_count,
+           stats.kls_first_active_rank_pivot_panel_rebuild_rows);
     printf("KLS row-up-looking panel cache: builds %" PRId64
            ", build panels %" PRId64 ", build entries %" PRId64
            ", appends %" PRId64 ", append panels %" PRId64

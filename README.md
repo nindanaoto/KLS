@@ -293,7 +293,12 @@ counters. Prefix panel rebuilds after a separator-pipeline pivot are reported
 through `kls_first_last_separator_queue_pipeline_prefix_panel_rebuild`,
 `kls_first_separator_queue_pipeline_prefix_panel_rebuild_count`, and
 `kls_first_last_separator_queue_pipeline_prefix_panel_rebuild_rows`, matching
-the retained prefix semantics of the epoch retry. If that
+the retained prefix semantics of the epoch retry. Active-rank pivot resets that
+still rebuild row-supernode metadata are exposed separately through
+`kls_first_active_rank_pivot_reset_count`,
+`kls_first_active_rank_pivot_reset_rows`,
+`kls_first_active_rank_pivot_panel_rebuild_count`, and
+`kls_first_active_rank_pivot_panel_rebuild_rows`. If that
 row-up-looking bridge is not eligible
 or still rejects a pivot, the pivoted KLS block tail
 still runs; it reuses KLS's retained factor-order input map when available,

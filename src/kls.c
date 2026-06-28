@@ -723,6 +723,10 @@ struct kls_solver {
   int kls_first_last_row_pipeline_prefix_panel_rebuild;
   UF_long kls_first_row_pipeline_prefix_panel_rebuild_count;
   UF_long kls_first_last_row_pipeline_prefix_panel_rebuild_rows;
+  UF_long kls_first_active_rank_pivot_reset_count;
+  UF_long kls_first_active_rank_pivot_reset_rows;
+  UF_long kls_first_active_rank_pivot_panel_rebuild_count;
+  UF_long kls_first_active_rank_pivot_panel_rebuild_rows;
   UF_long kls_first_row_panel_cache_build_count;
   UF_long kls_first_row_panel_cache_build_panels;
   UF_long kls_first_row_panel_cache_build_entries;
@@ -3442,6 +3446,10 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_first_last_row_pipeline_pivot_serial_rows = 0;
   solver->kls_first_last_row_pipeline_prefix_panel_rebuild = 0;
   solver->kls_first_last_row_pipeline_prefix_panel_rebuild_rows = 0;
+  solver->kls_first_active_rank_pivot_reset_count = 0;
+  solver->kls_first_active_rank_pivot_reset_rows = 0;
+  solver->kls_first_active_rank_pivot_panel_rebuild_count = 0;
+  solver->kls_first_active_rank_pivot_panel_rebuild_rows = 0;
   solver->kls_first_row_panel_cache_build_count = 0;
   solver->kls_first_row_panel_cache_build_panels = 0;
   solver->kls_first_row_panel_cache_build_entries = 0;
@@ -3517,6 +3525,10 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_first_last_row_pipeline_pivot_serial_rows = 0;
   solver->stats.kls_first_last_row_pipeline_prefix_panel_rebuild = 0;
   solver->stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows = 0;
+  solver->stats.kls_first_active_rank_pivot_reset_count = 0;
+  solver->stats.kls_first_active_rank_pivot_reset_rows = 0;
+  solver->stats.kls_first_active_rank_pivot_panel_rebuild_count = 0;
+  solver->stats.kls_first_active_rank_pivot_panel_rebuild_rows = 0;
   solver->stats.kls_first_row_panel_cache_build_count = 0;
   solver->stats.kls_first_row_panel_cache_build_panels = 0;
   solver->stats.kls_first_row_panel_cache_build_entries = 0;
@@ -12876,6 +12888,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->kls_first_row_pipeline_prefix_panel_rebuild_count;
   solver->stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows =
     (int64_t)solver->kls_first_last_row_pipeline_prefix_panel_rebuild_rows;
+  solver->stats.kls_first_active_rank_pivot_reset_count =
+    (int64_t)solver->kls_first_active_rank_pivot_reset_count;
+  solver->stats.kls_first_active_rank_pivot_reset_rows =
+    (int64_t)solver->kls_first_active_rank_pivot_reset_rows;
+  solver->stats.kls_first_active_rank_pivot_panel_rebuild_count =
+    (int64_t)solver->kls_first_active_rank_pivot_panel_rebuild_count;
+  solver->stats.kls_first_active_rank_pivot_panel_rebuild_rows =
+    (int64_t)solver->kls_first_active_rank_pivot_panel_rebuild_rows;
   solver->stats.kls_first_row_panel_cache_build_count =
     (int64_t)solver->kls_first_row_panel_cache_build_count;
   solver->stats.kls_first_row_panel_cache_build_panels =
@@ -45940,6 +45960,10 @@ typedef struct kls_row_first_row_stats {
   UF_long supernode_panel_update_rows;
   UF_long pipeline_prefix_panel_rebuilds;
   UF_long pipeline_prefix_panel_rebuild_rows;
+  UF_long active_rank_pivot_resets;
+  UF_long active_rank_pivot_reset_rows;
+  UF_long active_rank_pivot_panel_rebuilds;
+  UF_long active_rank_pivot_panel_rebuild_rows;
   UF_long panel_cache_builds;
   UF_long panel_cache_build_panels;
   UF_long panel_cache_build_entries;
@@ -46057,6 +46081,14 @@ static void kls_row_first_accumulate_panel_cache_stats(
                           src->panel_cache_append_panels);
   kls_row_first_stats_add(&dst->panel_cache_append_entries,
                           src->panel_cache_append_entries);
+  kls_row_first_stats_add(&dst->active_rank_pivot_resets,
+                          src->active_rank_pivot_resets);
+  kls_row_first_stats_add(&dst->active_rank_pivot_reset_rows,
+                          src->active_rank_pivot_reset_rows);
+  kls_row_first_stats_add(&dst->active_rank_pivot_panel_rebuilds,
+                          src->active_rank_pivot_panel_rebuilds);
+  kls_row_first_stats_add(&dst->active_rank_pivot_panel_rebuild_rows,
+                          src->active_rank_pivot_panel_rebuild_rows);
 }
 
 typedef struct kls_row_first_pivot_choice {
@@ -49621,6 +49653,13 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                     shared->workspace->u_row_end, shared->row_done,
                     shared->ctx->nk, shared->ctx->nk,
                     shared->supernode_start, shared->supernode_end);
+                  if (shared->stats != NULL) {
+                    kls_row_first_stats_add(
+                      &shared->stats->active_rank_pivot_resets, 1u);
+                    kls_row_first_stats_add(
+                      &shared->stats->active_rank_pivot_reset_rows,
+                      shared->ctx->nk);
+                  }
                   if (shared->private_supernode_panel_cache != NULL) {
                     (void)kls_row_first_supernode_panel_cache_build(
                       shared->private_supernode_panel_cache,
@@ -49629,6 +49668,14 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                       shared->row_done, shared->supernode_start,
                       shared->supernode_end, shared->ctx->nk,
                       shared->ctx->nk, shared->stats);
+                    if (shared->stats != NULL) {
+                      kls_row_first_stats_add(
+                        &shared->stats->active_rank_pivot_panel_rebuilds,
+                        1u);
+                      kls_row_first_stats_add(
+                        &shared->stats->active_rank_pivot_panel_rebuild_rows,
+                        shared->ctx->nk);
+                    }
                   }
                 } else {
                   kls_row_first_supernodes_publish_row(
@@ -50879,6 +50926,10 @@ typedef struct kls_row_first_parallel_shared {
   UF_long row_panel_cache_appends;
   UF_long row_panel_cache_append_panels;
   UF_long row_panel_cache_append_entries;
+  UF_long active_rank_pivot_resets;
+  UF_long active_rank_pivot_reset_rows;
+  UF_long active_rank_pivot_panel_rebuilds;
+  UF_long active_rank_pivot_panel_rebuild_rows;
   UF_long row_pipeline_runs;
   UF_long row_pipeline_rows;
   UF_long row_pipeline_threads;
@@ -51014,6 +51065,10 @@ static int kls_row_first_parallel_commit_block(
   UF_long row_panel_cache_appends,
   UF_long row_panel_cache_append_panels,
   UF_long row_panel_cache_append_entries,
+  UF_long active_rank_pivot_resets,
+  UF_long active_rank_pivot_reset_rows,
+  UF_long active_rank_pivot_panel_rebuilds,
+  UF_long active_rank_pivot_panel_rebuild_rows,
   UF_long row_pipeline_rows,
   UF_long row_pipeline_threads,
   UF_long row_pipeline_prefix_rows,
@@ -51088,6 +51143,14 @@ static int kls_row_first_parallel_commit_block(
                             row_panel_cache_append_panels);
     kls_row_first_stats_add(&shared->row_panel_cache_append_entries,
                             row_panel_cache_append_entries);
+    kls_row_first_stats_add(&shared->active_rank_pivot_resets,
+                            active_rank_pivot_resets);
+    kls_row_first_stats_add(&shared->active_rank_pivot_reset_rows,
+                            active_rank_pivot_reset_rows);
+    kls_row_first_stats_add(&shared->active_rank_pivot_panel_rebuilds,
+                            active_rank_pivot_panel_rebuilds);
+    kls_row_first_stats_add(&shared->active_rank_pivot_panel_rebuild_rows,
+                            active_rank_pivot_panel_rebuild_rows);
     if (row_pipeline_rows > 0u) {
       shared->row_pipeline_runs++;
       shared->row_pipeline_rows += row_pipeline_rows;
@@ -51599,6 +51662,10 @@ static int kls_row_first_parallel_factor_block(
   UF_long row_panel_cache_appends = 0;
   UF_long row_panel_cache_append_panels = 0;
   UF_long row_panel_cache_append_entries = 0;
+  UF_long active_rank_pivot_resets = 0;
+  UF_long active_rank_pivot_reset_rows = 0;
+  UF_long active_rank_pivot_panel_rebuilds = 0;
+  UF_long active_rank_pivot_panel_rebuild_rows = 0;
   UF_long row_pipeline_rows = 0;
   UF_long row_pipeline_threads = 0;
   UF_long row_pipeline_prefix_rows = 0;
@@ -52208,6 +52275,14 @@ static int kls_row_first_parallel_factor_block(
                           row_stats.panel_cache_append_panels);
   kls_row_first_stats_add(&row_panel_cache_append_entries,
                           row_stats.panel_cache_append_entries);
+  kls_row_first_stats_add(&active_rank_pivot_resets,
+                          row_stats.active_rank_pivot_resets);
+  kls_row_first_stats_add(&active_rank_pivot_reset_rows,
+                          row_stats.active_rank_pivot_reset_rows);
+  kls_row_first_stats_add(&active_rank_pivot_panel_rebuilds,
+                          row_stats.active_rank_pivot_panel_rebuilds);
+  kls_row_first_stats_add(&active_rank_pivot_panel_rebuild_rows,
+                          row_stats.active_rank_pivot_panel_rebuild_rows);
 
   ok = kls_row_first_parallel_commit_block(
     worker, block, k1, nk, worker->row_ptr, row_cols, row_input_pos,
@@ -52218,7 +52293,10 @@ static int kls_row_first_parallel_factor_block(
     row_supernode_panel_update_rows, row_panel_cache_builds,
     row_panel_cache_build_panels, row_panel_cache_build_entries,
     row_panel_cache_appends, row_panel_cache_append_panels,
-    row_panel_cache_append_entries, row_pipeline_rows, row_pipeline_threads,
+    row_panel_cache_append_entries, active_rank_pivot_resets,
+    active_rank_pivot_reset_rows, active_rank_pivot_panel_rebuilds,
+    active_rank_pivot_panel_rebuild_rows, row_pipeline_rows,
+    row_pipeline_threads,
     row_pipeline_prefix_rows, row_pipeline_suffix_rows,
     row_pipeline_gap_rows,
     row_pipeline_pivot_tail_rows, row_pipeline_pivot_restarts,
@@ -53192,6 +53270,16 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
                           shared.row_panel_cache_append_panels);
   kls_row_first_stats_add(&solver->kls_first_row_panel_cache_append_entries,
                           shared.row_panel_cache_append_entries);
+  kls_row_first_stats_add(&solver->kls_first_active_rank_pivot_reset_count,
+                          shared.active_rank_pivot_resets);
+  kls_row_first_stats_add(&solver->kls_first_active_rank_pivot_reset_rows,
+                          shared.active_rank_pivot_reset_rows);
+  kls_row_first_stats_add(
+    &solver->kls_first_active_rank_pivot_panel_rebuild_count,
+    shared.active_rank_pivot_panel_rebuilds);
+  kls_row_first_stats_add(
+    &solver->kls_first_active_rank_pivot_panel_rebuild_rows,
+    shared.active_rank_pivot_panel_rebuild_rows);
   solver->kls_first_last_dynamic_column_pivots =
     shared.dynamic_column_pivots;
   solver->kls_first_dynamic_column_pivot_count +=
@@ -53382,6 +53470,10 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
   UF_long row_panel_cache_appends = 0;
   UF_long row_panel_cache_append_panels = 0;
   UF_long row_panel_cache_append_entries = 0;
+  UF_long active_rank_pivot_resets = 0;
+  UF_long active_rank_pivot_reset_rows = 0;
+  UF_long active_rank_pivot_panel_rebuilds = 0;
+  UF_long active_rank_pivot_panel_rebuild_rows = 0;
   const int use_separator_pivot_domains =
     kls_separator_analysis_has_global_range(&solver->separator) &&
     solver->separator.component_count > 0u &&
@@ -54067,6 +54159,14 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
                             row_stats.panel_cache_append_panels);
     kls_row_first_stats_add(&row_panel_cache_append_entries,
                             row_stats.panel_cache_append_entries);
+    kls_row_first_stats_add(&active_rank_pivot_resets,
+                            row_stats.active_rank_pivot_resets);
+    kls_row_first_stats_add(&active_rank_pivot_reset_rows,
+                            row_stats.active_rank_pivot_reset_rows);
+    kls_row_first_stats_add(&active_rank_pivot_panel_rebuilds,
+                            row_stats.active_rank_pivot_panel_rebuilds);
+    kls_row_first_stats_add(&active_rank_pivot_panel_rebuild_rows,
+                            row_stats.active_rank_pivot_panel_rebuild_rows);
     if (!kls_pack_row_first_block_numeric(
           solver, numeric, block, k1, nk, local_row_order,
           &l_entries, &u_entries,
@@ -54185,6 +54285,16 @@ fail_block_entries:
                           row_panel_cache_append_panels);
   kls_row_first_stats_add(&solver->kls_first_row_panel_cache_append_entries,
                           row_panel_cache_append_entries);
+  kls_row_first_stats_add(&solver->kls_first_active_rank_pivot_reset_count,
+                          active_rank_pivot_resets);
+  kls_row_first_stats_add(&solver->kls_first_active_rank_pivot_reset_rows,
+                          active_rank_pivot_reset_rows);
+  kls_row_first_stats_add(
+    &solver->kls_first_active_rank_pivot_panel_rebuild_count,
+    active_rank_pivot_panel_rebuilds);
+  kls_row_first_stats_add(
+    &solver->kls_first_active_rank_pivot_panel_rebuild_rows,
+    active_rank_pivot_panel_rebuild_rows);
   if (row_supernode_update_groups > 0u) {
     solver->kls_first_last_row_supernode_update = 1;
     solver->kls_first_row_supernode_update_run_count++;

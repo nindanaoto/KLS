@@ -336,6 +336,10 @@ typedef struct kls_stats {
   int kls_first_last_row_pipeline_prefix_panel_rebuild;
   int64_t kls_first_row_pipeline_prefix_panel_rebuild_count;
   int64_t kls_first_last_row_pipeline_prefix_panel_rebuild_rows;
+  int64_t kls_first_active_rank_pivot_reset_count;
+  int64_t kls_first_active_rank_pivot_reset_rows;
+  int64_t kls_first_active_rank_pivot_panel_rebuild_count;
+  int64_t kls_first_active_rank_pivot_panel_rebuild_rows;
   int64_t kls_first_last_dynamic_column_pivots;
   int64_t kls_first_dynamic_column_pivot_count;
   int64_t separator_analyzed_rows;
