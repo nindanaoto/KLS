@@ -5711,12 +5711,29 @@ KLS then removed a non-paper threshold from the scalar compact-supernode update
 selector. SubtreeLU's row update branch treats a ready supernode as a triangular
 solve plus trailing update; the previous default only used KLS's contiguous
 worker-scratch `trsv` when a work-per-copied-entry gate said it would amortize.
-The default now runs that compact `trsv` for every ready producer run with at
-least two rows, while `KLS_ENABLE_COMPACT_SUPERNODE_TRSV=0` remains available as
-an explicit A/B disable. Existing compact-panel smoke coverage already unsets
-the variable and requires the `row_refactor_last_compact_supernode_trsv` counters
-to fire, so the test now proves the paper-shaped default rather than a forced
-probe.
+That broader default was rechecked after the CKTSO-gap rerun because the forced
+row path was executing tens of thousands of compact triangular solves with
+average producer runs below 80 rows. On the top-ten CKTSO-gap forced-row
+comparison, the unset default measured `12.2795s` SPICE-cycle geomean while
+`KLS_ENABLE_COMPACT_SUPERNODE_TRSV=0` improved to `11.2955s`
+(`build/kls_native_trsv_on_forced_row_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_native_trsv_off_forced_row_gap10_t4_r1_ref3_timeout120.jsonl`).
+A follow-up large-run gate at the CBLAS vector scale still did not beat the
+full off-switch: it measured `11.6484s` geomean and the few remaining 512+
+row triangular solves still hurt rows such as `onetone1`
+(`build/kls_native_trsv_largegate_forced_row_gap10_t4_r1_ref3_timeout120.jsonl`).
+The final decision used a higher-repeat top-five guard on the dominant slow
+rows: the auto-off default measured `16.5528s`, while force-on measured
+`16.8222s`
+(`build/kls_native_trsv_autoff_forced_row_gap5_t4_r1_ref20_timeout120.jsonl`,
+`build/kls_native_trsv_forceon_forced_row_gap5_t4_r1_ref20_timeout120.jsonl`).
+The unset default therefore keeps the triangular part on the scalar dependency
+walk while retaining the contiguous trailing accumulation. This rejects the
+small-BLAS hypothesis as a CKTSO-gap closer for the current row scaffold rather
+than the paper algorithm itself. `KLS_ENABLE_COMPACT_SUPERNODE_TRSV=1` remains
+the explicit force-on coverage/probe mode, and the compact-panel smoke test uses
+that force-on path when it requires the
+`row_refactor_last_compact_supernode_trsv` counters to fire.
 
 KLS-first row-up and pivot-tail pipeline phases now also have a portable
 cached-supernode panel executor. When a published U-row run has been retained as

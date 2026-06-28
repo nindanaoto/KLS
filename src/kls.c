@@ -29637,8 +29637,9 @@ static int kls_row_refactor_try_compact_supernode_update_cblas(
 
 static int kls_compact_supernode_trsv_auto_allows(UF_long run_rows,
                                                   UF_long trailing_len) {
+  (void)run_rows;
   (void)trailing_len;
-  return run_rows >= 2u;
+  return 0;
 }
 
 static int kls_compact_supernode_trsv_should_run(

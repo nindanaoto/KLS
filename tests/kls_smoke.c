@@ -3827,8 +3827,8 @@ static int test_unchecked_row_dense_compact_panel(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV") != 0) {
-    perror("unsetenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
+  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=1");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
