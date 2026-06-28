@@ -6582,3 +6582,17 @@ coverage (`6864` batches and `2717328408` entries) and zero CBLAS calls
 code was removed. Together with the worker-scratch probe, this points away from
 simple staging/locality rearrangements inside the current per-consumer row
 kernel and toward a more substantial packed row-panel update object.
+
+A narrower packed exact-update probe was also rejected. It kept the original
+column-major scatter order for retained target maps, but materialized each
+exact independent multi-producer run's `batch_rows x trailing_len` update
+panel in worker supernode workspace before scattering, mirroring the dense
+fragmented batch kernel's packed update object. The top-ten opt-in run
+regressed from `20.7554s` to `23.3306s` geomean with the same `6864`
+compact-supernode batches, the same `2717328408` batch entries, and zero CBLAS
+calls
+(`build/kls_multi_packed_exact_update_gap10_t4_r1_ref3_timeout120.jsonl`).
+The code was removed. This makes the remaining direction more specific:
+packing updates inside the existing row-batch executor is not enough; the data
+layout likely needs to avoid the current per-consumer row workspace/scatter
+contract rather than adding another temporary panel to it.
