@@ -621,6 +621,12 @@ typedef struct kls_stats {
   int64_t refactor_l_index32_entries;
   int refactor_u_index32_enabled;
   int64_t refactor_u_index32_entries;
+  int64_t kls_first_row_panel_cache_build_count;
+  int64_t kls_first_row_panel_cache_build_panels;
+  int64_t kls_first_row_panel_cache_build_entries;
+  int64_t kls_first_row_panel_cache_append_count;
+  int64_t kls_first_row_panel_cache_append_panels;
+  int64_t kls_first_row_panel_cache_append_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

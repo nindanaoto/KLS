@@ -1271,7 +1271,13 @@ int main(int argc, char **argv) {
            ",\"kls_first_last_row_pipeline_pivot_serial_rows\":%" PRId64
            ",\"kls_first_last_row_pipeline_prefix_panel_rebuild\":%d"
            ",\"kls_first_row_pipeline_prefix_panel_rebuild_count\":%" PRId64
-           ",\"kls_first_last_row_pipeline_prefix_panel_rebuild_rows\":%" PRId64,
+           ",\"kls_first_last_row_pipeline_prefix_panel_rebuild_rows\":%" PRId64
+           ",\"kls_first_row_panel_cache_build_count\":%" PRId64
+           ",\"kls_first_row_panel_cache_build_panels\":%" PRId64
+           ",\"kls_first_row_panel_cache_build_entries\":%" PRId64
+           ",\"kls_first_row_panel_cache_append_count\":%" PRId64
+           ",\"kls_first_row_panel_cache_append_panels\":%" PRId64
+           ",\"kls_first_row_panel_cache_append_entries\":%" PRId64,
            stats.kls_first_last_row_pipeline,
            stats.kls_first_row_pipeline_run_count,
            stats.kls_first_last_row_pipeline_rows,
@@ -1288,7 +1294,13 @@ int main(int argc, char **argv) {
            stats.kls_first_last_row_pipeline_pivot_serial_rows,
            stats.kls_first_last_row_pipeline_prefix_panel_rebuild,
            stats.kls_first_row_pipeline_prefix_panel_rebuild_count,
-           stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows);
+           stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows,
+           stats.kls_first_row_panel_cache_build_count,
+           stats.kls_first_row_panel_cache_build_panels,
+           stats.kls_first_row_panel_cache_build_entries,
+           stats.kls_first_row_panel_cache_append_count,
+           stats.kls_first_row_panel_cache_append_panels,
+           stats.kls_first_row_panel_cache_append_entries);
     printf(",\"kls_first_last_row_supernode_update\":%d"
            ",\"kls_first_row_supernode_update_run_count\":%" PRId64
            ",\"kls_first_last_row_supernode_update_groups\":%" PRId64
@@ -2112,6 +2124,16 @@ int main(int argc, char **argv) {
            stats.kls_first_last_row_pipeline_prefix_panel_rebuild,
            stats.kls_first_row_pipeline_prefix_panel_rebuild_count,
            stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows);
+    printf("KLS row-up-looking panel cache: builds %" PRId64
+           ", build panels %" PRId64 ", build entries %" PRId64
+           ", appends %" PRId64 ", append panels %" PRId64
+           ", append entries %" PRId64 "\n",
+           stats.kls_first_row_panel_cache_build_count,
+           stats.kls_first_row_panel_cache_build_panels,
+           stats.kls_first_row_panel_cache_build_entries,
+           stats.kls_first_row_panel_cache_append_count,
+           stats.kls_first_row_panel_cache_append_panels,
+           stats.kls_first_row_panel_cache_append_entries);
     printf("KLS row-up-looking supernode updates: last %d"
            ", runs %" PRId64 ", groups %" PRId64 ", rows %" PRId64 "\n",
            stats.kls_first_last_row_supernode_update,

@@ -6001,3 +6001,26 @@ useful code cleanup from this pass is exact rather than heuristic: the
 row-first pivot-restart path no longer calls `kls_row_first_supernodes_reset`
 immediately before `kls_row_first_pipeline_rebuild_prefix_panel_cache`, because
 the rebuild helper resets the same prefix before rebuilding the cache.
+
+KLS now exposes row-first panel-cache staging counters so the next
+SubtreeLU/CKTSO storage work can be separated from actual cached-panel
+consumption. Public stats and `kls_bench` JSON report
+`kls_first_row_panel_cache_build_count`,
+`kls_first_row_panel_cache_build_panels`,
+`kls_first_row_panel_cache_build_entries`,
+`kls_first_row_panel_cache_append_count`,
+`kls_first_row_panel_cache_append_panels`, and
+`kls_first_row_panel_cache_append_entries`. Synthetic smoke coverage now
+requires nonzero append counters when KLS-first panel updates are expected and
+nonzero build counters when a separator pivot epoch rebuilds the prefix cache.
+Focused checks showed that forced KLS-first `transient` exercised the cache
+heavily (`3,814` appended panels and `1,075,649` stored entries with `97,678`
+cached panel update groups in
+`build/kls_transient_panel_cache_stats_klsfirst_t4_r1_ref0.json`), while the
+forced KLS-first `ASIC_680k` stress control reported zero panel-cache activity
+(`build/kls_asic680k_panel_cache_stats_klsfirst_t4_r1_ref0.json`). The forced
+KLS-first `pre2` factor probe still timed out at 120s and left an empty JSON
+file (`build/kls_pre2_panel_cache_stats_klsfirst_factor_timeout120.json`), so
+the new counters do not close that gap directly; they make the next large-case
+diagnosis explicit about whether time is going into full prefix rebuilds,
+incremental published-panel staging, or later cached-panel consumption.

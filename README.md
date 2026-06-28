@@ -244,7 +244,15 @@ pivot epochs are reported through `kls_first_last_row_pipeline_pivot_tail`,
 `kls_first_last_row_pipeline_prefix_panel_rebuild`,
 `kls_first_row_pipeline_prefix_panel_rebuild_count`, and
 `kls_first_last_row_pipeline_prefix_panel_rebuild_rows`; separator pipeline
-epochs continue to use the separator-prefixed counters below.
+epochs continue to use the separator-prefixed counters below. KLS-first
+panel-cache staging is reported through
+`kls_first_row_panel_cache_build_count`,
+`kls_first_row_panel_cache_build_panels`,
+`kls_first_row_panel_cache_build_entries`,
+`kls_first_row_panel_cache_append_count`,
+`kls_first_row_panel_cache_append_panels`, and
+`kls_first_row_panel_cache_append_entries`, so large runs can distinguish
+full prefix-cache rebuilds from panels appended as rows are published.
 Builds configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` can use the same
 runtime `KLS_ENABLE_CBLAS_SUPERNODE=1` gate to consume eligible KLS-first
 cached panels with CBLAS `dtrsv` and `dgemv`; otherwise the cached panel uses
@@ -1507,6 +1515,14 @@ both reported zero CBLAS update counters, and forced `pre2` with the runtime
 gate on still timed out at 120s with no JSON row. KLS also removes a duplicate
 row-first supernode reset before prefix panel-cache rebuilds; the rebuild
 helper already performs the reset, so the call-site scan was redundant.
+KLS now also reports row-first panel-cache build/append volume in stats and
+benchmark JSON. A forced KLS-first `transient` probe reported `3,814`
+appended panels and `1,075,649` stored panel-cache entries alongside `97,678`
+cached panel update groups, while the forced KLS-first `ASIC_680k` stress
+probe reported zero panel-cache activity. The matching forced `pre2` factor
+probe still timed out at 120s, so that case remains unresolved, but future
+slow-path runs can now separate panel-cache staging volume from cached-panel
+consumption.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first

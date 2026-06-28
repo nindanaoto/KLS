@@ -12712,6 +12712,9 @@ static int test_kls_first_separator_pipeline_pivot_epoch(void) {
                0 ||
              factor_stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild_rows <=
                factor_stats.kls_first_last_separator_queue_private_rows ||
+             factor_stats.kls_first_row_panel_cache_build_count <= 0 ||
+             factor_stats.kls_first_row_panel_cache_build_panels <= 0 ||
+             factor_stats.kls_first_row_panel_cache_build_entries <= 0 ||
              factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update !=
                1 ||
              factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_groups <=
@@ -12729,6 +12732,7 @@ static int test_kls_first_separator_pipeline_pivot_epoch(void) {
             ", pipe_parallel=%d"
             ", sep_pivots=%" PRId64
             ", prefix_panel_rebuild=%d/%" PRId64 "/%" PRId64
+            ", cache_build=%" PRId64 "/%" PRId64 "/%" PRId64
             ", panel_update=%d/%" PRId64 "/%" PRId64
             ", pivot_tail=%d, restarts=%" PRId64
             ", tail_rows=%" PRId64
@@ -12745,6 +12749,9 @@ static int test_kls_first_separator_pipeline_pivot_epoch(void) {
             factor_stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild,
             factor_stats.kls_first_separator_queue_pipeline_prefix_panel_rebuild_count,
             factor_stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild_rows,
+            factor_stats.kls_first_row_panel_cache_build_count,
+            factor_stats.kls_first_row_panel_cache_build_panels,
+            factor_stats.kls_first_row_panel_cache_build_entries,
             factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update,
             factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_groups,
             factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_rows,
@@ -13653,11 +13660,15 @@ static int test_experimental_row_uplooking_first_consumer_panel(void) {
              stats.kls_first_last_row_supernode_panel_update != 1 ||
              stats.kls_first_row_supernode_panel_update_run_count != 1 ||
              stats.kls_first_last_row_supernode_panel_update_groups != 1 ||
-             stats.kls_first_last_row_supernode_panel_update_rows != 2)) {
+             stats.kls_first_last_row_supernode_panel_update_rows != 2 ||
+             stats.kls_first_row_panel_cache_append_count <= 0 ||
+             stats.kls_first_row_panel_cache_append_panels <= 0 ||
+             stats.kls_first_row_panel_cache_append_entries <= 0)) {
     fprintf(stderr,
             "unexpected first-consumer panel stats: path=%s"
             ", row_cols=%" PRId64 ", supernode=%d/%" PRId64 "/%" PRId64
-            ", panel=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
+            ", panel=%d/%" PRId64 "/%" PRId64 "/%" PRId64
+            ", cache_append=%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.kls_first_last_row_uplooking_columns,
             stats.kls_first_last_row_supernode_update,
@@ -13666,7 +13677,10 @@ static int test_experimental_row_uplooking_first_consumer_panel(void) {
             stats.kls_first_last_row_supernode_panel_update,
             stats.kls_first_row_supernode_panel_update_run_count,
             stats.kls_first_last_row_supernode_panel_update_groups,
-            stats.kls_first_last_row_supernode_panel_update_rows);
+            stats.kls_first_last_row_supernode_panel_update_rows,
+            stats.kls_first_row_panel_cache_append_count,
+            stats.kls_first_row_panel_cache_append_panels,
+            stats.kls_first_row_panel_cache_append_entries);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
@@ -13790,11 +13804,15 @@ static int test_experimental_row_uplooking_lazy_panel_prefix(void) {
              stats.kls_first_last_row_supernode_panel_update != 1 ||
              stats.kls_first_row_supernode_panel_update_run_count < 1 ||
              stats.kls_first_last_row_supernode_panel_update_groups < 1 ||
-             stats.kls_first_last_row_supernode_panel_update_rows < 2)) {
+             stats.kls_first_last_row_supernode_panel_update_rows < 2 ||
+             stats.kls_first_row_panel_cache_append_count <= 0 ||
+             stats.kls_first_row_panel_cache_append_panels <= 0 ||
+             stats.kls_first_row_panel_cache_append_entries <= 0)) {
     fprintf(stderr,
             "unexpected row-up lazy panel stats: path=%s, row_cols=%" PRId64
             ", row_supernode=%d/%" PRId64 ", panel=%d/%" PRId64
-            "/%" PRId64 "/%" PRId64 "\n",
+            "/%" PRId64 "/%" PRId64
+            ", cache_append=%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
             kls_factor_path_name(stats.last_factor_path),
             stats.kls_first_last_row_uplooking_columns,
             stats.kls_first_last_row_supernode_update,
@@ -13802,7 +13820,10 @@ static int test_experimental_row_uplooking_lazy_panel_prefix(void) {
             stats.kls_first_last_row_supernode_panel_update,
             stats.kls_first_row_supernode_panel_update_run_count,
             stats.kls_first_last_row_supernode_panel_update_groups,
-            stats.kls_first_last_row_supernode_panel_update_rows);
+            stats.kls_first_last_row_supernode_panel_update_rows,
+            stats.kls_first_row_panel_cache_append_count,
+            stats.kls_first_row_panel_cache_append_panels,
+            stats.kls_first_row_panel_cache_append_entries);
     ok = 0;
   }
   if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
