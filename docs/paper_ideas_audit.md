@@ -8127,3 +8127,23 @@ target: a producer-centered multi-consumer task can potentially amortize the
 retained row-major panel publication across hundreds of consumer runs per
 panel; further single-current-column tail or scalar scatter variants are the
 wrong granularity.
+
+KLS now has an opt-in retained consumer-run plan for that producer-centered
+task. With `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1`, schedule building
+keeps a producer-panel pointer array plus compact `(current column, producer
+dependency, run rows)` arrays for the same contiguous consumer runs reported by
+the reuse diagnostic. This does not execute a new numeric kernel yet; it closes
+the scheduling/data-ownership gap needed before a CKTSO/SubtreeLU-style
+producer task can publish one panel and feed many consumers. A JSON smoke on
+`rajat03` parsed cleanly and retained `6,598` runs and `41,466` consumer rows
+across `257` reused panels. The current top-five gap focus
+(`build/kls_consumer_plan_current_gap5_t4_r1_ref3_timeout120.jsonl`) retained
+large reusable plans on every row: `ASIC_320k` has `72,446` runs and
+`939,167` rows in a `4.31 MB` plan, `ASIC_320ks` has `73,551` runs and
+`897,255` rows in `4.34 MB`, `onetone2` has `50,274` runs and `431,440`
+rows in `1.50 MB`, `ASIC_100ks` has `160,299` runs and `1,148,099` rows in
+`4.64 MB`, and `G2_circuit` has `424,370` runs and `5,569,687` rows in
+`11.39 MB`. The same run again reported zero external CBLAS, compact GEMV, and
+compact TRSV counters on all five rows, so the small-BLAS-call hypothesis is
+not active on these losses; the next useful implementation step is a numeric
+executor that consumes this retained producer-panel plan.
