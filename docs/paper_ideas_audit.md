@@ -7076,3 +7076,34 @@ is the paper-level numeric representation/executor itself: CKTSO's production
 row/supernode storage, checked pivoting-tail scheduler, and coarse updates must
 replace more scalar row/panel-cache growth work before `pre2`-class cases can
 approach CKTSO.
+
+The next focused rerun kept the small-BLAS conclusion unchanged and removed
+one direct serial rebuild from the large whole-block row pipeline. After a
+dynamic column pivot in a full-block pipeline of at least 32,768 rows, KLS now
+keeps the scalar U entries and prefix supernode metadata correct but drops the
+speculative dense prefix panel cache instead of rebuilding it under the
+pipeline lock. This is correctness-preserving because the dense panels are only
+an acceleration layer over the already swapped U entries; small pipelines keep
+the old rebuild path and the existing dynamic-pivot smoke coverage.
+
+`cmake --build build -j$(nproc)` and
+`ctest --test-dir build --output-on-failure` passed. The retained change is not
+a CKTSO-gap closer. It gave a repeatable modest improvement on the forced
+`ASIC_320k` probe (`3.30s` to about `2.97s` initial factor in
+`build/kls_asic320k_final_drop_prefix_cache_t4_factor_timeout45.json`) with
+the same residual, but `rajat29` was effectively neutral/noisy
+(`12.61s` baseline, one `6.83s` transient run, and a final `12.78s` run in
+`build/kls_rajat29_final_drop_prefix_cache_t4_factor_timeout70.json`). The
+same `pre2` factor-only probe still timed out at 130s and left an empty
+artifact, `build/kls_pre2_drop_prefix_cache_t4_factor_timeout130.json`.
+
+GDB sampling after the cache-drop change confirms that the old
+`kls_row_first_supernode_panel_cache_build` sample is no longer the only
+bottleneck. The updated `pre2` run instead showed workers serialized under the
+pipeline lock in `kls_row_first_partial_apply_one_dep`, with another sample in
+`kls_row_first_supernodes_reset`. A stronger experiment that disabled all
+prefix supernode acceleration after the first large-pipeline pivot was rejected:
+it avoided the reset but pushed `rajat29` back near the old slow path. A
+prefix-only reset experiment was also rejected for the same reason. The useful
+conclusion is that `pre2` needs the paper-level coarse row/supernode executor,
+not just less panel-cache rebuilding and not a small-case BLAS guard.

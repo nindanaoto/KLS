@@ -61,6 +61,7 @@
 #define KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK_PER_ENTRY \
   KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY
 #define KLS_EGRAPH_SCALAR_SUPERNODE_UPDATE_MAX_WIDTH 256u
+#define KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS 32768u
 #define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
@@ -48705,19 +48706,71 @@ static void kls_row_first_pipeline_mark_failed(
   }
 }
 
-static void kls_row_first_pipeline_rebuild_prefix_panel_cache(
+static int kls_row_first_pipeline_should_rebuild_prefix_panel_cache(
+  const kls_row_first_pipeline_shared *shared) {
+  if (shared == NULL || shared->ctx == NULL) {
+    return 0;
+  }
+  if (shared->active_rank != NULL) {
+    return 0;
+  }
+  if (shared->begin == 0u && shared->end == shared->ctx->nk &&
+      shared->ctx->nk >=
+        KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS) {
+    return 0;
+  }
+  return 1;
+}
+
+static void kls_row_first_pipeline_reset_prefix_without_panel_cache(
   kls_row_first_pipeline_shared *shared) {
   if (shared == NULL || shared->ctx == NULL ||
-      shared->private_supernode_panel_cache == NULL ||
       shared->workspace == NULL ||
       shared->u_entries == NULL ||
-      shared->udiag_values == NULL ||
       shared->row_done == NULL ||
       shared->supernode_start == NULL ||
       shared->supernode_end == NULL) {
     return;
   }
   if (shared->active_rank != NULL) {
+    return;
+  }
+  const UF_long nk = shared->ctx->nk;
+  if (shared->completed_pos <= nk &&
+      shared->workspace->u_row_ptr != NULL &&
+      shared->workspace->u_row_end != NULL) {
+    kls_row_first_supernodes_reset(
+      shared->u_entries, shared->workspace->u_row_ptr,
+      shared->workspace->u_row_end, shared->row_done, nk,
+      shared->completed_pos, shared->supernode_start,
+      shared->supernode_end);
+  }
+  if (shared->private_supernode_panel_cache != NULL) {
+    kls_row_first_supernode_panel_cache_free(
+      shared->private_supernode_panel_cache);
+    shared->private_supernode_panel_cache = NULL;
+  }
+}
+
+static void kls_row_first_pipeline_rebuild_prefix_panel_cache(
+  kls_row_first_pipeline_shared *shared) {
+  if (shared == NULL || shared->ctx == NULL) {
+    return;
+  }
+  if (shared->active_rank != NULL) {
+    return;
+  }
+  if (!kls_row_first_pipeline_should_rebuild_prefix_panel_cache(shared)) {
+    kls_row_first_pipeline_reset_prefix_without_panel_cache(shared);
+    return;
+  }
+  if (shared->private_supernode_panel_cache == NULL ||
+      shared->workspace == NULL ||
+      shared->u_entries == NULL ||
+      shared->udiag_values == NULL ||
+      shared->row_done == NULL ||
+      shared->supernode_start == NULL ||
+      shared->supernode_end == NULL) {
     return;
   }
   const UF_long nk = shared->ctx->nk;
