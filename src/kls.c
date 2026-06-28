@@ -542,6 +542,14 @@ struct kls_solver {
   UF_long refactor_supernode_consumer_suffix_count;
   double refactor_supernode_consumer_l_entries;
   double refactor_supernode_consumer_internal_entries;
+  UF_long refactor_supernode_consumer_panel_count;
+  UF_long refactor_supernode_consumer_reused_panel_count;
+  UF_long refactor_supernode_consumer_reused_run_count;
+  UF_long refactor_supernode_consumer_reused_run_rows;
+  UF_long refactor_supernode_consumer_panel_max_runs;
+  UF_long refactor_supernode_consumer_panel_max_rows;
+  double refactor_supernode_consumer_reused_l_entries;
+  double refactor_supernode_consumer_reused_internal_entries;
   UF_long refactor_l_pattern_columns;
   UF_long refactor_l_pattern_entries;
   UF_long refactor_l_adjacent_run_count;
@@ -1614,6 +1622,35 @@ static void kls_count_supernode_consumer_runs(
       solver->numeric->Ulen == NULL || solver->numeric->LUbx == NULL) {
     return;
   }
+  UF_long *panel_run_count = NULL;
+  UF_long *panel_run_rows = NULL;
+  double *panel_l_entries = NULL;
+  double *panel_internal_entries = NULL;
+  if (solver->n <= (UF_long)(SIZE_MAX / sizeof(*panel_run_count)) &&
+      solver->n <= (UF_long)(SIZE_MAX / sizeof(*panel_run_rows)) &&
+      solver->n <= (UF_long)(SIZE_MAX / sizeof(*panel_l_entries)) &&
+      solver->n <= (UF_long)(SIZE_MAX / sizeof(*panel_internal_entries))) {
+    panel_run_count =
+      (UF_long *)calloc((size_t)solver->n, sizeof(*panel_run_count));
+    panel_run_rows =
+      (UF_long *)calloc((size_t)solver->n, sizeof(*panel_run_rows));
+    panel_l_entries =
+      (double *)calloc((size_t)solver->n, sizeof(*panel_l_entries));
+    panel_internal_entries =
+      (double *)calloc((size_t)solver->n,
+                       sizeof(*panel_internal_entries));
+    if (panel_run_count == NULL || panel_run_rows == NULL ||
+        panel_l_entries == NULL || panel_internal_entries == NULL) {
+      free(panel_run_count);
+      free(panel_run_rows);
+      free(panel_l_entries);
+      free(panel_internal_entries);
+      panel_run_count = NULL;
+      panel_run_rows = NULL;
+      panel_l_entries = NULL;
+      panel_internal_entries = NULL;
+    }
+  }
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
     const UF_long k1 = solver->symbolic->R[block];
     const UF_long k2 = solver->symbolic->R[block + 1u];
@@ -1670,13 +1707,54 @@ static void kls_count_supernode_consumer_runs(
         for (UF_long local = 0; local < run_rows; ++local) {
           l_entries += (double)solver->numeric->Llen[dep_global + local];
         }
+        const double internal_entries =
+          0.5 * (double)run_rows * (double)(run_rows - 1u);
         kls_record_supernode_consumer_run(
           solver, run_rows, consumer_start[dep_global] != dep_global,
           l_entries);
+        if (panel_run_count != NULL &&
+            consumer_start[dep_global] < solver->n) {
+          const UF_long panel_start = consumer_start[dep_global];
+          panel_run_count[panel_start]++;
+          panel_run_rows[panel_start] += run_rows;
+          panel_l_entries[panel_start] += l_entries;
+          panel_internal_entries[panel_start] += internal_entries;
+        }
         p += run_rows;
       }
     }
   }
+  if (panel_run_count != NULL) {
+    for (UF_long panel = 0; panel < solver->n; ++panel) {
+      const UF_long runs = panel_run_count[panel];
+      if (runs == 0u) {
+        continue;
+      }
+      solver->refactor_supernode_consumer_panel_count++;
+      if (runs > solver->refactor_supernode_consumer_panel_max_runs) {
+        solver->refactor_supernode_consumer_panel_max_runs = runs;
+      }
+      if (panel_run_rows[panel] >
+          solver->refactor_supernode_consumer_panel_max_rows) {
+        solver->refactor_supernode_consumer_panel_max_rows =
+          panel_run_rows[panel];
+      }
+      if (runs > 1u) {
+        solver->refactor_supernode_consumer_reused_panel_count++;
+        solver->refactor_supernode_consumer_reused_run_count += runs;
+        solver->refactor_supernode_consumer_reused_run_rows +=
+          panel_run_rows[panel];
+        solver->refactor_supernode_consumer_reused_l_entries +=
+          panel_l_entries[panel];
+        solver->refactor_supernode_consumer_reused_internal_entries +=
+          panel_internal_entries[panel];
+      }
+    }
+  }
+  free(panel_run_count);
+  free(panel_run_rows);
+  free(panel_l_entries);
+  free(panel_internal_entries);
 }
 
 static void free_refactor_map(kls_solver *solver) {
@@ -3659,6 +3737,14 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_supernode_consumer_suffix_count = 0;
   solver->refactor_supernode_consumer_l_entries = 0.0;
   solver->refactor_supernode_consumer_internal_entries = 0.0;
+  solver->refactor_supernode_consumer_panel_count = 0;
+  solver->refactor_supernode_consumer_reused_panel_count = 0;
+  solver->refactor_supernode_consumer_reused_run_count = 0;
+  solver->refactor_supernode_consumer_reused_run_rows = 0;
+  solver->refactor_supernode_consumer_panel_max_runs = 0;
+  solver->refactor_supernode_consumer_panel_max_rows = 0;
+  solver->refactor_supernode_consumer_reused_l_entries = 0.0;
+  solver->refactor_supernode_consumer_reused_internal_entries = 0.0;
   solver->refactor_u_supernode_pattern_count = 0;
   solver->refactor_u_supernode_pattern_rows = 0;
   solver->refactor_u_supernode_pattern_max_width = 0;
@@ -13284,6 +13370,22 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_supernode_consumer_l_entries;
   solver->stats.refactor_supernode_consumer_internal_entries =
     solver->refactor_supernode_consumer_internal_entries;
+  solver->stats.refactor_supernode_consumer_panel_count =
+    (int64_t)solver->refactor_supernode_consumer_panel_count;
+  solver->stats.refactor_supernode_consumer_reused_panel_count =
+    (int64_t)solver->refactor_supernode_consumer_reused_panel_count;
+  solver->stats.refactor_supernode_consumer_reused_run_count =
+    (int64_t)solver->refactor_supernode_consumer_reused_run_count;
+  solver->stats.refactor_supernode_consumer_reused_run_rows =
+    (int64_t)solver->refactor_supernode_consumer_reused_run_rows;
+  solver->stats.refactor_supernode_consumer_panel_max_runs =
+    (int64_t)solver->refactor_supernode_consumer_panel_max_runs;
+  solver->stats.refactor_supernode_consumer_panel_max_rows =
+    (int64_t)solver->refactor_supernode_consumer_panel_max_rows;
+  solver->stats.refactor_supernode_consumer_reused_l_entries =
+    solver->refactor_supernode_consumer_reused_l_entries;
+  solver->stats.refactor_supernode_consumer_reused_internal_entries =
+    solver->refactor_supernode_consumer_reused_internal_entries;
   solver->stats.refactor_u_supernode_pattern_count =
     (int64_t)solver->refactor_u_supernode_pattern_count;
   solver->stats.refactor_u_supernode_pattern_rows =

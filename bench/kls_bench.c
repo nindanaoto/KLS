@@ -1713,6 +1713,22 @@ int main(int argc, char **argv) {
            stats.row_refactor_lazy_value_scatter_run_count,
            stats.row_refactor_last_row_solve,
            stats.row_refactor_row_solve_run_count);
+    printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
+           ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
+           ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64
+           ",\"refactor_supernode_consumer_reused_run_rows\":%" PRId64
+           ",\"refactor_supernode_consumer_panel_max_runs\":%" PRId64
+           ",\"refactor_supernode_consumer_panel_max_rows\":%" PRId64
+           ",\"refactor_supernode_consumer_reused_l_entries\":%.9g"
+           ",\"refactor_supernode_consumer_reused_internal_entries\":%.9g",
+           stats.refactor_supernode_consumer_panel_count,
+           stats.refactor_supernode_consumer_reused_panel_count,
+           stats.refactor_supernode_consumer_reused_run_count,
+           stats.refactor_supernode_consumer_reused_run_rows,
+           stats.refactor_supernode_consumer_panel_max_runs,
+           stats.refactor_supernode_consumer_panel_max_rows,
+           stats.refactor_supernode_consumer_reused_l_entries,
+           stats.refactor_supernode_consumer_reused_internal_entries);
     printf(",\"refactor_l_pattern_columns\":%" PRId64
            ",\"refactor_l_pattern_entries\":%" PRId64
            ",\"refactor_l_adjacent_run_count\":%" PRId64
@@ -2625,6 +2641,10 @@ int main(int argc, char **argv) {
            ", suffix runs: %" PRId64
            ", consumer L entries: %.6g"
            ", consumer internal entries: %.6g"
+           ", consumer panels: %" PRId64 "/%" PRId64
+           ", reused runs: %" PRId64 "/%" PRId64
+           ", max panel reuse: %" PRId64 "/%" PRId64
+           ", reused entries: %.6g/%.6g"
            ", U patterns: %" PRId64 "/%" PRId64
            ", U pattern right entries: %" PRId64
            ", U pattern internal entries: %.6g"
@@ -2647,6 +2667,14 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_suffix_count,
            stats.refactor_supernode_consumer_l_entries,
            stats.refactor_supernode_consumer_internal_entries,
+           stats.refactor_supernode_consumer_panel_count,
+           stats.refactor_supernode_consumer_reused_panel_count,
+           stats.refactor_supernode_consumer_reused_run_count,
+           stats.refactor_supernode_consumer_reused_run_rows,
+           stats.refactor_supernode_consumer_panel_max_runs,
+           stats.refactor_supernode_consumer_panel_max_rows,
+           stats.refactor_supernode_consumer_reused_l_entries,
+           stats.refactor_supernode_consumer_reused_internal_entries,
            stats.refactor_u_supernode_pattern_count,
            stats.refactor_u_supernode_pattern_rows,
            stats.refactor_u_supernode_pattern_right_entries,

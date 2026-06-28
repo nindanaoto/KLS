@@ -8103,3 +8103,27 @@ prototype was reverted. This narrows the missing paper executor again: the
 problem is not just duplicate trailing-row writes inside retained ragged
 producer panels; KLS needs a coarser multi-consumer/panel task or row-major
 numeric object that avoids the current per-current-column execution shape.
+
+KLS now records the missing multi-consumer reuse shape explicitly. The existing
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_STATS=1` diagnostic still scans actual
+U-dependency streams for SubtreeLU-style contiguous consumer runs, but it now
+also groups those runs by producer supernode start. New stats report how many
+producer panels have any consumer run, how many are reused by at least two
+consumer runs, the reused run/row totals, max runs and rows per producer
+panel, and the L/internal work covered by reused panels. The older
+ASIC/gemat/rajat focus in
+`build/kls_consumer_reuse_stats_gap5_t4_r1_ref3_timeout120.jsonl` shows that
+the hard ASIC rows are not isolated single-consumer opportunities:
+`ASIC_320ks` has `73,413` of `73,551` consumer runs and `896,979` of
+`897,255` consumer rows inside reused producer panels; `ASIC_320k` has
+`72,321`/`72,446` runs and `938,917`/`939,167` rows; `ASIC_100ks` has
+`160,281`/`160,299` runs and `1,148,063`/`1,148,099` rows. The current
+five-row focus in
+`build/kls_consumer_reuse_stats_current_gap5_t4_r1_ref3_timeout120.jsonl`
+confirms this is not ASIC-only: `onetone2` has `431,426` of `431,440`
+consumer rows in reused panels, and `G2_circuit` has all `5,569,687`
+consumer rows in reused panels. This strengthens the next implementation
+target: a producer-centered multi-consumer task can potentially amortize the
+retained row-major panel publication across hundreds of consumer runs per
+panel; further single-current-column tail or scalar scatter variants are the
+wrong granularity.
