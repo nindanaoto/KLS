@@ -6719,3 +6719,22 @@ source was reverted. This closes that allocator-churn hypothesis; it does not
 change the earlier conclusion that the default CKTSO-gap path is not entering
 CBLAS at all and needs a coarser paper-style numeric executor rather than
 another small-case BLAS guard.
+
+A fresh paper-medium rerun on June 28, 2026 keeps that conclusion broad, not
+top-five-specific. The current default build completed 89 of the 93 public
+medium matrices in
+`build/kls_current_paper_medium_t4_r1_ref3_timeout120.jsonl`, with timeouts on
+`mac_econ_fwd500`, `ss1`, and `HTC_336_9129`, plus the existing singular
+`bips07_1998` setup failure. Against the saved CKTSO artifact, common
+successful rows measured `0.258758s` KLS geomean versus `0.253981s` CKTSO
+geomean, a `1.0188x` KLS/CKTSO ratio, with 38 wins and 47 losses over 2%.
+The top losses remain refactor-heavy: `ASIC_320ks` and `ASIC_320k` are about
+`3.0x` slower, followed by `gemat12`, `rajat03`, `ASIC_100ks`, `onetone2`,
+`rajat25`, `rajat28`, `rajat20`, and `onetone1`. The broad artifact reports
+`build_has_cblas=false`, zero CBLAS update runs, zero EGraph supernode update
+runs, zero blocked-panel update runs, and zero row-refactor runs on every
+successful row, while still discovering about 977k refactor supernode-candidate
+rows with 41.6M trailing entries. This rules out unguarded small BLAS calls as
+the broad CKTSO-gap cause; the missing paper-level piece is still the
+production row/supernode numeric representation and executor that can turn
+those candidates into coarse reusable update work.

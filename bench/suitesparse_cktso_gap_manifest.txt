@@ -5,57 +5,56 @@
 # or initial-factor overhead that should remain visible during policy tuning.
 #
 # Regenerate the comparison with:
-# python3 scripts/run_bench_suite.py --kls-bench build-default-on/kls_bench \
+# python3 scripts/run_bench_suite.py --kls-bench build/kls_bench \
 #   --matrix-dir data/suitesparse-paper-medium \
 #   --manifest bench/suitesparse_paper_medium_manifest.txt \
 #   --orientation auto --threads 4 --repeat 1 --refactor-repeat 3 \
 #   --passes 1 --timeout 120 --require-spral-scaling \
-#   --jsonl build-default-on/kls_current_medium93_t4_r3_timeout120.jsonl
+#   --jsonl build/kls_current_paper_medium_t4_r1_ref3_timeout120.jsonl
 # python3 scripts/decompose_solver_gap.py \
-#   --candidate build-default-on/kls_current_medium93_t4_r3_timeout120.jsonl \
-#   --candidate-name kls-head \
+#   --candidate build/kls_current_paper_medium_t4_r1_ref3_timeout120.jsonl \
+#   --candidate-name KLS \
 #   --reference build/cktso_paper_medium93_t4_timeout120.jsonl \
-#   --reference-name cktso --max-rows 40
-ASIC_320k
+#   --reference-name CKTSO --max-rows 40
 ASIC_320ks
-onetone2
-ASIC_100ks
-G2_circuit
-onetone1
+ASIC_320k
 gemat12
-rajat28
-transient
-rajat24
-rajat25
 rajat03
-dc2
-ASIC_100k
-mc2depi
-rajat15
+ASIC_100ks
+onetone2
+rajat25
+rajat28
 rajat20
-Raj1
-dc1
+onetone1
+transient
+G2_circuit
 HTC_336_4438
-TSOPF_FS_b9_c1
+rajat24
+dc2
 OPF_10000
 OPF_3754
-LeGresley_87936
-ASIC_680ks
 coupled
-gemat11
-dc3
-trans5
-ACTIVSg10K
-power197k
-ACTIVSg70K
-twotone
 trans4
-hvdc1
+dc1
+trans5
+ASIC_100k
+TSOPF_FS_b9_c1
+Raj1
+gemat11
+ASIC_680ks
+LeGresley_87936
+rajat15
 ACTIVSg2000
+mc2depi
+dc3
+hvdc1
+ACTIVSg10K
 ckt11752_tr_0
-HTC_336_9129
-xingo_afonso_itaipu
 rajat27
+ACTIVSg70K
+power197k
+twotone
+HTC_336_9129
 
 # Keep timeout/failure rows in the focus set for large-case policy checks.
 mac_econ_fwd500
