@@ -6513,3 +6513,22 @@ that recorded zero CBLAS update calls on these hard rows, this rejects the
 "small BLAS call" and hot-length-metadata hypotheses as primary causes. The
 remaining gap still points at the paper-level row/supernode numeric executor
 and storage model.
+
+A dependency-aware small-batch grouping probe was also rejected. The probe kept
+the old eight-row minimum for root/no-dependency batches but allowed adjacent
+same-level dependent rows to form two-row-or-larger batch groups, trying to give
+the existing row/supernode executor more consumer rows without touching BLAS
+thresholds. The smoke suite passed, but the forced row-refactor top-ten CKTSO-gap
+run regressed from `11.8996s` to `14.5117s` geomean against the saved
+group-shape baseline
+(`build/kls_forced_row_group_shape_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_dep_small_batch_gap10_t4_r1_ref3_timeout120.jsonl`). The probe did
+increase batch exposure (`row_refactor_group_batch_count` from `29059` to
+`72324`, and `row_refactor_group_batch_rows` from `323633` to `435106` across
+the ten rows), but it still reported zero
+`row_refactor_compact_supernode_batch_candidate_count` and zero compact
+supernode batches. It also recorded zero CBLAS update runs with
+`build_has_cblas=false`. The code was removed. This rejects "just make smaller
+same-level batches" along with the small-BLAS-call hypothesis; KLS needs
+producer-compatible row-panel/supernode batch construction, not more generic
+batch groups.
