@@ -6702,3 +6702,20 @@ The source was removed. The remaining gap is the paper-side executor/data
 structure combination that makes scheduled tasks coarse and cache/BLAS-friendly,
 not another thin scheduling wrapper around the current scalar EGraph column
 kernel.
+
+A single-row row-refactor allocator cleanup was tried and rejected after the
+same BLAS-threshold discussion. The grouped row executors already reuse
+`worker->byte_workspace` for their dependency-applied bitmaps, so the
+single-row executor was changed to use the same per-worker workspace instead of
+per-row `calloc/free`. This is source-structure clean, but the same-source
+forced-row native-off benchmark regressed on every top-five gap matrix:
+`23.5832s` geomean for the reverted control in
+`build/kls_control_forced_row_native_off_gap5_t4_r1_ref3_timeout120.jsonl`
+versus `29.3486s` for the workspace patch in
+`build/kls_applied_workspace_forced_row_native_off_gap5_t4_r1_ref3_timeout120.jsonl`.
+Both runs used `--row-refactor refactor`, `KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=0`,
+four threads, and three refactor repeats, and both were residual-clean. The
+source was reverted. This closes that allocator-churn hypothesis; it does not
+change the earlier conclusion that the default CKTSO-gap path is not entering
+CBLAS at all and needs a coarser paper-style numeric executor rather than
+another small-case BLAS guard.
