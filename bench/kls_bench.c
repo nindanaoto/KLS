@@ -1514,6 +1514,15 @@ int main(int argc, char **argv) {
            ",\"refactor_last_u_supernode_value_right_writes\":%" PRId64
            ",\"refactor_u_supernode_value_dense_write_count\":%" PRId64
            ",\"refactor_u_supernode_value_right_write_count\":%" PRId64
+           ",\"refactor_u_supernode_l_panel_count\":%" PRId64
+           ",\"refactor_u_supernode_l_dense_entries\":%" PRId64
+           ",\"refactor_u_supernode_l_trailing_entries\":%" PRId64
+           ",\"refactor_last_u_supernode_l_update_runs\":%" PRId64
+           ",\"refactor_last_u_supernode_l_update_rows\":%" PRId64
+           ",\"refactor_last_u_supernode_l_update_entries\":%" PRId64
+           ",\"refactor_u_supernode_l_update_run_count\":%" PRId64
+           ",\"refactor_u_supernode_l_update_rows\":%" PRId64
+           ",\"refactor_u_supernode_l_update_entries\":%" PRId64
            ",\"refactor_supernode_panel_count\":%" PRId64
            ",\"refactor_supernode_panel_used_count\":%" PRId64
            ",\"row_refactor_group_count\":%" PRId64
@@ -1625,6 +1634,15 @@ int main(int argc, char **argv) {
            stats.refactor_last_u_supernode_value_right_writes,
            stats.refactor_u_supernode_value_dense_write_count,
            stats.refactor_u_supernode_value_right_write_count,
+           stats.refactor_u_supernode_l_panel_count,
+           stats.refactor_u_supernode_l_dense_entries,
+           stats.refactor_u_supernode_l_trailing_entries,
+           stats.refactor_last_u_supernode_l_update_runs,
+           stats.refactor_last_u_supernode_l_update_rows,
+           stats.refactor_last_u_supernode_l_update_entries,
+           stats.refactor_u_supernode_l_update_run_count,
+           stats.refactor_u_supernode_l_update_rows,
+           stats.refactor_u_supernode_l_update_entries,
            stats.refactor_supernode_panel_count,
            stats.refactor_supernode_panel_used_count,
            stats.row_refactor_group_count,
@@ -2604,6 +2622,9 @@ int main(int argc, char **argv) {
            ", U pattern internal entries: %.6g"
            ", U value entries: %" PRId64 "/%" PRId64
            ", U value writes: %" PRId64 "/%" PRId64
+           ", ragged L panels: %" PRId64
+           ", ragged L entries: %" PRId64 "/%" PRId64
+           ", ragged L updates: %" PRId64 "/%" PRId64 "/%" PRId64
            ", panels: %" PRId64 ", used panels: %" PRId64
            ", cached probe disabled: %d/%" PRId64 "\n",
            stats.refactor_supernode_candidate_count,
@@ -2625,6 +2646,12 @@ int main(int argc, char **argv) {
            stats.refactor_u_supernode_value_right_entries,
            stats.refactor_last_u_supernode_value_dense_writes,
            stats.refactor_last_u_supernode_value_right_writes,
+           stats.refactor_u_supernode_l_panel_count,
+           stats.refactor_u_supernode_l_dense_entries,
+           stats.refactor_u_supernode_l_trailing_entries,
+           stats.refactor_last_u_supernode_l_update_runs,
+           stats.refactor_last_u_supernode_l_update_rows,
+           stats.refactor_last_u_supernode_l_update_entries,
            stats.refactor_supernode_panel_count,
            stats.refactor_supernode_panel_used_count,
            stats.refactor_supernode_cached_probe_disabled,

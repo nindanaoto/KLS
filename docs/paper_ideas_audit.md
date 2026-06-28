@@ -8017,3 +8017,29 @@ measured `1.41058s` and kept all U-supernode value counters at zero. This
 retains the paper-style numeric staging object but confirms the missing
 performance piece is still a consumer/executor that uses those cached values
 without paying an extra scalar recording pass.
+
+KLS now has an opt-in ragged L-panel executor for the same retained
+U-supernode producer ranges. With
+`KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1`, schedule construction retains the
+U-supernode structure, the refactor path allocates a ragged L-panel object,
+producer columns publish fresh L values into that object as each numeric pass
+finishes them, and later contiguous dependency runs can consume the cached
+internal panel plus per-producer trailing L rows. This is the direct
+paper-aligned extension beyond the older common-trailing cached panel: it can
+represent nearly all retained U-supernode producers on the ASIC focus rows
+instead of requiring identical trailing L row lists. The focused top-five
+artifact
+(`build/kls_u_supernode_ragged_l_gap5_t4_r1_ref3_timeout120.jsonl`) stayed
+residual-clean and built `18,218` valid ragged L panels over `747,694` dense
+entries and `2,610,433` trailing entries. The executor did real work:
+`637` last-pass runs covered `89,907` producer rows and `18,044,382` update
+entries, with `2,548` cumulative runs over the repeated refactors. It still
+lost the focused set, measuring a `1.65257s` geomean versus the same-source
+gate-off control
+(`build/kls_u_supernode_ragged_l_default_gap5_t4_r1_ref3_timeout120.jsonl`) at
+`1.33400s`, and `ASIC_100ks` regressed from `5.23s` to `11.34s`. The gate-off
+control kept all U-supernode ragged-L counters at zero. This validates the
+broader producer/consumer executor mechanically, but shows that simply caching
+ragged producer L rows is not enough; the next paper gap is coarser batching or
+a policy that only pays the publish/cache cost when producer rows are reused
+enough to amortize it.

@@ -866,6 +866,20 @@ the EGraph refactor publishes them. Benchmark JSON reports
 diagnostic staging object, not a default speed path: it proves the numeric data
 can be materialized in the retained paper-style layout, but a future executor
 still has to consume those buffers without paying an extra scalar recording pass.
+Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1` to enable the next
+off-by-default executor prototype for the same retained U-supernode ranges. It
+keeps a ragged L-panel structure for U-supernode producers, publishes fresh L
+values as producer columns finish in each numeric refactor, and consumes
+eligible contiguous U-dependency runs through the cached internal panel plus
+per-producer trailing L rows. Benchmark JSON reports
+`refactor_u_supernode_l_panel_count`,
+`refactor_u_supernode_l_dense_entries`,
+`refactor_u_supernode_l_trailing_entries`,
+`refactor_last_u_supernode_l_update_*`, and cumulative
+`refactor_u_supernode_l_update_*` counters. This path is intentionally opt-in:
+it validates a broader paper-style producer/consumer executor than the
+common-trailing cached panel, but current focused runs still show that KLS needs
+coarser batching/reuse before this shape can beat the scalar EGraph walk.
 Eligible retained refactor-map row/input positions and L row-index arrays are
 mirrored as 32-bit integers by default while leaving the KLU-owned numeric
 factor and public index ABI unchanged. The EGraph value-scatter path and

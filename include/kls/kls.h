@@ -686,6 +686,15 @@ typedef struct kls_stats {
   int64_t refactor_last_u_supernode_value_right_writes;
   int64_t refactor_u_supernode_value_dense_write_count;
   int64_t refactor_u_supernode_value_right_write_count;
+  int64_t refactor_u_supernode_l_panel_count;
+  int64_t refactor_u_supernode_l_dense_entries;
+  int64_t refactor_u_supernode_l_trailing_entries;
+  int64_t refactor_last_u_supernode_l_update_runs;
+  int64_t refactor_last_u_supernode_l_update_rows;
+  int64_t refactor_last_u_supernode_l_update_entries;
+  int64_t refactor_u_supernode_l_update_run_count;
+  int64_t refactor_u_supernode_l_update_rows;
+  int64_t refactor_u_supernode_l_update_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
