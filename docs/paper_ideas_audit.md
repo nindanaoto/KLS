@@ -6877,3 +6877,26 @@ experiments, and `1` still forces retained compact panels for coverage. This
 does not reject row-major panels as the final paper direction; it rejects
 promoting the current scalar blocked-panel scaffold before it reduces enough
 numeric work.
+
+A current CBLAS-enabled top-ten CKTSO-gap rerun also rejects promoting the
+existing BLAS-backed supernode bridge as the missing paper algorithm. The build
+configured successfully with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` in
+`build-cblas` and passed `ctest --test-dir build-cblas --output-on-failure`.
+With `OPENBLAS_NUM_THREADS=1`, the CBLAS-capable default measured `2.23148s`
+geomean in
+`build-cblas/kls_cblas_build_default_ob1_gap10_t4_r1_ref3_timeout120.jsonl`,
+essentially matching the non-CBLAS top-ten control, but all
+`refactor_supernode_cblas_update_*` counters were zero. Enabling the current
+EGraph supernode paths did not help: `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1`
+with `KLS_ENABLE_CBLAS_SUPERNODE=1` measured `2.41350s` in
+`build-cblas/kls_cblas_egraph_supernode_gap10_t4_r1_ref3_timeout120.jsonl`,
+and the narrower cached-only mode measured `2.34182s` in
+`build-cblas/kls_cblas_egraph_cached_gap10_t4_r1_ref3_timeout120.jsonl`.
+Those runs did build and use panel metadata (`3386` panels, `4654` cached
+blocked updates), but still took zero CBLAS updates because the eligible
+producer/consumer shapes did not pass the large-work BLAS gate. This confirms
+that simply compiling CBLAS or enabling the current cached-panel consumer does
+not close the CKTSO refactor gap; KLS still lacks the coarser row-major
+supernode numeric executor described by CKTSO/SubtreeLU, where panel packing
+and triangular/update work replace enough scalar dependency traversal to pay
+for the staging cost.
