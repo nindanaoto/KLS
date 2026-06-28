@@ -7484,3 +7484,26 @@ panel, and KLS-first row-panel counters stayed at zero. This directly rejects
 the current "guard BLAS for only large cases" hypothesis: the guard already
 requires 512-scale vector/panel shapes plus multi-million-work thresholds, and
 the tested gap path is not entering BLAS at all.
+
+The follow-up `rajat29` rerun found a fallback hygiene issue rather than a
+small-BLAS issue. Earlier failed KLS-first probes restored only
+`status`/`numerical_rank`/`singular_col`/`noffdiag` before entering the KLU
+fallback. KLS now restores the full KLU common state after failed row-up-looking
+and pivoted-block first-factor attempts, so failed experimental paths cannot
+leave changed scale, tolerance, memory-growth, or allocation counters behind.
+`cmake --build build -j4`, `ctest --test-dir build --output-on-failure`, and
+`git diff --check` passed. Forced KLS-first/no-fast `rajat29` probes completed
+at 2, 3, and 4 threads in
+`build/kls_rajat29_common_restore_retry_nofast_t2_factor_timeout90.json`,
+`build/kls_rajat29_common_restore_retry_nofast_t3_factor_timeout90.json`, and
+`build/kls_rajat29_common_restore_retry_nofast_t4_factor_timeout90.json`
+(`4.76019409s`, `5.530147s`, and `5.78516555s` initial factor, each with
+`9.86042515e-12` relative residual). A matching `ASIC_320k` no-fast probe
+completed in
+`build/kls_asic320k_common_restore_retry_nofast_t4_factor_timeout60.json`
+(`2.09658007s`, `2.02952977e-15` residual). These runs still report
+`last_factor_path="klu_fallback"`, zero KLS-first row-up-looking work, and
+`build_has_cblas=false`, so this is a correctness cleanup for fallback recovery,
+not the paper-level CKTSO gap closer. A broader symbolic `Q`/`Lnz` restore
+prototype was rejected because it made the threaded `rajat29` repro fail setup
+as singular again.

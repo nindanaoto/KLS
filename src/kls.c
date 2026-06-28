@@ -52756,10 +52756,7 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
   }
 
   TRILINOS_KLU_common *common = &solver->common;
-  const int saved_status = (int)common->status;
-  const UF_long saved_numerical_rank = (UF_long)common->numerical_rank;
-  const UF_long saved_singular_col = (UF_long)common->singular_col;
-  const UF_long saved_noffdiag = (UF_long)common->noffdiag;
+  trilinos_klu_l_common saved_common = *common;
   int q_committed = 0;
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
@@ -52769,10 +52766,7 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
 
   trilinos_klu_l_numeric *numeric = kls_allocate_numeric_skeleton(solver);
   if (numeric == NULL) {
-    common->status = saved_status;
-    common->numerical_rank = saved_numerical_rank;
-    common->singular_col = saved_singular_col;
-    common->noffdiag = saved_noffdiag;
+    *common = saved_common;
     return 0;
   }
   solver->numeric = numeric;
@@ -53050,10 +53044,7 @@ fail:
   free(separator_component_last);
   trilinos_klu_l_free_numeric(&numeric, common);
   solver->numeric = NULL;
-  common->status = saved_status;
-  common->numerical_rank = saved_numerical_rank;
-  common->singular_col = saved_singular_col;
-  common->noffdiag = saved_noffdiag;
+  *common = saved_common;
   return 0;
 }
 
@@ -53082,10 +53073,7 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
   }
 
   TRILINOS_KLU_common *common = &solver->common;
-  const int saved_status = (int)common->status;
-  const UF_long saved_numerical_rank = (UF_long)common->numerical_rank;
-  const UF_long saved_singular_col = (UF_long)common->singular_col;
-  const UF_long saved_noffdiag = (UF_long)common->noffdiag;
+  trilinos_klu_l_common saved_common = *common;
   int q_committed = 0;
   UF_long separator_dynamic_column_rejects = 0;
   common->status = TRILINOS_KLU_OK;
@@ -53096,10 +53084,7 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
 
   trilinos_klu_l_numeric *numeric = kls_allocate_numeric_skeleton(solver);
   if (numeric == NULL) {
-    common->status = saved_status;
-    common->numerical_rank = saved_numerical_rank;
-    common->singular_col = saved_singular_col;
-    common->noffdiag = saved_noffdiag;
+    *common = saved_common;
     return 0;
   }
   solver->numeric = numeric;
@@ -54160,10 +54145,7 @@ fail:
   free(separator_component_last);
   trilinos_klu_l_free_numeric(&numeric, common);
   solver->numeric = NULL;
-  common->status = saved_status;
-  common->numerical_rank = saved_numerical_rank;
-  common->singular_col = saved_singular_col;
-  common->noffdiag = saved_noffdiag;
+  *common = saved_common;
   return 0;
 }
 
@@ -54739,10 +54721,7 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
   }
 
   TRILINOS_KLU_common *common = &solver->common;
-  const int saved_status = (int)common->status;
-  const UF_long saved_numerical_rank = (UF_long)common->numerical_rank;
-  const UF_long saved_singular_col = (UF_long)common->singular_col;
-  const UF_long saved_noffdiag = (UF_long)common->noffdiag;
+  trilinos_klu_l_common saved_common = *common;
   common->initmem_amd = common->initmem_amd > 1.0 ? common->initmem_amd : 1.0;
   common->initmem = common->initmem > 1.0 ? common->initmem : 1.0;
   common->tol = common->tol < 1.0 ? common->tol : 1.0;
@@ -54756,10 +54735,7 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
 
   trilinos_klu_l_numeric *numeric = kls_allocate_numeric_skeleton(solver);
   if (numeric == NULL) {
-    common->status = saved_status;
-    common->numerical_rank = saved_numerical_rank;
-    common->singular_col = saved_singular_col;
-    common->noffdiag = saved_noffdiag;
+    *common = saved_common;
     return 0;
   }
   solver->numeric = numeric;
@@ -54932,10 +54908,7 @@ fail:
   free_refactor_map(solver);
   trilinos_klu_l_free_numeric(&numeric, common);
   solver->numeric = NULL;
-  common->status = saved_status;
-  common->numerical_rank = saved_numerical_rank;
-  common->singular_col = saved_singular_col;
-  common->noffdiag = saved_noffdiag;
+  *common = saved_common;
   return 0;
 }
 
