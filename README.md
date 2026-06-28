@@ -855,6 +855,17 @@ JSON reports `refactor_u_supernode_pattern_count`,
 metadata: it preserves the producer supernode start/width and right-side column
 pattern for the future CKTSO/SubtreeLU-style numeric executor, while the current
 default refactor continues to use the scalar KLU-format dependency walk.
+Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_VALUES=1` to additionally allocate the
+matching row-major dense and right-side value buffers and record U entries as
+the EGraph refactor publishes them. Benchmark JSON reports
+`refactor_u_supernode_value_dense_entries`,
+`refactor_u_supernode_value_right_entries`,
+`refactor_last_u_supernode_value_dense_writes`,
+`refactor_last_u_supernode_value_right_writes`, and cumulative
+`refactor_u_supernode_value_*_write_count` counters. This value cache is also a
+diagnostic staging object, not a default speed path: it proves the numeric data
+can be materialized in the retained paper-style layout, but a future executor
+still has to consume those buffers without paying an extra scalar recording pass.
 Eligible retained refactor-map row/input positions and L row-index arrays are
 mirrored as 32-bit integers by default while leaving the KLU-owned numeric
 factor and public index ABI unchanged. The EGraph value-scatter path and

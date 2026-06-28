@@ -7999,3 +7999,21 @@ default retained common-tail panels, while the consumer diagnostic saw
 paper gap: KLS now preserves the producer pattern that CKTSO/SubtreeLU would
 consume, but it still lacks the production numeric executor that updates
 consumer rows from that row-major U object.
+
+KLS now also has an opt-in numeric cache for the same retained U-supernode
+producer object. With `KLS_ENABLE_REFACTOR_U_SUPERNODE_VALUES=1`, the EGraph
+refactor allocates row-major dense and right-side U value buffers for the
+retained pattern and records U values as columns publish. The focused top-five
+diagnostic
+(`build/kls_u_supernode_values_gap5_t4_r1_ref3_timeout120.jsonl`) stayed
+residual-clean and populated substantial numeric storage: across the five rows
+it allocated `1,038,387` dense slots and `2,607,110` right-side slots, with
+`2,182,336` dense writes and `10,428,440` right-side writes over the repeated
+refactors. The slow ASIC rows had no external CBLAS calls in this run, so this
+is not a small-BLAS-call artifact. The same opt-in run measured a worse
+`1.70716s` geomean, while the gate-off current-source control
+(`build/kls_u_supernode_values_default_gap5_t4_r1_ref3_timeout120.jsonl`)
+measured `1.41058s` and kept all U-supernode value counters at zero. This
+retains the paper-style numeric staging object but confirms the missing
+performance piece is still a consumer/executor that uses those cached values
+without paying an extra scalar recording pass.

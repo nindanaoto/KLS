@@ -680,6 +680,12 @@ typedef struct kls_stats {
   int64_t refactor_u_supernode_pattern_max_width;
   int64_t refactor_u_supernode_pattern_right_entries;
   double refactor_u_supernode_pattern_internal_entries;
+  int64_t refactor_u_supernode_value_dense_entries;
+  int64_t refactor_u_supernode_value_right_entries;
+  int64_t refactor_last_u_supernode_value_dense_writes;
+  int64_t refactor_last_u_supernode_value_right_writes;
+  int64_t refactor_u_supernode_value_dense_write_count;
+  int64_t refactor_u_supernode_value_right_write_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
