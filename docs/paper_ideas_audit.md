@@ -1340,6 +1340,23 @@ but still lost `rajat29`. A factor-only `pre2` probe also timed out under
 125s, confirming that the unresolved `pre2` gap is first-factor numeric
 machinery, not repeated-refactor scheduling.
 
+The June 28, 2026 auto-input-width rerun keeps that conclusion. Artifact
+`build/kls_input_auto_large_recon_t4_r1_ref1_timeout120.jsonl` completed six of
+eight selected large rows with 32-bit input ingestion and a 38.19s completed-row
+geomean; `pre2` and `Hamrle3` timed out at 120s. Against
+`build/cktso_paper_large_recon_t4_timeout120.jsonl`, KLS still wins
+`TSOPF_FS_b39_c30` decisively but loses the other completed common rows:
+`rajat30` about 1.50x, `nxp1` about 1.40x, `ASIC_680k` about 1.30x,
+`G3_circuit` about 1.08x, and `rajat29` about 1.02x. CKTSO completes `pre2`
+in the saved artifact and times out only on `Hamrle3`. A same-session `pre2`
+isolation sweep found that analyze-only normal AMD completes in about 5s with
+a 629628-row dominant block, about 61.1M L and U entries, and about
+`2.08e11` estimated flops, while factor-only default AMD, forced
+`KLS_ENABLE_KLS_FIRST_FACTOR`, transpose AMD, METIS, and no-static-pivoting
+probes all timed out at 120s. This makes `pre2` a cold first-factor kernel gap,
+not an input-index, orientation, ordering, static-pivoting, or refactor-repeat
+artifact.
+
 A low-work dominant-BTF guard was then retained for Rajat-family large cases:
 if BTF finds one block covering at least 95% of the matrix, the stripped fringe
 is at most 5% but still nontrivial, and the symbolic flop estimate is below
@@ -4927,6 +4944,18 @@ also reproduced on the committed `d08ab35` baseline and is a pre-existing
 EGraph pipeline flake. This narrows the remaining paper gap: the useful next
 step is not more task scheduling, but production supernodal numeric storage
 and BLAS-style panel/trailing updates for these retained ranges.
+
+A June 28, 2026 default-path synchronization shortcut was also rejected. The
+experiment retained each column's EGraph level and skipped atomic `done` waits
+for dependencies known to have completed in the clustered barrier phase. It
+preserved residual correctness, but the five-row CKTSO-gap focus artifact
+`build/kls_skip_cluster_wait_focus5_t4_r1_ref3_timeout120.jsonl` regressed
+geomean to 7.77s versus 7.59s for
+`build/kls_input_auto_focus5_t4_r1_ref3_timeout120.jsonl`; four of five rows
+slowed, including `G2_circuit` where there were no clustered levels to skip.
+The local code was reverted. This reinforces the same paper gap as the
+supernode-task experiment: scheduler-only EGraph changes are not enough without
+the matching production row/segment or supernodal numeric object.
 
 The intermittent 120 s `transient` timeout was traced to the clustered
 EGraph/row-refactor barrier protocol, not to the supernode-range metadata. A

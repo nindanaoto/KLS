@@ -1482,6 +1482,14 @@ SubtreeLU/CKTSO row-segment work can be evaluated on the same slow-case
 artifacts.
 On the refreshed selected-large reconstruction, KLS is ahead of the saved KLU2
 artifact but still trails the saved CKTSO artifact, with `pre2` still timing out.
+The current auto-input-width rerun keeps the same shape: KLS completes six of
+eight selected large rows, wins `TSOPF_FS_b39_c30`, times out on `pre2` and
+`Hamrle3`, and loses the other completed common CKTSO rows by roughly 1.02x to
+1.50x. Same-session `pre2` probes show analysis completes quickly but
+factor-only default AMD, forced KLS-first, transpose AMD, METIS, and
+no-static-pivoting all exceed 120s, so the unresolved `pre2` gap is cold
+first-factor numeric machinery rather than input width, ordering, orientation,
+or repeated-refactor policy.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
