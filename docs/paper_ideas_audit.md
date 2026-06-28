@@ -7561,3 +7561,17 @@ to retain: the large-case CBLAS gates already exist, and the active CKTSO-gap
 path either does not enter the panel bridge or uses native blocked panel work.
 The remaining paper-level gap is still the row/supernode numeric executor and
 its coarse producer/consumer scheduling, not another BLAS threshold.
+
+A post-rebuild same-binary rerun kept that conclusion. After rebuilding both
+`build/` and `build-cblas/`, the top-five CKTSO-gap focus with
+`OPENBLAS_NUM_THREADS=1` measured `1.66028753s` geomean with
+`KLS_ENABLE_CBLAS_SUPERNODE=0` in
+`build-cblas/kls_cblas_guard_fresh_off_gap5_t4_r1_ref3_timeout120.jsonl` and
+`1.40658849s` with `KLS_ENABLE_CBLAS_SUPERNODE=1` in
+`build-cblas/kls_cblas_guard_fresh_on_gap5_t4_r1_ref3_timeout120.jsonl`.
+Every row in both files reported `build_has_cblas=true` but zero numeric
+CBLAS, EGraph-panel, blocked-panel, and row-panel-cache update counters. The
+short-run timing difference is therefore not evidence of BLAS work being used;
+it is run noise or unrelated scheduling variance. KLS should not add another
+small-BLAS guard here because the existing large-shape guard is already
+stricter than the proposed fix and the active path does not reach it.
