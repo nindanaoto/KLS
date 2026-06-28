@@ -7952,3 +7952,31 @@ still loses the top-ten common set to CKTSO by about `2.47x`. This is retained
 only as opt-in row/supernode executor cleanup; the missing paper-level item
 remains a coarse row-major/supernode numeric engine rather than another cached
 selector rule.
+
+The full EGraph supernode experiment now has the same kind of pass-level
+amortization guard for its low-work case. A current-source top-five rerun first
+confirmed that cached-only panels should remain opt-in:
+`build/kls_current_default_rerun_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.47590s` geomean, while
+`build/kls_current_cached_rerun_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.52588s`. The full `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1` bridge measured
+`1.47197s` before the guard in
+`build/kls_current_egraph_supernode_rerun_gap5_t4_r1_ref3_timeout120.jsonl`,
+but `ASIC_320k` did only two tiny supernode updates per pass
+(`10` entries) while still probing about `1,600` cached candidates. KLS now
+records `refactor_supernode_update_disabled` and
+`refactor_supernode_update_disable_count`; after one valid full-supernode pass
+with cached-probe attempts but fewer than `512` accepted update entries, later
+passes skip the full supernode probe for the retained panel cache. The focused
+guard artifact
+`build/kls_supernode_lowwork_guard_gap5_t4_r1_ref3_timeout120.jsonl` shows
+`ASIC_320k` reducing cumulative cached attempts from `6,388` to `1,597` and
+cumulative supernode work from `40` to `10` entries, with the disable counter
+set to `1`. Productive rows such as `ASIC_320ks`, `ASIC_100ks`, and `rajat03`
+did not disable. A second guarded rerun still remained noisy and mixed
+(`1.54805s` geomean in
+`build/kls_supernode_lowwork_guard_gap5_rerun2_t4_r1_ref3_timeout120.jsonl`),
+so the full supernode bridge remains experimental rather than a new default.
+This is retained only to avoid repeated no-amortization work inside the
+paper-aligned supernode prototype; the broad CKTSO gap still requires a
+production row-major/supernode numeric executor.

@@ -6144,13 +6144,16 @@ static int test_egraph_cached_supernode_blocked_update(void) {
          stats.refactor_last_supernode_update_entries ||
        stats.refactor_supernode_blocked_update_run_count <
          stats.refactor_last_supernode_blocked_update_runs ||
-       stats.refactor_last_supernode_cblas_update_runs != 0)) {
+       stats.refactor_last_supernode_cblas_update_runs != 0 ||
+       stats.refactor_supernode_update_disabled != 0 ||
+       stats.refactor_supernode_update_disable_count != 0)) {
     fprintf(stderr,
             "unexpected EGraph blocked stats: row=%d, candidates=%" PRId64
             ", panels=%" PRId64 "/%" PRId64
             ", updates=%" PRId64 "/%" PRId64 "/%" PRId64
             ", blocked=%" PRId64 "/%" PRId64 "/%" PRId64
-            ", blocked_total=%" PRId64 ", cblas=%" PRId64 "\n",
+            ", blocked_total=%" PRId64 ", cblas=%" PRId64
+            ", update_disabled=%d/%" PRId64 "\n",
             stats.row_refactor_last_run,
             stats.refactor_supernode_candidate_count,
             stats.refactor_supernode_panel_used_count,
@@ -6162,7 +6165,9 @@ static int test_egraph_cached_supernode_blocked_update(void) {
             stats.refactor_last_supernode_blocked_update_rows,
             stats.refactor_last_supernode_blocked_update_entries,
             stats.refactor_supernode_blocked_update_run_count,
-            stats.refactor_last_supernode_cblas_update_runs);
+            stats.refactor_last_supernode_cblas_update_runs,
+            stats.refactor_supernode_update_disabled,
+            stats.refactor_supernode_update_disable_count);
     ok = 0;
   }
 

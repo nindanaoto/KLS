@@ -829,6 +829,11 @@ finds no work-gate-accepted cached updates, later passes with the same retained
 panel cache skip the cached probe; JSON reports
 `refactor_supernode_cached_probe_disabled` and
 `refactor_supernode_cached_probe_disable_count`.
+In the full `=1` experiment, if a clean numeric pass probes retained panels but
+accepts less than one amortizable supernode-update window, later passes skip the
+full supernode probe and report `refactor_supernode_update_disabled` plus
+`refactor_supernode_update_disable_count`. Productive cached-panel work remains
+eligible; this only trims the low-work full-probe case.
 For paper-gap diagnosis without changing execution, set
 `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_STATS=1`. Schedule construction then
 counts actual U-stream dependency runs that fall inside retained EGraph
