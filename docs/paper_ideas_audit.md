@@ -6900,3 +6900,30 @@ not close the CKTSO refactor gap; KLS still lacks the coarser row-major
 supernode numeric executor described by CKTSO/SubtreeLU, where panel packing
 and triangular/update work replace enough scalar dependency traversal to pay
 for the staging cost.
+
+A direct producer-side EGraph supernode panel-factor probe was also tried and
+rejected. The experiment added an opt-in
+`KLS_ENABLE_EGRAPH_SUPERNODE_PANEL_FACTOR=1` path that reused retained L-panel
+metadata, handled suffix panels, and tested natural, ready-queue, non-ready,
+and cluster scheduling insertion points under the no-pivot/unscaled cases.
+The code built and passed the smoke tests while present, but it never reached a
+numeric panel-factor application on the two slow ASIC rows. The final relaxed
+diagnostic run in
+`build/kls_panel_factor_diag_probe_gap2_t4_r1_ref3_timeout120.jsonl` recorded
+`2,555,032` producer attempts, `2,776` containing-panel hits, and `3,051`
+admitted suffixes covering `162,132` rows, yet still produced `0` applied
+updates and `0` update rows. The ready-queue forcing path was separately
+rejected: enabling only `KLS_ENABLE_EGRAPH_READY_QUEUE=1` measured `27.6083s`
+geomean on the two-row ASIC probe in
+`build/kls_ready_queue_probe_gap2_t4_r1_ref3_timeout120.jsonl`, versus
+`13.0489s` for the no-env probe in
+`build/kls_default_probe_gap2_t4_r1_ref3_timeout120.jsonl`.
+
+The conclusion is stronger than "BLAS is too small" or "scheduling is too
+fine-grained." The existing KLU-compatible column-oriented U/L storage and
+consumer-side cached panels do not expose the row-major supernode factor/update
+object assumed by CKTSO/SubtreeLU. The source was reverted. The next paper-gap
+implementation should build a true row-major supernode symbolic and numeric
+storage layer, then run panel triangular solve and update work from that
+storage, instead of wrapping the current scalar column executor or forcing it
+through a different queue.
