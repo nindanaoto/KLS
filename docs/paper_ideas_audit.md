@@ -6624,3 +6624,24 @@ while forcing the paper partial-prefix release back on measured `16.9455s` in
 `build/kls_partial_pipeline_forced_on_gap5_t4_r1_ref20_timeout120.jsonl`. The
 default remains unchanged; partial-prefix release stays on unless explicitly
 disabled with `KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE=0`.
+
+A current same-source BLAS-threshold rerun keeps the "small BLAS call" concern
+closed for the default CKTSO-gap path. The CBLAS-capable Release tree was
+rebuilt at the current source, then the top-five gap manifest was run with
+`OPENBLAS_NUM_THREADS=1` and the runtime gate off/on. The first pass measured
+`7.71968s` geomean with `KLS_ENABLE_CBLAS_SUPERNODE=0` in
+`build-cblas/kls_cblas_guard_off_current_blashyp_gap5_t4_r1_ref3_timeout120.jsonl`
+and `8.89658s` with `KLS_ENABLE_CBLAS_SUPERNODE=1` in
+`build-cblas/kls_cblas_guard_on_current_blashyp_gap5_t4_r1_ref3_timeout120.jsonl`.
+A second noisy pass measured `10.4417s` on and `9.86407s` off in
+`build-cblas/kls_cblas_guard_on_current_blashyp2_gap5_t4_r1_ref3_timeout120.jsonl`
+and
+`build-cblas/kls_cblas_guard_off_current_blashyp2_gap5_t4_r1_ref3_timeout120.jsonl`.
+All four runs used `last_refactor_path=egraph`, reported zero
+`row_refactor_run_count`, zero native blocked-panel update runs, and zero
+`refactor_supernode_cblas_update_*` runs/rows/entries on every matrix. The
+existing BLAS policy is already build-time optional, runtime opt-in, and
+guarded by 512-row/vector or 512-width panel minima plus multi-million-work
+thresholds. Another "BLAS only for large cases" guard would not change the
+executed code path; the remaining gap is still the production row/supernode
+numeric storage and executor that would create reusable BLAS-sized work.
