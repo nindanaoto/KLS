@@ -6179,6 +6179,20 @@ and zero native blocked-panel update runs on all ten matrices. This rejects the
 "small BLAS calls" hypothesis for the active default CKTSO-gap loss; another
 BLAS-size guard would not change the executed code path.
 
+A June 28, 2026 same-binary top-five rerun of the current source reached the
+same conclusion for the user's proposed large-case BLAS guard. With
+`OPENBLAS_NUM_THREADS=1`, the CBLAS-capable binary measured `1.4959s` geomean
+with `KLS_ENABLE_CBLAS_SUPERNODE=0` and `1.4259s` with
+`KLS_ENABLE_CBLAS_SUPERNODE=1`
+(`build-cblas/kls_cblas_guard_current_off_gap5_t4_r1_ref3_timeout120.jsonl`,
+`build-cblas/kls_cblas_guard_current_on_gap5_t4_r1_ref3_timeout120.jsonl`).
+Both runs reported `build_has_cblas=true`, but every matrix recorded zero
+external CBLAS update runs, rows, and entries, and zero row-refactor compact
+GEMV counters. The small variations between the two timings are therefore not
+caused by dispatching small CBLAS calls. The active slow path is still missing
+broader paper-style row/supernode executor coverage, not another BLAS size
+threshold.
+
 KLS now also reports row-refactor group shape in public stats, `kls_bench`
 JSON/text output, and `scripts/decompose_solver_gap.py`. The forced row-engine
 control with the restored `KLS_ROW_REFACTOR_BATCH_MAX_ROWS=16` measured a
