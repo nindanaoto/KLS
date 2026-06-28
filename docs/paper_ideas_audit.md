@@ -5589,10 +5589,17 @@ two threads are enabled.
 
 The retained-tail row-pipeline repair now also validates SubtreeLU's component
 pivot domain before accepting the active ETree mask. If separator analysis
-covers the repaired BTF block, every retained active row must map to a valid
-collapsed-separator component and dynamic pivot choice remains bounded by that
-component extent intersected with the active tail mask; otherwise KLS falls back
-to the existing serial/KLU repair ladder. Benchmark output records this direct
+covers the repaired BTF block and the retained ETree tail is a suffix-exact
+restart, every retained active row must map to a valid collapsed-separator
+component and dynamic pivot choice remains bounded by that component extent
+intersected with the active tail mask; otherwise KLS falls back to the existing
+separator-queue, serial, or KLU repair ladder. A direct non-suffix experiment on
+the METIS tridiagonal fast-repair smoke case was rejected: the active tail
+covered only 5,731 of 30,000 rows, passed the local row pipeline, but left later
+weak pivots outside the retained ETree tail and fell through to KLU. KLS now
+pre-validates active-mask repairs with non-recording numeric and rowwise-U pivot
+checks before committing them, and keeps non-suffix separator-covered rejects on
+the full separator queue path. Benchmark output records this direct
 paper-algorithm overlap with
 `fast_kls_block_restart_last_row_pipeline_separator_tail_scope`,
 `fast_kls_block_restart_row_pipeline_separator_tail_scope_count`, and

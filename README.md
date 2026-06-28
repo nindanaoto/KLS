@@ -605,11 +605,13 @@ repairs report
 `fast_kls_block_restart_last_row_pipeline_separator_private_threads`,
 `fast_kls_block_restart_last_row_pipeline_separator_partitioned`, and
 `fast_kls_block_restart_last_row_pipeline_separator_split_components`.
-Suffix-shaped
-and BTF suffix repairs still use the ordered pivot-capable row pipeline, so this
-is a guarded CKTSO Algorithm 5 prefactor/postfactorization step plus a
-SubtreeLU separator full-block repair, rather than the full production
-ETree-descendant scheduler.
+Suffix-exact retained ETree tails inside separator-covered blocks can also use
+the ordered pivot-capable row pipeline after validating the separator pivot
+scope and passing pre-commit numeric and rowwise-U pivot checks. Non-suffix
+separator-covered tails stay on the full separator queue path because they can
+leave later weak pivots outside the active ETree tail. This remains a guarded
+CKTSO Algorithm 5 prefactor/postfactorization step plus a SubtreeLU separator
+full-block repair, rather than the full production ETree-descendant scheduler.
 The experimental KLS-owned row/segment checked fast-factor path is explicit
 opt-in. Set `KLS_ENABLE_CHECKED_ROW_REFACTOR=1` to run it as the first checked
 fast-factor attempt and to let it use the parallel row scheduler when multiple

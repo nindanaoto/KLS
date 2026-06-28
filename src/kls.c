@@ -51371,10 +51371,10 @@ static int kls_try_row_first_rebuild_rejected_block(
   int repaired_tail_etree_mask = 0;
   int repaired_tail_etree_order = 0;
   if (shared.force_block_pipeline &&
-      !separator_covers_rejected_block &&
       kls_pivot_tail_plan_local_range(
         solver, k1, nk, local_reject, &tail_begin, &tail_end,
-        &tail_columns, NULL, &tail_suffix_exact)) {
+        &tail_columns, NULL, &tail_suffix_exact) &&
+      (!separator_covers_rejected_block || tail_suffix_exact)) {
     const size_t nk_size = (size_t)nk;
     if ((UF_long)nk_size == nk) {
       pipeline_active_mask =
@@ -51504,6 +51504,22 @@ static int kls_try_row_first_rebuild_rejected_block(
     }
   }
   solver->common.noffdiag = offdiag;
+  if (shared.block_pipeline_active_mask != NULL) {
+    UF_long next_rejected_pivot = KLS_KLU_EMPTY;
+    UF_long rejected_pivot_col = KLS_KLU_EMPTY;
+    UF_long rejected_row = KLS_KLU_EMPTY;
+    double rejected_ratio_abs = -1.0;
+    double rejected_pivot_abs = -1.0;
+    double rejected_row_max_abs = -1.0;
+    if (!kls_numeric_pivots_pass_threshold_from_block(
+          solver, block, &next_rejected_pivot, &rejected_pivot_col) ||
+        kls_numeric_rowwise_u_pivots_pass_threshold_from_block(
+          solver, block, &next_rejected_pivot, &rejected_pivot_col,
+          &rejected_row, &rejected_ratio_abs, &rejected_pivot_abs,
+          &rejected_row_max_abs) != 1) {
+      goto fail;
+    }
+  }
 
   UF_long repaired_tail_end = nk;
   if (shared.block_pipeline_end > 0u && shared.block_pipeline_end <= nk) {

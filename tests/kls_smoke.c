@@ -12474,43 +12474,47 @@ static int test_fast_factor_separator_queue_repair(void) {
                         "stats separator repair")) {
     ok = 0;
   }
+  const int used_separator_tail_scope =
+    stats.fast_kls_block_restart_last_row_pipeline_separator_tail_scope == 1;
+  const int used_separator_queue =
+    stats.fast_kls_block_restart_last_row_pipeline_separator_queue == 1;
+  const int separator_tail_scope_ok =
+    used_separator_tail_scope &&
+    stats.fast_kls_block_restart_last_row_pipeline_etree_tail == 1 &&
+    stats.fast_kls_block_restart_row_pipeline_separator_tail_scope_count >= 1 &&
+    stats.fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows >
+      0 &&
+    stats.fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows ==
+      stats.fast_kls_block_restart_last_row_pipeline_rows &&
+    stats.fast_kls_block_restart_last_row_pipeline_rows <= n;
+  const int separator_queue_ok =
+    used_separator_queue &&
+    stats.fast_kls_block_restart_row_pipeline_separator_queue_count >= 1 &&
+    stats.fast_kls_block_restart_last_row_pipeline_separator_private_rows > 0 &&
+    stats.fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows > 0 &&
+    stats.fast_kls_block_restart_last_row_pipeline_separator_private_rows +
+      stats.fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows ==
+        n &&
+    stats.fast_kls_block_restart_last_row_pipeline_separator_private_threads >
+      1 &&
+    stats.fast_kls_block_restart_last_row_pipeline_separator_partitioned == 1 &&
+    stats.fast_kls_block_restart_last_row_pipeline_separator_split_components >
+      0 &&
+    stats.fast_kls_block_restart_last_row_pipeline_rows == n;
   if (ok && (stats.build_has_metis != 1 ||
              stats.last_factor_path != KLS_FACTOR_PATH_KLS_FAST_REFACTOR ||
              stats.separator_analyzed_rows != n ||
              stats.separator_component_count <= 1 ||
              stats.fast_block_restarts < 1 ||
              stats.fast_kls_block_restart_last_row_pipeline != 1 ||
-             stats.fast_kls_block_restart_last_row_pipeline_rows != n ||
-             stats.fast_kls_block_restart_last_row_pipeline_separator_queue !=
-               1 ||
-             stats.fast_kls_block_restart_row_pipeline_separator_queue_count <
-               1 ||
-             stats
-               .fast_kls_block_restart_last_row_pipeline_separator_private_rows <=
-               0 ||
-             stats
-               .fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows <=
-               0 ||
-             stats
-                 .fast_kls_block_restart_last_row_pipeline_separator_private_rows +
-               stats
-                 .fast_kls_block_restart_last_row_pipeline_separator_pipeline_rows !=
-               n ||
-             stats
-               .fast_kls_block_restart_last_row_pipeline_separator_private_threads <=
-               1 ||
-             stats
-               .fast_kls_block_restart_last_row_pipeline_separator_partitioned !=
-               1 ||
-             stats
-               .fast_kls_block_restart_last_row_pipeline_separator_split_components <=
-               0 ||
+             (!separator_tail_scope_ok && !separator_queue_ok) ||
              stats.selected_btf != 0 ||
              stats.selected_scale != 0)) {
     fprintf(stderr,
             "unexpected separator repair stats: metis=%d, path=%s"
             ", sep_rows=%" PRId64 ", components=%" PRId64
             ", block_restarts=%d, rowpipe=%d/%" PRId64
+            ", tail_scope=%d/%" PRId64 "/%" PRId64
             ", sepq=%d/%" PRId64 ", rows=%" PRId64 "/%" PRId64
             ", threads=%" PRId64 ", partitioned=%d, split=%" PRId64
             ", btf=%d, scale=%d\n",
@@ -12521,6 +12525,9 @@ static int test_fast_factor_separator_queue_repair(void) {
             stats.fast_block_restarts,
             stats.fast_kls_block_restart_last_row_pipeline,
             stats.fast_kls_block_restart_last_row_pipeline_rows,
+            stats.fast_kls_block_restart_last_row_pipeline_separator_tail_scope,
+            stats.fast_kls_block_restart_row_pipeline_separator_tail_scope_count,
+            stats.fast_kls_block_restart_last_row_pipeline_separator_tail_scope_rows,
             stats.fast_kls_block_restart_last_row_pipeline_separator_queue,
             stats
               .fast_kls_block_restart_row_pipeline_separator_queue_count,
