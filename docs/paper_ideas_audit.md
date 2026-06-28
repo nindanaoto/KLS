@@ -7002,3 +7002,36 @@ scalar-loop specialization are not the missing CKTSO/SubtreeLU mechanism; KLS
 still needs a true row-major supernode numeric object whose triangular solves
 and trailing updates replace enough scalar dependency traversal to pay for the
 extra storage.
+
+The large paper-recon comparison was refreshed with the local CKTSO library
+instead of relying only on the older saved artifact. `build-cktso` was
+configured with
+`-DKLS_BUILD_CKTSO_COMPARE=ON -DCKTSO_ROOT=/home/ubuntu/sources/kls-workspace/cktso`.
+KLS was rerun on `bench/suitesparse_paper_large_recon_manifest.txt` with
+`--threads 4 --repeat 1 --refactor-repeat 1 --timeout 120`, producing
+`build/kls_fresh_large_recon_t4_r1_ref1_timeout120.jsonl` plus the skip-four
+continuation
+`build/kls_fresh_large_recon_t4_r1_ref1_timeout120_skip4.jsonl`.
+CKTSO was rerun with the matching repeat settings into
+`build/cktso_fresh_large_recon_t4_r1_ref1_timeout120.jsonl`.
+
+The completed common large rows are now close on geomean but still mixed:
+KLS/CKTSO SPICE-cycle ratios were about `0.25x` on `TSOPF_FS_b39_c30`,
+`1.34x` on `nxp1`, `1.07x` on `G3_circuit`, `1.29x` on `ASIC_680k`,
+`1.04x` on `rajat29`, and `1.50x` on `rajat30`, for a completed-row geomean
+near `0.95x`. This is not evidence of general parity because KLS still timed
+out on `pre2` and `Hamrle3`, while the same-session CKTSO run completed
+`pre2` and timed out only on `Hamrle3`.
+
+The fresh `pre2` isolation is consistent with the older diagnosis. CKTSO
+completed direct `pre2` in the same environment with about `3.89s` analysis,
+`7.03s` initial factor, `6.08s` refactor, and a valid residual. KLS
+`--analyze-only` completed in about `9.7s` under auto/AMD and reported a
+629628-row dominant block, about `61.1M` estimated entries in each factor, and
+about `2.08e11` estimated flops; `--refactor-repeat 0` still timed out at
+130s. AMD, METIS, SCOTCH, COLAMD, and natural analyze-only probes completed,
+but prior and current numeric probes still time out. The actionable gap for
+large cases therefore remains cold first-factor numeric machinery, especially
+the CKTSO/SubtreeLU row-up-looking dominant-block executor and ETree-tail
+pipeline, not another refactor-only scalar split, small-BLAS guard, or simple
+ordering selector.
