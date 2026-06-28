@@ -1,0 +1,51 @@
+# Public SuiteSparse Matrix Collection circuit matrices used by SubtreeLU Fig. 7.
+# The paper describes this set as all SuiteSparse circuit matrices with N > 30000.
+# Keep this focused manifest in the figure order so KLS/CKTSO comparisons can
+# be run on the exact SubtreeLU corpus without the broader KLU/NICSLU/CKTSO union.
+
+onetone2
+onetone1
+rajat15
+rajat22
+ckt11752_dc_1
+ckt11752_tr_0
+rajat26
+bcircuit
+circuit_4
+rajat20
+rajat25
+rajat28
+rajat18
+rajat16
+rajat17
+asic_100ks
+asic_100k
+hcircuit
+rajat23
+dc1
+dc2
+dc3
+trans4
+trans5
+twotone
+g2_circuit
+scircuit
+transient
+ss1
+raj1
+asic_320ks
+asic_320k
+rajat24
+rajat21
+nxp1
+rajat29
+rajat30
+pre2
+asic_680ks
+asic_680k
+g3_circuit
+memchip
+freescale1
+circuit5m_dc
+rajat31
+circuit5m

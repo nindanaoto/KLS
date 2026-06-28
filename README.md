@@ -1314,6 +1314,16 @@ medium caps, including the largest KLU/NICSLU/SubtreeLU labels:
 python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_paper_large_manifest.txt --out data/suitesparse-paper-large
 ```
 
+For SubtreeLU-specific tuning, `bench/suitesparse_subtreelu_manifest.txt`
+contains the exact 46 public SuiteSparse circuit labels from SubtreeLU Fig. 7.
+Fetch it into its own directory when running the full set, so the suite runners
+see one matrix per basename:
+
+```sh
+python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_subtreelu_manifest.txt --out data/suitesparse-subtreelu
+python3 scripts/audit_paper_manifest.py --manifest bench/suitesparse_subtreelu_manifest.txt --source SubtreeLU
+```
+
 Use the medium paper suite as the normal inner loop for solver-policy changes.
 Use the large supplement as an overnight or pre-merge generalization gate with
 explicit timeouts; a retained change should improve the paper geomean or a

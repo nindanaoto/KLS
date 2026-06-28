@@ -193,11 +193,19 @@ def main() -> int:
         type=pathlib.Path,
         default=pathlib.Path("bench/suitesparse_paper_manifest.txt"),
     )
+    parser.add_argument(
+        "--source",
+        choices=sorted(EXPECTED_BY_SOURCE),
+        action="append",
+        help="limit coverage checks to one paper/source; may be repeated",
+    )
     args = parser.parse_args()
 
     manifest_names = load_manifest(args.manifest)
     failed = False
-    for source, expected in EXPECTED_BY_SOURCE.items():
+    selected_sources = args.source if args.source is not None else EXPECTED_BY_SOURCE
+    for source in selected_sources:
+        expected = EXPECTED_BY_SOURCE[source]
         missing = sorted({normalize(name) for name in expected} - manifest_names)
         if missing:
             failed = True
