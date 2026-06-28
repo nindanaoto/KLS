@@ -7815,3 +7815,20 @@ The source was reverted. The result reinforces that the dynamic-pivot rebuild
 path has hidden state-ordering requirements; fixing the `pre2` reset sample
 needs a designed pivot-aware row/supernode representation, not a storage-reuse
 shortcut around the current cache rebuild.
+
+A more paper-aligned active-rank pivot prototype was also rejected. Instead of
+resetting supernode metadata inside the pipeline worker after a dynamic pivot,
+the worker aborted the active-rank phase before appending/exchanging the pivot
+row and asked the existing restartable suffix logic to refactor that row
+serially. This matches CKTSO's preference for restarting the dependent tail
+after a pivot more directly than doing a full reset while peer workers wait,
+and `ASIC_320k` remained residual-clean
+(`build/kls_asic320k_active_pivot_abort_t4_factor.json`, `2.3335s` initial
+factor, `1.509e-15` relative residual). The same change made the sensitive
+forced KLS-first/no-fast `rajat29` probe fail setup as singular with an empty
+JSON file
+(`build/kls_rajat29_active_pivot_abort_nofast_t4_factor_timeout90.json`), so
+the source was reverted. The existing active-rank pipeline restart path is not
+yet semantically equivalent to the in-worker pivot path; a correct CKTSO-style
+pivot-tail restart needs explicit state transfer for the active-rank
+dependency/panel state, not just an earlier `KLS_ROW_FIRST_PIPELINE_FAIL_PIVOT`.
