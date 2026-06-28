@@ -1303,18 +1303,26 @@ int main(int argc, char **argv) {
            stats.kls_first_row_panel_cache_append_entries);
     printf(",\"kls_first_last_row_supernode_update\":%d"
            ",\"kls_first_row_supernode_update_run_count\":%" PRId64
+           ",\"kls_first_row_supernode_update_groups\":%" PRId64
+           ",\"kls_first_row_supernode_update_rows\":%" PRId64
            ",\"kls_first_last_row_supernode_update_groups\":%" PRId64
            ",\"kls_first_last_row_supernode_update_rows\":%" PRId64
            ",\"kls_first_last_row_supernode_panel_update\":%d"
            ",\"kls_first_row_supernode_panel_update_run_count\":%" PRId64
+           ",\"kls_first_row_supernode_panel_update_groups\":%" PRId64
+           ",\"kls_first_row_supernode_panel_update_rows\":%" PRId64
            ",\"kls_first_last_row_supernode_panel_update_groups\":%" PRId64
            ",\"kls_first_last_row_supernode_panel_update_rows\":%" PRId64,
            stats.kls_first_last_row_supernode_update,
            stats.kls_first_row_supernode_update_run_count,
+           stats.kls_first_row_supernode_update_groups,
+           stats.kls_first_row_supernode_update_rows,
            stats.kls_first_last_row_supernode_update_groups,
            stats.kls_first_last_row_supernode_update_rows,
            stats.kls_first_last_row_supernode_panel_update,
            stats.kls_first_row_supernode_panel_update_run_count,
+           stats.kls_first_row_supernode_panel_update_groups,
+           stats.kls_first_row_supernode_panel_update_rows,
            stats.kls_first_last_row_supernode_panel_update_groups,
            stats.kls_first_last_row_supernode_panel_update_rows);
     printf(",\"kls_first_last_separator_queue_parallel_pipeline\":%d"
@@ -2195,15 +2203,23 @@ int main(int argc, char **argv) {
            stats.kls_first_row_panel_cache_append_panels,
            stats.kls_first_row_panel_cache_append_entries);
     printf("KLS row-up-looking supernode updates: last %d"
-           ", runs %" PRId64 ", groups %" PRId64 ", rows %" PRId64 "\n",
+           ", runs %" PRId64 ", total groups %" PRId64
+           ", total rows %" PRId64 ", last groups %" PRId64
+           ", last rows %" PRId64 "\n",
            stats.kls_first_last_row_supernode_update,
            stats.kls_first_row_supernode_update_run_count,
+           stats.kls_first_row_supernode_update_groups,
+           stats.kls_first_row_supernode_update_rows,
            stats.kls_first_last_row_supernode_update_groups,
            stats.kls_first_last_row_supernode_update_rows);
     printf("KLS row-up-looking supernode panels: last %d"
-           ", runs %" PRId64 ", groups %" PRId64 ", rows %" PRId64 "\n",
+           ", runs %" PRId64 ", total groups %" PRId64
+           ", total rows %" PRId64 ", last groups %" PRId64
+           ", last rows %" PRId64 "\n",
            stats.kls_first_last_row_supernode_panel_update,
            stats.kls_first_row_supernode_panel_update_run_count,
+           stats.kls_first_row_supernode_panel_update_groups,
+           stats.kls_first_row_supernode_panel_update_rows,
            stats.kls_first_last_row_supernode_panel_update_groups,
            stats.kls_first_last_row_supernode_panel_update_rows);
     printf("KLS row-up-looking dynamic column pivots: last %" PRId64

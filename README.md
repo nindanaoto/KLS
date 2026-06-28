@@ -861,7 +861,17 @@ prefactor diagnostics remain reported through `row_refactor_last_prefactor`,
 `row_refactor_last_prefactor_rows`, `row_refactor_last_prefactor_deps`,
 cumulative `row_refactor_prefactor_*`, and the corresponding
 `row_refactor_prefactor_supernode_*` counters; exact row-dependency runs should
-leave those counters at zero. Row-pattern analysis also records
+leave those counters at zero.
+
+KLS-first row-up-looking factorization reports cumulative
+`kls_first_row_supernode_update_groups` and
+`kls_first_row_supernode_update_rows`, plus the panel-backed subset as
+`kls_first_row_supernode_panel_update_groups` and
+`kls_first_row_supernode_panel_update_rows`. These cumulative counters remain
+useful when later fallback or refactor bookkeeping clears the volatile
+`kls_first_last_row_supernode_*` fields.
+
+Row-pattern analysis also records
 `row_refactor_input_cleanup_rows`
 and `row_refactor_input_cleanup_entries`; rows whose input columns are already
 covered by `L`, the pivot, or `U` skip the redundant residual cleanup loop in

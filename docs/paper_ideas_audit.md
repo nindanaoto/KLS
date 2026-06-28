@@ -7518,3 +7518,27 @@ The same fallback-cleanup source was also checked in the CBLAS-enabled tree.
 `build-cblas/kls_asic320k_common_restore_cblas_on_t4_factor.json`. Both runs
 reported `build_has_cblas=true` and zero external CBLAS update counters, so the
 current-source BLAS guard conclusion is unchanged.
+
+The row-first supernode diagnostics were strengthened because the volatile
+`kls_first_last_row_supernode_*` fields can be cleared by later fallback or
+refactor bookkeeping even when the KLS-first attempt did use the row-supernode
+executor. KLS now reports cumulative
+`kls_first_row_supernode_update_groups`/`rows` and the panel-backed subset in
+`kls_first_row_supernode_panel_update_groups`/`rows`. On a focused
+`ASIC_320k` forced KLS-first factor-only run,
+`build/kls_asic320k_rowstats_final_t4_factor.json` measured `2.25258371s`
+initial factor with `1.50913325e-15` relative residual and reported `93365`
+row-supernode groups over `978512` rows. The panel-backed subset was `42656`
+groups over `779428` rows, about `18.27` rows per panel group. This rejects the
+idea that the completed `ASIC_320k` row-first path is dominated only by
+width-2/3 producer runs; the next CKTSO/SubtreeLU gap remains the arithmetic
+and synchronization cost of the existing row-supernode executor.
+
+A direct portable cached-panel row-major accumulation prototype was also
+rejected. It accumulated dense-suffix and tail updates into worker scratch with
+producer-row-major loops before scattering, matching the shape of a native
+`gemv`, but on the same `ASIC_320k` controls it regressed initial factor time
+from `2.30488623s` to `2.38630384s` for forced KLS-first and from
+`2.29399475s` to `2.38004146s` for forced KLS-first/no-fast, with unchanged
+residuals and nearly identical group counts. The source was reverted, leaving
+only the cumulative diagnostics.

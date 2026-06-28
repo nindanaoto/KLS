@@ -725,6 +725,8 @@ struct kls_solver {
   UF_long kls_first_row_panel_cache_append_entries;
   int kls_first_last_row_supernode_update;
   UF_long kls_first_row_supernode_update_run_count;
+  UF_long kls_first_row_supernode_update_groups;
+  UF_long kls_first_row_supernode_update_rows;
   UF_long kls_first_last_row_supernode_update_groups;
   UF_long kls_first_last_row_supernode_update_rows;
   UF_long kls_first_last_dynamic_column_pivots;
@@ -782,6 +784,8 @@ struct kls_solver {
   UF_long kls_first_last_separator_queue_pipeline_supernode_panel_update_rows;
   int kls_first_last_row_supernode_panel_update;
   UF_long kls_first_row_supernode_panel_update_run_count;
+  UF_long kls_first_row_supernode_panel_update_groups;
+  UF_long kls_first_row_supernode_panel_update_rows;
   UF_long kls_first_last_row_supernode_panel_update_groups;
   UF_long kls_first_last_row_supernode_panel_update_rows;
   int kls_first_last_separator_queue_pipeline_pivot_tail;
@@ -12747,6 +12751,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->kls_first_last_row_supernode_update;
   solver->stats.kls_first_row_supernode_update_run_count =
     (int64_t)solver->kls_first_row_supernode_update_run_count;
+  solver->stats.kls_first_row_supernode_update_groups =
+    (int64_t)solver->kls_first_row_supernode_update_groups;
+  solver->stats.kls_first_row_supernode_update_rows =
+    (int64_t)solver->kls_first_row_supernode_update_rows;
   solver->stats.kls_first_last_row_supernode_update_groups =
     (int64_t)solver->kls_first_last_row_supernode_update_groups;
   solver->stats.kls_first_last_row_supernode_update_rows =
@@ -12755,6 +12763,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->kls_first_last_row_supernode_panel_update;
   solver->stats.kls_first_row_supernode_panel_update_run_count =
     (int64_t)solver->kls_first_row_supernode_panel_update_run_count;
+  solver->stats.kls_first_row_supernode_panel_update_groups =
+    (int64_t)solver->kls_first_row_supernode_panel_update_groups;
+  solver->stats.kls_first_row_supernode_panel_update_rows =
+    (int64_t)solver->kls_first_row_supernode_panel_update_rows;
   solver->stats.kls_first_last_row_supernode_panel_update_groups =
     (int64_t)solver->kls_first_last_row_supernode_panel_update_groups;
   solver->stats.kls_first_last_row_supernode_panel_update_rows =
@@ -52969,6 +52981,10 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
   if (shared.row_supernode_update_groups > 0u) {
     solver->kls_first_last_row_supernode_update = 1;
     solver->kls_first_row_supernode_update_run_count++;
+    kls_row_first_stats_add(&solver->kls_first_row_supernode_update_groups,
+                            shared.row_supernode_update_groups);
+    kls_row_first_stats_add(&solver->kls_first_row_supernode_update_rows,
+                            shared.row_supernode_update_rows);
     solver->kls_first_last_row_supernode_update_groups =
       shared.row_supernode_update_groups;
     solver->kls_first_last_row_supernode_update_rows =
@@ -52977,6 +52993,12 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
   if (shared.row_supernode_panel_update_groups > 0u) {
     solver->kls_first_last_row_supernode_panel_update = 1;
     solver->kls_first_row_supernode_panel_update_run_count++;
+    kls_row_first_stats_add(
+      &solver->kls_first_row_supernode_panel_update_groups,
+      shared.row_supernode_panel_update_groups);
+    kls_row_first_stats_add(
+      &solver->kls_first_row_supernode_panel_update_rows,
+      shared.row_supernode_panel_update_rows);
     solver->kls_first_last_row_supernode_panel_update_groups =
       shared.row_supernode_panel_update_groups;
     solver->kls_first_last_row_supernode_panel_update_rows =
@@ -53990,6 +54012,10 @@ fail_block_entries:
   if (row_supernode_update_groups > 0u) {
     solver->kls_first_last_row_supernode_update = 1;
     solver->kls_first_row_supernode_update_run_count++;
+    kls_row_first_stats_add(&solver->kls_first_row_supernode_update_groups,
+                            row_supernode_update_groups);
+    kls_row_first_stats_add(&solver->kls_first_row_supernode_update_rows,
+                            row_supernode_update_rows);
     solver->kls_first_last_row_supernode_update_groups =
       row_supernode_update_groups;
     solver->kls_first_last_row_supernode_update_rows =
@@ -53998,6 +54024,11 @@ fail_block_entries:
   if (row_supernode_panel_update_groups > 0u) {
     solver->kls_first_last_row_supernode_panel_update = 1;
     solver->kls_first_row_supernode_panel_update_run_count++;
+    kls_row_first_stats_add(
+      &solver->kls_first_row_supernode_panel_update_groups,
+      row_supernode_panel_update_groups);
+    kls_row_first_stats_add(&solver->kls_first_row_supernode_panel_update_rows,
+                            row_supernode_panel_update_rows);
     solver->kls_first_last_row_supernode_panel_update_groups =
       row_supernode_panel_update_groups;
     solver->kls_first_last_row_supernode_panel_update_rows =
