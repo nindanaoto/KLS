@@ -7795,3 +7795,23 @@ METIS `pre2` factor probe still timed out at 120s with an empty JSON file
 (`build/kls_pre2_metis_defer_cached_scratch_t4_factor_timeout120.json`), so
 this is a retained executor hygiene improvement, not the missing CKTSO-scale
 row/supernode numeric engine.
+
+A follow-up GDB interrupt of the current forced-METIS `pre2` run still sampled
+one active pipeline worker in `kls_row_first_supernodes_reset`, with peer
+pipeline workers waiting on the condition variable and the parent joining
+(`build/pre2_current_defer_scratch_gdb_interrupt.txt`). That made private
+panel-cache rebuild storage reuse look attractive: keep the dynamic-pivot
+rebuild semantics, but avoid freeing/reallocating `panel_id_by_row`, dense
+panel, tail, and panel metadata arrays every time
+`kls_row_first_supernode_panel_cache_build` is called. The prototype was
+rejected for correctness. Reusing arrays, then adding back dense zeroing to
+match the old `calloc`, and then adding full `panel_id_by_row` clearing still
+made the sensitive forced KLS-first/no-fast `rajat29` probe fail setup as
+singular with empty JSON files
+(`build/kls_rajat29_reuse_panel_build_nofast_t4_factor_timeout90.json`,
+`build/kls_rajat29_reuse_panel_build_zero_nofast_t4_factor_timeout90.json`,
+`build/kls_rajat29_reuse_panel_build_fullclear_nofast_t4_factor_timeout90.json`).
+The source was reverted. The result reinforces that the dynamic-pivot rebuild
+path has hidden state-ordering requirements; fixing the `pre2` reset sample
+needs a designed pivot-aware row/supernode representation, not a storage-reuse
+shortcut around the current cache rebuild.
