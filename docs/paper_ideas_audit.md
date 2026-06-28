@@ -6772,3 +6772,19 @@ same-session reverted control measured `12.5034s` in
 `build/kls_lindex_cached_scatter_control_gap2_t4_r1_ref20_timeout120.jsonl`.
 The source stayed reverted. This keeps attention on coarser row/supernode
 execution rather than per-dependency pointer plumbing.
+
+The BLAS small-case guard hypothesis was rechecked with a CBLAS-capable build
+on the same top-ten CKTSO-gap focus set. `build-cblas` was configured with
+`-DKLS_ENABLE_CBLAS_SUPERNODE=ON`, then run once with
+`KLS_ENABLE_CBLAS_SUPERNODE=0` and once with `=1`. The disabled control measured
+`2.50754s` geomean in
+`build-cblas/kls_cblas_off_gap10_t4_r1_ref3_timeout120.jsonl`; the enabled run
+measured `2.57907s` in
+`build-cblas/kls_cblas_on_gap10_t4_r1_ref3_timeout120.jsonl`. Both artifacts
+reported `build_has_cblas=true` on all ten rows, but the enabled run still
+reported zero `refactor_supernode_cblas_update_run_count`, zero compact
+supernode GEMV/TRSV counts, and zero blocked dense-panel CBLAS runs on every
+row. The current BLAS path is already compile-time optional, runtime gated, and
+large-work gated, so adding another small-case guard cannot close the observed
+CKTSO gap. The slow rows are not paying small BLAS-call overhead; they are not
+using BLAS at all.
