@@ -7542,3 +7542,22 @@ from `2.30488623s` to `2.38630384s` for forced KLS-first and from
 `2.29399475s` to `2.38004146s` for forced KLS-first/no-fast, with unchanged
 residuals and nearly identical group counts. The source was reverted, leaving
 only the cumulative diagnostics.
+
+The small-BLAS hypothesis was rechecked once more on the current CBLAS-capable
+top-five CKTSO-gap focus. The default runtime switch comparison measured
+`1.49142089s` geomean with `KLS_ENABLE_CBLAS_SUPERNODE=0` and `1.39728323s`
+with `KLS_ENABLE_CBLAS_SUPERNODE=1` in
+`build-cblas/kls_cblas_guard_off_current_top5_t4_r1_ref3_p1_timeout120.jsonl`
+and
+`build-cblas/kls_cblas_guard_on_current_top5_t4_r1_ref3_p1_timeout120.jsonl`,
+but both runs reported zero EGraph panel, blocked, cached-probe, and CBLAS
+update counters. Forcing the only relevant bridge with
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached` and
+`KLS_ENABLE_CBLAS_SUPERNODE=1` measured `1.48961453s` in
+`build-cblas/kls_cblas_cached_current_top5_t4_r1_ref3_p1_timeout120.jsonl`;
+that run built panels and applied native blocked updates, but still reported
+zero CBLAS updates. This leaves no useful "only use BLAS for large cases" patch
+to retain: the large-case CBLAS gates already exist, and the active CKTSO-gap
+path either does not enter the panel bridge or uses native blocked panel work.
+The remaining paper-level gap is still the row/supernode numeric executor and
+its coarse producer/consumer scheduling, not another BLAS threshold.
