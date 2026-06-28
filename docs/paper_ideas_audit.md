@@ -7292,3 +7292,26 @@ inside the private row worker
 (`build/pre2_metis_fit_memo_gdb_interrupt.txt`). The remaining visible gap is
 therefore the cached row-supernode update itself and its heap/state movement,
 not repeated adjacent-tail validation.
+
+The next retained row-supernode executor cleanup removes another transient heap
+operation from validated same-run updates. When a cached or compact
+row-supernode run introduces a later dependency that is still inside the same
+run, KLS no longer pushes that dependency into the row dependency heap just to
+pop it before applying the next row of the run. A small consume helper still
+pops dependencies that were already present in the heap and still rejects a
+smaller unexpected root, so the change is limited to dependencies created by
+the current validated run.
+
+The same build and smoke checks passed again. On `ASIC_320k` forced KLS-first,
+the post-memoization control in
+`build/kls_asic320k_fit_memo_after_baseline_t4_factor.json` measured
+`2.32290521s` initial factor, while the same-run heap-elision build measured
+`2.27882813s` with the same `2.61575448e-15` relative residual in
+`build/kls_asic320k_same_run_heap_elide_t4_factor.json`. The hard `pre2`
+forced KLS-first run still timed out at 120s
+(`build/kls_pre2_metis_heap_elide_t4_factor_timeout120.json`), but the GDB
+sample no longer showed `kls_row_first_heap_pop`; it moved into
+`kls_row_first_partial_apply_supernode_run` itself
+(`build/pre2_metis_heap_elide_gdb_interrupt.txt`). The remaining visible gap is
+now inside the cached supernode arithmetic/state update body rather than
+avoidable heap maintenance for same-run internal dependencies.

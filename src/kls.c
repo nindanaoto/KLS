@@ -44518,6 +44518,23 @@ static UF_long kls_row_first_heap_pop(UF_long *heap, UF_long *size) {
   return result;
 }
 
+static int kls_row_first_heap_consume_ready_dep(UF_long *heap,
+                                                UF_long *size,
+                                                UF_long dep) {
+  if (heap == NULL || size == NULL) {
+    return 0;
+  }
+  if (*size == 0u) {
+    return 1;
+  }
+  const UF_long root = heap[0];
+  if (root == dep) {
+    const UF_long popped = kls_row_first_heap_pop(heap, size);
+    return popped == dep;
+  }
+  return root > dep;
+}
+
 static int kls_row_first_exchange_columns(kls_row_first_entries *u_entries,
                                           UF_long *q_order,
                                           UF_long *col_pos,
@@ -48041,7 +48058,6 @@ static int kls_row_first_partial_apply_supernode_run_cached_cblas(
       }
       mark[dep] = generation;
       pattern[state->pattern_count++] = dep;
-      kls_row_first_heap_push(dep_heap, &state->dep_heap_size, dep);
       x[dep] = 0.0;
     }
   }
@@ -48054,12 +48070,8 @@ static int kls_row_first_partial_apply_supernode_run_cached_cblas(
   for (UF_long local = 0; local < run_limit; ++local) {
     const UF_long dep = dep_begin + local;
     if (local > 0u) {
-      if (state->dep_heap_size == 0u || dep_heap[0] != dep) {
-        return -1;
-      }
-      const UF_long popped =
-        kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
-      if (popped != dep) {
+      if (!kls_row_first_heap_consume_ready_dep(
+            dep_heap, &state->dep_heap_size, dep)) {
         return -1;
       }
     }
@@ -48179,7 +48191,6 @@ static int kls_row_first_partial_apply_supernode_run_cached_portable(
       }
       mark[dep] = generation;
       pattern[state->pattern_count++] = dep;
-      kls_row_first_heap_push(dep_heap, &state->dep_heap_size, dep);
       x[dep] = 0.0;
     }
   }
@@ -48199,12 +48210,8 @@ static int kls_row_first_partial_apply_supernode_run_cached_portable(
   for (UF_long local = 0; local < run_limit; ++local) {
     const UF_long dep = dep_begin + local;
     if (local > 0u) {
-      if (state->dep_heap_size == 0u || dep_heap[0] != dep) {
-        return -1;
-      }
-      const UF_long popped =
-        kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
-      if (popped != dep) {
+      if (!kls_row_first_heap_consume_ready_dep(
+            dep_heap, &state->dep_heap_size, dep)) {
         return -1;
       }
     }
@@ -48397,12 +48404,8 @@ static int kls_row_first_partial_apply_supernode_run_cached(
     const UF_long panel_local = panel_offset + local;
     if (local > 0u) {
       if (mark[dep] != generation ||
-          state->dep_heap_size == 0u || dep_heap[0] != dep) {
-        return -1;
-      }
-      const UF_long popped =
-        kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
-      if (popped != dep) {
+          !kls_row_first_heap_consume_ready_dep(
+            dep_heap, &state->dep_heap_size, dep)) {
         return -1;
       }
     }
@@ -48425,9 +48428,6 @@ static int kls_row_first_partial_apply_supernode_run_cached(
         if (mark[col] != generation) {
           mark[col] = generation;
           pattern[state->pattern_count++] = col;
-          if (col < state->row) {
-            kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
-          }
           x[col] = 0.0;
         }
         x[col] -= lij * value;
@@ -48565,12 +48565,8 @@ static int kls_row_first_partial_apply_supernode_run_compact(
     const UF_long dep = dep_begin + local;
     if (local > 0u) {
       if (mark[dep] != generation ||
-          state->dep_heap_size == 0u || dep_heap[0] != dep) {
-        return -1;
-      }
-      const UF_long popped =
-        kls_row_first_heap_pop(dep_heap, &state->dep_heap_size);
-      if (popped != dep) {
+          !kls_row_first_heap_consume_ready_dep(
+            dep_heap, &state->dep_heap_size, dep)) {
         return -1;
       }
     }
@@ -48589,9 +48585,6 @@ static int kls_row_first_partial_apply_supernode_run_compact(
       if (mark[col] != generation) {
         mark[col] = generation;
         pattern[state->pattern_count++] = col;
-        if (col < state->row) {
-          kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
-        }
         x[col] = 0.0;
       }
       x[col] -= lij * published_u_entries->value[row_begin + offset];
