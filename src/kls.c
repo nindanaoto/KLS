@@ -56,6 +56,10 @@
 #define KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY \
   KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY
 #define KLS_ROW_REFACTOR_CBLAS_PANEL_MIN_WORK 20000000.0
+#define KLS_EGRAPH_CACHED_SUPERNODE_MIN_ROWS 16u
+#define KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK 512.0
+#define KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK_PER_ENTRY \
+  KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY
 #define KLS_EGRAPH_SCALAR_SUPERNODE_UPDATE_MAX_WIDTH 256u
 #define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
@@ -25084,6 +25088,24 @@ static int kls_multi_producer_supernode_env_enabled(void) {
   return !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_egraph_cached_supernode_update_allows(
+  UF_long run_rows,
+  UF_long dense_cols,
+  UF_long trailing_len) {
+  if (run_rows < KLS_EGRAPH_CACHED_SUPERNODE_MIN_ROWS) {
+    return 0;
+  }
+  const double work =
+    0.5 * (double)run_rows * (double)(run_rows - 1u) +
+    (double)run_rows * (double)dense_cols +
+    (double)run_rows * (double)trailing_len;
+  const double copied_entries =
+    (double)run_rows + (double)dense_cols + (double)trailing_len;
+  return work >= KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK &&
+         work >= KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK_PER_ENTRY *
+                   copied_entries;
+}
+
 #ifdef KLS_HAVE_CBLAS
 static int kls_cblas_supernode_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_CBLAS_SUPERNODE");
@@ -38476,6 +38498,12 @@ static int kls_egraph_apply_cached_supernode_blocked(
     return 0;
   }
 
+  const UF_long dense_scatter_len = width - available_end;
+  if (!kls_egraph_cached_supernode_update_allows(
+        run_rows, dense_scatter_len, trailing_len)) {
+    return 0;
+  }
+
   for (UF_long block_begin = 0u; block_begin < run_rows;
        block_begin += KLS_ROW_REFACTOR_CBLAS_BLOCK_ROWS) {
     UF_long block_end = block_begin + KLS_ROW_REFACTOR_CBLAS_BLOCK_ROWS;
@@ -38529,7 +38557,7 @@ static int kls_egraph_apply_cached_supernode_blocked(
   }
 
   const UF_long trsv_entries = (run_rows * (run_rows - 1u)) / 2u;
-  const UF_long dense_scatter_entries = run_rows * (width - available_end);
+  const UF_long dense_scatter_entries = run_rows * dense_scatter_len;
   const UF_long trailing_entries = run_rows * trailing_len;
   kls_egraph_record_supernode_blocked_update(
     shared, run_rows, trsv_entries + dense_scatter_entries +
@@ -38615,6 +38643,11 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
     if (ui[up + local] != dep_local + local) {
       return 0;
     }
+  }
+  const UF_long dense_scatter_len = width - available_end;
+  if (!kls_egraph_cached_supernode_update_allows(
+        run_rows, dense_scatter_len, trailing_len)) {
+    return 0;
   }
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(double));

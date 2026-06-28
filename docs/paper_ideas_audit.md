@@ -6350,3 +6350,25 @@ The opt-in path executed thousands of panel updates on those rows, so this is
 not an inactive feature or BLAS-threshold artifact. It is the wrong granularity
 for the current column EGraph executor until the row-major/supernodal storage
 path can amortize panel construction and consumption across coarser tasks.
+
+A small-work guard was added to the opt-in cached EGraph panel update path to
+test the remaining "small BLAS call" hypothesis without enabling any system
+BLAS dependency. CBLAS calls were already build-time optional, runtime gated,
+and size/work gated; the normal benchmark build still reports
+`build_has_cblas=false`. The new native cached-panel gate skips retained-panel
+updates before workspace allocation unless the dependency run has at least 16
+contiguous rows, at least 512 estimated triangular/update operations, and at
+least 8 estimated operations per staged panel/trailing entry. This removed the
+obvious tiny-update pathology: on `ASIC_320k`, the opt-in path dropped from
+`502` blocked cached updates over `1006` rows to zero blocked cached updates
+(`2` scalar supernode updates remained). It improved the cached-panel opt-in
+top-ten geomean only from `4.5505s` to `4.5126s`, still `1.1717x` slower than
+the stable default top-ten common rows at `3.8514s`
+(`build/kls_egraph_supernode_cache_reuse_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_egraph_supernode_workgate_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_current_gap20_t4_r1_ref20_timeout120.jsonl`). The guard is a useful
+scaffold cleanup and stays behind `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1`, but
+it confirms that small BLAS/panel-call overhead is not the large missing piece;
+large retained-panel updates on `ASIC_320ks` and `G2_circuit` still regress
+because the current executor has not yet moved to the paper-level
+row/supernode numeric algorithm.

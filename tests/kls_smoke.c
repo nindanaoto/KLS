@@ -6083,11 +6083,14 @@ static int test_egraph_cached_supernode_blocked_update(void) {
          stats.refactor_supernode_panel_count ||
        stats.refactor_last_supernode_update_runs < 1 ||
        stats.refactor_last_supernode_update_rows < panel_width ||
-       stats.refactor_last_supernode_blocked_update_runs !=
+       stats.refactor_last_supernode_blocked_update_runs < 1 ||
+       stats.refactor_last_supernode_blocked_update_runs >
          stats.refactor_last_supernode_update_runs ||
-       stats.refactor_last_supernode_blocked_update_rows !=
+       stats.refactor_last_supernode_blocked_update_rows < panel_width ||
+       stats.refactor_last_supernode_blocked_update_rows >
          stats.refactor_last_supernode_update_rows ||
-       stats.refactor_last_supernode_blocked_update_entries !=
+       stats.refactor_last_supernode_blocked_update_entries <= 0 ||
+       stats.refactor_last_supernode_blocked_update_entries >
          stats.refactor_last_supernode_update_entries ||
        stats.refactor_supernode_blocked_update_run_count <
          stats.refactor_last_supernode_blocked_update_runs ||
