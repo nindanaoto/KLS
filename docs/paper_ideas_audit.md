@@ -6002,6 +6002,21 @@ row-first pivot-restart path no longer calls `kls_row_first_supernodes_reset`
 immediately before `kls_row_first_pipeline_rebuild_prefix_panel_cache`, because
 the rebuild helper resets the same prefix before rebuilding the cache.
 
+A later CBLAS fallback audit did find one exact policy hole, but not the
+CKTSO-gap cause. Checked compact dense panels used to skip the native blocked
+kernel whenever `KLS_ENABLE_CBLAS_SUPERNODE=1`, even for panels too small for
+any guarded CBLAS row update. KLS now only suppresses the checked native blocked
+kernel when at least one row in the panel can pass the same structural and
+minimum-work CBLAS gate. The normal and CBLAS smoke suites pass with a small
+checked-panel fixture forcing the runtime CBLAS gate on and requiring native
+blocked-panel stats. A current same-binary top-ten CBLAS rerun still reports
+zero CBLAS and compact blocked-panel counters in both gate states
+(`build-cblas/kls_cblas_on_checked_guard_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build-cblas/kls_cblas_off_checked_guard_gap10_t4_r1_ref3_timeout120.jsonl`),
+with geomeans `4.0457s` on and `4.0592s` off. The remaining top-ten signal is
+therefore still the column/EGraph repeated-refactor path and missing row-major
+executor coverage, not small BLAS calls.
+
 KLS now exposes row-first panel-cache staging counters so the next
 SubtreeLU/CKTSO storage work can be separated from actual cached-panel
 consumption. Public stats and `kls_bench` JSON report

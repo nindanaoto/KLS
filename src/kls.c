@@ -24739,6 +24739,36 @@ static int kls_cblas_dense_panel_row_update_allows(UF_long local_row,
     (double)local_row + (double)right_len + (double)trailing_len;
   return kls_cblas_work_allows(work, copied_entries);
 }
+
+static int kls_cblas_dense_panel_checked_row_update_may_apply(
+  UF_long width,
+  UF_long trailing_len) {
+  if (width <= KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS ||
+      width > (UF_long)INT_MAX ||
+      trailing_len > (UF_long)INT_MAX) {
+    return 0;
+  }
+
+  const UF_long min_vector = KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS;
+  const UF_long local_row_min = min_vector;
+  UF_long local_row_max = width - 1u;
+  if (trailing_len < min_vector) {
+    const UF_long min_right = min_vector - trailing_len;
+    if (width <= min_right) {
+      return 0;
+    }
+    const UF_long max_by_right = width - min_right - 1u;
+    if (local_row_max > max_by_right) {
+      local_row_max = max_by_right;
+    }
+  }
+  if (local_row_max < local_row_min) {
+    return 0;
+  }
+
+  return kls_cblas_dense_panel_row_update_allows(
+    local_row_max, width - local_row_max - 1u, trailing_len);
+}
 #endif
 
 static int kls_first_factor_env_enabled(void) {
@@ -30758,8 +30788,11 @@ static int kls_compact_dense_panel_factor_blocked_checked(
       (trailing_len > 0u && trailing_panel == NULL)) {
     return 0;
   }
+  const UF_long width = row_end - row_begin;
 #ifdef KLS_HAVE_CBLAS
-  if (kls_cblas_supernode_env_enabled()) {
+  if (kls_cblas_supernode_env_enabled() &&
+      kls_cblas_dense_panel_checked_row_update_may_apply(width,
+                                                         trailing_len)) {
     return 0;
   }
 #endif
@@ -30772,7 +30805,6 @@ static int kls_compact_dense_panel_factor_blocked_checked(
     kls_egraph_refactor_record_invalid(shared);
     return -1;
   }
-  const UF_long width = row_end - row_begin;
   if (width <= 1u) {
     return 0;
   }

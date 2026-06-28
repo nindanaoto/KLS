@@ -11706,8 +11706,8 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=0");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
-    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
+  if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=1");
     ok = 0;
   }
   if (ok && !require_ok(kls_factor(checked_solver, ax1),
@@ -11751,12 +11751,18 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
              checked_stats.row_refactor_last_partial_supernode_pipeline != 1 ||
              checked_stats.row_refactor_last_done_bitmap != 1 ||
              checked_stats.row_refactor_last_compact_dense_panel != 1 ||
+             checked_stats.row_refactor_last_compact_dense_panel_blocked != 1 ||
+             checked_stats.row_refactor_compact_dense_panel_blocked_run_count < 1 ||
+             checked_stats.row_refactor_compact_dense_panel_blocked_rows <
+               expected_partial_rows ||
+             checked_stats.row_refactor_compact_dense_panel_blocked_entries <= 0 ||
              checked_stats.row_refactor_last_compact_supernode_update != 1 ||
              checked_stats.row_refactor_compact_supernode_update_rows <
                expected_partial_rows)) {
     fprintf(stderr,
             "unexpected checked partial-prefix stats: last=%d/%d/%d"
-            ", partial=%d, done=%d, compact=%d, update=%d/%" PRId64
+            ", partial=%d, done=%d, compact=%d, blocked=%d/%" PRId64
+            "/%" PRId64 "/%" PRId64 ", update=%d/%" PRId64
             ", partial_update=%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
             checked_stats.row_refactor_last_run,
             checked_stats.row_refactor_last_checked,
@@ -11764,6 +11770,10 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
             checked_stats.row_refactor_last_partial_supernode_pipeline,
             checked_stats.row_refactor_last_done_bitmap,
             checked_stats.row_refactor_last_compact_dense_panel,
+            checked_stats.row_refactor_last_compact_dense_panel_blocked,
+            checked_stats.row_refactor_compact_dense_panel_blocked_run_count,
+            checked_stats.row_refactor_compact_dense_panel_blocked_rows,
+            checked_stats.row_refactor_compact_dense_panel_blocked_entries,
             checked_stats.row_refactor_last_compact_supernode_update,
             checked_stats.row_refactor_compact_supernode_update_rows,
             checked_stats.row_refactor_last_compact_supernode_partial_update,
