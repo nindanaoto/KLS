@@ -627,6 +627,10 @@ typedef struct kls_stats {
   int64_t kls_first_row_panel_cache_append_count;
   int64_t kls_first_row_panel_cache_append_panels;
   int64_t kls_first_row_panel_cache_append_entries;
+  double row_refactor_auto_lower_bound_work;
+  int row_refactor_auto_lower_bound_rejected;
+  int row_refactor_auto_pattern_build_failed;
+  int row_refactor_auto_value_copy_failed;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

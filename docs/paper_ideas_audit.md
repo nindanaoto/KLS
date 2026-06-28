@@ -3605,7 +3605,24 @@ The gate is now visible in `kls_stats` and benchmark JSON through
 `row_refactor_auto_values_ready`, `row_refactor_auto_work_allowed`, and
 `row_refactor_auto_should_run`, so future KLS-first comparisons can explain
 whether the row-major path was skipped because the paper-style work model
-rejected it.
+rejected it. Follow-up diagnostics split that skipped state into
+`row_refactor_auto_lower_bound_work`,
+`row_refactor_auto_lower_bound_rejected`,
+`row_refactor_auto_pattern_build_failed`, and
+`row_refactor_auto_value_copy_failed`, so the CKTSO-gap runs can distinguish a
+cheap lower-bound rejection from an inability to build or populate the
+row-major refactor mirrors.
+A 2026-06-28 focused top-ten CKTSO-gap rerun with these diagnostics
+(`build/kls_auto_reject_diag_gap10_t4_r1_ref3_timeout120.jsonl`) produced a
+`3.998s` geomean and showed the row-refactor model recommended and attempted
+the handoff on 9 of 10 matrices, but every attempted handoff was rejected by the
+lower-bound work scan. The lower-bound estimates were only about `1.00x` to
+`1.01x` above the exact EGraph dependency work, and both
+`row_refactor_auto_pattern_build_failed` and
+`row_refactor_auto_value_copy_failed` stayed zero. This makes the current gap
+more concrete: the default slow cases are not reaching BLAS-backed or native
+row panels at all; KLS still lacks a row-major refactor algorithm whose
+structural work model clearly beats the EGraph scatter path on these patterns.
 A same-session 20-matrix CKTSO-gap probe compared this gated KLS-first mode
 with `--kls-first-factor off` at 4 threads and 3 refactors. The geomean ratio
 was about 1.01x, with wins on `ASIC_100k`, `rajat15`, `onetone1`, and

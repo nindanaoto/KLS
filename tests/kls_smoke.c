@@ -118,14 +118,27 @@ static int require_row_auto_model_stats(const kls_stats *stats,
       (stats->row_refactor_auto_model_attempted &&
        !stats->row_refactor_auto_model_recommended) ||
       (stats->row_refactor_auto_model_accepted &&
-       !stats->row_refactor_auto_model_attempted)) {
+       !stats->row_refactor_auto_model_attempted) ||
+      !isfinite(stats->row_refactor_auto_lower_bound_work) ||
+      stats->row_refactor_auto_lower_bound_work < 0.0 ||
+      (stats->row_refactor_auto_lower_bound_rejected != 0 &&
+       stats->row_refactor_auto_lower_bound_rejected != 1) ||
+      (stats->row_refactor_auto_pattern_build_failed != 0 &&
+       stats->row_refactor_auto_pattern_build_failed != 1) ||
+      (stats->row_refactor_auto_value_copy_failed != 0 &&
+       stats->row_refactor_auto_value_copy_failed != 1)) {
     fprintf(stderr,
             "unexpected row auto model stats for %s: rec=%d attempted=%d "
-            "accepted=%d\n",
+            "accepted=%d lower_bound=%.17g lower_reject=%d "
+            "pattern_failed=%d value_failed=%d\n",
             what,
             stats != NULL ? stats->row_refactor_auto_model_recommended : -1,
             stats != NULL ? stats->row_refactor_auto_model_attempted : -1,
-            stats != NULL ? stats->row_refactor_auto_model_accepted : -1);
+            stats != NULL ? stats->row_refactor_auto_model_accepted : -1,
+            stats != NULL ? stats->row_refactor_auto_lower_bound_work : -1.0,
+            stats != NULL ? stats->row_refactor_auto_lower_bound_rejected : -1,
+            stats != NULL ? stats->row_refactor_auto_pattern_build_failed : -1,
+            stats != NULL ? stats->row_refactor_auto_value_copy_failed : -1);
     return 0;
   }
   return 1;

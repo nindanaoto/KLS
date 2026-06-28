@@ -315,11 +315,17 @@ block rebuilt its LU payload. Benchmark stats expose
 `row_refactor_total_group_work`, `row_refactor_auto_enabled`,
 `row_refactor_auto_values_ready`, `row_refactor_auto_work_allowed`, and
 `row_refactor_auto_should_run` so this automatic handoff can be audited against
-the exact EGraph work model. Ordinary successful numeric factors can also enter
-the same owned row/segment refactor preparation when the NICSLU R1/R2 model
-recommends parallel numeric work and an exact dependency schedule is already
-available; the existing row-work gate still rejects row setup when it is more
-expensive than the EGraph estimate. `kls_bench` and
+the exact EGraph work model. The same stats also report
+`row_refactor_auto_lower_bound_work`,
+`row_refactor_auto_lower_bound_rejected`,
+`row_refactor_auto_pattern_build_failed`, and
+`row_refactor_auto_value_copy_failed` to distinguish the cheap work lower-bound
+gate from later row-pattern/value preparation failures. Ordinary successful
+numeric factors can also enter the same owned row/segment refactor preparation
+when the NICSLU R1/R2 model recommends parallel numeric work and an exact
+dependency schedule is already available; the existing row-work gate still
+rejects row setup when it is more expensive than the EGraph estimate.
+`kls_bench` and
 `run_bench_suite.py` also accept
 `--kls-first-factor env|off|on` so this path can be compared reproducibly
 without relying on an ambient environment variable. Benchmark JSON reports the

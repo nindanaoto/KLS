@@ -307,6 +307,10 @@ struct kls_solver {
   int row_refactor_last_defer_value_scatter;
   UF_long row_refactor_defer_value_scatter_run_count;
   int row_refactor_auto_enabled;
+  double row_refactor_auto_lower_bound_work;
+  int row_refactor_auto_lower_bound_rejected;
+  int row_refactor_auto_pattern_build_failed;
+  int row_refactor_auto_value_copy_failed;
   int row_refactor_values_ready;
   int row_refactor_values_dirty;
   int row_refactor_solve_direct_ready;
@@ -1776,6 +1780,10 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_input_cleanup_entries = 0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_defer_value_scatter_run_count = 0;
+  solver->row_refactor_auto_lower_bound_work = 0.0;
+  solver->row_refactor_auto_lower_bound_rejected = 0;
+  solver->row_refactor_auto_pattern_build_failed = 0;
+  solver->row_refactor_auto_value_copy_failed = 0;
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_values_dirty = 0;
   solver->row_refactor_solve_direct_ready = 0;
@@ -1960,6 +1968,10 @@ typedef struct {
   int last_defer_value_scatter;
   UF_long defer_value_scatter_run_count;
   int auto_enabled;
+  double auto_lower_bound_work;
+  int auto_lower_bound_rejected;
+  int auto_pattern_build_failed;
+  int auto_value_copy_failed;
   int last_lazy_value_scatter;
   UF_long lazy_value_scatter_run_count;
   int last_row_solve;
@@ -2157,6 +2169,14 @@ static void kls_save_row_refactor_diagnostics(
   diag->defer_value_scatter_run_count =
     solver->row_refactor_defer_value_scatter_run_count;
   diag->auto_enabled = solver->row_refactor_auto_enabled;
+  diag->auto_lower_bound_work =
+    solver->row_refactor_auto_lower_bound_work;
+  diag->auto_lower_bound_rejected =
+    solver->row_refactor_auto_lower_bound_rejected;
+  diag->auto_pattern_build_failed =
+    solver->row_refactor_auto_pattern_build_failed;
+  diag->auto_value_copy_failed =
+    solver->row_refactor_auto_value_copy_failed;
   diag->last_lazy_value_scatter =
     solver->row_refactor_last_lazy_value_scatter;
   diag->lazy_value_scatter_run_count =
@@ -2478,6 +2498,14 @@ static void kls_restore_row_refactor_diagnostics(
   solver->row_refactor_defer_value_scatter_run_count =
     diag->defer_value_scatter_run_count;
   solver->row_refactor_auto_enabled = diag->auto_enabled;
+  solver->row_refactor_auto_lower_bound_work =
+    diag->auto_lower_bound_work;
+  solver->row_refactor_auto_lower_bound_rejected =
+    diag->auto_lower_bound_rejected;
+  solver->row_refactor_auto_pattern_build_failed =
+    diag->auto_pattern_build_failed;
+  solver->row_refactor_auto_value_copy_failed =
+    diag->auto_value_copy_failed;
   solver->row_refactor_last_lazy_value_scatter =
     diag->last_lazy_value_scatter;
   solver->row_refactor_lazy_value_scatter_run_count =
@@ -12111,6 +12139,14 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     kls_auto_row_refactor_cost_allows(solver);
   solver->stats.row_refactor_auto_should_run =
     kls_auto_row_refactor_should_run(solver);
+  solver->stats.row_refactor_auto_lower_bound_work =
+    solver->row_refactor_auto_lower_bound_work;
+  solver->stats.row_refactor_auto_lower_bound_rejected =
+    solver->row_refactor_auto_lower_bound_rejected;
+  solver->stats.row_refactor_auto_pattern_build_failed =
+    solver->row_refactor_auto_pattern_build_failed;
+  solver->stats.row_refactor_auto_value_copy_failed =
+    solver->row_refactor_auto_value_copy_failed;
   kls_fill_separator_stats(&solver->stats, &solver->separator);
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
@@ -12169,6 +12205,14 @@ static void fill_numeric_stats(kls_solver *solver) {
     kls_auto_row_refactor_cost_allows(solver);
   solver->stats.row_refactor_auto_should_run =
     kls_auto_row_refactor_should_run(solver);
+  solver->stats.row_refactor_auto_lower_bound_work =
+    solver->row_refactor_auto_lower_bound_work;
+  solver->stats.row_refactor_auto_lower_bound_rejected =
+    solver->row_refactor_auto_lower_bound_rejected;
+  solver->stats.row_refactor_auto_pattern_build_failed =
+    solver->row_refactor_auto_pattern_build_failed;
+  solver->stats.row_refactor_auto_value_copy_failed =
+    solver->row_refactor_auto_value_copy_failed;
   kls_fill_separator_stats(&solver->stats, &solver->separator);
   solver->stats.selected_btf =
     (solver->symbolic != NULL && solver->symbolic->do_btf) ? 1 : 0;
@@ -25181,24 +25225,43 @@ static int kls_estimate_row_refactor_lower_bound_work(kls_solver *solver,
   return 1;
 }
 
+static void kls_reset_auto_row_refactor_prepare_stats(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->row_refactor_auto_lower_bound_work = 0.0;
+  solver->row_refactor_auto_lower_bound_rejected = 0;
+  solver->row_refactor_auto_pattern_build_failed = 0;
+  solver->row_refactor_auto_value_copy_failed = 0;
+}
+
 static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
   if (solver == NULL) {
     return 0;
   }
+  kls_reset_auto_row_refactor_prepare_stats(solver);
   if (solver->refactor_dependency_work > 0.0) {
     double lower_bound_work = 0.0;
     if (kls_estimate_row_refactor_lower_bound_work(solver,
-                                                   &lower_bound_work) &&
-        lower_bound_work > solver->refactor_dependency_work) {
-      solver->row_refactor_auto_enabled = 0;
-      solver->row_refactor_values_ready = 0;
-      solver->row_refactor_solve_direct_ready = 0;
-      solver->row_refactor_solve_validated = 0;
-      return 1;
+                                                   &lower_bound_work)) {
+      solver->row_refactor_auto_lower_bound_work = lower_bound_work;
+      if (lower_bound_work > solver->refactor_dependency_work) {
+        solver->row_refactor_auto_enabled = 0;
+        solver->row_refactor_values_ready = 0;
+        solver->row_refactor_solve_direct_ready = 0;
+        solver->row_refactor_solve_validated = 0;
+        solver->row_refactor_auto_lower_bound_rejected = 1;
+        return 1;
+      }
     }
   }
   if (!kls_build_refactor_map(solver) ||
       !kls_build_row_refactor_pattern(solver)) {
+    solver->row_refactor_auto_enabled = 0;
+    solver->row_refactor_values_ready = 0;
+    solver->row_refactor_solve_direct_ready = 0;
+    solver->row_refactor_solve_validated = 0;
+    solver->row_refactor_auto_pattern_build_failed = 1;
     return 0;
   }
   solver->row_refactor_auto_enabled = 1;
@@ -25214,7 +25277,11 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
     solver->row_refactor_solve_validated = 0;
     return 1;
   }
-  return kls_copy_row_refactor_values_from_numeric(solver);
+  if (!kls_copy_row_refactor_values_from_numeric(solver)) {
+    solver->row_refactor_auto_value_copy_failed = 1;
+    return 0;
+  }
+  return 1;
 }
 
 static void kls_maybe_prepare_model_row_refactor_from_numeric(

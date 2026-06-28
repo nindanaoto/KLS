@@ -1493,6 +1493,10 @@ int main(int argc, char **argv) {
            ",\"row_refactor_auto_values_ready\":%d"
            ",\"row_refactor_auto_work_allowed\":%d"
            ",\"row_refactor_auto_should_run\":%d"
+           ",\"row_refactor_auto_lower_bound_work\":%.9g"
+           ",\"row_refactor_auto_lower_bound_rejected\":%d"
+           ",\"row_refactor_auto_pattern_build_failed\":%d"
+           ",\"row_refactor_auto_value_copy_failed\":%d"
            ",\"row_refactor_auto_model_recommended\":%d"
            ",\"row_refactor_auto_model_attempted\":%d"
            ",\"row_refactor_auto_model_accepted\":%d"
@@ -1576,6 +1580,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_auto_values_ready,
            stats.row_refactor_auto_work_allowed,
            stats.row_refactor_auto_should_run,
+           stats.row_refactor_auto_lower_bound_work,
+           stats.row_refactor_auto_lower_bound_rejected,
+           stats.row_refactor_auto_pattern_build_failed,
+           stats.row_refactor_auto_value_copy_failed,
            stats.row_refactor_auto_model_recommended,
            stats.row_refactor_auto_model_attempted,
            stats.row_refactor_auto_model_accepted,
@@ -2536,6 +2544,8 @@ int main(int argc, char **argv) {
            ", total work: %.6g"
            ", auto enabled: %d, auto values ready: %d"
            ", auto work allowed: %d, auto should run: %d"
+           ", auto lower bound work/rejected: %.6g/%d"
+           ", auto pattern/value failures: %d/%d"
            ", auto model rec/attempt/accept: %d/%d/%d"
            ", edges: %" PRId64 ", roots: %" PRId64
            ", leaves: %" PRId64 ", max fanout: %" PRId64
@@ -2582,6 +2592,10 @@ int main(int argc, char **argv) {
            stats.row_refactor_auto_values_ready,
            stats.row_refactor_auto_work_allowed,
            stats.row_refactor_auto_should_run,
+           stats.row_refactor_auto_lower_bound_work,
+           stats.row_refactor_auto_lower_bound_rejected,
+           stats.row_refactor_auto_pattern_build_failed,
+           stats.row_refactor_auto_value_copy_failed,
            stats.row_refactor_auto_model_recommended,
            stats.row_refactor_auto_model_attempted,
            stats.row_refactor_auto_model_accepted,
