@@ -8062,3 +8062,19 @@ retained as opt-in executor cleanup rather than promoted to default policy. It
 narrows the missing piece further: KLS can now identify and discard unused
 ragged panels, but the remaining used panel work still needs a coarser kernel or
 an auto policy that predicts when the retained panel will beat scalar EGraph.
+
+A fresh same-binary CBLAS guard check on the current source again rejects the
+"small BLAS calls" hypothesis. The CBLAS-capable build was rebuilt, then the
+top-five CKTSO-gap focus set was run with `OPENBLAS_NUM_THREADS=1` and the
+runtime CBLAS gate off and on. The gate-off artifact
+(`build-cblas/kls_cblas_guard_latest2_off_gap5_t4_r1_ref3_timeout120.jsonl`)
+measured a `1.40038s` geomean; the gate-on artifact
+(`build-cblas/kls_cblas_guard_latest2_on_gap5_t4_r1_ref3_timeout120.jsonl`)
+measured `1.47634s`. Every row in both files reported
+`build_has_cblas=true` but zero external CBLAS update runs, rows, and entries,
+and zero compact-supernode GEMV/TRSV or blocked-panel counters. The active
+paths already require the runtime CBLAS gate plus 512-scale vector/panel tests
+and multi-million-operation work thresholds before calling BLAS. There is
+therefore no useful additional "only use BLAS for large cases" patch for these
+slow rows; the remaining gap is still the paper-level row-major/supernode
+executor that creates reusable coarse work, not BLAS call granularity.
