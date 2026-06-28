@@ -2011,6 +2011,20 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_blocked_update_run_count\":%" PRId64
            ",\"refactor_supernode_blocked_update_rows\":%" PRId64
            ",\"refactor_supernode_blocked_update_entries\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_attempts\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_panel_hits\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_contiguous\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_allowed\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_allowed_rows\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_applied\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_applied_rows\":%" PRId64
+           ",\"refactor_supernode_cached_probe_attempt_count\":%" PRId64
+           ",\"refactor_supernode_cached_probe_panel_hits\":%" PRId64
+           ",\"refactor_supernode_cached_probe_contiguous\":%" PRId64
+           ",\"refactor_supernode_cached_probe_allowed\":%" PRId64
+           ",\"refactor_supernode_cached_probe_allowed_rows\":%" PRId64
+           ",\"refactor_supernode_cached_probe_applied\":%" PRId64
+           ",\"refactor_supernode_cached_probe_applied_rows\":%" PRId64
            ",\"refactor_last_ready_queue_columns\":%" PRId64
            ",\"refactor_ready_queue_run_count\":%" PRId64
            ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
@@ -2058,6 +2072,20 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_blocked_update_run_count,
            stats.refactor_supernode_blocked_update_rows,
            stats.refactor_supernode_blocked_update_entries,
+           stats.refactor_last_supernode_cached_probe_attempts,
+           stats.refactor_last_supernode_cached_probe_panel_hits,
+           stats.refactor_last_supernode_cached_probe_contiguous,
+           stats.refactor_last_supernode_cached_probe_allowed,
+           stats.refactor_last_supernode_cached_probe_allowed_rows,
+           stats.refactor_last_supernode_cached_probe_applied,
+           stats.refactor_last_supernode_cached_probe_applied_rows,
+           stats.refactor_supernode_cached_probe_attempt_count,
+           stats.refactor_supernode_cached_probe_panel_hits,
+           stats.refactor_supernode_cached_probe_contiguous,
+           stats.refactor_supernode_cached_probe_allowed,
+           stats.refactor_supernode_cached_probe_allowed_rows,
+           stats.refactor_supernode_cached_probe_applied,
+           stats.refactor_supernode_cached_probe_applied_rows,
            stats.refactor_last_ready_queue_columns,
            stats.refactor_ready_queue_run_count,
            stats.nnz_l, stats.nnz_u,

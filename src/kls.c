@@ -578,6 +578,20 @@ struct kls_solver {
   UF_long refactor_supernode_blocked_update_run_count;
   UF_long refactor_supernode_blocked_update_rows;
   UF_long refactor_supernode_blocked_update_entries;
+  UF_long refactor_last_supernode_cached_probe_attempts;
+  UF_long refactor_last_supernode_cached_probe_panel_hits;
+  UF_long refactor_last_supernode_cached_probe_contiguous;
+  UF_long refactor_last_supernode_cached_probe_allowed;
+  UF_long refactor_last_supernode_cached_probe_allowed_rows;
+  UF_long refactor_last_supernode_cached_probe_applied;
+  UF_long refactor_last_supernode_cached_probe_applied_rows;
+  UF_long refactor_supernode_cached_probe_attempt_count;
+  UF_long refactor_supernode_cached_probe_panel_hits;
+  UF_long refactor_supernode_cached_probe_contiguous;
+  UF_long refactor_supernode_cached_probe_allowed;
+  UF_long refactor_supernode_cached_probe_allowed_rows;
+  UF_long refactor_supernode_cached_probe_applied;
+  UF_long refactor_supernode_cached_probe_applied_rows;
   UF_long refactor_last_ready_queue_columns;
   UF_long refactor_ready_queue_run_count;
   UF_long refactor_cluster_level_count;
@@ -875,6 +889,13 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong supernode_blocked_update_runs;
   atomic_ulong supernode_blocked_update_rows;
   atomic_ulong supernode_blocked_update_entries;
+  atomic_ulong supernode_cached_probe_attempts;
+  atomic_ulong supernode_cached_probe_panel_hits;
+  atomic_ulong supernode_cached_probe_contiguous;
+  atomic_ulong supernode_cached_probe_allowed;
+  atomic_ulong supernode_cached_probe_allowed_rows;
+  atomic_ulong supernode_cached_probe_applied;
+  atomic_ulong supernode_cached_probe_applied_rows;
   UF_long pipeline_pos_end;
   UF_long cluster_level_count;
   int pipeline_natural_order;
@@ -2896,6 +2917,20 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_supernode_blocked_update_run_count = 0;
   solver->refactor_supernode_blocked_update_rows = 0;
   solver->refactor_supernode_blocked_update_entries = 0;
+  solver->refactor_last_supernode_cached_probe_attempts = 0;
+  solver->refactor_last_supernode_cached_probe_panel_hits = 0;
+  solver->refactor_last_supernode_cached_probe_contiguous = 0;
+  solver->refactor_last_supernode_cached_probe_allowed = 0;
+  solver->refactor_last_supernode_cached_probe_allowed_rows = 0;
+  solver->refactor_last_supernode_cached_probe_applied = 0;
+  solver->refactor_last_supernode_cached_probe_applied_rows = 0;
+  solver->refactor_supernode_cached_probe_attempt_count = 0;
+  solver->refactor_supernode_cached_probe_panel_hits = 0;
+  solver->refactor_supernode_cached_probe_contiguous = 0;
+  solver->refactor_supernode_cached_probe_allowed = 0;
+  solver->refactor_supernode_cached_probe_allowed_rows = 0;
+  solver->refactor_supernode_cached_probe_applied = 0;
+  solver->refactor_supernode_cached_probe_applied_rows = 0;
   solver->refactor_last_ready_queue_columns = 0;
   solver->refactor_ready_queue_run_count = 0;
   solver->refactor_cluster_level_count = 0;
@@ -3558,6 +3593,13 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   solver->refactor_last_supernode_blocked_update_runs = 0;
   solver->refactor_last_supernode_blocked_update_rows = 0;
   solver->refactor_last_supernode_blocked_update_entries = 0;
+  solver->refactor_last_supernode_cached_probe_attempts = 0;
+  solver->refactor_last_supernode_cached_probe_panel_hits = 0;
+  solver->refactor_last_supernode_cached_probe_contiguous = 0;
+  solver->refactor_last_supernode_cached_probe_allowed = 0;
+  solver->refactor_last_supernode_cached_probe_allowed_rows = 0;
+  solver->refactor_last_supernode_cached_probe_applied = 0;
+  solver->refactor_last_supernode_cached_probe_applied_rows = 0;
   solver->refactor_last_ready_queue_columns = 0;
   solver->stats.refactor_last_supernode_pipeline_tasks = 0;
   solver->stats.refactor_last_supernode_pipeline_columns = 0;
@@ -3570,6 +3612,13 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   solver->stats.refactor_last_supernode_blocked_update_runs = 0;
   solver->stats.refactor_last_supernode_blocked_update_rows = 0;
   solver->stats.refactor_last_supernode_blocked_update_entries = 0;
+  solver->stats.refactor_last_supernode_cached_probe_attempts = 0;
+  solver->stats.refactor_last_supernode_cached_probe_panel_hits = 0;
+  solver->stats.refactor_last_supernode_cached_probe_contiguous = 0;
+  solver->stats.refactor_last_supernode_cached_probe_allowed = 0;
+  solver->stats.refactor_last_supernode_cached_probe_allowed_rows = 0;
+  solver->stats.refactor_last_supernode_cached_probe_applied = 0;
+  solver->stats.refactor_last_supernode_cached_probe_applied_rows = 0;
   solver->stats.refactor_last_ready_queue_columns = 0;
 }
 
@@ -12434,6 +12483,34 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_supernode_blocked_update_rows;
   solver->stats.refactor_supernode_blocked_update_entries =
     (int64_t)solver->refactor_supernode_blocked_update_entries;
+  solver->stats.refactor_last_supernode_cached_probe_attempts =
+    (int64_t)solver->refactor_last_supernode_cached_probe_attempts;
+  solver->stats.refactor_last_supernode_cached_probe_panel_hits =
+    (int64_t)solver->refactor_last_supernode_cached_probe_panel_hits;
+  solver->stats.refactor_last_supernode_cached_probe_contiguous =
+    (int64_t)solver->refactor_last_supernode_cached_probe_contiguous;
+  solver->stats.refactor_last_supernode_cached_probe_allowed =
+    (int64_t)solver->refactor_last_supernode_cached_probe_allowed;
+  solver->stats.refactor_last_supernode_cached_probe_allowed_rows =
+    (int64_t)solver->refactor_last_supernode_cached_probe_allowed_rows;
+  solver->stats.refactor_last_supernode_cached_probe_applied =
+    (int64_t)solver->refactor_last_supernode_cached_probe_applied;
+  solver->stats.refactor_last_supernode_cached_probe_applied_rows =
+    (int64_t)solver->refactor_last_supernode_cached_probe_applied_rows;
+  solver->stats.refactor_supernode_cached_probe_attempt_count =
+    (int64_t)solver->refactor_supernode_cached_probe_attempt_count;
+  solver->stats.refactor_supernode_cached_probe_panel_hits =
+    (int64_t)solver->refactor_supernode_cached_probe_panel_hits;
+  solver->stats.refactor_supernode_cached_probe_contiguous =
+    (int64_t)solver->refactor_supernode_cached_probe_contiguous;
+  solver->stats.refactor_supernode_cached_probe_allowed =
+    (int64_t)solver->refactor_supernode_cached_probe_allowed;
+  solver->stats.refactor_supernode_cached_probe_allowed_rows =
+    (int64_t)solver->refactor_supernode_cached_probe_allowed_rows;
+  solver->stats.refactor_supernode_cached_probe_applied =
+    (int64_t)solver->refactor_supernode_cached_probe_applied;
+  solver->stats.refactor_supernode_cached_probe_applied_rows =
+    (int64_t)solver->refactor_supernode_cached_probe_applied_rows;
   solver->stats.refactor_last_ready_queue_columns =
     (int64_t)solver->refactor_last_ready_queue_columns;
   solver->stats.refactor_ready_queue_run_count =
@@ -38499,6 +38576,57 @@ static void kls_egraph_record_supernode_blocked_update(
                             (unsigned long)entries, memory_order_relaxed);
 }
 
+static void kls_egraph_record_cached_probe_attempt(
+  kls_egraph_refactor_shared *shared) {
+  if (shared == NULL) {
+    return;
+  }
+  atomic_fetch_add_explicit(&shared->supernode_cached_probe_attempts, 1ul,
+                            memory_order_relaxed);
+}
+
+static void kls_egraph_record_cached_probe_panel_hit(
+  kls_egraph_refactor_shared *shared) {
+  if (shared == NULL) {
+    return;
+  }
+  atomic_fetch_add_explicit(&shared->supernode_cached_probe_panel_hits, 1ul,
+                            memory_order_relaxed);
+}
+
+static void kls_egraph_record_cached_probe_contiguous(
+  kls_egraph_refactor_shared *shared) {
+  if (shared == NULL) {
+    return;
+  }
+  atomic_fetch_add_explicit(&shared->supernode_cached_probe_contiguous, 1ul,
+                            memory_order_relaxed);
+}
+
+static void kls_egraph_record_cached_probe_allowed(
+  kls_egraph_refactor_shared *shared,
+  UF_long rows) {
+  if (shared == NULL) {
+    return;
+  }
+  atomic_fetch_add_explicit(&shared->supernode_cached_probe_allowed, 1ul,
+                            memory_order_relaxed);
+  atomic_fetch_add_explicit(&shared->supernode_cached_probe_allowed_rows,
+                            (unsigned long)rows, memory_order_relaxed);
+}
+
+static void kls_egraph_record_cached_probe_applied(
+  kls_egraph_refactor_shared *shared,
+  UF_long rows) {
+  if (shared == NULL) {
+    return;
+  }
+  atomic_fetch_add_explicit(&shared->supernode_cached_probe_applied, 1ul,
+                            memory_order_relaxed);
+  atomic_fetch_add_explicit(&shared->supernode_cached_probe_applied_rows,
+                            (unsigned long)rows, memory_order_relaxed);
+}
+
 static void kls_egraph_disable_supernode_panel(kls_solver *solver,
                                                UF_long panel) {
   if (solver == NULL ||
@@ -38806,11 +38934,13 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
   if (dep_global >= current_global || dep_global >= solver->n) {
     return 0;
   }
+  kls_egraph_record_cached_probe_attempt(shared);
   const UF_long panel = solver->refactor_supernode_panel_col_id[dep_global];
   if (panel == KLS_KLU_EMPTY ||
       panel >= solver->refactor_supernode_panel_count) {
     return 0;
   }
+  kls_egraph_record_cached_probe_panel_hit(shared);
   const UF_long start = solver->refactor_supernode_panel_start[panel];
   const UF_long local_start =
     solver->refactor_supernode_panel_local_start[panel];
@@ -38846,11 +38976,13 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
       return 0;
     }
   }
+  kls_egraph_record_cached_probe_contiguous(shared);
   const UF_long dense_scatter_len = width - available_end;
   if (!kls_egraph_cached_supernode_update_allows(
         run_rows, dense_scatter_len, trailing_len)) {
     return 0;
   }
+  kls_egraph_record_cached_probe_allowed(shared, run_rows);
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(double));
   if (run_rows > max_workspace_entries ||
@@ -38948,6 +39080,7 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
   kls_egraph_record_supernode_update(shared, run_rows,
                                      trsv_entries + dense_scatter_entries +
                                        trailing_entries);
+  kls_egraph_record_cached_probe_applied(shared, run_rows);
   *up_io = up + run_rows;
   return 1;
 }
@@ -38988,12 +39121,20 @@ static int kls_egraph_refactor_try_supernode_dependency_run(
   if (dep_global >= current_global || dep_global >= solver->n) {
     return 0;
   }
-  const int cached_status =
-    kls_egraph_refactor_try_cached_supernode_dependency_run(
-      worker, k1, current_global, current_local, up_io, ucol_len,
-      ui, ux, x, wait_for_dependencies);
-  if (cached_status != 0) {
-    return cached_status;
+  int try_cached = 0;
+  if (solver->refactor_supernode_panel_col_id != NULL) {
+    const UF_long panel = solver->refactor_supernode_panel_col_id[dep_global];
+    try_cached = panel != KLS_KLU_EMPTY &&
+                 panel < solver->refactor_supernode_panel_count;
+  }
+  if (try_cached) {
+    const int cached_status =
+      kls_egraph_refactor_try_cached_supernode_dependency_run(
+        worker, k1, current_global, current_local, up_io, ucol_len,
+        ui, ux, x, wait_for_dependencies);
+    if (cached_status != 0) {
+      return cached_status;
+    }
   }
   if (shared->supernode_cached_updates_only) {
     return 0;
@@ -40802,6 +40943,13 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->shared.supernode_blocked_update_runs, 0ul);
   atomic_init(&pool->shared.supernode_blocked_update_rows, 0ul);
   atomic_init(&pool->shared.supernode_blocked_update_entries, 0ul);
+  atomic_init(&pool->shared.supernode_cached_probe_attempts, 0ul);
+  atomic_init(&pool->shared.supernode_cached_probe_panel_hits, 0ul);
+  atomic_init(&pool->shared.supernode_cached_probe_contiguous, 0ul);
+  atomic_init(&pool->shared.supernode_cached_probe_allowed, 0ul);
+  atomic_init(&pool->shared.supernode_cached_probe_allowed_rows, 0ul);
+  atomic_init(&pool->shared.supernode_cached_probe_applied, 0ul);
+  atomic_init(&pool->shared.supernode_cached_probe_applied_rows, 0ul);
   atomic_init(&pool->shared.pipeline_ready_head, 0ul);
   atomic_init(&pool->shared.pipeline_ready_tail, 0ul);
   atomic_init(&pool->shared.pipeline_ready_completed, 0ul);
@@ -42103,6 +42251,20 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
                         memory_order_release);
   atomic_store_explicit(&shared->supernode_blocked_update_entries, 0ul,
                         memory_order_release);
+  atomic_store_explicit(&shared->supernode_cached_probe_attempts, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->supernode_cached_probe_panel_hits, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->supernode_cached_probe_contiguous, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->supernode_cached_probe_allowed, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->supernode_cached_probe_allowed_rows, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->supernode_cached_probe_applied, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->supernode_cached_probe_applied_rows, 0ul,
+                        memory_order_release);
   atomic_store_explicit(
     &shared->next_pipeline_pos,
     (unsigned long)(pipeline_done != NULL
@@ -42169,6 +42331,27 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const UF_long supernode_blocked_update_entries =
     (UF_long)atomic_load_explicit(&shared->supernode_blocked_update_entries,
                                   memory_order_acquire);
+  const UF_long supernode_cached_probe_attempts =
+    (UF_long)atomic_load_explicit(&shared->supernode_cached_probe_attempts,
+                                  memory_order_acquire);
+  const UF_long supernode_cached_probe_panel_hits =
+    (UF_long)atomic_load_explicit(&shared->supernode_cached_probe_panel_hits,
+                                  memory_order_acquire);
+  const UF_long supernode_cached_probe_contiguous =
+    (UF_long)atomic_load_explicit(&shared->supernode_cached_probe_contiguous,
+                                  memory_order_acquire);
+  const UF_long supernode_cached_probe_allowed =
+    (UF_long)atomic_load_explicit(&shared->supernode_cached_probe_allowed,
+                                  memory_order_acquire);
+  const UF_long supernode_cached_probe_allowed_rows =
+    (UF_long)atomic_load_explicit(
+      &shared->supernode_cached_probe_allowed_rows, memory_order_acquire);
+  const UF_long supernode_cached_probe_applied =
+    (UF_long)atomic_load_explicit(&shared->supernode_cached_probe_applied,
+                                  memory_order_acquire);
+  const UF_long supernode_cached_probe_applied_rows =
+    (UF_long)atomic_load_explicit(
+      &shared->supernode_cached_probe_applied_rows, memory_order_acquire);
   solver->refactor_last_supernode_pipeline_tasks =
     supernode_pipeline_tasks;
   solver->refactor_last_supernode_pipeline_columns =
@@ -42207,6 +42390,34 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     supernode_blocked_update_rows;
   solver->refactor_supernode_blocked_update_entries +=
     supernode_blocked_update_entries;
+  solver->refactor_last_supernode_cached_probe_attempts =
+    supernode_cached_probe_attempts;
+  solver->refactor_last_supernode_cached_probe_panel_hits =
+    supernode_cached_probe_panel_hits;
+  solver->refactor_last_supernode_cached_probe_contiguous =
+    supernode_cached_probe_contiguous;
+  solver->refactor_last_supernode_cached_probe_allowed =
+    supernode_cached_probe_allowed;
+  solver->refactor_last_supernode_cached_probe_allowed_rows =
+    supernode_cached_probe_allowed_rows;
+  solver->refactor_last_supernode_cached_probe_applied =
+    supernode_cached_probe_applied;
+  solver->refactor_last_supernode_cached_probe_applied_rows =
+    supernode_cached_probe_applied_rows;
+  solver->refactor_supernode_cached_probe_attempt_count +=
+    supernode_cached_probe_attempts;
+  solver->refactor_supernode_cached_probe_panel_hits +=
+    supernode_cached_probe_panel_hits;
+  solver->refactor_supernode_cached_probe_contiguous +=
+    supernode_cached_probe_contiguous;
+  solver->refactor_supernode_cached_probe_allowed +=
+    supernode_cached_probe_allowed;
+  solver->refactor_supernode_cached_probe_allowed_rows +=
+    supernode_cached_probe_allowed_rows;
+  solver->refactor_supernode_cached_probe_applied +=
+    supernode_cached_probe_applied;
+  solver->refactor_supernode_cached_probe_applied_rows +=
+    supernode_cached_probe_applied_rows;
   solver->refactor_last_ready_queue_columns =
     use_pipeline_ready_queue ? solver->refactor_pipeline_column_count : 0u;
   if (use_pipeline_ready_queue) {

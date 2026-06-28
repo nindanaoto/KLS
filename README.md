@@ -814,6 +814,11 @@ kernels.
 Set `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached` to isolate only the durable
 cached-panel consumer and skip the per-consumer temporary panel reconstruction
 fallback used by the full `=1` experiment.
+Cached runs skip the heavier panel consumer unless the producer column belongs
+to a retained panel, and JSON reports
+`refactor_supernode_cached_probe_*` counters so profiling can distinguish panel
+misses, contiguous producer runs, work-gate acceptance, and applied cached
+updates.
 Eligible retained refactor-map row/input positions and L row-index arrays are
 mirrored as 32-bit integers by default while leaving the KLU-owned numeric
 factor and public index ABI unchanged. The EGraph value-scatter path and

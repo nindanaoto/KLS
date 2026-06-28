@@ -6788,3 +6788,24 @@ row. The current BLAS path is already compile-time optional, runtime gated, and
 large-work gated, so adding another small-case guard cannot close the observed
 CKTSO gap. The slow rows are not paying small BLAS-call overhead; they are not
 using BLAS at all.
+
+The cached EGraph supernode experiment was then instrumented and tightened at
+the producer-probe boundary. Before the precheck, the cached top-five run in
+`build/kls_cached_probe_diag_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.63104s` geomean and showed millions of per-dependency cached probes for
+only thousands of retained-panel hits: for example, `ASIC_320ks` had
+6,347,752 probes, 18,548 panel hits, 2,596 contiguous runs, and 1,196 accepted
+updates. The source now skips the heavier cached-panel probe unless the
+producer column is actually mapped to a retained panel, and benchmark JSON
+reports `refactor_supernode_cached_probe_*` counters for attempts, panel hits,
+contiguous runs, work-gate acceptance, and applied updates. The same top-five
+diagnostic improved to `1.48966s` geomean in
+`build/kls_cached_probe_precheck_gap5_t4_r1_ref3_timeout120.jsonl`, and the
+top-ten cached run measured `2.30940s` in
+`build/kls_cached_probe_precheck_gap10_t4_r1_ref3_timeout120.jsonl` versus the
+older cached-only `2.38338s`. This is useful executor cleanup for the
+SubtreeLU-style path, but it still trails the default top-ten control
+(`2.23151s`), so cached EGraph supernode updates remain opt-in. The counters
+make the next gap clearer: panel discovery is not enough; KLS needs a coarser
+producer/consumer executor that amortizes the remaining panel publication and
+application work across larger row batches.
