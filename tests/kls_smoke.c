@@ -7181,8 +7181,8 @@ static int test_batch_group_multi_producer_supernode_update_probe(void) {
     perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
-    perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+  if (ok && setenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1");
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -7371,8 +7371,8 @@ static int test_batch_group_multi_producer_supernode_update_probe(void) {
     perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
-    perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+  if (ok && setenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
@@ -7726,8 +7726,8 @@ static int test_batch_group_fragmented_multi_producer_update_probe(void) {
     perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
-    perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+  if (ok && setenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1");
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -7871,8 +7871,8 @@ static int test_batch_group_fragmented_multi_producer_update_probe(void) {
     perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
-    perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+  if (ok && setenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
@@ -8207,8 +8207,8 @@ static int test_dense_group_fragmented_multi_producer_update_probe(void) {
     perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
-    perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+  if (ok && setenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1");
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -8584,8 +8584,8 @@ static int test_dense_group_fragmented_target_map_probe(void) {
     perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
-    perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+  if (ok && setenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
@@ -8775,8 +8775,8 @@ static int test_dense_group_fragmented_target_map_probe(void) {
     perror("setenv KLS_ENABLE_CBLAS_SUPERNODE=0");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE") != 0) {
-    perror("unsetenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
+  if (ok && setenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {

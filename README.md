@@ -672,12 +672,13 @@ that automatic choice, and `1` keeps forcing the path for probes. It reports
 `row_refactor_compact_supernode_trsv_count`,
 `row_refactor_compact_supernode_trsv_rows`, and
 `row_refactor_compact_supernode_trsv_entries`. KLS-owned scalar
-multi-producer row-panel updates are enabled by default when the retained
-row/segment structure and work gates accept them; set
-`KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=0` only to disable those updates for A/B
-runs. These cover contiguous independent-row producer suffixes and fragmented
-dense-consumer external prefixes without requiring CBLAS. Builds configured with
-`-DKLS_ENABLE_CBLAS_SUPERNODE=ON` also compile an opt-in
+multi-producer row-panel updates are available as an opt-in
+`KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1` experiment when the retained row/segment
+structure and work gates accept them. The default stays on the scalar/compact
+fallback because current CKTSO-gap probes show the fragmented batch scaffold can
+over-stage these rows. These cover contiguous independent-row producer suffixes
+and fragmented dense-consumer external prefixes without requiring CBLAS. Builds
+configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` also compile an opt-in
 `KLS_ENABLE_CBLAS_SUPERNODE=1` supernode experiment that uses standard CBLAS
 calls with the same scalar fallback and pivot checks. Completed producer
 supernodes can update later rows with CBLAS `dtrsv` plus `dgemv`, matching the

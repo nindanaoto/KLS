@@ -911,6 +911,18 @@ typedef struct kls_egraph_refactor_worker {
   UF_long index_workspace_size;
   unsigned char *byte_workspace;
   UF_long byte_workspace_size;
+  UF_long *row_target_stamp_workspace;
+  UF_long *row_target_pos_workspace;
+  unsigned char *row_target_kind_workspace;
+  UF_long row_target_workspace_size;
+  UF_long row_target_stamp;
+  int row_target_valid;
+  UF_long row_target_row;
+  UF_long row_target_row_begin;
+  UF_long row_target_row_end;
+  UF_long row_target_external_len;
+  UF_long row_target_trailing_len;
+  const UF_long *row_target_trailing_cols;
 } kls_egraph_refactor_worker;
 
 struct kls_egraph_refactor_pool {
@@ -24619,7 +24631,7 @@ static int kls_native_row_panel_env_state(void) {
 static int kls_multi_producer_supernode_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
   if (value == NULL || value[0] == '\0') {
-    return 1;
+    return 0;
   }
   return !(value[0] == '0' && value[1] == '\0');
 }
@@ -27584,6 +27596,9 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   free(worker.supernode_workspace);
   free(worker.index_workspace);
   free(worker.byte_workspace);
+  free(worker.row_target_stamp_workspace);
+  free(worker.row_target_pos_workspace);
+  free(worker.row_target_kind_workspace);
 
   if (!groups_ok || shared.invalid || shared.pivot_rejected ||
       (shared.singular && common->halt_if_singular)) {
@@ -28767,6 +28782,172 @@ static unsigned char *kls_egraph_worker_byte_workspace(
   worker->byte_workspace = workspace;
   worker->byte_workspace_size = entry_count;
   return workspace;
+}
+
+static int kls_egraph_worker_row_target_workspace(
+  kls_egraph_refactor_worker *worker,
+  UF_long n) {
+  if (worker == NULL || n == 0u ||
+      (uintmax_t)n >
+        (uintmax_t)PTRDIFF_MAX / sizeof(*worker->row_target_pos_workspace) ||
+      (uintmax_t)n >
+        (uintmax_t)PTRDIFF_MAX / sizeof(*worker->row_target_stamp_workspace) ||
+      (uintmax_t)n >
+        (uintmax_t)PTRDIFF_MAX / sizeof(*worker->row_target_kind_workspace)) {
+    return 0;
+  }
+  if (worker->row_target_stamp_workspace != NULL &&
+      worker->row_target_pos_workspace != NULL &&
+      worker->row_target_kind_workspace != NULL &&
+      worker->row_target_workspace_size >= n) {
+    return 1;
+  }
+
+  UF_long *stamp =
+    (UF_long *)calloc((size_t)n, sizeof(*stamp));
+  UF_long *pos =
+    (UF_long *)malloc((size_t)n * sizeof(*pos));
+  unsigned char *kind =
+    (unsigned char *)malloc((size_t)n * sizeof(*kind));
+  if (stamp == NULL || pos == NULL || kind == NULL) {
+    free(stamp);
+    free(pos);
+    free(kind);
+    return 0;
+  }
+
+  free(worker->row_target_stamp_workspace);
+  free(worker->row_target_pos_workspace);
+  free(worker->row_target_kind_workspace);
+  worker->row_target_stamp_workspace = stamp;
+  worker->row_target_pos_workspace = pos;
+  worker->row_target_kind_workspace = kind;
+  worker->row_target_workspace_size = n;
+  worker->row_target_stamp = 1u;
+  worker->row_target_valid = 0;
+  return 1;
+}
+
+static int kls_egraph_worker_prepare_fragmented_row_targets(
+  kls_egraph_refactor_worker *worker,
+  const kls_solver *solver,
+  UF_long row_begin,
+  UF_long row_end,
+  UF_long row,
+  UF_long external_len,
+  UF_long trailing_len,
+  const UF_long *trailing_cols) {
+  if (worker == NULL || solver == NULL ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_l_cols == NULL ||
+      row >= solver->n ||
+      row_begin > row_end ||
+      row < row_begin ||
+      row >= row_end ||
+      row_end > solver->n ||
+      (trailing_len > 0u && trailing_cols == NULL)) {
+    if (worker != NULL) {
+      worker->row_target_valid = 0;
+    }
+    return 0;
+  }
+  if (worker->row_target_valid &&
+      worker->row_target_row == row &&
+      worker->row_target_row_begin == row_begin &&
+      worker->row_target_row_end == row_end &&
+      worker->row_target_external_len == external_len &&
+      worker->row_target_trailing_len == trailing_len &&
+      worker->row_target_trailing_cols == trailing_cols) {
+    return 1;
+  }
+  if (!kls_egraph_worker_row_target_workspace(worker, solver->n)) {
+    worker->row_target_valid = 0;
+    return 0;
+  }
+  if (worker->row_target_stamp == UF_long_max) {
+    memset(worker->row_target_stamp_workspace, 0,
+           (size_t)worker->row_target_workspace_size *
+             sizeof(*worker->row_target_stamp_workspace));
+    worker->row_target_stamp = 1u;
+  } else {
+    worker->row_target_stamp++;
+  }
+  const UF_long stamp = worker->row_target_stamp;
+  const UF_long l_begin = solver->row_refactor_l_ptr[row];
+  if (external_len > solver->row_refactor_l_ptr[row + 1u] - l_begin) {
+    worker->row_target_valid = 0;
+    return 0;
+  }
+
+  for (UF_long local = 0; local < external_len; ++local) {
+    const UF_long col = solver->row_refactor_l_cols[l_begin + local];
+    if (col >= solver->n || col >= row_begin) {
+      worker->row_target_valid = 0;
+      return 0;
+    }
+    worker->row_target_stamp_workspace[col] = stamp;
+    worker->row_target_kind_workspace[col] =
+      KLS_FRAGMENTED_UPDATE_TARGET_EXTERNAL;
+    worker->row_target_pos_workspace[col] = local;
+  }
+  for (UF_long col = row_begin; col < row_end; ++col) {
+    worker->row_target_stamp_workspace[col] = stamp;
+    worker->row_target_kind_workspace[col] =
+      col == row ? KLS_FRAGMENTED_UPDATE_TARGET_PIVOT
+                 : KLS_FRAGMENTED_UPDATE_TARGET_DENSE;
+    worker->row_target_pos_workspace[col] = col - row_begin;
+  }
+  for (UF_long pos = 0; pos < trailing_len; ++pos) {
+    const UF_long col = trailing_cols[pos];
+    if (col >= solver->n) {
+      worker->row_target_valid = 0;
+      return 0;
+    }
+    if (worker->row_target_stamp_workspace[col] == stamp) {
+      continue;
+    }
+    worker->row_target_stamp_workspace[col] = stamp;
+    worker->row_target_kind_workspace[col] =
+      KLS_FRAGMENTED_UPDATE_TARGET_TRAILING;
+    worker->row_target_pos_workspace[col] = pos;
+  }
+
+  worker->row_target_valid = 1;
+  worker->row_target_row = row;
+  worker->row_target_row_begin = row_begin;
+  worker->row_target_row_end = row_end;
+  worker->row_target_external_len = external_len;
+  worker->row_target_trailing_len = trailing_len;
+  worker->row_target_trailing_cols = trailing_cols;
+  return 1;
+}
+
+static int kls_egraph_worker_lookup_fragmented_row_target(
+  const kls_egraph_refactor_worker *worker,
+  UF_long col,
+  unsigned char *kind_out,
+  UF_long *pos_out) {
+  if (kind_out != NULL) {
+    *kind_out = KLS_FRAGMENTED_UPDATE_TARGET_NONE;
+  }
+  if (pos_out != NULL) {
+    *pos_out = 0u;
+  }
+  if (worker == NULL || !worker->row_target_valid ||
+      col >= worker->row_target_workspace_size ||
+      worker->row_target_stamp_workspace == NULL ||
+      worker->row_target_kind_workspace == NULL ||
+      worker->row_target_pos_workspace == NULL ||
+      worker->row_target_stamp_workspace[col] != worker->row_target_stamp) {
+    return 0;
+  }
+  if (kind_out != NULL) {
+    *kind_out = worker->row_target_kind_workspace[col];
+  }
+  if (pos_out != NULL) {
+    *pos_out = worker->row_target_pos_workspace[col];
+  }
+  return 1;
 }
 
 static double *kls_row_refactor_compact_group_panel(kls_solver *solver,
@@ -32024,6 +32205,10 @@ static int kls_compact_dense_group_process_fragmented_scalar_range(
   }
 
   const UF_long l_begin = solver->row_refactor_l_ptr[row];
+  const int use_target_map =
+    kls_egraph_worker_prepare_fragmented_row_targets(
+      worker, solver, row_begin, row_end, row, external_len, trailing_len,
+      trailing_cols);
   for (UF_long local = local_begin; local < local_end; ++local) {
     const UF_long p = l_begin + local;
     const UF_long dep = solver->row_refactor_l_cols[p];
@@ -32048,23 +32233,50 @@ static int kls_compact_dense_group_process_fragmented_scalar_range(
     for (UF_long up = dep_u_begin; up < dep_u_end; ++up) {
       const UF_long col = solver->row_refactor_u_cols[up];
       const double update = lij * solver->row_refactor_u_row_values[up];
-      UF_long dep_pos = KLS_KLU_EMPTY;
-      UF_long trailing_pos = KLS_KLU_EMPTY;
-      if (col < row_begin &&
-          kls_find_uflong_sorted(solver->row_refactor_l_cols + l_begin,
-                                 external_len, col, &dep_pos)) {
-        row_multipliers[dep_pos] -= update;
-      } else if (col >= row_begin && col < row_end) {
-        const UF_long local_col = col - row_begin;
-        if (col == row) {
-          pivots[batch_local] -= update;
-        } else {
-          row_dense_panel[local_col] -= update;
+      if (use_target_map) {
+        unsigned char target_kind = KLS_FRAGMENTED_UPDATE_TARGET_NONE;
+        UF_long target_pos = 0u;
+        if (kls_egraph_worker_lookup_fragmented_row_target(
+              worker, col, &target_kind, &target_pos)) {
+          switch ((kls_fragmented_update_target_kind)target_kind) {
+            case KLS_FRAGMENTED_UPDATE_TARGET_EXTERNAL:
+              row_multipliers[target_pos] -= update;
+              break;
+            case KLS_FRAGMENTED_UPDATE_TARGET_DENSE:
+              row_dense_panel[target_pos] -= update;
+              break;
+            case KLS_FRAGMENTED_UPDATE_TARGET_PIVOT:
+              pivots[batch_local] -= update;
+              break;
+            case KLS_FRAGMENTED_UPDATE_TARGET_TRAILING:
+              if (row_trailing_panel != NULL) {
+                row_trailing_panel[target_pos] -= update;
+              }
+              break;
+            case KLS_FRAGMENTED_UPDATE_TARGET_NONE:
+            default:
+              break;
+          }
         }
-      } else if (trailing_len > 0u &&
-                 kls_find_uflong_sorted(trailing_cols, trailing_len, col,
-                                        &trailing_pos)) {
-        row_trailing_panel[trailing_pos] -= update;
+      } else {
+        UF_long dep_pos = KLS_KLU_EMPTY;
+        UF_long trailing_pos = KLS_KLU_EMPTY;
+        if (col < row_begin &&
+            kls_find_uflong_sorted(solver->row_refactor_l_cols + l_begin,
+                                   external_len, col, &dep_pos)) {
+          row_multipliers[dep_pos] -= update;
+        } else if (col >= row_begin && col < row_end) {
+          const UF_long local_col = col - row_begin;
+          if (col == row) {
+            pivots[batch_local] -= update;
+          } else {
+            row_dense_panel[local_col] -= update;
+          }
+        } else if (trailing_len > 0u &&
+                   kls_find_uflong_sorted(trailing_cols, trailing_len, col,
+                                          &trailing_pos)) {
+          row_trailing_panel[trailing_pos] -= update;
+        }
       }
       if (scalar_work != NULL) {
         *scalar_work += 1.0;
@@ -35818,6 +36030,9 @@ static void kls_row_refactor_refresh_missing_prefix(
   free(worker.supernode_workspace);
   free(worker.index_workspace);
   free(worker.byte_workspace);
+  free(worker.row_target_stamp_workspace);
+  free(worker.row_target_pos_workspace);
+  free(worker.row_target_kind_workspace);
 }
 
 static void kls_parallel_row_refactor_mark_group_done(
@@ -39685,6 +39900,9 @@ static void destroy_egraph_refactor_pool(kls_solver *solver) {
       free(pool->workers[i].supernode_workspace);
       free(pool->workers[i].index_workspace);
       free(pool->workers[i].byte_workspace);
+      free(pool->workers[i].row_target_stamp_workspace);
+      free(pool->workers[i].row_target_pos_workspace);
+      free(pool->workers[i].row_target_kind_workspace);
     }
   }
   free(pool->threads);
