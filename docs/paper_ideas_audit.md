@@ -7863,3 +7863,22 @@ Both runs had `build_has_cblas=true`, but every matrix reported zero CBLAS
 update runs, rows, and entries. Adding a stricter "large cases only" BLAS guard
 would therefore not affect the observed CKTSO-gap path; the active issue remains
 the native row-first/pivot-aware numeric executor shape.
+
+The next profiled hot-loop cleanup was also rejected as too small and mixed to
+keep. `perf record` was unavailable on this host because `perf_event_paranoid`
+is set to `4`, so Callgrind was used on `ASIC_100ks` instead. That mixed cold
+factor/refactor profile put `kls_egraph_refactor_btf_unscaled_column` at
+`37.58%` of sampled instructions, behind the cold KLU kernel at `41.50%`. A
+prototype hoisted the cached 32-bit `L` row-index table lookup out of each
+EGraph scatter helper call. It built and passed the normal smoke suite, but a
+same-commit top-five comparison was noise-level and matrix-mixed: the clean
+`c5b3f8a` control measured `1.44549s` geomean
+(`build/kls_baseline_c5b3f8a_gap5_t4_r1_ref3_timeout120.jsonl`) and the
+prototype measured `1.44269s`
+(`build/kls_cached_i32_gap5_t4_r1_ref3_timeout120.jsonl`), while
+`ASIC_320ks` and `rajat03` regressed. Focused repeats were also mixed
+(`ASIC_100ks` baseline refactor `0.04017s` versus prototype `0.05558s` and
+`0.03743s`; `ASIC_320k` baseline `0.10861s` versus prototype `0.10458s` and
+`0.10562s`). The source was reverted. This keeps the next work item at the
+algorithm level: a production CKTSO/SubtreeLU-style row/supernode numeric
+executor, not a scalar EGraph scatter cleanup.
