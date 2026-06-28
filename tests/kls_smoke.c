@@ -13823,19 +13823,41 @@ static int test_experimental_row_uplooking_natural_pipeline(void) {
 }
 
 static int test_experimental_row_uplooking_first_consumer_panel(void) {
-  const int32_t ap[] = {0, 3, 6, 9};
-  const int32_t ai[] = {
-    0, 1, 2,
-    0, 1, 2,
-    0, 1, 2
-  };
-  const double ax[] = {
-    5.0, 0.5, 0.25,
-    1.0, 6.0, 0.5,
-    1.0, 2.0, 7.0
-  };
-  const double b[] = {10.0, 18.5, 22.25};
-  double x[3] = {0.0, 0.0, 0.0};
+  const int32_t n = 40;
+  const int32_t nnz = n * n;
+  int32_t *ap = (int32_t *)calloc((size_t)n + 1u, sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  if (ap == NULL || ai == NULL || ax == NULL || b == NULL || x == NULL ||
+      expected == NULL) {
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    free(expected);
+    return 0;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    expected[row] = 1.0 + (double)(row % 7);
+  }
+  int32_t pos = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = pos;
+    for (int32_t row = 0; row < n; ++row) {
+      const double value = row == col
+        ? 64.0 + 0.25 * (double)col
+        : 0.001 * (double)(1 + ((row + 3 * col) % 11));
+      ai[pos] = row;
+      ax[pos] = value;
+      b[row] += value * expected[col];
+      pos++;
+    }
+  }
+  ap[n] = pos;
 
   kls_solver *solver = NULL;
   kls_options options;
@@ -13900,7 +13922,7 @@ static int test_experimental_row_uplooking_first_consumer_panel(void) {
   if (ok && !require_ok(kls_create(&solver),
                         "create first-consumer panel")) ok = 0;
   if (ok && !require_ok(kls_analyze_csc(
-                          solver, KLS_INDEX_INT32, 3, ap, ai, 0, &options),
+                          solver, KLS_INDEX_INT32, n, ap, ai, 0, &options),
                         "analyze first-consumer panel")) ok = 0;
   if (ok && !require_ok(kls_factor(solver, ax),
                         "factor first-consumer panel")) ok = 0;
@@ -13914,14 +13936,14 @@ static int test_experimental_row_uplooking_first_consumer_panel(void) {
     ok = 0;
   }
   if (ok && (stats.last_factor_path != KLS_FACTOR_PATH_KLS_FIRST ||
-             stats.kls_first_last_row_uplooking_columns != 3 ||
+             stats.kls_first_last_row_uplooking_columns != n ||
              stats.kls_first_last_row_supernode_update != 1 ||
-             stats.kls_first_last_row_supernode_update_groups != 1 ||
-             stats.kls_first_last_row_supernode_update_rows != 2 ||
+             stats.kls_first_last_row_supernode_update_groups <= 0 ||
+             stats.kls_first_last_row_supernode_update_rows < 16 ||
              stats.kls_first_last_row_supernode_panel_update != 1 ||
              stats.kls_first_row_supernode_panel_update_run_count != 1 ||
-             stats.kls_first_last_row_supernode_panel_update_groups != 1 ||
-             stats.kls_first_last_row_supernode_panel_update_rows != 2 ||
+             stats.kls_first_last_row_supernode_panel_update_groups <= 0 ||
+             stats.kls_first_last_row_supernode_panel_update_rows < 16 ||
              stats.kls_first_row_panel_cache_append_count <= 0 ||
              stats.kls_first_row_panel_cache_append_panels <= 0 ||
              stats.kls_first_row_panel_cache_append_entries <= 0)) {
@@ -13944,13 +13966,14 @@ static int test_experimental_row_uplooking_first_consumer_panel(void) {
             stats.kls_first_row_panel_cache_append_entries);
     ok = 0;
   }
-  if (ok && (!close_enough(x[0], 1.0) || !close_enough(x[1], 2.0) ||
-             !close_enough(x[2], 3.0))) {
-    fprintf(stderr,
-            "unexpected first-consumer panel solution:"
-            " %.17g %.17g %.17g\n",
-            x[0], x[1], x[2]);
-    ok = 0;
+  for (int32_t row = 0; ok && row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "unexpected first-consumer panel solution at %d:"
+              " %.17g != %.17g\n",
+              (int)row, x[row], expected[row]);
+      ok = 0;
+    }
   }
 
   if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
@@ -13970,6 +13993,12 @@ static int test_experimental_row_uplooking_first_consumer_panel(void) {
     ok = 0;
   }
   kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(b);
+  free(x);
+  free(expected);
   free(saved_first);
   free(saved_row);
   free(saved_checked);
@@ -14062,13 +14091,13 @@ static int test_experimental_row_uplooking_lazy_panel_prefix(void) {
              stats.kls_first_last_row_uplooking_columns != 4 ||
              stats.kls_first_last_row_supernode_update != 1 ||
              stats.kls_first_last_row_supernode_update_rows < 4 ||
-             stats.kls_first_last_row_supernode_panel_update != 1 ||
-             stats.kls_first_row_supernode_panel_update_run_count < 1 ||
-             stats.kls_first_last_row_supernode_panel_update_groups < 1 ||
-             stats.kls_first_last_row_supernode_panel_update_rows < 2 ||
-             stats.kls_first_row_panel_cache_append_count <= 0 ||
-             stats.kls_first_row_panel_cache_append_panels <= 0 ||
-             stats.kls_first_row_panel_cache_append_entries <= 0)) {
+             stats.kls_first_last_row_supernode_panel_update != 0 ||
+             stats.kls_first_row_supernode_panel_update_run_count != 0 ||
+             stats.kls_first_last_row_supernode_panel_update_groups != 0 ||
+             stats.kls_first_last_row_supernode_panel_update_rows != 0 ||
+             stats.kls_first_row_panel_cache_append_count != 0 ||
+             stats.kls_first_row_panel_cache_append_panels != 0 ||
+             stats.kls_first_row_panel_cache_append_entries != 0)) {
     fprintf(stderr,
             "unexpected row-up lazy panel stats: path=%s, row_cols=%" PRId64
             ", row_supernode=%d/%" PRId64 ", panel=%d/%" PRId64

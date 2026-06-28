@@ -7315,3 +7315,54 @@ sample no longer showed `kls_row_first_heap_pop`; it moved into
 (`build/pre2_metis_heap_elide_gdb_interrupt.txt`). The remaining visible gap is
 now inside the cached supernode arithmetic/state update body rather than
 avoidable heap maintenance for same-run internal dependencies.
+
+The follow-up BLAS-size question was rerun before changing the executor. The
+CBLAS-capable top-five CKTSO-gap probe measured `1.40471058s` geomean with
+`KLS_ENABLE_CBLAS_SUPERNODE=0` and `1.52710910s` with
+`KLS_ENABLE_CBLAS_SUPERNODE=1`
+(`build-cblas/kls_cblas_guard_off_current_top5_t4_r1_ref3_timeout120.jsonl`
+and `build-cblas/kls_cblas_guard_on_current_top5_t4_r1_ref3_timeout120.jsonl`).
+Both runs reported `build_has_cblas=true` but zero CBLAS, compact GEMV/TRSV,
+blocked-panel, and KLS-first panel-cache counters on every row. The existing
+512-scale and work-per-copy CBLAS guards are therefore not the active
+slow-case mechanism; the normal build is not calling BLAS in these paths.
+
+The retained change instead batches row-supernode executor storage and avoids
+tiny retained-panel construction. KLS now reserves worker entry arrays by the
+whole append count, copies worker-local entries in bulk when no column linked
+list is needed, and stores the solved consecutive L multipliers from cached
+CBLAS/native panel runs with one consecutive append. Missed row-panel cache
+materialization now uses the same cached-supernode structural/work gate as the
+EGraph cache before retaining a panel, so width-2 style producer runs stay on
+the native compact/scalar path instead of paying dense-panel copy and lookup
+costs. Dynamic-pivot panel-cache reset also keeps the allocated cache and
+clears only retained panel rows, avoiding an O(block rows) reinitialization of
+`panel_id_by_row` on large blocks.
+
+The verification set passed `cmake --build build -j4`,
+`ctest --test-dir build --output-on-failure`,
+`cmake --build build-cblas -j4`,
+`ctest --test-dir build-cblas --output-on-failure`, and `git diff --check`.
+`ASIC_320k` forced KLS-first stayed residual-clean: the previous accepted
+heap-elision artifact measured `2.27882813s` initial factor with
+`2.61575448e-15` relative residual
+(`build/kls_asic320k_same_run_heap_elide_t4_factor.json`), while the current
+work-gated/batched run measured `0.960101378s` initial factor and
+`1.50913325e-15` relative residual
+(`build/kls_asic320k_panel_clear_batch_l_t4_factor.json`). The top-five normal
+CKTSO-gap focus run completed with no failures at `1.44303173s` geomean in
+`build/kls_panel_clear_batch_l_gap5_t4_r1_ref3_timeout120.jsonl`.
+
+The hard `pre2` forced KLS-first METIS factor probe still timed out at 120s
+with an empty
+`build/kls_pre2_metis_panel_clear_batch_l_t4_factor_timeout120.json`. The GDB
+sequence is useful: before the panel gate, workers were still in
+`kls_row_first_supernode_panel_cache_append` and
+`kls_row_first_supernode_panel_cache_init_rows`
+(`build/pre2_metis_batch_l_append_gdb_interrupt.txt` and
+`build/pre2_metis_panel_workgate_batch_l_gdb_interrupt.txt`). After the reset
+cleanup, the visible stack moved to `kls_row_first_partial_apply_one_dep` and
+`kls_row_first_partial_apply_supernode_run_compact`
+(`build/pre2_metis_panel_clear_batch_l_gdb_interrupt.txt`). That narrows the
+remaining CKTSO-scale gap to the native scalar/compact row-dependency executor,
+not BLAS calls, panel-cache growth, or full-row cache resets.

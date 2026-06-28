@@ -44345,6 +44345,58 @@ static int kls_row_first_entries_reserve(kls_row_first_entries *entries,
   return 1;
 }
 
+static int kls_row_first_entries_reserve_append(
+  kls_row_first_entries *entries,
+  UF_long append_count) {
+  if (entries == NULL) {
+    return 0;
+  }
+  if (append_count == 0u) {
+    return 1;
+  }
+  if (append_count > UF_long_max - entries->count) {
+    return 0;
+  }
+  const UF_long needed = entries->count + append_count;
+  if (needed <= entries->capacity) {
+    return 1;
+  }
+  UF_long grown = entries->capacity == 0u ? 64u : entries->capacity;
+  while (grown < needed) {
+    if (grown > UF_long_max / 2u) {
+      grown = needed;
+      break;
+    }
+    grown *= 2u;
+  }
+  return kls_row_first_entries_reserve(entries, grown);
+}
+
+static int kls_row_first_entries_append_reserved(
+  kls_row_first_entries *entries,
+  UF_long row,
+  UF_long col,
+  double value) {
+  if (entries == NULL || entries->count >= entries->capacity ||
+      (entries->col_head != NULL && col >= entries->col_head_len) ||
+      (entries->col_count != NULL && col >= entries->col_count_len)) {
+    return 0;
+  }
+  const UF_long pos = entries->count;
+  entries->row[pos] = row;
+  entries->col[pos] = col;
+  entries->value[pos] = value;
+  if (entries->col_count != NULL) {
+    entries->col_count[col]++;
+  }
+  if (entries->col_head != NULL) {
+    entries->next[pos] = entries->col_head[col];
+    entries->col_head[col] = pos;
+  }
+  entries->count++;
+  return 1;
+}
+
 static UF_long kls_row_first_symbolic_reserve(
   const kls_solver *solver,
   UF_long block,
@@ -44366,34 +44418,48 @@ static int kls_row_first_entries_append(kls_row_first_entries *entries,
                                         UF_long row,
                                         UF_long col,
                                         double value) {
-  if (entries == NULL) {
+  if (!kls_row_first_entries_reserve_append(entries, 1u)) {
     return 0;
   }
-  if (entries->count == entries->capacity) {
-    UF_long grown = entries->capacity == 0u ? 64u : 2u * entries->capacity;
-    if (grown <= entries->capacity) {
-      return 0;
-    }
-    if (!kls_row_first_entries_reserve(entries, grown)) {
-      return 0;
-    }
+  return kls_row_first_entries_append_reserved(entries, row, col, value);
+}
+
+static int kls_row_first_entries_append_consecutive(
+  kls_row_first_entries *entries,
+  UF_long row,
+  UF_long col_begin,
+  const double *values,
+  UF_long count) {
+  if (count == 0u) {
+    return 1;
   }
-  if ((entries->col_head != NULL && col >= entries->col_head_len) ||
-      (entries->col_count != NULL && col >= entries->col_count_len)) {
+  if (entries == NULL || values == NULL ||
+      count > UF_long_max - col_begin ||
+      count > UF_long_max - entries->count ||
+      !kls_row_first_entries_reserve_append(entries, count)) {
     return 0;
   }
-  const UF_long pos = entries->count;
-  entries->row[pos] = row;
-  entries->col[pos] = col;
-  entries->value[pos] = value;
-  if (entries->col_count != NULL) {
-    entries->col_count[col]++;
+  const UF_long col_end = col_begin + count;
+  if ((entries->col_head != NULL && col_end > entries->col_head_len) ||
+      (entries->col_count != NULL && col_end > entries->col_count_len)) {
+    return 0;
   }
-  if (entries->col_head != NULL) {
-    entries->next[pos] = entries->col_head[col];
-    entries->col_head[col] = pos;
+  const UF_long pos_begin = entries->count;
+  for (UF_long local = 0; local < count; ++local) {
+    const UF_long pos = pos_begin + local;
+    const UF_long col = col_begin + local;
+    entries->row[pos] = row;
+    entries->col[pos] = col;
+    entries->value[pos] = values[local];
+    if (entries->col_count != NULL) {
+      entries->col_count[col]++;
+    }
+    if (entries->col_head != NULL) {
+      entries->next[pos] = entries->col_head[col];
+      entries->col_head[col] = pos;
+    }
   }
-  entries->count++;
+  entries->count = pos_begin + count;
   return 1;
 }
 
@@ -46682,8 +46748,38 @@ static int kls_row_first_append_entries(
   if (dst == NULL || src == NULL) {
     return 0;
   }
+  if (src->count == 0u) {
+    return 1;
+  }
+  if (dst == src ||
+      !kls_row_first_entries_reserve_append(dst, src->count)) {
+    return 0;
+  }
+  if (dst->col_count != NULL) {
+    for (UF_long p = 0; p < src->count; ++p) {
+      if (src->col[p] >= dst->col_count_len) {
+        return 0;
+      }
+    }
+  }
+  if (dst->col_head == NULL) {
+    const UF_long pos = dst->count;
+    memcpy(dst->row + pos, src->row,
+           (size_t)src->count * sizeof(*dst->row));
+    memcpy(dst->col + pos, src->col,
+           (size_t)src->count * sizeof(*dst->col));
+    memcpy(dst->value + pos, src->value,
+           (size_t)src->count * sizeof(*dst->value));
+    if (dst->col_count != NULL) {
+      for (UF_long p = 0; p < src->count; ++p) {
+        dst->col_count[src->col[p]]++;
+      }
+    }
+    dst->count += src->count;
+    return 1;
+  }
   for (UF_long p = 0; p < src->count; ++p) {
-    if (!kls_row_first_entries_append(
+    if (!kls_row_first_entries_append_reserved(
           dst, src->row[p], src->col[p], src->value[p])) {
       return 0;
     }
@@ -47083,6 +47179,38 @@ static int kls_row_first_supernode_panel_cache_init_rows(
   return 1;
 }
 
+static void kls_row_first_supernode_panel_cache_clear(
+  kls_row_first_supernode_panel_cache *cache) {
+  if (cache == NULL) {
+    return;
+  }
+  if (cache->panel_id_by_row != NULL) {
+    for (UF_long panel = 0; panel < cache->panel_count; ++panel) {
+      if (cache->width == NULL || cache->start == NULL ||
+          panel >= cache->panel_capacity) {
+        break;
+      }
+      const UF_long start = cache->start[panel];
+      const UF_long width = cache->width[panel];
+      if (start >= cache->row_count ||
+          width > cache->row_count - start) {
+        continue;
+      }
+      for (UF_long local = 0; local < width; ++local) {
+        const UF_long row = start + local;
+        if (cache->panel_id_by_row[row] == panel) {
+          cache->panel_id_by_row[row] = KLS_KLU_EMPTY;
+        }
+      }
+    }
+  }
+  cache->panel_count = 0;
+  cache->dense_value_count = 0;
+  cache->tail_value_count = 0;
+  cache->tail_col_count = 0;
+  cache->enabled = 0;
+}
+
 static void kls_row_first_supernode_panel_cache_reset_active(
   kls_row_first_supernode_panel_cache *cache,
   kls_row_first_workspace *workspace,
@@ -47101,9 +47229,16 @@ static void kls_row_first_supernode_panel_cache_reset_active(
   if (cache == NULL) {
     return;
   }
-  kls_row_first_supernode_panel_cache_free(cache);
-  if (workspace != NULL &&
-      kls_row_first_supernode_panel_cache_init_rows(cache, nk)) {
+  if (cache->panel_id_by_row == NULL || cache->row_count != nk) {
+    kls_row_first_supernode_panel_cache_free(cache);
+    if (workspace != NULL &&
+        kls_row_first_supernode_panel_cache_init_rows(cache, nk)) {
+      workspace->supernode_panel_cache = cache;
+    }
+    return;
+  }
+  kls_row_first_supernode_panel_cache_clear(cache);
+  if (workspace != NULL) {
     workspace->supernode_panel_cache = cache;
   }
 }
@@ -47260,12 +47395,19 @@ static int kls_row_first_supernode_panel_cache_append(
       start >= nk || end <= start || end >= nk) {
     return 0;
   }
+  const UF_long panel_width = end - start + 1u;
+  if (panel_width < KLS_EGRAPH_CACHED_SUPERNODE_MIN_ROWS) {
+    return 0;
+  }
   UF_long tail_len = 0;
   if (!kls_row_first_supernode_panel_shape(
         u_entries, u_row_ptr, u_row_end, nk, start, end, &tail_len)) {
     return 0;
   }
-  const UF_long panel_width = end - start + 1u;
+  if (!kls_egraph_cached_supernode_update_allows(panel_width, 0u,
+                                                 tail_len)) {
+    return 0;
+  }
   if (!kls_row_first_panel_cache_allows_missed_append(
         cache, panel_width, tail_len, max_stored_entries)) {
     return 0;
@@ -47935,6 +48077,10 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
   UF_long *dep_heap = workspace->dep_heap;
   const unsigned int generation = state->generation;
   UF_long run_rows = 0;
+  if (!kls_row_first_entries_reserve_append(
+        local_l_entries, dep_end - dep_begin + 1u)) {
+    return 0;
+  }
 
   /* Later rows in the run may be discovered by the triangular prefix update. */
   for (UF_long dep = dep_begin; dep <= dep_end; ++dep) {
@@ -48067,18 +48213,19 @@ static int kls_row_first_partial_apply_supernode_run_cached_cblas(
               dense_panel + panel_offset * width + panel_offset,
               (int)width, rhs, 1);
 
-  for (UF_long local = 0; local < run_limit; ++local) {
+  for (UF_long local = 1u; local < run_limit; ++local) {
     const UF_long dep = dep_begin + local;
-    if (local > 0u) {
-      if (!kls_row_first_heap_consume_ready_dep(
-            dep_heap, &state->dep_heap_size, dep)) {
-        return -1;
-      }
-    }
-    if (!kls_row_first_entries_append(local_l_entries, state->row, dep,
-                                      rhs[local])) {
+    if (!kls_row_first_heap_consume_ready_dep(
+          dep_heap, &state->dep_heap_size, dep)) {
       return -1;
     }
+  }
+  if (!kls_row_first_entries_append_consecutive(
+        local_l_entries, state->row, dep_begin, rhs, run_limit)) {
+    return -1;
+  }
+  for (UF_long local = 0; local < run_limit; ++local) {
+    const UF_long dep = dep_begin + local;
     x[dep] = 0.0;
   }
 
@@ -48207,18 +48354,19 @@ static int kls_row_first_partial_apply_supernode_run_cached_portable(
     rhs[local] = lij;
   }
 
-  for (UF_long local = 0; local < run_limit; ++local) {
+  for (UF_long local = 1u; local < run_limit; ++local) {
     const UF_long dep = dep_begin + local;
-    if (local > 0u) {
-      if (!kls_row_first_heap_consume_ready_dep(
-            dep_heap, &state->dep_heap_size, dep)) {
-        return -1;
-      }
-    }
-    if (!kls_row_first_entries_append(local_l_entries, state->row, dep,
-                                      rhs[local])) {
+    if (!kls_row_first_heap_consume_ready_dep(
+          dep_heap, &state->dep_heap_size, dep)) {
       return -1;
     }
+  }
+  if (!kls_row_first_entries_append_consecutive(
+        local_l_entries, state->row, dep_begin, rhs, run_limit)) {
+    return -1;
+  }
+  for (UF_long local = 0; local < run_limit; ++local) {
+    const UF_long dep = dep_begin + local;
     x[dep] = 0.0;
   }
 
@@ -48399,6 +48547,9 @@ static int kls_row_first_partial_apply_supernode_run_cached(
   }
 
   UF_long run_rows = 0;
+  if (!kls_row_first_entries_reserve_append(local_l_entries, run_limit)) {
+    return -1;
+  }
   for (UF_long local = 0; local < run_limit; ++local) {
     const UF_long dep = dep_begin + local;
     const UF_long panel_local = panel_offset + local;
@@ -48561,6 +48712,9 @@ static int kls_row_first_partial_apply_supernode_run_compact(
   }
 
   UF_long run_rows = 0;
+  if (!kls_row_first_entries_reserve_append(local_l_entries, run_limit)) {
+    return -1;
+  }
   for (UF_long local = 0; local < run_limit; ++local) {
     const UF_long dep = dep_begin + local;
     if (local > 0u) {
