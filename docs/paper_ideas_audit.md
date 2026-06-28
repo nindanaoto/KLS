@@ -6532,3 +6532,26 @@ supernode batches. It also recorded zero CBLAS update runs with
 same-level batches" along with the small-BLAS-call hypothesis; KLS needs
 producer-compatible row-panel/supernode batch construction, not more generic
 batch groups.
+
+The independent-row multi-producer scaffold then gained retained dense-producer
+target maps, but still remains opt-in. Previously those maps only described
+dense current groups, so the independent fragmented/exact row batches still did
+per-update searches from dense-producer trailing columns into each consumer
+row's later L, pivot, or row-major U workspace. KLS now builds the independent
+target slices only when `KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1` is set and the
+independent multi-producer executors carry retained run IDs to consume those
+slices. A first implementation moved the opt-in top-ten geomean from
+`25.4948s` to `22.9011s`; after moving target-slice validation out of the
+per-update loop, the same forced row-refactor top-ten opt-in rerun measured
+`20.7554s` geomean, with 10 wins over the prior multi-producer artifact
+(`build/kls_multi_producer_current_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_multi_targetmap_validated_gap10_t4_r1_ref3_timeout120.jsonl`).
+Batch coverage was effectively unchanged (`6864` compact supernode batches and
+`2717328408` batch entries), while the independent target maps eliminated the
+retained `NONE` target slots in the opt-in run. With the gate off, the top-ten
+target-map counters match the saved dense-only baseline exactly, so this is not
+a default policy change. The opt-in path is still much slower than the default
+forced row-refactor baseline (`20.7554s` versus `11.8996s` geomean, `1.744x`
+candidate/reference), so the remaining paper gap is still the lower-overhead
+row-panel storage/update kernel, not just retained target lookup or small BLAS
+thresholding.
