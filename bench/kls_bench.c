@@ -26,12 +26,34 @@ typedef struct matrix {
   double *values;
 } matrix;
 
+typedef enum bench_index_mode {
+  BENCH_INDEX_AUTO = 0,
+  BENCH_INDEX_INT32,
+  BENCH_INDEX_INT64
+} bench_index_mode;
+
+typedef struct bench_index_view {
+  kls_index_type type;
+  int bytes;
+  const void *col_ptr;
+  const void *row_idx;
+  int32_t *col_ptr32;
+  int32_t *row_idx32;
+} bench_index_view;
+
 static void matrix_free(matrix *a) {
   if (a == NULL) return;
   free(a->col_ptr);
   free(a->row_idx);
   free(a->values);
   memset(a, 0, sizeof(*a));
+}
+
+static void bench_index_view_free(bench_index_view *view) {
+  if (view == NULL) return;
+  free(view->col_ptr32);
+  free(view->row_idx32);
+  memset(view, 0, sizeof(*view));
 }
 
 static int cmp_triplet(const void *lhs, const void *rhs) {
@@ -290,6 +312,102 @@ static int parse_int64_arg(const char *s, int64_t *value_out) {
   return 1;
 }
 
+static int parse_index_mode(const char *s, bench_index_mode *mode_out) {
+  if (strcmp(s, "auto") == 0) {
+    *mode_out = BENCH_INDEX_AUTO;
+    return 1;
+  }
+  if (strcmp(s, "32") == 0 || strcmp(s, "int32") == 0) {
+    *mode_out = BENCH_INDEX_INT32;
+    return 1;
+  }
+  if (strcmp(s, "64") == 0 || strcmp(s, "int64") == 0) {
+    *mode_out = BENCH_INDEX_INT64;
+    return 1;
+  }
+  return 0;
+}
+
+static const char *index_mode_name(bench_index_mode mode) {
+  switch (mode) {
+    case BENCH_INDEX_AUTO: return "auto";
+    case BENCH_INDEX_INT32: return "32";
+    case BENCH_INDEX_INT64: return "64";
+    default: return "unknown";
+  }
+}
+
+static int matrix_fits_int32_indices(const matrix *a) {
+  return a != NULL &&
+         a->n >= 0 && a->n <= (int64_t)INT32_MAX &&
+         a->nnz >= 0 && a->nnz <= (int64_t)INT32_MAX;
+}
+
+static int prepare_index_view(const matrix *a,
+                              bench_index_mode mode,
+                              bench_index_view *view) {
+  if (a == NULL || view == NULL || a->col_ptr == NULL || a->row_idx == NULL) {
+    return 0;
+  }
+  memset(view, 0, sizeof(*view));
+
+  const int fits_int32 = matrix_fits_int32_indices(a);
+  const int use_int32 =
+    mode == BENCH_INDEX_INT32 || (mode == BENCH_INDEX_AUTO && fits_int32);
+  if (!use_int32) {
+    if (mode == BENCH_INDEX_INT32) {
+      fprintf(stderr,
+              "matrix order/nnz exceed 32-bit CSC index range; use --input-index auto or 64\n");
+      return 0;
+    }
+    view->type = KLS_INDEX_INT64;
+    view->bytes = 8;
+    view->col_ptr = a->col_ptr;
+    view->row_idx = a->row_idx;
+    return 1;
+  }
+
+  if (!fits_int32 ||
+      a->n + 1 > (int64_t)(SIZE_MAX / sizeof(*view->col_ptr32)) ||
+      a->nnz > (int64_t)(SIZE_MAX / sizeof(*view->row_idx32))) {
+    fprintf(stderr,
+            "matrix order/nnz exceed 32-bit CSC index range; use --input-index auto or 64\n");
+    return 0;
+  }
+  view->col_ptr32 =
+    (int32_t *)malloc((size_t)(a->n + 1) * sizeof(*view->col_ptr32));
+  view->row_idx32 = a->nnz > 0
+    ? (int32_t *)malloc((size_t)a->nnz * sizeof(*view->row_idx32))
+    : NULL;
+  if (view->col_ptr32 == NULL || (a->nnz > 0 && view->row_idx32 == NULL)) {
+    bench_index_view_free(view);
+    return 0;
+  }
+  for (int64_t i = 0; i <= a->n; ++i) {
+    if (a->col_ptr[i] < 0 || a->col_ptr[i] > (int64_t)INT32_MAX) {
+      fprintf(stderr,
+              "matrix column pointer exceeds 32-bit CSC index range; use --input-index auto or 64\n");
+      bench_index_view_free(view);
+      return 0;
+    }
+    view->col_ptr32[i] = (int32_t)a->col_ptr[i];
+  }
+  for (int64_t p = 0; p < a->nnz; ++p) {
+    if (a->row_idx[p] < 0 || a->row_idx[p] > (int64_t)INT32_MAX) {
+      fprintf(stderr,
+              "matrix row index exceeds 32-bit CSC index range; use --input-index auto or 64\n");
+      bench_index_view_free(view);
+      return 0;
+    }
+    view->row_idx32[p] = (int32_t)a->row_idx[p];
+  }
+  view->type = KLS_INDEX_INT32;
+  view->bytes = 4;
+  view->col_ptr = view->col_ptr32;
+  view->row_idx = view->row_idx32;
+  return 1;
+}
+
 static int valid_row_refactor_control(const char *s) {
   return strcmp(s, "env") == 0 ||
          strcmp(s, "off") == 0 ||
@@ -397,7 +515,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -416,6 +534,7 @@ int main(int argc, char **argv) {
   const char *row_refactor_control = "env";
   const char *kls_first_factor_control = "env";
   const char *row_solve_control = "env";
+  bench_index_mode input_index_mode = BENCH_INDEX_AUTO;
   kls_options options;
   kls_default_options(&options);
 
@@ -436,6 +555,11 @@ int main(int argc, char **argv) {
       options.orientation = parse_orientation(argv[++i]);
     } else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
       if (!parse_scale(argv[++i], &options.scale)) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+      }
+    } else if (strcmp(argv[i], "--input-index") == 0 && i + 1 < argc) {
+      if (!parse_index_mode(argv[++i], &input_index_mode)) {
         usage(argv[0]);
         return EXIT_FAILURE;
       }
@@ -516,18 +640,25 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
+  bench_index_view input_index = {0};
+  if (!prepare_index_view(&a, input_index_mode, &input_index)) {
+    matrix_free(&a);
+    return EXIT_FAILURE;
+  }
+
   if (analyze_only) {
     kls_solver *solver = NULL;
     int status = kls_create(&solver);
     if (status == KLS_OK) {
-      status = kls_analyze_csc(solver, KLS_INDEX_INT64, a.n,
-                               a.col_ptr, a.row_idx, 0,
+      status = kls_analyze_csc(solver, input_index.type, a.n,
+                               input_index.col_ptr, input_index.row_idx, 0,
                                &options);
     }
     if (status != KLS_OK) {
       fprintf(stderr, "KLS analyze failed: %s (%d)\n",
               kls_status_string(status), status);
       kls_destroy(solver);
+      bench_index_view_free(&input_index);
       matrix_free(&a);
       return EXIT_FAILURE;
     }
@@ -537,6 +668,8 @@ int main(int argc, char **argv) {
     if (json) {
       printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
              ",\"threads\":%d"
+             ",\"requested_input_index\":\"%s\""
+             ",\"input_index_bytes\":%d"
              ",\"internal_index_bytes\":%d"
              ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
              ",\"ordering\":\"%s\",\"requested_scale\":\"%s\""
@@ -579,6 +712,8 @@ int main(int argc, char **argv) {
              ",\"parallel_task_flow_recommends_parallel\":%d"
              ",\"analyze_only\":true}\n",
              path, a.n, a.nnz, options.threads,
+             index_mode_name(input_index_mode),
+             input_index.bytes,
              stats.internal_index_bytes,
              kls_orientation_name(options.orientation),
              kls_orientation_name(stats.selected_orientation),
@@ -624,6 +759,8 @@ int main(int argc, char **argv) {
     } else {
       printf("matrix: %s\n", path);
       printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
+      printf("input index bytes: %d (requested %s)\n",
+             input_index.bytes, index_mode_name(input_index_mode));
       printf("requested orientation: %s\n",
              kls_orientation_name(options.orientation));
       printf("selected orientation: %s\n",
@@ -685,6 +822,7 @@ int main(int argc, char **argv) {
              stats.parallel_task_flow_recommends_parallel ? "yes" : "no");
     }
     kls_destroy(solver);
+    bench_index_view_free(&input_index);
     matrix_free(&a);
     return EXIT_SUCCESS;
   }
@@ -700,6 +838,7 @@ int main(int argc, char **argv) {
                                            &stress_entries);
     if (stressed_values == NULL) {
       fprintf(stderr, "stress diagonal selection matched no diagonal entries\n");
+      bench_index_view_free(&input_index);
       matrix_free(&a);
       return EXIT_FAILURE;
     }
@@ -710,6 +849,7 @@ int main(int argc, char **argv) {
   double *b = (double *)calloc((size_t)a.n, sizeof(double));
   double *x = (double *)calloc((size_t)a.n, sizeof(double));
   if (x_true == NULL || b == NULL || x == NULL) {
+    bench_index_view_free(&input_index);
     matrix_free(&a);
     free(stressed_values);
     free(x_true);
@@ -725,8 +865,8 @@ int main(int argc, char **argv) {
   kls_solver *solver = NULL;
   int status = kls_create(&solver);
   if (status == KLS_OK) {
-    status = kls_analyze_csc(solver, KLS_INDEX_INT64, a.n,
-                             a.col_ptr, a.row_idx, 0,
+    status = kls_analyze_csc(solver, input_index.type, a.n,
+                             input_index.col_ptr, input_index.row_idx, 0,
                              &options);
   }
   if (status == KLS_OK) {
@@ -735,6 +875,7 @@ int main(int argc, char **argv) {
   if (status != KLS_OK) {
     fprintf(stderr, "KLS setup failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
+    bench_index_view_free(&input_index);
     matrix_free(&a);
     free(stressed_values);
     free(x_true);
@@ -786,6 +927,7 @@ int main(int argc, char **argv) {
   if (status != KLS_OK) {
     fprintf(stderr, "KLS benchmark failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
+    bench_index_view_free(&input_index);
     matrix_free(&a);
     free(stressed_values);
     free(x_true);
@@ -798,6 +940,7 @@ int main(int argc, char **argv) {
   if (status != KLS_OK) {
     fprintf(stderr, "KLS final solve failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
+    bench_index_view_free(&input_index);
     matrix_free(&a);
     free(stressed_values);
     free(x_true);
@@ -822,6 +965,8 @@ int main(int argc, char **argv) {
            ",\"build_has_scotch\":%s"
            ",\"build_has_spral_scaling\":%s"
            ",\"build_has_cblas\":%s"
+           ",\"requested_input_index\":\"%s\""
+           ",\"input_index_bytes\":%d"
            ",\"internal_index_bytes\":%d"
            ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
            ",\"ordering\":\"%s\",\"requested_scale\":\"%s\",\"scale\":%d"
@@ -876,6 +1021,8 @@ int main(int argc, char **argv) {
            stats.build_has_scotch ? "true" : "false",
            stats.build_has_spral_scaling ? "true" : "false",
            stats.build_has_cblas ? "true" : "false",
+           index_mode_name(input_index_mode),
+           input_index.bytes,
            stats.internal_index_bytes,
            kls_orientation_name(options.orientation),
            kls_orientation_name(stats.selected_orientation),
@@ -1891,6 +2038,8 @@ int main(int argc, char **argv) {
            stats.build_has_scotch ? "on" : "off",
            stats.build_has_spral_scaling ? "on" : "off",
            stats.build_has_cblas ? "on" : "off");
+    printf("input index bytes: %d (requested %s)\n",
+           input_index.bytes, index_mode_name(input_index_mode));
     printf("requested orientation: %s\n", kls_orientation_name(options.orientation));
     printf("selected orientation: %s\n", kls_orientation_name(stats.selected_orientation));
     printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
@@ -2697,6 +2846,7 @@ int main(int argc, char **argv) {
   }
 
   kls_destroy(solver);
+  bench_index_view_free(&input_index);
   matrix_free(&a);
   free(stressed_values);
   free(x_true);

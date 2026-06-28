@@ -128,9 +128,12 @@ the initial and last factorization path, largest-BTF-block factor ETree
 shape, refactor dependency-level metrics, dependency root/leaf/max-fanout
 scheduler diagnostics, NICSLU-style `parallel_model_r1`,
 `parallel_model_r2`, `parallel_model_recommends_parallel`, and numeric
-task-flow model metrics, and memory statistics. Use `--analyze-only` to
-measure symbolic analysis and ordering decisions without running numeric
-factorization.
+task-flow model metrics, selected input-index width, and memory statistics. By
+default `kls_bench` uses `--input-index auto`, which passes 32-bit CSC indices
+when the MatrixMarket problem fits the public `KLS_INDEX_INT32` API and falls
+back to 64-bit otherwise; use `--input-index 64` or `--input-index 32` for
+forced A/B runs. Use `--analyze-only` to measure symbolic analysis and ordering
+decisions without running numeric factorization.
 
 When system SuiteSparse KLU headers and libraries are installed, the build also
 provides `klu_width_compare` to compare system `klu_*` and `klu_l_*` on the same
@@ -1375,7 +1378,8 @@ dependency-work estimates when those fields are present in the benchmark JSONL.
 For row-engine experiments, `kls_bench` and `run_bench_suite.py` accept
 `--row-refactor env|off|refactor|checked|all` and
 `--kls-first-factor env|off|on`; they also accept
-`--row-solve env|off|on` for the ordinary-factor row-solve seed gate. The
+`--row-solve env|off|on` for the ordinary-factor row-solve seed gate and
+`--input-index auto|32|64` for reproducing benchmark input-width choices. The
 emitted `initial_factor_path`, `last_factor_path`, and `row_refactor_last_*`
 fields show whether the first factorization, later numeric passes, and solves
 really used KLS-owned paths. `--kls-first-factor env` preserves the library's

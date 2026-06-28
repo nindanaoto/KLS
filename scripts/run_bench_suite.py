@@ -94,6 +94,7 @@ def main() -> int:
     parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural", "metis", "scotch"], default="auto")
     parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")
     parser.add_argument("--scale", choices=["auto", "-1", "0", "1", "2"], default="auto")
+    parser.add_argument("--input-index", choices=["auto", "32", "64"], default="auto")
     parser.add_argument("--pivot-tol", type=float, default=None)
     parser.add_argument(
         "--row-refactor",
@@ -175,6 +176,8 @@ def main() -> int:
                     args.orientation,
                     "--scale",
                     args.scale,
+                    "--input-index",
+                    args.input_index,
                     "--json",
                 ]
                 if args.no_btf:

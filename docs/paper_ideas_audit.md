@@ -5891,3 +5891,30 @@ against the zero-scatter-skip baseline: `4.1888s` versus `4.1762s` geomean.
 That keeps checked row execution available for targeted paper tests and future
 row-major work, while preventing the default production `kls_factor` path from
 paying row-pattern setup for an executor that is not yet a broad CKTSO-gap win.
+
+The follow-up BLAS-threshold question exposed a benchmark fairness issue rather
+than a new solver algorithm: `cktso_compare` drives CKTSO with 32-bit CSC input
+arrays, while `kls_bench` was always calling the public KLS API through
+`KLS_INDEX_INT64`. `kls_bench` now defaults to `--input-index auto`, converts
+the parsed MatrixMarket structure to 32-bit CSC arrays when the order and nnz
+fit, reports `requested_input_index` and `input_index_bytes` in JSON/text, and
+falls back to 64-bit for larger inputs. `run_bench_suite.py` forwards
+`--input-index auto|32|64` so current paper-gap reruns can compare the fair
+32-bit-input path against the old forced-64 harness. This does not close the
+paper algorithm gap by itself; it removes an input-width artifact before
+judging the remaining EGraph/row-supernode executor losses.
+
+The rerun confirmed that size-gated BLAS and input width are not the large
+missing piece. On the five hardest CKTSO-gap rows, auto 32-bit input measured
+`7.5867s` geomean versus `7.7692s` for forced 64-bit input
+(`build/kls_input_auto_focus5_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_input_64_focus5_t4_r1_ref3_timeout120.jsonl`), while the saved CKTSO
+artifact is `3.0464s`. On the top-ten gap set, auto measured `4.0602s` versus
+`4.0805s` forced-64, still `2.37x` the saved CKTSO geomean
+(`build/kls_input_auto_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_input_64_gap10_t4_r1_ref3_timeout120.jsonl`). Every top-ten auto
+row reported `input_index_bytes=4`, `build_has_cblas=false`, and zero CBLAS
+supernode-update counters. The remaining ratios are repeated-refactor dominated
+(`2.08x` to `3.39x` CKTSO refactor ratios on the slowest refactor rows), so the
+large gap is still the paper-level numeric executor/storage issue rather than
+small BLAS calls or CSC input-width overhead.
