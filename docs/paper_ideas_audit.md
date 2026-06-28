@@ -7470,3 +7470,17 @@ Restoring the full pivot reset made the same `rajat29` probe complete with
 `build/kls_rajat29_active_rank_nonpivot_publish_nofast_t4_factor_timeout90.json`.
 The remaining paper-level gap is therefore still the checked pivoting
 row-supernode executor and coarse numeric storage, not a BLAS threshold.
+
+A fresh CBLAS build check on `ASIC_320k` reconfirmed the same conclusion after
+the active-rank reset change. With `OPENBLAS_NUM_THREADS=1` and
+`KLS_ENABLE_CBLAS_SUPERNODE=0`,
+`build-cblas/kls_asic320k_cblas_off_current_t4_factor.json` measured
+`2.31691659s` initial factor and `1.50913325e-15` relative residual. The
+same binary with `KLS_ENABLE_CBLAS_SUPERNODE=1` in
+`build-cblas/kls_asic320k_cblas_on_current_t4_factor.json` measured
+`2.30408845s` initial factor with the same residual. Both artifacts reported
+`build_has_cblas=true`, but all external CBLAS, compact GEMV/TRSV, blocked
+panel, and KLS-first row-panel counters stayed at zero. This directly rejects
+the current "guard BLAS for only large cases" hypothesis: the guard already
+requires 512-scale vector/panel shapes plus multi-million-work thresholds, and
+the tested gap path is not entering BLAS at all.
