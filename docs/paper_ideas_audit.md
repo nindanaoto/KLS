@@ -6454,3 +6454,17 @@ top-ten measured `3.8603s` geomean versus the saved `3.8514s` top-ten baseline
 This keeps the diagnosis unchanged: the large gap is not a disabled-branch
 artifact in the scalar EGraph loop; KLS still needs the paper-level
 row/supernode numeric executor.
+
+Disabling row-refactor auto preparation outright was also checked after the
+same decomposition showed many default EGraph rows paying a rejected lower-bound
+model attempt. `KLS_ENABLE_ROW_REFACTOR=0` correctly suppressed the model and
+lower-bound counters, but it did not give a stable policy win: the repeat-3
+top-ten moved only from `4.0924s` to `4.0702s` geomean with mixed row-level
+refactor noise, and the repeat-20 top-five moved from the saved `7.3959s` to
+`7.3566s` only because `onetone2` improved while `ASIC_320k`, `ASIC_320ks`,
+`ASIC_100ks`, and `G2_circuit` were flat to worse
+(`build/kls_row_auto_disabled_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_row_auto_disabled_gap5_t4_r1_ref20_timeout120.jsonl`,
+`build/kls_current_gap20_t4_r1_ref20_timeout120.jsonl`). The default keeps the
+existing guarded auto-preparation semantics; the missing lever remains making
+the prepared row/supernode path actually faster, not hiding its preparation.
