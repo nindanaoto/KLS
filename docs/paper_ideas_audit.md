@@ -6809,3 +6809,18 @@ SubtreeLU-style path, but it still trails the default top-ten control
 make the next gap clearer: panel discovery is not enough; KLS needs a coarser
 producer/consumer executor that amortizes the remaining panel publication and
 application work across larger row batches.
+
+A same-session scale and row-refactor control sweep also did not reveal a
+promotable policy fix. On the top-ten CKTSO-gap focus set, fresh auto scale
+measured `2.20572s` geomean in
+`build/kls_scale_auto_gap10_t4_r1_ref3_timeout120.jsonl`; forced scale `-1`,
+`0`, `1`, and `2` measured `2.16409s`, `2.17264s`, `2.35985s`, and
+`2.51107s` in the corresponding `build/kls_scale*_gap10_t4_r1_ref3_timeout120`
+artifacts. The best forced scale was only about 2% faster than auto and still
+left the ASIC and Rajat hard rows far behind CKTSO, so this is not the missing
+paper-level algorithm. Forcing the current row-refactor executor was worse:
+`--row-refactor refactor` measured `6.91960s` geomean and
+`--row-refactor all` measured `5.87436s` in the top-ten focus artifacts, while
+`--row-refactor checked` mostly declined the row path and measured `2.29421s`.
+Those runs confirm the current auto model is right to keep these rows on the
+EGraph path until the row/supernode executor is made coarser.
