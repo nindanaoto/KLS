@@ -7190,3 +7190,42 @@ remained on the non-separator KLS-first path with a valid residual in
 `pre2` gap is now clearer: after setup reaches the paper-aligned separator
 private phase, KLS is still dominated by scalar/panel-cache row-supernode
 numeric work rather than by the diagnostic queue planner.
+
+The next paper-aligned separator-tree probe tested whether KLS was retaining too
+shallow a METIS `NodeNDP` tree for the KLS-first separator executor. SubtreeLU
+Algorithm 2 sets the minimum depth to `log2(P)` but continues partitioning until
+subdomains are below `max(200, N/1000)`. KLS previously passed exactly the
+numeric thread count as `NodeNDP` `npes`, so four-thread `pre2` retained only
+four leaves and a `217028`-row largest private component. Analyze-only sweeps
+showed that increasing the retained leaves did not materially change METIS
+analysis time on `pre2` but strongly improved queue shape: 32 leaves reduced the
+largest private component to `44839` rows, 256 leaves to `7826` rows, and the
+paper-threshold final 999-leaf tree to `3718` rows.
+
+An unconditional deeper METIS tree was rejected for the production/default path:
+completed large METIS/KLU rows kept valid residuals but showed mixed timing
+regressions (`G3_circuit` and `rajat30` slowed modestly), because the
+permutation itself changes. The first forced-KLS-first version was also too
+aggressive in the paper threshold's 200-row saturated regime: the 30.6k-row
+weak-pivot separator smoke fixture exposed a residual around `7e-7`, matching
+the SubtreeLU warning that fine-grained separator partitioning can restrict
+pivoting choices in factorization. The retained change is therefore scoped to
+forced KLS-first METIS analyses with at least 200k rows, where `N/1000` rather
+than the hard 200-row floor controls the target leaf size. Default METIS
+analysis remains at the old thread-count tree unless
+`KLS_ENABLE_KLS_FIRST_FACTOR=1` is set.
+
+Current-source checks passed `cmake --build build -j$(nproc)` and
+`ctest --test-dir build --output-on-failure`. Paired `pre2` analyze-only probes
+confirm the gate: `--kls-first-factor off` retained the old 4-leaf tree with
+`217028` largest private rows in
+`build/kls_pre2_metis_analyze_default_ndp_t4_final.json`, while
+`--kls-first-factor on` retained 999 leaves with `3718` largest private rows in
+`build/kls_pre2_metis_analyze_klsfirst_deep_ndp_t4_final.json`. A completed
+forced-KLS-first `ASIC_320k` probe remained residual-clean with the deeper tree
+in `build/kls_asic320k_klsfirst_deep_ndp_final_t4_factor.json`. The change still
+does not close the hard `pre2` numeric gap:
+`build/kls_pre2_metis_klsfirst_deep_ndp_final_t4_factor_timeout120.json` is
+empty after the 120s timeout. The remaining bottleneck is still the actual
+row/supernode numeric executor, especially worker-local panel-cache copying and
+scalar/panel-cache updates, not the retained separator-tree depth alone.

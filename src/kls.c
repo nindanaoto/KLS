@@ -73,6 +73,11 @@
 #define KLS_NICSLU_PARALLEL_R1_THRESHOLD 2.0
 #define KLS_NICSLU_PARALLEL_R2_THRESHOLD 50.0
 #define KLS_NICSLU_TASK_FLOW_SYNC_COST 1.0
+#define KLS_METIS_NDP_MIN_ROWS 30000u
+#define KLS_METIS_NDP_MIN_LEAF_ROWS 200u
+#define KLS_METIS_NDP_TARGET_DIVISOR 1000u
+#define KLS_METIS_NDP_SUBTREE_THRESHOLD_MIN_ROWS 200000u
+#define KLS_METIS_NDP_MAX_OVERPARTITION_LEAVES 1024u
 #define KLS_FIRST_FACTOR_DOMINANT_BTF_PIPELINE_MIN_BLOCK 30000u
 #define KLS_FIRST_FACTOR_DOMINANT_BTF_PIPELINE_MIN_COVERAGE 0.75
 
@@ -1118,6 +1123,7 @@ static int kls_egraph_refactor_wait_done(
   kls_egraph_refactor_shared *shared,
   UF_long col);
 static int kls_multi_producer_supernode_env_enabled(void);
+static int kls_first_factor_env_enabled(void);
 static int kls_egraph_refreshed_prefix(
   const kls_egraph_refactor_shared *shared,
   UF_long rejected_pivot);
@@ -6329,6 +6335,52 @@ static int metis_size_ok(UF_long n, idx_t slots_per_entry) {
   return n >= 0 && (uint64_t)n <= (uint64_t)(SIZE_MAX / (size_t)slots_per_entry);
 }
 
+static idx_t kls_metis_ndp_leaf_count(UF_long n,
+                                      int thread_count,
+                                      int subtree_threshold) {
+  if (n < KLS_METIS_NDP_MIN_ROWS || thread_count <= 1) {
+    return 0;
+  }
+
+  UF_long leaves = (UF_long)thread_count;
+  if (subtree_threshold && n >= KLS_METIS_NDP_SUBTREE_THRESHOLD_MIN_ROWS) {
+    /*
+     * The KLS-first separator executor consumes SubtreeLU-style queues.
+     * SubtreeLU partitions until components are smaller than
+     * max(200, N/1000) after the minimum log2(P) depth.  METIS_NodeNDP only
+     * records a fixed top tree, so ask for enough leaves to retain that
+     * threshold-sized tree while the numeric executor still uses thread_count.
+     * Keep the 200-row saturated regime on the old thread-count tree for now:
+     * the pivoting first-factor executor is not yet robust enough for very
+     * fine separator pivot scopes on smaller synthetic weak-pivot grids.
+     */
+    UF_long target_rows =
+      (n + KLS_METIS_NDP_TARGET_DIVISOR - 1u) /
+      KLS_METIS_NDP_TARGET_DIVISOR;
+    if (target_rows < KLS_METIS_NDP_MIN_LEAF_ROWS) {
+      target_rows = KLS_METIS_NDP_MIN_LEAF_ROWS;
+    }
+    if (target_rows > 0u) {
+      UF_long target_leaves = (n + target_rows - 1u) / target_rows;
+      if (target_leaves > KLS_METIS_NDP_MAX_OVERPARTITION_LEAVES) {
+        target_leaves = KLS_METIS_NDP_MAX_OVERPARTITION_LEAVES;
+      }
+      if (target_leaves > leaves) {
+        leaves = target_leaves;
+      }
+    }
+  }
+
+  if (leaves > n) {
+    leaves = n;
+  }
+  const UF_long max_recorded_npes = (UF_long)((IDX_MAX - 1) / 2);
+  if (leaves > max_recorded_npes) {
+    leaves = max_recorded_npes;
+  }
+  return leaves > 1u ? (idx_t)leaves : 0;
+}
+
 static int kls_metis_append_separator_component(
   idx_t npes,
   idx_t cpos,
@@ -6985,7 +7037,7 @@ static UF_long kls_metis_order(UF_long n,
   idx_t *metis_iperm = (idx_t *)malloc(nsize * sizeof(*metis_iperm));
   idx_t metis_ndp_npes =
     metis_context != NULL && metis_context->npes > 1 ? metis_context->npes : 0;
-  if (n < 30000) {
+  if (n < KLS_METIS_NDP_MIN_ROWS) {
     metis_ndp_npes = 0;
   }
   if (metis_ndp_npes > (idx_t)n) {
@@ -7326,7 +7378,10 @@ static int analyze_with_ordering(UF_long n,
 #ifdef KLS_HAVE_METIS
     metis_context.n = n;
     metis_context.npes =
-      options != NULL && options->threads > 1 ? (idx_t)options->threads : 0;
+      options != NULL
+        ? kls_metis_ndp_leaf_count(n, options->threads,
+                                   kls_first_factor_env_enabled())
+        : 0;
     metis_context.separator = separator_out;
     metis_context_active = 1;
     common.ordering = 3;
