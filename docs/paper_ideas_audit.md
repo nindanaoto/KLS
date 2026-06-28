@@ -6596,3 +6596,31 @@ The code was removed. This makes the remaining direction more specific:
 packing updates inside the existing row-batch executor is not enough; the data
 layout likely needs to avoid the current per-consumer row workspace/scatter
 contract rather than adding another temporary panel to it.
+
+KLS now removes another direct mismatch with CKTSO/SubtreeLU's
+prefactor/postfactor row algorithm. The row pipeline used to stop trying
+retained compact-supernode producer updates after a row had prefactored any
+finished dependency while waiting for an earlier dependency; the remaining
+post-wait dependencies then fell back to scalar row updates even when a valid
+producer panel existed. The compact-supernode update helper is now
+applied-mask aware: it accepts the row's already-consumed dependency bitmap,
+rejects only candidate runs that would overlap prefactored entries, and remains
+available for later postfactor dependencies. This matches Algorithm 5's intent
+that both prefactorization and postfactorization can consume supernodes while
+preserving the existing scalar fallback. The normal build and smoke suite pass,
+but the current hard forced-row top-five repeat-20 guard did not exercise this
+case: all rows in
+`build/kls_postprefactor_mask_default_gap5_t4_r1_ref20_timeout120.jsonl`
+reported zero `row_refactor_prefactor_*` counters. This is therefore a
+semantic gap closure, not evidence of a CKTSO-gap speedup on the present focus
+set.
+
+A related policy probe was rejected in the same pass. Making
+`KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE` opt-in by default looked promising on a
+noisy top-eight repeat-3 forced-row run, but the higher-repeat top-five guard
+rejected it: default-off measured `19.1953s` geomean in
+`build/kls_partial_pipeline_default_off_gap5_t4_r1_ref20_timeout120.jsonl`,
+while forcing the paper partial-prefix release back on measured `16.9455s` in
+`build/kls_partial_pipeline_forced_on_gap5_t4_r1_ref20_timeout120.jsonl`. The
+default remains unchanged; partial-prefix release stays on unless explicitly
+disabled with `KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE=0`.

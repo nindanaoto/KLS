@@ -28026,8 +28026,10 @@ static int kls_row_refactor_try_compact_supernode_update(
   UF_long row,
   UF_long row_group,
   UF_long *p_io,
+  UF_long l_begin,
   UF_long l_end,
-  int wait_for_dependencies);
+  int wait_for_dependencies,
+  const unsigned char *applied);
 static int kls_row_refactor_group_trailing_slice(
   const kls_solver *solver,
   UF_long group,
@@ -29122,22 +29124,21 @@ static int kls_parallel_row_refactor_process_row(
       ++p;
       continue;
     }
-    if (prefactor_deps == 0u) {
-      const UF_long compact_begin = p;
-      const int compact_status =
-        kls_row_refactor_try_compact_supernode_update(
-          worker, row, current_group, &p, l_end, wait_for_dependencies);
-      if (compact_status < 0) {
-        free(applied);
-        return 0;
+    const UF_long compact_begin = p;
+    const int compact_status =
+      kls_row_refactor_try_compact_supernode_update(
+        worker, row, current_group, &p, l_begin, l_end,
+        wait_for_dependencies, applied);
+    if (compact_status < 0) {
+      free(applied);
+      return 0;
+    }
+    if (compact_status > 0) {
+      if (applied != NULL && p > compact_begin && p <= l_end) {
+        memset(applied + (compact_begin - l_begin), 1,
+               (size_t)(p - compact_begin));
       }
-      if (compact_status > 0) {
-        if (applied != NULL && p > compact_begin && p <= l_end) {
-          memset(applied + (compact_begin - l_begin), 1,
-                 (size_t)(p - compact_begin));
-        }
-        continue;
-      }
+      continue;
     }
     const UF_long dep = solver->row_refactor_l_cols[p];
     if (wait_for_dependencies &&
@@ -29748,14 +29749,16 @@ static int kls_row_refactor_try_compact_supernode_update(
   UF_long row,
   UF_long row_group,
   UF_long *p_io,
+  UF_long l_begin,
   UF_long l_end,
-  int wait_for_dependencies) {
+  int wait_for_dependencies,
+  const unsigned char *applied) {
   if (worker == NULL || worker->shared == NULL || p_io == NULL) {
     return -1;
   }
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
-  if (solver == NULL || *p_io >= l_end ||
+  if (solver == NULL || *p_io >= l_end || *p_io < l_begin ||
       solver->row_refactor_l_cols == NULL ||
       solver->row_refactor_l_row_values == NULL ||
       solver->row_refactor_l_values == NULL ||
@@ -29829,9 +29832,19 @@ static int kls_row_refactor_try_compact_supernode_update(
       return 0;
     }
     run_end = p0 + run_rows;
+    if (applied != NULL) {
+      for (UF_long p = p0; p < run_end; ++p) {
+        if (applied[p - l_begin]) {
+          return 0;
+        }
+      }
+    }
   } else {
     UF_long expected_dep = dep0;
     while (run_end < l_end && expected_dep < valid_end) {
+      if (applied != NULL && applied[run_end - l_begin]) {
+        break;
+      }
       const UF_long dep = solver->row_refactor_l_cols[run_end];
       if (dep != expected_dep || dep >= row ||
           solver->row_refactor_row_group[dep] != dep_group) {
@@ -30602,10 +30615,9 @@ static int kls_parallel_row_refactor_process_dense_group_native(
       }
       const UF_long compact_begin = lp;
       const int compact_status =
-        prefactor_deps == 0u
-          ? kls_row_refactor_try_compact_supernode_update(
-              worker, row, group, &lp, l_internal, wait_for_dependencies)
-          : 0;
+        kls_row_refactor_try_compact_supernode_update(
+          worker, row, group, &lp, l_begin, l_internal,
+          wait_for_dependencies, applied);
       if (compact_status < 0) {
         x[row] = 0.0;
         return 0;
@@ -33888,13 +33900,15 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
         return 0;
       }
 
-      UF_long lp = solver->row_refactor_l_ptr[row];
+      const UF_long l_begin = solver->row_refactor_l_ptr[row];
+      UF_long lp = l_begin;
       const UF_long l_internal = solver->row_refactor_l_internal_ptr[row];
       const UF_long l_end = solver->row_refactor_l_ptr[row + 1u];
       while (lp < l_internal) {
         const int compact_status =
           kls_row_refactor_try_compact_supernode_update(
-            worker, row, group, &lp, l_internal, wait_for_dependencies);
+            worker, row, group, &lp, l_begin, l_internal,
+            wait_for_dependencies, NULL);
         if (compact_status < 0) {
           x[row] = 0.0;
           return 0;
@@ -36529,10 +36543,9 @@ static int kls_parallel_row_refactor_process_group(
       }
       const UF_long compact_begin = p;
       const int compact_status =
-        prefactor_deps == 0u
-          ? kls_row_refactor_try_compact_supernode_update(
-              worker, row, group, &p, l_end, wait_for_dependencies)
-          : 0;
+        kls_row_refactor_try_compact_supernode_update(
+          worker, row, group, &p, l_begin, l_end,
+          wait_for_dependencies, applied);
       if (compact_status < 0) {
         x[row] = 0.0;
         return 0;
