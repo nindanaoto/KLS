@@ -7507,3 +7507,14 @@ completed in
 not the paper-level CKTSO gap closer. A broader symbolic `Q`/`Lnz` restore
 prototype was rejected because it made the threaded `rajat29` repro fail setup
 as singular again.
+
+The same fallback-cleanup source was also checked in the CBLAS-enabled tree.
+`cmake --build build-cblas -j4` and
+`ctest --test-dir build-cblas --output-on-failure` passed. With
+`OPENBLAS_NUM_THREADS=1`, `ASIC_320k` forced KLS-first/no-fast measured
+`2.31416104s` with `KLS_ENABLE_CBLAS_SUPERNODE=0` and `2.29213644s` with
+`KLS_ENABLE_CBLAS_SUPERNODE=1` in
+`build-cblas/kls_asic320k_common_restore_cblas_off_t4_factor.json` and
+`build-cblas/kls_asic320k_common_restore_cblas_on_t4_factor.json`. Both runs
+reported `build_has_cblas=true` and zero external CBLAS update counters, so the
+current-source BLAS guard conclusion is unchanged.
