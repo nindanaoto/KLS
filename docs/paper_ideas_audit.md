@@ -6390,3 +6390,17 @@ it confirms that small BLAS/panel-call overhead is not the large missing piece;
 large retained-panel updates on `ASIC_320ks` and `G2_circuit` still regress
 because the current executor has not yet moved to the paper-level
 row/supernode numeric algorithm.
+
+Two direct scheduler-only probes were also rejected on June 28, 2026. First,
+the forced row-refactor path was given shared/private-queue and level-sliced
+private-work variants to test whether the observed private-thread collapse was
+mostly queue policy. On `ASIC_100ks`, the control forced-row refactor was
+`0.284688s`; the shared/private-queue gate slowed it to `0.294783s`. A
+separate level-sliced private pass moved a `0.251362s` control to `0.284191s`.
+Both variants were residual-clean but slower. Second, a level-order EGraph
+supernode-task lease grouped contiguous `refactor_level_cols` under the
+existing opt-in task gate. On default EGraph `ASIC_100ks`, it formed 20 tasks
+over 140 columns across the run and stayed residual-clean, but repeated
+refactor time moved from `0.0432357s` to `0.0480641s`. These failures reinforce
+the paper diagnosis: queue reshaping without the production row/supernode
+numeric storage and executor does not close the CKTSO gap.
