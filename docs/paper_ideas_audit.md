@@ -7399,3 +7399,36 @@ the GDB sample moved from compact shape validation to compact arithmetic with
 `shape_known=1` (`build/pre2_metis_trusted_shape_compact_gdb_interrupt.txt`).
 That leaves the next paper-level issue in numeric row-supernode arithmetic and
 static private work distribution, not in BLAS call size.
+
+Two larger-looking follow-ups were rejected before the retained cleanup. First,
+a dependency-weighted separator-private work model added an ordered lower-edge
+update proxy on top of the existing `row_input_count^2` component weight. This
+matched the papers' work-balance language more closely, but it mostly added
+planning cost on the current top-five rows, where the separator queue was not
+active, and did not close `pre2`: the forced/default top-five probes measured
+about `1.740s`/`1.742s` geomean
+(`build/kls_depwork_gap5_t4_r1_ref3_timeout120.jsonl` and
+`build/kls_depwork_default_gap5_t4_r1_ref3_timeout120.jsonl`), while
+`build/kls_pre2_metis_depwork_t4_factor_timeout120.json` remained empty after
+120s. Second, delaying compact-run L publication to append the whole
+consecutive multiplier segment at once broke a separator pivot-epoch smoke
+case with a huge residual, so compact runs must keep publishing each multiplier
+before the rest of the row machinery can observe the updated state.
+
+The retained storage cleanup keeps that publication order. Scalar, cached, and
+compact row-supernode run loops already reserve the whole L segment before the
+loop; they now write each dependency with the reserved-entry helper instead of
+re-entering the growable append helper. This removes redundant capacity growth
+checks without changing when each L entry becomes visible. `cmake --build build
+-j4`, `ctest --test-dir build --output-on-failure`, `cmake --build build-cblas
+-j4`, `ctest --test-dir build-cblas --output-on-failure`, and `git diff
+--check` passed. `ASIC_320k` forced KLS-first/no-fast remained residual-clean
+in `build/kls_asic320k_reserved_l_run_nofast_t4_factor.json`
+(`2.35403384s` initial factor, `2.04287279e-15` relative residual). The hard
+`pre2` probe still timed out at 120s
+(`build/kls_pre2_metis_reserved_l_run_t4_factor_timeout120.json`), so this is
+not the missing CKTSO-scale executor. The focused top-five default rerun
+completed with no failures and `1.39715503s` geomean in
+`build/kls_reserved_l_run_gap5_rerun_t4_r1_ref3_timeout120.jsonl`, after a
+noisier first pass measured `1.59194508s` in
+`build/kls_reserved_l_run_gap5_t4_r1_ref3_timeout120.jsonl`.

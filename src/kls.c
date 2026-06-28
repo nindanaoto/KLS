@@ -48105,8 +48105,8 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
       return 0;
     }
     const double lij = x[dep] / dep_pivot;
-    if (!kls_row_first_entries_append(local_l_entries, state->row, dep,
-                                      lij)) {
+    if (!kls_row_first_entries_append_reserved(
+          local_l_entries, state->row, dep, lij)) {
       return 0;
     }
     x[dep] = 0.0;
@@ -48566,8 +48566,8 @@ static int kls_row_first_partial_apply_supernode_run_cached(
       return -1;
     }
     const double lij = x[dep] / dep_pivot;
-    if (!kls_row_first_entries_append(local_l_entries, state->row, dep,
-                                      lij)) {
+    if (!kls_row_first_entries_append_reserved(
+          local_l_entries, state->row, dep, lij)) {
       return -1;
     }
     x[dep] = 0.0;
@@ -48730,8 +48730,8 @@ static int kls_row_first_partial_apply_supernode_run_compact(
     }
     const double dep_pivot = udiag_values[dep];
     const double lij = x[dep] / dep_pivot;
-    if (!kls_row_first_entries_append(local_l_entries, state->row, dep,
-                                      lij)) {
+    if (!kls_row_first_entries_append_reserved(
+          local_l_entries, state->row, dep, lij)) {
       return -1;
     }
     x[dep] = 0.0;
