@@ -25199,10 +25199,14 @@ static int kls_compact_supernode_trsv_env_state(void) {
 
 static int kls_native_row_panel_env_state(void) {
   const char *value = getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-  if (value == NULL || value[0] == '\0') {
+  if (value == NULL || value[0] == '\0' ||
+      (value[0] == '0' && value[1] == '\0')) {
+    return -1;
+  }
+  if (strcmp(value, "auto") == 0 || strcmp(value, "AUTO") == 0) {
     return 0;
   }
-  return (value[0] == '0' && value[1] == '\0') ? -1 : 1;
+  return 1;
 }
 
 static int kls_multi_producer_supernode_env_enabled(void) {

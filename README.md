@@ -722,11 +722,11 @@ those later suffixes are solved; stats report
 `row_refactor_compact_supernode_batch_candidate_*`, and
 `row_refactor_compact_supernode_batch_rejected_work_count` counters distinguish
 missing same-pattern row subranges from candidates rejected by the structural
-work gate. Dense row groups now pass through a named native row-panel selector
+work gate. Dense row groups can pass through a named native row-panel selector
 before falling back to the direct row-mirror kernel. Unset
-`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR` uses the existing structural work gate,
-`1` forces the retained compact panel path for eligible dense groups, and `0`
-keeps the scalar row-major dense-group path. The selected path stores the
+`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR` keeps the scalar row-major dense-group
+path, `auto` uses the structural work gate, and `1` forces the retained compact
+panel path for eligible dense groups. The selected path stores the
 group in solver-owned row-major panel slices when available, applies the
 portable blocked panel factor/update kernel, and preserves the checked
 row-ordered update/check/publish loop so a rejected pivot leaves the same

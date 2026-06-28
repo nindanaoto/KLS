@@ -6857,3 +6857,23 @@ regressed all substantive rows (`ASIC_320ks` `1.015x`, `ASIC_320k` `1.017x`,
 merely grouping cluster scheduling tasks is not the missing SubtreeLU piece;
 KLS still needs the row-major supernode numeric update/storage that makes the
 grouped task perform less scalar work.
+
+The native row-panel selector is now opt-in rather than the default row
+refactor subpath. This is a reversal of the earlier "structural work gate by
+default" policy because current same-source probes show that KLS's retained
+compact panel still adds panel-copy/update overhead before the full paper
+numeric engine exists. On the forced-row top-five CKTSO-gap focus, the old
+default measured `4.60205s` geomean in
+`build/kls_forced_row_native_default_current_gap5_t4_r1_ref3_timeout120.jsonl`,
+while `KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=0` measured `4.38362s` in
+`build/kls_forced_row_native_off_current_gap5_t4_r1_ref3_timeout120.jsonl`.
+The checked-row analogue also favored native-off slightly (`1.48273s` versus
+`1.49574s`) in
+`build/kls_checked_row_native_off_current_gap5_t4_r1_ref3_timeout120.jsonl` and
+`build/kls_checked_row_native_default_current_gap5_t4_r1_ref3_timeout120.jsonl`.
+Unset `KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR` now keeps the scalar row-major
+dense-group path; `auto` restores the structural work-gated selector for
+experiments, and `1` still forces retained compact panels for coverage. This
+does not reject row-major panels as the final paper direction; it rejects
+promoting the current scalar blocked-panel scaffold before it reduces enough
+numeric work.
