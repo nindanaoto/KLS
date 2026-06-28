@@ -6682,3 +6682,23 @@ cycle `52.6120s` versus `29.6737s`, average refactor `0.488389s` versus
 The code was removed. This closes the specific "ready queue was never tried on
 G2" hole, and again points away from column-scheduler policy toward a different
 numeric representation/update granularity for the single-block CKTSO gap.
+
+A more literal NICSLU Algorithm 4-style static task-flow assignment was then
+prototyped behind `KLS_ENABLE_EGRAPH_TASK_FLOW=1` for the same huge
+single-block EGraph case. The prototype used the existing task-flow model to
+assign each column to the thread with the earliest predicted finish time, kept
+each thread's assigned columns in natural dependency order, and reused the
+existing pipeline-done waits for cross-thread dependencies. This avoided the
+global successor ready queue, but it still ran the current EGraph per-column
+numeric kernel. On `G2_circuit`, the same-source control measured `26.7858s`
+in `build/kls_task_flow_g2_off_t4_r1_ref20_timeout120.jsonl`, while the
+static task-flow executor measured `38.2774s` in
+`build/kls_task_flow_g2_on_t4_r1_ref20_timeout120.jsonl`. The average refactor
+time regressed from `0.232429s` to `0.341268s`, with the model still reporting
+`parallel_task_flow_speedup=3.94669` and residuals unchanged. Both runs used
+`build_has_cblas=false` and recorded zero CBLAS and supernode-update counters,
+so this result does not support the "too many small BLAS calls" hypothesis.
+The source was removed. The remaining gap is the paper-side executor/data
+structure combination that makes scheduled tasks coarse and cache/BLAS-friendly,
+not another thin scheduling wrapper around the current scalar EGraph column
+kernel.
