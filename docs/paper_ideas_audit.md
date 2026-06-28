@@ -6189,3 +6189,15 @@ geomean (`build/kls_zero_dep_metadata_skip_gap20_t4_r1_ref2_timeout120.jsonl`).
 This is a useful production-kernel cleanup for the currently dominant sparse
 scatter path, but it is still a small effect relative to CKTSO; it does not
 replace the missing paper-level row/supernode numeric executor.
+
+A more aggressive dynamic-dependency variant was rejected. The probe moved the
+pipeline wait until after reading the current work-vector dependency value and
+skipped the wait when an unchecked no-pivot dependency was exactly zero, on the
+theory that a zero multiplier does not need the producer `L` column. It stayed
+correct on smoke tests but regressed the top-ten CKTSO-gap repeat-3 geomean to
+`4.1126s` and `4.1145s` across two passes
+(`build/kls_zero_dep_wait_skip_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_zero_dep_wait_skip_gap10_t4_r1_ref3_timeout120_run2.jsonl`).
+That result keeps the structural pipeline wait order intact; the retained
+zero-dependency improvement is only the producer metadata/scatter bypass after
+the dependency is ready.
