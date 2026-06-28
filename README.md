@@ -1558,6 +1558,10 @@ or repeated-refactor policy. A follow-up CBLAS-enabled build with
 `pre2` forced KLS-first run still timed out at 120s with no JSON row, while
 same-option `ASIC_680k` checks reported zero CBLAS update counters. The
 existing BLAS gates are therefore not the current slow-case blocker.
+A current CBLAS-capable top-five CKTSO-gap check keeps that conclusion: the
+same binary measured `1.44563s` geomean with `KLS_ENABLE_CBLAS_SUPERNODE=0`
+and `1.49419s` with `=1`, while all focus rows reported zero CBLAS update
+counters.
 The latest `pre2` stack samples instead show the current KLS-first BTF-parallel
 route leaving one worker to factor the dominant block while the other BTF
 workers exit; the no-BTF intra-block route keeps workers alive but spends the

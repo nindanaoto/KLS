@@ -7904,3 +7904,27 @@ and `0.35153s` on `ASIC_100ks`
 auto-analysis overhead for the current top-gap ASIC shape, but it does not
 change the main refactor diagnosis: the repeated numeric path still needs the
 paper-level row/supernode executor.
+
+The next post-change selector checks rejected three tempting but narrower
+shortcuts. First, forcing the existing row-refactor engine on the top-five
+CKTSO-gap focus set measured `4.26764s` geomean versus `1.58809s` for the
+current auto control
+(`build/kls_forced_row_after_skip_nobtf_gap5_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_auto_skip_nobtf_gap5_t4_r1_ref3_timeout120.jsonl`). The forced row
+path did run in parallel and built row work, but every focus row regressed,
+confirming that the row lower-bound/model gate is protecting the scalar KLU
+storage path rather than hiding a ready win. Second, enabling the column EGraph
+successor ready queue measured `2.52798s` geomean on the same focus set
+(`build/kls_egraph_ready_queue_gap5_t4_r1_ref3_timeout120.jsonl`). It recorded
+ready-queue columns on the EGraph rows, but `ASIC_320ks`, `ASIC_320k`, and
+`ASIC_100ks` regressed sharply because the queue still feeds the same
+per-column scalar scatter executor. Third, a small static-pivot policy check on
+`gemat11`/`gemat12` again showed why disabling static pivoting is not a broad
+fix. `--no-static-pivoting` improved `gemat12` (`0.05018s` versus `0.05661s`)
+but regressed `gemat11` (`0.05351s` versus `0.03990s`), worsening the pair
+geomean from `0.04753s` to `0.05182s`
+(`build/kls_gemat_static_current_t4_r1_ref20_timeout120.jsonl`,
+`build/kls_gemat_nostatic_t4_r1_ref20_timeout120.jsonl`). These checks leave
+the paper-aligned target unchanged: KLS needs a production row-major/supernode
+numeric representation and coarse update kernels, not just different selector
+policy around the current scalar executors.
