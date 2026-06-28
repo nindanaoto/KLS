@@ -6495,3 +6495,21 @@ refactor noise, and the repeat-20 top-five moved from the saved `7.3959s` to
 `build/kls_current_gap20_t4_r1_ref20_timeout120.jsonl`). The default keeps the
 existing guarded auto-preparation semantics; the missing lever remains making
 the prepared row/supernode path actually faster, not hiding its preparation.
+
+A direct hot-metadata alias probe was also rejected. The probe cached
+`numeric->Llen` and `numeric->Ulen` aliases inside the refactor LU pointer cache
+and rewired the specialized EGraph refactor kernels to consume those aliases in
+the repeated-refactor dependency loops. This was a narrow attempt to reduce
+KLU-owned metadata touches without changing numeric semantics, but the rerun was
+unambiguously worse: the full CKTSO-gap manifest completed 39 of 42 matrices,
+with `HTC_336_9129`, `mac_econ_fwd500`, and `ss1` timing out at 120 seconds
+(`build/kls_refactor_len_alias_gap10_t4_r1_ref20_timeout120.jsonl`,
+`build/kls_refactor_len_alias_gap10_t4_r1_ref20_timeout120.failures`). On the
+20 common rows against the stable repeat-20 baseline, the probe had no wins and
+regressed geomean cycle time by `1.412x`; `ASIC_320k`, `G2_circuit`, and
+`onetone1` moved from `13.43s`, `20.01s`, and `4.97s` to `19.65s`, `27.96s`,
+and `9.21s`. The code was removed. Together with the CBLAS-on/off artifacts
+that recorded zero CBLAS update calls on these hard rows, this rejects the
+"small BLAS call" and hot-length-metadata hypotheses as primary causes. The
+remaining gap still points at the paper-level row/supernode numeric executor
+and storage model.
