@@ -6928,6 +6928,23 @@ storage layer, then run panel triangular solve and update work from that
 storage, instead of wrapping the current scalar column executor or forcing it
 through a different queue.
 
+A consumer-side structural-direct EGraph supernode probe was also rejected.
+The experiment kept retained panel maps only as shape metadata, skipped
+persistent value-panel publication, and read completed producer `L` columns
+directly from the current KLU-compatible numeric object while accumulating one
+common trailing workspace per accepted run. It built, passed smoke coverage,
+and did real grouped work on `ASIC_320ks`, `ASIC_100ks`, and `rajat03`, but
+same-binary top-five CKTSO-gap timing regressed: the default measured
+`1.39030s` geomean in
+`build/kls_struct_direct_default_gap5_t4_r1_ref3_timeout120.jsonl`, while
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=direct` measured `1.62085s` in
+`build/kls_struct_direct_gap5_t4_r1_ref3_timeout120.jsonl`, with all five rows
+slower. `ASIC_320k` formed `401` retained panels but accepted zero structural
+runs and still slowed, showing that shape-only retained panel metadata is not
+enough. The source was reverted. This reinforces the same paper-level target:
+KLS needs a true row-major/supernodal numeric object and batched executor, not
+another structural wrapper around KLU column storage.
+
 A successor-amortized native row-panel auto selector was also rejected. The
 paper motivation was reasonable: SubtreeLU's compact row-major supernode
 storage is supposed to amortize panel packing through later supernode updates,
