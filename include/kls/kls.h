@@ -675,6 +675,11 @@ typedef struct kls_stats {
   int64_t row_refactor_last_separator_flop_private_max_groups;
   double row_refactor_last_separator_flop_private_min_work;
   double row_refactor_last_separator_flop_private_max_work;
+  int64_t refactor_u_supernode_pattern_count;
+  int64_t refactor_u_supernode_pattern_rows;
+  int64_t refactor_u_supernode_pattern_max_width;
+  int64_t refactor_u_supernode_pattern_right_entries;
+  double refactor_u_supernode_pattern_internal_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

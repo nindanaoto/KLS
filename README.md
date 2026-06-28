@@ -845,6 +845,16 @@ supernodes and reports `refactor_supernode_consumer_run_count`,
 `refactor_supernode_consumer_internal_entries`. These counters estimate how
 much scalar dependency work a future row-major/supernodal numeric object could
 consume before the current common-trailing cached-panel gates are applied.
+Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN=1` to also retain the exact
+row-major U-supernode structural object from the same schedule pass. Benchmark
+JSON reports `refactor_u_supernode_pattern_count`,
+`refactor_u_supernode_pattern_rows`,
+`refactor_u_supernode_pattern_max_width`,
+`refactor_u_supernode_pattern_right_entries`, and
+`refactor_u_supernode_pattern_internal_entries`. This is still diagnostic
+metadata: it preserves the producer supernode start/width and right-side column
+pattern for the future CKTSO/SubtreeLU-style numeric executor, while the current
+default refactor continues to use the scalar KLU-format dependency walk.
 Eligible retained refactor-map row/input positions and L row-index arrays are
 mirrored as 32-bit integers by default while leaving the KLU-owned numeric
 factor and public index ABI unchanged. The EGraph value-scatter path and
