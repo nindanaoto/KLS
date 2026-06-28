@@ -39272,36 +39272,67 @@ static int kls_egraph_refactor_btf_unscaled_column(
   UF_long ucol_len = numeric->Ulen[k];
   UF_long up = 0;
   const int supernode_numeric_updates = shared->supernode_numeric_updates;
-  while (up < ucol_len) {
-    if (supernode_numeric_updates) {
-      const int supernode_status =
-        kls_egraph_refactor_try_supernode_dependency_run(
-          worker, k1, k, local_k, &up, ucol_len, ui, ux, l_indices,
-          l_values, numeric->Llen, x, wait_for_dependencies);
-      if (supernode_status < 0) {
+  /* Cluster columns already have their predecessors published; keep that
+     CKTSO-style cluster loop free of the per-entry wait check used below. */
+  if (wait_for_dependencies) {
+    while (up < ucol_len) {
+      if (supernode_numeric_updates) {
+        const int supernode_status =
+          kls_egraph_refactor_try_supernode_dependency_run(
+            worker, k1, k, local_k, &up, ucol_len, ui, ux, l_indices,
+            l_values, numeric->Llen, x, 1);
+        if (supernode_status < 0) {
+          return 0;
+        }
+        if (supernode_status > 0) {
+          continue;
+        }
+      }
+      const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+      if (!kls_egraph_refactor_wait_done(shared, k1 + j)) {
         return 0;
       }
-      if (supernode_status > 0) {
-        continue;
-      }
-    }
-    const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
-    if (wait_for_dependencies &&
-        !kls_egraph_refactor_wait_done(shared, k1 + j)) {
-      return 0;
-    }
-    const double ujk = x[j];
-    x[j] = 0.0;
-    ux[up] = ujk;
+      const double ujk = x[j];
+      x[j] = 0.0;
+      ux[up] = ujk;
 
-    if (ujk != 0.0) {
-      UF_long *li = l_indices[k1 + j];
-      double *lx = l_values[k1 + j];
-      UF_long lcol_len = numeric->Llen[k1 + j];
-      kls_scatter_subtract_refactor_l(solver, x, k1 + j, li, lx, lcol_len,
-                                      ujk);
+      if (ujk != 0.0) {
+        UF_long *li = l_indices[k1 + j];
+        double *lx = l_values[k1 + j];
+        UF_long lcol_len = numeric->Llen[k1 + j];
+        kls_scatter_subtract_refactor_l(solver, x, k1 + j, li, lx, lcol_len,
+                                        ujk);
+      }
+      up++;
     }
-    up++;
+  } else {
+    while (up < ucol_len) {
+      if (supernode_numeric_updates) {
+        const int supernode_status =
+          kls_egraph_refactor_try_supernode_dependency_run(
+            worker, k1, k, local_k, &up, ucol_len, ui, ux, l_indices,
+            l_values, numeric->Llen, x, 0);
+        if (supernode_status < 0) {
+          return 0;
+        }
+        if (supernode_status > 0) {
+          continue;
+        }
+      }
+      const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+      const double ujk = x[j];
+      x[j] = 0.0;
+      ux[up] = ujk;
+
+      if (ujk != 0.0) {
+        UF_long *li = l_indices[k1 + j];
+        double *lx = l_values[k1 + j];
+        UF_long lcol_len = numeric->Llen[k1 + j];
+        kls_scatter_subtract_refactor_l(solver, x, k1 + j, li, lx, lcol_len,
+                                        ujk);
+      }
+      up++;
+    }
   }
 
   const double ukk = x[local_k];

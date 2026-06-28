@@ -6255,3 +6255,22 @@ panel/update counters at `4.1230s`
 policy remains unchanged: cached panels are closer to the paper storage model
 but still slower than the scalar EGraph default until the row/supernode executor
 creates larger reusable work.
+
+The default BTF EGraph refactor now separates the CKTSO-style cluster loop from
+the waited pipeline loop inside the hot unscaled column kernel. Cluster columns
+are launched only after their predecessor levels have completed, so the inner
+dependency walk no longer tests `wait_for_dependencies` on every `U` entry; the
+pipeline path still performs the same per-dependency wait before consuming a
+producer column. This does not change ordering, pivot checks, or the opt-in
+supernode update path. The top-ten CKTSO-gap repeat-3 guards moved from the
+saved zero-dependency cleanup runs at `4.0034s` and `4.0203s` geomean to
+`3.9789s` and `3.9548s`
+(`build/kls_btf_nowait_split_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_btf_nowait_split_gap10_t4_r1_ref3_timeout120_run2.jsonl`). A
+broader top-20 repeat-2 guard completed all rows at `3.7633s`, versus the
+saved `3.8061s`
+(`build/kls_btf_nowait_split_gap20_t4_r1_ref2_timeout120.jsonl`,
+`build/kls_zero_dep_metadata_skip_gap20_t4_r1_ref2_timeout120.jsonl`). This is
+another small production-kernel cleanup in the dominant scalar EGraph path; the
+paper-level gap remains the durable row/supernode numeric executor that can
+replace these scalar dependency walks with coarser reusable work.
