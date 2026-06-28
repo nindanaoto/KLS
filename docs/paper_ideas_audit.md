@@ -5881,6 +5881,23 @@ default BLAS call. The open paper gap remains durable supernode/panel storage
 and an executor that creates BLAS-sized reusable work without per-consumer
 staging, not an unguarded small-BLAS threshold.
 
+The EGraph producer-panel cache now also records how many retained panels are
+structurally consumable by the actual U dependency streams. The build step
+scans the same contiguous dependency-run conditions used by the cached
+consumer, exposes `refactor_supernode_panel_count` and
+`refactor_supernode_panel_used_count`, and disables panels that no downstream
+consumer can use. The June 28, 2026 top-ten opt-in run
+(`build/kls_egraph_supernode_pruned_gap10_t4_r1_ref3_timeout120.jsonl`) did
+not find dead cache storage: every built panel was usable (`6913/6913` across
+the ten matrices), and the geomean was `4.8018s`. The default control
+(`build/kls_default_after_panel_prune_gap10_t4_r1_ref3_timeout120.jsonl`)
+reported zero panel-cache counters and a `4.0077s` geomean, matching the prior
+guarded default within run noise. This rules out unused retained-panel
+selection as the large CKTSO gap. The remaining paper-level missing part is
+the production row/supernode numeric layout and scheduler that amortizes panel
+publication and consumes many rows per stored panel, not another BLAS-size
+threshold or a dead-panel prune.
+
 The same conclusion held after splitting the lightweight scalar EGraph
 supernode-run consumer away from the retained-panel cache as a local probe.
 With scalar supernode updates enabled by default but without building the

@@ -541,6 +541,7 @@ struct kls_solver {
   double *refactor_supernode_panel_dense_values;
   double *refactor_supernode_panel_trailing_values;
   UF_long refactor_supernode_panel_count;
+  UF_long refactor_supernode_panel_used_count;
   UF_long refactor_last_supernode_pipeline_tasks;
   UF_long refactor_last_supernode_pipeline_columns;
   UF_long refactor_supernode_pipeline_task_count;
@@ -1472,6 +1473,7 @@ static void free_refactor_supernode_panel_cache(kls_solver *solver) {
   solver->refactor_supernode_panel_dense_values = NULL;
   solver->refactor_supernode_panel_trailing_values = NULL;
   solver->refactor_supernode_panel_count = 0;
+  solver->refactor_supernode_panel_used_count = 0;
 }
 
 static void free_refactor_lu_pointer_cache(kls_solver *solver) {
@@ -12259,6 +12261,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_supernode_candidate_dense_entries;
   solver->stats.refactor_supernode_candidate_trailing_entries =
     solver->refactor_supernode_candidate_trailing_entries;
+  solver->stats.refactor_supernode_panel_count =
+    (int64_t)solver->refactor_supernode_panel_count;
+  solver->stats.refactor_supernode_panel_used_count =
+    (int64_t)solver->refactor_supernode_panel_used_count;
   solver->stats.refactor_l_pattern_columns =
     (int64_t)solver->refactor_l_pattern_columns;
   solver->stats.refactor_l_pattern_entries =
@@ -18974,6 +18980,127 @@ static int kls_refactor_supernode_panel_candidate(
   return 1;
 }
 
+static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->refactor_supernode_panel_used_count = 0;
+  const UF_long panel_count = solver->refactor_supernode_panel_count;
+  if (panel_count == 0u) {
+    return;
+  }
+  if (solver->symbolic == NULL || solver->symbolic->R == NULL ||
+      solver->numeric == NULL || solver->numeric->Ulen == NULL ||
+      solver->refactor_u_indices == NULL ||
+      solver->refactor_supernode_panel_col_id == NULL ||
+      solver->refactor_supernode_panel_start == NULL ||
+      solver->refactor_supernode_panel_local_start == NULL ||
+      solver->refactor_supernode_panel_width == NULL ||
+      panel_count > (UF_long)(SIZE_MAX / sizeof(unsigned char))) {
+    solver->refactor_supernode_panel_used_count = panel_count;
+    return;
+  }
+
+  unsigned char *used =
+    (unsigned char *)calloc((size_t)panel_count, sizeof(*used));
+  if (used == NULL) {
+    solver->refactor_supernode_panel_used_count = panel_count;
+    return;
+  }
+
+  const UF_long nblocks = solver->symbolic->nblocks;
+  for (UF_long current = 0; current < solver->n; ++current) {
+    UF_long block = 0u;
+    if (nblocks > 1u) {
+      if (solver->refactor_col_block == NULL) {
+        continue;
+      }
+      block = solver->refactor_col_block[current];
+      if (block >= nblocks) {
+        continue;
+      }
+    } else if (nblocks == 0u) {
+      continue;
+    }
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (current < k1 || current >= k2) {
+      continue;
+    }
+    const UF_long current_local = current - k1;
+    const UF_long ulen = solver->numeric->Ulen[current];
+    const UF_long *ui = solver->refactor_u_indices[current];
+    if (ulen == 0u || ui == NULL) {
+      continue;
+    }
+
+    for (UF_long up = 0; up < ulen; ++up) {
+      const UF_long dep_local = ui[up];
+      if (dep_local >= current_local) {
+        continue;
+      }
+      const UF_long dep_global = k1 + dep_local;
+      if (dep_global >= current || dep_global >= solver->n) {
+        continue;
+      }
+      const UF_long panel =
+        solver->refactor_supernode_panel_col_id[dep_global];
+      if (panel == KLS_KLU_EMPTY || panel >= panel_count) {
+        continue;
+      }
+      const UF_long start = solver->refactor_supernode_panel_start[panel];
+      const UF_long local_start =
+        solver->refactor_supernode_panel_local_start[panel];
+      const UF_long width = solver->refactor_supernode_panel_width[panel];
+      if (width <= 1u || start > dep_global ||
+          dep_global >= start + width || start > solver->n ||
+          width > solver->n - start) {
+        continue;
+      }
+      const UF_long panel_offset = dep_global - start;
+      if (local_start > dep_local ||
+          dep_local - local_start != panel_offset) {
+        continue;
+      }
+      UF_long available_end = width;
+      if (start + width > current) {
+        available_end = current - start;
+      }
+      if (available_end > width) {
+        available_end = width;
+      }
+      if (available_end <= panel_offset + 1u) {
+        continue;
+      }
+      const UF_long run_rows = available_end - panel_offset;
+      if (run_rows > ulen - up || run_rows > current_local - dep_local) {
+        continue;
+      }
+      int contiguous = 1;
+      for (UF_long local = 0; local < run_rows; ++local) {
+        if (ui[up + local] != dep_local + local) {
+          contiguous = 0;
+          break;
+        }
+      }
+      if (contiguous) {
+        used[panel] = 1u;
+      }
+    }
+  }
+
+  UF_long used_count = 0u;
+  for (UF_long panel = 0; panel < panel_count; ++panel) {
+    if (used[panel]) {
+      used_count++;
+    } else {
+      solver->refactor_supernode_panel_width[panel] = 0u;
+    }
+  }
+  solver->refactor_supernode_panel_used_count = used_count;
+  free(used);
+}
+
 static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
   if (solver == NULL || solver->n == 0u ||
       solver->refactor_supernode_pipeline_end == NULL ||
@@ -19197,6 +19324,7 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
   solver->refactor_supernode_panel_dense_values = dense_values;
   solver->refactor_supernode_panel_trailing_values = trailing_values;
   solver->refactor_supernode_panel_count = panel_count;
+  kls_prune_unused_refactor_supernode_panels(solver);
   return 1;
 }
 

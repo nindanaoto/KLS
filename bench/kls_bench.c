@@ -1481,6 +1481,8 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_candidate_max_width\":%" PRId64
            ",\"refactor_supernode_candidate_dense_entries\":%.9g"
            ",\"refactor_supernode_candidate_trailing_entries\":%.9g"
+           ",\"refactor_supernode_panel_count\":%" PRId64
+           ",\"refactor_supernode_panel_used_count\":%" PRId64
            ",\"row_refactor_group_count\":%" PRId64
            ",\"row_refactor_group_level_count\":%" PRId64
            ",\"row_refactor_group_level_max_width\":%" PRId64
@@ -1568,6 +1570,8 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_candidate_max_width,
            stats.refactor_supernode_candidate_dense_entries,
            stats.refactor_supernode_candidate_trailing_entries,
+           stats.refactor_supernode_panel_count,
+           stats.refactor_supernode_panel_used_count,
            stats.row_refactor_group_count,
            stats.row_refactor_group_level_count,
            stats.row_refactor_group_level_max_width,
@@ -2468,12 +2472,15 @@ int main(int argc, char **argv) {
            stats.refactor_dependency_pipeline_max_column_work);
     printf("refactor supernode candidates: %" PRId64
            ", rows: %" PRId64 ", max width: %" PRId64
-           ", dense entries: %.6g, trailing entries: %.6g\n",
+           ", dense entries: %.6g, trailing entries: %.6g"
+           ", panels: %" PRId64 ", used panels: %" PRId64 "\n",
            stats.refactor_supernode_candidate_count,
            stats.refactor_supernode_candidate_rows,
            stats.refactor_supernode_candidate_max_width,
            stats.refactor_supernode_candidate_dense_entries,
-           stats.refactor_supernode_candidate_trailing_entries);
+           stats.refactor_supernode_candidate_trailing_entries,
+           stats.refactor_supernode_panel_count,
+           stats.refactor_supernode_panel_used_count);
     printf("refactor L pattern: columns %" PRId64
            ", entries %" PRId64 ", adjacent runs %" PRId64
            ", adjacent entries %" PRId64 ", max run %" PRId64

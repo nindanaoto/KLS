@@ -631,6 +631,8 @@ typedef struct kls_stats {
   int row_refactor_auto_lower_bound_rejected;
   int row_refactor_auto_pattern_build_failed;
   int row_refactor_auto_value_copy_failed;
+  int64_t refactor_supernode_panel_count;
+  int64_t refactor_supernode_panel_used_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
