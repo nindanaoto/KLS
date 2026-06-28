@@ -6927,3 +6927,31 @@ implementation should build a true row-major supernode symbolic and numeric
 storage layer, then run panel triangular solve and update work from that
 storage, instead of wrapping the current scalar column executor or forcing it
 through a different queue.
+
+A successor-amortized native row-panel auto selector was also rejected. The
+paper motivation was reasonable: SubtreeLU's compact row-major supernode
+storage is supposed to amortize panel packing through later supernode updates,
+so `KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto` was prototyped to require an
+accepted dense row group to have a downstream row-group successor in addition
+to the existing arithmetic-intensity gate. Same-session forced-row controls on
+the top-ten CKTSO-gap set showed that the retained native panel path is still
+mixed rather than promotable: scalar row-major with
+`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=0` measured `6.68536s` geomean in
+`build/kls_current_forced_row_native_off_gap10_t4_r1_ref3_timeout120.jsonl`,
+while the existing auto selector measured `6.75167s` in
+`build/kls_current_forced_row_native_auto_gap10_t4_r1_ref3_timeout120.jsonl`.
+The auto path did real paper-shaped work (`onetone1` alone recorded `57`
+native panels, `47` blocked panels, and `19,608` compact supernode updates),
+but it still regressed that row by `1.083x` and `ASIC_100ks` by `1.014x`,
+offsetting wins on `ASIC_320k`, `onetone2`, `rajat25`, and `rajat20`.
+
+The successor-only prototype itself failed smoke coverage before benchmarking:
+the dense checked-prefix repair fixture lost its retained compact panel
+(`compact=0`) and the subrange batched compact-supernode fixture lost its
+batched update counters. That proves row-group successors are not the right
+proxy for panel usefulness in KLS's current row engine. Retained panels also
+feed same-group/subrange batch executors and checked prefix repair, not only
+later group-DAG successors. The source was reverted. A future selector would
+need explicit panel-consumer metadata from the compact batch builders and the
+checked-prefix repair path; a simple downstream-successor guard is a structural
+under-approximation, not a valid paper-gap closure.
