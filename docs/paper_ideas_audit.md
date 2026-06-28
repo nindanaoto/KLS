@@ -3623,6 +3623,20 @@ lower-bound work scan. The lower-bound estimates were only about `1.00x` to
 more concrete: the default slow cases are not reaching BLAS-backed or native
 row panels at all; KLS still lacks a row-major refactor algorithm whose
 structural work model clearly beats the EGraph scatter path on these patterns.
+A forced row-refactor probe on the same top-ten slice
+(`build/kls_forced_row_refactor_gap10_t4_r1_ref3_timeout120.jsonl`) confirmed
+that simply bypassing this gate is not a plausible CKTSO-gap fix. It completed
+without numerical failures but regressed the geomean to `12.086s`; every row was
+slower, with `2.57x` to `3.83x` cycle slowdowns against the guarded default.
+The forced path did execute the KLS row engine and activated native/compact row
+panel counters on the large ASIC/G2 cases, so the loss is not an admission bug.
+It is evidence that the current row-major engine is still a scalar
+KLU-compatible scaffold rather than the production row/supernode numeric object
+described by CKTSO/SubtreeLU. A separate default-EGraph ready-queue probe
+(`build/kls_egraph_ready_queue_gap10_t4_r1_ref3_timeout120.jsonl`) also
+regressed to `7.272s` geomean, showing that replacing the existing
+cluster/pipeline EGraph tail with dynamic ready-column release is not the
+missing large lever either.
 A same-session 20-matrix CKTSO-gap probe compared this gated KLS-first mode
 with `--kls-first-factor off` at 4 threads and 3 refactors. The geomean ratio
 was about 1.01x, with wins on `ASIC_100k`, `rajat15`, `onetone1`, and
