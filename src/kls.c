@@ -41304,7 +41304,7 @@ static int kls_egraph_medium_heavy_dominant_btf_shape(
     (double)solver->symbolic->maxblock / (double)solver->n;
   return coverage >= 0.85 && coverage < 0.95 &&
          solver->symbolic->maxblock >= 30000u &&
-         solver->symbolic->nblocks <= 5000u &&
+         solver->symbolic->nblocks <= 50000u &&
          solver->common.flops >= 1.5e8;
 }
 

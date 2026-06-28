@@ -6142,6 +6142,24 @@ same CBLAS run reported zero refactor CBLAS update runs on all five rows. Its
 blocked native compact-panel counters were still active, so adding another
 "large cases only" BLAS guard would not change the exercised path.
 
+The supported fix from the same pass was instead to keep the paper-style
+EGraph refactor enabled for medium-heavy dominant-BTF cases with many fringe
+blocks. The earlier `5000` block cap excluded `HTC_336_4438` even though its
+largest block covered about 87% of the matrix and the refactor work was
+dominated by that block. Raising the cap to `50000` changed that row from the
+generic BTF pool path to `egraph`: the same-session old-cap control measured
+`22.2447s` with `0.1728s` average refactors, while the candidate measured
+`10.6333s` with `0.0559s` average refactors
+(`build/kls_medium_manyblock_control_HTC_t4_r1_ref5_timeout120.jsonl`,
+`build/kls_medium_manyblock_egraph_HTC_t4_r1_ref5_timeout120.jsonl`). On the
+current top-20 CKTSO-gap manifest the geomean moved from the accepted
+`3.7633s` artifact to `3.7127s`
+(`build/kls_btf_nowait_split_gap20_t4_r1_ref2_timeout120.jsonl`,
+`build/kls_medium_manyblock_egraph_gap20_t4_r1_ref2_timeout120.jsonl`). The
+remaining `HTC_336_4438` gap then shifts from refactor scheduling to initial
+factorization/row-up coverage, which is consistent with the paper-level
+executor gap rather than with small BLAS calls.
+
 Two scheduler probes also narrowed the paper gap. Disabling the separator-FLOP
 queue measured `11.6238s` geomean against the `11.8996s` control, with mixed
 per-matrix movement rather than a clear replacement
