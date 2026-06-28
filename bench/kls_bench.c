@@ -1885,6 +1885,16 @@ int main(int argc, char **argv) {
            stats.row_refactor_compact_supernode_batch_rows,
            stats.row_refactor_compact_supernode_batch_dep_rows,
            stats.row_refactor_compact_supernode_batch_entries);
+    printf(",\"row_refactor_last_separator_flop_private_threads\":%" PRId64
+           ",\"row_refactor_last_separator_flop_private_min_groups\":%" PRId64
+           ",\"row_refactor_last_separator_flop_private_max_groups\":%" PRId64
+           ",\"row_refactor_last_separator_flop_private_min_work\":%.9g"
+           ",\"row_refactor_last_separator_flop_private_max_work\":%.9g",
+           stats.row_refactor_last_separator_flop_private_threads,
+           stats.row_refactor_last_separator_flop_private_min_groups,
+           stats.row_refactor_last_separator_flop_private_max_groups,
+           stats.row_refactor_last_separator_flop_private_min_work,
+           stats.row_refactor_last_separator_flop_private_max_work);
     printf(",\"row_refactor_last_compact_dense_panel_blocked\":%d"
            ",\"row_refactor_compact_dense_panel_blocked_run_count\":%" PRId64
            ",\"row_refactor_compact_dense_panel_blocked_rows\":%" PRId64
@@ -2675,7 +2685,10 @@ int main(int argc, char **argv) {
            ", components %" PRId64 "/%" PRId64
            ", private groups %" PRId64 "/%" PRId64
            ", pipeline groups %" PRId64 "/%" PRId64
-           ", closure groups %" PRId64 "/%" PRId64 "\n",
+           ", closure groups %" PRId64 "/%" PRId64
+           ", private threads %" PRId64
+           ", private groups min/max %" PRId64 "/%" PRId64
+           ", private work min/max %.6g/%.6g\n",
            stats.row_refactor_last_separator_flop_queue,
            stats.row_refactor_last_separator_flop_components,
            stats.row_refactor_separator_flop_component_count,
@@ -2684,7 +2697,12 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_separator_flop_pipeline_groups,
            stats.row_refactor_separator_flop_pipeline_group_count,
            stats.row_refactor_last_separator_flop_closure_groups,
-           stats.row_refactor_separator_flop_closure_group_count);
+           stats.row_refactor_separator_flop_closure_group_count,
+           stats.row_refactor_last_separator_flop_private_threads,
+           stats.row_refactor_last_separator_flop_private_min_groups,
+           stats.row_refactor_last_separator_flop_private_max_groups,
+           stats.row_refactor_last_separator_flop_private_min_work,
+           stats.row_refactor_last_separator_flop_private_max_work);
     printf("row solve parallel: runs %" PRId64
            ", L slice runs %" PRId64 ", U slice runs %" PRId64
            ", L sparse level runs %" PRId64

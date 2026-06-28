@@ -638,6 +638,11 @@ typedef struct kls_stats {
   int64_t row_refactor_group_batch_rows;
   int64_t row_refactor_group_generic_count;
   int64_t row_refactor_group_dense_count;
+  int64_t row_refactor_last_separator_flop_private_threads;
+  int64_t row_refactor_last_separator_flop_private_min_groups;
+  int64_t row_refactor_last_separator_flop_private_max_groups;
+  double row_refactor_last_separator_flop_private_min_work;
+  double row_refactor_last_separator_flop_private_max_work;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

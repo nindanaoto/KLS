@@ -6115,3 +6115,39 @@ contiguous-batch threshold is not a paper-level fix. The next credible gap is
 still a durable row/supernode numeric executor that creates reusable
 BLAS-sized work and coarser same-level/ETree tasks, not another small-BLAS
 guard.
+
+The direct follow-up to the BLAS-threshold concern again showed that small BLAS
+calls are not active on the current forced-row slow set. A CBLAS-capable
+top-five forced-row run with `OPENBLAS_NUM_THREADS=1` and
+`KLS_ENABLE_CBLAS_SUPERNODE=1` measured `21.9360s` geomean, versus `21.3937s`
+for the first five rows of the non-CBLAS group-shape control
+(`build-cblas/kls_forced_row_cblas_on_focus5_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_forced_row_group_shape_gap10_t4_r1_ref3_timeout120.jsonl`). The
+same CBLAS run reported zero refactor CBLAS update runs on all five rows. Its
+blocked native compact-panel counters were still active, so adding another
+"large cases only" BLAS guard would not change the exercised path.
+
+Two scheduler probes also narrowed the paper gap. Disabling the separator-FLOP
+queue measured `11.6238s` geomean against the `11.8996s` control, with mixed
+per-matrix movement rather than a clear replacement
+(`build/kls_forced_row_no_sepflop_probe_gap10_t4_r1_ref3_timeout120.jsonl`).
+Forcing the row-dependency release wrapper whenever any separator pipeline
+work exists regressed to `12.1698s`
+(`build/kls_forced_row_sep_rowdep_probe_gap10_t4_r1_ref3_timeout120.jsonl`).
+Those results reject another broad queue switch as the direct CKTSO-gap fix.
+
+KLS now reports separator-FLOP private-queue balance directly. The diagnostic
+top-ten forced-row run measured `11.3918s` geomean, which is in the same noisy
+band as the prior forced-row controls, but its queue shape is more important
+than the timing
+(`build/kls_forced_row_sep_balance_gap10_t4_r1_ref3_timeout120.jsonl`). On
+`G2_circuit`, the separator-FLOP queue used all four private threads with
+17,238 to 17,540 groups and `2.950e8` to `3.176e8` estimated work per nonempty
+private queue, so the remaining loss there points back to numeric layout and
+compact update throughput. On `ASIC_320k`, `ASIC_320ks`, `ASIC_100ks`, and
+`rajat28`, the same Algorithm 6-style queue used only one nonempty private
+thread despite 242,653, 218,928, 54,214, and 33,912 private groups
+respectively. That is a concrete paper-aligned gap: KLS retained the
+private/pipeline structure, but its separator-private component generation or
+queue partitioning is not exposing independent private subtrees on several
+slow SPICE matrices.
