@@ -6102,6 +6102,21 @@ runs, rows, entries, and blocked-panel updates
 The external BLAS paths are therefore already build-time optional, runtime
 opt-in, and size/work gated for the current slow cases.
 
+A same-commit CBLAS guard rerun after the BTF EGraph no-wait split kept that
+conclusion unchanged. The accepted non-CBLAS top-ten run measured a `3.9789s`
+geomean with `build_has_cblas=false` and zero CBLAS/blocked-panel counters
+(`build/kls_btf_nowait_split_gap10_t4_r1_ref3_timeout120.jsonl`). Rebuilding
+the CBLAS tree at commit `af1be09` and running the same suite with
+`OPENBLAS_NUM_THREADS=1` measured `4.0990s` with
+`KLS_ENABLE_CBLAS_SUPERNODE=0` and `4.1731s` with
+`KLS_ENABLE_CBLAS_SUPERNODE=1`
+(`build-cblas/kls_cblas_guard_off_current_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build-cblas/kls_cblas_guard_on_current_gap10_t4_r1_ref3_timeout120.jsonl`).
+Both CBLAS-capable runs still recorded zero CBLAS update runs, rows, entries,
+and zero native blocked-panel update runs on all ten matrices. This rejects the
+"small BLAS calls" hypothesis for the active default CKTSO-gap loss; another
+BLAS-size guard would not change the executed code path.
+
 KLS now also reports row-refactor group shape in public stats, `kls_bench`
 JSON/text output, and `scripts/decompose_solver_gap.py`. The forced row-engine
 control with the restored `KLS_ROW_REFACTOR_BATCH_MAX_ROWS=16` measured a
