@@ -876,8 +876,14 @@ per-producer trailing L rows. Benchmark JSON reports
 `refactor_u_supernode_l_dense_entries`,
 `refactor_u_supernode_l_trailing_entries`,
 `refactor_last_u_supernode_l_update_*`, and cumulative
-`refactor_u_supernode_l_update_*` counters. This path is intentionally opt-in:
-it validates a broader paper-style producer/consumer executor than the
+`refactor_u_supernode_l_update_*` counters. After one clean numeric pass, the
+prototype disables ragged L panels that did not feed any dependency run and
+reports that amortization guard through
+`refactor_u_supernode_l_prune_count`,
+`refactor_u_supernode_l_pruned_panels`,
+`refactor_u_supernode_l_pruned_dense_entries`, and
+`refactor_u_supernode_l_pruned_trailing_entries`. This path is intentionally
+opt-in: it validates a broader paper-style producer/consumer executor than the
 common-trailing cached panel, but current focused runs still show that KLS needs
 coarser batching/reuse before this shape can beat the scalar EGraph walk.
 Eligible retained refactor-map row/input positions and L row-index arrays are

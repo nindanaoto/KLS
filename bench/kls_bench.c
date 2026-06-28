@@ -1517,6 +1517,10 @@ int main(int argc, char **argv) {
            ",\"refactor_u_supernode_l_panel_count\":%" PRId64
            ",\"refactor_u_supernode_l_dense_entries\":%" PRId64
            ",\"refactor_u_supernode_l_trailing_entries\":%" PRId64
+           ",\"refactor_u_supernode_l_prune_count\":%" PRId64
+           ",\"refactor_u_supernode_l_pruned_panels\":%" PRId64
+           ",\"refactor_u_supernode_l_pruned_dense_entries\":%" PRId64
+           ",\"refactor_u_supernode_l_pruned_trailing_entries\":%" PRId64
            ",\"refactor_last_u_supernode_l_update_runs\":%" PRId64
            ",\"refactor_last_u_supernode_l_update_rows\":%" PRId64
            ",\"refactor_last_u_supernode_l_update_entries\":%" PRId64
@@ -1637,6 +1641,10 @@ int main(int argc, char **argv) {
            stats.refactor_u_supernode_l_panel_count,
            stats.refactor_u_supernode_l_dense_entries,
            stats.refactor_u_supernode_l_trailing_entries,
+           stats.refactor_u_supernode_l_prune_count,
+           stats.refactor_u_supernode_l_pruned_panels,
+           stats.refactor_u_supernode_l_pruned_dense_entries,
+           stats.refactor_u_supernode_l_pruned_trailing_entries,
            stats.refactor_last_u_supernode_l_update_runs,
            stats.refactor_last_u_supernode_l_update_rows,
            stats.refactor_last_u_supernode_l_update_entries,
@@ -2624,6 +2632,7 @@ int main(int argc, char **argv) {
            ", U value writes: %" PRId64 "/%" PRId64
            ", ragged L panels: %" PRId64
            ", ragged L entries: %" PRId64 "/%" PRId64
+           ", ragged L pruned: %" PRId64 "/%" PRId64
            ", ragged L updates: %" PRId64 "/%" PRId64 "/%" PRId64
            ", panels: %" PRId64 ", used panels: %" PRId64
            ", cached probe disabled: %d/%" PRId64 "\n",
@@ -2649,6 +2658,8 @@ int main(int argc, char **argv) {
            stats.refactor_u_supernode_l_panel_count,
            stats.refactor_u_supernode_l_dense_entries,
            stats.refactor_u_supernode_l_trailing_entries,
+           stats.refactor_u_supernode_l_prune_count,
+           stats.refactor_u_supernode_l_pruned_panels,
            stats.refactor_last_u_supernode_l_update_runs,
            stats.refactor_last_u_supernode_l_update_rows,
            stats.refactor_last_u_supernode_l_update_entries,

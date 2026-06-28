@@ -689,6 +689,10 @@ typedef struct kls_stats {
   int64_t refactor_u_supernode_l_panel_count;
   int64_t refactor_u_supernode_l_dense_entries;
   int64_t refactor_u_supernode_l_trailing_entries;
+  int64_t refactor_u_supernode_l_prune_count;
+  int64_t refactor_u_supernode_l_pruned_panels;
+  int64_t refactor_u_supernode_l_pruned_dense_entries;
+  int64_t refactor_u_supernode_l_pruned_trailing_entries;
   int64_t refactor_last_u_supernode_l_update_runs;
   int64_t refactor_last_u_supernode_l_update_rows;
   int64_t refactor_last_u_supernode_l_update_entries;

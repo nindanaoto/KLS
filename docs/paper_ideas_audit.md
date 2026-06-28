@@ -8043,3 +8043,22 @@ broader producer/consumer executor mechanically, but shows that simply caching
 ragged producer L rows is not enough; the next paper gap is coarser batching or
 a policy that only pays the publish/cache cost when producer rows are reused
 enough to amortize it.
+
+The ragged L-panel executor now has the same clean-pass amortization guard as
+the earlier cached-panel probes. During the first valid numeric pass it marks
+only panels that actually feed a dependency run, then disables untouched panels
+for later repeated refactors. The focused prune artifact
+(`build/kls_u_supernode_ragged_l_prune_gap5_t4_r1_ref3_timeout120.jsonl`)
+improved the opt-in geomean from `1.65257s` to `1.44225s` and reduced the
+`ASIC_100ks` regression from `11.34s` to `5.70s`. The counters show why:
+`18,215` of `18,218` valid ragged panels were pruned after one clean pass,
+covering `557,004` dense entries and all `2,610,433` trailing entries that
+were not used later. The executor still did the same real work on the remaining
+panels (`637` last-pass runs, `89,907` producer rows, and `18,044,382` update
+entries), and residuals remained clean. The same-source gate-off control
+(`build/kls_u_supernode_ragged_l_prune_default_gap5_t4_r1_ref3_timeout120.jsonl`)
+measured `1.36151s` with all ragged-L counters at zero, so the prune is
+retained as opt-in executor cleanup rather than promoted to default policy. It
+narrows the missing piece further: KLS can now identify and discard unused
+ragged panels, but the remaining used panel work still needs a coarser kernel or
+an auto policy that predicts when the retained panel will beat scalar EGraph.
