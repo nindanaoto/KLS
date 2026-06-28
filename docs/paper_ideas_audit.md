@@ -6201,3 +6201,11 @@ correct on smoke tests but regressed the top-ten CKTSO-gap repeat-3 geomean to
 That result keeps the structural pipeline wait order intact; the retained
 zero-dependency improvement is only the producer metadata/scatter bypass after
 the dependency is ready.
+
+A zero-`L` store division probe was also rejected. It changed the EGraph
+`L`-column store helper to write exact zero directly for nonzero pivots instead
+of dividing `0.0 / pivot`, while preserving the old zero-pivot behavior. The
+extra branch regressed the top-ten CKTSO-gap repeat-3 geomean to `4.1316s`
+(`build/kls_zero_l_store_div_skip_gap10_t4_r1_ref3_timeout120.jsonl`), so the
+branch was removed. The profitable exact-zero handling remains at the producer
+dependency level, where it avoids whole `L`-column metadata/scatter work.
