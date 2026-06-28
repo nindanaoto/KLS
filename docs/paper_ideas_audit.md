@@ -8078,3 +8078,28 @@ and multi-million-operation work thresholds before calling BLAS. There is
 therefore no useful additional "only use BLAS for large cases" patch for these
 slow rows; the remaining gap is still the paper-level row-major/supernode
 executor that creates reusable coarse work, not BLAS call granularity.
+
+A direct ragged-panel tail-union accumulator was prototyped and rejected. The
+experiment kept the opt-in retained U-supernode ragged L-panel cache, then
+added `KLS_ENABLE_REFACTOR_U_SUPERNODE_L_UNION=1` to precompute each panel's
+unique trailing row set and map per-row ragged tail entries into that union.
+At run time, accepted ragged updates accumulated repeated trailing rows in
+worker scratch and scattered each touched union row once. This tested whether
+the remaining used ragged panels were losing mainly because they wrote the same
+trailing `x` rows repeatedly. Correctness passed (`ctest --test-dir build
+--output-on-failure` and opt-in `kls_smoke`), but the focused benchmarks did
+not support retaining the code. On the current five-row focus
+(`ASIC_320k`, `ASIC_320ks`, `onetone2`, `ASIC_100ks`, `G2_circuit`), ragged
+without the union measured `8.94150s` geomean in
+`build/kls_u_supernode_l_union_ragged_control_gap5_t4_r1_ref3_timeout120.jsonl`,
+while union measured `9.24227s` in
+`build/kls_u_supernode_l_union_gap5_t4_r1_ref3_timeout120.jsonl`; the default
+control was still better at `8.11402s` in
+`build/kls_union_default_control_gap5_current_t4_r1_ref3_timeout120.jsonl`.
+On the older ASIC/gemat/rajat focus, union measured `1.46720s` in
+`build/kls_u_supernode_l_union_oldgap5_t4_r1_ref3_timeout120.jsonl`, worse
+than the saved ragged-prune `1.44225s` and default `1.36151s` controls. The
+prototype was reverted. This narrows the missing paper executor again: the
+problem is not just duplicate trailing-row writes inside retained ragged
+producer panels; KLS needs a coarser multi-consumer/panel task or row-major
+numeric object that avoids the current per-current-column execution shape.
