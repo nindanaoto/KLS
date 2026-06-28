@@ -819,6 +819,17 @@ to a retained panel, and JSON reports
 `refactor_supernode_cached_probe_*` counters so profiling can distinguish panel
 misses, contiguous producer runs, work-gate acceptance, and applied cached
 updates.
+For paper-gap diagnosis without changing execution, set
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_STATS=1`. Schedule construction then
+counts actual U-stream dependency runs that fall inside retained EGraph
+supernodes and reports `refactor_supernode_consumer_run_count`,
+`refactor_supernode_consumer_run_rows`,
+`refactor_supernode_consumer_run_max_width`,
+`refactor_supernode_consumer_suffix_count`,
+`refactor_supernode_consumer_l_entries`, and
+`refactor_supernode_consumer_internal_entries`. These counters estimate how
+much scalar dependency work a future row-major/supernodal numeric object could
+consume before the current common-trailing cached-panel gates are applied.
 Eligible retained refactor-map row/input positions and L row-index arrays are
 mirrored as 32-bit integers by default while leaving the KLU-owned numeric
 factor and public index ABI unchanged. The EGraph value-scatter path and

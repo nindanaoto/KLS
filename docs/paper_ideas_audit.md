@@ -7672,3 +7672,35 @@ finishing. This also explains why the earlier producer-side supernode-task
 artifact (`KLS_ENABLE_EGRAPH_SUPERNODE_TASKS=1`) was not a general fix. Closing
 the CKTSO gap still requires a real coarse row/supernode numeric task, not only
 coarser waits over the existing scalar scatter loop.
+
+A retained diagnostic now measures that missing row/supernode numeric target
+directly instead of inferring it from rejected panel probes. With
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_STATS=1`, schedule construction builds
+a temporary map from every column inside a retained EGraph supernode to that
+supernode's end, then scans the actual U dependency streams for contiguous
+consumer runs that a SubtreeLU-style row-major panel could consume. This is
+only a counter path; it does not change the default executor. On `ASIC_100ks`,
+the current top-gap default refactor had `1,556,952` dependency edges and the
+diagnostic found `160,299` supernode-shaped consumer runs covering `1,148,099`
+dependency rows, with max width `282`, `306,222,715` covered L-entry visits,
+and `19,687,996` internal dense entries
+(`build/kls_supernode_consumer_asic100ks_t4_r1_ref3.json`). On `ASIC_320k`, it
+found `72,446` runs covering `939,167` rows, max width `537`,
+`303,544,843` L-entry visits, and `40,628,085` internal entries
+(`build/kls_supernode_consumer_asic320k_t4_r1_ref1.json`). The top-five focus
+artifact `build/kls_supernode_consumer_gap5_t4_r1_ref3_timeout120.jsonl` kept
+residuals clean and showed the same pattern on `ASIC_320ks`, `rajat03`, and
+`ASIC_100ks`; `gemat12` remains a first-factor loss with no EGraph refactor
+edges.
+
+The comparison against the existing cached-panel executor is the important
+part. On the same `ASIC_100ks` source,
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached` accepted only `267` cached updates
+over `39,436` rows and `7,400,641` blocked update entries
+(`build/kls_supernode_cached_asic100ks_current_t4_r1_ref3.json`), while the
+new consumer-run diagnostic saw more than a million supernode-shaped
+dependency rows. The missing paper algorithm is therefore not absent supernode
+structure and not just a wait or BLAS threshold. It is the durable
+row-major/supernode numeric object that can consume these runs without
+requiring the current common-trailing cached-panel shape or
+rebuilding/scattering through KLU-compatible column storage for each consumer.

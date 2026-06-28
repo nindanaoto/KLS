@@ -1489,6 +1489,12 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_candidate_max_width\":%" PRId64
            ",\"refactor_supernode_candidate_dense_entries\":%.9g"
            ",\"refactor_supernode_candidate_trailing_entries\":%.9g"
+           ",\"refactor_supernode_consumer_run_count\":%" PRId64
+           ",\"refactor_supernode_consumer_run_rows\":%" PRId64
+           ",\"refactor_supernode_consumer_run_max_width\":%" PRId64
+           ",\"refactor_supernode_consumer_suffix_count\":%" PRId64
+           ",\"refactor_supernode_consumer_l_entries\":%.9g"
+           ",\"refactor_supernode_consumer_internal_entries\":%.9g"
            ",\"refactor_supernode_panel_count\":%" PRId64
            ",\"refactor_supernode_panel_used_count\":%" PRId64
            ",\"row_refactor_group_count\":%" PRId64
@@ -1583,6 +1589,12 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_candidate_max_width,
            stats.refactor_supernode_candidate_dense_entries,
            stats.refactor_supernode_candidate_trailing_entries,
+           stats.refactor_supernode_consumer_run_count,
+           stats.refactor_supernode_consumer_run_rows,
+           stats.refactor_supernode_consumer_run_max_width,
+           stats.refactor_supernode_consumer_suffix_count,
+           stats.refactor_supernode_consumer_l_entries,
+           stats.refactor_supernode_consumer_internal_entries,
            stats.refactor_supernode_panel_count,
            stats.refactor_supernode_panel_used_count,
            stats.row_refactor_group_count,
@@ -2537,12 +2549,23 @@ int main(int argc, char **argv) {
     printf("refactor supernode candidates: %" PRId64
            ", rows: %" PRId64 ", max width: %" PRId64
            ", dense entries: %.6g, trailing entries: %.6g"
+           ", consumer runs: %" PRId64 ", consumer rows: %" PRId64
+           ", consumer max width: %" PRId64
+           ", suffix runs: %" PRId64
+           ", consumer L entries: %.6g"
+           ", consumer internal entries: %.6g"
            ", panels: %" PRId64 ", used panels: %" PRId64 "\n",
            stats.refactor_supernode_candidate_count,
            stats.refactor_supernode_candidate_rows,
            stats.refactor_supernode_candidate_max_width,
            stats.refactor_supernode_candidate_dense_entries,
            stats.refactor_supernode_candidate_trailing_entries,
+           stats.refactor_supernode_consumer_run_count,
+           stats.refactor_supernode_consumer_run_rows,
+           stats.refactor_supernode_consumer_run_max_width,
+           stats.refactor_supernode_consumer_suffix_count,
+           stats.refactor_supernode_consumer_l_entries,
+           stats.refactor_supernode_consumer_internal_entries,
            stats.refactor_supernode_panel_count,
            stats.refactor_supernode_panel_used_count);
     printf("refactor L pattern: columns %" PRId64
