@@ -6663,3 +6663,22 @@ artifacts, so the change only moved bookkeeping around and did not alter the
 default EGraph path selection. The source was reverted. This keeps the
 diagnosis focused on production row/supernode storage and arithmetic, not on
 auto-model bookkeeping.
+
+The natural all-pipeline single-block EGraph path was also tested with a true
+successor ready queue, because `G2_circuit` is the one current top-gap row
+where the NICSLU task-flow model reports a strong parallel recommendation
+(`parallel_task_flow_speedup=3.94669`) while the previous
+`KLS_ENABLE_EGRAPH_READY_QUEUE=1` probe reported zero ready-queue columns.
+The probe allowed the existing EGraph ready-queue machinery to use natural
+global column IDs instead of requiring `refactor_level_cols`. It was residual
+clean and exercised the intended graph: with the gate on, `G2_circuit`
+reported `refactor_last_ready_queue_columns=150102` and
+`refactor_ready_queue_run_count=21` in
+`build/kls_natural_ready_queue_g2_on_t4_r1_ref20_timeout120.jsonl`. It was much
+slower than the same-session natural-order control
+`build/kls_natural_ready_queue_g2_off_t4_r1_ref20_timeout120.jsonl`: SPICE
+cycle `52.6120s` versus `29.6737s`, average refactor `0.488389s` versus
+`0.261114s`, and average fast-factor refactor `0.426144s` versus `0.235491s`.
+The code was removed. This closes the specific "ready queue was never tried on
+G2" hole, and again points away from column-scheduler policy toward a different
+numeric representation/update granularity for the single-block CKTSO gap.
