@@ -6151,3 +6151,22 @@ respectively. That is a concrete paper-aligned gap: KLS retained the
 private/pipeline structure, but its separator-private component generation or
 queue partitioning is not exposing independent private subtrees on several
 slow SPICE matrices.
+
+Three follow-up probes rejected narrower explanations for the single-private
+queue collapse. Cutting row-refactor groups at retained separator-component
+boundaries reduced closure groups on the ASIC and `rajat28` rows, but still
+left the same one nonempty private thread and regressed the top-ten forced-row
+geomean to `11.6704s`
+(`build/kls_forced_row_sep_component_groups_gap10_t4_r1_ref3_timeout120.jsonl`).
+Forcing the separator-FLOP split loop to keep splitting until it had at least
+one candidate per worker did not change the reported queue shapes at all and
+measured `11.5917s`
+(`build/kls_forced_row_sep_min_candidates_gap10_t4_r1_ref3_timeout120.jsonl`).
+Finally, dropping the static private thread slices for collapsed separator
+queues and letting workers dynamically pull private groups through the exact
+predecessor counters regressed to `11.9151s`
+(`build/kls_forced_row_sep_dynamic_private_gap10_t4_r1_ref3_timeout120.jsonl`).
+Together these results point below the current row-group scheduler policy: the
+retained separator tree or numeric work model is not exposing multiple useful
+private subtrees for those matrices, and a generic dynamic/private fallback is
+not enough to recover CKTSO-level performance.
