@@ -6404,3 +6404,21 @@ over 140 columns across the run and stayed residual-clean, but repeated
 refactor time moved from `0.0432357s` to `0.0480641s`. These failures reinforce
 the paper diagnosis: queue reshaping without the production row/supernode
 numeric storage and executor does not close the CKTSO gap.
+
+A direct EGraph panel-publication storage probe was also rejected. The probe
+filled the opt-in retained supernode panel row inside
+`kls_egraph_store_l_column_from_workspace`, eliminating the separate
+post-store scan of the just-written L column. That looked closer to the
+paper's durable numeric-panel storage, but on the top-five CKTSO-gap EGraph
+rows it made the opt-in path materially worse: the same-binary default measured
+`8.4375s` geomean, while `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1` measured
+`9.7611s`
+(`build/kls_inline_panel_default_gap5_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_inline_panel_optin_gap5_t4_r1_ref3_timeout120.jsonl`). The older
+work-gated opt-in artifact was `8.4655s` on the same five rows, so the inline
+publication was not just still off-policy; it also regressed the opt-in
+scaffold. The likely cause is that panel fill pushed extra conditionals into
+the hot L-store loop for every published panel column. The probe was removed:
+the useful paper-level direction is still native row/supernode storage that
+avoids KLU-column staging altogether, not fusing another consumer into the
+current column-store loop.
