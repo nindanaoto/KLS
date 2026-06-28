@@ -633,6 +633,11 @@ typedef struct kls_stats {
   int row_refactor_auto_value_copy_failed;
   int64_t refactor_supernode_panel_count;
   int64_t refactor_supernode_panel_used_count;
+  int64_t row_refactor_group_single_count;
+  int64_t row_refactor_group_batch_count;
+  int64_t row_refactor_group_batch_rows;
+  int64_t row_refactor_group_generic_count;
+  int64_t row_refactor_group_dense_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

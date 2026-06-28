@@ -1484,6 +1484,11 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_panel_count\":%" PRId64
            ",\"refactor_supernode_panel_used_count\":%" PRId64
            ",\"row_refactor_group_count\":%" PRId64
+           ",\"row_refactor_group_single_count\":%" PRId64
+           ",\"row_refactor_group_batch_count\":%" PRId64
+           ",\"row_refactor_group_batch_rows\":%" PRId64
+           ",\"row_refactor_group_generic_count\":%" PRId64
+           ",\"row_refactor_group_dense_count\":%" PRId64
            ",\"row_refactor_group_level_count\":%" PRId64
            ",\"row_refactor_group_level_max_width\":%" PRId64
            ",\"row_refactor_group_cluster_levels\":%" PRId64
@@ -1573,6 +1578,11 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_panel_count,
            stats.refactor_supernode_panel_used_count,
            stats.row_refactor_group_count,
+           stats.row_refactor_group_single_count,
+           stats.row_refactor_group_batch_count,
+           stats.row_refactor_group_batch_rows,
+           stats.row_refactor_group_generic_count,
+           stats.row_refactor_group_dense_count,
            stats.row_refactor_group_level_count,
            stats.row_refactor_group_level_max_width,
            stats.row_refactor_group_cluster_levels,
@@ -2545,6 +2555,8 @@ int main(int argc, char **argv) {
            stats.refactor_last_ready_queue_columns,
            stats.refactor_ready_queue_run_count);
     printf("row refactor groups: %" PRId64
+           " (single %" PRId64 ", batch %" PRId64 "/%" PRId64
+           " rows, generic %" PRId64 ", dense %" PRId64 ")"
            ", levels: %" PRId64 ", max level width: %" PRId64
            ", cluster levels: %" PRId64 ", pipeline groups: %" PRId64
            ", pipeline rows: %" PRId64 ", pipeline work: %.6g"
@@ -2588,6 +2600,11 @@ int main(int argc, char **argv) {
            ", separator-private queue: %d, components %" PRId64 "/%" PRId64
            "\n",
            stats.row_refactor_group_count,
+           stats.row_refactor_group_single_count,
+           stats.row_refactor_group_batch_count,
+           stats.row_refactor_group_batch_rows,
+           stats.row_refactor_group_generic_count,
+           stats.row_refactor_group_dense_count,
            stats.row_refactor_group_level_count,
            stats.row_refactor_group_level_max_width,
            stats.row_refactor_group_cluster_levels,

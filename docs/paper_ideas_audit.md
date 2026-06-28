@@ -6087,3 +6087,31 @@ file (`build/kls_pre2_panel_cache_stats_klsfirst_factor_timeout120.json`), so
 the new counters do not close that gap directly; they make the next large-case
 diagnosis explicit about whether time is going into full prefix rebuilds,
 incremental published-panel staging, or later cached-panel consumption.
+
+The June 28, 2026 top-ten CKTSO-gap rerun again rejected "too many small BLAS
+calls" as the active explanation. The normal build is compiled without CBLAS,
+reported `build_has_cblas=false`, and recorded zero CBLAS update runs, rows,
+and entries while measuring a `4.1533s` geomean
+(`build/kls_default_group_shape_current_gap10_t4_r1_ref3_timeout120.jsonl`).
+The same source built with CBLAS reported `4.1118s` with
+`KLS_ENABLE_CBLAS_SUPERNODE=0` and `4.0363s` with
+`KLS_ENABLE_CBLAS_SUPERNODE=1`; both runs still recorded zero CBLAS update
+runs, rows, entries, and blocked-panel updates
+(`build-cblas/kls_cblas_guard_off_group_shape_current_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build-cblas/kls_cblas_guard_on_group_shape_current_gap10_t4_r1_ref3_timeout120.jsonl`).
+The external BLAS paths are therefore already build-time optional, runtime
+opt-in, and size/work gated for the current slow cases.
+
+KLS now also reports row-refactor group shape in public stats, `kls_bench`
+JSON/text output, and `scripts/decompose_solver_gap.py`. The forced row-engine
+control with the restored `KLS_ROW_REFACTOR_BATCH_MAX_ROWS=16` measured a
+`11.8996s` geomean and showed that singleton groups dominate: `1,107,031` of
+`1,187,615` groups were single-row groups, with only `29,059` contiguous batch
+groups covering `323,633` rows
+(`build/kls_forced_row_group_shape_gap10_t4_r1_ref3_timeout120.jsonl`). The
+rejected `64`- and `256`-row batch probes stayed in the same poor band
+(`12.1113s` and `11.8470s` post-counter geomeans), so widening the current
+contiguous-batch threshold is not a paper-level fix. The next credible gap is
+still a durable row/supernode numeric executor that creates reusable
+BLAS-sized work and coarser same-level/ETree tasks, not another small-BLAS
+guard.
