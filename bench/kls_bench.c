@@ -1923,6 +1923,29 @@ int main(int argc, char **argv) {
              .refactor_supernode_consumer_plan_first_dep_shape_batch_small_run_rows,
            stats
              .refactor_supernode_consumer_plan_first_dep_shape_batch_max_runs);
+    printf(",\"refactor_supernode_consumer_plan_shape_batch_advance_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_batch_advance_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_batch_advance_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_batch_advance_dep_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_batch_advance_work\":%.9g"
+           ",\"refactor_supernode_consumer_plan_shape_batch_advance_max_deps\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_batch_advance_max_work\":%.9g",
+           stats.refactor_supernode_consumer_plan_shape_batch_advance_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_batch_advance_run_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_batch_advance_run_rows,
+           stats
+             .refactor_supernode_consumer_plan_shape_batch_advance_dep_count,
+           stats.refactor_supernode_consumer_plan_shape_batch_advance_work,
+           stats
+             .refactor_supernode_consumer_plan_shape_batch_advance_max_deps,
+           stats.refactor_supernode_consumer_plan_shape_batch_advance_max_work);
     printf(",\"refactor_l_pattern_columns\":%" PRId64
            ",\"refactor_l_pattern_entries\":%" PRId64
            ",\"refactor_l_adjacent_run_count\":%" PRId64
@@ -2985,7 +3008,10 @@ int main(int argc, char **argv) {
            ", exact-shape max %" PRId64
            ", first-dep exact-shape %" PRId64 "/%" PRId64 "/%" PRId64
            ", first-dep small %" PRId64 "/%" PRId64
-           ", first-dep max %" PRId64 "\n",
+           ", first-dep max %" PRId64
+           ", advance exact-shape %" PRId64 "/%" PRId64 "/%" PRId64
+           ", advance deps/work %" PRId64 "/%.9g"
+           ", advance max %" PRId64 "/%.9g\n",
            stats.refactor_supernode_consumer_plan_panel_count,
            stats.refactor_supernode_consumer_plan_reused_panel_count,
            stats.refactor_supernode_consumer_plan_run_count,
@@ -3027,7 +3053,14 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_first_dep_shape_batch_run_rows,
            stats.refactor_supernode_consumer_plan_first_dep_shape_batch_small_run_count,
            stats.refactor_supernode_consumer_plan_first_dep_shape_batch_small_run_rows,
-           stats.refactor_supernode_consumer_plan_first_dep_shape_batch_max_runs);
+           stats.refactor_supernode_consumer_plan_first_dep_shape_batch_max_runs,
+           stats.refactor_supernode_consumer_plan_shape_batch_advance_count,
+           stats.refactor_supernode_consumer_plan_shape_batch_advance_run_count,
+           stats.refactor_supernode_consumer_plan_shape_batch_advance_run_rows,
+           stats.refactor_supernode_consumer_plan_shape_batch_advance_dep_count,
+           stats.refactor_supernode_consumer_plan_shape_batch_advance_work,
+           stats.refactor_supernode_consumer_plan_shape_batch_advance_max_deps,
+           stats.refactor_supernode_consumer_plan_shape_batch_advance_max_work);
     printf("refactor supernode consumer plan exec: attempts %" PRId64
            ", hits %" PRId64 ", applied %" PRId64
            ", rows %" PRId64 ", entries %" PRId64

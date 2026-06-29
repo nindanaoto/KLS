@@ -780,6 +780,13 @@ typedef struct kls_stats {
   int64_t
     refactor_supernode_consumer_plan_first_dep_shape_batch_small_run_rows;
   int64_t refactor_supernode_consumer_plan_first_dep_shape_batch_max_runs;
+  int64_t refactor_supernode_consumer_plan_shape_batch_advance_count;
+  int64_t refactor_supernode_consumer_plan_shape_batch_advance_run_count;
+  int64_t refactor_supernode_consumer_plan_shape_batch_advance_run_rows;
+  int64_t refactor_supernode_consumer_plan_shape_batch_advance_dep_count;
+  double refactor_supernode_consumer_plan_shape_batch_advance_work;
+  int64_t refactor_supernode_consumer_plan_shape_batch_advance_max_deps;
+  double refactor_supernode_consumer_plan_shape_batch_advance_max_work;
   int64_t refactor_last_supernode_consumer_plan_attempts;
   int64_t refactor_last_supernode_consumer_plan_hits;
   int64_t refactor_last_supernode_consumer_plan_applied;

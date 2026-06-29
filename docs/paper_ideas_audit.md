@@ -9762,3 +9762,39 @@ therefore is not unguarded small BLAS dispatch. It remains the larger
 paper-level executor problem: KLS must avoid repeatedly streaming long
 producer rows and instead apply retained producer panels to gathered current
 workspaces.
+
+KLS now measures the missing advance-to-offset stage for those retained
+producer-panel groups. The new
+`refactor_supernode_consumer_plan_shape_batch_advance_*` counters scan each
+exact-shape retained group, locate the producer dependency in the current
+column's numeric U stream, and estimate the earlier dependency work needed to
+advance a gathered current-column workspace to that retained
+`(panel_start,panel_offset)` before applying the shared producer panel.
+
+Validation:
+
+- `cmake --build build -j4` completed with only the pre-existing long JSON
+  format-string warning in `bench/kls_bench.c`.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1 ./build/kls_smoke` passed.
+- The top-ten CKTSO-gap retained-plan focus
+  `build/kls_shape_batch_advance_gap10_t4_r1_ref3_timeout120.jsonl`
+  completed with no failed matrices and measured `2.23896s` geomean.
+
+The counters now cover the same exact-shape retained groups as the existing
+shape-batch metadata: `39,077` groups, `713,396` runs, and `5,394,956` retained
+run rows across the top-ten focus. Advancing those gathered current workspaces
+to the retained offsets requires `312,069,123` earlier U dependencies and about
+`2.55859e10` estimated scalar update work, averaging about `437` earlier
+dependencies and `35,865` scalar-work units per retained run. The largest
+single retained run is preceded by `32,090` dependencies and about `678k`
+estimated scalar-work units.
+
+This rules out a lightweight panel-only executor as a CKTSO-gap closer. The
+paper-shaped grouped executor must claim a batch of current columns, scatter
+their inputs into several workspaces, advance each workspace through its earlier
+dependency stream, apply the shared retained producer panel, and then finish or
+publish those current columns so the normal EGraph loop does not process them a
+second time. If the advance work is added on top of the existing per-column
+factor loop, it will be too expensive; it has to replace that part of the
+normal numeric path for the claimed columns.
