@@ -1668,6 +1668,19 @@ probe reported zero panel-cache activity. The matching forced `pre2` factor
 probe still timed out at 120s, so that case remains unresolved, but future
 slow-path runs can now separate panel-cache staging volume from cached-panel
 consumption.
+KLS also reports dominant-BTF row-up-looking first-factor coverage through
+`kls_first_last_dominant_btf_pipeline`,
+`kls_first_last_dominant_btf_pipeline_block`,
+`kls_first_last_dominant_btf_pipeline_rows`, and
+`kls_first_last_dominant_btf_pipeline_has_separator`; setting
+`KLS_TRACE_KLS_FIRST_FACTOR=1` prints the same decision before a long factor
+run can time out. Same-session `pre2` probes show the default AMD run enters
+the 629,628-row dominant BTF block with no separator coverage, while forced
+METIS enters the same block with separator coverage but still exceeds the
+120s cap. The matching local CKTSO run finishes analysis, first factor, one
+factor, one refactor, and solve in about 21s wall time, so the remaining gap is
+not the timeout limit or BLAS thresholding; it is the missing CKTSO/SubtreeLU
+coarse row/supernode numeric executor inside that dominant block.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first

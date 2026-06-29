@@ -24,6 +24,7 @@
 
 #include <errno.h>
 #include <float.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
@@ -818,6 +819,12 @@ struct kls_solver {
   UF_long kls_tail_mapped_column_count;
   UF_long kls_first_last_row_uplooking_columns;
   UF_long kls_first_row_uplooking_column_count;
+  int kls_first_last_dominant_btf_pipeline;
+  UF_long kls_first_dominant_btf_pipeline_count;
+  UF_long kls_first_last_dominant_btf_pipeline_block;
+  UF_long kls_first_last_dominant_btf_pipeline_rows;
+  int kls_first_last_dominant_btf_pipeline_has_separator;
+  UF_long kls_first_dominant_btf_pipeline_without_separator_count;
   UF_long kls_first_last_row_refactor_seeded_rows;
   UF_long kls_first_row_refactor_seeded_row_count;
   int kls_first_last_row_pipeline;
@@ -4721,6 +4728,10 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->kls_tail_last_mapped_columns = 0;
   solver->kls_first_last_row_uplooking_columns = 0;
   solver->kls_first_last_row_refactor_seeded_rows = 0;
+  solver->kls_first_last_dominant_btf_pipeline = 0;
+  solver->kls_first_last_dominant_btf_pipeline_block = KLS_KLU_EMPTY;
+  solver->kls_first_last_dominant_btf_pipeline_rows = 0;
+  solver->kls_first_last_dominant_btf_pipeline_has_separator = 0;
   solver->kls_first_last_row_pipeline = 0;
   solver->kls_first_last_row_pipeline_rows = 0;
   solver->kls_first_last_row_pipeline_threads = 0;
@@ -4800,6 +4811,10 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   solver->stats.kls_tail_last_mapped_columns = 0;
   solver->stats.kls_first_last_row_uplooking_columns = 0;
   solver->stats.kls_first_last_row_refactor_seeded_rows = 0;
+  solver->stats.kls_first_last_dominant_btf_pipeline = 0;
+  solver->stats.kls_first_last_dominant_btf_pipeline_block = -1;
+  solver->stats.kls_first_last_dominant_btf_pipeline_rows = 0;
+  solver->stats.kls_first_last_dominant_btf_pipeline_has_separator = 0;
   solver->stats.kls_first_last_row_pipeline = 0;
   solver->stats.kls_first_last_row_pipeline_rows = 0;
   solver->stats.kls_first_last_row_pipeline_threads = 0;
@@ -14381,6 +14396,21 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->kls_first_last_row_uplooking_columns;
   solver->stats.kls_first_row_uplooking_column_count =
     (int64_t)solver->kls_first_row_uplooking_column_count;
+  solver->stats.kls_first_last_dominant_btf_pipeline =
+    solver->kls_first_last_dominant_btf_pipeline;
+  solver->stats.kls_first_dominant_btf_pipeline_count =
+    (int64_t)solver->kls_first_dominant_btf_pipeline_count;
+  solver->stats.kls_first_last_dominant_btf_pipeline_block =
+    solver->kls_first_last_dominant_btf_pipeline_block == KLS_KLU_EMPTY
+      ? -1
+      : (int64_t)solver->kls_first_last_dominant_btf_pipeline_block;
+  solver->stats.kls_first_last_dominant_btf_pipeline_rows =
+    (int64_t)solver->kls_first_last_dominant_btf_pipeline_rows;
+  solver->stats.kls_first_last_dominant_btf_pipeline_has_separator =
+    solver->kls_first_last_dominant_btf_pipeline_has_separator;
+  solver->stats.kls_first_dominant_btf_pipeline_without_separator_count =
+    (int64_t)solver
+      ->kls_first_dominant_btf_pipeline_without_separator_count;
   solver->stats.kls_first_last_row_refactor_seeded_rows =
     (int64_t)solver->kls_first_last_row_refactor_seeded_rows;
   solver->stats.kls_first_row_refactor_seeded_row_count =
@@ -27706,6 +27736,31 @@ static int kls_first_factor_env_enabled(void) {
 static int kls_first_factor_env_disabled(void) {
   const char *value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
   return value != NULL && value[0] == '0' && value[1] == '\0';
+}
+
+static int kls_first_factor_trace_env_enabled(void) {
+  const char *value = getenv("KLS_TRACE_KLS_FIRST_FACTOR");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static void kls_trace_first_factor_dominant_btf(
+  const kls_solver *solver,
+  UF_long block,
+  UF_long rows,
+  int has_separator) {
+  if (!kls_first_factor_trace_env_enabled()) {
+    return;
+  }
+  const UF_long nblocks =
+    solver != NULL && solver->symbolic != NULL ? solver->symbolic->nblocks : 0;
+  const UF_long n = solver != NULL ? solver->n : 0;
+  fprintf(stderr,
+          "KLS first-factor dominant-BTF pipeline: block=%" PRIu64
+          " rows=%" PRIu64 " n=%" PRIu64 " nblocks=%" PRIu64
+          " separator=%d\n",
+          (uint64_t)block, (uint64_t)rows, (uint64_t)n,
+          (uint64_t)nblocks, has_separator);
 }
 
 static int kls_auto_first_factor_has_separator_parallel_row_up(
@@ -56396,6 +56451,28 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
   UF_long dominant_pipeline_block = KLS_KLU_EMPTY;
   if (kls_first_factor_dominant_btf_pipeline_target(
         solver, &dominant_pipeline_block)) {
+    const UF_long block_begin =
+      solver->symbolic->R[dominant_pipeline_block];
+    const UF_long block_end =
+      solver->symbolic->R[dominant_pipeline_block + 1u];
+    const UF_long block_rows =
+      block_end >= block_begin ? block_end - block_begin : 0u;
+    const int dominant_has_separator =
+      use_separator_pivot_domains &&
+      block_begin >= solver->separator.global_begin &&
+      block_end <= solver->separator.global_end;
+    solver->kls_first_last_dominant_btf_pipeline = 1;
+    solver->kls_first_dominant_btf_pipeline_count++;
+    solver->kls_first_last_dominant_btf_pipeline_block =
+      dominant_pipeline_block;
+    solver->kls_first_last_dominant_btf_pipeline_rows = block_rows;
+    solver->kls_first_last_dominant_btf_pipeline_has_separator =
+      dominant_has_separator;
+    if (!dominant_has_separator) {
+      solver->kls_first_dominant_btf_pipeline_without_separator_count++;
+    }
+    kls_trace_first_factor_dominant_btf(
+      solver, dominant_pipeline_block, block_rows, dominant_has_separator);
     shared.force_block_pipeline = 1;
     shared.block_pipeline_thread_count = solver->options.threads;
     shared.block_pipeline_target_block = dominant_pipeline_block;

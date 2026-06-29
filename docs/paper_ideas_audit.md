@@ -8934,3 +8934,23 @@ supernode prototypes opt-in even on large rows. The next implementation target
 is still the production row/supernode numeric representation that can store
 and update the extra non-contiguous row-major state directly, plus a separate
 first-factor path for `pre2`; the current toggles do not close either gap.
+
+A follow-up `pre2` rerun added explicit dominant-BTF first-factor coverage
+diagnostics instead of inferring path selection from analysis-only output. The
+new stats record whether the KLS-first row-up-looking dominant-BTF pipeline was
+used, which BTF block it targeted, how many rows that block contained, and
+whether retained separator metadata covered it; `KLS_TRACE_KLS_FIRST_FACTOR=1`
+prints the same decision before a long factor run can time out. A fast
+`transient` forced-first probe confirmed the counters are wired, reporting the
+178,823-row dominant block with no separator coverage under AMD. On `pre2`, the
+default AMD forced-first run emitted
+`block=13843 rows=629628 n=659033 nblocks=29282 separator=0` and timed out at
+the 120s cap. The forced METIS run emitted the same block and row count with
+`separator=1`, but it also timed out at 120s. The local CKTSO comparison binary
+completed the matching `pre2` run in about 21s wall time, with
+`analysis_seconds=3.657411`, `initial_factor_seconds=6.308607`,
+`factor_seconds_avg=5.083979`, and `refactor_seconds_avg=4.893165`. This
+rejects both the timeout-limit and ordering-only explanations for `pre2`: KLS
+is entering the correct dominant block, and METIS can provide separator
+coverage, but the current KLS numeric executor still does not implement the
+coarse CKTSO/SubtreeLU row/supernode work inside that block.

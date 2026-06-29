@@ -325,6 +325,12 @@ typedef struct kls_stats {
   int64_t kls_tail_mapped_column_count;
   int64_t kls_first_last_row_uplooking_columns;
   int64_t kls_first_row_uplooking_column_count;
+  int kls_first_last_dominant_btf_pipeline;
+  int64_t kls_first_dominant_btf_pipeline_count;
+  int64_t kls_first_last_dominant_btf_pipeline_block;
+  int64_t kls_first_last_dominant_btf_pipeline_rows;
+  int kls_first_last_dominant_btf_pipeline_has_separator;
+  int64_t kls_first_dominant_btf_pipeline_without_separator_count;
   int64_t kls_first_last_row_refactor_seeded_rows;
   int64_t kls_first_row_refactor_seeded_row_count;
   int kls_first_last_row_pipeline;
