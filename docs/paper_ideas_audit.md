@@ -9086,3 +9086,31 @@ for large cases" policy is already implemented for the optional CBLAS paths and
 is not active in the current CKTSO-gap losses. The main gap is still coarse
 numeric work aggregation inside the dominant blocks, not BLAS thresholding or
 tail-wait bookkeeping.
+
+The direct follow-up to the BLAS-threshold question repeated the same-binary
+check on the current rebuilt CBLAS tree. With `OPENBLAS_NUM_THREADS=1` and the
+runtime CBLAS gate off,
+`build-cblas/kls_cblas_rerun_off_gap5_t4_r1_ref3_timeout120.jsonl` measured a
+`1.43193s` top-five geomean. With `KLS_ENABLE_CBLAS_SUPERNODE=1`,
+`build-cblas/kls_cblas_rerun_on_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.36371s`. The row-level movement was mixed (`ASIC_100ks` regressed while
+`rajat03` improved), and every row in both artifacts reported
+`build_has_cblas=true` with zero `refactor_last_supernode_cblas_update_*` and
+zero cumulative `refactor_supernode_cblas_update_*` counters. Therefore the
+runtime gate did not execute BLAS at all; adding another small-case BLAS guard
+would not change this focused path.
+
+A retained-plan lookup probe was also rejected. The experiment sorted each
+consumer-plan current-column run list by dependency and replaced the executor's
+linear run search with a binary lookup. It preserved smoke correctness
+(`cmake --build build -j 4`, `ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1 ./build/kls_smoke` passed),
+but it did not improve the focused benchmark:
+`build/kls_consumer_plan_binlookup_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.42891s` versus the same-source default
+`build/kls_binlookup_default_gap5_t4_r1_ref3_timeout120.jsonl` at `1.42766s`.
+The plan executor still applied only the already-known limited cached-panel
+subset before auto-disable, so lookup overhead is not the large paper gap. The
+source change was reverted; the next useful target remains a broader
+producer/output accumulator or row-major numeric object that can consume the
+retained plan beyond the current common-tail cached-panel shape.
