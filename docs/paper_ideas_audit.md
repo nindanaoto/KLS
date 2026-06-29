@@ -10009,3 +10009,39 @@ skipping scalar replay. The paper-aligned missing piece is therefore not more
 single-run lookup tuning; it is a true grouped/batched executor that claims and
 updates many same-shape consumers together, amortizing the retained producer
 panel over a group as in the paper algorithms.
+
+KLS now distinguishes standalone retained group-L executor eligibility from
+aggregate batch-candidate eligibility. The prior gate asked whether each
+single current-column run was large enough to justify a retained exact-L
+update. That is the wrong diagnostic for the paper-shaped grouped executor:
+the paper opportunity is many small same-shape consumers sharing one retained
+producer panel. The group-L cache therefore now reports
+`refactor_supernode_consumer_plan_group_l_batch_candidate_*` counters for
+exact-L-valid groups with at least two matching retained runs. These counters
+are explicitly named as candidates; they do not claim that a batched executor
+has been implemented yet.
+
+Validation:
+
+- `cmake --build build -j4` completed, with the same non-fatal long JSON
+  format-string warnings in `bench/kls_bench.c`.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- The opt-in group-L cache/executor metadata run
+  `build/kls_group_l_batch_candidates_gap10_t4_r1_ref3_timeout120.jsonl`
+  completed the top-ten CKTSO-gap focus with no failed matrices and measured
+  `2.24087s` geomean.
+- The same-source default control
+  `build/kls_group_l_batch_candidates_default_gap10_t4_r1_ref3_timeout120.jsonl`
+  completed with no failed matrices and measured `2.25333s` geomean; because
+  the retained group-L cache was not requested, it reported zero batch
+  candidate runs.
+
+The opt-in metadata run reports only `63` standalone executable group-L runs
+and `34,650` standalone executable rows, but `38,782` aggregate batch-candidate
+groups, `704,933` candidate runs, `5,314,536` candidate run rows, and
+`1,454,726,482` candidate update entries, with a maximum of `766` runs in one
+exact-shape group. This closes the diagnostic gap left by the single-run gate:
+the retained exact-L storage has enough aggregate same-shape work to matter,
+but KLS still needs the executor that owns multiple current columns and applies
+one producer panel over the group instead of replaying those runs one column at
+a time.
