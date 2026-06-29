@@ -8224,6 +8224,17 @@ CBLAS requires the build option, the runtime gate, 512-scale shape checks, and
 multi-million-work gates, and the current hard-gap rows do not enter those call
 sites at all.
 
+After the low-work fast-factor guard, the same current-source check was repeated
+with the CBLAS-capable binary on `LeGresley_87936`, `trans4`, `ACTIVSg2000`,
+`onetone2`, and `rajat28`. Two order-reversed passes with
+`OPENBLAS_NUM_THREADS=1` and `KLS_ENABLE_CBLAS_SUPERNODE=0/1` kept every row on
+`last_refactor_path=egraph` and reported zero CBLAS update runs, rows, and
+entries in both gate settings. The runtime geomean moved from `2.78635s` with
+the gate off to `2.39433s` with the gate on, but no BLAS call was taken, so that
+movement is ordinary run/cache noise. There is no useful source change in
+another small-BLAS threshold guard; the active gap remains outside the optional
+CBLAS kernels.
+
 The retained-plan ragged-L pruning/prefilter direction was also tested and
 rejected. The combined ragged-L plus retained consumer-plan run measured
 `1.51766s` geomean on the top-five gap focus in
