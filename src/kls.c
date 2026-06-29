@@ -58825,18 +58825,35 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
         int selected_separator_exact = 0;
         int selected_separator_extent = 0;
         int dependencies_ok = 1;
-        if ((shared->supernode_start == NULL ||
-             shared->supernode_end == NULL) &&
-            shared->active_rank == NULL) {
+        const int unlock_commit_drain =
+          ((shared->supernode_start == NULL ||
+            shared->supernode_end == NULL) &&
+           shared->active_rank == NULL) ||
+          (shared->active_rank != NULL &&
+           shared->ctx->nk >=
+             KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS);
+        if (unlock_commit_drain) {
           /*
-           * This row is now the commit cursor.  Later rows cannot append to the
-           * published U storage until this row finishes, so the scalar drain can
-           * run without holding the pipeline mutex.
+           * This row is now the commit cursor. Later rows cannot append to the
+           * published U storage until this row finishes, so the dependency drain
+           * can run without holding the pipeline mutex. Large active-rank phases
+           * still let waiting workers touch the shared panel cache under the
+           * mutex, so the unlocked cursor consumes only read-only supernode
+           * metadata and scalar/compact published-U rows.
            */
+          kls_row_first_workspace detached_workspace;
+          kls_row_first_workspace *drain_workspace = &worker->workspace;
+          kls_row_first_row_stats *drain_stats = shared->stats;
+          if (shared->active_rank != NULL) {
+            detached_workspace = worker->workspace;
+            detached_workspace.supernode_panel_cache = NULL;
+            drain_workspace = &detached_workspace;
+            drain_stats = NULL;
+          }
           pthread_mutex_unlock(&shared->lock);
           dependencies_ok =
             kls_row_first_partial_apply_ready(
-              shared->ctx, &worker->workspace, &worker->l_entries,
+              shared->ctx, drain_workspace, &worker->l_entries,
               shared->u_entries, shared->udiag_values,
               shared->workspace->u_row_ptr, shared->workspace->u_row_end,
               shared->supernode_start, shared->supernode_end,
@@ -58845,9 +58862,15 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               &worker->pipeline_supernode_update_rows,
               &worker->pipeline_supernode_panel_update_groups,
               &worker->pipeline_supernode_panel_update_rows,
-              shared->stats,
+              drain_stats,
               shared->trace_enabled ? &worker->trace_current : NULL,
               &blocked);
+          if (drain_workspace != &worker->workspace) {
+            worker->workspace.supernode_workspace =
+              drain_workspace->supernode_workspace;
+            worker->workspace.supernode_workspace_capacity =
+              drain_workspace->supernode_workspace_capacity;
+          }
           pthread_mutex_lock(&shared->lock);
         } else {
           dependencies_ok =

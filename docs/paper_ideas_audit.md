@@ -10248,3 +10248,44 @@ dead code for the current slow rows. The missing paper-aligned piece is still a
 real grouped/coarse numeric executor that performs the prefix advance and
 producer-panel application as a batch, not a standalone shape claim or a
 different threshold around an inactive CBLAS call site.
+
+The active-rank row pipeline now releases the pipeline mutex during the
+commit-cursor dependency drain for large active-rank phases as well. To avoid
+racing waiting workers that can still mutate the shared completed-panel cache,
+the unlocked cursor uses a shallow workspace with `supernode_panel_cache=NULL`;
+it can still consume read-only row-supernode metadata and compact/scalar
+published-U rows, and any scratch reallocation is synchronized back to the
+worker workspace after the drain. This is a direct concurrency fix for the
+sampled `kls_row_first_partial_apply_one_dep` lock hold, not another BLAS
+threshold.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `git diff --check` passed.
+- `build/kls_asic320k_unlocked_active_rank_t4_factor.json` completed with
+  `initial_factor_seconds=2.16228979` and `relative_residual_l2=2.61575448e-15`.
+- `build/kls_rajat29_unlocked_active_rank_nofast_t4_factor.json` completed
+  under forced KLS-first/no-fast with `initial_factor_seconds=5.13465759` and
+  `relative_residual_l2=9.86042515e-12`, so it did not reproduce the
+  correctness failures seen in earlier active-rank pivot/restart prototypes.
+- `build/kls_pre2_unlocked_active_rank_trace70.stderr` reached the
+  `pivot-tail` trace at row 274,430 within an 80s process cap. The previous
+  same-source control trace `build/kls_pre2_current_trace60.stderr` only
+  reached row 196,608 before timing out. The new trace still reported
+  `15.379B` scalar U entries, with `10.364B` output/trailing entries.
+- `build/kls_pre2_unlocked_active_rank_t4_factor_timeout130.json` remained
+  empty after the 130s timeout, although stderr printed the dominant-BTF trace
+  twice. The change improves first-pass concurrency but does not close the
+  hard measured-factor timeout.
+- The focused top-five CKTSO-gap reruns completed without failures:
+  `build/kls_unlocked_active_rank_gap5_t4_r1_ref3_timeout120.jsonl` measured
+  `1.41674462s` geomean, and
+  `build/kls_unlocked_active_rank_gap5_rerun_t4_r1_ref3_timeout120.jsonl`
+  measured `1.36983167s` geomean.
+
+This retained change removes a real serialized section from the large
+active-rank pipeline, but the trace confirms the remaining CKTSO gap is still
+the paper-sized grouped producer/output numeric executor rather than a mutex
+alone.

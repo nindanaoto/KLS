@@ -1746,6 +1746,20 @@ retained-code `pre2` METIS forced-first 120s probe still times out after the
 second dominant-BTF trace, and the current interrupt sample maps to the scalar
 published-U update loop inside `kls_row_first_partial_apply_one_dep`, with the
 other pipeline workers blocked on the pipeline condition/mutex.
+Large active-rank phases now take the same lock-free commit-cursor drain
+without sharing the mutable panel cache: the cursor consumes read-only
+row-supernode metadata plus scalar/compact published-U rows while waiting
+workers remain free to update the shared panel cache under the mutex. This
+removes a visible serialization point but is still a partial executor fix. A
+forced-METIS `pre2` trace with an 80s process cap reached the pivot-tail point
+at 274,430 committed rows, whereas the previous comparable trace reached only
+196,608 rows before timing out. A non-traced 130s `pre2` factor probe still
+timed out after printing the dominant-BTF trace twice, so the measured factor is
+still dominated by scalar output replay. Focused validation stayed clean:
+`ASIC_320k` forced KLS-first completed with `2.62e-15` relative residual,
+forced KLS-first/no-fast `rajat29` completed with `9.86e-12` relative residual,
+and two top-five CKTSO-gap reruns completed without failures at `1.4167s` and
+`1.3698s` geomean.
 Two direct attempts to restore more paper-style producer runs after that point
 were rejected. Keeping suffix supernode metadata alive after a large pivot,
 while clearing stale prefix panels, increased medium-case supernode activity but
