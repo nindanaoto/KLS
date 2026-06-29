@@ -8339,3 +8339,34 @@ with failures scored at 1000 seconds, the refreshed artifact measured
 `0.63138s` geomean versus CKTSO's saved `0.33559s`. The next gap is therefore
 still the remaining timeout rows and the broad slow repeated-refactor cases,
 not this now-removed HTC auto-policy failure.
+
+The next failure-removal change addresses `ss1`, a large, very-low-degree,
+full-diagonal matrix. Earlier probes showed that default auto selected METIS
+with BTF, creating `95,977` BTF blocks and timing out under the full
+`repeat=1, refactor_repeat=3, timeout=120` benchmark loop. The same METIS
+ordering without BTF completed under the wall-time cap and made repeated
+refactors much cheaper (`~11-12s` instead of `~57-60s` in focused probes).
+KLS now starts the existing structural class
+`is_large_very_low_degree_full_diagonal_pattern` with `use_btf=0` directly,
+instead of running a score-based no-BTF retry. This is intentionally structural:
+the paper-medium set has three matching matrices (`G2_circuit`, `mc2depi`,
+and `ss1`), and the two collateral rows already behaved as single METIS
+blocks even when BTF was requested.
+
+Focused verification on the current source:
+`build/kls_lowdegree_nobtf_G2_circuit_current_t4_r1_ref3_timeout120.jsonl`
+completed `G2_circuit` with METIS/no-BTF at `44.3114s`,
+`build/kls_lowdegree_nobtf_mc2depi_current_t4_r1_ref3_timeout120.jsonl`
+completed `mc2depi` with METIS/no-BTF at `191.031s`, and
+`build/kls_lowdegree_nobtf_ss1_current_t4_r1_ref3_timeout120.jsonl`
+completed `ss1` with METIS/no-BTF at `1125.86s`. The `ss1` row is therefore
+no longer a timeout, but it is still far slower than CKTSO's saved
+`348.787s` SPICE-cycle estimate. A projection artifact that replaces only
+the three affected rows in the previous medium run,
+`build/kls_lowdegree_nobtf_medium_projection_t4_r1_ref3_timeout120.jsonl`,
+scores one remaining missing candidate row (`mac_econ_fwd500`) and measures
+KLS at `0.58340s` geomean versus CKTSO at `0.30764s` on the common scored
+set. This keeps the main conclusion unchanged: the BLAS-size guard hypothesis
+is not active on these rows (all focused rows reported zero CBLAS calls), and
+the remaining large gap is repeated-refactor numeric work rather than small
+external BLAS calls.

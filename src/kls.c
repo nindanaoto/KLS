@@ -12948,25 +12948,14 @@ static int choose_symbolic_for_pattern(UF_long n,
 
 #ifdef KLS_HAVE_METIS
   if (is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
-    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
+    kls_options metis_options = *options;
+    metis_options.use_btf = 0;
+    int status = analyze_with_ordering(n, col_ptr, row_idx, &metis_options,
                                        KLS_ORDERING_METIS, symbolic_out,
                                        common_out, separator_out);
     if (status == KLS_OK) {
       *selected_ordering_out = KLS_ORDERING_METIS;
       double selected_score = symbolic_score(*symbolic_out);
-      maybe_retry_without_btf(n, col_ptr, row_idx, options,
-                              KLS_ORDERING_METIS, symbolic_out, common_out,
-                              &selected_score, 0, separator_out);
-#ifdef KLS_HAVE_SCOTCH
-      if (should_try_symbolic_nested_dissection_before_numeric(
-            n, *symbolic_out, *selected_ordering_out, KLS_ORDERING_SCOTCH,
-            selected_score)) {
-        maybe_promote_symbolic_ordering(
-          n, col_ptr, row_idx, options, KLS_ORDERING_SCOTCH,
-          symbolic_out, common_out, selected_ordering_out,
-          &selected_score, 0.90, separator_out);
-      }
-#endif
       *score_out = selected_score;
       return KLS_OK;
     }
