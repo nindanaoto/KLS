@@ -9214,3 +9214,19 @@ and about `1.75B` L entries on the same focus set), but the current ragged-L
 executor realizes only a small fraction of it. The next implementation should
 consume those retained runs with a broader row-major producer/output object
 instead of probing one narrow panel map from every scalar dependency.
+
+A same-source CBLAS guard rerun on June 29, 2026 confirms that the current
+focused loss is still not caused by small BLAS calls. `build-cblas` was rebuilt
+as a Release tree with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` and run on the saved
+top-five gap manifest with `OPENBLAS_NUM_THREADS=1`. With
+`KLS_ENABLE_CBLAS_SUPERNODE=0`,
+`build-cblas/kls_cblas_small_guard_latest_off_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `1.38157s` geomean. With `KLS_ENABLE_CBLAS_SUPERNODE=1`,
+`build-cblas/kls_cblas_small_guard_latest_on_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `1.32706s` geomean, but every row still reported zero
+`refactor_last_supernode_cblas_update_*` and zero cumulative
+`refactor_supernode_cblas_update_*` counters. The timing difference is
+therefore run noise or unrelated branch effects, not evidence that BLAS
+granularity is active. The existing CBLAS call sites already require the
+runtime gate plus 512-scale row/vector or panel checks and multi-million-work
+thresholds; another "large only" guard would not affect these rows.
