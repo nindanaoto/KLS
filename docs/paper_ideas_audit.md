@@ -10211,3 +10211,40 @@ select current columns by estimated advance cost, advance multiple workspaces
 without full block memset per column, apply substantial retained panels, and
 merge/publish results without making other workers wait on one stolen heavy
 column. The failed prototype was reverted from `src/kls.c`.
+
+A safer follow-up keeps the shape-claim ownership probe from firing unless the
+retained group-L executor is active and the retained group has measured
+candidate payoff. The cache now stores a separate validity bit and payoff bit:
+plain valid groups can still be retained for diagnostics or future executor
+work, but `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_SHAPE_CLAIMS=1` no
+longer claims columns for groups whose retained-L update work would not repay
+the estimated prefix advance.
+
+Validation:
+
+- `build/kls_shape_claims_payoff_gap3_t4_r1_ref3_timeout120.jsonl` completed
+  without failures but regressed the top-three probe: `ASIC_320ks=14.9006s`,
+  `ASIC_320k=13.4147s`, `gemat12=0.0601335s`, geomean `2.29069s`.
+  The two ASIC rows claimed future columns (`78` and `2` in the last refactor)
+  while applying zero retained group-L updates, so the probe was still only
+  rescheduling scalar current-column work.
+- After requiring the retained update executor,
+  `build/kls_shape_claims_payoff_execguard_gap3_t4_r1_ref3_timeout120.jsonl`
+  completed with no failures and no shape claims: `ASIC_320ks=11.3446s`,
+  `ASIC_320k=13.5294s`, `gemat12=0.0598688s`, geomean `2.09454s`.
+  The same rows still reported payoff-positive retained groups
+  (`288,654` and `22,566` retained update entries), but zero group-L update
+  executions because the executor itself was not enabled.
+- A CBLAS-capable top-ten control already has "use BLAS only for large cases"
+  behavior: the source requires the runtime `KLS_ENABLE_CBLAS_SUPERNODE=1`
+  gate plus 512/2048-scale row or panel dimensions and multi-million estimated
+  work. `build/kls_cblas_guard_current_off_gap10_t4_r1_ref3_timeout120.jsonl`
+  and `build/kls_cblas_guard_current_on_gap10_t4_r1_ref3_timeout120.jsonl`
+  both report zero `refactor_supernode_cblas_update_*` counters on all
+  top-ten CKTSO-gap rows, including `ASIC_320ks` and `ASIC_320k`.
+
+This narrows the actionable gap again: another small-case BLAS guard would be
+dead code for the current slow rows. The missing paper-aligned piece is still a
+real grouped/coarse numeric executor that performs the prefix advance and
+producer-panel application as a batch, not a standalone shape claim or a
+different threshold around an inactive CBLAS call site.

@@ -1792,6 +1792,15 @@ about 15.3B scalar U entries: about 5.0B internal dependency entries and about
 to reduce producer-to-current-row output streaming as well as dependency-chain
 updates; a dependency-only ready-supernode extension or another BLAS threshold
 would leave most of the measured stream intact.
+The retained group-L shape-claim probe is now also guarded by measured payoff
+and by the retained update executor being active. A payoff-only probe still
+claimed ASIC future columns while applying zero retained group-L updates and
+regressed the top-three gap run; after the executor-active guard, the same
+probe became non-perturbing. Current CBLAS-capable top-ten CKTSO-gap artifacts
+likewise report zero CBLAS update counters with the runtime BLAS gate both off
+and on, and the source already requires 512/2048-scale row or panel dimensions
+plus multi-million estimated work. Small-case BLAS dispatch is therefore not
+the active slow-row blocker.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first

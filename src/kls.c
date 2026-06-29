@@ -71,6 +71,8 @@
 #define KLS_EGRAPH_RAGGED_U_SUPERNODE_MIN_WORK_PER_ENTRY 4.0
 #define KLS_REFACTOR_PLAN_GROUP_L_EXEC_MIN_RUNS 1024u
 #define KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS 1024u
+#define KLS_REFACTOR_PLAN_GROUP_L_VALID 1u
+#define KLS_REFACTOR_PLAN_GROUP_L_PAYOFF 2u
 #define KLS_REFACTOR_PLAN_GROUP_L_CACHE_MAX_BYTES \
   ((size_t)1024u * 1024u * 1024u)
 #define KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS 32768u
@@ -24409,7 +24411,7 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
         free(row_counts);
         return 0;
       }
-      valid[group] = 1u;
+      valid[group] = KLS_REFACTOR_PLAN_GROUP_L_VALID;
       dense_begin[group] = dense_total;
       panel_count++;
       valid_run_count += runs;
@@ -24513,6 +24515,7 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
             batch_candidate_payoff_run_rows += run_rows;
             batch_candidate_payoff_entries += group_entries;
             batch_candidate_payoff_advance_work += group_advance_work;
+            valid[group] |= KLS_REFACTOR_PLAN_GROUP_L_PAYOFF;
           }
         }
       }
@@ -24746,7 +24749,7 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
     return 0;
   }
   for (UF_long group = 0u; group < group_count; ++group) {
-    if (!valid[group]) {
+    if ((valid[group] & KLS_REFACTOR_PLAN_GROUP_L_VALID) == 0u) {
       continue;
     }
     const UF_long panel_start =
@@ -24830,7 +24833,7 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
     memcpy(col_cursor, col_ptr, (size_t)solver->n * sizeof(*col_cursor));
   }
   for (UF_long group = 0u; group < group_count; ++group) {
-    if (!valid[group]) {
+    if ((valid[group] & KLS_REFACTOR_PLAN_GROUP_L_VALID) == 0u) {
       continue;
     }
     const UF_long panel_start =
@@ -24914,7 +24917,7 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
   }
 
   for (UF_long group = 0u; group < group_count; ++group) {
-    if (!valid[group]) {
+    if ((valid[group] & KLS_REFACTOR_PLAN_GROUP_L_VALID) == 0u) {
       continue;
     }
     const UF_long panel_start =
@@ -25020,7 +25023,7 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
     run_group[run] = KLS_KLU_EMPTY;
   }
   for (UF_long group = 0u; group < group_count; ++group) {
-    if (!valid[group]) {
+    if ((valid[group] & KLS_REFACTOR_PLAN_GROUP_L_VALID) == 0u) {
       continue;
     }
     const UF_long width =
@@ -48178,7 +48181,8 @@ static int kls_egraph_refactor_try_claim_shape_group_columns(
       solver->refactor_supernode_consumer_plan_group_l_run_group[run];
     if (group == KLS_KLU_EMPTY ||
         group >= solver->refactor_supernode_consumer_plan_shape_batch_count ||
-        !solver->refactor_supernode_consumer_plan_group_l_valid[group]) {
+        (solver->refactor_supernode_consumer_plan_group_l_valid[group] &
+         KLS_REFACTOR_PLAN_GROUP_L_PAYOFF) == 0u) {
       continue;
     }
     const UF_long runs_begin =
@@ -50743,6 +50747,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       ? 1 : 0;
   shared->supernode_consumer_plan_shape_claims =
     (consumer_plan_shape_claims_requested &&
+     shared->supernode_consumer_plan_group_l_exec &&
      !use_pipeline_ready_queue &&
      pipeline_done != NULL && pipeline_generation != 0u &&
      pipeline_claimed != NULL && pipeline_claim_generation != 0u &&
