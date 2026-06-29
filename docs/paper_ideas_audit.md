@@ -9011,3 +9011,51 @@ five rows had zero `refactor_last_supernode_cblas_update_*` and zero
 not caused by executing small BLAS kernels. The current source already
 implements the proposed "BLAS only for large cases" policy for these paths;
 tightening the threshold again would be a no-op on the focused losses.
+
+A fresh current-source rerun rejected the earlier small-dominant-BTF
+row-refactor escape hatch. That escape let row-refactor run when its cheap
+lower-bound or retained group-work estimate was up to `1.35x` the exact EGraph
+dependency work, on the assumption that row-major native/partial-supernode
+updates would amortize the extra scalar work. The current top-gap artifacts show
+the opposite for the retained KLU-compatible row scaffold: `rajat03` and
+`coupled` both switched to `last_refactor_path=row_refactor` under that escape
+and lost badly even though `coupled` reported compact-supernode activity. A
+same-session top-twenty control measured `2.12037s` geomean
+(`build/kls_current_control_gap20_t4_r1_ref3_timeout120.jsonl`); forcing
+row-refactor off measured `2.05920s`
+(`build/kls_row_refactor_off_gap20_t4_r1_ref3_timeout120.jsonl`) while moving
+`rajat03` and `coupled` back to EGraph.
+
+KLS now applies the row-refactor lower-bound gate uniformly: if the cheap
+lower-bound work exceeds the exact EGraph dependency work, row metadata setup is
+rejected even for small dominant-BTF matrices; if the full retained row-pattern
+work is built, it must be no larger than the EGraph dependency work before
+automatic row-refactor execution is allowed. This follows the paper-level
+principle more directly: the current row-major scaffold should only replace the
+exact EGraph refactor when it demonstrably reduces work or creates broad enough
+coarse kernels, not merely because the shape is small.
+
+Validation for the strict row lower-bound gate:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- Top-ten CKTSO-gap focus:
+  `build/kls_row_lb_strict_gap10_t4_r1_ref3_timeout120.jsonl`, geomean
+  `2.31589s`, versus the same top-ten slice from the fresh top-twenty control
+  at `2.36727s`.
+- Top-twenty CKTSO-gap focus:
+  `build/kls_row_lb_strict_gap20_t4_r1_ref3_timeout120.jsonl`, geomean
+  `1.92561s`, `0.9081x` of the fresh KLS control geomean. It had 11 wins, 3
+  ties, and 6 losses over 2% versus
+  `build/kls_current_control_gap20_t4_r1_ref3_timeout120.jsonl`.
+- The intended rows now reject at the lower-bound gate and stay on EGraph:
+  `rajat03` reports `row_refactor_auto_lower_bound_work=2110490` versus
+  `refactor_dependency_work=2018944`, `row_refactor_auto_lower_bound_rejected=1`,
+  and `last_refactor_path=egraph`; `coupled` reports
+  `12186383` versus `11933363`, lower-bound rejected, and EGraph.
+
+Against `build/cktso_paper_medium93_t4_timeout120.jsonl`, the strict top-twenty
+run is still `2.1896x` slower than CKTSO on the common rows. This change removes
+a self-inflicted selector loss, but it does not close the main CKTSO gap: the
+remaining losses are still the EGraph scalar update kernels and the missing
+production row/supernode numeric executor.

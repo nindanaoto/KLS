@@ -28002,8 +28002,7 @@ static int kls_auto_row_refactor_cost_allows(const kls_solver *solver) {
   if (row_work <= solver->refactor_dependency_work) {
     return 1;
   }
-  return kls_auto_row_refactor_small_dominant_btf_allows(solver) &&
-         row_work <= 1.35 * solver->refactor_dependency_work;
+  return 0;
 }
 
 static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
@@ -28268,8 +28267,7 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
     if (kls_estimate_row_refactor_lower_bound_work(solver,
                                                    &lower_bound_work)) {
       solver->row_refactor_auto_lower_bound_work = lower_bound_work;
-      if (lower_bound_work > solver->refactor_dependency_work &&
-          !kls_auto_row_refactor_small_dominant_btf_allows(solver)) {
+      if (lower_bound_work > solver->refactor_dependency_work) {
         solver->row_refactor_auto_enabled = 0;
         solver->row_refactor_auto_native_row_panel = 0;
         solver->row_refactor_values_ready = 0;
