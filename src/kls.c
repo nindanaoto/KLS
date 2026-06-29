@@ -2783,7 +2783,7 @@ static int kls_refactor_u_supernode_find_right_offset(
   return 0;
 }
 
-static void kls_egraph_record_u_supernode_value(
+static KLS_ALWAYS_INLINE void kls_egraph_record_u_supernode_value(
   kls_egraph_refactor_shared *shared,
   UF_long dep_global,
   UF_long current_global,
@@ -41725,8 +41725,10 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
     const UF_long panel_local = panel_offset + local;
     const double ujk = workspace[local];
     ux[up + local] = ujk;
-    kls_egraph_record_u_supernode_value(
-      shared, start + panel_local, current_global, ujk);
+    if (shared->u_supernode_values) {
+      kls_egraph_record_u_supernode_value(
+        shared, start + panel_local, current_global, ujk);
+    }
     const double *dense_row = dense_panel + panel_local * width;
     for (UF_long target = panel_local + 1u; target < width; ++target) {
       const double update = ujk * dense_row[target];
@@ -42381,7 +42383,9 @@ static int kls_egraph_refactor_single_unscaled_column(
     const double ujk = x[j];
     x[j] = 0.0;
     ux[up] = ujk;
-    kls_egraph_record_u_supernode_value(shared, j, k, ujk);
+    if (shared->u_supernode_values) {
+      kls_egraph_record_u_supernode_value(shared, j, k, ujk);
+    }
 
     if (ujk != 0.0) {
       UF_long *li = l_indices[j];
@@ -42401,7 +42405,9 @@ static int kls_egraph_refactor_single_unscaled_column(
     }
   }
   udiag[k] = ukk;
-  kls_egraph_record_u_supernode_value(shared, k, k, ukk);
+  if (shared->u_supernode_values) {
+    kls_egraph_record_u_supernode_value(shared, k, k, ukk);
+  }
 
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
@@ -42505,7 +42511,9 @@ static int kls_egraph_refactor_single_scaled_column(
     const double ujk = x[j];
     x[j] = 0.0;
     ux[up] = ujk;
-    kls_egraph_record_u_supernode_value(shared, j, k, ujk);
+    if (shared->u_supernode_values) {
+      kls_egraph_record_u_supernode_value(shared, j, k, ujk);
+    }
 
     if (ujk != 0.0) {
       UF_long *li = l_indices[j];
@@ -42525,7 +42533,9 @@ static int kls_egraph_refactor_single_scaled_column(
     }
   }
   udiag[k] = ukk;
-  kls_egraph_record_u_supernode_value(shared, k, k, ukk);
+  if (shared->u_supernode_values) {
+    kls_egraph_record_u_supernode_value(shared, k, k, ukk);
+  }
 
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
@@ -42661,7 +42671,9 @@ static int kls_egraph_refactor_btf_unscaled_column(
       const double ujk = x[j];
       x[j] = 0.0;
       ux[up] = ujk;
-      kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
+      if (shared->u_supernode_values) {
+        kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
+      }
 
       if (ujk != 0.0) {
         UF_long *li = l_indices[k1 + j];
@@ -42701,7 +42713,9 @@ static int kls_egraph_refactor_btf_unscaled_column(
       const double ujk = x[j];
       x[j] = 0.0;
       ux[up] = ujk;
-      kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
+      if (shared->u_supernode_values) {
+        kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
+      }
 
       if (ujk != 0.0) {
         UF_long *li = l_indices[k1 + j];
@@ -42723,7 +42737,9 @@ static int kls_egraph_refactor_btf_unscaled_column(
     }
   }
   udiag[k] = ukk;
-  kls_egraph_record_u_supernode_value(shared, k, k, ukk);
+  if (shared->u_supernode_values) {
+    kls_egraph_record_u_supernode_value(shared, k, k, ukk);
+  }
 
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
@@ -42942,7 +42958,9 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     const double ujk = x[j];
     x[j] = 0.0;
     ux[up] = ujk;
-    kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
+    if (shared->u_supernode_values) {
+      kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
+    }
 
     if (ujk != 0.0) {
       UF_long *li = l_indices[k1 + j];
@@ -42963,7 +42981,9 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     }
   }
   udiag[k] = ukk;
-  kls_egraph_record_u_supernode_value(shared, k, k, ukk);
+  if (shared->u_supernode_values) {
+    kls_egraph_record_u_supernode_value(shared, k, k, ukk);
+  }
 
   UF_long *li = l_indices[k];
   double *lx = l_values[k];

@@ -8696,3 +8696,63 @@ Against CKTSO, the pass-3 top-ten guard remains `4.964x` slower, and the
 single-pass first-20 focus remains `4.027x` slower. This confirms the guard is
 worth retaining as repeated-refactor policy cleanup, but it still does not
 replace the missing CKTSO/SubtreeLU-style row/segment numeric executor.
+
+A June 29 current-source rerun after the fast-factor guard gives the next
+baseline for that executor work. The fresh top-ten default artifact
+(`build/kls_current_baseline_gap10_t4_r1_ref3_timeout120.jsonl`) measured
+`3.5428s` geomean with no failures, improving over the saved guard artifact
+but still `3.779x` slower than `build/cktso_paper_medium93_t4_timeout120.jsonl`
+on the same ten rows. Nine of the ten rows were still dominated by repeated
+refactor time. The slow EGraph rows again reported
+`row_refactor_auto_model_recommended=1`,
+`row_refactor_auto_model_attempted=1`, and
+`row_refactor_auto_lower_bound_rejected=1`, with lower-bound work close to the
+exact EGraph work. Earlier forced-row artifacts and the current focused probes
+therefore still apply: bypassing the gate is not the missing fix because the
+current row-major executor does more scalar work than the EGraph path.
+
+Current-source opt-in checks also reject promoting the existing supernode
+prototypes. With `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached`, the top-five
+artifact `build/kls_current_cached_egraph_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `2.3725s` geomean, while the same-source default top-five control
+`build/kls_current_baseline_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.5925s`. The consumer-plan executor
+(`build/kls_current_consumer_plan_gap5_t4_r1_ref3_timeout120.jsonl`) measured
+`2.4539s`. On the top-ten set, full EGraph supernode updates
+(`build/kls_current_full_egraph_supernode_gap10_t4_r1_ref3_timeout120.jsonl`)
+measured `4.1474s`, and the U-supernode ragged-L path
+(`build/kls_current_u_ragged_gap10_t4_r1_ref3_timeout120.jsonl`) measured
+`3.8816s`, both behind the default. These results keep the existing
+paper-aligned supernode paths opt-in: they validate retained producer/consumer
+metadata, but they do not yet amortize enough scalar work to be production
+defaults.
+
+A thread-count sweep reinforces that the retained EGraph path is parallel-work
+limited but also has a high-thread synchronization boundary. On the same
+top-ten slice, one, four, eight, sixteen, and thirty-two KLS threads measured
+`6.0093s`, `3.5428s`, `2.9934s`, `2.3307s`, and `18.0589s` geomean in the
+`build/kls_current_baseline_gap10_t{1,4,8,16,32}_r1_ref3_timeout120.jsonl`
+artifacts. Sixteen threads still loses to CKTSO's four-thread artifact by
+`3.193x`, and the thirty-two-thread collapse is hardware/synchronization
+sensitive, so KLS did not add a CPU-dependent hard cap. The useful conclusion
+is narrower: the current scalar EGraph executor can use more parallelism, but
+it still needs coarser row/supernode numeric work per requested thread to close
+the CKTSO gap fairly.
+
+The only retained source cleanup from this pass removes inactive work from the
+default EGraph hot loops. U-supernode numeric-value recording is an opt-in
+paper prototype behind `KLS_ENABLE_REFACTOR_U_SUPERNODE_VALUES=1`, yet the
+default scalar EGraph dependency loops still called the recorder for every
+dependency and pivot, where it immediately returned because the value cache was
+disabled. KLS now makes that recorder explicitly inline and guards those call
+sites on `shared->u_supernode_values`; the opt-in value-cache smoke still
+passes with `KLS_ENABLE_REFACTOR_U_SUPERNODE_VALUES=1`. The guarded default
+artifact
+`build/kls_no_u_value_record_default_gap10_t4_r1_ref3_pass3_timeout120.jsonl`
+measured `3.4767s` pass-3 geomean with zero U-supernode value writes and no
+failures, versus `4.6536s` for the previous saved pass-3 guard artifact. The
+single-pass A/B was mixed (`3.6672s` after the guard versus `3.5428s` for the
+fresh pre-change control), so the cleanup is not a standalone speed claim. It
+is still `3.708x` slower than CKTSO on the same top-ten rows. This is retained
+as low-risk cleanup on the active EGraph path, not as a claim that hot-loop
+cleanup replaces the missing producer-centered row/supernode executor.
