@@ -10329,3 +10329,23 @@ kept as low-risk hot-path cleanup only. The remaining slow rows still run the
 scalar EGraph executor, so the paper-sized gap remains the missing
 row/segment-oriented grouped numeric engine and checked pivoting-tail
 scheduler, not BLAS granularity or disabled-hook branch overhead.
+
+A follow-up payoff-gating probe tested whether the existing single-current
+group-L executor could be salvaged by consuming only groups whose retained
+update entries exceed the modeled scalar prefix advance. It could not. The
+first version executed only payoff-positive groups but still published exact-L
+values for every valid retained group; the top-ten CKTSO-gap run regressed to
+`4.2323s` geomean in
+`build/kls_group_l_payoff_exec_gap10_t4_r1_ref3_timeout120.jsonl`. A second
+version added an explicit standalone-executable flag and skipped producer
+publish work for groups that were neither standalone-executable nor
+payoff-positive under batch execution; it improved the failed probe to
+`3.9022s` geomean in
+`build/kls_group_l_payoff_publishskip_gap10_t4_r1_ref3_timeout120.jsonl`, but
+that was still slower than the prior all-batch opt-in run (`3.6345s`) and far
+slower than the current default (`2.1172s`). The source experiment was
+reverted. The result is useful negative evidence: filtering a one-current-
+column replay path cannot close the gap, even when the retained panel work is
+payoff-positive. The needed paper-scale executor must own multiple compatible
+current workspaces, advance them as a batch to the retained producer offset,
+and apply the shared producer panel once across that group.
