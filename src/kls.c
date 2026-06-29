@@ -85,6 +85,8 @@
 #define KLS_METIS_NDP_MAX_OVERPARTITION_LEAVES 1024u
 #define KLS_FIRST_FACTOR_DOMINANT_BTF_PIPELINE_MIN_BLOCK 30000u
 #define KLS_FIRST_FACTOR_DOMINANT_BTF_PIPELINE_MIN_COVERAGE 0.75
+#define KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK 100000000.0
+#define KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_SHARE 0.95
 
 enum {
   KLS_FAST_FACTOR_FAIL_NONE = 0,
@@ -96,7 +98,8 @@ enum {
   KLS_FAST_FACTOR_FAIL_NO_REJECT = 6,
   KLS_FAST_FACTOR_FAIL_INVALID_STATUS = 7,
   KLS_FAST_FACTOR_FAIL_SINGULAR_STATUS = 8,
-  KLS_FAST_FACTOR_FAIL_DOMINANT_BTF_GUARD = 9
+  KLS_FAST_FACTOR_FAIL_DOMINANT_BTF_GUARD = 9,
+  KLS_FAST_FACTOR_FAIL_PIPELINE_REFACTOR_GUARD = 10
 };
 
 typedef struct kls_refactor_pool kls_refactor_pool;
@@ -27702,6 +27705,21 @@ static int kls_dominant_btf_fast_factor_repair_is_risky(
          solver->symbolic->nblocks <= 64u &&
          solver->symbolic->maxblock >= 100000u &&
          coverage >= 0.99;
+}
+
+static int kls_pipeline_refactor_fast_factor_repair_is_risky(
+  const kls_solver *solver) {
+  if (solver == NULL ||
+      solver->refactor_dependency_work <
+        KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK ||
+      solver->refactor_pipeline_work <= 0.0 ||
+      solver->refactor_level_ptr == NULL ||
+      solver->options.threads <= 1) {
+    return 0;
+  }
+  return solver->refactor_pipeline_work >=
+         KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_SHARE *
+           solver->refactor_dependency_work;
 }
 
 static int kls_row_solve_from_numeric_env_enabled(void) {
@@ -58461,30 +58479,38 @@ int kls_factor(kls_solver *solver, const double *values) {
                                                             : KLS_OK;
     }
   }
-  if (solver->options.fast_factor && solver->numeric != NULL &&
-      !kls_dominant_btf_fast_factor_repair_is_risky(solver)) {
-    const double start = kls_now_seconds();
-    const UF_long ok = kls_fast_factor_with_block_restarts(solver,
-                                                           numeric_values);
-    elapsed += kls_now_seconds() - start;
-    if (ok && solver->common.status >= 0 &&
-        solver->common.status != TRILINOS_KLU_SINGULAR) {
-      kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FAST_REFACTOR);
-      kls_maybe_reseed_auto_row_refactor_values(solver, &elapsed);
-      kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
-      solver->stats.factor_seconds = elapsed;
-      kls_update_numeric_diagnostics(solver, 1);
-      maybe_prepare_refactor_map(solver, &elapsed);
-      maybe_prepare_refactor_schedule(solver, &elapsed);
-      kls_maybe_prepare_model_row_refactor_from_numeric(solver, &elapsed);
-      solver->stats.factor_seconds = elapsed;
-      fill_numeric_stats(solver);
-      return KLS_OK;
+  if (solver->options.fast_factor && solver->numeric != NULL) {
+    const int dominant_btf_guard =
+      kls_dominant_btf_fast_factor_repair_is_risky(solver);
+    const int pipeline_refactor_guard =
+      !dominant_btf_guard &&
+      kls_pipeline_refactor_fast_factor_repair_is_risky(solver);
+    if (!dominant_btf_guard && !pipeline_refactor_guard) {
+      const double start = kls_now_seconds();
+      const UF_long ok = kls_fast_factor_with_block_restarts(solver,
+                                                             numeric_values);
+      elapsed += kls_now_seconds() - start;
+      if (ok && solver->common.status >= 0 &&
+          solver->common.status != TRILINOS_KLU_SINGULAR) {
+        kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FAST_REFACTOR);
+        kls_maybe_reseed_auto_row_refactor_values(solver, &elapsed);
+        kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
+        solver->stats.factor_seconds = elapsed;
+        kls_update_numeric_diagnostics(solver, 1);
+        maybe_prepare_refactor_map(solver, &elapsed);
+        maybe_prepare_refactor_schedule(solver, &elapsed);
+        kls_maybe_prepare_model_row_refactor_from_numeric(solver, &elapsed);
+        solver->stats.factor_seconds = elapsed;
+        fill_numeric_stats(solver);
+        return KLS_OK;
+      }
+    } else {
+      kls_record_fast_factor_failure(
+        solver,
+        dominant_btf_guard ? KLS_FAST_FACTOR_FAIL_DOMINANT_BTF_GUARD
+                           : KLS_FAST_FACTOR_FAIL_PIPELINE_REFACTOR_GUARD,
+        solver->common.status);
     }
-  } else if (solver->options.fast_factor && solver->numeric != NULL) {
-    kls_record_fast_factor_failure(
-      solver, KLS_FAST_FACTOR_FAIL_DOMINANT_BTF_GUARD,
-      solver->common.status);
   }
 
   free_numeric(solver);

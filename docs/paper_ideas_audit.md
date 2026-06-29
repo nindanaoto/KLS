@@ -8653,3 +8653,46 @@ This is a local improvement, not a CKTSO-gap closer. Against
 slower than CKTSO despite the row-path win. The missing paper-scale piece is
 therefore still the durable row/segment numeric storage and executor that
 creates reusable coarse work broadly, not BLAS dispatch size.
+
+A follow-up fast-factor policy check found a broader repeated-refactor issue.
+The benchmark's SPICE-cycle score ignores repeated `kls_factor` time but runs
+one `kls_factor` before the timed refactor loop, so the numeric state left by
+KLS fast-factor repair can still affect the 99-refactor projection. On the
+current top-ten focus, a same-source `--no-fast-factor` pass-3 control
+(`build/kls_no_fast_factor_current_gap10_t4_r1_ref3_pass3_timeout120.jsonl`)
+measured `4.7280s` geomean versus `6.0088s` for the previous default
+(`build/kls_small_dombtf_rowauto_gap10_t4_r1_ref3_pass3_timeout120.jsonl`).
+The improvement was not clean enough to turn fast factor off globally:
+`onetone2` regressed in that pass, and direct paired samples showed large run
+variance on rows whose final factor/refactor paths were otherwise identical.
+
+The retained change is therefore a structural guard, not a global default flip.
+When an existing EGraph refactor schedule has at least `1e8` dependency-work
+units and at least 95% of that work is in the pipeline region, KLS now skips
+the in-place fast-factor repair attempt and falls back to rebuilding the KLU
+numeric object. This leaves cold first factors unchanged, keeps the small
+dominant-BTF `rajat03` row-refactor path eligible for KLS fast factor, and
+keeps lower-work cases such as `onetone2` outside the new guard. The guard is
+recorded internally as `KLS_FAST_FACTOR_FAIL_PIPELINE_REFACTOR_GUARD` when
+stats are read immediately after `kls_factor`.
+
+Validation for the high-work pipeline guard:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- Single-pass top-ten guard:
+  `build/kls_fast_pipeline_guard_gap10_t4_r1_ref3_timeout120.jsonl`,
+  geomean `4.3822s`, nine wins over the previous single-pass default
+  (`6.3066s`), and one noisy `gemat12` loss.
+- Pass-3 top-ten guard:
+  `build/kls_fast_pipeline_guard_gap10_t4_r1_ref3_pass3_timeout120.jsonl`,
+  geomean `4.6536s`, eight wins over the previous pass-3 default
+  (`6.0088s`), with `onetone2` and `rajat25` as noisy losses.
+- First-20 focus screen:
+  `build/kls_fast_pipeline_guard_gap20_t4_r1_ref3_timeout120.jsonl`,
+  geomean `3.5419s`; no rows failed under the 120-second cap.
+
+Against CKTSO, the pass-3 top-ten guard remains `4.964x` slower, and the
+single-pass first-20 focus remains `4.027x` slower. This confirms the guard is
+worth retaining as repeated-refactor policy cleanup, but it still does not
+replace the missing CKTSO/SubtreeLU-style row/segment numeric executor.
