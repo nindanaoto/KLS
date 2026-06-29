@@ -9324,3 +9324,29 @@ storage to cross-current reuse if the column-grouped path proves insufficient.
 The existing executor does not do this yet: it still applies or rejects one
 planned producer run at a time, so the broad column-batch surface is currently
 only measured, not exploited.
+
+An immediate column-batch gate prototype was tried and reverted. The probe made
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_COLUMN_EXEC=1` retain cached
+producer panels for current columns whose total retained-plan rows cleared the
+existing cached-supernode row floor, then allowed those planned small runs to
+enter the cached panel path. It preserved correctness
+(`cmake --build build -j4`, `ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_COLUMN_EXEC=1 ./build/kls_smoke`
+passed), but it did not execute any cached updates on the focus rows. The
+top-ten default measured `2.35504s` in
+`build/kls_columnbatch_default_gap10_t4_r1_ref3_timeout120.jsonl`, the existing
+plan executor measured `2.37290s` in
+`build/kls_columnbatch_planexec_gap10_t4_r1_ref3_timeout120.jsonl`, and the
+column gate measured `2.48611s` in
+`build/kls_columnbatch_columnexec_gap10_t4_r1_ref3_timeout120.jsonl`. Both
+plan-enabled runs still reported zero cached-probe attempts, zero applied
+cached rows, and plan execution disabled on nine of ten rows.
+
+The failed probe clarifies the missing implementation boundary. A column-batch
+policy alone cannot help while the cached producer-panel object is still built
+from the narrower `supernode_pipeline_end` candidate map. The next real
+implementation must first materialize producer panels from the retained plan's
+panel starts and column-batch extents, then run a grouped current-column
+executor over that storage. Merely relaxing the individual-run work gate around
+the old panel cache adds retained-plan construction overhead without creating
+the missing producer storage.
