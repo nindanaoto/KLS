@@ -9505,3 +9505,39 @@ consumer groups, apply all consumers of one producer panel through one grouped
 scan/update, and leave unmatched or short groups on the current scalar path.
 That directly attacks the missing coarse panel reuse while preserving the
 already-correct BLAS size guards.
+
+KLS now retains those exact-shape groups as internal plan metadata rather than
+only counting them. The retained consumer plan stores, for every exact
+`(panel_start, panel_offset, run_rows)` group with at least two consumers, a
+group pointer, the group run ids, and the producer shape fields. The grouping
+uses the same definition as the diagnostic counters above and is built only
+when the retained consumer plan is requested. This is still not the grouped
+numeric executor; it is the executor-ready index that removes the need to
+rediscover shape batches from the run stream.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1 ./build/kls_smoke` passed.
+- `KLS_ENABLE_REFACTOR_U_SUPERNODE_PLAN_PATTERN=1
+  KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1 ./build/kls_smoke` passed.
+- The top-five retained-plan run
+  `build/kls_shape_groups_metadata_gap5_t4_r1_ref3_timeout120.jsonl` measured
+  `7.58465s` geomean with no failures, effectively neutral against the
+  same-source auto-order control at `7.58543s`.
+- The broader top-ten retained-plan run
+  `build/kls_shape_groups_metadata_gap10_t4_r1_ref3_timeout120.jsonl` measured
+  `4.13033s` geomean with no failures. The previous shape-counter diagnostic
+  was `4.03514s`; this run adds group metadata allocation and some timing noise,
+  not a new numeric path.
+
+The retained groups cover the same top-ten opportunity as the counter-only
+probe: `45,742` exact-shape groups, `1,016,724` grouped runs, and
+`10,069,373` grouped run rows out of `11,689,643` planned rows. The stored group
+metadata increased retained-plan bytes by `9,597,608` across the top-ten
+manifest. This keeps the memory cost modest relative to the matrix sizes and
+makes the next implementation target concrete: a producer-panel grouped
+executor can iterate `shape_group_ptr[group]..shape_group_ptr[group+1]`, gather
+the current columns from the stored run ids, and apply one producer shape to
+many consumers with a scalar/ragged fallback for unmatched groups.
