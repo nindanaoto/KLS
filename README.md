@@ -1749,6 +1749,22 @@ dependencies and 4.11B published-U entries. The allocator and row-entry growth
 are therefore not the main slow-case cost; the next fix should replace replayed
 scalar published-U streaming with the paper-style retained dense/supernodal
 numeric update representation.
+A retained row-up panel follow-up now keeps the private dense/common-tail panel
+cache alive after speculative row-supernode metadata is disabled, invalidates
+stale panels across dynamic column pivots, publishes completed producer panels
+as rows commit, and lets later dependency drains use those panels before the
+scalar row-entry fallback. `KLS_TRACE_ROW_PIPELINE=1` now also reports
+`panel_updates`, `panel_update_rows`, `panel_appends`, and
+`panel_append_entries`. This is useful but not enough for `pre2`: a traced
+forced-METIS run still reached the pivot tail at row 274,430 with about
+14.5M scalar dependencies and 15.5B published-U entries scanned, despite
+263,803 panel-backed update groups over 1.94M rows and 182 appended panels. On
+`Freescale/transient`, the same path reduced the repeated-pass scalar scan to
+about 3.9M published-U entries while applying about 12k panel-backed update
+groups. The remaining large-case gap is therefore not small BLAS dispatch and
+not merely missing exact/common-tail panel retention; the slow rows need a
+broader row/supernode numeric representation that avoids streaming long
+published-U rows through the scalar fallback.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
