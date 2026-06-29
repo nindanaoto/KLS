@@ -7600,6 +7600,12 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
 #ifdef KLS_HAVE_METIS
   if (solver->options.ordering == KLS_ORDERING_AUTO &&
       solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+      is_large_sparse_diagonal_low_degree_pattern(solver->n, solver->col_ptr,
+                                                  solver->row_idx)) {
+    return 1.0e-5;
+  }
+  if (solver->options.ordering == KLS_ORDERING_AUTO &&
+      solver->stats.selected_ordering == KLS_ORDERING_METIS &&
       solver->symbolic->do_btf && solver->symbolic->nblocks <= 4u &&
       (double)solver->symbolic->maxblock >= 0.95 * (double)solver->n &&
       ((solver->common.scale == 1 &&
@@ -11752,6 +11758,12 @@ static int should_try_spral_hungarian_numeric_trial(
   if (kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
     return 0;
   }
+#ifdef KLS_HAVE_METIS
+  if (is_large_sparse_diagonal_low_degree_pattern(solver->n, solver->col_ptr,
+                                                  solver->row_idx)) {
+    return 0;
+  }
+#endif
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
   const double offdiag_ratio =
     (double)solver->common.noffdiag / (double)solver->n;
@@ -12341,6 +12353,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                            solver->row_idx)) {
     return;
   }
+  if (is_large_sparse_diagonal_low_degree_pattern(solver->n, solver->col_ptr,
+                                                  solver->row_idx)) {
+    return;
+  }
 #endif
 
   const int small_candidate = solver->n <= 20000u;
@@ -12747,6 +12763,12 @@ static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
       solver->common.noffdiag < 16) {
     return 0;
   }
+#ifdef KLS_HAVE_METIS
+  if (is_large_sparse_diagonal_low_degree_pattern(solver->n, solver->col_ptr,
+                                                  solver->row_idx)) {
+    return 0;
+  }
+#endif
 
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
   return fill >= 1000000;

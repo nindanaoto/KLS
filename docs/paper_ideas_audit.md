@@ -8370,3 +8370,37 @@ set. This keeps the main conclusion unchanged: the BLAS-size guard hypothesis
 is not active on these rows (all focused rows reported zero CBLAS calls), and
 the remaining large gap is repeated-refactor numeric work rather than small
 external BLAS calls.
+
+The remaining medium timeout row, `mac_econ_fwd500`, was then traced on the
+current source. A temporary stage trace showed that default auto reached
+`maybe_select_pre_static_row_match` after METIS/BTF analysis and did not leave
+that large SPRAL/static pre-factor candidate before a 100-second cap. Disabling
+static pivoting confirmed that the base METIS/BTF path still completed its
+first factor, but then spent about 43 seconds in the auto pivot-tolerance
+trial before entering the repeated factor. The retained fix is therefore a
+structural policy correction for the existing
+`is_large_sparse_diagonal_low_degree_pattern` class: skip the large pre-static
+match, skip the post-factor SPRAL numeric trial, skip the redundant auto
+pivot-tolerance trial, and choose `1e-5` as the initial pivot tolerance for
+that class. Explicit probes rejected a fast-factor exception for the same
+dominant-BTF shape because it timed out under a 140-second cap, and rejected
+lower tolerance choices as an accuracy tradeoff (`1e-6` was faster but had a
+larger relative residual; `3e-6` was worse still).
+
+The focused standard medium-row rerun now completes:
+`build/kls_sparse_diag_trials_default_mac_r1_ref3_timeout120.jsonl` reports
+`mac_econ_fwd500` with METIS/BTF, scale `1`, selected pivot tolerance `1e-5`,
+no selected static/SPRAL match, analysis `11.8659s`, initial factor `33.4531s`,
+repeat factor `28.5324s`, refactor `8.8153s`, and SPICE-cycle estimate
+`930.249s`; the wall-clock wrapper completed in `101.37s` under the 120-second
+cap. The residual was valid but not CKTSO-class (`relative_residual_l2`
+`2.07e-7`), so this is not a license to lower pivot tolerance further without
+more accuracy evidence. A projection replacing this row in the previous
+medium projection,
+`build/kls_sparse_diag_trials_medium_projection_t4_r1_ref3_timeout120.jsonl`,
+has zero scored missing KLS rows versus the saved CKTSO medium artifact, but
+still measures KLS at `0.58294s` geomean versus CKTSO at `0.30764s`
+(`1.895x` candidate/reference). The next paper-level gap is therefore no
+longer timeout coverage on the medium set; it is the broad repeated-factor and
+refactor numeric gap on rows such as `ACTIVSg2000`, `LeGresley_87936`,
+`trans4`, `rajat24`, `HTC_336_4438`, and the ASIC family.
