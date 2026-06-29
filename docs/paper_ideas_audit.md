@@ -9584,3 +9584,40 @@ and it is absent from these measurements. The next plausible gap closer is the
 grouped producer-panel executor over the retained exact-shape groups, so one
 producer scan feeds many consumers without one scalar L-entry probe per planned
 dependency.
+
+The cached retained-plan executor now shares the same sorted current-column run
+cursor used by the ragged-L retained-pattern path. The worker cursor resets
+when a current column changes, when the stored cursor leaves the current
+column's run slice, or when dependency order moves backward, and it can return
+the matched run id for a future grouped executor. This removes the old linear
+scan through one current column's retained runs for every planned cached-panel
+probe, but it does not change the cached-panel numeric shape.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1 ./build/kls_smoke`
+  passed.
+- `KLS_ENABLE_REFACTOR_U_SUPERNODE_PLAN_PATTERN=1
+  KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1 ./build/kls_smoke` passed.
+- The top-five plan-exec focus improved only slightly, from `8.13022s` in
+  `build/kls_plan_exec_precursor_gap5_t4_r1_ref3_timeout120.jsonl` to
+  `8.10120s` in
+  `build/kls_plan_exec_cursor_gap5_t4_r1_ref3_timeout120.jsonl`. The same-code
+  default run
+  `build/kls_default_after_plan_cursor_gap5_t4_r1_ref3_timeout120.jsonl`
+  measured `7.67658s`, so the retained cached-panel executor remains slower
+  than default.
+- One-refactor samples show the narrow-coverage cause directly: `ASIC_320ks`
+  made `3,784` retained-plan attempts, hit `317` plan runs, applied `299`
+  cached-panel runs over `48,841` rows, and then disabled the executor;
+  `onetone2` made `7,280` attempts, hit `255`, applied `235` over `26,108`
+  rows, and also disabled the executor. Residuals remained clean.
+
+This confirms that lookup overhead is not the large missing paper mechanism.
+The executor still materializes only the strict cached-panel/common-trailing
+shape, so most retained rows never become executable numeric work. The next
+gap-closing implementation remains the broader materialized producer-panel or
+current-column grouped accumulator that can consume retained plan runs whose
+trailing patterns are ragged rather than common.

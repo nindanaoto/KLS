@@ -1201,6 +1201,7 @@ typedef struct kls_egraph_refactor_worker {
   int consumer_plan_cursor_valid;
   UF_long consumer_plan_cursor_current;
   UF_long consumer_plan_cursor_pos;
+  UF_long consumer_plan_cursor_last_dep;
 } kls_egraph_refactor_worker;
 
 struct kls_egraph_refactor_pool {
@@ -43353,9 +43354,13 @@ static int kls_egraph_worker_find_consumer_plan_run(
   kls_egraph_refactor_worker *worker,
   UF_long current_global,
   UF_long dep_global,
+  UF_long *run_id_out,
   UF_long *run_rows_out,
   UF_long *panel_start_out,
   UF_long *panel_offset_out) {
+  if (run_id_out != NULL) {
+    *run_id_out = KLS_KLU_EMPTY;
+  }
   if (run_rows_out != NULL) {
     *run_rows_out = 0u;
   }
@@ -43390,15 +43395,19 @@ static int kls_egraph_worker_find_consumer_plan_run(
   if (begin > end ||
       end > solver->refactor_supernode_consumer_plan_run_count) {
     worker->consumer_plan_cursor_valid = 0;
+    worker->consumer_plan_cursor_last_dep = KLS_KLU_EMPTY;
     return 0;
   }
   if (!worker->consumer_plan_cursor_valid ||
       worker->consumer_plan_cursor_current != current_global ||
       worker->consumer_plan_cursor_pos < begin ||
-      worker->consumer_plan_cursor_pos > end) {
+      worker->consumer_plan_cursor_pos > end ||
+      (worker->consumer_plan_cursor_last_dep != KLS_KLU_EMPTY &&
+       dep_global < worker->consumer_plan_cursor_last_dep)) {
     worker->consumer_plan_cursor_valid = 1;
     worker->consumer_plan_cursor_current = current_global;
     worker->consumer_plan_cursor_pos = begin;
+    worker->consumer_plan_cursor_last_dep = KLS_KLU_EMPTY;
   }
 
   UF_long pos = worker->consumer_plan_cursor_pos;
@@ -43406,6 +43415,7 @@ static int kls_egraph_worker_find_consumer_plan_run(
     const UF_long run = solver->refactor_supernode_consumer_plan_col_runs[pos];
     if (run >= solver->refactor_supernode_consumer_plan_run_count) {
       worker->consumer_plan_cursor_valid = 0;
+      worker->consumer_plan_cursor_last_dep = KLS_KLU_EMPTY;
       return 0;
     }
     const UF_long dep = solver->refactor_supernode_consumer_plan_dep[run];
@@ -43414,8 +43424,12 @@ static int kls_egraph_worker_find_consumer_plan_run(
       continue;
     }
     worker->consumer_plan_cursor_pos = pos;
+    worker->consumer_plan_cursor_last_dep = dep_global;
     if (dep != dep_global) {
       return 0;
+    }
+    if (run_id_out != NULL) {
+      *run_id_out = run;
     }
     if (run_rows_out != NULL) {
       *run_rows_out = solver->refactor_supernode_consumer_plan_rows[run];
@@ -43432,6 +43446,7 @@ static int kls_egraph_worker_find_consumer_plan_run(
     return 1;
   }
   worker->consumer_plan_cursor_pos = end;
+  worker->consumer_plan_cursor_last_dep = dep_global;
   return 0;
 }
 
@@ -43484,7 +43499,7 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
     solver->refactor_u_supernode_plan_pattern_built ? 1 : 0;
   if (plan_pattern &&
       !kls_egraph_worker_find_consumer_plan_run(
-        worker, current_global, dep_global, &planned_rows,
+        worker, current_global, dep_global, NULL, &planned_rows,
         &planned_start, &planned_offset)) {
     return 0;
   }
@@ -43676,8 +43691,9 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
   int planned_run = 0;
   if (shared->supernode_consumer_plan_exec) {
     kls_egraph_record_consumer_plan_attempt(shared);
-    planned_run = kls_egraph_find_consumer_plan_run(
-      solver, current_global, dep_global, &planned_run_rows,
+    planned_run = kls_egraph_worker_find_consumer_plan_run(
+      worker, current_global, dep_global, NULL,
+      &planned_run_rows,
       &planned_panel_start, &planned_panel_offset);
     if (planned_run) {
       kls_egraph_record_consumer_plan_hit(shared);
@@ -47344,6 +47360,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     pool->workers[i].consumer_plan_cursor_valid = 0;
     pool->workers[i].consumer_plan_cursor_current = KLS_KLU_EMPTY;
     pool->workers[i].consumer_plan_cursor_pos = 0u;
+    pool->workers[i].consumer_plan_cursor_last_dep = KLS_KLU_EMPTY;
   }
 
   pool->active_workers = thread_count;
