@@ -9862,3 +9862,38 @@ this benchmark. The remaining paper gap is still the grouped numeric producer:
 use these retained positions to advance claimed current-column workspaces once,
 apply the shared retained producer panel across the batch, and skip the old
 per-column scalar replay for those claimed columns.
+
+The retained-position arrays are now consumed by the opt-in plan executor. When
+the builder verifies that the stored U positions are monotone within each
+current column, the retained-plan cursor keys directly on the current U-stream
+position and still checks that the dependency column matches before accepting a
+run. If a future matrix lacks complete or monotone retained positions, the
+executor falls back to the previous dependency-key lookup.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1 ./build/kls_smoke`
+  passed.
+- `KLS_ENABLE_REFACTOR_U_SUPERNODE_PLAN_PATTERN=1
+  KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1 ./build/kls_smoke` passed.
+- The top-ten retained-plan executor run
+  `build/kls_planexec_poscursor_gap10_t4_r1_ref3_timeout120.jsonl` completed
+  with no failed matrices and measured `2.29693s` geomean.
+- The same-source default control
+  `build/kls_poscursor_default_gap10_t4_r1_ref3_timeout120.jsonl` completed
+  with no failed matrices and measured `2.12339s` geomean.
+- Same-source cached-panel and ragged-L toggles remained slower:
+  `build/kls_poscursor_cached_gap10_t4_r1_ref3_timeout120.jsonl` measured
+  `2.45566s`, and
+  `build/kls_poscursor_ragged_gap10_t4_r1_ref3_timeout120.jsonl` measured
+  `3.07614s`.
+
+This improves the opt-in plan-executor mechanics but does not close the CKTSO
+gap. The plan executor applied only `179,892` rows out of `6,285,128` planned
+rows and disabled itself on 9 of the 10 matrices. The same-source default KLS
+run is still `2.2648x` slower than the saved CKTSO top-ten subset
+(`2.12339s` versus `0.937565s` geomean), and all runs above reported zero CBLAS
+updates. The next required paper-level step is still broader grouped numeric
+execution over retained producer panels, not more retained-run lookup tuning.

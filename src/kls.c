@@ -577,6 +577,7 @@ struct kls_solver {
   UF_long *refactor_supernode_consumer_plan_shape_group_panel_offset;
   UF_long *refactor_supernode_consumer_plan_shape_group_rows;
   int refactor_supernode_consumer_plan_col_sorted;
+  int refactor_supernode_consumer_plan_dep_pos_sorted;
   int refactor_supernode_consumer_plan_built;
   UF_long refactor_supernode_consumer_plan_panel_count;
   UF_long refactor_supernode_consumer_plan_reused_panel_count;
@@ -2064,6 +2065,7 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_supernode_consumer_plan_shape_group_panel_offset = NULL;
   solver->refactor_supernode_consumer_plan_shape_group_rows = NULL;
   solver->refactor_supernode_consumer_plan_col_sorted = 0;
+  solver->refactor_supernode_consumer_plan_dep_pos_sorted = 0;
   solver->refactor_supernode_consumer_plan_built = 0;
   solver->refactor_supernode_consumer_plan_panel_count = 0;
   solver->refactor_supernode_consumer_plan_reused_panel_count = 0;
@@ -3436,6 +3438,7 @@ static int kls_build_refactor_supernode_consumer_plan(
   UF_long plan_column_shape_batch_small_run_rows = 0u;
   UF_long plan_column_shape_batch_max_runs = 0u;
   int plan_column_sorted = 1;
+  int plan_column_position_sorted = 1;
   UF_long plan_shape_batch_count = 0u;
   UF_long plan_shape_batch_run_count = 0u;
   UF_long plan_shape_batch_run_rows = 0u;
@@ -3976,6 +3979,24 @@ static int kls_build_refactor_supernode_consumer_plan(
         shape_group_panel_offset, shape_group_rows);
       return 0;
     }
+    for (UF_long col = 0u; col < solver->n; ++col) {
+      const UF_long begin = column_ptr[col];
+      const UF_long end = column_ptr[col + 1u];
+      UF_long prev_pos = 0u;
+      for (UF_long pos = begin; pos < end; ++pos) {
+        const UF_long run = column_runs[pos];
+        const UF_long dep_pos = plan_dep_pos[run];
+        if (dep_pos == KLS_KLU_EMPTY ||
+            (pos > begin && dep_pos < prev_pos)) {
+          plan_column_position_sorted = 0;
+          break;
+        }
+        prev_pos = dep_pos;
+      }
+      if (!plan_column_position_sorted) {
+        break;
+      }
+    }
     plan_bytes += 2u * run_count * sizeof(*plan_dep_pos);
     plan_bytes += plan_run_bytes;
   }
@@ -4010,6 +4031,8 @@ static int kls_build_refactor_supernode_consumer_plan(
     shape_group_rows;
   solver->refactor_supernode_consumer_plan_col_sorted =
     plan_column_sorted;
+  solver->refactor_supernode_consumer_plan_dep_pos_sorted =
+    plan_column_position_sorted;
   solver->refactor_supernode_consumer_plan_built = 1;
   solver->refactor_supernode_consumer_plan_panel_count = plan_panel_count;
   solver->refactor_supernode_consumer_plan_reused_panel_count =
@@ -44412,9 +44435,14 @@ static int kls_egraph_find_consumer_plan_run(
   const kls_solver *solver,
   UF_long current_global,
   UF_long dep_global,
+  UF_long dep_pos,
+  UF_long *run_id_out,
   UF_long *run_rows_out,
   UF_long *panel_start_out,
   UF_long *panel_offset_out) {
+  if (run_id_out != NULL) {
+    *run_id_out = KLS_KLU_EMPTY;
+  }
   if (run_rows_out != NULL) {
     *run_rows_out = 0u;
   }
@@ -44433,6 +44461,9 @@ static int kls_egraph_find_consumer_plan_run(
       solver->refactor_supernode_consumer_plan_panel_offset == NULL) {
     return 0;
   }
+  const int use_position =
+    dep_pos != KLS_KLU_EMPTY &&
+    solver->refactor_supernode_consumer_plan_dep_pos != NULL;
   const UF_long begin =
     solver->refactor_supernode_consumer_plan_col_ptr[current_global];
   const UF_long end =
@@ -44446,7 +44477,14 @@ static int kls_egraph_find_consumer_plan_run(
     if (run >= solver->refactor_supernode_consumer_plan_run_count) {
       return 0;
     }
+    if (use_position &&
+        solver->refactor_supernode_consumer_plan_dep_pos[run] != dep_pos) {
+      continue;
+    }
     if (solver->refactor_supernode_consumer_plan_dep[run] == dep_global) {
+      if (run_id_out != NULL) {
+        *run_id_out = run;
+      }
       if (run_rows_out != NULL) {
         *run_rows_out = solver->refactor_supernode_consumer_plan_rows[run];
       }
@@ -44468,6 +44506,7 @@ static int kls_egraph_worker_find_consumer_plan_run(
   kls_egraph_refactor_worker *worker,
   UF_long current_global,
   UF_long dep_global,
+  UF_long dep_pos,
   UF_long *run_id_out,
   UF_long *run_rows_out,
   UF_long *panel_start_out,
@@ -44498,9 +44537,14 @@ static int kls_egraph_worker_find_consumer_plan_run(
       solver->refactor_supernode_consumer_plan_panel_start == NULL ||
       solver->refactor_supernode_consumer_plan_panel_offset == NULL) {
     return kls_egraph_find_consumer_plan_run(
-      solver, current_global, dep_global, run_rows_out,
+      solver, current_global, dep_global, dep_pos, run_id_out, run_rows_out,
       panel_start_out, panel_offset_out);
   }
+  const int use_position =
+    dep_pos != KLS_KLU_EMPTY &&
+    solver->refactor_supernode_consumer_plan_dep_pos != NULL &&
+    solver->refactor_supernode_consumer_plan_dep_pos_sorted;
+  const UF_long target_key = use_position ? dep_pos : dep_global;
 
   const UF_long begin =
     solver->refactor_supernode_consumer_plan_col_ptr[current_global];
@@ -44517,7 +44561,7 @@ static int kls_egraph_worker_find_consumer_plan_run(
       worker->consumer_plan_cursor_pos < begin ||
       worker->consumer_plan_cursor_pos > end ||
       (worker->consumer_plan_cursor_last_dep != KLS_KLU_EMPTY &&
-       dep_global < worker->consumer_plan_cursor_last_dep)) {
+       target_key < worker->consumer_plan_cursor_last_dep)) {
     worker->consumer_plan_cursor_valid = 1;
     worker->consumer_plan_cursor_current = current_global;
     worker->consumer_plan_cursor_pos = begin;
@@ -44533,13 +44577,15 @@ static int kls_egraph_worker_find_consumer_plan_run(
       return 0;
     }
     const UF_long dep = solver->refactor_supernode_consumer_plan_dep[run];
-    if (dep < dep_global) {
+    const UF_long key =
+      use_position ? solver->refactor_supernode_consumer_plan_dep_pos[run] : dep;
+    if (key == KLS_KLU_EMPTY || key < target_key) {
       pos++;
       continue;
     }
     worker->consumer_plan_cursor_pos = pos;
-    worker->consumer_plan_cursor_last_dep = dep_global;
-    if (dep != dep_global) {
+    worker->consumer_plan_cursor_last_dep = target_key;
+    if (key != target_key || dep != dep_global) {
       return 0;
     }
     if (run_id_out != NULL) {
@@ -44560,7 +44606,7 @@ static int kls_egraph_worker_find_consumer_plan_run(
     return 1;
   }
   worker->consumer_plan_cursor_pos = end;
-  worker->consumer_plan_cursor_last_dep = dep_global;
+  worker->consumer_plan_cursor_last_dep = target_key;
   return 0;
 }
 
@@ -44613,7 +44659,7 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
     solver->refactor_u_supernode_plan_pattern_built ? 1 : 0;
   if (plan_pattern &&
       !kls_egraph_worker_find_consumer_plan_run(
-        worker, current_global, dep_global, NULL, &planned_rows,
+        worker, current_global, dep_global, up, NULL, &planned_rows,
         &planned_start, &planned_offset)) {
     return 0;
   }
@@ -44806,7 +44852,7 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
   if (shared->supernode_consumer_plan_exec) {
     kls_egraph_record_consumer_plan_attempt(shared);
     planned_run = kls_egraph_worker_find_consumer_plan_run(
-      worker, current_global, dep_global, NULL,
+      worker, current_global, dep_global, up, NULL,
       &planned_run_rows,
       &planned_panel_start, &planned_panel_offset);
     if (planned_run) {
