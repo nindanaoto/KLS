@@ -1711,6 +1711,16 @@ retained-code `pre2` METIS forced-first 120s probe still times out after the
 second dominant-BTF trace, and the current interrupt sample maps to the scalar
 published-U update loop inside `kls_row_first_partial_apply_one_dep`, with the
 other pipeline workers blocked on the pipeline condition/mutex.
+Two direct attempts to restore more paper-style producer runs after that point
+were rejected. Keeping suffix supernode metadata alive after a large pivot,
+while clearing stale prefix panels, increased medium-case supernode activity but
+made `pre2` miss the second dominant-BTF trace within the 120s cap and sampled
+inside row-entry storage growth. An on-demand compact-run probe that validated
+consecutive ready producers from published U rows also increased supernode row
+counts, but similarly made the target `pre2` probe miss the second trace. The
+remaining gap therefore needs a coarser numeric representation/executor rather
+than more opportunistic grouping over the current KLU-compatible row-entry
+storage.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
