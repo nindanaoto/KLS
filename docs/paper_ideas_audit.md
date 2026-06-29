@@ -8756,3 +8756,21 @@ fresh pre-change control), so the cleanup is not a standalone speed claim. It
 is still `3.708x` slower than CKTSO on the same top-ten rows. This is retained
 as low-risk cleanup on the active EGraph path, not as a claim that hot-loop
 cleanup replaces the missing producer-centered row/supernode executor.
+
+A fresh same-binary CBLAS gate check on June 29, 2026 reconfirms that "use
+BLAS only for large cases" is already the current policy and is not active on
+the CKTSO-gap focus rows. The normal `build` tree has
+`KLS_ENABLE_CBLAS_SUPERNODE=OFF`; the separate `build-cblas` tree was rebuilt
+with `KLS_ENABLE_CBLAS_SUPERNODE=ON` and run with `OPENBLAS_NUM_THREADS=1`.
+With the runtime gate off,
+`build-cblas/kls_cblas_gate_off_gap10_t4_r1_ref3_current_timeout120.jsonl`
+measured `3.4664s` geomean. With `KLS_ENABLE_CBLAS_SUPERNODE=1`,
+`build-cblas/kls_cblas_gate_on_gap10_t4_r1_ref3_current_timeout120.jsonl`
+measured `3.6931s` geomean. Both artifacts reported
+`build_has_cblas=true`, but every row had zero
+`refactor_last_supernode_cblas_update_*` and zero
+`refactor_supernode_cblas_update_*` counters. Eight rows still used the EGraph
+refactor path, one used the mapped path, and one used row refactor. Therefore
+an additional small-case BLAS guard would be a no-op for this slow set; the
+gap remains in creating and scheduling reusable coarse row/supernode numeric
+work rather than in external BLAS call granularity.
