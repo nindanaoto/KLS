@@ -9688,3 +9688,33 @@ panel to multiple current workspaces, and then publish/merge the resulting
 updates before those current columns complete. A current-column executor may
 still help for ragged output accumulation, but it cannot consume the retained
 exact producer-panel groups measured above.
+
+The row-refactor work model now treats dense row groups as a single
+supernode-panel update rather than counting their internal dependencies twice.
+For `KLS_ROW_REFACTOR_GROUP_DENSE`, `kls_row_refactor_compute_group_work`
+keeps input, U storage, and external dependency work, skips scalar dependency
+charges for prior rows inside the same dense group, and then adds the dense
+panel update cost once. This matches the SubtreeLU/CKTSO paper intent more
+closely: the dense supernode update replaces the internal row-by-row walk.
+
+Validation on the top-five CKTSO-gap focus:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- The default/env run
+  `build/kls_dense_group_work_defaultenv_gap5_t4_r1_ref3_timeout120.jsonl`
+  measured `1.38939s` geomean and kept row refactor off on all five matrices.
+  The auto model still recommended the ASIC and `rajat03` cases, but the
+  pre-pattern lower-bound gate rejected them.
+- The forced row run
+  `build/kls_dense_group_work_forcedrow_gap5_t4_r1_ref3_timeout120.jsonl`
+  measured `5.09228s` geomean. It remained much slower than the column path,
+  but its reported row work dropped as expected: `ASIC_320ks` from about
+  `1.188x` to `1.011x` of dependency work, `ASIC_320k` from about `1.083x` to
+  `1.009x`, and `ASIC_100ks` from about `1.085x` to `1.008x`.
+
+This is a useful correction but not a gap closer. The forced row path now looks
+nearly equal in modeled arithmetic on the ASIC cases while still running
+roughly `3.5x` to `6.8x` slower in refactor time. That points back to staging,
+workspace traffic, ready-queue overhead, and missing coarse producer/consumer
+execution, not to small BLAS calls or scalar overcounting in the model.

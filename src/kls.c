@@ -27232,6 +27232,9 @@ static double kls_row_refactor_compute_group_work(const kls_solver *solver,
   if (row_begin >= row_end || row_end > solver->n) {
     return 1.0;
   }
+  const int dense_group =
+    solver->row_refactor_group_dense != NULL &&
+    solver->row_refactor_group_dense[group];
 
   double work = 1.0;
   for (UF_long row = row_begin; row < row_end; ++row) {
@@ -27243,14 +27246,16 @@ static double kls_row_refactor_compute_group_work(const kls_solver *solver,
          p < solver->row_refactor_l_ptr[row + 1u]; ++p) {
       const UF_long dep = solver->row_refactor_l_cols[p];
       if (dep < solver->n) {
+        if (dense_group && dep >= row_begin && dep < row) {
+          continue;
+        }
         work += 1.0 + (double)(solver->row_refactor_u_ptr[dep + 1u] -
                                solver->row_refactor_u_ptr[dep]);
       }
     }
   }
 
-  if (solver->row_refactor_group_dense != NULL &&
-      solver->row_refactor_group_dense[group]) {
+  if (dense_group) {
     const double width = (double)(row_end - row_begin);
     const double trailing = solver->row_refactor_group_trailing_len != NULL
       ? (double)solver->row_refactor_group_trailing_len[group] : 0.0;
