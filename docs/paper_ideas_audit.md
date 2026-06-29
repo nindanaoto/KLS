@@ -9459,3 +9459,49 @@ paper gap now points more specifically to a real retained producer-panel
 numeric object with row-major or panel-major values, grouped dependency scans,
 and fewer scalar L-entry probes before output accumulation, rather than a
 post-hoc accumulator around the current per-entry replay.
+
+The next rerun inspected whether that retained producer-panel executor can be a
+simple exact-shape batch first, rather than a fully ragged batch from day one.
+KLS now reports
+`refactor_supernode_consumer_plan_shape_batch_*` counters from the retained
+consumer plan. For each producer panel it groups planned runs by exact
+`(panel_offset, run_rows)` and counts only groups with at least two consumers.
+These counters are diagnostic; the executor is still the existing scalar EGraph
+path.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1 ./build/kls_smoke` passed.
+- The current top-five auto-order rerun with the diagnostic produced
+  `build/kls_plan_shape_batch_gap5_t4_r1_ref3_timeout120.jsonl` with a
+  `7.74922s` geomean and no failures. The same-source auto-order control was
+  `7.58543s`; CKTSO on the same five was `2.93787s`.
+- The broader top-ten manifest produced
+  `build/kls_plan_shape_batch_gap10_t4_r1_ref3_timeout120.jsonl` with a
+  `4.03514s` geomean and no failures.
+
+The BLAS-small-case hypothesis remains rejected by the new artifacts. The
+top-ten run was built without CBLAS and reported zero external CBLAS updates
+and zero compact-supernode GEMV activity on every row. The top-five run likewise
+reported zero CBLAS and compact GEMV counters. Therefore an additional "BLAS
+only for large cases" guard would not change these measured paths.
+
+The exact-shape batching signal is strong. Across the top-ten manifest, the
+retained plan covered `11,689,643` run rows, the existing broad batch gate
+covered `11,619,009` rows, and exact `(panel_offset, run_rows)` groups covered
+`10,069,373` rows in `45,742` groups and `1,016,724` runs. Among matrices with
+nonzero retained-plan work, exact-shape coverage ranged from `58.4%`
+(`transient`) to `91.2%` (`ASIC_100ks`) of planned rows, with an `80.9%`
+geometric-mean coverage. The exact-shape groups still include many short runs:
+`2,370,852` exact-shape rows were below the current ragged-supernode row gate,
+so the production executor should batch large exact shapes first and keep a
+cheap scalar/ragged fallback for small shapes.
+
+This gives a clearer paper-aligned next implementation target than another
+threshold tweak: build a retained producer-panel numeric object for exact-shape
+consumer groups, apply all consumers of one producer panel through one grouped
+scan/update, and leave unmatched or short groups on the current scalar path.
+That directly attacks the missing coarse panel reuse while preserving the
+already-correct BLAS size guards.
