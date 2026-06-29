@@ -904,6 +904,17 @@ U-supernode L pattern, and runs the ragged-L executor only for selected runs.
 This is also intentionally experimental and off by default; it tests whether
 the Algorithm 5 payoff surface is enough without a true multi-current batch
 executor.
+When `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1` or the stricter
+exec flag is set, KLS now also retains the selected producer groups as a
+multi-current descriptor for that future executor. Benchmark JSON reports
+`refactor_supernode_algorithm5_payoff_group_current_total`,
+`refactor_supernode_algorithm5_payoff_group_multi_current_count`,
+`refactor_supernode_algorithm5_payoff_group_max_currents`,
+`refactor_supernode_algorithm5_payoff_group_workspace_rows`, and
+`refactor_supernode_algorithm5_payoff_group_max_workspace_rows`. These counters
+estimate the number of distinct current-column workspaces and compact prefix
+workspace rows a real Algorithm 5 batch would need; they do not enable the old
+per-current scalar replay by default.
 Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN=1` to also retain the exact
 row-major U-supernode structural object from the same schedule pass. Benchmark
 JSON reports `refactor_u_supernode_pattern_count`,

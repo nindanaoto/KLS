@@ -54,6 +54,20 @@ next executor should select low-advance current columns inside each retained
 Algorithm-5 panel, advance those workspaces together, apply the shared producer
 prefix, and leave high-advance currents on the scalar path.
 
+KLS now retains that missing executor shape explicitly when
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1` or
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1` is set. The retained
+payoff plan stores distinct current columns per selected producer group and a
+compact workspace-row estimate for the future multi-current batch executor.
+The focused top-five rerun
+`build/kls_alg5_workspace_plan_gap5_t4_r1_ref3_timeout120.jsonl` populated
+those counters without changing default execution: `ASIC_320ks` has `129`
+multi-current groups, `3,596` distinct current workspaces, max `196` currents
+in one group, and `157,067` compact workspace rows; `ASIC_320k` has `121`
+groups, `3,755` workspaces, max `233` currents, and `146,027` workspace rows.
+This confirms the paper-level target is a real multi-current workspace
+executor, not a BLAS size guard or another single-current ragged replay.
+
 KLS has **not** implemented every paper idea that is still worth trying. It has
 implemented the ideas that can be layered around the current KLU-derived
 Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, explicit SCOTCH
