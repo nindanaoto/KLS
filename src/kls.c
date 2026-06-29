@@ -683,6 +683,37 @@ struct kls_solver {
   double refactor_supernode_algorithm5_prefix_update_work;
   UF_long refactor_supernode_algorithm5_crossing_run_count;
   UF_long refactor_supernode_algorithm5_crossing_run_rows;
+  UF_long refactor_supernode_algorithm5_prefix_advance_run_count;
+  UF_long refactor_supernode_algorithm5_prefix_advance_run_rows;
+  UF_long refactor_supernode_algorithm5_prefix_advance_dep_count;
+  double refactor_supernode_algorithm5_prefix_advance_work;
+  UF_long refactor_supernode_algorithm5_prefix_payoff_run_count;
+  UF_long refactor_supernode_algorithm5_prefix_payoff_run_rows;
+  double refactor_supernode_algorithm5_prefix_payoff_update_work;
+  double refactor_supernode_algorithm5_prefix_payoff_advance_work;
+  UF_long refactor_supernode_algorithm5_prefix_panel_count;
+  UF_long refactor_supernode_algorithm5_prefix_panel_run_count;
+  UF_long refactor_supernode_algorithm5_prefix_panel_run_rows;
+  UF_long refactor_supernode_algorithm5_prefix_panel_advance_dep_count;
+  double refactor_supernode_algorithm5_prefix_panel_update_work;
+  double refactor_supernode_algorithm5_prefix_panel_advance_work;
+  UF_long refactor_supernode_algorithm5_prefix_panel_max_runs;
+  UF_long refactor_supernode_algorithm5_prefix_panel_payoff_count;
+  UF_long refactor_supernode_algorithm5_prefix_panel_payoff_run_count;
+  UF_long refactor_supernode_algorithm5_prefix_panel_payoff_run_rows;
+  double refactor_supernode_algorithm5_prefix_panel_payoff_update_work;
+  double refactor_supernode_algorithm5_prefix_panel_payoff_advance_work;
+  UF_long refactor_supernode_algorithm5_prefix_panel_payoff_subset_count;
+  UF_long
+    refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_count;
+  UF_long
+    refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_rows;
+  double
+    refactor_supernode_algorithm5_prefix_panel_payoff_subset_update_work;
+  double
+    refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work;
+  UF_long
+    refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs;
   UF_long refactor_supernode_consumer_plan_group_l_panel_count;
   UF_long refactor_supernode_consumer_plan_group_l_run_count;
   UF_long refactor_supernode_consumer_plan_group_l_rows;
@@ -2375,6 +2406,42 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_supernode_algorithm5_prefix_update_work = 0.0;
   solver->refactor_supernode_algorithm5_crossing_run_count = 0;
   solver->refactor_supernode_algorithm5_crossing_run_rows = 0;
+  solver->refactor_supernode_algorithm5_prefix_advance_run_count = 0;
+  solver->refactor_supernode_algorithm5_prefix_advance_run_rows = 0;
+  solver->refactor_supernode_algorithm5_prefix_advance_dep_count = 0;
+  solver->refactor_supernode_algorithm5_prefix_advance_work = 0.0;
+  solver->refactor_supernode_algorithm5_prefix_payoff_run_count = 0;
+  solver->refactor_supernode_algorithm5_prefix_payoff_run_rows = 0;
+  solver->refactor_supernode_algorithm5_prefix_payoff_update_work = 0.0;
+  solver->refactor_supernode_algorithm5_prefix_payoff_advance_work = 0.0;
+  solver->refactor_supernode_algorithm5_prefix_panel_count = 0;
+  solver->refactor_supernode_algorithm5_prefix_panel_run_count = 0;
+  solver->refactor_supernode_algorithm5_prefix_panel_run_rows = 0;
+  solver->refactor_supernode_algorithm5_prefix_panel_advance_dep_count = 0;
+  solver->refactor_supernode_algorithm5_prefix_panel_update_work = 0.0;
+  solver->refactor_supernode_algorithm5_prefix_panel_advance_work = 0.0;
+  solver->refactor_supernode_algorithm5_prefix_panel_max_runs = 0;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_count = 0;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_run_count = 0;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_run_rows = 0;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_update_work =
+    0.0;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_advance_work =
+    0.0;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_subset_count =
+    0;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_count =
+    0;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_rows =
+    0;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_update_work =
+      0.0;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work =
+      0.0;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs =
+    0;
   solver->refactor_supernode_consumer_plan_cached_panel_count = 0;
   solver->refactor_supernode_consumer_plan_cached_panel_rows = 0;
   solver->refactor_supernode_consumer_plan_strict_cached_panel_count = 0;
@@ -3888,12 +3955,40 @@ typedef struct {
   double prefix_update_work;
   UF_long crossing_run_count;
   UF_long crossing_run_rows;
+  UF_long prefix_advance_run_count;
+  UF_long prefix_advance_run_rows;
+  UF_long prefix_advance_dep_count;
+  double prefix_advance_work;
+  UF_long prefix_payoff_run_count;
+  UF_long prefix_payoff_run_rows;
+  double prefix_payoff_update_work;
+  double prefix_payoff_advance_work;
+  UF_long prefix_panel_count;
+  UF_long prefix_panel_run_count;
+  UF_long prefix_panel_run_rows;
+  UF_long prefix_panel_advance_dep_count;
+  double prefix_panel_update_work;
+  double prefix_panel_advance_work;
+  UF_long prefix_panel_max_runs;
+  UF_long prefix_panel_payoff_count;
+  UF_long prefix_panel_payoff_run_count;
+  UF_long prefix_panel_payoff_run_rows;
+  double prefix_panel_payoff_update_work;
+  double prefix_panel_payoff_advance_work;
+  UF_long prefix_panel_payoff_subset_count;
+  UF_long prefix_panel_payoff_subset_run_count;
+  UF_long prefix_panel_payoff_subset_run_rows;
+  double prefix_panel_payoff_subset_update_work;
+  double prefix_panel_payoff_subset_advance_work;
+  UF_long prefix_panel_payoff_subset_max_runs;
 } kls_supernode_algorithm5_split_stats;
 
 static int kls_count_refactor_supernode_algorithm5_split_opportunities(
   const kls_solver *solver,
   const UF_long *consumer_start,
   const UF_long *consumer_end,
+  const UF_long *plan_ptr,
+  const UF_long *plan_current,
   const UF_long *plan_dep,
   const UF_long *plan_rows,
   const UF_long *plan_panel_start,
@@ -3947,17 +4042,14 @@ static int kls_count_refactor_supernode_algorithm5_split_opportunities(
   if (run_count == 0u) {
     return 1;
   }
-  if (plan_dep == NULL || plan_rows == NULL || plan_panel_start == NULL ||
+  if (plan_ptr == NULL || plan_current == NULL || plan_dep == NULL ||
+      plan_rows == NULL || plan_panel_start == NULL ||
       plan_panel_offset == NULL) {
     return 0;
   }
 
-  for (UF_long run = 0u; run < run_count; ++run) {
-    const UF_long panel = plan_panel_start[run];
-    const UF_long rows = plan_rows[run];
-    const UF_long offset = plan_panel_offset[run];
-    if (panel >= solver->n || rows == 0u ||
-        consumer_start[panel] != panel) {
+  for (UF_long panel = 0u; panel < solver->n; ++panel) {
+    if (consumer_start[panel] != panel) {
       continue;
     }
     const UF_long end = consumer_end[panel];
@@ -3965,53 +4057,183 @@ static int kls_count_refactor_supernode_algorithm5_split_opportunities(
       continue;
     }
     const UF_long width = end - panel;
-    if (width < min_split_width || offset >= width ||
-        rows > width - offset) {
+    if (width < min_split_width) {
       continue;
     }
-    if (stats->candidate_run_count == UF_long_max ||
-        rows > UF_long_max - stats->candidate_run_rows) {
+    const UF_long begin_run = plan_ptr[panel];
+    const UF_long end_run = plan_ptr[panel + 1u];
+    if (begin_run > end_run || end_run > run_count) {
       return 0;
     }
-    stats->candidate_run_count++;
-    stats->candidate_run_rows += rows;
 
     const UF_long prefix_limit = width - producer_suffix_rows;
-    if (offset >= prefix_limit) {
-      continue;
-    }
-    UF_long prefix_rows = prefix_limit - offset;
-    if (prefix_rows > rows) {
-      prefix_rows = rows;
-    }
-    if (prefix_rows == 0u) {
-      continue;
-    }
-    if (stats->prefix_run_count == UF_long_max ||
-        prefix_rows > UF_long_max - stats->prefix_run_rows) {
-      return 0;
-    }
-    const UF_long dep = plan_dep[run];
-    if (dep >= solver->n || prefix_rows > solver->n - dep) {
-      return 0;
-    }
-    stats->prefix_run_count++;
-    stats->prefix_run_rows += prefix_rows;
-    for (UF_long local = 0u; local < prefix_rows; ++local) {
-      stats->prefix_update_work +=
-        1.0 + (double)solver->numeric->Llen[dep + local];
-    }
-
-    if (rows > UF_long_max - offset) {
-      return 0;
-    }
-    if (offset + rows > prefix_limit) {
-      if (stats->crossing_run_count == UF_long_max ||
-          rows > UF_long_max - stats->crossing_run_rows) {
+    UF_long panel_prefix_run_count = 0u;
+    UF_long panel_prefix_run_rows = 0u;
+    UF_long panel_prefix_advance_dep_count = 0u;
+    double panel_prefix_update_work = 0.0;
+    double panel_prefix_advance_work = 0.0;
+    UF_long panel_payoff_subset_run_count = 0u;
+    UF_long panel_payoff_subset_run_rows = 0u;
+    double panel_payoff_subset_update_work = 0.0;
+    double panel_payoff_subset_advance_work = 0.0;
+    for (UF_long run = begin_run; run < end_run; ++run) {
+      if (plan_panel_start[run] != panel) {
         return 0;
       }
-      stats->crossing_run_count++;
-      stats->crossing_run_rows += rows;
+      const UF_long rows = plan_rows[run];
+      const UF_long offset = plan_panel_offset[run];
+      if (rows == 0u || offset >= width || rows > width - offset) {
+        continue;
+      }
+      if (stats->candidate_run_count == UF_long_max ||
+          rows > UF_long_max - stats->candidate_run_rows) {
+        return 0;
+      }
+      stats->candidate_run_count++;
+      stats->candidate_run_rows += rows;
+
+      if (offset >= prefix_limit) {
+        continue;
+      }
+      UF_long prefix_rows = prefix_limit - offset;
+      if (prefix_rows > rows) {
+        prefix_rows = rows;
+      }
+      if (prefix_rows == 0u) {
+        continue;
+      }
+      if (stats->prefix_run_count == UF_long_max ||
+          prefix_rows > UF_long_max - stats->prefix_run_rows) {
+        return 0;
+      }
+      const UF_long dep = plan_dep[run];
+      if (dep >= solver->n || prefix_rows > solver->n - dep) {
+        return 0;
+      }
+      stats->prefix_run_count++;
+      stats->prefix_run_rows += prefix_rows;
+      double run_update_work = 0.0;
+      for (UF_long local = 0u; local < prefix_rows; ++local) {
+        run_update_work += 1.0 + (double)solver->numeric->Llen[dep + local];
+      }
+      stats->prefix_update_work += run_update_work;
+
+      UF_long run_advance_deps = 0u;
+      double run_advance_work = 0.0;
+      if (kls_supernode_consumer_plan_run_advance_cost(
+            solver, plan_current, plan_dep, run_count, run,
+            &run_advance_deps, &run_advance_work)) {
+        if (stats->prefix_advance_run_count == UF_long_max ||
+            prefix_rows > UF_long_max -
+                            stats->prefix_advance_run_rows ||
+            run_advance_deps > UF_long_max -
+                                  stats->prefix_advance_dep_count ||
+            panel_prefix_run_count == UF_long_max ||
+            prefix_rows > UF_long_max - panel_prefix_run_rows ||
+            run_advance_deps > UF_long_max -
+                                  panel_prefix_advance_dep_count) {
+          return 0;
+        }
+        stats->prefix_advance_run_count++;
+        stats->prefix_advance_run_rows += prefix_rows;
+        stats->prefix_advance_dep_count += run_advance_deps;
+        stats->prefix_advance_work += run_advance_work;
+        if (run_update_work >= run_advance_work) {
+          if (stats->prefix_payoff_run_count == UF_long_max ||
+              prefix_rows > UF_long_max -
+                              stats->prefix_payoff_run_rows ||
+              panel_payoff_subset_run_count == UF_long_max ||
+              prefix_rows > UF_long_max -
+                              panel_payoff_subset_run_rows) {
+            return 0;
+          }
+          stats->prefix_payoff_run_count++;
+          stats->prefix_payoff_run_rows += prefix_rows;
+          stats->prefix_payoff_update_work += run_update_work;
+          stats->prefix_payoff_advance_work += run_advance_work;
+          panel_payoff_subset_run_count++;
+          panel_payoff_subset_run_rows += prefix_rows;
+          panel_payoff_subset_update_work += run_update_work;
+          panel_payoff_subset_advance_work += run_advance_work;
+        }
+        panel_prefix_run_count++;
+        panel_prefix_run_rows += prefix_rows;
+        panel_prefix_advance_dep_count += run_advance_deps;
+        panel_prefix_update_work += run_update_work;
+        panel_prefix_advance_work += run_advance_work;
+      }
+
+      if (rows > UF_long_max - offset) {
+        return 0;
+      }
+      if (offset + rows > prefix_limit) {
+        if (stats->crossing_run_count == UF_long_max ||
+            rows > UF_long_max - stats->crossing_run_rows) {
+          return 0;
+        }
+        stats->crossing_run_count++;
+        stats->crossing_run_rows += rows;
+      }
+    }
+    if (panel_prefix_run_count >= 2u) {
+      if (stats->prefix_panel_count == UF_long_max ||
+          panel_prefix_run_count > UF_long_max -
+                                      stats->prefix_panel_run_count ||
+          panel_prefix_run_rows > UF_long_max -
+                                    stats->prefix_panel_run_rows ||
+          panel_prefix_advance_dep_count >
+            UF_long_max - stats->prefix_panel_advance_dep_count) {
+        return 0;
+      }
+      stats->prefix_panel_count++;
+      stats->prefix_panel_run_count += panel_prefix_run_count;
+      stats->prefix_panel_run_rows += panel_prefix_run_rows;
+      stats->prefix_panel_advance_dep_count +=
+        panel_prefix_advance_dep_count;
+      stats->prefix_panel_update_work += panel_prefix_update_work;
+      stats->prefix_panel_advance_work += panel_prefix_advance_work;
+      if (panel_prefix_run_count > stats->prefix_panel_max_runs) {
+        stats->prefix_panel_max_runs = panel_prefix_run_count;
+      }
+      if (panel_prefix_update_work >= panel_prefix_advance_work) {
+        if (stats->prefix_panel_payoff_count == UF_long_max ||
+            panel_prefix_run_count > UF_long_max -
+                                       stats
+                                         ->prefix_panel_payoff_run_count ||
+            panel_prefix_run_rows > UF_long_max -
+                                      stats
+                                        ->prefix_panel_payoff_run_rows) {
+          return 0;
+        }
+        stats->prefix_panel_payoff_count++;
+        stats->prefix_panel_payoff_run_count += panel_prefix_run_count;
+        stats->prefix_panel_payoff_run_rows += panel_prefix_run_rows;
+        stats->prefix_panel_payoff_update_work += panel_prefix_update_work;
+        stats->prefix_panel_payoff_advance_work += panel_prefix_advance_work;
+      }
+    }
+    if (panel_payoff_subset_run_count >= 2u) {
+      if (stats->prefix_panel_payoff_subset_count == UF_long_max ||
+          panel_payoff_subset_run_count >
+            UF_long_max - stats->prefix_panel_payoff_subset_run_count ||
+          panel_payoff_subset_run_rows >
+            UF_long_max - stats->prefix_panel_payoff_subset_run_rows) {
+        return 0;
+      }
+      stats->prefix_panel_payoff_subset_count++;
+      stats->prefix_panel_payoff_subset_run_count +=
+        panel_payoff_subset_run_count;
+      stats->prefix_panel_payoff_subset_run_rows +=
+        panel_payoff_subset_run_rows;
+      stats->prefix_panel_payoff_subset_update_work +=
+        panel_payoff_subset_update_work;
+      stats->prefix_panel_payoff_subset_advance_work +=
+        panel_payoff_subset_advance_work;
+      if (panel_payoff_subset_run_count >
+          stats->prefix_panel_payoff_subset_max_runs) {
+        stats->prefix_panel_payoff_subset_max_runs =
+          panel_payoff_subset_run_count;
+      }
     }
   }
 
@@ -4723,9 +4945,9 @@ static int kls_build_refactor_supernode_consumer_plan(
   }
 
   if (!kls_count_refactor_supernode_algorithm5_split_opportunities(
-        solver, consumer_start, consumer_end, plan_dep, plan_rows,
-        plan_panel_start, plan_panel_offset, count_ctx.run_count,
-        &algorithm5_stats)) {
+        solver, consumer_start, consumer_end, plan_ptr, plan_current,
+        plan_dep, plan_rows, plan_panel_start, plan_panel_offset,
+        count_ctx.run_count, &algorithm5_stats)) {
     free(panel_run_count);
     free(panel_run_rows);
     free(panel_small_run_count);
@@ -4922,6 +5144,61 @@ static int kls_build_refactor_supernode_consumer_plan(
     algorithm5_stats.crossing_run_count;
   solver->refactor_supernode_algorithm5_crossing_run_rows =
     algorithm5_stats.crossing_run_rows;
+  solver->refactor_supernode_algorithm5_prefix_advance_run_count =
+    algorithm5_stats.prefix_advance_run_count;
+  solver->refactor_supernode_algorithm5_prefix_advance_run_rows =
+    algorithm5_stats.prefix_advance_run_rows;
+  solver->refactor_supernode_algorithm5_prefix_advance_dep_count =
+    algorithm5_stats.prefix_advance_dep_count;
+  solver->refactor_supernode_algorithm5_prefix_advance_work =
+    algorithm5_stats.prefix_advance_work;
+  solver->refactor_supernode_algorithm5_prefix_payoff_run_count =
+    algorithm5_stats.prefix_payoff_run_count;
+  solver->refactor_supernode_algorithm5_prefix_payoff_run_rows =
+    algorithm5_stats.prefix_payoff_run_rows;
+  solver->refactor_supernode_algorithm5_prefix_payoff_update_work =
+    algorithm5_stats.prefix_payoff_update_work;
+  solver->refactor_supernode_algorithm5_prefix_payoff_advance_work =
+    algorithm5_stats.prefix_payoff_advance_work;
+  solver->refactor_supernode_algorithm5_prefix_panel_count =
+    algorithm5_stats.prefix_panel_count;
+  solver->refactor_supernode_algorithm5_prefix_panel_run_count =
+    algorithm5_stats.prefix_panel_run_count;
+  solver->refactor_supernode_algorithm5_prefix_panel_run_rows =
+    algorithm5_stats.prefix_panel_run_rows;
+  solver->refactor_supernode_algorithm5_prefix_panel_advance_dep_count =
+    algorithm5_stats.prefix_panel_advance_dep_count;
+  solver->refactor_supernode_algorithm5_prefix_panel_update_work =
+    algorithm5_stats.prefix_panel_update_work;
+  solver->refactor_supernode_algorithm5_prefix_panel_advance_work =
+    algorithm5_stats.prefix_panel_advance_work;
+  solver->refactor_supernode_algorithm5_prefix_panel_max_runs =
+    algorithm5_stats.prefix_panel_max_runs;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_count =
+    algorithm5_stats.prefix_panel_payoff_count;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_run_count =
+    algorithm5_stats.prefix_panel_payoff_run_count;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_run_rows =
+    algorithm5_stats.prefix_panel_payoff_run_rows;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_update_work =
+    algorithm5_stats.prefix_panel_payoff_update_work;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_advance_work =
+    algorithm5_stats.prefix_panel_payoff_advance_work;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_subset_count =
+    algorithm5_stats.prefix_panel_payoff_subset_count;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_count =
+    algorithm5_stats.prefix_panel_payoff_subset_run_count;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_rows =
+      algorithm5_stats.prefix_panel_payoff_subset_run_rows;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_update_work =
+      algorithm5_stats.prefix_panel_payoff_subset_update_work;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work =
+      algorithm5_stats.prefix_panel_payoff_subset_advance_work;
+  solver->refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs =
+    algorithm5_stats.prefix_panel_payoff_subset_max_runs;
   return 1;
 }
 
@@ -17387,6 +17664,81 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_supernode_algorithm5_crossing_run_count;
   solver->stats.refactor_supernode_algorithm5_crossing_run_rows =
     (int64_t)solver->refactor_supernode_algorithm5_crossing_run_rows;
+  solver->stats.refactor_supernode_algorithm5_prefix_advance_run_count =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_advance_run_count;
+  solver->stats.refactor_supernode_algorithm5_prefix_advance_run_rows =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_advance_run_rows;
+  solver->stats.refactor_supernode_algorithm5_prefix_advance_dep_count =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_advance_dep_count;
+  solver->stats.refactor_supernode_algorithm5_prefix_advance_work =
+    solver->refactor_supernode_algorithm5_prefix_advance_work;
+  solver->stats.refactor_supernode_algorithm5_prefix_payoff_run_count =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_payoff_run_count;
+  solver->stats.refactor_supernode_algorithm5_prefix_payoff_run_rows =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_payoff_run_rows;
+  solver->stats.refactor_supernode_algorithm5_prefix_payoff_update_work =
+    solver->refactor_supernode_algorithm5_prefix_payoff_update_work;
+  solver->stats.refactor_supernode_algorithm5_prefix_payoff_advance_work =
+    solver->refactor_supernode_algorithm5_prefix_payoff_advance_work;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_count =
+    (int64_t)solver->refactor_supernode_algorithm5_prefix_panel_count;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_run_count =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_panel_run_count;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_run_rows =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_panel_run_rows;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_advance_dep_count =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_panel_advance_dep_count;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_update_work =
+    solver->refactor_supernode_algorithm5_prefix_panel_update_work;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_advance_work =
+    solver->refactor_supernode_algorithm5_prefix_panel_advance_work;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_max_runs =
+    (int64_t)solver->refactor_supernode_algorithm5_prefix_panel_max_runs;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_payoff_count =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_panel_payoff_count;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_payoff_run_count =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_panel_payoff_run_count;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_payoff_run_rows =
+    (int64_t)solver
+      ->refactor_supernode_algorithm5_prefix_panel_payoff_run_rows;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_payoff_update_work =
+    solver->refactor_supernode_algorithm5_prefix_panel_payoff_update_work;
+  solver->stats.refactor_supernode_algorithm5_prefix_panel_payoff_advance_work =
+    solver->refactor_supernode_algorithm5_prefix_panel_payoff_advance_work;
+  solver->stats
+    .refactor_supernode_algorithm5_prefix_panel_payoff_subset_count =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_count;
+  solver->stats
+    .refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_count =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_count;
+  solver->stats
+    .refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_rows =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_rows;
+  solver->stats
+    .refactor_supernode_algorithm5_prefix_panel_payoff_subset_update_work =
+      solver
+        ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_update_work;
+  solver->stats
+    .refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work =
+      solver
+        ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work;
+  solver->stats
+    .refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs;
   solver->stats.refactor_last_supernode_consumer_plan_attempts =
     (int64_t)solver->refactor_last_supernode_consumer_plan_attempts;
   solver->stats.refactor_last_supernode_consumer_plan_hits =

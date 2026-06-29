@@ -2257,6 +2257,83 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_prefix_update_work,
            stats.refactor_supernode_algorithm5_crossing_run_count,
            stats.refactor_supernode_algorithm5_crossing_run_rows);
+    printf(",\"refactor_supernode_algorithm5_prefix_advance_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_advance_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_advance_dep_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_advance_work\":%.9g"
+           ",\"refactor_supernode_algorithm5_prefix_payoff_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_payoff_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_payoff_update_work\":%.9g"
+           ",\"refactor_supernode_algorithm5_prefix_payoff_advance_work\":%.9g"
+           ",\"refactor_supernode_algorithm5_prefix_panel_count\":%" PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_advance_dep_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_update_work\":%.9g"
+           ",\"refactor_supernode_algorithm5_prefix_panel_advance_work\":%.9g"
+           ",\"refactor_supernode_algorithm5_prefix_panel_max_runs\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_update_work\":%.9g"
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_advance_work\":%.9g"
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_update_work\":%.9g"
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work\":%.9g"
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs\":%"
+           PRId64,
+           stats.refactor_supernode_algorithm5_prefix_advance_run_count,
+           stats.refactor_supernode_algorithm5_prefix_advance_run_rows,
+           stats.refactor_supernode_algorithm5_prefix_advance_dep_count,
+           stats.refactor_supernode_algorithm5_prefix_advance_work,
+           stats.refactor_supernode_algorithm5_prefix_payoff_run_count,
+           stats.refactor_supernode_algorithm5_prefix_payoff_run_rows,
+           stats.refactor_supernode_algorithm5_prefix_payoff_update_work,
+           stats.refactor_supernode_algorithm5_prefix_payoff_advance_work,
+           stats.refactor_supernode_algorithm5_prefix_panel_count,
+           stats.refactor_supernode_algorithm5_prefix_panel_run_count,
+           stats.refactor_supernode_algorithm5_prefix_panel_run_rows,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_advance_dep_count,
+           stats.refactor_supernode_algorithm5_prefix_panel_update_work,
+           stats.refactor_supernode_algorithm5_prefix_panel_advance_work,
+           stats.refactor_supernode_algorithm5_prefix_panel_max_runs,
+           stats.refactor_supernode_algorithm5_prefix_panel_payoff_count,
+           stats.refactor_supernode_algorithm5_prefix_panel_payoff_run_count,
+           stats.refactor_supernode_algorithm5_prefix_panel_payoff_run_rows,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_update_work,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_advance_work,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_count,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_count,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_rows,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_update_work,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs);
     printf(",\"refactor_l_pattern_columns\":%" PRId64
            ",\"refactor_l_pattern_entries\":%" PRId64
            ",\"refactor_l_adjacent_run_count\":%" PRId64
@@ -3332,6 +3409,15 @@ int main(int argc, char **argv) {
            ", alg5 split runs %" PRId64 "/%" PRId64
            ", prefix %" PRId64 "/%" PRId64 " work %.9g"
            ", crossing %" PRId64 "/%" PRId64
+           ", alg5 advance %" PRId64 "/%" PRId64 "/%" PRId64
+           " work %.9g"
+           ", alg5 payoff %" PRId64 "/%" PRId64 " work %.9g/%.9g"
+           ", alg5 panels %" PRId64 "/%" PRId64 "/%" PRId64
+           " deps %" PRId64 " work %.9g/%.9g max %" PRId64
+           ", alg5 panel payoff %" PRId64 "/%" PRId64 "/%" PRId64
+           " work %.9g/%.9g"
+           ", alg5 subset payoff %" PRId64 "/%" PRId64 "/%" PRId64
+           " work %.9g/%.9g max %" PRId64
            ", group L %d/%d %" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64
@@ -3421,6 +3507,41 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_prefix_update_work,
            stats.refactor_supernode_algorithm5_crossing_run_count,
            stats.refactor_supernode_algorithm5_crossing_run_rows,
+           stats.refactor_supernode_algorithm5_prefix_advance_run_count,
+           stats.refactor_supernode_algorithm5_prefix_advance_run_rows,
+           stats.refactor_supernode_algorithm5_prefix_advance_dep_count,
+           stats.refactor_supernode_algorithm5_prefix_advance_work,
+           stats.refactor_supernode_algorithm5_prefix_payoff_run_count,
+           stats.refactor_supernode_algorithm5_prefix_payoff_run_rows,
+           stats.refactor_supernode_algorithm5_prefix_payoff_update_work,
+           stats.refactor_supernode_algorithm5_prefix_payoff_advance_work,
+           stats.refactor_supernode_algorithm5_prefix_panel_count,
+           stats.refactor_supernode_algorithm5_prefix_panel_run_count,
+           stats.refactor_supernode_algorithm5_prefix_panel_run_rows,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_advance_dep_count,
+           stats.refactor_supernode_algorithm5_prefix_panel_update_work,
+           stats.refactor_supernode_algorithm5_prefix_panel_advance_work,
+           stats.refactor_supernode_algorithm5_prefix_panel_max_runs,
+           stats.refactor_supernode_algorithm5_prefix_panel_payoff_count,
+           stats.refactor_supernode_algorithm5_prefix_panel_payoff_run_count,
+           stats.refactor_supernode_algorithm5_prefix_panel_payoff_run_rows,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_update_work,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_advance_work,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_count,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_count,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_run_rows,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_update_work,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs,
            stats.refactor_supernode_consumer_plan_group_l_built,
            stats.refactor_supernode_consumer_plan_group_l_storage_limited,
            stats.refactor_supernode_consumer_plan_group_l_panel_count,

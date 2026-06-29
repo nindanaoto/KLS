@@ -38,6 +38,22 @@ This is a much broader paper-aligned target than another BLAS-size guard: KLS
 needs a producer-panel prefix/suffix executor with readiness tracking and
 multiple consumer workspaces, not a narrower exact-prefix replay.
 
+The follow-up payoff diagnostic narrows the executor shape further. The final
+top-ten run
+`build/kls_alg5_payoff_diag_gap10_t4_r1_ref3_timeout120.jsonl` still reports
+the same 156,660 Algorithm-5 prefix runs and about 1.397B modeled update work,
+but advancing every current column to those producer offsets would cost about
+11.29B modeled work. Whole producer panels are therefore the wrong unit:
+only 3 full panels are payoff-positive. The useful target is the low-advance
+subset inside each producer panel: 594 producer-panel subsets contain 13,980
+payoff-positive runs, 670,921 prefix rows, about 251.4M update work, and about
+132.9M advance work, with up to 322 selected runs in one panel. That is still
+a materially broader target than exact-prefix batching, but it is not enough
+to justify replaying complete panels or expensive scalar current tails. The
+next executor should select low-advance current columns inside each retained
+Algorithm-5 panel, advance those workspaces together, apply the shared producer
+prefix, and leave high-advance currents on the scalar path.
+
 KLS has **not** implemented every paper idea that is still worth trying. It has
 implemented the ideas that can be layered around the current KLU-derived
 Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, explicit SCOTCH
