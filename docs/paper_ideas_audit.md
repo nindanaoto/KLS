@@ -8843,3 +8843,37 @@ batched-supernode counters also stayed at zero on both rows. An additional
 "BLAS only for large cases" guard would therefore not change these losses; the
 active row-refactor gap is still in the scalar native/compact panel executor
 and value writeback, not in small external BLAS dispatch.
+
+The same focused rows were then checked against the SubtreeLU Algorithm 6
+private/pipeline queue idea. The default artifacts showed
+`separator_analyzed_rows=0` for both `coupled` and `rajat03`; KLS's retained
+`METIS_NodeNDP` separator map is currently limited to 30,000+ row threaded
+METIS analyses, while these row-refactor losses have only 11,341 and 7,602
+rows. A temporary source probe lowered `KLS_METIS_NDP_MIN_ROWS` to 4,096 and
+rebuilt KLS. This did activate retained separator metadata and the
+FLOP-balanced separator queue for METIS-ordered `rajat03` and forced-METIS
+`coupled`, but it was a loss: auto ordering on the two-row focus measured
+`0.5380s` geomean in
+`build/kls_ndp4096_auto_coupled_rajat03_t4_r1_ref3_pass3_timeout120.jsonl`,
+and forced METIS measured `0.6240s` in
+`build/kls_ndp4096_metis_coupled_rajat03_t4_r1_ref3_pass3_timeout120.jsonl`.
+For those runs, the separator queue turned almost the whole row-refactor group
+graph into pipeline work (`row_refactor_group_pipeline_groups` equaled all
+groups), increasing both analysis and repeated refactor time. The threshold
+change was reverted; medium-matrix separator retention is not a general gap
+closer in the current row executor.
+
+The competing partial-supernode pipeline policy was also probed because the
+default row-refactor rows showed partial-supernode activity but no retained
+separator queue. With `KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE=0`, the focused
+two-row median artifact
+`build/kls_sepqueue_no_partial_coupled_rajat03_t4_r1_ref3_pass3_timeout120.jsonl`
+improved `coupled` but slightly worsened `rajat03`, for a `0.4221s` geomean
+versus `0.4482s` in the same-source default artifact
+`build/kls_default_coupled_rajat03_t4_r1_ref3_pass3_timeout120.jsonl`.
+The broader top-20 guard rejected making that policy a default:
+`build/kls_ndp4096_no_partial_gap20_t4_r1_ref3_timeout120.jsonl` measured
+`2.0638s`, worse than the saved same-source default top-20 `2.0286s`. The
+retained conclusion is that KLS should not broadly disable the partial
+supernode pipeline; the remaining CKTSO gap needs a better row/supernode
+numeric executor, not just a different queue-selection switch.
