@@ -9135,3 +9135,40 @@ construction cost. The source change was reverted. The useful conclusion is
 that the retained plan's run length metadata alone does not create the missing
 paper mechanism; KLS still needs the persistent producer/output accumulator or
 row-major numeric object that lets one producer panel feed many consumers.
+
+The small-BLAS guard hypothesis was then checked against a new opt-in default
+EGraph stream diagnostic rather than another threshold change. KLS now reports
+`refactor_stream_dependency_entries`, `refactor_stream_pivot_entries`, and
+`refactor_stream_output_entries` when
+`KLS_ENABLE_REFACTOR_STREAM_STATS=1` is set. The counters are populated while
+building the exact EGraph dependency schedule and are otherwise inert; they
+classify each producer L-column entry used by a U dependency as still-pending
+dependency work, the current pivot row, or output/trailing work.
+
+Validation for this diagnostic:
+
+- `cmake --build build -j 4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_STREAM_STATS=1` on the current top-ten CKTSO-gap focus
+  produced `build/kls_stream_stats_gap10_t4_r1_ref3_timeout120.jsonl` with a
+  `2.29825s` SPICE-cycle geomean. That is `1.007x` of the retained default
+  `build/kls_current_retained_gap10_t4_r1_ref3_timeout120.jsonl`, so the
+  diagnostic did not materially perturb the path.
+- The same diagnostic run remains `2.451x` slower than
+  `build/cktso_paper_medium93_t4_timeout120.jsonl` on the common rows.
+
+The stream split is the useful finding. Across the nine EGraph rows in that
+top-ten set, KLS counted about `932.1M` dependency-side L entries, `8.8M` pivot
+entries, and `921.4M` output/trailing entries. Output/trailing work is therefore
+about `49.5%` of the measured scalar stream, while pivot entries are only about
+`0.47%`. The hard ASIC rows are almost exactly balanced:
+`ASIC_320ks` is `139.2M` dependency versus `139.3M` output/trailing entries,
+and `ASIC_320k` is `170.1M` versus `169.8M`. This confirms that the current
+loss is not caused by small external BLAS calls: the CBLAS artifacts still show
+zero BLAS update counters, and the scalar EGraph stream itself is split across
+dependency and output/trailing work. A dependency-only grouping tweak or another
+BLAS threshold guard would leave roughly half of the stream untouched. The more
+direct paper-aligned target remains a persistent producer/output accumulator,
+row-major numeric object, or broad supernode executor that can reuse one
+producer panel across many consumers and scatter/output rows without rebuilding
+the same stream each time.

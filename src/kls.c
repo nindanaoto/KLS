@@ -609,6 +609,10 @@ struct kls_solver {
   UF_long *refactor_pipeline_ready_cols;
   atomic_uint *refactor_pipeline_ready_slots;
   atomic_ulong *refactor_pipeline_remaining_preds;
+  int refactor_stream_stats_built;
+  double refactor_stream_dependency_entries;
+  double refactor_stream_pivot_entries;
+  double refactor_stream_output_entries;
   UF_long *refactor_supernode_pipeline_end;
   UF_long *refactor_u_supernode_start_id;
   UF_long *refactor_u_supernode_col_id;
@@ -4382,6 +4386,10 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_pipeline_column_count = 0;
   solver->refactor_dependency_work = 0.0;
   solver->refactor_pipeline_work = 0.0;
+  solver->refactor_stream_stats_built = 0;
+  solver->refactor_stream_dependency_entries = 0.0;
+  solver->refactor_stream_pivot_entries = 0.0;
+  solver->refactor_stream_output_entries = 0.0;
 }
 
 static void free_egraph_worker_scratch(kls_solver *solver) {
@@ -14962,6 +14970,12 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_dependency_work;
   solver->stats.refactor_dependency_pipeline_work =
     solver->refactor_pipeline_work;
+  solver->stats.refactor_stream_dependency_entries =
+    solver->refactor_stream_dependency_entries;
+  solver->stats.refactor_stream_pivot_entries =
+    solver->refactor_stream_pivot_entries;
+  solver->stats.refactor_stream_output_entries =
+    solver->refactor_stream_output_entries;
 }
 
 static double *ensure_solve_perm_workspace(kls_solver *solver) {
@@ -20298,6 +20312,12 @@ static int kls_build_refactor_map(kls_solver *solver) {
 
 static int kls_refactor_l_pattern_stats_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_REFACTOR_L_PATTERN_STATS");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static int kls_refactor_stream_stats_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_REFACTOR_STREAM_STATS");
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -46835,6 +46855,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     kls_refactor_supernode_consumer_plan_exec_env_enabled();
   const int supernode_consumer_stats_env =
     kls_refactor_supernode_consumer_stats_env_enabled();
+  const int record_stream_stats = kls_refactor_stream_stats_env_enabled();
   const int need_u_supernode_pattern =
     supernode_consumer_stats_env ||
     kls_refactor_u_supernode_pattern_env_enabled() ||
@@ -46849,8 +46870,14 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
        solver->refactor_u_supernode_pattern_built) &&
       (!build_supernode_consumer_plan ||
        solver->refactor_supernode_consumer_plan_built) &&
+      (!record_stream_stats ||
+       solver->refactor_stream_stats_built) &&
       (solver->refactor_level_cols != NULL || natural_pipeline)) {
     return 1;
+  }
+  if (record_stream_stats &&
+      (solver->numeric->Lip == NULL || solver->numeric->Llen == NULL)) {
+    return 0;
   }
 
   free_refactor_schedule(solver);
@@ -46943,6 +46970,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long root_columns = 0;
   double max_column_work = 0.0;
   double total_work = 0.0;
+  double stream_dependency_entries = 0.0;
+  double stream_pivot_entries = 0.0;
+  double stream_output_entries = 0.0;
   const int weight_singleton_blocks =
     kls_egraph_non_dominant_many_block_shape(solver);
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
@@ -46968,6 +46998,10 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     }
     const UF_long *uip = solver->numeric->Uip + k1;
     const UF_long *ulen = solver->numeric->Ulen + k1;
+    const UF_long *lip =
+      record_stream_stats ? solver->numeric->Lip + k1 : NULL;
+    const UF_long *llen =
+      record_stream_stats ? solver->numeric->Llen + k1 : NULL;
     for (UF_long k = 0; k < nk; ++k) {
       UF_long *ui = NULL;
       double *ux = NULL;
@@ -46995,6 +47029,31 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
           level = dep_level;
         }
         work += 1.0 + (double)solver->numeric->Llen[k1 + dep];
+        if (record_stream_stats) {
+          UF_long *li = NULL;
+          double *lx = NULL;
+          UF_long lcol_len = 0u;
+          kls_klu_get_pointer(lu, lip, llen, dep, &li, &lx, &lcol_len);
+          (void)lx;
+          if (li == NULL && lcol_len > 0u) {
+            KLS_FREE_REFACTOR_SCHEDULE_TEMP();
+            return 0;
+          }
+          for (UF_long lp = 0; lp < lcol_len; ++lp) {
+            const UF_long row = li[lp];
+            if (row >= nk) {
+              KLS_FREE_REFACTOR_SCHEDULE_TEMP();
+              return 0;
+            }
+            if (row < k) {
+              stream_dependency_entries += 1.0;
+            } else if (row == k) {
+              stream_pivot_entries += 1.0;
+            } else {
+              stream_output_entries += 1.0;
+            }
+          }
+        }
         edges++;
       }
       if (ucol_len == 0u) {
@@ -47249,6 +47308,10 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   solver->refactor_pipeline_column_count = pipeline_columns;
   solver->refactor_dependency_work = total_work;
   solver->refactor_pipeline_work = pipeline_work;
+  solver->refactor_stream_stats_built = record_stream_stats;
+  solver->refactor_stream_dependency_entries = stream_dependency_entries;
+  solver->refactor_stream_pivot_entries = stream_pivot_entries;
+  solver->refactor_stream_output_entries = stream_output_entries;
   level_ptr = NULL;
   level_cols = NULL;
   level_thread_ptr = NULL;

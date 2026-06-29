@@ -145,6 +145,9 @@ typedef struct kls_stats {
   int64_t refactor_dependency_pipeline_columns;
   double refactor_dependency_work;
   double refactor_dependency_pipeline_work;
+  double refactor_stream_dependency_entries;
+  double refactor_stream_pivot_entries;
+  double refactor_stream_output_entries;
   int64_t fast_rejected_block_start;
   int64_t fast_rejected_block_size;
   int64_t fast_rejected_suffix_columns;

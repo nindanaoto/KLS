@@ -2139,6 +2139,9 @@ int main(int argc, char **argv) {
            ",\"refactor_dependency_pipeline_columns\":%" PRId64
            ",\"refactor_dependency_work\":%.9g"
            ",\"refactor_dependency_pipeline_work\":%.9g"
+           ",\"refactor_stream_dependency_entries\":%.9g"
+           ",\"refactor_stream_pivot_entries\":%.9g"
+           ",\"refactor_stream_output_entries\":%.9g"
            ",\"refactor_last_supernode_pipeline_tasks\":%" PRId64
            ",\"refactor_last_supernode_pipeline_columns\":%" PRId64
            ",\"refactor_supernode_pipeline_task_count\":%" PRId64
@@ -2204,6 +2207,9 @@ int main(int argc, char **argv) {
            stats.refactor_dependency_pipeline_columns,
            stats.refactor_dependency_work,
            stats.refactor_dependency_pipeline_work,
+           stats.refactor_stream_dependency_entries,
+           stats.refactor_stream_pivot_entries,
+           stats.refactor_stream_output_entries,
            stats.refactor_last_supernode_pipeline_tasks,
            stats.refactor_last_supernode_pipeline_columns,
            stats.refactor_supernode_pipeline_task_count,
@@ -3254,6 +3260,10 @@ int main(int argc, char **argv) {
     printf("refactor dependency work: %.6g, pipeline work: %.6g\n",
            stats.refactor_dependency_work,
            stats.refactor_dependency_pipeline_work);
+    printf("refactor stream split: dependency %.6g, pivot %.6g, output %.6g\n",
+           stats.refactor_stream_dependency_entries,
+           stats.refactor_stream_pivot_entries,
+           stats.refactor_stream_output_entries);
     printf("nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n", stats.nnz_l, stats.nnz_u);
     printf("estimated flops: %.6e, factor flops: %.6e\n", stats.estimated_flops, stats.factor_flops);
     printf("parallel model R1/R2: %.6g / %.6g, recommends parallel: %s\n",
