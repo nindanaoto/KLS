@@ -9744,3 +9744,21 @@ earlier dependency stream to the retained `(panel_start, panel_offset)`, apply
 the shared producer panel across that gathered batch, and then finish or
 publish those current columns without double-processing them in the normal
 EGraph scheduler.
+
+A current CBLAS-enabled build confirms that small BLAS calls are already
+guarded out of the focused slow paths. The CBLAS call sites require explicit
+`KLS_ENABLE_CBLAS_SUPERNODE=1` plus minimum row/batch/panel sizes and estimated
+work before issuing `dtrsv`, `dgemv`, `dtrsm`, or `dgemm`; otherwise they fall
+back to the KLS scalar/compact kernels. With the refreshed `build-cblas`
+binary, both
+`build/kls_cblas_guard_current_off_gap10_t4_r1_ref3_timeout120.jsonl` and
+`build/kls_cblas_guard_current_on_gap10_t4_r1_ref3_timeout120.jsonl`
+completed the top-ten CKTSO-gap focus with no failures. The runtime-gate-on
+run reported zero `refactor_supernode_cblas_update_*` counters on every row;
+its cycle geomean was `2.52445s` versus `2.64174s` with the runtime gate off.
+The follow-up `Freescale/transient` checks also reported zero CBLAS update
+counters, with `4.31849s` cycle time on and `4.45335s` off. The remaining gap
+therefore is not unguarded small BLAS dispatch. It remains the larger
+paper-level executor problem: KLS must avoid repeatedly streaming long
+producer rows and instead apply retained producer panels to gathered current
+workspaces.
