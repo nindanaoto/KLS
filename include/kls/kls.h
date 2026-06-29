@@ -881,6 +881,17 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_prefix_advance_batch_max_runs;
   int64_t refactor_supernode_consumer_plan_prefix_advance_batch_max_deps;
   double refactor_supernode_consumer_plan_prefix_advance_batch_max_work;
+  int64_t refactor_supernode_algorithm5_large_panel_count;
+  int64_t refactor_supernode_algorithm5_large_panel_rows;
+  int64_t refactor_supernode_algorithm5_large_panel_prefix_rows;
+  int64_t refactor_supernode_algorithm5_large_panel_max_width;
+  int64_t refactor_supernode_algorithm5_candidate_run_count;
+  int64_t refactor_supernode_algorithm5_candidate_run_rows;
+  int64_t refactor_supernode_algorithm5_prefix_run_count;
+  int64_t refactor_supernode_algorithm5_prefix_run_rows;
+  double refactor_supernode_algorithm5_prefix_update_work;
+  int64_t refactor_supernode_algorithm5_crossing_run_count;
+  int64_t refactor_supernode_algorithm5_crossing_run_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

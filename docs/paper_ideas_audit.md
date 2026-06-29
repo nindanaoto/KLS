@@ -23,6 +23,21 @@ guard around BLAS calls for small cases. The artifacts are
 `build/kls_group_shape_diag_forcedrow_native_auto_gap5_t4_r1_ref3_timeout120.jsonl`,
 and `build/kls_current_gap10_continuation_t4_r1_ref3_timeout120.jsonl`.
 
+The June 29, 2026 Algorithm-5 split diagnostic makes the next SubtreeLU gap
+more concrete. With `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1`, the
+top-ten CKTSO-gap artifact
+`build/kls_alg5_split_diag_gap10_t4_r1_ref3_timeout120.jsonl` reports 892
+producer panels wide enough for the paper's `2P` split rule, 19,325 covered
+panel rows, and 15,757 prefix rows before the `P`-row suffix. Their retained
+consumer-plan runs cover 156,935 candidate runs and 4,484,827 run rows. The
+prefix side alone covers 156,660 runs, 3,921,698 run rows, and about 1.397B
+modeled update work, compared with only about 0.136B work in the earlier exact
+identical-prefix batch diagnostic. That prefix work is about 79.7% of retained
+plan `L` work and 71.4% of retained `L+internal` work across these ten rows.
+This is a much broader paper-aligned target than another BLAS-size guard: KLS
+needs a producer-panel prefix/suffix executor with readiness tracking and
+multiple consumer workspaces, not a narrower exact-prefix replay.
+
 KLS has **not** implemented every paper idea that is still worth trying. It has
 implemented the ideas that can be layered around the current KLU-derived
 Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, explicit SCOTCH
