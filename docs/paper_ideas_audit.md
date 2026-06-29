@@ -8196,3 +8196,22 @@ and the row-refactor model again rejected automatic handoff through the
 lower-bound work gate. Further BLAS-size threshold changes would not close the
 CKTSO gap on these cases; the missing mechanism is still the paper-level
 producer/consumer row-major numeric executor.
+
+The retained-plan ragged-L pruning/prefilter direction was also tested and
+rejected. The combined ragged-L plus retained consumer-plan run measured
+`1.51766s` geomean on the top-five gap focus in
+`build/kls_ragged_l_plan_probe_gap5_t4_r1_ref3_timeout120.jsonl`, already
+slower than the same-binary default control at `1.39148s` in
+`build/kls_default_control_probe_gap5_t4_r1_ref3_timeout120.jsonl`. Moving the
+retained plan into a post-build prune step measured `1.54823s` in
+`build/kls_ragged_l_plan_preprune_gap5_t4_r1_ref3_timeout120.jsonl`, and
+skipping the second prune scan only improved that to `1.51137s` in
+`build/kls_ragged_l_plan_preprune2_gap5_t4_r1_ref3_timeout120.jsonl`.
+Filtering panels before metadata construction was much worse: the focused run
+measured `3.69737s` in
+`build/kls_ragged_l_plan_prefilter_gap5_t4_r1_ref3_timeout120.jsonl`, and the
+counters showed that ragged update rows dropped to zero on the ASIC rows after
+the filter. This rejects static plan pruning as the clear missing CKTSO idea:
+it can remove some publication scans, but it does not create the reusable
+row-major/persistent accumulator that the papers rely on to feed many consumers
+from one producer panel.
