@@ -8205,6 +8205,25 @@ lower-bound work gate. Further BLAS-size threshold changes would not close the
 CKTSO gap on these cases; the missing mechanism is still the paper-level
 producer/consumer row-major numeric executor.
 
+The June 29, 2026 follow-up rerun reached the same conclusion on the current
+source after the object-workspace cleanup. A freshly rebuilt CBLAS-capable tree
+was run on the first five CKTSO-gap matrices with `OPENBLAS_NUM_THREADS=1`,
+four KLS threads, one initial factor, and three refactors. With the runtime
+CBLAS gate disabled,
+`build-cblas/kls_cblas_guard_current_off_gap5_t4_r1_ref3_timeout120.jsonl`
+measured a `2.67328s` SPICE-cycle geomean; with
+`KLS_ENABLE_CBLAS_SUPERNODE=1`,
+`build-cblas/kls_cblas_guard_current_on_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `4.14533s`. Both artifacts reported `build_has_cblas=true`, but every
+row still had zero external CBLAS update runs, rows, and entries. The default
+non-CBLAS build in
+`build/kls_default_guard_current_gap5_t4_r1_ref3_timeout120.jsonl` reported
+`build_has_cblas=false` and zero CBLAS/compact-panel counters. This means the
+requested "use BLAS only for large cases" policy is already true in the source:
+CBLAS requires the build option, the runtime gate, 512-scale shape checks, and
+multi-million-work gates, and the current hard-gap rows do not enter those call
+sites at all.
+
 The retained-plan ragged-L pruning/prefilter direction was also tested and
 rejected. The combined ragged-L plus retained consumer-plan run measured
 `1.51766s` geomean on the top-five gap focus in
