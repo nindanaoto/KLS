@@ -1737,7 +1737,19 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_consumer_plan_max_panel_rows\":%" PRId64
            ",\"refactor_supernode_consumer_plan_l_entries\":%.9g"
            ",\"refactor_supernode_consumer_plan_internal_entries\":%.9g"
-           ",\"refactor_supernode_consumer_plan_bytes\":%" PRId64,
+           ",\"refactor_supernode_consumer_plan_bytes\":%" PRId64
+           ",\"refactor_last_supernode_consumer_plan_attempts\":%" PRId64
+           ",\"refactor_last_supernode_consumer_plan_hits\":%" PRId64
+           ",\"refactor_last_supernode_consumer_plan_applied\":%" PRId64
+           ",\"refactor_last_supernode_consumer_plan_rows\":%" PRId64
+           ",\"refactor_last_supernode_consumer_plan_entries\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_attempt_count\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_hit_count\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_apply_count\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_apply_rows\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_apply_entries\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_exec_disabled\":%d"
+           ",\"refactor_supernode_consumer_plan_exec_disable_count\":%" PRId64,
            stats.refactor_supernode_consumer_plan_panel_count,
            stats.refactor_supernode_consumer_plan_reused_panel_count,
            stats.refactor_supernode_consumer_plan_run_count,
@@ -1746,7 +1758,19 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_max_panel_rows,
            stats.refactor_supernode_consumer_plan_l_entries,
            stats.refactor_supernode_consumer_plan_internal_entries,
-           stats.refactor_supernode_consumer_plan_bytes);
+           stats.refactor_supernode_consumer_plan_bytes,
+           stats.refactor_last_supernode_consumer_plan_attempts,
+           stats.refactor_last_supernode_consumer_plan_hits,
+           stats.refactor_last_supernode_consumer_plan_applied,
+           stats.refactor_last_supernode_consumer_plan_rows,
+           stats.refactor_last_supernode_consumer_plan_entries,
+           stats.refactor_supernode_consumer_plan_attempt_count,
+           stats.refactor_supernode_consumer_plan_hit_count,
+           stats.refactor_supernode_consumer_plan_apply_count,
+           stats.refactor_supernode_consumer_plan_apply_rows,
+           stats.refactor_supernode_consumer_plan_apply_entries,
+           stats.refactor_supernode_consumer_plan_exec_disabled,
+           stats.refactor_supernode_consumer_plan_exec_disable_count);
     printf(",\"refactor_l_pattern_columns\":%" PRId64
            ",\"refactor_l_pattern_entries\":%" PRId64
            ",\"refactor_l_adjacent_run_count\":%" PRId64
@@ -2726,6 +2750,24 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_l_entries,
            stats.refactor_supernode_consumer_plan_internal_entries,
            stats.refactor_supernode_consumer_plan_bytes);
+    printf("refactor supernode consumer plan exec: attempts %" PRId64
+           ", hits %" PRId64 ", applied %" PRId64
+           ", rows %" PRId64 ", entries %" PRId64
+           ", cumulative %" PRId64 "/%" PRId64 "/%" PRId64
+           "/%" PRId64 "/%" PRId64
+           ", disabled %d/%" PRId64 "\n",
+           stats.refactor_last_supernode_consumer_plan_attempts,
+           stats.refactor_last_supernode_consumer_plan_hits,
+           stats.refactor_last_supernode_consumer_plan_applied,
+           stats.refactor_last_supernode_consumer_plan_rows,
+           stats.refactor_last_supernode_consumer_plan_entries,
+           stats.refactor_supernode_consumer_plan_attempt_count,
+           stats.refactor_supernode_consumer_plan_hit_count,
+           stats.refactor_supernode_consumer_plan_apply_count,
+           stats.refactor_supernode_consumer_plan_apply_rows,
+           stats.refactor_supernode_consumer_plan_apply_entries,
+           stats.refactor_supernode_consumer_plan_exec_disabled,
+           stats.refactor_supernode_consumer_plan_exec_disable_count);
     printf("refactor supernode update disabled: %d, disable count %" PRId64
            "\n",
            stats.refactor_supernode_update_disabled,

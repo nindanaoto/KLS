@@ -8147,3 +8147,34 @@ rows in `1.50 MB`, `ASIC_100ks` has `160,299` runs and `1,148,099` rows in
 compact TRSV counters on all five rows, so the small-BLAS-call hypothesis is
 not active on these losses; the next useful implementation step is a numeric
 executor that consumes this retained producer-panel plan.
+
+The retained consumer plan can now drive an opt-in cached-panel executor with
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1`. The executor builds the
+same retained plan, adds a current-column lookup index, uses planned
+`(current, producer, run_rows)` entries to select cached producer-panel updates,
+and records attempt/hit/applied counters. The producer-panel cache pruning step
+also consumes the retained plan directly instead of rediscovering every
+contiguous run from U. Correctness remained clean: the `rajat03` smoke applied
+`44` planned runs and `1,310` rows on the first refactor, then disabled the
+executor after the low-coverage clean pass; the final relative residual was
+about `3.9e-15`.
+
+The focused top-five result rejects this cached-panel executor as the missing
+CKTSO mechanism. The unguarded plan executor was correct but slower
+(`8.54s` geomean in
+`build/kls_consumer_plan_exec2_current_gap5_t4_r1_ref3_timeout120.jsonl`).
+After adding the structural coverage guard, the same focus set measured
+`7.67s` in
+`build/kls_consumer_plan_exec_guard_current_gap5_t4_r1_ref3_timeout120.jsonl`,
+slightly slower than the same-binary no-env control at `7.62s` in
+`build/kls_consumer_plan_exec_guard_default_current_gap5_t4_r1_ref3_timeout120.jsonl`.
+The counters explain why the path is insufficient: `ASIC_320ks` applied only
+`48,841` of `897,255` retained plan rows, `onetone2` applied `26,108` of
+`431,440`, `ASIC_100ks` applied `39,436` of `1,148,099`, and `G2_circuit`
+applied `65,265` of `5,569,687`; `ASIC_320k` found hits but no planned run
+passed the cached-panel executor's shape/work gates. This is a direct
+paper-gap result, not a small tuning result: KLS can now retain and execute
+planned producer-panel runs, but the existing completed-panel cache covers only
+a tiny fraction of the reusable work. Closing the CKTSO gap requires a broader
+row-major or persistent-consumer accumulator that can consume the retained plan
+beyond the current equal-trailing cached-panel shape.
