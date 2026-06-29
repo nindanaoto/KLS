@@ -9976,3 +9976,36 @@ object from structural-only storage into numeric storage; the remaining
 paper-level gap is now the executor that claims compatible current columns,
 uses these published panels, and skips the old scalar replay for those claimed
 columns.
+
+The retained group-L cache now also has an opt-in single-current-column
+executor gate behind
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_EXEC=1`. The executor adds a
+run-to-group map, uses the retained exact-shape dense/ragged L values when a
+current U dependency stream exactly matches a retained run, and reports
+separate structural executable-run and applied-update counters. It deliberately
+reuses the existing native ragged-supernode work gate and adds a structural
+minimum of `1024` executable retained runs before allocating/publishing numeric
+group-L values for exec-only runs.
+
+Validation:
+
+- `cmake --build build -j4` completed, with the same non-fatal long JSON
+  format-string warnings in `bench/kls_bench.c`.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- The current-build default top-ten control
+  `build/kls_group_exec_default_current_gap10_t4_r1_ref3_timeout120.jsonl`
+  completed with no failed matrices and measured `2.18820s` geomean.
+- The guarded group-exec top-ten run
+  `build/kls_group_exec_minguard_gap10_t4_r1_ref3_timeout120.jsonl` completed
+  with no failed matrices and measured `2.22099s` geomean.
+
+The important result is negative and algorithmic: the top-ten focus has large
+exact-shape cache coverage, but the single-run executor finds no worthwhile
+per-current updates. Only `onetone1` reports any structurally executable
+single-run groups (`63` runs, `34,650` rows), below the amortization guard, and
+all matrices report zero applied group-L update rows. This explains why the
+ungated probe regressed badly: it performed retained-plan lookups without
+skipping scalar replay. The paper-aligned missing piece is therefore not more
+single-run lookup tuning; it is a true grouped/batched executor that claims and
+updates many same-shape consumers together, amortizing the retained producer
+panel over a group as in the paper algorithms.

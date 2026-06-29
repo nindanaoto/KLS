@@ -695,6 +695,8 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_group_l_run_count;
   int64_t refactor_supernode_consumer_plan_group_l_rows;
   int64_t refactor_supernode_consumer_plan_group_l_run_rows;
+  int64_t refactor_supernode_consumer_plan_group_l_exec_run_count;
+  int64_t refactor_supernode_consumer_plan_group_l_exec_run_rows;
   int64_t refactor_supernode_consumer_plan_group_l_dense_entries;
   int64_t refactor_supernode_consumer_plan_group_l_trailing_entries;
   int64_t refactor_supernode_consumer_plan_group_l_bytes;
@@ -704,6 +706,12 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_group_l_dense_write_count;
   int64_t refactor_supernode_consumer_plan_group_l_trailing_write_count;
   int64_t refactor_supernode_consumer_plan_group_l_invalidation_count;
+  int64_t refactor_last_supernode_consumer_plan_group_l_update_runs;
+  int64_t refactor_last_supernode_consumer_plan_group_l_update_rows;
+  int64_t refactor_last_supernode_consumer_plan_group_l_update_entries;
+  int64_t refactor_supernode_consumer_plan_group_l_update_run_count;
+  int64_t refactor_supernode_consumer_plan_group_l_update_rows;
+  int64_t refactor_supernode_consumer_plan_group_l_update_entries;
   int64_t refactor_supernode_consumer_plan_deferred_columns;
   int64_t refactor_supernode_consumer_plan_deferred_entries;
   int64_t refactor_supernode_consumer_plan_deferred_unique_rows;
