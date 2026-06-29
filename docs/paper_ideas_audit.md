@@ -10486,3 +10486,15 @@ reproduced the same `594` groups, `13,980` selected runs/current columns,
 This still is not the final numeric batch executor, but the scheduler and
 kernel no longer have to infer sibling current columns by rescanning the whole
 consumer plan.
+
+The retained group map now also carries the execution metadata needed by that
+future batch kernel. Each selected run stores its exact Algorithm 5 prefix-row
+count, each payoff group stores total and max prefix rows, and stats report how
+many grouped runs already have retained dependency positions. The focused
+artifact `build/kls_alg5_execmeta_plan_gap10_t4_r1_ref3_timeout120.jsonl`
+verified that the grouped metadata exactly matches the selected payoff surface:
+`594` groups, `13,980` selected runs/current columns, `670,921` retained
+group-prefix rows, and `13,980` positioned grouped runs. The largest retained
+per-run prefix has `546` rows. The remaining missing piece is therefore the
+numeric multi-current workspace/publish kernel itself, not plan discovery,
+prefix-length recovery, or dependency-position lookup.
