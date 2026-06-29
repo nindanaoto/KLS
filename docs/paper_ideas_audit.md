@@ -8954,3 +8954,25 @@ rejects both the timeout-limit and ordering-only explanations for `pre2`: KLS
 is entering the correct dominant block, and METIS can provide separator
 coverage, but the current KLS numeric executor still does not implement the
 coarse CKTSO/SubtreeLU row/supernode work inside that block.
+
+The next `pre2` probe sampled the METIS path under `gdb` and found a more
+specific serialization point inside that numeric executor. The interrupted run
+had one pipeline worker in `kls_row_first_supernodes_reset()` while the other
+pipeline workers waited on the same mutex. That reset was rebuilding the
+completed-prefix row-supernode map after a pivot; in the separator-queue case,
+the completed prefix is almost the whole 629,628-row dominant block. KLS now
+keeps the small-prefix behavior but, once the completed prefix reaches the
+existing 32k-row prefix-cache rebuild cutoff, invalidates the speculative
+row-supernode accelerator and continues with scalar dependency updates instead
+of rescanning the huge prefix under the pipeline lock. A fast forced-first
+`transient` run still completed with a valid residual (`relative_residual_l2`
+about `3.44e-13`) and comparable timing. On `pre2`, the METIS forced-first
+120s run now emitted the dominant-block trace a second time, showing the first
+factor completed and the measured factor started; before this change the same
+bounded run timed out before that point. A 240s `pre2` METIS factor-only run
+still timed out during the measured factor, however, and the new stack sample
+moved to `kls_row_first_partial_apply_one_dep()` with other pipeline workers
+waiting. The default AMD forced-first path still timed out before a second
+trace. This narrows the next CKTSO/SubtreeLU gap further: after avoiding the
+large prefix supernode reset, KLS still serializes too much dependency-row
+numeric update work behind the pipeline mutex.

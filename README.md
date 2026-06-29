@@ -1681,6 +1681,17 @@ METIS enters the same block with separator coverage but still exceeds the
 factor, one refactor, and solve in about 21s wall time, so the remaining gap is
 not the timeout limit or BLAS thresholding; it is the missing CKTSO/SubtreeLU
 coarse row/supernode numeric executor inside that dominant block.
+The METIS dominant-block path now avoids rebuilding the whole completed-prefix
+row-supernode map after large-prefix pivot events. Once the completed prefix is
+past the existing 32k-row cache rebuild cutoff, KLS invalidates the speculative
+row-supernode accelerator and continues with scalar dependency application
+instead of rescanning nearly the full 629k-row `pre2` block while holding the
+pipeline mutex. This is only a partial fix: the `pre2` METIS forced-first run
+now reaches a second factor trace within the 120s cap, but a 240s
+factor-only run still times out during the measured factor, and a stack sample
+then shows the next bottleneck in `kls_row_first_partial_apply_one_dep` with
+other pipeline workers waiting. The default AMD path still times out before a
+second factor trace because it lacks separator-private coverage.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
