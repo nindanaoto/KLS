@@ -8609,3 +8609,47 @@ confirmed the retirement path: after three refactors it reported
 `row_refactor_native_row_panel_auto_disabled=1`,
 `row_refactor_native_row_panel_auto_disable_count=1`, six native panels / 200
 rows from the first run, and zero compact-supernode or partial-pipeline reuse.
+
+A same-source rerun then checked whether the remaining top-ten gap could be
+explained by small BLAS calls. It cannot: the default benchmark binary again
+reported `build_has_cblas=false`, and every focused row reported zero external
+CBLAS update counters. The optional CBLAS paths are already large-case gated
+behind the build option, the runtime `KLS_ENABLE_CBLAS_SUPERNODE=1` switch,
+512-scale shape checks, and multi-million-operation work thresholds, so an
+additional "BLAS only for large cases" guard would be a no-op for these rows.
+
+The retained code change is instead a narrow structural auto-row-refactor
+escape hatch for small dominant-BTF cases. KLS now lets the row-refactor
+pattern pass the lower-bound and work-ratio gates when the matrix is
+moderately sized, has no off-diagonal pivots, and has one dominant BTF block;
+that shape is where the EGraph refactor was losing to the forced row path.
+For that internally selected shape, native row-panel `auto` is enabled without
+changing the global `KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR` default. Diagnostic
+save/restore now also carries the internal native-panel auto flag with the
+row-refactor auto state.
+
+Validation for the small dominant-BTF gate:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- Single-pass top-ten candidate:
+  `build/kls_small_dombtf_rowauto_gap10_t4_r1_ref3_timeout120.jsonl`,
+  geomean `6.3066s`; `rajat03` switched to `last_refactor_path=row_refactor`,
+  used 18 native panels / 600 rows, and reported zero CBLAS calls.
+- Same-binary row-refactor-disabled control:
+  `build/kls_rowauto_disabled_samebin_gap10_t4_r1_ref3_timeout120.jsonl`,
+  geomean `4.5419s`; this run had large unchanged-row timing swings, so it was
+  not used alone for the policy decision.
+- Pass-3 median candidate:
+  `build/kls_small_dombtf_rowauto_gap10_t4_r1_ref3_pass3_timeout120.jsonl`,
+  geomean `6.0088s`; `rajat03` measured `0.7027s`.
+- Pass-3 median row-refactor-disabled control:
+  `build/kls_rowauto_disabled_samebin_gap10_t4_r1_ref3_pass3_timeout120.jsonl`,
+  geomean `5.9559s`; `rajat03` measured `3.4663s`.
+
+This is a local improvement, not a CKTSO-gap closer. Against
+`build/cktso_paper_medium93_t4_timeout120.jsonl`, the pass-3 candidate remains
+`6.409x` slower on the common top-ten set, with `rajat03` still `13.98x`
+slower than CKTSO despite the row-path win. The missing paper-scale piece is
+therefore still the durable row/segment numeric storage and executor that
+creates reusable coarse work broadly, not BLAS dispatch size.
