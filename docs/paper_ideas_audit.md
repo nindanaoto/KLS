@@ -9230,3 +9230,42 @@ therefore run noise or unrelated branch effects, not evidence that BLAS
 granularity is active. The existing CBLAS call sites already require the
 runtime gate plus 512-scale row/vector or panel checks and multi-million-work
 thresholds; another "large only" guard would not affect these rows.
+
+The next direct supernode-gap prototype builds the U-supernode ragged-L panel
+pattern from the retained consumer plan instead of from the narrower
+`supernode_pipeline_end` candidate map. Set
+`KLS_ENABLE_REFACTOR_U_SUPERNODE_PLAN_PATTERN=1` together with
+`KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1` to select this path. The schedule
+now forces the retained consumer plan when the plan-pattern probe is requested,
+then populates the existing ragged-L panel storage from each planned producer
+panel's maximum retained run width. The executor also caps a ragged update to
+the exact retained `(current, dependency)` plan run when the plan-derived
+pattern is active. Existing default and old ragged modes still use the original
+`supernode_pipeline_end` source.
+
+Validation for the implementation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- On the saved top-five CKTSO-gap focus, the current default measured
+  `1.53003s` geomean in
+  `build/kls_planpattern_default_gap5_t4_r1_ref3_timeout120.jsonl`, the old
+  ragged path measured `1.61840s` in
+  `build/kls_planpattern_oldragged_gap5_t4_r1_ref3_timeout120.jsonl`, and the
+  plan-derived ragged path measured `1.63377s` in
+  `build/kls_planpattern_ragged_gap5_t4_r1_ref3_timeout120.jsonl`.
+- On the top-ten CKTSO-gap focus,
+  `build/kls_planpattern_ragged_gap10_t4_r1_ref3_timeout120.jsonl` measured
+  `2.68365s` geomean, `1.251x` slower than
+  `build/kls_default_after_ragged_guard_gap10_t4_r1_ref3_timeout120.jsonl`.
+
+This rejects a tempting direct reading of the retained-plan opportunity. The
+top-ten plan-pattern run exposed `750,247` retained consumer runs over
+`6,285,128` planned rows and about `1.754B` planned L entries, but it still
+applied only `2,001` ragged updates over `357,981` rows before disabling on
+nine of ten matrices. The retained plan therefore is not missing merely because
+the panel map starts from `supernode_pipeline_end`; the larger missing
+algorithm is the CKTSO/SubtreeLU-style batching step that groups many planned
+small consumer runs against persistent producer/output storage. Single-run
+ragged triangular updates remain too sparse and too probe-heavy even when their
+panel ranges come from the broad consumer plan.
