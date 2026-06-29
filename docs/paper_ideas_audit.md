@@ -9059,3 +9059,30 @@ run is still `2.1896x` slower than CKTSO on the common rows. This change removes
 a self-inflicted selector loss, but it does not close the main CKTSO gap: the
 remaining losses are still the EGraph scalar update kernels and the missing
 production row/supernode numeric executor.
+
+An EGraph tail-wait experiment tested whether CKTSO's cluster/pipeline split was
+leaving avoidable dependency waits in KLS. The idea was valid: cluster levels
+complete under barriers before the pipeline tail starts, so tail columns do not
+need to spin on predecessors that belong to the completed cluster prefix. Three
+variants were tried: an ungated pipeline-column flag, a boundary-edge gated flag,
+and a simpler split-prefix flag enabled only when `cluster_levels > 0`.
+
+The experiment was rejected as a source change. The ungated run
+`build/kls_tail_wait_flag_gap20_t4_r1_ref3_timeout120.jsonl` measured
+`1.87993s` geomean versus the strict row lower-bound baseline at `1.92561s`, but
+the wins included all-pipeline matrices where the flag cannot skip any waits,
+so that result was not a defensible algorithmic signal. The boundary-gated run
+`build/kls_tail_wait_flag_diffgate_gap20_t4_r1_ref3_timeout120.jsonl` measured
+`1.90098s` geomean, still had 7 losses over 2%, and remained `2.1615x` slower
+than CKTSO. The simpler split-prefix run
+`build/kls_tail_wait_splitflag_gap20_t4_r1_ref3_timeout120.jsonl` measured
+`1.92149s`, effectively the same as strict KLS. The source was therefore left at
+the strict row lower-bound gate rather than retaining a noisy scheduler tweak.
+
+This also keeps the BLAS hypothesis bounded. The measured retained build reports
+`build_has_cblas=false`, and the earlier same-binary CBLAS checks reported zero
+CBLAS update counters even when CBLAS was enabled. The proposed "use BLAS only
+for large cases" policy is already implemented for the optional CBLAS paths and
+is not active in the current CKTSO-gap losses. The main gap is still coarse
+numeric work aggregation inside the dominant blocks, not BLAS thresholding or
+tail-wait bookkeeping.
