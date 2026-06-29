@@ -9936,3 +9936,43 @@ the normal non-CBLAS build with zero CBLAS calls. This strengthens the current
 gap diagnosis: a high-coverage retained producer-panel object is feasible, but
 KLS still needs the value-publish and grouped executor that consumes these
 panels instead of replaying the scalar current-column path.
+
+The retained exact-shape producer L-cache now has a numeric publication layer.
+The cache builder also creates a producer-column map from each completed L
+column to the retained exact-shape groups and local rows that contain it. Under
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_CACHE=1`, the EGraph
+refactor publishes the freshly computed L values into the cached dense internal
+rows and ragged trailing rows at the same column-completion points used by the
+existing U-supernode and cached-panel publishers. The cache remains opt-in and
+is still not consumed by a grouped executor.
+
+Validation:
+
+- `cmake --build build -j4` completed. The benchmark executable now reports
+  two long JSON format-string warnings in `bench/kls_bench.c`; they are
+  non-fatal and come from the expanded diagnostic JSON fields.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_CACHE=1 ./build/kls_smoke`
+  passed.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1
+  KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_CACHE=1 ./build/kls_smoke`
+  passed.
+- The top-ten opt-in publish run
+  `build/kls_group_l_publish_gap10_t4_r1_ref3_timeout120.jsonl` completed with
+  no failed matrices and measured `2.26451s` geomean.
+- The same-source default control
+  `build/kls_group_l_publish_default_gap10_t4_r1_ref3_timeout120.jsonl`
+  completed with no failed matrices and measured `2.25914s` geomean.
+
+The publish run wrote `1,716,223` dense cached values and `18,534,182` ragged
+trailing cached values across the top-ten focus, while retaining the same
+structural coverage as the prior cache run: `38,782` cached exact-shape groups,
+`704,933` covered grouped runs, and `5,314,536` covered grouped run rows. It
+recorded `45` cumulative group invalidations across repeated refactors, all
+left disabled for fallback instead of being used by future grouped execution.
+The default control kept the cache disabled (`group_l_built=0`) with zero group
+L writes and zero CBLAS calls. This turns the high-coverage retained producer
+object from structural-only storage into numeric storage; the remaining
+paper-level gap is now the executor that claims compatible current columns,
+uses these published panels, and skips the old scalar replay for those claimed
+columns.

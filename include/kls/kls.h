@@ -698,6 +698,12 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_group_l_dense_entries;
   int64_t refactor_supernode_consumer_plan_group_l_trailing_entries;
   int64_t refactor_supernode_consumer_plan_group_l_bytes;
+  int64_t refactor_last_supernode_consumer_plan_group_l_dense_writes;
+  int64_t refactor_last_supernode_consumer_plan_group_l_trailing_writes;
+  int64_t refactor_last_supernode_consumer_plan_group_l_invalidations;
+  int64_t refactor_supernode_consumer_plan_group_l_dense_write_count;
+  int64_t refactor_supernode_consumer_plan_group_l_trailing_write_count;
+  int64_t refactor_supernode_consumer_plan_group_l_invalidation_count;
   int64_t refactor_supernode_consumer_plan_deferred_columns;
   int64_t refactor_supernode_consumer_plan_deferred_entries;
   int64_t refactor_supernode_consumer_plan_deferred_unique_rows;
