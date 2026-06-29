@@ -47607,11 +47607,55 @@ static int kls_egraph_refactor_btf_unscaled_column(
   const int supernode_numeric_updates = shared->supernode_numeric_updates;
   const int consumer_plan_group_l_updates =
     shared->supernode_consumer_plan_group_l_exec;
+  const int consumer_plan_group_l_values =
+    shared->supernode_consumer_plan_group_l_values;
   const int u_supernode_ragged_l_updates =
     shared->u_supernode_ragged_l_updates;
+  const int u_supernode_values = shared->u_supernode_values;
+  const int plain_scalar_updates =
+    !supernode_numeric_updates && !consumer_plan_group_l_updates &&
+    !u_supernode_ragged_l_updates && !u_supernode_values;
+  const UF_long *llen = numeric->Llen + k1;
   /* Cluster columns already have their predecessors published; keep that
      CKTSO-style cluster loop free of the per-entry wait check used below. */
-  if (wait_for_dependencies) {
+  if (plain_scalar_updates) {
+    if (wait_for_dependencies) {
+      while (up < ucol_len) {
+        const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+        if (!kls_egraph_refactor_wait_done(shared, k1 + j)) {
+          return 0;
+        }
+        const double ujk = x[j];
+        x[j] = 0.0;
+        ux[up] = ujk;
+
+        if (ujk != 0.0) {
+          UF_long *li = l_indices[k1 + j];
+          double *lx = l_values[k1 + j];
+          UF_long lcol_len = llen[j];
+          kls_scatter_subtract_refactor_l(solver, x, k1 + j, li, lx,
+                                          lcol_len, ujk);
+        }
+        up++;
+      }
+    } else {
+      while (up < ucol_len) {
+        const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+        const double ujk = x[j];
+        x[j] = 0.0;
+        ux[up] = ujk;
+
+        if (ujk != 0.0) {
+          UF_long *li = l_indices[k1 + j];
+          double *lx = l_values[k1 + j];
+          UF_long lcol_len = llen[j];
+          kls_scatter_subtract_refactor_l(solver, x, k1 + j, li, lx,
+                                          lcol_len, ujk);
+        }
+        up++;
+      }
+    }
+  } else if (wait_for_dependencies) {
     while (up < ucol_len) {
       if (supernode_numeric_updates) {
         const int supernode_status =
@@ -47654,14 +47698,14 @@ static int kls_egraph_refactor_btf_unscaled_column(
       const double ujk = x[j];
       x[j] = 0.0;
       ux[up] = ujk;
-      if (shared->u_supernode_values) {
+      if (u_supernode_values) {
         kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
       }
 
       if (ujk != 0.0) {
         UF_long *li = l_indices[k1 + j];
         double *lx = l_values[k1 + j];
-        UF_long lcol_len = numeric->Llen[k1 + j];
+        UF_long lcol_len = llen[j];
         kls_scatter_subtract_refactor_l(solver, x, k1 + j, li, lx, lcol_len,
                                         ujk);
       }
@@ -47707,14 +47751,14 @@ static int kls_egraph_refactor_btf_unscaled_column(
       const double ujk = x[j];
       x[j] = 0.0;
       ux[up] = ujk;
-      if (shared->u_supernode_values) {
+      if (u_supernode_values) {
         kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
       }
 
       if (ujk != 0.0) {
         UF_long *li = l_indices[k1 + j];
         double *lx = l_values[k1 + j];
-        UF_long lcol_len = numeric->Llen[k1 + j];
+        UF_long lcol_len = llen[j];
         kls_scatter_subtract_refactor_l(solver, x, k1 + j, li, lx, lcol_len,
                                         ujk);
       }
@@ -47731,13 +47775,13 @@ static int kls_egraph_refactor_btf_unscaled_column(
     }
   }
   udiag[k] = ukk;
-  if (shared->u_supernode_values) {
+  if (u_supernode_values) {
     kls_egraph_record_u_supernode_value(shared, k, k, ukk);
   }
 
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
-  UF_long lcol_len = numeric->Llen[k];
+  UF_long lcol_len = llen[local_k];
   UF_long rejected_row = KLS_KLU_EMPTY;
   UF_long rejected_local_row = KLS_KLU_EMPTY;
   double rejected_multiplier_abs = -1.0;
@@ -47758,8 +47802,12 @@ static int kls_egraph_refactor_btf_unscaled_column(
   }
   kls_egraph_store_l_column_from_workspace(solver, x, k, li, lx, lcol_len,
                                            ukk);
-  kls_egraph_publish_u_supernode_l_column(shared, k);
-  kls_egraph_publish_consumer_plan_group_l_column(shared, k);
+  if (u_supernode_ragged_l_updates) {
+    kls_egraph_publish_u_supernode_l_column(shared, k);
+  }
+  if (consumer_plan_group_l_values) {
+    kls_egraph_publish_consumer_plan_group_l_column(shared, k);
+  }
   if (supernode_numeric_updates) {
     kls_egraph_publish_supernode_panel_column(shared, k);
   }

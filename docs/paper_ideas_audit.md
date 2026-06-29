@@ -10312,3 +10312,20 @@ CKTSO-gap check also completed without failures at `1.4545s` geomean in
 `build/kls_cblas_update_guard_final_gap5_t4_r1_ref3_timeout120.jsonl`. The
 guard is retained as a safe policy bound rather than as evidence that BLAS
 thresholding closes the paper gap.
+
+The next retained cleanup splits the unscaled BTF EGraph column kernel into a
+plain scalar loop when all optional supernode, group-L, ragged-L, and
+U-supernode value hooks are disabled. The default CKTSO-gap path was paying
+those disabled hook branches on every U-stream dependency even in non-CBLAS
+runs. The hook-capable loop is unchanged for experimental modes, while the
+plain path still uses the same exact EGraph schedule and KLU-compatible
+column storage. Validation passed `cmake --build build -j4`,
+`ctest --test-dir build --output-on-failure`, and `git diff --check`.
+Focused top-five reruns measured `1.4181s` and `1.4180s` geomean in
+`build/kls_plain_btf_branch_gap5*_t4_r1_ref3_timeout120.jsonl`; the top-ten
+continuation comparison measured `2.1172s` geomean versus `2.1949s` for
+`build/kls_current_gap10_continuation_t4_r1_ref3_timeout120.jsonl`. This is
+kept as low-risk hot-path cleanup only. The remaining slow rows still run the
+scalar EGraph executor, so the paper-sized gap remains the missing
+row/segment-oriented grouped numeric engine and checked pivoting-tail
+scheduler, not BLAS granularity or disabled-hook branch overhead.
