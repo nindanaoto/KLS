@@ -10684,3 +10684,33 @@ show nonzero retained advance spans alongside the existing target spans:
 entries; `ASIC_320k` has `121`, `194,219`, and `48,674,072`; `ASIC_100ks` has
 `102`, `32,849`, and `4,668,124`. `gemat12` and `rajat03` remain mapped-path
 rows with zero Algorithm 5 payoff groups.
+
+KLS now separates the retained Algorithm 5 target-entry work volume from the
+exact accumulator slots a grouped executor would need to publish. Selected
+payoff runs retain a target-slot offset, each group retains its target-slot
+span, and `group_target_cols` stores those slots as compact local workspace row
+indices. Dense suffix slots are retained directly; L-trailing rows are stamped
+per selected run so duplicated rows become one accumulator/publish position for
+that run. The existing scalar opt-in path validates target-entry, target-slot,
+and advance-span ownership before accepting a selected run, but the numeric
+kernel remains unchanged. This is paper-aligned descriptor work, not BLAS
+threshold tuning.
+
+Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`, `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE=1 ./build/kls_smoke`.
+The top-five CKTSO-gap probe
+`build/kls_alg5_target_slots_gap5_t4_r1_ref3_timeout120.jsonl` completed with
+no failures and `1.8057280532263165s` geomean. The hard ASIC EGraph rows show
+why slot-indexed accumulation is the right next step: `ASIC_320ks` has
+`46,839,997` target entries but only `784,673` target slots
+(`67,651` max group, `492` max run), `ASIC_320k` has `48,674,072` entries but
+`971,718` slots (`96,854` max group, `598` max run), and `ASIC_100ks` has
+`4,668,124` entries but `188,230` slots (`22,332` max group, `615` max run).
+The next CKTSO-paper gap remains the true grouped multi-current executor:
+allocate current workspaces and slot-indexed accumulators from these retained
+offsets, batch prefix advancement across the group, then publish the accumulated
+dense-suffix and L-trailing updates without replaying each current column as a
+scalar EGraph task.

@@ -925,19 +925,25 @@ workspaces without rediscovering the group shape. Benchmark JSON reports
 `refactor_supernode_algorithm5_payoff_group_max_target_entries`, and
 `refactor_supernode_algorithm5_payoff_group_max_run_target_entries`, which
 count the dense suffix and L-trailing update surface that a retained
-multi-current accumulator would have to address after the selected producer
-prefix. The retained descriptor also stores each selected run's target offset
-inside that aggregate surface and each group's pattern width and target-entry
-span; benchmark output reports the pattern-width sum and maximum as
+multi-current accumulator would have to apply after the selected producer
+prefix. The retained descriptor also stores each selected run's target-entry
+offset, each run's exact target-slot offset, and each group's target-slot span;
+the slot counters
+`refactor_supernode_algorithm5_payoff_group_target_slots`,
+`refactor_supernode_algorithm5_payoff_group_max_target_slots`, and
+`refactor_supernode_algorithm5_payoff_group_max_run_target_slots` count the
+deduplicated accumulator/publish positions retained in `group_target_cols`.
+Benchmark output reports the pattern-width sum and maximum as
 `refactor_supernode_algorithm5_payoff_group_pattern_width` and
 `refactor_supernode_algorithm5_payoff_group_max_pattern_width`. These counters
 estimate the number of distinct current-column workspaces, compact prefix
-workspace rows, addressable target accumulator entries, and prefix-advance
-dependencies a real Algorithm 5 batch would need. On the slow ASIC diagnostics,
-zero-advance selected runs are rare or absent, so the next paper-aligned
-executor has to batch prefix advancement before the shared producer update
-rather than relying on a first-dependency shortcut. These counters do not enable
-the old per-current scalar replay by default.
+workspace rows, addressable target accumulator slots, retained update-entry
+work, and prefix-advance dependencies a real Algorithm 5 batch would need. On
+the slow ASIC diagnostics, zero-advance selected runs are rare or absent, so the
+next paper-aligned executor has to batch prefix advancement before the shared
+producer update rather than relying on a first-dependency shortcut or BLAS
+threshold tuning. These counters do not enable the old per-current scalar replay
+by default.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and
