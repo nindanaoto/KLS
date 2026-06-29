@@ -8844,6 +8844,19 @@ batched-supernode counters also stayed at zero on both rows. An additional
 active row-refactor gap is still in the scalar native/compact panel executor
 and value writeback, not in small external BLAS dispatch.
 
+The native row-panel off control itself was then corrected so
+`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=0` cannot be promoted back to structural
+auto mode by `row_refactor_auto_native_row_panel`. Unset still keeps the
+current structural default, `auto` requests the auto gate, and `1` forces
+eligible retained panels. With the corrected explicit off state,
+`build/kls_native_forced_off_coupled_rajat03_t4_r1_ref3_pass3_timeout120.jsonl`
+measured `0.4508s` geomean on `coupled`/`rajat03`; native-panel counters were
+zero as intended. The same-source default rerun in
+`build/kls_default_after_native_env_fix_coupled_rajat03_t4_r1_ref3_pass3_timeout120.jsonl`
+measured `0.4158s` geomean and still reported zero external CBLAS calls. This
+rejects a scalar/off guard for these small panels; the retained native panel
+path is not the main reason for the CKTSO gap on the focused pair.
+
 The same focused rows were then checked against the SubtreeLU Algorithm 6
 private/pipeline queue idea. The default artifacts showed
 `separator_analyzed_rows=0` for both `coupled` and `rajat03`; KLS's retained
