@@ -48718,19 +48718,18 @@ cleanup:
   return ok;
 }
 
-static int kls_build_first_separator_queue_plan_legacy(
+static int kls_build_first_separator_queue_plan_legacy_from_counts(
   const kls_solver *solver,
   UF_long k1,
   UF_long k2,
   int thread_count,
+  const UF_long *row_input_count,
   kls_first_separator_queue_plan *plan) {
   if (plan != NULL) {
     memset(plan, 0, sizeof(*plan));
   }
-  if (solver == NULL || solver->symbolic == NULL || plan == NULL ||
+  if (solver == NULL || plan == NULL || row_input_count == NULL ||
       thread_count <= 1 || k2 <= k1 || k2 > solver->n ||
-      solver->col_ptr == NULL || solver->row_idx == NULL ||
-      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
       !kls_separator_analysis_has_global_range(&solver->separator) ||
       solver->separator.component_count <= 1u ||
       solver->separator.component_kind == NULL ||
@@ -48747,20 +48746,16 @@ static int kls_build_first_separator_queue_plan_legacy(
   if (local_end > separator->n || component_count > (UF_long)UINT_MAX) {
     return 0;
   }
-  const UF_long n = solver->n;
   const size_t component_count_size = (size_t)component_count;
   const size_t thread_count_size = (size_t)thread_count;
-  const size_t n_size = (size_t)n;
   const UF_long block_rows = k2 - k1;
   if ((UF_long)component_count_size != component_count ||
       (UF_long)thread_count_size != (UF_long)thread_count ||
-      (UF_long)n_size != n ||
       component_count_size > SIZE_MAX / sizeof(UF_long) ||
       component_count_size > SIZE_MAX / sizeof(int) ||
       component_count_size > SIZE_MAX / sizeof(double) ||
       component_count_size >
         SIZE_MAX / sizeof(kls_first_separator_component_entry) ||
-      n_size > SIZE_MAX / sizeof(UF_long) ||
       block_rows > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
       thread_count_size > (SIZE_MAX / sizeof(UF_long)) - 1u ||
       thread_count_size > SIZE_MAX / sizeof(double)) {
@@ -48783,52 +48778,17 @@ static int kls_build_first_separator_queue_plan_legacy(
     (UF_long *)calloc(thread_count_size, sizeof(*thread_counts));
   double *thread_work =
     (double *)calloc(thread_count_size, sizeof(*thread_work));
-  UF_long *symbolic_pos_by_row =
-    (UF_long *)malloc(n_size * sizeof(*symbolic_pos_by_row));
-  UF_long *row_input_count =
-    (UF_long *)calloc((size_t)block_rows, sizeof(*row_input_count));
   UF_long *thread_ptr = NULL;
   UF_long *private_queue = NULL;
   UF_long *pipeline_queue = NULL;
   if (component_private_rows == NULL || component_pipeline_rows == NULL ||
       component_work == NULL || component_thread == NULL ||
       private_components == NULL || thread_counts == NULL ||
-      thread_work == NULL || symbolic_pos_by_row == NULL ||
-      row_input_count == NULL) {
+      thread_work == NULL) {
     goto cleanup;
   }
   for (UF_long component = 0; component < component_count; ++component) {
     component_thread[component] = -1;
-  }
-  for (UF_long row = 0; row < n; ++row) {
-    symbolic_pos_by_row[row] = KLS_KLU_EMPTY;
-  }
-  for (UF_long pos = 0; pos < n; ++pos) {
-    const UF_long row = solver->symbolic->P[pos];
-    if (row >= n || symbolic_pos_by_row[row] != KLS_KLU_EMPTY) {
-      goto cleanup;
-    }
-    symbolic_pos_by_row[row] = pos;
-  }
-
-  for (UF_long local_col = 0; local_col < block_rows; ++local_col) {
-    const UF_long oldcol = solver->symbolic->Q[k1 + local_col];
-    if (oldcol >= n ||
-        solver->col_ptr[oldcol] > solver->col_ptr[oldcol + 1u] ||
-        solver->col_ptr[oldcol + 1u] > solver->nnz) {
-      goto cleanup;
-    }
-    for (UF_long p = solver->col_ptr[oldcol];
-         p < solver->col_ptr[oldcol + 1u]; ++p) {
-      const UF_long oldrow = solver->row_idx[p];
-      if (oldrow >= n) {
-        goto cleanup;
-      }
-      const UF_long row_pos = symbolic_pos_by_row[oldrow];
-      if (row_pos >= k1 && row_pos < k2) {
-        row_input_count[row_pos - k1]++;
-      }
-    }
   }
 
   UF_long private_rows = 0;
@@ -48983,11 +48943,83 @@ cleanup:
   free(private_components);
   free(thread_counts);
   free(thread_work);
-  free(symbolic_pos_by_row);
-  free(row_input_count);
   free(thread_ptr);
   free(private_queue);
   free(pipeline_queue);
+  return ok;
+}
+
+static int kls_build_first_separator_queue_plan_legacy(
+  const kls_solver *solver,
+  UF_long k1,
+  UF_long k2,
+  int thread_count,
+  kls_first_separator_queue_plan *plan) {
+  if (plan != NULL) {
+    memset(plan, 0, sizeof(*plan));
+  }
+  if (solver == NULL || solver->symbolic == NULL || plan == NULL ||
+      thread_count <= 1 || k2 <= k1 || k2 > solver->n ||
+      solver->col_ptr == NULL || solver->row_idx == NULL ||
+      solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
+      !kls_separator_analysis_has_global_range(&solver->separator)) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  const UF_long block_rows = k2 - k1;
+  const size_t n_size = (size_t)n;
+  if ((UF_long)n_size != n ||
+      n_size > SIZE_MAX / sizeof(UF_long) ||
+      block_rows > (UF_long)(SIZE_MAX / sizeof(UF_long))) {
+    return 0;
+  }
+
+  int ok = 0;
+  UF_long *symbolic_pos_by_row =
+    (UF_long *)malloc(n_size * sizeof(*symbolic_pos_by_row));
+  UF_long *row_input_count =
+    (UF_long *)calloc((size_t)block_rows, sizeof(*row_input_count));
+  if (symbolic_pos_by_row == NULL || row_input_count == NULL) {
+    goto cleanup;
+  }
+  for (UF_long row = 0; row < n; ++row) {
+    symbolic_pos_by_row[row] = KLS_KLU_EMPTY;
+  }
+  for (UF_long pos = 0; pos < n; ++pos) {
+    const UF_long row = solver->symbolic->P[pos];
+    if (row >= n || symbolic_pos_by_row[row] != KLS_KLU_EMPTY) {
+      goto cleanup;
+    }
+    symbolic_pos_by_row[row] = pos;
+  }
+
+  for (UF_long local_col = 0; local_col < block_rows; ++local_col) {
+    const UF_long oldcol = solver->symbolic->Q[k1 + local_col];
+    if (oldcol >= n ||
+        solver->col_ptr[oldcol] > solver->col_ptr[oldcol + 1u] ||
+        solver->col_ptr[oldcol + 1u] > solver->nnz) {
+      goto cleanup;
+    }
+    for (UF_long p = solver->col_ptr[oldcol];
+         p < solver->col_ptr[oldcol + 1u]; ++p) {
+      const UF_long oldrow = solver->row_idx[p];
+      if (oldrow >= n) {
+        goto cleanup;
+      }
+      const UF_long row_pos = symbolic_pos_by_row[oldrow];
+      if (row_pos >= k1 && row_pos < k2) {
+        row_input_count[row_pos - k1]++;
+      }
+    }
+  }
+
+  ok = kls_build_first_separator_queue_plan_legacy_from_counts(
+    solver, k1, k2, thread_count, row_input_count, plan);
+
+cleanup:
+  free(symbolic_pos_by_row);
+  free(row_input_count);
   return ok;
 }
 
@@ -49029,6 +49061,7 @@ static int kls_build_first_separator_queue_plan(
   }
 
   int ok = 0;
+  int counted = 0;
   UF_long *symbolic_pos_by_row =
     (UF_long *)malloc(n_size * sizeof(*symbolic_pos_by_row));
   UF_long *row_input_count =
@@ -49070,17 +49103,27 @@ static int kls_build_first_separator_queue_plan(
       }
     }
   }
+  counted = 1;
 
   ok = kls_build_first_separator_queue_plan_partitioned(
     solver, k1, k2, thread_count, row_input_count, plan);
 
 cleanup:
-  free(symbolic_pos_by_row);
-  free(row_input_count);
   if (ok) {
+    free(symbolic_pos_by_row);
+    free(row_input_count);
     return 1;
   }
   kls_first_separator_queue_plan_free(plan);
+  if (counted) {
+    ok = kls_build_first_separator_queue_plan_legacy_from_counts(
+      solver, k1, k2, thread_count, row_input_count, plan);
+    free(symbolic_pos_by_row);
+    free(row_input_count);
+    return ok;
+  }
+  free(symbolic_pos_by_row);
+  free(row_input_count);
   return kls_build_first_separator_queue_plan_legacy(
     solver, k1, k2, thread_count, plan);
 }
@@ -57074,8 +57117,10 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
             k1, nk, n, row_ptr, row_cols, col_pos, &separator_plan,
             solver->options.threads)) {
         kls_first_separator_queue_plan_free(&separator_plan);
-        have_separator_plan = kls_build_first_separator_queue_plan_legacy(
-          solver, k1, k2, solver->options.threads, &separator_plan);
+        have_separator_plan =
+          kls_build_first_separator_queue_plan_legacy_from_counts(
+            solver, k1, k2, solver->options.threads, row_counts,
+            &separator_plan);
       }
       if (have_separator_plan) {
         row_order = (UF_long *)malloc((size_t)nk * sizeof(*row_order));

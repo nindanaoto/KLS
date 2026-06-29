@@ -1692,6 +1692,15 @@ factor-only run still times out during the measured factor, and a stack sample
 then shows the next bottleneck in `kls_row_first_partial_apply_one_dep` with
 other pipeline workers waiting. The default AMD path still times out before a
 second factor trace because it lacks separator-private coverage.
+KLS also reuses the already computed row-input counts when the METIS
+partitioned separator queue falls back to the legacy component-kind queue, and
+when a partitioned queue fails private-ownership validation. This removes a
+second full symbolic-row map build and column scan from the fallback path. A
+same-option `pre2` METIS forced-first rerun still times out at 120s after the
+second trace, and a post-fix interrupt sample again lands in scalar
+`kls_row_first_partial_apply_one_dep` with other pipeline workers waiting. This
+run was from a non-CBLAS build, so small BLAS call overhead is not the active
+blocker on this path.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
