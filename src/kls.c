@@ -47451,6 +47451,26 @@ static void kls_egraph_record_u_supernode_l_work_reject(
                             memory_order_relaxed);
 }
 
+static UF_long kls_egraph_algorithm5_split_available_end(
+  const kls_egraph_refactor_shared *shared,
+  UF_long panel_offset,
+  UF_long available_end) {
+  if (shared == NULL || !shared->u_supernode_ragged_l_updates ||
+      shared->thread_count <= 0 || available_end <= panel_offset) {
+    return available_end;
+  }
+
+  const UF_long run_rows = available_end - panel_offset;
+  const UF_long tail_rows = (UF_long)shared->thread_count;
+  if (tail_rows == 0u || tail_rows > UF_long_max / 2u ||
+      run_rows < 2u * tail_rows) {
+    return available_end;
+  }
+
+  const UF_long prefix_rows = run_rows - tail_rows;
+  return prefix_rows > 1u ? panel_offset + prefix_rows : available_end;
+}
+
 static void kls_egraph_disable_supernode_panel(kls_solver *solver,
                                                UF_long panel) {
   if (solver == NULL ||
@@ -48594,6 +48614,10 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
     }
   } else if (current_global < start + width) {
     available_end = current_global - start;
+  }
+  if (wait_for_dependencies && !shared->supernode_algorithm5_payoff_exec) {
+    available_end = kls_egraph_algorithm5_split_available_end(
+      shared, panel_offset, available_end);
   }
   if (available_end > width || available_end <= panel_offset + 1u) {
     kls_egraph_record_u_supernode_l_short_reject(shared);
