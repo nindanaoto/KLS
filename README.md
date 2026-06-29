@@ -901,6 +901,9 @@ their broader opportunistic probes.
 Algorithm 5 probe: it builds the retained plan, selects payoff-positive
 producer-prefix subsets, materializes those prefixes as the existing ragged
 U-supernode L pattern, and runs the ragged-L executor only for selected runs.
+That executor now addresses its scratch data through the retained
+group/current workspace map, so the opt-in numeric path exercises the same
+compact current-slot layout that a true multi-current batch kernel will need.
 This is also intentionally experimental and off by default; it tests whether
 the Algorithm 5 payoff surface is enough without a true multi-current batch
 executor.

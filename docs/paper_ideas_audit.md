@@ -10515,3 +10515,27 @@ group-prefix rows, and `13,980` positioned grouped runs. The largest retained
 per-run prefix has `546` rows. The remaining missing piece is therefore the
 numeric multi-current workspace/publish kernel itself, not plan discovery,
 prefix-length recovery, or dependency-position lookup.
+
+The next executable slice moved the opt-in ragged Algorithm 5 path onto that
+retained workspace layout. Under
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1`, a selected run now
+validates its group/current slot, allocates the group's compact current
+workspace extent, and executes through the mapped current-slot offset rather
+than a standalone run-sized scratch array. Correctness passed
+`cmake --build build -j4`, `ctest --test-dir build --output-on-failure`,
+`./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`.
+
+The focused top-ten CKTSO-gap check
+`build/kls_alg5_mapped_workspace_exec_gap10_t4_r1_ref3_timeout120.jsonl`
+completed without failures at `2.9601s` geomean, while the same-source default
+control `build/kls_mapped_workspace_default_gap10_t4_r1_ref3_timeout120.jsonl`
+measured `2.2298s`. The mapped path did execute numeric ragged updates on
+`rajat25` (`7` updates, `1,773` rows, `363,412` entries) and `onetone1`
+(`182` updates, `74,377` rows, `29.37M` entries), but the ASIC rows still only
+populated the retained multi-current workspace map. This confirms the remaining
+paper gap is not BLAS dispatch and not the workspace-addressing substrate; the
+missing CKTSO-scale mechanism is the actual multi-current executor that gathers
+and advances many current workspaces for one retained producer group before
+publishing them.
