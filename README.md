@@ -850,7 +850,11 @@ the scalar prefix work needed to reach an exact retained producer panel, and
 the subset where the grouped panel update work is at least that advance work.
 These are diagnostics for future grouped producer-panel execution; the default
 path does not build this cache unless the retained group-L cache experiment is
-enabled.
+enabled. The opt-in group-L batch executor only maps payoff-positive groups, so
+the batch path follows the same advance-work test instead of executing every
+reusable shape candidate. If one clean numeric pass covers only a small
+fraction of the retained group-L rows, later passes disable the batch executor
+and keep the cache as diagnostic evidence.
 Set `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached` to isolate only the durable
 cached-panel consumer and skip the per-consumer temporary panel reconstruction
 fallback used by the full `=1` experiment.
