@@ -2270,6 +2270,10 @@ int main(int argc, char **argv) {
            PRId64
            ",\"refactor_supernode_algorithm5_prefix_payoff_update_work\":%.9g"
            ",\"refactor_supernode_algorithm5_prefix_payoff_advance_work\":%.9g"
+           ",\"refactor_last_egraph_algorithm5_prefactor_columns\":%" PRId64
+           ",\"refactor_last_egraph_algorithm5_prefactor_deps\":%" PRId64
+           ",\"refactor_egraph_algorithm5_prefactor_column_count\":%" PRId64
+           ",\"refactor_egraph_algorithm5_prefactor_dep_count\":%" PRId64
            ",\"refactor_supernode_algorithm5_prefix_panel_count\":%" PRId64
            ",\"refactor_supernode_algorithm5_prefix_panel_run_count\":%"
            PRId64
@@ -2353,6 +2357,10 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_prefix_payoff_run_rows,
            stats.refactor_supernode_algorithm5_prefix_payoff_update_work,
            stats.refactor_supernode_algorithm5_prefix_payoff_advance_work,
+           stats.refactor_last_egraph_algorithm5_prefactor_columns,
+           stats.refactor_last_egraph_algorithm5_prefactor_deps,
+           stats.refactor_egraph_algorithm5_prefactor_column_count,
+           stats.refactor_egraph_algorithm5_prefactor_dep_count,
            stats.refactor_supernode_algorithm5_prefix_panel_count,
            stats.refactor_supernode_algorithm5_prefix_panel_run_count,
            stats.refactor_supernode_algorithm5_prefix_panel_run_rows,
@@ -3493,6 +3501,8 @@ int main(int argc, char **argv) {
            ", alg5 advance %" PRId64 "/%" PRId64 "/%" PRId64
            " work %.9g"
            ", alg5 payoff %" PRId64 "/%" PRId64 " work %.9g/%.9g"
+           ", alg5 prefactor %" PRId64 "/%" PRId64
+           " cumulative %" PRId64 "/%" PRId64
            ", alg5 panels %" PRId64 "/%" PRId64 "/%" PRId64
            " deps %" PRId64 " work %.9g/%.9g max %" PRId64
            ", alg5 panel payoff %" PRId64 "/%" PRId64 "/%" PRId64
@@ -3604,6 +3614,10 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_prefix_payoff_run_rows,
            stats.refactor_supernode_algorithm5_prefix_payoff_update_work,
            stats.refactor_supernode_algorithm5_prefix_payoff_advance_work,
+           stats.refactor_last_egraph_algorithm5_prefactor_columns,
+           stats.refactor_last_egraph_algorithm5_prefactor_deps,
+           stats.refactor_egraph_algorithm5_prefactor_column_count,
+           stats.refactor_egraph_algorithm5_prefactor_dep_count,
            stats.refactor_supernode_algorithm5_prefix_panel_count,
            stats.refactor_supernode_algorithm5_prefix_panel_run_count,
            stats.refactor_supernode_algorithm5_prefix_panel_run_rows,

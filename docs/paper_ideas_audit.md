@@ -10738,3 +10738,33 @@ still retain the same large grouped surfaces: `ASIC_320ks` has `129` groups,
 not a BLAS or CPU-specific tuning change; the remaining paper gap is the
 numeric grouped executor that uses the retained current-run map, current
 workspace offsets, advance spans, and target slots together.
+
+KLS now fills a narrower CKTSO Algorithm 5 execution semantic in the BTF EGraph
+numeric kernel. `KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1` lets a blocked
+pipeline column consume later already-finished scalar U predecessors before the
+current predecessor is done, but only when a structural safety scan proves that
+no earlier unapplied predecessor can still write the candidate workspace entry.
+The kernel tracks consumed positions in an applied bitmap, marks ordinary
+scalar and batched dependencies as they are consumed, and disables further
+batched dependency runs for that column after the first true out-of-order
+prefactor. This implements Algorithm 5's skip-unfinished prefactor idea without
+turning the retained payoff descriptor into a misleading "backend" or a
+CPU-specific micro-tuning knob.
+
+Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`, `./build/kls_smoke`,
+`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1 ./build/kls_smoke`, and
+`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1 KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`.
+The top-five CKTSO-gap probe with the new prefactor flag alone
+`build/kls_pref_update_only_gap5_t4_r1_ref3_timeout120.jsonl` completed with
+no failures and `1.3938181393489573s` geomean versus the current no-new-flag
+control `build/kls_current_default_gap5_t4_r1_ref3_timeout120.jsonl` at
+`1.4204760684642577s`. The last-refactor prefactor counters confirm that the
+path fired on the hard ASIC rows: `ASIC_320ks` used `61` columns / `125` deps,
+`ASIC_320k` used `66` / `81`, and `ASIC_100ks` used `5` / `425`. Combining it
+with the existing scalar ragged payoff executor remained worse:
+`build/kls_alg5_pref_update_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.8658851843625461s`. The lesson is that the direct Algorithm 5 prefactor
+semantic helps modestly, but the large CKTSO gap still points at the missing
+grouped multi-current numeric executor rather than BLAS thresholds or the
+current scalar payoff replay.

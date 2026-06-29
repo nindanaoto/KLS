@@ -1028,14 +1028,19 @@ comparisons. Benchmark JSON reports `refactor_map_index32_enabled` and
 `refactor_map_index32_entries`, `refactor_l_index32_enabled` and
 `refactor_l_index32_entries`, plus `refactor_u_index32_enabled` and
 `refactor_u_index32_entries` so runs can verify whether each mirror was active.
-A separate CKTSO Algorithm 5-style probe tried letting the column EGraph
-refactor consume later already-finished scalar dependencies while waiting for an
-earlier unfinished dependency. The structural safety scan was correct but not a
-usable default: KLU-first focused runs regressed `ASIC_320ks`, `ASIC_100ks`, and
-`G2_circuit`, and `onetone2` timed out at the 120 s harness limit. The probe was
-removed rather than kept behind another runtime flag; the same Algorithm 5 idea
-remains implemented in the row-major row-refactor path where dependency metadata
-is already row-oriented.
+`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1` enables a guarded CKTSO Algorithm
+5-style prefactor slice in the BTF EGraph numeric kernel. When a pipeline column
+is blocked on its current U predecessor, the kernel scans later U predecessors
+that are already published, applies only those whose workspace entry cannot be
+changed by any earlier unapplied predecessor, records them in an applied bitmap,
+and skips them when the normal postfactor cursor reaches that position. This is
+off by default and deliberately scalar: it fills the paper's skip-unfinished
+prefactor semantics without pretending that the grouped Algorithm 5 payoff
+descriptor already has a multi-current numeric kernel. Benchmark JSON reports
+`refactor_last_egraph_algorithm5_prefactor_columns`,
+`refactor_last_egraph_algorithm5_prefactor_deps`,
+`refactor_egraph_algorithm5_prefactor_column_count`, and
+`refactor_egraph_algorithm5_prefactor_dep_count`.
 The experimental row pipeline preserves the CKTSO-style wide cluster prefix
 selected by the `2 * threads` width rule, then consumes the remaining narrow
 tail through a bounded successor-ready queue when explicit predecessor counts
