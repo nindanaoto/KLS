@@ -8178,3 +8178,21 @@ planned producer-panel runs, but the existing completed-panel cache covers only
 a tiny fraction of the reusable work. Closing the CKTSO gap requires a broader
 row-major or persistent-consumer accumulator that can consume the retained plan
 beyond the current equal-trailing cached-panel shape.
+
+A fresh same-source CBLAS-capable rerun confirms that "guard BLAS for only large
+cases" is already handled and is not the active loss mode. The current code's
+CBLAS call sites require both the runtime `KLS_ENABLE_CBLAS_SUPERNODE` gate and
+large shape/work thresholds before calling BLAS. With `OPENBLAS_NUM_THREADS=1`,
+the top-five focus measured `1.47818s` geomean with the runtime CBLAS gate off
+in
+`build-cblas/kls_cblas_guard_rerun_current3_off_gap5_t4_r1_ref3_timeout120.jsonl`
+and `1.43948s` with it on in
+`build-cblas/kls_cblas_guard_rerun_current3_on_gap5_t4_r1_ref3_timeout120.jsonl`.
+Every matrix in both runs reported `build_has_cblas=true`, but all external
+CBLAS update, compact-supernode GEMV, and compact-supernode TRSV counters were
+zero. The small timing movement is therefore ordinary run noise or indirect
+layout noise, not BLAS work. The slow rows stayed on the EGraph refactor path,
+and the row-refactor model again rejected automatic handoff through the
+lower-bound work gate. Further BLAS-size threshold changes would not close the
+CKTSO gap on these cases; the missing mechanism is still the paper-level
+producer/consumer row-major numeric executor.
