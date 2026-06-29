@@ -8470,3 +8470,20 @@ allocation. It is the paper-level missing piece: make retained numeric panels
 usable for non-contiguous consumer streams and for the currently
 shape-rejected producer/consumer cases, then revisit the work gate once that
 coverage is materially higher.
+
+A direct partial-prefix experiment was rejected. Letting the cached executor
+consume only the contiguous prefix of a non-contiguous probe did reduce stream
+rejects and increased applied cached rows on `onetone2`, but the focused
+retained-plan runs got slower, so this is not the missing paper mechanism.
+The retained source instead skips cached probes for panel ids whose panel
+width has already been pruned to zero. This does not change any accepted
+numeric update, but it removes invalid-panel probe overhead exposed by the
+new counters. With
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1`,
+`build/kls_valid_panel_probe_asic100ks_t4_r1_ref3.json` kept the same 267
+applied cached runs / 39436 rows while reducing cached probe attempts from
+5468 to 734 and shape rejects from 2750 to 15. The matching `onetone2` run
+kept 235 applied runs / 26108 rows while reducing attempts from 9309 to 7280
+and shape rejects from 1241 to 22. The remaining misses are still the real
+paper gap: non-contiguous consumer streams (`onetone2`) and low-coverage
+retained plan application, not invalid-panel probing.

@@ -21259,7 +21259,7 @@ static int kls_prune_unused_refactor_supernode_panels_from_plan(
     return 0;
   }
   const UF_long panel_count = solver->refactor_supernode_panel_count;
-  if (panel_count > (UF_long)(SIZE_MAX / sizeof(unsigned char))) {
+  if (panel_count > (UF_long)(PTRDIFF_MAX / sizeof(unsigned char))) {
     return 0;
   }
   unsigned char *used =
@@ -21313,7 +21313,6 @@ static int kls_prune_unused_refactor_supernode_panels_from_plan(
       used[panel] = 1u;
     }
   }
-
   UF_long used_count = 0u;
   for (UF_long panel = 0; panel < panel_count; ++panel) {
     if (used[panel]) {
@@ -21347,7 +21346,7 @@ static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
       solver->refactor_supernode_panel_local_start == NULL ||
       solver->refactor_supernode_panel_width == NULL ||
       solver->refactor_supernode_panel_trailing_len == NULL ||
-      panel_count > (UF_long)(SIZE_MAX / sizeof(unsigned char))) {
+      panel_count > (UF_long)(PTRDIFF_MAX / sizeof(unsigned char))) {
     solver->refactor_supernode_panel_used_count = panel_count;
     return;
   }
@@ -41896,7 +41895,9 @@ static int kls_egraph_refactor_try_supernode_dependency_run(
   if (solver->refactor_supernode_panel_col_id != NULL) {
     const UF_long panel = solver->refactor_supernode_panel_col_id[dep_global];
     try_cached = panel != KLS_KLU_EMPTY &&
-                 panel < solver->refactor_supernode_panel_count;
+                 panel < solver->refactor_supernode_panel_count &&
+                 solver->refactor_supernode_panel_width != NULL &&
+                 solver->refactor_supernode_panel_width[panel] > 1u;
   }
   if (try_cached) {
     const int cached_status =
