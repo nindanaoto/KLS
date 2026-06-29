@@ -9718,3 +9718,29 @@ nearly equal in modeled arithmetic on the ASIC cases while still running
 roughly `3.5x` to `6.8x` slower in refactor time. That points back to staging,
 workspace traffic, ready-queue overhead, and missing coarse producer/consumer
 execution, not to small BLAS calls or scalar overcounting in the model.
+
+KLS now also measures whether the retained exact producer-panel groups are
+simple enough for a batch-start executor. The new
+`refactor_supernode_consumer_plan_first_dep_shape_batch_*` counters keep only
+exact-shape retained runs whose producer panel is the first actual U dependency
+of the current column. That subset could be executed from freshly scattered
+current-column workspaces without first replaying earlier dependencies.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1 ./build/kls_smoke` passed.
+- The top-ten retained-plan focus
+  `build/kls_first_dep_shape_batch_gap10_t4_r1_ref3_timeout120.jsonl`
+  completed with no failed matrices and measured `2.20643s` geomean.
+
+The result rules out the smaller batch-start shortcut. The same run reported
+`39,077` exact-shape retained groups covering `713,396` runs and `5,394,956`
+rows, but every `first_dep_shape_batch_*` counter was zero on every matrix.
+The next executor therefore must include the harder paper-style stage:
+materialize several current-column workspaces, advance each one through its
+earlier dependency stream to the retained `(panel_start, panel_offset)`, apply
+the shared producer panel across that gathered batch, and then finish or
+publish those current columns without double-processing them in the normal
+EGraph scheduler.
