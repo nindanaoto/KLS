@@ -10402,3 +10402,36 @@ the broad slow set. This rules out an exact identical-prefix batch executor as
 the main gap closer. The next paper-aligned implementation should therefore
 batch less-identical row/segment streams with shared producer panels and
 coarse output accumulation, not another exact-shape or exact-prefix replay.
+
+A direct Algorithm 5 payoff audit then separated whole producer panels from
+payoff-positive subsets inside those panels. The first top-ten CKTSO-gap
+diagnostic,
+`build/kls_alg5_payoff_diag_gap10_t4_r1_ref3_timeout120.jsonl`, measured
+`2.1783s` geomean and found only `3` whole panels where replaying all selected
+producer work paid off. In contrast, selected subsets inside panels covered
+`594` groups and `13,980` runs, with about `251.4M` modeled update work versus
+`132.9M` modeled prefix-advance work. This is the clearest paper-aligned
+surface so far: the executor should not replay whole producer panels, but it
+should batch the payoff-positive current subsets that share a retained
+producer panel.
+
+The scalar scheduling shortcut was rejected. A claim-based prototype that tried
+to steal those Algorithm 5 payoff columns without a new batched numeric kernel
+regressed to `2.2933s` geomean in
+`build/kls_alg5_payoff_claims_gap10_t4_r1_ref3_timeout120.jsonl`, and the
+claim counters stayed at zero. That path was removed. The retained source now
+keeps only an opt-in selected-run substrate behind
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1`; ordinary
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1` diagnostics still report the
+same Algorithm 5 payoff counters without allocating dead execution-plan arrays.
+Current reruns on the same source reported the same `594` groups and `13,980`
+runs in
+`build/kls_alg5_payoff_diag_rerun_gap10_t4_r1_ref3_timeout120.jsonl` and
+`build/kls_alg5_payoff_plan_gated_gap10_t4_r1_ref3_timeout120.jsonl`; both were
+non-CBLAS builds with zero CBLAS update counters. The gated retained-plan run
+was slower (`3.9534s` versus `3.5523s` diagnostic-only), confirming that
+retaining the selector is useful only as a substrate for the future batched
+executor, not as a performance change by itself. This also keeps the latest
+BLAS-size-guard hypothesis bounded: the focused slow paths are not dispatching
+external BLAS at all, so another small-case BLAS threshold cannot close this
+gap.

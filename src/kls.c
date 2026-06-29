@@ -595,6 +595,9 @@ struct kls_solver {
   UF_long *refactor_supernode_consumer_plan_shape_group_panel_start;
   UF_long *refactor_supernode_consumer_plan_shape_group_panel_offset;
   UF_long *refactor_supernode_consumer_plan_shape_group_rows;
+  UF_long *refactor_supernode_algorithm5_payoff_panel_ptr;
+  UF_long *refactor_supernode_algorithm5_payoff_runs;
+  unsigned char *refactor_supernode_algorithm5_payoff_run_selected;
   unsigned char *refactor_supernode_consumer_plan_group_l_valid;
   UF_long *refactor_supernode_consumer_plan_group_l_dense_begin;
   UF_long *refactor_supernode_consumer_plan_group_l_row_begin;
@@ -1876,6 +1879,13 @@ static int kls_refactor_supernode_consumer_plan_output_stats_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_refactor_supernode_algorithm5_payoff_plan_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int
 kls_refactor_supernode_consumer_plan_group_cache_env_enabled(void) {
   const char *value =
@@ -2308,6 +2318,9 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   free(solver->refactor_supernode_consumer_plan_shape_group_panel_start);
   free(solver->refactor_supernode_consumer_plan_shape_group_panel_offset);
   free(solver->refactor_supernode_consumer_plan_shape_group_rows);
+  free(solver->refactor_supernode_algorithm5_payoff_panel_ptr);
+  free(solver->refactor_supernode_algorithm5_payoff_runs);
+  free(solver->refactor_supernode_algorithm5_payoff_run_selected);
   solver->refactor_supernode_consumer_plan_ptr = NULL;
   solver->refactor_supernode_consumer_plan_current = NULL;
   solver->refactor_supernode_consumer_plan_dep = NULL;
@@ -2323,6 +2336,9 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_supernode_consumer_plan_shape_group_panel_start = NULL;
   solver->refactor_supernode_consumer_plan_shape_group_panel_offset = NULL;
   solver->refactor_supernode_consumer_plan_shape_group_rows = NULL;
+  solver->refactor_supernode_algorithm5_payoff_panel_ptr = NULL;
+  solver->refactor_supernode_algorithm5_payoff_runs = NULL;
+  solver->refactor_supernode_algorithm5_payoff_run_selected = NULL;
   solver->refactor_supernode_consumer_plan_col_sorted = 0;
   solver->refactor_supernode_consumer_plan_dep_pos_sorted = 0;
   solver->refactor_supernode_consumer_plan_built = 0;
@@ -4240,6 +4256,231 @@ static int kls_count_refactor_supernode_algorithm5_split_opportunities(
   return 1;
 }
 
+static int kls_refactor_supernode_algorithm5_run_payoff(
+  const kls_solver *solver,
+  const UF_long *consumer_start,
+  const UF_long *consumer_end,
+  const UF_long *plan_current,
+  const UF_long *plan_dep,
+  const UF_long *plan_rows,
+  const UF_long *plan_panel_start,
+  const UF_long *plan_panel_offset,
+  UF_long run_count,
+  UF_long run) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Llen == NULL || consumer_start == NULL ||
+      consumer_end == NULL || plan_current == NULL || plan_dep == NULL ||
+      plan_rows == NULL || plan_panel_start == NULL ||
+      plan_panel_offset == NULL || run >= run_count) {
+    return 0;
+  }
+  UF_long producer_suffix_rows = 1u;
+  if (solver->options.threads > 1) {
+    producer_suffix_rows = (UF_long)solver->options.threads;
+  }
+  if (producer_suffix_rows > UF_long_max / 2u) {
+    return 0;
+  }
+  const UF_long panel = plan_panel_start[run];
+  const UF_long rows = plan_rows[run];
+  const UF_long offset = plan_panel_offset[run];
+  if (panel >= solver->n || rows == 0u ||
+      consumer_start[panel] != panel) {
+    return 0;
+  }
+  const UF_long end = consumer_end[panel];
+  if (end <= panel || end > solver->n) {
+    return 0;
+  }
+  const UF_long width = end - panel;
+  if (width < 2u * producer_suffix_rows || offset >= width ||
+      rows > width - offset) {
+    return 0;
+  }
+  const UF_long prefix_limit = width - producer_suffix_rows;
+  if (offset >= prefix_limit) {
+    return 0;
+  }
+  UF_long prefix_rows = prefix_limit - offset;
+  if (prefix_rows > rows) {
+    prefix_rows = rows;
+  }
+  if (prefix_rows == 0u) {
+    return 0;
+  }
+  const UF_long dep = plan_dep[run];
+  if (dep >= solver->n || prefix_rows > solver->n - dep) {
+    return 0;
+  }
+  double update_work = 0.0;
+  for (UF_long local = 0u; local < prefix_rows; ++local) {
+    update_work += 1.0 + (double)solver->numeric->Llen[dep + local];
+  }
+  UF_long advance_deps = 0u;
+  double advance_work = 0.0;
+  if (!kls_supernode_consumer_plan_run_advance_cost(
+        solver, plan_current, plan_dep, run_count, run,
+        &advance_deps, &advance_work)) {
+    return 0;
+  }
+  (void)advance_deps;
+  return update_work >= advance_work;
+}
+
+static int kls_build_refactor_supernode_algorithm5_payoff_plan(
+  const kls_solver *solver,
+  const UF_long *consumer_start,
+  const UF_long *consumer_end,
+  const UF_long *plan_ptr,
+  const UF_long *plan_current,
+  const UF_long *plan_dep,
+  const UF_long *plan_rows,
+  const UF_long *plan_panel_start,
+  const UF_long *plan_panel_offset,
+  UF_long run_count,
+  UF_long **panel_ptr_out,
+  UF_long **selected_runs_out,
+  unsigned char **run_selected_out) {
+  if (panel_ptr_out != NULL) {
+    *panel_ptr_out = NULL;
+  }
+  if (selected_runs_out != NULL) {
+    *selected_runs_out = NULL;
+  }
+  if (run_selected_out != NULL) {
+    *run_selected_out = NULL;
+  }
+  if (solver == NULL || consumer_start == NULL || consumer_end == NULL ||
+      plan_ptr == NULL || plan_current == NULL || plan_dep == NULL ||
+      plan_rows == NULL || plan_panel_start == NULL ||
+      plan_panel_offset == NULL || panel_ptr_out == NULL ||
+      selected_runs_out == NULL || run_selected_out == NULL) {
+    return 0;
+  }
+  const size_t n = (size_t)solver->n;
+  const size_t run_count_size = (size_t)run_count;
+  if ((UF_long)n != solver->n || (UF_long)run_count_size != run_count ||
+      n > SIZE_MAX - 1u) {
+    return 0;
+  }
+  const size_t n_alloc = n > 0u ? n : 1u;
+  const size_t ptr_count = n + 1u;
+  if (ptr_count > SIZE_MAX / sizeof(UF_long) ||
+      n_alloc > SIZE_MAX / sizeof(UF_long) ||
+      run_count_size > SIZE_MAX / sizeof(unsigned char)) {
+    return 0;
+  }
+
+  UF_long *panel_counts =
+    (UF_long *)calloc(n_alloc, sizeof(*panel_counts));
+  unsigned char *run_selected =
+    run_count_size > 0u
+      ? (unsigned char *)calloc(run_count_size, sizeof(*run_selected))
+      : NULL;
+  if (panel_counts == NULL ||
+      (run_count_size > 0u && run_selected == NULL)) {
+    free(panel_counts);
+    free(run_selected);
+    return 0;
+  }
+
+  UF_long selected_run_count = 0u;
+  for (UF_long panel = 0u; panel < solver->n; ++panel) {
+    const UF_long begin = plan_ptr[panel];
+    const UF_long end = plan_ptr[panel + 1u];
+    if (begin > end || end > run_count) {
+      free(panel_counts);
+      free(run_selected);
+      return 0;
+    }
+    UF_long panel_selected = 0u;
+    for (UF_long run = begin; run < end; ++run) {
+      if (kls_refactor_supernode_algorithm5_run_payoff(
+            solver, consumer_start, consumer_end, plan_current, plan_dep,
+            plan_rows, plan_panel_start, plan_panel_offset, run_count,
+            run)) {
+        run_selected[run] = 1u;
+        if (panel_selected == UF_long_max) {
+          free(panel_counts);
+          free(run_selected);
+          return 0;
+        }
+        panel_selected++;
+      }
+    }
+    if (panel_selected >= 2u) {
+      if (panel_selected > UF_long_max - selected_run_count) {
+        free(panel_counts);
+        free(run_selected);
+        return 0;
+      }
+      panel_counts[panel] = panel_selected;
+      selected_run_count += panel_selected;
+    }
+  }
+
+  UF_long *panel_ptr = (UF_long *)malloc(ptr_count * sizeof(*panel_ptr));
+  UF_long *selected_runs =
+    selected_run_count > 0u
+      ? (UF_long *)malloc((size_t)selected_run_count * sizeof(*selected_runs))
+      : NULL;
+  if (panel_ptr == NULL ||
+      (selected_run_count > 0u && selected_runs == NULL)) {
+    free(panel_counts);
+    free(run_selected);
+    free(panel_ptr);
+    free(selected_runs);
+    return 0;
+  }
+  UF_long prefix = 0u;
+  for (UF_long panel = 0u; panel < solver->n; ++panel) {
+    panel_ptr[panel] = prefix;
+    prefix += panel_counts[panel];
+  }
+  panel_ptr[solver->n] = prefix;
+  if (prefix != selected_run_count) {
+    free(panel_counts);
+    free(run_selected);
+    free(panel_ptr);
+    free(selected_runs);
+    return 0;
+  }
+  UF_long cursor = 0u;
+  for (UF_long panel = 0u; panel < solver->n; ++panel) {
+    if (panel_counts[panel] == 0u) {
+      continue;
+    }
+    const UF_long begin = plan_ptr[panel];
+    const UF_long end = plan_ptr[panel + 1u];
+    for (UF_long run = begin; run < end; ++run) {
+      if (!run_selected[run]) {
+        continue;
+      }
+      if (cursor >= selected_run_count || selected_runs == NULL) {
+        free(panel_counts);
+        free(run_selected);
+        free(panel_ptr);
+        free(selected_runs);
+        return 0;
+      }
+      selected_runs[cursor++] = run;
+    }
+  }
+  if (cursor != selected_run_count) {
+    free(panel_counts);
+    free(run_selected);
+    free(panel_ptr);
+    free(selected_runs);
+    return 0;
+  }
+
+  free(panel_counts);
+  *panel_ptr_out = panel_ptr;
+  *selected_runs_out = selected_runs;
+  *run_selected_out = run_selected;
+  return 1;
+}
+
 static int kls_build_refactor_supernode_consumer_plan(
   kls_solver *solver,
   const UF_long *consumer_start,
@@ -4436,6 +4677,9 @@ static int kls_build_refactor_supernode_consumer_plan(
   UF_long *shape_group_panel_start = NULL;
   UF_long *shape_group_panel_offset = NULL;
   UF_long *shape_group_rows = NULL;
+  UF_long *algorithm5_payoff_panel_ptr = NULL;
+  UF_long *algorithm5_payoff_runs = NULL;
+  unsigned char *algorithm5_payoff_run_selected = NULL;
   UF_long plan_positioned_run_count = 0u;
   UF_long plan_positioned_run_rows = 0u;
   const size_t run_count = (size_t)count_ctx.run_count;
@@ -4970,6 +5214,38 @@ static int kls_build_refactor_supernode_consumer_plan(
       shape_group_panel_offset, shape_group_rows);
     return 0;
   }
+  if (kls_refactor_supernode_algorithm5_payoff_plan_env_enabled() &&
+      count_ctx.run_count > 0u &&
+      !kls_build_refactor_supernode_algorithm5_payoff_plan(
+        solver, consumer_start, consumer_end, plan_ptr, plan_current,
+        plan_dep, plan_rows, plan_panel_start, plan_panel_offset,
+        count_ctx.run_count, &algorithm5_payoff_panel_ptr,
+        &algorithm5_payoff_runs, &algorithm5_payoff_run_selected)) {
+    free(panel_run_count);
+    free(panel_run_rows);
+    free(panel_small_run_count);
+    free(panel_small_run_rows);
+    free(column_run_count);
+    free(plan_ptr);
+    free(column_ptr);
+    free(plan_current);
+    free(plan_dep);
+    free(plan_rows);
+    free(plan_panel_start);
+    free(plan_panel_offset);
+    free(plan_dep_pos);
+    free(plan_block_start);
+    free(column_runs);
+    free(cursor);
+    free(column_cursor);
+    free(algorithm5_payoff_panel_ptr);
+    free(algorithm5_payoff_runs);
+    free(algorithm5_payoff_run_selected);
+    kls_free_supernode_consumer_plan_shape_groups(
+      shape_group_ptr, shape_group_runs, shape_group_panel_start,
+      shape_group_panel_offset, shape_group_rows);
+    return 0;
+  }
 
   free(panel_run_count);
   free(panel_run_rows);
@@ -4999,6 +5275,12 @@ static int kls_build_refactor_supernode_consumer_plan(
     shape_group_panel_offset;
   solver->refactor_supernode_consumer_plan_shape_group_rows =
     shape_group_rows;
+  solver->refactor_supernode_algorithm5_payoff_panel_ptr =
+    algorithm5_payoff_panel_ptr;
+  solver->refactor_supernode_algorithm5_payoff_runs =
+    algorithm5_payoff_runs;
+  solver->refactor_supernode_algorithm5_payoff_run_selected =
+    algorithm5_payoff_run_selected;
   solver->refactor_supernode_consumer_plan_col_sorted =
     plan_column_sorted;
   solver->refactor_supernode_consumer_plan_dep_pos_sorted =
@@ -51585,10 +51867,10 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     return -1;
   }
   const int consumer_plan_claims_requested =
-    (kls_refactor_supernode_consumer_plan_claims_env_enabled() ||
-     consumer_plan_shape_claims_requested) &&
-    solver->refactor_supernode_consumer_plan_built &&
-    solver->refactor_supernode_consumer_plan_shape_batch_count > 0u;
+    ((kls_refactor_supernode_consumer_plan_claims_env_enabled() ||
+      consumer_plan_shape_claims_requested) &&
+     solver->refactor_supernode_consumer_plan_built &&
+     solver->refactor_supernode_consumer_plan_shape_batch_count > 0u);
   if (consumer_plan_claims_requested && pipeline_done == NULL) {
     pipeline_done =
       ensure_egraph_pipeline_done(solver, &pipeline_generation);
@@ -53231,6 +53513,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     kls_refactor_supernode_consumer_plan_group_exec_env_enabled() ||
     kls_refactor_supernode_consumer_plan_group_batch_exec_env_enabled() ||
     kls_refactor_supernode_consumer_plan_shape_claims_env_enabled() ||
+    kls_refactor_supernode_algorithm5_payoff_plan_env_enabled() ||
     kls_refactor_u_supernode_plan_pattern_env_enabled();
   const int supernode_consumer_stats_env =
     kls_refactor_supernode_consumer_stats_env_enabled();
