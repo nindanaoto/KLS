@@ -10045,3 +10045,43 @@ the retained exact-L storage has enough aggregate same-shape work to matter,
 but KLS still needs the executor that owns multiple current columns and applies
 one producer panel over the group instead of replaying those runs one column at
 a time.
+
+The next opt-in probe deliberately executed those aggregate candidates through
+the existing single-current-column group-L executor behind
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_BATCH_EXEC=1`. The cache
+keeps retained exact-L values when aggregate batch candidates clear the
+structural threshold, maps each retained run to its exact-L group, and relaxes
+the standalone per-run work gate only for that explicit batch-exec experiment.
+The hot run lookup now uses the same worker cursor as the other retained-plan
+executors, so the probe is testing the algorithmic granularity rather than a
+known linear lookup artifact.
+
+Validation:
+
+- `git diff --check` passed.
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_BATCH_EXEC=1 ./build/kls_smoke`
+  passed.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_EXEC=1 ./build/kls_smoke`
+  passed.
+- The top-ten CKTSO-gap focus
+  `build/kls_group_l_batch_exec_cursor_gap10_t4_r1_ref3_timeout120.jsonl`
+  completed with no failed matrices and measured `3.63452s` geomean. This is
+  slightly better than the same aggregate executor before the cursor lookup
+  cleanup (`3.76413s`), but still much slower than the same-source metadata-only
+  cache run (`2.24087s`) and default control (`2.25333s`).
+
+The aggregate executor consumed the full candidate surface: `38,782` candidate
+groups, `704,933` candidate runs, and `5,314,536` candidate run rows became
+`2,111,342` applied group-L update runs, `15,672,408` applied update rows, and
+`4,273,553,183` applied update entries across the three repeated refactors.
+That is useful negative evidence. KLS can now retain and replay the exact-L
+groups, but replaying them one current column at a time is slower than the
+normal path. The paper-level gap is therefore the true grouped producer-panel
+executor: claim compatible current columns, advance each workspace once to the
+retained producer offset, apply the shared exact-L panel over the group, and
+skip the old scalar/current-column replay for those claimed updates. The same
+run was built without CBLAS support (`build_has_cblas=false`) and reported zero
+`refactor_supernode_cblas_update_*` calls, so an additional "use BLAS only for
+large cases" guard cannot affect this result.

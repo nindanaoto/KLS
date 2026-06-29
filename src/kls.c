@@ -70,6 +70,7 @@
 #define KLS_EGRAPH_RAGGED_U_SUPERNODE_MIN_WORK 512.0
 #define KLS_EGRAPH_RAGGED_U_SUPERNODE_MIN_WORK_PER_ENTRY 4.0
 #define KLS_REFACTOR_PLAN_GROUP_L_EXEC_MIN_RUNS 1024u
+#define KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS 1024u
 #define KLS_REFACTOR_PLAN_GROUP_L_CACHE_MAX_BYTES \
   ((size_t)1024u * 1024u * 1024u)
 #define KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS 32768u
@@ -1200,6 +1201,7 @@ typedef struct kls_egraph_refactor_shared {
   int supernode_consumer_plan_only;
   int supernode_consumer_plan_group_l_values;
   int supernode_consumer_plan_group_l_exec;
+  int supernode_consumer_plan_group_l_batch_exec;
   int u_supernode_values;
   int u_supernode_ragged_l_updates;
   atomic_ulong supernode_consumer_plan_group_l_dense_writes;
@@ -1797,6 +1799,14 @@ static int
 kls_refactor_supernode_consumer_plan_group_exec_env_enabled(void) {
   const char *value =
     getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_EXEC");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static int
+kls_refactor_supernode_consumer_plan_group_batch_exec_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_BATCH_EXEC");
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -24006,7 +24016,8 @@ static int kls_egraph_ragged_u_supernode_update_allows(
 
 static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
   kls_solver *solver,
-  int keep_publish_values) {
+  int keep_publish_values,
+  int keep_batch_candidate_values) {
   if (solver == NULL || !solver->refactor_supernode_consumer_plan_built ||
       solver->numeric == NULL || solver->numeric->Llen == NULL ||
       solver->refactor_l_indices == NULL ||
@@ -24262,7 +24273,10 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
   }
 
   if (!keep_publish_values &&
-      valid_exec_run_count < KLS_REFACTOR_PLAN_GROUP_L_EXEC_MIN_RUNS) {
+      valid_exec_run_count < KLS_REFACTOR_PLAN_GROUP_L_EXEC_MIN_RUNS &&
+      (!keep_batch_candidate_values ||
+       batch_candidate_run_count <
+         KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS)) {
     free(valid);
     free(dense_begin);
     free(row_begin);
@@ -24682,9 +24696,7 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
       solver->refactor_supernode_consumer_plan_shape_group_rows[group];
     const UF_long row_base = row_begin[group];
     if (width <= 1u || row_base + width > pattern_rows ||
-        row_ptr[row_base + width] < row_ptr[row_base] ||
-        !kls_egraph_ragged_u_supernode_update_allows(
-          width, 0u, row_ptr[row_base + width] - row_ptr[row_base])) {
+        row_ptr[row_base + width] < row_ptr[row_base]) {
       continue;
     }
     const UF_long runs_begin =
@@ -24708,6 +24720,16 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
       free(cursor);
       free(run_group);
       return 0;
+    }
+    const UF_long runs = runs_end - runs_begin;
+    const UF_long trailing_entries =
+      row_ptr[row_base + width] - row_ptr[row_base];
+    const int standalone_allowed =
+      kls_egraph_ragged_u_supernode_update_allows(
+        width, 0u, trailing_entries);
+    if (!standalone_allowed &&
+        (!keep_batch_candidate_values || runs < 2u)) {
+      continue;
     }
     for (UF_long pos = runs_begin; pos < runs_end; ++pos) {
       const UF_long run =
@@ -45870,8 +45892,8 @@ static int kls_egraph_refactor_try_consumer_plan_group_l_run(
   UF_long planned_start = KLS_KLU_EMPTY;
   UF_long planned_offset = 0u;
   kls_egraph_record_consumer_plan_attempt(shared);
-  if (!kls_egraph_find_consumer_plan_run(
-        solver, current_global, dep_global, up, &run_id, &planned_rows,
+  if (!kls_egraph_worker_find_consumer_plan_run(
+        worker, current_global, dep_global, up, &run_id, &planned_rows,
         &planned_start, &planned_offset)) {
     return 0;
   }
@@ -45936,7 +45958,8 @@ static int kls_egraph_refactor_try_consumer_plan_group_l_run(
     trailing_entries += end - begin;
   }
   if (!kls_egraph_ragged_u_supernode_update_allows(
-        width, 0u, trailing_entries)) {
+        width, 0u, trailing_entries) &&
+      !shared->supernode_consumer_plan_group_l_batch_exec) {
     return 0;
   }
 
@@ -49713,6 +49736,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     !solver->refactor_supernode_consumer_plan_exec_disabled;
   const int consumer_plan_group_l_exec_requested =
     kls_refactor_supernode_consumer_plan_group_exec_env_enabled();
+  const int consumer_plan_group_l_batch_exec_requested =
+    kls_refactor_supernode_consumer_plan_group_batch_exec_env_enabled();
   const int consumer_plan_group_l_cache_requested =
     kls_refactor_supernode_consumer_plan_group_cache_env_enabled();
   const int cached_supernode_updates_only =
@@ -49775,11 +49800,14 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_egraph_reset_u_supernode_l_used(solver);
   }
   const int consumer_plan_group_l_requested =
-    consumer_plan_group_l_cache_requested || consumer_plan_group_l_exec_requested;
+    consumer_plan_group_l_cache_requested ||
+    consumer_plan_group_l_exec_requested ||
+    consumer_plan_group_l_batch_exec_requested;
   if (consumer_plan_group_l_requested) {
     if (!solver->refactor_supernode_consumer_plan_built ||
         !kls_build_refactor_supernode_consumer_plan_group_l_cache(
-          solver, consumer_plan_group_l_cache_requested)) {
+          solver, consumer_plan_group_l_cache_requested,
+          consumer_plan_group_l_batch_exec_requested)) {
       return -1;
     }
   } else if (solver->refactor_supernode_consumer_plan_group_l_built) {
@@ -49981,7 +50009,11 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     ((consumer_plan_group_l_cache_requested ||
       (consumer_plan_group_l_exec_requested &&
        solver->refactor_supernode_consumer_plan_group_l_exec_run_count >=
-         KLS_REFACTOR_PLAN_GROUP_L_EXEC_MIN_RUNS)) &&
+         KLS_REFACTOR_PLAN_GROUP_L_EXEC_MIN_RUNS) ||
+      (consumer_plan_group_l_batch_exec_requested &&
+       solver
+         ->refactor_supernode_consumer_plan_group_l_batch_candidate_run_count >=
+         KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS)) &&
      solver->refactor_supernode_consumer_plan_group_l_built &&
      !solver->refactor_supernode_consumer_plan_group_l_storage_limited &&
      solver->refactor_supernode_consumer_plan_group_l_col_ptr != NULL &&
@@ -49990,16 +50022,28 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      solver->refactor_supernode_consumer_plan_group_l_dense_values != NULL)
       ? 1 : 0;
   shared->supernode_consumer_plan_group_l_exec =
-    (consumer_plan_group_l_exec_requested &&
+    ((consumer_plan_group_l_exec_requested ||
+      consumer_plan_group_l_batch_exec_requested) &&
      shared->supernode_consumer_plan_group_l_values &&
-     solver->refactor_supernode_consumer_plan_group_l_exec_run_count >=
-       KLS_REFACTOR_PLAN_GROUP_L_EXEC_MIN_RUNS &&
+     ((consumer_plan_group_l_exec_requested &&
+       solver->refactor_supernode_consumer_plan_group_l_exec_run_count >=
+         KLS_REFACTOR_PLAN_GROUP_L_EXEC_MIN_RUNS) ||
+      (consumer_plan_group_l_batch_exec_requested &&
+       solver
+         ->refactor_supernode_consumer_plan_group_l_batch_candidate_run_count >=
+         KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS)) &&
      solver->refactor_supernode_consumer_plan_group_l_run_group != NULL &&
      solver->refactor_supernode_consumer_plan_group_l_row_ptr != NULL &&
      (solver->refactor_supernode_consumer_plan_group_l_trailing_entries ==
         0u ||
       (solver->refactor_supernode_consumer_plan_group_l_cols != NULL &&
        solver->refactor_supernode_consumer_plan_group_l_values != NULL)))
+      ? 1 : 0;
+  shared->supernode_consumer_plan_group_l_batch_exec =
+    (shared->supernode_consumer_plan_group_l_exec &&
+     consumer_plan_group_l_batch_exec_requested &&
+     solver->refactor_supernode_consumer_plan_group_l_batch_candidate_run_count >=
+       KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS)
       ? 1 : 0;
   shared->u_supernode_values = u_supernode_values ? 1 : 0;
   shared->u_supernode_ragged_l_updates =
@@ -50171,6 +50215,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->pipeline_ready_total = 0u;
   shared->pipeline_claimed = NULL;
   shared->pipeline_claim_generation = 0u;
+  shared->supernode_consumer_plan_group_l_batch_exec = 0;
   pthread_mutex_unlock(&shared->lock);
 
   const UF_long supernode_pipeline_tasks =
@@ -51427,6 +51472,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     kls_refactor_supernode_consumer_plan_output_stats_env_enabled() ||
     kls_refactor_supernode_consumer_plan_group_cache_env_enabled() ||
     kls_refactor_supernode_consumer_plan_group_exec_env_enabled() ||
+    kls_refactor_supernode_consumer_plan_group_batch_exec_env_enabled() ||
     kls_refactor_u_supernode_plan_pattern_env_enabled();
   const int supernode_consumer_stats_env =
     kls_refactor_supernode_consumer_stats_env_enabled();
