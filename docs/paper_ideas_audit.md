@@ -9289,3 +9289,38 @@ contain `725,372` runs and `6,235,295` rows, including `574,389` small runs and
 gap is a panel-level grouped consumer executor that batches many small planned
 runs against one producer panel/output accumulator, not a different single-run
 threshold or a broader panel start map.
+
+A follow-up retained-plan diagnostic checks whether that batching opportunity
+is only cross-current producer-panel reuse, or whether enough work is visible
+inside each current column to justify a smaller column-grouped executor first.
+KLS now also reports current-column retained-plan distribution through
+`refactor_supernode_consumer_plan_column_count`,
+`refactor_supernode_consumer_plan_max_column_*`, and
+`refactor_supernode_consumer_plan_column_batch_*`. The counters are computed
+from the same retained plan and do not change numeric execution.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1 ./build/kls_smoke` passed.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1` on the top-ten CKTSO-gap
+  focus produced
+  `build/kls_consumer_plan_column_batch_stats_gap10_t4_r1_ref3_timeout120.jsonl`
+  with a `2.26381s` geomean and no failed matrices.
+
+The new split is actionable. Across the same top-ten focus, the retained plan
+still has `750,247` runs over `6,285,128` rows, with `599,264` small runs over
+`1,826,985` rows. Producer-panel batches cover `725,372` runs and
+`6,235,295` rows. Current-column batches cover almost the same numeric surface:
+`35,873` current columns contain `670,653` retained runs and `6,106,008` rows,
+including `519,716` small runs and `1,648,550` small-run rows. The largest
+single current column batch is also substantial (`3,450` runs and `9,421`
+planned rows on the Rajat rows). This means the next paper-aligned prototype
+does not have to start with a fully cross-current producer scheduler. A
+current-column grouped consumer executor can first consume many retained runs
+for one active `x` workspace, then later promote the same retained producer
+storage to cross-current reuse if the column-grouped path proves insufficient.
+The existing executor does not do this yet: it still applies or rejects one
+planned producer run at a time, so the broad column-batch surface is currently
+only measured, not exploited.
