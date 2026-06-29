@@ -1548,6 +1548,15 @@ int main(int argc, char **argv) {
            ",\"refactor_u_supernode_l_update_entries\":%" PRId64
            ",\"refactor_supernode_panel_count\":%" PRId64
            ",\"refactor_supernode_panel_used_count\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_cached_panel_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_cached_panel_rows\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_strict_cached_panel_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_strict_cached_panel_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries\":%"
+           PRId64
            ",\"row_refactor_group_count\":%" PRId64
            ",\"row_refactor_group_single_count\":%" PRId64
            ",\"row_refactor_group_batch_count\":%" PRId64
@@ -1679,6 +1688,11 @@ int main(int argc, char **argv) {
            stats.refactor_u_supernode_l_update_entries,
            stats.refactor_supernode_panel_count,
            stats.refactor_supernode_panel_used_count,
+           stats.refactor_supernode_consumer_plan_cached_panel_count,
+           stats.refactor_supernode_consumer_plan_cached_panel_rows,
+           stats.refactor_supernode_consumer_plan_strict_cached_panel_count,
+           stats.refactor_supernode_consumer_plan_strict_cached_panel_rows,
+           stats.refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries,
            stats.row_refactor_group_count,
            stats.row_refactor_group_single_count,
            stats.row_refactor_group_batch_count,
@@ -2815,6 +2829,9 @@ int main(int argc, char **argv) {
            "/%" PRId64 "/%" PRId64
            ", ragged L disabled: %d/%" PRId64
            ", panels: %" PRId64 ", used panels: %" PRId64
+           ", plan cached panels: %" PRId64 "/%" PRId64
+           ", strict plan cached panels: %" PRId64 "/%" PRId64
+           "/%" PRId64
            ", cached probe disabled: %d/%" PRId64 "\n",
            stats.refactor_supernode_candidate_count,
            stats.refactor_supernode_candidate_rows,
@@ -2860,6 +2877,11 @@ int main(int argc, char **argv) {
            stats.refactor_u_supernode_l_exec_disable_count,
            stats.refactor_supernode_panel_count,
            stats.refactor_supernode_panel_used_count,
+           stats.refactor_supernode_consumer_plan_cached_panel_count,
+           stats.refactor_supernode_consumer_plan_cached_panel_rows,
+           stats.refactor_supernode_consumer_plan_strict_cached_panel_count,
+           stats.refactor_supernode_consumer_plan_strict_cached_panel_rows,
+           stats.refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries,
            stats.refactor_supernode_cached_probe_disabled,
            stats.refactor_supernode_cached_probe_disable_count);
     printf("refactor supernode consumer plan: panels %" PRId64 "/%" PRId64

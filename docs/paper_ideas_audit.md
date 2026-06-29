@@ -9350,3 +9350,36 @@ panel starts and column-batch extents, then run a grouped current-column
 executor over that storage. Merely relaxing the individual-run work gate around
 the old panel cache adds retained-plan construction overhead without creating
 the missing producer storage.
+
+The next diagnostic makes that storage boundary explicit. KLS now reports how
+many retained-plan producer-panel starts could be materialized as the existing
+strict cached-panel object, and how many of those pass the current
+common-trailing predicate:
+`refactor_supernode_consumer_plan_cached_panel_*` and
+`refactor_supernode_consumer_plan_strict_cached_panel_*`. These counters are
+computed when the cached panel builder runs and survive the old panel cache's
+auto-disable path, so they describe the missing materialization opportunity
+even when no cached updates execute.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1 ./build/kls_smoke`
+  passed.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1` on the top-ten
+  CKTSO-gap focus produced
+  `build/kls_plan_strict_cached_panel2_gap10_t4_r1_ref3_timeout120.jsonl`
+  with a `2.29734s` geomean and no failed matrices.
+
+The strict cached-panel shape is far too narrow to close the gap. The retained
+plan still contains `750,247` runs over `6,285,128` rows, and current-column
+batches cover `6,106,008` rows. The plan-derived producer starts expose
+`39,658` possible panel objects over only `113,830` panel rows, and the
+existing common-trailing cached-panel predicate accepts just `2,798` of them
+over `7,168` rows with `14,203` trailing value entries. The benchmark still
+reports zero actual cached panels, zero cached-probe attempts, and plan
+execution disabled on nine of ten matrices. Therefore the next implementation
+should not try to stretch the strict cached-panel object. It needs a ragged
+retained-plan producer panel or current-column grouped accumulator that can
+consume non-common trailing patterns directly.

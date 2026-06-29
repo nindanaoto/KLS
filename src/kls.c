@@ -697,6 +697,11 @@ struct kls_solver {
   double *refactor_supernode_panel_trailing_values;
   UF_long refactor_supernode_panel_count;
   UF_long refactor_supernode_panel_used_count;
+  UF_long refactor_supernode_consumer_plan_cached_panel_count;
+  UF_long refactor_supernode_consumer_plan_cached_panel_rows;
+  UF_long refactor_supernode_consumer_plan_strict_cached_panel_count;
+  UF_long refactor_supernode_consumer_plan_strict_cached_panel_rows;
+  UF_long refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries;
   UF_long refactor_last_supernode_pipeline_tasks;
   UF_long refactor_last_supernode_pipeline_columns;
   UF_long refactor_supernode_pipeline_task_count;
@@ -2000,6 +2005,12 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_supernode_consumer_plan_column_batch_run_rows = 0;
   solver->refactor_supernode_consumer_plan_column_batch_small_run_count = 0;
   solver->refactor_supernode_consumer_plan_column_batch_small_run_rows = 0;
+  solver->refactor_supernode_consumer_plan_cached_panel_count = 0;
+  solver->refactor_supernode_consumer_plan_cached_panel_rows = 0;
+  solver->refactor_supernode_consumer_plan_strict_cached_panel_count = 0;
+  solver->refactor_supernode_consumer_plan_strict_cached_panel_rows = 0;
+  solver->refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries =
+    0;
   solver->refactor_last_supernode_consumer_plan_attempts = 0;
   solver->refactor_last_supernode_consumer_plan_hits = 0;
   solver->refactor_last_supernode_consumer_plan_applied = 0;
@@ -14654,6 +14665,18 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_supernode_panel_count;
   solver->stats.refactor_supernode_panel_used_count =
     (int64_t)solver->refactor_supernode_panel_used_count;
+  solver->stats.refactor_supernode_consumer_plan_cached_panel_count =
+    (int64_t)solver->refactor_supernode_consumer_plan_cached_panel_count;
+  solver->stats.refactor_supernode_consumer_plan_cached_panel_rows =
+    (int64_t)solver->refactor_supernode_consumer_plan_cached_panel_rows;
+  solver->stats.refactor_supernode_consumer_plan_strict_cached_panel_count =
+    (int64_t)
+      solver->refactor_supernode_consumer_plan_strict_cached_panel_count;
+  solver->stats.refactor_supernode_consumer_plan_strict_cached_panel_rows =
+    (int64_t)
+      solver->refactor_supernode_consumer_plan_strict_cached_panel_rows;
+  solver->stats.refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries =
+    (int64_t)solver->refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries;
   solver->stats.refactor_l_pattern_columns =
     (int64_t)solver->refactor_l_pattern_columns;
   solver->stats.refactor_l_pattern_entries =
@@ -22051,6 +22074,91 @@ static int kls_refactor_supernode_panel_cache_ready(kls_solver *solver) {
   return 1;
 }
 
+static void kls_count_consumer_plan_strict_cached_panel_candidates(
+  kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->refactor_supernode_consumer_plan_cached_panel_count = 0u;
+  solver->refactor_supernode_consumer_plan_cached_panel_rows = 0u;
+  solver->refactor_supernode_consumer_plan_strict_cached_panel_count = 0u;
+  solver->refactor_supernode_consumer_plan_strict_cached_panel_rows = 0u;
+  solver->refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries =
+    0u;
+  if (!solver->refactor_supernode_consumer_plan_built ||
+      solver->refactor_supernode_consumer_plan_ptr == NULL ||
+      solver->refactor_supernode_consumer_plan_rows == NULL ||
+      solver->refactor_supernode_consumer_plan_panel_start == NULL ||
+      solver->refactor_supernode_consumer_plan_panel_offset == NULL ||
+      solver->refactor_l_indices == NULL ||
+      solver->refactor_l_values == NULL ||
+      solver->numeric == NULL || solver->numeric->Llen == NULL) {
+    return;
+  }
+
+  for (UF_long start = 0u; start < solver->n; ++start) {
+    const UF_long begin =
+      solver->refactor_supernode_consumer_plan_ptr[start];
+    const UF_long end =
+      solver->refactor_supernode_consumer_plan_ptr[start + 1u];
+    if (begin > end ||
+        end > solver->refactor_supernode_consumer_plan_run_count) {
+      return;
+    }
+    UF_long width = 0u;
+    for (UF_long run = begin; run < end; ++run) {
+      if (solver->refactor_supernode_consumer_plan_panel_start[run] !=
+          start) {
+        continue;
+      }
+      const UF_long rows =
+        solver->refactor_supernode_consumer_plan_rows[run];
+      const UF_long offset =
+        solver->refactor_supernode_consumer_plan_panel_offset[run];
+      if (rows <= 1u || offset > solver->n - start ||
+          rows > solver->n - start - offset) {
+        continue;
+      }
+      const UF_long run_end = offset + rows;
+      if (run_end > width) {
+        width = run_end;
+      }
+    }
+    if (width <= 1u) {
+      continue;
+    }
+    solver->refactor_supernode_consumer_plan_cached_panel_count++;
+    solver->refactor_supernode_consumer_plan_cached_panel_rows += width;
+
+    UF_long block_size = 0u;
+    UF_long local_start = 0u;
+    if (!kls_refactor_supernode_panel_block_info(
+          solver, start, start + width, NULL, &block_size, &local_start)) {
+      continue;
+    }
+    UF_long trailing_len = 0u;
+    if (!kls_refactor_supernode_panel_candidate(
+          solver, start, start + width, local_start, block_size,
+          &trailing_len, NULL)) {
+      continue;
+    }
+    solver->refactor_supernode_consumer_plan_strict_cached_panel_count++;
+    solver->refactor_supernode_consumer_plan_strict_cached_panel_rows +=
+      width;
+    if (trailing_len > 0u &&
+        width >
+          (UF_long_max -
+           solver
+             ->refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries) /
+            trailing_len) {
+      return;
+    }
+    solver
+      ->refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries +=
+      width * trailing_len;
+  }
+}
+
 static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
   if (solver == NULL || solver->n == 0u ||
       solver->refactor_supernode_pipeline_end == NULL ||
@@ -22066,6 +22174,7 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
   }
 
   free_refactor_supernode_panel_cache(solver);
+  kls_count_consumer_plan_strict_cached_panel_candidates(solver);
 
   UF_long candidate_count = 0u;
   for (UF_long start = 0; start < solver->n; ++start) {
