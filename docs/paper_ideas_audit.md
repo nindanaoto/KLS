@@ -8239,3 +8239,27 @@ itself after the low-coverage clean pass on those rows. The retained
 producer-panel fields are useful for the next producer-task implementation, but
 they do not change the current conclusion: KLS needs a coarser row-major or
 persistent-consumer accumulator, not more cached-panel lookup metadata.
+
+The independent row multi-producer executor then had its per-accepted-batch
+allocation path removed. Both contiguous and fragmented independent-row
+multi-producer kernels now use the existing worker index workspace for run
+groups, row offsets, per-run offsets/suffixes/lengths/ids, and U offsets; the
+worker double workspace for multipliers, pivots, and U scratch; and the worker
+object/byte workspace for run panel descriptors. This matches the storage
+direction implied by CKTSO/SubtreeLU better than repeated `malloc`/`calloc`
+setup around the row-panel executor, while preserving the same scalar arithmetic
+and pivot checks.
+
+The focused forced-row top-five rerun is coverage-limited, not a gap-closing
+result. The same-session control
+`build/kls_worker_scratch_forced_control_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `8.13943s` geomean, while
+`build/kls_worker_scratch_multiproducer_gap5_t4_r1_ref3_timeout120.jsonl` with
+`KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1` measured `5.69134s` geomean. However,
+all five matrices still reported zero
+`row_refactor_compact_supernode_batch_count` and zero candidate counts; the
+observed wins therefore cannot be credited to accepted independent
+multi-producer batches. The synthetic smoke fixtures remain the correctness
+coverage for this storage cleanup. The paper-level conclusion is unchanged:
+the current hard rows need the broader native row/segment producer-consumer
+numeric engine, not another small gate around the independent-batch scaffold.
