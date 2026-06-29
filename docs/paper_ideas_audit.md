@@ -9426,3 +9426,36 @@ all retained runs for one current column, accumulate into a sparse/dense touched
 row set once, and write each output row once before the pivot/store step. A
 BLAS-size guard remains correct policy for optional external CBLAS, but it is
 not the missing large mechanism on these slow cases.
+
+The follow-up execution prototype rejected the scalar grouped-accumulator half
+of that direction. An opt-in current-column retained-plan accumulator was
+implemented first as a full sparse output accumulator and then narrowed to only
+accumulate the pivot/output value. The smoke suite stayed residual-clean, and
+the top-three probes measured `2.83539s` for the full sparse accumulator in
+`build/kls_plan_accum_gap3_t4_r1_ref3_timeout120.jsonl`, `2.80389s` after a
+column-batch gate in
+`build/kls_plan_accum_batchgate_gap3_t4_r1_ref3_timeout120.jsonl`, and
+`2.38787s` for the pivot-only variant in
+`build/kls_plan_accum_pivot_gap3_t4_r1_ref3_timeout120.jsonl`. That apparent
+win was against a stale baseline.
+
+The decisive same-binary top-ten comparison was worse on every row. The default
+run in `build/kls_plan_accum_default_gap10_t4_r1_ref3_timeout120.jsonl` measured
+`2.28458s` geomean, while the pivot-only accumulator in
+`build/kls_plan_accum_pivot_gap10_t4_r1_ref3_timeout120.jsonl` measured
+`3.42396s`, a `1.499x` regression. Per-matrix ratios ranged from `1.017x` on
+`gemat12` to `2.029x` on `onetone1`; the large ASIC rows regressed by `1.268x`
+to `1.833x`. The accumulator artifact did execute large retained-plan work on
+the hard rows, for example `ASIC_320ks` applied `617,135` plan rows and
+`185,394,303` entries, but still reported zero CBLAS and zero compact-GEMV
+counters. The default comparison likewise reported zero CBLAS counters.
+
+The direct conclusion is that another "use BLAS only for large cases" guard is
+not an actionable patch here: the optional CBLAS paths already require the
+build flag, runtime gate, 512-scale shape checks, and minimum-work checks, and
+the current slow default path does not enter CBLAS. It is also not enough to
+wrap the existing scalar EGraph replay in a write-combining accumulator. The
+paper gap now points more specifically to a real retained producer-panel
+numeric object with row-major or panel-major values, grouped dependency scans,
+and fewer scalar L-entry probes before output accumulation, rather than a
+post-hoc accumulator around the current per-entry replay.
