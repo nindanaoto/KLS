@@ -8995,3 +8995,18 @@ target producer-to-current-row output streaming through a broader row-major
 numeric object, producer/output accumulator, or comparable coarse supernode
 executor; a dependency-only grouping change or another BLAS threshold would
 leave most of the measured `pre2` scalar stream intact.
+
+A same-binary CBLAS guard rerun confirmed that this conclusion still applies
+to the current top CKTSO-gap medium rows. `build-cblas` was rebuilt and run
+with `OPENBLAS_NUM_THREADS=1` on the first five
+`bench/suitesparse_cktso_gap_manifest.txt` entries. With
+`KLS_ENABLE_CBLAS_SUPERNODE=0`,
+`build-cblas/kls_cblas_small_guard_off_gap5_t4_r1_ref3_timeout120.jsonl`
+measured a `1.61415s` SPICE-cycle geomean; with
+`KLS_ENABLE_CBLAS_SUPERNODE=1`,
+`build-cblas/kls_cblas_small_guard_on_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `1.60915s`. Both artifacts reported `build_has_cblas=true`, but all
+five rows had zero `refactor_last_supernode_cblas_update_*` and zero
+`refactor_supernode_cblas_update_*` counters. The current source therefore
+already implements the proposed "BLAS only for large cases" policy for these
+paths; tightening the threshold again would be a no-op on the focused losses.
