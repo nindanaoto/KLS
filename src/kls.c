@@ -58,6 +58,7 @@
   KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY
 #define KLS_ROW_REFACTOR_CBLAS_PANEL_MIN_WORK 20000000.0
 #define KLS_ROW_FIRST_CBLAS_MIN_VECTOR_ROWS 2048u
+#define KLS_ROW_FIRST_CBLAS_MIN_UPDATE_COLS 512u
 #define KLS_ROW_FIRST_CBLAS_SUPERNODE_MIN_WORK 50000000.0
 #define KLS_ROW_FIRST_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY 16.0
 #define KLS_EGRAPH_CACHED_SUPERNODE_MIN_ROWS 16u
@@ -31680,7 +31681,9 @@ static int kls_cblas_row_first_supernode_vector_update_allows(
   UF_long run_rows,
   UF_long dense_cols,
   UF_long trailing_len) {
-  if (run_rows < KLS_ROW_FIRST_CBLAS_MIN_VECTOR_ROWS) {
+  if (run_rows < KLS_ROW_FIRST_CBLAS_MIN_VECTOR_ROWS ||
+      dense_cols > UF_long_max - trailing_len ||
+      dense_cols + trailing_len < KLS_ROW_FIRST_CBLAS_MIN_UPDATE_COLS) {
     return 0;
   }
   const double work =

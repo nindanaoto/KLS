@@ -257,9 +257,10 @@ Builds configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` can use the same
 runtime `KLS_ENABLE_CBLAS_SUPERNODE=1` gate to consume eligible KLS-first
 cached panels with CBLAS `dtrsv` and `dgemv`; otherwise the cached panel uses
 the scalar in-panel solver. KLS-first CBLAS consumption now also requires at
-least 2048 producer rows, at least 50M estimated update operations, and at
-least 16 estimated operations per copied panel entry, so medium and fragmented
-Level-2 panel updates stay on the portable compact kernel. Dynamic column
+least 2048 producer rows, at least 512 dense/tail update columns, at least 50M
+estimated update operations, and at least 16 estimated operations per copied
+panel entry, so medium and fragmented Level-2 panel updates stay on the
+portable compact kernel. Dynamic column
 exchanges rebuild the phase-local
 pipeline cache from the post-exchange column order over the whole committed
 prefix and reset the row-up producer panel caches. Separator pipeline

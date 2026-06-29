@@ -10289,3 +10289,26 @@ This retained change removes a real serialized section from the large
 active-rank pipeline, but the trace confirms the remaining CKTSO gap is still
 the paper-sized grouped producer/output numeric executor rather than a mutex
 alone.
+
+A follow-up wait-snapshot prototype tried to let workers waiting behind the
+commit cursor drain ready active-rank dependencies against a snapshot of the
+published U prefix. It preserved correctness on the sensitive forced
+KLS-first probes, but was rejected before commit: the top-five CKTSO-gap
+geomean regressed twice (`1.4503s` and `1.5076s` in
+`build/kls_wait_snapshot_guard_gap5*_t4_r1_ref3_timeout120.jsonl`), and
+`pre2` still reached the same pivot-tail point as the retained active-rank
+commit-drain unlock (`274,430/629,628`) before the timeout. The retained
+source therefore stays with the committed cursor-only unlock.
+
+The CBLAS large-case guard was tightened independently. The optional
+KLS-first cached-panel CBLAS path now requires at least 512 dense/tail update
+columns in addition to the existing 2048 producer-row, 50M-work, and
+work-per-copied-entry thresholds. This directly implements the conservative
+"BLAS only for large useful updates" policy without changing the default
+non-CBLAS build. Same-binary CBLAS-capable forced `ASIC_320k` checks completed
+with clean residuals (`2.61575448e-15`): `KLS_ENABLE_CBLAS_SUPERNODE=0`
+measured `2.5094s`, and `=1` measured `2.4994s`. The final non-CBLAS top-five
+CKTSO-gap check also completed without failures at `1.4545s` geomean in
+`build/kls_cblas_update_guard_final_gap5_t4_r1_ref3_timeout120.jsonl`. The
+guard is retained as a safe policy bound rather than as evidence that BLAS
+thresholding closes the paper gap.
