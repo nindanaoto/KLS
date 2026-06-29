@@ -8487,3 +8487,36 @@ kept 235 applied runs / 26108 rows while reducing attempts from 9309 to 7280
 and shape rejects from 1241 to 22. The remaining misses are still the real
 paper gap: non-contiguous consumer streams (`onetone2`) and low-coverage
 retained plan application, not invalid-panel probing.
+
+A stricter gathered cached-panel solve was also tested and rejected. The
+prototype solved the whole retained panel slice in worker scratch and would
+commit only if every internal U row missing from the fixed KLU-compatible U
+pattern computed exactly zero. This preserves correctness, because committing
+nonzero values for missing U rows would require extra U storage and solve
+support. Focused runs with both
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1` and
+`KLS_ENABLE_REFACTOR_GATHERED_SUPERNODE=1` on `ASIC_100ks` and `onetone2`
+kept the same applied cached rows and the same stream-reject counts as the
+valid-panel-probe baseline. The non-contiguous streams therefore are not
+recoverable inside the current KLU-compatible U pattern by a guarded gathered
+panel consumer. Closing this paper gap requires changing the native numeric
+object/U storage, or routing these cases through a row-major supernodal
+refactor that owns the additional internal U entries.
+
+A current-source CBLAS-capable rerun confirms that adding another "large cases
+only" BLAS guard would be a no-op for the focused retained-panel slow cases.
+`build-cblas` was rebuilt and run with `OPENBLAS_NUM_THREADS=1`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1`, and
+`KLS_ENABLE_CBLAS_SUPERNODE=0/1` on `ASIC_100ks` and `onetone2`
+(`build-cblas/kls_cblas_guard_plan_{off,on}_{asic100ks,onetone2}_t4_r1_ref3.json`).
+Both matrices reported `build_has_cblas=true`, but every run had zero
+`refactor_supernode_cblas_update_*` calls. The retained cached-panel coverage
+was unchanged by the runtime CBLAS gate: `ASIC_100ks` kept 734 cached probes,
+267 blocked updates / 39436 rows, 347 stream rejects / 61101 rows, and zero
+workspace rejects; `onetone2` kept 7280 cached probes, 235 blocked updates /
+26108 rows, 6837 stream rejects / 939932 rows, and zero workspace rejects.
+The existing source already requires the runtime CBLAS gate plus 512-scale
+shape checks and multi-million-operation work thresholds, and these focused
+paths fall through to the in-KLS blocked cached-panel kernel. The active
+paper gap remains retained row/segment numeric storage for non-contiguous
+consumer streams, not small BLAS dispatch.
