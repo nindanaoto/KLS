@@ -10616,3 +10616,28 @@ measured `0.0792330637s` with `2` queued claims, and
 `0` queued claims. This confirms the ready-only queue is a safe diagnostic but
 not the CKTSO-closing mechanism; the useful paper gap remains the grouped
 multi-current numeric executor, not more scalar column stealing.
+
+KLS now records the retained Algorithm 5 target/accumulator surface needed by
+that grouped executor. Each selected payoff run stores a target-entry count
+covering dense suffix updates inside the retained producer pattern plus
+best-effort L-trailing entries outside that pattern. Public stats and
+`kls_bench` report the total target entries, maximum per group, and maximum per
+run. The implementation deliberately leaves the existing scalar ragged-L
+executor unchanged; these counters are descriptor substrate for the paper
+algorithm, not a BLAS or scalar-scheduler tuning change. Correctness passed
+`cmake --build build -j4`, `ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`. The
+top-five CKTSO-gap descriptor probe
+`build/kls_alg5_target_surface_gap5_t4_r1_ref3_timeout120.jsonl` completed with
+no failures and `1.7929971541164775s` geomean. It reported large retained target
+surfaces on the ASIC EGraph rows: `ASIC_320ks` has `129` groups, `3,596`
+current workspaces, `157,067` prefix workspace rows, `46,839,997` target
+entries, and `190,994` advance dependencies; `ASIC_320k` has `121` groups,
+`3,755` current workspaces, `146,027` prefix workspace rows, `48,674,072`
+target entries, and `194,219` advance dependencies; `ASIC_100ks` has `102`
+groups, `1,112` current workspaces, `20,859` prefix workspace rows,
+`4,668,124` target entries, and `32,849` advance dependencies. This makes the
+next paper gap more concrete: the missing executor must retain and publish tens
+of millions of accumulator updates for grouped current workspaces, not just
+claim earlier scalar columns or adjust BLAS thresholds.

@@ -920,14 +920,19 @@ workspaces without rediscovering the group shape. Benchmark JSON reports
 `refactor_supernode_algorithm5_payoff_group_max_workspace_rows`,
 `refactor_supernode_algorithm5_payoff_group_advance_deps`,
 `refactor_supernode_algorithm5_payoff_group_max_advance_deps`, and
-`refactor_supernode_algorithm5_payoff_group_zero_advance_runs`. These counters
-estimate the number of distinct current-column workspaces, compact prefix
-workspace rows, and prefix-advance dependencies a real Algorithm 5 batch would
-need. On the slow ASIC diagnostics, zero-advance selected runs are rare or
-absent, so the next paper-aligned executor has to batch prefix advancement
-before the shared producer update rather than relying on a first-dependency
-shortcut. These counters do not enable the old per-current scalar replay by
-default.
+`refactor_supernode_algorithm5_payoff_group_zero_advance_runs`. It also reports
+`refactor_supernode_algorithm5_payoff_group_target_entries`,
+`refactor_supernode_algorithm5_payoff_group_max_target_entries`, and
+`refactor_supernode_algorithm5_payoff_group_max_run_target_entries`, which
+count the dense suffix and L-trailing update surface that a retained
+multi-current accumulator would have to address after the selected producer
+prefix. These counters estimate the number of distinct current-column
+workspaces, compact prefix workspace rows, target accumulator entries, and
+prefix-advance dependencies a real Algorithm 5 batch would need. On the slow
+ASIC diagnostics, zero-advance selected runs are rare or absent, so the next
+paper-aligned executor has to batch prefix advancement before the shared
+producer update rather than relying on a first-dependency shortcut. These
+counters do not enable the old per-current scalar replay by default.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and

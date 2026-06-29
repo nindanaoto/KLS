@@ -6075,6 +6075,24 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   char *saved_first =
     saved_first_value != NULL ? strdup(saved_first_value) : NULL;
   const int had_first = saved_first_value != NULL;
+  const char *saved_algorithm5_plan_value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN");
+  char *saved_algorithm5_plan =
+    saved_algorithm5_plan_value != NULL ? strdup(saved_algorithm5_plan_value)
+                                        : NULL;
+  const int had_algorithm5_plan = saved_algorithm5_plan_value != NULL;
+  const char *saved_algorithm5_exec_value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC");
+  char *saved_algorithm5_exec =
+    saved_algorithm5_exec_value != NULL ? strdup(saved_algorithm5_exec_value)
+                                        : NULL;
+  const int had_algorithm5_exec = saved_algorithm5_exec_value != NULL;
+  const char *saved_algorithm5_claims_value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS");
+  char *saved_algorithm5_claims =
+    saved_algorithm5_claims_value != NULL
+      ? strdup(saved_algorithm5_claims_value) : NULL;
+  const int had_algorithm5_claims = saved_algorithm5_claims_value != NULL;
   const char *saved_algorithm5_queue_value =
     getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE");
   char *saved_algorithm5_queue =
@@ -6101,6 +6119,9 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       (had_u_values && saved_u_values == NULL) ||
       (had_cblas && saved_cblas == NULL) ||
       (had_first && saved_first == NULL) ||
+      (had_algorithm5_plan && saved_algorithm5_plan == NULL) ||
+      (had_algorithm5_exec && saved_algorithm5_exec == NULL) ||
+      (had_algorithm5_claims && saved_algorithm5_claims == NULL) ||
       (had_algorithm5_queue && saved_algorithm5_queue == NULL)) {
     fprintf(stderr, "failed to save EGraph blocked environment\n");
     ok = 0;
@@ -6131,6 +6152,24 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   }
   if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0) {
     perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN", "0",
+             1) != 0) {
+    perror("setenv KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC", "0",
+             1) != 0) {
+    perror("setenv KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS", "0",
+             1) != 0) {
+    perror("setenv KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=0");
     ok = 0;
   }
   if (ok &&
@@ -6288,6 +6327,18 @@ static int test_egraph_cached_supernode_blocked_update(void) {
                          saved_first)) {
     ok = 0;
   }
+  if (!restore_env_value("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN",
+                         had_algorithm5_plan, saved_algorithm5_plan)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC",
+                         had_algorithm5_exec, saved_algorithm5_exec)) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS",
+                         had_algorithm5_claims, saved_algorithm5_claims)) {
+    ok = 0;
+  }
   if (!restore_env_value("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE",
                          had_algorithm5_queue, saved_algorithm5_queue)) {
     ok = 0;
@@ -6300,6 +6351,9 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   free(saved_u_values);
   free(saved_cblas);
   free(saved_first);
+  free(saved_algorithm5_plan);
+  free(saved_algorithm5_exec);
+  free(saved_algorithm5_claims);
   free(saved_algorithm5_queue);
   kls_destroy(solver);
   free(ap);
