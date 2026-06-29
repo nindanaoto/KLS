@@ -893,6 +893,13 @@ staging for a future producer/consumer row-major numeric task. When this flag
 is the only supernode update gate, KLS restricts cached-panel probing to
 retained plan hits; explicit `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES` modes keep
 their broader opportunistic probes.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1` is a stricter
+Algorithm 5 probe: it builds the retained plan, selects payoff-positive
+producer-prefix subsets, materializes those prefixes as the existing ragged
+U-supernode L pattern, and runs the ragged-L executor only for selected runs.
+This is also intentionally experimental and off by default; it tests whether
+the Algorithm 5 payoff surface is enough without a true multi-current batch
+executor.
 Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN=1` to also retain the exact
 row-major U-supernode structural object from the same schedule pass. Benchmark
 JSON reports `refactor_u_supernode_pattern_count`,

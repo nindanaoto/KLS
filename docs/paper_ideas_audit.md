@@ -10435,3 +10435,30 @@ executor, not as a performance change by itself. This also keeps the latest
 BLAS-size-guard hypothesis bounded: the focused slow paths are not dispatching
 external BLAS at all, so another small-case BLAS threshold cannot close this
 gap.
+
+The next implementation tried the direct ragged producer-panel variant of that
+Algorithm 5 subset. `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1`
+now builds the retained consumer plan, keeps the payoff-positive Algorithm 5
+subset, materializes only those selected prefix extents as the existing
+plan-derived ragged U-supernode L pattern, and clamps the ragged-L executor to
+selected runs. Correctness passed `ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`,
+and the same smoke with `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1`.
+
+The focused top-ten result rejects this as the missing CKTSO mechanism. The
+new opt-in numeric path measured `4.9043s` geomean in
+`build/kls_alg5_payoff_ragged_exec_gap10_t4_r1_ref3_timeout120.jsonl`, while
+the same-source default control measured `2.1604s` in
+`build/kls_alg5_payoff_ragged_exec_default_gap10_t4_r1_ref3_timeout120.jsonl`.
+The run was still a normal non-CBLAS build with zero CBLAS update counters.
+It built `594` Algorithm 5 payoff patterns over `11,650` producer rows and did
+execute the ragged path (`567` updates, `228,450` rows, and `89.2M` update
+entries), but seven rows disabled the ragged executor after low useful
+coverage. The ASIC rows built payoff patterns but reported no cumulative
+ragged updates before disable; `onetone1` executed `546` updates over `223,131`
+rows and still remained slower. This means the payoff-positive ragged producer
+panel alone is not enough. It removes some producer L scans, but it still
+advances and executes one current column at a time. The remaining paper gap is
+more specific: KLS needs a multi-current Algorithm 5 executor or persistent
+consumer accumulator so one producer-prefix panel and one prefix-advance phase
+feed many current workspaces, rather than another per-current replay path.
