@@ -918,6 +918,9 @@ typedef struct kls_stats {
   double refactor_supernode_algorithm5_prefix_panel_payoff_subset_update_work;
   double refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work;
   int64_t refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs;
+  int64_t refactor_supernode_algorithm5_prefix_panel_payoff_subset_current_count;
+  int64_t refactor_supernode_algorithm5_prefix_panel_payoff_subset_multi_current_count;
+  int64_t refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

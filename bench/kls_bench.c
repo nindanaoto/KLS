@@ -2298,6 +2298,12 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_update_work\":%.9g"
            ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work\":%.9g"
            ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_current_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_multi_current_count\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents\":%"
            PRId64,
            stats.refactor_supernode_algorithm5_prefix_advance_run_count,
            stats.refactor_supernode_algorithm5_prefix_advance_run_rows,
@@ -2333,7 +2339,13 @@ int main(int argc, char **argv) {
            stats
              .refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work,
            stats
-             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs);
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_current_count,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_multi_current_count,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents);
     printf(",\"refactor_l_pattern_columns\":%" PRId64
            ",\"refactor_l_pattern_entries\":%" PRId64
            ",\"refactor_l_adjacent_run_count\":%" PRId64
@@ -3418,6 +3430,7 @@ int main(int argc, char **argv) {
            " work %.9g/%.9g"
            ", alg5 subset payoff %" PRId64 "/%" PRId64 "/%" PRId64
            " work %.9g/%.9g max %" PRId64
+           " currents %" PRId64 "/%" PRId64 "/%" PRId64
            ", group L %d/%d %" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64
@@ -3542,6 +3555,12 @@ int main(int argc, char **argv) {
              .refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work,
            stats
              .refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_current_count,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_multi_current_count,
+           stats
+             .refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents,
            stats.refactor_supernode_consumer_plan_group_l_built,
            stats.refactor_supernode_consumer_plan_group_l_storage_limited,
            stats.refactor_supernode_consumer_plan_group_l_panel_count,

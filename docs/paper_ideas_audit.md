@@ -10462,3 +10462,15 @@ advances and executes one current column at a time. The remaining paper gap is
 more specific: KLS needs a multi-current Algorithm 5 executor or persistent
 consumer accumulator so one producer-prefix panel and one prefix-advance phase
 feed many current workspaces, rather than another per-current replay path.
+
+The follow-up multi-current diagnostic makes that conclusion sharper and moves
+the next work away from BLAS guards. `build/kls_alg5_multicurrent_diag_gap10_t4_r1_ref3_timeout120.jsonl`
+reported the same `594` payoff-positive Algorithm 5 producer-panel subsets and
+`13,980` selected runs, but those runs also correspond to `13,980` distinct
+current columns. Every payoff subset was multi-current, with max per-panel
+current counts matching max selected-run counts: `196` on `ASIC_320ks`, `233`
+on `ASIC_320k`, `153` on `onetone2`, and `322` on `onetone1`. That means the
+paper-aligned opportunity is not repeated work inside one current column. The
+missing executor must gather many current-column workspaces for one retained
+producer prefix, advance them once to the selected offset, and apply/publish the
+shared prefix update as a batch.

@@ -717,6 +717,12 @@ struct kls_solver {
     refactor_supernode_algorithm5_prefix_panel_payoff_subset_advance_work;
   UF_long
     refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs;
+  UF_long
+    refactor_supernode_algorithm5_prefix_panel_payoff_subset_current_count;
+  UF_long
+    refactor_supernode_algorithm5_prefix_panel_payoff_subset_multi_current_count;
+  UF_long
+    refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents;
   UF_long refactor_supernode_consumer_plan_group_l_panel_count;
   UF_long refactor_supernode_consumer_plan_group_l_run_count;
   UF_long refactor_supernode_consumer_plan_group_l_rows;
@@ -2467,6 +2473,15 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
       0.0;
   solver->refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs =
     0;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_current_count =
+      0;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_multi_current_count =
+      0;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents =
+      0;
   solver->refactor_supernode_consumer_plan_cached_panel_count = 0;
   solver->refactor_supernode_consumer_plan_cached_panel_rows = 0;
   solver->refactor_supernode_consumer_plan_strict_cached_panel_count = 0;
@@ -4006,6 +4021,9 @@ typedef struct {
   double prefix_panel_payoff_subset_update_work;
   double prefix_panel_payoff_subset_advance_work;
   UF_long prefix_panel_payoff_subset_max_runs;
+  UF_long prefix_panel_payoff_subset_current_count;
+  UF_long prefix_panel_payoff_subset_multi_current_count;
+  UF_long prefix_panel_payoff_subset_max_currents;
 } kls_supernode_algorithm5_split_stats;
 
 static int kls_count_refactor_supernode_algorithm5_split_opportunities(
@@ -4101,6 +4119,8 @@ static int kls_count_refactor_supernode_algorithm5_split_opportunities(
     UF_long panel_payoff_subset_run_rows = 0u;
     double panel_payoff_subset_update_work = 0.0;
     double panel_payoff_subset_advance_work = 0.0;
+    UF_long panel_payoff_subset_current_count = 0u;
+    UF_long panel_payoff_subset_last_current = KLS_KLU_EMPTY;
     for (UF_long run = begin_run; run < end_run; ++run) {
       if (plan_panel_start[run] != panel) {
         return 0;
@@ -4176,6 +4196,17 @@ static int kls_count_refactor_supernode_algorithm5_split_opportunities(
           stats->prefix_payoff_run_rows += prefix_rows;
           stats->prefix_payoff_update_work += run_update_work;
           stats->prefix_payoff_advance_work += run_advance_work;
+          const UF_long current = plan_current[run];
+          if (current >= solver->n) {
+            return 0;
+          }
+          if (current != panel_payoff_subset_last_current) {
+            if (panel_payoff_subset_current_count == UF_long_max) {
+              return 0;
+            }
+            panel_payoff_subset_current_count++;
+            panel_payoff_subset_last_current = current;
+          }
           panel_payoff_subset_run_count++;
           panel_payoff_subset_run_rows += prefix_rows;
           panel_payoff_subset_update_work += run_update_work;
@@ -4242,7 +4273,10 @@ static int kls_count_refactor_supernode_algorithm5_split_opportunities(
           panel_payoff_subset_run_count >
             UF_long_max - stats->prefix_panel_payoff_subset_run_count ||
           panel_payoff_subset_run_rows >
-            UF_long_max - stats->prefix_panel_payoff_subset_run_rows) {
+            UF_long_max - stats->prefix_panel_payoff_subset_run_rows ||
+          panel_payoff_subset_current_count >
+            UF_long_max - stats
+                            ->prefix_panel_payoff_subset_current_count) {
         return 0;
       }
       stats->prefix_panel_payoff_subset_count++;
@@ -4250,6 +4284,15 @@ static int kls_count_refactor_supernode_algorithm5_split_opportunities(
         panel_payoff_subset_run_count;
       stats->prefix_panel_payoff_subset_run_rows +=
         panel_payoff_subset_run_rows;
+      stats->prefix_panel_payoff_subset_current_count +=
+        panel_payoff_subset_current_count;
+      if (panel_payoff_subset_current_count >= 2u) {
+        if (stats->prefix_panel_payoff_subset_multi_current_count ==
+            UF_long_max) {
+          return 0;
+        }
+        stats->prefix_panel_payoff_subset_multi_current_count++;
+      }
       stats->prefix_panel_payoff_subset_update_work +=
         panel_payoff_subset_update_work;
       stats->prefix_panel_payoff_subset_advance_work +=
@@ -4258,6 +4301,11 @@ static int kls_count_refactor_supernode_algorithm5_split_opportunities(
           stats->prefix_panel_payoff_subset_max_runs) {
         stats->prefix_panel_payoff_subset_max_runs =
           panel_payoff_subset_run_count;
+      }
+      if (panel_payoff_subset_current_count >
+          stats->prefix_panel_payoff_subset_max_currents) {
+        stats->prefix_panel_payoff_subset_max_currents =
+          panel_payoff_subset_current_count;
       }
     }
   }
@@ -5491,6 +5539,15 @@ static int kls_build_refactor_supernode_consumer_plan(
       algorithm5_stats.prefix_panel_payoff_subset_advance_work;
   solver->refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs =
     algorithm5_stats.prefix_panel_payoff_subset_max_runs;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_current_count =
+      algorithm5_stats.prefix_panel_payoff_subset_current_count;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_multi_current_count =
+      algorithm5_stats.prefix_panel_payoff_subset_multi_current_count;
+  solver
+    ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents =
+      algorithm5_stats.prefix_panel_payoff_subset_max_currents;
   return 1;
 }
 
@@ -18319,6 +18376,18 @@ static void fill_numeric_stats(kls_solver *solver) {
     .refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs =
       (int64_t)solver
         ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_runs;
+  solver->stats
+    .refactor_supernode_algorithm5_prefix_panel_payoff_subset_current_count =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_current_count;
+  solver->stats
+    .refactor_supernode_algorithm5_prefix_panel_payoff_subset_multi_current_count =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_multi_current_count;
+  solver->stats
+    .refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents;
   solver->stats.refactor_last_supernode_consumer_plan_attempts =
     (int64_t)solver->refactor_last_supernode_consumer_plan_attempts;
   solver->stats.refactor_last_supernode_consumer_plan_hits =
