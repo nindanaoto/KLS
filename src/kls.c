@@ -21265,30 +21265,23 @@ static int kls_egraph_cached_supernode_update_allows(
   UF_long dense_cols,
   UF_long trailing_len);
 
-static int kls_prune_unused_refactor_supernode_panels_from_plan(
-  kls_solver *solver) {
-  if (solver == NULL ||
-      solver->refactor_supernode_panel_count == 0u ||
-      solver->refactor_supernode_panel_start_id == NULL ||
-      solver->refactor_supernode_panel_col_id == NULL ||
-      solver->refactor_supernode_panel_start == NULL ||
-      solver->refactor_supernode_panel_width == NULL ||
-      solver->refactor_supernode_panel_trailing_len == NULL ||
+static int kls_mark_refactor_supernode_used_candidates_from_plan(
+  const kls_solver *solver,
+  const UF_long *candidate_start_id,
+  const UF_long *candidate_start,
+  const UF_long *candidate_width,
+  const UF_long *candidate_trailing_len,
+  UF_long candidate_count,
+  unsigned char *used) {
+  if (solver == NULL || candidate_start_id == NULL ||
+      candidate_start == NULL || candidate_width == NULL ||
+      candidate_trailing_len == NULL || used == NULL ||
       solver->refactor_supernode_consumer_plan_run_count == 0u ||
       solver->refactor_supernode_consumer_plan_current == NULL ||
       solver->refactor_supernode_consumer_plan_dep == NULL ||
       solver->refactor_supernode_consumer_plan_rows == NULL ||
       solver->refactor_supernode_consumer_plan_panel_start == NULL ||
       solver->refactor_supernode_consumer_plan_panel_offset == NULL) {
-    return 0;
-  }
-  const UF_long panel_count = solver->refactor_supernode_panel_count;
-  if (panel_count > (UF_long)(PTRDIFF_MAX / sizeof(unsigned char))) {
-    return 0;
-  }
-  unsigned char *used =
-    (unsigned char *)calloc((size_t)panel_count, sizeof(*used));
-  if (used == NULL) {
     return 0;
   }
 
@@ -21310,21 +21303,16 @@ static int kls_prune_unused_refactor_supernode_panels_from_plan(
         panel_offset != dep_global - plan_start) {
       continue;
     }
-    const UF_long panel =
-      solver->refactor_supernode_panel_start_id[plan_start];
-    if (panel == KLS_KLU_EMPTY || panel >= panel_count) {
+    const UF_long candidate = candidate_start_id[plan_start];
+    if (candidate == KLS_KLU_EMPTY || candidate >= candidate_count) {
       continue;
     }
-    const UF_long start = solver->refactor_supernode_panel_start[panel];
-    const UF_long width = solver->refactor_supernode_panel_width[panel];
-    const UF_long trailing_len =
-      solver->refactor_supernode_panel_trailing_len[panel];
+    const UF_long start = candidate_start[candidate];
+    const UF_long width = candidate_width[candidate];
+    const UF_long trailing_len = candidate_trailing_len[candidate];
     if (start != plan_start || width <= 1u || start > dep_global ||
         dep_global >= start + width || start > solver->n ||
-        width > solver->n - start) {
-      continue;
-    }
-    if (run_rows > width - panel_offset) {
+        width > solver->n - start || run_rows > width - panel_offset) {
       continue;
     }
     const UF_long available_end = panel_offset + run_rows;
@@ -21334,52 +21322,37 @@ static int kls_prune_unused_refactor_supernode_panels_from_plan(
     const UF_long dense_scatter_len = width - available_end;
     if (kls_egraph_cached_supernode_update_allows(
           run_rows, dense_scatter_len, trailing_len)) {
-      used[panel] = 1u;
+      used[candidate] = 1u;
     }
   }
-  UF_long used_count = 0u;
-  for (UF_long panel = 0; panel < panel_count; ++panel) {
-    if (used[panel]) {
-      used_count++;
-    } else {
-      solver->refactor_supernode_panel_width[panel] = 0u;
-    }
-  }
-  solver->refactor_supernode_panel_used_count = used_count;
-  free(used);
   return 1;
 }
 
-static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
-  if (solver == NULL) {
-    return;
+static int kls_mark_refactor_supernode_used_candidates(
+  const kls_solver *solver,
+  const UF_long *candidate_start_id,
+  const UF_long *candidate_col_id,
+  const UF_long *candidate_start,
+  const UF_long *candidate_local_start,
+  const UF_long *candidate_width,
+  const UF_long *candidate_trailing_len,
+  UF_long candidate_count,
+  unsigned char *used) {
+  if (solver == NULL || candidate_start_id == NULL ||
+      candidate_col_id == NULL || candidate_start == NULL ||
+      candidate_local_start == NULL || candidate_width == NULL ||
+      candidate_trailing_len == NULL || used == NULL) {
+    return 0;
   }
-  solver->refactor_supernode_panel_used_count = 0;
-  const UF_long panel_count = solver->refactor_supernode_panel_count;
-  if (panel_count == 0u) {
-    return;
-  }
-  if (kls_prune_unused_refactor_supernode_panels_from_plan(solver)) {
-    return;
+  if (kls_mark_refactor_supernode_used_candidates_from_plan(
+        solver, candidate_start_id, candidate_start, candidate_width,
+        candidate_trailing_len, candidate_count, used)) {
+    return 1;
   }
   if (solver->symbolic == NULL || solver->symbolic->R == NULL ||
       solver->numeric == NULL || solver->numeric->Ulen == NULL ||
-      solver->refactor_u_indices == NULL ||
-      solver->refactor_supernode_panel_col_id == NULL ||
-      solver->refactor_supernode_panel_start == NULL ||
-      solver->refactor_supernode_panel_local_start == NULL ||
-      solver->refactor_supernode_panel_width == NULL ||
-      solver->refactor_supernode_panel_trailing_len == NULL ||
-      panel_count > (UF_long)(PTRDIFF_MAX / sizeof(unsigned char))) {
-    solver->refactor_supernode_panel_used_count = panel_count;
-    return;
-  }
-
-  unsigned char *used =
-    (unsigned char *)calloc((size_t)panel_count, sizeof(*used));
-  if (used == NULL) {
-    solver->refactor_supernode_panel_used_count = panel_count;
-    return;
+      solver->refactor_u_indices == NULL) {
+    return 0;
   }
 
   const UF_long nblocks = solver->symbolic->nblocks;
@@ -21387,7 +21360,7 @@ static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
     UF_long block = 0u;
     if (nblocks > 1u) {
       if (solver->refactor_col_block == NULL) {
-        continue;
+        return 0;
       }
       block = solver->refactor_col_block[current];
       if (block >= nblocks) {
@@ -21417,17 +21390,14 @@ static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
       if (dep_global >= current || dep_global >= solver->n) {
         continue;
       }
-      const UF_long panel =
-        solver->refactor_supernode_panel_col_id[dep_global];
-      if (panel == KLS_KLU_EMPTY || panel >= panel_count) {
+      const UF_long candidate = candidate_col_id[dep_global];
+      if (candidate == KLS_KLU_EMPTY || candidate >= candidate_count) {
         continue;
       }
-      const UF_long start = solver->refactor_supernode_panel_start[panel];
-      const UF_long local_start =
-        solver->refactor_supernode_panel_local_start[panel];
-      const UF_long width = solver->refactor_supernode_panel_width[panel];
-      const UF_long trailing_len =
-        solver->refactor_supernode_panel_trailing_len[panel];
+      const UF_long start = candidate_start[candidate];
+      const UF_long local_start = candidate_local_start[candidate];
+      const UF_long width = candidate_width[candidate];
+      const UF_long trailing_len = candidate_trailing_len[candidate];
       if (width <= 1u || start > dep_global ||
           dep_global >= start + width || start > solver->n ||
           width > solver->n - start) {
@@ -21448,7 +21418,6 @@ static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
       if (available_end <= panel_offset + 1u) {
         continue;
       }
-      const UF_long dense_scatter_len = width - available_end;
       const UF_long run_rows = available_end - panel_offset;
       if (run_rows > ulen - up || run_rows > current_local - dep_local) {
         continue;
@@ -21460,24 +21429,15 @@ static void kls_prune_unused_refactor_supernode_panels(kls_solver *solver) {
           break;
         }
       }
+      const UF_long dense_scatter_len = width - available_end;
       if (contiguous &&
           kls_egraph_cached_supernode_update_allows(
             run_rows, dense_scatter_len, trailing_len)) {
-        used[panel] = 1u;
+        used[candidate] = 1u;
       }
     }
   }
-
-  UF_long used_count = 0u;
-  for (UF_long panel = 0; panel < panel_count; ++panel) {
-    if (used[panel]) {
-      used_count++;
-    } else {
-      solver->refactor_supernode_panel_width[panel] = 0u;
-    }
-  }
-  solver->refactor_supernode_panel_used_count = used_count;
-  free(used);
+  return 1;
 }
 
 static int kls_refactor_supernode_panel_cache_ready(kls_solver *solver) {
@@ -21539,10 +21499,7 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
 
   free_refactor_supernode_panel_cache(solver);
 
-  UF_long panel_count = 0u;
-  UF_long dense_total = 0u;
-  UF_long trailing_row_total = 0u;
-  UF_long trailing_value_total = 0u;
+  UF_long candidate_count = 0u;
   for (UF_long start = 0; start < solver->n; ++start) {
     const UF_long end = solver->refactor_supernode_pipeline_end[start];
     if (end <= start + 1u || end > solver->n) {
@@ -21560,19 +21517,152 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
           NULL)) {
       continue;
     }
+    candidate_count++;
+  }
+  if (candidate_count == 0u) {
+    return 1;
+  }
+  if (solver->n > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      candidate_count > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      candidate_count > (UF_long)(PTRDIFF_MAX / sizeof(unsigned char))) {
+    return 0;
+  }
+
+  UF_long *candidate_start_id =
+    (UF_long *)malloc((size_t)solver->n * sizeof(*candidate_start_id));
+  UF_long *candidate_col_id =
+    (UF_long *)malloc((size_t)solver->n * sizeof(*candidate_col_id));
+  UF_long *candidate_start =
+    (UF_long *)malloc((size_t)candidate_count * sizeof(*candidate_start));
+  UF_long *candidate_local_start =
+    (UF_long *)malloc((size_t)candidate_count *
+                      sizeof(*candidate_local_start));
+  UF_long *candidate_width =
+    (UF_long *)malloc((size_t)candidate_count * sizeof(*candidate_width));
+  UF_long *candidate_trailing_len =
+    (UF_long *)malloc((size_t)candidate_count *
+                      sizeof(*candidate_trailing_len));
+  unsigned char *candidate_used =
+    (unsigned char *)calloc((size_t)candidate_count,
+                            sizeof(*candidate_used));
+  if (candidate_start_id == NULL || candidate_col_id == NULL ||
+      candidate_start == NULL || candidate_local_start == NULL ||
+      candidate_width == NULL || candidate_trailing_len == NULL ||
+      candidate_used == NULL) {
+    free(candidate_start_id);
+    free(candidate_col_id);
+    free(candidate_start);
+    free(candidate_local_start);
+    free(candidate_width);
+    free(candidate_trailing_len);
+    free(candidate_used);
+    return 0;
+  }
+  for (UF_long k = 0; k < solver->n; ++k) {
+    candidate_start_id[k] = KLS_KLU_EMPTY;
+    candidate_col_id[k] = KLS_KLU_EMPTY;
+  }
+
+  UF_long candidate = 0u;
+  for (UF_long start = 0; start < solver->n; ++start) {
+    const UF_long end = solver->refactor_supernode_pipeline_end[start];
+    if (end <= start + 1u || end > solver->n) {
+      continue;
+    }
+    UF_long block_size = 0u;
+    UF_long local_start = 0u;
+    if (!kls_refactor_supernode_panel_block_info(
+          solver, start, end, NULL, &block_size, &local_start)) {
+      continue;
+    }
+    UF_long trailing_len = 0u;
+    if (!kls_refactor_supernode_panel_candidate(
+          solver, start, end, local_start, block_size, &trailing_len,
+          NULL)) {
+      continue;
+    }
+    if (candidate >= candidate_count) {
+      free(candidate_start_id);
+      free(candidate_col_id);
+      free(candidate_start);
+      free(candidate_local_start);
+      free(candidate_width);
+      free(candidate_trailing_len);
+      free(candidate_used);
+      return 0;
+    }
     const UF_long width = end - start;
+    candidate_start[candidate] = start;
+    candidate_local_start[candidate] = local_start;
+    candidate_width[candidate] = width;
+    candidate_trailing_len[candidate] = trailing_len;
+    candidate_start_id[start] = candidate;
+    for (UF_long col = start; col < end; ++col) {
+      candidate_col_id[col] = candidate;
+    }
+    candidate++;
+  }
+  if (candidate != candidate_count) {
+    free(candidate_start_id);
+    free(candidate_col_id);
+    free(candidate_start);
+    free(candidate_local_start);
+    free(candidate_width);
+    free(candidate_trailing_len);
+    free(candidate_used);
+    return 0;
+  }
+  if (!kls_mark_refactor_supernode_used_candidates(
+        solver, candidate_start_id, candidate_col_id, candidate_start,
+        candidate_local_start, candidate_width, candidate_trailing_len,
+        candidate_count, candidate_used)) {
+    memset(candidate_used, 1, (size_t)candidate_count *
+                              sizeof(*candidate_used));
+  }
+
+  UF_long panel_count = 0u;
+  UF_long dense_total = 0u;
+  UF_long trailing_row_total = 0u;
+  UF_long trailing_value_total = 0u;
+  for (UF_long c = 0u; c < candidate_count; ++c) {
+    if (!candidate_used[c]) {
+      continue;
+    }
+    const UF_long width = candidate_width[c];
+    const UF_long trailing_len = candidate_trailing_len[c];
     if (width > UF_long_max / width) {
+      free(candidate_start_id);
+      free(candidate_col_id);
+      free(candidate_start);
+      free(candidate_local_start);
+      free(candidate_width);
+      free(candidate_trailing_len);
+      free(candidate_used);
       return 0;
     }
     const UF_long dense_entries = width * width;
     if (trailing_len > 0u &&
         width > (UF_long_max - trailing_value_total) / trailing_len) {
+      free(candidate_start_id);
+      free(candidate_col_id);
+      free(candidate_start);
+      free(candidate_local_start);
+      free(candidate_width);
+      free(candidate_trailing_len);
+      free(candidate_used);
       return 0;
     }
     const UF_long trailing_entries = width * trailing_len;
     if (dense_entries > UF_long_max - dense_total ||
         trailing_len > UF_long_max - trailing_row_total ||
         trailing_entries > UF_long_max - trailing_value_total) {
+      free(candidate_start_id);
+      free(candidate_col_id);
+      free(candidate_start);
+      free(candidate_local_start);
+      free(candidate_width);
+      free(candidate_trailing_len);
+      free(candidate_used);
       return 0;
     }
     dense_total += dense_entries;
@@ -21581,13 +21671,26 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
     panel_count++;
   }
   if (panel_count == 0u) {
+    free(candidate_start_id);
+    free(candidate_col_id);
+    free(candidate_start);
+    free(candidate_local_start);
+    free(candidate_width);
+    free(candidate_trailing_len);
+    free(candidate_used);
     return 1;
   }
-  if (solver->n > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
-      panel_count > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+  if (panel_count > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
       dense_total > (UF_long)(SIZE_MAX / sizeof(double)) ||
       trailing_row_total > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
       trailing_value_total > (UF_long)(SIZE_MAX / sizeof(double))) {
+    free(candidate_start_id);
+    free(candidate_col_id);
+    free(candidate_start);
+    free(candidate_local_start);
+    free(candidate_width);
+    free(candidate_trailing_len);
+    free(candidate_used);
     return 0;
   }
 
@@ -21625,6 +21728,13 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
       (trailing_row_total > 0u && trailing_rows == NULL) ||
       dense_values == NULL ||
       (trailing_value_total > 0u && trailing_values == NULL)) {
+    free(candidate_start_id);
+    free(candidate_col_id);
+    free(candidate_start);
+    free(candidate_local_start);
+    free(candidate_width);
+    free(candidate_trailing_len);
+    free(candidate_used);
     free(start_id);
     free(col_id);
     free(panel_start);
@@ -21648,30 +21758,33 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
   UF_long dense_pos = 0u;
   UF_long trailing_row_pos = 0u;
   UF_long trailing_value_pos = 0u;
-  for (UF_long start = 0; start < solver->n; ++start) {
-    const UF_long end = solver->refactor_supernode_pipeline_end[start];
-    if (end <= start + 1u || end > solver->n) {
+  for (UF_long c = 0u; c < candidate_count; ++c) {
+    if (!candidate_used[c]) {
       continue;
     }
+    const UF_long start = candidate_start[c];
+    const UF_long local_start = candidate_local_start[c];
+    const UF_long width = candidate_width[c];
     UF_long block_size = 0u;
-    UF_long local_start = 0u;
-    if (!kls_refactor_supernode_panel_block_info(
-          solver, start, end, NULL, &block_size, &local_start)) {
-      continue;
-    }
-    UF_long trailing_len = 0u;
+    UF_long checked_local_start = 0u;
+    UF_long trailing_len = candidate_trailing_len[c];
     UF_long *rows_out = trailing_len > 0u ? trailing_rows + trailing_row_pos
                                           : NULL;
-    if (!kls_refactor_supernode_panel_candidate(
-          solver, start, end, local_start, block_size, &trailing_len,
-          rows_out)) {
-      continue;
-    }
-    rows_out = trailing_len > 0u ? trailing_rows + trailing_row_pos : NULL;
-    if (trailing_len > 0u &&
+    if (!kls_refactor_supernode_panel_block_info(
+          solver, start, start + width, NULL, &block_size,
+          &checked_local_start) ||
+        checked_local_start != local_start ||
         !kls_refactor_supernode_panel_candidate(
-          solver, start, end, local_start, block_size, &trailing_len,
-          rows_out)) {
+          solver, start, start + width, local_start,
+          block_size, &trailing_len, rows_out) ||
+        trailing_len != candidate_trailing_len[c]) {
+      free(candidate_start_id);
+      free(candidate_col_id);
+      free(candidate_start);
+      free(candidate_local_start);
+      free(candidate_width);
+      free(candidate_trailing_len);
+      free(candidate_used);
       free(start_id);
       free(col_id);
       free(panel_start);
@@ -21687,6 +21800,13 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
       return 0;
     }
     if (panel >= panel_count) {
+      free(candidate_start_id);
+      free(candidate_col_id);
+      free(candidate_start);
+      free(candidate_local_start);
+      free(candidate_width);
+      free(candidate_trailing_len);
+      free(candidate_used);
       free(start_id);
       free(col_id);
       free(panel_start);
@@ -21701,7 +21821,6 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
       free(trailing_values);
       return 0;
     }
-    const UF_long width = end - start;
     panel_start[panel] = start;
     panel_local_start[panel] = local_start;
     panel_width[panel] = width;
@@ -21710,7 +21829,7 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
     panel_trailing_value_begin[panel] = trailing_value_pos;
     panel_trailing_len[panel] = trailing_len;
     start_id[start] = panel;
-    for (UF_long col = start; col < end; ++col) {
+    for (UF_long col = start; col < start + width; ++col) {
       col_id[col] = panel;
     }
     dense_pos += width * width;
@@ -21721,6 +21840,13 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
   if (panel != panel_count || dense_pos != dense_total ||
       trailing_row_pos != trailing_row_total ||
       trailing_value_pos != trailing_value_total) {
+    free(candidate_start_id);
+    free(candidate_col_id);
+    free(candidate_start);
+    free(candidate_local_start);
+    free(candidate_width);
+    free(candidate_trailing_len);
+    free(candidate_used);
     free(start_id);
     free(col_id);
     free(panel_start);
@@ -21735,6 +21861,13 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
     free(trailing_values);
     return 0;
   }
+  free(candidate_start_id);
+  free(candidate_col_id);
+  free(candidate_start);
+  free(candidate_local_start);
+  free(candidate_width);
+  free(candidate_trailing_len);
+  free(candidate_used);
 
   solver->refactor_supernode_panel_start_id = start_id;
   solver->refactor_supernode_panel_col_id = col_id;
@@ -21750,7 +21883,7 @@ static int kls_build_refactor_supernode_panel_cache(kls_solver *solver) {
   solver->refactor_supernode_panel_dense_values = dense_values;
   solver->refactor_supernode_panel_trailing_values = trailing_values;
   solver->refactor_supernode_panel_count = panel_count;
-  kls_prune_unused_refactor_supernode_panels(solver);
+  solver->refactor_supernode_panel_used_count = panel_count;
   return 1;
 }
 
@@ -45118,6 +45251,22 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   if (supernode_numeric_updates) {
     if (!kls_build_refactor_supernode_panel_cache(solver)) {
       return -1;
+    }
+    if (solver->refactor_supernode_panel_used_count == 0u) {
+      free_refactor_supernode_panel_cache(solver);
+      supernode_numeric_updates = 0;
+      if (cached_supernode_updates_only) {
+        solver->refactor_supernode_cached_probe_disabled = 1;
+        solver->refactor_supernode_cached_probe_disable_count++;
+      }
+      if (supernode_numeric_update_mode == 1) {
+        solver->refactor_supernode_update_disabled = 1;
+        solver->refactor_supernode_update_disable_count++;
+      }
+      if (consumer_plan_exec_active) {
+        solver->refactor_supernode_consumer_plan_exec_disabled = 1;
+        solver->refactor_supernode_consumer_plan_exec_disable_count++;
+      }
     }
   } else if (supernode_numeric_update_mode == 0) {
     free_refactor_supernode_panel_cache(solver);

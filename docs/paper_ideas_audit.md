@@ -8774,3 +8774,40 @@ refactor path, one used the mapped path, and one used row refactor. Therefore
 an additional small-case BLAS guard would be a no-op for this slow set; the
 gap remains in creating and scheduling reusable coarse row/supernode numeric
 work rather than in external BLAS call granularity.
+
+The next paper-aligned EGraph supernode cleanup moves the cached-panel pruning
+decision before numeric panel allocation. Previously
+`kls_build_refactor_supernode_panel_cache` allocated dense and trailing value
+storage for every structural candidate and then pruned to the panels that the
+U dependency stream or retained consumer plan could actually consume. On rows
+such as `ASIC_320k`, this meant hundreds of candidate panels could be staged
+even when zero cached updates would run. The builder now records lightweight
+candidate metadata first, marks only candidates whose dependency run passes
+the same contiguity and work tests used by the executor, and allocates dense
+and trailing numeric storage only for those marked candidates. If an opt-in
+supernode mode requests the cache but the marked set is empty, KLS frees the
+empty cache and disables that opt-in mode for later refactors of the same
+numeric object.
+
+Validation kept the change scoped to the experimental supernode paths:
+`cmake --build build -j4`, `ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1 ./build/kls_smoke`,
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached ./build/kls_smoke`, and
+`git diff --check` all passed. The single-pass top-ten artifacts show the
+intended staging effect. Default mode stayed free of supernode-cache work in
+`build/kls_used_panel_cache_default_gap10_t4_r1_ref3_timeout120.jsonl`
+(`3.6069s` geomean). Cached mode in
+`build/kls_used_panel_cache_cached_gap10_t4_r1_ref3_timeout120.jsonl`
+reduced no-use rows to zero retained panels and one disable, but still measured
+`3.6520s`, so it remains opt-in. Full supernode mode improved the focused
+top-ten artifact to `2.6895s` in
+`build/kls_used_panel_cache_full_gap10_t4_r1_ref3_timeout120.jsonl`, with
+usable rows retaining exactly one panel instead of hundreds of staged
+candidates; however, the broader top-20 promotion check rejected making this
+the default. `build/kls_used_panel_cache_full_gap20_t4_r1_ref3_timeout120.jsonl`
+measured `2.2795s`, while the same-source default
+`build/kls_used_panel_cache_default_gap20_t4_r1_ref3_timeout120.jsonl`
+measured `2.0286s`. The retained value is therefore narrower: the
+SubtreeLU/CKTSO-style cached-panel scaffold now avoids paying for panels that
+cannot be consumed, but the scalar update executor still lacks enough
+arithmetic intensity to be a general default.
