@@ -8877,3 +8877,19 @@ The broader top-20 guard rejected making that policy a default:
 retained conclusion is that KLS should not broadly disable the partial
 supernode pipeline; the remaining CKTSO gap needs a better row/supernode
 numeric executor, not just a different queue-selection switch.
+
+The current source also rechecked whether forcing the KLS-owned first-factor
+bridge could improve the large EGraph refactor rows enough to justify replacing
+the accepted KLU first factor. It did not. With
+`KLS_ENABLE_KLS_FIRST_FACTOR=1`,
+`build/kls_forced_first_large3_t4_r1_ref3_timeout120.jsonl` measured
+`7.4156s` on `ASIC_100ks`, `14.0002s` on `ASIC_320k`, and `22.7419s` on
+`G2_circuit`, versus the saved default values of `5.4732s`, `13.0825s`, and
+`21.1155s`. The forced path changed `last_factor_path` to `kls_first`, but
+initial factor time rose sharply (`ASIC_100ks` from `0.6480s` to `2.0697s`,
+`ASIC_320k` from `1.2720s` to `2.1234s`, and `G2_circuit` from `1.0330s` to
+`2.0720s`) while repeated EGraph refactor time stayed flat or slightly worse.
+The KLS-first automatic selector therefore remains conservative for these
+large CKTSO-gap rows. The missing piece is still the production
+row/supernode numeric executor that lowers repeated refactor cost, not merely
+seeding the existing EGraph path from the current KLS-first bridge.
