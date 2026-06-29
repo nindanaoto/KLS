@@ -57,6 +57,9 @@
 #define KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY \
   KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY
 #define KLS_ROW_REFACTOR_CBLAS_PANEL_MIN_WORK 20000000.0
+#define KLS_ROW_FIRST_CBLAS_MIN_VECTOR_ROWS 2048u
+#define KLS_ROW_FIRST_CBLAS_SUPERNODE_MIN_WORK 50000000.0
+#define KLS_ROW_FIRST_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY 16.0
 #define KLS_EGRAPH_CACHED_SUPERNODE_MIN_ROWS 16u
 #define KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK 512.0
 #define KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK_PER_ENTRY \
@@ -27651,6 +27654,24 @@ static int kls_cblas_supernode_vector_update_allows(UF_long run_rows,
   return kls_cblas_work_allows(work, copied_entries);
 }
 
+static int kls_cblas_row_first_supernode_vector_update_allows(
+  UF_long run_rows,
+  UF_long dense_cols,
+  UF_long trailing_len) {
+  if (run_rows < KLS_ROW_FIRST_CBLAS_MIN_VECTOR_ROWS) {
+    return 0;
+  }
+  const double work =
+    0.5 * (double)run_rows * (double)(run_rows - 1u) +
+    (double)run_rows * (double)dense_cols +
+    (double)run_rows * (double)trailing_len;
+  const double copied_entries =
+    (double)run_rows + (double)dense_cols + (double)trailing_len;
+  return work >= KLS_ROW_FIRST_CBLAS_SUPERNODE_MIN_WORK &&
+         work >= KLS_ROW_FIRST_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY *
+                   copied_entries;
+}
+
 static int kls_cblas_batched_supernode_update_allows(UF_long batch_rows,
                                                      UF_long dep_rows,
                                                      UF_long trailing_len) {
@@ -51784,8 +51805,8 @@ static int kls_row_first_partial_apply_supernode_run_cached_cblas(
     return 0;
   }
 
-  if (!kls_cblas_supernode_vector_update_allows(run_limit, dense_suffix_len,
-                                                tail_len)) {
+  if (!kls_cblas_row_first_supernode_vector_update_allows(
+        run_limit, dense_suffix_len, tail_len)) {
     return 0;
   }
   if (tail_len > UF_long_max - run_limit) {

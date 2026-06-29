@@ -256,7 +256,11 @@ full prefix-cache rebuilds from panels appended as rows are published.
 Builds configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` can use the same
 runtime `KLS_ENABLE_CBLAS_SUPERNODE=1` gate to consume eligible KLS-first
 cached panels with CBLAS `dtrsv` and `dgemv`; otherwise the cached panel uses
-the scalar in-panel solver. Dynamic column exchanges rebuild the phase-local
+the scalar in-panel solver. KLS-first CBLAS consumption now also requires at
+least 2048 producer rows, at least 50M estimated update operations, and at
+least 16 estimated operations per copied panel entry, so medium and fragmented
+Level-2 panel updates stay on the portable compact kernel. Dynamic column
+exchanges rebuild the phase-local
 pipeline cache from the post-exchange column order over the whole committed
 prefix and reset the row-up producer panel caches. Separator pipeline
 pivot-tail rows that are serialized after a restart use the same row-up
@@ -1701,6 +1705,14 @@ second trace, and a post-fix interrupt sample again lands in scalar
 `kls_row_first_partial_apply_one_dep` with other pipeline workers waiting. This
 run was from a non-CBLAS build, so small BLAS call overhead is not the active
 blocker on this path.
+A CBLAS-enabled check confirmed that conclusion. Before tightening the
+KLS-first CBLAS gate, `Freescale/transient` with `KLS_ENABLE_CBLAS_SUPERNODE=1`
+measured `factor_seconds_avg=1.3894s` versus `1.2569s` with the runtime gate
+off on the same binary. KLS now requires a larger first-factor BLAS window; the
+same medium CBLAS-on/off comparison measured `1.2985s`/`1.3120s` with clean
+residuals. A post-change `pre2` CBLAS-on rerun still timed out at 120s after
+the repeated dominant-BTF trace, so the remaining slow case is still the
+coarser numeric executor gap rather than BLAS thresholding.
 The row-first pipeline now also drains the final scalar dependency set for the
 commit-cursor row without holding the pipeline mutex when supernode and
 active-rank accelerators are already disabled; no later row can append to the
