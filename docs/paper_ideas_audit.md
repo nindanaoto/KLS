@@ -10085,3 +10085,37 @@ skip the old scalar/current-column replay for those claimed updates. The same
 run was built without CBLAS support (`build_has_cblas=false`) and reported zero
 `refactor_supernode_cblas_update_*` calls, so an additional "use BLAS only for
 large cases" guard cannot affect this result.
+
+KLS now has default-off ownership infrastructure for that future grouped
+executor behind
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_SHAPE_CLAIMS=1`: an inverse
+`refactor_level_pos` map, distinct pipeline ownership tags for ordinary leased
+columns versus shape-claimed columns, and a guarded shape-group owner probe
+that only activates when the retained group-L run map is present. This is an
+ownership substrate, not the final paper algorithm.
+
+Validation:
+
+- `git diff --check` passed.
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_SHAPE_CLAIMS=1 ./build/kls_smoke`
+  passed.
+- The default top-three control after the patch
+  `build/kls_default_after_shape_claims_gap3_t4_r1_ref3_timeout120.jsonl`
+  completed with no failed matrices and measured `2.05866s` geomean:
+  `ASIC_320ks=10.8233s`, `ASIC_320k=12.6456s`, `gemat12=0.063746s`.
+- The opt-in shape-claim probe
+  `build/kls_shape_claims_gap3_t4_r1_ref3_timeout120.jsonl` timed out on both
+  hard ASIC cases at the 120s per-matrix limit and only completed `gemat12` at
+  `0.0647132s`.
+
+This is stronger negative evidence against scalar future-column replay. The
+ownership guard is safe enough for smoke tests and leaves default performance
+unchanged, but using it to claim future columns and dispatch their complete
+scalar EGraph refactors serializes the slow ASIC cases instead of closing the
+gap. The missing CKTSO-paper-sized step remains the same and is now sharper:
+once columns are safely owned, KLS must execute a true grouped producer-panel
+kernel over multiple current workspaces. A BLAS size guard is still orthogonal:
+these default and failed probe runs do not exercise external CBLAS update
+counters, so small-case BLAS overhead is not the main cause of the ASIC loss.
