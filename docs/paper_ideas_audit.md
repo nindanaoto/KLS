@@ -10768,3 +10768,42 @@ with the existing scalar ragged payoff executor remained worse:
 semantic helps modestly, but the large CKTSO gap still points at the missing
 grouped multi-current numeric executor rather than BLAS thresholds or the
 current scalar payoff replay.
+
+The Algorithm 5 prefactor flag is now opportunistic rather than scheduler
+shaping. The earlier implementation allocated `pipeline_done` solely because
+`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1` was set, which made the experiment
+measure both the skip-unfinished prefactor semantic and a changed EGraph
+scheduler. KLS now only uses pipeline completion state that the selected
+refactor path already needed for other reasons. Inside a BTF EGraph column, the
+applied bitmap is allocated lazily only after a dependency actually blocks; when
+allocated, it marks the already-consumed prefix as applied before scanning later
+published predecessors. That prefix initialization is part of the algorithmic
+guard, because without it the out-of-order scan can treat ordinary consumed
+predecessors as still pending.
+
+Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1 ./build/kls_smoke`. The final
+top-five CKTSO-gap probe
+`build/kls_pref_update_lazy_prefix_gap5_t4_r1_ref3_timeout120.jsonl` completed
+with no failures and `1.3868464599815646s` geomean. The 20-matrix CKTSO-gap
+slice `build/kls_pref_update_lazy_prefix_gap20_t4_r1_ref3_timeout120.jsonl`
+completed with no failures and `1.895666332219691s` geomean, versus the current
+default control `build/kls_current_default_gap20_t4_r1_ref3_timeout120.jsonl`
+at `1.9827861293806655s`, the earlier forced-pipeline prefactor probe
+`build/kls_pref_update_gap20_t4_r1_ref3_timeout120.jsonl` at
+`1.9475523420313228s`, and the no-force/eager-bitmap probe
+`build/kls_pref_update_noforce_gap20_t4_r1_ref3_timeout120.jsonl` at
+`1.9157238058535386s`. This confirms that the useful part is the paper-level
+skip-unfinished prefactor semantic, not changing the scheduler just to enable
+the flag.
+
+A prefix-triggered current-replay queue was also tested and rejected rather than
+kept. `build/kls_alg5_queue_pref_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`2.9581724708498953s` top-five geomean, and combining it with the prefactor
+flag in
+`build/kls_alg5_queue_pref_plus_pref_update_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `2.9219258140638535s`; `ASIC_100ks` alone rose to about `23s`. That
+experiment replayed whole scalar current columns early. It did not implement
+the paper's grouped multi-current accumulator, so keeping it would be misleading
+and would distract from the still-missing large algorithmic piece.

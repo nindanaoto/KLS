@@ -52523,15 +52523,10 @@ static int kls_egraph_refactor_btf_unscaled_column(
     !u_supernode_ragged_l_updates && !u_supernode_values;
   const UF_long *llen = numeric->Llen + k1;
   UF_long algorithm5_prefactor_deps = 0u;
+  const int algorithm5_prefactor_enabled =
+    wait_for_dependencies && shared->algorithm5_prefactor_updates &&
+    ucol_len > 1u;
   unsigned char *algorithm5_prefactor_applied = NULL;
-  if (wait_for_dependencies && shared->algorithm5_prefactor_updates &&
-      ucol_len > 1u) {
-    algorithm5_prefactor_applied =
-      kls_egraph_worker_byte_workspace(worker, ucol_len);
-    if (algorithm5_prefactor_applied != NULL) {
-      memset(algorithm5_prefactor_applied, 0, (size_t)ucol_len);
-    }
-  }
   /* Cluster columns already have their predecessors published; keep that
      CKTSO-style cluster loop free of the per-entry wait check used below. */
   if (plain_scalar_updates) {
@@ -52543,13 +52538,25 @@ static int kls_egraph_refactor_btf_unscaled_column(
           continue;
         }
         const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
-        if (algorithm5_prefactor_applied != NULL &&
-            !kls_egraph_refactor_dependency_done_now(shared, k1 + j) &&
-            !kls_egraph_refactor_prefactor_finished_btf_deps(
-              worker, k1, k, local_k, up, ucol_len, ui, ui32, ux,
-              l_indices, l_values, llen, x, algorithm5_prefactor_applied,
-              0, &algorithm5_prefactor_deps)) {
-          return 0;
+        if (algorithm5_prefactor_enabled &&
+            !kls_egraph_refactor_dependency_done_now(shared, k1 + j)) {
+          if (algorithm5_prefactor_applied == NULL) {
+            algorithm5_prefactor_applied =
+              kls_egraph_worker_byte_workspace(worker, ucol_len);
+            if (algorithm5_prefactor_applied != NULL) {
+              memset(algorithm5_prefactor_applied, 0, (size_t)ucol_len);
+              if (up > 0u) {
+                memset(algorithm5_prefactor_applied, 1, (size_t)up);
+              }
+            }
+          }
+          if (algorithm5_prefactor_applied != NULL &&
+              !kls_egraph_refactor_prefactor_finished_btf_deps(
+                worker, k1, k, local_k, up, ucol_len, ui, ui32, ux,
+                l_indices, l_values, llen, x, algorithm5_prefactor_applied,
+                0, &algorithm5_prefactor_deps)) {
+            return 0;
+          }
         }
         if (!kls_egraph_refactor_wait_done(shared, k1 + j)) {
           return 0;
@@ -52628,13 +52635,25 @@ static int kls_egraph_refactor_btf_unscaled_column(
         }
       }
       const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
-      if (algorithm5_prefactor_applied != NULL &&
-          !kls_egraph_refactor_dependency_done_now(shared, k1 + j) &&
-          !kls_egraph_refactor_prefactor_finished_btf_deps(
-            worker, k1, k, local_k, up, ucol_len, ui, ui32, ux,
-            l_indices, l_values, llen, x, algorithm5_prefactor_applied,
-            u_supernode_values, &algorithm5_prefactor_deps)) {
-        return 0;
+      if (algorithm5_prefactor_enabled &&
+          !kls_egraph_refactor_dependency_done_now(shared, k1 + j)) {
+        if (algorithm5_prefactor_applied == NULL) {
+          algorithm5_prefactor_applied =
+            kls_egraph_worker_byte_workspace(worker, ucol_len);
+          if (algorithm5_prefactor_applied != NULL) {
+            memset(algorithm5_prefactor_applied, 0, (size_t)ucol_len);
+            if (up > 0u) {
+              memset(algorithm5_prefactor_applied, 1, (size_t)up);
+            }
+          }
+        }
+        if (algorithm5_prefactor_applied != NULL &&
+            !kls_egraph_refactor_prefactor_finished_btf_deps(
+              worker, k1, k, local_k, up, ucol_len, ui, ui32, ux,
+              l_indices, l_values, llen, x, algorithm5_prefactor_applied,
+              u_supernode_values, &algorithm5_prefactor_deps)) {
+          return 0;
+        }
       }
       if (!kls_egraph_refactor_wait_done(shared, k1 + j)) {
         return 0;
@@ -56153,16 +56172,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
   if ((natural_pipeline || check_pivots) && pipeline_done == NULL) {
     return -1;
-  }
-  if (algorithm5_prefactor_update_requested &&
-      pipeline_done == NULL &&
-      solver->refactor_pipeline_column_count > 0u &&
-      cluster_level_count < solver->refactor_level_count) {
-    pipeline_done =
-      ensure_egraph_pipeline_done(solver, &pipeline_generation);
-    if (pipeline_done == NULL || pipeline_generation == 0u) {
-      return -1;
-    }
   }
   const int consumer_plan_claims_requested =
     ((kls_refactor_supernode_consumer_plan_claims_env_enabled() ||
