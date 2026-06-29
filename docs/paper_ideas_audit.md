@@ -9172,3 +9172,45 @@ direct paper-aligned target remains a persistent producer/output accumulator,
 row-major numeric object, or broad supernode executor that can reuse one
 producer panel across many consumers and scatter/output rows without rebuilding
 the same stream each time.
+
+The follow-up ragged-L miss instrumentation explains why the existing
+U-supernode ragged executor is not that missing mechanism. KLS now reports
+last-pass ragged-L probe attempts, panel misses, short rejects, stream rejects,
+and work rejects, plus an auto-disable flag/counter for the ragged-L executor.
+The counters are only active when
+`KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1` requests that experimental path.
+
+On the focused top-ten CKTSO-gap run before the auto-disable guard,
+`build/kls_ragged_miss_stats_gap10_t4_r1_ref3_timeout120.jsonl` measured a
+`3.02317s` geomean versus the retained default's `2.28216s`. The miss counters
+showed the real cause: `9,238,545` of `9,268,826` last-pass ragged probes were
+panel misses (`99.7%`). Short rejects, stream rejects, and work rejects were
+tiny by comparison (`107`, `27,449`, and `724`). The executor did build many
+candidate panels, but after the first pass it pruned almost all unused panels
+and then kept probing the invalidated panel map on later SPICE refactors.
+
+KLS therefore now auto-disables the ragged-L executor for a numeric object when
+a clean pass applies less than one quarter as many ragged update rows as it
+probes. This keeps the experimental path from repeatedly paying panel-miss
+overhead while preserving the default EGraph path. Validation:
+
+- `cmake --build build -j 4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- Final-source default top-ten run
+  `build/kls_default_after_ragged_guard_gap10_t4_r1_ref3_timeout120.jsonl`
+  measured `2.14452s` geomean and remains `2.287x` slower than CKTSO on the
+  same ten rows, so the default path was not regressed but the CKTSO gap remains.
+- Final-source ragged-L run
+  `build/kls_ragged_autodisable_final2_gap10_t4_r1_ref3_timeout120.jsonl`
+  measured `2.60687s`, `0.862x` of the raw ragged miss run but still
+  `1.216x` slower than the default final-source EGraph run. It disabled
+  ragged-L on 9 of 10 rows after one sparse-use pass and preserved
+  `357,981` cumulative ragged update rows over `2,001` runs.
+
+This is a useful guardrail, not the CKTSO closer. It directly rejects a
+paper-shaped but too-narrow executor once measured coverage is sparse. The
+large consumer plan still exposes the important opportunity (`6.3M` run rows
+and about `1.75B` L entries on the same focus set), but the current ragged-L
+executor realizes only a small fraction of it. The next implementation should
+consume those retained runs with a broader row-major producer/output object
+instead of probing one narrow panel map from every scalar dependency.

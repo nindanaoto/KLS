@@ -1536,6 +1536,13 @@ int main(int argc, char **argv) {
            ",\"refactor_last_u_supernode_l_update_runs\":%" PRId64
            ",\"refactor_last_u_supernode_l_update_rows\":%" PRId64
            ",\"refactor_last_u_supernode_l_update_entries\":%" PRId64
+           ",\"refactor_last_u_supernode_l_probe_attempts\":%" PRId64
+           ",\"refactor_last_u_supernode_l_panel_misses\":%" PRId64
+           ",\"refactor_last_u_supernode_l_short_rejects\":%" PRId64
+           ",\"refactor_last_u_supernode_l_stream_rejects\":%" PRId64
+           ",\"refactor_last_u_supernode_l_work_rejects\":%" PRId64
+           ",\"refactor_u_supernode_l_exec_disabled\":%d"
+           ",\"refactor_u_supernode_l_exec_disable_count\":%" PRId64
            ",\"refactor_u_supernode_l_update_run_count\":%" PRId64
            ",\"refactor_u_supernode_l_update_rows\":%" PRId64
            ",\"refactor_u_supernode_l_update_entries\":%" PRId64
@@ -1660,6 +1667,13 @@ int main(int argc, char **argv) {
            stats.refactor_last_u_supernode_l_update_runs,
            stats.refactor_last_u_supernode_l_update_rows,
            stats.refactor_last_u_supernode_l_update_entries,
+           stats.refactor_last_u_supernode_l_probe_attempts,
+           stats.refactor_last_u_supernode_l_panel_misses,
+           stats.refactor_last_u_supernode_l_short_rejects,
+           stats.refactor_last_u_supernode_l_stream_rejects,
+           stats.refactor_last_u_supernode_l_work_rejects,
+           stats.refactor_u_supernode_l_exec_disabled,
+           stats.refactor_u_supernode_l_exec_disable_count,
            stats.refactor_u_supernode_l_update_run_count,
            stats.refactor_u_supernode_l_update_rows,
            stats.refactor_u_supernode_l_update_entries,
@@ -2760,6 +2774,9 @@ int main(int argc, char **argv) {
            ", ragged L entries: %" PRId64 "/%" PRId64
            ", ragged L pruned: %" PRId64 "/%" PRId64
            ", ragged L updates: %" PRId64 "/%" PRId64 "/%" PRId64
+           ", ragged L misses: %" PRId64 "/%" PRId64 "/%" PRId64
+           "/%" PRId64 "/%" PRId64
+           ", ragged L disabled: %d/%" PRId64
            ", panels: %" PRId64 ", used panels: %" PRId64
            ", cached probe disabled: %d/%" PRId64 "\n",
            stats.refactor_supernode_candidate_count,
@@ -2797,6 +2814,13 @@ int main(int argc, char **argv) {
            stats.refactor_last_u_supernode_l_update_runs,
            stats.refactor_last_u_supernode_l_update_rows,
            stats.refactor_last_u_supernode_l_update_entries,
+           stats.refactor_last_u_supernode_l_probe_attempts,
+           stats.refactor_last_u_supernode_l_panel_misses,
+           stats.refactor_last_u_supernode_l_short_rejects,
+           stats.refactor_last_u_supernode_l_stream_rejects,
+           stats.refactor_last_u_supernode_l_work_rejects,
+           stats.refactor_u_supernode_l_exec_disabled,
+           stats.refactor_u_supernode_l_exec_disable_count,
            stats.refactor_supernode_panel_count,
            stats.refactor_supernode_panel_used_count,
            stats.refactor_supernode_cached_probe_disabled,

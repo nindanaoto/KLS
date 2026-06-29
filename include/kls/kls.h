@@ -715,6 +715,13 @@ typedef struct kls_stats {
   int64_t refactor_last_u_supernode_l_update_runs;
   int64_t refactor_last_u_supernode_l_update_rows;
   int64_t refactor_last_u_supernode_l_update_entries;
+  int64_t refactor_last_u_supernode_l_probe_attempts;
+  int64_t refactor_last_u_supernode_l_panel_misses;
+  int64_t refactor_last_u_supernode_l_short_rejects;
+  int64_t refactor_last_u_supernode_l_stream_rejects;
+  int64_t refactor_last_u_supernode_l_work_rejects;
+  int refactor_u_supernode_l_exec_disabled;
+  int64_t refactor_u_supernode_l_exec_disable_count;
   int64_t refactor_u_supernode_l_update_run_count;
   int64_t refactor_u_supernode_l_update_rows;
   int64_t refactor_u_supernode_l_update_entries;
