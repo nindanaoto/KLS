@@ -664,6 +664,14 @@ struct kls_solver {
   double refactor_supernode_consumer_plan_shape_batch_advance_work;
   UF_long refactor_supernode_consumer_plan_shape_batch_advance_max_deps;
   double refactor_supernode_consumer_plan_shape_batch_advance_max_work;
+  UF_long refactor_supernode_consumer_plan_prefix_advance_batch_count;
+  UF_long refactor_supernode_consumer_plan_prefix_advance_batch_run_count;
+  UF_long refactor_supernode_consumer_plan_prefix_advance_batch_run_rows;
+  UF_long refactor_supernode_consumer_plan_prefix_advance_batch_dep_count;
+  double refactor_supernode_consumer_plan_prefix_advance_batch_work;
+  UF_long refactor_supernode_consumer_plan_prefix_advance_batch_max_runs;
+  UF_long refactor_supernode_consumer_plan_prefix_advance_batch_max_deps;
+  double refactor_supernode_consumer_plan_prefix_advance_batch_max_work;
   UF_long refactor_supernode_consumer_plan_group_l_panel_count;
   UF_long refactor_supernode_consumer_plan_group_l_run_count;
   UF_long refactor_supernode_consumer_plan_group_l_rows;
@@ -2336,6 +2344,15 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_supernode_consumer_plan_shape_batch_advance_work = 0.0;
   solver->refactor_supernode_consumer_plan_shape_batch_advance_max_deps = 0;
   solver->refactor_supernode_consumer_plan_shape_batch_advance_max_work = 0.0;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_count = 0;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_run_count = 0;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_run_rows = 0;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_dep_count = 0;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_work = 0.0;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_max_runs = 0;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_max_deps = 0;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_max_work =
+    0.0;
   solver->refactor_supernode_consumer_plan_cached_panel_count = 0;
   solver->refactor_supernode_consumer_plan_cached_panel_rows = 0;
   solver->refactor_supernode_consumer_plan_strict_cached_panel_count = 0;
@@ -3549,6 +3566,294 @@ static int kls_count_supernode_consumer_plan_shape_batch_advance_costs(
   return 1;
 }
 
+static int kls_same_supernode_consumer_plan_prefix(
+  UF_long block_start_a,
+  const UF_long *ui_a,
+  UF_long len_a,
+  UF_long block_start_b,
+  const UF_long *ui_b,
+  UF_long len_b) {
+  if (block_start_a != block_start_b || len_a != len_b) {
+    return 0;
+  }
+  for (UF_long pos = 0u; pos < len_a; ++pos) {
+    if (ui_a == NULL || ui_b == NULL || ui_a[pos] != ui_b[pos]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int kls_count_supernode_consumer_plan_prefix_advance_batches(
+  const kls_solver *solver,
+  const UF_long *group_ptr,
+  const UF_long *group_runs,
+  const UF_long *group_rows,
+  const UF_long *plan_current,
+  const UF_long *plan_dep,
+  UF_long group_count,
+  UF_long group_run_count,
+  UF_long run_count,
+  UF_long max_group_runs,
+  UF_long *batch_count_out,
+  UF_long *batch_run_count_out,
+  UF_long *batch_run_rows_out,
+  UF_long *batch_dep_count_out,
+  double *batch_work_out,
+  UF_long *batch_max_runs_out,
+  UF_long *batch_max_deps_out,
+  double *batch_max_work_out) {
+  if (batch_count_out != NULL) {
+    *batch_count_out = 0u;
+  }
+  if (batch_run_count_out != NULL) {
+    *batch_run_count_out = 0u;
+  }
+  if (batch_run_rows_out != NULL) {
+    *batch_run_rows_out = 0u;
+  }
+  if (batch_dep_count_out != NULL) {
+    *batch_dep_count_out = 0u;
+  }
+  if (batch_work_out != NULL) {
+    *batch_work_out = 0.0;
+  }
+  if (batch_max_runs_out != NULL) {
+    *batch_max_runs_out = 0u;
+  }
+  if (batch_max_deps_out != NULL) {
+    *batch_max_deps_out = 0u;
+  }
+  if (batch_max_work_out != NULL) {
+    *batch_max_work_out = 0.0;
+  }
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Llen == NULL ||
+      group_ptr == NULL || group_runs == NULL || group_rows == NULL ||
+      plan_current == NULL || plan_dep == NULL ||
+      batch_count_out == NULL ||
+      batch_run_count_out == NULL ||
+      batch_run_rows_out == NULL ||
+      batch_dep_count_out == NULL ||
+      batch_work_out == NULL ||
+      batch_max_runs_out == NULL ||
+      batch_max_deps_out == NULL ||
+      batch_max_work_out == NULL) {
+    return 0;
+  }
+  if (group_count == 0u || group_run_count == 0u || run_count == 0u ||
+      max_group_runs < 2u) {
+    return 1;
+  }
+
+  const size_t max_runs = (size_t)max_group_runs;
+  if ((UF_long)max_runs != max_group_runs || max_runs > SIZE_MAX / 2u) {
+    return 0;
+  }
+  size_t bucket_count = 4u;
+  const size_t wanted_buckets = max_runs * 2u;
+  while (bucket_count < wanted_buckets) {
+    if (bucket_count > SIZE_MAX / 2u) {
+      return 0;
+    }
+    bucket_count *= 2u;
+  }
+  if (bucket_count > SIZE_MAX / sizeof(uint64_t) ||
+      bucket_count > SIZE_MAX / sizeof(UF_long) ||
+      bucket_count > SIZE_MAX / sizeof(double) ||
+      bucket_count > SIZE_MAX / sizeof(unsigned char) ||
+      bucket_count > SIZE_MAX / sizeof(const UF_long *)) {
+    return 0;
+  }
+
+  uint64_t *bucket_hash =
+    (uint64_t *)malloc(bucket_count * sizeof(*bucket_hash));
+  const UF_long **bucket_ui =
+    (const UF_long **)malloc(bucket_count * sizeof(*bucket_ui));
+  UF_long *bucket_block_start =
+    (UF_long *)malloc(bucket_count * sizeof(*bucket_block_start));
+  UF_long *bucket_prefix_len =
+    (UF_long *)malloc(bucket_count * sizeof(*bucket_prefix_len));
+  UF_long *bucket_runs =
+    (UF_long *)malloc(bucket_count * sizeof(*bucket_runs));
+  UF_long *bucket_run_rows =
+    (UF_long *)malloc(bucket_count * sizeof(*bucket_run_rows));
+  UF_long *bucket_deps =
+    (UF_long *)malloc(bucket_count * sizeof(*bucket_deps));
+  double *bucket_work =
+    (double *)malloc(bucket_count * sizeof(*bucket_work));
+  unsigned char *bucket_used =
+    (unsigned char *)malloc(bucket_count * sizeof(*bucket_used));
+  if (bucket_hash == NULL || bucket_ui == NULL ||
+      bucket_block_start == NULL || bucket_prefix_len == NULL ||
+      bucket_runs == NULL || bucket_run_rows == NULL ||
+      bucket_deps == NULL || bucket_work == NULL || bucket_used == NULL) {
+    free(bucket_hash);
+    free(bucket_ui);
+    free(bucket_block_start);
+    free(bucket_prefix_len);
+    free(bucket_runs);
+    free(bucket_run_rows);
+    free(bucket_deps);
+    free(bucket_work);
+    free(bucket_used);
+    return 0;
+  }
+
+  UF_long batch_count = 0u;
+  UF_long batch_run_count = 0u;
+  UF_long batch_run_rows = 0u;
+  UF_long batch_dep_count = 0u;
+  double batch_work = 0.0;
+  UF_long batch_max_runs = 0u;
+  UF_long batch_max_deps = 0u;
+  double batch_max_work = 0.0;
+  int ok = 1;
+  for (UF_long group = 0u; ok && group < group_count; ++group) {
+    const UF_long begin = group_ptr[group];
+    const UF_long end = group_ptr[group + 1u];
+    if (begin > end || end > group_run_count) {
+      ok = 0;
+      break;
+    }
+    const UF_long runs = end - begin;
+    if (runs < 2u) {
+      continue;
+    }
+    const size_t group_runs_size = (size_t)runs;
+    if ((UF_long)group_runs_size != runs || group_runs_size > max_runs ||
+        group_runs_size > SIZE_MAX / 2u) {
+      ok = 0;
+      break;
+    }
+    size_t active_buckets = 4u;
+    const size_t wanted = group_runs_size * 2u;
+    while (active_buckets < wanted) {
+      active_buckets *= 2u;
+    }
+    memset(bucket_used, 0, active_buckets * sizeof(*bucket_used));
+    const UF_long rows = group_rows[group];
+    for (UF_long pos = begin; ok && pos < end; ++pos) {
+      const UF_long run = group_runs[pos];
+      if (run >= run_count) {
+        ok = 0;
+        break;
+      }
+      UF_long prefix_len = 0u;
+      UF_long block_start = 0u;
+      const UF_long *ui = NULL;
+      if (!kls_supernode_consumer_plan_run_dep_position(
+            solver, plan_current, plan_dep, run_count, run,
+            &prefix_len, &block_start, &ui)) {
+        continue;
+      }
+      if (prefix_len == 0u) {
+        continue;
+      }
+      uint64_t hash =
+        kls_mix_u64((uint64_t)block_start ^
+                    (kls_mix_u64((uint64_t)prefix_len) +
+                     UINT64_C(0x9e3779b97f4a7c15)));
+      double run_work = 0.0;
+      for (UF_long prefix_pos = 0u; prefix_pos < prefix_len; ++prefix_pos) {
+        if (ui == NULL || ui[prefix_pos] > UF_long_max - block_start) {
+          ok = 0;
+          break;
+        }
+        const UF_long dep = block_start + ui[prefix_pos];
+        if (dep >= solver->n || dep >= plan_current[run]) {
+          ok = 0;
+          break;
+        }
+        hash ^= kls_mix_u64((uint64_t)ui[prefix_pos] +
+                            UINT64_C(0xbf58476d1ce4e5b9) +
+                            (hash << 6) + (hash >> 2));
+        run_work += 1.0 + (double)solver->numeric->Llen[dep];
+      }
+      if (!ok) {
+        break;
+      }
+      size_t slot = (size_t)hash & (active_buckets - 1u);
+      while (bucket_used[slot] &&
+             (bucket_hash[slot] != hash ||
+              !kls_same_supernode_consumer_plan_prefix(
+                bucket_block_start[slot], bucket_ui[slot],
+                bucket_prefix_len[slot], block_start, ui, prefix_len))) {
+        slot = (slot + 1u) & (active_buckets - 1u);
+      }
+      if (!bucket_used[slot]) {
+        bucket_used[slot] = 1u;
+        bucket_hash[slot] = hash;
+        bucket_ui[slot] = ui;
+        bucket_block_start[slot] = block_start;
+        bucket_prefix_len[slot] = prefix_len;
+        bucket_runs[slot] = 0u;
+        bucket_run_rows[slot] = 0u;
+        bucket_deps[slot] = 0u;
+        bucket_work[slot] = 0.0;
+      }
+      if (bucket_runs[slot] == UF_long_max ||
+          rows > UF_long_max - bucket_run_rows[slot] ||
+          prefix_len > UF_long_max - bucket_deps[slot]) {
+        ok = 0;
+        break;
+      }
+      bucket_runs[slot]++;
+      bucket_run_rows[slot] += rows;
+      bucket_deps[slot] += prefix_len;
+      bucket_work[slot] += run_work;
+    }
+    for (size_t slot = 0u; ok && slot < active_buckets; ++slot) {
+      if (!bucket_used[slot] || bucket_runs[slot] < 2u) {
+        continue;
+      }
+      if (batch_count == UF_long_max ||
+          bucket_runs[slot] > UF_long_max - batch_run_count ||
+          bucket_run_rows[slot] > UF_long_max - batch_run_rows ||
+          bucket_deps[slot] > UF_long_max - batch_dep_count) {
+        ok = 0;
+        break;
+      }
+      batch_count++;
+      batch_run_count += bucket_runs[slot];
+      batch_run_rows += bucket_run_rows[slot];
+      batch_dep_count += bucket_deps[slot];
+      batch_work += bucket_work[slot];
+      if (bucket_runs[slot] > batch_max_runs) {
+        batch_max_runs = bucket_runs[slot];
+      }
+      if (bucket_prefix_len[slot] > batch_max_deps) {
+        batch_max_deps = bucket_prefix_len[slot];
+      }
+      if (bucket_work[slot] > batch_max_work) {
+        batch_max_work = bucket_work[slot];
+      }
+    }
+  }
+
+  free(bucket_hash);
+  free(bucket_ui);
+  free(bucket_block_start);
+  free(bucket_prefix_len);
+  free(bucket_runs);
+  free(bucket_run_rows);
+  free(bucket_deps);
+  free(bucket_work);
+  free(bucket_used);
+  if (!ok) {
+    return 0;
+  }
+  *batch_count_out = batch_count;
+  *batch_run_count_out = batch_run_count;
+  *batch_run_rows_out = batch_run_rows;
+  *batch_dep_count_out = batch_dep_count;
+  *batch_work_out = batch_work;
+  *batch_max_runs_out = batch_max_runs;
+  *batch_max_deps_out = batch_max_deps;
+  *batch_max_work_out = batch_max_work;
+  return 1;
+}
+
 static int kls_build_refactor_supernode_consumer_plan(
   kls_solver *solver,
   const UF_long *consumer_start,
@@ -3667,6 +3972,14 @@ static int kls_build_refactor_supernode_consumer_plan(
   double plan_shape_batch_advance_work = 0.0;
   UF_long plan_shape_batch_advance_max_deps = 0u;
   double plan_shape_batch_advance_max_work = 0.0;
+  UF_long plan_prefix_advance_batch_count = 0u;
+  UF_long plan_prefix_advance_batch_run_count = 0u;
+  UF_long plan_prefix_advance_batch_run_rows = 0u;
+  UF_long plan_prefix_advance_batch_dep_count = 0u;
+  double plan_prefix_advance_batch_work = 0.0;
+  UF_long plan_prefix_advance_batch_max_runs = 0u;
+  UF_long plan_prefix_advance_batch_max_deps = 0u;
+  double plan_prefix_advance_batch_max_work = 0.0;
   for (UF_long panel = 0; panel < solver->n; ++panel) {
     const UF_long runs = panel_run_count[panel];
     const UF_long rows = panel_run_rows[panel];
@@ -4092,6 +4405,39 @@ static int kls_build_refactor_supernode_consumer_plan(
           shape_group_panel_offset, shape_group_rows);
         return 0;
       }
+      if (!kls_count_supernode_consumer_plan_prefix_advance_batches(
+            solver, shape_group_ptr, shape_group_runs, shape_group_rows,
+            plan_current, plan_dep, plan_shape_batch_count,
+            plan_shape_batch_run_count, count_ctx.run_count,
+            plan_shape_batch_max_runs,
+            &plan_prefix_advance_batch_count,
+            &plan_prefix_advance_batch_run_count,
+            &plan_prefix_advance_batch_run_rows,
+            &plan_prefix_advance_batch_dep_count,
+            &plan_prefix_advance_batch_work,
+            &plan_prefix_advance_batch_max_runs,
+            &plan_prefix_advance_batch_max_deps,
+            &plan_prefix_advance_batch_max_work)) {
+        free(panel_run_count);
+        free(panel_run_rows);
+        free(panel_small_run_count);
+        free(panel_small_run_rows);
+        free(column_run_count);
+        free(plan_ptr);
+        free(column_ptr);
+        free(plan_current);
+        free(plan_dep);
+        free(plan_rows);
+        free(plan_panel_start);
+        free(plan_panel_offset);
+        free(column_runs);
+        free(cursor);
+        free(column_cursor);
+        kls_free_supernode_consumer_plan_shape_groups(
+          shape_group_ptr, shape_group_runs, shape_group_panel_start,
+          shape_group_panel_offset, shape_group_rows);
+        return 0;
+      }
       plan_bytes += shape_group_bytes;
     }
     if (plan_run_bytes > SIZE_MAX - plan_bytes ||
@@ -4345,6 +4691,22 @@ static int kls_build_refactor_supernode_consumer_plan(
     plan_shape_batch_advance_max_deps;
   solver->refactor_supernode_consumer_plan_shape_batch_advance_max_work =
     plan_shape_batch_advance_max_work;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_count =
+    plan_prefix_advance_batch_count;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_run_count =
+    plan_prefix_advance_batch_run_count;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_run_rows =
+    plan_prefix_advance_batch_run_rows;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_dep_count =
+    plan_prefix_advance_batch_dep_count;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_work =
+    plan_prefix_advance_batch_work;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_max_runs =
+    plan_prefix_advance_batch_max_runs;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_max_deps =
+    plan_prefix_advance_batch_max_deps;
+  solver->refactor_supernode_consumer_plan_prefix_advance_batch_max_work =
+    plan_prefix_advance_batch_max_work;
   return 1;
 }
 
@@ -16755,6 +17117,39 @@ static void fill_numeric_stats(kls_solver *solver) {
         ->refactor_supernode_consumer_plan_shape_batch_advance_max_deps;
   solver->stats.refactor_supernode_consumer_plan_shape_batch_advance_max_work =
     solver->refactor_supernode_consumer_plan_shape_batch_advance_max_work;
+  solver->stats.refactor_supernode_consumer_plan_prefix_advance_batch_count =
+    (int64_t)
+      solver->refactor_supernode_consumer_plan_prefix_advance_batch_count;
+  solver->stats
+    .refactor_supernode_consumer_plan_prefix_advance_batch_run_count =
+      (int64_t)
+        solver
+          ->refactor_supernode_consumer_plan_prefix_advance_batch_run_count;
+  solver->stats
+    .refactor_supernode_consumer_plan_prefix_advance_batch_run_rows =
+      (int64_t)
+        solver
+          ->refactor_supernode_consumer_plan_prefix_advance_batch_run_rows;
+  solver->stats
+    .refactor_supernode_consumer_plan_prefix_advance_batch_dep_count =
+      (int64_t)
+        solver
+          ->refactor_supernode_consumer_plan_prefix_advance_batch_dep_count;
+  solver->stats.refactor_supernode_consumer_plan_prefix_advance_batch_work =
+    solver->refactor_supernode_consumer_plan_prefix_advance_batch_work;
+  solver->stats
+    .refactor_supernode_consumer_plan_prefix_advance_batch_max_runs =
+      (int64_t)
+        solver
+          ->refactor_supernode_consumer_plan_prefix_advance_batch_max_runs;
+  solver->stats
+    .refactor_supernode_consumer_plan_prefix_advance_batch_max_deps =
+      (int64_t)
+        solver
+          ->refactor_supernode_consumer_plan_prefix_advance_batch_max_deps;
+  solver->stats
+    .refactor_supernode_consumer_plan_prefix_advance_batch_max_work =
+      solver->refactor_supernode_consumer_plan_prefix_advance_batch_max_work;
   solver->stats.refactor_last_supernode_consumer_plan_attempts =
     (int64_t)solver->refactor_last_supernode_consumer_plan_attempts;
   solver->stats.refactor_last_supernode_consumer_plan_hits =

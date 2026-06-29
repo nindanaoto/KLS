@@ -873,6 +873,14 @@ typedef struct kls_stats {
   int64_t refactor_supernode_cached_probe_work_reject_rows;
   int64_t refactor_supernode_cached_probe_workspace_rejects;
   int64_t refactor_supernode_cached_probe_workspace_reject_rows;
+  int64_t refactor_supernode_consumer_plan_prefix_advance_batch_count;
+  int64_t refactor_supernode_consumer_plan_prefix_advance_batch_run_count;
+  int64_t refactor_supernode_consumer_plan_prefix_advance_batch_run_rows;
+  int64_t refactor_supernode_consumer_plan_prefix_advance_batch_dep_count;
+  double refactor_supernode_consumer_plan_prefix_advance_batch_work;
+  int64_t refactor_supernode_consumer_plan_prefix_advance_batch_max_runs;
+  int64_t refactor_supernode_consumer_plan_prefix_advance_batch_max_deps;
+  double refactor_supernode_consumer_plan_prefix_advance_batch_max_work;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

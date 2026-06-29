@@ -10349,3 +10349,25 @@ column replay path cannot close the gap, even when the retained panel work is
 payoff-positive. The needed paper-scale executor must own multiple compatible
 current workspaces, advance them as a batch to the retained producer offset,
 and apply the shared producer panel once across that group.
+
+The retained consumer-plan diagnostics now also measure exact non-empty prefix
+sharing inside each retained producer-shape group. The new
+`refactor_supernode_consumer_plan_prefix_advance_batch_*` counters hash and
+collision-check the actual earlier U-dependency stream before the retained
+panel dependency, so they answer whether a direct "same prefix, then shared
+producer panel" executor has enough structural surface. The top-ten CKTSO-gap
+diagnostic with `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1` completed in
+`build/kls_prefix_advance_diag_gap10_t4_r1_ref3_timeout120.jsonl`; the matching
+group-cache diagnostic completed in
+`build/kls_prefix_advance_groupcache_gap10_t4_r1_ref3_timeout120.jsonl`.
+Across the ten rows, exact shape groups still represented `713,396` runs and
+`25.586B` modeled prefix-advance work, but identical non-empty prefix batches
+covered only `36,122` runs, `1.213M` dependencies, and `136.4M` work
+(`0.53%` of advance work). The ASIC rows, which dominate the CKTSO gap, had
+almost no coverage (`0.04%`, `0.01%`, and `0.05%` work share for
+`ASIC_320ks`, `ASIC_320k`, and `ASIC_100ks`). `onetone2` and `onetone1` had
+larger prefix sharing (`7.7%` and `2.3%` work share), but not enough to explain
+the broad slow set. This rules out an exact identical-prefix batch executor as
+the main gap closer. The next paper-aligned implementation should therefore
+batch less-identical row/segment streams with shared producer panels and
+coarse output accumulation, not another exact-shape or exact-prefix replay.
