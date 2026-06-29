@@ -8520,3 +8520,26 @@ shape checks and multi-million-operation work thresholds, and these focused
 paths fall through to the in-KLS blocked cached-panel kernel. The active
 paper gap remains retained row/segment numeric storage for non-contiguous
 consumer streams, not small BLAS dispatch.
+
+The retained consumer-plan executor now stays plan-only when
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1` is the gate that enables
+supernode numeric updates. Previously the executor used the retained plan for
+known producer/consumer runs, then still tried opportunistic full-panel probes
+for non-plan dependencies; on the focused rows those extra probes did not
+produce accepted updates and dominated the stream-reject bucket. The new guard
+returns to scalar handling before recording a cached-panel probe when no
+retained consumer-plan run exists. Explicit
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1` still keeps the broader opportunistic
+cached-panel experiment.
+
+Focused plan-only reruns stayed residual-clean and preserved all accepted
+cached rows while removing non-plan stream rejects. On `onetone2`,
+`build/kls_plan_only_probe_onetone2_t4_r1_ref3.json` kept 235 accepted cached
+updates / 26108 rows, but cached attempts dropped from 7280 to 255 and stream
+rejects dropped from 6837 / 939932 rows to zero. On `ASIC_100ks`,
+`build/kls_plan_only_probe_asic100ks_t4_r1_ref3.json` kept 267 accepted
+updates / 39436 rows, while cached attempts dropped from 734 to 281 and stream
+rejects dropped from 347 / 61101 rows to zero. The remaining misses are 20
+work-gate rejects on `onetone2` and 14 on `ASIC_100ks`; the large row-count
+gap is still the missing native row/segment storage, but the plan executor no
+longer pays for non-plan KLU-stream probes that cannot implement that storage.

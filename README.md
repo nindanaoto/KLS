@@ -864,7 +864,10 @@ producer-panel offset, and reports the retained shape through
 cached-panel executor consume that plan. This executor is intentionally
 off-by-default: focused CKTSO-gap runs show that the current completed-panel
 cache covers only a small fraction of retained rows, so the plan is primarily
-staging for a future producer/consumer row-major numeric task.
+staging for a future producer/consumer row-major numeric task. When this flag
+is the only supernode update gate, KLS restricts cached-panel probing to
+retained plan hits; explicit `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES` modes keep
+their broader opportunistic probes.
 Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN=1` to also retain the exact
 row-major U-supernode structural object from the same schedule pass. Benchmark
 JSON reports `refactor_u_supernode_pattern_count`,

@@ -1047,6 +1047,7 @@ typedef struct kls_egraph_refactor_shared {
   int supernode_numeric_updates;
   int supernode_cached_updates_only;
   int supernode_consumer_plan_exec;
+  int supernode_consumer_plan_only;
   int u_supernode_values;
   int u_supernode_ragged_l_updates;
   atomic_ulong u_supernode_value_dense_writes;
@@ -41643,6 +41644,8 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
       &planned_panel_start, &planned_panel_offset);
     if (planned_run) {
       kls_egraph_record_consumer_plan_hit(shared);
+    } else if (shared->supernode_consumer_plan_only) {
+      return 0;
     }
   }
   kls_egraph_record_cached_probe_attempt(shared);
@@ -45127,6 +45130,9 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      solver->refactor_supernode_consumer_plan_panel_start != NULL &&
      solver->refactor_supernode_consumer_plan_panel_offset != NULL)
       ? 1 : 0;
+  shared->supernode_consumer_plan_only =
+    (shared->supernode_consumer_plan_exec &&
+     supernode_numeric_update_mode == 0) ? 1 : 0;
   shared->u_supernode_values = u_supernode_values ? 1 : 0;
   shared->u_supernode_ragged_l_updates =
     u_supernode_ragged_l_updates ? 1 : 0;
