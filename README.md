@@ -944,12 +944,16 @@ columns were claimed and later skipped by the ordinary pipeline.
 queue diagnostic for that same retained Algorithm 5 payoff descriptor. It builds
 the payoff groups without requiring the older ragged-L payoff numeric executor,
 publishes current-column candidates when their producer-prefix trigger column
-finishes, and lets bounded queue consumers claim and execute those columns
-through the normal dependency-checked EGraph dispatcher. The flag remains
-off-by-default: focused Sandia probes showed that the safe claim-on-pop queue is
-correct and bounded but does not close the CKTSO gap, while a claim-on-publish
-variant can stall large cases. The existing claimed/skipped/wait counters report
-how much queued work was actually taken.
+finishes, preclaims only candidates whose U predecessors are already complete,
+and lets bounded queue consumers execute those columns through the normal
+dependency-checked EGraph dispatcher. Pipeline workers that encounter a
+preclaimed column drain payoff-queue work while waiting, so the diagnostic does
+not rely on a separate worker staying free. Candidates that are not dependency
+ready are left to the ordinary pipeline. The flag remains off-by-default:
+focused Sandia probes showed that the queue is correct and bounded but does not
+close the CKTSO gap, while broader claim-on-publish variants can stall large
+cases. The existing claimed/skipped/wait counters report how much queued work was
+actually taken.
 Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN=1` to also retain the exact
 row-major U-supernode structural object from the same schedule pass. Benchmark
 JSON reports `refactor_u_supernode_pattern_count`,

@@ -10598,3 +10598,21 @@ just earlier column ownership. KLS still needs the true multi-current numeric
 batch that advances many current workspaces for one retained producer-prefix
 group and publishes the shared update without converting those current columns
 back into ordinary scalar EGraph column tasks.
+
+A follow-on queue pass tested the safer half of claim-on-publish: preclaim a
+candidate only when all U predecessors are already complete in the current
+EGraph generation. Keeping not-ready candidates in the same queue still exposed
+the old scheduler hazard: `ASIC_320ks` hit the `60s` timeout because pipeline
+workers can wait on preclaimed columns before any worker drains the queue. The
+kept implementation therefore makes the queue ready-only and lets a worker that
+encounters a claimed column drain payoff-queue work while it waits. Correctness
+passed `cmake --build build -j4`, `ctest --test-dir build --output-on-failure`,
+and `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE=1 ./build/kls_smoke`.
+Focused probes then completed:
+`build/asic100ks_alg5_queue_readyclaim_probe.json` measured `0.0362660967s`
+refactor with `0` queued claims, `build/asic320ks_alg5_queue_readyclaim_probe.json`
+measured `0.0792330637s` with `2` queued claims, and
+`build/rajat03_alg5_queue_readyclaim_probe.json` measured `0.00091396682s` with
+`0` queued claims. This confirms the ready-only queue is a safe diagnostic but
+not the CKTSO-closing mechanism; the useful paper gap remains the grouped
+multi-current numeric executor, not more scalar column stealing.
