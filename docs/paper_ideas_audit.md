@@ -8263,3 +8263,30 @@ multi-producer batches. The synthetic smoke fixtures remain the correctness
 coverage for this storage cleanup. The paper-level conclusion is unchanged:
 the current hard rows need the broader native row/segment producer-consumer
 numeric engine, not another small gate around the independent-batch scaffold.
+
+The same worker-object storage was then separated from the byte workspace and
+applied to the dense-consumer fragmented producer executor's run-panel
+descriptors. This matters because the dense path can need both live panel
+descriptors and byte scratch for fallback target maps; using the byte workspace
+for both would be unsafe. The worker now owns a dedicated object buffer that is
+freed with the other row-refactor worker scratch buffers, and the dense
+fragmented path no longer `calloc`/`free`s descriptor arrays per accepted batch.
+
+This is still a storage cleanup, not the missing paper kernel. With current
+selector policy, unset `KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR` keeps the scalar
+dense-group path and therefore accepts zero dense-fragmented batches on the old
+top-five dense-fragmented focus. Forcing the current compact selector with
+`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto` and
+`KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1` exercises the same batch shape, but the
+overall scaffold remains slow (`62.4818s` geomean in
+`build/kls_dense_fragmented_object_workspace_auto_top5_t4_r1_ref2_timeout120.jsonl`).
+An isolated same-mode `ASIC_320k` comparison against the previous commit shows
+the descriptor storage change itself is not the regression source:
+`515f202` measured `72.3339s` in
+`build/kls_prev515_dense_fragmented_auto_asic320k_t4_r1_ref2_timeout120.jsonl`,
+while the object-workspace build measured `69.4805s` in
+`build/kls_object_workspace_dense_fragmented_auto_asic320k_t4_r1_ref2_timeout120.jsonl`;
+both runs had identical dense-fragmented coverage (`70` compact panels,
+`352` accepted batches, `246,898` batched dependency rows). The remaining gap
+is therefore still the native row/segment numeric representation and production
+blocked update, not descriptor allocation.

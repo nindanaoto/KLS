@@ -705,10 +705,13 @@ over-stage these rows. These cover contiguous independent-row producer suffixes
 and fragmented dense-consumer external prefixes without requiring CBLAS. The
 independent-row multi-producer executor now keeps its metadata, pivots, U
 scratch, and panel descriptors in per-worker scratch instead of allocating them
-for each accepted batch; this is a storage cleanup for the paper-shaped
-executor, not a default policy change. Current top-five CKTSO-gap forced-row
-probes still accept zero independent compact-supernode batches, so this cleanup
-is covered by targeted smoke fixtures rather than by those slow-case rows.
+for each accepted batch. Dense-consumer fragmented producer batches use the same
+dedicated object workspace for their run-panel descriptors while retaining a
+separate byte workspace for fallback target maps. This is a storage cleanup for
+the paper-shaped executor, not a default policy change. Current top-five
+CKTSO-gap forced-row probes still accept zero independent compact-supernode
+batches, so that part is covered by targeted smoke fixtures rather than by
+those slow-case rows.
 Builds
 configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` also compile an opt-in
 `KLS_ENABLE_CBLAS_SUPERNODE=1` supernode experiment that uses standard CBLAS

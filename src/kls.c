@@ -1086,6 +1086,8 @@ typedef struct kls_egraph_refactor_worker {
   UF_long index_workspace_size;
   unsigned char *byte_workspace;
   UF_long byte_workspace_size;
+  void *object_workspace;
+  UF_long object_workspace_size;
   UF_long *row_target_stamp_workspace;
   UF_long *row_target_pos_workspace;
   unsigned char *row_target_kind_workspace;
@@ -30287,6 +30289,7 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   free(worker.supernode_workspace);
   free(worker.index_workspace);
   free(worker.byte_workspace);
+  free(worker.object_workspace);
   free(worker.row_target_stamp_workspace);
   free(worker.row_target_pos_workspace);
   free(worker.row_target_kind_workspace);
@@ -31490,7 +31493,22 @@ static void *kls_egraph_worker_object_workspace(
   if (byte_count > (uintmax_t)SIZE_MAX) {
     return NULL;
   }
-  return kls_egraph_worker_byte_workspace(worker, (UF_long)byte_count);
+  if (worker == NULL || byte_count > (uintmax_t)UF_long_max) {
+    return NULL;
+  }
+  if (worker->object_workspace != NULL &&
+      worker->object_workspace_size >= (UF_long)byte_count) {
+    return worker->object_workspace;
+  }
+
+  void *workspace =
+    realloc(worker->object_workspace, (size_t)byte_count);
+  if (workspace == NULL) {
+    return NULL;
+  }
+  worker->object_workspace = workspace;
+  worker->object_workspace_size = (UF_long)byte_count;
+  return workspace;
 }
 
 static int kls_egraph_worker_row_target_workspace(
@@ -35285,11 +35303,12 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
   double *updates = update_entries > 0u
     ? multipliers + total_external_entries : NULL;
 
-  panels = (kls_dense_fragmented_run_panel *)calloc((size_t)run_count,
-                                                    sizeof(*panels));
+  panels = (kls_dense_fragmented_run_panel *)
+    kls_egraph_worker_object_workspace(worker, run_count, sizeof(*panels));
   if (panels == NULL) {
     goto cleanup_rows;
   }
+  memset(panels, 0, (size_t)run_count * sizeof(*panels));
   for (UF_long run_pos = 0; run_pos < run_count; ++run_pos) {
     const UF_long dep_group = run_groups[run_pos];
     const UF_long dep_begin = solver->row_refactor_group_ptr[dep_group];
@@ -35796,8 +35815,6 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
   }
 
 cleanup_rows:
-  free(panels);
-
 cleanup_first:
   return status;
 }
@@ -38862,6 +38879,7 @@ static void kls_row_refactor_refresh_missing_prefix(
   free(worker.supernode_workspace);
   free(worker.index_workspace);
   free(worker.byte_workspace);
+  free(worker.object_workspace);
   free(worker.row_target_stamp_workspace);
   free(worker.row_target_pos_workspace);
   free(worker.row_target_kind_workspace);
@@ -42717,6 +42735,7 @@ static int kls_refresh_pivot_tail_preserved_block_columns(
   free(worker.supernode_workspace);
   free(worker.index_workspace);
   free(worker.byte_workspace);
+  free(worker.object_workspace);
   (void)pthread_mutex_destroy(&shared.lock);
   return ok;
 }
@@ -42848,6 +42867,7 @@ static void kls_egraph_refactor_refresh_missing_prefix(
   free(worker.supernode_workspace);
   free(worker.index_workspace);
   free(worker.byte_workspace);
+  free(worker.object_workspace);
 
   if (refreshed > 0u) {
     solver->fast_rejected_prefix_refresh_columns += refreshed;
@@ -43469,6 +43489,7 @@ static void destroy_egraph_refactor_pool(kls_solver *solver) {
       free(pool->workers[i].supernode_workspace);
       free(pool->workers[i].index_workspace);
       free(pool->workers[i].byte_workspace);
+      free(pool->workers[i].object_workspace);
       free(pool->workers[i].row_target_stamp_workspace);
       free(pool->workers[i].row_target_pos_workspace);
       free(pool->workers[i].row_target_kind_workspace);
