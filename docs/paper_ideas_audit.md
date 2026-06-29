@@ -8543,3 +8543,25 @@ rejects dropped from 347 / 61101 rows to zero. The remaining misses are 20
 work-gate rejects on `onetone2` and 14 on `ASIC_100ks`; the large row-count
 gap is still the missing native row/segment storage, but the plan executor no
 longer pays for non-plan KLU-stream probes that cannot implement that storage.
+
+A fresh native row-panel policy probe on the current source shows why the
+existing selector still needs a better structural signal before promotion.
+Forced row-refactor runs on the first five CKTSO-gap manifest rows compared
+`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=0`, `auto`, and `1` with
+`--row-refactor refactor`, one factor repeat, and two refactor repeats
+(`build/kls_native_policy_{off,auto,on}_gap5_t4_r1_ref2_timeout120.jsonl`).
+The same-source geomeans were `10.3462s`, `10.0424s`, and `9.4441s`,
+respectively, and all rows stayed residual-clean. `auto` improved the large
+ASIC rows (`ASIC_320ks` `0.9065x`, `ASIC_320k` `0.9157x`, `ASIC_100ks`
+`0.9720x` versus native-off) but regressed `rajat03` by `1.629x`; forced `1`
+was best geomean in this pass but still regressed `rajat03` and `ASIC_100ks`.
+This is promising coverage movement, not enough evidence for a default change.
+
+A narrower auto rule that rejected unchecked pure-internal dense panels
+(`trailing_len == 0`) was prototyped and rejected by smoke coverage. It would
+avoid the `rajat03` auto regression shape, but the checked-row prefix repair
+fixture and the partial-prefix fixture both require zero-trailing compact
+panels to publish the expected retained panel state. That means trailing
+presence alone is not the right reuse proxy. The next native selector needs to
+distinguish no-reuse pure panel factorization from zero-trailing panels that
+feed checked-prefix or partial-prefix publication.
