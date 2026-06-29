@@ -8811,3 +8811,17 @@ measured `2.0286s`. The retained value is therefore narrower: the
 SubtreeLU/CKTSO-style cached-panel scaffold now avoids paying for panels that
 cannot be consumed, but the scalar update executor still lacks enough
 arithmetic intensity to be a general default.
+
+The same source was then rerun with the retained supernode consumer-plan
+executor after the used-panel cache change. The plan-only path avoids the
+ordinary cached-probe stream rejects by looking up retained producer/consumer
+runs directly, and it now benefits from the same pre-allocation panel pruning.
+It improved relative to the older pre-pruning consumer-plan artifact but still
+did not clear the broader default gate: the top-ten plan-only artifact
+`build/kls_used_panel_cache_consumer_plan_gap10_t4_r1_ref3_timeout120.jsonl`
+measured `2.4451s`, and the top-20 artifact
+`build/kls_used_panel_cache_consumer_plan_gap20_t4_r1_ref3_timeout120.jsonl`
+measured `2.2768s`. Because the same-source default top-20 artifact above
+measured `2.0286s`, the consumer-plan executor also remains opt-in. The
+remaining gap is the executor arithmetic and writeback cost after a plan hit,
+not just rejected-probe overhead or unused panel staging.
