@@ -1764,6 +1764,15 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_consumer_plan_l_entries\":%.9g"
            ",\"refactor_supernode_consumer_plan_internal_entries\":%.9g"
            ",\"refactor_supernode_consumer_plan_bytes\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_small_run_count\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_small_run_rows\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_batch_panel_count\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_batch_run_count\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_batch_run_rows\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_batch_small_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_batch_small_run_rows\":%"
+           PRId64
            ",\"refactor_last_supernode_consumer_plan_attempts\":%" PRId64
            ",\"refactor_last_supernode_consumer_plan_hits\":%" PRId64
            ",\"refactor_last_supernode_consumer_plan_applied\":%" PRId64
@@ -1785,6 +1794,13 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_l_entries,
            stats.refactor_supernode_consumer_plan_internal_entries,
            stats.refactor_supernode_consumer_plan_bytes,
+           stats.refactor_supernode_consumer_plan_small_run_count,
+           stats.refactor_supernode_consumer_plan_small_run_rows,
+           stats.refactor_supernode_consumer_plan_batch_panel_count,
+           stats.refactor_supernode_consumer_plan_batch_run_count,
+           stats.refactor_supernode_consumer_plan_batch_run_rows,
+           stats.refactor_supernode_consumer_plan_batch_small_run_count,
+           stats.refactor_supernode_consumer_plan_batch_small_run_rows,
            stats.refactor_last_supernode_consumer_plan_attempts,
            stats.refactor_last_supernode_consumer_plan_hits,
            stats.refactor_last_supernode_consumer_plan_applied,
@@ -2828,7 +2844,10 @@ int main(int argc, char **argv) {
     printf("refactor supernode consumer plan: panels %" PRId64 "/%" PRId64
            ", runs %" PRId64 ", rows %" PRId64
            ", max panel %" PRId64 "/%" PRId64
-           ", entries %.6g/%.6g, bytes %" PRId64 "\n",
+           ", entries %.6g/%.6g, bytes %" PRId64
+           ", small %" PRId64 "/%" PRId64
+           ", batch %" PRId64 "/%" PRId64 "/%" PRId64
+           ", batch small %" PRId64 "/%" PRId64 "\n",
            stats.refactor_supernode_consumer_plan_panel_count,
            stats.refactor_supernode_consumer_plan_reused_panel_count,
            stats.refactor_supernode_consumer_plan_run_count,
@@ -2837,7 +2856,14 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_max_panel_rows,
            stats.refactor_supernode_consumer_plan_l_entries,
            stats.refactor_supernode_consumer_plan_internal_entries,
-           stats.refactor_supernode_consumer_plan_bytes);
+           stats.refactor_supernode_consumer_plan_bytes,
+           stats.refactor_supernode_consumer_plan_small_run_count,
+           stats.refactor_supernode_consumer_plan_small_run_rows,
+           stats.refactor_supernode_consumer_plan_batch_panel_count,
+           stats.refactor_supernode_consumer_plan_batch_run_count,
+           stats.refactor_supernode_consumer_plan_batch_run_rows,
+           stats.refactor_supernode_consumer_plan_batch_small_run_count,
+           stats.refactor_supernode_consumer_plan_batch_small_run_rows);
     printf("refactor supernode consumer plan exec: attempts %" PRId64
            ", hits %" PRId64 ", applied %" PRId64
            ", rows %" PRId64 ", entries %" PRId64

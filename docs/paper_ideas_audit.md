@@ -9269,3 +9269,23 @@ algorithm is the CKTSO/SubtreeLU-style batching step that groups many planned
 small consumer runs against persistent producer/output storage. Single-run
 ragged triangular updates remain too sparse and too probe-heavy even when their
 panel ranges come from the broad consumer plan.
+
+The retained consumer-plan diagnostics now distinguish single-run sparsity from
+panel-level batching opportunity. `kls_stats` and `kls_bench` report planned
+runs below the ragged single-run row floor, plus reused-panel batches whose
+aggregate row count clears that floor:
+`refactor_supernode_consumer_plan_small_run_*`,
+`refactor_supernode_consumer_plan_batch_*`, and
+`refactor_supernode_consumer_plan_batch_small_run_*`.
+
+On the top-ten CKTSO-gap focus,
+`build/kls_consumer_plan_batch_stats_gap10_t4_r1_ref3_timeout120.jsonl`
+measured `2.26037s` geomean with plan construction enabled. It counted
+`750,247` retained plan runs over `6,285,128` rows. Of those, `599,264` runs
+and `1,826,985` rows are below the current ragged single-run row floor, which
+explains why single-run ragged execution has poor coverage. But reused panels
+contain `725,372` runs and `6,235,295` rows, including `574,389` small runs and
+`1,777,152` small-run rows. This narrows the implementation target: the paper
+gap is a panel-level grouped consumer executor that batches many small planned
+runs against one producer panel/output accumulator, not a different single-run
+threshold or a broader panel start map.
