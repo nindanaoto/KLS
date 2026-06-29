@@ -59,8 +59,11 @@ KLS now retains that missing executor shape explicitly when
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1` is set. The retained
 payoff plan stores distinct current columns per selected producer group and a
 compact workspace-row estimate for the future multi-current batch executor.
+It now also keeps each selected run's current-slot index plus a compact
+workspace pointer for that current slot, so the future executor has the direct
+gather/publish layout it needs rather than only aggregate counters.
 The focused top-five rerun
-`build/kls_alg5_workspace_plan_gap5_t4_r1_ref3_timeout120.jsonl` populated
+`build/kls_alg5_workspace_map_gap5_t4_r1_ref3_timeout120.jsonl` populated
 those counters without changing default execution: `ASIC_320ks` has `129`
 multi-current groups, `3,596` distinct current workspaces, max `196` currents
 in one group, and `157,067` compact workspace rows; `ASIC_320k` has `121`

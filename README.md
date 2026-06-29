@@ -906,7 +906,10 @@ the Algorithm 5 payoff surface is enough without a true multi-current batch
 executor.
 When `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1` or the stricter
 exec flag is set, KLS now also retains the selected producer groups as a
-multi-current descriptor for that future executor. Benchmark JSON reports
+multi-current descriptor for that future executor. The retained internal layout
+maps each selected run to its current-column slot and gives that slot a compact
+workspace offset, so a batch kernel can gather/advance/publish current
+workspaces without rediscovering the group shape. Benchmark JSON reports
 `refactor_supernode_algorithm5_payoff_group_current_total`,
 `refactor_supernode_algorithm5_payoff_group_multi_current_count`,
 `refactor_supernode_algorithm5_payoff_group_max_currents`,
