@@ -10663,3 +10663,24 @@ therefore correctly report zero Algorithm 5 payoff groups. The next CKTSO-paper
 gap remains the actual grouped numeric kernel: allocate current workspaces and
 target accumulators from these retained offsets, batch prefix advancement, and
 publish the accumulated dense-suffix/L-trailing updates.
+
+KLS now makes the other half of that descriptor addressable as well: selected
+Algorithm 5 payoff runs retain a prefix-advance offset, and each payoff group
+retains the total advance-dependency span that owns those offsets. The scalar
+opt-in path validates both target-span and advance-span ownership before it
+accepts a selected run, so the future grouped executor can consume the same
+descriptor without rediscovering either slice. This is still descriptor
+substrate, not a BLAS or scalar-scheduler tuning change. Correctness passed
+`cmake --build build -j2`, `ctest --test-dir build --output-on-failure`,
+`./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE=1 ./build/kls_smoke`.
+The top-five descriptor probe
+`build/kls_alg5_advance_spans_gap5_t4_r1_ref3_timeout120.jsonl` completed with
+no failures and `1.8396695264324108s` geomean. The hard ASIC EGraph rows still
+show nonzero retained advance spans alongside the existing target spans:
+`ASIC_320ks` has `129` groups, `190,994` advance deps, and `46,839,997` target
+entries; `ASIC_320k` has `121`, `194,219`, and `48,674,072`; `ASIC_100ks` has
+`102`, `32,849`, and `4,668,124`. `gemat12` and `rajat03` remain mapped-path
+rows with zero Algorithm 5 payoff groups.
