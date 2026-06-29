@@ -1621,10 +1621,12 @@ SubtreeLU/CKTSO row-segment work can be evaluated on the same slow-case
 artifacts.
 On the refreshed selected-large reconstruction, KLS is ahead of the saved KLU2
 artifact but still trails the saved CKTSO artifact, with `pre2` still timing out.
-The current auto-input-width rerun keeps the same shape: KLS completes six of
+The June 29, 2026 current-source rerun keeps the same shape:
+`build/kls_current_large_recon_t4_r1_ref1_timeout120.jsonl` completes six of
 eight selected large rows, wins `TSOPF_FS_b39_c30`, times out on `pre2` and
-`Hamrle3`, and loses the other completed common CKTSO rows by roughly 1.02x to
-1.50x. Same-session `pre2` probes show analysis completes quickly but
+`Hamrle3`, and scores `1.06x` slower than the fresh CKTSO large-recon artifact
+when both solver failures are charged as 1000s. Same-session `pre2` probes show
+analysis completes quickly but
 factor-only default AMD, forced KLS-first, transpose AMD, METIS, and
 no-static-pivoting all exceed 120s, so the unresolved `pre2` gap is cold
 first-factor numeric machinery rather than input width, ordering, orientation,
@@ -1633,6 +1635,14 @@ or repeated-refactor policy. A follow-up CBLAS-enabled build with
 `pre2` forced KLS-first run still timed out at 120s with no JSON row, while
 same-option `ASIC_680k` checks reported zero CBLAS update counters. The
 existing BLAS gates are therefore not the current slow-case blocker.
+The same current-source large run also rechecked the completed-but-slow
+`nxp1`/`rajat30` pair. Forcing row refactor measured `151.3s`/`131.7s`, full
+EGraph supernode updates measured `48.2s`/`40.6s`, and the consumer-plan
+executor measured `49.3s`/`36.3s`, versus the default `36.2s`/`37.3s`. These
+large-row probes reject bypassing the row lower-bound gate or promoting the
+current scalar supernode executors; the needed paper-level work remains a
+production row/supernode numeric representation, plus the separate `pre2`
+first-factor bottleneck.
 A current CBLAS-capable top-five CKTSO-gap check keeps that conclusion: the
 same binary measured `1.44563s` geomean with `KLS_ENABLE_CBLAS_SUPERNODE=0`
 and `1.49419s` with `=1`, while all focus rows reported zero CBLAS update

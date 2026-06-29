@@ -8906,3 +8906,31 @@ The KLS-first automatic selector therefore remains conservative for these
 large CKTSO-gap rows. The missing piece is still the production
 row/supernode numeric executor that lowers repeated refactor cost, not merely
 seeding the existing EGraph path from the current KLS-first bridge.
+
+A fresh large-paper reconnaissance on June 29, 2026 keeps the same conclusion
+with current source. `build/kls_current_large_recon_t4_r1_ref1_timeout120.jsonl`
+completed six of the eight selected large rows at `39.0334s` geomean and timed
+out on `pre2` and `Hamrle3` under the 120s process cap. Against the fresh CKTSO
+large-recon artifact, charging failures as 1000s, KLS measured `1.060x` slower:
+it won `TSOPF_FS_b39_c30` (`82.99s` versus `334.19s`), tied CKTSO's `Hamrle3`
+timeout, but lost `pre2` because CKTSO completed it (`509.50s` projected
+cycle) while KLS timed out. The completed large losses are now concentrated in
+`rajat30` (`37.33s` versus `22.15s`), `nxp1` (`36.17s` versus `25.34s`),
+`ASIC_680k` (`7.10s` versus `5.89s`), `G3_circuit` (`809.24s` versus
+`749.95s`), and the near-tie `rajat29`.
+
+Focused current-source probes on the completed-but-slow `nxp1`/`rajat30` pair
+rejected the obvious paper-path bypasses. Forcing row refactor in
+`build/kls_forced_row_large_nxp1_rajat30_t4_r1_ref1_timeout120.jsonl`
+measured `151.35s` and `131.69s`, far behind the default `36.17s` and
+`37.33s`; this validates the existing row lower-bound rejection on these large
+single-block cases. Full EGraph supernode updates in
+`build/kls_full_supernode_large_nxp1_rajat30_t4_r1_ref1_timeout120.jsonl`
+measured `48.18s` and `40.56s`. The retained consumer-plan executor in
+`build/kls_consumer_plan_large_nxp1_rajat30_t4_r1_ref1_timeout120.jsonl`
+was mixed, losing `nxp1` (`49.34s`) while slightly improving `rajat30`
+(`36.32s`), for a net geomean loss. These results keep the current scalar
+supernode prototypes opt-in even on large rows. The next implementation target
+is still the production row/supernode numeric representation that can store
+and update the extra non-contiguous row-major state directly, plus a separate
+first-factor path for `pre2`; the current toggles do not close either gap.
