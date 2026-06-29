@@ -9621,3 +9621,31 @@ shape, so most retained rows never become executable numeric work. The next
 gap-closing implementation remains the broader materialized producer-panel or
 current-column grouped accumulator that can consume retained plan runs whose
 trailing patterns are ragged rather than common.
+
+A fresh CBLAS size-guard rerun on the current source confirms that the
+"small BLAS calls" hypothesis is already covered by the implementation and is
+not the active CKTSO-gap cause. The optional CBLAS call sites require the CBLAS
+build, `KLS_ENABLE_CBLAS_SUPERNODE=1`, 512-scale vector/panel shape checks
+(`2048` rows on the row-first cached path), and minimum work/copy thresholds
+before calling `dtrsv`, `dgemv`, `dtrsm`, or `dgemm`.
+
+Validation:
+
+- `cmake --build build-cblas -j4` completed.
+- `ctest --test-dir build-cblas --output-on-failure` passed both tests.
+- With `OPENBLAS_NUM_THREADS=1` and `KLS_ENABLE_CBLAS_SUPERNODE=0`, the
+  top-five CKTSO-gap focus
+  `build-cblas/kls_cblas_sizeguard_current_off_gap5_t4_r1_ref3_timeout120.jsonl`
+  measured `1.38984s` geomean.
+- With the same binary and `KLS_ENABLE_CBLAS_SUPERNODE=1`,
+  `build-cblas/kls_cblas_sizeguard_current_on_gap5_t4_r1_ref3_timeout120.jsonl`
+  measured `1.38296s` geomean, a `0.995x` on/off ratio.
+- Every row in both artifacts reported zero
+  `refactor_supernode_cblas_update_*`,
+  `row_refactor_compact_supernode_gemv_*`, and
+  `row_refactor_compact_supernode_trsv_*` counters.
+
+Therefore adding another "use BLAS only for large cases" switch would be a
+no-op for the focused slow rows. The current gap is still in the missing
+paper-style coarse producer/consumer numeric executor, not in dispatching small
+external BLAS kernels.
