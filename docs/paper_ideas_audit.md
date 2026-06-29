@@ -9114,3 +9114,24 @@ subset before auto-disable, so lookup overhead is not the large paper gap. The
 source change was reverted; the next useful target remains a broader
 producer/output accumulator or row-major numeric object that can consume the
 retained plan beyond the current common-tail cached-panel shape.
+
+A follow-up U-supernode ragged-L run-length probe tested a more direct retained
+plan use without the failed static pre-prune. The experiment built the retained
+consumer plan whenever `KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1` was set
+and let the ragged-L executor cap each candidate producer run to the plan's
+actual contiguous `(current, dependency)` run length before validating the U
+stream. This preserved correctness (`cmake --build build -j 4`,
+`ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1 ./build/kls_smoke` passed), but the
+focused top-ten CKTSO-gap benchmark regressed:
+`build/kls_ragged_planrun_gap10_t4_r1_ref3_timeout120.jsonl` measured
+`3.52997s` geomean versus the same-source retained default
+`build/kls_current_retained_gap10_t4_r1_ref3_timeout120.jsonl` at `2.28216s`,
+with no wins over 2%. The counters showed no new broad coverage: the path
+still updated the same limited ragged-L shapes (`ASIC_320ks` cumulative
+`146,769` rows, `ASIC_100ks` `118,584`, `onetone2` `78,600`) and still applied
+zero ragged-L rows on `ASIC_320k` and `rajat28`, while paying the retained-plan
+construction cost. The source change was reverted. The useful conclusion is
+that the retained plan's run length metadata alone does not create the missing
+paper mechanism; KLS still needs the persistent producer/output accumulator or
+row-major numeric object that lets one producer panel feed many consumers.
