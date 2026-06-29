@@ -799,6 +799,12 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_apply_entries;
   int refactor_supernode_consumer_plan_exec_disabled;
   int64_t refactor_supernode_consumer_plan_exec_disable_count;
+  int64_t refactor_last_supernode_consumer_plan_claimed_columns;
+  int64_t refactor_last_supernode_consumer_plan_claim_skips;
+  int64_t refactor_last_supernode_consumer_plan_claim_waits;
+  int64_t refactor_supernode_consumer_plan_claimed_columns;
+  int64_t refactor_supernode_consumer_plan_claim_skip_count;
+  int64_t refactor_supernode_consumer_plan_claim_wait_count;
   int64_t refactor_last_supernode_cached_probe_shape_rejects;
   int64_t refactor_last_supernode_cached_probe_shape_reject_rows;
   int64_t refactor_last_supernode_cached_probe_stream_rejects;

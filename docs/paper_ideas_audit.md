@@ -9798,3 +9798,39 @@ publish those current columns so the normal EGraph loop does not process them a
 second time. If the advance work is added on top of the existing per-column
 factor loop, it will be too expensive; it has to replace that part of the
 normal numeric path for the claimed columns.
+
+KLS now has the scheduler substrate needed for that replacement path. The
+opt-in `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_CLAIMS=1` path allocates a
+per-column claim-generation map next to the existing pipeline-done map. Normal
+EGraph workers check the map before factoring each column; if a future grouped
+retained-plan producer claims a column, the worker waits for that column's
+pipeline-done generation and skips the duplicate scalar factorization. Ready
+queue mode also publishes successors after a claimed column finishes, so the
+dependency graph can continue without refactoring the column twice.
+
+This chunk deliberately does not claim columns yet. It only makes the normal
+scheduler safe for a grouped producer to own columns in a later patch and
+reports claim/skip/wait counters through `kls_stats` and `kls_bench`.
+
+Validation:
+
+- `cmake --build build -j4` completed with only the pre-existing long JSON
+  format-string warning in `bench/kls_bench.c`.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1 ./build/kls_smoke` passed.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1
+  KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_CLAIMS=1 ./build/kls_smoke`
+  passed.
+- The top-ten retained-plan focus with claims enabled completed with no failed
+  matrices in `build/kls_claim_substrate_gap10_t4_r1_ref3_timeout120.jsonl`
+  and measured `2.27105s` geomean.
+
+The benchmark reported zero claimed columns, zero claim skips, and zero claim
+waits, as expected for a dormant substrate. The same run used the normal
+non-CBLAS build (`build_has_cblas=false`) and reported zero CBLAS updates, so
+the latest check also confirms that this slow-path work is not being explained
+by small external BLAS calls. The remaining paper gap is still the grouped
+numeric producer that actually claims retained-plan current columns, advances
+their workspaces through earlier dependencies, applies the shared retained
+producer panel, publishes the finished columns, and avoids the old scalar path
+for those claimed columns.

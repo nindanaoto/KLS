@@ -1851,7 +1851,14 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_consumer_plan_apply_rows\":%" PRId64
            ",\"refactor_supernode_consumer_plan_apply_entries\":%" PRId64
            ",\"refactor_supernode_consumer_plan_exec_disabled\":%d"
-           ",\"refactor_supernode_consumer_plan_exec_disable_count\":%" PRId64,
+           ",\"refactor_supernode_consumer_plan_exec_disable_count\":%" PRId64
+           ",\"refactor_last_supernode_consumer_plan_claimed_columns\":%"
+           PRId64
+           ",\"refactor_last_supernode_consumer_plan_claim_skips\":%" PRId64
+           ",\"refactor_last_supernode_consumer_plan_claim_waits\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_claimed_columns\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_claim_skip_count\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_claim_wait_count\":%" PRId64,
            stats.refactor_supernode_consumer_plan_panel_count,
            stats.refactor_supernode_consumer_plan_reused_panel_count,
            stats.refactor_supernode_consumer_plan_run_count,
@@ -1899,7 +1906,13 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_apply_rows,
            stats.refactor_supernode_consumer_plan_apply_entries,
            stats.refactor_supernode_consumer_plan_exec_disabled,
-           stats.refactor_supernode_consumer_plan_exec_disable_count);
+           stats.refactor_supernode_consumer_plan_exec_disable_count,
+           stats.refactor_last_supernode_consumer_plan_claimed_columns,
+           stats.refactor_last_supernode_consumer_plan_claim_skips,
+           stats.refactor_last_supernode_consumer_plan_claim_waits,
+           stats.refactor_supernode_consumer_plan_claimed_columns,
+           stats.refactor_supernode_consumer_plan_claim_skip_count,
+           stats.refactor_supernode_consumer_plan_claim_wait_count);
     printf(",\"refactor_supernode_consumer_plan_first_dep_shape_batch_count\":%"
            PRId64
            ",\"refactor_supernode_consumer_plan_first_dep_shape_batch_run_count\":%"
@@ -3066,7 +3079,9 @@ int main(int argc, char **argv) {
            ", rows %" PRId64 ", entries %" PRId64
            ", cumulative %" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64
-           ", disabled %d/%" PRId64 "\n",
+           ", disabled %d/%" PRId64
+           ", claims %" PRId64 "/%" PRId64 "/%" PRId64
+           ", cumulative claims %" PRId64 "/%" PRId64 "/%" PRId64 "\n",
            stats.refactor_last_supernode_consumer_plan_attempts,
            stats.refactor_last_supernode_consumer_plan_hits,
            stats.refactor_last_supernode_consumer_plan_applied,
@@ -3078,7 +3093,13 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_apply_rows,
            stats.refactor_supernode_consumer_plan_apply_entries,
            stats.refactor_supernode_consumer_plan_exec_disabled,
-           stats.refactor_supernode_consumer_plan_exec_disable_count);
+           stats.refactor_supernode_consumer_plan_exec_disable_count,
+           stats.refactor_last_supernode_consumer_plan_claimed_columns,
+           stats.refactor_last_supernode_consumer_plan_claim_skips,
+           stats.refactor_last_supernode_consumer_plan_claim_waits,
+           stats.refactor_supernode_consumer_plan_claimed_columns,
+           stats.refactor_supernode_consumer_plan_claim_skip_count,
+           stats.refactor_supernode_consumer_plan_claim_wait_count);
     printf("refactor cached probe rejects: shape %" PRId64 "/%" PRId64
            ", stream %" PRId64 "/%" PRId64
            ", work %" PRId64 "/%" PRId64
