@@ -1580,6 +1580,24 @@ int main(int argc, char **argv) {
            PRId64
            ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs\":%"
            PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work\":%.9g"
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work\":%.9g"
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work\":%.9g"
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio\":%.9g"
            ",\"refactor_supernode_consumer_plan_group_l_dense_entries\":%"
            PRId64
            ",\"refactor_supernode_consumer_plan_group_l_trailing_entries\":%"
@@ -1779,6 +1797,17 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_run_rows,
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_entries,
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio,
            stats.refactor_supernode_consumer_plan_group_l_dense_entries,
            stats.refactor_supernode_consumer_plan_group_l_trailing_entries,
            stats.refactor_supernode_consumer_plan_group_l_bytes,
@@ -1969,6 +1998,24 @@ int main(int argc, char **argv) {
            PRId64
            ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs\":%"
            PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work\":%.9g"
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work\":%.9g"
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work\":%.9g"
+           ",\"refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio\":%.9g"
            ",\"refactor_supernode_consumer_plan_group_l_dense_entries\":%"
            PRId64
            ",\"refactor_supernode_consumer_plan_group_l_trailing_entries\":%"
@@ -2068,6 +2115,17 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_run_rows,
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_entries,
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio,
            stats.refactor_supernode_consumer_plan_group_l_dense_entries,
            stats.refactor_supernode_consumer_plan_group_l_trailing_entries,
            stats.refactor_supernode_consumer_plan_group_l_bytes,
@@ -3219,6 +3277,10 @@ int main(int argc, char **argv) {
            "/%" PRId64 "/%" PRId64
            ", group L batch candidates %" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64
+           ", group L batch advance %" PRId64 "/%" PRId64 "/%" PRId64
+           " work %.9g max %.9g"
+           ", group L batch payoff %" PRId64 "/%" PRId64 "/%" PRId64
+           "/%" PRId64 " advance %.9g max ratio %.9g"
            ", group L writes %" PRId64 "/%" PRId64 "/%" PRId64
            " cumulative %" PRId64 "/%" PRId64 "/%" PRId64
            ", group L updates %" PRId64 "/%" PRId64 "/%" PRId64
@@ -3290,6 +3352,17 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_run_rows,
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_entries,
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work,
+           stats.refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio,
            stats.refactor_last_supernode_consumer_plan_group_l_dense_writes,
            stats.refactor_last_supernode_consumer_plan_group_l_trailing_writes,
            stats.refactor_last_supernode_consumer_plan_group_l_invalidations,

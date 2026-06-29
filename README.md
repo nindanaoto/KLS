@@ -841,6 +841,15 @@ EGraph panel with a unit-diagonal `dtrsv` over the retained internal panel plus
 show this removes the worst rebuild overhead, but the path is still slower than
 default KLS because the broad default path still needs coarser batched panel
 kernels.
+The retained consumer-plan diagnostics also report group-L batch candidate
+payoff counters:
+`refactor_supernode_consumer_plan_group_l_batch_candidate_advance_*` measures
+the scalar prefix work needed to reach an exact retained producer panel, and
+`refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_*` measures
+the subset where the grouped panel update work is at least that advance work.
+These are diagnostics for future grouped producer-panel execution; the default
+path does not build this cache unless the retained group-L cache experiment is
+enabled.
 Set `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached` to isolate only the durable
 cached-panel consumer and skip the per-consumer temporary panel reconstruction
 fallback used by the full `=1` experiment.

@@ -672,6 +672,28 @@ struct kls_solver {
   UF_long refactor_supernode_consumer_plan_group_l_batch_candidate_run_rows;
   UF_long refactor_supernode_consumer_plan_group_l_batch_candidate_entries;
   UF_long refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs;
+  UF_long
+    refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count;
+  UF_long
+    refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count;
+  UF_long
+    refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows;
+  double
+    refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work;
+  double
+    refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work;
+  UF_long
+    refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count;
+  UF_long
+    refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count;
+  UF_long
+    refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows;
+  UF_long
+    refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries;
+  double
+    refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work;
+  double
+    refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio;
   UF_long refactor_supernode_consumer_plan_group_l_dense_entries;
   UF_long refactor_supernode_consumer_plan_group_l_trailing_entries;
   size_t refactor_supernode_consumer_plan_group_l_bytes;
@@ -2163,6 +2185,39 @@ static void kls_free_refactor_supernode_consumer_plan_group_l_cache(
   solver->refactor_supernode_consumer_plan_group_l_batch_candidate_entries = 0;
   solver->refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs =
     0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count =
+      0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count =
+      0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows =
+      0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work =
+      0.0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work =
+      0.0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count =
+      0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count =
+      0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows =
+      0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries =
+      0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work =
+      0.0;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio =
+      0.0;
   solver->refactor_supernode_consumer_plan_group_l_dense_entries = 0;
   solver->refactor_supernode_consumer_plan_group_l_trailing_entries = 0;
   solver->refactor_supernode_consumer_plan_group_l_bytes = 0u;
@@ -16849,6 +16904,50 @@ static void fill_numeric_stats(kls_solver *solver) {
     .refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs =
       (int64_t)solver
         ->refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count =
+      (int64_t)solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count =
+      (int64_t)solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows =
+      (int64_t)solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work =
+      solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work =
+      solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count =
+      (int64_t)solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count =
+      (int64_t)solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows =
+      (int64_t)solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries =
+      (int64_t)solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work =
+      solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio =
+      solver
+        ->refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio;
   solver->stats.refactor_supernode_consumer_plan_group_l_dense_entries =
     (int64_t)
       solver->refactor_supernode_consumer_plan_group_l_dense_entries;
@@ -24190,6 +24289,17 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
   UF_long batch_candidate_run_rows = 0u;
   UF_long batch_candidate_entries = 0u;
   UF_long batch_candidate_max_runs = 0u;
+  UF_long batch_candidate_advance_count = 0u;
+  UF_long batch_candidate_advance_run_count = 0u;
+  UF_long batch_candidate_advance_run_rows = 0u;
+  double batch_candidate_advance_work = 0.0;
+  double batch_candidate_advance_max_work = 0.0;
+  UF_long batch_candidate_payoff_count = 0u;
+  UF_long batch_candidate_payoff_run_count = 0u;
+  UF_long batch_candidate_payoff_run_rows = 0u;
+  UF_long batch_candidate_payoff_entries = 0u;
+  double batch_candidate_payoff_advance_work = 0.0;
+  double batch_candidate_max_payoff_ratio = 0.0;
   UF_long dense_total = 0u;
   UF_long trailing_total = 0u;
   for (UF_long group = 0u; group < group_count; ++group) {
@@ -24342,6 +24452,69 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
         if (runs > batch_candidate_max_runs) {
           batch_candidate_max_runs = runs;
         }
+        int advance_ok = 1;
+        double group_advance_work = 0.0;
+        for (UF_long pos = runs_begin; pos < runs_end; ++pos) {
+          const UF_long run =
+            solver->refactor_supernode_consumer_plan_shape_group_runs[pos];
+          UF_long run_deps = 0u;
+          double run_work = 0.0;
+          if (!kls_supernode_consumer_plan_run_advance_cost(
+                solver, solver->refactor_supernode_consumer_plan_current,
+                solver->refactor_supernode_consumer_plan_dep,
+                solver->refactor_supernode_consumer_plan_run_count, run,
+                &run_deps, &run_work)) {
+            advance_ok = 0;
+            break;
+          }
+          (void)run_deps;
+          group_advance_work += run_work;
+        }
+        if (advance_ok) {
+          if (batch_candidate_advance_count == UF_long_max ||
+              runs > UF_long_max - batch_candidate_advance_run_count ||
+              run_rows > UF_long_max - batch_candidate_advance_run_rows) {
+            free(valid);
+            free(dense_begin);
+            free(row_begin);
+            free(row_counts);
+            return 0;
+          }
+          batch_candidate_advance_count++;
+          batch_candidate_advance_run_count += runs;
+          batch_candidate_advance_run_rows += run_rows;
+          batch_candidate_advance_work += group_advance_work;
+          if (group_advance_work > batch_candidate_advance_max_work) {
+            batch_candidate_advance_max_work = group_advance_work;
+          }
+          const double group_entries_work = (double)group_entries;
+          double payoff_ratio = 0.0;
+          if (group_advance_work > 0.0) {
+            payoff_ratio = group_entries_work / group_advance_work;
+          } else if (group_entries > 0u) {
+            payoff_ratio = DBL_MAX;
+          }
+          if (payoff_ratio > batch_candidate_max_payoff_ratio) {
+            batch_candidate_max_payoff_ratio = payoff_ratio;
+          }
+          if (group_entries_work >= group_advance_work) {
+            if (batch_candidate_payoff_count == UF_long_max ||
+                runs > UF_long_max - batch_candidate_payoff_run_count ||
+                run_rows > UF_long_max - batch_candidate_payoff_run_rows ||
+                group_entries > UF_long_max - batch_candidate_payoff_entries) {
+              free(valid);
+              free(dense_begin);
+              free(row_begin);
+              free(row_counts);
+              return 0;
+            }
+            batch_candidate_payoff_count++;
+            batch_candidate_payoff_run_count += runs;
+            batch_candidate_payoff_run_rows += run_rows;
+            batch_candidate_payoff_entries += group_entries;
+            batch_candidate_payoff_advance_work += group_advance_work;
+          }
+        }
       }
       dense_total += dense_entries;
       trailing_total += group_trailing;
@@ -24399,6 +24572,39 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
     solver
       ->refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs =
         batch_candidate_max_runs;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count =
+        batch_candidate_advance_count;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count =
+        batch_candidate_advance_run_count;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows =
+        batch_candidate_advance_run_rows;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work =
+        batch_candidate_advance_work;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work =
+        batch_candidate_advance_max_work;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count =
+        batch_candidate_payoff_count;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count =
+        batch_candidate_payoff_run_count;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows =
+        batch_candidate_payoff_run_rows;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries =
+        batch_candidate_payoff_entries;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work =
+        batch_candidate_payoff_advance_work;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio =
+        batch_candidate_max_payoff_ratio;
     solver->refactor_supernode_consumer_plan_group_l_dense_entries =
       dense_total;
     solver->refactor_supernode_consumer_plan_group_l_trailing_entries =
@@ -24466,6 +24672,39 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
     solver
       ->refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs =
         batch_candidate_max_runs;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count =
+        batch_candidate_advance_count;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count =
+        batch_candidate_advance_run_count;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows =
+        batch_candidate_advance_run_rows;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work =
+        batch_candidate_advance_work;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work =
+        batch_candidate_advance_max_work;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count =
+        batch_candidate_payoff_count;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count =
+        batch_candidate_payoff_run_count;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows =
+        batch_candidate_payoff_run_rows;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries =
+        batch_candidate_payoff_entries;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work =
+        batch_candidate_payoff_advance_work;
+    solver
+      ->refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio =
+        batch_candidate_max_payoff_ratio;
     solver->refactor_supernode_consumer_plan_group_l_dense_entries =
       dense_total;
     solver->refactor_supernode_consumer_plan_group_l_trailing_entries =
@@ -24885,6 +25124,39 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
     batch_candidate_entries;
   solver->refactor_supernode_consumer_plan_group_l_batch_candidate_max_runs =
     batch_candidate_max_runs;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_count =
+      batch_candidate_advance_count;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_count =
+      batch_candidate_advance_run_count;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_run_rows =
+      batch_candidate_advance_run_rows;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_work =
+      batch_candidate_advance_work;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_advance_max_work =
+      batch_candidate_advance_max_work;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_count =
+      batch_candidate_payoff_count;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_count =
+      batch_candidate_payoff_run_count;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_run_rows =
+      batch_candidate_payoff_run_rows;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_entries =
+      batch_candidate_payoff_entries;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_payoff_advance_work =
+      batch_candidate_payoff_advance_work;
+  solver
+    ->refactor_supernode_consumer_plan_group_l_batch_candidate_max_payoff_ratio =
+      batch_candidate_max_payoff_ratio;
   solver->refactor_supernode_consumer_plan_group_l_dense_entries =
     dense_total;
   solver->refactor_supernode_consumer_plan_group_l_trailing_entries =

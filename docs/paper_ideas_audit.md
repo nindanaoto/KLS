@@ -10053,6 +10053,39 @@ Validation:
   the retained group-L cache was not requested, it reported zero batch
   candidate runs.
 
+The retained group-L batch-candidate diagnostic now also measures whether a
+candidate has enough grouped update work to pay for scalar prefix advancement
+to the retained producer panel. With
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_CACHE=1`, the current
+top-ten CKTSO-gap run
+`build/kls_group_l_batch_payoff_gap10_t4_r1_ref3_timeout120.jsonl` completed
+with no failed matrices and measured `2.58472s` geomean. The same-source
+default control
+`build/kls_group_l_batch_payoff_default_gap10_t4_r1_ref3_timeout120.jsonl`
+completed with no failed matrices and measured `2.19009s` geomean, with zero
+group-L cache counters because the cache was not requested.
+
+Across the cache-enabled top ten, all `38,782` batch candidates and `704,933`
+candidate runs had computable advance costs, covering `1,454,726,482`
+candidate update entries. The scalar prefix work to reach those panels was
+about `25,156,176,333` estimated work units. Only `1,830` candidates,
+`5,997` runs, and `3,141,804` update entries passed the simple payoff filter
+where grouped update entries are at least the scalar advance work; their
+advance work was only about `2,118,881`. On the hard ASIC rows, the payoff
+surface was especially small: `ASIC_320ks` kept `288,654` of `211,576,799`
+candidate entries, and `ASIC_320k` kept `22,566` of `239,333,804` candidate
+entries.
+
+This directly addresses the small-BLAS-guard hypothesis. Optional external
+CBLAS is already gated by large size/work thresholds and these default focused
+runs do not enter the external CBLAS counters. The retained-panel loss is
+dominated by the cost of advancing current columns to the shared producer
+panel, not by BLAS dispatch granularity after reaching the panel. A plausible
+paper-aligned next executor must therefore batch or otherwise reduce the
+advance stage itself before applying the retained L panels; merely replaying
+the existing scalar prefix and adding another BLAS threshold cannot close the
+ASIC gap.
+
 The opt-in metadata run reports only `63` standalone executable group-L runs
 and `34,650` standalone executable rows, but `38,782` aggregate batch-candidate
 groups, `704,933` candidate runs, `5,314,536` candidate run rows, and
