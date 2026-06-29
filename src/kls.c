@@ -554,6 +554,8 @@ struct kls_solver {
   UF_long *refactor_supernode_consumer_plan_current;
   UF_long *refactor_supernode_consumer_plan_dep;
   UF_long *refactor_supernode_consumer_plan_rows;
+  UF_long *refactor_supernode_consumer_plan_panel_start;
+  UF_long *refactor_supernode_consumer_plan_panel_offset;
   UF_long *refactor_supernode_consumer_plan_col_ptr;
   UF_long *refactor_supernode_consumer_plan_col_runs;
   int refactor_supernode_consumer_plan_built;
@@ -1878,12 +1880,16 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   free(solver->refactor_supernode_consumer_plan_current);
   free(solver->refactor_supernode_consumer_plan_dep);
   free(solver->refactor_supernode_consumer_plan_rows);
+  free(solver->refactor_supernode_consumer_plan_panel_start);
+  free(solver->refactor_supernode_consumer_plan_panel_offset);
   free(solver->refactor_supernode_consumer_plan_col_ptr);
   free(solver->refactor_supernode_consumer_plan_col_runs);
   solver->refactor_supernode_consumer_plan_ptr = NULL;
   solver->refactor_supernode_consumer_plan_current = NULL;
   solver->refactor_supernode_consumer_plan_dep = NULL;
   solver->refactor_supernode_consumer_plan_rows = NULL;
+  solver->refactor_supernode_consumer_plan_panel_start = NULL;
+  solver->refactor_supernode_consumer_plan_panel_offset = NULL;
   solver->refactor_supernode_consumer_plan_col_ptr = NULL;
   solver->refactor_supernode_consumer_plan_col_runs = NULL;
   solver->refactor_supernode_consumer_plan_built = 0;
@@ -1948,6 +1954,8 @@ typedef struct {
   UF_long *plan_current;
   UF_long *plan_dep;
   UF_long *plan_rows;
+  UF_long *plan_panel_start;
+  UF_long *plan_panel_offset;
   UF_long *column_cursor;
   UF_long *column_ptr;
   UF_long *column_runs;
@@ -1973,6 +1981,11 @@ static int kls_fill_supernode_consumer_plan_run(
   ctx->plan_current[dst] = run->current_global;
   ctx->plan_dep[dst] = run->dep_global;
   ctx->plan_rows[dst] = run->run_rows;
+  if (run->dep_global < panel) {
+    return 0;
+  }
+  ctx->plan_panel_start[dst] = panel;
+  ctx->plan_panel_offset[dst] = run->dep_global - panel;
   const UF_long col_dst = ctx->column_cursor[run->current_global]++;
   if (col_dst >= ctx->column_ptr[run->current_global + 1u]) {
     return 0;
@@ -2091,6 +2104,8 @@ static int kls_build_refactor_supernode_consumer_plan(
   UF_long *plan_current = NULL;
   UF_long *plan_dep = NULL;
   UF_long *plan_rows = NULL;
+  UF_long *plan_panel_start = NULL;
+  UF_long *plan_panel_offset = NULL;
   UF_long *cursor = NULL;
   UF_long *column_cursor = NULL;
   UF_long *column_runs = NULL;
@@ -2107,7 +2122,7 @@ static int kls_build_refactor_supernode_consumer_plan(
     ptr_count * sizeof(*plan_ptr) + ptr_count * sizeof(*column_ptr);
   if (run_count > 0u) {
     if (run_count >
-        (SIZE_MAX - plan_bytes) / (4u * sizeof(*plan_current))) {
+        (SIZE_MAX - plan_bytes) / (6u * sizeof(*plan_current))) {
       free(panel_run_count);
       free(panel_run_rows);
       free(column_run_count);
@@ -2119,10 +2134,15 @@ static int kls_build_refactor_supernode_consumer_plan(
       (UF_long *)malloc(run_count * sizeof(*plan_current));
     plan_dep = (UF_long *)malloc(run_count * sizeof(*plan_dep));
     plan_rows = (UF_long *)malloc(run_count * sizeof(*plan_rows));
+    plan_panel_start =
+      (UF_long *)malloc(run_count * sizeof(*plan_panel_start));
+    plan_panel_offset =
+      (UF_long *)malloc(run_count * sizeof(*plan_panel_offset));
     column_runs = (UF_long *)malloc(run_count * sizeof(*column_runs));
     cursor = (UF_long *)malloc(n_alloc * sizeof(*cursor));
     column_cursor = (UF_long *)malloc(n_alloc * sizeof(*column_cursor));
     if (plan_current == NULL || plan_dep == NULL || plan_rows == NULL ||
+        plan_panel_start == NULL || plan_panel_offset == NULL ||
         column_runs == NULL || cursor == NULL || column_cursor == NULL) {
       free(panel_run_count);
       free(panel_run_rows);
@@ -2132,6 +2152,8 @@ static int kls_build_refactor_supernode_consumer_plan(
       free(plan_current);
       free(plan_dep);
       free(plan_rows);
+      free(plan_panel_start);
+      free(plan_panel_offset);
       free(column_runs);
       free(cursor);
       free(column_cursor);
@@ -2145,6 +2167,8 @@ static int kls_build_refactor_supernode_consumer_plan(
     fill_ctx.plan_current = plan_current;
     fill_ctx.plan_dep = plan_dep;
     fill_ctx.plan_rows = plan_rows;
+    fill_ctx.plan_panel_start = plan_panel_start;
+    fill_ctx.plan_panel_offset = plan_panel_offset;
     fill_ctx.column_cursor = column_cursor;
     fill_ctx.column_ptr = column_ptr;
     fill_ctx.column_runs = column_runs;
@@ -2159,6 +2183,8 @@ static int kls_build_refactor_supernode_consumer_plan(
       free(plan_current);
       free(plan_dep);
       free(plan_rows);
+      free(plan_panel_start);
+      free(plan_panel_offset);
       free(column_runs);
       free(cursor);
       free(column_cursor);
@@ -2174,6 +2200,8 @@ static int kls_build_refactor_supernode_consumer_plan(
         free(plan_current);
         free(plan_dep);
         free(plan_rows);
+        free(plan_panel_start);
+        free(plan_panel_offset);
         free(column_runs);
         free(cursor);
         free(column_cursor);
@@ -2190,13 +2218,15 @@ static int kls_build_refactor_supernode_consumer_plan(
         free(plan_current);
         free(plan_dep);
         free(plan_rows);
+        free(plan_panel_start);
+        free(plan_panel_offset);
         free(column_runs);
         free(cursor);
         free(column_cursor);
         return 0;
       }
     }
-    plan_bytes += 4u * run_count * sizeof(*plan_current);
+    plan_bytes += 6u * run_count * sizeof(*plan_current);
   }
 
   free(panel_run_count);
@@ -2209,6 +2239,8 @@ static int kls_build_refactor_supernode_consumer_plan(
   solver->refactor_supernode_consumer_plan_current = plan_current;
   solver->refactor_supernode_consumer_plan_dep = plan_dep;
   solver->refactor_supernode_consumer_plan_rows = plan_rows;
+  solver->refactor_supernode_consumer_plan_panel_start = plan_panel_start;
+  solver->refactor_supernode_consumer_plan_panel_offset = plan_panel_offset;
   solver->refactor_supernode_consumer_plan_col_ptr = column_ptr;
   solver->refactor_supernode_consumer_plan_col_runs = column_runs;
   solver->refactor_supernode_consumer_plan_built = 1;
@@ -21080,6 +21112,7 @@ static int kls_prune_unused_refactor_supernode_panels_from_plan(
   kls_solver *solver) {
   if (solver == NULL ||
       solver->refactor_supernode_panel_count == 0u ||
+      solver->refactor_supernode_panel_start_id == NULL ||
       solver->refactor_supernode_panel_col_id == NULL ||
       solver->refactor_supernode_panel_start == NULL ||
       solver->refactor_supernode_panel_width == NULL ||
@@ -21087,7 +21120,9 @@ static int kls_prune_unused_refactor_supernode_panels_from_plan(
       solver->refactor_supernode_consumer_plan_run_count == 0u ||
       solver->refactor_supernode_consumer_plan_current == NULL ||
       solver->refactor_supernode_consumer_plan_dep == NULL ||
-      solver->refactor_supernode_consumer_plan_rows == NULL) {
+      solver->refactor_supernode_consumer_plan_rows == NULL ||
+      solver->refactor_supernode_consumer_plan_panel_start == NULL ||
+      solver->refactor_supernode_consumer_plan_panel_offset == NULL) {
     return 0;
   }
   const UF_long panel_count = solver->refactor_supernode_panel_count;
@@ -21108,12 +21143,18 @@ static int kls_prune_unused_refactor_supernode_panels_from_plan(
       solver->refactor_supernode_consumer_plan_current[run];
     const UF_long run_rows =
       solver->refactor_supernode_consumer_plan_rows[run];
+    const UF_long plan_start =
+      solver->refactor_supernode_consumer_plan_panel_start[run];
+    const UF_long panel_offset =
+      solver->refactor_supernode_consumer_plan_panel_offset[run];
     if (dep_global >= solver->n || current >= solver->n ||
-        dep_global >= current || run_rows <= 1u) {
+        dep_global >= current || run_rows <= 1u ||
+        plan_start >= solver->n || dep_global < plan_start ||
+        panel_offset != dep_global - plan_start) {
       continue;
     }
     const UF_long panel =
-      solver->refactor_supernode_panel_col_id[dep_global];
+      solver->refactor_supernode_panel_start_id[plan_start];
     if (panel == KLS_KLU_EMPTY || panel >= panel_count) {
       continue;
     }
@@ -21121,12 +21162,11 @@ static int kls_prune_unused_refactor_supernode_panels_from_plan(
     const UF_long width = solver->refactor_supernode_panel_width[panel];
     const UF_long trailing_len =
       solver->refactor_supernode_panel_trailing_len[panel];
-    if (width <= 1u || start > dep_global ||
+    if (start != plan_start || width <= 1u || start > dep_global ||
         dep_global >= start + width || start > solver->n ||
         width > solver->n - start) {
       continue;
     }
-    const UF_long panel_offset = dep_global - start;
     if (run_rows > width - panel_offset) {
       continue;
     }
@@ -41133,15 +41173,25 @@ static int kls_egraph_find_consumer_plan_run(
   const kls_solver *solver,
   UF_long current_global,
   UF_long dep_global,
-  UF_long *run_rows_out) {
+  UF_long *run_rows_out,
+  UF_long *panel_start_out,
+  UF_long *panel_offset_out) {
   if (run_rows_out != NULL) {
     *run_rows_out = 0u;
+  }
+  if (panel_start_out != NULL) {
+    *panel_start_out = KLS_KLU_EMPTY;
+  }
+  if (panel_offset_out != NULL) {
+    *panel_offset_out = 0u;
   }
   if (solver == NULL || current_global >= solver->n ||
       solver->refactor_supernode_consumer_plan_col_ptr == NULL ||
       solver->refactor_supernode_consumer_plan_col_runs == NULL ||
       solver->refactor_supernode_consumer_plan_dep == NULL ||
-      solver->refactor_supernode_consumer_plan_rows == NULL) {
+      solver->refactor_supernode_consumer_plan_rows == NULL ||
+      solver->refactor_supernode_consumer_plan_panel_start == NULL ||
+      solver->refactor_supernode_consumer_plan_panel_offset == NULL) {
     return 0;
   }
   const UF_long begin =
@@ -41160,6 +41210,14 @@ static int kls_egraph_find_consumer_plan_run(
     if (solver->refactor_supernode_consumer_plan_dep[run] == dep_global) {
       if (run_rows_out != NULL) {
         *run_rows_out = solver->refactor_supernode_consumer_plan_rows[run];
+      }
+      if (panel_start_out != NULL) {
+        *panel_start_out =
+          solver->refactor_supernode_consumer_plan_panel_start[run];
+      }
+      if (panel_offset_out != NULL) {
+        *panel_offset_out =
+          solver->refactor_supernode_consumer_plan_panel_offset[run];
       }
       return 1;
     }
@@ -41370,17 +41428,31 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
     return 0;
   }
   UF_long planned_run_rows = 0u;
+  UF_long planned_panel_start = KLS_KLU_EMPTY;
+  UF_long planned_panel_offset = 0u;
   int planned_run = 0;
   if (shared->supernode_consumer_plan_exec) {
     kls_egraph_record_consumer_plan_attempt(shared);
     planned_run = kls_egraph_find_consumer_plan_run(
-      solver, current_global, dep_global, &planned_run_rows);
+      solver, current_global, dep_global, &planned_run_rows,
+      &planned_panel_start, &planned_panel_offset);
     if (planned_run) {
       kls_egraph_record_consumer_plan_hit(shared);
     }
   }
   kls_egraph_record_cached_probe_attempt(shared);
-  const UF_long panel = solver->refactor_supernode_panel_col_id[dep_global];
+  UF_long panel = KLS_KLU_EMPTY;
+  if (planned_run) {
+    if (solver->refactor_supernode_panel_start_id == NULL ||
+        planned_panel_start >= solver->n ||
+        planned_panel_start > dep_global ||
+        planned_panel_offset != dep_global - planned_panel_start) {
+      return 0;
+    }
+    panel = solver->refactor_supernode_panel_start_id[planned_panel_start];
+  } else {
+    panel = solver->refactor_supernode_panel_col_id[dep_global];
+  }
   if (panel == KLS_KLU_EMPTY ||
       panel >= solver->refactor_supernode_panel_count) {
     return 0;
@@ -41397,6 +41469,11 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
     return 0;
   }
   const UF_long panel_offset = dep_global - start;
+  if (planned_run &&
+      (start != planned_panel_start ||
+       panel_offset != planned_panel_offset)) {
+    return 0;
+  }
   if (local_start > dep_local ||
       dep_local - local_start != panel_offset) {
     return 0;
@@ -44806,7 +44883,9 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     (consumer_plan_exec_active &&
      solver->refactor_supernode_consumer_plan_built &&
      solver->refactor_supernode_consumer_plan_col_ptr != NULL &&
-     solver->refactor_supernode_consumer_plan_col_runs != NULL)
+     solver->refactor_supernode_consumer_plan_col_runs != NULL &&
+     solver->refactor_supernode_consumer_plan_panel_start != NULL &&
+     solver->refactor_supernode_consumer_plan_panel_offset != NULL)
       ? 1 : 0;
   shared->u_supernode_values = u_supernode_values ? 1 : 0;
   shared->u_supernode_ragged_l_updates =

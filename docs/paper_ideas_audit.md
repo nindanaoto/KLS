@@ -8148,6 +8148,14 @@ compact TRSV counters on all five rows, so the small-BLAS-call hypothesis is
 not active on these losses; the next useful implementation step is a numeric
 executor that consumes this retained producer-panel plan.
 
+The retained plan now also stores each run's producer-panel start column and
+producer-panel local offset. The plan executor and producer-panel cache pruning
+consume those retained fields instead of rediscovering the producer panel from
+the dependency column. This is still scaffolding rather than a speed path: it
+turns the plan into a producer-addressable run table needed by a future
+producer-centered task, but it does not create the persistent target
+accumulators that would let that task update many consumers at once.
+
 The retained consumer plan can now drive an opt-in cached-panel executor with
 `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1`. The executor builds the
 same retained plan, adds a current-column lookup index, uses planned
@@ -8215,3 +8223,19 @@ the filter. This rejects static plan pruning as the clear missing CKTSO idea:
 it can remove some publication scans, but it does not create the reusable
 row-major/persistent accumulator that the papers rely on to feed many consumers
 from one producer panel.
+
+A focused rerun after adding retained producer-panel starts/offsets confirmed
+that this metadata alone is not the missing mechanism. With
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1`, the top-five focus
+measured `3.95505s` geomean in
+`build/kls_consumer_plan_panel_fields_gap5_t4_r1_ref3_timeout120.jsonl`,
+versus the same-binary no-env control at `3.18461s` in
+`build/kls_consumer_plan_panel_fields_default_gap5_t4_r1_ref3_timeout120.jsonl`.
+Coverage remained the same narrow shape as before: `ASIC_320ks` retained
+`897,255` plan rows but applied `48,841`, `ASIC_320k` retained `939,167` and
+applied none, `rajat03` retained `41,466` and applied `1,310`, and
+`ASIC_100ks` retained `1,148,099` and applied `39,436`; the executor disabled
+itself after the low-coverage clean pass on those rows. The retained
+producer-panel fields are useful for the next producer-task implementation, but
+they do not change the current conclusion: KLS needs a coarser row-major or
+persistent-consumer accumulator, not more cached-panel lookup metadata.

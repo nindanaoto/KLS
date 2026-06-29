@@ -845,6 +845,16 @@ supernodes and reports `refactor_supernode_consumer_run_count`,
 `refactor_supernode_consumer_internal_entries`. These counters estimate how
 much scalar dependency work a future row-major/supernodal numeric object could
 consume before the current common-trailing cached-panel gates are applied.
+Set `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1` to retain those contiguous
+consumer runs as a producer-addressable plan. The plan stores each run's
+current column, producer dependency, run length, producer-panel start, and
+producer-panel offset, and reports the retained shape through
+`refactor_supernode_consumer_plan_*` counters. Set
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1` to let the experimental
+cached-panel executor consume that plan. This executor is intentionally
+off-by-default: focused CKTSO-gap runs show that the current completed-panel
+cache covers only a small fraction of retained rows, so the plan is primarily
+staging for a future producer/consumer row-major numeric task.
 Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN=1` to also retain the exact
 row-major U-supernode structural object from the same schedule pass. Benchmark
 JSON reports `refactor_u_supernode_pattern_count`,
