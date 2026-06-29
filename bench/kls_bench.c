@@ -1623,8 +1623,19 @@ int main(int argc, char **argv) {
            ",\"row_refactor_group_single_count\":%" PRId64
            ",\"row_refactor_group_batch_count\":%" PRId64
            ",\"row_refactor_group_batch_rows\":%" PRId64
+           ",\"row_refactor_group_batch_max_width\":%" PRId64
+           ",\"row_refactor_group_batch_width_le_4_count\":%" PRId64
+           ",\"row_refactor_group_batch_width_le_8_count\":%" PRId64
            ",\"row_refactor_group_generic_count\":%" PRId64
+           ",\"row_refactor_group_generic_rows\":%" PRId64
+           ",\"row_refactor_group_generic_max_width\":%" PRId64
            ",\"row_refactor_group_dense_count\":%" PRId64
+           ",\"row_refactor_group_dense_rows\":%" PRId64
+           ",\"row_refactor_group_dense_max_width\":%" PRId64
+           ",\"row_refactor_group_single_work\":%.9g"
+           ",\"row_refactor_group_batch_work\":%.9g"
+           ",\"row_refactor_group_generic_work\":%.9g"
+           ",\"row_refactor_group_dense_work\":%.9g"
            ",\"row_refactor_group_level_count\":%" PRId64
            ",\"row_refactor_group_level_max_width\":%" PRId64
            ",\"row_refactor_group_cluster_levels\":%" PRId64
@@ -1793,8 +1804,19 @@ int main(int argc, char **argv) {
            stats.row_refactor_group_single_count,
            stats.row_refactor_group_batch_count,
            stats.row_refactor_group_batch_rows,
+           stats.row_refactor_group_batch_max_width,
+           stats.row_refactor_group_batch_width_le_4_count,
+           stats.row_refactor_group_batch_width_le_8_count,
            stats.row_refactor_group_generic_count,
+           stats.row_refactor_group_generic_rows,
+           stats.row_refactor_group_generic_max_width,
            stats.row_refactor_group_dense_count,
+           stats.row_refactor_group_dense_rows,
+           stats.row_refactor_group_dense_max_width,
+           stats.row_refactor_group_single_work,
+           stats.row_refactor_group_batch_work,
+           stats.row_refactor_group_generic_work,
+           stats.row_refactor_group_dense_work,
            stats.row_refactor_group_level_count,
            stats.row_refactor_group_level_max_width,
            stats.row_refactor_group_cluster_levels,
@@ -3393,7 +3415,10 @@ int main(int argc, char **argv) {
            stats.refactor_ready_queue_run_count);
     printf("row refactor groups: %" PRId64
            " (single %" PRId64 ", batch %" PRId64 "/%" PRId64
-           " rows, generic %" PRId64 ", dense %" PRId64 ")"
+           " rows, batch max/le4/le8 %" PRId64 "/%" PRId64 "/%" PRId64
+           ", generic %" PRId64 "/%" PRId64 " rows max %" PRId64
+           ", dense %" PRId64 "/%" PRId64 " rows max %" PRId64 ")"
+           ", work single/batch/generic/dense %.6g/%.6g/%.6g/%.6g"
            ", levels: %" PRId64 ", max level width: %" PRId64
            ", cluster levels: %" PRId64 ", pipeline groups: %" PRId64
            ", pipeline rows: %" PRId64 ", pipeline work: %.6g"
@@ -3440,8 +3465,19 @@ int main(int argc, char **argv) {
            stats.row_refactor_group_single_count,
            stats.row_refactor_group_batch_count,
            stats.row_refactor_group_batch_rows,
+           stats.row_refactor_group_batch_max_width,
+           stats.row_refactor_group_batch_width_le_4_count,
+           stats.row_refactor_group_batch_width_le_8_count,
            stats.row_refactor_group_generic_count,
+           stats.row_refactor_group_generic_rows,
+           stats.row_refactor_group_generic_max_width,
            stats.row_refactor_group_dense_count,
+           stats.row_refactor_group_dense_rows,
+           stats.row_refactor_group_dense_max_width,
+           stats.row_refactor_group_single_work,
+           stats.row_refactor_group_batch_work,
+           stats.row_refactor_group_generic_work,
+           stats.row_refactor_group_dense_work,
            stats.row_refactor_group_level_count,
            stats.row_refactor_group_level_max_width,
            stats.row_refactor_group_cluster_levels,

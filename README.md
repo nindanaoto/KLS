@@ -666,7 +666,17 @@ solver-owned compact panel slices reported as
 those slices before falling back to worker-local scratch and reports actual
 retained-slice execution as
 `row_refactor_last_compact_dense_panel_persistent` and
-`row_refactor_compact_dense_panel_persistent_run_count`. Later rows can consume
+`row_refactor_compact_dense_panel_persistent_run_count`. Stats also report
+row-group shape counters such as
+`row_refactor_group_batch_max_width`,
+`row_refactor_group_batch_width_le_4_count`,
+`row_refactor_group_batch_width_le_8_count`,
+`row_refactor_group_generic_rows`,
+`row_refactor_group_generic_max_width`,
+`row_refactor_group_dense_rows`,
+`row_refactor_group_dense_max_width`, and
+`row_refactor_group_*_work` to distinguish small independent-batch overhead
+from dense/generic panel work concentration. Later rows can consume
 a current-pass retained compact panel as a supernode update source when they
 have a contiguous suffix of dependencies on that completed dense group; stats report
 `row_refactor_last_compact_supernode_update`,

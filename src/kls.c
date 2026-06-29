@@ -293,8 +293,19 @@ struct kls_solver {
   UF_long row_refactor_group_single_count;
   UF_long row_refactor_group_batch_count;
   UF_long row_refactor_group_batch_rows;
+  UF_long row_refactor_group_batch_max_width;
+  UF_long row_refactor_group_batch_width_le_4_count;
+  UF_long row_refactor_group_batch_width_le_8_count;
   UF_long row_refactor_group_generic_count;
+  UF_long row_refactor_group_generic_rows;
+  UF_long row_refactor_group_generic_max_width;
   UF_long row_refactor_group_dense_count;
+  UF_long row_refactor_group_dense_rows;
+  UF_long row_refactor_group_dense_max_width;
+  double row_refactor_group_single_work;
+  double row_refactor_group_batch_work;
+  double row_refactor_group_generic_work;
+  double row_refactor_group_dense_work;
   UF_long row_refactor_group_dependency_edges;
   UF_long row_refactor_group_root_count;
   UF_long row_refactor_group_leaf_count;
@@ -5539,8 +5550,19 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_single_count = 0;
   solver->row_refactor_group_batch_count = 0;
   solver->row_refactor_group_batch_rows = 0;
+  solver->row_refactor_group_batch_max_width = 0;
+  solver->row_refactor_group_batch_width_le_4_count = 0;
+  solver->row_refactor_group_batch_width_le_8_count = 0;
   solver->row_refactor_group_generic_count = 0;
+  solver->row_refactor_group_generic_rows = 0;
+  solver->row_refactor_group_generic_max_width = 0;
   solver->row_refactor_group_dense_count = 0;
+  solver->row_refactor_group_dense_rows = 0;
+  solver->row_refactor_group_dense_max_width = 0;
+  solver->row_refactor_group_single_work = 0.0;
+  solver->row_refactor_group_batch_work = 0.0;
+  solver->row_refactor_group_generic_work = 0.0;
+  solver->row_refactor_group_dense_work = 0.0;
   solver->row_refactor_group_dependency_edges = 0;
   solver->row_refactor_group_root_count = 0;
   solver->row_refactor_group_leaf_count = 0;
@@ -5739,8 +5761,19 @@ typedef struct {
   UF_long group_single_count;
   UF_long group_batch_count;
   UF_long group_batch_rows;
+  UF_long group_batch_max_width;
+  UF_long group_batch_width_le_4_count;
+  UF_long group_batch_width_le_8_count;
   UF_long group_generic_count;
+  UF_long group_generic_rows;
+  UF_long group_generic_max_width;
   UF_long group_dense_count;
+  UF_long group_dense_rows;
+  UF_long group_dense_max_width;
+  double group_single_work;
+  double group_batch_work;
+  double group_generic_work;
+  double group_dense_work;
   UF_long group_dependency_edges;
   UF_long group_root_count;
   UF_long group_leaf_count;
@@ -5938,8 +5971,24 @@ static void kls_save_row_refactor_diagnostics(
   diag->group_single_count = solver->row_refactor_group_single_count;
   diag->group_batch_count = solver->row_refactor_group_batch_count;
   diag->group_batch_rows = solver->row_refactor_group_batch_rows;
+  diag->group_batch_max_width =
+    solver->row_refactor_group_batch_max_width;
+  diag->group_batch_width_le_4_count =
+    solver->row_refactor_group_batch_width_le_4_count;
+  diag->group_batch_width_le_8_count =
+    solver->row_refactor_group_batch_width_le_8_count;
   diag->group_generic_count = solver->row_refactor_group_generic_count;
+  diag->group_generic_rows = solver->row_refactor_group_generic_rows;
+  diag->group_generic_max_width =
+    solver->row_refactor_group_generic_max_width;
   diag->group_dense_count = solver->row_refactor_group_dense_count;
+  diag->group_dense_rows = solver->row_refactor_group_dense_rows;
+  diag->group_dense_max_width =
+    solver->row_refactor_group_dense_max_width;
+  diag->group_single_work = solver->row_refactor_group_single_work;
+  diag->group_batch_work = solver->row_refactor_group_batch_work;
+  diag->group_generic_work = solver->row_refactor_group_generic_work;
+  diag->group_dense_work = solver->row_refactor_group_dense_work;
   diag->group_dependency_edges = solver->row_refactor_group_dependency_edges;
   diag->group_root_count = solver->row_refactor_group_root_count;
   diag->group_leaf_count = solver->row_refactor_group_leaf_count;
@@ -6280,8 +6329,24 @@ static void kls_restore_row_refactor_diagnostics(
   solver->row_refactor_group_single_count = diag->group_single_count;
   solver->row_refactor_group_batch_count = diag->group_batch_count;
   solver->row_refactor_group_batch_rows = diag->group_batch_rows;
+  solver->row_refactor_group_batch_max_width =
+    diag->group_batch_max_width;
+  solver->row_refactor_group_batch_width_le_4_count =
+    diag->group_batch_width_le_4_count;
+  solver->row_refactor_group_batch_width_le_8_count =
+    diag->group_batch_width_le_8_count;
   solver->row_refactor_group_generic_count = diag->group_generic_count;
+  solver->row_refactor_group_generic_rows = diag->group_generic_rows;
+  solver->row_refactor_group_generic_max_width =
+    diag->group_generic_max_width;
   solver->row_refactor_group_dense_count = diag->group_dense_count;
+  solver->row_refactor_group_dense_rows = diag->group_dense_rows;
+  solver->row_refactor_group_dense_max_width =
+    diag->group_dense_max_width;
+  solver->row_refactor_group_single_work = diag->group_single_work;
+  solver->row_refactor_group_batch_work = diag->group_batch_work;
+  solver->row_refactor_group_generic_work = diag->group_generic_work;
+  solver->row_refactor_group_dense_work = diag->group_dense_work;
   solver->row_refactor_group_dependency_edges =
     diag->group_dependency_edges;
   solver->row_refactor_group_root_count = diag->group_root_count;
@@ -16992,10 +17057,32 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_group_batch_count;
   solver->stats.row_refactor_group_batch_rows =
     (int64_t)solver->row_refactor_group_batch_rows;
+  solver->stats.row_refactor_group_batch_max_width =
+    (int64_t)solver->row_refactor_group_batch_max_width;
+  solver->stats.row_refactor_group_batch_width_le_4_count =
+    (int64_t)solver->row_refactor_group_batch_width_le_4_count;
+  solver->stats.row_refactor_group_batch_width_le_8_count =
+    (int64_t)solver->row_refactor_group_batch_width_le_8_count;
   solver->stats.row_refactor_group_generic_count =
     (int64_t)solver->row_refactor_group_generic_count;
+  solver->stats.row_refactor_group_generic_rows =
+    (int64_t)solver->row_refactor_group_generic_rows;
+  solver->stats.row_refactor_group_generic_max_width =
+    (int64_t)solver->row_refactor_group_generic_max_width;
   solver->stats.row_refactor_group_dense_count =
     (int64_t)solver->row_refactor_group_dense_count;
+  solver->stats.row_refactor_group_dense_rows =
+    (int64_t)solver->row_refactor_group_dense_rows;
+  solver->stats.row_refactor_group_dense_max_width =
+    (int64_t)solver->row_refactor_group_dense_max_width;
+  solver->stats.row_refactor_group_single_work =
+    solver->row_refactor_group_single_work;
+  solver->stats.row_refactor_group_batch_work =
+    solver->row_refactor_group_batch_work;
+  solver->stats.row_refactor_group_generic_work =
+    solver->row_refactor_group_generic_work;
+  solver->stats.row_refactor_group_dense_work =
+    solver->row_refactor_group_dense_work;
   solver->stats.row_refactor_group_level_count =
     (int64_t)solver->row_refactor_level_count;
   solver->stats.row_refactor_group_level_max_width =
@@ -28589,20 +28676,44 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   UF_long group_single_count = 0u;
   UF_long group_batch_count = 0u;
   UF_long group_batch_rows = 0u;
+  UF_long group_batch_max_width = 0u;
+  UF_long group_batch_width_le_4_count = 0u;
+  UF_long group_batch_width_le_8_count = 0u;
   UF_long group_generic_count = 0u;
+  UF_long group_generic_rows = 0u;
+  UF_long group_generic_max_width = 0u;
   UF_long group_dense_count = 0u;
+  UF_long group_dense_rows = 0u;
+  UF_long group_dense_max_width = 0u;
   for (UF_long group = 0; group < group_count; ++group) {
     const UF_long group_rows = group_ptr[group + 1u] - group_ptr[group];
     switch ((kls_row_refactor_group_kind)group_kind[group]) {
       case KLS_ROW_REFACTOR_GROUP_BATCH:
         group_batch_count++;
         group_batch_rows += group_rows;
+        if (group_rows > group_batch_max_width) {
+          group_batch_max_width = group_rows;
+        }
+        if (group_rows <= 4u) {
+          group_batch_width_le_4_count++;
+        }
+        if (group_rows <= 8u) {
+          group_batch_width_le_8_count++;
+        }
         break;
       case KLS_ROW_REFACTOR_GROUP_GENERIC:
         group_generic_count++;
+        group_generic_rows += group_rows;
+        if (group_rows > group_generic_max_width) {
+          group_generic_max_width = group_rows;
+        }
         break;
       case KLS_ROW_REFACTOR_GROUP_DENSE:
         group_dense_count++;
+        group_dense_rows += group_rows;
+        if (group_rows > group_dense_max_width) {
+          group_dense_max_width = group_rows;
+        }
         break;
       case KLS_ROW_REFACTOR_GROUP_SINGLE:
       default:
@@ -28622,8 +28733,18 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   solver->row_refactor_group_single_count = group_single_count;
   solver->row_refactor_group_batch_count = group_batch_count;
   solver->row_refactor_group_batch_rows = group_batch_rows;
+  solver->row_refactor_group_batch_max_width = group_batch_max_width;
+  solver->row_refactor_group_batch_width_le_4_count =
+    group_batch_width_le_4_count;
+  solver->row_refactor_group_batch_width_le_8_count =
+    group_batch_width_le_8_count;
   solver->row_refactor_group_generic_count = group_generic_count;
+  solver->row_refactor_group_generic_rows = group_generic_rows;
+  solver->row_refactor_group_generic_max_width =
+    group_generic_max_width;
   solver->row_refactor_group_dense_count = group_dense_count;
+  solver->row_refactor_group_dense_rows = group_dense_rows;
+  solver->row_refactor_group_dense_max_width = group_dense_max_width;
   solver->row_refactor_group_dependency_edges = group_dependency_edges;
   solver->row_refactor_group_root_count = group_root_count;
   solver->row_refactor_group_leaf_count = group_leaf_count;
@@ -28742,6 +28863,28 @@ static int kls_finish_row_refactor_pattern_from_arrays(
         solver->row_refactor_group_work[group] =
           kls_row_refactor_compute_group_work(solver, group);
       }
+    }
+  }
+  solver->row_refactor_group_single_work = 0.0;
+  solver->row_refactor_group_batch_work = 0.0;
+  solver->row_refactor_group_generic_work = 0.0;
+  solver->row_refactor_group_dense_work = 0.0;
+  for (UF_long group = 0; group < group_count; ++group) {
+    const double work = kls_row_refactor_group_work(solver, group);
+    switch ((kls_row_refactor_group_kind)group_kind[group]) {
+      case KLS_ROW_REFACTOR_GROUP_BATCH:
+        solver->row_refactor_group_batch_work += work;
+        break;
+      case KLS_ROW_REFACTOR_GROUP_GENERIC:
+        solver->row_refactor_group_generic_work += work;
+        break;
+      case KLS_ROW_REFACTOR_GROUP_DENSE:
+        solver->row_refactor_group_dense_work += work;
+        break;
+      case KLS_ROW_REFACTOR_GROUP_SINGLE:
+      default:
+        solver->row_refactor_group_single_work += work;
+        break;
     }
   }
   kls_sort_row_refactor_successors_by_work(solver);

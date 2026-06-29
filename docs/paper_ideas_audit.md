@@ -6,6 +6,23 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The latest forced-row rerun adds explicit row-group shape/work diagnostics and
+rejects the small-BLAS hypothesis for the current slow cases. The slow default
+ASIC rows still report zero CBLAS update counters, and forced row refactor with
+`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=0` shows that the row work is not trapped
+primarily in tiny independent batches: `ASIC_320ks` has about 270.5M of 285.2M
+modeled row work in dense groups, `ASIC_100ks` about 308.0M of 319.1M, and
+`onetone1` about 415.1M of 421.3M. Enabling the native/compact dense-panel path
+does execute hundreds of retained panels, but only modestly improves the
+forced-row top-five geomean from about 4.33s to about 4.03s and still leaves it
+far behind the current default top-five around 1.40s. The missing paper-scale
+piece is therefore a broader CKTSO/SubtreeLU-style dense producer-panel numeric
+executor that reduces row-panel update traffic and synchronization, not another
+guard around BLAS calls for small cases. The artifacts are
+`build/kls_group_shape_diag_forcedrow_gap10_t4_r1_ref3_timeout120.jsonl`,
+`build/kls_group_shape_diag_forcedrow_native_auto_gap5_t4_r1_ref3_timeout120.jsonl`,
+and `build/kls_current_gap10_continuation_t4_r1_ref3_timeout120.jsonl`.
+
 KLS has **not** implemented every paper idea that is still worth trying. It has
 implemented the ideas that can be layered around the current KLU-derived
 Gilbert-Peierls kernel: BTF, AMD/COLAMD/METIS ordering policy, explicit SCOTCH
