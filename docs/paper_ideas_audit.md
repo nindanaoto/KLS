@@ -9541,3 +9541,46 @@ makes the next implementation target concrete: a producer-panel grouped
 executor can iterate `shape_group_ptr[group]..shape_group_ptr[group+1]`, gather
 the current columns from the stored run ids, and apply one producer shape to
 many consumers with a scalar/ragged fallback for unmatched groups.
+
+The retained-plan U-supernode ragged-L experiment now prefilters dependency
+probes through the retained consumer plan before touching the cached panel
+state. The implementation records whether each current column's retained runs
+are dependency-sorted, gives each EGraph worker a cursor for that sorted run
+stream, and uses the retained `(panel_start, panel_offset, run_rows)` metadata
+instead of rediscovering the planned run twice. This is still the scalar
+ragged-L executor; it does not yet use the retained exact-shape groups as a
+grouped numeric kernel.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1 ./build/kls_smoke` passed.
+- `KLS_ENABLE_REFACTOR_U_SUPERNODE_PLAN_PATTERN=1
+  KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1 ./build/kls_smoke` passed.
+- On `onetone2` with one refactor repeat, the prefiltered path reported
+  `50,274` U-supernode L probe attempts, `1,885` panel misses, `48,146`
+  work rejects, `26,200` applied rows, and `4.37e-16` relative residual. The
+  earlier unfiltered retained-pattern ragged-L probe attempted `528,565`
+  dependencies on the same matrix, so this removes roughly `90.5%` of raw
+  scalar probes before panel/cache checks.
+- The final top-five CKTSO-gap focus run
+  `build/kls_planpattern_ragged_prefilter_gap5_t4_r1_ref3_timeout120.jsonl`
+  measured `8.50835s` geomean with no failures. The same-code default rerun
+  `build/kls_current_auto_rerun_gap5_t4_r1_ref3_timeout120.jsonl` measured
+  `7.56138s` geomean. Both runs were built without CBLAS and reported zero
+  CBLAS updates.
+
+This confirms that retained-plan filtering is useful but insufficient. The
+experimental ragged-L path improved over the previous plan-pattern ragged-L
+top-five run (`9.01978s` geomean), but it remains slower than the default KLU
+column replay. On repeated refactors, KLS prunes U-supernode L panels that were
+not actually applied; later iterations therefore turn most retained-run probes
+into cheap panel misses instead of small-work rejects. That behavior reinforces
+the same conclusion as the output-collapse and exact-shape diagnostics: the
+missing paper-aligned mechanism is not a smaller BLAS threshold. Optional CBLAS
+is already behind build/runtime gates plus 512-scale and minimum-work guards,
+and it is absent from these measurements. The next plausible gap closer is the
+grouped producer-panel executor over the retained exact-shape groups, so one
+producer scan feeds many consumers without one scalar L-entry probe per planned
+dependency.
