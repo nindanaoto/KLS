@@ -454,6 +454,7 @@ struct kls_solver {
   UF_long row_refactor_compact_dense_panel_blocked_entries;
   int row_refactor_native_row_panel_enabled;
   int row_refactor_last_native_row_panel;
+  int row_refactor_native_row_panel_auto_disabled;
   UF_long row_refactor_native_row_panel_count;
   UF_long row_refactor_native_row_panel_rows;
   UF_long row_refactor_native_row_panel_entries;
@@ -462,6 +463,7 @@ struct kls_solver {
   UF_long row_refactor_native_row_panel_blocked_entries;
   UF_long row_refactor_native_row_panel_fallback_count;
   UF_long row_refactor_native_row_panel_checked_reject_count;
+  UF_long row_refactor_native_row_panel_auto_disable_count;
   UF_long row_refactor_last_compact_dense_panel_direct_input_rows;
   UF_long row_refactor_compact_dense_panel_direct_input_rows;
   UF_long row_refactor_last_compact_panel_solve_values;
@@ -3270,6 +3272,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_compact_dense_panel_blocked_entries = 0;
   solver->row_refactor_native_row_panel_enabled = 0;
   solver->row_refactor_last_native_row_panel = 0;
+  solver->row_refactor_native_row_panel_auto_disabled = 0;
   solver->row_refactor_native_row_panel_count = 0;
   solver->row_refactor_native_row_panel_rows = 0;
   solver->row_refactor_native_row_panel_entries = 0;
@@ -3278,6 +3281,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_native_row_panel_blocked_entries = 0;
   solver->row_refactor_native_row_panel_fallback_count = 0;
   solver->row_refactor_native_row_panel_checked_reject_count = 0;
+  solver->row_refactor_native_row_panel_auto_disable_count = 0;
   solver->row_refactor_last_compact_dense_panel_direct_input_rows = 0;
   solver->row_refactor_compact_dense_panel_direct_input_rows = 0;
   solver->row_refactor_last_compact_panel_solve_values = 0;
@@ -3464,6 +3468,7 @@ typedef struct {
   UF_long compact_dense_panel_blocked_entries;
   int native_row_panel_enabled;
   int last_native_row_panel;
+  UF_long native_row_panel_auto_disable_count;
   UF_long native_row_panel_count;
   UF_long native_row_panel_rows;
   UF_long native_row_panel_entries;
@@ -3739,6 +3744,8 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_native_row_panel_enabled;
   diag->last_native_row_panel =
     solver->row_refactor_last_native_row_panel;
+  diag->native_row_panel_auto_disable_count =
+    solver->row_refactor_native_row_panel_auto_disable_count;
   diag->native_row_panel_count =
     solver->row_refactor_native_row_panel_count;
   diag->native_row_panel_rows =
@@ -4085,6 +4092,8 @@ static void kls_restore_row_refactor_diagnostics(
     diag->native_row_panel_enabled;
   solver->row_refactor_last_native_row_panel =
     diag->last_native_row_panel;
+  solver->row_refactor_native_row_panel_auto_disable_count =
+    diag->native_row_panel_auto_disable_count;
   solver->row_refactor_native_row_panel_count =
     diag->native_row_panel_count;
   solver->row_refactor_native_row_panel_rows =
@@ -14771,6 +14780,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_native_row_panel_enabled;
   solver->stats.row_refactor_last_native_row_panel =
     solver->row_refactor_last_native_row_panel;
+  solver->stats.row_refactor_native_row_panel_auto_disabled =
+    solver->row_refactor_native_row_panel_auto_disabled;
   solver->stats.row_refactor_native_row_panel_count =
     (int64_t)solver->row_refactor_native_row_panel_count;
   solver->stats.row_refactor_native_row_panel_rows =
@@ -14787,6 +14798,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_native_row_panel_fallback_count;
   solver->stats.row_refactor_native_row_panel_checked_reject_count =
     (int64_t)solver->row_refactor_native_row_panel_checked_reject_count;
+  solver->stats.row_refactor_native_row_panel_auto_disable_count =
+    (int64_t)solver->row_refactor_native_row_panel_auto_disable_count;
   solver->stats.row_refactor_last_compact_dense_panel_direct_input_rows =
     (int64_t)solver->row_refactor_last_compact_dense_panel_direct_input_rows;
   solver->stats.row_refactor_compact_dense_panel_direct_input_rows =
@@ -27360,6 +27373,17 @@ static int kls_native_row_panel_env_state(void) {
   return 1;
 }
 
+static int kls_native_row_panel_enabled_for_run(const kls_solver *solver,
+                                                int env_state,
+                                                int check_pivots);
+static void kls_maybe_disable_native_row_panel_auto(
+  kls_solver *solver,
+  int check_pivots,
+  int env_state,
+  UF_long native_count_before,
+  UF_long compact_update_count_before,
+  UF_long partial_pipeline_count_before);
+
 static int kls_multi_producer_supernode_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_MULTI_PRODUCER_SUPERNODE");
   if (value == NULL || value[0] == '\0') {
@@ -30381,6 +30405,13 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
     kls_row_refactor_should_defer_value_scatter(solver, check_pivots);
   const int lazy_value_scatter =
     kls_row_refactor_should_lazy_value_scatter(check_pivots);
+  const int native_row_panel_state = kls_native_row_panel_env_state();
+  const UF_long native_row_panel_count_before =
+    solver->row_refactor_native_row_panel_count;
+  const UF_long compact_supernode_update_count_before =
+    solver->row_refactor_compact_supernode_update_count;
+  const UF_long partial_supernode_pipeline_count_before =
+    solver->row_refactor_partial_supernode_pipeline_run_count;
   kls_row_refactor_record_pipeline_scope(solver,
                                          solver->row_refactor_level_count);
   kls_record_row_refactor_run(solver, check_pivots, 0);
@@ -30418,7 +30449,8 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
     kls_compact_supernode_trsv_env_state();
   shared.row_refactor_native_row_panel_active = 0;
   solver->row_refactor_native_row_panel_enabled =
-    kls_native_row_panel_env_state() >= 0 ? 1 : 0;
+    kls_native_row_panel_enabled_for_run(
+      solver, native_row_panel_state, check_pivots);
   atomic_init(&shared.row_prefactor_rows, 0ul);
   atomic_init(&shared.row_prefactor_deps, 0ul);
   atomic_init(&shared.row_prefactor_supernode_rows, 0ul);
@@ -30511,6 +30543,10 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   solver->row_refactor_values_ready = 1;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
+  kls_maybe_disable_native_row_panel_auto(
+    solver, check_pivots, native_row_panel_state,
+    native_row_panel_count_before, compact_supernode_update_count_before,
+    partial_supernode_pipeline_count_before);
   return 1;
 }
 
@@ -33157,13 +33193,58 @@ static int kls_row_refactor_prefers_compact_dense_panel(UF_long width,
 static int kls_native_row_panel_should_try(UF_long width,
                                            UF_long trailing_len,
                                            int env_state) {
+  (void)trailing_len;
   if (env_state < 0 || width <= 1u) {
     return 0;
   }
-  if (env_state > 0) {
-    return 1;
+  return 1;
+}
+
+static int kls_native_row_panel_enabled_for_run(const kls_solver *solver,
+                                                int env_state,
+                                                int check_pivots) {
+  if (env_state < 0) {
+    return 0;
   }
-  return kls_row_refactor_prefers_compact_dense_panel(width, trailing_len);
+  if (env_state == 0 && !check_pivots && solver != NULL &&
+      solver->row_refactor_native_row_panel_auto_disabled) {
+    return 0;
+  }
+  return 1;
+}
+
+static int kls_native_row_panel_should_try_for_solver(
+  const kls_solver *solver,
+  UF_long width,
+  UF_long trailing_len,
+  int env_state,
+  int check_pivots) {
+  if (!kls_native_row_panel_enabled_for_run(solver, env_state,
+                                            check_pivots)) {
+    return 0;
+  }
+  return kls_native_row_panel_should_try(width, trailing_len, env_state);
+}
+
+static void kls_maybe_disable_native_row_panel_auto(
+  kls_solver *solver,
+  int check_pivots,
+  int env_state,
+  UF_long native_count_before,
+  UF_long compact_update_count_before,
+  UF_long partial_pipeline_count_before) {
+  if (solver == NULL || check_pivots || env_state != 0 ||
+      solver->row_refactor_native_row_panel_auto_disabled ||
+      solver->row_refactor_native_row_panel_count <= native_count_before ||
+      solver->row_refactor_compact_supernode_update_count >
+        compact_update_count_before ||
+      solver->row_refactor_partial_supernode_pipeline_run_count >
+        partial_pipeline_count_before) {
+    return;
+  }
+  solver->row_refactor_native_row_panel_auto_disabled = 1;
+  solver->row_refactor_native_row_panel_auto_disable_count++;
+  solver->row_refactor_native_row_panel_enabled = 0;
 }
 
 static int kls_store_compact_dense_panel_row(
@@ -36438,7 +36519,8 @@ static int kls_parallel_row_refactor_process_dense_group(
   const int native_env_state = kls_native_row_panel_env_state();
   const int native_row_panel =
     shared != NULL &&
-    kls_native_row_panel_should_try(width, trailing_len, native_env_state);
+    kls_native_row_panel_should_try_for_solver(
+      solver, width, trailing_len, native_env_state, shared->check_pivots);
   int compact_attempted = 0;
 
   if (native_row_panel) {
@@ -39935,6 +40017,13 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
   common->nrealloc = 0;
+  const int native_row_panel_state = kls_native_row_panel_env_state();
+  const UF_long native_row_panel_count_before =
+    solver->row_refactor_native_row_panel_count;
+  const UF_long compact_supernode_update_count_before =
+    solver->row_refactor_compact_supernode_update_count;
+  const UF_long partial_supernode_pipeline_count_before =
+    solver->row_refactor_partial_supernode_pipeline_run_count;
 
   kls_egraph_refactor_shared *shared = &pool->shared;
   pthread_mutex_lock(&shared->lock);
@@ -39965,7 +40054,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     kls_compact_supernode_trsv_env_state();
   shared->row_refactor_native_row_panel_active = 0;
   solver->row_refactor_native_row_panel_enabled =
-    kls_native_row_panel_env_state() >= 0 ? 1 : 0;
+    kls_native_row_panel_enabled_for_run(
+      solver, native_row_panel_state, check_pivots);
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   shared->invalid = 0;
   shared->pivot_rejected = 0;
@@ -40199,6 +40289,10 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   solver->row_refactor_values_ready = 1;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
+  kls_maybe_disable_native_row_panel_auto(
+    solver, check_pivots, native_row_panel_state,
+    native_row_panel_count_before, compact_supernode_update_count_before,
+    partial_supernode_pipeline_count_before);
   return 1;
 }
 

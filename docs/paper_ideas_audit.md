@@ -8565,3 +8565,47 @@ panels to publish the expected retained panel state. That means trailing
 presence alone is not the right reuse proxy. The next native selector needs to
 distinguish no-reuse pure panel factorization from zero-trailing panels that
 feed checked-prefix or partial-prefix publication.
+
+The follow-up implementation changed native row-panel `auto` from a fixed
+compact-work threshold into a reuse-retiring policy. In `auto`, KLS now tries
+native row-panel execution for width > 1, but after a successful unchecked
+refactor it disables native row panels for later refactors of the same
+row-refactor pattern when that run used native panels and produced neither
+compact-supernode updates nor a partial-supernode pipeline. Checked refactors
+and partial-prefix/pipeline runs are intentionally exempt, preserving the smoke
+coverage that rejected the trailing-only rule. The benchmark output now exposes
+`row_refactor_native_row_panel_auto_disabled` and
+`row_refactor_native_row_panel_auto_disable_count`.
+
+This is also the current answer to the small-BLAS hypothesis. The source
+already gates external CBLAS behind the build option, the runtime
+`KLS_ENABLE_CBLAS_SUPERNODE=1` switch, 512-scale row/panel tests, and
+multi-million-operation work thresholds. The focused runs below used the
+default build (`build_has_cblas=false`), so a stricter "BLAS only for large
+cases" guard cannot explain or fix these timings.
+
+Validation after the selector change:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- Native-off top-five forced row-refactor control:
+  `build/kls_native_adaptive_off_gap5_t4_r1_ref3_timeout120.jsonl`,
+  geomean `10.0890s`.
+- Broad native-auto:
+  `build/kls_native_adaptive_broad_auto_gap5_t4_r1_ref3_timeout120.jsonl`,
+  geomean `8.1896s`, five wins over native-off, geomean ratio `0.8117`.
+- Forced native rerun:
+  `build/kls_native_adaptive_broad_on_gap5_t4_r1_ref3_timeout120.jsonl`,
+  geomean `8.4649s`; broad auto is within normal run noise and slightly
+  faster in this pass. An earlier forced-native artifact at `4.3748s` did not
+  reproduce and should be treated as an outlier.
+
+The top-five broad-auto rows did not trip auto-disable: ASIC rows produced
+compact-supernode updates, while `gemat12` and `rajat03` used the partial
+pipeline. A controlled `rajat03` run with
+`KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE=0`
+(`build/kls_native_adaptive_broad_auto_no_partial_rajat03_t4_r1_ref3_timeout120.jsonl`)
+confirmed the retirement path: after three refactors it reported
+`row_refactor_native_row_panel_auto_disabled=1`,
+`row_refactor_native_row_panel_auto_disable_count=1`, six native panels / 200
+rows from the first run, and zero compact-supernode or partial-pipeline reuse.

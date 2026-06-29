@@ -638,6 +638,7 @@ typedef struct kls_stats {
   int64_t fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps;
   int row_refactor_native_row_panel_enabled;
   int row_refactor_last_native_row_panel;
+  int row_refactor_native_row_panel_auto_disabled;
   int64_t row_refactor_native_row_panel_count;
   int64_t row_refactor_native_row_panel_rows;
   int64_t row_refactor_native_row_panel_entries;
@@ -646,6 +647,7 @@ typedef struct kls_stats {
   int64_t row_refactor_native_row_panel_blocked_entries;
   int64_t row_refactor_native_row_panel_fallback_count;
   int64_t row_refactor_native_row_panel_checked_reject_count;
+  int64_t row_refactor_native_row_panel_auto_disable_count;
   int64_t refactor_l_pattern_columns;
   int64_t refactor_l_pattern_entries;
   int64_t refactor_l_adjacent_run_count;
