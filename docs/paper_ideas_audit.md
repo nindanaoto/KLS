@@ -10571,3 +10571,30 @@ pursue. The missing CKTSO/SubtreeLU mechanism is a grouped Algorithm 5 executor
 that claims current workspaces, batches prefix advancement across those
 workspaces, and only then applies and publishes the shared producer-prefix
 update.
+
+The next implementation added the first shared-work scheduler slice for that
+descriptor. `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE=1` now builds
+the retained Algorithm 5 payoff groups as a self-contained request, allocates a
+bounded solver-owned queue, publishes current-column candidates when a
+producer-prefix trigger column is marked done, and lets at most half the worker
+threads claim queued columns on pop before dispatching them through the normal
+EGraph dependency-checked column executor. This deliberately does not require
+the older `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1` ragged-L
+numeric path; the queue uses the paper payoff descriptor as scheduling metadata.
+Correctness passed `cmake --build build -j4`,
+`ctest --test-dir build --output-on-failure`, `./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE=1 ./build/kls_smoke`.
+
+The bounded claim-on-pop queue is safe but not yet the missing CKTSO-scale win.
+Same-build 4-thread controls measured `0.0408858587s` refactor on
+`ASIC_100ks`, `0.0802955404s` on `ASIC_320ks`, and `0.000656136405s` on
+`rajat03`. The queue probes measured `0.077946977s`, `0.13615748s`, and
+`0.000625623402s` respectively, with `13`, `29`, and `4` queued claimed columns
+and matching residuals. A more aggressive claim-on-publish variant was also
+tried because claim-on-pop loses most candidates to the ordinary pipeline, but
+it hit the `40s`/`60s` timeouts on `ASIC_100ks`/`ASIC_320ks`; that variant was
+rejected. The result sharpens the remaining gap: the paper mechanism is not
+just earlier column ownership. KLS still needs the true multi-current numeric
+batch that advances many current workspaces for one retained producer-prefix
+group and publishes the shared update without converting those current columns
+back into ordinary scalar EGraph column tasks.
