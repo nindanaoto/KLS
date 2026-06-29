@@ -8309,3 +8309,33 @@ both runs had identical dense-fragmented coverage (`70` compact panels,
 `352` accepted batches, `246,898` batched dependency rows). The remaining gap
 is therefore still the native row/segment numeric representation and production
 blocked update, not descriptor allocation.
+
+The next broad-suite timeout fix targets the policy path around
+`HTC_336_9129`. The refreshed medium comparison had scored this row as a
+120-second timeout while CKTSO solved it in `8.08898s`; focused probes showed
+that explicit AMD/no-BTF/unscaled factorization completed cleanly, but auto
+policy could spend the whole cap in static-matching or METIS-promotion retry
+territory before settling. KLS now recognizes a narrow low-work direct-AMD
+class before those expensive numeric probes: auto ordering, AMD-selected,
+single no-BTF block, at least 200k rows, symbolic work below `2e8`, average
+stored degree at most `3.40`, and a 40-60% structural diagonal fraction. For
+that class, KLS skips pre-static row matching, the SPRAL Hungarian numeric
+trial, and numeric METIS promotion, letting the already-low-work AMD/no-BTF
+factor run directly.
+
+This is a failure-removal policy, not the missing row/supernode kernel. The
+targeted default-auto suite row now completes:
+`build/kls_lowwork_direct_amd_htc9129_suite_t4_r1_ref3_timeout120.jsonl`
+reports `HTC_336_9129` at `16.2184s` with AMD, no BTF, scale `-1`, no static
+matching, and a clean EGraph refactor path; the refreshed medium run
+`build/kls_lowwork_direct_amd_paper_medium_t4_r1_ref3_timeout120.jsonl`
+measured the same row at `7.64591s`, slightly faster than the saved CKTSO
+artifact for that matrix. The denser `HTC_336_4438` row stayed on its existing
+AMD/BTF/static-SPRAL shape and did not match the new sparse low-work guard.
+The smoke suite still passes. The full medium run improved the failure count
+from four rows to three (`mac_econ_fwd500`, `ss1`, and singular
+`bips07_1998` remain), but KLS is still not generally on par with CKTSO:
+with failures scored at 1000 seconds, the refreshed artifact measured
+`0.63138s` geomean versus CKTSO's saved `0.33559s`. The next gap is therefore
+still the remaining timeout rows and the broad slow repeated-refactor cases,
+not this now-removed HTC auto-policy failure.

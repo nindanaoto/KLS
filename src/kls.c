@@ -11716,6 +11716,29 @@ done:
   return accepted;
 }
 
+static int kls_auto_low_work_no_btf_direct_amd_is_preferable(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->options.ordering != KLS_ORDERING_AUTO ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->symbolic == NULL || solver->symbolic->do_btf ||
+      solver->symbolic->nblocks != 1u ||
+      solver->symbolic->maxblock != solver->n ||
+      solver->n < 200000u || solver->col_ptr == NULL ||
+      solver->row_idx == NULL || solver->nnz == 0u ||
+      solver->symbolic->est_flops <= 0.0 ||
+      solver->symbolic->est_flops > 2.0e8) {
+    return 0;
+  }
+
+  const double n = (double)solver->n;
+  const double nnz = (double)solver->nnz;
+  const UF_long diagonal =
+    count_pattern_diagonal(solver->n, solver->col_ptr, solver->row_idx);
+  return nnz <= 3.40 * n &&
+         10.0 * (double)diagonal >= 4.0 * n &&
+         10.0 * (double)diagonal <= 6.0 * n;
+}
+
 static int should_try_spral_hungarian_numeric_trial(
   const kls_solver *solver) {
   if (solver == NULL || !solver->options.static_pivoting ||
@@ -11724,6 +11747,9 @@ static int should_try_spral_hungarian_numeric_trial(
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->n < 20000u || solver->n > 750000u ||
       solver->nnz > 8000000u || solver->common.noffdiag < 16u) {
+    return 0;
+  }
+  if (kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
     return 0;
   }
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
@@ -12307,6 +12333,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       solver->n < 3000) {
     return;
   }
+  if (kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
+    return;
+  }
 #ifdef KLS_HAVE_METIS
   if (is_small_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
                                            solver->row_idx)) {
@@ -12794,6 +12823,9 @@ static int should_try_auto_metis(const kls_solver *solver) {
   if (solver->auto_metis_checked || solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->stats.selected_ordering == KLS_ORDERING_METIS ||
       solver->numeric == NULL) {
+    return 0;
+  }
+  if (kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
     return 0;
   }
 
