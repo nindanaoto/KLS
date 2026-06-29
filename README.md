@@ -1678,13 +1678,17 @@ KLS also reports dominant-BTF row-up-looking first-factor coverage through
 `kls_first_last_dominant_btf_pipeline_rows`, and
 `kls_first_last_dominant_btf_pipeline_has_separator`; setting
 `KLS_TRACE_KLS_FIRST_FACTOR=1` prints the same decision before a long factor
-run can time out. Same-session `pre2` probes show the default AMD run enters
-the 629,628-row dominant BTF block with no separator coverage, while forced
-METIS enters the same block with separator coverage but still exceeds the
-120s cap. The matching local CKTSO run finishes analysis, first factor, one
-factor, one refactor, and solve in about 21s wall time, so the remaining gap is
-not the timeout limit or BLAS thresholding; it is the missing CKTSO/SubtreeLU
-coarse row/supernode numeric executor inside that dominant block.
+run can time out. Setting `KLS_TRACE_ROW_PIPELINE=1` additionally prints
+row-first pipeline progress with committed rows, scalar dependency applications,
+published-U entries scanned by the scalar update loop, scalar supernode fallback
+rows, and local/shared row-entry reserve growth/copy volume. Same-session `pre2`
+probes show the default AMD run enters the 629,628-row dominant BTF block with
+no separator coverage, while forced METIS enters the same block with separator
+coverage but still exceeds the 120s cap. The matching local CKTSO run finishes
+analysis, first factor, one factor, one refactor, and solve in about 21s wall
+time, so the remaining gap is not the timeout limit or BLAS thresholding; it is
+the missing CKTSO/SubtreeLU coarse row/supernode numeric executor inside that
+dominant block.
 The METIS dominant-block path now avoids rebuilding the whole completed-prefix
 row-supernode map after large-prefix pivot events. Once the completed prefix is
 past the existing 32k-row cache rebuild cutoff, KLS invalidates the speculative
@@ -1733,6 +1737,18 @@ counts, but similarly made the target `pre2` probe miss the second trace. The
 remaining gap therefore needs a coarser numeric representation/executor rather
 than more opportunistic grouping over the current KLU-compatible row-entry
 storage.
+The row-pipeline trace now quantifies that conclusion. On `Freescale/transient`,
+the first KLS-first pipeline pass completed 178,823 rows with about 882,837
+scalar dependencies and 109M published-U entries scanned, while local row-entry
+growth copied only about 100k entries. On forced-METIS `pre2`, the first traced
+dominant-block pass reached a pivot tail after 274,430 committed rows with about
+15.8M scalar dependencies and 16.1B published-U entries scanned; local
+row-entry growth copied about 32k entries. The second traced large pass reached
+131,072 committed rows before the 120s timeout after another 5.66M scalar
+dependencies and 4.11B published-U entries. The allocator and row-entry growth
+are therefore not the main slow-case cost; the next fix should replace replayed
+scalar published-U streaming with the paper-style retained dense/supernodal
+numeric update representation.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
