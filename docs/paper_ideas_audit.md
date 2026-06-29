@@ -10474,3 +10474,15 @@ paper-aligned opportunity is not repeated work inside one current column. The
 missing executor must gather many current-column workspaces for one retained
 producer prefix, advance them once to the selected offset, and apply/publish the
 shared prefix update as a batch.
+
+KLS now retains the corresponding batch-substrate map explicitly. The
+Algorithm 5 payoff selector keeps a compact group pointer over payoff-positive
+producer panels, the producer-panel start for each group, and a run-to-group
+map for selected consumer-plan runs. The old ragged payoff executor now accepts
+only grouped runs, so single payoff-positive runs are no longer treated as
+executable batch work. `build/kls_alg5_groupmap_diag_gap10_t4_r1_ref3_timeout120.jsonl`
+reproduced the same `594` groups, `13,980` selected runs/current columns,
+`670,921` prefix rows, and modeled work `251.4M/132.9M` update/advance totals.
+This still is not the final numeric batch executor, but the scheduler and
+kernel no longer have to infer sibling current columns by rescanning the whole
+consumer plan.
