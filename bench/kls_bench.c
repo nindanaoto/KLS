@@ -1557,6 +1557,16 @@ int main(int argc, char **argv) {
            PRId64
            ",\"refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries\":%"
            PRId64
+           ",\"refactor_supernode_consumer_plan_deferred_columns\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_deferred_entries\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_deferred_unique_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_batch_deferred_columns\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_batch_deferred_entries\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_batch_deferred_unique_rows\":%"
+           PRId64
            ",\"row_refactor_group_count\":%" PRId64
            ",\"row_refactor_group_single_count\":%" PRId64
            ",\"row_refactor_group_batch_count\":%" PRId64
@@ -1693,6 +1703,12 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_strict_cached_panel_count,
            stats.refactor_supernode_consumer_plan_strict_cached_panel_rows,
            stats.refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries,
+           stats.refactor_supernode_consumer_plan_deferred_columns,
+           stats.refactor_supernode_consumer_plan_deferred_entries,
+           stats.refactor_supernode_consumer_plan_deferred_unique_rows,
+           stats.refactor_supernode_consumer_plan_batch_deferred_columns,
+           stats.refactor_supernode_consumer_plan_batch_deferred_entries,
+           stats.refactor_supernode_consumer_plan_batch_deferred_unique_rows,
            stats.row_refactor_group_count,
            stats.row_refactor_group_single_count,
            stats.row_refactor_group_batch_count,
@@ -2832,6 +2848,8 @@ int main(int argc, char **argv) {
            ", plan cached panels: %" PRId64 "/%" PRId64
            ", strict plan cached panels: %" PRId64 "/%" PRId64
            "/%" PRId64
+           ", plan deferred output: %" PRId64 "/%" PRId64 "/%" PRId64
+           ", batch deferred output: %" PRId64 "/%" PRId64 "/%" PRId64
            ", cached probe disabled: %d/%" PRId64 "\n",
            stats.refactor_supernode_candidate_count,
            stats.refactor_supernode_candidate_rows,
@@ -2882,6 +2900,12 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_strict_cached_panel_count,
            stats.refactor_supernode_consumer_plan_strict_cached_panel_rows,
            stats.refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries,
+           stats.refactor_supernode_consumer_plan_deferred_columns,
+           stats.refactor_supernode_consumer_plan_deferred_entries,
+           stats.refactor_supernode_consumer_plan_deferred_unique_rows,
+           stats.refactor_supernode_consumer_plan_batch_deferred_columns,
+           stats.refactor_supernode_consumer_plan_batch_deferred_entries,
+           stats.refactor_supernode_consumer_plan_batch_deferred_unique_rows,
            stats.refactor_supernode_cached_probe_disabled,
            stats.refactor_supernode_cached_probe_disable_count);
     printf("refactor supernode consumer plan: panels %" PRId64 "/%" PRId64

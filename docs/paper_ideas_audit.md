@@ -9383,3 +9383,46 @@ execution disabled on nine of ten matrices. Therefore the next implementation
 should not try to stretch the strict cached-panel object. It needs a ragged
 retained-plan producer panel or current-column grouped accumulator that can
 consume non-common trailing patterns directly.
+
+The next retained-plan diagnostic measures that grouped-accumulator direction
+directly. With
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_OUTPUT_STATS=1`, KLS now builds the
+retained consumer plan, scans each current column's planned producer runs, and
+counts output entries at or after the current pivot against the unique local
+rows those entries would touch. The counters are reported as
+`refactor_supernode_consumer_plan_deferred_*` for all current columns and
+`refactor_supernode_consumer_plan_batch_deferred_*` for the current-column
+batches that pass the existing ragged-supernode row gate. This is deliberately a
+diagnostic scan, not production execution.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_OUTPUT_STATS=1 ./build/kls_smoke`
+  passed.
+- A no-diagnostic same-binary top-ten CKTSO-gap baseline produced
+  `build/kls_default_after_outputdiag_gap10_t4_r1_ref3_timeout120.jsonl` with a
+  `4.63823s` geomean and no failed matrices.
+- The output-stats diagnostic produced
+  `build/kls_plan_output_defer_stats_gap10_t4_r1_ref3_timeout120.jsonl` with a
+  `6.99864s` geomean and no failed matrices. The slower time is instrumentation
+  cost from scanning retained-plan output structure.
+
+This rules out the small-BLAS explanation for the current default gap. The
+baseline run was built without CBLAS support and reported zero external CBLAS
+updates and zero compact-supernode GEMV activity. The diagnostic run likewise
+reported zero CBLAS updates. Across the top-ten focus, the retained plan still
+covered `6,285,128` run rows and `6,106,008` current-column batch rows, but the
+deferred output side exposed `875,343,104` raw entries collapsing to only
+`6,257,172` unique output rows. The batchable subset was almost the same:
+`873,846,433` raw entries collapsed to `5,748,636` unique rows. Per-matrix
+collapse ratios ranged from about `21.9x` on `rajat03` to about `197.5x` on
+`onetone1`, with the large ASIC and Rajat rows mostly above `100x`.
+
+The direct paper-aligned next step is therefore a current-column grouped output
+accumulator or ragged retained-plan producer-panel executor. It should consume
+all retained runs for one current column, accumulate into a sparse/dense touched
+row set once, and write each output row once before the pivot/store step. A
+BLAS-size guard remains correct policy for optional external CBLAS, but it is
+not the missing large mechanism on these slow cases.
