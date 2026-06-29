@@ -8976,3 +8976,22 @@ waiting. The default AMD forced-first path still timed out before a second
 trace. This narrows the next CKTSO/SubtreeLU gap further: after avoiding the
 large prefix supernode reset, KLS still serializes too much dependency-row
 numeric update work behind the pipeline mutex.
+
+The follow-up retained-panel path keeps completed dense/common-tail row-up
+panels alive after speculative row-supernode metadata is disabled, invalidates
+stale panels across dynamic column pivots, and lets later pipeline rows consume
+those panels before falling back to scalar row-entry streaming. This is a
+correct SubtreeLU-shaped bridge but not enough for the hard first-factor case.
+On forced-METIS `pre2`, a capped trace still reached the pivot tail at row
+274,430 with about 15.3B scalar U entries after applying about 260k
+panel-backed update groups over roughly 2.0M rows. The new scalar-stream split
+shows why this is not just a missing ready-supernode dependency run: about
+5.0B of those scalar entries update still-pending dependency rows, while about
+10.3B update the current row's output/trailing pattern. On
+`Freescale/transient`, the repeated pass is much smaller but shows the same
+split direction after retained panels: about 1.47M internal entries and 2.57M
+output/trailing entries. The next paper-level implementation should therefore
+target producer-to-current-row output streaming through a broader row-major
+numeric object, producer/output accumulator, or comparable coarse supernode
+executor; a dependency-only grouping change or another BLAS threshold would
+leave most of the measured `pre2` scalar stream intact.

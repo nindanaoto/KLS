@@ -49376,6 +49376,8 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long scalar_run_calls;
   UF_long scalar_run_rows;
   UF_long scalar_run_u_entries;
+  UF_long scalar_u_internal_entries;
+  UF_long scalar_u_output_entries;
   UF_long panel_update_groups;
   UF_long panel_update_rows;
   UF_long panel_cache_appends;
@@ -49411,6 +49413,10 @@ static void kls_row_first_pipeline_trace_add(
                           source->scalar_run_rows);
   kls_row_first_stats_add(&target->scalar_run_u_entries,
                           source->scalar_run_u_entries);
+  kls_row_first_stats_add(&target->scalar_u_internal_entries,
+                          source->scalar_u_internal_entries);
+  kls_row_first_stats_add(&target->scalar_u_output_entries,
+                          source->scalar_u_output_entries);
   kls_row_first_stats_add(&target->panel_update_groups,
                           source->panel_update_groups);
   kls_row_first_stats_add(&target->panel_update_rows,
@@ -51801,10 +51807,19 @@ static int kls_row_first_partial_apply_one_dep(
     kls_row_first_stats_add(&trace->scalar_dep_u_entries,
                             u_row_end[dep] - u_row_ptr[dep]);
   }
+  UF_long trace_internal_entries = 0u;
+  UF_long trace_output_entries = 0u;
   for (UF_long up = u_row_ptr[dep]; up < u_row_end[dep]; ++up) {
     const UF_long col = published_u_entries->col[up];
     if (col <= dep || col >= ctx->nk) {
       return 0;
+    }
+    if (trace != NULL) {
+      if (col < state->row) {
+        trace_internal_entries++;
+      } else {
+        trace_output_entries++;
+      }
     }
     if (mark[col] != state->generation) {
       mark[col] = state->generation;
@@ -51815,6 +51830,12 @@ static int kls_row_first_partial_apply_one_dep(
       x[col] = 0.0;
     }
     x[col] -= lij * published_u_entries->value[up];
+  }
+  if (trace != NULL) {
+    kls_row_first_stats_add(&trace->scalar_u_internal_entries,
+                            trace_internal_entries);
+    kls_row_first_stats_add(&trace->scalar_u_output_entries,
+                            trace_output_entries);
   }
   return 1;
 }
@@ -51853,6 +51874,8 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
   const unsigned int generation = state->generation;
   UF_long run_rows = 0;
   UF_long run_u_entries = 0;
+  UF_long trace_internal_entries = 0u;
+  UF_long trace_output_entries = 0u;
   if (!kls_row_first_entries_reserve_append(
         local_l_entries, dep_end - dep_begin + 1u)) {
     return 0;
@@ -51892,6 +51915,13 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
       if (col <= dep || col >= ctx->nk) {
         return 0;
       }
+      if (trace != NULL) {
+        if (col < state->row) {
+          trace_internal_entries++;
+        } else {
+          trace_output_entries++;
+        }
+      }
       if (mark[col] != generation) {
         mark[col] = generation;
         pattern[state->pattern_count++] = col;
@@ -51908,6 +51938,10 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
     kls_row_first_stats_add(&trace->scalar_run_calls, 1u);
     kls_row_first_stats_add(&trace->scalar_run_rows, run_rows);
     kls_row_first_stats_add(&trace->scalar_run_u_entries, run_u_entries);
+    kls_row_first_stats_add(&trace->scalar_u_internal_entries,
+                            trace_internal_entries);
+    kls_row_first_stats_add(&trace->scalar_u_output_entries,
+                            trace_output_entries);
   }
   if (run_rows_out != NULL) {
     *run_rows_out = run_rows;
@@ -52971,6 +53005,8 @@ static void kls_row_first_pipeline_trace_print(
           " scalar_l_entries=%" PRIu64
           " scalar_runs=%" PRIu64 " scalar_run_rows=%" PRIu64
           " scalar_run_u_entries=%" PRIu64
+          " scalar_u_internal=%" PRIu64
+          " scalar_u_output=%" PRIu64
           " panel_updates=%" PRIu64 " panel_update_rows=%" PRIu64
           " panel_appends=%" PRIu64 " panel_append_entries=%" PRIu64
           " local_l_growths=%" PRIu64 " local_l_copied=%" PRIu64
@@ -52986,6 +53022,8 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->scalar_run_calls,
           (uint64_t)trace->scalar_run_rows,
           (uint64_t)trace->scalar_run_u_entries,
+          (uint64_t)trace->scalar_u_internal_entries,
+          (uint64_t)trace->scalar_u_output_entries,
           (uint64_t)trace->panel_update_groups,
           (uint64_t)trace->panel_update_rows,
           (uint64_t)trace->panel_cache_appends,

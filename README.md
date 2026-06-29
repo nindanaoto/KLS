@@ -1765,6 +1765,14 @@ groups. The remaining large-case gap is therefore not small BLAS dispatch and
 not merely missing exact/common-tail panel retention; the slow rows need a
 broader row/supernode numeric representation that avoids streaming long
 published-U rows through the scalar fallback.
+The row-pipeline trace now splits scalar U-row scans into entries that update
+still-pending dependencies and entries that update the current row's output
+pattern. A capped forced-METIS `pre2` trace reached the same pivot tail with
+about 15.3B scalar U entries: about 5.0B internal dependency entries and about
+10.3B output/trailing entries. The next paper-aligned executor therefore needs
+to reduce producer-to-current-row output streaming as well as dependency-chain
+updates; a dependency-only ready-supernode extension or another BLAS threshold
+would leave most of the measured stream intact.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
