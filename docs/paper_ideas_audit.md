@@ -10714,3 +10714,27 @@ allocate current workspaces and slot-indexed accumulators from these retained
 offsets, batch prefix advancement across the group, then publish the accumulated
 dense-suffix and L-trailing updates without replaying each current column as a
 scalar EGraph task.
+
+The retained group descriptor now also owns the inverse map needed by that
+executor: `group_current_run_ptr` and `group_current_runs` list the selected
+Algorithm 5 payoff runs attached to each retained current slot. The scalar
+opt-in path validates that its selected run is present in the slot's retained
+run list before using the descriptor. This removes the last per-column
+consumer-plan lookup a group-triggered executor would otherwise need when it
+starts from a payoff group rather than from an individual current column. It
+also handles the conservative case where a retained current owns more than one
+selected run in the same group. Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE=1 ./build/kls_smoke`.
+The focused top-five CKTSO-gap probe
+`build/kls_alg5_current_runs_gap5_t4_r1_ref3_timeout120.jsonl` also completed
+with no failures and `1.8909105332569978s` geomean. The hard ASIC EGraph rows
+still retain the same large grouped surfaces: `ASIC_320ks` has `129` groups,
+`3,596` currents, `784,673` target slots, and `190,994` advance dependencies;
+`ASIC_320k` has `121`, `3,755`, `971,718`, and `194,219`; `ASIC_100ks` has
+`102`, `1,112`, `188,230`, and `32,849`. This is still descriptor substrate,
+not a BLAS or CPU-specific tuning change; the remaining paper gap is the
+numeric grouped executor that uses the retained current-run map, current
+workspace offsets, advance spans, and target slots together.
