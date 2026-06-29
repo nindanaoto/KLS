@@ -8404,3 +8404,30 @@ still measures KLS at `0.58294s` geomean versus CKTSO at `0.30764s`
 longer timeout coverage on the medium set; it is the broad repeated-factor and
 refactor numeric gap on rows such as `ACTIVSg2000`, `LeGresley_87936`,
 `trans4`, `rajat24`, `HTC_336_4438`, and the ASIC family.
+
+The next retained improvement targets a low-work no-pivot repeated-factor
+policy failure. In the projected medium comparison, `ACTIVSg2000`,
+`ACTIVSg10K`, and `ACTIVSg70K` all used the checked `kls_fast_refactor` factor
+path even though their numeric work was only about `2.0e6`, `4.4e6`, and
+`9.2e6` flops and there were no off-diagonal pivots. Focused default versus
+`--no-fast-factor` probes showed that the checked fast-factor scaffold was
+more expensive than rebuilding the KLU numeric object and keeping the EGraph
+refactor schedule for these shapes. The retained gate therefore skips
+fast-factor repair for two narrow structural cases: single-block/no-BTF,
+no-static, no-pivot matrices with `1e6-1e7` factor flops and at least 10k
+rows, and small dominant-BTF/no-pivot matrices with 128-512 BTF blocks,
+`1e6-3e6` factor flops, 3k-10k rows, and 90-97% largest-block coverage. Guard
+probes kept `powersim`, `OPF_10000`, `G2_circuit`, `rajat03`, `hcircuit`, and
+`memplus` outside the new skip or on their previous fast path.
+
+Focused artifacts on the retained source report `ACTIVSg2000` at `0.658s`,
+`ACTIVSg10K` at `1.581s`, and `ACTIVSg70K` at `1.146s`
+(`build/kls_lowwork_skip_fast_activsg2000_t4_r1_ref3.json`,
+`build/kls_lowwork_skip_fast_activsg10k_t4_r1_ref3.json`, and
+`build/kls_lowwork_skip_fast_activsg70k_t4_r1_ref3.json`). Replacing those
+three rows in the current medium projection gives
+`build/kls_lowwork_skip_fast_activs_medium_projection_t4_r1_ref3_timeout120.jsonl`,
+with KLS geomean `0.56554s` versus CKTSO `0.30764s` (`1.838x`). This is a
+real movement from the previous `1.895x` projection, but it also confirms the
+dominant remaining loss is still the broader CKTSO numeric kernel gap, not
+just low-work fast-factor dispatch.

@@ -27542,6 +27542,27 @@ static int kls_dominant_btf_fast_factor_repair_is_risky(
   }
   const double coverage =
     (double)solver->symbolic->maxblock / (double)solver->n;
+  /* On low-work no-pivot grids, the checked fast-factor scaffolding can cost
+     more than rebuilding the KLU numeric object and keeping the EGraph refactor
+     schedule. Keep this bounded away from larger single-block cases. */
+  if (solver->row_perm == NULL && !solver->symbolic->do_btf &&
+      solver->symbolic->nblocks == 1u && solver->symbolic->maxblock == solver->n &&
+      solver->common.noffdiag == 0u &&
+      solver->common.flops >= 1.0e6 && solver->common.flops <= 1.0e7 &&
+      solver->n >= 10000u) {
+    return 1;
+  }
+  if (solver->row_perm == NULL && solver->symbolic->do_btf &&
+      solver->symbolic->nblocks >= 128u && solver->symbolic->nblocks <= 512u &&
+      solver->common.noffdiag == 0u &&
+      solver->common.flops >= 1.0e6 && solver->common.flops <= 3.0e6 &&
+      solver->n >= 3000u && solver->n <= 10000u &&
+      100.0 * (double)solver->symbolic->maxblock >=
+        90.0 * (double)solver->n &&
+      100.0 * (double)solver->symbolic->maxblock <=
+        97.0 * (double)solver->n) {
+    return 1;
+  }
   if (solver->row_perm != NULL &&
       solver->symbolic->nblocks >= 1024u &&
       solver->symbolic->maxblock >= 30000u &&
