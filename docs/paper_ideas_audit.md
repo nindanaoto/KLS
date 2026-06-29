@@ -10119,3 +10119,45 @@ once columns are safely owned, KLS must execute a true grouped producer-panel
 kernel over multiple current workspaces. A BLAS size guard is still orthogonal:
 these default and failed probe runs do not exercise external CBLAS update
 counters, so small-case BLAS overhead is not the main cause of the ASIC loss.
+
+A first BTF-unscaled gathered-workspace executor prototype was implemented and
+rejected before commit. The prototype added
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_L_CLAIM_EXEC=1`, claimed
+future columns from one retained exact group, scattered each claimed current
+column into a private block-sized workspace, advanced each workspace to the
+retained producer offset through scalar dependencies, applied the shared
+retained exact-L panel, then finished the scalar suffix and marked the claimed
+columns done. It passed `cmake --build build -j4`,
+`ctest --test-dir build --output-on-failure`, `git diff --check`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_L_CLAIM_EXEC=1
+./build/kls_smoke`, but the focused ASIC measurements were strongly negative.
+
+Artifacts:
+
+- Unguarded active grouped-claim run
+  `build/kls_group_l_claim_exec_active_gap3_t4_r1_ref3_timeout120.jsonl`:
+  `ASIC_320ks` and `ASIC_320k` both timed out at 120s; only `gemat12`
+  completed (`0.0878407s`).
+- With a 128-dependency prefix-advance guard,
+  `build/kls_group_l_claim_exec_guard128_gap3_t4_r1_ref3_timeout120.jsonl`:
+  the same two ASIC cases timed out at 120s; `gemat12` completed
+  (`0.0729079s`).
+- With a hard cap of one claimed column per refactor,
+  `build/kls_group_l_claim_exec_cap1_gap3_t4_r1_ref3_timeout120.jsonl`
+  completed but regressed badly: `ASIC_320ks=17.5253s`,
+  `ASIC_320k=21.3527s`, `gemat12=0.0660925s`, geomean `2.91356s`.
+  The two ASIC rows each claimed only one column and applied only one retained
+  group-L update (`9` rows / `467` entries on `ASIC_320ks`, `7` rows / `329`
+  entries on `ASIC_320k`), yet refactor time rose from the same-source default
+  `0.081893s` to `0.144222s` and from `0.097155s` to `0.180003s`.
+
+This rejects the naive gathered-workspace implementation, not the paper
+algorithm itself. The expensive part is advancing and finishing claimed current
+columns as isolated scalar columns with full block-sized workspace traffic.
+Even a single claimed column can be an expensive current column, and the small
+retained exact-L update it reaches does not amortize that cost. A viable
+CKTSO-style executor must make the advance stage itself a batched/coarse task:
+select current columns by estimated advance cost, advance multiple workspaces
+without full block memset per column, apply substantial retained panels, and
+merge/publish results without making other workers wait on one stolen heavy
+column. The failed prototype was reverted from `src/kls.c`.
