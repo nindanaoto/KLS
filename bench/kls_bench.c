@@ -1789,6 +1789,10 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_consumer_plan_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_plan_run_count\":%" PRId64
            ",\"refactor_supernode_consumer_plan_run_rows\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_positioned_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_positioned_run_rows\":%"
+           PRId64
            ",\"refactor_supernode_consumer_plan_max_panel_runs\":%" PRId64
            ",\"refactor_supernode_consumer_plan_max_panel_rows\":%" PRId64
            ",\"refactor_supernode_consumer_plan_l_entries\":%.9g"
@@ -1863,6 +1867,8 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_reused_panel_count,
            stats.refactor_supernode_consumer_plan_run_count,
            stats.refactor_supernode_consumer_plan_run_rows,
+           stats.refactor_supernode_consumer_plan_positioned_run_count,
+           stats.refactor_supernode_consumer_plan_positioned_run_rows,
            stats.refactor_supernode_consumer_plan_max_panel_runs,
            stats.refactor_supernode_consumer_plan_max_panel_rows,
            stats.refactor_supernode_consumer_plan_l_entries,
@@ -3005,6 +3011,7 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_cached_probe_disable_count);
     printf("refactor supernode consumer plan: panels %" PRId64 "/%" PRId64
            ", runs %" PRId64 ", rows %" PRId64
+           ", positioned %" PRId64 "/%" PRId64
            ", max panel %" PRId64 "/%" PRId64
            ", entries %.6g/%.6g, bytes %" PRId64
            ", small %" PRId64 "/%" PRId64
@@ -3029,6 +3036,8 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_reused_panel_count,
            stats.refactor_supernode_consumer_plan_run_count,
            stats.refactor_supernode_consumer_plan_run_rows,
+           stats.refactor_supernode_consumer_plan_positioned_run_count,
+           stats.refactor_supernode_consumer_plan_positioned_run_rows,
            stats.refactor_supernode_consumer_plan_max_panel_runs,
            stats.refactor_supernode_consumer_plan_max_panel_rows,
            stats.refactor_supernode_consumer_plan_l_entries,

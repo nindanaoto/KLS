@@ -9834,3 +9834,31 @@ numeric producer that actually claims retained-plan current columns, advances
 their workspaces through earlier dependencies, applies the shared retained
 producer panel, publishes the finished columns, and avoids the old scalar path
 for those claimed columns.
+
+KLS now also retains the executable U-stream location for every retained
+consumer-plan run. Each run stores the producer dependency position and block
+start in the current column's numeric stream when the retained plan is built,
+so the future grouped producer does not need to rediscover those offsets while
+holding a batch of gathered current-column workspaces. The new
+`refactor_supernode_consumer_plan_positioned_*` counters report how much of the
+retained plan has a reusable location.
+
+Validation:
+
+- `cmake --build build -j4` completed with only the pre-existing long JSON
+  format-string warning in `bench/kls_bench.c`.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1 ./build/kls_smoke` passed.
+- The top-ten retained-plan focus
+  `build/kls_plan_positions_gap10_t4_r1_ref3_timeout120.jsonl` completed with
+  no failed matrices and measured `2.28316s` geomean.
+
+The retained-position coverage is complete on the focus set: `750,247` planned
+runs and all `6,285,128` planned rows also reported positioned locations. The
+same run used the normal non-CBLAS build (`build_has_cblas=false`) and reported
+zero CBLAS update runs/rows. Therefore the user's proposed large-case BLAS
+guard is already satisfied for the active code path and would be a no-op on
+this benchmark. The remaining paper gap is still the grouped numeric producer:
+use these retained positions to advance claimed current-column workspaces once,
+apply the shared retained producer panel across the batch, and skip the old
+per-column scalar replay for those claimed columns.
