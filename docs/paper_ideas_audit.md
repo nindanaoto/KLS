@@ -9001,12 +9001,13 @@ to the current top CKTSO-gap medium rows. `build-cblas` was rebuilt and run
 with `OPENBLAS_NUM_THREADS=1` on the first five
 `bench/suitesparse_cktso_gap_manifest.txt` entries. With
 `KLS_ENABLE_CBLAS_SUPERNODE=0`,
-`build-cblas/kls_cblas_small_guard_off_gap5_t4_r1_ref3_timeout120.jsonl`
-measured a `1.61415s` SPICE-cycle geomean; with
+`build-cblas/kls_cblas_guard_current_off_gap5_t4_r1_ref3_timeout120.jsonl`
+measured a `1.76679s` SPICE-cycle geomean; with
 `KLS_ENABLE_CBLAS_SUPERNODE=1`,
-`build-cblas/kls_cblas_small_guard_on_gap5_t4_r1_ref3_timeout120.jsonl`
-measured `1.60915s`. Both artifacts reported `build_has_cblas=true`, but all
+`build-cblas/kls_cblas_guard_current_on_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `1.61226s`. Both artifacts reported `build_has_cblas=true`, but all
 five rows had zero `refactor_last_supernode_cblas_update_*` and zero
-`refactor_supernode_cblas_update_*` counters. The current source therefore
-already implements the proposed "BLAS only for large cases" policy for these
-paths; tightening the threshold again would be a no-op on the focused losses.
+`refactor_supernode_cblas_update_*` counters. The timing variation is therefore
+not caused by executing small BLAS kernels. The current source already
+implements the proposed "BLAS only for large cases" policy for these paths;
+tightening the threshold again would be a no-op on the focused losses.
