@@ -10641,3 +10641,25 @@ groups, `1,112` current workspaces, `20,859` prefix workspace rows,
 next paper gap more concrete: the missing executor must retain and publish tens
 of millions of accumulator updates for grouped current workspaces, not just
 claim earlier scalar columns or adjust BLAS thresholds.
+
+The retained target surface is now addressable rather than only counted. The
+Algorithm 5 payoff descriptor stores a target offset for each selected run,
+each group's retained producer-pattern width, and each group's target-entry
+span, and the opt-in mapped path validates that a selected run's target slice
+fits inside its group span before using the descriptor. This still leaves the
+numeric executor unchanged, but it removes another rediscovery step from the
+future grouped multi-current accumulator. Correctness passed
+`cmake --build build -j4`, `ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`.
+The top-five descriptor probe
+`build/kls_alg5_addressable_target_gap5_t4_r1_ref3_timeout120.jsonl` completed
+with no failures and `1.7738882990342122s` geomean. It reports retained
+pattern-width sums and target entries on the ASIC EGraph rows:
+`ASIC_320ks` has pattern-width sum/max `2,425/264` and `46,839,997` target
+entries, `ASIC_320k` has `2,604/535` and `48,674,072`, and `ASIC_100ks` has
+`1,535/157` and `4,668,124`. `gemat12` and `rajat03` used the mapped path and
+therefore correctly report zero Algorithm 5 payoff groups. The next CKTSO-paper
+gap remains the actual grouped numeric kernel: allocate current workspaces and
+target accumulators from these retained offsets, batch prefix advancement, and
+publish the accumulated dense-suffix/L-trailing updates.
