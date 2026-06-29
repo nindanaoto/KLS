@@ -70,6 +70,19 @@ in one group, and `157,067` compact workspace rows; `ASIC_320k` has `121`
 groups, `3,755` workspaces, max `233` currents, and `146,027` workspace rows.
 This confirms the paper-level target is a real multi-current workspace
 executor, not a BLAS size guard or another single-current ragged replay.
+The next trigger diagnostic now wires producer-prefix completion to the retained
+Algorithm-5 payoff descriptor with
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1`. It is deliberately
+surface-guarded: a naive unguarded run serialized large Sandia future-current
+groups behind one producer worker and timed out, which directly confirms that
+the paper gap is the shared multi-current work queue/batch executor. With the
+guard, large Sandia rows keep plan counters but record zero claims, while
+`rajat03` records 12 payoff groups, 76 current workspaces, and 4 claimed
+columns. The guarded top-five CKTSO-gap artifact
+`build/kls_alg5_claims_plan_guard_gap5_t4_r1_ref3_timeout120.jsonl` completed
+with no failures and a `1.397s` geomean versus `1.430s` for the same-session
+default artifact, but this should be read as bounded trigger validation rather
+than a general CKTSO gap closer.
 
 KLS has **not** implemented every paper idea that is still worth trying. It has
 implemented the ideas that can be layered around the current KLU-derived

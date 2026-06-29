@@ -928,6 +928,18 @@ absent, so the next paper-aligned executor has to batch prefix advancement
 before the shared producer update rather than relying on a first-dependency
 shortcut. These counters do not enable the old per-current scalar replay by
 default.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
+trigger-timing diagnostic. It still retains the payoff descriptor for all
+selected groups, but it only enables the mapped numeric payoff pattern and
+claim scheduling when the total current-column surface is small enough for the
+current serial follow-on executor. Large retained groups are deliberately left
+as plan-only diagnostics because the CKTSO/SubtreeLU paper shape requires a
+shared multi-current work queue, not one producer thread eagerly replaying all
+future current columns. When active, the existing
+`refactor_supernode_consumer_plan_claimed_columns`,
+`refactor_supernode_consumer_plan_claim_skip_count`, and
+`refactor_supernode_consumer_plan_claim_wait_count` counters show how many
+columns were claimed and later skipped by the ordinary pipeline.
 Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN=1` to also retain the exact
 row-major U-supernode structural object from the same schedule pass. Benchmark
 JSON reports `refactor_u_supernode_pattern_count`,
@@ -1851,6 +1863,16 @@ likewise report zero CBLAS update counters with the runtime BLAS gate both off
 and on, and the source already requires 512/2048-scale row or panel dimensions
 plus multi-million estimated work. Small-case BLAS dispatch is therefore not
 the active slow-row blocker.
+The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
+naive claims run serialized large Sandia payoff groups and timed out; the
+retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while
+allowing small surfaces such as `rajat03` to exercise the trigger path. The
+current top-five CKTSO-gap guarded rerun completed with no failures:
+`build/kls_alg5_claims_plan_guard_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.397s` geomean versus `1.430s` for the same-session default artifact, with
+only `rajat03` recording claimed columns. Treat this as evidence that producer
+prefix trigger timing is wired and bounded, not as evidence that the missing
+paper-level multi-current executor has been implemented.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
