@@ -2177,7 +2177,7 @@ int main(int argc, char **argv) {
            ",\"parallel_task_flow_speedup\":%.9g"
            ",\"parallel_task_flow_recommends_parallel\":%d"
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
-           ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu}\n",
+           ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu",
            stats.row_refactor_compact_supernode_batch_pattern_count,
            stats.row_refactor_compact_supernode_batch_pattern_rows,
            stats.row_refactor_compact_supernode_batch_candidate_count,
@@ -2243,6 +2243,39 @@ int main(int argc, char **argv) {
            stats.parallel_task_flow_recommends_parallel,
            stats.rcond, stats.rgrowth,
            stats.memory_bytes, stats.memory_peak_bytes);
+    printf(",\"refactor_last_supernode_cached_probe_shape_rejects\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_shape_reject_rows\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_stream_rejects\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_stream_reject_rows\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_work_rejects\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_work_reject_rows\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_workspace_rejects\":%" PRId64
+           ",\"refactor_last_supernode_cached_probe_workspace_reject_rows\":%" PRId64
+           ",\"refactor_supernode_cached_probe_shape_rejects\":%" PRId64
+           ",\"refactor_supernode_cached_probe_shape_reject_rows\":%" PRId64
+           ",\"refactor_supernode_cached_probe_stream_rejects\":%" PRId64
+           ",\"refactor_supernode_cached_probe_stream_reject_rows\":%" PRId64
+           ",\"refactor_supernode_cached_probe_work_rejects\":%" PRId64
+           ",\"refactor_supernode_cached_probe_work_reject_rows\":%" PRId64
+           ",\"refactor_supernode_cached_probe_workspace_rejects\":%" PRId64
+           ",\"refactor_supernode_cached_probe_workspace_reject_rows\":%" PRId64
+           "}\n",
+           stats.refactor_last_supernode_cached_probe_shape_rejects,
+           stats.refactor_last_supernode_cached_probe_shape_reject_rows,
+           stats.refactor_last_supernode_cached_probe_stream_rejects,
+           stats.refactor_last_supernode_cached_probe_stream_reject_rows,
+           stats.refactor_last_supernode_cached_probe_work_rejects,
+           stats.refactor_last_supernode_cached_probe_work_reject_rows,
+           stats.refactor_last_supernode_cached_probe_workspace_rejects,
+           stats.refactor_last_supernode_cached_probe_workspace_reject_rows,
+           stats.refactor_supernode_cached_probe_shape_rejects,
+           stats.refactor_supernode_cached_probe_shape_reject_rows,
+           stats.refactor_supernode_cached_probe_stream_rejects,
+           stats.refactor_supernode_cached_probe_stream_reject_rows,
+           stats.refactor_supernode_cached_probe_work_rejects,
+           stats.refactor_supernode_cached_probe_work_reject_rows,
+           stats.refactor_supernode_cached_probe_workspace_rejects,
+           stats.refactor_supernode_cached_probe_workspace_reject_rows);
   } else {
     printf("matrix: %s\n", path);
     printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
@@ -2768,6 +2801,24 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_apply_entries,
            stats.refactor_supernode_consumer_plan_exec_disabled,
            stats.refactor_supernode_consumer_plan_exec_disable_count);
+    printf("refactor cached probe rejects: shape %" PRId64 "/%" PRId64
+           ", stream %" PRId64 "/%" PRId64
+           ", work %" PRId64 "/%" PRId64
+           ", workspace %" PRId64 "/%" PRId64
+           ", cumulative %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+           "\n",
+           stats.refactor_last_supernode_cached_probe_shape_rejects,
+           stats.refactor_last_supernode_cached_probe_shape_reject_rows,
+           stats.refactor_last_supernode_cached_probe_stream_rejects,
+           stats.refactor_last_supernode_cached_probe_stream_reject_rows,
+           stats.refactor_last_supernode_cached_probe_work_rejects,
+           stats.refactor_last_supernode_cached_probe_work_reject_rows,
+           stats.refactor_last_supernode_cached_probe_workspace_rejects,
+           stats.refactor_last_supernode_cached_probe_workspace_reject_rows,
+           stats.refactor_supernode_cached_probe_shape_rejects,
+           stats.refactor_supernode_cached_probe_stream_rejects,
+           stats.refactor_supernode_cached_probe_work_rejects,
+           stats.refactor_supernode_cached_probe_workspace_rejects);
     printf("refactor supernode update disabled: %d, disable count %" PRId64
            "\n",
            stats.refactor_supernode_update_disabled,

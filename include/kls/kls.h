@@ -728,6 +728,22 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_apply_entries;
   int refactor_supernode_consumer_plan_exec_disabled;
   int64_t refactor_supernode_consumer_plan_exec_disable_count;
+  int64_t refactor_last_supernode_cached_probe_shape_rejects;
+  int64_t refactor_last_supernode_cached_probe_shape_reject_rows;
+  int64_t refactor_last_supernode_cached_probe_stream_rejects;
+  int64_t refactor_last_supernode_cached_probe_stream_reject_rows;
+  int64_t refactor_last_supernode_cached_probe_work_rejects;
+  int64_t refactor_last_supernode_cached_probe_work_reject_rows;
+  int64_t refactor_last_supernode_cached_probe_workspace_rejects;
+  int64_t refactor_last_supernode_cached_probe_workspace_reject_rows;
+  int64_t refactor_supernode_cached_probe_shape_rejects;
+  int64_t refactor_supernode_cached_probe_shape_reject_rows;
+  int64_t refactor_supernode_cached_probe_stream_rejects;
+  int64_t refactor_supernode_cached_probe_stream_reject_rows;
+  int64_t refactor_supernode_cached_probe_work_rejects;
+  int64_t refactor_supernode_cached_probe_work_reject_rows;
+  int64_t refactor_supernode_cached_probe_workspace_rejects;
+  int64_t refactor_supernode_cached_probe_workspace_reject_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

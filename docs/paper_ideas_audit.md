@@ -8442,3 +8442,31 @@ with KLS geomean `0.56554s` versus CKTSO `0.30764s` (`1.838x`). This is a
 real movement from the previous `1.895x` projection, but it also confirms the
 dominant remaining loss is still the broader CKTSO numeric kernel gap, not
 just low-work fast-factor dispatch.
+
+The BLAS-small-case hypothesis was checked against the current build before
+changing policy: this build reports `build_has_cblas=false`, and the previous
+focused rows reported zero CBLAS update calls. The retained change is
+therefore diagnostic rather than another executor toggle. Public stats and
+`kls_bench --json` now classify retained cached-supernode probe misses into
+shape/materialization, sparse-stream contiguity, work gate, and workspace
+pressure. This directly tests the SubtreeLU/CKTSO gap around persistent
+supernode numeric panels and producer/consumer reuse without making a
+case-specific timing change.
+
+Focused runs with
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC=1`, 4 threads, one factor
+repeat, and three refactor repeats were saved as
+`build/kls_retained_plan_diag_asic100ks_t4_r1_ref3.json` and
+`build/kls_retained_plan_diag_onetone2_t4_r1_ref3.json`. On `ASIC_100ks`,
+the cached probe attempted 5468 runs, hit a panel every time, found 2369
+contiguous streams, and applied only 267 runs / 39436 rows. The misses were
+2750 shape/materialization rejects, 349 stream rejects covering 61106 rows,
+2102 work-gate rejects covering 4666 rows, and zero workspace rejects. On
+`onetone2`, the probe attempted 9309 runs and applied 235 runs / 26108 rows;
+the misses were 1241 shape rejects, 6837 stream rejects covering 939932 rows,
+996 work-gate rejects covering 3052 rows, and zero workspace rejects. The
+large remaining gap is therefore not small BLAS dispatch or workspace
+allocation. It is the paper-level missing piece: make retained numeric panels
+usable for non-contiguous consumer streams and for the currently
+shape-rejected producer/consumer cases, then revisit the work gate once that
+coverage is materially higher.
