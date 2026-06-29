@@ -9897,3 +9897,42 @@ run is still `2.2648x` slower than the saved CKTSO top-ten subset
 (`2.12339s` versus `0.937565s` geomean), and all runs above reported zero CBLAS
 updates. The next required paper-level step is still broader grouped numeric
 execution over retained producer panels, not more retained-run lookup tuning.
+
+KLS now has an opt-in retained exact-shape producer L-cache behind
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_CACHE=1`. This is the first
+direct storage step for the paper-aligned grouped producer-panel executor:
+instead of using the strict common-trailing cached-panel predicate, it validates
+each retained exact-shape group as a dense internal L subpanel plus ragged
+per-row trailing rows. The cache records structural coverage, dense slots,
+trailing row slots, covered retained runs/run rows, and a conservative storage
+cap result. It does not yet publish values or execute the grouped update, so
+timing with the gate enabled measures staging overhead rather than the final
+algorithm.
+
+Validation:
+
+- `cmake --build build -j4` completed with only the existing long JSON
+  format-string warning in `bench/kls_bench.c`.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_CACHE=1 ./build/kls_smoke`
+  passed.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1
+  KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_CACHE=1 ./build/kls_smoke`
+  passed.
+- The top-ten opt-in cache run
+  `build/kls_group_l_cache_gap10_t4_r1_ref3_timeout120.jsonl` completed with
+  no failed matrices and measured `2.32137s` geomean.
+- The same-source default control
+  `build/kls_group_l_cache_default_gap10_t4_r1_ref3_timeout120.jsonl`
+  completed with no failed matrices and measured `2.17693s` geomean.
+
+The new cache validates `38,782` of `39,077` retained exact-shape groups,
+covering `704,933` of `713,396` grouped runs and `5,314,536` of `5,394,956`
+grouped run rows. The structural object needs `112,662` unique group rows,
+`1,523,436` dense slots, `6,341,846` ragged trailing slots, and
+`115,230,013` bytes on the focus set; no matrix hit the storage cap. The
+default control kept the new cache disabled (`group_l_built=0`) and again used
+the normal non-CBLAS build with zero CBLAS calls. This strengthens the current
+gap diagnosis: a high-coverage retained producer-panel object is feasible, but
+KLS still needs the value-publish and grouped executor that consumes these
+panels instead of replaying the scalar current-column path.

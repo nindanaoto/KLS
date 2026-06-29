@@ -689,6 +689,15 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_strict_cached_panel_count;
   int64_t refactor_supernode_consumer_plan_strict_cached_panel_rows;
   int64_t refactor_supernode_consumer_plan_strict_cached_panel_trailing_entries;
+  int refactor_supernode_consumer_plan_group_l_built;
+  int refactor_supernode_consumer_plan_group_l_storage_limited;
+  int64_t refactor_supernode_consumer_plan_group_l_panel_count;
+  int64_t refactor_supernode_consumer_plan_group_l_run_count;
+  int64_t refactor_supernode_consumer_plan_group_l_rows;
+  int64_t refactor_supernode_consumer_plan_group_l_run_rows;
+  int64_t refactor_supernode_consumer_plan_group_l_dense_entries;
+  int64_t refactor_supernode_consumer_plan_group_l_trailing_entries;
+  int64_t refactor_supernode_consumer_plan_group_l_bytes;
   int64_t refactor_supernode_consumer_plan_deferred_columns;
   int64_t refactor_supernode_consumer_plan_deferred_entries;
   int64_t refactor_supernode_consumer_plan_deferred_unique_rows;
