@@ -52997,20 +52997,44 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
         UF_long selected_col = KLS_KLU_EMPTY;
         int selected_separator_exact = 0;
         int selected_separator_extent = 0;
-        if (!kls_row_first_partial_apply_ready(
+        int dependencies_ok = 1;
+        if ((shared->supernode_start == NULL ||
+             shared->supernode_end == NULL) &&
+            shared->active_rank == NULL) {
+          /*
+           * This row is now the commit cursor.  Later rows cannot append to the
+           * published U storage until this row finishes, so the scalar drain can
+           * run without holding the pipeline mutex.
+           */
+          pthread_mutex_unlock(&shared->lock);
+          dependencies_ok =
+            kls_row_first_partial_apply_ready(
               shared->ctx, &worker->workspace, &worker->l_entries,
               shared->u_entries, shared->udiag_values,
-              shared->workspace->u_row_ptr,
-              shared->workspace->u_row_end,
+              shared->workspace->u_row_ptr, shared->workspace->u_row_end,
               shared->supernode_start, shared->supernode_end,
-              shared->row_done, shared->active_rank, shared->ctx->nk,
-              &state,
+              shared->row_done, shared->active_rank, shared->ctx->nk, &state,
               &worker->pipeline_supernode_update_groups,
               &worker->pipeline_supernode_update_rows,
               &worker->pipeline_supernode_panel_update_groups,
               &worker->pipeline_supernode_panel_update_rows,
-              shared->stats, &blocked) ||
-            blocked) {
+              shared->stats, &blocked);
+          pthread_mutex_lock(&shared->lock);
+        } else {
+          dependencies_ok =
+            kls_row_first_partial_apply_ready(
+              shared->ctx, &worker->workspace, &worker->l_entries,
+              shared->u_entries, shared->udiag_values,
+              shared->workspace->u_row_ptr, shared->workspace->u_row_end,
+              shared->supernode_start, shared->supernode_end,
+              shared->row_done, shared->active_rank, shared->ctx->nk, &state,
+              &worker->pipeline_supernode_update_groups,
+              &worker->pipeline_supernode_update_rows,
+              &worker->pipeline_supernode_panel_update_groups,
+              &worker->pipeline_supernode_panel_update_rows,
+              shared->stats, &blocked);
+        }
+        if (!dependencies_ok || shared->failed || blocked) {
           kls_row_first_pipeline_mark_failed(
             shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
         } else if (!kls_row_first_partial_finish(
@@ -53059,33 +53083,39 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               if (shared->active_rank != NULL) {
                 shared->row_done[row] = 1u;
                 if (pivoted) {
-                  kls_row_first_supernodes_reset(
-                    shared->u_entries, shared->workspace->u_row_ptr,
-                    shared->workspace->u_row_end, shared->row_done,
-                    shared->ctx->nk, shared->ctx->nk,
-                    shared->supernode_start, shared->supernode_end);
-                  if (shared->stats != NULL) {
-                    kls_row_first_stats_add(
-                      &shared->stats->active_rank_pivot_resets, 1u);
-                    kls_row_first_stats_add(
-                      &shared->stats->active_rank_pivot_reset_rows,
-                      shared->ctx->nk);
-                  }
-                  if (shared->private_supernode_panel_cache != NULL) {
-                    (void)kls_row_first_supernode_panel_cache_build(
-                      shared->private_supernode_panel_cache,
+                  if (shared->ctx->nk >=
+                      KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS) {
+                    kls_row_first_pipeline_disable_prefix_supernodes(shared);
+                  } else {
+                    kls_row_first_supernodes_reset(
                       shared->u_entries, shared->workspace->u_row_ptr,
-                      shared->workspace->u_row_end, shared->udiag_values,
-                      shared->row_done, shared->supernode_start,
-                      shared->supernode_end, shared->ctx->nk,
-                      shared->ctx->nk, shared->stats);
+                      shared->workspace->u_row_end, shared->row_done,
+                      shared->ctx->nk, shared->ctx->nk,
+                      shared->supernode_start, shared->supernode_end);
                     if (shared->stats != NULL) {
                       kls_row_first_stats_add(
-                        &shared->stats->active_rank_pivot_panel_rebuilds,
-                        1u);
+                        &shared->stats->active_rank_pivot_resets, 1u);
                       kls_row_first_stats_add(
-                        &shared->stats->active_rank_pivot_panel_rebuild_rows,
+                        &shared->stats->active_rank_pivot_reset_rows,
                         shared->ctx->nk);
+                    }
+                    if (shared->private_supernode_panel_cache != NULL) {
+                      (void)kls_row_first_supernode_panel_cache_build(
+                        shared->private_supernode_panel_cache,
+                        shared->u_entries, shared->workspace->u_row_ptr,
+                        shared->workspace->u_row_end, shared->udiag_values,
+                        shared->row_done, shared->supernode_start,
+                        shared->supernode_end, shared->ctx->nk,
+                        shared->ctx->nk, shared->stats);
+                      if (shared->stats != NULL) {
+                        kls_row_first_stats_add(
+                          &shared->stats->active_rank_pivot_panel_rebuilds,
+                          1u);
+                        kls_row_first_stats_add(
+                          &shared->stats
+                             ->active_rank_pivot_panel_rebuild_rows,
+                          shared->ctx->nk);
+                      }
                     }
                   }
                 } else {

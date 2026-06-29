@@ -1701,6 +1701,16 @@ second trace, and a post-fix interrupt sample again lands in scalar
 `kls_row_first_partial_apply_one_dep` with other pipeline workers waiting. This
 run was from a non-CBLAS build, so small BLAS call overhead is not the active
 blocker on this path.
+The row-first pipeline now also drains the final scalar dependency set for the
+commit-cursor row without holding the pipeline mutex when supernode and
+active-rank accelerators are already disabled; no later row can append to the
+published U storage until that row commits. Large active-rank pivot events use
+the same 32k-row cutoff as prefix pivot events and invalidate speculative
+row-supernode state instead of rebuilding panel caches over the whole block. A
+retained-code `pre2` METIS forced-first 120s probe still times out after the
+second dominant-BTF trace, and the current interrupt sample maps to the scalar
+published-U update loop inside `kls_row_first_partial_apply_one_dep`, with the
+other pipeline workers blocked on the pipeline condition/mutex.
 It is not yet a generally CKTSO-beating solver across broad circuit corpora.
 The clear remaining CKTSO-paper gap is not just another ordering package: KLS
 no longer only depends on the KLU column-oriented serial kernel for large first
