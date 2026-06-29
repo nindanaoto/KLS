@@ -930,6 +930,9 @@ typedef struct kls_stats {
   int64_t refactor_supernode_algorithm5_payoff_group_max_currents;
   int64_t refactor_supernode_algorithm5_payoff_group_workspace_rows;
   int64_t refactor_supernode_algorithm5_payoff_group_max_workspace_rows;
+  int64_t refactor_supernode_algorithm5_payoff_group_advance_deps;
+  int64_t refactor_supernode_algorithm5_payoff_group_max_advance_deps;
+  int64_t refactor_supernode_algorithm5_payoff_group_zero_advance_runs;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

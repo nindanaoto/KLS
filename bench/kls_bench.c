@@ -2322,6 +2322,12 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_algorithm5_payoff_group_workspace_rows\":%"
            PRId64
            ",\"refactor_supernode_algorithm5_payoff_group_max_workspace_rows\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_advance_deps\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_max_advance_deps\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_zero_advance_runs\":%"
            PRId64,
            stats.refactor_supernode_algorithm5_prefix_advance_run_count,
            stats.refactor_supernode_algorithm5_prefix_advance_run_rows,
@@ -2374,7 +2380,12 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_payoff_group_max_currents,
            stats.refactor_supernode_algorithm5_payoff_group_workspace_rows,
            stats
-             .refactor_supernode_algorithm5_payoff_group_max_workspace_rows);
+             .refactor_supernode_algorithm5_payoff_group_max_workspace_rows,
+           stats.refactor_supernode_algorithm5_payoff_group_advance_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_max_advance_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_zero_advance_runs);
     printf(",\"refactor_l_pattern_columns\":%" PRId64
            ",\"refactor_l_pattern_entries\":%" PRId64
            ",\"refactor_l_adjacent_run_count\":%" PRId64
@@ -3463,6 +3474,7 @@ int main(int argc, char **argv) {
            " groups %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            " currents %" PRId64 "/%" PRId64 "/%" PRId64
            " workspace %" PRId64 "/%" PRId64
+           " advance %" PRId64 "/%" PRId64 "/%" PRId64
            ", group L %d/%d %" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64
@@ -3604,6 +3616,11 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_payoff_group_workspace_rows,
            stats
              .refactor_supernode_algorithm5_payoff_group_max_workspace_rows,
+           stats.refactor_supernode_algorithm5_payoff_group_advance_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_max_advance_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_zero_advance_runs,
            stats.refactor_supernode_consumer_plan_group_l_built,
            stats.refactor_supernode_consumer_plan_group_l_storage_limited,
            stats.refactor_supernode_consumer_plan_group_l_panel_count,

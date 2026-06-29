@@ -916,11 +916,18 @@ workspaces without rediscovering the group shape. Benchmark JSON reports
 `refactor_supernode_algorithm5_payoff_group_current_total`,
 `refactor_supernode_algorithm5_payoff_group_multi_current_count`,
 `refactor_supernode_algorithm5_payoff_group_max_currents`,
-`refactor_supernode_algorithm5_payoff_group_workspace_rows`, and
-`refactor_supernode_algorithm5_payoff_group_max_workspace_rows`. These counters
-estimate the number of distinct current-column workspaces and compact prefix
-workspace rows a real Algorithm 5 batch would need; they do not enable the old
-per-current scalar replay by default.
+`refactor_supernode_algorithm5_payoff_group_workspace_rows`,
+`refactor_supernode_algorithm5_payoff_group_max_workspace_rows`,
+`refactor_supernode_algorithm5_payoff_group_advance_deps`,
+`refactor_supernode_algorithm5_payoff_group_max_advance_deps`, and
+`refactor_supernode_algorithm5_payoff_group_zero_advance_runs`. These counters
+estimate the number of distinct current-column workspaces, compact prefix
+workspace rows, and prefix-advance dependencies a real Algorithm 5 batch would
+need. On the slow ASIC diagnostics, zero-advance selected runs are rare or
+absent, so the next paper-aligned executor has to batch prefix advancement
+before the shared producer update rather than relying on a first-dependency
+shortcut. These counters do not enable the old per-current scalar replay by
+default.
 Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN=1` to also retain the exact
 row-major U-supernode structural object from the same schedule pass. Benchmark
 JSON reports `refactor_u_supernode_pattern_count`,

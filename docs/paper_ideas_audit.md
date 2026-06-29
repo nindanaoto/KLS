@@ -10539,3 +10539,22 @@ paper gap is not BLAS dispatch and not the workspace-addressing substrate; the
 missing CKTSO-scale mechanism is the actual multi-current executor that gathers
 and advances many current workspaces for one retained producer group before
 publishing them.
+
+KLS now retains Algorithm 5 prefix-advance counts inside the payoff descriptor
+instead of only retaining current-slot workspace geometry. Each selected run
+stores the number of producer dependencies that must be advanced before the
+selected prefix update, and public stats report the total advance dependencies,
+maximum per-run advance dependencies, and zero-advance selected runs across all
+payoff groups. The focused top-five CKTSO-gap artifact
+`build/kls_alg5_advance_descriptor_gap5_t4_r1_ref3_timeout120.jsonl` completed
+with no failed passes at `1.391166153602165` geomean. It reports
+`190,994` retained advance dependencies for `ASIC_320ks` with zero
+zero-advance selected runs, and `194,219` retained advance dependencies for
+`ASIC_320k` with one zero-advance selected run. `ASIC_100ks` still has
+`32,849` retained advance dependencies and only five zero-advance selected
+runs. This makes the next paper gap concrete: a first-dependency shortcut is
+too small for the slow cases, and BLAS dispatch is not the first explanation to
+pursue. The missing CKTSO/SubtreeLU mechanism is a grouped Algorithm 5 executor
+that claims current workspaces, batches prefix advancement across those
+workspaces, and only then applies and publishes the shared producer-prefix
+update.
