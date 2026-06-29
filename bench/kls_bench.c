@@ -1816,6 +1816,18 @@ int main(int argc, char **argv) {
            PRId64
            ",\"refactor_supernode_consumer_plan_column_batch_small_run_rows\":%"
            PRId64
+           ",\"refactor_supernode_consumer_plan_column_shape_batch_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_column_shape_batch_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_column_shape_batch_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_column_shape_batch_small_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_column_shape_batch_small_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_column_shape_batch_max_runs\":%"
+           PRId64
            ",\"refactor_supernode_consumer_plan_shape_batch_count\":%"
            PRId64
            ",\"refactor_supernode_consumer_plan_shape_batch_run_count\":%"
@@ -1864,6 +1876,12 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_column_batch_run_rows,
            stats.refactor_supernode_consumer_plan_column_batch_small_run_count,
            stats.refactor_supernode_consumer_plan_column_batch_small_run_rows,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_count,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_run_count,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_run_rows,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_small_run_count,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_small_run_rows,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_max_runs,
            stats.refactor_supernode_consumer_plan_shape_batch_count,
            stats.refactor_supernode_consumer_plan_shape_batch_run_count,
            stats.refactor_supernode_consumer_plan_shape_batch_run_rows,
@@ -2936,6 +2954,9 @@ int main(int argc, char **argv) {
            ", columns %" PRId64 ", max column %" PRId64 "/%" PRId64
            ", column batch %" PRId64 "/%" PRId64 "/%" PRId64
            ", column batch small %" PRId64 "/%" PRId64
+           ", column exact-shape batch %" PRId64 "/%" PRId64 "/%" PRId64
+           ", column exact-shape small %" PRId64 "/%" PRId64
+           ", column exact-shape max %" PRId64
            ", exact-shape batch %" PRId64 "/%" PRId64 "/%" PRId64
            ", exact-shape small %" PRId64 "/%" PRId64
            ", exact-shape max %" PRId64 "\n",
@@ -2963,6 +2984,12 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_column_batch_run_rows,
            stats.refactor_supernode_consumer_plan_column_batch_small_run_count,
            stats.refactor_supernode_consumer_plan_column_batch_small_run_rows,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_count,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_run_count,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_run_rows,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_small_run_count,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_small_run_rows,
+           stats.refactor_supernode_consumer_plan_column_shape_batch_max_runs,
            stats.refactor_supernode_consumer_plan_shape_batch_count,
            stats.refactor_supernode_consumer_plan_shape_batch_run_count,
            stats.refactor_supernode_consumer_plan_shape_batch_run_rows,

@@ -9649,3 +9649,42 @@ Therefore adding another "use BLAS only for large cases" switch would be a
 no-op for the focused slow rows. The current gap is still in the missing
 paper-style coarse producer/consumer numeric executor, not in dispatching small
 external BLAS kernels.
+
+KLS now also reports whether those exact retained producer-panel groups exist
+inside a single current column. The new
+`refactor_supernode_consumer_plan_column_shape_batch_*` counters group each
+current column's retained runs by exact
+`(panel_start, panel_offset, run_rows)` and count only groups with at least two
+runs. This deliberately includes `panel_start`, because the question is whether
+one active EGraph `x` workspace can reuse one producer-panel numeric object
+without a cross-current scheduler.
+
+Validation:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1 ./build/kls_smoke` passed.
+- `KLS_ENABLE_REFACTOR_U_SUPERNODE_PLAN_PATTERN=1
+  KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1 ./build/kls_smoke` passed.
+- `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN=1` on the top-ten CKTSO-gap
+  focus produced
+  `build/kls_column_shape_batch_gap10_t4_r1_ref3_timeout120.jsonl` with a
+  `2.13626s` geomean and no failed matrices.
+
+The result closes the current-column exact-shape branch. Across the top-ten
+focus, the retained plan covered `6,285,128` rows, broad current-column batches
+covered `6,106,008` rows, and producer-side exact-shape groups still covered
+`5,394,956` rows in `39,077` groups. The new current-column exact producer
+shape counters were zero on every row: zero groups, zero runs, zero rows, and
+zero small-run rows. That is consistent with the plan structure: within one
+current column, an exact `(panel_start, panel_offset)` identifies one dependency
+run, so repeated exact producer-panel shape is fundamentally cross-current.
+
+The next executor should therefore stop trying to stay inside the current
+worker's single `x` workspace for the exact-shape path. To exploit the retained
+groups already stored in `shape_group_ptr`, KLS needs a producer-panel grouped
+task that can gather several current columns, apply one materialized producer
+panel to multiple current workspaces, and then publish/merge the resulting
+updates before those current columns complete. A current-column executor may
+still help for ragged output accumulation, but it cannot consume the retained
+exact producer-panel groups measured above.
