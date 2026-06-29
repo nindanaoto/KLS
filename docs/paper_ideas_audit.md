@@ -8825,3 +8825,21 @@ measured `2.2768s`. Because the same-source default top-20 artifact above
 measured `2.0286s`, the consumer-plan executor also remains opt-in. The
 remaining gap is the executor arithmetic and writeback cost after a plan hit,
 not just rejected-probe overhead or unused panel staging.
+
+After the focused row-refactor loss shifted to `coupled` and `rajat03`, KLS
+also reran the small-BLAS hypothesis on those rows specifically. The current
+source already requires a CBLAS-capable build, `KLS_ENABLE_CBLAS_SUPERNODE=1`,
+512-scale row/vector shape checks, and multi-million-operation work thresholds
+before dispatching to external BLAS. A rebuilt `build-cblas` tree was run with
+`OPENBLAS_NUM_THREADS=1` on just those two matrices. With the runtime gate off,
+`build/kls_cblas_gate_off_coupled_rajat03_t4_r1_ref3_timeout120.jsonl`
+measured `0.4246s` geomean; with the gate on,
+`build/kls_cblas_gate_on_coupled_rajat03_t4_r1_ref3_timeout120.jsonl`
+measured `0.4388s`. Both artifacts reported `build_has_cblas=true`, but the
+external CBLAS counters remained zero. `coupled` used 81 native row panels over
+2421 rows, while `rajat03` used 18 panels over 600 rows, so the native panels
+average only about 30 to 33 rows, far below the CBLAS threshold. The compact
+batched-supernode counters also stayed at zero on both rows. An additional
+"BLAS only for large cases" guard would therefore not change these losses; the
+active row-refactor gap is still in the scalar native/compact panel executor
+and value writeback, not in small external BLAS dispatch.
