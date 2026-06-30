@@ -2143,9 +2143,13 @@ factorization, EGraph pivot checks, and ETree-scheduled pipelined tail
 factorization. The generic sparse segment direct-load path, first-consumer
 ready-panel publication, CKTSO-style unfinished-set tail seeding, and
 range-aware row-first use of retained pivoting-tail envelopes narrow the
-current refactor bridge, but the next larger algorithmic work is still to evolve
-the numeric factor/refactor/solve kernels toward those deeper KLS-owned sparse
-kernels while keeping the public API and benchmark harness stable.
+current refactor bridge, but current CKTSO-gap reruns still show a scalar
+EGraph pipeline-tail numeric-owner gap: ready-queue and scalar-prefactor
+toggles do not close it, and the active hard rows report zero grouped
+supernode/current-state update execution. The next larger algorithmic work is
+still to evolve the numeric factor/refactor/solve kernels toward those deeper
+KLS-owned sparse kernels while keeping the public API and benchmark harness
+stable.
 
 The guarded Algorithm 5 payoff path also now owns retained current-state
 workspaces explicitly during direct final-state completion. A slot transitions

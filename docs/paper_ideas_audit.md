@@ -12212,3 +12212,31 @@ forced row probes as `row_refactor_private_scalar_scaffold` or
 lower bound is already worse are marked `row_refactor_lower_bound_rejected`.
 On the forced full-panel `ASIC_320ks` artifact, the signal is
 `row_refactor_panel_overstaged` with a panel-overstage ratio of `2.134`.
+
+The refactor focus was rerun on the current tree after the BLAS-threshold
+discussion. A same-source top-five control measured `1.46637s` geomean in
+`build/kls_current_default_gap5_t4_r1_ref3_timeout120.jsonl`. Forcing the
+existing EGraph ready queue with `KLS_ENABLE_EGRAPH_READY_QUEUE=1` measured
+`2.49138s` in
+`build/kls_ready_queue_probe_gap5_t4_r1_ref3_timeout120.jsonl`, with large
+regressions on `ASIC_320ks`, `ASIC_320k`, and `ASIC_100ks`. Explicit
+Algorithm 5 prefactor on/off checks were also neutral-to-negative:
+`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=0` measured `1.47113s`
+(`build/kls_prefactor_off_probe_gap5_t4_r1_ref3_timeout120.jsonl`) and
+`=1` measured `1.48939s`
+(`build/kls_prefactor_on_probe_gap5_t4_r1_ref3_timeout120.jsonl`). In the
+default hard rows, nearly all modeled refactor work is already in the pipeline
+tail (`ASIC_320ks` `273,590,879 / 282,035,457`, `ASIC_320k`
+`335,407,299 / 343,575,699`, `ASIC_100ks`
+`306,394,308 / 316,640,487`), but all supernode, ragged-L, and Algorithm 5
+payoff execution counters remain zero. This rejects ready-queue scheduling and
+the scalar prefactor guard as the missing CKTSO/SubtreeLU mechanism on the
+current slow rows.
+
+`scripts/decompose_solver_gap.py` now marks that sharper case as
+`egraph_scalar_tail_numeric_owner_missing` when refactor work is dominated by
+the EGraph pipeline tail, row-refactor auto is lower-bound rejected, and no
+grouped supernode/current-state executor counter fires. That label is meant to
+keep the next implementation directed at the paper's row-major supernode or
+multi-current numeric owner, not at BLAS thresholds, ready queues, or another
+thin wrapper around the scalar dependency stream.

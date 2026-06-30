@@ -99,6 +99,22 @@ def row_refactor_panel_overstage_entries(row: dict[str, object]) -> float:
     )
 
 
+def egraph_scalar_numeric_owner_missing(row: dict[str, object]) -> bool:
+    egraph_work = float_value(row, "refactor_dependency_work")
+    pipeline_work = float_value(row, "refactor_dependency_pipeline_work")
+    if egraph_work < 5.0e7 or share(pipeline_work, egraph_work) < 0.50:
+        return False
+    active_grouped_updates = (
+        int_value(row, "refactor_last_supernode_update_runs")
+        + int_value(row, "refactor_last_supernode_cached_probe_applied")
+        + int_value(row, "refactor_last_u_supernode_l_update_runs")
+        + int_value(row, "refactor_last_supernode_algorithm5_payoff_prefix_prep_runs")
+        + int_value(row, "refactor_last_supernode_algorithm5_payoff_current_state_seed_runs")
+        + int_value(row, "refactor_last_supernode_algorithm5_payoff_suffix_advance_deps")
+    )
+    return active_grouped_updates == 0
+
+
 def paper_gap_signal(
     cand: dict[str, float],
     cand_row: dict[str, object],
@@ -169,6 +185,10 @@ def paper_gap_signal(
                 return "row_panel_kernel_active"
             return "row_kernel_active"
         if last_refactor_path == "egraph":
+            if egraph_scalar_numeric_owner_missing(cand_row):
+                if auto_lower_rejected:
+                    return "egraph_scalar_tail_numeric_owner_missing"
+                return "egraph_scalar_pipeline_numeric_owner_missing"
             if auto_lower_rejected:
                 return "row_refactor_lower_bound_rejected"
             if egraph_work > 0.0:
