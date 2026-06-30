@@ -525,6 +525,8 @@ def main() -> int:
         "refactor_last_btf_scalar_run_group_run_ready_currents,"
         "refactor_last_btf_scalar_run_group_run_ready_rows,"
         "refactor_last_btf_scalar_run_group_run_ready_entries,"
+        "refactor_last_btf_scalar_run_group_wake_armed_currents,"
+        "refactor_last_btf_scalar_run_group_wake_ready_currents,"
         "refactor_last_ready_queue_columns,"
         "refactor_ready_queue_run_count,"
         "row_refactor_group_count,"
@@ -668,7 +670,9 @@ def main() -> int:
         "refactor_last_btf_scalar_run_group_prefix_ready_entries,"
         "refactor_last_btf_scalar_run_group_run_ready_currents,"
         "refactor_last_btf_scalar_run_group_run_ready_rows,"
-        "refactor_last_btf_scalar_run_group_run_ready_entries"
+        "refactor_last_btf_scalar_run_group_run_ready_entries,"
+        "refactor_last_btf_scalar_run_group_wake_armed_currents,"
+        "refactor_last_btf_scalar_run_group_wake_ready_currents"
     )
     print(header)
     for cycle_ratio, name, cand, ref, cand_row in rows[: args.max_rows]:
@@ -939,6 +943,8 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_run_ready_currents')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_run_ready_rows')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_run_ready_entries')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_wake_armed_currents')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_wake_ready_currents')},"
             f"{int_value(cand_row, 'refactor_last_ready_queue_columns')},"
             f"{int_value(cand_row, 'refactor_ready_queue_run_count')},"
             f"{int_value(cand_row, 'row_refactor_group_count')},"
@@ -1095,7 +1101,9 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_prefix_ready_entries')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_run_ready_currents')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_run_ready_rows')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_run_ready_entries')}"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_run_ready_entries')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_wake_armed_currents')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_wake_ready_currents')}"
         )
     return 0
 

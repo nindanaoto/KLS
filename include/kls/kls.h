@@ -1102,6 +1102,12 @@ typedef struct kls_stats {
   int64_t refactor_last_btf_scalar_run_group_run_ready_currents;
   int64_t refactor_last_btf_scalar_run_group_run_ready_rows;
   int64_t refactor_last_btf_scalar_run_group_run_ready_entries;
+  int64_t refactor_last_btf_scalar_run_group_wake_armed_currents;
+  int64_t refactor_last_btf_scalar_run_group_wake_armed_rows;
+  int64_t refactor_last_btf_scalar_run_group_wake_armed_entries;
+  int64_t refactor_last_btf_scalar_run_group_wake_ready_currents;
+  int64_t refactor_last_btf_scalar_run_group_wake_ready_rows;
+  int64_t refactor_last_btf_scalar_run_group_wake_ready_entries;
   int64_t refactor_btf_scalar_run_group_claim_surface_trigger_count;
   int64_t refactor_btf_scalar_run_group_claim_surface_group_count;
   int64_t refactor_btf_scalar_run_group_claim_surface_current_count;
@@ -1114,6 +1120,12 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_group_run_ready_current_count;
   int64_t refactor_btf_scalar_run_group_run_ready_rows;
   int64_t refactor_btf_scalar_run_group_run_ready_entries;
+  int64_t refactor_btf_scalar_run_group_wake_armed_current_count;
+  int64_t refactor_btf_scalar_run_group_wake_armed_rows;
+  int64_t refactor_btf_scalar_run_group_wake_armed_entries;
+  int64_t refactor_btf_scalar_run_group_wake_ready_current_count;
+  int64_t refactor_btf_scalar_run_group_wake_ready_rows;
+  int64_t refactor_btf_scalar_run_group_wake_ready_entries;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

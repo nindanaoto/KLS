@@ -1277,6 +1277,15 @@ current/row/entry counts. A large prefix-ready count with a tiny run-ready count
 means the next executor must retain live partial current state and wake it again
 as later producers in the contiguous run complete; a full-column claim at the
 producer-start hook is too late and too restrictive.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAKE_STATS=1` adds the matching
+run-end schedule probe. When the producer-start hook finds a prefix-ready
+membership, KLS arms that membership in a per-refactor live array. The retained
+descriptor also indexes memberships by the last producer in the contiguous run,
+so the completion hook can count armed memberships whose full producer run has
+become ready. Benchmark JSON reports last and cumulative wake-armed and
+wake-ready current/row/entry counts. This remains diagnostic, but it is the
+scheduler skeleton needed by a retained current-state owner that will store the
+prefix state at arm time and apply shared producer-run updates at wake time.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
 same BTF scalar producer-run shape. It first waits for every dependency in a
 contiguous run, then applies the run through a local row workspace. Under the

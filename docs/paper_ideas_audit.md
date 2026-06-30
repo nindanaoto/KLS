@@ -12882,3 +12882,21 @@ owner for these prefix-ready memberships and register wakeups on later producer
 columns in the contiguous run, so grouped L-stream reuse is applied when the run
 actually becomes ready instead of waiting until the whole current column is
 done.
+
+The run-end wake probe adds that missing second trigger. Under
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAKE_STATS=1`, KLS now builds a
+reverse descriptor from the last producer in each grouped contiguous run to the
+group memberships that should wake there. At producer-start completion it arms
+memberships whose prefix dependencies are already published; at producer-run-end
+completion it records the armed memberships whose full run is now ready.
+`ASIC_100ks` armed `44,454` memberships covering `150,680,054` L entries and
+woke `44,072` memberships covering `150,430,068` L entries. `ASIC_320ks` armed
+`49,740` memberships covering `149,632,370` L entries and woke `49,643`
+memberships covering `149,422,154` L entries. Both probes were residual-clean
+(`1.92251861e-15` and `2.08436857e-15`).
+
+This confirms that the scheduler-side shape needed by the paper-level retained
+current-state owner is present: most prefix-ready memberships have a matching
+run-end wake. The next numeric implementation should attach a compact retained
+workspace to the armed membership and consume those wake-ready batches with one
+producer-owned L-stream pass across multiple current states.
