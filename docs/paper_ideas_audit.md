@@ -12454,3 +12454,34 @@ diagnosis unchanged: the refactor loss is not a missed scalar branch in
 `kls_egraph_refactor_apply_btf_scalar_dep`; the paper-sized gap is still the
 row-major/supernode current-state numeric owner that reduces the scalar
 dependency stream instead of polishing it.
+
+A scheduler-barrier shortcut for the EGraph refactor was tested and rejected
+before commit. The paper-level hypothesis was that, after the SubtreeLU-style
+cluster-level barriers, a pipeline column should not need to poll
+`pipeline_done` for predecessors scheduled before
+`refactor_level_ptr[cluster_level_count]`; those predecessors have already
+passed the cluster barriers. The prototype routed both
+`kls_egraph_refactor_wait_done` and
+`kls_egraph_refactor_dependency_done_now` through that schedule-position check.
+Correctness passed `cmake --build build -j2`, `./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and `git diff --check`, but the
+timing was not robust enough to keep. The initial uncached helper measured
+`7.5566s`, `7.9116s`, and `7.3799s` SPICE-cycle geomean on the top-five
+CKTSO-gap manifest in
+`build/kls_cluster_done_skip_gap5_t4_r1_ref3_timeout120*.jsonl`, versus clean
+baseline runs at `7.7531s`, `7.6663s`, and `7.6065s`
+(`build/kls_baseline_head_gap5_t4_r1_ref3_timeout120*.jsonl` and
+`build/kls_baseline_c565_gap5_t4_r1_ref3_timeout120.jsonl`). An isolated
+higher-repeat ASIC_100ks check was mildly positive (`5.2809s` versus
+`5.3952s` in
+`build/kls_cluster_done_skip_asic100ks_t4_r2_ref8_timeout120.jsonl` and
+`build/kls_baseline_c565_asic100ks_t4_r2_ref8_timeout120.jsonl`), but the full
+run still had unstable ASIC_100ks losses. A tightened version that cached the
+pipeline-begin schedule position regressed two consecutive full passes to
+`7.8890s` and `8.0413s` in
+`build/kls_cluster_done_skip_cached_gap5_t4_r1_ref3_timeout120*.jsonl`.
+This rejects redundant cluster-predecessor polling as the clear missing
+paper mechanism. The remaining gap is not the cluster/pipeline barrier
+bookkeeping; it is still the absent coarse numeric owner that prevents the
+pipeline tail from being expressed as hundreds of millions of scalar
+dependency updates.
