@@ -2876,6 +2876,8 @@ int main(int argc, char **argv) {
            ",\"row_refactor_separator_private_component_count\":%" PRId64
            ",\"row_refactor_last_separator_flop_queue\":%d"
            ",\"row_refactor_separator_flop_queue_run_count\":%" PRId64
+           ",\"row_refactor_last_separator_flop_ordered_private\":%d"
+           ",\"row_refactor_separator_flop_ordered_private_run_count\":%" PRId64
            ",\"row_refactor_last_separator_flop_components\":%" PRId64
            ",\"row_refactor_separator_flop_component_count\":%" PRId64
            ",\"row_refactor_last_separator_flop_private_groups\":%" PRId64
@@ -2956,6 +2958,8 @@ int main(int argc, char **argv) {
            stats.row_refactor_separator_private_component_count,
            stats.row_refactor_last_separator_flop_queue,
            stats.row_refactor_separator_flop_queue_run_count,
+           stats.row_refactor_last_separator_flop_ordered_private,
+           stats.row_refactor_separator_flop_ordered_private_run_count,
            stats.row_refactor_last_separator_flop_components,
            stats.row_refactor_separator_flop_component_count,
            stats.row_refactor_last_separator_flop_private_groups,
@@ -4449,6 +4453,7 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_separator_private_components,
            stats.row_refactor_separator_private_component_count);
     printf("row refactor separator FLOP queue: %d"
+           ", ordered private %d/%" PRId64
            ", components %" PRId64 "/%" PRId64
            ", private groups %" PRId64 "/%" PRId64
            ", pipeline groups %" PRId64 "/%" PRId64
@@ -4457,6 +4462,8 @@ int main(int argc, char **argv) {
            ", private groups min/max %" PRId64 "/%" PRId64
            ", private work min/max %.6g/%.6g\n",
            stats.row_refactor_last_separator_flop_queue,
+           stats.row_refactor_last_separator_flop_ordered_private,
+           stats.row_refactor_separator_flop_ordered_private_run_count,
            stats.row_refactor_last_separator_flop_components,
            stats.row_refactor_separator_flop_component_count,
            stats.row_refactor_last_separator_flop_private_groups,

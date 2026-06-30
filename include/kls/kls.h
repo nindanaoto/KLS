@@ -410,6 +410,8 @@ typedef struct kls_stats {
   int build_has_cblas;
   int row_refactor_last_separator_flop_queue;
   int64_t row_refactor_separator_flop_queue_run_count;
+  int row_refactor_last_separator_flop_ordered_private;
+  int64_t row_refactor_separator_flop_ordered_private_run_count;
   int64_t row_refactor_last_separator_flop_components;
   int64_t row_refactor_separator_flop_component_count;
   int64_t row_refactor_last_separator_flop_private_groups;

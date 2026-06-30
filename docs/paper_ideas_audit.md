@@ -6,6 +6,36 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The separator-tree row refactor now has a validation-gated ordered-private
+executor for SubtreeLU-style private subdomains. The separator FLOP queue
+already promotes any private group reached from pipeline work back into the
+pipeline side. KLS now additionally validates that every private-to-private
+successor stays in the same worker's ordered private list and appears later in
+that list. When the proof passes, private groups execute without spinning on
+`row_pipeline_remaining_preds` and without atomically releasing private
+successors; they still release pipeline successors through the guarded ready
+queue. This makes the retained separator-private phase closer to the paper
+algorithm instead of running thread-local subdomains through the generic
+pipeline dependency scaffold. The new diagnostics
+`row_refactor_last_separator_flop_ordered_private` and
+`row_refactor_separator_flop_ordered_private_run_count` show whether this
+path was selected.
+
+Correctness passed `git diff --check`, `cmake --build build -j2`,
+`./build/kls_smoke`, and `ctest --test-dir build --output-on-failure`. On the
+forced row-refactor top-five CKTSO-gap slice, the ordered-private run
+`build/kls_ordered_private_forced_row_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `3.8786s` SPICE-cycle geomean versus `4.2265s` in the stored forced
+row current artifact
+`build/kls_forced_row_refactor_current_gap5_t4_r1_ref3_timeout120.jsonl`
+(`1.09x` geomean speedup, wins on all five rows). The ordered-private stat was
+active for all three refactor repeats on the large ASIC rows
+(`ASIC_320ks`, `ASIC_320k`, `ASIC_100ks`) and inactive on the tiny private
+queues in `gemat12` and `rajat03`. This is retained as a solid paper-aligned
+row-refactor cleanup, but it does not close the main gap: the same focused
+default artifact remains `1.4664s`, so forced row refactor is still about
+`2.65x` slower than the normal KLS path on this slice.
+
 An active producer-bucket grouped advance executor was prototyped and rejected
 before commit. The trial kept the retained position-coded Algorithm 5
 pre-prefix state plan, but replaced the runtime scan over active current

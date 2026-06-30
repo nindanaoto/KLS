@@ -1384,6 +1384,8 @@ separator schedule.
 Stats report this path through
 `row_refactor_last_separator_flop_queue`,
 `row_refactor_separator_flop_queue_run_count`,
+`row_refactor_last_separator_flop_ordered_private`,
+`row_refactor_separator_flop_ordered_private_run_count`,
 `row_refactor_last_separator_flop_components`,
 `row_refactor_last_separator_flop_private_groups`, and
 `row_refactor_last_separator_flop_pipeline_groups`, plus closure promotions via
