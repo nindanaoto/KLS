@@ -100,6 +100,27 @@ runs, so it is preparation only. Its `1.7807s` geomean is not a speed claim; the
 extra retained-plan/schedule work must be consumed by a real grouped numeric
 executor before this path can close the CKTSO gap.
 
+The EGraph prefactor path now has the corresponding guarded supernode-shaped
+prefactor slice when `KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1` is explicitly
+requested. A blocked BTF EGraph column may consume a contiguous finished
+U-supernode producer run during Algorithm-5 prefactorization, but only after a
+run-aware safety scan proves that no earlier unapplied predecessor can still
+write any row in that run. This fills the paper's "use finished producer
+supernodes while skipping unfinished predecessors" semantic without promoting
+the losing ragged producer cache to the default path. Correctness passed
+`cmake --build build -j2`, `ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1 KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1 ./build/kls_smoke`.
+The focused top-five rerun still rejects this as a CKTSO-gap closer:
+`build/kls_pref_supernode_default_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.4631s` geomean, while the opt-in ragged-prefactor run
+`build/kls_pref_supernode_ragged_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.6197s`. The opt-in path executed retained ragged producer work on
+`ASIC_320ks`, `rajat03`, and `ASIC_100ks`, then auto-disabled after low useful
+coverage. This confirms the missing large piece is still the multi-current
+workspace/accumulator executor, not another scalar or single-workspace
+producer-cache variant.
+
 A structural selector probe was also rejected. Raising the exact-EGraph work
 floor for the small compact dominant-BTF class from `5.0e5` to `5.0e6` moved
 `rajat03` from EGraph to the mapped path, but worsened the focused top-five
