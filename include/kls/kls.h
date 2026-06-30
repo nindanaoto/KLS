@@ -1049,6 +1049,14 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_group_l_state_selected_bytes;
   int64_t refactor_supernode_algorithm5_payoff_current_state_span_rows;
   int64_t refactor_supernode_algorithm5_payoff_current_state_max_span_rows;
+  int64_t refactor_last_btf_scalar_run_candidates;
+  int64_t refactor_last_btf_scalar_run_rows;
+  int64_t refactor_last_btf_scalar_run_entries;
+  int64_t refactor_last_btf_scalar_run_max_rows;
+  int64_t refactor_btf_scalar_run_candidate_count;
+  int64_t refactor_btf_scalar_run_rows;
+  int64_t refactor_btf_scalar_run_entries;
+  int64_t refactor_btf_scalar_run_max_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

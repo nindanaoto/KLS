@@ -173,6 +173,9 @@ def paper_gap_signal(
     compact_eligible_rows = int_value(
         cand_row, "row_refactor_compact_dense_panel_eligible_rows"
     )
+    btf_scalar_run_rows = int_value(
+        cand_row, "refactor_last_btf_scalar_run_rows"
+    )
 
     if first_skip_scaled_single:
         return "missing_parallel_rowup_first_factor"
@@ -205,6 +208,8 @@ def paper_gap_signal(
                 if exact_shape_bounded_owner_payoff_tiny(cand_row):
                     return "egraph_scalar_bounded_owner_payoff_tiny"
                 if auto_lower_rejected:
+                    if btf_scalar_run_rows > 0:
+                        return "egraph_scalar_tail_producer_runs_unowned"
                     return "egraph_scalar_tail_numeric_owner_missing"
                 return "egraph_scalar_pipeline_numeric_owner_missing"
             if auto_lower_rejected:
@@ -474,6 +479,14 @@ def main() -> int:
         "refactor_supernode_cached_probe_work_reject_rows,"
         "refactor_supernode_cached_probe_workspace_rejects,"
         "refactor_supernode_cached_probe_workspace_reject_rows,"
+        "refactor_last_btf_scalar_run_candidates,"
+        "refactor_last_btf_scalar_run_rows,"
+        "refactor_last_btf_scalar_run_entries,"
+        "refactor_last_btf_scalar_run_max_rows,"
+        "refactor_btf_scalar_run_candidate_count,"
+        "refactor_btf_scalar_run_rows,"
+        "refactor_btf_scalar_run_entries,"
+        "refactor_btf_scalar_run_max_rows,"
         "refactor_last_ready_queue_columns,"
         "refactor_ready_queue_run_count,"
         "row_refactor_group_count,"
@@ -594,7 +607,11 @@ def main() -> int:
         "row_refactor_separator_flop_closure_group_count,"
         "refactor_dependency_cluster_levels,"
         "refactor_dependency_pipeline_columns,refactor_dependency_work,"
-        "refactor_dependency_pipeline_work"
+        "refactor_dependency_pipeline_work,"
+        "refactor_last_btf_scalar_run_candidates,"
+        "refactor_last_btf_scalar_run_rows,"
+        "refactor_last_btf_scalar_run_entries,"
+        "refactor_last_btf_scalar_run_max_rows"
     )
     print(header)
     for cycle_ratio, name, cand, ref, cand_row in rows[: args.max_rows]:
@@ -827,6 +844,14 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_supernode_cached_probe_work_reject_rows')},"
             f"{int_value(cand_row, 'refactor_supernode_cached_probe_workspace_rejects')},"
             f"{int_value(cand_row, 'refactor_supernode_cached_probe_workspace_reject_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_candidates')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_entries')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_max_rows')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_candidate_count')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_rows')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_entries')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_max_rows')},"
             f"{int_value(cand_row, 'refactor_last_ready_queue_columns')},"
             f"{int_value(cand_row, 'refactor_ready_queue_run_count')},"
             f"{int_value(cand_row, 'row_refactor_group_count')},"
@@ -960,7 +985,11 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_dependency_cluster_levels')},"
             f"{int_value(cand_row, 'refactor_dependency_pipeline_columns')},"
             f"{float_value(cand_row, 'refactor_dependency_work'):.6g},"
-            f"{float_value(cand_row, 'refactor_dependency_pipeline_work'):.6g}"
+            f"{float_value(cand_row, 'refactor_dependency_pipeline_work'):.6g},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_candidates')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_entries')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_max_rows')}"
         )
     return 0
 

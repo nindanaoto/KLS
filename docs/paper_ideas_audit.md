@@ -12679,3 +12679,28 @@ cases: the row ranges are hundreds of times larger than the useful sparse
 state. The paper-aligned target remains a grouped sparse current-state owner
 that keeps live producer/current batches together without copying or scanning
 each current independently.
+
+The default BTF EGraph scalar tail now has an opt-in producer-run surface
+diagnostic behind `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_STATS=1`. The tracker is
+on-the-fly and default-off: it only records consecutive scalar dependencies
+whose U positions and block-local producer rows advance together, then reports
+last-pass and cumulative run count, row count, L-entry surface, and max run
+length through `refactor_*_btf_scalar_run_*` stats and benchmark JSON. It does
+not change numeric execution. Validation passed `cmake --build build -j2`,
+`./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_STATS=1 ./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and `git diff --check`.
+
+The first focused probe on `ASIC_100ks` with 4 threads, one factor, and one
+refactor (`build/kls_btf_scalar_run_stats_asic100ks_t4_r1_ref1.json`) stayed
+residual-clean (`relative_residual_l2=1.9225e-15`) and reported
+`107,917` contiguous scalar producer runs covering `1,245,501` of the
+`1,556,952` scalar dependency edges, with `312,716,559` summed L entries and max
+run length `462`. The same no-env run
+(`build/kls_btf_scalar_run_stats_off_asic100ks_t4_r1_ref1.json`) kept all new
+counters at zero. `scripts/decompose_solver_gap.py` now labels this measured
+case `egraph_scalar_tail_producer_runs_unowned` instead of the broader
+`egraph_scalar_tail_numeric_owner_missing`. This strengthens the refactor
+direction: the slow tail has enough contiguous producer-run surface for a
+coarse row-major/current-state owner, and the missing piece is not another BLAS
+threshold, ready queue, or scalar scatter cleanup.

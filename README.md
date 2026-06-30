@@ -1224,6 +1224,16 @@ reports that amortization guard through
 opt-in: it validates a broader paper-style producer/consumer executor than the
 common-trailing cached panel, but current focused runs still show that KLS needs
 coarser batching/reuse before this shape can beat the scalar EGraph walk.
+Set `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_STATS=1` to measure the default BTF
+EGraph scalar tail without changing execution. The refactor loop then records
+contiguous producer runs whose U-dependency positions and local row ids advance
+together, reporting `refactor_last_btf_scalar_run_candidates`,
+`refactor_last_btf_scalar_run_rows`,
+`refactor_last_btf_scalar_run_entries`,
+`refactor_last_btf_scalar_run_max_rows`, and cumulative
+`refactor_btf_scalar_run_*` counters. This is an opt-in diagnostic for the
+missing paper-level numeric owner: it answers whether the scalar tail has enough
+producer-run surface for a future row-major/current-state executor to consume.
 Eligible retained refactor-map row/input positions and L row-index arrays are
 mirrored as 32-bit integers by default while leaving the KLU-owned numeric
 factor and public index ABI unchanged. The EGraph value-scatter path and
@@ -2190,6 +2200,13 @@ rows spanning `703M` dense slots, and `ASIC_320k` retained `2.93M` rows
 spanning `782M` slots. Even compact retained state kept spans above `572M` and
 `698M` slots. The next refactor work should therefore stay on a grouped sparse
 current-state owner rather than a dense row-window conversion.
+KLS also has an opt-in BTF scalar producer-run diagnostic:
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_STATS=1`. A one-refactor `ASIC_100ks` probe
+reported `107,917` contiguous scalar producer runs covering `1,245,501` scalar
+dependencies and `312,716,559` L-entry updates, with max run length `462`, while
+the default no-env run kept these counters at zero. This confirms that the slow
+tail contains a large structured producer-run surface, but it is still unowned by
+the current numeric executor.
 
 ## License
 
