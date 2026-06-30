@@ -11500,3 +11500,30 @@ and slowed all three ASIC rows. The result is a useful negative signal: the
 remaining large gap is not raw private queue balance or small-BLAS dispatch, but
 the scalar row/segment numeric executor and the missing coarse grouped numeric
 owner described by the CKTSO/SubtreeLU papers.
+
+A current-source scheduler interleaving probe also rejects the remaining
+private/pipeline handoff as the first-order gap. SubtreeLU says the
+refactorization private-to-pipeline barrier can be removed because the sparsity
+pattern is reused. KLS already removes the hard level barrier for the retained
+separator FLOP queue, but a trial change let each worker non-blockingly consume
+one ready separator chain between private groups. Correctness passed
+`cmake --build build -j2`, `git diff --check`,
+`./build/kls_smoke`, and `ctest --test-dir build --output-on-failure`, but the
+forced row-refactor top-five run
+`build/kls_row_sep_interleave_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`4.2960s` geomean versus `4.2548s` for the retained component-balance baseline.
+The ASIC rows slowed by about `1-2%`, and the local-ready counters dropped
+rather than exposing more useful overlap. The probe was removed.
+
+A current-source native EGraph supernode A/B likewise keeps BLAS and existing
+coarse-update switches out of the lead-cause slot. With
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached`, the top-five default-path focus
+run `build/kls_egraph_supernode_cached_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `1.4449s` geomean versus `1.4624s` for the same current-source default
+subset, but the gain came from `rajat03`; the ASIC rows were neutral or slower
+(`ASIC_320ks` `1.060x`, `ASIC_320k` `1.001x`, `ASIC_100ks` `1.085x` relative
+to default). Full native updates were worse at `1.6025s` in
+`build/kls_egraph_supernode_updates_gap5_t4_r1_ref3_timeout120.jsonl`. These
+paths are paper-aligned scalar/native supernode experiments, not BLAS calls, but
+they still do not provide the missing CKTSO/SubtreeLU grouped multi-current
+numeric owner.
