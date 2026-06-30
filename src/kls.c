@@ -64160,18 +64160,6 @@ kls_egraph_refactor_try_advance_algorithm5_payoff_suffix_group_batch(
             &batch->state_item, dep_local, &dep_pos)) {
         ok = 0;
       }
-      if (ok) {
-        for (UF_long q = 0u; q < lcol_len; ++q) {
-          const UF_long row = rows32 != NULL ? (UF_long)rows32[q] : rows[q];
-          UF_long row_pos = 0u;
-          if (row >= block_size ||
-              !kls_algorithm5_payoff_state_value_position_sorted(
-                &batch->state_item, row, &row_pos)) {
-            ok = 0;
-            break;
-          }
-        }
-      }
       if (!ok) {
         kls_algorithm5_payoff_current_state_store(
           shared->algorithm5_payoff_current_flags, current_slot,
@@ -64185,6 +64173,56 @@ kls_egraph_refactor_try_advance_algorithm5_payoff_suffix_group_batch(
     }
   }
 
+  if (item_count == 0u) {
+    return 0;
+  }
+
+  UF_long *row_positions = NULL;
+  const UF_long position_stride = item_count;
+  if (lcol_len > 0u) {
+    if (item_count > UF_long_max / lcol_len) {
+      kls_algorithm5_payoff_release_suffix_batch_items(
+        shared, items, item_count);
+      kls_egraph_refactor_record_invalid(shared);
+      return -1;
+    }
+    const UF_long position_count = item_count * lcol_len;
+    row_positions = kls_egraph_worker_index_workspace(worker, position_count);
+    if (row_positions == NULL) {
+      kls_algorithm5_payoff_release_suffix_batch_items(
+        shared, items, item_count);
+      kls_egraph_refactor_record_invalid(shared);
+      return -1;
+    }
+  }
+
+  UF_long valid_count = 0u;
+  for (UF_long i = 0u; i < item_count; ++i) {
+    kls_algorithm5_payoff_suffix_batch_item *batch = &items[i];
+    int ok = 1;
+    for (UF_long q = 0u; q < lcol_len; ++q) {
+      const UF_long row = rows32 != NULL ? (UF_long)rows32[q] : rows[q];
+      UF_long row_pos = 0u;
+      if (row >= batch->state_item.block_size ||
+          !kls_algorithm5_payoff_state_value_position_sorted(
+            &batch->state_item, row, &row_pos)) {
+        ok = 0;
+        break;
+      }
+      row_positions[q * position_stride + valid_count] = row_pos;
+    }
+    if (!ok) {
+      kls_algorithm5_payoff_current_state_store(
+        shared->algorithm5_payoff_current_flags,
+        batch->state_item.current_slot, KLS_ALGORITHM5_PAYOFF_CURRENT_READY);
+      continue;
+    }
+    if (valid_count != i) {
+      items[valid_count] = items[i];
+    }
+    valid_count++;
+  }
+  item_count = valid_count;
   if (item_count == 0u) {
     return 0;
   }
@@ -64213,21 +64251,13 @@ kls_egraph_refactor_try_advance_algorithm5_payoff_suffix_group_batch(
         shared, items, item_count);
       return -1;
     }
-    const UF_long row = rows32 != NULL ? (UF_long)rows32[q] : rows[q];
     const double lvalue = lx[q];
     for (UF_long i = 0u; i < item_count; ++i) {
       kls_algorithm5_payoff_suffix_batch_item *batch = &items[i];
       if (batch->ujk == 0.0) {
         continue;
       }
-      UF_long row_pos = 0u;
-      if (!kls_algorithm5_payoff_state_value_position_sorted(
-            &batch->state_item, row, &row_pos)) {
-        kls_algorithm5_payoff_release_suffix_batch_items(
-          shared, items, item_count);
-        kls_egraph_refactor_record_invalid(shared);
-        return -1;
-      }
+      const UF_long row_pos = row_positions[q * position_stride + i];
       batch->state_item.state_values[row_pos] -= batch->ujk * lvalue;
     }
   }

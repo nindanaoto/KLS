@@ -136,6 +136,25 @@ one-producer sparse suffix update: KLS still needs a true grouped live-workspace
 or supernodal window owner that avoids retained-state lookup/cursor work as the
 dominant cost.
 
+The suffix-group batch follow-up now retains the validated row positions for a
+producer L column inside each claimed current-state batch, so the executor no
+longer binary-searches the retained row list once for validation and again for
+the update. This moves the opt-in path a little closer to a real grouped
+numeric object: map rows once, stream numeric values once. Correctness passed
+`cmake --build build -j2`, `ctest --test-dir build --output-on-failure`,
+`./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE=1 ./build/kls_smoke`.
+The focused artifact
+`build/kls_suffix_group_position_cache_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `2.7521s` top-five geomean, a small `1.017x` speedup over the prior
+batched artifact (`2.7996s`). It remains far from the same-binary default
+control at `1.4446s` (`1.91x` slower), so retained row-position caching is
+useful substrate but not the missing CKTSO mechanism. The first-order gap is
+still the owner/scheduler level: the path prepares and owns retained current
+states per current cursor, while the papers' advantage comes from a broader
+grouped live workspace or supernodal window that avoids this per-current
+retained-state traffic.
+
 The latest Algorithm 5 grouped-prefix work now includes a targetless
 direct-prefix variant, an advance-seed probe, a retained-current-row state probe,
 and a final-state probe, without changing BLAS thresholds. The
