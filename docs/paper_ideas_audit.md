@@ -11388,3 +11388,33 @@ next plausible paper-aligned step is not BLAS thresholding; it is to execute
 multiple prepared current workspaces inside one grouped numeric task so claimed
 columns do not re-enter the ordinary per-column dispatcher and make other
 workers wait on scalar follow-on work.
+
+The follow-up wait-free prepared-completion slice keeps that same guarded
+Algorithm 5 surface but removes one scalar scheduler artifact. A final-triggered
+prepared current has already passed `kls_egraph_refactor_column_dependencies_done`,
+so the claim processor now first calls the BTF direct-prefix completion helper
+with dependency waits disabled, after doing the same off-block input copy the
+normal BTF dispatcher would have done. If the prepared-state shape does not
+match, it falls back to the ordinary claimed-column dispatcher.
+
+Correctness passed `cmake --build build -j2`, `git diff --check`,
+`ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE=1 ./build/kls_smoke`.
+The same-build top-five control
+`build/kls_default_after_waitfree_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.4558s` SPICE-cycle geomean. The guarded wait-free completion run
+`build/kls_alg5_group_complete_waitfree_final_gap5_t4_r1_ref3_timeout120.jsonl`
+completed all five rows but still measured `2.3694s`. The ASIC rows did use the
+path: `ASIC_320ks` claimed `921` prepared columns and still processed `1,360`
+current-state seed runs / `702,618` skipped dependencies / `1,147,422` state
+rows; `ASIC_320k` claimed `1,064` with `1,357` / `742,805` / `1,223,719`;
+`ASIC_100ks` claimed `215` with `309` / `179,851` / `282,959`. This confirms
+the wait checks were not the large gap.
+
+A direct in-place live-state suffix attempt was also tested and rejected before
+commit. Mutating the retained current-state buffer as the post-prefix workspace
+matched the desired paper direction superficially, but the top-five run failed
+the three ASIC rows with singular-matrix errors. The committed code therefore
+keeps the conservative private/delta state completion. The missing piece is
+still a designed multi-current numeric owner with correct lifetime and rollback
+rules, not ad hoc mutation of the retained seed buffers.

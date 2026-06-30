@@ -60274,6 +60274,86 @@ static void kls_sort_algorithm5_payoff_group_complete_items(
   }
 }
 
+static int kls_egraph_refactor_try_dispatch_algorithm5_payoff_complete_btf(
+  kls_egraph_refactor_worker *worker,
+  UF_long col,
+  int dependencies_proven_done) {
+  if (worker == NULL || worker->shared == NULL) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL ||
+      shared->kernel != KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED ||
+      !shared->supernode_algorithm5_payoff_group_complete ||
+      !shared->supernode_algorithm5_payoff_direct_prefix_complete ||
+      !shared->supernode_algorithm5_payoff_direct_prefix_final_state ||
+      shared->check_pivots || col >= solver->n ||
+      solver->symbolic->R == NULL || solver->refactor_col_block == NULL ||
+      solver->numeric->Offp == NULL || solver->numeric->Offx == NULL ||
+      solver->numeric->Udiag == NULL || solver->numeric->Ulen == NULL ||
+      solver->numeric->Llen == NULL ||
+      solver->refactor_lu_pointer_count != solver->n ||
+      solver->refactor_l_indices == NULL ||
+      solver->refactor_l_values == NULL ||
+      solver->refactor_u_indices == NULL ||
+      solver->refactor_u_values == NULL ||
+      solver->refactor_block_start == NULL) {
+    return 0;
+  }
+
+  const UF_long block = solver->refactor_col_block[col];
+  if (block == KLS_KLU_EMPTY || block >= solver->symbolic->nblocks ||
+      block + 1u > solver->symbolic->nblocks) {
+    return 0;
+  }
+  const UF_long k1 = solver->symbolic->R[block];
+  const UF_long k2 = solver->symbolic->R[block + 1u];
+  if (k2 <= k1 || col < k1 || col >= k2) {
+    return 0;
+  }
+  const UF_long nk = k2 - k1;
+  const UF_long local_k = col - k1;
+  if (nk <= 1u || local_k >= nk) {
+    return 0;
+  }
+
+  UF_long poff = solver->numeric->Offp[col];
+  const UF_long poff_end = solver->numeric->Offp[col + 1u];
+  double *offx = (double *)solver->numeric->Offx;
+  if (!kls_egraph_copy_unscaled_offblock_input(
+        solver, shared->values, offx, &poff, poff_end,
+        solver->refactor_col_ptr[col], solver->refactor_block_start[col])) {
+    kls_egraph_refactor_record_invalid(shared);
+    return -1;
+  }
+
+  const UF_long ucol_len = solver->numeric->Ulen[col];
+  const UF_long *ui =
+    solver->refactor_u_indices != NULL ? solver->refactor_u_indices[col] : NULL;
+  const int32_t *ui32 =
+    solver->refactor_u_indices32 != NULL
+      ? solver->refactor_u_indices32[col] : NULL;
+  double *ux =
+    solver->refactor_u_values != NULL ? solver->refactor_u_values[col] : NULL;
+  if (ucol_len > 0u && ui == NULL && ui32 == NULL) {
+    return 0;
+  }
+  if (ux == NULL && ucol_len > 0u) {
+    return 0;
+  }
+
+  return
+    kls_egraph_refactor_try_complete_algorithm5_payoff_direct_prefix_final_state_btf(
+      worker, k1, col, local_k, nk, ucol_len, ui, ui32, ux,
+      (double *)solver->numeric->Udiag, solver->refactor_l_indices,
+      solver->refactor_l_values, solver->numeric->Llen + k1,
+      dependencies_proven_done ? 0 : 1, shared->supernode_numeric_updates,
+      shared->supernode_consumer_plan_group_l_values,
+      shared->u_supernode_ragged_l_updates, shared->u_supernode_values);
+}
+
 static int kls_egraph_refactor_try_complete_algorithm5_payoff_group(
   kls_egraph_refactor_worker *worker,
   UF_long group,
@@ -60422,7 +60502,15 @@ static int kls_egraph_refactor_try_complete_algorithm5_payoff_group(
       free(claims);
       return -1;
     }
-    if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
+    const int complete_status =
+      kls_egraph_refactor_try_dispatch_algorithm5_payoff_complete_btf(
+        worker, col, 1);
+    if (complete_status < 0) {
+      free(claims);
+      return -1;
+    }
+    if (complete_status == 0 &&
+        !kls_egraph_refactor_dispatch_column(worker, col, 1)) {
       free(claims);
       if (!kls_egraph_refactor_should_stop(shared)) {
         kls_egraph_refactor_record_invalid(shared);
@@ -60549,7 +60637,15 @@ kls_egraph_refactor_try_complete_algorithm5_payoff_final_triggers(
       free(claims);
       return -1;
     }
-    if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
+    const int complete_status =
+      kls_egraph_refactor_try_dispatch_algorithm5_payoff_complete_btf(
+        worker, col, 1);
+    if (complete_status < 0) {
+      free(claims);
+      return -1;
+    }
+    if (complete_status == 0 &&
+        !kls_egraph_refactor_dispatch_column(worker, col, 1)) {
       free(claims);
       if (!kls_egraph_refactor_should_stop(shared)) {
         kls_egraph_refactor_record_invalid(shared);
