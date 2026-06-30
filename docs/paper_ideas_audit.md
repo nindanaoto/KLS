@@ -60,6 +60,19 @@ triggers" as the next lead cause. The missing paper-level piece remains a true
 grouped live-workspace executor with clear completion ownership, not BLAS
 thresholding or small local replay changes.
 
+After the current-state row plan was fixed to include suffix targets for
+producer-triggered advancement, the producer path was rerun. The default
+completion-state branch still drifted on `ASIC_320ks`
+(`build/kls_alg5_suffix_producer_advance_unsafe_rowplanfix_gap5_t4_r1_ref3_timeout120.jsonl`,
+`2.18e-8` relative residual, `3.1941s` geomean). Forcing the live-state
+completion branch made the five-row run numerically clean while still advancing
+about `1.109M` suffix dependencies and `409.6M` update entries
+(`build/kls_alg5_suffix_producer_live_state_gap5_t4_r1_ref3_timeout120.jsonl`),
+but it measured `3.1440s` geomean. That is still slower than the same-build
+default at `1.4427s` and much slower than the CKTSO medium artifact near
+`0.5505s`. So the paper gap is not merely "allow more suffix advancement"; KLS
+needs to amortize the duplicate producer work through a grouped numeric owner.
+
 The grouped suffix-trigger follow-up adds an opt-in
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE=1`
 executor that uses the retained suffix-map trigger table directly instead of
