@@ -60916,13 +60916,13 @@ static int kls_egraph_btf_prefactor_dep_safe(
 
 static void kls_egraph_refactor_apply_btf_scalar_dep(
   kls_egraph_refactor_shared *shared,
-  kls_solver *solver,
   UF_long k1,
   UF_long current_global,
   UF_long dep_local,
   UF_long dep_pos,
   double *ux,
   UF_long **l_indices,
+  int32_t **l_indices32,
   double **l_values,
   const UF_long *llen,
   double *x,
@@ -60938,10 +60938,15 @@ static void kls_egraph_refactor_apply_btf_scalar_dep(
 
   if (ujk != 0.0) {
     UF_long *li = l_indices[dep_global];
+    const int32_t *li32 =
+      l_indices32 != NULL ? l_indices32[dep_global] : NULL;
     double *lx = l_values[dep_global];
     UF_long lcol_len = llen[dep_local];
-    kls_scatter_subtract_refactor_l(solver, x, dep_global, li, lx, lcol_len,
-                                    ujk);
+    if (li32 != NULL || lcol_len == 0u) {
+      kls_scatter_subtract_i32(x, li32, lx, lcol_len, ujk);
+    } else {
+      kls_scatter_subtract(x, li, lx, lcol_len, ujk);
+    }
   }
 }
 
@@ -61196,8 +61201,8 @@ static int kls_egraph_refactor_prefactor_finished_btf_deps(
       continue;
     }
     kls_egraph_refactor_apply_btf_scalar_dep(
-      shared, solver, k1, current_global, dep_local, scan, ux, l_indices,
-      l_values, llen, x, record_u_value);
+      shared, k1, current_global, dep_local, scan, ux, l_indices,
+      solver->refactor_l_indices32, l_values, llen, x, record_u_value);
     applied[scan] = 1u;
     (*prefactor_deps_out)++;
   }
@@ -61647,6 +61652,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
   double *x = worker->x;
   double *udiag = (double *)numeric->Udiag;
   UF_long **l_indices = solver->refactor_l_indices;
+  int32_t **l_indices32 = solver->refactor_l_indices32;
   double **l_values = solver->refactor_l_values;
   UF_long **u_indices = solver->refactor_u_indices;
   double **u_values = solver->refactor_u_values;
@@ -61783,7 +61789,8 @@ static int kls_egraph_refactor_btf_unscaled_column(
           return 0;
         }
         kls_egraph_refactor_apply_btf_scalar_dep(
-          shared, solver, k1, k, j, up, ux, l_indices, l_values, llen, x, 0);
+          shared, k1, k, j, up, ux, l_indices, l_indices32, l_values,
+          llen, x, 0);
         if (algorithm5_prefactor_applied != NULL) {
           algorithm5_prefactor_applied[up] = 1u;
         }
@@ -61793,7 +61800,8 @@ static int kls_egraph_refactor_btf_unscaled_column(
       while (up < ucol_len) {
         const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
         kls_egraph_refactor_apply_btf_scalar_dep(
-          shared, solver, k1, k, j, up, ux, l_indices, l_values, llen, x, 0);
+          shared, k1, k, j, up, ux, l_indices, l_indices32, l_values,
+          llen, x, 0);
         up++;
       }
     }
@@ -61889,8 +61897,8 @@ static int kls_egraph_refactor_btf_unscaled_column(
         return 0;
       }
       kls_egraph_refactor_apply_btf_scalar_dep(
-        shared, solver, k1, k, j, up, ux, l_indices, l_values, llen, x,
-        u_supernode_values);
+        shared, k1, k, j, up, ux, l_indices, l_indices32, l_values,
+        llen, x, u_supernode_values);
       if (algorithm5_prefactor_applied != NULL) {
         algorithm5_prefactor_applied[up] = 1u;
       }
@@ -61942,10 +61950,15 @@ static int kls_egraph_refactor_btf_unscaled_column(
 
       if (ujk != 0.0) {
         UF_long *li = l_indices[k1 + j];
+        const int32_t *li32 =
+          l_indices32 != NULL ? l_indices32[k1 + j] : NULL;
         double *lx = l_values[k1 + j];
         UF_long lcol_len = llen[j];
-        kls_scatter_subtract_refactor_l(solver, x, k1 + j, li, lx, lcol_len,
-                                        ujk);
+        if (li32 != NULL || lcol_len == 0u) {
+          kls_scatter_subtract_i32(x, li32, lx, lcol_len, ujk);
+        } else {
+          kls_scatter_subtract(x, li, lx, lcol_len, ujk);
+        }
       }
       up++;
     }

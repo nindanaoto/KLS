@@ -12130,3 +12130,24 @@ rejects active dependency bucketing as the clear missing CKTSO/SubtreeLU paper
 piece. The dominant loss is still the surrounding grouped sparse-state executor:
 it seeds and updates too much per-current state before the producer-panel work
 is coarse enough to amortize that cost.
+
+The scalar BTF EGraph dependency hot path now passes the already-built
+32-bit L-row alias table directly into `kls_egraph_refactor_apply_btf_scalar_dep`
+and into the inline non-wait BTF scatter. This removes a per-dependency lookup
+through `solver->refactor_l_indices32` and a helper branch from the path that
+callgrind identified as the hard ASIC refactor bottleneck. It is not the missing
+CKTSO/SubtreeLU grouped executor, but it is a default-path cleanup on the same
+measured scalar dependency stream. Validation passed `cmake --build build -j2`,
+`./build/kls_smoke`, and `ctest --test-dir build --output-on-failure`.
+The same-source top-five CKTSO-gap baseline before the change measured
+`1.4820s` in
+`build/kls_active_map_default_gap5_t4_r1_ref3_timeout120.jsonl`; two candidate
+runs measured `1.4184s` and `1.4151s` in
+`build/kls_btf_i32_direct_gap5_t4_r1_ref3_timeout120.jsonl` and
+`build/kls_btf_i32_direct_gap5_t4_r1_ref3_timeout120_r2.jsonl`. A stashed
+same-source top-ten baseline measured `2.3084s` in
+`build/kls_pre_i32_direct_gap10_t4_r1_ref3_timeout120.jsonl`; the candidate
+measured `2.2805s` in
+`build/kls_btf_i32_direct_gap10_t4_r1_ref3_timeout120.jsonl`. This is a small
+accepted scalar cleanup, not evidence that scalar tuning replaces the still
+missing grouped producer/current-state executor.
