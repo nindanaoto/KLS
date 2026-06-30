@@ -11764,3 +11764,28 @@ focused control stayed normal at `1.4497s` in
 confirms the refactor gap is large, structured, and paper-aligned, but the
 next implementation should stream or own current states inside a grouped
 executor instead of pre-materializing every advance row.
+
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS=1` now makes
+that state diagnostic bounded and self-contained. The focus flag triggers the
+retained consumer plan, the group-L cache, and the state scan, but only stores
+the largest advance-valid groups that fit the current focus cap
+(`64` groups and `64MB` of state rows plus run pointers). It still counts the
+full candidate surface, so it is a descriptor for a future grouped executor
+rather than a speed path.
+
+On `ASIC_100ks` with 4 threads, one factor, and one refactor, the focus probe
+`build/kls_group_l_state_focus_asic100ks_t4_r1_ref1.json` reported a clean
+residual (`relative_residual_l2=1.9225e-15`), `1,556,952` dependency edges,
+`8,434` candidate groups, `152,496` candidate runs, and `72,670,355`
+candidate rows. The bounded state retained `16` groups, `7,375` runs, and
+`8,228,308` rows at exactly `67,108,864` bytes, with
+`refactor_supernode_consumer_plan_group_l_state_storage_limited=1`. The
+same-source no-state control
+`build/kls_group_l_state_focus_asic100ks_default_t4_r1_ref1.json` kept group-L
+state counters at zero and refactored in `0.0390s`, while the focus scan took
+`12.1663s`. That cost is expected because focus mode still walks the whole
+advance surface; the important result is that KLS can now inspect the largest
+grouped refactor states without allocating the previous hundreds of megabytes
+of row-state arrays. The next refactor implementation should consume this
+shape as an owned/streaming group executor, not by materializing another
+diagnostic table.

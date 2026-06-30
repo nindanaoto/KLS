@@ -1644,6 +1644,21 @@ int main(int argc, char **argv) {
            PRId64
            ",\"refactor_supernode_consumer_plan_group_l_state_bytes\":%"
            PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_focus_enabled\":%d"
+           ",\"refactor_supernode_consumer_plan_group_l_state_candidate_group_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_candidate_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_candidate_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_selected_group_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_selected_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_selected_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_selected_bytes\":%"
+           PRId64
            ",\"refactor_last_supernode_consumer_plan_group_l_dense_writes\":%"
            PRId64
            ",\"refactor_last_supernode_consumer_plan_group_l_trailing_writes\":%"
@@ -1858,6 +1873,18 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_group_l_state_rows,
            stats.refactor_supernode_consumer_plan_group_l_state_max_rows,
            stats.refactor_supernode_consumer_plan_group_l_state_bytes,
+           stats.refactor_supernode_consumer_plan_group_l_state_focus_enabled,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_candidate_group_count,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_candidate_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_state_candidate_rows,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_selected_group_count,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_selected_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_state_selected_rows,
+           stats.refactor_supernode_consumer_plan_group_l_state_selected_bytes,
            stats.refactor_last_supernode_consumer_plan_group_l_dense_writes,
            stats.refactor_last_supernode_consumer_plan_group_l_trailing_writes,
            stats.refactor_last_supernode_consumer_plan_group_l_invalidations,
@@ -2078,6 +2105,21 @@ int main(int argc, char **argv) {
            PRId64
            ",\"refactor_supernode_consumer_plan_group_l_state_bytes\":%"
            PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_focus_enabled\":%d"
+           ",\"refactor_supernode_consumer_plan_group_l_state_candidate_group_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_candidate_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_candidate_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_selected_group_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_selected_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_selected_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_group_l_state_selected_bytes\":%"
+           PRId64
            ",\"refactor_last_supernode_consumer_plan_group_l_dense_writes\":%"
            PRId64
            ",\"refactor_last_supernode_consumer_plan_group_l_trailing_writes\":%"
@@ -2192,6 +2234,18 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_group_l_state_rows,
            stats.refactor_supernode_consumer_plan_group_l_state_max_rows,
            stats.refactor_supernode_consumer_plan_group_l_state_bytes,
+           stats.refactor_supernode_consumer_plan_group_l_state_focus_enabled,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_candidate_group_count,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_candidate_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_state_candidate_rows,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_selected_group_count,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_selected_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_state_selected_rows,
+           stats.refactor_supernode_consumer_plan_group_l_state_selected_bytes,
            stats.refactor_last_supernode_consumer_plan_group_l_dense_writes,
            stats.refactor_last_supernode_consumer_plan_group_l_trailing_writes,
            stats.refactor_last_supernode_consumer_plan_group_l_invalidations,
@@ -3751,8 +3805,10 @@ int main(int argc, char **argv) {
            ", group L %d/%d %" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64
-           ", group L state %d/%d %" PRId64 "/%" PRId64 "/%" PRId64
-           "/%" PRId64
+          ", group L state %d/%d focus %d stored %" PRId64 "/%" PRId64
+          "/%" PRId64 "/%" PRId64
+          " candidate %" PRId64 "/%" PRId64 "/%" PRId64
+          " selected %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            ", group L batch candidates %" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64
            ", group L batch advance %" PRId64 "/%" PRId64 "/%" PRId64
@@ -3986,10 +4042,22 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_group_l_bytes,
            stats.refactor_supernode_consumer_plan_group_l_state_built,
            stats.refactor_supernode_consumer_plan_group_l_state_storage_limited,
+           stats.refactor_supernode_consumer_plan_group_l_state_focus_enabled,
            stats.refactor_supernode_consumer_plan_group_l_state_run_count,
            stats.refactor_supernode_consumer_plan_group_l_state_rows,
            stats.refactor_supernode_consumer_plan_group_l_state_max_rows,
            stats.refactor_supernode_consumer_plan_group_l_state_bytes,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_candidate_group_count,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_candidate_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_state_candidate_rows,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_selected_group_count,
+           stats
+             .refactor_supernode_consumer_plan_group_l_state_selected_run_count,
+           stats.refactor_supernode_consumer_plan_group_l_state_selected_rows,
+           stats.refactor_supernode_consumer_plan_group_l_state_selected_bytes,
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_count,
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_run_count,
            stats.refactor_supernode_consumer_plan_group_l_batch_candidate_run_rows,

@@ -999,6 +999,14 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_group_l_state_rows;
   int64_t refactor_supernode_consumer_plan_group_l_state_max_rows;
   int64_t refactor_supernode_consumer_plan_group_l_state_bytes;
+  int refactor_supernode_consumer_plan_group_l_state_focus_enabled;
+  int64_t refactor_supernode_consumer_plan_group_l_state_candidate_group_count;
+  int64_t refactor_supernode_consumer_plan_group_l_state_candidate_run_count;
+  int64_t refactor_supernode_consumer_plan_group_l_state_candidate_rows;
+  int64_t refactor_supernode_consumer_plan_group_l_state_selected_group_count;
+  int64_t refactor_supernode_consumer_plan_group_l_state_selected_run_count;
+  int64_t refactor_supernode_consumer_plan_group_l_state_selected_rows;
+  int64_t refactor_supernode_consumer_plan_group_l_state_selected_bytes;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -6316,6 +6316,17 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       ? strdup(saved_algorithm5_prefix_prep_value) : NULL;
   const int had_algorithm5_prefix_prep =
     saved_algorithm5_prefix_prep_value != NULL;
+  const char *saved_group_l_state_value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE");
+  char *saved_group_l_state =
+    saved_group_l_state_value != NULL ? strdup(saved_group_l_state_value) : NULL;
+  const int had_group_l_state = saved_group_l_state_value != NULL;
+  const char *saved_group_l_state_focus_value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS");
+  char *saved_group_l_state_focus =
+    saved_group_l_state_focus_value != NULL
+      ? strdup(saved_group_l_state_focus_value) : NULL;
+  const int had_group_l_state_focus = saved_group_l_state_focus_value != NULL;
 
   kls_solver *solver = NULL;
   kls_options options;
@@ -6361,7 +6372,9 @@ static int test_egraph_cached_supernode_blocked_update(void) {
        saved_algorithm5_direct_prefix_live_state == NULL) ||
       (had_algorithm5_workspace && saved_algorithm5_workspace == NULL) ||
       (had_algorithm5_slot_accum && saved_algorithm5_slot_accum == NULL) ||
-      (had_algorithm5_prefix_prep && saved_algorithm5_prefix_prep == NULL)) {
+      (had_algorithm5_prefix_prep && saved_algorithm5_prefix_prep == NULL) ||
+      (had_group_l_state && saved_group_l_state == NULL) ||
+      (had_group_l_state_focus && saved_group_l_state_focus == NULL)) {
     fprintf(stderr, "failed to save EGraph blocked environment\n");
     ok = 0;
   }
@@ -6574,6 +6587,20 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     perror(
       "setenv "
       "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_LIVE_STATE=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE", "0",
+             1) != 0) {
+    perror(
+      "setenv KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS",
+             "0", 1) != 0) {
+    perror(
+      "setenv KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS=0");
     ok = 0;
   }
   if (ok &&
@@ -6884,6 +6911,16 @@ static int test_egraph_cached_supernode_blocked_update(void) {
         had_algorithm5_prefix_prep, saved_algorithm5_prefix_prep)) {
     ok = 0;
   }
+  if (!restore_env_value(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE",
+        had_group_l_state, saved_group_l_state)) {
+    ok = 0;
+  }
+  if (!restore_env_value(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS",
+        had_group_l_state_focus, saved_group_l_state_focus)) {
+    ok = 0;
+  }
 
   free(saved_row);
   free(saved_checked);
@@ -6917,6 +6954,8 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   free(saved_algorithm5_workspace);
   free(saved_algorithm5_slot_accum);
   free(saved_algorithm5_prefix_prep);
+  free(saved_group_l_state);
+  free(saved_group_l_state_focus);
   kls_destroy(solver);
   free(ap);
   free(ai);
