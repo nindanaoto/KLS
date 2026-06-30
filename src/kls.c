@@ -61793,12 +61793,17 @@ static int kls_egraph_refactor_single_unscaled_column(
   const int algorithm5_prefactor_enabled =
     wait_for_dependencies && shared->algorithm5_prefactor_updates &&
     ucol_len > 1u;
+  const int algorithm5_seed_active =
+    shared->supernode_algorithm5_payoff_direct_prefix_current_state ||
+    shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
   unsigned char *algorithm5_prefactor_applied = NULL;
-  const int advance_seed_status =
-    kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
-      worker, 0u, k, k, &up, ucol_len, ui, ux, x);
-  if (advance_seed_status < 0) {
-    return 0;
+  if (algorithm5_seed_active) {
+    const int advance_seed_status =
+      kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
+        worker, 0u, k, k, &up, ucol_len, ui, ux, x);
+    if (advance_seed_status < 0) {
+      return 0;
+    }
   }
   while (up < ucol_len) {
     if (algorithm5_prefactor_applied != NULL &&
@@ -61806,14 +61811,16 @@ static int kls_egraph_refactor_single_unscaled_column(
       up++;
       continue;
     }
-    const int advance_seed_loop_status =
-      kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
-        worker, 0u, k, k, &up, ucol_len, ui, ux, x);
-    if (advance_seed_loop_status < 0) {
-      return 0;
-    }
-    if (advance_seed_loop_status > 0) {
-      continue;
+    if (algorithm5_seed_active) {
+      const int advance_seed_loop_status =
+        kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
+          worker, 0u, k, k, &up, ucol_len, ui, ux, x);
+      if (advance_seed_loop_status < 0) {
+        return 0;
+      }
+      if (advance_seed_loop_status > 0) {
+        continue;
+      }
     }
     const int batch_paths_allowed =
       algorithm5_prefactor_deps == 0u;
@@ -62010,12 +62017,17 @@ static int kls_egraph_refactor_single_scaled_column(
   const int algorithm5_prefactor_enabled =
     wait_for_dependencies && shared->algorithm5_prefactor_updates &&
     ucol_len > 1u;
+  const int algorithm5_seed_active =
+    shared->supernode_algorithm5_payoff_direct_prefix_current_state ||
+    shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
   unsigned char *algorithm5_prefactor_applied = NULL;
-  const int advance_seed_status =
-    kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
-      worker, 0u, k, k, &up, ucol_len, ui, ux, x);
-  if (advance_seed_status < 0) {
-    return 0;
+  if (algorithm5_seed_active) {
+    const int advance_seed_status =
+      kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
+        worker, 0u, k, k, &up, ucol_len, ui, ux, x);
+    if (advance_seed_status < 0) {
+      return 0;
+    }
   }
   while (up < ucol_len) {
     if (algorithm5_prefactor_applied != NULL &&
@@ -62023,14 +62035,16 @@ static int kls_egraph_refactor_single_scaled_column(
       up++;
       continue;
     }
-    const int advance_seed_loop_status =
-      kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
-        worker, 0u, k, k, &up, ucol_len, ui, ux, x);
-    if (advance_seed_loop_status < 0) {
-      return 0;
-    }
-    if (advance_seed_loop_status > 0) {
-      continue;
+    if (algorithm5_seed_active) {
+      const int advance_seed_loop_status =
+        kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
+          worker, 0u, k, k, &up, ucol_len, ui, ux, x);
+      if (advance_seed_loop_status < 0) {
+        return 0;
+      }
+      if (advance_seed_loop_status > 0) {
+        continue;
+      }
     }
     const int batch_paths_allowed =
       algorithm5_prefactor_deps == 0u;
@@ -62278,12 +62292,17 @@ static int kls_egraph_refactor_btf_unscaled_column(
   const int algorithm5_prefactor_enabled =
     wait_for_dependencies && shared->algorithm5_prefactor_updates &&
     ucol_len > 1u;
+  const int algorithm5_seed_active =
+    shared->supernode_algorithm5_payoff_direct_prefix_current_state ||
+    shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
   unsigned char *algorithm5_prefactor_applied = NULL;
-  const int advance_seed_status =
-    kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
-      worker, k1, k, local_k, &up, ucol_len, ui, ux, x);
-  if (advance_seed_status < 0) {
-    return 0;
+  if (algorithm5_seed_active) {
+    const int advance_seed_status =
+      kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
+        worker, k1, k, local_k, &up, ucol_len, ui, ux, x);
+    if (advance_seed_status < 0) {
+      return 0;
+    }
   }
   /* Cluster columns already have their predecessors published; keep that
      CKTSO-style cluster loop free of the per-entry wait check used below. */
@@ -62295,14 +62314,16 @@ static int kls_egraph_refactor_btf_unscaled_column(
           up++;
           continue;
         }
-        const int advance_seed_loop_status =
-          kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
-            worker, k1, k, local_k, &up, ucol_len, ui, ux, x);
-        if (advance_seed_loop_status < 0) {
-          return 0;
-        }
-        if (advance_seed_loop_status > 0) {
-          continue;
+        if (algorithm5_seed_active) {
+          const int advance_seed_loop_status =
+            kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
+              worker, k1, k, local_k, &up, ucol_len, ui, ux, x);
+          if (advance_seed_loop_status < 0) {
+            return 0;
+          }
+          if (advance_seed_loop_status > 0) {
+            continue;
+          }
         }
         const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
         if (algorithm5_prefactor_enabled &&
@@ -62352,14 +62373,16 @@ static int kls_egraph_refactor_btf_unscaled_column(
         up++;
         continue;
       }
-      const int advance_seed_loop_status =
-        kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
-          worker, k1, k, local_k, &up, ucol_len, ui, ux, x);
-      if (advance_seed_loop_status < 0) {
-        return 0;
-      }
-      if (advance_seed_loop_status > 0) {
-        continue;
+      if (algorithm5_seed_active) {
+        const int advance_seed_loop_status =
+          kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
+            worker, k1, k, local_k, &up, ucol_len, ui, ux, x);
+        if (advance_seed_loop_status < 0) {
+          return 0;
+        }
+        if (advance_seed_loop_status > 0) {
+          continue;
+        }
       }
       const int batch_paths_allowed =
         algorithm5_prefactor_deps == 0u;
@@ -62717,12 +62740,17 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   const int algorithm5_prefactor_enabled =
     wait_for_dependencies && shared->algorithm5_prefactor_updates &&
     ucol_len > 1u;
+  const int algorithm5_seed_active =
+    shared->supernode_algorithm5_payoff_direct_prefix_current_state ||
+    shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
   unsigned char *algorithm5_prefactor_applied = NULL;
-  const int advance_seed_status =
-    kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
-      worker, k1, k, local_k, &up, ucol_len, ui, ux, x);
-  if (advance_seed_status < 0) {
-    return 0;
+  if (algorithm5_seed_active) {
+    const int advance_seed_status =
+      kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
+        worker, k1, k, local_k, &up, ucol_len, ui, ux, x);
+    if (advance_seed_status < 0) {
+      return 0;
+    }
   }
   while (up < ucol_len) {
     if (algorithm5_prefactor_applied != NULL &&
@@ -62730,14 +62758,16 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
       up++;
       continue;
     }
-    const int advance_seed_loop_status =
-      kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
-        worker, k1, k, local_k, &up, ucol_len, ui, ux, x);
-    if (advance_seed_loop_status < 0) {
-      return 0;
-    }
-    if (advance_seed_loop_status > 0) {
-      continue;
+    if (algorithm5_seed_active) {
+      const int advance_seed_loop_status =
+        kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_advance(
+          worker, k1, k, local_k, &up, ucol_len, ui, ux, x);
+      if (advance_seed_loop_status < 0) {
+        return 0;
+      }
+      if (advance_seed_loop_status > 0) {
+        continue;
+      }
     }
     const int batch_paths_allowed =
       algorithm5_prefactor_deps == 0u;

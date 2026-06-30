@@ -12344,3 +12344,24 @@ clean at `1.41046s` in
 This is a useful refactor-path cleanup, but it is not the paper-level gap
 closer: the slow cases still need the production row-major grouped numeric
 owner rather than per-row scalar private-group bookkeeping.
+
+The default EGraph refactor loop now also skips the dormant Algorithm 5
+direct-prefix seed probe before calling into its helper. The helper already
+returned immediately when the opt-in current-state/advance-seed executors were
+inactive, but the hard ASIC profile still charged the inactive call chain inside
+the repeated scalar dependency stream. The change gates the helper at the four
+EGraph refactor loops and preserves the explicit
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_ADVANCE_SEED`
+path. Verification passed `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_ADVANCE_SEED=1 ./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and `git diff --check`. Focused
+top-five CKTSO-gap timing stayed neutral at the cycle level:
+`build/kls_seed_guard_gap5_t4_r1_ref3_timeout120.jsonl` measured `1.41525s`
+geomean and repeat
+`build/kls_seed_guard_gap5_t4_r1_ref3_timeout120_r2.jsonl` measured
+`1.42174s`, versus the retained default artifact at `1.41046s`; refactor-only
+geomean was essentially unchanged (`0.00905s` and `0.00913s` versus
+`0.00913s`). This is worth keeping as a default hot-loop cleanup, but it does
+not change the paper-level conclusion: inactive probes and BLAS thresholds are
+not the first-order CKTSO gap; the missing mechanism is still the grouped
+row-major/supernode current-state numeric owner.
