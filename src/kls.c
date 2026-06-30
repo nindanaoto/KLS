@@ -74,7 +74,10 @@
 #define KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS 1024u
 #define KLS_REFACTOR_PLAN_GROUP_L_VALID 1u
 #define KLS_REFACTOR_PLAN_GROUP_L_PAYOFF 2u
+#define KLS_REFACTOR_PLAN_GROUP_L_ADVANCE 4u
 #define KLS_REFACTOR_PLAN_GROUP_L_CACHE_MAX_BYTES \
+  ((size_t)1024u * 1024u * 1024u)
+#define KLS_REFACTOR_PLAN_GROUP_L_STATE_MAX_BYTES \
   ((size_t)1024u * 1024u * 1024u)
 #define KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS 32768u
 #define KLS_ROW_FIRST_MISSED_PANEL_CACHE_MAX_STORED_ENTRIES 4194304u
@@ -688,11 +691,15 @@ struct kls_solver {
   UF_long *refactor_supernode_consumer_plan_group_l_run_group;
   double *refactor_supernode_consumer_plan_group_l_dense_values;
   double *refactor_supernode_consumer_plan_group_l_values;
+  UF_long *refactor_supernode_consumer_plan_group_l_state_ptr;
+  UF_long *refactor_supernode_consumer_plan_group_l_state_row_idx;
   int refactor_supernode_consumer_plan_col_sorted;
   int refactor_supernode_consumer_plan_dep_pos_sorted;
   int refactor_supernode_consumer_plan_built;
   int refactor_supernode_consumer_plan_group_l_built;
   int refactor_supernode_consumer_plan_group_l_storage_limited;
+  int refactor_supernode_consumer_plan_group_l_state_built;
+  int refactor_supernode_consumer_plan_group_l_state_storage_limited;
   UF_long refactor_supernode_consumer_plan_panel_count;
   UF_long refactor_supernode_consumer_plan_reused_panel_count;
   UF_long refactor_supernode_consumer_plan_run_count;
@@ -908,6 +915,10 @@ struct kls_solver {
   UF_long refactor_supernode_consumer_plan_group_l_dense_entries;
   UF_long refactor_supernode_consumer_plan_group_l_trailing_entries;
   size_t refactor_supernode_consumer_plan_group_l_bytes;
+  UF_long refactor_supernode_consumer_plan_group_l_state_run_count;
+  UF_long refactor_supernode_consumer_plan_group_l_state_rows;
+  UF_long refactor_supernode_consumer_plan_group_l_state_max_rows;
+  size_t refactor_supernode_consumer_plan_group_l_state_bytes;
   UF_long refactor_last_supernode_consumer_plan_group_l_dense_writes;
   UF_long refactor_last_supernode_consumer_plan_group_l_trailing_writes;
   UF_long refactor_last_supernode_consumer_plan_group_l_invalidations;
@@ -2169,6 +2180,14 @@ kls_refactor_supernode_consumer_plan_shape_targets_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int
+kls_refactor_supernode_consumer_plan_group_state_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_refactor_supernode_algorithm5_payoff_plan_env_enabled(void) {
   const char *value =
     getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN");
@@ -2938,11 +2957,29 @@ static void kls_count_supernode_consumer_runs(
   free(panel_internal_entries);
 }
 
+static void kls_free_refactor_supernode_consumer_plan_group_l_state_plan(
+  kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->refactor_supernode_consumer_plan_group_l_state_ptr);
+  free(solver->refactor_supernode_consumer_plan_group_l_state_row_idx);
+  solver->refactor_supernode_consumer_plan_group_l_state_ptr = NULL;
+  solver->refactor_supernode_consumer_plan_group_l_state_row_idx = NULL;
+  solver->refactor_supernode_consumer_plan_group_l_state_built = 0;
+  solver->refactor_supernode_consumer_plan_group_l_state_storage_limited = 0;
+  solver->refactor_supernode_consumer_plan_group_l_state_run_count = 0;
+  solver->refactor_supernode_consumer_plan_group_l_state_rows = 0;
+  solver->refactor_supernode_consumer_plan_group_l_state_max_rows = 0;
+  solver->refactor_supernode_consumer_plan_group_l_state_bytes = 0u;
+}
+
 static void kls_free_refactor_supernode_consumer_plan_group_l_cache(
   kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
+  kls_free_refactor_supernode_consumer_plan_group_l_state_plan(solver);
   free(solver->refactor_supernode_consumer_plan_group_l_valid);
   free(solver->refactor_supernode_consumer_plan_group_l_dense_begin);
   free(solver->refactor_supernode_consumer_plan_group_l_row_begin);
@@ -25561,6 +25598,22 @@ static void fill_numeric_stats(kls_solver *solver) {
       solver->refactor_supernode_consumer_plan_group_l_trailing_entries;
   solver->stats.refactor_supernode_consumer_plan_group_l_bytes =
     (int64_t)solver->refactor_supernode_consumer_plan_group_l_bytes;
+  solver->stats.refactor_supernode_consumer_plan_group_l_state_built =
+    solver->refactor_supernode_consumer_plan_group_l_state_built;
+  solver->stats
+    .refactor_supernode_consumer_plan_group_l_state_storage_limited =
+      solver->refactor_supernode_consumer_plan_group_l_state_storage_limited;
+  solver->stats.refactor_supernode_consumer_plan_group_l_state_run_count =
+    (int64_t)solver
+      ->refactor_supernode_consumer_plan_group_l_state_run_count;
+  solver->stats.refactor_supernode_consumer_plan_group_l_state_rows =
+    (int64_t)solver->refactor_supernode_consumer_plan_group_l_state_rows;
+  solver->stats.refactor_supernode_consumer_plan_group_l_state_max_rows =
+    (int64_t)solver
+      ->refactor_supernode_consumer_plan_group_l_state_max_rows;
+  solver->stats.refactor_supernode_consumer_plan_group_l_state_bytes =
+    (int64_t)solver
+      ->refactor_supernode_consumer_plan_group_l_state_bytes;
   solver->stats.refactor_last_supernode_consumer_plan_group_l_dense_writes =
     (int64_t)
       solver->refactor_last_supernode_consumer_plan_group_l_dense_writes;
@@ -32828,7 +32881,8 @@ static int kls_egraph_ragged_u_supernode_update_allows(
 static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
   kls_solver *solver,
   int keep_publish_values,
-  int keep_batch_candidate_values) {
+  int keep_batch_candidate_values,
+  int keep_advance_candidate_values) {
   if (solver == NULL || !solver->refactor_supernode_consumer_plan_built ||
       solver->numeric == NULL || solver->numeric->Llen == NULL ||
       solver->refactor_l_indices == NULL ||
@@ -33091,6 +33145,7 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
           group_advance_work += run_work;
         }
         if (advance_ok) {
+          valid[group] |= KLS_REFACTOR_PLAN_GROUP_L_ADVANCE;
           if (batch_candidate_advance_count == UF_long_max ||
               runs > UF_long_max - batch_candidate_advance_run_count ||
               run_rows > UF_long_max - batch_candidate_advance_run_rows) {
@@ -33162,7 +33217,10 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
       valid_exec_run_count < KLS_REFACTOR_PLAN_GROUP_L_EXEC_MIN_RUNS &&
       (!keep_batch_candidate_values ||
        batch_candidate_payoff_run_count <
-         KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS)) {
+        KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS) &&
+      (!keep_advance_candidate_values ||
+       batch_candidate_advance_run_count <
+        KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS)) {
     free(valid);
     free(dense_begin);
     free(row_begin);
@@ -33682,7 +33740,11 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
     const int payoff_batch_allowed =
       keep_batch_candidate_values && runs >= 2u &&
       (valid[group] & KLS_REFACTOR_PLAN_GROUP_L_PAYOFF) != 0u;
-    if (!standalone_allowed && !payoff_batch_allowed) {
+    const int advance_state_allowed =
+      keep_advance_candidate_values && runs >= 2u &&
+      (valid[group] & KLS_REFACTOR_PLAN_GROUP_L_ADVANCE) != 0u;
+    if (!standalone_allowed && !payoff_batch_allowed &&
+        !advance_state_allowed) {
       continue;
     }
     for (UF_long pos = runs_begin; pos < runs_end; ++pos) {
@@ -33785,6 +33847,357 @@ static int kls_build_refactor_supernode_consumer_plan_group_l_cache(
   solver->refactor_supernode_consumer_plan_group_l_trailing_entries =
     trailing_total;
   solver->refactor_supernode_consumer_plan_group_l_bytes = cache_bytes;
+  return 1;
+}
+
+static int
+kls_collect_refactor_supernode_consumer_plan_group_l_state_rows(
+  const kls_solver *solver,
+  UF_long run,
+  UF_long *stamp_workspace,
+  UF_long stamp_workspace_size,
+  UF_long stamp,
+  UF_long *rows,
+  UF_long row_capacity,
+  UF_long *row_count_out) {
+  if (row_count_out != NULL) {
+    *row_count_out = 0u;
+  }
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || solver->numeric->Llen == NULL ||
+      solver->numeric->Ulen == NULL ||
+      solver->refactor_supernode_consumer_plan_current == NULL ||
+      solver->refactor_supernode_consumer_plan_dep == NULL ||
+      solver->refactor_supernode_consumer_plan_rows == NULL ||
+      solver->refactor_supernode_consumer_plan_dep_pos == NULL ||
+      solver->refactor_supernode_consumer_plan_block_start == NULL ||
+      solver->refactor_supernode_consumer_plan_shape_group_panel_start == NULL ||
+      solver->refactor_supernode_consumer_plan_shape_group_panel_offset == NULL ||
+      solver->refactor_supernode_consumer_plan_shape_group_rows == NULL ||
+      solver->refactor_supernode_consumer_plan_group_l_valid == NULL ||
+      solver->refactor_supernode_consumer_plan_group_l_run_group == NULL ||
+      stamp_workspace == NULL || stamp_workspace_size == 0u ||
+      stamp == 0u || row_count_out == NULL ||
+      run >= solver->refactor_supernode_consumer_plan_run_count) {
+    return 0;
+  }
+
+  const UF_long group =
+    solver->refactor_supernode_consumer_plan_group_l_run_group[run];
+  if (group == KLS_KLU_EMPTY) {
+    return 1;
+  }
+  if (group >= solver->refactor_supernode_consumer_plan_shape_batch_count) {
+    return 0;
+  }
+  if ((solver->refactor_supernode_consumer_plan_group_l_valid[group] &
+       KLS_REFACTOR_PLAN_GROUP_L_ADVANCE) == 0u) {
+    return 1;
+  }
+
+  const UF_long panel_start =
+    solver->refactor_supernode_consumer_plan_shape_group_panel_start[group];
+  const UF_long panel_offset =
+    solver->refactor_supernode_consumer_plan_shape_group_panel_offset[group];
+  const UF_long width =
+    solver->refactor_supernode_consumer_plan_shape_group_rows[group];
+  const UF_long current =
+    solver->refactor_supernode_consumer_plan_current[run];
+  const UF_long dep =
+    solver->refactor_supernode_consumer_plan_dep[run];
+  const UF_long run_rows =
+    solver->refactor_supernode_consumer_plan_rows[run];
+  const UF_long dep_pos =
+    solver->refactor_supernode_consumer_plan_dep_pos[run];
+  const UF_long plan_block_start =
+    solver->refactor_supernode_consumer_plan_block_start[run];
+  if (width <= 1u || run_rows != width ||
+      panel_start > solver->n || panel_offset > solver->n - panel_start ||
+      current >= solver->n || dep >= current || dep_pos == KLS_KLU_EMPTY ||
+      plan_block_start == KLS_KLU_EMPTY) {
+    return 0;
+  }
+  const UF_long start = panel_start + panel_offset;
+  if (start != dep || start > solver->n || width > solver->n - start) {
+    return 0;
+  }
+
+  UF_long k1 = 0u;
+  UF_long block_size = 0u;
+  UF_long local_start = 0u;
+  if (!kls_refactor_supernode_panel_block_info(
+        solver, start, start + width, &k1, &block_size, &local_start)) {
+    return 0;
+  }
+  if (k1 != plan_block_start || block_size == 0u ||
+      block_size > stamp_workspace_size || local_start >= block_size ||
+      width > block_size - local_start || current < k1 ||
+      current >= k1 + block_size) {
+    return 0;
+  }
+  const UF_long current_local = current - k1;
+  if (local_start >= current_local ||
+      width > current_local - local_start) {
+    return 0;
+  }
+
+  UF_long row_count = 0u;
+  if (solver->refactor_col_ptr == NULL ||
+      (solver->refactor_row_idx == NULL &&
+       solver->refactor_row_idx32 == NULL)) {
+    return 0;
+  }
+  const UF_long scatter_col_begin = solver->refactor_col_ptr[current];
+  const UF_long scatter_end = solver->refactor_col_ptr[current + 1u];
+  if (scatter_col_begin > scatter_end || scatter_end > solver->nnz) {
+    return 0;
+  }
+  UF_long scatter_begin = scatter_col_begin;
+  if (solver->symbolic->nblocks != 1u) {
+    if (solver->refactor_block_start == NULL ||
+        solver->refactor_block_start[current] < scatter_col_begin ||
+        solver->refactor_block_start[current] > scatter_end) {
+      return 0;
+    }
+    scatter_begin = solver->refactor_block_start[current];
+  }
+  if (solver->refactor_row_idx32 != NULL) {
+    const int32_t *input_rows32 = solver->refactor_row_idx32;
+    for (UF_long p = scatter_begin; p < scatter_end; ++p) {
+      const UF_long row = (UF_long)input_rows32[p];
+      if (row >= k1 && row < k1 + block_size &&
+          !kls_algorithm5_payoff_mark_current_state_row(
+            row - k1, stamp_workspace, stamp_workspace_size, stamp, rows,
+            row_capacity, &row_count)) {
+        return 0;
+      }
+    }
+  } else {
+    const UF_long *input_rows = solver->refactor_row_idx;
+    for (UF_long p = scatter_begin; p < scatter_end; ++p) {
+      const UF_long row = input_rows[p];
+      if (row >= k1 && row < k1 + block_size &&
+          !kls_algorithm5_payoff_mark_current_state_row(
+            row - k1, stamp_workspace, stamp_workspace_size, stamp, rows,
+            row_capacity, &row_count)) {
+        return 0;
+      }
+    }
+  }
+
+  const UF_long ulen = solver->numeric->Ulen[current];
+  const int32_t *ui32 =
+    solver->refactor_u_indices32 != NULL
+      ? solver->refactor_u_indices32[current] : NULL;
+  const UF_long *ui =
+    ui32 == NULL && solver->refactor_u_indices != NULL
+      ? solver->refactor_u_indices[current] : NULL;
+  if (dep_pos > ulen || width > ulen - dep_pos ||
+      (dep_pos + width > 0u && ui32 == NULL && ui == NULL)) {
+    return 0;
+  }
+  const UF_long prefix_end = dep_pos + width;
+  for (UF_long p = 0u; p < prefix_end; ++p) {
+    const UF_long j = ui32 != NULL ? (UF_long)ui32[p] : ui[p];
+    if (j >= current_local || j >= block_size) {
+      return 0;
+    }
+    if (p >= dep_pos && j != local_start + (p - dep_pos)) {
+      return 0;
+    }
+    if (!kls_algorithm5_payoff_mark_current_state_row(
+          j, stamp_workspace, stamp_workspace_size, stamp, rows,
+          row_capacity, &row_count)) {
+      return 0;
+    }
+    const UF_long col = k1 + j;
+    if (col >= solver->n) {
+      return 0;
+    }
+    const UF_long llen = solver->numeric->Llen[col];
+    const int32_t *li32 =
+      solver->refactor_l_indices32 != NULL
+        ? solver->refactor_l_indices32[col] : NULL;
+    const UF_long *li =
+      li32 == NULL && solver->refactor_l_indices != NULL
+        ? solver->refactor_l_indices[col] : NULL;
+    if (llen > 0u && li32 == NULL && li == NULL) {
+      return 0;
+    }
+    for (UF_long lp = 0u; lp < llen; ++lp) {
+      const UF_long row = li32 != NULL ? (UF_long)li32[lp] : li[lp];
+      if (row >= block_size ||
+          !kls_algorithm5_payoff_mark_current_state_row(
+            row, stamp_workspace, stamp_workspace_size, stamp, rows,
+            row_capacity, &row_count)) {
+        return 0;
+      }
+    }
+  }
+
+  if (!kls_algorithm5_payoff_mark_current_state_row(
+        current_local, stamp_workspace, stamp_workspace_size, stamp, rows,
+        row_capacity, &row_count)) {
+    return 0;
+  }
+  *row_count_out = row_count;
+  return 1;
+}
+
+static int kls_build_refactor_supernode_consumer_plan_group_l_state_plan(
+  kls_solver *solver) {
+  if (solver == NULL) {
+    return 0;
+  }
+  if (solver->refactor_supernode_consumer_plan_group_l_state_built) {
+    return 1;
+  }
+
+  kls_free_refactor_supernode_consumer_plan_group_l_state_plan(solver);
+  if (!solver->refactor_supernode_consumer_plan_built ||
+      !solver->refactor_supernode_consumer_plan_group_l_built ||
+      solver->symbolic == NULL) {
+    return 0;
+  }
+
+  const UF_long run_count =
+    solver->refactor_supernode_consumer_plan_run_count;
+  const UF_long group_count =
+    solver->refactor_supernode_consumer_plan_shape_batch_count;
+  if (run_count == 0u || group_count == 0u ||
+      solver->refactor_supernode_consumer_plan_group_l_valid == NULL ||
+      solver->refactor_supernode_consumer_plan_group_l_run_group == NULL) {
+    solver->refactor_supernode_consumer_plan_group_l_state_built = 1;
+    return 1;
+  }
+
+  const size_t max_object = (size_t)PTRDIFF_MAX;
+  if (run_count > (UF_long)((max_object / sizeof(UF_long)) - 1u)) {
+    return 0;
+  }
+  UF_long stamp_size = solver->symbolic->maxblock;
+  if (stamp_size == 0u) {
+    stamp_size = solver->n;
+  }
+  if (stamp_size == 0u ||
+      stamp_size > (UF_long)(max_object / sizeof(UF_long))) {
+    return 0;
+  }
+
+  UF_long *state_ptr =
+    (UF_long *)malloc((size_t)(run_count + 1u) * sizeof(*state_ptr));
+  UF_long *stamp_workspace =
+    (UF_long *)calloc((size_t)stamp_size, sizeof(*stamp_workspace));
+  if (state_ptr == NULL || stamp_workspace == NULL) {
+    free(state_ptr);
+    free(stamp_workspace);
+    return 0;
+  }
+
+  UF_long stamp = 0u;
+  UF_long prefix = 0u;
+  UF_long state_run_count = 0u;
+  UF_long state_max_rows = 0u;
+  state_ptr[0] = 0u;
+  for (UF_long run = 0u; run < run_count; ++run) {
+    UF_long run_stamp = 0u;
+    UF_long row_count = 0u;
+    if (!kls_refactor_supernode_algorithm5_next_target_stamp(
+          stamp_workspace, stamp_size, &stamp, &run_stamp) ||
+        !kls_collect_refactor_supernode_consumer_plan_group_l_state_rows(
+          solver, run, stamp_workspace, stamp_size, run_stamp, NULL, 0u,
+          &row_count) ||
+        row_count > UF_long_max - prefix) {
+      free(state_ptr);
+      free(stamp_workspace);
+      return 0;
+    }
+    if (row_count > 0u) {
+      state_run_count++;
+      if (row_count > state_max_rows) {
+        state_max_rows = row_count;
+      }
+    }
+    prefix += row_count;
+    state_ptr[run + 1u] = prefix;
+  }
+
+  size_t state_bytes = 0u;
+#define KLS_ADD_STATE_BYTES(count_, type_) \
+  do { \
+    const size_t kls_count__ = (size_t)(count_); \
+    if ((UF_long)kls_count__ != (count_) || \
+        kls_count__ > SIZE_MAX / sizeof(type_) || \
+        state_bytes > SIZE_MAX - kls_count__ * sizeof(type_)) { \
+      free(state_ptr); \
+      free(stamp_workspace); \
+      return 0; \
+    } \
+    state_bytes += kls_count__ * sizeof(type_); \
+  } while (0)
+  KLS_ADD_STATE_BYTES(run_count + 1u, UF_long);
+  KLS_ADD_STATE_BYTES(prefix, UF_long);
+#undef KLS_ADD_STATE_BYTES
+
+  if (state_bytes > KLS_REFACTOR_PLAN_GROUP_L_STATE_MAX_BYTES) {
+    free(state_ptr);
+    free(stamp_workspace);
+    solver->refactor_supernode_consumer_plan_group_l_state_built = 1;
+    solver->refactor_supernode_consumer_plan_group_l_state_storage_limited =
+      1;
+    solver->refactor_supernode_consumer_plan_group_l_state_run_count =
+      state_run_count;
+    solver->refactor_supernode_consumer_plan_group_l_state_rows = prefix;
+    solver->refactor_supernode_consumer_plan_group_l_state_max_rows =
+      state_max_rows;
+    solver->refactor_supernode_consumer_plan_group_l_state_bytes =
+      state_bytes;
+    return 1;
+  }
+
+  UF_long *state_row_idx =
+    prefix > 0u ? (UF_long *)malloc((size_t)prefix * sizeof(*state_row_idx))
+                : NULL;
+  if (prefix > 0u && state_row_idx == NULL) {
+    free(state_ptr);
+    free(stamp_workspace);
+    return 0;
+  }
+
+  stamp = 0u;
+  memset(stamp_workspace, 0, (size_t)stamp_size * sizeof(*stamp_workspace));
+  for (UF_long run = 0u; run < run_count; ++run) {
+    UF_long run_stamp = 0u;
+    UF_long row_count = 0u;
+    const UF_long begin = state_ptr[run];
+    const UF_long end = state_ptr[run + 1u];
+    if (begin > end || end > prefix ||
+        !kls_refactor_supernode_algorithm5_next_target_stamp(
+          stamp_workspace, stamp_size, &stamp, &run_stamp) ||
+        !kls_collect_refactor_supernode_consumer_plan_group_l_state_rows(
+          solver, run, stamp_workspace, stamp_size, run_stamp,
+          state_row_idx != NULL ? state_row_idx + begin : NULL,
+          end - begin, &row_count) ||
+        row_count != end - begin) {
+      free(state_ptr);
+      free(state_row_idx);
+      free(stamp_workspace);
+      return 0;
+    }
+  }
+
+  free(stamp_workspace);
+  solver->refactor_supernode_consumer_plan_group_l_state_ptr = state_ptr;
+  solver->refactor_supernode_consumer_plan_group_l_state_row_idx =
+    state_row_idx;
+  solver->refactor_supernode_consumer_plan_group_l_state_built = 1;
+  solver->refactor_supernode_consumer_plan_group_l_state_storage_limited = 0;
+  solver->refactor_supernode_consumer_plan_group_l_state_run_count =
+    state_run_count;
+  solver->refactor_supernode_consumer_plan_group_l_state_rows = prefix;
+  solver->refactor_supernode_consumer_plan_group_l_state_max_rows =
+    state_max_rows;
+  solver->refactor_supernode_consumer_plan_group_l_state_bytes = state_bytes;
   return 1;
 }
 
@@ -66128,6 +66541,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     !solver->refactor_supernode_consumer_plan_group_l_batch_exec_disabled;
   const int consumer_plan_group_l_cache_requested =
     kls_refactor_supernode_consumer_plan_group_cache_env_enabled();
+  const int consumer_plan_group_l_state_requested =
+    kls_refactor_supernode_consumer_plan_group_state_env_enabled();
   const int consumer_plan_shape_claims_requested =
     kls_refactor_supernode_consumer_plan_shape_claims_env_enabled();
   const int algorithm5_payoff_claims_requested =
@@ -66268,14 +66683,25 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     consumer_plan_group_l_cache_requested ||
     consumer_plan_group_l_exec_requested ||
     consumer_plan_group_l_batch_exec_env_requested ||
-    consumer_plan_shape_claims_requested;
+    consumer_plan_shape_claims_requested ||
+    consumer_plan_group_l_state_requested;
   if (consumer_plan_group_l_requested) {
     if (!solver->refactor_supernode_consumer_plan_built ||
         !kls_build_refactor_supernode_consumer_plan_group_l_cache(
           solver, consumer_plan_group_l_cache_requested,
           consumer_plan_group_l_batch_exec_requested ||
-            consumer_plan_shape_claims_requested)) {
+            consumer_plan_shape_claims_requested ||
+            consumer_plan_group_l_state_requested,
+          consumer_plan_group_l_state_requested)) {
       return -1;
+    }
+    if (consumer_plan_group_l_state_requested) {
+      if (!kls_build_refactor_supernode_consumer_plan_group_l_state_plan(
+            solver)) {
+        return -1;
+      }
+    } else {
+      kls_free_refactor_supernode_consumer_plan_group_l_state_plan(solver);
     }
   } else if (solver->refactor_supernode_consumer_plan_group_l_built) {
     kls_free_refactor_supernode_consumer_plan_group_l_cache(solver);
@@ -68758,6 +69184,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     kls_refactor_supernode_consumer_plan_group_cache_env_enabled() ||
     kls_refactor_supernode_consumer_plan_group_exec_env_enabled() ||
     kls_refactor_supernode_consumer_plan_group_batch_exec_env_enabled() ||
+    kls_refactor_supernode_consumer_plan_group_state_env_enabled() ||
     kls_refactor_supernode_consumer_plan_shape_claims_env_enabled() ||
     build_algorithm5_payoff_plan ||
     kls_refactor_u_supernode_plan_pattern_env_enabled();

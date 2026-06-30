@@ -993,6 +993,12 @@ typedef struct kls_stats {
   int64_t refactor_last_supernode_algorithm5_payoff_suffix_advance_deps;
   int64_t refactor_last_supernode_algorithm5_payoff_suffix_advance_updates;
   int64_t refactor_last_supernode_algorithm5_payoff_suffix_advance_finished;
+  int refactor_supernode_consumer_plan_group_l_state_built;
+  int refactor_supernode_consumer_plan_group_l_state_storage_limited;
+  int64_t refactor_supernode_consumer_plan_group_l_state_run_count;
+  int64_t refactor_supernode_consumer_plan_group_l_state_rows;
+  int64_t refactor_supernode_consumer_plan_group_l_state_max_rows;
+  int64_t refactor_supernode_consumer_plan_group_l_state_bytes;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

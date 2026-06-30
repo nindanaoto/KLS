@@ -11742,3 +11742,25 @@ the slow ASIC refactor cases. The missing paper-level executor is still the
 coarse grouped numeric owner that reduces those 1.56M scalar BTF dependency
 applications, either by batched prefix advancement or by a multi-current
 producer-panel kernel.
+
+The new opt-in group-L state-plan probe
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE=1` keeps compact
+per-run row-state metadata for grouped consumer-plan runs. It first exposed a
+too-narrow payoff filter: on the hard `ASIC_320ks` and `ASIC_320k` rows the
+old payoff gate retained zero state rows despite `69,341` and `68,260`
+advance-valid candidate runs. KLS now marks advance-valid group-L shapes
+separately from payoff-valid execution shapes, so the diagnostic can retain
+advance-state metadata without enabling those groups in the numeric executor.
+The focused top-five probe
+`build/kls_group_l_state_plan_gap5_t4_r1_ref3_timeout120_v2.jsonl` then showed
+the full advance surface is large: `ASIC_320ks` retained `69,341` state runs,
+`28,823,026` rows, max `2,546` rows, and `231MB`; `ASIC_320k` retained
+`68,260` / `29,211,275` / `2,658` / `234MB`; `ASIC_100ks` retained
+`152,496` / `72,670,355` / `2,588` / `583MB`. The diagnostic itself is
+therefore intentionally not a speed path: the same run regressed to `11.7841s`
+geomean because it materializes the full surface before numerics. The default
+focused control stayed normal at `1.4497s` in
+`build/kls_group_l_state_default_gap5_t4_r1_ref3_timeout120.jsonl`. This
+confirms the refactor gap is large, structured, and paper-aligned, but the
+next implementation should stream or own current states inside a grouped
+executor instead of pre-materializing every advance row.
