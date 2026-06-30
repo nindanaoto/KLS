@@ -13003,3 +13003,18 @@ the missing CKTSO-speed mechanism. The next paper-aligned owner needs to keep a
 multi-current producer/window batch alive and stream the producer L data once
 across that batch, rather than materializing and restoring one sparse state per
 eventual current column.
+
+The default BTF EGraph scalar tail now also skips the dormant direct-complete
+final-state probe before calling its helper. The helper already returned
+immediately unless
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_COMPLETE=1` was
+set, but the inactive call still sat in the repeated unscaled BTF column hot
+path. Correctness passed `cmake --build build -j2`, `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_COMPLETE=1 ./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and `git diff --check`. Focused
+default probes stayed residual-clean: `ASIC_100ks` measured
+`refactor_seconds_avg=0.0470649`, `ASIC_320ks` measured
+`0.0809238`, and the full 41-row CKTSO-gap manifest completed without failures
+at `2.08205s` SPICE-cycle geomean. This is retained as another safe inactive
+probe guard, not as a CKTSO-gap explanation; the missing refactor mechanism is
+still the grouped live current-state owner described above.

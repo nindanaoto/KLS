@@ -65474,11 +65474,13 @@ static int kls_egraph_refactor_btf_unscaled_column(
     !u_supernode_ragged_l_updates && !u_supernode_values;
   const UF_long *llen = numeric->Llen + k1;
   const int complete_status =
-    kls_egraph_refactor_try_complete_algorithm5_payoff_direct_prefix_final_state_btf(
-      worker, k1, k, local_k, nk, ucol_len, ui, ui32, ux, udiag,
-      l_indices, l_values, llen, wait_for_dependencies,
-      supernode_numeric_updates, consumer_plan_group_l_values,
-      u_supernode_ragged_l_updates, u_supernode_values);
+    shared->supernode_algorithm5_payoff_direct_prefix_complete
+      ? kls_egraph_refactor_try_complete_algorithm5_payoff_direct_prefix_final_state_btf(
+          worker, k1, k, local_k, nk, ucol_len, ui, ui32, ux, udiag,
+          l_indices, l_values, llen, wait_for_dependencies,
+          supernode_numeric_updates, consumer_plan_group_l_values,
+          u_supernode_ragged_l_updates, u_supernode_values)
+      : 0;
   if (complete_status < 0) {
     return 0;
   }
