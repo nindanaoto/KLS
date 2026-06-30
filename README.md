@@ -1008,6 +1008,19 @@ of millions of retained target updates and are slower than the default EGraph
 path. This points the next paper-aligned work at direct row-workspace
 supernode-prefix/suffix application, matching CKTSO/SubtreeLU Algorithm 5
 semantics, rather than BLAS threshold tuning.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_PREP=1` is the
+targetless grouped prefix probe. It uses the same selected Algorithm 5
+producer-prefix groups and current-state flags, but the grouped preparation
+pass retains only prefix workspaces and applies only the internal prefix
+triangular work. When the ordinary ragged-L path later consumes a ready slot,
+it streams the dense suffix and L-trailing contribution directly into the
+current column workspace instead of replaying retained target slots. Benchmark
+JSON still reports the skipped suffix/trailing work as
+`refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries`, while
+`refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots` is zero in
+this direct mode. The flag is opt-in: focused CKTSO-gap checks show it removes
+the retained target workspace and improves the retained-target grouped probe,
+but it is still slower than the default EGraph path.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and
