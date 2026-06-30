@@ -65,6 +65,23 @@ The useful paper target is therefore not another BLAS guard and not the current
 single-current/producer-panel replay switches; it is persistent grouped
 Algorithm-5 state with one batch advancing many current workspaces.
 
+The clean rebuild rerun after the rejected selector probe confirms that BLAS is
+not the first-order explanation from this point forward. The same source rebuilt
+from the clean tree measured `1.4454s` top-five CKTSO-gap geomean in
+`build/kls_current_rebuilt_gap5_t4_r1_ref3_timeout120.jsonl`, while the existing
+Algorithm-5 payoff-claims scalar replay path measured `1.8426s` in
+`build/kls_alg5_claims_rebuilt_gap5_t4_r1_ref3_timeout120.jsonl`, with `rajat03`
+regressing most sharply. Forced KLS-first row-up-looking factorization also lost
+at `1.6118s` in `build/kls_klsfirst_forced_gap5_t4_r1_ref3_timeout120.jsonl`.
+The component comparison against
+`build/cktso_paper_medium93_t4_timeout120.jsonl` shows the SPICE-cycle gap on
+the hard ASIC rows is dominated by repeated numeric refactorization: KLS solve
+time is close on `ASIC_320ks`, while refactor time is roughly `3.6x` CKTSO and
+initial factorization is even farther behind but amortized over the 99 repeated
+refactors. KLS fill is only modestly worse on those rows, so the next paper-level
+work should stay on row/producer-panel grouped numeric execution and
+checked-tail scheduling, not BLAS thresholds or matrix-specific ordering tweaks.
+
 A structural selector probe was also rejected. Raising the exact-EGraph work
 floor for the small compact dominant-BTF class from `5.0e5` to `5.0e6` moved
 `rajat03` from EGraph to the mapped path, but worsened the focused top-five
