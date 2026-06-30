@@ -273,6 +273,24 @@ more suffix dependencies"; the current per-current row-state lookup and retained
 state ownership model must be replaced by a grouped multi-current producer/window
 executor that amortizes the duplicate suffix producers.
 
+A bounded prepared-suffix batch owner was also prototyped and rejected before
+commit. The trial added an opt-in
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PREPARED_SUFFIX_BATCH=1` path
+that, while a grouped prefix batch still owned its current states, advanced only
+suffix producers shared by at least two owned currents and left singleton
+producers for the normal later trigger path. The source built cleanly with
+`cmake --build build -j2`, and the focused benchmark completed all five rows
+with clean residuals, but it regressed sharply: the new path measured `4.0739s`
+geomean in
+`build/kls_prepared_suffix_batch_gap5_t4_r1_ref3_timeout120.jsonl` versus
+`2.8150s` for the existing suffix-group path
+`build/kls_prepared_suffix_batch_suffixgroup_gap5_t4_r1_ref3_timeout120.jsonl`
+and `1.4142s` for the same-source default
+`build/kls_prepared_suffix_batch_default_gap5_t4_r1_ref3_timeout120.jsonl`.
+This rejects "batch only the already-owned prepared suffix frontier" as the
+missing paper mechanism; it still spends too much effort on sparse retained
+state setup and row-position validation before a coarse numeric owner exists.
+
 The suffix-group executor now has a first producer-column batched implementation
 behind the same opt-in flag
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE=1`.
