@@ -44,6 +44,22 @@ paper-aligned refactor step should fuse grouped producer-panel advancement and
 prefix application into one multi-current executor instead of publishing
 per-current prepared states for the scalar consumer to replay.
 
+A current-source grouped-final-state probe rejects a tempting shortcut for that
+executor. The trial changed the guarded direct-prefix final-state path in
+`kls_egraph_refactor_apply_algorithm5_payoff_group_prefix_items` from
+current-major replay to a producer-row/current grouped loop. The first version
+used sorted retained-state lookups inside the dense update loop; the focused
+top-five run measured `4.9728s` geomean in
+`build/kls_finalstate_grouped_groupcomplete_gap5_t4_r1_ref3_timeout120.jsonl`
+versus `1.4722s` for the same-source default control
+`build/kls_finalstate_grouped_default_gap5_t4_r1_ref3_timeout120.jsonl`.
+Precomputing prefix and dense-target state positions once per batch did not fix
+the issue: `build/kls_finalstate_grouped_prepos_groupcomplete_gap5_t4_r1_ref3_timeout120.jsonl`
+still measured `4.9402s`. The source change was removed. This closes the
+"just flip the final-state loop order" shortcut; the required paper-level owner
+must carry efficient per-current state-position metadata with the grouped
+numeric task, not rebuild or binary-search state maps during completion.
+
 A direct scalar BTF dispatch split was tested and rejected before commit. The
 prototype added a plain scalar dependency helper for the default BTF refactor
 loop, passed `git diff --check`, `cmake --build build -j2`, `./build/kls_smoke`,
