@@ -2235,6 +2235,23 @@ static int kls_refactor_supernode_consumer_plan_output_stats_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static UF_long
+kls_refactor_supernode_consumer_plan_bounded_advance_dep_limit(void) {
+  const char *value =
+    getenv("KLS_REFACTOR_PLAN_GROUP_L_BOUNDED_ADVANCE_MAX_DEPS");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_REFACTOR_PLAN_GROUP_L_BOUNDED_ADVANCE_MAX_DEPS;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' ||
+      parsed > (unsigned long long)UF_long_max) {
+    return KLS_REFACTOR_PLAN_GROUP_L_BOUNDED_ADVANCE_MAX_DEPS;
+  }
+  return (UF_long)parsed;
+}
+
 static int
 kls_refactor_supernode_consumer_plan_shape_targets_env_enabled(void) {
   const char *value =
@@ -3513,7 +3530,7 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
     0.0;
   solver
     ->refactor_supernode_consumer_plan_shape_bounded_advance_dep_limit =
-      KLS_REFACTOR_PLAN_GROUP_L_BOUNDED_ADVANCE_MAX_DEPS;
+      kls_refactor_supernode_consumer_plan_bounded_advance_dep_limit();
   solver->refactor_supernode_consumer_plan_shape_bounded_advance_count = 0;
   solver
     ->refactor_supernode_consumer_plan_shape_bounded_advance_run_count = 0;
@@ -10820,7 +10837,7 @@ static int kls_build_refactor_supernode_consumer_plan(
   UF_long plan_prefix_advance_batch_max_deps = 0u;
   double plan_prefix_advance_batch_max_work = 0.0;
   const UF_long plan_shape_bounded_advance_dep_limit =
-    KLS_REFACTOR_PLAN_GROUP_L_BOUNDED_ADVANCE_MAX_DEPS;
+    kls_refactor_supernode_consumer_plan_bounded_advance_dep_limit();
   UF_long plan_shape_bounded_advance_count = 0u;
   UF_long plan_shape_bounded_advance_run_count = 0u;
   UF_long plan_shape_bounded_advance_run_rows = 0u;

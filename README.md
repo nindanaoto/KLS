@@ -861,6 +861,12 @@ the batch path follows the same advance-work test instead of executing every
 reusable shape candidate. If one clean numeric pass covers only a small
 fraction of the retained group-L rows, later passes disable the batch executor
 and keep the cache as diagnostic evidence.
+The exact-shape bounded-owner diagnostic uses a default pre-panel advance
+limit of 128 U dependencies and reports the active value through
+`refactor_supernode_consumer_plan_shape_bounded_advance_dep_limit`. Set
+`KLS_REFACTOR_PLAN_GROUP_L_BOUNDED_ADVANCE_MAX_DEPS=<n>` to rerun the same
+retained-plan accounting with a different bound; this changes diagnostic
+counters only and does not enable a numeric executor.
 `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_SHAPE_TARGETS=1` is an
 off-by-default retained-target substrate for the grouped output accumulator
 path. It builds the retained consumer plan, then stores a compact block-local

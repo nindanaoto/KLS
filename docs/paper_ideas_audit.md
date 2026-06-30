@@ -86,6 +86,33 @@ still needs to batch producer work across currents, fuse advancement with prefix
 application, and avoid publishing per-current prepared states that the scalar
 consumer later replays.
 
+The bounded-owner diagnostic limit is now runtime-configurable through
+`KLS_REFACTOR_PLAN_GROUP_L_BOUNDED_ADVANCE_MAX_DEPS`, with the existing `128`
+dependency bound kept as the default and reported in
+`refactor_supernode_consumer_plan_shape_bounded_advance_dep_limit`. This is a
+diagnostic knob only: it changes retained-plan accounting, not numeric
+execution. Validation passed `git diff --check`, `cmake --build build -j2`,
+`./build/kls_smoke`, `ctest --test-dir build --output-on-failure`, and a
+malformed-value smoke check with
+`KLS_REFACTOR_PLAN_GROUP_L_BOUNDED_ADVANCE_MAX_DEPS=not-a-number`.
+
+Rerunning the same top-five exact-shape/group-cache probe at wider bounds
+confirms that merely increasing the bounded prefix window is not enough. The
+new artifacts
+`build/kls_bounded_refactor_owner_512_groupcache_gap5_t4_r1_ref3_timeout120.jsonl`
+and
+`build/kls_bounded_refactor_owner_2048_groupcache_gap5_t4_r1_ref3_timeout120.jsonl`
+completed cleanly. At the default `128` bound, the focused set had `107,423`
+bounded exact-shape run rows and only `5,205` payoff rows. At `512`, bounded
+rows grew to `259,289`, but payoff rows only reached `7,605`. At `2048`, nearly
+the whole exact-shape surface became bounded (`2,438,635` of `2,584,727` run
+rows), yet payoff rows stayed at `7,605` and payoff update entries stayed at
+`376,831`. On the hard ASIC rows this is especially clear: `ASIC_320k` went
+from `21,697` bounded rows at `128` to `754,674` at `2048`, but remained at
+only `96` payoff rows. The next refactor implementation should therefore not
+be a larger bounded-prefix owner; it needs the broader grouped live-workspace or
+row-major supernode owner that reduces the advance stage itself.
+
 The previous compact retained-state probe implemented an opt-in compact plan for
 Algorithm 5 grouped pre-prefix advance:
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_COMPACT_STATE=1`.

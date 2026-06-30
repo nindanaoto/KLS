@@ -115,6 +115,22 @@ def egraph_scalar_numeric_owner_missing(row: dict[str, object]) -> bool:
     return active_grouped_updates == 0
 
 
+def exact_shape_bounded_owner_payoff_tiny(row: dict[str, object]) -> bool:
+    exact_rows = int_value(
+        row, "refactor_supernode_consumer_plan_group_l_batch_candidate_run_rows"
+    )
+    payoff_rows = int_value(
+        row,
+        "refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_rows",
+    )
+    bounded_rows = int_value(
+        row, "refactor_supernode_consumer_plan_shape_bounded_advance_run_rows"
+    )
+    if exact_rows < 100_000 or bounded_rows == 0:
+        return False
+    return share(float(payoff_rows), float(exact_rows)) < 0.01
+
+
 def paper_gap_signal(
     cand: dict[str, float],
     cand_row: dict[str, object],
@@ -186,6 +202,8 @@ def paper_gap_signal(
             return "row_kernel_active"
         if last_refactor_path == "egraph":
             if egraph_scalar_numeric_owner_missing(cand_row):
+                if exact_shape_bounded_owner_payoff_tiny(cand_row):
+                    return "egraph_scalar_bounded_owner_payoff_tiny"
                 if auto_lower_rejected:
                     return "egraph_scalar_tail_numeric_owner_missing"
                 return "egraph_scalar_pipeline_numeric_owner_missing"
