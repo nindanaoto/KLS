@@ -2564,6 +2564,10 @@ int main(int argc, char **argv) {
            PRId64
            ",\"refactor_supernode_algorithm5_payoff_current_state_max_rows\":%"
            PRId64
+           ",\"refactor_supernode_algorithm5_payoff_current_state_span_rows\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_current_state_max_span_rows\":%"
+           PRId64
            ",\"refactor_supernode_algorithm5_payoff_runtime_workspace_rows\":%"
            PRId64
            ",\"refactor_supernode_algorithm5_payoff_runtime_target_slots\":%"
@@ -2652,6 +2656,10 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_payoff_current_state_rows,
            stats
              .refactor_supernode_algorithm5_payoff_current_state_max_rows,
+           stats
+             .refactor_supernode_algorithm5_payoff_current_state_span_rows,
+           stats
+             .refactor_supernode_algorithm5_payoff_current_state_max_span_rows,
            stats.refactor_supernode_algorithm5_payoff_runtime_workspace_rows,
            stats.refactor_supernode_algorithm5_payoff_runtime_target_slots,
            stats.refactor_supernode_algorithm5_payoff_runtime_current_count);
@@ -3900,6 +3908,7 @@ int main(int argc, char **argv) {
            " target slots %" PRId64 "/%" PRId64 "/%" PRId64
            " pattern %" PRId64 "/%" PRId64
            " state rows %" PRId64 "/%" PRId64
+           " state span %" PRId64 "/%" PRId64
            " runtime %" PRId64 "/%" PRId64 "/%" PRId64
            " slot accum %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            " prefix prep %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
@@ -4136,6 +4145,10 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_payoff_current_state_rows,
            stats
              .refactor_supernode_algorithm5_payoff_current_state_max_rows,
+           stats
+             .refactor_supernode_algorithm5_payoff_current_state_span_rows,
+           stats
+             .refactor_supernode_algorithm5_payoff_current_state_max_span_rows,
            stats.refactor_supernode_algorithm5_payoff_runtime_workspace_rows,
            stats.refactor_supernode_algorithm5_payoff_runtime_target_slots,
            stats.refactor_supernode_algorithm5_payoff_runtime_current_count,

@@ -2181,6 +2181,15 @@ sparse-state seeding plus pre-prefix advance work, the opt-in grouped
 sparse-state executor timed out a single-pass `ASIC_320ks` probe under a
 90-second guard. This keeps the target at a different numeric owner, not a
 stricter scalar gate around the existing sparse current-state batch.
+KLS now reports retained Algorithm 5 current-state row spans as
+`refactor_supernode_algorithm5_payoff_current_state_span_rows` and
+`refactor_supernode_algorithm5_payoff_current_state_max_span_rows`. A one-pass
+top-three CKTSO-gap probe showed why a dense retained-state window is not the
+right owner for the hard ASIC rows: `ASIC_320ks` retained `2.57M` sparse state
+rows spanning `703M` dense slots, and `ASIC_320k` retained `2.93M` rows
+spanning `782M` slots. Even compact retained state kept spans above `572M` and
+`698M` slots. The next refactor work should therefore stay on a grouped sparse
+current-state owner rather than a dense row-window conversion.
 
 ## License
 

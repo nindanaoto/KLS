@@ -12658,3 +12658,24 @@ existing sparse current-state batch as the missing CKTSO/SubtreeLU mechanism.
 The problem is not simply selecting fewer high-advance currents; the retained
 executor still materializes and mutates sparse per-current state in a form that
 is too expensive before it reaches the coarse producer-panel work.
+
+To test whether a dense current-state window could be that missing owner, KLS
+now reports the retained Algorithm 5 current-state row span in addition to the
+actual retained row count. The diagnostics are exposed as
+`refactor_supernode_algorithm5_payoff_current_state_span_rows` and
+`refactor_supernode_algorithm5_payoff_current_state_max_span_rows`.
+A one-pass top-three CKTSO-gap plan-only probe
+(`build/kls_alg5_state_span_plan_gap3_t4_r1_ref1.jsonl`) measured
+`10.5621s`, `12.7739s`, and `0.061058s` on `ASIC_320ks`, `ASIC_320k`,
+and `gemat12`, for a `2.0196s` geomean. The two ASIC rows retained
+`2,568,461` and `2,925,515` sparse current-state rows, but those rows spanned
+`703,336,131` and `781,830,290` dense row slots, with per-current maxima of
+about the full block (`320,926`). The compact-state variant
+(`build/kls_alg5_state_span_compact_gap3_t4_r1_ref1.jsonl`) reduced actual
+state rows to `910,070` and `1,067,018`, but still spanned `572,250,409` and
+`698,030,903` row slots while regressing the top-three geomean to `4.6545s`.
+This rejects a naive dense-window retained-state executor for the hard ASIC
+cases: the row ranges are hundreds of times larger than the useful sparse
+state. The paper-aligned target remains a grouped sparse current-state owner
+that keeps live producer/current batches together without copying or scanning
+each current independently.

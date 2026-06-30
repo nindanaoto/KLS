@@ -1047,6 +1047,8 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_group_l_state_selected_run_count;
   int64_t refactor_supernode_consumer_plan_group_l_state_selected_rows;
   int64_t refactor_supernode_consumer_plan_group_l_state_selected_bytes;
+  int64_t refactor_supernode_algorithm5_payoff_current_state_span_rows;
+  int64_t refactor_supernode_algorithm5_payoff_current_state_max_span_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
