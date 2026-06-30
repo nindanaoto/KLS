@@ -66,6 +66,32 @@ closer. The missing paper-aligned piece is therefore not just fewer ready-queue
 groups; it remains a production row-major supernode/current-state numeric
 executor that fuses or avoids the scalar row/current-state work itself.
 
+The compact producer-consumer row update then gained a portable packed scaled
+accumulator for its retained trailing panel update. A callgrind run with
+collection toggled around `kls_refactor` on one-thread forced-row `ASIC_100ks`
+showed `kls_row_refactor_try_compact_supernode_update` at about `34%` of
+isolated refactor instructions, with the inner
+`trailing_workspace += lij * dep_panel` loop accounting for about `16%`. KLS now
+routes that contiguous row-panel operation through one always-inline helper
+used by both the normal compact update and the prefactor compact-supernode
+update. This is not a BLAS threshold change; it keeps the LGPL KLS-owned
+SubtreeLU-style trailing accumulation while making the packed row update a
+first-class numeric kernel primitive.
+
+Against the previous committed control
+`build/kls_control_c76_pass3_gap5_t4_r1_ref3_timeout120.jsonl`, the retained
+helper run
+`build/kls_accum_scaled_pass3_gap5_t4_r1_ref3_timeout120.jsonl` improved the
+forced row-refactor top-five CKTSO-gap pass-3 median geomean from `4.0007s` to
+`3.7969s` (`0.949x`). The three matrices that execute compact supernode
+updates improved together by `0.896x` geomean: `ASIC_320ks` `26.77s -> 23.94s`,
+`ASIC_320k` `31.46s -> 27.16s`, and `ASIC_100ks` `15.54s -> 14.48s`. `gemat12`
+and `rajat03` do not execute compact-supernode updates in this run and moved
+slightly backward within the usual small-matrix noise. This is retained as a
+real row numeric-kernel improvement, but it does not change the broader
+conclusion: KLS still needs the larger production row/segment panel executor to
+make forced row refactor competitive with the default EGraph path and CKTSO.
+
 An active producer-bucket grouped advance executor was prototyped and rejected
 before commit. The trial kept the retained position-coded Algorithm 5
 pre-prefix state plan, but replaced the runtime scan over active current

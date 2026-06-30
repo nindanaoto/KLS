@@ -40,6 +40,23 @@
 #define KLS_ALWAYS_INLINE inline
 #endif
 
+static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
+  double *restrict dst,
+  const double *restrict src,
+  UF_long len,
+  double scale) {
+  UF_long i = 0;
+  for (; i + 4u <= len; i += 4u) {
+    dst[i] += scale * src[i];
+    dst[i + 1u] += scale * src[i + 1u];
+    dst[i + 2u] += scale * src[i + 2u];
+    dst[i + 3u] += scale * src[i + 3u];
+  }
+  for (; i < len; ++i) {
+    dst[i] += scale * src[i];
+  }
+}
+
 #define KLS_KLU_EMPTY ((UF_long)-1)
 #define KLS_ROW_REFACTOR_BATCH_MIN_ROWS 8u
 #define KLS_ROW_REFACTOR_BATCH_MAX_ROWS 16u
@@ -47098,9 +47115,8 @@ static int kls_parallel_row_refactor_prefactor_compact_supernode_update(
     }
     if (trailing_len > 0u) {
       const double *dep_panel = trailing_panel + local_dep * trailing_len;
-      for (UF_long offset = 0; offset < trailing_len; ++offset) {
-        trailing_workspace[offset] += lij * dep_panel[offset];
-      }
+      kls_accumulate_scaled_dense(trailing_workspace, dep_panel,
+                                  trailing_len, lij);
     }
   }
 
@@ -48136,9 +48152,8 @@ static int kls_row_refactor_try_compact_supernode_update(
       }
       if (trailing_len > 0u) {
         const double *dep_panel = trailing_panel + local_dep * trailing_len;
-        for (UF_long offset = 0; offset < trailing_len; ++offset) {
-          trailing_workspace[offset] += lij * dep_panel[offset];
-        }
+        kls_accumulate_scaled_dense(trailing_workspace, dep_panel,
+                                    trailing_len, lij);
       }
     }
     touched_entries += trsv_entries;
@@ -48184,9 +48199,8 @@ static int kls_row_refactor_try_compact_supernode_update(
       touched_entries += width - local_dep - 1u;
       if (trailing_len > 0u && use_trailing_gemv) {
         const double *dep_panel = trailing_panel + local_dep * trailing_len;
-        for (UF_long offset = 0; offset < trailing_len; ++offset) {
-          trailing_workspace[offset] += lij * dep_panel[offset];
-        }
+        kls_accumulate_scaled_dense(trailing_workspace, dep_panel,
+                                    trailing_len, lij);
       } else if (trailing_len > 0u) {
         const double *dep_panel = trailing_panel + local_dep * trailing_len;
         for (UF_long offset = 0; offset < trailing_len; ++offset) {
