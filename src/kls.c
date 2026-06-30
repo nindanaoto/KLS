@@ -1275,12 +1275,24 @@ struct kls_solver {
   UF_long refactor_last_btf_scalar_run_group_claim_triggers;
   UF_long refactor_last_btf_scalar_run_group_claim_groups;
   UF_long refactor_last_btf_scalar_run_group_claim_currents;
+  UF_long refactor_last_btf_scalar_run_group_prefix_ready_currents;
+  UF_long refactor_last_btf_scalar_run_group_prefix_ready_rows;
+  UF_long refactor_last_btf_scalar_run_group_prefix_ready_entries;
+  UF_long refactor_last_btf_scalar_run_group_run_ready_currents;
+  UF_long refactor_last_btf_scalar_run_group_run_ready_rows;
+  UF_long refactor_last_btf_scalar_run_group_run_ready_entries;
   UF_long refactor_btf_scalar_run_group_claim_surface_trigger_count;
   UF_long refactor_btf_scalar_run_group_claim_surface_group_count;
   UF_long refactor_btf_scalar_run_group_claim_surface_current_count;
   UF_long refactor_btf_scalar_run_group_claim_trigger_count;
   UF_long refactor_btf_scalar_run_group_claim_group_count;
   UF_long refactor_btf_scalar_run_group_claim_current_count;
+  UF_long refactor_btf_scalar_run_group_prefix_ready_current_count;
+  UF_long refactor_btf_scalar_run_group_prefix_ready_rows;
+  UF_long refactor_btf_scalar_run_group_prefix_ready_entries;
+  UF_long refactor_btf_scalar_run_group_run_ready_current_count;
+  UF_long refactor_btf_scalar_run_group_run_ready_rows;
+  UF_long refactor_btf_scalar_run_group_run_ready_entries;
   int refactor_supernode_update_disabled;
   UF_long refactor_supernode_update_disable_count;
   UF_long refactor_last_ready_queue_columns;
@@ -1649,6 +1661,7 @@ typedef struct kls_egraph_refactor_shared {
   int btf_scalar_run_exec;
   int btf_scalar_run_group_wait_stats;
   int btf_scalar_run_group_claims;
+  int btf_scalar_run_group_prefix_stats;
   atomic_uint *btf_scalar_run_group_live;
   UF_long btf_scalar_run_group_live_count;
   atomic_ulong btf_scalar_run_candidates;
@@ -1672,6 +1685,12 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong btf_scalar_run_group_claim_triggers;
   atomic_ulong btf_scalar_run_group_claim_groups;
   atomic_ulong btf_scalar_run_group_claim_currents;
+  atomic_ulong btf_scalar_run_group_prefix_ready_currents;
+  atomic_ulong btf_scalar_run_group_prefix_ready_rows;
+  atomic_ulong btf_scalar_run_group_prefix_ready_entries;
+  atomic_ulong btf_scalar_run_group_run_ready_currents;
+  atomic_ulong btf_scalar_run_group_run_ready_rows;
+  atomic_ulong btf_scalar_run_group_run_ready_entries;
   atomic_ulong supernode_consumer_plan_attempts;
   atomic_ulong supernode_consumer_plan_hits;
   atomic_ulong supernode_consumer_plan_applied;
@@ -3028,12 +3047,20 @@ static int kls_refactor_btf_scalar_run_group_claims_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_refactor_btf_scalar_run_group_prefix_stats_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_PREFIX_STATS");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_refactor_btf_scalar_run_groups_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUPS");
   return (value != NULL && value[0] != '\0' &&
           !(value[0] == '0' && value[1] == '\0')) ||
          kls_refactor_btf_scalar_run_group_wait_stats_env_enabled() ||
-         kls_refactor_btf_scalar_run_group_claims_env_enabled();
+         kls_refactor_btf_scalar_run_group_claims_env_enabled() ||
+         kls_refactor_btf_scalar_run_group_prefix_stats_env_enabled();
 }
 
 static void kls_record_supernode_candidate(
@@ -18035,6 +18062,12 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   solver->refactor_last_btf_scalar_run_group_claim_triggers = 0;
   solver->refactor_last_btf_scalar_run_group_claim_groups = 0;
   solver->refactor_last_btf_scalar_run_group_claim_currents = 0;
+  solver->refactor_last_btf_scalar_run_group_prefix_ready_currents = 0;
+  solver->refactor_last_btf_scalar_run_group_prefix_ready_rows = 0;
+  solver->refactor_last_btf_scalar_run_group_prefix_ready_entries = 0;
+  solver->refactor_last_btf_scalar_run_group_run_ready_currents = 0;
+  solver->refactor_last_btf_scalar_run_group_run_ready_rows = 0;
+  solver->refactor_last_btf_scalar_run_group_run_ready_entries = 0;
   solver->refactor_last_supernode_consumer_plan_attempts = 0;
   solver->refactor_last_supernode_consumer_plan_hits = 0;
   solver->refactor_last_supernode_consumer_plan_applied = 0;
@@ -18121,6 +18154,12 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   solver->stats.refactor_last_btf_scalar_run_group_claim_triggers = 0;
   solver->stats.refactor_last_btf_scalar_run_group_claim_groups = 0;
   solver->stats.refactor_last_btf_scalar_run_group_claim_currents = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_prefix_ready_currents = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_prefix_ready_rows = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_prefix_ready_entries = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_run_ready_currents = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_run_ready_rows = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_run_ready_entries = 0;
   solver->stats.refactor_last_supernode_consumer_plan_attempts = 0;
   solver->stats.refactor_last_supernode_consumer_plan_hits = 0;
   solver->stats.refactor_last_supernode_consumer_plan_applied = 0;
@@ -28244,6 +28283,20 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_last_btf_scalar_run_group_claim_groups;
   solver->stats.refactor_last_btf_scalar_run_group_claim_currents =
     (int64_t)solver->refactor_last_btf_scalar_run_group_claim_currents;
+  solver->stats.refactor_last_btf_scalar_run_group_prefix_ready_currents =
+    (int64_t)solver
+      ->refactor_last_btf_scalar_run_group_prefix_ready_currents;
+  solver->stats.refactor_last_btf_scalar_run_group_prefix_ready_rows =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_prefix_ready_rows;
+  solver->stats.refactor_last_btf_scalar_run_group_prefix_ready_entries =
+    (int64_t)solver
+      ->refactor_last_btf_scalar_run_group_prefix_ready_entries;
+  solver->stats.refactor_last_btf_scalar_run_group_run_ready_currents =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_run_ready_currents;
+  solver->stats.refactor_last_btf_scalar_run_group_run_ready_rows =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_run_ready_rows;
+  solver->stats.refactor_last_btf_scalar_run_group_run_ready_entries =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_run_ready_entries;
   solver->stats.refactor_btf_scalar_run_group_claim_surface_trigger_count =
     (int64_t)solver->refactor_btf_scalar_run_group_claim_surface_trigger_count;
   solver->stats.refactor_btf_scalar_run_group_claim_surface_group_count =
@@ -28256,6 +28309,19 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_btf_scalar_run_group_claim_group_count;
   solver->stats.refactor_btf_scalar_run_group_claim_current_count =
     (int64_t)solver->refactor_btf_scalar_run_group_claim_current_count;
+  solver->stats.refactor_btf_scalar_run_group_prefix_ready_current_count =
+    (int64_t)solver
+      ->refactor_btf_scalar_run_group_prefix_ready_current_count;
+  solver->stats.refactor_btf_scalar_run_group_prefix_ready_rows =
+    (int64_t)solver->refactor_btf_scalar_run_group_prefix_ready_rows;
+  solver->stats.refactor_btf_scalar_run_group_prefix_ready_entries =
+    (int64_t)solver->refactor_btf_scalar_run_group_prefix_ready_entries;
+  solver->stats.refactor_btf_scalar_run_group_run_ready_current_count =
+    (int64_t)solver->refactor_btf_scalar_run_group_run_ready_current_count;
+  solver->stats.refactor_btf_scalar_run_group_run_ready_rows =
+    (int64_t)solver->refactor_btf_scalar_run_group_run_ready_rows;
+  solver->stats.refactor_btf_scalar_run_group_run_ready_entries =
+    (int64_t)solver->refactor_btf_scalar_run_group_run_ready_entries;
   solver->stats.refactor_supernode_cached_probe_disabled =
     solver->refactor_supernode_cached_probe_disabled;
   solver->stats.refactor_supernode_cached_probe_disable_count =
@@ -65509,6 +65575,100 @@ static int kls_egraph_refactor_column_dependencies_done(
   return 1;
 }
 
+enum {
+  KLS_BTF_SCALAR_RUN_GROUP_PREFIX_READY = 1,
+  KLS_BTF_SCALAR_RUN_GROUP_RUN_READY = 2
+};
+
+static int kls_egraph_refactor_btf_scalar_run_group_readiness(
+  const kls_egraph_refactor_shared *shared,
+  UF_long current_col,
+  UF_long current_up,
+  UF_long dep0_global,
+  UF_long rows) {
+  if (shared == NULL || shared->solver == NULL ||
+      shared->pipeline_done == NULL || shared->pipeline_generation == 0u ||
+      rows == 0u || current_col >= shared->solver->n ||
+      dep0_global >= shared->solver->n ||
+      rows > shared->solver->n - dep0_global) {
+    return 0;
+  }
+  const kls_solver *solver = shared->solver;
+  if (atomic_load_explicit(&shared->pipeline_done[current_col],
+                           memory_order_acquire) ==
+      shared->pipeline_generation) {
+    return 0;
+  }
+  if (solver->symbolic == NULL || solver->symbolic->R == NULL ||
+      solver->symbolic->nblocks == 0u ||
+      solver->numeric == NULL || solver->numeric->Ulen == NULL ||
+      solver->refactor_u_indices == NULL) {
+    return 0;
+  }
+
+  UF_long block = KLS_KLU_EMPTY;
+  if (solver->symbolic->nblocks == 1u) {
+    block = 0u;
+  } else if (solver->refactor_col_block != NULL) {
+    block = solver->refactor_col_block[current_col];
+  } else {
+    block = kls_block_for_pivot(solver, current_col);
+  }
+  if (block == KLS_KLU_EMPTY || block >= solver->symbolic->nblocks) {
+    return 0;
+  }
+  const UF_long k1 = solver->symbolic->R[block];
+  const UF_long k2 = solver->symbolic->R[block + 1u];
+  if (current_col < k1 || current_col >= k2 ||
+      dep0_global < k1 || dep0_global >= k2 ||
+      rows > k2 - dep0_global || dep0_global >= current_col) {
+    return 0;
+  }
+  const UF_long local_col = current_col - k1;
+  const UF_long dep0_local = dep0_global - k1;
+  const UF_long ulen = solver->numeric->Ulen[current_col];
+  const UF_long *ui = solver->refactor_u_indices[current_col];
+  const int32_t *ui32 =
+    solver->refactor_u_indices32 != NULL
+      ? solver->refactor_u_indices32[current_col] : NULL;
+  if ((ui == NULL && ulen > 0u) || current_up > ulen ||
+      rows > ulen - current_up || dep0_local > local_col) {
+    return 0;
+  }
+  for (UF_long p = 0u; p < current_up; ++p) {
+    const UF_long dep_local = ui32 != NULL ? (UF_long)ui32[p] : ui[p];
+    if (dep_local >= local_col || dep_local > UF_long_max - k1) {
+      return 0;
+    }
+    const UF_long dep_global = k1 + dep_local;
+    if (dep_global >= current_col ||
+        atomic_load_explicit(&shared->pipeline_done[dep_global],
+                             memory_order_acquire) !=
+          shared->pipeline_generation) {
+      return 0;
+    }
+  }
+  for (UF_long r = 0u; r < rows; ++r) {
+    const UF_long dep_local =
+      ui32 != NULL ? (UF_long)ui32[current_up + r] : ui[current_up + r];
+    if (dep_local != dep0_local + r || dep_local >= local_col) {
+      return 0;
+    }
+  }
+
+  int ready = KLS_BTF_SCALAR_RUN_GROUP_PREFIX_READY;
+  for (UF_long r = 0u; r < rows; ++r) {
+    const UF_long dep_global = dep0_global + r;
+    if (dep_global >= current_col ||
+        atomic_load_explicit(&shared->pipeline_done[dep_global],
+                             memory_order_acquire) !=
+          shared->pipeline_generation) {
+      return ready;
+    }
+  }
+  return ready | KLS_BTF_SCALAR_RUN_GROUP_RUN_READY;
+}
+
 static int kls_egraph_refactor_try_claim_btf_scalar_group_column(
   kls_egraph_refactor_shared *shared,
   UF_long col) {
@@ -65552,13 +65712,17 @@ static int kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
   }
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
-  if (solver == NULL || !shared->btf_scalar_run_group_claims ||
+  if (solver == NULL ||
+      (!shared->btf_scalar_run_group_claims &&
+       !shared->btf_scalar_run_group_prefix_stats) ||
       shared->pipeline_ready_queue ||
       producer_col >= solver->n ||
       solver->refactor_btf_scalar_run_group_multi_count == 0u ||
       solver->refactor_btf_scalar_run_group_ptr == NULL ||
       solver->refactor_btf_scalar_run_group_dep0 == NULL ||
-      solver->refactor_btf_scalar_run_group_currents == NULL) {
+      solver->refactor_btf_scalar_run_group_currents == NULL ||
+      solver->refactor_btf_scalar_run_group_current_up == NULL ||
+      solver->refactor_btf_scalar_run_group_current_rows == NULL) {
     return 0;
   }
 
@@ -65586,9 +65750,13 @@ static int kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
     }
     candidate_total += end - begin;
   }
-  if (candidate_total == 0u ||
-      candidate_total > (UF_long)(SIZE_MAX / (2u * sizeof(UF_long)))) {
+  if (candidate_total == 0u) {
     return 0;
+  }
+  if (shared->btf_scalar_run_group_claims &&
+      candidate_total > (UF_long)(SIZE_MAX / (2u * sizeof(UF_long)))) {
+    kls_egraph_refactor_record_invalid(shared);
+    return -1;
   }
   atomic_fetch_add_explicit(
     &shared->btf_scalar_run_group_claim_surface_triggers, 1ul,
@@ -65600,15 +65768,24 @@ static int kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
     &shared->btf_scalar_run_group_claim_surface_currents,
     (unsigned long)candidate_total, memory_order_relaxed);
 
-  UF_long *claimed =
-    (UF_long *)malloc((size_t)(2u * candidate_total) * sizeof(*claimed));
-  if (claimed == NULL) {
+  UF_long *claimed = NULL;
+  if (shared->btf_scalar_run_group_claims) {
+    claimed =
+      (UF_long *)malloc((size_t)(2u * candidate_total) * sizeof(*claimed));
+  }
+  if (shared->btf_scalar_run_group_claims && claimed == NULL) {
     kls_egraph_refactor_record_invalid(shared);
     return -1;
   }
 
   UF_long claim_count = 0u;
   UF_long claimed_groups = 0u;
+  UF_long prefix_ready_currents = 0u;
+  UF_long prefix_ready_rows = 0u;
+  UF_long prefix_ready_entries = 0u;
+  UF_long run_ready_currents = 0u;
+  UF_long run_ready_rows = 0u;
+  UF_long run_ready_entries = 0u;
   for (UF_long group = group_begin; group < group_end; ++group) {
     const UF_long begin = solver->refactor_btf_scalar_run_group_ptr[group];
     const UF_long end = solver->refactor_btf_scalar_run_group_ptr[group + 1u];
@@ -65616,6 +65793,48 @@ static int kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
     for (UF_long pos = begin; pos < end; ++pos) {
       const UF_long candidate =
         solver->refactor_btf_scalar_run_group_currents[pos];
+      const UF_long current_up =
+        solver->refactor_btf_scalar_run_group_current_up[pos];
+      const UF_long current_rows =
+        solver->refactor_btf_scalar_run_group_current_rows[pos];
+      if (shared->btf_scalar_run_group_prefix_stats) {
+        const int ready =
+          kls_egraph_refactor_btf_scalar_run_group_readiness(
+            shared, candidate, current_up, producer_col, current_rows);
+        if ((ready & KLS_BTF_SCALAR_RUN_GROUP_PREFIX_READY) != 0) {
+          prefix_ready_currents++;
+          if (current_rows > UF_long_max - prefix_ready_rows) {
+            prefix_ready_rows = UF_long_max;
+          } else {
+            prefix_ready_rows += current_rows;
+          }
+          const UF_long entries =
+            kls_btf_scalar_run_l_entries(solver, producer_col, current_rows);
+          if (entries > UF_long_max - prefix_ready_entries) {
+            prefix_ready_entries = UF_long_max;
+          } else {
+            prefix_ready_entries += entries;
+          }
+        }
+        if ((ready & KLS_BTF_SCALAR_RUN_GROUP_RUN_READY) != 0) {
+          run_ready_currents++;
+          if (current_rows > UF_long_max - run_ready_rows) {
+            run_ready_rows = UF_long_max;
+          } else {
+            run_ready_rows += current_rows;
+          }
+          const UF_long entries =
+            kls_btf_scalar_run_l_entries(solver, producer_col, current_rows);
+          if (entries > UF_long_max - run_ready_entries) {
+            run_ready_entries = UF_long_max;
+          } else {
+            run_ready_entries += entries;
+          }
+        }
+      }
+      if (!shared->btf_scalar_run_group_claims) {
+        continue;
+      }
       UF_long candidate_pos = KLS_KLU_EMPTY;
       if (candidate == producer_col || candidate >= solver->n ||
           !kls_egraph_refactor_pipeline_position_for_column(
@@ -65633,6 +65852,28 @@ static int kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
     if (group_claimed) {
       claimed_groups++;
     }
+  }
+  if (prefix_ready_currents > 0u) {
+    atomic_fetch_add_explicit(
+      &shared->btf_scalar_run_group_prefix_ready_currents,
+      (unsigned long)prefix_ready_currents, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+      &shared->btf_scalar_run_group_prefix_ready_rows,
+      (unsigned long)prefix_ready_rows, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+      &shared->btf_scalar_run_group_prefix_ready_entries,
+      (unsigned long)prefix_ready_entries, memory_order_relaxed);
+  }
+  if (run_ready_currents > 0u) {
+    atomic_fetch_add_explicit(
+      &shared->btf_scalar_run_group_run_ready_currents,
+      (unsigned long)run_ready_currents, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+      &shared->btf_scalar_run_group_run_ready_rows,
+      (unsigned long)run_ready_rows, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+      &shared->btf_scalar_run_group_run_ready_entries,
+      (unsigned long)run_ready_entries, memory_order_relaxed);
   }
 
   if (claim_count == 0u) {
@@ -71540,6 +71781,12 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->shared.btf_scalar_run_group_claim_triggers, 0ul);
   atomic_init(&pool->shared.btf_scalar_run_group_claim_groups, 0ul);
   atomic_init(&pool->shared.btf_scalar_run_group_claim_currents, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_prefix_ready_currents, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_prefix_ready_rows, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_prefix_ready_entries, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_run_ready_currents, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_run_ready_rows, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_run_ready_entries, 0ul);
   atomic_init(&pool->shared.supernode_consumer_plan_attempts, 0ul);
   atomic_init(&pool->shared.supernode_consumer_plan_hits, 0ul);
   atomic_init(&pool->shared.supernode_consumer_plan_applied, 0ul);
@@ -72790,6 +73037,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_refactor_btf_scalar_run_group_wait_stats_env_enabled();
   const int btf_scalar_run_group_claims_requested =
     kls_refactor_btf_scalar_run_group_claims_env_enabled();
+  const int btf_scalar_run_group_prefix_stats_requested =
+    kls_refactor_btf_scalar_run_group_prefix_stats_env_enabled();
   const int algorithm5_payoff_group_complete_requested =
     kls_refactor_supernode_algorithm5_payoff_group_complete_env_enabled() ||
     algorithm5_payoff_suffix_advance_requested ||
@@ -72990,11 +73239,17 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
     solver->refactor_btf_scalar_run_group_built &&
     solver->refactor_btf_scalar_run_group_multi_count > 0u;
+  const int btf_scalar_run_group_prefix_stats_have_groups =
+    btf_scalar_run_group_prefix_stats_requested &&
+    selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
+    solver->refactor_btf_scalar_run_group_built &&
+    solver->refactor_btf_scalar_run_group_multi_count > 0u;
   const int pipeline_claims_requested =
     consumer_plan_claims_requested || algorithm5_payoff_claims_have_groups ||
     algorithm5_payoff_queue_have_groups ||
     algorithm5_payoff_group_complete_have_groups ||
-    btf_scalar_run_group_claims_have_groups;
+    btf_scalar_run_group_claims_have_groups ||
+    btf_scalar_run_group_prefix_stats_have_groups;
   if (pipeline_claims_requested && pipeline_done == NULL) {
     pipeline_done =
       ensure_egraph_pipeline_done(solver, &pipeline_generation);
@@ -73284,6 +73539,13 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     (btf_scalar_run_group_claims_requested &&
      shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
      pipeline_claimed != NULL &&
+     solver->refactor_btf_scalar_run_group_built &&
+     solver->refactor_btf_scalar_run_group_multi_count > 0u)
+      ? 1 : 0;
+  shared->btf_scalar_run_group_prefix_stats =
+    (btf_scalar_run_group_prefix_stats_requested &&
+     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
+     pipeline_done != NULL &&
      solver->refactor_btf_scalar_run_group_built &&
      solver->refactor_btf_scalar_run_group_multi_count > 0u)
       ? 1 : 0;
@@ -73833,6 +74095,21 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
                         memory_order_release);
   atomic_store_explicit(&shared->btf_scalar_run_group_claim_currents, 0ul,
                         memory_order_release);
+  atomic_store_explicit(
+    &shared->btf_scalar_run_group_prefix_ready_currents, 0ul,
+    memory_order_release);
+  atomic_store_explicit(&shared->btf_scalar_run_group_prefix_ready_rows, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(
+    &shared->btf_scalar_run_group_prefix_ready_entries, 0ul,
+    memory_order_release);
+  atomic_store_explicit(
+    &shared->btf_scalar_run_group_run_ready_currents, 0ul,
+    memory_order_release);
+  atomic_store_explicit(&shared->btf_scalar_run_group_run_ready_rows, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->btf_scalar_run_group_run_ready_entries, 0ul,
+                        memory_order_release);
   atomic_store_explicit(&shared->supernode_consumer_plan_attempts, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->supernode_consumer_plan_hits, 0ul,
@@ -73986,6 +74263,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->btf_scalar_run_exec = 0;
   shared->btf_scalar_run_group_wait_stats = 0;
   shared->btf_scalar_run_group_claims = 0;
+  shared->btf_scalar_run_group_prefix_stats = 0;
   shared->btf_scalar_run_group_live = NULL;
   shared->btf_scalar_run_group_live_count = 0u;
   shared->supernode_consumer_plan_group_l_batch_exec = 0;
@@ -74192,6 +74470,26 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const UF_long btf_scalar_run_group_claim_currents =
     (UF_long)atomic_load_explicit(
       &shared->btf_scalar_run_group_claim_currents, memory_order_acquire);
+  const UF_long btf_scalar_run_group_prefix_ready_currents =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_prefix_ready_currents,
+      memory_order_acquire);
+  const UF_long btf_scalar_run_group_prefix_ready_rows =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_prefix_ready_rows, memory_order_acquire);
+  const UF_long btf_scalar_run_group_prefix_ready_entries =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_prefix_ready_entries,
+      memory_order_acquire);
+  const UF_long btf_scalar_run_group_run_ready_currents =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_run_ready_currents, memory_order_acquire);
+  const UF_long btf_scalar_run_group_run_ready_rows =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_run_ready_rows, memory_order_acquire);
+  const UF_long btf_scalar_run_group_run_ready_entries =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_run_ready_entries, memory_order_acquire);
   const UF_long supernode_consumer_plan_attempts =
     (UF_long)atomic_load_explicit(
       &shared->supernode_consumer_plan_attempts, memory_order_acquire);
@@ -74524,6 +74822,18 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     btf_scalar_run_group_claim_groups;
   solver->refactor_last_btf_scalar_run_group_claim_currents =
     btf_scalar_run_group_claim_currents;
+  solver->refactor_last_btf_scalar_run_group_prefix_ready_currents =
+    btf_scalar_run_group_prefix_ready_currents;
+  solver->refactor_last_btf_scalar_run_group_prefix_ready_rows =
+    btf_scalar_run_group_prefix_ready_rows;
+  solver->refactor_last_btf_scalar_run_group_prefix_ready_entries =
+    btf_scalar_run_group_prefix_ready_entries;
+  solver->refactor_last_btf_scalar_run_group_run_ready_currents =
+    btf_scalar_run_group_run_ready_currents;
+  solver->refactor_last_btf_scalar_run_group_run_ready_rows =
+    btf_scalar_run_group_run_ready_rows;
+  solver->refactor_last_btf_scalar_run_group_run_ready_entries =
+    btf_scalar_run_group_run_ready_entries;
   solver->refactor_btf_scalar_run_group_claim_surface_trigger_count +=
     btf_scalar_run_group_claim_surface_triggers;
   solver->refactor_btf_scalar_run_group_claim_surface_group_count +=
@@ -74536,6 +74846,18 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     btf_scalar_run_group_claim_groups;
   solver->refactor_btf_scalar_run_group_claim_current_count +=
     btf_scalar_run_group_claim_currents;
+  solver->refactor_btf_scalar_run_group_prefix_ready_current_count +=
+    btf_scalar_run_group_prefix_ready_currents;
+  solver->refactor_btf_scalar_run_group_prefix_ready_rows +=
+    btf_scalar_run_group_prefix_ready_rows;
+  solver->refactor_btf_scalar_run_group_prefix_ready_entries +=
+    btf_scalar_run_group_prefix_ready_entries;
+  solver->refactor_btf_scalar_run_group_run_ready_current_count +=
+    btf_scalar_run_group_run_ready_currents;
+  solver->refactor_btf_scalar_run_group_run_ready_rows +=
+    btf_scalar_run_group_run_ready_rows;
+  solver->refactor_btf_scalar_run_group_run_ready_entries +=
+    btf_scalar_run_group_run_ready_entries;
   solver->refactor_last_supernode_consumer_plan_attempts =
     supernode_consumer_plan_attempts;
   solver->refactor_last_supernode_consumer_plan_hits =

@@ -1268,6 +1268,15 @@ marks them done through the normal pipeline path. Benchmark JSON reports last
 and cumulative trigger/group/current surface counts plus the subset actually
 claimed. This opt-in scheduler probe tests whether producer-side current
 locality helps before adding a true multi-workspace grouped numeric owner.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_PREFIX_STATS=1` keeps the same
+producer-completion hook diagnostic-only and asks an earlier paper-level
+question: for each grouped current membership, are all dependencies before the
+contiguous producer run already published, and is the full producer run itself
+ready? Benchmark JSON reports last and cumulative prefix-ready and run-ready
+current/row/entry counts. A large prefix-ready count with a tiny run-ready count
+means the next executor must retain live partial current state and wake it again
+as later producers in the contiguous run complete; a full-column claim at the
+producer-start hook is too late and too restrictive.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
 same BTF scalar producer-run shape. It first waits for every dependency in a
 contiguous run, then applies the run through a local row workspace. Under the

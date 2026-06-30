@@ -12861,3 +12861,24 @@ current state before all dependencies are complete, advance those live
 workspaces through grouped producer runs, and then hand the completed columns
 back to the normal publish path. A scheduler-only current claim does not fill
 that gap.
+
+The prefix-readiness probe fills in the next dependency detail. Under
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_PREFIX_STATS=1`, KLS now checks each
+producer-triggered grouped current membership for two states: all dependencies
+before the contiguous producer run are already published, and the full producer
+run is already published. With both prefix stats and the old claim probe enabled,
+`ASIC_100ks` saw `104,280` schedule-visible memberships, `44,454` prefix-ready
+memberships covering `150,680,054` L entries, but only `246` full-run-ready
+memberships covering `2,937` L entries; full-column claims remained zero.
+`ASIC_320ks` saw `121,701` memberships, `49,742` prefix-ready memberships
+covering `149,632,708` L entries, and only `18` full-run-ready memberships
+covering `1,152` L entries; full-column claims again remained zero. Both probes
+were residual-clean (`1.92251861e-15` and `2.08436857e-15`).
+
+This rejects producer-start dispatch as the whole refactor answer. The useful
+surface is the prefix-ready current state, not an immediately executable full
+producer run. The next implementation should create a retained current-state
+owner for these prefix-ready memberships and register wakeups on later producer
+columns in the contiguous run, so grouped L-stream reuse is applied when the run
+actually becomes ready instead of waiting until the whole current column is
+done.
