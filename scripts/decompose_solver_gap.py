@@ -91,6 +91,14 @@ def fmt_share(value: float) -> str:
     return f"{value:.3f}"
 
 
+def row_refactor_panel_overstage_entries(row: dict[str, object]) -> float:
+    return max(
+        float_value(row, "row_refactor_compact_supernode_update_entries"),
+        float_value(row, "row_refactor_native_row_panel_blocked_entries"),
+        float_value(row, "row_refactor_compact_supernode_batch_entries"),
+    )
+
+
 def paper_gap_signal(
     cand: dict[str, float],
     cand_row: dict[str, object],
@@ -98,6 +106,7 @@ def paper_gap_signal(
     dominant_phase = max(cand, key=cand.get)
     initial_path = str_value(cand_row, "initial_factor_path")
     last_path = str_value(cand_row, "last_factor_path")
+    last_refactor_path = str_value(cand_row, "last_refactor_path")
     row_groups = int_value(cand_row, "row_refactor_group_count")
     row_run = int_value(cand_row, "row_refactor_last_run")
     first_skip_scaled_single = int_value(
@@ -113,10 +122,57 @@ def paper_gap_signal(
     native_rejects = int_value(
         cand_row, "row_refactor_native_row_panel_checked_reject_count"
     )
+    auto_lower_rejected = int_value(
+        cand_row, "row_refactor_auto_lower_bound_rejected"
+    )
+    panel_entries = row_refactor_panel_overstage_entries(cand_row)
+    separator_flop_queue = int_value(
+        cand_row, "row_refactor_last_separator_flop_queue"
+    )
+    separator_private_groups = int_value(
+        cand_row, "row_refactor_last_separator_flop_private_groups"
+    )
+    separator_pipeline_groups = int_value(
+        cand_row, "row_refactor_last_separator_flop_pipeline_groups"
+    )
+    compact_update_rows = int_value(
+        cand_row, "row_refactor_compact_supernode_update_rows"
+    )
+    compact_eligible_rows = int_value(
+        cand_row, "row_refactor_compact_dense_panel_eligible_rows"
+    )
 
     if first_skip_scaled_single:
         return "missing_parallel_rowup_first_factor"
     if dominant_phase == "refactor_99":
+        if last_refactor_path == "row_refactor" or row_run:
+            if native_rejects:
+                return "native_row_panel_checked_reject"
+            if native_fallbacks:
+                return "native_row_panel_fallback"
+            if (
+                panel_entries > 0.0
+                and row_work > 0.0
+                and panel_entries > 1.5 * row_work
+            ):
+                return "row_refactor_panel_overstaged"
+            if separator_flop_queue and separator_private_groups > 0:
+                if compact_update_rows == 0 and compact_eligible_rows > 0:
+                    return "row_refactor_private_scalar_scaffold"
+                if separator_pipeline_groups > 0:
+                    return "row_refactor_many_private_groups"
+            if native_panel:
+                return "native_row_panel_active"
+            if egraph_work > 0.0 and row_work > egraph_work:
+                return "row_kernel_more_work_than_egraph"
+            if compact_work > 0.0:
+                return "row_panel_kernel_active"
+            return "row_kernel_active"
+        if last_refactor_path == "egraph":
+            if auto_lower_rejected:
+                return "row_refactor_lower_bound_rejected"
+            if egraph_work > 0.0:
+                return "column_egraph_refactor_missing_row_engine"
         if last_path == "kls_fast_refactor":
             if row_run:
                 if native_rejects:
@@ -185,6 +241,7 @@ def main() -> int:
         "matrix,candidate_cycle,reference_cycle,cycle_ratio,"
         "dominant_candidate_phase,dominant_candidate_share,"
         "candidate_initial_factor_path,candidate_last_factor_path,"
+        "candidate_last_refactor_path,"
         "kls_tail_last_mapped_columns,kls_tail_mapped_column_count,"
         "kls_first_last_row_uplooking_columns,"
         "kls_first_row_uplooking_column_count,"
@@ -281,6 +338,8 @@ def main() -> int:
         "parallel_task_flow_recommends_parallel,"
         "row_refactor_group_work_ratio,"
         "row_refactor_compact_panel_work_share,"
+        "row_refactor_panel_overstage_ratio,"
+        "row_refactor_private_group_share,"
         "refactor_ratio,solve_ratio,initial_factor_ratio,analysis_ratio,"
         "n,nblocks,max_block,scale,offdiag_pivots,"
         "fast_repaired_tail_restart_overcompute_columns,"
@@ -496,12 +555,20 @@ def main() -> int:
         dominant_share = cand[dominant_phase] / cand_cycle if cand_cycle > 0.0 else math.nan
         egraph_work = float_value(cand_row, "refactor_dependency_work")
         row_work = float_value(cand_row, "row_refactor_total_group_work")
-        compact_work = float_value(cand_row, "row_refactor_compact_dense_panel_update_work")
+        compact_work = float_value(
+            cand_row, "row_refactor_compact_dense_panel_update_work"
+        )
+        row_groups = float_value(cand_row, "row_refactor_group_count")
+        private_groups = float_value(
+            cand_row, "row_refactor_last_separator_flop_private_groups"
+        )
+        panel_entries = row_refactor_panel_overstage_entries(cand_row)
         print(
             f"{name},{cand_cycle:.6g},{ref_cycle:.6g},{cycle_ratio:.3f},"
             f"{dominant_phase},{dominant_share:.1%},"
             f"{str_value(cand_row, 'initial_factor_path')},"
             f"{str_value(cand_row, 'last_factor_path')},"
+            f"{str_value(cand_row, 'last_refactor_path')},"
             f"{int_value(cand_row, 'kls_tail_last_mapped_columns')},"
             f"{int_value(cand_row, 'kls_tail_mapped_column_count')},"
             f"{int_value(cand_row, 'kls_first_last_row_uplooking_columns')},"
@@ -603,6 +670,8 @@ def main() -> int:
             f"{int_value(cand_row, 'parallel_task_flow_recommends_parallel')},"
             f"{fmt_share(share(row_work, egraph_work))},"
             f"{fmt_share(share(compact_work, egraph_work))},"
+            f"{fmt_share(share(panel_entries, row_work))},"
+            f"{fmt_share(share(private_groups, row_groups))},"
             f"{fmt_ratio(ratio(cand['refactor_99'], ref['refactor_99']))},"
             f"{fmt_ratio(ratio(cand['solve_100'], ref['solve_100']))},"
             f"{fmt_ratio(ratio(cand['initial_factor'], ref['initial_factor']))},"

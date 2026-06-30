@@ -12169,3 +12169,46 @@ keeps the accepted direct-i32 change limited to the measured BTF scalar stream
 and reinforces that the next useful refactor work is still the grouped
 multi-current producer/current-state executor, not broader scalar scatter
 plumbing.
+
+The refactor focus was re-checked against the CKTSO and SubtreeLU paper
+algorithms after rejecting BLAS-threshold tuning as the primary explanation.
+The papers point at row-major up-looking refactorization, Algorithm 5
+prefactor/postfactorization, supernode TRSV/GEMV updates, and Algorithm 6
+private/pipeline separator scheduling. KLS already has probes or retained
+metadata for each of those names, but the forced-row CKTSO-gap evidence shows
+they are still wrapped around the old scalar/current-state executor rather than
+replacing it. The top-five forced row-refactor run
+`build/kls_forced_row_refactor_current_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `4.22647s` geomean and put `ASIC_320ks` at `28.977s`
+(`refactor_seconds_avg=0.258348`) versus the retained EGraph row in
+`build/kls_btf_i32_direct_gap10_t4_r1_ref3_timeout120.jsonl` at `10.862s`
+(`refactor_seconds_avg=0.0828143`). The scheduler did use the paper-shaped
+separator queue on the ASIC rows, but almost all work became tiny private
+groups: `ASIC_320ks` reported `218928` separator-private groups, `125`
+pipeline groups, `95` closure promotions, and zero compact-supernode update
+rows.
+
+Forcing the more paper-shaped row-panel/supernode knobs on the same worst case
+was also negative:
+`build/kls_forced_row_refactor_full_panel_asic320ks_t4_r1_ref3_timeout120.jsonl`
+measured `37.144s` and `refactor_seconds_avg=0.341396`. It executed
+`1,468,143` compact-supernode update rows and `608,619,828` compact-supernode
+update entries, including `462,827,352` GEMV entries, `82,867,395` TRSV
+entries, `732` compact-supernode batches, and `82,314,839` native-panel blocked
+entries. This is more than twice the row-group work estimate
+(`285,164,776`) and worse than the scalar forced row-refactor run. The
+accepted conclusion is that simply enabling existing compact-panel, native
+row-panel, multi-producer, or BLAS-shaped probes will not close the CKTSO gap.
+The missing large piece remains a production row-major supernode/current-state
+numeric object that avoids duplicated sparse current states and private-group
+bookkeeping instead of adding panel work on top of them.
+
+`scripts/decompose_solver_gap.py` now records this distinction directly. It
+uses `last_refactor_path` in addition to the first-factor path and reports
+`candidate_last_refactor_path`, `row_refactor_panel_overstage_ratio`, and
+`row_refactor_private_group_share`. Its `paper_gap_signal` can now classify
+forced row probes as `row_refactor_private_scalar_scaffold` or
+`row_refactor_panel_overstaged`, while default EGraph rows whose row-refactor
+lower bound is already worse are marked `row_refactor_lower_bound_rejected`.
+On the forced full-panel `ASIC_320ks` artifact, the signal is
+`row_refactor_panel_overstaged` with a panel-overstage ratio of `2.134`.

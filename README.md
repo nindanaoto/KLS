@@ -1394,6 +1394,17 @@ worker keeps one local continuation and only spills the rest to the shared
 queue. Checked queued
 rejects refresh any missing prefix rows before accepting a prefix-tail repair
 classification.
+Focused CKTSO-gap probes show that this retained scheduler is not, by itself,
+the missing row-refactor core: forced row refactors on the ASIC cases can place
+almost every tiny group in private separator queues, while opt-in compact
+supernode/native-panel runs over-stage more panel entries than the scalar row
+work they replace. The default automatic row-refactor handoff therefore keeps
+using the lower-bound gate, and the benchmark decomposer now labels these cases
+as `row_refactor_private_scalar_scaffold`,
+`row_refactor_panel_overstaged`, or `row_refactor_lower_bound_rejected`.
+Those signals distinguish the remaining paper gap, a production row-major
+supernode/current-state numeric executor, from the already-present scheduling
+and panel probes.
 Checked row fast-factor rejects also report the conservative row-group restart
 tail through
 `fast_rejected_group_tail_groups`, `fast_rejected_group_tail_rows`, and
