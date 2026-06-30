@@ -121,6 +121,24 @@ maps. It also reinforces that BLAS thresholding is not the first cause from
 here: the issue is still repeated scalar workspace advancement and publication,
 not small dense kernel dispatch.
 
+KLS now retains those compact advance rows instead of only counting them. The
+payoff-plan post-pass materializes per-selected-run advance slot pointers and
+row lists plus per-group advance slot counts, reusing the same row surface
+validated by the diagnostic above. This is still a descriptor/substrate change,
+not a promoted numeric executor: the existing scalar payoff replay remains
+guarded and known-losing, but the next grouped executor no longer needs a
+full-block workspace or hot-path row discovery to advance selected current
+columns. Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`.
+The focused prep artifact
+`build/kls_alg5_advance_rows_gap5_t4_r1_ref3_timeout120.jsonl` completed all
+five rows with `1.7659s` geomean and preserved the same hard-ASIC surfaces:
+`909,325` retained advance slots on `ASIC_320ks`, `1,065,691` on `ASIC_320k`,
+and `194,019` on `ASIC_100ks`.
+
 The EGraph prefactor path now has the corresponding guarded supernode-shaped
 prefactor slice when `KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1` is explicitly
 requested. A blocked BTF EGraph column may consume a contiguous finished
