@@ -6,6 +6,39 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The latest refactor probe turns the previous grouped pre-prefix advance result
+into a position-coded executor. With
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_POS=1`, KLS now
+retains `advance occurrence -> current-state row position` spans for each
+Algorithm 5 pre-prefix dependency and streams the grouped producer L column
+without binary-searching or hashing sparse state rows in the inner update loop.
+Correctness passed `cmake --build build -j2`, `git diff --check`,
+`./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_POS=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_POS=1 KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_POS=1 KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`.
+
+The focused same-binary result is still rejected as a default CKTSO-gap closer.
+The position-coded path measured `2.5584s` top-five SPICE-cycle geomean in
+`build/kls_advance_pos_gap5_t4_r1_ref3_timeout120.jsonl`, better than the
+same-source hash-only grouped advance control at `2.8508s`
+(`build/kls_advance_hash_control_gap5_t4_r1_ref3_timeout120.jsonl`) but still
+well behind the default control at `1.5000s`
+(`build/kls_advance_pos_default_gap5_t4_r1_ref3_timeout120.jsonl`). Adding the
+hash table for the remaining final row copies did not help (`2.5906s` in
+`build/kls_advance_pos_hash_gap5_t4_r1_ref3_timeout120.jsonl`). On the hard
+ASIC rows the opt-in path definitely ran (`ASIC_320ks` seeded `4,010` current
+states / `3,564,401` sparse rows, `ASIC_320k` `3,916` / `3,718,316`,
+`ASIC_100ks` `638` / `586,074`), but refactor time still roughly doubled
+against default (`0.1869s` vs `0.0832s` on `ASIC_320ks`, `0.1983s` vs
+`0.1017s` on `ASIC_320k`, `0.0858s` vs `0.0440s` on `ASIC_100ks`). This narrows
+the missing paper-level piece: row-position lookup was a real overhead, but not
+the first-order CKTSO gap. The next refactor work should avoid materializing and
+seeding per-current sparse retained states for the grouped prefix path, likely
+by owning a bounded dense/current-window producer-panel state or by publishing
+from a compact multi-current accumulator without restoring scalar current state.
+
 The refactor focus now has a clearer missing paper-level surface before the
 suffix probes: Algorithm 5 payoff groups have substantial duplicate producer
 work in the pre-prefix advance section. KLS records this with the new
