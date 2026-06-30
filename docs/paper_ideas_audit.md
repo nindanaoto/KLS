@@ -12104,3 +12104,29 @@ runtime granularity: each prefix-trigger batch claims only a small active subset
 so iterating full symbolic group fanout can add work. The CKTSO/SubtreeLU gap
 therefore remains the active-batch grouped numeric executor described by the
 papers, not merely a faster lookup for the already retained producer map.
+
+An active-batch producer dependency map was also prototyped and rejected before
+commit. The source patch added
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_ACTIVE_MAP=1`
+and kept only each claimed current's live next pre-prefix dependency in a
+worker-local bucket map, avoiding the old grouped advance loop's repeated scan
+over every claimed current. It built cleanly and passed `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_ACTIVE_MAP=1
+./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_ACTIVE_MAP=1
+KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_POS=1
+./build/kls_smoke`, and `ctest --test-dir build --output-on-failure`.
+The focused same-source top-five CKTSO-gap benchmark was negative:
+`build/kls_active_map_default_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.4820s` default geomean,
+`build/kls_group_advance_prep_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`3.3484s` for the existing grouped-advance prep,
+`build/kls_active_map_gap5_t4_r1_ref3_timeout120.jsonl` measured `4.5098s`,
+and
+`build/kls_active_map_pos_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`2.4771s`. Position-coded row lookup helped but was still far slower than
+default, while the plain active map was worse than the old grouped loop. This
+rejects active dependency bucketing as the clear missing CKTSO/SubtreeLU paper
+piece. The dominant loss is still the surrounding grouped sparse-state executor:
+it seeds and updates too much per-current state before the producer-panel work
+is coarse enough to amortize that cost.
