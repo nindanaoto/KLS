@@ -65,6 +65,18 @@ The useful paper target is therefore not another BLAS guard and not the current
 single-current/producer-panel replay switches; it is persistent grouped
 Algorithm-5 state with one batch advancing many current workspaces.
 
+The latest retained-plan change moves the grouped-output direction from a
+counter-only observation to retained data. With
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_SHAPE_TARGETS=1`, KLS now stores
+per-producer-shape target-row maps for the compact publish surface that a
+multi-current output accumulator would need. This is still off-by-default and
+does not alter numeric execution, but it confirms the scale of the paper-level
+opportunity: `ASIC_100ks` collapsed `133,615,959` raw shape-publish entries to
+`159,004` retained target rows, and `ASIC_320k` collapsed `109,078,358` raw
+entries to `75,161` target rows in focused one-refactor probes. The next
+executor should consume these retained targets directly; BLAS thresholding is
+not the first cause from this point.
+
 The clean rebuild rerun after the rejected selector probe confirms that BLAS is
 not the first-order explanation from this point forward. The same source rebuilt
 from the clean tree measured `1.4454s` top-five CKTSO-gap geomean in
@@ -9667,6 +9679,21 @@ all retained runs for one current column, accumulate into a sparse/dense touched
 row set once, and write each output row once before the pivot/store step. A
 BLAS-size guard remains correct policy for optional external CBLAS, but it is
 not the missing large mechanism on these slow cases.
+
+That grouped-output direction now has retained shape-target substrate behind
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_SHAPE_TARGETS=1`. Instead of only
+counting current-column deferred rows, KLS stores a compact target-row map for
+each reusable producer shape and reports raw per-current publish entries versus
+retained target rows. Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_SHAPE_TARGETS=1 ./build/kls_smoke`.
+Focused probes completed on `ASIC_100ks` and `ASIC_320k`: `ASIC_100ks` reported
+`8,434` target groups, `152,496` target runs, `133,615,959` raw entries,
+`159,004` target rows, and max `611` rows/group; `ASIC_320k` reported `4,521`
+target groups, `68,258` target runs, `109,078,358` raw entries, `75,161`
+target rows, and max `508` rows/group. This is still not the executor, but it
+is the retained sparse publish surface the CKTSO/SubtreeLU-style grouped
+executor needs.
 
 The follow-up execution prototype rejected the scalar grouped-accumulator half
 of that direction. An opt-in current-column retained-plan accumulator was

@@ -2159,6 +2159,22 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_consumer_plan_claimed_columns,
            stats.refactor_supernode_consumer_plan_claim_skip_count,
            stats.refactor_supernode_consumer_plan_claim_wait_count);
+    printf(",\"refactor_supernode_consumer_plan_shape_targets_built\":%d"
+           ",\"refactor_supernode_consumer_plan_shape_target_group_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_target_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_target_entries\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_target_rows\":%" PRId64
+           ",\"refactor_supernode_consumer_plan_shape_target_max_rows\":%"
+           PRId64,
+           stats.refactor_supernode_consumer_plan_shape_targets_built,
+           stats.refactor_supernode_consumer_plan_shape_target_group_count,
+           stats.refactor_supernode_consumer_plan_shape_target_run_count,
+           stats.refactor_supernode_consumer_plan_shape_target_entries,
+           stats.refactor_supernode_consumer_plan_shape_target_rows,
+           stats.refactor_supernode_consumer_plan_shape_target_max_rows);
     printf(",\"refactor_supernode_consumer_plan_first_dep_shape_batch_count\":%"
            PRId64
            ",\"refactor_supernode_consumer_plan_first_dep_shape_batch_run_count\":%"

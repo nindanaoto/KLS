@@ -861,6 +861,19 @@ the batch path follows the same advance-work test instead of executing every
 reusable shape candidate. If one clean numeric pass covers only a small
 fraction of the retained group-L rows, later passes disable the batch executor
 and keep the cache as diagnostic evidence.
+`KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_SHAPE_TARGETS=1` is an
+off-by-default retained-target substrate for the grouped output accumulator
+path. It builds the retained consumer plan, then stores a compact block-local
+target-row map for each reusable producer shape while separately counting the
+raw per-current publish entries. Benchmark JSON reports
+`refactor_supernode_consumer_plan_shape_targets_built`,
+`refactor_supernode_consumer_plan_shape_target_group_count`,
+`refactor_supernode_consumer_plan_shape_target_run_count`,
+`refactor_supernode_consumer_plan_shape_target_entries`,
+`refactor_supernode_consumer_plan_shape_target_rows`, and
+`refactor_supernode_consumer_plan_shape_target_max_rows`. This does not change
+default numeric execution; it retains the sparse publish surface needed by a
+future CKTSO/SubtreeLU-style multi-current producer executor.
 Set `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached` to isolate only the durable
 cached-panel consumer and skip the per-consumer temporary panel reconstruction
 fallback used by the full `=1` experiment.
