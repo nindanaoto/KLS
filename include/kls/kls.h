@@ -1108,6 +1108,15 @@ typedef struct kls_stats {
   int64_t refactor_last_btf_scalar_run_group_wake_ready_currents;
   int64_t refactor_last_btf_scalar_run_group_wake_ready_rows;
   int64_t refactor_last_btf_scalar_run_group_wake_ready_entries;
+  int64_t refactor_btf_scalar_run_group_state_rows_total;
+  int64_t refactor_btf_scalar_run_group_state_max_rows;
+  int64_t refactor_last_btf_scalar_run_group_state_materialized_currents;
+  int64_t refactor_last_btf_scalar_run_group_state_materialized_rows;
+  int64_t refactor_last_btf_scalar_run_group_state_materialized_prefix_deps;
+  int64_t refactor_last_btf_scalar_run_group_state_advanced_currents;
+  int64_t refactor_last_btf_scalar_run_group_state_advanced_rows;
+  int64_t refactor_last_btf_scalar_run_group_state_advanced_entries;
+  int64_t refactor_last_btf_scalar_run_group_state_rejects;
   int64_t refactor_btf_scalar_run_group_claim_surface_trigger_count;
   int64_t refactor_btf_scalar_run_group_claim_surface_group_count;
   int64_t refactor_btf_scalar_run_group_claim_surface_current_count;
@@ -1126,6 +1135,13 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_group_wake_ready_current_count;
   int64_t refactor_btf_scalar_run_group_wake_ready_rows;
   int64_t refactor_btf_scalar_run_group_wake_ready_entries;
+  int64_t refactor_btf_scalar_run_group_state_materialized_current_count;
+  int64_t refactor_btf_scalar_run_group_state_materialized_rows;
+  int64_t refactor_btf_scalar_run_group_state_materialized_prefix_deps;
+  int64_t refactor_btf_scalar_run_group_state_advanced_current_count;
+  int64_t refactor_btf_scalar_run_group_state_advanced_rows;
+  int64_t refactor_btf_scalar_run_group_state_advanced_entries;
+  int64_t refactor_btf_scalar_run_group_state_reject_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

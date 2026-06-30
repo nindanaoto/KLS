@@ -1286,6 +1286,16 @@ become ready. Benchmark JSON reports last and cumulative wake-armed and
 wake-ready current/row/entry counts. This remains diagnostic, but it is the
 scheduler skeleton needed by a retained current-state owner that will store the
 prefix state at arm time and apply shared producer-run updates at wake time.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STATS=1` extends that wake
+probe with the first guarded retained-state materialization. The flag implies
+the wake probe, allocates compact row-state storage for each grouped membership,
+copies the prefix-ready current state when the membership is armed, and applies
+the contiguous producer run into that compact state when the wake fires.
+Benchmark JSON reports the planned state rows, the materialized current/row and
+prefix-dependency counts, the advanced current/row/entry counts, and state
+rejects. This still does not replace the normal numeric refactor; it validates
+the paper-level live current-state shape before KLS commits it to the production
+numeric path.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
 same BTF scalar producer-run shape. It first waits for every dependency in a
 contiguous run, then applies the run through a local row workspace. Under the

@@ -12900,3 +12900,24 @@ current-state owner is present: most prefix-ready memberships have a matching
 run-end wake. The next numeric implementation should attach a compact retained
 workspace to the armed membership and consume those wake-ready batches with one
 producer-owned L-stream pass across multiple current states.
+
+The retained-state wake probe now attaches that compact workspace under
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STATS=1`. The flag implies the
+run-end wake probe, plans compact per-membership row maps, materializes the
+prefix-ready state at arm time, and advances that state when the contiguous
+producer run becomes ready. `ASIC_100ks` planned `58,663,555` compact rows,
+materialized `44,334` currents / `13,633,139` rows / `1,409,330` prefix
+dependencies, advanced `43,776` currents through `485,305` state rows and
+`127,452,176` L entries, and recorded zero state rejects. `ASIC_320ks` planned
+`50,818,849` compact rows, materialized `49,765` currents / `15,442,593` rows /
+`1,941,488` prefix dependencies, advanced `47,515` currents through `493,567`
+state rows and `125,352,798` L entries, and also recorded zero state rejects.
+Both runs remained residual-clean (`1.92251861e-15` and `2.08436857e-15`).
+
+This fills the direct paper-algorithm gap that was still missing after the wake
+probe: KLS can now retain and update live BTF current state at the right
+producer-run boundaries. It is not a speed result yet, because the normal scalar
+refactor still executes and the retained state is only diagnostic. The next
+refactor step should make this state the numeric owner for those current
+columns, avoiding the duplicated scalar prefix/run recomputation and sharing the
+producer L stream across the wake-ready batch.
