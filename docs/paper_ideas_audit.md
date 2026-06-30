@@ -11759,6 +11759,23 @@ coarse grouped numeric owner that reduces those 1.56M scalar BTF dependency
 applications, either by batched prefix advancement or by a multi-current
 producer-panel kernel.
 
+A direct-default scalar supernode fallback was tested and rejected before
+commit. The prototype let the existing direct supernode dependency helper run
+without the cached-panel gate and called it from the plain BTF scalar loop. On
+the top-five CKTSO-gap focus,
+`build/kls_direct_supernode_plain_gap5_t4_r1_ref3_timeout120.jsonl` regressed to
+`1.9612s` geomean versus the same-source default artifact
+`build/kls_prepared_suffix_default_gap5_t4_r1_ref3_timeout120.jsonl` at
+`1.4287s`. It applied only tiny runs on the hard rows: in the last refactor
+`ASIC_320ks` applied `488` supernode rows, `ASIC_320k` applied `1,004`, and
+`ASIC_100ks` applied `4,025`, out of `1.56M-1.72M` scalar dependencies. Adding
+the same 16-row minimum used by cached EGraph supernodes removed all applied
+updates but still measured `1.8815s` in
+`build/kls_direct_supernode_min16_gap5_t4_r1_ref3_timeout120.jsonl`. The source
+change was reverted. This closes the narrow "just enable the direct supernode
+helper in the scalar loop" idea: the default gap is not hidden by an inactive
+direct helper; the probe cost is visible before any paper-sized batch is formed.
+
 The new opt-in group-L state-plan probe
 `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE=1` keeps compact
 per-run row-state metadata for grouped consumer-plan runs. It first exposed a
