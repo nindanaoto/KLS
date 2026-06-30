@@ -13055,3 +13055,24 @@ versus `8.7118s`. This is worth retaining as a correct Algorithm 5
 post-factorization writeback slice, but the timing confirms the same larger
 diagnosis: retained-state materialization and producer-run advancement dominate,
 so the CKTSO-speed path still needs a live multi-current producer/window owner.
+
+The wake-time terminal publisher now fills the next direct Algorithm 5 gap:
+terminal retained states can be claimed and published immediately when the
+producer wake fires, even when the future current is still in the
+level-synchronous, non-tail-pipeline phase. The first diagnostic version found
+that all terminal wake candidates were outside the tail-pipeline position
+surface, not blocked by dependency or claim contention. The final guarded
+implementation claims those currents through the same `pipeline_claimed` array,
+marks them done, and lets the later level worker skip them through the existing
+claimed-column wait path. Focused probes stayed residual-clean with zero
+state-exec rejects. On `ASIC_100ks`,
+`build/kls_btf_group_state_exec_wake_terminal_nonpipeline_asic100ks_t4_r1_ref1.json`
+published all `10,104` terminal wake candidates, all nonpipeline, restored
+`130,330` rows, and measured `10.0954s`. On `ASIC_320ks`,
+`build/kls_btf_group_state_exec_wake_terminal_nonpipeline_asic320ks_t4_r1_ref1.json`
+published all `2,684` terminal wake candidates, all nonpipeline, restored
+`425,154` rows, and measured `8.5030s`. This closes the obvious terminal
+writeback ownership gap but still only moves timing slightly, so the remaining
+paper-level loss is earlier: KLS materializes and advances one retained sparse
+state per current instead of keeping CKTSO-style grouped current state live
+across the producer/window batch.

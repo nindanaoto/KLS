@@ -1306,8 +1306,13 @@ L-store path finish the column. When the retained state is already terminal,
 the executor publishes `U`, the diagonal, and `L` directly from the retained
 state map, using the sorted retained rows as a merge stream when available, so
 that terminal columns do not copy the sparse state back through the scalar
-workspace. Benchmark JSON reports last and cumulative
+workspace. The same terminal publisher can also run at the producer wake point:
+if all dependencies are already done, KLS claims the future current through the
+normal claimed-column array and later level-synchronous workers skip it after
+observing the done generation. Benchmark JSON reports last and cumulative
 state-exec current, skipped-dependency, restored-row, terminal-current,
+wake-terminal current, wake-terminal candidate, wake-terminal nonpipeline,
+wake-terminal dependency-miss, wake-terminal claim-miss,
 remaining-suffix-dependency, remaining-suffix-entry, and reject counts. It also
 reports dispatch bypasses where the BTF column had a selected retained state but
 the restore hook was gated off, and splits remaining misses into

@@ -3384,6 +3384,11 @@ int main(int argc, char **argv) {
            ",\"refactor_last_btf_scalar_run_group_state_exec_skipped_deps\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_restored_rows\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_terminal_currents\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_wake_terminal_currents\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_wake_terminal_candidate_currents\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_wake_terminal_nonpipeline_currents\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_wake_terminal_dependency_miss_currents\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_wake_terminal_claim_miss_currents\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_remaining_deps\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_remaining_entries\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_rejects\":%" PRId64
@@ -3421,6 +3426,11 @@ int main(int argc, char **argv) {
            ",\"refactor_btf_scalar_run_group_state_exec_skipped_deps\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_restored_rows\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_terminal_current_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_wake_terminal_current_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_wake_terminal_candidate_current_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_wake_terminal_nonpipeline_current_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_wake_terminal_dependency_miss_current_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_wake_terminal_claim_miss_current_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_remaining_deps\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_remaining_entries\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_reject_count\":%" PRId64
@@ -3472,6 +3482,16 @@ int main(int argc, char **argv) {
            stats.refactor_last_btf_scalar_run_group_state_exec_skipped_deps,
            stats.refactor_last_btf_scalar_run_group_state_exec_restored_rows,
            stats.refactor_last_btf_scalar_run_group_state_exec_terminal_currents,
+           stats
+             .refactor_last_btf_scalar_run_group_state_exec_wake_terminal_currents,
+           stats
+             .refactor_last_btf_scalar_run_group_state_exec_wake_terminal_candidate_currents,
+           stats
+             .refactor_last_btf_scalar_run_group_state_exec_wake_terminal_nonpipeline_currents,
+           stats
+             .refactor_last_btf_scalar_run_group_state_exec_wake_terminal_dependency_miss_currents,
+           stats
+             .refactor_last_btf_scalar_run_group_state_exec_wake_terminal_claim_miss_currents,
            stats.refactor_last_btf_scalar_run_group_state_exec_remaining_deps,
            stats.refactor_last_btf_scalar_run_group_state_exec_remaining_entries,
            stats.refactor_last_btf_scalar_run_group_state_exec_rejects,
@@ -3514,6 +3534,16 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_state_exec_skipped_deps,
            stats.refactor_btf_scalar_run_group_state_exec_restored_rows,
            stats.refactor_btf_scalar_run_group_state_exec_terminal_current_count,
+           stats
+             .refactor_btf_scalar_run_group_state_exec_wake_terminal_current_count,
+           stats
+             .refactor_btf_scalar_run_group_state_exec_wake_terminal_candidate_current_count,
+           stats
+             .refactor_btf_scalar_run_group_state_exec_wake_terminal_nonpipeline_current_count,
+           stats
+             .refactor_btf_scalar_run_group_state_exec_wake_terminal_dependency_miss_current_count,
+           stats
+             .refactor_btf_scalar_run_group_state_exec_wake_terminal_claim_miss_current_count,
            stats.refactor_btf_scalar_run_group_state_exec_remaining_deps,
            stats.refactor_btf_scalar_run_group_state_exec_remaining_entries,
            stats.refactor_btf_scalar_run_group_state_exec_reject_count,
