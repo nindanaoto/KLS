@@ -960,6 +960,23 @@ next paper-aligned executor has to batch prefix advancement before the shared
 producer update rather than relying on a first-dependency shortcut or BLAS
 threshold tuning. These counters do not enable the old per-current scalar replay
 by default.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PREFIX_PREP=1` is an
+off-by-default retained-prefix replay probe. When a selected producer prefix is
+published, KLS can prepare each eligible current slot by applying already
+published advance dependencies into a private scratch row, retaining the prefix
+U coefficients in the current workspace, retaining dense-tail/L-trailing
+target deltas in the target slots, and later letting the ordinary scalar
+ragged-L column path consume that ready prefix instead of recomputing it. This
+is intentionally not a claimed grouped executor: the advance/scatter phase is
+still per current column. The probe is useful because it validates the
+producer-prefix/current-slot handoff that a CKTSO-style grouped executor needs,
+but focused ASIC runs still show that batching several current workspaces
+through the same producer panel is the missing performance step. Benchmark JSON
+reports consumed retained prefixes through
+`refactor_last_supernode_algorithm5_payoff_prefix_prep_runs`,
+`refactor_last_supernode_algorithm5_payoff_prefix_prep_rows`,
+`refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries`, and
+`refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots`.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and

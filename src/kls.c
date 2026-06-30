@@ -815,6 +815,10 @@ struct kls_solver {
   UF_long refactor_last_supernode_algorithm5_payoff_slot_accum_rows;
   UF_long refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries;
   UF_long refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots;
+  UF_long refactor_last_supernode_algorithm5_payoff_prefix_prep_runs;
+  UF_long refactor_last_supernode_algorithm5_payoff_prefix_prep_rows;
+  UF_long refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries;
+  UF_long refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots;
   UF_long refactor_supernode_consumer_plan_group_l_panel_count;
   UF_long refactor_supernode_consumer_plan_group_l_run_count;
   UF_long refactor_supernode_consumer_plan_group_l_rows;
@@ -1067,7 +1071,7 @@ struct kls_solver {
   UF_long egraph_algorithm5_payoff_workspace_size;
   double *egraph_algorithm5_payoff_target_values;
   UF_long egraph_algorithm5_payoff_target_size;
-  unsigned char *egraph_algorithm5_payoff_current_flags;
+  atomic_uchar *egraph_algorithm5_payoff_current_flags;
   UF_long egraph_algorithm5_payoff_current_flags_size;
   kls_input_format input_format;
   kls_orientation orientation;
@@ -1412,6 +1416,7 @@ typedef struct kls_egraph_refactor_shared {
   int supernode_algorithm5_payoff_queue_prefetch;
   int supernode_algorithm5_payoff_workspace;
   int supernode_algorithm5_payoff_slot_accum;
+  int supernode_algorithm5_payoff_prefix_prep;
   int algorithm5_prefactor_updates;
   int u_supernode_values;
   int u_supernode_ragged_l_updates;
@@ -1435,6 +1440,10 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong algorithm5_payoff_slot_accum_rows;
   atomic_ulong algorithm5_payoff_slot_accum_target_entries;
   atomic_ulong algorithm5_payoff_slot_accum_target_slots;
+  atomic_ulong algorithm5_payoff_prefix_prep_runs;
+  atomic_ulong algorithm5_payoff_prefix_prep_rows;
+  atomic_ulong algorithm5_payoff_prefix_prep_target_entries;
+  atomic_ulong algorithm5_payoff_prefix_prep_target_slots;
   atomic_ulong algorithm5_prefactor_columns;
   atomic_ulong algorithm5_prefactor_deps;
   UF_long *algorithm5_payoff_queue_cols;
@@ -1448,7 +1457,7 @@ typedef struct kls_egraph_refactor_shared {
   UF_long algorithm5_payoff_workspace_size;
   double *algorithm5_payoff_target_values;
   UF_long algorithm5_payoff_target_size;
-  unsigned char *algorithm5_payoff_current_flags;
+  atomic_uchar *algorithm5_payoff_current_flags;
   UF_long algorithm5_payoff_current_count;
   int pipeline_ready_queue;
   UF_long *pipeline_ready_cols;
@@ -2088,9 +2097,18 @@ kls_refactor_supernode_algorithm5_payoff_slot_accum_env_enabled(void) {
 }
 
 static int
+kls_refactor_supernode_algorithm5_payoff_prefix_prep_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PREFIX_PREP");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static int
 kls_refactor_supernode_algorithm5_payoff_runtime_env_enabled(void) {
   return kls_refactor_supernode_algorithm5_payoff_workspace_env_enabled() ||
-         kls_refactor_supernode_algorithm5_payoff_slot_accum_env_enabled();
+         kls_refactor_supernode_algorithm5_payoff_slot_accum_env_enabled() ||
+         kls_refactor_supernode_algorithm5_payoff_prefix_prep_env_enabled();
 }
 
 static int kls_refactor_supernode_algorithm5_payoff_claim_surface_allowed(
@@ -2749,6 +2767,18 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries =
     0;
   solver->refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots = 0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_runs = 0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_rows = 0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries =
+    0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots =
+    0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_runs = 0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_rows = 0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries =
+    0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots =
+    0;
   solver->refactor_supernode_algorithm5_prefix_panel_count = 0;
   solver->refactor_supernode_algorithm5_prefix_panel_run_count = 0;
   solver->refactor_supernode_algorithm5_prefix_panel_run_rows = 0;
@@ -2826,6 +2856,12 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries =
     0;
   solver->refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots = 0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_runs = 0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_rows = 0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries =
+    0;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots =
+    0;
   solver->refactor_supernode_consumer_plan_cached_panel_count = 0;
   solver->refactor_supernode_consumer_plan_cached_panel_rows = 0;
   solver->refactor_supernode_consumer_plan_strict_cached_panel_count = 0;
@@ -8095,6 +8131,7 @@ static int kls_build_refactor_supernode_consumer_plan(
     kls_refactor_supernode_algorithm5_payoff_queue_prefetch_env_enabled() ||
     kls_refactor_supernode_algorithm5_payoff_slot_accum_env_enabled() ||
     kls_refactor_supernode_algorithm5_payoff_workspace_env_enabled() ||
+    kls_refactor_supernode_algorithm5_payoff_prefix_prep_env_enabled() ||
     kls_refactor_supernode_algorithm5_payoff_group_prep_env_enabled();
   if (algorithm5_payoff_plan_requested && count_ctx.run_count > 0u) {
     if (!kls_build_refactor_supernode_algorithm5_payoff_plan(
@@ -11839,7 +11876,7 @@ static int ensure_egraph_algorithm5_payoff_runtime_state(
   UF_long current_count,
   double **workspace_values_out,
   double **target_values_out,
-  unsigned char **current_flags_out) {
+  atomic_uchar **current_flags_out) {
   if (workspace_values_out != NULL) {
     *workspace_values_out = NULL;
   }
@@ -11859,7 +11896,7 @@ static int ensure_egraph_algorithm5_payoff_runtime_state(
       (UF_long)current_slot_count != current_count ||
       workspace_row_count > SIZE_MAX / sizeof(double) ||
       target_slot_count > SIZE_MAX / sizeof(double) ||
-      current_slot_count > SIZE_MAX / sizeof(unsigned char) ||
+      current_slot_count > SIZE_MAX / sizeof(atomic_uchar) ||
       workspace_row_count > (size_t)PTRDIFF_MAX ||
       target_slot_count > (size_t)PTRDIFF_MAX ||
       current_slot_count > (size_t)PTRDIFF_MAX) {
@@ -11896,8 +11933,8 @@ static int ensure_egraph_algorithm5_payoff_runtime_state(
   if (current_count > 0u &&
       (solver->egraph_algorithm5_payoff_current_flags == NULL ||
        solver->egraph_algorithm5_payoff_current_flags_size < current_count)) {
-    unsigned char *flags =
-      (unsigned char *)realloc(
+    atomic_uchar *flags =
+      (atomic_uchar *)realloc(
         solver->egraph_algorithm5_payoff_current_flags,
         current_slot_count *
           sizeof(*solver->egraph_algorithm5_payoff_current_flags));
@@ -11918,9 +11955,11 @@ static int ensure_egraph_algorithm5_payoff_runtime_state(
              sizeof(*solver->egraph_algorithm5_payoff_target_values));
   }
   if (current_count > 0u) {
-    memset(solver->egraph_algorithm5_payoff_current_flags, 0,
-           current_slot_count *
-             sizeof(*solver->egraph_algorithm5_payoff_current_flags));
+    for (UF_long slot = 0u; slot < current_count; ++slot) {
+      atomic_store_explicit(
+        &solver->egraph_algorithm5_payoff_current_flags[slot], 0u,
+        memory_order_relaxed);
+    }
   }
   *workspace_values_out =
     workspace_rows > 0u ? solver->egraph_algorithm5_payoff_workspace_values
@@ -11939,7 +11978,7 @@ static int kls_prepare_refactor_algorithm5_payoff_runtime_state(
   UF_long *workspace_size_out,
   double **target_values_out,
   UF_long *target_size_out,
-  unsigned char **current_flags_out,
+  atomic_uchar **current_flags_out,
   UF_long *current_count_out) {
   if (active_out != NULL) {
     *active_out = 0;
@@ -11984,7 +12023,7 @@ static int kls_prepare_refactor_algorithm5_payoff_runtime_state(
     solver->refactor_supernode_algorithm5_payoff_group_current_total;
   double *workspace_values = NULL;
   double *target_values = NULL;
-  unsigned char *current_flags = NULL;
+  atomic_uchar *current_flags = NULL;
   if (!ensure_egraph_algorithm5_payoff_runtime_state(
         solver, workspace_size, target_size, current_count, &workspace_values,
         &target_values, &current_flags)) {
@@ -12654,6 +12693,12 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
     .refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries = 0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots = 0;
+  solver->stats.refactor_last_supernode_algorithm5_payoff_prefix_prep_runs = 0;
+  solver->stats.refactor_last_supernode_algorithm5_payoff_prefix_prep_rows = 0;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries = 0;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots = 0;
   solver->stats.refactor_u_supernode_l_exec_disabled =
     solver->refactor_u_supernode_l_exec_disabled;
   solver->stats.refactor_u_supernode_l_exec_disable_count =
@@ -21977,6 +22022,20 @@ static void fill_numeric_stats(kls_solver *solver) {
     .refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots =
       (int64_t)solver
         ->refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots;
+  solver->stats.refactor_last_supernode_algorithm5_payoff_prefix_prep_runs =
+    (int64_t)solver
+      ->refactor_last_supernode_algorithm5_payoff_prefix_prep_runs;
+  solver->stats.refactor_last_supernode_algorithm5_payoff_prefix_prep_rows =
+    (int64_t)solver
+      ->refactor_last_supernode_algorithm5_payoff_prefix_prep_rows;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries =
+      (int64_t)solver
+        ->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots =
+      (int64_t)solver
+        ->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots;
   solver->stats.refactor_last_supernode_consumer_plan_attempts =
     (int64_t)solver->refactor_last_supernode_consumer_plan_attempts;
   solver->stats.refactor_last_supernode_consumer_plan_hits =
@@ -39998,6 +40057,10 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   atomic_init(&shared.algorithm5_payoff_slot_accum_rows, 0ul);
   atomic_init(&shared.algorithm5_payoff_slot_accum_target_entries, 0ul);
   atomic_init(&shared.algorithm5_payoff_slot_accum_target_slots, 0ul);
+  atomic_init(&shared.algorithm5_payoff_prefix_prep_runs, 0ul);
+  atomic_init(&shared.algorithm5_payoff_prefix_prep_rows, 0ul);
+  atomic_init(&shared.algorithm5_payoff_prefix_prep_target_entries, 0ul);
+  atomic_init(&shared.algorithm5_payoff_prefix_prep_target_slots, 0ul);
 
   kls_egraph_refactor_worker worker;
   memset(&worker, 0, sizeof(worker));
@@ -50695,6 +50758,72 @@ static void kls_egraph_record_algorithm5_payoff_slot_accum(
                             (unsigned long)target_slots, memory_order_relaxed);
 }
 
+static void kls_egraph_record_algorithm5_payoff_prefix_prep(
+  kls_egraph_refactor_shared *shared,
+  UF_long rows,
+  UF_long target_entries,
+  UF_long target_slots) {
+  if (shared == NULL || rows <= 1u || target_slots == 0u) {
+    return;
+  }
+  atomic_fetch_add_explicit(&shared->algorithm5_payoff_prefix_prep_runs, 1ul,
+                            memory_order_relaxed);
+  atomic_fetch_add_explicit(&shared->algorithm5_payoff_prefix_prep_rows,
+                            (unsigned long)rows, memory_order_relaxed);
+  atomic_fetch_add_explicit(
+    &shared->algorithm5_payoff_prefix_prep_target_entries,
+    (unsigned long)target_entries, memory_order_relaxed);
+  atomic_fetch_add_explicit(&shared->algorithm5_payoff_prefix_prep_target_slots,
+                            (unsigned long)target_slots, memory_order_relaxed);
+}
+
+enum {
+  KLS_ALGORITHM5_PAYOFF_CURRENT_EMPTY = 0u,
+  KLS_ALGORITHM5_PAYOFF_CURRENT_PREPARING = 1u,
+  KLS_ALGORITHM5_PAYOFF_CURRENT_READY = 2u
+};
+
+static unsigned char kls_algorithm5_payoff_current_state_load(
+  const atomic_uchar *flags,
+  UF_long slot) {
+  return flags != NULL
+    ? atomic_load_explicit(&flags[slot], memory_order_acquire)
+    : KLS_ALGORITHM5_PAYOFF_CURRENT_EMPTY;
+}
+
+static void kls_algorithm5_payoff_current_state_store(
+  atomic_uchar *flags,
+  UF_long slot,
+  unsigned char state) {
+  if (flags != NULL) {
+    atomic_store_explicit(&flags[slot], state, memory_order_release);
+  }
+}
+
+static int kls_algorithm5_payoff_current_state_try_begin(
+  atomic_uchar *flags,
+  UF_long slot) {
+  if (flags == NULL) {
+    return 0;
+  }
+  unsigned char expected = KLS_ALGORITHM5_PAYOFF_CURRENT_EMPTY;
+  return atomic_compare_exchange_strong_explicit(
+    &flags[slot], &expected, KLS_ALGORITHM5_PAYOFF_CURRENT_PREPARING,
+    memory_order_acq_rel, memory_order_acquire);
+}
+
+static int kls_algorithm5_payoff_current_state_try_consume(
+  atomic_uchar *flags,
+  UF_long slot) {
+  if (flags == NULL) {
+    return 0;
+  }
+  unsigned char expected = KLS_ALGORITHM5_PAYOFF_CURRENT_READY;
+  return atomic_compare_exchange_strong_explicit(
+    &flags[slot], &expected, KLS_ALGORITHM5_PAYOFF_CURRENT_EMPTY,
+    memory_order_acq_rel, memory_order_acquire);
+}
+
 static void kls_egraph_record_u_supernode_l_probe_attempt(
   kls_egraph_refactor_shared *shared) {
   if (shared == NULL) {
@@ -51856,6 +51985,7 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
   UF_long algorithm5_target_entries = 0u;
   UF_long algorithm5_pattern_width = 0u;
   int algorithm5_slot_accum_candidate = 0;
+  int algorithm5_prefix_prep_candidate = 0;
   const int plan_pattern =
     solver->refactor_u_supernode_plan_pattern_built ? 1 : 0;
   if (plan_pattern &&
@@ -52105,10 +52235,12 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
           algorithm5_workspace_request - algorithm5_workspace_offset) {
       return 0;
     }
-    if (shared->supernode_algorithm5_payoff_slot_accum) {
+    if (shared->supernode_algorithm5_payoff_slot_accum ||
+        shared->supernode_algorithm5_payoff_prefix_prep) {
       if (!shared->supernode_algorithm5_payoff_workspace ||
           shared->algorithm5_payoff_workspace_values == NULL ||
           shared->algorithm5_payoff_target_values == NULL ||
+          shared->algorithm5_payoff_current_flags == NULL ||
           solver->refactor_supernode_algorithm5_payoff_group_target_cols ==
             NULL ||
           algorithm5_workspace_begin >
@@ -52125,7 +52257,10 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
           algorithm5_target_slots == 0u) {
         return 0;
       }
-      algorithm5_slot_accum_candidate = 1;
+      algorithm5_slot_accum_candidate =
+        shared->supernode_algorithm5_payoff_slot_accum ? 1 : 0;
+      algorithm5_prefix_prep_candidate =
+        shared->supernode_algorithm5_payoff_prefix_prep ? 1 : 0;
     }
   }
   kls_egraph_record_u_supernode_l_probe_attempt(shared);
@@ -52232,6 +52367,58 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
 
   const UF_long trsv_entries = (run_rows * (run_rows - 1u)) / 2u;
   const UF_long dense_entries = run_rows * dense_scatter_cols;
+  if (algorithm5_prefix_prep_candidate) {
+    const UF_long current_slot =
+      solver->refactor_supernode_algorithm5_payoff_run_current_pos[
+        planned_run_id];
+    if (current_slot >= shared->algorithm5_payoff_current_count) {
+      return 0;
+    }
+    unsigned char state =
+      kls_algorithm5_payoff_current_state_load(
+        shared->algorithm5_payoff_current_flags, current_slot);
+    unsigned spin = 0u;
+    while (state == KLS_ALGORITHM5_PAYOFF_CURRENT_PREPARING) {
+      if (kls_egraph_refactor_should_stop(shared)) {
+        return -1;
+      }
+      kls_egraph_pipeline_pause(&spin);
+      state = kls_algorithm5_payoff_current_state_load(
+        shared->algorithm5_payoff_current_flags, current_slot);
+    }
+    if (state == KLS_ALGORITHM5_PAYOFF_CURRENT_READY &&
+        kls_algorithm5_payoff_current_state_try_consume(
+          shared->algorithm5_payoff_current_flags, current_slot)) {
+      double *prepared_workspace =
+        shared->algorithm5_payoff_workspace_values +
+        algorithm5_workspace_begin + algorithm5_workspace_offset;
+      double *prepared_targets =
+        shared->algorithm5_payoff_target_values + algorithm5_target_slot_begin;
+      const UF_long *prepared_target_cols =
+        solver->refactor_supernode_algorithm5_payoff_group_target_cols +
+        algorithm5_target_slot_begin;
+      for (UF_long local = 0u; local < run_rows; ++local) {
+        const UF_long row = dep_local + local;
+        const double ujk = prepared_workspace[local];
+        ux[up + local] = ujk;
+        x[row] = 0.0;
+        if (shared->u_supernode_values) {
+          kls_egraph_record_u_supernode_value(
+            shared, dep_global + local, current_global, ujk);
+        }
+      }
+      for (UF_long slot = 0u; slot < algorithm5_target_slots; ++slot) {
+        x[prepared_target_cols[slot]] -= prepared_targets[slot];
+      }
+      kls_egraph_record_algorithm5_payoff_prefix_prep(
+        shared, run_rows, algorithm5_target_entries, algorithm5_target_slots);
+      kls_egraph_record_u_supernode_l_update(
+        shared, run_rows, trsv_entries + dense_entries + trailing_entries);
+      kls_egraph_mark_u_supernode_l_panel_used(solver, panel);
+      *up_io = up + run_rows;
+      return 1;
+    }
+  }
   int use_algorithm5_slot_accum = 0;
   UF_long algorithm5_block_size = 0u;
   UF_long algorithm5_target_stamp_value = 0u;
@@ -55217,9 +55404,507 @@ static int kls_egraph_refactor_try_process_algorithm5_payoff_queue(
   return 1;
 }
 
+static int kls_egraph_refactor_prepare_algorithm5_payoff_prefix_run(
+  kls_egraph_refactor_worker *worker,
+  UF_long run,
+  UF_long current_slot) {
+  if (worker == NULL || worker->shared == NULL) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->R == NULL || solver->numeric == NULL ||
+      solver->numeric->Ulen == NULL || solver->numeric->Llen == NULL ||
+      solver->refactor_col_ptr == NULL || solver->refactor_row_idx == NULL ||
+      solver->refactor_input_pos == NULL ||
+      solver->refactor_u_indices == NULL || solver->refactor_u_values == NULL ||
+      solver->refactor_l_indices == NULL || solver->refactor_l_values == NULL ||
+      (solver->symbolic->nblocks != 1u &&
+       solver->refactor_block_start == NULL) ||
+      solver->refactor_u_supernode_col_id == NULL ||
+      solver->refactor_u_supernode_start == NULL ||
+      solver->refactor_u_supernode_local_start == NULL ||
+      solver->refactor_u_supernode_width == NULL ||
+      solver->refactor_u_supernode_dense_begin == NULL ||
+      solver->refactor_u_supernode_l_valid == NULL ||
+      solver->refactor_u_supernode_l_row_begin == NULL ||
+      solver->refactor_u_supernode_l_row_ptr == NULL ||
+      solver->refactor_u_supernode_l_cols == NULL ||
+      solver->refactor_u_supernode_l_dense_values == NULL ||
+      solver->refactor_supernode_consumer_plan_current == NULL ||
+      solver->refactor_supernode_consumer_plan_dep == NULL ||
+      solver->refactor_supernode_consumer_plan_panel_start == NULL ||
+      solver->refactor_supernode_consumer_plan_panel_offset == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_group == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_current_pos == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_advance_deps == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_advance_slot_ptr ==
+        NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_advance_slots == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_prefix_rows == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_target_entries == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_target_slot_ptr == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_target_slots == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_current_ptr == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_current_workspace_ptr ==
+        NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_workspace_rows == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_pattern_width == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_target_cols == NULL ||
+      !shared->supernode_algorithm5_payoff_workspace ||
+      shared->algorithm5_payoff_workspace_values == NULL ||
+      shared->algorithm5_payoff_target_values == NULL ||
+      shared->algorithm5_payoff_current_flags == NULL ||
+      current_slot >= shared->algorithm5_payoff_current_count ||
+      run >= solver->refactor_supernode_consumer_plan_run_count) {
+    return 0;
+  }
+
+  const UF_long current =
+    solver->refactor_supernode_consumer_plan_current[run];
+  const UF_long dep = solver->refactor_supernode_consumer_plan_dep[run];
+  const UF_long panel_start =
+    solver->refactor_supernode_consumer_plan_panel_start[run];
+  const UF_long panel_offset =
+    solver->refactor_supernode_consumer_plan_panel_offset[run];
+  const UF_long prefix_rows =
+    solver->refactor_supernode_algorithm5_payoff_run_prefix_rows[run];
+  const UF_long advance_deps =
+    solver->refactor_supernode_algorithm5_payoff_run_advance_deps[run];
+  if (current >= solver->n || dep >= current || prefix_rows == 0u ||
+      panel_start >= solver->n || dep != panel_start + panel_offset ||
+      solver->refactor_supernode_algorithm5_payoff_run_current_pos[run] !=
+        current_slot) {
+    return 0;
+  }
+
+  UF_long block = KLS_KLU_EMPTY;
+  if (solver->symbolic->nblocks == 1u) {
+    block = 0u;
+  } else if (solver->refactor_col_block != NULL) {
+    block = solver->refactor_col_block[current];
+  } else {
+    block = kls_block_for_pivot(solver, current);
+  }
+  if (block == KLS_KLU_EMPTY || block >= solver->symbolic->nblocks) {
+    return 0;
+  }
+  const UF_long k1 = solver->symbolic->R[block];
+  const UF_long k2 = solver->symbolic->R[block + 1u];
+  if (k2 <= k1 || current < k1 || current >= k2 || dep < k1 ||
+      dep >= k2) {
+    return 0;
+  }
+  const UF_long block_size = k2 - k1;
+  const UF_long local_k = current - k1;
+  const UF_long dep_local = dep - k1;
+  if (dep_local >= local_k || prefix_rows > local_k - dep_local ||
+      block_size > (UF_long)(SIZE_MAX / sizeof(double))) {
+    return 0;
+  }
+
+  const UF_long ulen = solver->numeric->Ulen[current];
+  UF_long *ui = solver->refactor_u_indices[current];
+  const int32_t *ui32 =
+    solver->refactor_u_indices32 != NULL
+      ? solver->refactor_u_indices32[current] : NULL;
+  if (ui == NULL || advance_deps > ulen ||
+      prefix_rows > ulen - advance_deps) {
+    return 0;
+  }
+  for (UF_long p = 0u; p < advance_deps; ++p) {
+    const UF_long j = ui32 != NULL ? (UF_long)ui32[p] : ui[p];
+    if (j >= local_k || j > UF_long_max - k1 ||
+        !kls_egraph_refactor_dependency_done_now(shared, k1 + j)) {
+      return 0;
+    }
+  }
+  for (UF_long local = 0u; local < prefix_rows; ++local) {
+    const UF_long p = advance_deps + local;
+    const UF_long j = ui32 != NULL ? (UF_long)ui32[p] : ui[p];
+    if (j != dep_local + local || j > UF_long_max - k1 ||
+        !kls_egraph_refactor_dependency_done_now(shared, k1 + j)) {
+      return 0;
+    }
+  }
+
+  const UF_long group =
+    solver->refactor_supernode_algorithm5_payoff_run_group[run];
+  if (group == KLS_KLU_EMPTY ||
+      group >= solver->refactor_supernode_algorithm5_payoff_group_count) {
+    return 0;
+  }
+  const UF_long current_begin =
+    solver->refactor_supernode_algorithm5_payoff_group_current_ptr[group];
+  const UF_long current_end =
+    solver->refactor_supernode_algorithm5_payoff_group_current_ptr[group + 1u];
+  if (current_begin > current_end || current_slot < current_begin ||
+      current_slot >= current_end ||
+      current_end >
+        solver->refactor_supernode_algorithm5_payoff_group_current_total) {
+    return 0;
+  }
+  const UF_long group_workspace_begin =
+    solver->refactor_supernode_algorithm5_payoff_group_current_workspace_ptr[
+      current_begin];
+  const UF_long workspace_begin =
+    solver->refactor_supernode_algorithm5_payoff_group_current_workspace_ptr[
+      current_slot];
+  const UF_long workspace_end =
+    solver->refactor_supernode_algorithm5_payoff_group_current_workspace_ptr[
+      current_slot + 1u];
+  const UF_long group_workspace_rows =
+    solver->refactor_supernode_algorithm5_payoff_group_workspace_rows[group];
+  if (workspace_end < workspace_begin ||
+      workspace_begin < group_workspace_begin ||
+      prefix_rows > workspace_end - workspace_begin ||
+      workspace_end - group_workspace_begin > group_workspace_rows ||
+      group_workspace_begin > shared->algorithm5_payoff_workspace_size ||
+      group_workspace_rows >
+        shared->algorithm5_payoff_workspace_size - group_workspace_begin) {
+    return 0;
+  }
+  double *workspace =
+    shared->algorithm5_payoff_workspace_values + workspace_begin;
+
+  const UF_long target_slot_begin =
+    solver->refactor_supernode_algorithm5_payoff_run_target_slot_ptr[run];
+  const UF_long target_slots =
+    solver->refactor_supernode_algorithm5_payoff_run_target_slots[run];
+  const UF_long target_entries =
+    solver->refactor_supernode_algorithm5_payoff_run_target_entries[run];
+  if (target_slot_begin == KLS_KLU_EMPTY ||
+      target_slot_begin > shared->algorithm5_payoff_target_size ||
+      target_slots >
+        shared->algorithm5_payoff_target_size - target_slot_begin ||
+      target_slots == 0u ||
+      !kls_egraph_worker_row_target_workspace(worker, block_size)) {
+    return 0;
+  }
+  const UF_long *target_cols =
+    solver->refactor_supernode_algorithm5_payoff_group_target_cols +
+    target_slot_begin;
+  double *target_values =
+    shared->algorithm5_payoff_target_values + target_slot_begin;
+
+  const UF_long pattern_width =
+    solver->refactor_supernode_algorithm5_payoff_group_pattern_width[group];
+  if (pattern_width == 0u || panel_offset > pattern_width ||
+      prefix_rows > pattern_width - panel_offset) {
+    return 0;
+  }
+  const UF_long panel = solver->refactor_u_supernode_col_id[dep];
+  if (panel == KLS_KLU_EMPTY ||
+      panel >= solver->refactor_u_supernode_pattern_count ||
+      !solver->refactor_u_supernode_l_valid[panel]) {
+    return 0;
+  }
+  const UF_long start = solver->refactor_u_supernode_start[panel];
+  const UF_long local_start =
+    solver->refactor_u_supernode_local_start[panel];
+  const UF_long width = solver->refactor_u_supernode_width[panel];
+  if (start != panel_start || width != pattern_width ||
+      start > solver->n || width > solver->n - start ||
+      local_start > dep_local || dep_local - local_start != panel_offset ||
+      local_start > block_size || width > block_size - local_start) {
+    return 0;
+  }
+  const UF_long row_base =
+    solver->refactor_u_supernode_l_row_begin[panel] + panel_offset;
+  if (row_base + prefix_rows > solver->refactor_u_supernode_pattern_rows) {
+    return 0;
+  }
+  UF_long trailing_entries = 0u;
+  for (UF_long local = 0u; local < prefix_rows; ++local) {
+    const UF_long begin =
+      solver->refactor_u_supernode_l_row_ptr[row_base + local];
+    const UF_long end =
+      solver->refactor_u_supernode_l_row_ptr[row_base + local + 1u];
+    if (end < begin || end > solver->refactor_u_supernode_l_trailing_entries ||
+        end - begin > UF_long_max - trailing_entries) {
+      return 0;
+    }
+    trailing_entries += end - begin;
+  }
+  const UF_long available_end = panel_offset + prefix_rows;
+  const UF_long dense_scatter_cols = width - available_end;
+  const UF_long dense_entries = prefix_rows * dense_scatter_cols;
+  if (target_entries != dense_entries + trailing_entries) {
+    return 0;
+  }
+
+  double *x = worker->x;
+  const UF_long scatter_begin =
+    solver->symbolic->nblocks == 1u
+      ? solver->refactor_col_ptr[current]
+      : solver->refactor_block_start[current];
+  const UF_long scatter_end = solver->refactor_col_ptr[current + 1u];
+  if (!kls_egraph_scatter_refactor_input(
+        solver, shared->values, shared->rs, shared->scale, x, k1, k2,
+        scatter_begin, scatter_end)) {
+    memset(x, 0, (size_t)block_size * sizeof(*x));
+    return 0;
+  }
+
+  for (UF_long p = 0u; p < advance_deps; ++p) {
+    const UF_long j = ui32 != NULL ? (UF_long)ui32[p] : ui[p];
+    const double ujk = x[j];
+    x[j] = 0.0;
+    if (ujk != 0.0) {
+      UF_long *li = solver->refactor_l_indices[k1 + j];
+      double *lx = solver->refactor_l_values[k1 + j];
+      const UF_long lcol_len = solver->numeric->Llen[k1 + j];
+      if ((li == NULL && solver->refactor_l_indices32 == NULL &&
+           lcol_len > 0u) ||
+          (lx == NULL && lcol_len > 0u)) {
+        memset(x, 0, (size_t)block_size * sizeof(*x));
+        return 0;
+      }
+      kls_scatter_subtract_refactor_l(
+        solver, x, k1 + j, li, lx, lcol_len, ujk);
+    }
+  }
+
+  if (worker->row_target_stamp == UF_long_max) {
+    memset(worker->row_target_stamp_workspace, 0,
+           (size_t)block_size *
+             sizeof(*worker->row_target_stamp_workspace));
+    worker->row_target_stamp = 1u;
+  } else {
+    worker->row_target_stamp++;
+    if (worker->row_target_stamp == 0u) {
+      worker->row_target_stamp = 1u;
+    }
+  }
+  const UF_long target_stamp_value = worker->row_target_stamp;
+  UF_long *target_stamp = worker->row_target_stamp_workspace;
+  UF_long *target_pos = worker->row_target_pos_workspace;
+  memset(target_values, 0, (size_t)target_slots * sizeof(*target_values));
+  for (UF_long slot = 0u; slot < target_slots; ++slot) {
+    const UF_long row = target_cols[slot];
+    if (row >= block_size || target_stamp[row] == target_stamp_value) {
+      memset(x, 0, (size_t)block_size * sizeof(*x));
+      return 0;
+    }
+    target_stamp[row] = target_stamp_value;
+    target_pos[row] = slot;
+  }
+
+  for (UF_long local = 0u; local < prefix_rows; ++local) {
+    workspace[local] = x[dep_local + local];
+    x[dep_local + local] = 0.0;
+  }
+  const double *dense_panel =
+    solver->refactor_u_supernode_l_dense_values +
+    solver->refactor_u_supernode_dense_begin[panel];
+  const UF_long *trailing_cols = solver->refactor_u_supernode_l_cols;
+  const double *trailing_values = solver->refactor_u_supernode_l_values;
+  if (trailing_entries > 0u &&
+      (trailing_cols == NULL || trailing_values == NULL)) {
+    memset(x, 0, (size_t)block_size * sizeof(*x));
+    return 0;
+  }
+  for (UF_long local = 0u; local < prefix_rows; ++local) {
+    const UF_long panel_local = panel_offset + local;
+    const double ujk = workspace[local];
+    const double *dense_row = dense_panel + panel_local * width;
+    for (UF_long target = panel_local + 1u; target < width; ++target) {
+      const double update = ujk * dense_row[target];
+      if (target < available_end) {
+        workspace[target - panel_offset] -= update;
+      } else {
+        const UF_long row = local_start + target;
+        if (row >= block_size ||
+            target_stamp[row] != target_stamp_value) {
+          memset(x, 0, (size_t)block_size * sizeof(*x));
+          return 0;
+        }
+        target_values[target_pos[row]] += update;
+      }
+    }
+    const UF_long row = row_base + local;
+    const UF_long begin = solver->refactor_u_supernode_l_row_ptr[row];
+    const UF_long end = solver->refactor_u_supernode_l_row_ptr[row + 1u];
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long target_row = trailing_cols[p];
+      if (target_row >= block_size ||
+          target_stamp[target_row] != target_stamp_value) {
+        memset(x, 0, (size_t)block_size * sizeof(*x));
+        return 0;
+      }
+      target_values[target_pos[target_row]] += ujk * trailing_values[p];
+    }
+  }
+  if (solver->refactor_row_idx32 != NULL) {
+    const int32_t *rows32 = solver->refactor_row_idx32;
+    for (UF_long p = scatter_begin; p < scatter_end; ++p) {
+      const UF_long row = (UF_long)rows32[p];
+      if (row >= k1 && row < k2) {
+        x[row - k1] = 0.0;
+      }
+    }
+  } else {
+    const UF_long *rows = solver->refactor_row_idx;
+    for (UF_long p = scatter_begin; p < scatter_end; ++p) {
+      const UF_long row = rows[p];
+      if (row >= k1 && row < k2) {
+        x[row - k1] = 0.0;
+      }
+    }
+  }
+  const UF_long advance_slot_begin =
+    solver->refactor_supernode_algorithm5_payoff_run_advance_slot_ptr[run];
+  const UF_long advance_slots =
+    solver->refactor_supernode_algorithm5_payoff_run_advance_slots[run];
+  if (advance_slot_begin != KLS_KLU_EMPTY &&
+      advance_slot_begin <=
+        solver->refactor_supernode_algorithm5_payoff_group_advance_slots_total &&
+      advance_slots <=
+        solver->refactor_supernode_algorithm5_payoff_group_advance_slots_total -
+          advance_slot_begin &&
+      (advance_slots == 0u ||
+       solver->refactor_supernode_algorithm5_payoff_group_advance_cols !=
+         NULL)) {
+    const UF_long *advance_cols =
+      advance_slots > 0u
+        ? solver->refactor_supernode_algorithm5_payoff_group_advance_cols +
+            advance_slot_begin
+        : NULL;
+    for (UF_long slot = 0u; slot < advance_slots; ++slot) {
+      if (advance_cols[slot] < block_size) {
+        x[advance_cols[slot]] = 0.0;
+      }
+    }
+  } else {
+    memset(x, 0, (size_t)block_size * sizeof(*x));
+  }
+  for (UF_long local = 0u; local < prefix_rows; ++local) {
+    x[dep_local + local] = 0.0;
+  }
+  for (UF_long slot = 0u; slot < target_slots; ++slot) {
+    if (target_cols[slot] < block_size) {
+      x[target_cols[slot]] = 0.0;
+    }
+  }
+  return 1;
+}
+
+static int kls_egraph_refactor_try_prepare_algorithm5_payoff_group_prefixes(
+  kls_egraph_refactor_worker *worker,
+  UF_long current_col) {
+  if (worker == NULL || worker->shared == NULL) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL || !shared->supernode_algorithm5_payoff_prefix_prep ||
+      current_col >= solver->n ||
+      solver->refactor_supernode_algorithm5_payoff_trigger_ptr == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_trigger_groups == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_prefix_end == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_ptr == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_current_ptr == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_currents == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_current_run_ptr ==
+        NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_current_runs ==
+        NULL ||
+      shared->algorithm5_payoff_current_flags == NULL) {
+    return 0;
+  }
+
+  const UF_long trigger_begin =
+    solver->refactor_supernode_algorithm5_payoff_trigger_ptr[current_col];
+  const UF_long trigger_end =
+    solver->refactor_supernode_algorithm5_payoff_trigger_ptr[current_col + 1u];
+  if (trigger_begin > trigger_end ||
+      trigger_end > solver->refactor_supernode_algorithm5_payoff_group_count) {
+    kls_egraph_refactor_record_invalid(shared);
+    return -1;
+  }
+
+  int prepared = 0;
+  for (UF_long trigger_pos = trigger_begin; trigger_pos < trigger_end;
+       ++trigger_pos) {
+    const UF_long group =
+      solver->refactor_supernode_algorithm5_payoff_trigger_groups[trigger_pos];
+    if (group >= solver->refactor_supernode_algorithm5_payoff_group_count ||
+        solver->refactor_supernode_algorithm5_payoff_group_prefix_end[group] !=
+          current_col + 1u) {
+      kls_egraph_refactor_record_invalid(shared);
+      return -1;
+    }
+    const UF_long current_begin =
+      solver->refactor_supernode_algorithm5_payoff_group_current_ptr[group];
+    const UF_long current_end =
+      solver->refactor_supernode_algorithm5_payoff_group_current_ptr[group + 1u];
+    if (current_begin > current_end ||
+        current_end >
+          solver->refactor_supernode_algorithm5_payoff_group_current_total) {
+      kls_egraph_refactor_record_invalid(shared);
+      return -1;
+    }
+    if (current_end - current_begin <= 1u) {
+      continue;
+    }
+    for (UF_long current_slot = current_begin; current_slot < current_end;
+         ++current_slot) {
+      const UF_long candidate =
+        solver->refactor_supernode_algorithm5_payoff_group_currents[
+          current_slot];
+      if (candidate == current_col || candidate >= solver->n ||
+          (shared->pipeline_done != NULL &&
+           shared->pipeline_generation != 0u &&
+           atomic_load_explicit(&shared->pipeline_done[candidate],
+                                memory_order_acquire) ==
+             shared->pipeline_generation)) {
+        continue;
+      }
+      const UF_long run_begin =
+        solver->refactor_supernode_algorithm5_payoff_group_current_run_ptr[
+          current_slot];
+      const UF_long run_end =
+        solver->refactor_supernode_algorithm5_payoff_group_current_run_ptr[
+          current_slot + 1u];
+      if (run_begin > run_end ||
+          run_end >
+            solver->refactor_supernode_algorithm5_payoff_group_ptr[
+              solver->refactor_supernode_algorithm5_payoff_group_count] ||
+          run_end - run_begin != 1u) {
+        continue;
+      }
+      if (!kls_algorithm5_payoff_current_state_try_begin(
+            shared->algorithm5_payoff_current_flags, current_slot)) {
+        continue;
+      }
+      const UF_long run =
+        solver->refactor_supernode_algorithm5_payoff_group_current_runs[
+          run_begin];
+      const int ok =
+        kls_egraph_refactor_prepare_algorithm5_payoff_prefix_run(
+          worker, run, current_slot);
+      kls_algorithm5_payoff_current_state_store(
+        shared->algorithm5_payoff_current_flags, current_slot,
+        ok ? KLS_ALGORITHM5_PAYOFF_CURRENT_READY
+           : KLS_ALGORITHM5_PAYOFF_CURRENT_EMPTY);
+      if (ok) {
+        prepared = 1;
+      }
+    }
+  }
+  return prepared;
+}
+
 static int kls_egraph_refactor_after_pipeline_column_done(
   kls_egraph_refactor_worker *worker,
   UF_long col) {
+  const int prep_status =
+    kls_egraph_refactor_try_prepare_algorithm5_payoff_group_prefixes(
+      worker, col);
+  if (prep_status < 0) {
+    return -1;
+  }
   const int enqueue_status =
     kls_egraph_refactor_try_enqueue_algorithm5_payoff_group_currents(
       worker, col);
@@ -56344,6 +57029,10 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->shared.algorithm5_payoff_slot_accum_rows, 0ul);
   atomic_init(&pool->shared.algorithm5_payoff_slot_accum_target_entries, 0ul);
   atomic_init(&pool->shared.algorithm5_payoff_slot_accum_target_slots, 0ul);
+  atomic_init(&pool->shared.algorithm5_payoff_prefix_prep_runs, 0ul);
+  atomic_init(&pool->shared.algorithm5_payoff_prefix_prep_rows, 0ul);
+  atomic_init(&pool->shared.algorithm5_payoff_prefix_prep_target_entries, 0ul);
+  atomic_init(&pool->shared.algorithm5_payoff_prefix_prep_target_slots, 0ul);
   atomic_init(&pool->shared.pipeline_ready_head, 0ul);
   atomic_init(&pool->shared.pipeline_ready_tail, 0ul);
   atomic_init(&pool->shared.pipeline_ready_completed, 0ul);
@@ -57473,16 +58162,23 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     algorithm5_payoff_queue_prefetch_requested;
   const int algorithm5_payoff_slot_accum_requested =
     kls_refactor_supernode_algorithm5_payoff_slot_accum_env_enabled();
+  const int algorithm5_payoff_prefix_prep_requested =
+    kls_refactor_supernode_algorithm5_payoff_prefix_prep_env_enabled();
   const int algorithm5_prefactor_update_requested =
     kls_egraph_algorithm5_prefactor_update_requested(solver);
   const int algorithm5_payoff_claim_surface_requested =
     algorithm5_payoff_claims_requested &&
     kls_refactor_supernode_algorithm5_payoff_claim_surface_allowed(
       solver, thread_count);
+  const int algorithm5_payoff_prefix_prep_have_groups =
+    algorithm5_payoff_prefix_prep_requested &&
+    solver->refactor_supernode_algorithm5_payoff_group_count > 0u &&
+    solver->refactor_supernode_algorithm5_payoff_group_current_total > 0u;
   const int algorithm5_payoff_exec_requested =
     kls_refactor_supernode_algorithm5_payoff_exec_env_enabled() ||
     algorithm5_payoff_claim_surface_requested ||
-    algorithm5_payoff_slot_accum_requested;
+    algorithm5_payoff_slot_accum_requested ||
+    algorithm5_payoff_prefix_prep_have_groups;
   const int cached_supernode_updates_only =
     supernode_numeric_update_mode == 2;
   int supernode_numeric_updates =
@@ -57585,7 +58281,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   UF_long algorithm5_payoff_queue_capacity = 0u;
   double *algorithm5_payoff_workspace_values = NULL;
   double *algorithm5_payoff_target_values = NULL;
-  unsigned char *algorithm5_payoff_current_flags = NULL;
+  atomic_uchar *algorithm5_payoff_current_flags = NULL;
   int algorithm5_payoff_workspace_active = 0;
   UF_long algorithm5_payoff_workspace_size = 0u;
   UF_long algorithm5_payoff_target_size = 0u;
@@ -57958,6 +58654,15 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      algorithm5_payoff_workspace_values != NULL &&
      algorithm5_payoff_target_values != NULL)
       ? 1 : 0;
+  shared->supernode_algorithm5_payoff_prefix_prep =
+    (algorithm5_payoff_prefix_prep_requested &&
+     shared->supernode_algorithm5_payoff_exec &&
+     shared->supernode_algorithm5_payoff_workspace &&
+     solver->refactor_supernode_algorithm5_payoff_group_target_cols != NULL &&
+     algorithm5_payoff_workspace_values != NULL &&
+     algorithm5_payoff_target_values != NULL &&
+     algorithm5_payoff_current_flags != NULL)
+      ? 1 : 0;
   shared->algorithm5_prefactor_updates =
     (algorithm5_prefactor_update_requested &&
      pipeline_done != NULL && pipeline_generation != 0u)
@@ -58151,6 +58856,16 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   atomic_store_explicit(
     &shared->algorithm5_payoff_slot_accum_target_slots, 0ul,
     memory_order_release);
+  atomic_store_explicit(&shared->algorithm5_payoff_prefix_prep_runs, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->algorithm5_payoff_prefix_prep_rows, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(
+    &shared->algorithm5_payoff_prefix_prep_target_entries, 0ul,
+    memory_order_release);
+  atomic_store_explicit(
+    &shared->algorithm5_payoff_prefix_prep_target_slots, 0ul,
+    memory_order_release);
   atomic_store_explicit(&shared->algorithm5_prefactor_columns, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->algorithm5_prefactor_deps, 0ul,
@@ -58204,6 +58919,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->supernode_algorithm5_payoff_queue_prefetch = 0;
   shared->supernode_algorithm5_payoff_workspace = 0;
   shared->supernode_algorithm5_payoff_slot_accum = 0;
+  shared->supernode_algorithm5_payoff_prefix_prep = 0;
   shared->algorithm5_prefactor_updates = 0;
   shared->algorithm5_payoff_queue_cols = NULL;
   shared->algorithm5_payoff_queue_slots = NULL;
@@ -58392,6 +59108,20 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const UF_long algorithm5_payoff_slot_accum_target_slots =
     (UF_long)atomic_load_explicit(
       &shared->algorithm5_payoff_slot_accum_target_slots, memory_order_acquire);
+  const UF_long algorithm5_payoff_prefix_prep_runs =
+    (UF_long)atomic_load_explicit(
+      &shared->algorithm5_payoff_prefix_prep_runs, memory_order_acquire);
+  const UF_long algorithm5_payoff_prefix_prep_rows =
+    (UF_long)atomic_load_explicit(
+      &shared->algorithm5_payoff_prefix_prep_rows, memory_order_acquire);
+  const UF_long algorithm5_payoff_prefix_prep_target_entries =
+    (UF_long)atomic_load_explicit(
+      &shared->algorithm5_payoff_prefix_prep_target_entries,
+      memory_order_acquire);
+  const UF_long algorithm5_payoff_prefix_prep_target_slots =
+    (UF_long)atomic_load_explicit(
+      &shared->algorithm5_payoff_prefix_prep_target_slots,
+      memory_order_acquire);
   const UF_long algorithm5_prefactor_columns =
     (UF_long)atomic_load_explicit(&shared->algorithm5_prefactor_columns,
                                   memory_order_acquire);
@@ -58590,6 +59320,14 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     algorithm5_payoff_slot_accum_target_entries;
   solver->refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots =
     algorithm5_payoff_slot_accum_target_slots;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_runs =
+    algorithm5_payoff_prefix_prep_runs;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_rows =
+    algorithm5_payoff_prefix_prep_rows;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries =
+    algorithm5_payoff_prefix_prep_target_entries;
+  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots =
+    algorithm5_payoff_prefix_prep_target_slots;
   solver->refactor_last_egraph_algorithm5_prefactor_columns =
     algorithm5_prefactor_columns;
   solver->refactor_last_egraph_algorithm5_prefactor_deps =
@@ -59519,11 +60257,15 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     algorithm5_payoff_queue_prefetch;
   const int algorithm5_payoff_slot_accum =
     kls_refactor_supernode_algorithm5_payoff_slot_accum_env_enabled();
+  const int algorithm5_payoff_prefix_prep =
+    kls_refactor_supernode_algorithm5_payoff_prefix_prep_env_enabled();
   const int algorithm5_payoff_workspace =
     kls_refactor_supernode_algorithm5_payoff_workspace_env_enabled() ||
-    algorithm5_payoff_slot_accum;
+    algorithm5_payoff_slot_accum ||
+    algorithm5_payoff_prefix_prep;
   const int algorithm5_payoff_group_prep =
-    kls_refactor_supernode_algorithm5_payoff_group_prep_env_enabled();
+    kls_refactor_supernode_algorithm5_payoff_group_prep_env_enabled() ||
+    algorithm5_payoff_prefix_prep;
   const int algorithm5_payoff_claim_surface_ready =
     algorithm5_payoff_claims &&
     kls_refactor_supernode_algorithm5_payoff_claim_surface_allowed(
@@ -59533,6 +60275,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
      algorithm5_payoff_claims ||
      algorithm5_payoff_queue ||
      algorithm5_payoff_slot_accum ||
+     algorithm5_payoff_prefix_prep ||
      algorithm5_payoff_group_prep) && !natural_pipeline;
   const int algorithm5_payoff_exec =
     kls_refactor_supernode_algorithm5_payoff_exec_env_enabled() ||
@@ -59544,6 +60287,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     algorithm5_payoff_claims ||
     algorithm5_payoff_queue ||
     algorithm5_payoff_slot_accum ||
+    algorithm5_payoff_prefix_prep ||
     algorithm5_payoff_workspace ||
     algorithm5_payoff_group_prep;
   const int build_supernode_consumer_plan =
@@ -60153,7 +60897,7 @@ static void maybe_prepare_refactor_schedule(kls_solver *solver,
   if (kls_build_refactor_schedule(solver)) {
     double *workspace_values = NULL;
     double *target_values = NULL;
-    unsigned char *current_flags = NULL;
+    atomic_uchar *current_flags = NULL;
     int active = 0;
     UF_long workspace_size = 0u;
     UF_long target_size = 0u;

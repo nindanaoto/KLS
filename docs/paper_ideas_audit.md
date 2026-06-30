@@ -11071,3 +11071,35 @@ measured `2.8342883267318753s`, while auto already selected METIS on the hard
 ASIC rows. This keeps the next high-value work on the grouped Algorithm 5
 multi-current executor, not SCOTCH promotion, BLAS thresholds, or cached-panel
 splitting alone.
+
+The retained Algorithm 5 prefix handoff is now real under
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PREFIX_PREP=1`. A
+producer-prefix trigger can mark a current slot as preparing, apply already
+published advance dependencies into private scratch, retain the prefix U
+coefficients and target deltas, publish the slot as ready, and let the normal
+ragged-L column path consume that retained prefix instead of recomputing the
+producer update. Current-slot flags are atomic because producer preparation and
+scalar column consumption can occur on different EGraph workers. The blocked
+smoke fixture now saves/restores this new environment variable so Algorithm 5
+experiments do not leak into the cached-supernode stats test.
+
+Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PREFIX_PREP=1 ./build/kls_smoke`,
+and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PREFIX_PREP=1 KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`.
+The top-five CKTSO-gap refactor probe
+`build/kls_prefix_prep_final_gap5_t4_r1_ref3_timeout120.jsonl`
+completed with no failures. Its `refactor_seconds_avg` geomean was
+`0.14802499172433736s`, versus the same-source default
+`build/kls_prefix_prep_default_gap5_t4_r1_ref3_timeout120.jsonl` at
+`0.05883573675690034s` and the retained-workspace-only check
+`build/kls_prefix_prep_workspace_check_gap5_t4_r1_ref3_timeout120.jsonl` at
+`0.11620079150786915s`. The path did consume retained prefixes on the ASIC
+rows: `ASIC_320k` consumed `1,974` runs / `107,853` rows / `697,212` target
+slots, `ASIC_320ks` consumed `2,029` / `127,978` / `593,344`, and
+`ASIC_100ks` consumed `354` / `12,206` / `110,744`. This confirms the
+paper-level handoff but rejects the per-current retained-prefix replay as a
+default speed fix. The remaining gap is the larger grouped executor: prepare
+several current workspaces and advance them through the shared producer panel
+together, rather than repeating scatter and advance work once per current.
