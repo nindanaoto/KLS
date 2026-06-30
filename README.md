@@ -1302,7 +1302,11 @@ U coefficients consumed while preparing the retained state, arms only the
 farthest retained member per current column, restores that state when the
 column is dispatched through either wait or no-wait plain-scalar BTF paths,
 writes the skipped U entries, and lets the existing suffix, pivot check, and
-L-store path finish the column. Benchmark JSON reports last and cumulative
+L-store path finish the column. When the retained state is already terminal,
+the executor publishes `U`, the diagonal, and `L` directly from the retained
+state map, using the sorted retained rows as a merge stream when available, so
+that terminal columns do not copy the sparse state back through the scalar
+workspace. Benchmark JSON reports last and cumulative
 state-exec current, skipped-dependency, restored-row, terminal-current,
 remaining-suffix-dependency, remaining-suffix-entry, and reject counts. It also
 reports dispatch bypasses where the BTF column had a selected retained state but

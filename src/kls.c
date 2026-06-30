@@ -65545,6 +65545,12 @@ static int kls_egraph_refactor_btf_unscaled_column(
       ? kls_egraph_refactor_try_restore_btf_scalar_run_group_state(
           worker, k, nk, local_k, ucol_len, ui, ui32, ux, x, 0, &up)
       : 0;
+  if (restored_btf_group_state < 0) {
+    return 0;
+  }
+  if (restored_btf_group_state > 1) {
+    return 1;
+  }
   if (!restored_btf_group_state) {
     kls_egraph_scatter_btf_unscaled_input(
       solver, shared->values, x, k1, solver->refactor_block_start[k],
@@ -67297,6 +67303,195 @@ kls_egraph_record_btf_scalar_run_group_state_exec_dispatch_bypass(
   }
 }
 
+static int
+kls_egraph_refactor_try_publish_terminal_btf_scalar_run_group_state(
+  kls_egraph_refactor_worker *worker,
+  UF_long current,
+  UF_long local_k,
+  UF_long ucol_len,
+  const UF_long *ui,
+  const int32_t *ui32,
+  double *ux,
+  int record_u_value,
+  UF_long member) {
+  if (worker == NULL || worker->shared == NULL || ux == NULL ||
+      (ui == NULL && ui32 == NULL && ucol_len > 0u)) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL || current >= solver->n || current < local_k ||
+      solver->symbolic == NULL || solver->symbolic->Q == NULL ||
+      solver->numeric == NULL || solver->numeric->Udiag == NULL ||
+      solver->numeric->Llen == NULL ||
+      solver->refactor_l_values == NULL ||
+      shared->btf_scalar_run_group_state_values == NULL ||
+      shared->btf_scalar_run_group_state_u_values == NULL ||
+      solver->refactor_btf_scalar_run_group_state_ptr == NULL ||
+      solver->refactor_btf_scalar_run_group_state_rows == NULL) {
+    return 0;
+  }
+
+  const UF_long k1 = current - local_k;
+  const UF_long lcol_len = solver->numeric->Llen[current];
+  const UF_long *li =
+    solver->refactor_l_indices != NULL ? solver->refactor_l_indices[current]
+                                       : NULL;
+  const int32_t *li32 =
+    solver->refactor_l_indices32 != NULL
+      ? solver->refactor_l_indices32[current] : NULL;
+  double *lx = solver->refactor_l_values[current];
+  if (lcol_len > 0u && (lx == NULL || (li == NULL && li32 == NULL))) {
+    return 0;
+  }
+  const UF_long state_begin =
+    solver->refactor_btf_scalar_run_group_state_ptr[member];
+  const UF_long state_end =
+    solver->refactor_btf_scalar_run_group_state_ptr[member + 1u];
+  if (state_end < state_begin ||
+      state_end > solver->refactor_btf_scalar_run_group_state_rows_total) {
+    return 0;
+  }
+  const UF_long *state_rows =
+    solver->refactor_btf_scalar_run_group_state_rows + state_begin;
+  const UF_long state_count = state_end - state_begin;
+
+  UF_long pivot_pos = 0u;
+  if (!kls_btf_scalar_run_group_state_position(
+        solver, member, local_k, &pivot_pos)) {
+    return 0;
+  }
+  const double *state_values = shared->btf_scalar_run_group_state_values;
+  const double ukk = state_values[pivot_pos];
+  if (ukk == 0.0) {
+    kls_egraph_refactor_record_singular(
+      shared, current, solver->symbolic->Q[current]);
+    if (solver->common.halt_if_singular) {
+      return -1;
+    }
+  }
+
+  UF_long rejected_row = KLS_KLU_EMPTY;
+  UF_long rejected_local_row = KLS_KLU_EMPTY;
+  double rejected_multiplier_abs = -1.0;
+  double rejected_pivot_abs = fabs(ukk);
+  double rejected_candidate_abs = -1.0;
+  if (solver->refactor_l_indices_sorted) {
+    UF_long state_pos = 0u;
+    for (UF_long p = 0u; p < lcol_len; ++p) {
+      const UF_long row = li32 != NULL ? (UF_long)li32[p] : li[p];
+      while (state_pos < state_count && state_rows[state_pos] < row) {
+        state_pos++;
+      }
+      if (state_pos >= state_count || state_rows[state_pos] != row) {
+        return 0;
+      }
+      if (!shared->check_pivots) {
+        continue;
+      }
+      const double value = state_values[state_begin + state_pos];
+      const double candidate_abs = fabs(value);
+      const double multiplier_abs = fabs(value / ukk);
+      if (isfinite(multiplier_abs) &&
+          multiplier_abs * solver->common.tol <= 1.0 + 1.0e-12) {
+        continue;
+      }
+      if (rejected_local_row == KLS_KLU_EMPTY ||
+          (!isnan(candidate_abs) &&
+           (isnan(rejected_candidate_abs) ||
+            candidate_abs > rejected_candidate_abs))) {
+        rejected_local_row = row;
+        rejected_row = k1 + row;
+        rejected_candidate_abs = candidate_abs;
+        rejected_multiplier_abs = multiplier_abs;
+      }
+    }
+  } else {
+    for (UF_long p = 0u; p < lcol_len; ++p) {
+      const UF_long row = li32 != NULL ? (UF_long)li32[p] : li[p];
+      UF_long row_pos = 0u;
+      if (!kls_btf_scalar_run_group_state_position(
+            solver, member, row, &row_pos)) {
+        return 0;
+      }
+      if (!shared->check_pivots) {
+        continue;
+      }
+      const double value = state_values[row_pos];
+      const double candidate_abs = fabs(value);
+      const double multiplier_abs = fabs(value / ukk);
+      if (isfinite(multiplier_abs) &&
+          multiplier_abs * solver->common.tol <= 1.0 + 1.0e-12) {
+        continue;
+      }
+      if (rejected_local_row == KLS_KLU_EMPTY ||
+          (!isnan(candidate_abs) &&
+           (isnan(rejected_candidate_abs) ||
+            candidate_abs > rejected_candidate_abs))) {
+        rejected_local_row = row;
+        rejected_row = k1 + row;
+        rejected_candidate_abs = candidate_abs;
+        rejected_multiplier_abs = multiplier_abs;
+      }
+    }
+  }
+  if (rejected_local_row != KLS_KLU_EMPTY) {
+    kls_egraph_refactor_record_reject(
+      shared, current, solver->symbolic->Q[current], rejected_row,
+      rejected_multiplier_abs, rejected_pivot_abs, rejected_candidate_abs);
+    return -1;
+  }
+
+  for (UF_long up = 0u; up < ucol_len; ++up) {
+    const UF_long dep_local = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+    UF_long dep_pos = 0u;
+    if (!kls_btf_scalar_run_group_state_position(
+          solver, member, dep_local, &dep_pos)) {
+      return 0;
+    }
+    const double ujk = shared->btf_scalar_run_group_state_u_values[dep_pos];
+    ux[up] = ujk;
+    if (record_u_value) {
+      kls_egraph_record_u_supernode_value(shared, k1 + dep_local, current,
+                                          ujk);
+    }
+  }
+  ((double *)solver->numeric->Udiag)[current] = ukk;
+  if (record_u_value) {
+    kls_egraph_record_u_supernode_value(shared, current, current, ukk);
+  }
+
+  if (solver->refactor_l_indices_sorted) {
+    UF_long state_pos = 0u;
+    for (UF_long p = 0u; p < lcol_len; ++p) {
+      const UF_long row = li32 != NULL ? (UF_long)li32[p] : li[p];
+      while (state_pos < state_count && state_rows[state_pos] < row) {
+        state_pos++;
+      }
+      lx[p] = state_values[state_begin + state_pos] / ukk;
+    }
+  } else {
+    for (UF_long p = 0u; p < lcol_len; ++p) {
+      const UF_long row = li32 != NULL ? (UF_long)li32[p] : li[p];
+      UF_long row_pos = 0u;
+      (void)kls_btf_scalar_run_group_state_position(
+        solver, member, row, &row_pos);
+      lx[p] = state_values[row_pos] / ukk;
+    }
+  }
+  if (solver->refactor_l_sorted_values != NULL &&
+      solver->refactor_l_sorted_pos32 != NULL) {
+    double *sorted_values = solver->refactor_l_sorted_values[current];
+    const int32_t *sorted_pos = solver->refactor_l_sorted_pos32[current];
+    if (sorted_values != NULL && sorted_pos != NULL) {
+      for (UF_long p = 0u; p < lcol_len; ++p) {
+        sorted_values[p] = lx[(UF_long)sorted_pos[p]];
+      }
+    }
+  }
+  return 1;
+}
+
 static int kls_egraph_refactor_try_restore_btf_scalar_run_group_state(
   kls_egraph_refactor_worker *worker,
   UF_long current,
@@ -67408,6 +67603,23 @@ static int kls_egraph_refactor_try_restore_btf_scalar_run_group_state(
     atomic_fetch_add_explicit(
       &shared->btf_scalar_run_group_state_exec_terminal_currents, 1ul,
       memory_order_relaxed);
+    const int terminal_status =
+      kls_egraph_refactor_try_publish_terminal_btf_scalar_run_group_state(
+        worker, current, local_k, ucol_len, ui, ui32, ux, record_u_value,
+        best_member);
+    if (terminal_status < 0) {
+      return -1;
+    }
+    if (terminal_status > 0) {
+      atomic_fetch_add_explicit(
+        &shared->btf_scalar_run_group_state_exec_currents, 1ul,
+        memory_order_relaxed);
+      atomic_fetch_add_explicit(
+        &shared->btf_scalar_run_group_state_exec_skipped_deps,
+        (unsigned long)best_skip, memory_order_relaxed);
+      *up_out = best_skip;
+      return 2;
+    }
   } else if (solver->numeric != NULL && solver->numeric->Llen != NULL &&
              current >= local_k) {
     const UF_long k1 = current - local_k;

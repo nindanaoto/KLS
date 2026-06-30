@@ -13037,3 +13037,21 @@ still restored `738,957` state rows and refactored in `10.2357s`. On
 `8.7118s`. This confirms the suffix after restore is not the first-order loss;
 the paper-level owner still has to avoid materializing/restoring one sparse
 state per current and instead keep the multi-current producer/window batch live.
+
+The follow-up implementation now makes those terminal retained states publish
+directly from the retained state map instead of copying through the scalar
+workspace. The path is still guarded by
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1`; it validates the
+retained pivot and L rows, applies the same pivot-reject rule, writes the
+retained U coefficients, diagonal, and L multipliers, and uses a merge walk for
+sorted retained L rows. The focused probes stayed residual-clean with zero
+state-exec rejects. On `ASIC_100ks`,
+`build/kls_btf_group_state_exec_terminal_direct_merge_asic100ks_t4_r1_ref1.json`
+reduced restored rows from `738,957` to `128,014` and measured `10.1458s`
+versus `10.2357s` for the restore path. On `ASIC_320ks`,
+`build/kls_btf_group_state_exec_terminal_direct_merge_asic320ks_t4_r1_ref1.json`
+reduced restored rows from `898,406` to `434,141` and measured `8.5201s`
+versus `8.7118s`. This is worth retaining as a correct Algorithm 5
+post-factorization writeback slice, but the timing confirms the same larger
+diagnosis: retained-state materialization and producer-run advancement dominate,
+so the CKTSO-speed path still needs a live multi-current producer/window owner.
