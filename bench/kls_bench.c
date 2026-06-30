@@ -2530,6 +2530,22 @@ int main(int argc, char **argv) {
              .refactor_last_supernode_algorithm5_payoff_current_state_seed_deps,
            stats
              .refactor_last_supernode_algorithm5_payoff_current_state_seed_rows);
+    printf(",\"refactor_last_supernode_algorithm5_payoff_final_trigger_batches\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_final_trigger_claims\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps\":%"
+           PRId64,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_final_trigger_batches,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_final_trigger_claims,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps);
     printf(",\"refactor_l_pattern_columns\":%" PRId64
            ",\"refactor_l_pattern_entries\":%" PRId64
            ",\"refactor_l_adjacent_run_count\":%" PRId64
@@ -3631,6 +3647,7 @@ int main(int argc, char **argv) {
            " slot accum %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            " prefix prep %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            " current-state seed %" PRId64 "/%" PRId64 "/%" PRId64
+           " final trigger %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            ", group L %d/%d %" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64
@@ -3830,6 +3847,14 @@ int main(int argc, char **argv) {
              .refactor_last_supernode_algorithm5_payoff_current_state_seed_deps,
            stats
              .refactor_last_supernode_algorithm5_payoff_current_state_seed_rows,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_final_trigger_batches,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_final_trigger_claims,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps,
            stats.refactor_supernode_consumer_plan_group_l_built,
            stats.refactor_supernode_consumer_plan_group_l_storage_limited,
            stats.refactor_supernode_consumer_plan_group_l_panel_count,

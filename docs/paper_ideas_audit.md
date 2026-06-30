@@ -11579,3 +11579,19 @@ the grouped descriptor exposed `2,997,879` suffix dependencies and
 BLAS and terminal publication out of the lead-cause slot: the paper-aligned
 work still missing from KLS is a grouped suffix/current-state executor that can
 amortize this remaining scalar update surface.
+
+A runtime final-trigger batch probe rules out final-trigger completion as the
+place to recover that grouped suffix surface. KLS now reports
+`refactor_last_supernode_algorithm5_payoff_final_trigger_batches`,
+`refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches`,
+`refactor_last_supernode_algorithm5_payoff_final_trigger_claims`, and
+`refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps`. The
+focused grouped-complete run
+`build/kls_alg5_group_complete_final_trigger_surface_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `2.5581s` geomean, with `412` final-trigger batches, `0`
+multi-claim batches, `412` claims, and only `54,739` suffix dependencies reached
+through that path. The same rows still expose `2,997,879` planned grouped
+suffix dependencies and `1,029,383,423` suffix update-entry proxy work in the
+descriptor. So the CKTSO/SubtreeLU paper gap is not a missed final-trigger
+batch: it is earlier, where grouped current-state suffix work should be owned
+and advanced before individual final-trigger claims become visible.

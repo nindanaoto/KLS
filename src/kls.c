@@ -845,6 +845,10 @@ struct kls_solver {
   UF_long refactor_last_supernode_algorithm5_payoff_current_state_seed_runs;
   UF_long refactor_last_supernode_algorithm5_payoff_current_state_seed_deps;
   UF_long refactor_last_supernode_algorithm5_payoff_current_state_seed_rows;
+  UF_long refactor_last_supernode_algorithm5_payoff_final_trigger_batches;
+  UF_long refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches;
+  UF_long refactor_last_supernode_algorithm5_payoff_final_trigger_claims;
+  UF_long refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps;
   UF_long refactor_supernode_consumer_plan_group_l_panel_count;
   UF_long refactor_supernode_consumer_plan_group_l_run_count;
   UF_long refactor_supernode_consumer_plan_group_l_rows;
@@ -1502,6 +1506,10 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong algorithm5_payoff_current_state_seed_runs;
   atomic_ulong algorithm5_payoff_current_state_seed_deps;
   atomic_ulong algorithm5_payoff_current_state_seed_rows;
+  atomic_ulong algorithm5_payoff_final_trigger_batches;
+  atomic_ulong algorithm5_payoff_final_trigger_multi_batches;
+  atomic_ulong algorithm5_payoff_final_trigger_claims;
+  atomic_ulong algorithm5_payoff_final_trigger_suffix_deps;
   atomic_ulong algorithm5_prefactor_columns;
   atomic_ulong algorithm5_prefactor_deps;
   UF_long *algorithm5_payoff_queue_cols;
@@ -3185,6 +3193,15 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_last_supernode_algorithm5_payoff_current_state_seed_runs = 0;
   solver->refactor_last_supernode_algorithm5_payoff_current_state_seed_deps = 0;
   solver->refactor_last_supernode_algorithm5_payoff_current_state_seed_rows = 0;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_batches = 0;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches =
+      0;
+  solver->refactor_last_supernode_algorithm5_payoff_final_trigger_claims = 0;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps =
+      0;
   solver->refactor_supernode_algorithm5_prefix_panel_count = 0;
   solver->refactor_supernode_algorithm5_prefix_panel_run_count = 0;
   solver->refactor_supernode_algorithm5_prefix_panel_run_rows = 0;
@@ -3284,6 +3301,15 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_last_supernode_algorithm5_payoff_current_state_seed_runs = 0;
   solver->refactor_last_supernode_algorithm5_payoff_current_state_seed_deps = 0;
   solver->refactor_last_supernode_algorithm5_payoff_current_state_seed_rows = 0;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_batches = 0;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches =
+      0;
+  solver->refactor_last_supernode_algorithm5_payoff_final_trigger_claims = 0;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps =
+      0;
   solver->refactor_supernode_consumer_plan_cached_panel_count = 0;
   solver->refactor_supernode_consumer_plan_cached_panel_rows = 0;
   solver->refactor_supernode_consumer_plan_strict_cached_panel_count = 0;
@@ -14395,6 +14421,15 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   solver->refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries =
     0;
   solver->refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots = 0;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_batches = 0;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches =
+      0;
+  solver->refactor_last_supernode_algorithm5_payoff_final_trigger_claims = 0;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps =
+      0;
   solver->refactor_last_ready_queue_columns = 0;
   solver->stats.refactor_last_supernode_pipeline_tasks = 0;
   solver->stats.refactor_last_supernode_pipeline_columns = 0;
@@ -14464,6 +14499,15 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
     .refactor_last_supernode_algorithm5_payoff_current_state_seed_deps = 0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_current_state_seed_rows = 0;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_final_trigger_batches = 0;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches =
+      0;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_final_trigger_claims = 0;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps = 0;
   solver->stats.refactor_u_supernode_l_exec_disabled =
     solver->refactor_u_supernode_l_exec_disabled;
   solver->stats.refactor_u_supernode_l_exec_disable_count =
@@ -23843,6 +23887,22 @@ static void fill_numeric_stats(kls_solver *solver) {
     .refactor_last_supernode_algorithm5_payoff_current_state_seed_rows =
       (int64_t)solver
         ->refactor_last_supernode_algorithm5_payoff_current_state_seed_rows;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_final_trigger_batches =
+      (int64_t)solver
+        ->refactor_last_supernode_algorithm5_payoff_final_trigger_batches;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches =
+      (int64_t)solver
+        ->refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_final_trigger_claims =
+      (int64_t)solver
+        ->refactor_last_supernode_algorithm5_payoff_final_trigger_claims;
+  solver->stats
+    .refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps =
+      (int64_t)solver
+        ->refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps;
   solver->stats.refactor_last_supernode_consumer_plan_attempts =
     (int64_t)solver->refactor_last_supernode_consumer_plan_attempts;
   solver->stats.refactor_last_supernode_consumer_plan_hits =
@@ -41910,6 +41970,10 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   atomic_init(&shared.algorithm5_payoff_current_state_seed_runs, 0ul);
   atomic_init(&shared.algorithm5_payoff_current_state_seed_deps, 0ul);
   atomic_init(&shared.algorithm5_payoff_current_state_seed_rows, 0ul);
+  atomic_init(&shared.algorithm5_payoff_final_trigger_batches, 0ul);
+  atomic_init(&shared.algorithm5_payoff_final_trigger_multi_batches, 0ul);
+  atomic_init(&shared.algorithm5_payoff_final_trigger_claims, 0ul);
+  atomic_init(&shared.algorithm5_payoff_final_trigger_suffix_deps, 0ul);
 
   kls_egraph_refactor_worker worker;
   memset(&worker, 0, sizeof(worker));
@@ -52659,6 +52723,85 @@ static void kls_egraph_record_algorithm5_payoff_current_state_seed(
     memory_order_relaxed);
 }
 
+static void kls_egraph_record_algorithm5_payoff_final_trigger_claims(
+  kls_egraph_refactor_shared *shared,
+  UF_long claims,
+  UF_long suffix_deps) {
+  if (shared == NULL || claims == 0u) {
+    return;
+  }
+  atomic_fetch_add_explicit(
+    &shared->algorithm5_payoff_final_trigger_batches, 1ul,
+    memory_order_relaxed);
+  if (claims > 1u) {
+    atomic_fetch_add_explicit(
+      &shared->algorithm5_payoff_final_trigger_multi_batches, 1ul,
+      memory_order_relaxed);
+  }
+  atomic_fetch_add_explicit(
+    &shared->algorithm5_payoff_final_trigger_claims, (unsigned long)claims,
+    memory_order_relaxed);
+  atomic_fetch_add_explicit(
+    &shared->algorithm5_payoff_final_trigger_suffix_deps,
+    (unsigned long)suffix_deps, memory_order_relaxed);
+}
+
+static UF_long kls_algorithm5_payoff_current_slot_suffix_deps(
+  const kls_solver *solver,
+  UF_long current_slot) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Ulen == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_ptr == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_current_run_ptr ==
+        NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_current_runs ==
+        NULL ||
+      solver->refactor_supernode_algorithm5_payoff_group_currents == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_advance_deps == NULL ||
+      solver->refactor_supernode_algorithm5_payoff_run_prefix_rows == NULL ||
+      solver->refactor_supernode_consumer_plan_current == NULL ||
+      current_slot >=
+        solver->refactor_supernode_algorithm5_payoff_group_current_total ||
+      current_slot + 1u >
+        solver->refactor_supernode_algorithm5_payoff_group_current_total) {
+    return 0u;
+  }
+  const UF_long run_begin =
+    solver->refactor_supernode_algorithm5_payoff_group_current_run_ptr[
+      current_slot];
+  const UF_long run_end =
+    solver->refactor_supernode_algorithm5_payoff_group_current_run_ptr[
+      current_slot + 1u];
+  if (run_begin > run_end ||
+      run_end >
+        solver->refactor_supernode_algorithm5_payoff_group_ptr[
+          solver->refactor_supernode_algorithm5_payoff_group_count] ||
+      run_end - run_begin != 1u) {
+    return 0u;
+  }
+  const UF_long run =
+    solver->refactor_supernode_algorithm5_payoff_group_current_runs[run_begin];
+  if (run >= solver->refactor_supernode_consumer_plan_run_count) {
+    return 0u;
+  }
+  const UF_long current =
+    solver->refactor_supernode_consumer_plan_current[run];
+  if (current >= solver->n ||
+      solver->refactor_supernode_algorithm5_payoff_group_currents[
+        current_slot] != current) {
+    return 0u;
+  }
+  const UF_long advance_deps =
+    solver->refactor_supernode_algorithm5_payoff_run_advance_deps[run];
+  const UF_long prefix_rows =
+    solver->refactor_supernode_algorithm5_payoff_run_prefix_rows[run];
+  const UF_long ulen = solver->numeric->Ulen[current];
+  if (advance_deps > ulen || prefix_rows > ulen - advance_deps) {
+    return 0u;
+  }
+  return ulen - advance_deps - prefix_rows;
+}
+
 enum {
   KLS_ALGORITHM5_PAYOFF_CURRENT_EMPTY = 0u,
   KLS_ALGORITHM5_PAYOFF_CURRENT_PREPARING = 1u,
@@ -61107,6 +61250,7 @@ kls_egraph_refactor_try_complete_algorithm5_payoff_final_triggers(
   }
 
   UF_long claim_count = 0u;
+  UF_long claim_suffix_deps = 0u;
   for (UF_long pos = trigger_begin; pos < trigger_end; ++pos) {
     const UF_long current_slot =
       shared->algorithm5_payoff_final_trigger_slots[pos];
@@ -61150,6 +61294,11 @@ kls_egraph_refactor_try_complete_algorithm5_payoff_final_triggers(
     claims[claim_count].col = candidate;
     claims[claim_count].current_slot = current_slot;
     claims[claim_count].run = KLS_KLU_EMPTY;
+    const UF_long suffix_deps =
+      kls_algorithm5_payoff_current_slot_suffix_deps(solver, current_slot);
+    claim_suffix_deps =
+      suffix_deps > UF_long_max - claim_suffix_deps
+        ? UF_long_max : claim_suffix_deps + suffix_deps;
     claim_count++;
   }
 
@@ -61157,6 +61306,8 @@ kls_egraph_refactor_try_complete_algorithm5_payoff_final_triggers(
     free(claims);
     return 0;
   }
+  kls_egraph_record_algorithm5_payoff_final_trigger_claims(
+    shared, claim_count, claim_suffix_deps);
   kls_sort_algorithm5_payoff_group_complete_items(claims, claim_count);
 
   int processed = 0;
@@ -62469,6 +62620,10 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->shared.algorithm5_payoff_current_state_seed_runs, 0ul);
   atomic_init(&pool->shared.algorithm5_payoff_current_state_seed_deps, 0ul);
   atomic_init(&pool->shared.algorithm5_payoff_current_state_seed_rows, 0ul);
+  atomic_init(&pool->shared.algorithm5_payoff_final_trigger_batches, 0ul);
+  atomic_init(&pool->shared.algorithm5_payoff_final_trigger_multi_batches, 0ul);
+  atomic_init(&pool->shared.algorithm5_payoff_final_trigger_claims, 0ul);
+  atomic_init(&pool->shared.algorithm5_payoff_final_trigger_suffix_deps, 0ul);
   atomic_init(&pool->shared.pipeline_ready_head, 0ul);
   atomic_init(&pool->shared.pipeline_ready_tail, 0ul);
   atomic_init(&pool->shared.pipeline_ready_completed, 0ul);
@@ -64494,6 +64649,16 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
                         memory_order_release);
   atomic_store_explicit(&shared->algorithm5_payoff_current_state_seed_rows, 0ul,
                         memory_order_release);
+  atomic_store_explicit(&shared->algorithm5_payoff_final_trigger_batches, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(
+    &shared->algorithm5_payoff_final_trigger_multi_batches, 0ul,
+    memory_order_release);
+  atomic_store_explicit(&shared->algorithm5_payoff_final_trigger_claims, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(
+    &shared->algorithm5_payoff_final_trigger_suffix_deps, 0ul,
+    memory_order_release);
   atomic_store_explicit(&shared->algorithm5_prefactor_columns, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->algorithm5_prefactor_deps, 0ul,
@@ -64790,6 +64955,22 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     (UF_long)atomic_load_explicit(
       &shared->algorithm5_payoff_current_state_seed_rows,
       memory_order_acquire);
+  const UF_long algorithm5_payoff_final_trigger_batches =
+    (UF_long)atomic_load_explicit(
+      &shared->algorithm5_payoff_final_trigger_batches,
+      memory_order_acquire);
+  const UF_long algorithm5_payoff_final_trigger_multi_batches =
+    (UF_long)atomic_load_explicit(
+      &shared->algorithm5_payoff_final_trigger_multi_batches,
+      memory_order_acquire);
+  const UF_long algorithm5_payoff_final_trigger_claims =
+    (UF_long)atomic_load_explicit(
+      &shared->algorithm5_payoff_final_trigger_claims,
+      memory_order_acquire);
+  const UF_long algorithm5_payoff_final_trigger_suffix_deps =
+    (UF_long)atomic_load_explicit(
+      &shared->algorithm5_payoff_final_trigger_suffix_deps,
+      memory_order_acquire);
   const UF_long algorithm5_prefactor_columns =
     (UF_long)atomic_load_explicit(&shared->algorithm5_prefactor_columns,
                                   memory_order_acquire);
@@ -65008,6 +65189,17 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     algorithm5_payoff_current_state_seed_deps;
   solver->refactor_last_supernode_algorithm5_payoff_current_state_seed_rows =
     algorithm5_payoff_current_state_seed_rows;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_batches =
+      algorithm5_payoff_final_trigger_batches;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches =
+      algorithm5_payoff_final_trigger_multi_batches;
+  solver->refactor_last_supernode_algorithm5_payoff_final_trigger_claims =
+    algorithm5_payoff_final_trigger_claims;
+  solver
+    ->refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps =
+      algorithm5_payoff_final_trigger_suffix_deps;
   solver->refactor_last_egraph_algorithm5_prefactor_columns =
     algorithm5_prefactor_columns;
   solver->refactor_last_egraph_algorithm5_prefactor_deps =
