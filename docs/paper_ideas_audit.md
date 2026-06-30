@@ -11358,3 +11358,33 @@ paper-level handoff but rejects the per-current retained-prefix replay as a
 default speed fix. The remaining gap is the larger grouped executor: prepare
 several current workspaces and advance them through the shared producer panel
 together, rather than repeating scatter and advance work once per current.
+
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE=1` now adds the
+next direct paper-level scheduling slice: a retained final-dependency trigger
+map for prepared Algorithm 5 current slots. Prefix triggers still prepare
+current-state workspaces in grouped batches; additionally, KLS maps each
+single-run current slot to its final U dependency and, when that dependency
+publishes, claims and dispatches the prepared current column through the
+existing direct-prefix completion path. This fixes the earlier structural issue
+where grouped completion at the prefix trigger could only claim `3` to `4`
+ASIC currents because most prepared currents still had suffix dependencies.
+
+Correctness passed `cmake --build build -j2`,
+`git diff --check`, `ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE=1 ./build/kls_smoke`.
+The first full 41-row CKTSO-gap run before final-trigger activation,
+`build/kls_alg5_group_complete_gap5_t4_r1_ref3_timeout120.jsonl`, behaved like
+the old direct-complete path and had two 120s timeouts. After adding the final
+trigger map, the top-five focused run
+`build/kls_alg5_group_complete_final_trigger_gap5_t4_r1_ref3_timeout120.jsonl`
+completed but remained slower than default: SPICE-cycle geomean `2.4134s`
+versus `1.4629s` in `build/kls_current_default_gap5_t4_r1_ref3_timeout120.jsonl`.
+The ASIC rows show that the new trigger really fires:
+`ASIC_320ks` claimed `289` prepared currents with `103` claim waits,
+`ASIC_320k` claimed `337` with `104` waits, and `ASIC_100ks` claimed `75` with
+`27` waits. This closes the prefix-trigger timing gap from the papers, but it
+also rejects delayed scalar dispatch as the missing performance mechanism. The
+next plausible paper-aligned step is not BLAS thresholding; it is to execute
+multiple prepared current workspaces inside one grouped numeric task so claimed
+columns do not re-enter the ordinary per-column dispatcher and make other
+workers wait on scalar follow-on work.

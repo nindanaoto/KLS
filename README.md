@@ -1092,6 +1092,21 @@ retained-row copy but still measured `2.4101s`. The current default on the same
 source measured `1.4629s`, so the next paper-level gap is a grouped live
 Algorithm 5 workspace that advances the remaining dependency stream for
 multiple current columns, not BLAS thresholding or retained-row copy alone.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE=1` extends the
+direct-complete probe with retained final-dependency triggers. The grouped
+producer-prefix path still prepares the current-state workspaces in batch, but
+KLS also builds a map from each current slot to the last U dependency in that
+column. When that final dependency publishes, a worker can claim the prepared
+current column and dispatch it through the existing direct-prefix completion
+path instead of waiting for the ordinary pipeline position. This directly tests
+the CKTSO/SubtreeLU scheduling gap that prefix-trigger-only completion missed.
+It remains guarded and off by default: the top-five CKTSO-gap run
+`build/kls_alg5_group_complete_final_trigger_gap5_t4_r1_ref3_timeout120.jsonl`
+raised claimed prepared currents on the ASIC rows from single digits to
+hundreds, but the SPICE-cycle geomean was `2.4134s` versus the current default
+`1.4629s`. Claim waits and per-column dispatch still dominate, so the remaining
+paper gap is a true grouped numeric executor for several live current
+workspaces, not delayed scalar dispatch alone.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_STATE_RAGGED_SUFFIX=1`
 is a guarded diagnostic for that remaining suffix: it tries to apply matching
 ragged-L supernode runs directly against the retained state map before falling
