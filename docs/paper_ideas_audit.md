@@ -11950,3 +11950,21 @@ grouped pre-prefix replay as the missing large CKTSO-paper mechanism. The
 next refactor attempt should avoid per-row sparse lookup in the inner numeric
 loop, likely by owning a dense or position-coded multi-current state for a
 bounded producer-panel kernel.
+
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_PREP_HASH=1`
+tests the next narrower version of that idea: the grouped pre-prefix advance
+executor builds a compact per-batch row-to-state-position hash table, so the
+inner L-row update no longer binary-searches every sparse current-state row.
+This correctly activates the same direct-current-state machinery as
+`GROUP_ADVANCE_PREP` and passes smoke/ctest. The fixed top-five CKTSO-gap run
+`build/kls_alg5_group_advance_prep_hash_gap5_t4_r1_ref3_timeout120_fixed.jsonl`
+measured `2.8283s` geomean. That is much better than the binary-search grouped
+replay at `3.4233s`, but still worse than scalar direct-current prep at
+`2.3865s` and default at `1.4532s` on the same source. Counters confirm the
+hash path ran on the ASIC cases (`ASIC_320ks` seeded `4,010` states and
+`3,564,401` sparse rows). This narrows the loss: row-position lookup alone was
+not the large missing CKTSO mechanism. The remaining overhead is the doubled
+current-state seeding and per-current sparse state update volume; the next
+attempt should avoid materializing both scalar and grouped current states, or
+own a bounded dense producer-panel state instead of hashing sparse rows per
+batch.
