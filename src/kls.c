@@ -52199,8 +52199,22 @@ static int kls_egraph_refactor_single_unscaled_column(
     shared->supernode_consumer_plan_group_l_exec;
   const int u_supernode_ragged_l_updates =
     shared->u_supernode_ragged_l_updates;
+  const int u_supernode_values = shared->u_supernode_values;
+  UF_long algorithm5_prefactor_deps = 0u;
+  const int algorithm5_prefactor_enabled =
+    wait_for_dependencies && shared->algorithm5_prefactor_updates &&
+    ucol_len > 1u;
+  unsigned char *algorithm5_prefactor_applied = NULL;
   while (up < ucol_len) {
-    if (supernode_numeric_updates) {
+    if (algorithm5_prefactor_applied != NULL &&
+        algorithm5_prefactor_applied[up]) {
+      up++;
+      continue;
+    }
+    const int batch_paths_allowed =
+      algorithm5_prefactor_deps == 0u;
+    if (batch_paths_allowed && supernode_numeric_updates) {
+      const UF_long run_begin = up;
       const int supernode_status =
         kls_egraph_refactor_try_supernode_dependency_run(
           worker, 0u, k, k, &up, ucol_len, ui, ux, l_indices, l_values,
@@ -52209,10 +52223,15 @@ static int kls_egraph_refactor_single_unscaled_column(
         return 0;
       }
       if (supernode_status > 0) {
+        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
+          memset(algorithm5_prefactor_applied + run_begin, 1,
+                 (size_t)(up - run_begin));
+        }
         continue;
       }
     }
-    if (consumer_plan_group_l_updates) {
+    if (batch_paths_allowed && consumer_plan_group_l_updates) {
+      const UF_long run_begin = up;
       const int group_l_status =
         kls_egraph_refactor_try_consumer_plan_group_l_run(
           worker, 0u, k, k, &up, ucol_len, ui, ux, x,
@@ -52221,10 +52240,15 @@ static int kls_egraph_refactor_single_unscaled_column(
         return 0;
       }
       if (group_l_status > 0) {
+        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
+          memset(algorithm5_prefactor_applied + run_begin, 1,
+                 (size_t)(up - run_begin));
+        }
         continue;
       }
     }
-    if (u_supernode_ragged_l_updates) {
+    if (batch_paths_allowed && u_supernode_ragged_l_updates) {
+      const UF_long run_begin = up;
       const int ragged_status =
         kls_egraph_refactor_try_u_supernode_ragged_l_run(
           worker, 0u, k, k, &up, ucol_len, ui, ux, x,
@@ -52233,10 +52257,34 @@ static int kls_egraph_refactor_single_unscaled_column(
         return 0;
       }
       if (ragged_status > 0) {
+        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
+          memset(algorithm5_prefactor_applied + run_begin, 1,
+                 (size_t)(up - run_begin));
+        }
         continue;
       }
     }
     const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+    if (algorithm5_prefactor_enabled &&
+        !kls_egraph_refactor_dependency_done_now(shared, j)) {
+      if (algorithm5_prefactor_applied == NULL) {
+        algorithm5_prefactor_applied =
+          kls_egraph_worker_byte_workspace(worker, ucol_len);
+        if (algorithm5_prefactor_applied != NULL) {
+          memset(algorithm5_prefactor_applied, 0, (size_t)ucol_len);
+          if (up > 0u) {
+            memset(algorithm5_prefactor_applied, 1, (size_t)up);
+          }
+        }
+      }
+      if (algorithm5_prefactor_applied != NULL &&
+          !kls_egraph_refactor_prefactor_finished_btf_deps(
+            worker, 0u, k, k, up, ucol_len, ui, ui32, ux, l_indices,
+            l_values, numeric->Llen, x, algorithm5_prefactor_applied,
+            u_supernode_values, &algorithm5_prefactor_deps)) {
+        return 0;
+      }
+    }
     if (wait_for_dependencies &&
         !kls_egraph_refactor_wait_done(shared, j)) {
       return 0;
@@ -52244,7 +52292,7 @@ static int kls_egraph_refactor_single_unscaled_column(
     const double ujk = x[j];
     x[j] = 0.0;
     ux[up] = ujk;
-    if (shared->u_supernode_values) {
+    if (u_supernode_values) {
       kls_egraph_record_u_supernode_value(shared, j, k, ujk);
     }
 
@@ -52254,7 +52302,18 @@ static int kls_egraph_refactor_single_unscaled_column(
       UF_long lcol_len = numeric->Llen[j];
       kls_scatter_subtract_refactor_l(solver, x, j, li, lx, lcol_len, ujk);
     }
+    if (algorithm5_prefactor_applied != NULL) {
+      algorithm5_prefactor_applied[up] = 1u;
+    }
     up++;
+  }
+
+  if (algorithm5_prefactor_deps > 0u) {
+    atomic_fetch_add_explicit(&shared->algorithm5_prefactor_columns, 1ul,
+                              memory_order_relaxed);
+    atomic_fetch_add_explicit(&shared->algorithm5_prefactor_deps,
+                              (unsigned long)algorithm5_prefactor_deps,
+                              memory_order_relaxed);
   }
 
   const double ukk = x[k];
@@ -52266,7 +52325,7 @@ static int kls_egraph_refactor_single_unscaled_column(
     }
   }
   udiag[k] = ukk;
-  if (shared->u_supernode_values) {
+  if (u_supernode_values) {
     kls_egraph_record_u_supernode_value(shared, k, k, ukk);
   }
 
@@ -52342,8 +52401,22 @@ static int kls_egraph_refactor_single_scaled_column(
     shared->supernode_consumer_plan_group_l_exec;
   const int u_supernode_ragged_l_updates =
     shared->u_supernode_ragged_l_updates;
+  const int u_supernode_values = shared->u_supernode_values;
+  UF_long algorithm5_prefactor_deps = 0u;
+  const int algorithm5_prefactor_enabled =
+    wait_for_dependencies && shared->algorithm5_prefactor_updates &&
+    ucol_len > 1u;
+  unsigned char *algorithm5_prefactor_applied = NULL;
   while (up < ucol_len) {
-    if (supernode_numeric_updates) {
+    if (algorithm5_prefactor_applied != NULL &&
+        algorithm5_prefactor_applied[up]) {
+      up++;
+      continue;
+    }
+    const int batch_paths_allowed =
+      algorithm5_prefactor_deps == 0u;
+    if (batch_paths_allowed && supernode_numeric_updates) {
+      const UF_long run_begin = up;
       const int supernode_status =
         kls_egraph_refactor_try_supernode_dependency_run(
           worker, 0u, k, k, &up, ucol_len, ui, ux, l_indices, l_values,
@@ -52352,10 +52425,15 @@ static int kls_egraph_refactor_single_scaled_column(
         return 0;
       }
       if (supernode_status > 0) {
+        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
+          memset(algorithm5_prefactor_applied + run_begin, 1,
+                 (size_t)(up - run_begin));
+        }
         continue;
       }
     }
-    if (consumer_plan_group_l_updates) {
+    if (batch_paths_allowed && consumer_plan_group_l_updates) {
+      const UF_long run_begin = up;
       const int group_l_status =
         kls_egraph_refactor_try_consumer_plan_group_l_run(
           worker, 0u, k, k, &up, ucol_len, ui, ux, x,
@@ -52364,10 +52442,15 @@ static int kls_egraph_refactor_single_scaled_column(
         return 0;
       }
       if (group_l_status > 0) {
+        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
+          memset(algorithm5_prefactor_applied + run_begin, 1,
+                 (size_t)(up - run_begin));
+        }
         continue;
       }
     }
-    if (u_supernode_ragged_l_updates) {
+    if (batch_paths_allowed && u_supernode_ragged_l_updates) {
+      const UF_long run_begin = up;
       const int ragged_status =
         kls_egraph_refactor_try_u_supernode_ragged_l_run(
           worker, 0u, k, k, &up, ucol_len, ui, ux, x,
@@ -52376,10 +52459,34 @@ static int kls_egraph_refactor_single_scaled_column(
         return 0;
       }
       if (ragged_status > 0) {
+        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
+          memset(algorithm5_prefactor_applied + run_begin, 1,
+                 (size_t)(up - run_begin));
+        }
         continue;
       }
     }
     const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+    if (algorithm5_prefactor_enabled &&
+        !kls_egraph_refactor_dependency_done_now(shared, j)) {
+      if (algorithm5_prefactor_applied == NULL) {
+        algorithm5_prefactor_applied =
+          kls_egraph_worker_byte_workspace(worker, ucol_len);
+        if (algorithm5_prefactor_applied != NULL) {
+          memset(algorithm5_prefactor_applied, 0, (size_t)ucol_len);
+          if (up > 0u) {
+            memset(algorithm5_prefactor_applied, 1, (size_t)up);
+          }
+        }
+      }
+      if (algorithm5_prefactor_applied != NULL &&
+          !kls_egraph_refactor_prefactor_finished_btf_deps(
+            worker, 0u, k, k, up, ucol_len, ui, ui32, ux, l_indices,
+            l_values, numeric->Llen, x, algorithm5_prefactor_applied,
+            u_supernode_values, &algorithm5_prefactor_deps)) {
+        return 0;
+      }
+    }
     if (wait_for_dependencies &&
         !kls_egraph_refactor_wait_done(shared, j)) {
       return 0;
@@ -52387,7 +52494,7 @@ static int kls_egraph_refactor_single_scaled_column(
     const double ujk = x[j];
     x[j] = 0.0;
     ux[up] = ujk;
-    if (shared->u_supernode_values) {
+    if (u_supernode_values) {
       kls_egraph_record_u_supernode_value(shared, j, k, ujk);
     }
 
@@ -52397,7 +52504,18 @@ static int kls_egraph_refactor_single_scaled_column(
       UF_long lcol_len = numeric->Llen[j];
       kls_scatter_subtract_refactor_l(solver, x, j, li, lx, lcol_len, ujk);
     }
+    if (algorithm5_prefactor_applied != NULL) {
+      algorithm5_prefactor_applied[up] = 1u;
+    }
     up++;
+  }
+
+  if (algorithm5_prefactor_deps > 0u) {
+    atomic_fetch_add_explicit(&shared->algorithm5_prefactor_columns, 1ul,
+                              memory_order_relaxed);
+    atomic_fetch_add_explicit(&shared->algorithm5_prefactor_deps,
+                              (unsigned long)algorithm5_prefactor_deps,
+                              memory_order_relaxed);
   }
 
   const double ukk = x[k];
@@ -52409,7 +52527,7 @@ static int kls_egraph_refactor_single_scaled_column(
     }
   }
   udiag[k] = ukk;
-  if (shared->u_supernode_values) {
+  if (u_supernode_values) {
     kls_egraph_record_u_supernode_value(shared, k, k, ukk);
   }
 
@@ -52930,8 +53048,22 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     shared->supernode_consumer_plan_group_l_exec;
   const int u_supernode_ragged_l_updates =
     shared->u_supernode_ragged_l_updates;
+  const int u_supernode_values = shared->u_supernode_values;
+  UF_long algorithm5_prefactor_deps = 0u;
+  const int algorithm5_prefactor_enabled =
+    wait_for_dependencies && shared->algorithm5_prefactor_updates &&
+    ucol_len > 1u;
+  unsigned char *algorithm5_prefactor_applied = NULL;
   while (up < ucol_len) {
-    if (supernode_numeric_updates) {
+    if (algorithm5_prefactor_applied != NULL &&
+        algorithm5_prefactor_applied[up]) {
+      up++;
+      continue;
+    }
+    const int batch_paths_allowed =
+      algorithm5_prefactor_deps == 0u;
+    if (batch_paths_allowed && supernode_numeric_updates) {
+      const UF_long run_begin = up;
       const int supernode_status =
         kls_egraph_refactor_try_supernode_dependency_run(
           worker, k1, k, local_k, &up, ucol_len, ui, ux, l_indices,
@@ -52940,10 +53072,15 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
         return 0;
       }
       if (supernode_status > 0) {
+        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
+          memset(algorithm5_prefactor_applied + run_begin, 1,
+                 (size_t)(up - run_begin));
+        }
         continue;
       }
     }
-    if (consumer_plan_group_l_updates) {
+    if (batch_paths_allowed && consumer_plan_group_l_updates) {
+      const UF_long run_begin = up;
       const int group_l_status =
         kls_egraph_refactor_try_consumer_plan_group_l_run(
           worker, k1, k, local_k, &up, ucol_len, ui, ux, x,
@@ -52952,10 +53089,15 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
         return 0;
       }
       if (group_l_status > 0) {
+        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
+          memset(algorithm5_prefactor_applied + run_begin, 1,
+                 (size_t)(up - run_begin));
+        }
         continue;
       }
     }
-    if (u_supernode_ragged_l_updates) {
+    if (batch_paths_allowed && u_supernode_ragged_l_updates) {
+      const UF_long run_begin = up;
       const int ragged_status =
         kls_egraph_refactor_try_u_supernode_ragged_l_run(
           worker, k1, k, local_k, &up, ucol_len, ui, ux, x,
@@ -52964,6 +53106,10 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
         return 0;
       }
       if (ragged_status > 0) {
+        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
+          memset(algorithm5_prefactor_applied + run_begin, 1,
+                 (size_t)(up - run_begin));
+        }
         continue;
       }
     }
@@ -52972,6 +53118,26 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
+    if (algorithm5_prefactor_enabled &&
+        !kls_egraph_refactor_dependency_done_now(shared, k1 + j)) {
+      if (algorithm5_prefactor_applied == NULL) {
+        algorithm5_prefactor_applied =
+          kls_egraph_worker_byte_workspace(worker, ucol_len);
+        if (algorithm5_prefactor_applied != NULL) {
+          memset(algorithm5_prefactor_applied, 0, (size_t)ucol_len);
+          if (up > 0u) {
+            memset(algorithm5_prefactor_applied, 1, (size_t)up);
+          }
+        }
+      }
+      if (algorithm5_prefactor_applied != NULL &&
+          !kls_egraph_refactor_prefactor_finished_btf_deps(
+            worker, k1, k, local_k, up, ucol_len, ui, ui32, ux, l_indices,
+            l_values, llen, x, algorithm5_prefactor_applied,
+            u_supernode_values, &algorithm5_prefactor_deps)) {
+        return 0;
+      }
+    }
     if (wait_for_dependencies &&
         !kls_egraph_refactor_wait_done(shared, k1 + j)) {
       return 0;
@@ -52979,7 +53145,7 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     const double ujk = x[j];
     x[j] = 0.0;
     ux[up] = ujk;
-    if (shared->u_supernode_values) {
+    if (u_supernode_values) {
       kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
     }
 
@@ -52990,7 +53156,18 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
       kls_scatter_subtract_refactor_l(solver, x, k1 + j, li, lx, lcol_len,
                                       ujk);
     }
+    if (algorithm5_prefactor_applied != NULL) {
+      algorithm5_prefactor_applied[up] = 1u;
+    }
     up++;
+  }
+
+  if (algorithm5_prefactor_deps > 0u) {
+    atomic_fetch_add_explicit(&shared->algorithm5_prefactor_columns, 1ul,
+                              memory_order_relaxed);
+    atomic_fetch_add_explicit(&shared->algorithm5_prefactor_deps,
+                              (unsigned long)algorithm5_prefactor_deps,
+                              memory_order_relaxed);
   }
 
   const double ukk = x[local_k];
@@ -53002,7 +53179,7 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     }
   }
   udiag[k] = ukk;
-  if (shared->u_supernode_values) {
+  if (u_supernode_values) {
     kls_egraph_record_u_supernode_value(shared, k, k, ukk);
   }
 
