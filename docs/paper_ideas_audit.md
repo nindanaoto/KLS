@@ -6,7 +6,45 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
-The latest refactor probe turns the previous grouped pre-prefix advance result
+The latest refactor probe implements an opt-in compact retained-state plan for
+Algorithm 5 grouped pre-prefix advance:
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_COMPACT_STATE=1`.
+For the compatible direct-prefix handoff path, the current-state row plan now
+retains only the advance closure plus prefix output rows instead of cloning the
+full scatter/current/suffix/target row set. It falls back to the full retained
+state when final-state or suffix-completion modes are requested. Correctness
+passed `git diff --check`, `cmake --build build -j2`, `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_COMPACT_STATE=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_COMPACT_STATE=1 KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_POS=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`.
+
+The focused top-five CKTSO-gap result rejects compact state as a default. The
+current default control measured `1.3839s` SPICE-cycle geomean in
+`build/kls_compact_state_default_gap5_t4_r1_ref3_timeout120.jsonl`.
+Compact state alone measured `3.3963s` in
+`build/kls_compact_state_gap5_t4_r1_ref3_timeout120.jsonl`; compact state plus
+the position map measured `2.6173s` in
+`build/kls_compact_state_pos_gap5_t4_r1_ref3_timeout120.jsonl`, essentially tied
+with the full-state position control at `2.6128s`
+(`build/kls_pos_control_gap5_t4_r1_ref3_timeout120.jsonl`). The row-count
+reduction is real: on `ASIC_320ks`, retained current-state rows dropped from
+`2,568,461` in the full-state position control to `910,070`, and seeded rows
+dropped from `3,564,401` to `1,326,362`; `ASIC_320k` dropped from `2,925,515`
+to `1,067,018` retained rows; `ASIC_100ks` dropped from `783,675` to `195,090`.
+Refactor time did not move enough (`ASIC_320ks` `0.1827s` full-state position
+control vs `0.1809s` compact+position), so retained sparse-state size is not the
+first-order CKTSO gap.
+
+The refactor focus is therefore more specific: KLS still lacks the paper-shaped
+producer-panel/multi-current numeric executor. The current grouped payoff path
+prepares current states and prefixes, but then still pays the same large
+prepared-prefix update volume (`~34M` target-entry work and `~47.9M` recorded
+U-supernode update entries on `ASIC_320ks`) plus skipped-advance work. The next
+paper-aligned refactor step should fuse grouped producer-panel advancement and
+prefix application into one multi-current executor instead of publishing
+per-current prepared states for the scalar consumer to replay.
+
+The previous refactor probe turns the grouped pre-prefix advance result
 into a position-coded executor. With
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_POS=1`, KLS now
 retains `advance occurrence -> current-state row position` spans for each
@@ -34,10 +72,8 @@ states / `3,564,401` sparse rows, `ASIC_320k` `3,916` / `3,718,316`,
 against default (`0.1869s` vs `0.0832s` on `ASIC_320ks`, `0.1983s` vs
 `0.1017s` on `ASIC_320k`, `0.0858s` vs `0.0440s` on `ASIC_100ks`). This narrows
 the missing paper-level piece: row-position lookup was a real overhead, but not
-the first-order CKTSO gap. The next refactor work should avoid materializing and
-seeding per-current sparse retained states for the grouped prefix path, likely
-by owning a bounded dense/current-window producer-panel state or by publishing
-from a compact multi-current accumulator without restoring scalar current state.
+the first-order CKTSO gap. That result motivated the compact retained-state test
+above.
 
 The refactor focus now has a clearer missing paper-level surface before the
 suffix probes: Algorithm 5 payoff groups have substantial duplicate producer

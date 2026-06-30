@@ -2314,6 +2314,16 @@ kls_refactor_supernode_algorithm5_payoff_group_advance_pos_env_enabled(void) {
 }
 
 static int
+kls_refactor_supernode_algorithm5_payoff_group_advance_compact_state_env_enabled(
+  void) {
+  const char *value =
+    getenv(
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_COMPACT_STATE");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static int
 kls_refactor_supernode_algorithm5_payoff_group_advance_prep_env_enabled(
   void) {
   const char *value =
@@ -2325,7 +2335,8 @@ kls_refactor_supernode_algorithm5_payoff_group_advance_prep_env_enabled(
   }
   return
     kls_refactor_supernode_algorithm5_payoff_group_advance_prep_hash_env_enabled() ||
-    kls_refactor_supernode_algorithm5_payoff_group_advance_pos_env_enabled();
+    kls_refactor_supernode_algorithm5_payoff_group_advance_pos_env_enabled() ||
+    kls_refactor_supernode_algorithm5_payoff_group_advance_compact_state_env_enabled();
 }
 
 static int
@@ -2671,6 +2682,18 @@ kls_refactor_supernode_algorithm5_payoff_direct_prefix_sparse_delta_env_enabled(
       "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_DELTA");
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
+}
+
+static int
+kls_refactor_supernode_algorithm5_payoff_group_advance_compact_state_plan_env_enabled(
+  void) {
+  return
+    kls_refactor_supernode_algorithm5_payoff_group_advance_compact_state_env_enabled() &&
+    !kls_refactor_supernode_algorithm5_payoff_direct_prefix_final_state_env_enabled() &&
+    !kls_refactor_supernode_algorithm5_payoff_suffix_advance_env_enabled() &&
+    !kls_refactor_supernode_algorithm5_payoff_suffix_group_advance_env_enabled() &&
+    !kls_refactor_supernode_algorithm5_payoff_suffix_group_window_env_enabled() &&
+    !kls_refactor_supernode_algorithm5_payoff_suffix_producer_advance_env_enabled();
 }
 
 static int
@@ -9312,6 +9335,7 @@ static int kls_collect_refactor_supernode_algorithm5_current_state_rows(
   UF_long k2,
   UF_long block_size,
   int include_suffix_targets,
+  int compact_prefix_only,
   UF_long *stamp_workspace,
   UF_long stamp,
   UF_long *rows,
@@ -9343,6 +9367,65 @@ static int kls_collect_refactor_supernode_algorithm5_current_state_rows(
   }
 
   UF_long row_count = 0u;
+  if (compact_prefix_only) {
+    if (include_suffix_targets) {
+      return 0;
+    }
+    const UF_long run_begin = group_current_run_ptr[current_slot];
+    const UF_long run_end = group_current_run_ptr[current_slot + 1u];
+    const UF_long ulen = solver->numeric->Ulen[current];
+    if (run_begin > run_end || run_end > selected_run_count) {
+      return 0;
+    }
+    for (UF_long pos = run_begin; pos < run_end; ++pos) {
+      const UF_long run = group_current_runs[pos];
+      if (run >= run_count || plan_current[run] != current) {
+        return 0;
+      }
+
+      const UF_long advance_begin = run_advance_slot_ptr[run];
+      const UF_long advance_slots = run_advance_slots[run];
+      if (advance_slots > 0u) {
+        if (advance_begin == KLS_KLU_EMPTY ||
+            advance_begin > advance_slots_total ||
+            advance_slots > advance_slots_total - advance_begin ||
+            group_advance_cols == NULL) {
+          return 0;
+        }
+        for (UF_long slot = 0u; slot < advance_slots; ++slot) {
+          const UF_long row = group_advance_cols[advance_begin + slot];
+          if (row >= block_size ||
+              !kls_algorithm5_payoff_mark_current_state_row(
+                row, stamp_workspace, block_size, stamp, rows, row_capacity,
+                &row_count)) {
+            return 0;
+          }
+        }
+      } else if (advance_begin != KLS_KLU_EMPTY &&
+                 advance_begin > advance_slots_total) {
+        return 0;
+      }
+
+      const UF_long dep = plan_dep[run];
+      const UF_long advance_deps = run_advance_deps[run];
+      const UF_long prefix_rows = run_prefix_rows[run];
+      if (dep < k1 || dep > k2 || prefix_rows > k2 - dep ||
+          advance_deps > ulen || prefix_rows > ulen - advance_deps) {
+        return 0;
+      }
+      const UF_long dep_local = dep - k1;
+      for (UF_long local = 0u; local < prefix_rows; ++local) {
+        if (!kls_algorithm5_payoff_mark_current_state_row(
+              dep_local + local, stamp_workspace, block_size, stamp, rows,
+              row_capacity, &row_count)) {
+          return 0;
+        }
+      }
+    }
+    *row_count_out = row_count;
+    return 1;
+  }
+
   const UF_long scatter_col_begin = solver->refactor_col_ptr[current];
   const UF_long scatter_end = solver->refactor_col_ptr[current + 1u];
   if (scatter_col_begin > scatter_end || scatter_end > solver->nnz) {
@@ -9561,6 +9644,7 @@ static int kls_build_refactor_supernode_algorithm5_current_state_row_plan(
   const UF_long *group_target_cols,
   UF_long target_slots_total,
   int include_suffix_targets,
+  int compact_prefix_only,
   UF_long **state_ptr_out,
   UF_long **state_rows_out,
   UF_long *state_rows_total_out,
@@ -9667,8 +9751,8 @@ static int kls_build_refactor_supernode_algorithm5_current_state_row_plan(
           run_advance_slots, run_advance_slot_ptr, group_advance_cols,
           advance_slots_total, run_target_slots, run_target_slot_ptr,
           group_target_cols, target_slots_total, slot, current, k1, k2,
-          block_size, include_suffix_targets, stamp_workspace, stamp, NULL,
-          0u, &rows) ||
+          block_size, include_suffix_targets, compact_prefix_only,
+          stamp_workspace, stamp, NULL, 0u, &rows) ||
         rows > UF_long_max - state_rows_total) {
       free(state_ptr);
       free(stamp_workspace);
@@ -9744,8 +9828,8 @@ static int kls_build_refactor_supernode_algorithm5_current_state_row_plan(
           run_advance_slots, run_advance_slot_ptr, group_advance_cols,
           advance_slots_total, run_target_slots, run_target_slot_ptr,
           group_target_cols, target_slots_total, slot, current, k1, k2,
-          block_size, include_suffix_targets, stamp_workspace, stamp,
-          state_rows + begin, end - begin, &filled) ||
+          block_size, include_suffix_targets, compact_prefix_only,
+          stamp_workspace, stamp, state_rows + begin, end - begin, &filled) ||
         filled != end - begin) {
       free(state_ptr);
       free(state_rows);
@@ -11281,6 +11365,13 @@ static int kls_build_refactor_supernode_consumer_plan(
         shape_group_panel_offset, shape_group_rows);
       return 0;
     }
+    const int algorithm5_payoff_include_suffix_targets =
+      kls_refactor_supernode_algorithm5_payoff_suffix_advance_env_enabled() ||
+      kls_refactor_supernode_algorithm5_payoff_suffix_group_advance_env_enabled() ||
+      kls_refactor_supernode_algorithm5_payoff_suffix_group_window_env_enabled() ||
+      kls_refactor_supernode_algorithm5_payoff_suffix_producer_advance_env_enabled();
+    const int algorithm5_payoff_compact_current_state =
+      kls_refactor_supernode_algorithm5_payoff_group_advance_compact_state_plan_env_enabled();
     if (!kls_build_refactor_supernode_algorithm5_current_state_row_plan(
           solver, plan_current, plan_dep, count_ctx.run_count,
           algorithm5_payoff_group_current_ptr, algorithm5_payoff_group_currents,
@@ -11297,10 +11388,8 @@ static int kls_build_refactor_supernode_consumer_plan(
           algorithm5_payoff_run_target_slot_ptr,
           algorithm5_payoff_group_target_cols,
           algorithm5_payoff_group_target_slots_total,
-          kls_refactor_supernode_algorithm5_payoff_suffix_advance_env_enabled() ||
-            kls_refactor_supernode_algorithm5_payoff_suffix_group_advance_env_enabled() ||
-            kls_refactor_supernode_algorithm5_payoff_suffix_group_window_env_enabled() ||
-            kls_refactor_supernode_algorithm5_payoff_suffix_producer_advance_env_enabled(),
+          algorithm5_payoff_include_suffix_targets,
+          algorithm5_payoff_compact_current_state,
           &algorithm5_payoff_current_state_ptr,
           &algorithm5_payoff_current_state_rows,
           &algorithm5_payoff_current_state_rows_total,
