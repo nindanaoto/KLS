@@ -45818,6 +45818,9 @@ static double *kls_row_refactor_compact_group_panel(kls_solver *solver,
 static double *kls_egraph_worker_supernode_workspace(
   kls_egraph_refactor_worker *worker,
   UF_long entry_count);
+static unsigned char *kls_egraph_worker_byte_workspace(
+  kls_egraph_refactor_worker *worker,
+  UF_long entry_count);
 static int kls_row_refactor_try_compact_supernode_update(
   kls_egraph_refactor_worker *worker,
   UF_long row,
@@ -46950,7 +46953,10 @@ static int kls_parallel_row_refactor_process_row(
   unsigned char *applied = NULL;
   if (wait_for_dependencies && dep_count > 1u &&
       (uintmax_t)dep_count <= (uintmax_t)SIZE_MAX / sizeof(*applied)) {
-    applied = (unsigned char *)calloc((size_t)dep_count, sizeof(*applied));
+    applied = kls_egraph_worker_byte_workspace(worker, dep_count);
+    if (applied != NULL) {
+      memset(applied, 0, (size_t)dep_count);
+    }
   }
   UF_long prefactor_deps = 0;
   UF_long prefactor_supernode_deps = 0;
@@ -46965,7 +46971,6 @@ static int kls_parallel_row_refactor_process_row(
         worker, row, current_group, &p, l_begin, l_end,
         wait_for_dependencies, applied);
     if (compact_status < 0) {
-      free(applied);
       return 0;
     }
     if (compact_status > 0) {
@@ -46982,18 +46987,15 @@ static int kls_parallel_row_refactor_process_row(
           !kls_parallel_row_refactor_prefactor_finished_deps(
             worker, row, current_group, row, l_begin, l_end, p, applied,
             x, &prefactor_deps, &prefactor_supernode_deps)) {
-        free(applied);
         return 0;
       }
       if (!kls_egraph_refactor_wait_done(shared, dep)) {
         x[dep] = 0.0;
-        free(applied);
         return 0;
       }
     }
     if (!kls_parallel_row_refactor_apply_scalar_dep(
           worker, row, current_group, p, x, 1)) {
-      free(applied);
       return 0;
     }
     if (applied != NULL) {
@@ -47012,13 +47014,11 @@ static int kls_parallel_row_refactor_process_row(
           solver, row, pivot, x, row_u_values, direct_input,
           &row_max_abs)) {
       kls_egraph_refactor_record_invalid(shared);
-      free(applied);
       return 0;
     }
     if (kls_parallel_row_refactor_rejects_pivot(worker, row, pivot,
                                                row_max_abs)) {
       memset(x, 0, (size_t)solver->n * sizeof(*x));
-      free(applied);
       return 0;
     }
   }
@@ -47027,7 +47027,6 @@ static int kls_parallel_row_refactor_process_row(
     kls_egraph_refactor_record_singular(shared, row, symbolic->Q[row]);
     if (solver->common.halt_if_singular) {
       memset(x, 0, (size_t)solver->n * sizeof(*x));
-      free(applied);
       return 0;
     }
   }
@@ -47068,7 +47067,6 @@ static int kls_parallel_row_refactor_process_row(
                               (unsigned long)prefactor_supernode_deps,
                               memory_order_relaxed);
   }
-  free(applied);
   kls_row_refactor_mark_row_done(worker, row);
   return 1;
 }

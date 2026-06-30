@@ -12330,3 +12330,17 @@ The default selector remained on EGraph/mapped refactor paths at `1.46054s` in
 `build/kls_structural_native_auto_default_gap5_t4_r1_ref3_timeout120.jsonl`.
 This is worth retaining as a scoped row-panel dispatch fix, but the large CKTSO
 gap remains the missing production row-major grouped numeric owner.
+
+The scalar row-refactor row kernel now also uses the retained worker byte
+workspace for its per-row dependency-applied bitmap instead of allocating and
+freeing that bitmap for every row. This matches the dense/native row-refactor
+paths and removes one avoidable source of private-group scaffold overhead.
+The focused forced row-refactor top-five run
+`build/kls_row_bitmap_workspace_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`4.14697s` geomean, compared with the recent forced-row artifacts around
+`4.22647s` to `4.5736s`; the same-source default EGraph selector remained
+clean at `1.41046s` in
+`build/kls_row_bitmap_workspace_default_gap5_t4_r1_ref3_timeout120.jsonl`.
+This is a useful refactor-path cleanup, but it is not the paper-level gap
+closer: the slow cases still need the production row-major grouped numeric
+owner rather than per-row scalar private-group bookkeeping.
