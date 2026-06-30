@@ -12385,3 +12385,27 @@ geomean was essentially unchanged (`0.00905s` and `0.00913s` versus
 not change the paper-level conclusion: inactive probes and BLAS thresholds are
 not the first-order CKTSO gap; the missing mechanism is still the grouped
 row-major/supernode current-state numeric owner.
+
+A bounded dense-current panel inside the Algorithm 5 suffix-group executor was
+prototyped and rejected before commit. The experiment added an opt-in
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_DENSE_PANEL`
+path that gathered each producer batch's retained sparse current-state values
+into a worker-local dense `lcol_len x item_count` panel, applied the shared
+producer update there, and scattered the panel back. It passed `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_DENSE_PANEL=1 ./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and `git diff --check`, but the
+focused top-five CKTSO-gap benchmark did not move. Same-source default measured
+`7.8135s` SPICE-cycle geomean and `0.06097s` refactor-only geomean in
+`build/kls_dense_panel_default_gap5_t4_r1_ref3_timeout120.jsonl`. Existing
+suffix-group advance measured `27.0181s` / `0.24840s` in
+`build/kls_suffix_group_control_gap5_t4_r1_ref3_timeout120.jsonl`; the dense
+panel measured `26.9663s` / `0.24787s` in
+`build/kls_suffix_group_dense_panel_gap5_t4_r1_ref3_timeout120.jsonl`. On the
+hard ASIC rows, the panel still seeded the same sparse current states
+(`ASIC_320k` `1,023,899` rows, `ASIC_320ks` `789,478`, `ASIC_100ks` `75,621`)
+and only changed the single-producer update storage. This rejects a bounded
+gather/update/scatter panel as the large paper gap. The missing piece has to be
+earlier and coarser: avoid materializing the per-current sparse state in this
+form, or make the row-major/supernode owner hold the live state across producer
+windows instead of copying it around one producer at a time.
