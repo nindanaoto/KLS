@@ -2123,6 +2123,14 @@ current refactor bridge, but the next larger algorithmic work is still to evolve
 the numeric factor/refactor/solve kernels toward those deeper KLS-owned sparse
 kernels while keeping the public API and benchmark harness stable.
 
+The guarded Algorithm 5 payoff path also now owns retained current-state
+workspaces explicitly during direct final-state completion. A slot transitions
+`READY -> COMPLETING -> EMPTY` on success, or restores to `READY` when the
+guarded direct path falls back. This fixes the lifetime hole exposed by the
+rejected in-place retained-state experiment, but the focused CKTSO-gap run still
+loses to default; the remaining paper-level gap is the grouped multi-current
+numeric executor, not BLAS thresholding or per-column wait removal.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

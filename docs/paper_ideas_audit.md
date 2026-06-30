@@ -11418,3 +11418,25 @@ the three ASIC rows with singular-matrix errors. The committed code therefore
 keeps the conservative private/delta state completion. The missing piece is
 still a designed multi-current numeric owner with correct lifetime and rollback
 rules, not ad hoc mutation of the retained seed buffers.
+
+The retained current-state lifetime is now represented explicitly: prepared
+current slots move from `READY` to `COMPLETING` before the guarded direct final
+state completion reads them, restore to `READY` on fallback/error, and clear to
+`EMPTY` only after a successful completion. This closes the state ownership gap
+that made the rejected in-place mutation unsafe, but it does not by itself
+provide the paper's grouped numeric executor. Correctness passed
+`cmake --build build -j2`, `git diff --check`,
+`ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE=1 ./build/kls_smoke`.
+The guarded top-five run
+`build/kls_alg5_group_complete_owned_state_gap5_t4_r1_ref3_timeout120.jsonl`
+completed with no failures but measured `2.4617s` SPICE-cycle geomean, while
+the same-build default control
+`build/kls_default_after_owned_state_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `1.4734s`. Retained-state seed runs dropped on the ASIC rows
+(`ASIC_320ks` `1360 -> 887`, `ASIC_320k` `1357 -> 1055`, `ASIC_100ks`
+`309 -> 85` versus the previous wait-free guarded artifact), confirming that
+owning the slot changes lifetime behavior; the speed loss confirms again that
+the main gap is not BLAS or scalar wait checks, but the absence of a grouped
+multi-current numeric task that advances several owned current workspaces
+together.
