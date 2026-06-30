@@ -3337,6 +3337,34 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_reused_entries,
            stats.refactor_btf_scalar_run_group_max_currents,
            stats.refactor_btf_scalar_run_group_max_rows);
+    printf(",\"refactor_last_btf_scalar_run_group_waits\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_wait_rows\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_wait_entries\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_overlap_waits\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_overlap_rows\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_overlap_entries\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_max_live\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_wait_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_wait_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_wait_entries\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_overlap_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_overlap_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_overlap_entries\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_max_live\":%" PRId64,
+           stats.refactor_last_btf_scalar_run_group_waits,
+           stats.refactor_last_btf_scalar_run_group_wait_rows,
+           stats.refactor_last_btf_scalar_run_group_wait_entries,
+           stats.refactor_last_btf_scalar_run_group_overlap_waits,
+           stats.refactor_last_btf_scalar_run_group_overlap_rows,
+           stats.refactor_last_btf_scalar_run_group_overlap_entries,
+           stats.refactor_last_btf_scalar_run_group_max_live,
+           stats.refactor_btf_scalar_run_group_wait_count,
+           stats.refactor_btf_scalar_run_group_wait_rows,
+           stats.refactor_btf_scalar_run_group_wait_entries,
+           stats.refactor_btf_scalar_run_group_overlap_count,
+           stats.refactor_btf_scalar_run_group_overlap_rows,
+           stats.refactor_btf_scalar_run_group_overlap_entries,
+           stats.refactor_btf_scalar_run_group_max_live);
     printf(",\"refactor_last_supernode_cached_probe_shape_rejects\":%" PRId64
            ",\"refactor_last_supernode_cached_probe_shape_reject_rows\":%" PRId64
            ",\"refactor_last_supernode_cached_probe_stream_rejects\":%" PRId64
@@ -3912,7 +3940,13 @@ int main(int argc, char **argv) {
            ", multi %" PRId64 "/%" PRId64
            ", rows %" PRId64 " reused %" PRId64
            ", entries %" PRId64 " reused %" PRId64
-           ", max currents %" PRId64 ", max rows %" PRId64 "\n",
+           ", max currents %" PRId64 ", max rows %" PRId64
+           ", waits %" PRId64 "/%" PRId64 "/%" PRId64
+           ", overlaps %" PRId64 "/%" PRId64 "/%" PRId64
+           ", max live %" PRId64
+           ", cumulative waits %" PRId64 "/%" PRId64 "/%" PRId64
+           ", cumulative overlaps %" PRId64 "/%" PRId64 "/%" PRId64
+           ", cumulative max live %" PRId64 "\n",
            stats.refactor_last_btf_scalar_run_candidates,
            stats.refactor_last_btf_scalar_run_rows,
            stats.refactor_last_btf_scalar_run_entries,
@@ -3939,7 +3973,21 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_entries,
            stats.refactor_btf_scalar_run_group_reused_entries,
            stats.refactor_btf_scalar_run_group_max_currents,
-           stats.refactor_btf_scalar_run_group_max_rows);
+           stats.refactor_btf_scalar_run_group_max_rows,
+           stats.refactor_last_btf_scalar_run_group_waits,
+           stats.refactor_last_btf_scalar_run_group_wait_rows,
+           stats.refactor_last_btf_scalar_run_group_wait_entries,
+           stats.refactor_last_btf_scalar_run_group_overlap_waits,
+           stats.refactor_last_btf_scalar_run_group_overlap_rows,
+           stats.refactor_last_btf_scalar_run_group_overlap_entries,
+           stats.refactor_last_btf_scalar_run_group_max_live,
+           stats.refactor_btf_scalar_run_group_wait_count,
+           stats.refactor_btf_scalar_run_group_wait_rows,
+           stats.refactor_btf_scalar_run_group_wait_entries,
+           stats.refactor_btf_scalar_run_group_overlap_count,
+           stats.refactor_btf_scalar_run_group_overlap_rows,
+           stats.refactor_btf_scalar_run_group_overlap_entries,
+           stats.refactor_btf_scalar_run_group_max_live);
     printf("refactor supernode consumer plan: panels %" PRId64 "/%" PRId64
            ", runs %" PRId64 ", rows %" PRId64
            ", positioned %" PRId64 "/%" PRId64

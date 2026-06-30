@@ -286,6 +286,8 @@ struct kls_solver {
   UF_long *refactor_btf_scalar_run_group_currents;
   UF_long *refactor_btf_scalar_run_group_current_up;
   UF_long *refactor_btf_scalar_run_group_current_rows;
+  atomic_uint *refactor_btf_scalar_run_group_live;
+  UF_long refactor_btf_scalar_run_group_live_count;
   UF_long refactor_lu_pointer_count;
   int refactor_l_indices_sorted;
   int refactor_l_sorted_enabled;
@@ -1253,6 +1255,20 @@ struct kls_solver {
   UF_long refactor_btf_scalar_run_group_reused_entries;
   UF_long refactor_btf_scalar_run_group_max_currents;
   UF_long refactor_btf_scalar_run_group_max_rows;
+  UF_long refactor_last_btf_scalar_run_group_waits;
+  UF_long refactor_last_btf_scalar_run_group_wait_rows;
+  UF_long refactor_last_btf_scalar_run_group_wait_entries;
+  UF_long refactor_last_btf_scalar_run_group_overlap_waits;
+  UF_long refactor_last_btf_scalar_run_group_overlap_rows;
+  UF_long refactor_last_btf_scalar_run_group_overlap_entries;
+  UF_long refactor_last_btf_scalar_run_group_max_live;
+  UF_long refactor_btf_scalar_run_group_wait_count;
+  UF_long refactor_btf_scalar_run_group_wait_rows;
+  UF_long refactor_btf_scalar_run_group_wait_entries;
+  UF_long refactor_btf_scalar_run_group_overlap_count;
+  UF_long refactor_btf_scalar_run_group_overlap_rows;
+  UF_long refactor_btf_scalar_run_group_overlap_entries;
+  UF_long refactor_btf_scalar_run_group_max_live;
   int refactor_supernode_update_disabled;
   UF_long refactor_supernode_update_disable_count;
   UF_long refactor_last_ready_queue_columns;
@@ -1619,6 +1635,9 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong supernode_cached_probe_workspace_reject_rows;
   int btf_scalar_run_stats;
   int btf_scalar_run_exec;
+  int btf_scalar_run_group_wait_stats;
+  atomic_uint *btf_scalar_run_group_live;
+  UF_long btf_scalar_run_group_live_count;
   atomic_ulong btf_scalar_run_candidates;
   atomic_ulong btf_scalar_run_rows;
   atomic_ulong btf_scalar_run_entries;
@@ -1627,6 +1646,13 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong btf_scalar_run_exec_rows;
   atomic_ulong btf_scalar_run_exec_entries;
   atomic_ulong btf_scalar_run_exec_max_rows;
+  atomic_ulong btf_scalar_run_group_waits;
+  atomic_ulong btf_scalar_run_group_wait_rows;
+  atomic_ulong btf_scalar_run_group_wait_entries;
+  atomic_ulong btf_scalar_run_group_overlap_waits;
+  atomic_ulong btf_scalar_run_group_overlap_rows;
+  atomic_ulong btf_scalar_run_group_overlap_entries;
+  atomic_ulong btf_scalar_run_group_max_live;
   atomic_ulong supernode_consumer_plan_attempts;
   atomic_ulong supernode_consumer_plan_hits;
   atomic_ulong supernode_consumer_plan_applied;
@@ -2969,10 +2995,18 @@ static int kls_refactor_btf_scalar_run_exec_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
-static int kls_refactor_btf_scalar_run_groups_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUPS");
+static int kls_refactor_btf_scalar_run_group_wait_stats_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS");
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
+}
+
+static int kls_refactor_btf_scalar_run_groups_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUPS");
+  return (value != NULL && value[0] != '\0' &&
+          !(value[0] == '0' && value[1] == '\0')) ||
+         kls_refactor_btf_scalar_run_group_wait_stats_env_enabled();
 }
 
 static void kls_record_supernode_candidate(
@@ -14528,6 +14562,7 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   free(solver->refactor_btf_scalar_run_group_currents);
   free(solver->refactor_btf_scalar_run_group_current_up);
   free(solver->refactor_btf_scalar_run_group_current_rows);
+  free(solver->refactor_btf_scalar_run_group_live);
   solver->refactor_l_indices = NULL;
   solver->refactor_l_indices32 = NULL;
   solver->refactor_l_indices32_storage = NULL;
@@ -14548,6 +14583,8 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_btf_scalar_run_group_currents = NULL;
   solver->refactor_btf_scalar_run_group_current_up = NULL;
   solver->refactor_btf_scalar_run_group_current_rows = NULL;
+  solver->refactor_btf_scalar_run_group_live = NULL;
+  solver->refactor_btf_scalar_run_group_live_count = 0u;
   solver->refactor_lu_pointer_count = 0;
   solver->refactor_l_indices_sorted = 0;
   solver->refactor_l_sorted_enabled = 0;
@@ -17958,6 +17995,13 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   solver->refactor_last_btf_scalar_run_exec_rows = 0;
   solver->refactor_last_btf_scalar_run_exec_entries = 0;
   solver->refactor_last_btf_scalar_run_exec_max_rows = 0;
+  solver->refactor_last_btf_scalar_run_group_waits = 0;
+  solver->refactor_last_btf_scalar_run_group_wait_rows = 0;
+  solver->refactor_last_btf_scalar_run_group_wait_entries = 0;
+  solver->refactor_last_btf_scalar_run_group_overlap_waits = 0;
+  solver->refactor_last_btf_scalar_run_group_overlap_rows = 0;
+  solver->refactor_last_btf_scalar_run_group_overlap_entries = 0;
+  solver->refactor_last_btf_scalar_run_group_max_live = 0;
   solver->refactor_last_supernode_consumer_plan_attempts = 0;
   solver->refactor_last_supernode_consumer_plan_hits = 0;
   solver->refactor_last_supernode_consumer_plan_applied = 0;
@@ -18031,6 +18075,13 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   solver->stats.refactor_last_btf_scalar_run_exec_rows = 0;
   solver->stats.refactor_last_btf_scalar_run_exec_entries = 0;
   solver->stats.refactor_last_btf_scalar_run_exec_max_rows = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_waits = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_wait_rows = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_wait_entries = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_overlap_waits = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_overlap_rows = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_overlap_entries = 0;
+  solver->stats.refactor_last_btf_scalar_run_group_max_live = 0;
   solver->stats.refactor_last_supernode_consumer_plan_attempts = 0;
   solver->stats.refactor_last_supernode_consumer_plan_hits = 0;
   solver->stats.refactor_last_supernode_consumer_plan_applied = 0;
@@ -28114,6 +28165,34 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_btf_scalar_run_group_max_currents;
   solver->stats.refactor_btf_scalar_run_group_max_rows =
     (int64_t)solver->refactor_btf_scalar_run_group_max_rows;
+  solver->stats.refactor_last_btf_scalar_run_group_waits =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_waits;
+  solver->stats.refactor_last_btf_scalar_run_group_wait_rows =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_wait_rows;
+  solver->stats.refactor_last_btf_scalar_run_group_wait_entries =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_wait_entries;
+  solver->stats.refactor_last_btf_scalar_run_group_overlap_waits =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_overlap_waits;
+  solver->stats.refactor_last_btf_scalar_run_group_overlap_rows =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_overlap_rows;
+  solver->stats.refactor_last_btf_scalar_run_group_overlap_entries =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_overlap_entries;
+  solver->stats.refactor_last_btf_scalar_run_group_max_live =
+    (int64_t)solver->refactor_last_btf_scalar_run_group_max_live;
+  solver->stats.refactor_btf_scalar_run_group_wait_count =
+    (int64_t)solver->refactor_btf_scalar_run_group_wait_count;
+  solver->stats.refactor_btf_scalar_run_group_wait_rows =
+    (int64_t)solver->refactor_btf_scalar_run_group_wait_rows;
+  solver->stats.refactor_btf_scalar_run_group_wait_entries =
+    (int64_t)solver->refactor_btf_scalar_run_group_wait_entries;
+  solver->stats.refactor_btf_scalar_run_group_overlap_count =
+    (int64_t)solver->refactor_btf_scalar_run_group_overlap_count;
+  solver->stats.refactor_btf_scalar_run_group_overlap_rows =
+    (int64_t)solver->refactor_btf_scalar_run_group_overlap_rows;
+  solver->stats.refactor_btf_scalar_run_group_overlap_entries =
+    (int64_t)solver->refactor_btf_scalar_run_group_overlap_entries;
+  solver->stats.refactor_btf_scalar_run_group_max_live =
+    (int64_t)solver->refactor_btf_scalar_run_group_max_live;
   solver->stats.refactor_supernode_cached_probe_disabled =
     solver->refactor_supernode_cached_probe_disabled;
   solver->stats.refactor_supernode_cached_probe_disable_count =
@@ -34680,12 +34759,15 @@ static void kls_clear_refactor_btf_scalar_run_group_descriptor(
   free(solver->refactor_btf_scalar_run_group_currents);
   free(solver->refactor_btf_scalar_run_group_current_up);
   free(solver->refactor_btf_scalar_run_group_current_rows);
+  free(solver->refactor_btf_scalar_run_group_live);
   solver->refactor_btf_scalar_run_group_ptr = NULL;
   solver->refactor_btf_scalar_run_group_dep0 = NULL;
   solver->refactor_btf_scalar_run_group_max_rows_by_group = NULL;
   solver->refactor_btf_scalar_run_group_currents = NULL;
   solver->refactor_btf_scalar_run_group_current_up = NULL;
   solver->refactor_btf_scalar_run_group_current_rows = NULL;
+  solver->refactor_btf_scalar_run_group_live = NULL;
+  solver->refactor_btf_scalar_run_group_live_count = 0u;
   solver->refactor_btf_scalar_run_group_built = 0;
 }
 
@@ -34752,6 +34834,96 @@ static UF_long kls_btf_scalar_run_l_entries(const kls_solver *solver,
     entries += len;
   }
   return entries;
+}
+
+static atomic_uint *kls_prepare_refactor_btf_scalar_run_group_live(
+  kls_solver *solver) {
+  if (solver == NULL || !solver->refactor_btf_scalar_run_group_built ||
+      solver->refactor_btf_scalar_run_group_multi_count == 0u) {
+    return NULL;
+  }
+  const UF_long count = solver->refactor_btf_scalar_run_group_multi_count;
+  if (count > (UF_long)(KLS_MAX_ALLOCATION / sizeof(atomic_uint))) {
+    return NULL;
+  }
+  if (solver->refactor_btf_scalar_run_group_live != NULL &&
+      solver->refactor_btf_scalar_run_group_live_count != count) {
+    free(solver->refactor_btf_scalar_run_group_live);
+    solver->refactor_btf_scalar_run_group_live = NULL;
+    solver->refactor_btf_scalar_run_group_live_count = 0u;
+  }
+  int fresh = 0;
+  if (solver->refactor_btf_scalar_run_group_live == NULL) {
+    solver->refactor_btf_scalar_run_group_live =
+      (atomic_uint *)malloc((size_t)count *
+                            sizeof(*solver->refactor_btf_scalar_run_group_live));
+    if (solver->refactor_btf_scalar_run_group_live == NULL) {
+      return NULL;
+    }
+    solver->refactor_btf_scalar_run_group_live_count = count;
+    fresh = 1;
+  }
+  for (UF_long group = 0u; group < count; ++group) {
+    if (fresh) {
+      atomic_init(&solver->refactor_btf_scalar_run_group_live[group], 0u);
+    } else {
+      atomic_store_explicit(
+        &solver->refactor_btf_scalar_run_group_live[group], 0u,
+        memory_order_relaxed);
+    }
+  }
+  return solver->refactor_btf_scalar_run_group_live;
+}
+
+static UF_long kls_refactor_btf_scalar_run_group_for_current(
+  const kls_solver *solver,
+  UF_long dep0_global,
+  UF_long current_global,
+  UF_long up,
+  UF_long *rows_out) {
+  if (rows_out != NULL) {
+    *rows_out = 0u;
+  }
+  if (solver == NULL || !solver->refactor_btf_scalar_run_group_built ||
+      solver->refactor_btf_scalar_run_group_multi_count == 0u ||
+      solver->refactor_btf_scalar_run_group_ptr == NULL ||
+      solver->refactor_btf_scalar_run_group_dep0 == NULL ||
+      solver->refactor_btf_scalar_run_group_currents == NULL ||
+      solver->refactor_btf_scalar_run_group_current_up == NULL ||
+      solver->refactor_btf_scalar_run_group_current_rows == NULL) {
+    return KLS_KLU_EMPTY;
+  }
+  const UF_long group_count =
+    solver->refactor_btf_scalar_run_group_multi_count;
+  UF_long lo = 0u;
+  UF_long hi = group_count;
+  while (lo < hi) {
+    const UF_long mid = lo + (hi - lo) / 2u;
+    if (solver->refactor_btf_scalar_run_group_dep0[mid] < dep0_global) {
+      lo = mid + 1u;
+    } else {
+      hi = mid;
+    }
+  }
+  for (UF_long group = lo; group < group_count &&
+       solver->refactor_btf_scalar_run_group_dep0[group] == dep0_global;
+       ++group) {
+    const UF_long begin = solver->refactor_btf_scalar_run_group_ptr[group];
+    const UF_long end =
+      solver->refactor_btf_scalar_run_group_ptr[group + 1u];
+    for (UF_long pos = begin; pos < end; ++pos) {
+      if (solver->refactor_btf_scalar_run_group_currents[pos] ==
+            current_global &&
+          solver->refactor_btf_scalar_run_group_current_up[pos] == up) {
+        if (rows_out != NULL) {
+          *rows_out =
+            solver->refactor_btf_scalar_run_group_current_rows[pos];
+        }
+        return group;
+      }
+    }
+  }
+  return KLS_KLU_EMPTY;
 }
 
 static int kls_build_refactor_btf_scalar_run_groups(kls_solver *solver) {
@@ -58023,6 +58195,56 @@ static void kls_egraph_record_btf_scalar_run_exec(
   kls_atomic_update_max_ulong(&shared->btf_scalar_run_exec_max_rows, rows);
 }
 
+static int kls_egraph_record_btf_scalar_run_group_wait_begin(
+  kls_egraph_refactor_shared *shared,
+  UF_long group,
+  UF_long rows,
+  UF_long entries) {
+  if (shared == NULL || !shared->btf_scalar_run_group_wait_stats ||
+      shared->btf_scalar_run_group_live == NULL ||
+      group >= shared->btf_scalar_run_group_live_count) {
+    return 0;
+  }
+  atomic_fetch_add_explicit(&shared->btf_scalar_run_group_waits, 1ul,
+                            memory_order_relaxed);
+  atomic_fetch_add_explicit(&shared->btf_scalar_run_group_wait_rows,
+                            (unsigned long)rows, memory_order_relaxed);
+  atomic_fetch_add_explicit(&shared->btf_scalar_run_group_wait_entries,
+                            (unsigned long)entries, memory_order_relaxed);
+  const unsigned old =
+    atomic_fetch_add_explicit(&shared->btf_scalar_run_group_live[group],
+                              1u, memory_order_acq_rel);
+  const UF_long now = (UF_long)old + 1u;
+  kls_atomic_update_max_ulong(&shared->btf_scalar_run_group_max_live, now);
+  if (old > 0u) {
+    atomic_fetch_add_explicit(&shared->btf_scalar_run_group_overlap_waits,
+                              1ul, memory_order_relaxed);
+    atomic_fetch_add_explicit(&shared->btf_scalar_run_group_overlap_rows,
+                              (unsigned long)rows, memory_order_relaxed);
+    atomic_fetch_add_explicit(&shared->btf_scalar_run_group_overlap_entries,
+                              (unsigned long)entries, memory_order_relaxed);
+  }
+  return 1;
+}
+
+static void kls_egraph_record_btf_scalar_run_group_wait_end(
+  kls_egraph_refactor_shared *shared,
+  UF_long group) {
+  if (shared == NULL || !shared->btf_scalar_run_group_wait_stats ||
+      shared->btf_scalar_run_group_live == NULL ||
+      group >= shared->btf_scalar_run_group_live_count) {
+    return;
+  }
+  unsigned current =
+    atomic_load_explicit(&shared->btf_scalar_run_group_live[group],
+                         memory_order_acquire);
+  while (current > 0u &&
+         !atomic_compare_exchange_weak_explicit(
+           &shared->btf_scalar_run_group_live[group], &current, current - 1u,
+           memory_order_acq_rel, memory_order_acquire)) {
+  }
+}
+
 typedef struct kls_btf_scalar_run_tracker {
   int enabled;
   int active;
@@ -64050,8 +64272,32 @@ static int kls_egraph_refactor_btf_unscaled_column(
           }
           continue;
         }
+        UF_long wait_group = KLS_KLU_EMPTY;
+        int wait_group_active = 0;
+        if (shared->btf_scalar_run_group_wait_stats &&
+            !kls_egraph_refactor_dependency_done_now(shared, k1 + j)) {
+          UF_long wait_rows = 0u;
+          wait_group =
+            kls_refactor_btf_scalar_run_group_for_current(
+              solver, k1 + j, k, up, &wait_rows);
+          if (wait_group != KLS_KLU_EMPTY) {
+            const UF_long wait_entries =
+              kls_btf_scalar_run_l_entries(solver, k1 + j, wait_rows);
+            wait_group_active =
+              kls_egraph_record_btf_scalar_run_group_wait_begin(
+                shared, wait_group, wait_rows, wait_entries);
+          }
+        }
         if (!kls_egraph_refactor_wait_done(shared, k1 + j)) {
+          if (wait_group_active) {
+            kls_egraph_record_btf_scalar_run_group_wait_end(
+              shared, wait_group);
+          }
           return 0;
+        }
+        if (wait_group_active) {
+          kls_egraph_record_btf_scalar_run_group_wait_end(
+            shared, wait_group);
         }
         kls_btf_scalar_run_tracker_note(
           shared, &scalar_run_tracker, up, j, llen[j]);
@@ -70994,6 +71240,13 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->shared.btf_scalar_run_exec_rows, 0ul);
   atomic_init(&pool->shared.btf_scalar_run_exec_entries, 0ul);
   atomic_init(&pool->shared.btf_scalar_run_exec_max_rows, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_waits, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_wait_rows, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_wait_entries, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_overlap_waits, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_overlap_rows, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_overlap_entries, 0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_max_live, 0ul);
   atomic_init(&pool->shared.supernode_consumer_plan_attempts, 0ul);
   atomic_init(&pool->shared.supernode_consumer_plan_hits, 0ul);
   atomic_init(&pool->shared.supernode_consumer_plan_applied, 0ul);
@@ -72240,6 +72493,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_refactor_btf_scalar_run_stats_env_enabled();
   const int btf_scalar_run_exec_requested =
     kls_refactor_btf_scalar_run_exec_env_enabled();
+  const int btf_scalar_run_group_wait_stats_requested =
+    kls_refactor_btf_scalar_run_group_wait_stats_env_enabled();
   const int algorithm5_payoff_group_complete_requested =
     kls_refactor_supernode_algorithm5_payoff_group_complete_env_enabled() ||
     algorithm5_payoff_suffix_advance_requested ||
@@ -72622,6 +72877,23 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     return -1;
   }
 
+  const kls_egraph_refactor_kernel selected_kernel =
+    kls_egraph_refactor_kernel_for(solver, (int)common->scale);
+  atomic_uint *btf_scalar_run_group_live = NULL;
+  UF_long btf_scalar_run_group_live_count = 0u;
+  if (btf_scalar_run_group_wait_stats_requested &&
+      selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
+      solver->refactor_btf_scalar_run_group_built &&
+      solver->refactor_btf_scalar_run_group_multi_count > 0u) {
+    btf_scalar_run_group_live =
+      kls_prepare_refactor_btf_scalar_run_group_live(solver);
+    if (btf_scalar_run_group_live == NULL) {
+      return -1;
+    }
+    btf_scalar_run_group_live_count =
+      solver->refactor_btf_scalar_run_group_live_count;
+  }
+
   kls_egraph_refactor_pool *pool =
     ensure_egraph_refactor_pool(solver, thread_count);
   if (pool == NULL) {
@@ -72640,8 +72912,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->rs = solver->numeric->Rs;
   shared->check_pivots = check_pivots;
   shared->scale = (int)common->scale;
-  shared->kernel =
-    kls_egraph_refactor_kernel_for(solver, shared->scale);
+  shared->kernel = selected_kernel;
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 0;
   shared->row_solve_mode = 0;
@@ -72696,6 +72967,18 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     (btf_scalar_run_exec_requested &&
      shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED)
       ? 1 : 0;
+  shared->btf_scalar_run_group_wait_stats =
+    (btf_scalar_run_group_wait_stats_requested &&
+     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
+     btf_scalar_run_group_live != NULL &&
+     btf_scalar_run_group_live_count > 0u)
+      ? 1 : 0;
+  shared->btf_scalar_run_group_live =
+    shared->btf_scalar_run_group_wait_stats ? btf_scalar_run_group_live : NULL;
+  shared->btf_scalar_run_group_live_count =
+    shared->btf_scalar_run_group_wait_stats
+      ? btf_scalar_run_group_live_count
+      : 0u;
   shared->supernode_consumer_plan_exec =
     (consumer_plan_exec_active &&
      solver->refactor_supernode_consumer_plan_built &&
@@ -73213,6 +73496,20 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
                         memory_order_release);
   atomic_store_explicit(&shared->btf_scalar_run_exec_max_rows, 0ul,
                         memory_order_release);
+  atomic_store_explicit(&shared->btf_scalar_run_group_waits, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->btf_scalar_run_group_wait_rows, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->btf_scalar_run_group_wait_entries, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->btf_scalar_run_group_overlap_waits, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->btf_scalar_run_group_overlap_rows, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->btf_scalar_run_group_overlap_entries, 0ul,
+                        memory_order_release);
+  atomic_store_explicit(&shared->btf_scalar_run_group_max_live, 0ul,
+                        memory_order_release);
   atomic_store_explicit(&shared->supernode_consumer_plan_attempts, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->supernode_consumer_plan_hits, 0ul,
@@ -73364,6 +73661,9 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->subtree_supernode_split = 0;
   shared->btf_scalar_run_stats = 0;
   shared->btf_scalar_run_exec = 0;
+  shared->btf_scalar_run_group_wait_stats = 0;
+  shared->btf_scalar_run_group_live = NULL;
+  shared->btf_scalar_run_group_live_count = 0u;
   shared->supernode_consumer_plan_group_l_batch_exec = 0;
   shared->supernode_consumer_plan_shape_claims = 0;
   shared->supernode_algorithm5_payoff_exec = 0;
@@ -73525,6 +73825,27 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
                                   memory_order_acquire);
   const UF_long btf_scalar_run_exec_max_rows =
     (UF_long)atomic_load_explicit(&shared->btf_scalar_run_exec_max_rows,
+                                  memory_order_acquire);
+  const UF_long btf_scalar_run_group_waits =
+    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_group_waits,
+                                  memory_order_acquire);
+  const UF_long btf_scalar_run_group_wait_rows =
+    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_group_wait_rows,
+                                  memory_order_acquire);
+  const UF_long btf_scalar_run_group_wait_entries =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_wait_entries, memory_order_acquire);
+  const UF_long btf_scalar_run_group_overlap_waits =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_overlap_waits, memory_order_acquire);
+  const UF_long btf_scalar_run_group_overlap_rows =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_overlap_rows, memory_order_acquire);
+  const UF_long btf_scalar_run_group_overlap_entries =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_overlap_entries, memory_order_acquire);
+  const UF_long btf_scalar_run_group_max_live =
+    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_group_max_live,
                                   memory_order_acquire);
   const UF_long supernode_consumer_plan_attempts =
     (UF_long)atomic_load_explicit(
@@ -73814,6 +74135,37 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       solver->refactor_btf_scalar_run_exec_max_rows) {
     solver->refactor_btf_scalar_run_exec_max_rows =
       btf_scalar_run_exec_max_rows;
+  }
+  solver->refactor_last_btf_scalar_run_group_waits =
+    btf_scalar_run_group_waits;
+  solver->refactor_last_btf_scalar_run_group_wait_rows =
+    btf_scalar_run_group_wait_rows;
+  solver->refactor_last_btf_scalar_run_group_wait_entries =
+    btf_scalar_run_group_wait_entries;
+  solver->refactor_last_btf_scalar_run_group_overlap_waits =
+    btf_scalar_run_group_overlap_waits;
+  solver->refactor_last_btf_scalar_run_group_overlap_rows =
+    btf_scalar_run_group_overlap_rows;
+  solver->refactor_last_btf_scalar_run_group_overlap_entries =
+    btf_scalar_run_group_overlap_entries;
+  solver->refactor_last_btf_scalar_run_group_max_live =
+    btf_scalar_run_group_max_live;
+  solver->refactor_btf_scalar_run_group_wait_count +=
+    btf_scalar_run_group_waits;
+  solver->refactor_btf_scalar_run_group_wait_rows +=
+    btf_scalar_run_group_wait_rows;
+  solver->refactor_btf_scalar_run_group_wait_entries +=
+    btf_scalar_run_group_wait_entries;
+  solver->refactor_btf_scalar_run_group_overlap_count +=
+    btf_scalar_run_group_overlap_waits;
+  solver->refactor_btf_scalar_run_group_overlap_rows +=
+    btf_scalar_run_group_overlap_rows;
+  solver->refactor_btf_scalar_run_group_overlap_entries +=
+    btf_scalar_run_group_overlap_entries;
+  if (btf_scalar_run_group_max_live >
+      solver->refactor_btf_scalar_run_group_max_live) {
+    solver->refactor_btf_scalar_run_group_max_live =
+      btf_scalar_run_group_max_live;
   }
   solver->refactor_last_supernode_consumer_plan_attempts =
     supernode_consumer_plan_attempts;

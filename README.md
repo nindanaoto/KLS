@@ -1253,6 +1253,13 @@ L-entry stream that a grouped current-state owner could read once while updating
 several current workspaces. The retained group descriptor is tied to the LU
 pointer cache and is reused across repeated numeric refactors until the numeric
 pattern changes.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS=1` also builds that
+descriptor and records live runtime overlap at the grouped producer-run wait
+point. It does not change numeric execution. Benchmark JSON reports last and
+cumulative grouped wait counts, overlapped wait counts, wait rows/entries, and
+the maximum number of live waiters on a grouped producer run. These counters
+answer whether the structural paper-style reuse surface is actually reached by
+multiple current columns at the same time under the current BTF schedule.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
 same BTF scalar producer-run shape. It first waits for every dependency in a
 contiguous run, then applies the run through a local row workspace. Under the

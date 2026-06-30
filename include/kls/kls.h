@@ -1076,6 +1076,20 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_group_reused_entries;
   int64_t refactor_btf_scalar_run_group_max_currents;
   int64_t refactor_btf_scalar_run_group_max_rows;
+  int64_t refactor_last_btf_scalar_run_group_waits;
+  int64_t refactor_last_btf_scalar_run_group_wait_rows;
+  int64_t refactor_last_btf_scalar_run_group_wait_entries;
+  int64_t refactor_last_btf_scalar_run_group_overlap_waits;
+  int64_t refactor_last_btf_scalar_run_group_overlap_rows;
+  int64_t refactor_last_btf_scalar_run_group_overlap_entries;
+  int64_t refactor_last_btf_scalar_run_group_max_live;
+  int64_t refactor_btf_scalar_run_group_wait_count;
+  int64_t refactor_btf_scalar_run_group_wait_rows;
+  int64_t refactor_btf_scalar_run_group_wait_entries;
+  int64_t refactor_btf_scalar_run_group_overlap_count;
+  int64_t refactor_btf_scalar_run_group_overlap_rows;
+  int64_t refactor_btf_scalar_run_group_overlap_entries;
+  int64_t refactor_btf_scalar_run_group_max_live;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

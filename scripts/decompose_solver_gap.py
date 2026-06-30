@@ -514,6 +514,9 @@ def main() -> int:
         "refactor_btf_scalar_run_group_reused_entries,"
         "refactor_btf_scalar_run_group_max_currents,"
         "refactor_btf_scalar_run_group_max_rows,"
+        "refactor_last_btf_scalar_run_group_waits,"
+        "refactor_last_btf_scalar_run_group_overlap_waits,"
+        "refactor_last_btf_scalar_run_group_max_live,"
         "refactor_last_ready_queue_columns,"
         "refactor_ready_queue_run_count,"
         "row_refactor_group_count,"
@@ -646,7 +649,10 @@ def main() -> int:
         "refactor_btf_scalar_run_group_multi_count,"
         "refactor_btf_scalar_run_group_multi_current_total,"
         "refactor_btf_scalar_run_group_reused_entries,"
-        "refactor_btf_scalar_run_group_max_currents"
+        "refactor_btf_scalar_run_group_max_currents,"
+        "refactor_last_btf_scalar_run_group_waits,"
+        "refactor_last_btf_scalar_run_group_overlap_waits,"
+        "refactor_last_btf_scalar_run_group_max_live"
     )
     print(header)
     for cycle_ratio, name, cand, ref, cand_row in rows[: args.max_rows]:
@@ -906,6 +912,9 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_btf_scalar_run_group_reused_entries')},"
             f"{int_value(cand_row, 'refactor_btf_scalar_run_group_max_currents')},"
             f"{int_value(cand_row, 'refactor_btf_scalar_run_group_max_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_waits')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_overlap_waits')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_max_live')},"
             f"{int_value(cand_row, 'refactor_last_ready_queue_columns')},"
             f"{int_value(cand_row, 'refactor_ready_queue_run_count')},"
             f"{int_value(cand_row, 'row_refactor_group_count')},"
@@ -1051,7 +1060,10 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_btf_scalar_run_group_multi_count')},"
             f"{int_value(cand_row, 'refactor_btf_scalar_run_group_multi_current_total')},"
             f"{int_value(cand_row, 'refactor_btf_scalar_run_group_reused_entries')},"
-            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_max_currents')}"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_max_currents')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_waits')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_overlap_waits')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_max_live')}"
         )
     return 0
 

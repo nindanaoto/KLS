@@ -12799,3 +12799,32 @@ multi-current groups over `121,701` current-run memberships and reported
 length `586`. This gives the next implementation a concrete target: a live
 multi-current BTF executor should consume these retained groups and update
 several current workspaces per streamed producer L suffix.
+
+The next diagnostic slice checked whether the existing EGraph/BTF schedule
+already creates a natural rendezvous point for that grouped executor. Under
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS=1`, KLS now reuses the
+retained grouped producer-run descriptor and records live wait overlap when a
+current column reaches a grouped scalar producer run whose producer dependency is
+not yet published. This is still diagnostic-only; it does not change numeric
+execution.
+
+The result is clear on the current hard SPICE cases. On `ASIC_100ks`,
+`build/kls_btf_group_wait_on_asic100ks_t4_r1_ref1.json` built the same `13,116`
+multi-current groups and `299,572,567` reusable L-entry reads, but reported
+zero grouped waits, zero grouped overlap waits, and max live waiters zero
+(`relative_residual_l2=1.92251861e-15`). On `ASIC_320ks`,
+`build/kls_btf_group_wait_on_asic320ks_t4_r1_ref1.json` likewise built `33,856`
+multi-current groups and `270,529,235` reusable L-entry reads, but also reported
+zero grouped waits and max live waiters zero
+(`relative_residual_l2=2.08436857e-15`). Enabling scalar producer-run stats at
+the same time confirms the scalar-run surface is present: `ASIC_100ks` reported
+`107,920` producer runs and `312,769,800` touched L entries, while `ASIC_320ks`
+reported `230,896` producer runs and `278,005,604` touched L entries. Both
+still had zero grouped live waits.
+
+This rejects a simple wait-rendezvous implementation. The paper-level grouped
+current-state owner has to be introduced explicitly in the BTF schedule; it
+cannot be obtained by attaching work to the current dependency wait point. The
+next refactor implementation should make grouped producer runs schedule-visible
+and route multiple current workspaces through a producer-owned update, rather
+than relying on incidental concurrent waits.
