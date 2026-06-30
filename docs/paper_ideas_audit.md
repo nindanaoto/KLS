@@ -60,6 +60,25 @@ triggers" as the next lead cause. The missing paper-level piece remains a true
 grouped live-workspace executor with clear completion ownership, not BLAS
 thresholding or small local replay changes.
 
+The grouped suffix-trigger follow-up adds an opt-in
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE=1`
+executor that uses the retained suffix-map trigger table directly instead of
+replaying the scalar producer helper. To preserve U-order and avoid the residual
+drift seen in the unsafe scalar suffix probes, it only applies a dependency when
+the retained current-state cursor is exactly at that producer (`current_up ==
+target_up`). This is numerically clean on the focused gap run, but it is not a
+CKTSO-gap closer: `build/kls_alg5_suffix_group_advance_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `2.6927s` geomean versus the same-build default
+`build/kls_default_compare_gap5_t4_r1_ref3_timeout120.jsonl` at `1.4427s` and
+the CKTSO medium artifact at about `0.5505s`. The strict in-order grouped path
+advanced only `1,249` suffix dependencies and `492,359` update entries, all on
+`ASIC_320k`, so it avoids the correctness failure by giving up most of the
+paper's intended live overlap. This rejects BLAS thresholding and
+single-producer in-order suffix triggering as the first cause; the remaining
+paper-level gap is a supernode/window owner that can safely process a broad
+finished-prefix frontier, closer to SubtreeLU's split wait/update/wait schedule,
+instead of advancing one dependency per current-state cursor.
+
 The latest Algorithm 5 grouped-prefix work now includes a targetless
 direct-prefix variant, an advance-seed probe, a retained-current-row state probe,
 and a final-state probe, without changing BLAS thresholds. The
