@@ -144,6 +144,64 @@ static int require_row_auto_model_stats(const kls_stats *stats,
   return 1;
 }
 
+static int require_algorithm5_suffix_sharing_stats(const kls_stats *stats,
+                                                   const char *what) {
+  if (stats == NULL ||
+      stats->refactor_supernode_algorithm5_payoff_group_suffix_unique_deps <
+        0 ||
+      stats->refactor_supernode_algorithm5_payoff_group_suffix_duplicate_deps <
+        0 ||
+      stats->refactor_supernode_algorithm5_payoff_group_suffix_shared_deps <
+        0 ||
+      stats->refactor_supernode_algorithm5_payoff_group_suffix_max_dep_fanout <
+        0 ||
+      stats
+          ->refactor_supernode_algorithm5_payoff_group_suffix_duplicate_update_entries <
+        0) {
+    fprintf(stderr, "negative Algorithm 5 suffix sharing stats for %s\n",
+            what);
+    return 0;
+  }
+
+  const int64_t suffix_deps =
+    stats->refactor_supernode_algorithm5_payoff_group_suffix_deps;
+  const int64_t unique_deps =
+    stats->refactor_supernode_algorithm5_payoff_group_suffix_unique_deps;
+  const int64_t duplicate_deps =
+    stats->refactor_supernode_algorithm5_payoff_group_suffix_duplicate_deps;
+  const int64_t shared_deps =
+    stats->refactor_supernode_algorithm5_payoff_group_suffix_shared_deps;
+  const int64_t max_fanout =
+    stats->refactor_supernode_algorithm5_payoff_group_suffix_max_dep_fanout;
+  const int64_t duplicate_update_entries =
+    stats
+      ->refactor_supernode_algorithm5_payoff_group_suffix_duplicate_update_entries;
+  const int64_t suffix_update_entries =
+    stats->refactor_supernode_algorithm5_payoff_group_suffix_update_entries;
+  if (suffix_deps < 0 ||
+      unique_deps > suffix_deps ||
+      duplicate_deps > suffix_deps ||
+      unique_deps > INT64_MAX - duplicate_deps ||
+      unique_deps + duplicate_deps != suffix_deps ||
+      shared_deps > unique_deps ||
+      duplicate_update_entries > suffix_update_entries ||
+      (suffix_deps == 0 &&
+       (unique_deps != 0 || duplicate_deps != 0 || shared_deps != 0 ||
+        max_fanout != 0 || duplicate_update_entries != 0)) ||
+      (duplicate_deps > 0 && max_fanout < 2)) {
+    fprintf(stderr,
+            "inconsistent Algorithm 5 suffix sharing stats for %s:"
+            " suffix=%" PRId64 ", unique=%" PRId64
+            ", duplicate=%" PRId64 ", shared=%" PRId64
+            ", max_fanout=%" PRId64 ", duplicate_updates=%" PRId64
+            ", suffix_updates=%" PRId64 "\n",
+            what, suffix_deps, unique_deps, duplicate_deps, shared_deps,
+            max_fanout, duplicate_update_entries, suffix_update_entries);
+    return 0;
+  }
+  return 1;
+}
+
 static int require_pivoting_tail_plan(const kls_stats *stats,
                                       const char *what) {
   if (stats == NULL || stats->fast_rejected_pivot < 0 ||
@@ -6486,6 +6544,10 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   stats.struct_size = sizeof(stats);
   if (ok && !require_ok(kls_get_stats(solver, &stats),
                         "stats EGraph blocked")) {
+    ok = 0;
+  }
+  if (ok && !require_algorithm5_suffix_sharing_stats(&stats,
+                                                     "EGraph blocked")) {
     ok = 0;
   }
   if (ok &&

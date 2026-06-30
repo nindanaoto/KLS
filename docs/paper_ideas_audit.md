@@ -11626,3 +11626,26 @@ suffix dependencies and `1,029,383,423` suffix update-entry proxy work in the
 descriptor. So the CKTSO/SubtreeLU paper gap is not a missed final-trigger
 batch: it is earlier, where grouped current-state suffix work should be owned
 and advanced before individual final-trigger claims become visible.
+
+The grouped suffix surface now also records whether those suffix dependencies
+are unique or repeated inside each Algorithm 5 payoff group:
+`refactor_supernode_algorithm5_payoff_group_suffix_unique_deps`,
+`refactor_supernode_algorithm5_payoff_group_suffix_duplicate_deps`,
+`refactor_supernode_algorithm5_payoff_group_suffix_shared_deps`,
+`refactor_supernode_algorithm5_payoff_group_suffix_max_dep_fanout`, and
+`refactor_supernode_algorithm5_payoff_group_suffix_duplicate_update_entries`.
+The focused grouped-prep run
+`build/kls_alg5_group_suffix_sharing_gap5_t4_r1_ref3_timeout120.jsonl`
+completed all five rows with clean residuals and `1.7751s` geomean. The hard
+ASIC rows show the intended next executor target clearly: `ASIC_320ks` had
+`1,212,799` suffix deps but only `212,759` group-local unique deps, with
+`1,000,040` duplicate deps, `111,618` shared dependency keys, max fanout `173`,
+and `348,084,511` duplicate update-entry proxy work. `ASIC_320k` had
+`1,369,088` / `207,442` / `1,161,646` / `112,649` / `223` /
+`454,748,014`; `ASIC_100ks` had `415,992` / `139,796` / `276,196` /
+`68,503` / `79` / `98,483,225`. Across the five-row focus set, `2,437,882` of
+`2,997,879` suffix dependencies were duplicate group-local producer columns and
+`901,315,750` of the suffix update-entry proxy work was duplicate-after-first
+surface. This makes the next paper-level step more concrete: the grouped
+multi-current owner should batch suffix advancement by producer dependency
+inside a payoff group, not only retain one current state per scalar consumer.

@@ -2473,6 +2473,16 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_algorithm5_payoff_group_suffix_update_entries\":%"
            PRId64
            ",\"refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_suffix_unique_deps\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_suffix_duplicate_deps\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_suffix_shared_deps\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_suffix_max_dep_fanout\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_suffix_duplicate_update_entries\":%"
            PRId64,
            stats.refactor_supernode_algorithm5_payoff_group_suffix_deps,
            stats
@@ -2480,7 +2490,17 @@ int main(int argc, char **argv) {
            stats
              .refactor_supernode_algorithm5_payoff_group_suffix_update_entries,
            stats
-             .refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries);
+             .refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_unique_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_duplicate_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_shared_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_max_dep_fanout,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_duplicate_update_entries);
     printf(",\"refactor_last_supernode_algorithm5_payoff_slot_accum_runs\":%"
            PRId64
            ",\"refactor_last_supernode_algorithm5_payoff_slot_accum_rows\":%"
@@ -3652,6 +3672,8 @@ int main(int argc, char **argv) {
            " workspace %" PRId64 "/%" PRId64
            " advance %" PRId64 "/%" PRId64 "/%" PRId64
            " suffix %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+           " suffix share %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+           "/%" PRId64
            " advance slots %" PRId64 "/%" PRId64 "/%" PRId64
            " target %" PRId64 "/%" PRId64 "/%" PRId64
            " target slots %" PRId64 "/%" PRId64 "/%" PRId64
@@ -3820,6 +3842,16 @@ int main(int argc, char **argv) {
              .refactor_supernode_algorithm5_payoff_group_suffix_update_entries,
            stats
              .refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_unique_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_duplicate_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_shared_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_max_dep_fanout,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_duplicate_update_entries,
            stats.refactor_supernode_algorithm5_payoff_group_advance_slots,
            stats
              .refactor_supernode_algorithm5_payoff_group_max_advance_slots,
