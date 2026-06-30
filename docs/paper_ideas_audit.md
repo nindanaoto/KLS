@@ -12985,6 +12985,18 @@ the per-current sparse-state restore is still the wrong CKTSO-gap owner: once
 nearly all READY states are consumed, restored-row traffic dominates and the
 path remains orders of magnitude slower than the default refactor.
 
+The retained-state advance helper now uses the sorted L-row fact already
+available in the LU pointer cache. When the state executor is requested, KLS
+records whether L row lists are sorted; if they are, advancing a retained sparse
+state walks the sorted retained-state rows and L rows once instead of binary
+searching the retained state for every L entry. This is not the missing grouped
+producer owner, but it removes a real cost from the sparse-state experiment:
+`ASIC_100ks` improved from `10.5670s` to `9.8842s`, and `ASIC_320ks` improved
+from `8.7802s` to `8.3343s`, both with clean residuals and zero state rejects.
+The remaining gap is still much larger than row-position lookup; the executor
+continues to materialize, advance, and restore one sparse current state per
+consumer instead of streaming each producer L suffix once across a live group.
+
 This confirms that the retained current-state handoff can be made
 correctness-clean, but it also rejects a per-current restored sparse state as
 the missing CKTSO-speed mechanism. The next paper-aligned owner needs to keep a

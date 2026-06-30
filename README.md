@@ -1306,7 +1306,10 @@ L-store path finish the column. Benchmark JSON reports last and cumulative
 state-exec current, skipped-dependency, restored-row, and reject counts. It also
 reports dispatch bypasses where the BTF column had a selected retained state but
 the restore hook was gated off, and splits remaining misses into
-not-ready-at-dispatch, ready-while-owned, and ready-after-done buckets.
+not-ready-at-dispatch, ready-while-owned, and ready-after-done buckets. When
+this executor is requested, KLS also records whether retained L row lists are
+sorted and advances retained sparse states with a merge walk instead of a
+per-entry binary search when that sorted shape holds.
 This remains opt-in: the focused ASIC probes are residual-clean, but the state
 owner is still too fine-grained to beat the default refactor path.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
