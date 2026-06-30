@@ -155,6 +155,32 @@ states per current cursor, while the papers' advantage comes from a broader
 grouped live workspace or supernodal window that avoids this per-current
 retained-state traffic.
 
+The suffix-group window probe adds a separate opt-in
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_WINDOW=1` path
+that keeps the claimed current-state batch alive after the first producer
+column and advances later already-finished producers inside that owned window.
+To keep the path aligned with the papers' shared-producer payoff rather than a
+scalar tail replay, it only continues when a later producer has at least two
+valid current-state consumers in the batch. Correctness passed
+`cmake --build build -j2`, `git diff --check`,
+`ctest --test-dir build --output-on-failure`, `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE=1 ./build/kls_smoke`,
+and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_WINDOW=1 ./build/kls_smoke`.
+The focused artifact
+`build/kls_suffix_group_window_fanout_gap5_t4_r1_ref3_timeout120.jsonl`
+completed cleanly but measured `8.2147s` geomean, `2.98x` slower than the
+position-cache suffix-group path and `5.69x` slower than the same-binary
+default. The fanout guard reduced the unguarded window's suffix work, but the
+hard rows still advanced too much retained-state traffic:
+`ASIC_320ks` processed `228,582` suffix deps and `81,956,367` update entries,
+`ASIC_320k` processed `337,750` / `141,881,301`, and `ASIC_100ks` processed
+`11,048` / `3,980,511`. This rejects "keep a per-current retained cursor window
+alive and push more suffix deps through it" as the CKTSO-gap closer. The next
+refactor work should use the grouped producer/current-state surface without
+materializing or cursor-advancing each current independently, e.g. the bounded
+group-L state shape as an owned streaming executor.
+
 The latest Algorithm 5 grouped-prefix work now includes a targetless
 direct-prefix variant, an advance-seed probe, a retained-current-row state probe,
 and a final-state probe, without changing BLAS thresholds. The
