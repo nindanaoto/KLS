@@ -990,6 +990,11 @@ reports consumed retained prefixes through
 `refactor_last_supernode_algorithm5_payoff_prefix_prep_rows`,
 `refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries`, and
 `refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots`.
+The scalar slot-accum and prefix-prep probes write retained dense suffix target
+slots directly and only build row-stamp maps for irregular L-trailing targets.
+This matches the retained Algorithm 5 layout more closely, but it does not
+promote those probes: current top-five CKTSO-gap checks still reject per-current
+scalar replay versus the default path.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and

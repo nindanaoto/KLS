@@ -6,6 +6,32 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The latest retained-target cleanup follows the Algorithm 5 descriptor more
+directly without revisiting BLAS thresholds. In the scalar payoff slot-accum and
+prefix-prep diagnostics, dense suffix targets now write by their retained slot
+ordinal and only the irregular L-trailing targets build a row-stamp map. This
+keeps `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP=1`
+preparation-only rather than silently enabling the known-losing scalar replay.
+Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PREFIX_PREP=1 ./build/kls_smoke`,
+and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SLOT_ACCUM=1 ./build/kls_smoke`.
+Focused top-five CKTSO-gap probes still reject scalar current replay:
+same-source default
+`build/kls_dense_direct_default_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.3810s` SPICE-cycle geomean, prefix prep measured `2.0942s` in
+`build/kls_dense_direct_prefix_prep_gap5_t4_r1_ref3_timeout120.jsonl`, and slot
+accumulation measured `2.1187s` in
+`build/kls_dense_direct_slotaccum_gap5_t4_r1_ref3_timeout120.jsonl`. A
+`GROUP_PREP` one-matrix check,
+`build/asic100ks_group_prep_planonly_after_dense_direct.json`, reported zero
+runtime payoff workspace and zero last-refactor prefix/slot-accum runs,
+confirming it remains a descriptor path. The missing CKTSO-sized step is still
+the compact grouped multi-current prefix-advance executor backed by the retained
+advance slots, target slots, current slots, and current-run maps.
+
 The latest Algorithm 5 prefactor change makes the guarded EGraph prefactor
 slice automatic for retained EGraph pipelines with at least
 `KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK` modeled dependency work, with

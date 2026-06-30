@@ -52789,6 +52789,8 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
   UF_long *algorithm5_target_pos = NULL;
   const UF_long *algorithm5_target_cols = NULL;
   double *algorithm5_target_values = NULL;
+  UF_long algorithm5_dense_target_slots = 0u;
+  UF_long algorithm5_trailing_target_slots = 0u;
   if (algorithm5_slot_accum_candidate) {
     UF_long checked_k1 = 0u;
     UF_long checked_local_start = 0u;
@@ -52801,40 +52803,56 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
         checked_local_start != local_start ||
         local_start > algorithm5_block_size ||
         width > algorithm5_block_size - local_start ||
-        !kls_egraph_worker_row_target_workspace(worker,
-                                                algorithm5_block_size)) {
+        dense_scatter_cols > algorithm5_target_slots) {
       return 0;
     }
-    if (worker->row_target_stamp == UF_long_max) {
-      memset(worker->row_target_stamp_workspace, 0,
-             (size_t)algorithm5_block_size *
-               sizeof(*worker->row_target_stamp_workspace));
-      worker->row_target_stamp = 1u;
-    } else {
-      worker->row_target_stamp++;
-      if (worker->row_target_stamp == 0u) {
-        worker->row_target_stamp = 1u;
-      }
-    }
-    algorithm5_target_stamp_value = worker->row_target_stamp;
-    algorithm5_target_stamp = worker->row_target_stamp_workspace;
-    algorithm5_target_pos = worker->row_target_pos_workspace;
     algorithm5_target_cols =
       solver->refactor_supernode_algorithm5_payoff_group_target_cols +
       algorithm5_target_slot_begin;
     algorithm5_target_values =
       shared->algorithm5_payoff_target_values + algorithm5_target_slot_begin;
+    algorithm5_dense_target_slots = dense_scatter_cols;
+    algorithm5_trailing_target_slots =
+      algorithm5_target_slots - algorithm5_dense_target_slots;
+    for (UF_long slot = 0u; slot < algorithm5_dense_target_slots; ++slot) {
+      const UF_long row = local_start + available_end + slot;
+      if (row >= algorithm5_block_size ||
+          algorithm5_target_cols[slot] != row) {
+        return 0;
+      }
+    }
     memset(algorithm5_target_values, 0,
            (size_t)algorithm5_target_slots *
              sizeof(*algorithm5_target_values));
-    for (UF_long slot = 0u; slot < algorithm5_target_slots; ++slot) {
-      const UF_long row = algorithm5_target_cols[slot];
-      if (row >= algorithm5_block_size ||
-          algorithm5_target_stamp[row] == algorithm5_target_stamp_value) {
+    if (algorithm5_trailing_target_slots > 0u) {
+      if (!kls_egraph_worker_row_target_workspace(worker,
+                                                  algorithm5_block_size)) {
         return 0;
       }
-      algorithm5_target_stamp[row] = algorithm5_target_stamp_value;
-      algorithm5_target_pos[row] = slot;
+      if (worker->row_target_stamp == UF_long_max) {
+        memset(worker->row_target_stamp_workspace, 0,
+               (size_t)algorithm5_block_size *
+                 sizeof(*worker->row_target_stamp_workspace));
+        worker->row_target_stamp = 1u;
+      } else {
+        worker->row_target_stamp++;
+        if (worker->row_target_stamp == 0u) {
+          worker->row_target_stamp = 1u;
+        }
+      }
+      algorithm5_target_stamp_value = worker->row_target_stamp;
+      algorithm5_target_stamp = worker->row_target_stamp_workspace;
+      algorithm5_target_pos = worker->row_target_pos_workspace;
+      for (UF_long slot = algorithm5_dense_target_slots;
+           slot < algorithm5_target_slots; ++slot) {
+        const UF_long row = algorithm5_target_cols[slot];
+        if (row >= algorithm5_block_size ||
+            algorithm5_target_stamp[row] == algorithm5_target_stamp_value) {
+          return 0;
+        }
+        algorithm5_target_stamp[row] = algorithm5_target_stamp_value;
+        algorithm5_target_pos[row] = slot;
+      }
     }
     use_algorithm5_slot_accum = 1;
   }
@@ -52893,12 +52911,14 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
         workspace[target - panel_offset] -= update;
       } else if (use_algorithm5_slot_accum) {
         const UF_long row = local_start + target;
+        const UF_long slot = target - available_end;
         if (row >= algorithm5_block_size ||
-            algorithm5_target_stamp[row] != algorithm5_target_stamp_value) {
+            slot >= algorithm5_dense_target_slots ||
+            algorithm5_target_cols[slot] != row) {
           kls_egraph_refactor_record_invalid(shared);
           return -1;
         }
-        algorithm5_target_values[algorithm5_target_pos[row]] += update;
+        algorithm5_target_values[slot] += update;
       } else {
         x[local_start + target] -= update;
       }
@@ -52909,7 +52929,8 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
     for (UF_long p = begin; p < end; ++p) {
       if (use_algorithm5_slot_accum) {
         const UF_long target_row = trailing_cols[p];
-        if (target_row >= algorithm5_block_size ||
+        if (algorithm5_trailing_target_slots == 0u ||
+            target_row >= algorithm5_block_size ||
             algorithm5_target_stamp[target_row] !=
               algorithm5_target_stamp_value) {
           kls_egraph_refactor_record_invalid(shared);
@@ -55941,8 +55962,7 @@ static int kls_egraph_refactor_prepare_algorithm5_payoff_prefix_run(
       target_slot_begin > shared->algorithm5_payoff_target_size ||
       target_slots >
         shared->algorithm5_payoff_target_size - target_slot_begin ||
-      target_slots == 0u ||
-      !kls_egraph_worker_row_target_workspace(worker, block_size)) {
+      target_slots == 0u) {
     return 0;
   }
   const UF_long *target_cols =
@@ -55993,8 +56013,17 @@ static int kls_egraph_refactor_prepare_algorithm5_payoff_prefix_run(
   const UF_long available_end = panel_offset + prefix_rows;
   const UF_long dense_scatter_cols = width - available_end;
   const UF_long dense_entries = prefix_rows * dense_scatter_cols;
-  if (target_entries != dense_entries + trailing_entries) {
+  if (target_entries != dense_entries + trailing_entries ||
+      dense_scatter_cols > target_slots) {
     return 0;
+  }
+  const UF_long dense_target_slots = dense_scatter_cols;
+  const UF_long trailing_target_slots = target_slots - dense_target_slots;
+  for (UF_long slot = 0u; slot < dense_target_slots; ++slot) {
+    const UF_long row = local_start + available_end + slot;
+    if (row >= block_size || target_cols[slot] != row) {
+      return 0;
+    }
   }
 
   double *x = worker->x;
@@ -56029,29 +56058,38 @@ static int kls_egraph_refactor_prepare_algorithm5_payoff_prefix_run(
     }
   }
 
-  if (worker->row_target_stamp == UF_long_max) {
-    memset(worker->row_target_stamp_workspace, 0,
-           (size_t)block_size *
-             sizeof(*worker->row_target_stamp_workspace));
-    worker->row_target_stamp = 1u;
-  } else {
-    worker->row_target_stamp++;
-    if (worker->row_target_stamp == 0u) {
-      worker->row_target_stamp = 1u;
-    }
-  }
-  const UF_long target_stamp_value = worker->row_target_stamp;
-  UF_long *target_stamp = worker->row_target_stamp_workspace;
-  UF_long *target_pos = worker->row_target_pos_workspace;
+  UF_long target_stamp_value = 0u;
+  UF_long *target_stamp = NULL;
+  UF_long *target_pos = NULL;
   memset(target_values, 0, (size_t)target_slots * sizeof(*target_values));
-  for (UF_long slot = 0u; slot < target_slots; ++slot) {
-    const UF_long row = target_cols[slot];
-    if (row >= block_size || target_stamp[row] == target_stamp_value) {
+  if (trailing_target_slots > 0u) {
+    if (!kls_egraph_worker_row_target_workspace(worker, block_size)) {
       memset(x, 0, (size_t)block_size * sizeof(*x));
       return 0;
     }
-    target_stamp[row] = target_stamp_value;
-    target_pos[row] = slot;
+    if (worker->row_target_stamp == UF_long_max) {
+      memset(worker->row_target_stamp_workspace, 0,
+             (size_t)block_size *
+               sizeof(*worker->row_target_stamp_workspace));
+      worker->row_target_stamp = 1u;
+    } else {
+      worker->row_target_stamp++;
+      if (worker->row_target_stamp == 0u) {
+        worker->row_target_stamp = 1u;
+      }
+    }
+    target_stamp_value = worker->row_target_stamp;
+    target_stamp = worker->row_target_stamp_workspace;
+    target_pos = worker->row_target_pos_workspace;
+    for (UF_long slot = dense_target_slots; slot < target_slots; ++slot) {
+      const UF_long row = target_cols[slot];
+      if (row >= block_size || target_stamp[row] == target_stamp_value) {
+        memset(x, 0, (size_t)block_size * sizeof(*x));
+        return 0;
+      }
+      target_stamp[row] = target_stamp_value;
+      target_pos[row] = slot;
+    }
   }
 
   for (UF_long local = 0u; local < prefix_rows; ++local) {
@@ -56078,12 +56116,13 @@ static int kls_egraph_refactor_prepare_algorithm5_payoff_prefix_run(
         workspace[target - panel_offset] -= update;
       } else {
         const UF_long row = local_start + target;
-        if (row >= block_size ||
-            target_stamp[row] != target_stamp_value) {
+        const UF_long slot = target - available_end;
+        if (row >= block_size || slot >= dense_target_slots ||
+            target_cols[slot] != row) {
           memset(x, 0, (size_t)block_size * sizeof(*x));
           return 0;
         }
-        target_values[target_pos[row]] += update;
+        target_values[slot] += update;
       }
     }
     const UF_long row = row_base + local;
@@ -56091,7 +56130,7 @@ static int kls_egraph_refactor_prepare_algorithm5_payoff_prefix_run(
     const UF_long end = solver->refactor_u_supernode_l_row_ptr[row + 1u];
     for (UF_long p = begin; p < end; ++p) {
       const UF_long target_row = trailing_cols[p];
-      if (target_row >= block_size ||
+      if (trailing_target_slots == 0u || target_row >= block_size ||
           target_stamp[target_row] != target_stamp_value) {
         memset(x, 0, (size_t)block_size * sizeof(*x));
         return 0;
