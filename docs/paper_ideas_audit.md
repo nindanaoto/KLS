@@ -60,6 +60,24 @@ still measured `4.9402s`. The source change was removed. This closes the
 must carry efficient per-current state-position metadata with the grouped
 numeric task, not rebuild or binary-search state maps during completion.
 
+A batched-hash version of the same final-state shortcut was also tested and
+rejected before commit. The trial added an opt-in
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_FINAL_STATE_HASH=1`
+path that built one retained-state hash table for all currents in a grouped
+completion batch and then applied the final-state prefix in producer-row/current
+order. Correctness passed `cmake --build build -j2`, `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE=1 KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_FINAL_STATE_HASH=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`. The focused top-five
+CKTSO-gap run measured `3.1472s` geomean in
+`build/kls_finalstate_hash_groupcomplete_hash_gap5_t4_r1_ref3_timeout120.jsonl`
+versus `2.5542s` for the same-source group-complete control
+`build/kls_finalstate_hash_groupcomplete_gap5_t4_r1_ref3_timeout120.jsonl` and
+`1.4463s` for the default control
+`build/kls_finalstate_hash_default_gap5_t4_r1_ref3_timeout120.jsonl`. This
+confirms that a lookup-only owner does not fill the paper gap; the missing
+piece is still reducing the grouped prefix/suffix numeric work itself.
+
 A direct scalar BTF dispatch split was tested and rejected before commit. The
 prototype added a plain scalar dependency helper for the default BTF refactor
 loop, passed `git diff --check`, `cmake --build build -j2`, `./build/kls_smoke`,
