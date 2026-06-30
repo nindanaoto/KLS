@@ -12,6 +12,20 @@
 #include <string.h>
 #include <strings.h>
 
+#if defined(__has_include)
+#if __has_include(<valgrind/callgrind.h>)
+#include <valgrind/callgrind.h>
+#define KLS_BENCH_HAVE_CALLGRIND 1
+#endif
+#endif
+
+#ifndef KLS_BENCH_HAVE_CALLGRIND
+#define CALLGRIND_START_INSTRUMENTATION ((void)0)
+#define CALLGRIND_STOP_INSTRUMENTATION ((void)0)
+#define CALLGRIND_ZERO_STATS ((void)0)
+#define CALLGRIND_DUMP_STATS ((void)0)
+#endif
+
 typedef struct triplet {
   int64_t row;
   int64_t col;
@@ -40,6 +54,13 @@ typedef struct bench_index_view {
   int32_t *col_ptr32;
   int32_t *row_idx32;
 } bench_index_view;
+
+static int bench_env_enabled(const char *name) {
+  const char *value = getenv(name);
+  return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0 &&
+         strcasecmp(value, "false") != 0 && strcasecmp(value, "off") != 0 &&
+         strcasecmp(value, "no") != 0;
+}
 
 static void matrix_free(matrix *a) {
   if (a == NULL) return;
@@ -894,6 +915,8 @@ int main(int argc, char **argv) {
   double refactor_total = 0.0;
   double solve_total = 0.0;
   double tsolve_total = 0.0;
+  const int callgrind_refactor =
+      bench_env_enabled("KLS_BENCH_CALLGRIND_REFACTOR");
 
   for (int i = 0; i < repeat; ++i) {
     status = kls_factor(solver, run_values);
@@ -901,11 +924,19 @@ int main(int argc, char **argv) {
     kls_get_stats(solver, &stats);
     factor_total += stats.factor_seconds;
   }
+  if (callgrind_refactor) {
+    CALLGRIND_START_INSTRUMENTATION;
+    CALLGRIND_ZERO_STATS;
+  }
   for (int i = 0; i < refactor_repeat && status == KLS_OK; ++i) {
     status = kls_refactor(solver, run_values);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     refactor_total += stats.refactor_seconds;
+  }
+  if (callgrind_refactor) {
+    CALLGRIND_DUMP_STATS;
+    CALLGRIND_STOP_INSTRUMENTATION;
   }
   for (int i = 0; i < repeat && status == KLS_OK; ++i) {
     status = kls_solve(solver, 1, b, 0, x, 0);

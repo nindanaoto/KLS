@@ -11723,3 +11723,22 @@ completed with clean residuals, the same `2,997,879` suffix dependencies and
 `1.8208s` with the map flag off. The descriptor is kept behind its own flag
 because it is still preparation for the grouped suffix executor, not a speedup
 by itself.
+
+To keep the next refactor work grounded in the repeated numeric pass rather
+than the initial factorization, `kls_bench` now has an optional callgrind hook:
+set `KLS_BENCH_CALLGRIND_REFACTOR=1` and run under callgrind with collection
+disabled at start. The hook starts instrumentation, zeros stats, dumps stats,
+and stops instrumentation around only the repeated `kls_refactor` loop. A
+focused `ASIC_100ks` profile using
+`build/callgrind_asic100ks_refactor.out.1` collected `2,669,453,961`
+instruction references in the repeated refactor region. The profile is
+decisive: `kls_egraph_refactor_apply_btf_scalar_dep` accounts for
+`2,460,170,381` instructions (`92.16%`), called from
+`kls_egraph_refactor_btf_unscaled_column`, and the call count matches
+`refactor_dependency_edges=1,556,952`. In the same run all default
+supernode/panel/Algorithm 5 payoff execution counters were zero. This rejects
+another suffix-only or BLAS-threshold tweak as the next first-order fix for
+the slow ASIC refactor cases. The missing paper-level executor is still the
+coarse grouped numeric owner that reduces those 1.56M scalar BTF dependency
+applications, either by batched prefix advancement or by a multi-current
+producer-panel kernel.
