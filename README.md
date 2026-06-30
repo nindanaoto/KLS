@@ -1039,6 +1039,18 @@ the paper-level missing piece that direct-prefix prep was otherwise replaying,
 but it remains rejected as a default: the focused ASIC cases skip many advance
 dependencies, yet restoring hundreds of thousands of row slots is slower than
 the targetless direct-prefix probe and the default EGraph path.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_CURRENT_STATE=1`
+is the fuller retained-current-row probe. It also implies direct-prefix prep,
+stores values for the retained per-current state row map, and restores that
+state plus skipped U coefficients before consuming the prepared prefix.
+Benchmark JSON reports the restore through
+`refactor_last_supernode_algorithm5_payoff_current_state_seed_runs`,
+`refactor_last_supernode_algorithm5_payoff_current_state_seed_deps`, and
+`refactor_last_supernode_algorithm5_payoff_current_state_seed_rows`. The
+top-five CKTSO-gap check rejects this as a default too: it fills the
+CKTSO/SubtreeLU current-row persistence gap, but the hard ASIC cases restore
+hundreds of thousands to millions of state rows per run, making it slower than
+the lighter advance-seed probe.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and

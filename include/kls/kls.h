@@ -970,6 +970,9 @@ typedef struct kls_stats {
   int64_t refactor_last_supernode_algorithm5_payoff_advance_seed_runs;
   int64_t refactor_last_supernode_algorithm5_payoff_advance_seed_deps;
   int64_t refactor_last_supernode_algorithm5_payoff_advance_seed_slots;
+  int64_t refactor_last_supernode_algorithm5_payoff_current_state_seed_runs;
+  int64_t refactor_last_supernode_algorithm5_payoff_current_state_seed_deps;
+  int64_t refactor_last_supernode_algorithm5_payoff_current_state_seed_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
