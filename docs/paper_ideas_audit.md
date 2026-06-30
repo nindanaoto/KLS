@@ -6,6 +6,23 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The refactor focus now has a clearer missing paper-level surface before the
+suffix probes: Algorithm 5 payoff groups have substantial duplicate producer
+work in the pre-prefix advance section. KLS records this with the new
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_ADVANCE_MAP=1` descriptor,
+which builds `group -> advance producer column -> (run, U position)` and reports
+unique/duplicate/shared fanout counters. The focused artifact
+`build/kls_alg5_advance_map_gap5_t4_r1_ref3_timeout120.jsonl` completed all five
+rows with `1.7971s` geomean, which is not a speed claim because the map is still
+descriptor-only. The important result is the hard-ASIC sharing: `ASIC_320ks` has
+`190,994` grouped advance deps but only `53,758` unique producer keys
+(`137,236` duplicate occurrences, max fanout `151`, `26,825,778` duplicate
+update-entry proxy work), `ASIC_320k` has `194,219` / `61,682` / `132,537` /
+`165` / `25,161,014`, and `ASIC_100ks` has `32,849` / `14,443` / `18,406` /
+`53` / `2,166,521`. This makes the next CKTSO/SubtreeLU-aligned fix a true
+grouped advance owner feeding the prefix executor, not BLAS thresholding,
+suffix-only replay, or per-current row-state micro tuning.
+
 The guarded suffix-advance follow-up filled the next direct Algorithm 5
 surface, but it is rejected as a working CKTSO-gap closer. The implementation
 adds a retained `current_up` cursor, a suffix-trigger map from completed
@@ -553,6 +570,25 @@ The focused prep artifact
 five rows with `1.7659s` geomean and preserved the same hard-ASIC surfaces:
 `909,325` retained advance slots on `ASIC_320ks`, `1,065,691` on `ASIC_320k`,
 and `194,019` on `ASIC_100ks`.
+
+KLS now also retains the producer-keyed advance surface behind
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_ADVANCE_MAP=1`. This mirrors the
+suffix producer map but covers the pre-prefix dependencies that each selected
+current must advance before the grouped prefix panel can run. The descriptor
+records `refactor_supernode_algorithm5_payoff_group_advance_unique_deps`,
+`...advance_duplicate_deps`, `...advance_shared_deps`,
+`...advance_max_dep_fanout`, and
+`...advance_duplicate_update_entries`, plus the opt-in map arrays
+`group -> advance producer column -> (run, U position)`. Correctness passed
+`cmake --build build -j2`, `git diff --check`, `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_ADVANCE_MAP=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`. The focused descriptor run
+`build/kls_alg5_advance_map_gap5_t4_r1_ref3_timeout120.jsonl` exposes a large
+shared pre-prefix advance target: the two large ASIC rows have about `70%`
+duplicate advance producer occurrences inside their retained payoff groups
+(`137,236/190,994` on `ASIC_320ks` and `132,537/194,219` on `ASIC_320k`). This
+fills the descriptor gap left by the row-slot plan; the remaining implementation
+gap is the actual grouped advance executor that consumes this producer map.
 
 The EGraph prefactor path now has the corresponding guarded supernode-shaped
 prefactor slice when `KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1` is explicitly

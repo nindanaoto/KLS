@@ -202,6 +202,60 @@ static int require_algorithm5_suffix_sharing_stats(const kls_stats *stats,
   return 1;
 }
 
+static int require_algorithm5_advance_sharing_stats(const kls_stats *stats,
+                                                    const char *what) {
+  if (stats == NULL ||
+      stats->refactor_supernode_algorithm5_payoff_group_advance_unique_deps <
+        0 ||
+      stats->refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps <
+        0 ||
+      stats->refactor_supernode_algorithm5_payoff_group_advance_shared_deps <
+        0 ||
+      stats->refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout <
+        0 ||
+      stats
+          ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries <
+        0) {
+    fprintf(stderr, "negative Algorithm 5 advance sharing stats for %s\n",
+            what);
+    return 0;
+  }
+
+  const int64_t advance_deps =
+    stats->refactor_supernode_algorithm5_payoff_group_advance_deps;
+  const int64_t unique_deps =
+    stats->refactor_supernode_algorithm5_payoff_group_advance_unique_deps;
+  const int64_t duplicate_deps =
+    stats->refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps;
+  const int64_t shared_deps =
+    stats->refactor_supernode_algorithm5_payoff_group_advance_shared_deps;
+  const int64_t max_fanout =
+    stats->refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout;
+  const int64_t duplicate_update_entries =
+    stats
+      ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries;
+  if (advance_deps < 0 ||
+      unique_deps > advance_deps ||
+      duplicate_deps > advance_deps ||
+      unique_deps > INT64_MAX - duplicate_deps ||
+      unique_deps + duplicate_deps != advance_deps ||
+      shared_deps > unique_deps ||
+      (advance_deps == 0 &&
+       (unique_deps != 0 || duplicate_deps != 0 || shared_deps != 0 ||
+        max_fanout != 0 || duplicate_update_entries != 0)) ||
+      (duplicate_deps > 0 && max_fanout < 2)) {
+    fprintf(stderr,
+            "inconsistent Algorithm 5 advance sharing stats for %s:"
+            " advance=%" PRId64 ", unique=%" PRId64
+            ", duplicate=%" PRId64 ", shared=%" PRId64
+            ", max_fanout=%" PRId64 ", duplicate_updates=%" PRId64 "\n",
+            what, advance_deps, unique_deps, duplicate_deps, shared_deps,
+            max_fanout, duplicate_update_entries);
+    return 0;
+  }
+  return 1;
+}
+
 static int require_pivoting_tail_plan(const kls_stats *stats,
                                       const char *what) {
   if (stats == NULL || stats->fast_rejected_pivot < 0 ||
@@ -6192,6 +6246,13 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       ? strdup(saved_algorithm5_suffix_map_value) : NULL;
   const int had_algorithm5_suffix_map =
     saved_algorithm5_suffix_map_value != NULL;
+  const char *saved_algorithm5_advance_map_value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_ADVANCE_MAP");
+  char *saved_algorithm5_advance_map =
+    saved_algorithm5_advance_map_value != NULL
+      ? strdup(saved_algorithm5_advance_map_value) : NULL;
+  const int had_algorithm5_advance_map =
+    saved_algorithm5_advance_map_value != NULL;
   const char *saved_algorithm5_suffix_group_advance_value =
     getenv(
       "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE");
@@ -6484,6 +6545,15 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   }
   if (ok &&
       setenv(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_ADVANCE_MAP",
+        "0", 1) != 0) {
+    perror(
+      "setenv "
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_ADVANCE_MAP=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv(
         "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE",
         "0", 1) != 0) {
     perror(
@@ -6665,6 +6735,10 @@ static int test_egraph_cached_supernode_blocked_update(void) {
                                                      "EGraph blocked")) {
     ok = 0;
   }
+  if (ok && !require_algorithm5_advance_sharing_stats(&stats,
+                                                      "EGraph blocked")) {
+    ok = 0;
+  }
   if (ok &&
       (stats.row_refactor_last_run != 0 ||
        stats.refactor_supernode_candidate_count < 1 ||
@@ -6839,6 +6913,11 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     ok = 0;
   }
   if (!restore_env_value(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_ADVANCE_MAP",
+        had_algorithm5_advance_map, saved_algorithm5_advance_map)) {
+    ok = 0;
+  }
+  if (!restore_env_value(
         "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE",
         had_algorithm5_suffix_group_advance,
         saved_algorithm5_suffix_group_advance)) {
@@ -6963,6 +7042,7 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   free(saved_algorithm5_group_prefix_prep);
   free(saved_algorithm5_group_complete);
   free(saved_algorithm5_suffix_map);
+  free(saved_algorithm5_advance_map);
   free(saved_algorithm5_suffix_group_advance);
   free(saved_algorithm5_suffix_group_window);
   free(saved_algorithm5_suffix_producer_advance);

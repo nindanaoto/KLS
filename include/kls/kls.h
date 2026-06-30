@@ -943,6 +943,12 @@ typedef struct kls_stats {
   int64_t refactor_supernode_algorithm5_payoff_group_advance_deps;
   int64_t refactor_supernode_algorithm5_payoff_group_max_advance_deps;
   int64_t refactor_supernode_algorithm5_payoff_group_zero_advance_runs;
+  int64_t refactor_supernode_algorithm5_payoff_group_advance_unique_deps;
+  int64_t refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps;
+  int64_t refactor_supernode_algorithm5_payoff_group_advance_shared_deps;
+  int64_t refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout;
+  int64_t
+    refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries;
   int64_t refactor_supernode_algorithm5_payoff_group_suffix_deps;
   int64_t refactor_supernode_algorithm5_payoff_group_max_suffix_deps;
   int64_t refactor_supernode_algorithm5_payoff_group_suffix_update_entries;

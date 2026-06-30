@@ -632,6 +632,11 @@ struct kls_solver {
   UF_long *refactor_supernode_algorithm5_payoff_group_advance_deps;
   UF_long *refactor_supernode_algorithm5_payoff_group_advance_slots;
   UF_long *refactor_supernode_algorithm5_payoff_group_advance_cols;
+  UF_long *refactor_supernode_algorithm5_payoff_group_advance_map_ptr;
+  UF_long *refactor_supernode_algorithm5_payoff_group_advance_map_cols;
+  UF_long *refactor_supernode_algorithm5_payoff_group_advance_map_run_ptr;
+  UF_long *refactor_supernode_algorithm5_payoff_group_advance_map_runs;
+  UF_long *refactor_supernode_algorithm5_payoff_group_advance_map_up;
   UF_long *refactor_supernode_algorithm5_payoff_group_current_ptr;
   UF_long *refactor_supernode_algorithm5_payoff_group_currents;
   UF_long *refactor_supernode_algorithm5_payoff_group_current_run_ptr;
@@ -666,6 +671,13 @@ struct kls_solver {
   UF_long refactor_supernode_algorithm5_payoff_group_advance_deps_total;
   UF_long refactor_supernode_algorithm5_payoff_group_max_advance_deps;
   UF_long refactor_supernode_algorithm5_payoff_group_zero_advance_runs;
+  UF_long refactor_supernode_algorithm5_payoff_group_advance_unique_deps_total;
+  UF_long
+    refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps_total;
+  UF_long refactor_supernode_algorithm5_payoff_group_advance_shared_deps_total;
+  UF_long refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout;
+  UF_long
+    refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries_total;
   UF_long refactor_supernode_algorithm5_payoff_group_suffix_deps_total;
   UF_long refactor_supernode_algorithm5_payoff_group_max_suffix_deps;
   UF_long
@@ -840,6 +852,13 @@ struct kls_solver {
   UF_long refactor_supernode_algorithm5_payoff_group_advance_deps_stat;
   UF_long refactor_supernode_algorithm5_payoff_group_max_advance_deps_stat;
   UF_long refactor_supernode_algorithm5_payoff_group_zero_advance_runs_stat;
+  UF_long refactor_supernode_algorithm5_payoff_group_advance_unique_deps_stat;
+  UF_long
+    refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps_stat;
+  UF_long refactor_supernode_algorithm5_payoff_group_advance_shared_deps_stat;
+  UF_long refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout_stat;
+  UF_long
+    refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries_stat;
   UF_long refactor_supernode_algorithm5_payoff_group_suffix_deps_stat;
   UF_long refactor_supernode_algorithm5_payoff_group_max_suffix_deps_stat;
   UF_long
@@ -2262,6 +2281,14 @@ kls_refactor_supernode_algorithm5_payoff_suffix_map_env_enabled(void) {
 }
 
 static int
+kls_refactor_supernode_algorithm5_payoff_advance_map_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_ADVANCE_MAP");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static int
 kls_refactor_supernode_algorithm5_payoff_suffix_group_advance_env_enabled(
   void) {
   const char *value =
@@ -3161,6 +3188,11 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   free(solver->refactor_supernode_algorithm5_payoff_group_advance_deps);
   free(solver->refactor_supernode_algorithm5_payoff_group_advance_slots);
   free(solver->refactor_supernode_algorithm5_payoff_group_advance_cols);
+  free(solver->refactor_supernode_algorithm5_payoff_group_advance_map_ptr);
+  free(solver->refactor_supernode_algorithm5_payoff_group_advance_map_cols);
+  free(solver->refactor_supernode_algorithm5_payoff_group_advance_map_run_ptr);
+  free(solver->refactor_supernode_algorithm5_payoff_group_advance_map_runs);
+  free(solver->refactor_supernode_algorithm5_payoff_group_advance_map_up);
   free(solver->refactor_supernode_algorithm5_payoff_group_current_ptr);
   free(solver->refactor_supernode_algorithm5_payoff_group_currents);
   free(solver->refactor_supernode_algorithm5_payoff_group_current_run_ptr);
@@ -3221,6 +3253,11 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_supernode_algorithm5_payoff_group_advance_deps = NULL;
   solver->refactor_supernode_algorithm5_payoff_group_advance_slots = NULL;
   solver->refactor_supernode_algorithm5_payoff_group_advance_cols = NULL;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_map_ptr = NULL;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_map_cols = NULL;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_map_run_ptr = NULL;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_map_runs = NULL;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_map_up = NULL;
   solver->refactor_supernode_algorithm5_payoff_group_current_ptr = NULL;
   solver->refactor_supernode_algorithm5_payoff_group_currents = NULL;
   solver->refactor_supernode_algorithm5_payoff_group_current_run_ptr = NULL;
@@ -3256,6 +3293,18 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_supernode_algorithm5_payoff_group_advance_deps_total = 0;
   solver->refactor_supernode_algorithm5_payoff_group_max_advance_deps = 0;
   solver->refactor_supernode_algorithm5_payoff_group_zero_advance_runs = 0;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_unique_deps_total =
+    0;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps_total =
+      0;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_shared_deps_total =
+    0;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout =
+    0;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries_total =
+      0;
   solver->refactor_supernode_algorithm5_payoff_group_suffix_deps_total = 0;
   solver->refactor_supernode_algorithm5_payoff_group_max_suffix_deps = 0;
   solver
@@ -3472,6 +3521,21 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
   solver->refactor_supernode_algorithm5_payoff_group_advance_deps_stat = 0;
   solver->refactor_supernode_algorithm5_payoff_group_max_advance_deps_stat = 0;
   solver->refactor_supernode_algorithm5_payoff_group_zero_advance_runs_stat = 0;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_unique_deps_stat =
+      0;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps_stat =
+      0;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_shared_deps_stat =
+      0;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout_stat =
+      0;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries_stat =
+      0;
   solver->refactor_supernode_algorithm5_payoff_group_suffix_deps_stat = 0;
   solver->refactor_supernode_algorithm5_payoff_group_max_suffix_deps_stat = 0;
   solver
@@ -5187,6 +5251,566 @@ fail:
   free(group_suffix_run_ptr);
   free(group_suffix_runs);
   free(group_suffix_up);
+  free(fill_cursor);
+  free(stamp_workspace);
+  free(entry_workspace);
+  return 0;
+}
+
+static int kls_refactor_algorithm5_payoff_run_advance_pattern(
+  const kls_solver *solver,
+  const UF_long *plan_current,
+  const UF_long *plan_dep,
+  UF_long run_count,
+  UF_long run,
+  const UF_long *run_advance_deps,
+  UF_long *advance_deps_out,
+  UF_long *block_start_out,
+  const UF_long **ui_out) {
+  if (advance_deps_out != NULL) {
+    *advance_deps_out = 0u;
+  }
+  if (block_start_out != NULL) {
+    *block_start_out = 0u;
+  }
+  if (ui_out != NULL) {
+    *ui_out = NULL;
+  }
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Ulen == NULL || plan_current == NULL ||
+      plan_dep == NULL || run_advance_deps == NULL ||
+      advance_deps_out == NULL || block_start_out == NULL ||
+      ui_out == NULL) {
+    return 0;
+  }
+
+  UF_long dep_pos = 0u;
+  UF_long block_start = 0u;
+  const UF_long *ui = NULL;
+  if (!kls_supernode_consumer_plan_run_dep_position(
+        solver, plan_current, plan_dep, run_count, run, &dep_pos,
+        &block_start, &ui)) {
+    return 0;
+  }
+  if (run >= run_count || run_advance_deps[run] != dep_pos) {
+    return 0;
+  }
+  const UF_long current = plan_current[run];
+  if (current >= solver->n || dep_pos > solver->numeric->Ulen[current] ||
+      (dep_pos > 0u && ui == NULL)) {
+    return 0;
+  }
+
+  *advance_deps_out = dep_pos;
+  *block_start_out = block_start;
+  *ui_out = ui;
+  return 1;
+}
+
+static int kls_count_refactor_algorithm5_payoff_group_advance_sharing(
+  const kls_solver *solver,
+  const UF_long *plan_current,
+  const UF_long *plan_dep,
+  UF_long run_count,
+  const UF_long *selected_runs,
+  const UF_long *group_ptr,
+  UF_long group_count,
+  const UF_long *run_advance_deps,
+  UF_long *unique_deps_total_out,
+  UF_long *duplicate_deps_total_out,
+  UF_long *shared_deps_total_out,
+  UF_long *max_dep_fanout_out,
+  UF_long *duplicate_update_entries_total_out) {
+  if (unique_deps_total_out != NULL) {
+    *unique_deps_total_out = 0u;
+  }
+  if (duplicate_deps_total_out != NULL) {
+    *duplicate_deps_total_out = 0u;
+  }
+  if (shared_deps_total_out != NULL) {
+    *shared_deps_total_out = 0u;
+  }
+  if (max_dep_fanout_out != NULL) {
+    *max_dep_fanout_out = 0u;
+  }
+  if (duplicate_update_entries_total_out != NULL) {
+    *duplicate_update_entries_total_out = 0u;
+  }
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
+      plan_current == NULL || plan_dep == NULL ||
+      unique_deps_total_out == NULL || duplicate_deps_total_out == NULL ||
+      shared_deps_total_out == NULL || max_dep_fanout_out == NULL ||
+      duplicate_update_entries_total_out == NULL) {
+    return 0;
+  }
+  if (group_count == 0u) {
+    return 1;
+  }
+  if (selected_runs == NULL || group_ptr == NULL ||
+      run_advance_deps == NULL) {
+    return 0;
+  }
+  const size_t n = (size_t)solver->n;
+  if ((UF_long)n != solver->n || n > SIZE_MAX / sizeof(UF_long)) {
+    return 0;
+  }
+  const size_t n_alloc = n > 0u ? n : 1u;
+  UF_long *stamp_workspace =
+    (UF_long *)calloc(n_alloc, sizeof(*stamp_workspace));
+  UF_long *fanout_workspace =
+    (UF_long *)calloc(n_alloc, sizeof(*fanout_workspace));
+  if (stamp_workspace == NULL || fanout_workspace == NULL) {
+    free(stamp_workspace);
+    free(fanout_workspace);
+    return 0;
+  }
+
+  const UF_long selected_run_count = group_ptr[group_count];
+  UF_long stamp_value = 0u;
+  UF_long unique_total = 0u;
+  UF_long duplicate_total = 0u;
+  UF_long shared_total = 0u;
+  UF_long max_fanout = 0u;
+  UF_long duplicate_update_total = 0u;
+  for (UF_long group = 0u; group < group_count; ++group) {
+    const UF_long begin = group_ptr[group];
+    const UF_long end = group_ptr[group + 1u];
+    if (begin > end || end > selected_run_count) {
+      free(stamp_workspace);
+      free(fanout_workspace);
+      return 0;
+    }
+    stamp_value++;
+    if (stamp_value == 0u) {
+      memset(stamp_workspace, 0, n_alloc * sizeof(*stamp_workspace));
+      stamp_value = 1u;
+    }
+    const UF_long stamp = stamp_value;
+    for (UF_long pos = begin; pos < end; ++pos) {
+      const UF_long run = selected_runs[pos];
+      if (run >= run_count) {
+        free(stamp_workspace);
+        free(fanout_workspace);
+        return 0;
+      }
+      UF_long advance_deps = 0u;
+      UF_long block_start = 0u;
+      const UF_long *ui = NULL;
+      if (!kls_refactor_algorithm5_payoff_run_advance_pattern(
+            solver, plan_current, plan_dep, run_count, run, run_advance_deps,
+            &advance_deps, &block_start, &ui)) {
+        free(stamp_workspace);
+        free(fanout_workspace);
+        return 0;
+      }
+      const UF_long current = plan_current[run];
+      for (UF_long up = 0u; up < advance_deps; ++up) {
+        const UF_long local_dep = ui[up];
+        if (local_dep > UF_long_max - block_start) {
+          free(stamp_workspace);
+          free(fanout_workspace);
+          return 0;
+        }
+        const UF_long dep = block_start + local_dep;
+        if (dep >= solver->n || dep >= current ||
+            solver->numeric->Llen[dep] == UF_long_max) {
+          free(stamp_workspace);
+          free(fanout_workspace);
+          return 0;
+        }
+        const UF_long update_entries = 1u + solver->numeric->Llen[dep];
+        if (stamp_workspace[dep] != stamp) {
+          if (unique_total == UF_long_max) {
+            free(stamp_workspace);
+            free(fanout_workspace);
+            return 0;
+          }
+          stamp_workspace[dep] = stamp;
+          fanout_workspace[dep] = 1u;
+          unique_total++;
+          if (max_fanout == 0u) {
+            max_fanout = 1u;
+          }
+          continue;
+        }
+        if (fanout_workspace[dep] == UF_long_max ||
+            duplicate_total == UF_long_max ||
+            duplicate_update_total > UF_long_max - update_entries) {
+          free(stamp_workspace);
+          free(fanout_workspace);
+          return 0;
+        }
+        fanout_workspace[dep]++;
+        duplicate_total++;
+        duplicate_update_total += update_entries;
+        if (fanout_workspace[dep] == 2u) {
+          if (shared_total == UF_long_max) {
+            free(stamp_workspace);
+            free(fanout_workspace);
+            return 0;
+          }
+          shared_total++;
+        }
+        if (fanout_workspace[dep] > max_fanout) {
+          max_fanout = fanout_workspace[dep];
+        }
+      }
+    }
+  }
+
+  free(stamp_workspace);
+  free(fanout_workspace);
+  *unique_deps_total_out = unique_total;
+  *duplicate_deps_total_out = duplicate_total;
+  *shared_deps_total_out = shared_total;
+  *max_dep_fanout_out = max_fanout;
+  *duplicate_update_entries_total_out = duplicate_update_total;
+  return 1;
+}
+
+static int kls_build_refactor_algorithm5_payoff_group_advance_map(
+  const kls_solver *solver,
+  const UF_long *plan_current,
+  const UF_long *plan_dep,
+  UF_long run_count,
+  const UF_long *selected_runs,
+  const UF_long *group_ptr,
+  UF_long group_count,
+  const UF_long *run_advance_deps,
+  UF_long expected_unique_deps_total,
+  UF_long expected_run_refs_total,
+  UF_long **group_advance_map_ptr_out,
+  UF_long **group_advance_map_cols_out,
+  UF_long **group_advance_map_run_ptr_out,
+  UF_long **group_advance_map_runs_out,
+  UF_long **group_advance_map_up_out) {
+  if (group_advance_map_ptr_out != NULL) {
+    *group_advance_map_ptr_out = NULL;
+  }
+  if (group_advance_map_cols_out != NULL) {
+    *group_advance_map_cols_out = NULL;
+  }
+  if (group_advance_map_run_ptr_out != NULL) {
+    *group_advance_map_run_ptr_out = NULL;
+  }
+  if (group_advance_map_runs_out != NULL) {
+    *group_advance_map_runs_out = NULL;
+  }
+  if (group_advance_map_up_out != NULL) {
+    *group_advance_map_up_out = NULL;
+  }
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Ulen == NULL || plan_current == NULL ||
+      plan_dep == NULL || group_advance_map_ptr_out == NULL ||
+      group_advance_map_cols_out == NULL ||
+      group_advance_map_run_ptr_out == NULL ||
+      group_advance_map_runs_out == NULL ||
+      group_advance_map_up_out == NULL) {
+    return 0;
+  }
+  if (group_count == 0u) {
+    return expected_unique_deps_total == 0u && expected_run_refs_total == 0u;
+  }
+  if (selected_runs == NULL || group_ptr == NULL ||
+      run_advance_deps == NULL) {
+    return 0;
+  }
+
+  const size_t group_count_size = (size_t)group_count;
+  const size_t unique_size = (size_t)expected_unique_deps_total;
+  const size_t ref_size = (size_t)expected_run_refs_total;
+  const size_t n = (size_t)solver->n;
+  if ((UF_long)group_count_size != group_count ||
+      (UF_long)unique_size != expected_unique_deps_total ||
+      (UF_long)ref_size != expected_run_refs_total ||
+      (UF_long)n != solver->n ||
+      group_count_size > (SIZE_MAX / sizeof(UF_long)) - 1u ||
+      unique_size > (SIZE_MAX / sizeof(UF_long)) - 1u ||
+      ref_size > SIZE_MAX / sizeof(UF_long) ||
+      n > SIZE_MAX / sizeof(UF_long)) {
+    return 0;
+  }
+  const size_t n_alloc = n > 0u ? n : 1u;
+
+  UF_long *group_advance_map_ptr =
+    (UF_long *)calloc(group_count_size + 1u, sizeof(*group_advance_map_ptr));
+  UF_long *stamp_workspace =
+    (UF_long *)calloc(n_alloc, sizeof(*stamp_workspace));
+  UF_long *entry_workspace =
+    (UF_long *)malloc(n_alloc * sizeof(*entry_workspace));
+  UF_long *group_advance_map_cols = NULL;
+  UF_long *group_advance_map_run_ptr = NULL;
+  UF_long *group_advance_map_runs = NULL;
+  UF_long *group_advance_map_up = NULL;
+  UF_long *fill_cursor = NULL;
+  if (group_advance_map_ptr == NULL || stamp_workspace == NULL ||
+      entry_workspace == NULL) {
+    goto fail;
+  }
+
+  const UF_long selected_run_count = group_ptr[group_count];
+  UF_long stamp_value = 0u;
+  UF_long counted_unique = 0u;
+  UF_long counted_refs = 0u;
+  for (UF_long group = 0u; group < group_count; ++group) {
+    const UF_long begin = group_ptr[group];
+    const UF_long end = group_ptr[group + 1u];
+    if (begin > end || end > selected_run_count) {
+      goto fail;
+    }
+    stamp_value++;
+    if (stamp_value == 0u) {
+      memset(stamp_workspace, 0, n_alloc * sizeof(*stamp_workspace));
+      stamp_value = 1u;
+    }
+    const UF_long stamp = stamp_value;
+    for (UF_long pos = begin; pos < end; ++pos) {
+      const UF_long run = selected_runs[pos];
+      if (run >= run_count) {
+        goto fail;
+      }
+      UF_long advance_deps = 0u;
+      UF_long block_start = 0u;
+      const UF_long *ui = NULL;
+      if (!kls_refactor_algorithm5_payoff_run_advance_pattern(
+            solver, plan_current, plan_dep, run_count, run, run_advance_deps,
+            &advance_deps, &block_start, &ui)) {
+        goto fail;
+      }
+      const UF_long current = plan_current[run];
+      for (UF_long up = 0u; up < advance_deps; ++up) {
+        const UF_long local_dep = ui[up];
+        if (local_dep > UF_long_max - block_start ||
+            counted_refs == UF_long_max) {
+          goto fail;
+        }
+        const UF_long dep = block_start + local_dep;
+        if (dep >= solver->n || dep >= current) {
+          goto fail;
+        }
+        counted_refs++;
+        if (stamp_workspace[dep] != stamp) {
+          if (counted_unique == UF_long_max ||
+              group_advance_map_ptr[group + 1u] == UF_long_max) {
+            goto fail;
+          }
+          stamp_workspace[dep] = stamp;
+          counted_unique++;
+          group_advance_map_ptr[group + 1u]++;
+        }
+      }
+    }
+  }
+  if (counted_unique != expected_unique_deps_total ||
+      counted_refs != expected_run_refs_total) {
+    goto fail;
+  }
+
+  UF_long unique_prefix = 0u;
+  for (UF_long group = 0u; group < group_count; ++group) {
+    const UF_long group_unique = group_advance_map_ptr[group + 1u];
+    if (group_unique > UF_long_max - unique_prefix) {
+      goto fail;
+    }
+    group_advance_map_ptr[group] = unique_prefix;
+    unique_prefix += group_unique;
+    group_advance_map_ptr[group + 1u] = unique_prefix;
+  }
+  if (unique_prefix != expected_unique_deps_total) {
+    goto fail;
+  }
+
+  const size_t run_ptr_size = unique_size + 1u;
+  group_advance_map_cols =
+    unique_size > 0u
+      ? (UF_long *)malloc(unique_size * sizeof(*group_advance_map_cols))
+      : NULL;
+  group_advance_map_run_ptr =
+    (UF_long *)calloc(run_ptr_size, sizeof(*group_advance_map_run_ptr));
+  if ((unique_size > 0u && group_advance_map_cols == NULL) ||
+      group_advance_map_run_ptr == NULL) {
+    goto fail;
+  }
+
+  memset(stamp_workspace, 0, n_alloc * sizeof(*stamp_workspace));
+  stamp_value = 0u;
+  for (UF_long group = 0u; group < group_count; ++group) {
+    const UF_long begin = group_ptr[group];
+    const UF_long end = group_ptr[group + 1u];
+    const UF_long entry_end = group_advance_map_ptr[group + 1u];
+    UF_long entry_cursor = group_advance_map_ptr[group];
+    stamp_value++;
+    if (stamp_value == 0u) {
+      memset(stamp_workspace, 0, n_alloc * sizeof(*stamp_workspace));
+      stamp_value = 1u;
+    }
+    const UF_long stamp = stamp_value;
+    for (UF_long pos = begin; pos < end; ++pos) {
+      const UF_long run = selected_runs[pos];
+      UF_long advance_deps = 0u;
+      UF_long block_start = 0u;
+      const UF_long *ui = NULL;
+      if (!kls_refactor_algorithm5_payoff_run_advance_pattern(
+            solver, plan_current, plan_dep, run_count, run, run_advance_deps,
+            &advance_deps, &block_start, &ui)) {
+        goto fail;
+      }
+      const UF_long current = plan_current[run];
+      for (UF_long up = 0u; up < advance_deps; ++up) {
+        const UF_long local_dep = ui[up];
+        if (local_dep > UF_long_max - block_start) {
+          goto fail;
+        }
+        const UF_long dep = block_start + local_dep;
+        if (dep >= solver->n || dep >= current) {
+          goto fail;
+        }
+        UF_long entry = 0u;
+        if (stamp_workspace[dep] != stamp) {
+          if (entry_cursor >= entry_end || entry_cursor >= unique_prefix) {
+            goto fail;
+          }
+          entry = entry_cursor++;
+          stamp_workspace[dep] = stamp;
+          entry_workspace[dep] = entry;
+          group_advance_map_cols[entry] = dep;
+        } else {
+          entry = entry_workspace[dep];
+          if (entry < group_advance_map_ptr[group] || entry >= entry_end ||
+              group_advance_map_cols[entry] != dep) {
+            goto fail;
+          }
+        }
+        if (entry >= expected_unique_deps_total ||
+            group_advance_map_run_ptr[entry + 1u] == UF_long_max) {
+          goto fail;
+        }
+        group_advance_map_run_ptr[entry + 1u]++;
+      }
+    }
+    if (entry_cursor != entry_end) {
+      goto fail;
+    }
+  }
+
+  UF_long ref_prefix = 0u;
+  for (UF_long entry = 0u; entry < expected_unique_deps_total; ++entry) {
+    const UF_long refs = group_advance_map_run_ptr[entry + 1u];
+    if (refs > UF_long_max - ref_prefix) {
+      goto fail;
+    }
+    group_advance_map_run_ptr[entry] = ref_prefix;
+    ref_prefix += refs;
+    group_advance_map_run_ptr[entry + 1u] = ref_prefix;
+  }
+  if (ref_prefix != expected_run_refs_total) {
+    goto fail;
+  }
+
+  group_advance_map_runs =
+    ref_size > 0u
+      ? (UF_long *)malloc(ref_size * sizeof(*group_advance_map_runs))
+      : NULL;
+  group_advance_map_up =
+    ref_size > 0u
+      ? (UF_long *)malloc(ref_size * sizeof(*group_advance_map_up))
+      : NULL;
+  fill_cursor =
+    unique_size > 0u ? (UF_long *)malloc(unique_size * sizeof(*fill_cursor))
+                     : NULL;
+  if ((ref_size > 0u &&
+       (group_advance_map_runs == NULL || group_advance_map_up == NULL)) ||
+      (unique_size > 0u && fill_cursor == NULL)) {
+    goto fail;
+  }
+  if (unique_size > 0u) {
+    memcpy(fill_cursor, group_advance_map_run_ptr,
+           unique_size * sizeof(*fill_cursor));
+  }
+
+  memset(stamp_workspace, 0, n_alloc * sizeof(*stamp_workspace));
+  stamp_value = 0u;
+  for (UF_long group = 0u; group < group_count; ++group) {
+    const UF_long begin = group_ptr[group];
+    const UF_long end = group_ptr[group + 1u];
+    const UF_long entry_end = group_advance_map_ptr[group + 1u];
+    UF_long entry_cursor = group_advance_map_ptr[group];
+    stamp_value++;
+    if (stamp_value == 0u) {
+      memset(stamp_workspace, 0, n_alloc * sizeof(*stamp_workspace));
+      stamp_value = 1u;
+    }
+    const UF_long stamp = stamp_value;
+    for (UF_long pos = begin; pos < end; ++pos) {
+      const UF_long run = selected_runs[pos];
+      UF_long advance_deps = 0u;
+      UF_long block_start = 0u;
+      const UF_long *ui = NULL;
+      if (!kls_refactor_algorithm5_payoff_run_advance_pattern(
+            solver, plan_current, plan_dep, run_count, run, run_advance_deps,
+            &advance_deps, &block_start, &ui)) {
+        goto fail;
+      }
+      const UF_long current = plan_current[run];
+      for (UF_long up = 0u; up < advance_deps; ++up) {
+        const UF_long local_dep = ui[up];
+        if (local_dep > UF_long_max - block_start) {
+          goto fail;
+        }
+        const UF_long dep = block_start + local_dep;
+        if (dep >= solver->n || dep >= current) {
+          goto fail;
+        }
+        UF_long entry = 0u;
+        if (stamp_workspace[dep] != stamp) {
+          if (entry_cursor >= entry_end) {
+            goto fail;
+          }
+          entry = entry_cursor++;
+          stamp_workspace[dep] = stamp;
+          entry_workspace[dep] = entry;
+        } else {
+          entry = entry_workspace[dep];
+          if (entry < group_advance_map_ptr[group] || entry >= entry_end) {
+            goto fail;
+          }
+        }
+        if (entry >= expected_unique_deps_total ||
+            fill_cursor[entry] >= group_advance_map_run_ptr[entry + 1u]) {
+          goto fail;
+        }
+        const UF_long dst = fill_cursor[entry]++;
+        group_advance_map_runs[dst] = run;
+        group_advance_map_up[dst] = up;
+      }
+    }
+    if (entry_cursor != entry_end) {
+      goto fail;
+    }
+  }
+  for (UF_long entry = 0u; entry < expected_unique_deps_total; ++entry) {
+    if (fill_cursor[entry] != group_advance_map_run_ptr[entry + 1u]) {
+      goto fail;
+    }
+  }
+
+  free(stamp_workspace);
+  free(entry_workspace);
+  free(fill_cursor);
+  *group_advance_map_ptr_out = group_advance_map_ptr;
+  *group_advance_map_cols_out = group_advance_map_cols;
+  *group_advance_map_run_ptr_out = group_advance_map_run_ptr;
+  *group_advance_map_runs_out = group_advance_map_runs;
+  *group_advance_map_up_out = group_advance_map_up;
+  return 1;
+
+fail:
+  free(group_advance_map_ptr);
+  free(group_advance_map_cols);
+  free(group_advance_map_run_ptr);
+  free(group_advance_map_runs);
+  free(group_advance_map_up);
   free(fill_cursor);
   free(stamp_workspace);
   free(entry_workspace);
@@ -9487,6 +10111,11 @@ static int kls_build_refactor_supernode_consumer_plan(
   UF_long *algorithm5_payoff_group_advance_deps = NULL;
   UF_long *algorithm5_payoff_group_advance_slots = NULL;
   UF_long *algorithm5_payoff_group_advance_cols = NULL;
+  UF_long *algorithm5_payoff_group_advance_map_ptr = NULL;
+  UF_long *algorithm5_payoff_group_advance_map_cols = NULL;
+  UF_long *algorithm5_payoff_group_advance_map_run_ptr = NULL;
+  UF_long *algorithm5_payoff_group_advance_map_runs = NULL;
+  UF_long *algorithm5_payoff_group_advance_map_up = NULL;
   UF_long *algorithm5_payoff_group_current_ptr = NULL;
   UF_long *algorithm5_payoff_group_currents = NULL;
   UF_long *algorithm5_payoff_group_current_run_ptr = NULL;
@@ -9521,6 +10150,11 @@ static int kls_build_refactor_supernode_consumer_plan(
   UF_long algorithm5_payoff_group_advance_deps_total = 0u;
   UF_long algorithm5_payoff_group_max_advance_deps = 0u;
   UF_long algorithm5_payoff_group_zero_advance_runs = 0u;
+  UF_long algorithm5_payoff_group_advance_unique_deps_total = 0u;
+  UF_long algorithm5_payoff_group_advance_duplicate_deps_total = 0u;
+  UF_long algorithm5_payoff_group_advance_shared_deps_total = 0u;
+  UF_long algorithm5_payoff_group_advance_max_dep_fanout = 0u;
+  UF_long algorithm5_payoff_group_advance_duplicate_update_entries_total = 0u;
   UF_long algorithm5_payoff_group_suffix_deps_total = 0u;
   UF_long algorithm5_payoff_group_max_suffix_deps = 0u;
   UF_long algorithm5_payoff_group_suffix_update_entries_total = 0u;
@@ -10081,6 +10715,7 @@ static int kls_build_refactor_supernode_consumer_plan(
     kls_refactor_supernode_algorithm5_payoff_group_prefix_prep_env_enabled() ||
     kls_refactor_supernode_algorithm5_payoff_direct_prefix_prep_env_enabled() ||
     kls_refactor_supernode_algorithm5_payoff_suffix_advance_env_enabled() ||
+    kls_refactor_supernode_algorithm5_payoff_advance_map_env_enabled() ||
     kls_refactor_supernode_algorithm5_payoff_suffix_map_env_enabled() ||
     kls_refactor_supernode_algorithm5_payoff_suffix_group_advance_env_enabled() ||
     kls_refactor_supernode_algorithm5_payoff_suffix_group_window_env_enabled() ||
@@ -10206,7 +10841,17 @@ static int kls_build_refactor_supernode_consumer_plan(
     const UF_long algorithm5_payoff_selected_run_count =
       algorithm5_payoff_group_count > 0u
         ? algorithm5_payoff_group_ptr[algorithm5_payoff_group_count] : 0u;
-    if (!kls_count_refactor_algorithm5_payoff_group_suffix_sharing(
+    if (!kls_count_refactor_algorithm5_payoff_group_advance_sharing(
+          solver, plan_current, plan_dep, count_ctx.run_count,
+          algorithm5_payoff_runs, algorithm5_payoff_group_ptr,
+          algorithm5_payoff_group_count,
+          algorithm5_payoff_run_advance_deps,
+          &algorithm5_payoff_group_advance_unique_deps_total,
+          &algorithm5_payoff_group_advance_duplicate_deps_total,
+          &algorithm5_payoff_group_advance_shared_deps_total,
+          &algorithm5_payoff_group_advance_max_dep_fanout,
+          &algorithm5_payoff_group_advance_duplicate_update_entries_total) ||
+        !kls_count_refactor_algorithm5_payoff_group_suffix_sharing(
           solver, plan_current, plan_dep, count_ctx.run_count,
           algorithm5_payoff_runs, algorithm5_payoff_group_ptr,
           algorithm5_payoff_group_count,
@@ -10456,6 +11101,88 @@ static int kls_build_refactor_supernode_consumer_plan(
         shape_group_panel_offset, shape_group_rows);
       return 0;
     }
+    if (kls_refactor_supernode_algorithm5_payoff_advance_map_env_enabled() &&
+        !kls_build_refactor_algorithm5_payoff_group_advance_map(
+          solver, plan_current, plan_dep, count_ctx.run_count,
+          algorithm5_payoff_runs, algorithm5_payoff_group_ptr,
+          algorithm5_payoff_group_count,
+          algorithm5_payoff_run_advance_deps,
+          algorithm5_payoff_group_advance_unique_deps_total,
+          algorithm5_payoff_group_advance_deps_total,
+          &algorithm5_payoff_group_advance_map_ptr,
+          &algorithm5_payoff_group_advance_map_cols,
+          &algorithm5_payoff_group_advance_map_run_ptr,
+          &algorithm5_payoff_group_advance_map_runs,
+          &algorithm5_payoff_group_advance_map_up)) {
+      free(panel_run_count);
+      free(panel_run_rows);
+      free(panel_small_run_count);
+      free(panel_small_run_rows);
+      free(column_run_count);
+      free(plan_ptr);
+      free(column_ptr);
+      free(plan_current);
+      free(plan_dep);
+      free(plan_rows);
+      free(plan_panel_start);
+      free(plan_panel_offset);
+      free(plan_dep_pos);
+      free(plan_block_start);
+      free(column_runs);
+      free(cursor);
+      free(column_cursor);
+      free(algorithm5_payoff_panel_ptr);
+      free(algorithm5_payoff_runs);
+      free(algorithm5_payoff_group_ptr);
+      free(algorithm5_payoff_group_panel_start);
+      free(algorithm5_payoff_group_prefix_end);
+      free(algorithm5_payoff_trigger_ptr);
+      free(algorithm5_payoff_trigger_groups);
+      free(algorithm5_payoff_run_group);
+      free(algorithm5_payoff_run_group_pos);
+      free(algorithm5_payoff_run_current_pos);
+      free(algorithm5_payoff_run_advance_deps);
+      free(algorithm5_payoff_run_advance_ptr);
+      free(algorithm5_payoff_run_advance_slots);
+      free(algorithm5_payoff_run_advance_slot_ptr);
+      free(algorithm5_payoff_run_prefix_rows);
+      free(algorithm5_payoff_run_target_entries);
+      free(algorithm5_payoff_run_target_ptr);
+      free(algorithm5_payoff_run_target_slots);
+      free(algorithm5_payoff_run_target_slot_ptr);
+      free(algorithm5_payoff_group_prefix_rows);
+      free(algorithm5_payoff_group_max_run_rows);
+      free(algorithm5_payoff_group_pattern_width);
+      free(algorithm5_payoff_group_target_entries);
+      free(algorithm5_payoff_group_target_slots);
+      free(algorithm5_payoff_group_target_cols);
+      free(algorithm5_payoff_group_advance_deps);
+      free(algorithm5_payoff_group_advance_slots);
+      free(algorithm5_payoff_group_advance_cols);
+      free(algorithm5_payoff_group_advance_map_ptr);
+      free(algorithm5_payoff_group_advance_map_cols);
+      free(algorithm5_payoff_group_advance_map_run_ptr);
+      free(algorithm5_payoff_group_advance_map_runs);
+      free(algorithm5_payoff_group_advance_map_up);
+      free(algorithm5_payoff_group_current_ptr);
+      free(algorithm5_payoff_group_currents);
+      free(algorithm5_payoff_group_current_run_ptr);
+      free(algorithm5_payoff_group_current_runs);
+      free(algorithm5_payoff_group_current_workspace_ptr);
+      free(algorithm5_payoff_group_workspace_rows);
+      free(algorithm5_payoff_current_state_ptr);
+      free(algorithm5_payoff_current_state_rows);
+      free(algorithm5_payoff_group_suffix_ptr);
+      free(algorithm5_payoff_group_suffix_cols);
+      free(algorithm5_payoff_group_suffix_run_ptr);
+      free(algorithm5_payoff_group_suffix_runs);
+      free(algorithm5_payoff_group_suffix_up);
+      free(algorithm5_payoff_run_selected);
+      kls_free_supernode_consumer_plan_shape_groups(
+        shape_group_ptr, shape_group_runs, shape_group_panel_start,
+        shape_group_panel_offset, shape_group_rows);
+      return 0;
+    }
   }
 
   free(panel_run_count);
@@ -10542,6 +11269,16 @@ static int kls_build_refactor_supernode_consumer_plan(
     algorithm5_payoff_group_advance_slots;
   solver->refactor_supernode_algorithm5_payoff_group_advance_cols =
     algorithm5_payoff_group_advance_cols;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_map_ptr =
+    algorithm5_payoff_group_advance_map_ptr;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_map_cols =
+    algorithm5_payoff_group_advance_map_cols;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_map_run_ptr =
+    algorithm5_payoff_group_advance_map_run_ptr;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_map_runs =
+    algorithm5_payoff_group_advance_map_runs;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_map_up =
+    algorithm5_payoff_group_advance_map_up;
   solver->refactor_supernode_algorithm5_payoff_group_current_ptr =
     algorithm5_payoff_group_current_ptr;
   solver->refactor_supernode_algorithm5_payoff_group_currents =
@@ -10610,6 +11347,18 @@ static int kls_build_refactor_supernode_consumer_plan(
     algorithm5_payoff_group_max_advance_deps;
   solver->refactor_supernode_algorithm5_payoff_group_zero_advance_runs =
     algorithm5_payoff_group_zero_advance_runs;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_unique_deps_total =
+    algorithm5_payoff_group_advance_unique_deps_total;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps_total =
+      algorithm5_payoff_group_advance_duplicate_deps_total;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_shared_deps_total =
+    algorithm5_payoff_group_advance_shared_deps_total;
+  solver->refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout =
+    algorithm5_payoff_group_advance_max_dep_fanout;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries_total =
+      algorithm5_payoff_group_advance_duplicate_update_entries_total;
   solver->refactor_supernode_algorithm5_payoff_group_suffix_deps_total =
     algorithm5_payoff_group_suffix_deps_total;
   solver->refactor_supernode_algorithm5_payoff_group_max_suffix_deps =
@@ -10896,6 +11645,25 @@ static int kls_build_refactor_supernode_consumer_plan(
     solver->refactor_supernode_algorithm5_payoff_group_max_advance_deps;
   solver->refactor_supernode_algorithm5_payoff_group_zero_advance_runs_stat =
     solver->refactor_supernode_algorithm5_payoff_group_zero_advance_runs;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_unique_deps_stat =
+      solver
+        ->refactor_supernode_algorithm5_payoff_group_advance_unique_deps_total;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps_stat =
+      solver
+        ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps_total;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_shared_deps_stat =
+      solver
+        ->refactor_supernode_algorithm5_payoff_group_advance_shared_deps_total;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout_stat =
+      solver->refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout;
+  solver
+    ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries_stat =
+      solver
+        ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries_total;
   solver->refactor_supernode_algorithm5_payoff_group_suffix_deps_stat =
     solver->refactor_supernode_algorithm5_payoff_group_suffix_deps_total;
   solver->refactor_supernode_algorithm5_payoff_group_max_suffix_deps_stat =
@@ -25282,6 +26050,26 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.refactor_supernode_algorithm5_payoff_group_zero_advance_runs =
     (int64_t)solver
       ->refactor_supernode_algorithm5_payoff_group_zero_advance_runs_stat;
+  solver->stats
+    .refactor_supernode_algorithm5_payoff_group_advance_unique_deps =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_payoff_group_advance_unique_deps_stat;
+  solver->stats
+    .refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps_stat;
+  solver->stats
+    .refactor_supernode_algorithm5_payoff_group_advance_shared_deps =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_payoff_group_advance_shared_deps_stat;
+  solver->stats
+    .refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout_stat;
+  solver->stats
+    .refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries =
+      (int64_t)solver
+        ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries_stat;
   solver->stats.refactor_supernode_algorithm5_payoff_group_suffix_deps =
     (int64_t)solver
       ->refactor_supernode_algorithm5_payoff_group_suffix_deps_stat;
@@ -70083,6 +70871,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     kls_refactor_supernode_algorithm5_payoff_suffix_group_window_env_enabled();
   const int algorithm5_payoff_suffix_producer_advance =
     kls_refactor_supernode_algorithm5_payoff_suffix_producer_advance_env_enabled();
+  const int algorithm5_payoff_advance_map =
+    kls_refactor_supernode_algorithm5_payoff_advance_map_env_enabled();
   const int algorithm5_payoff_suffix_map =
     kls_refactor_supernode_algorithm5_payoff_suffix_map_env_enabled() ||
     algorithm5_payoff_suffix_group_advance ||
@@ -70144,6 +70934,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     algorithm5_payoff_group_prefix_prep ||
     algorithm5_payoff_workspace ||
     algorithm5_payoff_suffix_advance ||
+    algorithm5_payoff_advance_map ||
     algorithm5_payoff_suffix_map ||
     algorithm5_payoff_suffix_group_advance ||
     algorithm5_payoff_suffix_producer_advance ||
@@ -70190,8 +70981,24 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       solver->refactor_supernode_algorithm5_payoff_group_suffix_cols != NULL) &&
      (solver->refactor_supernode_algorithm5_payoff_group_suffix_deps_total ==
         0u ||
-      (solver->refactor_supernode_algorithm5_payoff_group_suffix_runs != NULL &&
-       solver->refactor_supernode_algorithm5_payoff_group_suffix_up != NULL)));
+	      (solver->refactor_supernode_algorithm5_payoff_group_suffix_runs != NULL &&
+	       solver->refactor_supernode_algorithm5_payoff_group_suffix_up != NULL)));
+  const int algorithm5_payoff_advance_map_ready =
+    !algorithm5_payoff_advance_map ||
+    solver->refactor_supernode_algorithm5_payoff_group_count == 0u ||
+    (solver->refactor_supernode_algorithm5_payoff_group_advance_map_ptr != NULL &&
+     solver->refactor_supernode_algorithm5_payoff_group_advance_map_run_ptr !=
+       NULL &&
+     (solver
+        ->refactor_supernode_algorithm5_payoff_group_advance_unique_deps_total ==
+        0u ||
+      solver->refactor_supernode_algorithm5_payoff_group_advance_map_cols != NULL) &&
+     (solver->refactor_supernode_algorithm5_payoff_group_advance_deps_total ==
+        0u ||
+      (solver
+         ->refactor_supernode_algorithm5_payoff_group_advance_map_runs != NULL &&
+       solver->refactor_supernode_algorithm5_payoff_group_advance_map_up !=
+         NULL)));
   if (solver->refactor_level_ptr != NULL &&
       solver->refactor_supernode_pipeline_end != NULL &&
       (!need_pipeline_ready_graph ||
@@ -70273,7 +71080,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
              solver
                ->refactor_supernode_algorithm5_payoff_current_state_rows !=
                NULL) &&
-            algorithm5_payoff_suffix_map_ready)))))) &&
+	            algorithm5_payoff_suffix_map_ready &&
+	            algorithm5_payoff_advance_map_ready)))))) &&
       (!record_stream_stats ||
        solver->refactor_stream_stats_built) &&
       (!need_level_pos || solver->refactor_level_pos != NULL) &&

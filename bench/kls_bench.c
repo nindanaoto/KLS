@@ -2583,6 +2583,26 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_payoff_runtime_workspace_rows,
            stats.refactor_supernode_algorithm5_payoff_runtime_target_slots,
            stats.refactor_supernode_algorithm5_payoff_runtime_current_count);
+    printf(",\"refactor_supernode_algorithm5_payoff_group_advance_unique_deps\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_advance_shared_deps\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries\":%"
+           PRId64,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_advance_unique_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_advance_shared_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries);
     printf(",\"refactor_supernode_algorithm5_payoff_group_suffix_deps\":%"
            PRId64
            ",\"refactor_supernode_algorithm5_payoff_group_max_suffix_deps\":%"
@@ -3788,6 +3808,8 @@ int main(int argc, char **argv) {
            " currents %" PRId64 "/%" PRId64 "/%" PRId64
            " workspace %" PRId64 "/%" PRId64
            " advance %" PRId64 "/%" PRId64 "/%" PRId64
+           " advance share %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+           "/%" PRId64
            " suffix %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            " suffix share %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64
@@ -3956,6 +3978,16 @@ int main(int argc, char **argv) {
              .refactor_supernode_algorithm5_payoff_group_max_advance_deps,
            stats
              .refactor_supernode_algorithm5_payoff_group_zero_advance_runs,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_advance_unique_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_advance_shared_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries,
            stats.refactor_supernode_algorithm5_payoff_group_suffix_deps,
            stats
              .refactor_supernode_algorithm5_payoff_group_max_suffix_deps,
