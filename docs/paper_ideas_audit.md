@@ -49,10 +49,12 @@ private retained-state copy and commits U, diagonal, and L values only after the
 pivot is nonzero. The sparse-delta follow-up
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_DELTA=1`
 uses the same direct-complete setup but replaces the private copy with a sparse
-delta accumulator over the retained row map. These probes prove the direct
-arithmetic is correct and make the copy cost measurable, but they deliberately
-remain opt-in: the next lead cause is still live grouped current workspaces
-rather than BLAS thresholds.
+delta accumulator over the retained row map. The direct-complete remaining
+stream now validates dependencies and retained-state rows as it computes into
+private/local state, instead of pre-scanning the whole suffix and then scanning
+it again. These probes prove the direct arithmetic is correct and make the copy
+cost measurable, but they deliberately remain opt-in: the next lead cause is
+still live grouped current workspaces rather than BLAS thresholds.
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_PREP=1 ./build/kls_smoke`,
@@ -130,6 +132,20 @@ the sole large missing part: after copy removal, the hard rows still stream
 per-current path. The paper-level fix must therefore be a grouped owner that
 advances multiple current workspaces and their remaining dependency stream
 together, not just a lower-copy scalar direct-complete path.
+
+The single-pass direct-complete follow-up
+`build/kls_direct_prefix_complete_single_pass_gap5_t4_r1_ref3_timeout120.jsonl`
+removed that duplicate suffix validation pass and completed the same five rows
+with `2.3314s` SPICE-cycle geomean. `ASIC_320ks` improved to `16.5794s`,
+`ASIC_320k` to `19.4593s`, and `ASIC_100ks` to `10.3019s` while preserving the
+same direct-complete run/dependency surface. The sparse-delta single-pass A/B
+`build/kls_direct_prefix_sparse_delta_single_pass_gap5_t4_r1_ref3_timeout120.jsonl`
+also improved to `2.4101s` geomean with zero copied retained rows. This proves
+the previous direct-complete loss was partly an executor artifact, not just
+Algorithm 5 arithmetic. It still does not beat the current default top-five run
+`build/kls_current_default_gap5_t4_r1_ref3_timeout120.jsonl` at `1.4629s`, so
+the remaining paper gap is still broader grouped post-prefix execution rather
+than promoting direct-complete as-is.
 
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`, and

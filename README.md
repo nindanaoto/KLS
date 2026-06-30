@@ -1082,13 +1082,16 @@ computes the remaining U stream, pivot, and L column from a private
 retained-state copy and only commits factor storage after the pivot is nonzero.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_DELTA=1`
 is the same direct-complete setup with a sparse retained-state delta accumulator
-instead of the private copy. Focused CKTSO-gap checks solve correctly but reject
-both as defaults: terminal/private direct-complete measured `3.1603s` SPICE-cycle
-geomean on the five-row slice, while sparse delta removed retained-row copy but
-still measured `3.1847s`, worse than sparse restore at `2.2665s`. This confirms
-the next paper-level gap is a grouped live Algorithm 5 workspace that advances
-the remaining dependency stream for multiple current columns, not BLAS
-thresholding or retained-row copy alone.
+instead of the private copy. The direct-complete suffix is now single-pass:
+dependency readiness and retained-row mapping are checked while computing into
+private/local state, so the suffix is not scanned once for validation and again
+for arithmetic. Focused CKTSO-gap checks solve correctly but reject both as
+defaults: single-pass terminal/private direct-complete measured `2.3314s`
+SPICE-cycle geomean on the five-row slice, while sparse delta removed
+retained-row copy but still measured `2.4101s`. The current default on the same
+source measured `1.4629s`, so the next paper-level gap is a grouped live
+Algorithm 5 workspace that advances the remaining dependency stream for
+multiple current columns, not BLAS thresholding or retained-row copy alone.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and

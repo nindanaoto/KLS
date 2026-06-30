@@ -54986,49 +54986,6 @@ kls_egraph_refactor_try_complete_algorithm5_payoff_direct_prefix_final_state_btf
     if (!stream_ok) {
       continue;
     }
-    for (UF_long p = prefix_end; p < ucol_len; ++p) {
-      const UF_long row = kls_algorithm5_payoff_u_index_at(ui, ui32, p);
-      if (row >= current_local || row > UF_long_max - k1 ||
-          k1 + row >= solver->n ||
-          !kls_algorithm5_payoff_state_value_position(
-            &state_item, row, state_stamp_value, state_stamp, state_pos,
-            &tmp_pos)) {
-        stream_ok = 0;
-        break;
-      }
-      const UF_long dep_global = k1 + row;
-      const UF_long lcol_len = llen[row];
-      const int32_t *rows32 =
-        solver->refactor_l_indices32 != NULL
-          ? solver->refactor_l_indices32[dep_global] : NULL;
-      const UF_long *rows =
-        rows32 == NULL && l_indices != NULL ? l_indices[dep_global] : NULL;
-      const double *lx = l_values[dep_global];
-      if (lcol_len > 0u && (lx == NULL || (rows32 == NULL && rows == NULL))) {
-        stream_ok = 0;
-        break;
-      }
-      for (UF_long q = 0u; q < lcol_len; ++q) {
-        const UF_long lrow = rows32 != NULL ? (UF_long)rows32[q] : rows[q];
-        if (!kls_algorithm5_payoff_state_value_position(
-              &state_item, lrow, state_stamp_value, state_stamp, state_pos,
-              &tmp_pos)) {
-          stream_ok = 0;
-          break;
-        }
-      }
-      if (!stream_ok) {
-        break;
-      }
-      if (wait_for_dependencies) {
-        if (!kls_egraph_refactor_wait_done(shared, dep_global)) {
-          return -1;
-        }
-      } else if (!kls_egraph_refactor_dependency_done_now(shared, dep_global)) {
-        stream_ok = 0;
-        break;
-      }
-    }
     if (!stream_ok ||
         !kls_algorithm5_payoff_state_value_position(
           &state_item, current_local, state_stamp_value, state_stamp,
@@ -55173,11 +55130,28 @@ kls_egraph_refactor_try_complete_algorithm5_payoff_direct_prefix_final_state_btf
       for (UF_long p = prefix_end; p < ucol_len; ++p) {
         const UF_long dep_local2 =
           kls_algorithm5_payoff_u_index_at(ui, ui32, p);
+        if (dep_local2 >= current_local || dep_local2 > UF_long_max - k1 ||
+            k1 + dep_local2 >= solver->n) {
+          stream_ok = 0;
+          break;
+        }
         const UF_long dep_global = k1 + dep_local2;
         UF_long dep_pos = 0u;
-        (void)kls_algorithm5_payoff_state_value_position(
-          &state_item, dep_local2, state_stamp_value, state_stamp, state_pos,
-          &dep_pos);
+        if (!kls_algorithm5_payoff_state_value_position(
+              &state_item, dep_local2, state_stamp_value, state_stamp,
+              state_pos, &dep_pos)) {
+          stream_ok = 0;
+          break;
+        }
+        if (wait_for_dependencies) {
+          if (!kls_egraph_refactor_wait_done(shared, dep_global)) {
+            return -1;
+          }
+        } else if (!kls_egraph_refactor_dependency_done_now(shared,
+                                                           dep_global)) {
+          stream_ok = 0;
+          break;
+        }
         const double ujk = state_work[dep_pos];
         state_work[dep_pos] = 0.0;
         u_work[p] = ujk;
@@ -55191,14 +55165,28 @@ kls_egraph_refactor_try_complete_algorithm5_payoff_direct_prefix_final_state_btf
         const UF_long *rows =
           rows32 == NULL && l_indices != NULL ? l_indices[dep_global] : NULL;
         const double *lx = l_values[dep_global];
+        if (lcol_len > 0u &&
+            (lx == NULL || (rows32 == NULL && rows == NULL))) {
+          stream_ok = 0;
+          break;
+        }
         for (UF_long q = 0u; q < lcol_len; ++q) {
           const UF_long row = rows32 != NULL ? (UF_long)rows32[q] : rows[q];
           UF_long row_pos = 0u;
-          (void)kls_algorithm5_payoff_state_value_position(
-            &state_item, row, state_stamp_value, state_stamp, state_pos,
-            &row_pos);
+          if (!kls_algorithm5_payoff_state_value_position(
+                &state_item, row, state_stamp_value, state_stamp, state_pos,
+                &row_pos)) {
+            stream_ok = 0;
+            break;
+          }
           state_work[row_pos] -= ujk * lx[q];
         }
+        if (!stream_ok) {
+          break;
+        }
+      }
+      if (!stream_ok) {
+        continue;
       }
 
       UF_long pivot_pos = 0u;
@@ -55290,11 +55278,28 @@ kls_egraph_refactor_try_complete_algorithm5_payoff_direct_prefix_final_state_btf
     for (UF_long p = prefix_end; p < ucol_len; ++p) {
       const UF_long dep_local2 =
         kls_algorithm5_payoff_u_index_at(ui, ui32, p);
+      if (dep_local2 >= current_local || dep_local2 > UF_long_max - k1 ||
+          k1 + dep_local2 >= solver->n) {
+        stream_ok = 0;
+        break;
+      }
       const UF_long dep_global = k1 + dep_local2;
       UF_long dep_pos = 0u;
-      (void)kls_algorithm5_payoff_state_value_position(
-        &state_item, dep_local2, state_stamp_value, state_stamp, state_pos,
-        &dep_pos);
+      if (!kls_algorithm5_payoff_state_value_position(
+            &state_item, dep_local2, state_stamp_value, state_stamp,
+            state_pos, &dep_pos)) {
+        stream_ok = 0;
+        break;
+      }
+      if (wait_for_dependencies) {
+        if (!kls_egraph_refactor_wait_done(shared, dep_global)) {
+          return -1;
+        }
+      } else if (!kls_egraph_refactor_dependency_done_now(shared,
+                                                         dep_global)) {
+        stream_ok = 0;
+        break;
+      }
       const double ujk = kls_algorithm5_payoff_state_with_delta(
         &state_item, delta_mark, delta_values, dep_pos);
       u_work[p] = ujk;
@@ -55308,15 +55313,29 @@ kls_egraph_refactor_try_complete_algorithm5_payoff_direct_prefix_final_state_btf
       const UF_long *rows =
         rows32 == NULL && l_indices != NULL ? l_indices[dep_global] : NULL;
       const double *lx = l_values[dep_global];
+      if (lcol_len > 0u &&
+          (lx == NULL || (rows32 == NULL && rows == NULL))) {
+        stream_ok = 0;
+        break;
+      }
       for (UF_long q = 0u; q < lcol_len; ++q) {
         const UF_long row = rows32 != NULL ? (UF_long)rows32[q] : rows[q];
         UF_long row_pos = 0u;
-        (void)kls_algorithm5_payoff_state_value_position(
-          &state_item, row, state_stamp_value, state_stamp, state_pos,
-          &row_pos);
+        if (!kls_algorithm5_payoff_state_value_position(
+              &state_item, row, state_stamp_value, state_stamp, state_pos,
+              &row_pos)) {
+          stream_ok = 0;
+          break;
+        }
         kls_algorithm5_payoff_add_state_delta(
           delta_mark, delta_values, row_pos, -ujk * lx[q]);
       }
+      if (!stream_ok) {
+        break;
+      }
+    }
+    if (!stream_ok) {
+      continue;
     }
 
     UF_long pivot_pos = 0u;
