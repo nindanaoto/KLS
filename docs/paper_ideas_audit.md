@@ -11968,3 +11968,25 @@ current-state seeding and per-current sparse state update volume; the next
 attempt should avoid materializing both scalar and grouped current states, or
 own a bounded dense producer-panel state instead of hashing sparse rows per
 batch.
+
+The retained Algorithm 5 pre-prefix producer map was tested as the next direct
+refactor fix and rejected before commit. The prototype kept the same grouped
+sparse current-state semantics, but replaced runtime fanout discovery with the
+stored `group_advance_map_*` producer-to-run references. Correctness passed
+(`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_PREP=1
+./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_PREP_HASH=1
+./build/kls_smoke`, and `ctest --test-dir build --output-on-failure`), but the
+focused same-source benchmark regressed:
+`build/kls_alg5_group_advance_map_hash_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `3.0131s` SPICE-cycle geomean, versus `2.4192s` for scalar
+direct-current prep in
+`build/kls_mapchange_scalar_direct_current_gap5_t4_r1_ref3_timeout120.jsonl`
+and `1.4674s` for default in
+`build/kls_mapchange_default_gap5_t4_r1_ref3_timeout120.jsonl`. On
+`ASIC_320ks`, refactor time rose to `0.2877s`, worse than the previous hashed
+grouped run at `0.2400s`. This shows the retained full-group map is the wrong
+runtime granularity: each prefix-trigger batch claims only a small active subset,
+so iterating full symbolic group fanout can add work. The CKTSO/SubtreeLU gap
+therefore remains the active-batch grouped numeric executor described by the
+papers, not merely a faster lookup for the already retained producer map.
