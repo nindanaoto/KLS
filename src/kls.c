@@ -280,9 +280,16 @@ struct kls_solver {
   int32_t **refactor_u_indices32;
   int32_t *refactor_u_indices32_storage;
   double **refactor_u_values;
+  UF_long *refactor_btf_scalar_run_group_ptr;
+  UF_long *refactor_btf_scalar_run_group_dep0;
+  UF_long *refactor_btf_scalar_run_group_max_rows_by_group;
+  UF_long *refactor_btf_scalar_run_group_currents;
+  UF_long *refactor_btf_scalar_run_group_current_up;
+  UF_long *refactor_btf_scalar_run_group_current_rows;
   UF_long refactor_lu_pointer_count;
   int refactor_l_indices_sorted;
   int refactor_l_sorted_enabled;
+  int refactor_btf_scalar_run_group_built;
   UF_long refactor_map_indices32_count;
   UF_long refactor_l_indices32_count;
   UF_long refactor_l_sorted_entries;
@@ -1236,6 +1243,16 @@ struct kls_solver {
   UF_long refactor_btf_scalar_run_exec_rows;
   UF_long refactor_btf_scalar_run_exec_entries;
   UF_long refactor_btf_scalar_run_exec_max_rows;
+  UF_long refactor_btf_scalar_run_group_count;
+  UF_long refactor_btf_scalar_run_group_current_total;
+  UF_long refactor_btf_scalar_run_group_multi_count;
+  UF_long refactor_btf_scalar_run_group_multi_current_total;
+  UF_long refactor_btf_scalar_run_group_rows;
+  UF_long refactor_btf_scalar_run_group_reused_rows;
+  UF_long refactor_btf_scalar_run_group_entries;
+  UF_long refactor_btf_scalar_run_group_reused_entries;
+  UF_long refactor_btf_scalar_run_group_max_currents;
+  UF_long refactor_btf_scalar_run_group_max_rows;
   int refactor_supernode_update_disabled;
   UF_long refactor_supernode_update_disable_count;
   UF_long refactor_last_ready_queue_columns;
@@ -2948,6 +2965,12 @@ static int kls_refactor_btf_scalar_run_stats_env_enabled(void) {
 
 static int kls_refactor_btf_scalar_run_exec_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static int kls_refactor_btf_scalar_run_groups_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUPS");
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -14499,6 +14522,12 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   free(solver->refactor_u_indices32);
   free(solver->refactor_u_indices32_storage);
   free(solver->refactor_u_values);
+  free(solver->refactor_btf_scalar_run_group_ptr);
+  free(solver->refactor_btf_scalar_run_group_dep0);
+  free(solver->refactor_btf_scalar_run_group_max_rows_by_group);
+  free(solver->refactor_btf_scalar_run_group_currents);
+  free(solver->refactor_btf_scalar_run_group_current_up);
+  free(solver->refactor_btf_scalar_run_group_current_rows);
   solver->refactor_l_indices = NULL;
   solver->refactor_l_indices32 = NULL;
   solver->refactor_l_indices32_storage = NULL;
@@ -14513,12 +14542,29 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_u_indices32 = NULL;
   solver->refactor_u_indices32_storage = NULL;
   solver->refactor_u_values = NULL;
+  solver->refactor_btf_scalar_run_group_ptr = NULL;
+  solver->refactor_btf_scalar_run_group_dep0 = NULL;
+  solver->refactor_btf_scalar_run_group_max_rows_by_group = NULL;
+  solver->refactor_btf_scalar_run_group_currents = NULL;
+  solver->refactor_btf_scalar_run_group_current_up = NULL;
+  solver->refactor_btf_scalar_run_group_current_rows = NULL;
   solver->refactor_lu_pointer_count = 0;
   solver->refactor_l_indices_sorted = 0;
   solver->refactor_l_sorted_enabled = 0;
+  solver->refactor_btf_scalar_run_group_built = 0;
   solver->refactor_l_indices32_count = 0;
   solver->refactor_l_sorted_entries = 0;
   solver->refactor_u_indices32_count = 0;
+  solver->refactor_btf_scalar_run_group_count = 0;
+  solver->refactor_btf_scalar_run_group_current_total = 0;
+  solver->refactor_btf_scalar_run_group_multi_count = 0;
+  solver->refactor_btf_scalar_run_group_multi_current_total = 0;
+  solver->refactor_btf_scalar_run_group_rows = 0;
+  solver->refactor_btf_scalar_run_group_reused_rows = 0;
+  solver->refactor_btf_scalar_run_group_entries = 0;
+  solver->refactor_btf_scalar_run_group_reused_entries = 0;
+  solver->refactor_btf_scalar_run_group_max_currents = 0;
+  solver->refactor_btf_scalar_run_group_max_rows = 0;
   solver->refactor_l_index32_enabled = 0;
   solver->refactor_u_index32_enabled = 0;
   solver->refactor_l_pattern_columns = 0;
@@ -28046,6 +28092,28 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_btf_scalar_run_exec_entries;
   solver->stats.refactor_btf_scalar_run_exec_max_rows =
     (int64_t)solver->refactor_btf_scalar_run_exec_max_rows;
+  solver->stats.refactor_btf_scalar_run_group_built =
+    solver->refactor_btf_scalar_run_group_built;
+  solver->stats.refactor_btf_scalar_run_group_count =
+    (int64_t)solver->refactor_btf_scalar_run_group_count;
+  solver->stats.refactor_btf_scalar_run_group_current_total =
+    (int64_t)solver->refactor_btf_scalar_run_group_current_total;
+  solver->stats.refactor_btf_scalar_run_group_multi_count =
+    (int64_t)solver->refactor_btf_scalar_run_group_multi_count;
+  solver->stats.refactor_btf_scalar_run_group_multi_current_total =
+    (int64_t)solver->refactor_btf_scalar_run_group_multi_current_total;
+  solver->stats.refactor_btf_scalar_run_group_rows =
+    (int64_t)solver->refactor_btf_scalar_run_group_rows;
+  solver->stats.refactor_btf_scalar_run_group_reused_rows =
+    (int64_t)solver->refactor_btf_scalar_run_group_reused_rows;
+  solver->stats.refactor_btf_scalar_run_group_entries =
+    (int64_t)solver->refactor_btf_scalar_run_group_entries;
+  solver->stats.refactor_btf_scalar_run_group_reused_entries =
+    (int64_t)solver->refactor_btf_scalar_run_group_reused_entries;
+  solver->stats.refactor_btf_scalar_run_group_max_currents =
+    (int64_t)solver->refactor_btf_scalar_run_group_max_currents;
+  solver->stats.refactor_btf_scalar_run_group_max_rows =
+    (int64_t)solver->refactor_btf_scalar_run_group_max_rows;
   solver->stats.refactor_supernode_cached_probe_disabled =
     solver->refactor_supernode_cached_probe_disabled;
   solver->stats.refactor_supernode_cached_probe_disable_count =
@@ -34565,6 +34633,433 @@ static int kls_ensure_refactor_l_sorted_cache(kls_solver *solver) {
   return 1;
 }
 
+typedef struct kls_btf_scalar_run_group_item {
+  UF_long block;
+  UF_long dep0_global;
+  UF_long current_global;
+  UF_long up;
+  UF_long rows;
+  UF_long entries;
+} kls_btf_scalar_run_group_item;
+
+static int kls_compare_btf_scalar_run_group_item(const void *a,
+                                                 const void *b) {
+  const kls_btf_scalar_run_group_item *ea =
+    (const kls_btf_scalar_run_group_item *)a;
+  const kls_btf_scalar_run_group_item *eb =
+    (const kls_btf_scalar_run_group_item *)b;
+  if (ea->block < eb->block) {
+    return -1;
+  }
+  if (ea->block > eb->block) {
+    return 1;
+  }
+  if (ea->dep0_global < eb->dep0_global) {
+    return -1;
+  }
+  if (ea->dep0_global > eb->dep0_global) {
+    return 1;
+  }
+  if (ea->current_global < eb->current_global) {
+    return -1;
+  }
+  if (ea->current_global > eb->current_global) {
+    return 1;
+  }
+  return (ea->up > eb->up) - (ea->up < eb->up);
+}
+
+static void kls_clear_refactor_btf_scalar_run_group_descriptor(
+  kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->refactor_btf_scalar_run_group_ptr);
+  free(solver->refactor_btf_scalar_run_group_dep0);
+  free(solver->refactor_btf_scalar_run_group_max_rows_by_group);
+  free(solver->refactor_btf_scalar_run_group_currents);
+  free(solver->refactor_btf_scalar_run_group_current_up);
+  free(solver->refactor_btf_scalar_run_group_current_rows);
+  solver->refactor_btf_scalar_run_group_ptr = NULL;
+  solver->refactor_btf_scalar_run_group_dep0 = NULL;
+  solver->refactor_btf_scalar_run_group_max_rows_by_group = NULL;
+  solver->refactor_btf_scalar_run_group_currents = NULL;
+  solver->refactor_btf_scalar_run_group_current_up = NULL;
+  solver->refactor_btf_scalar_run_group_current_rows = NULL;
+  solver->refactor_btf_scalar_run_group_built = 0;
+}
+
+static void kls_reset_refactor_btf_scalar_run_group_stats(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->refactor_btf_scalar_run_group_count = 0;
+  solver->refactor_btf_scalar_run_group_current_total = 0;
+  solver->refactor_btf_scalar_run_group_multi_count = 0;
+  solver->refactor_btf_scalar_run_group_multi_current_total = 0;
+  solver->refactor_btf_scalar_run_group_rows = 0;
+  solver->refactor_btf_scalar_run_group_reused_rows = 0;
+  solver->refactor_btf_scalar_run_group_entries = 0;
+  solver->refactor_btf_scalar_run_group_reused_entries = 0;
+  solver->refactor_btf_scalar_run_group_max_currents = 0;
+  solver->refactor_btf_scalar_run_group_max_rows = 0;
+}
+
+static UF_long kls_btf_scalar_run_structural_len(
+  UF_long start_pos,
+  UF_long ucol_len,
+  const UF_long *ui,
+  const int32_t *ui32,
+  UF_long local_k) {
+  if (start_pos >= ucol_len || (ui == NULL && ui32 == NULL)) {
+    return 0u;
+  }
+  const UF_long dep0 =
+    ui32 != NULL ? (UF_long)ui32[start_pos] : ui[start_pos];
+  if (dep0 >= local_k) {
+    return 0u;
+  }
+  UF_long rows = 1u;
+  while (start_pos + rows < ucol_len &&
+         rows < KLS_BTF_SCALAR_RUN_EXEC_MAX_ROWS) {
+    if (dep0 > UF_long_max - rows) {
+      break;
+    }
+    const UF_long dep =
+      ui32 != NULL ? (UF_long)ui32[start_pos + rows] : ui[start_pos + rows];
+    if (dep != dep0 + rows || dep >= local_k) {
+      break;
+    }
+    rows++;
+  }
+  return rows;
+}
+
+static UF_long kls_btf_scalar_run_l_entries(const kls_solver *solver,
+                                            UF_long dep0_global,
+                                            UF_long rows) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Llen == NULL || dep0_global > solver->n ||
+      rows > solver->n - dep0_global) {
+    return 0u;
+  }
+  UF_long entries = 0u;
+  for (UF_long p = 0u; p < rows; ++p) {
+    const UF_long len = solver->numeric->Llen[dep0_global + p];
+    if (len > UF_long_max - entries) {
+      return UF_long_max;
+    }
+    entries += len;
+  }
+  return entries;
+}
+
+static int kls_build_refactor_btf_scalar_run_groups(kls_solver *solver) {
+  if (!kls_refactor_btf_scalar_run_groups_env_enabled()) {
+    kls_clear_refactor_btf_scalar_run_group_descriptor(solver);
+    kls_reset_refactor_btf_scalar_run_group_stats(solver);
+    return 1;
+  }
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->symbolic->R == NULL || solver->numeric->Ulen == NULL ||
+      solver->numeric->Llen == NULL ||
+      solver->refactor_lu_pointer_count != solver->n ||
+      solver->refactor_u_indices == NULL || solver->refactor_u_values == NULL ||
+      solver->n <= 0) {
+    return 1;
+  }
+  if (solver->refactor_btf_scalar_run_group_built) {
+    return 1;
+  }
+  kls_clear_refactor_btf_scalar_run_group_descriptor(solver);
+  kls_reset_refactor_btf_scalar_run_group_stats(solver);
+
+  UF_long item_count = 0u;
+  for (UF_long k = 0u; k < solver->n; ++k) {
+    UF_long block = 0u;
+    if (solver->symbolic->nblocks != 1u) {
+      if (solver->refactor_col_block == NULL) {
+        return 1;
+      }
+      block = solver->refactor_col_block[k];
+    }
+    if (block >= solver->symbolic->nblocks) {
+      continue;
+    }
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (k < k1 || k >= k2 || k2 <= k1 + 1u) {
+      continue;
+    }
+    const UF_long local_k = k - k1;
+    const UF_long ucol_len = solver->numeric->Ulen[k];
+    const UF_long *ui = solver->refactor_u_indices[k];
+    const int32_t *ui32 =
+      solver->refactor_u_indices32 != NULL
+        ? solver->refactor_u_indices32[k] : NULL;
+    for (UF_long up = 0u; up < ucol_len;) {
+      const UF_long rows =
+        kls_btf_scalar_run_structural_len(up, ucol_len, ui, ui32, local_k);
+      if (rows > 1u) {
+        if (item_count == UF_long_max) {
+          return 1;
+        }
+        item_count++;
+        up += rows;
+      } else {
+        up++;
+      }
+    }
+  }
+  if (item_count == 0u) {
+    solver->refactor_btf_scalar_run_group_built = 1;
+    return 1;
+  }
+  if (item_count > (UF_long)(KLS_MAX_ALLOCATION / sizeof(
+                     kls_btf_scalar_run_group_item))) {
+    return 1;
+  }
+  kls_btf_scalar_run_group_item *items =
+    (kls_btf_scalar_run_group_item *)malloc(
+      (size_t)item_count * sizeof(*items));
+  if (items == NULL) {
+    return 1;
+  }
+
+  UF_long item = 0u;
+  for (UF_long k = 0u; k < solver->n; ++k) {
+    UF_long block = 0u;
+    if (solver->symbolic->nblocks != 1u) {
+      block = solver->refactor_col_block[k];
+    }
+    if (block >= solver->symbolic->nblocks) {
+      continue;
+    }
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    if (k < k1 || k >= k2 || k2 <= k1 + 1u) {
+      continue;
+    }
+    const UF_long local_k = k - k1;
+    const UF_long ucol_len = solver->numeric->Ulen[k];
+    const UF_long *ui = solver->refactor_u_indices[k];
+    const int32_t *ui32 =
+      solver->refactor_u_indices32 != NULL
+        ? solver->refactor_u_indices32[k] : NULL;
+    for (UF_long up = 0u; up < ucol_len;) {
+      const UF_long rows =
+        kls_btf_scalar_run_structural_len(up, ucol_len, ui, ui32, local_k);
+      if (rows > 1u) {
+        if (item >= item_count) {
+          free(items);
+          return 1;
+        }
+        const UF_long dep0 =
+          ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+        const UF_long dep0_global = k1 + dep0;
+        items[item].block = block;
+        items[item].dep0_global = dep0_global;
+        items[item].current_global = k;
+        items[item].up = up;
+        items[item].rows = rows;
+        items[item].entries =
+          kls_btf_scalar_run_l_entries(solver, dep0_global, rows);
+        item++;
+        up += rows;
+      } else {
+        up++;
+      }
+    }
+  }
+  if (item != item_count) {
+    free(items);
+    return 1;
+  }
+
+  qsort(items, (size_t)item_count, sizeof(*items),
+        kls_compare_btf_scalar_run_group_item);
+
+  UF_long group_count = 0u;
+  UF_long multi_count = 0u;
+  UF_long multi_current_total = 0u;
+  UF_long rows_total = 0u;
+  UF_long reused_rows = 0u;
+  UF_long entries_total = 0u;
+  UF_long reused_entries = 0u;
+  UF_long max_currents = 0u;
+  UF_long max_rows = 0u;
+  for (UF_long begin = 0u; begin < item_count;) {
+    UF_long end = begin + 1u;
+    while (end < item_count &&
+           items[end].block == items[begin].block &&
+           items[end].dep0_global == items[begin].dep0_global) {
+      end++;
+    }
+    const UF_long currents = end - begin;
+    UF_long group_rows = 0u;
+    UF_long group_entries = 0u;
+    UF_long group_max_rows = 0u;
+    for (UF_long p = begin; p < end; ++p) {
+      if (items[p].rows > group_max_rows) {
+        group_max_rows = items[p].rows;
+      }
+      if (items[p].rows > UF_long_max - group_rows) {
+        group_rows = UF_long_max;
+      } else {
+        group_rows += items[p].rows;
+      }
+      if (items[p].entries > UF_long_max - group_entries) {
+        group_entries = UF_long_max;
+      } else {
+        group_entries += items[p].entries;
+      }
+    }
+    const UF_long unique_entries =
+      kls_btf_scalar_run_l_entries(
+        solver, items[begin].dep0_global, group_max_rows);
+    group_count++;
+    if (group_rows > UF_long_max - rows_total) {
+      rows_total = UF_long_max;
+    } else {
+      rows_total += group_rows;
+    }
+    if (group_entries > UF_long_max - entries_total) {
+      entries_total = UF_long_max;
+    } else {
+      entries_total += group_entries;
+    }
+    if (currents > max_currents) {
+      max_currents = currents;
+    }
+    if (group_max_rows > max_rows) {
+      max_rows = group_max_rows;
+    }
+    if (currents > 1u) {
+      multi_count++;
+      if (currents > UF_long_max - multi_current_total) {
+        multi_current_total = UF_long_max;
+      } else {
+        multi_current_total += currents;
+      }
+      if (group_rows > group_max_rows) {
+        const UF_long saved_rows = group_rows - group_max_rows;
+        if (saved_rows > UF_long_max - reused_rows) {
+          reused_rows = UF_long_max;
+        } else {
+          reused_rows += saved_rows;
+        }
+      }
+      if (group_entries > unique_entries) {
+        const UF_long saved_entries = group_entries - unique_entries;
+        if (saved_entries > UF_long_max - reused_entries) {
+          reused_entries = UF_long_max;
+        } else {
+          reused_entries += saved_entries;
+        }
+      }
+    }
+    begin = end;
+  }
+
+  solver->refactor_btf_scalar_run_group_count = group_count;
+  solver->refactor_btf_scalar_run_group_current_total = item_count;
+  solver->refactor_btf_scalar_run_group_multi_count = multi_count;
+  solver->refactor_btf_scalar_run_group_multi_current_total =
+    multi_current_total;
+  solver->refactor_btf_scalar_run_group_rows = rows_total;
+  solver->refactor_btf_scalar_run_group_reused_rows = reused_rows;
+  solver->refactor_btf_scalar_run_group_entries = entries_total;
+  solver->refactor_btf_scalar_run_group_reused_entries = reused_entries;
+  solver->refactor_btf_scalar_run_group_max_currents = max_currents;
+  solver->refactor_btf_scalar_run_group_max_rows = max_rows;
+
+  if (multi_count == 0u) {
+    solver->refactor_btf_scalar_run_group_built = 1;
+    free(items);
+    return 1;
+  }
+  if (multi_count > (UF_long)(KLS_MAX_ALLOCATION / sizeof(UF_long)) - 1u ||
+      multi_current_total > (UF_long)(KLS_MAX_ALLOCATION / sizeof(UF_long))) {
+    free(items);
+    return 1;
+  }
+  UF_long *group_ptr =
+    (UF_long *)calloc((size_t)multi_count + 1u, sizeof(*group_ptr));
+  UF_long *group_dep0 =
+    (UF_long *)malloc((size_t)multi_count * sizeof(*group_dep0));
+  UF_long *group_max_rows =
+    (UF_long *)malloc((size_t)multi_count * sizeof(*group_max_rows));
+  UF_long *group_currents =
+    (UF_long *)malloc((size_t)multi_current_total * sizeof(*group_currents));
+  UF_long *group_current_up =
+    (UF_long *)malloc((size_t)multi_current_total * sizeof(*group_current_up));
+  UF_long *group_current_rows =
+    (UF_long *)malloc((size_t)multi_current_total *
+                      sizeof(*group_current_rows));
+  if (group_ptr == NULL || group_dep0 == NULL || group_max_rows == NULL ||
+      group_currents == NULL || group_current_up == NULL ||
+      group_current_rows == NULL) {
+    free(group_ptr);
+    free(group_dep0);
+    free(group_max_rows);
+    free(group_currents);
+    free(group_current_up);
+    free(group_current_rows);
+    free(items);
+    return 1;
+  }
+
+  UF_long group = 0u;
+  UF_long current_offset = 0u;
+  group_ptr[0] = 0u;
+  for (UF_long begin = 0u; begin < item_count;) {
+    UF_long end = begin + 1u;
+    while (end < item_count &&
+           items[end].block == items[begin].block &&
+           items[end].dep0_global == items[begin].dep0_global) {
+      end++;
+    }
+    const UF_long currents = end - begin;
+    if (currents > 1u) {
+      UF_long group_max = 0u;
+      group_dep0[group] = items[begin].dep0_global;
+      for (UF_long p = begin; p < end; ++p) {
+        if (items[p].rows > group_max) {
+          group_max = items[p].rows;
+        }
+        group_currents[current_offset] = items[p].current_global;
+        group_current_up[current_offset] = items[p].up;
+        group_current_rows[current_offset] = items[p].rows;
+        current_offset++;
+      }
+      group_max_rows[group] = group_max;
+      group++;
+      group_ptr[group] = current_offset;
+    }
+    begin = end;
+  }
+  if (group != multi_count || current_offset != multi_current_total) {
+    free(group_ptr);
+    free(group_dep0);
+    free(group_max_rows);
+    free(group_currents);
+    free(group_current_up);
+    free(group_current_rows);
+    free(items);
+    return 1;
+  }
+
+  solver->refactor_btf_scalar_run_group_ptr = group_ptr;
+  solver->refactor_btf_scalar_run_group_dep0 = group_dep0;
+  solver->refactor_btf_scalar_run_group_max_rows_by_group = group_max_rows;
+  solver->refactor_btf_scalar_run_group_currents = group_currents;
+  solver->refactor_btf_scalar_run_group_current_up = group_current_up;
+  solver->refactor_btf_scalar_run_group_current_rows = group_current_rows;
+  solver->refactor_btf_scalar_run_group_built = 1;
+  free(items);
+  return 1;
+}
+
 static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->R == NULL || solver->numeric->LUbx == NULL ||
@@ -34580,7 +35075,8 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
       solver->refactor_u_values != NULL) {
     return kls_ensure_refactor_l_index32_cache(solver) &&
            kls_ensure_refactor_u_index32_cache(solver) &&
-           kls_ensure_refactor_l_sorted_cache(solver);
+           kls_ensure_refactor_l_sorted_cache(solver) &&
+           kls_build_refactor_btf_scalar_run_groups(solver);
   }
 
   free_refactor_lu_pointer_cache(solver);
@@ -34909,7 +35405,8 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_l_contiguous_suffix_columns = contiguous_suffix_columns;
   solver->refactor_l_contiguous_suffix_entries = contiguous_suffix_entries;
   solver->refactor_l_contiguous_suffix_max_len = contiguous_suffix_max_len;
-  return kls_ensure_refactor_l_sorted_cache(solver);
+  return kls_ensure_refactor_l_sorted_cache(solver) &&
+         kls_build_refactor_btf_scalar_run_groups(solver);
 }
 
 static int kls_refactor_supernode_panel_block_info(

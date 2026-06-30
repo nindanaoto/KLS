@@ -211,6 +211,11 @@ def paper_gap_signal(
                 if int_value(cand_row, "refactor_last_btf_scalar_run_exec_runs") > 0:
                     return "egraph_btf_scalar_run_executor_active"
                 if auto_lower_rejected:
+                    if int_value(
+                        cand_row,
+                        "refactor_btf_scalar_run_group_reused_entries",
+                    ) > 0:
+                        return "egraph_scalar_tail_grouped_producer_runs_unowned"
                     if btf_scalar_run_rows > 0:
                         return "egraph_scalar_tail_producer_runs_unowned"
                     return "egraph_scalar_tail_numeric_owner_missing"
@@ -498,6 +503,17 @@ def main() -> int:
         "refactor_btf_scalar_run_exec_rows,"
         "refactor_btf_scalar_run_exec_entries,"
         "refactor_btf_scalar_run_exec_max_rows,"
+        "refactor_btf_scalar_run_group_built,"
+        "refactor_btf_scalar_run_group_count,"
+        "refactor_btf_scalar_run_group_current_total,"
+        "refactor_btf_scalar_run_group_multi_count,"
+        "refactor_btf_scalar_run_group_multi_current_total,"
+        "refactor_btf_scalar_run_group_rows,"
+        "refactor_btf_scalar_run_group_reused_rows,"
+        "refactor_btf_scalar_run_group_entries,"
+        "refactor_btf_scalar_run_group_reused_entries,"
+        "refactor_btf_scalar_run_group_max_currents,"
+        "refactor_btf_scalar_run_group_max_rows,"
         "refactor_last_ready_queue_columns,"
         "refactor_ready_queue_run_count,"
         "row_refactor_group_count,"
@@ -626,7 +642,11 @@ def main() -> int:
         "refactor_last_btf_scalar_run_exec_runs,"
         "refactor_last_btf_scalar_run_exec_rows,"
         "refactor_last_btf_scalar_run_exec_entries,"
-        "refactor_last_btf_scalar_run_exec_max_rows"
+        "refactor_last_btf_scalar_run_exec_max_rows,"
+        "refactor_btf_scalar_run_group_multi_count,"
+        "refactor_btf_scalar_run_group_multi_current_total,"
+        "refactor_btf_scalar_run_group_reused_entries,"
+        "refactor_btf_scalar_run_group_max_currents"
     )
     print(header)
     for cycle_ratio, name, cand, ref, cand_row in rows[: args.max_rows]:
@@ -875,6 +895,17 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_btf_scalar_run_exec_rows')},"
             f"{int_value(cand_row, 'refactor_btf_scalar_run_exec_entries')},"
             f"{int_value(cand_row, 'refactor_btf_scalar_run_exec_max_rows')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_built')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_count')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_current_total')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_multi_count')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_multi_current_total')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_rows')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_reused_rows')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_entries')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_reused_entries')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_max_currents')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_max_rows')},"
             f"{int_value(cand_row, 'refactor_last_ready_queue_columns')},"
             f"{int_value(cand_row, 'refactor_ready_queue_run_count')},"
             f"{int_value(cand_row, 'row_refactor_group_count')},"
@@ -1016,7 +1047,11 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_runs')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_rows')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_entries')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_max_rows')}"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_max_rows')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_multi_count')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_multi_current_total')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_reused_entries')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_group_max_currents')}"
         )
     return 0
 

@@ -1234,6 +1234,25 @@ together, reporting `refactor_last_btf_scalar_run_candidates`,
 `refactor_btf_scalar_run_*` counters. This is an opt-in diagnostic for the
 missing paper-level numeric owner: it answers whether the scalar tail has enough
 producer-run surface for a future row-major/current-state executor to consume.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUPS=1` builds the next structural object
+for that executor without changing numeric execution. It scans the retained BTF
+U patterns for the same contiguous producer runs, groups them by producer start,
+and retains only producer starts used by multiple current columns. Benchmark JSON
+reports `refactor_btf_scalar_run_group_built`,
+`refactor_btf_scalar_run_group_count`,
+`refactor_btf_scalar_run_group_current_total`,
+`refactor_btf_scalar_run_group_multi_count`,
+`refactor_btf_scalar_run_group_multi_current_total`,
+`refactor_btf_scalar_run_group_rows`,
+`refactor_btf_scalar_run_group_reused_rows`,
+`refactor_btf_scalar_run_group_entries`,
+`refactor_btf_scalar_run_group_reused_entries`,
+`refactor_btf_scalar_run_group_max_currents`, and
+`refactor_btf_scalar_run_group_max_rows`. The reused-entry counter estimates the
+L-entry stream that a grouped current-state owner could read once while updating
+several current workspaces. The retained group descriptor is tied to the LU
+pointer cache and is reused across repeated numeric refactors until the numeric
+pattern changes.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
 same BTF scalar producer-run shape. It first waits for every dependency in a
 contiguous run, then applies the run through a local row workspace. Under the

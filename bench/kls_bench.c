@@ -3315,6 +3315,28 @@ int main(int argc, char **argv) {
            stats.parallel_task_flow_recommends_parallel,
            stats.rcond, stats.rgrowth,
            stats.memory_bytes, stats.memory_peak_bytes);
+    printf(",\"refactor_btf_scalar_run_group_built\":%d"
+           ",\"refactor_btf_scalar_run_group_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_current_total\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_multi_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_multi_current_total\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_reused_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_entries\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_reused_entries\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_max_currents\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_max_rows\":%" PRId64,
+           stats.refactor_btf_scalar_run_group_built,
+           stats.refactor_btf_scalar_run_group_count,
+           stats.refactor_btf_scalar_run_group_current_total,
+           stats.refactor_btf_scalar_run_group_multi_count,
+           stats.refactor_btf_scalar_run_group_multi_current_total,
+           stats.refactor_btf_scalar_run_group_rows,
+           stats.refactor_btf_scalar_run_group_reused_rows,
+           stats.refactor_btf_scalar_run_group_entries,
+           stats.refactor_btf_scalar_run_group_reused_entries,
+           stats.refactor_btf_scalar_run_group_max_currents,
+           stats.refactor_btf_scalar_run_group_max_rows);
     printf(",\"refactor_last_supernode_cached_probe_shape_rejects\":%" PRId64
            ",\"refactor_last_supernode_cached_probe_shape_reject_rows\":%" PRId64
            ",\"refactor_last_supernode_cached_probe_stream_rejects\":%" PRId64
@@ -3884,7 +3906,13 @@ int main(int argc, char **argv) {
            ", exec %" PRId64 "/%" PRId64 "/%" PRId64
            ", exec max rows %" PRId64
            ", cumulative exec %" PRId64 "/%" PRId64 "/%" PRId64
-           ", exec max rows %" PRId64 "\n",
+           ", exec max rows %" PRId64
+           ", groups built %d"
+           ", groups %" PRId64 "/%" PRId64
+           ", multi %" PRId64 "/%" PRId64
+           ", rows %" PRId64 " reused %" PRId64
+           ", entries %" PRId64 " reused %" PRId64
+           ", max currents %" PRId64 ", max rows %" PRId64 "\n",
            stats.refactor_last_btf_scalar_run_candidates,
            stats.refactor_last_btf_scalar_run_rows,
            stats.refactor_last_btf_scalar_run_entries,
@@ -3900,7 +3928,18 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_exec_count,
            stats.refactor_btf_scalar_run_exec_rows,
            stats.refactor_btf_scalar_run_exec_entries,
-           stats.refactor_btf_scalar_run_exec_max_rows);
+           stats.refactor_btf_scalar_run_exec_max_rows,
+           stats.refactor_btf_scalar_run_group_built,
+           stats.refactor_btf_scalar_run_group_count,
+           stats.refactor_btf_scalar_run_group_current_total,
+           stats.refactor_btf_scalar_run_group_multi_count,
+           stats.refactor_btf_scalar_run_group_multi_current_total,
+           stats.refactor_btf_scalar_run_group_rows,
+           stats.refactor_btf_scalar_run_group_reused_rows,
+           stats.refactor_btf_scalar_run_group_entries,
+           stats.refactor_btf_scalar_run_group_reused_entries,
+           stats.refactor_btf_scalar_run_group_max_currents,
+           stats.refactor_btf_scalar_run_group_max_rows);
     printf("refactor supernode consumer plan: panels %" PRId64 "/%" PRId64
            ", runs %" PRId64 ", rows %" PRId64
            ", positioned %" PRId64 "/%" PRId64

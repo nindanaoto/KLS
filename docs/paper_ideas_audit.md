@@ -12770,3 +12770,32 @@ mechanism. The next paper-aligned executor has to batch multiple current
 workspaces through the retained producer run, so the producer's L suffix is
 streamed once across a grouped current-state owner rather than replaying a
 separate scalar scatter for each current column.
+
+The follow-on slice added the structural grouped-current descriptor for that BTF
+producer-run target. `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUPS=1` keeps numeric
+execution unchanged, scans retained BTF U patterns for contiguous scalar
+producer runs, groups those runs by producer start, and retains the multi-current
+groups as `(producer start, max rows, current, U position, current rows)` arrays.
+The benchmark fields `refactor_btf_scalar_run_group_*` report the total run
+surface, the subset with multiple current columns, and the row/L-entry surface
+that could be reused if a future live current-state executor streams the producer
+L suffix once across the group. The gap decomposition script now labels rows
+with nonzero `refactor_btf_scalar_run_group_reused_entries` as
+`egraph_scalar_tail_grouped_producer_runs_unowned`, separating this paper-level
+missing owner from the earlier single-current producer-run executor.
+
+Focused one-refactor probes confirm that this is the right next executor target,
+not just a bookkeeping variant. On `ASIC_100ks`, the cached planner artifact
+`build/kls_btf_group_cached_on_asic100ks_t4_r1_ref1.json` stayed
+residual-clean (`relative_residual_l2=1.9225e-15`), built `13,116`
+multi-current producer groups covering `104,280` current-run memberships, and
+reported `299,572,567` reused L-entry reads, with up to `362` currents sharing a
+producer start and max run length `462`. The cached planner measured
+`refactor_seconds_avg=0.043987771`, in the same noise band as the default
+one-refactor control. On `ASIC_320ks`,
+`build/kls_btf_group_on_asic320ks_t4_r1_ref1.json` built `33,856`
+multi-current groups over `121,701` current-run memberships and reported
+`270,529,235` reused L-entry reads, with max current fanout `444` and max run
+length `586`. This gives the next implementation a concrete target: a live
+multi-current BTF executor should consume these retained groups and update
+several current workspaces per streamed producer L suffix.
