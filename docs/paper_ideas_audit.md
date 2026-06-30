@@ -28,7 +28,8 @@ and forced-on `build/kls_pref_default_on_gap10_t4_r1_ref3_timeout120.jsonl` at
 loss over 2%. Against CKTSO on the same ten rows, KLS is still `2.41x` slower
 geomean (`2.2600s` versus `0.9376s`), so the main conclusion is unchanged: the
 next first cause is the grouped multi-current Algorithm 5 executor rather than
-BLAS thresholding or this scalar prefactor slice.
+BLAS thresholding, CPU-specific dispatch thresholds, or this scalar prefactor
+slice.
 
 The latest scalar payoff-exec rerun removes another ambiguity in the retained
 paper path. A direct target-slot accumulator was tested and rejected before
@@ -47,6 +48,22 @@ This confirms that the paper-level missing piece is not simply "let selected
 scalar runs fire" or "publish scalar target slots"; it is the grouped
 multi-current executor that advances many current workspaces and
 applies/publishes a producer prefix as one batch.
+
+The same conclusion holds after rerunning the existing producer-panel grouping
+switches on the current auto-prefactor source. On the top-five CKTSO-gap focus,
+the same-source default
+`build/kls_slotaccum_default_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.4114s` geomean. The current opt-in grouped producer-panel executor measured
+`1.6218s` in
+`build/kls_current_group_exec_gap5_t4_r1_ref3_timeout120.jsonl`, grouped-batch
+execution measured `1.6850s` in
+`build/kls_current_group_batch_exec_gap5_t4_r1_ref3_timeout120.jsonl`, and the
+shape-claim scheduler measured `1.6672s` in
+`build/kls_current_shape_claims_gap5_t4_r1_ref3_timeout120.jsonl`. These runs
+all stayed on the no-CBLAS EGraph path for the hard ASIC rows and still lost.
+The useful paper target is therefore not another BLAS guard and not the current
+single-current/producer-panel replay switches; it is persistent grouped
+Algorithm-5 state with one batch advancing many current workspaces.
 
 The latest forced-row rerun adds explicit row-group shape/work diagnostics and
 rejects the small-BLAS hypothesis for the current slow cases. The slow default
