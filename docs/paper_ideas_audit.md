@@ -44,6 +44,22 @@ paper-aligned refactor step should fuse grouped producer-panel advancement and
 prefix application into one multi-current executor instead of publishing
 per-current prepared states for the scalar consumer to replay.
 
+A direct scalar BTF dispatch split was tested and rejected before commit. The
+prototype added a plain scalar dependency helper for the default BTF refactor
+loop, passed `git diff --check`, `cmake --build build -j2`, `./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`, then compared against a fresh
+same-source top-five CKTSO-gap baseline. The baseline
+`build/kls_scalar_plain_baseline_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.4524s` SPICE-cycle geomean. The split helper measured `1.4547s` in
+`build/kls_scalar_plain_candidate_gap5_t4_r1_ref3_timeout120.jsonl`, and a
+three-repeat check measured `1.4609s` in
+`build/kls_scalar_plain_candidate_gap5_t4_r3_ref3_timeout120.jsonl`. It slightly
+helped `ASIC_320ks` but regressed `ASIC_100ks`, so the source change was
+reverted. This is useful negative evidence: shaving format dispatch inside
+`kls_egraph_refactor_apply_btf_scalar_dep` is not the clear missing paper
+mechanism. The large gap remains reducing the number of scalar dependency
+applications through a grouped producer-panel/multi-current executor.
+
 A compact final-state variant was tested and rejected before commit. Extending
 the compact row plan to direct-prefix final-state completion has to retain the
 pivot row, current-column L rows, prefix target rows, and every remaining suffix
