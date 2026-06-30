@@ -11461,3 +11461,42 @@ failures were a lifetime/rollback bug and that copied retained rows are not the
 primary CKTSO-gap cause. The missing algorithm remains a grouped multi-current
 numeric owner that applies the suffix dependencies to several live current
 states together.
+
+The next paper-level row-refactor check moved away from BLAS thresholds and back
+to SubtreeLU Algorithm 6 scheduling. The forced row-refactor ASIC runs were using
+the retained separator flop queue, but the private side reported only one active
+private thread: `ASIC_320ks`, `ASIC_320k`, and `ASIC_100ks` each had
+`row_refactor_last_separator_flop_private_threads=1` despite a 4-thread run and
+hundreds of retained separator components. KLS now assigns the remaining active
+separator components, rather than each whole surviving candidate subtree, to the
+least-loaded private thread queue. This keeps separator-crossing groups in the
+pipeline closure but prevents a single large surviving private subtree from
+serializing all private component work.
+
+Correctness passed `cmake --build build -j2`, `git diff --check`, and
+`ctest --test-dir build --output-on-failure`. The forced unchecked row-refactor
+top-five final-source run
+`build/kls_row_sep_component_balance_final_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `4.2548s` geomean, a `1.075x` speedup over the prior forced-row artifact
+`build/kls_row_refactor_current_gap5_t4_r1_ref3_timeout120.jsonl` at `4.5736s`.
+The ASIC rows now report `row_refactor_last_separator_flop_private_threads=4`;
+`ASIC_320ks` improved from `32.8883s` to `29.2094s`, `ASIC_320k` from
+`37.7034s` to `35.8048s`, and `ASIC_100ks` from `19.7514s` to `17.7677s`.
+This is worth retaining because it closes a clear Algorithm 6 implementation
+gap, but it is not a CKTSO-gap closer: the same forced row run is still
+`2.888x` slower than the default top-five control
+`build/kls_default_after_owned_state_gap5_t4_r1_ref3_timeout120.jsonl`.
+
+Two follow-up probes explain why the selector should remain conservative. With
+`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto`, the same forced-row top-five
+artifact
+`build/kls_row_sep_component_balance_native_auto_env_gap5_t4_r1_ref3_timeout120.jsonl`
+improved to `4.1008s` and executed compact dense panels on the ASIC rows, but it
+was still `2.783x` slower than default and regressed small rows such as
+`gemat12`. A finer private group-level balance attempt was rejected and removed:
+`build/kls_row_sep_group_balance_gap5_t4_r1_ref3_timeout120.jsonl` balanced the
+private work almost perfectly, but worsened the forced-row geomean to `4.4904s`
+and slowed all three ASIC rows. The result is a useful negative signal: the
+remaining large gap is not raw private queue balance or small-BLAS dispatch, but
+the scalar row/segment numeric executor and the missing coarse grouped numeric
+owner described by the CKTSO/SubtreeLU papers.

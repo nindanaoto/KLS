@@ -1372,8 +1372,9 @@ separator trees cover the factor order, including BTF analyses where local
 separator trees are stitched into a global forest, row refactors first try a
 SubtreeLU Algorithm 6-style FLOP-balanced separator queue: the dominant
 separator subtree is repeatedly split into a pipeline root plus child subtrees,
-remaining subtrees are assigned to private thread queues by retained group
-work, and separator-crossing row groups are forced into the pipeline queue.
+remaining active components are assigned to private thread queues by retained
+component work, and separator-crossing row groups are forced into the pipeline
+queue.
 Indivisible retained components are left in the private candidate set, so an
 unbalanced separator tree cannot collapse the Algorithm 6 queue into all
 pipeline work with no private subtrees.

@@ -37282,8 +37282,13 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     return 0;
   }
 
-  for (UF_long pos = 0; pos < candidate_count; ++pos) {
-    if (candidates[pos] > (UF_long)UINT_MAX) {
+  UF_long assigned_component_count = 0;
+  for (UF_long component = 0; component < component_count; ++component) {
+    if (component_group_count[component] == 0u ||
+        component_pipeline[component]) {
+      continue;
+    }
+    if (component > (UF_long)UINT_MAX) {
       free(group_component);
       free(group_forced_pipeline);
       free(component_group_count);
@@ -37302,16 +37307,38 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
       free(private_group_mask);
       return 0;
     }
-    candidate_entries[pos].component = (unsigned int)candidates[pos];
-    candidate_entries[pos].kind = 0u;
-    candidate_entries[pos].work = subtree_work[candidates[pos]];
+    candidate_entries[assigned_component_count].component =
+      (unsigned int)component;
+    candidate_entries[assigned_component_count].kind = 0u;
+    candidate_entries[assigned_component_count].work =
+      component_work[component];
+    assigned_component_count++;
   }
-  qsort(candidate_entries, (size_t)candidate_count,
+  if (assigned_component_count == 0u) {
+    free(group_component);
+    free(group_forced_pipeline);
+    free(component_group_count);
+    free(component_work);
+    free(subtree_begin);
+    free(subtree_end);
+    free(subtree_work);
+    free(candidates);
+    free(component_pipeline);
+    free(component_thread);
+    free(candidate_entries);
+    free(private_groups);
+    free(thread_ptr);
+    free(thread_counts);
+    free(thread_work);
+    free(private_group_mask);
+    return 0;
+  }
+  qsort(candidate_entries, (size_t)assigned_component_count,
         sizeof(*candidate_entries),
         kls_compare_separator_component_work_desc);
 
-  for (UF_long pos = 0; pos < candidate_count; ++pos) {
-    const UF_long component = candidate_entries[pos].component;
+  for (UF_long pos = 0; pos < assigned_component_count; ++pos) {
+    const unsigned int component = candidate_entries[pos].component;
     int target = 0;
     double target_work = thread_work[0];
     for (int tid = 1; tid < thread_count; ++tid) {
@@ -37320,14 +37347,8 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
         target_work = thread_work[tid];
       }
     }
-    for (UF_long c = subtree_begin[component]; c < subtree_end[component];
-         ++c) {
-      if (c >= component_count || component_pipeline[c]) {
-        continue;
-      }
-      component_thread[c] = target;
-    }
-    thread_work[target] += subtree_work[component];
+    component_thread[component] = target;
+    thread_work[target] += component_work[component];
   }
 
   UF_long pipeline_group_count = 0;
@@ -37700,7 +37721,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
   *private_group_count_out = private_group_count;
   *pipeline_group_count_out = pipeline_group_count;
   *closure_group_count_out = closure_group_count;
-  *component_count_out = candidate_count + pipeline_component_count;
+  *component_count_out = assigned_component_count + pipeline_component_count;
   *private_threads_out = private_threads;
   *private_min_groups_out = private_min_groups;
   *private_max_groups_out = private_max_groups;
