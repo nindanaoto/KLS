@@ -108,6 +108,34 @@ more suffix dependencies"; the current per-current row-state lookup and retained
 state ownership model must be replaced by a grouped multi-current producer/window
 executor that amortizes the duplicate suffix producers.
 
+The suffix-group executor now has a first producer-column batched implementation
+behind the same opt-in flag
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE=1`.
+The retained current-state row lists are sorted once during plan construction,
+and the runtime suffix trigger now claims all eligible READY current states for
+one completed producer, captures their U coefficient, then streams that
+producer's L column across the batch. This is directly aligned with the paper
+direction of amortizing one finished producer over a current window, and it
+removes the earlier single-current trigger loop from the opt-in path.
+Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`, `./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE=1 ./build/kls_smoke`.
+The final focused run
+`build/kls_batched_suffix_group_gap5_t4_r1_ref3_timeout120_final.jsonl`
+measured `2.7996s` top-five SPICE-cycle geomean. That is a real improvement
+over the prior sorted single-current suffix-group probe
+`build/kls_sorted_state_suffix_group_gap5_t4_r1_ref3_timeout120.jsonl`
+at `4.1072s` geomean (`1.47x` speedup), with the largest improvements on
+`ASIC_320k` and `ASIC_320ks`. It is still not a CKTSO-gap closer: the refreshed
+same-binary default control
+`build/kls_batched_suffix_default_gap5_t4_r1_ref3_timeout120_final.jsonl`
+measured `1.4446s`, so the batched opt-in path is still `1.94x` slower than
+default on the focused set. The result confirms batching the producer trigger
+is necessary substrate, but the remaining paper gap is broader than this
+one-producer sparse suffix update: KLS still needs a true grouped live-workspace
+or supernodal window owner that avoids retained-state lookup/cursor work as the
+dominant cost.
+
 The latest Algorithm 5 grouped-prefix work now includes a targetless
 direct-prefix variant, an advance-seed probe, a retained-current-row state probe,
 and a final-state probe, without changing BLAS thresholds. The
