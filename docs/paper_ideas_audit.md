@@ -39,13 +39,23 @@ resuming the existing loop. A cheap structural upper bound rejects the sparse
 row-set construction unless it can skip a material share of retained rows. This
 is the first guarded attempt to remove the current full-row copy without yet
 replacing the scalar continuation with a live grouped workspace.
+The direct-complete follow-up
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_COMPLETE=1`
+also uses the final retained state, but tries to complete the whole BTF-local
+column from that state instead of returning to the scalar continuation. The
+safe probe computes on a private retained-state copy and commits U, diagonal,
+and L values only after the pivot is nonzero. It proves the direct arithmetic is
+correct, but it deliberately does not solve the copy problem; that keeps the
+next lead cause on live grouped current workspaces rather than BLAS thresholds.
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_PREP=1 ./build/kls_smoke`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_ADVANCE_SEED=1 ./build/kls_smoke`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_CURRENT_STATE=1 ./build/kls_smoke`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE=1 ./build/kls_smoke`, and
-`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE=1 ./build/kls_smoke`.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE=1 ./build/kls_smoke`;
+the direct-complete follow-up also passed
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_COMPLETE=1 ./build/kls_smoke`.
 The focused current-state value probe
 `build/kls_direct_prefix_current_state_gap5_t4_r1_ref3_timeout120.jsonl`
 completed all five rows with `2.2981s` SPICE-cycle geomean, worse than the
@@ -83,6 +93,19 @@ not enough to close the CKTSO gap. The next direct paper-level target is avoidin
 the scalar continuation after the retained prefix, for example by keeping grouped
 current workspaces live through column completion rather than copying them into
 the scalar scratch.
+
+The private-state direct-complete run
+`build/kls_direct_prefix_complete_private_state_gap5_t4_r1_ref3_timeout120.jsonl`
+also completed the same five rows, but regressed to `3.3422s` SPICE-cycle
+geomean. The ASIC rows solved correctly but paid the private retained-state
+copy and remaining dependency stream: `ASIC_320ks` recorded `1,360` direct
+completion runs / `702,618` skipped deps / `1,147,897` copied rows,
+`ASIC_320k` recorded `1,357` / `742,805` / `1,224,196`, and `ASIC_100ks`
+recorded `309` / `179,851` / `282,959`. This rejects per-column direct
+completion with copied retained state as a CKTSO-gap closer. The missing paper
+mechanism is still the grouped live workspace executor: Algorithm 5 current
+states should stay owned by the grouped pipeline through completion, not be
+copied into a private scalar/direct column path.
 
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`, and

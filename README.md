@@ -1073,6 +1073,16 @@ material share of the retained rows. The same
 `refactor_last_supernode_algorithm5_payoff_current_state_seed_rows` counter then
 reports restored rows rather than total retained rows, making the retained-copy
 payoff directly measurable without changing the default executor.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_COMPLETE=1` is
+a safe direct-completion probe for the same final retained state. It also
+implies direct-prefix prep/current-state/final-state mode. For an eligible
+BTF-local column, KLS computes the remaining U stream, pivot, and L column from
+a private retained-state copy and only commits factor storage after the pivot is
+nonzero. Focused CKTSO-gap checks solve correctly but reject this as a default:
+the private-copy direct-complete run measured `3.3422s` SPICE-cycle geomean on
+the same five rows, worse than sparse restore at `2.2665s`. This confirms the
+next paper-level gap is a grouped live Algorithm 5 workspace that avoids
+per-column retained-state copies, not BLAS thresholding.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and
