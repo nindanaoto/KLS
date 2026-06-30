@@ -12828,3 +12828,36 @@ cannot be obtained by attaching work to the current dependency wait point. The
 next refactor implementation should make grouped producer runs schedule-visible
 and route multiple current workspaces through a producer-owned update, rather
 than relying on incidental concurrent waits.
+
+The follow-on scheduler slice made the grouped producer runs schedule-visible
+without changing the numeric kernel. Under
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_CLAIMS=1`, KLS now triggers from a
+completed producer column, finds retained BTF scalar-run groups for that
+producer, and attempts to claim grouped current columns whose full dependency
+lists are already published. The hook also fires from barriered cluster columns,
+so it sees producer starts before the pipeline tail begins. Benchmark JSON now
+separates producer-trigger surface counters from the subset of current columns
+actually claimed and dispatched.
+
+Focused probes show that this simple producer-side claim scheduler is still too
+late in the dependency stream. On `ASIC_100ks`,
+`build/kls_btf_group_claims2_on_asic100ks_t4_r1_ref1.json` saw the full
+schedule-visible grouped surface: `13,116` producer triggers/groups and
+`104,280` current memberships, with `299,572,567` reusable L-entry reads. It
+claimed zero currents. On `ASIC_320ks`,
+`build/kls_btf_group_claims2_on_asic320ks_t4_r1_ref1.json` saw `33,856`
+producer triggers/groups and `121,701` current memberships, with `270,529,235`
+reusable L-entry reads. It also claimed zero currents. Both runs were
+residual-clean (`relative_residual_l2=1.92251861e-15` and
+`2.08436857e-15`). Same-binary controls without the flag measured
+`0.045162553s` on `ASIC_100ks` and `0.084273274s` on `ASIC_320ks`; the claim
+probe measured `0.041062299s` and `0.087357188s`, but with zero actual claimed
+currents those timing deltas are noise rather than a numeric improvement.
+
+This narrows the next implementation further. Producer completion is now proven
+to expose the grouped surface, but waiting for full current-column readiness
+still leaves no work to claim. The missing paper-level executor must own partial
+current state before all dependencies are complete, advance those live
+workspaces through grouped producer runs, and then hand the completed columns
+back to the normal publish path. A scheduler-only current claim does not fill
+that gap.

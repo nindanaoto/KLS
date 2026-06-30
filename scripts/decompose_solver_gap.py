@@ -517,6 +517,8 @@ def main() -> int:
         "refactor_last_btf_scalar_run_group_waits,"
         "refactor_last_btf_scalar_run_group_overlap_waits,"
         "refactor_last_btf_scalar_run_group_max_live,"
+        "refactor_last_btf_scalar_run_group_claim_surface_currents,"
+        "refactor_last_btf_scalar_run_group_claim_currents,"
         "refactor_last_ready_queue_columns,"
         "refactor_ready_queue_run_count,"
         "row_refactor_group_count,"
@@ -652,7 +654,9 @@ def main() -> int:
         "refactor_btf_scalar_run_group_max_currents,"
         "refactor_last_btf_scalar_run_group_waits,"
         "refactor_last_btf_scalar_run_group_overlap_waits,"
-        "refactor_last_btf_scalar_run_group_max_live"
+        "refactor_last_btf_scalar_run_group_max_live,"
+        "refactor_last_btf_scalar_run_group_claim_surface_currents,"
+        "refactor_last_btf_scalar_run_group_claim_currents"
     )
     print(header)
     for cycle_ratio, name, cand, ref, cand_row in rows[: args.max_rows]:
@@ -915,6 +919,8 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_waits')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_overlap_waits')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_max_live')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_claim_surface_currents')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_claim_currents')},"
             f"{int_value(cand_row, 'refactor_last_ready_queue_columns')},"
             f"{int_value(cand_row, 'refactor_ready_queue_run_count')},"
             f"{int_value(cand_row, 'row_refactor_group_count')},"
@@ -1063,7 +1069,9 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_btf_scalar_run_group_max_currents')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_waits')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_overlap_waits')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_max_live')}"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_max_live')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_claim_surface_currents')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_claim_currents')}"
         )
     return 0
 

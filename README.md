@@ -1260,6 +1260,14 @@ cumulative grouped wait counts, overlapped wait counts, wait rows/entries, and
 the maximum number of live waiters on a grouped producer run. These counters
 answer whether the structural paper-style reuse surface is actually reached by
 multiple current columns at the same time under the current BTF schedule.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_CLAIMS=1` makes those grouped
+producer runs schedule-visible without changing the numeric kernel. When a
+producer column finishes, KLS claims grouped current columns whose full
+dependency lists are already published, dispatches them on the same worker, and
+marks them done through the normal pipeline path. Benchmark JSON reports last
+and cumulative trigger/group/current surface counts plus the subset actually
+claimed. This opt-in scheduler probe tests whether producer-side current
+locality helps before adding a true multi-workspace grouped numeric owner.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
 same BTF scalar producer-run shape. It first waits for every dependency in a
 contiguous run, then applies the run through a local row workspace. Under the

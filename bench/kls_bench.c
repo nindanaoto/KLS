@@ -3350,7 +3350,19 @@ int main(int argc, char **argv) {
            ",\"refactor_btf_scalar_run_group_overlap_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_overlap_rows\":%" PRId64
            ",\"refactor_btf_scalar_run_group_overlap_entries\":%" PRId64
-           ",\"refactor_btf_scalar_run_group_max_live\":%" PRId64,
+           ",\"refactor_btf_scalar_run_group_max_live\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_claim_surface_triggers\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_claim_surface_groups\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_claim_surface_currents\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_claim_triggers\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_claim_groups\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_claim_currents\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_claim_surface_trigger_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_claim_surface_group_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_claim_surface_current_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_claim_trigger_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_claim_group_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_claim_current_count\":%" PRId64,
            stats.refactor_last_btf_scalar_run_group_waits,
            stats.refactor_last_btf_scalar_run_group_wait_rows,
            stats.refactor_last_btf_scalar_run_group_wait_entries,
@@ -3364,7 +3376,19 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_overlap_count,
            stats.refactor_btf_scalar_run_group_overlap_rows,
            stats.refactor_btf_scalar_run_group_overlap_entries,
-           stats.refactor_btf_scalar_run_group_max_live);
+           stats.refactor_btf_scalar_run_group_max_live,
+           stats.refactor_last_btf_scalar_run_group_claim_surface_triggers,
+           stats.refactor_last_btf_scalar_run_group_claim_surface_groups,
+           stats.refactor_last_btf_scalar_run_group_claim_surface_currents,
+           stats.refactor_last_btf_scalar_run_group_claim_triggers,
+           stats.refactor_last_btf_scalar_run_group_claim_groups,
+           stats.refactor_last_btf_scalar_run_group_claim_currents,
+           stats.refactor_btf_scalar_run_group_claim_surface_trigger_count,
+           stats.refactor_btf_scalar_run_group_claim_surface_group_count,
+           stats.refactor_btf_scalar_run_group_claim_surface_current_count,
+           stats.refactor_btf_scalar_run_group_claim_trigger_count,
+           stats.refactor_btf_scalar_run_group_claim_group_count,
+           stats.refactor_btf_scalar_run_group_claim_current_count);
     printf(",\"refactor_last_supernode_cached_probe_shape_rejects\":%" PRId64
            ",\"refactor_last_supernode_cached_probe_shape_reject_rows\":%" PRId64
            ",\"refactor_last_supernode_cached_probe_stream_rejects\":%" PRId64
@@ -3946,7 +3970,11 @@ int main(int argc, char **argv) {
            ", max live %" PRId64
            ", cumulative waits %" PRId64 "/%" PRId64 "/%" PRId64
            ", cumulative overlaps %" PRId64 "/%" PRId64 "/%" PRId64
-           ", cumulative max live %" PRId64 "\n",
+           ", cumulative max live %" PRId64
+           ", claim surface %" PRId64 "/%" PRId64 "/%" PRId64
+           ", claims %" PRId64 "/%" PRId64 "/%" PRId64
+           ", cumulative claim surface %" PRId64 "/%" PRId64 "/%" PRId64
+           ", cumulative claims %" PRId64 "/%" PRId64 "/%" PRId64 "\n",
            stats.refactor_last_btf_scalar_run_candidates,
            stats.refactor_last_btf_scalar_run_rows,
            stats.refactor_last_btf_scalar_run_entries,
@@ -3987,7 +4015,19 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_overlap_count,
            stats.refactor_btf_scalar_run_group_overlap_rows,
            stats.refactor_btf_scalar_run_group_overlap_entries,
-           stats.refactor_btf_scalar_run_group_max_live);
+           stats.refactor_btf_scalar_run_group_max_live,
+           stats.refactor_last_btf_scalar_run_group_claim_surface_triggers,
+           stats.refactor_last_btf_scalar_run_group_claim_surface_groups,
+           stats.refactor_last_btf_scalar_run_group_claim_surface_currents,
+           stats.refactor_last_btf_scalar_run_group_claim_triggers,
+           stats.refactor_last_btf_scalar_run_group_claim_groups,
+           stats.refactor_last_btf_scalar_run_group_claim_currents,
+           stats.refactor_btf_scalar_run_group_claim_surface_trigger_count,
+           stats.refactor_btf_scalar_run_group_claim_surface_group_count,
+           stats.refactor_btf_scalar_run_group_claim_surface_current_count,
+           stats.refactor_btf_scalar_run_group_claim_trigger_count,
+           stats.refactor_btf_scalar_run_group_claim_group_count,
+           stats.refactor_btf_scalar_run_group_claim_current_count);
     printf("refactor supernode consumer plan: panels %" PRId64 "/%" PRId64
            ", runs %" PRId64 ", rows %" PRId64
            ", positioned %" PRId64 "/%" PRId64
