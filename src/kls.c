@@ -54335,9 +54335,16 @@ static int kls_egraph_ready_queue_env_enabled(void) {
   return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
 }
 
-static int kls_egraph_algorithm5_prefactor_update_env_enabled(void) {
+static int kls_egraph_algorithm5_prefactor_update_requested(
+  const kls_solver *solver) {
   const char *value = getenv("KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE");
-  return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+  if (value != NULL && value[0] != '\0') {
+    return strcmp(value, "0") != 0;
+  }
+  return solver != NULL &&
+         solver->refactor_dependency_work >=
+           KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK &&
+         solver->refactor_pipeline_work > 0.0;
 }
 
 static int kls_refactor_supernode_consumer_plan_claims_env_enabled(void) {
@@ -56228,7 +56235,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const int algorithm5_payoff_queue_requested =
     kls_refactor_supernode_algorithm5_payoff_queue_env_enabled();
   const int algorithm5_prefactor_update_requested =
-    kls_egraph_algorithm5_prefactor_update_env_enabled();
+    kls_egraph_algorithm5_prefactor_update_requested(solver);
   const int algorithm5_payoff_claim_surface_requested =
     algorithm5_payoff_claims_requested &&
     kls_refactor_supernode_algorithm5_payoff_claim_surface_allowed(

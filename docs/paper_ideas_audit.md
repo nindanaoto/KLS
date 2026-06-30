@@ -6,26 +6,29 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
-The latest Algorithm 5 prefactor change expands the guarded
-`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1` path from the unscaled BTF kernel
-to the single-block unscaled/scaled kernels and the generic scaled/fallback
-kernel. This is a paper-semantics coverage change, not a BLAS or CPU-threshold
-change: a blocked pipeline column can consume later already-finished U
-predecessors when the structural safety scan proves that earlier unapplied
-predecessors cannot still write that workspace entry. Correctness passed
+The latest Algorithm 5 prefactor change makes the guarded EGraph prefactor
+slice automatic for retained EGraph pipelines with at least
+`KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK` modeled dependency work, with
+`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1` and `=0` retained as explicit
+force/disable A/B controls. The path now covers the unscaled BTF kernel, the
+single-block unscaled/scaled kernels, and the generic scaled/fallback kernel.
+This is a paper-semantics coverage change, not a BLAS or CPU-threshold change:
+a blocked pipeline column can consume later already-finished U predecessors
+when the structural safety scan proves that earlier unapplied predecessors
+cannot still write that workspace entry. Correctness passed
 `cmake --build build -j2`, `ctest --test-dir build --output-on-failure`,
-`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1 ./build/kls_smoke`, and
-`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1 KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`.
-The focused top-ten CKTSO-gap run is essentially neutral but useful as
-coverage: `build/kls_pref_allkernels_on_gap10_t4_r1_ref3_timeout120.jsonl`
-measured `2.3638s` geomean versus
-`build/kls_pref_allkernels_gap10_t4_r1_ref3_timeout120.jsonl` at `2.3722s`,
-with `304` prefactor columns and `3,102` prefactor dependencies consumed under
-the opt-in flag. Wins on `rajat25`, `rajat03`, `ASIC_320ks`, and `ASIC_320k`
-were offset by losses on `onetone2`, `onetone1`, and `ASIC_100ks`. This keeps
-the main conclusion unchanged: KLS should not spend the next effort on BLAS
-thresholds, and the large CKTSO gap still points at the grouped multi-current
-Algorithm 5 executor.
+`./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`.
+The focused top-ten CKTSO-gap A/B run now favors the modeled-work auto gate:
+`build/kls_pref_auto_gap10_t4_r1_ref3_timeout120.jsonl` measured `2.2600s`
+geomean, versus explicit prefactor-off
+`build/kls_pref_default_off_gap10_t4_r1_ref3_timeout120.jsonl` at `2.4045s`
+and forced-on `build/kls_pref_default_on_gap10_t4_r1_ref3_timeout120.jsonl` at
+`2.4027s`. Compared with explicit off, the auto gate had seven wins and one
+loss over 2%. Against CKTSO on the same ten rows, KLS is still `2.41x` slower
+geomean (`2.2600s` versus `0.9376s`), so the main conclusion is unchanged: the
+next first cause is the grouped multi-current Algorithm 5 executor rather than
+BLAS thresholding or this scalar prefactor slice.
 
 The latest Algorithm 5 payoff-exec rerun removes one ambiguity in the retained
 paper path. Before this check, the ASIC rows built large payoff descriptors but
@@ -10782,11 +10785,11 @@ not a BLAS or CPU-specific tuning change; the remaining paper gap is the
 numeric grouped executor that uses the retained current-run map, current
 workspace offsets, advance spans, and target slots together.
 
-KLS now fills a narrower CKTSO Algorithm 5 execution semantic in the BTF EGraph
-numeric kernel. `KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1` lets a blocked
-pipeline column consume later already-finished scalar U predecessors before the
-current predecessor is done, but only when a structural safety scan proves that
-no earlier unapplied predecessor can still write the candidate workspace entry.
+KLS now fills a narrower CKTSO Algorithm 5 execution semantic in the EGraph
+numeric kernels under the modeled-work auto gate. A blocked pipeline column can
+consume later already-finished scalar U predecessors before the current
+predecessor is done, but only when a structural safety scan proves that no
+earlier unapplied predecessor can still write the candidate workspace entry.
 The kernel tracks consumed positions in an applied bitmap, marks ordinary
 scalar and batched dependencies as they are consumed, and disables further
 batched dependency runs for that column after the first true out-of-order
@@ -10795,10 +10798,9 @@ turning the retained payoff descriptor into a misleading "backend" or a
 CPU-specific micro-tuning knob.
 
 Correctness passed `cmake --build build -j2`,
-`ctest --test-dir build --output-on-failure`, `./build/kls_smoke`,
-`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1 ./build/kls_smoke`, and
-`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1 KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`.
-The top-five CKTSO-gap probe with the new prefactor flag alone
+`ctest --test-dir build --output-on-failure`, `./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`.
+The top-five CKTSO-gap probe with the prefactor path
 `build/kls_pref_update_only_gap5_t4_r1_ref3_timeout120.jsonl` completed with
 no failures and `1.3938181393489573s` geomean versus the current no-new-flag
 control `build/kls_current_default_gap5_t4_r1_ref3_timeout120.jsonl` at
@@ -10825,8 +10827,7 @@ guard, because without it the out-of-order scan can treat ordinary consumed
 predecessors as still pending.
 
 Correctness passed `cmake --build build -j2`,
-`ctest --test-dir build --output-on-failure`, and
-`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1 ./build/kls_smoke`. The final
+`ctest --test-dir build --output-on-failure`, and `./build/kls_smoke`. The final
 top-five CKTSO-gap probe
 `build/kls_pref_update_lazy_prefix_gap5_t4_r1_ref3_timeout120.jsonl` completed
 with no failures and `1.3868464599815646s` geomean. The 20-matrix CKTSO-gap
