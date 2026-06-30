@@ -1117,6 +1117,10 @@ typedef struct kls_stats {
   int64_t refactor_last_btf_scalar_run_group_state_advanced_rows;
   int64_t refactor_last_btf_scalar_run_group_state_advanced_entries;
   int64_t refactor_last_btf_scalar_run_group_state_rejects;
+  int64_t refactor_last_btf_scalar_run_group_state_exec_currents;
+  int64_t refactor_last_btf_scalar_run_group_state_exec_skipped_deps;
+  int64_t refactor_last_btf_scalar_run_group_state_exec_restored_rows;
+  int64_t refactor_last_btf_scalar_run_group_state_exec_rejects;
   int64_t refactor_btf_scalar_run_group_claim_surface_trigger_count;
   int64_t refactor_btf_scalar_run_group_claim_surface_group_count;
   int64_t refactor_btf_scalar_run_group_claim_surface_current_count;
@@ -1142,6 +1146,10 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_group_state_advanced_rows;
   int64_t refactor_btf_scalar_run_group_state_advanced_entries;
   int64_t refactor_btf_scalar_run_group_state_reject_count;
+  int64_t refactor_btf_scalar_run_group_state_exec_current_count;
+  int64_t refactor_btf_scalar_run_group_state_exec_skipped_deps;
+  int64_t refactor_btf_scalar_run_group_state_exec_restored_rows;
+  int64_t refactor_btf_scalar_run_group_state_exec_reject_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

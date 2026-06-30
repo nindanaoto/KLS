@@ -3380,6 +3380,10 @@ int main(int argc, char **argv) {
            ",\"refactor_last_btf_scalar_run_group_state_advanced_rows\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_advanced_entries\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_rejects\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_currents\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_skipped_deps\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_restored_rows\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_rejects\":%" PRId64
            ",\"refactor_btf_scalar_run_group_claim_surface_trigger_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_claim_surface_group_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_claim_surface_current_count\":%" PRId64
@@ -3404,7 +3408,11 @@ int main(int argc, char **argv) {
            ",\"refactor_btf_scalar_run_group_state_advanced_current_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_advanced_rows\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_advanced_entries\":%" PRId64
-           ",\"refactor_btf_scalar_run_group_state_reject_count\":%" PRId64,
+           ",\"refactor_btf_scalar_run_group_state_reject_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_current_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_skipped_deps\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_restored_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_reject_count\":%" PRId64,
            stats.refactor_last_btf_scalar_run_group_waits,
            stats.refactor_last_btf_scalar_run_group_wait_rows,
            stats.refactor_last_btf_scalar_run_group_wait_entries,
@@ -3444,6 +3452,10 @@ int main(int argc, char **argv) {
            stats.refactor_last_btf_scalar_run_group_state_advanced_rows,
            stats.refactor_last_btf_scalar_run_group_state_advanced_entries,
            stats.refactor_last_btf_scalar_run_group_state_rejects,
+           stats.refactor_last_btf_scalar_run_group_state_exec_currents,
+           stats.refactor_last_btf_scalar_run_group_state_exec_skipped_deps,
+           stats.refactor_last_btf_scalar_run_group_state_exec_restored_rows,
+           stats.refactor_last_btf_scalar_run_group_state_exec_rejects,
            stats.refactor_btf_scalar_run_group_claim_surface_trigger_count,
            stats.refactor_btf_scalar_run_group_claim_surface_group_count,
            stats.refactor_btf_scalar_run_group_claim_surface_current_count,
@@ -3468,7 +3480,11 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_state_advanced_current_count,
            stats.refactor_btf_scalar_run_group_state_advanced_rows,
            stats.refactor_btf_scalar_run_group_state_advanced_entries,
-           stats.refactor_btf_scalar_run_group_state_reject_count);
+           stats.refactor_btf_scalar_run_group_state_reject_count,
+           stats.refactor_btf_scalar_run_group_state_exec_current_count,
+           stats.refactor_btf_scalar_run_group_state_exec_skipped_deps,
+           stats.refactor_btf_scalar_run_group_state_exec_restored_rows,
+           stats.refactor_btf_scalar_run_group_state_exec_reject_count);
     printf(",\"refactor_last_supernode_cached_probe_shape_rejects\":%" PRId64
            ",\"refactor_last_supernode_cached_probe_shape_reject_rows\":%" PRId64
            ",\"refactor_last_supernode_cached_probe_stream_rejects\":%" PRId64

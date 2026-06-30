@@ -12921,3 +12921,32 @@ refactor still executes and the retained state is only diagnostic. The next
 refactor step should make this state the numeric owner for those current
 columns, avoiding the duplicated scalar prefix/run recomputation and sharing the
 producer L stream across the wake-ready batch.
+
+The first guarded numeric consumer for that state is now implemented under
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1`. It stores retained U
+coefficients while materializing/advancing compact state, publishes a READY
+state only after the run-end advance has completed, arms only the farthest
+member per current column, restores that state at dispatch, writes the skipped U
+entries, and then returns to the existing scalar suffix, pivot check, and L
+storage path. The READY-after-advance ordering matters: the first trial
+published READY before advance and produced a `1.53e-8` residual on
+`ASIC_100ks`; delaying READY until after advance restored the clean
+`1.92251861e-15` residual.
+
+Best-member filtering makes the probe much cheaper but still not competitive.
+On `ASIC_100ks`, execution mode materialized `15,124` states / `940,885` rows,
+advanced `14,818` states through `10,756,780` L entries, consumed `604`
+retained states, skipped `129,480` U dependencies, restored `291,012` state
+rows, and refactored in `9.9392s`; the no-flag same-build control refactored in
+`0.0475s`. On `ASIC_320ks`, it materialized `16,742` states / `1,168,129`
+rows, advanced `16,464` states through `14,290,944` L entries, consumed `998`
+states, skipped `193,588` U dependencies, restored `463,173` rows, and
+refactored in `8.5472s`; the no-flag control was `0.0808s`. Both execution
+probes had zero state-exec rejects and zero state rejects.
+
+This confirms that the retained current-state handoff can be made
+correctness-clean, but it also rejects a per-current restored sparse state as
+the missing CKTSO-speed mechanism. The next paper-aligned owner needs to keep a
+multi-current producer/window batch alive and stream the producer L data once
+across that batch, rather than materializing and restoring one sparse state per
+eventual current column.

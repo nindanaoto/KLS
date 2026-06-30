@@ -536,6 +536,10 @@ def main() -> int:
         "refactor_last_btf_scalar_run_group_state_advanced_rows,"
         "refactor_last_btf_scalar_run_group_state_advanced_entries,"
         "refactor_last_btf_scalar_run_group_state_rejects,"
+        "refactor_last_btf_scalar_run_group_state_exec_currents,"
+        "refactor_last_btf_scalar_run_group_state_exec_skipped_deps,"
+        "refactor_last_btf_scalar_run_group_state_exec_restored_rows,"
+        "refactor_last_btf_scalar_run_group_state_exec_rejects,"
         "refactor_last_ready_queue_columns,"
         "refactor_ready_queue_run_count,"
         "row_refactor_group_count,"
@@ -687,7 +691,11 @@ def main() -> int:
         "refactor_last_btf_scalar_run_group_state_materialized_rows,"
         "refactor_last_btf_scalar_run_group_state_advanced_currents,"
         "refactor_last_btf_scalar_run_group_state_advanced_entries,"
-        "refactor_last_btf_scalar_run_group_state_rejects"
+        "refactor_last_btf_scalar_run_group_state_rejects,"
+        "refactor_last_btf_scalar_run_group_state_exec_currents,"
+        "refactor_last_btf_scalar_run_group_state_exec_skipped_deps,"
+        "refactor_last_btf_scalar_run_group_state_exec_restored_rows,"
+        "refactor_last_btf_scalar_run_group_state_exec_rejects"
     )
     print(header)
     for cycle_ratio, name, cand, ref, cand_row in rows[: args.max_rows]:
@@ -969,6 +977,10 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_advanced_rows')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_advanced_entries')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_rejects')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_exec_currents')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_exec_skipped_deps')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_exec_restored_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_exec_rejects')},"
             f"{int_value(cand_row, 'refactor_last_ready_queue_columns')},"
             f"{int_value(cand_row, 'refactor_ready_queue_run_count')},"
             f"{int_value(cand_row, 'row_refactor_group_count')},"
@@ -1133,7 +1145,11 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_materialized_rows')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_advanced_currents')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_advanced_entries')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_rejects')}"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_rejects')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_exec_currents')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_exec_skipped_deps')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_exec_restored_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_exec_rejects')}"
         )
     return 0
 

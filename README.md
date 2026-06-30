@@ -1296,6 +1296,15 @@ prefix-dependency counts, the advanced current/row/entry counts, and state
 rejects. This still does not replace the normal numeric refactor; it validates
 the paper-level live current-state shape before KLS commits it to the production
 numeric path.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1` turns that retained
+state into a guarded numeric consumer. The flag implies state stats, stores the
+U coefficients consumed while preparing the retained state, arms only the
+farthest retained member per current column, restores that state when the
+column is dispatched, writes the skipped U entries, and lets the existing suffix,
+pivot check, and L-store path finish the column. Benchmark JSON reports last and
+cumulative state-exec current, skipped-dependency, restored-row, and reject
+counts. This remains opt-in: the focused ASIC probes are residual-clean, but the
+state owner is still too fine-grained to beat the default refactor path.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
 same BTF scalar producer-run shape. It first waits for every dependency in a
 contiguous run, then applies the run through a local row workspace. Under the
