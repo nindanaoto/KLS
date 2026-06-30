@@ -147,6 +147,28 @@ Algorithm 5 arithmetic. It still does not beat the current default top-five run
 the remaining paper gap is still broader grouped post-prefix execution rather
 than promoting direct-complete as-is.
 
+The guarded state-ragged suffix experiment
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_STATE_RAGGED_SUFFIX=1`
+tries the next direct paper-level idea inside that direct-complete private state:
+when the remaining U stream is contiguous and matches an existing ragged-L
+supernode panel, it applies that grouped dense/trailing update against the
+retained state map before falling back to the scalar dependency loop. Correctness
+passed `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_STATE_RAGGED_SUFFIX=1 ./build/kls_smoke`,
+but focused ASIC probes reject this broad probing form. On `ASIC_320ks`,
+`build/kls_direct_prefix_state_ragged_asic320ks_t4_r1_ref3_timeout120.jsonl`
+measured `22.3606s` versus `16.6473s` for the same direct-complete path with the
+suffix experiment off in
+`build/kls_direct_prefix_complete_state_ragged_gated_fixed_gap5_t4_r1_ref3_timeout120.jsonl`.
+The loss is structural: the opt-in suffix issued `187,757` ragged-L probes, but
+`175,399` were panel misses and `3,848` were stream rejects. On `ASIC_100ks`,
+the sequential diagnostic
+`build/kls_direct_prefix_state_ragged_asic100ks_seq_t4_r1_ref3_timeout45.jsonl`
+measured `12.0946s` and showed the same pattern (`95,890` probes, `92,865`
+panel misses). This closes off another tempting micro-path: KLS should not
+rediscover grouped suffix shapes one dependency at a time. The remaining paper
+gap is still a retained multi-current Algorithm 5 executor that owns the grouped
+workspaces and target slots up front.
+
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`, and
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_ADVANCE_SEED=1 ./build/kls_smoke`.

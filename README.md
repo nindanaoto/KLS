@@ -1092,6 +1092,14 @@ retained-row copy but still measured `2.4101s`. The current default on the same
 source measured `1.4629s`, so the next paper-level gap is a grouped live
 Algorithm 5 workspace that advances the remaining dependency stream for
 multiple current columns, not BLAS thresholding or retained-row copy alone.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_STATE_RAGGED_SUFFIX=1`
+is a guarded diagnostic for that remaining suffix: it tries to apply matching
+ragged-L supernode runs directly against the retained state map before falling
+back to scalar dependencies. It is intentionally not a default. `ASIC_320ks`
+slowed from `16.6473s` to `22.3606s` because the broad probe issued `187,757`
+ragged-L attempts with `175,399` panel misses; this confirms the missing paper
+piece is retained multi-current workspace ownership, not one-dependency-at-a-time
+suffix rediscovery.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and
