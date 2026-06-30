@@ -81,6 +81,22 @@ initial factorization is even farther behind but amortized over the 99 repeated
 refactors. KLS fill is only modestly worse on those rows, so the next paper-level
 work should stay on row/producer-panel grouped numeric execution and
 checked-tail scheduling, not BLAS thresholds or matrix-specific ordering tweaks.
+KLS now also has an explicit
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP=1` preparation flag
+for that work: it builds the retained payoff-group plan and Algorithm-5
+U-supernode pattern without enabling the known-losing scalar
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1` replay path. This keeps
+future grouped-executor experiments separated from scalar current replay.
+Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP=1 ./build/kls_smoke`.
+The focused top-five diagnostic
+`build/kls_alg5_group_prep_gap5_t4_r1_ref3_timeout120.jsonl` populated the hard
+ASIC grouped surfaces (`129` groups / `3,596` currents on `ASIC_320ks` and `102`
+/ `1,112` on `ASIC_100ks`) while reporting zero last-refactor ragged-L update
+runs, so it is preparation only. Its `1.7807s` geomean is not a speed claim; the
+extra retained-plan/schedule work must be consumed by a real grouped numeric
+executor before this path can close the CKTSO gap.
 
 A structural selector probe was also rejected. Raising the exact-EGraph work
 floor for the small compact dominant-BTF class from `5.0e5` to `5.0e6` moved
