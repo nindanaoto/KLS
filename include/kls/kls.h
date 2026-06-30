@@ -887,6 +887,29 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_prefix_advance_batch_max_runs;
   int64_t refactor_supernode_consumer_plan_prefix_advance_batch_max_deps;
   double refactor_supernode_consumer_plan_prefix_advance_batch_max_work;
+  int64_t refactor_supernode_consumer_plan_shape_bounded_advance_dep_limit;
+  int64_t refactor_supernode_consumer_plan_shape_bounded_advance_count;
+  int64_t refactor_supernode_consumer_plan_shape_bounded_advance_run_count;
+  int64_t refactor_supernode_consumer_plan_shape_bounded_advance_run_rows;
+  int64_t refactor_supernode_consumer_plan_shape_bounded_advance_dep_count;
+  int64_t
+    refactor_supernode_consumer_plan_shape_bounded_advance_update_entries;
+  double refactor_supernode_consumer_plan_shape_bounded_advance_work;
+  int64_t
+    refactor_supernode_consumer_plan_shape_bounded_advance_max_run_deps;
+  double refactor_supernode_consumer_plan_shape_bounded_advance_max_run_work;
+  int64_t
+    refactor_supernode_consumer_plan_shape_bounded_advance_payoff_count;
+  int64_t
+    refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_count;
+  int64_t
+    refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_rows;
+  int64_t
+    refactor_supernode_consumer_plan_shape_bounded_advance_payoff_update_entries;
+  double
+    refactor_supernode_consumer_plan_shape_bounded_advance_payoff_advance_work;
+  double
+    refactor_supernode_consumer_plan_shape_bounded_advance_max_payoff_ratio;
   int64_t refactor_supernode_algorithm5_large_panel_count;
   int64_t refactor_supernode_algorithm5_large_panel_rows;
   int64_t refactor_supernode_algorithm5_large_panel_prefix_rows;

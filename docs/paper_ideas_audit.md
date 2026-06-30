@@ -6,7 +6,37 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
-The latest refactor probe implements an opt-in compact retained-state plan for
+The latest refactor probe adds default-safe bounded owner diagnostics for the
+exact-shape group-L/refactor surface. The new
+`refactor_supernode_consumer_plan_shape_bounded_advance_*` stats count exact
+shape groups where every run reaches the retained producer panel after at most
+`128` scalar advance dependencies, then separately count the subset whose cached
+panel update entries pay for the advance work. Correctness passed
+`git diff --check`, `cmake --build build -j2`, `./build/kls_smoke`,
+`KLS_REFACTOR_SUPERNODE_CONSUMER_PLAN_OUTPUT_STATS=1 ./build/kls_smoke`, and
+`ctest --test-dir build --output-on-failure`.
+
+The result rejects a small bounded-prefix refactor owner as the clear CKTSO-gap
+closer. With group-L cache stats enabled, the focused top-five gap run
+`build/kls_bounded_refactor_owner_groupcache_gap5_t4_r1_ref3_timeout120.jsonl`
+completed all rows at `1.5700s` SPICE-cycle geomean. The exact-shape surface is
+large on the slow ASIC rows, but the bounded-and-payoff subset is tiny:
+`ASIC_320ks` has `746,229` exact-shape run rows and `2.145e9` advance work, but
+only `23,262` bounded rows and `348` bounded-payoff rows; `ASIC_320k` has
+`755,745` exact-shape rows and `2.475e9` advance work, but only `21,697`
+bounded rows and `96` payoff rows; `ASIC_100ks` has `1,047,047` exact-shape rows
+and `5.691e9` advance work, but only `35,262` bounded rows and `4,416` payoff
+rows. `rajat03` has more bounded coverage (`27,202` of `35,706` rows), but only
+`345` payoff rows.
+
+This sharpens the refactor target. KLS does not just need a guard around small
+advance prefixes; the missing paper-level mechanism must own or avoid the huge
+unbounded advance stage. A paper-shaped producer-panel/multi-current executor
+still needs to batch producer work across currents, fuse advancement with prefix
+application, and avoid publishing per-current prepared states that the scalar
+consumer later replays.
+
+The previous compact retained-state probe implemented an opt-in compact plan for
 Algorithm 5 grouped pre-prefix advance:
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_COMPACT_STATE=1`.
 For the compatible direct-prefix handoff path, the current-state row plan now
@@ -34,15 +64,6 @@ to `1,067,018` retained rows; `ASIC_100ks` dropped from `783,675` to `195,090`.
 Refactor time did not move enough (`ASIC_320ks` `0.1827s` full-state position
 control vs `0.1809s` compact+position), so retained sparse-state size is not the
 first-order CKTSO gap.
-
-The refactor focus is therefore more specific: KLS still lacks the paper-shaped
-producer-panel/multi-current numeric executor. The current grouped payoff path
-prepares current states and prefixes, but then still pays the same large
-prepared-prefix update volume (`~34M` target-entry work and `~47.9M` recorded
-U-supernode update entries on `ASIC_320ks`) plus skipped-advance work. The next
-paper-aligned refactor step should fuse grouped producer-panel advancement and
-prefix application into one multi-current executor instead of publishing
-per-current prepared states for the scalar consumer to replay.
 
 A current-source grouped-final-state probe rejects a tempting shortcut for that
 executor. The trial changed the guarded direct-prefix final-state path in

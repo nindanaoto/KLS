@@ -2366,6 +2366,60 @@ int main(int argc, char **argv) {
              .refactor_supernode_consumer_plan_prefix_advance_batch_max_deps,
            stats
              .refactor_supernode_consumer_plan_prefix_advance_batch_max_work);
+    printf(",\"refactor_supernode_consumer_plan_shape_bounded_advance_dep_limit\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_dep_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_update_entries\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_work\":%.9g"
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_max_run_deps\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_max_run_work\":%.9g"
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_payoff_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_count\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_rows\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_payoff_update_entries\":%"
+           PRId64
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_payoff_advance_work\":%.9g"
+           ",\"refactor_supernode_consumer_plan_shape_bounded_advance_max_payoff_ratio\":%.9g",
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_dep_limit,
+           stats.refactor_supernode_consumer_plan_shape_bounded_advance_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_run_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_run_rows,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_dep_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_update_entries,
+           stats.refactor_supernode_consumer_plan_shape_bounded_advance_work,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_max_run_deps,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_max_run_work,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_payoff_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_rows,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_payoff_update_entries,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_payoff_advance_work,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_max_payoff_ratio);
     printf(",\"refactor_supernode_algorithm5_large_panel_count\":%" PRId64
            ",\"refactor_supernode_algorithm5_large_panel_rows\":%" PRId64
            ",\"refactor_supernode_algorithm5_large_panel_prefix_rows\":%"
@@ -3787,6 +3841,12 @@ int main(int argc, char **argv) {
            ", prefix-advance batch %" PRId64 "/%" PRId64 "/%" PRId64
            ", prefix-advance deps/work %" PRId64 "/%.9g"
            ", prefix-advance max %" PRId64 "/%" PRId64 "/%.9g"
+           ", bounded advance limit %" PRId64
+           " groups %" PRId64 "/%" PRId64 "/%" PRId64
+           " deps/update/work %" PRId64 "/%" PRId64 "/%.9g"
+           " max %" PRId64 "/%.9g"
+           " payoff %" PRId64 "/%" PRId64 "/%" PRId64
+           "/%" PRId64 " advance %.9g max ratio %.9g"
            ", alg5 split panels %" PRId64 "/%" PRId64 "/%" PRId64
            " max %" PRId64
            ", alg5 split runs %" PRId64 "/%" PRId64
@@ -3906,6 +3966,34 @@ int main(int argc, char **argv) {
              .refactor_supernode_consumer_plan_prefix_advance_batch_max_deps,
            stats
              .refactor_supernode_consumer_plan_prefix_advance_batch_max_work,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_dep_limit,
+           stats.refactor_supernode_consumer_plan_shape_bounded_advance_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_run_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_run_rows,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_dep_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_update_entries,
+           stats.refactor_supernode_consumer_plan_shape_bounded_advance_work,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_max_run_deps,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_max_run_work,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_payoff_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_count,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_rows,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_payoff_update_entries,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_payoff_advance_work,
+           stats
+             .refactor_supernode_consumer_plan_shape_bounded_advance_max_payoff_ratio,
            stats.refactor_supernode_algorithm5_large_panel_count,
            stats.refactor_supernode_algorithm5_large_panel_rows,
            stats.refactor_supernode_algorithm5_large_panel_prefix_rows,
