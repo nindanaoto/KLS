@@ -3206,6 +3206,14 @@ int main(int argc, char **argv) {
            ",\"refactor_btf_scalar_run_rows\":%" PRId64
            ",\"refactor_btf_scalar_run_entries\":%" PRId64
            ",\"refactor_btf_scalar_run_max_rows\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_exec_runs\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_exec_rows\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_exec_entries\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_exec_max_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_exec_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_exec_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_exec_entries\":%" PRId64
+           ",\"refactor_btf_scalar_run_exec_max_rows\":%" PRId64
            ",\"refactor_supernode_update_disabled\":%d"
            ",\"refactor_supernode_update_disable_count\":%" PRId64
            ",\"refactor_last_ready_queue_columns\":%" PRId64
@@ -3282,6 +3290,14 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_rows,
            stats.refactor_btf_scalar_run_entries,
            stats.refactor_btf_scalar_run_max_rows,
+           stats.refactor_last_btf_scalar_run_exec_runs,
+           stats.refactor_last_btf_scalar_run_exec_rows,
+           stats.refactor_last_btf_scalar_run_exec_entries,
+           stats.refactor_last_btf_scalar_run_exec_max_rows,
+           stats.refactor_btf_scalar_run_exec_count,
+           stats.refactor_btf_scalar_run_exec_rows,
+           stats.refactor_btf_scalar_run_exec_entries,
+           stats.refactor_btf_scalar_run_exec_max_rows,
            stats.refactor_supernode_update_disabled,
            stats.refactor_supernode_update_disable_count,
            stats.refactor_last_ready_queue_columns,
@@ -3864,7 +3880,11 @@ int main(int argc, char **argv) {
     printf("refactor BTF scalar producer runs: last %" PRId64
            "/%" PRId64 "/%" PRId64 ", max rows %" PRId64
            ", cumulative %" PRId64 "/%" PRId64 "/%" PRId64
-           ", max rows %" PRId64 "\n",
+           ", max rows %" PRId64
+           ", exec %" PRId64 "/%" PRId64 "/%" PRId64
+           ", exec max rows %" PRId64
+           ", cumulative exec %" PRId64 "/%" PRId64 "/%" PRId64
+           ", exec max rows %" PRId64 "\n",
            stats.refactor_last_btf_scalar_run_candidates,
            stats.refactor_last_btf_scalar_run_rows,
            stats.refactor_last_btf_scalar_run_entries,
@@ -3872,7 +3892,15 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_candidate_count,
            stats.refactor_btf_scalar_run_rows,
            stats.refactor_btf_scalar_run_entries,
-           stats.refactor_btf_scalar_run_max_rows);
+           stats.refactor_btf_scalar_run_max_rows,
+           stats.refactor_last_btf_scalar_run_exec_runs,
+           stats.refactor_last_btf_scalar_run_exec_rows,
+           stats.refactor_last_btf_scalar_run_exec_entries,
+           stats.refactor_last_btf_scalar_run_exec_max_rows,
+           stats.refactor_btf_scalar_run_exec_count,
+           stats.refactor_btf_scalar_run_exec_rows,
+           stats.refactor_btf_scalar_run_exec_entries,
+           stats.refactor_btf_scalar_run_exec_max_rows);
     printf("refactor supernode consumer plan: panels %" PRId64 "/%" PRId64
            ", runs %" PRId64 ", rows %" PRId64
            ", positioned %" PRId64 "/%" PRId64

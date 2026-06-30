@@ -111,6 +111,7 @@ def egraph_scalar_numeric_owner_missing(row: dict[str, object]) -> bool:
         + int_value(row, "refactor_last_supernode_algorithm5_payoff_prefix_prep_runs")
         + int_value(row, "refactor_last_supernode_algorithm5_payoff_current_state_seed_runs")
         + int_value(row, "refactor_last_supernode_algorithm5_payoff_suffix_advance_deps")
+        + int_value(row, "refactor_last_btf_scalar_run_exec_runs")
     )
     return active_grouped_updates == 0
 
@@ -207,6 +208,8 @@ def paper_gap_signal(
             if egraph_scalar_numeric_owner_missing(cand_row):
                 if exact_shape_bounded_owner_payoff_tiny(cand_row):
                     return "egraph_scalar_bounded_owner_payoff_tiny"
+                if int_value(cand_row, "refactor_last_btf_scalar_run_exec_runs") > 0:
+                    return "egraph_btf_scalar_run_executor_active"
                 if auto_lower_rejected:
                     if btf_scalar_run_rows > 0:
                         return "egraph_scalar_tail_producer_runs_unowned"
@@ -487,6 +490,14 @@ def main() -> int:
         "refactor_btf_scalar_run_rows,"
         "refactor_btf_scalar_run_entries,"
         "refactor_btf_scalar_run_max_rows,"
+        "refactor_last_btf_scalar_run_exec_runs,"
+        "refactor_last_btf_scalar_run_exec_rows,"
+        "refactor_last_btf_scalar_run_exec_entries,"
+        "refactor_last_btf_scalar_run_exec_max_rows,"
+        "refactor_btf_scalar_run_exec_count,"
+        "refactor_btf_scalar_run_exec_rows,"
+        "refactor_btf_scalar_run_exec_entries,"
+        "refactor_btf_scalar_run_exec_max_rows,"
         "refactor_last_ready_queue_columns,"
         "refactor_ready_queue_run_count,"
         "row_refactor_group_count,"
@@ -611,7 +622,11 @@ def main() -> int:
         "refactor_last_btf_scalar_run_candidates,"
         "refactor_last_btf_scalar_run_rows,"
         "refactor_last_btf_scalar_run_entries,"
-        "refactor_last_btf_scalar_run_max_rows"
+        "refactor_last_btf_scalar_run_max_rows,"
+        "refactor_last_btf_scalar_run_exec_runs,"
+        "refactor_last_btf_scalar_run_exec_rows,"
+        "refactor_last_btf_scalar_run_exec_entries,"
+        "refactor_last_btf_scalar_run_exec_max_rows"
     )
     print(header)
     for cycle_ratio, name, cand, ref, cand_row in rows[: args.max_rows]:
@@ -852,6 +867,14 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_btf_scalar_run_rows')},"
             f"{int_value(cand_row, 'refactor_btf_scalar_run_entries')},"
             f"{int_value(cand_row, 'refactor_btf_scalar_run_max_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_runs')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_entries')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_max_rows')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_exec_count')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_exec_rows')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_exec_entries')},"
+            f"{int_value(cand_row, 'refactor_btf_scalar_run_exec_max_rows')},"
             f"{int_value(cand_row, 'refactor_last_ready_queue_columns')},"
             f"{int_value(cand_row, 'refactor_ready_queue_run_count')},"
             f"{int_value(cand_row, 'row_refactor_group_count')},"
@@ -989,7 +1012,11 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_candidates')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_rows')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_entries')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_max_rows')}"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_max_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_runs')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_entries')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_max_rows')}"
         )
     return 0
 

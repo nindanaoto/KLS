@@ -1057,6 +1057,14 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_rows;
   int64_t refactor_btf_scalar_run_entries;
   int64_t refactor_btf_scalar_run_max_rows;
+  int64_t refactor_last_btf_scalar_run_exec_runs;
+  int64_t refactor_last_btf_scalar_run_exec_rows;
+  int64_t refactor_last_btf_scalar_run_exec_entries;
+  int64_t refactor_last_btf_scalar_run_exec_max_rows;
+  int64_t refactor_btf_scalar_run_exec_count;
+  int64_t refactor_btf_scalar_run_exec_rows;
+  int64_t refactor_btf_scalar_run_exec_entries;
+  int64_t refactor_btf_scalar_run_exec_max_rows;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -12704,3 +12704,39 @@ case `egraph_scalar_tail_producer_runs_unowned` instead of the broader
 direction: the slow tail has enough contiguous producer-run surface for a
 coarse row-major/current-state owner, and the missing piece is not another BLAS
 threshold, ready queue, or scalar scatter cleanup.
+
+The first direct BTF scalar producer-run executor was implemented behind
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` and kept default execution unchanged.
+The unsafe wait-mode mutation hazard was fixed before validation: the executor
+now waits for every dependency in the run before clearing any live workspace
+entry. It also records last-pass and cumulative applied-run counters through
+`refactor_*_btf_scalar_run_exec_*`, and the gap script treats nonzero applied
+runs as `egraph_btf_scalar_run_executor_active`.
+
+The unguarded direct form was residual-clean but too slow on `ASIC_100ks`: it
+covered `46,540` producer runs, `1,100,807` rows, and `310,512,292` L entries,
+but raised one-refactor `refactor_seconds_avg` from about `0.0425s` to
+`0.1145s`. The reason matches the CKTSO/SubtreeLU paper gap: wrapping KLU's
+current scalar dependency stream added an in-run/trailing row-range branch to
+every L entry instead of preserving the branch-light trailing scatter.
+
+The committed opt-in executor therefore uses a stricter split: while building
+the retained LU pointer cache under the exec flag, KLS records whether all L row
+lists are strictly ascending. Only in that case can the executor apply the
+in-run triangular prefix locally and send the suffix through the existing
+scatter primitive. On the current `ASIC_100ks` focus case that guard correctly
+prevents execution: the same-source split benchmark
+`build/kls_btf_scalar_run_exec_split_off_asic100ks_t4_r1_ref3.json` measured
+`refactor_seconds_avg=0.0394436027`, and
+`build/kls_btf_scalar_run_exec_split_on_asic100ks_t4_r1_ref3.json` measured
+`0.0393036917` with all `refactor_last_btf_scalar_run_exec_*` counters at zero
+and `relative_residual_l2=1.92251861e-15`.
+
+Validation for this chunk passed `git diff --check`, `cmake --build build -j2`,
+`./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1 KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_STATS=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`. The result is not a default
+speed path; it narrows the paper-aligned next step to an owned row-ordered or
+grouped current-state numeric representation instead of more scalar-loop
+tuning.
