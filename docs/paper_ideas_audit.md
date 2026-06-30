@@ -7,8 +7,8 @@ solver algorithms instead of tuning individual benchmark matrices.
 ## Current Conclusion
 
 The latest Algorithm 5 grouped-prefix work now includes a targetless
-direct-prefix variant, an advance-seed probe, and a fuller retained-current-row
-state probe, without changing BLAS thresholds. The
+direct-prefix variant, an advance-seed probe, a retained-current-row state probe,
+and a final-state probe, without changing BLAS thresholds. The
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_PREP=1` path
 requests the selected payoff groups and runtime prefix workspace, but it does
 not allocate runtime target slots. When a producer-prefix trigger fires, it
@@ -23,15 +23,21 @@ over ready remaining advance dependencies before consuming the prepared prefix.
 The newer
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_CURRENT_STATE=1`
 probe stores and restores values for the compact per-current-slot row-state map,
-plus skipped U coefficients. This fills the direct CKTSO/SubtreeLU current-row
-persistence gap, but remains rejected as a default because the restore volume is
-too high in this executor shape.
+plus skipped U coefficients. The newer
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE=1`
+probe goes one step further: the grouped producer pass applies the prepared
+prefix's dense suffix and L-trailing effects into the retained current-state row
+map, so the consuming column restores that final state, writes the skipped
+advance and prefix U coefficients, and jumps past the prefix. This fills another
+direct CKTSO/SubtreeLU paper gap, but remains rejected as a default because the
+retained-state restore volume is still too high in this executor shape.
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_PREP=1 ./build/kls_smoke`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_ADVANCE_SEED=1 ./build/kls_smoke`,
 and
-`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_CURRENT_STATE=1 ./build/kls_smoke`.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_CURRENT_STATE=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE=1 ./build/kls_smoke`.
 The focused current-state value probe
 `build/kls_direct_prefix_current_state_gap5_t4_r1_ref3_timeout120.jsonl`
 completed all five rows with `2.2981s` SPICE-cycle geomean, worse than the
@@ -43,6 +49,19 @@ new path: `ASIC_320ks` restored `2,018` current states / `120,963` skipped deps
 confirms the next paper-level executor should avoid per-current restore and keep
 current workspaces live or batch producer-side advancement in place, rather than
 revisiting BLAS thresholds first.
+
+The final-state probe
+`build/kls_direct_prefix_final_state_gap5_t4_r1_ref3_timeout120.jsonl` completed
+all five focused rows with `2.2742s` SPICE-cycle geomean. It did skip the later
+prefix consumer: `ASIC_320ks` recorded `2,018` final-state restores,
+`226,588` skipped U deps including prefix rows, `1,792,538` restored state rows,
+and `126,823` direct prefix rows with zero retained target slots. `ASIC_320k`
+recorded `1,973` / `202,111` / `1,873,376` / `107,808`, and `ASIC_100ks`
+recorded `350` / `27,565` / `323,524` / `11,938`. The timing stays in the same
+bad range as the current-state restore probe, so the missing performance feature
+is not another retained-state shortcut. It is the paper's live grouped
+multi-current workspace execution, where producer-side prefix work is applied to
+current workspaces that do not have to be copied back into the scalar column path.
 
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`, and

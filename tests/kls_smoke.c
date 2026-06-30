@@ -6144,6 +6144,14 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       ? strdup(saved_algorithm5_direct_prefix_current_state_value) : NULL;
   const int had_algorithm5_direct_prefix_current_state =
     saved_algorithm5_direct_prefix_current_state_value != NULL;
+  const char *saved_algorithm5_direct_prefix_final_state_value =
+    getenv(
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE");
+  char *saved_algorithm5_direct_prefix_final_state =
+    saved_algorithm5_direct_prefix_final_state_value != NULL
+      ? strdup(saved_algorithm5_direct_prefix_final_state_value) : NULL;
+  const int had_algorithm5_direct_prefix_final_state =
+    saved_algorithm5_direct_prefix_final_state_value != NULL;
   const char *saved_algorithm5_workspace_value =
     getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_WORKSPACE");
   char *saved_algorithm5_workspace =
@@ -6305,6 +6313,15 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     perror(
       "setenv "
       "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_CURRENT_STATE=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE",
+        "0", 1) != 0) {
+    perror(
+      "setenv "
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE=0");
     ok = 0;
   }
   if (ok &&
@@ -6525,6 +6542,12 @@ static int test_egraph_cached_supernode_blocked_update(void) {
         "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_CURRENT_STATE",
         had_algorithm5_direct_prefix_current_state,
         saved_algorithm5_direct_prefix_current_state)) {
+    ok = 0;
+  }
+  if (!restore_env_value(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE",
+        had_algorithm5_direct_prefix_final_state,
+        saved_algorithm5_direct_prefix_final_state)) {
     ok = 0;
   }
   if (!restore_env_value(

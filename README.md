@@ -1051,6 +1051,17 @@ top-five CKTSO-gap check rejects this as a default too: it fills the
 CKTSO/SubtreeLU current-row persistence gap, but the hard ASIC cases restore
 hundreds of thousands to millions of state rows per run, making it slower than
 the lighter advance-seed probe.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE=1`
+is the final retained-current-state probe. It also implies direct-prefix prep and
+current-state storage. The grouped producer applies the prefix's dense suffix and
+L-trailing effects into the retained current-state rows, so the consuming column
+restores that final row state, writes the skipped advance and prefix U
+coefficients, and jumps past the prepared prefix. Benchmark JSON reports this
+through the same `refactor_last_supernode_algorithm5_payoff_current_state_*`
+counters plus direct-prefix rows in
+`refactor_last_supernode_algorithm5_payoff_prefix_prep_*`. Focused CKTSO-gap
+checks reject this as a default too: it removes the later prefix replay, but the
+large ASIC cases still copy millions of retained state rows.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and
