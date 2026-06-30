@@ -13018,3 +13018,22 @@ default probes stayed residual-clean: `ASIC_100ks` measured
 at `2.08205s` SPICE-cycle geomean. This is retained as another safe inactive
 probe guard, not as a CKTSO-gap explanation; the missing refactor mechanism is
 still the grouped live current-state owner described above.
+
+The retained BTF state executor now reports how much scalar suffix remains after
+a consumed retained state. The new last/cumulative counters split terminal
+currents, remaining suffix dependencies, and remaining suffix L-entry work. This
+tests the direct CKTSO Algorithm 5 post-factorization question: if most retained
+states are already terminal, should KLS finish those columns directly from the
+state map? Focused probes stayed residual-clean, but the counters show that
+terminal direct completion is not the large missing piece. On `ASIC_100ks`,
+`build/kls_btf_group_state_exec_suffix_asic100ks_t4_r1_ref1.json` consumed
+`14,697` retained states, of which `10,085` were terminal, with only `12,566`
+remaining suffix dependencies and `390,272` remaining L entries; nevertheless it
+still restored `738,957` state rows and refactored in `10.2357s`. On
+`ASIC_320ks`,
+`build/kls_btf_group_state_exec_suffix_asic320ks_t4_r1_ref1.json` consumed
+`16,360` states, `2,728` terminal, with `45,717` remaining dependencies and
+`396,029` remaining L entries, while restoring `898,406` rows and refactoring in
+`8.7118s`. This confirms the suffix after restore is not the first-order loss;
+the paper-level owner still has to avoid materializing/restoring one sparse
+state per current and instead keep the multi-current producer/window batch live.

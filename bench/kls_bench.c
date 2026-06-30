@@ -3383,6 +3383,9 @@ int main(int argc, char **argv) {
            ",\"refactor_last_btf_scalar_run_group_state_exec_currents\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_skipped_deps\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_restored_rows\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_terminal_currents\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_remaining_deps\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_exec_remaining_entries\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_rejects\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_dispatch_bypass_currents\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_dispatch_bypass_ready_currents\":%" PRId64
@@ -3417,6 +3420,9 @@ int main(int argc, char **argv) {
            ",\"refactor_btf_scalar_run_group_state_exec_current_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_skipped_deps\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_restored_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_terminal_current_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_remaining_deps\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_exec_remaining_entries\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_reject_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_dispatch_bypass_current_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_dispatch_bypass_ready_current_count\":%" PRId64
@@ -3465,6 +3471,9 @@ int main(int argc, char **argv) {
            stats.refactor_last_btf_scalar_run_group_state_exec_currents,
            stats.refactor_last_btf_scalar_run_group_state_exec_skipped_deps,
            stats.refactor_last_btf_scalar_run_group_state_exec_restored_rows,
+           stats.refactor_last_btf_scalar_run_group_state_exec_terminal_currents,
+           stats.refactor_last_btf_scalar_run_group_state_exec_remaining_deps,
+           stats.refactor_last_btf_scalar_run_group_state_exec_remaining_entries,
            stats.refactor_last_btf_scalar_run_group_state_exec_rejects,
            stats
              .refactor_last_btf_scalar_run_group_state_exec_dispatch_bypass_currents,
@@ -3504,6 +3513,9 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_state_exec_current_count,
            stats.refactor_btf_scalar_run_group_state_exec_skipped_deps,
            stats.refactor_btf_scalar_run_group_state_exec_restored_rows,
+           stats.refactor_btf_scalar_run_group_state_exec_terminal_current_count,
+           stats.refactor_btf_scalar_run_group_state_exec_remaining_deps,
+           stats.refactor_btf_scalar_run_group_state_exec_remaining_entries,
            stats.refactor_btf_scalar_run_group_state_exec_reject_count,
            stats
              .refactor_btf_scalar_run_group_state_exec_dispatch_bypass_current_count,

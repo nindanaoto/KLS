@@ -1303,7 +1303,8 @@ farthest retained member per current column, restores that state when the
 column is dispatched through either wait or no-wait plain-scalar BTF paths,
 writes the skipped U entries, and lets the existing suffix, pivot check, and
 L-store path finish the column. Benchmark JSON reports last and cumulative
-state-exec current, skipped-dependency, restored-row, and reject counts. It also
+state-exec current, skipped-dependency, restored-row, terminal-current,
+remaining-suffix-dependency, remaining-suffix-entry, and reject counts. It also
 reports dispatch bypasses where the BTF column had a selected retained state but
 the restore hook was gated off, and splits remaining misses into
 not-ready-at-dispatch, ready-while-owned, and ready-after-done buckets. When
