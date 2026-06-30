@@ -11043,3 +11043,31 @@ queue/plan overhead and rose from `0.122342586544s` to `0.37090529484s`.
 This rejects queue scheduling as the first-order CKTSO-gap fix. The missing
 paper-level part remains grouped multi-current numeric execution, not BLAS
 thresholding and not earlier scalar-column queue placement.
+
+The cached EGraph supernode consumer now also implements SubtreeLU's
+large-dependent-supernode split rule. When `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES`
+is active and dependency waiting is required, a retained cached-panel run with
+at least `2 * threads` producer rows may consume the completed prefix ending
+`threads` rows before the producer supernode tail, then leave the tail for the
+next dependency-run iteration. `KLS_ENABLE_EGRAPH_SUPERNODE_SPLIT=0` disables
+the split for same-binary A/B checks; the existing ragged-L Algorithm 5
+prefactor split uses the same helper.
+
+Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1 ./build/kls_smoke`, and
+`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1 KLS_ENABLE_EGRAPH_SUPERNODE_SPLIT=0 ./build/kls_smoke`.
+The focused top-five CKTSO-gap default control
+`build/kls_subtree_split_default_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.419884637649015s` geomean. The cached-supernode path with the split disabled
+`build/kls_subtree_split_supernode_off_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `1.5582262938112768s`; with the split enabled,
+`build/kls_subtree_split_supernode_on_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `1.5670838569234982s`. The split reduced cached rows on
+`ASIC_100ks`, `ASIC_320ks`, and `rajat03`, but the full cached path still lost
+to the default scalar EGraph path. Forced SCOTCH ordering was also rejected on
+this focused set: `build/kls_order_scotch_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `2.8342883267318753s`, while auto already selected METIS on the hard
+ASIC rows. This keeps the next high-value work on the grouped Algorithm 5
+multi-current executor, not SCOTCH promotion, BLAS thresholds, or cached-panel
+splitting alone.

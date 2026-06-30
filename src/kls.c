@@ -1398,6 +1398,7 @@ typedef struct kls_egraph_refactor_shared {
   int pipeline_natural_order;
   int pipeline_supernode_tasks;
   int supernode_numeric_updates;
+  int subtree_supernode_split;
   int supernode_cached_updates_only;
   int supernode_consumer_plan_exec;
   int supernode_consumer_plan_only;
@@ -50739,12 +50740,13 @@ static void kls_egraph_record_u_supernode_l_work_reject(
                             memory_order_relaxed);
 }
 
-static UF_long kls_egraph_algorithm5_split_available_end(
+static UF_long kls_egraph_subtree_split_available_end(
   const kls_egraph_refactor_shared *shared,
   UF_long panel_offset,
   UF_long available_end) {
-  if (shared == NULL || !shared->u_supernode_ragged_l_updates ||
-      shared->thread_count <= 0 || available_end <= panel_offset) {
+  if (shared == NULL || !shared->subtree_supernode_split ||
+      shared->thread_count <= 0 ||
+      available_end <= panel_offset) {
     return available_end;
   }
 
@@ -50757,6 +50759,17 @@ static UF_long kls_egraph_algorithm5_split_available_end(
 
   const UF_long prefix_rows = run_rows - tail_rows;
   return prefix_rows > 1u ? panel_offset + prefix_rows : available_end;
+}
+
+static UF_long kls_egraph_algorithm5_split_available_end(
+  const kls_egraph_refactor_shared *shared,
+  UF_long panel_offset,
+  UF_long available_end) {
+  if (shared == NULL || !shared->u_supernode_ragged_l_updates) {
+    return available_end;
+  }
+  return kls_egraph_subtree_split_available_end(
+    shared, panel_offset, available_end);
 }
 
 static void kls_egraph_disable_supernode_panel(kls_solver *solver,
@@ -52497,6 +52510,11 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
         shared, planned_run_rows);
       return 0;
     }
+  }
+  if (wait_for_dependencies) {
+    available_end =
+      kls_egraph_subtree_split_available_end(shared, panel_offset,
+                                             available_end);
   }
   if (available_end <= panel_offset + 1u) {
     kls_egraph_record_cached_probe_shape_reject(
@@ -55537,6 +55555,11 @@ static int kls_egraph_supernode_numeric_updates_env_mode(void) {
   return 1;
 }
 
+static int kls_egraph_subtree_supernode_split_env_enabled(void) {
+  const char *value = getenv("KLS_ENABLE_EGRAPH_SUPERNODE_SPLIT");
+  return value == NULL || value[0] == '\0' || strcmp(value, "0") != 0;
+}
+
 static int kls_egraph_ready_queue_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_EGRAPH_READY_QUEUE");
   return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
@@ -57773,6 +57796,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     (natural_pipeline && kls_egraph_supernode_tasks_env_enabled()) ? 1 : 0;
   shared->supernode_numeric_updates =
     supernode_numeric_updates ? 1 : 0;
+  shared->subtree_supernode_split =
+    kls_egraph_subtree_supernode_split_env_enabled() ? 1 : 0;
   shared->supernode_cached_updates_only =
     cached_supernode_updates_only ? 1 : 0;
   shared->supernode_consumer_plan_exec =
@@ -58170,6 +58195,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->pipeline_claimed = NULL;
   shared->pipeline_claim_generation = 0u;
   shared->pipeline_lease_generation = 0u;
+  shared->subtree_supernode_split = 0;
   shared->supernode_consumer_plan_group_l_batch_exec = 0;
   shared->supernode_consumer_plan_shape_claims = 0;
   shared->supernode_algorithm5_payoff_exec = 0;

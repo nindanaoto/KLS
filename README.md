@@ -842,6 +842,12 @@ EGraph panel with a unit-diagonal `dtrsv` over the retained internal panel plus
 show this removes the worst rebuild overhead, but the path is still slower than
 default KLS because the broad default path still needs coarser batched panel
 kernels.
+When dependency waiting is active, the cached-panel consumer follows the
+SubtreeLU large-supernode split rule: if a retained producer run has at least
+`2 * threads` rows, it may consume the completed prefix ending `threads` rows
+before the producer supernode tail and leave the tail for the next dependency
+iteration. Set `KLS_ENABLE_EGRAPH_SUPERNODE_SPLIT=0` to disable this split for
+A/B runs.
 The retained consumer-plan diagnostics also report group-L batch candidate
 payoff counters:
 `refactor_supernode_consumer_plan_group_l_batch_candidate_advance_*` measures
