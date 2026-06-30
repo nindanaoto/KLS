@@ -46,6 +46,7 @@
 #define KLS_ROW_REFACTOR_DENSE_MIN_WORK 1024.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY 8.0
+#define KLS_ROW_REFACTOR_NATIVE_PANEL_AUTO_MIN_WORK 10000000.0
 #define KLS_ROW_REFACTOR_CBLAS_BLOCK_ROWS 32u
 #define KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS 512u
 #define KLS_ROW_REFACTOR_CBLAS_MIN_BATCH_ROWS 64u
@@ -42744,10 +42745,23 @@ static int kls_native_row_panel_env_state(void) {
   return KLS_NATIVE_ROW_PANEL_ENV_ON;
 }
 
+static int kls_native_row_panel_structural_auto_allows(
+  const kls_solver *solver) {
+  return solver != NULL &&
+         solver->row_refactor_compact_dense_panel_persistent_groups > 0u &&
+         solver->row_refactor_compact_dense_panel_eligible_rows > 1u &&
+         solver->row_refactor_compact_dense_panel_update_work >=
+           KLS_ROW_REFACTOR_NATIVE_PANEL_AUTO_MIN_WORK &&
+         solver->row_refactor_compact_dense_panel_update_work >=
+           KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY *
+             solver->row_refactor_compact_dense_panel_entries;
+}
+
 static int kls_native_row_panel_effective_state(const kls_solver *solver) {
   const int env_state = kls_native_row_panel_env_state();
   if (env_state == KLS_NATIVE_ROW_PANEL_ENV_UNSET && solver != NULL &&
-      solver->row_refactor_auto_native_row_panel) {
+      (solver->row_refactor_auto_native_row_panel ||
+       kls_native_row_panel_structural_auto_allows(solver))) {
     return KLS_NATIVE_ROW_PANEL_ENV_AUTO;
   }
   return env_state == KLS_NATIVE_ROW_PANEL_ENV_UNSET

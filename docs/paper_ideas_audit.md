@@ -12313,3 +12313,20 @@ grouped supernode/current-state executor counter fires. That label is meant to
 keep the next implementation directed at the paper's row-major supernode or
 multi-current numeric owner, not at BLAS thresholds, ready queues, or another
 thin wrapper around the scalar dependency stream.
+
+The row-refactor path now takes one narrow paper-aligned step toward that
+owner: unset `KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR` behaves like `auto` only
+when the retained row-refactor pattern already has persistent compact dense
+panels and at least `1e7` modeled compact-panel update work. This keeps explicit
+`0`, `auto`, and `1` semantics unchanged, skips small pure-panel cases such as
+`rajat03`, and lets large ASIC-style row refactors use the retained
+row-panel/supernode executor without a manual env override. Same-source
+forced row-refactor top-five checks with refactor-repeat 10 measured
+`3.20631s` geomean for the structural auto gate versus `3.42501s` with
+`KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=0`
+(`build/kls_structural_native_auto_gap5_t4_r1_ref10_timeout120.jsonl`,
+`build/kls_structural_native_auto_off_gap5_t4_r1_ref10_timeout120.jsonl`).
+The default selector remained on EGraph/mapped refactor paths at `1.46054s` in
+`build/kls_structural_native_auto_default_gap5_t4_r1_ref3_timeout120.jsonl`.
+This is worth retaining as a scoped row-panel dispatch fix, but the large CKTSO
+gap remains the missing production row-major grouped numeric owner.
