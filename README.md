@@ -1021,6 +1021,19 @@ JSON still reports the skipped suffix/trailing work as
 this direct mode. The flag is opt-in: focused CKTSO-gap checks show it removes
 the retained target workspace and improves the retained-target grouped probe,
 but it is still slower than the default EGraph path.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_ADVANCE_SEED=1`
+adds an additional opt-in probe on top of direct-prefix prep. The grouped
+producer records the post-advance row workspace slots and skipped U
+coefficients using the existing Algorithm 5 advance descriptors; the consuming
+column can then restore that state and jump over any remaining advance
+dependencies before consuming the prepared prefix. Benchmark JSON reports this
+through `refactor_last_supernode_algorithm5_payoff_advance_seed_runs`,
+`refactor_last_supernode_algorithm5_payoff_advance_seed_deps`, and
+`refactor_last_supernode_algorithm5_payoff_advance_seed_slots`. This validates
+the paper-level missing piece that direct-prefix prep was otherwise replaying,
+but it remains rejected as a default: the focused ASIC cases skip many advance
+dependencies, yet restoring hundreds of thousands of row slots is slower than
+the targetless direct-prefix probe and the default EGraph path.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and

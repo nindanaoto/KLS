@@ -6,24 +6,34 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
-The latest Algorithm 5 grouped-prefix probe is now the targetless direct-prefix
-variant, without changing BLAS thresholds. The new
+The latest Algorithm 5 grouped-prefix work now includes a targetless
+direct-prefix variant and an additional advance-seed probe, without changing
+BLAS thresholds. The
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_PREP=1` path
 requests the selected payoff groups and runtime prefix workspace, but it does
 not allocate runtime target slots. When a producer-prefix trigger fires, it
 claims eligible current slots, prepares their prefix workspaces, applies only
 the internal prefix triangular work, and later lets the ordinary ragged-L path
 consume the ready prefix while streaming dense suffix and L-trailing updates
-directly into the current column workspace.
+directly into the current column workspace. The newer
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_ADVANCE_SEED=1`
+probe records post-advance row-workspace slots plus skipped U coefficients
+from the same Algorithm 5 advance descriptors, so a consuming column can jump
+over ready remaining advance dependencies before consuming the prepared prefix.
 
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`, and
-`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_PREP=1 ./build/kls_smoke`.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_ADVANCE_SEED=1 ./build/kls_smoke`.
 The focused probe `build/asic100ks_direct_prefix_prep_probe.json` reported an
 EGraph refactor, runtime workspace rows `20,859`, runtime target slots `0`,
 `350` consumed prefix-prep runs, `11,938` prefix rows, `3.65M` direct
 suffix/trailing target entries, zero retained target slots, and `1.92e-15`
 relative residual.
+The matching advance-seed probe
+`build/asic100ks_direct_prefix_advance_seed_probe.json` preserved the same
+`1.92e-15` residual and reported `346` advance-seed runs, `16,109` skipped
+advance deps, and `113,341` restored row slots, but refactor time rose to about
+`0.099s` on the single probe.
 
 The targetless direct-prefix executor is a partial paper-aligned improvement,
 but still not the CKTSO closer. The top-five focused run
@@ -39,6 +49,16 @@ retained target slots. This matches the paper-level diagnosis: avoiding retained
 targets helps, but KLS is still not executing CKTSO/SubtreeLU's full
 row-workspace prefactor/postfactor pipeline with enough overlap and locality to
 beat the default EGraph path.
+The advance-seed top-five run
+`build/kls_direct_prefix_advance_seed_gap5_t4_r1_ref3_timeout120.jsonl`
+completed all five rows with `2.2868s` SPICE-cycle geomean. It did skip real
+work (`ASIC_320ks`: `2,017` seed runs, `120,895` skipped deps, `664,375`
+restored slots; `ASIC_320k`: `1,972`/`113,755`/`738,427`; `ASIC_100ks`:
+`346`/`16,109`/`113,341`), but the row-slot restore traffic made it slower
+than targetless direct-prefix prep. This rejects advance seeding as currently
+implemented and sharpens the remaining paper gap: KLS needs a true shared
+multi-current row-workspace pipeline, not a per-current restore of the
+post-advance state.
 
 The latest retained-target cleanup follows the Algorithm 5 descriptor more
 directly without revisiting BLAS thresholds. In the scalar payoff slot-accum and

@@ -2474,6 +2474,12 @@ int main(int argc, char **argv) {
            ",\"refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries\":%"
            PRId64
            ",\"refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_advance_seed_runs\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_advance_seed_deps\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_advance_seed_slots\":%"
            PRId64,
            stats.refactor_last_supernode_algorithm5_payoff_slot_accum_runs,
            stats.refactor_last_supernode_algorithm5_payoff_slot_accum_rows,
@@ -2486,7 +2492,10 @@ int main(int argc, char **argv) {
            stats
              .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries,
            stats
-             .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots);
+             .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots,
+           stats.refactor_last_supernode_algorithm5_payoff_advance_seed_runs,
+           stats.refactor_last_supernode_algorithm5_payoff_advance_seed_deps,
+           stats.refactor_last_supernode_algorithm5_payoff_advance_seed_slots);
     printf(",\"refactor_l_pattern_columns\":%" PRId64
            ",\"refactor_l_pattern_entries\":%" PRId64
            ",\"refactor_l_adjacent_run_count\":%" PRId64
