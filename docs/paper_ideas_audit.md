@@ -12432,3 +12432,25 @@ This rejects the seed-copy staging as the large missing mechanism. The
 Algorithm 5 gap is still downstream of, or broader than, the initial seed:
 the retained sparse current states and grouped executor ownership model remain
 the target.
+
+A branch-light scalar scatter cleanup in the default BTF EGraph refactor was
+also tested and rejected before commit. The prototype split the generic
+`kls_scatter_subtract*` helpers into checked and already-nonzero variants,
+marked `kls_egraph_refactor_apply_btf_scalar_dep` always-inline, and skipped
+L-column pointer loads for empty L columns. It passed `cmake --build build -j2`,
+`./build/kls_smoke`, `ctest --test-dir build --output-on-failure`, and
+`git diff --check`, but a clean same-source A/B against a detached HEAD
+baseline showed no robust improvement. On the current top-five CKTSO-gap
+manifest, patched runs measured `7.7090s` and `7.7365s` SPICE-cycle geomean in
+`build/kls_scalar_scatter_nonzero_gap5_t4_r1_ref3_timeout120.jsonl` and
+`build/kls_scalar_scatter_nonzero_gap5_t4_r1_ref3_timeout120_r2.jsonl`, while
+the clean baseline worktree measured `7.7531s` and `7.6663s` in
+`build/kls_baseline_head_gap5_t4_r1_ref3_timeout120*.jsonl`.
+Median refactor-only geomean was effectively identical: `0.06003s` patched
+versus `0.06002s` baseline. The patch helped the hard ASIC_320k/ASIC_320ks
+median refactor rows by about `1.8%` and `2.2%`, but regressed ASIC_100ks,
+G2_circuit, and onetone2 enough to erase the geomean. This keeps the accepted
+diagnosis unchanged: the refactor loss is not a missed scalar branch in
+`kls_egraph_refactor_apply_btf_scalar_dep`; the paper-sized gap is still the
+row-major/supernode current-state numeric owner that reduces the scalar
+dependency stream instead of polishing it.
