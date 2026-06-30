@@ -6099,6 +6099,13 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     saved_algorithm5_queue_value != NULL ? strdup(saved_algorithm5_queue_value)
                                          : NULL;
   const int had_algorithm5_queue = saved_algorithm5_queue_value != NULL;
+  const char *saved_algorithm5_queue_prefetch_value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE_PREFETCH");
+  char *saved_algorithm5_queue_prefetch =
+    saved_algorithm5_queue_prefetch_value != NULL
+      ? strdup(saved_algorithm5_queue_prefetch_value) : NULL;
+  const int had_algorithm5_queue_prefetch =
+    saved_algorithm5_queue_prefetch_value != NULL;
   const char *saved_algorithm5_group_prep_value =
     getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP");
   char *saved_algorithm5_group_prep =
@@ -6144,6 +6151,8 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       (had_algorithm5_exec && saved_algorithm5_exec == NULL) ||
       (had_algorithm5_claims && saved_algorithm5_claims == NULL) ||
       (had_algorithm5_queue && saved_algorithm5_queue == NULL) ||
+      (had_algorithm5_queue_prefetch &&
+       saved_algorithm5_queue_prefetch == NULL) ||
       (had_algorithm5_group_prep && saved_algorithm5_group_prep == NULL) ||
       (had_algorithm5_workspace && saved_algorithm5_workspace == NULL) ||
       (had_algorithm5_slot_accum && saved_algorithm5_slot_accum == NULL)) {
@@ -6200,6 +6209,14 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       setenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE", "0",
              1) != 0) {
     perror("setenv KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE_PREFETCH",
+             "0", 1) != 0) {
+    perror(
+      "setenv "
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE_PREFETCH=0");
     ok = 0;
   }
   if (ok &&
@@ -6389,6 +6406,11 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     ok = 0;
   }
   if (!restore_env_value(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE_PREFETCH",
+        had_algorithm5_queue_prefetch, saved_algorithm5_queue_prefetch)) {
+    ok = 0;
+  }
+  if (!restore_env_value(
         "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP",
         had_algorithm5_group_prep, saved_algorithm5_group_prep)) {
     ok = 0;
@@ -6415,6 +6437,7 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   free(saved_algorithm5_exec);
   free(saved_algorithm5_claims);
   free(saved_algorithm5_queue);
+  free(saved_algorithm5_queue_prefetch);
   free(saved_algorithm5_group_prep);
   free(saved_algorithm5_workspace);
   free(saved_algorithm5_slot_accum);

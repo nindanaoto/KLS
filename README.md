@@ -980,6 +980,16 @@ focused Sandia probes showed that the queue is correct and bounded but does not
 close the CKTSO gap, while broader claim-on-publish variants can stall large
 cases. The existing claimed/skipped/wait counters report how much queued work was
 actually taken.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE_PREFETCH=1` implies the
+same retained payoff queue and enables an experimental CKTSO Algorithm 5
+prefactor/postfactor scheduling probe: after a producer-prefix trigger column
+finishes, KLS may queue up to `8 * threads` unclaimed current-column hints whose
+full U dependency list is not complete yet. Queue consumers claim those hints
+only if the dependencies are complete by the time the hint is popped; otherwise
+the ordinary pipeline remains responsible for the column. This path requires the
+guarded Algorithm 5 EGraph prefactor state, leaves the default queue behavior
+unchanged, and remains off by default because it still does not add the
+still-missing grouped multi-current numeric executor.
 Set `KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN=1` to also retain the exact
 row-major U-supernode structural object from the same schedule pass. Benchmark
 JSON reports `refactor_u_supernode_pattern_count`,

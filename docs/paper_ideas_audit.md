@@ -11011,3 +11011,35 @@ each current column separately. Closing the large slow-case gap requires the
 actual grouped multi-current numeric executor that advances several retained
 current workspaces through the same producer panel together and then publishes
 their target slots, not BLAS threshold tuning or CPU-specific changes.
+
+The Algorithm 5 payoff queue now also has an opt-in prefix-triggered prefetch
+probe under
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE_PREFETCH=1`. The first
+implementation preclaimed current columns before all scalar U predecessors were
+complete; the focused CKTSO-gap run
+`build/kls_queuepref_prefetch_fixed_gap5_t4_r1_ref3_timeout120.jsonl` timed out
+on `ASIC_320ks`, `ASIC_320k`, and `ASIC_100ks` at the 120s per-matrix limit.
+That failure is useful: without the paper's separate postfactor task graph,
+preclaiming an unfinished scalar column can make the ordinary EGraph pipeline
+wait on work that is not actually executable yet.
+
+The committed version therefore uses unclaimed prefetch hints. A prefix trigger
+may queue up to `8 * threads` not-yet-ready current columns, but a queue consumer
+claims and executes such a hint only if the dependencies are complete when the
+hint is popped; otherwise the ordinary pipeline remains responsible for the
+column. Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE_PREFETCH=1 ./build/kls_smoke`.
+The same-build top-five CKTSO-gap control
+`build/kls_queuepref_default_samebuild_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `1.3987571728147734s` geomean; the existing payoff queue
+`build/kls_queuepref_queue_samebuild_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.7752554941984127s`; and the safe prefetch-hint run
+`build/kls_queuepref_prefetch_hint_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.7573032538167448s`. The ASIC rows claimed only `13`, `13`, and `0` columns
+respectively under prefetch hints, while the zero-group `rajat03` row still paid
+queue/plan overhead and rose from `0.122342586544s` to `0.37090529484s`.
+This rejects queue scheduling as the first-order CKTSO-gap fix. The missing
+paper-level part remains grouped multi-current numeric execution, not BLAS
+thresholding and not earlier scalar-column queue placement.
