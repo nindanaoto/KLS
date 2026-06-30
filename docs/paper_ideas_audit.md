@@ -83,10 +83,12 @@ work should stay on row/producer-panel grouped numeric execution and
 checked-tail scheduling, not BLAS thresholds or matrix-specific ordering tweaks.
 KLS now also has an explicit
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP=1` preparation flag
-for that work: it builds the retained payoff-group plan and Algorithm-5
-U-supernode pattern without enabling the known-losing scalar
+for that work: it builds the retained payoff-group plan, and now only builds the
+Algorithm-5 U-supernode pattern when the payoff plan actually finds groups,
+without enabling the known-losing scalar
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1` replay path. This keeps
-future grouped-executor experiments separated from scalar current replay.
+future grouped-executor experiments separated from scalar current replay and
+keeps no-group cases from paying retained-pattern setup cost under the prep flag.
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`, and
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP=1 ./build/kls_smoke`.

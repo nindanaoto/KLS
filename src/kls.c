@@ -58189,17 +58189,18 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   const int record_stream_stats = kls_refactor_stream_stats_env_enabled();
   const int build_plan_u_supernode_pattern =
     kls_refactor_u_supernode_plan_pattern_env_enabled() ||
-    algorithm5_payoff_exec ||
-    algorithm5_payoff_group_prep;
+    algorithm5_payoff_exec;
   const int build_algorithm5_payoff_u_supernode_pattern =
     algorithm5_payoff_exec ||
-    algorithm5_payoff_group_prep;
+    (algorithm5_payoff_group_prep &&
+     solver->refactor_supernode_algorithm5_payoff_group_count > 0u);
   const int need_u_supernode_pattern =
     supernode_consumer_stats_env ||
     kls_refactor_u_supernode_pattern_env_enabled() ||
     kls_refactor_u_supernode_values_env_enabled() ||
     kls_refactor_u_supernode_ragged_l_env_enabled() ||
-    build_plan_u_supernode_pattern;
+    build_plan_u_supernode_pattern ||
+    build_algorithm5_payoff_u_supernode_pattern;
   if (solver->refactor_level_ptr != NULL &&
       solver->refactor_supernode_pipeline_end != NULL &&
       (!need_pipeline_ready_graph ||
@@ -58677,8 +58678,12 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       return 0;
     }
   }
+  const int algorithm5_payoff_group_prep_surface_ready =
+    algorithm5_payoff_group_prep &&
+    solver->refactor_supernode_algorithm5_payoff_group_count > 0u;
   const int build_algorithm5_payoff_u_pattern_after_plan =
-    build_algorithm5_payoff_u_supernode_pattern ||
+    algorithm5_payoff_exec ||
+    algorithm5_payoff_group_prep_surface_ready ||
     (algorithm5_payoff_claims &&
      kls_refactor_supernode_algorithm5_payoff_claim_surface_allowed(
        solver, solver->options.threads));
