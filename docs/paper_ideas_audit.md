@@ -92,6 +92,23 @@ real row numeric-kernel improvement, but it does not change the broader
 conclusion: KLS still needs the larger production row/segment panel executor to
 make forced row refactor competitive with the default EGraph path and CKTSO.
 
+The same refactor-only callgrind pass exposed one retained scheduler-build
+cleanup that is worth keeping but not enough to change direction. Row-refactor
+successor ordering sorted every successor list through a malloc/qsort/free path,
+even though the row task graph is dominated by tiny fanout lists. KLS now sorts
+lists of at most `32` groups in place with the same work-descending and
+group-id tie order, while preserving qsort for large root lists. On one-thread
+forced-row `ASIC_100ks`, the callgrind instruction total moved from `3.8385B`
+after the packed accumulator to `3.7862B`, and the visible libc qsort-family
+entries fell from tens of millions of instructions to only the remaining
+large-list sort. The same-machine top-five forced-row pass-3 comparison against
+the previous committed control `0ed2402` measured
+`build/kls_control_0ed2402_forcedrow_gap5_t4_r1_ref3_p3_timeout120.jsonl` at
+`3.7495s` geomean and
+`build/kls_small_sort_forcedrow_gap5_t4_r1_ref3_p3_timeout120.jsonl` at
+`3.7331s` (`0.996x`). This is retained as a scheduler-overhead reduction, not
+as the missing CKTSO/SubtreeLU row numeric executor.
+
 An active producer-bucket grouped advance executor was prototyped and rejected
 before commit. The trial kept the retained position-coded Algorithm 5
 pre-prefix state plan, but replaced the runtime scan over active current

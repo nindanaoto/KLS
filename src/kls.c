@@ -60,6 +60,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_KLU_EMPTY ((UF_long)-1)
 #define KLS_ROW_REFACTOR_BATCH_MIN_ROWS 8u
 #define KLS_ROW_REFACTOR_BATCH_MAX_ROWS 16u
+#define KLS_ROW_REFACTOR_SMALL_SORT_MAX 32u
 #define KLS_ROW_REFACTOR_DENSE_MIN_WORK 1024.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY 8.0
@@ -40779,6 +40780,20 @@ static int kls_compare_row_refactor_group_work_desc(const void *a,
   return 0;
 }
 
+static KLS_ALWAYS_INLINE int kls_row_refactor_group_work_before(
+  UF_long a_group,
+  double a_work,
+  UF_long b_group,
+  double b_work) {
+  if (a_work > b_work) {
+    return 1;
+  }
+  if (a_work < b_work) {
+    return 0;
+  }
+  return a_group < b_group;
+}
+
 static double kls_row_refactor_compute_group_work(const kls_solver *solver,
                                                   UF_long group) {
   if (solver == NULL || group >= solver->row_refactor_group_count ||
@@ -40844,6 +40859,26 @@ static int kls_sort_row_refactor_group_list_by_work(
   if (solver == NULL || groups == NULL || count <= 1u) {
     return 1;
   }
+  if (count <= KLS_ROW_REFACTOR_SMALL_SORT_MAX) {
+    for (UF_long i = 1u; i < count; ++i) {
+      const UF_long group = groups[i];
+      const double work = kls_row_refactor_group_work(solver, group);
+      UF_long j = i;
+      while (j > 0u) {
+        const UF_long prev_group = groups[j - 1u];
+        const double prev_work =
+          kls_row_refactor_group_work(solver, prev_group);
+        if (!kls_row_refactor_group_work_before(group, work,
+                                                prev_group, prev_work)) {
+          break;
+        }
+        groups[j] = prev_group;
+        j--;
+      }
+      groups[j] = group;
+    }
+    return 1;
+  }
   if (count > (UF_long)(SIZE_MAX / sizeof(kls_row_refactor_group_work_entry))) {
     return 0;
   }
@@ -40871,6 +40906,25 @@ static int kls_sort_row_refactor_group_list_by_cached_work(
   UF_long count,
   const double *group_work) {
   if (groups == NULL || group_work == NULL || count <= 1u) {
+    return 1;
+  }
+  if (count <= KLS_ROW_REFACTOR_SMALL_SORT_MAX) {
+    for (UF_long i = 1u; i < count; ++i) {
+      const UF_long group = groups[i];
+      const double work = group_work[group];
+      UF_long j = i;
+      while (j > 0u) {
+        const UF_long prev_group = groups[j - 1u];
+        const double prev_work = group_work[prev_group];
+        if (!kls_row_refactor_group_work_before(group, work,
+                                                prev_group, prev_work)) {
+          break;
+        }
+        groups[j] = prev_group;
+        j--;
+      }
+      groups[j] = group;
+    }
     return 1;
   }
   if (count > (UF_long)(SIZE_MAX / sizeof(kls_row_refactor_group_work_entry))) {
