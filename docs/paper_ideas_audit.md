@@ -12151,3 +12151,21 @@ measured `2.2805s` in
 `build/kls_btf_i32_direct_gap10_t4_r1_ref3_timeout120.jsonl`. This is a small
 accepted scalar cleanup, not evidence that scalar tuning replaces the still
 missing grouped producer/current-state executor.
+
+A follow-up generalization of that cleanup was tested and rejected before
+commit. The prototype added a reusable alias-aware scatter helper, marked the
+BTF scalar dependency helper always-inline, and threaded local `refactor_l_indices32`
+aliases through the single-block, generic, and Algorithm 5 prefix-advance
+EGraph scalar loops. It built cleanly and passed `./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and `git diff --check`, but the
+timing did not justify the added churn. The focused top-five CKTSO-gap run
+`build/kls_egraph_alias_direct_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`1.4184s`, essentially the same as the retained BTF-only cleanup. On top ten,
+one candidate run improved a same-machine stashed baseline from `2.3467s` to
+`2.2915s`, but a second candidate pass regressed to `2.3734s` in
+`build/kls_egraph_alias_direct_gap10_t4_r1_ref3_timeout120_r2.jsonl`, and the
+hard ASIC rows were neutral or slower. The source patch was reverted. This
+keeps the accepted direct-i32 change limited to the measured BTF scalar stream
+and reinforces that the next useful refactor work is still the grouped
+multi-current producer/current-state executor, not broader scalar scatter
+plumbing.
