@@ -6,6 +6,40 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The latest Algorithm 5 grouped-prefix probe implements the retained
+multi-current handoff directly, without changing BLAS thresholds. The new
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREFIX_PREP=1` path
+requests the retained payoff plan, runtime workspace, target slots, and current
+state; when a producer-prefix trigger fires, it claims eligible current slots,
+prepares their prefix workspaces, applies dense/trailing retained target slots
+as a grouped pass, and then lets the ordinary ragged-L path consume the ready
+prefixes. Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREFIX_PREP=1 ./build/kls_smoke`.
+Focused probes confirmed that the executor is live and numerically correct:
+`build/asic100ks_group_prefix_prep_probe.json` reported an EGraph refactor,
+`350` consumed prefix-prep runs, `11,938` prefix rows, `109,628` target slots,
+and `1.92e-15` relative residual; `build/asic320k_group_prefix_prep_probe.json`
+reported `1,973` consumed prefix-prep runs, `107,808` prefix rows, `696,846`
+target slots, and `2.04e-15` relative residual.
+
+The grouped retained-target executor is still not the CKTSO closer. The top-five
+focused run
+`build/kls_group_prefix_prep_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`2.3654s` SPICE-cycle geomean, slower than the same-source default
+`build/kls_dense_direct_default_gap5_t4_r1_ref3_timeout120.jsonl` at `1.3810s`
+and slower than the scalar prefix/slot probes at `2.0942s`/`2.1187s`. The large
+ASIC rows executed thousands of retained current slots and tens of millions of
+target-entry updates; for example `ASIC_320k` recorded `1,973` consumed
+prefix-prep runs and `41.9M` retained target-entry updates. This negative result
+matches the papers' distinction: CKTSO Algorithm 5 prefactorizes the current row
+with already-finished predecessors and postfactorizes the skipped predecessors,
+while SubtreeLU Algorithm 5 waits for supernode prefixes/suffixes and applies
+them directly to the current row work vector. KLS's retained-target probe instead
+materializes a future update surface. The next paper-aligned fix is therefore a
+direct row-workspace supernode prefix/suffix executor with readiness tracking,
+not BLAS threshold tuning and not another per-current retained-target replay.
+
 The latest retained-target cleanup follows the Algorithm 5 descriptor more
 directly without revisiting BLAS thresholds. In the scalar payoff slot-accum and
 prefix-prep diagnostics, dense suffix targets now write by their retained slot

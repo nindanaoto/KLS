@@ -995,6 +995,19 @@ slots directly and only build row-stamp maps for irregular L-trailing targets.
 This matches the retained Algorithm 5 layout more closely, but it does not
 promote those probes: current top-five CKTSO-gap checks still reject per-current
 scalar replay versus the default path.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREFIX_PREP=1` is a
+stronger grouped retained-prefix probe. It claims all currently eligible
+current slots for a producer-prefix trigger, prepares their prefix workspaces,
+and applies the retained dense and trailing target slots as one grouped pass
+before the ordinary ragged-L path consumes the ready prefixes. The flag also
+requests the retained Algorithm 5 payoff plan, runtime workspace, target slots,
+and current-state flags; it remains opt-in and off by default. Current top-five
+CKTSO-gap checks reject this retained-target executor as a default: it proves
+the grouped current-slot handoff works, but the large ASIC rows materialize tens
+of millions of retained target updates and are slower than the default EGraph
+path. This points the next paper-aligned work at direct row-workspace
+supernode-prefix/suffix application, matching CKTSO/SubtreeLU Algorithm 5
+semantics, rather than BLAS threshold tuning.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and
