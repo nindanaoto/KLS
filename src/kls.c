@@ -58,6 +58,11 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 }
 
 #define KLS_KLU_EMPTY ((UF_long)-1)
+#ifdef PTRDIFF_MAX
+#define KLS_MAX_ALLOCATION ((size_t)PTRDIFF_MAX)
+#else
+#define KLS_MAX_ALLOCATION (SIZE_MAX / 2u)
+#endif
 #define KLS_ROW_REFACTOR_BATCH_MIN_ROWS 8u
 #define KLS_ROW_REFACTOR_BATCH_MAX_ROWS 16u
 #define KLS_ROW_REFACTOR_SMALL_SORT_MAX 32u
@@ -89,7 +94,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_EGRAPH_RAGGED_U_SUPERNODE_MIN_ROWS 8u
 #define KLS_EGRAPH_RAGGED_U_SUPERNODE_MIN_WORK 512.0
 #define KLS_EGRAPH_RAGGED_U_SUPERNODE_MIN_WORK_PER_ENTRY 4.0
-#define KLS_BTF_SCALAR_RUN_EXEC_MIN_ROWS 4u
+#define KLS_BTF_SCALAR_RUN_EXEC_MIN_ROWS 16u
 #define KLS_BTF_SCALAR_RUN_EXEC_MAX_ROWS 1024u
 #define KLS_REFACTOR_PLAN_GROUP_L_EXEC_MIN_RUNS 1024u
 #define KLS_REFACTOR_PLAN_GROUP_L_BATCH_EXEC_MIN_RUNS 1024u
@@ -264,15 +269,23 @@ struct kls_solver {
   UF_long **refactor_l_indices;
   int32_t **refactor_l_indices32;
   int32_t *refactor_l_indices32_storage;
+  int32_t **refactor_l_sorted_indices32;
+  int32_t *refactor_l_sorted_indices32_storage;
+  int32_t **refactor_l_sorted_pos32;
+  int32_t *refactor_l_sorted_pos32_storage;
   double **refactor_l_values;
+  double **refactor_l_sorted_values;
+  double *refactor_l_sorted_values_storage;
   UF_long **refactor_u_indices;
   int32_t **refactor_u_indices32;
   int32_t *refactor_u_indices32_storage;
   double **refactor_u_values;
   UF_long refactor_lu_pointer_count;
   int refactor_l_indices_sorted;
+  int refactor_l_sorted_enabled;
   UF_long refactor_map_indices32_count;
   UF_long refactor_l_indices32_count;
+  UF_long refactor_l_sorted_entries;
   UF_long refactor_u_indices32_count;
   UF_long *row_refactor_l_ptr;
   UF_long *row_refactor_l_cols;
@@ -14475,7 +14488,13 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   free(solver->refactor_l_indices);
   free(solver->refactor_l_indices32);
   free(solver->refactor_l_indices32_storage);
+  free(solver->refactor_l_sorted_indices32);
+  free(solver->refactor_l_sorted_indices32_storage);
+  free(solver->refactor_l_sorted_pos32);
+  free(solver->refactor_l_sorted_pos32_storage);
   free(solver->refactor_l_values);
+  free(solver->refactor_l_sorted_values);
+  free(solver->refactor_l_sorted_values_storage);
   free(solver->refactor_u_indices);
   free(solver->refactor_u_indices32);
   free(solver->refactor_u_indices32_storage);
@@ -14483,14 +14502,22 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_l_indices = NULL;
   solver->refactor_l_indices32 = NULL;
   solver->refactor_l_indices32_storage = NULL;
+  solver->refactor_l_sorted_indices32 = NULL;
+  solver->refactor_l_sorted_indices32_storage = NULL;
+  solver->refactor_l_sorted_pos32 = NULL;
+  solver->refactor_l_sorted_pos32_storage = NULL;
   solver->refactor_l_values = NULL;
+  solver->refactor_l_sorted_values = NULL;
+  solver->refactor_l_sorted_values_storage = NULL;
   solver->refactor_u_indices = NULL;
   solver->refactor_u_indices32 = NULL;
   solver->refactor_u_indices32_storage = NULL;
   solver->refactor_u_values = NULL;
   solver->refactor_lu_pointer_count = 0;
   solver->refactor_l_indices_sorted = 0;
+  solver->refactor_l_sorted_enabled = 0;
   solver->refactor_l_indices32_count = 0;
+  solver->refactor_l_sorted_entries = 0;
   solver->refactor_u_indices32_count = 0;
   solver->refactor_l_index32_enabled = 0;
   solver->refactor_u_index32_enabled = 0;
@@ -34125,6 +34152,7 @@ static int kls_ensure_refactor_l_index32_cache(kls_solver *solver) {
     return 1;
   }
   if (solver == NULL || solver->numeric == NULL ||
+      solver->symbolic == NULL || solver->symbolic->R == NULL ||
       solver->numeric->Llen == NULL ||
       solver->refactor_lu_pointer_count != solver->n ||
       solver->refactor_l_indices == NULL ||
@@ -34292,6 +34320,251 @@ static int kls_ensure_refactor_u_index32_cache(kls_solver *solver) {
   return 1;
 }
 
+typedef struct kls_l_sorted_entry32 {
+  int32_t row;
+  int32_t pos;
+} kls_l_sorted_entry32;
+
+static int kls_compare_l_sorted_entry32(const void *a, const void *b) {
+  const kls_l_sorted_entry32 *ea = (const kls_l_sorted_entry32 *)a;
+  const kls_l_sorted_entry32 *eb = (const kls_l_sorted_entry32 *)b;
+  if (ea->row < eb->row) {
+    return -1;
+  }
+  if (ea->row > eb->row) {
+    return 1;
+  }
+  return (ea->pos > eb->pos) - (ea->pos < eb->pos);
+}
+
+static void kls_free_refactor_l_sorted_cache(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->refactor_l_sorted_indices32);
+  free(solver->refactor_l_sorted_indices32_storage);
+  free(solver->refactor_l_sorted_pos32);
+  free(solver->refactor_l_sorted_pos32_storage);
+  free(solver->refactor_l_sorted_values);
+  free(solver->refactor_l_sorted_values_storage);
+  solver->refactor_l_sorted_indices32 = NULL;
+  solver->refactor_l_sorted_indices32_storage = NULL;
+  solver->refactor_l_sorted_pos32 = NULL;
+  solver->refactor_l_sorted_pos32_storage = NULL;
+  solver->refactor_l_sorted_values = NULL;
+  solver->refactor_l_sorted_values_storage = NULL;
+  solver->refactor_l_sorted_enabled = 0;
+  solver->refactor_l_sorted_entries = 0u;
+}
+
+static int kls_ensure_refactor_l_sorted_cache(kls_solver *solver) {
+  if (!kls_refactor_btf_scalar_run_exec_env_enabled()) {
+    return 1;
+  }
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Llen == NULL ||
+      solver->refactor_lu_pointer_count != solver->n ||
+      solver->refactor_l_indices == NULL ||
+      solver->refactor_l_values == NULL || solver->n <= 0) {
+    return 0;
+  }
+  if (solver->n > (UF_long)INT32_MAX) {
+    return 1;
+  }
+  if (solver->refactor_l_sorted_indices32 != NULL &&
+      solver->refactor_l_sorted_pos32 != NULL &&
+      solver->refactor_l_sorted_values != NULL) {
+    solver->refactor_l_sorted_enabled = 1;
+    return 1;
+  }
+
+  kls_free_refactor_l_sorted_cache(solver);
+  UF_long l_entries = 0u;
+  UF_long max_len = 0u;
+  for (UF_long col = 0; col < solver->n; ++col) {
+    const UF_long len = solver->numeric->Llen[col];
+    const UF_long *rows = solver->refactor_l_indices[col];
+    if (len == 0u || rows == NULL) {
+      continue;
+    }
+    if (len > (UF_long)INT32_MAX || len > UF_long_max - l_entries) {
+      return 0;
+    }
+    l_entries += len;
+    if (len > max_len) {
+      max_len = len;
+    }
+  }
+
+  if (solver->n > (UF_long)(KLS_MAX_ALLOCATION / sizeof(int32_t *)) ||
+      solver->n > (UF_long)(KLS_MAX_ALLOCATION / sizeof(double *))) {
+    return 0;
+  }
+  const size_t n_size = (size_t)solver->n;
+  if (n_size > (size_t)INT32_MAX) {
+    return 0;
+  }
+  int32_t **sorted_rows =
+    (int32_t **)calloc(n_size, sizeof(*sorted_rows));
+  int32_t **sorted_pos =
+    (int32_t **)calloc(n_size, sizeof(*sorted_pos));
+  double **sorted_values =
+    (double **)calloc(n_size, sizeof(*sorted_values));
+  if (sorted_rows == NULL || sorted_pos == NULL || sorted_values == NULL) {
+    free(sorted_rows);
+    free(sorted_pos);
+    free(sorted_values);
+    return 0;
+  }
+
+  int32_t *row_storage = NULL;
+  int32_t *pos_storage = NULL;
+  double *value_storage = NULL;
+  if (l_entries > 0u) {
+    if (l_entries > (UF_long)(KLS_MAX_ALLOCATION / sizeof(*row_storage)) ||
+        l_entries > (UF_long)(KLS_MAX_ALLOCATION / sizeof(*pos_storage)) ||
+        l_entries > (UF_long)(KLS_MAX_ALLOCATION / sizeof(*value_storage))) {
+      free(sorted_rows);
+      free(sorted_pos);
+      free(sorted_values);
+      return 0;
+    }
+    row_storage =
+      (int32_t *)malloc((size_t)l_entries * sizeof(*row_storage));
+    pos_storage =
+      (int32_t *)malloc((size_t)l_entries * sizeof(*pos_storage));
+    value_storage =
+      (double *)calloc((size_t)l_entries, sizeof(*value_storage));
+    if (row_storage == NULL || pos_storage == NULL || value_storage == NULL) {
+      free(row_storage);
+      free(pos_storage);
+      free(value_storage);
+      free(sorted_rows);
+      free(sorted_pos);
+      free(sorted_values);
+      return 0;
+    }
+  }
+
+  kls_l_sorted_entry32 *scratch = NULL;
+  if (max_len > 0u) {
+    if (max_len > (UF_long)(KLS_MAX_ALLOCATION / sizeof(*scratch))) {
+      free(row_storage);
+      free(pos_storage);
+      free(value_storage);
+      free(sorted_rows);
+      free(sorted_pos);
+      free(sorted_values);
+      return 0;
+    }
+    scratch =
+      (kls_l_sorted_entry32 *)malloc((size_t)max_len * sizeof(*scratch));
+    if (scratch == NULL) {
+      free(row_storage);
+      free(pos_storage);
+      free(value_storage);
+      free(sorted_rows);
+      free(sorted_pos);
+      free(sorted_values);
+      return 0;
+    }
+  }
+
+  UF_long offset = 0u;
+  for (UF_long col = 0; col < solver->n; ++col) {
+    const UF_long len = solver->numeric->Llen[col];
+    const UF_long *rows = solver->refactor_l_indices[col];
+    if (len == 0u || rows == NULL) {
+      continue;
+    }
+    if (offset > l_entries - len || len > (UF_long)INT32_MAX) {
+      free(scratch);
+      free(row_storage);
+      free(pos_storage);
+      free(value_storage);
+      free(sorted_rows);
+      free(sorted_pos);
+      free(sorted_values);
+      return 0;
+    }
+    UF_long block = KLS_KLU_EMPTY;
+    if (solver->symbolic->nblocks == 1u) {
+      block = 0u;
+    } else if (solver->refactor_col_block != NULL) {
+      block = solver->refactor_col_block[col];
+    } else {
+      block = kls_block_for_pivot(solver, col);
+    }
+    if (block >= solver->symbolic->nblocks ||
+        col < solver->symbolic->R[block]) {
+      free(scratch);
+      free(row_storage);
+      free(pos_storage);
+      free(value_storage);
+      free(sorted_rows);
+      free(sorted_pos);
+      free(sorted_values);
+      return 0;
+    }
+    const UF_long local_col = col - solver->symbolic->R[block];
+    for (UF_long p = 0u; p < len; ++p) {
+      if (rows[p] > (UF_long)INT32_MAX || p > (UF_long)INT32_MAX) {
+        free(scratch);
+        free(row_storage);
+        free(pos_storage);
+        free(value_storage);
+        free(sorted_rows);
+        free(sorted_pos);
+        free(sorted_values);
+        return 0;
+      }
+      if (rows[p] <= local_col) {
+        free(scratch);
+        free(row_storage);
+        free(pos_storage);
+        free(value_storage);
+        free(sorted_rows);
+        free(sorted_pos);
+        free(sorted_values);
+        return 0;
+      }
+      scratch[p].row = (int32_t)rows[p];
+      scratch[p].pos = (int32_t)p;
+    }
+    qsort(scratch, (size_t)len, sizeof(*scratch),
+          kls_compare_l_sorted_entry32);
+    sorted_rows[col] = row_storage + offset;
+    sorted_pos[col] = pos_storage + offset;
+    sorted_values[col] = value_storage + offset;
+    for (UF_long p = 0u; p < len; ++p) {
+      if (p > 0u && scratch[p].row <= scratch[p - 1u].row) {
+        free(scratch);
+        free(row_storage);
+        free(pos_storage);
+        free(value_storage);
+        free(sorted_rows);
+        free(sorted_pos);
+        free(sorted_values);
+        return 0;
+      }
+      row_storage[offset + p] = scratch[p].row;
+      pos_storage[offset + p] = scratch[p].pos;
+    }
+    offset += len;
+  }
+  free(scratch);
+
+  solver->refactor_l_sorted_indices32 = sorted_rows;
+  solver->refactor_l_sorted_indices32_storage = row_storage;
+  solver->refactor_l_sorted_pos32 = sorted_pos;
+  solver->refactor_l_sorted_pos32_storage = pos_storage;
+  solver->refactor_l_sorted_values = sorted_values;
+  solver->refactor_l_sorted_values_storage = value_storage;
+  solver->refactor_l_sorted_entries = l_entries;
+  solver->refactor_l_sorted_enabled = 1;
+  return 1;
+}
+
 static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->R == NULL || solver->numeric->LUbx == NULL ||
@@ -34306,7 +34579,8 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
       solver->refactor_u_indices != NULL &&
       solver->refactor_u_values != NULL) {
     return kls_ensure_refactor_l_index32_cache(solver) &&
-           kls_ensure_refactor_u_index32_cache(solver);
+           kls_ensure_refactor_u_index32_cache(solver) &&
+           kls_ensure_refactor_l_sorted_cache(solver);
   }
 
   free_refactor_lu_pointer_cache(solver);
@@ -34635,7 +34909,7 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_l_contiguous_suffix_columns = contiguous_suffix_columns;
   solver->refactor_l_contiguous_suffix_entries = contiguous_suffix_entries;
   solver->refactor_l_contiguous_suffix_max_len = contiguous_suffix_max_len;
-  return 1;
+  return kls_ensure_refactor_l_sorted_cache(solver);
 }
 
 static int kls_refactor_supernode_panel_block_info(
@@ -56814,12 +57088,32 @@ static inline void kls_egraph_store_l_column_from_workspace(
       values[p] = x[i] / pivot;
       x[i] = 0.0;
     }
+    if (solver != NULL && solver->refactor_l_sorted_values != NULL &&
+        solver->refactor_l_sorted_pos32 != NULL) {
+      double *sorted_values = solver->refactor_l_sorted_values[column];
+      const int32_t *sorted_pos = solver->refactor_l_sorted_pos32[column];
+      if (sorted_values != NULL && sorted_pos != NULL) {
+        for (UF_long p = 0u; p < length; ++p) {
+          sorted_values[p] = values[(UF_long)sorted_pos[p]];
+        }
+      }
+    }
     return;
   }
   for (UF_long p = 0; p < length; ++p) {
     const UF_long i = rows[p];
     values[p] = x[i] / pivot;
     x[i] = 0.0;
+  }
+  if (solver != NULL && solver->refactor_l_sorted_values != NULL &&
+      solver->refactor_l_sorted_pos32 != NULL) {
+    double *sorted_values = solver->refactor_l_sorted_values[column];
+    const int32_t *sorted_pos = solver->refactor_l_sorted_pos32[column];
+    if (sorted_values != NULL && sorted_pos != NULL) {
+      for (UF_long p = 0u; p < length; ++p) {
+        sorted_values[p] = values[(UF_long)sorted_pos[p]];
+      }
+    }
   }
 }
 
@@ -62261,7 +62555,12 @@ static int kls_egraph_refactor_try_btf_scalar_producer_run(
   }
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
-  if (solver == NULL || !solver->refactor_l_indices_sorted) {
+  const int use_sorted_mirror =
+    solver != NULL && solver->refactor_l_sorted_enabled &&
+    solver->refactor_l_sorted_indices32 != NULL &&
+    solver->refactor_l_sorted_values != NULL;
+  if (solver == NULL ||
+      (!use_sorted_mirror && !solver->refactor_l_indices_sorted)) {
     return 0;
   }
   const UF_long start_pos = *up;
@@ -62298,30 +62597,20 @@ static int kls_egraph_refactor_try_btf_scalar_producer_run(
     }
     const UF_long dep_global = k1 + dep;
     const int32_t *li32 =
-      l_indices32 != NULL ? l_indices32[dep_global] : NULL;
-    if (li32 != NULL || lcol_len == 0u) {
-      for (UF_long p = 0u; p < lcol_len; ++p) {
-        const UF_long row = (UF_long)li32[p];
-        if (row >= run_end) {
-          break;
-        }
-        if (row <= dep) {
-          return 0;
-        }
-      }
-    } else {
+      use_sorted_mirror ? solver->refactor_l_sorted_indices32[dep_global]
+                        : (l_indices32 != NULL ? l_indices32[dep_global]
+                                                : NULL);
+    const double *lx_check =
+      use_sorted_mirror ? solver->refactor_l_sorted_values[dep_global]
+                        : l_values[dep_global];
+    if (lcol_len > 0u &&
+        (lx_check == NULL || (use_sorted_mirror && li32 == NULL))) {
+      return 0;
+    }
+    if (li32 == NULL && lcol_len != 0u) {
       const UF_long *li = l_indices[dep_global];
       if (li == NULL) {
         return 0;
-      }
-      for (UF_long p = 0u; p < lcol_len; ++p) {
-        const UF_long row = li[p];
-        if (row >= run_end) {
-          break;
-        }
-        if (row <= dep) {
-          return 0;
-        }
       }
     }
   }
@@ -62345,9 +62634,13 @@ static int kls_egraph_refactor_try_btf_scalar_producer_run(
       continue;
     }
     const UF_long lcol_len = llen[dep];
-    double *lx = l_values[dep_global];
+    double *lx = use_sorted_mirror
+                   ? solver->refactor_l_sorted_values[dep_global]
+                   : l_values[dep_global];
     const int32_t *li32 =
-      l_indices32 != NULL ? l_indices32[dep_global] : NULL;
+      use_sorted_mirror ? solver->refactor_l_sorted_indices32[dep_global]
+                        : (l_indices32 != NULL ? l_indices32[dep_global]
+                                                : NULL);
     if (li32 != NULL || lcol_len == 0u) {
       UF_long p = 0u;
       for (; p < lcol_len; ++p) {

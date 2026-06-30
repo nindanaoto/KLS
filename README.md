@@ -1236,9 +1236,10 @@ missing paper-level numeric owner: it answers whether the scalar tail has enough
 producer-run surface for a future row-major/current-state executor to consume.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
 same BTF scalar producer-run shape. It first waits for every dependency in a
-contiguous run, then applies the run through a local row workspace; when the
-cached L row lists are strictly ascending it keeps the in-run triangular prefix
-local and sends the trailing suffix back through the existing scatter primitive.
+contiguous run, then applies the run through a local row workspace. Under the
+same flag, KLS also retains an owned sorted L-row mirror: the in-run triangular
+prefix is applied locally and the trailing suffix is sent through the existing
+scatter primitive without rewriting the KLU-owned numeric factor.
 Benchmark JSON reports the applied surface through
 `refactor_last_btf_scalar_run_exec_runs`,
 `refactor_last_btf_scalar_run_exec_rows`,
@@ -1246,10 +1247,11 @@ Benchmark JSON reports the applied surface through
 `refactor_last_btf_scalar_run_exec_max_rows`, and cumulative
 `refactor_btf_scalar_run_exec_*` counters. This is intentionally off by default:
 the direct unsorted-row prototype was residual-clean but slower on `ASIC_100ks`,
-while the guarded split correctly no-ops on that case because the KLU-owned L row
-lists are not ordered for this paper-shaped update. The useful conclusion is
-that closing this refactor gap needs a row-ordered or grouped current-state
-numeric owner, not another wrapper around the scalar KLU scatter layout.
+and the sorted-mirror executor activates the intended large producer-run surface
+but still remains slower than the default scalar EGraph path on the focused ASIC
+cases. The useful conclusion is that closing this refactor gap needs grouped
+current-state arithmetic over this row-ordered representation, not another
+wrapper around the scalar KLU scatter layout.
 Eligible retained refactor-map row/input positions and L row-index arrays are
 mirrored as 32-bit integers by default while leaving the KLU-owned numeric
 factor and public index ABI unchanged. The EGraph value-scatter path and

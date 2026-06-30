@@ -12740,3 +12740,33 @@ and `ctest --test-dir build --output-on-failure`. The result is not a default
 speed path; it narrows the paper-aligned next step to an owned row-ordered or
 grouped current-state numeric representation instead of more scalar-loop
 tuning.
+
+The next refactor slice added that owned row-ordered representation without
+changing the KLU-compatible numeric factor: under
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1`, KLS now builds a sorted L-row mirror
+with source positions, refreshes each sorted value vector when the EGraph stores
+the corresponding L column, and routes the BTF scalar producer-run executor
+through that mirror. This turns the previous no-op split into an actual
+triangular-prefix/trailing-scatter executor while keeping the path default-off.
+The row-lower invariant is checked when the mirror is built, so the hot executor
+does not rescan each in-run prefix just for validation.
+
+Focused measurements show that the representation is correct and much closer to
+the paper shape, but still not a default speed path. On `ASIC_100ks`, the
+default control
+`build/kls_btf_scalar_run_sorted_l_off_asic100ks_t4_r1_ref3.json` measured
+`refactor_seconds_avg=0.0444740077`. The sorted-mirror executor with a 4-row
+floor covered `46,540` runs, `1,100,807` rows, and `310,512,292` L entries, but
+measured `0.050005735`; a 16-row floor covered `12,548` runs, `879,371` rows,
+and `297,303,361` entries, but still measured `0.049890663`. On `ASIC_320ks`,
+the default control
+`build/kls_btf_scalar_run_sorted_l_off_asic320ks_t4_r1_ref1.json` measured
+`0.085005967`; the sorted-mirror executor measured `0.10847028` with a 4-row
+floor and `0.106261211` with a 16-row floor. All focused sorted-mirror runs were
+residual-clean (`relative_residual_l2` about `1.9e-15` to `2.1e-15`).
+
+This rejects sorted row order alone as the clear missing CKTSO/SubtreeLU
+mechanism. The next paper-aligned executor has to batch multiple current
+workspaces through the retained producer run, so the producer's L suffix is
+streamed once across a grouped current-state owner rather than replaying a
+separate scalar scatter for each current column.
