@@ -2773,12 +2773,6 @@ static void free_refactor_supernode_consumer_plan(kls_solver *solver) {
     0;
   solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots =
     0;
-  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_runs = 0;
-  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_rows = 0;
-  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries =
-    0;
-  solver->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots =
-    0;
   solver->refactor_supernode_algorithm5_prefix_panel_count = 0;
   solver->refactor_supernode_algorithm5_prefix_panel_run_count = 0;
   solver->refactor_supernode_algorithm5_prefix_panel_run_rows = 0;
