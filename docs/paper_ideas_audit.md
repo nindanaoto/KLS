@@ -12972,6 +12972,19 @@ directly at the restore-hook eligibility gate around `plain_scalar_updates`:
 the retained BTF state exists, but most target columns bypass the consumer
 hook instead of being owned by a grouped current-state executor.
 
+The immediate follow-up removes the `wait_for_dependencies` part of that hook
+gate while keeping the plain-scalar and Algorithm 5 seed guards. This makes
+already-READY retained state consumable from both wait and no-wait BTF scalar
+dispatches. On `ASIC_100ks`, the same guarded executor then consumed `14,697`
+states, skipped `302,057` U dependencies, restored `737,313` rows, and had zero
+dispatch bypasses, but still refactored in `10.5670s`. On `ASIC_320ks`, it
+consumed `16,356` states, skipped `345,690` dependencies, restored `894,007`
+rows, and refactored in `8.7802s`. Both probes stayed residual-clean with zero
+state rejects. This closes the hook-reachability gap, but it also confirms that
+the per-current sparse-state restore is still the wrong CKTSO-gap owner: once
+nearly all READY states are consumed, restored-row traffic dominates and the
+path remains orders of magnitude slower than the default refactor.
+
 This confirms that the retained current-state handoff can be made
 correctness-clean, but it also rejects a per-current restored sparse state as
 the missing CKTSO-speed mechanism. The next paper-aligned owner needs to keep a

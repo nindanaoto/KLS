@@ -65487,7 +65487,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
 
   UF_long up = 0;
   const int restore_btf_group_state_gate =
-    wait_for_dependencies && plain_scalar_updates &&
+    plain_scalar_updates &&
     !shared->supernode_algorithm5_payoff_direct_prefix_current_state &&
     !shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
   if (!restore_btf_group_state_gate) {

@@ -1300,12 +1300,13 @@ numeric path.
 state into a guarded numeric consumer. The flag implies state stats, stores the
 U coefficients consumed while preparing the retained state, arms only the
 farthest retained member per current column, restores that state when the
-column is dispatched, writes the skipped U entries, and lets the existing suffix,
-pivot check, and L-store path finish the column. Benchmark JSON reports last and
-cumulative state-exec current, skipped-dependency, restored-row, and reject
-counts. It also reports dispatch bypasses where the BTF column had a selected
-retained state but the restore hook was gated off, and splits remaining misses
-into not-ready-at-dispatch, ready-while-owned, and ready-after-done buckets.
+column is dispatched through either wait or no-wait plain-scalar BTF paths,
+writes the skipped U entries, and lets the existing suffix, pivot check, and
+L-store path finish the column. Benchmark JSON reports last and cumulative
+state-exec current, skipped-dependency, restored-row, and reject counts. It also
+reports dispatch bypasses where the BTF column had a selected retained state but
+the restore hook was gated off, and splits remaining misses into
+not-ready-at-dispatch, ready-while-owned, and ready-after-done buckets.
 This remains opt-in: the focused ASIC probes are residual-clean, but the state
 owner is still too fine-grained to beat the default refactor path.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
