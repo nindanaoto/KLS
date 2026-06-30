@@ -37,6 +37,29 @@ is a correct grouped owner for live multi-current state, or a different
 supernodal task decomposition that avoids mutating partially owned current
 states from multiple suffix triggers.
 
+The producer-triggered suffix follow-up extends the retained suffix map into a
+reverse `producer column -> unique suffix-map entry` trigger table and reuses
+the scalar in-order current-state suffix helper when a producer column
+finishes. This is closer to the paper's producer-side scheduling surface than
+the plain suffix trigger, but it is still not the grouped owner described by
+the Algorithm 5/SubtreeLU-style algorithms: every current slot is claimed and
+advanced independently through the scalar current-state path. It is therefore
+quarantined behind the explicit unsafe opt-in pair
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_PRODUCER_ADVANCE=1` and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_PRODUCER_ADVANCE_UNSAFE=1`.
+The single producer flag alone is intentionally inert.
+
+The focused producer-trigger artifact
+`build/kls_alg5_suffix_producer_advance_unsafe_gap5_t4_r1_ref3_timeout120.jsonl`
+regressed to `3.1927s` SPICE-cycle geomean and produced relative-residual drift
+on `ASIC_320ks` (`3.08376272E-8`). The active rows advanced `1,109,202` runtime
+suffix dependencies and an estimated `409,499,854` suffix update entries, which
+matches the expected large work surface but does not close the CKTSO gap. This
+rejects "drive more scalar current-state suffix advancement from producer
+triggers" as the next lead cause. The missing paper-level piece remains a true
+grouped live-workspace executor with clear completion ownership, not BLAS
+thresholding or small local replay changes.
+
 The latest Algorithm 5 grouped-prefix work now includes a targetless
 direct-prefix variant, an advance-seed probe, a retained-current-row state probe,
 and a final-state probe, without changing BLAS thresholds. The
