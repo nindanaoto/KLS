@@ -1062,6 +1062,17 @@ counters plus direct-prefix rows in
 `refactor_last_supernode_algorithm5_payoff_prefix_prep_*`. Focused CKTSO-gap
 checks reject this as a default too: it removes the later prefix replay, but the
 large ASIC cases still copy millions of retained state rows.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE=1`
+is a guarded variant of final retained-state mode. It also implies final-state
+storage, but the consuming column restores only the retained rows that the
+remaining scalar update can read or modify: remaining U dependencies, their L
+rows, the pivot row, and the final L column rows. Input-scatter rows outside that
+set are cleared before the scalar loop continues. A cheap L-pattern upper bound
+skips sparse row-set construction unless the continuation can avoid restoring a
+material share of the retained rows. The same
+`refactor_last_supernode_algorithm5_payoff_current_state_seed_rows` counter then
+reports restored rows rather than total retained rows, making the retained-copy
+payoff directly measurable without changing the default executor.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and

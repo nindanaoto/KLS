@@ -1448,6 +1448,7 @@ typedef struct kls_egraph_refactor_shared {
   int supernode_algorithm5_payoff_direct_prefix_advance_seed;
   int supernode_algorithm5_payoff_direct_prefix_current_state;
   int supernode_algorithm5_payoff_direct_prefix_final_state;
+  int supernode_algorithm5_payoff_direct_prefix_sparse_restore;
   int algorithm5_prefactor_updates;
   int u_supernode_values;
   int u_supernode_ragged_l_updates;
@@ -2165,6 +2166,13 @@ kls_refactor_supernode_algorithm5_payoff_direct_prefix_prep_env_enabled(void) {
   value =
     getenv(
       "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE");
+  if (value != NULL && value[0] != '\0' &&
+      !(value[0] == '0' && value[1] == '\0')) {
+    return 1;
+  }
+  value =
+    getenv(
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE");
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -2192,6 +2200,13 @@ kls_refactor_supernode_algorithm5_payoff_direct_prefix_current_state_env_enabled
   value =
     getenv(
       "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE");
+  if (value != NULL && value[0] != '\0' &&
+      !(value[0] == '0' && value[1] == '\0')) {
+    return 1;
+  }
+  value =
+    getenv(
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE");
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -2202,6 +2217,23 @@ kls_refactor_supernode_algorithm5_payoff_direct_prefix_final_state_env_enabled(
   const char *value =
     getenv(
       "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE");
+  if (value != NULL && value[0] != '\0' &&
+      !(value[0] == '0' && value[1] == '\0')) {
+    return 1;
+  }
+  value =
+    getenv(
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static int
+kls_refactor_supernode_algorithm5_payoff_direct_prefix_sparse_restore_env_enabled(
+  void) {
+  const char *value =
+    getenv(
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE");
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -53849,6 +53881,84 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
   return 1;
 }
 
+typedef struct {
+  UF_long current_slot;
+  UF_long run;
+  UF_long current;
+  UF_long k1;
+  UF_long block_size;
+  UF_long dep_local;
+  UF_long panel;
+  UF_long panel_offset;
+  UF_long prefix_rows;
+  UF_long available_end;
+  UF_long row_base;
+  UF_long dense_target_slots;
+  UF_long trailing_target_slots;
+  UF_long target_slots;
+  UF_long target_entries;
+  UF_long trailing_entries;
+  UF_long advance_deps;
+  UF_long advance_slots;
+  UF_long state_rows;
+  UF_long local_start;
+  UF_long width;
+  double *workspace;
+  const UF_long *advance_cols;
+  double *advance_values;
+  double *advance_u_values;
+  const UF_long *target_cols;
+  double *target_values;
+  const UF_long *state_row_idx;
+  double *state_values;
+} kls_algorithm5_payoff_group_prefix_item;
+
+static int kls_algorithm5_payoff_prepare_state_row_lookup(
+  kls_egraph_refactor_worker *worker,
+  const kls_algorithm5_payoff_group_prefix_item *item,
+  UF_long *stamp_value_out,
+  UF_long **stamp_out,
+  UF_long **pos_out);
+
+static int kls_algorithm5_payoff_state_value_position(
+  const kls_algorithm5_payoff_group_prefix_item *item,
+  UF_long row,
+  UF_long stamp_value,
+  const UF_long *stamp,
+  const UF_long *pos,
+  UF_long *state_pos_out);
+
+static int kls_algorithm5_payoff_add_sparse_restore_row(
+  const kls_algorithm5_payoff_group_prefix_item *item,
+  UF_long row,
+  UF_long stamp_value,
+  const UF_long *stamp,
+  const UF_long *pos,
+  unsigned char *needed,
+  UF_long *needed_rows,
+  UF_long needed_capacity,
+  UF_long *needed_count_io);
+
+static int kls_algorithm5_payoff_add_l_sparse_restore_rows(
+  const kls_solver *solver,
+  const kls_algorithm5_payoff_group_prefix_item *item,
+  UF_long column,
+  UF_long stamp_value,
+  const UF_long *stamp,
+  const UF_long *pos,
+  unsigned char *needed,
+  UF_long *needed_rows,
+  UF_long needed_capacity,
+  UF_long *needed_count_io);
+
+static int kls_algorithm5_payoff_clear_sparse_restore_scatter(
+  const kls_solver *solver,
+  UF_long k1,
+  UF_long current,
+  UF_long block_size,
+  const unsigned char *needed,
+  double *x);
+
 static int
 kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_current_state(
   kls_egraph_refactor_worker *worker,
@@ -54102,12 +54212,118 @@ kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_current_state(
       continue;
     }
 
-    for (UF_long p = 0u; p < state_rows; ++p) {
-      const UF_long row = state_row_idx[p];
-      if (row >= block_size) {
-        return 0;
+    UF_long restored_rows = state_rows;
+    int sparse_restored = 0;
+    if (direct_prefix_final_state &&
+        shared->supernode_algorithm5_payoff_direct_prefix_sparse_restore &&
+        current_up == 0u && state_rows > 0u) {
+      int sparse_candidate =
+        solver->numeric != NULL && solver->numeric->Llen != NULL;
+      if (sparse_candidate) {
+        double needed_bound = 1.0 + (double)solver->numeric->Llen[current_global];
+        const double useful_bound = 0.75 * (double)state_rows;
+        if (needed_bound >= useful_bound) {
+          sparse_candidate = 0;
+        }
+        for (UF_long p = prefix_end; sparse_candidate && p < ucol_len; ++p) {
+          const UF_long dep_local = ui[p];
+          if (dep_local >= block_size || dep_local > UF_long_max - k1 ||
+              k1 + dep_local >= solver->n) {
+            sparse_candidate = 0;
+            break;
+          }
+          needed_bound +=
+            1.0 + (double)solver->numeric->Llen[k1 + dep_local];
+          if (needed_bound >= useful_bound) {
+            sparse_candidate = 0;
+            break;
+          }
+        }
       }
-      x[row] = state_values[p];
+      if (!sparse_candidate) {
+        goto algorithm5_payoff_full_state_restore;
+      }
+      kls_algorithm5_payoff_group_prefix_item state_item;
+      memset(&state_item, 0, sizeof(state_item));
+      state_item.current = current_global;
+      state_item.k1 = k1;
+      state_item.block_size = block_size;
+      state_item.state_rows = state_rows;
+      state_item.state_row_idx = state_row_idx;
+      state_item.state_values = (double *)state_values;
+
+      UF_long state_stamp_value = 0u;
+      UF_long *state_stamp = NULL;
+      UF_long *state_pos = NULL;
+      unsigned char *needed =
+        kls_egraph_worker_byte_workspace(worker, block_size);
+      UF_long *needed_rows =
+        (UF_long *)kls_egraph_worker_object_workspace(
+          worker, state_rows, sizeof(*needed_rows));
+      if (needed != NULL && needed_rows != NULL &&
+          kls_algorithm5_payoff_prepare_state_row_lookup(
+            worker, &state_item, &state_stamp_value, &state_stamp,
+            &state_pos)) {
+        memset(needed, 0, (size_t)block_size);
+        UF_long needed_count = 0u;
+        int sparse_ok = 1;
+        for (UF_long p = prefix_end; p < ucol_len; ++p) {
+          const UF_long dep_local = ui[p];
+          if (dep_local >= block_size || dep_local > UF_long_max - k1 ||
+              !kls_algorithm5_payoff_add_sparse_restore_row(
+                &state_item, dep_local, state_stamp_value, state_stamp,
+                state_pos, needed, needed_rows, state_rows, &needed_count) ||
+              !kls_algorithm5_payoff_add_l_sparse_restore_rows(
+                solver, &state_item, k1 + dep_local, state_stamp_value,
+                state_stamp, state_pos, needed, needed_rows, state_rows,
+                &needed_count)) {
+            sparse_ok = 0;
+            break;
+          }
+        }
+        if (sparse_ok &&
+            (!kls_algorithm5_payoff_add_sparse_restore_row(
+               &state_item, current_local, state_stamp_value, state_stamp,
+               state_pos, needed, needed_rows, state_rows, &needed_count) ||
+             !kls_algorithm5_payoff_add_l_sparse_restore_rows(
+               solver, &state_item, current_global, state_stamp_value,
+               state_stamp, state_pos, needed, needed_rows, state_rows,
+               &needed_count))) {
+          sparse_ok = 0;
+        }
+        if (sparse_ok) {
+          for (UF_long p = 0u; p < needed_count; ++p) {
+            const UF_long row = needed_rows[p];
+            UF_long pos = 0u;
+            if (!kls_algorithm5_payoff_state_value_position(
+                  &state_item, row, state_stamp_value, state_stamp, state_pos,
+                  &pos)) {
+              sparse_ok = 0;
+              break;
+            }
+            x[row] = state_values[pos];
+          }
+        }
+        if (sparse_ok &&
+            !kls_algorithm5_payoff_clear_sparse_restore_scatter(
+              solver, k1, current_global, block_size, needed, x)) {
+          sparse_ok = 0;
+        }
+        if (sparse_ok) {
+          restored_rows = needed_count;
+          sparse_restored = 1;
+        }
+      }
+    }
+algorithm5_payoff_full_state_restore:
+    if (!sparse_restored) {
+      for (UF_long p = 0u; p < state_rows; ++p) {
+        const UF_long row = state_row_idx[p];
+        if (row >= block_size) {
+          return 0;
+        }
+        x[row] = state_values[p];
+      }
     }
 
     const double *advance_u_values =
@@ -54147,7 +54363,7 @@ kls_egraph_refactor_try_seed_algorithm5_payoff_direct_prefix_current_state(
     const UF_long seeded_deps = seed_end - current_up;
     *up_io = seed_end;
     kls_egraph_record_algorithm5_payoff_current_state_seed(
-      shared, seeded_deps, state_rows);
+      shared, seeded_deps, restored_rows);
     return 1;
   }
   return 0;
@@ -57714,38 +57930,6 @@ static int kls_egraph_refactor_prepare_algorithm5_payoff_prefix_run(
   return 1;
 }
 
-typedef struct {
-  UF_long current_slot;
-  UF_long run;
-  UF_long current;
-  UF_long k1;
-  UF_long block_size;
-  UF_long dep_local;
-  UF_long panel;
-  UF_long panel_offset;
-  UF_long prefix_rows;
-  UF_long available_end;
-  UF_long row_base;
-  UF_long dense_target_slots;
-  UF_long trailing_target_slots;
-  UF_long target_slots;
-  UF_long target_entries;
-  UF_long trailing_entries;
-  UF_long advance_deps;
-  UF_long advance_slots;
-  UF_long state_rows;
-  UF_long local_start;
-  UF_long width;
-  double *workspace;
-  const UF_long *advance_cols;
-  double *advance_values;
-  double *advance_u_values;
-  const UF_long *target_cols;
-  double *target_values;
-  const UF_long *state_row_idx;
-  double *state_values;
-} kls_algorithm5_payoff_group_prefix_item;
-
 static int kls_algorithm5_payoff_prepare_state_row_lookup(
   kls_egraph_refactor_worker *worker,
   const kls_algorithm5_payoff_group_prefix_item *item,
@@ -57812,6 +57996,125 @@ static int kls_algorithm5_payoff_state_value_position(
     return 0;
   }
   *state_pos_out = pos[row];
+  return 1;
+}
+
+static int kls_algorithm5_payoff_add_sparse_restore_row(
+  const kls_algorithm5_payoff_group_prefix_item *item,
+  UF_long row,
+  UF_long stamp_value,
+  const UF_long *stamp,
+  const UF_long *pos,
+  unsigned char *needed,
+  UF_long *needed_rows,
+  UF_long needed_capacity,
+  UF_long *needed_count_io) {
+  UF_long state_pos = 0u;
+  if (needed == NULL || needed_rows == NULL || needed_count_io == NULL ||
+      !kls_algorithm5_payoff_state_value_position(
+        item, row, stamp_value, stamp, pos, &state_pos)) {
+    return 0;
+  }
+  (void)state_pos;
+  if (needed[row] != 0u) {
+    return 1;
+  }
+  if (*needed_count_io >= needed_capacity) {
+    return 0;
+  }
+  needed[row] = 1u;
+  needed_rows[*needed_count_io] = row;
+  (*needed_count_io)++;
+  return 1;
+}
+
+static int kls_algorithm5_payoff_add_l_sparse_restore_rows(
+  const kls_solver *solver,
+  const kls_algorithm5_payoff_group_prefix_item *item,
+  UF_long column,
+  UF_long stamp_value,
+  const UF_long *stamp,
+  const UF_long *pos,
+  unsigned char *needed,
+  UF_long *needed_rows,
+  UF_long needed_capacity,
+  UF_long *needed_count_io) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Llen == NULL || column >= solver->n) {
+    return 0;
+  }
+  const UF_long length = solver->numeric->Llen[column];
+  const int32_t *rows32 =
+    solver->refactor_l_indices32 != NULL
+      ? solver->refactor_l_indices32[column] : NULL;
+  const UF_long *rows =
+    rows32 == NULL && solver->refactor_l_indices != NULL
+      ? solver->refactor_l_indices[column] : NULL;
+  if (length > 0u && rows32 == NULL && rows == NULL) {
+    return 0;
+  }
+  for (UF_long p = 0u; p < length; ++p) {
+    const UF_long row = rows32 != NULL ? (UF_long)rows32[p] : rows[p];
+    if (!kls_algorithm5_payoff_add_sparse_restore_row(
+          item, row, stamp_value, stamp, pos, needed, needed_rows,
+          needed_capacity, needed_count_io)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int kls_algorithm5_payoff_clear_sparse_restore_scatter(
+  const kls_solver *solver,
+  UF_long k1,
+  UF_long current,
+  UF_long block_size,
+  const unsigned char *needed,
+  double *x) {
+  if (solver == NULL || solver->refactor_col_ptr == NULL ||
+      (solver->refactor_row_idx == NULL && solver->refactor_row_idx32 == NULL) ||
+      needed == NULL || x == NULL || current >= solver->n ||
+      block_size == 0u || k1 > UF_long_max - block_size) {
+    return 0;
+  }
+  const UF_long k2 = k1 + block_size;
+  const UF_long scatter_col_begin = solver->refactor_col_ptr[current];
+  const UF_long scatter_end = solver->refactor_col_ptr[current + 1u];
+  if (scatter_col_begin > scatter_end || scatter_end > solver->nnz) {
+    return 0;
+  }
+  UF_long scatter_begin = scatter_col_begin;
+  if (solver->symbolic != NULL && solver->symbolic->nblocks != 1u) {
+    if (solver->refactor_block_start == NULL ||
+        solver->refactor_block_start[current] < scatter_col_begin ||
+        solver->refactor_block_start[current] > scatter_end) {
+      return 0;
+    }
+    scatter_begin = solver->refactor_block_start[current];
+  }
+  if (solver->refactor_row_idx32 != NULL) {
+    const int32_t *rows32 = solver->refactor_row_idx32;
+    for (UF_long p = scatter_begin; p < scatter_end; ++p) {
+      const UF_long row = (UF_long)rows32[p];
+      if (row >= k1 && row < k2) {
+        const UF_long local = row - k1;
+        if (needed[local] == 0u) {
+          x[local] = 0.0;
+        }
+      }
+    }
+  } else {
+    const UF_long *rows = solver->refactor_row_idx;
+    for (UF_long p = scatter_begin; p < scatter_end; ++p) {
+      const UF_long row = rows[p];
+      if (row >= k1 && row < k2) {
+        const UF_long local = row - k1;
+        if (needed[local] == 0u) {
+          x[local] = 0.0;
+        }
+      }
+    }
+  }
   return 1;
 }
 
@@ -61010,6 +61313,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_refactor_supernode_algorithm5_payoff_direct_prefix_current_state_env_enabled();
   const int algorithm5_payoff_direct_prefix_final_state_requested =
     kls_refactor_supernode_algorithm5_payoff_direct_prefix_final_state_env_enabled();
+  const int algorithm5_payoff_direct_prefix_sparse_restore_requested =
+    kls_refactor_supernode_algorithm5_payoff_direct_prefix_sparse_restore_env_enabled();
   const int algorithm5_payoff_direct_prefix_prep_requested =
     kls_refactor_supernode_algorithm5_payoff_direct_prefix_prep_env_enabled();
   const int algorithm5_payoff_group_prefix_prep_requested =
@@ -61581,6 +61886,10 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      shared->supernode_algorithm5_payoff_direct_prefix_current_state &&
      algorithm5_payoff_workspace_values != NULL)
       ? 1 : 0;
+  shared->supernode_algorithm5_payoff_direct_prefix_sparse_restore =
+    (algorithm5_payoff_direct_prefix_sparse_restore_requested &&
+     shared->supernode_algorithm5_payoff_direct_prefix_final_state)
+      ? 1 : 0;
   shared->supernode_algorithm5_payoff_group_prefix_prep =
     (algorithm5_payoff_group_prefix_prep_requested &&
      shared->supernode_algorithm5_payoff_prefix_prep &&
@@ -61890,6 +62199,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->supernode_algorithm5_payoff_direct_prefix_advance_seed = 0;
   shared->supernode_algorithm5_payoff_direct_prefix_current_state = 0;
   shared->supernode_algorithm5_payoff_direct_prefix_final_state = 0;
+  shared->supernode_algorithm5_payoff_direct_prefix_sparse_restore = 0;
   shared->algorithm5_prefactor_updates = 0;
   shared->algorithm5_payoff_queue_cols = NULL;
   shared->algorithm5_payoff_queue_slots = NULL;

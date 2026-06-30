@@ -31,13 +31,21 @@ map, so the consuming column restores that final state, writes the skipped
 advance and prefix U coefficients, and jumps past the prefix. This fills another
 direct CKTSO/SubtreeLU paper gap, but remains rejected as a default because the
 retained-state restore volume is still too high in this executor shape.
+The sparse-restore follow-up
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE=1`
+keeps the same final retained state but restores only rows needed by the
+remaining scalar continuation, clearing unneeded input-scatter rows before
+resuming the existing loop. A cheap structural upper bound rejects the sparse
+row-set construction unless it can skip a material share of retained rows. This
+is the first guarded attempt to remove the current full-row copy without yet
+replacing the scalar continuation with a live grouped workspace.
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_PREP=1 ./build/kls_smoke`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_ADVANCE_SEED=1 ./build/kls_smoke`,
-and
-`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_CURRENT_STATE=1 ./build/kls_smoke`, and
-`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE=1 ./build/kls_smoke`.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_CURRENT_STATE=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE=1 ./build/kls_smoke`.
 The focused current-state value probe
 `build/kls_direct_prefix_current_state_gap5_t4_r1_ref3_timeout120.jsonl`
 completed all five rows with `2.2981s` SPICE-cycle geomean, worse than the
@@ -62,6 +70,19 @@ bad range as the current-state restore probe, so the missing performance feature
 is not another retained-state shortcut. It is the paper's live grouped
 multi-current workspace execution, where producer-side prefix work is applied to
 current workspaces that do not have to be copied back into the scalar column path.
+
+The guarded sparse-restore run
+`build/kls_direct_prefix_sparse_restore_guarded_gap5_t4_r1_ref3_timeout120.jsonl`
+completed the same five focused rows with `2.2665s` SPICE-cycle geomean. The
+guard mostly rejected sparse row-set construction on the ASIC cases:
+`ASIC_320ks` recorded `2,018` restores / `226,588` skipped deps / `1,792,325`
+restored rows, `ASIC_320k` recorded `1,973` / `202,111` / `1,873,119`, and
+`ASIC_100ks` recorded `350` / `27,565` / `323,524`. The continuation set is
+therefore nearly the whole retained state on the gap cases, so sparse restore is
+not enough to close the CKTSO gap. The next direct paper-level target is avoiding
+the scalar continuation after the retained prefix, for example by keeping grouped
+current workspaces live through column completion rather than copying them into
+the scalar scratch.
 
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`, and

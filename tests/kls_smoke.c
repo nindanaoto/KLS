@@ -6152,6 +6152,14 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       ? strdup(saved_algorithm5_direct_prefix_final_state_value) : NULL;
   const int had_algorithm5_direct_prefix_final_state =
     saved_algorithm5_direct_prefix_final_state_value != NULL;
+  const char *saved_algorithm5_direct_prefix_sparse_restore_value =
+    getenv(
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE");
+  char *saved_algorithm5_direct_prefix_sparse_restore =
+    saved_algorithm5_direct_prefix_sparse_restore_value != NULL
+      ? strdup(saved_algorithm5_direct_prefix_sparse_restore_value) : NULL;
+  const int had_algorithm5_direct_prefix_sparse_restore =
+    saved_algorithm5_direct_prefix_sparse_restore_value != NULL;
   const char *saved_algorithm5_workspace_value =
     getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_WORKSPACE");
   char *saved_algorithm5_workspace =
@@ -6322,6 +6330,15 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     perror(
       "setenv "
       "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE",
+        "0", 1) != 0) {
+    perror(
+      "setenv "
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE=0");
     ok = 0;
   }
   if (ok &&
@@ -6551,6 +6568,12 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     ok = 0;
   }
   if (!restore_env_value(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE",
+        had_algorithm5_direct_prefix_sparse_restore,
+        saved_algorithm5_direct_prefix_sparse_restore)) {
+    ok = 0;
+  }
+  if (!restore_env_value(
         "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_WORKSPACE",
         had_algorithm5_workspace, saved_algorithm5_workspace)) {
     ok = 0;
@@ -6583,6 +6606,8 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   free(saved_algorithm5_direct_prefix_prep);
   free(saved_algorithm5_direct_prefix_advance_seed);
   free(saved_algorithm5_direct_prefix_current_state);
+  free(saved_algorithm5_direct_prefix_final_state);
+  free(saved_algorithm5_direct_prefix_sparse_restore);
   free(saved_algorithm5_workspace);
   free(saved_algorithm5_slot_accum);
   free(saved_algorithm5_prefix_prep);
