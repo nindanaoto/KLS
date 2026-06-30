@@ -12409,3 +12409,26 @@ gather/update/scatter panel as the large paper gap. The missing piece has to be
 earlier and coarser: avoid materializing the per-current sparse state in this
 form, or make the row-major/supernode owner hold the live state across producer
 windows instead of copying it around one producer at a time.
+
+A direct retained-current-state seed prototype was also rejected before commit.
+The patch changed
+`kls_egraph_refactor_seed_algorithm5_payoff_group_item_state` to initialize the
+Algorithm 5 retained sparse state directly from the current column's mapped
+input entries instead of staging through the worker `x` vector and copying the
+retained rows back. Correctness passed `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`, but the hard seeded ASIC
+rows did not improve. The binary-search version measured `26.7430s` SPICE-cycle
+geomean and `0.24605s` refactor-only geomean in
+`build/kls_direct_state_seed_suffix_group_gap5_t4_r1_ref3_timeout120.jsonl`,
+versus the previous suffix-group artifact at `27.0181s` / `0.24840s`; however
+the seeded rows themselves were neutral or slightly slower
+(`ASIC_320k` `0.23594s` vs `0.23583s`, `ASIC_320ks` `0.20829s` vs
+`0.20814s`, `ASIC_100ks` `0.09873s` vs `0.09838s`). Replacing the per-entry
+binary search with a sorted merge cursor regressed the same top-five suffix
+group run to `27.0366s` in
+`build/kls_direct_state_seed_merge_suffix_group_gap5_t4_r1_ref3_timeout120.jsonl`.
+This rejects the seed-copy staging as the large missing mechanism. The
+Algorithm 5 gap is still downstream of, or broader than, the initial seed:
+the retained sparse current states and grouped executor ownership model remain
+the target.
