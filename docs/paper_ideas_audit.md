@@ -11649,3 +11649,22 @@ and `348,084,511` duplicate update-entry proxy work. `ASIC_320k` had
 surface. This makes the next paper-level step more concrete: the grouped
 multi-current owner should batch suffix advancement by producer dependency
 inside a payoff group, not only retain one current state per scalar consumer.
+
+KLS can now retain that producer-keyed suffix surface in the Algorithm 5 payoff
+descriptor with
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_MAP=1`. The internal
+map is `group -> suffix producer column -> (run, U position)` and is built
+after the existing grouped current-state and trigger maps are complete,
+validated against the measured unique-dependency and suffix dependency totals.
+It is intentionally descriptor-only: no numeric path uses it yet, because the
+previous unsafe suffix-advance probe showed that mutating live current states
+outside a clear owner protocol can introduce residual drift. The map gives the
+next executor the paper-aligned shape it needs to advance all occurrences of
+one producer inside a payoff group through owned current states. The focused
+top-five grouped-prep benchmark with the map enabled in
+`build/kls_alg5_group_suffix_map_on_gap5_t4_r1_ref3_timeout120.jsonl`
+completed with clean residuals, the same `2,997,879` suffix dependencies and
+`2,437,882` duplicate producer occurrences, and `1.8473s` geomean versus
+`1.8208s` with the map flag off. The descriptor is kept behind its own flag
+because it is still preparation for the grouped suffix executor, not a speedup
+by itself.
