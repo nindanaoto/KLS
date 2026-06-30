@@ -2546,6 +2546,20 @@ int main(int argc, char **argv) {
              .refactor_last_supernode_algorithm5_payoff_final_trigger_claims,
            stats
              .refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps);
+    printf(",\"refactor_last_supernode_algorithm5_payoff_suffix_advance_slots\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_suffix_advance_deps\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_suffix_advance_updates\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_suffix_advance_finished\":%"
+           PRId64,
+           stats.refactor_last_supernode_algorithm5_payoff_suffix_advance_slots,
+           stats.refactor_last_supernode_algorithm5_payoff_suffix_advance_deps,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_suffix_advance_updates,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_suffix_advance_finished);
     printf(",\"refactor_l_pattern_columns\":%" PRId64
            ",\"refactor_l_pattern_entries\":%" PRId64
            ",\"refactor_l_adjacent_run_count\":%" PRId64
@@ -3648,6 +3662,7 @@ int main(int argc, char **argv) {
            " prefix prep %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            " current-state seed %" PRId64 "/%" PRId64 "/%" PRId64
            " final trigger %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+           " suffix advance %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            ", group L %d/%d %" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64
@@ -3855,6 +3870,12 @@ int main(int argc, char **argv) {
              .refactor_last_supernode_algorithm5_payoff_final_trigger_claims,
            stats
              .refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps,
+           stats.refactor_last_supernode_algorithm5_payoff_suffix_advance_slots,
+           stats.refactor_last_supernode_algorithm5_payoff_suffix_advance_deps,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_suffix_advance_updates,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_suffix_advance_finished,
            stats.refactor_supernode_consumer_plan_group_l_built,
            stats.refactor_supernode_consumer_plan_group_l_storage_limited,
            stats.refactor_supernode_consumer_plan_group_l_panel_count,

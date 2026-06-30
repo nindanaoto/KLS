@@ -6,6 +6,37 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The guarded suffix-advance follow-up filled the next direct Algorithm 5
+surface, but it is rejected as a working CKTSO-gap closer. The implementation
+adds a retained `current_up` cursor, a suffix-trigger map from completed
+dependencies to prepared current slots, and a live current-state suffix executor
+that advances READY current states as later dependencies finish. It also extends
+the current-state row plan to include suffix dependency rows and their L-target
+rows, which is required for the paper-style live state update. Because repeated
+four-thread runs showed residual drift on `ASIC_320k`, the executor is now gated
+behind the explicit unsafe opt-in pair
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_ADVANCE=1` and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_ADVANCE_UNSAFE=1`.
+The normal suffix flag alone no longer enables the multicore live-state
+executor.
+
+The rejected benchmark artifact
+`build/kls_alg5_suffix_advance_reset_gap5_t4_r1_ref3_timeout120.jsonl`
+completed all five focused rows with no process failures but measured
+`3.1956s` SPICE-cycle geomean, worse than the final-trigger-only surface at
+`2.5581s` and the default runs around `1.4s`. The three active ASIC rows
+allocated `6,277,651` retained current-state rows and advanced `1,108,677`
+suffix dependencies, but that replay performed `409,264,540` suffix update
+entries. A rerun,
+`build/kls_alg5_suffix_advance_reset_gap5_t4_r1_ref3_timeout120_rerun.jsonl`,
+was worse at `3.3224s`. Isolated repeated `ASIC_320k` probes under the unsafe
+suffix executor produced residuals around `1e-8` to `4e-8`, while the default
+and final-trigger controls stayed at `2.04e-15`. This confirms the next missing
+paper-level piece is not BLAS thresholding and not per-current suffix replay; it
+is a correct grouped owner for live multi-current state, or a different
+supernodal task decomposition that avoids mutating partially owned current
+states from multiple suffix triggers.
+
 The latest Algorithm 5 grouped-prefix work now includes a targetless
 direct-prefix variant, an advance-seed probe, a retained-current-row state probe,
 and a final-state probe, without changing BLAS thresholds. The
