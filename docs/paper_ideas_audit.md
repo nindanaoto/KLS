@@ -11440,3 +11440,24 @@ owning the slot changes lifetime behavior; the speed loss confirms again that
 the main gap is not BLAS or scalar wait checks, but the absence of a grouped
 multi-current numeric task that advances several owned current workspaces
 together.
+
+The next direct live-state retry is now correctness-safe but still rejected as
+the large speed fix. `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_LIVE_STATE=1`
+adds a logged in-place retained-state suffix path under the guarded direct
+final-state completion: it requires the owned `COMPLETING` slot state, records
+the original value of each retained state entry before mutation, restores the
+log on fallback/error, and clears the slot only after a successful completion.
+Correctness passed `cmake --build build -j2`, `git diff --check`,
+`ctest --test-dir build --output-on-failure`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE=1 KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_LIVE_STATE=1 ./build/kls_smoke`.
+The top-five CKTSO-gap run
+`build/kls_alg5_group_complete_live_owned_gap5_t4_r1_ref3_timeout120.jsonl`
+completed with no failures but measured `2.5316s` geomean, versus `2.4617s`
+for `build/kls_alg5_group_complete_owned_state_gap5_t4_r1_ref3_timeout120.jsonl`.
+The live path did remove retained-row copy accounting on the ASIC rows
+(`seed_rows` went to zero while seed-run counts stayed essentially the same),
+but refactor time rose by about `3%`. This confirms that the earlier singular
+failures were a lifetime/rollback bug and that copied retained rows are not the
+primary CKTSO-gap cause. The missing algorithm remains a grouped multi-current
+numeric owner that applies the suffix dependencies to several live current
+states together.

@@ -1112,6 +1112,18 @@ versus the same-build default
 `1.4558s`. Claim waits and per-column prepared-state completion still dominate,
 so the remaining paper gap is a true grouped numeric executor for several live
 current workspaces, not delayed scalar dispatch alone.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_LIVE_STATE=1`
+is the rollback-safe version of the rejected in-place retained-state suffix
+experiment. It implies the direct-prefix final-state setup, requires the
+completion path to own the current slot, logs original retained-state values
+before mutating them, restores the log on fallback/error, and clears the slot
+only after a successful completion. Correctness passes, but the focused
+top-five run
+`build/kls_alg5_group_complete_live_owned_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `2.5316s` geomean versus `2.4617s` for the non-live owned-state
+guarded path. It removes retained-row copy counters on the ASIC rows, so the
+remaining gap is not state-copy overhead; it is still the absence of a grouped
+multi-current suffix update.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_STATE_RAGGED_SUFFIX=1`
 is a guarded diagnostic for that remaining suffix: it tries to apply matching
 ragged-L supernode runs directly against the retained state map before falling
