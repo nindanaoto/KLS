@@ -44,6 +44,35 @@ paper-aligned refactor step should fuse grouped producer-panel advancement and
 prefix application into one multi-current executor instead of publishing
 per-current prepared states for the scalar consumer to replay.
 
+A compact final-state variant was tested and rejected before commit. Extending
+the compact row plan to direct-prefix final-state completion has to retain the
+pivot row, current-column L rows, prefix target rows, and every remaining suffix
+dependency closure. On the hard ASIC rows that closure was effectively the same
+size as the full retained state (`ASIC_320ks` and `ASIC_320k` still reported
+`2,568,461` and `2,925,515` retained current-state rows). Worse, enabling the
+compact knob together with group completion also enabled grouped advance prep
+and increased seed work: the top-five run
+`build/kls_group_complete_compact_state_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `3.6382s` geomean versus `2.5457s` for
+`build/kls_group_complete_control_gap5_t4_r1_ref3_timeout120.jsonl`. This
+confirms that the final-state row set cannot be shrunk enough to matter; the
+remaining useful direction is a real grouped suffix/current-state executor, not
+another retained-row pruning mode.
+
+A SubtreeLU-inspired suffix `2P` fanout guard was also tested and rejected
+before commit. The trial let
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_GROUP_ADVANCE=1` build
+a producer batch only when the retained fanout for that trigger was at least
+twice the worker count, matching the paper's "small unfinished supernodes should
+wait" rule. Correctness passed default smoke and suffix-group smoke, but the
+focused top-five run
+`build/kls_suffix_group_2p_gap5_t4_r1_ref3_timeout120.jsonl` measured `2.8081s`
+geomean versus `1.4498s` for the same-binary default control
+`build/kls_suffix_2p_default_gap5_t4_r1_ref3_timeout120.jsonl`, and it was
+worse than the earlier suffix position-cache run. The rejected guard confirms
+that the current suffix-group path is dominated by retained-state ownership and
+cursor setup, not by too many tiny fanout batches.
+
 The previous refactor probe turns the grouped pre-prefix advance result
 into a position-coded executor. With
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_POS=1`, KLS now
