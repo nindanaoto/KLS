@@ -2175,6 +2175,12 @@ guarded direct path falls back. This fixes the lifetime hole exposed by the
 rejected in-place retained-state experiment, but the focused CKTSO-gap run still
 loses to default; the remaining paper-level gap is the grouped multi-current
 numeric executor, not BLAS thresholding or per-column wait removal.
+A June 30, 2026 cost-gated grouped pre-prefix advance patch was also rejected:
+even after admitting only currents whose retained prefix work exceeded modeled
+sparse-state seeding plus pre-prefix advance work, the opt-in grouped
+sparse-state executor timed out a single-pass `ASIC_320ks` probe under a
+90-second guard. This keeps the target at a different numeric owner, not a
+stricter scalar gate around the existing sparse current-state batch.
 
 ## License
 

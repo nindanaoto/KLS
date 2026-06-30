@@ -12630,3 +12630,31 @@ paper mechanism. The remaining gap is not the cluster/pipeline barrier
 bookkeeping; it is still the absent coarse numeric owner that prevents the
 pipeline tail from being expressed as hundreds of millions of scalar
 dependency updates.
+
+A June 30, 2026 cost-gated grouped pre-prefix advance patch was tested and
+rejected before commit. The patch tried to make
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_PREP=1`
+closer to the paper's low-advance Algorithm 5 subset: before claiming a
+current for the grouped sparse-state batch, it required the retained producer
+prefix work (`target_entries + prefix triangular work`) to exceed the modeled
+cost of sparse current-state seeding plus pre-prefix advance dependencies.
+It also refused to form a grouped sparse-state batch with only one surviving
+current. Correctness passed `cmake --build build -j2`, `git diff --check`,
+`./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_PREP=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_POS=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`.
+The performance result was decisively negative. The same-source default
+top-five CKTSO-gap run
+`build/kls_group_adv_paygate_default_gap5_t4_r1_ref3_p3_timeout120.jsonl`
+measured `1.3865s` SPICE-cycle geomean, but the gated grouped-advance run
+did not produce the first matrix row after several minutes and was interrupted
+with an empty
+`build/kls_group_adv_paygate_prep_gap5_t4_r1_ref3_p3_timeout120.jsonl`.
+A direct single-pass probe on `ASIC_320ks`
+(`repeat=1`, `refactor-repeat=1`) hit a 90 second external timeout with the
+same gated grouped-advance flag. This rejects a scalar cost gate around the
+existing sparse current-state batch as the missing CKTSO/SubtreeLU mechanism.
+The problem is not simply selecting fewer high-advance currents; the retained
+executor still materializes and mutates sparse per-current state in a form that
+is too expensive before it reaches the coarse producer-panel work.
