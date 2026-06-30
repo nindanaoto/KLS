@@ -65,6 +65,15 @@ The useful paper target is therefore not another BLAS guard and not the current
 single-current/producer-panel replay switches; it is persistent grouped
 Algorithm-5 state with one batch advancing many current workspaces.
 
+A structural selector probe was also rejected. Raising the exact-EGraph work
+floor for the small compact dominant-BTF class from `5.0e5` to `5.0e6` moved
+`rajat03` from EGraph to the mapped path, but worsened the focused top-five
+CKTSO-gap geomean to `1.4493s` in
+`build/kls_smallcompact_workfloor_gap5_t4_r1_ref3_timeout120.jsonl`. The
+`rajat03` repeated refactor itself slowed from the recent EGraph baseline around
+`0.00069s` to `0.00103s`. This rules out a broad "small compact EGraph is the
+problem" selector fix for the observed gap.
+
 The latest forced-row rerun adds explicit row-group shape/work diagnostics and
 rejects the small-BLAS hypothesis for the current slow cases. The slow default
 ASIC rows still report zero CBLAS update counters, and forced row refactor with
