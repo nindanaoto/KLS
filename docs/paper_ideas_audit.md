@@ -100,6 +100,27 @@ runs, so it is preparation only. Its `1.7807s` geomean is not a speed claim; the
 extra retained-plan/schedule work must be consumed by a real grouped numeric
 executor before this path can close the CKTSO gap.
 
+The June 30, 2026 advance-slot diagnostic adds the missing row-surface
+measurement for that executor. KLS now records, per retained Algorithm-5 payoff
+group, how many distinct local workspace rows would be touched by advancing the
+selected current columns to the producer prefix. This changes stats only, not
+numeric execution. Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1 ./build/kls_smoke`, and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1 ./build/kls_smoke`.
+The focused artifact
+`build/kls_alg5_advance_slots_gap5_t4_r1_ref3_timeout120.jsonl` reports that the
+hard ASIC advance surface is comparable to the target surface, not a full-block
+explosion: `ASIC_320ks` has `909,325` advance slots versus `784,673` target
+slots, `ASIC_320k` has `1,065,691` versus `971,718`, and `ASIC_100ks` has
+`194,019` versus `188,230`. The largest single run needs `1,884` advance slots.
+This makes the plausible paper-aligned next fix a compact grouped
+multi-current prefix-advance executor backed by the retained group/current/run
+maps. It also reinforces that BLAS thresholding is not the first cause from
+here: the issue is still repeated scalar workspace advancement and publication,
+not small dense kernel dispatch.
+
 The EGraph prefactor path now has the corresponding guarded supernode-shaped
 prefactor slice when `KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L=1` is explicitly
 requested. A blocked BTF EGraph column may consume a contiguous finished
