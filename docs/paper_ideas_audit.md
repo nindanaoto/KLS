@@ -11559,3 +11559,23 @@ The terminal surface was tiny on the hard ASIC rows, so the added claim/scan
 work outweighed the saved per-column dispatch. The remaining paper gap is still
 not terminal publication; it is a real grouped multi-current suffix executor
 that advances several live current workspaces together.
+
+To make that remaining gap measurable, KLS now reports grouped Algorithm 5
+suffix counters whenever the grouped payoff descriptor is built:
+`refactor_supernode_algorithm5_payoff_group_suffix_deps`,
+`refactor_supernode_algorithm5_payoff_group_max_suffix_deps`,
+`refactor_supernode_algorithm5_payoff_group_suffix_update_entries`, and
+`refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries`.
+These count the U dependencies and `1 + Llen(dep)` update-entry proxy left
+after the current advance and prefix work. The focused top-five grouped-prep
+run
+`build/kls_alg5_group_suffix_stats_gap5_t4_r1_ref3_timeout120.jsonl`
+reported large non-terminal suffix surfaces on the hard ASIC rows:
+`ASIC_320ks` had `1,212,799` suffix dependencies and `393,218,349` suffix
+update entries, `ASIC_320k` had `1,369,088` and `503,781,567`, and
+`ASIC_100ks` had `415,992` and `132,383,507`. Across the five-row focus set,
+the grouped descriptor exposed `2,997,879` suffix dependencies and
+`1,029,383,423` suffix update entries over `8,463` positioned runs. This keeps
+BLAS and terminal publication out of the lead-cause slot: the paper-aligned
+work still missing from KLS is a grouped suffix/current-state executor that can
+amortize this remaining scalar update surface.

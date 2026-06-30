@@ -2466,6 +2466,21 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_payoff_runtime_workspace_rows,
            stats.refactor_supernode_algorithm5_payoff_runtime_target_slots,
            stats.refactor_supernode_algorithm5_payoff_runtime_current_count);
+    printf(",\"refactor_supernode_algorithm5_payoff_group_suffix_deps\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_max_suffix_deps\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_suffix_update_entries\":%"
+           PRId64
+           ",\"refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries\":%"
+           PRId64,
+           stats.refactor_supernode_algorithm5_payoff_group_suffix_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_max_suffix_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_update_entries,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries);
     printf(",\"refactor_last_supernode_algorithm5_payoff_slot_accum_runs\":%"
            PRId64
            ",\"refactor_last_supernode_algorithm5_payoff_slot_accum_rows\":%"
@@ -3606,6 +3621,7 @@ int main(int argc, char **argv) {
            " currents %" PRId64 "/%" PRId64 "/%" PRId64
            " workspace %" PRId64 "/%" PRId64
            " advance %" PRId64 "/%" PRId64 "/%" PRId64
+           " suffix %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            " advance slots %" PRId64 "/%" PRId64 "/%" PRId64
            " target %" PRId64 "/%" PRId64 "/%" PRId64
            " target slots %" PRId64 "/%" PRId64 "/%" PRId64
@@ -3765,6 +3781,13 @@ int main(int argc, char **argv) {
              .refactor_supernode_algorithm5_payoff_group_max_advance_deps,
            stats
              .refactor_supernode_algorithm5_payoff_group_zero_advance_runs,
+           stats.refactor_supernode_algorithm5_payoff_group_suffix_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_max_suffix_deps,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_suffix_update_entries,
+           stats
+             .refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries,
            stats.refactor_supernode_algorithm5_payoff_group_advance_slots,
            stats
              .refactor_supernode_algorithm5_payoff_group_max_advance_slots,
