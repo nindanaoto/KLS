@@ -12944,6 +12944,34 @@ states, skipped `193,588` U dependencies, restored `463,173` rows, and
 refactored in `8.5472s`; the no-flag control was `0.0808s`. Both execution
 probes had zero state-exec rejects and zero state rejects.
 
+The next diagnostic split records why most wake-ready retained states are not
+consumed: `refactor_last_btf_scalar_run_group_state_exec_not_ready_currents`
+counts dispatch attempts where the selected retained state is not READY yet,
+`refactor_last_btf_scalar_run_group_state_exec_dispatch_bypass_currents`
+counts target-column dispatches with a selected retained state where the
+restore hook was gated off, the matching `_ready_` counter records how often
+that bypassed state was already READY,
+`refactor_last_btf_scalar_run_group_state_exec_owned_ready_currents` counts
+states that become READY while the target current column is already
+claimed/leased, and
+`refactor_last_btf_scalar_run_group_state_exec_late_ready_currents` counts
+states that become READY only after their target current column is already done.
+This distinguishes a simple consumer lookup miss from the larger paper-level
+scheduling problem of publishing current-state work too late for the existing
+scalar EGraph dispatch.
+
+The bypass split makes the dominant large-case miss explicit. On `ASIC_100ks`,
+the guarded executor produced `14,818` READY retained states, consumed only
+`607`, and saw `14,130` dispatch bypasses where the selected retained state was
+already READY; only `1,660` dispatches saw not-ready state, `7` became READY
+while already owned, and `74` became READY after done. On `ASIC_320ks`, it
+produced `16,441` READY states, consumed `973`, and saw `15,386` READY
+bypasses; not-ready, owned-ready, and late-ready were only `1,351`, `18`, and
+`64`. Both probes remained residual-clean with zero state rejects. This points
+directly at the restore-hook eligibility gate around `plain_scalar_updates`:
+the retained BTF state exists, but most target columns bypass the consumer
+hook instead of being owned by a grouped current-state executor.
+
 This confirms that the retained current-state handoff can be made
 correctness-clean, but it also rejects a per-current restored sparse state as
 the missing CKTSO-speed mechanism. The next paper-aligned owner needs to keep a
