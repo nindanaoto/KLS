@@ -10982,3 +10982,32 @@ target slots; `ASIC_320k` has `3,755`, `146,027`, and `971,718`; `ASIC_100ks`
 has `1,112`, `20,859`, and `188,230`. This keeps BLAS out of the first-order
 explanation: the remaining gap is still the paper-level grouped numeric
 accumulator that uses this state.
+
+The first numeric consumer of that retained state is now implemented as an
+opt-in slot accumulator under
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SLOT_ACCUM=1`. The flag now
+triggers the same payoff-plan preparation as the scalar Algorithm 5 executor,
+allocates retained current/target arrays, copies each selected current's prefix
+values into its retained workspace slice, accumulates dense-suffix and
+L-trailing updates into retained target slots, and publishes each target slot
+once. Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`, `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SLOT_ACCUM=1 ./build/kls_smoke`,
+and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SLOT_ACCUM=1 KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_WORKSPACE=1 ./build/kls_smoke`.
+The top-five CKTSO-gap probe
+`build/kls_alg5_slot_accum_runtime_gap5_t4_r1_ref3_timeout120.jsonl` completed
+with no failures and `2.1749853505877623s` geomean. It fired on the hard ASIC
+EGraph rows: `ASIC_320ks` recorded `3,596` slot-accumulated runs, `157,067`
+rows, `46,839,997` target entries, and `784,673` target slots; `ASIC_320k`
+recorded `3,719`, `133,371`, `47,336,990`, and `964,970`; `ASIC_100ks`
+recorded `1,112`, `20,859`, `4,668,124`, and `188,230`. A same-binary
+workspace-only rerun
+`build/kls_alg5_runtime_workspace_rerun_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `1.804664999716117s`, so the slot path remains experimental rather
+than a default speed path. The direct lesson matches the CKTSO paper gap: a
+per-current slot accumulator removes repeated target scatter but still replays
+each current column separately. Closing the large slow-case gap requires the
+actual grouped multi-current numeric executor that advances several retained
+current workspaces through the same producer panel together and then publishes
+their target slots, not BLAS threshold tuning or CPU-specific changes.

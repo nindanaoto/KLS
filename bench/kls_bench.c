@@ -2443,6 +2443,20 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_payoff_runtime_workspace_rows,
            stats.refactor_supernode_algorithm5_payoff_runtime_target_slots,
            stats.refactor_supernode_algorithm5_payoff_runtime_current_count);
+    printf(",\"refactor_last_supernode_algorithm5_payoff_slot_accum_runs\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_slot_accum_rows\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries\":%"
+           PRId64
+           ",\"refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots\":%"
+           PRId64,
+           stats.refactor_last_supernode_algorithm5_payoff_slot_accum_runs,
+           stats.refactor_last_supernode_algorithm5_payoff_slot_accum_rows,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots);
     printf(",\"refactor_l_pattern_columns\":%" PRId64
            ",\"refactor_l_pattern_entries\":%" PRId64
            ",\"refactor_l_adjacent_run_count\":%" PRId64
@@ -3539,6 +3553,7 @@ int main(int argc, char **argv) {
            " target slots %" PRId64 "/%" PRId64 "/%" PRId64
            " pattern %" PRId64 "/%" PRId64
            " runtime %" PRId64 "/%" PRId64 "/%" PRId64
+           " slot accum %" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            ", group L %d/%d %" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            "/%" PRId64 "/%" PRId64
@@ -3710,6 +3725,12 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_algorithm5_payoff_runtime_workspace_rows,
            stats.refactor_supernode_algorithm5_payoff_runtime_target_slots,
            stats.refactor_supernode_algorithm5_payoff_runtime_current_count,
+           stats.refactor_last_supernode_algorithm5_payoff_slot_accum_runs,
+           stats.refactor_last_supernode_algorithm5_payoff_slot_accum_rows,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries,
+           stats
+             .refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots,
            stats.refactor_supernode_consumer_plan_group_l_built,
            stats.refactor_supernode_consumer_plan_group_l_storage_limited,
            stats.refactor_supernode_consumer_plan_group_l_panel_count,

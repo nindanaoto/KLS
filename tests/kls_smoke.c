@@ -6113,6 +6113,13 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       ? strdup(saved_algorithm5_workspace_value) : NULL;
   const int had_algorithm5_workspace =
     saved_algorithm5_workspace_value != NULL;
+  const char *saved_algorithm5_slot_accum_value =
+    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SLOT_ACCUM");
+  char *saved_algorithm5_slot_accum =
+    saved_algorithm5_slot_accum_value != NULL
+      ? strdup(saved_algorithm5_slot_accum_value) : NULL;
+  const int had_algorithm5_slot_accum =
+    saved_algorithm5_slot_accum_value != NULL;
 
   kls_solver *solver = NULL;
   kls_options options;
@@ -6138,7 +6145,8 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       (had_algorithm5_claims && saved_algorithm5_claims == NULL) ||
       (had_algorithm5_queue && saved_algorithm5_queue == NULL) ||
       (had_algorithm5_group_prep && saved_algorithm5_group_prep == NULL) ||
-      (had_algorithm5_workspace && saved_algorithm5_workspace == NULL)) {
+      (had_algorithm5_workspace && saved_algorithm5_workspace == NULL) ||
+      (had_algorithm5_slot_accum && saved_algorithm5_slot_accum == NULL)) {
     fprintf(stderr, "failed to save EGraph blocked environment\n");
     ok = 0;
   }
@@ -6206,6 +6214,13 @@ static int test_egraph_cached_supernode_blocked_update(void) {
              1) != 0) {
     perror(
       "setenv KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_WORKSPACE=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SLOT_ACCUM", "0",
+             1) != 0) {
+    perror(
+      "setenv KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SLOT_ACCUM=0");
     ok = 0;
   }
 
@@ -6383,6 +6398,11 @@ static int test_egraph_cached_supernode_blocked_update(void) {
         had_algorithm5_workspace, saved_algorithm5_workspace)) {
     ok = 0;
   }
+  if (!restore_env_value(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SLOT_ACCUM",
+        had_algorithm5_slot_accum, saved_algorithm5_slot_accum)) {
+    ok = 0;
+  }
 
   free(saved_row);
   free(saved_checked);
@@ -6397,6 +6417,7 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   free(saved_algorithm5_queue);
   free(saved_algorithm5_group_prep);
   free(saved_algorithm5_workspace);
+  free(saved_algorithm5_slot_accum);
   kls_destroy(solver);
   free(ap);
   free(ai);
