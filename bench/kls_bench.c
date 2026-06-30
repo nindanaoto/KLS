@@ -1700,6 +1700,15 @@ int main(int argc, char **argv) {
            ",\"row_refactor_group_batch_max_width\":%" PRId64
            ",\"row_refactor_group_batch_width_le_4_count\":%" PRId64
            ",\"row_refactor_group_batch_width_le_8_count\":%" PRId64
+           ",\"row_refactor_group_scalar_candidate_count\":%" PRId64
+           ",\"row_refactor_group_scalar_candidate_rows\":%" PRId64
+           ",\"row_refactor_group_scalar_short_count\":%" PRId64
+           ",\"row_refactor_group_scalar_short_rows\":%" PRId64
+           ",\"row_refactor_group_scalar_stop_level_mismatch_count\":%" PRId64
+           ",\"row_refactor_group_scalar_stop_internal_dep_count\":%" PRId64
+           ",\"row_refactor_group_scalar_stop_next_segment_count\":%" PRId64
+           ",\"row_refactor_group_scalar_stop_max_width_count\":%" PRId64
+           ",\"row_refactor_group_scalar_stop_matrix_end_count\":%" PRId64
            ",\"row_refactor_group_generic_count\":%" PRId64
            ",\"row_refactor_group_generic_rows\":%" PRId64
            ",\"row_refactor_group_generic_max_width\":%" PRId64
@@ -1910,6 +1919,15 @@ int main(int argc, char **argv) {
            stats.row_refactor_group_batch_max_width,
            stats.row_refactor_group_batch_width_le_4_count,
            stats.row_refactor_group_batch_width_le_8_count,
+           stats.row_refactor_group_scalar_candidate_count,
+           stats.row_refactor_group_scalar_candidate_rows,
+           stats.row_refactor_group_scalar_short_count,
+           stats.row_refactor_group_scalar_short_rows,
+           stats.row_refactor_group_scalar_stop_level_mismatch_count,
+           stats.row_refactor_group_scalar_stop_internal_dep_count,
+           stats.row_refactor_group_scalar_stop_next_segment_count,
+           stats.row_refactor_group_scalar_stop_max_width_count,
+           stats.row_refactor_group_scalar_stop_matrix_end_count,
            stats.row_refactor_group_generic_count,
            stats.row_refactor_group_generic_rows,
            stats.row_refactor_group_generic_max_width,
@@ -4324,6 +4342,10 @@ int main(int argc, char **argv) {
     printf("row refactor groups: %" PRId64
            " (single %" PRId64 ", batch %" PRId64 "/%" PRId64
            " rows, batch max/le4/le8 %" PRId64 "/%" PRId64 "/%" PRId64
+           ", scalar candidates %" PRId64 "/%" PRId64
+           " rows, short %" PRId64 "/%" PRId64
+           " rows, stops level/internal/segment/max/end "
+           "%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
            ", generic %" PRId64 "/%" PRId64 " rows max %" PRId64
            ", dense %" PRId64 "/%" PRId64 " rows max %" PRId64 ")"
            ", work single/batch/generic/dense %.6g/%.6g/%.6g/%.6g"
@@ -4376,6 +4398,15 @@ int main(int argc, char **argv) {
            stats.row_refactor_group_batch_max_width,
            stats.row_refactor_group_batch_width_le_4_count,
            stats.row_refactor_group_batch_width_le_8_count,
+           stats.row_refactor_group_scalar_candidate_count,
+           stats.row_refactor_group_scalar_candidate_rows,
+           stats.row_refactor_group_scalar_short_count,
+           stats.row_refactor_group_scalar_short_rows,
+           stats.row_refactor_group_scalar_stop_level_mismatch_count,
+           stats.row_refactor_group_scalar_stop_internal_dep_count,
+           stats.row_refactor_group_scalar_stop_next_segment_count,
+           stats.row_refactor_group_scalar_stop_max_width_count,
+           stats.row_refactor_group_scalar_stop_matrix_end_count,
            stats.row_refactor_group_generic_count,
            stats.row_refactor_group_generic_rows,
            stats.row_refactor_group_generic_max_width,

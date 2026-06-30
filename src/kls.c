@@ -308,6 +308,15 @@ struct kls_solver {
   UF_long row_refactor_group_batch_max_width;
   UF_long row_refactor_group_batch_width_le_4_count;
   UF_long row_refactor_group_batch_width_le_8_count;
+  UF_long row_refactor_group_scalar_candidate_count;
+  UF_long row_refactor_group_scalar_candidate_rows;
+  UF_long row_refactor_group_scalar_short_count;
+  UF_long row_refactor_group_scalar_short_rows;
+  UF_long row_refactor_group_scalar_stop_level_mismatch_count;
+  UF_long row_refactor_group_scalar_stop_internal_dep_count;
+  UF_long row_refactor_group_scalar_stop_next_segment_count;
+  UF_long row_refactor_group_scalar_stop_max_width_count;
+  UF_long row_refactor_group_scalar_stop_matrix_end_count;
   UF_long row_refactor_group_generic_count;
   UF_long row_refactor_group_generic_rows;
   UF_long row_refactor_group_generic_max_width;
@@ -14614,6 +14623,15 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_batch_max_width = 0;
   solver->row_refactor_group_batch_width_le_4_count = 0;
   solver->row_refactor_group_batch_width_le_8_count = 0;
+  solver->row_refactor_group_scalar_candidate_count = 0;
+  solver->row_refactor_group_scalar_candidate_rows = 0;
+  solver->row_refactor_group_scalar_short_count = 0;
+  solver->row_refactor_group_scalar_short_rows = 0;
+  solver->row_refactor_group_scalar_stop_level_mismatch_count = 0;
+  solver->row_refactor_group_scalar_stop_internal_dep_count = 0;
+  solver->row_refactor_group_scalar_stop_next_segment_count = 0;
+  solver->row_refactor_group_scalar_stop_max_width_count = 0;
+  solver->row_refactor_group_scalar_stop_matrix_end_count = 0;
   solver->row_refactor_group_generic_count = 0;
   solver->row_refactor_group_generic_rows = 0;
   solver->row_refactor_group_generic_max_width = 0;
@@ -14827,6 +14845,15 @@ typedef struct {
   UF_long group_batch_max_width;
   UF_long group_batch_width_le_4_count;
   UF_long group_batch_width_le_8_count;
+  UF_long group_scalar_candidate_count;
+  UF_long group_scalar_candidate_rows;
+  UF_long group_scalar_short_count;
+  UF_long group_scalar_short_rows;
+  UF_long group_scalar_stop_level_mismatch_count;
+  UF_long group_scalar_stop_internal_dep_count;
+  UF_long group_scalar_stop_next_segment_count;
+  UF_long group_scalar_stop_max_width_count;
+  UF_long group_scalar_stop_matrix_end_count;
   UF_long group_generic_count;
   UF_long group_generic_rows;
   UF_long group_generic_max_width;
@@ -15042,6 +15069,24 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_group_batch_width_le_4_count;
   diag->group_batch_width_le_8_count =
     solver->row_refactor_group_batch_width_le_8_count;
+  diag->group_scalar_candidate_count =
+    solver->row_refactor_group_scalar_candidate_count;
+  diag->group_scalar_candidate_rows =
+    solver->row_refactor_group_scalar_candidate_rows;
+  diag->group_scalar_short_count =
+    solver->row_refactor_group_scalar_short_count;
+  diag->group_scalar_short_rows =
+    solver->row_refactor_group_scalar_short_rows;
+  diag->group_scalar_stop_level_mismatch_count =
+    solver->row_refactor_group_scalar_stop_level_mismatch_count;
+  diag->group_scalar_stop_internal_dep_count =
+    solver->row_refactor_group_scalar_stop_internal_dep_count;
+  diag->group_scalar_stop_next_segment_count =
+    solver->row_refactor_group_scalar_stop_next_segment_count;
+  diag->group_scalar_stop_max_width_count =
+    solver->row_refactor_group_scalar_stop_max_width_count;
+  diag->group_scalar_stop_matrix_end_count =
+    solver->row_refactor_group_scalar_stop_matrix_end_count;
   diag->group_generic_count = solver->row_refactor_group_generic_count;
   diag->group_generic_rows = solver->row_refactor_group_generic_rows;
   diag->group_generic_max_width =
@@ -15404,6 +15449,24 @@ static void kls_restore_row_refactor_diagnostics(
     diag->group_batch_width_le_4_count;
   solver->row_refactor_group_batch_width_le_8_count =
     diag->group_batch_width_le_8_count;
+  solver->row_refactor_group_scalar_candidate_count =
+    diag->group_scalar_candidate_count;
+  solver->row_refactor_group_scalar_candidate_rows =
+    diag->group_scalar_candidate_rows;
+  solver->row_refactor_group_scalar_short_count =
+    diag->group_scalar_short_count;
+  solver->row_refactor_group_scalar_short_rows =
+    diag->group_scalar_short_rows;
+  solver->row_refactor_group_scalar_stop_level_mismatch_count =
+    diag->group_scalar_stop_level_mismatch_count;
+  solver->row_refactor_group_scalar_stop_internal_dep_count =
+    diag->group_scalar_stop_internal_dep_count;
+  solver->row_refactor_group_scalar_stop_next_segment_count =
+    diag->group_scalar_stop_next_segment_count;
+  solver->row_refactor_group_scalar_stop_max_width_count =
+    diag->group_scalar_stop_max_width_count;
+  solver->row_refactor_group_scalar_stop_matrix_end_count =
+    diag->group_scalar_stop_matrix_end_count;
   solver->row_refactor_group_generic_count = diag->group_generic_count;
   solver->row_refactor_group_generic_rows = diag->group_generic_rows;
   solver->row_refactor_group_generic_max_width =
@@ -27814,6 +27877,24 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_group_batch_width_le_4_count;
   solver->stats.row_refactor_group_batch_width_le_8_count =
     (int64_t)solver->row_refactor_group_batch_width_le_8_count;
+  solver->stats.row_refactor_group_scalar_candidate_count =
+    (int64_t)solver->row_refactor_group_scalar_candidate_count;
+  solver->stats.row_refactor_group_scalar_candidate_rows =
+    (int64_t)solver->row_refactor_group_scalar_candidate_rows;
+  solver->stats.row_refactor_group_scalar_short_count =
+    (int64_t)solver->row_refactor_group_scalar_short_count;
+  solver->stats.row_refactor_group_scalar_short_rows =
+    (int64_t)solver->row_refactor_group_scalar_short_rows;
+  solver->stats.row_refactor_group_scalar_stop_level_mismatch_count =
+    (int64_t)solver->row_refactor_group_scalar_stop_level_mismatch_count;
+  solver->stats.row_refactor_group_scalar_stop_internal_dep_count =
+    (int64_t)solver->row_refactor_group_scalar_stop_internal_dep_count;
+  solver->stats.row_refactor_group_scalar_stop_next_segment_count =
+    (int64_t)solver->row_refactor_group_scalar_stop_next_segment_count;
+  solver->stats.row_refactor_group_scalar_stop_max_width_count =
+    (int64_t)solver->row_refactor_group_scalar_stop_max_width_count;
+  solver->stats.row_refactor_group_scalar_stop_matrix_end_count =
+    (int64_t)solver->row_refactor_group_scalar_stop_matrix_end_count;
   solver->stats.row_refactor_group_generic_count =
     (int64_t)solver->row_refactor_group_generic_count;
   solver->stats.row_refactor_group_generic_rows =
@@ -39641,6 +39722,15 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     return 0;
   }
   UF_long group_count = 0;
+  UF_long group_scalar_candidate_count = 0;
+  UF_long group_scalar_candidate_rows = 0;
+  UF_long group_scalar_short_count = 0;
+  UF_long group_scalar_short_rows = 0;
+  UF_long group_scalar_stop_level_mismatch_count = 0;
+  UF_long group_scalar_stop_internal_dep_count = 0;
+  UF_long group_scalar_stop_next_segment_count = 0;
+  UF_long group_scalar_stop_max_width_count = 0;
+  UF_long group_scalar_stop_matrix_end_count = 0;
   UF_long row = 0;
   while (row < n) {
     group_ptr[group_count] = row;
@@ -39657,24 +39747,44 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     /* Coarsen only long scalar runs that live on the same dependency level.
        That trims ready-queue/task overhead without hiding useful small-width
        parallelism or delaying low-level rows behind later dependencies. */
-    while (!segment && end < n &&
-           end - row < KLS_ROW_REFACTOR_BATCH_MAX_ROWS) {
-      if (levels[end] != levels[row]) {
-        break;
+    if (!segment) {
+      int stop_recorded = 0;
+      group_scalar_candidate_count++;
+      while (end < n && end - row < KLS_ROW_REFACTOR_BATCH_MAX_ROWS) {
+        if (levels[end] != levels[row]) {
+          group_scalar_stop_level_mismatch_count++;
+          stop_recorded = 1;
+          break;
+        }
+        if (end + 1u < n &&
+            kls_row_refactor_u_row_extends_next(u_ptr, u_cols, n,
+                                                end, end + 1u)) {
+          group_scalar_stop_next_segment_count++;
+          stop_recorded = 1;
+          break;
+        }
+        if (kls_row_refactor_row_depends_in_range(l_ptr, l_cols, end,
+                                                  row, end)) {
+          group_scalar_stop_internal_dep_count++;
+          stop_recorded = 1;
+          break;
+        }
+        end++;
       }
-      if (end + 1u < n &&
-          kls_row_refactor_u_row_extends_next(u_ptr, u_cols, n,
-                                              end, end + 1u)) {
-        break;
+      if (!stop_recorded) {
+        if (end >= n) {
+          group_scalar_stop_matrix_end_count++;
+        } else {
+          group_scalar_stop_max_width_count++;
+        }
       }
-      if (kls_row_refactor_row_depends_in_range(l_ptr, l_cols, end,
-                                                row, end)) {
-        break;
+      const UF_long candidate_rows = end - row;
+      group_scalar_candidate_rows += candidate_rows;
+      if (candidate_rows < KLS_ROW_REFACTOR_BATCH_MIN_ROWS) {
+        group_scalar_short_count++;
+        group_scalar_short_rows += candidate_rows;
+        end = row + 1u;
       }
-      end++;
-    }
-    if (!segment && end - row < KLS_ROW_REFACTOR_BATCH_MIN_ROWS) {
-      end = row + 1u;
     }
     for (UF_long i = row; i < end; ++i) {
       row_group[i] = group_count;
@@ -40202,6 +40312,24 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     group_batch_width_le_4_count;
   solver->row_refactor_group_batch_width_le_8_count =
     group_batch_width_le_8_count;
+  solver->row_refactor_group_scalar_candidate_count =
+    group_scalar_candidate_count;
+  solver->row_refactor_group_scalar_candidate_rows =
+    group_scalar_candidate_rows;
+  solver->row_refactor_group_scalar_short_count =
+    group_scalar_short_count;
+  solver->row_refactor_group_scalar_short_rows =
+    group_scalar_short_rows;
+  solver->row_refactor_group_scalar_stop_level_mismatch_count =
+    group_scalar_stop_level_mismatch_count;
+  solver->row_refactor_group_scalar_stop_internal_dep_count =
+    group_scalar_stop_internal_dep_count;
+  solver->row_refactor_group_scalar_stop_next_segment_count =
+    group_scalar_stop_next_segment_count;
+  solver->row_refactor_group_scalar_stop_max_width_count =
+    group_scalar_stop_max_width_count;
+  solver->row_refactor_group_scalar_stop_matrix_end_count =
+    group_scalar_stop_matrix_end_count;
   solver->row_refactor_group_generic_count = group_generic_count;
   solver->row_refactor_group_generic_rows = group_generic_rows;
   solver->row_refactor_group_generic_max_width =

@@ -36,6 +36,36 @@ row-refactor cleanup, but it does not close the main gap: the same focused
 default artifact remains `1.4664s`, so forced row refactor is still about
 `2.65x` slower than the normal KLS path on this slice.
 
+The row-refactor group builder now reports scalar batching blocker diagnostics:
+`row_refactor_group_scalar_candidate_count`,
+`row_refactor_group_scalar_candidate_rows`,
+`row_refactor_group_scalar_short_count`,
+`row_refactor_group_scalar_short_rows`, and the first stop reason split across
+level mismatch, internal dependency, next segment, max width, and matrix end.
+The focused forced-row probe
+`build/kls_row_group_blockers_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`4.0429s` SPICE-cycle geomean and showed that internal row dependencies are not
+the scalar batching blocker. On `ASIC_320ks`, `204,113` of `219,053` groups
+were single-row groups; scalar candidates covered `509,279` rows, `405,067`
+candidate rows were discarded by the minimum-width rule, and `213,854` of
+`214,348` scalar candidates stopped first at the same-level boundary. `ASIC_320k`
+was similar: `230,012` of `242,821` groups were singles and `237,505` of
+`238,002` scalar candidates stopped first at level mismatch.
+
+A level-relaxed scalar batching prototype was tested and rejected before
+commit. The prototype allowed scalar batches to cross row levels while still
+requiring no internal row dependencies, directly testing whether the SubtreeLU
+private-refactor gap was mostly scheduler fragmentation. It reduced group counts
+on the ASIC rows (`ASIC_320k` `242,821 -> 218,620`, singles
+`230,012 -> 203,963`; `ASIC_100ks` `54,297 -> 40,871`, singles
+`43,358 -> 28,692`), but the top-five forced-row geomean still worsened
+slightly (`4.0429s -> 4.0664s`) in
+`build/kls_relaxed_scalar_batch_gap5_t4_r1_ref3_timeout120.jsonl`. This rejects
+"coarsen scalar private groups across row levels" as the clear slow-case gap
+closer. The missing paper-aligned piece is therefore not just fewer ready-queue
+groups; it remains a production row-major supernode/current-state numeric
+executor that fuses or avoids the scalar row/current-state work itself.
+
 An active producer-bucket grouped advance executor was prototyped and rejected
 before commit. The trial kept the retained position-coded Algorithm 5
 pre-prefix state plan, but replaced the runtime scan over active current

@@ -748,6 +748,15 @@ typedef struct kls_stats {
   int64_t row_refactor_group_batch_max_width;
   int64_t row_refactor_group_batch_width_le_4_count;
   int64_t row_refactor_group_batch_width_le_8_count;
+  int64_t row_refactor_group_scalar_candidate_count;
+  int64_t row_refactor_group_scalar_candidate_rows;
+  int64_t row_refactor_group_scalar_short_count;
+  int64_t row_refactor_group_scalar_short_rows;
+  int64_t row_refactor_group_scalar_stop_level_mismatch_count;
+  int64_t row_refactor_group_scalar_stop_internal_dep_count;
+  int64_t row_refactor_group_scalar_stop_next_segment_count;
+  int64_t row_refactor_group_scalar_stop_max_width_count;
+  int64_t row_refactor_group_scalar_stop_matrix_end_count;
   int64_t row_refactor_group_generic_count;
   int64_t row_refactor_group_generic_rows;
   int64_t row_refactor_group_generic_max_width;
