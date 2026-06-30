@@ -6,6 +6,26 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+An active producer-bucket grouped advance executor was prototyped and rejected
+before commit. The trial kept the retained position-coded Algorithm 5
+pre-prefix state plan, but replaced the runtime scan over active current
+columns with per-producer buckets that requeued a current only after its next
+U dependency had been applied. This preserves each current column's triangular
+order and directly tests whether the missing paper-level owner is mainly the
+active-current scan around grouped producer work. It is not: on the same-source
+five-matrix CKTSO-gap focus manifest
+`build/kls_group_advance_bucket_default_gap5_t4_r1_ref3_timeout120.jsonl`
+measured `7.8971s` SPICE-cycle geomean, while the active-bucket prototype
+`build/kls_group_advance_bucket_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`22.0281s`. Refactor time roughly doubled on the hard ASIC rows
+(`ASIC_320k` `0.0989s -> 0.1679s`, `ASIC_320ks` `0.0802s -> 0.1643s`,
+`ASIC_100ks` `0.0444s -> 0.0923s`) and `G2_circuit` hit the 120s ceiling.
+The active path did run (`ASIC_320k` seeded `3,916` current states and
+`3,718,316` sparse rows), so the loss is not lack of coverage. This rejects
+"bucket the already retained sparse current states" as the clear CKTSO-gap
+closer; the remaining refactor work still has to avoid or fuse the huge
+unbounded advance/current-state stage itself.
+
 The latest refactor probe adds default-safe bounded owner diagnostics for the
 exact-shape group-L/refactor surface. The new
 `refactor_supernode_consumer_plan_shape_bounded_advance_*` stats count exact
