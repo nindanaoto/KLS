@@ -11527,3 +11527,35 @@ to default). Full native updates were worse at `1.6025s` in
 paths are paper-aligned scalar/native supernode experiments, not BLAS calls, but
 they still do not provide the missing CKTSO/SubtreeLU grouped multi-current
 numeric owner.
+
+A broader current-source sweep confirms that none of the existing scheduler or
+coarse-update switches should be promoted as the next default. Forced cached
+EGraph supernode updates over the first 20 CKTSO-gap rows completed cleanly in
+`build/kls_egraph_supernode_cached_gap20_t4_r1_ref3_timeout120.jsonl`, but the
+geomean regressed to `2.1650s` versus `2.0798s` for the current default. Only
+`coupled` and `OPF_3754` improved materially; most EGraph rows slowed even when
+the cached update counters fired. Forced `KLS_ENABLE_EGRAPH_READY_QUEUE=1` was
+much worse on the same 20-row focus:
+`build/kls_egraph_ready_queue_gap20_t4_r1_ref3_timeout120.jsonl` measured
+`3.3987s`, with large regressions on nearly every row. A forced SCOTCH-ordering
+probe was stopped after the first six rows because setup/runtime had already
+exceeded the useful probe budget; the completed rows were slower than current
+`auto` ordering (`ASIC_320ks` `16.3754s`, `ASIC_320k` `16.8603s`,
+`gemat12` `0.0949s`, `rajat03` `0.2090s`, `ASIC_100ks` `6.0265s`,
+`onetone2` `7.5626s`). These results reject broad cached-supernode, ready-queue,
+and forced-SCOTCH promotion as general CKTSO-gap fixes.
+
+A guarded grouped-terminal Algorithm 5 implementation was also rejected and
+removed. The trial added a publisher that consumed already prepared grouped
+prefix items directly when the prefix covered all U dependencies, preserving
+the existing sorted pipeline release for completed claims. Correctness passed
+normal smoke, group-complete smoke, `ctest --test-dir build
+--output-on-failure`, and `git diff --check`, but
+`build/kls_alg5_group_complete_group_terminal_gap5_t4_r1_ref3_timeout120.jsonl`
+regressed the guarded top-five group-complete geomean to `2.5191s` versus
+`2.4617s` for
+`build/kls_alg5_group_complete_owned_state_gap5_t4_r1_ref3_timeout120.jsonl`.
+The terminal surface was tiny on the hard ASIC rows, so the added claim/scan
+work outweighed the saved per-column dispatch. The remaining paper gap is still
+not terminal publication; it is a real grouped multi-current suffix executor
+that advances several live current workspaces together.
