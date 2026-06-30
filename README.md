@@ -964,15 +964,20 @@ the slot counters
 deduplicated accumulator/publish positions retained in `group_target_cols`.
 Benchmark output reports the pattern-width sum and maximum as
 `refactor_supernode_algorithm5_payoff_group_pattern_width` and
-`refactor_supernode_algorithm5_payoff_group_max_pattern_width`. These counters
-estimate the number of distinct current-column workspaces, compact prefix
-workspace rows, addressable target accumulator slots, retained update-entry
-work, and prefix-advance dependencies a real Algorithm 5 batch would need. On
-the slow ASIC diagnostics, zero-advance selected runs are rare or absent, so the
-next paper-aligned executor has to batch prefix advancement before the shared
-producer update rather than relying on a first-dependency shortcut or BLAS
-threshold tuning. These counters do not enable the old per-current scalar replay
-by default.
+`refactor_supernode_algorithm5_payoff_group_max_pattern_width`. It also reports
+`refactor_supernode_algorithm5_payoff_current_state_rows` and
+`refactor_supernode_algorithm5_payoff_current_state_max_rows` for the retained
+compact local-row map of each current slot. That map is the union of input
+scatter rows, current-column U/L rows, the pivot row, retained advance rows,
+prefix rows, and retained target rows. These counters estimate the number of
+distinct current-column workspaces, compact prefix workspace rows, addressable
+target accumulator slots, retained update-entry work, prefix-advance
+dependencies, and persistent current-state rows a real Algorithm 5 batch would
+need. On the slow ASIC diagnostics, zero-advance selected runs are rare or
+absent, so the next paper-aligned executor has to batch prefix advancement
+before the shared producer update rather than relying on a first-dependency
+shortcut or BLAS threshold tuning. These counters do not enable the old
+per-current scalar replay by default.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PREFIX_PREP=1` is an
 off-by-default retained-prefix replay probe. When a selected producer prefix is
 published, KLS can prepare each eligible current slot by applying already

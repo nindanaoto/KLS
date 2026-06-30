@@ -20,6 +20,27 @@ directly into the current column workspace. The newer
 probe records post-advance row-workspace slots plus skipped U coefficients
 from the same Algorithm 5 advance descriptors, so a consuming column can jump
 over ready remaining advance dependencies before consuming the prepared prefix.
+The current retained-plan work adds a compact per-current-slot row-state map
+instead of changing BLAS thresholds: each retained current slot now records the
+local rows touched by input scatter, current U/L structure, the pivot row,
+advance slots, prefix rows, and target slots. This is still descriptor substrate,
+not a promoted numeric executor, but it fills the next direct paper gap needed
+for a true persistent multi-current workspace pipeline.
+Correctness passed `cmake --build build -j2`,
+`ctest --test-dir build --output-on-failure`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_PREP=1 ./build/kls_smoke`,
+and `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1 ./build/kls_smoke`.
+The focused descriptor diagnostic
+`build/kls_alg5_current_state_rows_gap5_t4_r1_ref3_timeout120.jsonl` completed
+all five rows with `1.7585s` SPICE-cycle geomean while reporting zero runtime
+payoff workspace and zero last-refactor prefix/slot-accum execution. The hard
+ASIC row-state surfaces were sizable but bounded: `ASIC_320ks` retained
+`2,568,461` current-state rows with a `2,533` max slot, `ASIC_320k` retained
+`2,925,515` with a `2,658` max slot, and `ASIC_100ks` retained `783,675` with a
+`2,292` max slot. This confirms the next paper-level executor should keep these
+compact current states live and batch producer-prefix advancement, rather than
+restoring per-current rows or revisiting BLAS thresholds first.
 
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`, and
