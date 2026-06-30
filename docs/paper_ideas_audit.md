@@ -43,10 +43,16 @@ The direct-complete follow-up
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_COMPLETE=1`
 also uses the final retained state, but tries to complete the whole BTF-local
 column from that state instead of returning to the scalar continuation. The
-safe probe computes on a private retained-state copy and commits U, diagonal,
-and L values only after the pivot is nonzero. It proves the direct arithmetic is
-correct, but it deliberately does not solve the copy problem; that keeps the
-next lead cause on live grouped current workspaces rather than BLAS thresholds.
+safe probe publishes terminal columns directly from the retained final state
+when the prepared prefix covers all U dependencies; otherwise it computes on a
+private retained-state copy and commits U, diagonal, and L values only after the
+pivot is nonzero. The sparse-delta follow-up
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_DELTA=1`
+uses the same direct-complete setup but replaces the private copy with a sparse
+delta accumulator over the retained row map. These probes prove the direct
+arithmetic is correct and make the copy cost measurable, but they deliberately
+remain opt-in: the next lead cause is still live grouped current workspaces
+rather than BLAS thresholds.
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_PREP=1 ./build/kls_smoke`,
@@ -55,7 +61,9 @@ Correctness passed `cmake --build build -j2`,
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_FINAL_STATE=1 ./build/kls_smoke`, and
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_RESTORE=1 ./build/kls_smoke`;
 the direct-complete follow-up also passed
-`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_COMPLETE=1 ./build/kls_smoke`.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_COMPLETE=1 ./build/kls_smoke`
+and
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_DELTA=1 ./build/kls_smoke`.
 The focused current-state value probe
 `build/kls_direct_prefix_current_state_gap5_t4_r1_ref3_timeout120.jsonl`
 completed all five rows with `2.2981s` SPICE-cycle geomean, worse than the
@@ -106,6 +114,22 @@ completion with copied retained state as a CKTSO-gap closer. The missing paper
 mechanism is still the grouped live workspace executor: Algorithm 5 current
 states should stay owned by the grouped pipeline through completion, not be
 copied into a private scalar/direct column path.
+
+The terminal-live/private-copy follow-up
+`build/kls_direct_prefix_complete_terminal_private_gap5_t4_r1_ref3_timeout120.jsonl`
+completed all five rows with `3.1603s` SPICE-cycle geomean. Terminal no-copy
+completion removed only a tiny retained-copy slice: `ASIC_320ks` still copied
+`1,147,422` rows over `1,360` direct-complete runs, `ASIC_320k` copied
+`1,223,719` rows over `1,357` runs, and `ASIC_100ks` copied `282,959` rows
+over `309` runs. The sparse-delta A/B run
+`build/kls_direct_prefix_sparse_delta_gap5_t4_r1_ref3_timeout120.jsonl`
+also completed all five rows and reported zero copied retained rows for those
+same runs, but measured `3.1847s` geomean. That rejects retained-row copy as
+the sole large missing part: after copy removal, the hard rows still stream
+`702,618`, `742,805`, and `179,851` remaining dependencies through a scalar
+per-current path. The paper-level fix must therefore be a grouped owner that
+advances multiple current workspaces and their remaining dependency stream
+together, not just a lower-copy scalar direct-complete path.
 
 Correctness passed `cmake --build build -j2`,
 `ctest --test-dir build --output-on-failure`, and

@@ -1076,13 +1076,19 @@ payoff directly measurable without changing the default executor.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_COMPLETE=1` is
 a safe direct-completion probe for the same final retained state. It also
 implies direct-prefix prep/current-state/final-state mode. For an eligible
-BTF-local column, KLS computes the remaining U stream, pivot, and L column from
-a private retained-state copy and only commits factor storage after the pivot is
-nonzero. Focused CKTSO-gap checks solve correctly but reject this as a default:
-the private-copy direct-complete run measured `3.3422s` SPICE-cycle geomean on
-the same five rows, worse than sparse restore at `2.2665s`. This confirms the
-next paper-level gap is a grouped live Algorithm 5 workspace that avoids
-per-column retained-state copies, not BLAS thresholding.
+BTF-local column, KLS publishes terminal columns directly from the retained
+final state when the prepared prefix covers all U dependencies; otherwise it
+computes the remaining U stream, pivot, and L column from a private
+retained-state copy and only commits factor storage after the pivot is nonzero.
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_DELTA=1`
+is the same direct-complete setup with a sparse retained-state delta accumulator
+instead of the private copy. Focused CKTSO-gap checks solve correctly but reject
+both as defaults: terminal/private direct-complete measured `3.1603s` SPICE-cycle
+geomean on the five-row slice, while sparse delta removed retained-row copy but
+still measured `3.1847s`, worse than sparse restore at `2.2665s`. This confirms
+the next paper-level gap is a grouped live Algorithm 5 workspace that advances
+the remaining dependency stream for multiple current columns, not BLAS
+thresholding or retained-row copy alone.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS=1` is a narrower
 trigger-timing diagnostic. It still retains the payoff descriptor for all
 selected groups, but it only enables the mapped numeric payoff pattern and

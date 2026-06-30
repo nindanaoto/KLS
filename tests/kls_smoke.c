@@ -6168,6 +6168,14 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       ? strdup(saved_algorithm5_direct_prefix_complete_value) : NULL;
   const int had_algorithm5_direct_prefix_complete =
     saved_algorithm5_direct_prefix_complete_value != NULL;
+  const char *saved_algorithm5_direct_prefix_sparse_delta_value =
+    getenv(
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_DELTA");
+  char *saved_algorithm5_direct_prefix_sparse_delta =
+    saved_algorithm5_direct_prefix_sparse_delta_value != NULL
+      ? strdup(saved_algorithm5_direct_prefix_sparse_delta_value) : NULL;
+  const int had_algorithm5_direct_prefix_sparse_delta =
+    saved_algorithm5_direct_prefix_sparse_delta_value != NULL;
   const char *saved_algorithm5_workspace_value =
     getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_WORKSPACE");
   char *saved_algorithm5_workspace =
@@ -6356,6 +6364,15 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     perror(
       "setenv "
       "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_COMPLETE=0");
+    ok = 0;
+  }
+  if (ok &&
+      setenv(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_DELTA",
+        "0", 1) != 0) {
+    perror(
+      "setenv "
+      "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_DELTA=0");
     ok = 0;
   }
   if (ok &&
@@ -6597,6 +6614,12 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     ok = 0;
   }
   if (!restore_env_value(
+        "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_DIRECT_PREFIX_SPARSE_DELTA",
+        had_algorithm5_direct_prefix_sparse_delta,
+        saved_algorithm5_direct_prefix_sparse_delta)) {
+    ok = 0;
+  }
+  if (!restore_env_value(
         "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_WORKSPACE",
         had_algorithm5_workspace, saved_algorithm5_workspace)) {
     ok = 0;
@@ -6632,6 +6655,7 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   free(saved_algorithm5_direct_prefix_final_state);
   free(saved_algorithm5_direct_prefix_sparse_restore);
   free(saved_algorithm5_direct_prefix_complete);
+  free(saved_algorithm5_direct_prefix_sparse_delta);
   free(saved_algorithm5_workspace);
   free(saved_algorithm5_slot_accum);
   free(saved_algorithm5_prefix_prep);
