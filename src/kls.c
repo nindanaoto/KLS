@@ -51337,7 +51337,8 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
     trailing_entries += end - begin;
   }
   const UF_long dense_scatter_cols = width - available_end;
-  if (!kls_egraph_ragged_u_supernode_update_allows(
+  if (!shared->supernode_algorithm5_payoff_exec &&
+      !kls_egraph_ragged_u_supernode_update_allows(
         run_rows, dense_scatter_cols, trailing_entries)) {
     kls_egraph_record_u_supernode_l_work_reject(shared);
     return 0;

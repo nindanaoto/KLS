@@ -6,6 +6,28 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The latest Algorithm 5 payoff-exec rerun removes one ambiguity in the retained
+paper path. Before this check, the ASIC rows built large payoff descriptors but
+the scalar ragged-L executor never ran because the generic ragged-U work gate
+rejected every selected run. KLS now trusts the retained Algorithm 5 payoff
+selector under the opt-in
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1` path, so those
+selected runs actually execute. The result is negative as a speed path:
+`build/kls_alg5_payoff_bypass_gate_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`2.0098s` top-five geomean, worse than the same-build default
+`build/kls_slotaccum_default_gap5_t4_r1_ref3_timeout120.jsonl` at `1.4093s`
+and worse than the older payoff-exec control
+`build/kls_slotaccum_payoff_exec_gap5_t4_r1_ref3_timeout120.jsonl` at
+`1.8486s`. The top-ten check
+`build/kls_alg5_payoff_bypass_gate_gap10_t4_r1_ref3_timeout120.jsonl` measured
+`7.3037s` versus `6.9742s` for the old payoff-exec control. On `ASIC_320ks`,
+the bypass executed all `3,596` selected runs, `157,067` rows, and about
+`55.7M` scalar update entries, replacing `3,596` work rejects with real
+numeric work. This confirms that the paper-level missing piece is not simply
+"let selected scalar runs fire"; it is the grouped multi-current executor that
+advances many current workspaces and applies/publishes a producer prefix as one
+batch.
+
 The latest forced-row rerun adds explicit row-group shape/work diagnostics and
 rejects the small-BLAS hypothesis for the current slow cases. The slow default
 ASIC rows still report zero CBLAS update counters, and forced row refactor with

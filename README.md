@@ -901,12 +901,19 @@ their broader opportunistic probes.
 Algorithm 5 probe: it builds the retained plan, selects payoff-positive
 producer-prefix subsets, materializes those prefixes as the existing ragged
 U-supernode L pattern, and runs the ragged-L executor only for selected runs.
+For those selected runs, KLS trusts the retained Algorithm 5 payoff selector
+instead of reapplying the generic ragged-U work gate; this makes the opt-in
+path a direct scalar replay test for the paper selector, not a candidate
+default.
 That executor now addresses its scratch data through the retained
 group/current workspace map, so the opt-in numeric path exercises the same
 compact current-slot layout that a true multi-current batch kernel will need.
 This is also intentionally experimental and off by default; it tests whether
 the Algorithm 5 payoff surface is enough without a true multi-current batch
-executor.
+executor. Focused CKTSO-gap probes show that scalar selected-run replay is not
+enough: making the selected ASIC runs execute regressed the top-five and
+top-ten payoff-exec controls, so the remaining paper gap is still the grouped
+multi-current numeric executor.
 When `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN=1` or the stricter
 exec flag is set, KLS now also retains the selected producer groups as a
 multi-current descriptor for that future executor. The retained internal layout
