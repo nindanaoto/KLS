@@ -109,6 +109,21 @@ the previous committed control `0ed2402` measured
 `3.7331s` (`0.996x`). This is retained as a scheduler-overhead reduction, not
 as the missing CKTSO/SubtreeLU row numeric executor.
 
+A direct current-panel scalar scatter prototype was then tested and rejected
+before commit. The trial targeted the remaining scalar fallback inside compact
+dense row groups: after direct input initialized the current dense/trailing row
+panel, scalar external dependencies wrote current-group and trailing targets
+straight into that panel while leaving truly external targets in `x`. This
+looked paper-aligned because it tried to avoid the row-panel round trip through
+the sparse workspace, but the target checks and mixed scatter pattern lost badly.
+The focused top-five forced-row run
+`build/kls_current_panel_scalar_forcedrow_gap5_t4_r1_ref3_p3_timeout120.jsonl`
+measured `4.4153s` geomean versus `3.7331s` for the retained small-sort build;
+`ASIC_100ks` regressed from about `14.01s` to `25.77s`. This rejects a
+per-scalar current-panel scatter shortcut. The remaining useful path is still a
+larger grouped producer/current executor that batches the target mapping once
+per panel or selected run, not once per scalar dependency.
+
 An active producer-bucket grouped advance executor was prototyped and rejected
 before commit. The trial kept the retained position-coded Algorithm 5
 pre-prefix state plan, but replaced the runtime scan over active current
