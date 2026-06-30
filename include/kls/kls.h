@@ -948,6 +948,9 @@ typedef struct kls_stats {
   int64_t refactor_supernode_algorithm5_payoff_group_max_run_target_slots;
   int64_t refactor_supernode_algorithm5_payoff_group_pattern_width;
   int64_t refactor_supernode_algorithm5_payoff_group_max_pattern_width;
+  int64_t refactor_supernode_algorithm5_payoff_runtime_workspace_rows;
+  int64_t refactor_supernode_algorithm5_payoff_runtime_target_slots;
+  int64_t refactor_supernode_algorithm5_payoff_runtime_current_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

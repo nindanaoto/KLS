@@ -10968,3 +10968,17 @@ measured `2.9219258140638535s`; `ASIC_100ks` alone rose to about `23s`. That
 experiment replayed whole scalar current columns early. It did not implement
 the paper's grouped multi-current accumulator, so keeping it would be misleading
 and would distract from the still-missing large algorithmic piece.
+
+KLS now allocates retained Algorithm 5 payoff runtime state under
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_WORKSPACE=1`. The allocation is
+attached to schedule preparation, not to the numeric hot path, and therefore
+serves as the persistent current/target substrate for the missing grouped
+multi-current executor rather than as a speed claim. The top-five CKTSO-gap
+probe `build/kls_alg5_runtime_workspace_gap5_t4_r1_ref3_timeout120.jsonl`
+completed with no failures and `1.7766791317372144s` geomean. On the hard ASIC
+rows the runtime counters match the retained descriptors exactly:
+`ASIC_320ks` has `3,596` currents, `157,067` workspace rows, and `784,673`
+target slots; `ASIC_320k` has `3,755`, `146,027`, and `971,718`; `ASIC_100ks`
+has `1,112`, `20,859`, and `188,230`. This keeps BLAS out of the first-order
+explanation: the remaining gap is still the paper-level grouped numeric
+accumulator that uses this state.
