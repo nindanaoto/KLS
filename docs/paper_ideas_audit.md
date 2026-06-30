@@ -92,6 +92,22 @@ paper-level gap is a supernode/window owner that can safely process a broad
 finished-prefix frontier, closer to SubtreeLU's split wait/update/wait schedule,
 instead of advancing one dependency per current-state cursor.
 
+The prepared-state suffix catch-up extends that safe grouped path without
+re-enabling the unsafe live-state replay: when prefix preparation still owns a
+current slot in `PREPARING`, it now advances already-finished suffix dependencies
+inside that private current-state window and immediately hands fully advanced
+currents to the final-state completer. The focused opt-in probe
+`build/kls_alg5_prepared_suffix_group_gap5_t4_r1_ref3_timeout120_rerun.jsonl`
+completed cleanly and advanced far more suffix work (`98,106` / `134,593` /
+`3,857` deps on the three ASIC rows, with `24` finished currents) than the
+strict trigger-only path. It still regressed to `2.7651s` geomean, while the
+same-source default
+`build/kls_prepared_suffix_default_gap5_t4_r1_ref3_timeout120.jsonl` stayed at
+`1.4287s`. This confirms the missing CKTSO/SubtreeLU step is not just "catch up
+more suffix dependencies"; the current per-current row-state lookup and retained
+state ownership model must be replaced by a grouped multi-current producer/window
+executor that amortizes the duplicate suffix producers.
+
 The latest Algorithm 5 grouped-prefix work now includes a targetless
 direct-prefix variant, an advance-seed probe, a retained-current-row state probe,
 and a final-state probe, without changing BLAS thresholds. The
