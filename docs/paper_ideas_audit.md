@@ -11931,3 +11931,22 @@ grouped refactor states without allocating the previous hundreds of megabytes
 of row-state arrays. The next refactor implementation should consume this
 shape as an owned/streaming group executor, not by materializing another
 diagnostic table.
+
+`KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_ADVANCE_PREP=1` now
+adds an opt-in grouped pre-prefix advance executor for the Algorithm 5 payoff
+path. It seeds each claimed current into its planned sparse current-state rows
+once, advances shared pre-prefix producers across the group in producer order,
+then reuses the existing prefix application. Correctness smoke tests pass for
+the plain flag, direct-prefix final-state, and group-complete combinations.
+The focused top-five CKTSO-gap benchmark was a negative result:
+`build/kls_alg5_group_advance_prep_gap5_t4_r1_ref3_timeout120.jsonl` measured
+`3.3473s` geomean, versus `2.1922s` for the equivalent scalar direct-current
+prep control
+`build/kls_scalar_direct_current_advance_map_gap5_t4_r1_ref3_timeout120.jsonl`.
+The path did run on the ASIC cases (`ASIC_320ks` seeded `4,011` current states
+and `3,565,150` sparse rows), but sparse-state row lookup and per-current row
+updates dominated the producer reuse. This rejects a sparse binary-search
+grouped pre-prefix replay as the missing large CKTSO-paper mechanism. The
+next refactor attempt should avoid per-row sparse lookup in the inner numeric
+loop, likely by owning a dense or position-coded multi-current state for a
+bounded producer-panel kernel.
