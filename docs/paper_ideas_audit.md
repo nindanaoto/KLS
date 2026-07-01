@@ -33,6 +33,22 @@ larger paper-level mechanism: a pivot-compatible grouped-current/deferred-swap
 numeric owner, not just committing private prefixes after a dynamic-pivot
 failure.
 
+A follow-up repair of the initial partitioned separator plan was prototyped and
+rejected before commit. The idea promoted private rows with invalid left
+dependencies into the pipeline, then rebuilt the private queues instead of
+dropping the SubtreeLU Algorithm 6-style partitioned plan. On `pre2`, the
+repaired plan validated and kept the partitioned shape, but it over-expanded
+the private phase: `build/kls_pre2_partition_repair_trace45.stderr` reported
+`final_partitioned=1`, `final_private_rows=623574`, and only `6054` pipeline
+rows. The private phase then failed late at `failed_row=471797` with
+`reason=pivot-reject` after `188557` completed rows in the failing worker,
+`29266` dynamic pivots, and `16666624` worker-local U entries, before falling
+back to the full row pipeline. The resulting full-pipeline trace reached only
+`131072/629628` rows under the 45s cap, far worse than the guarded legacy split
+trace. This rejects ownership-repair promotion as a default; preserving the
+partitioned plan needs a pivot-compatible private/pipeline owner, not simply
+more private rows.
+
 The separator-tree row refactor now has a validation-gated ordered-private
 executor for SubtreeLU-style private subdomains. The separator FLOP queue
 already promotes any private group reached from pipeline work back into the
