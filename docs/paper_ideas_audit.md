@@ -13440,3 +13440,35 @@ The actionable largest gap remains the first-factor row-pipeline executor for
 the dominant BTF block, especially the published-U/output streaming and
 producer-to-multiple-current reuse that the CKTSO/SubtreeLU-style algorithms
 avoid doing one current row at a time.
+
+The experimental lookahead path now has a producer-stop catch-up slice. Before
+the completed-producer batch scan tests an unclaimed lookahead state, KLS
+advances that partial row through ready dependencies strictly before the
+producer and stops with the producer still at the heap root. This directly
+matches the paper-level producer-owned update idea: the prefix is made ready,
+but the just-published U row is still streamed once across the batch rather
+than scalar-applied independently per current row. The effect is visible on
+`pre2`: at the 589,824-row checkpoint, the no-lookahead retained producer
+batch trace `build/kls_pre2_producer_batch_threshold_trace_t4_r1_ref0_timeout90.stderr`
+had `340` producer batches, `1020` targets, `195174` streamed producer U
+entries, and `804044491` scalar U-entry touches. With
+`KLS_ENABLE_EXPERIMENTAL_ROW_PIPELINE_LOOKAHEAD=1` and
+`KLS_ROW_PIPELINE_LOOKAHEAD=8`,
+`build/kls_pre2_lookahead8_catchup_trace_t4_r1_ref0_timeout90.stderr`
+increased that to `1967` producer batches, `11617` targets, and `704485`
+streamed producer U entries, while scalar U-entry touches fell to
+`802908719`. That is real movement in the intended direction but still far
+too small for the CKTSO gap. Pushing to `32` lookahead slots grew the target
+surface further (`3652` batches and `32104` targets by the 524,288-row
+checkpoint in
+`build/kls_pre2_lookahead32_catchup_trace_t4_r1_ref0_timeout90.stderr`) but
+lost row progress by the same 90s cap, so the next step should not simply
+increase slots. The forced KLS-first `G2_circuit`/`transient` spot stayed
+residual-clean with the 8-slot catch-up path but was not a robust runtime win:
+`build/kls_lookahead8_catchup_forced_spot_t4_r1_ref0_timeout120.jsonl`
+measured `11.2465s` geomean, while the exact-code rerun
+`build/kls_lookahead8_catchup_rerun_forced_spot_t4_r1_ref0_timeout120.jsonl`
+measured `12.0360s`, both slower than the guarded default `8.9437s` geomean.
+This keeps catch-up lookahead experimental and points to a persistent
+grouped-current owner, not a larger pool of independent future-row states, as
+the remaining paper-aligned mechanism.

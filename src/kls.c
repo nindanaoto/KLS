@@ -87110,6 +87110,29 @@ static int kls_row_first_partial_apply_supernode_run(
     u_row_ptr, u_row_end, state, dep_begin, dep_end, trace, run_rows_out);
 }
 
+static int kls_row_first_partial_apply_ready_until(
+  const kls_row_first_block_context *ctx,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *local_l_entries,
+  const kls_row_first_entries *published_u_entries,
+  const double *udiag_values,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  const UF_long *supernode_start,
+  const UF_long *supernode_end,
+  const unsigned char *row_done,
+  const UF_long *active_rank,
+  UF_long ready_limit,
+  kls_row_first_partial_row *state,
+  UF_long stop_dep,
+  UF_long *supernode_groups_out,
+  UF_long *supernode_rows_out,
+  UF_long *supernode_panel_groups_out,
+  UF_long *supernode_panel_rows_out,
+  kls_row_first_row_stats *stats,
+  kls_row_first_pipeline_trace *trace,
+  int *blocked_out);
+
 static int kls_row_first_partial_apply_ready(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
@@ -87124,6 +87147,36 @@ static int kls_row_first_partial_apply_ready(
   const UF_long *active_rank,
   UF_long ready_limit,
   kls_row_first_partial_row *state,
+  UF_long *supernode_groups_out,
+  UF_long *supernode_rows_out,
+  UF_long *supernode_panel_groups_out,
+  UF_long *supernode_panel_rows_out,
+  kls_row_first_row_stats *stats,
+  kls_row_first_pipeline_trace *trace,
+  int *blocked_out) {
+  return kls_row_first_partial_apply_ready_until(
+    ctx, workspace, local_l_entries, published_u_entries, udiag_values,
+    u_row_ptr, u_row_end, supernode_start, supernode_end, row_done,
+    active_rank, ready_limit, state, KLS_KLU_EMPTY, supernode_groups_out,
+    supernode_rows_out, supernode_panel_groups_out,
+    supernode_panel_rows_out, stats, trace, blocked_out);
+}
+
+static int kls_row_first_partial_apply_ready_until(
+  const kls_row_first_block_context *ctx,
+  kls_row_first_workspace *workspace,
+  kls_row_first_entries *local_l_entries,
+  const kls_row_first_entries *published_u_entries,
+  const double *udiag_values,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  const UF_long *supernode_start,
+  const UF_long *supernode_end,
+  const unsigned char *row_done,
+  const UF_long *active_rank,
+  UF_long ready_limit,
+  kls_row_first_partial_row *state,
+  UF_long stop_dep,
   UF_long *supernode_groups_out,
   UF_long *supernode_rows_out,
   UF_long *supernode_panel_groups_out,
@@ -87148,6 +87201,9 @@ static int kls_row_first_partial_apply_ready(
   const UF_long i = state->row;
   while (state->dep_heap_size > 0u) {
     const UF_long peek = dep_heap[0];
+    if (stop_dep != KLS_KLU_EMPTY && peek >= stop_dep) {
+      return 1;
+    }
     if (!kls_row_first_dependency_ready(row_done, active_rank,
                                         ready_limit, peek)) {
       if (blocked_out != NULL) {
@@ -87160,10 +87216,13 @@ static int kls_row_first_partial_apply_ready(
     if (dep >= i || mark[dep] != state->generation) {
       return 0;
     }
-    const UF_long run_end =
+    UF_long run_end =
       kls_row_first_ready_supernode_end(
         supernode_start, supernode_end, row_done, active_rank, ctx->nk,
         ready_limit, i, dep);
+    if (stop_dep != KLS_KLU_EMPTY && run_end >= stop_dep) {
+      run_end = stop_dep > 0u ? stop_dep - 1u : dep;
+    }
     UF_long run_rows = 1;
     int used_panel = 0;
     if (run_end > dep) {
@@ -87174,10 +87233,13 @@ static int kls_row_first_partial_apply_ready(
         return 0;
       }
     } else {
-      const UF_long cached_run_end =
+      UF_long cached_run_end =
         kls_row_first_ready_cached_panel_end(
           workspace->supernode_panel_cache, row_done, active_rank,
           ctx->nk, ready_limit, i, dep);
+      if (stop_dep != KLS_KLU_EMPTY && cached_run_end >= stop_dep) {
+        cached_run_end = stop_dep > 0u ? stop_dep - 1u : dep;
+      }
       if (cached_run_end > dep) {
         const int cached_status =
           kls_row_first_partial_apply_supernode_run_cached(
@@ -87522,8 +87584,29 @@ static int kls_row_first_pipeline_apply_producer_batch(
   for (int slot = 0; slot < shared->lookahead_count; ++slot) {
     kls_row_first_pipeline_worker *worker =
       shared->lookahead_states + slot;
-    if (!worker->lookahead_active || worker->lookahead_claimed ||
-        !kls_row_first_pipeline_worker_scalar_batch_candidate(
+    if (!worker->lookahead_active || worker->lookahead_claimed) {
+      continue;
+    }
+    if (worker->active_order_epoch != shared->order_epoch) {
+      continue;
+    }
+    if (!kls_row_first_partial_apply_ready_until(
+          shared->ctx, &worker->workspace, &worker->l_entries,
+          shared->u_entries, shared->udiag_values,
+          shared->workspace->u_row_ptr, shared->workspace->u_row_end,
+          shared->supernode_start, shared->supernode_end,
+          shared->row_done, shared->active_rank, shared->completed_pos,
+          worker->active_state, dep,
+          &worker->pipeline_supernode_update_groups,
+          &worker->pipeline_supernode_update_rows,
+          &worker->pipeline_supernode_panel_update_groups,
+          &worker->pipeline_supernode_panel_update_rows,
+          shared->stats,
+          shared->trace_enabled ? &worker->trace_current : NULL,
+          NULL)) {
+      return 0;
+    }
+    if (!kls_row_first_pipeline_worker_scalar_batch_candidate(
           shared, worker, dep)) {
       continue;
     }
