@@ -14892,3 +14892,35 @@ entries. This rejects slot-fill scans and next-root scans as the large missing
 piece. The dense target-by-union compact owner itself is now the bounded-owner
 bottleneck; the next paper-aligned implementation needs a sparse row-position
 or main row/panel grouped workspace, not a larger dense compact window.
+
+The retained BTF scalar-run step-window path now has a bounded row-position
+matrix substrate, controlled by
+`KLS_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_POSITION_MAX_ENTRIES`. The
+numeric path first records each claimed retained state's structural row span and
+value-base once, then can optionally prevalidate and store direct value
+positions for a grouped producer update before streaming the producer L column
+across the active retained states. The default cap is `0`, so this heavier
+matrix is explicit opt-in; the direct grouped row stream remains the default
+inside the already opt-in step-window experiment.
+
+Correctness stayed clean under `cmake --build build --target kls_bench
+kls_smoke -j2`, `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE=1
+./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_WINDOW=1
+./build/kls_smoke`, and `ctest --test-dir build --output-on-failure`. The
+focused `ASIC_100ks` comparison rejects the position matrix as a near-term
+speed fix. The prior same-surface state-window row
+`build/kls_state_step_window_asic100ks_t4_r1_ref1.json` measured
+`refactor_seconds_avg=35.3764624` with `858` grouped rounds, `102,314`
+windowed currents, and clean residual `1.92251861e-15`. The new explicit
+position-matrix probe
+`build/kls_state_step_positions_asic100ks_t4_r1_ref1.json` stayed
+residual-clean but slowed to `36.831824s`, while the value-base-only direct
+stream
+`build/kls_state_step_valuebase_asic100ks_t4_r1_ref1.json` measured
+`37.0629566s`. This confirms that merely caching per-update row positions
+inside the existing per-member retained-state owner is not enough. The next
+paper-aligned step must replace the per-member retained slices with a true
+partial live-step owner, or move the same sparse grouped-owner idea into the
+main row/panel first-factor path where `pre2` is still losing to CKTSO.

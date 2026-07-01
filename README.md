@@ -1392,6 +1392,11 @@ the first producer update, then advances additional ready producer rows when at
 least two active retained states share the same completed producer. Benchmark
 JSON reports last and cumulative grouped-window round, current, and entry
 counts. The path remains opt-in while it is compared against CKTSO-gap cases.
+`KLS_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_POSITION_MAX_ENTRIES=N` enables
+an additional retained-state row-position matrix inside that opt-in step
+window when the active producer update fits `N` stored positions per worker.
+The default is `0`, so KLS keeps the direct grouped row stream unless this
+experimental matrix is explicitly requested.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1` turns that retained
 state into a guarded numeric consumer. The flag implies state stats, stores the
 U coefficients consumed while preparing the retained state, arms only the
