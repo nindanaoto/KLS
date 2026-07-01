@@ -27,6 +27,13 @@ PRODUCER_COUNTERS = [
     "producer_active_catchup_attempts",
     "producer_active_catchup_deps",
     "producer_active_catchup_targets",
+    "compact_window_fills",
+    "compact_window_evictions",
+    "compact_window_overflows",
+    "compact_window_probes",
+    "compact_window_targets",
+    "compact_window_target_u_entries",
+    "compact_window_state_rows",
     "producer_probe_workers",
     "producer_probe_lookahead",
     "producer_ready_roots",
@@ -89,6 +96,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_active_catchup_attempts = 0
     long_active_catchup_deps = 0
     long_active_catchup_targets = 0
+    long_compact_window_targets = 0
+    long_compact_window_target_u = 0
+    long_compact_window_state_rows = 0
     long_panel_rows = 0
     long_pivot_scalar = 0
     long_pivot_output = 0
@@ -142,6 +152,15 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_active_catchup_targets += parse_int(
                 row.get("producer_active_catchup_targets")
             )
+            long_compact_window_targets += parse_int(
+                row.get("compact_window_targets")
+            )
+            long_compact_window_target_u += parse_int(
+                row.get("compact_window_target_u_entries")
+            )
+            long_compact_window_state_rows += parse_int(
+                row.get("compact_window_state_rows")
+            )
             long_panel_rows += parse_int(row.get("panel_update_rows"))
             if pivoted:
                 producer_batches = parse_int(row.get("producer_batches"))
@@ -189,6 +208,13 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     active_catchup_targets = parse_int(
         last_trace.get("producer_active_catchup_targets")
     )
+    compact_window_targets = parse_int(last_trace.get("compact_window_targets"))
+    compact_window_target_u = parse_int(
+        last_trace.get("compact_window_target_u_entries")
+    )
+    compact_window_state_rows = parse_int(
+        last_trace.get("compact_window_state_rows")
+    )
     panel_rows = parse_int(last_trace.get("panel_update_rows"))
     summary: dict[str, object] = {
         "path": str(path),
@@ -208,6 +234,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "producer_active_catchup_attempts": active_catchup_attempts,
         "producer_active_catchup_deps": active_catchup_deps,
         "producer_active_catchup_targets": active_catchup_targets,
+        "compact_window_targets": compact_window_targets,
+        "compact_window_target_u_entries": compact_window_target_u,
+        "compact_window_state_rows": compact_window_state_rows,
         "panel_update_rows": panel_rows,
         "long_rows": long_rows,
         "long_max_row": long_max_row,
@@ -227,6 +256,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_producer_active_catchup_attempts": long_active_catchup_attempts,
         "long_producer_active_catchup_deps": long_active_catchup_deps,
         "long_producer_active_catchup_targets": long_active_catchup_targets,
+        "long_compact_window_targets": long_compact_window_targets,
+        "long_compact_window_target_u_entries": long_compact_window_target_u,
+        "long_compact_window_state_rows": long_compact_window_state_rows,
         "long_panel_update_rows": long_panel_rows,
         "long_pivot_scalar_u_entries": long_pivot_scalar,
         "long_pivot_scalar_u_output": long_pivot_output,
@@ -248,6 +280,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "producer_accepted_target_u_share_of_candidates": ratio(
             producer_target_u, candidate_target_u
         ),
+        "compact_window_target_u_per_scalar_u": ratio(
+            compact_window_target_u, scalar
+        ),
+        "scalar_u_output_per_compact_window_target_u": ratio(
+            output, compact_window_target_u
+        ),
         "scalar_u_output_per_producer_target_u": ratio(
             output, producer_target_u
         ),
@@ -261,6 +299,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         ),
         "long_producer_candidate_target_u_per_scalar_u": ratio(
             long_candidate_target_u, long_scalar
+        ),
+        "long_compact_window_target_u_per_scalar_u": ratio(
+            long_compact_window_target_u, long_scalar
         ),
         "long_scalar_u_output_per_producer_target_u": ratio(
             long_output, long_producer_target_u
@@ -307,6 +348,14 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "producer_active_catchup_attempts",
         "producer_active_catchup_deps",
         "producer_active_catchup_targets",
+        "compact_window_fills",
+        "compact_window_evictions",
+        "compact_window_overflows",
+        "compact_window_targets",
+        "compact_window_target_u_entries",
+        "compact_window_target_u_per_scalar_u",
+        "scalar_u_output_per_compact_window_target_u",
+        "compact_window_state_rows",
         "producer_underfilled",
         "producer_low_saved_stream",
         "producer_reject_bad_state",
@@ -332,6 +381,10 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_producer_active_catchup_attempts",
         "long_producer_active_catchup_deps",
         "long_producer_active_catchup_targets",
+        "long_compact_window_targets",
+        "long_compact_window_target_u_entries",
+        "long_compact_window_target_u_per_scalar_u",
+        "long_compact_window_state_rows",
         "long_pivot_scalar_u_entries",
         "long_pivot_scalar_u_output",
         "long_pivot_producer_target_u_entries",

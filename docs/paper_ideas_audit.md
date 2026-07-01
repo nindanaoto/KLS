@@ -14274,3 +14274,38 @@ active-state catch-up as CKTSO-scale fixes. The missing first-factor mechanism
 has to create a much larger live target window or persistent grouped-current
 owner before producer filtering, not merely accept more of the current
 ready-root surface.
+
+The timeout-case refocus now drops `Hamrle3` from the tight tuning loop because
+CKTSO also times out there. The interrupted two-row reference run,
+`build/cktso_timeout_pair_refocus_t4_r1_ref1_timeout120.jsonl`, completed
+`pre2` under the same 120s cap (`analysis_seconds=3.670268`,
+`initial_factor_seconds=6.197750`, `refactor_seconds_avg=4.851256`,
+`solve_seconds_avg=0.118040`) and timed out only on `Hamrle3`. The matching
+KLS `pre2`-only run,
+`build/kls_pre2_refocus_t4_r1_ref1_timeout120.jsonl`, emitted no rows; its
+failure sidecar records analyze-only success in `11.6621665s`, METIS ordering,
+and the same `629628`-row dominant BTF block before the 120s timeout. Thus KLS
+spends at least `108.34s` after analysis inside first numeric factorization
+without completing the benchmark row, already `17.48x` CKTSO's `pre2` initial
+factor time.
+
+KLS also now has a trace-only compact live-window diagnostic for this
+first-factor question. `KLS_TRACE_ROW_PIPELINE_COMPACT_WINDOW=1` keeps compact
+symbolic sparse states for a bounded current/future row window until their rows
+complete, advances those states structurally as producer U rows are published,
+and reports `compact_window_*` counters in row-pipeline progress and long-row
+trace lines. `KLS_ROW_PIPELINE_COMPACT_WINDOW=<slots>` controls the window
+width, and `KLS_ROW_PIPELINE_COMPACT_WINDOW_MAX_ENTRIES=<entries>` caps one
+state. The summary helper reports compact-window target/scalar ratios.
+
+The focused `pre2` evidence rejects bounded independent compact states as the
+CKTSO-sized missing mechanism. The baseline 45s trace
+`build/kls_pre2_refocus_trace45.stderr` reached `589824/629628` rows with
+`743927452` scalar U-output entries and only `1006368` producer-target U
+entries (`739.22x`). The completed-frontier 64-state compact-window trace,
+`build/kls_pre2_compact_window64_completed_trace45.stderr`, raised the modeled
+target surface to `9081488` U entries with zero compact overflows, but scalar
+output remained `81.92x` larger. This is more surface than the current accepted
+producer batches, but still far below CKTSO scale. The paper-aligned next step
+therefore remains a coarser grouped-current row/supernode numeric owner, not a
+bounded side window of independent sparse symbolic states.

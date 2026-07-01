@@ -2183,7 +2183,14 @@ published-U entries scanned by the scalar update loop, scalar supernode fallback
 rows, and local/shared row-entry reserve growth/copy volume. Setting
 `KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES=N` with row-pipeline tracing enabled
 also prints the first live dependency and the commit summary for rows whose
-scalar published-U scan crosses `N` entries. Same-session `pre2` probes show
+scalar published-U scan crosses `N` entries. Setting
+`KLS_TRACE_ROW_PIPELINE_COMPACT_WINDOW=1` adds a trace-only symbolic live-window
+probe for current/future rows. `KLS_ROW_PIPELINE_COMPACT_WINDOW=<slots>`
+controls the number of compact sparse states, and
+`KLS_ROW_PIPELINE_COMPACT_WINDOW_MAX_ENTRIES=<entries>` caps one state. This
+does not execute numeric updates or affect default factorization; it only
+estimates whether a bounded persistent-current window would expose enough
+producer-owned U-row work to matter. Same-session `pre2` probes show
 the default AMD run enters the 629,628-row dominant BTF block with no separator
 coverage, while forced METIS enters the same block with separator coverage but
 still exceeds the 120s cap. The matching local CKTSO run finishes analysis,
@@ -2638,6 +2645,30 @@ gap. With active catch-up enabled,
 candidate surface only to `32567534` entries, still `22.84x` short. This rules
 out simple saved-stream threshold tuning as the next CKTSO-scale fix; the live
 target window itself is too small.
+
+A `pre2`-only July 1, 2026 refocus excludes `Hamrle3` from the tuning loop
+because CKTSO also times out on `Hamrle3`. The interrupted two-row reference
+run, `build/cktso_timeout_pair_refocus_t4_r1_ref1_timeout120.jsonl`, still
+completed `pre2` (`analysis_seconds=3.670268`,
+`initial_factor_seconds=6.197750`, `refactor_seconds_avg=4.851256`,
+`solve_seconds_avg=0.118040`) and timed out only on `Hamrle3`. The matching
+KLS `pre2`-only run,
+`build/kls_pre2_refocus_t4_r1_ref1_timeout120.jsonl`, emitted no rows; its
+sidecar reports a 120s timeout after analyze-only completed in `11.6621665s`
+with `ordering=metis` and the same `629628`-row dominant block. That leaves at
+least `108.34s` in first numeric factorization after analysis, `17.48x` CKTSO's
+initial factor time, before KLS has produced a benchmark row.
+
+The focused 45s KLS trace,
+`build/kls_pre2_refocus_trace45.stderr`, reached `589824/629628` rows with
+`743927452` scalar U-output entries and only `1006368` producer-target U
+entries (`739.22x`). The completed-frontier compact-window trace,
+`build/kls_pre2_compact_window64_completed_trace45.stderr`, models a bounded
+64-state persistent-current window and raises the modeled target surface to
+`9081488` U entries with no compact-state overflows, but scalar output is still
+`81.92x` larger. This rejects bounded independent compact sparse states as the
+CKTSO-sized missing piece; the next paper-level target remains a coarser
+grouped-current row/supernode numeric owner for the first-factor pivoting tail.
 
 ## License
 
