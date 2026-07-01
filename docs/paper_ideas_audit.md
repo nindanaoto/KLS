@@ -13835,3 +13835,33 @@ progress, but the untraced 120s factor-only run
 with no JSON. The remaining `pre2` gap is still numeric pivot-tail execution:
 late rows continue to replay multi-million-entry scalar U streams with only
 small producer batches.
+
+A same-commit timeout-pair recheck at `6633f97` keeps that conclusion and makes
+`pre2` the largest clean KLS-vs-CKTSO timeout gap. With the same two-matrix
+large-recon slice, four threads, `repeat=1`, `refactor-repeat=1`, and a 120s
+per-matrix cap, CKTSO completed `pre2` in
+`build/cktso_timeout_pair_6633f97_t4_r1_ref1_timeout120.jsonl`
+(`analysis_seconds=3.618970`, `initial_factor_seconds=6.303858`,
+`factor_seconds_avg=5.097129`, `refactor_seconds_avg=4.922565`,
+`solve_seconds_avg=0.121867`) and timed out only on `Hamrle3`. KLS emitted no
+rows in `build/kls_timeout_pair_6633f97_t4_r1_ref1_timeout120.jsonl`; the
+sidecar records 120s timeouts on both `pre2` and `Hamrle3`. Current KLS
+analyze-only on `pre2` still selects `ordering=metis` and finishes in
+`11.6469298s` with `separator_pipeline_rows=4126`
+(`build/kls_pre2_timeout_pair_6633f97_analyze_auto_t4.json`), so setup and
+ordering are not the timeout-sized part.
+
+The matching forced KLS-owned decomposition trace
+`build/kls_pre2_timeout_pair_6633f97_forced_trace45.stderr` reached the
+`589824/629628` checkpoint with `869321669` scalar U-entry touches, split into
+`125359072` internal dependency touches and `743962597` trailing/output touches.
+After that checkpoint, the 45s cap logged `2359` long rows through row `599195`;
+those rows alone replayed `6410013403` scalar U entries, `4263724314` of them
+trailing/output entries. Dynamic pivots accounted for `998` of those rows
+(`42.3%`) and had zero producer-batch targets. Non-pivot rows did trigger the
+retained producer path, but only for `3817` targets and `8001601` target U
+entries, with `16813` panel-backed rows total. That is orders of magnitude
+smaller than the scalar trailing/output stream. The largest gap is therefore
+still the paper-level numeric owner for the pivoting dominant-BTF tail: a
+producer/panel-to-many-current row/supernode executor that avoids replaying
+published U rows through the scalar current-row path.

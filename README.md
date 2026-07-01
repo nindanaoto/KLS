@@ -2470,6 +2470,17 @@ trace `build/kls_pre2_auto_direct_metis_trace45.stderr` reached
 factor-only probe still timed out, so this fixes the ordering half of that
 paper gap but leaves the dominant numeric pivot-tail/output-stream executor as
 the next required work.
+A same-commit timeout-pair recheck at `6633f97` keeps `pre2` as the largest
+clean KLS-vs-CKTSO gap: CKTSO completed `pre2` in 6.30s initial factor and
+4.92s refactor while timing out only on `Hamrle3`; KLS timed out on both
+matrices under the same 120s cap. KLS analyze-only on `pre2` still completed
+in 11.65s with `ordering=metis`, so the remaining timeout-sized loss is
+numeric. The forced KLS-owned 45s trace reached the 589,824-row checkpoint and
+then logged 2,359 long rows through row 599,195 with 6.41B scalar U-entry
+touches, 4.26B of them trailing/output touches. Producer/panel reuse covered
+only about 8.0M target U entries in that logged tail, so the missing paper
+piece is still a producer/panel-to-many-current row/supernode numeric owner,
+not another ordering-only change.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while
