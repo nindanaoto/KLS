@@ -2624,6 +2624,20 @@ factor-only probe
 out with no JSON row. This keeps the next required work on a larger persistent
 grouped-current owner, not just advancing existing active sparse states to the
 current producer.
+The row-pipeline trace also reports the pre-threshold producer candidate
+surface through `producer_candidate_targets`,
+`producer_candidate_target_u_entries`,
+`producer_underfilled_target_u_entries`, and
+`producer_low_saved_stream_target_u_entries`. A fresh `pre2` trace with those
+fields, `build/kls_pre2_candidate_surface_trace75.stderr`, reached the same
+`589824/629628` checkpoint and found only `28216007` candidate target U entries
+before thresholds, versus `743979273` scalar output entries. Even accepting
+every ready-root candidate would leave a `26.37x` scalar-output/candidate
+gap. With active catch-up enabled,
+`build/kls_pre2_candidate_surface_active_catchup_trace75.stderr` raised the
+candidate surface only to `32567534` entries, still `22.84x` short. This rules
+out simple saved-stream threshold tuning as the next CKTSO-scale fix; the live
+target window itself is too small.
 
 ## License
 

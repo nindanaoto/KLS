@@ -14248,3 +14248,29 @@ out with no JSON row. This rejects active-state catch-up around the existing
 independent sparse row states as the clear missing mechanism; the required
 paper-level work remains a persistent grouped-current numeric owner that makes
 many more live currents targets of producer-owned row/supernode updates.
+
+The next trace-only slice measures the ready-root candidate surface before the
+current producer-batch filters discard it. KLS now reports
+`producer_candidate_targets`, `producer_candidate_target_u_entries`,
+`producer_underfilled_target_u_entries`, and
+`producer_low_saved_stream_target_u_entries` in row-pipeline progress and
+long-row trace lines, and the summary helper reports candidate/scalar ratios
+and accepted-candidate share. This answers whether the current gap could be
+closed by lowering `KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM` or admitting
+single-target batches.
+
+On `pre2`, the answer is no. The default candidate-surface trace
+`build/kls_pre2_candidate_surface_trace75.stderr` reached the same
+`589824/629628` checkpoint with `28216007` candidate target U entries before
+thresholds, of which only `954507` were accepted, `5489691` were underfilled,
+and `21771809` failed the saved-stream gate. That looks like a large discard
+ratio, but it is still tiny next to the `743979273` scalar U-output entries:
+even accepting every candidate would leave scalar output `26.37x` larger than
+candidate producer-target work. With active catch-up enabled,
+`build/kls_pre2_candidate_surface_active_catchup_trace75.stderr` eliminated
+`not_root` and raised candidate target U entries only to `32567534`; scalar
+output was still `22.84x` larger. This rejects threshold tuning and
+active-state catch-up as CKTSO-scale fixes. The missing first-factor mechanism
+has to create a much larger live target window or persistent grouped-current
+owner before producer filtering, not merely accept more of the current
+ready-root surface.

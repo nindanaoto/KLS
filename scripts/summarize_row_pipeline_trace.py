@@ -20,6 +20,10 @@ KEY_VALUE_RE = re.compile(r"([A-Za-z0-9_]+)=([^ \n]+)")
 PRODUCER_COUNTERS = [
     "producer_batches",
     "producer_targets",
+    "producer_candidate_targets",
+    "producer_candidate_target_u_entries",
+    "producer_underfilled_target_u_entries",
+    "producer_low_saved_stream_target_u_entries",
     "producer_active_catchup_attempts",
     "producer_active_catchup_deps",
     "producer_active_catchup_targets",
@@ -78,6 +82,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_producer_target_u = 0
     long_producer_state_rows = 0
     long_producer_unique_state_rows = 0
+    long_candidate_targets = 0
+    long_candidate_target_u = 0
+    long_underfilled_target_u = 0
+    long_low_saved_stream_target_u = 0
     long_active_catchup_attempts = 0
     long_active_catchup_deps = 0
     long_active_catchup_targets = 0
@@ -114,6 +122,16 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_producer_state_rows += parse_int(row.get("producer_state_rows"))
             long_producer_unique_state_rows += parse_int(
                 row.get("producer_unique_state_rows")
+            )
+            long_candidate_targets += parse_int(row.get("producer_candidate_targets"))
+            long_candidate_target_u += parse_int(
+                row.get("producer_candidate_target_u_entries")
+            )
+            long_underfilled_target_u += parse_int(
+                row.get("producer_underfilled_target_u_entries")
+            )
+            long_low_saved_stream_target_u += parse_int(
+                row.get("producer_low_saved_stream_target_u_entries")
             )
             long_active_catchup_attempts += parse_int(
                 row.get("producer_active_catchup_attempts")
@@ -154,6 +172,16 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     producer_unique_state_rows = parse_int(
         last_trace.get("producer_unique_state_rows")
     )
+    candidate_targets = parse_int(last_trace.get("producer_candidate_targets"))
+    candidate_target_u = parse_int(
+        last_trace.get("producer_candidate_target_u_entries")
+    )
+    underfilled_target_u = parse_int(
+        last_trace.get("producer_underfilled_target_u_entries")
+    )
+    low_saved_stream_target_u = parse_int(
+        last_trace.get("producer_low_saved_stream_target_u_entries")
+    )
     active_catchup_attempts = parse_int(
         last_trace.get("producer_active_catchup_attempts")
     )
@@ -173,6 +201,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "producer_target_u_entries": producer_target_u,
         "producer_state_rows": producer_state_rows,
         "producer_unique_state_rows": producer_unique_state_rows,
+        "producer_candidate_targets": candidate_targets,
+        "producer_candidate_target_u_entries": candidate_target_u,
+        "producer_underfilled_target_u_entries": underfilled_target_u,
+        "producer_low_saved_stream_target_u_entries": low_saved_stream_target_u,
         "producer_active_catchup_attempts": active_catchup_attempts,
         "producer_active_catchup_deps": active_catchup_deps,
         "producer_active_catchup_targets": active_catchup_targets,
@@ -187,6 +219,11 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_producer_target_u_entries": long_producer_target_u,
         "long_producer_state_rows": long_producer_state_rows,
         "long_producer_unique_state_rows": long_producer_unique_state_rows,
+        "long_producer_candidate_targets": long_candidate_targets,
+        "long_producer_candidate_target_u_entries": long_candidate_target_u,
+        "long_producer_underfilled_target_u_entries": long_underfilled_target_u,
+        "long_producer_low_saved_stream_target_u_entries":
+            long_low_saved_stream_target_u,
         "long_producer_active_catchup_attempts": long_active_catchup_attempts,
         "long_producer_active_catchup_deps": long_active_catchup_deps,
         "long_producer_active_catchup_targets": long_active_catchup_targets,
@@ -204,6 +241,13 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "completion_fraction": ratio(completed, total),
         "scalar_u_output_share": ratio(output, scalar),
         "producer_target_u_per_scalar_u": ratio(producer_target_u, scalar),
+        "producer_candidate_target_u_per_scalar_u": ratio(candidate_target_u, scalar),
+        "scalar_u_output_per_producer_candidate_target_u": ratio(
+            output, candidate_target_u
+        ),
+        "producer_accepted_target_u_share_of_candidates": ratio(
+            producer_target_u, candidate_target_u
+        ),
         "scalar_u_output_per_producer_target_u": ratio(
             output, producer_target_u
         ),
@@ -214,6 +258,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_scalar_u_output_share": ratio(long_output, long_scalar),
         "long_producer_target_u_per_scalar_u": ratio(
             long_producer_target_u, long_scalar
+        ),
+        "long_producer_candidate_target_u_per_scalar_u": ratio(
+            long_candidate_target_u, long_scalar
         ),
         "long_scalar_u_output_per_producer_target_u": ratio(
             long_output, long_producer_target_u
@@ -250,6 +297,13 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "producer_state_rows",
         "producer_unique_state_rows",
         "producer_state_rows_per_unique",
+        "producer_candidate_targets",
+        "producer_candidate_target_u_entries",
+        "producer_candidate_target_u_per_scalar_u",
+        "scalar_u_output_per_producer_candidate_target_u",
+        "producer_accepted_target_u_share_of_candidates",
+        "producer_underfilled_target_u_entries",
+        "producer_low_saved_stream_target_u_entries",
         "producer_active_catchup_attempts",
         "producer_active_catchup_deps",
         "producer_active_catchup_targets",
@@ -270,6 +324,11 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_producer_state_rows",
         "long_producer_unique_state_rows",
         "long_producer_state_rows_per_unique",
+        "long_producer_candidate_targets",
+        "long_producer_candidate_target_u_entries",
+        "long_producer_candidate_target_u_per_scalar_u",
+        "long_producer_underfilled_target_u_entries",
+        "long_producer_low_saved_stream_target_u_entries",
         "long_producer_active_catchup_attempts",
         "long_producer_active_catchup_deps",
         "long_producer_active_catchup_targets",
