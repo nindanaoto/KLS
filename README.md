@@ -2187,10 +2187,12 @@ scalar published-U scan crosses `N` entries. Setting
 `KLS_TRACE_ROW_PIPELINE_COMPACT_WINDOW=1` adds a trace-only symbolic live-window
 probe for current/future rows. `KLS_ROW_PIPELINE_COMPACT_WINDOW=<slots>`
 controls the number of compact sparse states, and
-`KLS_ROW_PIPELINE_COMPACT_WINDOW_MAX_ENTRIES=<entries>` caps one state. This
-does not execute numeric updates or affect default factorization; it only
-estimates whether a bounded persistent-current window would expose enough
-producer-owned U-row work to matter. Same-session `pre2` probes show
+`KLS_ROW_PIPELINE_COMPACT_WINDOW_MAX_ENTRIES=<entries>` caps one state.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1` turns the same window into an opt-in
+sparse numeric prototype for unreserved first-factor rows: producer publication
+advances compact current states, and a worker can claim one instead of replaying
+its prefix from the input row. This remains off by default; use it only for
+focused paper-gap probes. Same-session `pre2` probes show
 the default AMD run enters the 629,628-row dominant BTF block with no separator
 coverage, while forced METIS enters the same block with separator coverage but
 still exceeds the 120s cap. The matching local CKTSO run finishes analysis,
@@ -2669,6 +2671,25 @@ entries (`739.22x`). The completed-frontier compact-window trace,
 `81.92x` larger. This rejects bounded independent compact sparse states as the
 CKTSO-sized missing piece; the next paper-level target remains a coarser
 grouped-current row/supernode numeric owner for the first-factor pivoting tail.
+
+The direct sparse numeric compact-window prototype is correct on smaller
+forced KLS-first probes but is not a `pre2` gap closer. With
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1`, `add20` and `bcircuit` stayed
+residual-clean in `build/kls_add20_compact_exec_t4_r1_ref0.json`
+(`relative_residual_l2=3.39e-16`) and
+`build/kls_bcircuit_compact_exec_t4_r1_ref0.json`
+(`relative_residual_l2=8.17e-17`). On `pre2`, the 8-state 45s trace
+`build/kls_pre2_compact_exec_w8_trace45.stderr` reached the same
+`589824/629628` checkpoint as the control and raised modeled compact target
+work to `43001975` U entries, but scalar U output was still `17.37x` larger and
+the trace exposed heavy sparse-state allocation/copy churn. Wider windows were
+worse: 16 states reached only `524288/629628`, and 64 states only
+`131072/629628`, in the same 45s cap. The untraced 8-state factor probe
+`build/kls_pre2_compact_exec_w8_factor_t4_r1_ref0_timeout125.json` still timed
+out at 125s with no JSON row. This rejects "materialize many independent sparse
+current states and hand them to workers" as the missing CKTSO mechanism; the
+next implementation needs a coarser owner that batches the current states
+without per-state sparse allocation and replay churn.
 
 ## License
 
