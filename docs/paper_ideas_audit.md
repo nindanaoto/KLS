@@ -14507,3 +14507,32 @@ broader than metadata lifetime: the pivoting tail needs a grouped
 row/supernode/current owner that can share producer work across many live
 current rows, including rows that do not satisfy KLS's exact adjacent
 supernode-shape predicate.
+
+A compact-window pivot-preservation prototype was rejected before commit. This
+tested a stronger version of the earlier post-pivot compact refill idea: instead
+of clearing prepared compact states after a dynamic column pivot, the prototype
+permuted each state accumulator through the column swap, rebuilt its sparse
+index and root-dependency heap, conservatively discarded states that had already
+consumed either swapped column, and streamed the just-published pivot row through
+the preserved compact buckets. Default smoke, opt-in compact-preserve smoke,
+`ctest --test-dir build --output-on-failure`, and residual probes stayed clean:
+`build/kls_add20_compact_pivot_preserve_t4_r1_ref0.json` reported
+`relative_residual_l2=3.38738965e-16`, and
+`build/kls_bcircuit_compact_pivot_preserve_t4_r1_ref0.json` reported
+`8.16829708e-17`.
+
+The focused `pre2` evidence was not good enough to retain the code. Against the
+same-binary compact-exec 64-state control
+`build/kls_pre2_compact_w64_current_trace45.stderr`, the preserve trace
+`build/kls_pre2_compact_pivot_preserve_w64_trace45.stderr` reached the same
+`589824/629628` periodic checkpoint. It raised compact target U work from
+`153034087` to `170767920` and reduced compact refills, so the preservation
+path did activate. However, scalar U output also rose slightly
+(`555604758` to `556795398`), and the no-trace factor probe
+`build/kls_pre2_compact_pivot_preserve_w64_factor_t4_r1_ref0_timeout125.json`
+still timed out with no JSON row. This rejects "preserve bounded compact
+states across dynamic pivots" as the missing CKTSO/SubtreeLU mechanism. The
+useful conclusion is that retaining sparse side states across pivots can expose
+more producer/target surface, but the surface is still far too bounded and
+state-local; the next implementation needs a coarser owner for many current
+rows, not better lifetime management for independent compact states.
