@@ -13684,3 +13684,42 @@ paper-aligned implementation target should therefore replace per-current
 retained sparse states with a grouped live-current workspace/window owner that
 streams one producer L column across many current states and writes the
 nonidentical output/trailing rows from that owner.
+
+The first retained-value storage cut is now implemented as an opt-in substrate,
+not a performance win. `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_COMPACT_VALUES=1`
+lets the retained BTF scalar-run executor allocate value storage only for
+memberships belonging to current columns that have a selected retained executor
+state; the structural sparse row descriptors remain complete. The first
+best-member-only variant was rejected because producer-step advance also uses
+member positions from the step index, causing many compact value lookups to
+reject. The retained implementation now broadens compact storage to all
+memberships for selected current columns, which preserves the producer-step
+path.
+
+Validation for the compact value substrate:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests.
+- `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1
+  KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE=1
+  KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_COMPACT_VALUES=1
+  build/kls_smoke` passed.
+- On `ASIC_100ks`, the same-binary full-value baseline
+  `build/kls_btf_state_exec_full_values_asic100ks_t4_r1_ref1.json` was
+  residual-clean with `refactor_seconds_avg=18.8164198`; compact values in
+  `build/kls_btf_state_exec_compact_values2_asic100ks_t4_r1_ref1.json` were
+  also residual-clean with zero state rejects but measured `18.8269919`
+  (`1.0006x` of full).
+- On `ASIC_320ks`,
+  `build/kls_btf_state_exec_full_values_asic320ks_t4_r1_ref1.json` measured
+  `15.876602`, while
+  `build/kls_btf_state_exec_compact_values_asic320ks_t4_r1_ref1.json` measured
+  `15.8905815`, again residual-clean with zero state rejects (`1.0009x`).
+
+This result is useful mainly because it proves the retained executor can be
+decoupled from absolute per-member value offsets without losing correctness.
+It does not close the CKTSO gap by itself: the selected-current compact store
+still preserves per-membership sparse states and therefore leaves the core
+producer-to-many-current owner missing. The next implementation should use this
+indirection to replace those member-local value slices with an actual grouped
+workspace/window, rather than expecting compact allocation alone to move time.

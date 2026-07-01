@@ -1345,6 +1345,12 @@ sorted and advances retained sparse states with a merge walk instead of a
 per-entry binary search when that sorted shape holds.
 This remains opt-in: the focused ASIC probes are residual-clean, but the state
 owner is still too fine-grained to beat the default refactor path.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_COMPACT_VALUES=1` is an
+additional opt-in for the retained-state executor. When combined with
+`STATE_EXEC`, it stores retained state values only for memberships belonging to
+columns that have a selected retained executor state, while keeping the full
+structural row descriptors. This is a storage substrate for a future grouped
+live-current owner, not a default execution mode.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_ADVANCE_BATCH_STATS=1` is a
 separate diagnostic for the next grouped-current owner. It implies state stats
 and reports last/cumulative advance-batch group, current, unique-entry,
