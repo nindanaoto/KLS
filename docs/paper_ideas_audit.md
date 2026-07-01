@@ -13916,3 +13916,33 @@ work. This recheck points to the same missing paper algorithm: a grouped
 producer/panel-to-many-current numeric owner for the pivoting dominant-BTF
 tail, not a wider ordering package, BLAS threshold, or larger lookahead around
 the existing scalar current-row replay.
+
+A July 1, 2026 current-`HEAD` rerun at `879d478` reproduces the timeout split
+and keeps `pre2` as the clean KLS-only large timeout. With the same two-matrix
+large-recon slice, four threads, `repeat=1`, `refactor-repeat=1`, and a 120s
+per-matrix cap, KLS emitted no rows in
+`build/kls_timeout_pair_head_t4_r1_ref1_timeout120.jsonl`; the sidecar records
+120s timeouts on both `pre2` and `Hamrle3`. CKTSO completed `pre2` in
+`build/cktso_timeout_pair_head_t4_r1_ref1_timeout120.jsonl`
+(`analysis_seconds=4.225813`, `initial_factor_seconds=7.914385`,
+`factor_seconds_avg=5.161273`, `refactor_seconds_avg=5.269733`,
+`solve_seconds_avg=0.148217`) and timed out only on `Hamrle3`. The KLS
+failure diagnostic for `pre2` completed analyze-only in `12.7715154s`, selected
+`ordering=metis`, and retained the same 629,628-row dominant BTF block with
+`separator_pipeline_rows=4126`, so analysis and ordering remain secondary to
+numeric execution.
+
+The matching 90s forced KLS-owned trace,
+`build/kls_pre2_head_forced_trace90.stderr`, reached the `589824/629628`
+checkpoint (`93.68%` complete). It recorded `869303361` scalar U-entry touches
+and `743949878` trailing/output touches, while the retained producer-batch path
+covered only `936240` target U entries. Overall scalar output was therefore
+`794.61x` larger than producer-target U work, with producer targets covering
+only `0.108%` of scalar U touches. The long-row tail logged `2083` long rows
+through row `598912`; those rows replayed `4843807560` scalar U entries,
+`3415853832` of them trailing/output entries, but only `7187407`
+producer-target U entries. Pivot rows were `850` of those long rows
+(`40.81%`), and long-row scalar output was still `475.26x` larger than
+producer-target U work. This fresh rerun rejects the same policy-only fixes and
+keeps the next implementation target on the paper-level grouped
+producer/panel-to-many-current numeric owner for the pivoting dominant-BTF tail.
