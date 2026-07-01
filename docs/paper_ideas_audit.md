@@ -13472,3 +13472,20 @@ measured `12.0360s`, both slower than the guarded default `8.9437s` geomean.
 This keeps catch-up lookahead experimental and points to a persistent
 grouped-current owner, not a larger pool of independent future-row states, as
 the remaining paper-aligned mechanism.
+
+A follow-up producer-directed raw-input scan was tested and rejected before it
+was retained in source. The idea was to fill experimental lookahead slots with
+future rows whose raw input already referenced the just-completed producer,
+then run the existing producer-batch update on those states. This is still not
+the needed grouped-current owner. In
+`build/kls_pre2_lookahead8_producerdirect_trace_t4_r1_ref0_timeout90.stderr`,
+the run reached only the 393,216-row checkpoint by the same 90s cap, versus
+589,824 rows for
+`build/kls_pre2_lookahead8_catchup_trace_t4_r1_ref0_timeout90.stderr`.
+At that lower checkpoint it had `1132` producer batches and `6095` targets,
+so it did find some producer-specific states, but the scan/fill policy spent
+too much time on poorer future rows and reduced overall row progress. This
+rejects raw-input future-row scanning as the next CKTSO-gap closer; the next
+implementation should keep a producer-indexed grouped-current state live
+without repeatedly searching future rows or materializing many independent
+full workspaces.
