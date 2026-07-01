@@ -245,9 +245,13 @@ pivot epochs are reported through `kls_first_last_row_pipeline_pivot_tail`,
 `kls_first_row_pipeline_prefix_panel_rebuild_count`, and
 `kls_first_last_row_pipeline_prefix_panel_rebuild_rows`; these rebuild counters
 remain in the ABI, but the current pivot path avoids full prefix rebuilds while
-holding the ordered pipeline lock. It disables stale prefix supernode metadata
-and exchanges or deactivates cached panels that survive the pivot. Separator
-pipeline epochs continue to use the separator-prefixed counters below. KLS-first
+holding the ordered pipeline lock. It advances a post-pivot supernode validity
+floor, so stale pre-pivot supernodes are rejected while newly published
+post-pivot rows can form fresh Algorithm 4-style supernode runs; cached panels
+use the same floor after the pivot column exchange. Set
+`KLS_DISABLE_ROW_PIPELINE_PIVOT_SUPERNODE_REBASE=1` to restore the older
+post-pivot supernode disable behavior for A/B traces. Separator pipeline epochs
+continue to use the separator-prefixed counters below. KLS-first
 panel-cache staging is reported through
 `kls_first_row_panel_cache_build_count`,
 `kls_first_row_panel_cache_build_panels`,
@@ -2792,6 +2796,24 @@ surface: `build/kls_pre2_pivot_compact_w64_trace45.stderr` reached the same
 U entries essentially unchanged (`153016248` versus `153032141`) and slightly
 more scalar U output. This keeps the missing mechanism focused on a coarser
 grouped current owner, not another bounded independent-state refill.
+
+The row pipeline now keeps supernode metadata alive after dynamic pivots by
+advancing a post-pivot validity floor instead of nulling `supernode_start/end`.
+This directly fills one SubtreeLU/CKTSO algorithm gap: post-pivot tail rows can
+again publish and consume fresh supernode/panel runs, while pre-pivot runs are
+still rejected for correctness. On `pre2`, the default 45s trace
+`build/kls_pre2_pivot_supernode_rebase_trace45.stderr` reached the same
+`589824/629628` checkpoint as the old-behavior A/B trace
+`build/kls_pre2_pivot_supernode_rebase_disabled_trace45.stderr`, but scalar U
+entries dropped from `623921331` to `506647034`, and scalar U output dropped
+from `534483739` to `430870724`. The rebase trace retained substantial
+post-pivot panel use (`117195` panel-update rows and `19264108` panel-update
+entries), but panel-entry volume is not monotonic against the old behavior
+because the old path can still consume cached panels that the rebase now treats
+as pre-pivot-stale. The untraced factor-only probe
+`build/kls_pre2_pivot_supernode_rebase_factor_t4_r1_ref0_timeout125.json`
+still timed out with no JSON row, so this is retained as a real paper-aligned
+tail-supernode repair but not as a CKTSO-gap closer by itself.
 
 ## License
 

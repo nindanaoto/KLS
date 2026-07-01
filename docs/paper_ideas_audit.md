@@ -6,6 +6,26 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The row-pipeline pivot tail now preserves the supernode substrate after dynamic
+pivots by advancing a validity floor rather than discarding `supernode_start`
+and `supernode_end`. This is the direct SubtreeLU/CKTSO-style repair for the
+previous gap where KLS abandoned post-pivot supernode updates for the remainder
+of a pivoting pipeline phase. The floor rejects any pre-pivot supernode or
+cached panel while allowing rows published after the pivot to form fresh
+Algorithm 4-style runs. On `pre2`, the same-binary 45s A/B traces
+`build/kls_pre2_pivot_supernode_rebase_trace45.stderr` and
+`build/kls_pre2_pivot_supernode_rebase_disabled_trace45.stderr` both reached
+`589824/629628` rows, but rebase reduced scalar U entries from `623921331` to
+`506647034`, and reduced scalar U output from `534483739` to
+`430870724`. The rebase trace still kept post-pivot panel use substantial
+(`117195` panel-update rows and `19264108` panel-update entries), but the raw
+panel-entry counter is not monotonic because the disabled path can still
+consume cached panels that the rebase now treats as pre-pivot-stale. The
+untraced factor-only probe
+`build/kls_pre2_pivot_supernode_rebase_factor_t4_r1_ref0_timeout125.json`
+still timed out with no JSON row, so this closes a clear paper-alignment gap
+but does not by itself close the CKTSO-sized `pre2` numeric tail loss.
+
 The first-factor separator-private pivot path is now closer to SubtreeLU's
 private-mode rule: private pivot search is restricted to columns owned by the
 same private worker. This fixes the earlier `pre2` diagnostic where a private

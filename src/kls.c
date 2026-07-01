@@ -48107,6 +48107,13 @@ static int kls_row_pipeline_active_catchup_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_pivot_supernode_rebase_env_disabled(void) {
+  const char *value =
+    getenv("KLS_DISABLE_ROW_PIPELINE_PIVOT_SUPERNODE_REBASE");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_row_pipeline_compact_window_trace_env_enabled(void) {
   const char *value =
     getenv("KLS_TRACE_ROW_PIPELINE_COMPACT_WINDOW");
@@ -89998,6 +90005,7 @@ static UF_long kls_row_first_ready_supernode_end(
   const unsigned char *row_done,
   const UF_long *active_rank,
   UF_long nk,
+  UF_long supernode_valid_begin,
   UF_long ready_limit,
   UF_long current_row,
   UF_long dep) {
@@ -90005,8 +90013,11 @@ static UF_long kls_row_first_ready_supernode_end(
       row_done == NULL || dep >= nk || dep >= current_row) {
     return dep;
   }
+  if (dep < supernode_valid_begin) {
+    return dep;
+  }
   const UF_long start = supernode_start[dep];
-  if (start >= nk) {
+  if (start >= nk || start < supernode_valid_begin || dep < start) {
     return dep;
   }
   const UF_long end = supernode_end[start];
@@ -90043,6 +90054,7 @@ static UF_long kls_row_first_ready_cached_panel_end(
   const unsigned char *row_done,
   const UF_long *active_rank,
   UF_long nk,
+  UF_long supernode_valid_begin,
   UF_long ready_limit,
   UF_long current_row,
   UF_long dep) {
@@ -90054,6 +90066,9 @@ static UF_long kls_row_first_ready_cached_panel_end(
       dep >= nk || dep >= current_row) {
     return dep;
   }
+  if (dep < supernode_valid_begin) {
+    return dep;
+  }
   const UF_long panel = cache->panel_id_by_row[dep];
   if (panel == KLS_KLU_EMPTY || panel >= cache->panel_count ||
       cache->active[panel] == 0u) {
@@ -90061,6 +90076,9 @@ static UF_long kls_row_first_ready_cached_panel_end(
   }
   const UF_long start = cache->start[panel];
   const UF_long width = cache->width[panel];
+  if (start < supernode_valid_begin) {
+    return dep;
+  }
   if (width <= 1u || dep < start ||
       width - 1u > UF_long_max - start) {
     return dep;
@@ -91019,6 +91037,7 @@ static int kls_row_first_partial_apply_ready_until(
   const UF_long *u_row_end,
   const UF_long *supernode_start,
   const UF_long *supernode_end,
+  UF_long supernode_valid_begin,
   const unsigned char *row_done,
   const UF_long *active_rank,
   UF_long ready_limit,
@@ -91042,6 +91061,7 @@ static int kls_row_first_partial_apply_ready(
   const UF_long *u_row_end,
   const UF_long *supernode_start,
   const UF_long *supernode_end,
+  UF_long supernode_valid_begin,
   const unsigned char *row_done,
   const UF_long *active_rank,
   UF_long ready_limit,
@@ -91055,10 +91075,11 @@ static int kls_row_first_partial_apply_ready(
   int *blocked_out) {
   return kls_row_first_partial_apply_ready_until(
     ctx, workspace, local_l_entries, published_u_entries, udiag_values,
-    u_row_ptr, u_row_end, supernode_start, supernode_end, row_done,
-    active_rank, ready_limit, state, KLS_KLU_EMPTY, supernode_groups_out,
-    supernode_rows_out, supernode_panel_groups_out,
-    supernode_panel_rows_out, stats, trace, blocked_out);
+    u_row_ptr, u_row_end, supernode_start, supernode_end,
+    supernode_valid_begin, row_done, active_rank, ready_limit, state,
+    KLS_KLU_EMPTY, supernode_groups_out, supernode_rows_out,
+    supernode_panel_groups_out, supernode_panel_rows_out, stats, trace,
+    blocked_out);
 }
 
 static UF_long kls_row_first_published_u_run_entries(
@@ -91096,6 +91117,7 @@ static int kls_row_first_partial_apply_ready_until(
   const UF_long *u_row_end,
   const UF_long *supernode_start,
   const UF_long *supernode_end,
+  UF_long supernode_valid_begin,
   const unsigned char *row_done,
   const UF_long *active_rank,
   UF_long ready_limit,
@@ -91143,7 +91165,7 @@ static int kls_row_first_partial_apply_ready_until(
     UF_long run_end =
       kls_row_first_ready_supernode_end(
         supernode_start, supernode_end, row_done, active_rank, ctx->nk,
-        ready_limit, i, dep);
+        supernode_valid_begin, ready_limit, i, dep);
     if (stop_dep != KLS_KLU_EMPTY && run_end >= stop_dep) {
       run_end = stop_dep > 0u ? stop_dep - 1u : dep;
     }
@@ -91160,7 +91182,7 @@ static int kls_row_first_partial_apply_ready_until(
       UF_long cached_run_end =
         kls_row_first_ready_cached_panel_end(
           workspace->supernode_panel_cache, row_done, active_rank,
-          ctx->nk, ready_limit, i, dep);
+          ctx->nk, supernode_valid_begin, ready_limit, i, dep);
       if (stop_dep != KLS_KLU_EMPTY && cached_run_end >= stop_dep) {
         cached_run_end = stop_dep > 0u ? stop_dep - 1u : dep;
       }
@@ -91337,6 +91359,7 @@ typedef struct kls_row_first_pipeline_shared {
   const UF_long *private_u_row_end;
   UF_long *supernode_start;
   UF_long *supernode_end;
+  UF_long supernode_valid_begin;
   kls_row_first_supernode_panel_cache *private_supernode_panel_cache;
   UF_long open_panel_start;
   UF_long open_panel_end;
@@ -91403,6 +91426,7 @@ typedef struct kls_row_first_pipeline_shared {
   int compact_group_active;
   int lookahead_fill_enabled;
   int pivot_lookahead_enabled;
+  int pivot_supernode_rebase_enabled;
   int failed;
   kls_row_first_pipeline_failure failure_reason;
 } kls_row_first_pipeline_shared;
@@ -91538,8 +91562,8 @@ static int kls_row_first_pipeline_worker_scalar_batch_candidate(
   const UF_long run_end =
     kls_row_first_ready_supernode_end(
       shared->supernode_start, shared->supernode_end, shared->row_done,
-      shared->active_rank, shared->ctx->nk, shared->completed_pos,
-      state->row, dep);
+      shared->active_rank, shared->ctx->nk, shared->supernode_valid_begin,
+      shared->completed_pos, state->row, dep);
   if (run_end > dep) {
     if (reject_out != NULL) {
       *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_SUPERNODE;
@@ -91549,8 +91573,8 @@ static int kls_row_first_pipeline_worker_scalar_batch_candidate(
   const UF_long cached_run_end =
     kls_row_first_ready_cached_panel_end(
       worker->workspace.supernode_panel_cache, shared->row_done,
-      shared->active_rank, shared->ctx->nk, shared->completed_pos,
-      state->row, dep);
+      shared->active_rank, shared->ctx->nk, shared->supernode_valid_begin,
+      shared->completed_pos, state->row, dep);
   if (cached_run_end > dep) {
     if (reject_out != NULL) {
       *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_CACHED_PANEL;
@@ -91709,7 +91733,8 @@ static int kls_row_first_pipeline_apply_producer_batch(
               shared->u_entries, shared->udiag_values,
               shared->workspace->u_row_ptr, shared->workspace->u_row_end,
               shared->supernode_start, shared->supernode_end,
-              shared->row_done, shared->active_rank, shared->completed_pos,
+              shared->supernode_valid_begin, shared->row_done,
+              shared->active_rank, shared->completed_pos,
               worker->active_state, dep,
               &worker->pipeline_supernode_update_groups,
               &worker->pipeline_supernode_update_rows,
@@ -91772,7 +91797,8 @@ static int kls_row_first_pipeline_apply_producer_batch(
           shared->u_entries, shared->udiag_values,
           shared->workspace->u_row_ptr, shared->workspace->u_row_end,
           shared->supernode_start, shared->supernode_end,
-          shared->row_done, shared->active_rank, shared->completed_pos,
+          shared->supernode_valid_begin, shared->row_done,
+          shared->active_rank, shared->completed_pos,
           worker->active_state, dep,
           &worker->pipeline_supernode_update_groups,
           &worker->pipeline_supernode_update_rows,
@@ -94759,12 +94785,25 @@ static void kls_row_first_pipeline_disable_prefix_supernodes(
 
 static void kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
   kls_row_first_pipeline_shared *shared,
-  UF_long pivot_col_a,
-  UF_long pivot_col_b) {
+  UF_long pivot_row,
+  UF_long pivot_col) {
   if (shared == NULL) {
     return;
   }
-  kls_row_first_pipeline_disable_prefix_supernodes(shared);
+  shared->open_panel_start = KLS_KLU_EMPTY;
+  shared->open_panel_end = KLS_KLU_EMPTY;
+  if (shared->pivot_supernode_rebase_enabled &&
+      shared->ctx != NULL &&
+      shared->supernode_start != NULL &&
+      shared->supernode_end != NULL) {
+    const UF_long floor =
+      pivot_row >= shared->ctx->nk ? shared->ctx->nk : pivot_row + 1u;
+    if (floor > shared->supernode_valid_begin) {
+      shared->supernode_valid_begin = floor;
+    }
+  } else {
+    kls_row_first_pipeline_disable_prefix_supernodes(shared);
+  }
   if (shared->private_supernode_panel_cache == NULL || shared->ctx == NULL) {
     return;
   }
@@ -94773,7 +94812,7 @@ static void kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
   if (cache->row_count == shared->ctx->nk &&
       cache->panel_id_by_row != NULL) {
     (void)kls_row_first_supernode_panel_cache_exchange_columns(
-      cache, pivot_col_a, pivot_col_b);
+      cache, pivot_row, pivot_col);
   } else {
     kls_row_first_supernode_panel_cache_free(cache);
     if (!kls_row_first_supernode_panel_cache_init_rows(
@@ -94945,7 +94984,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               shared->private_u_entries, shared->udiag_values,
               shared->private_u_row_ptr, shared->private_u_row_end,
               shared->supernode_start, shared->supernode_end,
-              shared->row_done, shared->active_rank, shared->begin, &state,
+              shared->supernode_valid_begin, shared->row_done,
+              shared->active_rank, shared->begin, &state,
               &worker->pipeline_supernode_update_groups,
               &worker->pipeline_supernode_update_rows,
               &worker->pipeline_supernode_panel_update_groups,
@@ -94994,7 +95034,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               shared->workspace->u_row_ptr,
               shared->workspace->u_row_end,
               shared->supernode_start, shared->supernode_end,
-              shared->row_done, shared->active_rank, shared->completed_pos,
+              shared->supernode_valid_begin, shared->row_done,
+              shared->active_rank, shared->completed_pos,
               &state,
               &worker->pipeline_supernode_update_groups,
               &worker->pipeline_supernode_update_rows,
@@ -95075,7 +95116,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               shared->u_entries, shared->udiag_values,
               shared->workspace->u_row_ptr, shared->workspace->u_row_end,
               shared->supernode_start, shared->supernode_end,
-              shared->row_done, shared->active_rank, shared->ctx->nk, &state,
+              shared->supernode_valid_begin, shared->row_done,
+              shared->active_rank, shared->ctx->nk, &state,
               &worker->pipeline_supernode_update_groups,
               &worker->pipeline_supernode_update_rows,
               &worker->pipeline_supernode_panel_update_groups,
@@ -95097,7 +95139,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               shared->u_entries, shared->udiag_values,
               shared->workspace->u_row_ptr, shared->workspace->u_row_end,
               shared->supernode_start, shared->supernode_end,
-              shared->row_done, shared->active_rank, shared->ctx->nk, &state,
+              shared->supernode_valid_begin, shared->row_done,
+              shared->active_rank, shared->ctx->nk, &state,
               &worker->pipeline_supernode_update_groups,
               &worker->pipeline_supernode_update_rows,
               &worker->pipeline_supernode_panel_update_groups,
@@ -95165,14 +95208,18 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                   kls_row_first_supernodes_publish_row(
                     shared->u_entries, shared->workspace->u_row_ptr,
                     shared->workspace->u_row_end, shared->row_done,
-                    shared->ctx->nk, 0u, row,
+                    shared->ctx->nk, shared->supernode_valid_begin, row,
                     shared->supernode_start, shared->supernode_end);
                 }
               } else {
+                const UF_long merge_floor =
+                  shared->begin > shared->supernode_valid_begin
+                    ? shared->begin
+                    : shared->supernode_valid_begin;
                 kls_row_first_supernodes_publish_row(
                   shared->u_entries, shared->workspace->u_row_ptr,
                   shared->workspace->u_row_end, shared->row_done,
-                  shared->ctx->nk, shared->begin, row,
+                  shared->ctx->nk, merge_floor, row,
                   shared->supernode_start, shared->supernode_end);
                 shared->row_done[row] = 1u;
               }
@@ -95649,6 +95696,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.private_u_row_end = private_u_row_end;
   shared.supernode_start = supernode_start;
   shared.supernode_end = supernode_end;
+  shared.supernode_valid_begin = 0u;
   shared.private_supernode_panel_cache =
     private_supernode_panel_cache.panel_id_by_row != NULL
       ? &private_supernode_panel_cache : NULL;
@@ -95693,6 +95741,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.lookahead_fill_enabled = requested_lookahead > 0u;
   shared.pivot_lookahead_enabled =
     requested_pivot_lookahead > 0u && shared.producer_batch_enabled;
+  shared.pivot_supernode_rebase_enabled =
+    !kls_row_pipeline_pivot_supernode_rebase_env_disabled();
   shared.lookahead_max_inputs =
     kls_row_pipeline_lookahead_max_inputs_env();
   shared.compact_window_execute_enabled = compact_window_execute_requested;
