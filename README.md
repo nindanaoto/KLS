@@ -2815,6 +2815,17 @@ as pre-pivot-stale. The untraced factor-only probe
 still timed out with no JSON row, so this is retained as a real paper-aligned
 tail-supernode repair but not as a CKTSO-gap closer by itself.
 
+That validity floor is now also carried across restartable pipeline phases and
+the guarded ETree-tail repair path when a serialized pivot row performs a
+dynamic column exchange. This keeps the same invariant after a phase-boundary
+pivot instead of letting the next phase rebuild pre-pivot supernodes from
+scratch. The focused trace
+`build/kls_pre2_cross_phase_supernode_floor_trace45.stderr` remained at the
+same `589824/629628` checkpoint and was effectively neutral against the prior
+rebase trace (`507333583` scalar U entries versus `506647034`), so it is kept
+as correctness/paper-consistency substrate rather than counted as a `pre2`
+gap closer.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

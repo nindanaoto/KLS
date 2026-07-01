@@ -95451,6 +95451,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   const UF_long *active_rank,
   UF_long begin,
   UF_long end,
+  UF_long supernode_valid_begin,
   int thread_count,
   kls_row_first_workspace *workspace,
   kls_row_first_entries *l_entries,
@@ -95696,7 +95697,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.private_u_row_end = private_u_row_end;
   shared.supernode_start = supernode_start;
   shared.supernode_end = supernode_end;
-  shared.supernode_valid_begin = 0u;
+  shared.supernode_valid_begin =
+    supernode_valid_begin <= ctx->nk ? supernode_valid_begin : ctx->nk;
   shared.private_supernode_panel_cache =
     private_supernode_panel_cache.panel_id_by_row != NULL
       ? &private_supernode_panel_cache : NULL;
@@ -96091,6 +96093,7 @@ static int kls_row_first_run_restartable_pipeline_suffix(
   UF_long pivot_tail_rows = 0;
   UF_long pivot_restarts = 0;
   UF_long pivot_serial_rows = 0;
+  UF_long supernode_valid_begin = 0u;
   while (cursor < end) {
     UF_long phase_rows = 0;
     UF_long phase_threads = 0;
@@ -96106,13 +96109,15 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     UF_long completed_pos = cursor;
     int pivot_tail_ready = 0;
     if (kls_row_first_run_parallel_pipeline_phase(
-          ctx, row_order, active_rank, cursor, end, thread_count, workspace,
-          l_entries, u_entries, udiag_values, row_done, stats, &phase_rows,
-          &phase_threads, &phase_partial_rows, &phase_wait_partial_rows,
+          ctx, row_order, active_rank, cursor, end, supernode_valid_begin,
+          thread_count, workspace, l_entries, u_entries, udiag_values,
+          row_done, stats, &phase_rows, &phase_threads,
+          &phase_partial_rows, &phase_wait_partial_rows,
           &phase_wait_partial_deps, &phase_supernode_groups,
           &phase_supernode_rows, &phase_supernode_panel_groups,
-          &phase_supernode_panel_rows, &completed_pos, &pivot_tail_ready,
-          &phase_pivot_tail_rows, &phase_pivot_restarts)) {
+          &phase_supernode_panel_rows, &completed_pos,
+          &pivot_tail_ready, &phase_pivot_tail_rows,
+          &phase_pivot_restarts)) {
       pipeline_rows += phase_rows;
       if (phase_threads > max_threads) {
         max_threads = phase_threads;
@@ -96171,6 +96176,11 @@ static int kls_row_first_run_restartable_pipeline_suffix(
       return 0;
     }
     if (stats != NULL && stats->dynamic_column_pivots != pivots_before) {
+      const UF_long floor =
+        pivot_row >= ctx->nk ? ctx->nk : pivot_row + 1u;
+      if (floor > supernode_valid_begin) {
+        supernode_valid_begin = floor;
+      }
       kls_row_first_supernode_panel_cache_reset_active(
         pivot_serial_panel_cache, workspace, ctx->nk,
         pivot_serial_open_panel_start_io,
@@ -96231,6 +96241,7 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
   const unsigned char *active_mask,
   const UF_long *tail_parent,
   UF_long active_rows,
+  UF_long supernode_valid_begin,
   int thread_count,
   kls_row_first_workspace *workspace,
   kls_row_first_entries *l_entries,
@@ -96348,12 +96359,12 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
     UF_long completed_pos = cursor;
     int pivot_tail_ready = 0;
     if (kls_row_first_run_parallel_pipeline_phase(
-          ctx, row_order, active_rank, cursor, active_rows, thread_count,
-          workspace, l_entries, u_entries, udiag_values, row_done, stats,
-          &phase_pipeline_rows, &phase_threads, &phase_prefactor_rows,
-          &phase_wait_partial_rows, &phase_wait_partial_deps,
-          &phase_supernode_update_groups, &phase_supernode_update_rows,
-          &phase_supernode_panel_update_groups,
+          ctx, row_order, active_rank, cursor, active_rows,
+          supernode_valid_begin, thread_count, workspace, l_entries,
+          u_entries, udiag_values, row_done, stats, &phase_pipeline_rows,
+          &phase_threads, &phase_prefactor_rows, &phase_wait_partial_rows,
+          &phase_wait_partial_deps, &phase_supernode_update_groups,
+          &phase_supernode_update_rows, &phase_supernode_panel_update_groups,
           &phase_supernode_panel_update_rows, &completed_pos,
           &pivot_tail_ready, &phase_pivot_tail_rows,
           &phase_pivot_restarts)) {
@@ -96406,11 +96417,17 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
       free(active_rank);
       return 0;
     }
-    if (stats != NULL && stats->dynamic_column_pivots != pivots_before &&
-        workspace->supernode_panel_cache != NULL) {
-      kls_row_first_supernode_panel_cache_reset_active(
-        workspace->supernode_panel_cache, workspace, ctx->nk,
-        &open_panel_start, &open_panel_end);
+    if (stats != NULL && stats->dynamic_column_pivots != pivots_before) {
+      const UF_long floor =
+        pivot_row >= ctx->nk ? ctx->nk : pivot_row + 1u;
+      if (floor > supernode_valid_begin) {
+        supernode_valid_begin = floor;
+      }
+      if (workspace->supernode_panel_cache != NULL) {
+        kls_row_first_supernode_panel_cache_reset_active(
+          workspace->supernode_panel_cache, workspace, ctx->nk,
+          &open_panel_start, &open_panel_end);
+      }
     }
     kls_row_first_supernode_panel_cache_publish_completed(
       workspace->supernode_panel_cache, u_entries, workspace->u_row_ptr,
@@ -97480,6 +97497,9 @@ static int kls_try_row_first_etree_ready_tail_repair(
   }
   memcpy(ready_mask, active_mask, (size_t)nk * sizeof(*ready_mask));
   const UF_long boundary_row = row_order[0];
+  UF_long supernode_valid_begin = 0u;
+  const UF_long boundary_pivots_before =
+    row_stats != NULL ? row_stats->dynamic_column_pivots : 0u;
   if (boundary_row >= nk || ready_mask[boundary_row] == 0u ||
       !kls_row_first_factor_one_row(
         ctx, &trial_workspace, &trial_l_entries, &trial_u_entries,
@@ -97487,6 +97507,11 @@ static int kls_try_row_first_etree_ready_tail_repair(
         NULL)) {
     free(ready_mask);
     goto cleanup;
+  }
+  if (row_stats != NULL &&
+      row_stats->dynamic_column_pivots != boundary_pivots_before) {
+    supernode_valid_begin =
+      boundary_row >= nk ? nk : boundary_row + 1u;
   }
   ready_mask[boundary_row] = 0u;
   if (trial_workspace.supernode_panel_cache != NULL) {
@@ -97514,6 +97539,7 @@ static int kls_try_row_first_etree_ready_tail_repair(
       !kls_row_first_run_etree_prefactor_tail_phase(
         ctx, row_order + 1u, ready_mask,
         ctx->solver->fast_reject_tail_parent, ready_rows,
+        supernode_valid_begin,
         worker->shared->block_pipeline_thread_count, &trial_workspace,
         &trial_l_entries, &trial_u_entries, trial_udiag, trial_row_done,
         row_stats, &ready_threads, &prefactor_rows, &prefactor_wait_rows,

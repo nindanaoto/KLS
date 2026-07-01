@@ -26,6 +26,16 @@ untraced factor-only probe
 still timed out with no JSON row, so this closes a clear paper-alignment gap
 but does not by itself close the CKTSO-sized `pre2` numeric tail loss.
 
+The same validity floor now also survives restartable row-pipeline phase
+boundaries and the guarded ETree-tail repair path when the serialized boundary
+or pivot-tail row performs a dynamic column exchange. This prevents a resumed
+phase from rebuilding and consuming pre-pivot supernodes after the earlier phase
+already changed the column order. The focused `pre2` trace
+`build/kls_pre2_cross_phase_supernode_floor_trace45.stderr` was neutral against
+the prior rebase trace (`589824/629628` rows, `507333583` scalar U entries
+versus `506647034`), so it is retained as correctness/paper-consistency
+substrate rather than treated as a `pre2` performance closer.
+
 The first-factor separator-private pivot path is now closer to SubtreeLU's
 private-mode rule: private pivot search is restricted to columns owned by the
 same private worker. This fixes the earlier `pre2` diagnostic where a private
