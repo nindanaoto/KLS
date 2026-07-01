@@ -2427,6 +2427,22 @@ entries against `138562400` scalar output entries in logged long rows. This
 keeps the next algorithmic target on a persistent CKTSO/SubtreeLU-style
 producer-to-many-current owner, not out-of-order dependency hacks or simply
 larger advisory lookahead.
+A July 1, 2026 producer-indexed lookahead recheck was rejected for the same
+reason. The prototype built a block-local reverse map from each completed
+producer to future rows whose raw input referenced it and filled lookahead
+states from that map before the producer-batch scan. It stayed correct on a
+forced KLS-first `Freescale/transient` sanity probe, but the capped `pre2`
+trace `build/kls_pre2_producer_index_trace_t4_r1_ref0_timeout75.stderr`
+reached only row `22535` of `629628`, essentially the same point as the
+default `22540` trace, while logged scalar output touches increased to
+`398381325`. Producer batching remained tiny (`114` batches, `277` targets,
+`520283` target U entries). The matching CKTSO rerun
+`build/cktso_pre2_recheck_producer_index_t4_r1_ref1_timeout120.json` completed
+the same `pre2` compare in `21.15s` wall time, with `6.157833s` initial factor
+and `1.017e-16` relative residual. This rules out a shallow
+producer-to-future-row index over the existing sparse current states as the
+CKTSO-gap closer; the missing piece is still a real live grouped-current
+numeric owner that avoids per-current scalar output replay.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while

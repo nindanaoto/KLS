@@ -13621,3 +13621,25 @@ misses. The next paper-aligned implementation should therefore create a
 persistent producer-indexed live-current owner, with current states retained
 and advanced outside the commit-lock producer scan, rather than increasing
 lookahead slots or trying to apply producer dependencies out of order.
+
+A July 1, 2026 producer-indexed lookahead prototype tested the most direct
+small version of that idea and was rejected before commit. It built a
+block-local reverse map from each completed producer row to future row
+positions whose raw input contained that producer, then filled lookahead
+states from that producer list before the normal producer-batch scan. The path
+stayed residual-clean on forced KLS-first `Freescale/transient`
+(`build/kls_transient_producer_index_t4_r1_ref0_timeout120.json`), but it did
+not move the hard timeout case. The 75s `pre2` trace
+`build/kls_pre2_producer_index_trace_t4_r1_ref0_timeout75.stderr` reached only
+row `22535` of the `629628`-row dominant BTF block, compared with `22540` for
+the default trace, and logged `454599862` scalar U touches with `398381325`
+scalar output touches. Producer batching remained too small: `114` batches,
+`277` targets, and `520283` target U entries. A same-session CKTSO rerun,
+`build/cktso_pre2_recheck_producer_index_t4_r1_ref1_timeout120.json`,
+completed the same matrix in `21.15s` wall time, with
+`initial_factor_seconds=6.157833` and `relative_residual_l2=1.01703404e-16`.
+This narrows the retained implementation target: KLS needs the paper-level
+live grouped-current numeric owner that keeps several current states in one
+producer-owned batch and streams output work once across that batch. A
+producer-to-future-row index feeding the existing per-current sparse states is
+not enough.
