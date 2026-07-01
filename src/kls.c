@@ -114,6 +114,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_MISSED_PANEL_CACHE_MAX_STORED_ENTRIES 4194304u
 #define KLS_ROW_FIRST_PIPELINE_TRACE_INTERVAL 65536u
 #define KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM 1024u
+#define KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_MAX_SLOTS 32u
 #define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
@@ -46620,6 +46621,33 @@ static int kls_row_pipeline_producer_batch_env_disabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_experimental_lookahead_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_EXPERIMENTAL_ROW_PIPELINE_LOOKAHEAD");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static UF_long kls_row_pipeline_lookahead_slots_env(void) {
+  if (!kls_row_pipeline_experimental_lookahead_env_enabled()) {
+    return 0u;
+  }
+  const char *value = getenv("KLS_ROW_PIPELINE_LOOKAHEAD");
+  if (value == NULL || value[0] == '\0' ||
+      (value[0] == '0' && value[1] == '\0')) {
+    return 0u;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return 0u;
+  }
+  return parsed > KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_MAX_SLOTS
+    ? KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_MAX_SLOTS
+    : (UF_long)parsed;
+}
+
 static UF_long kls_row_pipeline_long_row_trace_threshold(void) {
   const char *value = getenv("KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES");
   if (value == NULL || value[0] == '\0' ||
@@ -87305,8 +87333,11 @@ typedef struct kls_row_first_pipeline_shared {
   kls_row_first_row_stats *stats;
   kls_row_first_pipeline_trace trace_committed;
   kls_row_first_pipeline_worker *workers;
+  kls_row_first_pipeline_worker *lookahead_states;
   kls_row_first_pipeline_batch_target *batch_targets;
   int worker_count;
+  int lookahead_count;
+  int batch_target_capacity;
   atomic_ulong next_pos;
   pthread_mutex_t lock;
   pthread_cond_t cond;
@@ -87328,6 +87359,11 @@ struct kls_row_first_pipeline_worker {
   kls_row_first_entries u_entries;
   kls_row_first_partial_row *active_state;
   UF_long active_order_epoch;
+  kls_row_first_partial_row state_storage;
+  UF_long lookahead_pos;
+  UF_long lookahead_row;
+  int lookahead_active;
+  int lookahead_claimed;
   UF_long rows;
   UF_long partial_rows;
   UF_long pipeline_wait_partial_rows;
@@ -87396,6 +87432,7 @@ static int kls_row_first_pipeline_worker_scalar_batch_candidate(
   }
   const kls_row_first_partial_row *state = worker->active_state;
   if (worker->active_order_epoch != shared->order_epoch ||
+      (worker->lookahead_active && worker->lookahead_claimed) ||
       state->row >= shared->ctx->nk || dep >= state->row ||
       state->dep_heap_size == 0u ||
       worker->workspace.dep_heap[0] != dep ||
@@ -87428,7 +87465,7 @@ static int kls_row_first_pipeline_apply_producer_batch(
   if (shared == NULL || current_worker == NULL ||
       !shared->producer_batch_enabled ||
       shared->workers == NULL || shared->batch_targets == NULL ||
-      shared->worker_count <= 1 || shared->ctx == NULL ||
+      shared->batch_target_capacity <= 1 || shared->ctx == NULL ||
       shared->u_entries == NULL || shared->workspace == NULL ||
       shared->workspace->u_row_ptr == NULL ||
       shared->workspace->u_row_end == NULL ||
@@ -87451,7 +87488,25 @@ static int kls_row_first_pipeline_apply_producer_batch(
           shared, worker, dep)) {
       continue;
     }
-    if (target_count >= (UF_long)shared->worker_count) {
+    if (target_count >= (UF_long)shared->batch_target_capacity) {
+      return 0;
+    }
+    kls_row_first_partial_row *state = worker->active_state;
+    const double lij = worker->workspace.x[dep] / shared->udiag_values[dep];
+    shared->batch_targets[target_count].worker = worker;
+    shared->batch_targets[target_count].state = state;
+    shared->batch_targets[target_count].lij = lij;
+    target_count++;
+  }
+  for (int slot = 0; slot < shared->lookahead_count; ++slot) {
+    kls_row_first_pipeline_worker *worker =
+      shared->lookahead_states + slot;
+    if (!worker->lookahead_active || worker->lookahead_claimed ||
+        !kls_row_first_pipeline_worker_scalar_batch_candidate(
+          shared, worker, dep)) {
+      continue;
+    }
+    if (target_count >= (UF_long)shared->batch_target_capacity) {
       return 0;
     }
     kls_row_first_partial_row *state = worker->active_state;
@@ -87544,6 +87599,207 @@ static int kls_row_first_pipeline_apply_producer_batch(
     kls_row_first_stats_add(&trace->producer_batch_output_entries,
                             output_entries);
   }
+  return 1;
+}
+
+static void kls_row_first_pipeline_clear_lookahead_state(
+  kls_row_first_pipeline_worker *state) {
+  if (state == NULL || !state->lookahead_active) {
+    return;
+  }
+  if (state->active_state != NULL) {
+    kls_row_first_partial_row_clear(state->active_state,
+                                    &state->workspace);
+  }
+  state->l_entries.count = 0u;
+  state->u_entries.count = 0u;
+  memset(&state->trace_current, 0, sizeof(state->trace_current));
+  memset(&state->state_storage, 0, sizeof(state->state_storage));
+  state->state_storage.row = UF_long_max;
+  state->active_state = NULL;
+  state->active_order_epoch = 0u;
+  state->lookahead_pos = KLS_KLU_EMPTY;
+  state->lookahead_row = KLS_KLU_EMPTY;
+  state->lookahead_active = 0;
+  state->lookahead_claimed = 0;
+}
+
+static void kls_row_first_pipeline_clear_unclaimed_lookahead(
+  kls_row_first_pipeline_shared *shared) {
+  if (shared == NULL || shared->lookahead_states == NULL) {
+    return;
+  }
+  for (int slot = 0; slot < shared->lookahead_count; ++slot) {
+    kls_row_first_pipeline_worker *state =
+      shared->lookahead_states + slot;
+    if (state->lookahead_active && !state->lookahead_claimed) {
+      kls_row_first_pipeline_clear_lookahead_state(state);
+    }
+  }
+}
+
+static int kls_row_first_pipeline_fill_lookahead(
+  kls_row_first_pipeline_shared *shared) {
+  if (shared == NULL || shared->lookahead_states == NULL ||
+      shared->lookahead_count <= 0 || shared->ctx == NULL ||
+      shared->row_order == NULL || shared->private_u_entries == NULL ||
+      shared->private_u_row_ptr == NULL ||
+      shared->private_u_row_end == NULL ||
+      shared->u_entries == NULL || shared->workspace == NULL ||
+      shared->workspace->u_row_ptr == NULL ||
+      shared->workspace->u_row_end == NULL ||
+      shared->udiag_values == NULL || shared->row_done == NULL ||
+      shared->failed) {
+    return 1;
+  }
+  const UF_long reserved_next =
+    (UF_long)atomic_load_explicit(&shared->next_pos, memory_order_acquire);
+  if (shared->worker_count > 0 &&
+      reserved_next < shared->completed_pos + (UF_long)shared->worker_count) {
+    return 1;
+  }
+
+  for (int slot = 0; slot < shared->lookahead_count; ++slot) {
+    kls_row_first_pipeline_worker *state =
+      shared->lookahead_states + slot;
+    if (state->lookahead_active) {
+      if (!state->lookahead_claimed &&
+          state->active_order_epoch != shared->order_epoch) {
+        kls_row_first_pipeline_clear_lookahead_state(state);
+      } else {
+        continue;
+      }
+    }
+    const UF_long pos =
+      (UF_long)atomic_fetch_add_explicit(&shared->next_pos, 1ul,
+                                         memory_order_acq_rel);
+    if (pos >= shared->end) {
+      break;
+    }
+    if (pos < shared->begin) {
+      return 0;
+    }
+    const UF_long row = shared->row_order[pos];
+    state->l_entries.count = 0u;
+    state->u_entries.count = 0u;
+    state->l_entries.reserve_growths = 0u;
+    state->l_entries.reserve_copied_entries = 0u;
+    state->u_entries.reserve_growths = 0u;
+    state->u_entries.reserve_copied_entries = 0u;
+    state->l_reserve_growths_reported = 0u;
+    state->l_reserve_copied_reported = 0u;
+    state->u_reserve_growths_reported = 0u;
+    state->u_reserve_copied_reported = 0u;
+    memset(&state->trace_current, 0, sizeof(state->trace_current));
+    state->trace_current.long_row_threshold =
+      shared->long_row_trace_threshold;
+    state->trace_current.long_row = row;
+    state->trace_current.long_row_pos = pos;
+    memset(&state->state_storage, 0, sizeof(state->state_storage));
+    state->state_storage.row = UF_long_max;
+    int blocked = 0;
+    if (row >= shared->ctx->nk ||
+        !kls_row_first_partial_row_begin(shared->ctx, &state->workspace,
+                                         &state->state_storage, row) ||
+        !kls_row_first_partial_apply_ready(
+          shared->ctx, &state->workspace, &state->l_entries,
+          shared->private_u_entries, shared->udiag_values,
+          shared->private_u_row_ptr, shared->private_u_row_end,
+          shared->supernode_start, shared->supernode_end, shared->row_done,
+          shared->active_rank, shared->begin, &state->state_storage,
+          NULL, NULL, NULL, NULL, NULL,
+          shared->trace_enabled ? &state->trace_current : NULL, &blocked) ||
+        !kls_row_first_partial_apply_ready(
+          shared->ctx, &state->workspace, &state->l_entries,
+          shared->u_entries, shared->udiag_values,
+          shared->workspace->u_row_ptr, shared->workspace->u_row_end,
+          shared->supernode_start, shared->supernode_end, shared->row_done,
+          shared->active_rank, shared->completed_pos,
+          &state->state_storage, NULL, NULL, NULL, NULL, NULL,
+          shared->trace_enabled ? &state->trace_current : NULL, &blocked)) {
+      kls_row_first_partial_row_clear(&state->state_storage,
+                                      &state->workspace);
+      state->l_entries.count = 0u;
+      state->u_entries.count = 0u;
+      return 0;
+    }
+    state->active_state = &state->state_storage;
+    state->active_order_epoch = shared->order_epoch;
+    state->lookahead_pos = pos;
+    state->lookahead_row = row;
+    state->lookahead_active = 1;
+    state->lookahead_claimed = 0;
+  }
+  return 1;
+}
+
+static int kls_row_first_pipeline_try_claim_lookahead(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_worker *worker,
+  UF_long *pos_out,
+  UF_long *row_out,
+  UF_long *order_epoch_out,
+  kls_row_first_partial_row *state_out) {
+  if (shared == NULL || worker == NULL || pos_out == NULL ||
+      row_out == NULL || order_epoch_out == NULL || state_out == NULL ||
+      shared->lookahead_states == NULL) {
+    return 0;
+  }
+  int best_slot = -1;
+  UF_long best_pos = UF_long_max;
+  for (int slot = 0; slot < shared->lookahead_count; ++slot) {
+    kls_row_first_pipeline_worker *state =
+      shared->lookahead_states + slot;
+    if (!state->lookahead_active || state->lookahead_claimed) {
+      continue;
+    }
+    if (state->active_order_epoch != shared->order_epoch) {
+      kls_row_first_pipeline_clear_lookahead_state(state);
+      continue;
+    }
+    if (state->lookahead_pos < best_pos) {
+      best_pos = state->lookahead_pos;
+      best_slot = slot;
+    }
+  }
+  if (best_slot < 0) {
+    return 0;
+  }
+  kls_row_first_pipeline_worker *state =
+    shared->lookahead_states + best_slot;
+  state->lookahead_claimed = 1;
+
+  kls_row_first_workspace tmp_workspace = worker->workspace;
+  worker->workspace = state->workspace;
+  state->workspace = tmp_workspace;
+
+  kls_row_first_entries tmp_l_entries = worker->l_entries;
+  worker->l_entries = state->l_entries;
+  state->l_entries = tmp_l_entries;
+
+  kls_row_first_entries tmp_u_entries = worker->u_entries;
+  worker->u_entries = state->u_entries;
+  state->u_entries = tmp_u_entries;
+
+  worker->trace_current = state->trace_current;
+  worker->l_reserve_growths_reported = 0u;
+  worker->l_reserve_copied_reported = 0u;
+  worker->u_reserve_growths_reported = 0u;
+  worker->u_reserve_copied_reported = 0u;
+  *state_out = state->state_storage;
+  *pos_out = state->lookahead_pos;
+  *row_out = state->lookahead_row;
+  *order_epoch_out = state->active_order_epoch;
+
+  state->active_state = NULL;
+  state->active_order_epoch = 0u;
+  memset(&state->state_storage, 0, sizeof(state->state_storage));
+  state->state_storage.row = UF_long_max;
+  memset(&state->trace_current, 0, sizeof(state->trace_current));
+  state->lookahead_active = 0;
+  state->lookahead_claimed = 0;
+  state->lookahead_pos = KLS_KLU_EMPTY;
+  state->lookahead_row = KLS_KLU_EMPTY;
   return 1;
 }
 
@@ -87848,9 +88104,25 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
     shared->private_supernode_panel_cache;
 
   for (;;) {
-    const UF_long pos =
-      (UF_long)atomic_fetch_add_explicit(&shared->next_pos, 1ul,
-                                         memory_order_acq_rel);
+    UF_long pos = KLS_KLU_EMPTY;
+    UF_long row = KLS_KLU_EMPTY;
+    UF_long adopted_order_epoch = 0u;
+    kls_row_first_partial_row adopted_state;
+    memset(&adopted_state, 0, sizeof(adopted_state));
+    adopted_state.row = UF_long_max;
+    int adopted_lookahead = 0;
+    pthread_mutex_lock(&shared->lock);
+    if (!shared->failed) {
+      adopted_lookahead =
+        kls_row_first_pipeline_try_claim_lookahead(
+          shared, worker, &pos, &row, &adopted_order_epoch,
+          &adopted_state);
+    }
+    pthread_mutex_unlock(&shared->lock);
+    if (!adopted_lookahead) {
+      pos = (UF_long)atomic_fetch_add_explicit(&shared->next_pos, 1ul,
+                                               memory_order_acq_rel);
+    }
     if (pos >= shared->end) {
       break;
     }
@@ -87863,7 +88135,9 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
       break;
     }
 
-    const UF_long row = shared->row_order[pos];
+    if (!adopted_lookahead) {
+      row = shared->row_order[pos];
+    }
     int stop_worker = 0;
     int retry_row = 1;
     while (retry_row) {
@@ -87871,13 +88145,17 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
       kls_row_first_partial_row state;
       memset(&state, 0, sizeof(state));
       state.row = UF_long_max;
-      worker->l_entries.count = 0;
-      worker->u_entries.count = 0;
-      memset(&worker->trace_current, 0, sizeof(worker->trace_current));
-      worker->trace_current.long_row_threshold =
-        shared->long_row_trace_threshold;
-      worker->trace_current.long_row = row;
-      worker->trace_current.long_row_pos = pos;
+      if (adopted_lookahead) {
+        state = adopted_state;
+      } else {
+        worker->l_entries.count = 0;
+        worker->u_entries.count = 0;
+        memset(&worker->trace_current, 0, sizeof(worker->trace_current));
+        worker->trace_current.long_row_threshold =
+          shared->long_row_trace_threshold;
+        worker->trace_current.long_row = row;
+        worker->trace_current.long_row_pos = pos;
+      }
       int blocked = 0;
       int begin_ok = 1;
       UF_long order_epoch = 0;
@@ -87886,6 +88164,12 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
       if (shared->failed) {
         stop_worker = 1;
         begin_ok = 0;
+      } else if (adopted_lookahead) {
+        order_epoch = adopted_order_epoch;
+        if (order_epoch != shared->order_epoch) {
+          retry_row = 1;
+          begin_ok = 0;
+        }
       } else {
         order_epoch = shared->order_epoch;
         if (row >= shared->ctx->nk ||
@@ -87919,8 +88203,17 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
       pthread_mutex_unlock(&shared->lock);
       if (!begin_ok) {
         kls_row_first_partial_row_clear(&state, &worker->workspace);
+        if (retry_row) {
+          adopted_lookahead = 0;
+          worker->l_entries.count = 0;
+          worker->u_entries.count = 0;
+          memset(&worker->trace_current, 0,
+                 sizeof(worker->trace_current));
+          continue;
+        }
         break;
       }
+      adopted_lookahead = 0;
       worker->partial_rows++;
 
       pthread_mutex_lock(&shared->lock);
@@ -88153,6 +88446,11 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                   shared->supernode_start, shared->supernode_end);
                 shared->row_done[row] = 1u;
               }
+              if (!pivoted &&
+                  !kls_row_first_pipeline_fill_lookahead(shared)) {
+                kls_row_first_pipeline_mark_failed(
+                  shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
+              }
               kls_row_first_pipeline_publish_completed_panel(shared, row);
               shared->completed_pos = pos + 1u;
               if (!pivoted &&
@@ -88224,6 +88522,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                 }
                 shared->pivot_tail_rows += shared->end - pos;
                 shared->pivot_restarts++;
+                kls_row_first_pipeline_clear_unclaimed_lookahead(shared);
                 shared->order_epoch++;
                 if (shared->active_rank == NULL) {
                   kls_row_first_pipeline_rebuild_prefix_panel_cache(
@@ -88315,9 +88614,21 @@ static int kls_row_first_run_parallel_pipeline_phase(
   kls_row_first_pipeline_worker *workers =
     (kls_row_first_pipeline_worker *)
       calloc((size_t)worker_count, sizeof(*workers));
+  const UF_long requested_lookahead =
+    kls_row_pipeline_lookahead_slots_env();
+  int lookahead_count = (int)requested_lookahead;
+  if ((UF_long)lookahead_count > pipeline_rows) {
+    lookahead_count = (int)pipeline_rows;
+  }
+  kls_row_first_pipeline_worker *lookahead_states =
+    lookahead_count > 0
+      ? (kls_row_first_pipeline_worker *)
+          calloc((size_t)lookahead_count, sizeof(*lookahead_states))
+      : NULL;
+  const int batch_target_capacity = worker_count + lookahead_count;
   kls_row_first_pipeline_batch_target *batch_targets =
     (kls_row_first_pipeline_batch_target *)
-      calloc((size_t)worker_count, sizeof(*batch_targets));
+      calloc((size_t)batch_target_capacity, sizeof(*batch_targets));
   kls_row_first_entries private_u_entries;
   memset(&private_u_entries, 0, sizeof(private_u_entries));
   UF_long *private_u_row_ptr =
@@ -88328,9 +88639,11 @@ static int kls_row_first_run_parallel_pipeline_phase(
     (UF_long *)malloc((size_t)ctx->nk * sizeof(*supernode_start));
   UF_long *supernode_end =
     (UF_long *)malloc((size_t)ctx->nk * sizeof(*supernode_end));
-  if (threads == NULL || workers == NULL || batch_targets == NULL) {
+  if (threads == NULL || workers == NULL || batch_targets == NULL ||
+      (lookahead_count > 0 && lookahead_states == NULL)) {
     free(threads);
     free(workers);
+    free(lookahead_states);
     free(batch_targets);
     free(private_u_row_ptr);
     free(private_u_row_end);
@@ -88343,6 +88656,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
       !kls_row_first_append_entries(&private_u_entries, u_entries)) {
     free(threads);
     free(workers);
+    free(lookahead_states);
     free(batch_targets);
     kls_row_first_entries_free(&private_u_entries);
     free(private_u_row_ptr);
@@ -88403,8 +88717,11 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.order_epoch = 0;
   shared.trace_enabled = kls_row_pipeline_trace_env_enabled();
   shared.workers = workers;
+  shared.lookahead_states = lookahead_states;
   shared.batch_targets = batch_targets;
   shared.worker_count = worker_count;
+  shared.lookahead_count = lookahead_count;
+  shared.batch_target_capacity = batch_target_capacity;
   shared.producer_batch_enabled =
     !kls_row_pipeline_producer_batch_env_disabled();
   shared.long_row_trace_threshold =
@@ -88415,6 +88732,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
       &private_supernode_panel_cache);
     free(threads);
     free(workers);
+    free(lookahead_states);
     free(batch_targets);
     kls_row_first_entries_free(&private_u_entries);
     free(private_u_row_ptr);
@@ -88429,6 +88747,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
       &private_supernode_panel_cache);
     free(threads);
     free(workers);
+    free(lookahead_states);
     free(batch_targets);
     kls_row_first_entries_free(&private_u_entries);
     free(private_u_row_ptr);
@@ -88436,6 +88755,29 @@ static int kls_row_first_run_parallel_pipeline_phase(
     free(supernode_start);
     free(supernode_end);
     return 0;
+  }
+  int lookahead_ready = 1;
+  for (int slot = 0; slot < shared.lookahead_count; ++slot) {
+    lookahead_states[slot].shared = &shared;
+    lookahead_states[slot].state_storage.row = UF_long_max;
+    lookahead_states[slot].lookahead_pos = KLS_KLU_EMPTY;
+    lookahead_states[slot].lookahead_row = KLS_KLU_EMPTY;
+    if (!kls_row_first_workspace_init(&lookahead_states[slot].workspace,
+                                      ctx->nk)) {
+      lookahead_ready = 0;
+      break;
+    }
+    lookahead_states[slot].workspace.supernode_panel_cache =
+      shared.private_supernode_panel_cache;
+  }
+  if (!lookahead_ready) {
+    for (int slot = 0; slot < shared.lookahead_count; ++slot) {
+      kls_row_first_pipeline_worker_free(lookahead_states + slot);
+    }
+    free(lookahead_states);
+    lookahead_states = NULL;
+    shared.lookahead_states = NULL;
+    shared.lookahead_count = 0;
   }
   kls_row_first_pipeline_trace_print(&shared, "start");
 
@@ -88540,6 +88882,9 @@ static int kls_row_first_run_parallel_pipeline_phase(
   for (int tid = 0; tid < worker_count; ++tid) {
     kls_row_first_pipeline_worker_free(workers + tid);
   }
+  for (int slot = 0; slot < shared.lookahead_count; ++slot) {
+    kls_row_first_pipeline_worker_free(lookahead_states + slot);
+  }
   kls_row_first_supernode_panel_cache_free(&private_supernode_panel_cache);
   kls_row_first_entries_free(&private_u_entries);
   free(private_u_row_ptr);
@@ -88548,6 +88893,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   free(supernode_end);
   free(threads);
   free(workers);
+  free(lookahead_states);
   free(batch_targets);
   return ok;
 }

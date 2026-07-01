@@ -13356,3 +13356,24 @@ and scalar published-U touches move from `804,607,861` in
 the current pipeline's live current-row window is too small to capture the
 large missing reuse surface; the next gap-closing step is a broader live-row
 window or grouped current-state owner, not lowering the threshold again.
+
+An experimental bounded live-row lookahead substrate now exists, but it is not
+ready for default use. It is gated behind both
+`KLS_ENABLE_EXPERIMENTAL_ROW_PIPELINE_LOOKAHEAD=1` and
+`KLS_ROW_PIPELINE_LOOKAHEAD=<slots>` so ordinary runs, and even accidental
+`KLS_ROW_PIPELINE_LOOKAHEAD` settings, stay on the safe worker-only pipeline.
+The substrate reserves extra future row states, initializes them to the current
+pipeline epoch, lets committed producers update them through the producer-batch
+path, and lets workers adopt the oldest unclaimed state later. This directly
+tests the broader live-current-window idea that the `pre2` trace called for.
+The result is mixed and therefore intentionally not default: with the
+experimental path effectively enabled during development, `G2_circuit`
+improved from the prior forced KLS-first `13.7s` range to `9.20s`-`9.79s`,
+but `transient` timed out at 120s with both 2 and 8 lookahead slots. The normal
+guarded build still passes `./build/kls_smoke`, `ctest --test-dir build
+--output-on-failure`, and the forced KLS-first `G2_circuit`/`transient` spot
+completed at `8.3534s` geomean in
+`build/kls_lookahead_guard_default_forced_spot_t4_r1_ref0_timeout120.jsonl`.
+This confirms the live-row window is a real paper-aligned lever, but the
+current implementation needs eligibility control or cheaper catch-up before it
+can be used generally.
