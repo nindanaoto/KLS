@@ -1322,6 +1322,12 @@ sorted and advances retained sparse states with a merge walk instead of a
 per-entry binary search when that sorted shape holds.
 This remains opt-in: the focused ASIC probes are residual-clean, but the state
 owner is still too fine-grained to beat the default refactor path.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_ADVANCE_BATCH_STATS=1` is a
+separate diagnostic for the next grouped-current owner. It implies state stats
+and reports last/cumulative advance-batch group, current, unique-entry,
+duplicate-entry, and max-current counts. The normal state executor leaves these
+counters at zero unless this diagnostic is enabled, so timing runs do not pay
+for the extra wake-loop measurement.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
 same BTF scalar producer-run shape. It first waits for every dependency in a
 contiguous run, then applies the run through a local row workspace. Under the

@@ -13076,3 +13076,35 @@ writeback ownership gap but still only moves timing slightly, so the remaining
 paper-level loss is earlier: KLS materializes and advances one retained sparse
 state per current instead of keeping CKTSO-style grouped current state live
 across the producer/window batch.
+
+The retained-state wake path now has an explicit grouped-advance diagnostic,
+guarded by
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_ADVANCE_BATCH_STATS=1`, to
+check whether several retained states from the same producer group advance
+together often enough to justify a direct grouped owner. The diagnostic is
+gated separately from
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1`, so normal retained
+state timing leaves these counters at zero. Focused normal runs stayed
+residual-clean and confirmed the gate: `ASIC_100ks` measured `10.4165s` with
+all advance-batch counters at zero, and `ASIC_320ks` measured `8.34268s` with
+all advance-batch counters at zero. With the diagnostic enabled, `ASIC_100ks`
+reported `1,702` same-group advance batches covering `3,526` currents, only
+`46,878` unique producer-stream entries versus `95,062` duplicated per-current
+entries, max batch width `3`, and `9.98670s` refactor time. `ASIC_320ks`
+reported `981` batches covering `1,967` currents, `215,456` unique entries
+versus `455,595` duplicated entries, max batch width `3`, and `8.32107s`.
+Both diagnostic probes had clean residuals and zero state-exec rejects. This
+shows a real pairwise sharing surface, but it is too small to explain the slow
+cases by itself: batched duplicate entries were about `0.8%` of all advanced
+entries on `ASIC_100ks` and `3.3%` on `ASIC_320ks`. The larger paper gap is
+therefore not simply "batch adjacent wake advances"; it remains the need for a
+different live current-state owner that avoids materializing, advancing, and
+restoring one sparse state per current across the whole producer/window region.
+
+A workspace lazy-clear variant was also rejected. Removing the full sequential
+clear from retained BTF state preparation kept residuals clean but moved cost
+into scattered worker-side initialization: `ASIC_100ks` slowed from the
+`10.0954s` wake-terminal baseline to `10.2738s`, and `ASIC_320ks` slowed from
+`8.5030s` to `8.59457s`. KLS therefore keeps the full clear because it likely
+pre-touches the retained-state workspace more effectively than piecemeal lazy
+initialization on these cases.
