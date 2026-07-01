@@ -13489,3 +13489,26 @@ rejects raw-input future-row scanning as the next CKTSO-gap closer; the next
 implementation should keep a producer-indexed grouped-current state live
 without repeatedly searching future rows or materializing many independent
 full workspaces.
+
+A fresh timeout recheck on the current tree shifts the immediate `pre2`
+culprit earlier inside that first-factor pipeline. A direct CKTSO run on the
+same workspace completed `pre2` with `analysis_seconds=5.304347`,
+`initial_factor_seconds=9.175596`, `refactor_seconds_avg=6.084399`, and
+`solve_seconds_avg=0.140293`. KLS analyze-only on the same command shape
+completed with `analysis_seconds=8.33114405` in
+`build/kls_pre2_timeout_recheck_analyze_current_t4.json`, so ordering/analyze
+is not enough to explain the 120s failure. The current KLS traced factor run
+`build/kls_pre2_timeout_recheck_trace_current_t4_r1_ref0_timeout120.stderr`
+entered the `629628`-row dominant row-pipeline block but emitted no 65,536-row
+progress checkpoint before the timeout. A debugger-owned interrupt of the same
+AMD/auto command
+`build/pre2_timeout_recheck_auto_gdb_interrupt.txt` sampled one active worker
+inside `kls_row_first_supernode_panel_cache_build()` /
+`kls_row_first_supernode_panel_cache_free()` while the other row-pipeline
+workers waited on the pipeline mutex/condition. This makes the largest current
+gap more specific than generic scalar published-U streaming: early first-factor
+prefix/pivot panel-cache rebuild work is serialized under the row-pipeline
+commit lock before useful row progress. The next fix should remove or sharply
+bound those early panel-cache rebuilds on large dominant BTF blocks, or make
+the rebuild/exchange state incremental and outside the global pipeline mutex,
+before returning to broader grouped-current producer ownership.
