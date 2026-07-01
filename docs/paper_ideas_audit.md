@@ -14034,3 +14034,24 @@ owned sparse lookahead states as the large CKTSO-gap closer. The required
 algorithm is still a production grouped-current or row/supernode numeric owner
 that owns the current batch and its target map, rather than repeatedly catching
 up independent sparse current states.
+
+A CKTSO static-pivoting shortcut was tested and rejected before commit. CKTSO's
+preprocessing uses maximum-weight matching to reduce dynamic pivots, so the
+trial allowed the existing large SPRAL pre-static candidate to accept its
+matched symbolic pattern without first requiring a successful trial numeric
+factorization. This specifically tested whether `pre2` is timing out because
+KLS never reaches the post-factor SPRAL acceptance gate. Correctness smoke
+passed for the normal binary and for the opt-in
+`KLS_ENABLE_PRE_STATIC_SPRAL_SYMBOLIC_ONLY=1` path, but the focused trace was
+negative. The 45s `pre2` trace
+`build/kls_pre2_prestat_spral_symbolic_trace45.stderr` reached only
+`393216/629628` rows, while the retained METIS-start trace reaches the late
+tail in the same window. At 90s,
+`build/kls_pre2_prestat_spral_symbolic_trace90.stderr` reached the same
+`589824/629628` checkpoint as `build/kls_pre2_head_forced_trace90.stderr`, but
+long-row scalar U work worsened from `4.843807560e9` to `8.057231222e9` and
+the long-row scalar-output/producer-target ratio worsened from `475.26x` to
+`578.88x`. This rejects accepting a large SPRAL static match without numeric
+proof as the clear `pre2` gap closer. Static pivoting remains useful through
+the existing guarded numeric-trial paths, but the timeout-sized gap is still
+the row-pipeline numeric owner for the pivoting tail.
