@@ -86269,15 +86269,20 @@ struct kls_row_first_compact_window_state {
   UF_long *pattern;
   UF_long *heap;
   UF_long *l_cols;
+  UF_long *index_keys;
+  UF_long *index_pos;
   double *values;
   double *l_values;
+  unsigned int *index_mark;
   kls_row_first_pipeline_trace trace_current;
   UF_long pattern_count;
   UF_long pattern_capacity;
+  UF_long index_capacity;
   UF_long heap_size;
   UF_long l_count;
   UF_long l_capacity;
   unsigned int generation;
+  unsigned int index_generation;
   int bucket_slot;
   int bucket_next;
   int bucket_linked;
@@ -86310,8 +86315,11 @@ static void kls_row_first_compact_window_state_free(
   free(state->pattern);
   free(state->heap);
   free(state->l_cols);
+  free(state->index_keys);
+  free(state->index_pos);
   free(state->values);
   free(state->l_values);
+  free(state->index_mark);
   memset(state, 0, sizeof(*state));
   state->row = KLS_KLU_EMPTY;
   state->pos = KLS_KLU_EMPTY;
@@ -86376,21 +86384,123 @@ static int kls_row_first_compact_window_l_append(
   return 1;
 }
 
-static UF_long kls_row_first_compact_window_lower_bound(
-  const UF_long *values,
-  UF_long count,
-  UF_long value) {
-  UF_long lo = 0u;
-  UF_long hi = count;
-  while (lo < hi) {
-    const UF_long mid = lo + (hi - lo) / 2u;
-    if (values[mid] < value) {
-      lo = mid + 1u;
-    } else {
-      hi = mid;
-    }
+static UF_long kls_row_first_compact_window_index_slot(
+  const kls_row_first_compact_window_state *state,
+  UF_long col,
+  int *found_out) {
+  if (found_out != NULL) {
+    *found_out = 0;
   }
-  return lo;
+  if (state == NULL || state->index_capacity == 0u ||
+      state->index_keys == NULL || state->index_pos == NULL ||
+      state->index_mark == NULL || state->index_generation == 0u) {
+    return KLS_KLU_EMPTY;
+  }
+  const UF_long mask = state->index_capacity - 1u;
+  UF_long slot = (UF_long)(kls_mix_u64((uint64_t)col) & (uint64_t)mask);
+  for (UF_long probe = 0u; probe < state->index_capacity; ++probe) {
+    if (state->index_mark[slot] != state->index_generation) {
+      return slot;
+    }
+    if (state->index_keys[slot] == col) {
+      if (found_out != NULL) {
+        *found_out = 1;
+      }
+      return slot;
+    }
+    slot = (slot + 1u) & mask;
+  }
+  return KLS_KLU_EMPTY;
+}
+
+static int kls_row_first_compact_window_index_rebuild(
+  kls_row_first_compact_window_state *state,
+  UF_long capacity) {
+  if (state == NULL || capacity == 0u ||
+      (capacity & (capacity - 1u)) != 0u ||
+      capacity > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      capacity > (UF_long)(SIZE_MAX / sizeof(unsigned int))) {
+    return 0;
+  }
+  UF_long *new_keys =
+    (UF_long *)malloc((size_t)capacity * sizeof(*new_keys));
+  UF_long *new_pos =
+    (UF_long *)malloc((size_t)capacity * sizeof(*new_pos));
+  unsigned int *new_mark =
+    (unsigned int *)calloc((size_t)capacity, sizeof(*new_mark));
+  if (new_keys == NULL || new_pos == NULL || new_mark == NULL) {
+    free(new_keys);
+    free(new_pos);
+    free(new_mark);
+    return 0;
+  }
+
+  const UF_long old_capacity = state->index_capacity;
+  UF_long *old_keys = state->index_keys;
+  UF_long *old_pos = state->index_pos;
+  unsigned int *old_mark = state->index_mark;
+  state->index_capacity = capacity;
+  state->index_keys = new_keys;
+  state->index_pos = new_pos;
+  state->index_mark = new_mark;
+
+  int ok = 1;
+  for (UF_long p = 0u; p < state->pattern_count; ++p) {
+    int found = 0;
+    const UF_long slot =
+      kls_row_first_compact_window_index_slot(state, state->pattern[p],
+                                             &found);
+    if (slot == KLS_KLU_EMPTY || found) {
+      ok = 0;
+      break;
+    }
+    state->index_keys[slot] = state->pattern[p];
+    state->index_pos[slot] = p;
+    state->index_mark[slot] = state->index_generation;
+  }
+  if (!ok) {
+    free(new_keys);
+    free(new_pos);
+    free(new_mark);
+    state->index_capacity = old_capacity;
+    state->index_keys = old_keys;
+    state->index_pos = old_pos;
+    state->index_mark = old_mark;
+    return 0;
+  }
+
+  free(old_keys);
+  free(old_pos);
+  free(old_mark);
+  return 1;
+}
+
+static int kls_row_first_compact_window_index_reserve(
+  kls_row_first_compact_window_state *state,
+  UF_long needed) {
+  if (state == NULL) {
+    return 0;
+  }
+  if (needed == 0u) {
+    return 1;
+  }
+  if (needed > UF_long_max / 2u ||
+      needed > (UF_long)(SIZE_MAX / (2u * sizeof(UF_long))) ||
+      needed > (UF_long)(SIZE_MAX / (2u * sizeof(unsigned int)))) {
+    return 0;
+  }
+  if (state->index_capacity >= needed * 2u &&
+      state->index_capacity != 0u) {
+    return 1;
+  }
+  UF_long capacity = 32u;
+  while (capacity < needed * 2u) {
+    if (capacity > UF_long_max / 2u) {
+      return 0;
+    }
+    capacity *= 2u;
+  }
+  return kls_row_first_compact_window_index_rebuild(state, capacity);
 }
 
 static int kls_row_first_compact_window_reserve(
@@ -86401,7 +86511,7 @@ static int kls_row_first_compact_window_reserve(
     return 0;
   }
   if (needed <= state->pattern_capacity) {
-    return 1;
+    return kls_row_first_compact_window_index_reserve(state, needed);
   }
   if (needed > max_entries ||
       needed > (UF_long)(SIZE_MAX / sizeof(UF_long))) {
@@ -86444,6 +86554,9 @@ static int kls_row_first_compact_window_reserve(
   }
   state->values = new_values;
   state->pattern_capacity = grown;
+  if (!kls_row_first_compact_window_index_reserve(state, needed)) {
+    return 0;
+  }
   return 1;
 }
 
@@ -86460,10 +86573,14 @@ static int kls_row_first_compact_window_insert(
   if (state == NULL || col == KLS_KLU_EMPTY) {
     return 0;
   }
-  const UF_long at =
-    kls_row_first_compact_window_lower_bound(
-      state->pattern, state->pattern_count, col);
-  if (at < state->pattern_count && state->pattern[at] == col) {
+  int found = 0;
+  UF_long slot =
+    kls_row_first_compact_window_index_slot(state, col, &found);
+  if (found) {
+    const UF_long at = state->index_pos[slot];
+    if (at >= state->pattern_count || state->pattern[at] != col) {
+      return 0;
+    }
     if (state->values != NULL) {
       state->values[at] += delta;
     }
@@ -86473,17 +86590,17 @@ static int kls_row_first_compact_window_insert(
         state, state->pattern_count + 1u, max_entries)) {
     return 0;
   }
-  if (at < state->pattern_count) {
-    memmove(state->pattern + at + 1u, state->pattern + at,
-            (size_t)(state->pattern_count - at) *
-              sizeof(*state->pattern));
-    memmove(state->values + at + 1u, state->values + at,
-            (size_t)(state->pattern_count - at) *
-              sizeof(*state->values));
+  slot = kls_row_first_compact_window_index_slot(state, col, &found);
+  if (slot == KLS_KLU_EMPTY || found) {
+    return 0;
   }
+  const UF_long at = state->pattern_count;
   state->pattern[at] = col;
   state->values[at] = delta;
   state->pattern_count++;
+  state->index_keys[slot] = col;
+  state->index_pos[slot] = at;
+  state->index_mark[slot] = state->index_generation;
   if (col < row) {
     kls_row_first_heap_push(state->heap, &state->heap_size, col);
   }
@@ -86513,9 +86630,18 @@ static int kls_row_first_compact_window_state_begin(
   if (generation == 0u) {
     return 0;
   }
+  unsigned int index_generation = state->index_generation + 1u;
+  if (index_generation == 0u) {
+    if (state->index_mark != NULL && state->index_capacity > 0u) {
+      memset(state->index_mark, 0,
+             (size_t)state->index_capacity * sizeof(*state->index_mark));
+    }
+    index_generation = 1u;
+  }
   state->row = row;
   state->pos = pos;
   state->generation = generation;
+  state->index_generation = index_generation;
   for (UF_long p = ctx->row_ptr[row]; p < ctx->row_ptr[row + 1u]; ++p) {
     const UF_long oldcol = ctx->row_cols[p];
     if (oldcol >= ctx->n || ctx->col_pos[oldcol] >= ctx->nk) {
@@ -89476,14 +89602,24 @@ static int kls_row_first_compact_window_value_pos(
   if (state == NULL || pos_out == NULL) {
     return 0;
   }
-  const UF_long at =
-    kls_row_first_compact_window_lower_bound(
-      state->pattern, state->pattern_count, col);
-  if (at >= state->pattern_count || state->pattern[at] != col) {
-    return 0;
+  int found = 0;
+  const UF_long slot =
+    kls_row_first_compact_window_index_slot(state, col, &found);
+  if (found) {
+    const UF_long at = state->index_pos[slot];
+    if (at >= state->pattern_count || state->pattern[at] != col) {
+      return 0;
+    }
+    *pos_out = at;
+    return 1;
   }
-  *pos_out = at;
-  return 1;
+  for (UF_long at = 0u; at < state->pattern_count; ++at) {
+    if (state->pattern[at] == col) {
+      *pos_out = at;
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static int kls_row_first_compact_window_apply_dep(

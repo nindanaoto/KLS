@@ -2200,7 +2200,9 @@ collects compact states whose root dependency is the just-published producer,
 streams that producer row across the target batch, and lets a worker claim one
 prepared state instead of replaying its prefix from the input row. Live compact
 states are bucketed by root dependency, so producer publication no longer scans
-the whole compact window before every grouped update. This remains
+the whole compact window before every grouped update. Each compact state also
+keeps an internal row-to-position index, so wider compact-window probes can
+append new fill entries without sorted-array insertion. This remains
 off by default; use it only for focused paper-gap probes. Same-session `pre2`
 probes show
 the default AMD run enters the 629,628-row dominant BTF block with no separator

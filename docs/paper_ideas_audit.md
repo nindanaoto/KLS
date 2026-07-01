@@ -14425,6 +14425,24 @@ paper mechanism: the no-trace indexed run
 `build/kls_pre2_compact_index_w64_notrace120.json` still timed out with no JSON
 row under the 120s cap.
 
+The compact sparse state now also uses append-only pattern storage with an
+open-addressed row-to-position index, instead of keeping each state sorted by
+binary-search insertion and shifting values on every new fill. This is still
+only an opt-in compact-window substrate, but it attacks the cost exposed by
+wider grouped-current probes. The 64-state `pre2` trace stayed effectively
+neutral (`build/kls_pre2_compact_hashindex_w64_trace45.stderr` reached the same
+`589824/629628` checkpoint and preserved about `153M` compact target U entries).
+The wider 256-state run improved from
+`build/kls_pre2_compact_index_w256_trace45.stderr`, which reached only
+`393216/629628` rows, to
+`build/kls_pre2_compact_hashindex2_w256_trace45.stderr`, which reached
+`458752/629628` rows with `245453325` compact target U entries and
+`12935884` streamed producer U entries (`18.97x` reuse). This confirms that
+per-state sparse insertion was a real overhead in wider windows. It still does
+not close `pre2`: the 256-state path remains behind the 64-state checkpoint, so
+the missing paper-scale mechanism is still a coarser grouped row/supernode
+owner, not simply a larger independent sparse window.
+
 An early-abort guard for separator-private dynamic pivots was tested and
 rejected before commit. The experiment stopped the private separator phase on
 `pre2` after `1024` dynamic column pivots, before the later `pivot-reject`,
