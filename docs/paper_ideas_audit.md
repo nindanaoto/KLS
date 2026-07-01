@@ -14771,3 +14771,24 @@ retention is probably enough" as an explanation. The missing CKTSO/SubtreeLU
 piece is still a broader grouped owner that keeps ready producer supernodes or
 row states live across many target rows after the private/pipeline split, not a
 small admission-gate or BLAS dispatch tweak.
+
+The compact live-window executor now pre-reserves each target sparse map before
+streaming a producer row when the upper-bound reserve fits the existing
+per-state entry cap, and the row-pipeline trace reports
+`compact_window_unique_state_rows` next to `compact_window_state_rows`. This is
+a small owner-overhead cleanup plus a stronger diagnostic, not a claimed gap
+closer. Correctness stayed clean under `./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and forced KLS-first compact
+execution probes on `add20` and `bcircuit` with relative residuals
+`3.79718427e-16` and `7.87813496e-17`.
+
+The focused `pre2` 64-slot compact-exec trace
+`build/kls_pre2_compact_prereserve_w64_trace45.stderr` still timed out at the
+same `589824/629628` checkpoint. Versus the saved 64-slot compact trace, scalar
+U touches moved only from `651,169,318` to `651,110,464` and compact target U
+entries from `153,034,087` to `153,020,075`, so pre-reserve alone is not a
+CKTSO-scale fix. The useful new signal is the target-state union size:
+`267,237,486` compact target state rows collapsed to `42,063,220` unique rows,
+or `6.35x`. That reinforces the paper-aligned next implementation target: a
+shared-union grouped-current owner for the first-factor pivot tail, rather than
+more independent sparse compact states.

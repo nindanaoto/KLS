@@ -86663,6 +86663,7 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_targets;
   UF_long compact_window_target_u_entries;
   UF_long compact_window_state_rows;
+  UF_long compact_window_unique_state_rows;
   UF_long producer_probe_workers;
   UF_long producer_probe_lookahead;
   UF_long producer_probe_ready_roots;
@@ -86818,6 +86819,8 @@ static void kls_row_first_pipeline_trace_add(
                           source->compact_window_target_u_entries);
   kls_row_first_stats_add(&target->compact_window_state_rows,
                           source->compact_window_state_rows);
+  kls_row_first_stats_add(&target->compact_window_unique_state_rows,
+                          source->compact_window_unique_state_rows);
   kls_row_first_stats_add(&target->producer_probe_workers,
                           source->producer_probe_workers);
   kls_row_first_stats_add(&target->producer_probe_lookahead,
@@ -91408,6 +91411,48 @@ static void kls_row_first_pipeline_trace_producer_batch_state_union(
                           unique_rows);
 }
 
+static void kls_row_first_pipeline_trace_compact_window_state_union(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_trace *trace,
+  UF_long target_count) {
+  if (shared == NULL || trace == NULL ||
+      shared->trace_state_union_mark == NULL ||
+      shared->ctx == NULL || shared->compact_batch_targets == NULL ||
+      target_count == 0u) {
+    return;
+  }
+  unsigned int generation = shared->trace_state_union_generation + 1u;
+  if (generation == 0u) {
+    memset(shared->trace_state_union_mark, 0,
+           (size_t)shared->ctx->nk *
+             sizeof(*shared->trace_state_union_mark));
+    generation = 1u;
+  }
+  shared->trace_state_union_generation = generation;
+
+  UF_long unique_rows = 0u;
+  for (UF_long t = 0; t < target_count; ++t) {
+    const kls_row_first_compact_window_state *state =
+      shared->compact_batch_targets[t].state;
+    if (state == NULL || !state->active || state->pattern == NULL ||
+        state->pattern_count > shared->ctx->nk) {
+      continue;
+    }
+    for (UF_long p = 0; p < state->pattern_count; ++p) {
+      const UF_long col = state->pattern[p];
+      if (col >= shared->ctx->nk) {
+        return;
+      }
+      if (shared->trace_state_union_mark[col] != generation) {
+        shared->trace_state_union_mark[col] = generation;
+        kls_row_first_stats_add(&unique_rows, 1u);
+      }
+    }
+  }
+  kls_row_first_stats_add(&trace->compact_window_unique_state_rows,
+                          unique_rows);
+}
+
 static int kls_row_first_pipeline_apply_producer_batch(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_pipeline_worker *current_worker,
@@ -92022,6 +92067,36 @@ static void kls_row_first_pipeline_apply_compact_window_producer_batch(
     }
   }
   if (target_count == 0u) {
+    return;
+  }
+  if (trace != NULL) {
+    kls_row_first_pipeline_trace_compact_window_state_union(
+      shared, trace, target_count);
+  }
+  UF_long active_target_count = 0u;
+  for (UF_long t = 0; t < target_count; ++t) {
+    kls_row_first_compact_window_state *state =
+      shared->compact_batch_targets[t].state;
+    if (state == NULL || !state->active) {
+      shared->compact_batch_targets[t].state = NULL;
+      continue;
+    }
+    if (row_entries <= shared->compact_window_max_entries &&
+        state->pattern_count <=
+          shared->compact_window_max_entries - row_entries &&
+        !kls_row_first_compact_window_reserve(
+          state, state->pattern_count + row_entries,
+          shared->compact_window_max_entries)) {
+      kls_row_first_compact_window_state_clear(state);
+      shared->compact_batch_targets[t].state = NULL;
+      if (trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+      }
+      continue;
+    }
+    active_target_count++;
+  }
+  if (active_target_count == 0u) {
     return;
   }
   if (trace != NULL) {
@@ -92647,6 +92722,7 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_targets=%" PRIu64
           " compact_window_target_u_entries=%" PRIu64
           " compact_window_state_rows=%" PRIu64
+          " compact_window_unique_state_rows=%" PRIu64
           " producer_probe_workers=%" PRIu64
           " producer_probe_lookahead=%" PRIu64
           " producer_ready_roots=%" PRIu64
@@ -92703,6 +92779,7 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_targets,
           (uint64_t)trace->compact_window_target_u_entries,
           (uint64_t)trace->compact_window_state_rows,
+          (uint64_t)trace->compact_window_unique_state_rows,
           (uint64_t)trace->producer_probe_workers,
           (uint64_t)trace->producer_probe_lookahead,
           (uint64_t)trace->producer_probe_ready_roots,
@@ -93257,6 +93334,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " compact_window_targets=%" PRIu64
                         " compact_window_target_u_entries=%" PRIu64
                         " compact_window_state_rows=%" PRIu64
+                        " compact_window_unique_state_rows=%" PRIu64
                         " producer_probe_workers=%" PRIu64
                         " producer_probe_lookahead=%" PRIu64
                         " producer_ready_roots=%" PRIu64
@@ -93311,6 +93389,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.compact_window_targets,
                         (uint64_t)worker->trace_current.compact_window_target_u_entries,
                         (uint64_t)worker->trace_current.compact_window_state_rows,
+                        (uint64_t)worker->trace_current.compact_window_unique_state_rows,
                         (uint64_t)worker->trace_current.producer_probe_workers,
                         (uint64_t)worker->trace_current.producer_probe_lookahead,
                         (uint64_t)worker->trace_current.producer_probe_ready_roots,
