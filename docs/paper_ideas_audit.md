@@ -14659,3 +14659,25 @@ a separate stress/scalability bucket. They are useful for robustness and
 long-run profiling, but they should not drive CKTSO-relative tuning or geomean
 gap claims because there is no finite CKTSO timing to close. The primary
 gap-closing slice should use cases where CKTSO completes and KLS still loses.
+
+The next row-descriptor chunk connects that retained live-step substrate to
+runtime producer batches. `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_PLAN=1`
+now leaves the existing numeric path unchanged but records how many
+producer-step retained-state batches exactly cover all memberships of a planned
+live step. Benchmark JSON exposes last and cumulative
+`refactor_*_live_step_runtime_full_*` counters for full steps, current
+memberships, and unique descriptor rows. If these counters are high on the
+slow ASIC rows, the next grouped owner can use the retained live-step row list
+directly; if they are low, the remaining gap is scheduler coverage before
+numeric ownership. This avoids another per-current replay tweak and tests the
+paper-level grouped workspace precondition directly.
+
+The first focused `ASIC_100ks` probe with live-step plan plus retained
+producer-step advance stayed residual-clean (`1.92251861e-15`) and retained the
+full `183,365,884` live-step row descriptor, but runtime exact coverage was
+small: `2,723` full steps, `7,301` currents, and `1,625,695` unique descriptor
+rows, while the producer batch advanced `59,689` steps and `308,194` current
+updates. This makes the next missing large piece clearer: a grouped owner must
+either claim/schedule whole live steps more often or handle partial-step
+membership directly. The existing per-current retained-state path is not close
+enough to the paper algorithm just because the row descriptor exists.
