@@ -14486,3 +14486,24 @@ ready-supernode target" idea as the missing paper mechanism. The useful target
 remains a coarser grouped-current owner that makes several live current states
 share producer-row or producer-supernode numeric work, not a one-target
 catch-up around an already ready run.
+
+A post-pivot exact-supernode-retention prototype was rejected before commit.
+The idea followed SubtreeLU's row-by-row supernode detection more directly:
+after a dynamic pivot, KLS kept the supernode metadata arrays alive but raised a
+validity floor to the pivoted row, so old prefix metadata was ignored and only
+newly published post-pivot rows could form exact adjacent U-supernodes. The
+prototype built cleanly and passed `./build/kls_smoke` plus
+`ctest --test-dir build --output-on-failure`, but it did not activate the
+missing hot path on `pre2`. Against
+`build/kls_pre2_current_refresh_trace45.stderr`, the prototype trace
+`build/kls_pre2_supernode_floor_trace45.stderr` still timed out at the same
+`589824/629628` periodic checkpoint; tail inspection reached slightly fewer
+rows (`599260` max row and `599257` max completed versus `599283` and `599280`
+for the control), scalar U output was effectively unchanged
+(`534467391` versus `534467374`), and the long-row tail still reported
+`scalar_runs=0`. This rejects "resume exact adjacent supernodes after pivots"
+as the clear CKTSO/SubtreeLU gap closer. The remaining paper-level gap is
+broader than metadata lifetime: the pivoting tail needs a grouped
+row/supernode/current owner that can share producer work across many live
+current rows, including rows that do not satisfy KLS's exact adjacent
+supernode-shape predicate.
