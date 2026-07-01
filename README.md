@@ -2714,6 +2714,15 @@ timed out with no JSON row. This keeps compact-exec off by default: grouped
 streaming is the right direction, but the bounded compact window is still not
 the CKTSO-scale grouped row/supernode owner.
 
+A post-pivot compact refill trial was also rejected before commit. With the
+64-state compact window on `pre2`, immediately refilling compact states after a
+dynamic pivot and streaming the pivot row did not increase the reusable compact
+surface: `build/kls_pre2_pivot_compact_w64_trace45.stderr` reached the same
+`589824/629628` checkpoint as the prior compact-index trace, with compact target
+U entries essentially unchanged (`153016248` versus `153032141`) and slightly
+more scalar U output. This keeps the missing mechanism focused on a coarser
+grouped current owner, not another bounded independent-state refill.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

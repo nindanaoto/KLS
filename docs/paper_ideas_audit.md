@@ -14443,6 +14443,21 @@ not close `pre2`: the 256-state path remains behind the 64-state checkpoint, so
 the missing paper-scale mechanism is still a coarser grouped row/supernode
 owner, not simply a larger independent sparse window.
 
+A post-pivot compact refill prototype was rejected before commit. It tested
+whether compact execution was missing an obvious pivot-row publication step by
+clearing stale compact states after a dynamic column pivot, advancing the order
+epoch, then filling fresh compact states and streaming the just-published pivot
+row through the compact producer batch. The focused 64-state `pre2` trace
+`build/kls_pre2_pivot_compact_w64_trace45.stderr` reached the same
+`589824/629628` checkpoint as
+`build/kls_pre2_compact_hashindex_w64_trace45.stderr`, but compact target U work
+stayed flat (`153016248` versus `153032141`), scalar U output rose slightly
+(`556025156` versus `555564933`), and normal producer target U entries fell
+(`903186` versus `930291`). This rejects "post-pivot compact rehydrate" as the
+clear missing mechanism. The useful conclusion is narrower: pivoted rows are a
+real missing surface for producer ownership, but bounded compact states still do
+not create the paper-level grouped current owner.
+
 An early-abort guard for separator-private dynamic pivots was tested and
 rejected before commit. The experiment stopped the private separator phase on
 `pre2` after `1024` dynamic column pivots, before the later `pivot-reject`,
