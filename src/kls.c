@@ -286,6 +286,14 @@ struct kls_solver {
   UF_long *refactor_btf_scalar_run_group_currents;
   UF_long *refactor_btf_scalar_run_group_current_up;
   UF_long *refactor_btf_scalar_run_group_current_rows;
+  UF_long *refactor_btf_scalar_run_group_step_ptr;
+  UF_long *refactor_btf_scalar_run_group_step_dep;
+  UF_long *refactor_btf_scalar_run_group_step_groups;
+  UF_long *refactor_btf_scalar_run_group_step_member_ptr;
+  UF_long *refactor_btf_scalar_run_group_step_members;
+  UF_long refactor_btf_scalar_run_group_step_dep_count;
+  UF_long refactor_btf_scalar_run_group_step_count;
+  UF_long refactor_btf_scalar_run_group_step_member_total;
   UF_long *refactor_btf_scalar_run_group_wake_ptr;
   UF_long *refactor_btf_scalar_run_group_wake_dep;
   UF_long *refactor_btf_scalar_run_group_wake_groups;
@@ -1279,6 +1287,8 @@ struct kls_solver {
   UF_long refactor_btf_scalar_run_group_producer_step_duplicate_entries;
   UF_long refactor_btf_scalar_run_group_producer_step_reused_entries;
   UF_long refactor_btf_scalar_run_group_producer_step_max_currents;
+  UF_long refactor_btf_scalar_run_group_producer_index_count;
+  UF_long refactor_btf_scalar_run_group_producer_index_max_steps;
   UF_long refactor_last_btf_scalar_run_group_waits;
   UF_long refactor_last_btf_scalar_run_group_wait_rows;
   UF_long refactor_last_btf_scalar_run_group_wait_entries;
@@ -14822,6 +14832,11 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   free(solver->refactor_btf_scalar_run_group_currents);
   free(solver->refactor_btf_scalar_run_group_current_up);
   free(solver->refactor_btf_scalar_run_group_current_rows);
+  free(solver->refactor_btf_scalar_run_group_step_ptr);
+  free(solver->refactor_btf_scalar_run_group_step_dep);
+  free(solver->refactor_btf_scalar_run_group_step_groups);
+  free(solver->refactor_btf_scalar_run_group_step_member_ptr);
+  free(solver->refactor_btf_scalar_run_group_step_members);
   free(solver->refactor_btf_scalar_run_group_wake_ptr);
   free(solver->refactor_btf_scalar_run_group_wake_dep);
   free(solver->refactor_btf_scalar_run_group_wake_groups);
@@ -14853,6 +14868,14 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_btf_scalar_run_group_currents = NULL;
   solver->refactor_btf_scalar_run_group_current_up = NULL;
   solver->refactor_btf_scalar_run_group_current_rows = NULL;
+  solver->refactor_btf_scalar_run_group_step_ptr = NULL;
+  solver->refactor_btf_scalar_run_group_step_dep = NULL;
+  solver->refactor_btf_scalar_run_group_step_groups = NULL;
+  solver->refactor_btf_scalar_run_group_step_member_ptr = NULL;
+  solver->refactor_btf_scalar_run_group_step_members = NULL;
+  solver->refactor_btf_scalar_run_group_step_dep_count = 0u;
+  solver->refactor_btf_scalar_run_group_step_count = 0u;
+  solver->refactor_btf_scalar_run_group_step_member_total = 0u;
   solver->refactor_btf_scalar_run_group_wake_ptr = NULL;
   solver->refactor_btf_scalar_run_group_wake_dep = NULL;
   solver->refactor_btf_scalar_run_group_wake_groups = NULL;
@@ -14893,6 +14916,8 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_btf_scalar_run_group_producer_step_duplicate_entries = 0;
   solver->refactor_btf_scalar_run_group_producer_step_reused_entries = 0;
   solver->refactor_btf_scalar_run_group_producer_step_max_currents = 0;
+  solver->refactor_btf_scalar_run_group_producer_index_count = 0;
+  solver->refactor_btf_scalar_run_group_producer_index_max_steps = 0;
   solver->refactor_l_index32_enabled = 0;
   solver->refactor_u_index32_enabled = 0;
   solver->refactor_l_pattern_columns = 0;
@@ -28634,6 +28659,10 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.refactor_btf_scalar_run_group_producer_step_max_currents =
     (int64_t)solver
       ->refactor_btf_scalar_run_group_producer_step_max_currents;
+  solver->stats.refactor_btf_scalar_run_group_producer_index_count =
+    (int64_t)solver->refactor_btf_scalar_run_group_producer_index_count;
+  solver->stats.refactor_btf_scalar_run_group_producer_index_max_steps =
+    (int64_t)solver->refactor_btf_scalar_run_group_producer_index_max_steps;
   solver->stats.refactor_last_btf_scalar_run_group_waits =
     (int64_t)solver->refactor_last_btf_scalar_run_group_waits;
   solver->stats.refactor_last_btf_scalar_run_group_wait_rows =
@@ -35473,6 +35502,13 @@ typedef struct kls_btf_scalar_run_group_wake_item {
   UF_long member;
 } kls_btf_scalar_run_group_wake_item;
 
+typedef struct kls_btf_scalar_run_group_step_item {
+  UF_long producer_global;
+  UF_long group;
+  UF_long member_begin;
+  UF_long member_count;
+} kls_btf_scalar_run_group_step_item;
+
 static int kls_compare_btf_scalar_run_group_item(const void *a,
                                                  const void *b) {
   const kls_btf_scalar_run_group_item *ea =
@@ -35521,6 +35557,21 @@ static int kls_compare_btf_scalar_run_group_wake_item(const void *a,
   return (ea->member > eb->member) - (ea->member < eb->member);
 }
 
+static int kls_compare_btf_scalar_run_group_step_item(const void *a,
+                                                      const void *b) {
+  const kls_btf_scalar_run_group_step_item *ea =
+    (const kls_btf_scalar_run_group_step_item *)a;
+  const kls_btf_scalar_run_group_step_item *eb =
+    (const kls_btf_scalar_run_group_step_item *)b;
+  if (ea->producer_global < eb->producer_global) {
+    return -1;
+  }
+  if (ea->producer_global > eb->producer_global) {
+    return 1;
+  }
+  return (ea->group > eb->group) - (ea->group < eb->group);
+}
+
 static void kls_clear_refactor_btf_scalar_run_group_descriptor(
   kls_solver *solver) {
   if (solver == NULL) {
@@ -35532,6 +35583,11 @@ static void kls_clear_refactor_btf_scalar_run_group_descriptor(
   free(solver->refactor_btf_scalar_run_group_currents);
   free(solver->refactor_btf_scalar_run_group_current_up);
   free(solver->refactor_btf_scalar_run_group_current_rows);
+  free(solver->refactor_btf_scalar_run_group_step_ptr);
+  free(solver->refactor_btf_scalar_run_group_step_dep);
+  free(solver->refactor_btf_scalar_run_group_step_groups);
+  free(solver->refactor_btf_scalar_run_group_step_member_ptr);
+  free(solver->refactor_btf_scalar_run_group_step_members);
   free(solver->refactor_btf_scalar_run_group_wake_ptr);
   free(solver->refactor_btf_scalar_run_group_wake_dep);
   free(solver->refactor_btf_scalar_run_group_wake_groups);
@@ -35549,6 +35605,14 @@ static void kls_clear_refactor_btf_scalar_run_group_descriptor(
   solver->refactor_btf_scalar_run_group_currents = NULL;
   solver->refactor_btf_scalar_run_group_current_up = NULL;
   solver->refactor_btf_scalar_run_group_current_rows = NULL;
+  solver->refactor_btf_scalar_run_group_step_ptr = NULL;
+  solver->refactor_btf_scalar_run_group_step_dep = NULL;
+  solver->refactor_btf_scalar_run_group_step_groups = NULL;
+  solver->refactor_btf_scalar_run_group_step_member_ptr = NULL;
+  solver->refactor_btf_scalar_run_group_step_members = NULL;
+  solver->refactor_btf_scalar_run_group_step_dep_count = 0u;
+  solver->refactor_btf_scalar_run_group_step_count = 0u;
+  solver->refactor_btf_scalar_run_group_step_member_total = 0u;
   solver->refactor_btf_scalar_run_group_wake_ptr = NULL;
   solver->refactor_btf_scalar_run_group_wake_dep = NULL;
   solver->refactor_btf_scalar_run_group_wake_groups = NULL;
@@ -35589,6 +35653,8 @@ static void kls_reset_refactor_btf_scalar_run_group_stats(kls_solver *solver) {
   solver->refactor_btf_scalar_run_group_producer_step_duplicate_entries = 0;
   solver->refactor_btf_scalar_run_group_producer_step_reused_entries = 0;
   solver->refactor_btf_scalar_run_group_producer_step_max_currents = 0;
+  solver->refactor_btf_scalar_run_group_producer_index_count = 0;
+  solver->refactor_btf_scalar_run_group_producer_index_max_steps = 0;
   solver->refactor_btf_scalar_run_group_state_rows_total = 0;
   solver->refactor_btf_scalar_run_group_state_max_rows = 0;
   solver->refactor_btf_scalar_run_group_state_materialized_current_count = 0;
@@ -36364,6 +36430,222 @@ static int kls_refactor_btf_scalar_run_group_wake_range_for_dep(
   return 1;
 }
 
+static int kls_build_refactor_btf_scalar_run_group_step_index(
+  kls_solver *solver) {
+  if (solver == NULL) {
+    return 1;
+  }
+  free(solver->refactor_btf_scalar_run_group_step_ptr);
+  free(solver->refactor_btf_scalar_run_group_step_dep);
+  free(solver->refactor_btf_scalar_run_group_step_groups);
+  free(solver->refactor_btf_scalar_run_group_step_member_ptr);
+  free(solver->refactor_btf_scalar_run_group_step_members);
+  solver->refactor_btf_scalar_run_group_step_ptr = NULL;
+  solver->refactor_btf_scalar_run_group_step_dep = NULL;
+  solver->refactor_btf_scalar_run_group_step_groups = NULL;
+  solver->refactor_btf_scalar_run_group_step_member_ptr = NULL;
+  solver->refactor_btf_scalar_run_group_step_members = NULL;
+  solver->refactor_btf_scalar_run_group_step_dep_count = 0u;
+  solver->refactor_btf_scalar_run_group_step_count = 0u;
+  solver->refactor_btf_scalar_run_group_step_member_total = 0u;
+  solver->refactor_btf_scalar_run_group_producer_index_count = 0u;
+  solver->refactor_btf_scalar_run_group_producer_index_max_steps = 0u;
+
+  if (!solver->refactor_btf_scalar_run_group_built ||
+      solver->refactor_btf_scalar_run_group_multi_count == 0u ||
+      solver->refactor_btf_scalar_run_group_producer_step_count == 0u ||
+      solver->refactor_btf_scalar_run_group_producer_step_active_currents == 0u ||
+      solver->refactor_btf_scalar_run_group_producer_step_count == UF_long_max ||
+      solver->refactor_btf_scalar_run_group_producer_step_active_currents ==
+        UF_long_max ||
+      solver->refactor_btf_scalar_run_group_ptr == NULL ||
+      solver->refactor_btf_scalar_run_group_dep0 == NULL ||
+      solver->refactor_btf_scalar_run_group_max_rows_by_group == NULL ||
+      solver->refactor_btf_scalar_run_group_current_rows == NULL) {
+    return 1;
+  }
+
+  const UF_long step_count =
+    solver->refactor_btf_scalar_run_group_producer_step_count;
+  const UF_long member_total =
+    solver->refactor_btf_scalar_run_group_producer_step_active_currents;
+  if (step_count > (UF_long)(KLS_MAX_ALLOCATION /
+                             sizeof(kls_btf_scalar_run_group_step_item)) ||
+      member_total > (UF_long)(KLS_MAX_ALLOCATION / sizeof(UF_long))) {
+    return 1;
+  }
+
+  kls_btf_scalar_run_group_step_item *items =
+    (kls_btf_scalar_run_group_step_item *)malloc(
+      (size_t)step_count * sizeof(*items));
+  UF_long *member_scratch =
+    (UF_long *)malloc((size_t)member_total * sizeof(*member_scratch));
+  if (items == NULL || member_scratch == NULL) {
+    free(items);
+    free(member_scratch);
+    return 0;
+  }
+
+  UF_long step = 0u;
+  UF_long member_out = 0u;
+  for (UF_long group = 0u;
+       group < solver->refactor_btf_scalar_run_group_multi_count; ++group) {
+    const UF_long dep0 = solver->refactor_btf_scalar_run_group_dep0[group];
+    const UF_long rows =
+      solver->refactor_btf_scalar_run_group_max_rows_by_group[group];
+    const UF_long begin = solver->refactor_btf_scalar_run_group_ptr[group];
+    const UF_long end = solver->refactor_btf_scalar_run_group_ptr[group + 1u];
+    if (begin > end ||
+        end > solver->refactor_btf_scalar_run_group_multi_current_total ||
+        rows > solver->n || dep0 > solver->n ||
+        rows > solver->n - dep0) {
+      free(items);
+      free(member_scratch);
+      return 0;
+    }
+    for (UF_long row = 0u; row < rows; ++row) {
+      const UF_long member_begin = member_out;
+      for (UF_long pos = begin; pos < end; ++pos) {
+        if (solver->refactor_btf_scalar_run_group_current_rows[pos] > row) {
+          if (member_out >= member_total) {
+            free(items);
+            free(member_scratch);
+            return 0;
+          }
+          member_scratch[member_out++] = pos;
+        }
+      }
+      const UF_long member_count = member_out - member_begin;
+      if (member_count == 0u) {
+        continue;
+      }
+      if (step >= step_count) {
+        free(items);
+        free(member_scratch);
+        return 0;
+      }
+      items[step].producer_global = dep0 + row;
+      items[step].group = group;
+      items[step].member_begin = member_begin;
+      items[step].member_count = member_count;
+      step++;
+    }
+  }
+  if (step != step_count || member_out != member_total) {
+    free(items);
+    free(member_scratch);
+    return 0;
+  }
+
+  qsort(items, (size_t)step_count, sizeof(*items),
+        kls_compare_btf_scalar_run_group_step_item);
+
+  UF_long dep_count = 0u;
+  UF_long max_steps = 0u;
+  for (UF_long p = 0u; p < step_count;) {
+    UF_long q = p + 1u;
+    while (q < step_count &&
+           items[q].producer_global == items[p].producer_global) {
+      q++;
+    }
+    const UF_long steps = q - p;
+    if (steps > max_steps) {
+      max_steps = steps;
+    }
+    dep_count++;
+    p = q;
+  }
+  if (dep_count == 0u ||
+      dep_count > (UF_long)(KLS_MAX_ALLOCATION / sizeof(UF_long)) - 1u ||
+      step_count > (UF_long)(KLS_MAX_ALLOCATION / sizeof(UF_long)) - 1u) {
+    free(items);
+    free(member_scratch);
+    return 0;
+  }
+
+  UF_long *step_ptr =
+    (UF_long *)calloc((size_t)dep_count + 1u, sizeof(*step_ptr));
+  UF_long *step_dep =
+    (UF_long *)malloc((size_t)dep_count * sizeof(*step_dep));
+  UF_long *step_groups =
+    (UF_long *)malloc((size_t)step_count * sizeof(*step_groups));
+  UF_long *step_member_ptr =
+    (UF_long *)calloc((size_t)step_count + 1u, sizeof(*step_member_ptr));
+  UF_long *step_members =
+    (UF_long *)malloc((size_t)member_total * sizeof(*step_members));
+  if (step_ptr == NULL || step_dep == NULL || step_groups == NULL ||
+      step_member_ptr == NULL || step_members == NULL) {
+    free(step_ptr);
+    free(step_dep);
+    free(step_groups);
+    free(step_member_ptr);
+    free(step_members);
+    free(items);
+    free(member_scratch);
+    return 0;
+  }
+
+  UF_long dep = 0u;
+  UF_long out_step = 0u;
+  member_out = 0u;
+  step_ptr[0] = 0u;
+  step_member_ptr[0] = 0u;
+  for (UF_long p = 0u; p < step_count;) {
+    UF_long q = p + 1u;
+    while (q < step_count &&
+           items[q].producer_global == items[p].producer_global) {
+      q++;
+    }
+    step_dep[dep] = items[p].producer_global;
+    for (UF_long r = p; r < q; ++r) {
+      const UF_long count = items[r].member_count;
+      if (member_out > member_total || count > member_total - member_out) {
+        free(step_ptr);
+        free(step_dep);
+        free(step_groups);
+        free(step_member_ptr);
+        free(step_members);
+        free(items);
+        free(member_scratch);
+        return 0;
+      }
+      step_groups[out_step] = items[r].group;
+      memcpy(step_members + member_out,
+             member_scratch + items[r].member_begin,
+             (size_t)count * sizeof(*step_members));
+      member_out += count;
+      out_step++;
+      step_member_ptr[out_step] = member_out;
+    }
+    dep++;
+    step_ptr[dep] = out_step;
+    p = q;
+  }
+  free(items);
+  free(member_scratch);
+  if (dep != dep_count || out_step != step_count ||
+      member_out != member_total) {
+    free(step_ptr);
+    free(step_dep);
+    free(step_groups);
+    free(step_member_ptr);
+    free(step_members);
+    return 0;
+  }
+
+  solver->refactor_btf_scalar_run_group_step_ptr = step_ptr;
+  solver->refactor_btf_scalar_run_group_step_dep = step_dep;
+  solver->refactor_btf_scalar_run_group_step_groups = step_groups;
+  solver->refactor_btf_scalar_run_group_step_member_ptr = step_member_ptr;
+  solver->refactor_btf_scalar_run_group_step_members = step_members;
+  solver->refactor_btf_scalar_run_group_step_dep_count = dep_count;
+  solver->refactor_btf_scalar_run_group_step_count = step_count;
+  solver->refactor_btf_scalar_run_group_step_member_total = member_total;
+  solver->refactor_btf_scalar_run_group_producer_index_count = dep_count;
+  solver->refactor_btf_scalar_run_group_producer_index_max_steps = max_steps;
+  return 1;
+}
+
 static int kls_build_refactor_btf_scalar_run_group_wake_index(
   kls_solver *solver) {
   if (solver == NULL || !solver->refactor_btf_scalar_run_group_built ||
@@ -36870,6 +37152,7 @@ static int kls_build_refactor_btf_scalar_run_groups(kls_solver *solver) {
   solver->refactor_btf_scalar_run_group_current_up = group_current_up;
   solver->refactor_btf_scalar_run_group_current_rows = group_current_rows;
   solver->refactor_btf_scalar_run_group_built = 1;
+  (void)kls_build_refactor_btf_scalar_run_group_step_index(solver);
   (void)kls_build_refactor_btf_scalar_run_group_state_plan(solver);
   (void)kls_build_refactor_btf_scalar_run_group_wake_index(solver);
   free(items);

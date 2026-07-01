@@ -13131,3 +13131,22 @@ confirms the prior small wake-adjacent result was only measuring a narrow
 scheduling coincidence; the real CKTSO-sized surface is a producer-row indexed
 live grouped-current executor that streams each completed producer once across
 all active currents.
+
+The follow-up refactor chunk now retains that producer-row indexed schedule in
+the BTF scalar-run group descriptor. For every indexed completed producer, KLS
+stores the dependent group steps and the active grouped-current members for each
+step; the descriptor remains tied to the LU pointer cache and is still gated by
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUPS=1`. This is not yet the numeric
+executor, but it removes the next structural gap between the diagnostic fanout
+and a real completed-producer hook. Focused probes stayed residual-clean. The
+default-off `ASIC_100ks` control left the group/index counters at zero and
+measured `0.0499743s`. With the descriptor enabled, `ASIC_100ks` built `34,328`
+producer index entries for `76,244` producer steps, with at most `24` group
+steps on one completed producer, and measured `0.0437695s`. `ASIC_320ks` built
+`82,133` producer index entries for `115,602` producer steps, with at most `11`
+group steps on one producer, and measured `0.0838740s`. The duplicate/unique
+producer-entry ratios remain the key signal: about `33.1x` on `ASIC_100ks` and
+`62.5x` on `ASIC_320ks`. The next paper-aligned implementation step is to make
+the runtime producer-completion path consume this retained schedule while
+keeping the grouped current workspaces live, instead of materializing/restoring
+one sparse current state per eventual consumer.

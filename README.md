@@ -1256,11 +1256,15 @@ reports `refactor_btf_scalar_run_group_built`,
 `refactor_btf_scalar_run_group_producer_step_duplicate_entries`,
 `refactor_btf_scalar_run_group_producer_step_reused_entries`, and
 `refactor_btf_scalar_run_group_producer_step_max_currents`, which measure the
-per-producer-row fanout a live grouped current-state owner would consume. The
-reused-entry counters estimate the L-entry stream that such an owner could read
-once while updating several current workspaces. The retained group descriptor is
-tied to the LU pointer cache and is reused across repeated numeric refactors
-until the numeric pattern changes.
+per-producer-row fanout a live grouped current-state owner would consume.
+`refactor_btf_scalar_run_group_producer_index_count` and
+`refactor_btf_scalar_run_group_producer_index_max_steps` report the retained
+completed-producer lookup built from that fanout: each producer index entry owns
+one or more group steps, and each step owns the active grouped-current members
+for that producer row. The reused-entry counters estimate the L-entry stream
+that such an owner could read once while updating several current workspaces.
+The retained group descriptor is tied to the LU pointer cache and is reused
+across repeated numeric refactors until the numeric pattern changes.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS=1` also builds that
 descriptor and records live runtime overlap at the grouped producer-run wait
 point. It does not change numeric execution. Benchmark JSON reports last and
