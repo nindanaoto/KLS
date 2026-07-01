@@ -2321,6 +2321,21 @@ trace still timed out at the 589,824-row checkpoint, so this is not the full
 CKTSO-gap closer. A completed forced KLS-first `transient` run exercised the
 same pivot-plus-panel path with a clean `2.75e-13` relative residual and
 `initial_factor_seconds=0.763728`.
+A same-binary timeout-pair refresh after that change still makes `pre2` the
+largest actionable gap. CKTSO completed `pre2` in
+`build/cktso_timeout_pair_refresh_t4_r1_ref1_timeout120.jsonl`
+(`analysis_seconds=4.347466`, `initial_factor_seconds=8.525571`,
+`factor_seconds_avg=4.311943`, `refactor_seconds_avg=3.348520`,
+`solve_seconds_avg=0.134543`) while timing out on `Hamrle3`; KLS timed out on
+both rows in `build/kls_timeout_pair_refresh_t4_r1_ref1_timeout120.failures`.
+A fresh forced-METIS `pre2` factor trace reached the 589,824/629,628-row
+checkpoint with `804,367,990` scalar published-U entry touches, split into
+`114,634,524` internal entries and `689,733,466` output/trailing entries. A
+90s GDB run sampled the active pipeline worker in
+`kls_row_first_partial_apply_one_dep` under `kls_row_first_partial_apply_ready`,
+with peer pipeline workers waiting. The next first-factor target is therefore
+still the coarse CKTSO/SubtreeLU row/supernode numeric executor for output
+streaming, not a longer timeout, ordering-only change, or BLAS threshold.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while

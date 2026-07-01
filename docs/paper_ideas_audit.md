@@ -13268,3 +13268,26 @@ detail. Validation included `./build/kls_smoke`,
 `ctest --test-dir build --output-on-failure`, a no-failure top-five CKTSO-gap
 medium run at `1.6325s` geomean, and a completed forced KLS-first
 `transient` pivot-plus-panel run with `2.75e-13` relative residual.
+
+A same-binary timeout-pair refresh after the tail-only panel exchange confirms
+that `pre2` remains the largest clean KLS-vs-CKTSO timeout gap. CKTSO completed
+`pre2` in `build/cktso_timeout_pair_refresh_t4_r1_ref1_timeout120.jsonl` with
+`analysis_seconds=4.347466`, `initial_factor_seconds=8.525571`,
+`factor_seconds_avg=4.311943`, `refactor_seconds_avg=3.348520`, and
+`solve_seconds_avg=0.134543`, while `Hamrle3` still timed out. The matching KLS
+pair `build/kls_timeout_pair_refresh_t4_r1_ref1_timeout120.jsonl` emitted no
+rows because both `pre2` and `Hamrle3` timed out. A fresh forced-METIS
+KLS-first `pre2` trace,
+`build/kls_pre2_timeout_pair_refresh_trace_t4_r1_ref0_timeout90.stderr`,
+entered the 629,628-row dominant BTF block with separator coverage and reached
+the 589,824-row checkpoint before the 90s cap. At that checkpoint it had
+`8,252,845` scalar dependencies and `804,367,990` scalar published-U entry
+touches; only `114,634,524` were internal dependency-row touches, while
+`689,733,466` were current-row output/trailing touches. The same-run GDB sample
+in `build/pre2_timeout_pair_refresh_gdb_run.txt` captured the active pipeline
+worker in `kls_row_first_partial_apply_one_dep()` called from
+`kls_row_first_partial_apply_ready()`, while the peer pipeline workers waited
+on the row-pipeline condition/mutex and the parent joined the pipeline phase.
+This keeps the next implementation target at the paper-level coarse
+row/supernode numeric executor for producer-to-current output streaming, not
+timeout policy, `Hamrle3`, ordering alone, or BLAS dispatch.
