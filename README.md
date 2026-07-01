@@ -2458,6 +2458,18 @@ and `1.017e-16` relative residual. This rules out a shallow
 producer-to-future-row index over the existing sparse current states as the
 CKTSO-gap closer; the missing piece is still a real live grouped-current
 numeric owner that avoids per-current scalar output replay.
+KLS auto ordering now starts or promotes to METIS for large weak-diagonal
+moderate-degree matrices and high-work dominant-BTF symbolic candidates whose
+METIS trial builds a retained separator queue. This is a structural
+CKTSO-paper ordering rule, not a matrix-name exception. On `pre2`, the retained
+auto policy selected METIS with `separator_pipeline_rows=4126` in
+`build/kls_pre2_auto_direct_metis_skipretry_analyze_t4.json`, and the 45s
+trace `build/kls_pre2_auto_direct_metis_trace45.stderr` reached
+`599203/629628` rows instead of `36176/629628` for the AMD-auto baseline
+`build/kls_pre2_timeout_recheck_current_trace45.stderr`. The untraced 120s
+factor-only probe still timed out, so this fixes the ordering half of that
+paper gap but leaves the dominant numeric pivot-tail/output-stream executor as
+the next required work.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while

@@ -13814,3 +13814,24 @@ entries, while producer batching usually covers only a few thousand target
 entries per row. The next paper-aligned step should move that output/trailing
 update stream into a grouped producer/panel-to-many-current owner instead of
 trying to recover more prefix cache state after pivots.
+
+Auto ordering now starts or promotes to METIS for large weak-diagonal
+moderate-degree matrices and for high-work dominant-BTF symbolic candidates
+whose METIS trial builds a retained separator queue. This fills a direct
+CKTSO-paper ordering gap without using a matrix-name exception: the direct
+start requires at least 500k rows, 6-12 average structural entries per column,
+bounded row/column degree, nonempty rows, and 20%-60% diagonal coverage; the
+post-AMD/COLAMD promotion requires a 95%+ dominant BTF block, thousands of BTF
+blocks, and very high estimated factor work. On `pre2`,
+`build/kls_pre2_auto_direct_metis_skipretry_analyze_t4.json` selected
+`ordering=metis`, retained `separator_pipeline_rows=4126`, and reduced auto
+analysis to `12.8011618s` by skipping the unhelpful no-BTF retry for this
+direct-start class. The matching 45s trace
+`build/kls_pre2_auto_direct_metis_trace45.stderr` reached
+`599203/629628` rows, compared with `36176/629628` for the AMD-auto trace
+`build/kls_pre2_timeout_recheck_current_trace45.stderr`. This is substantial
+progress, but the untraced 120s factor-only run
+`build/kls_pre2_auto_direct_metis_t4_r1_ref0_timeout120.json` still timed out
+with no JSON. The remaining `pre2` gap is still numeric pivot-tail execution:
+late rows continue to replay multi-million-entry scalar U streams with only
+small producer batches.

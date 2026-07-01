@@ -20935,6 +20935,68 @@ static int is_large_nearly_diagonal_spiked_metis_pattern(
   return sparse_spike || dense_spike;
 }
 
+static int is_large_moderate_degree_weak_diagonal_metis_pattern(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (n < 500000u || col_ptr == NULL || row_idx == NULL ||
+      n > UF_long_max / 12u ||
+      col_ptr[n] < 6u * n || col_ptr[n] > 12u * n) {
+    return 0;
+  }
+
+  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_count = 0;
+  UF_long max_col_degree = 0;
+  int valid = 1;
+  for (UF_long col = 0; col < n && valid; ++col) {
+    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
+    if (col_degree > max_col_degree) {
+      max_col_degree = col_degree;
+    }
+    if (col_degree > 4096u) {
+      valid = 0;
+      break;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] >= 4096u) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      if (row == col) {
+        diagonal_count++;
+      }
+    }
+  }
+
+  UF_long max_row_degree = 0;
+  int no_empty_rows = 1;
+  for (UF_long row = 0; row < n && valid; ++row) {
+    if (row_degree[row] == 0u) {
+      no_empty_rows = 0;
+      break;
+    }
+    if (row_degree[row] > max_row_degree) {
+      max_row_degree = row_degree[row];
+    }
+  }
+  free(row_degree);
+  if (!valid || !no_empty_rows) {
+    return 0;
+  }
+
+  return max_col_degree <= 4096u && max_row_degree <= 4096u &&
+         (max_col_degree >= 64u || max_row_degree >= 64u) &&
+         10.0 * (double)diagonal_count >= 2.0 * (double)n &&
+         10.0 * (double)diagonal_count <= 6.0 * (double)n;
+}
+
 static int is_large_sparse_diagonal_low_degree_pattern(UF_long n,
                                                        const UF_long *col_ptr,
                                                        const UF_long *row_idx) {
@@ -22610,6 +22672,18 @@ static int symbolic_is_low_work_dominant_btf(
          20.0 * (double)outside_largest <= (double)n;
 }
 
+static int symbolic_is_high_work_dominant_btf_nd_candidate(
+  UF_long n,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (symbolic == NULL || !symbolic->do_btf ||
+      n < 500000u || symbolic->nblocks < 4096u ||
+      symbolic->maxblock < (UF_long)(0.95 * (double)n) ||
+      symbolic->est_flops < 5.0e10) {
+    return 0;
+  }
+  return !symbolic_is_low_work_dominant_btf(n, symbolic);
+}
+
 static int btf_dominant_block_retry_shape_is_allowed(
   UF_long n,
   const trilinos_klu_l_symbolic *symbolic) {
@@ -22793,6 +22867,10 @@ static int should_start_auto_with_metis(UF_long n,
   if (large_spiked_metis_no_btf) {
     return 1;
   }
+  if (is_large_moderate_degree_weak_diagonal_metis_pattern(n, col_ptr,
+                                                           row_idx)) {
+    return 1;
+  }
   if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
     return 1;
   }
@@ -22811,7 +22889,9 @@ static int metis_start_should_skip_no_btf_retry(UF_long n,
   /* Large full/nearly-full diagonal ASIC-style matrices use BTF to keep the
      off-diagonal fringe cheap. Retrying no-BTF doubles METIS analysis cost and
      has worse repeated-refactor work on this structural class. */
-  return is_large_diagonal_metis_start_pattern(n, col_ptr, row_idx);
+  return is_large_diagonal_metis_start_pattern(n, col_ptr, row_idx) ||
+         is_large_moderate_degree_weak_diagonal_metis_pattern(n, col_ptr,
+                                                              row_idx);
 }
 
 #endif
@@ -22824,11 +22904,37 @@ static int should_try_symbolic_nested_dissection_before_numeric(
   kls_ordering trial_ordering,
   double score) {
   if (selected_ordering == trial_ordering || symbolic == NULL ||
-      n < 200000 || symbolic->do_btf || symbolic->nblocks != 1 ||
+      n < 200000) {
+    return 0;
+  }
+  if (trial_ordering == KLS_ORDERING_METIS &&
+      symbolic_is_high_work_dominant_btf_nd_candidate(n, symbolic)) {
+    return isfinite(score) && score > 0.0;
+  }
+  if (symbolic->do_btf || symbolic->nblocks != 1 ||
       symbolic->maxblock != n || symbolic->est_flops < 1.0e9) {
     return 0;
   }
   return isfinite(score) && score > 0.0;
+}
+
+static int should_accept_high_work_dominant_btf_nd_trial(
+  UF_long n,
+  const trilinos_klu_l_symbolic *best_symbolic,
+  kls_ordering trial_ordering,
+  const trilinos_klu_l_symbolic *trial_symbolic,
+  const kls_separator_analysis *trial_separator) {
+  if (trial_ordering != KLS_ORDERING_METIS ||
+      !symbolic_is_high_work_dominant_btf_nd_candidate(n, best_symbolic) ||
+      trial_symbolic == NULL || trial_separator == NULL ||
+      !trial_symbolic->do_btf ||
+      trial_symbolic->maxblock < (UF_long)(0.90 * (double)n) ||
+      trial_separator->n != n ||
+      trial_separator->pipeline_rows == 0u ||
+      trial_separator->component_count == 0u) {
+    return 0;
+  }
+  return 1;
 }
 
 static void maybe_promote_symbolic_ordering(
@@ -22869,8 +22975,14 @@ static void maybe_promote_symbolic_ordering(
                           trial_ordering, &trial_symbolic,
                           &trial_common, &trial_score, 0,
                           &trial_separator);
-  if (isfinite(trial_score) &&
-      trial_score <= improvement_ratio * (*best_score_io)) {
+  const int score_accept =
+    isfinite(trial_score) &&
+    trial_score <= improvement_ratio * (*best_score_io);
+  const int separator_accept =
+    should_accept_high_work_dominant_btf_nd_trial(
+      n, *best_symbolic_io, trial_ordering, trial_symbolic,
+      &trial_separator);
+  if (score_accept || separator_accept) {
     trilinos_klu_l_free_symbolic(best_symbolic_io, best_common_io);
     *best_symbolic_io = trial_symbolic;
     *best_common_io = trial_common;
