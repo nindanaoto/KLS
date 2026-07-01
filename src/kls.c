@@ -85752,44 +85752,45 @@ static int kls_row_first_supernode_panel_cache_build(
   return 1;
 }
 
-static int kls_row_first_supernode_panel_cache_panel_uses_col(
-  const kls_row_first_supernode_panel_cache *cache,
-  UF_long panel,
-  UF_long col) {
-  if (cache == NULL || panel >= cache->panel_count ||
-      col == KLS_KLU_EMPTY || col >= cache->row_count ||
+static void kls_row_first_supernode_panel_cache_deactivate_panel(
+  kls_row_first_supernode_panel_cache *cache,
+  UF_long panel) {
+  if (cache == NULL || cache->active == NULL ||
       cache->start == NULL || cache->width == NULL ||
-      cache->tail_begin == NULL || cache->tail_len == NULL) {
-    return 0;
+      cache->panel_id_by_row == NULL ||
+      panel >= cache->panel_count ||
+      cache->active[panel] == 0u) {
+    return;
   }
+  cache->active[panel] = 0u;
   const UF_long start = cache->start[panel];
   const UF_long width = cache->width[panel];
-  if (width > 0u && col >= start && col - start < width) {
-    return 1;
+  if (start >= cache->row_count) {
+    return;
   }
-  const UF_long tail_begin = cache->tail_begin[panel];
-  const UF_long tail_len = cache->tail_len[panel];
-  if (tail_len > 0u && cache->tail_cols == NULL) {
-    return 1;
+  UF_long local_limit = cache->row_count - start;
+  if (local_limit > width) {
+    local_limit = width;
   }
-  if (tail_begin > cache->tail_col_count ||
-      tail_len > cache->tail_col_count - tail_begin) {
-    return 1;
-  }
-  for (UF_long offset = 0; offset < tail_len; ++offset) {
-    if (cache->tail_cols[tail_begin + offset] == col) {
-      return 1;
+  for (UF_long local = 0; local < local_limit; ++local) {
+    const UF_long row = start + local;
+    if (cache->panel_id_by_row[row] == panel) {
+      cache->panel_id_by_row[row] = KLS_KLU_EMPTY;
     }
   }
-  return 0;
 }
 
-static UF_long kls_row_first_supernode_panel_cache_invalidate_columns(
+static UF_long kls_row_first_supernode_panel_cache_exchange_columns(
   kls_row_first_supernode_panel_cache *cache,
   UF_long col_a,
   UF_long col_b) {
+  if (col_a == col_b) {
+    return 0;
+  }
   if (cache == NULL || cache->active == NULL ||
-      cache->panel_id_by_row == NULL) {
+      cache->panel_id_by_row == NULL ||
+      cache->start == NULL || cache->width == NULL ||
+      cache->tail_begin == NULL || cache->tail_len == NULL) {
     return 0;
   }
   UF_long invalidated = 0;
@@ -85798,33 +85799,59 @@ static UF_long kls_row_first_supernode_panel_cache_invalidate_columns(
     if (cache->active[panel] == 0u) {
       continue;
     }
-    if (kls_row_first_supernode_panel_cache_panel_uses_col(
-          cache, panel, col_a) ||
-        kls_row_first_supernode_panel_cache_panel_uses_col(
-          cache, panel, col_b)) {
-      cache->active[panel] = 0u;
+    const UF_long start = cache->start[panel];
+    const UF_long width = cache->width[panel];
+    const UF_long panel_end =
+      width > 0u && width - 1u <= UF_long_max - start
+        ? start + width - 1u : UF_long_max;
+    const int a_in_dense =
+      width > 0u && col_a >= start && col_a - start < width;
+    const int b_in_dense =
+      width > 0u && col_b >= start && col_b - start < width;
+    if (a_in_dense || b_in_dense) {
+      kls_row_first_supernode_panel_cache_deactivate_panel(cache, panel);
       invalidated++;
-      const UF_long start = cache->start[panel];
-      const UF_long width = cache->width[panel];
-      if (start < cache->row_count) {
-        UF_long local_limit = cache->row_count - start;
-        if (local_limit > width) {
-          local_limit = width;
-        }
-        for (UF_long local = 0; local < local_limit; ++local) {
-          const UF_long row = start + local;
-          if (cache->panel_id_by_row[row] == panel) {
-            cache->panel_id_by_row[row] = KLS_KLU_EMPTY;
-          }
-        }
-      }
-    } else {
-      still_active++;
+      continue;
     }
+    /* Tail-only swaps preserve the cached triangular panel. */
+    const UF_long tail_begin = cache->tail_begin[panel];
+    const UF_long tail_len = cache->tail_len[panel];
+    if (tail_len > 0u && cache->tail_cols == NULL) {
+      kls_row_first_supernode_panel_cache_deactivate_panel(cache, panel);
+      invalidated++;
+      continue;
+    }
+    if (tail_begin > cache->tail_col_count ||
+        tail_len > cache->tail_col_count - tail_begin) {
+      kls_row_first_supernode_panel_cache_deactivate_panel(cache, panel);
+      invalidated++;
+      continue;
+    }
+    for (UF_long offset = 0; offset < tail_len; ++offset) {
+      UF_long *tail_col = cache->tail_cols + tail_begin + offset;
+      if (*tail_col == col_a) {
+        if (col_b <= panel_end) {
+          kls_row_first_supernode_panel_cache_deactivate_panel(cache,
+                                                              panel);
+          invalidated++;
+          goto next_panel;
+        }
+        *tail_col = col_b;
+      } else if (*tail_col == col_b) {
+        if (col_a <= panel_end) {
+          kls_row_first_supernode_panel_cache_deactivate_panel(cache,
+                                                              panel);
+          invalidated++;
+          goto next_panel;
+        }
+        *tail_col = col_a;
+      }
+    }
+    still_active++;
+next_panel:
+    ;
   }
-  if (still_active == 0u) {
-    cache->enabled = 0;
-  }
+  cache->enabled = still_active > 0u ? 1 : 0;
   return invalidated;
 }
 
@@ -87432,7 +87459,7 @@ static void kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
     shared->private_supernode_panel_cache;
   if (cache->row_count == shared->ctx->nk &&
       cache->panel_id_by_row != NULL) {
-    (void)kls_row_first_supernode_panel_cache_invalidate_columns(
+    (void)kls_row_first_supernode_panel_cache_exchange_columns(
       cache, pivot_col_a, pivot_col_b);
   } else {
     kls_row_first_supernode_panel_cache_free(cache);
@@ -87478,7 +87505,7 @@ static void kls_row_first_pipeline_reset_prefix_after_large_pivot(
     kls_row_first_supernode_panel_cache *cache =
       shared->private_supernode_panel_cache;
     if (cache->row_count == nk && cache->panel_id_by_row != NULL) {
-      (void)kls_row_first_supernode_panel_cache_invalidate_columns(
+      (void)kls_row_first_supernode_panel_cache_exchange_columns(
         cache, pivot_col_a, pivot_col_b);
     } else {
       kls_row_first_supernode_panel_cache_free(cache);

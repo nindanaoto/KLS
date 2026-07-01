@@ -2309,6 +2309,18 @@ rows over the 5M threshold were all dynamic-pivot rows and summed `84,654,869`
 scalar U-entry touches. A serial pivot-storm drain probe triggered after only
 5,024 committed rows and still timed out at 120s, so simply abandoning the
 pipeline for pivot storms is not the missing paper mechanism.
+KLS now preserves row-first cached supernode panels across dynamic column
+pivots when both exchanged columns are only trailing columns of the panel; it
+still invalidates panels whose dense block would be affected. This keeps
+paper-style supernode update surfaces alive through tail-only column exchanges
+instead of dropping back to scalar row replay. A forced-METIS `pre2` long-row
+trace shows a partial improvement: the 90s capped run reached long rows through
+about row `599710` instead of about `598872`, and the long-row sample's
+panel-backed update rows rose from `2,940` to `92,353`. The less noisy 130s
+trace still timed out at the 589,824-row checkpoint, so this is not the full
+CKTSO-gap closer. A completed forced KLS-first `transient` run exercised the
+same pivot-plus-panel path with a clean `2.75e-13` relative residual and
+`initial_factor_seconds=0.763728`.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while

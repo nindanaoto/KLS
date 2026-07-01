@@ -13248,3 +13248,23 @@ at 120s. The clear missing mechanism is therefore not a timeout limit, small
 BLAS threshold, or simple pivot-storm serial fallback; it is still the
 CKTSO/SubtreeLU-style coarse row/supernode numeric executor that avoids
 replaying long published-U streams for adjacent pivoting rows.
+
+KLS now keeps row-first cached supernode panels across dynamic column pivots
+when both exchanged columns are only trailing columns of the panel, while still
+invalidating panels whose dense block would be changed. This fills a direct
+paper-aligned retention gap: a tail-only column exchange does not invalidate
+the supernode's triangular block, so the cached panel can continue to serve
+later row updates after its common tail column labels are exchanged. The target
+`pre2` result is positive but partial. A 90s forced-METIS KLS-first long-row
+trace with this change,
+`build/kls_pre2_panel_tail_exchange_trace_t4_r1_ref0_timeout90.stderr`,
+reached long rows through about `599710` instead of about `598872`, and the
+long-row sample's panel-backed update rows rose from `2,940` to `92,353`.
+The low-noise 130s trace
+`build/kls_pre2_panel_tail_exchange_trace_t4_r1_ref0_timeout130.stderr` still
+timed out at the 589,824-row checkpoint, so the remaining gap is still the
+coarser CKTSO/SubtreeLU numeric executor rather than this one cache-retention
+detail. Validation included `./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, a no-failure top-five CKTSO-gap
+medium run at `1.6325s` geomean, and a completed forced KLS-first
+`transient` pivot-plus-panel run with `2.75e-13` relative residual.
