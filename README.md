@@ -1308,6 +1308,15 @@ prefix-dependency counts, the advanced current/row/entry counts, and state
 rejects. This still does not replace the normal numeric refactor; it validates
 the paper-level live current-state shape before KLS commits it to the production
 numeric path.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE=1` makes that
+retained state consume the retained producer-step schedule incrementally. The
+flag implies state stats, tracks each materialized membership's next producer
+row, and advances it from the producer-completion hook through the existing
+per-member wake-state CAS. Benchmark JSON reports last and cumulative
+step-advance trigger, step, current, row, entry, ready-current, and reject
+counts. This is still an opt-in retained-state experiment: it tests whether
+completed-producer scheduling closes the paper gap before a broader grouped
+workspace owner streams one producer L column across several current states.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1` turns that retained
 state into a guarded numeric consumer. The flag implies state stats, stores the
 U coefficients consumed while preparing the retained state, arms only the

@@ -13150,3 +13150,38 @@ producer-entry ratios remain the key signal: about `33.1x` on `ASIC_100ks` and
 the runtime producer-completion path consume this retained schedule while
 keeping the grouped current workspaces live, instead of materializing/restoring
 one sparse current state per eventual consumer.
+
+The retained schedule is now consumed by an opt-in producer-step retained-state
+advance path,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE=1`. Instead of
+waiting until the last producer in a contiguous run and then replaying the whole
+run for one retained sparse current state, KLS tracks each materialized
+membership's next producer row and advances it from the completed-producer hook
+through the producer-step index. The path uses the existing wake-state CAS for
+per-member ownership, can finish a state at run-end without replaying already
+advanced rows, and remains default-off. Correctness stayed clean:
+`./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE=1 KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure` all passed.
+
+The focused ASIC probes show this is a useful paper-aligned substrate but not
+the CKTSO-gap closer. With step advance but no retained-state execution,
+`ASIC_100ks` stayed residual-clean and consumed the whole producer-step index:
+`34,328` triggers, `76,244` steps, `396,292` advanced current events,
+`479,962` advanced rows, `125,069,484` L entries, `44,115` ready retained
+states, and zero rejects. It still measured `11.6130s` because it materialized
+`44,115` sparse current states with `13,361,860` retained rows. `ASIC_320ks`
+was similar: `82,133` triggers, `115,602` steps, `440,257` advanced current
+events, `541,432` rows, `144,652,075` entries, `49,635` ready states, zero
+rejects, and `10.2718s`, after materializing `15,281,862` retained rows. With
+`STATE_EXEC=1` on `ASIC_100ks`, step advance reduced the retained work surface
+to `15,284` materialized states, `900,370` retained rows, `75,626` advanced
+rows, and `11,390,181` step-advance entries, while consuming `15,193` states
+and restoring only `133,941` rows. The run still measured `10.5671s`, about the
+same order as the prior wake-terminal retained-state executor. This rejects
+"incrementally advance one sparse retained current state per member" as the
+large missing CKTSO mechanism. The next implementation should use the same
+producer-step schedule to own a grouped live workspace and stream each producer
+L column once across multiple current states, rather than maintaining thousands
+of separate sparse retained states.
