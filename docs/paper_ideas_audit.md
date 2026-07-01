@@ -14747,3 +14747,13 @@ large enough to explain the CKTSO gap by itself. The remaining missing piece is
 still the heavier owner: avoid per-current scatter/search over each retained
 state by building or reusing an active grouped row-position workspace for the
 large partial live-step surface.
+
+The dense-group supernode executor now uses the same worker-scratch allocation
+model across exact, ragged, and fragmented producer batches. Exact common-prefix
+batches keep their `kls_batched_supernode_run` descriptors in the worker object
+workspace and their external-column list in the worker index workspace; ragged
+single-producer batches keep per-row suffix and dependency counts in the worker
+index workspace. This removes per-attempt `malloc`/`calloc`/`free` churn from
+the accepted dense-group supernode paths without changing admission gates or
+numeric behavior. It is a prerequisite cleanup for broader paper-shaped row
+owners, not evidence that the remaining `pre2` timeout gap has been closed.

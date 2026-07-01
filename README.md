@@ -737,14 +737,16 @@ multi-producer row-panel updates are available as an opt-in
 `KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1` experiment when the retained row/segment
 structure and work gates accept them. The default stays on the scalar/compact
 fallback because current CKTSO-gap probes show the fragmented batch scaffold can
-over-stage these rows. These cover contiguous independent-row producer suffixes
-and fragmented dense-consumer external prefixes without requiring CBLAS. The
+over-stage these rows. These cover exact common producer suffixes, ragged
+single-producer suffixes, contiguous independent-row producer suffixes, and
+fragmented dense-consumer external prefixes without requiring CBLAS. The
 independent-row multi-producer executor now keeps its metadata, pivots, U
 scratch, and panel descriptors in per-worker scratch instead of allocating them
-for each accepted batch. Dense-consumer fragmented producer batches use the same
-dedicated object workspace for their run-panel descriptors while retaining a
-separate byte workspace for fallback target maps. This is a storage cleanup for
-the paper-shaped executor, not a default policy change. Current top-five
+for each accepted batch. Dense-consumer exact, ragged, and fragmented producer
+batches use the same worker scratch model for their run descriptors and index
+metadata, while retaining a separate byte workspace for fallback target maps.
+This is a storage cleanup for the paper-shaped executor, not a default policy
+change. Current top-five
 CKTSO-gap forced-row probes still accept zero independent compact-supernode
 batches, so that part is covered by targeted smoke fixtures rather than by
 those slow-case rows.

@@ -54915,14 +54915,14 @@ static int kls_compact_dense_group_try_batched_supernode_update(
   }
 
   kls_batched_supernode_run *runs =
-    (kls_batched_supernode_run *)calloc((size_t)external_len, sizeof(*runs));
+    (kls_batched_supernode_run *)kls_egraph_worker_object_workspace(
+      worker, external_len, sizeof(*runs));
   UF_long *external_cols =
-    (UF_long *)malloc((size_t)external_len * sizeof(*external_cols));
+    kls_egraph_worker_index_workspace(worker, external_len);
   if (runs == NULL || external_cols == NULL) {
-    free(runs);
-    free(external_cols);
     return 0;
   }
+  memset(runs, 0, (size_t)external_len * sizeof(*runs));
 
   int status = 0;
   UF_long run_count = 0;
@@ -55397,8 +55397,6 @@ static int kls_compact_dense_group_try_batched_supernode_update(
   status = 1;
 
 cleanup:
-  free(runs);
-  free(external_cols);
   return status;
 }
 
@@ -55514,19 +55512,18 @@ static int kls_compact_dense_group_try_ragged_supernode_update(
   const UF_long batch_rows = batch_end - batch_begin;
   if (batch_rows == 0u ||
       batch_rows > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      batch_rows > UF_long_max / 2u ||
       batch_rows > (UF_long)(SIZE_MAX / sizeof(*worker->supernode_workspace)) /
                      dep_width) {
     return 0;
   }
-  UF_long *suffix_begins =
-    (UF_long *)malloc((size_t)batch_rows * sizeof(*suffix_begins));
-  UF_long *dep_rows_by_row =
-    (UF_long *)malloc((size_t)batch_rows * sizeof(*dep_rows_by_row));
-  if (suffix_begins == NULL || dep_rows_by_row == NULL) {
-    free(suffix_begins);
-    free(dep_rows_by_row);
+  UF_long *index_workspace =
+    kls_egraph_worker_index_workspace(worker, 2u * batch_rows);
+  if (index_workspace == NULL) {
     return 0;
   }
+  UF_long *suffix_begins = index_workspace;
+  UF_long *dep_rows_by_row = suffix_begins + batch_rows;
 
   int status = 0;
   double *workspace =
@@ -55753,8 +55750,6 @@ static int kls_compact_dense_group_try_ragged_supernode_update(
   status = 1;
 
 cleanup:
-  free(suffix_begins);
-  free(dep_rows_by_row);
   return status;
 }
 
