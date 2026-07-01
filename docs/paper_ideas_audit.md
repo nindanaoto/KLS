@@ -13291,3 +13291,22 @@ on the row-pipeline condition/mutex and the parent joined the pipeline phase.
 This keeps the next implementation target at the paper-level coarse
 row/supernode numeric executor for producer-to-current output streaming, not
 timeout policy, `Hamrle3`, ordering alone, or BLAS dispatch.
+
+An exact current-row output-suffix grouping experiment was rejected as too
+narrow for the `pre2` pivot tail. The prototype split scalar dependency rows
+into immediate internal updates and a deferred output suffix, then grouped
+adjacent ready dependencies only when both rows had the same large ordered
+`col >= current_row` suffix. It passed `./build/kls_smoke` and
+`ctest --test-dir build --output-on-failure` after adding a pivot-safe guard
+that makes unsorted dynamic-pivot rows fall back to scalar. The target trace
+`build/kls_pre2_output_run_guarded_trace_t4_r1_ref0_timeout90.stderr` showed
+the path activating, but only for `980` groups, `3,841` rows, and `2,161,382`
+U entries by the 589,824-row checkpoint. The same checkpoint moved the wrong
+way versus `build/kls_pre2_timeout_pair_refresh_trace_t4_r1_ref0_timeout90.stderr`:
+scalar published-U touches increased from `804,367,990` to `804,557,892`, and
+output touches increased from `689,733,466` to `689,906,083`. This rules out
+a single-current exact-suffix accumulator as the clear missing paper mechanism.
+The first-factor gap needs a broader producer-indexed or multi-current numeric
+owner that reuses producer output streams across several current rows despite
+dynamic pivot ordering, rather than another exact-tail cache inside one current
+row.
