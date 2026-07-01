@@ -13310,3 +13310,24 @@ The first-factor gap needs a broader producer-indexed or multi-current numeric
 owner that reuses producer output streams across several current rows despite
 dynamic pivot ordering, rather than another exact-tail cache inside one current
 row.
+
+A fresh timeout-pair recheck after rejecting the exact-suffix experiment again
+isolates `pre2` as the largest clean KLS-vs-CKTSO timeout gap. CKTSO completed
+`pre2` in `build/cktso_timeout_recheck_pair_t4_r1_ref1_timeout120.jsonl` with
+`analysis_seconds=4.272073`, `initial_factor_seconds=8.18128`,
+`factor_seconds_avg=5.73322`, `refactor_seconds_avg=4.233533`,
+`solve_seconds_avg=0.146472`, and `spice_cycle_seconds=446.22032`; CKTSO timed
+out only on `Hamrle3`. The matching KLS pair
+`build/kls_timeout_recheck_pair_t4_r1_ref1_timeout120.jsonl` emitted no rows,
+with both `pre2` and `Hamrle3` recorded in the failure sidecar as 120s
+timeouts. A short-start probe reached the forced-METIS KLS-first dominant BTF
+row-pipeline start for `pre2` at about `16.5s`, so KLS setup/ordering is slower
+than CKTSO's analysis but is not the full 120s failure. The 90s factor-only
+trace `build/kls_pre2_timeout_recheck_trace_t4_r1_ref0_timeout90.stderr`
+entered the same 629,628-row dominant BTF block and reached the 589,824-row
+checkpoint with `8,252,734` scalar dependencies, `804,607,861` scalar U-entry
+touches, `114,660,977` internal touches, and `689,946,884` output/trailing
+touches. The gap is therefore still dominated by first-factor row-pipeline
+published-U/output streaming in the dominant BTF block; the actionable missing
+mechanism remains a CKTSO/SubtreeLU-style coarse producer-to-multiple-current
+numeric owner for pivoting rows, with setup/ordering as a secondary gap.
