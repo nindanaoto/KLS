@@ -40,6 +40,10 @@ PRODUCER_COUNTERS = [
     "compact_window_group_targets",
     "compact_window_group_cols",
     "compact_window_group_values",
+    "compact_window_group_merges",
+    "compact_window_group_merge_targets",
+    "compact_window_group_merge_cols",
+    "compact_window_group_merge_values",
     "producer_probe_workers",
     "producer_probe_lookahead",
     "producer_ready_roots",
@@ -116,6 +120,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_compact_group_targets = 0
     long_compact_group_cols = 0
     long_compact_group_values = 0
+    long_compact_group_merges = 0
+    long_compact_group_merge_targets = 0
+    long_compact_group_merge_cols = 0
+    long_compact_group_merge_values = 0
     long_panel_rows = 0
     long_panel_entries = 0
     long_pivot_scalar = 0
@@ -212,6 +220,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_group_values += parse_int(
                 row.get("compact_window_group_values")
             )
+            long_compact_group_merges += parse_int(
+                row.get("compact_window_group_merges")
+            )
+            long_compact_group_merge_targets += parse_int(
+                row.get("compact_window_group_merge_targets")
+            )
+            long_compact_group_merge_cols += parse_int(
+                row.get("compact_window_group_merge_cols")
+            )
+            long_compact_group_merge_values += parse_int(
+                row.get("compact_window_group_merge_values")
+            )
             long_panel_rows += parse_int(row.get("panel_update_rows"))
             long_panel_entries += parse_int(row.get("panel_update_entries"))
             if pivoted:
@@ -292,6 +312,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_group_values = parse_int(
         last_trace.get("compact_window_group_values")
     )
+    compact_group_merges = parse_int(
+        last_trace.get("compact_window_group_merges")
+    )
+    compact_group_merge_targets = parse_int(
+        last_trace.get("compact_window_group_merge_targets")
+    )
+    compact_group_merge_cols = parse_int(
+        last_trace.get("compact_window_group_merge_cols")
+    )
+    compact_group_merge_values = parse_int(
+        last_trace.get("compact_window_group_merge_values")
+    )
     panel_rows = parse_int(last_trace.get("panel_update_rows"))
     panel_entries = parse_int(last_trace.get("panel_update_entries"))
     summary: dict[str, object] = {
@@ -326,6 +358,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_group_targets": compact_group_targets,
         "compact_window_group_cols": compact_group_cols,
         "compact_window_group_values": compact_group_values,
+        "compact_window_group_merges": compact_group_merges,
+        "compact_window_group_merge_targets": compact_group_merge_targets,
+        "compact_window_group_merge_cols": compact_group_merge_cols,
+        "compact_window_group_merge_values": compact_group_merge_values,
         "panel_update_rows": panel_rows,
         "panel_update_entries": panel_entries,
         "long_rows": long_rows,
@@ -361,6 +397,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_compact_window_group_targets": long_compact_group_targets,
         "long_compact_window_group_cols": long_compact_group_cols,
         "long_compact_window_group_values": long_compact_group_values,
+        "long_compact_window_group_merges": long_compact_group_merges,
+        "long_compact_window_group_merge_targets":
+            long_compact_group_merge_targets,
+        "long_compact_window_group_merge_cols": long_compact_group_merge_cols,
+        "long_compact_window_group_merge_values":
+            long_compact_group_merge_values,
         "long_panel_update_rows": long_panel_rows,
         "long_panel_update_entries": long_panel_entries,
         "long_pivot_scalar_u_entries": long_pivot_scalar,
@@ -407,6 +449,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_group_targets_per_step": ratio(
             compact_group_targets, compact_group_steps
         ),
+        "compact_window_group_merge_targets_per_merge": ratio(
+            compact_group_merge_targets, compact_group_merges
+        ),
+        "compact_window_group_merge_values_per_col": ratio(
+            compact_group_merge_values, compact_group_merge_cols
+        ),
         "panel_update_entries_per_scalar_u": ratio(panel_entries, scalar),
         "scalar_u_output_per_panel_update_entries": ratio(output, panel_entries),
         "scalar_u_output_per_producer_target_u": ratio(
@@ -444,6 +492,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         ),
         "long_compact_window_group_targets_per_step": ratio(
             long_compact_group_targets, long_compact_group_steps
+        ),
+        "long_compact_window_group_merge_targets_per_merge": ratio(
+            long_compact_group_merge_targets, long_compact_group_merges
+        ),
+        "long_compact_window_group_merge_values_per_col": ratio(
+            long_compact_group_merge_values, long_compact_group_merge_cols
         ),
         "long_scalar_u_output_per_producer_target_u": ratio(
             long_output, long_producer_target_u
@@ -521,6 +575,12 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_group_values",
         "compact_window_group_values_per_col",
         "compact_window_group_targets_per_step",
+        "compact_window_group_merges",
+        "compact_window_group_merge_targets",
+        "compact_window_group_merge_cols",
+        "compact_window_group_merge_values",
+        "compact_window_group_merge_targets_per_merge",
+        "compact_window_group_merge_values_per_col",
         "producer_underfilled",
         "producer_low_saved_stream",
         "producer_reject_bad_state",
@@ -570,6 +630,12 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_compact_window_group_values",
         "long_compact_window_group_values_per_col",
         "long_compact_window_group_targets_per_step",
+        "long_compact_window_group_merges",
+        "long_compact_window_group_merge_targets",
+        "long_compact_window_group_merge_cols",
+        "long_compact_window_group_merge_values",
+        "long_compact_window_group_merge_targets_per_merge",
+        "long_compact_window_group_merge_values_per_col",
         "long_panel_update_rows",
         "long_panel_update_entries",
         "long_panel_update_entries_per_scalar_u",

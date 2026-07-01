@@ -14924,3 +14924,35 @@ inside the existing per-member retained-state owner is not enough. The next
 paper-aligned step must replace the per-member retained slices with a true
 partial live-step owner, or move the same sparse grouped-owner idea into the
 main row/panel first-factor path where `pre2` is still losing to CKTSO.
+
+The compact live-window executor now lets an existing persistent dense group
+absorb later compact rows whose next dependency matches the group's next
+producer. This fills a direct gap in the previous compact-owner experiment:
+after a dense group was created, later same-root compact states were still
+updated in a transient union batch and scattered back to independent sparse
+states. The new row-pipeline trace counters
+`compact_window_group_merge_{targets,cols,values}` report that incremental
+owner growth, and `scripts/summarize_row_pipeline_trace.py` includes those
+counters in its CSV output.
+
+Correctness stayed clean under `cmake --build build --target kls_bench
+kls_smoke -j2`, `./build/kls_smoke`,
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1 ./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and compact-exec factor-only
+`add20` / `bcircuit` probes with relative residuals `3.79718427e-16` and
+`7.87813496e-17`. The focused `pre2` trace
+`build/kls_pre2_compact_group_merge_w64_trace55.stderr` still reached only the
+same `589824/629628` checkpoint before the cap. The new merge path fired
+heavily: `39,830` group-merge events absorbed `100,420` compact targets with
+`20,359,236` target-union values. However, against the prior
+`build/kls_pre2_compact_group_w64_trace45.stderr` checkpoint, scalar U touches
+were effectively unchanged (`650,809,838` to `650,855,680`), scalar U-output
+was unchanged (`555,292,971` to `555,298,722`), and compact target U entries
+only moved from `124,741,863` to `124,466,160`. The no-trace 125s factor-only
+probe
+`build/kls_pre2_compact_group_merge_w64_factor_t4_r1_ref0_timeout125.json`
+still timed out with an empty JSON row. This rejects "make the bounded compact
+group grow incrementally" as the missing CKTSO-scale mechanism. The paper-sized
+gap is now narrower: the grouped owner must cover the main row/panel state, or
+a sparse row-position owner wider than the bounded compact window, instead of
+continuing to add mechanics to the 64-row compact-window prototype.
