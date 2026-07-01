@@ -14792,3 +14792,23 @@ CKTSO-scale fix. The useful new signal is the target-state union size:
 or `6.35x`. That reinforces the paper-aligned next implementation target: a
 shared-union grouped-current owner for the first-factor pivot tail, rather than
 more independent sparse compact states.
+
+The compact live-window executor now uses a two-phase producer update plan for
+accepted compact batches: first prepare direct value positions for the whole
+producer row in each target state, then stream numeric updates by those
+positions. This moves the opt-in compact owner closer to a grouped row-position
+workspace by avoiding the old interleaved insert/update path inside the
+producer stream. Correctness remained clean under `./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and compact-exec `add20` /
+`bcircuit` probes with relative residuals `3.79718427e-16` and
+`7.87813496e-17`.
+
+The focused `pre2` 64-slot compact-exec trace
+`build/kls_pre2_compact_posplan_w64_trace45.stderr` still timed out at the
+same `589824/629628` checkpoint. It was only a small owner-overhead movement:
+scalar U touches fell from the pre-reserve trace's `651,110,464` to
+`651,079,397`, while compact target U entries were essentially unchanged
+(`153,026,329`). The compact target-state union ratio remained `6.35x`
+(`267,262,660` state rows over `42,067,213` unique rows). This keeps the next
+paper-aligned implementation target on a persistent shared-union grouped-current
+state, not on further independent compact-state insert micro-optimizations.
