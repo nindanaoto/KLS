@@ -14869,3 +14869,26 @@ scatter-back cleanup: KLS needs the grouped owner to cover a much larger part
 of the first-factor row state, likely beyond the bounded 64-row compact window
 and into the main row/panel owner used after the separator-private attempt
 falls back to the full-block pipeline.
+
+The compact-window manager now avoids two obvious bounded-owner overheads:
+active compact states are indexed by row position, stale states are evicted by
+completed position instead of by scanning every slot on every producer, compact
+claims use the position map, and persistent grouped states maintain their
+pending dependency heaps while dense instead of rescanning the whole union for
+each next root. This is the management shape a wider grouped owner would need,
+but it did not change the `pre2` conclusion. Correctness remained clean under
+`./build/kls_smoke`, `ctest --test-dir build --output-on-failure`, and
+compact-exec `add20` / `bcircuit` probes with relative residuals
+`3.79718427e-16` and `7.87813496e-17`.
+
+The 64-slot focused trace
+`build/kls_pre2_compact_posmap_heap_w64_trace45.stderr` still stopped at the
+same `589824/629628` checkpoint and kept essentially the same compact surface:
+`124,737,060` compact target U entries and `78,986,769` grouped target-union
+values. A 256-slot check did not recover after position-indexed management;
+`build/kls_pre2_compact_posmap_w256_trace45.stderr` reached only
+`458752/629628`, even though it exposed `199,665,695` compact target U
+entries. This rejects slot-fill scans and next-root scans as the large missing
+piece. The dense target-by-union compact owner itself is now the bounded-owner
+bottleneck; the next paper-aligned implementation needs a sparse row-position
+or main row/panel grouped workspace, not a larger dense compact window.
