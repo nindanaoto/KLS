@@ -2442,6 +2442,18 @@ entries against `138562400` scalar output entries in logged long rows. This
 keeps the next algorithmic target on a persistent CKTSO/SubtreeLU-style
 producer-to-many-current owner, not out-of-order dependency hacks or simply
 larger advisory lookahead.
+`KLS_ENABLE_ROW_PIPELINE_PIVOT_LOOKAHEAD=1` enables a narrower post-pivot
+diagnostic for the same producer-to-many-current idea without enabling general
+lookahead. After a dynamic pivot commits, KLS clears stale lookahead states,
+advances the row-pipeline order epoch, fills a bounded fresh lookahead window
+under the post-pivot column order, and immediately lets the existing producer
+batch kernel stream the just-published pivot row into eligible current rows.
+By default the window uses one slot per worker; set
+`KLS_ROW_PIPELINE_PIVOT_LOOKAHEAD=<slots>` to test a wider window, capped by the
+normal row-pipeline lookahead maximum. This remains opt-in: current `pre2`
+traces show real producer-coverage growth, but the 120s factor-only run still
+times out, so the missing CKTSO/SubtreeLU mechanism is still a persistent
+grouped-current numeric owner rather than another independent lookahead pool.
 A July 1, 2026 producer-indexed lookahead recheck was rejected for the same
 reason. The prototype built a block-local reverse map from each completed
 producer to future rows whose raw input referenced it and filled lookahead

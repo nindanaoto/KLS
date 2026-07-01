@@ -46886,6 +46886,35 @@ static int kls_row_pipeline_experimental_lookahead_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_pivot_lookahead_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_ROW_PIPELINE_PIVOT_LOOKAHEAD");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static UF_long kls_row_pipeline_pivot_lookahead_slots_env(void) {
+  if (!kls_row_pipeline_pivot_lookahead_env_enabled()) {
+    return 0u;
+  }
+  const char *value = getenv("KLS_ROW_PIPELINE_PIVOT_LOOKAHEAD");
+  if (value == NULL || value[0] == '\0') {
+    return 0u;
+  }
+  if (value[0] == '0' && value[1] == '\0') {
+    return 0u;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return 0u;
+  }
+  return parsed > KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_MAX_SLOTS
+    ? KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_MAX_SLOTS
+    : (UF_long)parsed;
+}
+
 static UF_long kls_row_pipeline_lookahead_slots_env(void) {
   if (!kls_row_pipeline_experimental_lookahead_env_enabled()) {
     return 0u;
@@ -88110,6 +88139,8 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long lookahead_max_inputs;
   int trace_enabled;
   int producer_batch_enabled;
+  int lookahead_fill_enabled;
+  int pivot_lookahead_enabled;
   int failed;
   kls_row_first_pipeline_failure failure_reason;
 } kls_row_first_pipeline_shared;
@@ -89231,6 +89262,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                 shared->row_done[row] = 1u;
               }
               if (!pivoted &&
+                  shared->lookahead_fill_enabled &&
                   !kls_row_first_pipeline_fill_lookahead(shared)) {
                 kls_row_first_pipeline_mark_failed(
                   shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
@@ -89242,6 +89274,33 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                     shared, worker, row)) {
                 kls_row_first_pipeline_mark_failed(
                   shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
+              }
+              if (pivoted) {
+                if (shared->stats != NULL) {
+                  shared->stats->dynamic_column_pivots++;
+                  if (selected_separator_exact) {
+                    shared->stats->separator_dynamic_column_pivots++;
+                  } else if (selected_separator_extent) {
+                    shared->stats->separator_extent_dynamic_column_pivots++;
+                  }
+                }
+                shared->pivot_tail_rows += shared->end - pos;
+                shared->pivot_restarts++;
+                kls_row_first_pipeline_clear_unclaimed_lookahead(shared);
+                shared->order_epoch++;
+                if (shared->active_rank == NULL) {
+                  kls_row_first_pipeline_rebuild_prefix_panel_cache(
+                    shared, row, selected_col);
+                }
+                if (!shared->failed &&
+                    shared->pivot_lookahead_enabled &&
+                    shared->producer_batch_enabled &&
+                    (!kls_row_first_pipeline_fill_lookahead(shared) ||
+                     !kls_row_first_pipeline_apply_producer_batch(
+                       shared, worker, row))) {
+                  kls_row_first_pipeline_mark_failed(
+                    shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
+                }
               }
               worker->rows++;
               if (shared->trace_enabled &&
@@ -89331,24 +89390,6 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                   kls_row_first_pipeline_trace_print(shared, "progress");
                 }
               }
-              if (pivoted) {
-                if (shared->stats != NULL) {
-                  shared->stats->dynamic_column_pivots++;
-                  if (selected_separator_exact) {
-                    shared->stats->separator_dynamic_column_pivots++;
-                  } else if (selected_separator_extent) {
-                    shared->stats->separator_extent_dynamic_column_pivots++;
-                  }
-                }
-                shared->pivot_tail_rows += shared->end - pos;
-                shared->pivot_restarts++;
-                kls_row_first_pipeline_clear_unclaimed_lookahead(shared);
-                shared->order_epoch++;
-                if (shared->active_rank == NULL) {
-                  kls_row_first_pipeline_rebuild_prefix_panel_cache(
-                    shared, row, selected_col);
-                }
-              }
             }
           }
         }
@@ -89436,7 +89477,18 @@ static int kls_row_first_run_parallel_pipeline_phase(
       calloc((size_t)worker_count, sizeof(*workers));
   const UF_long requested_lookahead =
     kls_row_pipeline_lookahead_slots_env();
-  int lookahead_count = (int)requested_lookahead;
+  const int pivot_lookahead_requested =
+    kls_row_pipeline_pivot_lookahead_env_enabled();
+  UF_long requested_pivot_lookahead =
+    kls_row_pipeline_pivot_lookahead_slots_env();
+  if (pivot_lookahead_requested && requested_pivot_lookahead == 0u) {
+    requested_pivot_lookahead = (UF_long)worker_count;
+  }
+  UF_long effective_lookahead = requested_lookahead;
+  if (effective_lookahead < requested_pivot_lookahead) {
+    effective_lookahead = requested_pivot_lookahead;
+  }
+  int lookahead_count = (int)effective_lookahead;
   if ((UF_long)lookahead_count > pipeline_rows) {
     lookahead_count = (int)pipeline_rows;
   }
@@ -89545,6 +89597,9 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.batch_target_capacity = batch_target_capacity;
   shared.producer_batch_enabled =
     !kls_row_pipeline_producer_batch_env_disabled();
+  shared.lookahead_fill_enabled = requested_lookahead > 0u;
+  shared.pivot_lookahead_enabled =
+    requested_pivot_lookahead > 0u && shared.producer_batch_enabled;
   shared.lookahead_max_inputs =
     kls_row_pipeline_lookahead_max_inputs_env();
   shared.long_row_trace_threshold =

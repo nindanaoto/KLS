@@ -13946,3 +13946,36 @@ producer-target U entries. Pivot rows were `850` of those long rows
 producer-target U work. This fresh rerun rejects the same policy-only fixes and
 keeps the next implementation target on the paper-level grouped
 producer/panel-to-many-current numeric owner for the pivoting dominant-BTF tail.
+
+A post-pivot producer-lookahead diagnostic now tests one bounded slice of that
+owner without enabling the broader experimental lookahead path. With
+`KLS_ENABLE_ROW_PIPELINE_PIVOT_LOOKAHEAD=1`, a dynamic-pivot commit clears stale
+lookahead, advances the order epoch, fills fresh lookahead states under the
+post-pivot column order, and immediately streams the just-published pivot row
+through the existing producer-batch kernel. The default diagnostic window uses
+one slot per worker; `KLS_ROW_PIPELINE_PIVOT_LOOKAHEAD=<slots>` can widen it up
+to the existing row-pipeline lookahead cap. Correctness passed
+`./build/kls_smoke`,
+`KLS_ENABLE_ROW_PIPELINE_PIVOT_LOOKAHEAD=1 ./build/kls_smoke`,
+`KLS_ENABLE_ROW_PIPELINE_PIVOT_LOOKAHEAD=1 KLS_ROW_PIPELINE_PIVOT_LOOKAHEAD=8 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`.
+
+The `pre2` trace response confirms that post-pivot producer ownership is the
+right direction but not enough. At the same `589824/629628` checkpoint, the
+four-slot diagnostic
+`build/kls_pre2_pivot_lookahead_trace90.stderr` raised producer target U
+entries to `2112190` and reduced the overall scalar-output/producer-target
+ratio to `351.93x`; the eight-slot diagnostic
+`build/kls_pre2_pivot_lookahead8_trace90.stderr` raised target U entries to
+`3601125` and reduced the ratio to `206.30x`; the sixteen-slot diagnostic
+`build/kls_pre2_pivot_lookahead16_trace90.stderr` raised target U entries to
+`6252151` and reduced the ratio to `118.72x`. Eight and sixteen slots also
+advanced the traced long-tail maximum to about row `608k`, versus `598912` for
+the default trace. However, non-traced 125s probes with four and eight slots
+still timed out
+(`build/kls_pre2_pivot_lookahead_t4_r1_ref0_timeout125.json` and
+`build/kls_pre2_pivot_lookahead8_t4_r1_ref0_timeout125.json`). This keeps the
+post-pivot path opt-in: it proves that pivot rows were a real missing producer
+surface, but closing the CKTSO gap still requires a persistent grouped-current
+numeric owner that avoids materializing and replaying independent sparse
+current states.
