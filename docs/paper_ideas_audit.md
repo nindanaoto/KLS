@@ -13595,3 +13595,29 @@ paper-level owner again: it cannot require identical current-row output tails.
 It needs to be a CKTSO/SubtreeLU-style producer/panel-to-many-current executor
 that owns nonidentical sparse current states and streams published output work
 once across that live group.
+
+The producer-batch miss counters now make that conclusion more concrete. The
+opt-in `KLS_TRACE_ROW_PIPELINE=1` long-row trace reports producer probe counts,
+ready roots, underfilled probes, and rejection reasons. In the 75s default
+`pre2` trace
+`build/kls_pre2_producer_miss_default_trace_t4_r1_ref0_timeout75.stderr`, KLS
+again reached only row `22540` of the `629628`-row dominant BTF block. The
+logged long rows applied `413850748` scalar U entries, including `362332719`
+scalar output entries. Producer batching fired, but its scale was tiny:
+`112` batches, `287` targets, `210797` streamed producer U entries, and
+`539981` target U entries. The rejection split rules out out-of-order
+dependency handling as the first fix: `producer_reject_not_root=7`,
+`producer_reject_not_ready=0`, `producer_reject_supernode=0`, and
+`producer_reject_cached_panel=0`. The bigger misses were absent or unavailable
+states: `producer_reject_bad_state=390`, `producer_reject_dep_absent=120`,
+and `192` underfilled probes from `912` worker probes. The eight-slot
+lookahead check
+`build/kls_pre2_producer_miss_lookahead8_trace_t4_r1_ref0_timeout75.stderr`
+did not change the conclusion. It reached only row `22501`, and although it
+added `841` lookahead probes, it still applied only `36` producer batches and
+`284012` target U entries against `138562400` scalar output entries in the
+logged long rows; `producer_reject_bad_state=903` dominated the lookahead
+misses. The next paper-aligned implementation should therefore create a
+persistent producer-indexed live-current owner, with current states retained
+and advanced outside the commit-lock producer scan, rather than increasing
+lookahead slots or trying to apply producer dependencies out of order.

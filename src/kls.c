@@ -83739,6 +83739,20 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long producer_batch_target_u_entries;
   UF_long producer_batch_internal_entries;
   UF_long producer_batch_output_entries;
+  UF_long producer_probe_workers;
+  UF_long producer_probe_lookahead;
+  UF_long producer_probe_ready_roots;
+  UF_long producer_probe_underfilled;
+  UF_long producer_probe_underfilled_targets;
+  UF_long producer_probe_low_saved_stream;
+  UF_long producer_reject_bad_state;
+  UF_long producer_reject_epoch;
+  UF_long producer_reject_claimed;
+  UF_long producer_reject_dep_absent;
+  UF_long producer_reject_not_root;
+  UF_long producer_reject_not_ready;
+  UF_long producer_reject_supernode;
+  UF_long producer_reject_cached_panel;
   UF_long panel_update_groups;
   UF_long panel_update_rows;
   UF_long panel_cache_appends;
@@ -83753,11 +83767,60 @@ typedef struct kls_row_first_pipeline_trace {
   int long_row_emitted;
 } kls_row_first_pipeline_trace;
 
+typedef enum kls_row_first_pipeline_producer_reject {
+  KLS_ROW_FIRST_PRODUCER_REJECT_NONE = 0,
+  KLS_ROW_FIRST_PRODUCER_REJECT_BAD_STATE,
+  KLS_ROW_FIRST_PRODUCER_REJECT_EPOCH,
+  KLS_ROW_FIRST_PRODUCER_REJECT_CLAIMED,
+  KLS_ROW_FIRST_PRODUCER_REJECT_DEP_ABSENT,
+  KLS_ROW_FIRST_PRODUCER_REJECT_NOT_ROOT,
+  KLS_ROW_FIRST_PRODUCER_REJECT_NOT_READY,
+  KLS_ROW_FIRST_PRODUCER_REJECT_SUPERNODE,
+  KLS_ROW_FIRST_PRODUCER_REJECT_CACHED_PANEL
+} kls_row_first_pipeline_producer_reject;
+
 static void kls_row_first_stats_add(UF_long *target, UF_long value) {
   if (target == NULL || value == 0u) {
     return;
   }
   *target = *target > UF_long_max - value ? UF_long_max : *target + value;
+}
+
+static void kls_row_first_pipeline_trace_producer_reject(
+  kls_row_first_pipeline_trace *trace,
+  kls_row_first_pipeline_producer_reject reason) {
+  if (trace == NULL) {
+    return;
+  }
+  switch (reason) {
+    case KLS_ROW_FIRST_PRODUCER_REJECT_BAD_STATE:
+      kls_row_first_stats_add(&trace->producer_reject_bad_state, 1u);
+      break;
+    case KLS_ROW_FIRST_PRODUCER_REJECT_EPOCH:
+      kls_row_first_stats_add(&trace->producer_reject_epoch, 1u);
+      break;
+    case KLS_ROW_FIRST_PRODUCER_REJECT_CLAIMED:
+      kls_row_first_stats_add(&trace->producer_reject_claimed, 1u);
+      break;
+    case KLS_ROW_FIRST_PRODUCER_REJECT_DEP_ABSENT:
+      kls_row_first_stats_add(&trace->producer_reject_dep_absent, 1u);
+      break;
+    case KLS_ROW_FIRST_PRODUCER_REJECT_NOT_ROOT:
+      kls_row_first_stats_add(&trace->producer_reject_not_root, 1u);
+      break;
+    case KLS_ROW_FIRST_PRODUCER_REJECT_NOT_READY:
+      kls_row_first_stats_add(&trace->producer_reject_not_ready, 1u);
+      break;
+    case KLS_ROW_FIRST_PRODUCER_REJECT_SUPERNODE:
+      kls_row_first_stats_add(&trace->producer_reject_supernode, 1u);
+      break;
+    case KLS_ROW_FIRST_PRODUCER_REJECT_CACHED_PANEL:
+      kls_row_first_stats_add(&trace->producer_reject_cached_panel, 1u);
+      break;
+    case KLS_ROW_FIRST_PRODUCER_REJECT_NONE:
+    default:
+      break;
+  }
 }
 
 static void kls_row_first_pipeline_trace_add(
@@ -83794,6 +83857,34 @@ static void kls_row_first_pipeline_trace_add(
                           source->producer_batch_internal_entries);
   kls_row_first_stats_add(&target->producer_batch_output_entries,
                           source->producer_batch_output_entries);
+  kls_row_first_stats_add(&target->producer_probe_workers,
+                          source->producer_probe_workers);
+  kls_row_first_stats_add(&target->producer_probe_lookahead,
+                          source->producer_probe_lookahead);
+  kls_row_first_stats_add(&target->producer_probe_ready_roots,
+                          source->producer_probe_ready_roots);
+  kls_row_first_stats_add(&target->producer_probe_underfilled,
+                          source->producer_probe_underfilled);
+  kls_row_first_stats_add(&target->producer_probe_underfilled_targets,
+                          source->producer_probe_underfilled_targets);
+  kls_row_first_stats_add(&target->producer_probe_low_saved_stream,
+                          source->producer_probe_low_saved_stream);
+  kls_row_first_stats_add(&target->producer_reject_bad_state,
+                          source->producer_reject_bad_state);
+  kls_row_first_stats_add(&target->producer_reject_epoch,
+                          source->producer_reject_epoch);
+  kls_row_first_stats_add(&target->producer_reject_claimed,
+                          source->producer_reject_claimed);
+  kls_row_first_stats_add(&target->producer_reject_dep_absent,
+                          source->producer_reject_dep_absent);
+  kls_row_first_stats_add(&target->producer_reject_not_root,
+                          source->producer_reject_not_root);
+  kls_row_first_stats_add(&target->producer_reject_not_ready,
+                          source->producer_reject_not_ready);
+  kls_row_first_stats_add(&target->producer_reject_supernode,
+                          source->producer_reject_supernode);
+  kls_row_first_stats_add(&target->producer_reject_cached_panel,
+                          source->producer_reject_cached_panel);
   kls_row_first_stats_add(&target->panel_update_groups,
                           source->panel_update_groups);
   kls_row_first_stats_add(&target->panel_update_rows,
@@ -87506,23 +87597,58 @@ static void kls_row_first_pipeline_collect_worker_storage_trace(
 static int kls_row_first_pipeline_worker_scalar_batch_candidate(
   const kls_row_first_pipeline_shared *shared,
   const kls_row_first_pipeline_worker *worker,
-  UF_long dep) {
+  UF_long dep,
+  kls_row_first_pipeline_producer_reject *reject_out) {
+  if (reject_out != NULL) {
+    *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_NONE;
+  }
   if (shared == NULL || worker == NULL || worker->active_state == NULL ||
       worker->workspace.x == NULL || worker->workspace.mark == NULL ||
       worker->workspace.dep_heap == NULL ||
       shared->row_done == NULL || shared->ctx == NULL) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_BAD_STATE;
+    }
     return 0;
   }
   const kls_row_first_partial_row *state = worker->active_state;
-  if (worker->active_order_epoch != shared->order_epoch ||
-      (worker->lookahead_active && worker->lookahead_claimed) ||
-      state->row >= shared->ctx->nk || dep >= state->row ||
-      state->dep_heap_size == 0u ||
-      worker->workspace.dep_heap[0] != dep ||
-      worker->workspace.mark[dep] != state->generation ||
-      !kls_row_first_dependency_ready(shared->row_done,
+  if (worker->active_order_epoch != shared->order_epoch) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_EPOCH;
+    }
+    return 0;
+  }
+  if (worker->lookahead_active && worker->lookahead_claimed) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_CLAIMED;
+    }
+    return 0;
+  }
+  if (state->row >= shared->ctx->nk || dep >= state->row ||
+      state->dep_heap_size == 0u) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_BAD_STATE;
+    }
+    return 0;
+  }
+  if (worker->workspace.mark[dep] != state->generation) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_DEP_ABSENT;
+    }
+    return 0;
+  }
+  if (worker->workspace.dep_heap[0] != dep) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_NOT_ROOT;
+    }
+    return 0;
+  }
+  if (!kls_row_first_dependency_ready(shared->row_done,
                                       shared->active_rank,
                                       shared->completed_pos, dep)) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_NOT_READY;
+    }
     return 0;
   }
   const UF_long run_end =
@@ -87531,6 +87657,9 @@ static int kls_row_first_pipeline_worker_scalar_batch_candidate(
       shared->active_rank, shared->ctx->nk, shared->completed_pos,
       state->row, dep);
   if (run_end > dep) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_SUPERNODE;
+    }
     return 0;
   }
   const UF_long cached_run_end =
@@ -87538,7 +87667,13 @@ static int kls_row_first_pipeline_worker_scalar_batch_candidate(
       worker->workspace.supernode_panel_cache, shared->row_done,
       shared->active_rank, shared->ctx->nk, shared->completed_pos,
       state->row, dep);
-  return cached_run_end <= dep;
+  if (cached_run_end > dep) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_CACHED_PANEL;
+    }
+    return 0;
+  }
+  return 1;
 }
 
 static int kls_row_first_pipeline_apply_producer_batch(
@@ -87562,14 +87697,29 @@ static int kls_row_first_pipeline_apply_producer_batch(
     return 1;
   }
   const UF_long row_entries = row_end - row_begin;
+  kls_row_first_pipeline_trace *producer_trace =
+    shared->trace_enabled && current_worker != NULL
+      ? &current_worker->trace_current : NULL;
 
   UF_long target_count = 0;
   for (int tid = 0; tid < shared->worker_count; ++tid) {
     kls_row_first_pipeline_worker *worker = shared->workers + tid;
-    if (worker == current_worker ||
-        !kls_row_first_pipeline_worker_scalar_batch_candidate(
-          shared, worker, dep)) {
+    if (worker == current_worker) {
       continue;
+    }
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_workers, 1u);
+    }
+    kls_row_first_pipeline_producer_reject reject_reason =
+      KLS_ROW_FIRST_PRODUCER_REJECT_NONE;
+    if (!kls_row_first_pipeline_worker_scalar_batch_candidate(
+          shared, worker, dep, &reject_reason)) {
+      kls_row_first_pipeline_trace_producer_reject(producer_trace,
+                                                  reject_reason);
+      continue;
+    }
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_ready_roots, 1u);
     }
     if (target_count >= (UF_long)shared->batch_target_capacity) {
       return 0;
@@ -87587,7 +87737,12 @@ static int kls_row_first_pipeline_apply_producer_batch(
     if (!worker->lookahead_active || worker->lookahead_claimed) {
       continue;
     }
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_lookahead, 1u);
+    }
     if (worker->active_order_epoch != shared->order_epoch) {
+      kls_row_first_pipeline_trace_producer_reject(
+        producer_trace, KLS_ROW_FIRST_PRODUCER_REJECT_EPOCH);
       continue;
     }
     if (!kls_row_first_partial_apply_ready_until(
@@ -87606,9 +87761,16 @@ static int kls_row_first_pipeline_apply_producer_batch(
           NULL)) {
       return 0;
     }
+    kls_row_first_pipeline_producer_reject reject_reason =
+      KLS_ROW_FIRST_PRODUCER_REJECT_NONE;
     if (!kls_row_first_pipeline_worker_scalar_batch_candidate(
-          shared, worker, dep)) {
+          shared, worker, dep, &reject_reason)) {
+      kls_row_first_pipeline_trace_producer_reject(producer_trace,
+                                                  reject_reason);
       continue;
+    }
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_ready_roots, 1u);
     }
     if (target_count >= (UF_long)shared->batch_target_capacity) {
       return 0;
@@ -87621,6 +87783,11 @@ static int kls_row_first_pipeline_apply_producer_batch(
     target_count++;
   }
   if (target_count < 2u) {
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_underfilled, 1u);
+      kls_row_first_stats_add(&producer_trace->producer_probe_underfilled_targets,
+                              target_count);
+    }
     return 1;
   }
   const UF_long saved_targets = target_count - 1u;
@@ -87629,6 +87796,10 @@ static int kls_row_first_pipeline_apply_producer_batch(
       ? UF_long_max
       : row_entries * saved_targets;
   if (saved_stream < KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM) {
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_low_saved_stream,
+                              1u);
+    }
     return 1;
   }
 
@@ -87688,19 +87859,19 @@ static int kls_row_first_pipeline_apply_producer_batch(
     }
   }
 
-  if (shared->trace_enabled) {
-    kls_row_first_pipeline_trace *trace = &current_worker->trace_current;
-    kls_row_first_stats_add(&trace->producer_batch_calls, 1u);
-    kls_row_first_stats_add(&trace->producer_batch_targets, target_count);
-    kls_row_first_stats_add(&trace->producer_batch_stream_u_entries,
+  if (producer_trace != NULL) {
+    kls_row_first_stats_add(&producer_trace->producer_batch_calls, 1u);
+    kls_row_first_stats_add(&producer_trace->producer_batch_targets,
+                            target_count);
+    kls_row_first_stats_add(&producer_trace->producer_batch_stream_u_entries,
                             row_entries);
     for (UF_long t = 0; t < target_count; ++t) {
-      kls_row_first_stats_add(&trace->producer_batch_target_u_entries,
+      kls_row_first_stats_add(&producer_trace->producer_batch_target_u_entries,
                               row_entries);
     }
-    kls_row_first_stats_add(&trace->producer_batch_internal_entries,
+    kls_row_first_stats_add(&producer_trace->producer_batch_internal_entries,
                             internal_entries);
-    kls_row_first_stats_add(&trace->producer_batch_output_entries,
+    kls_row_first_stats_add(&producer_trace->producer_batch_output_entries,
                             output_entries);
   }
   return 1;
@@ -87972,6 +88143,20 @@ static void kls_row_first_pipeline_trace_print(
           " producer_target_u_entries=%" PRIu64
           " producer_u_internal=%" PRIu64
           " producer_u_output=%" PRIu64
+          " producer_probe_workers=%" PRIu64
+          " producer_probe_lookahead=%" PRIu64
+          " producer_ready_roots=%" PRIu64
+          " producer_underfilled=%" PRIu64
+          " producer_underfilled_targets=%" PRIu64
+          " producer_low_saved_stream=%" PRIu64
+          " producer_reject_bad_state=%" PRIu64
+          " producer_reject_epoch=%" PRIu64
+          " producer_reject_claimed=%" PRIu64
+          " producer_reject_dep_absent=%" PRIu64
+          " producer_reject_not_root=%" PRIu64
+          " producer_reject_not_ready=%" PRIu64
+          " producer_reject_supernode=%" PRIu64
+          " producer_reject_cached_panel=%" PRIu64
           " panel_updates=%" PRIu64 " panel_update_rows=%" PRIu64
           " panel_appends=%" PRIu64 " panel_append_entries=%" PRIu64
           " local_l_growths=%" PRIu64 " local_l_copied=%" PRIu64
@@ -87995,6 +88180,20 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->producer_batch_target_u_entries,
           (uint64_t)trace->producer_batch_internal_entries,
           (uint64_t)trace->producer_batch_output_entries,
+          (uint64_t)trace->producer_probe_workers,
+          (uint64_t)trace->producer_probe_lookahead,
+          (uint64_t)trace->producer_probe_ready_roots,
+          (uint64_t)trace->producer_probe_underfilled,
+          (uint64_t)trace->producer_probe_underfilled_targets,
+          (uint64_t)trace->producer_probe_low_saved_stream,
+          (uint64_t)trace->producer_reject_bad_state,
+          (uint64_t)trace->producer_reject_epoch,
+          (uint64_t)trace->producer_reject_claimed,
+          (uint64_t)trace->producer_reject_dep_absent,
+          (uint64_t)trace->producer_reject_not_root,
+          (uint64_t)trace->producer_reject_not_ready,
+          (uint64_t)trace->producer_reject_supernode,
+          (uint64_t)trace->producer_reject_cached_panel,
           (uint64_t)trace->panel_update_groups,
           (uint64_t)trace->panel_update_rows,
           (uint64_t)trace->panel_cache_appends,
@@ -88602,6 +88801,24 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " scalar_runs=%" PRIu64
                         " scalar_run_rows=%" PRIu64
                         " scalar_run_u_entries=%" PRIu64
+                        " producer_batches=%" PRIu64
+                        " producer_targets=%" PRIu64
+                        " producer_stream_u_entries=%" PRIu64
+                        " producer_target_u_entries=%" PRIu64
+                        " producer_probe_workers=%" PRIu64
+                        " producer_probe_lookahead=%" PRIu64
+                        " producer_ready_roots=%" PRIu64
+                        " producer_underfilled=%" PRIu64
+                        " producer_underfilled_targets=%" PRIu64
+                        " producer_low_saved_stream=%" PRIu64
+                        " producer_reject_bad_state=%" PRIu64
+                        " producer_reject_epoch=%" PRIu64
+                        " producer_reject_claimed=%" PRIu64
+                        " producer_reject_dep_absent=%" PRIu64
+                        " producer_reject_not_root=%" PRIu64
+                        " producer_reject_not_ready=%" PRIu64
+                        " producer_reject_supernode=%" PRIu64
+                        " producer_reject_cached_panel=%" PRIu64
                         " panel_updates=%" PRIu64
                         " panel_update_rows=%" PRIu64
                         " l_entries=%" PRIu64
@@ -88619,6 +88836,24 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.scalar_run_calls,
                         (uint64_t)worker->trace_current.scalar_run_rows,
                         (uint64_t)worker->trace_current.scalar_run_u_entries,
+                        (uint64_t)worker->trace_current.producer_batch_calls,
+                        (uint64_t)worker->trace_current.producer_batch_targets,
+                        (uint64_t)worker->trace_current.producer_batch_stream_u_entries,
+                        (uint64_t)worker->trace_current.producer_batch_target_u_entries,
+                        (uint64_t)worker->trace_current.producer_probe_workers,
+                        (uint64_t)worker->trace_current.producer_probe_lookahead,
+                        (uint64_t)worker->trace_current.producer_probe_ready_roots,
+                        (uint64_t)worker->trace_current.producer_probe_underfilled,
+                        (uint64_t)worker->trace_current.producer_probe_underfilled_targets,
+                        (uint64_t)worker->trace_current.producer_probe_low_saved_stream,
+                        (uint64_t)worker->trace_current.producer_reject_bad_state,
+                        (uint64_t)worker->trace_current.producer_reject_epoch,
+                        (uint64_t)worker->trace_current.producer_reject_claimed,
+                        (uint64_t)worker->trace_current.producer_reject_dep_absent,
+                        (uint64_t)worker->trace_current.producer_reject_not_root,
+                        (uint64_t)worker->trace_current.producer_reject_not_ready,
+                        (uint64_t)worker->trace_current.producer_reject_supernode,
+                        (uint64_t)worker->trace_current.producer_reject_cached_panel,
                         (uint64_t)worker->trace_current.panel_update_groups,
                         (uint64_t)worker->trace_current.panel_update_rows,
                         (uint64_t)worker->l_entries.count,

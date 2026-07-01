@@ -2408,6 +2408,25 @@ grouping. This rejects same-tail batching as the missing CKTSO-sized mechanism
 and keeps the target on a broader producer/supernode owner that streams a
 published row or panel once for many current rows, even when their output tails
 are not identical.
+KLS now has row-pipeline producer miss counters in the opt-in
+`KLS_TRACE_ROW_PIPELINE=1` trace. A 75s default `pre2` trace,
+`build/kls_pre2_producer_miss_default_trace_t4_r1_ref0_timeout75.stderr`,
+again reached only row `22540` of the `629628`-row dominant BTF block. The
+logged long rows still performed `413850748` scalar U touches and
+`362332719` scalar trailing/output touches. The retained producer-batch path
+did fire (`112` batches, `287` targets), but it streamed only `210797`
+producer U entries and applied `539981` target U entries. Producer probes were
+not mainly rejected by dependency order (`producer_reject_not_root=7`,
+`producer_reject_not_ready=0`); they were mostly rejected because too few
+usable current states were live (`producer_reject_bad_state=390`) or because
+the producer was absent from that state (`producer_reject_dep_absent=120`), and
+`192` probes were underfilled. With experimental eight-slot lookahead,
+`build/kls_pre2_producer_miss_lookahead8_trace_t4_r1_ref0_timeout75.stderr`
+still reached only row `22501`, with `36` batches and `284012` target U
+entries against `138562400` scalar output entries in logged long rows. This
+keeps the next algorithmic target on a persistent CKTSO/SubtreeLU-style
+producer-to-many-current owner, not out-of-order dependency hacks or simply
+larger advisory lookahead.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while
