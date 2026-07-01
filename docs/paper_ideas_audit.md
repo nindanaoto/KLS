@@ -14317,22 +14317,24 @@ the compact states, advances unreserved states when producer U rows publish,
 and lets a worker claim the prepared sparse state instead of replaying the row
 prefix from scratch. Correctness smoke passed, and forced KLS-first `add20` and
 `bcircuit` probes stayed residual-clean:
-`build/kls_add20_compact_exec_t4_r1_ref0.json` reported
+`build/kls_add20_compact_exec_lean_t4_r1_ref0.json` reported
 `relative_residual_l2=3.39e-16`, and
-`build/kls_bcircuit_compact_exec_t4_r1_ref0.json` reported
+`build/kls_bcircuit_compact_exec_lean_t4_r1_ref0.json` reported
 `relative_residual_l2=8.17e-17`.
 
-The focused `pre2` timing rejects the shape. The 8-state compact-exec trace
-`build/kls_pre2_compact_exec_w8_trace45.stderr` reached the same
-`589824/629628` checkpoint as
+The focused `pre2` timing rejects the shape even after trimming the compact
+state storage. Retained compact-state L entries now live in lean `(dep,value)`
+arrays, and compact-claim tracing baselines against the worker's current
+allocation counters so the earlier hundreds of millions of reported local
+reserve-copy entries are no longer misread as real per-row churn. The corrected
+16-state compact-exec trace
+`build/kls_pre2_compact_exec_lean_w16_tracefix_trace45.stderr` reached the
+same `589824/629628` checkpoint as
 `build/kls_pre2_compact_exec_control_trace45.stderr` and raised compact target
-work to `43001975` U entries, but scalar U output remained `17.37x` larger and
-the trace showed hundreds of millions of sparse-state reserve-copy entries.
-Increasing the window exposed more target surface but made progress worse:
-16 states reached `524288/629628`, and 64 states reached only `131072/629628`,
-under the same 45s cap. The untraced 8-state factor probe
-`build/kls_pre2_compact_exec_w8_factor_t4_r1_ref0_timeout125.json` still timed
-out with no JSON row. This means the missing CKTSO/SubtreeLU mechanism is not
-"more independent sparse states"; it has to be a coarser grouped-current owner
-that streams producers across a batch without materializing and copying a
-separate sparse state per future row.
+work to `69009179` U entries, but scalar U output remained `10.83x` larger.
+The untraced 16-state factor probe
+`build/kls_pre2_compact_exec_lean_w16_factor_t4_r1_ref0_timeout125.json` still
+timed out with no JSON row. This means the missing CKTSO/SubtreeLU mechanism is
+not "more independent sparse states"; it has to be a coarser grouped-current
+owner that streams producers across a batch instead of replaying most
+trailing/output work through separately materialized sparse states.

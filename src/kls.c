@@ -85857,12 +85857,15 @@ typedef struct kls_row_first_compact_window_state {
   UF_long pos;
   UF_long *pattern;
   UF_long *heap;
+  UF_long *l_cols;
   double *values;
-  kls_row_first_entries l_entries;
+  double *l_values;
   kls_row_first_pipeline_trace trace_current;
   UF_long pattern_count;
   UF_long pattern_capacity;
   UF_long heap_size;
+  UF_long l_count;
+  UF_long l_capacity;
   unsigned int generation;
   int active;
 } kls_row_first_compact_window_state;
@@ -85876,7 +85879,7 @@ static void kls_row_first_compact_window_state_clear(
   state->pos = KLS_KLU_EMPTY;
   state->pattern_count = 0u;
   state->heap_size = 0u;
-  state->l_entries.count = 0u;
+  state->l_count = 0u;
   memset(&state->trace_current, 0, sizeof(state->trace_current));
   state->generation = 0u;
   state->active = 0;
@@ -85889,11 +85892,71 @@ static void kls_row_first_compact_window_state_free(
   }
   free(state->pattern);
   free(state->heap);
+  free(state->l_cols);
   free(state->values);
-  kls_row_first_entries_free(&state->l_entries);
+  free(state->l_values);
   memset(state, 0, sizeof(*state));
   state->row = KLS_KLU_EMPTY;
   state->pos = KLS_KLU_EMPTY;
+}
+
+static int kls_row_first_compact_window_l_reserve(
+  kls_row_first_compact_window_state *state,
+  UF_long needed) {
+  if (state == NULL) {
+    return 0;
+  }
+  if (needed <= state->l_capacity) {
+    return 1;
+  }
+  if (needed > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      needed > (UF_long)(SIZE_MAX / sizeof(double))) {
+    return 0;
+  }
+  UF_long grown = state->l_capacity == 0u ? 64u : state->l_capacity;
+  while (grown < needed) {
+    if (grown > UF_long_max / 2u) {
+      grown = needed;
+      break;
+    }
+    grown *= 2u;
+  }
+  if (grown > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      grown > (UF_long)(SIZE_MAX / sizeof(double))) {
+    return 0;
+  }
+  UF_long *new_cols =
+    (UF_long *)realloc(state->l_cols,
+                       (size_t)grown * sizeof(*state->l_cols));
+  if (new_cols == NULL) {
+    return 0;
+  }
+  state->l_cols = new_cols;
+  double *new_values =
+    (double *)realloc(state->l_values,
+                      (size_t)grown * sizeof(*state->l_values));
+  if (new_values == NULL) {
+    return 0;
+  }
+  state->l_values = new_values;
+  state->l_capacity = grown;
+  return 1;
+}
+
+static int kls_row_first_compact_window_l_append(
+  kls_row_first_compact_window_state *state,
+  UF_long col,
+  double value) {
+  if (state == NULL ||
+      state->l_count == UF_long_max ||
+      !kls_row_first_compact_window_l_reserve(
+        state, state->l_count + 1u)) {
+    return 0;
+  }
+  state->l_cols[state->l_count] = col;
+  state->l_values[state->l_count] = value;
+  state->l_count++;
+  return 1;
 }
 
 static UF_long kls_row_first_compact_window_lower_bound(
@@ -89036,8 +89099,7 @@ static int kls_row_first_compact_window_apply_dep(
     return 0;
   }
   const double lij = state->values[dep_pos] / dep_pivot;
-  if (!kls_row_first_entries_append(&state->l_entries, state->row, dep,
-                                    lij)) {
+  if (!kls_row_first_compact_window_l_append(state, dep, lij)) {
     return 0;
   }
   state->values[dep_pos] = 0.0;
@@ -89516,16 +89578,30 @@ static int kls_row_first_pipeline_try_claim_compact_window(
            (size_t)state->heap_size * sizeof(*state->heap));
   }
 
-  kls_row_first_entries tmp_l_entries = worker->l_entries;
-  worker->l_entries = state->l_entries;
-  state->l_entries = tmp_l_entries;
-  state->l_entries.count = 0u;
+  worker->l_entries.count = 0u;
   worker->u_entries.count = 0u;
+  worker->l_reserve_growths_reported = worker->l_entries.reserve_growths;
+  worker->l_reserve_copied_reported =
+    worker->l_entries.reserve_copied_entries;
+  worker->u_reserve_growths_reported = worker->u_entries.reserve_growths;
+  worker->u_reserve_copied_reported =
+    worker->u_entries.reserve_copied_entries;
+  if (state->l_count > 0u &&
+      !kls_row_first_entries_reserve_append(
+        &worker->l_entries, state->l_count)) {
+    kls_row_first_compact_window_state_clear(state);
+    return 0;
+  }
+  for (UF_long p = 0; p < state->l_count; ++p) {
+    if (!kls_row_first_entries_append_reserved(
+          &worker->l_entries, state->row,
+          state->l_cols[p], state->l_values[p])) {
+      kls_row_first_compact_window_state_clear(state);
+      return 0;
+    }
+  }
+  state->l_count = 0u;
   worker->trace_current = state->trace_current;
-  worker->l_reserve_growths_reported = 0u;
-  worker->l_reserve_copied_reported = 0u;
-  worker->u_reserve_growths_reported = 0u;
-  worker->u_reserve_copied_reported = 0u;
 
   state_out->row = state->row;
   state_out->generation = state->generation;
