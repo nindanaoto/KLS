@@ -13212,3 +13212,22 @@ states" surface, but the retained-state materialization remained enormous
 paper-aligned gap is therefore not the producer trigger itself; it is replacing
 the sparse retained-state objects with a grouped live workspace/supernodal
 window owner so the producer batch does not pay per-current retained row maps.
+
+Rechecking the selected-large timeout cases keeps `pre2` as the largest
+actionable KLS-vs-CKTSO gap. The saved large recon sidecars show KLS timing out
+on `pre2` and `Hamrle3` under 120s, while CKTSO times out only on `Hamrle3`;
+the same-session CKTSO `pre2` rerun completes the full compare in `21.50s`
+wall time with `initial_factor_seconds=6.210766` and
+`refactor_seconds_avg=4.922633`. KLS now makes the dominant-BTF parallel
+KLS-first path fall back to the same legacy count-based separator queue used by
+the serial path when a METIS partitioned queue fails private-ownership
+validation. On forced-METIS `pre2`, the 60s trace improved from the old
+131,072-row checkpoint with about `4.06e9` scalar published-U entry touches to
+about `1.75e8` touches at the same checkpoint and reached the pivot-tail
+restart near row `593,557`. However,
+`build/kls_pre2_metis_fallback_t4_r1_ref0_timeout130.json` remained empty
+after a non-traced 130s factor-only timeout, and the traced 130s run was still
+inside the 629,628-row pipeline after the 589,824-row checkpoint. This confirms
+the timeout policy is not the issue; the remaining clear missing piece is the
+paper-level coarse row/supernode first-factor executor for the dominant block,
+especially the scalar dependency drain and pivot-tail continuation.

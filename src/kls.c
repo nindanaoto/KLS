@@ -89946,6 +89946,16 @@ static int kls_row_first_parallel_factor_block(
     int have_separator_plan = kls_build_first_separator_queue_plan(
       solver, k1, k2, shared->block_pipeline_thread_count,
       &separator_plan);
+    if (have_separator_plan && separator_plan.partitioned &&
+        !kls_first_separator_private_ownership_valid(
+          k1, nk, n, worker->row_ptr, row_cols, worker->col_pos,
+          &separator_plan, shared->block_pipeline_thread_count)) {
+      kls_first_separator_queue_plan_free(&separator_plan);
+      have_separator_plan =
+        kls_build_first_separator_queue_plan_legacy_from_counts(
+          solver, k1, k2, shared->block_pipeline_thread_count,
+          worker->row_counts, &separator_plan);
+    }
     if (have_separator_plan) {
       row_order = (UF_long *)malloc((size_t)nk * sizeof(*row_order));
       row_seen = (unsigned char *)calloc((size_t)nk, sizeof(*row_seen));

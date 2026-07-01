@@ -2193,6 +2193,18 @@ second trace, and a post-fix interrupt sample again lands in scalar
 `kls_row_first_partial_apply_one_dep` with other pipeline workers waiting. This
 run was from a non-CBLAS build, so small BLAS call overhead is not the active
 blocker on this path.
+The dominant-BTF parallel first-factor path now also mirrors the serial
+KLS-first path when a METIS partitioned separator queue fails private-ownership
+validation: it falls back to the legacy count-based separator queue instead of
+dropping to the previous row order immediately. On `pre2`, this cuts the traced
+forced-METIS 131,072-row checkpoint from about `4.06e9` scalar published-U
+entry touches to about `1.75e8`, and the 60s trace reaches the pivot-tail
+restart near row `593,557`. This is still not enough: the same non-traced
+forced-METIS factor-only run times out at 130s with no JSON row, while the
+same-session CKTSO full compare finishes in `21.50s` wall time. The remaining
+largest CKTSO gap is therefore still the coarse first-factor row/supernode
+numeric executor inside `pre2`'s dominant block, not ordering selection or the
+process timeout.
 A CBLAS-enabled check confirmed that conclusion. Before tightening the
 KLS-first CBLAS gate, `Freescale/transient` with `KLS_ENABLE_CBLAS_SUPERNODE=1`
 measured `factor_seconds_avg=1.3894s` versus `1.2569s` with the runtime gate
