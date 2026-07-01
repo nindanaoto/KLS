@@ -14012,3 +14012,25 @@ states as the persistent owner. The next implementation target remains a
 coarser grouped-current numeric owner that advances a batch as one object,
 rather than carrying many separately caught-up sparse row workspaces across
 pivots.
+
+A grouped lookahead catch-up prototype was also tested and rejected before
+commit. It tried to batch shared ready roots across unclaimed lookahead states
+before the normal current-producer scan, directly testing whether the missing
+owner could be approximated by synchronizing existing sparse lookahead rows
+around earlier completed producers. The trace moved in the right direction but
+not nearly enough: against the no-cap pivot refill control
+`build/kls_pre2_pivot_lookahead8_maxinputs0_trace90.stderr`, the grouped
+catch-up trace
+`build/kls_pre2_group_catchup_pivot8_maxinputs0_trace90.stderr` reduced overall
+scalar U touches only from `859854990` to `859296862` and improved the overall
+scalar-output/producer-target ratio only from `28.44x` to `26.58x`. Pivot
+long-row coverage rose from `916/921` to `1108/1113`, and the pivot
+scalar-output/producer-target ratio improved from `109.82x` to `83.68x`, but
+both traces still stopped at the same `589824/629628` progress checkpoint. The
+non-traced 125s factor-only probe
+`build/kls_pre2_group_catchup_pivot8_maxinputs0_t4_r1_ref0_timeout125.json`
+also timed out with no JSON row. This rejects grouped catch-up of separately
+owned sparse lookahead states as the large CKTSO-gap closer. The required
+algorithm is still a production grouped-current or row/supernode numeric owner
+that owns the current batch and its target map, rather than repeatedly catching
+up independent sparse current states.
