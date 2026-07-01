@@ -14191,3 +14191,30 @@ entries, about `807x` smaller than the scalar output stream. This sharpens the
 next implementation target: grouped state storage is useful once targets are
 present, but the CKTSO-scale gap still requires a larger live grouped-current
 owner that brings far more current rows into producer-owned batches.
+
+A fresh timeout-case recheck at `88aaf4b` confirms the largest gap component
+without relying on older artifacts. The same two-row large slice, four threads,
+`repeat=1`, `refactor-repeat=1`, and 120s per-matrix cap produced
+`build/cktso_timeout_pair_88aaf4b_t4_r1_ref1_timeout120.jsonl` for CKTSO and
+`build/kls_timeout_pair_88aaf4b_t4_r1_ref1_timeout120.jsonl` for KLS. CKTSO
+completed `pre2` (`analysis_seconds=4.162433`,
+`initial_factor_seconds=5.589610`, `factor_seconds_avg=3.541263`,
+`refactor_seconds_avg=4.520806`, `solve_seconds_avg=0.129361`) and timed out
+only on `Hamrle3`. KLS emitted no rows; its failure sidecar records 120s
+timeouts on both matrices. The KLS `pre2` analyze-only diagnostic completed in
+`13.0557551s`, selected METIS, and reported the same `629628`-row dominant BTF
+block, so analyze/order setup remains bounded far below the timeout.
+
+The matching capped `pre2` factor-only trace,
+`build/kls_pre2_timeout_pair_88aaf4b_trace75.stderr`, reached the same
+`589824/629628` checkpoint before the 75s cap. At that point KLS had replayed
+`869301906` scalar U entries, including `743948197` trailing/output entries,
+while successful producer batches covered only `944607` target U entries. The
+scalar-output/producer-target ratio is therefore `787.57x`. The new state-union
+diagnostic also reports `1190540` producer target state rows but only `425873`
+unique rows (`2.80x` reuse), which means grouped state storage is not the
+missing scale by itself; KLS is failing to make enough live currents targets of
+producer-owned numeric updates. This keeps the paper-level target on a
+persistent grouped-current row/supernode numeric owner for first-factor
+pivoting tails, rather than another timeout-policy, ordering-package, BLAS, or
+small lock-refactor change.

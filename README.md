@@ -2588,6 +2588,27 @@ producer-target coverage and a shorter long-row tail (`595435` versus
 `599516`). The matching 125s factor-only probe still timed out with no JSON row,
 so wait-drain mutex serialization is not the clear CKTSO-sized missing piece.
 
+A fresh July 1, 2026 timeout-pair recheck at `88aaf4b` keeps the same largest
+gap. With four threads, `repeat=1`, `refactor-repeat=1`, and a 120s per-matrix
+cap over the `pre2`/`Hamrle3` large slice, CKTSO completed `pre2` in
+`build/cktso_timeout_pair_88aaf4b_t4_r1_ref1_timeout120.jsonl`
+(`analysis_seconds=4.162433`, `initial_factor_seconds=5.589610`,
+`refactor_seconds_avg=4.520806`, `solve_seconds_avg=0.129361`) and timed out
+only on `Hamrle3`. The matching KLS run
+`build/kls_timeout_pair_88aaf4b_t4_r1_ref1_timeout120.jsonl` emitted no rows;
+its sidecar records 120s timeouts on both matrices. KLS analyze-only on `pre2`
+finished in `13.0557551s`, selected `ordering=metis`, and reported the same
+`629628`-row dominant BTF block, so ordering/setup is still not the timeout
+sized component. The capped factor-only trace
+`build/kls_pre2_timeout_pair_88aaf4b_trace75.stderr` again reached
+`589824/629628` rows before timeout, with `743948197` scalar U-output entries
+against only `944607` producer-target U entries (`787.57x`). The successful
+producer batches still show useful grouped-state reuse (`1190540` target state
+rows versus `425873` unique rows, `2.80x`), but they cover too little of the
+numeric stream. This pins the largest clean gap on first-factor pivoting-tail
+row/supernode numeric ownership, not `Hamrle3`, timeout policy, ordering,
+refactorization, solve time, BLAS dispatch, or small mutex movement.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
