@@ -86265,6 +86265,7 @@ typedef struct kls_row_first_compact_batch_target {
 struct kls_row_first_compact_window_state {
   UF_long row;
   UF_long pos;
+  UF_long bucket_dep;
   UF_long *pattern;
   UF_long *heap;
   UF_long *l_cols;
@@ -86277,6 +86278,9 @@ struct kls_row_first_compact_window_state {
   UF_long l_count;
   UF_long l_capacity;
   unsigned int generation;
+  int bucket_slot;
+  int bucket_next;
+  int bucket_linked;
   int active;
 };
 
@@ -86287,11 +86291,14 @@ static void kls_row_first_compact_window_state_clear(
   }
   state->row = KLS_KLU_EMPTY;
   state->pos = KLS_KLU_EMPTY;
+  state->bucket_dep = KLS_KLU_EMPTY;
   state->pattern_count = 0u;
   state->heap_size = 0u;
   state->l_count = 0u;
   memset(&state->trace_current, 0, sizeof(state->trace_current));
   state->generation = 0u;
+  state->bucket_next = -1;
+  state->bucket_linked = 0;
   state->active = 0;
 }
 
@@ -88925,6 +88932,7 @@ typedef struct kls_row_first_pipeline_shared {
   kls_row_first_pipeline_batch_target *batch_targets;
   kls_row_first_compact_batch_target *compact_batch_targets;
   kls_row_first_compact_window_state *compact_window_states;
+  int *compact_root_heads;
   int worker_count;
   int lookahead_count;
   int compact_window_count;
@@ -89572,6 +89580,75 @@ static int kls_row_first_compact_window_apply_ready_until(
   return 1;
 }
 
+static void kls_row_first_pipeline_unlink_compact_window_state(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_compact_window_state *state) {
+  if (shared == NULL || state == NULL || !state->bucket_linked) {
+    return;
+  }
+  if (shared->compact_root_heads != NULL && shared->ctx != NULL &&
+      state->bucket_dep < shared->ctx->nk &&
+      state->bucket_slot >= 0 &&
+      state->bucket_slot < shared->compact_window_count) {
+    int *head = shared->compact_root_heads + state->bucket_dep;
+    if (*head == state->bucket_slot) {
+      *head = state->bucket_next;
+    } else {
+      int cursor = *head;
+      int guard = 0;
+      while (cursor >= 0 && cursor < shared->compact_window_count &&
+             guard++ < shared->compact_window_count) {
+        kls_row_first_compact_window_state *candidate =
+          shared->compact_window_states + cursor;
+        if (candidate->bucket_next == state->bucket_slot) {
+          candidate->bucket_next = state->bucket_next;
+          break;
+        }
+        cursor = candidate->bucket_next;
+      }
+    }
+  }
+  state->bucket_dep = KLS_KLU_EMPTY;
+  state->bucket_next = -1;
+  state->bucket_linked = 0;
+}
+
+static void kls_row_first_pipeline_clear_compact_window_state(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_compact_window_state *state) {
+  if (state == NULL) {
+    return;
+  }
+  kls_row_first_pipeline_unlink_compact_window_state(shared, state);
+  kls_row_first_compact_window_state_clear(state);
+}
+
+static int kls_row_first_pipeline_register_compact_window_state(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_compact_window_state *state) {
+  if (shared == NULL || state == NULL ||
+      !shared->compact_window_execute_enabled ||
+      shared->compact_root_heads == NULL || shared->ctx == NULL) {
+    return 1;
+  }
+  kls_row_first_pipeline_unlink_compact_window_state(shared, state);
+  if (!state->active || state->heap_size == 0u) {
+    return 1;
+  }
+  const UF_long dep = state->heap[0];
+  if (dep >= state->row || dep >= shared->ctx->nk ||
+      state->bucket_slot < 0 ||
+      state->bucket_slot >= shared->compact_window_count) {
+    kls_row_first_compact_window_state_clear(state);
+    return 0;
+  }
+  state->bucket_dep = dep;
+  state->bucket_next = shared->compact_root_heads[dep];
+  state->bucket_linked = 1;
+  shared->compact_root_heads[dep] = state->bucket_slot;
+  return 1;
+}
+
 static void kls_row_first_pipeline_apply_compact_window_producer_batch(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_pipeline_trace *trace,
@@ -89592,42 +89669,97 @@ static void kls_row_first_pipeline_apply_compact_window_producer_batch(
   }
 
   UF_long target_count = 0u;
-  for (int slot = 0; slot < shared->compact_window_count; ++slot) {
-    kls_row_first_compact_window_state *state =
-      shared->compact_window_states + slot;
-    if (!state->active) {
-      continue;
-    }
-    if (trace != NULL) {
-      kls_row_first_stats_add(&trace->compact_window_probes, 1u);
-    }
-    if (state->row <= dep || state->heap_size == 0u ||
-        state->heap[0] != dep) {
-      continue;
-    }
-    UF_long dep_pos = KLS_KLU_EMPTY;
-    if (!kls_row_first_compact_window_value_pos(state, dep, &dep_pos) ||
-        dep_pos >= state->pattern_count ||
-        target_count >= (UF_long)shared->compact_batch_target_capacity ||
-        !kls_row_first_compact_window_l_reserve(
-          state, state->l_count + 1u)) {
-      kls_row_first_compact_window_state_clear(state);
-      if (trace != NULL) {
-        kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+  if (shared->compact_root_heads != NULL) {
+    int slot = shared->compact_root_heads[dep];
+    shared->compact_root_heads[dep] = -1;
+    int guard = 0;
+    while (slot >= 0 && slot < shared->compact_window_count &&
+           guard++ < shared->compact_window_count) {
+      kls_row_first_compact_window_state *state =
+        shared->compact_window_states + slot;
+      const int next_slot = state->bucket_next;
+      state->bucket_dep = KLS_KLU_EMPTY;
+      state->bucket_next = -1;
+      state->bucket_linked = 0;
+      if (!state->active) {
+        slot = next_slot;
+        continue;
       }
-      continue;
+      if (trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_probes, 1u);
+      }
+      if (state->row <= dep || state->heap_size == 0u ||
+          state->heap[0] != dep) {
+        (void)kls_row_first_pipeline_register_compact_window_state(
+          shared, state);
+        slot = next_slot;
+        continue;
+      }
+      UF_long dep_pos = KLS_KLU_EMPTY;
+      if (!kls_row_first_compact_window_value_pos(state, dep, &dep_pos) ||
+          dep_pos >= state->pattern_count ||
+          target_count >= (UF_long)shared->compact_batch_target_capacity ||
+          !kls_row_first_compact_window_l_reserve(
+            state, state->l_count + 1u)) {
+        kls_row_first_compact_window_state_clear(state);
+        if (trace != NULL) {
+          kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+        }
+        slot = next_slot;
+        continue;
+      }
+      shared->compact_batch_targets[target_count].state = state;
+      shared->compact_batch_targets[target_count].dep_pos = dep_pos;
+      shared->compact_batch_targets[target_count].lij =
+        state->values[dep_pos] / dep_pivot;
+      target_count++;
+      if (trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_targets, 1u);
+        kls_row_first_stats_add(&trace->compact_window_target_u_entries,
+                                row_entries);
+        kls_row_first_stats_add(&trace->compact_window_state_rows,
+                                state->pattern_count);
+      }
+      slot = next_slot;
     }
-    shared->compact_batch_targets[target_count].state = state;
-    shared->compact_batch_targets[target_count].dep_pos = dep_pos;
-    shared->compact_batch_targets[target_count].lij =
-      state->values[dep_pos] / dep_pivot;
-    target_count++;
-    if (trace != NULL) {
-      kls_row_first_stats_add(&trace->compact_window_targets, 1u);
-      kls_row_first_stats_add(&trace->compact_window_target_u_entries,
-                              row_entries);
-      kls_row_first_stats_add(&trace->compact_window_state_rows,
-                              state->pattern_count);
+  } else {
+    for (int slot = 0; slot < shared->compact_window_count; ++slot) {
+      kls_row_first_compact_window_state *state =
+        shared->compact_window_states + slot;
+      if (!state->active) {
+        continue;
+      }
+      if (trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_probes, 1u);
+      }
+      if (state->row <= dep || state->heap_size == 0u ||
+          state->heap[0] != dep) {
+        continue;
+      }
+      UF_long dep_pos = KLS_KLU_EMPTY;
+      if (!kls_row_first_compact_window_value_pos(state, dep, &dep_pos) ||
+          dep_pos >= state->pattern_count ||
+          target_count >= (UF_long)shared->compact_batch_target_capacity ||
+          !kls_row_first_compact_window_l_reserve(
+            state, state->l_count + 1u)) {
+        kls_row_first_compact_window_state_clear(state);
+        if (trace != NULL) {
+          kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+        }
+        continue;
+      }
+      shared->compact_batch_targets[target_count].state = state;
+      shared->compact_batch_targets[target_count].dep_pos = dep_pos;
+      shared->compact_batch_targets[target_count].lij =
+        state->values[dep_pos] / dep_pivot;
+      target_count++;
+      if (trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_targets, 1u);
+        kls_row_first_stats_add(&trace->compact_window_target_u_entries,
+                                row_entries);
+        kls_row_first_stats_add(&trace->compact_window_state_rows,
+                                state->pattern_count);
+      }
     }
   }
   if (target_count == 0u) {
@@ -89670,8 +89802,8 @@ static void kls_row_first_pipeline_apply_compact_window_producer_batch(
     if (col <= dep || col >= shared->ctx->nk) {
       for (UF_long t = 0; t < target_count; ++t) {
         if (shared->compact_batch_targets[t].state != NULL) {
-          kls_row_first_compact_window_state_clear(
-            shared->compact_batch_targets[t].state);
+          kls_row_first_pipeline_clear_compact_window_state(
+            shared, shared->compact_batch_targets[t].state);
           shared->compact_batch_targets[t].state = NULL;
         }
       }
@@ -89709,12 +89841,29 @@ static void kls_row_first_pipeline_apply_compact_window_producer_batch(
       }
     }
   }
+  for (UF_long t = 0; t < target_count; ++t) {
+    kls_row_first_compact_window_state *state =
+      shared->compact_batch_targets[t].state;
+    if (state != NULL && state->active &&
+        !kls_row_first_pipeline_register_compact_window_state(
+          shared, state)) {
+      if (trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+      }
+    }
+    shared->compact_batch_targets[t].state = NULL;
+  }
 }
 
 static void kls_row_first_pipeline_clear_compact_window(
   kls_row_first_pipeline_shared *shared) {
   if (shared == NULL || shared->compact_window_states == NULL) {
     return;
+  }
+  if (shared->compact_root_heads != NULL && shared->ctx != NULL) {
+    for (UF_long dep = 0; dep < shared->ctx->nk; ++dep) {
+      shared->compact_root_heads[dep] = -1;
+    }
   }
   for (int slot = 0; slot < shared->compact_window_count; ++slot) {
     kls_row_first_compact_window_state_clear(
@@ -89751,7 +89900,7 @@ static int kls_row_first_pipeline_fill_compact_window(
         if (trace != NULL) {
           kls_row_first_stats_add(&trace->compact_window_evictions, 1u);
         }
-        kls_row_first_compact_window_state_clear(state);
+        kls_row_first_pipeline_clear_compact_window_state(shared, state);
       } else {
         continue;
       }
@@ -89786,6 +89935,13 @@ static int kls_row_first_pipeline_fill_compact_window(
       }
       if (trace != NULL) {
         kls_row_first_stats_add(&trace->compact_window_fills, 1u);
+      }
+      if (!kls_row_first_pipeline_register_compact_window_state(
+            shared, state)) {
+        if (trace != NULL) {
+          kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+        }
+        continue;
       }
       break;
     }
@@ -90100,7 +90256,7 @@ static int kls_row_first_pipeline_try_claim_compact_window(
       continue;
     }
     if (state->pos < shared->completed_pos) {
-      kls_row_first_compact_window_state_clear(state);
+      kls_row_first_pipeline_clear_compact_window_state(shared, state);
       continue;
     }
     if (state->pos == wanted_pos) {
@@ -90113,18 +90269,19 @@ static int kls_row_first_pipeline_try_claim_compact_window(
   }
   kls_row_first_compact_window_state *state =
     shared->compact_window_states + best_slot;
+  kls_row_first_pipeline_unlink_compact_window_state(shared, state);
   if (state->row >= shared->ctx->nk ||
       state->generation == 0u ||
       state->pattern_count > shared->ctx->nk ||
       state->heap_size > state->pattern_count ||
       state->values == NULL) {
-    kls_row_first_compact_window_state_clear(state);
+    kls_row_first_pipeline_clear_compact_window_state(shared, state);
     return 0;
   }
   for (UF_long p = 0; p < state->pattern_count; ++p) {
     const UF_long col = state->pattern[p];
     if (col >= shared->ctx->nk) {
-      kls_row_first_compact_window_state_clear(state);
+      kls_row_first_pipeline_clear_compact_window_state(shared, state);
       return 0;
     }
     worker->workspace.pattern[p] = col;
@@ -90147,14 +90304,14 @@ static int kls_row_first_pipeline_try_claim_compact_window(
   if (state->l_count > 0u &&
       !kls_row_first_entries_reserve_append(
         &worker->l_entries, state->l_count)) {
-    kls_row_first_compact_window_state_clear(state);
+    kls_row_first_pipeline_clear_compact_window_state(shared, state);
     return 0;
   }
   for (UF_long p = 0; p < state->l_count; ++p) {
     if (!kls_row_first_entries_append_reserved(
           &worker->l_entries, state->row,
           state->l_cols[p], state->l_values[p])) {
-      kls_row_first_compact_window_state_clear(state);
+      kls_row_first_pipeline_clear_compact_window_state(shared, state);
       return 0;
     }
   }
@@ -90170,7 +90327,7 @@ static int kls_row_first_pipeline_try_claim_compact_window(
   *row_out = state->row;
   *order_epoch_out = shared->order_epoch;
 
-  kls_row_first_compact_window_state_clear(state);
+  kls_row_first_pipeline_clear_compact_window_state(shared, state);
   return 1;
 }
 
@@ -91028,6 +91185,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
   if ((UF_long)lookahead_count > pipeline_rows) {
     lookahead_count = (int)pipeline_rows;
   }
+  const int compact_window_execute_requested =
+    kls_row_pipeline_compact_window_exec_env_enabled();
   UF_long requested_compact_window =
     kls_row_pipeline_compact_window_slots_env();
   if (requested_compact_window > pipeline_rows) {
@@ -91051,6 +91210,11 @@ static int kls_row_first_run_parallel_pipeline_phase(
           calloc((size_t)compact_window_count,
                  sizeof(*compact_batch_targets))
       : NULL;
+  int *compact_root_heads =
+    compact_window_count > 0 && compact_window_execute_requested &&
+        ctx->nk <= (UF_long)(SIZE_MAX / sizeof(int))
+      ? (int *)malloc((size_t)ctx->nk * sizeof(*compact_root_heads))
+      : NULL;
   const int batch_target_capacity = worker_count + lookahead_count;
   kls_row_first_pipeline_batch_target *batch_targets =
     (kls_row_first_pipeline_batch_target *)
@@ -91068,12 +91232,15 @@ static int kls_row_first_run_parallel_pipeline_phase(
   if (threads == NULL || workers == NULL || batch_targets == NULL ||
       (lookahead_count > 0 && lookahead_states == NULL) ||
       (compact_window_count > 0 && compact_window_states == NULL) ||
-      (compact_window_count > 0 && compact_batch_targets == NULL)) {
+      (compact_window_count > 0 && compact_batch_targets == NULL) ||
+      (compact_window_count > 0 && compact_window_execute_requested &&
+       compact_root_heads == NULL)) {
     free(threads);
     free(workers);
     free(lookahead_states);
     free(compact_window_states);
     free(compact_batch_targets);
+    free(compact_root_heads);
     free(batch_targets);
     free(private_u_row_ptr);
     free(private_u_row_end);
@@ -91089,6 +91256,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
     free(lookahead_states);
     free(compact_window_states);
     free(compact_batch_targets);
+    free(compact_root_heads);
     free(batch_targets);
     kls_row_first_entries_free(&private_u_entries);
     free(private_u_row_ptr);
@@ -91161,6 +91329,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.batch_targets = batch_targets;
   shared.compact_batch_targets = compact_batch_targets;
   shared.compact_window_states = compact_window_states;
+  shared.compact_root_heads = compact_root_heads;
   shared.worker_count = worker_count;
   shared.lookahead_count = lookahead_count;
   shared.compact_window_count = compact_window_count;
@@ -91176,8 +91345,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
     requested_pivot_lookahead > 0u && shared.producer_batch_enabled;
   shared.lookahead_max_inputs =
     kls_row_pipeline_lookahead_max_inputs_env();
-  shared.compact_window_execute_enabled =
-    kls_row_pipeline_compact_window_exec_env_enabled();
+  shared.compact_window_execute_enabled = compact_window_execute_requested;
   shared.compact_window_enabled =
     (shared.trace_enabled &&
      kls_row_pipeline_compact_window_trace_env_enabled()) ||
@@ -91187,6 +91355,16 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.compact_window_next_pos = begin;
   shared.long_row_trace_threshold =
     shared.trace_enabled ? kls_row_pipeline_long_row_trace_threshold() : 0u;
+  if (compact_root_heads != NULL) {
+    for (UF_long dep = 0; dep < ctx->nk; ++dep) {
+      compact_root_heads[dep] = -1;
+    }
+  }
+  for (int slot = 0; slot < compact_window_count; ++slot) {
+    compact_window_states[slot].bucket_slot = slot;
+    compact_window_states[slot].bucket_next = -1;
+    compact_window_states[slot].bucket_dep = KLS_KLU_EMPTY;
+  }
   atomic_init(&shared.next_pos, (unsigned long)begin);
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {
     kls_row_first_supernode_panel_cache_free(
@@ -91196,6 +91374,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
     free(lookahead_states);
     free(compact_window_states);
     free(compact_batch_targets);
+    free(compact_root_heads);
     free(batch_targets);
     kls_row_first_entries_free(&private_u_entries);
     free(private_u_row_ptr);
@@ -91214,6 +91393,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
     free(lookahead_states);
     free(compact_window_states);
     free(compact_batch_targets);
+    free(compact_root_heads);
     free(batch_targets);
     kls_row_first_entries_free(&private_u_entries);
     free(private_u_row_ptr);
@@ -91367,6 +91547,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   free(lookahead_states);
   free(compact_window_states);
   free(compact_batch_targets);
+  free(compact_root_heads);
   free(batch_targets);
   free(shared.trace_state_union_mark);
   return ok;

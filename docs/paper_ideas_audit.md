@@ -14412,6 +14412,19 @@ a better paper-aligned substrate than independent compact states, but the
 bounded compact window is still not the missing CKTSO-scale grouped
 row/supernode owner.
 
+The compact-exec target lookup is now indexed by each live compact state's root
+dependency instead of scanning every compact slot at every producer publication.
+On the 64-state `pre2` trace, this preserves the same grouped compact surface
+while cutting `compact_window_probes` from `36497216` to `2078045`, matching the
+number of actual compact targets. The indexed 45s trace
+`build/kls_pre2_compact_index_w64_trace45.stderr` reached the same
+`589824/629628` checkpoint with `153075875` compact target U entries and
+`15382089` streamed producer U entries (`9.95x` reuse). This removes avoidable
+scan overhead in the opt-in compact prototype, but it is not the large missing
+paper mechanism: the no-trace indexed run
+`build/kls_pre2_compact_index_w64_notrace120.json` still timed out with no JSON
+row under the 120s cap.
+
 An early-abort guard for separator-private dynamic pivots was tested and
 rejected before commit. The experiment stopped the private separator phase on
 `pre2` after `1024` dynamic column pivots, before the later `pivot-reject`,

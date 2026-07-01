@@ -2198,7 +2198,9 @@ controls the number of compact sparse states, and
 sparse numeric prototype for unreserved first-factor rows: producer publication
 collects compact states whose root dependency is the just-published producer,
 streams that producer row across the target batch, and lets a worker claim one
-prepared state instead of replaying its prefix from the input row. This remains
+prepared state instead of replaying its prefix from the input row. Live compact
+states are bucketed by root dependency, so producer publication no longer scans
+the whole compact window before every grouped update. This remains
 off by default; use it only for focused paper-gap probes. Same-session `pre2`
 probes show
 the default AMD run enters the 629,628-row dominant BTF block with no separator
