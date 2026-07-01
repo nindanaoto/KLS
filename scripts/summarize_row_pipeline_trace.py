@@ -74,6 +74,16 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_producer_targets = 0
     long_producer_target_u = 0
     long_panel_rows = 0
+    long_pivot_scalar = 0
+    long_pivot_output = 0
+    long_pivot_producer_rows = 0
+    long_pivot_producer_targets = 0
+    long_pivot_producer_target_u = 0
+    long_pivot_probe_lookahead = 0
+    long_pivot_ready_roots = 0
+    long_pivot_underfilled = 0
+    long_pivot_reject_bad_state = 0
+    long_pivot_reject_epoch = 0
 
     with path.open("r", encoding="utf-8", errors="replace") as trace:
         for line in trace:
@@ -94,6 +104,26 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_producer_targets += parse_int(row.get("producer_targets"))
             long_producer_target_u += parse_int(row.get("producer_target_u_entries"))
             long_panel_rows += parse_int(row.get("panel_update_rows"))
+            if pivoted:
+                producer_batches = parse_int(row.get("producer_batches"))
+                producer_targets = parse_int(row.get("producer_targets"))
+                producer_target_u = parse_int(row.get("producer_target_u_entries"))
+                long_pivot_scalar += parse_int(row.get("scalar_u_entries"))
+                long_pivot_output += parse_int(row.get("scalar_u_output"))
+                long_pivot_producer_rows += 1 if producer_batches > 0 else 0
+                long_pivot_producer_targets += producer_targets
+                long_pivot_producer_target_u += producer_target_u
+                long_pivot_probe_lookahead += parse_int(
+                    row.get("producer_probe_lookahead")
+                )
+                long_pivot_ready_roots += parse_int(row.get("producer_ready_roots"))
+                long_pivot_underfilled += parse_int(row.get("producer_underfilled"))
+                long_pivot_reject_bad_state += parse_int(
+                    row.get("producer_reject_bad_state")
+                )
+                long_pivot_reject_epoch += parse_int(
+                    row.get("producer_reject_epoch")
+                )
 
     completed, total = split_completed(last_trace.get("completed"))
     scalar = parse_int(last_trace.get("scalar_u_entries"))
@@ -119,6 +149,16 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_producer_targets": long_producer_targets,
         "long_producer_target_u_entries": long_producer_target_u,
         "long_panel_update_rows": long_panel_rows,
+        "long_pivot_scalar_u_entries": long_pivot_scalar,
+        "long_pivot_scalar_u_output": long_pivot_output,
+        "long_pivot_producer_rows": long_pivot_producer_rows,
+        "long_pivot_producer_targets": long_pivot_producer_targets,
+        "long_pivot_producer_target_u_entries": long_pivot_producer_target_u,
+        "long_pivot_probe_lookahead": long_pivot_probe_lookahead,
+        "long_pivot_ready_roots": long_pivot_ready_roots,
+        "long_pivot_underfilled": long_pivot_underfilled,
+        "long_pivot_reject_bad_state": long_pivot_reject_bad_state,
+        "long_pivot_reject_epoch": long_pivot_reject_epoch,
         "completion_fraction": ratio(completed, total),
         "scalar_u_output_share": ratio(output, scalar),
         "producer_target_u_per_scalar_u": ratio(producer_target_u, scalar),
@@ -132,6 +172,15 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         ),
         "long_scalar_u_output_per_producer_target_u": ratio(
             long_output, long_producer_target_u
+        ),
+        "long_pivot_producer_row_share": ratio(
+            long_pivot_producer_rows, long_pivot_rows
+        ),
+        "long_pivot_producer_target_u_per_scalar_u": ratio(
+            long_pivot_producer_target_u, long_pivot_scalar
+        ),
+        "long_pivot_scalar_u_output_per_producer_target_u": ratio(
+            long_pivot_output, long_pivot_producer_target_u
         ),
     }
     for name in PRODUCER_COUNTERS:
@@ -160,17 +209,29 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_rows",
         "long_max_row",
         "long_pivot_rows",
+        "long_pivot_producer_rows",
         "long_scalar_u_entries",
         "long_scalar_u_output",
         "long_producer_target_u_entries",
+        "long_pivot_scalar_u_entries",
+        "long_pivot_scalar_u_output",
+        "long_pivot_producer_target_u_entries",
+        "long_pivot_probe_lookahead",
+        "long_pivot_ready_roots",
+        "long_pivot_underfilled",
+        "long_pivot_reject_bad_state",
+        "long_pivot_reject_epoch",
         "completion_fraction",
         "scalar_u_output_share",
         "producer_target_u_per_scalar_u",
         "scalar_u_output_per_producer_target_u",
         "long_pivot_share",
+        "long_pivot_producer_row_share",
         "long_scalar_u_output_share",
         "long_producer_target_u_per_scalar_u",
         "long_scalar_u_output_per_producer_target_u",
+        "long_pivot_producer_target_u_per_scalar_u",
+        "long_pivot_scalar_u_output_per_producer_target_u",
     ]
     print(",".join(columns))
     for row in rows:

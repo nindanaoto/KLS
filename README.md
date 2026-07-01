@@ -2494,13 +2494,15 @@ only about 8.0M target U entries in that logged tail, so the missing paper
 piece is still a producer/panel-to-many-current row/supernode numeric owner,
 not another ordering-only change.
 Use `scripts/summarize_row_pipeline_trace.py build/...stderr` to compare these
-tail traces without hand-written `awk`. Current same-commit probes also reject
-three narrower policies as gap closers: 8/32-slot experimental lookahead grows
-producer target entries but advances fewer tail rows in 45s, explicit scale `2`
-advances fewer rows than the auto-scale trace, and lower pivot tolerances
-(`1e-4`, `1e-5`) still time out at 120s despite reducing some traced scalar
-work. These probes narrow the next implementation target to the grouped
-numeric owner rather than policy selection around the existing scalar states.
+tail traces without hand-written `awk`; it now also reports pivot-long-row
+producer coverage and pivot scalar-output/producer-target ratios. Current
+same-commit probes also reject three narrower policies as gap closers: 8/32-slot
+experimental lookahead grows producer target entries but advances fewer tail
+rows in 45s, explicit scale `2` advances fewer rows than the auto-scale trace,
+and lower pivot tolerances (`1e-4`, `1e-5`) still time out at 120s despite
+reducing some traced scalar work. These probes narrow the next implementation
+target to the grouped numeric owner rather than policy selection around the
+existing scalar states.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while

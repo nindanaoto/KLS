@@ -13979,3 +13979,36 @@ post-pivot path opt-in: it proves that pivot rows were a real missing producer
 surface, but closing the CKTSO gap still requires a persistent grouped-current
 numeric owner that avoids materializing and replaying independent sparse
 current states.
+
+The follow-up pivot-row split in `scripts/summarize_row_pipeline_trace.py`
+confirms why the default-capped diagnostic did not close the timeout. With
+`KLS_ROW_PIPELINE_PIVOT_LOOKAHEAD=8`, only `14` of `1826` logged pivot long rows
+actually applied a producer batch, and pivot-row producer target U entries were
+just `77502` against `3.870788451e9` pivot scalar output entries. Disabling the
+lookahead raw-input cap for the same pivot-only diagnostic
+(`KLS_ROW_PIPELINE_LOOKAHEAD_MAX_INPUTS=0`,
+`build/kls_pre2_pivot_lookahead8_maxinputs0_trace90.stderr`) made `916` of
+`921` logged pivot long rows batch the pivot producer, raised pivot producer
+target U entries to `15566778`, and reduced the pivot scalar-output/producer
+target ratio from `49944x` to `109.82x`. The non-traced 125s run still timed
+out in `build/kls_pre2_pivot_lookahead8_maxinputs0_t4_r1_ref0_timeout125.json`,
+so broader pivot eligibility is not sufficient by itself.
+
+A sparse-state preservation prototype was rejected before commit. It tried to
+carry unclaimed lookahead states across a pivot by applying the column exchange
+to each saved sparse workspace and rebuilding its local dependency heap, rather
+than clearing and refilling from raw input. Correctness passed the normal smoke
+test and the opt-in preserve smoke test, but the focused `pre2` traces were
+negative. With the normal input cap,
+`build/kls_pre2_pivot_lookahead8_preserve_trace90.stderr` increased scalar
+touches to `982777460` and only batched `281` of `1095` logged pivot long rows,
+versus `868249990` scalar touches for the capped refill path. With the cap
+disabled,
+`build/kls_pre2_pivot_lookahead8_maxinputs0_preserve_trace90.stderr` increased
+scalar touches to `1139176876` and worsened the pivot scalar-output/producer
+target ratio to `147.59x`, versus `859854990` scalar touches and `109.82x` for
+the no-cap refill path. This rejects preserving independent sparse lookahead
+states as the persistent owner. The next implementation target remains a
+coarser grouped-current numeric owner that advances a batch as one object,
+rather than carrying many separately caught-up sparse row workspaces across
+pivots.
