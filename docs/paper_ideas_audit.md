@@ -14837,3 +14837,35 @@ timed out with an empty JSON row. This confirms that a transient per-batch
 shared union is not enough; the next algorithmic gap is a persistent grouped
 owner that avoids scatter-back to independent compact states after every
 producer.
+
+The compact live-window executor now has a first persistent grouped-current
+owner. When a shared-union compact batch leaves at least two target rows with
+the same next dependency, KLS promotes that subset into a dense target-by-union
+group instead of immediately scattering every target back to independent
+compact states. When that dependency row is published, the group advances in
+place, then either keeps the next common-root subgroup dense or scatters the
+remaining targets back to normal compact-window states. This directly implements
+the next paper-shaped step from the prior audit note: keep a grouped row owner
+alive across producer rows, with cache-clear fallback preserving correctness.
+The trace helper now reports
+`compact_window_group_{steps,targets,cols,values}`.
+
+Correctness remained clean under `./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and compact-exec `add20` /
+`bcircuit` probes with relative residuals `3.79718427e-16` and
+`7.87813496e-17`. On the focused `pre2` 64-slot compact-exec trace
+`build/kls_pre2_compact_group_w64_trace45.stderr`, the persistent group path
+did fire: `93,435` grouped producer steps, `414,446` grouped targets,
+`9,923,866` grouped union columns, and `78,970,065` grouped target-union
+values. Compared with the previous transient-union trace at the same
+`589824/629628` checkpoint, compact target U entries fell from `152,987,452`
+to `124,741,863`, compact state rows from `267,215,868` to `217,526,803`, and
+union-batch target-union values from `453,573,710` to `361,785,375`. The
+no-trace 125s factor-only probe
+`build/kls_pre2_compact_group_w64_factor_t4_r1_ref0_timeout125.json` still
+timed out with an empty JSON row, so this is an enabling algorithmic step, not
+yet a CKTSO-scale gap closer. The remaining loss is still larger than a
+scatter-back cleanup: KLS needs the grouped owner to cover a much larger part
+of the first-factor row state, likely beyond the bounded 64-row compact window
+and into the main row/panel owner used after the separator-private attempt
+falls back to the full-block pipeline.
