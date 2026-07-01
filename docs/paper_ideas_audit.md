@@ -14536,3 +14536,53 @@ useful conclusion is that retaining sparse side states across pivots can expose
 more producer/target surface, but the surface is still far too bounded and
 state-local; the next implementation needs a coarser owner for many current
 rows, not better lifetime management for independent compact states.
+
+The BTF scalar-run group descriptor now has an opt-in live-state union
+diagnostic,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STATE_STATS=1`, that measures
+the sparse workspace shape needed by the missing grouped-current owner before
+the retained-state executor materializes per-current sparse states. For each
+multi-current BTF scalar-run group, KLS reuses the existing structural row
+collector to count both the duplicated per-member retained rows and the exact
+union of local state rows that a single grouped live workspace would need. The
+fields are visible through `kls_stats`, benchmark JSON/text, and the gap
+decomposition CSV as
+`refactor_btf_scalar_run_group_live_state_groups`,
+`refactor_btf_scalar_run_group_live_state_currents`,
+`refactor_btf_scalar_run_group_live_state_rows`,
+`refactor_btf_scalar_run_group_live_state_unique_rows`,
+`refactor_btf_scalar_run_group_live_state_reused_rows`,
+`refactor_btf_scalar_run_group_live_state_max_currents`,
+`refactor_btf_scalar_run_group_live_state_max_rows`, and
+`refactor_btf_scalar_run_group_live_state_max_unique_rows`.
+
+Validation stayed clean:
+`cmake --build build --target kls_bench kls_smoke -j2`,
+`./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STATE_STATS=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure` all passed. The default
+`ASIC_100ks` control
+`build/kls_asic100ks_live_state_default_t4_r1_ref1.json` left the descriptor
+and live-state counters at zero and measured `initial_factor_seconds=0.752872`
+and `refactor_seconds_avg=0.0471574`. With the diagnostic enabled,
+`build/kls_asic100ks_live_state_stats_t4_r1_ref1.json` stayed residual-clean
+(`relative_residual_l2=1.92251861e-15`) and reported `13,116` live-state
+groups covering `104,280` current memberships, `58,663,555` duplicated
+per-current state rows, `20,355,030` unique grouped rows, `38,308,525` reusable
+rows, max fanout `362`, max duplicated group rows `489,578`, and max unique
+group rows `27,386`. `ASIC_320ks` in
+`build/kls_asic320ks_live_state_stats_t4_r1_ref1.json` was also residual-clean
+(`2.08436857e-15`) and reported `33,856` groups, `121,701` memberships,
+`50,818,849` duplicated rows, `18,462,708` unique grouped rows, `32,356,141`
+reusable rows, max fanout `444`, max duplicated group rows `501,702`, and max
+unique group rows `21,683`.
+
+This fills a diagnostic gap between the paper-level idea and the current
+retained-state prototype. The whole-group state collapse is real, about `2.88x`
+on `ASIC_100ks` and `2.75x` on `ASIC_320ks`, but it is smaller than the
+producer-step row-union collapse observed after materialization. That means the
+next implementation should not simply allocate one full union workspace per
+static group and expect a CKTSO-sized win. The stronger target is a
+producer/window-scoped grouped workspace that keeps only the live row union for
+the active producer slice, then publishes or restores the nonidentical current
+outputs from that owner.

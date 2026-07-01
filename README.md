@@ -1275,6 +1275,18 @@ completed-producer lookup built from that fanout: each producer index entry owns
 one or more group steps, and each step owns the active grouped-current members
 for that producer row. The reused-entry counters estimate the L-entry stream
 that such an owner could read once while updating several current workspaces.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STATE_STATS=1` adds a
+descriptor-level sparse-state union diagnostic for the same grouped current
+sets. It reports `refactor_btf_scalar_run_group_live_state_groups`,
+`refactor_btf_scalar_run_group_live_state_currents`,
+`refactor_btf_scalar_run_group_live_state_rows`,
+`refactor_btf_scalar_run_group_live_state_unique_rows`,
+`refactor_btf_scalar_run_group_live_state_reused_rows`,
+`refactor_btf_scalar_run_group_live_state_max_currents`,
+`refactor_btf_scalar_run_group_live_state_max_rows`, and
+`refactor_btf_scalar_run_group_live_state_max_unique_rows`. These counters
+estimate how much per-current retained sparse state a grouped live workspace
+could collapse before enabling any retained-state numeric executor.
 The retained group descriptor is tied to the LU pointer cache and is reused
 across repeated numeric refactors until the numeric pattern changes.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS=1` also builds that
