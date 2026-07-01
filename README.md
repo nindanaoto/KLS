@@ -284,7 +284,13 @@ separator pivots through
 through `kls_first_last_separator_extent_dynamic_column_pivots` and
 `kls_first_separator_extent_dynamic_column_pivot_count`, and cross-domain
 rejections through `kls_first_last_separator_dynamic_column_fallbacks` and
-`kls_first_separator_dynamic_column_fallback_count`. If a guarded separator
+`kls_first_separator_dynamic_column_fallback_count`. Private separator workers
+also restrict off-diagonal pivot candidates to columns owned by the same
+private domain. If that private search still rejects a pivot, KLS does not
+publish the completed private prefix: later dynamic column exchanges can
+conflict with already-published private U rows unless a future deferred-swap
+owner is available, so the block falls back to the ordinary full row pipeline.
+If a guarded separator
 pipeline row still needs a dynamic pivot, KLS preserves the completed prefix,
 publishes the scoped pivot row while holding the ordered pipeline lock, updates
 the phase-local prefix snapshot, advances a column-order epoch, and lets

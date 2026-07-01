@@ -6,6 +6,33 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The first-factor separator-private pivot path is now closer to SubtreeLU's
+private-mode rule: private pivot search is restricted to columns owned by the
+same private worker. This fixes the earlier `pre2` diagnostic where a private
+row selected a pipeline-owned pivot candidate and then failed only at the
+post-selection owner check. The current trace
+`build/kls_pre2_pivot_reject_no_partial_trace35.stderr` instead fails the
+private phase at `failed_row=130192` with `reason=pivot-reject`, after
+`38134` rows in that worker and `480390` total completed private rows across
+workers. That is the expected paper-level boundary: private mode cannot safely
+continue when the row needs a cross-owner dynamic pivot.
+
+Partial publication of those completed private rows was tested and rejected for
+pivot-related failures. With all completed private rows published, the active
+tail shrank to `149238` rows, but relaxing the tail to allow cross-component
+active pivots later failed at `reason=pivot-exchange`: the selected active
+column conflicted with already-published private U rows. With a first-failed-row
+cutoff, the active tail grew to `499436` rows and still did not provide a
+CKTSO-scale path. KLS therefore only allows partial separator-private
+publication for non-pivot private failures; `pivot-reject`, `pivot-owner`,
+`pivot-exchange`, `pivot-verify`, and append failures discard private work and
+fall back to the ordinary full row pipeline. On `pre2`, the guarded fallback
+records `private_rows=0`, `partial_active=0`, and the full row pipeline reaches
+`589824/629628` rows in the 35s trace. Closing this gap still requires the
+larger paper-level mechanism: a pivot-compatible grouped-current/deferred-swap
+numeric owner, not just committing private prefixes after a dynamic-pivot
+failure.
+
 The separator-tree row refactor now has a validation-gated ordered-private
 executor for SubtreeLU-style private subdomains. The separator FLOP queue
 already promotes any private group reached from pipeline work back into the
