@@ -13886,3 +13886,33 @@ traced scalar work but not the timeout: `pivot_tol=1e-4`
 the next code target on a real grouped-current numeric owner, not larger
 lookahead, stronger scaling, or lower pivot tolerance around the existing
 per-current scalar state.
+
+A fresh current-tree timeout-pair recheck at `b6fb241` keeps the same largest
+gap. With the same two-matrix large-recon slice, four threads, `repeat=1`,
+`refactor-repeat=1`, and a 120s per-matrix cap, KLS emitted no rows in
+`build/kls_timeout_pair_b6fb241_t4_r1_ref1_timeout120.jsonl`; the sidecar
+records 120s timeouts on both `pre2` and `Hamrle3`. CKTSO completed `pre2` in
+`build/cktso_timeout_pair_b6fb241_t4_r1_ref1_timeout120.jsonl`
+(`analysis_seconds=4.515627`, `initial_factor_seconds=8.042882`,
+`factor_seconds_avg=6.024751`, `refactor_seconds_avg=5.303302`,
+`solve_seconds_avg=0.141433`) and timed out only on `Hamrle3`. The KLS failure
+diagnostic for `pre2` completed analyze-only in `14.0594538s`, selected
+`ordering=metis`, and again reported a 629,628-row dominant BTF block with
+`separator_pipeline_rows=4126`, so ordering/analyze remains a secondary cost
+rather than the timeout-sized gap.
+
+The matching current-tree forced KLS-owned trace,
+`build/kls_pre2_b6fb241_forced_trace45.stderr`, reached the same
+`589824/629628` checkpoint. The trace summarized `869372808` scalar U-entry
+touches, `744003478` of them trailing/output touches. Producer batching
+covered only `912507` target U entries at that checkpoint, so scalar output was
+`815.34x` larger than the producer-target U stream and producer targets covered
+only `0.105%` of scalar U work. The 45s cap also logged `2132` long rows
+through row `598963`; those long rows replayed `5129278578` scalar U entries,
+`3574480212` of them trailing/output entries, with only `7403498`
+producer-target U entries. Pivot rows were `874` of those long rows (`40.99%`),
+and long-row scalar output was still `482.81x` larger than producer-target U
+work. This recheck points to the same missing paper algorithm: a grouped
+producer/panel-to-many-current numeric owner for the pivoting dominant-BTF
+tail, not a wider ordering package, BLAS threshold, or larger lookahead around
+the existing scalar current-row replay.

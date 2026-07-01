@@ -52,6 +52,12 @@ def split_completed(value: str | None) -> tuple[int, int]:
     return parse_int(done), parse_int(total)
 
 
+def ratio(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return float(numerator) / float(denominator)
+
+
 def fields(line: str) -> dict[str, str]:
     return {match.group(1): match.group(2) for match in KEY_VALUE_RE.finditer(line)}
 
@@ -113,6 +119,20 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_producer_targets": long_producer_targets,
         "long_producer_target_u_entries": long_producer_target_u,
         "long_panel_update_rows": long_panel_rows,
+        "completion_fraction": ratio(completed, total),
+        "scalar_u_output_share": ratio(output, scalar),
+        "producer_target_u_per_scalar_u": ratio(producer_target_u, scalar),
+        "scalar_u_output_per_producer_target_u": ratio(
+            output, producer_target_u
+        ),
+        "long_pivot_share": ratio(long_pivot_rows, long_rows),
+        "long_scalar_u_output_share": ratio(long_output, long_scalar),
+        "long_producer_target_u_per_scalar_u": ratio(
+            long_producer_target_u, long_scalar
+        ),
+        "long_scalar_u_output_per_producer_target_u": ratio(
+            long_output, long_producer_target_u
+        ),
     }
     for name in PRODUCER_COUNTERS:
         summary[name] = parse_int(last_trace.get(name))
@@ -143,10 +163,26 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_scalar_u_entries",
         "long_scalar_u_output",
         "long_producer_target_u_entries",
+        "completion_fraction",
+        "scalar_u_output_share",
+        "producer_target_u_per_scalar_u",
+        "scalar_u_output_per_producer_target_u",
+        "long_pivot_share",
+        "long_scalar_u_output_share",
+        "long_producer_target_u_per_scalar_u",
+        "long_scalar_u_output_per_producer_target_u",
     ]
     print(",".join(columns))
     for row in rows:
-        print(",".join(str(row[column]) for column in columns))
+        print(",".join(format_value(row[column]) for column in columns))
+
+
+def format_value(value: object) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
 
 
 def main() -> int:
