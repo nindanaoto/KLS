@@ -2364,8 +2364,8 @@ cache alive after speculative row-supernode metadata is disabled, invalidates
 stale panels across dynamic column pivots, publishes completed producer panels
 as rows commit, and lets later dependency drains use those panels before the
 scalar row-entry fallback. `KLS_TRACE_ROW_PIPELINE=1` now also reports
-`panel_updates`, `panel_update_rows`, `panel_appends`, and
-`panel_append_entries`. The trace also reports `producer_state_rows` and
+`panel_updates`, `panel_update_rows`, `panel_update_entries`, `panel_appends`,
+and `panel_append_entries`. The trace also reports `producer_state_rows` and
 `producer_unique_state_rows` for successful producer batches, measuring how
 much sparse current-state row storage a future grouped live workspace could
 collapse. This is useful but not enough for `pre2`: a traced forced-METIS run

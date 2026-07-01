@@ -86679,6 +86679,7 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long producer_reject_cached_panel;
   UF_long panel_update_groups;
   UF_long panel_update_rows;
+  UF_long panel_update_entries;
   UF_long panel_cache_appends;
   UF_long panel_cache_append_entries;
   UF_long local_l_reserve_growths;
@@ -86849,6 +86850,8 @@ static void kls_row_first_pipeline_trace_add(
                           source->panel_update_groups);
   kls_row_first_stats_add(&target->panel_update_rows,
                           source->panel_update_rows);
+  kls_row_first_stats_add(&target->panel_update_entries,
+                          source->panel_update_entries);
   kls_row_first_stats_add(&target->panel_cache_appends,
                           source->panel_cache_appends);
   kls_row_first_stats_add(&target->panel_cache_append_entries,
@@ -90890,6 +90893,31 @@ static int kls_row_first_partial_apply_ready(
     supernode_panel_rows_out, stats, trace, blocked_out);
 }
 
+static UF_long kls_row_first_published_u_run_entries(
+  const kls_row_first_entries *published_u_entries,
+  const UF_long *u_row_ptr,
+  const UF_long *u_row_end,
+  UF_long begin,
+  UF_long rows) {
+  if (published_u_entries == NULL || u_row_ptr == NULL || u_row_end == NULL ||
+      rows == 0u) {
+    return 0u;
+  }
+  UF_long entries = 0u;
+  for (UF_long offset = 0; offset < rows; offset++) {
+    if (begin > UF_long_max - offset) {
+      break;
+    }
+    const UF_long row = begin + offset;
+    const UF_long row_begin = u_row_ptr[row];
+    const UF_long row_end = u_row_end[row];
+    if (row_begin <= row_end && row_end <= published_u_entries->count) {
+      kls_row_first_stats_add(&entries, row_end - row_begin);
+    }
+  }
+  return entries;
+}
+
 static int kls_row_first_partial_apply_ready_until(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
@@ -91001,6 +91029,10 @@ static int kls_row_first_partial_apply_ready_until(
         if (trace != NULL) {
           kls_row_first_stats_add(&trace->panel_update_groups, 1u);
           kls_row_first_stats_add(&trace->panel_update_rows, run_rows);
+          kls_row_first_stats_add(
+            &trace->panel_update_entries,
+            kls_row_first_published_u_run_entries(
+              published_u_entries, u_row_ptr, u_row_end, dep, run_rows));
         }
       }
     }
@@ -92630,6 +92662,7 @@ static void kls_row_first_pipeline_trace_print(
           " producer_reject_supernode=%" PRIu64
           " producer_reject_cached_panel=%" PRIu64
           " panel_updates=%" PRIu64 " panel_update_rows=%" PRIu64
+          " panel_update_entries=%" PRIu64
           " panel_appends=%" PRIu64 " panel_append_entries=%" PRIu64
           " local_l_growths=%" PRIu64 " local_l_copied=%" PRIu64
           " local_u_growths=%" PRIu64 " local_u_copied=%" PRIu64
@@ -92686,6 +92719,7 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->producer_reject_cached_panel,
           (uint64_t)trace->panel_update_groups,
           (uint64_t)trace->panel_update_rows,
+          (uint64_t)trace->panel_update_entries,
           (uint64_t)trace->panel_cache_appends,
           (uint64_t)trace->panel_cache_append_entries,
           (uint64_t)trace->local_l_reserve_growths,
@@ -93239,6 +93273,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " producer_reject_cached_panel=%" PRIu64
                         " panel_updates=%" PRIu64
                         " panel_update_rows=%" PRIu64
+                        " panel_update_entries=%" PRIu64
                         " l_entries=%" PRIu64
                         " u_entries=%" PRIu64
                         " pattern=%" PRIu64
@@ -93292,6 +93327,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.producer_reject_cached_panel,
                         (uint64_t)worker->trace_current.panel_update_groups,
                         (uint64_t)worker->trace_current.panel_update_rows,
+                        (uint64_t)worker->trace_current.panel_update_entries,
                         (uint64_t)worker->l_entries.count,
                         (uint64_t)worker->u_entries.count,
                         (uint64_t)state.pattern_count,

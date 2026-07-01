@@ -104,6 +104,7 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_compact_window_stream_u = 0
     long_compact_window_state_rows = 0
     long_panel_rows = 0
+    long_panel_entries = 0
     long_pivot_scalar = 0
     long_pivot_output = 0
     long_pivot_producer_rows = 0
@@ -172,6 +173,7 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
                 row.get("compact_window_state_rows")
             )
             long_panel_rows += parse_int(row.get("panel_update_rows"))
+            long_panel_entries += parse_int(row.get("panel_update_entries"))
             if pivoted:
                 producer_batches = parse_int(row.get("producer_batches"))
                 producer_targets = parse_int(row.get("producer_targets"))
@@ -230,6 +232,7 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         last_trace.get("compact_window_state_rows")
     )
     panel_rows = parse_int(last_trace.get("panel_update_rows"))
+    panel_entries = parse_int(last_trace.get("panel_update_entries"))
     summary: dict[str, object] = {
         "path": str(path),
         "trace_events": trace_event_count,
@@ -254,6 +257,7 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_stream_u_entries": compact_window_stream_u,
         "compact_window_state_rows": compact_window_state_rows,
         "panel_update_rows": panel_rows,
+        "panel_update_entries": panel_entries,
         "long_rows": long_rows,
         "long_max_row": long_max_row,
         "long_pivot_rows": long_pivot_rows,
@@ -278,6 +282,7 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_compact_window_stream_u_entries": long_compact_window_stream_u,
         "long_compact_window_state_rows": long_compact_window_state_rows,
         "long_panel_update_rows": long_panel_rows,
+        "long_panel_update_entries": long_panel_entries,
         "long_pivot_scalar_u_entries": long_pivot_scalar,
         "long_pivot_scalar_u_output": long_pivot_output,
         "long_pivot_producer_rows": long_pivot_producer_rows,
@@ -307,6 +312,8 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "scalar_u_output_per_compact_window_target_u": ratio(
             output, compact_window_target_u
         ),
+        "panel_update_entries_per_scalar_u": ratio(panel_entries, scalar),
+        "scalar_u_output_per_panel_update_entries": ratio(output, panel_entries),
         "scalar_u_output_per_producer_target_u": ratio(
             output, producer_target_u
         ),
@@ -329,6 +336,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         ),
         "long_scalar_u_output_per_producer_target_u": ratio(
             long_output, long_producer_target_u
+        ),
+        "long_panel_update_entries_per_scalar_u": ratio(
+            long_panel_entries, long_scalar
+        ),
+        "long_scalar_u_output_per_panel_update_entries": ratio(
+            long_output, long_panel_entries
         ),
         "long_producer_state_rows_per_unique": ratio(
             long_producer_state_rows, long_producer_unique_state_rows
@@ -390,6 +403,9 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "producer_reject_dep_absent",
         "producer_reject_not_root",
         "panel_update_rows",
+        "panel_update_entries",
+        "panel_update_entries_per_scalar_u",
+        "scalar_u_output_per_panel_update_entries",
         "long_rows",
         "long_max_row",
         "long_pivot_rows",
@@ -415,6 +431,10 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_compact_window_target_u_per_stream_u",
         "long_compact_window_target_u_per_scalar_u",
         "long_compact_window_state_rows",
+        "long_panel_update_rows",
+        "long_panel_update_entries",
+        "long_panel_update_entries_per_scalar_u",
+        "long_scalar_u_output_per_panel_update_entries",
         "long_pivot_scalar_u_entries",
         "long_pivot_scalar_u_output",
         "long_pivot_producer_target_u_entries",

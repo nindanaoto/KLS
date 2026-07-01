@@ -14757,3 +14757,17 @@ index workspace. This removes per-attempt `malloc`/`calloc`/`free` churn from
 the accepted dense-group supernode paths without changing admission gates or
 numeric behavior. It is a prerequisite cleanup for broader paper-shaped row
 owners, not evidence that the remaining `pre2` timeout gap has been closed.
+
+The `pre2` timeout probe now tracks panel-backed update work by published-U
+entries, not just by dependency rows. A forced METIS/KLS-first 45s trace still
+timed out at the same structural point: the separator-private attempt rejected a
+pivot after 5,933 dynamic separator pivots and the full-block row pipeline then
+reached `589824/629628` rows. At that point scalar fallback had scanned
+`623,926,801` U entries and produced `534,485,690` output-side U entries, while
+cached panel runs covered only `192,018` rows and `30,087,557` published-U
+entries. That is about `4.8%` of scalar U input volume, or roughly `17.8x` less
+than scalar U output. This rules out "there are many panel rows, so panel
+retention is probably enough" as an explanation. The missing CKTSO/SubtreeLU
+piece is still a broader grouped owner that keeps ready producer supernodes or
+row states live across many target rows after the private/pipeline split, not a
+small admission-gate or BLAS dispatch tweak.
