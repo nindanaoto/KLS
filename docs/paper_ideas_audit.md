@@ -13643,3 +13643,44 @@ live grouped-current numeric owner that keeps several current states in one
 producer-owned batch and streams output work once across that batch. A
 producer-to-future-row index feeding the existing per-current sparse states is
 not enough.
+
+A retained-state producer-step row-union diagnostic now measures the live
+workspace opportunity directly instead of inferring it from producer-entry
+counts. The new JSON fields
+`refactor_last_btf_scalar_run_group_state_step_batch_state_rows`,
+`refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows`, and
+their cumulative counterparts are populated only when
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_ADVANCE_BATCH_STATS=1` is used
+with retained producer-step advance. They merge the sorted sparse retained row
+sets for the members that actually advanced in each producer-step batch and
+count duplicate state rows versus exact unique global rows. The code builds
+cleanly, and `ctest --test-dir build --output-on-failure` still passes both
+tests.
+
+The diagnostic confirms that the missing mechanism is a grouped live workspace,
+not another small threshold around the current per-member sparse state. On
+`ASIC_100ks`, `build/kls_btf_group_state_step_union_asic100ks_t4_r1_ref1.json`
+was residual-clean (`relative_residual_l2=2.65029351e-15`) and reported
+`13016768` duplicate producer-step batch state rows but only `3241691` unique
+global state rows, a `4.02x` collapse opportunity. On `ASIC_320ks`,
+`build/kls_btf_group_state_step_union_asic320ks_t4_r1_ref1.json` was also
+residual-clean (`2.08436857e-15`) and reported `61569635` duplicate state rows
+versus `6419228` unique rows, a `9.59x` opportunity. The same runs remained
+slow because the opt-in retained-state experiment still materializes tens of
+millions of per-member sparse states (`69160671` on `ASIC_100ks` and
+`56280350` on `ASIC_320ks`) before the diagnostic can stream producer batches.
+
+A fresh same-tree `pre2` factor-only recheck keeps the largest clean timeout
+gap in the same place. The command writing
+`build/kls_pre2_factoronly_rowunion_tree_t4_r1_ref0_timeout120.json` timed out
+at the 120s cap with no JSON output. The current saved CKTSO pair artifact,
+`build/cktso_timeout_pair_current_t4_r1_ref1_timeout120.jsonl`, completed
+`pre2` with `analysis_seconds=4.652263`, `initial_factor_seconds=6.003679`,
+`refactor_seconds_avg=3.714327`, and `solve_seconds_avg=0.133762`, while
+`build/kls_timeout_pair_current_t4_r1_ref1_timeout120.failures` records KLS
+timeouts on both `pre2` and `Hamrle3`. Analyze-only KLS is not large enough to
+explain the miss (`3.80298773s` on forced AMD ordering). The next
+paper-aligned implementation target should therefore replace per-current
+retained sparse states with a grouped live-current workspace/window owner that
+streams one producer L column across many current states and writes the
+nonidentical output/trailing rows from that owner.

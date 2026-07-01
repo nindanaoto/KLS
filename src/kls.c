@@ -1350,6 +1350,9 @@ struct kls_solver {
   UF_long refactor_last_btf_scalar_run_group_state_step_batch_steps;
   UF_long refactor_last_btf_scalar_run_group_state_step_batch_currents;
   UF_long refactor_last_btf_scalar_run_group_state_step_batch_entries;
+  UF_long refactor_last_btf_scalar_run_group_state_step_batch_state_rows;
+  UF_long
+    refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows;
   UF_long refactor_last_btf_scalar_run_group_state_rejects;
   UF_long refactor_last_btf_scalar_run_group_state_exec_currents;
   UF_long refactor_last_btf_scalar_run_group_state_exec_skipped_deps;
@@ -1414,6 +1417,8 @@ struct kls_solver {
   UF_long refactor_btf_scalar_run_group_state_step_batch_step_count;
   UF_long refactor_btf_scalar_run_group_state_step_batch_current_count;
   UF_long refactor_btf_scalar_run_group_state_step_batch_entries;
+  UF_long refactor_btf_scalar_run_group_state_step_batch_state_rows;
+  UF_long refactor_btf_scalar_run_group_state_step_batch_unique_state_rows;
   UF_long refactor_btf_scalar_run_group_state_reject_count;
   UF_long refactor_btf_scalar_run_group_state_exec_current_count;
   UF_long refactor_btf_scalar_run_group_state_exec_skipped_deps;
@@ -1875,6 +1880,8 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong btf_scalar_run_group_state_step_batch_steps;
   atomic_ulong btf_scalar_run_group_state_step_batch_currents;
   atomic_ulong btf_scalar_run_group_state_step_batch_entries;
+  atomic_ulong btf_scalar_run_group_state_step_batch_state_rows;
+  atomic_ulong btf_scalar_run_group_state_step_batch_unique_state_rows;
   atomic_ulong btf_scalar_run_group_state_rejects;
   atomic_ulong btf_scalar_run_group_state_exec_currents;
   atomic_ulong btf_scalar_run_group_state_exec_skipped_deps;
@@ -18443,6 +18450,10 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   solver->refactor_last_btf_scalar_run_group_state_step_batch_steps = 0;
   solver->refactor_last_btf_scalar_run_group_state_step_batch_currents = 0;
   solver->refactor_last_btf_scalar_run_group_state_step_batch_entries = 0;
+  solver->refactor_last_btf_scalar_run_group_state_step_batch_state_rows = 0;
+  solver
+    ->refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows =
+      0;
   solver->refactor_last_btf_scalar_run_group_state_rejects = 0;
   solver->refactor_last_btf_scalar_run_group_state_exec_currents = 0;
   solver->refactor_last_btf_scalar_run_group_state_exec_skipped_deps = 0;
@@ -18613,6 +18624,10 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
     .refactor_last_btf_scalar_run_group_state_step_batch_currents = 0;
   solver->stats
     .refactor_last_btf_scalar_run_group_state_step_batch_entries = 0;
+  solver->stats
+    .refactor_last_btf_scalar_run_group_state_step_batch_state_rows = 0;
+  solver->stats
+    .refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows = 0;
   solver->stats.refactor_last_btf_scalar_run_group_state_rejects = 0;
   solver->stats.refactor_last_btf_scalar_run_group_state_exec_currents = 0;
   solver->stats.refactor_last_btf_scalar_run_group_state_exec_skipped_deps = 0;
@@ -28904,6 +28919,14 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.refactor_last_btf_scalar_run_group_state_step_batch_entries =
     (int64_t)solver
       ->refactor_last_btf_scalar_run_group_state_step_batch_entries;
+  solver->stats
+    .refactor_last_btf_scalar_run_group_state_step_batch_state_rows =
+      (int64_t)solver
+        ->refactor_last_btf_scalar_run_group_state_step_batch_state_rows;
+  solver->stats
+    .refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows =
+      (int64_t)solver
+        ->refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows;
   solver->stats.refactor_last_btf_scalar_run_group_state_rejects =
     (int64_t)solver->refactor_last_btf_scalar_run_group_state_rejects;
   solver->stats.refactor_last_btf_scalar_run_group_state_exec_currents =
@@ -29065,6 +29088,13 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.refactor_btf_scalar_run_group_state_step_batch_entries =
     (int64_t)solver
       ->refactor_btf_scalar_run_group_state_step_batch_entries;
+  solver->stats.refactor_btf_scalar_run_group_state_step_batch_state_rows =
+    (int64_t)solver
+      ->refactor_btf_scalar_run_group_state_step_batch_state_rows;
+  solver->stats
+    .refactor_btf_scalar_run_group_state_step_batch_unique_state_rows =
+      (int64_t)solver
+        ->refactor_btf_scalar_run_group_state_step_batch_unique_state_rows;
   solver->stats.refactor_btf_scalar_run_group_state_reject_count =
     (int64_t)solver->refactor_btf_scalar_run_group_state_reject_count;
   solver->stats.refactor_btf_scalar_run_group_state_exec_current_count =
@@ -35845,6 +35875,8 @@ static void kls_reset_refactor_btf_scalar_run_group_stats(kls_solver *solver) {
   solver->refactor_btf_scalar_run_group_state_step_batch_step_count = 0;
   solver->refactor_btf_scalar_run_group_state_step_batch_current_count = 0;
   solver->refactor_btf_scalar_run_group_state_step_batch_entries = 0;
+  solver->refactor_btf_scalar_run_group_state_step_batch_state_rows = 0;
+  solver->refactor_btf_scalar_run_group_state_step_batch_unique_state_rows = 0;
   solver->refactor_btf_scalar_run_group_state_reject_count = 0;
   solver->refactor_btf_scalar_run_group_state_exec_current_count = 0;
   solver->refactor_btf_scalar_run_group_state_exec_skipped_deps = 0;
@@ -68164,6 +68196,134 @@ static int kls_egraph_materialize_btf_scalar_run_group_state(
   return 1;
 }
 
+static int
+kls_egraph_btf_scalar_run_group_state_step_batch_row_union(
+  const kls_solver *solver,
+  const UF_long *members,
+  const unsigned char *active,
+  UF_long member_count,
+  UF_long *cursors,
+  UF_long *block_offsets,
+  UF_long *state_rows_out,
+  UF_long *unique_rows_out) {
+  if (state_rows_out != NULL) {
+    *state_rows_out = 0u;
+  }
+  if (unique_rows_out != NULL) {
+    *unique_rows_out = 0u;
+  }
+  if (solver == NULL || members == NULL || active == NULL ||
+      cursors == NULL || block_offsets == NULL ||
+      state_rows_out == NULL || unique_rows_out == NULL ||
+      solver->refactor_btf_scalar_run_group_currents == NULL ||
+      solver->refactor_btf_scalar_run_group_state_ptr == NULL ||
+      solver->refactor_btf_scalar_run_group_state_rows == NULL) {
+    return 0;
+  }
+
+  UF_long state_rows = 0u;
+  for (UF_long i = 0u; i < member_count; ++i) {
+    cursors[i] = 0u;
+    block_offsets[i] = 0u;
+    if (!active[i]) {
+      continue;
+    }
+    const UF_long member = members[i];
+    if (member >= solver->refactor_btf_scalar_run_group_multi_current_total) {
+      return 0;
+    }
+    const UF_long current =
+      solver->refactor_btf_scalar_run_group_currents[member];
+    UF_long k1 = 0u;
+    UF_long k2 = 0u;
+    UF_long block_size = 0u;
+    UF_long current_local = 0u;
+    if (!kls_egraph_btf_scalar_run_group_state_block_info(
+          solver, current, &k1, &k2, &block_size, &current_local)) {
+      return 0;
+    }
+    (void)k2;
+    (void)block_size;
+    (void)current_local;
+    const UF_long begin =
+      solver->refactor_btf_scalar_run_group_state_ptr[member];
+    const UF_long end =
+      solver->refactor_btf_scalar_run_group_state_ptr[member + 1u];
+    if (end < begin ||
+        end > solver->refactor_btf_scalar_run_group_state_rows_total) {
+      return 0;
+    }
+    const UF_long count = end - begin;
+    state_rows =
+      count > UF_long_max - state_rows ? UF_long_max : state_rows + count;
+    block_offsets[i] = k1;
+  }
+
+  UF_long unique_rows = 0u;
+  for (;;) {
+    UF_long min_row = UF_long_max;
+    int have_row = 0;
+    for (UF_long i = 0u; i < member_count; ++i) {
+      if (!active[i]) {
+        continue;
+      }
+      const UF_long member = members[i];
+      const UF_long begin =
+        solver->refactor_btf_scalar_run_group_state_ptr[member];
+      const UF_long end =
+        solver->refactor_btf_scalar_run_group_state_ptr[member + 1u];
+      const UF_long cursor = cursors[i];
+      if (cursor >= end - begin) {
+        continue;
+      }
+      const UF_long local_row =
+        solver->refactor_btf_scalar_run_group_state_rows[begin + cursor];
+      if (local_row > UF_long_max - block_offsets[i]) {
+        return 0;
+      }
+      const UF_long global_row = block_offsets[i] + local_row;
+      if (!have_row || global_row < min_row) {
+        min_row = global_row;
+        have_row = 1;
+      }
+    }
+    if (!have_row) {
+      break;
+    }
+    if (unique_rows != UF_long_max) {
+      unique_rows++;
+    }
+    for (UF_long i = 0u; i < member_count; ++i) {
+      if (!active[i]) {
+        continue;
+      }
+      const UF_long member = members[i];
+      const UF_long begin =
+        solver->refactor_btf_scalar_run_group_state_ptr[member];
+      const UF_long end =
+        solver->refactor_btf_scalar_run_group_state_ptr[member + 1u];
+      UF_long cursor = cursors[i];
+      while (cursor < end - begin) {
+        const UF_long local_row =
+          solver->refactor_btf_scalar_run_group_state_rows[begin + cursor];
+        if (local_row > UF_long_max - block_offsets[i]) {
+          return 0;
+        }
+        const UF_long global_row = block_offsets[i] + local_row;
+        if (global_row != min_row) {
+          break;
+        }
+        cursor++;
+      }
+      cursors[i] = cursor;
+    }
+  }
+
+  *state_rows_out = state_rows;
+  *unique_rows_out = unique_rows;
+  return 1;
+}
+
 static int kls_egraph_advance_btf_scalar_run_group_state_window(
   kls_egraph_refactor_worker *worker,
   UF_long group,
@@ -68597,6 +68757,7 @@ kls_egraph_refactor_try_advance_btf_scalar_run_group_state_producer_batch(
     const UF_long next = shared->btf_scalar_run_group_state_next[member];
     const UF_long producer_offset = producer_offsets[i];
     if (next != producer_offset) {
+      active[i] = 0u;
       atomic_store_explicit(
         &shared->btf_scalar_run_group_wake_live[member],
         KLS_BTF_SCALAR_RUN_GROUP_WAKE_REJECTED, memory_order_release);
@@ -68616,6 +68777,15 @@ kls_egraph_refactor_try_advance_btf_scalar_run_group_state_producer_batch(
         KLS_BTF_SCALAR_RUN_GROUP_WAKE_ARMED, memory_order_release);
     }
     advanced_currents++;
+  }
+
+  UF_long batch_state_rows = 0u;
+  UF_long batch_unique_state_rows = 0u;
+  if (advanced_currents > 0u &&
+      shared->btf_scalar_run_group_state_advance_batch_stats) {
+    (void)kls_egraph_btf_scalar_run_group_state_step_batch_row_union(
+      solver, claimed_members, active, claimed_count, state_cursor,
+      producer_offsets, &batch_state_rows, &batch_unique_state_rows);
   }
 
   if (advanced_currents > 0u) {
@@ -68641,6 +68811,14 @@ kls_egraph_refactor_try_advance_btf_scalar_run_group_state_producer_batch(
     atomic_fetch_add_explicit(
       &shared->btf_scalar_run_group_state_step_batch_entries,
       (unsigned long)entry_total, memory_order_relaxed);
+    if (shared->btf_scalar_run_group_state_advance_batch_stats) {
+      atomic_fetch_add_explicit(
+        &shared->btf_scalar_run_group_state_step_batch_state_rows,
+        (unsigned long)batch_state_rows, memory_order_relaxed);
+      atomic_fetch_add_explicit(
+        &shared->btf_scalar_run_group_state_step_batch_unique_state_rows,
+        (unsigned long)batch_unique_state_rows, memory_order_relaxed);
+    }
   }
   if (ready_currents > 0u) {
     atomic_fetch_add_explicit(
@@ -76070,6 +76248,10 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
               0ul);
   atomic_init(&pool->shared.btf_scalar_run_group_state_step_batch_entries,
               0ul);
+  atomic_init(&pool->shared.btf_scalar_run_group_state_step_batch_state_rows,
+              0ul);
+  atomic_init(
+    &pool->shared.btf_scalar_run_group_state_step_batch_unique_state_rows, 0ul);
   atomic_init(&pool->shared.btf_scalar_run_group_state_rejects, 0ul);
   atomic_init(&pool->shared.btf_scalar_run_group_state_exec_currents, 0ul);
   atomic_init(&pool->shared.btf_scalar_run_group_state_exec_skipped_deps, 0ul);
@@ -78639,6 +78821,12 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   atomic_store_explicit(
     &shared->btf_scalar_run_group_state_step_batch_entries, 0ul,
     memory_order_release);
+  atomic_store_explicit(
+    &shared->btf_scalar_run_group_state_step_batch_state_rows, 0ul,
+    memory_order_release);
+  atomic_store_explicit(
+    &shared->btf_scalar_run_group_state_step_batch_unique_state_rows, 0ul,
+    memory_order_release);
   atomic_store_explicit(&shared->btf_scalar_run_group_state_rejects, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->btf_scalar_run_group_state_exec_currents,
@@ -79183,6 +79371,14 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     (UF_long)atomic_load_explicit(
       &shared->btf_scalar_run_group_state_step_batch_entries,
       memory_order_acquire);
+  const UF_long btf_scalar_run_group_state_step_batch_state_rows =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_state_step_batch_state_rows,
+      memory_order_acquire);
+  const UF_long btf_scalar_run_group_state_step_batch_unique_state_rows =
+    (UF_long)atomic_load_explicit(
+      &shared->btf_scalar_run_group_state_step_batch_unique_state_rows,
+      memory_order_acquire);
   const UF_long btf_scalar_run_group_state_rejects =
     (UF_long)atomic_load_explicit(
       &shared->btf_scalar_run_group_state_rejects, memory_order_acquire);
@@ -79663,6 +79859,11 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     btf_scalar_run_group_state_step_batch_currents;
   solver->refactor_last_btf_scalar_run_group_state_step_batch_entries =
     btf_scalar_run_group_state_step_batch_entries;
+  solver->refactor_last_btf_scalar_run_group_state_step_batch_state_rows =
+    btf_scalar_run_group_state_step_batch_state_rows;
+  solver
+    ->refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows =
+      btf_scalar_run_group_state_step_batch_unique_state_rows;
   solver->refactor_last_btf_scalar_run_group_state_rejects =
     btf_scalar_run_group_state_rejects;
   solver->refactor_last_btf_scalar_run_group_state_exec_currents =
@@ -79788,6 +79989,10 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     btf_scalar_run_group_state_step_batch_currents;
   solver->refactor_btf_scalar_run_group_state_step_batch_entries +=
     btf_scalar_run_group_state_step_batch_entries;
+  solver->refactor_btf_scalar_run_group_state_step_batch_state_rows +=
+    btf_scalar_run_group_state_step_batch_state_rows;
+  solver->refactor_btf_scalar_run_group_state_step_batch_unique_state_rows +=
+    btf_scalar_run_group_state_step_batch_unique_state_rows;
   solver->refactor_btf_scalar_run_group_state_reject_count +=
     btf_scalar_run_group_state_rejects;
   solver->refactor_btf_scalar_run_group_state_exec_current_count +=

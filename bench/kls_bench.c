@@ -3412,6 +3412,8 @@ int main(int argc, char **argv) {
            ",\"refactor_last_btf_scalar_run_group_state_step_batch_steps\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_step_batch_currents\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_step_batch_entries\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_step_batch_state_rows\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_rejects\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_currents\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_exec_skipped_deps\":%" PRId64
@@ -3469,6 +3471,8 @@ int main(int argc, char **argv) {
            ",\"refactor_btf_scalar_run_group_state_step_batch_step_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_step_batch_current_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_step_batch_entries\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_step_batch_state_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_step_batch_unique_state_rows\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_reject_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_current_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_exec_skipped_deps\":%" PRId64
@@ -3545,6 +3549,10 @@ int main(int argc, char **argv) {
            stats.refactor_last_btf_scalar_run_group_state_step_batch_steps,
            stats.refactor_last_btf_scalar_run_group_state_step_batch_currents,
            stats.refactor_last_btf_scalar_run_group_state_step_batch_entries,
+           stats
+             .refactor_last_btf_scalar_run_group_state_step_batch_state_rows,
+           stats
+             .refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows,
            stats.refactor_last_btf_scalar_run_group_state_rejects,
            stats.refactor_last_btf_scalar_run_group_state_exec_currents,
            stats.refactor_last_btf_scalar_run_group_state_exec_skipped_deps,
@@ -3614,6 +3622,9 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_state_step_batch_step_count,
            stats.refactor_btf_scalar_run_group_state_step_batch_current_count,
            stats.refactor_btf_scalar_run_group_state_step_batch_entries,
+           stats.refactor_btf_scalar_run_group_state_step_batch_state_rows,
+           stats
+             .refactor_btf_scalar_run_group_state_step_batch_unique_state_rows,
            stats.refactor_btf_scalar_run_group_state_reject_count,
            stats.refactor_btf_scalar_run_group_state_exec_current_count,
            stats.refactor_btf_scalar_run_group_state_exec_skipped_deps,
