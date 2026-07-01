@@ -14135,3 +14135,38 @@ ready-root catch-up over independently owned sparse states as the missing
 CKTSO-scale mechanism. The next paper-aligned implementation still needs a
 real live grouped-current numeric owner that advances one batch and target map
 coarsely instead of repeatedly probing and catching up separate row states.
+
+An unlocked wait-partial prototype was also rejected before commit. It targeted
+one plausible CKTSO/SubtreeLU scheduling gap: KLS advances waiting current rows
+under the shared row-pipeline mutex, while the papers describe current rows
+using finished predecessors as they become available. The prototype let
+active-rank wait drains run outside the mutex with a snapshot of published U
+storage, hid the mutable sparse state from producer-batch probing, and made
+commits wait before any U reallocation or pivot column exchange that could
+invalidate unlocked readers. Correctness checks passed
+(`./build/kls_smoke`,
+`KLS_ENABLE_ROW_PIPELINE_UNLOCK_WAIT_PARTIAL=1 ./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, plus residual-clean forced
+`add20` and `bcircuit` probes), but the `pre2` timing evidence was not strong
+enough to keep the code.
+
+The 45s trace was only mildly positive:
+`build/kls_pre2_unlock_wait_trace45.stderr` reached the same
+`458752/629628` checkpoint as `build/kls_pre2_baseline_trace45.stderr`,
+reduced scalar U touches from `682232871` to `682160113`, and raised producer
+target U entries from `854772` to `931806` (`682.25x` to `625.77x` scalar
+output per producer-target U entry). The longer 75s trace rejected it as a
+CKTSO-gap closer:
+`build/kls_pre2_unlock_wait_trace75.stderr` reached the same
+`589824/629628` checkpoint as the saved baseline
+`build/kls_pre2_timeout_pair_54d839d_trace_t4_r1_ref0_timeout75.stderr`, but
+total scalar U touches were essentially unchanged (`869321969` versus
+`869303159`), producer target U entries were slightly lower (`936438` versus
+`957366`), and the long-row log advanced only to row `595435` versus `599516`
+for the baseline. The no-trace factor-only probe
+`build/kls_pre2_unlock_wait_factor_t4_r1_ref0_timeout125.json` still timed out
+with no JSON row. This rejects mutex release around existing independent sparse
+current states as the clear missing mechanism; the larger paper-level gap
+remains a live grouped-current numeric owner that changes the state ownership
+and producer-stream reuse, not just where the current scalar drain holds the
+mutex.

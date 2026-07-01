@@ -2576,6 +2576,14 @@ target U entries from `854772` to `591684` and worsened the scalar
 output/producer-target ratio from `682.25x` to `985.93x`. This reinforces that
 the missing paper-level mechanism is a true grouped-current numeric owner, not
 another catch-up pass over separately owned sparse states.
+An unlocked wait-partial prototype was also rejected before commit. It let
+waiting active-rank rows drain ready dependencies outside the pipeline mutex
+using a snapshot of published U storage, while hiding the mutable sparse state
+from producer batching. The 45s `pre2` trace was only mildly positive, and the
+75s trace still stopped at `589824/629628` with slightly worse total
+producer-target coverage and a shorter long-row tail (`595435` versus
+`599516`). The matching 125s factor-only probe still timed out with no JSON row,
+so wait-drain mutex serialization is not the clear CKTSO-sized missing piece.
 
 ## License
 
