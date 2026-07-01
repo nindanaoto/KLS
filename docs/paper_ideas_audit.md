@@ -13331,3 +13331,28 @@ touches. The gap is therefore still dominated by first-factor row-pipeline
 published-U/output streaming in the dominant BTF block; the actionable missing
 mechanism remains a CKTSO/SubtreeLU-style coarse producer-to-multiple-current
 numeric owner for pivoting rows, with setup/ordering as a secondary gap.
+
+KLS now has the first safe slice of that producer-owned numeric path in the
+first-factor row pipeline: after a row commits and publishes its U row, the
+commit cursor can claim waiting partial rows whose next scalar dependency is
+that producer, then stream the producer U row once across the claimed current
+rows. The claim is guarded by the pipeline order epoch, requires the producer
+to be the heap root for each target row, and skips targets where the existing
+supernode or cached-panel executor can own a wider run. The path is on by
+default only for coarse producers with at least `1024` saved stream entries,
+and can be disabled with `KLS_DISABLE_ROW_PIPELINE_PRODUCER_BATCH=1`. The
+unthresholded version was too eager: on the forced KLS-first spot
+`G2_circuit`/`transient` run it measured `10.7099s` geomean versus `10.1031s`
+with batching disabled. A `512` saved-stream threshold was still slightly
+negative (`12.0067s` versus `11.8314s`). The retained `1024` threshold is
+neutral on that forced spot (`11.2926s` versus `11.3075s`) with clean
+residuals. On `pre2`, the retained threshold activates only for `340` coarse
+producer batches by the 589,824-row checkpoint in
+`build/kls_pre2_producer_batch_threshold_trace_t4_r1_ref0_timeout90.stderr`:
+it replaces `585,522` target U updates with `195,174` producer-stream reads,
+and scalar published-U touches move from `804,607,861` in
+`build/kls_pre2_timeout_recheck_trace_t4_r1_ref0_timeout90.stderr` to
+`804,044,491`. This is a correct paper-aligned substrate, but it also proves
+the current pipeline's live current-row window is too small to capture the
+large missing reuse surface; the next gap-closing step is a broader live-row
+window or grouped current-state owner, not lowering the threshold again.

@@ -113,6 +113,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS 32768u
 #define KLS_ROW_FIRST_MISSED_PANEL_CACHE_MAX_STORED_ENTRIES 4194304u
 #define KLS_ROW_FIRST_PIPELINE_TRACE_INTERVAL 65536u
+#define KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM 1024u
 #define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
@@ -46613,6 +46614,12 @@ static int kls_row_pipeline_trace_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_producer_batch_env_disabled(void) {
+  const char *value = getenv("KLS_DISABLE_ROW_PIPELINE_PRODUCER_BATCH");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static UF_long kls_row_pipeline_long_row_trace_threshold(void) {
   const char *value = getenv("KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES");
   if (value == NULL || value[0] == '\0' ||
@@ -83679,6 +83686,12 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long scalar_run_u_entries;
   UF_long scalar_u_internal_entries;
   UF_long scalar_u_output_entries;
+  UF_long producer_batch_calls;
+  UF_long producer_batch_targets;
+  UF_long producer_batch_stream_u_entries;
+  UF_long producer_batch_target_u_entries;
+  UF_long producer_batch_internal_entries;
+  UF_long producer_batch_output_entries;
   UF_long panel_update_groups;
   UF_long panel_update_rows;
   UF_long panel_cache_appends;
@@ -83722,6 +83735,18 @@ static void kls_row_first_pipeline_trace_add(
                           source->scalar_u_internal_entries);
   kls_row_first_stats_add(&target->scalar_u_output_entries,
                           source->scalar_u_output_entries);
+  kls_row_first_stats_add(&target->producer_batch_calls,
+                          source->producer_batch_calls);
+  kls_row_first_stats_add(&target->producer_batch_targets,
+                          source->producer_batch_targets);
+  kls_row_first_stats_add(&target->producer_batch_stream_u_entries,
+                          source->producer_batch_stream_u_entries);
+  kls_row_first_stats_add(&target->producer_batch_target_u_entries,
+                          source->producer_batch_target_u_entries);
+  kls_row_first_stats_add(&target->producer_batch_internal_entries,
+                          source->producer_batch_internal_entries);
+  kls_row_first_stats_add(&target->producer_batch_output_entries,
+                          source->producer_batch_output_entries);
   kls_row_first_stats_add(&target->panel_update_groups,
                           source->panel_update_groups);
   kls_row_first_stats_add(&target->panel_update_rows,
@@ -84949,6 +84974,15 @@ typedef enum kls_row_first_pipeline_failure {
   KLS_ROW_FIRST_PIPELINE_FAIL_APPEND,
   KLS_ROW_FIRST_PIPELINE_FAIL_THREAD
 } kls_row_first_pipeline_failure;
+
+struct kls_row_first_pipeline_worker;
+typedef struct kls_row_first_pipeline_worker kls_row_first_pipeline_worker;
+
+typedef struct kls_row_first_pipeline_batch_target {
+  kls_row_first_pipeline_worker *worker;
+  kls_row_first_partial_row *state;
+  double lij;
+} kls_row_first_pipeline_batch_target;
 
 static void kls_row_first_partial_row_clear(
   const kls_row_first_partial_row *state,
@@ -87270,6 +87304,9 @@ typedef struct kls_row_first_pipeline_shared {
   unsigned char *row_done;
   kls_row_first_row_stats *stats;
   kls_row_first_pipeline_trace trace_committed;
+  kls_row_first_pipeline_worker *workers;
+  kls_row_first_pipeline_batch_target *batch_targets;
+  int worker_count;
   atomic_ulong next_pos;
   pthread_mutex_t lock;
   pthread_cond_t cond;
@@ -87279,15 +87316,18 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long pivot_restarts;
   UF_long long_row_trace_threshold;
   int trace_enabled;
+  int producer_batch_enabled;
   int failed;
   kls_row_first_pipeline_failure failure_reason;
 } kls_row_first_pipeline_shared;
 
-typedef struct kls_row_first_pipeline_worker {
+struct kls_row_first_pipeline_worker {
   kls_row_first_pipeline_shared *shared;
   kls_row_first_workspace workspace;
   kls_row_first_entries l_entries;
   kls_row_first_entries u_entries;
+  kls_row_first_partial_row *active_state;
+  UF_long active_order_epoch;
   UF_long rows;
   UF_long partial_rows;
   UF_long pipeline_wait_partial_rows;
@@ -87301,7 +87341,7 @@ typedef struct kls_row_first_pipeline_worker {
   UF_long l_reserve_copied_reported;
   UF_long u_reserve_growths_reported;
   UF_long u_reserve_copied_reported;
-} kls_row_first_pipeline_worker;
+};
 
 static void kls_row_first_pipeline_worker_free(
   kls_row_first_pipeline_worker *worker) {
@@ -87344,6 +87384,169 @@ static void kls_row_first_pipeline_collect_worker_storage_trace(
     worker->u_entries.reserve_copied_entries;
 }
 
+static int kls_row_first_pipeline_worker_scalar_batch_candidate(
+  const kls_row_first_pipeline_shared *shared,
+  const kls_row_first_pipeline_worker *worker,
+  UF_long dep) {
+  if (shared == NULL || worker == NULL || worker->active_state == NULL ||
+      worker->workspace.x == NULL || worker->workspace.mark == NULL ||
+      worker->workspace.dep_heap == NULL ||
+      shared->row_done == NULL || shared->ctx == NULL) {
+    return 0;
+  }
+  const kls_row_first_partial_row *state = worker->active_state;
+  if (worker->active_order_epoch != shared->order_epoch ||
+      state->row >= shared->ctx->nk || dep >= state->row ||
+      state->dep_heap_size == 0u ||
+      worker->workspace.dep_heap[0] != dep ||
+      worker->workspace.mark[dep] != state->generation ||
+      !kls_row_first_dependency_ready(shared->row_done,
+                                      shared->active_rank,
+                                      shared->completed_pos, dep)) {
+    return 0;
+  }
+  const UF_long run_end =
+    kls_row_first_ready_supernode_end(
+      shared->supernode_start, shared->supernode_end, shared->row_done,
+      shared->active_rank, shared->ctx->nk, shared->completed_pos,
+      state->row, dep);
+  if (run_end > dep) {
+    return 0;
+  }
+  const UF_long cached_run_end =
+    kls_row_first_ready_cached_panel_end(
+      worker->workspace.supernode_panel_cache, shared->row_done,
+      shared->active_rank, shared->ctx->nk, shared->completed_pos,
+      state->row, dep);
+  return cached_run_end <= dep;
+}
+
+static int kls_row_first_pipeline_apply_producer_batch(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_worker *current_worker,
+  UF_long dep) {
+  if (shared == NULL || current_worker == NULL ||
+      !shared->producer_batch_enabled ||
+      shared->workers == NULL || shared->batch_targets == NULL ||
+      shared->worker_count <= 1 || shared->ctx == NULL ||
+      shared->u_entries == NULL || shared->workspace == NULL ||
+      shared->workspace->u_row_ptr == NULL ||
+      shared->workspace->u_row_end == NULL ||
+      shared->udiag_values == NULL || dep >= shared->ctx->nk) {
+    return 1;
+  }
+  const UF_long row_begin = shared->workspace->u_row_ptr[dep];
+  const UF_long row_end = shared->workspace->u_row_end[dep];
+  if (row_begin > row_end || row_end > shared->u_entries->count ||
+      row_begin == row_end || shared->udiag_values[dep] == 0.0) {
+    return 1;
+  }
+  const UF_long row_entries = row_end - row_begin;
+
+  UF_long target_count = 0;
+  for (int tid = 0; tid < shared->worker_count; ++tid) {
+    kls_row_first_pipeline_worker *worker = shared->workers + tid;
+    if (worker == current_worker ||
+        !kls_row_first_pipeline_worker_scalar_batch_candidate(
+          shared, worker, dep)) {
+      continue;
+    }
+    if (target_count >= (UF_long)shared->worker_count) {
+      return 0;
+    }
+    kls_row_first_partial_row *state = worker->active_state;
+    const double lij = worker->workspace.x[dep] / shared->udiag_values[dep];
+    shared->batch_targets[target_count].worker = worker;
+    shared->batch_targets[target_count].state = state;
+    shared->batch_targets[target_count].lij = lij;
+    target_count++;
+  }
+  if (target_count < 2u) {
+    return 1;
+  }
+  const UF_long saved_targets = target_count - 1u;
+  const UF_long saved_stream =
+    saved_targets != 0u && row_entries > UF_long_max / saved_targets
+      ? UF_long_max
+      : row_entries * saved_targets;
+  if (saved_stream < KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM) {
+    return 1;
+  }
+
+  for (UF_long t = 0; t < target_count; ++t) {
+    if (!kls_row_first_entries_reserve_append(
+          &shared->batch_targets[t].worker->l_entries, 1u)) {
+      return 0;
+    }
+  }
+
+  for (UF_long t = 0; t < target_count; ++t) {
+    kls_row_first_pipeline_worker *worker =
+      shared->batch_targets[t].worker;
+    kls_row_first_partial_row *state = shared->batch_targets[t].state;
+    const UF_long popped =
+      kls_row_first_heap_pop(worker->workspace.dep_heap,
+                             &state->dep_heap_size);
+    if (popped != dep ||
+        !kls_row_first_entries_append_reserved(
+          &worker->l_entries, state->row, dep,
+          shared->batch_targets[t].lij)) {
+      return 0;
+    }
+    worker->workspace.x[dep] = 0.0;
+  }
+
+  UF_long internal_entries = 0u;
+  UF_long output_entries = 0u;
+  for (UF_long up = row_begin; up < row_end; ++up) {
+    const UF_long col = shared->u_entries->col[up];
+    if (col <= dep || col >= shared->ctx->nk) {
+      return 0;
+    }
+    const double uvalue = shared->u_entries->value[up];
+    for (UF_long t = 0; t < target_count; ++t) {
+      kls_row_first_pipeline_worker *worker =
+        shared->batch_targets[t].worker;
+      kls_row_first_partial_row *state = shared->batch_targets[t].state;
+      double *x = worker->workspace.x;
+      unsigned int *mark = worker->workspace.mark;
+      UF_long *pattern = worker->workspace.pattern;
+      UF_long *dep_heap = worker->workspace.dep_heap;
+      if (mark[col] != state->generation) {
+        mark[col] = state->generation;
+        pattern[state->pattern_count++] = col;
+        if (col < state->row) {
+          kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+        }
+        x[col] = 0.0;
+      }
+      x[col] -= shared->batch_targets[t].lij * uvalue;
+      if (col < state->row) {
+        internal_entries++;
+      } else {
+        output_entries++;
+      }
+    }
+  }
+
+  if (shared->trace_enabled) {
+    kls_row_first_pipeline_trace *trace = &current_worker->trace_current;
+    kls_row_first_stats_add(&trace->producer_batch_calls, 1u);
+    kls_row_first_stats_add(&trace->producer_batch_targets, target_count);
+    kls_row_first_stats_add(&trace->producer_batch_stream_u_entries,
+                            row_entries);
+    for (UF_long t = 0; t < target_count; ++t) {
+      kls_row_first_stats_add(&trace->producer_batch_target_u_entries,
+                              row_entries);
+    }
+    kls_row_first_stats_add(&trace->producer_batch_internal_entries,
+                            internal_entries);
+    kls_row_first_stats_add(&trace->producer_batch_output_entries,
+                            output_entries);
+  }
+  return 1;
+}
+
 static void kls_row_first_pipeline_trace_print(
   const kls_row_first_pipeline_shared *shared,
   const char *event) {
@@ -87377,6 +87580,12 @@ static void kls_row_first_pipeline_trace_print(
           " scalar_run_u_entries=%" PRIu64
           " scalar_u_internal=%" PRIu64
           " scalar_u_output=%" PRIu64
+          " producer_batches=%" PRIu64
+          " producer_targets=%" PRIu64
+          " producer_stream_u_entries=%" PRIu64
+          " producer_target_u_entries=%" PRIu64
+          " producer_u_internal=%" PRIu64
+          " producer_u_output=%" PRIu64
           " panel_updates=%" PRIu64 " panel_update_rows=%" PRIu64
           " panel_appends=%" PRIu64 " panel_append_entries=%" PRIu64
           " local_l_growths=%" PRIu64 " local_l_copied=%" PRIu64
@@ -87394,6 +87603,12 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->scalar_run_u_entries,
           (uint64_t)trace->scalar_u_internal_entries,
           (uint64_t)trace->scalar_u_output_entries,
+          (uint64_t)trace->producer_batch_calls,
+          (uint64_t)trace->producer_batch_targets,
+          (uint64_t)trace->producer_batch_stream_u_entries,
+          (uint64_t)trace->producer_batch_target_u_entries,
+          (uint64_t)trace->producer_batch_internal_entries,
+          (uint64_t)trace->producer_batch_output_entries,
           (uint64_t)trace->panel_update_groups,
           (uint64_t)trace->panel_update_rows,
           (uint64_t)trace->panel_cache_appends,
@@ -87697,6 +87912,10 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
           begin_ok = 0;
         }
       }
+      if (begin_ok) {
+        worker->active_state = &state;
+        worker->active_order_epoch = order_epoch;
+      }
       pthread_mutex_unlock(&shared->lock);
       if (!begin_ok) {
         kls_row_first_partial_row_clear(&state, &worker->workspace);
@@ -87753,6 +87972,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
         worker->pipeline_wait_partial_rows++;
       }
       if (retry_row) {
+        worker->active_state = NULL;
+        worker->active_order_epoch = 0u;
         pthread_mutex_unlock(&shared->lock);
         kls_row_first_partial_row_clear(&state, &worker->workspace);
         continue;
@@ -87934,6 +88155,12 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               }
               kls_row_first_pipeline_publish_completed_panel(shared, row);
               shared->completed_pos = pos + 1u;
+              if (!pivoted &&
+                  !kls_row_first_pipeline_apply_producer_batch(
+                    shared, worker, row)) {
+                kls_row_first_pipeline_mark_failed(
+                  shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
+              }
               worker->rows++;
               if (shared->trace_enabled &&
                   shared->long_row_trace_threshold > 0u &&
@@ -88009,6 +88236,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
         pthread_cond_broadcast(&shared->cond);
       }
       const int failed = shared->failed;
+      worker->active_state = NULL;
+      worker->active_order_epoch = 0u;
       pthread_mutex_unlock(&shared->lock);
       kls_row_first_partial_row_clear(&state, &worker->workspace);
       if (failed) {
@@ -88086,6 +88315,9 @@ static int kls_row_first_run_parallel_pipeline_phase(
   kls_row_first_pipeline_worker *workers =
     (kls_row_first_pipeline_worker *)
       calloc((size_t)worker_count, sizeof(*workers));
+  kls_row_first_pipeline_batch_target *batch_targets =
+    (kls_row_first_pipeline_batch_target *)
+      calloc((size_t)worker_count, sizeof(*batch_targets));
   kls_row_first_entries private_u_entries;
   memset(&private_u_entries, 0, sizeof(private_u_entries));
   UF_long *private_u_row_ptr =
@@ -88096,9 +88328,10 @@ static int kls_row_first_run_parallel_pipeline_phase(
     (UF_long *)malloc((size_t)ctx->nk * sizeof(*supernode_start));
   UF_long *supernode_end =
     (UF_long *)malloc((size_t)ctx->nk * sizeof(*supernode_end));
-  if (threads == NULL || workers == NULL) {
+  if (threads == NULL || workers == NULL || batch_targets == NULL) {
     free(threads);
     free(workers);
+    free(batch_targets);
     free(private_u_row_ptr);
     free(private_u_row_end);
     free(supernode_start);
@@ -88110,6 +88343,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
       !kls_row_first_append_entries(&private_u_entries, u_entries)) {
     free(threads);
     free(workers);
+    free(batch_targets);
     kls_row_first_entries_free(&private_u_entries);
     free(private_u_row_ptr);
     free(private_u_row_end);
@@ -88168,6 +88402,11 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.completed_pos = begin;
   shared.order_epoch = 0;
   shared.trace_enabled = kls_row_pipeline_trace_env_enabled();
+  shared.workers = workers;
+  shared.batch_targets = batch_targets;
+  shared.worker_count = worker_count;
+  shared.producer_batch_enabled =
+    !kls_row_pipeline_producer_batch_env_disabled();
   shared.long_row_trace_threshold =
     shared.trace_enabled ? kls_row_pipeline_long_row_trace_threshold() : 0u;
   atomic_init(&shared.next_pos, (unsigned long)begin);
@@ -88176,6 +88415,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
       &private_supernode_panel_cache);
     free(threads);
     free(workers);
+    free(batch_targets);
     kls_row_first_entries_free(&private_u_entries);
     free(private_u_row_ptr);
     free(private_u_row_end);
@@ -88189,6 +88429,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
       &private_supernode_panel_cache);
     free(threads);
     free(workers);
+    free(batch_targets);
     kls_row_first_entries_free(&private_u_entries);
     free(private_u_row_ptr);
     free(private_u_row_end);
@@ -88307,6 +88548,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   free(supernode_end);
   free(threads);
   free(workers);
+  free(batch_targets);
   return ok;
 }
 
