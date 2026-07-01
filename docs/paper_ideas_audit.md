@@ -14586,3 +14586,49 @@ static group and expect a CKTSO-sized win. The stronger target is a
 producer/window-scoped grouped workspace that keeps only the live row union for
 the active producer slice, then publishes or restores the nonidentical current
 outputs from that owner.
+
+The current live-workspace follow-up refines that surface to producer-step
+granularity. `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_STATS=1`
+counts, for each multi-current producer step, the duplicated retained rows that
+the scalar current-state path would carry and the exact unique row union that a
+single grouped producer/window workspace would need. The optional
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_PLAN=1` additionally keeps
+the per-step unique-row sizing prefix; it is still an allocation substrate only
+and leaves numeric execution unchanged. Default runs keep the counters and plan
+empty.
+
+Validation passed `cmake --build build --target kls_bench kls_smoke -j2`,
+`./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_STATS=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_PLAN=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`. The default `ASIC_100ks`
+control
+`build/kls_asic100ks_live_step_default_t4_r1_ref1.json` measured
+`initial_factor_seconds=0.673518`, `refactor_seconds_avg=0.0463456`, clean
+residual `1.92251861e-15`, and zero live-step counters. With live-step stats
+enabled, `build/kls_asic100ks_live_step_stats_t4_r1_ref1.json` reported
+`68,467` multi-current live producer steps, `1,217,923` active current
+memberships, `1,183,247,933` duplicated state rows, `183,365,884` unique rows,
+and `999,882,049` reusable rows, for a `6.45x` row-collapse surface. The max
+step reached `362` active currents, `489,578` duplicated rows, and `27,386`
+unique rows. `ASIC_320ks` in
+`build/kls_asic320ks_live_step_stats_t4_r1_ref1.json` reported `98,964` live
+steps, `1,123,018` current memberships, `960,528,608` duplicated rows,
+`120,767,097` unique rows, and `839,761,511` reusable rows, for a `7.95x`
+collapse surface, with max fanout `444`. The plan variant on `ASIC_100ks`
+matched those counters and stayed residual-clean.
+
+This is the strongest paper-aligned refactor signal so far: the useful sharing
+surface is much larger at active producer-step scope than at whole static group
+scope, while the default KLS path remains unchanged. The next implementation
+should therefore build a real producer/window live workspace from this sizing
+prefix, including row-position storage and a numeric owner that streams each
+producer row once across the active current set. It should not spend more time
+on larger whole-group state plans or per-current retained-state replay.
+
+For benchmark selection, matrices where the reference solver times out under
+the same limit, such as `Hamrle3` under the current CKTSO cap, should remain in
+a separate stress/scalability bucket. They are useful for robustness and
+long-run profiling, but they should not drive CKTSO-relative tuning or geomean
+gap claims because there is no finite CKTSO timing to close. The primary
+gap-closing slice should use cases where CKTSO completes and KLS still loses.

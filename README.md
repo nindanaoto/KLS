@@ -1287,6 +1287,21 @@ sets. It reports `refactor_btf_scalar_run_group_live_state_groups`,
 `refactor_btf_scalar_run_group_live_state_max_unique_rows`. These counters
 estimate how much per-current retained sparse state a grouped live workspace
 could collapse before enabling any retained-state numeric executor.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_STATS=1` measures the
+same row-union surface at producer-step granularity, after the completed
+producer index has selected the active current memberships for each producer
+row. Benchmark JSON reports
+`refactor_btf_scalar_run_group_live_step_count`,
+`refactor_btf_scalar_run_group_live_step_current_total`,
+`refactor_btf_scalar_run_group_live_step_rows`,
+`refactor_btf_scalar_run_group_live_step_unique_rows`,
+`refactor_btf_scalar_run_group_live_step_reused_rows`,
+`refactor_btf_scalar_run_group_live_step_max_currents`,
+`refactor_btf_scalar_run_group_live_step_max_rows`, and
+`refactor_btf_scalar_run_group_live_step_max_unique_rows`.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_PLAN=1` additionally keeps
+a per-step unique-row sizing prefix that a future producer/window workspace can
+use for allocation. It still leaves numeric execution unchanged.
 The retained group descriptor is tied to the LU pointer cache and is reused
 across repeated numeric refactors until the numeric pattern changes.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS=1` also builds that
