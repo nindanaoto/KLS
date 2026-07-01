@@ -13512,3 +13512,36 @@ commit lock before useful row progress. The next fix should remove or sharply
 bound those early panel-cache rebuilds on large dominant BTF blocks, or make
 the rebuild/exchange state incremental and outside the global pipeline mutex,
 before returning to broader grouped-current producer ownership.
+
+The direct large-prefix-cache bypass prototype was tested and rejected. The
+first version skipped full prefix panel-cache rebuilds for all blocks above
+`32768` rows after a dynamic pivot and only cleared active cached panels. It
+remained residual-clean on `ASIC_320k`, but it pushed that probe from the
+saved `~2s` initial-factor range to `11.2391421s` in
+`build/kls_asic320k_large_prefix_clear_t4_factor.json`, so the guard was too
+broad. Narrowing the bypass to blocks at least `16 * 32768` rows left
+`ASIC_320k` below the cutoff but still did not improve the hard case:
+`build/kls_pre2_large_prefix_clear_trace_t4_r1_ref0_timeout120.stderr` reached
+only the row-pipeline start. The matching interrupt
+`build/pre2_large_prefix_clear_gdb_interrupt.txt` showed the sampled worker had
+moved from panel-cache build/free into `kls_row_first_supernodes_reset_prefix`,
+still under the row-pipeline lock. A stronger huge-block variant then disabled
+prefix supernodes immediately after the pivot and skipped wait-time dependency
+drains under the lock. It passed `ctest --test-dir build --output-on-failure`
+and kept the sensitive `rajat29` no-fast probe residual-clean
+(`build/kls_rajat29_large_prefix_disable_nofast_t4_factor_timeout90.json`),
+but `build/kls_pre2_large_prefix_disable_nowait_trace_t4_r1_ref0_timeout75.stderr`
+still did not reach the first 65,536-row checkpoint. The short low-threshold
+long-row trace
+`build/kls_pre2_large_prefix_disable_nowait_longrow_t4_timeout30.stderr`
+proved rows were committing below that coarse interval (`completed=21520` by
+the cap), but many committed rows were still applying roughly `3.3M` scalar U
+entries apiece. The last interrupt
+`build/pre2_large_prefix_disable_nowait_gdb_interrupt.txt` sampled the active
+worker in `kls_row_first_partial_apply_ready_until()` /
+`kls_row_first_partial_apply_one_dep()` with peer workers waiting. The source
+was restored. This sequence rules out cache rebuild/reset alone as the
+CKTSO-scale gap closer; after that serialization is removed, the same `pre2`
+region is dominated by repeated scalar dependency/output application. The next
+retained implementation needs the paper-level grouped-current/producer-output
+executor, not another prefix-cache invalidation shortcut.
