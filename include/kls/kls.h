@@ -1106,6 +1106,11 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_group_live_step_runtime_full_step_count;
   int64_t refactor_btf_scalar_run_group_live_step_runtime_full_current_count;
   int64_t refactor_btf_scalar_run_group_live_step_runtime_full_rows;
+  int64_t refactor_btf_scalar_run_group_live_step_runtime_partial_step_count;
+  int64_t
+    refactor_btf_scalar_run_group_live_step_runtime_partial_current_count;
+  int64_t refactor_btf_scalar_run_group_live_step_runtime_partial_member_count;
+  int64_t refactor_btf_scalar_run_group_live_step_runtime_partial_rows;
   int64_t refactor_last_btf_scalar_run_group_waits;
   int64_t refactor_last_btf_scalar_run_group_wait_rows;
   int64_t refactor_last_btf_scalar_run_group_wait_entries;
@@ -1171,6 +1176,10 @@ typedef struct kls_stats {
   int64_t refactor_last_btf_scalar_run_group_live_step_runtime_full_steps;
   int64_t refactor_last_btf_scalar_run_group_live_step_runtime_full_currents;
   int64_t refactor_last_btf_scalar_run_group_live_step_runtime_full_rows;
+  int64_t refactor_last_btf_scalar_run_group_live_step_runtime_partial_steps;
+  int64_t refactor_last_btf_scalar_run_group_live_step_runtime_partial_currents;
+  int64_t refactor_last_btf_scalar_run_group_live_step_runtime_partial_members;
+  int64_t refactor_last_btf_scalar_run_group_live_step_runtime_partial_rows;
   int64_t refactor_last_btf_scalar_run_group_state_rejects;
   int64_t refactor_last_btf_scalar_run_group_state_exec_currents;
   int64_t refactor_last_btf_scalar_run_group_state_exec_skipped_deps;

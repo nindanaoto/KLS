@@ -14677,7 +14677,23 @@ producer-step advance stayed residual-clean (`1.92251861e-15`) and retained the
 full `183,365,884` live-step row descriptor, but runtime exact coverage was
 small: `2,723` full steps, `7,301` currents, and `1,625,695` unique descriptor
 rows, while the producer batch advanced `59,689` steps and `308,194` current
-updates. This makes the next missing large piece clearer: a grouped owner must
+updates. KLS now also reports
+`refactor_*_live_step_runtime_partial_*` counters for producer steps where the
+runtime path reached a retained live-step descriptor but claimed only part of
+its structural membership. A large partial/full ratio would make the next
+missing large piece clearer: a grouped owner must
 either claim/schedule whole live steps more often or handle partial-step
 membership directly. The existing per-current retained-state path is not close
 enough to the paper algorithm just because the row descriptor exists.
+
+The follow-up `ASIC_100ks` probe with partial coverage instrumentation confirms
+that diagnosis. The run stayed residual-clean (`1.92251861e-15`) with average
+refactor time `35.422539s`. Full live-step coverage remained tiny (`2,718`
+steps, `7,303` currents, `1,627,247` descriptor rows), while partial live-step
+coverage was large (`39,904` steps, `299,971` active currents over `882,024`
+structural memberships, `124,179,982` descriptor rows). Partial rows were about
+`76.3x` full rows, and active currents covered only about `34.0%` of the
+structural memberships in those partial steps. The paper-aligned next
+implementation should therefore build a partial live-step owner or scheduler
+that can reuse one retained row descriptor across the currently claimable
+membership subset, rather than waiting for exact whole-step ownership.

@@ -1309,9 +1309,16 @@ retained-state advance is also enabled, KLS records runtime full-step coverage
 through `refactor_last_btf_scalar_run_group_live_step_runtime_full_steps`,
 `refactor_last_btf_scalar_run_group_live_step_runtime_full_currents`, and
 `refactor_last_btf_scalar_run_group_live_step_runtime_full_rows`, plus matching
-cumulative counters. These counters identify claimed producer batches whose
-active members exactly match a retained live-step descriptor. Numeric execution
-is still unchanged.
+cumulative counters. It also records partial-step coverage through
+`refactor_last_btf_scalar_run_group_live_step_runtime_partial_steps`,
+`refactor_last_btf_scalar_run_group_live_step_runtime_partial_currents`,
+`refactor_last_btf_scalar_run_group_live_step_runtime_partial_members`, and
+`refactor_last_btf_scalar_run_group_live_step_runtime_partial_rows`, plus
+matching cumulative counters. Full counters identify claimed producer batches
+whose active members exactly match a retained live-step descriptor. Partial
+counters identify descriptor surface reached by runtime producer batches whose
+memberships are split across scheduler ownership. Numeric execution is still
+unchanged.
 The retained group descriptor is tied to the LU pointer cache and is reused
 across repeated numeric refactors until the numeric pattern changes.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS=1` also builds that
