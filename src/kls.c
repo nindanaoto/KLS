@@ -87361,6 +87361,7 @@ typedef struct kls_row_first_pipeline_shared {
   pthread_mutex_t lock;
   pthread_cond_t cond;
   UF_long completed_pos;
+  UF_long lookahead_next_pos;
   UF_long order_epoch;
   UF_long pivot_tail_rows;
   UF_long pivot_restarts;
@@ -87656,6 +87657,8 @@ static void kls_row_first_pipeline_clear_unclaimed_lookahead(
       kls_row_first_pipeline_clear_lookahead_state(state);
     }
   }
+  shared->lookahead_next_pos =
+    (UF_long)atomic_load_explicit(&shared->next_pos, memory_order_acquire);
 }
 
 static int kls_row_first_pipeline_fill_lookahead(
@@ -87674,9 +87677,13 @@ static int kls_row_first_pipeline_fill_lookahead(
   }
   const UF_long reserved_next =
     (UF_long)atomic_load_explicit(&shared->next_pos, memory_order_acquire);
-  if (shared->worker_count > 0 &&
-      reserved_next < shared->completed_pos + (UF_long)shared->worker_count) {
-    return 1;
+  if (shared->lookahead_next_pos < reserved_next) {
+    shared->lookahead_next_pos = reserved_next;
+  }
+  UF_long scan_budget =
+    (UF_long)shared->lookahead_count * 4u + (UF_long)shared->worker_count;
+  if (scan_budget < 16u) {
+    scan_budget = 16u;
   }
 
   for (int slot = 0; slot < shared->lookahead_count; ++slot) {
@@ -87684,7 +87691,8 @@ static int kls_row_first_pipeline_fill_lookahead(
       shared->lookahead_states + slot;
     if (state->lookahead_active) {
       if (!state->lookahead_claimed &&
-          state->active_order_epoch != shared->order_epoch) {
+          (state->active_order_epoch != shared->order_epoch ||
+           state->lookahead_pos < reserved_next)) {
         kls_row_first_pipeline_clear_lookahead_state(state);
       } else {
         continue;
@@ -87692,15 +87700,18 @@ static int kls_row_first_pipeline_fill_lookahead(
     }
     UF_long pos = KLS_KLU_EMPTY;
     UF_long row = KLS_KLU_EMPTY;
-    for (;;) {
-      const unsigned long loaded =
-        atomic_load_explicit(&shared->next_pos, memory_order_acquire);
-      pos = (UF_long)loaded;
+    int found = 0;
+    while (scan_budget > 0u && shared->lookahead_next_pos < shared->end) {
+      scan_budget--;
+      pos = shared->lookahead_next_pos++;
       if (pos >= shared->end) {
         break;
       }
       if (pos < shared->begin) {
         return 0;
+      }
+      if (pos < reserved_next) {
+        continue;
       }
       row = shared->row_order[pos];
       if (row >= shared->ctx->nk ||
@@ -87711,16 +87722,26 @@ static int kls_row_first_pipeline_fill_lookahead(
       const UF_long input_count =
         shared->ctx->row_ptr[row + 1u] - shared->ctx->row_ptr[row];
       if (input_count > shared->lookahead_max_inputs) {
-        return 1;
+        continue;
       }
-      unsigned long expected = loaded;
-      if (atomic_compare_exchange_weak_explicit(
-            &shared->next_pos, &expected, loaded + 1ul,
-            memory_order_acq_rel, memory_order_acquire)) {
+      int duplicate = 0;
+      for (int other = 0; other < shared->lookahead_count; ++other) {
+        const kls_row_first_pipeline_worker *other_state =
+          shared->lookahead_states + other;
+        if (other_state != state &&
+            other_state->lookahead_active &&
+            !other_state->lookahead_claimed &&
+            other_state->lookahead_pos == pos) {
+          duplicate = 1;
+          break;
+        }
+      }
+      if (!duplicate) {
+        found = 1;
         break;
       }
     }
-    if (pos >= shared->end) {
+    if (!found) {
       break;
     }
     state->l_entries.count = 0u;
@@ -87762,6 +87783,7 @@ static int kls_row_first_pipeline_fill_lookahead(
 static int kls_row_first_pipeline_try_claim_lookahead(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_pipeline_worker *worker,
+  UF_long wanted_pos,
   UF_long *pos_out,
   UF_long *row_out,
   UF_long *order_epoch_out,
@@ -87772,7 +87794,6 @@ static int kls_row_first_pipeline_try_claim_lookahead(
     return 0;
   }
   int best_slot = -1;
-  UF_long best_pos = UF_long_max;
   for (int slot = 0; slot < shared->lookahead_count; ++slot) {
     kls_row_first_pipeline_worker *state =
       shared->lookahead_states + slot;
@@ -87783,9 +87804,9 @@ static int kls_row_first_pipeline_try_claim_lookahead(
       kls_row_first_pipeline_clear_lookahead_state(state);
       continue;
     }
-    if (state->lookahead_pos < best_pos) {
-      best_pos = state->lookahead_pos;
+    if (state->lookahead_pos == wanted_pos) {
       best_slot = slot;
+      break;
     }
   }
   if (best_slot < 0) {
@@ -88130,25 +88151,15 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
     shared->private_supernode_panel_cache;
 
   for (;;) {
-    UF_long pos = KLS_KLU_EMPTY;
+    UF_long pos =
+      (UF_long)atomic_fetch_add_explicit(&shared->next_pos, 1ul,
+                                         memory_order_acq_rel);
     UF_long row = KLS_KLU_EMPTY;
     UF_long adopted_order_epoch = 0u;
     kls_row_first_partial_row adopted_state;
     memset(&adopted_state, 0, sizeof(adopted_state));
     adopted_state.row = UF_long_max;
     int adopted_lookahead = 0;
-    pthread_mutex_lock(&shared->lock);
-    if (!shared->failed) {
-      adopted_lookahead =
-        kls_row_first_pipeline_try_claim_lookahead(
-          shared, worker, &pos, &row, &adopted_order_epoch,
-          &adopted_state);
-    }
-    pthread_mutex_unlock(&shared->lock);
-    if (!adopted_lookahead) {
-      pos = (UF_long)atomic_fetch_add_explicit(&shared->next_pos, 1ul,
-                                               memory_order_acq_rel);
-    }
     if (pos >= shared->end) {
       break;
     }
@@ -88161,6 +88172,14 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
       break;
     }
 
+    pthread_mutex_lock(&shared->lock);
+    if (!shared->failed) {
+      adopted_lookahead =
+        kls_row_first_pipeline_try_claim_lookahead(
+          shared, worker, pos, &pos, &row, &adopted_order_epoch,
+          &adopted_state);
+    }
+    pthread_mutex_unlock(&shared->lock);
     if (!adopted_lookahead) {
       row = shared->row_order[pos];
     }
@@ -88740,6 +88759,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.row_done = row_done;
   shared.stats = stats;
   shared.completed_pos = begin;
+  shared.lookahead_next_pos = begin;
   shared.order_epoch = 0;
   shared.trace_enabled = kls_row_pipeline_trace_env_enabled();
   shared.workers = workers;

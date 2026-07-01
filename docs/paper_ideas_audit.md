@@ -13399,3 +13399,44 @@ lookahead adoption policy can reserve or prioritize rows that are bad for some
 pipelines. The next implementation should add shape/owner eligibility before
 adoption, or make lookahead rows advisory rather than consuming the global row
 cursor.
+
+The lookahead path has now been made advisory rather than cursor-consuming:
+workers first claim the normal global row position, then adopt a prepared
+lookahead state only when it exactly matches that position. This fixes the
+pathological scheduling failure but does not make lookahead a default win. The
+explicit experimental run
+`build/kls_lookahead8_advisory_forced_spot_t4_r1_ref0_timeout120.jsonl`
+completed both forced KLS-first spot matrices with clean residuals
+(`G2_circuit=10.9588s`, `transient=12.2114s`), while the guarded default
+artifact
+`build/kls_lookahead_inputonly_default_forced_spot_t4_r1_ref0_timeout120.jsonl`
+remained faster (`G2_circuit=10.6131s`, `transient=7.5370s`). The result keeps
+lookahead as an experimental substrate: exact-position advisory adoption is
+safer, but it still needs a stronger owner/shape filter before it can help the
+large timeout cases.
+
+A current timeout-case recheck keeps the largest clean KLS-vs-CKTSO gap on
+`pre2`, and narrows it to numeric first factor rather than the benchmark
+refactor loop. The direct KLS factor-only probes
+`build/kls_pre2_factoronly_current_t4_r1_ref0_timeout120.json`,
+`build/kls_pre2_factoronly_metis_current_t4_r1_ref0_timeout120.json`, and
+`build/kls_pre2_factoronly_scotch_current_t4_r1_ref0_timeout120.json` all
+timed out at 120s without JSON, while the direct `Hamrle3` factor-only probe
+also timed out. CKTSO's refreshed workspace artifact
+`build/cktso_timeout_pair_refresh_t4_r1_ref1_timeout120.jsonl` completed
+`pre2` with `analysis_seconds=4.347466`,
+`initial_factor_seconds=8.525571`, `factor_seconds_avg=4.311943`,
+`refactor_seconds_avg=3.348520`, and `solve_seconds_avg=0.134543`; CKTSO only
+timed out on `Hamrle3`. KLS analyze-only on `pre2` is slower but not the main
+120s failure: AMD took `21.398362s`, METIS took `18.6061678s`, and SCOTCH took
+`20.9142238s`, and all three retained the same `629628`-row dominant block.
+The current 75s traced AMD factor-only run
+`build/kls_pre2_factoronly_trace_current_t4_r1_ref0_timeout75.stderr` reached
+the dominant row-pipeline start but no 65,536-row progress checkpoint; the
+thread `/proc` sample in `build/kls_pre2_proc_sample_current.txt` showed the
+process had entered the threaded factor phase after setup. This makes ordering
+a secondary issue for this case: METIS and SCOTCH did not rescue the timeout.
+The actionable largest gap remains the first-factor row-pipeline executor for
+the dominant BTF block, especially the published-U/output streaming and
+producer-to-multiple-current reuse that the CKTSO/SubtreeLU-style algorithms
+avoid doing one current row at a time.
