@@ -13865,3 +13865,24 @@ smaller than the scalar trailing/output stream. The largest gap is therefore
 still the paper-level numeric owner for the pivoting dominant-BTF tail: a
 producer/panel-to-many-current row/supernode executor that avoids replaying
 published U rows through the scalar current-row path.
+
+`scripts/summarize_row_pipeline_trace.py` now turns those row-pipeline stderr
+files into repeatable CSV or JSON summaries, including the last progress event,
+long-row count, pivoted long rows, scalar U entries, trailing/output entries,
+producer target entries, and panel update rows. Applying it to same-commit
+probes rejects the obvious policy-only alternatives. Eight-slot lookahead
+(`build/kls_pre2_6633f97_lookahead8_trace45.stderr`) increased checkpoint
+producer target U entries to `35781784` but advanced only to long row `598218`
+in the 45s cap; 32-slot lookahead
+(`build/kls_pre2_6633f97_lookahead32_trace45.stderr`) raised checkpoint target
+entries to `94687787` but only reached long row `594654`. Explicit scale `2`
+(`build/kls_pre2_6633f97_scale2_forced_trace45.stderr`) also reached fewer
+tail rows than the auto-scale forced trace. Lower pivot tolerance reduces some
+traced scalar work but not the timeout: `pivot_tol=1e-4`
+(`build/kls_pre2_6633f97_tol1e4_forced_trace45.stderr`) still timed out in
+`build/kls_pre2_6633f97_tol1e4_forced_t4_r1_ref0_timeout120.json`, and
+`pivot_tol=1e-5` similarly timed out in
+`build/kls_pre2_6633f97_tol1e5_forced_t4_r1_ref0_timeout120.json`. This keeps
+the next code target on a real grouped-current numeric owner, not larger
+lookahead, stronger scaling, or lower pivot tolerance around the existing
+per-current scalar state.
