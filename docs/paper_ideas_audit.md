@@ -13377,3 +13377,25 @@ completed at `8.3534s` geomean in
 This confirms the live-row window is a real paper-aligned lever, but the
 current implementation needs eligibility control or cheaper catch-up before it
 can be used generally.
+
+The lookahead substrate now has that first eligibility control: by default it
+only reserves rows with at most `4` raw input entries
+(`KLS_ROW_PIPELINE_LOOKAHEAD_MAX_INPUTS=0` disables this cap), and it prepares
+lookahead rows by loading only the raw input pattern under the commit mutex.
+Older dependency catch-up is left to the adopting worker, so the lookahead
+window no longer performs large scalar drains while publishing a producer.
+This made the experimental smoke check complete under a 30s cap, but it did
+not make the policy generally safe: with
+`KLS_ENABLE_EXPERIMENTAL_ROW_PIPELINE_LOOKAHEAD=1` and
+`KLS_ROW_PIPELINE_LOOKAHEAD=8`, the forced KLS-first spot still completed
+`G2_circuit` at `10.9122s` but timed out `transient` at 120s in
+`build/kls_lookahead8_inputonly_forced_spot_t4_r1_ref0_timeout120.jsonl`.
+The safe default path remained unaffected: the same forced spot without the
+experimental flag completed both matrices at `8.9437s` geomean in
+`build/kls_lookahead_inputonly_default_forced_spot_t4_r1_ref0_timeout120.jsonl`,
+and `KLS_ROW_PIPELINE_LOOKAHEAD=8` alone stayed inert. The remaining problem is
+therefore not just expensive lookahead preparation; it is that the current
+lookahead adoption policy can reserve or prioritize rows that are bad for some
+pipelines. The next implementation should add shape/owner eligibility before
+adoption, or make lookahead rows advisory rather than consuming the global row
+cursor.

@@ -115,6 +115,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_PIPELINE_TRACE_INTERVAL 65536u
 #define KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM 1024u
 #define KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_MAX_SLOTS 32u
+#define KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_DEFAULT_MAX_INPUTS 4u
 #define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
@@ -46648,6 +46649,24 @@ static UF_long kls_row_pipeline_lookahead_slots_env(void) {
     : (UF_long)parsed;
 }
 
+static UF_long kls_row_pipeline_lookahead_max_inputs_env(void) {
+  const char *value = getenv("KLS_ROW_PIPELINE_LOOKAHEAD_MAX_INPUTS");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_DEFAULT_MAX_INPUTS;
+  }
+  if (value[0] == '0' && value[1] == '\0') {
+    return UF_long_max;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_DEFAULT_MAX_INPUTS;
+  }
+  const unsigned long long max_uf = (unsigned long long)UF_long_max;
+  return parsed > max_uf ? UF_long_max : (UF_long)parsed;
+}
+
 static UF_long kls_row_pipeline_long_row_trace_threshold(void) {
   const char *value = getenv("KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES");
   if (value == NULL || value[0] == '\0' ||
@@ -87346,6 +87365,7 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long pivot_tail_rows;
   UF_long pivot_restarts;
   UF_long long_row_trace_threshold;
+  UF_long lookahead_max_inputs;
   int trace_enabled;
   int producer_batch_enabled;
   int failed;
@@ -87670,16 +87690,39 @@ static int kls_row_first_pipeline_fill_lookahead(
         continue;
       }
     }
-    const UF_long pos =
-      (UF_long)atomic_fetch_add_explicit(&shared->next_pos, 1ul,
-                                         memory_order_acq_rel);
+    UF_long pos = KLS_KLU_EMPTY;
+    UF_long row = KLS_KLU_EMPTY;
+    for (;;) {
+      const unsigned long loaded =
+        atomic_load_explicit(&shared->next_pos, memory_order_acquire);
+      pos = (UF_long)loaded;
+      if (pos >= shared->end) {
+        break;
+      }
+      if (pos < shared->begin) {
+        return 0;
+      }
+      row = shared->row_order[pos];
+      if (row >= shared->ctx->nk ||
+          shared->ctx->row_ptr == NULL ||
+          shared->ctx->row_ptr[row] > shared->ctx->row_ptr[row + 1u]) {
+        return 0;
+      }
+      const UF_long input_count =
+        shared->ctx->row_ptr[row + 1u] - shared->ctx->row_ptr[row];
+      if (input_count > shared->lookahead_max_inputs) {
+        return 1;
+      }
+      unsigned long expected = loaded;
+      if (atomic_compare_exchange_weak_explicit(
+            &shared->next_pos, &expected, loaded + 1ul,
+            memory_order_acq_rel, memory_order_acquire)) {
+        break;
+      }
+    }
     if (pos >= shared->end) {
       break;
     }
-    if (pos < shared->begin) {
-      return 0;
-    }
-    const UF_long row = shared->row_order[pos];
     state->l_entries.count = 0u;
     state->u_entries.count = 0u;
     state->l_entries.reserve_growths = 0u;
@@ -87697,26 +87740,9 @@ static int kls_row_first_pipeline_fill_lookahead(
     state->trace_current.long_row_pos = pos;
     memset(&state->state_storage, 0, sizeof(state->state_storage));
     state->state_storage.row = UF_long_max;
-    int blocked = 0;
     if (row >= shared->ctx->nk ||
         !kls_row_first_partial_row_begin(shared->ctx, &state->workspace,
-                                         &state->state_storage, row) ||
-        !kls_row_first_partial_apply_ready(
-          shared->ctx, &state->workspace, &state->l_entries,
-          shared->private_u_entries, shared->udiag_values,
-          shared->private_u_row_ptr, shared->private_u_row_end,
-          shared->supernode_start, shared->supernode_end, shared->row_done,
-          shared->active_rank, shared->begin, &state->state_storage,
-          NULL, NULL, NULL, NULL, NULL,
-          shared->trace_enabled ? &state->trace_current : NULL, &blocked) ||
-        !kls_row_first_partial_apply_ready(
-          shared->ctx, &state->workspace, &state->l_entries,
-          shared->u_entries, shared->udiag_values,
-          shared->workspace->u_row_ptr, shared->workspace->u_row_end,
-          shared->supernode_start, shared->supernode_end, shared->row_done,
-          shared->active_rank, shared->completed_pos,
-          &state->state_storage, NULL, NULL, NULL, NULL, NULL,
-          shared->trace_enabled ? &state->trace_current : NULL, &blocked)) {
+                                         &state->state_storage, row)) {
       kls_row_first_partial_row_clear(&state->state_storage,
                                       &state->workspace);
       state->l_entries.count = 0u;
@@ -88724,6 +88750,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.batch_target_capacity = batch_target_capacity;
   shared.producer_batch_enabled =
     !kls_row_pipeline_producer_batch_env_disabled();
+  shared.lookahead_max_inputs =
+    kls_row_pipeline_lookahead_max_inputs_env();
   shared.long_row_trace_threshold =
     shared.trace_enabled ? kls_row_pipeline_long_row_trace_threshold() : 0u;
   atomic_init(&shared.next_pos, (unsigned long)begin);
