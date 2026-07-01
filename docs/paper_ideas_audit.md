@@ -13545,3 +13545,33 @@ CKTSO-scale gap closer; after that serialization is removed, the same `pre2`
 region is dominated by repeated scalar dependency/output application. The next
 retained implementation needs the paper-level grouped-current/producer-output
 executor, not another prefix-cache invalidation shortcut.
+
+A rebuilt-binary timeout recheck again isolates `pre2` as the largest clean
+KLS-vs-CKTSO timeout gap. With `repeat=1`, `refactor-repeat=1`, 4 threads, and
+the same 120s wall cap over the known timeout pair, CKTSO completed `pre2` in
+`build/cktso_timeout_pair_current_t4_r1_ref1_timeout120.jsonl` with
+`analysis_seconds=4.652263`, `initial_factor_seconds=6.003679`,
+`refactor_seconds_avg=3.714327`, `solve_seconds_avg=0.133762`, and
+`spice_cycle_seconds=391.750515`; CKTSO timed out only on `Hamrle3`. KLS
+emitted no successful row in
+`build/kls_timeout_pair_current_t4_r1_ref1_timeout120.jsonl`; the sidecar shows
+both `pre2` and `Hamrle3` timed out. Analyze-only is not the largest part:
+fresh `pre2` analyze-only completed in `9.72s` wall / `8.05047587s` reported
+analysis for auto ordering
+(`build/kls_pre2_timeout_pair_current_analyze_auto_t4.json`) and `5.46s` wall /
+`3.80298773s` reported analysis for explicit AMD
+(`build/kls_pre2_timeout_pair_current_analyze_amd_t4.json`). A forced KLS
+first-factor trace reached the dominant `629628`-row BTF row-pipeline block
+but not the first 65,536-row progress checkpoint before a 75s cap
+(`build/kls_pre2_timeout_pair_current_forced_trace_t4_r1_ref0_timeout75.stderr`).
+The only committed progress shown there was around rows `14054` and `14070`,
+with individual rows applying about `1.05M-1.12M` scalar U entries and
+roughly `0.90M-0.96M` of those as output entries. A gdb-owned rerun
+(`build/pre2_timeout_pair_current_gdb_run_under.txt`) sampled one pipeline
+worker in `kls_row_first_supernode_panel_cache_build()` while peer row-pipeline
+workers waited on the condition variable and the outer KLS first-factor worker
+joined that phase. The largest clean gap is therefore KLS initial numeric
+factorization of the dominant `pre2` BTF block: first serialized panel-cache
+rebuild/reset work in the row-pipeline commit path, then repeated scalar
+producer-output replay across adjacent current rows. The timeout limit and
+ordering/analyze phase are secondary for this case.
