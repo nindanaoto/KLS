@@ -1101,6 +1101,8 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_group_live_step_max_currents;
   int64_t refactor_btf_scalar_run_group_live_step_max_rows;
   int64_t refactor_btf_scalar_run_group_live_step_max_unique_rows;
+  int64_t refactor_btf_scalar_run_group_live_step_stored_rows;
+  int64_t refactor_btf_scalar_run_group_live_step_storage_limited;
   int64_t refactor_last_btf_scalar_run_group_waits;
   int64_t refactor_last_btf_scalar_run_group_wait_rows;
   int64_t refactor_last_btf_scalar_run_group_wait_entries;

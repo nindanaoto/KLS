@@ -14626,6 +14626,33 @@ prefix, including row-position storage and a numeric owner that streams each
 producer row once across the active current set. It should not spend more time
 on larger whole-group state plans or per-current retained-state replay.
 
+That prefix has now been extended into the first real row descriptor substrate.
+With `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_PLAN=1`, KLS retains
+the sorted unique row list for each live producer step when memory allows, and
+reports `refactor_btf_scalar_run_group_live_step_stored_rows` plus
+`refactor_btf_scalar_run_group_live_step_storage_limited`. Correctness passed
+`git diff --check`, `python3 -m py_compile scripts/decompose_solver_gap.py`,
+`cmake --build build --target kls_bench kls_smoke -j2`, `./build/kls_smoke`,
+both live-step opt-in smoke modes, `ctest --test-dir build --output-on-failure`,
+and the decomposition CSV smoke. The default `ASIC_100ks` control
+`build/kls_asic100ks_live_step_rows_default_t4_r1_ref1.json` still left the
+descriptor inactive (`built=0`, live-step unique/stored rows both zero) and
+measured `refactor_seconds_avg=0.0444901` with clean residual.
+
+The full descriptor retained on both hard ASIC probes without hitting the
+storage guard. `build/kls_asic100ks_live_step_rows_t4_r1_ref1.json` stored all
+`183,365,884` unique live-step rows (`storage_limited=0`) and stayed
+residual-clean (`1.92251861e-15`), while
+`build/kls_asic320ks_live_step_rows_t4_r1_ref1.json` stored all `120,767,097`
+unique rows with `storage_limited=0` and residual `2.08436857e-15`. These
+plan-mode runs are intentionally expensive (`22.93s` and `17.62s` average
+refactor time) because they still recompute and retain the descriptor rather
+than executing through it. The value is not current speed; it is that the
+producer/window owner now has the exact row sets it needs on the slow cases.
+The next step is to add per-current row positions or a dense workspace mapping
+on top of this descriptor and then move one producer-step numeric update into
+the grouped owner.
+
 For benchmark selection, matrices where the reference solver times out under
 the same limit, such as `Hamrle3` under the current CKTSO cap, should remain in
 a separate stress/scalability bucket. They are useful for robustness and

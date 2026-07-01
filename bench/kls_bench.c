@@ -3351,6 +3351,8 @@ int main(int argc, char **argv) {
            ",\"refactor_btf_scalar_run_group_live_step_max_currents\":%" PRId64
            ",\"refactor_btf_scalar_run_group_live_step_max_rows\":%" PRId64
            ",\"refactor_btf_scalar_run_group_live_step_max_unique_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_live_step_stored_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_live_step_storage_limited\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_rows_total\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_max_rows\":%" PRId64,
            stats.refactor_btf_scalar_run_group_built,
@@ -3389,6 +3391,8 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_live_step_max_currents,
            stats.refactor_btf_scalar_run_group_live_step_max_rows,
            stats.refactor_btf_scalar_run_group_live_step_max_unique_rows,
+           stats.refactor_btf_scalar_run_group_live_step_stored_rows,
+           stats.refactor_btf_scalar_run_group_live_step_storage_limited,
            stats.refactor_btf_scalar_run_group_state_rows_total,
            stats.refactor_btf_scalar_run_group_state_max_rows);
     printf(",\"refactor_last_btf_scalar_run_group_waits\":%" PRId64
@@ -4272,6 +4276,7 @@ int main(int argc, char **argv) {
            ", live step %" PRId64 "/%" PRId64
            ", live step rows %" PRId64 "/%" PRId64 "/%" PRId64
            ", live step max %" PRId64 "/%" PRId64 "/%" PRId64
+           ", live step stored %" PRId64 "/%" PRId64
            ", waits %" PRId64 "/%" PRId64 "/%" PRId64
            ", overlaps %" PRId64 "/%" PRId64 "/%" PRId64
            ", max live %" PRId64
@@ -4342,6 +4347,8 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_live_step_max_currents,
            stats.refactor_btf_scalar_run_group_live_step_max_rows,
            stats.refactor_btf_scalar_run_group_live_step_max_unique_rows,
+           stats.refactor_btf_scalar_run_group_live_step_stored_rows,
+           stats.refactor_btf_scalar_run_group_live_step_storage_limited,
            stats.refactor_last_btf_scalar_run_group_waits,
            stats.refactor_last_btf_scalar_run_group_wait_rows,
            stats.refactor_last_btf_scalar_run_group_wait_entries,

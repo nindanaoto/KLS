@@ -1300,8 +1300,12 @@ row. Benchmark JSON reports
 `refactor_btf_scalar_run_group_live_step_max_rows`, and
 `refactor_btf_scalar_run_group_live_step_max_unique_rows`.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_PLAN=1` additionally keeps
-a per-step unique-row sizing prefix that a future producer/window workspace can
-use for allocation. It still leaves numeric execution unchanged.
+a per-step unique-row prefix plus the sorted row descriptor for each retained
+step when memory allows. `refactor_btf_scalar_run_group_live_step_stored_rows`
+reports the retained row-index entries, and
+`refactor_btf_scalar_run_group_live_step_storage_limited` reports when KLS
+counted the surface but could not retain the descriptor. Numeric execution is
+still unchanged.
 The retained group descriptor is tied to the LU pointer cache and is reused
 across repeated numeric refactors until the numeric pattern changes.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS=1` also builds that
