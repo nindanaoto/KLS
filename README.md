@@ -2354,6 +2354,29 @@ published-U scalar entries, `361,240,265` of them trailing/output entries,
 with zero scalar-run grouping. The largest clean KLS-vs-CKTSO timeout gap is
 therefore specifically `pre2` cold numeric factorization, dominated by scalar
 replay of trailing/output U rows in the first-factor row pipeline.
+A July 1, 2026 timeout-pair refresh gives the same answer on the current
+binary. CKTSO again completed `pre2` under the 120s process cap in
+`build/cktso_timeout_pair_gaprefresh_t4_r1_ref1_timeout120.jsonl`
+(`analysis_seconds=3.744502`, `initial_factor_seconds=6.872791`,
+`factor_seconds_avg=5.484577`, `refactor_seconds_avg=5.539306`,
+`solve_seconds_avg=0.129193`) and timed out only on `Hamrle3`; KLS timed out
+on both rows in
+`build/kls_timeout_pair_gaprefresh_t4_r1_ref1_timeout120.failures`.
+Current KLS analyze-only `pre2` checks are still single-digit to low
+double-digit seconds (`10.3982772s` for auto and `7.14765274s` for explicit
+AMD), so ordering is not the timeout-sized gap. A fresh 75s forced KLS-first
+trace
+`build/kls_pre2_gaprefresh_trace_t4_r1_ref0_timeout75.stderr` entered the
+same 629,628-row dominant BTF block and reached only row `22419`. Its logged
+long rows touched `315,497,095` scalar U entries, `276,067,152` of them
+trailing/output entries, with zero scalar-run grouping; live long-row samples
+recorded another `447,498,939` scalar U touches before completion. The small
+producer-batch activity (`366,272` target U entries in committed long rows) is
+orders of magnitude below the repeated scalar output stream. This reconfirms
+that the actionable CKTSO gap is not the timeout limit or ordering package,
+but the paper-level numeric owner: preserving and grouping prefactorized
+current-row work through pivoting/refactor phases instead of replaying scalar
+trailing/output updates.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while
