@@ -13575,3 +13575,23 @@ factorization of the dominant `pre2` BTF block: first serialized panel-cache
 rebuild/reset work in the row-pipeline commit path, then repeated scalar
 producer-output replay across adjacent current rows. The timeout limit and
 ordering/analyze phase are secondary for this case.
+
+The July 1, 2026 timeout recheck also rejects a narrower same-output-tail
+batching attempt. The prototype grouped consecutive ready dependency rows only
+when their published-U tail columns at or beyond the current row were exactly
+identical and long enough to amortize one output scatter. It built cleanly,
+passed `ctest --test-dir build --output-on-failure`, and stayed residual-clean
+on a forced KLS-first `transient` factor probe, but it did not touch the active
+`pre2` loss. The 75s trace
+`build/kls_pre2_output_tail_group_trace_t4_r1_ref0_timeout75.stderr` reached
+only row `22501` of the `629628`-row dominant BTF block, versus `22419` in the
+saved baseline `build/kls_pre2_gaprefresh_trace_t4_r1_ref0_timeout75.stderr`.
+Aggregated long-row counters recorded just `45` grouped scalar runs, `102`
+grouped rows, and `192701` grouped U entries, while the same long rows still
+performed `158704950` scalar U-entry touches and `138095349` scalar
+trailing/output touches. The hot long-row lines at the timeout tail still had
+`scalar_runs=0`. The source was restored, and the evidence narrows the missing
+paper-level owner again: it cannot require identical current-row output tails.
+It needs to be a CKTSO/SubtreeLU-style producer/panel-to-many-current executor
+that owns nonidentical sparse current states and streams published output work
+once across that live group.

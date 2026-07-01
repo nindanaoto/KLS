@@ -2395,6 +2395,19 @@ out. This rejects active-row epoch preservation as a standalone fix and points
 back to the larger paper gap: a grouped row/supernode numeric owner for the
 trailing/output stream, not just preserving scalar current states through
 pivots.
+A follow-up identical-output-tail grouping prototype was also rejected before
+being retained. It tried to batch consecutive ready dependency rows that shared
+the same large published-U output tail, but the same 75s `pre2` trace
+`build/kls_pre2_output_tail_group_trace_t4_r1_ref0_timeout75.stderr` advanced
+only to row `22501`, essentially matching the `22419` baseline. Aggregated
+long-row counters show why: the grouped path covered only `45` runs, `102`
+dependency rows, and `192701` U entries, while the same logged long rows still
+performed `158704950` scalar U-entry touches, `138095349` of them
+trailing/output touches. The hot rows continued to report zero scalar-run
+grouping. This rejects same-tail batching as the missing CKTSO-sized mechanism
+and keeps the target on a broader producer/supernode owner that streams a
+published row or panel once for many current rows, even when their output tails
+are not identical.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while
