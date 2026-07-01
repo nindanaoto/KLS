@@ -13108,3 +13108,26 @@ into scattered worker-side initialization: `ASIC_100ks` slowed from the
 `8.5030s` to `8.59457s`. KLS therefore keeps the full clear because it likely
 pre-touches the retained-state workspace more effectively than piecemeal lazy
 initialization on these cases.
+
+The BTF scalar-run group descriptor now also reports producer-step fanout for
+the live grouped-current owner the papers imply. This is different from the
+wake-adjacent batch diagnostic above: for each producer row inside a grouped
+contiguous run, KLS counts how many current columns would be updated if a
+completed-producer hook streamed that producer's L rows once across all live
+current states. The counters are descriptor-level and remain gated by
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUPS=1`, so the default no-env run leaves
+them at zero. Focused controls stayed residual-clean:
+`build/kls_btf_group_producer_step_off_asic100ks_t4_r1_ref1.json` reported no
+group descriptor and no producer-step counters. With groups enabled,
+`ASIC_100ks` reported `76,244` producer steps, `68,467` multi-current steps,
+`1,225,700` active current-step slots, `9,319,210` unique producer L entries,
+`308,891,777` duplicate per-current entries, `299,572,567` reusable entries,
+max fanout `362`, and a clean residual. `ASIC_320ks` reported `115,602`
+producer steps, `98,964` multi-current steps, `1,139,656` active slots,
+`4,398,767` unique producer L entries, `274,928,002` duplicate entries,
+`270,529,235` reusable entries, max fanout `444`, and a clean residual. The
+duplicate/unique ratios are about `33.1x` and `62.5x`, respectively. This
+confirms the prior small wake-adjacent result was only measuring a narrow
+scheduling coincidence; the real CKTSO-sized surface is a producer-row indexed
+live grouped-current executor that streams each completed producer once across
+all active currents.

@@ -1272,6 +1272,13 @@ struct kls_solver {
   UF_long refactor_btf_scalar_run_group_reused_entries;
   UF_long refactor_btf_scalar_run_group_max_currents;
   UF_long refactor_btf_scalar_run_group_max_rows;
+  UF_long refactor_btf_scalar_run_group_producer_step_count;
+  UF_long refactor_btf_scalar_run_group_producer_step_multi_count;
+  UF_long refactor_btf_scalar_run_group_producer_step_active_currents;
+  UF_long refactor_btf_scalar_run_group_producer_step_unique_entries;
+  UF_long refactor_btf_scalar_run_group_producer_step_duplicate_entries;
+  UF_long refactor_btf_scalar_run_group_producer_step_reused_entries;
+  UF_long refactor_btf_scalar_run_group_producer_step_max_currents;
   UF_long refactor_last_btf_scalar_run_group_waits;
   UF_long refactor_last_btf_scalar_run_group_wait_rows;
   UF_long refactor_last_btf_scalar_run_group_wait_entries;
@@ -14879,6 +14886,13 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_btf_scalar_run_group_reused_entries = 0;
   solver->refactor_btf_scalar_run_group_max_currents = 0;
   solver->refactor_btf_scalar_run_group_max_rows = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_count = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_multi_count = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_active_currents = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_unique_entries = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_duplicate_entries = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_reused_entries = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_max_currents = 0;
   solver->refactor_l_index32_enabled = 0;
   solver->refactor_u_index32_enabled = 0;
   solver->refactor_l_pattern_columns = 0;
@@ -28600,6 +28614,26 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_btf_scalar_run_group_max_currents;
   solver->stats.refactor_btf_scalar_run_group_max_rows =
     (int64_t)solver->refactor_btf_scalar_run_group_max_rows;
+  solver->stats.refactor_btf_scalar_run_group_producer_step_count =
+    (int64_t)solver->refactor_btf_scalar_run_group_producer_step_count;
+  solver->stats.refactor_btf_scalar_run_group_producer_step_multi_count =
+    (int64_t)solver
+      ->refactor_btf_scalar_run_group_producer_step_multi_count;
+  solver->stats.refactor_btf_scalar_run_group_producer_step_active_currents =
+    (int64_t)solver
+      ->refactor_btf_scalar_run_group_producer_step_active_currents;
+  solver->stats.refactor_btf_scalar_run_group_producer_step_unique_entries =
+    (int64_t)solver
+      ->refactor_btf_scalar_run_group_producer_step_unique_entries;
+  solver->stats.refactor_btf_scalar_run_group_producer_step_duplicate_entries =
+    (int64_t)solver
+      ->refactor_btf_scalar_run_group_producer_step_duplicate_entries;
+  solver->stats.refactor_btf_scalar_run_group_producer_step_reused_entries =
+    (int64_t)solver
+      ->refactor_btf_scalar_run_group_producer_step_reused_entries;
+  solver->stats.refactor_btf_scalar_run_group_producer_step_max_currents =
+    (int64_t)solver
+      ->refactor_btf_scalar_run_group_producer_step_max_currents;
   solver->stats.refactor_last_btf_scalar_run_group_waits =
     (int64_t)solver->refactor_last_btf_scalar_run_group_waits;
   solver->stats.refactor_last_btf_scalar_run_group_wait_rows =
@@ -35548,6 +35582,13 @@ static void kls_reset_refactor_btf_scalar_run_group_stats(kls_solver *solver) {
   solver->refactor_btf_scalar_run_group_reused_entries = 0;
   solver->refactor_btf_scalar_run_group_max_currents = 0;
   solver->refactor_btf_scalar_run_group_max_rows = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_count = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_multi_count = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_active_currents = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_unique_entries = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_duplicate_entries = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_reused_entries = 0;
+  solver->refactor_btf_scalar_run_group_producer_step_max_currents = 0;
   solver->refactor_btf_scalar_run_group_state_rows_total = 0;
   solver->refactor_btf_scalar_run_group_state_max_rows = 0;
   solver->refactor_btf_scalar_run_group_state_materialized_current_count = 0;
@@ -35595,6 +35636,17 @@ static void kls_reset_refactor_btf_scalar_run_group_stats(kls_solver *solver) {
     0;
   solver->refactor_btf_scalar_run_group_state_exec_late_ready_current_count =
     0;
+}
+
+static UF_long kls_saturating_add_uf_long(UF_long a, UF_long b) {
+  return b > UF_long_max - a ? UF_long_max : a + b;
+}
+
+static UF_long kls_saturating_mul_uf_long(UF_long a, UF_long b) {
+  if (a == 0u || b == 0u) {
+    return 0u;
+  }
+  return a > UF_long_max / b ? UF_long_max : a * b;
 }
 
 static UF_long kls_btf_scalar_run_structural_len(
@@ -36584,6 +36636,13 @@ static int kls_build_refactor_btf_scalar_run_groups(kls_solver *solver) {
   UF_long reused_entries = 0u;
   UF_long max_currents = 0u;
   UF_long max_rows = 0u;
+  UF_long producer_step_count = 0u;
+  UF_long producer_step_multi_count = 0u;
+  UF_long producer_step_active_currents = 0u;
+  UF_long producer_step_unique_entries = 0u;
+  UF_long producer_step_duplicate_entries = 0u;
+  UF_long producer_step_reused_entries = 0u;
+  UF_long producer_step_max_currents = 0u;
   for (UF_long begin = 0u; begin < item_count;) {
     UF_long end = begin + 1u;
     while (end < item_count &&
@@ -36653,6 +36712,51 @@ static int kls_build_refactor_btf_scalar_run_groups(kls_solver *solver) {
           reused_entries += saved_entries;
         }
       }
+      for (UF_long row = 0u; row < group_max_rows; ++row) {
+        UF_long fanout = 0u;
+        for (UF_long p = begin; p < end; ++p) {
+          if (items[p].rows > row) {
+            fanout++;
+          }
+        }
+        if (fanout == 0u) {
+          continue;
+        }
+        producer_step_count =
+          kls_saturating_add_uf_long(producer_step_count, 1u);
+        producer_step_active_currents =
+          kls_saturating_add_uf_long(producer_step_active_currents, fanout);
+        if (fanout > producer_step_max_currents) {
+          producer_step_max_currents = fanout;
+        }
+        if (fanout > 1u) {
+          producer_step_multi_count =
+            kls_saturating_add_uf_long(producer_step_multi_count, 1u);
+        }
+        if (items[begin].dep0_global > UF_long_max - row ||
+            items[begin].dep0_global + row >= solver->n) {
+          producer_step_unique_entries = UF_long_max;
+          producer_step_duplicate_entries = UF_long_max;
+          producer_step_reused_entries = UF_long_max;
+          continue;
+        }
+        const UF_long dep_entries =
+          solver->numeric->Llen[items[begin].dep0_global + row];
+        const UF_long duplicate_entries =
+          kls_saturating_mul_uf_long(dep_entries, fanout);
+        producer_step_unique_entries =
+          kls_saturating_add_uf_long(producer_step_unique_entries,
+                                     dep_entries);
+        producer_step_duplicate_entries =
+          kls_saturating_add_uf_long(producer_step_duplicate_entries,
+                                     duplicate_entries);
+        if (fanout > 1u) {
+          const UF_long reused =
+            kls_saturating_mul_uf_long(dep_entries, fanout - 1u);
+          producer_step_reused_entries =
+            kls_saturating_add_uf_long(producer_step_reused_entries, reused);
+        }
+      }
     }
     begin = end;
   }
@@ -36668,6 +36772,20 @@ static int kls_build_refactor_btf_scalar_run_groups(kls_solver *solver) {
   solver->refactor_btf_scalar_run_group_reused_entries = reused_entries;
   solver->refactor_btf_scalar_run_group_max_currents = max_currents;
   solver->refactor_btf_scalar_run_group_max_rows = max_rows;
+  solver->refactor_btf_scalar_run_group_producer_step_count =
+    producer_step_count;
+  solver->refactor_btf_scalar_run_group_producer_step_multi_count =
+    producer_step_multi_count;
+  solver->refactor_btf_scalar_run_group_producer_step_active_currents =
+    producer_step_active_currents;
+  solver->refactor_btf_scalar_run_group_producer_step_unique_entries =
+    producer_step_unique_entries;
+  solver->refactor_btf_scalar_run_group_producer_step_duplicate_entries =
+    producer_step_duplicate_entries;
+  solver->refactor_btf_scalar_run_group_producer_step_reused_entries =
+    producer_step_reused_entries;
+  solver->refactor_btf_scalar_run_group_producer_step_max_currents =
+    producer_step_max_currents;
 
   if (multi_count == 0u) {
     solver->refactor_btf_scalar_run_group_built = 1;

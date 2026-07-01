@@ -1076,6 +1076,13 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_group_reused_entries;
   int64_t refactor_btf_scalar_run_group_max_currents;
   int64_t refactor_btf_scalar_run_group_max_rows;
+  int64_t refactor_btf_scalar_run_group_producer_step_count;
+  int64_t refactor_btf_scalar_run_group_producer_step_multi_count;
+  int64_t refactor_btf_scalar_run_group_producer_step_active_currents;
+  int64_t refactor_btf_scalar_run_group_producer_step_unique_entries;
+  int64_t refactor_btf_scalar_run_group_producer_step_duplicate_entries;
+  int64_t refactor_btf_scalar_run_group_producer_step_reused_entries;
+  int64_t refactor_btf_scalar_run_group_producer_step_max_currents;
   int64_t refactor_last_btf_scalar_run_group_waits;
   int64_t refactor_last_btf_scalar_run_group_wait_rows;
   int64_t refactor_last_btf_scalar_run_group_wait_entries;
