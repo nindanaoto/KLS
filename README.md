@@ -243,8 +243,11 @@ pivot epochs are reported through `kls_first_last_row_pipeline_pivot_tail`,
 `kls_first_last_row_pipeline_pivot_serial_rows`,
 `kls_first_last_row_pipeline_prefix_panel_rebuild`,
 `kls_first_row_pipeline_prefix_panel_rebuild_count`, and
-`kls_first_last_row_pipeline_prefix_panel_rebuild_rows`; separator pipeline
-epochs continue to use the separator-prefixed counters below. KLS-first
+`kls_first_last_row_pipeline_prefix_panel_rebuild_rows`; these rebuild counters
+remain in the ABI, but the current pivot path avoids full prefix rebuilds while
+holding the ordered pipeline lock. It disables stale prefix supernode metadata
+and exchanges or deactivates cached panels that survive the pivot. Separator
+pipeline epochs continue to use the separator-prefixed counters below. KLS-first
 panel-cache staging is reported through
 `kls_first_row_panel_cache_build_count`,
 `kls_first_row_panel_cache_build_panels`,
@@ -294,12 +297,15 @@ separate them from older external serialized rows with
 pre-updates and scalar row-supernode updates completed before a pivot restart
 remain counted in the same separator-pipeline counters; phase-local cached panel
 updates after the restart remain visible through the separator-pipeline panel
-counters. Prefix panel rebuilds after a separator-pipeline pivot are reported
-through `kls_first_last_separator_queue_pipeline_prefix_panel_rebuild`,
+counters. Separator pivot epochs follow the same no-rebuild policy: stale
+prefix metadata is disabled, valid cached panels are exchanged or deactivated,
+and future panels can still be appended as rows publish. The retained prefix
+rebuild counters are therefore expected to stay zero on this path:
+`kls_first_last_separator_queue_pipeline_prefix_panel_rebuild`,
 `kls_first_separator_queue_pipeline_prefix_panel_rebuild_count`, and
-`kls_first_last_separator_queue_pipeline_prefix_panel_rebuild_rows`, matching
-the retained prefix semantics of the epoch retry. Active-rank pivot resets that
-still rebuild row-supernode metadata are exposed separately through
+`kls_first_last_separator_queue_pipeline_prefix_panel_rebuild_rows`.
+Active-rank pivot resets that rebuild row-supernode metadata, if re-enabled for
+diagnostics, are exposed separately through
 `kls_first_active_rank_pivot_reset_count`,
 `kls_first_active_rank_pivot_reset_rows`,
 `kls_first_active_rank_pivot_panel_rebuild_count`, and

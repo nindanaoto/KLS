@@ -88694,21 +88694,6 @@ static void kls_row_first_pipeline_mark_failed(
   }
 }
 
-static int kls_row_first_pipeline_should_rebuild_prefix_panel_cache(
-  const kls_row_first_pipeline_shared *shared) {
-  if (shared == NULL || shared->ctx == NULL) {
-    return 0;
-  }
-  if (shared->active_rank != NULL) {
-    return 0;
-  }
-  if (shared->completed_pos >=
-      KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS) {
-    return 0;
-  }
-  return 1;
-}
-
 static void kls_row_first_pipeline_disable_prefix_supernodes(
   kls_row_first_pipeline_shared *shared) {
   if (shared == NULL) {
@@ -88746,50 +88731,6 @@ static void kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
   }
 }
 
-static void kls_row_first_pipeline_reset_prefix_after_large_pivot(
-  kls_row_first_pipeline_shared *shared,
-  UF_long pivot_col_a,
-  UF_long pivot_col_b) {
-  if (shared == NULL || shared->ctx == NULL ||
-      shared->workspace == NULL ||
-      shared->u_entries == NULL ||
-      shared->row_done == NULL ||
-      shared->supernode_start == NULL ||
-      shared->supernode_end == NULL) {
-    return;
-  }
-  if (shared->active_rank != NULL) {
-    return;
-  }
-  if (shared->completed_pos >=
-      KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS) {
-    kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
-      shared, pivot_col_a, pivot_col_b);
-    return;
-  }
-  const UF_long nk = shared->ctx->nk;
-  if (shared->completed_pos <= nk &&
-      shared->workspace->u_row_ptr != NULL &&
-      shared->workspace->u_row_end != NULL) {
-    kls_row_first_supernodes_reset_prefix(
-      shared->u_entries, shared->workspace->u_row_ptr,
-      shared->workspace->u_row_end, shared->row_done, nk,
-      shared->completed_pos, shared->supernode_start,
-      shared->supernode_end);
-  }
-  if (shared->private_supernode_panel_cache != NULL) {
-    kls_row_first_supernode_panel_cache *cache =
-      shared->private_supernode_panel_cache;
-    if (cache->row_count == nk && cache->panel_id_by_row != NULL) {
-      (void)kls_row_first_supernode_panel_cache_exchange_columns(
-        cache, pivot_col_a, pivot_col_b);
-    } else {
-      kls_row_first_supernode_panel_cache_free(cache);
-      (void)kls_row_first_supernode_panel_cache_init_rows(cache, nk);
-    }
-  }
-}
-
 static void kls_row_first_pipeline_rebuild_prefix_panel_cache(
   kls_row_first_pipeline_shared *shared,
   UF_long pivot_col_a,
@@ -88800,46 +88741,8 @@ static void kls_row_first_pipeline_rebuild_prefix_panel_cache(
   if (shared->active_rank != NULL) {
     return;
   }
-  if (!kls_row_first_pipeline_should_rebuild_prefix_panel_cache(shared)) {
-    kls_row_first_pipeline_reset_prefix_after_large_pivot(
-      shared, pivot_col_a, pivot_col_b);
-    return;
-  }
-  if (shared->private_supernode_panel_cache == NULL ||
-      shared->workspace == NULL ||
-      shared->u_entries == NULL ||
-      shared->udiag_values == NULL ||
-      shared->row_done == NULL ||
-      shared->supernode_start == NULL ||
-      shared->supernode_end == NULL) {
-    return;
-  }
-  const UF_long nk = shared->ctx->nk;
-  if (shared->completed_pos > nk ||
-      shared->workspace->u_row_ptr == NULL ||
-      shared->workspace->u_row_end == NULL) {
-    kls_row_first_supernode_panel_cache_free(
-      shared->private_supernode_panel_cache);
-    return;
-  }
-  kls_row_first_supernodes_reset_prefix(
-    shared->u_entries, shared->workspace->u_row_ptr,
-    shared->workspace->u_row_end, shared->row_done, nk,
-    shared->completed_pos, shared->supernode_start, shared->supernode_end);
-  if (!kls_row_first_supernode_panel_cache_build(
-        shared->private_supernode_panel_cache, shared->u_entries,
-        shared->workspace->u_row_ptr, shared->workspace->u_row_end,
-        shared->udiag_values, shared->row_done, shared->supernode_start,
-        shared->supernode_end, nk, shared->completed_pos, shared->stats)) {
-    kls_row_first_supernode_panel_cache_free(
-      shared->private_supernode_panel_cache);
-    return;
-  }
-  if (shared->stats != NULL) {
-    shared->stats->pipeline_prefix_panel_rebuilds++;
-    shared->stats->pipeline_prefix_panel_rebuild_rows +=
-      shared->completed_pos;
-  }
+  kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
+    shared, pivot_col_a, pivot_col_b);
 }
 
 static void kls_row_first_pipeline_publish_completed_panel(
@@ -89198,42 +89101,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               if (shared->active_rank != NULL) {
                 shared->row_done[row] = 1u;
                 if (pivoted) {
-                  if (shared->ctx->nk >=
-                      KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS) {
-                    kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
-                      shared, row, selected_col);
-                  } else {
-                    kls_row_first_supernodes_reset(
-                      shared->u_entries, shared->workspace->u_row_ptr,
-                      shared->workspace->u_row_end, shared->row_done,
-                      shared->ctx->nk, shared->ctx->nk,
-                      shared->supernode_start, shared->supernode_end);
-                    if (shared->stats != NULL) {
-                      kls_row_first_stats_add(
-                        &shared->stats->active_rank_pivot_resets, 1u);
-                      kls_row_first_stats_add(
-                        &shared->stats->active_rank_pivot_reset_rows,
-                        shared->ctx->nk);
-                    }
-                    if (shared->private_supernode_panel_cache != NULL) {
-                      (void)kls_row_first_supernode_panel_cache_build(
-                        shared->private_supernode_panel_cache,
-                        shared->u_entries, shared->workspace->u_row_ptr,
-                        shared->workspace->u_row_end, shared->udiag_values,
-                        shared->row_done, shared->supernode_start,
-                        shared->supernode_end, shared->ctx->nk,
-                        shared->ctx->nk, shared->stats);
-                      if (shared->stats != NULL) {
-                        kls_row_first_stats_add(
-                          &shared->stats->active_rank_pivot_panel_rebuilds,
-                          1u);
-                        kls_row_first_stats_add(
-                          &shared->stats
-                             ->active_rank_pivot_panel_rebuild_rows,
-                          shared->ctx->nk);
-                      }
-                    }
-                  }
+                  kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
+                    shared, row, selected_col);
                 } else {
                   kls_row_first_supernodes_publish_row(
                     shared->u_entries, shared->workspace->u_row_ptr,

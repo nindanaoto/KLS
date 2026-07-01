@@ -13899,11 +13899,11 @@ static int test_kls_first_separator_pipeline_pivot_epoch(void) {
              factor_stats.kls_first_last_separator_queue_pipeline_pivot_tail_rows <=
                0 ||
              factor_stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild !=
-               1 ||
-             factor_stats.kls_first_separator_queue_pipeline_prefix_panel_rebuild_count <=
                0 ||
-             factor_stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild_rows <=
-               factor_stats.kls_first_last_separator_queue_private_rows ||
+             factor_stats.kls_first_separator_queue_pipeline_prefix_panel_rebuild_count !=
+               0 ||
+             factor_stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild_rows !=
+               0 ||
              factor_stats.kls_first_row_panel_cache_build_count <= 0 ||
              factor_stats.kls_first_row_panel_cache_build_panels <= 0 ||
              factor_stats.kls_first_row_panel_cache_build_entries <= 0 ||
@@ -15158,9 +15158,9 @@ static int test_experimental_row_uplooking_dynamic_column_pivot(void) {
              stats.kls_first_last_row_pipeline_pivot_tail_rows <= 0 ||
              stats.kls_first_last_row_pipeline_pivot_restarts <= 0 ||
              stats.kls_first_last_row_pipeline_pivot_serial_rows != 0 ||
-             stats.kls_first_last_row_pipeline_prefix_panel_rebuild != 1 ||
-             stats.kls_first_row_pipeline_prefix_panel_rebuild_count < 1 ||
-             stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows <=
+             stats.kls_first_last_row_pipeline_prefix_panel_rebuild != 0 ||
+             stats.kls_first_row_pipeline_prefix_panel_rebuild_count != 0 ||
+             stats.kls_first_last_row_pipeline_prefix_panel_rebuild_rows !=
                0 ||
              stats.kls_first_last_separator_queue_parallel_pipeline != 0 ||
              stats.kls_first_last_separator_queue_pipeline_prefix_panel_rebuild !=

@@ -13763,3 +13763,54 @@ parallel progress. The paper-aligned next target remains a coarser CKTSO /
 SubtreeLU-style row/supernode numeric owner that preserves and streams producer
 panel work across the suffix instead of repeatedly rebuilding or replaying it
 under a one-worker bottleneck.
+
+The pivot path now removes that rebuild/reset bottleneck from the ordered
+row-pipeline critical section. Dynamic-pivot epochs no longer rebuild prefix
+row-supernode metadata or the prefix panel cache while peer workers wait.
+Instead, KLS disables stale prefix supernode metadata and preserves only cached
+panels that survive the pivot by exchanging tail columns or deactivating panels
+whose dense block was affected. This applies to generic row-pipeline pivots,
+separator-queue pipeline pivots, and active-rank suffix pivots; future panels
+can still be appended as rows publish, so correctness falls back to scalar or
+newly appended panels rather than relying on stale prefix metadata.
+
+Validation for the no-rebuild pivot path:
+
+- `cmake --build build -j4` completed.
+- `ctest --test-dir build --output-on-failure` passed both tests after the
+  smoke diagnostics were updated to require zero prefix rebuild counters on the
+  pivot-epoch paths.
+- `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1
+  KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE=1
+  KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_COMPACT_VALUES=1
+  build/kls_smoke` passed.
+- A forced KLS-first `transient` check,
+  `build/kls_transient_no_prefix_rebuild_t4_r1_ref0.json`, was residual-clean
+  (`relative_residual_l2=4.12024204e-13`) with
+  `initial_factor_seconds=2.03343866`, `factor_seconds_avg=1.15802924`, and
+  zero row-pipeline/active-rank prefix panel rebuild counters.
+
+On `pre2`, this is a real progress fix but not the CKTSO-gap closer. The old
+75s trace at `e37f923`,
+`build/kls_pre2_timeout_gap_trace_e37f923_t4_r1_ref0_timeout75.stderr`, only
+printed the dominant-pipeline start before the timeout. The intermediate
+no-active-rank-rebuild trace still did the same. After removing both prefix
+rebuild and prefix reset from the ordered lock,
+`build/kls_pre2_no_prefix_rebuild_trace_t4_r1_ref0_timeout75.stderr` reached
+long-row commits around `completed=45171/629628`. A debugger-owned sample,
+`build/pre2_no_prefix_rebuild_gdb_pty.txt`, now lands in
+`kls_row_first_partial_apply_one_dep` rather than
+`kls_row_first_supernode_panel_cache_build` or
+`kls_row_first_supernodes_reset_prefix`; peer workers are still waiting on the
+ordered pipeline lock. The non-traced 120s factor-only run
+`build/kls_pre2_no_prefix_rebuild_factor_t4_r1_ref0_timeout120.json` still
+timed out with no JSON output.
+
+The remaining large gap is therefore sharper: after removing the full prefix
+rebuild/reset lock bottleneck, the hard `pre2` rows still spend their time in
+single-row scalar published-U replay. The 75s trace shows repeated long rows
+with roughly `5M` to `10M` scalar U entries each, dominated by output/trailing
+entries, while producer batching usually covers only a few thousand target
+entries per row. The next paper-aligned step should move that output/trailing
+update stream into a grouped producer/panel-to-many-current owner instead of
+trying to recover more prefix cache state after pivots.
