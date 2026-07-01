@@ -14218,3 +14218,33 @@ producer-owned numeric updates. This keeps the paper-level target on a
 persistent grouped-current row/supernode numeric owner for first-factor
 pivoting tails, rather than another timeout-policy, ordering-package, BLAS, or
 small lock-refactor change.
+
+An active-current catch-up batching probe was added behind
+`KLS_ENABLE_ROW_PIPELINE_ACTIVE_CATCHUP_BATCH=1` and rejected as a default
+gap-closer. The idea directly tested whether KLS was missing CKTSO/SubtreeLU
+producer reuse because active current rows were not being advanced to the
+just-completed producer before producer-batch selection. The guarded path
+applies ready dependencies below the producer for active rows that already
+contain that producer, then reruns the normal producer-batch eligibility check.
+The implementation keeps extra trace fields:
+`producer_active_catchup_attempts`, `producer_active_catchup_deps`, and
+`producer_active_catchup_targets`; the summary helper includes the same fields
+for progress and long-row traces.
+
+Correctness checks passed (`./build/kls_smoke`,
+`KLS_ENABLE_ROW_PIPELINE_ACTIVE_CATCHUP_BATCH=1 ./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, plus forced KLS-first `add20`
+and `bcircuit` residual probes). The focused `pre2` trace was mildly positive
+but far below CKTSO scale. Against
+`build/kls_pre2_timeout_pair_88aaf4b_trace75.stderr`,
+`build/kls_pre2_active_catchup_trace75.stderr` reached the same
+`589824/629628` checkpoint, eliminated `producer_reject_not_root` by creating
+`62131` catch-up targets and advancing `79883` scalar dependencies, but raised
+producer-target U entries only from `944607` to `1054425`. The scalar
+output/producer-target ratio improved only from `787.57x` to `705.53x`. The
+matching no-trace probe
+`build/kls_pre2_active_catchup_factor_t4_r1_ref0_timeout125.json` still timed
+out with no JSON row. This rejects active-state catch-up around the existing
+independent sparse row states as the clear missing mechanism; the required
+paper-level work remains a persistent grouped-current numeric owner that makes
+many more live currents targets of producer-owned row/supernode updates.

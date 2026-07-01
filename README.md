@@ -2608,6 +2608,22 @@ rows versus `425873` unique rows, `2.80x`), but they cover too little of the
 numeric stream. This pins the largest clean gap on first-factor pivoting-tail
 row/supernode numeric ownership, not `Hamrle3`, timeout policy, ordering,
 refactorization, solve time, BLAS dispatch, or small mutex movement.
+`KLS_ENABLE_ROW_PIPELINE_ACTIVE_CATCHUP_BATCH=1` keeps an opt-in diagnostic
+for one nearby paper-aligned idea: active current rows whose next dependency is
+not the just-completed producer can be advanced to that producer before the
+batching test, matching the catch-up already allowed for unclaimed lookahead
+states. Correctness smoke and forced `add20`/`bcircuit` probes stayed
+residual-clean, but the focused `pre2` check rejects this as the missing
+default mechanism. The 75s trace
+`build/kls_pre2_active_catchup_trace75.stderr` reached the same
+`589824/629628` checkpoint as the baseline and eliminated `not_root` rejects,
+but producer-target U entries rose only from `944607` to `1054425` while the
+scalar-output/producer-target ratio remained `705.53x`. The no-trace
+factor-only probe
+`build/kls_pre2_active_catchup_factor_t4_r1_ref0_timeout125.json` still timed
+out with no JSON row. This keeps the next required work on a larger persistent
+grouped-current owner, not just advancing existing active sparse states to the
+current producer.
 
 ## License
 

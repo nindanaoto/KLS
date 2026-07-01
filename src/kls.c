@@ -46893,6 +46893,13 @@ static int kls_row_pipeline_pivot_lookahead_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_active_catchup_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_ROW_PIPELINE_ACTIVE_CATCHUP_BATCH");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static UF_long kls_row_pipeline_pivot_lookahead_slots_env(void) {
   if (!kls_row_pipeline_pivot_lookahead_env_enabled()) {
     return 0u;
@@ -84358,6 +84365,9 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long producer_batch_output_entries;
   UF_long producer_batch_state_rows;
   UF_long producer_batch_unique_state_rows;
+  UF_long producer_active_catchup_attempts;
+  UF_long producer_active_catchup_deps;
+  UF_long producer_active_catchup_targets;
   UF_long producer_probe_workers;
   UF_long producer_probe_lookahead;
   UF_long producer_probe_ready_roots;
@@ -84480,6 +84490,12 @@ static void kls_row_first_pipeline_trace_add(
                           source->producer_batch_state_rows);
   kls_row_first_stats_add(&target->producer_batch_unique_state_rows,
                           source->producer_batch_unique_state_rows);
+  kls_row_first_stats_add(&target->producer_active_catchup_attempts,
+                          source->producer_active_catchup_attempts);
+  kls_row_first_stats_add(&target->producer_active_catchup_deps,
+                          source->producer_active_catchup_deps);
+  kls_row_first_stats_add(&target->producer_active_catchup_targets,
+                          source->producer_active_catchup_targets);
   kls_row_first_stats_add(&target->producer_probe_workers,
                           source->producer_probe_workers);
   kls_row_first_stats_add(&target->producer_probe_lookahead,
@@ -88147,6 +88163,7 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long lookahead_max_inputs;
   int trace_enabled;
   int producer_batch_enabled;
+  int active_catchup_batch_enabled;
   int lookahead_fill_enabled;
   int pivot_lookahead_enabled;
   int failed;
@@ -88388,9 +88405,58 @@ static int kls_row_first_pipeline_apply_producer_batch(
       KLS_ROW_FIRST_PRODUCER_REJECT_NONE;
     if (!kls_row_first_pipeline_worker_scalar_batch_candidate(
           shared, worker, dep, &reject_reason)) {
-      kls_row_first_pipeline_trace_producer_reject(producer_trace,
-                                                  reject_reason);
-      continue;
+      int retry_after_catchup = 0;
+      if (shared->active_catchup_batch_enabled &&
+          reject_reason == KLS_ROW_FIRST_PRODUCER_REJECT_NOT_ROOT &&
+          worker->active_state != NULL &&
+          worker->active_order_epoch == shared->order_epoch &&
+          worker->workspace.mark != NULL &&
+          worker->workspace.dep_heap != NULL &&
+          dep < worker->active_state->row &&
+          worker->workspace.mark[dep] ==
+            worker->active_state->generation &&
+          worker->active_state->dep_heap_size > 0u &&
+          worker->workspace.dep_heap[0] < dep) {
+        if (producer_trace != NULL) {
+          kls_row_first_stats_add(
+            &producer_trace->producer_active_catchup_attempts, 1u);
+        }
+        const UF_long before_l_count = worker->l_entries.count;
+        if (!kls_row_first_partial_apply_ready_until(
+              shared->ctx, &worker->workspace, &worker->l_entries,
+              shared->u_entries, shared->udiag_values,
+              shared->workspace->u_row_ptr, shared->workspace->u_row_end,
+              shared->supernode_start, shared->supernode_end,
+              shared->row_done, shared->active_rank, shared->completed_pos,
+              worker->active_state, dep,
+              &worker->pipeline_supernode_update_groups,
+              &worker->pipeline_supernode_update_rows,
+              &worker->pipeline_supernode_panel_update_groups,
+              &worker->pipeline_supernode_panel_update_rows,
+              shared->stats,
+              shared->trace_enabled ? &worker->trace_current : NULL,
+              NULL)) {
+          return 0;
+        }
+        if (producer_trace != NULL &&
+            worker->l_entries.count > before_l_count) {
+          kls_row_first_stats_add(
+            &producer_trace->producer_active_catchup_deps,
+            worker->l_entries.count - before_l_count);
+        }
+        retry_after_catchup = 1;
+      }
+      if (!retry_after_catchup ||
+          !kls_row_first_pipeline_worker_scalar_batch_candidate(
+            shared, worker, dep, &reject_reason)) {
+        kls_row_first_pipeline_trace_producer_reject(producer_trace,
+                                                    reject_reason);
+        continue;
+      }
+      if (producer_trace != NULL) {
+        kls_row_first_stats_add(
+          &producer_trace->producer_active_catchup_targets, 1u);
+      }
     }
     if (producer_trace != NULL) {
       kls_row_first_stats_add(&producer_trace->producer_probe_ready_roots, 1u);
@@ -88821,6 +88887,9 @@ static void kls_row_first_pipeline_trace_print(
           " producer_u_output=%" PRIu64
           " producer_state_rows=%" PRIu64
           " producer_unique_state_rows=%" PRIu64
+          " producer_active_catchup_attempts=%" PRIu64
+          " producer_active_catchup_deps=%" PRIu64
+          " producer_active_catchup_targets=%" PRIu64
           " producer_probe_workers=%" PRIu64
           " producer_probe_lookahead=%" PRIu64
           " producer_ready_roots=%" PRIu64
@@ -88860,6 +88929,9 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->producer_batch_output_entries,
           (uint64_t)trace->producer_batch_state_rows,
           (uint64_t)trace->producer_batch_unique_state_rows,
+          (uint64_t)trace->producer_active_catchup_attempts,
+          (uint64_t)trace->producer_active_catchup_deps,
+          (uint64_t)trace->producer_active_catchup_targets,
           (uint64_t)trace->producer_probe_workers,
           (uint64_t)trace->producer_probe_lookahead,
           (uint64_t)trace->producer_probe_ready_roots,
@@ -89384,6 +89456,9 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " producer_target_u_entries=%" PRIu64
                         " producer_state_rows=%" PRIu64
                         " producer_unique_state_rows=%" PRIu64
+                        " producer_active_catchup_attempts=%" PRIu64
+                        " producer_active_catchup_deps=%" PRIu64
+                        " producer_active_catchup_targets=%" PRIu64
                         " producer_probe_workers=%" PRIu64
                         " producer_probe_lookahead=%" PRIu64
                         " producer_ready_roots=%" PRIu64
@@ -89421,6 +89496,9 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.producer_batch_target_u_entries,
                         (uint64_t)worker->trace_current.producer_batch_state_rows,
                         (uint64_t)worker->trace_current.producer_batch_unique_state_rows,
+                        (uint64_t)worker->trace_current.producer_active_catchup_attempts,
+                        (uint64_t)worker->trace_current.producer_active_catchup_deps,
+                        (uint64_t)worker->trace_current.producer_active_catchup_targets,
                         (uint64_t)worker->trace_current.producer_probe_workers,
                         (uint64_t)worker->trace_current.producer_probe_lookahead,
                         (uint64_t)worker->trace_current.producer_probe_ready_roots,
@@ -89669,6 +89747,9 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.batch_target_capacity = batch_target_capacity;
   shared.producer_batch_enabled =
     !kls_row_pipeline_producer_batch_env_disabled();
+  shared.active_catchup_batch_enabled =
+    shared.producer_batch_enabled &&
+    kls_row_pipeline_active_catchup_env_enabled();
   shared.lookahead_fill_enabled = requested_lookahead > 0u;
   shared.pivot_lookahead_enabled =
     requested_pivot_lookahead > 0u && shared.producer_batch_enabled;

@@ -20,6 +20,9 @@ KEY_VALUE_RE = re.compile(r"([A-Za-z0-9_]+)=([^ \n]+)")
 PRODUCER_COUNTERS = [
     "producer_batches",
     "producer_targets",
+    "producer_active_catchup_attempts",
+    "producer_active_catchup_deps",
+    "producer_active_catchup_targets",
     "producer_probe_workers",
     "producer_probe_lookahead",
     "producer_ready_roots",
@@ -75,6 +78,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_producer_target_u = 0
     long_producer_state_rows = 0
     long_producer_unique_state_rows = 0
+    long_active_catchup_attempts = 0
+    long_active_catchup_deps = 0
+    long_active_catchup_targets = 0
     long_panel_rows = 0
     long_pivot_scalar = 0
     long_pivot_output = 0
@@ -109,6 +115,15 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_producer_unique_state_rows += parse_int(
                 row.get("producer_unique_state_rows")
             )
+            long_active_catchup_attempts += parse_int(
+                row.get("producer_active_catchup_attempts")
+            )
+            long_active_catchup_deps += parse_int(
+                row.get("producer_active_catchup_deps")
+            )
+            long_active_catchup_targets += parse_int(
+                row.get("producer_active_catchup_targets")
+            )
             long_panel_rows += parse_int(row.get("panel_update_rows"))
             if pivoted:
                 producer_batches = parse_int(row.get("producer_batches"))
@@ -139,6 +154,13 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     producer_unique_state_rows = parse_int(
         last_trace.get("producer_unique_state_rows")
     )
+    active_catchup_attempts = parse_int(
+        last_trace.get("producer_active_catchup_attempts")
+    )
+    active_catchup_deps = parse_int(last_trace.get("producer_active_catchup_deps"))
+    active_catchup_targets = parse_int(
+        last_trace.get("producer_active_catchup_targets")
+    )
     panel_rows = parse_int(last_trace.get("panel_update_rows"))
     summary: dict[str, object] = {
         "path": str(path),
@@ -151,6 +173,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "producer_target_u_entries": producer_target_u,
         "producer_state_rows": producer_state_rows,
         "producer_unique_state_rows": producer_unique_state_rows,
+        "producer_active_catchup_attempts": active_catchup_attempts,
+        "producer_active_catchup_deps": active_catchup_deps,
+        "producer_active_catchup_targets": active_catchup_targets,
         "panel_update_rows": panel_rows,
         "long_rows": long_rows,
         "long_max_row": long_max_row,
@@ -162,6 +187,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_producer_target_u_entries": long_producer_target_u,
         "long_producer_state_rows": long_producer_state_rows,
         "long_producer_unique_state_rows": long_producer_unique_state_rows,
+        "long_producer_active_catchup_attempts": long_active_catchup_attempts,
+        "long_producer_active_catchup_deps": long_active_catchup_deps,
+        "long_producer_active_catchup_targets": long_active_catchup_targets,
         "long_panel_update_rows": long_panel_rows,
         "long_pivot_scalar_u_entries": long_pivot_scalar,
         "long_pivot_scalar_u_output": long_pivot_output,
@@ -222,6 +250,9 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "producer_state_rows",
         "producer_unique_state_rows",
         "producer_state_rows_per_unique",
+        "producer_active_catchup_attempts",
+        "producer_active_catchup_deps",
+        "producer_active_catchup_targets",
         "producer_underfilled",
         "producer_low_saved_stream",
         "producer_reject_bad_state",
@@ -239,6 +270,9 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_producer_state_rows",
         "long_producer_unique_state_rows",
         "long_producer_state_rows_per_unique",
+        "long_producer_active_catchup_attempts",
+        "long_producer_active_catchup_deps",
+        "long_producer_active_catchup_targets",
         "long_pivot_scalar_u_entries",
         "long_pivot_scalar_u_output",
         "long_pivot_producer_target_u_entries",
