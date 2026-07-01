@@ -2336,6 +2336,24 @@ checkpoint with `804,367,990` scalar published-U entry touches, split into
 with peer pipeline workers waiting. The next first-factor target is therefore
 still the coarse CKTSO/SubtreeLU row/supernode numeric executor for output
 streaming, not a longer timeout, ordering-only change, or BLAS threshold.
+A clean-HEAD rerun at `ff0637d` reconfirms that timeout split without any
+uncommitted row-pipeline experiments. CKTSO completed `pre2` in
+`build/cktso_timeout_pair_headrecheck_t4_r1_ref1_timeout120.jsonl`
+(`analysis_seconds=3.814414`, `initial_factor_seconds=6.401925`,
+`factor_seconds_avg=5.108526`, `refactor_seconds_avg=4.908564`,
+`solve_seconds_avg=0.123054`) and timed out only on `Hamrle3`. The matching
+clean KLS run `build/kls_head_timeout_pair_recheck_t4_r1_ref1_timeout120.*`
+timed out on both `pre2` and `Hamrle3`. KLS analyze-only checks bound the
+`pre2` ordering/analyze cost at single-digit seconds
+(`analysis_seconds=8.56565108` for auto/AMD-selected ordering and
+`6.36665609` for explicit AMD), while a 75s forced first-factor trace
+`build/kls_head_pre2_timeout_gap_trace_t4_r1_ref0_timeout75.stderr` entered
+the 629,628-row dominant BTF block and advanced only from completed row
+`14054` to `22458`. The logged long rows alone touched `411,867,565`
+published-U scalar entries, `361,240,265` of them trailing/output entries,
+with zero scalar-run grouping. The largest clean KLS-vs-CKTSO timeout gap is
+therefore specifically `pre2` cold numeric factorization, dominated by scalar
+replay of trailing/output U rows in the first-factor row pipeline.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while
