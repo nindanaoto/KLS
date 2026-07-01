@@ -14812,3 +14812,28 @@ scalar U touches fell from the pre-reserve trace's `651,110,464` to
 (`267,262,660` state rows over `42,067,213` unique rows). This keeps the next
 paper-aligned implementation target on a persistent shared-union grouped-current
 state, not on further independent compact-state insert micro-optimizations.
+
+The compact live-window executor now has a first shared-union batch path. For
+accepted compact batches with at least two surviving targets, it builds one
+union column set across the target sparse states plus the producer row, updates
+a target-by-union value block, and scatters back while preserving each target's
+pending dependency heap. This is the first implementation of the grouped-current
+owner shape requested by the `6.35x` state-row collapse diagnostic, still
+inside the opt-in compact executor. The trace helper reports
+`compact_window_union_{batches,targets,cols,values}`.
+
+Correctness remained clean under `./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and compact-exec `add20` /
+`bcircuit` probes with relative residuals `3.79718427e-16` and
+`7.87813496e-17`. On the focused `pre2` 64-slot compact-exec trace
+`build/kls_pre2_compact_union_w64_trace45.stderr`, the union path fired for
+`314,435` compact batches, `1,967,854` targets, `36,494,900` union columns, and
+`453,573,710` target-union values. It modestly improved the same checkpoint:
+scalar U touches fell from `651,079,397` to `650,802,752`, compact target U
+entries stayed about `153M`, and scalar-output-per-compact-target-U improved
+from `3.63048x` to `3.62955x`. The no-trace 125s factor-only probe
+`build/kls_pre2_compact_union_w64_factor_t4_r1_ref0_timeout125.json` still
+timed out with an empty JSON row. This confirms that a transient per-batch
+shared union is not enough; the next algorithmic gap is a persistent grouped
+owner that avoids scatter-back to independent compact states after every
+producer.

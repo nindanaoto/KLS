@@ -104,6 +104,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_compact_window_stream_u = 0
     long_compact_window_state_rows = 0
     long_compact_window_unique_state_rows = 0
+    long_compact_union_batches = 0
+    long_compact_union_targets = 0
+    long_compact_union_cols = 0
+    long_compact_union_values = 0
     long_panel_rows = 0
     long_panel_entries = 0
     long_pivot_scalar = 0
@@ -176,6 +180,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_window_unique_state_rows += parse_int(
                 row.get("compact_window_unique_state_rows")
             )
+            long_compact_union_batches += parse_int(
+                row.get("compact_window_union_batches")
+            )
+            long_compact_union_targets += parse_int(
+                row.get("compact_window_union_targets")
+            )
+            long_compact_union_cols += parse_int(
+                row.get("compact_window_union_cols")
+            )
+            long_compact_union_values += parse_int(
+                row.get("compact_window_union_values")
+            )
             long_panel_rows += parse_int(row.get("panel_update_rows"))
             long_panel_entries += parse_int(row.get("panel_update_entries"))
             if pivoted:
@@ -238,6 +254,16 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_unique_state_rows = parse_int(
         last_trace.get("compact_window_unique_state_rows")
     )
+    compact_union_batches = parse_int(
+        last_trace.get("compact_window_union_batches")
+    )
+    compact_union_targets = parse_int(
+        last_trace.get("compact_window_union_targets")
+    )
+    compact_union_cols = parse_int(last_trace.get("compact_window_union_cols"))
+    compact_union_values = parse_int(
+        last_trace.get("compact_window_union_values")
+    )
     panel_rows = parse_int(last_trace.get("panel_update_rows"))
     panel_entries = parse_int(last_trace.get("panel_update_entries"))
     summary: dict[str, object] = {
@@ -264,6 +290,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_stream_u_entries": compact_window_stream_u,
         "compact_window_state_rows": compact_window_state_rows,
         "compact_window_unique_state_rows": compact_window_unique_state_rows,
+        "compact_window_union_batches": compact_union_batches,
+        "compact_window_union_targets": compact_union_targets,
+        "compact_window_union_cols": compact_union_cols,
+        "compact_window_union_values": compact_union_values,
         "panel_update_rows": panel_rows,
         "panel_update_entries": panel_entries,
         "long_rows": long_rows,
@@ -291,6 +321,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_compact_window_state_rows": long_compact_window_state_rows,
         "long_compact_window_unique_state_rows":
             long_compact_window_unique_state_rows,
+        "long_compact_window_union_batches": long_compact_union_batches,
+        "long_compact_window_union_targets": long_compact_union_targets,
+        "long_compact_window_union_cols": long_compact_union_cols,
+        "long_compact_window_union_values": long_compact_union_values,
         "long_panel_update_rows": long_panel_rows,
         "long_panel_update_entries": long_panel_entries,
         "long_pivot_scalar_u_entries": long_pivot_scalar,
@@ -325,6 +359,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_state_rows_per_unique": ratio(
             compact_window_state_rows, compact_window_unique_state_rows
         ),
+        "compact_window_union_values_per_col": ratio(
+            compact_union_values, compact_union_cols
+        ),
+        "compact_window_union_targets_per_batch": ratio(
+            compact_union_targets, compact_union_batches
+        ),
         "panel_update_entries_per_scalar_u": ratio(panel_entries, scalar),
         "scalar_u_output_per_panel_update_entries": ratio(output, panel_entries),
         "scalar_u_output_per_producer_target_u": ratio(
@@ -350,6 +390,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_compact_window_state_rows_per_unique": ratio(
             long_compact_window_state_rows,
             long_compact_window_unique_state_rows,
+        ),
+        "long_compact_window_union_values_per_col": ratio(
+            long_compact_union_values, long_compact_union_cols
+        ),
+        "long_compact_window_union_targets_per_batch": ratio(
+            long_compact_union_targets, long_compact_union_batches
         ),
         "long_scalar_u_output_per_producer_target_u": ratio(
             long_output, long_producer_target_u
@@ -415,6 +461,12 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_state_rows",
         "compact_window_unique_state_rows",
         "compact_window_state_rows_per_unique",
+        "compact_window_union_batches",
+        "compact_window_union_targets",
+        "compact_window_union_cols",
+        "compact_window_union_values",
+        "compact_window_union_values_per_col",
+        "compact_window_union_targets_per_batch",
         "producer_underfilled",
         "producer_low_saved_stream",
         "producer_reject_bad_state",
@@ -452,6 +504,12 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_compact_window_state_rows",
         "long_compact_window_unique_state_rows",
         "long_compact_window_state_rows_per_unique",
+        "long_compact_window_union_batches",
+        "long_compact_window_union_targets",
+        "long_compact_window_union_cols",
+        "long_compact_window_union_values",
+        "long_compact_window_union_values_per_col",
+        "long_compact_window_union_targets_per_batch",
         "long_panel_update_rows",
         "long_panel_update_entries",
         "long_panel_update_entries_per_scalar_u",
