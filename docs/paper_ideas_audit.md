@@ -14469,3 +14469,20 @@ private rows. The same 35s cap gives no evidence of a speedup:
 `534466380` to `728292143`. This rejects "fail separator-private earlier" as
 the large missing paper mechanism; the gap remains the first-factor
 producer/current grouping problem in the pivoting dominant BTF tail.
+
+A direct ready-supernode producer handoff was also rejected before commit. The
+prototype let producer-batch probing consume a ready supernode or cached-panel
+run for an active target row when the scalar producer candidate was rejected
+only because the target's root dependency was inside that ready run. Default
+and opt-in smoke tests passed, and `ctest --test-dir build --output-on-failure`
+passed. However, the focused `pre2` trace
+`build/kls_pre2_supernode_producer_trace45.stderr` timed out at the same
+`589824/629628` progress checkpoint as the current no-compact trace, and the
+new path did not trigger at that checkpoint (`producer_supernode_targets=0`,
+`producer_supernode_rows=0`). Scalar U output was essentially unchanged versus
+`build/kls_pre2_nocap_current_trace35.stderr` (`534573340` versus
+`534466380`). This rejects the simple "let producer probing advance one
+ready-supernode target" idea as the missing paper mechanism. The useful target
+remains a coarser grouped-current owner that makes several live current states
+share producer-row or producer-supernode numeric work, not a one-target
+catch-up around an already ready run.
