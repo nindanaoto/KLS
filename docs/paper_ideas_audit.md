@@ -13185,3 +13185,30 @@ large missing CKTSO mechanism. The next implementation should use the same
 producer-step schedule to own a grouped live workspace and stream each producer
 L column once across multiple current states, rather than maintaining thousands
 of separate sparse retained states.
+
+The producer-step path now has that first producer-column batched slice: for a
+completed producer, KLS claims all eligible retained BTF scalar-run memberships
+across the producer's retained step range, captures each current state's U
+coefficient, and streams the producer L column once across the claimed retained
+states. The scalar per-member helper remains as a fallback and catch-up path.
+Correctness stayed clean on `./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE=1 ./build/kls_smoke`,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE=1 KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1 ./build/kls_smoke`,
+and `ctest --test-dir build --output-on-failure`. The default `ASIC_100ks`
+control still left the step and batch counters at zero and measured
+`0.0474679s`.
+
+The focused probes show the batching is active and useful substrate, but still
+not the large CKTSO gap closer. On `ASIC_100ks`, the producer batch covered
+`60,384` retained steps, `314,957` current updates, and `65,762,438` update
+entries with zero rejects; refactor time moved from the previous step-only
+`11.6130s` to `11.2642s`, with a clean `1.92e-15` relative residual. On
+`ASIC_320ks`, it covered `61,619` retained steps, `332,333` current updates,
+and `72,724,209` entries with zero rejects; refactor time moved from the
+previous step-only `10.2718s` to `9.78565s`, with a clean `2.08e-15` relative
+residual. This directly fills the "stream one producer across multiple current
+states" surface, but the retained-state materialization remained enormous
+(`13,493,577` rows on `ASIC_100ks`, `15,218,280` on `ASIC_320ks`). The next
+paper-aligned gap is therefore not the producer trigger itself; it is replacing
+the sparse retained-state objects with a grouped live workspace/supernodal
+window owner so the producer batch does not pay per-current retained row maps.

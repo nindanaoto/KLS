@@ -1141,6 +1141,9 @@ typedef struct kls_stats {
   int64_t
     refactor_last_btf_scalar_run_group_state_step_advance_ready_currents;
   int64_t refactor_last_btf_scalar_run_group_state_step_advance_rejects;
+  int64_t refactor_last_btf_scalar_run_group_state_step_batch_steps;
+  int64_t refactor_last_btf_scalar_run_group_state_step_batch_currents;
+  int64_t refactor_last_btf_scalar_run_group_state_step_batch_entries;
   int64_t refactor_last_btf_scalar_run_group_state_rejects;
   int64_t refactor_last_btf_scalar_run_group_state_exec_currents;
   int64_t refactor_last_btf_scalar_run_group_state_exec_skipped_deps;
@@ -1203,6 +1206,9 @@ typedef struct kls_stats {
   int64_t
     refactor_btf_scalar_run_group_state_step_advance_ready_current_count;
   int64_t refactor_btf_scalar_run_group_state_step_advance_reject_count;
+  int64_t refactor_btf_scalar_run_group_state_step_batch_step_count;
+  int64_t refactor_btf_scalar_run_group_state_step_batch_current_count;
+  int64_t refactor_btf_scalar_run_group_state_step_batch_entries;
   int64_t refactor_btf_scalar_run_group_state_reject_count;
   int64_t refactor_btf_scalar_run_group_state_exec_current_count;
   int64_t refactor_btf_scalar_run_group_state_exec_skipped_deps;
