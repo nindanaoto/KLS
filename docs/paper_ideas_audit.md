@@ -14170,3 +14170,24 @@ current states as the clear missing mechanism; the larger paper-level gap
 remains a live grouped-current numeric owner that changes the state ownership
 and producer-stream reuse, not just where the current scalar drain holds the
 mutex.
+
+The first-factor row-pipeline trace now has the matching producer-batch
+state-union diagnostic. For each successful producer batch, KLS counts the
+sum of target sparse-state pattern rows and the exact unique column rows across
+those targets, reporting them as `producer_state_rows` and
+`producer_unique_state_rows` in both progress and long-row trace lines. The
+summary helper also reports the state-rows-per-unique ratio. This is trace-only
+and does not affect default execution.
+
+The first `pre2` trace with the new fields,
+`build/kls_pre2_state_union_trace45.stderr`, confirms that the active producer
+batches have real grouped-workspace reuse but the live target window is still
+too narrow. At the `589824/629628` checkpoint, successful batches covered
+`1160592` target sparse-state rows but only `415135` unique rows, a `2.80x`
+collapse opportunity. In the logged long rows, the matching split was
+`2121701` state rows versus `827050` unique rows (`2.57x`). However, producer
+target U entries were still only `921402` against `743978570` scalar output
+entries, about `807x` smaller than the scalar output stream. This sharpens the
+next implementation target: grouped state storage is useful once targets are
+present, but the CKTSO-scale gap still requires a larger live grouped-current
+owner that brings far more current rows into producer-owned batches.

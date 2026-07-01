@@ -2283,8 +2283,11 @@ stale panels across dynamic column pivots, publishes completed producer panels
 as rows commit, and lets later dependency drains use those panels before the
 scalar row-entry fallback. `KLS_TRACE_ROW_PIPELINE=1` now also reports
 `panel_updates`, `panel_update_rows`, `panel_appends`, and
-`panel_append_entries`. This is useful but not enough for `pre2`: a traced
-forced-METIS run still reached the pivot tail at row 274,430 with about
+`panel_append_entries`. The trace also reports `producer_state_rows` and
+`producer_unique_state_rows` for successful producer batches, measuring how
+much sparse current-state row storage a future grouped live workspace could
+collapse. This is useful but not enough for `pre2`: a traced forced-METIS run
+still reached the pivot tail at row 274,430 with about
 14.5M scalar dependencies and 15.5B published-U entries scanned, despite
 263,803 panel-backed update groups over 1.94M rows and 182 appended panels. On
 `Freescale/transient`, the same path reduced the repeated-pass scalar scan to

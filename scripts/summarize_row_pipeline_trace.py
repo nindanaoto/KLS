@@ -73,6 +73,8 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_output = 0
     long_producer_targets = 0
     long_producer_target_u = 0
+    long_producer_state_rows = 0
+    long_producer_unique_state_rows = 0
     long_panel_rows = 0
     long_pivot_scalar = 0
     long_pivot_output = 0
@@ -103,6 +105,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_output += parse_int(row.get("scalar_u_output"))
             long_producer_targets += parse_int(row.get("producer_targets"))
             long_producer_target_u += parse_int(row.get("producer_target_u_entries"))
+            long_producer_state_rows += parse_int(row.get("producer_state_rows"))
+            long_producer_unique_state_rows += parse_int(
+                row.get("producer_unique_state_rows")
+            )
             long_panel_rows += parse_int(row.get("panel_update_rows"))
             if pivoted:
                 producer_batches = parse_int(row.get("producer_batches"))
@@ -129,6 +135,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     scalar = parse_int(last_trace.get("scalar_u_entries"))
     output = parse_int(last_trace.get("scalar_u_output"))
     producer_target_u = parse_int(last_trace.get("producer_target_u_entries"))
+    producer_state_rows = parse_int(last_trace.get("producer_state_rows"))
+    producer_unique_state_rows = parse_int(
+        last_trace.get("producer_unique_state_rows")
+    )
     panel_rows = parse_int(last_trace.get("panel_update_rows"))
     summary: dict[str, object] = {
         "path": str(path),
@@ -139,6 +149,8 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "scalar_u_entries": scalar,
         "scalar_u_output": output,
         "producer_target_u_entries": producer_target_u,
+        "producer_state_rows": producer_state_rows,
+        "producer_unique_state_rows": producer_unique_state_rows,
         "panel_update_rows": panel_rows,
         "long_rows": long_rows,
         "long_max_row": long_max_row,
@@ -148,6 +160,8 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_scalar_u_output": long_output,
         "long_producer_targets": long_producer_targets,
         "long_producer_target_u_entries": long_producer_target_u,
+        "long_producer_state_rows": long_producer_state_rows,
+        "long_producer_unique_state_rows": long_producer_unique_state_rows,
         "long_panel_update_rows": long_panel_rows,
         "long_pivot_scalar_u_entries": long_pivot_scalar,
         "long_pivot_scalar_u_output": long_pivot_output,
@@ -165,6 +179,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "scalar_u_output_per_producer_target_u": ratio(
             output, producer_target_u
         ),
+        "producer_state_rows_per_unique": ratio(
+            producer_state_rows, producer_unique_state_rows
+        ),
         "long_pivot_share": ratio(long_pivot_rows, long_rows),
         "long_scalar_u_output_share": ratio(long_output, long_scalar),
         "long_producer_target_u_per_scalar_u": ratio(
@@ -172,6 +189,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         ),
         "long_scalar_u_output_per_producer_target_u": ratio(
             long_output, long_producer_target_u
+        ),
+        "long_producer_state_rows_per_unique": ratio(
+            long_producer_state_rows, long_producer_unique_state_rows
         ),
         "long_pivot_producer_row_share": ratio(
             long_pivot_producer_rows, long_pivot_rows
@@ -199,6 +219,9 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "producer_batches",
         "producer_targets",
         "producer_target_u_entries",
+        "producer_state_rows",
+        "producer_unique_state_rows",
+        "producer_state_rows_per_unique",
         "producer_underfilled",
         "producer_low_saved_stream",
         "producer_reject_bad_state",
@@ -213,6 +236,9 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_scalar_u_entries",
         "long_scalar_u_output",
         "long_producer_target_u_entries",
+        "long_producer_state_rows",
+        "long_producer_unique_state_rows",
+        "long_producer_state_rows_per_unique",
         "long_pivot_scalar_u_entries",
         "long_pivot_scalar_u_output",
         "long_pivot_producer_target_u_entries",
