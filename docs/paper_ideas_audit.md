@@ -14381,3 +14381,45 @@ timed out with no JSON row. This means the missing CKTSO/SubtreeLU mechanism is
 not "more independent sparse states"; it has to be a coarser grouped-current
 owner that streams producers across a batch instead of replaying most
 trailing/output work through separately materialized sparse states.
+
+That compact-exec prototype now has the first grouped producer/current update:
+when compact numeric execution is enabled, a completed producer row collects
+compact states whose root dependency is that producer, pops/appends their L
+entries, and streams the published U row once across the compact target list.
+The trace records `compact_window_batches` and
+`compact_window_stream_u_entries`, and the summary helper reports compact
+target/stream reuse. Correctness stayed clean under
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1`: default and compact-exec smoke passed,
+`ctest --test-dir build --output-on-failure` passed, and forced KLS-first
+`add20`/`bcircuit` probes with a 64-state compact window reported
+`relative_residual_l2=3.39e-16` and `8.17e-17`.
+
+The grouped compact update improves the rejected compact-exec shape but still
+does not close the `pre2` gap. The old 16-state compact-exec trace,
+`build/kls_pre2_compact_exec_lean_w16_tracefix_trace45.stderr`, reached
+`589824/629628` rows with `872880120` scalar U entries and `69009179` compact
+target U entries. The grouped 16-state trace,
+`build/kls_pre2_compact_group_w16_trace45.stderr`, reached the same checkpoint
+with `651254322` scalar U entries and streamed `13169290` producer U entries
+across `69926314` compact target U entries (`5.31x` reuse). A wider 64-state
+grouped trace, `build/kls_pre2_compact_group_w64_trace45.stderr`, raised
+compact target work to `153055010` U entries with `9.95x` target/stream reuse,
+but still reached only the same checkpoint and remained slightly behind the
+same-binary no-compact control in scalar output. The no-trace 64-state factor
+probe, `build/kls_pre2_compact_group_w64_factor_t4_r1_ref0_timeout125.json`,
+timed out with no JSON row. This keeps the grouped compact path opt-in: it is
+a better paper-aligned substrate than independent compact states, but the
+bounded compact window is still not the missing CKTSO-scale grouped
+row/supernode owner.
+
+An early-abort guard for separator-private dynamic pivots was tested and
+rejected before commit. The experiment stopped the private separator phase on
+`pre2` after `1024` dynamic column pivots, before the later `pivot-reject`,
+then fell back to the guarded full row pipeline without publishing partial
+private rows. The same 35s cap gives no evidence of a speedup:
+`build/kls_pre2_nocap_current_trace35.stderr` and
+`build/kls_pre2_cap1024_current_trace35.stderr` both timed out at the
+`589824/629628` checkpoint, while the capped run raised scalar U output from
+`534466380` to `728292143`. This rejects "fail separator-private earlier" as
+the large missing paper mechanism; the gap remains the first-factor
+producer/current grouping problem in the pivoting dominant BTF tail.

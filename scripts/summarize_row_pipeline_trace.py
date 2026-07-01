@@ -31,6 +31,8 @@ PRODUCER_COUNTERS = [
     "compact_window_evictions",
     "compact_window_overflows",
     "compact_window_probes",
+    "compact_window_batches",
+    "compact_window_stream_u_entries",
     "compact_window_targets",
     "compact_window_target_u_entries",
     "compact_window_state_rows",
@@ -98,6 +100,8 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_active_catchup_targets = 0
     long_compact_window_targets = 0
     long_compact_window_target_u = 0
+    long_compact_window_batches = 0
+    long_compact_window_stream_u = 0
     long_compact_window_state_rows = 0
     long_panel_rows = 0
     long_pivot_scalar = 0
@@ -158,6 +162,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_window_target_u += parse_int(
                 row.get("compact_window_target_u_entries")
             )
+            long_compact_window_batches += parse_int(
+                row.get("compact_window_batches")
+            )
+            long_compact_window_stream_u += parse_int(
+                row.get("compact_window_stream_u_entries")
+            )
             long_compact_window_state_rows += parse_int(
                 row.get("compact_window_state_rows")
             )
@@ -212,6 +222,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_target_u = parse_int(
         last_trace.get("compact_window_target_u_entries")
     )
+    compact_window_batches = parse_int(last_trace.get("compact_window_batches"))
+    compact_window_stream_u = parse_int(
+        last_trace.get("compact_window_stream_u_entries")
+    )
     compact_window_state_rows = parse_int(
         last_trace.get("compact_window_state_rows")
     )
@@ -236,6 +250,8 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "producer_active_catchup_targets": active_catchup_targets,
         "compact_window_targets": compact_window_targets,
         "compact_window_target_u_entries": compact_window_target_u,
+        "compact_window_batches": compact_window_batches,
+        "compact_window_stream_u_entries": compact_window_stream_u,
         "compact_window_state_rows": compact_window_state_rows,
         "panel_update_rows": panel_rows,
         "long_rows": long_rows,
@@ -258,6 +274,8 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_producer_active_catchup_targets": long_active_catchup_targets,
         "long_compact_window_targets": long_compact_window_targets,
         "long_compact_window_target_u_entries": long_compact_window_target_u,
+        "long_compact_window_batches": long_compact_window_batches,
+        "long_compact_window_stream_u_entries": long_compact_window_stream_u,
         "long_compact_window_state_rows": long_compact_window_state_rows,
         "long_panel_update_rows": long_panel_rows,
         "long_pivot_scalar_u_entries": long_pivot_scalar,
@@ -283,6 +301,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_target_u_per_scalar_u": ratio(
             compact_window_target_u, scalar
         ),
+        "compact_window_target_u_per_stream_u": ratio(
+            compact_window_target_u, compact_window_stream_u
+        ),
         "scalar_u_output_per_compact_window_target_u": ratio(
             output, compact_window_target_u
         ),
@@ -302,6 +323,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         ),
         "long_compact_window_target_u_per_scalar_u": ratio(
             long_compact_window_target_u, long_scalar
+        ),
+        "long_compact_window_target_u_per_stream_u": ratio(
+            long_compact_window_target_u, long_compact_window_stream_u
         ),
         "long_scalar_u_output_per_producer_target_u": ratio(
             long_output, long_producer_target_u
@@ -351,8 +375,11 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_fills",
         "compact_window_evictions",
         "compact_window_overflows",
+        "compact_window_batches",
+        "compact_window_stream_u_entries",
         "compact_window_targets",
         "compact_window_target_u_entries",
+        "compact_window_target_u_per_stream_u",
         "compact_window_target_u_per_scalar_u",
         "scalar_u_output_per_compact_window_target_u",
         "compact_window_state_rows",
@@ -383,6 +410,9 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_producer_active_catchup_targets",
         "long_compact_window_targets",
         "long_compact_window_target_u_entries",
+        "long_compact_window_batches",
+        "long_compact_window_stream_u_entries",
+        "long_compact_window_target_u_per_stream_u",
         "long_compact_window_target_u_per_scalar_u",
         "long_compact_window_state_rows",
         "long_pivot_scalar_u_entries",

@@ -2196,9 +2196,11 @@ controls the number of compact sparse states, and
 `KLS_ROW_PIPELINE_COMPACT_WINDOW_MAX_ENTRIES=<entries>` caps one state.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1` turns the same window into an opt-in
 sparse numeric prototype for unreserved first-factor rows: producer publication
-advances compact current states, and a worker can claim one instead of replaying
-its prefix from the input row. This remains off by default; use it only for
-focused paper-gap probes. Same-session `pre2` probes show
+collects compact states whose root dependency is the just-published producer,
+streams that producer row across the target batch, and lets a worker claim one
+prepared state instead of replaying its prefix from the input row. This remains
+off by default; use it only for focused paper-gap probes. Same-session `pre2`
+probes show
 the default AMD run enters the 629,628-row dominant BTF block with no separator
 coverage, while forced METIS enters the same block with separator coverage but
 still exceeds the 120s cap. The matching local CKTSO run finishes analysis,
@@ -2513,7 +2515,8 @@ piece is still a producer/panel-to-many-current row/supernode numeric owner,
 not another ordering-only change.
 Use `scripts/summarize_row_pipeline_trace.py build/...stderr` to compare these
 tail traces without hand-written `awk`; it now also reports pivot-long-row
-producer coverage and pivot scalar-output/producer-target ratios. Current
+producer coverage, pivot scalar-output/producer-target ratios, and compact
+window target/stream reuse for grouped compact-exec probes. Current
 same-commit probes also reject three narrower policies as gap closers: 8/32-slot
 experimental lookahead grows producer target entries but advances fewer tail
 rows in 45s, explicit scale `2` advances fewer rows than the auto-scale trace,
@@ -2696,9 +2699,16 @@ matching untraced 125s factor probe
 `build/kls_pre2_compact_exec_lean_w16_factor_t4_r1_ref0_timeout125.json`
 still timed out with no JSON row. This rejects "materialize many independent
 sparse current states and hand them to workers" as the missing CKTSO mechanism;
-the next implementation needs a coarser owner that batches the current states
-instead of replaying most trailing/output work through independent sparse
-states.
+the next implementation needs a coarser owner that batches the current states.
+The compact-exec prototype now performs that producer update as a grouped
+target batch. On `pre2`, `build/kls_pre2_compact_group_w64_trace45.stderr`
+streamed `15380064` producer U entries across `153055010` compact target U
+entries (`9.95x` reuse) with zero compact overflows, but it still reached only
+the same `589824/629628` checkpoint, and
+`build/kls_pre2_compact_group_w64_factor_t4_r1_ref0_timeout125.json` still
+timed out with no JSON row. This keeps compact-exec off by default: grouped
+streaming is the right direction, but the bounded compact window is still not
+the CKTSO-scale grouped row/supernode owner.
 
 ## License
 
