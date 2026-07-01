@@ -17,6 +17,24 @@ from typing import Iterable
 
 KEY_VALUE_RE = re.compile(r"([A-Za-z0-9_]+)=([^ \n]+)")
 
+PRODUCER_COUNTERS = [
+    "producer_batches",
+    "producer_targets",
+    "producer_probe_workers",
+    "producer_probe_lookahead",
+    "producer_ready_roots",
+    "producer_underfilled",
+    "producer_underfilled_targets",
+    "producer_low_saved_stream",
+    "producer_reject_bad_state",
+    "producer_reject_epoch",
+    "producer_reject_dep_absent",
+    "producer_reject_not_root",
+    "producer_reject_not_ready",
+    "producer_reject_supernode",
+    "producer_reject_cached_panel",
+]
+
 
 def parse_int(value: str | None, default: int = 0) -> int:
     if value is None:
@@ -76,7 +94,7 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     output = parse_int(last_trace.get("scalar_u_output"))
     producer_target_u = parse_int(last_trace.get("producer_target_u_entries"))
     panel_rows = parse_int(last_trace.get("panel_update_rows"))
-    return {
+    summary: dict[str, object] = {
         "path": str(path),
         "trace_events": trace_event_count,
         "last_event": last_trace.get("event", ""),
@@ -96,6 +114,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_producer_target_u_entries": long_producer_target_u,
         "long_panel_update_rows": long_panel_rows,
     }
+    for name in PRODUCER_COUNTERS:
+        summary[name] = parse_int(last_trace.get(name))
+    return summary
 
 
 def print_table(rows: Iterable[dict[str, object]]) -> None:
@@ -106,7 +127,15 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "total",
         "scalar_u_entries",
         "scalar_u_output",
+        "producer_batches",
+        "producer_targets",
         "producer_target_u_entries",
+        "producer_underfilled",
+        "producer_low_saved_stream",
+        "producer_reject_bad_state",
+        "producer_reject_epoch",
+        "producer_reject_dep_absent",
+        "producer_reject_not_root",
         "panel_update_rows",
         "long_rows",
         "long_max_row",

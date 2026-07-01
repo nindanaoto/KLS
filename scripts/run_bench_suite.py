@@ -26,6 +26,92 @@ def geometric_mean(values: list[float]) -> float:
     return math.exp(sum(math.log(v) for v in positives) / len(positives))
 
 
+def clipped_text(text: str, limit: int = 4000) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...<truncated>"
+
+
+def append_solver_options(cmd: list[str], args: argparse.Namespace) -> None:
+    cmd.extend(
+        [
+            "--threads",
+            str(args.threads),
+            "--ordering",
+            args.ordering,
+            "--orientation",
+            args.orientation,
+            "--scale",
+            args.scale,
+            "--input-index",
+            args.input_index,
+        ]
+    )
+    if args.no_btf:
+        cmd.append("--no-btf")
+    if args.no_fast_factor:
+        cmd.append("--no-fast-factor")
+    if args.no_static_pivoting:
+        cmd.append("--no-static-pivoting")
+    if args.pivot_tol is not None:
+        cmd.extend(["--pivot-tol", str(args.pivot_tol)])
+    if args.row_refactor != "env":
+        cmd.extend(["--row-refactor", args.row_refactor])
+    if args.kls_first_factor != "env":
+        cmd.extend(["--kls-first-factor", args.kls_first_factor])
+    if args.row_solve != "env":
+        cmd.extend(["--row-solve", args.row_solve])
+    if args.stress_diagonal_scale is not None:
+        cmd.extend(["--stress-diagonal-scale", str(args.stress_diagonal_scale)])
+    if args.stress_diagonal_column is not None:
+        cmd.extend(["--stress-diagonal-column", str(args.stress_diagonal_column)])
+
+
+def collect_failure_diagnostic(
+    args: argparse.Namespace, matrix: pathlib.Path
+) -> dict[str, object] | None:
+    if args.failure_diagnostics == "none":
+        return None
+    cmd = [
+        str(args.kls_bench),
+        str(matrix),
+        "--analyze-only",
+        "--json",
+    ]
+    append_solver_options(cmd, args)
+    try:
+        proc = subprocess.run(
+            cmd,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=args.failure_diagnostic_timeout,
+        )
+    except subprocess.TimeoutExpired:
+        timeout = args.failure_diagnostic_timeout
+        return {
+            "kind": "analyze",
+            "status": "timeout",
+            "timeout_seconds": timeout,
+        }
+    diagnostic: dict[str, object] = {
+        "kind": "analyze",
+        "returncode": proc.returncode,
+    }
+    if proc.returncode != 0:
+        diagnostic["status"] = "failed"
+        diagnostic["stderr"] = clipped_text(proc.stderr.strip())
+        return diagnostic
+    try:
+        diagnostic["row"] = json.loads(proc.stdout)
+        diagnostic["status"] = "ok"
+    except json.JSONDecodeError:
+        diagnostic["status"] = "invalid-json"
+        diagnostic["stdout"] = clipped_text(proc.stdout.strip())
+        diagnostic["stderr"] = clipped_text(proc.stderr.strip())
+    return diagnostic
+
+
 def read_manifest(path: pathlib.Path) -> list[str]:
     names: list[str] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -119,6 +205,18 @@ def main() -> int:
     parser.add_argument("--require-metis", action="store_true")
     parser.add_argument("--require-scotch", action="store_true")
     parser.add_argument("--require-spral-scaling", action="store_true")
+    parser.add_argument(
+        "--failure-diagnostics",
+        choices=["none", "analyze"],
+        default="analyze",
+        help="attach an analyze-only diagnostic row when every sample fails",
+    )
+    parser.add_argument(
+        "--failure-diagnostic-timeout",
+        type=float,
+        default=30.0,
+        help="timeout in seconds for failure diagnostics",
+    )
     args = parser.parse_args()
 
     try:
@@ -137,6 +235,9 @@ def main() -> int:
         return 1
     if args.limit is not None and args.limit < 0:
         print("--limit must be non-negative", file=sys.stderr)
+        return 1
+    if args.failure_diagnostic_timeout is not None and args.failure_diagnostic_timeout <= 0:
+        print("--failure-diagnostic-timeout must be positive", file=sys.stderr)
         return 1
     if args.skip:
         matrices = matrices[args.skip :]
@@ -168,40 +269,9 @@ def main() -> int:
                     str(args.repeat),
                     "--refactor-repeat",
                     str(args.refactor_repeat),
-                    "--threads",
-                    str(args.threads),
-                    "--ordering",
-                    args.ordering,
-                    "--orientation",
-                    args.orientation,
-                    "--scale",
-                    args.scale,
-                    "--input-index",
-                    args.input_index,
                     "--json",
                 ]
-                if args.no_btf:
-                    cmd.append("--no-btf")
-                if args.no_fast_factor:
-                    cmd.append("--no-fast-factor")
-                if args.no_static_pivoting:
-                    cmd.append("--no-static-pivoting")
-                if args.pivot_tol is not None:
-                    cmd.extend(["--pivot-tol", str(args.pivot_tol)])
-                if args.row_refactor != "env":
-                    cmd.extend(["--row-refactor", args.row_refactor])
-                if args.kls_first_factor != "env":
-                    cmd.extend(["--kls-first-factor", args.kls_first_factor])
-                if args.row_solve != "env":
-                    cmd.extend(["--row-solve", args.row_solve])
-                if args.stress_diagonal_scale is not None:
-                    cmd.extend(
-                        ["--stress-diagonal-scale", str(args.stress_diagonal_scale)]
-                    )
-                if args.stress_diagonal_column is not None:
-                    cmd.extend(
-                        ["--stress-diagonal-column", str(args.stress_diagonal_column)]
-                    )
+                append_solver_options(cmd, args)
                 try:
                     proc = subprocess.run(
                         cmd,
@@ -238,6 +308,9 @@ def main() -> int:
                     "reason": "; ".join(sample_failures),
                     "sample_failures": sample_failures,
                 }
+                diagnostic = collect_failure_diagnostic(args, matrix)
+                if diagnostic is not None:
+                    failure["diagnostic"] = diagnostic
                 failures.append(failure)
                 if failure_out is not None:
                     failure_out.write(json.dumps(failure, sort_keys=True) + "\n")
