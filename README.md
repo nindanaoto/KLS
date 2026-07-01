@@ -1383,6 +1383,13 @@ producer column is streamed across multiple claimed retained states. This is
 still an opt-in retained-state experiment: it tests whether completed-producer
 scheduling closes the paper gap before a broader grouped workspace owner
 streams one producer L column across several current states.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_WINDOW=1` extends that
+producer-step path into a guarded grouped retained-state window. The flag
+implies step advance, keeps successfully claimed retained states owned after
+the first producer update, then advances additional ready producer rows when at
+least two active retained states share the same completed producer. Benchmark
+JSON reports last and cumulative grouped-window round, current, and entry
+counts. The path remains opt-in while it is compared against CKTSO-gap cases.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC=1` turns that retained
 state into a guarded numeric consumer. The flag implies state stats, stores the
 U coefficients consumed while preparing the retained state, arms only the

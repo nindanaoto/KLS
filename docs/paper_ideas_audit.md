@@ -14720,3 +14720,30 @@ blindly scanning the full retained descriptor for partial steps, but the active
 subset is large enough to justify a real row-position or workspace owner if it
 can build that subset incrementally instead of recomputing the union as a
 diagnostic pass.
+
+The next retained-state owner step is
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_WINDOW=1`. It is not a
+micro-tuning flag: it keeps a producer-batch's claimed retained states owned
+after the first completed producer update and, while they remain ready, advances
+additional producer rows only when at least two active retained states share the
+same completed producer. This directly targets the paper-level missing piece
+identified by the live-step probes: one producer L column should be streamed
+across a group of current states instead of released after a single row update.
+Benchmark JSON exposes
+`refactor_last_btf_scalar_run_group_state_step_window_{rounds,currents,entries}`
+and cumulative
+`refactor_btf_scalar_run_group_state_step_window_{round_count,current_count,entries}`
+so focused CKTSO-gap runs can separate useful grouped window work from ordinary
+single-step retained-state advances.
+
+On `ASIC_100ks` with four threads and partial-owner instrumentation,
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_WINDOW=1` stayed
+residual-clean (`relative_residual_l2=1.92251861e-15`) and measured
+`35.3764624s` average refactor time. It performed `858` grouped window rounds,
+advancing `102,314` retained currents and `45,298,864` L entries inside the
+retained owner before release. That is real paper-aligned work and a small
+improvement over the previous `36.1740561s` partial-owner probe, but it is not
+large enough to explain the CKTSO gap by itself. The remaining missing piece is
+still the heavier owner: avoid per-current scatter/search over each retained
+state by building or reusing an active grouped row-position workspace for the
+large partial live-step surface.

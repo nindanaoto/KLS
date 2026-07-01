@@ -3474,6 +3474,9 @@ int main(int argc, char **argv) {
            ",\"refactor_last_btf_scalar_run_group_state_step_batch_entries\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_step_batch_state_rows\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_step_window_rounds\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_step_window_currents\":%" PRId64
+           ",\"refactor_last_btf_scalar_run_group_state_step_window_entries\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_live_step_runtime_full_steps\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_live_step_runtime_full_currents\":%" PRId64
            ",\"refactor_last_btf_scalar_run_group_live_step_runtime_full_rows\":%" PRId64
@@ -3542,6 +3545,9 @@ int main(int argc, char **argv) {
            ",\"refactor_btf_scalar_run_group_state_step_batch_entries\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_step_batch_state_rows\":%" PRId64
            ",\"refactor_btf_scalar_run_group_state_step_batch_unique_state_rows\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_step_window_round_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_step_window_current_count\":%" PRId64
+           ",\"refactor_btf_scalar_run_group_state_step_window_entries\":%" PRId64
            ",\"refactor_btf_scalar_run_group_live_step_runtime_full_step_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_live_step_runtime_full_current_count\":%" PRId64
            ",\"refactor_btf_scalar_run_group_live_step_runtime_full_rows\":%" PRId64
@@ -3631,6 +3637,9 @@ int main(int argc, char **argv) {
              .refactor_last_btf_scalar_run_group_state_step_batch_state_rows,
            stats
              .refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows,
+           stats.refactor_last_btf_scalar_run_group_state_step_window_rounds,
+           stats.refactor_last_btf_scalar_run_group_state_step_window_currents,
+           stats.refactor_last_btf_scalar_run_group_state_step_window_entries,
            stats.refactor_last_btf_scalar_run_group_live_step_runtime_full_steps,
            stats
              .refactor_last_btf_scalar_run_group_live_step_runtime_full_currents,
@@ -3719,6 +3728,9 @@ int main(int argc, char **argv) {
            stats.refactor_btf_scalar_run_group_state_step_batch_state_rows,
            stats
              .refactor_btf_scalar_run_group_state_step_batch_unique_state_rows,
+           stats.refactor_btf_scalar_run_group_state_step_window_round_count,
+           stats.refactor_btf_scalar_run_group_state_step_window_current_count,
+           stats.refactor_btf_scalar_run_group_state_step_window_entries,
            stats.refactor_btf_scalar_run_group_live_step_runtime_full_step_count,
            stats
              .refactor_btf_scalar_run_group_live_step_runtime_full_current_count,
