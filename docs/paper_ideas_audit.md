@@ -14101,3 +14101,37 @@ timed out with no JSON row. This rejects keeping a much larger pool of
 independent sparse lookahead states as the CKTSO-gap closer; KLS needs a
 production grouped-current numeric owner that owns the batch and target map,
 not more advisory sparse rows around the existing replay path.
+
+A July 1, 2026 timeout-pair refresh on the same `pre2`/`Hamrle3` large slice
+keeps `pre2` as the largest clean KLS-only timeout gap. With four threads,
+`repeat=1`, `refactor-repeat=1`, and a 120s per-matrix cap, CKTSO completed
+`pre2` in
+`build/cktso_timeout_pair_readyroot_recheck_t4_r1_ref1_timeout120.jsonl`
+(`analysis_seconds=4.544027`, `initial_factor_seconds=7.761729`,
+`factor_seconds_avg=5.175383`, `refactor_seconds_avg=3.904002`,
+`solve_seconds_avg=0.142911`, `spice_cycle_seconds=413.093054`) and timed out
+only on `Hamrle3`. The matching KLS run
+`build/kls_timeout_pair_readyroot_recheck_t4_r1_ref1_timeout120.jsonl` emitted
+no rows; its sidecar records 120s timeouts on both matrices. The `pre2`
+analyze-only diagnostic in that sidecar completed in `13.1605754s`, selected
+`ordering=metis`, and again reported the `629628`-row dominant BTF block. This
+keeps the largest actionable gap inside numeric first factorization of the
+pivoting dominant block; `Hamrle3` remains shared-hard because CKTSO also times
+out there.
+
+A ready-root batching prototype was rejected before commit. It kept the
+commit-drain lock and, whenever a current row popped a ready scalar dependency,
+tried to batch that producer across active workers and unclaimed lookahead
+states with the same root. This directly tested whether the missing
+CKTSO/SubtreeLU grouped-current owner could be approximated by synchronizing
+existing sparse states at ready roots. The same-checkpoint `pre2` result was
+negative: `build/kls_pre2_baseline_trace45.stderr` and
+`build/kls_pre2_readyroot_trace45.stderr` both reached `458752/629628` rows
+under a 45s cap, but the prototype increased scalar U work from `682232871` to
+`682418775`, reduced producer target U entries from `854772` to `591684`, and
+worsened the scalar-output/producer-target ratio from `682.25x` to `985.93x`.
+It also inflated underfilled probes from `264766` to `2427994`. This rejects
+ready-root catch-up over independently owned sparse states as the missing
+CKTSO-scale mechanism. The next paper-aligned implementation still needs a
+real live grouped-current numeric owner that advances one batch and target map
+coarsely instead of repeatedly probing and catching up separate row states.

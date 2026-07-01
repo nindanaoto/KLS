@@ -2566,6 +2566,17 @@ the default no-env run kept these counters at zero. This confirms that the slow
 tail contains a large structured producer-run surface, but it is still unowned by
 the current numeric executor.
 
+A July 1, 2026 timeout-pair refresh keeps `pre2` as the largest clean
+KLS-vs-CKTSO timeout gap. CKTSO completed `pre2` under the 120s cap
+(`initial_factor_seconds=7.761729`, `refactor_seconds_avg=3.904002`) and timed
+out only on `Hamrle3`; the matching KLS run emitted no rows and timed out on
+both. A same-checkpoint `pre2` ready-root batching prototype was rejected before
+commit: it reached the same `458752/629628` rows in 45s but reduced producer
+target U entries from `854772` to `591684` and worsened the scalar
+output/producer-target ratio from `682.25x` to `985.93x`. This reinforces that
+the missing paper-level mechanism is a true grouped-current numeric owner, not
+another catch-up pass over separately owned sparse states.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
