@@ -14055,3 +14055,49 @@ the long-row scalar-output/producer-target ratio worsened from `475.26x` to
 proof as the clear `pre2` gap closer. Static pivoting remains useful through
 the existing guarded numeric-trial paths, but the timeout-sized gap is still
 the row-pipeline numeric owner for the pivoting tail.
+
+A current timeout-pair recheck at `54d839d` again isolates `pre2` as the
+largest clean KLS-only timeout. With four threads, `repeat=1`,
+`refactor-repeat=1`, and a 120s per-matrix cap over the `pre2`/`Hamrle3`
+slice, CKTSO completed `pre2` in
+`build/cktso_timeout_pair_54d839d_t4_r1_ref1_timeout120.jsonl`
+(`analysis_seconds=4.252091`, `initial_factor_seconds=7.752507`,
+`factor_seconds_avg=5.061632`, `refactor_seconds_avg=5.312715`,
+`solve_seconds_avg=0.160632`) and timed out on `Hamrle3`. The matching KLS run
+`build/kls_timeout_pair_54d839d_t4_r1_ref1_timeout120.jsonl` emitted no rows;
+its sidecar records 120s timeouts on both matrices. The `pre2` KLS
+analyze-only diagnostic completed in `12.5914825s`, selected `ordering=metis`,
+and reported the same `629628`-row dominant BTF block, so ordering/setup is not
+the largest part of this gap. `Hamrle3` remains a shared hard case because
+CKTSO also times out there; `pre2` is the actionable comparator because CKTSO
+finishes the same case inside the cap.
+
+The matching current `pre2` factor-only trace
+`build/kls_pre2_timeout_pair_54d839d_trace_t4_r1_ref0_timeout75.stderr`
+reached the familiar `589824/629628` progress checkpoint before the 75s cap.
+At that checkpoint KLS had replayed `869303159` scalar U entries, including
+`743949331` trailing/output entries, while the retained producer-batch path
+covered only `957366` target U entries; scalar output was therefore `777.08x`
+larger than producer-target U work. The long-row tail logged `2687` rows
+through row `599516`, replaying `8421328975` scalar U entries and
+`5208144838` trailing/output entries, with only `8876221` producer-target U
+entries. Dynamic-pivot long rows were `1141` of those rows and still had zero
+producer rows in the baseline trace. This pins the largest clean CKTSO gap on
+numeric first-factor row-pipeline replay in the pivoting dominant-BTF tail, not
+refactorization, solve time, ordering, or the timeout limit.
+
+A wider pivot-lookahead no-cap probe was also rejected as a substitute for the
+live grouped-current owner. With `KLS_ROW_PIPELINE_PIVOT_LOOKAHEAD=32` and
+`KLS_ROW_PIPELINE_LOOKAHEAD_MAX_INPUTS=0`,
+`build/kls_pre2_pivot_lookahead32_maxinputs0_trace90.stderr` greatly increased
+producer coverage at the `589824/629628` checkpoint: producer target U entries
+rose to `114915909` and the scalar-output/producer-target ratio fell to
+`6.28x`, versus `28.44x` for the eight-slot no-cap control and `794.61x` for
+the default trace. Long-row scalar replay also dropped to `1776215140` entries
+with a `21.60x` long-row output/target ratio. However, the trace still stopped
+at the same checkpoint and the matching non-traced 125s factor-only probe
+`build/kls_pre2_pivot_lookahead32_maxinputs0_t4_r1_ref0_timeout125.json`
+timed out with no JSON row. This rejects keeping a much larger pool of
+independent sparse lookahead states as the CKTSO-gap closer; KLS needs a
+production grouped-current numeric owner that owns the batch and target map,
+not more advisory sparse rows around the existing replay path.
