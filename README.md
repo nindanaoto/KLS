@@ -2377,6 +2377,24 @@ that the actionable CKTSO gap is not the timeout limit or ordering package,
 but the paper-level numeric owner: preserving and grouping prefactorized
 current-row work through pivoting/refactor phases instead of replaying scalar
 trailing/output updates.
+A guarded active-row pivot-preservation prototype tested the narrowest version
+of that idea: when a dynamic pivot exchanged only a committed row and a column
+that was still trailing for every live active row, the prototype rewrote each
+active sparse `x/mark/pattern/dep_heap` state instead of bumping the pipeline
+epoch. It passed `ctest --test-dir build --output-on-failure` and completed
+focused `transient`/`rajat29` factor probes, but it was not a CKTSO-gap closer.
+The 75s forced KLS-first `pre2` trace
+`build/kls_pre2_pivot_preserve_trace_t4_r1_ref0_timeout75.stderr` recorded
+`2,946` preserve events and `8,570` repaired active rows, yet advanced only to
+row `22974` of the 629,628-row dominant BTF block. It still logged
+`828,874,062` scalar U touches in committed long rows,
+`732,601,412` of them trailing/output, and zero scalar-run grouping. The
+matching untraced 120s probe
+`build/kls_pre2_pivot_preserve_factor_t4_r1_ref0_timeout120.*` still timed
+out. This rejects active-row epoch preservation as a standalone fix and points
+back to the larger paper gap: a grouped row/supernode numeric owner for the
+trailing/output stream, not just preserving scalar current states through
+pivots.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while
