@@ -1319,6 +1319,14 @@ whose active members exactly match a retained live-step descriptor. Partial
 counters identify descriptor surface reached by runtime producer batches whose
 memberships are split across scheduler ownership. Numeric execution is still
 unchanged.
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_PARTIAL_OWNER_STATS=1`
+also builds the live-step plan and, during retained-state step advance, measures
+the duplicate and unique state rows for only the currently claimed members of
+partial live steps through
+`refactor_last_btf_scalar_run_group_live_step_runtime_partial_active_rows` and
+`refactor_last_btf_scalar_run_group_live_step_runtime_partial_active_unique_rows`.
+Those counters size the active subset that a future partial live-step owner
+would gather, which can be much smaller than the full structural descriptor.
 The retained group descriptor is tied to the LU pointer cache and is reused
 across repeated numeric refactors until the numeric pattern changes.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS=1` also builds that

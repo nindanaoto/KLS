@@ -14697,3 +14697,26 @@ structural memberships in those partial steps. The paper-aligned next
 implementation should therefore build a partial live-step owner or scheduler
 that can reuse one retained row descriptor across the currently claimable
 membership subset, rather than waiting for exact whole-step ownership.
+
+KLS now has a guarded scaffold for that owner:
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_PARTIAL_OWNER_STATS=1`
+keeps the retained live-step descriptor and, for partial runtime hits, computes
+the duplicate and unique state-row union for only the active claimed members.
+The resulting
+`refactor_*_live_step_runtime_partial_active_{rows,unique_rows}` counters
+separate the future gather/scatter footprint from the larger structural
+descriptor. The numeric path is still unchanged; this is the row-union substrate
+needed before replacing scattered per-current retained-state updates with a
+partial live-step workspace owner.
+
+The focused `ASIC_100ks` scaffold probe stayed residual-clean
+(`1.92251861e-15`) and measured `36.1740561s` average refactor time. It saw
+`40,051` partial live steps, `305,788` active currents, `881,924` structural
+memberships, and `124,251,635` structural descriptor rows. The active claimed
+subset was smaller but still large: `214,547,653` duplicate state rows and
+`44,460,063` unique active rows. Active unique rows were about `35.8%` of the
+structural partial descriptor. The next implementation should therefore avoid
+blindly scanning the full retained descriptor for partial steps, but the active
+subset is large enough to justify a real row-position or workspace owner if it
+can build that subset incrementally instead of recomputing the union as a
+diagnostic pass.
