@@ -46613,6 +46613,23 @@ static int kls_row_pipeline_trace_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static UF_long kls_row_pipeline_long_row_trace_threshold(void) {
+  const char *value = getenv("KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES");
+  if (value == NULL || value[0] == '\0' ||
+      (value[0] == '0' && value[1] == '\0')) {
+    return 0;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return 0;
+  }
+  const unsigned long long max_uf =
+    (unsigned long long)UF_long_max;
+  return parsed > max_uf ? UF_long_max : (UF_long)parsed;
+}
+
 static void kls_trace_first_factor_dominant_btf(
   const kls_solver *solver,
   UF_long block,
@@ -83670,6 +83687,10 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long local_l_reserve_copied_entries;
   UF_long local_u_reserve_growths;
   UF_long local_u_reserve_copied_entries;
+  UF_long long_row_threshold;
+  UF_long long_row;
+  UF_long long_row_pos;
+  int long_row_emitted;
 } kls_row_first_pipeline_trace;
 
 static void kls_row_first_stats_add(UF_long *target, UF_long value) {
@@ -83717,6 +83738,41 @@ static void kls_row_first_pipeline_trace_add(
                           source->local_u_reserve_growths);
   kls_row_first_stats_add(&target->local_u_reserve_copied_entries,
                           source->local_u_reserve_copied_entries);
+}
+
+static void kls_row_first_pipeline_trace_maybe_print_live_long_row(
+  kls_row_first_pipeline_trace *trace,
+  const kls_row_first_partial_row *state,
+  UF_long dep) {
+  if (trace == NULL || state == NULL ||
+      trace->long_row_threshold == 0u ||
+      trace->long_row_emitted ||
+      trace->scalar_dep_u_entries < trace->long_row_threshold) {
+    return;
+  }
+  fprintf(stderr,
+          "KLS row-pipeline live-long-row: row=%" PRIu64
+          " pos=%" PRIu64 " dep=%" PRIu64
+          " deps=%" PRIu64
+          " scalar_u_entries=%" PRIu64
+          " scalar_u_internal=%" PRIu64
+          " scalar_u_output=%" PRIu64
+          " scalar_runs=%" PRIu64
+          " scalar_run_rows=%" PRIu64
+          " scalar_run_u_entries=%" PRIu64
+          " pattern=%" PRIu64
+          " remaining_deps=%" PRIu64 "\n",
+          (uint64_t)trace->long_row, (uint64_t)trace->long_row_pos,
+          (uint64_t)dep, (uint64_t)trace->scalar_dep_calls,
+          (uint64_t)trace->scalar_dep_u_entries,
+          (uint64_t)trace->scalar_u_internal_entries,
+          (uint64_t)trace->scalar_u_output_entries,
+          (uint64_t)trace->scalar_run_calls,
+          (uint64_t)trace->scalar_run_rows,
+          (uint64_t)trace->scalar_run_u_entries,
+          (uint64_t)state->pattern_count,
+          (uint64_t)state->dep_heap_size);
+  trace->long_row_emitted = 1;
 }
 
 static UF_long kls_row_first_panel_cache_stored_entries(UF_long width,
@@ -86090,6 +86146,8 @@ static int kls_row_first_partial_apply_one_dep(
     kls_row_first_stats_add(&trace->scalar_dep_l_entries, 1u);
     kls_row_first_stats_add(&trace->scalar_dep_u_entries,
                             u_row_end[dep] - u_row_ptr[dep]);
+    kls_row_first_pipeline_trace_maybe_print_live_long_row(
+      trace, state, dep);
   }
   UF_long trace_internal_entries = 0u;
   UF_long trace_output_entries = 0u;
@@ -87192,6 +87250,7 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long order_epoch;
   UF_long pivot_tail_rows;
   UF_long pivot_restarts;
+  UF_long long_row_trace_threshold;
   int trace_enabled;
   int failed;
   kls_row_first_pipeline_failure failure_reason;
@@ -87573,6 +87632,10 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
       worker->l_entries.count = 0;
       worker->u_entries.count = 0;
       memset(&worker->trace_current, 0, sizeof(worker->trace_current));
+      worker->trace_current.long_row_threshold =
+        shared->long_row_trace_threshold;
+      worker->trace_current.long_row = row;
+      worker->trace_current.long_row_pos = pos;
       int blocked = 0;
       int begin_ok = 1;
       UF_long order_epoch = 0;
@@ -87845,6 +87908,45 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               kls_row_first_pipeline_publish_completed_panel(shared, row);
               shared->completed_pos = pos + 1u;
               worker->rows++;
+              if (shared->trace_enabled &&
+                  shared->long_row_trace_threshold > 0u &&
+                  worker->trace_current.scalar_dep_u_entries >=
+                    shared->long_row_trace_threshold) {
+                fprintf(stderr,
+                        "KLS row-pipeline long-row: row=%" PRIu64
+                        " pos=%" PRIu64 " completed=%" PRIu64
+                        "/%" PRIu64 " deps=%" PRIu64
+                        " scalar_u_entries=%" PRIu64
+                        " scalar_u_internal=%" PRIu64
+                        " scalar_u_output=%" PRIu64
+                        " scalar_runs=%" PRIu64
+                        " scalar_run_rows=%" PRIu64
+                        " scalar_run_u_entries=%" PRIu64
+                        " panel_updates=%" PRIu64
+                        " panel_update_rows=%" PRIu64
+                        " l_entries=%" PRIu64
+                        " u_entries=%" PRIu64
+                        " pattern=%" PRIu64
+                        " remaining_deps=%" PRIu64
+                        " pivoted=%d selected_col=%" PRIu64 "\n",
+                        (uint64_t)row, (uint64_t)pos,
+                        (uint64_t)(shared->completed_pos - shared->begin),
+                        (uint64_t)(shared->end - shared->begin),
+                        (uint64_t)worker->trace_current.scalar_dep_calls,
+                        (uint64_t)worker->trace_current.scalar_dep_u_entries,
+                        (uint64_t)worker->trace_current.scalar_u_internal_entries,
+                        (uint64_t)worker->trace_current.scalar_u_output_entries,
+                        (uint64_t)worker->trace_current.scalar_run_calls,
+                        (uint64_t)worker->trace_current.scalar_run_rows,
+                        (uint64_t)worker->trace_current.scalar_run_u_entries,
+                        (uint64_t)worker->trace_current.panel_update_groups,
+                        (uint64_t)worker->trace_current.panel_update_rows,
+                        (uint64_t)worker->l_entries.count,
+                        (uint64_t)worker->u_entries.count,
+                        (uint64_t)state.pattern_count,
+                        (uint64_t)state.dep_heap_size,
+                        pivoted, (uint64_t)selected_col);
+              }
               if (shared->trace_enabled) {
                 kls_row_first_pipeline_collect_worker_storage_trace(worker);
                 kls_row_first_pipeline_trace_add(
@@ -88039,6 +88141,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.completed_pos = begin;
   shared.order_epoch = 0;
   shared.trace_enabled = kls_row_pipeline_trace_env_enabled();
+  shared.long_row_trace_threshold =
+    shared.trace_enabled ? kls_row_pipeline_long_row_trace_threshold() : 0u;
   atomic_init(&shared.next_pos, (unsigned long)begin);
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {
     kls_row_first_supernode_panel_cache_free(

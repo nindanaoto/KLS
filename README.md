@@ -2165,14 +2165,17 @@ KLS also reports dominant-BTF row-up-looking first-factor coverage through
 run can time out. Setting `KLS_TRACE_ROW_PIPELINE=1` additionally prints
 row-first pipeline progress with committed rows, scalar dependency applications,
 published-U entries scanned by the scalar update loop, scalar supernode fallback
-rows, and local/shared row-entry reserve growth/copy volume. Same-session `pre2`
-probes show the default AMD run enters the 629,628-row dominant BTF block with
-no separator coverage, while forced METIS enters the same block with separator
-coverage but still exceeds the 120s cap. The matching local CKTSO run finishes
-analysis, first factor, one factor, one refactor, and solve in about 21s wall
-time, so the remaining gap is not the timeout limit or BLAS thresholding; it is
-the missing CKTSO/SubtreeLU coarse row/supernode numeric executor inside that
-dominant block.
+rows, and local/shared row-entry reserve growth/copy volume. Setting
+`KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES=N` with row-pipeline tracing enabled
+also prints the first live dependency and the commit summary for rows whose
+scalar published-U scan crosses `N` entries. Same-session `pre2` probes show
+the default AMD run enters the 629,628-row dominant BTF block with no separator
+coverage, while forced METIS enters the same block with separator coverage but
+still exceeds the 120s cap. The matching local CKTSO run finishes analysis,
+first factor, one factor, one refactor, and solve in about 21s wall time, so the
+remaining gap is not the timeout limit or BLAS thresholding; it is the missing
+CKTSO/SubtreeLU coarse row/supernode numeric executor inside that dominant
+block.
 The METIS dominant-block path now avoids rebuilding the whole completed-prefix
 row-supernode map after large-prefix pivot events. Once the completed prefix is
 past the existing 32k-row cache rebuild cutoff, KLS invalidates the speculative
@@ -2292,6 +2295,20 @@ likewise report zero CBLAS update counters with the runtime BLAS gate both off
 and on, and the source already requires 512/2048-scale row or panel dimensions
 plus multi-million estimated work. Small-case BLAS dispatch is therefore not
 the active slow-row blocker.
+A July 1, 2026 timeout-pair recheck keeps `pre2` as the largest clean
+KLS-vs-CKTSO gap. `build/cktso_recheck_timeout_pair_t4_r1_ref1_timeout120.jsonl`
+completed `pre2` with `analysis_seconds=4.584171`,
+`initial_factor_seconds=7.237705`, `factor_seconds_avg=4.191527`,
+`refactor_seconds_avg=5.262766`, and `solve_seconds_avg=0.138894`, while
+`Hamrle3` timed out. The matching KLS pair
+`build/kls_recheck_timeout_pair_t4_r1_ref1_timeout120.jsonl` emitted no rows:
+both `pre2` and `Hamrle3` timed out. A forced-METIS KLS-first `pre2` trace
+reached the 589,824-row checkpoint with `804,575,231` scalar published-U entry
+touches, then spent the capped run on rows `598596`-`598872`; the 15 committed
+rows over the 5M threshold were all dynamic-pivot rows and summed `84,654,869`
+scalar U-entry touches. A serial pivot-storm drain probe triggered after only
+5,024 committed rows and still timed out at 120s, so simply abandoning the
+pipeline for pivot storms is not the missing paper mechanism.
 The Algorithm 5 payoff-claim trigger is likewise bounded by plan shape. A
 naive claims run serialized large Sandia payoff groups and timed out; the
 retained guard now keeps `ASIC_320ks`/`ASIC_320k`/`ASIC_100ks` plan-only while

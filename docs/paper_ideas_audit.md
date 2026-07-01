@@ -13231,3 +13231,20 @@ inside the 629,628-row pipeline after the 589,824-row checkpoint. This confirms
 the timeout policy is not the issue; the remaining clear missing piece is the
 paper-level coarse row/supernode first-factor executor for the dominant block,
 especially the scalar dependency drain and pivot-tail continuation.
+
+A July 1, 2026 timeout-pair recheck keeps that diagnosis. CKTSO completed
+`pre2` in `build/cktso_recheck_timeout_pair_t4_r1_ref1_timeout120.jsonl` with
+`analysis_seconds=4.584171`, `initial_factor_seconds=7.237705`,
+`factor_seconds_avg=4.191527`, `refactor_seconds_avg=5.262766`, and
+`solve_seconds_avg=0.138894`, while `Hamrle3` timed out. The matching KLS run
+`build/kls_recheck_timeout_pair_t4_r1_ref1_timeout120.jsonl` emitted no rows
+because both `pre2` and `Hamrle3` timed out. A forced-METIS KLS-first `pre2`
+trace reached the 589,824-row checkpoint with `804,575,231` scalar published-U
+entry touches, then spent the cap on rows `598596`-`598872`; the 15 committed
+rows over the 5M trace threshold were all dynamic-pivot rows and summed
+`84,654,869` scalar U-entry touches. An attempted serial pivot-storm drain was
+not retained: it triggered after only 5,024 committed rows and still timed out
+at 120s. The clear missing mechanism is therefore not a timeout limit, small
+BLAS threshold, or simple pivot-storm serial fallback; it is still the
+CKTSO/SubtreeLU-style coarse row/supernode numeric executor that avoids
+replaying long published-U streams for adjacent pivoting rows.
