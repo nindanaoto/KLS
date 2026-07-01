@@ -13723,3 +13723,43 @@ still preserves per-membership sparse states and therefore leaves the core
 producer-to-many-current owner missing. The next implementation should use this
 indirection to replace those member-local value slices with an actual grouped
 workspace/window, rather than expecting compact allocation alone to move time.
+
+A current timeout-pair recheck at commit `e37f923` again isolates `pre2` as the
+largest clean KLS-vs-CKTSO gap. With the same 4-thread, one-factor,
+one-refactor, 120s-per-matrix cap over the large recon timeout pair, CKTSO
+completed `pre2` in
+`build/cktso_timeout_pair_e37f923_t4_r1_ref1_timeout120.jsonl` with
+`analysis_seconds=3.586958`, `initial_factor_seconds=6.326116`,
+`refactor_seconds_avg=4.875776`, `solve_seconds_avg=0.121033`, and
+`spice_cycle_seconds=504.718198`; CKTSO timed out on `Hamrle3`. The matching
+KLS run, `build/kls_timeout_pair_e37f923_t4_r1_ref1_timeout120.jsonl`, emitted
+no rows, and its sidecar records 120s timeouts on both `pre2` and `Hamrle3`.
+That makes `pre2` the actionable comparator because CKTSO solves it inside the
+same cap.
+
+The current `pre2` KLS analysis cost is not the timeout-sized gap. Analyze-only
+KLS completed with auto/AMD-selected ordering in `10.5177002s` and explicit AMD
+in `7.37985796s`
+(`build/kls_pre2_analyze_auto_e37f923_t4.json` and
+`build/kls_pre2_analyze_amd_e37f923_t4.json`). Both analyze rows show the same
+dominant BTF block: `nblocks=29282`, `max_block=629628`, and estimated flops
+`2.07660366e+11`. A 75s forced first-factor trace,
+`build/kls_pre2_timeout_gap_trace_e37f923_t4_r1_ref0_timeout75.stderr`, reached
+the dominant row-first pipeline (`block=13843`, `rows=629628`) but produced no
+completed JSON before the cap.
+
+A debugger-owned live sample of the same factor-only `pre2` window,
+`build/pre2_timeout_gap_gdb_pty_e37f923.txt`, refines the hot point: the main
+thread is waiting in `kls_factor` through
+`kls_try_first_factor_row_uplooking_blocks_impl`, one row-first worker is
+waiting in `kls_row_first_run_parallel_pipeline_phase` /
+`kls_row_first_run_restartable_pipeline_suffix`, one active worker is in
+`kls_row_first_supernode_panel_cache_build`, and the other row-pipeline workers
+are blocked on the pipeline condition variable. This single sample is not a
+full profile, but it is consistent with the previous scalar-output traces: the
+gap is still cold numeric factorization inside the dominant BTF row/supernode
+executor, with serialized panel-cache rebuild/suffix-pipeline work blocking
+parallel progress. The paper-aligned next target remains a coarser CKTSO /
+SubtreeLU-style row/supernode numeric owner that preserves and streams producer
+panel work across the suffix instead of repeatedly rebuilding or replaying it
+under a one-worker bottleneck.
