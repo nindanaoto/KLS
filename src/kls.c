@@ -22623,9 +22623,20 @@ static UF_long kls_metis_order(UF_long n,
                      metis_perm, metis_iperm);
   UF_long order_lnz = 0;
   if (metis_status == METIS_OK) {
+    UF_long camd_group_size =
+      kls_metis_camd_group_size(n, col_ptr, row_idx);
+    if (camd_group_size == 0 && n > 1) {
+      /* Below the window-refinement floor, keep the METIS order exactly by
+         constraining every vertex to its own group.  CAMD then reproduces
+         the given elimination order while still reporting its fill
+         estimate, so METIS-ordered symbolic candidates get a real lnz and
+         can be compared against AMD/COLAMD scores instead of reporting an
+         unknown estimate for the whole ordering. */
+      camd_group_size = 1;
+    }
     UF_long camd_lnz =
       kls_metis_refine_with_camd(n, col_ptr, row_idx, metis_perm,
-                                 kls_metis_camd_group_size(n, col_ptr, row_idx),
+                                 camd_group_size,
                                  perm_out);
     if (camd_lnz == 0) {
       for (UF_long i = 0; i < n; ++i) {
