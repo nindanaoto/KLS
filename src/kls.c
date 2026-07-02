@@ -85970,6 +85970,17 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
       return (UF_long)mapped;
     }
+    const UF_long serial_ok =
+      trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
+                              numeric_values, solver->symbolic,
+                              solver->numeric, &solver->common);
+    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
+    if (!serial_ok) {
+      kls_record_fast_factor_failure(
+        solver, KLS_FAST_FACTOR_FAIL_KLU_REFACTOR_FAILED,
+        solver->common.status);
+    }
+    return serial_ok;
   }
   const int egraph =
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
