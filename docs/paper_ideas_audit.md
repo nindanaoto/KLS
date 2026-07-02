@@ -6,6 +6,22 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The latest `pre2` trace adds a claim-time delayed-output surface for sparse
+grouped compact states, without enabling the rejected numeric group replay.
+`build/kls_pre2_claim_group_output_surface_w512_trace45.stderr` timed out at
+the familiar traced checkpoint, `510403/629628` rows, but it measured the
+missing owner surface more directly than the earlier strict-run probe. Across
+`63297` grouped claim surfaces, the active group again averaged `31.6` states
+per claim, while strict contiguity stayed at `4.87` rows per claim. The new
+delayed-output counters show why a paper-shaped streaming owner remains
+plausible: only `8641858` of `145136802` delayed-output dependency touches were
+unique (`5.95%`), and a grouped scan over the unique producer rows would scan
+`662930248` U entries instead of `18833835429` per-state entries (`3.52%`).
+This does not vindicate future-row output materialization, which previous
+replay and output-stream prototypes rejected; it points more specifically to a
+CKTSO/SubtreeLU-style grouped row/panel owner that shares producer-row scans
+across active current states while applying output directly to the claim owner.
+
 The row-pipeline pivot tail now preserves the supernode substrate after dynamic
 pivots by advancing a validity floor rather than discarding `supernode_start`
 and `supernode_end`. This is the direct SubtreeLU/CKTSO-style repair for the

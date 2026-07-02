@@ -86873,6 +86873,13 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_delayed_group_replay_duplicate_deps;
   UF_long compact_window_delayed_group_replay_scan_entries;
   UF_long compact_window_delayed_group_replay_group_scan_entries;
+  UF_long compact_window_claim_group_output_surfaces;
+  UF_long compact_window_claim_group_output_states;
+  UF_long compact_window_claim_group_output_deps;
+  UF_long compact_window_claim_group_output_unique_deps;
+  UF_long compact_window_claim_group_output_duplicate_deps;
+  UF_long compact_window_claim_group_output_scan_entries;
+  UF_long compact_window_claim_group_output_group_scan_entries;
   UF_long compact_window_probes;
   UF_long compact_window_batches;
   UF_long compact_window_stream_u_entries;
@@ -87115,6 +87122,27 @@ static void kls_row_first_pipeline_trace_add(
   kls_row_first_stats_add(
     &target->compact_window_delayed_group_replay_group_scan_entries,
     source->compact_window_delayed_group_replay_group_scan_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_group_output_surfaces,
+    source->compact_window_claim_group_output_surfaces);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_group_output_states,
+    source->compact_window_claim_group_output_states);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_group_output_deps,
+    source->compact_window_claim_group_output_deps);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_group_output_unique_deps,
+    source->compact_window_claim_group_output_unique_deps);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_group_output_duplicate_deps,
+    source->compact_window_claim_group_output_duplicate_deps);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_group_output_scan_entries,
+    source->compact_window_claim_group_output_scan_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_group_output_group_scan_entries,
+    source->compact_window_claim_group_output_group_scan_entries);
   kls_row_first_stats_add(&target->compact_window_probes,
                           source->compact_window_probes);
   kls_row_first_stats_add(&target->compact_window_batches,
@@ -93618,11 +93646,12 @@ static int kls_row_first_pipeline_sparse_group_state_keeps_root(
          state->heap[0] < state->row;
 }
 
-static void kls_row_first_pipeline_trace_delayed_group_replay_surface(
+static void kls_row_first_pipeline_trace_delayed_group_surface(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_pipeline_trace *trace,
   UF_long keep_root,
-  int trace_nonmatching_only) {
+  int trace_nonmatching_only,
+  int claim_surface) {
   if (shared == NULL || !shared->compact_group_active ||
       !shared->compact_group_sparse ||
       !shared->compact_window_delay_output_enabled ||
@@ -93738,23 +93767,43 @@ static void kls_row_first_pipeline_trace_delayed_group_replay_surface(
     }
   }
 
-  kls_row_first_stats_add(
-    &target->compact_window_delayed_group_replay_surfaces, 1u);
-  kls_row_first_stats_add(
-    &target->compact_window_delayed_group_replay_states, states);
-  kls_row_first_stats_add(
-    &target->compact_window_delayed_group_replay_deps, deps);
-  kls_row_first_stats_add(
-    &target->compact_window_delayed_group_replay_unique_deps, unique_deps);
-  kls_row_first_stats_add(
-    &target->compact_window_delayed_group_replay_duplicate_deps,
-    deps >= unique_deps ? deps - unique_deps : 0u);
-  kls_row_first_stats_add(
-    &target->compact_window_delayed_group_replay_scan_entries,
-    scan_entries);
-  kls_row_first_stats_add(
-    &target->compact_window_delayed_group_replay_group_scan_entries,
-    group_scan_entries);
+  if (claim_surface) {
+    kls_row_first_stats_add(
+      &target->compact_window_claim_group_output_surfaces, 1u);
+    kls_row_first_stats_add(
+      &target->compact_window_claim_group_output_states, states);
+    kls_row_first_stats_add(
+      &target->compact_window_claim_group_output_deps, deps);
+    kls_row_first_stats_add(
+      &target->compact_window_claim_group_output_unique_deps, unique_deps);
+    kls_row_first_stats_add(
+      &target->compact_window_claim_group_output_duplicate_deps,
+      deps >= unique_deps ? deps - unique_deps : 0u);
+    kls_row_first_stats_add(
+      &target->compact_window_claim_group_output_scan_entries,
+      scan_entries);
+    kls_row_first_stats_add(
+      &target->compact_window_claim_group_output_group_scan_entries,
+      group_scan_entries);
+  } else {
+    kls_row_first_stats_add(
+      &target->compact_window_delayed_group_replay_surfaces, 1u);
+    kls_row_first_stats_add(
+      &target->compact_window_delayed_group_replay_states, states);
+    kls_row_first_stats_add(
+      &target->compact_window_delayed_group_replay_deps, deps);
+    kls_row_first_stats_add(
+      &target->compact_window_delayed_group_replay_unique_deps, unique_deps);
+    kls_row_first_stats_add(
+      &target->compact_window_delayed_group_replay_duplicate_deps,
+      deps >= unique_deps ? deps - unique_deps : 0u);
+    kls_row_first_stats_add(
+      &target->compact_window_delayed_group_replay_scan_entries,
+      scan_entries);
+    kls_row_first_stats_add(
+      &target->compact_window_delayed_group_replay_group_scan_entries,
+      group_scan_entries);
+  }
 }
 
 static void kls_row_first_pipeline_trace_claim_group_run_surface(
@@ -93902,8 +93951,8 @@ static int kls_row_first_pipeline_scatter_compact_group(
   if (shared == NULL || !shared->compact_group_active) {
     return 1;
   }
-  kls_row_first_pipeline_trace_delayed_group_replay_surface(
-    shared, trace, KLS_KLU_EMPTY, 0);
+  kls_row_first_pipeline_trace_delayed_group_surface(
+    shared, trace, KLS_KLU_EMPTY, 0, 0);
   if (shared->compact_group_replay_enabled) {
     (void)kls_row_first_pipeline_replay_delayed_sparse_group(
       shared, trace, KLS_KLU_EMPTY, 0);
@@ -94607,8 +94656,8 @@ static void kls_row_first_pipeline_compact_sparse_group_keep_root(
     (void)kls_row_first_pipeline_scatter_compact_group(shared, trace);
     return;
   }
-  kls_row_first_pipeline_trace_delayed_group_replay_surface(
-    shared, trace, root_dep, 1);
+  kls_row_first_pipeline_trace_delayed_group_surface(
+    shared, trace, root_dep, 1, 0);
   if (shared->compact_group_replay_enabled) {
     (void)kls_row_first_pipeline_replay_delayed_sparse_group(
       shared, trace, root_dep, 1);
@@ -96487,6 +96536,10 @@ static int kls_row_first_pipeline_try_claim_compact_window(
           state->pos == wanted_pos) {
         kls_row_first_pipeline_trace_claim_group_run_surface(
           shared, wanted_pos);
+        kls_row_first_pipeline_trace_delayed_group_surface(
+          shared,
+          shared->trace_enabled ? &shared->trace_committed : NULL,
+          KLS_KLU_EMPTY, 0, 1);
         if (shared->compact_group_sparse) {
           kls_row_first_compact_window_state *detached =
             kls_row_first_pipeline_detach_sparse_group_row(
@@ -96758,6 +96811,13 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_delayed_group_replay_duplicate_deps=%" PRIu64
           " compact_window_delayed_group_replay_scan_entries=%" PRIu64
           " compact_window_delayed_group_replay_group_scan_entries=%" PRIu64
+          " compact_window_claim_group_output_surfaces=%" PRIu64
+          " compact_window_claim_group_output_states=%" PRIu64
+          " compact_window_claim_group_output_deps=%" PRIu64
+          " compact_window_claim_group_output_unique_deps=%" PRIu64
+          " compact_window_claim_group_output_duplicate_deps=%" PRIu64
+          " compact_window_claim_group_output_scan_entries=%" PRIu64
+          " compact_window_claim_group_output_group_scan_entries=%" PRIu64
           " compact_window_probes=%" PRIu64
           " compact_window_batches=%" PRIu64
           " compact_window_stream_u_entries=%" PRIu64
@@ -96866,6 +96926,13 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_delayed_group_replay_duplicate_deps,
           (uint64_t)trace->compact_window_delayed_group_replay_scan_entries,
           (uint64_t)trace->compact_window_delayed_group_replay_group_scan_entries,
+          (uint64_t)trace->compact_window_claim_group_output_surfaces,
+          (uint64_t)trace->compact_window_claim_group_output_states,
+          (uint64_t)trace->compact_window_claim_group_output_deps,
+          (uint64_t)trace->compact_window_claim_group_output_unique_deps,
+          (uint64_t)trace->compact_window_claim_group_output_duplicate_deps,
+          (uint64_t)trace->compact_window_claim_group_output_scan_entries,
+          (uint64_t)trace->compact_window_claim_group_output_group_scan_entries,
           (uint64_t)trace->compact_window_probes,
           (uint64_t)trace->compact_window_batches,
           (uint64_t)trace->compact_window_stream_u_entries,
@@ -97540,6 +97607,13 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " compact_window_delayed_group_replay_duplicate_deps=%" PRIu64
                         " compact_window_delayed_group_replay_scan_entries=%" PRIu64
                         " compact_window_delayed_group_replay_group_scan_entries=%" PRIu64
+                        " compact_window_claim_group_output_surfaces=%" PRIu64
+                        " compact_window_claim_group_output_states=%" PRIu64
+                        " compact_window_claim_group_output_deps=%" PRIu64
+                        " compact_window_claim_group_output_unique_deps=%" PRIu64
+                        " compact_window_claim_group_output_duplicate_deps=%" PRIu64
+                        " compact_window_claim_group_output_scan_entries=%" PRIu64
+                        " compact_window_claim_group_output_group_scan_entries=%" PRIu64
                         " compact_window_probes=%" PRIu64
                         " compact_window_batches=%" PRIu64
                         " compact_window_stream_u_entries=%" PRIu64
@@ -97646,6 +97720,13 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.compact_window_delayed_group_replay_duplicate_deps,
                         (uint64_t)worker->trace_current.compact_window_delayed_group_replay_scan_entries,
                         (uint64_t)worker->trace_current.compact_window_delayed_group_replay_group_scan_entries,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_output_surfaces,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_output_states,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_output_deps,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_output_unique_deps,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_output_duplicate_deps,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_output_scan_entries,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_output_group_scan_entries,
                         (uint64_t)worker->trace_current.compact_window_probes,
                         (uint64_t)worker->trace_current.compact_window_batches,
                         (uint64_t)worker->trace_current.compact_window_stream_u_entries,

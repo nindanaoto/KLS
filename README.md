@@ -2316,6 +2316,18 @@ With sparse compact groups enabled, traces also report
 `compact_window_delayed_group_replay_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`
 to measure how much claim-time delayed replay could share producer-row scans
 across grouped states.
+Claim-time sparse grouped-output probes additionally report
+`compact_window_claim_group_output_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`.
+These counters do not replay or materialize any future-row output; they estimate
+the scan work a persistent grouped row/panel owner could share at each grouped
+claim. On `pre2` with a 512-row compact window,
+`build/kls_pre2_claim_group_output_surface_w512_trace45.stderr` timed out at
+`510403/629628` rows under trace overhead, but measured `63,297` claim surfaces
+with `31.6` states per surface. Only `5.95%` of delayed-output dependencies were
+unique, and the grouped-scan estimate was `3.52%` of the per-state scan volume
+(`662,930,248` versus `18,833,835,429` entries). This keeps the next CKTSO and
+SubtreeLU-shaped implementation target on a streaming grouped owner that shares
+producer-row scans without storing output into each future row.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_REPLAY=1` enables the matching numeric
 grouped replay experiment, but it remains off by default: a 45s `pre2` trial
 cut delayed replay scan entries while inflating delayed output materialization
