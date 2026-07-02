@@ -2030,13 +2030,19 @@ python3 scripts/run_bench_suite.py --kls-bench build/kls_bench \
 
 For a shorter large-case reconnaissance before an overnight run, use the
 selected large manifest. It covers the high-signal large paper cases that have
-already shown KLS/CKTSO differences under a 120s per-process cap:
+already shown KLS/CKTSO differences under a 120s per-process cap. Matrices
+where CKTSO also times out under that cap are kept out of this tuning loop:
 
 ```sh
 python3 scripts/run_bench_suite.py --kls-bench build/kls_bench --matrix-dir data/suitesparse-paper-large --manifest bench/suitesparse_paper_large_recon_manifest.txt --orientation auto --threads 4 --repeat 1 --refactor-repeat 1 --timeout 120 --jsonl build/kls_paper_large_recon.jsonl
 python3 scripts/run_cktso_suite.py --cktso-compare build-cktso/cktso_compare --matrix-dir data/suitesparse-paper-large --manifest bench/suitesparse_paper_large_recon_manifest.txt --threads 4 --repeat 1 --refactor-repeat 1 --timeout 120 --jsonl build/cktso_paper_large_recon.jsonl
 python3 scripts/run_klu2_suite.py --klu2-compare build-klu2/klu2_compare --matrix-dir data/suitesparse-paper-large --manifest bench/suitesparse_paper_large_recon_manifest.txt --repeat 1 --refactor-repeat 1 --timeout 120 --jsonl build/klu2_paper_large_recon.jsonl
 ```
+
+Use `bench/suitesparse_stress_timeout_manifest.txt` for shared-hard timeout
+cases such as `Hamrle3`. They are useful robustness and scalability checks, but
+they should not drive CKTSO-relative tuning or geomean gap claims unless the
+reference solver also produces a finite timing under the same cap.
 
 To regenerate a metadata-bounded subset from the full paper corpus and record
 the exact canonical SuiteSparse names used:

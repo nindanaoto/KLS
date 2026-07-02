@@ -1,0 +1,6 @@
+# Shared-hard timeout/stress cases.
+# These matrices are useful for robustness, memory growth, and long-run
+# scalability checks, but CKTSO currently has no finite timing for them under
+# the focused 120s cap. Keep them out of CKTSO-relative tuning geomeans.
+
+Hamrle3
