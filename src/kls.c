@@ -26502,6 +26502,11 @@ done:
   return accepted;
 }
 
+static int kls_trace_pre_static_enabled(void) {
+  const char *value = getenv("KLS_TRACE_PRESTATIC");
+  return value != NULL && value[0] == '1';
+}
+
 static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               double *elapsed,
                                               const double *numeric_values) {
@@ -26704,7 +26709,18 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                             &match_row_scale,
                                             &match_col_scale);
   }
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr,
+            "KLS pre-static: n=%ld weak=%ld missing=%ld large=%d "
+            "prefer_unscaled=%d match_status=%d matched=%ld spral=%d\n",
+            (long)solver->n, (long)weak, (long)missing_diagonal,
+            (int)use_large_spral_match, prefer_unscaled_static_match,
+            status, (long)matched, spral_matching);
+  }
   if (status != KLS_OK || 1000u * matched < 995u * solver->n) {
+    if (kls_trace_pre_static_enabled()) {
+      fprintf(stderr, "KLS pre-static: reject match coverage\n");
+    }
     goto done;
   }
 
@@ -26753,11 +26769,22 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     trial_common.scale = -1;
   }
 
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr,
+            "KLS pre-static: trial factor start ordering=%d scale=%ld "
+            "tol=%g score=%.3e\n",
+            (int)trial_ordering, (long)trial_common.scale, trial_common.tol,
+            trial_score);
+  }
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
                           trial_symbolic, &trial_common);
   if (trial_numeric == NULL || trial_common.status < 0 ||
       trial_common.status == TRILINOS_KLU_SINGULAR) {
+    if (kls_trace_pre_static_enabled()) {
+      fprintf(stderr, "KLS pre-static: reject trial factor status=%ld\n",
+              (long)trial_common.status);
+    }
     goto done;
   }
 
@@ -26774,8 +26801,19 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                    trial_symbolic, &trial_values,
                                    &trial_row_scale, &trial_col_scale,
                                    &trial_numeric, &trial_common);
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr,
+            "KLS pre-static: trial numeric lnz=%ld unz=%ld noffdiag=%ld "
+            "rcond=%.3e flops=%.3e\n",
+            (long)trial_numeric->lnz, (long)trial_numeric->unz,
+            (long)trial_common.noffdiag, trial_common.rcond,
+            trial_common.flops);
+  }
   if (trial_common.noffdiag > weak / 20u + 16u ||
       trial_common.rcond <= 0.0) {
+    if (kls_trace_pre_static_enabled()) {
+      fprintf(stderr, "KLS pre-static: reject quality gate\n");
+    }
     goto done;
   }
 
