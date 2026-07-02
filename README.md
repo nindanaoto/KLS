@@ -2321,6 +2321,12 @@ state hash, but the default stream cap still reached only `262144/629628` rows
 in 45s with `90` stream overflows, and a `4096`-entry cap regressed to
 `196608/629628` rows with `5296` overflows. The actionable gap therefore remains
 a true row/panel owner workspace, not another per-future-row output store.
+The existing first-factor row-supernode panel cache is not that owner: on
+`pre2`, the non-delayed panel trace had `30,087,557` panel-update entries, but
+the best compact delayed-output trace had only `8816` panel-update entries while
+delayed-output replay still carried `387,971,639` output entries. The missing
+paper mechanism needs to batch trailing/output work across target rows, not only
+batch contiguous predecessor runs for one target row.
 On `pre2`, a suffix-seek replay probe with the 512-state compact window reached
 the same `589824/629628` 45s checkpoint as the prior delayed-output run and
 skipped only `254207` prefix entries while scanning `458936540` entries. This

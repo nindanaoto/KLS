@@ -15268,6 +15268,20 @@ regressed further to `196608/629628` rows and `5296` overflows. This rules out
 postfactor work needs to stay in a row/panel owner workspace or equivalent
 streaming kernel rather than being stored per future compact row.
 
+The existing first-factor row-supernode panel cache is not the same mechanism as
+that missing owner. It accelerates contiguous ready dependency runs inside one
+current row; the compact delayed-output loss is trailing/postfactor output shared
+across many future rows. The counters make the mismatch visible. A non-delayed
+panel trace, `build/kls_pre2_panel_entries_trace45.stderr`, reached the normal
+`589824/629628` checkpoint with `192018` panel-update rows and `30,087,557`
+panel-update entries. The current best compact delayed-output trace,
+`build/kls_pre2_direct_claim_replay_sparse_delay_w512_trace45.stderr`, also
+reached `589824/629628`, but panel-cache work fell to only `48` rows and `8816`
+entries while delayed-output replay carried `387,971,639` output entries and
+`459,834,505` scan entries. This rejects "reuse the current row-supernode panel
+cache" as the direct fix: the paper-gap owner has to batch delayed output across
+target rows, not only batch a contiguous predecessor run for one target row.
+
 A follow-up checked the other obvious CKTSO/SubtreeLU paper gap before
 returning to row ownership: static pivoting before explicit nested dissection.
 The raw `pre2` matrix satisfies the large SPRAL/MC64-style trigger, with
