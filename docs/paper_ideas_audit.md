@@ -54,6 +54,32 @@ U output. This rejects both under-mutex and detached eager supernode producer
 replay as the CKTSO-sized gap closer; the remaining paper-level gap is still a
 persistent main row/panel grouped owner.
 
+The latest row-pipeline diagnostics narrow that remaining owner gap. KLS now
+has `KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE=1`, a trace-only sampled lower-bound
+probe for the tempting "bucket future rows by their original input root"
+variant of a persistent main owner. On the forced-METIS `pre2` trace
+`build/kls_pre2_owner_surface_trace45.stderr`, KLS again reached the standard
+`589824/629628` checkpoint, but the sampled input-root surface found only
+`2286` targets and `71221` target U entries across `1110` sampled producers and
+`4546560` scanned future row positions. That is far below the same trace's
+`25772923` ordinary producer-candidate target U entries and `430384038` scalar
+U-output entries. This rejects an original-input-root bucket owner as the
+missing CKTSO/SubtreeLU mechanism: the owner has to carry updated live row
+state and fill.
+
+The compact-window cap is now 2048 slots so exact live-state owner sizing can
+be tested beyond the earlier 256-state ceiling. The wider probe also rejects
+"just make independent compact sparse states wider" as the next default
+mechanism. With `KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1` and
+`KLS_ROW_PIPELINE_COMPACT_WINDOW=512`,
+`build/kls_pre2_compact_exec_w512_trace45.stderr` reached only
+`393216/629628` rows in 45s. It exposed real grouped target work
+(`231858129` compact target U entries from `10638367` compact stream U entries),
+but scalar U output was still `388360106`, and the compact owner slowed the
+frontier instead of advancing it. This keeps the next implementation target on
+a production row/panel live-workspace owner, not a larger independent sparse
+compact window.
+
 The first-factor separator-private pivot path is now closer to SubtreeLU's
 private-mode rule: private pivot search is restricted to columns owned by the
 same private worker. This fixes the earlier `pre2` diagnostic where a private

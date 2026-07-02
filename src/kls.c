@@ -118,9 +118,12 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM 1024u
 #define KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_MAX_SLOTS 32u
 #define KLS_ROW_FIRST_PIPELINE_LOOKAHEAD_DEFAULT_MAX_INPUTS 4u
-#define KLS_ROW_FIRST_COMPACT_WINDOW_MAX_SLOTS 256u
+#define KLS_ROW_FIRST_COMPACT_WINDOW_MAX_SLOTS 2048u
 #define KLS_ROW_FIRST_COMPACT_WINDOW_DEFAULT_SLOTS 64u
 #define KLS_ROW_FIRST_COMPACT_WINDOW_DEFAULT_MAX_ENTRIES 65536u
+#define KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_WINDOW 4096u
+#define KLS_ROW_FIRST_OWNER_SURFACE_MAX_WINDOW 65536u
+#define KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_INTERVAL 512u
 #define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
@@ -48135,6 +48138,56 @@ static int kls_row_pipeline_compact_window_exec_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_owner_surface_trace_env_enabled(void) {
+  const char *value =
+    getenv("KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static UF_long kls_row_pipeline_owner_surface_window_env(void) {
+  if (!kls_row_pipeline_owner_surface_trace_env_enabled()) {
+    return 0u;
+  }
+  const char *value = getenv("KLS_ROW_PIPELINE_OWNER_SURFACE_WINDOW");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_WINDOW;
+  }
+  if (value[0] == '0' && value[1] == '\0') {
+    return 0u;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_WINDOW;
+  }
+  return parsed > KLS_ROW_FIRST_OWNER_SURFACE_MAX_WINDOW
+    ? KLS_ROW_FIRST_OWNER_SURFACE_MAX_WINDOW
+    : (UF_long)parsed;
+}
+
+static UF_long kls_row_pipeline_owner_surface_interval_env(void) {
+  if (!kls_row_pipeline_owner_surface_trace_env_enabled()) {
+    return 0u;
+  }
+  const char *value = getenv("KLS_ROW_PIPELINE_OWNER_SURFACE_INTERVAL");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_INTERVAL;
+  }
+  if (value[0] == '0' && value[1] == '\0') {
+    return 1u;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_INTERVAL;
+  }
+  const unsigned long long max_uf = (unsigned long long)UF_long_max;
+  return parsed > max_uf ? UF_long_max : (UF_long)parsed;
+}
+
 static UF_long kls_row_pipeline_compact_window_slots_env(void) {
   if (!kls_row_pipeline_compact_window_trace_env_enabled() &&
       !kls_row_pipeline_compact_window_exec_env_enabled()) {
@@ -86792,6 +86845,12 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_group_merge_targets;
   UF_long compact_window_group_merge_cols;
   UF_long compact_window_group_merge_values;
+  UF_long owner_surface_probes;
+  UF_long owner_surface_probe_u_entries;
+  UF_long owner_surface_scanned_rows;
+  UF_long owner_surface_targets;
+  UF_long owner_surface_target_u_entries;
+  UF_long owner_surface_max_targets;
   UF_long producer_probe_workers;
   UF_long producer_probe_lookahead;
   UF_long producer_probe_ready_roots;
@@ -86838,6 +86897,12 @@ static void kls_row_first_stats_add(UF_long *target, UF_long value) {
     return;
   }
   *target = *target > UF_long_max - value ? UF_long_max : *target + value;
+}
+
+static void kls_row_first_stats_max(UF_long *target, UF_long value) {
+  if (target != NULL && value > *target) {
+    *target = value;
+  }
 }
 
 static void kls_row_first_pipeline_trace_producer_reject(
@@ -86973,6 +87038,18 @@ static void kls_row_first_pipeline_trace_add(
                           source->compact_window_group_merge_cols);
   kls_row_first_stats_add(&target->compact_window_group_merge_values,
                           source->compact_window_group_merge_values);
+  kls_row_first_stats_add(&target->owner_surface_probes,
+                          source->owner_surface_probes);
+  kls_row_first_stats_add(&target->owner_surface_probe_u_entries,
+                          source->owner_surface_probe_u_entries);
+  kls_row_first_stats_add(&target->owner_surface_scanned_rows,
+                          source->owner_surface_scanned_rows);
+  kls_row_first_stats_add(&target->owner_surface_targets,
+                          source->owner_surface_targets);
+  kls_row_first_stats_add(&target->owner_surface_target_u_entries,
+                          source->owner_surface_target_u_entries);
+  kls_row_first_stats_max(&target->owner_surface_max_targets,
+                          source->owner_surface_max_targets);
   kls_row_first_stats_add(&target->producer_probe_workers,
                           source->producer_probe_workers);
   kls_row_first_stats_add(&target->producer_probe_lookahead,
@@ -91425,11 +91502,14 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long long_row_trace_threshold;
   UF_long lookahead_max_inputs;
   UF_long compact_window_max_entries;
+  UF_long owner_surface_window;
+  UF_long owner_surface_interval;
   int trace_enabled;
   int producer_batch_enabled;
   int active_catchup_batch_enabled;
   int compact_window_enabled;
   int compact_window_execute_enabled;
+  int owner_surface_trace_enabled;
   int compact_group_active;
   int lookahead_fill_enabled;
   int pivot_lookahead_enabled;
@@ -91510,6 +91590,104 @@ static void kls_row_first_pipeline_collect_worker_storage_trace(
   worker->u_reserve_growths_reported = worker->u_entries.reserve_growths;
   worker->u_reserve_copied_reported =
     worker->u_entries.reserve_copied_entries;
+}
+
+static UF_long kls_row_first_input_first_unready_dep(
+  const kls_row_first_pipeline_shared *shared,
+  UF_long row,
+  UF_long ready_limit) {
+  if (shared == NULL || shared->ctx == NULL ||
+      shared->ctx->row_ptr == NULL || shared->ctx->row_cols == NULL ||
+      shared->ctx->col_pos == NULL || shared->row_done == NULL ||
+      row >= shared->ctx->nk ||
+      shared->ctx->row_ptr[row] > shared->ctx->row_ptr[row + 1u]) {
+    return KLS_KLU_EMPTY;
+  }
+  UF_long best = KLS_KLU_EMPTY;
+  for (UF_long p = shared->ctx->row_ptr[row];
+       p < shared->ctx->row_ptr[row + 1u]; ++p) {
+    const UF_long oldcol = shared->ctx->row_cols[p];
+    if (oldcol >= shared->ctx->n) {
+      return KLS_KLU_EMPTY;
+    }
+    const UF_long col = shared->ctx->col_pos[oldcol];
+    if (col >= row || col >= shared->ctx->nk) {
+      continue;
+    }
+    if (kls_row_first_dependency_ready(shared->row_done,
+                                       shared->active_rank,
+                                       ready_limit, col)) {
+      continue;
+    }
+    if (best == KLS_KLU_EMPTY || col < best) {
+      best = col;
+    }
+  }
+  return best;
+}
+
+static void kls_row_first_pipeline_trace_owner_surface(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_trace *trace,
+  UF_long current_pos,
+  UF_long dep) {
+  if (shared == NULL || trace == NULL ||
+      !shared->owner_surface_trace_enabled ||
+      shared->owner_surface_window == 0u ||
+      shared->owner_surface_interval == 0u ||
+      shared->ctx == NULL || shared->row_order == NULL ||
+      shared->workspace == NULL ||
+      shared->workspace->u_row_ptr == NULL ||
+      shared->workspace->u_row_end == NULL ||
+      shared->u_entries == NULL || dep >= shared->ctx->nk ||
+      shared->workspace->u_row_ptr[dep] >
+        shared->workspace->u_row_end[dep] ||
+      shared->workspace->u_row_end[dep] > shared->u_entries->count) {
+    return;
+  }
+  if ((current_pos - shared->begin) % shared->owner_surface_interval != 0u) {
+    return;
+  }
+  const UF_long row_entries =
+    shared->workspace->u_row_end[dep] -
+    shared->workspace->u_row_ptr[dep];
+  const UF_long start =
+    current_pos < shared->end ? current_pos + 1u : shared->end;
+  UF_long stop = start;
+  if (shared->owner_surface_window > shared->end - start) {
+    stop = shared->end;
+  } else {
+    stop = start + shared->owner_surface_window;
+  }
+
+  UF_long scanned = 0u;
+  UF_long targets = 0u;
+  for (UF_long pos = start; pos < stop; ++pos) {
+    const UF_long row = shared->row_order[pos];
+    if (row >= shared->ctx->nk) {
+      break;
+    }
+    scanned++;
+    if (kls_row_first_input_first_unready_dep(shared, row, current_pos) ==
+        dep) {
+      targets++;
+    }
+  }
+  if (scanned == 0u) {
+    return;
+  }
+  const UF_long target_u_entries =
+    targets != 0u && row_entries > UF_long_max / targets
+      ? UF_long_max
+      : row_entries * targets;
+  kls_row_first_stats_add(&trace->owner_surface_probes, 1u);
+  kls_row_first_stats_add(&trace->owner_surface_probe_u_entries,
+                          row_entries);
+  kls_row_first_stats_add(&trace->owner_surface_scanned_rows, scanned);
+  kls_row_first_stats_add(&trace->owner_surface_targets, targets);
+  kls_row_first_stats_add(&trace->owner_surface_target_u_entries,
+                          target_u_entries);
+  kls_row_first_stats_max(&trace->owner_surface_max_targets, targets);
 }
 
 static int kls_row_first_pipeline_worker_scalar_batch_candidate(
@@ -94961,6 +95139,12 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_group_merge_targets=%" PRIu64
           " compact_window_group_merge_cols=%" PRIu64
           " compact_window_group_merge_values=%" PRIu64
+          " owner_surface_probes=%" PRIu64
+          " owner_surface_probe_u_entries=%" PRIu64
+          " owner_surface_scanned_rows=%" PRIu64
+          " owner_surface_targets=%" PRIu64
+          " owner_surface_target_u_entries=%" PRIu64
+          " owner_surface_max_targets=%" PRIu64
           " producer_probe_workers=%" PRIu64
           " producer_probe_lookahead=%" PRIu64
           " producer_ready_roots=%" PRIu64
@@ -95030,6 +95214,12 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_group_merge_targets,
           (uint64_t)trace->compact_window_group_merge_cols,
           (uint64_t)trace->compact_window_group_merge_values,
+          (uint64_t)trace->owner_surface_probes,
+          (uint64_t)trace->owner_surface_probe_u_entries,
+          (uint64_t)trace->owner_surface_scanned_rows,
+          (uint64_t)trace->owner_surface_targets,
+          (uint64_t)trace->owner_surface_target_u_entries,
+          (uint64_t)trace->owner_surface_max_targets,
           (uint64_t)trace->producer_probe_workers,
           (uint64_t)trace->producer_probe_lookahead,
           (uint64_t)trace->producer_probe_ready_roots,
@@ -95563,6 +95753,10 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                   row);
               }
               shared->completed_pos = pos + 1u;
+              if (!pivoted && shared->trace_enabled) {
+                kls_row_first_pipeline_trace_owner_surface(
+                  shared, &worker->trace_current, pos, row);
+              }
               if (!pivoted &&
                   shared->supernode_start != NULL &&
                   row < shared->ctx->nk) {
@@ -95661,6 +95855,12 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " compact_window_group_merge_targets=%" PRIu64
                         " compact_window_group_merge_cols=%" PRIu64
                         " compact_window_group_merge_values=%" PRIu64
+                        " owner_surface_probes=%" PRIu64
+                        " owner_surface_probe_u_entries=%" PRIu64
+                        " owner_surface_scanned_rows=%" PRIu64
+                        " owner_surface_targets=%" PRIu64
+                        " owner_surface_target_u_entries=%" PRIu64
+                        " owner_surface_max_targets=%" PRIu64
                         " producer_probe_workers=%" PRIu64
                         " producer_probe_lookahead=%" PRIu64
                         " producer_ready_roots=%" PRIu64
@@ -95728,6 +95928,12 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.compact_window_group_merge_targets,
                         (uint64_t)worker->trace_current.compact_window_group_merge_cols,
                         (uint64_t)worker->trace_current.compact_window_group_merge_values,
+                        (uint64_t)worker->trace_current.owner_surface_probes,
+                        (uint64_t)worker->trace_current.owner_surface_probe_u_entries,
+                        (uint64_t)worker->trace_current.owner_surface_scanned_rows,
+                        (uint64_t)worker->trace_current.owner_surface_targets,
+                        (uint64_t)worker->trace_current.owner_surface_target_u_entries,
+                        (uint64_t)worker->trace_current.owner_surface_max_targets,
                         (uint64_t)worker->trace_current.producer_probe_workers,
                         (uint64_t)worker->trace_current.producer_probe_lookahead,
                         (uint64_t)worker->trace_current.producer_probe_ready_roots,
@@ -96050,7 +96256,11 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.completed_pos = begin;
   shared.lookahead_next_pos = begin;
   shared.order_epoch = 0;
-  shared.trace_enabled = kls_row_pipeline_trace_env_enabled();
+  shared.owner_surface_trace_enabled =
+    kls_row_pipeline_owner_surface_trace_env_enabled();
+  shared.trace_enabled =
+    kls_row_pipeline_trace_env_enabled() ||
+    shared.owner_surface_trace_enabled;
   if (shared.trace_enabled &&
       ctx->nk <=
         (UF_long)(SIZE_MAX / sizeof(*shared.trace_state_union_mark))) {
@@ -96097,6 +96307,12 @@ static int kls_row_first_run_parallel_pipeline_phase(
     shared.compact_window_execute_enabled;
   shared.compact_window_max_entries =
     kls_row_pipeline_compact_window_max_entries_env();
+  shared.owner_surface_window =
+    shared.owner_surface_trace_enabled
+      ? kls_row_pipeline_owner_surface_window_env() : 0u;
+  shared.owner_surface_interval =
+    shared.owner_surface_trace_enabled
+      ? kls_row_pipeline_owner_surface_interval_env() : 0u;
   shared.compact_window_next_pos = begin;
   shared.compact_window_evict_pos = begin;
   shared.compact_window_scan_slot = 0;

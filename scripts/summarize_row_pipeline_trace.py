@@ -44,6 +44,12 @@ PRODUCER_COUNTERS = [
     "compact_window_group_merge_targets",
     "compact_window_group_merge_cols",
     "compact_window_group_merge_values",
+    "owner_surface_probes",
+    "owner_surface_probe_u_entries",
+    "owner_surface_scanned_rows",
+    "owner_surface_targets",
+    "owner_surface_target_u_entries",
+    "owner_surface_max_targets",
     "producer_probe_workers",
     "producer_probe_lookahead",
     "producer_ready_roots",
@@ -124,6 +130,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_compact_group_merge_targets = 0
     long_compact_group_merge_cols = 0
     long_compact_group_merge_values = 0
+    long_owner_surface_probes = 0
+    long_owner_surface_probe_u = 0
+    long_owner_surface_scanned = 0
+    long_owner_surface_targets = 0
+    long_owner_surface_target_u = 0
+    long_owner_surface_max_targets = 0
     long_panel_rows = 0
     long_panel_entries = 0
     long_pivot_scalar = 0
@@ -232,6 +244,25 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_group_merge_values += parse_int(
                 row.get("compact_window_group_merge_values")
             )
+            long_owner_surface_probes += parse_int(
+                row.get("owner_surface_probes")
+            )
+            long_owner_surface_probe_u += parse_int(
+                row.get("owner_surface_probe_u_entries")
+            )
+            long_owner_surface_scanned += parse_int(
+                row.get("owner_surface_scanned_rows")
+            )
+            long_owner_surface_targets += parse_int(
+                row.get("owner_surface_targets")
+            )
+            long_owner_surface_target_u += parse_int(
+                row.get("owner_surface_target_u_entries")
+            )
+            long_owner_surface_max_targets = max(
+                long_owner_surface_max_targets,
+                parse_int(row.get("owner_surface_max_targets")),
+            )
             long_panel_rows += parse_int(row.get("panel_update_rows"))
             long_panel_entries += parse_int(row.get("panel_update_entries"))
             if pivoted:
@@ -324,6 +355,20 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_group_merge_values = parse_int(
         last_trace.get("compact_window_group_merge_values")
     )
+    owner_surface_probes = parse_int(last_trace.get("owner_surface_probes"))
+    owner_surface_probe_u = parse_int(
+        last_trace.get("owner_surface_probe_u_entries")
+    )
+    owner_surface_scanned = parse_int(
+        last_trace.get("owner_surface_scanned_rows")
+    )
+    owner_surface_targets = parse_int(last_trace.get("owner_surface_targets"))
+    owner_surface_target_u = parse_int(
+        last_trace.get("owner_surface_target_u_entries")
+    )
+    owner_surface_max_targets = parse_int(
+        last_trace.get("owner_surface_max_targets")
+    )
     panel_rows = parse_int(last_trace.get("panel_update_rows"))
     panel_entries = parse_int(last_trace.get("panel_update_entries"))
     summary: dict[str, object] = {
@@ -362,6 +407,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_group_merge_targets": compact_group_merge_targets,
         "compact_window_group_merge_cols": compact_group_merge_cols,
         "compact_window_group_merge_values": compact_group_merge_values,
+        "owner_surface_probes": owner_surface_probes,
+        "owner_surface_probe_u_entries": owner_surface_probe_u,
+        "owner_surface_scanned_rows": owner_surface_scanned,
+        "owner_surface_targets": owner_surface_targets,
+        "owner_surface_target_u_entries": owner_surface_target_u,
+        "owner_surface_max_targets": owner_surface_max_targets,
         "panel_update_rows": panel_rows,
         "panel_update_entries": panel_entries,
         "long_rows": long_rows,
@@ -403,6 +454,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_compact_window_group_merge_cols": long_compact_group_merge_cols,
         "long_compact_window_group_merge_values":
             long_compact_group_merge_values,
+        "long_owner_surface_probes": long_owner_surface_probes,
+        "long_owner_surface_probe_u_entries": long_owner_surface_probe_u,
+        "long_owner_surface_scanned_rows": long_owner_surface_scanned,
+        "long_owner_surface_targets": long_owner_surface_targets,
+        "long_owner_surface_target_u_entries": long_owner_surface_target_u,
+        "long_owner_surface_max_targets": long_owner_surface_max_targets,
         "long_panel_update_rows": long_panel_rows,
         "long_panel_update_entries": long_panel_entries,
         "long_pivot_scalar_u_entries": long_pivot_scalar,
@@ -455,6 +512,15 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_group_merge_values_per_col": ratio(
             compact_group_merge_values, compact_group_merge_cols
         ),
+        "owner_surface_targets_per_probe": ratio(
+            owner_surface_targets, owner_surface_probes
+        ),
+        "owner_surface_targets_per_scanned_row": ratio(
+            owner_surface_targets, owner_surface_scanned
+        ),
+        "owner_surface_target_u_per_probe_u": ratio(
+            owner_surface_target_u, owner_surface_probe_u
+        ),
         "panel_update_entries_per_scalar_u": ratio(panel_entries, scalar),
         "scalar_u_output_per_panel_update_entries": ratio(output, panel_entries),
         "scalar_u_output_per_producer_target_u": ratio(
@@ -498,6 +564,15 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         ),
         "long_compact_window_group_merge_values_per_col": ratio(
             long_compact_group_merge_values, long_compact_group_merge_cols
+        ),
+        "long_owner_surface_targets_per_probe": ratio(
+            long_owner_surface_targets, long_owner_surface_probes
+        ),
+        "long_owner_surface_targets_per_scanned_row": ratio(
+            long_owner_surface_targets, long_owner_surface_scanned
+        ),
+        "long_owner_surface_target_u_per_probe_u": ratio(
+            long_owner_surface_target_u, long_owner_surface_probe_u
         ),
         "long_scalar_u_output_per_producer_target_u": ratio(
             long_output, long_producer_target_u
@@ -581,6 +656,15 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_group_merge_values",
         "compact_window_group_merge_targets_per_merge",
         "compact_window_group_merge_values_per_col",
+        "owner_surface_probes",
+        "owner_surface_probe_u_entries",
+        "owner_surface_scanned_rows",
+        "owner_surface_targets",
+        "owner_surface_target_u_entries",
+        "owner_surface_targets_per_probe",
+        "owner_surface_targets_per_scanned_row",
+        "owner_surface_target_u_per_probe_u",
+        "owner_surface_max_targets",
         "producer_underfilled",
         "producer_low_saved_stream",
         "producer_reject_bad_state",
@@ -636,6 +720,15 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_compact_window_group_merge_values",
         "long_compact_window_group_merge_targets_per_merge",
         "long_compact_window_group_merge_values_per_col",
+        "long_owner_surface_probes",
+        "long_owner_surface_probe_u_entries",
+        "long_owner_surface_scanned_rows",
+        "long_owner_surface_targets",
+        "long_owner_surface_target_u_entries",
+        "long_owner_surface_targets_per_probe",
+        "long_owner_surface_targets_per_scanned_row",
+        "long_owner_surface_target_u_per_probe_u",
+        "long_owner_surface_max_targets",
         "long_panel_update_rows",
         "long_panel_update_entries",
         "long_panel_update_entries_per_scalar_u",

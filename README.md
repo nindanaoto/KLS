@@ -2277,8 +2277,17 @@ compact group is active, later compact rows whose next root matches that group
 can be merged into it instead of scattering immediately back to independent
 sparse states; row-pipeline traces report
 `compact_window_group_merge_{targets,cols,values}` for that surface. This remains
-off by default; use it only for focused paper-gap probes. Same-session `pre2`
-probes show
+off by default; use it only for focused paper-gap probes. The opt-in compact
+window cap is now 2048 states so wide live-state owner sizing can be run without
+changing default behavior. `KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE=1` adds a
+cheaper sampled lower-bound probe for a possible persistent main-row owner. It
+scans a future row-order horizon every
+`KLS_ROW_PIPELINE_OWNER_SURFACE_INTERVAL` producer rows (default 512), using
+`KLS_ROW_PIPELINE_OWNER_SURFACE_WINDOW` future rows (default 4096), and reports
+`owner_surface_{probes,probe_u_entries,scanned_rows,targets,target_u_entries,max_targets}`.
+This is deliberately not a numeric path: it only asks whether the just-published
+producer is the first still-unready original input dependency in the sampled
+future rows. Same-session `pre2` probes show
 the default AMD run enters the 629,628-row dominant BTF block with no separator
 coverage, while forced METIS enters the same block with separator coverage but
 still exceeds the 120s cap. The matching local CKTSO run finishes analysis,
@@ -2845,6 +2854,29 @@ the same cap. The guarded default rerun,
 scalar U output. This rejects both under-mutex and detached eager
 supernode producer replay as the CKTSO-scale missing mechanism and keeps the
 next target on a persistent main row/panel owner.
+
+The sampled owner-surface probe rejects a still simpler main-owner shortcut. A
+45s forced-METIS `pre2` trace,
+`build/kls_pre2_owner_surface_trace45.stderr`, reached the same
+`589824/629628` checkpoint and sampled `1110` producer rows across `4546560`
+future row positions. The first-unready-input-root surface found only `2286`
+targets and `71221` target U entries (`2.06` targets/probe, max `18`), while
+the ordinary producer candidate surface remained `25772923` target U entries
+and scalar U output was `430384038`. A true paper-aligned owner therefore has
+to carry updated live row state/fill; bucketing rows by their original input
+root is not enough.
+
+The widened exact compact-owner probe also rejects "just make the compact
+window bigger" as the next default path. With
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1` and
+`KLS_ROW_PIPELINE_COMPACT_WINDOW=512`,
+`build/kls_pre2_compact_exec_w512_trace45.stderr` reached only
+`393216/629628` rows in the same cap. It streamed `10638367` compact producer
+U entries across `231858129` compact target U entries, but scalar U output was
+still `388360106` and the grouped compact owner itself dominated progress.
+This keeps the required implementation focused on a production row/panel
+live-workspace owner, not independent sparse compact states with a larger
+window.
 
 ## License
 
