@@ -42,17 +42,17 @@ supernode prefix ready, KLS can advance active target rows waiting on the
 supernode root as one producer batch instead of rejecting them from the scalar
 producer path. The batch avoids the cached-panel shortcut because producer-time
 target states may only expose the root dependency; it uses the discovery-safe
-compact/scalar supernode update. This is off by default. The enabled forced
-METIS/KLS-first `pre2` trace
-`build/kls_pre2_supernode_producer_safe_trace45.stderr` accepted `660`
-producer batches and `1868` targets, but reached only `52672/629628` rows in
-the 45s cap. The guarded default trace
-`build/kls_pre2_supernode_producer_guard_default_trace45.stderr` returned to
-`589824/629628` rows with `506311553` scalar U entries and `430534487` scalar
-U output. This rejects eager under-mutex supernode producer batching as the
-CKTSO-sized gap closer; the remaining paper-level gap is still a persistent
-main row/panel grouped owner that does not replay large ready prefixes inside
-the commit critical section.
+compact/scalar supernode update. It now claims those active target states and
+runs the heavy update outside the pipeline mutex while owner threads wait on a
+short gate. This is off by default. The enabled forced METIS/KLS-first `pre2`
+trace `build/kls_pre2_detached_supernode_producer_trace45.stderr` accepted
+`1118` producer batches and `3204` targets, but reached only `68357/629628`
+rows in the 45s cap. The guarded default trace
+`build/kls_pre2_detached_gate_default_trace45.stderr` returned to
+`589824/629628` rows with `507390832` scalar U entries and `431089935` scalar
+U output. This rejects both under-mutex and detached eager supernode producer
+replay as the CKTSO-sized gap closer; the remaining paper-level gap is still a
+persistent main row/panel grouped owner.
 
 The first-factor separator-private pivot path is now closer to SubtreeLU's
 private-mode rule: private pivot search is restricted to columns owned by the

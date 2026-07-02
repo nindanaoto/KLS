@@ -2833,16 +2833,18 @@ on the supernode's first row are advanced together instead of being rejected by
 the scalar producer-batch path. The implementation deliberately uses the
 discovery-safe compact/scalar supernode update, not the cached-panel shortcut,
 because target rows may only have the supernode root visible when the producer
-fires. The experiment is off by default. A focused forced-METIS `pre2` trace
-with the flag enabled,
-`build/kls_pre2_supernode_producer_safe_trace45.stderr`, accepted `660`
-producer batches and `1868` targets, but reached only `52672/629628` rows in
+fires. It now claims those active target states and runs the heavy supernode
+update outside the pipeline mutex while owner threads wait on a short gate. The
+experiment remains off by default. A focused forced-METIS `pre2` trace with the
+detached gate,
+`build/kls_pre2_detached_supernode_producer_trace45.stderr`, accepted `1118`
+producer batches and `3204` targets, but reached only `68357/629628` rows in
 the same cap. The guarded default rerun,
-`build/kls_pre2_supernode_producer_guard_default_trace45.stderr`, returned to
-the expected `589824/629628` checkpoint with `506311553` scalar U entries and
-`430534487` scalar U output. This rejects under-mutex supernode producer
-batching as the CKTSO-scale missing mechanism and keeps the next target on a
-persistent main row/panel owner rather than eager producer-side replay.
+`build/kls_pre2_detached_gate_default_trace45.stderr`, returned to the expected
+`589824/629628` checkpoint with `507390832` scalar U entries and `431089935`
+scalar U output. This rejects both under-mutex and detached eager
+supernode producer replay as the CKTSO-scale missing mechanism and keeps the
+next target on a persistent main row/panel owner.
 
 ## License
 

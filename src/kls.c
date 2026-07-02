@@ -91435,6 +91435,7 @@ typedef struct kls_row_first_pipeline_shared {
   int pivot_lookahead_enabled;
   int pivot_supernode_rebase_enabled;
   int supernode_producer_batch_enabled;
+  int supernode_producer_batch_active;
   int failed;
   kls_row_first_pipeline_failure failure_reason;
 } kls_row_first_pipeline_shared;
@@ -91454,6 +91455,7 @@ struct kls_row_first_pipeline_worker {
   UF_long lookahead_row;
   int lookahead_active;
   int lookahead_claimed;
+  int external_update_active;
   UF_long rows;
   UF_long partial_rows;
   UF_long pipeline_wait_partial_rows;
@@ -91892,20 +91894,29 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
     return 1;
   }
 
+  /*
+   * The opt-in supernode producer can be expensive; claim target states and
+   * run it outside the pipeline mutex while owner threads wait on the gate.
+   */
+  shared->supernode_producer_batch_active = 1;
   for (UF_long t = 0; t < target_count; ++t) {
     kls_row_first_pipeline_worker *worker =
       shared->batch_targets[t].worker;
-    if (!kls_row_first_entries_reserve_append(&worker->l_entries,
-                                              run_rows)) {
-      return 0;
-    }
+    worker->external_update_active = 1;
   }
 
+  pthread_mutex_unlock(&shared->lock);
+  int ok = 1;
   for (UF_long t = 0; t < target_count; ++t) {
     kls_row_first_pipeline_worker *worker =
       shared->batch_targets[t].worker;
     kls_row_first_partial_row *state = shared->batch_targets[t].state;
     UF_long applied_rows = 0u;
+    if (!kls_row_first_entries_reserve_append(&worker->l_entries,
+                                              run_rows)) {
+      ok = 0;
+      break;
+    }
     const int compact_status =
       kls_row_first_partial_apply_supernode_run_compact(
         shared->ctx, &worker->workspace, &worker->l_entries,
@@ -91914,7 +91925,8 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
         state, dep_begin, dep_end, &applied_rows, 1, 0,
         shared->stats);
     if (compact_status < 0) {
-      return 0;
+      ok = 0;
+      break;
     }
     if (compact_status == 0 &&
         !kls_row_first_partial_apply_supernode_run_scalar(
@@ -91922,13 +91934,26 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
           shared->u_entries, shared->udiag_values,
           shared->workspace->u_row_ptr, shared->workspace->u_row_end,
           state, dep_begin, dep_end, NULL, &applied_rows)) {
-      return 0;
+      ok = 0;
+      break;
     }
     if (applied_rows != run_rows) {
-      return 0;
+      ok = 0;
+      break;
     }
     worker->pipeline_supernode_update_groups++;
     worker->pipeline_supernode_update_rows += run_rows;
+  }
+  pthread_mutex_lock(&shared->lock);
+  for (UF_long t = 0; t < target_count; ++t) {
+    kls_row_first_pipeline_worker *worker =
+      shared->batch_targets[t].worker;
+    worker->external_update_active = 0;
+  }
+  shared->supernode_producer_batch_active = 0;
+  pthread_cond_broadcast(&shared->cond);
+  if (!ok) {
+    return 0;
   }
 
   if (producer_trace != NULL) {
@@ -95197,6 +95222,15 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
     }
 
     pthread_mutex_lock(&shared->lock);
+    while (!shared->failed &&
+           shared->supernode_producer_batch_active) {
+      if (pthread_cond_wait(&shared->cond, &shared->lock) != 0) {
+        kls_row_first_pipeline_mark_failed(
+          shared, KLS_ROW_FIRST_PIPELINE_FAIL_THREAD);
+        pthread_cond_broadcast(&shared->cond);
+        break;
+      }
+    }
     if (!shared->failed) {
       adopted_lookahead =
         kls_row_first_pipeline_try_claim_lookahead(
@@ -95295,6 +95329,16 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
       pthread_mutex_lock(&shared->lock);
       int wait_partial = 0;
       while (!shared->failed && shared->completed_pos != pos) {
+        if (shared->supernode_producer_batch_active ||
+            worker->external_update_active) {
+          if (pthread_cond_wait(&shared->cond, &shared->lock) != 0) {
+            kls_row_first_pipeline_mark_failed(
+              shared, KLS_ROW_FIRST_PIPELINE_FAIL_THREAD);
+            pthread_cond_broadcast(&shared->cond);
+            break;
+          }
+          continue;
+        }
         if (order_epoch != shared->order_epoch) {
           retry_row = 1;
           break;
@@ -95337,6 +95381,16 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
       if (!retry_row && !shared->failed &&
           order_epoch != shared->order_epoch) {
         retry_row = 1;
+      }
+      while (!retry_row && !shared->failed &&
+             (shared->supernode_producer_batch_active ||
+              worker->external_update_active)) {
+        if (pthread_cond_wait(&shared->cond, &shared->lock) != 0) {
+          kls_row_first_pipeline_mark_failed(
+            shared, KLS_ROW_FIRST_PIPELINE_FAIL_THREAD);
+          pthread_cond_broadcast(&shared->cond);
+          break;
+        }
       }
       if (wait_partial) {
         worker->pipeline_wait_partial_rows++;
