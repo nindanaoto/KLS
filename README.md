@@ -2394,6 +2394,16 @@ recorded `15,974,574` delayed-output additions, `1,393,652` distinct
 state/column cells, `1,839,073` triangular panel slots, and `2,183,001`
 rectangular dense slots. That makes the next direct prototype a sparse or
 masked local span/panel workspace, not just a scheduler reservation.
+A 45s `pre2` shape trace with a 256-row span,
+`build/kls_pre2_claim_span256_shape_trace45.stderr`, timed out earlier
+(`262144/629628`) because the diagnostic is intentionally heavy, but its
+workspace ratios are the key result: `8,251,520,214` delayed-output additions
+collapsed to `119,231,230` distinct state/column cells, `137,503,076`
+triangular panel slots, and `150,801,490` full dense slots. That is `69.2`
+additions per touched cell and only `1.26x` dense slots per touched cell, so
+the paper-aligned next step is a worker-owned masked/dense span workspace that
+streams grouped delayed output into the local panel rather than materializing
+it into each future compact state.
 `build/kls_pre2_claim_span64_output_surface_w512_trace45.stderr` again reached
 `589824/629628`, but the span surface covered `318,807` states (`9.78` per
 surface) and cut scan volume to `168,701,660` grouped entries from

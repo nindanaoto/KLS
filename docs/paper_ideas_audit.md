@@ -99,6 +99,17 @@ triangular row/panel cells, and full rectangular dense storage. On the focused
 `1839073` triangular panel slots, and `2183001` full dense slots. That supports
 a sparse or masked local span/panel workspace as the next paper-aligned
 implementation target; it does not support another scheduler-only reservation.
+The same diagnostic on the slow `pre2` case,
+`build/kls_pre2_claim_span256_shape_trace45.stderr`, timed out at
+`262144/629628` rows because the diagnostic itself is heavy, but the structural
+ratios are stronger than on `bcircuit`: a 256-row span saw `8251520214`
+delayed-output additions collapse to `119231230` distinct state/column cells,
+with only `137503076` triangular panel slots and `150801490` full dense slots.
+That is `69.2` additions per touched cell and just `1.26x` full-dense slots per
+touched cell. The next implementation should therefore own a local masked or
+dense span workspace and apply grouped delayed-output scans into that worker
+workspace, while avoiding the already-rejected variants that write all output
+back into future compact states or merely reserve scheduler positions.
 
 A same-options span-width recheck after making the span surface runtime
 configurable confirms that the useful paper-shaped owner is wider than the
