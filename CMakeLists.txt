@@ -316,6 +316,7 @@ set(KLS_KLU_LONG_SOURCES
 set(KLS_KLU_DLONG_SOURCES
   "${KLS_SUITESPARSE_ROOT}/KLU/Source/trilinos_klu_diagnostics.c"
   "${KLS_SUITESPARSE_ROOT}/KLU/Source/trilinos_klu_refactor.c"
+  "${KLS_SUITESPARSE_ROOT}/KLU/Source/trilinos_klu_sort.c"
   "${KLS_SUITESPARSE_ROOT}/KLU/Source/trilinos_klu_tsolve.c")
 set_source_files_properties(${KLS_KLU_DLONG_SOURCES}
   PROPERTIES COMPILE_DEFINITIONS DLONG)

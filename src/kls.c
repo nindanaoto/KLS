@@ -157,6 +157,9 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_NICSLU_PARALLEL_R2_THRESHOLD 50.0
 #define KLS_NICSLU_TASK_FLOW_SYNC_COST 1.0
 #define KLS_METIS_NDP_MIN_ROWS 30000u
+#define KLS_SNODE_MIN_BATCH 3
+#define KLS_SNODE_MAX_BATCH 24
+#define KLS_SNODE_TAIL_CHUNK 32
 #define KLS_METIS_NDP_MIN_LEAF_ROWS 200u
 #define KLS_METIS_NDP_TARGET_DIVISOR 1000u
 #define KLS_METIS_NDP_SUBTREE_THRESHOLD_MIN_ROWS 200000u
@@ -298,6 +301,8 @@ struct kls_solver {
   int32_t *refactor_input_pos32;
   UF_long *refactor_block_start;
   UF_long *refactor_col_block;
+  UF_long *snode_run_end;
+  int snode_prepared;
   UF_long **refactor_l_indices;
   int32_t **refactor_l_indices32;
   int32_t *refactor_l_indices32_storage;
@@ -1798,6 +1803,7 @@ typedef struct kls_parallel_refactor_shared {
   const UF_long *map_row_idx;
   const UF_long *map_input_pos;
   const UF_long *map_block_start;
+  const UF_long *snode_run_end;
   const double *values;
   const trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_numeric *numeric;
@@ -19892,6 +19898,113 @@ static int kls_checked_refactor_best_reject_candidate(
   return 1;
 }
 
+static UF_long kls_snode_trace_batched_producers = 0;
+static UF_long kls_snode_trace_batched_tail_entries = 0;
+
+__attribute__((destructor)) static void kls_snode_trace_report(void) {
+  if (getenv("KLS_TRACE_SNODE") != NULL &&
+      kls_snode_trace_batched_producers != 0u) {
+    fprintf(stderr, "KLS snode: batched_producers=%ld tail_entries=%ld\n",
+            (long)kls_snode_trace_batched_producers,
+            (long)kls_snode_trace_batched_tail_entries);
+  }
+}
+
+/* Consume a batch of consecutive sorted-supernode producer columns from a
+ * U column during a left-looking refactor.  Returns the number of producers
+ * consumed (0 when no batch applies at position up).  Storage must be the
+ * ascending-sorted KLU numeric prepared by kls_maybe_prepare_snode_panels:
+ * each run column is then [in-batch prefix rows][shared extended tail], so
+ * the batch is a dense in-panel unit-lower solve plus one shared-tail panel
+ * update with a single index stream.  The chunked tail update only pays for
+ * itself when it vectorizes, so the function is multi-versioned and the
+ * AVX2/FMA clone is selected at load time on capable hosts. */
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+__attribute__((target_clones("default", "arch=x86-64-v3")))
+#endif
+static UF_long kls_snode_batch_consume(
+  double *lu,
+  const UF_long *lip,
+  const UF_long *llen,
+  const UF_long *ui,
+  double *ux,
+  UF_long ucol_len,
+  UF_long up,
+  double *restrict x,
+  UF_long k1,
+  const UF_long *snode_run_end) {
+  const UF_long j = ui[up];
+  const UF_long run_end = snode_run_end[k1 + j];
+  if (run_end <= k1 + j + 1u) {
+    return 0;
+  }
+  UF_long tmax = run_end - (k1 + j);
+  if (tmax > KLS_SNODE_MAX_BATCH) {
+    tmax = KLS_SNODE_MAX_BATCH;
+  }
+  if (tmax > ucol_len - up) {
+    tmax = ucol_len - up;
+  }
+  UF_long t = 1;
+  while (t < tmax && ui[up + t] == j + t) {
+    t++;
+  }
+  if (t < KLS_SNODE_MIN_BATCH) {
+    return 0;
+  }
+  double xs[KLS_SNODE_MAX_BATCH];
+  const double *lx_arr[KLS_SNODE_MAX_BATCH];
+  for (UF_long i = 0; i < t; ++i) {
+    UF_long *bli = NULL;
+    double *blx = NULL;
+    UF_long blen = 0;
+    kls_klu_get_pointer(lu, (UF_long *)lip, (UF_long *)llen, j + i, &bli,
+                        &blx, &blen);
+    lx_arr[i] = blx;
+    xs[i] = x[j + i];
+    x[j + i] = 0.0;
+  }
+  for (UF_long i = 0; i < t; ++i) {
+    const double u = xs[i];
+    ux[up + i] = u;
+    const double *lxi = lx_arr[i];
+    for (UF_long r0 = 0; r0 + i + 1u < t; ++r0) {
+      xs[i + 1u + r0] -= lxi[r0] * u;
+    }
+  }
+  UF_long *tli = NULL;
+  double *tlx = NULL;
+  UF_long tlen = 0;
+  kls_klu_get_pointer(lu, (UF_long *)lip, (UF_long *)llen, j + t - 1u, &tli,
+                      &tlx, &tlen);
+  for (UF_long p0 = 0; p0 < tlen; p0 += KLS_SNODE_TAIL_CHUNK) {
+    const UF_long pc = tlen - p0 < KLS_SNODE_TAIL_CHUNK
+                         ? tlen - p0
+                         : KLS_SNODE_TAIL_CHUNK;
+    double acc[KLS_SNODE_TAIL_CHUNK];
+    {
+      const double *src = tlx + p0;
+      const double u = xs[t - 1u];
+      for (UF_long p = 0; p < pc; ++p) {
+        acc[p] = src[p] * u;
+      }
+    }
+    for (UF_long i = 0; i + 1u < t; ++i) {
+      const double *src = lx_arr[i] + (t - 1u - i) + p0;
+      const double u = xs[i];
+      for (UF_long p = 0; p < pc; ++p) {
+        acc[p] += src[p] * u;
+      }
+    }
+    for (UF_long p = 0; p < pc; ++p) {
+      x[tli[p0 + p]] -= acc[p];
+    }
+  }
+  kls_snode_trace_batched_producers += t;
+  kls_snode_trace_batched_tail_entries += t * tlen;
+  return t;
+}
+
 static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
                                         UF_long block) {
   kls_parallel_refactor_shared *shared = worker->shared;
@@ -20052,8 +20165,18 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
     double *ux = NULL;
     UF_long ucol_len = 0;
     kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
-    for (UF_long up = 0; up < ucol_len; ++up) {
+    const UF_long *snode_run_end = shared->snode_run_end;
+    UF_long up = 0;
+    while (up < ucol_len) {
       const UF_long j = ui[up];
+      if (snode_run_end != NULL) {
+        const UF_long consumed = kls_snode_batch_consume(
+          lu, lip, llen, ui, ux, ucol_len, up, x, k1, snode_run_end);
+        if (consumed != 0u) {
+          up += consumed;
+          continue;
+        }
+      }
       const double ujk = x[j];
       x[j] = 0.0;
       ux[up] = ujk;
@@ -20066,6 +20189,7 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
         kls_scatter_subtract_refactor_l(shared->solver, x, k1 + j, li, lx,
                                         lcol_len, ujk);
       }
+      up++;
     }
 
     const double ukk = x[k];
@@ -20385,6 +20509,7 @@ static int run_refactor_pool(kls_solver *solver,
   shared->map_row_idx = solver->refactor_row_idx;
   shared->map_input_pos = solver->refactor_input_pos;
   shared->map_block_start = solver->refactor_block_start;
+  shared->snode_run_end = solver->snode_run_end;
   shared->values = numeric_values;
   shared->symbolic = solver->symbolic;
   shared->numeric = solver->numeric;
@@ -20514,7 +20639,17 @@ static void free_symbolic(kls_solver *solver) {
   kls_invalidate_factor_etree_stats(solver);
 }
 
+static void free_snode_panels(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->snode_run_end);
+  solver->snode_run_end = NULL;
+  solver->snode_prepared = 0;
+}
+
 static void free_numeric(kls_solver *solver) {
+  free_snode_panels(solver);
   destroy_egraph_refactor_pool(solver);
   free_egraph_worker_scratch(solver);
   free_egraph_pipeline_done(solver);
@@ -84031,6 +84166,7 @@ static int kls_mapped_refactor(kls_solver *solver,
   shared.map_row_idx = solver->refactor_row_idx;
   shared.map_input_pos = solver->refactor_input_pos;
   shared.map_block_start = solver->refactor_block_start;
+  shared.snode_run_end = solver->snode_run_end;
   shared.values = numeric_values;
   shared.symbolic = solver->symbolic;
   shared.numeric = solver->numeric;
@@ -84427,6 +84563,101 @@ static int kls_serial_checked_scaled_refactor(kls_solver *solver,
                                               double *numeric_values) {
   return kls_serial_checked_scaled_refactor_from_block(solver, numeric_values,
                                                        0u);
+}
+
+static int kls_snode_panel_env_disabled(void) {
+  const char *value = getenv("KLS_DISABLE_SNODE_PANEL_REFACTOR");
+  return value != NULL && value[0] == '1';
+}
+
+static void kls_maybe_prepare_snode_panels(kls_solver *solver,
+                                           double *elapsed) {
+  if (solver == NULL || elapsed == NULL || solver->snode_prepared ||
+      solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->numeric->LUbx == NULL || solver->symbolic->R == NULL ||
+      solver->n < 4000u || solver->common.flops < 5.0e6 ||
+      kls_snode_panel_env_disabled()) {
+    return;
+  }
+  /* Sorting reorders every L/U column's packed storage, so no
+     position-based retained structure may exist yet.  KLS-first assembled
+     numerics keep their own seeded row metadata, so leave them unsorted. */
+  if (solver->refactor_col_ptr != NULL ||
+      solver->refactor_level_ptr != NULL ||
+      solver->refactor_l_indices32 != NULL ||
+      solver->row_refactor_group_count != 0u ||
+      solver->row_refactor_values_ready ||
+      solver->stats.last_factor_path == KLS_FACTOR_PATH_KLS_FIRST) {
+    return;
+  }
+  const double start = kls_now_seconds();
+  solver->snode_prepared = 1;
+  if (!trilinos_klu_l_sort(solver->symbolic, solver->numeric,
+                           &solver->common)) {
+    *elapsed += kls_now_seconds() - start;
+    return;
+  }
+  UF_long *run_end = (UF_long *)calloc((size_t)solver->n, sizeof(*run_end));
+  if (run_end == NULL) {
+    *elapsed += kls_now_seconds() - start;
+    return;
+  }
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  UF_long covered = 0;
+  for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+    const UF_long k1 = symbolic->R[block];
+    const UF_long k2 = symbolic->R[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (nk < 2u) {
+      continue;
+    }
+    UF_long *lip = numeric->Lip + k1;
+    UF_long *llen = numeric->Llen + k1;
+    double *lu = (double *)numeric->LUbx[block];
+    if (lu == NULL) {
+      continue;
+    }
+    UF_long start_col = 0;
+    for (UF_long k = 0; k < nk; ++k) {
+      int extends = 0;
+      if (k + 1u < nk && llen[k] >= 1 && llen[k + 1u] == llen[k] - 1) {
+        UF_long *li = NULL;
+        UF_long *li2 = NULL;
+        double *lx = NULL;
+        double *lx2 = NULL;
+        UF_long l1 = 0;
+        UF_long l2 = 0;
+        kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &l1);
+        kls_klu_get_pointer(lu, lip, llen, k + 1u, &li2, &lx2, &l2);
+        /* Sorted columns make strict supernode nesting a prefix test: the
+           next column's whole pattern must be this column's tail. */
+        if (li[0] == k + 1u &&
+            memcmp(li + 1, li2, (size_t)l2 * sizeof(*li)) == 0) {
+          extends = 1;
+        }
+      }
+      if (!extends) {
+        if (k > start_col) {
+          for (UF_long c = start_col; c <= k; ++c) {
+            run_end[k1 + c] = k1 + k + 1u;
+          }
+          covered += k - start_col + 1u;
+        }
+        start_col = k + 1u;
+      }
+    }
+  }
+  if (covered < 64u) {
+    free(run_end);
+  } else {
+    solver->snode_run_end = run_end;
+  }
+  if (getenv("KLS_TRACE_SNODE") != NULL) {
+    fprintf(stderr, "KLS snode: sorted=1 covered_cols=%ld accepted=%d\n",
+            (long)covered, solver->snode_run_end != NULL);
+  }
+  *elapsed += kls_now_seconds() - start;
 }
 
 static void maybe_prepare_refactor_map(kls_solver *solver,
@@ -110247,6 +110478,7 @@ int kls_factor(kls_solver *solver, const double *values) {
           elapsed += kls_now_seconds() - row_start;
         }
       }
+      kls_maybe_prepare_snode_panels(solver, &elapsed);
       kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
       maybe_prepare_refactor_map(solver, &elapsed);
       maybe_prepare_refactor_schedule(solver, &elapsed);
@@ -110387,6 +110619,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     (void)kls_prepare_auto_row_refactor_from_numeric(solver);
     elapsed += kls_now_seconds() - start;
   }
+  kls_maybe_prepare_snode_panels(solver, &elapsed);
   kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
   maybe_prepare_refactor_map(solver, &elapsed);
   maybe_prepare_refactor_schedule(solver, &elapsed);
