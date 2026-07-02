@@ -30,6 +30,11 @@ PRODUCER_COUNTERS = [
     "compact_window_fills",
     "compact_window_evictions",
     "compact_window_overflows",
+    "compact_window_claim_attempts",
+    "compact_window_claims",
+    "compact_window_claim_misses",
+    "compact_window_claim_stale_clears",
+    "compact_window_claim_group_scatters",
     "compact_window_probes",
     "compact_window_batches",
     "compact_window_stream_u_entries",
@@ -112,6 +117,11 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_active_catchup_attempts = 0
     long_active_catchup_deps = 0
     long_active_catchup_targets = 0
+    long_compact_window_claim_attempts = 0
+    long_compact_window_claims = 0
+    long_compact_window_claim_misses = 0
+    long_compact_window_claim_stale_clears = 0
+    long_compact_window_claim_group_scatters = 0
     long_compact_window_targets = 0
     long_compact_window_target_u = 0
     long_compact_window_batches = 0
@@ -122,6 +132,11 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_compact_union_targets = 0
     long_compact_union_cols = 0
     long_compact_union_values = 0
+    long_compact_union_skips = 0
+    long_compact_union_skip_targets = 0
+    long_compact_union_skip_cols = 0
+    long_compact_union_skip_values = 0
+    long_compact_union_skip_sparse_values = 0
     long_compact_group_steps = 0
     long_compact_group_targets = 0
     long_compact_group_cols = 0
@@ -190,6 +205,21 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_active_catchup_targets += parse_int(
                 row.get("producer_active_catchup_targets")
             )
+            long_compact_window_claim_attempts += parse_int(
+                row.get("compact_window_claim_attempts")
+            )
+            long_compact_window_claims += parse_int(
+                row.get("compact_window_claims")
+            )
+            long_compact_window_claim_misses += parse_int(
+                row.get("compact_window_claim_misses")
+            )
+            long_compact_window_claim_stale_clears += parse_int(
+                row.get("compact_window_claim_stale_clears")
+            )
+            long_compact_window_claim_group_scatters += parse_int(
+                row.get("compact_window_claim_group_scatters")
+            )
             long_compact_window_targets += parse_int(
                 row.get("compact_window_targets")
             )
@@ -219,6 +249,21 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             )
             long_compact_union_values += parse_int(
                 row.get("compact_window_union_values")
+            )
+            long_compact_union_skips += parse_int(
+                row.get("compact_window_union_skips")
+            )
+            long_compact_union_skip_targets += parse_int(
+                row.get("compact_window_union_skip_targets")
+            )
+            long_compact_union_skip_cols += parse_int(
+                row.get("compact_window_union_skip_cols")
+            )
+            long_compact_union_skip_values += parse_int(
+                row.get("compact_window_union_skip_values")
+            )
+            long_compact_union_skip_sparse_values += parse_int(
+                row.get("compact_window_union_skip_sparse_values")
             )
             long_compact_group_steps += parse_int(
                 row.get("compact_window_group_steps")
@@ -315,6 +360,19 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_target_u = parse_int(
         last_trace.get("compact_window_target_u_entries")
     )
+    compact_window_claim_attempts = parse_int(
+        last_trace.get("compact_window_claim_attempts")
+    )
+    compact_window_claims = parse_int(last_trace.get("compact_window_claims"))
+    compact_window_claim_misses = parse_int(
+        last_trace.get("compact_window_claim_misses")
+    )
+    compact_window_claim_stale_clears = parse_int(
+        last_trace.get("compact_window_claim_stale_clears")
+    )
+    compact_window_claim_group_scatters = parse_int(
+        last_trace.get("compact_window_claim_group_scatters")
+    )
     compact_window_batches = parse_int(last_trace.get("compact_window_batches"))
     compact_window_stream_u = parse_int(
         last_trace.get("compact_window_stream_u_entries")
@@ -334,6 +392,19 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_union_cols = parse_int(last_trace.get("compact_window_union_cols"))
     compact_union_values = parse_int(
         last_trace.get("compact_window_union_values")
+    )
+    compact_union_skips = parse_int(last_trace.get("compact_window_union_skips"))
+    compact_union_skip_targets = parse_int(
+        last_trace.get("compact_window_union_skip_targets")
+    )
+    compact_union_skip_cols = parse_int(
+        last_trace.get("compact_window_union_skip_cols")
+    )
+    compact_union_skip_values = parse_int(
+        last_trace.get("compact_window_union_skip_values")
+    )
+    compact_union_skip_sparse_values = parse_int(
+        last_trace.get("compact_window_union_skip_sparse_values")
     )
     compact_group_steps = parse_int(last_trace.get("compact_window_group_steps"))
     compact_group_targets = parse_int(
@@ -389,6 +460,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "producer_active_catchup_attempts": active_catchup_attempts,
         "producer_active_catchup_deps": active_catchup_deps,
         "producer_active_catchup_targets": active_catchup_targets,
+        "compact_window_claim_attempts": compact_window_claim_attempts,
+        "compact_window_claims": compact_window_claims,
+        "compact_window_claim_misses": compact_window_claim_misses,
+        "compact_window_claim_stale_clears": compact_window_claim_stale_clears,
+        "compact_window_claim_group_scatters":
+            compact_window_claim_group_scatters,
         "compact_window_targets": compact_window_targets,
         "compact_window_target_u_entries": compact_window_target_u,
         "compact_window_batches": compact_window_batches,
@@ -399,6 +476,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_union_targets": compact_union_targets,
         "compact_window_union_cols": compact_union_cols,
         "compact_window_union_values": compact_union_values,
+        "compact_window_union_skips": compact_union_skips,
+        "compact_window_union_skip_targets": compact_union_skip_targets,
+        "compact_window_union_skip_cols": compact_union_skip_cols,
+        "compact_window_union_skip_values": compact_union_skip_values,
+        "compact_window_union_skip_sparse_values":
+            compact_union_skip_sparse_values,
         "compact_window_group_steps": compact_group_steps,
         "compact_window_group_targets": compact_group_targets,
         "compact_window_group_cols": compact_group_cols,
@@ -433,6 +516,14 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_producer_active_catchup_attempts": long_active_catchup_attempts,
         "long_producer_active_catchup_deps": long_active_catchup_deps,
         "long_producer_active_catchup_targets": long_active_catchup_targets,
+        "long_compact_window_claim_attempts":
+            long_compact_window_claim_attempts,
+        "long_compact_window_claims": long_compact_window_claims,
+        "long_compact_window_claim_misses": long_compact_window_claim_misses,
+        "long_compact_window_claim_stale_clears":
+            long_compact_window_claim_stale_clears,
+        "long_compact_window_claim_group_scatters":
+            long_compact_window_claim_group_scatters,
         "long_compact_window_targets": long_compact_window_targets,
         "long_compact_window_target_u_entries": long_compact_window_target_u,
         "long_compact_window_batches": long_compact_window_batches,
@@ -444,6 +535,13 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_compact_window_union_targets": long_compact_union_targets,
         "long_compact_window_union_cols": long_compact_union_cols,
         "long_compact_window_union_values": long_compact_union_values,
+        "long_compact_window_union_skips": long_compact_union_skips,
+        "long_compact_window_union_skip_targets":
+            long_compact_union_skip_targets,
+        "long_compact_window_union_skip_cols": long_compact_union_skip_cols,
+        "long_compact_window_union_skip_values": long_compact_union_skip_values,
+        "long_compact_window_union_skip_sparse_values":
+            long_compact_union_skip_sparse_values,
         "long_compact_window_group_steps": long_compact_group_steps,
         "long_compact_window_group_targets": long_compact_group_targets,
         "long_compact_window_group_cols": long_compact_group_cols,
@@ -485,6 +583,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_target_u_per_scalar_u": ratio(
             compact_window_target_u, scalar
         ),
+        "compact_window_claim_rate": ratio(
+            compact_window_claims, compact_window_claim_attempts
+        ),
+        "compact_window_claim_miss_rate": ratio(
+            compact_window_claim_misses, compact_window_claim_attempts
+        ),
         "compact_window_target_u_per_stream_u": ratio(
             compact_window_target_u, compact_window_stream_u
         ),
@@ -499,6 +603,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         ),
         "compact_window_union_targets_per_batch": ratio(
             compact_union_targets, compact_union_batches
+        ),
+        "compact_window_union_skip_targets_per_skip": ratio(
+            compact_union_skip_targets, compact_union_skips
+        ),
+        "compact_window_union_skip_values_per_sparse_value": ratio(
+            compact_union_skip_values, compact_union_skip_sparse_values
         ),
         "compact_window_group_values_per_col": ratio(
             compact_group_values, compact_group_cols
@@ -540,6 +650,13 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_compact_window_target_u_per_scalar_u": ratio(
             long_compact_window_target_u, long_scalar
         ),
+        "long_compact_window_claim_rate": ratio(
+            long_compact_window_claims, long_compact_window_claim_attempts
+        ),
+        "long_compact_window_claim_miss_rate": ratio(
+            long_compact_window_claim_misses,
+            long_compact_window_claim_attempts,
+        ),
         "long_compact_window_target_u_per_stream_u": ratio(
             long_compact_window_target_u, long_compact_window_stream_u
         ),
@@ -552,6 +669,13 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         ),
         "long_compact_window_union_targets_per_batch": ratio(
             long_compact_union_targets, long_compact_union_batches
+        ),
+        "long_compact_window_union_skip_targets_per_skip": ratio(
+            long_compact_union_skip_targets, long_compact_union_skips
+        ),
+        "long_compact_window_union_skip_values_per_sparse_value": ratio(
+            long_compact_union_skip_values,
+            long_compact_union_skip_sparse_values,
         ),
         "long_compact_window_group_values_per_col": ratio(
             long_compact_group_values, long_compact_group_cols
@@ -628,6 +752,13 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_fills",
         "compact_window_evictions",
         "compact_window_overflows",
+        "compact_window_claim_attempts",
+        "compact_window_claims",
+        "compact_window_claim_misses",
+        "compact_window_claim_stale_clears",
+        "compact_window_claim_group_scatters",
+        "compact_window_claim_rate",
+        "compact_window_claim_miss_rate",
         "compact_window_batches",
         "compact_window_stream_u_entries",
         "compact_window_targets",
@@ -644,6 +775,13 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_union_values",
         "compact_window_union_values_per_col",
         "compact_window_union_targets_per_batch",
+        "compact_window_union_skips",
+        "compact_window_union_skip_targets",
+        "compact_window_union_skip_cols",
+        "compact_window_union_skip_values",
+        "compact_window_union_skip_sparse_values",
+        "compact_window_union_skip_targets_per_skip",
+        "compact_window_union_skip_values_per_sparse_value",
         "compact_window_group_steps",
         "compact_window_group_targets",
         "compact_window_group_cols",
@@ -693,6 +831,13 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_producer_active_catchup_attempts",
         "long_producer_active_catchup_deps",
         "long_producer_active_catchup_targets",
+        "long_compact_window_claim_attempts",
+        "long_compact_window_claims",
+        "long_compact_window_claim_misses",
+        "long_compact_window_claim_stale_clears",
+        "long_compact_window_claim_group_scatters",
+        "long_compact_window_claim_rate",
+        "long_compact_window_claim_miss_rate",
         "long_compact_window_targets",
         "long_compact_window_target_u_entries",
         "long_compact_window_batches",
@@ -708,6 +853,13 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_compact_window_union_values",
         "long_compact_window_union_values_per_col",
         "long_compact_window_union_targets_per_batch",
+        "long_compact_window_union_skips",
+        "long_compact_window_union_skip_targets",
+        "long_compact_window_union_skip_cols",
+        "long_compact_window_union_skip_values",
+        "long_compact_window_union_skip_sparse_values",
+        "long_compact_window_union_skip_targets_per_skip",
+        "long_compact_window_union_skip_values_per_sparse_value",
         "long_compact_window_group_steps",
         "long_compact_window_group_targets",
         "long_compact_window_group_cols",

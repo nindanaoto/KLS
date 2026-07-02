@@ -2276,10 +2276,16 @@ append new fill entries without sorted-array insertion. When a persistent dense
 compact group is active, later compact rows whose next root matches that group
 can be merged into it instead of scattering immediately back to independent
 sparse states; row-pipeline traces report
-`compact_window_group_merge_{targets,cols,values}` for that surface. This remains
-off by default; use it only for focused paper-gap probes. The opt-in compact
-window cap is now 2048 states so wide live-state owner sizing can be run without
-changing default behavior. `KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE=1` adds a
+`compact_window_group_merge_{targets,cols,values}` for that surface. Dense
+compact union materialization is guarded by a sparse-work envelope, and traces
+report `compact_window_union_skip_{targets,cols,values,sparse_values}` when the
+exact sparse batched update is used instead. Compact execution traces also
+report
+`compact_window_claim_{attempts,claims,misses,stale_clears,group_scatters}` so
+reuse can be separated from eager-update cost. This remains off by default; use
+it only for focused paper-gap probes. The opt-in compact window cap is now 2048
+states so wide live-state owner sizing can be run without changing default
+behavior. `KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE=1` adds a
 cheaper sampled lower-bound probe for a possible persistent main-row owner. It
 scans a future row-order horizon every
 `KLS_ROW_PIPELINE_OWNER_SURFACE_INTERVAL` producer rows (default 512), using
@@ -2874,6 +2880,13 @@ window bigger" as the next default path. With
 `393216/629628` rows in the same cap. It streamed `10638367` compact producer
 U entries across `231858129` compact target U entries, but scalar U output was
 still `388360106` and the grouped compact owner itself dominated progress.
+After the dense-union sparse-work guard,
+`build/kls_pre2_compact_exec_w512_guard_claim_trace45.stderr` again reached
+`393216/629628`; it skipped `226329` dense union batches representing
+`1309588991` dense slots versus `253484565` sparse update slots, while compact
+claims were high (`382555/393219`, `97.29%`). This rejects failed reuse or dense
+union alone as the missing mechanism: the eager compact owner is maintaining too
+much future row state.
 This keeps the required implementation focused on a production row/panel
 live-workspace owner, not independent sparse compact states with a larger
 window.

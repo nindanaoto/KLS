@@ -121,6 +121,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_COMPACT_WINDOW_MAX_SLOTS 2048u
 #define KLS_ROW_FIRST_COMPACT_WINDOW_DEFAULT_SLOTS 64u
 #define KLS_ROW_FIRST_COMPACT_WINDOW_DEFAULT_MAX_ENTRIES 65536u
+#define KLS_ROW_FIRST_COMPACT_DENSE_UNION_MAX_SPARSE_MULT 2u
 #define KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_WINDOW 4096u
 #define KLS_ROW_FIRST_OWNER_SURFACE_MAX_WINDOW 65536u
 #define KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_INTERVAL 512u
@@ -86826,6 +86827,11 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_fills;
   UF_long compact_window_evictions;
   UF_long compact_window_overflows;
+  UF_long compact_window_claim_attempts;
+  UF_long compact_window_claims;
+  UF_long compact_window_claim_misses;
+  UF_long compact_window_claim_stale_clears;
+  UF_long compact_window_claim_group_scatters;
   UF_long compact_window_probes;
   UF_long compact_window_batches;
   UF_long compact_window_stream_u_entries;
@@ -86837,6 +86843,11 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_union_targets;
   UF_long compact_window_union_cols;
   UF_long compact_window_union_values;
+  UF_long compact_window_union_skips;
+  UF_long compact_window_union_skip_targets;
+  UF_long compact_window_union_skip_cols;
+  UF_long compact_window_union_skip_values;
+  UF_long compact_window_union_skip_sparse_values;
   UF_long compact_window_group_steps;
   UF_long compact_window_group_targets;
   UF_long compact_window_group_cols;
@@ -87000,6 +87011,16 @@ static void kls_row_first_pipeline_trace_add(
                           source->compact_window_evictions);
   kls_row_first_stats_add(&target->compact_window_overflows,
                           source->compact_window_overflows);
+  kls_row_first_stats_add(&target->compact_window_claim_attempts,
+                          source->compact_window_claim_attempts);
+  kls_row_first_stats_add(&target->compact_window_claims,
+                          source->compact_window_claims);
+  kls_row_first_stats_add(&target->compact_window_claim_misses,
+                          source->compact_window_claim_misses);
+  kls_row_first_stats_add(&target->compact_window_claim_stale_clears,
+                          source->compact_window_claim_stale_clears);
+  kls_row_first_stats_add(&target->compact_window_claim_group_scatters,
+                          source->compact_window_claim_group_scatters);
   kls_row_first_stats_add(&target->compact_window_probes,
                           source->compact_window_probes);
   kls_row_first_stats_add(&target->compact_window_batches,
@@ -87022,6 +87043,17 @@ static void kls_row_first_pipeline_trace_add(
                           source->compact_window_union_cols);
   kls_row_first_stats_add(&target->compact_window_union_values,
                           source->compact_window_union_values);
+  kls_row_first_stats_add(&target->compact_window_union_skips,
+                          source->compact_window_union_skips);
+  kls_row_first_stats_add(&target->compact_window_union_skip_targets,
+                          source->compact_window_union_skip_targets);
+  kls_row_first_stats_add(&target->compact_window_union_skip_cols,
+                          source->compact_window_union_skip_cols);
+  kls_row_first_stats_add(&target->compact_window_union_skip_values,
+                          source->compact_window_union_skip_values);
+  kls_row_first_stats_add(
+    &target->compact_window_union_skip_sparse_values,
+    source->compact_window_union_skip_sparse_values);
   kls_row_first_stats_add(&target->compact_window_group_steps,
                           source->compact_window_group_steps);
   kls_row_first_stats_add(&target->compact_window_group_targets,
@@ -94006,6 +94038,30 @@ static int kls_row_first_pipeline_try_compact_window_union_batch(
     return 1;
   }
   const UF_long matrix_count = active_targets * union_count;
+  const UF_long sparse_matrix_count =
+    active_targets > UF_long_max / row_entries
+      ? UF_long_max : active_targets * row_entries;
+  const UF_long dense_union_limit =
+    row_entries > UF_long_max /
+                    KLS_ROW_FIRST_COMPACT_DENSE_UNION_MAX_SPARSE_MULT
+      ? UF_long_max
+      : row_entries *
+          KLS_ROW_FIRST_COMPACT_DENSE_UNION_MAX_SPARSE_MULT;
+  if (union_count > dense_union_limit) {
+    if (trace != NULL) {
+      kls_row_first_stats_add(&trace->compact_window_union_skips, 1u);
+      kls_row_first_stats_add(&trace->compact_window_union_skip_targets,
+                              active_targets);
+      kls_row_first_stats_add(&trace->compact_window_union_skip_cols,
+                              union_count);
+      kls_row_first_stats_add(&trace->compact_window_union_skip_values,
+                              matrix_count);
+      kls_row_first_stats_add(
+        &trace->compact_window_union_skip_sparse_values,
+        sparse_matrix_count);
+    }
+    return 1;
+  }
   if (!kls_row_first_pipeline_reserve_compact_union_matrix(
         shared, matrix_count)) {
     return 1;
@@ -94948,6 +95004,10 @@ static int kls_row_first_pipeline_try_claim_compact_window(
       worker->workspace.dep_heap == NULL) {
     return 0;
   }
+  if (shared->trace_enabled) {
+    kls_row_first_stats_add(
+      &shared->trace_committed.compact_window_claim_attempts, 1u);
+  }
   if (shared->compact_group_active &&
       shared->compact_group_slots != NULL) {
     for (UF_long g = 0; g < shared->compact_group_target_count; ++g) {
@@ -94959,6 +95019,11 @@ static int kls_row_first_pipeline_try_claim_compact_window(
         shared->compact_window_states + slot;
       if (state->active && state->grouped &&
           state->pos == wanted_pos) {
+        if (shared->trace_enabled) {
+          kls_row_first_stats_add(
+            &shared->trace_committed.compact_window_claim_group_scatters,
+            1u);
+        }
         (void)kls_row_first_pipeline_scatter_compact_group(
           shared, NULL);
         break;
@@ -94978,6 +95043,11 @@ static int kls_row_first_pipeline_try_claim_compact_window(
           state->pos != wanted_pos ||
           state->pos < shared->completed_pos) {
         if (state->active && state->pos < shared->completed_pos) {
+          if (shared->trace_enabled) {
+            kls_row_first_stats_add(
+              &shared->trace_committed.compact_window_claim_stale_clears,
+              1u);
+          }
           kls_row_first_pipeline_clear_compact_window_state(shared, state);
         } else {
           shared->compact_pos_slots[wanted_pos] = -1;
@@ -94993,6 +95063,11 @@ static int kls_row_first_pipeline_try_claim_compact_window(
         continue;
       }
       if (state->pos < shared->completed_pos) {
+        if (shared->trace_enabled) {
+          kls_row_first_stats_add(
+            &shared->trace_committed.compact_window_claim_stale_clears,
+            1u);
+        }
         kls_row_first_pipeline_clear_compact_window_state(shared, state);
         continue;
       }
@@ -95003,6 +95078,10 @@ static int kls_row_first_pipeline_try_claim_compact_window(
     }
   }
   if (best_slot < 0) {
+    if (shared->trace_enabled) {
+      kls_row_first_stats_add(
+        &shared->trace_committed.compact_window_claim_misses, 1u);
+    }
     return 0;
   }
   kls_row_first_compact_window_state *state =
@@ -95013,12 +95092,20 @@ static int kls_row_first_pipeline_try_claim_compact_window(
       state->pattern_count > shared->ctx->nk ||
       state->heap_size > state->pattern_count ||
       state->values == NULL) {
+    if (shared->trace_enabled) {
+      kls_row_first_stats_add(
+        &shared->trace_committed.compact_window_claim_stale_clears, 1u);
+    }
     kls_row_first_pipeline_clear_compact_window_state(shared, state);
     return 0;
   }
   for (UF_long p = 0; p < state->pattern_count; ++p) {
     const UF_long col = state->pattern[p];
     if (col >= shared->ctx->nk) {
+      if (shared->trace_enabled) {
+        kls_row_first_stats_add(
+          &shared->trace_committed.compact_window_claim_stale_clears, 1u);
+      }
       kls_row_first_pipeline_clear_compact_window_state(shared, state);
       return 0;
     }
@@ -95042,6 +95129,10 @@ static int kls_row_first_pipeline_try_claim_compact_window(
   if (state->l_count > 0u &&
       !kls_row_first_entries_reserve_append(
         &worker->l_entries, state->l_count)) {
+    if (shared->trace_enabled) {
+      kls_row_first_stats_add(
+        &shared->trace_committed.compact_window_claim_stale_clears, 1u);
+    }
     kls_row_first_pipeline_clear_compact_window_state(shared, state);
     return 0;
   }
@@ -95049,6 +95140,10 @@ static int kls_row_first_pipeline_try_claim_compact_window(
     if (!kls_row_first_entries_append_reserved(
           &worker->l_entries, state->row,
           state->l_cols[p], state->l_values[p])) {
+      if (shared->trace_enabled) {
+        kls_row_first_stats_add(
+          &shared->trace_committed.compact_window_claim_stale_clears, 1u);
+      }
       kls_row_first_pipeline_clear_compact_window_state(shared, state);
       return 0;
     }
@@ -95065,6 +95160,10 @@ static int kls_row_first_pipeline_try_claim_compact_window(
   *row_out = state->row;
   *order_epoch_out = shared->order_epoch;
 
+  if (shared->trace_enabled) {
+    kls_row_first_stats_add(
+      &shared->trace_committed.compact_window_claims, 1u);
+  }
   kls_row_first_pipeline_clear_compact_window_state(shared, state);
   return 1;
 }
@@ -95120,6 +95219,11 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_fills=%" PRIu64
           " compact_window_evictions=%" PRIu64
           " compact_window_overflows=%" PRIu64
+          " compact_window_claim_attempts=%" PRIu64
+          " compact_window_claims=%" PRIu64
+          " compact_window_claim_misses=%" PRIu64
+          " compact_window_claim_stale_clears=%" PRIu64
+          " compact_window_claim_group_scatters=%" PRIu64
           " compact_window_probes=%" PRIu64
           " compact_window_batches=%" PRIu64
           " compact_window_stream_u_entries=%" PRIu64
@@ -95131,6 +95235,11 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_union_targets=%" PRIu64
           " compact_window_union_cols=%" PRIu64
           " compact_window_union_values=%" PRIu64
+          " compact_window_union_skips=%" PRIu64
+          " compact_window_union_skip_targets=%" PRIu64
+          " compact_window_union_skip_cols=%" PRIu64
+          " compact_window_union_skip_values=%" PRIu64
+          " compact_window_union_skip_sparse_values=%" PRIu64
           " compact_window_group_steps=%" PRIu64
           " compact_window_group_targets=%" PRIu64
           " compact_window_group_cols=%" PRIu64
@@ -95195,6 +95304,11 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_fills,
           (uint64_t)trace->compact_window_evictions,
           (uint64_t)trace->compact_window_overflows,
+          (uint64_t)trace->compact_window_claim_attempts,
+          (uint64_t)trace->compact_window_claims,
+          (uint64_t)trace->compact_window_claim_misses,
+          (uint64_t)trace->compact_window_claim_stale_clears,
+          (uint64_t)trace->compact_window_claim_group_scatters,
           (uint64_t)trace->compact_window_probes,
           (uint64_t)trace->compact_window_batches,
           (uint64_t)trace->compact_window_stream_u_entries,
@@ -95206,6 +95320,11 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_union_targets,
           (uint64_t)trace->compact_window_union_cols,
           (uint64_t)trace->compact_window_union_values,
+          (uint64_t)trace->compact_window_union_skips,
+          (uint64_t)trace->compact_window_union_skip_targets,
+          (uint64_t)trace->compact_window_union_skip_cols,
+          (uint64_t)trace->compact_window_union_skip_values,
+          (uint64_t)trace->compact_window_union_skip_sparse_values,
           (uint64_t)trace->compact_window_group_steps,
           (uint64_t)trace->compact_window_group_targets,
           (uint64_t)trace->compact_window_group_cols,
@@ -95836,6 +95955,11 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " compact_window_fills=%" PRIu64
                         " compact_window_evictions=%" PRIu64
                         " compact_window_overflows=%" PRIu64
+                        " compact_window_claim_attempts=%" PRIu64
+                        " compact_window_claims=%" PRIu64
+                        " compact_window_claim_misses=%" PRIu64
+                        " compact_window_claim_stale_clears=%" PRIu64
+                        " compact_window_claim_group_scatters=%" PRIu64
                         " compact_window_probes=%" PRIu64
                         " compact_window_batches=%" PRIu64
                         " compact_window_stream_u_entries=%" PRIu64
@@ -95847,6 +95971,11 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " compact_window_union_targets=%" PRIu64
                         " compact_window_union_cols=%" PRIu64
                         " compact_window_union_values=%" PRIu64
+                        " compact_window_union_skips=%" PRIu64
+                        " compact_window_union_skip_targets=%" PRIu64
+                        " compact_window_union_skip_cols=%" PRIu64
+                        " compact_window_union_skip_values=%" PRIu64
+                        " compact_window_union_skip_sparse_values=%" PRIu64
                         " compact_window_group_steps=%" PRIu64
                         " compact_window_group_targets=%" PRIu64
                         " compact_window_group_cols=%" PRIu64
@@ -95909,6 +96038,11 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.compact_window_fills,
                         (uint64_t)worker->trace_current.compact_window_evictions,
                         (uint64_t)worker->trace_current.compact_window_overflows,
+                        (uint64_t)worker->trace_current.compact_window_claim_attempts,
+                        (uint64_t)worker->trace_current.compact_window_claims,
+                        (uint64_t)worker->trace_current.compact_window_claim_misses,
+                        (uint64_t)worker->trace_current.compact_window_claim_stale_clears,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_scatters,
                         (uint64_t)worker->trace_current.compact_window_probes,
                         (uint64_t)worker->trace_current.compact_window_batches,
                         (uint64_t)worker->trace_current.compact_window_stream_u_entries,
@@ -95920,6 +96054,11 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.compact_window_union_targets,
                         (uint64_t)worker->trace_current.compact_window_union_cols,
                         (uint64_t)worker->trace_current.compact_window_union_values,
+                        (uint64_t)worker->trace_current.compact_window_union_skips,
+                        (uint64_t)worker->trace_current.compact_window_union_skip_targets,
+                        (uint64_t)worker->trace_current.compact_window_union_skip_cols,
+                        (uint64_t)worker->trace_current.compact_window_union_skip_values,
+                        (uint64_t)worker->trace_current.compact_window_union_skip_sparse_values,
                         (uint64_t)worker->trace_current.compact_window_group_steps,
                         (uint64_t)worker->trace_current.compact_window_group_targets,
                         (uint64_t)worker->trace_current.compact_window_group_cols,

@@ -80,6 +80,19 @@ frontier instead of advancing it. This keeps the next implementation target on
 a production row/panel live-workspace owner, not a larger independent sparse
 compact window.
 
+The dense compact owner is now guarded by a sparse-work envelope and traced
+with compact claim counters. The guarded `pre2` run
+`build/kls_pre2_compact_exec_w512_guard_claim_trace45.stderr` still reached
+only `393216/629628` rows in 45s. It skipped `226329` dense-union batches
+(`1309588991` dense slots versus `253484565` sparse update slots), but the
+compact reuse rate was already high: `382555` claims out of `393219` attempts
+(`97.29%`) with only `10664` misses. This rejects both dense-union
+materialization and failed compact-state reuse as the large missing part. The
+remaining paper gap is the eager maintenance shape itself: KLS is carrying too
+many separately materialized future row states instead of using a production
+row/panel owner that amortizes producer work without replaying a full sparse
+state per future row.
+
 The first-factor separator-private pivot path is now closer to SubtreeLU's
 private-mode rule: private pivot search is restricted to columns owned by the
 same private worker. This fixes the earlier `pre2` diagnostic where a private
@@ -14455,6 +14468,16 @@ timed out with no JSON row. This means the missing CKTSO/SubtreeLU mechanism is
 not "more independent sparse states"; it has to be a coarser grouped-current
 owner that streams producers across a batch instead of replaying most
 trailing/output work through separately materialized sparse states.
+
+The wider 512-state compact-owner run gives the same conclusion with the dense
+grouping path under a sparse-work guard. The guarded trace
+`build/kls_pre2_compact_exec_w512_guard_claim_trace45.stderr` skipped `226329`
+dense-union batches (`1309588991` dense slots versus `253484565` sparse update
+slots), but still reached only `393216/629628` rows. The compact-window claim
+surface was healthy (`382555/393219`, `97.29%`), so the gap is not a claim-miss
+or stale-state bug. The missing CKTSO/SubtreeLU-scale mechanism has to avoid
+the eager per-future-row state-maintenance work itself, not merely make the
+current compact states wider or denser.
 
 That compact-exec prototype now has the first grouped producer/current update:
 when compact numeric execution is enabled, a completed producer row collects
