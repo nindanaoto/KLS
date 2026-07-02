@@ -2429,10 +2429,18 @@ worker. `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ALLOW_HOLES=1` restores the earlier
 experimental behavior. `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ALLOW_PREFIX=1`
 accepts only the contiguous owned prefix of a holey candidate; it is also
 experimental and remains off because it regressed `pre2`.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER=1` enables a more
+paper-shaped non-contiguous shared owner workspace: a grouped sparse claim can
+build one shared delayed-output panel for nearby grouped states, tag those
+states, and apply the panel only when each state is later claimed instead of
+materializing output columns into future compact rows. This is opt-in because
+the current implementation still does not close the `pre2` gap.
 Row-pipeline traces now report
 `compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,hole_skips,hole_skip_rows,prefix_shrinks,prefix_shrink_rows,oversize_skips,oversize_slots,link_skips,link_skip_entries,scan_skips,scan_skip_entries}`
+and `compact_window_span_shared_owner_{reservations,rows,applies,entries}`
 so the owner can be tuned from workspace density, discovery cost, reserved hole
-cost, and prefix-shrink opportunities instead of a matrix-specific rule.
+cost, prefix-shrink opportunities, and shared-owner reuse instead of a
+matrix-specific rule.
 The link cap is deliberately conservative after `pre2` evidence: the default
 cap-1 opt-in trace reached `524288/629628` rows in 45s with zero owner
 reservations and `53,626` link-skip fallbacks before the hole guard. The
@@ -2444,7 +2452,13 @@ owner reservations, recorded `32,026` hole-skip fallbacks and `22,432`
 prefix-shrink opportunities, and reached `524288/629628` rows. Enabling prefix
 shrinking accepted 162 two-row owner reservations but reached only
 `196608/629628`, so higher caps and prefix shrinking remain benchmark
-overrides until the owner has a stronger payoff test.
+overrides until the owner has a stronger payoff test. The first shared-owner
+prototype confirms that non-contiguous owner persistence works but is still not
+enough: with cap-2,
+`build/kls_pre2_span_shared_owner_linkcap2_trace45.stderr` again reached
+`524288/629628`, building 555 shared two-row panels and applying 985 tagged
+rows; cap-4 and cap-16 both regressed to `65536/629628`. The shared owner
+therefore remains an experimental substrate, not a default path.
 Before the link cap was tightened, a five-matrix smoke-manifest A/B against the
 same compact/delay baseline with the 4-row owner improved the SPICE-cycle
 geomean from `0.0474s` to `0.0415s` (`1.14x`), with wins over 2% on `add20`,
