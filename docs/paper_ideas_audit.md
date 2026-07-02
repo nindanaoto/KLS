@@ -93,6 +93,24 @@ many separately materialized future row states instead of using a production
 row/panel owner that amortizes producer work without replaying a full sparse
 state per future row.
 
+The next CKTSO/SubtreeLU-shaped split now exists behind
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT=1`. In that mode the compact
+executor performs producer-side prefactor work only for dependencies below the
+target row and delays diagonal/output U updates until the compact state is
+claimed. Correctness stayed clean on smoke plus forced KLS-first
+`add20`/`bcircuit` probes:
+`build/kls_add20_compact_delay_output_w512_t4_r1_ref0.json` reported
+`relative_residual_l2=3.80e-16`, and
+`build/kls_bcircuit_compact_delay_output_w512_t4_r1_ref0.json` reported
+`relative_residual_l2=7.88e-17`. On `pre2`,
+`build/kls_pre2_compact_delay_output_w512_trace45.stderr` restored the
+checkpoint to `589824/629628` rows, with `570012/589827` compact claims
+(`96.64%`) and `388010831` delayed output entries replayed at claim. This
+rejects the dense/full-output compact owner as the immediate cause of the
+393216-row regression, but it still does not beat the no-compact default. The
+remaining paper gap is narrower: KLS needs a row/panel owner that amortizes the
+postfactor output replay, not just a prefactor-only side window.
+
 The first-factor separator-private pivot path is now closer to SubtreeLU's
 private-mode rule: private pivot search is restricted to columns owned by the
 same private worker. This fixes the earlier `pre2` diagnostic where a private
@@ -14478,6 +14496,19 @@ surface was healthy (`382555/393219`, `97.29%`), so the gap is not a claim-miss
 or stale-state bug. The missing CKTSO/SubtreeLU-scale mechanism has to avoid
 the eager per-future-row state-maintenance work itself, not merely make the
 current compact states wider or denser.
+
+The prefactor/postfactor compact split was then tested directly. With
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT=1`, compact producer publication
+updates only below-target dependencies and defers diagonal/output U entries
+until claim. The 512-state `pre2` trace
+`build/kls_pre2_compact_delay_output_w512_trace45.stderr` reached
+`589824/629628` rows instead of the dense compact executor's `393216/629628`,
+with `570012/589827` compact claims (`96.64%`). It delayed and replayed
+`388010831` output entries, which kept correctness but did not improve over the
+no-compact default checkpoint. This is a better paper-aligned substrate than
+the full dense compact owner, but the missing CKTSO/SubtreeLU mechanism is now
+specifically the coarser row/panel postfactor owner that avoids replaying that
+output work one compact state at a time.
 
 That compact-exec prototype now has the first grouped producer/current update:
 when compact numeric execution is enabled, a completed producer row collects

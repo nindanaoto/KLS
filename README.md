@@ -2282,10 +2282,15 @@ report `compact_window_union_skip_{targets,cols,values,sparse_values}` when the
 exact sparse batched update is used instead. Compact execution traces also
 report
 `compact_window_claim_{attempts,claims,misses,stale_clears,group_scatters}` so
-reuse can be separated from eager-update cost. This remains off by default; use
-it only for focused paper-gap probes. The opt-in compact window cap is now 2048
-states so wide live-state owner sizing can be run without changing default
-behavior. `KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE=1` adds a
+reuse can be separated from eager-update cost.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT=1` adds an opt-in
+prefactor/postfactor split for that compact executor: producer publication
+updates only dependencies below the target row, while diagonal/output U updates
+are replayed when the prepared compact state is claimed. Traces report
+`compact_window_delayed_output_{skips,replays,deps,entries}`. This remains off
+by default; use it only for focused paper-gap probes. The opt-in compact window
+cap is now 2048 states so wide live-state owner sizing can be run without
+changing default behavior. `KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE=1` adds a
 cheaper sampled lower-bound probe for a possible persistent main-row owner. It
 scans a future row-order horizon every
 `KLS_ROW_PIPELINE_OWNER_SURFACE_INTERVAL` producer rows (default 512), using
@@ -2887,6 +2892,14 @@ After the dense-union sparse-work guard,
 claims were high (`382555/393219`, `97.29%`). This rejects failed reuse or dense
 union alone as the missing mechanism: the eager compact owner is maintaining too
 much future row state.
+The delayed-output variant,
+`build/kls_pre2_compact_delay_output_w512_trace45.stderr`, restored the
+checkpoint to `589824/629628` and kept compact claims high
+(`570012/589827`, `96.64%`), but replayed `388010831` delayed output entries
+and still did not improve the no-compact default. This narrows the next target:
+the paper-shaped prefactor/postfactor split is necessary to avoid the worst
+dense-owner loss, but KLS still needs a coarser row/panel owner that amortizes
+the output replay itself.
 This keeps the required implementation focused on a production row/panel
 live-workspace owner, not independent sparse compact states with a larger
 window.
