@@ -2541,7 +2541,10 @@ span.
 owner to a capped delayed-output producer window. It picks up to `N` common
 pending producer rows from nearby grouped states, streams only those producers
 into the shared panel, and advances each tagged row through the contiguous
-prefix covered by the selected producer set when claimed. `N` is capped at `64`;
+prefix covered by the selected producer set when claimed. The selected producer
+list is now resizable and sorted, so `N` is no longer clipped at the old
+64-producer probe cap; the usual owner row, slot, scan, and payoff gates still
+bound how much work is actually accepted.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_SINGLE_DEP=1` is a
 compatibility shorthand for `N=1`. This tests the paper-shaped
 producer-to-many-current owner without eagerly materializing every delayed

@@ -15874,3 +15874,13 @@ delayed-output replay still around `388M` entries. This narrows the next
 paper-level implementation target again: KLS needs a broader live row/panel
 owner that removes delayed-output replay work, not just a different value
 layout for the already-selected shared owner.
+
+The non-prefix shared-owner selector no longer hard-clips
+`KLS_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_DEP_LIMIT` at the original
+64-producer probe cap. The selected producer set is now held in the shared
+owner's resizable dependency storage, sorted once after selection, and queried
+with binary membership checks during owner build and claim-time skip replay.
+This does not make the shared owner a default CKTSO-gap closer by itself; it
+removes an artificial implementation ceiling so wider paper-shaped owner runs
+can be tested under the existing row, slot, scan, and payoff gates without
+turning producer membership into a linear scan over every selected dependency.

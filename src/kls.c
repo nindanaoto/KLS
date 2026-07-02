@@ -132,7 +132,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_LINKS 1u
 #define KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_SCAN_ENTRIES \
   (KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_SLOTS * 8u)
-#define KLS_ROW_FIRST_COMPACT_SPAN_SHARED_OWNER_MAX_DEP_LIMIT 64u
+#define KLS_ROW_FIRST_COMPACT_SPAN_SHARED_OWNER_DEFAULT_DEP_CAP 64u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_STREAM_OWNER_DEFAULT_MAX_SLOTS 64u
 #define KLS_ROW_FIRST_COMPACT_DEFERRED_OUTPUT_DEFAULT_MAX_ENTRIES 65536u
 #define KLS_ROW_FIRST_COMPACT_DEFERRED_OUTPUT_DEFAULT_MIN_U_ENTRIES 1024u
@@ -48678,9 +48678,8 @@ kls_row_pipeline_compact_span_shared_owner_dep_limit_env(void) {
   if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
     return 0u;
   }
-  return parsed > KLS_ROW_FIRST_COMPACT_SPAN_SHARED_OWNER_MAX_DEP_LIMIT
-    ? KLS_ROW_FIRST_COMPACT_SPAN_SHARED_OWNER_MAX_DEP_LIMIT
-    : (UF_long)parsed;
+  const unsigned long long max_uf = (unsigned long long)UF_long_max;
+  return parsed > max_uf ? UF_long_max : (UF_long)parsed;
 }
 
 static UF_long
@@ -93530,7 +93529,7 @@ static int kls_row_first_pipeline_reserve_shared_span_owner_deps(
     return 0;
   }
   UF_long grown = shared->compact_span_shared_owner_dep_capacity == 0u
-    ? KLS_ROW_FIRST_COMPACT_SPAN_SHARED_OWNER_MAX_DEP_LIMIT
+    ? KLS_ROW_FIRST_COMPACT_SPAN_SHARED_OWNER_DEFAULT_DEP_CAP
     : shared->compact_span_shared_owner_dep_capacity;
   while (grown < needed) {
     if (grown > UF_long_max / 2u) {
@@ -94937,6 +94936,26 @@ static int kls_row_first_dep_list_contains(
   return 0;
 }
 
+static int kls_row_first_dep_sorted_contains(
+  const UF_long *deps,
+  UF_long dep_count,
+  UF_long dep) {
+  if (deps == NULL || dep_count == 0u) {
+    return 0;
+  }
+  UF_long lo = 0u;
+  UF_long hi = dep_count;
+  while (lo < hi) {
+    const UF_long mid = lo + (hi - lo) / 2u;
+    if (deps[mid] < dep) {
+      lo = mid + 1u;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo < dep_count && deps[lo] == dep;
+}
+
 static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_compact_window_state *state,
@@ -94947,6 +94966,7 @@ static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace
   UF_long end_l_count,
   const UF_long *skip_deps,
   UF_long skip_dep_count,
+  int skip_deps_sorted,
   int update_cutoff);
 
 static int kls_row_first_compact_window_apply_deferred_output_cache(
@@ -94981,7 +95001,7 @@ static int kls_row_first_compact_window_apply_deferred_output_cache(
     if (!kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
           shared, state, workspace, pattern_count_io, trace,
           state->delayed_output_replayed_l_count,
-          state->deferred_output_start_l_count, NULL, 0u, 0)) {
+          state->deferred_output_start_l_count, NULL, 0u, 0, 0)) {
       return 0;
     }
     state->delayed_output_replayed_l_count =
@@ -95046,6 +95066,7 @@ static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace
   UF_long end_l_count,
   const UF_long *skip_deps,
   UF_long skip_dep_count,
+  int skip_deps_sorted,
   int update_cutoff) {
   if (shared == NULL || state == NULL ||
       !shared->compact_window_delay_output_enabled) {
@@ -95077,7 +95098,11 @@ static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace
       return 0;
     }
     if (skip_dep_count > 0u &&
-        kls_row_first_dep_list_contains(skip_deps, skip_dep_count, dep)) {
+        (skip_deps_sorted
+           ? kls_row_first_dep_sorted_contains(
+               skip_deps, skip_dep_count, dep)
+           : kls_row_first_dep_list_contains(
+               skip_deps, skip_dep_count, dep))) {
       continue;
     }
     const UF_long row_begin = shared->workspace->u_row_ptr[dep];
@@ -95159,7 +95184,7 @@ static int kls_row_first_compact_window_replay_delayed_output_to_workspace(
   }
   return kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
     shared, state, workspace, pattern_count_io, trace,
-    state->delayed_output_replayed_l_count, state->l_count, NULL, 0u, 1);
+    state->delayed_output_replayed_l_count, state->l_count, NULL, 0u, 0, 1);
 }
 
 static UF_long kls_row_first_pipeline_worker_span_owner_index(
@@ -95305,7 +95330,7 @@ static int kls_row_first_pipeline_apply_claim_stream_owner_to_workspace(
       !kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
         worker->shared, state, workspace, pattern_count_io, trace,
         state->delayed_output_replayed_l_count, start_l_count,
-        NULL, 0u, 1)) {
+        NULL, 0u, 0, 1)) {
     return 0;
   }
   const UF_long rows = worker->compact_claim_stream_owner_rows;
@@ -95468,7 +95493,7 @@ static int kls_row_first_pipeline_apply_shared_span_owner_to_workspace(
           state->delayed_output_replayed_l_count,
           state->compact_span_shared_owner_l_count,
           shared->compact_span_shared_owner_deps,
-          shared->compact_span_shared_owner_dep_count, 1)) {
+          shared->compact_span_shared_owner_dep_count, 1, 1)) {
       return 0;
     }
   } else {
@@ -97946,8 +97971,6 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
   const int work_weight_mode =
     nonprefix_mode &&
     shared->compact_span_shared_owner_nonprefix_work_weight_enabled;
-  UF_long selected_owner_deps
-    [KLS_ROW_FIRST_COMPACT_SPAN_SHARED_OWNER_MAX_DEP_LIMIT];
   UF_long selected_owner_dep_count = 0u;
   if (nonprefix_mode) {
     if (shared->compact_span_shared_owner_nonprefix_retain_enabled &&
@@ -98092,10 +98115,14 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
           best_dep_score == 0u) {
         break;
       }
+      if (!kls_row_first_pipeline_reserve_shared_span_owner_deps(
+            shared, selected_deps + 1u)) {
+        return 0u;
+      }
       shared->compact_batch_positions[best_index] = 0u;
       shared->compact_union_mark[best_dep] = selected_dep_generation;
       shared->compact_union_pos[best_dep] = selected_deps;
-      selected_owner_deps[selected_deps] = best_dep;
+      shared->compact_span_shared_owner_deps[selected_deps] = best_dep;
       selected_deps++;
       selected_total_count =
         selected_total_count > UF_long_max - best_dep_score
@@ -98109,6 +98136,12 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
       kls_row_first_pipeline_trace_span_owner_payoff_skip(
         trace, best_count, selected_total_count, 0u);
       return 0u;
+    }
+    if (selected_deps > 1u) {
+      qsort(shared->compact_span_shared_owner_deps,
+            (size_t)selected_deps,
+            sizeof(*shared->compact_span_shared_owner_deps),
+            kls_algorithm5_payoff_compare_uf_long);
     }
     selected_owner_dep_count = selected_deps;
   }
@@ -98147,8 +98180,9 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
             if (dep >= state->row || dep >= shared->ctx->nk) {
               break;
             }
-            if (kls_row_first_dep_list_contains(
-                  selected_owner_deps, selected_owner_dep_count, dep)) {
+            if (kls_row_first_dep_sorted_contains(
+                  shared->compact_span_shared_owner_deps,
+                  selected_owner_dep_count, dep)) {
               has_selected_dep = 1;
               break;
             }
@@ -98211,8 +98245,9 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
         return 0u;
       }
       if (nonprefix_mode &&
-          !kls_row_first_dep_list_contains(
-            selected_owner_deps, selected_owner_dep_count, dep)) {
+          !kls_row_first_dep_sorted_contains(
+            shared->compact_span_shared_owner_deps,
+            selected_owner_dep_count, dep)) {
         continue;
       }
       const UF_long row_begin = shared->workspace->u_row_ptr[dep];
@@ -98278,8 +98313,9 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
         continue;
       }
       if (nonprefix_mode &&
-          !kls_row_first_dep_list_contains(
-            selected_owner_deps, selected_owner_dep_count, dep)) {
+          !kls_row_first_dep_sorted_contains(
+            shared->compact_span_shared_owner_deps,
+            selected_owner_dep_count, dep)) {
         continue;
       }
       const UF_long pos = shared->compact_union_pos[dep];
@@ -98486,13 +98522,11 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
 
   if (nonprefix_mode) {
     if (selected_owner_dep_count == 0u ||
-        !kls_row_first_pipeline_reserve_shared_span_owner_deps(
-          shared, selected_owner_dep_count)) {
+        shared->compact_span_shared_owner_deps == NULL ||
+        selected_owner_dep_count >
+          shared->compact_span_shared_owner_dep_capacity) {
       return 0u;
     }
-    memcpy(shared->compact_span_shared_owner_deps, selected_owner_deps,
-           (size_t)selected_owner_dep_count *
-             sizeof(*shared->compact_span_shared_owner_deps));
     shared->compact_span_shared_owner_dep_count =
       selected_owner_dep_count;
     shared->compact_span_shared_owner_nonprefix_active = 1;
