@@ -15157,3 +15157,28 @@ wider 65,536-row horizon sampled every 2,048 producer rows,
 entries. This makes the next main-owner requirement sharper: useful target
 coverage on `pre2` comes from retained dynamic row states, not from a late
 scan of original input rows for the current first unready dependency.
+
+Sparse compact groups can now run under the delayed-output prefactor/postfactor
+split. In that mode, grouped producer updates keep only columns below each
+target row and leave output columns for the existing claim-time delayed replay.
+This combines the two strongest compact-window substrates tested so far:
+retained sparse dynamic groups and no eager target-output maintenance.
+
+Correctness stayed clean under `cmake --build build --target kls_bench
+kls_smoke -j2`, `./build/kls_smoke`,
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1
+KLS_ENABLE_ROW_PIPELINE_COMPACT_SPARSE_GROUP=1
+KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT=1 ./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and delayed sparse-group
+`add20` / `bcircuit` probes with relative residuals `3.38738965e-16` and
+`8.16829708e-17`. On the focused 512-state `pre2` trace
+`build/kls_pre2_compact_sparse_delay_w512_trace45.stderr`, KLS again reached
+`589824/629628`. Compared with the prior delayed-output-only trace
+`build/kls_pre2_compact_delay_output_w512_trace45.stderr`, sparse grouping cut
+compact target U entries from `403,242,927` to `321,824,000` and compact state
+rows from `320,127,847` to `259,771,558`; the sparse group fired for `54,240`
+producer steps and `860,673` grouped targets. But the delayed output replay
+surface stayed essentially unchanged (`388,010,831` replayed output entries
+before, `388,256,554` after). This keeps the gap diagnosis focused on
+postfactor replay amortization in a wider main row/panel owner, not on compact
+group representation or eager output updates alone.

@@ -2293,7 +2293,9 @@ reuse can be separated from eager-update cost.
 compact group in each member state's sparse row/index storage instead of the
 dense target-by-union matrix. This is useful for paper-gap probes that need to
 separate grouped-owner coverage from dense materialization cost; it remains off
-by default and still requires `KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1`.
+by default and still requires `KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1`. It can
+also be combined with delayed output, where grouped producer updates keep only
+prefactor/internal columns and leave target-output columns for claim-time replay.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT=1` adds an opt-in
 prefactor/postfactor split for that compact executor: producer publication
 updates only dependencies below the target row, while diagonal/output U updates

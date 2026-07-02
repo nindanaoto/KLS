@@ -94296,6 +94296,7 @@ static void kls_row_first_pipeline_update_compact_sparse_group_producer(
     return;
   }
 
+  UF_long group_update_values = 0u;
   for (UF_long up = row_begin; up < row_end; ++up) {
     const UF_long col = shared->u_entries->col[up];
     const double uvalue = shared->u_entries->value[up];
@@ -94305,6 +94306,12 @@ static void kls_row_first_pipeline_update_compact_sparse_group_producer(
       kls_row_first_compact_window_state *state = target->state;
       if (state == NULL || !state->active || !state->grouped) {
         target->state = NULL;
+        continue;
+      }
+      if (shared->compact_window_delay_output_enabled &&
+          col >= state->row) {
+        kls_row_first_stats_add(
+          &state->trace_current.compact_window_delayed_output_skips, 1u);
         continue;
       }
       UF_long value_pos = KLS_KLU_EMPTY;
@@ -94319,6 +94326,9 @@ static void kls_row_first_pipeline_update_compact_sparse_group_producer(
         continue;
       }
       state->values[value_pos] -= target->lij * uvalue;
+      group_update_values =
+        group_update_values == UF_long_max
+          ? UF_long_max : group_update_values + 1u;
       if (col < state->row) {
         kls_row_first_stats_add(
           &state->trace_current.scalar_u_internal_entries, 1u);
@@ -94351,11 +94361,8 @@ static void kls_row_first_pipeline_update_compact_sparse_group_producer(
                             retained_targets);
     kls_row_first_stats_add(&trace->compact_window_group_cols,
                             row_entries);
-    if (row_entries <= UF_long_max / retained_targets) {
-      kls_row_first_stats_add(
-        &trace->compact_window_group_values,
-        row_entries * retained_targets);
-    }
+    kls_row_first_stats_add(&trace->compact_window_group_values,
+                            group_update_values);
   }
 
   const UF_long root_dep =
@@ -95179,8 +95186,7 @@ static void kls_row_first_pipeline_apply_compact_window_producer_batch(
       }
     }
   }
-  if (shared->compact_group_sparse_enabled &&
-      !shared->compact_window_delay_output_enabled) {
+  if (shared->compact_group_sparse_enabled) {
     if (shared->compact_group_active &&
         shared->compact_group_sparse) {
       (void)kls_row_first_pipeline_merge_compact_sparse_group_targets(
@@ -95381,7 +95387,12 @@ static void kls_row_first_pipeline_update_compact_window_producer(
   const UF_long row_entries = row_end - row_begin;
   if (shared->compact_window_execute_enabled) {
     if (shared->compact_window_delay_output_enabled) {
-      kls_row_first_pipeline_clear_compact_group(shared);
+      if (shared->compact_group_sparse_enabled) {
+        kls_row_first_pipeline_update_compact_group_producer(
+          shared, trace, dep);
+      } else {
+        kls_row_first_pipeline_clear_compact_group(shared);
+      }
     } else {
       kls_row_first_pipeline_update_compact_group_producer(
         shared, trace, dep);
@@ -97148,7 +97159,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
     compact_window_delay_output_requested;
   shared.compact_group_sparse_enabled =
     shared.compact_window_execute_enabled &&
-    !shared.compact_window_delay_output_enabled &&
     kls_row_pipeline_compact_sparse_group_env_enabled();
   shared.compact_window_enabled =
     (shared.trace_enabled &&
