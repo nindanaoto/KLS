@@ -161,6 +161,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_SNODE_MAX_BATCH 24
 #define KLS_SNODE_TAIL_CHUNK 32
 #define KLS_SNODE_MIN_BATCH_WORK 192
+#define KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD 5.0e7
 #define KLS_METIS_NDP_MIN_LEAF_ROWS 200u
 #define KLS_METIS_NDP_TARGET_DIVISOR 1000u
 #define KLS_METIS_NDP_SUBTREE_THRESHOLD_MIN_ROWS 200000u
@@ -85953,6 +85954,23 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
+  if (!check_pivots && solver->common.flops > 0.0 &&
+      solver->common.flops <
+        KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+          (double)solver->options.threads) {
+    /* Below roughly 5e7 factor flops per thread the EGraph's per-column
+       synchronization costs more than it saves, and the sorted-supernode
+       panel updates made the serial mapped kernel faster still; the
+       measured four-thread crossover on the paper set sits near 1e8-2e8
+       flops.  Prefer the serial mapped refactor when it is eligible and
+       keep the EGraph for shapes it cannot cover. */
+    const int mapped = kls_mapped_refactor(solver, numeric_values,
+                                           check_pivots);
+    if (mapped >= 0) {
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
+      return (UF_long)mapped;
+    }
+  }
   const int egraph =
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
   if (egraph >= 0) {
