@@ -40,6 +40,17 @@
 #define KLS_ALWAYS_INLINE inline
 #endif
 
+/* Pause hint for atomic spin waits: keeps a blocked worker from hammering
+   the shared cache line at full speed and starving the producing thread of
+   memory bandwidth. */
+static KLS_ALWAYS_INLINE void kls_cpu_relax(void) {
+#if defined(__x86_64__) || defined(__i386__)
+  __builtin_ia32_pause();
+#elif defined(__aarch64__)
+  __asm__ __volatile__("yield");
+#endif
+}
+
 static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
   double *restrict dst,
   const double *restrict src,
@@ -61140,6 +61151,7 @@ static int kls_row_refactor_pop_ready_group(
     }
     while (atomic_load_explicit(&shared->row_pipeline_ready_slots[head],
                                 memory_order_acquire) == 0u) {
+                                  kls_cpu_relax();
       if (kls_egraph_refactor_should_stop(shared)) {
         return 0;
       }
@@ -61343,6 +61355,7 @@ static int kls_row_refactor_wait_private_group_ready(
   unsigned spin = 0;
   while (atomic_load_explicit(&shared->row_pipeline_remaining_preds[group],
                               memory_order_acquire) != 0ul) {
+                                kls_cpu_relax();
     if ((spin++ & 1023u) == 0u &&
         kls_egraph_refactor_should_stop(shared)) {
       return 0;
@@ -62797,6 +62810,7 @@ static int kls_egraph_refactor_wait_done(
   unsigned spin = 0;
   while (atomic_load_explicit(&shared->pipeline_done[col],
                               memory_order_acquire) != generation) {
+    kls_cpu_relax();
     if ((spin++ & 1023u) == 0u &&
         kls_egraph_refactor_should_stop(shared)) {
       return 0;
@@ -62844,6 +62858,7 @@ static int kls_egraph_refactor_try_skip_claimed_column(
     while (atomic_load_explicit(&shared->pipeline_done[col],
                                 memory_order_acquire) !=
            shared->pipeline_generation) {
+             kls_cpu_relax();
       const int queue_status =
         kls_egraph_refactor_try_process_algorithm5_payoff_queue(worker);
       if (queue_status < 0) {
@@ -74142,6 +74157,7 @@ static int kls_egraph_refactor_try_pop_algorithm5_payoff_column(
       while (atomic_load_explicit(
                &shared->algorithm5_payoff_queue_slots[head],
                memory_order_acquire) != shared->pipeline_generation) {
+                 kls_cpu_relax();
         if (kls_egraph_refactor_should_stop(shared)) {
           return -1;
         }
@@ -79260,6 +79276,7 @@ static int kls_egraph_refactor_pop_ready_column(
       while (atomic_load_explicit(&shared->pipeline_ready_slots[head],
                                   memory_order_acquire) !=
              shared->pipeline_generation) {
+               kls_cpu_relax();
         if (kls_egraph_refactor_should_stop(shared)) {
           return 0;
         }
