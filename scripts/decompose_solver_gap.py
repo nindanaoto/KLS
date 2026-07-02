@@ -9,6 +9,34 @@ import math
 import pathlib
 
 
+def matrix_name_variants(name: str) -> set[str]:
+    path_name = pathlib.Path(name).name
+    variants = {path_name}
+    stem = pathlib.Path(path_name).stem
+    if stem:
+        variants.add(stem)
+    return variants
+
+
+def load_manifest_names(path: pathlib.Path) -> set[str]:
+    names: set[str] = set()
+    with path.open("r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            token = stripped.split()[0]
+            variants = matrix_name_variants(token)
+            if not variants:
+                raise ValueError(f"{path}:{line_no}: empty matrix name")
+            names.update(variants)
+    return names
+
+
+def matches_manifest_name(name: str, manifest_names: set[str]) -> bool:
+    return bool(matrix_name_variants(name) & manifest_names)
+
+
 def field(row: dict[str, object], *names: str, default: float = 0.0) -> float:
     for name in names:
         if name in row:
@@ -389,6 +417,26 @@ def main() -> int:
     parser.add_argument("--reference-name", default="reference")
     parser.add_argument("--max-rows", type=int, default=20)
     parser.add_argument(
+        "--include-manifest",
+        action="append",
+        type=pathlib.Path,
+        default=[],
+        help=(
+            "only compare matrices listed in this manifest; may be repeated. "
+            "Bare SuiteSparse names and .mtx basenames both match."
+        ),
+    )
+    parser.add_argument(
+        "--exclude-manifest",
+        action="append",
+        type=pathlib.Path,
+        default=[],
+        help=(
+            "drop matrices listed in this manifest; may be repeated. "
+            "Bare SuiteSparse names and .mtx basenames both match."
+        ),
+    )
+    parser.add_argument(
         "--concise",
         action="store_true",
         help="print the common high-signal CKTSO-gap columns instead of all diagnostics",
@@ -398,6 +446,22 @@ def main() -> int:
     candidate = load_rows(args.candidate)
     reference = load_rows(args.reference)
     common = sorted(set(candidate) & set(reference))
+    include_names: set[str] = set()
+    for manifest in args.include_manifest:
+        include_names.update(load_manifest_names(manifest))
+    exclude_names: set[str] = set()
+    for manifest in args.exclude_manifest:
+        exclude_names.update(load_manifest_names(manifest))
+    if include_names:
+        common = [
+            name for name in common
+            if matches_manifest_name(name, include_names)
+        ]
+    if exclude_names:
+        common = [
+            name for name in common
+            if not matches_manifest_name(name, exclude_names)
+        ]
     if not common:
         raise SystemExit("no common matrix basenames")
 
