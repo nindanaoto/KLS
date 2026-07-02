@@ -2379,6 +2379,24 @@ not advance past the timeout checkpoint. Traces report
 `compact_window_deferred_output_cache_{stores,applies,l_entries,entries,disables,overflows}`
 plus cache-entry and store-share ratios in
 `scripts/summarize_row_pipeline_trace.py`.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_OUTPUT_CACHE=1` adds a second
+experimental delayed-output cache for sparse compact groups. Instead of giving
+each future row its own producer-time hash map, the sparse group owns one
+row/column matrix of output deltas and materializes the claimed row into the
+normal deferred-output replay path only when that row leaves the group.
+`KLS_ROW_PIPELINE_COMPACT_GROUP_OUTPUT_MAX_SLOTS=<slots>` caps the grouped
+matrix (`65536` by default), and
+`KLS_ROW_PIPELINE_COMPACT_GROUP_OUTPUT_MIN_U_ENTRIES=<entries>` controls the
+minimum producer U-row width that starts grouped output caching (`128` by
+default). The existing claim-run/span-owner paths clear this cache and proceed
+through their faster worker-owned replay paths, so this option remains a
+conservative, off-by-default experiment. Current probes show correctness but
+not a CKTSO-gap closer: `G2_circuit` no-trace factor time stayed in the same
+range (`4.78s`, `3.4e-16` relative residual), while a 60s traced `pre2` probe
+again reached `589824/629628` rows and reduced delayed-output replay entries
+from the earlier roughly `387.8M` to `363.1M`. Traces report
+`compact_window_group_output_cache_{stores,applies,l_entries,entries,cols,disables,overflows}`
+plus grouped-cache entries/apply, columns/apply, and store-share ratios.
 Claim-time sparse grouped-output probes additionally report
 `compact_window_claim_group_output_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`.
 These counters do not replay or materialize any future-row output; they estimate

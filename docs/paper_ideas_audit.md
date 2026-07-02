@@ -79,6 +79,26 @@ the clear gap closer; the paper-aligned missing piece is still a grouped
 trailing/output workspace that shares producer-row scans while applying values
 directly to active row owners.
 
+The grouped deferred-output cache fills in another rejected branch of that
+decision tree. `KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_OUTPUT_CACHE=1` lets a
+sparse compact group accumulate output-column deltas in one grouped row/column
+matrix and materialize only the row being claimed into the normal deferred
+replay path. This is closer to a paper-shaped shared owner than the earlier
+per-state deferred hash maps, and it is independent KLS code, but it still
+writes output back into future row state instead of applying directly to a
+worker-owned panel. The fixed activation probe on `G2_circuit` preserved
+correctness (`relative_residual_l2=3.39e-16`) and stayed in the same no-trace
+factor range (`4.78s`). On the 60s traced `pre2` probe
+`build/kls_pre2_group_output_cache_trace60.stderr`, the owner was active
+(`45,977,109` stores, `17,231` row materializations, `3,829,889` materialized
+entries, no overflows) and preserved the usual `589824/629628` checkpoint while
+reducing delayed-output replay entries to `363,101,216`. That is better than
+the no-cache trace's roughly `387.8M` replayed entries, but still far from the
+claim/span output-surface opportunity. The result keeps the next paper-aligned
+work on a true worker-owned grouped row/panel workspace; grouped future-row
+materialization is useful as instrumentation and a correctness substrate, not
+as the CKTSO-scale closer.
+
 The owned claim-run output surface now measures the missing postfactor sharing
 without materializing any future-row output. In
 `build/kls_pre2_claim_run_output_surface_w512_trace45.stderr`, the same

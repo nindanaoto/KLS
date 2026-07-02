@@ -111,6 +111,13 @@ PRODUCER_COUNTERS = [
     "compact_window_deferred_output_cache_entries",
     "compact_window_deferred_output_cache_disables",
     "compact_window_deferred_output_cache_overflows",
+    "compact_window_group_output_cache_stores",
+    "compact_window_group_output_cache_applies",
+    "compact_window_group_output_cache_l_entries",
+    "compact_window_group_output_cache_entries",
+    "compact_window_group_output_cache_cols",
+    "compact_window_group_output_cache_disables",
+    "compact_window_group_output_cache_overflows",
     "compact_window_delayed_group_replay_surfaces",
     "compact_window_delayed_group_replay_states",
     "compact_window_delayed_group_replay_deps",
@@ -192,6 +199,7 @@ def fields(line: str) -> dict[str, str]:
 
 def summarize(path: pathlib.Path) -> dict[str, object]:
     last_trace: dict[str, str] = {}
+    last_trace_completed = -1
     trace_event_count = 0
     long_rows = 0
     long_max_row = 0
@@ -319,7 +327,11 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     with path.open("r", encoding="utf-8", errors="replace") as trace:
         for line in trace:
             if "KLS row-pipeline trace:" in line:
-                last_trace = fields(line)
+                trace_fields = fields(line)
+                completed, _ = split_completed(trace_fields.get("completed"))
+                if completed >= last_trace_completed:
+                    last_trace = trace_fields
+                    last_trace_completed = completed
                 trace_event_count += 1
                 continue
             if "KLS row-pipeline long-row:" not in line:
@@ -937,6 +949,27 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_deferred_output_cache_overflows = parse_int(
         last_trace.get("compact_window_deferred_output_cache_overflows")
     )
+    compact_window_group_output_cache_stores = parse_int(
+        last_trace.get("compact_window_group_output_cache_stores")
+    )
+    compact_window_group_output_cache_applies = parse_int(
+        last_trace.get("compact_window_group_output_cache_applies")
+    )
+    compact_window_group_output_cache_l_entries = parse_int(
+        last_trace.get("compact_window_group_output_cache_l_entries")
+    )
+    compact_window_group_output_cache_entries = parse_int(
+        last_trace.get("compact_window_group_output_cache_entries")
+    )
+    compact_window_group_output_cache_cols = parse_int(
+        last_trace.get("compact_window_group_output_cache_cols")
+    )
+    compact_window_group_output_cache_disables = parse_int(
+        last_trace.get("compact_window_group_output_cache_disables")
+    )
+    compact_window_group_output_cache_overflows = parse_int(
+        last_trace.get("compact_window_group_output_cache_overflows")
+    )
     compact_window_delayed_group_replay_surfaces = parse_int(
         last_trace.get("compact_window_delayed_group_replay_surfaces")
     )
@@ -1232,6 +1265,20 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_deferred_output_cache_disables,
         "compact_window_deferred_output_cache_overflows":
             compact_window_deferred_output_cache_overflows,
+        "compact_window_group_output_cache_stores":
+            compact_window_group_output_cache_stores,
+        "compact_window_group_output_cache_applies":
+            compact_window_group_output_cache_applies,
+        "compact_window_group_output_cache_l_entries":
+            compact_window_group_output_cache_l_entries,
+        "compact_window_group_output_cache_entries":
+            compact_window_group_output_cache_entries,
+        "compact_window_group_output_cache_cols":
+            compact_window_group_output_cache_cols,
+        "compact_window_group_output_cache_disables":
+            compact_window_group_output_cache_disables,
+        "compact_window_group_output_cache_overflows":
+            compact_window_group_output_cache_overflows,
         "compact_window_delayed_group_replay_surfaces":
             compact_window_delayed_group_replay_surfaces,
         "compact_window_delayed_group_replay_states":
@@ -1703,6 +1750,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_deferred_output_cache_stores,
             compact_window_delayed_output_skips,
         ),
+        "compact_window_group_output_cache_entries_per_apply": ratio(
+            compact_window_group_output_cache_entries,
+            compact_window_group_output_cache_applies,
+        ),
+        "compact_window_group_output_cache_cols_per_apply": ratio(
+            compact_window_group_output_cache_cols,
+            compact_window_group_output_cache_applies,
+        ),
+        "compact_window_group_output_cache_store_share": ratio(
+            compact_window_group_output_cache_stores,
+            compact_window_delayed_output_skips,
+        ),
         "compact_window_delayed_group_replay_states_per_surface": ratio(
             compact_window_delayed_group_replay_states,
             compact_window_delayed_group_replay_surfaces,
@@ -2035,6 +2094,16 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_deferred_output_cache_overflows",
         "compact_window_deferred_output_cache_entries_per_apply",
         "compact_window_deferred_output_cache_store_share",
+        "compact_window_group_output_cache_stores",
+        "compact_window_group_output_cache_applies",
+        "compact_window_group_output_cache_l_entries",
+        "compact_window_group_output_cache_entries",
+        "compact_window_group_output_cache_cols",
+        "compact_window_group_output_cache_disables",
+        "compact_window_group_output_cache_overflows",
+        "compact_window_group_output_cache_entries_per_apply",
+        "compact_window_group_output_cache_cols_per_apply",
+        "compact_window_group_output_cache_store_share",
         "compact_window_delayed_group_replay_surfaces",
         "compact_window_delayed_group_replay_states",
         "compact_window_delayed_group_replay_states_per_surface",
