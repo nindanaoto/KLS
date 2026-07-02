@@ -15831,3 +15831,26 @@ out-of-order owner is now present and active on the hard surfaces, but the
 remaining gap is likely the cost/placement of the owner panel and broader
 coarse supernode/update scheduling rather than mere absence of non-prefix
 producer sharing.
+
+Two follow-up selector/lifetime checks reject smaller explanations for that
+remaining gap. `KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_NONPREFIX_RETAIN=1`
+defers rebuilding a non-prefix shared owner while enough still-claimable tagged
+rows remain. It was residual-clean on smoke and focused traces, but it did not
+materially improve owner coverage: on `ASIC_100ks`, the retain trace
+`build/kls_nonprefix4_retain_asic100ks_trace_t4_r1_ref0.stderr` moved from
+`192` reservations / `764` rows / `750` applies to `189` / `755` / `754`, with
+nearly unchanged delayed-output entries. This rejects short owner lifetime as
+the main first-order loss.
+
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_NONPREFIX_WORK_WEIGHT=1`
+selects non-prefix producers by estimated reusable U-output work instead of
+plain row frequency. It increases shared-panel entries, but still does not
+replace enough replay work to improve elapsed time. On `ASIC_100ks`, the
+work-weighted `DEP_LIMIT=4` trace raised shared entries from about `0.65M` to
+about `0.90M`, while delayed-output entries stayed about `93.8M`; the
+`DEP_LIMIT=64` work-weighted trace raised shared entries to `14.4M` and reduced
+delayed-output scan entries by roughly the same amount, but the initial
+KLS-first factor trace still slowed slightly. This rejects "pick heavier
+producers" and "just widen the cap" as the missing CKTSO/SubtreeLU mechanism.
+The next useful implementation target remains a coarse row/supernode owner that
+shares output scans without materializing a large dense per-row panel.

@@ -2556,6 +2556,13 @@ for any later dependencies. This directly tests the SubtreeLU-style
 out-of-order row/panel owner shape. It is still experimental: it greatly
 increases owner coverage on `bcircuit` and `ASIC_100ks`, but the `pre2` timeout
 case still does not finish under the current cap.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_NONPREFIX_RETAIN=1` keeps an
+active non-prefix owner alive while at least two still-claimable tagged rows
+remain. `KLS_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_NONPREFIX_RETAIN_MIN_ROWS`
+changes that threshold. `KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_NONPREFIX_WORK_WEIGHT=1`
+selects non-prefix producers by estimated reusable U-output work instead of row
+frequency. Both are diagnostic flags and remain off by default because focused
+traces showed they add owner work without closing the delayed-output gap.
 Row-pipeline traces now report
 `compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,hole_skips,hole_skip_rows,prefix_shrinks,prefix_shrink_rows,oversize_skips,oversize_slots,link_skips,link_skip_entries,scan_skips,scan_skip_entries}`
 plus `compact_window_span_owner_payoff_{skips,skip_rows,skip_entries,skip_scan_entries}`
