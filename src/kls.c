@@ -68038,6 +68038,126 @@ static int kls_egraph_refactor_dependency_done_now(
          shared->pipeline_generation;
 }
 
+/* Cached-pointer variant of kls_snode_batch_consume for the EGraph column
+ * kernels, which read L columns through the retained l_indices/l_values
+ * caches and can walk 32-bit U index mirrors.  In pipeline mode a batch is
+ * only taken when every producer in it is already published; otherwise the
+ * scalar path performs its usual blocking wait.  Returns the number of
+ * producers consumed (0 = no batch at position up). */
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+__attribute__((target_clones("default", "arch=x86-64-v3")))
+#endif
+static UF_long kls_snode_batch_consume_cached(
+  UF_long *const *l_indices,
+  double *const *l_values,
+  const UF_long *llen_local,
+  const UF_long *ui,
+  const int32_t *ui32,
+  double *ux,
+  UF_long ucol_len,
+  UF_long up,
+  double *restrict x,
+  UF_long k1,
+  UF_long producer_limit,
+  const UF_long *snode_run_end,
+  const kls_egraph_refactor_shared *shared,
+  int wait_for_dependencies,
+  const unsigned char *applied) {
+  const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+  const UF_long run_end = snode_run_end[k1 + j];
+  if (run_end <= k1 + j + 1u) {
+    return 0;
+  }
+  UF_long tmax = run_end - (k1 + j);
+  if (tmax > KLS_SNODE_MAX_BATCH) {
+    tmax = KLS_SNODE_MAX_BATCH;
+  }
+  if (tmax > ucol_len - up) {
+    tmax = ucol_len - up;
+  }
+  UF_long t = 1;
+  if (ui32 != NULL) {
+    while (t < tmax && (UF_long)ui32[up + t] == j + t) {
+      t++;
+    }
+  } else {
+    while (t < tmax && ui[up + t] == j + t) {
+      t++;
+    }
+  }
+  if (applied != NULL) {
+    /* Positions the Algorithm-5 prefactor already applied must not be
+       consumed again; clamp the batch at the first applied position. */
+    UF_long limit = 0;
+    while (limit < t && !applied[up + limit]) {
+      limit++;
+    }
+    t = limit;
+  }
+  if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
+    return 0;
+  }
+  if (wait_for_dependencies) {
+    for (UF_long i = 0; i < t; ++i) {
+      if (!kls_egraph_refactor_dependency_done_now(shared, k1 + j + i)) {
+        return 0;
+      }
+    }
+  }
+  const UF_long *tli = l_indices[k1 + j + t - 1u];
+  const UF_long tlen = llen_local[j + t - 1u];
+  if (tli == NULL) {
+    return 0;
+  }
+  double xs[KLS_SNODE_MAX_BATCH];
+  const double *lx_arr[KLS_SNODE_MAX_BATCH];
+  for (UF_long i = 0; i < t; ++i) {
+    lx_arr[i] = l_values[k1 + j + i];
+    if (lx_arr[i] == NULL) {
+      return 0;
+    }
+    xs[i] = x[j + i];
+  }
+  for (UF_long i = 0; i < t; ++i) {
+    x[j + i] = 0.0;
+  }
+  for (UF_long i = 0; i < t; ++i) {
+    const double u = xs[i];
+    ux[up + i] = u;
+    const double *lxi = lx_arr[i];
+    for (UF_long r0 = 0; r0 + i + 1u < t; ++r0) {
+      xs[i + 1u + r0] -= lxi[r0] * u;
+    }
+  }
+  const double *tlx = lx_arr[t - 1u];
+  for (UF_long p0 = 0; p0 < tlen; p0 += KLS_SNODE_TAIL_CHUNK) {
+    const UF_long pc = tlen - p0 < KLS_SNODE_TAIL_CHUNK
+                         ? tlen - p0
+                         : KLS_SNODE_TAIL_CHUNK;
+    double acc[KLS_SNODE_TAIL_CHUNK];
+    {
+      const double *src = tlx + p0;
+      const double u = xs[t - 1u];
+      for (UF_long p = 0; p < pc; ++p) {
+        acc[p] = src[p] * u;
+      }
+    }
+    for (UF_long i = 0; i + 1u < t; ++i) {
+      const double *src = lx_arr[i] + (t - 1u - i) + p0;
+      const double u = xs[i];
+      for (UF_long p = 0; p < pc; ++p) {
+        acc[p] += src[p] * u;
+      }
+    }
+    for (UF_long p = 0; p < pc; ++p) {
+      x[tli[p0 + p]] -= acc[p];
+    }
+  }
+  kls_snode_trace_batched_producers += t;
+  kls_snode_trace_batched_tail_entries += t * tlen;
+  return t;
+}
+
 static int kls_egraph_refactor_column_owned_now(
   const kls_egraph_refactor_shared *shared,
   UF_long col) {
@@ -68676,6 +68796,8 @@ static int kls_egraph_refactor_single_unscaled_column(
   const int algorithm5_seed_active =
     shared->supernode_algorithm5_payoff_direct_prefix_current_state ||
     shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
+  const int snode_batches_allowed =
+    solver->snode_run_end != NULL && !u_supernode_values;
   unsigned char *algorithm5_prefactor_applied = NULL;
   if (algorithm5_seed_active) {
     const int advance_seed_status =
@@ -68752,6 +68874,19 @@ static int kls_egraph_refactor_single_unscaled_column(
           memset(algorithm5_prefactor_applied + run_begin, 1,
                  (size_t)(up - run_begin));
         }
+        continue;
+      }
+    }
+    if (snode_batches_allowed) {
+      const UF_long consumed = kls_snode_batch_consume_cached(
+        l_indices, l_values, numeric->Llen, ui, ui32, ux, ucol_len, up, x,
+        0u, k, solver->snode_run_end, shared, wait_for_dependencies,
+        algorithm5_prefactor_applied);
+      if (consumed != 0u) {
+        if (algorithm5_prefactor_applied != NULL) {
+          memset(algorithm5_prefactor_applied + up, 1, (size_t)consumed);
+        }
+        up += consumed;
         continue;
       }
     }
@@ -68900,6 +69035,8 @@ static int kls_egraph_refactor_single_scaled_column(
   const int algorithm5_seed_active =
     shared->supernode_algorithm5_payoff_direct_prefix_current_state ||
     shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
+  const int snode_batches_allowed =
+    solver->snode_run_end != NULL && !u_supernode_values;
   unsigned char *algorithm5_prefactor_applied = NULL;
   if (algorithm5_seed_active) {
     const int advance_seed_status =
@@ -68976,6 +69113,19 @@ static int kls_egraph_refactor_single_scaled_column(
           memset(algorithm5_prefactor_applied + run_begin, 1,
                  (size_t)(up - run_begin));
         }
+        continue;
+      }
+    }
+    if (snode_batches_allowed) {
+      const UF_long consumed = kls_snode_batch_consume_cached(
+        l_indices, l_values, numeric->Llen, ui, ui32, ux, ucol_len, up, x,
+        0u, k, solver->snode_run_end, shared, wait_for_dependencies,
+        algorithm5_prefactor_applied);
+      if (consumed != 0u) {
+        if (algorithm5_prefactor_applied != NULL) {
+          memset(algorithm5_prefactor_applied + up, 1, (size_t)consumed);
+        }
+        up += consumed;
         continue;
       }
     }
@@ -69149,6 +69299,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
   const int plain_scalar_updates =
     !supernode_numeric_updates && !consumer_plan_group_l_updates &&
     !u_supernode_ragged_l_updates && !u_supernode_values;
+  const int snode_batches_allowed = solver->snode_run_end != NULL;
   const UF_long *llen = numeric->Llen + k1;
   const int complete_status =
     shared->supernode_algorithm5_payoff_direct_prefix_complete
@@ -69232,6 +69383,19 @@ static int kls_egraph_refactor_btf_unscaled_column(
             continue;
           }
         }
+        if (snode_batches_allowed) {
+          const UF_long consumed = kls_snode_batch_consume_cached(
+            l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
+            local_k, solver->snode_run_end, shared, 1,
+            algorithm5_prefactor_applied);
+          if (consumed != 0u) {
+            if (algorithm5_prefactor_applied != NULL) {
+              memset(algorithm5_prefactor_applied + up, 1, (size_t)consumed);
+            }
+            up += consumed;
+            continue;
+          }
+        }
         const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
         if (algorithm5_prefactor_enabled &&
             !kls_egraph_refactor_dependency_done_now(shared, k1 + j)) {
@@ -69308,6 +69472,15 @@ static int kls_egraph_refactor_btf_unscaled_column(
       }
     } else {
       while (up < ucol_len) {
+        if (snode_batches_allowed) {
+          const UF_long consumed = kls_snode_batch_consume_cached(
+            l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
+            local_k, solver->snode_run_end, shared, 0, NULL);
+          if (consumed != 0u) {
+            up += consumed;
+            continue;
+          }
+        }
         const int run_status =
           kls_egraph_refactor_try_btf_scalar_producer_run(
             worker, k1, k, local_k, &up, ucol_len, ui, ui32, ux, l_indices,
@@ -69705,6 +69878,8 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   const int algorithm5_seed_active =
     shared->supernode_algorithm5_payoff_direct_prefix_current_state ||
     shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
+  const int snode_batches_allowed =
+    solver->snode_run_end != NULL && !u_supernode_values;
   unsigned char *algorithm5_prefactor_applied = NULL;
   if (algorithm5_seed_active) {
     const int advance_seed_status =
@@ -69781,6 +69956,19 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
           memset(algorithm5_prefactor_applied + run_begin, 1,
                  (size_t)(up - run_begin));
         }
+        continue;
+      }
+    }
+    if (snode_batches_allowed) {
+      const UF_long consumed = kls_snode_batch_consume_cached(
+        l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
+        local_k, solver->snode_run_end, shared, wait_for_dependencies,
+        algorithm5_prefactor_applied);
+      if (consumed != 0u) {
+        if (algorithm5_prefactor_applied != NULL) {
+          memset(algorithm5_prefactor_applied + up, 1, (size_t)consumed);
+        }
+        up += consumed;
         continue;
       }
     }
