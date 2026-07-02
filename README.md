@@ -2296,11 +2296,19 @@ separate grouped-owner coverage from dense materialization cost; it remains off
 by default and still requires `KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1`. It can
 also be combined with delayed output, where grouped producer updates keep only
 prefactor/internal columns and leave target-output columns for claim-time
-replay. Sparse grouped claims detach only the claimed row, so a current-row
-claim does not scatter the rest of the grouped owner.
-`KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT=1` adds an opt-in
-prefactor/postfactor split for that compact executor: producer publication
-updates only dependencies below the target row, while diagonal/output U updates
+	replay. Sparse grouped claims detach only the claimed row, so a current-row
+	claim does not scatter the rest of the grouped owner.
+	Sparse grouped-claim traces also report
+	`compact_window_claim_group_run_{probes,states,consecutive,near64,near512,max_consecutive}`
+	to separate strict commit-adjacent run length from the wider local grouped
+	surface. On `pre2` with a 512-row compact window, the active grouped surface
+	averaged `31.6` states per claim probe and `12.4` states within the next 64
+	positions, but only `4.9` strictly consecutive states. This rejects a purely
+	contiguous commit-owner as too narrow and points the next output-owner work at
+	a wider local panel or a selective claim-run replay.
+	`KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT=1` adds an opt-in
+	prefactor/postfactor split for that compact executor: producer publication
+	updates only dependencies below the target row, while diagonal/output U updates
 are replayed directly into the worker row workspace when the prepared compact
 state is claimed. Traces report
 `compact_window_delayed_output_{skips,replays,deps,entries,scan_entries,seek_skips}`.

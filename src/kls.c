@@ -86854,6 +86854,12 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_claim_stale_clears;
   UF_long compact_window_claim_group_scatters;
   UF_long compact_window_claim_group_detaches;
+  UF_long compact_window_claim_group_run_probes;
+  UF_long compact_window_claim_group_run_states;
+  UF_long compact_window_claim_group_run_consecutive;
+  UF_long compact_window_claim_group_run_near64;
+  UF_long compact_window_claim_group_run_near512;
+  UF_long compact_window_claim_group_run_max_consecutive;
   UF_long compact_window_delayed_output_skips;
   UF_long compact_window_delayed_output_replays;
   UF_long compact_window_delayed_output_deps;
@@ -87061,6 +87067,20 @@ static void kls_row_first_pipeline_trace_add(
                           source->compact_window_claim_group_scatters);
   kls_row_first_stats_add(&target->compact_window_claim_group_detaches,
                           source->compact_window_claim_group_detaches);
+  kls_row_first_stats_add(&target->compact_window_claim_group_run_probes,
+                          source->compact_window_claim_group_run_probes);
+  kls_row_first_stats_add(&target->compact_window_claim_group_run_states,
+                          source->compact_window_claim_group_run_states);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_group_run_consecutive,
+    source->compact_window_claim_group_run_consecutive);
+  kls_row_first_stats_add(&target->compact_window_claim_group_run_near64,
+                          source->compact_window_claim_group_run_near64);
+  kls_row_first_stats_add(&target->compact_window_claim_group_run_near512,
+                          source->compact_window_claim_group_run_near512);
+  kls_row_first_stats_max(
+    &target->compact_window_claim_group_run_max_consecutive,
+    source->compact_window_claim_group_run_max_consecutive);
   kls_row_first_stats_add(&target->compact_window_delayed_output_skips,
                           source->compact_window_delayed_output_skips);
   kls_row_first_stats_add(&target->compact_window_delayed_output_replays,
@@ -93737,6 +93757,78 @@ static void kls_row_first_pipeline_trace_delayed_group_replay_surface(
     group_scan_entries);
 }
 
+static void kls_row_first_pipeline_trace_claim_group_run_surface(
+  kls_row_first_pipeline_shared *shared,
+  UF_long wanted_pos) {
+  if (shared == NULL || !shared->trace_enabled ||
+      !shared->compact_group_active ||
+      shared->compact_group_slots == NULL ||
+      shared->compact_window_states == NULL ||
+      shared->compact_pos_slots == NULL ||
+      shared->ctx == NULL ||
+      wanted_pos >= shared->ctx->nk) {
+    return;
+  }
+
+  UF_long states = 0u;
+  UF_long near64 = 0u;
+  UF_long near512 = 0u;
+  for (UF_long g = 0; g < shared->compact_group_target_count; ++g) {
+    const int slot = shared->compact_group_slots[g];
+    if (slot < 0 || slot >= shared->compact_window_count) {
+      continue;
+    }
+    const kls_row_first_compact_window_state *state =
+      shared->compact_window_states + slot;
+    if (state == NULL || !state->active || !state->grouped) {
+      continue;
+    }
+    states++;
+    if (state->pos >= wanted_pos) {
+      const UF_long delta = state->pos - wanted_pos;
+      if (delta < 64u) {
+        near64++;
+      }
+      if (delta < 512u) {
+        near512++;
+      }
+    }
+  }
+
+  UF_long consecutive = 0u;
+  while (consecutive < states) {
+    const UF_long pos = wanted_pos + consecutive;
+    if (pos < wanted_pos || pos >= shared->ctx->nk) {
+      break;
+    }
+    const int slot = shared->compact_pos_slots[pos];
+    if (slot < 0 || slot >= shared->compact_window_count) {
+      break;
+    }
+    const kls_row_first_compact_window_state *state =
+      shared->compact_window_states + slot;
+    if (state == NULL || !state->active || !state->grouped ||
+        state->pos != pos) {
+      break;
+    }
+    consecutive++;
+  }
+
+  kls_row_first_pipeline_trace *trace = &shared->trace_committed;
+  kls_row_first_stats_add(
+    &trace->compact_window_claim_group_run_probes, 1u);
+  kls_row_first_stats_add(
+    &trace->compact_window_claim_group_run_states, states);
+  kls_row_first_stats_add(
+    &trace->compact_window_claim_group_run_consecutive, consecutive);
+  kls_row_first_stats_add(
+    &trace->compact_window_claim_group_run_near64, near64);
+  kls_row_first_stats_add(
+    &trace->compact_window_claim_group_run_near512, near512);
+  kls_row_first_stats_max(
+    &trace->compact_window_claim_group_run_max_consecutive, consecutive);
+}
+
 static void kls_row_first_pipeline_clear_compact_group(
   kls_row_first_pipeline_shared *shared) {
   if (shared == NULL || !shared->compact_group_active) {
@@ -96393,6 +96485,8 @@ static int kls_row_first_pipeline_try_claim_compact_window(
         shared->compact_window_states + slot;
       if (state->active && state->grouped &&
           state->pos == wanted_pos) {
+        kls_row_first_pipeline_trace_claim_group_run_surface(
+          shared, wanted_pos);
         if (shared->compact_group_sparse) {
           kls_row_first_compact_window_state *detached =
             kls_row_first_pipeline_detach_sparse_group_row(
@@ -96645,6 +96739,12 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_claim_stale_clears=%" PRIu64
           " compact_window_claim_group_scatters=%" PRIu64
           " compact_window_claim_group_detaches=%" PRIu64
+          " compact_window_claim_group_run_probes=%" PRIu64
+          " compact_window_claim_group_run_states=%" PRIu64
+          " compact_window_claim_group_run_consecutive=%" PRIu64
+          " compact_window_claim_group_run_near64=%" PRIu64
+          " compact_window_claim_group_run_near512=%" PRIu64
+          " compact_window_claim_group_run_max_consecutive=%" PRIu64
           " compact_window_delayed_output_skips=%" PRIu64
           " compact_window_delayed_output_replays=%" PRIu64
           " compact_window_delayed_output_deps=%" PRIu64
@@ -96747,6 +96847,12 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_claim_stale_clears,
           (uint64_t)trace->compact_window_claim_group_scatters,
           (uint64_t)trace->compact_window_claim_group_detaches,
+          (uint64_t)trace->compact_window_claim_group_run_probes,
+          (uint64_t)trace->compact_window_claim_group_run_states,
+          (uint64_t)trace->compact_window_claim_group_run_consecutive,
+          (uint64_t)trace->compact_window_claim_group_run_near64,
+          (uint64_t)trace->compact_window_claim_group_run_near512,
+          (uint64_t)trace->compact_window_claim_group_run_max_consecutive,
           (uint64_t)trace->compact_window_delayed_output_skips,
           (uint64_t)trace->compact_window_delayed_output_replays,
           (uint64_t)trace->compact_window_delayed_output_deps,
@@ -97415,6 +97521,12 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " compact_window_claim_stale_clears=%" PRIu64
                         " compact_window_claim_group_scatters=%" PRIu64
                         " compact_window_claim_group_detaches=%" PRIu64
+                        " compact_window_claim_group_run_probes=%" PRIu64
+                        " compact_window_claim_group_run_states=%" PRIu64
+                        " compact_window_claim_group_run_consecutive=%" PRIu64
+                        " compact_window_claim_group_run_near64=%" PRIu64
+                        " compact_window_claim_group_run_near512=%" PRIu64
+                        " compact_window_claim_group_run_max_consecutive=%" PRIu64
                         " compact_window_delayed_output_skips=%" PRIu64
                         " compact_window_delayed_output_replays=%" PRIu64
                         " compact_window_delayed_output_deps=%" PRIu64
@@ -97515,6 +97627,12 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.compact_window_claim_stale_clears,
                         (uint64_t)worker->trace_current.compact_window_claim_group_scatters,
                         (uint64_t)worker->trace_current.compact_window_claim_group_detaches,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_run_probes,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_run_states,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_run_consecutive,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_run_near64,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_run_near512,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_run_max_consecutive,
                         (uint64_t)worker->trace_current.compact_window_delayed_output_skips,
                         (uint64_t)worker->trace_current.compact_window_delayed_output_replays,
                         (uint64_t)worker->trace_current.compact_window_delayed_output_deps,

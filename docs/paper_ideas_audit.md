@@ -15282,6 +15282,21 @@ entries while delayed-output replay carried `387,971,639` output entries and
 cache" as the direct fix: the paper-gap owner has to batch delayed output across
 target rows, not only batch a contiguous predecessor run for one target row.
 
+The sparse grouped-claim surface was then measured directly with
+`build/kls_pre2_claim_group_run_surface_w512_trace45.stderr`. The 45s trace
+timed out at `510403/629628` rows under trace overhead, but it covered `63,255`
+grouped claim probes. The active sparse group held `2,000,406` states
+(`31.6` states/probe), almost all within the 512-row compact window and
+`785,116` within the next 64 positions (`12.4` states/probe). Strict
+commit-adjacent contiguity was much smaller: `308,306` states total
+(`4.87` states/probe, `15.4%` of active grouped states), with a maximum
+consecutive run of `122`. This rejects a purely contiguous commit-owner as the
+whole fix. The paper-shaped sharing surface is wider and local but not mostly
+consecutive, so the next implementation experiment should either use a wider
+local row/panel owner or a selective claim-run replay that limits materialized
+future output to immediately claimable rows instead of replaying the entire
+sparse group.
+
 A follow-up checked the other obvious CKTSO/SubtreeLU paper gap before
 returning to row ownership: static pivoting before explicit nested dissection.
 The raw `pre2` matrix satisfies the large SPRAL/MC64-style trigger, with

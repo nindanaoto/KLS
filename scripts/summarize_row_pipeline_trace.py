@@ -36,6 +36,12 @@ PRODUCER_COUNTERS = [
     "compact_window_claim_stale_clears",
     "compact_window_claim_group_scatters",
     "compact_window_claim_group_detaches",
+    "compact_window_claim_group_run_probes",
+    "compact_window_claim_group_run_states",
+    "compact_window_claim_group_run_consecutive",
+    "compact_window_claim_group_run_near64",
+    "compact_window_claim_group_run_near512",
+    "compact_window_claim_group_run_max_consecutive",
     "compact_window_delayed_output_skips",
     "compact_window_delayed_output_replays",
     "compact_window_delayed_output_deps",
@@ -140,6 +146,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_compact_window_claim_stale_clears = 0
     long_compact_window_claim_group_scatters = 0
     long_compact_window_claim_group_detaches = 0
+    long_compact_window_claim_group_run_probes = 0
+    long_compact_window_claim_group_run_states = 0
+    long_compact_window_claim_group_run_consecutive = 0
+    long_compact_window_claim_group_run_near64 = 0
+    long_compact_window_claim_group_run_near512 = 0
+    long_compact_window_claim_group_run_max_consecutive = 0
     long_compact_window_delayed_output_skips = 0
     long_compact_window_delayed_output_replays = 0
     long_compact_window_delayed_output_deps = 0
@@ -256,6 +268,25 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             )
             long_compact_window_claim_group_detaches += parse_int(
                 row.get("compact_window_claim_group_detaches")
+            )
+            long_compact_window_claim_group_run_probes += parse_int(
+                row.get("compact_window_claim_group_run_probes")
+            )
+            long_compact_window_claim_group_run_states += parse_int(
+                row.get("compact_window_claim_group_run_states")
+            )
+            long_compact_window_claim_group_run_consecutive += parse_int(
+                row.get("compact_window_claim_group_run_consecutive")
+            )
+            long_compact_window_claim_group_run_near64 += parse_int(
+                row.get("compact_window_claim_group_run_near64")
+            )
+            long_compact_window_claim_group_run_near512 += parse_int(
+                row.get("compact_window_claim_group_run_near512")
+            )
+            long_compact_window_claim_group_run_max_consecutive = max(
+                long_compact_window_claim_group_run_max_consecutive,
+                parse_int(row.get("compact_window_claim_group_run_max_consecutive")),
             )
             long_compact_window_delayed_output_skips += parse_int(
                 row.get("compact_window_delayed_output_skips")
@@ -462,6 +493,24 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_claim_group_detaches = parse_int(
         last_trace.get("compact_window_claim_group_detaches")
     )
+    compact_window_claim_group_run_probes = parse_int(
+        last_trace.get("compact_window_claim_group_run_probes")
+    )
+    compact_window_claim_group_run_states = parse_int(
+        last_trace.get("compact_window_claim_group_run_states")
+    )
+    compact_window_claim_group_run_consecutive = parse_int(
+        last_trace.get("compact_window_claim_group_run_consecutive")
+    )
+    compact_window_claim_group_run_near64 = parse_int(
+        last_trace.get("compact_window_claim_group_run_near64")
+    )
+    compact_window_claim_group_run_near512 = parse_int(
+        last_trace.get("compact_window_claim_group_run_near512")
+    )
+    compact_window_claim_group_run_max_consecutive = parse_int(
+        last_trace.get("compact_window_claim_group_run_max_consecutive")
+    )
     compact_window_delayed_output_skips = parse_int(
         last_trace.get("compact_window_delayed_output_skips")
     )
@@ -605,6 +654,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_claim_group_scatters,
         "compact_window_claim_group_detaches":
             compact_window_claim_group_detaches,
+        "compact_window_claim_group_run_probes":
+            compact_window_claim_group_run_probes,
+        "compact_window_claim_group_run_states":
+            compact_window_claim_group_run_states,
+        "compact_window_claim_group_run_consecutive":
+            compact_window_claim_group_run_consecutive,
+        "compact_window_claim_group_run_near64":
+            compact_window_claim_group_run_near64,
+        "compact_window_claim_group_run_near512":
+            compact_window_claim_group_run_near512,
+        "compact_window_claim_group_run_max_consecutive":
+            compact_window_claim_group_run_max_consecutive,
         "compact_window_delayed_output_skips":
             compact_window_delayed_output_skips,
         "compact_window_delayed_output_replays":
@@ -694,6 +755,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_window_claim_group_scatters,
         "long_compact_window_claim_group_detaches":
             long_compact_window_claim_group_detaches,
+        "long_compact_window_claim_group_run_probes":
+            long_compact_window_claim_group_run_probes,
+        "long_compact_window_claim_group_run_states":
+            long_compact_window_claim_group_run_states,
+        "long_compact_window_claim_group_run_consecutive":
+            long_compact_window_claim_group_run_consecutive,
+        "long_compact_window_claim_group_run_near64":
+            long_compact_window_claim_group_run_near64,
+        "long_compact_window_claim_group_run_near512":
+            long_compact_window_claim_group_run_near512,
+        "long_compact_window_claim_group_run_max_consecutive":
+            long_compact_window_claim_group_run_max_consecutive,
         "long_compact_window_delayed_output_skips":
             long_compact_window_delayed_output_skips,
         "long_compact_window_delayed_output_replays":
@@ -795,6 +868,26 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_claim_group_detaches,
             compact_window_claim_group_scatters
             + compact_window_claim_group_detaches,
+        ),
+        "compact_window_claim_group_run_states_per_probe": ratio(
+            compact_window_claim_group_run_states,
+            compact_window_claim_group_run_probes,
+        ),
+        "compact_window_claim_group_run_consecutive_per_probe": ratio(
+            compact_window_claim_group_run_consecutive,
+            compact_window_claim_group_run_probes,
+        ),
+        "compact_window_claim_group_run_consecutive_share": ratio(
+            compact_window_claim_group_run_consecutive,
+            compact_window_claim_group_run_states,
+        ),
+        "compact_window_claim_group_run_near64_per_probe": ratio(
+            compact_window_claim_group_run_near64,
+            compact_window_claim_group_run_probes,
+        ),
+        "compact_window_claim_group_run_near512_per_probe": ratio(
+            compact_window_claim_group_run_near512,
+            compact_window_claim_group_run_probes,
         ),
         "compact_window_delayed_output_replay_entries_per_skip": ratio(
             compact_window_delayed_output_entries,
@@ -903,6 +996,26 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_window_claim_group_detaches,
             long_compact_window_claim_group_scatters
             + long_compact_window_claim_group_detaches,
+        ),
+        "long_compact_window_claim_group_run_states_per_probe": ratio(
+            long_compact_window_claim_group_run_states,
+            long_compact_window_claim_group_run_probes,
+        ),
+        "long_compact_window_claim_group_run_consecutive_per_probe": ratio(
+            long_compact_window_claim_group_run_consecutive,
+            long_compact_window_claim_group_run_probes,
+        ),
+        "long_compact_window_claim_group_run_consecutive_share": ratio(
+            long_compact_window_claim_group_run_consecutive,
+            long_compact_window_claim_group_run_states,
+        ),
+        "long_compact_window_claim_group_run_near64_per_probe": ratio(
+            long_compact_window_claim_group_run_near64,
+            long_compact_window_claim_group_run_probes,
+        ),
+        "long_compact_window_claim_group_run_near512_per_probe": ratio(
+            long_compact_window_claim_group_run_near512,
+            long_compact_window_claim_group_run_probes,
         ),
         "long_compact_window_delayed_output_replay_entries_per_skip": ratio(
             long_compact_window_delayed_output_entries,
@@ -1044,6 +1157,17 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_claim_miss_rate",
         "compact_window_claim_group_detaches",
         "compact_window_claim_group_detach_rate",
+        "compact_window_claim_group_run_probes",
+        "compact_window_claim_group_run_states",
+        "compact_window_claim_group_run_states_per_probe",
+        "compact_window_claim_group_run_consecutive",
+        "compact_window_claim_group_run_consecutive_per_probe",
+        "compact_window_claim_group_run_consecutive_share",
+        "compact_window_claim_group_run_near64",
+        "compact_window_claim_group_run_near64_per_probe",
+        "compact_window_claim_group_run_near512",
+        "compact_window_claim_group_run_near512_per_probe",
+        "compact_window_claim_group_run_max_consecutive",
         "compact_window_delayed_output_skips",
         "compact_window_delayed_output_replays",
         "compact_window_delayed_output_deps",
@@ -1150,6 +1274,17 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_compact_window_claim_miss_rate",
         "long_compact_window_claim_group_detaches",
         "long_compact_window_claim_group_detach_rate",
+        "long_compact_window_claim_group_run_probes",
+        "long_compact_window_claim_group_run_states",
+        "long_compact_window_claim_group_run_states_per_probe",
+        "long_compact_window_claim_group_run_consecutive",
+        "long_compact_window_claim_group_run_consecutive_per_probe",
+        "long_compact_window_claim_group_run_consecutive_share",
+        "long_compact_window_claim_group_run_near64",
+        "long_compact_window_claim_group_run_near64_per_probe",
+        "long_compact_window_claim_group_run_near512",
+        "long_compact_window_claim_group_run_near512_per_probe",
+        "long_compact_window_claim_group_run_max_consecutive",
         "long_compact_window_delayed_output_skips",
         "long_compact_window_delayed_output_replays",
         "long_compact_window_delayed_output_deps",
