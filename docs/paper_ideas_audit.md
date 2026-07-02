@@ -15744,3 +15744,30 @@ all-cache/tail variant reduced replay further but regressed progress to
 that delayed output should still be owned at a coarser grouped row/panel level,
 not through per-state producer-time hash aggregation on every cached output
 column.
+
+The shared span owner now has a direct single-producer mode behind
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_SINGLE_DEP=1`. Instead of
+building an all-delayed-output panel for the selected local states, the selector
+chooses the most common next delayed dependency among nearby grouped states,
+streams only that producer U row into the shared panel, and advances each tagged
+state by one delayed-output dependency when it is claimed. This is a narrower
+test of the paper-level producer-to-many-current owner and bypasses the older
+all-output contiguous span setup when requested. Correctness stayed clean under
+`cmake --build build -j2`, `./build/kls_smoke`, the opt-in `kls_smoke`, and
+`ctest --test-dir build --output-on-failure`.
+
+The focused traces make this a retained substrate, not a CKTSO-gap closer. On
+`bcircuit`, `build/kls_single_dep_dispatch_bcircuit_trace_t4_r1_ref0.stderr`
+completed the row pipeline with `28` shared-owner reservations, `84` tagged
+rows, `84` applies, and clean residual `8.16829708e-17`, but factor time stayed
+slower than the control. On the harder `ASIC_100ks` probe,
+`build/kls_single_dep_dispatch_asic100ks_trace_t4_r1_ref0.stderr` completed
+the traced dominant block with clean residual `2.25396042e-15` but built zero
+shared-owner reservations: the broad claim-span surface still averaged `58.8`
+nearby states and a `2.92%` grouped-scan ratio, while the best immediate
+next-dependency candidate averaged only about one row
+(`compact_window_span_owner_payoff_skip_rows_per_skip=1.004`). This rejects
+"stream only the next producer row" as the missing paper mechanism on the hard
+ASIC case. The next row/panel owner needs to share a wider delayed-output
+prefix or hold a panel workspace that can cover nonidentical pending producers
+without storing output back into future compact states.
