@@ -15568,3 +15568,22 @@ under the 125s cap. The remaining gap is therefore not lock placement around
 the existing root producer batches; KLS still needs a coarser row/panel
 live-workspace owner that makes much more of the postfactor/output stream shared
 before it becomes independent scalar row replay.
+
+The shared compact span owner was widened to separate the owner row capacity
+from the positional scan window. `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ROWS`
+still bounds the materialized shared panel, while
+`KLS_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_SCAN_ROWS` lets the selector scan a
+larger non-contiguous local window and prioritizes the currently claimed row as
+the first owned state. This directly tests the claim-surface evidence that
+useful `pre2` grouped rows are local but not mostly consecutive. The result is
+negative for the current compact-state owner shape. A loose 64-row owner with a
+512-row scan window,
+`build/kls_pre2_wide_shared_owner_w512_trace45.stderr`, did not reach the first
+progress checkpoint under the 45s cap. A capped run,
+`build/kls_pre2_wide_shared_owner_capped_w512_trace45.stderr`, reached only
+`131072/629628` rows in 45s, with `980` shared-owner reservations,
+`11813` shared-owner rows, `3778` applies, and `1393244` applied entries. The
+selector works, but the shared compact owner still pays too much to build and
+materialize delayed output. The next row/panel owner needs to keep output in a
+live executor or streaming kernel rather than broadening compact-state
+materialization.

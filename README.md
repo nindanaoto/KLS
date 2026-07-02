@@ -2440,6 +2440,11 @@ build one shared delayed-output panel for nearby grouped states, tag those
 states, and apply the panel only when each state is later claimed instead of
 materializing output columns into future compact rows. This is opt-in because
 the current implementation still does not close the `pre2` gap.
+`KLS_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_SCAN_ROWS=<rows>` widens the
+positional scan window used to choose non-contiguous shared-owner rows while
+leaving `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ROWS` as the bounded owner row
+capacity. The default keeps the old behavior by scanning only the owner-row
+span.
 Row-pipeline traces now report
 `compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,hole_skips,hole_skip_rows,prefix_shrinks,prefix_shrink_rows,oversize_skips,oversize_slots,link_skips,link_skip_entries,scan_skips,scan_skip_entries}`
 plus `compact_window_span_owner_payoff_{skips,skip_rows,skip_entries,skip_scan_entries}`
@@ -3188,6 +3193,18 @@ retained as concurrency substrate, not as a solved performance gap. The focused
 row. The missing paper-scale mechanism remains a coarser row/panel
 live-workspace owner that shares the postfactor/output stream before it falls
 back to scalar row replay.
+
+The shared span owner can now scan a wider non-contiguous compact group without
+increasing the bounded owner row capacity. This directly tests the trace signal
+that `pre2`'s grouped rows are local but not mostly consecutive. The focused
+wide-owner trace
+`build/kls_pre2_wide_shared_owner_capped_w512_trace45.stderr` was negative:
+with a 512-row compact window, 16 owned rows, and a 512-row scan window, KLS
+reached only `131072/629628` rows in 45s despite `980` shared-owner
+reservations and `3778` shared-owner applies. A looser 64-row owner did not
+reach the first progress checkpoint in the same cap. This keeps the missing
+mechanism focused on avoiding delayed-output materialization in compact states,
+not merely selecting a wider shared owner panel.
 
 ## License
 
