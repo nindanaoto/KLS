@@ -248,6 +248,97 @@ def paper_gap_signal(
     return "mixed"
 
 
+def print_concise_report(
+    rows: list[
+        tuple[
+            float,
+            str,
+            dict[str, float],
+            dict[str, float],
+            dict[str, object],
+        ]
+    ],
+    max_rows: int,
+) -> None:
+    fields = [
+        "matrix",
+        "candidate_cycle",
+        "reference_cycle",
+        "cycle_ratio",
+        "dominant_candidate_phase",
+        "dominant_candidate_share",
+        "paper_gap_signal",
+        "refactor_ratio",
+        "initial_factor_ratio",
+        "solve_ratio",
+        "analysis_ratio",
+        "candidate_initial_factor_path",
+        "candidate_last_factor_path",
+        "candidate_last_refactor_path",
+        "refactor_dependency_pipeline_share",
+        "refactor_dependency_work",
+        "refactor_dependency_pipeline_work",
+        "refactor_last_btf_scalar_run_rows",
+        "refactor_last_btf_scalar_run_entries",
+        "refactor_btf_scalar_run_group_multi_current_total",
+        "refactor_btf_scalar_run_group_reused_entries",
+        "row_refactor_auto_lower_bound_rejected",
+        "n",
+        "nblocks",
+        "max_block",
+        "scale",
+        "offdiag_pivots",
+    ]
+    print(",".join(fields))
+    for cycle_ratio, name, cand, ref, cand_row in rows[:max_rows]:
+        cand_cycle = sum(cand.values())
+        ref_cycle = sum(ref.values())
+        dominant_phase = max(cand, key=cand.get)
+        dominant_share = (
+            cand[dominant_phase] / cand_cycle if cand_cycle > 0.0 else math.nan
+        )
+        egraph_work = float_value(cand_row, "refactor_dependency_work")
+        values = [
+            name,
+            f"{cand_cycle:.6g}",
+            f"{ref_cycle:.6g}",
+            f"{cycle_ratio:.3f}",
+            dominant_phase,
+            f"{dominant_share:.1%}",
+            paper_gap_signal(cand, cand_row),
+            fmt_ratio(ratio(cand["refactor_99"], ref["refactor_99"])),
+            fmt_ratio(ratio(cand["initial_factor"], ref["initial_factor"])),
+            fmt_ratio(ratio(cand["solve_100"], ref["solve_100"])),
+            fmt_ratio(ratio(cand["analysis"], ref["analysis"])),
+            str_value(cand_row, "initial_factor_path"),
+            str_value(cand_row, "last_factor_path"),
+            str_value(cand_row, "last_refactor_path"),
+            fmt_share(
+                share(
+                    float_value(cand_row, "refactor_dependency_pipeline_work"),
+                    egraph_work,
+                )
+            ),
+            f"{egraph_work:.6g}",
+            f"{float_value(cand_row, 'refactor_dependency_pipeline_work'):.6g}",
+            str(int_value(cand_row, "refactor_last_btf_scalar_run_rows")),
+            str(int_value(cand_row, "refactor_last_btf_scalar_run_entries")),
+            str(
+                int_value(
+                    cand_row, "refactor_btf_scalar_run_group_multi_current_total"
+                )
+            ),
+            str(int_value(cand_row, "refactor_btf_scalar_run_group_reused_entries")),
+            str(int_value(cand_row, "row_refactor_auto_lower_bound_rejected")),
+            str(int_value(cand_row, "n")),
+            str(int_value(cand_row, "nblocks")),
+            str(int_value(cand_row, "max_block")),
+            str(int_value(cand_row, "scale")),
+            str(int_value(cand_row, "offdiag_pivots")),
+        ]
+        print(",".join(values))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate", type=pathlib.Path, required=True)
@@ -255,6 +346,11 @@ def main() -> int:
     parser.add_argument("--candidate-name", default="candidate")
     parser.add_argument("--reference-name", default="reference")
     parser.add_argument("--max-rows", type=int, default=20)
+    parser.add_argument(
+        "--concise",
+        action="store_true",
+        help="print the common high-signal CKTSO-gap columns instead of all diagnostics",
+    )
     args = parser.parse_args()
 
     candidate = load_rows(args.candidate)
@@ -287,6 +383,9 @@ def main() -> int:
             )
         )
     rows.sort(reverse=True)
+    if args.concise:
+        print_concise_report(rows, args.max_rows)
+        return 0
 
     header = (
         "matrix,candidate_cycle,reference_cycle,cycle_ratio,"

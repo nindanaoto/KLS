@@ -2118,6 +2118,10 @@ static work model is already worse than the existing exact EGraph schedule:
 python3 scripts/decompose_solver_gap.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/cktso_suite.jsonl --reference-name cktso
 ```
 
+Add `--concise` for the usual solved-by-reference triage view: it keeps the
+cycle ratio, dominant phase, paper-gap signal, path names, and the core EGraph
+pipeline work counters while omitting the full diagnostic surface.
+
 To summarize the CKTSO-style tail-restart opportunity fields across a KLS JSONL
 run, use:
 
