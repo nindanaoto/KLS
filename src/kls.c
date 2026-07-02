@@ -92648,6 +92648,12 @@ static int kls_row_first_pipeline_worker_scalar_batch_candidate(
     }
     return 0;
   }
+  if (worker->external_update_active) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_CLAIMED;
+    }
+    return 0;
+  }
   if (state->row >= shared->ctx->nk || dep >= state->row ||
       state->dep_heap_size == 0u) {
     if (reject_out != NULL) {
@@ -92727,6 +92733,12 @@ static int kls_row_first_pipeline_worker_supernode_batch_candidate(
     return 0;
   }
   if (worker->lookahead_active && worker->lookahead_claimed) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_CLAIMED;
+    }
+    return 0;
+  }
+  if (worker->external_update_active) {
     if (reject_out != NULL) {
       *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_CLAIMED;
     }
@@ -93076,6 +93088,103 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
   return 1;
 }
 
+static int kls_row_first_pipeline_apply_scalar_producer_targets(
+  const kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_batch_target *targets,
+  UF_long target_count,
+  UF_long dep,
+  const UF_long *row_cols,
+  const double *row_values,
+  UF_long row_entries,
+  UF_long *internal_entries_out,
+  UF_long *output_entries_out) {
+  if (internal_entries_out != NULL) {
+    *internal_entries_out = 0u;
+  }
+  if (output_entries_out != NULL) {
+    *output_entries_out = 0u;
+  }
+  if (shared == NULL || targets == NULL || target_count == 0u ||
+      shared->ctx == NULL || row_cols == NULL || row_values == NULL ||
+      dep >= shared->ctx->nk) {
+    return 0;
+  }
+
+  for (UF_long t = 0; t < target_count; ++t) {
+    kls_row_first_pipeline_worker *worker = targets[t].worker;
+    if (worker == NULL ||
+        !kls_row_first_entries_reserve_append(&worker->l_entries, 1u)) {
+      return 0;
+    }
+  }
+
+  for (UF_long t = 0; t < target_count; ++t) {
+    kls_row_first_pipeline_worker *worker = targets[t].worker;
+    kls_row_first_partial_row *state = targets[t].state;
+    if (worker == NULL || state == NULL ||
+        worker->workspace.dep_heap == NULL ||
+        worker->workspace.x == NULL) {
+      return 0;
+    }
+    const UF_long popped =
+      kls_row_first_heap_pop(worker->workspace.dep_heap,
+                             &state->dep_heap_size);
+    if (popped != dep ||
+        !kls_row_first_entries_append_reserved(
+          &worker->l_entries, state->row, dep, targets[t].lij)) {
+      return 0;
+    }
+    worker->workspace.x[dep] = 0.0;
+  }
+
+  UF_long internal_entries = 0u;
+  UF_long output_entries = 0u;
+  for (UF_long up = 0u; up < row_entries; ++up) {
+    const UF_long col = row_cols[up];
+    if (col <= dep || col >= shared->ctx->nk) {
+      return 0;
+    }
+    const double uvalue = row_values[up];
+    for (UF_long t = 0; t < target_count; ++t) {
+      kls_row_first_pipeline_worker *worker = targets[t].worker;
+      kls_row_first_partial_row *state = targets[t].state;
+      if (worker == NULL || state == NULL ||
+          worker->workspace.x == NULL ||
+          worker->workspace.mark == NULL ||
+          worker->workspace.pattern == NULL ||
+          worker->workspace.dep_heap == NULL) {
+        return 0;
+      }
+      double *x = worker->workspace.x;
+      unsigned int *mark = worker->workspace.mark;
+      UF_long *pattern = worker->workspace.pattern;
+      UF_long *dep_heap = worker->workspace.dep_heap;
+      if (mark[col] != state->generation) {
+        mark[col] = state->generation;
+        pattern[state->pattern_count++] = col;
+        if (col < state->row) {
+          kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
+        }
+        x[col] = 0.0;
+      }
+      x[col] -= targets[t].lij * uvalue;
+      if (col < state->row) {
+        kls_row_first_stats_add(&internal_entries, 1u);
+      } else {
+        kls_row_first_stats_add(&output_entries, 1u);
+      }
+    }
+  }
+
+  if (internal_entries_out != NULL) {
+    *internal_entries_out = internal_entries;
+  }
+  if (output_entries_out != NULL) {
+    *output_entries_out = output_entries;
+  }
+  return 1;
+}
+
 static int kls_row_first_pipeline_apply_producer_batch(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_pipeline_worker *current_worker,
@@ -93181,6 +93290,7 @@ static int kls_row_first_pipeline_apply_producer_batch(
     shared->batch_targets[target_count].lij = lij;
     target_count++;
   }
+  const UF_long active_target_count = target_count;
   for (int slot = 0; slot < shared->lookahead_count; ++slot) {
     kls_row_first_pipeline_worker *worker =
       shared->lookahead_states + slot;
@@ -93271,60 +93381,76 @@ static int kls_row_first_pipeline_apply_producer_batch(
     return 1;
   }
 
-  for (UF_long t = 0; t < target_count; ++t) {
-    if (!kls_row_first_entries_reserve_append(
-          &shared->batch_targets[t].worker->l_entries, 1u)) {
-      return 0;
-    }
-  }
-
-  for (UF_long t = 0; t < target_count; ++t) {
-    kls_row_first_pipeline_worker *worker =
-      shared->batch_targets[t].worker;
-    kls_row_first_partial_row *state = shared->batch_targets[t].state;
-    const UF_long popped =
-      kls_row_first_heap_pop(worker->workspace.dep_heap,
-                             &state->dep_heap_size);
-    if (popped != dep ||
-        !kls_row_first_entries_append_reserved(
-          &worker->l_entries, state->row, dep,
-          shared->batch_targets[t].lij)) {
-      return 0;
-    }
-    worker->workspace.x[dep] = 0.0;
-  }
-
   UF_long internal_entries = 0u;
   UF_long output_entries = 0u;
-  for (UF_long up = row_begin; up < row_end; ++up) {
-    const UF_long col = shared->u_entries->col[up];
-    if (col <= dep || col >= shared->ctx->nk) {
+  if (active_target_count == target_count) {
+    if (target_count >
+          (UF_long)(SIZE_MAX / sizeof(*shared->batch_targets)) ||
+        row_entries > (UF_long)(SIZE_MAX / sizeof(*shared->u_entries->col)) ||
+        row_entries > (UF_long)(SIZE_MAX /
+                                sizeof(*shared->u_entries->value))) {
       return 0;
     }
-    const double uvalue = shared->u_entries->value[up];
+    kls_row_first_pipeline_batch_target *detached_targets =
+      (kls_row_first_pipeline_batch_target *)malloc(
+        (size_t)target_count * sizeof(*detached_targets));
+    if (detached_targets == NULL) {
+      return 0;
+    }
+    UF_long *detached_cols =
+      (UF_long *)malloc((size_t)row_entries *
+                        sizeof(*detached_cols));
+    double *detached_values =
+      (double *)malloc((size_t)row_entries *
+                       sizeof(*detached_values));
+    if (detached_cols == NULL || detached_values == NULL) {
+      free(detached_values);
+      free(detached_cols);
+      free(detached_targets);
+      return 0;
+    }
+    memcpy(detached_cols, shared->u_entries->col + row_begin,
+           (size_t)row_entries * sizeof(*detached_cols));
+    memcpy(detached_values, shared->u_entries->value + row_begin,
+           (size_t)row_entries * sizeof(*detached_values));
     for (UF_long t = 0; t < target_count; ++t) {
       kls_row_first_pipeline_worker *worker =
         shared->batch_targets[t].worker;
-      kls_row_first_partial_row *state = shared->batch_targets[t].state;
-      double *x = worker->workspace.x;
-      unsigned int *mark = worker->workspace.mark;
-      UF_long *pattern = worker->workspace.pattern;
-      UF_long *dep_heap = worker->workspace.dep_heap;
-      if (mark[col] != state->generation) {
-        mark[col] = state->generation;
-        pattern[state->pattern_count++] = col;
-        if (col < state->row) {
-          kls_row_first_heap_push(dep_heap, &state->dep_heap_size, col);
-        }
-        x[col] = 0.0;
-      }
-      x[col] -= shared->batch_targets[t].lij * uvalue;
-      if (col < state->row) {
-        internal_entries++;
-      } else {
-        output_entries++;
+      detached_targets[t] = shared->batch_targets[t];
+      if (worker != NULL) {
+        worker->external_update_active = 1;
       }
     }
+    pthread_mutex_unlock(&shared->lock);
+    const int ok = kls_row_first_pipeline_apply_scalar_producer_targets(
+      shared, detached_targets, target_count, dep,
+      detached_cols, detached_values, row_entries,
+      &internal_entries, &output_entries);
+    pthread_mutex_lock(&shared->lock);
+    for (UF_long t = 0; t < target_count; ++t) {
+      kls_row_first_pipeline_worker *worker = detached_targets[t].worker;
+      if (worker != NULL) {
+        worker->external_update_active = 0;
+      }
+    }
+    pthread_cond_broadcast(&shared->cond);
+    if (!ok) {
+      free(detached_values);
+      free(detached_cols);
+      free(detached_targets);
+      return 0;
+    }
+    memcpy(shared->batch_targets, detached_targets,
+           (size_t)target_count * sizeof(*shared->batch_targets));
+    free(detached_values);
+    free(detached_cols);
+    free(detached_targets);
+  } else if (!kls_row_first_pipeline_apply_scalar_producer_targets(
+               shared, shared->batch_targets, target_count, dep,
+               shared->u_entries->col + row_begin,
+               shared->u_entries->value + row_begin, row_entries,
+               &internal_entries, &output_entries)) {
+    return 0;
   }
 
   if (producer_trace != NULL) {

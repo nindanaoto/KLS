@@ -3176,6 +3176,19 @@ reverted. The remaining `pre2` gap is therefore not explained by simply
 combining SPRAL/MC64-style static pivoting with explicit METIS; it is still the
 row/panel output-postfactor owner inside the pivoting first-factor tail.
 
+The default scalar producer batch now uses that same owner direction more
+safely: active-worker targets are copied into private storage, marked with the
+external-update gate, and updated outside the ordered pipeline mutex using a
+private copy of the published U row. Candidate selection skips workers already
+under an external update, including the opt-in supernode producer path. This is
+retained as concurrency substrate, not as a solved performance gap. The focused
+`pre2` trace `build/kls_pre2_detached_scalar_t4_75.stderr` still timed out at
+`589824/629628` rows with only `467460` producer target U entries against
+`430728328` scalar U output, and the untraced 125s factor probe emitted no JSON
+row. The missing paper-scale mechanism remains a coarser row/panel
+live-workspace owner that shares the postfactor/output stream before it falls
+back to scalar row replay.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

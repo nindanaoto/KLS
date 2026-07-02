@@ -15549,3 +15549,22 @@ static matching" as the clear large missing `pre2` mechanism. Static
 pivoting/scaling remains important for robustness and other matrices, but the
 current actionable `pre2` loss remains the first-factor row/panel
 postfactor/output owner, not another matching gate.
+
+The scalar producer-batch owner was then made concurrency-safe outside the
+ordered pipeline mutex for active worker targets. The implementation copies the
+published producer U row before unlocking, copies the target list into private
+storage, marks claimed target workers with the existing external-update gate,
+and rejects already externally-updated workers from both scalar and supernode
+producer candidate selection. Lookahead targets stay on the locked path, so this
+does not mix detached updates with lookahead claim/adoption semantics. This is
+retained as a paper-aligned owner primitive, but the focused `pre2` evidence
+still rejects it as the CKTSO-gap closer. The traced run
+`build/kls_pre2_detached_scalar_t4_75.stderr` timed out at
+`589824/629628` rows with only `264` accepted producer batches and `467460`
+producer target U entries, versus `506475007` scalar U entries and
+`430728328` scalar U output. The untraced factor probe
+`build/kls_pre2_detached_scalar_t4_r1_ref0_timeout125.json` emitted no JSON row
+under the 125s cap. The remaining gap is therefore not lock placement around
+the existing root producer batches; KLS still needs a coarser row/panel
+live-workspace owner that makes much more of the postfactor/output stream shared
+before it becomes independent scalar row replay.
