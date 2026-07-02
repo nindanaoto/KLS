@@ -2315,6 +2315,12 @@ and reached only `262144/629628` rows. After sparse claim detaches, the same
 flag improved to `524288/629628` but still lost to the detach-only
 `589824/629628` checkpoint, so the default path keeps only the diagnostic
 counters.
+An append-only grouped output-stream prototype was also tested and reverted. It
+shared producer-row scans without inserting output columns into the compact
+state hash, but the default stream cap still reached only `262144/629628` rows
+in 45s with `90` stream overflows, and a `4096`-entry cap regressed to
+`196608/629628` rows with `5296` overflows. The actionable gap therefore remains
+a true row/panel owner workspace, not another per-future-row output store.
 On `pre2`, a suffix-seek replay probe with the 512-state compact window reached
 the same `589824/629628` 45s checkpoint as the prior delayed-output run and
 skipped only `254207` prefix entries while scanning `458936540` entries. This

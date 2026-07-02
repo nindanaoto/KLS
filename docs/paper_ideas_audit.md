@@ -15250,6 +15250,24 @@ materialization as the missing paper mechanism. The next row/panel owner needs
 to keep shared postfactor/output work in an owner workspace or stream, without
 persisting those output columns back into future independent compact states.
 
+An append-only grouped output-stream prototype tested the stream half of that
+last sentence and was also rejected before retaining code. The prototype shared
+the sparse-group delayed-output producer scans, appended output contributions to
+per-state streams instead of hash-inserting them into compact state patterns, and
+drained each stream directly into the claimed worker workspace. Correctness
+stayed clean under `cmake --build build --target kls_bench kls_smoke -j2`,
+`./build/kls_smoke`, and the compact sparse delayed-output output-stream smoke.
+On `pre2`, however,
+`build/kls_pre2_output_stream_sparse_delay_w512_trace45.stderr` reached only
+`262144/629628` rows in 45s. It reduced delayed output scan entries to
+`190,255,136`, but still carried `279,427,229` delayed output entries and hit
+`90` stream overflows. Tightening the stream cap to `4096` entries in
+`build/kls_pre2_output_stream_cap4096_sparse_delay_w512_trace45.stderr`
+regressed further to `196608/629628` rows and `5296` overflows. This rules out
+"keep output in per-future-row streams" as the missing paper mechanism; the
+postfactor work needs to stay in a row/panel owner workspace or equivalent
+streaming kernel rather than being stored per future compact row.
+
 A follow-up checked the other obvious CKTSO/SubtreeLU paper gap before
 returning to row ownership: static pivoting before explicit nested dissection.
 The raw `pre2` matrix satisfies the large SPRAL/MC64-style trigger, with
