@@ -6,6 +6,47 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+The `pre2` CKTSO gap is now decomposed and the first-factor half is fixed.
+Uncapped runs showed that KLS's production first factor on `pre2` does not
+merely time out: it fails outright (`KLS_ERR_FACTOR_FAILED` after ~13 minutes
+at 12.5GB peak RSS) under both AMD and METIS orderings, matching the NICSLU
+paper's report that KLU cannot factor `pre2` at all. The cause chain, isolated
+with standalone KLU/SPRAL/METIS/CAMD experiments
+(`build/kls_pre2_prestatic_v5_t4.*` holds the end-to-end artifact):
+`pre2` has 425k/659k structurally missing diagonals; the pre-static SPRAL
+auction match covers only 96.1%, below the 99.5% acceptance gate, so the
+static-pivoting trial silently died and the plain threshold-pivoting KLU
+factor exploded structurally from element growth. Exact SPRAL Hungarian
+matching covers 100% in 0.3s. With the matched diagonal, *scaled* values
+still explode at tol 1e-3 and 1e-4 (KLU `TOO_LARGE` at 14.5GB) because
+matching-based scaling flattens the column magnitude contrast, while
+*unscaled* values survive the default tolerance — consistent with CKTSO's
+scaling-off default (`iparm[7]=0`). Ordering decides the factor work once the
+structure survives: on the matched pattern, METIS+CAMD gives 96.5M L+U proxy
+and 8.8e10 flops versus AMD's 123.9M and 2.5e11 (the existing window-4096
+CAMD constraints match CKTSO-style NDP-part constraints within 2%, so no new
+constraint machinery is needed). The accepted end-to-end recipe — Hungarian
+match, unscaled, METIS+CAMD selected by fill estimate, default tolerance —
+factors `pre2` with lnz+unz 75.7M (CKTSO: 72.4M), 3078 off-diagonal pivots,
+1.09e11 flops, ~63-90s serial, with solve error at the condition-limited
+floor (inf err ~1e-6 after refinement; rcond ~6e-24 without pivoting is why
+NICSLU reports pure no-pivot factorization fails on this matrix). Four
+source changes implement this: Hungarian escalation gated on
+`missing_diagonal*2 >= n` (the gate keeps healthy-diagonal matrices like
+`rajat29` on their existing paths), a large mostly-missing-diagonal arm in
+`static_match_prefers_unscaled`, singleton-group CAMD in `kls_metis_order` so
+METIS orderings report a real lnz estimate through `symbolic_score` for every
+block size, and a CKTSO-style estimate-based METIS candidate comparison in the
+pre-static trial behind an 8e7 estimated-fill floor. Smoke-manifest and
+rajat30/nxp1/ASIC_680k A/B runs are at control parity. The remaining `pre2`
+gap versus CKTSO (6.2s factor / 4.9s refactor at 4 threads) is now a numeric
+throughput gap on a working factorization: ~60-90s serial refactor at 1.1e11
+flops needs the parallel EGraph refactor classes to accept the
+`row_perm`-accepted dominant-BTF shape (the current
+`kls_dominant_btf_fast_factor_repair_is_risky` guard also forces repeat
+`kls_factor` calls into a full KLU rebuild for this shape) plus the
+supernode/panel kernel work already tracked below.
+
 A current solved-by-CKTSO top-five recheck keeps the immediate tuning target on
 refactor numeric ownership rather than Hamrle3-style shared timeouts. The fresh
 KLS artifact `build/kls_gap5_current_recheck_t4_r1_ref3_timeout120.jsonl`
