@@ -2404,6 +2404,18 @@ additions per touched cell and only `1.26x` dense slots per touched cell, so
 the paper-aligned next step is a worker-owned masked/dense span workspace that
 streams grouped delayed output into the local panel rather than materializing
 it into each future compact state.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_OWNER=1` enables the first opt-in
+implementation of that worker-owned span workspace. It reserves a local
+contiguous factor-position span, owns the grouped compact rows inside that
+span, streams currently-known delayed output into a worker-owned masked dense
+panel, and applies each panel row only when that same worker consumes the
+reserved row. `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ROWS=<rows>` controls the
+span width (`4` by default, clipped at `256`). On `bcircuit`, the same
+compact/delay setup improved from `0.625s` initial factor without the span owner
+to `0.450s` at 16 rows and `0.384s` at 64 rows in quick 3-repeat probes; 256
+rows was slightly worse at `0.392s`. The same prototype still timed out on
+`pre2` after 45s, so it is retained as experimental paper-aligned substrate,
+not a default policy.
 `build/kls_pre2_claim_span64_output_surface_w512_trace45.stderr` again reached
 `589824/629628`, but the span surface covered `318,807` states (`9.78` per
 surface) and cut scan volume to `168,701,660` grouped entries from

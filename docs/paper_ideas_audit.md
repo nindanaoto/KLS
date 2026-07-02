@@ -110,6 +110,19 @@ touched cell. The next implementation should therefore own a local masked or
 dense span workspace and apply grouped delayed-output scans into that worker
 workspace, while avoiding the already-rejected variants that write all output
 back into future compact states or merely reserve scheduler positions.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_OWNER=1` now implements that direction as
+an opt-in prototype: the worker reserves a local span, owns the grouped compact
+rows inside it, preplays currently-known delayed output into a worker-owned
+masked dense panel, and consumes those panel rows only through the same
+reserved worker queue. This is the first source-retained implementation that
+fills the paper gap directly instead of just measuring it. On `bcircuit`, quick
+3-repeat probes improved initial factor time from `0.625s` for the same
+compact/delay path without the owner to `0.450s` at 16 rows and `0.384s` at 64
+rows; 256 rows was slightly worse at `0.392s`. The opt-in default is kept at 4
+rows so the full smoke suite still completes when the prototype is enabled. The
+first `pre2` factor-only probe with a 64-row span still timed out after 45s, so
+the prototype is evidence-backed substrate rather than a completed CKTSO-gap
+closer.
 
 A same-options span-width recheck after making the span surface runtime
 configurable confirms that the useful paper-shaped owner is wider than the
