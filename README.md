@@ -2537,14 +2537,16 @@ positional scan window used to choose non-contiguous shared-owner rows while
 leaving `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ROWS` as the bounded owner row
 capacity. The default keeps the old behavior by scanning only the owner-row
 span.
-`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_SINGLE_DEP=1` narrows that
-shared owner to a single producer row: it picks the most common next delayed
-dependency among nearby grouped states, streams only that producer's output into
-the shared panel, and advances each tagged row by one delayed-output dependency
-when claimed. This tests the paper-shaped producer-to-many-current owner without
-eagerly materializing every delayed output column. It remains opt-in because
-current hard-row traces show the immediate next-dependency fanout is often too
-small to close the CKTSO gap by itself.
+`KLS_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_DEP_LIMIT=N` narrows that shared
+owner to a capped delayed-output producer window. It picks up to `N` common
+pending producer rows from nearby grouped states, streams only those producers
+into the shared panel, and advances each tagged row through the contiguous
+prefix covered by the selected producer set when claimed. `N` is capped at `64`;
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_SINGLE_DEP=1` is a
+compatibility shorthand for `N=1`. This tests the paper-shaped
+producer-to-many-current owner without eagerly materializing every delayed
+output column. It remains opt-in because current hard-row traces show the useful
+sharing is often out of prefix order.
 Row-pipeline traces now report
 `compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,hole_skips,hole_skip_rows,prefix_shrinks,prefix_shrink_rows,oversize_skips,oversize_slots,link_skips,link_skip_entries,scan_skips,scan_skip_entries}`
 plus `compact_window_span_owner_payoff_{skips,skip_rows,skip_entries,skip_scan_entries}`

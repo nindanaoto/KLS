@@ -15771,3 +15771,28 @@ next-dependency candidate averaged only about one row
 ASIC case. The next row/panel owner needs to share a wider delayed-output
 prefix or hold a panel workspace that can cover nonidentical pending producers
 without storing output back into future compact states.
+
+The single-producer selector has now been generalized to a capped delayed-output
+prefix window,
+`KLS_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_DEP_LIMIT=N`. `N=1` preserves the
+single-producer mode, while larger values select the most common pending
+producer rows and let each tagged state advance through the contiguous prefix
+covered by that selected producer set. This directly tests whether the missing
+paper owner is just a short producer prefix rather than a full all-output panel.
+Correctness stayed clean under `cmake --build build -j2`, `./build/kls_smoke`,
+the single-producer and `DEP_LIMIT=4` opt-in smoke modes.
+
+The focused result rejects this as the hard-row closer. On `bcircuit`,
+`build/kls_depwin4_bcircuit_trace_t4_r1_ref0.stderr` raised shared-owner
+coverage from the single-producer `28` reservations / `84` rows to `221`
+reservations / `785` rows with clean residual `8.16829708e-17`, but factor time
+remained slower than control. On `ASIC_100ks`, both
+`build/kls_depwin4_asic100ks_trace_t4_r1_ref0.stderr` and
+`build/kls_depwin8_asic100ks_trace_t4_r1_ref0.stderr` still built zero
+shared-owner reservations despite the broad claim-span surface
+(`~58.7` states per surface and `~2.92%` grouped-scan ratio). The best
+contiguous selected-prefix row count stayed about one
+(`1.015` for `DEP_LIMIT=4`, `1.022` for `DEP_LIMIT=8`). This makes the next
+paper-aligned owner more specific: it must share out-of-order delayed-output
+producers in a panel/workspace and then avoid double replay at claim time,
+instead of only advancing a contiguous delayed-output prefix.
