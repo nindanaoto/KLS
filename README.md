@@ -2320,11 +2320,16 @@ across grouped states.
 grouped replay experiment, but it remains off by default: a 45s `pre2` trial
 cut delayed replay scan entries while inflating delayed output materialization
 and reached only `262144/629628` rows. After sparse claim detaches, the same
-flag improved to `524288/629628` but still lost to the detach-only
-`589824/629628` checkpoint, so the default path keeps only the diagnostic
-counters.
-An append-only grouped output-stream prototype was also tested and reverted. It
-shared producer-row scans without inserting output columns into the compact
+	flag improved to `524288/629628` but still lost to the detach-only
+	`589824/629628` checkpoint, so the default path keeps only the diagnostic
+	counters.
+	A selective claim-run replay prototype was also tested and reverted. It
+	limited grouped delayed-output replay to the strict consecutive run starting at
+	the claimed row, but `pre2` still regressed to `524288/629628` rows versus the
+	current direct replay's `589824/629628`: scan entries fell to `263,693,712`,
+	while materialized delayed output grew to `624,187,362` entries.
+	An append-only grouped output-stream prototype was also tested and reverted. It
+	shared producer-row scans without inserting output columns into the compact
 state hash, but the default stream cap still reached only `262144/629628` rows
 in 45s with `90` stream overflows, and a `4096`-entry cap regressed to
 `196608/629628` rows with `5296` overflows. The actionable gap therefore remains

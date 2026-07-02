@@ -15297,6 +15297,24 @@ local row/panel owner or a selective claim-run replay that limits materialized
 future output to immediately claimable rows instead of replaying the entire
 sparse group.
 
+The selective claim-run replay variant was then implemented as an opt-in
+prototype and rejected before retaining source code. It reused the sparse-group
+delayed replay kernel, but filtered the group to the strict consecutive run
+starting at the claimed position. Correctness stayed clean under
+`cmake --build build --target kls_bench kls_smoke -j2`, `./build/kls_smoke`, and
+the compact sparse delayed-output claim-run smoke. On `pre2`,
+`build/kls_pre2_claim_run_replay_w512_trace45.stderr` reached only
+`524288/629628` rows in 45s. A same-source direct replay rerun,
+`build/kls_pre2_direct_after_claim_run_code_w512_trace45.stderr`, reached
+`589824/629628`. The claim-run replay reduced delayed-output scan entries
+(`263,693,712` versus `459,688,630`) but raised delayed-output materialization
+(`624,187,362` versus `387,861,547`) and scalar output accounting
+(`758,843,786` versus `550,366,263`). This confirms that even immediate
+future-row materialization is still the wrong side of the tradeoff. The missing
+paper-sized mechanism needs to share the output U-row scans in an owner
+workspace or streaming kernel without storing those output columns back into
+future compact row states.
+
 A follow-up checked the other obvious CKTSO/SubtreeLU paper gap before
 returning to row ownership: static pivoting before explicit nested dissection.
 The raw `pre2` matrix satisfies the large SPRAL/MC64-style trigger, with
