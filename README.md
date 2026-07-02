@@ -2421,7 +2421,12 @@ masked panel (`65536` slots by default). The setup phase is capped separately:
 `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_LINKS=<links>` defaults to `1`
 dependency links and
 `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SCAN_ENTRIES=<entries>` defaults to
-`524288` scanned U-row entries. Candidates that exceed any cap fall back to the
+`524288` scanned U-row entries.
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MIN_ROWS=<rows>` defaults to `4`, and
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MIN_ENTRIES_PER_SCAN=<ratio>` defaults to
+`2`, so tiny panels are rejected unless they own enough rows and are projected
+to replay at least twice as many output entries as the grouped setup scan.
+Candidates that exceed any cap or miss this payoff gate fall back to the
 existing compact path before allocating or filling the owner panel. By default
 the owner also requires every row in the reserved span to be an owned grouped
 state, avoiding reserved holes that serialize recomputation inside the same
@@ -2437,10 +2442,11 @@ materializing output columns into future compact rows. This is opt-in because
 the current implementation still does not close the `pre2` gap.
 Row-pipeline traces now report
 `compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,hole_skips,hole_skip_rows,prefix_shrinks,prefix_shrink_rows,oversize_skips,oversize_slots,link_skips,link_skip_entries,scan_skips,scan_skip_entries}`
+plus `compact_window_span_owner_payoff_{skips,skip_rows,skip_entries,skip_scan_entries}`
 and `compact_window_span_shared_owner_{reservations,rows,applies,entries}`
 so the owner can be tuned from workspace density, discovery cost, reserved hole
-cost, prefix-shrink opportunities, and shared-owner reuse instead of a
-matrix-specific rule.
+cost, prefix-shrink opportunities, payoff rejects, and shared-owner reuse
+instead of a matrix-specific rule.
 The link cap is deliberately conservative after `pre2` evidence: the default
 cap-1 opt-in trace reached `524288/629628` rows in 45s with zero owner
 reservations and `53,626` link-skip fallbacks before the hole guard. The
@@ -2458,7 +2464,13 @@ enough: with cap-2,
 `build/kls_pre2_span_shared_owner_linkcap2_trace45.stderr` again reached
 `524288/629628`, building 555 shared two-row panels and applying 985 tagged
 rows; cap-4 and cap-16 both regressed to `65536/629628`. The shared owner
-therefore remains an experimental substrate, not a default path.
+therefore remains an experimental substrate, not a default path. The payoff
+gate repeat,
+`build/kls_pre2_span_owner_payoff_linkcap16_trace45.stderr`, cut cap-16
+reservations from 794 to 16 and rejected 3,627 low-payoff candidates, but it
+still reached only `65536/629628`; this keeps the evidence pointed at a
+coarser numeric owner/refactor algorithm rather than just a missing admission
+threshold.
 Before the link cap was tightened, a five-matrix smoke-manifest A/B against the
 same compact/delay baseline with the 4-row owner improved the SPICE-cycle
 geomean from `0.0474s` to `0.0415s` (`1.14x`), with wins over 2% on `add20`,

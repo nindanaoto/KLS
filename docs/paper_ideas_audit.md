@@ -129,7 +129,12 @@ slots by default),
 `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_LINKS` caps dependency links
 (`1` by default), and
 `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SCAN_ENTRIES` caps scanned U-row
-entries during column discovery (`524288` by default). The default owner also
+entries during column discovery (`524288` by default). The owner now also has a
+paper-shaped payoff gate:
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MIN_ROWS` defaults to `4`, and
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MIN_ENTRIES_PER_SCAN` defaults to `2`, so
+two-row panels and panels that do not at least double the grouped scan work are
+rejected before they can perturb the pipeline. The default owner also
 rejects any candidate with reserved holes, because a contiguous claim span with
 unowned positions serializes those rows through the same worker. The earlier
 holey behavior is still available for experiments through
@@ -142,7 +147,7 @@ non-contiguous owner workspace directly: it builds one delayed-output panel for
 nearby grouped states, tags those states, and applies the panel only when each
 state is later claimed. Row-pipeline traces report owner reservations, density,
 hole skips, prefix-shrink opportunities, shared-owner reservations/applies,
-oversize skips, link skips, and scan skips directly. A traced 64-row `bcircuit`
+oversize skips, link skips, scan skips, and payoff skips directly. A traced 64-row `bcircuit`
 run showed why a simple density gate would be wrong: only `8.0%` of reserved
 span positions were owned grouped rows, but the owner still improved time
 because each build had useful scan amortization (`2.68` output entries per scan
@@ -171,10 +176,13 @@ non-contiguous tags without serializing holes, but it was still not a gap
 closer: `build/kls_pre2_span_shared_owner_linkcap2_trace45.stderr` reached the
 same `524288/629628` checkpoint as the prefix-off control, with 555 shared
 two-row panels and 985 later applies. Raising the cap to 4 or 16 regressed to
-`65536/629628`.
+`65536/629628`. The payoff-gated repeat
+`build/kls_pre2_span_owner_payoff_linkcap16_trace45.stderr` reduced cap-16
+reservations from 794 to 16 and recorded 3,627 payoff rejects, but it still
+only reached `65536/629628`.
 This rejects "non-contiguous tagging alone" as the missing CKTSO-scale
-mechanism; the next owner needs a stronger payoff model or a coarser
-supernode/panel update kernel before widening the accepted panel.
+mechanism; the next owner needs a coarser supernode/panel update or refactor
+kernel before widening the accepted panel.
 Before the link cap was tightened, a five-matrix smoke-manifest A/B with the
 4-row owner showed that the source-retained prototype can be useful on small
 public cases: the compact/delay baseline geomean was `0.0474s`, while that
