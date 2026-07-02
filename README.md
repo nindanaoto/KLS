@@ -2289,6 +2289,11 @@ exact sparse batched update is used instead. Compact execution traces also
 report
 `compact_window_claim_{attempts,claims,misses,stale_clears,group_scatters}` so
 reuse can be separated from eager-update cost.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPARSE_GROUP=1` keeps an opt-in persistent
+compact group in each member state's sparse row/index storage instead of the
+dense target-by-union matrix. This is useful for paper-gap probes that need to
+separate grouped-owner coverage from dense materialization cost; it remains off
+by default and still requires `KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1`.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT=1` adds an opt-in
 prefactor/postfactor split for that compact executor: producer publication
 updates only dependencies below the target row, while diagonal/output U updates

@@ -15095,3 +15095,35 @@ group grow incrementally" as the missing CKTSO-scale mechanism. The paper-sized
 gap is now narrower: the grouped owner must cover the main row/panel state, or
 a sparse row-position owner wider than the bounded compact window, instead of
 continuing to add mechanics to the 64-row compact-window prototype.
+
+The compact live-window executor now also has an opt-in sparse persistent
+group, controlled by `KLS_ENABLE_ROW_PIPELINE_COMPACT_SPARSE_GROUP=1` together
+with `KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1`. Instead of promoting same-root
+compact states into the dense target-by-union matrix, this path keeps each
+member row in its own sparse pattern/value/index storage, unlinks the grouped
+states from root buckets, advances them together on the shared producer, and
+merges later compact states whose next dependency matches the sparse group's
+next producer. This directly tests whether the previous compact-group loss was
+mostly dense materialization rather than insufficient owner coverage.
+
+Correctness stayed clean under `cmake --build build --target kls_bench
+kls_smoke -j2`, `./build/kls_smoke`,
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1
+KLS_ENABLE_ROW_PIPELINE_COMPACT_SPARSE_GROUP=1 ./build/kls_smoke`,
+`ctest --test-dir build --output-on-failure`, and compact-exec sparse-group
+`add20` / `bcircuit` probes with relative residuals `3.38738965e-16` and
+`8.16829708e-17`. On the focused 64-state `pre2` trace
+`build/kls_pre2_compact_sparse_group_w64_trace45.stderr`, the sparse group was
+active and reached the same `589824/629628` checkpoint. It recorded `77,513`
+grouped producer steps, `443,531` grouped targets, `40,143` sparse merge
+events, and `101,054` merged targets, while dense compact-union batches stayed
+at zero. Against the prior dense-group checkpoint
+`build/kls_pre2_compact_group_w64_trace45.stderr`, grouped value traffic fell
+from `78,970,065` dense target-union values to `28,946,578` sparse group
+values plus `10,339,969` sparse merge values, and scalar U touches moved only
+slightly (`650,809,838` to `648,133,274`). The no-trace 125s factor-only probe
+`build/kls_pre2_compact_sparse_group_w64_factor_t4_r1_ref0_timeout125.json`
+still timed out with an empty JSON row. This means sparse grouping successfully
+removes dense compact-owner materialization, but it does not close the CKTSO
+gap; the missing paper-sized mechanism is still a wider main row/panel grouped
+owner, not another bounded 64-row compact-window variant.
