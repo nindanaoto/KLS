@@ -15182,3 +15182,20 @@ surface stayed essentially unchanged (`388,010,831` replayed output entries
 before, `388,256,554` after). This keeps the gap diagnosis focused on
 postfactor replay amortization in a wider main row/panel owner, not on compact
 group representation or eager output updates alone.
+
+The delayed sparse-group trace now measures a grouped replay opportunity
+surface before each sparse-group scatter. On
+`build/kls_pre2_group_surface_gated_w512_trace45.stderr`, still at the normal
+`589824/629628` checkpoint, `85,871` surfaces covered `2,128,892` states and
+`149,160,558` delayed dependencies. Only `9,763,884` dependencies were unique
+(`6.55%`), and a grouped scan estimate was `745,065,655` entries versus
+`19,378,697,456` separate replay scan entries (`3.84%`). That confirms the
+paper-shaped sharing surface is real. The direct numeric implementation is
+available only under `KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_REPLAY=1` because
+the first trial, `build/kls_pre2_group_replay_sparse_delay_w512_trace45.stderr`,
+reached only `262144/629628`: delayed replay scan entries fell to
+`112,352,607`, but delayed output entries grew to `1,086,452,821` and scalar
+output accounting to `1,156,915,464`. This rejects blind replay of every
+separated grouped state as the default and points the next paper-gap work at a
+claim-local or panel-owner output workspace that shares scans without eagerly
+materializing all future output columns.

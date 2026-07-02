@@ -2301,6 +2301,15 @@ prefactor/postfactor split for that compact executor: producer publication
 updates only dependencies below the target row, while diagonal/output U updates
 are replayed when the prepared compact state is claimed. Traces report
 `compact_window_delayed_output_{skips,replays,deps,entries,scan_entries,seek_skips}`.
+With sparse compact groups enabled, traces also report
+`compact_window_delayed_group_replay_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`
+to measure how much claim-time delayed replay could share producer-row scans
+across grouped states.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_REPLAY=1` enables the matching numeric
+grouped replay experiment, but it remains off by default: a 45s `pre2` trial
+cut delayed replay scan entries while inflating delayed output materialization
+and reached only `262144/629628` rows, so the default path keeps only the
+diagnostic counters.
 On `pre2`, a suffix-seek replay probe with the 512-state compact window reached
 the same `589824/629628` 45s checkpoint as the prior delayed-output run and
 skipped only `254207` prefix entries while scanning `458936540` entries. This
