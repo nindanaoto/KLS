@@ -2954,6 +2954,22 @@ missing CKTSO/SubtreeLU mechanism; the next owner needs to share the output
 postfactor work without converting future rows back into independent compact
 state payloads.
 
+An explicit-METIS pre-static matching trial was also rejected for `pre2`.
+`pre2` does satisfy the paper-level static-pivoting predicate
+(`437785` weak diagonal rows and `425257` missing diagonal entries at the
+`0.001` pivot tolerance), but enabling the large SPRAL pre-static path for
+forced-METIS KLS-first runs did not change the dominant tail. The KLU-accepted
+variant reached only `262144/629628` rows in the 45s trace
+`build/kls_pre2_prestatic_metis_sparse_delay_w512_trace45.stderr`, and the
+matching no-KLS-first diagnostic timed out at 120s without a JSON row. A direct
+static-pivot install that skipped the serial KLU acceptance factor improved the
+45s checkpoint only to `327680/629628` in
+`build/kls_pre2_prestatic_direct_metis_sparse_delay_w512_trace45.stderr`, still
+behind the direct claim replay baseline at `589824/629628`. That prototype was
+reverted. The remaining `pre2` gap is therefore not explained by simply
+combining SPRAL/MC64-style static pivoting with explicit METIS; it is still the
+row/panel output-postfactor owner inside the pivoting first-factor tail.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

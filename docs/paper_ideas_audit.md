@@ -15249,3 +15249,26 @@ the default eight-row panel trace
 materialization as the missing paper mechanism. The next row/panel owner needs
 to keep shared postfactor/output work in an owner workspace or stream, without
 persisting those output columns back into future independent compact states.
+
+A follow-up checked the other obvious CKTSO/SubtreeLU paper gap before
+returning to row ownership: static pivoting before explicit nested dissection.
+The raw `pre2` matrix satisfies the large SPRAL/MC64-style trigger, with
+`437785` weak diagonal rows and `425257` missing diagonal entries at the
+default `0.001` pivot tolerance, so it was plausible that the forced-METIS
+KLS-first runs were missing CKTSO's matching-before-ordering step. Two
+prototypes were rejected and reverted. First, allowing the existing
+KLU-accepted pre-static path under explicit METIS reached only
+`262144/629628` rows in
+`build/kls_pre2_prestatic_metis_sparse_delay_w512_trace45.stderr`, while the
+same direct claim replay baseline reached `589824/629628`; the no-KLS-first
+diagnostic `build/kls_pre2_prestatic_metis_klu_t4_r1_ref0_timeout120.json`
+timed out with no JSON row. Second, a direct static-pivot install path skipped
+the serial KLU acceptance factor and handed the SPRAL-permuted/scaled symbolic
+candidate straight to KLS-first. That reduced the startup penalty but still
+reached only `327680/629628` rows in
+`build/kls_pre2_prestatic_direct_metis_sparse_delay_w512_trace45.stderr`, with
+the same scalar-output replay shape. This rules out "explicit METIS forgot
+static matching" as the clear large missing `pre2` mechanism. Static
+pivoting/scaling remains important for robustness and other matrices, but the
+current actionable `pre2` loss remains the first-factor row/panel
+postfactor/output owner, not another matching gate.
