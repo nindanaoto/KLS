@@ -123,7 +123,9 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_COMPACT_WINDOW_DEFAULT_MAX_ENTRIES 65536u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS 128u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_RUN_DEFAULT_ROWS 8u
-#define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_ROWS 64u
+#define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_DEFAULT_ROWS 64u
+#define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_MAX_ROWS \
+  KLS_ROW_FIRST_COMPACT_WINDOW_MAX_SLOTS
 #define KLS_ROW_FIRST_COMPACT_DENSE_UNION_MAX_SPARSE_MULT 2u
 #define KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_WINDOW 4096u
 #define KLS_ROW_FIRST_OWNER_SURFACE_MAX_WINDOW 65536u
@@ -48283,6 +48285,25 @@ static UF_long kls_row_pipeline_compact_claim_run_max_rows_env(void) {
     : (UF_long)parsed;
 }
 
+static UF_long kls_row_pipeline_compact_claim_span_trace_rows_env(void) {
+  const char *value = getenv("KLS_ROW_PIPELINE_COMPACT_CLAIM_SPAN_TRACE_ROWS");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_DEFAULT_ROWS;
+  }
+  if (value[0] == '0' && value[1] == '\0') {
+    return 0u;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_DEFAULT_ROWS;
+  }
+  return parsed > KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_MAX_ROWS
+    ? KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_MAX_ROWS
+    : (UF_long)parsed;
+}
+
 static UF_long kls_row_pipeline_pivot_lookahead_slots_env(void) {
   if (!kls_row_pipeline_pivot_lookahead_env_enabled()) {
     return 0u;
@@ -91787,6 +91808,7 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long lookahead_max_inputs;
   UF_long compact_window_max_entries;
   UF_long compact_claim_run_max_rows;
+  UF_long compact_claim_span_trace_rows;
   UF_long owner_surface_window;
   UF_long owner_surface_interval;
   int trace_enabled;
@@ -94104,6 +94126,7 @@ static void kls_row_first_pipeline_trace_claim_span_output_surface(
       shared->workspace->u_row_end == NULL ||
       shared->compact_union_mark == NULL ||
       shared->compact_union_pos == NULL ||
+      shared->compact_claim_span_trace_rows == 0u ||
       wanted_pos >= shared->ctx->nk) {
     return;
   }
@@ -94140,8 +94163,7 @@ static void kls_row_first_pipeline_trace_claim_span_output_surface(
     if (state == NULL || !state->active || !state->grouped ||
         state->row >= nk ||
         state->pos < wanted_pos ||
-        state->pos - wanted_pos >=
-          KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_ROWS ||
+        state->pos - wanted_pos >= shared->compact_claim_span_trace_rows ||
         (state->pos != wanted_pos && state->pos < next_reserved) ||
         state->delayed_output_replayed_l_count > state->l_count) {
       continue;
@@ -99106,6 +99128,9 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.compact_claim_run_enabled =
     shared.compact_group_sparse_enabled &&
     shared.compact_claim_run_max_rows >= 2u;
+  shared.compact_claim_span_trace_rows =
+    shared.trace_enabled
+      ? kls_row_pipeline_compact_claim_span_trace_rows_env() : 0u;
   shared.compact_window_enabled =
     (shared.trace_enabled &&
      kls_row_pipeline_compact_window_trace_env_enabled()) ||

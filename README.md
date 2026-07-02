@@ -2379,6 +2379,9 @@ future compact states.
 The follow-up local-span probe records the unreserved grouped rows within the
 next 64 factor positions as
 `compact_window_claim_span_output_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`.
+`KLS_ROW_PIPELINE_COMPACT_CLAIM_SPAN_TRACE_ROWS=<rows>` changes that
+trace-only local span width; `0` disables the span-output surface, and values
+above the compact-window slot cap are clipped.
 `build/kls_pre2_claim_span64_output_surface_w512_trace45.stderr` again reached
 `589824/629628`, but the span surface covered `318,807` states (`9.78` per
 surface) and cut scan volume to `168,701,660` grouped entries from
