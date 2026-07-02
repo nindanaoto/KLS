@@ -2547,6 +2547,15 @@ compatibility shorthand for `N=1`. This tests the paper-shaped
 producer-to-many-current owner without eagerly materializing every delayed
 output column. It remains opt-in because current hard-row traces show the useful
 sharing is often out of prefix order.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_NONPREFIX=1` changes the
+same capped shared owner to select common delayed-output producers from anywhere
+in each grouped row's pending delayed-output range. Claim-time replay applies
+the shared producer panel, skips exactly those selected producers through the
+snapshot covered by the panel, and then resumes the normal delayed-output replay
+for any later dependencies. This directly tests the SubtreeLU-style
+out-of-order row/panel owner shape. It is still experimental: it greatly
+increases owner coverage on `bcircuit` and `ASIC_100ks`, but the `pre2` timeout
+case still does not finish under the current cap.
 Row-pipeline traces now report
 `compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,hole_skips,hole_skip_rows,prefix_shrinks,prefix_shrink_rows,oversize_skips,oversize_slots,link_skips,link_skip_entries,scan_skips,scan_skip_entries}`
 plus `compact_window_span_owner_payoff_{skips,skip_rows,skip_entries,skip_scan_entries}`

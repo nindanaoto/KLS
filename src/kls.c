@@ -48597,6 +48597,17 @@ kls_row_pipeline_compact_span_shared_owner_single_dep_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int
+kls_row_pipeline_compact_span_shared_owner_nonprefix_env_enabled(void) {
+  if (!kls_row_pipeline_compact_span_owner_shared_env_enabled()) {
+    return 0;
+  }
+  const char *value =
+    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_NONPREFIX");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static UF_long
 kls_row_pipeline_compact_span_shared_owner_dep_limit_env(void) {
   if (!kls_row_pipeline_compact_span_owner_shared_env_enabled()) {
@@ -89741,6 +89752,7 @@ struct kls_row_first_compact_window_state {
   UF_long delayed_output_replayed_l_count;
   UF_long group_member_count;
   UF_long compact_span_shared_owner_row;
+  UF_long compact_span_shared_owner_start_l_count;
   UF_long compact_span_shared_owner_l_count;
   unsigned int generation;
   unsigned int index_generation;
@@ -89772,6 +89784,7 @@ static void kls_row_first_compact_window_state_clear(
   state->delayed_output_replayed_l_count = 0u;
   state->group_member_count = 0u;
   state->compact_span_shared_owner_row = KLS_KLU_EMPTY;
+  state->compact_span_shared_owner_start_l_count = 0u;
   state->compact_span_shared_owner_l_count = 0u;
   memset(&state->trace_current, 0, sizeof(state->trace_current));
   state->generation = 0u;
@@ -92971,6 +92984,7 @@ typedef struct kls_row_first_pipeline_shared {
   unsigned char *compact_group_flags;
   kls_row_first_compact_window_state *compact_window_states;
   UF_long *compact_span_shared_owner_cols;
+  UF_long *compact_span_shared_owner_deps;
   double *compact_span_shared_owner_values;
   unsigned char *compact_span_shared_owner_mask;
   UF_long *compact_span_shared_owner_replay_entries;
@@ -92989,9 +93003,11 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long compact_group_col_capacity;
   UF_long compact_group_matrix_capacity;
   UF_long compact_span_shared_owner_col_capacity;
+  UF_long compact_span_shared_owner_dep_capacity;
   UF_long compact_span_shared_owner_value_capacity;
   UF_long compact_span_shared_owner_rows;
   UF_long compact_span_shared_owner_cols_count;
+  UF_long compact_span_shared_owner_dep_count;
   UF_long compact_group_target_count;
   UF_long compact_group_union_count;
   UF_long compact_group_stride;
@@ -93050,6 +93066,8 @@ typedef struct kls_row_first_pipeline_shared {
   int compact_span_owner_allow_prefix;
   int compact_span_shared_owner_enabled;
   int compact_span_shared_owner_active;
+  int compact_span_shared_owner_nonprefix_enabled;
+  int compact_span_shared_owner_nonprefix_active;
   int compact_group_sparse_enabled;
   int compact_group_replay_enabled;
   int compact_group_sparse;
@@ -93432,6 +93450,45 @@ static int kls_row_first_pipeline_reserve_shared_span_owner_cols(
   }
   shared->compact_span_shared_owner_cols = cols;
   shared->compact_span_shared_owner_col_capacity = grown;
+  return 1;
+}
+
+static int kls_row_first_pipeline_reserve_shared_span_owner_deps(
+  kls_row_first_pipeline_shared *shared,
+  UF_long needed) {
+  if (shared == NULL) {
+    return 0;
+  }
+  if (needed <= shared->compact_span_shared_owner_dep_capacity) {
+    return 1;
+  }
+  if (needed > (UF_long)(SIZE_MAX /
+                         sizeof(*shared->compact_span_shared_owner_deps))) {
+    return 0;
+  }
+  UF_long grown = shared->compact_span_shared_owner_dep_capacity == 0u
+    ? KLS_ROW_FIRST_COMPACT_SPAN_SHARED_OWNER_MAX_DEP_LIMIT
+    : shared->compact_span_shared_owner_dep_capacity;
+  while (grown < needed) {
+    if (grown > UF_long_max / 2u) {
+      grown = needed;
+      break;
+    }
+    grown *= 2u;
+  }
+  if (grown > (UF_long)(SIZE_MAX /
+                        sizeof(*shared->compact_span_shared_owner_deps))) {
+    return 0;
+  }
+  UF_long *deps =
+    (UF_long *)realloc(shared->compact_span_shared_owner_deps,
+                       (size_t)grown *
+                         sizeof(*shared->compact_span_shared_owner_deps));
+  if (deps == NULL) {
+    return 0;
+  }
+  shared->compact_span_shared_owner_deps = deps;
+  shared->compact_span_shared_owner_dep_capacity = grown;
   return 1;
 }
 
@@ -94707,6 +94764,21 @@ static int kls_row_first_workspace_accumulate_claim_value(
   return 1;
 }
 
+static int kls_row_first_dep_list_contains(
+  const UF_long *deps,
+  UF_long dep_count,
+  UF_long dep) {
+  if (deps == NULL) {
+    return 0;
+  }
+  for (UF_long p = 0u; p < dep_count; ++p) {
+    if (deps[p] == dep) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_compact_window_state *state,
@@ -94715,6 +94787,8 @@ static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace
   kls_row_first_pipeline_trace *trace,
   UF_long begin_l_count,
   UF_long end_l_count,
+  const UF_long *skip_deps,
+  UF_long skip_dep_count,
   int update_cutoff);
 
 static int kls_row_first_compact_window_apply_deferred_output_cache(
@@ -94749,7 +94823,7 @@ static int kls_row_first_compact_window_apply_deferred_output_cache(
     if (!kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
           shared, state, workspace, pattern_count_io, trace,
           state->delayed_output_replayed_l_count,
-          state->deferred_output_start_l_count, 0)) {
+          state->deferred_output_start_l_count, NULL, 0u, 0)) {
       return 0;
     }
     state->delayed_output_replayed_l_count =
@@ -94812,6 +94886,8 @@ static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace
   kls_row_first_pipeline_trace *trace,
   UF_long begin_l_count,
   UF_long end_l_count,
+  const UF_long *skip_deps,
+  UF_long skip_dep_count,
   int update_cutoff) {
   if (shared == NULL || state == NULL ||
       !shared->compact_window_delay_output_enabled) {
@@ -94841,6 +94917,10 @@ static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace
     const UF_long dep = state->l_cols[lp];
     if (dep >= state->row || dep >= shared->ctx->nk) {
       return 0;
+    }
+    if (skip_dep_count > 0u &&
+        kls_row_first_dep_list_contains(skip_deps, skip_dep_count, dep)) {
+      continue;
     }
     const UF_long row_begin = shared->workspace->u_row_ptr[dep];
     const UF_long row_end = shared->workspace->u_row_end[dep];
@@ -94921,7 +95001,7 @@ static int kls_row_first_compact_window_replay_delayed_output_to_workspace(
   }
   return kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
     shared, state, workspace, pattern_count_io, trace,
-    state->delayed_output_replayed_l_count, state->l_count, 1);
+    state->delayed_output_replayed_l_count, state->l_count, NULL, 0u, 1);
 }
 
 static UF_long kls_row_first_pipeline_worker_span_owner_index(
@@ -95066,7 +95146,8 @@ static int kls_row_first_pipeline_apply_claim_stream_owner_to_workspace(
   if (state->delayed_output_replayed_l_count < start_l_count &&
       !kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
         worker->shared, state, workspace, pattern_count_io, trace,
-        state->delayed_output_replayed_l_count, start_l_count, 1)) {
+        state->delayed_output_replayed_l_count, start_l_count,
+        NULL, 0u, 1)) {
     return 0;
   }
   const UF_long rows = worker->compact_claim_stream_owner_rows;
@@ -95129,6 +95210,8 @@ static int kls_row_first_pipeline_apply_shared_span_owner_to_workspace(
         shared->compact_span_shared_owner_generation ||
       state->compact_span_shared_owner_row >=
         shared->compact_span_shared_owner_rows ||
+      state->compact_span_shared_owner_start_l_count >
+        state->compact_span_shared_owner_l_count ||
       state->compact_span_shared_owner_l_count > state->l_count ||
       shared->compact_span_shared_owner_cols_count == 0u ||
       shared->compact_span_shared_owner_cols == NULL ||
@@ -95141,6 +95224,21 @@ static int kls_row_first_pipeline_apply_shared_span_owner_to_workspace(
   if (shared->compact_span_shared_owner_cols_count >
         shared->compact_span_shared_owner_value_capacity ||
       row_index > UF_long_max / shared->compact_span_shared_owner_cols_count) {
+    return 1;
+  }
+  const int nonprefix =
+    shared->compact_span_shared_owner_nonprefix_active &&
+    shared->compact_span_shared_owner_dep_count > 0u;
+  if (nonprefix && shared->compact_span_shared_owner_deps == NULL) {
+    return 0;
+  }
+  if (nonprefix &&
+      state->delayed_output_replayed_l_count !=
+        state->compact_span_shared_owner_start_l_count) {
+    state->compact_span_shared_owner_generation = 0u;
+    state->compact_span_shared_owner_row = KLS_KLU_EMPTY;
+    state->compact_span_shared_owner_start_l_count = 0u;
+    state->compact_span_shared_owner_l_count = 0u;
     return 1;
   }
 
@@ -95164,13 +95262,28 @@ static int kls_row_first_pipeline_apply_shared_span_owner_to_workspace(
     }
     applied_cols++;
   }
-  if (state->delayed_output_replayed_l_count <
-      state->compact_span_shared_owner_l_count) {
-    state->delayed_output_replayed_l_count =
-      state->compact_span_shared_owner_l_count;
+  if (nonprefix) {
+    if (state->delayed_output_replayed_l_count >
+        state->compact_span_shared_owner_l_count) {
+      return 0;
+    }
+    if (!kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
+          shared, state, workspace, pattern_count_io, trace,
+          state->delayed_output_replayed_l_count,
+          state->compact_span_shared_owner_l_count,
+          shared->compact_span_shared_owner_deps,
+          shared->compact_span_shared_owner_dep_count, 1)) {
+      return 0;
+    }
+  } else {
+    if (state->delayed_output_replayed_l_count <
+        state->compact_span_shared_owner_l_count) {
+      state->delayed_output_replayed_l_count =
+        state->compact_span_shared_owner_l_count;
+    }
+    kls_row_first_compact_window_deferred_output_reset(state);
+    (void)kls_row_first_compact_window_deferred_output_bump_generation(state);
   }
-  kls_row_first_compact_window_deferred_output_reset(state);
-  (void)kls_row_first_compact_window_deferred_output_bump_generation(state);
   if (trace != NULL &&
       shared->compact_span_shared_owner_replay_entries != NULL &&
       row_index < shared->compact_span_shared_owner_rows) {
@@ -95192,6 +95305,7 @@ static int kls_row_first_pipeline_apply_shared_span_owner_to_workspace(
   (void)applied_cols;
   state->compact_span_shared_owner_generation = 0u;
   state->compact_span_shared_owner_row = KLS_KLU_EMPTY;
+  state->compact_span_shared_owner_start_l_count = 0u;
   state->compact_span_shared_owner_l_count = 0u;
   return 1;
 }
@@ -97170,6 +97284,8 @@ static int kls_row_first_pipeline_state_has_shared_span_owner(
            shared->compact_span_shared_owner_generation &&
          state->compact_span_shared_owner_row <
            shared->compact_span_shared_owner_rows &&
+         state->compact_span_shared_owner_start_l_count <=
+           state->compact_span_shared_owner_l_count &&
          state->compact_span_shared_owner_l_count <= state->l_count;
 }
 
@@ -97358,6 +97474,17 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
   UF_long owner_l_counts[KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS];
   const UF_long dep_window_limit =
     shared->compact_span_shared_owner_dep_limit;
+  const int nonprefix_mode =
+    shared->compact_span_shared_owner_nonprefix_enabled &&
+    dep_window_limit > 0u;
+  UF_long selected_owner_deps
+    [KLS_ROW_FIRST_COMPACT_SPAN_SHARED_OWNER_MAX_DEP_LIMIT];
+  UF_long selected_owner_dep_count = 0u;
+  if (nonprefix_mode) {
+    shared->compact_span_shared_owner_active = 0;
+    shared->compact_span_shared_owner_dep_count = 0u;
+    shared->compact_span_shared_owner_nonprefix_active = 0;
+  }
   const UF_long min_owner_rows =
     dep_window_limit > 0u && shared->compact_span_owner_min_rows > 2u
       ? 2u : shared->compact_span_owner_min_rows;
@@ -97386,7 +97513,10 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
       }
       UF_long local_deps = 0u;
       for (UF_long lp = state->delayed_output_replayed_l_count;
-           lp < state->l_count && local_deps < dep_window_limit; ++lp) {
+           lp < state->l_count; ++lp) {
+        if (!nonprefix_mode && local_deps >= dep_window_limit) {
+          break;
+        }
         const UF_long dep = state->l_cols[lp];
         if (dep >= state->row || dep >= shared->ctx->nk) {
           break;
@@ -97447,6 +97577,7 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
       shared->compact_batch_positions[best_index] = 0u;
       shared->compact_union_mark[best_dep] = selected_dep_generation;
       shared->compact_union_pos[best_dep] = selected_deps;
+      selected_owner_deps[selected_deps] = best_dep;
       selected_deps++;
       selected_total_count =
         selected_total_count > UF_long_max - best_dep_count
@@ -97461,6 +97592,7 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
         trace, best_count, selected_total_count, 0u);
       return 0u;
     }
+    selected_owner_dep_count = selected_deps;
   }
   for (int pass = 0; pass < 2 && owner_count < owner_limit; ++pass) {
     for (UF_long g = 0; g < shared->compact_group_target_count &&
@@ -97489,18 +97621,37 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
       }
       UF_long l_count = state->l_count;
       if (dep_window_limit > 0u) {
-        l_count = state->delayed_output_replayed_l_count;
-        while (l_count < state->l_count) {
-          const UF_long dep = state->l_cols[l_count];
-          if (dep >= state->row || dep >= shared->ctx->nk ||
-              shared->compact_union_mark[dep] !=
-                selected_dep_generation) {
-            break;
+        if (nonprefix_mode) {
+          int has_selected_dep = 0;
+          for (UF_long lp = state->delayed_output_replayed_l_count;
+               lp < state->l_count; ++lp) {
+            const UF_long dep = state->l_cols[lp];
+            if (dep >= state->row || dep >= shared->ctx->nk) {
+              break;
+            }
+            if (kls_row_first_dep_list_contains(
+                  selected_owner_deps, selected_owner_dep_count, dep)) {
+              has_selected_dep = 1;
+              break;
+            }
           }
-          l_count++;
-        }
-        if (l_count == state->delayed_output_replayed_l_count) {
-          continue;
+          if (!has_selected_dep) {
+            continue;
+          }
+        } else {
+          l_count = state->delayed_output_replayed_l_count;
+          while (l_count < state->l_count) {
+            const UF_long dep = state->l_cols[l_count];
+            if (dep >= state->row || dep >= shared->ctx->nk ||
+                shared->compact_union_mark[dep] !=
+                  selected_dep_generation) {
+              break;
+            }
+            l_count++;
+          }
+          if (l_count == state->delayed_output_replayed_l_count) {
+            continue;
+          }
         }
       }
       owner_slots[owner_count] = slot;
@@ -97540,6 +97691,11 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
       const UF_long dep = state->l_cols[lp];
       if (dep >= state->row || dep >= shared->ctx->nk) {
         return 0u;
+      }
+      if (nonprefix_mode &&
+          !kls_row_first_dep_list_contains(
+            selected_owner_deps, selected_owner_dep_count, dep)) {
+        continue;
       }
       const UF_long row_begin = shared->workspace->u_row_ptr[dep];
       const UF_long row_end = shared->workspace->u_row_end[dep];
@@ -97601,6 +97757,11 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
       const UF_long dep = state->l_cols[lp];
       if (dep >= shared->ctx->nk ||
           shared->compact_union_mark[dep] != dep_generation) {
+        continue;
+      }
+      if (nonprefix_mode &&
+          !kls_row_first_dep_list_contains(
+            selected_owner_deps, selected_owner_dep_count, dep)) {
         continue;
       }
       const UF_long pos = shared->compact_union_pos[dep];
@@ -97788,6 +97949,23 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
     }
   }
 
+  if (nonprefix_mode) {
+    if (selected_owner_dep_count == 0u ||
+        !kls_row_first_pipeline_reserve_shared_span_owner_deps(
+          shared, selected_owner_dep_count)) {
+      return 0u;
+    }
+    memcpy(shared->compact_span_shared_owner_deps, selected_owner_deps,
+           (size_t)selected_owner_dep_count *
+             sizeof(*shared->compact_span_shared_owner_deps));
+    shared->compact_span_shared_owner_dep_count =
+      selected_owner_dep_count;
+    shared->compact_span_shared_owner_nonprefix_active = 1;
+  } else {
+    shared->compact_span_shared_owner_dep_count = 0u;
+    shared->compact_span_shared_owner_nonprefix_active = 0;
+  }
+
   unsigned int owner_generation =
     shared->compact_span_shared_owner_generation + 1u;
   if (owner_generation == 0u) {
@@ -97813,6 +97991,8 @@ static UF_long kls_row_first_pipeline_prepare_sparse_shared_span_owner(
     }
     state->compact_span_shared_owner_generation = owner_generation;
     state->compact_span_shared_owner_row = r;
+    state->compact_span_shared_owner_start_l_count =
+      state->delayed_output_replayed_l_count;
     state->compact_span_shared_owner_l_count = owner_l_counts[r];
   }
   if (trace != NULL) {
@@ -103456,6 +103636,10 @@ static int kls_row_first_run_parallel_pipeline_phase(
       kls_row_pipeline_compact_span_shared_owner_single_dep_env_enabled()) {
     shared.compact_span_shared_owner_dep_limit = 1u;
   }
+  shared.compact_span_shared_owner_nonprefix_enabled =
+    shared.compact_span_shared_owner_enabled &&
+    shared.compact_span_shared_owner_dep_limit > 0u &&
+    kls_row_pipeline_compact_span_shared_owner_nonprefix_env_enabled();
   shared.compact_claim_span_trace_rows =
     shared.trace_enabled
       ? kls_row_pipeline_compact_claim_span_trace_rows_env() : 0u;
@@ -103550,6 +103734,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
     free(shared.compact_group_values);
     free(shared.compact_group_flags);
     free(shared.compact_span_shared_owner_cols);
+    free(shared.compact_span_shared_owner_deps);
     free(shared.compact_span_shared_owner_values);
     free(shared.compact_span_shared_owner_mask);
     free(shared.compact_span_shared_owner_replay_entries);
@@ -103592,6 +103777,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
     free(shared.compact_group_values);
     free(shared.compact_group_flags);
     free(shared.compact_span_shared_owner_cols);
+    free(shared.compact_span_shared_owner_deps);
     free(shared.compact_span_shared_owner_values);
     free(shared.compact_span_shared_owner_mask);
     free(shared.compact_span_shared_owner_replay_entries);
@@ -103762,6 +103948,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   free(shared.compact_group_values);
   free(shared.compact_group_flags);
   free(shared.compact_span_shared_owner_cols);
+  free(shared.compact_span_shared_owner_deps);
   free(shared.compact_span_shared_owner_values);
   free(shared.compact_span_shared_owner_mask);
   free(shared.compact_span_shared_owner_replay_entries);

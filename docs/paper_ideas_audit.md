@@ -15796,3 +15796,38 @@ contiguous selected-prefix row count stayed about one
 paper-aligned owner more specific: it must share out-of-order delayed-output
 producers in a panel/workspace and then avoid double replay at claim time,
 instead of only advancing a contiguous delayed-output prefix.
+
+That out-of-order owner is now available behind
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_NONPREFIX=1` together with
+`KLS_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_DEP_LIMIT=N`. It selects common
+pending delayed-output producers from anywhere in each grouped row's pending
+range, stores the selected producer set with the shared panel, applies that
+panel at claim time, replays the snapshot range while skipping the selected
+producers, and then lets the normal delayed-output replay handle any later
+dependencies. The implementation also invalidates the active non-prefix shared
+owner before rebuilding the global panel arrays; without that guard, a failed
+prepare could leave old tagged rows pointing at half-built shared storage.
+Correctness stayed clean under `cmake --build build -j2`, `./build/kls_smoke`,
+the old `DEP_LIMIT=4` opt-in smoke, repeated `DEP_LIMIT=4` non-prefix smokes,
+and `ctest --test-dir build --output-on-failure`.
+
+The focused traces show this fills the algorithmic prefix gap but does not yet
+close the slow cases. On `bcircuit`,
+`build/kls_nonprefix4_bcircuit_trace_t4_r1_ref0.stderr` completed with `2166`
+shared-owner reservations, `8177` tagged rows, `8054` applies, and `287136`
+shared entries, compared with the previous contiguous `DEP_LIMIT=4` result of
+`221` reservations / `785` rows. On `ASIC_100ks`,
+`build/kls_nonprefix4_asic100ks_trace_t4_r1_ref0.stderr` completed with `192`
+reservations, `764` tagged rows, `750` applies, and `666400` shared entries,
+where the contiguous `DEP_LIMIT=4` and `DEP_LIMIT=8` traces built zero shared
+owners. Raising the non-prefix cap to `8` doubled shared entries on
+`ASIC_100ks` (`1338977`) without improving the reservation count or elapsed
+time, so the immediate cap is not the only limiter. On the large `pre2` probe,
+`build/kls_nonprefix4_pre2_trace_t4_r1_ref0_timeout75.stderr` still hit the
+75s timeout; the first pivot-tail trace reached `510403/629628` rows while
+building `12435` shared-owner reservations, `44773` tagged rows, `36487`
+applies, and `7612055` shared entries. This means the paper-shaped
+out-of-order owner is now present and active on the hard surfaces, but the
+remaining gap is likely the cost/placement of the owner panel and broader
+coarse supernode/update scheduling rather than mere absence of non-prefix
+producer sharing.
