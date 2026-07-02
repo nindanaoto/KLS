@@ -2360,6 +2360,25 @@ With sparse compact groups enabled, traces also report
 `compact_window_delayed_group_replay_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`
 to measure how much claim-time delayed replay could share producer-row scans
 across grouped states.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_DEFERRED_OUTPUT_CACHE=1` adds an experimental
+per-state postfactor cache for delayed output. When a compact state streams a
+producer U row, output-column deltas can be accumulated into a separate sparse
+map and applied at claim time before the normal delayed-output replay tail.
+`KLS_ROW_PIPELINE_COMPACT_DEFERRED_OUTPUT_MAX_ENTRIES=<entries>` caps one
+state's cached output map (`65536` by default), and
+`KLS_ROW_PIPELINE_COMPACT_DEFERRED_OUTPUT_MIN_U_ENTRIES=<entries>` controls the
+minimum producer U-row width that starts a cached tail (`1024` by default);
+once a tail has started, later producer rows continue to cache so the covered L
+range remains contiguous. This path remains off by default because current
+probes show that producer-time hash aggregation can cost more than it saves:
+on `G2_circuit`, no-trace factor time moved from `4.77s` to `5.49s` with a
+128-entry start threshold, while preserving a `3.4e-16` relative residual. On a
+60s traced `pre2` probe, the same threshold kept progress at `589824/629628`
+rows and cut delayed-output replay entries from about `388M` to `304M`, but did
+not advance past the timeout checkpoint. Traces report
+`compact_window_deferred_output_cache_{stores,applies,l_entries,entries,disables,overflows}`
+plus cache-entry and store-share ratios in
+`scripts/summarize_row_pipeline_trace.py`.
 Claim-time sparse grouped-output probes additionally report
 `compact_window_claim_group_output_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`.
 These counters do not replay or materialize any future-row output; they estimate

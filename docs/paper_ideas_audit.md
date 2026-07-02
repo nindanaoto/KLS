@@ -15703,3 +15703,20 @@ entries, and `25893928` candidate producer-target U entries. The derived
 ratios were `909.4x` scalar-output per accepted producer-target entry and
 `16.7x` even against the candidate target surface, keeping the next paper-gap
 implementation target on a larger grouped current-row/panel numeric owner.
+
+A direct postfactor-cache probe was added after that evidence. The opt-in
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_DEFERRED_OUTPUT_CACHE=1` path records delayed
+output deltas while the producer U row is already being streamed, applies the
+cached sparse map at claim time, and replays only any uncached prefix/tail.
+This fills a real paper-algorithm gap more directly than the previous
+per-claim span-owner rebuilds, but the first implementation is not a default
+CKTSO closer. With
+`KLS_ROW_PIPELINE_COMPACT_DEFERRED_OUTPUT_MIN_U_ENTRIES=128`, a 60s traced
+`pre2` probe kept the same `589824/629628` checkpoint as the no-cache control
+while reducing delayed-output replay entries from about `388M` to `304M`; the
+all-cache/tail variant reduced replay further but regressed progress to
+`510403/629628`. A completing no-trace `G2_circuit` check preserved residuals
+(`~3.4e-16`) but moved factor time from `4.77s` to `5.49s`. The conclusion is
+that delayed output should still be owned at a coarser grouped row/panel level,
+not through per-state producer-time hash aggregation on every cached output
+column.

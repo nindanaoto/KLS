@@ -133,6 +133,8 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_SCAN_ENTRIES \
   (KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_SLOTS * 8u)
 #define KLS_ROW_FIRST_COMPACT_CLAIM_STREAM_OWNER_DEFAULT_MAX_SLOTS 64u
+#define KLS_ROW_FIRST_COMPACT_DEFERRED_OUTPUT_DEFAULT_MAX_ENTRIES 65536u
+#define KLS_ROW_FIRST_COMPACT_DEFERRED_OUTPUT_DEFAULT_MIN_U_ENTRIES 1024u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_DEFAULT_ROWS 64u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_MAX_ROWS \
   KLS_ROW_FIRST_COMPACT_WINDOW_MAX_SLOTS
@@ -48266,6 +48268,55 @@ static int kls_row_pipeline_compact_delay_output_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_compact_deferred_output_cache_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_DEFERRED_OUTPUT_CACHE");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static UF_long kls_row_pipeline_compact_deferred_output_max_entries_env(void) {
+  if (!kls_row_pipeline_compact_deferred_output_cache_env_enabled()) {
+    return 0u;
+  }
+  const char *value =
+    getenv("KLS_ROW_PIPELINE_COMPACT_DEFERRED_OUTPUT_MAX_ENTRIES");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_ROW_FIRST_COMPACT_DEFERRED_OUTPUT_DEFAULT_MAX_ENTRIES;
+  }
+  if (value[0] == '0' && value[1] == '\0') {
+    return 0u;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return KLS_ROW_FIRST_COMPACT_DEFERRED_OUTPUT_DEFAULT_MAX_ENTRIES;
+  }
+  const unsigned long long max_uf = (unsigned long long)UF_long_max;
+  return parsed > max_uf ? UF_long_max : (UF_long)parsed;
+}
+
+static UF_long
+kls_row_pipeline_compact_deferred_output_min_u_entries_env(void) {
+  if (!kls_row_pipeline_compact_deferred_output_cache_env_enabled()) {
+    return UF_long_max;
+  }
+  const char *value =
+    getenv("KLS_ROW_PIPELINE_COMPACT_DEFERRED_OUTPUT_MIN_U_ENTRIES");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_ROW_FIRST_COMPACT_DEFERRED_OUTPUT_DEFAULT_MIN_U_ENTRIES;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return KLS_ROW_FIRST_COMPACT_DEFERRED_OUTPUT_DEFAULT_MIN_U_ENTRIES;
+  }
+  const unsigned long long max_uf = (unsigned long long)UF_long_max;
+  return parsed > max_uf ? UF_long_max : (UF_long)parsed;
+}
+
 static int kls_row_pipeline_compact_sparse_group_env_enabled(void) {
   const char *value =
     getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_SPARSE_GROUP");
@@ -87343,6 +87394,12 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_delayed_output_entries;
   UF_long compact_window_delayed_output_scan_entries;
   UF_long compact_window_delayed_output_seek_skips;
+  UF_long compact_window_deferred_output_cache_stores;
+  UF_long compact_window_deferred_output_cache_applies;
+  UF_long compact_window_deferred_output_cache_l_entries;
+  UF_long compact_window_deferred_output_cache_entries;
+  UF_long compact_window_deferred_output_cache_disables;
+  UF_long compact_window_deferred_output_cache_overflows;
   UF_long compact_window_delayed_group_replay_surfaces;
   UF_long compact_window_delayed_group_replay_states;
   UF_long compact_window_delayed_group_replay_deps;
@@ -87743,6 +87800,24 @@ static void kls_row_first_pipeline_trace_add(
     source->compact_window_delayed_output_scan_entries);
   kls_row_first_stats_add(&target->compact_window_delayed_output_seek_skips,
                           source->compact_window_delayed_output_seek_skips);
+  kls_row_first_stats_add(
+    &target->compact_window_deferred_output_cache_stores,
+    source->compact_window_deferred_output_cache_stores);
+  kls_row_first_stats_add(
+    &target->compact_window_deferred_output_cache_applies,
+    source->compact_window_deferred_output_cache_applies);
+  kls_row_first_stats_add(
+    &target->compact_window_deferred_output_cache_l_entries,
+    source->compact_window_deferred_output_cache_l_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_deferred_output_cache_entries,
+    source->compact_window_deferred_output_cache_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_deferred_output_cache_disables,
+    source->compact_window_deferred_output_cache_disables);
+  kls_row_first_stats_add(
+    &target->compact_window_deferred_output_cache_overflows,
+    source->compact_window_deferred_output_cache_overflows);
   kls_row_first_stats_add(
     &target->compact_window_delayed_group_replay_surfaces,
     source->compact_window_delayed_group_replay_surfaces);
@@ -89390,6 +89465,7 @@ typedef struct kls_row_first_compact_batch_target {
   kls_row_first_compact_window_state *state;
   UF_long dep_pos;
   double lij;
+  int deferred_output_cache;
 } kls_row_first_compact_batch_target;
 
 struct kls_row_first_compact_window_state {
@@ -89401,13 +89477,23 @@ struct kls_row_first_compact_window_state {
   UF_long *l_cols;
   UF_long *index_keys;
   UF_long *index_pos;
+  UF_long *deferred_output_cols;
+  UF_long *deferred_output_index_keys;
+  UF_long *deferred_output_index_pos;
   double *values;
   double *l_values;
+  double *deferred_output_values;
   unsigned int *index_mark;
+  unsigned int *deferred_output_index_mark;
   kls_row_first_pipeline_trace trace_current;
   UF_long pattern_count;
   UF_long pattern_capacity;
   UF_long index_capacity;
+  UF_long deferred_output_count;
+  UF_long deferred_output_capacity;
+  UF_long deferred_output_index_capacity;
+  UF_long deferred_output_start_l_count;
+  UF_long deferred_output_l_count;
   UF_long heap_size;
   UF_long l_count;
   UF_long l_capacity;
@@ -89417,11 +89503,14 @@ struct kls_row_first_compact_window_state {
   UF_long compact_span_shared_owner_l_count;
   unsigned int generation;
   unsigned int index_generation;
+  unsigned int deferred_output_index_generation;
   unsigned int compact_span_shared_owner_generation;
   int bucket_slot;
   int bucket_next;
   int bucket_linked;
   int grouped;
+  int deferred_output_valid;
+  int deferred_output_disabled;
   int active;
 };
 
@@ -89434,6 +89523,9 @@ static void kls_row_first_compact_window_state_clear(
   state->pos = KLS_KLU_EMPTY;
   state->bucket_dep = KLS_KLU_EMPTY;
   state->pattern_count = 0u;
+  state->deferred_output_count = 0u;
+  state->deferred_output_start_l_count = 0u;
+  state->deferred_output_l_count = 0u;
   state->heap_size = 0u;
   state->l_count = 0u;
   state->delayed_output_replayed_l_count = 0u;
@@ -89446,6 +89538,8 @@ static void kls_row_first_compact_window_state_clear(
   state->bucket_next = -1;
   state->bucket_linked = 0;
   state->grouped = 0;
+  state->deferred_output_valid = 0;
+  state->deferred_output_disabled = 0;
   state->active = 0;
 }
 
@@ -89459,9 +89553,14 @@ static void kls_row_first_compact_window_state_free(
   free(state->l_cols);
   free(state->index_keys);
   free(state->index_pos);
+  free(state->deferred_output_cols);
+  free(state->deferred_output_index_keys);
+  free(state->deferred_output_index_pos);
   free(state->values);
   free(state->l_values);
+  free(state->deferred_output_values);
   free(state->index_mark);
+  free(state->deferred_output_index_mark);
   memset(state, 0, sizeof(*state));
   state->row = KLS_KLU_EMPTY;
   state->pos = KLS_KLU_EMPTY;
@@ -89775,6 +89874,337 @@ static int kls_row_first_compact_window_insert(
   return 1;
 }
 
+static void kls_row_first_compact_window_deferred_output_reset(
+  kls_row_first_compact_window_state *state) {
+  if (state == NULL) {
+    return;
+  }
+  state->deferred_output_count = 0u;
+  state->deferred_output_start_l_count = 0u;
+  state->deferred_output_l_count = 0u;
+  state->deferred_output_valid = 0;
+}
+
+static int kls_row_first_compact_window_deferred_output_bump_generation(
+  kls_row_first_compact_window_state *state) {
+  if (state == NULL) {
+    return 0;
+  }
+  unsigned int generation = state->deferred_output_index_generation + 1u;
+  if (generation == 0u) {
+    if (state->deferred_output_index_mark != NULL &&
+        state->deferred_output_index_capacity > 0u) {
+      memset(state->deferred_output_index_mark, 0,
+             (size_t)state->deferred_output_index_capacity *
+               sizeof(*state->deferred_output_index_mark));
+    }
+    generation = 1u;
+  }
+  state->deferred_output_index_generation = generation;
+  return 1;
+}
+
+static void kls_row_first_compact_window_deferred_output_disable(
+  kls_row_first_compact_window_state *state,
+  kls_row_first_pipeline_trace *trace,
+  int overflow) {
+  if (state == NULL) {
+    return;
+  }
+  kls_row_first_compact_window_deferred_output_reset(state);
+  (void)kls_row_first_compact_window_deferred_output_bump_generation(state);
+  state->deferred_output_disabled = 1;
+  if (trace != NULL) {
+    kls_row_first_stats_add(
+      &trace->compact_window_deferred_output_cache_disables, 1u);
+    if (overflow) {
+      kls_row_first_stats_add(
+        &trace->compact_window_deferred_output_cache_overflows, 1u);
+    }
+  }
+}
+
+static UF_long kls_row_first_compact_window_deferred_output_index_slot(
+  const kls_row_first_compact_window_state *state,
+  UF_long col,
+  int *found_out) {
+  if (found_out != NULL) {
+    *found_out = 0;
+  }
+  if (state == NULL || state->deferred_output_index_capacity == 0u ||
+      state->deferred_output_index_keys == NULL ||
+      state->deferred_output_index_pos == NULL ||
+      state->deferred_output_index_mark == NULL ||
+      state->deferred_output_index_generation == 0u) {
+    return KLS_KLU_EMPTY;
+  }
+  const UF_long mask = state->deferred_output_index_capacity - 1u;
+  UF_long slot = (UF_long)(kls_mix_u64((uint64_t)col) & (uint64_t)mask);
+  for (UF_long probe = 0u;
+       probe < state->deferred_output_index_capacity; ++probe) {
+    if (state->deferred_output_index_mark[slot] !=
+        state->deferred_output_index_generation) {
+      return slot;
+    }
+    if (state->deferred_output_index_keys[slot] == col) {
+      if (found_out != NULL) {
+        *found_out = 1;
+      }
+      return slot;
+    }
+    slot = (slot + 1u) & mask;
+  }
+  return KLS_KLU_EMPTY;
+}
+
+static int kls_row_first_compact_window_deferred_output_index_rebuild(
+  kls_row_first_compact_window_state *state,
+  UF_long capacity) {
+  if (state == NULL || capacity == 0u ||
+      (capacity & (capacity - 1u)) != 0u ||
+      capacity > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      capacity > (UF_long)(SIZE_MAX / sizeof(unsigned int))) {
+    return 0;
+  }
+  UF_long *new_keys =
+    (UF_long *)malloc((size_t)capacity * sizeof(*new_keys));
+  UF_long *new_pos =
+    (UF_long *)malloc((size_t)capacity * sizeof(*new_pos));
+  unsigned int *new_mark =
+    (unsigned int *)calloc((size_t)capacity, sizeof(*new_mark));
+  if (new_keys == NULL || new_pos == NULL || new_mark == NULL) {
+    free(new_keys);
+    free(new_pos);
+    free(new_mark);
+    return 0;
+  }
+
+  const UF_long old_capacity = state->deferred_output_index_capacity;
+  UF_long *old_keys = state->deferred_output_index_keys;
+  UF_long *old_pos = state->deferred_output_index_pos;
+  unsigned int *old_mark = state->deferred_output_index_mark;
+  state->deferred_output_index_capacity = capacity;
+  state->deferred_output_index_keys = new_keys;
+  state->deferred_output_index_pos = new_pos;
+  state->deferred_output_index_mark = new_mark;
+
+  int ok = 1;
+  for (UF_long p = 0u; p < state->deferred_output_count; ++p) {
+    int found = 0;
+    const UF_long slot =
+      kls_row_first_compact_window_deferred_output_index_slot(
+        state, state->deferred_output_cols[p], &found);
+    if (slot == KLS_KLU_EMPTY || found) {
+      ok = 0;
+      break;
+    }
+    state->deferred_output_index_keys[slot] =
+      state->deferred_output_cols[p];
+    state->deferred_output_index_pos[slot] = p;
+    state->deferred_output_index_mark[slot] =
+      state->deferred_output_index_generation;
+  }
+  if (!ok) {
+    free(new_keys);
+    free(new_pos);
+    free(new_mark);
+    state->deferred_output_index_capacity = old_capacity;
+    state->deferred_output_index_keys = old_keys;
+    state->deferred_output_index_pos = old_pos;
+    state->deferred_output_index_mark = old_mark;
+    return 0;
+  }
+
+  free(old_keys);
+  free(old_pos);
+  free(old_mark);
+  return 1;
+}
+
+static int kls_row_first_compact_window_deferred_output_index_reserve(
+  kls_row_first_compact_window_state *state,
+  UF_long needed) {
+  if (state == NULL) {
+    return 0;
+  }
+  if (needed == 0u) {
+    return 1;
+  }
+  if (needed > UF_long_max / 2u ||
+      needed > (UF_long)(SIZE_MAX / (2u * sizeof(UF_long))) ||
+      needed > (UF_long)(SIZE_MAX / (2u * sizeof(unsigned int)))) {
+    return 0;
+  }
+  if (state->deferred_output_index_capacity >= needed * 2u &&
+      state->deferred_output_index_capacity != 0u) {
+    return 1;
+  }
+  UF_long capacity = 32u;
+  while (capacity < needed * 2u) {
+    if (capacity > UF_long_max / 2u) {
+      return 0;
+    }
+    capacity *= 2u;
+  }
+  return kls_row_first_compact_window_deferred_output_index_rebuild(
+    state, capacity);
+}
+
+static int kls_row_first_compact_window_deferred_output_reserve(
+  kls_row_first_compact_window_state *state,
+  UF_long needed,
+  UF_long max_entries) {
+  if (state == NULL) {
+    return 0;
+  }
+  if (needed <= state->deferred_output_capacity) {
+    return kls_row_first_compact_window_deferred_output_index_reserve(
+      state, needed);
+  }
+  if (needed > max_entries ||
+      needed > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      needed > (UF_long)(SIZE_MAX / sizeof(double))) {
+    return 0;
+  }
+  UF_long grown = state->deferred_output_capacity == 0u
+    ? 16u : state->deferred_output_capacity;
+  while (grown < needed) {
+    if (grown > UF_long_max / 2u) {
+      grown = needed;
+      break;
+    }
+    grown *= 2u;
+  }
+  if (grown > max_entries) {
+    grown = needed;
+  }
+  if (grown > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      grown > (UF_long)(SIZE_MAX / sizeof(double))) {
+    return 0;
+  }
+  UF_long *new_cols =
+    (UF_long *)realloc(state->deferred_output_cols,
+                       (size_t)grown *
+                         sizeof(*state->deferred_output_cols));
+  if (new_cols == NULL) {
+    return 0;
+  }
+  state->deferred_output_cols = new_cols;
+  double *new_values =
+    (double *)realloc(state->deferred_output_values,
+                      (size_t)grown *
+                        sizeof(*state->deferred_output_values));
+  if (new_values == NULL) {
+    return 0;
+  }
+  state->deferred_output_values = new_values;
+  state->deferred_output_capacity = grown;
+  return kls_row_first_compact_window_deferred_output_index_reserve(
+    state, needed);
+}
+
+static int kls_row_first_compact_window_deferred_output_begin_dep(
+  kls_row_first_compact_window_state *state,
+  kls_row_first_pipeline_trace *trace) {
+  if (state == NULL || state->deferred_output_disabled ||
+      state->l_count == 0u) {
+    return 0;
+  }
+  const UF_long previous_l_count = state->l_count - 1u;
+  if (!state->deferred_output_valid) {
+    state->deferred_output_start_l_count = previous_l_count;
+    state->deferred_output_l_count = previous_l_count;
+    state->deferred_output_valid = 1;
+    return 1;
+  }
+  if (state->deferred_output_l_count != previous_l_count) {
+    kls_row_first_compact_window_deferred_output_disable(
+      state, trace, 0);
+    return 0;
+  }
+  return 1;
+}
+
+static int kls_row_first_compact_window_deferred_output_insert(
+  kls_row_first_compact_window_state *state,
+  UF_long col,
+  double delta,
+  UF_long max_entries,
+  kls_row_first_pipeline_trace *trace) {
+  if (state == NULL || !state->deferred_output_valid ||
+      state->deferred_output_disabled || col == KLS_KLU_EMPTY) {
+    return 0;
+  }
+  int found = 0;
+  UF_long slot =
+    kls_row_first_compact_window_deferred_output_index_slot(
+      state, col, &found);
+  if (found) {
+    const UF_long at = state->deferred_output_index_pos[slot];
+    if (at >= state->deferred_output_count ||
+        state->deferred_output_cols[at] != col ||
+        state->deferred_output_values == NULL) {
+      kls_row_first_compact_window_deferred_output_disable(
+        state, trace, 0);
+      return 0;
+    }
+    state->deferred_output_values[at] += delta;
+    if (trace != NULL) {
+      kls_row_first_stats_add(
+        &trace->compact_window_deferred_output_cache_stores, 1u);
+    }
+    return 1;
+  }
+  if (state->deferred_output_count >= state->deferred_output_capacity ||
+      state->deferred_output_index_capacity < 2u ||
+      state->deferred_output_count + 1u >
+        state->deferred_output_index_capacity / 2u) {
+    if (!kls_row_first_compact_window_deferred_output_reserve(
+          state, state->deferred_output_count + 1u, max_entries)) {
+      kls_row_first_compact_window_deferred_output_disable(
+        state, trace, 1);
+      return 0;
+    }
+    slot =
+      kls_row_first_compact_window_deferred_output_index_slot(
+        state, col, &found);
+    if (slot == KLS_KLU_EMPTY || found) {
+      kls_row_first_compact_window_deferred_output_disable(
+        state, trace, 0);
+      return 0;
+    }
+  }
+  const UF_long at = state->deferred_output_count;
+  state->deferred_output_cols[at] = col;
+  state->deferred_output_values[at] = delta;
+  state->deferred_output_count++;
+  state->deferred_output_index_keys[slot] = col;
+  state->deferred_output_index_pos[slot] = at;
+  state->deferred_output_index_mark[slot] =
+    state->deferred_output_index_generation;
+  if (trace != NULL) {
+    kls_row_first_stats_add(
+      &trace->compact_window_deferred_output_cache_stores, 1u);
+  }
+  return 1;
+}
+
+static int kls_row_first_compact_window_deferred_output_finish_dep(
+  kls_row_first_compact_window_state *state,
+  kls_row_first_pipeline_trace *trace) {
+  if (state == NULL || !state->deferred_output_valid ||
+      state->deferred_output_disabled || state->l_count == 0u) {
+    return 0;
+  }
+  if (state->deferred_output_l_count + 1u != state->l_count) {
+    kls_row_first_compact_window_deferred_output_disable(
+      state, trace, 0);
+    return 0;
+  }
+  state->deferred_output_l_count = state->l_count;
+  return 1;
+}
+
 static int kls_row_first_compact_window_state_begin(
   const kls_row_first_block_context *ctx,
   kls_row_first_compact_window_state *state,
@@ -89803,10 +90233,23 @@ static int kls_row_first_compact_window_state_begin(
     }
     index_generation = 1u;
   }
+  unsigned int deferred_output_index_generation =
+    state->deferred_output_index_generation + 1u;
+  if (deferred_output_index_generation == 0u) {
+    if (state->deferred_output_index_mark != NULL &&
+        state->deferred_output_index_capacity > 0u) {
+      memset(state->deferred_output_index_mark, 0,
+             (size_t)state->deferred_output_index_capacity *
+               sizeof(*state->deferred_output_index_mark));
+    }
+    deferred_output_index_generation = 1u;
+  }
   state->row = row;
   state->pos = pos;
   state->generation = generation;
   state->index_generation = index_generation;
+  state->deferred_output_index_generation =
+    deferred_output_index_generation;
   for (UF_long p = ctx->row_ptr[row]; p < ctx->row_ptr[row + 1u]; ++p) {
     const UF_long oldcol = ctx->row_cols[p];
     if (oldcol >= ctx->n || ctx->col_pos[oldcol] >= ctx->nk) {
@@ -92331,6 +92774,8 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long long_row_trace_threshold;
   UF_long lookahead_max_inputs;
   UF_long compact_window_max_entries;
+  UF_long compact_deferred_output_max_entries;
+  UF_long compact_deferred_output_min_u_entries;
   UF_long compact_claim_run_max_rows;
   UF_long compact_span_owner_rows;
   UF_long compact_span_owner_min_rows;
@@ -92349,6 +92794,7 @@ typedef struct kls_row_first_pipeline_shared {
   int compact_window_enabled;
   int compact_window_execute_enabled;
   int compact_window_delay_output_enabled;
+  int compact_deferred_output_cache_enabled;
   int owner_surface_trace_enabled;
   int compact_group_active;
   int compact_claim_run_enabled;
@@ -93907,6 +94353,17 @@ static int kls_row_first_compact_window_apply_dep(
   }
   state->values[dep_pos] = 0.0;
 
+  int deferred_output_cache =
+    shared->compact_deferred_output_cache_enabled &&
+    shared->compact_window_delay_output_enabled &&
+    (state->deferred_output_valid ||
+     row_end - row_begin >= shared->compact_deferred_output_min_u_entries);
+  if (deferred_output_cache &&
+      !kls_row_first_compact_window_deferred_output_begin_dep(
+        state, trace)) {
+    deferred_output_cache = 0;
+  }
+
   UF_long trace_internal_entries = 0u;
   UF_long trace_output_entries = 0u;
   UF_long delayed_output_entries = 0u;
@@ -93917,6 +94374,12 @@ static int kls_row_first_compact_window_apply_dep(
     }
     if (shared->compact_window_delay_output_enabled &&
         col >= state->row) {
+      if (deferred_output_cache &&
+          !kls_row_first_compact_window_deferred_output_insert(
+            state, col, -lij * shared->u_entries->value[up],
+            shared->compact_deferred_output_max_entries, trace)) {
+        deferred_output_cache = 0;
+      }
       delayed_output_entries++;
       continue;
     }
@@ -93930,6 +94393,10 @@ static int kls_row_first_compact_window_apply_dep(
     } else {
       trace_output_entries++;
     }
+  }
+  if (deferred_output_cache) {
+    (void)kls_row_first_compact_window_deferred_output_finish_dep(
+      state, trace);
   }
   if (trace != NULL) {
     kls_row_first_stats_add(&trace->scalar_dep_calls, 1u);
@@ -93991,6 +94458,102 @@ static int kls_row_first_workspace_accumulate_claim_value(
   } else {
     workspace->x[col] += delta;
   }
+  return 1;
+}
+
+static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_compact_window_state *state,
+  kls_row_first_workspace *workspace,
+  UF_long *pattern_count_io,
+  kls_row_first_pipeline_trace *trace,
+  UF_long begin_l_count,
+  UF_long end_l_count,
+  int update_cutoff);
+
+static int kls_row_first_compact_window_apply_deferred_output_cache(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_compact_window_state *state,
+  kls_row_first_workspace *workspace,
+  UF_long *pattern_count_io,
+  kls_row_first_pipeline_trace *trace) {
+  if (shared == NULL || state == NULL || workspace == NULL ||
+      pattern_count_io == NULL ||
+      !shared->compact_deferred_output_cache_enabled ||
+      !state->deferred_output_valid || state->deferred_output_disabled) {
+    return 1;
+  }
+  if (state->deferred_output_l_count > state->l_count ||
+      state->deferred_output_start_l_count >
+        state->deferred_output_l_count) {
+    kls_row_first_compact_window_deferred_output_disable(
+      state, trace, 0);
+    return 1;
+  }
+  if (state->deferred_output_start_l_count !=
+      state->delayed_output_replayed_l_count) {
+    if (state->deferred_output_start_l_count <
+        state->delayed_output_replayed_l_count) {
+      kls_row_first_compact_window_deferred_output_reset(state);
+      (void)kls_row_first_compact_window_deferred_output_bump_generation(
+        state);
+      return 1;
+    }
+    if (!kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
+          shared, state, workspace, pattern_count_io, trace,
+          state->delayed_output_replayed_l_count,
+          state->deferred_output_start_l_count, 0)) {
+      return 0;
+    }
+    state->delayed_output_replayed_l_count =
+      state->deferred_output_start_l_count;
+  }
+  if (state->deferred_output_count > state->deferred_output_capacity ||
+      state->deferred_output_cols == NULL ||
+      state->deferred_output_values == NULL ||
+      shared->ctx == NULL) {
+    return 0;
+  }
+  for (UF_long p = 0u; p < state->deferred_output_count; ++p) {
+    const UF_long col = state->deferred_output_cols[p];
+    if (col < state->row || col >= shared->ctx->nk) {
+      return 0;
+    }
+    if (!kls_row_first_workspace_accumulate_claim_value(
+          workspace, state->generation, shared->ctx->nk,
+          pattern_count_io, col, state->deferred_output_values[p])) {
+      return 0;
+    }
+  }
+  const UF_long covered_l_entries =
+    state->deferred_output_l_count -
+    state->deferred_output_start_l_count;
+  state->delayed_output_replayed_l_count =
+    state->deferred_output_l_count;
+  if (trace != NULL) {
+    kls_row_first_stats_add(
+      &trace->compact_window_deferred_output_cache_applies, 1u);
+    kls_row_first_stats_add(
+      &trace->compact_window_deferred_output_cache_l_entries,
+      covered_l_entries);
+    kls_row_first_stats_add(
+      &trace->compact_window_deferred_output_cache_entries,
+      state->deferred_output_count);
+    if (state->deferred_output_count > 0u) {
+      kls_row_first_stats_add(
+        &trace->compact_window_delayed_output_replays, 1u);
+      kls_row_first_stats_add(
+        &trace->compact_window_delayed_output_deps,
+        covered_l_entries);
+      kls_row_first_stats_add(
+        &trace->compact_window_delayed_output_entries,
+        state->deferred_output_count);
+      kls_row_first_stats_add(&trace->scalar_u_output_entries,
+                              state->deferred_output_count);
+    }
+  }
+  kls_row_first_compact_window_deferred_output_reset(state);
+  (void)kls_row_first_compact_window_deferred_output_bump_generation(state);
   return 1;
 }
 
@@ -94075,6 +94638,9 @@ static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace
   }
   if (update_cutoff) {
     state->delayed_output_replayed_l_count = end_l_count;
+    kls_row_first_compact_window_deferred_output_reset(state);
+    (void)kls_row_first_compact_window_deferred_output_bump_generation(
+      state);
   }
   if (trace != NULL) {
     kls_row_first_stats_add(&trace->compact_window_delayed_output_replays,
@@ -94283,6 +94849,8 @@ static int kls_row_first_pipeline_apply_claim_stream_owner_to_workspace(
   if (state->delayed_output_replayed_l_count < end_l_count) {
     state->delayed_output_replayed_l_count = end_l_count;
   }
+  kls_row_first_compact_window_deferred_output_reset(state);
+  (void)kls_row_first_compact_window_deferred_output_bump_generation(state);
   if (trace != NULL) {
     const UF_long replay_entries =
       worker->compact_claim_stream_owner_replay_entries[row_index];
@@ -94354,6 +94922,8 @@ static int kls_row_first_pipeline_apply_shared_span_owner_to_workspace(
     state->delayed_output_replayed_l_count =
       state->compact_span_shared_owner_l_count;
   }
+  kls_row_first_compact_window_deferred_output_reset(state);
+  (void)kls_row_first_compact_window_deferred_output_bump_generation(state);
   if (trace != NULL &&
       shared->compact_span_shared_owner_replay_entries != NULL &&
       row_index < shared->compact_span_shared_owner_rows) {
@@ -97007,6 +97577,9 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
       state->bucket_next = -1;
       state->bucket_linked = 0;
       state->delayed_output_replayed_l_count = state->l_count;
+      kls_row_first_compact_window_deferred_output_reset(state);
+      (void)kls_row_first_compact_window_deferred_output_bump_generation(
+        state);
       shared->compact_group_slots[g] = -1;
       continue;
     }
@@ -98221,6 +98794,9 @@ static int kls_row_first_pipeline_replay_delayed_sparse_group(
       continue;
     }
     state->delayed_output_replayed_l_count = state->l_count;
+    kls_row_first_compact_window_deferred_output_reset(state);
+    (void)kls_row_first_compact_window_deferred_output_bump_generation(
+      state);
   }
 
   kls_row_first_pipeline_trace *target =
@@ -98289,6 +98865,7 @@ static void kls_row_first_pipeline_update_compact_sparse_group_producer(
   UF_long live_targets = 0u;
   for (UF_long g = 0; g < shared->compact_group_target_count; ++g) {
     shared->compact_batch_targets[g].state = NULL;
+    shared->compact_batch_targets[g].deferred_output_cache = 0;
     const int slot = shared->compact_group_slots[g];
     if (slot < 0 || slot >= shared->compact_window_count) {
       continue;
@@ -98326,6 +98903,14 @@ static void kls_row_first_pipeline_update_compact_sparse_group_producer(
     state->values[dep_pos] = 0.0;
     shared->compact_batch_targets[g].state = state;
     shared->compact_batch_targets[g].lij = lij;
+    if (shared->compact_deferred_output_cache_enabled &&
+        shared->compact_window_delay_output_enabled &&
+        (state->deferred_output_valid ||
+         row_entries >= shared->compact_deferred_output_min_u_entries) &&
+        kls_row_first_compact_window_deferred_output_begin_dep(
+          state, &state->trace_current)) {
+      shared->compact_batch_targets[g].deferred_output_cache = 1;
+    }
     kls_row_first_stats_add(&state->trace_current.scalar_dep_calls, 1u);
     kls_row_first_stats_add(&state->trace_current.scalar_dep_l_entries, 1u);
     kls_row_first_stats_add(&state->trace_current.scalar_dep_u_entries,
@@ -98351,6 +98936,13 @@ static void kls_row_first_pipeline_update_compact_sparse_group_producer(
       }
       if (shared->compact_window_delay_output_enabled &&
           col >= state->row) {
+        if (target->deferred_output_cache &&
+            !kls_row_first_compact_window_deferred_output_insert(
+              state, col, -target->lij * uvalue,
+              shared->compact_deferred_output_max_entries,
+              &state->trace_current)) {
+          target->deferred_output_cache = 0;
+        }
         kls_row_first_stats_add(
           &state->trace_current.compact_window_delayed_output_skips, 1u);
         continue;
@@ -98378,6 +98970,17 @@ static void kls_row_first_pipeline_update_compact_sparse_group_producer(
           &state->trace_current.scalar_u_output_entries, 1u);
       }
     }
+  }
+
+  for (UF_long g = 0; g < shared->compact_group_target_count; ++g) {
+    kls_row_first_compact_batch_target *target =
+      shared->compact_batch_targets + g;
+    if (target->deferred_output_cache && target->state != NULL &&
+        target->state->active && target->state->grouped) {
+      (void)kls_row_first_compact_window_deferred_output_finish_dep(
+        target->state, &target->state->trace_current);
+    }
+    target->deferred_output_cache = 0;
   }
 
   UF_long retained_targets = 0u;
@@ -99630,6 +100233,16 @@ static UF_long kls_row_first_pipeline_update_claim_run_producer(
     shared->compact_batch_targets[target_count].state = state;
     shared->compact_batch_targets[target_count].dep_pos = r;
     shared->compact_batch_targets[target_count].lij = lij;
+    shared->compact_batch_targets[target_count].deferred_output_cache = 0;
+    if (!stream_owner_active &&
+        shared->compact_deferred_output_cache_enabled &&
+        shared->compact_window_delay_output_enabled &&
+        (state->deferred_output_valid ||
+         row_end - row_begin >= shared->compact_deferred_output_min_u_entries) &&
+        kls_row_first_compact_window_deferred_output_begin_dep(
+          state, &state->trace_current)) {
+      shared->compact_batch_targets[target_count].deferred_output_cache = 1;
+    }
     target_count++;
     kls_row_first_stats_add(&state->trace_current.scalar_dep_calls, 1u);
     kls_row_first_stats_add(&state->trace_current.scalar_dep_l_entries, 1u);
@@ -99708,6 +100321,13 @@ static UF_long kls_row_first_pipeline_update_claim_run_producer(
           }
         }
         if (!stream_owner_active) {
+          if (target->deferred_output_cache &&
+              !kls_row_first_compact_window_deferred_output_insert(
+                state, col, -target->lij * uvalue,
+                shared->compact_deferred_output_max_entries,
+                &state->trace_current)) {
+            target->deferred_output_cache = 0;
+          }
           kls_row_first_stats_add(
             &state->trace_current.compact_window_delayed_output_skips, 1u);
         }
@@ -99739,11 +100359,17 @@ static UF_long kls_row_first_pipeline_update_claim_run_producer(
   for (UF_long t = 0; t < target_count; ++t) {
     kls_row_first_compact_batch_target *target =
       shared->compact_batch_targets + t;
+    if (target->deferred_output_cache && target->state != NULL &&
+        target->state->active) {
+      (void)kls_row_first_compact_window_deferred_output_finish_dep(
+        target->state, &target->state->trace_current);
+    }
     if (stream_owner_active && target->state != NULL &&
         target->dep_pos < worker->compact_claim_stream_owner_rows) {
       worker->compact_claim_stream_owner_l_counts[target->dep_pos] =
         target->state->l_count;
     }
+    target->deferred_output_cache = 0;
     target->state = NULL;
   }
   if (trace != NULL) {
@@ -100112,6 +100738,19 @@ static int kls_row_first_pipeline_claim_compact_window_slot(
     return 0;
   }
   if (!kls_row_first_pipeline_apply_shared_span_owner_to_workspace(
+        shared, state, &worker->workspace, &claimed_pattern_count,
+        &state->trace_current)) {
+    if (shared->trace_enabled) {
+      kls_row_first_stats_add(
+        &shared->trace_committed.compact_window_claim_stale_clears, 1u);
+    }
+    kls_row_first_pipeline_clear_claim_workspace(
+      &worker->workspace, state->row, state->generation,
+      claimed_pattern_count);
+    kls_row_first_pipeline_clear_compact_window_state(shared, state);
+    return 0;
+  }
+  if (!kls_row_first_compact_window_apply_deferred_output_cache(
         shared, state, &worker->workspace, &claimed_pattern_count,
         &state->trace_current)) {
     if (shared->trace_enabled) {
@@ -100516,6 +101155,12 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_delayed_output_entries=%" PRIu64
           " compact_window_delayed_output_scan_entries=%" PRIu64
           " compact_window_delayed_output_seek_skips=%" PRIu64
+          " compact_window_deferred_output_cache_stores=%" PRIu64
+          " compact_window_deferred_output_cache_applies=%" PRIu64
+          " compact_window_deferred_output_cache_l_entries=%" PRIu64
+          " compact_window_deferred_output_cache_entries=%" PRIu64
+          " compact_window_deferred_output_cache_disables=%" PRIu64
+          " compact_window_deferred_output_cache_overflows=%" PRIu64
           " compact_window_delayed_group_replay_surfaces=%" PRIu64
           " compact_window_delayed_group_replay_states=%" PRIu64
           " compact_window_delayed_group_replay_deps=%" PRIu64
@@ -100601,6 +101246,12 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_delayed_output_entries,
           (uint64_t)trace->compact_window_delayed_output_scan_entries,
           (uint64_t)trace->compact_window_delayed_output_seek_skips,
+          (uint64_t)trace->compact_window_deferred_output_cache_stores,
+          (uint64_t)trace->compact_window_deferred_output_cache_applies,
+          (uint64_t)trace->compact_window_deferred_output_cache_l_entries,
+          (uint64_t)trace->compact_window_deferred_output_cache_entries,
+          (uint64_t)trace->compact_window_deferred_output_cache_disables,
+          (uint64_t)trace->compact_window_deferred_output_cache_overflows,
           (uint64_t)trace->compact_window_delayed_group_replay_surfaces,
           (uint64_t)trace->compact_window_delayed_group_replay_states,
           (uint64_t)trace->compact_window_delayed_group_replay_deps,
@@ -102020,6 +102671,15 @@ static int kls_row_first_run_parallel_pipeline_phase(
     shared.compact_window_execute_enabled;
   shared.compact_window_max_entries =
     kls_row_pipeline_compact_window_max_entries_env();
+  shared.compact_deferred_output_max_entries =
+    kls_row_pipeline_compact_deferred_output_max_entries_env();
+  shared.compact_deferred_output_min_u_entries =
+    kls_row_pipeline_compact_deferred_output_min_u_entries_env();
+  shared.compact_deferred_output_cache_enabled =
+    shared.compact_window_execute_enabled &&
+    shared.compact_window_delay_output_enabled &&
+    shared.compact_deferred_output_max_entries > 0u &&
+    kls_row_pipeline_compact_deferred_output_cache_env_enabled();
   shared.owner_surface_window =
     shared.owner_surface_trace_enabled
       ? kls_row_pipeline_owner_surface_window_env() : 0u;

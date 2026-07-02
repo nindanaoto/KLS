@@ -105,6 +105,12 @@ PRODUCER_COUNTERS = [
     "compact_window_delayed_output_entries",
     "compact_window_delayed_output_scan_entries",
     "compact_window_delayed_output_seek_skips",
+    "compact_window_deferred_output_cache_stores",
+    "compact_window_deferred_output_cache_applies",
+    "compact_window_deferred_output_cache_l_entries",
+    "compact_window_deferred_output_cache_entries",
+    "compact_window_deferred_output_cache_disables",
+    "compact_window_deferred_output_cache_overflows",
     "compact_window_delayed_group_replay_surfaces",
     "compact_window_delayed_group_replay_states",
     "compact_window_delayed_group_replay_deps",
@@ -913,6 +919,24 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_delayed_output_seek_skips = parse_int(
         last_trace.get("compact_window_delayed_output_seek_skips")
     )
+    compact_window_deferred_output_cache_stores = parse_int(
+        last_trace.get("compact_window_deferred_output_cache_stores")
+    )
+    compact_window_deferred_output_cache_applies = parse_int(
+        last_trace.get("compact_window_deferred_output_cache_applies")
+    )
+    compact_window_deferred_output_cache_l_entries = parse_int(
+        last_trace.get("compact_window_deferred_output_cache_l_entries")
+    )
+    compact_window_deferred_output_cache_entries = parse_int(
+        last_trace.get("compact_window_deferred_output_cache_entries")
+    )
+    compact_window_deferred_output_cache_disables = parse_int(
+        last_trace.get("compact_window_deferred_output_cache_disables")
+    )
+    compact_window_deferred_output_cache_overflows = parse_int(
+        last_trace.get("compact_window_deferred_output_cache_overflows")
+    )
     compact_window_delayed_group_replay_surfaces = parse_int(
         last_trace.get("compact_window_delayed_group_replay_surfaces")
     )
@@ -1196,6 +1220,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_delayed_output_scan_entries,
         "compact_window_delayed_output_seek_skips":
             compact_window_delayed_output_seek_skips,
+        "compact_window_deferred_output_cache_stores":
+            compact_window_deferred_output_cache_stores,
+        "compact_window_deferred_output_cache_applies":
+            compact_window_deferred_output_cache_applies,
+        "compact_window_deferred_output_cache_l_entries":
+            compact_window_deferred_output_cache_l_entries,
+        "compact_window_deferred_output_cache_entries":
+            compact_window_deferred_output_cache_entries,
+        "compact_window_deferred_output_cache_disables":
+            compact_window_deferred_output_cache_disables,
+        "compact_window_deferred_output_cache_overflows":
+            compact_window_deferred_output_cache_overflows,
         "compact_window_delayed_group_replay_surfaces":
             compact_window_delayed_group_replay_surfaces,
         "compact_window_delayed_group_replay_states":
@@ -1659,6 +1695,14 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_delayed_output_scan_entries
             + compact_window_delayed_output_seek_skips,
         ),
+        "compact_window_deferred_output_cache_entries_per_apply": ratio(
+            compact_window_deferred_output_cache_entries,
+            compact_window_deferred_output_cache_applies,
+        ),
+        "compact_window_deferred_output_cache_store_share": ratio(
+            compact_window_deferred_output_cache_stores,
+            compact_window_delayed_output_skips,
+        ),
         "compact_window_delayed_group_replay_states_per_surface": ratio(
             compact_window_delayed_group_replay_states,
             compact_window_delayed_group_replay_surfaces,
@@ -1983,6 +2027,14 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_delayed_output_deps_per_replay",
         "compact_window_delayed_output_entries_per_scan",
         "compact_window_delayed_output_seek_skip_share",
+        "compact_window_deferred_output_cache_stores",
+        "compact_window_deferred_output_cache_applies",
+        "compact_window_deferred_output_cache_l_entries",
+        "compact_window_deferred_output_cache_entries",
+        "compact_window_deferred_output_cache_disables",
+        "compact_window_deferred_output_cache_overflows",
+        "compact_window_deferred_output_cache_entries_per_apply",
+        "compact_window_deferred_output_cache_store_share",
         "compact_window_delayed_group_replay_surfaces",
         "compact_window_delayed_group_replay_states",
         "compact_window_delayed_group_replay_states_per_surface",
