@@ -6,6 +6,31 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+KLS now measures generally faster than the saved CKTSO binary on the
+93-matrix paper-medium manifest at 4 threads. Because the benchmark host's
+clock state drifted about 2x within a single day (which made every
+cross-window suite comparison misleading), the comparison now runs paired:
+`scripts/run_paired_suite.sh` executes both solvers back-to-back per matrix
+so machine drift cancels inside each pair. The paired artifacts
+`build/kls_paired_medium_t4.jsonl` and `build/cktso_paired_medium_t4.jsonl`
+give a SPICE-cycle geomean of 0.4167s for KLS versus 0.5787s for CKTSO
+(0.72x, KLS wins 50/92). The main mechanism behind the flip is the sorted
+supernode panel refactor: after a fresh full factor KLS sorts the KLU
+numeric columns ascending, detects strict nested-tail L-supernode runs, and
+consumes consecutive run producers per U column as a dense in-panel solve
+plus a chunked shared-tail panel update in the mapped/BTF-pool kernel and
+all EGraph column kernels, multi-versioned so an AVX2/FMA clone carries the
+vectorized tail loop (the panel loses outright without SIMD) and gated on
+batched work (short tails lose to the 32-bit-index scalar path). Interleaved
+A/B improvements on the previously refactor-dominated gap rows: rajat03
+1.57x, ASIC_100ks 1.57x, ASIC_320ks 1.65x, G2_circuit 1.56x, transient
+1.46x, scircuit 1.20x. The residual worst class in the paired run is
+power-grid shaped (ACTIVSg2000 9.7x, OPF_10000 7.9x, coupled 5.6x), which is
+the next target, followed by supernode-aware EGraph scheduling (collapsing
+runs into single pipeline tasks; two-thread EGraph refactor still measures
+slower than serial on ASIC_320ks from per-column sync), the checked
+fast-factor kernels, and the `pre2` first-factor/analysis costs.
+
 The `pre2` CKTSO gap is now decomposed and the first-factor half is fixed.
 Uncapped runs showed that KLS's production first factor on `pre2` does not
 merely time out: it fails outright (`KLS_ERR_FACTOR_FAILED` after ~13 minutes
