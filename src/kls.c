@@ -81016,7 +81016,11 @@ static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
     (double)solver->symbolic->maxblock / (double)solver->n;
   if (coverage >= 0.95 &&
       (solver->symbolic->maxblock >= 90000u ||
-       solver->common.flops >= 5.0e9)) {
+       solver->common.flops >= 5.0e8)) {
+    /* Dominant blocks between the small-compact and large windows used to
+       be excluded as overhead-prone (dense TSOPF-style shapes), but the
+       sorted-supernode panel batches now carry those dense tails, so
+       medium-high work is enough to amortize the schedule. */
     return 1;
   }
   if (kls_egraph_medium_heavy_dominant_btf_shape(solver)) {
