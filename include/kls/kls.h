@@ -1103,6 +1103,8 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_group_live_step_max_unique_rows;
   int64_t refactor_btf_scalar_run_group_live_step_stored_rows;
   int64_t refactor_btf_scalar_run_group_live_step_storage_limited;
+  int64_t refactor_btf_scalar_run_group_wake_count;
+  int64_t refactor_btf_scalar_run_group_wake_member_total;
   int64_t refactor_btf_scalar_run_group_live_step_runtime_full_step_count;
   int64_t refactor_btf_scalar_run_group_live_step_runtime_full_current_count;
   int64_t refactor_btf_scalar_run_group_live_step_runtime_full_rows;
@@ -1148,6 +1150,9 @@ typedef struct kls_stats {
   int64_t refactor_last_btf_scalar_run_group_wake_ready_entries;
   int64_t refactor_btf_scalar_run_group_state_rows_total;
   int64_t refactor_btf_scalar_run_group_state_max_rows;
+  int64_t refactor_btf_scalar_run_group_state_current_count;
+  int64_t refactor_btf_scalar_run_group_state_best_skip_total;
+  int64_t refactor_btf_scalar_run_group_state_max_best_skip;
   int64_t refactor_last_btf_scalar_run_group_state_materialized_currents;
   int64_t refactor_last_btf_scalar_run_group_state_materialized_rows;
   int64_t refactor_last_btf_scalar_run_group_state_materialized_prefix_deps;

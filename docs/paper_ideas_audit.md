@@ -20,6 +20,21 @@ gap is still dominated by repeated refactorization and the missing grouped
 row/panel numeric owner, with small initial-factor overhead as a separate
 secondary issue.
 
+The retained BTF scalar-run state executor now has a structural guard instead
+of relying on timeout-heavy probes. A focused rejected `rajat03` run showed why:
+the descriptor exposed `1156` wake triggers, `4706` wake members, `558487`
+retained state rows, and only `55844` best-skip U positions, while no prefix
+became runtime-ready and no state was materialized. With the guard active, the
+same state-exec/step-window request without the live-step partial diagnostic
+keeps refactor time near the default (`0.0010s` versus `0.00088s`) and still
+reports the structural rejection counters. On `ASIC_100ks`, the exact state
+surface is much larger (`58663555` retained rows versus `1434485` best-skip
+positions), so the guarded runtime avoids materialization but the initial exact
+state-plan build is still too expensive for a promoted path. That keeps the next
+paper-aligned work on a cheaper live-workspace activation estimate or true
+grouped current workspace, not on forcing exact retained-state construction for
+large ASIC rows.
+
 The latest `pre2` trace adds a claim-time delayed-output surface for sparse
 grouped compact states, without enabling the rejected numeric group replay.
 `build/kls_pre2_claim_group_output_surface_w512_trace45.stderr` timed out at

@@ -1427,6 +1427,19 @@ sorted and advances retained sparse states with a merge walk instead of a
 per-entry binary search when that sorted shape holds.
 This remains opt-in: the focused ASIC probes are residual-clean, but the state
 owner is still too fine-grained to beat the default refactor path.
+The executor is now additionally guarded by structural state/payoff counters:
+`refactor_btf_scalar_run_group_wake_count`,
+`refactor_btf_scalar_run_group_wake_member_total`,
+`refactor_btf_scalar_run_group_state_current_count`,
+`refactor_btf_scalar_run_group_state_best_skip_total`, and
+`refactor_btf_scalar_run_group_state_max_best_skip`. Unless
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC_UNGUARDED=1` is set, the
+state executor and step-window runtime are disabled when the retained best-skip
+surface is smaller than the retained state-row surface. This keeps rejected
+CKTSO/SubtreeLU state-owner probes from running the expensive wake/materialize
+path when the paper-level state geometry is already upside down. The exact
+state plan is retained across repeated refactors while the LU pointer cache is
+valid, so repeated SPICE refactors do not rebuild the same state-row descriptor.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_COMPACT_VALUES=1` is an
 additional opt-in for the retained-state executor. When combined with
 `STATE_EXEC`, it stores retained state values only for memberships belonging to
