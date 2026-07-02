@@ -15607,3 +15607,21 @@ claim-run control
 first 65536-row progress checkpoint in 45s. This rejects strict adjacent
 claim-run ownership as the missing mechanism even with incremental output
 streaming; the next owner must not be tied to adjacent compact claim runs.
+
+The next paper-gap check isolated SubtreeLU's component-local pivoting rule
+from the wider row/panel owner work. `KLS_ENABLE_ROW_FIRST_STRICT_SEPARATOR_PIVOT_SCOPE=1`
+keeps normal behavior off by default but, when enabled, filters
+separator-scoped row-first dynamic pivot candidates to the exact current
+separator component instead of the default retained component extent. This
+passed `cmake --build build --target kls_smoke kls_bench -j2`,
+`ctest --test-dir build --output-on-failure`, an opt-in `kls_smoke`, and a
+forced KLS-first `Freescale/transient` check with
+`relative_residual_l2=2.74709086e-13`. The focused `pre2` evidence rejects it
+as the CKTSO-gap closer: `build/kls_pre2_strict_separator_scope_trace75.stderr`
+timed out with no JSON row, reached pivot-tail at only `130192/629628` rows in
+the first repeated dominant-block passes, and later hit another pivot-tail at
+`118553/629628` after `3850088846` scalar U entries and `2850787280`
+output-side entries. Exact component-only pivots therefore make `pre2` less
+stable for the current row-first executor; the missing paper-scale mechanism is
+still the grouped row/supernode live workspace for postfactor/output streaming,
+not a stricter pivot scope by itself.

@@ -48140,6 +48140,13 @@ static int kls_row_pipeline_supernode_producer_batch_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_first_strict_separator_pivot_scope_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_ROW_FIRST_STRICT_SEPARATOR_PIVOT_SCOPE");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_row_pipeline_compact_window_trace_env_enabled(void) {
   const char *value =
     getenv("KLS_TRACE_ROW_PIPELINE_COMPACT_WINDOW");
@@ -86942,6 +86949,7 @@ typedef struct kls_row_first_block_context {
   int scale;
   int use_separator_for_block;
   int use_pivot_col_limit;
+  int strict_separator_pivot_scope;
   double tol;
 } kls_row_first_block_context;
 
@@ -88170,15 +88178,17 @@ static int kls_row_first_collect_pivot_choice(
       if (!kls_row_first_separator_position(ctx, col, &separator_pos)) {
         return 0;
       }
+      const unsigned int col_component =
+        ctx->solver->separator.order_component[separator_pos];
+      const int exact_component = col_component == pivot_component;
       if (within_limit &&
           separator_pos <= pivot_component_last &&
+          (!ctx->strict_separator_pivot_scope || exact_component) &&
           abs_value > scoped_best_abs) {
         scoped_best_abs = abs_value;
         choice->scoped_abs = abs_value;
         choice->scoped_col = col;
-        choice->scoped_col_exact =
-          ctx->solver->separator.order_component[separator_pos] ==
-          pivot_component;
+        choice->scoped_col_exact = exact_component;
       }
     }
   }
@@ -104243,6 +104253,8 @@ static int kls_row_first_parallel_factor_block(
   row_ctx.scaled = shared->scaled;
   row_ctx.scale = shared->scale;
   row_ctx.use_separator_for_block = use_separator_for_block;
+  row_ctx.strict_separator_pivot_scope =
+    kls_row_first_strict_separator_pivot_scope_env_enabled();
   row_ctx.tol = shared->tol;
 
   kls_row_first_row_stats row_stats;
@@ -106229,6 +106241,8 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
     row_ctx.scaled = scaled;
     row_ctx.scale = (int)common->scale;
     row_ctx.use_separator_for_block = use_separator_for_block;
+    row_ctx.strict_separator_pivot_scope =
+      kls_row_first_strict_separator_pivot_scope_env_enabled();
     row_ctx.tol = tol;
 
     kls_row_first_workspace row_workspace;

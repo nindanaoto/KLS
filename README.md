@@ -3223,6 +3223,19 @@ reach the first progress checkpoint in the same cap. This keeps the missing
 mechanism focused on avoiding delayed-output materialization in compact states,
 not merely selecting a wider shared owner panel.
 
+`KLS_ENABLE_ROW_FIRST_STRICT_SEPARATOR_PIVOT_SCOPE=1` is a diagnostic for the
+SubtreeLU component-local pivot rule. With the flag set, separator-scoped
+row-first factorization will only choose dynamic column pivots from the exact
+current separator component, rather than the wider retained component extent
+used by default. This is not promoted to the default path: it passed the normal
+build/tests and a forced KLS-first `Freescale/transient` check
+(`relative_residual_l2=2.75e-13`), but the forced-METIS `pre2` trace
+`build/kls_pre2_strict_separator_scope_trace75.stderr` timed out and regressed
+to early pivot-tail checkpoints (`130192/629628` and then `118553/629628`).
+The current `pre2` gap is therefore not caused by allowing component-extent
+pivots; KLS still needs the broader row/panel live-workspace owner for scalar
+trailing/output replay.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
