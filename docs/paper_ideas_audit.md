@@ -15679,3 +15679,27 @@ score only the active gap manifest while excluding
 such as `Hamrle3`, where CKTSO itself times out under the current cap, in the
 stress/scalability bucket instead of letting them distort finite-reference
 geomeans.
+
+The KLS suite runner can now preserve the row-pipeline evidence for timeout
+rows directly in the failure sidecar. `scripts/run_bench_suite.py
+--failure-diagnostics trace` reruns each failed KLS row with
+`KLS_TRACE_KLS_FIRST_FACTOR=1`, `KLS_TRACE_ROW_PIPELINE=1`, and a bounded
+`KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES` threshold, writes the stderr trace
+under `<jsonl-stem>.failure-traces/`, and embeds the
+`scripts/summarize_row_pipeline_trace.py` summary in the `.failures` row.
+`--failure-diagnostics all` keeps the analyze-only diagnostic alongside the
+trace. `--failure-trace-kls-first-factor on` is available for `pre2`-style
+first-factor investigations, where the scored default run may time out before
+entering the KLS-owned row pipeline but the diagnostic needs that row-pipeline
+surface. This does not claim a performance win; it makes the actionable
+`pre2` evidence reproducible from the suite command itself, so future timeout
+checks report both "ordering/analyze is small" and the scalar-output versus
+producer-target numeric-owner surface without hand-running a separate trace.
+The verification run
+`build/kls_pre2_failure_trace45_forced_row.failures` captured that surface in
+the sidecar: the trace reached `589824/629628` rows, reported
+`432842841` scalar output U entries, only `475956` accepted producer-target U
+entries, and `25893928` candidate producer-target U entries. The derived
+ratios were `909.4x` scalar-output per accepted producer-target entry and
+`16.7x` even against the candidate target surface, keeping the next paper-gap
+implementation target on a larger grouped current-row/panel numeric owner.

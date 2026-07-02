@@ -2094,6 +2094,17 @@ Add `--include-failures --failure-seconds SECONDS` when a hard-suite comparison
 should score failed or missing rows with an explicit cycle-time penalty; using a
 process timeout value as the penalty is only a lower bound for SPICE-cycle
 comparisons.
+For timeout diagnosis, `run_bench_suite.py --failure-diagnostics trace` reruns
+each failed KLS matrix under a shorter row-pipeline trace cap, writes the trace
+stderr under `<jsonl-stem>.failure-traces/`, and embeds the
+`scripts/summarize_row_pipeline_trace.py` counters in the `.failures` record.
+Use `--failure-diagnostics all` to keep the default analyze-only row alongside
+that trace summary. For first-factor owner investigations, add
+`--failure-trace-kls-first-factor on` so only the diagnostic run forces the
+KLS-owned row pipeline. This is the reproducible way to recheck cases such as
+`pre2`: analysis/order remains visible, while the failure sidecar also records
+the scalar-output versus producer-target surface that drives the current
+numeric-owner gap.
 
 The suite metric is:
 
