@@ -2563,6 +2563,18 @@ changes that threshold. `KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_NONPR
 selects non-prefix producers by estimated reusable U-output work instead of row
 frequency. Both are diagnostic flags and remain off by default because focused
 traces showed they add owner work without closing the delayed-output gap.
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_SPARSE_VALUES=1` changes the
+shared-owner value panel to a row-wise sparse accumulator that stores one summed
+entry per touched row/column cell. This directly tests whether the current
+masked dense owner is losing mainly to empty panel slots. It is also
+off-by-default: focused traces show the selected owner panels are already
+nearly dense. On `ASIC_100ks`, dense owner storage used `169046` slots for
+`671140` replay entries, while sparse storage used `169612` cells for
+`677628` replay entries. On a 45s `pre2` trace, sparse storage reduced owner
+slots only from `4264760` to `4202192` while reaching the same
+`589824/629628` checkpoint. This rejects shared-owner value layout as the
+first-order CKTSO gap; the missing piece remains a broader live row/panel owner
+that avoids the delayed-output replay stream itself.
 Row-pipeline traces now report
 `compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,hole_skips,hole_skip_rows,prefix_shrinks,prefix_shrink_rows,oversize_skips,oversize_slots,link_skips,link_skip_entries,scan_skips,scan_skip_entries}`
 plus `compact_window_span_owner_payoff_{skips,skip_rows,skip_entries,skip_scan_entries}`

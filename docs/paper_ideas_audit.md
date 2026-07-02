@@ -15854,3 +15854,23 @@ KLS-first factor trace still slowed slightly. This rejects "pick heavier
 producers" and "just widen the cap" as the missing CKTSO/SubtreeLU mechanism.
 The next useful implementation target remains a coarse row/supernode owner that
 shares output scans without materializing a large dense per-row panel.
+
+The shared span owner now also has an off-by-default sparse accumulated value
+layout behind
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_SHARED_OWNER_SPARSE_VALUES=1`. Instead of
+keeping the selected producer contributions in the masked row-by-union-column
+panel, the sparse path sums duplicate producer contributions into row-wise
+`(column,value)` cells and applies only the touched cells at claim time. This
+directly tested whether the dense shared-owner storage was the first-order
+remaining loss.
+
+The focused result rejects that explanation. The sparse path was
+residual-clean on smoke and on `ASIC_100ks`, but the selected owner panels were
+already nearly dense: dense storage used `169046` slots for `671140` replay
+entries, while sparse storage used `169612` cells for `677628` replay entries.
+On the 45s `pre2` timeout trace, sparse storage reduced owner slots only from
+`4264760` to `4202192` and reached the same `589824/629628` checkpoint, with
+delayed-output replay still around `388M` entries. This narrows the next
+paper-level implementation target again: KLS needs a broader live row/panel
+owner that removes delayed-output replay work, not just a different value
+layout for the already-selected shared owner.
