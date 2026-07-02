@@ -2376,6 +2376,23 @@ keeps the claim-run path diagnostic and off by default: adjacent-row ownership
 alone is not the missing CKTSO/SubtreeLU trailing-output workspace; the next
 owner needs a wider local row/panel surface without storing output back into
 future compact states.
+
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_CLAIM_STREAM_OWNER=1` adds a stricter
+claim-run streaming experiment. While a strict claim run is reserved, newly
+published producer rows can stream delayed-output contributions once into a
+worker-owned panel and advance the claimed rows' delayed-output replay cutoff
+when they are later consumed. The owner records each row's stream-start L-count
+and replays any older delayed-output prefix before applying the streamed panel,
+so the cutoff only advances across the streamed range.
+`KLS_ROW_PIPELINE_COMPACT_CLAIM_STREAM_OWNER_MAX_SLOTS=<slots>` caps that panel
+(`64` by default); lower values disable the owner instead of entering a
+partial-stream fallback. This remains diagnostic: a focused `pre2` run with a
+two-row claim run and 64 stream-owner slots,
+`build/kls_pre2_claim_stream_owner_r2_s64_trace45.stderr`, did not reach the
+first progress checkpoint in 45s, and the matching claim-run-only control also
+did not reach it. The strict adjacent claim-run family is therefore not the
+right `pre2` gap closer even when output replay is streamed incrementally.
+
 The follow-up local-span probe records the unreserved grouped rows within the
 next 64 factor positions as
 `compact_window_claim_span_output_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`.

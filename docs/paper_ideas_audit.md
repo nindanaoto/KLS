@@ -15587,3 +15587,23 @@ selector works, but the shared compact owner still pays too much to build and
 materialize delayed output. The next row/panel owner needs to keep output in a
 live executor or streaming kernel rather than broadening compact-state
 materialization.
+
+A claim-run streaming owner was then added as a narrower non-materializing
+test. `KLS_ENABLE_ROW_PIPELINE_COMPACT_CLAIM_STREAM_OWNER=1` streams delayed
+output from newly published producer rows into a worker-owned column-major
+panel for the currently reserved strict claim run, and each claimed row
+records a stream-start L-count. When the row is consumed, KLS first replays any
+older delayed-output prefix, then applies the streamed panel and advances
+`delayed_output_replayed_l_count` only across the streamed range. The panel is
+capped by
+`KLS_ROW_PIPELINE_COMPACT_CLAIM_STREAM_OWNER_MAX_SLOTS` (`64` by default).
+Lower values disable the owner because partial-stream fallback is slower than
+the control path. Correctness and build gates passed, and small opt-in smoke
+passes with two-row runs at the default 64-slot cap; larger caps become
+expensive. On `pre2`, the bounded stream-owner trace
+`build/kls_pre2_claim_stream_owner_r2_s64_trace45.stderr` and matching
+claim-run control
+`build/kls_pre2_claim_run_r2_control_trace45.stderr` both failed to reach the
+first 65536-row progress checkpoint in 45s. This rejects strict adjacent
+claim-run ownership as the missing mechanism even with incremental output
+streaming; the next owner must not be tied to adjacent compact claim runs.

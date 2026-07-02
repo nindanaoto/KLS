@@ -132,6 +132,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_LINKS 1u
 #define KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_SCAN_ENTRIES \
   (KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_SLOTS * 8u)
+#define KLS_ROW_FIRST_COMPACT_CLAIM_STREAM_OWNER_DEFAULT_MAX_SLOTS 64u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_DEFAULT_ROWS 64u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_MAX_ROWS \
   KLS_ROW_FIRST_COMPACT_WINDOW_MAX_SLOTS
@@ -48181,6 +48182,38 @@ static int kls_row_pipeline_compact_claim_run_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_compact_claim_stream_owner_env_enabled(void) {
+  if (!kls_row_pipeline_compact_claim_run_env_enabled()) {
+    return 0;
+  }
+  const char *value =
+    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_CLAIM_STREAM_OWNER");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
+static UF_long kls_row_pipeline_compact_claim_stream_owner_max_slots_env(void) {
+  if (!kls_row_pipeline_compact_claim_stream_owner_env_enabled()) {
+    return 0u;
+  }
+  const char *value =
+    getenv("KLS_ROW_PIPELINE_COMPACT_CLAIM_STREAM_OWNER_MAX_SLOTS");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_ROW_FIRST_COMPACT_CLAIM_STREAM_OWNER_DEFAULT_MAX_SLOTS;
+  }
+  if (value[0] == '0' && value[1] == '\0') {
+    return 0u;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return KLS_ROW_FIRST_COMPACT_CLAIM_STREAM_OWNER_DEFAULT_MAX_SLOTS;
+  }
+  const unsigned long long max_uf = (unsigned long long)UF_long_max;
+  return parsed > max_uf ? UF_long_max : (UF_long)parsed;
+}
+
 static int kls_row_pipeline_compact_span_owner_env_enabled(void) {
   const char *value =
     getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_OWNER");
@@ -92173,6 +92206,7 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long compact_span_owner_max_links;
   UF_long compact_span_owner_max_scan_entries;
   UF_long compact_span_shared_owner_scan_rows;
+  UF_long compact_claim_stream_owner_max_slots;
   UF_long compact_claim_span_trace_rows;
   UF_long owner_surface_window;
   UF_long owner_surface_interval;
@@ -92185,6 +92219,7 @@ typedef struct kls_row_first_pipeline_shared {
   int owner_surface_trace_enabled;
   int compact_group_active;
   int compact_claim_run_enabled;
+  int compact_claim_stream_owner_enabled;
   int compact_span_owner_enabled;
   int compact_span_owner_allow_holes;
   int compact_span_owner_allow_prefix;
@@ -92223,11 +92258,23 @@ struct kls_row_first_pipeline_worker {
   double *compact_span_owner_values;
   unsigned char *compact_span_owner_mask;
   UF_long *compact_span_owner_replay_entries;
+  UF_long *compact_claim_stream_owner_cols;
+  double *compact_claim_stream_owner_values;
+  unsigned char *compact_claim_stream_owner_mask;
+  UF_long *compact_claim_stream_owner_replay_entries;
+  UF_long *compact_claim_stream_owner_start_l_counts;
+  UF_long *compact_claim_stream_owner_l_counts;
   UF_long compact_span_owner_col_capacity;
   UF_long compact_span_owner_value_capacity;
+  UF_long compact_claim_stream_owner_col_capacity;
+  UF_long compact_claim_stream_owner_value_capacity;
+  UF_long compact_claim_stream_owner_row_capacity;
   UF_long compact_span_owner_rows;
   UF_long compact_span_owner_cols_count;
   int compact_span_owner_active;
+  UF_long compact_claim_stream_owner_rows;
+  UF_long compact_claim_stream_owner_cols_count;
+  int compact_claim_stream_owner_active;
   int lookahead_active;
   int lookahead_claimed;
   int external_update_active;
@@ -92258,6 +92305,12 @@ static void kls_row_first_pipeline_worker_free(
   free(worker->compact_span_owner_values);
   free(worker->compact_span_owner_mask);
   free(worker->compact_span_owner_replay_entries);
+  free(worker->compact_claim_stream_owner_cols);
+  free(worker->compact_claim_stream_owner_values);
+  free(worker->compact_claim_stream_owner_mask);
+  free(worker->compact_claim_stream_owner_replay_entries);
+  free(worker->compact_claim_stream_owner_start_l_counts);
+  free(worker->compact_claim_stream_owner_l_counts);
 }
 
 static void kls_row_first_pipeline_collect_worker_storage_trace(
@@ -92301,6 +92354,9 @@ static void kls_row_first_pipeline_worker_reset_claim_run(
   worker->compact_span_owner_rows = 0u;
   worker->compact_span_owner_cols_count = 0u;
   worker->compact_span_owner_active = 0;
+  worker->compact_claim_stream_owner_rows = 0u;
+  worker->compact_claim_stream_owner_cols_count = 0u;
+  worker->compact_claim_stream_owner_active = 0;
 }
 
 static int kls_row_first_pipeline_worker_reserve_span_owner_cols(
@@ -92399,6 +92455,120 @@ static int kls_row_first_pipeline_worker_reserve_span_owner_matrix(
     return 0;
   }
   worker->compact_span_owner_replay_entries = entries;
+  return 1;
+}
+
+static int kls_row_first_pipeline_worker_reserve_claim_stream_owner(
+  kls_row_first_pipeline_worker *worker,
+  UF_long rows,
+  UF_long cols) {
+  if (worker == NULL || rows == 0u ||
+      rows > KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS) {
+    return 0;
+  }
+  const size_t max_object = (size_t)PTRDIFF_MAX;
+  if (cols > (UF_long)(max_object /
+                       sizeof(*worker->compact_claim_stream_owner_cols)) ||
+      rows > (UF_long)(max_object /
+                       sizeof(*worker->compact_claim_stream_owner_l_counts)) ||
+      rows > (UF_long)(max_object /
+                       sizeof(*worker->compact_claim_stream_owner_start_l_counts)) ||
+      rows > (UF_long)(max_object /
+                       sizeof(*worker->compact_claim_stream_owner_replay_entries)) ||
+      (cols > 0u && rows > UF_long_max / cols)) {
+    return 0;
+  }
+  const UF_long slots = rows * cols;
+  if (slots > (UF_long)(max_object /
+                        sizeof(*worker->compact_claim_stream_owner_values)) ||
+      slots > (UF_long)(max_object /
+                        sizeof(*worker->compact_claim_stream_owner_mask))) {
+    return 0;
+  }
+  if (cols > worker->compact_claim_stream_owner_col_capacity) {
+    UF_long grown = worker->compact_claim_stream_owner_col_capacity == 0u
+      ? 256u : worker->compact_claim_stream_owner_col_capacity;
+    while (grown < cols) {
+      if (grown > UF_long_max / 2u) {
+        grown = cols;
+        break;
+      }
+      grown *= 2u;
+    }
+    if (grown > (UF_long)(max_object /
+                          sizeof(*worker->compact_claim_stream_owner_cols))) {
+      return 0;
+    }
+    UF_long *cols_ptr =
+      (UF_long *)realloc(worker->compact_claim_stream_owner_cols,
+                         (size_t)grown *
+                           sizeof(*worker->compact_claim_stream_owner_cols));
+    if (cols_ptr == NULL) {
+      return 0;
+    }
+    worker->compact_claim_stream_owner_cols = cols_ptr;
+    worker->compact_claim_stream_owner_col_capacity = grown;
+  }
+  const UF_long value_slots =
+    worker->compact_claim_stream_owner_col_capacity > 0u &&
+        rows > UF_long_max / worker->compact_claim_stream_owner_col_capacity
+      ? UF_long_max
+      : rows * worker->compact_claim_stream_owner_col_capacity;
+  if (value_slots > (UF_long)(max_object /
+                              sizeof(*worker->compact_claim_stream_owner_values)) ||
+      value_slots > (UF_long)(max_object /
+                              sizeof(*worker->compact_claim_stream_owner_mask))) {
+    return 0;
+  }
+  if (value_slots > worker->compact_claim_stream_owner_value_capacity) {
+    double *values =
+      (double *)realloc(worker->compact_claim_stream_owner_values,
+                        (size_t)value_slots *
+                          sizeof(*worker->compact_claim_stream_owner_values));
+    if (values == NULL && value_slots > 0u) {
+      return 0;
+    }
+    worker->compact_claim_stream_owner_values = values;
+    unsigned char *mask =
+      (unsigned char *)realloc(worker->compact_claim_stream_owner_mask,
+                               (size_t)value_slots *
+                                 sizeof(*worker->compact_claim_stream_owner_mask));
+    if (mask == NULL && value_slots > 0u) {
+      return 0;
+    }
+    worker->compact_claim_stream_owner_mask = mask;
+    worker->compact_claim_stream_owner_value_capacity = value_slots;
+  }
+  if (rows > worker->compact_claim_stream_owner_row_capacity) {
+    UF_long *entries =
+      (UF_long *)realloc(
+        worker->compact_claim_stream_owner_replay_entries,
+        (size_t)rows *
+          sizeof(*worker->compact_claim_stream_owner_replay_entries));
+    if (entries == NULL && rows > 0u) {
+      return 0;
+    }
+    worker->compact_claim_stream_owner_replay_entries = entries;
+    UF_long *start_l_counts =
+      (UF_long *)realloc(
+        worker->compact_claim_stream_owner_start_l_counts,
+        (size_t)rows *
+          sizeof(*worker->compact_claim_stream_owner_start_l_counts));
+    if (start_l_counts == NULL && rows > 0u) {
+      return 0;
+    }
+    worker->compact_claim_stream_owner_start_l_counts = start_l_counts;
+    UF_long *l_counts =
+      (UF_long *)realloc(
+        worker->compact_claim_stream_owner_l_counts,
+        (size_t)rows *
+          sizeof(*worker->compact_claim_stream_owner_l_counts));
+    if (l_counts == NULL && rows > 0u) {
+      return 0;
+    }
+    worker->compact_claim_stream_owner_l_counts = l_counts;
+    worker->compact_claim_stream_owner_row_capacity = rows;
+  }
   return 1;
 }
 
@@ -93691,12 +93861,15 @@ static int kls_row_first_workspace_accumulate_claim_value(
   return 1;
 }
 
-static int kls_row_first_compact_window_replay_delayed_output_to_workspace(
+static int kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_compact_window_state *state,
   kls_row_first_workspace *workspace,
   UF_long *pattern_count_io,
-  kls_row_first_pipeline_trace *trace) {
+  kls_row_first_pipeline_trace *trace,
+  UF_long begin_l_count,
+  UF_long end_l_count,
+  int update_cutoff) {
   if (shared == NULL || state == NULL ||
       !shared->compact_window_delay_output_enabled) {
     return 1;
@@ -93710,15 +93883,18 @@ static int kls_row_first_compact_window_replay_delayed_output_to_workspace(
       shared->workspace->u_row_end == NULL) {
     return 0;
   }
+  if (begin_l_count > end_l_count || end_l_count > state->l_count) {
+    return 0;
+  }
+  if (update_cutoff &&
+      begin_l_count != state->delayed_output_replayed_l_count) {
+    return 0;
+  }
   UF_long replay_deps = 0u;
   UF_long replay_entries = 0u;
   UF_long replay_scan_entries = 0u;
   UF_long replay_seek_skips = 0u;
-  if (state->delayed_output_replayed_l_count > state->l_count) {
-    return 0;
-  }
-  for (UF_long lp = state->delayed_output_replayed_l_count;
-       lp < state->l_count; ++lp) {
+  for (UF_long lp = begin_l_count; lp < end_l_count; ++lp) {
     const UF_long dep = state->l_cols[lp];
     if (dep >= state->row || dep >= shared->ctx->nk) {
       return 0;
@@ -93764,7 +93940,9 @@ static int kls_row_first_compact_window_replay_delayed_output_to_workspace(
       kls_row_first_stats_add(&replay_entries, dep_output_entries);
     }
   }
-  state->delayed_output_replayed_l_count = state->l_count;
+  if (update_cutoff) {
+    state->delayed_output_replayed_l_count = end_l_count;
+  }
   if (trace != NULL) {
     kls_row_first_stats_add(&trace->compact_window_delayed_output_replays,
                             replay_deps > 0u ? 1u : 0u);
@@ -93781,6 +93959,23 @@ static int kls_row_first_compact_window_replay_delayed_output_to_workspace(
                             replay_entries);
   }
   return 1;
+}
+
+static int kls_row_first_compact_window_replay_delayed_output_to_workspace(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_compact_window_state *state,
+  kls_row_first_workspace *workspace,
+  UF_long *pattern_count_io,
+  kls_row_first_pipeline_trace *trace) {
+  if (shared == NULL || state == NULL) {
+    return 0;
+  }
+  if (state->delayed_output_replayed_l_count > state->l_count) {
+    return 0;
+  }
+  return kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
+    shared, state, workspace, pattern_count_io, trace,
+    state->delayed_output_replayed_l_count, state->l_count, 1);
 }
 
 static UF_long kls_row_first_pipeline_worker_span_owner_index(
@@ -93859,6 +94054,113 @@ static int kls_row_first_pipeline_apply_span_owner_panel_to_workspace(
       kls_row_first_stats_add(&trace->scalar_u_output_entries,
                               replay_entries);
       (void)applied_cols;
+    }
+  }
+  return 1;
+}
+
+static UF_long kls_row_first_pipeline_claim_stream_owner_index(
+  const kls_row_first_pipeline_worker *worker,
+  int slot,
+  UF_long pos) {
+  if (worker == NULL || !worker->compact_claim_stream_owner_active ||
+      worker->compact_claim_run_count >
+        KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS) {
+    return KLS_KLU_EMPTY;
+  }
+  for (UF_long r = 0; r < worker->compact_claim_run_count; ++r) {
+    if (worker->compact_claim_run_slots[r] == slot &&
+        worker->compact_claim_run_pos[r] == pos) {
+      return r;
+    }
+  }
+  return KLS_KLU_EMPTY;
+}
+
+static int kls_row_first_pipeline_apply_claim_stream_owner_to_workspace(
+  kls_row_first_pipeline_worker *worker,
+  kls_row_first_compact_window_state *state,
+  kls_row_first_workspace *workspace,
+  UF_long *pattern_count_io,
+  kls_row_first_pipeline_trace *trace) {
+  if (worker == NULL || state == NULL || workspace == NULL ||
+      pattern_count_io == NULL ||
+      !worker->compact_claim_stream_owner_active ||
+      worker->shared == NULL || worker->shared->ctx == NULL ||
+      worker->compact_claim_stream_owner_cols_count == 0u ||
+      worker->compact_claim_stream_owner_cols == NULL ||
+      worker->compact_claim_stream_owner_values == NULL ||
+      worker->compact_claim_stream_owner_mask == NULL ||
+      worker->compact_claim_stream_owner_start_l_counts == NULL ||
+      worker->compact_claim_stream_owner_l_counts == NULL ||
+      worker->compact_claim_stream_owner_replay_entries == NULL) {
+    return 1;
+  }
+  const UF_long row_index =
+    kls_row_first_pipeline_claim_stream_owner_index(
+      worker, state->bucket_slot, state->pos);
+  if (row_index == KLS_KLU_EMPTY ||
+      row_index >= worker->compact_claim_stream_owner_rows ||
+      worker->compact_claim_stream_owner_rows == 0u ||
+      worker->compact_claim_stream_owner_cols_count >
+        worker->compact_claim_stream_owner_col_capacity ||
+      worker->compact_claim_stream_owner_cols_count >
+        worker->compact_claim_stream_owner_value_capacity /
+          worker->compact_claim_stream_owner_rows) {
+    return 1;
+  }
+  const UF_long start_l_count =
+    worker->compact_claim_stream_owner_start_l_counts[row_index];
+  const UF_long end_l_count =
+    worker->compact_claim_stream_owner_l_counts[row_index];
+  if (start_l_count > end_l_count || end_l_count > state->l_count ||
+      state->delayed_output_replayed_l_count > start_l_count) {
+    return 0;
+  }
+  if (state->delayed_output_replayed_l_count < start_l_count &&
+      !kls_row_first_compact_window_replay_delayed_output_range_to_workspace(
+        worker->shared, state, workspace, pattern_count_io, trace,
+        state->delayed_output_replayed_l_count, start_l_count, 1)) {
+    return 0;
+  }
+  const UF_long rows = worker->compact_claim_stream_owner_rows;
+  const UF_long cols = worker->compact_claim_stream_owner_cols_count;
+  UF_long applied_entries = 0u;
+  for (UF_long c = 0; c < cols; ++c) {
+    const UF_long at = c * rows + row_index;
+    if (at >= worker->compact_claim_stream_owner_value_capacity ||
+        worker->compact_claim_stream_owner_mask[at] == 0u) {
+      continue;
+    }
+    const UF_long col = worker->compact_claim_stream_owner_cols[c];
+    if (col < state->row || col >= worker->shared->ctx->nk) {
+      continue;
+    }
+    if (!kls_row_first_workspace_accumulate_claim_value(
+          workspace, state->generation, worker->shared->ctx->nk,
+          pattern_count_io, col,
+          worker->compact_claim_stream_owner_values[at])) {
+      return 0;
+    }
+    applied_entries++;
+  }
+  if (state->delayed_output_replayed_l_count != start_l_count) {
+    return 0;
+  }
+  if (state->delayed_output_replayed_l_count < end_l_count) {
+    state->delayed_output_replayed_l_count = end_l_count;
+  }
+  if (trace != NULL) {
+    const UF_long replay_entries =
+      worker->compact_claim_stream_owner_replay_entries[row_index];
+    if (replay_entries > 0u) {
+      kls_row_first_stats_add(
+        &trace->compact_window_delayed_output_replays, 1u);
+      kls_row_first_stats_add(
+        &trace->compact_window_delayed_output_entries, replay_entries);
+      kls_row_first_stats_add(&trace->scalar_u_output_entries,
+                              replay_entries);
+      (void)applied_entries;
     }
   }
   return 1;
@@ -95465,6 +95767,13 @@ static UF_long kls_row_first_pipeline_prepare_sparse_claim_run(
   if (run_count < 2u) {
     return 0u;
   }
+  const int claim_stream_owner_requested =
+    shared->compact_claim_stream_owner_enabled;
+  if (claim_stream_owner_requested &&
+      !kls_row_first_pipeline_worker_reserve_claim_stream_owner(
+        worker, run_count, 0u)) {
+    return 0u;
+  }
 
   if (wanted_pos + run_count < wanted_pos) {
     return 0u;
@@ -95540,6 +95849,29 @@ static UF_long kls_row_first_pipeline_prepare_sparse_claim_run(
 
   worker->compact_claim_run_count = run_count;
   worker->compact_claim_run_next = 1u;
+  worker->compact_claim_stream_owner_active = 0;
+  worker->compact_claim_stream_owner_rows = 0u;
+  worker->compact_claim_stream_owner_cols_count = 0u;
+  if (claim_stream_owner_requested) {
+    memset(worker->compact_claim_stream_owner_replay_entries, 0,
+           (size_t)run_count *
+             sizeof(*worker->compact_claim_stream_owner_replay_entries));
+    for (UF_long r = 0; r < run_count; ++r) {
+      const int slot = worker->compact_claim_run_slots[r];
+      const kls_row_first_compact_window_state *state =
+        slot >= 0 && slot < shared->compact_window_count
+          ? shared->compact_window_states + slot : NULL;
+      const UF_long start_l_count =
+        state != NULL && state->active &&
+            state->pos == worker->compact_claim_run_pos[r]
+          ? state->l_count : 0u;
+      worker->compact_claim_stream_owner_start_l_counts[r] = start_l_count;
+      worker->compact_claim_stream_owner_l_counts[r] = start_l_count;
+    }
+    worker->compact_claim_stream_owner_rows = run_count;
+    worker->compact_claim_stream_owner_cols_count = 0u;
+    worker->compact_claim_stream_owner_active = 1;
+  }
   if (trace != NULL) {
     kls_row_first_stats_add(&trace->compact_window_claim_run_reservations,
                             1u);
@@ -99074,6 +99406,48 @@ static UF_long kls_row_first_pipeline_update_claim_run_producer(
       return 0u;
     }
   }
+  int stream_owner_active =
+    shared->compact_claim_stream_owner_enabled &&
+    worker->compact_claim_stream_owner_active &&
+    worker->compact_claim_stream_owner_rows ==
+      worker->compact_claim_run_count &&
+    worker->compact_claim_stream_owner_rows > 0u &&
+    worker->compact_claim_stream_owner_start_l_counts != NULL &&
+    worker->compact_claim_stream_owner_l_counts != NULL &&
+    worker->compact_claim_stream_owner_replay_entries != NULL &&
+    shared->compact_union_mark != NULL &&
+    shared->compact_union_pos != NULL;
+  if (stream_owner_active &&
+      worker->compact_claim_stream_owner_cols_count > 0u &&
+      (worker->compact_claim_stream_owner_cols == NULL ||
+       worker->compact_claim_stream_owner_values == NULL ||
+       worker->compact_claim_stream_owner_mask == NULL ||
+       worker->compact_claim_stream_owner_cols_count >
+         worker->compact_claim_stream_owner_col_capacity ||
+       worker->compact_claim_stream_owner_cols_count >
+         worker->compact_claim_stream_owner_value_capacity /
+           worker->compact_claim_stream_owner_rows)) {
+    stream_owner_active = 0;
+  }
+  unsigned int stream_generation = 0u;
+  if (stream_owner_active) {
+    stream_generation =
+      kls_row_first_pipeline_next_compact_union_generation(shared);
+    if (stream_generation == 0u) {
+      stream_owner_active = 0;
+    } else {
+      for (UF_long c = 0;
+           c < worker->compact_claim_stream_owner_cols_count; ++c) {
+        const UF_long col = worker->compact_claim_stream_owner_cols[c];
+        if (col >= shared->ctx->nk) {
+          stream_owner_active = 0;
+          break;
+        }
+        shared->compact_union_mark[col] = stream_generation;
+        shared->compact_union_pos[col] = c;
+      }
+    }
+  }
 
   UF_long target_count = 0u;
   for (UF_long r = worker->compact_claim_run_next;
@@ -99121,6 +99495,7 @@ static UF_long kls_row_first_pipeline_update_claim_run_producer(
     }
     state->values[dep_pos] = 0.0;
     shared->compact_batch_targets[target_count].state = state;
+    shared->compact_batch_targets[target_count].dep_pos = r;
     shared->compact_batch_targets[target_count].lij = lij;
     target_count++;
     kls_row_first_stats_add(&state->trace_current.scalar_dep_calls, 1u);
@@ -99145,8 +99520,64 @@ static UF_long kls_row_first_pipeline_update_claim_run_producer(
       }
       if (shared->compact_window_delay_output_enabled &&
           col >= state->row) {
-        kls_row_first_stats_add(
-          &state->trace_current.compact_window_delayed_output_skips, 1u);
+        if (stream_owner_active) {
+          const UF_long row_slot = target->dep_pos;
+          if (row_slot >= worker->compact_claim_stream_owner_rows) {
+            stream_owner_active = 0;
+            worker->compact_claim_stream_owner_active = 0;
+            worker->compact_claim_stream_owner_cols_count = 0u;
+          } else {
+            if (shared->compact_union_mark[col] != stream_generation) {
+              const UF_long new_col =
+                worker->compact_claim_stream_owner_cols_count;
+              const UF_long rows =
+                worker->compact_claim_stream_owner_rows;
+              if (rows == 0u ||
+                  new_col >=
+                    shared->compact_claim_stream_owner_max_slots / rows ||
+                  !kls_row_first_pipeline_worker_reserve_claim_stream_owner(
+                    worker, rows, new_col + 1u)) {
+                stream_owner_active = 0;
+                worker->compact_claim_stream_owner_active = 0;
+                worker->compact_claim_stream_owner_cols_count = 0u;
+              } else {
+                shared->compact_union_mark[col] = stream_generation;
+                shared->compact_union_pos[col] = new_col;
+                worker->compact_claim_stream_owner_cols[new_col] = col;
+                for (UF_long rr = 0; rr < rows; ++rr) {
+                  const UF_long at = new_col * rows + rr;
+                  worker->compact_claim_stream_owner_values[at] = 0.0;
+                  worker->compact_claim_stream_owner_mask[at] = 0u;
+                }
+                worker->compact_claim_stream_owner_cols_count = new_col + 1u;
+              }
+            }
+            if (stream_owner_active &&
+                shared->compact_union_mark[col] == stream_generation) {
+              const UF_long col_pos = shared->compact_union_pos[col];
+              const UF_long rows = worker->compact_claim_stream_owner_rows;
+              const UF_long at = col_pos * rows + row_slot;
+              if (col_pos >= worker->compact_claim_stream_owner_cols_count ||
+                  at >= worker->compact_claim_stream_owner_value_capacity) {
+                stream_owner_active = 0;
+                worker->compact_claim_stream_owner_active = 0;
+                worker->compact_claim_stream_owner_cols_count = 0u;
+              } else {
+                worker->compact_claim_stream_owner_values[at] -=
+                  target->lij * uvalue;
+                worker->compact_claim_stream_owner_mask[at] = 1u;
+                kls_row_first_stats_add(
+                  worker->compact_claim_stream_owner_replay_entries +
+                    row_slot,
+                  1u);
+              }
+            }
+          }
+        }
+        if (!stream_owner_active) {
+          kls_row_first_stats_add(
+            &state->trace_current.compact_window_delayed_output_skips, 1u);
+        }
         continue;
       }
       UF_long value_pos = KLS_KLU_EMPTY;
@@ -99173,7 +99604,14 @@ static UF_long kls_row_first_pipeline_update_claim_run_producer(
     }
   }
   for (UF_long t = 0; t < target_count; ++t) {
-    shared->compact_batch_targets[t].state = NULL;
+    kls_row_first_compact_batch_target *target =
+      shared->compact_batch_targets + t;
+    if (stream_owner_active && target->state != NULL &&
+        target->dep_pos < worker->compact_claim_stream_owner_rows) {
+      worker->compact_claim_stream_owner_l_counts[target->dep_pos] =
+        target->state->l_count;
+    }
+    target->state = NULL;
   }
   if (trace != NULL) {
     kls_row_first_stats_add(&trace->compact_window_claim_run_updates, 1u);
@@ -99513,6 +99951,19 @@ static int kls_row_first_pipeline_claim_compact_window_slot(
   if (state->heap_size > 0u) {
     memcpy(worker->workspace.dep_heap, state->heap,
            (size_t)state->heap_size * sizeof(*state->heap));
+  }
+  if (!kls_row_first_pipeline_apply_claim_stream_owner_to_workspace(
+        worker, state, &worker->workspace, &claimed_pattern_count,
+        &state->trace_current)) {
+    if (shared->trace_enabled) {
+      kls_row_first_stats_add(
+        &shared->trace_committed.compact_window_claim_stale_clears, 1u);
+    }
+    kls_row_first_pipeline_clear_claim_workspace(
+      &worker->workspace, state->row, state->generation,
+      claimed_pattern_count);
+    kls_row_first_pipeline_clear_compact_window_state(shared, state);
+    return 0;
   }
   if (!kls_row_first_pipeline_apply_span_owner_panel_to_workspace(
         worker, state, &worker->workspace, &claimed_pattern_count,
@@ -101366,6 +101817,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
     kls_row_pipeline_compact_span_owner_max_scan_entries_env();
   shared.compact_span_shared_owner_scan_rows =
     kls_row_pipeline_compact_span_shared_owner_scan_rows_env();
+  shared.compact_claim_stream_owner_max_slots =
+    kls_row_pipeline_compact_claim_stream_owner_max_slots_env();
   shared.compact_span_owner_allow_holes =
     kls_row_pipeline_compact_span_owner_allow_holes_env_enabled();
   shared.compact_span_owner_allow_prefix =
@@ -101406,6 +101859,14 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.compact_claim_run_enabled =
     shared.compact_group_sparse_enabled &&
     shared.compact_claim_run_max_rows >= 2u;
+  shared.compact_claim_stream_owner_enabled =
+    shared.compact_claim_run_enabled &&
+    shared.compact_window_delay_output_enabled &&
+    kls_row_pipeline_compact_claim_stream_owner_env_enabled() &&
+    shared.compact_claim_stream_owner_max_slots >=
+      KLS_ROW_FIRST_COMPACT_CLAIM_STREAM_OWNER_DEFAULT_MAX_SLOTS &&
+    shared.compact_claim_stream_owner_max_slots >=
+      shared.compact_claim_run_max_rows;
   shared.compact_span_owner_enabled =
     shared.compact_group_sparse_enabled &&
     shared.compact_window_delay_output_enabled &&
