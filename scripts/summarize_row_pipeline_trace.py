@@ -62,6 +62,8 @@ PRODUCER_COUNTERS = [
     "compact_window_span_owner_entries",
     "compact_window_span_owner_hole_skips",
     "compact_window_span_owner_hole_skip_rows",
+    "compact_window_span_owner_prefix_shrinks",
+    "compact_window_span_owner_prefix_shrink_rows",
     "compact_window_span_owner_oversize_skips",
     "compact_window_span_owner_oversize_slots",
     "compact_window_span_owner_link_skips",
@@ -774,6 +776,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_span_owner_hole_skip_rows = parse_int(
         last_trace.get("compact_window_span_owner_hole_skip_rows")
     )
+    compact_window_span_owner_prefix_shrinks = parse_int(
+        last_trace.get("compact_window_span_owner_prefix_shrinks")
+    )
+    compact_window_span_owner_prefix_shrink_rows = parse_int(
+        last_trace.get("compact_window_span_owner_prefix_shrink_rows")
+    )
     compact_window_span_owner_oversize_skips = parse_int(
         last_trace.get("compact_window_span_owner_oversize_skips")
     )
@@ -1071,6 +1079,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_span_owner_hole_skips,
         "compact_window_span_owner_hole_skip_rows":
             compact_window_span_owner_hole_skip_rows,
+        "compact_window_span_owner_prefix_shrinks":
+            compact_window_span_owner_prefix_shrinks,
+        "compact_window_span_owner_prefix_shrink_rows":
+            compact_window_span_owner_prefix_shrink_rows,
         "compact_window_span_owner_oversize_skips":
             compact_window_span_owner_oversize_skips,
         "compact_window_span_owner_oversize_slots":
@@ -1493,6 +1505,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_span_owner_hole_skip_rows_per_skip": ratio(
             compact_window_span_owner_hole_skip_rows,
             compact_window_span_owner_hole_skips,
+        ),
+        "compact_window_span_owner_prefix_shrink_rows_per_shrink": ratio(
+            compact_window_span_owner_prefix_shrink_rows,
+            compact_window_span_owner_prefix_shrinks,
         ),
         "compact_window_span_owner_oversize_slots_per_skip": ratio(
             compact_window_span_owner_oversize_slots,
@@ -1954,6 +1970,8 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_span_owner_entries_per_slot",
         "compact_window_span_owner_hole_skips",
         "compact_window_span_owner_hole_skip_rows_per_skip",
+        "compact_window_span_owner_prefix_shrinks",
+        "compact_window_span_owner_prefix_shrink_rows_per_shrink",
         "compact_window_span_owner_oversize_skips",
         "compact_window_span_owner_oversize_slots_per_skip",
         "compact_window_span_owner_link_skips",

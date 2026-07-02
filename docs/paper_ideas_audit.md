@@ -133,15 +133,18 @@ entries during column discovery (`524288` by default). The default owner also
 rejects any candidate with reserved holes, because a contiguous claim span with
 unowned positions serializes those rows through the same worker. The earlier
 holey behavior is still available for experiments through
-`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ALLOW_HOLES=1`. Row-pipeline traces report
-owner reservations, density, hole skips, oversize skips, link skips, and scan
-skips directly. A traced 64-row `bcircuit` run showed why a simple density gate
-would be wrong: only `8.0%` of reserved span positions were owned grouped rows,
-but the owner still improved time because each build had useful scan
-amortization (`2.68` output entries per scan entry, `0.41` entries per masked
-slot). The pre2 cap-2 trace exposed the other side of that tradeoff: accepted
-tiny panels with holes can serialize the cursor badly, so hole-free ownership is
-now the default while non-contiguous ownership remains future work.
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ALLOW_HOLES=1`. A second experiment,
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ALLOW_PREFIX=1`, accepts only the
+contiguous owned prefix of a holey candidate; it remains off because the
+focused `pre2` trace regressed. Row-pipeline traces report owner reservations,
+density, hole skips, prefix-shrink opportunities, oversize skips, link skips,
+and scan skips directly. A traced 64-row `bcircuit` run showed why a simple
+density gate would be wrong: only `8.0%` of reserved span positions were owned
+grouped rows, but the owner still improved time because each build had useful
+scan amortization (`2.68` output entries per scan entry, `0.41` entries per
+masked slot). The pre2 cap-2 trace exposed the other side of that tradeoff:
+accepted tiny panels with holes can serialize the cursor badly, so hole-free
+ownership is now the default while non-contiguous ownership remains future work.
 A follow-up default-cap check made the link cap conservative after `pre2`
 evidence showed that even two-link accepted owner panels can stall the large
 numeric tail before the first progress event. With
@@ -151,12 +154,14 @@ trace `build/kls_pre2_span_owner_default_linkcap1_trace45.stderr` reached
 reservations, and recorded `53,626` link-skip fallbacks. The neighboring cap-2
 probe reached only `65536/629628` rows in 35s after accepting 47 tiny owner
 reservations with only half the reserved span rows owned. After the hole-free
-guard, the cap-2/no-holes trace
-`build/kls_pre2_span_owner_linkcap2_noholes_trace45.stderr` accepted zero owner
-reservations, recorded `27,485` hole-skip fallbacks, and reached
-`458752/629628` rows. This confirms that raising the default cap is not
-justified until the owner can score panel payoff more directly or use
-non-contiguous ownership without serializing holes.
+guard, the cap-2/prefix-off trace
+`build/kls_pre2_span_owner_linkcap2_prefixoff_trace45.stderr` accepted zero
+owner reservations, recorded `32,026` hole-skip fallbacks and `22,432`
+prefix-shrink opportunities, and reached `524288/629628` rows. Enabling the
+prefix experiment accepted 162 two-row owner reservations but reached only
+`196608/629628`. This confirms that raising the default cap is not justified
+until the owner can score panel payoff more directly or use non-contiguous
+ownership without serializing holes.
 Before the link cap was tightened, a five-matrix smoke-manifest A/B with the
 4-row owner showed that the source-retained prototype can be useful on small
 public cases: the compact/delay baseline geomean was `0.0474s`, while that
