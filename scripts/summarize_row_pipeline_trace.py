@@ -39,6 +39,8 @@ PRODUCER_COUNTERS = [
     "compact_window_delayed_output_replays",
     "compact_window_delayed_output_deps",
     "compact_window_delayed_output_entries",
+    "compact_window_delayed_output_scan_entries",
+    "compact_window_delayed_output_seek_skips",
     "compact_window_probes",
     "compact_window_batches",
     "compact_window_stream_u_entries",
@@ -130,6 +132,8 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_compact_window_delayed_output_replays = 0
     long_compact_window_delayed_output_deps = 0
     long_compact_window_delayed_output_entries = 0
+    long_compact_window_delayed_output_scan_entries = 0
+    long_compact_window_delayed_output_seek_skips = 0
     long_compact_window_targets = 0
     long_compact_window_target_u = 0
     long_compact_window_batches = 0
@@ -239,6 +243,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             )
             long_compact_window_delayed_output_entries += parse_int(
                 row.get("compact_window_delayed_output_entries")
+            )
+            long_compact_window_delayed_output_scan_entries += parse_int(
+                row.get("compact_window_delayed_output_scan_entries")
+            )
+            long_compact_window_delayed_output_seek_skips += parse_int(
+                row.get("compact_window_delayed_output_seek_skips")
             )
             long_compact_window_targets += parse_int(
                 row.get("compact_window_targets")
@@ -405,6 +415,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_delayed_output_entries = parse_int(
         last_trace.get("compact_window_delayed_output_entries")
     )
+    compact_window_delayed_output_scan_entries = parse_int(
+        last_trace.get("compact_window_delayed_output_scan_entries")
+    )
+    compact_window_delayed_output_seek_skips = parse_int(
+        last_trace.get("compact_window_delayed_output_seek_skips")
+    )
     compact_window_batches = parse_int(last_trace.get("compact_window_batches"))
     compact_window_stream_u = parse_int(
         last_trace.get("compact_window_stream_u_entries")
@@ -505,6 +521,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_delayed_output_deps": compact_window_delayed_output_deps,
         "compact_window_delayed_output_entries":
             compact_window_delayed_output_entries,
+        "compact_window_delayed_output_scan_entries":
+            compact_window_delayed_output_scan_entries,
+        "compact_window_delayed_output_seek_skips":
+            compact_window_delayed_output_seek_skips,
         "compact_window_targets": compact_window_targets,
         "compact_window_target_u_entries": compact_window_target_u,
         "compact_window_batches": compact_window_batches,
@@ -571,6 +591,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_window_delayed_output_deps,
         "long_compact_window_delayed_output_entries":
             long_compact_window_delayed_output_entries,
+        "long_compact_window_delayed_output_scan_entries":
+            long_compact_window_delayed_output_scan_entries,
+        "long_compact_window_delayed_output_seek_skips":
+            long_compact_window_delayed_output_seek_skips,
         "long_compact_window_targets": long_compact_window_targets,
         "long_compact_window_target_u_entries": long_compact_window_target_u,
         "long_compact_window_batches": long_compact_window_batches,
@@ -643,6 +667,15 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_delayed_output_deps_per_replay": ratio(
             compact_window_delayed_output_deps,
             compact_window_delayed_output_replays,
+        ),
+        "compact_window_delayed_output_entries_per_scan": ratio(
+            compact_window_delayed_output_entries,
+            compact_window_delayed_output_scan_entries,
+        ),
+        "compact_window_delayed_output_seek_skip_share": ratio(
+            compact_window_delayed_output_seek_skips,
+            compact_window_delayed_output_scan_entries
+            + compact_window_delayed_output_seek_skips,
         ),
         "compact_window_target_u_per_stream_u": ratio(
             compact_window_target_u, compact_window_stream_u
@@ -719,6 +752,15 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_compact_window_delayed_output_deps_per_replay": ratio(
             long_compact_window_delayed_output_deps,
             long_compact_window_delayed_output_replays,
+        ),
+        "long_compact_window_delayed_output_entries_per_scan": ratio(
+            long_compact_window_delayed_output_entries,
+            long_compact_window_delayed_output_scan_entries,
+        ),
+        "long_compact_window_delayed_output_seek_skip_share": ratio(
+            long_compact_window_delayed_output_seek_skips,
+            long_compact_window_delayed_output_scan_entries
+            + long_compact_window_delayed_output_seek_skips,
         ),
         "long_compact_window_target_u_per_stream_u": ratio(
             long_compact_window_target_u, long_compact_window_stream_u
@@ -826,8 +868,12 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_delayed_output_replays",
         "compact_window_delayed_output_deps",
         "compact_window_delayed_output_entries",
+        "compact_window_delayed_output_scan_entries",
+        "compact_window_delayed_output_seek_skips",
         "compact_window_delayed_output_replay_entries_per_skip",
         "compact_window_delayed_output_deps_per_replay",
+        "compact_window_delayed_output_entries_per_scan",
+        "compact_window_delayed_output_seek_skip_share",
         "compact_window_batches",
         "compact_window_stream_u_entries",
         "compact_window_targets",
@@ -911,8 +957,12 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_compact_window_delayed_output_replays",
         "long_compact_window_delayed_output_deps",
         "long_compact_window_delayed_output_entries",
+        "long_compact_window_delayed_output_scan_entries",
+        "long_compact_window_delayed_output_seek_skips",
         "long_compact_window_delayed_output_replay_entries_per_skip",
         "long_compact_window_delayed_output_deps_per_replay",
+        "long_compact_window_delayed_output_entries_per_scan",
+        "long_compact_window_delayed_output_seek_skip_share",
         "long_compact_window_targets",
         "long_compact_window_target_u_entries",
         "long_compact_window_batches",

@@ -2287,10 +2287,16 @@ reuse can be separated from eager-update cost.
 prefactor/postfactor split for that compact executor: producer publication
 updates only dependencies below the target row, while diagonal/output U updates
 are replayed when the prepared compact state is claimed. Traces report
-`compact_window_delayed_output_{skips,replays,deps,entries}`. This remains off
-by default; use it only for focused paper-gap probes. The opt-in compact window
-cap is now 2048 states so wide live-state owner sizing can be run without
-changing default behavior. `KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE=1` adds a
+`compact_window_delayed_output_{skips,replays,deps,entries,scan_entries,seek_skips}`.
+On `pre2`, a suffix-seek replay probe with the 512-state compact window reached
+the same `589824/629628` 45s checkpoint as the prior delayed-output run and
+skipped only `254207` prefix entries while scanning `458936540` entries. This
+keeps the missing mechanism focused on amortizing postfactor output replay
+across a grouped row/panel owner, not on avoiding a small internal prefix scan.
+This remains off by default; use it only for focused paper-gap probes. The
+opt-in compact window cap is now 2048 states so wide live-state owner sizing can
+be run without changing default behavior.
+`KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE=1` adds a
 cheaper sampled lower-bound probe for a possible persistent main-row owner. It
 scans a future row-order horizon every
 `KLS_ROW_PIPELINE_OWNER_SURFACE_INTERVAL` producer rows (default 512), using

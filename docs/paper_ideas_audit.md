@@ -111,6 +111,17 @@ rejects the dense/full-output compact owner as the immediate cause of the
 remaining paper gap is narrower: KLS needs a row/panel owner that amortizes the
 postfactor output replay, not just a prefactor-only side window.
 
+The follow-up suffix-seek replay probe confirms that the delayed-output loss is
+not mainly from rescanning a small internal prefix of sorted U rows. With the
+same forced-METIS `pre2` setup and 512-state compact window,
+`build/kls_pre2_compact_delay_seek_w512_trace45.stderr` again reached
+`589824/629628` rows in 45s. It replayed `387319947` output entries, scanned
+`458936540` delayed-output entries, and skipped only `254207` prefix entries
+(`0.055%` of scanned-plus-skipped entries). This is useful diagnostic
+instrumentation, but it does not change the CKTSO/SubtreeLU conclusion: the
+needed executor has to batch the postfactor/output side across current rows
+rather than optimize one-row replay scans.
+
 The first-factor separator-private pivot path is now closer to SubtreeLU's
 private-mode rule: private pivot search is restricted to columns owned by the
 same private worker. This fixes the earlier `pre2` diagnostic where a private

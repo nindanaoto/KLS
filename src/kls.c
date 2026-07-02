@@ -86843,6 +86843,8 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_delayed_output_replays;
   UF_long compact_window_delayed_output_deps;
   UF_long compact_window_delayed_output_entries;
+  UF_long compact_window_delayed_output_scan_entries;
+  UF_long compact_window_delayed_output_seek_skips;
   UF_long compact_window_probes;
   UF_long compact_window_batches;
   UF_long compact_window_stream_u_entries;
@@ -87040,6 +87042,11 @@ static void kls_row_first_pipeline_trace_add(
                           source->compact_window_delayed_output_deps);
   kls_row_first_stats_add(&target->compact_window_delayed_output_entries,
                           source->compact_window_delayed_output_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_delayed_output_scan_entries,
+    source->compact_window_delayed_output_scan_entries);
+  kls_row_first_stats_add(&target->compact_window_delayed_output_seek_skips,
+                          source->compact_window_delayed_output_seek_skips);
   kls_row_first_stats_add(&target->compact_window_probes,
                           source->compact_window_probes);
   kls_row_first_stats_add(&target->compact_window_batches,
@@ -92618,6 +92625,28 @@ static int kls_row_first_compact_window_apply_dep(
   return 1;
 }
 
+static UF_long kls_row_first_entries_lower_bound_col(
+  const kls_row_first_entries *entries,
+  UF_long begin,
+  UF_long end,
+  UF_long target) {
+  if (entries == NULL || entries->col == NULL || begin > end ||
+      end > entries->count) {
+    return begin;
+  }
+  UF_long lo = begin;
+  UF_long hi = end;
+  while (lo < hi) {
+    const UF_long mid = lo + (hi - lo) / 2u;
+    if (entries->col[mid] < target) {
+      lo = mid + 1u;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
 static int kls_row_first_compact_window_replay_delayed_output(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_compact_window_state *state,
@@ -92634,6 +92663,8 @@ static int kls_row_first_compact_window_replay_delayed_output(
   }
   UF_long replay_deps = 0u;
   UF_long replay_entries = 0u;
+  UF_long replay_scan_entries = 0u;
+  UF_long replay_seek_skips = 0u;
   for (UF_long lp = 0; lp < state->l_count; ++lp) {
     const UF_long dep = state->l_cols[lp];
     if (dep >= state->row || dep >= shared->ctx->nk) {
@@ -92646,12 +92677,25 @@ static int kls_row_first_compact_window_replay_delayed_output(
     }
     const double lij = state->l_values[lp];
     UF_long dep_output_entries = 0u;
-    for (UF_long up = row_begin; up < row_end; ++up) {
+    UF_long scan_begin = row_begin;
+    if (shared->order_epoch == 0u) {
+      scan_begin = kls_row_first_entries_lower_bound_col(
+        shared->u_entries, row_begin, row_end, state->row);
+      if (scan_begin > row_begin) {
+        kls_row_first_stats_add(&replay_seek_skips,
+                                scan_begin - row_begin);
+      }
+    }
+    if (row_end >= scan_begin) {
+      kls_row_first_stats_add(&replay_scan_entries,
+                              row_end - scan_begin);
+    }
+    for (UF_long up = scan_begin; up < row_end; ++up) {
       const UF_long col = shared->u_entries->col[up];
       if (col <= dep || col >= shared->ctx->nk) {
         return 0;
       }
-      if (col < state->row) {
+      if (shared->order_epoch != 0u && col < state->row) {
         continue;
       }
       if (!kls_row_first_compact_window_insert(
@@ -92673,6 +92717,11 @@ static int kls_row_first_compact_window_replay_delayed_output(
                             replay_deps);
     kls_row_first_stats_add(&trace->compact_window_delayed_output_entries,
                             replay_entries);
+    kls_row_first_stats_add(
+      &trace->compact_window_delayed_output_scan_entries,
+      replay_scan_entries);
+    kls_row_first_stats_add(&trace->compact_window_delayed_output_seek_skips,
+                            replay_seek_skips);
     kls_row_first_stats_add(&trace->scalar_u_output_entries,
                             replay_entries);
   }
@@ -95343,6 +95392,8 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_delayed_output_replays=%" PRIu64
           " compact_window_delayed_output_deps=%" PRIu64
           " compact_window_delayed_output_entries=%" PRIu64
+          " compact_window_delayed_output_scan_entries=%" PRIu64
+          " compact_window_delayed_output_seek_skips=%" PRIu64
           " compact_window_probes=%" PRIu64
           " compact_window_batches=%" PRIu64
           " compact_window_stream_u_entries=%" PRIu64
@@ -95432,6 +95483,8 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_delayed_output_replays,
           (uint64_t)trace->compact_window_delayed_output_deps,
           (uint64_t)trace->compact_window_delayed_output_entries,
+          (uint64_t)trace->compact_window_delayed_output_scan_entries,
+          (uint64_t)trace->compact_window_delayed_output_seek_skips,
           (uint64_t)trace->compact_window_probes,
           (uint64_t)trace->compact_window_batches,
           (uint64_t)trace->compact_window_stream_u_entries,
@@ -96087,6 +96140,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " compact_window_delayed_output_replays=%" PRIu64
                         " compact_window_delayed_output_deps=%" PRIu64
                         " compact_window_delayed_output_entries=%" PRIu64
+                        " compact_window_delayed_output_scan_entries=%" PRIu64
+                        " compact_window_delayed_output_seek_skips=%" PRIu64
                         " compact_window_probes=%" PRIu64
                         " compact_window_batches=%" PRIu64
                         " compact_window_stream_u_entries=%" PRIu64
@@ -96174,6 +96229,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.compact_window_delayed_output_replays,
                         (uint64_t)worker->trace_current.compact_window_delayed_output_deps,
                         (uint64_t)worker->trace_current.compact_window_delayed_output_entries,
+                        (uint64_t)worker->trace_current.compact_window_delayed_output_scan_entries,
+                        (uint64_t)worker->trace_current.compact_window_delayed_output_seek_skips,
                         (uint64_t)worker->trace_current.compact_window_probes,
                         (uint64_t)worker->trace_current.compact_window_batches,
                         (uint64_t)worker->trace_current.compact_window_stream_u_entries,
