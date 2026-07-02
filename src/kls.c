@@ -26939,6 +26939,13 @@ static int should_try_auto_scale(const kls_solver *solver) {
       solver->numeric == NULL || solver->n < 20000) {
     return 0;
   }
+  if (solver->row_perm != NULL) {
+    /* Statically matched numerics chose their scale mode with the match;
+       re-scaling flattens the column magnitude contrast that keeps the
+       matched diagonal dominant, and the scaled trial factorization can
+       explode structurally on mostly-missing-diagonal matrices. */
+    return 0;
+  }
   if (solver->common.scale <= 0 &&
       is_medium_dense_diagonal_high_degree_pattern(solver->n, solver->col_ptr,
                                                    solver->row_idx)) {
