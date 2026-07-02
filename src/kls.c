@@ -86853,6 +86853,7 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_claim_misses;
   UF_long compact_window_claim_stale_clears;
   UF_long compact_window_claim_group_scatters;
+  UF_long compact_window_claim_group_detaches;
   UF_long compact_window_delayed_output_skips;
   UF_long compact_window_delayed_output_replays;
   UF_long compact_window_delayed_output_deps;
@@ -87058,6 +87059,8 @@ static void kls_row_first_pipeline_trace_add(
                           source->compact_window_claim_stale_clears);
   kls_row_first_stats_add(&target->compact_window_claim_group_scatters,
                           source->compact_window_claim_group_scatters);
+  kls_row_first_stats_add(&target->compact_window_claim_group_detaches,
+                          source->compact_window_claim_group_detaches);
   kls_row_first_stats_add(&target->compact_window_delayed_output_skips,
                           source->compact_window_delayed_output_skips);
   kls_row_first_stats_add(&target->compact_window_delayed_output_replays,
@@ -93798,6 +93801,76 @@ static int kls_row_first_pipeline_scatter_compact_group(
   return ok;
 }
 
+static kls_row_first_compact_window_state *
+kls_row_first_pipeline_detach_sparse_group_row(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_trace *trace,
+  UF_long group_slot) {
+  if (shared == NULL || !shared->compact_group_active ||
+      !shared->compact_group_sparse ||
+      shared->compact_group_slots == NULL ||
+      shared->compact_window_states == NULL ||
+      group_slot >= shared->compact_group_target_count) {
+    return NULL;
+  }
+  const UF_long old_count = shared->compact_group_target_count;
+  const int slot = shared->compact_group_slots[group_slot];
+  if (slot < 0 || slot >= shared->compact_window_count) {
+    return NULL;
+  }
+  kls_row_first_compact_window_state *state =
+    shared->compact_window_states + slot;
+  if (!state->active || !state->grouped) {
+    return NULL;
+  }
+
+  for (UF_long g = group_slot + 1u; g < old_count; ++g) {
+    shared->compact_group_slots[g - 1u] = shared->compact_group_slots[g];
+  }
+  shared->compact_group_slots[old_count - 1u] = -1;
+  shared->compact_group_target_count = old_count - 1u;
+
+  state->grouped = 0;
+  state->group_member_count = 0u;
+  state->bucket_dep = KLS_KLU_EMPTY;
+  state->bucket_next = -1;
+  state->bucket_linked = 0;
+
+  if (shared->compact_group_target_count < 2u) {
+    const UF_long remaining = shared->compact_group_target_count;
+    for (UF_long g = 0; g < remaining; ++g) {
+      const int rem_slot = shared->compact_group_slots[g];
+      shared->compact_group_slots[g] = -1;
+      if (rem_slot < 0 || rem_slot >= shared->compact_window_count) {
+        continue;
+      }
+      kls_row_first_compact_window_state *remaining_state =
+        shared->compact_window_states + rem_slot;
+      if (!remaining_state->active || !remaining_state->grouped) {
+        continue;
+      }
+      remaining_state->grouped = 0;
+      remaining_state->group_member_count = 0u;
+      remaining_state->bucket_dep = KLS_KLU_EMPTY;
+      remaining_state->bucket_next = -1;
+      remaining_state->bucket_linked = 0;
+      if (!kls_row_first_pipeline_register_compact_window_state(
+            shared, remaining_state) &&
+          trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+      }
+    }
+    shared->compact_group_active = 0;
+    shared->compact_group_target_count = 0u;
+    shared->compact_group_union_count = 0u;
+    shared->compact_group_stride = 0u;
+    shared->compact_group_dep = KLS_KLU_EMPTY;
+    shared->compact_group_sparse = 0;
+  }
+
+  return state;
+}
+
 static UF_long kls_row_first_pipeline_compact_batch_common_root(
   kls_row_first_pipeline_shared *shared,
   UF_long target_count,
@@ -96263,6 +96336,7 @@ static int kls_row_first_pipeline_try_claim_compact_window(
     kls_row_first_stats_add(
       &shared->trace_committed.compact_window_claim_attempts, 1u);
   }
+  int best_slot = -1;
   if (shared->compact_group_active &&
       shared->compact_group_slots != NULL) {
     for (UF_long g = 0; g < shared->compact_group_target_count; ++g) {
@@ -96274,19 +96348,41 @@ static int kls_row_first_pipeline_try_claim_compact_window(
         shared->compact_window_states + slot;
       if (state->active && state->grouped &&
           state->pos == wanted_pos) {
-        if (shared->trace_enabled) {
-          kls_row_first_stats_add(
-            &shared->trace_committed.compact_window_claim_group_scatters,
-            1u);
+        if (shared->compact_group_sparse) {
+          kls_row_first_compact_window_state *detached =
+            kls_row_first_pipeline_detach_sparse_group_row(
+              shared, shared->trace_enabled ? &shared->trace_committed : NULL,
+              g);
+          if (detached != NULL) {
+            best_slot = detached->bucket_slot;
+            if (shared->trace_enabled) {
+              kls_row_first_stats_add(
+                &shared->trace_committed.compact_window_claim_group_detaches,
+                1u);
+            }
+          } else {
+            if (shared->trace_enabled) {
+              kls_row_first_stats_add(
+                &shared->trace_committed.compact_window_claim_group_scatters,
+                1u);
+            }
+            (void)kls_row_first_pipeline_scatter_compact_group(
+              shared, NULL);
+          }
+        } else {
+          if (shared->trace_enabled) {
+            kls_row_first_stats_add(
+              &shared->trace_committed.compact_window_claim_group_scatters,
+              1u);
+          }
+          (void)kls_row_first_pipeline_scatter_compact_group(
+            shared, NULL);
         }
-        (void)kls_row_first_pipeline_scatter_compact_group(
-          shared, NULL);
         break;
       }
     }
   }
-  int best_slot = -1;
-  if (shared->compact_pos_slots != NULL &&
+  if (best_slot < 0 && shared->compact_pos_slots != NULL &&
       wanted_pos < shared->ctx->nk) {
     best_slot = shared->compact_pos_slots[wanted_pos];
     if (best_slot < 0 || best_slot >= shared->compact_window_count) {
@@ -96310,7 +96406,7 @@ static int kls_row_first_pipeline_try_claim_compact_window(
         best_slot = -1;
       }
     }
-  } else {
+  } else if (best_slot < 0) {
     for (int slot = 0; slot < shared->compact_window_count; ++slot) {
       kls_row_first_compact_window_state *state =
         shared->compact_window_states + slot;
@@ -96488,6 +96584,7 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_claim_misses=%" PRIu64
           " compact_window_claim_stale_clears=%" PRIu64
           " compact_window_claim_group_scatters=%" PRIu64
+          " compact_window_claim_group_detaches=%" PRIu64
           " compact_window_delayed_output_skips=%" PRIu64
           " compact_window_delayed_output_replays=%" PRIu64
           " compact_window_delayed_output_deps=%" PRIu64
@@ -96589,6 +96686,7 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_claim_misses,
           (uint64_t)trace->compact_window_claim_stale_clears,
           (uint64_t)trace->compact_window_claim_group_scatters,
+          (uint64_t)trace->compact_window_claim_group_detaches,
           (uint64_t)trace->compact_window_delayed_output_skips,
           (uint64_t)trace->compact_window_delayed_output_replays,
           (uint64_t)trace->compact_window_delayed_output_deps,
@@ -97256,6 +97354,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " compact_window_claim_misses=%" PRIu64
                         " compact_window_claim_stale_clears=%" PRIu64
                         " compact_window_claim_group_scatters=%" PRIu64
+                        " compact_window_claim_group_detaches=%" PRIu64
                         " compact_window_delayed_output_skips=%" PRIu64
                         " compact_window_delayed_output_replays=%" PRIu64
                         " compact_window_delayed_output_deps=%" PRIu64
@@ -97355,6 +97454,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.compact_window_claim_misses,
                         (uint64_t)worker->trace_current.compact_window_claim_stale_clears,
                         (uint64_t)worker->trace_current.compact_window_claim_group_scatters,
+                        (uint64_t)worker->trace_current.compact_window_claim_group_detaches,
                         (uint64_t)worker->trace_current.compact_window_delayed_output_skips,
                         (uint64_t)worker->trace_current.compact_window_delayed_output_replays,
                         (uint64_t)worker->trace_current.compact_window_delayed_output_deps,

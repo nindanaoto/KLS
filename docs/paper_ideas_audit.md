@@ -15199,3 +15199,22 @@ output accounting to `1,156,915,464`. This rejects blind replay of every
 separated grouped state as the default and points the next paper-gap work at a
 claim-local or panel-owner output workspace that shares scans without eagerly
 materializing all future output columns.
+
+Sparse compact groups now detach only the claimed row instead of scattering the
+whole group when the current row is inside a grouped owner. The focused trace
+`build/kls_pre2_sparse_claim_detach_delay_w512_trace45.stderr` kept the normal
+`589824/629628` checkpoint but replaced `67,263` claim-triggered full group
+scatters with `73,635` single-row detaches. Grouped producer work increased
+from `54,217` steps / `861,032` grouped targets in
+`build/kls_pre2_group_surface_gated_w512_trace45.stderr` to `105,402` steps /
+`2,762,508` grouped targets, so the sparse owner now survives claims. The
+unchanged delayed output work (`388,436,793` entries and `460,611,934` scan
+entries) confirms that group lifetime was a real missing owner detail, but not
+the remaining timeout-sized gap by itself. Retesting the explicit numeric
+group replay after this fix,
+`build/kls_pre2_sparse_detach_group_replay_w512_trace45.stderr`, improved the
+old rejected grouped-replay checkpoint from `262144/629628` to
+`524288/629628`, but it still underperformed detach-only and inflated delayed
+output entries to `462,243,229`. The next direct paper-aligned step is still a
+claim-local or panel-owned output workspace, not eager replay into every
+separated sparse state.

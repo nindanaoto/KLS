@@ -2287,15 +2287,17 @@ compact union materialization is guarded by a sparse-work envelope, and traces
 report `compact_window_union_skip_{targets,cols,values,sparse_values}` when the
 exact sparse batched update is used instead. Compact execution traces also
 report
-`compact_window_claim_{attempts,claims,misses,stale_clears,group_scatters}` so
-reuse can be separated from eager-update cost.
+`compact_window_claim_{attempts,claims,misses,stale_clears,group_scatters,group_detaches}`
+so reuse can be separated from eager-update cost.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_SPARSE_GROUP=1` keeps an opt-in persistent
 compact group in each member state's sparse row/index storage instead of the
 dense target-by-union matrix. This is useful for paper-gap probes that need to
 separate grouped-owner coverage from dense materialization cost; it remains off
 by default and still requires `KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC=1`. It can
 also be combined with delayed output, where grouped producer updates keep only
-prefactor/internal columns and leave target-output columns for claim-time replay.
+prefactor/internal columns and leave target-output columns for claim-time
+replay. Sparse grouped claims detach only the claimed row, so a current-row
+claim does not scatter the rest of the grouped owner.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT=1` adds an opt-in
 prefactor/postfactor split for that compact executor: producer publication
 updates only dependencies below the target row, while diagonal/output U updates
@@ -2308,8 +2310,10 @@ across grouped states.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_REPLAY=1` enables the matching numeric
 grouped replay experiment, but it remains off by default: a 45s `pre2` trial
 cut delayed replay scan entries while inflating delayed output materialization
-and reached only `262144/629628` rows, so the default path keeps only the
-diagnostic counters.
+and reached only `262144/629628` rows. After sparse claim detaches, the same
+flag improved to `524288/629628` but still lost to the detach-only
+`589824/629628` checkpoint, so the default path keeps only the diagnostic
+counters.
 On `pre2`, a suffix-seek replay probe with the 512-state compact window reached
 the same `589824/629628` 45s checkpoint as the prior delayed-output run and
 skipped only `254207` prefix entries while scanning `458936540` entries. This
