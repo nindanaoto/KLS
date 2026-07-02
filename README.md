@@ -2826,6 +2826,24 @@ rebase trace (`507333583` scalar U entries versus `506647034`), so it is kept
 as correctness/paper-consistency substrate rather than counted as a `pre2`
 gap closer.
 
+`KLS_ENABLE_ROW_PIPELINE_SUPERNODE_PRODUCER_BATCH=1` adds an explicit
+first-factor experiment for a direct SubtreeLU/CKTSO scheduling question:
+when a committed row makes a supernode prefix ready, active target rows waiting
+on the supernode's first row are advanced together instead of being rejected by
+the scalar producer-batch path. The implementation deliberately uses the
+discovery-safe compact/scalar supernode update, not the cached-panel shortcut,
+because target rows may only have the supernode root visible when the producer
+fires. The experiment is off by default. A focused forced-METIS `pre2` trace
+with the flag enabled,
+`build/kls_pre2_supernode_producer_safe_trace45.stderr`, accepted `660`
+producer batches and `1868` targets, but reached only `52672/629628` rows in
+the same cap. The guarded default rerun,
+`build/kls_pre2_supernode_producer_guard_default_trace45.stderr`, returned to
+the expected `589824/629628` checkpoint with `506311553` scalar U entries and
+`430534487` scalar U output. This rejects under-mutex supernode producer
+batching as the CKTSO-scale missing mechanism and keeps the next target on a
+persistent main row/panel owner rather than eager producer-side replay.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

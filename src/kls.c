@@ -48114,6 +48114,13 @@ static int kls_row_pipeline_pivot_supernode_rebase_env_disabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_supernode_producer_batch_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_ROW_PIPELINE_SUPERNODE_PRODUCER_BATCH");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_row_pipeline_compact_window_trace_env_enabled(void) {
   const char *value =
     getenv("KLS_TRACE_ROW_PIPELINE_COMPACT_WINDOW");
@@ -91427,6 +91434,7 @@ typedef struct kls_row_first_pipeline_shared {
   int lookahead_fill_enabled;
   int pivot_lookahead_enabled;
   int pivot_supernode_rebase_enabled;
+  int supernode_producer_batch_enabled;
   int failed;
   kls_row_first_pipeline_failure failure_reason;
 } kls_row_first_pipeline_shared;
@@ -91584,6 +91592,80 @@ static int kls_row_first_pipeline_worker_scalar_batch_candidate(
   return 1;
 }
 
+static int kls_row_first_pipeline_worker_supernode_batch_candidate(
+  const kls_row_first_pipeline_shared *shared,
+  const kls_row_first_pipeline_worker *worker,
+  UF_long dep_begin,
+  UF_long dep_end,
+  kls_row_first_pipeline_producer_reject *reject_out) {
+  if (reject_out != NULL) {
+    *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_NONE;
+  }
+  if (shared == NULL || worker == NULL || worker->active_state == NULL ||
+      worker->workspace.x == NULL || worker->workspace.mark == NULL ||
+      worker->workspace.dep_heap == NULL ||
+      shared->row_done == NULL || shared->ctx == NULL ||
+      dep_begin > dep_end || dep_end >= shared->ctx->nk) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_BAD_STATE;
+    }
+    return 0;
+  }
+  const kls_row_first_partial_row *state = worker->active_state;
+  if (worker->active_order_epoch != shared->order_epoch) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_EPOCH;
+    }
+    return 0;
+  }
+  if (worker->lookahead_active && worker->lookahead_claimed) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_CLAIMED;
+    }
+    return 0;
+  }
+  if (state->row >= shared->ctx->nk || dep_end >= state->row ||
+      state->dep_heap_size == 0u) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_BAD_STATE;
+    }
+    return 0;
+  }
+  if (worker->workspace.mark[dep_begin] != state->generation) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_DEP_ABSENT;
+    }
+    return 0;
+  }
+  if (worker->workspace.dep_heap[0] != dep_begin) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_NOT_ROOT;
+    }
+    return 0;
+  }
+  if (!kls_row_first_dependency_ready(shared->row_done,
+                                      shared->active_rank,
+                                      shared->completed_pos,
+                                      dep_begin)) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_NOT_READY;
+    }
+    return 0;
+  }
+  const UF_long ready_end =
+    kls_row_first_ready_supernode_end(
+      shared->supernode_start, shared->supernode_end, shared->row_done,
+      shared->active_rank, shared->ctx->nk, shared->supernode_valid_begin,
+      shared->completed_pos, state->row, dep_begin);
+  if (ready_end < dep_end) {
+    if (reject_out != NULL) {
+      *reject_out = KLS_ROW_FIRST_PRODUCER_REJECT_NOT_READY;
+    }
+    return 0;
+  }
+  return 1;
+}
+
 static void kls_row_first_pipeline_trace_producer_batch_state_union(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_pipeline_trace *trace,
@@ -91671,6 +91753,196 @@ static void kls_row_first_pipeline_trace_compact_window_state_union(
   }
   kls_row_first_stats_add(&trace->compact_window_unique_state_rows,
                           unique_rows);
+}
+
+static int kls_row_first_pipeline_apply_supernode_producer_batch(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_worker *current_worker,
+  UF_long dep_begin,
+  UF_long dep_end) {
+  if (shared == NULL || current_worker == NULL ||
+      !shared->producer_batch_enabled ||
+      !shared->supernode_producer_batch_enabled ||
+      shared->workers == NULL || shared->batch_targets == NULL ||
+      shared->batch_target_capacity <= 1 || shared->ctx == NULL ||
+      shared->u_entries == NULL || shared->workspace == NULL ||
+      shared->workspace->u_row_ptr == NULL ||
+      shared->workspace->u_row_end == NULL ||
+      shared->udiag_values == NULL ||
+      dep_begin >= dep_end || dep_end >= shared->ctx->nk) {
+    return 1;
+  }
+  if (shared->supernode_start == NULL || shared->supernode_end == NULL ||
+      dep_begin < shared->supernode_valid_begin ||
+      shared->supernode_start[dep_begin] != dep_begin ||
+      shared->supernode_end[dep_begin] < dep_end) {
+    return 1;
+  }
+
+  const UF_long run_rows = dep_end - dep_begin + 1u;
+  UF_long run_entries = 0u;
+  for (UF_long dep = dep_begin; dep <= dep_end; ++dep) {
+    const UF_long row_begin = shared->workspace->u_row_ptr[dep];
+    const UF_long row_end = shared->workspace->u_row_end[dep];
+    if (row_begin > row_end || row_end > shared->u_entries->count ||
+        shared->udiag_values[dep] == 0.0) {
+      return 1;
+    }
+    kls_row_first_stats_add(&run_entries, row_end - row_begin);
+  }
+  if (run_entries == 0u) {
+    return 1;
+  }
+
+  kls_row_first_pipeline_trace *producer_trace =
+    shared->trace_enabled ? &current_worker->trace_current : NULL;
+  UF_long target_count = 0u;
+  for (int tid = 0; tid < shared->worker_count; ++tid) {
+    kls_row_first_pipeline_worker *worker = shared->workers + tid;
+    if (worker == current_worker) {
+      continue;
+    }
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_workers, 1u);
+    }
+    kls_row_first_pipeline_producer_reject reject_reason =
+      KLS_ROW_FIRST_PRODUCER_REJECT_NONE;
+    if (!kls_row_first_pipeline_worker_supernode_batch_candidate(
+          shared, worker, dep_begin, dep_end, &reject_reason)) {
+      kls_row_first_pipeline_trace_producer_reject(producer_trace,
+                                                  reject_reason);
+      continue;
+    }
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_ready_roots, 1u);
+    }
+    if (target_count >= (UF_long)shared->batch_target_capacity) {
+      return 0;
+    }
+    shared->batch_targets[target_count].worker = worker;
+    shared->batch_targets[target_count].state = worker->active_state;
+    shared->batch_targets[target_count].lij = 0.0;
+    target_count++;
+  }
+  for (int slot = 0; slot < shared->lookahead_count; ++slot) {
+    kls_row_first_pipeline_worker *worker =
+      shared->lookahead_states + slot;
+    if (!worker->lookahead_active || worker->lookahead_claimed) {
+      continue;
+    }
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_lookahead, 1u);
+    }
+    kls_row_first_pipeline_producer_reject reject_reason =
+      KLS_ROW_FIRST_PRODUCER_REJECT_NONE;
+    if (!kls_row_first_pipeline_worker_supernode_batch_candidate(
+          shared, worker, dep_begin, dep_end, &reject_reason)) {
+      kls_row_first_pipeline_trace_producer_reject(producer_trace,
+                                                  reject_reason);
+      continue;
+    }
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_ready_roots, 1u);
+    }
+    if (target_count >= (UF_long)shared->batch_target_capacity) {
+      return 0;
+    }
+    shared->batch_targets[target_count].worker = worker;
+    shared->batch_targets[target_count].state = worker->active_state;
+    shared->batch_targets[target_count].lij = 0.0;
+    target_count++;
+  }
+
+  const UF_long candidate_target_u_entries =
+    target_count != 0u && run_entries > UF_long_max / target_count
+      ? UF_long_max
+      : run_entries * target_count;
+  if (producer_trace != NULL) {
+    kls_row_first_stats_add(&producer_trace->producer_candidate_targets,
+                            target_count);
+    kls_row_first_stats_add(
+      &producer_trace->producer_candidate_target_u_entries,
+      candidate_target_u_entries);
+  }
+  if (target_count < 2u) {
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_underfilled, 1u);
+      kls_row_first_stats_add(
+        &producer_trace->producer_probe_underfilled_targets,
+        target_count);
+      kls_row_first_stats_add(
+        &producer_trace->producer_underfilled_target_u_entries,
+        candidate_target_u_entries);
+    }
+    return 1;
+  }
+  const UF_long saved_targets = target_count - 1u;
+  const UF_long saved_stream =
+    saved_targets != 0u && run_entries > UF_long_max / saved_targets
+      ? UF_long_max
+      : run_entries * saved_targets;
+  if (saved_stream < KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM) {
+    if (producer_trace != NULL) {
+      kls_row_first_stats_add(&producer_trace->producer_probe_low_saved_stream,
+                              1u);
+      kls_row_first_stats_add(
+        &producer_trace->producer_low_saved_stream_target_u_entries,
+        candidate_target_u_entries);
+    }
+    return 1;
+  }
+
+  for (UF_long t = 0; t < target_count; ++t) {
+    kls_row_first_pipeline_worker *worker =
+      shared->batch_targets[t].worker;
+    if (!kls_row_first_entries_reserve_append(&worker->l_entries,
+                                              run_rows)) {
+      return 0;
+    }
+  }
+
+  for (UF_long t = 0; t < target_count; ++t) {
+    kls_row_first_pipeline_worker *worker =
+      shared->batch_targets[t].worker;
+    kls_row_first_partial_row *state = shared->batch_targets[t].state;
+    UF_long applied_rows = 0u;
+    const int compact_status =
+      kls_row_first_partial_apply_supernode_run_compact(
+        shared->ctx, &worker->workspace, &worker->l_entries,
+        shared->u_entries, shared->udiag_values,
+        shared->workspace->u_row_ptr, shared->workspace->u_row_end,
+        state, dep_begin, dep_end, &applied_rows, 1, 0,
+        shared->stats);
+    if (compact_status < 0) {
+      return 0;
+    }
+    if (compact_status == 0 &&
+        !kls_row_first_partial_apply_supernode_run_scalar(
+          shared->ctx, &worker->workspace, &worker->l_entries,
+          shared->u_entries, shared->udiag_values,
+          shared->workspace->u_row_ptr, shared->workspace->u_row_end,
+          state, dep_begin, dep_end, NULL, &applied_rows)) {
+      return 0;
+    }
+    if (applied_rows != run_rows) {
+      return 0;
+    }
+    worker->pipeline_supernode_update_groups++;
+    worker->pipeline_supernode_update_rows += run_rows;
+  }
+
+  if (producer_trace != NULL) {
+    kls_row_first_stats_add(&producer_trace->producer_batch_calls, 1u);
+    kls_row_first_stats_add(&producer_trace->producer_batch_targets,
+                            target_count);
+    kls_row_first_stats_add(&producer_trace->producer_batch_stream_u_entries,
+                            run_entries);
+    kls_row_first_stats_add(&producer_trace->producer_batch_target_u_entries,
+                            candidate_target_u_entries);
+    kls_row_first_pipeline_trace_producer_batch_state_union(
+      shared, producer_trace, target_count);
+  }
+  return 1;
 }
 
 static int kls_row_first_pipeline_apply_producer_batch(
@@ -95238,6 +95510,20 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               }
               shared->completed_pos = pos + 1u;
               if (!pivoted &&
+                  shared->supernode_start != NULL &&
+                  row < shared->ctx->nk) {
+                const UF_long supernode_dep =
+                  shared->supernode_start[row];
+                if (supernode_dep < row &&
+                    supernode_dep >= shared->supernode_valid_begin &&
+                    shared->supernode_end[supernode_dep] >= row &&
+                    !kls_row_first_pipeline_apply_supernode_producer_batch(
+                      shared, worker, supernode_dep, row)) {
+                  kls_row_first_pipeline_mark_failed(
+                    shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
+                }
+              }
+              if (!pivoted &&
                   !kls_row_first_pipeline_apply_producer_batch(
                     shared, worker, row)) {
                 kls_row_first_pipeline_mark_failed(
@@ -95745,6 +96031,9 @@ static int kls_row_first_run_parallel_pipeline_phase(
     requested_pivot_lookahead > 0u && shared.producer_batch_enabled;
   shared.pivot_supernode_rebase_enabled =
     !kls_row_pipeline_pivot_supernode_rebase_env_disabled();
+  shared.supernode_producer_batch_enabled =
+    shared.producer_batch_enabled &&
+    kls_row_pipeline_supernode_producer_batch_env_enabled();
   shared.lookahead_max_inputs =
     kls_row_pipeline_lookahead_max_inputs_env();
   shared.compact_window_execute_enabled = compact_window_execute_requested;
