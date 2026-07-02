@@ -386,6 +386,21 @@ factor/refactor/solve/residual path uses the stressed values. JSON includes
 the first rejected fast-factor tail, because later repeated calls can overwrite
 the first rejection diagnostics.
 
+After a fresh full factorization on medium and larger matrices, KLS sorts the
+retained KLU numeric columns into ascending row order and detects strict
+L-supernode runs: consecutive pivot columns whose sorted patterns nest, so
+each run column is stored as an in-batch prefix plus a shared extended tail.
+Repeated refactors then consume consecutive run producers per U column as one
+dense in-panel solve plus a chunked shared-tail panel update that reads a
+single index stream, in the serial mapped/BTF-pool kernels and in the EGraph
+column kernels (including pipeline mode, where a batch is taken only when
+every producer in it is already published). The panel update is only used
+when the batched work amortizes the staging, and the hot loop is
+multi-versioned so an AVX2/FMA clone is selected at load time on capable
+hosts. Set `KLS_DISABLE_SNODE_PANEL_REFACTOR=1` to keep the numeric unsorted
+and stay on the scalar per-producer updates; `KLS_TRACE_SNODE=1` reports run
+coverage and batch counters.
+
 Use `--threads N` to enable KLS-owned parallel work where it is currently
 available. The first threaded path is repeated numeric refactorization across
 independent BTF diagonal blocks for large, high-flop cases, including existing
