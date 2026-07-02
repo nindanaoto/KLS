@@ -24489,7 +24489,11 @@ static void improve_numeric_row_match_by_swaps(UF_long n,
                                                const kls_row_match_graph *graph,
                                                UF_long *row_perm,
                                                UF_long *col_match) {
-  const UF_long max_candidates_per_row = 16;
+  /* Rows are weight-sorted descending when the graph is built, so the
+     truncated candidate window already holds each row's strongest edges;
+     eight of them find the same improvement cycles at half the search
+     breadth. */
+  const UF_long max_candidates_per_row = 8;
   const int max_rounds = 5;
   for (int round = 0; round < max_rounds; ++round) {
     UF_long changes = 0;
