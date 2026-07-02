@@ -42,6 +42,9 @@ PRODUCER_COUNTERS = [
     "compact_window_claim_group_run_near64",
     "compact_window_claim_group_run_near512",
     "compact_window_claim_group_run_max_consecutive",
+    "compact_window_claim_group_run_stealable",
+    "compact_window_claim_group_run_max_stealable",
+    "compact_window_claim_group_run_unreserved_near64",
     "compact_window_delayed_output_skips",
     "compact_window_delayed_output_replays",
     "compact_window_delayed_output_deps",
@@ -159,6 +162,9 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_compact_window_claim_group_run_near64 = 0
     long_compact_window_claim_group_run_near512 = 0
     long_compact_window_claim_group_run_max_consecutive = 0
+    long_compact_window_claim_group_run_stealable = 0
+    long_compact_window_claim_group_run_max_stealable = 0
+    long_compact_window_claim_group_run_unreserved_near64 = 0
     long_compact_window_delayed_output_skips = 0
     long_compact_window_delayed_output_replays = 0
     long_compact_window_delayed_output_deps = 0
@@ -301,6 +307,16 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_window_claim_group_run_max_consecutive = max(
                 long_compact_window_claim_group_run_max_consecutive,
                 parse_int(row.get("compact_window_claim_group_run_max_consecutive")),
+            )
+            long_compact_window_claim_group_run_stealable += parse_int(
+                row.get("compact_window_claim_group_run_stealable")
+            )
+            long_compact_window_claim_group_run_max_stealable = max(
+                long_compact_window_claim_group_run_max_stealable,
+                parse_int(row.get("compact_window_claim_group_run_max_stealable")),
+            )
+            long_compact_window_claim_group_run_unreserved_near64 += parse_int(
+                row.get("compact_window_claim_group_run_unreserved_near64")
             )
             long_compact_window_delayed_output_skips += parse_int(
                 row.get("compact_window_delayed_output_skips")
@@ -546,6 +562,15 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_claim_group_run_max_consecutive = parse_int(
         last_trace.get("compact_window_claim_group_run_max_consecutive")
     )
+    compact_window_claim_group_run_stealable = parse_int(
+        last_trace.get("compact_window_claim_group_run_stealable")
+    )
+    compact_window_claim_group_run_max_stealable = parse_int(
+        last_trace.get("compact_window_claim_group_run_max_stealable")
+    )
+    compact_window_claim_group_run_unreserved_near64 = parse_int(
+        last_trace.get("compact_window_claim_group_run_unreserved_near64")
+    )
     compact_window_delayed_output_skips = parse_int(
         last_trace.get("compact_window_delayed_output_skips")
     )
@@ -722,6 +747,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_claim_group_run_near512,
         "compact_window_claim_group_run_max_consecutive":
             compact_window_claim_group_run_max_consecutive,
+        "compact_window_claim_group_run_stealable":
+            compact_window_claim_group_run_stealable,
+        "compact_window_claim_group_run_max_stealable":
+            compact_window_claim_group_run_max_stealable,
+        "compact_window_claim_group_run_unreserved_near64":
+            compact_window_claim_group_run_unreserved_near64,
         "compact_window_delayed_output_skips":
             compact_window_delayed_output_skips,
         "compact_window_delayed_output_replays":
@@ -837,6 +868,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_window_claim_group_run_near512,
         "long_compact_window_claim_group_run_max_consecutive":
             long_compact_window_claim_group_run_max_consecutive,
+        "long_compact_window_claim_group_run_stealable":
+            long_compact_window_claim_group_run_stealable,
+        "long_compact_window_claim_group_run_max_stealable":
+            long_compact_window_claim_group_run_max_stealable,
+        "long_compact_window_claim_group_run_unreserved_near64":
+            long_compact_window_claim_group_run_unreserved_near64,
         "long_compact_window_delayed_output_skips":
             long_compact_window_delayed_output_skips,
         "long_compact_window_delayed_output_replays":
@@ -972,6 +1009,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_claim_group_run_near512_per_probe": ratio(
             compact_window_claim_group_run_near512,
             compact_window_claim_group_run_probes,
+        ),
+        "compact_window_claim_group_run_stealable_per_probe": ratio(
+            compact_window_claim_group_run_stealable,
+            compact_window_claim_group_run_probes,
+        ),
+        "compact_window_claim_group_run_stealable_share": ratio(
+            compact_window_claim_group_run_stealable,
+            compact_window_claim_group_run_consecutive,
+        ),
+        "compact_window_claim_group_run_unreserved_near64_share": ratio(
+            compact_window_claim_group_run_unreserved_near64,
+            compact_window_claim_group_run_near64,
         ),
         "compact_window_delayed_output_replay_entries_per_skip": ratio(
             compact_window_delayed_output_entries,
@@ -1112,6 +1161,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_compact_window_claim_group_run_near512_per_probe": ratio(
             long_compact_window_claim_group_run_near512,
             long_compact_window_claim_group_run_probes,
+        ),
+        "long_compact_window_claim_group_run_stealable_per_probe": ratio(
+            long_compact_window_claim_group_run_stealable,
+            long_compact_window_claim_group_run_probes,
+        ),
+        "long_compact_window_claim_group_run_stealable_share": ratio(
+            long_compact_window_claim_group_run_stealable,
+            long_compact_window_claim_group_run_consecutive,
+        ),
+        "long_compact_window_claim_group_run_unreserved_near64_share": ratio(
+            long_compact_window_claim_group_run_unreserved_near64,
+            long_compact_window_claim_group_run_near64,
         ),
         "long_compact_window_delayed_output_replay_entries_per_skip": ratio(
             long_compact_window_delayed_output_entries,

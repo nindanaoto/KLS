@@ -22,6 +22,18 @@ replay and output-stream prototypes rejected; it points more specifically to a
 CKTSO/SubtreeLU-style grouped row/panel owner that shares producer-row scans
 across active current states while applying output directly to the claim owner.
 
+A follow-up `pre2` trace checks whether that direct claim-owner path is blocked
+by the current worker scheduler. It is not. With the same 512-state compact
+window, `build/kls_pre2_claim_group_stealable_w512_trace45.stderr` reached
+`589824/629628` rows and found `73600` grouped claim probes. The strict
+commit-adjacent run stayed near the previous result (`4.86` rows per probe),
+but `3.86` of those rows per probe were still unreserved by other workers
+(`79.4%` of the strict run), with a maximum stealable run of `121`. Among the
+local 64-position grouped surface, `91.9%` was unreserved. This means a
+non-materializing claim-run executor can probably reserve useful short runs with
+an atomic `next_pos` handoff; the hard part remains the numeric kernel that
+keeps those rows in worker-owned scratch while sharing delayed-output scans.
+
 The row-pipeline pivot tail now preserves the supernode substrate after dynamic
 pivots by advancing a validity floor rather than discarding `supernode_start`
 and `supernode_end`. This is the direct SubtreeLU/CKTSO-style repair for the

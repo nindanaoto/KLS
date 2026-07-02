@@ -2328,6 +2328,17 @@ unique, and the grouped-scan estimate was `3.52%` of the per-state scan volume
 (`662,930,248` versus `18,833,835,429` entries). This keeps the next CKTSO and
 SubtreeLU-shaped implementation target on a streaming grouped owner that shares
 producer-row scans without storing output into each future row.
+The same grouped-claim probe now also reports
+`compact_window_claim_group_run_{stealable,max_stealable,unreserved_near64}`.
+These counters check whether strict commit-adjacent group rows have already been
+reserved by other workers. In
+`build/kls_pre2_claim_group_stealable_w512_trace45.stderr`, `pre2` reached
+`589824/629628` rows and showed `3.86` stealable rows per claim probe, or
+`79.4%` of the strict consecutive run, with a maximum stealable run of `121`.
+Within the next 64 grouped positions, `91.9%` were still unreserved. That makes
+a local claim-run owner feasible from a scheduler perspective; the remaining
+constraint is to apply the shared output in a worker-owned scratch/run executor
+instead of materializing it into future compact states.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_REPLAY=1` enables the matching numeric
 grouped replay experiment, but it remains off by default: a 45s `pre2` trial
 cut delayed replay scan entries while inflating delayed output materialization
