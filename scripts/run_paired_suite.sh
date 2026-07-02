@@ -12,16 +12,23 @@ SUBTREELU_COMPARE=${7:-}
 OUT_ST=${8:-}
 THREADS=${THREADS:-4}
 TIMEOUT=${TIMEOUT:-120}
+PASSES=${PASSES:-1}
 : > "$OUT_KLS"
 : > "$OUT_CK"
 [ -n "$OUT_ST" ] && : > "$OUT_ST"
 sides="kls ck"
 [ -n "$SUBTREELU_COMPARE" ] && sides="kls ck st"
+passes_sides=""
+p=0
+while [ "$p" -lt "$PASSES" ]; do
+  passes_sides="$passes_sides $sides"
+  p=$((p + 1))
+done
 while IFS= read -r name; do
   case "$name" in ''|'#'*) continue;; esac
   matrix=$(find "$MATRIX_DIR" -name "${name}.mtx" | head -1)
   [ -z "$matrix" ] && { echo "skip $name (not found)" >&2; continue; }
-  for side in $sides; do
+  for side in $passes_sides; do
     if [ "$side" = kls ]; then
       out=$(timeout "$TIMEOUT" "$KLS_BENCH" "$matrix" --orientation auto \
         --repeat 1 --refactor-repeat 3 --threads "$THREADS" --json 2>/dev/null)
