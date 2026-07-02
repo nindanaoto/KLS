@@ -6,6 +6,20 @@ solver algorithms instead of tuning individual benchmark matrices.
 
 ## Current Conclusion
 
+A current solved-by-CKTSO top-five recheck keeps the immediate tuning target on
+refactor numeric ownership rather than Hamrle3-style shared timeouts. The fresh
+KLS artifact `build/kls_gap5_current_recheck_t4_r1_ref3_timeout120.jsonl`
+completed the first five `bench/suitesparse_cktso_gap_manifest.txt` rows with
+no failures and a `1.5474s` SPICE-cycle geomean. Against the saved CKTSO medium
+artifact, the concise decomposition reports `rajat03` at `3.745x` with
+`row_refactor_lower_bound_rejected`, `ASIC_320ks` at `2.909x`, `ASIC_320k` at
+`2.832x`, and `ASIC_100ks` at `2.455x` with
+`egraph_scalar_tail_numeric_owner_missing`, plus `gemat12` at `2.317x` with
+`klu_first_factor_missing_row_engine`. This confirms that the solved-by-CKTSO
+gap is still dominated by repeated refactorization and the missing grouped
+row/panel numeric owner, with small initial-factor overhead as a separate
+secondary issue.
+
 The latest `pre2` trace adds a claim-time delayed-output surface for sparse
 grouped compact states, without enabling the rejected numeric group replay.
 `build/kls_pre2_claim_group_output_surface_w512_trace45.stderr` timed out at
