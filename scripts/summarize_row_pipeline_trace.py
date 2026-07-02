@@ -62,6 +62,10 @@ PRODUCER_COUNTERS = [
     "compact_window_span_owner_entries",
     "compact_window_span_owner_oversize_skips",
     "compact_window_span_owner_oversize_slots",
+    "compact_window_span_owner_link_skips",
+    "compact_window_span_owner_link_skip_entries",
+    "compact_window_span_owner_scan_skips",
+    "compact_window_span_owner_scan_skip_entries",
     "compact_window_claim_run_output_surfaces",
     "compact_window_claim_run_output_states",
     "compact_window_claim_run_output_deps",
@@ -768,6 +772,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_span_owner_oversize_slots = parse_int(
         last_trace.get("compact_window_span_owner_oversize_slots")
     )
+    compact_window_span_owner_link_skips = parse_int(
+        last_trace.get("compact_window_span_owner_link_skips")
+    )
+    compact_window_span_owner_link_skip_entries = parse_int(
+        last_trace.get("compact_window_span_owner_link_skip_entries")
+    )
+    compact_window_span_owner_scan_skips = parse_int(
+        last_trace.get("compact_window_span_owner_scan_skips")
+    )
+    compact_window_span_owner_scan_skip_entries = parse_int(
+        last_trace.get("compact_window_span_owner_scan_skip_entries")
+    )
     compact_window_claim_run_output_surfaces = parse_int(
         last_trace.get("compact_window_claim_run_output_surfaces")
     )
@@ -1047,6 +1063,14 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_span_owner_oversize_skips,
         "compact_window_span_owner_oversize_slots":
             compact_window_span_owner_oversize_slots,
+        "compact_window_span_owner_link_skips":
+            compact_window_span_owner_link_skips,
+        "compact_window_span_owner_link_skip_entries":
+            compact_window_span_owner_link_skip_entries,
+        "compact_window_span_owner_scan_skips":
+            compact_window_span_owner_scan_skips,
+        "compact_window_span_owner_scan_skip_entries":
+            compact_window_span_owner_scan_skip_entries,
         "compact_window_claim_run_output_surfaces":
             compact_window_claim_run_output_surfaces,
         "compact_window_claim_run_output_states":
@@ -1457,6 +1481,14 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_span_owner_oversize_slots_per_skip": ratio(
             compact_window_span_owner_oversize_slots,
             compact_window_span_owner_oversize_skips,
+        ),
+        "compact_window_span_owner_link_skip_entries_per_skip": ratio(
+            compact_window_span_owner_link_skip_entries,
+            compact_window_span_owner_link_skips,
+        ),
+        "compact_window_span_owner_scan_skip_entries_per_skip": ratio(
+            compact_window_span_owner_scan_skip_entries,
+            compact_window_span_owner_scan_skips,
         ),
         "compact_window_claim_run_output_states_per_surface": ratio(
             compact_window_claim_run_output_states,
@@ -1906,6 +1938,10 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_span_owner_entries_per_slot",
         "compact_window_span_owner_oversize_skips",
         "compact_window_span_owner_oversize_slots_per_skip",
+        "compact_window_span_owner_link_skips",
+        "compact_window_span_owner_link_skip_entries_per_skip",
+        "compact_window_span_owner_scan_skips",
+        "compact_window_span_owner_scan_skip_entries_per_skip",
         "compact_window_batches",
         "compact_window_stream_u_entries",
         "compact_window_targets",

@@ -2417,15 +2417,27 @@ rows was slightly worse at `0.392s`. The same prototype still timed out on
 `pre2` after 45s, so it is retained as experimental paper-aligned substrate,
 not a default policy.
 `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SLOTS=<slots>` caps the worker-owned
-masked panel (`65536` slots by default) and oversized candidates fall back to
-the existing compact path. Row-pipeline traces now report
-`compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,oversize_skips,oversize_slots}`
-so the owner can be tuned from workspace density instead of a matrix-specific
-rule.
-A five-matrix smoke-manifest A/B against the same compact/delay baseline with
-the conservative 4-row default improved the SPICE-cycle geomean from
-`0.0474s` to `0.0415s` (`1.14x`), with wins over 2% on `add20`, `add32`,
-`bcircuit`, and `circuit204`, and a near-tie on `rajat03`.
+masked panel (`65536` slots by default). The setup phase is capped separately:
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_LINKS=<links>` defaults to `1`
+dependency links and
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SCAN_ENTRIES=<entries>` defaults to
+`524288` scanned U-row entries. Candidates that exceed any cap fall back to the
+existing compact path before allocating or filling the owner panel.
+Row-pipeline traces now report
+`compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,oversize_skips,oversize_slots,link_skips,link_skip_entries,scan_skips,scan_skip_entries}`
+so the owner can be tuned from workspace density and discovery cost instead of
+a matrix-specific rule.
+The link cap is deliberately conservative after `pre2` evidence: the default
+cap-1 opt-in trace reached `524288/629628` rows in 45s with zero owner
+reservations and `53,626` link-skip fallbacks, while a cap-2 probe accepted 47
+tiny owner reservations but reached only `65536/629628` rows in 35s. Higher caps
+remain benchmark overrides until the owner has a stronger payoff test.
+Before the link cap was tightened, a five-matrix smoke-manifest A/B against the
+same compact/delay baseline with the 4-row owner improved the SPICE-cycle
+geomean from `0.0474s` to `0.0415s` (`1.14x`), with wins over 2% on `add20`,
+`add32`, `bcircuit`, and `circuit204`, and a near-tie on `rajat03`. That remains
+evidence that the worker-owned panel can pay off, not evidence that the current
+cap-1 default closes the large-case gap.
 `build/kls_pre2_claim_span64_output_surface_w512_trace45.stderr` again reached
 `589824/629628`, but the span surface covered `318,807` states (`9.78` per
 surface) and cut scan volume to `168,701,660` grouped entries from

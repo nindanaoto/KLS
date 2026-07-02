@@ -123,22 +123,39 @@ rows so the full smoke suite still completes when the prototype is enabled. The
 first `pre2` factor-only probe with a 64-row span still timed out after 45s, so
 the prototype is evidence-backed substrate rather than a completed CKTSO-gap
 closer.
-The span owner now has a worker-panel workspace cap,
-`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SLOTS` (`65536` slots by default), and
-row-pipeline traces report the owner surface directly. A traced 64-row
-`bcircuit` run showed why a simple density gate would be wrong: only `8.0%` of
-reserved span positions were owned grouped rows, but the owner still improved
-time because each build had useful scan amortization (`2.68` output entries per
-scan entry, `0.41` entries per masked slot). A short capped 64-row `pre2` trace
-still failed to reach the first progress event, so the next work should reduce
-early owner discovery cost or make the owner non-contiguous before expecting it
-to close the `pre2` gap.
-A five-matrix smoke-manifest A/B with the conservative 4-row default showed
-that the source-retained prototype is already useful on small public cases:
-the compact/delay baseline geomean was `0.0474s`, while span owner default was
-`0.0415s` (`1.14x` faster). It won on `add20`, `add32`, `bcircuit`, and
-`circuit204`, and tied `rajat03`. That keeps the next work on span-owner policy
-and overhead control rather than reverting the mechanism.
+The span owner now has bounded setup and workspace cost:
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SLOTS` caps the worker panel (`65536`
+slots by default),
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_LINKS` caps dependency links
+(`1` by default), and
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SCAN_ENTRIES` caps scanned U-row
+entries during column discovery (`524288` by default). Row-pipeline traces
+report owner reservations, density, oversize skips, link skips, and scan skips
+directly. A traced 64-row `bcircuit` run showed why a simple density gate would
+be wrong: only `8.0%` of reserved span positions were owned grouped rows, but
+the owner still improved time because each build had useful scan amortization
+(`2.68` output entries per scan entry, `0.41` entries per masked slot). A short
+capped 64-row `pre2` trace still failed to reach the first progress event, so
+the next work should verify whether the new early fallback exposes progress and
+then consider non-contiguous ownership before expecting it to close the `pre2`
+gap.
+A follow-up default-cap check made the link cap conservative after `pre2`
+evidence showed that even two-link accepted owner panels can stall the large
+numeric tail before the first progress event. With
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_LINKS=1`, the default opt-in owner
+trace `build/kls_pre2_span_owner_default_linkcap1_trace45.stderr` reached
+`524288/629628` rows in the 45s cap, accepted zero owner reservations, and
+recorded `53,626` link-skip fallbacks. The neighboring cap-2 probe reached only
+`65536/629628` rows in 35s after accepting 47 tiny owner reservations, so
+raising the default cap is not justified until the owner can score panel payoff
+more directly.
+Before the link cap was tightened, a five-matrix smoke-manifest A/B with the
+4-row owner showed that the source-retained prototype can be useful on small
+public cases: the compact/delay baseline geomean was `0.0474s`, while that
+high-cap span-owner setting was `0.0415s` (`1.14x` faster). It won on `add20`,
+`add32`, `bcircuit`, and `circuit204`, and tied `rajat03`. That keeps the next
+work on span-owner policy and overhead control rather than reverting the
+mechanism, but it should not be read as current cap-1 default performance.
 
 A same-options span-width recheck after making the span surface runtime
 configurable confirms that the useful paper-shaped owner is wider than the
