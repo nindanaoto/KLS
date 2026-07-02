@@ -49324,7 +49324,13 @@ static int kls_dominant_btf_fast_factor_repair_is_risky(
   if (solver->row_perm != NULL &&
       solver->symbolic->nblocks >= 1024u &&
       solver->symbolic->maxblock >= 30000u &&
-      coverage >= 0.75) {
+      coverage >= 0.75 &&
+      solver->common.flops < 2.0e9) {
+    /* The full KLU rebuild this guard selects costs time proportional to the
+       factor work.  Row-permuted fragmented dominant-BTF cases with low work
+       rebuild in well under a second, but high-work statically matched
+       factors (pre2-class, ~1e11 flops) would pay minutes per repeated
+       factor call, so those stay on the checked fast-factor path. */
     return 1;
   }
   return solver->row_perm == NULL &&
