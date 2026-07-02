@@ -50,6 +50,18 @@ PRODUCER_COUNTERS = [
     "compact_window_claim_run_recomputes",
     "compact_window_claim_run_updates",
     "compact_window_claim_run_update_targets",
+    "compact_window_span_owner_reservations",
+    "compact_window_span_owner_rows",
+    "compact_window_span_owner_owned_rows",
+    "compact_window_span_owner_hole_rows",
+    "compact_window_span_owner_deps",
+    "compact_window_span_owner_unique_deps",
+    "compact_window_span_owner_scan_entries",
+    "compact_window_span_owner_cols",
+    "compact_window_span_owner_slots",
+    "compact_window_span_owner_entries",
+    "compact_window_span_owner_oversize_skips",
+    "compact_window_span_owner_oversize_slots",
     "compact_window_claim_run_output_surfaces",
     "compact_window_claim_run_output_states",
     "compact_window_claim_run_output_deps",
@@ -720,6 +732,42 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_claim_run_update_targets = parse_int(
         last_trace.get("compact_window_claim_run_update_targets")
     )
+    compact_window_span_owner_reservations = parse_int(
+        last_trace.get("compact_window_span_owner_reservations")
+    )
+    compact_window_span_owner_rows = parse_int(
+        last_trace.get("compact_window_span_owner_rows")
+    )
+    compact_window_span_owner_owned_rows = parse_int(
+        last_trace.get("compact_window_span_owner_owned_rows")
+    )
+    compact_window_span_owner_hole_rows = parse_int(
+        last_trace.get("compact_window_span_owner_hole_rows")
+    )
+    compact_window_span_owner_deps = parse_int(
+        last_trace.get("compact_window_span_owner_deps")
+    )
+    compact_window_span_owner_unique_deps = parse_int(
+        last_trace.get("compact_window_span_owner_unique_deps")
+    )
+    compact_window_span_owner_scan_entries = parse_int(
+        last_trace.get("compact_window_span_owner_scan_entries")
+    )
+    compact_window_span_owner_cols = parse_int(
+        last_trace.get("compact_window_span_owner_cols")
+    )
+    compact_window_span_owner_slots = parse_int(
+        last_trace.get("compact_window_span_owner_slots")
+    )
+    compact_window_span_owner_entries = parse_int(
+        last_trace.get("compact_window_span_owner_entries")
+    )
+    compact_window_span_owner_oversize_skips = parse_int(
+        last_trace.get("compact_window_span_owner_oversize_skips")
+    )
+    compact_window_span_owner_oversize_slots = parse_int(
+        last_trace.get("compact_window_span_owner_oversize_slots")
+    )
     compact_window_claim_run_output_surfaces = parse_int(
         last_trace.get("compact_window_claim_run_output_surfaces")
     )
@@ -975,6 +1023,30 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_claim_run_updates,
         "compact_window_claim_run_update_targets":
             compact_window_claim_run_update_targets,
+        "compact_window_span_owner_reservations":
+            compact_window_span_owner_reservations,
+        "compact_window_span_owner_rows":
+            compact_window_span_owner_rows,
+        "compact_window_span_owner_owned_rows":
+            compact_window_span_owner_owned_rows,
+        "compact_window_span_owner_hole_rows":
+            compact_window_span_owner_hole_rows,
+        "compact_window_span_owner_deps":
+            compact_window_span_owner_deps,
+        "compact_window_span_owner_unique_deps":
+            compact_window_span_owner_unique_deps,
+        "compact_window_span_owner_scan_entries":
+            compact_window_span_owner_scan_entries,
+        "compact_window_span_owner_cols":
+            compact_window_span_owner_cols,
+        "compact_window_span_owner_slots":
+            compact_window_span_owner_slots,
+        "compact_window_span_owner_entries":
+            compact_window_span_owner_entries,
+        "compact_window_span_owner_oversize_skips":
+            compact_window_span_owner_oversize_skips,
+        "compact_window_span_owner_oversize_slots":
+            compact_window_span_owner_oversize_slots,
         "compact_window_claim_run_output_surfaces":
             compact_window_claim_run_output_surfaces,
         "compact_window_claim_run_output_states":
@@ -1353,6 +1425,38 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_claim_run_update_targets_per_update": ratio(
             compact_window_claim_run_update_targets,
             compact_window_claim_run_updates,
+        ),
+        "compact_window_span_owner_rows_per_reservation": ratio(
+            compact_window_span_owner_rows,
+            compact_window_span_owner_reservations,
+        ),
+        "compact_window_span_owner_owned_share": ratio(
+            compact_window_span_owner_owned_rows,
+            compact_window_span_owner_rows,
+        ),
+        "compact_window_span_owner_holes_per_reservation": ratio(
+            compact_window_span_owner_hole_rows,
+            compact_window_span_owner_reservations,
+        ),
+        "compact_window_span_owner_unique_dep_share": ratio(
+            compact_window_span_owner_unique_deps,
+            compact_window_span_owner_deps,
+        ),
+        "compact_window_span_owner_cols_per_reservation": ratio(
+            compact_window_span_owner_cols,
+            compact_window_span_owner_reservations,
+        ),
+        "compact_window_span_owner_entries_per_scan": ratio(
+            compact_window_span_owner_entries,
+            compact_window_span_owner_scan_entries,
+        ),
+        "compact_window_span_owner_entries_per_slot": ratio(
+            compact_window_span_owner_entries,
+            compact_window_span_owner_slots,
+        ),
+        "compact_window_span_owner_oversize_slots_per_skip": ratio(
+            compact_window_span_owner_oversize_slots,
+            compact_window_span_owner_oversize_skips,
         ),
         "compact_window_claim_run_output_states_per_surface": ratio(
             compact_window_claim_run_output_states,
@@ -1785,6 +1889,23 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_claim_span_output_dense_slots_per_state_col_slot",
         "compact_window_claim_span_output_panel_slots_per_value",
         "compact_window_claim_span_output_dense_slots_per_value",
+        "compact_window_span_owner_reservations",
+        "compact_window_span_owner_rows",
+        "compact_window_span_owner_rows_per_reservation",
+        "compact_window_span_owner_owned_rows",
+        "compact_window_span_owner_hole_rows",
+        "compact_window_span_owner_owned_share",
+        "compact_window_span_owner_holes_per_reservation",
+        "compact_window_span_owner_unique_dep_share",
+        "compact_window_span_owner_scan_entries",
+        "compact_window_span_owner_cols",
+        "compact_window_span_owner_cols_per_reservation",
+        "compact_window_span_owner_slots",
+        "compact_window_span_owner_entries",
+        "compact_window_span_owner_entries_per_scan",
+        "compact_window_span_owner_entries_per_slot",
+        "compact_window_span_owner_oversize_skips",
+        "compact_window_span_owner_oversize_slots_per_skip",
         "compact_window_batches",
         "compact_window_stream_u_entries",
         "compact_window_targets",

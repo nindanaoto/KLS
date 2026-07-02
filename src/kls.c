@@ -126,6 +126,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_ROWS 4u
 #define KLS_ROW_FIRST_COMPACT_SPAN_OWNER_MAX_ROWS \
   KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS
+#define KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_SLOTS 65536u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_DEFAULT_ROWS 64u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_MAX_ROWS \
   KLS_ROW_FIRST_COMPACT_WINDOW_MAX_SLOTS
@@ -48317,6 +48318,28 @@ static UF_long kls_row_pipeline_compact_span_owner_rows_env(void) {
     : (UF_long)parsed;
 }
 
+static UF_long kls_row_pipeline_compact_span_owner_max_slots_env(void) {
+  if (!kls_row_pipeline_compact_span_owner_env_enabled()) {
+    return 0u;
+  }
+  const char *value =
+    getenv("KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SLOTS");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_SLOTS;
+  }
+  if (value[0] == '0' && value[1] == '\0') {
+    return 0u;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return KLS_ROW_FIRST_COMPACT_SPAN_OWNER_DEFAULT_MAX_SLOTS;
+  }
+  const unsigned long long max_uf = (unsigned long long)UF_long_max;
+  return parsed > max_uf ? UF_long_max : (UF_long)parsed;
+}
+
 static UF_long kls_row_pipeline_compact_claim_span_trace_rows_env(void) {
   const char *value = getenv("KLS_ROW_PIPELINE_COMPACT_CLAIM_SPAN_TRACE_ROWS");
   if (value == NULL || value[0] == '\0') {
@@ -86953,6 +86976,18 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_claim_run_recomputes;
   UF_long compact_window_claim_run_updates;
   UF_long compact_window_claim_run_update_targets;
+  UF_long compact_window_span_owner_reservations;
+  UF_long compact_window_span_owner_rows;
+  UF_long compact_window_span_owner_owned_rows;
+  UF_long compact_window_span_owner_hole_rows;
+  UF_long compact_window_span_owner_deps;
+  UF_long compact_window_span_owner_unique_deps;
+  UF_long compact_window_span_owner_scan_entries;
+  UF_long compact_window_span_owner_cols;
+  UF_long compact_window_span_owner_slots;
+  UF_long compact_window_span_owner_entries;
+  UF_long compact_window_span_owner_oversize_skips;
+  UF_long compact_window_span_owner_oversize_slots;
   UF_long compact_window_claim_run_output_surfaces;
   UF_long compact_window_claim_run_output_states;
   UF_long compact_window_claim_run_output_deps;
@@ -87220,6 +87255,42 @@ static void kls_row_first_pipeline_trace_add(
                           source->compact_window_claim_run_updates);
   kls_row_first_stats_add(&target->compact_window_claim_run_update_targets,
                           source->compact_window_claim_run_update_targets);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_reservations,
+    source->compact_window_span_owner_reservations);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_rows,
+    source->compact_window_span_owner_rows);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_owned_rows,
+    source->compact_window_span_owner_owned_rows);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_hole_rows,
+    source->compact_window_span_owner_hole_rows);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_deps,
+    source->compact_window_span_owner_deps);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_unique_deps,
+    source->compact_window_span_owner_unique_deps);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_scan_entries,
+    source->compact_window_span_owner_scan_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_cols,
+    source->compact_window_span_owner_cols);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_slots,
+    source->compact_window_span_owner_slots);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_entries,
+    source->compact_window_span_owner_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_oversize_skips,
+    source->compact_window_span_owner_oversize_skips);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_oversize_slots,
+    source->compact_window_span_owner_oversize_slots);
   kls_row_first_stats_add(
     &target->compact_window_claim_run_output_surfaces,
     source->compact_window_claim_run_output_surfaces);
@@ -91869,6 +91940,7 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long compact_window_max_entries;
   UF_long compact_claim_run_max_rows;
   UF_long compact_span_owner_rows;
+  UF_long compact_span_owner_max_slots;
   UF_long compact_claim_span_trace_rows;
   UF_long owner_surface_window;
   UF_long owner_surface_interval;
@@ -95001,6 +95073,8 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
   if (owner_slots[0] < 0 || owned_count < 2u) {
     return 0u;
   }
+  const UF_long hole_count =
+    span_rows >= owned_count ? span_rows - owned_count : 0u;
 
   const unsigned int dep_generation =
     kls_row_first_pipeline_next_compact_union_generation(shared);
@@ -95010,6 +95084,7 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
 
   UF_long unique_deps = 0u;
   UF_long link_count = 0u;
+  UF_long dep_count = 0u;
   for (UF_long r = 0; r < span_rows; ++r) {
     const int slot = owner_slots[r];
     if (slot < 0) {
@@ -95028,6 +95103,7 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
       if (row_begin > row_end || row_end > shared->u_entries->count) {
         return 0u;
       }
+      dep_count++;
       if (shared->compact_union_mark[dep] != dep_generation) {
         if (!kls_row_first_pipeline_reserve_compact_union_cols(
               shared, unique_deps + 1u) ||
@@ -95101,6 +95177,7 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
     return 0u;
   }
   UF_long unique_cols = 0u;
+  UF_long scan_entries = 0u;
   for (UF_long u = 0; u < unique_deps; ++u) {
     const UF_long dep = shared->compact_union_cols[u];
     const UF_long row_begin = shared->workspace->u_row_ptr[dep];
@@ -95114,6 +95191,9 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
         shared->u_entries, row_begin, row_end,
         shared->compact_replay_min_rows[u]);
     }
+    if (row_end >= scan_begin) {
+      kls_row_first_stats_add(&scan_entries, row_end - scan_begin);
+    }
     for (UF_long up = scan_begin; up < row_end; ++up) {
       const UF_long col = shared->u_entries->col[up];
       if (col <= dep || col >= shared->ctx->nk) {
@@ -95123,6 +95203,21 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
         continue;
       }
       if (shared->compact_union_mark[col] != col_generation) {
+        if (unique_cols + 1u < unique_cols ||
+            span_rows >
+              shared->compact_span_owner_max_slots / (unique_cols + 1u)) {
+          if (trace != NULL) {
+            kls_row_first_stats_add(
+              &trace->compact_window_span_owner_oversize_skips, 1u);
+            kls_row_first_stats_add(
+              &trace->compact_window_span_owner_oversize_slots,
+              unique_cols == UF_long_max ||
+                  span_rows > UF_long_max / (unique_cols + 1u)
+                ? UF_long_max
+                : span_rows * (unique_cols + 1u));
+          }
+          return 0u;
+        }
         if (!kls_row_first_pipeline_worker_reserve_span_owner_cols(
               worker, unique_cols + 1u)) {
           return 0u;
@@ -95139,6 +95234,16 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
     return 0u;
   }
   const UF_long matrix_slots = span_rows * unique_cols;
+  if (shared->compact_span_owner_max_slots == 0u ||
+      matrix_slots > shared->compact_span_owner_max_slots) {
+    if (trace != NULL) {
+      kls_row_first_stats_add(
+        &trace->compact_window_span_owner_oversize_skips, 1u);
+      kls_row_first_stats_add(
+        &trace->compact_window_span_owner_oversize_slots, matrix_slots);
+    }
+    return 0u;
+  }
   const size_t max_object = (size_t)PTRDIFF_MAX;
   if (matrix_slots >
         (UF_long)(max_object /
@@ -95165,6 +95270,7 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
          (size_t)span_rows *
            sizeof(*worker->compact_span_owner_replay_entries));
 
+  UF_long replay_entries = 0u;
   for (UF_long u = 0; u < unique_deps; ++u) {
     const UF_long dep = shared->compact_union_cols[u];
     const UF_long row_begin = shared->workspace->u_row_ptr[dep];
@@ -95215,6 +95321,7 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
         worker->compact_span_owner_mask[matrix_pos] = 1u;
         kls_row_first_stats_add(
           worker->compact_span_owner_replay_entries + row_slot, 1u);
+        kls_row_first_stats_add(&replay_entries, 1u);
       }
     }
   }
@@ -95311,6 +95418,26 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
                             1u);
     kls_row_first_stats_add(&trace->compact_window_claim_run_rows,
                             span_rows);
+    kls_row_first_stats_add(
+      &trace->compact_window_span_owner_reservations, 1u);
+    kls_row_first_stats_add(
+      &trace->compact_window_span_owner_rows, span_rows);
+    kls_row_first_stats_add(
+      &trace->compact_window_span_owner_owned_rows, owned_count);
+    kls_row_first_stats_add(
+      &trace->compact_window_span_owner_hole_rows, hole_count);
+    kls_row_first_stats_add(
+      &trace->compact_window_span_owner_deps, dep_count);
+    kls_row_first_stats_add(
+      &trace->compact_window_span_owner_unique_deps, unique_deps);
+    kls_row_first_stats_add(
+      &trace->compact_window_span_owner_scan_entries, scan_entries);
+    kls_row_first_stats_add(
+      &trace->compact_window_span_owner_cols, unique_cols);
+    kls_row_first_stats_add(
+      &trace->compact_window_span_owner_slots, matrix_slots);
+    kls_row_first_stats_add(
+      &trace->compact_window_span_owner_entries, replay_entries);
   }
   return span_rows;
 }
@@ -98547,6 +98674,18 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_claim_run_recomputes=%" PRIu64
           " compact_window_claim_run_updates=%" PRIu64
           " compact_window_claim_run_update_targets=%" PRIu64
+          " compact_window_span_owner_reservations=%" PRIu64
+          " compact_window_span_owner_rows=%" PRIu64
+          " compact_window_span_owner_owned_rows=%" PRIu64
+          " compact_window_span_owner_hole_rows=%" PRIu64
+          " compact_window_span_owner_deps=%" PRIu64
+          " compact_window_span_owner_unique_deps=%" PRIu64
+          " compact_window_span_owner_scan_entries=%" PRIu64
+          " compact_window_span_owner_cols=%" PRIu64
+          " compact_window_span_owner_slots=%" PRIu64
+          " compact_window_span_owner_entries=%" PRIu64
+          " compact_window_span_owner_oversize_skips=%" PRIu64
+          " compact_window_span_owner_oversize_slots=%" PRIu64
           " compact_window_claim_run_output_surfaces=%" PRIu64
           " compact_window_claim_run_output_states=%" PRIu64
           " compact_window_claim_run_output_deps=%" PRIu64
@@ -98604,6 +98743,18 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_claim_run_recomputes,
           (uint64_t)trace->compact_window_claim_run_updates,
           (uint64_t)trace->compact_window_claim_run_update_targets,
+          (uint64_t)trace->compact_window_span_owner_reservations,
+          (uint64_t)trace->compact_window_span_owner_rows,
+          (uint64_t)trace->compact_window_span_owner_owned_rows,
+          (uint64_t)trace->compact_window_span_owner_hole_rows,
+          (uint64_t)trace->compact_window_span_owner_deps,
+          (uint64_t)trace->compact_window_span_owner_unique_deps,
+          (uint64_t)trace->compact_window_span_owner_scan_entries,
+          (uint64_t)trace->compact_window_span_owner_cols,
+          (uint64_t)trace->compact_window_span_owner_slots,
+          (uint64_t)trace->compact_window_span_owner_entries,
+          (uint64_t)trace->compact_window_span_owner_oversize_skips,
+          (uint64_t)trace->compact_window_span_owner_oversize_slots,
           (uint64_t)trace->compact_window_claim_run_output_surfaces,
           (uint64_t)trace->compact_window_claim_run_output_states,
           (uint64_t)trace->compact_window_claim_run_output_deps,
@@ -99968,6 +100119,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
     kls_row_pipeline_compact_claim_run_max_rows_env();
   shared.compact_span_owner_rows =
     kls_row_pipeline_compact_span_owner_rows_env();
+  shared.compact_span_owner_max_slots =
+    kls_row_pipeline_compact_span_owner_max_slots_env();
   if (shared.compact_claim_run_max_rows >
       (UF_long)shared.compact_window_count) {
     shared.compact_claim_run_max_rows =
@@ -99984,7 +100137,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.compact_span_owner_enabled =
     shared.compact_group_sparse_enabled &&
     shared.compact_window_delay_output_enabled &&
-    shared.compact_span_owner_rows >= 2u;
+    shared.compact_span_owner_rows >= 2u &&
+    shared.compact_span_owner_max_slots > 0u;
   shared.compact_claim_span_trace_rows =
     shared.trace_enabled
       ? kls_row_pipeline_compact_claim_span_trace_rows_env() : 0u;

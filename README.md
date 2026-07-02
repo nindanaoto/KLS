@@ -2416,10 +2416,16 @@ to `0.450s` at 16 rows and `0.384s` at 64 rows in quick 3-repeat probes; 256
 rows was slightly worse at `0.392s`. The same prototype still timed out on
 `pre2` after 45s, so it is retained as experimental paper-aligned substrate,
 not a default policy.
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SLOTS=<slots>` caps the worker-owned
+masked panel (`65536` slots by default) and oversized candidates fall back to
+the existing compact path. Row-pipeline traces now report
+`compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,oversize_skips,oversize_slots}`
+so the owner can be tuned from workspace density instead of a matrix-specific
+rule.
 A five-matrix smoke-manifest A/B against the same compact/delay baseline with
 the conservative 4-row default improved the SPICE-cycle geomean from
-`0.0463s` to `0.0422s` (`1.10x`), with wins on `add20`, `add32`, and
-`bcircuit`, one near-tie on `rajat03`, and one small-case loss on `circuit204`.
+`0.0474s` to `0.0415s` (`1.14x`), with wins over 2% on `add20`, `add32`,
+`bcircuit`, and `circuit204`, and a near-tie on `rajat03`.
 `build/kls_pre2_claim_span64_output_surface_w512_trace45.stderr` again reached
 `589824/629628`, but the span surface covered `318,807` states (`9.78` per
 surface) and cut scan volume to `168,701,660` grouped entries from
