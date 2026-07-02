@@ -26660,6 +26660,29 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     status = build_spral_auction_row_match(
       solver->n, solver->nnz, base_col_ptr, base_row_idx, base_values,
       &row_perm, &matched, &match_row_scale, &match_col_scale);
+    if (status == KLS_OK && 1000u * matched < 995u * solver->n &&
+        missing_diagonal * 2u >= solver->n) {
+      /* Approximate auction matching can leave too many rows unmatched on
+         mostly-missing-diagonal circuit matrices, and an incomplete static
+         match is rejected below.  These matrices are exactly the ones whose
+         plain threshold-pivoting factorization can fail outright from
+         pivoting-induced fill, so escalate to the exact Hungarian matching
+         before giving up; the pre-static candidate size bounds keep the
+         exact-assignment cost acceptable for a one-time analysis step.
+         Matrices whose diagonal is mostly present factor fine without the
+         static match, so an incomplete auction match is left rejected there
+         instead of being completed into an accepted slower trial. */
+      free(row_perm);
+      free(match_row_scale);
+      free(match_col_scale);
+      row_perm = NULL;
+      match_row_scale = NULL;
+      match_col_scale = NULL;
+      matched = 0;
+      status = build_spral_hungarian_row_match_scaling(
+        solver->n, solver->nnz, base_col_ptr, base_row_idx, base_values,
+        &row_perm, &matched, &match_row_scale, &match_col_scale);
+    }
     exact_matching = 0;
     exact_matching_scaling = 0;
     spral_matching = status == KLS_OK;
