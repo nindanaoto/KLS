@@ -2942,6 +2942,18 @@ This keeps the required implementation focused on a production row/panel
 live-workspace owner, not independent sparse compact states with a larger
 window.
 
+A bounded claim-panel replay prototype was rejected and reverted. It tried to
+share delayed-output U-row scans only across sparse-group rows adjacent to the
+claimed row, instead of replaying the whole group. Even at the minimal two-row
+panel, `build/kls_pre2_claim_panel2_delay_w512_trace45.stderr` reached only
+`262144/629628` rows in 45s, versus `589824/629628` for the direct claim replay
+baseline. The default eight-row panel
+`build/kls_pre2_claim_panel_delay_w512_trace45.stderr` reached the same early
+checkpoint. This rules out small claim-adjacent output materialization as the
+missing CKTSO/SubtreeLU mechanism; the next owner needs to share the output
+postfactor work without converting future rows back into independent compact
+state payloads.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

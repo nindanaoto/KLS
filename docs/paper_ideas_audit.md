@@ -15231,3 +15231,21 @@ This is the right claim-local data movement direction, but it does not change
 the remaining diagnosis: the timeout-sized gap still requires sharing or
 owning the output replay scans across rows/panels, not only avoiding the final
 compact-state materialization step.
+
+A bounded claim-panel replay prototype tested the next tempting variant and was
+rejected before retaining code. The prototype replayed delayed output for only
+the claimed sparse-group row plus a small adjacent panel, so it avoided the
+previous whole-group eager replay. Correctness stayed clean under
+`cmake --build build --target kls_bench kls_smoke -j2`, `./build/kls_smoke`,
+the compact sparse delayed-output claim-panel smoke, and `add20` / `bcircuit`
+residual probes (`4.02823841e-16` and `7.87813496e-17`). On `pre2`, however,
+the default eight-row panel trace
+`build/kls_pre2_claim_panel_delay_w512_trace45.stderr` reached only
+`262144/629628` rows in 45s. The minimal two-row panel
+`build/kls_pre2_claim_panel2_delay_w512_trace45.stderr` also reached only
+`262144/629628`, while the direct claim replay baseline
+`build/kls_pre2_direct_claim_replay_sparse_delay_w512_trace45.stderr` reached
+`589824/629628` under the same cap. This rejects bounded claim-adjacent output
+materialization as the missing paper mechanism. The next row/panel owner needs
+to keep shared postfactor/output work in an owner workspace or stream, without
+persisting those output columns back into future independent compact states.
