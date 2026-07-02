@@ -2387,6 +2387,14 @@ above the compact-window slot cap are clipped.
 surface) and cut scan volume to `168,701,660` grouped entries from
 `2,004,785,169` per-state entries (`8.4%`). That is a much better target than
 strict claim runs while still avoiding the full-group materialization trap.
+A same-options span-width recheck after making the trace width runtime
+configurable keeps that direction: `KLS_ROW_PIPELINE_COMPACT_CLAIM_SPAN_TRACE_ROWS=64`
+timed out at `510403/629628` rows with `12.40` states per span surface and a
+`7.54%` grouped-scan ratio, while `256` reached `589824/629628` rows with
+`24.55` states per span surface and a `4.27%` grouped-scan ratio. The
+completion counts are trace-heavy and non-gating, but the structural signal
+points the next owner prototype at a wider local row/panel workspace that still
+stops short of full-group materialization.
 The matching scheduler-only span reservation was tested and rejected before it
 was retained as source: a contiguous 64-position reservation reached only
 `524288/629628` rows on the same 45s `pre2` trace, a 16-position cap regressed

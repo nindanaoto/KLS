@@ -89,6 +89,20 @@ prototype should therefore be a local span/panel owner that can reserve or own
 non-contiguous grouped rows in a short factor-order window, then stream
 postfactor output into that owner without per-future-row materialization.
 
+A same-options span-width recheck after making the span surface runtime
+configurable confirms that the useful paper-shaped owner is wider than the
+original 64-row local window. The `64`-row trace
+`build/kls_pre2_claim_span64_sameopts_w512_trace45.stderr` timed out at
+`510403/629628` rows with `12.40` states per span surface and a `7.54%`
+grouped-scan ratio. The `256`-row trace
+`build/kls_pre2_claim_span256_output_surface_w512_trace45.stderr` reached
+`589824/629628` rows with `24.55` states per span surface and a `4.27%`
+grouped-scan ratio, close to the full grouped surface's `3.50%`. Because these
+are trace-heavy timed runs, the completion difference is not a speed claim; the
+actionable signal is that a wider local row/panel workspace can recover most of
+the full grouped-output sharing without immediately materializing every future
+row state.
+
 The first span-reservation prototype was tested and rejected before commit. A
 contiguous 64-position reservation of those local grouped rows reached only
 `524288/629628` rows on the same 45s `pre2` trace
