@@ -99,6 +99,18 @@ def row_refactor_panel_overstage_entries(row: dict[str, object]) -> float:
     )
 
 
+def btf_step_batch_row_collapse(row: dict[str, object]) -> float:
+    return ratio(
+        float_value(
+            row, "refactor_last_btf_scalar_run_group_state_step_batch_state_rows"
+        ),
+        float_value(
+            row,
+            "refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows",
+        ),
+    )
+
+
 def egraph_scalar_numeric_owner_missing(row: dict[str, object]) -> bool:
     egraph_work = float_value(row, "refactor_dependency_work")
     pipeline_work = float_value(row, "refactor_dependency_pipeline_work")
@@ -282,6 +294,11 @@ def print_concise_report(
         "refactor_last_btf_scalar_run_entries",
         "refactor_btf_scalar_run_group_multi_current_total",
         "refactor_btf_scalar_run_group_reused_entries",
+        "refactor_last_btf_scalar_run_group_state_step_batch_currents",
+        "refactor_last_btf_scalar_run_group_state_step_batch_entries",
+        "refactor_last_btf_scalar_run_group_state_step_batch_state_rows",
+        "refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows",
+        "refactor_last_btf_scalar_run_group_state_step_batch_row_collapse",
         "row_refactor_auto_lower_bound_rejected",
         "n",
         "nblocks",
@@ -329,6 +346,31 @@ def print_concise_report(
                 )
             ),
             str(int_value(cand_row, "refactor_btf_scalar_run_group_reused_entries")),
+            str(
+                int_value(
+                    cand_row,
+                    "refactor_last_btf_scalar_run_group_state_step_batch_currents",
+                )
+            ),
+            str(
+                int_value(
+                    cand_row,
+                    "refactor_last_btf_scalar_run_group_state_step_batch_entries",
+                )
+            ),
+            str(
+                int_value(
+                    cand_row,
+                    "refactor_last_btf_scalar_run_group_state_step_batch_state_rows",
+                )
+            ),
+            str(
+                int_value(
+                    cand_row,
+                    "refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows",
+                )
+            ),
+            fmt_ratio(btf_step_batch_row_collapse(cand_row)),
             str(int_value(cand_row, "row_refactor_auto_lower_bound_rejected")),
             str(int_value(cand_row, "n")),
             str(int_value(cand_row, "nblocks")),
@@ -694,6 +736,9 @@ def main() -> int:
         "refactor_last_btf_scalar_run_group_state_step_batch_steps,"
         "refactor_last_btf_scalar_run_group_state_step_batch_currents,"
         "refactor_last_btf_scalar_run_group_state_step_batch_entries,"
+        "refactor_last_btf_scalar_run_group_state_step_batch_state_rows,"
+        "refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows,"
+        "refactor_last_btf_scalar_run_group_state_step_batch_row_collapse,"
         "refactor_last_btf_scalar_run_group_state_step_window_rounds,"
         "refactor_last_btf_scalar_run_group_state_step_window_currents,"
         "refactor_last_btf_scalar_run_group_state_step_window_entries,"
@@ -924,6 +969,9 @@ def main() -> int:
         "refactor_last_btf_scalar_run_group_state_step_advance_rejects,"
         "refactor_last_btf_scalar_run_group_state_step_batch_currents,"
         "refactor_last_btf_scalar_run_group_state_step_batch_entries,"
+        "refactor_last_btf_scalar_run_group_state_step_batch_state_rows,"
+        "refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows,"
+        "refactor_last_btf_scalar_run_group_state_step_batch_row_collapse,"
         "refactor_last_btf_scalar_run_group_state_step_window_rounds,"
         "refactor_last_btf_scalar_run_group_state_step_window_currents,"
         "refactor_last_btf_scalar_run_group_state_step_window_entries,"
@@ -1285,6 +1333,9 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_batch_steps')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_batch_currents')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_batch_entries')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_batch_state_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows')},"
+            f"{fmt_ratio(btf_step_batch_row_collapse(cand_row))},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_window_rounds')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_window_currents')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_window_entries')},"
@@ -1528,6 +1579,9 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_advance_rejects')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_batch_currents')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_batch_entries')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_batch_state_rows')},"
+            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows')},"
+            f"{fmt_ratio(btf_step_batch_row_collapse(cand_row))},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_window_rounds')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_window_currents')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_group_state_step_window_entries')},"

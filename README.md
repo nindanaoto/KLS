@@ -2120,7 +2120,10 @@ python3 scripts/decompose_solver_gap.py --candidate build/kls_suite.jsonl --cand
 
 Add `--concise` for the usual solved-by-reference triage view: it keeps the
 cycle ratio, dominant phase, paper-gap signal, path names, and the core EGraph
-pipeline work counters while omitting the full diagnostic surface.
+pipeline work counters while omitting the full diagnostic surface. When
+producer-step advance-batch stats are present, it also keeps the duplicate
+retained-state row count, exact unique row count, and row-collapse ratio so the
+grouped-current owner opportunity remains visible in the short report.
 
 To summarize the CKTSO-style tail-restart opportunity fields across a KLS JSONL
 run, use:
