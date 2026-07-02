@@ -160,6 +160,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_SNODE_MIN_BATCH 3
 #define KLS_SNODE_MAX_BATCH 24
 #define KLS_SNODE_TAIL_CHUNK 32
+#define KLS_SNODE_MIN_BATCH_WORK 192
 #define KLS_METIS_NDP_MIN_LEAF_ROWS 200u
 #define KLS_METIS_NDP_TARGET_DIVISOR 1000u
 #define KLS_METIS_NDP_SUBTREE_THRESHOLD_MIN_ROWS 200000u
@@ -19952,6 +19953,16 @@ static UF_long kls_snode_batch_consume(
   if (t < KLS_SNODE_MIN_BATCH) {
     return 0;
   }
+  UF_long *tli = NULL;
+  double *tlx = NULL;
+  UF_long tlen = 0;
+  kls_klu_get_pointer(lu, (UF_long *)lip, (UF_long *)llen, j + t - 1u, &tli,
+                      &tlx, &tlen);
+  if (t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
+    /* Short shared tails lose to the scalar path; only pay the panel
+       staging when the batched update amortizes it. */
+    return 0;
+  }
   double xs[KLS_SNODE_MAX_BATCH];
   const double *lx_arr[KLS_SNODE_MAX_BATCH];
   for (UF_long i = 0; i < t; ++i) {
@@ -19972,11 +19983,6 @@ static UF_long kls_snode_batch_consume(
       xs[i + 1u + r0] -= lxi[r0] * u;
     }
   }
-  UF_long *tli = NULL;
-  double *tlx = NULL;
-  UF_long tlen = 0;
-  kls_klu_get_pointer(lu, (UF_long *)lip, (UF_long *)llen, j + t - 1u, &tli,
-                      &tlx, &tlen);
   for (UF_long p0 = 0; p0 < tlen; p0 += KLS_SNODE_TAIL_CHUNK) {
     const UF_long pc = tlen - p0 < KLS_SNODE_TAIL_CHUNK
                          ? tlen - p0
@@ -68106,7 +68112,9 @@ static UF_long kls_snode_batch_consume_cached(
   }
   const UF_long *tli = l_indices[k1 + j + t - 1u];
   const UF_long tlen = llen_local[j + t - 1u];
-  if (tli == NULL) {
+  if (tli == NULL || t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
+    /* Short shared tails lose to the 32-bit-index scalar path; only pay the
+       panel staging when the batched update amortizes it. */
     return 0;
   }
   double xs[KLS_SNODE_MAX_BATCH];
