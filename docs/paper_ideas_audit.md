@@ -75,6 +75,19 @@ prototype should therefore be a local span/panel owner that can reserve or own
 non-contiguous grouped rows in a short factor-order window, then stream
 postfactor output into that owner without per-future-row materialization.
 
+The first span-reservation prototype was tested and rejected before commit. A
+contiguous 64-position reservation of those local grouped rows reached only
+`524288/629628` rows on the same 45s `pre2` trace
+(`build/kls_pre2_claim_span_reserve_w512_trace45.stderr`), and a 16-position cap
+regressed further to `393216/629628`
+(`build/kls_pre2_claim_span16_reserve_w512_trace45.stderr`). A non-contiguous
+reservation bitmap prototype then stalled before the first progress checkpoint
+(`build/kls_pre2_claim_span_reserve_sparse_w512_trace45.stderr`). This rejects a
+scheduler-only span reservation layered on scalar/compact states. The paper gap
+is more specific: the span/panel owner has to own the numeric workspace and
+stream postfactor output directly into that workspace, not merely reserve future
+pipeline positions.
+
 The row-pipeline pivot tail now preserves the supernode substrate after dynamic
 pivots by advancing a validity floor rather than discarding `supernode_start`
 and `supernode_end`. This is the direct SubtreeLU/CKTSO-style repair for the

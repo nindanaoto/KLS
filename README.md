@@ -2372,6 +2372,13 @@ next 64 factor positions as
 surface) and cut scan volume to `168,701,660` grouped entries from
 `2,004,785,169` per-state entries (`8.4%`). That is a much better target than
 strict claim runs while still avoiding the full-group materialization trap.
+The matching scheduler-only span reservation was tested and rejected before it
+was retained as source: a contiguous 64-position reservation reached only
+`524288/629628` rows on the same 45s `pre2` trace, a 16-position cap regressed
+to `393216/629628`, and a non-contiguous reservation bitmap stalled before the
+first progress checkpoint. This keeps the local span result as a target for a
+real row/panel owner, not as permission to reserve future scalar pipeline
+positions without owning the numeric workspace and postfactor output stream.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_REPLAY=1` enables the matching numeric
 grouped replay experiment, but it remains off by default: a 45s `pre2` trial
 cut delayed replay scan entries while inflating delayed output materialization
