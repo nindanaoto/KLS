@@ -89,6 +89,17 @@ prototype should therefore be a local span/panel owner that can reserve or own
 non-contiguous grouped rows in a short factor-order window, then stream
 postfactor output into that owner without per-future-row materialization.
 
+The span probe now also records the numeric owner shape needed by that
+prototype. The counters
+`compact_window_claim_span_output_{value_entries,state_col_slots,unique_cols,panel_slots,dense_slots,max_states,max_unique_cols}`
+separate delayed-output additions from distinct touched row/column cells,
+triangular row/panel cells, and full rectangular dense storage. On the focused
+`bcircuit` trace `build/kls_bcirc_shape_trace.stderr`, a 16-row span recorded
+`15974574` delayed-output additions, `1393652` distinct state/column cells,
+`1839073` triangular panel slots, and `2183001` full dense slots. That supports
+a sparse or masked local span/panel workspace as the next paper-aligned
+implementation target; it does not support another scheduler-only reservation.
+
 A same-options span-width recheck after making the span surface runtime
 configurable confirms that the useful paper-shaped owner is wider than the
 original 64-row local window. The `64`-row trace

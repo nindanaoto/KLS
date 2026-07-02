@@ -2379,9 +2379,21 @@ future compact states.
 The follow-up local-span probe records the unreserved grouped rows within the
 next 64 factor positions as
 `compact_window_claim_span_output_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`.
+It also records the numeric owner shape as
+`compact_window_claim_span_output_{value_entries,state_col_slots,unique_cols,panel_slots,dense_slots,max_states,max_unique_cols}`:
+`value_entries` counts delayed-output additions, `state_col_slots` counts
+distinct touched row/column cells, `unique_cols` counts the local panel column
+surface, `panel_slots` counts the triangular row/panel cells with
+`col >= row`, and `dense_slots` counts the full rectangular
+`states * unique_cols` workspace.
 `KLS_ROW_PIPELINE_COMPACT_CLAIM_SPAN_TRACE_ROWS=<rows>` changes that
 trace-only local span width; `0` disables the span-output surface, and values
 above the compact-window slot cap are clipped.
+On a short `bcircuit` trace with a 16-row span, the owner-shape counters
+recorded `15,974,574` delayed-output additions, `1,393,652` distinct
+state/column cells, `1,839,073` triangular panel slots, and `2,183,001`
+rectangular dense slots. That makes the next direct prototype a sparse or
+masked local span/panel workspace, not just a scheduler reservation.
 `build/kls_pre2_claim_span64_output_surface_w512_trace45.stderr` again reached
 `589824/629628`, but the span surface covered `318,807` states (`9.78` per
 surface) and cut scan volume to `168,701,660` grouped entries from

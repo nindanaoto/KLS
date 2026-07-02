@@ -64,6 +64,13 @@ PRODUCER_COUNTERS = [
     "compact_window_claim_span_output_duplicate_deps",
     "compact_window_claim_span_output_scan_entries",
     "compact_window_claim_span_output_group_scan_entries",
+    "compact_window_claim_span_output_value_entries",
+    "compact_window_claim_span_output_state_col_slots",
+    "compact_window_claim_span_output_unique_cols",
+    "compact_window_claim_span_output_panel_slots",
+    "compact_window_claim_span_output_dense_slots",
+    "compact_window_claim_span_output_max_states",
+    "compact_window_claim_span_output_max_unique_cols",
     "compact_window_delayed_output_skips",
     "compact_window_delayed_output_replays",
     "compact_window_delayed_output_deps",
@@ -203,6 +210,13 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_compact_window_claim_span_output_duplicate_deps = 0
     long_compact_window_claim_span_output_scan_entries = 0
     long_compact_window_claim_span_output_group_scan_entries = 0
+    long_compact_window_claim_span_output_value_entries = 0
+    long_compact_window_claim_span_output_state_col_slots = 0
+    long_compact_window_claim_span_output_unique_cols = 0
+    long_compact_window_claim_span_output_panel_slots = 0
+    long_compact_window_claim_span_output_dense_slots = 0
+    long_compact_window_claim_span_output_max_states = 0
+    long_compact_window_claim_span_output_max_unique_cols = 0
     long_compact_window_delayed_output_skips = 0
     long_compact_window_delayed_output_replays = 0
     long_compact_window_delayed_output_deps = 0
@@ -412,6 +426,31 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             )
             long_compact_window_claim_span_output_group_scan_entries += parse_int(
                 row.get("compact_window_claim_span_output_group_scan_entries")
+            )
+            long_compact_window_claim_span_output_value_entries += parse_int(
+                row.get("compact_window_claim_span_output_value_entries")
+            )
+            long_compact_window_claim_span_output_state_col_slots += parse_int(
+                row.get("compact_window_claim_span_output_state_col_slots")
+            )
+            long_compact_window_claim_span_output_unique_cols += parse_int(
+                row.get("compact_window_claim_span_output_unique_cols")
+            )
+            long_compact_window_claim_span_output_panel_slots += parse_int(
+                row.get("compact_window_claim_span_output_panel_slots")
+            )
+            long_compact_window_claim_span_output_dense_slots += parse_int(
+                row.get("compact_window_claim_span_output_dense_slots")
+            )
+            long_compact_window_claim_span_output_max_states = max(
+                long_compact_window_claim_span_output_max_states,
+                parse_int(row.get("compact_window_claim_span_output_max_states")),
+            )
+            long_compact_window_claim_span_output_max_unique_cols = max(
+                long_compact_window_claim_span_output_max_unique_cols,
+                parse_int(
+                    row.get("compact_window_claim_span_output_max_unique_cols")
+                ),
             )
             long_compact_window_delayed_output_skips += parse_int(
                 row.get("compact_window_delayed_output_skips")
@@ -723,6 +762,27 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_claim_span_output_group_scan_entries = parse_int(
         last_trace.get("compact_window_claim_span_output_group_scan_entries")
     )
+    compact_window_claim_span_output_value_entries = parse_int(
+        last_trace.get("compact_window_claim_span_output_value_entries")
+    )
+    compact_window_claim_span_output_state_col_slots = parse_int(
+        last_trace.get("compact_window_claim_span_output_state_col_slots")
+    )
+    compact_window_claim_span_output_unique_cols = parse_int(
+        last_trace.get("compact_window_claim_span_output_unique_cols")
+    )
+    compact_window_claim_span_output_panel_slots = parse_int(
+        last_trace.get("compact_window_claim_span_output_panel_slots")
+    )
+    compact_window_claim_span_output_dense_slots = parse_int(
+        last_trace.get("compact_window_claim_span_output_dense_slots")
+    )
+    compact_window_claim_span_output_max_states = parse_int(
+        last_trace.get("compact_window_claim_span_output_max_states")
+    )
+    compact_window_claim_span_output_max_unique_cols = parse_int(
+        last_trace.get("compact_window_claim_span_output_max_unique_cols")
+    )
     compact_window_delayed_output_skips = parse_int(
         last_trace.get("compact_window_delayed_output_skips")
     )
@@ -943,6 +1003,20 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_claim_span_output_scan_entries,
         "compact_window_claim_span_output_group_scan_entries":
             compact_window_claim_span_output_group_scan_entries,
+        "compact_window_claim_span_output_value_entries":
+            compact_window_claim_span_output_value_entries,
+        "compact_window_claim_span_output_state_col_slots":
+            compact_window_claim_span_output_state_col_slots,
+        "compact_window_claim_span_output_unique_cols":
+            compact_window_claim_span_output_unique_cols,
+        "compact_window_claim_span_output_panel_slots":
+            compact_window_claim_span_output_panel_slots,
+        "compact_window_claim_span_output_dense_slots":
+            compact_window_claim_span_output_dense_slots,
+        "compact_window_claim_span_output_max_states":
+            compact_window_claim_span_output_max_states,
+        "compact_window_claim_span_output_max_unique_cols":
+            compact_window_claim_span_output_max_unique_cols,
         "compact_window_delayed_output_skips":
             compact_window_delayed_output_skips,
         "compact_window_delayed_output_replays":
@@ -1102,6 +1176,20 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_window_claim_span_output_scan_entries,
         "long_compact_window_claim_span_output_group_scan_entries":
             long_compact_window_claim_span_output_group_scan_entries,
+        "long_compact_window_claim_span_output_value_entries":
+            long_compact_window_claim_span_output_value_entries,
+        "long_compact_window_claim_span_output_state_col_slots":
+            long_compact_window_claim_span_output_state_col_slots,
+        "long_compact_window_claim_span_output_unique_cols":
+            long_compact_window_claim_span_output_unique_cols,
+        "long_compact_window_claim_span_output_panel_slots":
+            long_compact_window_claim_span_output_panel_slots,
+        "long_compact_window_claim_span_output_dense_slots":
+            long_compact_window_claim_span_output_dense_slots,
+        "long_compact_window_claim_span_output_max_states":
+            long_compact_window_claim_span_output_max_states,
+        "long_compact_window_claim_span_output_max_unique_cols":
+            long_compact_window_claim_span_output_max_unique_cols,
         "long_compact_window_delayed_output_skips":
             long_compact_window_delayed_output_skips,
         "long_compact_window_delayed_output_replays":
@@ -1289,6 +1377,38 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_claim_span_output_group_scan_ratio": ratio(
             compact_window_claim_span_output_group_scan_entries,
             compact_window_claim_span_output_scan_entries,
+        ),
+        "compact_window_claim_span_output_values_per_surface": ratio(
+            compact_window_claim_span_output_value_entries,
+            compact_window_claim_span_output_surfaces,
+        ),
+        "compact_window_claim_span_output_state_col_slots_per_surface": ratio(
+            compact_window_claim_span_output_state_col_slots,
+            compact_window_claim_span_output_surfaces,
+        ),
+        "compact_window_claim_span_output_unique_cols_per_surface": ratio(
+            compact_window_claim_span_output_unique_cols,
+            compact_window_claim_span_output_surfaces,
+        ),
+        "compact_window_claim_span_output_values_per_state_col_slot": ratio(
+            compact_window_claim_span_output_value_entries,
+            compact_window_claim_span_output_state_col_slots,
+        ),
+        "compact_window_claim_span_output_panel_slots_per_state_col_slot": ratio(
+            compact_window_claim_span_output_panel_slots,
+            compact_window_claim_span_output_state_col_slots,
+        ),
+        "compact_window_claim_span_output_dense_slots_per_state_col_slot": ratio(
+            compact_window_claim_span_output_dense_slots,
+            compact_window_claim_span_output_state_col_slots,
+        ),
+        "compact_window_claim_span_output_panel_slots_per_value": ratio(
+            compact_window_claim_span_output_panel_slots,
+            compact_window_claim_span_output_value_entries,
+        ),
+        "compact_window_claim_span_output_dense_slots_per_value": ratio(
+            compact_window_claim_span_output_dense_slots,
+            compact_window_claim_span_output_value_entries,
         ),
         "compact_window_delayed_output_replay_entries_per_skip": ratio(
             compact_window_delayed_output_entries,
@@ -1641,6 +1761,30 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "compact_window_delayed_group_replay_scan_entries",
         "compact_window_delayed_group_replay_group_scan_entries",
         "compact_window_delayed_group_replay_group_scan_ratio",
+        "compact_window_claim_span_output_surfaces",
+        "compact_window_claim_span_output_states",
+        "compact_window_claim_span_output_states_per_surface",
+        "compact_window_claim_span_output_deps",
+        "compact_window_claim_span_output_unique_deps",
+        "compact_window_claim_span_output_unique_dep_share",
+        "compact_window_claim_span_output_scan_entries",
+        "compact_window_claim_span_output_group_scan_entries",
+        "compact_window_claim_span_output_group_scan_ratio",
+        "compact_window_claim_span_output_value_entries",
+        "compact_window_claim_span_output_state_col_slots",
+        "compact_window_claim_span_output_unique_cols",
+        "compact_window_claim_span_output_panel_slots",
+        "compact_window_claim_span_output_dense_slots",
+        "compact_window_claim_span_output_max_states",
+        "compact_window_claim_span_output_max_unique_cols",
+        "compact_window_claim_span_output_values_per_surface",
+        "compact_window_claim_span_output_state_col_slots_per_surface",
+        "compact_window_claim_span_output_unique_cols_per_surface",
+        "compact_window_claim_span_output_values_per_state_col_slot",
+        "compact_window_claim_span_output_panel_slots_per_state_col_slot",
+        "compact_window_claim_span_output_dense_slots_per_state_col_slot",
+        "compact_window_claim_span_output_panel_slots_per_value",
+        "compact_window_claim_span_output_dense_slots_per_value",
         "compact_window_batches",
         "compact_window_stream_u_entries",
         "compact_window_targets",
