@@ -2416,6 +2416,10 @@ to `0.450s` at 16 rows and `0.384s` at 64 rows in quick 3-repeat probes; 256
 rows was slightly worse at `0.392s`. The same prototype still timed out on
 `pre2` after 45s, so it is retained as experimental paper-aligned substrate,
 not a default policy.
+A five-matrix smoke-manifest A/B against the same compact/delay baseline with
+the conservative 4-row default improved the SPICE-cycle geomean from
+`0.0463s` to `0.0422s` (`1.10x`), with wins on `add20`, `add32`, and
+`bcircuit`, one near-tie on `rajat03`, and one small-case loss on `circuit204`.
 `build/kls_pre2_claim_span64_output_surface_w512_trace45.stderr` again reached
 `589824/629628`, but the span surface covered `318,807` states (`9.78` per
 surface) and cut scan volume to `168,701,660` grouped entries from

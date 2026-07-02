@@ -123,6 +123,12 @@ rows so the full smoke suite still completes when the prototype is enabled. The
 first `pre2` factor-only probe with a 64-row span still timed out after 45s, so
 the prototype is evidence-backed substrate rather than a completed CKTSO-gap
 closer.
+A five-matrix smoke-manifest A/B with the conservative 4-row default showed
+that the source-retained prototype is already useful on small public cases:
+the compact/delay baseline geomean was `0.0463s`, while span owner default was
+`0.0422s` (`1.10x` faster). It won on `add20`, `add32`, and `bcircuit`, tied
+`rajat03`, and lost the tiny `circuit204` case. That keeps the next work on
+span-owner policy and overhead control rather than reverting the mechanism.
 
 A same-options span-width recheck after making the span surface runtime
 configurable confirms that the useful paper-shaped owner is wider than the
