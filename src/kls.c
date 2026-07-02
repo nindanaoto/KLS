@@ -48894,6 +48894,9 @@ static int kls_pipeline_refactor_fast_factor_repair_is_risky(
       solver->options.threads <= 1) {
     return 0;
   }
+  if (solver->common.noffdiag == 0u) {
+    return 0;
+  }
   return solver->refactor_pipeline_work >=
          KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_SHARE *
            solver->refactor_dependency_work;

@@ -10106,6 +10106,20 @@ keeps lower-work cases such as `onetone2` outside the new guard. The guard is
 recorded internally as `KLS_FAST_FACTOR_FAIL_PIPELINE_REFACTOR_GUARD` when
 stats are read immediately after `kls_factor`.
 
+The guard now has a no-offdiagonal-pivot exception. The repair-risk concern is
+about pivoted pipeline factors; when the retained numeric object has
+`common.noffdiag == 0`, KLS again attempts the checked EGraph fast refactor and
+falls back to KLU if the checked update cannot be accepted. Focused factor-only
+probes after the change restored `kls_fast_refactor` on `ASIC_100ks`,
+`ASIC_320k`, and `ASIC_320ks` with clean residuals, reducing repeated
+`factor_seconds_avg` from roughly `0.21s`, `0.43s`, and `0.34s` to `0.047s`,
+`0.117s`, and `0.094s`, respectively. A broader
+`bench/suitesparse_cktso_gap_manifest.txt` run completed all `41` rows with no
+failures (`build/kls_goal_nooffdiag_fastfactor_gap5_t4_r1_ref3_timeout120.jsonl`).
+This closes a real repeated-factor regression, but the CKTSO SPICE-cycle gap
+remains dominated by refactor time because the suite metric uses
+`analysis + initial factor + solve + 99 * (refactor + solve)`.
+
 Validation for the high-work pipeline guard:
 
 - `cmake --build build -j4` completed.

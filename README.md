@@ -1510,6 +1510,11 @@ kernel. Benchmark JSON reports
 `refactor_last_egraph_algorithm5_prefactor_deps`,
 `refactor_egraph_algorithm5_prefactor_column_count`, and
 `refactor_egraph_algorithm5_prefactor_dep_count`.
+The separate repeated-factor repair guard still blocks high-work pipeline
+factors when pivot repair would be risky, but no longer blocks numerics whose
+retained factor has zero off-diagonal pivots. Those no-pivot cases reuse the
+checked EGraph fast refactor and still fall back to full KLU factorization if
+the pivot check fails.
 The experimental row pipeline preserves the CKTSO-style wide cluster prefix
 selected by the `2 * threads` width rule, then consumes the remaining narrow
 tail through a bounded successor-ready queue when explicit predecessor counts
