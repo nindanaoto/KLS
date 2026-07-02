@@ -26065,9 +26065,20 @@ static int static_match_prefers_unscaled(UF_long n,
                                          UF_long missing_diagonal) {
   /* Majority-missing medium circuit blocks can lose sparsity from matching
      equilibration; keep the static row permutation but leave values unscaled. */
-  return n >= 80000u && n <= 150000u && nnz <= 1500000u &&
-         missing_diagonal * 2u >= n &&
-         weak_diagonal * 2u >= n;
+  if (n >= 80000u && n <= 150000u && nnz <= 1500000u &&
+      missing_diagonal * 2u >= n &&
+      weak_diagonal * 2u >= n) {
+    return 1;
+  }
+  /* Large mostly-missing-diagonal matrices: matching-based scaling flattens
+     the column magnitude contrast, and element growth along the deep factor
+     chains then makes default threshold pivoting abandon the matched
+     diagonal so often that the factor structure explodes (the KLU factor
+     can fail outright).  Unscaled values keep the matched diagonal dominant
+     inside its column during the threshold test, so the trial factorization
+     stays near the symbolic fill estimate with a bounded number of
+     stabilizing off-diagonal pivots. */
+  return n > 150000u && missing_diagonal * 2u >= n;
 }
 
 static int reactive_static_match_setup_is_unlikely_to_pay(
