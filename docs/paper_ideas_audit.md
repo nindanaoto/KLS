@@ -50,6 +50,19 @@ the clear gap closer; the paper-aligned missing piece is still a grouped
 trailing/output workspace that shares producer-row scans while applying values
 directly to active row owners.
 
+The owned claim-run output surface now measures the missing postfactor sharing
+without materializing any future-row output. In
+`build/kls_pre2_claim_run_output_surface_w512_trace45.stderr`, the same
+configuration reached the familiar `589824/629628` checkpoint and recorded
+`19037` owned surfaces over `69741` states. Strict runs had useful but limited
+sharing: `965697` of `2901084` delayed-output dependencies were unique
+(`33.3%`), and a grouped scan would read `86861893` entries instead of
+`324714822` per-state entries (`26.8%`). That is far weaker than the wider
+sparse-group output surface in the same trace (`3.7%` grouped-scan ratio), so
+the next direct implementation target should be a wider local row/panel owner
+or span owner. A strict adjacent run workspace is unlikely to be the whole
+CKTSO/SubtreeLU postfactor mechanism.
+
 The row-pipeline pivot tail now preserves the supernode substrate after dynamic
 pivots by advancing a validity floor rather than discarding `supernode_start`
 and `supernode_end`. This is the direct SubtreeLU/CKTSO-style repair for the

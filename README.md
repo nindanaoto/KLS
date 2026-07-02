@@ -2345,15 +2345,25 @@ claim cursor reaches the first row, keeps the later rows in worker-owned compact
 scratch, and consumes those reserved positions before taking new atomic work.
 `KLS_ROW_PIPELINE_COMPACT_CLAIM_RUN_MAX_ROWS=<rows>` caps the run length
 (`8` by default, clipped at `128`). Traces report
-`compact_window_claim_run_{reservations,rows,recomputes,updates,update_targets}`.
+`compact_window_claim_run_{reservations,rows,recomputes,updates,update_targets}`
+and the non-materializing owned-run delayed-output surface as
+`compact_window_claim_run_output_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`.
 On `pre2` with the same 512-row compact window, the first claim-run trace
 reserved `19,031` runs and `69,727` rows (`3.66` rows per reservation) but
 performed no owned-run producer updates and still timed out at `589824/629628`
 rows. A follow-up ready-root catch-up pass performed `91,546` owned-run updates
 over `255,424` targets, but it also stopped at `589824/629628` rows with
-`407,796,098` delayed-output scan entries. This keeps the claim-run path
-diagnostic and off by default: adjacent-row ownership alone is not the missing
-CKTSO/SubtreeLU trailing-output workspace.
+`407,796,098` delayed-output scan entries. The owned-run output-surface trace,
+`build/kls_pre2_claim_run_output_surface_w512_trace45.stderr`, reached the same
+checkpoint and measured `19,037` owned surfaces over `69,741` states. Strict
+runs had real sharing (`965,697` unique dependencies out of `2,901,084`,
+`33.3%`) and would cut scan volume to `86,861,893` grouped entries from
+`324,714,822` per-state entries (`26.8%`), but this is much weaker than the
+wider sparse-group surface (`3.7%` grouped-scan ratio in the same trace). This
+keeps the claim-run path diagnostic and off by default: adjacent-row ownership
+alone is not the missing CKTSO/SubtreeLU trailing-output workspace; the next
+owner needs a wider local row/panel surface without storing output back into
+future compact states.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_REPLAY=1` enables the matching numeric
 grouped replay experiment, but it remains off by default: a 45s `pre2` trial
 cut delayed replay scan entries while inflating delayed output materialization
