@@ -25493,9 +25493,13 @@ static int build_matching_dual_scaling(UF_long n,
 
   double *matched_log = (double *)malloc((size_t)n * sizeof(*matched_log));
   double *col_potential = (double *)calloc((size_t)n, sizeof(*col_potential));
-  if (matched_log == NULL || col_potential == NULL) {
+  const UF_long nnz_total = base_col_ptr[n];
+  double *entry_log =
+    (double *)malloc((size_t)nnz_total * sizeof(*entry_log));
+  if (matched_log == NULL || col_potential == NULL || entry_log == NULL) {
     free(matched_log);
     free(col_potential);
+    free(entry_log);
     return 0;
   }
 
@@ -25503,9 +25507,19 @@ static int build_matching_dual_scaling(UF_long n,
     if (diag[i] <= 0.0 || !isfinite(diag[i])) {
       free(matched_log);
       free(col_potential);
+      free(entry_log);
       return 0;
     }
     matched_log[i] = log(diag[i]);
+  }
+  /* The refinement rounds below revisit every entry; hoisting the entry
+     logarithms out of the rounds removes the dominant libm cost of the
+     medium static-match setup. */
+  for (UF_long p = 0; p < nnz_total; ++p) {
+    const double abs_value = fabs(base_values[p]);
+    entry_log[p] = abs_value > 0.0 && isfinite(abs_value)
+                     ? log(abs_value)
+                     : (double)NAN;
   }
 
   const int max_rounds = n >= 200000 ? 32 : 64;
@@ -25522,13 +25536,13 @@ static int build_matching_dual_scaling(UF_long n,
         if (row >= n || row_perm[row] >= n) {
           continue;
         }
-        const double abs_value = fabs(base_values[p]);
-        if (abs_value <= 0.0 || !isfinite(abs_value)) {
+        const double log_value = entry_log[p];
+        if (!isfinite(log_value)) {
           continue;
         }
         const UF_long matched_col = row_perm[row];
         const double lower_bound =
-          col_potential[matched_col] + log(abs_value) - matched_log[matched_col];
+          col_potential[matched_col] + log_value - matched_log[matched_col];
         if (lower_bound > col_potential[col] + update_tol) {
           col_potential[col] = lower_bound;
           changes++;
@@ -25550,6 +25564,7 @@ static int build_matching_dual_scaling(UF_long n,
         max_potential - min_potential > 120.0) {
       free(matched_log);
       free(col_potential);
+      free(entry_log);
       return 0;
     }
     if (min_potential != 0.0 && isfinite(min_potential)) {
@@ -25570,12 +25585,12 @@ static int build_matching_dual_scaling(UF_long n,
       if (row >= n || row_perm[row] >= n) {
         continue;
       }
-      const double abs_value = fabs(base_values[p]);
-      if (abs_value <= 0.0 || !isfinite(abs_value)) {
+      const double log_value = entry_log[p];
+      if (!isfinite(log_value)) {
         continue;
       }
       const UF_long matched_col = row_perm[row];
-      const double excess = log(abs_value) - matched_log[matched_col] -
+      const double excess = log_value - matched_log[matched_col] -
                             col_potential[col] + col_potential[matched_col];
       if (excess > max_excess) {
         max_excess = excess;
@@ -25585,6 +25600,7 @@ static int build_matching_dual_scaling(UF_long n,
   if (!converged && max_excess > log(4.0)) {
     free(matched_log);
     free(col_potential);
+    free(entry_log);
     return 0;
   }
 
@@ -25605,6 +25621,7 @@ static int build_matching_dual_scaling(UF_long n,
         fabs(col_log_scale) > max_log_scale) {
       free(matched_log);
       free(col_potential);
+      free(entry_log);
       return 0;
     }
     row_scale[i] = clamp_matching_scale(exp(row_log_scale));
@@ -25613,6 +25630,7 @@ static int build_matching_dual_scaling(UF_long n,
 
   free(matched_log);
   free(col_potential);
+  free(entry_log);
   return 1;
 }
 
