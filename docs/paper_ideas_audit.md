@@ -15654,3 +15654,28 @@ output-side entries. Exact component-only pivots therefore make `pre2` less
 stable for the current row-first executor; the missing paper-scale mechanism is
 still the grouped row/supernode live workspace for postfactor/output streaming,
 not a stricter pivot scope by itself.
+
+A fresh July 2, 2026 focused refactor A/B keeps the current default direction
+unchanged. On the first five `bench/suitesparse_cktso_gap_manifest.txt` rows,
+the same-binary default measured `1.526621274782767s` SPICE-cycle geomean in
+`build/kls_ab_default_gap5_t4_r1_ref3_timeout120.jsonl`. Disabling the
+automatic CKTSO Algorithm 5 prefactor semantic regressed to
+`1.572181256453604s`
+(`build/kls_ab_pref_off_gap5_t4_r1_ref3_timeout120.jsonl`), so the lazy
+prefactor should stay enabled under its current structural auto gate. The old
+BTF scalar-run executor remains mixed: it won `ASIC_100ks` (`6.1591s` versus
+`7.5214s`) but lost `ASIC_320ks`, `ASIC_320k`, and `rajat03`, for a worse
+`1.609162676708381s` geomean in
+`build/kls_ab_scalar_run_exec_gap5_t4_r1_ref3_timeout120.jsonl`. There is no
+paper-level structural discriminator strong enough to promote that executor by
+default; the remaining CKTSO gap is still the grouped multi-current numeric
+owner, not a scalar-run threshold.
+
+The comparison tooling now mirrors the manifest filters already used by
+`scripts/decompose_solver_gap.py`. `scripts/compare_bench_runs.py` accepts
+`--include-manifest` and `--exclude-manifest`, so CKTSO-relative summaries can
+score only the active gap manifest while excluding
+`bench/suitesparse_stress_timeout_manifest.txt`. This keeps shared-hard rows
+such as `Hamrle3`, where CKTSO itself times out under the current cap, in the
+stress/scalability bucket instead of letting them distort finite-reference
+geomeans.

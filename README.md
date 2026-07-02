@@ -2087,10 +2087,13 @@ example, `build/kls_paper_large_recon.jsonl` records completed matrices and
 `scripts/compare_bench_runs.py` reads those sidecars when present so large-case
 comparisons show both timing ratios and missing rows caused by failures. By
 default it still computes geomeans only over successful rows common to both
-runs. Add `--include-failures --failure-seconds SECONDS` when a hard-suite
-comparison should score failed or missing rows with an explicit cycle-time
-penalty; using a process timeout value as the penalty is only a lower bound for
-SPICE-cycle comparisons.
+runs. Use `--include-manifest` and `--exclude-manifest` to keep the scored set
+aligned with the intended tuning slice, for example excluding
+`bench/suitesparse_stress_timeout_manifest.txt` from CKTSO-relative geomeans.
+Add `--include-failures --failure-seconds SECONDS` when a hard-suite comparison
+should score failed or missing rows with an explicit cycle-time penalty; using a
+process timeout value as the penalty is only a lower bound for SPICE-cycle
+comparisons.
 
 The suite metric is:
 
@@ -2142,8 +2145,8 @@ pipeline work counters while omitting the full diagnostic surface. When
 producer-step advance-batch stats are present, it also keeps the duplicate
 retained-state row count, exact unique row count, and row-collapse ratio so the
 grouped-current owner opportunity remains visible in the short report. Use
-`--include-manifest bench/suitesparse_cktso_gap_manifest.txt` to rank only the
-current CKTSO-gap focus set, and
+`--include-manifest bench/suitesparse_cktso_gap_manifest.txt` with either
+comparison script to rank only the current CKTSO-gap focus set, and
 `--exclude-manifest bench/suitesparse_stress_timeout_manifest.txt` to keep
 shared-hard stress rows such as `Hamrle3` out of CKTSO-relative tuning reports.
 Manifest entries may be bare SuiteSparse names or `.mtx` basenames.

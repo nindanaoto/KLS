@@ -36,6 +36,46 @@ def load_rows(path: pathlib.Path) -> dict[str, dict[str, object]]:
     return rows
 
 
+def matrix_name_variants(name: str) -> set[str]:
+    path_name = pathlib.Path(name).name
+    variants = {path_name}
+    stem = pathlib.Path(path_name).stem
+    if stem:
+        variants.add(stem)
+    return variants
+
+
+def load_manifest_names(path: pathlib.Path) -> set[str]:
+    names: set[str] = set()
+    with path.open("r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            token = stripped.split()[0]
+            variants = matrix_name_variants(token)
+            if not variants:
+                raise ValueError(f"{path}:{line_no}: empty matrix name")
+            names.update(variants)
+    return names
+
+
+def matches_manifest_name(name: str, manifest_names: set[str]) -> bool:
+    return bool(matrix_name_variants(name) & manifest_names)
+
+
+def filter_matrix_names(
+    names: set[str],
+    include_names: set[str],
+    exclude_names: set[str],
+) -> set[str]:
+    if include_names:
+        names = {name for name in names if matches_manifest_name(name, include_names)}
+    if exclude_names:
+        names = {name for name in names if not matches_manifest_name(name, exclude_names)}
+    return names
+
+
 def load_failures(path: pathlib.Path) -> dict[str, dict[str, object]]:
     failure_path = path.with_suffix(".failures")
     rows: dict[str, dict[str, object]] = {}
@@ -115,6 +155,26 @@ def main() -> int:
     parser.add_argument("--reference-name", default="reference")
     parser.add_argument("--max-rows", type=int, default=12)
     parser.add_argument(
+        "--include-manifest",
+        action="append",
+        type=pathlib.Path,
+        default=[],
+        help=(
+            "only compare matrices listed in this manifest; may be repeated. "
+            "Bare SuiteSparse names and .mtx basenames both match."
+        ),
+    )
+    parser.add_argument(
+        "--exclude-manifest",
+        action="append",
+        type=pathlib.Path,
+        default=[],
+        help=(
+            "drop matrices listed in this manifest; may be repeated. "
+            "Bare SuiteSparse names and .mtx basenames both match."
+        ),
+    )
+    parser.add_argument(
         "--include-failures",
         action="store_true",
         help=(
@@ -139,15 +199,22 @@ def main() -> int:
     reference = load_rows(args.reference)
     candidate_failures = load_failures(args.candidate)
     reference_failures = load_failures(args.reference)
+    include_names: set[str] = set()
+    for manifest in args.include_manifest:
+        include_names.update(load_manifest_names(manifest))
+    exclude_names: set[str] = set()
+    for manifest in args.exclude_manifest:
+        exclude_names.update(load_manifest_names(manifest))
     if args.include_failures:
-        common = sorted(
+        common_set = (
             set(candidate)
             | set(reference)
             | set(candidate_failures)
             | set(reference_failures)
         )
     else:
-        common = sorted(set(candidate) & set(reference))
+        common_set = set(candidate) & set(reference)
+    common = sorted(filter_matrix_names(common_set, include_names, exclude_names))
     if not common:
         print_failures(args.candidate_name, candidate_failures)
         print_failures(args.reference_name, reference_failures)
@@ -228,8 +295,14 @@ def main() -> int:
             f"{args.reference_name}={r:.6g}s/{r_status}"
         )
 
-    missing_candidate = sorted(set(reference) - set(candidate))
-    missing_reference = sorted(set(candidate) - set(reference))
+    visible_candidate = filter_matrix_names(
+        set(candidate), include_names, exclude_names
+    )
+    visible_reference = filter_matrix_names(
+        set(reference), include_names, exclude_names
+    )
+    missing_candidate = sorted(visible_reference - visible_candidate)
+    missing_reference = sorted(visible_candidate - visible_reference)
     if missing_candidate:
         print(f"\nMissing from {args.candidate_name}: {', '.join(missing_candidate)}")
     if missing_reference:
