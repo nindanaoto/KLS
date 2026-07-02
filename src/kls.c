@@ -26761,6 +26761,47 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   if (status != KLS_OK) {
     goto done;
   }
+#if defined(KLS_HAVE_METIS) && defined(KLS_HAVE_SPRAL_SCALING)
+  if (use_large_spral_match && trial_ordering != KLS_ORDERING_METIS &&
+      trial_score >= 8.0e7) {
+    /* CKTSO-style ordering selection: compare a nested-dissection candidate
+       by estimated fill before the expensive numeric trial.  Statically
+       matched circuit matrices often favor the METIS+CAMD ordering by a
+       large factor-work margin, and factoring once with the estimate winner
+       avoids a second full trial factorization.  The estimated-fill floor
+       keeps cheap trials from paying the serial nested-dissection analysis
+       when the minimum-degree trial factor is already fast. */
+    kls_options metis_options = trial_options;
+    metis_options.ordering = KLS_ORDERING_METIS;
+    trilinos_klu_l_symbolic *metis_symbolic = NULL;
+    trilinos_klu_l_common metis_common;
+    kls_separator_analysis metis_separator;
+    memset(&metis_separator, 0, sizeof(metis_separator));
+    if (analyze_with_ordering(solver->n, trial_col_ptr, trial_row_idx,
+                              &metis_options, KLS_ORDERING_METIS,
+                              &metis_symbolic, &metis_common,
+                              &metis_separator) == KLS_OK) {
+      const double metis_score = symbolic_score(metis_symbolic);
+      if (kls_trace_pre_static_enabled()) {
+        fprintf(stderr,
+                "KLS pre-static: ordering scores base=%.3e metis=%.3e\n",
+                trial_score, metis_score);
+      }
+      if (metis_score < DBL_MAX && metis_score < trial_score) {
+        trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
+        kls_separator_analysis_clear(&trial_separator);
+        trial_symbolic = metis_symbolic;
+        trial_common = metis_common;
+        trial_ordering = KLS_ORDERING_METIS;
+        trial_score = metis_score;
+        kls_separator_analysis_move(&trial_separator, &metis_separator);
+      } else {
+        trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+        kls_separator_analysis_clear(&metis_separator);
+      }
+    }
+  }
+#endif
   trial_common.scale = choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
                                                       trial_row_idx,
                                                       &trial_options,
