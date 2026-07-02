@@ -34,6 +34,22 @@ non-materializing claim-run executor can probably reserve useful short runs with
 an atomic `next_pos` handoff; the hard part remains the numeric kernel that
 keeps those rows in worker-owned scratch while sharing delayed-output scans.
 
+The first opt-in claim-run owner confirms that distinction. With
+`KLS_ENABLE_ROW_PIPELINE_COMPACT_CLAIM_RUN=1`, KLS reserves strict adjacent
+sparse-group rows into a worker queue and consumes those positions before taking
+new atomic work. The initial `pre2` trace
+`build/kls_pre2_claim_run_w512_trace45.stderr` reserved `19031` runs and
+`69727` rows (`3.66` rows per reservation), with a `16.95%` recompute fallback,
+but it performed no owned-run producer updates and still timed out at
+`589824/629628`. Adding ready-root catch-up for the queued compact states in
+`build/kls_pre2_claim_run_ready_w512_trace45.stderr` performed `91546`
+owned-run updates over `255424` targets, but the checkpoint remained
+`589824/629628` and delayed-output scan work stayed high
+(`407796098` scan entries). This rejects adjacent claim-run ownership alone as
+the clear gap closer; the paper-aligned missing piece is still a grouped
+trailing/output workspace that shares producer-row scans while applying values
+directly to active row owners.
+
 The row-pipeline pivot tail now preserves the supernode substrate after dynamic
 pivots by advancing a validity floor rather than discarding `supernode_start`
 and `supernode_end`. This is the direct SubtreeLU/CKTSO-style repair for the

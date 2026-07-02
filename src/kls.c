@@ -121,6 +121,8 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_COMPACT_WINDOW_MAX_SLOTS 2048u
 #define KLS_ROW_FIRST_COMPACT_WINDOW_DEFAULT_SLOTS 64u
 #define KLS_ROW_FIRST_COMPACT_WINDOW_DEFAULT_MAX_ENTRIES 65536u
+#define KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS 128u
+#define KLS_ROW_FIRST_COMPACT_CLAIM_RUN_DEFAULT_ROWS 8u
 #define KLS_ROW_FIRST_COMPACT_DENSE_UNION_MAX_SPARSE_MULT 2u
 #define KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_WINDOW 4096u
 #define KLS_ROW_FIRST_OWNER_SURFACE_MAX_WINDOW 65536u
@@ -48160,6 +48162,13 @@ static int kls_row_pipeline_compact_group_replay_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_compact_claim_run_env_enabled(void) {
+  const char *value =
+    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_CLAIM_RUN");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_row_pipeline_owner_surface_trace_env_enabled(void) {
   const char *value =
     getenv("KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE");
@@ -48249,6 +48258,28 @@ static UF_long kls_row_pipeline_compact_window_max_entries_env(void) {
   }
   const unsigned long long max_uf = (unsigned long long)UF_long_max;
   return parsed > max_uf ? UF_long_max : (UF_long)parsed;
+}
+
+static UF_long kls_row_pipeline_compact_claim_run_max_rows_env(void) {
+  if (!kls_row_pipeline_compact_claim_run_env_enabled()) {
+    return 0u;
+  }
+  const char *value = getenv("KLS_ROW_PIPELINE_COMPACT_CLAIM_RUN_MAX_ROWS");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_ROW_FIRST_COMPACT_CLAIM_RUN_DEFAULT_ROWS;
+  }
+  if (value[0] == '0' && value[1] == '\0') {
+    return 0u;
+  }
+  errno = 0;
+  char *end = NULL;
+  const unsigned long long parsed = strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
+    return KLS_ROW_FIRST_COMPACT_CLAIM_RUN_DEFAULT_ROWS;
+  }
+  return parsed > KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS
+    ? KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS
+    : (UF_long)parsed;
 }
 
 static UF_long kls_row_pipeline_pivot_lookahead_slots_env(void) {
@@ -86863,6 +86894,11 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_claim_group_run_stealable;
   UF_long compact_window_claim_group_run_max_stealable;
   UF_long compact_window_claim_group_run_unreserved_near64;
+  UF_long compact_window_claim_run_reservations;
+  UF_long compact_window_claim_run_rows;
+  UF_long compact_window_claim_run_recomputes;
+  UF_long compact_window_claim_run_updates;
+  UF_long compact_window_claim_run_update_targets;
   UF_long compact_window_delayed_output_skips;
   UF_long compact_window_delayed_output_replays;
   UF_long compact_window_delayed_output_deps;
@@ -87099,6 +87135,16 @@ static void kls_row_first_pipeline_trace_add(
   kls_row_first_stats_add(
     &target->compact_window_claim_group_run_unreserved_near64,
     source->compact_window_claim_group_run_unreserved_near64);
+  kls_row_first_stats_add(&target->compact_window_claim_run_reservations,
+                          source->compact_window_claim_run_reservations);
+  kls_row_first_stats_add(&target->compact_window_claim_run_rows,
+                          source->compact_window_claim_run_rows);
+  kls_row_first_stats_add(&target->compact_window_claim_run_recomputes,
+                          source->compact_window_claim_run_recomputes);
+  kls_row_first_stats_add(&target->compact_window_claim_run_updates,
+                          source->compact_window_claim_run_updates);
+  kls_row_first_stats_add(&target->compact_window_claim_run_update_targets,
+                          source->compact_window_claim_run_update_targets);
   kls_row_first_stats_add(&target->compact_window_delayed_output_skips,
                           source->compact_window_delayed_output_skips);
   kls_row_first_stats_add(&target->compact_window_delayed_output_replays,
@@ -91683,6 +91729,7 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long long_row_trace_threshold;
   UF_long lookahead_max_inputs;
   UF_long compact_window_max_entries;
+  UF_long compact_claim_run_max_rows;
   UF_long owner_surface_window;
   UF_long owner_surface_interval;
   int trace_enabled;
@@ -91693,6 +91740,7 @@ typedef struct kls_row_first_pipeline_shared {
   int compact_window_delay_output_enabled;
   int owner_surface_trace_enabled;
   int compact_group_active;
+  int compact_claim_run_enabled;
   int compact_group_sparse_enabled;
   int compact_group_replay_enabled;
   int compact_group_sparse;
@@ -91718,6 +91766,10 @@ struct kls_row_first_pipeline_worker {
   kls_row_first_partial_row state_storage;
   UF_long lookahead_pos;
   UF_long lookahead_row;
+  int compact_claim_run_slots[KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS];
+  UF_long compact_claim_run_pos[KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS];
+  UF_long compact_claim_run_count;
+  UF_long compact_claim_run_next;
   int lookahead_active;
   int lookahead_claimed;
   int external_update_active;
@@ -91775,6 +91827,38 @@ static void kls_row_first_pipeline_collect_worker_storage_trace(
   worker->u_reserve_growths_reported = worker->u_entries.reserve_growths;
   worker->u_reserve_copied_reported =
     worker->u_entries.reserve_copied_entries;
+}
+
+static void kls_row_first_pipeline_worker_reset_claim_run(
+  kls_row_first_pipeline_worker *worker) {
+  if (worker == NULL) {
+    return;
+  }
+  worker->compact_claim_run_count = 0u;
+  worker->compact_claim_run_next = 0u;
+}
+
+static int kls_row_first_pipeline_worker_take_claim_run_pos(
+  kls_row_first_pipeline_worker *worker,
+  UF_long *pos_out,
+  int *slot_out) {
+  if (pos_out != NULL) {
+    *pos_out = KLS_KLU_EMPTY;
+  }
+  if (slot_out != NULL) {
+    *slot_out = -1;
+  }
+  if (worker == NULL || pos_out == NULL || slot_out == NULL ||
+      worker->compact_claim_run_next >= worker->compact_claim_run_count ||
+      worker->compact_claim_run_count >
+        KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS) {
+    kls_row_first_pipeline_worker_reset_claim_run(worker);
+    return 0;
+  }
+  const UF_long at = worker->compact_claim_run_next++;
+  *pos_out = worker->compact_claim_run_pos[at];
+  *slot_out = worker->compact_claim_run_slots[at];
+  return 1;
 }
 
 static UF_long kls_row_first_input_first_unready_dep(
@@ -93921,6 +94005,155 @@ static void kls_row_first_pipeline_trace_claim_group_run_surface(
   kls_row_first_stats_add(
     &trace->compact_window_claim_group_run_unreserved_near64,
     unreserved_near64);
+}
+
+static int kls_row_first_pipeline_claim_run_contains_slot(
+  const kls_row_first_pipeline_worker *worker,
+  UF_long run_count,
+  int slot) {
+  if (worker == NULL || slot < 0 ||
+      run_count > KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS) {
+    return 0;
+  }
+  for (UF_long r = 0; r < run_count; ++r) {
+    if (worker->compact_claim_run_slots[r] == slot) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static UF_long kls_row_first_pipeline_prepare_sparse_claim_run(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_worker *worker,
+  kls_row_first_pipeline_trace *trace,
+  UF_long wanted_pos) {
+  if (shared == NULL || worker == NULL ||
+      !shared->compact_claim_run_enabled ||
+      !shared->compact_group_active ||
+      !shared->compact_group_sparse ||
+      shared->compact_group_target_count < 2u ||
+      shared->compact_claim_run_max_rows < 2u ||
+      shared->compact_group_slots == NULL ||
+      shared->compact_pos_slots == NULL ||
+      shared->compact_window_states == NULL ||
+      shared->ctx == NULL || wanted_pos >= shared->ctx->nk) {
+    return 0u;
+  }
+
+  UF_long run_limit = shared->compact_claim_run_max_rows;
+  if (run_limit > KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS) {
+    run_limit = KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS;
+  }
+  if (run_limit > shared->compact_group_target_count) {
+    run_limit = shared->compact_group_target_count;
+  }
+
+  UF_long run_count = 0u;
+  while (run_count < run_limit) {
+    const UF_long pos = wanted_pos + run_count;
+    if (pos < wanted_pos || pos >= shared->ctx->nk) {
+      break;
+    }
+    const int slot = shared->compact_pos_slots[pos];
+    if (slot < 0 || slot >= shared->compact_window_count) {
+      break;
+    }
+    const kls_row_first_compact_window_state *state =
+      shared->compact_window_states + slot;
+    if (state == NULL || !state->active || !state->grouped ||
+        state->pos != pos) {
+      break;
+    }
+    worker->compact_claim_run_slots[run_count] = slot;
+    worker->compact_claim_run_pos[run_count] = pos;
+    run_count++;
+  }
+  if (run_count < 2u) {
+    return 0u;
+  }
+
+  if (wanted_pos + run_count < wanted_pos) {
+    return 0u;
+  }
+  unsigned long expected = (unsigned long)(wanted_pos + 1u);
+  const unsigned long desired = (unsigned long)(wanted_pos + run_count);
+  if (!atomic_compare_exchange_strong_explicit(
+        &shared->next_pos, &expected, desired,
+        memory_order_acq_rel, memory_order_acquire)) {
+    return 0u;
+  }
+
+  const UF_long old_count = shared->compact_group_target_count;
+  UF_long dst = 0u;
+  for (UF_long g = 0; g < old_count; ++g) {
+    const int slot = shared->compact_group_slots[g];
+    if (slot < 0 || slot >= shared->compact_window_count) {
+      shared->compact_group_slots[g] = -1;
+      continue;
+    }
+    kls_row_first_compact_window_state *state =
+      shared->compact_window_states + slot;
+    if (kls_row_first_pipeline_claim_run_contains_slot(
+          worker, run_count, slot)) {
+      state->grouped = 0;
+      state->group_member_count = 0u;
+      state->bucket_dep = KLS_KLU_EMPTY;
+      state->bucket_next = -1;
+      state->bucket_linked = 0;
+      shared->compact_group_slots[g] = -1;
+      continue;
+    }
+    shared->compact_group_slots[dst++] = slot;
+  }
+  for (UF_long g = dst; g < old_count; ++g) {
+    shared->compact_group_slots[g] = -1;
+  }
+
+  if (dst < 2u) {
+    for (UF_long g = 0; g < dst; ++g) {
+      const int slot = shared->compact_group_slots[g];
+      shared->compact_group_slots[g] = -1;
+      if (slot < 0 || slot >= shared->compact_window_count) {
+        continue;
+      }
+      kls_row_first_compact_window_state *state =
+        shared->compact_window_states + slot;
+      if (!state->active || !state->grouped) {
+        continue;
+      }
+      state->grouped = 0;
+      state->group_member_count = 0u;
+      state->bucket_dep = KLS_KLU_EMPTY;
+      state->bucket_next = -1;
+      state->bucket_linked = 0;
+      if (!kls_row_first_pipeline_register_compact_window_state(
+            shared, state) &&
+          trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+      }
+    }
+    shared->compact_group_active = 0;
+    shared->compact_group_target_count = 0u;
+    shared->compact_group_union_count = 0u;
+    shared->compact_group_stride = 0u;
+    shared->compact_group_dep = KLS_KLU_EMPTY;
+    shared->compact_group_sparse = 0;
+  } else {
+    shared->compact_group_target_count = dst;
+    shared->compact_group_union_count = 0u;
+    shared->compact_group_stride = 0u;
+  }
+
+  worker->compact_claim_run_count = run_count;
+  worker->compact_claim_run_next = 1u;
+  if (trace != NULL) {
+    kls_row_first_stats_add(&trace->compact_window_claim_run_reservations,
+                            1u);
+    kls_row_first_stats_add(&trace->compact_window_claim_run_rows,
+                            run_count);
+  }
+  return run_count;
 }
 
 static void kls_row_first_pipeline_clear_compact_group(
@@ -96343,6 +96576,217 @@ static void kls_row_first_pipeline_update_compact_window_producer(
   }
 }
 
+static UF_long kls_row_first_pipeline_update_claim_run_producer(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_worker *worker,
+  kls_row_first_pipeline_trace *trace,
+  UF_long dep) {
+  if (shared == NULL || worker == NULL ||
+      worker->compact_claim_run_next >= worker->compact_claim_run_count ||
+      worker->compact_claim_run_count >
+        KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS ||
+      shared->compact_window_states == NULL ||
+      shared->compact_batch_targets == NULL ||
+      shared->compact_batch_target_capacity <= 0 ||
+      shared->ctx == NULL || shared->workspace == NULL ||
+      shared->workspace->u_row_ptr == NULL ||
+      shared->workspace->u_row_end == NULL ||
+      shared->u_entries == NULL || shared->udiag_values == NULL ||
+      dep >= shared->ctx->nk) {
+    return 0u;
+  }
+  const double dep_pivot = shared->udiag_values[dep];
+  if (dep_pivot == 0.0) {
+    return 0u;
+  }
+  const UF_long row_begin = shared->workspace->u_row_ptr[dep];
+  const UF_long row_end = shared->workspace->u_row_end[dep];
+  if (row_begin > row_end || row_end > shared->u_entries->count) {
+    return 0u;
+  }
+  for (UF_long up = row_begin; up < row_end; ++up) {
+    const UF_long col = shared->u_entries->col[up];
+    if (col <= dep || col >= shared->ctx->nk) {
+      return 0u;
+    }
+  }
+
+  UF_long target_count = 0u;
+  for (UF_long r = worker->compact_claim_run_next;
+       r < worker->compact_claim_run_count; ++r) {
+    const int slot = worker->compact_claim_run_slots[r];
+    if (slot < 0 || slot >= shared->compact_window_count ||
+        target_count >= (UF_long)shared->compact_batch_target_capacity) {
+      continue;
+    }
+    kls_row_first_compact_window_state *state =
+      shared->compact_window_states + slot;
+    if (state == NULL || !state->active || state->grouped ||
+        state->pos != worker->compact_claim_run_pos[r] ||
+        state->row <= dep || state->heap_size == 0u ||
+        state->heap[0] != dep) {
+      continue;
+    }
+    UF_long dep_pos = KLS_KLU_EMPTY;
+    if (!kls_row_first_compact_window_value_pos(state, dep, &dep_pos) ||
+        dep_pos >= state->pattern_count ||
+        !kls_row_first_compact_window_l_reserve(
+          state, state->l_count + 1u)) {
+      kls_row_first_pipeline_clear_compact_window_state(shared, state);
+      if (trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+      }
+      continue;
+    }
+    const UF_long popped =
+      kls_row_first_heap_pop(state->heap, &state->heap_size);
+    if (popped != dep) {
+      kls_row_first_pipeline_clear_compact_window_state(shared, state);
+      if (trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+      }
+      continue;
+    }
+    const double lij = state->values[dep_pos] / dep_pivot;
+    if (!kls_row_first_compact_window_l_append(state, dep, lij)) {
+      kls_row_first_pipeline_clear_compact_window_state(shared, state);
+      if (trace != NULL) {
+        kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+      }
+      continue;
+    }
+    state->values[dep_pos] = 0.0;
+    shared->compact_batch_targets[target_count].state = state;
+    shared->compact_batch_targets[target_count].lij = lij;
+    target_count++;
+    kls_row_first_stats_add(&state->trace_current.scalar_dep_calls, 1u);
+    kls_row_first_stats_add(&state->trace_current.scalar_dep_l_entries, 1u);
+    kls_row_first_stats_add(&state->trace_current.scalar_dep_u_entries,
+                            row_end - row_begin);
+  }
+  if (target_count == 0u) {
+    return 0u;
+  }
+
+  for (UF_long up = row_begin; up < row_end; ++up) {
+    const UF_long col = shared->u_entries->col[up];
+    const double uvalue = shared->u_entries->value[up];
+    for (UF_long t = 0; t < target_count; ++t) {
+      kls_row_first_compact_batch_target *target =
+        shared->compact_batch_targets + t;
+      kls_row_first_compact_window_state *state = target->state;
+      if (state == NULL || !state->active || state->grouped) {
+        target->state = NULL;
+        continue;
+      }
+      if (shared->compact_window_delay_output_enabled &&
+          col >= state->row) {
+        kls_row_first_stats_add(
+          &state->trace_current.compact_window_delayed_output_skips, 1u);
+        continue;
+      }
+      UF_long value_pos = KLS_KLU_EMPTY;
+      if (!kls_row_first_compact_window_prepare_update_pos(
+            state, state->row, col, shared->compact_window_max_entries,
+            &value_pos, NULL) ||
+          value_pos >= state->pattern_count ||
+          state->values == NULL) {
+        kls_row_first_pipeline_clear_compact_window_state(shared, state);
+        target->state = NULL;
+        if (trace != NULL) {
+          kls_row_first_stats_add(&trace->compact_window_overflows, 1u);
+        }
+        continue;
+      }
+      state->values[value_pos] -= target->lij * uvalue;
+      if (col < state->row) {
+        kls_row_first_stats_add(
+          &state->trace_current.scalar_u_internal_entries, 1u);
+      } else {
+        kls_row_first_stats_add(
+          &state->trace_current.scalar_u_output_entries, 1u);
+      }
+    }
+  }
+  for (UF_long t = 0; t < target_count; ++t) {
+    shared->compact_batch_targets[t].state = NULL;
+  }
+  if (trace != NULL) {
+    kls_row_first_stats_add(&trace->compact_window_claim_run_updates, 1u);
+    kls_row_first_stats_add(&trace->compact_window_claim_run_update_targets,
+                            target_count);
+  }
+  return target_count;
+}
+
+static UF_long kls_row_first_pipeline_claim_run_ready_root(
+  const kls_row_first_pipeline_shared *shared,
+  const kls_row_first_pipeline_worker *worker) {
+  if (shared == NULL || worker == NULL ||
+      worker->compact_claim_run_next >= worker->compact_claim_run_count ||
+      worker->compact_claim_run_count >
+        KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS ||
+      shared->compact_window_states == NULL || shared->ctx == NULL ||
+      shared->row_done == NULL) {
+    return KLS_KLU_EMPTY;
+  }
+  UF_long best = KLS_KLU_EMPTY;
+  for (UF_long r = worker->compact_claim_run_next;
+       r < worker->compact_claim_run_count; ++r) {
+    const int slot = worker->compact_claim_run_slots[r];
+    if (slot < 0 || slot >= shared->compact_window_count) {
+      continue;
+    }
+    const kls_row_first_compact_window_state *state =
+      shared->compact_window_states + slot;
+    if (state == NULL || !state->active || state->grouped ||
+        state->pos != worker->compact_claim_run_pos[r] ||
+        state->row >= shared->ctx->nk ||
+        state->heap_size == 0u) {
+      continue;
+    }
+    const UF_long dep = state->heap[0];
+    if (dep >= state->row || dep >= shared->ctx->nk ||
+        !kls_row_first_dependency_ready(shared->row_done,
+                                        shared->active_rank,
+                                        shared->completed_pos, dep)) {
+      continue;
+    }
+    if (best == KLS_KLU_EMPTY || dep < best) {
+      best = dep;
+    }
+  }
+  return best;
+}
+
+static void kls_row_first_pipeline_update_claim_run_ready(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_worker *worker,
+  kls_row_first_pipeline_trace *trace) {
+  if (shared == NULL || worker == NULL ||
+      worker->compact_claim_run_next >= worker->compact_claim_run_count) {
+    return;
+  }
+  UF_long guard = 0u;
+  const UF_long guard_limit =
+    worker->compact_claim_run_count <=
+      KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS
+      ? worker->compact_claim_run_count *
+          KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS
+      : KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS;
+  while (guard++ < guard_limit) {
+    const UF_long dep =
+      kls_row_first_pipeline_claim_run_ready_root(shared, worker);
+    if (dep == KLS_KLU_EMPTY) {
+      break;
+    }
+    if (kls_row_first_pipeline_update_claim_run_producer(
+          shared, worker, trace, dep) == 0u) {
+      break;
+    }
+  }
+}
+
 static int kls_row_first_pipeline_fill_lookahead(
   kls_row_first_pipeline_shared *shared) {
   if (shared == NULL || shared->lookahead_states == NULL ||
@@ -96545,135 +96989,31 @@ static void kls_row_first_pipeline_clear_claim_workspace(
   kls_row_first_partial_row_clear(&cleanup_state, workspace);
 }
 
-static int kls_row_first_pipeline_try_claim_compact_window(
+static int kls_row_first_pipeline_claim_compact_window_slot(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_pipeline_worker *worker,
-  UF_long wanted_pos,
+  int best_slot,
+  UF_long expected_pos,
   UF_long *pos_out,
   UF_long *row_out,
   UF_long *order_epoch_out,
   kls_row_first_partial_row *state_out) {
   if (shared == NULL || worker == NULL || pos_out == NULL ||
       row_out == NULL || order_epoch_out == NULL || state_out == NULL ||
-      !shared->compact_window_execute_enabled ||
-      shared->compact_window_states == NULL ||
-      shared->ctx == NULL || worker->workspace.x == NULL ||
-      worker->workspace.mark == NULL ||
+      shared->compact_window_states == NULL || shared->ctx == NULL ||
+      best_slot < 0 || best_slot >= shared->compact_window_count ||
+      worker->workspace.x == NULL || worker->workspace.mark == NULL ||
       worker->workspace.pattern == NULL ||
       worker->workspace.dep_heap == NULL) {
     return 0;
   }
-  if (shared->trace_enabled) {
-    kls_row_first_stats_add(
-      &shared->trace_committed.compact_window_claim_attempts, 1u);
-  }
-  int best_slot = -1;
-  if (shared->compact_group_active &&
-      shared->compact_group_slots != NULL) {
-    for (UF_long g = 0; g < shared->compact_group_target_count; ++g) {
-      const int slot = shared->compact_group_slots[g];
-      if (slot < 0 || slot >= shared->compact_window_count) {
-        continue;
-      }
-      const kls_row_first_compact_window_state *state =
-        shared->compact_window_states + slot;
-      if (state->active && state->grouped &&
-          state->pos == wanted_pos) {
-        kls_row_first_pipeline_trace_claim_group_run_surface(
-          shared, wanted_pos);
-        kls_row_first_pipeline_trace_delayed_group_surface(
-          shared,
-          shared->trace_enabled ? &shared->trace_committed : NULL,
-          KLS_KLU_EMPTY, 0, 1);
-        if (shared->compact_group_sparse) {
-          kls_row_first_compact_window_state *detached =
-            kls_row_first_pipeline_detach_sparse_group_row(
-              shared, shared->trace_enabled ? &shared->trace_committed : NULL,
-              g);
-          if (detached != NULL) {
-            best_slot = detached->bucket_slot;
-            if (shared->trace_enabled) {
-              kls_row_first_stats_add(
-                &shared->trace_committed.compact_window_claim_group_detaches,
-                1u);
-            }
-          } else {
-            if (shared->trace_enabled) {
-              kls_row_first_stats_add(
-                &shared->trace_committed.compact_window_claim_group_scatters,
-                1u);
-            }
-            (void)kls_row_first_pipeline_scatter_compact_group(
-              shared, NULL);
-          }
-        } else {
-          if (shared->trace_enabled) {
-            kls_row_first_stats_add(
-              &shared->trace_committed.compact_window_claim_group_scatters,
-              1u);
-          }
-          (void)kls_row_first_pipeline_scatter_compact_group(
-            shared, NULL);
-        }
-        break;
-      }
-    }
-  }
-  if (best_slot < 0 && shared->compact_pos_slots != NULL &&
-      wanted_pos < shared->ctx->nk) {
-    best_slot = shared->compact_pos_slots[wanted_pos];
-    if (best_slot < 0 || best_slot >= shared->compact_window_count) {
-      best_slot = -1;
-    } else {
-      kls_row_first_compact_window_state *state =
-        shared->compact_window_states + best_slot;
-      if (!state->active || state->grouped ||
-          state->pos != wanted_pos ||
-          state->pos < shared->completed_pos) {
-        if (state->active && state->pos < shared->completed_pos) {
-          if (shared->trace_enabled) {
-            kls_row_first_stats_add(
-              &shared->trace_committed.compact_window_claim_stale_clears,
-              1u);
-          }
-          kls_row_first_pipeline_clear_compact_window_state(shared, state);
-        } else {
-          shared->compact_pos_slots[wanted_pos] = -1;
-        }
-        best_slot = -1;
-      }
-    }
-  } else if (best_slot < 0) {
-    for (int slot = 0; slot < shared->compact_window_count; ++slot) {
-      kls_row_first_compact_window_state *state =
-        shared->compact_window_states + slot;
-      if (!state->active || state->grouped) {
-        continue;
-      }
-      if (state->pos < shared->completed_pos) {
-        if (shared->trace_enabled) {
-          kls_row_first_stats_add(
-            &shared->trace_committed.compact_window_claim_stale_clears,
-            1u);
-        }
-        kls_row_first_pipeline_clear_compact_window_state(shared, state);
-        continue;
-      }
-      if (state->pos == wanted_pos) {
-        best_slot = slot;
-        break;
-      }
-    }
-  }
-  if (best_slot < 0) {
-    if (shared->trace_enabled) {
-      kls_row_first_stats_add(
-        &shared->trace_committed.compact_window_claim_misses, 1u);
-    }
-    return 0;
-  }
+
   kls_row_first_compact_window_state *state =
     shared->compact_window_states + best_slot;
+  if (!state->active || state->grouped ||
+      (expected_pos != KLS_KLU_EMPTY && state->pos != expected_pos)) {
+    return 0;
+  }
   kls_row_first_pipeline_unlink_compact_window_state(shared, state);
   if (state->row >= shared->ctx->nk ||
       state->generation == 0u ||
@@ -96780,6 +97120,153 @@ static int kls_row_first_pipeline_try_claim_compact_window(
   return 1;
 }
 
+static int kls_row_first_pipeline_try_claim_compact_window(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_worker *worker,
+  UF_long wanted_pos,
+  UF_long *pos_out,
+  UF_long *row_out,
+  UF_long *order_epoch_out,
+  kls_row_first_partial_row *state_out) {
+  if (shared == NULL || worker == NULL || pos_out == NULL ||
+      row_out == NULL || order_epoch_out == NULL || state_out == NULL ||
+      !shared->compact_window_execute_enabled ||
+      shared->compact_window_states == NULL ||
+      shared->ctx == NULL || worker->workspace.x == NULL ||
+      worker->workspace.mark == NULL ||
+      worker->workspace.pattern == NULL ||
+      worker->workspace.dep_heap == NULL) {
+    return 0;
+  }
+  if (shared->trace_enabled) {
+    kls_row_first_stats_add(
+      &shared->trace_committed.compact_window_claim_attempts, 1u);
+  }
+  int best_slot = -1;
+  if (shared->compact_group_active &&
+      shared->compact_group_slots != NULL) {
+    for (UF_long g = 0; g < shared->compact_group_target_count; ++g) {
+      const int slot = shared->compact_group_slots[g];
+      if (slot < 0 || slot >= shared->compact_window_count) {
+        continue;
+      }
+      const kls_row_first_compact_window_state *state =
+        shared->compact_window_states + slot;
+      if (state->active && state->grouped &&
+          state->pos == wanted_pos) {
+        kls_row_first_pipeline_trace_claim_group_run_surface(
+          shared, wanted_pos);
+        kls_row_first_pipeline_trace_delayed_group_surface(
+          shared,
+          shared->trace_enabled ? &shared->trace_committed : NULL,
+          KLS_KLU_EMPTY, 0, 1);
+        if (shared->compact_group_sparse) {
+          const UF_long run_count =
+            kls_row_first_pipeline_prepare_sparse_claim_run(
+              shared, worker,
+              shared->trace_enabled ? &shared->trace_committed : NULL,
+              wanted_pos);
+          if (run_count >= 2u) {
+            best_slot = worker->compact_claim_run_slots[0];
+            if (shared->trace_enabled) {
+              kls_row_first_stats_add(
+                &shared->trace_committed.compact_window_claim_group_detaches,
+                1u);
+            }
+          } else {
+            kls_row_first_compact_window_state *detached =
+              kls_row_first_pipeline_detach_sparse_group_row(
+                shared,
+                shared->trace_enabled ? &shared->trace_committed : NULL,
+                g);
+            if (detached != NULL) {
+              best_slot = detached->bucket_slot;
+              if (shared->trace_enabled) {
+                kls_row_first_stats_add(
+                  &shared->trace_committed.compact_window_claim_group_detaches,
+                  1u);
+              }
+            } else {
+              if (shared->trace_enabled) {
+                kls_row_first_stats_add(
+                  &shared->trace_committed.compact_window_claim_group_scatters,
+                  1u);
+              }
+              (void)kls_row_first_pipeline_scatter_compact_group(
+                shared, NULL);
+            }
+          }
+        } else {
+          if (shared->trace_enabled) {
+            kls_row_first_stats_add(
+              &shared->trace_committed.compact_window_claim_group_scatters,
+              1u);
+          }
+          (void)kls_row_first_pipeline_scatter_compact_group(
+            shared, NULL);
+        }
+        break;
+      }
+    }
+  }
+  if (best_slot < 0 && shared->compact_pos_slots != NULL &&
+      wanted_pos < shared->ctx->nk) {
+    best_slot = shared->compact_pos_slots[wanted_pos];
+    if (best_slot < 0 || best_slot >= shared->compact_window_count) {
+      best_slot = -1;
+    } else {
+      kls_row_first_compact_window_state *state =
+        shared->compact_window_states + best_slot;
+      if (!state->active || state->grouped ||
+          state->pos != wanted_pos ||
+          state->pos < shared->completed_pos) {
+        if (state->active && state->pos < shared->completed_pos) {
+          if (shared->trace_enabled) {
+            kls_row_first_stats_add(
+              &shared->trace_committed.compact_window_claim_stale_clears,
+              1u);
+          }
+          kls_row_first_pipeline_clear_compact_window_state(shared, state);
+        } else {
+          shared->compact_pos_slots[wanted_pos] = -1;
+        }
+        best_slot = -1;
+      }
+    }
+  } else if (best_slot < 0) {
+    for (int slot = 0; slot < shared->compact_window_count; ++slot) {
+      kls_row_first_compact_window_state *state =
+        shared->compact_window_states + slot;
+      if (!state->active || state->grouped) {
+        continue;
+      }
+      if (state->pos < shared->completed_pos) {
+        if (shared->trace_enabled) {
+          kls_row_first_stats_add(
+            &shared->trace_committed.compact_window_claim_stale_clears,
+            1u);
+        }
+        kls_row_first_pipeline_clear_compact_window_state(shared, state);
+        continue;
+      }
+      if (state->pos == wanted_pos) {
+        best_slot = slot;
+        break;
+      }
+    }
+  }
+  if (best_slot < 0) {
+    if (shared->trace_enabled) {
+      kls_row_first_stats_add(
+        &shared->trace_committed.compact_window_claim_misses, 1u);
+    }
+    return 0;
+  }
+  return kls_row_first_pipeline_claim_compact_window_slot(
+    shared, worker, best_slot, wanted_pos, pos_out, row_out, order_epoch_out,
+    state_out);
+}
+
 static void kls_row_first_pipeline_trace_print(
   const kls_row_first_pipeline_shared *shared,
   const char *event) {
@@ -96872,6 +97359,11 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_claim_group_run_stealable=%" PRIu64
           " compact_window_claim_group_run_max_stealable=%" PRIu64
           " compact_window_claim_group_run_unreserved_near64=%" PRIu64
+          " compact_window_claim_run_reservations=%" PRIu64
+          " compact_window_claim_run_rows=%" PRIu64
+          " compact_window_claim_run_recomputes=%" PRIu64
+          " compact_window_claim_run_updates=%" PRIu64
+          " compact_window_claim_run_update_targets=%" PRIu64
           " compact_window_delayed_output_skips=%" PRIu64
           " compact_window_delayed_output_replays=%" PRIu64
           " compact_window_delayed_output_deps=%" PRIu64
@@ -96903,6 +97395,11 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_claim_group_run_stealable,
           (uint64_t)trace->compact_window_claim_group_run_max_stealable,
           (uint64_t)trace->compact_window_claim_group_run_unreserved_near64,
+          (uint64_t)trace->compact_window_claim_run_reservations,
+          (uint64_t)trace->compact_window_claim_run_rows,
+          (uint64_t)trace->compact_window_claim_run_recomputes,
+          (uint64_t)trace->compact_window_claim_run_updates,
+          (uint64_t)trace->compact_window_claim_run_update_targets,
           (uint64_t)trace->compact_window_delayed_output_skips,
           (uint64_t)trace->compact_window_delayed_output_replays,
           (uint64_t)trace->compact_window_delayed_output_deps,
@@ -97191,9 +97688,15 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
     shared->private_supernode_panel_cache;
 
   for (;;) {
-    UF_long pos =
-      (UF_long)atomic_fetch_add_explicit(&shared->next_pos, 1ul,
-                                         memory_order_acq_rel);
+    UF_long pos = KLS_KLU_EMPTY;
+    int claim_run_slot = -1;
+    const int claimed_run_pos =
+      kls_row_first_pipeline_worker_take_claim_run_pos(
+        worker, &pos, &claim_run_slot);
+    if (!claimed_run_pos) {
+      pos = (UF_long)atomic_fetch_add_explicit(&shared->next_pos, 1ul,
+                                               memory_order_acq_rel);
+    }
     UF_long row = KLS_KLU_EMPTY;
     UF_long adopted_order_epoch = 0u;
     kls_row_first_partial_row adopted_state;
@@ -97223,15 +97726,35 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
       }
     }
     if (!shared->failed) {
-      adopted_lookahead =
-        kls_row_first_pipeline_try_claim_lookahead(
-          shared, worker, pos, &pos, &row, &adopted_order_epoch,
-          &adopted_state);
-      if (!adopted_lookahead) {
+      if (claimed_run_pos) {
+        if (worker->compact_claim_run_next > 0u) {
+          worker->compact_claim_run_next--;
+          kls_row_first_pipeline_update_claim_run_ready(
+            shared, worker,
+            shared->trace_enabled ? &shared->trace_committed : NULL);
+          worker->compact_claim_run_next++;
+        }
         adopted_lookahead =
-          kls_row_first_pipeline_try_claim_compact_window(
+          kls_row_first_pipeline_claim_compact_window_slot(
+            shared, worker, claim_run_slot, pos, &pos, &row,
+            &adopted_order_epoch,
+            &adopted_state);
+        if (!adopted_lookahead && shared->trace_enabled) {
+          kls_row_first_stats_add(
+            &shared->trace_committed.compact_window_claim_run_recomputes,
+            1u);
+        }
+      } else {
+        adopted_lookahead =
+          kls_row_first_pipeline_try_claim_lookahead(
             shared, worker, pos, &pos, &row, &adopted_order_epoch,
             &adopted_state);
+        if (!adopted_lookahead) {
+          adopted_lookahead =
+            kls_row_first_pipeline_try_claim_compact_window(
+              shared, worker, pos, &pos, &row, &adopted_order_epoch,
+              &adopted_state);
+        }
       }
     }
     pthread_mutex_unlock(&shared->lock);
@@ -97547,6 +98070,12 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                   shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
               }
               kls_row_first_pipeline_publish_completed_panel(shared, row);
+              if (!pivoted) {
+                kls_row_first_pipeline_update_claim_run_producer(
+                  shared, worker,
+                  shared->trace_enabled ? &worker->trace_current : NULL,
+                  row);
+              }
               if (!pivoted && shared->compact_window_enabled) {
                 kls_row_first_pipeline_update_compact_window_producer(
                   shared,
@@ -98209,6 +98738,16 @@ static int kls_row_first_run_parallel_pipeline_phase(
     shared.compact_group_sparse_enabled &&
     shared.compact_window_delay_output_enabled &&
     kls_row_pipeline_compact_group_replay_env_enabled();
+  shared.compact_claim_run_max_rows =
+    kls_row_pipeline_compact_claim_run_max_rows_env();
+  if (shared.compact_claim_run_max_rows >
+      (UF_long)shared.compact_window_count) {
+    shared.compact_claim_run_max_rows =
+      (UF_long)shared.compact_window_count;
+  }
+  shared.compact_claim_run_enabled =
+    shared.compact_group_sparse_enabled &&
+    shared.compact_claim_run_max_rows >= 2u;
   shared.compact_window_enabled =
     (shared.trace_enabled &&
      kls_row_pipeline_compact_window_trace_env_enabled()) ||
