@@ -129,26 +129,34 @@ slots by default),
 `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_LINKS` caps dependency links
 (`1` by default), and
 `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SCAN_ENTRIES` caps scanned U-row
-entries during column discovery (`524288` by default). Row-pipeline traces
-report owner reservations, density, oversize skips, link skips, and scan skips
-directly. A traced 64-row `bcircuit` run showed why a simple density gate would
-be wrong: only `8.0%` of reserved span positions were owned grouped rows, but
-the owner still improved time because each build had useful scan amortization
-(`2.68` output entries per scan entry, `0.41` entries per masked slot). A short
-capped 64-row `pre2` trace still failed to reach the first progress event, so
-the next work should verify whether the new early fallback exposes progress and
-then consider non-contiguous ownership before expecting it to close the `pre2`
-gap.
+entries during column discovery (`524288` by default). The default owner also
+rejects any candidate with reserved holes, because a contiguous claim span with
+unowned positions serializes those rows through the same worker. The earlier
+holey behavior is still available for experiments through
+`KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ALLOW_HOLES=1`. Row-pipeline traces report
+owner reservations, density, hole skips, oversize skips, link skips, and scan
+skips directly. A traced 64-row `bcircuit` run showed why a simple density gate
+would be wrong: only `8.0%` of reserved span positions were owned grouped rows,
+but the owner still improved time because each build had useful scan
+amortization (`2.68` output entries per scan entry, `0.41` entries per masked
+slot). The pre2 cap-2 trace exposed the other side of that tradeoff: accepted
+tiny panels with holes can serialize the cursor badly, so hole-free ownership is
+now the default while non-contiguous ownership remains future work.
 A follow-up default-cap check made the link cap conservative after `pre2`
 evidence showed that even two-link accepted owner panels can stall the large
 numeric tail before the first progress event. With
 `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_LINKS=1`, the default opt-in owner
 trace `build/kls_pre2_span_owner_default_linkcap1_trace45.stderr` reached
-`524288/629628` rows in the 45s cap, accepted zero owner reservations, and
-recorded `53,626` link-skip fallbacks. The neighboring cap-2 probe reached only
-`65536/629628` rows in 35s after accepting 47 tiny owner reservations, so
-raising the default cap is not justified until the owner can score panel payoff
-more directly.
+`524288/629628` rows in the 45s cap before the hole guard, accepted zero owner
+reservations, and recorded `53,626` link-skip fallbacks. The neighboring cap-2
+probe reached only `65536/629628` rows in 35s after accepting 47 tiny owner
+reservations with only half the reserved span rows owned. After the hole-free
+guard, the cap-2/no-holes trace
+`build/kls_pre2_span_owner_linkcap2_noholes_trace45.stderr` accepted zero owner
+reservations, recorded `27,485` hole-skip fallbacks, and reached
+`458752/629628` rows. This confirms that raising the default cap is not
+justified until the owner can score panel payoff more directly or use
+non-contiguous ownership without serializing holes.
 Before the link cap was tightened, a five-matrix smoke-manifest A/B with the
 4-row owner showed that the source-retained prototype can be useful on small
 public cases: the compact/delay baseline geomean was `0.0474s`, while that

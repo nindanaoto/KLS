@@ -2422,16 +2422,25 @@ masked panel (`65536` slots by default). The setup phase is capped separately:
 dependency links and
 `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_MAX_SCAN_ENTRIES=<entries>` defaults to
 `524288` scanned U-row entries. Candidates that exceed any cap fall back to the
-existing compact path before allocating or filling the owner panel.
+existing compact path before allocating or filling the owner panel. By default
+the owner also requires every row in the reserved span to be an owned grouped
+state, avoiding reserved holes that serialize recomputation inside the same
+worker. `KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ALLOW_HOLES=1` restores the earlier
+experimental behavior.
 Row-pipeline traces now report
-`compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,oversize_skips,oversize_slots,link_skips,link_skip_entries,scan_skips,scan_skip_entries}`
-so the owner can be tuned from workspace density and discovery cost instead of
-a matrix-specific rule.
+`compact_window_span_owner_{reservations,rows,owned_rows,hole_rows,deps,unique_deps,scan_entries,cols,slots,entries,hole_skips,hole_skip_rows,oversize_skips,oversize_slots,link_skips,link_skip_entries,scan_skips,scan_skip_entries}`
+so the owner can be tuned from workspace density, discovery cost, and reserved
+hole cost instead of a matrix-specific rule.
 The link cap is deliberately conservative after `pre2` evidence: the default
 cap-1 opt-in trace reached `524288/629628` rows in 45s with zero owner
-reservations and `53,626` link-skip fallbacks, while a cap-2 probe accepted 47
-tiny owner reservations but reached only `65536/629628` rows in 35s. Higher caps
-remain benchmark overrides until the owner has a stronger payoff test.
+reservations and `53,626` link-skip fallbacks before the hole guard. The
+neighboring cap-2 probe accepted 47 tiny owner reservations with only half the
+reserved span rows owned and reached only `65536/629628` rows in 35s. After the
+hole-free guard, the same cap-2 style trace
+`build/kls_pre2_span_owner_linkcap2_noholes_trace45.stderr` accepted zero owner
+reservations, recorded `27,485` hole-skip fallbacks, and reached
+`458752/629628` rows. Higher caps remain benchmark overrides until the owner
+has a stronger payoff test.
 Before the link cap was tightened, a five-matrix smoke-manifest A/B against the
 same compact/delay baseline with the 4-row owner improved the SPICE-cycle
 geomean from `0.0474s` to `0.0415s` (`1.14x`), with wins over 2% on `add20`,

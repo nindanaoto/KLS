@@ -48186,6 +48186,16 @@ static int kls_row_pipeline_compact_span_owner_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
+static int kls_row_pipeline_compact_span_owner_allow_holes_env_enabled(void) {
+  if (!kls_row_pipeline_compact_span_owner_env_enabled()) {
+    return 0;
+  }
+  const char *value =
+    getenv("KLS_ROW_PIPELINE_COMPACT_SPAN_OWNER_ALLOW_HOLES");
+  return value != NULL && value[0] != '\0' &&
+         !(value[0] == '0' && value[1] == '\0');
+}
+
 static int kls_row_pipeline_owner_surface_trace_env_enabled(void) {
   const char *value =
     getenv("KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE");
@@ -87034,6 +87044,8 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_span_owner_cols;
   UF_long compact_window_span_owner_slots;
   UF_long compact_window_span_owner_entries;
+  UF_long compact_window_span_owner_hole_skips;
+  UF_long compact_window_span_owner_hole_skip_rows;
   UF_long compact_window_span_owner_oversize_skips;
   UF_long compact_window_span_owner_oversize_slots;
   UF_long compact_window_span_owner_link_skips;
@@ -87337,6 +87349,12 @@ static void kls_row_first_pipeline_trace_add(
   kls_row_first_stats_add(
     &target->compact_window_span_owner_entries,
     source->compact_window_span_owner_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_hole_skips,
+    source->compact_window_span_owner_hole_skips);
+  kls_row_first_stats_add(
+    &target->compact_window_span_owner_hole_skip_rows,
+    source->compact_window_span_owner_hole_skip_rows);
   kls_row_first_stats_add(
     &target->compact_window_span_owner_oversize_skips,
     source->compact_window_span_owner_oversize_skips);
@@ -92020,6 +92038,7 @@ typedef struct kls_row_first_pipeline_shared {
   int compact_group_active;
   int compact_claim_run_enabled;
   int compact_span_owner_enabled;
+  int compact_span_owner_allow_holes;
   int compact_group_sparse_enabled;
   int compact_group_replay_enabled;
   int compact_group_sparse;
@@ -95141,6 +95160,15 @@ static UF_long kls_row_first_pipeline_prepare_sparse_span_owner(
   }
   const UF_long hole_count =
     span_rows >= owned_count ? span_rows - owned_count : 0u;
+  if (hole_count > 0u && !shared->compact_span_owner_allow_holes) {
+    if (trace != NULL) {
+      kls_row_first_stats_add(
+        &trace->compact_window_span_owner_hole_skips, 1u);
+      kls_row_first_stats_add(
+        &trace->compact_window_span_owner_hole_skip_rows, hole_count);
+    }
+    return 0u;
+  }
 
   const unsigned int dep_generation =
     kls_row_first_pipeline_next_compact_union_generation(shared);
@@ -98772,6 +98800,8 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_span_owner_cols=%" PRIu64
           " compact_window_span_owner_slots=%" PRIu64
           " compact_window_span_owner_entries=%" PRIu64
+          " compact_window_span_owner_hole_skips=%" PRIu64
+          " compact_window_span_owner_hole_skip_rows=%" PRIu64
           " compact_window_span_owner_oversize_skips=%" PRIu64
           " compact_window_span_owner_oversize_slots=%" PRIu64
           " compact_window_span_owner_link_skips=%" PRIu64
@@ -98845,6 +98875,8 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_span_owner_cols,
           (uint64_t)trace->compact_window_span_owner_slots,
           (uint64_t)trace->compact_window_span_owner_entries,
+          (uint64_t)trace->compact_window_span_owner_hole_skips,
+          (uint64_t)trace->compact_window_span_owner_hole_skip_rows,
           (uint64_t)trace->compact_window_span_owner_oversize_skips,
           (uint64_t)trace->compact_window_span_owner_oversize_slots,
           (uint64_t)trace->compact_window_span_owner_link_skips,
@@ -100221,6 +100253,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
     kls_row_pipeline_compact_span_owner_max_links_env();
   shared.compact_span_owner_max_scan_entries =
     kls_row_pipeline_compact_span_owner_max_scan_entries_env();
+  shared.compact_span_owner_allow_holes =
+    kls_row_pipeline_compact_span_owner_allow_holes_env_enabled();
   if (shared.compact_claim_run_max_rows >
       (UF_long)shared.compact_window_count) {
     shared.compact_claim_run_max_rows =
