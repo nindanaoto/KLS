@@ -92732,15 +92732,46 @@ static UF_long kls_row_first_entries_lower_bound_col(
   return lo;
 }
 
-static int kls_row_first_compact_window_replay_delayed_output(
+static int kls_row_first_workspace_accumulate_claim_value(
+  kls_row_first_workspace *workspace,
+  unsigned int generation,
+  UF_long nk,
+  UF_long *pattern_count_io,
+  UF_long col,
+  double delta) {
+  if (workspace == NULL || workspace->x == NULL ||
+      workspace->mark == NULL || workspace->pattern == NULL ||
+      pattern_count_io == NULL || col >= nk) {
+    return 0;
+  }
+  if (workspace->mark[col] != generation) {
+    if (*pattern_count_io >= nk) {
+      return 0;
+    }
+    workspace->mark[col] = generation;
+    workspace->pattern[*pattern_count_io] = col;
+    (*pattern_count_io)++;
+    workspace->x[col] = delta;
+  } else {
+    workspace->x[col] += delta;
+  }
+  return 1;
+}
+
+static int kls_row_first_compact_window_replay_delayed_output_to_workspace(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_compact_window_state *state,
+  kls_row_first_workspace *workspace,
+  UF_long *pattern_count_io,
   kls_row_first_pipeline_trace *trace) {
   if (shared == NULL || state == NULL ||
       !shared->compact_window_delay_output_enabled) {
     return 1;
   }
-  if (!state->active || state->row >= shared->ctx->nk ||
+  if (shared->ctx == NULL ||
+      !state->active || state->row >= shared->ctx->nk ||
+      state->generation == 0u ||
+      workspace == NULL || pattern_count_io == NULL ||
       shared->u_entries == NULL || shared->workspace == NULL ||
       shared->workspace->u_row_ptr == NULL ||
       shared->workspace->u_row_end == NULL) {
@@ -92787,9 +92818,10 @@ static int kls_row_first_compact_window_replay_delayed_output(
       if (shared->order_epoch != 0u && col < state->row) {
         continue;
       }
-      if (!kls_row_first_compact_window_insert(
-            state, state->row, col, -lij * shared->u_entries->value[up],
-            shared->compact_window_max_entries, NULL)) {
+      if (!kls_row_first_workspace_accumulate_claim_value(
+            workspace, state->generation, shared->ctx->nk,
+            pattern_count_io, col,
+            -lij * shared->u_entries->value[up])) {
         return 0;
       }
       dep_output_entries++;
@@ -96314,6 +96346,19 @@ static int kls_row_first_pipeline_try_claim_lookahead(
   return 1;
 }
 
+static void kls_row_first_pipeline_clear_claim_workspace(
+  kls_row_first_workspace *workspace,
+  UF_long row,
+  unsigned int generation,
+  UF_long pattern_count) {
+  kls_row_first_partial_row cleanup_state;
+  memset(&cleanup_state, 0, sizeof(cleanup_state));
+  cleanup_state.row = row;
+  cleanup_state.generation = generation;
+  cleanup_state.pattern_count = pattern_count;
+  kls_row_first_partial_row_clear(&cleanup_state, workspace);
+}
+
 static int kls_row_first_pipeline_try_claim_compact_window(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_pipeline_worker *worker,
@@ -96450,15 +96495,7 @@ static int kls_row_first_pipeline_try_claim_compact_window(
     kls_row_first_pipeline_clear_compact_window_state(shared, state);
     return 0;
   }
-  if (!kls_row_first_compact_window_replay_delayed_output(
-        shared, state, &state->trace_current)) {
-    if (shared->trace_enabled) {
-      kls_row_first_stats_add(
-        &shared->trace_committed.compact_window_claim_stale_clears, 1u);
-    }
-    kls_row_first_pipeline_clear_compact_window_state(shared, state);
-    return 0;
-  }
+  UF_long claimed_pattern_count = 0u;
   for (UF_long p = 0; p < state->pattern_count; ++p) {
     const UF_long col = state->pattern[p];
     if (col >= shared->ctx->nk) {
@@ -96466,16 +96503,33 @@ static int kls_row_first_pipeline_try_claim_compact_window(
         kls_row_first_stats_add(
           &shared->trace_committed.compact_window_claim_stale_clears, 1u);
       }
+      kls_row_first_pipeline_clear_claim_workspace(
+        &worker->workspace, state->row, state->generation,
+        claimed_pattern_count);
       kls_row_first_pipeline_clear_compact_window_state(shared, state);
       return 0;
     }
-    worker->workspace.pattern[p] = col;
+    worker->workspace.pattern[claimed_pattern_count] = col;
+    claimed_pattern_count++;
     worker->workspace.mark[col] = state->generation;
     worker->workspace.x[col] = state->values[p];
   }
   if (state->heap_size > 0u) {
     memcpy(worker->workspace.dep_heap, state->heap,
            (size_t)state->heap_size * sizeof(*state->heap));
+  }
+  if (!kls_row_first_compact_window_replay_delayed_output_to_workspace(
+        shared, state, &worker->workspace, &claimed_pattern_count,
+        &state->trace_current)) {
+    if (shared->trace_enabled) {
+      kls_row_first_stats_add(
+        &shared->trace_committed.compact_window_claim_stale_clears, 1u);
+    }
+    kls_row_first_pipeline_clear_claim_workspace(
+      &worker->workspace, state->row, state->generation,
+      claimed_pattern_count);
+    kls_row_first_pipeline_clear_compact_window_state(shared, state);
+    return 0;
   }
 
   worker->l_entries.count = 0u;
@@ -96493,6 +96547,9 @@ static int kls_row_first_pipeline_try_claim_compact_window(
       kls_row_first_stats_add(
         &shared->trace_committed.compact_window_claim_stale_clears, 1u);
     }
+    kls_row_first_pipeline_clear_claim_workspace(
+      &worker->workspace, state->row, state->generation,
+      claimed_pattern_count);
     kls_row_first_pipeline_clear_compact_window_state(shared, state);
     return 0;
   }
@@ -96504,6 +96561,9 @@ static int kls_row_first_pipeline_try_claim_compact_window(
         kls_row_first_stats_add(
           &shared->trace_committed.compact_window_claim_stale_clears, 1u);
       }
+      kls_row_first_pipeline_clear_claim_workspace(
+        &worker->workspace, state->row, state->generation,
+        claimed_pattern_count);
       kls_row_first_pipeline_clear_compact_window_state(shared, state);
       return 0;
     }
@@ -96513,7 +96573,7 @@ static int kls_row_first_pipeline_try_claim_compact_window(
 
   state_out->row = state->row;
   state_out->generation = state->generation;
-  state_out->pattern_count = state->pattern_count;
+  state_out->pattern_count = claimed_pattern_count;
   state_out->dep_heap_size = state->heap_size;
   state_out->pivot = 0.0;
   *pos_out = state->pos;

@@ -2301,7 +2301,8 @@ claim does not scatter the rest of the grouped owner.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT=1` adds an opt-in
 prefactor/postfactor split for that compact executor: producer publication
 updates only dependencies below the target row, while diagonal/output U updates
-are replayed when the prepared compact state is claimed. Traces report
+are replayed directly into the worker row workspace when the prepared compact
+state is claimed. Traces report
 `compact_window_delayed_output_{skips,replays,deps,entries,scan_entries,seek_skips}`.
 With sparse compact groups enabled, traces also report
 `compact_window_delayed_group_replay_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`

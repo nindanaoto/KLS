@@ -15218,3 +15218,16 @@ old rejected grouped-replay checkpoint from `262144/629628` to
 output entries to `462,243,229`. The next direct paper-aligned step is still a
 claim-local or panel-owned output workspace, not eager replay into every
 separated sparse state.
+
+Claim-time delayed output replay now writes directly into the worker row
+workspace instead of first materializing output columns in the compact state
+that is about to be discarded. The focused trace
+`build/kls_pre2_direct_claim_replay_sparse_delay_w512_trace45.stderr` stayed at
+the same `589824/629628` checkpoint as
+`build/kls_pre2_sparse_claim_detach_delay_w512_trace45.stderr`, with no stale
+claim clears. It slightly reduced delayed output entries from `388,436,793` to
+`387,971,639` and replay scan entries from `460,611,934` to `459,834,505`.
+This is the right claim-local data movement direction, but it does not change
+the remaining diagnosis: the timeout-sized gap still requires sharing or
+owning the output replay scans across rows/panels, not only avoiding the final
+compact-state materialization step.
