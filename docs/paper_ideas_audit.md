@@ -20,20 +20,24 @@ gap is still dominated by repeated refactorization and the missing grouped
 row/panel numeric owner, with small initial-factor overhead as a separate
 secondary issue.
 
-The retained BTF scalar-run state executor now has a structural guard instead
-of relying on timeout-heavy probes. A focused rejected `rajat03` run showed why:
-the descriptor exposed `1156` wake triggers, `4706` wake members, `558487`
-retained state rows, and only `55844` best-skip U positions, while no prefix
-became runtime-ready and no state was materialized. With the guard active, the
-same state-exec/step-window request without the live-step partial diagnostic
-keeps refactor time near the default (`0.0010s` versus `0.00088s`) and still
-reports the structural rejection counters. On `ASIC_100ks`, the exact state
-surface is much larger (`58663555` retained rows versus `1434485` best-skip
-positions), so the guarded runtime avoids materialization but the initial exact
-state-plan build is still too expensive for a promoted path. That keeps the next
-paper-aligned work on a cheaper live-workspace activation estimate or true
-grouped current workspace, not on forcing exact retained-state construction for
-large ASIC rows.
+The retained BTF scalar-run state executor now has a cheap structural guard
+before exact state-row construction. A focused rejected `rajat03` run showed why:
+the descriptor exposed `4706` grouped members, but the best skipped
+U-dependency surface was only `55844` positions versus a `194731` member-skip
+lower bound on retained rows. The new guard therefore rejects before allocating
+or sorting exact per-member state rows, reports
+`refactor_btf_scalar_run_group_state_guard_lower_bound_rejected=1`, and keeps
+the forced state-exec/step-window request near the default EGraph path. The
+top-five forced-state suite
+`build/kls_guard_stateexec_gap5_t4_r1_ref3_timeout120.jsonl` completed with a
+`1.4412s` SPICE-cycle geomean and clean residuals; `ASIC_320ks`,
+`ASIC_320k`, `rajat03`, and `ASIC_100ks` all rejected on the lower bound, for
+example `ASIC_100ks` had `1434485` best-skip positions versus `14519340`
+lower-bound rows. This removes a misleading timeout-heavy exact-state probe
+from the first tuning loop. It does not close the CKTSO gap: the paper-aligned
+target remains a true grouped current workspace or a cheaper activation
+estimate that can identify cases where retained state can pay before exact
+state construction.
 
 The latest `pre2` trace adds a claim-time delayed-output surface for sparse
 grouped compact states, without enabling the rejected numeric group replay.

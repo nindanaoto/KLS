@@ -1440,6 +1440,12 @@ CKTSO/SubtreeLU state-owner probes from running the expensive wake/materialize
 path when the paper-level state geometry is already upside down. The exact
 state plan is retained across repeated refactors while the LU pointer cache is
 valid, so repeated SPICE refactors do not rebuild the same state-row descriptor.
+The guarded path also runs a cheaper lower-bound check before allocating exact
+per-member state rows: if the best skipped U-dependency surface is already
+smaller than the sum of member skip lengths, the exact retained-state plan
+cannot pass the same payoff guard. Benchmark JSON reports this as
+`refactor_btf_scalar_run_group_state_guard_lower_bound_rows` and
+`refactor_btf_scalar_run_group_state_guard_lower_bound_rejected`.
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_COMPACT_VALUES=1` is an
 additional opt-in for the retained-state executor. When combined with
 `STATE_EXEC`, it stores retained state values only for memberships belonging to

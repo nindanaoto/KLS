@@ -1153,6 +1153,8 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_group_state_current_count;
   int64_t refactor_btf_scalar_run_group_state_best_skip_total;
   int64_t refactor_btf_scalar_run_group_state_max_best_skip;
+  int64_t refactor_btf_scalar_run_group_state_guard_lower_bound_rows;
+  int64_t refactor_btf_scalar_run_group_state_guard_lower_bound_rejected;
   int64_t refactor_last_btf_scalar_run_group_state_materialized_currents;
   int64_t refactor_last_btf_scalar_run_group_state_materialized_rows;
   int64_t refactor_last_btf_scalar_run_group_state_materialized_prefix_deps;
