@@ -2313,6 +2313,11 @@ scans a future row-order horizon every
 `KLS_ROW_PIPELINE_OWNER_SURFACE_INTERVAL` producer rows (default 512), using
 `KLS_ROW_PIPELINE_OWNER_SURFACE_WINDOW` future rows (default 4096), and reports
 `owner_surface_{probes,probe_u_entries,scanned_rows,targets,target_u_entries,max_targets}`.
+It also reports `owner_surface_scanned_input_entries`,
+`owner_surface_target_input_entries`, and
+`owner_surface_max_target_input_entries` so a main row/panel owner probe can
+distinguish producer-update coverage from the sparse row-state footprint needed
+to capture that coverage.
 This is deliberately not a numeric path: it only asks whether the just-published
 producer is the first still-unready original input dependency in the sampled
 future rows. Same-session `pre2` probes show

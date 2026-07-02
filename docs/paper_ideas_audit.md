@@ -15127,3 +15127,33 @@ still timed out with an empty JSON row. This means sparse grouping successfully
 removes dense compact-owner materialization, but it does not close the CKTSO
 gap; the missing paper-sized mechanism is still a wider main row/panel grouped
 owner, not another bounded 64-row compact-window variant.
+
+The sparse compact group does not make wider compact windows viable. A
+64-state sparse-group trace reached the usual `589824/629628` checkpoint, but
+the same 45s `pre2` setup with `KLS_ROW_PIPELINE_COMPACT_WINDOW=256`,
+`build/kls_pre2_compact_sparse_group_w256_trace45.stderr`, reached only
+`327680/629628`. At that earlier checkpoint it had already streamed
+`164,119,264` compact target U entries and `292,301,112` compact state rows,
+versus `81,788,584` compact target U entries and `142,480,009` state rows for
+the 64-state sparse-group trace at the same checkpoint. That rejects "make the
+sparse compact group wider" as the next path; larger compact windows mostly
+increase eager future-state maintenance.
+
+The owner-surface trace now records the future-row input footprint behind its
+same-root target counts:
+`owner_surface_scanned_input_entries`,
+`owner_surface_target_input_entries`, and
+`owner_surface_max_target_input_entries`. This checks whether a main row/panel
+owner can cheaply discover useful targets from original row inputs when a
+producer is published. On `pre2`, the default 4096-row sampled trace
+`build/kls_pre2_owner_surface_input_trace45.stderr` reached the normal
+`589824/629628` checkpoint but found only `2,286` owner-surface targets across
+`1,110` probes after scanning `4,546,560` future rows and `34,604,001` input
+entries. Those targets covered just `71,221` producer target-U entries and
+`26,673` target input entries, with at most `18` targets in one probe. A much
+wider 65,536-row horizon sampled every 2,048 producer rows,
+`build/kls_pre2_owner_surface_input_w65536_i2048_trace45.stderr`, found only
+`541` targets after scanning `18,135,492` rows and `158,601,956` input
+entries. This makes the next main-owner requirement sharper: useful target
+coverage on `pre2` comes from retained dynamic row states, not from a late
+scan of original input rows for the current first unready dependency.

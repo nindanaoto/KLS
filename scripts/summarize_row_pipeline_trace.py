@@ -60,7 +60,10 @@ PRODUCER_COUNTERS = [
     "owner_surface_scanned_rows",
     "owner_surface_targets",
     "owner_surface_target_u_entries",
+    "owner_surface_scanned_input_entries",
+    "owner_surface_target_input_entries",
     "owner_surface_max_targets",
+    "owner_surface_max_target_input_entries",
     "producer_probe_workers",
     "producer_probe_lookahead",
     "producer_ready_roots",
@@ -162,7 +165,10 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_owner_surface_scanned = 0
     long_owner_surface_targets = 0
     long_owner_surface_target_u = 0
+    long_owner_surface_scanned_input = 0
+    long_owner_surface_target_input = 0
     long_owner_surface_max_targets = 0
+    long_owner_surface_max_target_input = 0
     long_panel_rows = 0
     long_panel_entries = 0
     long_pivot_scalar = 0
@@ -334,9 +340,19 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_owner_surface_target_u += parse_int(
                 row.get("owner_surface_target_u_entries")
             )
+            long_owner_surface_scanned_input += parse_int(
+                row.get("owner_surface_scanned_input_entries")
+            )
+            long_owner_surface_target_input += parse_int(
+                row.get("owner_surface_target_input_entries")
+            )
             long_owner_surface_max_targets = max(
                 long_owner_surface_max_targets,
                 parse_int(row.get("owner_surface_max_targets")),
+            )
+            long_owner_surface_max_target_input = max(
+                long_owner_surface_max_target_input,
+                parse_int(row.get("owner_surface_max_target_input_entries")),
             )
             long_panel_rows += parse_int(row.get("panel_update_rows"))
             long_panel_entries += parse_int(row.get("panel_update_entries"))
@@ -485,8 +501,17 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     owner_surface_target_u = parse_int(
         last_trace.get("owner_surface_target_u_entries")
     )
+    owner_surface_scanned_input = parse_int(
+        last_trace.get("owner_surface_scanned_input_entries")
+    )
+    owner_surface_target_input = parse_int(
+        last_trace.get("owner_surface_target_input_entries")
+    )
     owner_surface_max_targets = parse_int(
         last_trace.get("owner_surface_max_targets")
+    )
+    owner_surface_max_target_input = parse_int(
+        last_trace.get("owner_surface_max_target_input_entries")
     )
     panel_rows = parse_int(last_trace.get("panel_update_rows"))
     panel_entries = parse_int(last_trace.get("panel_update_entries"))
@@ -554,7 +579,11 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "owner_surface_scanned_rows": owner_surface_scanned,
         "owner_surface_targets": owner_surface_targets,
         "owner_surface_target_u_entries": owner_surface_target_u,
+        "owner_surface_scanned_input_entries": owner_surface_scanned_input,
+        "owner_surface_target_input_entries": owner_surface_target_input,
         "owner_surface_max_targets": owner_surface_max_targets,
+        "owner_surface_max_target_input_entries":
+            owner_surface_max_target_input,
         "panel_update_rows": panel_rows,
         "panel_update_entries": panel_entries,
         "long_rows": long_rows,
@@ -628,7 +657,13 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "long_owner_surface_scanned_rows": long_owner_surface_scanned,
         "long_owner_surface_targets": long_owner_surface_targets,
         "long_owner_surface_target_u_entries": long_owner_surface_target_u,
+        "long_owner_surface_scanned_input_entries":
+            long_owner_surface_scanned_input,
+        "long_owner_surface_target_input_entries":
+            long_owner_surface_target_input,
         "long_owner_surface_max_targets": long_owner_surface_max_targets,
+        "long_owner_surface_max_target_input_entries":
+            long_owner_surface_max_target_input,
         "long_panel_update_rows": long_panel_rows,
         "long_panel_update_entries": long_panel_entries,
         "long_pivot_scalar_u_entries": long_pivot_scalar,
@@ -719,6 +754,12 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "owner_surface_target_u_per_probe_u": ratio(
             owner_surface_target_u, owner_surface_probe_u
         ),
+        "owner_surface_target_input_per_scanned_input": ratio(
+            owner_surface_target_input, owner_surface_scanned_input
+        ),
+        "owner_surface_target_input_per_target": ratio(
+            owner_surface_target_input, owner_surface_targets
+        ),
         "panel_update_entries_per_scalar_u": ratio(panel_entries, scalar),
         "scalar_u_output_per_panel_update_entries": ratio(output, panel_entries),
         "scalar_u_output_per_producer_target_u": ratio(
@@ -802,6 +843,13 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         ),
         "long_owner_surface_target_u_per_probe_u": ratio(
             long_owner_surface_target_u, long_owner_surface_probe_u
+        ),
+        "long_owner_surface_target_input_per_scanned_input": ratio(
+            long_owner_surface_target_input,
+            long_owner_surface_scanned_input,
+        ),
+        "long_owner_surface_target_input_per_target": ratio(
+            long_owner_surface_target_input, long_owner_surface_targets
         ),
         "long_scalar_u_output_per_producer_target_u": ratio(
             long_output, long_producer_target_u
@@ -914,10 +962,15 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "owner_surface_scanned_rows",
         "owner_surface_targets",
         "owner_surface_target_u_entries",
+        "owner_surface_scanned_input_entries",
+        "owner_surface_target_input_entries",
         "owner_surface_targets_per_probe",
         "owner_surface_targets_per_scanned_row",
         "owner_surface_target_u_per_probe_u",
+        "owner_surface_target_input_per_scanned_input",
+        "owner_surface_target_input_per_target",
         "owner_surface_max_targets",
+        "owner_surface_max_target_input_entries",
         "producer_underfilled",
         "producer_low_saved_stream",
         "producer_reject_bad_state",
@@ -1002,10 +1055,15 @@ def print_table(rows: Iterable[dict[str, object]]) -> None:
         "long_owner_surface_scanned_rows",
         "long_owner_surface_targets",
         "long_owner_surface_target_u_entries",
+        "long_owner_surface_scanned_input_entries",
+        "long_owner_surface_target_input_entries",
         "long_owner_surface_targets_per_probe",
         "long_owner_surface_targets_per_scanned_row",
         "long_owner_surface_target_u_per_probe_u",
+        "long_owner_surface_target_input_per_scanned_input",
+        "long_owner_surface_target_input_per_target",
         "long_owner_surface_max_targets",
+        "long_owner_surface_max_target_input_entries",
         "long_panel_update_rows",
         "long_panel_update_entries",
         "long_panel_update_entries_per_scalar_u",

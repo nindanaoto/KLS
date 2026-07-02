@@ -86881,7 +86881,10 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long owner_surface_scanned_rows;
   UF_long owner_surface_targets;
   UF_long owner_surface_target_u_entries;
+  UF_long owner_surface_scanned_input_entries;
+  UF_long owner_surface_target_input_entries;
   UF_long owner_surface_max_targets;
+  UF_long owner_surface_max_target_input_entries;
   UF_long producer_probe_workers;
   UF_long producer_probe_lookahead;
   UF_long producer_probe_ready_roots;
@@ -87113,8 +87116,14 @@ static void kls_row_first_pipeline_trace_add(
                           source->owner_surface_targets);
   kls_row_first_stats_add(&target->owner_surface_target_u_entries,
                           source->owner_surface_target_u_entries);
+  kls_row_first_stats_add(&target->owner_surface_scanned_input_entries,
+                          source->owner_surface_scanned_input_entries);
+  kls_row_first_stats_add(&target->owner_surface_target_input_entries,
+                          source->owner_surface_target_input_entries);
   kls_row_first_stats_max(&target->owner_surface_max_targets,
                           source->owner_surface_max_targets);
+  kls_row_first_stats_max(&target->owner_surface_max_target_input_entries,
+                          source->owner_surface_max_target_input_entries);
   kls_row_first_stats_add(&target->producer_probe_workers,
                           source->producer_probe_workers);
   kls_row_first_stats_add(&target->producer_probe_lookahead,
@@ -91730,15 +91739,27 @@ static void kls_row_first_pipeline_trace_owner_surface(
 
   UF_long scanned = 0u;
   UF_long targets = 0u;
+  UF_long scanned_input_entries = 0u;
+  UF_long target_input_entries = 0u;
   for (UF_long pos = start; pos < stop; ++pos) {
     const UF_long row = shared->row_order[pos];
-    if (row >= shared->ctx->nk) {
+    if (row >= shared->ctx->nk ||
+        shared->ctx->row_ptr == NULL ||
+        shared->ctx->row_ptr[row] > shared->ctx->row_ptr[row + 1u]) {
       break;
     }
+    const UF_long input_entries =
+      shared->ctx->row_ptr[row + 1u] - shared->ctx->row_ptr[row];
+    scanned_input_entries =
+      input_entries > UF_long_max - scanned_input_entries
+        ? UF_long_max : scanned_input_entries + input_entries;
     scanned++;
     if (kls_row_first_input_first_unready_dep(shared, row, current_pos) ==
         dep) {
       targets++;
+      target_input_entries =
+        input_entries > UF_long_max - target_input_entries
+          ? UF_long_max : target_input_entries + input_entries;
     }
   }
   if (scanned == 0u) {
@@ -91755,7 +91776,13 @@ static void kls_row_first_pipeline_trace_owner_surface(
   kls_row_first_stats_add(&trace->owner_surface_targets, targets);
   kls_row_first_stats_add(&trace->owner_surface_target_u_entries,
                           target_u_entries);
+  kls_row_first_stats_add(&trace->owner_surface_scanned_input_entries,
+                          scanned_input_entries);
+  kls_row_first_stats_add(&trace->owner_surface_target_input_entries,
+                          target_input_entries);
   kls_row_first_stats_max(&trace->owner_surface_max_targets, targets);
+  kls_row_first_stats_max(&trace->owner_surface_max_target_input_entries,
+                          target_input_entries);
 }
 
 static int kls_row_first_pipeline_worker_scalar_batch_candidate(
@@ -95897,7 +95924,10 @@ static void kls_row_first_pipeline_trace_print(
           " owner_surface_scanned_rows=%" PRIu64
           " owner_surface_targets=%" PRIu64
           " owner_surface_target_u_entries=%" PRIu64
+          " owner_surface_scanned_input_entries=%" PRIu64
+          " owner_surface_target_input_entries=%" PRIu64
           " owner_surface_max_targets=%" PRIu64
+          " owner_surface_max_target_input_entries=%" PRIu64
           " producer_probe_workers=%" PRIu64
           " producer_probe_lookahead=%" PRIu64
           " producer_ready_roots=%" PRIu64
@@ -95988,7 +96018,10 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->owner_surface_scanned_rows,
           (uint64_t)trace->owner_surface_targets,
           (uint64_t)trace->owner_surface_target_u_entries,
+          (uint64_t)trace->owner_surface_scanned_input_entries,
+          (uint64_t)trace->owner_surface_target_input_entries,
           (uint64_t)trace->owner_surface_max_targets,
+          (uint64_t)trace->owner_surface_max_target_input_entries,
           (uint64_t)trace->producer_probe_workers,
           (uint64_t)trace->producer_probe_lookahead,
           (uint64_t)trace->producer_probe_ready_roots,
@@ -96645,7 +96678,10 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         " owner_surface_scanned_rows=%" PRIu64
                         " owner_surface_targets=%" PRIu64
                         " owner_surface_target_u_entries=%" PRIu64
+                        " owner_surface_scanned_input_entries=%" PRIu64
+                        " owner_surface_target_input_entries=%" PRIu64
                         " owner_surface_max_targets=%" PRIu64
+                        " owner_surface_max_target_input_entries=%" PRIu64
                         " producer_probe_workers=%" PRIu64
                         " producer_probe_lookahead=%" PRIu64
                         " producer_ready_roots=%" PRIu64
@@ -96734,7 +96770,10 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
                         (uint64_t)worker->trace_current.owner_surface_scanned_rows,
                         (uint64_t)worker->trace_current.owner_surface_targets,
                         (uint64_t)worker->trace_current.owner_surface_target_u_entries,
+                        (uint64_t)worker->trace_current.owner_surface_scanned_input_entries,
+                        (uint64_t)worker->trace_current.owner_surface_target_input_entries,
                         (uint64_t)worker->trace_current.owner_surface_max_targets,
+                        (uint64_t)worker->trace_current.owner_surface_max_target_input_entries,
                         (uint64_t)worker->trace_current.producer_probe_workers,
                         (uint64_t)worker->trace_current.producer_probe_lookahead,
                         (uint64_t)worker->trace_current.producer_probe_ready_roots,
