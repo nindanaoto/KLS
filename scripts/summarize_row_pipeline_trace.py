@@ -57,6 +57,13 @@ PRODUCER_COUNTERS = [
     "compact_window_claim_run_output_duplicate_deps",
     "compact_window_claim_run_output_scan_entries",
     "compact_window_claim_run_output_group_scan_entries",
+    "compact_window_claim_span_output_surfaces",
+    "compact_window_claim_span_output_states",
+    "compact_window_claim_span_output_deps",
+    "compact_window_claim_span_output_unique_deps",
+    "compact_window_claim_span_output_duplicate_deps",
+    "compact_window_claim_span_output_scan_entries",
+    "compact_window_claim_span_output_group_scan_entries",
     "compact_window_delayed_output_skips",
     "compact_window_delayed_output_replays",
     "compact_window_delayed_output_deps",
@@ -189,6 +196,13 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     long_compact_window_claim_run_output_duplicate_deps = 0
     long_compact_window_claim_run_output_scan_entries = 0
     long_compact_window_claim_run_output_group_scan_entries = 0
+    long_compact_window_claim_span_output_surfaces = 0
+    long_compact_window_claim_span_output_states = 0
+    long_compact_window_claim_span_output_deps = 0
+    long_compact_window_claim_span_output_unique_deps = 0
+    long_compact_window_claim_span_output_duplicate_deps = 0
+    long_compact_window_claim_span_output_scan_entries = 0
+    long_compact_window_claim_span_output_group_scan_entries = 0
     long_compact_window_delayed_output_skips = 0
     long_compact_window_delayed_output_replays = 0
     long_compact_window_delayed_output_deps = 0
@@ -377,6 +391,27 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             )
             long_compact_window_claim_run_output_group_scan_entries += parse_int(
                 row.get("compact_window_claim_run_output_group_scan_entries")
+            )
+            long_compact_window_claim_span_output_surfaces += parse_int(
+                row.get("compact_window_claim_span_output_surfaces")
+            )
+            long_compact_window_claim_span_output_states += parse_int(
+                row.get("compact_window_claim_span_output_states")
+            )
+            long_compact_window_claim_span_output_deps += parse_int(
+                row.get("compact_window_claim_span_output_deps")
+            )
+            long_compact_window_claim_span_output_unique_deps += parse_int(
+                row.get("compact_window_claim_span_output_unique_deps")
+            )
+            long_compact_window_claim_span_output_duplicate_deps += parse_int(
+                row.get("compact_window_claim_span_output_duplicate_deps")
+            )
+            long_compact_window_claim_span_output_scan_entries += parse_int(
+                row.get("compact_window_claim_span_output_scan_entries")
+            )
+            long_compact_window_claim_span_output_group_scan_entries += parse_int(
+                row.get("compact_window_claim_span_output_group_scan_entries")
             )
             long_compact_window_delayed_output_skips += parse_int(
                 row.get("compact_window_delayed_output_skips")
@@ -667,6 +702,27 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
     compact_window_claim_run_output_group_scan_entries = parse_int(
         last_trace.get("compact_window_claim_run_output_group_scan_entries")
     )
+    compact_window_claim_span_output_surfaces = parse_int(
+        last_trace.get("compact_window_claim_span_output_surfaces")
+    )
+    compact_window_claim_span_output_states = parse_int(
+        last_trace.get("compact_window_claim_span_output_states")
+    )
+    compact_window_claim_span_output_deps = parse_int(
+        last_trace.get("compact_window_claim_span_output_deps")
+    )
+    compact_window_claim_span_output_unique_deps = parse_int(
+        last_trace.get("compact_window_claim_span_output_unique_deps")
+    )
+    compact_window_claim_span_output_duplicate_deps = parse_int(
+        last_trace.get("compact_window_claim_span_output_duplicate_deps")
+    )
+    compact_window_claim_span_output_scan_entries = parse_int(
+        last_trace.get("compact_window_claim_span_output_scan_entries")
+    )
+    compact_window_claim_span_output_group_scan_entries = parse_int(
+        last_trace.get("compact_window_claim_span_output_group_scan_entries")
+    )
     compact_window_delayed_output_skips = parse_int(
         last_trace.get("compact_window_delayed_output_skips")
     )
@@ -873,6 +929,20 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             compact_window_claim_run_output_scan_entries,
         "compact_window_claim_run_output_group_scan_entries":
             compact_window_claim_run_output_group_scan_entries,
+        "compact_window_claim_span_output_surfaces":
+            compact_window_claim_span_output_surfaces,
+        "compact_window_claim_span_output_states":
+            compact_window_claim_span_output_states,
+        "compact_window_claim_span_output_deps":
+            compact_window_claim_span_output_deps,
+        "compact_window_claim_span_output_unique_deps":
+            compact_window_claim_span_output_unique_deps,
+        "compact_window_claim_span_output_duplicate_deps":
+            compact_window_claim_span_output_duplicate_deps,
+        "compact_window_claim_span_output_scan_entries":
+            compact_window_claim_span_output_scan_entries,
+        "compact_window_claim_span_output_group_scan_entries":
+            compact_window_claim_span_output_group_scan_entries,
         "compact_window_delayed_output_skips":
             compact_window_delayed_output_skips,
         "compact_window_delayed_output_replays":
@@ -1018,6 +1088,20 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
             long_compact_window_claim_run_output_scan_entries,
         "long_compact_window_claim_run_output_group_scan_entries":
             long_compact_window_claim_run_output_group_scan_entries,
+        "long_compact_window_claim_span_output_surfaces":
+            long_compact_window_claim_span_output_surfaces,
+        "long_compact_window_claim_span_output_states":
+            long_compact_window_claim_span_output_states,
+        "long_compact_window_claim_span_output_deps":
+            long_compact_window_claim_span_output_deps,
+        "long_compact_window_claim_span_output_unique_deps":
+            long_compact_window_claim_span_output_unique_deps,
+        "long_compact_window_claim_span_output_duplicate_deps":
+            long_compact_window_claim_span_output_duplicate_deps,
+        "long_compact_window_claim_span_output_scan_entries":
+            long_compact_window_claim_span_output_scan_entries,
+        "long_compact_window_claim_span_output_group_scan_entries":
+            long_compact_window_claim_span_output_group_scan_entries,
         "long_compact_window_delayed_output_skips":
             long_compact_window_delayed_output_skips,
         "long_compact_window_delayed_output_replays":
@@ -1193,6 +1277,18 @@ def summarize(path: pathlib.Path) -> dict[str, object]:
         "compact_window_claim_run_output_group_scan_ratio": ratio(
             compact_window_claim_run_output_group_scan_entries,
             compact_window_claim_run_output_scan_entries,
+        ),
+        "compact_window_claim_span_output_states_per_surface": ratio(
+            compact_window_claim_span_output_states,
+            compact_window_claim_span_output_surfaces,
+        ),
+        "compact_window_claim_span_output_unique_dep_share": ratio(
+            compact_window_claim_span_output_unique_deps,
+            compact_window_claim_span_output_deps,
+        ),
+        "compact_window_claim_span_output_group_scan_ratio": ratio(
+            compact_window_claim_span_output_group_scan_entries,
+            compact_window_claim_span_output_scan_entries,
         ),
         "compact_window_delayed_output_replay_entries_per_skip": ratio(
             compact_window_delayed_output_entries,

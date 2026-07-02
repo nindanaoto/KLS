@@ -63,6 +63,18 @@ the next direct implementation target should be a wider local row/panel owner
 or span owner. A strict adjacent run workspace is unlikely to be the whole
 CKTSO/SubtreeLU postfactor mechanism.
 
+A local 64-position span probe sharpens that target. In
+`build/kls_pre2_claim_span64_output_surface_w512_trace45.stderr`, KLS again
+reached `589824/629628`, while the span surface covered `318807` states
+(`9.78` per claim surface). Only `2167882` of `16717219` dependencies were
+unique (`13.0%`), and the grouped scan estimate was `168701660` entries versus
+`2004785169` per-state entries (`8.4%`). This is substantially better than the
+strict claim-run surface (`26.7%`) while still being scheduler-local and mostly
+unreserved (`89.8%` of near-64 grouped rows). The next CKTSO/SubtreeLU-aligned
+prototype should therefore be a local span/panel owner that can reserve or own
+non-contiguous grouped rows in a short factor-order window, then stream
+postfactor output into that owner without per-future-row materialization.
+
 The row-pipeline pivot tail now preserves the supernode substrate after dynamic
 pivots by advancing a validity floor rather than discarding `supernode_start`
 and `supernode_end`. This is the direct SubtreeLU/CKTSO-style repair for the

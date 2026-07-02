@@ -123,6 +123,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_ROW_FIRST_COMPACT_WINDOW_DEFAULT_MAX_ENTRIES 65536u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS 128u
 #define KLS_ROW_FIRST_COMPACT_CLAIM_RUN_DEFAULT_ROWS 8u
+#define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_ROWS 64u
 #define KLS_ROW_FIRST_COMPACT_DENSE_UNION_MAX_SPARSE_MULT 2u
 #define KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_WINDOW 4096u
 #define KLS_ROW_FIRST_OWNER_SURFACE_MAX_WINDOW 65536u
@@ -86906,6 +86907,13 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long compact_window_claim_run_output_duplicate_deps;
   UF_long compact_window_claim_run_output_scan_entries;
   UF_long compact_window_claim_run_output_group_scan_entries;
+  UF_long compact_window_claim_span_output_surfaces;
+  UF_long compact_window_claim_span_output_states;
+  UF_long compact_window_claim_span_output_deps;
+  UF_long compact_window_claim_span_output_unique_deps;
+  UF_long compact_window_claim_span_output_duplicate_deps;
+  UF_long compact_window_claim_span_output_scan_entries;
+  UF_long compact_window_claim_span_output_group_scan_entries;
   UF_long compact_window_delayed_output_skips;
   UF_long compact_window_delayed_output_replays;
   UF_long compact_window_delayed_output_deps;
@@ -87173,6 +87181,27 @@ static void kls_row_first_pipeline_trace_add(
   kls_row_first_stats_add(
     &target->compact_window_claim_run_output_group_scan_entries,
     source->compact_window_claim_run_output_group_scan_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_surfaces,
+    source->compact_window_claim_span_output_surfaces);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_states,
+    source->compact_window_claim_span_output_states);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_deps,
+    source->compact_window_claim_span_output_deps);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_unique_deps,
+    source->compact_window_claim_span_output_unique_deps);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_duplicate_deps,
+    source->compact_window_claim_span_output_duplicate_deps);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_scan_entries,
+    source->compact_window_claim_span_output_scan_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_group_scan_entries,
+    source->compact_window_claim_span_output_group_scan_entries);
   kls_row_first_stats_add(&target->compact_window_delayed_output_skips,
                           source->compact_window_delayed_output_skips);
   kls_row_first_stats_add(&target->compact_window_delayed_output_replays,
@@ -94060,6 +94089,142 @@ static void kls_row_first_pipeline_trace_claim_run_output_surface(
     group_scan_entries);
 }
 
+static void kls_row_first_pipeline_trace_claim_span_output_surface(
+  kls_row_first_pipeline_shared *shared,
+  kls_row_first_pipeline_trace *trace,
+  UF_long wanted_pos) {
+  if (shared == NULL || !shared->compact_group_active ||
+      !shared->compact_group_sparse ||
+      !shared->compact_window_delay_output_enabled ||
+      shared->compact_group_slots == NULL ||
+      shared->compact_window_states == NULL ||
+      shared->ctx == NULL || shared->workspace == NULL ||
+      shared->u_entries == NULL ||
+      shared->workspace->u_row_ptr == NULL ||
+      shared->workspace->u_row_end == NULL ||
+      shared->compact_union_mark == NULL ||
+      shared->compact_union_pos == NULL ||
+      wanted_pos >= shared->ctx->nk) {
+    return;
+  }
+  kls_row_first_pipeline_trace *target =
+    trace != NULL ? trace
+                  : (shared->trace_enabled ? &shared->trace_committed : NULL);
+  if (target == NULL) {
+    return;
+  }
+
+  unsigned int generation = shared->compact_union_generation + 1u;
+  if (generation == 0u) {
+    memset(shared->compact_union_mark, 0,
+           (size_t)shared->ctx->nk *
+             sizeof(*shared->compact_union_mark));
+    generation = 1u;
+  }
+  shared->compact_union_generation = generation;
+
+  const UF_long nk = shared->ctx->nk;
+  const UF_long next_reserved =
+    (UF_long)atomic_load_explicit(&shared->next_pos, memory_order_acquire);
+  UF_long states = 0u;
+  UF_long deps = 0u;
+  UF_long unique_deps = 0u;
+  UF_long scan_entries = 0u;
+  for (UF_long g = 0; g < shared->compact_group_target_count; ++g) {
+    const int slot = shared->compact_group_slots[g];
+    if (slot < 0 || slot >= shared->compact_window_count) {
+      continue;
+    }
+    const kls_row_first_compact_window_state *state =
+      shared->compact_window_states + slot;
+    if (state == NULL || !state->active || !state->grouped ||
+        state->row >= nk ||
+        state->pos < wanted_pos ||
+        state->pos - wanted_pos >=
+          KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_ROWS ||
+        (state->pos != wanted_pos && state->pos < next_reserved) ||
+        state->delayed_output_replayed_l_count > state->l_count) {
+      continue;
+    }
+    states++;
+    for (UF_long lp = state->delayed_output_replayed_l_count;
+         lp < state->l_count; ++lp) {
+      const UF_long dep = state->l_cols[lp];
+      if (dep >= state->row || dep >= nk) {
+        continue;
+      }
+      const UF_long row_begin = shared->workspace->u_row_ptr[dep];
+      const UF_long row_end = shared->workspace->u_row_end[dep];
+      if (row_begin > row_end || row_end > shared->u_entries->count) {
+        continue;
+      }
+      deps++;
+      UF_long scan_begin = row_begin;
+      if (shared->order_epoch == 0u) {
+        scan_begin = kls_row_first_entries_lower_bound_col(
+          shared->u_entries, row_begin, row_end, state->row);
+      }
+      if (row_end >= scan_begin) {
+        kls_row_first_stats_add(&scan_entries, row_end - scan_begin);
+      }
+      if (shared->compact_union_mark[dep] != generation) {
+        if (!kls_row_first_pipeline_reserve_compact_union_cols(
+              shared, unique_deps + 1u)) {
+          return;
+        }
+        shared->compact_union_mark[dep] = generation;
+        shared->compact_union_pos[dep] = state->row;
+        shared->compact_union_cols[unique_deps] = dep;
+        unique_deps++;
+      } else if (state->row < shared->compact_union_pos[dep]) {
+        shared->compact_union_pos[dep] = state->row;
+      }
+    }
+  }
+  if (states == 0u || deps == 0u) {
+    return;
+  }
+
+  UF_long group_scan_entries = 0u;
+  for (UF_long p = 0; p < unique_deps; ++p) {
+    const UF_long dep = shared->compact_union_cols[p];
+    if (dep >= nk) {
+      continue;
+    }
+    const UF_long row_begin = shared->workspace->u_row_ptr[dep];
+    const UF_long row_end = shared->workspace->u_row_end[dep];
+    if (row_begin > row_end || row_end > shared->u_entries->count) {
+      continue;
+    }
+    UF_long scan_begin = row_begin;
+    if (shared->order_epoch == 0u) {
+      scan_begin = kls_row_first_entries_lower_bound_col(
+        shared->u_entries, row_begin, row_end,
+        shared->compact_union_pos[dep]);
+    }
+    if (row_end >= scan_begin) {
+      kls_row_first_stats_add(&group_scan_entries, row_end - scan_begin);
+    }
+  }
+
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_surfaces, 1u);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_states, states);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_deps, deps);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_unique_deps, unique_deps);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_duplicate_deps,
+    deps >= unique_deps ? deps - unique_deps : 0u);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_scan_entries, scan_entries);
+  kls_row_first_stats_add(
+    &target->compact_window_claim_span_output_group_scan_entries,
+    group_scan_entries);
+}
+
 static void kls_row_first_pipeline_trace_claim_group_run_surface(
   kls_row_first_pipeline_shared *shared,
   UF_long wanted_pos) {
@@ -97317,6 +97482,10 @@ static int kls_row_first_pipeline_try_claim_compact_window(
           state->pos == wanted_pos) {
         kls_row_first_pipeline_trace_claim_group_run_surface(
           shared, wanted_pos);
+        kls_row_first_pipeline_trace_claim_span_output_surface(
+          shared,
+          shared->trace_enabled ? &shared->trace_committed : NULL,
+          wanted_pos);
         kls_row_first_pipeline_trace_delayed_group_surface(
           shared,
           shared->trace_enabled ? &shared->trace_committed : NULL,
@@ -97532,6 +97701,13 @@ static void kls_row_first_pipeline_trace_print(
           " compact_window_claim_run_output_duplicate_deps=%" PRIu64
           " compact_window_claim_run_output_scan_entries=%" PRIu64
           " compact_window_claim_run_output_group_scan_entries=%" PRIu64
+          " compact_window_claim_span_output_surfaces=%" PRIu64
+          " compact_window_claim_span_output_states=%" PRIu64
+          " compact_window_claim_span_output_deps=%" PRIu64
+          " compact_window_claim_span_output_unique_deps=%" PRIu64
+          " compact_window_claim_span_output_duplicate_deps=%" PRIu64
+          " compact_window_claim_span_output_scan_entries=%" PRIu64
+          " compact_window_claim_span_output_group_scan_entries=%" PRIu64
           " compact_window_delayed_output_skips=%" PRIu64
           " compact_window_delayed_output_replays=%" PRIu64
           " compact_window_delayed_output_deps=%" PRIu64
@@ -97575,6 +97751,13 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->compact_window_claim_run_output_duplicate_deps,
           (uint64_t)trace->compact_window_claim_run_output_scan_entries,
           (uint64_t)trace->compact_window_claim_run_output_group_scan_entries,
+          (uint64_t)trace->compact_window_claim_span_output_surfaces,
+          (uint64_t)trace->compact_window_claim_span_output_states,
+          (uint64_t)trace->compact_window_claim_span_output_deps,
+          (uint64_t)trace->compact_window_claim_span_output_unique_deps,
+          (uint64_t)trace->compact_window_claim_span_output_duplicate_deps,
+          (uint64_t)trace->compact_window_claim_span_output_scan_entries,
+          (uint64_t)trace->compact_window_claim_span_output_group_scan_entries,
           (uint64_t)trace->compact_window_delayed_output_skips,
           (uint64_t)trace->compact_window_delayed_output_replays,
           (uint64_t)trace->compact_window_delayed_output_deps,

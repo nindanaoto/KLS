@@ -2364,6 +2364,14 @@ keeps the claim-run path diagnostic and off by default: adjacent-row ownership
 alone is not the missing CKTSO/SubtreeLU trailing-output workspace; the next
 owner needs a wider local row/panel surface without storing output back into
 future compact states.
+The follow-up local-span probe records the unreserved grouped rows within the
+next 64 factor positions as
+`compact_window_claim_span_output_{surfaces,states,deps,unique_deps,duplicate_deps,scan_entries,group_scan_entries}`.
+`build/kls_pre2_claim_span64_output_surface_w512_trace45.stderr` again reached
+`589824/629628`, but the span surface covered `318,807` states (`9.78` per
+surface) and cut scan volume to `168,701,660` grouped entries from
+`2,004,785,169` per-state entries (`8.4%`). That is a much better target than
+strict claim runs while still avoiding the full-group materialization trap.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_REPLAY=1` enables the matching numeric
 grouped replay experiment, but it remains off by default: a 45s `pre2` trial
 cut delayed replay scan entries while inflating delayed output materialization
