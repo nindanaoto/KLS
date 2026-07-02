@@ -173,6 +173,7 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_SNODE_TAIL_CHUNK 32
 #define KLS_SNODE_MIN_BATCH_WORK 192
 #define KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD 5.0e7
+#define KLS_EGRAPH_POOL_SPIN_ITERS 200000u
 #define KLS_METIS_NDP_MIN_LEAF_ROWS 200u
 #define KLS_METIS_NDP_TARGET_DIVISOR 1000u
 #define KLS_METIS_NDP_SUBTREE_THRESHOLD_MIN_ROWS 200000u
@@ -2220,11 +2221,12 @@ struct kls_egraph_refactor_pool {
   pthread_cond_t done_cond;
   pthread_t *threads;
   kls_egraph_refactor_worker *workers;
-  unsigned long generation;
+  atomic_ulong generation;
   int thread_count;
   int created_count;
-  int active_workers;
-  int shutdown;
+  atomic_int active_workers;
+  atomic_int shutdown;
+  int busy_wait;
   int conds_initialized;
   int lock_initialized;
   int barrier_initialized;
@@ -2338,6 +2340,10 @@ static int kls_try_row_first_rebuild_rejected_block(
   UF_long old_unz_block,
   UF_long *pblock_out);
 static void destroy_egraph_refactor_pool(kls_solver *solver);
+static void kls_egraph_pool_dispatch_and_wait(
+  kls_egraph_refactor_pool *pool,
+  kls_egraph_refactor_shared *shared,
+  int thread_count);
 static void kls_egraph_refactor_record_invalid(
   kls_egraph_refactor_shared *shared);
 static void kls_egraph_refactor_record_reject(
@@ -62157,12 +62163,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     pool->workers[i].x = scratch[i];
   }
 
-  pool->active_workers = thread_count;
-  pool->generation++;
-  pthread_cond_broadcast(&pool->work_cond);
-  while (pool->active_workers > 0) {
-    pthread_cond_wait(&pool->done_cond, &shared->lock);
-  }
+  kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
   const UF_long row_local_ready_groups =
     use_row_ready_queue
       ? (UF_long)atomic_load_explicit(
@@ -79784,17 +79785,37 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
   kls_egraph_refactor_shared *shared = worker->shared;
   unsigned long seen_generation = 0;
 
-  pthread_mutex_lock(&shared->lock);
   for (;;) {
-    while (!pool->shutdown && pool->generation == seen_generation) {
-      pthread_cond_wait(&pool->work_cond, &shared->lock);
-    }
-    if (pool->shutdown) {
+    unsigned long generation;
+    unsigned spin = 0;
+    for (;;) {
+      if (atomic_load_explicit(&pool->shutdown, memory_order_acquire)) {
+        return NULL;
+      }
+      generation =
+        atomic_load_explicit(&pool->generation, memory_order_acquire);
+      if (generation != seen_generation) {
+        break;
+      }
+      if (pool->busy_wait && spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
+        spin++;
+        kls_cpu_relax();
+        continue;
+      }
+      /* Repeated SPICE refactors arrive back to back, so a short spin
+         usually catches the next generation without a futex round trip;
+         fall back to the condition variable when the solver goes idle. */
+      pthread_mutex_lock(&shared->lock);
+      while (!atomic_load_explicit(&pool->shutdown, memory_order_acquire) &&
+             atomic_load_explicit(&pool->generation,
+                                  memory_order_acquire) ==
+               seen_generation) {
+        pthread_cond_wait(&pool->work_cond, &shared->lock);
+      }
       pthread_mutex_unlock(&shared->lock);
-      return NULL;
+      spin = 0;
     }
-    seen_generation = pool->generation;
-    pthread_mutex_unlock(&shared->lock);
+    seen_generation = generation;
 
     if (shared->row_solve_mode) {
       kls_row_solve_worker_run(worker);
@@ -79804,11 +79825,41 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
       kls_egraph_refactor_worker_run(worker);
     }
 
-    pthread_mutex_lock(&shared->lock);
-    pool->active_workers--;
-    if (pool->active_workers == 0) {
+    if (atomic_fetch_sub_explicit(&pool->active_workers, 1,
+                                  memory_order_acq_rel) == 1) {
+      pthread_mutex_lock(&shared->lock);
       pthread_cond_signal(&pool->done_cond);
+      pthread_mutex_unlock(&shared->lock);
     }
+  }
+}
+
+/* Publish a new pool generation and wait for the workers to finish.
+   Expects shared->lock held on entry and returns with it held; the wait
+   spins briefly before sleeping so sub-millisecond parallel refactors do
+   not pay two futex round trips per call. */
+static void kls_egraph_pool_dispatch_and_wait(
+  kls_egraph_refactor_pool *pool,
+  kls_egraph_refactor_shared *shared,
+  int thread_count) {
+  atomic_store_explicit(&pool->active_workers, thread_count,
+                        memory_order_relaxed);
+  atomic_fetch_add_explicit(&pool->generation, 1ul, memory_order_release);
+  pthread_cond_broadcast(&pool->work_cond);
+  pthread_mutex_unlock(&shared->lock);
+  if (pool->busy_wait) {
+    unsigned spin = 0;
+    while (atomic_load_explicit(&pool->active_workers,
+                                memory_order_acquire) > 0 &&
+           spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
+      spin++;
+      kls_cpu_relax();
+    }
+  }
+  pthread_mutex_lock(&shared->lock);
+  while (atomic_load_explicit(&pool->active_workers,
+                              memory_order_acquire) > 0) {
+    pthread_cond_wait(&pool->done_cond, &shared->lock);
   }
 }
 
@@ -79819,7 +79870,7 @@ static void destroy_egraph_refactor_pool(kls_solver *solver) {
   kls_egraph_refactor_pool *pool = solver->egraph_pool;
   if (pool->lock_initialized) {
     pthread_mutex_lock(&pool->shared.lock);
-    pool->shutdown = 1;
+    atomic_store_explicit(&pool->shutdown, 1, memory_order_release);
     if (pool->conds_initialized) {
       pthread_cond_broadcast(&pool->work_cond);
     }
@@ -79923,6 +79974,13 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
     return NULL;
   }
   pool->barrier_initialized = 1;
+  atomic_init(&pool->generation, 0ul);
+  atomic_init(&pool->active_workers, 0);
+  atomic_init(&pool->shutdown, 0);
+  {
+    const char *busy = getenv("KLS_DISABLE_EGRAPH_BUSY_WAIT");
+    pool->busy_wait = !(busy != NULL && busy[0] == '1');
+  }
   atomic_init(&pool->shared.stop, 0);
   atomic_init(&pool->shared.next_pipeline_pos, 0ul);
   atomic_init(&pool->shared.supernode_pipeline_tasks, 0ul);
@@ -80275,12 +80333,7 @@ static int kls_run_parallel_row_solve_factor(kls_solver *solver,
     pool->workers[i].shared = shared;
   }
 
-  pool->active_workers = thread_count;
-  pool->generation++;
-  pthread_cond_broadcast(&pool->work_cond);
-  while (pool->active_workers > 0) {
-    pthread_cond_wait(&pool->done_cond, &shared->lock);
-  }
+  kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
   const int ok = !shared->invalid &&
                  !kls_egraph_refactor_should_stop(shared);
   shared->row_solve_mode = 0;
@@ -80379,12 +80432,7 @@ static int kls_run_parallel_row_solve_sparse_block(
     pool->workers[i].shared = shared;
   }
 
-  pool->active_workers = thread_count;
-  pool->generation++;
-  pthread_cond_broadcast(&pool->work_cond);
-  while (pool->active_workers > 0) {
-    pthread_cond_wait(&pool->done_cond, &shared->lock);
-  }
+  kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
   const int ok = !shared->invalid &&
                  !kls_egraph_refactor_should_stop(shared);
   shared->row_solve_mode = 0;
@@ -82912,12 +82960,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     pool->workers[i].consumer_plan_cursor_last_dep = KLS_KLU_EMPTY;
   }
 
-  pool->active_workers = thread_count;
-  pool->generation++;
-  pthread_cond_broadcast(&pool->work_cond);
-  while (pool->active_workers > 0) {
-    pthread_cond_wait(&pool->done_cond, &shared->lock);
-  }
+  kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
   const int group_l_batch_exec_active =
     shared->supernode_consumer_plan_group_l_batch_exec;
   shared->pipeline_ready_queue = 0;
