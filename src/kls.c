@@ -20693,6 +20693,22 @@ static void free_numeric(kls_solver *solver) {
   }
 }
 
+/* A trial numeric replaced solver->numeric wholesale: every structure
+   derived from the old numeric's pattern or storage is now stale and must
+   be dropped, or later refactorizations read freed or mismatched LU data. */
+static void kls_numeric_replaced_invalidate(kls_solver *solver) {
+  free_snode_panels(solver);
+  free_egraph_algorithm5_payoff_queue(solver);
+  free_egraph_algorithm5_payoff_runtime_state(solver);
+  free_egraph_btf_scalar_run_group_state(solver);
+  free_row_refactor_pattern(solver);
+  solver->row_refactor_auto_enabled = 0;
+  free_fast_reject_tail_plan(solver);
+  free_refactor_lu_pointer_cache(solver);
+  free_refactor_map(solver);
+  free_refactor_schedule(solver);
+}
+
 static void fill_build_stats(kls_stats *stats) {
   if (stats == NULL) {
     return;
@@ -26010,6 +26026,7 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   kls_separator_analysis_move(&solver->separator, &trial_separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
+  kls_numeric_replaced_invalidate(solver);
   solver->common = trial_common;
   solver->stats.selected_ordering = trial_ordering;
   solver->stats.selected_orientation = solver->orientation;
@@ -26624,6 +26641,7 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   kls_separator_analysis_move(&solver->separator, &trial_separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
+  kls_numeric_replaced_invalidate(solver);
   solver->common = trial_common;
   solver->stats.selected_ordering = trial_ordering;
   solver->stats.selected_orientation = solver->orientation;
@@ -27065,6 +27083,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   kls_separator_analysis_move(&solver->separator, &trial_separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
+  kls_numeric_replaced_invalidate(solver);
   solver->common = trial_common;
   solver->stats.selected_ordering = trial_ordering;
   solver->stats.selected_orientation = solver->orientation;
@@ -27206,6 +27225,7 @@ static int maybe_select_auto_scale(kls_solver *solver,
     trilinos_klu_l_numeric *old_numeric = solver->numeric;
     trilinos_klu_l_common old_common = solver->common;
     solver->numeric = trial_numeric;
+    kls_numeric_replaced_invalidate(solver);
     solver->common = trial_common;
     trilinos_klu_l_free_numeric(&old_numeric, &old_common);
     accepted = 1;
@@ -27292,6 +27312,7 @@ static int maybe_select_auto_pivot_tolerance(kls_solver *solver,
   trilinos_klu_l_numeric *old_numeric = solver->numeric;
   trilinos_klu_l_common old_common = solver->common;
   solver->numeric = trial_numeric;
+  kls_numeric_replaced_invalidate(solver);
   solver->common = trial_common;
   trilinos_klu_l_free_numeric(&old_numeric, &old_common);
   return 1;
@@ -27391,6 +27412,7 @@ static int maybe_promote_auto_metis(kls_solver *solver,
   kls_separator_analysis_move(&solver->separator, &metis_separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = metis_numeric;
+  kls_numeric_replaced_invalidate(solver);
   solver->common = metis_common;
   solver->stats.selected_ordering = KLS_ORDERING_METIS;
   solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
@@ -35865,6 +35887,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   free_refactor_schedule(solver);
   free_row_refactor_pattern_preserve_diagnostics(solver);
   free_refactor_lu_pointer_cache(solver);
+  free_snode_panels(solver);
   solver->common.status = TRILINOS_KLU_OK;
   solver->common.numerical_rank = KLS_KLU_EMPTY;
   solver->common.singular_col = KLS_KLU_EMPTY;
@@ -39437,6 +39460,39 @@ static int kls_build_refactor_btf_scalar_run_groups(kls_solver *solver) {
   return 1;
 }
 
+/* A retained pointer cache must describe the numeric the solver holds NOW.
+   Numeric rebuilds can replace LU storage wholesale without passing through
+   every invalidation site, so the reuse gate re-derives each column pointer
+   from the live Lip/Uip/LUbx and rejects the cache on any mismatch. */
+static int kls_refactor_lu_pointer_cache_matches(const kls_solver *solver) {
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  const trilinos_klu_l_numeric *numeric = solver->numeric;
+  for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+    const UF_long k1 = symbolic->R[block];
+    const UF_long k2 = symbolic->R[block + 1u];
+    if (k2 - k1 <= 1u) {
+      continue;
+    }
+    const double *lu = (const double *)numeric->LUbx[block];
+    if (lu == NULL) {
+      return 0;
+    }
+    for (UF_long k = k1; k < k2; ++k) {
+      const double *lp = lu + numeric->Lip[k];
+      const double *up = lu + numeric->Uip[k];
+      if (solver->refactor_l_indices[k] != (UF_long *)lp ||
+          solver->refactor_u_indices[k] != (UF_long *)up ||
+          solver->refactor_l_values[k] !=
+            (double *)(lp + kls_klu_units_for_indices(numeric->Llen[k])) ||
+          solver->refactor_u_values[k] !=
+            (double *)(up + kls_klu_units_for_indices(numeric->Ulen[k]))) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
 static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->R == NULL || solver->numeric->LUbx == NULL ||
@@ -39449,7 +39505,8 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
       solver->refactor_l_indices != NULL &&
       solver->refactor_l_values != NULL &&
       solver->refactor_u_indices != NULL &&
-      solver->refactor_u_values != NULL) {
+      solver->refactor_u_values != NULL &&
+      kls_refactor_lu_pointer_cache_matches(solver)) {
     return kls_ensure_refactor_l_index32_cache(solver) &&
            kls_ensure_refactor_u_index32_cache(solver) &&
            kls_ensure_refactor_l_sorted_cache(solver) &&
@@ -110719,6 +110776,7 @@ static int kls_try_rebuild_current_numeric_with_kls_first_mode(
   if (rebuilt && solver->numeric != NULL && solver->common.status >= 0 &&
       kls_first_rebuild_quality_accepts(solver, saved_numeric,
                                         &saved_common)) {
+    free_snode_panels(solver);
     trilinos_klu_l_free_numeric(&saved_numeric, &saved_common);
     free(saved_q);
     return 1;
