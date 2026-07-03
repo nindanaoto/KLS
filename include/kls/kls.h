@@ -48,7 +48,8 @@ typedef enum kls_factor_path {
   KLS_FACTOR_PATH_KLS_FAST_REFACTOR = 2,
   KLS_FACTOR_PATH_KLU_FALLBACK = 3,
   KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST = 4,
-  KLS_FACTOR_PATH_KLS_FIRST = 5
+  KLS_FACTOR_PATH_KLS_FIRST = 5,
+  KLS_FACTOR_PATH_PREDICTED_FIRST = 6
 } kls_factor_path;
 
 typedef enum kls_refactor_path {

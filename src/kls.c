@@ -317,6 +317,8 @@ struct kls_solver {
   UF_long *refactor_col_block;
   UF_long *snode_run_end;
   int snode_prepared;
+  int snode_numeric_pre_sorted;
+  int numeric_is_predicted;
   UF_long **refactor_l_indices;
   int32_t **refactor_l_indices32;
   int32_t *refactor_l_indices32_storage;
@@ -20670,6 +20672,7 @@ static void free_snode_panels(kls_solver *solver) {
   free(solver->snode_run_end);
   solver->snode_run_end = NULL;
   solver->snode_prepared = 0;
+  solver->snode_numeric_pre_sorted = 0;
 }
 
 static void free_numeric(kls_solver *solver) {
@@ -20685,6 +20688,7 @@ static void free_numeric(kls_solver *solver) {
   solver->row_refactor_auto_enabled = 0;
   free_fast_reject_tail_plan(solver);
   free_refactor_lu_pointer_cache(solver);
+  solver->numeric_is_predicted = 0;
   if (solver->numeric != NULL) {
     free_refactor_map(solver);
     free_refactor_schedule(solver);
@@ -20707,6 +20711,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   free_refactor_lu_pointer_cache(solver);
   free_refactor_map(solver);
   free_refactor_schedule(solver);
+  solver->numeric_is_predicted = 0;
 }
 
 static void fill_build_stats(kls_stats *stats) {
@@ -27144,6 +27149,12 @@ static int should_try_auto_scale(const kls_solver *solver) {
        re-scaling flattens the column magnitude contrast that keeps the
        matched diagonal dominant, and the scaled trial factorization can
        explode structurally on mostly-missing-diagonal matrices. */
+    return 0;
+  }
+  if (solver->numeric_is_predicted) {
+    /* A predicted-pattern numeric already proved a machine-precision
+       residual without scaling, and the serial scaled trial factorization
+       costs minutes at this size. */
     return 0;
   }
   if (solver->common.scale <= 0 &&
@@ -49660,6 +49671,11 @@ static int kls_auto_row_refactor_cost_allows(const kls_solver *solver) {
 }
 
 static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
+  if (solver != NULL && solver->numeric_is_predicted) {
+    /* The row-refactor bridges assume KLU-kernel-built numerics; predicted
+       numerics stay on the column machinery. */
+    return 0;
+  }
   return solver != NULL &&
          !kls_row_refactor_env_disabled() &&
          solver->row_refactor_auto_enabled &&
@@ -49969,6 +49985,11 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
 static void kls_maybe_prepare_model_row_refactor_from_numeric(
   kls_solver *solver,
   double *elapsed) {
+  if (solver != NULL && solver->numeric_is_predicted) {
+    /* The experimental row-refactor model bridge assumes KLU-kernel-built
+       numerics; predicted-pattern numerics use the column machinery only. */
+    return;
+  }
   if (solver == NULL || elapsed == NULL ||
       kls_row_refactor_env_disabled() ||
       solver->options.threads <= 1 ||
@@ -52314,6 +52335,9 @@ static int kls_parallel_row_refactor_load_targeted_input_row(
 static int kls_serial_row_refactor_numeric(kls_solver *solver,
                                            double *numeric_values,
                                            int check_pivots) {
+  if (solver != NULL && solver->numeric_is_predicted) {
+    return -1;
+  }
   const int scaled = solver != NULL && solver->common.scale > 0;
   if (numeric_values == NULL || solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->symbolic->nblocks == 0u ||
@@ -61702,6 +61726,9 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
 static int kls_threaded_row_refactor_numeric(kls_solver *solver,
                                              double *numeric_values,
                                              int check_pivots) {
+  if (solver != NULL && solver->numeric_is_predicted) {
+    return -1;
+  }
   const int scaled = solver != NULL && solver->common.scale > 0;
   if (numeric_values == NULL || solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->symbolic->nblocks == 0u ||
@@ -84932,7 +84959,8 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
   }
   const double start = kls_now_seconds();
   solver->snode_prepared = 1;
-  if (!trilinos_klu_l_sort(solver->symbolic, solver->numeric,
+  if (!solver->snode_numeric_pre_sorted &&
+      !trilinos_klu_l_sort(solver->symbolic, solver->numeric,
                            &solver->common)) {
     *elapsed += kls_now_seconds() - start;
     return;
@@ -110808,6 +110836,616 @@ static int kls_try_rebuild_current_numeric_with_kls_first(
     solver, numeric_values, elapsed, 0);
 }
 
+/* Predicted-pattern first factorization: KLU's Gilbert-Peierls first factor
+   spends two orders of magnitude more time discovering the pattern per
+   column than the refactorization spends computing the same values (the
+   NICSLU paper documents KLU at 462s on memchip whose refactor takes about
+   a second).  For large structurally symmetric patterns with a full
+   diagonal, the exact no-pivot LU pattern equals the symbolic Cholesky
+   pattern of the block, which an elimination-tree reach computes in near
+   linear time.  Build that pattern directly into a KLU numeric object and
+   compute the first values with the ordinary refactorization; a pivot
+   threshold check keeps the quality guarantees and any rejection falls
+   back to the standard factorization. */
+static int kls_predicted_pattern_first_factor(kls_solver *solver,
+                                              double *numeric_values,
+                                              double *elapsed) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric != NULL ||
+      numeric_values == NULL || solver->n < 100000 ||
+      solver->common.scale > 0 || solver->options.pivot_tolerance <= 0.0) {
+    return 0;
+  }
+  trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_common *common = &solver->common;
+  const UF_long n = solver->n;
+  const UF_long nblocks = symbolic->nblocks;
+  const UF_long maxblock = symbolic->maxblock;
+  const UF_long *P = symbolic->P;
+  const UF_long *Q = symbolic->Q;
+  const UF_long *R = symbolic->R;
+  if (P == NULL || Q == NULL || R == NULL || maxblock < 2) {
+    return 0;
+  }
+  const double start = kls_now_seconds();
+
+  UF_long *pinv = (UF_long *)malloc((size_t)n * sizeof(*pinv));
+  UF_long *col_block = (UF_long *)malloc((size_t)n * sizeof(*col_block));
+  if (pinv == NULL || col_block == NULL) {
+    free(pinv);
+    free(col_block);
+    return 0;
+  }
+  for (UF_long block = 0; block < nblocks; ++block) {
+    for (UF_long k = R[block]; k < R[block + 1u]; ++k) {
+      col_block[k] = block;
+    }
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    pinv[P[k]] = k;
+  }
+
+  /* Block-local pattern in CSC over final (pivot) indices, plus the
+     off-diagonal entry count. */
+  UF_long *bcol_ptr = (UF_long *)malloc(((size_t)maxblock + 1u) *
+                                        sizeof(*bcol_ptr));
+  UF_long *work_rows = NULL;
+  UF_long work_rows_capacity = 0;
+  UF_long *parent = (UF_long *)malloc((size_t)maxblock * sizeof(*parent));
+  UF_long *ancestor = (UF_long *)malloc((size_t)maxblock * sizeof(*ancestor));
+  UF_long *mark = (UF_long *)malloc((size_t)maxblock * sizeof(*mark));
+  UF_long *rowlen = (UF_long *)malloc((size_t)maxblock * sizeof(*rowlen));
+  UF_long *colcount = (UF_long *)malloc((size_t)maxblock * sizeof(*colcount));
+  UF_long *rowpat_ptr = NULL;
+  UF_long *rowpat = NULL;
+  UF_long *bcol_ptr_union = NULL;
+  UF_long *work_rows_union = NULL;
+  int ok = bcol_ptr != NULL && parent != NULL && ancestor != NULL &&
+           mark != NULL && rowlen != NULL && colcount != NULL;
+
+  trilinos_klu_l_numeric *numeric = NULL;
+  UF_long total_lnz = 0;
+  UF_long total_unz = 0;
+  UF_long max_lnz_block = 1;
+  UF_long max_unz_block = 1;
+
+  if (ok) {
+    numeric = (trilinos_klu_l_numeric *)trilinos_klu_l_malloc(
+      sizeof(*numeric), 1, common);
+    ok = numeric != NULL && common->status >= TRILINOS_KLU_OK;
+  }
+  if (ok) {
+    memset(numeric, 0, sizeof(*numeric));
+    numeric->n = n;
+    numeric->nblocks = nblocks;
+    numeric->nzoff = symbolic->nzoff;
+    numeric->Pnum =
+      (UF_long *)trilinos_klu_l_malloc((size_t)n, sizeof(UF_long), common);
+    numeric->Pinv =
+      (UF_long *)trilinos_klu_l_malloc((size_t)n, sizeof(UF_long), common);
+    numeric->Offp = (UF_long *)trilinos_klu_l_malloc((size_t)n + 1u,
+                                                     sizeof(UF_long), common);
+    numeric->Offi = (UF_long *)trilinos_klu_l_malloc(
+      (size_t)symbolic->nzoff + 1u, sizeof(UF_long), common);
+    numeric->Offx = trilinos_klu_l_malloc((size_t)symbolic->nzoff + 1u,
+                                          sizeof(double), common);
+    numeric->Lip =
+      (UF_long *)trilinos_klu_l_malloc((size_t)n, sizeof(UF_long), common);
+    numeric->Uip =
+      (UF_long *)trilinos_klu_l_malloc((size_t)n, sizeof(UF_long), common);
+    numeric->Llen =
+      (UF_long *)trilinos_klu_l_malloc((size_t)n, sizeof(UF_long), common);
+    numeric->Ulen =
+      (UF_long *)trilinos_klu_l_malloc((size_t)n, sizeof(UF_long), common);
+    numeric->LUsize = (size_t *)trilinos_klu_l_malloc((size_t)nblocks,
+                                                      sizeof(size_t), common);
+    numeric->LUbx = (void **)trilinos_klu_l_malloc((size_t)nblocks,
+                                                   sizeof(void *), common);
+    numeric->Udiag =
+      trilinos_klu_l_malloc((size_t)n, sizeof(double), common);
+    numeric->Rs = NULL;
+    {
+      size_t s = (size_t)n * sizeof(double);
+      size_t n3 = (size_t)n * 3u * sizeof(double);
+      size_t b6 = (size_t)maxblock * 6u * sizeof(UF_long);
+      numeric->worksize = s + (n3 > b6 ? n3 : b6);
+      numeric->Work = trilinos_klu_l_malloc(numeric->worksize, 1, common);
+      numeric->Xwork = numeric->Work;
+      numeric->Iwork =
+        numeric->Work != NULL
+          ? (UF_long *)((double *)numeric->Work + n)
+          : NULL;
+    }
+    ok = common->status >= TRILINOS_KLU_OK && numeric->Pnum != NULL &&
+         numeric->Pinv != NULL && numeric->Offp != NULL &&
+         numeric->Offi != NULL && numeric->Offx != NULL &&
+         numeric->Lip != NULL && numeric->Uip != NULL &&
+         numeric->Llen != NULL && numeric->Ulen != NULL &&
+         numeric->LUsize != NULL && numeric->LUbx != NULL &&
+         numeric->Udiag != NULL && numeric->Work != NULL;
+    if (ok) {
+      for (UF_long block = 0; block < nblocks; ++block) {
+        numeric->LUbx[block] = NULL;
+        numeric->LUsize[block] = 0;
+      }
+      memcpy(numeric->Pnum, P, (size_t)n * sizeof(*P));
+      memcpy(numeric->Pinv, pinv, (size_t)n * sizeof(*pinv));
+    }
+  }
+
+  /* Off-diagonal pattern in input-column order, matching the sequential
+     Offx writes the refactorization performs. */
+  if (ok) {
+    UF_long poff = 0;
+    for (UF_long k = 0; k < n && ok; ++k) {
+      numeric->Offp[k] = poff;
+      const UF_long oldcol = Q[k];
+      const UF_long k1 = R[col_block[k]];
+      for (UF_long p = solver->col_ptr[oldcol];
+           p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long newrow = pinv[solver->row_idx[p]];
+        if (newrow < k1) {
+          if (poff >= symbolic->nzoff) {
+            ok = 0;
+            break;
+          }
+          numeric->Offi[poff++] = newrow;
+        }
+      }
+    }
+    if (ok) {
+      numeric->Offp[n] = poff;
+      ok = poff == symbolic->nzoff;
+    }
+  }
+
+  for (UF_long block = 0; block < nblocks && ok; ++block) {
+    const UF_long k1 = R[block];
+    const UF_long k2 = R[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (nk < 2) {
+      numeric->Lip[k1] = 0;
+      numeric->Uip[k1] = 0;
+      numeric->Llen[k1] = 0;
+      numeric->Ulen[k1] = 0;
+      total_lnz += 1;
+      total_unz += 1;
+      continue;
+    }
+    /* Local pattern: count entries, then fill row-index lists per local
+       column; verify a full structural diagonal.  Reject any block whose
+       pattern is not structurally symmetric: only there does the symmetric
+       elimination-tree reach give the exact no-pivot LU pattern. */
+    UF_long bnz = 0;
+    for (UF_long k = 0; k < nk; ++k) {
+      const UF_long oldcol = Q[k1 + k];
+      for (UF_long p = solver->col_ptr[oldcol];
+           p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long newrow = pinv[solver->row_idx[p]];
+        if (newrow >= k1 && newrow < k2) {
+          bnz++;
+        }
+      }
+    }
+    if (bnz > work_rows_capacity) {
+      free(work_rows);
+      work_rows = (UF_long *)malloc((size_t)bnz * sizeof(*work_rows));
+      work_rows_capacity = work_rows != NULL ? bnz : 0;
+      if (work_rows == NULL) {
+        ok = 0;
+        break;
+      }
+    }
+    memset(bcol_ptr, 0, ((size_t)nk + 1u) * sizeof(*bcol_ptr));
+    for (UF_long k = 0; k < nk; ++k) {
+      const UF_long oldcol = Q[k1 + k];
+      for (UF_long p = solver->col_ptr[oldcol];
+           p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long newrow = pinv[solver->row_idx[p]];
+        if (newrow >= k1 && newrow < k2) {
+          bcol_ptr[k + 1u]++;
+        }
+      }
+    }
+    for (UF_long k = 0; k < nk; ++k) {
+      bcol_ptr[k + 1u] += bcol_ptr[k];
+    }
+    for (UF_long k = 0; k < nk; ++k) {
+      UF_long cursor = bcol_ptr[k];
+      const UF_long oldcol = Q[k1 + k];
+      for (UF_long p = solver->col_ptr[oldcol];
+           p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long newrow = pinv[solver->row_idx[p]];
+        if (newrow >= k1 && newrow < k2) {
+          work_rows[cursor++] = newrow - k1;
+        }
+      }
+    }
+    /* Symmetrize the block pattern: the symbolic Cholesky pattern of
+       B | B' is the exact no-pivot LU bound (superset positions compute
+       zeros), so mild asymmetry is absorbed instead of rejected.  Bail on
+       strongly unsymmetric blocks where the bound is loose, and require a
+       full structural diagonal. */
+    {
+      UF_long *ucol_ptr =
+        (UF_long *)calloc((size_t)nk + 1u, sizeof(*ucol_ptr));
+      UF_long *urows = (UF_long *)malloc((size_t)(2u * bnz + nk) *
+                                         sizeof(*urows));
+      if (ucol_ptr == NULL || urows == NULL) {
+        free(ucol_ptr);
+        free(urows);
+        ok = 0;
+        break;
+      }
+      for (UF_long k = 0; k < nk; ++k) {
+        for (UF_long p = bcol_ptr[k]; p < bcol_ptr[k + 1u]; ++p) {
+          const UF_long i = work_rows[p];
+          ucol_ptr[k + 1u]++;
+          if (i != k) {
+            ucol_ptr[i + 1u]++;
+          }
+        }
+      }
+      for (UF_long k = 0; k < nk; ++k) {
+        ucol_ptr[k + 1u] += ucol_ptr[k];
+      }
+      {
+        UF_long *cursor = rowlen; /* reuse as scratch */
+        memcpy(cursor, ucol_ptr, (size_t)nk * sizeof(*cursor));
+        for (UF_long k = 0; k < nk; ++k) {
+          for (UF_long p = bcol_ptr[k]; p < bcol_ptr[k + 1u]; ++p) {
+            const UF_long i = work_rows[p];
+            urows[cursor[k]++] = i;
+            if (i != k) {
+              urows[cursor[i]++] = k;
+            }
+          }
+        }
+      }
+      /* sort + dedupe each column of the union */
+      UF_long out = 0;
+      UF_long diag_seen = 0;
+      for (UF_long k = 0; k < nk; ++k) {
+        const UF_long lo = ucol_ptr[k];
+        const UF_long hi = rowlen[k];
+        for (UF_long a = lo + 1u; a < hi; ++a) {
+          const UF_long v = urows[a];
+          UF_long b = a;
+          while (b > lo && urows[b - 1u] > v) {
+            urows[b] = urows[b - 1u];
+            b--;
+          }
+          urows[b] = v;
+        }
+        const UF_long dst = out;
+        UF_long prev = KLS_KLU_EMPTY;
+        for (UF_long p = lo; p < hi; ++p) {
+          if (urows[p] != prev) {
+            prev = urows[p];
+            urows[out++] = prev;
+            if (prev == k) {
+              diag_seen++;
+            }
+          }
+        }
+        ucol_ptr[k] = dst;
+      }
+      ucol_ptr[nk] = out;
+      if (diag_seen != nk || out > bnz + bnz / 8u + nk) {
+        free(ucol_ptr);
+        free(urows);
+        ok = 0;
+        break;
+      }
+      free(bcol_ptr_union);
+      free(work_rows_union);
+      bcol_ptr_union = ucol_ptr;
+      work_rows_union = urows;
+    }
+    /* Elimination tree over the sorted symmetric block pattern. */
+    for (UF_long k = 0; k < nk; ++k) {
+      parent[k] = KLS_KLU_EMPTY;
+      ancestor[k] = KLS_KLU_EMPTY;
+    }
+    for (UF_long k = 0; k < nk; ++k) {
+      for (UF_long p = bcol_ptr_union[k]; p < bcol_ptr_union[k + 1u]; ++p) {
+        UF_long i = work_rows_union[p];
+        while (i != KLS_KLU_EMPTY && i < k) {
+          const UF_long next = ancestor[i];
+          ancestor[i] = k;
+          if (next == KLS_KLU_EMPTY) {
+            parent[i] = k;
+            i = KLS_KLU_EMPTY;
+          } else {
+            i = next;
+          }
+        }
+      }
+    }
+    /* Pass 1: row reach counts give Ulen (row pattern length) and column
+       counts give Llen. */
+    memset(colcount, 0, (size_t)nk * sizeof(*colcount));
+    for (UF_long k = 0; k < nk; ++k) {
+      mark[k] = -1;
+    }
+    UF_long block_lnz = 0;
+    for (UF_long k = 0; k < nk; ++k) {
+      mark[k] = k;
+      UF_long len = 0;
+      for (UF_long p = bcol_ptr_union[k]; p < bcol_ptr_union[k + 1u]; ++p) {
+        UF_long i = work_rows_union[p];
+        while (i < k && mark[i] != k) {
+          mark[i] = k;
+          colcount[i]++;
+          len++;
+          i = parent[i];
+          if (i == KLS_KLU_EMPTY) {
+            break;
+          }
+        }
+      }
+      rowlen[k] = len;
+      block_lnz += len;
+    }
+    /* Layout and allocation for this block. */
+    size_t lusize = 0;
+    for (UF_long k = 0; k < nk; ++k) {
+      numeric->Llen[k1 + k] = colcount[k];
+      numeric->Ulen[k1 + k] = rowlen[k];
+      numeric->Lip[k1 + k] = (UF_long)lusize;
+      lusize += 2u * (size_t)colcount[k];
+      numeric->Uip[k1 + k] = (UF_long)lusize;
+      lusize += 2u * (size_t)rowlen[k];
+    }
+    if (lusize == 0) {
+      lusize = 1;
+    }
+    numeric->LUbx[block] =
+      trilinos_klu_l_malloc(lusize, sizeof(double), common);
+    numeric->LUsize[block] = lusize;
+    if (numeric->LUbx[block] == NULL || common->status < TRILINOS_KLU_OK) {
+      ok = 0;
+      break;
+    }
+    /* Pass 2: fill sorted index areas.  U column k receives the sorted row
+       reach of k directly; L columns receive k appended in ascending order
+       as rows are visited. */
+    {
+      double *lu = (double *)numeric->LUbx[block];
+      if (rowpat_ptr == NULL) {
+        rowpat_ptr = (UF_long *)malloc((size_t)maxblock * sizeof(*rowpat_ptr));
+        if (rowpat_ptr == NULL) {
+          ok = 0;
+          break;
+        }
+      }
+      /* per-column L write cursors reuse colcount as cursor after reset */
+      for (UF_long k = 0; k < nk; ++k) {
+        rowpat_ptr[k] = 0;
+        mark[k] = -1;
+      }
+      if (rowpat == NULL || (UF_long)block_lnz > 0) {
+        free(rowpat);
+        rowpat = (UF_long *)malloc(
+          (size_t)(block_lnz > 0 ? block_lnz : 1) * sizeof(*rowpat));
+        if (rowpat == NULL) {
+          ok = 0;
+          break;
+        }
+      }
+      (void)rowpat;
+      for (UF_long k = 0; k < nk; ++k) {
+        mark[k] = k;
+        UF_long len = 0;
+        UF_long *urow = rowpat;
+        for (UF_long p = bcol_ptr_union[k]; p < bcol_ptr_union[k + 1u]; ++p) {
+          UF_long i = work_rows_union[p];
+          while (i < k && mark[i] != k) {
+            mark[i] = k;
+            urow[len++] = i;
+            i = parent[i];
+            if (i == KLS_KLU_EMPTY) {
+              break;
+            }
+          }
+        }
+        /* sort the row pattern ascending */
+        for (UF_long a = 1u; a < len; ++a) {
+          const UF_long v = urow[a];
+          UF_long b = a;
+          while (b > 0u && urow[b - 1u] > v) {
+            urow[b] = urow[b - 1u];
+            b--;
+          }
+          urow[b] = v;
+        }
+        UF_long *ui = (UF_long *)(lu + numeric->Uip[k1 + k]);
+        for (UF_long p = 0; p < len; ++p) {
+          ui[p] = urow[p];
+          const UF_long j = urow[p];
+          UF_long *li = (UF_long *)(lu + numeric->Lip[k1 + j]);
+          li[rowpat_ptr[j]++] = k;
+        }
+      }
+      for (UF_long k = 0; k < nk && ok; ++k) {
+        if (rowpat_ptr[k] != (UF_long)numeric->Llen[k1 + k]) {
+          ok = 0;
+        }
+      }
+    }
+    total_lnz += block_lnz + nk;
+    {
+      UF_long block_unz = 0;
+      for (UF_long k = 0; k < nk; ++k) {
+        block_unz += numeric->Ulen[k1 + k];
+      }
+      total_unz += block_unz + nk;
+      if (block_lnz + nk > max_lnz_block) {
+        max_lnz_block = block_lnz + nk;
+      }
+      if (block_unz + nk > max_unz_block) {
+        max_unz_block = block_unz + nk;
+      }
+    }
+  }
+
+  free(work_rows);
+  free(bcol_ptr);
+  free(parent);
+  free(ancestor);
+  free(mark);
+  free(rowlen);
+  free(colcount);
+  free(rowpat_ptr);
+  free(rowpat);
+  free(bcol_ptr_union);
+  free(work_rows_union);
+  free(col_block);
+  free(pinv);
+
+  if (!ok) {
+    if (numeric != NULL) {
+      trilinos_klu_l_free_numeric(&numeric, common);
+    }
+    *elapsed += kls_now_seconds() - start;
+    return 0;
+  }
+
+  numeric->lnz = total_lnz;
+  numeric->unz = total_unz;
+  numeric->max_lnz_block = max_lnz_block;
+  numeric->max_unz_block = max_unz_block;
+
+  /* Fill the first values through the solver's own refactorization
+     machinery: the pattern is already ascending so the supernode panel
+     preparation and retained schedules apply directly, and the threaded
+     panel refactor computes the identical values one to two orders of
+     magnitude faster than the serial KLU refactorization. */
+  common->status = TRILINOS_KLU_OK;
+  solver->numeric = numeric;
+  solver->numeric_is_predicted = 1;
+  /* The pattern was written in ascending row order, so the supernode
+     preparation can skip its sorting pass. */
+  solver->snode_numeric_pre_sorted =
+    getenv("KLS_PREDICTED_FORCE_SORT") == NULL;
+  /* The routing gates below need the factor work estimate, which KLU
+     computes from the pattern alone. */
+  kls_update_numeric_diagnostics(solver, 0);
+  const double build_done = kls_now_seconds();
+  kls_maybe_prepare_snode_panels(solver, elapsed);
+  maybe_prepare_refactor_map(solver, elapsed);
+  maybe_prepare_refactor_schedule(solver, elapsed);
+  const UF_long refactor_ok =
+    kls_parallel_refactor(solver, numeric_values, 0);
+  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+    fprintf(stderr, "KLS predicted: build=%.2fs first_values=%.2fs\n",
+            build_done - start, kls_now_seconds() - build_done);
+  }
+  if (!refactor_ok || common->status < TRILINOS_KLU_OK ||
+      common->status == TRILINOS_KLU_SINGULAR) {
+    free_numeric(solver);
+    common->status = TRILINOS_KLU_OK;
+    *elapsed += kls_now_seconds() - start;
+    return 0;
+  }
+  {
+    UF_long rejected_pivot = KLS_KLU_EMPTY;
+    UF_long rejected_pivot_col = KLS_KLU_EMPTY;
+    if (!kls_numeric_pivots_pass_threshold(solver, &rejected_pivot,
+                                           &rejected_pivot_col)) {
+      free_numeric(solver);
+      common->status = TRILINOS_KLU_OK;
+      *elapsed += kls_now_seconds() - start;
+      return 0;
+    }
+  }
+  /* Reject numerically unstable no-pivot factorizations directly: solve
+     A x = A e and require a small true residual.  Per-column multiplier
+     bounds cannot stop growth from compounding across elimination levels
+     (Freescale1 passes them yet yields a 5e-3 residual). */
+  {
+    double *probe_b =
+      (double *)malloc(2u * (size_t)n * sizeof(*probe_b));
+    if (probe_b == NULL) {
+      free_numeric(solver);
+      common->status = TRILINOS_KLU_OK;
+      *elapsed += kls_now_seconds() - start;
+      return 0;
+    }
+    double *probe_x = probe_b + n;
+    for (UF_long i = 0; i < n; ++i) {
+      probe_b[i] = 0.0;
+    }
+    for (UF_long j = 0; j < n; ++j) {
+      for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
+           ++p) {
+        probe_b[solver->row_idx[p]] += numeric_values[p];
+      }
+    }
+    memcpy(probe_x, probe_b, (size_t)n * sizeof(*probe_x));
+    double residual = HUGE_VAL;
+    if (trilinos_klu_l_solve(symbolic, numeric, n, 1, probe_x, common) &&
+        common->status >= TRILINOS_KLU_OK) {
+      double bmax = 0.0;
+      for (UF_long i = 0; i < n; ++i) {
+        const double v = fabs(probe_b[i]);
+        bmax = bmax < v ? v : bmax;
+      }
+      for (UF_long j = 0; j < n; ++j) {
+        for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
+             ++p) {
+          probe_b[solver->row_idx[p]] -= numeric_values[p] * probe_x[j];
+        }
+      }
+      double rmax = 0.0;
+      for (UF_long i = 0; i < n; ++i) {
+        const double v = fabs(probe_b[i]);
+        rmax = rmax < v ? v : rmax;
+      }
+      residual = bmax > 0.0 ? rmax / bmax : rmax;
+    }
+    free(probe_b);
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS predicted: probe_residual=%.3e\n", residual);
+    }
+    if (!(residual < 1e-9)) {
+      free_numeric(solver);
+      common->status = TRILINOS_KLU_OK;
+      *elapsed += kls_now_seconds() - start;
+      return 0;
+    }
+  }
+  /* Accept only numerics the checked refactorization would also accept:
+     a stored L multiplier above 1/tol is exactly the reject condition of
+     the checked kernels, and a numeric that mass-rejects there forces a
+     full pivoted rebuild on every repeat factorization. */
+  {
+    const double tol = common->tol > 0.0 ? common->tol : 0.001;
+    const double max_multiplier = 1.0 / tol;
+    for (UF_long block = 0; block < nblocks; ++block) {
+      const UF_long k1 = R[block];
+      const UF_long k2 = R[block + 1u];
+      if (k2 - k1 <= 1u) {
+        continue;
+      }
+      const double *lu = (const double *)numeric->LUbx[block];
+      for (UF_long k = k1; k < k2; ++k) {
+        const UF_long len = numeric->Llen[k];
+        const double *lx = lu + numeric->Lip[k] + len;
+        for (UF_long p = 0; p < len; ++p) {
+          if (!(fabs(lx[p]) <= max_multiplier)) {
+            free_numeric(solver);
+            common->status = TRILINOS_KLU_OK;
+            *elapsed += kls_now_seconds() - start;
+            return 0;
+          }
+        }
+      }
+    }
+  }
+  *elapsed += kls_now_seconds() - start;
+  return 1;
+}
+
 int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -110919,13 +111557,22 @@ int kls_factor(kls_solver *solver, const double *values) {
     elapsed += kls_now_seconds() - start;
   }
   if (!kls_first_factor_used) {
-    const double start = kls_now_seconds();
-    kls_set_last_factor_path(solver, had_numeric ? KLS_FACTOR_PATH_KLU_FALLBACK
-                                                 : KLS_FACTOR_PATH_KLU_FIRST);
-    solver->numeric = trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,
-                                            numeric_values, solver->symbolic,
-                                            &solver->common);
-    elapsed += kls_now_seconds() - start;
+    if (!had_numeric &&
+        kls_predicted_pattern_first_factor(solver, numeric_values,
+                                           &elapsed)) {
+      kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
+    } else {
+      const double start = kls_now_seconds();
+      kls_set_last_factor_path(solver,
+                               had_numeric ? KLS_FACTOR_PATH_KLU_FALLBACK
+                                           : KLS_FACTOR_PATH_KLU_FIRST);
+      solver->numeric = trilinos_klu_l_factor(solver->col_ptr,
+                                              solver->row_idx,
+                                              numeric_values,
+                                              solver->symbolic,
+                                              &solver->common);
+      elapsed += kls_now_seconds() - start;
+    }
   }
   solver->stats.factor_seconds = elapsed;
   if (solver->numeric == NULL || solver->common.status < 0) {
@@ -111248,6 +111895,7 @@ const char *kls_factor_path_name(kls_factor_path path) {
     case KLS_FACTOR_PATH_KLU_FALLBACK: return "klu_fallback";
     case KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST: return "prestatic_klu_first";
     case KLS_FACTOR_PATH_KLS_FIRST: return "kls_first";
+    case KLS_FACTOR_PATH_PREDICTED_FIRST: return "predicted_first";
     default: return "unknown";
   }
 }
