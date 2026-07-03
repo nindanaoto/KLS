@@ -110866,6 +110866,13 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   if (P == NULL || Q == NULL || R == NULL || maxblock < 2) {
     return 0;
   }
+  /* The KLU first factorization only becomes pattern-discovery bound at
+     scale; below it the prediction attempt (build + fill + probe) costs
+     more than it saves and the symmetrized pattern can carry extra fill
+     into every refactorization. */
+  if (n < 500000 && !(symbolic->lnz >= 8.0e6)) {
+    return 0;
+  }
   const double start = kls_now_seconds();
 
   UF_long *pinv = (UF_long *)malloc((size_t)n * sizeof(*pinv));
