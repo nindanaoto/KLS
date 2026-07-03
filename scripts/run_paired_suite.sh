@@ -26,7 +26,7 @@ while [ "$p" -lt "$PASSES" ]; do
 done
 while IFS= read -r name; do
   case "$name" in ''|'#'*) continue;; esac
-  matrix=$(find "$MATRIX_DIR" -name "${name}.mtx" | head -1)
+  matrix=$(find "$MATRIX_DIR" -iname "${name}.mtx" | head -1)
   [ -z "$matrix" ] && { echo "skip $name (not found)" >&2; continue; }
   for side in $passes_sides; do
     if [ "$side" = kls ]; then
