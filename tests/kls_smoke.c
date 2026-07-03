@@ -6783,6 +6783,13 @@ static int test_egraph_cached_supernode_blocked_update(void) {
       "setenv KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PREFIX_PREP=0");
     ok = 0;
   }
+  /* The production EGraph work floor would route this small fixture to the
+     serial mapped path; pin it to zero so the forced supernode machinery
+     under test actually executes. */
+  if (ok && setenv("KLS_EGRAPH_REFACTOR_FLOOR", "0", 1) != 0) {
+    perror("setenv KLS_EGRAPH_REFACTOR_FLOOR=0");
+    ok = 0;
+  }
 
   if (!require_ok(kls_create(&solver), "create EGraph blocked")) ok = 0;
   if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
@@ -6913,6 +6920,10 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     ok = 0;
   }
 
+  if (unsetenv("KLS_EGRAPH_REFACTOR_FLOOR") != 0) {
+    perror("unsetenv KLS_EGRAPH_REFACTOR_FLOOR");
+    ok = 0;
+  }
   if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
     ok = 0;
   }

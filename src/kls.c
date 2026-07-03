@@ -86040,10 +86040,19 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
+  double egraph_floor = KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD;
+  {
+    const char *floor_env = getenv("KLS_EGRAPH_REFACTOR_FLOOR");
+    if (floor_env != NULL && floor_env[0] != '\0') {
+      const double parsed = atof(floor_env);
+      if (parsed >= 0.0) {
+        egraph_floor = parsed;
+      }
+    }
+  }
   if (!check_pivots && solver->common.flops > 0.0 &&
       solver->common.flops <
-        KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
-          (double)solver->options.threads) {
+        egraph_floor * (double)solver->options.threads) {
     /* Below roughly 5e7 factor flops per thread the EGraph's per-column
        synchronization costs more than it saves, and the sorted-supernode
        panel updates made the serial mapped kernel faster still; the
