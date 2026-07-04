@@ -111613,6 +111613,9 @@ static int kls_compare_uf_long_asc(const void *a, const void *b) {
 
 static int kls_predicted_pivoting_fill(kls_solver *solver,
                                        const double *numeric_values);
+static int kls_predicted_pivot_rescue(kls_solver *solver,
+                                      const double *numeric_values,
+                                      double *elapsed);
 
 static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                               double *numeric_values,
@@ -112189,6 +112192,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
             sched_done - map_done, (long)total_lnz, (long)total_unz);
   }
   UF_long refactor_ok = 0;
+  int saw_singular = 0;
   if (getenv("KLS_FORCE_PIVOT_FILL") != NULL) {
     refactor_ok = 0;
     common->status = TRILINOS_KLU_SINGULAR;
@@ -112345,6 +112349,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       if (common->status != TRILINOS_KLU_SINGULAR) {
         break;
       }
+      saw_singular = 1;
       k = (UF_long)common->numerical_rank;
     }
     if (k == KLS_KLU_EMPTY || k >= n || solver->pivot_nudge_count >= 64u) {
@@ -112426,12 +112431,14 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
               (long)refactor_ok, (int)common->status,
               (long)common->singular_col);
     }
+    const int rescue_worthwhile =
+      common->status == TRILINOS_KLU_SINGULAR || saw_singular;
     common->status = TRILINOS_KLU_OK;
     common->numerical_rank = KLS_KLU_EMPTY;
     common->singular_col = KLS_KLU_EMPTY;
     free_pivot_nudges(solver);
-    if (getenv("KLS_ENABLE_PIVOT_FILL") == NULL ||
-        !kls_predicted_pivoting_fill(solver, numeric_values)) {
+    if (!rescue_worthwhile ||
+        !kls_predicted_pivot_rescue(solver, numeric_values, elapsed)) {
       if (getenv("KLS_TRACE_PREDICTED") != NULL) {
         fprintf(stderr, "KLS predicted: pivoting fill reject status=%d\n",
                 (int)common->status);
@@ -112534,9 +112541,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
               residual, refine_iters);
     }
     if (!(residual < 1e-9)) {
-      if (probe_attempt == 0 && !pivot_fill_used &&
-          getenv("KLS_ENABLE_PIVOT_FILL") != NULL &&
-          kls_predicted_pivoting_fill(solver, numeric_values)) {
+      if (0 && probe_attempt == 0 && !pivot_fill_used &&
+          kls_predicted_pivot_rescue(solver, numeric_values, elapsed)) {
         pivot_fill_used = 1;
         if (getenv("KLS_TRACE_PREDICTED") != NULL) {
           fprintf(stderr,
@@ -112577,6 +112583,285 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
    through the pattern's row lists) all swap, exactly as in dense getrf.
    The solve probe remains the arbiter for the rare pivot that the bound
    cannot express. */
+
+/* Suffix-close the predicted pattern over its supernode run spans: whenever
+   a column's pattern hits a run row, extend it to the run's end.  On the U
+   side this is a running merge of the run columns' U lists, which makes the
+   construction linear in the closed output.  Closure removes the one-sided
+   veto cases entirely, so the pivoting fill can swap any weak pivot with
+   any in-run candidate.  Values are left uninitialized; the pivoting fill
+   rewrites every pattern position. */
+static int kls_predicted_suffix_close_numeric(kls_solver *solver) {
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_common *common = &solver->common;
+  if (numeric == NULL || symbolic == NULL || solver->snode_run_end == NULL) {
+    return 0;
+  }
+  const UF_long nblocks = symbolic->nblocks;
+  const UF_long *R = symbolic->R;
+  const UF_long maxblock = symbolic->maxblock;
+  UF_long *merge = (UF_long *)malloc((size_t)maxblock * sizeof(*merge));
+  UF_long *merge_next = (UF_long *)malloc((size_t)maxblock *
+                                          sizeof(*merge_next));
+  UF_long *closed_llen = (UF_long *)malloc((size_t)maxblock *
+                                           sizeof(*closed_llen));
+  UF_long *closed_ulen_buf = (UF_long *)malloc((size_t)maxblock *
+                                               sizeof(*closed_ulen_buf));
+  UF_long *cursor = (UF_long *)malloc((size_t)maxblock * sizeof(*cursor));
+  if (merge == NULL || merge_next == NULL || closed_llen == NULL ||
+      closed_ulen_buf == NULL || cursor == NULL) {
+    free(merge);
+    free(merge_next);
+    free(closed_llen);
+    free(closed_ulen_buf);
+    free(cursor);
+    return 0;
+  }
+  int ok = 1;
+  UF_long total_lnz = 0;
+  UF_long total_unz = 0;
+  UF_long max_lnz_block = 1;
+  UF_long max_unz_block = 1;
+
+  for (UF_long block = 0; block < nblocks && ok; ++block) {
+    const UF_long k1 = R[block];
+    const UF_long k2 = R[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (nk <= 1u) {
+      total_lnz += 1;
+      total_unz += 1;
+      continue;
+    }
+    double *lu = (double *)numeric->LUbx[block];
+    if (lu == NULL) {
+      ok = 0;
+      break;
+    }
+    UF_long *uip = (UF_long *)malloc((size_t)nk * sizeof(*uip));
+    UF_long *ulen = (UF_long *)malloc((size_t)nk * sizeof(*ulen));
+    if (uip == NULL || ulen == NULL) {
+      free(uip);
+      free(ulen);
+      ok = 0;
+      break;
+    }
+    memcpy(uip, numeric->Uip + k1, (size_t)nk * sizeof(*uip));
+    memcpy(ulen, numeric->Ulen + k1, (size_t)nk * sizeof(*ulen));
+
+    /* Pass 1: full-span union sizes.  For a span S=[s,e) the closed U list
+       of column k is (union of the span's unpadded U lists, below k) plus
+       the dense in-span range [s,k): every earlier column that touches the
+       span then carries its whole remainder, so any in-span row swap keeps
+       every stored value inside every pattern. */
+    memset(closed_llen, 0, (size_t)nk * sizeof(*closed_llen));
+    UF_long *closed_ulen = closed_ulen_buf;
+    UF_long block_unz = 0;
+    size_t lusize = 0;
+    for (UF_long s = 0; s < nk;) {
+      UF_long e = solver->snode_run_end[k1 + s] - k1;
+      if (e <= s || e > nk) {
+        e = s + 1u;
+      }
+      /* running (suffix) merge: column k sees the union of U lists of
+         span columns up to and including itself, plus the dense range */
+      UF_long union_len = 0;
+      for (UF_long k = s; k < e; ++k) {
+        UF_long *ui = NULL;
+        double *ux = NULL;
+        UF_long ucol_len = 0;
+        kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+        (void)ux;
+        UF_long a = 0;
+        UF_long b = 0;
+        UF_long w = 0;
+        while (a < union_len || b < ucol_len) {
+          const UF_long va = a < union_len ? merge[a] : nk;
+          const UF_long vb = b < ucol_len ? ui[b] : nk;
+          UF_long v = va < vb ? va : vb;
+          if (va == v) {
+            a++;
+          }
+          if (vb == v) {
+            b++;
+          }
+          merge_next[w++] = v;
+        }
+        memcpy(merge, merge_next, (size_t)w * sizeof(*merge));
+        union_len = w;
+        UF_long upos = 0;
+        while (upos < union_len && merge[upos] < k) {
+          upos++;
+        }
+        /* count = |union below k| + |[s,k)| - |union ∩ [s,k)| */
+        UF_long in_span_dup = 0;
+        for (UF_long p = 0; p < upos; ++p) {
+          if (merge[p] >= s) {
+            in_span_dup = upos - p;
+            break;
+          }
+        }
+        const UF_long cw = upos + (k - s) - in_span_dup;
+        closed_ulen[k] = cw;
+        block_unz += cw;
+        lusize += 2u * (size_t)cw;
+        /* L counts via the same membership */
+        {
+          UF_long p = 0;
+          UF_long rr = s;
+          while (p < upos || rr < k) {
+            const UF_long vu = p < upos ? merge[p] : nk;
+            const UF_long vr = rr < k ? rr : nk;
+            UF_long v = vu < vr ? vu : vr;
+            if (vu == v) {
+              p++;
+            }
+            if (vr == v) {
+              rr++;
+            }
+            closed_llen[v]++;
+          }
+        }
+      }
+      s = e;
+    }
+    UF_long block_lnz = 0;
+    for (UF_long jj = 0; jj < nk; ++jj) {
+      block_lnz += closed_llen[jj];
+      lusize += 2u * (size_t)closed_llen[jj];
+    }
+    if (lusize == 0) {
+      lusize = 1;
+    }
+    double *new_lu =
+      (double *)trilinos_klu_l_malloc(lusize, sizeof(double), common);
+    if (new_lu == NULL || common->status < TRILINOS_KLU_OK) {
+      common->status = TRILINOS_KLU_OK;
+      free(uip);
+      free(ulen);
+      ok = 0;
+      break;
+    }
+    /* layout */
+    UF_long *nlip = numeric->Lip + k1;
+    UF_long *nllen = numeric->Llen + k1;
+    UF_long *nuip = numeric->Uip + k1;
+    UF_long *nulen = numeric->Ulen + k1;
+    size_t off = 0;
+    for (UF_long k = 0; k < nk; ++k) {
+      nlip[k] = (UF_long)off;
+      off += 2u * (size_t)closed_llen[k];
+      nuip[k] = (UF_long)off;
+      off += 2u * (size_t)closed_ulen[k];
+    }
+    memcpy(cursor, nlip, (size_t)nk * sizeof(*cursor));
+    /* Pass 2: emit closed lists and scatter L rows. */
+    for (UF_long s = 0; s < nk;) {
+      UF_long e = solver->snode_run_end[k1 + s] - k1;
+      if (e <= s || e > nk) {
+        e = s + 1u;
+      }
+      UF_long union_len = 0;
+      for (UF_long k = s; k < e; ++k) {
+        UF_long *ui = NULL;
+        double *ux = NULL;
+        UF_long ucol_len = 0;
+        kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+        (void)ux;
+        UF_long a = 0;
+        UF_long b = 0;
+        UF_long w = 0;
+        while (a < union_len || b < ucol_len) {
+          const UF_long va = a < union_len ? merge[a] : nk;
+          const UF_long vb = b < ucol_len ? ui[b] : nk;
+          UF_long v = va < vb ? va : vb;
+          if (va == v) {
+            a++;
+          }
+          if (vb == v) {
+            b++;
+          }
+          merge_next[w++] = v;
+        }
+        memcpy(merge, merge_next, (size_t)w * sizeof(*merge));
+        union_len = w;
+        UF_long upos = 0;
+        while (upos < union_len && merge[upos] < k) {
+          upos++;
+        }
+        UF_long *nui = (UF_long *)(new_lu + nuip[k]);
+        UF_long p = 0;
+        UF_long rr = s;
+        UF_long ew = 0;
+        while (p < upos || rr < k) {
+          const UF_long vu = p < upos ? merge[p] : nk;
+          const UF_long vr = rr < k ? rr : nk;
+          UF_long v = vu < vr ? vu : vr;
+          if (vu == v) {
+            p++;
+          }
+          if (vr == v) {
+            rr++;
+          }
+          nui[ew++] = v;
+          UF_long *nli = (UF_long *)(new_lu + nlip[v]);
+          nli[cursor[v] - nlip[v]] = k;
+          cursor[v] += 1u;
+        }
+        if (ew != closed_ulen[k]) {
+          ok = 0;
+          break;
+        }
+        nulen[k] = ew;
+      }
+      if (!ok) {
+        break;
+      }
+      s = e;
+    }
+    if (ok) {
+      for (UF_long k = 0; k < nk; ++k) {
+        if (cursor[k] - nlip[k] != closed_llen[k]) {
+          ok = 0;
+          break;
+        }
+        nllen[k] = closed_llen[k];
+      }
+    }
+    free(uip);
+    free(ulen);
+    if (!ok) {
+      trilinos_klu_l_free(new_lu, lusize, sizeof(double), common);
+      break;
+    }
+    trilinos_klu_l_free(numeric->LUbx[block], numeric->LUsize[block],
+                        sizeof(double), common);
+    numeric->LUbx[block] = new_lu;
+    numeric->LUsize[block] = lusize;
+    total_lnz += block_lnz + nk;
+    total_unz += block_unz + nk;
+    if (block_lnz + nk > max_lnz_block) {
+      max_lnz_block = block_lnz + nk;
+    }
+    if (block_unz + nk > max_unz_block) {
+      max_unz_block = block_unz + nk;
+    }
+  }
+  free(merge);
+  free(merge_next);
+  free(closed_llen);
+  free(closed_ulen_buf);
+  free(cursor);
+  if (!ok) {
+    return 0;
+  }
+  numeric->lnz = total_lnz;
+  numeric->unz = total_unz;
+  numeric->max_lnz_block = max_lnz_block;
+  numeric->max_unz_block = max_unz_block;
+  return 1;
+}
+
 static int kls_predicted_pivoting_fill(kls_solver *solver,
                                        const double *numeric_values) {
   trilinos_klu_l_numeric *numeric = solver->numeric;
@@ -112619,16 +112904,22 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
   UF_long *cur_slot = (UF_long *)malloc((size_t)maxblock * sizeof(*cur_slot));
   UF_long *row_cols_ptr =
     (UF_long *)malloc(((size_t)maxblock + 1u) * sizeof(*row_cols_ptr));
+  unsigned char *cand_tried =
+    (unsigned char *)calloc((size_t)maxblock, sizeof(*cand_tried));
   UF_long *row_cols = NULL;
   UF_long row_cols_capacity = 0;
-  if (x == NULL || cur_slot == NULL || row_cols_ptr == NULL) {
+  if (x == NULL || cur_slot == NULL || row_cols_ptr == NULL ||
+      cand_tried == NULL) {
     free(x);
     free(cur_slot);
     free(row_cols_ptr);
+    free(cand_tried);
     return 0;
   }
 
   int ok = 1;
+  UF_long swap_count = 0;
+  UF_long veto_count = 0;
   for (UF_long block = 0; block < nblocks && ok; ++block) {
     const UF_long k1 = R[block];
     const UF_long k2 = R[block + 1u];
@@ -112770,24 +113061,44 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
           run_end_local = k + 1u;
         }
       }
-      for (UF_long p = 0; p < lcol_len; ++p) {
-        if (li[p] >= run_end_local) {
-          break;
-        }
-        const double av = fabs(x[li[p]]);
-        if (av > cmax) {
-          cmax = av;
-          best = li[p];
-        }
+      UF_long in_run_len = 0;
+      while (in_run_len < lcol_len && li[in_run_len] < run_end_local) {
+        in_run_len++;
       }
-      /* The tolerance still weighs the whole column. */
-      double colmax_all = cmax;
+      double colmax_all = fabs(ukk);
       for (UF_long p = 0; p < lcol_len; ++p) {
         const double av = fabs(x[li[p]]);
         colmax_all = colmax_all < av ? av : colmax_all;
       }
       cmax = colmax_all;
-      if (best != KLS_KLU_EMPTY && fabs(ukk) < tol * cmax) {
+      /* Candidates by descending magnitude; a veto moves to the next one
+         instead of giving up on the swap entirely. */
+      if (fabs(ukk) < tol * cmax) {
+        for (UF_long p = 0; p < in_run_len; ++p) {
+          cand_tried[li[p]] = 0;
+        }
+        for (int attempt = 0; attempt < 8; ++attempt) {
+          double best_av = fabs(ukk);
+          UF_long pick = KLS_KLU_EMPTY;
+          for (UF_long p = 0; p < in_run_len; ++p) {
+            if (cand_tried[li[p]]) {
+              continue;
+            }
+            const double av = fabs(x[li[p]]);
+            if (av > best_av) {
+              best_av = av;
+              pick = li[p];
+            }
+          }
+          if (pick == KLS_KLU_EMPTY) {
+            break;
+          }
+          cand_tried[pick] = 1;
+          best = pick;
+          break;
+        }
+      }
+      while (best != KLS_KLU_EMPTY && fabs(ukk) < tol * cmax) {
         /* A swap is only performed when every earlier column carries both
            slots or neither: a one-sided column would have to drop a stored
            value outside its fixed pattern, corrupting the factor. */
@@ -112815,8 +113126,26 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
           }
         }
         if (vetoed) {
+          veto_count++;
+          /* next candidate by magnitude */
+          double best_av = fabs(ukk);
           best = KLS_KLU_EMPTY;
+          for (UF_long p = 0; p < in_run_len; ++p) {
+            if (cand_tried[li[p]]) {
+              continue;
+            }
+            const double av = fabs(x[li[p]]);
+            if (av > best_av) {
+              best_av = av;
+              best = li[p];
+            }
+          }
+          if (best != KLS_KLU_EMPTY) {
+            cand_tried[best] = 1;
+          }
+          continue;
         }
+        break;
       }
       if (best != KLS_KLU_EMPTY && fabs(ukk) < tol * cmax) {
         /* Swap slots k and best: workspace, pending scatters, and the
@@ -112902,14 +113231,66 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
           }
         }
         ukk = x[k];
+        swap_count++;
       }
       x[k] = 0.0;
       if (ukk == 0.0) {
-        common->status = TRILINOS_KLU_SINGULAR;
-        common->numerical_rank = gk;
-        common->singular_col = Q[gk];
-        ok = 0;
-        break;
+        /* No in-run candidate: fall back to a diagonal correction that the
+           persistent nudge list replays on every later refactorization. */
+        double sigma = tol * (colmax_all > 0.0 ? colmax_all : 1.0);
+        UF_long diag_pos = KLS_KLU_EMPTY;
+        for (UF_long p = map_block_start[gk];
+             p < solver->refactor_col_ptr[gk + 1u]; ++p) {
+          const UF_long slot0 = solver->refactor_row_idx[p] - k1;
+          if (cur_slot[slot0] == k) {
+            diag_pos = solver->refactor_input_pos[p];
+            break;
+          }
+        }
+        if (diag_pos == KLS_KLU_EMPTY ||
+            solver->pivot_nudge_count >=
+              (solver->pivot_nudge_capacity > 0
+                 ? solver->pivot_nudge_capacity : 0)) {
+          if (diag_pos == KLS_KLU_EMPTY && solver->pivot_nudge_values == NULL) {
+            /* allocate below */
+          }
+        }
+        if (diag_pos != KLS_KLU_EMPTY) {
+          if (solver->pivot_nudge_values == NULL) {
+            solver->pivot_nudge_values = (double *)malloc(
+              (size_t)solver->nnz * sizeof(*solver->pivot_nudge_values));
+            solver->pivot_nudge_pos = (UF_long *)malloc(
+              1024u * sizeof(*solver->pivot_nudge_pos));
+            solver->pivot_nudge_sigma = (double *)malloc(
+              1024u * sizeof(*solver->pivot_nudge_sigma));
+            if (solver->pivot_nudge_values == NULL ||
+                solver->pivot_nudge_pos == NULL ||
+                solver->pivot_nudge_sigma == NULL) {
+              free_pivot_nudges(solver);
+              diag_pos = KLS_KLU_EMPTY;
+            } else {
+              solver->pivot_nudge_capacity = 1024u;
+            }
+          }
+        }
+        if (diag_pos != KLS_KLU_EMPTY &&
+            solver->pivot_nudge_count < solver->pivot_nudge_capacity) {
+          solver->pivot_nudge_pos[solver->pivot_nudge_count] = diag_pos;
+          solver->pivot_nudge_sigma[solver->pivot_nudge_count] = sigma;
+          solver->pivot_nudge_count++;
+          ukk = sigma;
+          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+            fprintf(stderr,
+                    "KLS predicted: pivot fill nudge col=%ld sigma=%.3e\n",
+                    (long)gk, sigma);
+          }
+        } else {
+          common->status = TRILINOS_KLU_SINGULAR;
+          common->numerical_rank = gk;
+          common->singular_col = Q[gk];
+          ok = 0;
+          break;
+        }
       }
       ((double *)numeric->Udiag)[gk] = ukk;
       for (UF_long p = 0; p < lcol_len; ++p) {
@@ -112921,12 +113302,77 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
   free(x);
   free(cur_slot);
   free(row_cols_ptr);
+  free(cand_tried);
   free(row_cols);
+  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+    fprintf(stderr, "KLS predicted: pivot fill swaps=%ld vetoes=%ld ok=%d\n",
+            (long)swap_count, (long)veto_count, ok);
+  }
   if (!ok) {
     return 0;
   }
   common->status = TRILINOS_KLU_OK;
   return 1;
+}
+
+
+/* Rescue path: suffix-close the pattern, rebuild the derived structures on
+   it, and refactor with pattern-restricted pivoting.  The closed fill must
+   stay near the ordering estimate, or the pivoted KLU factorization is the
+   better numeric and the rescue declines. */
+static int kls_predicted_pivot_rescue(kls_solver *solver,
+                                      const double *numeric_values,
+                                      double *elapsed) {
+  if (getenv("KLS_ENABLE_PIVOT_FILL") == NULL || solver->numeric == NULL ||
+      solver->symbolic == NULL) {
+    return 0;
+  }
+  const double est_total = solver->symbolic->lnz + solver->symbolic->unz;
+  if (est_total > 0.0 &&
+      (double)(solver->numeric->lnz + solver->numeric->unz) >
+        1.2 * est_total) {
+    return 0;
+  }
+  if (solver->snode_run_end == NULL) {
+    free_snode_panels(solver);
+    solver->snode_numeric_pre_sorted = 1;
+    kls_maybe_prepare_snode_panels(solver, elapsed);
+    if (solver->snode_run_end == NULL) {
+      return 0;
+    }
+  }
+  if (!kls_predicted_suffix_close_numeric(solver)) {
+    return 0;
+  }
+  if (est_total > 0.0 &&
+      (double)(solver->numeric->lnz + solver->numeric->unz) >
+        1.6 * est_total) {
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS predicted: closure fill reject %.3e vs est %.3e\n",
+              (double)(solver->numeric->lnz + solver->numeric->unz),
+              est_total);
+    }
+    return 0;
+  }
+  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+    fprintf(stderr, "KLS predicted: closed fill=%ld+%ld\n",
+            (long)solver->numeric->lnz, (long)solver->numeric->unz);
+  }
+  /* The fill must pivot within the very spans the closure guaranteed, so
+     the pre-closure run partition stays live through it; the wider runs of
+     the closed pattern are re-detected afterwards for the refactor path. */
+  free_refactor_lu_pointer_cache(solver);
+  free_refactor_map(solver);
+  free_refactor_schedule(solver);
+  const int filled = kls_predicted_pivoting_fill(solver, numeric_values);
+  free_snode_panels(solver);
+  solver->snode_numeric_pre_sorted = 1;
+  kls_maybe_prepare_snode_panels(solver, elapsed);
+  free_refactor_map(solver);
+  free_refactor_schedule(solver);
+  maybe_prepare_refactor_map(solver, elapsed);
+  maybe_prepare_refactor_schedule(solver, elapsed);
+  return filled;
 }
 
 int kls_factor(kls_solver *solver, const double *values) {
