@@ -110851,8 +110851,12 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                               double *numeric_values,
                                               double *elapsed) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric != NULL ||
-      numeric_values == NULL || solver->n < 100000 ||
-      solver->common.scale > 0 || solver->options.pivot_tolerance <= 0.0) {
+      numeric_values == NULL || solver->n < 20000 ||
+      solver->options.pivot_tolerance <= 0.0) {
+    return 0;
+  }
+  if (solver->common.scale > 0 &&
+      solver->options.scale != KLS_SCALE_AUTO) {
     return 0;
   }
   trilinos_klu_l_symbolic *symbolic = solver->symbolic;
@@ -110870,14 +110874,25 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
      scale; below it the prediction attempt (build + fill + probe) costs
      more than it saves and the symmetrized pattern can carry extra fill
      into every refactorization. */
-  if (n < 500000 && !(symbolic->lnz >= 8.0e6)) {
+  if (n < 500000 && !(symbolic->lnz >= 5.0e6)) {
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS predicted: skipped n=%ld est_lnz=%.3e\n",
+              (long)n, symbolic->lnz);
+    }
     return 0;
   }
   const double start = kls_now_seconds();
+  /* The predicted factorization runs unscaled: the solve probe proves the
+     result, and every strong-diagonal candidate that reaches this path
+     settles on the unscaled mode in the auto-scale trials anyway.  Restore
+     the mode on any rejection. */
+  const UF_long saved_scale = solver->common.scale;
+  solver->common.scale = -1;
 
   UF_long *pinv = (UF_long *)malloc((size_t)n * sizeof(*pinv));
   UF_long *col_block = (UF_long *)malloc((size_t)n * sizeof(*col_block));
   if (pinv == NULL || col_block == NULL) {
+    solver->common.scale = saved_scale;
     free(pinv);
     free(col_block);
     return 0;
@@ -111002,6 +111017,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     if (ok) {
       numeric->Offp[n] = poff;
       ok = poff == symbolic->nzoff;
+      if (!ok && getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr, "KLS predicted: off count %ld != nzoff %ld\n",
+                (long)poff, (long)symbolic->nzoff);
+      }
     }
   }
 
@@ -111137,7 +111156,14 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         ucol_ptr[k] = dst;
       }
       ucol_ptr[nk] = out;
-      if (diag_seen != nk || out > bnz + bnz / 8u + nk) {
+      if (diag_seen != nk || out > 2u * bnz + nk) {
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr,
+                  "KLS predicted: block reject nk=%ld diag=%ld/%ld union=%ld"
+                  " bound=%ld\n",
+                  (long)nk, (long)diag_seen, (long)nk, (long)out,
+                  (long)(2u * bnz + nk));
+        }
         free(ucol_ptr);
         free(urows);
         ok = 0;
@@ -111309,7 +111335,23 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   free(col_block);
   free(pinv);
 
+  if (ok) {
+    const double est_total = symbolic->lnz + symbolic->unz;
+    const double exact_total = (double)total_lnz + (double)total_unz;
+    if (est_total > 0.0 && exact_total > 2.0 * est_total + (double)n) {
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr,
+                "KLS predicted: fill reject exact=%.3e est=%.3e\n",
+                exact_total, est_total);
+      }
+      ok = 0;
+    }
+  }
   if (!ok) {
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS predicted: construction rejected\n");
+    }
+    solver->common.scale = saved_scale;
     if (numeric != NULL) {
       trilinos_klu_l_free_numeric(&numeric, common);
     }
@@ -111339,8 +111381,18 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   kls_update_numeric_diagnostics(solver, 0);
   const double build_done = kls_now_seconds();
   kls_maybe_prepare_snode_panels(solver, elapsed);
+  const double snode_done = kls_now_seconds();
   maybe_prepare_refactor_map(solver, elapsed);
+  const double map_done = kls_now_seconds();
   maybe_prepare_refactor_schedule(solver, elapsed);
+  const double sched_done = kls_now_seconds();
+  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+    fprintf(stderr,
+            "KLS predicted: preps snode=%.2fs map=%.2fs sched=%.2fs"
+            " fill=%ld+%ld\n",
+            snode_done - build_done, map_done - snode_done,
+            sched_done - map_done, (long)total_lnz, (long)total_unz);
+  }
   const UF_long refactor_ok =
     kls_parallel_refactor(solver, numeric_values, 0);
   if (getenv("KLS_TRACE_PREDICTED") != NULL) {
@@ -111349,8 +111401,15 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   }
   if (!refactor_ok || common->status < TRILINOS_KLU_OK ||
       common->status == TRILINOS_KLU_SINGULAR) {
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr,
+              "KLS predicted: fill reject ok=%ld status=%d singular_col=%ld\n",
+              (long)refactor_ok, (int)common->status,
+              (long)common->singular_col);
+    }
     free_numeric(solver);
     common->status = TRILINOS_KLU_OK;
+    common->scale = saved_scale;
     *elapsed += kls_now_seconds() - start;
     return 0;
   }
@@ -111359,8 +111418,13 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     UF_long rejected_pivot_col = KLS_KLU_EMPTY;
     if (!kls_numeric_pivots_pass_threshold(solver, &rejected_pivot,
                                            &rejected_pivot_col)) {
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr, "KLS predicted: threshold reject col=%ld\n",
+                (long)rejected_pivot_col);
+      }
       free_numeric(solver);
       common->status = TRILINOS_KLU_OK;
+      common->scale = saved_scale;
       *elapsed += kls_now_seconds() - start;
       return 0;
     }
@@ -111375,6 +111439,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     if (probe_b == NULL) {
       free_numeric(solver);
       common->status = TRILINOS_KLU_OK;
+      common->scale = saved_scale;
       *elapsed += kls_now_seconds() - start;
       return 0;
     }
@@ -111417,6 +111482,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     if (!(residual < 1e-9)) {
       free_numeric(solver);
       common->status = TRILINOS_KLU_OK;
+      common->scale = saved_scale;
       *elapsed += kls_now_seconds() - start;
       return 0;
     }
@@ -111440,6 +111506,11 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         const double *lx = lu + numeric->Lip[k] + len;
         for (UF_long p = 0; p < len; ++p) {
           if (!(fabs(lx[p]) <= max_multiplier)) {
+            if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+              fprintf(stderr,
+                      "KLS predicted: multiplier reject col=%ld |l|=%.3e\n",
+                      (long)k, fabs(lx[p]));
+            }
             free_numeric(solver);
             common->status = TRILINOS_KLU_OK;
             *elapsed += kls_now_seconds() - start;
@@ -111449,6 +111520,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       }
     }
   }
+  solver->auto_scale_checked = 1;
   *elapsed += kls_now_seconds() - start;
   return 1;
 }
