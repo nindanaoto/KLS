@@ -111644,7 +111644,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
      scale; below it the prediction attempt (build + fill + probe) costs
      more than it saves and the symmetrized pattern can carry extra fill
      into every refactorization. */
-  if (n < 500000 && !(symbolic->lnz >= 5.0e6)) {
+  if (n < 500000 && !(symbolic->lnz >= 5.0e6) &&
+      getenv("KLS_FORCE_PIVOT_FILL") == NULL) {
     if (getenv("KLS_TRACE_PREDICTED") != NULL) {
       fprintf(stderr, "KLS predicted: skipped n=%ld est_lnz=%.3e\n",
               (long)n, symbolic->lnz);
