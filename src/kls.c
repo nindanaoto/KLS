@@ -319,6 +319,11 @@ struct kls_solver {
   int snode_prepared;
   int snode_numeric_pre_sorted;
   int numeric_is_predicted;
+  UF_long *pivot_nudge_pos;
+  double *pivot_nudge_sigma;
+  double *pivot_nudge_values;
+  UF_long pivot_nudge_count;
+  UF_long pivot_nudge_capacity;
   UF_long **refactor_l_indices;
   int32_t **refactor_l_indices32;
   int32_t *refactor_l_indices32_storage;
@@ -20675,7 +20680,23 @@ static void free_snode_panels(kls_solver *solver) {
   solver->snode_numeric_pre_sorted = 0;
 }
 
+/* Diagonal nudges make an accepted predicted numeric the exact factor of
+   A plus a tiny explicit diagonal correction: every refactorization applies
+   the same correction, so zero pivots stay rescued across the whole cycle
+   while the solve probe measured the honest residual against A itself. */
+static void free_pivot_nudges(kls_solver *solver) {
+  free(solver->pivot_nudge_pos);
+  free(solver->pivot_nudge_sigma);
+  free(solver->pivot_nudge_values);
+  solver->pivot_nudge_pos = NULL;
+  solver->pivot_nudge_sigma = NULL;
+  solver->pivot_nudge_values = NULL;
+  solver->pivot_nudge_count = 0;
+  solver->pivot_nudge_capacity = 0;
+}
+
 static void free_numeric(kls_solver *solver) {
+  free_pivot_nudges(solver);
   free_snode_panels(solver);
   destroy_egraph_refactor_pool(solver);
   free_egraph_worker_scratch(solver);
@@ -20701,6 +20722,7 @@ static void free_numeric(kls_solver *solver) {
    derived from the old numeric's pattern or storage is now stale and must
    be dropped, or later refactorizations read freed or mismatched LU data. */
 static void kls_numeric_replaced_invalidate(kls_solver *solver) {
+  free_pivot_nudges(solver);
   free_snode_panels(solver);
   free_egraph_algorithm5_payoff_queue(solver);
   free_egraph_algorithm5_payoff_runtime_state(solver);
@@ -86081,6 +86103,16 @@ static void maybe_prepare_refactor_schedule(kls_solver *solver,
 static UF_long kls_parallel_refactor(kls_solver *solver,
                                      double *numeric_values,
                                      int check_pivots) {
+  if (solver->pivot_nudge_count > 0 && solver->pivot_nudge_values != NULL &&
+      numeric_values != solver->pivot_nudge_values) {
+    memcpy(solver->pivot_nudge_values, numeric_values,
+           (size_t)solver->nnz * sizeof(*numeric_values));
+    for (UF_long i = 0; i < solver->pivot_nudge_count; ++i) {
+      solver->pivot_nudge_values[solver->pivot_nudge_pos[i]] +=
+        solver->pivot_nudge_sigma[i];
+    }
+    numeric_values = solver->pivot_nudge_values;
+  }
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
   kls_clear_egraph_refactor_last_stats(solver);
   kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_NONE);
@@ -111393,8 +111425,219 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
             snode_done - build_done, map_done - snode_done,
             sched_done - map_done, (long)total_lnz, (long)total_unz);
   }
-  const UF_long refactor_ok =
-    kls_parallel_refactor(solver, numeric_values, 0);
+  UF_long refactor_ok = 0;
+  for (UF_long fill_round = 0; fill_round < 8u; ++fill_round) {
+    refactor_ok = kls_parallel_refactor(solver, numeric_values, 0);
+    UF_long k = KLS_KLU_EMPTY;
+    if (refactor_ok && common->status >= TRILINOS_KLU_OK &&
+        common->status != TRILINOS_KLU_SINGULAR) {
+      UF_long threshold_pivot = KLS_KLU_EMPTY;
+      UF_long threshold_col = KLS_KLU_EMPTY;
+      if (kls_numeric_pivots_pass_threshold(solver, &threshold_pivot,
+                                            &threshold_col)) {
+        break;
+      }
+      /* Pivots too small for the 1/tol multiplier bound: nudge every
+         violating column at once, each by the amount its own multipliers
+         require, so the round count depends on escalation depth rather
+         than on how many weak pivots the matrix has.  The solve probe
+         stays the accuracy arbiter. */
+      const double tolv = common->tol > 0.0 ? common->tol : 0.001;
+      UF_long batch_nudged = 0;
+      int batch_failed = 0;
+      for (UF_long block = 0; block < nblocks && !batch_failed; ++block) {
+        const UF_long bk1 = R[block];
+        const UF_long bk2 = R[block + 1u];
+        if (bk2 - bk1 <= 1u) {
+          continue;
+        }
+        double *lu = (double *)numeric->LUbx[block];
+        const UF_long *lip = numeric->Lip + bk1;
+        const UF_long *llen = numeric->Llen + bk1;
+        const double *udiag = (const double *)numeric->Udiag;
+        for (UF_long kk = 0; kk < bk2 - bk1; ++kk) {
+          UF_long *li = NULL;
+          double *lx = NULL;
+          UF_long lcol_len = 0;
+          kls_klu_get_pointer(lu, lip, llen, kk, &li, &lx, &lcol_len);
+          (void)li;
+          double maxmult = 0.0;
+          int bad = 0;
+          for (UF_long p = 0; p < lcol_len; ++p) {
+            const double v = fabs(lx[p]);
+            if (!isfinite(v)) {
+              bad = 1;
+              break;
+            }
+            maxmult = maxmult < v ? v : maxmult;
+          }
+          if (!bad && !(maxmult * tolv > 1.0 + 1.0e-12)) {
+            continue;
+          }
+          const UF_long gk = bk1 + kk;
+          const UF_long goldcol = Q[gk];
+          UF_long gdiag_pos = KLS_KLU_EMPTY;
+          double gcolmax = 0.0;
+          for (UF_long p = solver->col_ptr[goldcol];
+               p < solver->col_ptr[goldcol + 1u]; ++p) {
+            const double av = fabs(numeric_values[p]);
+            gcolmax = gcolmax < av ? av : gcolmax;
+            if (numeric->Pinv[solver->row_idx[p]] == gk) {
+              gdiag_pos = p;
+            }
+          }
+          const double gpivot = fabs(udiag[gk]);
+          double sigma = bad || gpivot == 0.0
+            ? tolv * (gcolmax > 0.0 ? gcolmax : 1.0)
+            : 1.25 * tolv * maxmult * gpivot;
+          if (gdiag_pos == KLS_KLU_EMPTY) {
+            /* Diagonal present only through symmetrization: nothing in A to
+               nudge.  Leave the column to the solve probe. */
+            continue;
+          }
+          if (solver->pivot_nudge_count + batch_nudged >=
+              (solver->pivot_nudge_capacity > 0
+                 ? solver->pivot_nudge_capacity : 1024u)) {
+            batch_failed = 1;
+            break;
+          }
+          if (solver->pivot_nudge_values == NULL) {
+            solver->pivot_nudge_values = (double *)malloc(
+              (size_t)solver->nnz * sizeof(*solver->pivot_nudge_values));
+            solver->pivot_nudge_pos = (UF_long *)malloc(
+              1024u * sizeof(*solver->pivot_nudge_pos));
+            solver->pivot_nudge_sigma = (double *)malloc(
+              1024u * sizeof(*solver->pivot_nudge_sigma));
+            if (solver->pivot_nudge_values == NULL ||
+                solver->pivot_nudge_pos == NULL ||
+                solver->pivot_nudge_sigma == NULL) {
+              free_pivot_nudges(solver);
+              batch_failed = 1;
+              break;
+            }
+            solver->pivot_nudge_capacity = 1024u;
+          }
+          UF_long slot = KLS_KLU_EMPTY;
+          for (UF_long i = 0; i < solver->pivot_nudge_count; ++i) {
+            if (solver->pivot_nudge_pos[i] == gdiag_pos) {
+              slot = i;
+              break;
+            }
+          }
+          if (slot != KLS_KLU_EMPTY) {
+            const double escalated = solver->pivot_nudge_sigma[slot] * 32.0;
+            solver->pivot_nudge_sigma[slot] =
+              sigma > escalated ? sigma : escalated;
+            if (!(fabs(solver->pivot_nudge_sigma[slot]) <=
+                  (gcolmax > 0.0 ? gcolmax : 1.0))) {
+              batch_failed = 1;
+              break;
+            }
+          } else {
+            solver->pivot_nudge_pos[solver->pivot_nudge_count] = gdiag_pos;
+            solver->pivot_nudge_sigma[solver->pivot_nudge_count] = sigma;
+            solver->pivot_nudge_count++;
+          }
+          batch_nudged++;
+        }
+      }
+      if (batch_failed) {
+        refactor_ok = 0;
+        break;
+      }
+      if (batch_nudged == 0) {
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr,
+                  "KLS predicted: threshold waived, probe arbitrates\n");
+        }
+        break;
+      }
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr,
+                "KLS predicted: batch nudged %ld columns (total %ld)"
+                " round=%ld\n",
+                (long)batch_nudged, (long)solver->pivot_nudge_count,
+                (long)fill_round);
+      }
+      common->status = TRILINOS_KLU_OK;
+      refactor_ok = 0;
+      continue;
+    } else {
+      /* Zero pivot: rescue it with a tiny explicit diagonal correction and
+         refill.  The correction persists with the numeric so every later
+         refactorization factors the same nudged matrix, and the solve probe
+         below still measures the residual against the original values. */
+      if (common->status != TRILINOS_KLU_SINGULAR) {
+        break;
+      }
+      k = (UF_long)common->numerical_rank;
+    }
+    if (k == KLS_KLU_EMPTY || k >= n || solver->pivot_nudge_count >= 64u) {
+      break;
+    }
+    const UF_long oldcol = Q[k];
+    UF_long diag_pos = KLS_KLU_EMPTY;
+    double colmax = 0.0;
+    for (UF_long p = solver->col_ptr[oldcol]; p < solver->col_ptr[oldcol + 1u];
+         ++p) {
+      const double av = fabs(numeric_values[p]);
+      colmax = colmax < av ? av : colmax;
+      if (numeric->Pinv[solver->row_idx[p]] == k) {
+        diag_pos = p;
+      }
+    }
+    if (diag_pos == KLS_KLU_EMPTY) {
+      break;
+    }
+    if (solver->pivot_nudge_values == NULL) {
+      solver->pivot_nudge_values = (double *)malloc(
+        (size_t)solver->nnz * sizeof(*solver->pivot_nudge_values));
+      solver->pivot_nudge_pos = (UF_long *)malloc(
+        1024u * sizeof(*solver->pivot_nudge_pos));
+      solver->pivot_nudge_sigma = (double *)malloc(
+        1024u * sizeof(*solver->pivot_nudge_sigma));
+      if (solver->pivot_nudge_values == NULL ||
+          solver->pivot_nudge_pos == NULL ||
+          solver->pivot_nudge_sigma == NULL) {
+        free_pivot_nudges(solver);
+        break;
+      }
+      solver->pivot_nudge_capacity = 1024u;
+    }
+    const double base = colmax > 0.0 ? colmax : 1.0;
+    UF_long existing = KLS_KLU_EMPTY;
+    for (UF_long i = 0; i < solver->pivot_nudge_count; ++i) {
+      if (solver->pivot_nudge_pos[i] == diag_pos) {
+        existing = i;
+        break;
+      }
+    }
+    if (existing != KLS_KLU_EMPTY) {
+      solver->pivot_nudge_sigma[existing] *= 32.0;
+      if (!(fabs(solver->pivot_nudge_sigma[existing]) <= base)) {
+        break;
+      }
+    } else {
+      const double tol_sigma =
+        (common->tol > 0.0 ? common->tol : 0.001) * base;
+      solver->pivot_nudge_pos[solver->pivot_nudge_count] = diag_pos;
+      solver->pivot_nudge_sigma[solver->pivot_nudge_count] = tol_sigma;
+      solver->pivot_nudge_count++;
+    }
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr,
+              "KLS predicted: nudge col=%ld sigma=%.3e round=%ld\n",
+              (long)k,
+              solver->pivot_nudge_sigma[existing != KLS_KLU_EMPTY
+                                          ? existing
+                                          : solver->pivot_nudge_count - 1u],
+              (long)fill_round);
+    }
+    common->status = TRILINOS_KLU_OK;
+    common->numerical_rank = KLS_KLU_EMPTY;
+    common->singular_col = KLS_KLU_EMPTY;
+    refactor_ok = 0;
+  }
   if (getenv("KLS_TRACE_PREDICTED") != NULL) {
     fprintf(stderr, "KLS predicted: build=%.2fs first_values=%.2fs\n",
             build_done - start, kls_now_seconds() - build_done);
@@ -111412,22 +111655,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     common->scale = saved_scale;
     *elapsed += kls_now_seconds() - start;
     return 0;
-  }
-  {
-    UF_long rejected_pivot = KLS_KLU_EMPTY;
-    UF_long rejected_pivot_col = KLS_KLU_EMPTY;
-    if (!kls_numeric_pivots_pass_threshold(solver, &rejected_pivot,
-                                           &rejected_pivot_col)) {
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr, "KLS predicted: threshold reject col=%ld\n",
-                (long)rejected_pivot_col);
-      }
-      free_numeric(solver);
-      common->status = TRILINOS_KLU_OK;
-      common->scale = saved_scale;
-      *elapsed += kls_now_seconds() - start;
-      return 0;
-    }
   }
   /* Reject numerically unstable no-pivot factorizations directly: solve
      A x = A e and require a small true residual.  Per-column multiplier
@@ -111485,39 +111712,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       common->scale = saved_scale;
       *elapsed += kls_now_seconds() - start;
       return 0;
-    }
-  }
-  /* Accept only numerics the checked refactorization would also accept:
-     a stored L multiplier above 1/tol is exactly the reject condition of
-     the checked kernels, and a numeric that mass-rejects there forces a
-     full pivoted rebuild on every repeat factorization. */
-  {
-    const double tol = common->tol > 0.0 ? common->tol : 0.001;
-    const double max_multiplier = 1.0 / tol;
-    for (UF_long block = 0; block < nblocks; ++block) {
-      const UF_long k1 = R[block];
-      const UF_long k2 = R[block + 1u];
-      if (k2 - k1 <= 1u) {
-        continue;
-      }
-      const double *lu = (const double *)numeric->LUbx[block];
-      for (UF_long k = k1; k < k2; ++k) {
-        const UF_long len = numeric->Llen[k];
-        const double *lx = lu + numeric->Lip[k] + len;
-        for (UF_long p = 0; p < len; ++p) {
-          if (!(fabs(lx[p]) <= max_multiplier)) {
-            if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-              fprintf(stderr,
-                      "KLS predicted: multiplier reject col=%ld |l|=%.3e\n",
-                      (long)k, fabs(lx[p]));
-            }
-            free_numeric(solver);
-            common->status = TRILINOS_KLU_OK;
-            *elapsed += kls_now_seconds() - start;
-            return 0;
-          }
-        }
-      }
     }
   }
   solver->auto_scale_checked = 1;
