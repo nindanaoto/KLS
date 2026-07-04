@@ -328,6 +328,8 @@ struct kls_solver {
   double *solve_refine_values;
   double base_solve_seconds;
   int fp32_decision;
+  int fp32_last_used;
+  int fp32_validated;
   int numeric_needs_refinement;
   int in_solve_refinement;
   UF_long **refactor_l_indices;
@@ -20741,6 +20743,8 @@ static void free_pivot_nudges(kls_solver *solver) {
 static void free_numeric(kls_solver *solver) {
   solver->numeric_needs_refinement = 0;
   solver->fp32_decision = 0;
+  solver->fp32_last_used = 0;
+  solver->fp32_validated = 0;
   solver->base_solve_seconds = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
@@ -20769,6 +20773,8 @@ static void free_numeric(kls_solver *solver) {
    be dropped, or later refactorizations read freed or mismatched LU data. */
 static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->fp32_decision = 0;
+  solver->fp32_last_used = 0;
+  solver->fp32_validated = 0;
   solver->base_solve_seconds = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
@@ -82985,6 +82991,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     }
     shared->use_fp32_l_values = solver->refactor_l_values32 != NULL;
   }
+  solver->fp32_last_used = shared->use_fp32_l_values;
   if (shared->use_fp32_l_values) {
     solver->numeric_needs_refinement = 1;
   }
@@ -86569,8 +86576,63 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     }
     return serial_ok;
   }
-  const int egraph =
+  int egraph =
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
+  if (egraph > 0 && solver->fp32_last_used && !solver->fp32_validated) {
+    /* First reduced-precision pass on this numeric: ill conditioning can
+       amplify the storage rounding beyond what refinement recovers, so
+       prove the factorization on A e before trusting the mode; on failure
+       redo this pass in double precision and lock the mode off. */
+    int probe_ok = 0;
+    double *probe = (double *)malloc(2u * (size_t)solver->n * sizeof(*probe));
+    if (probe != NULL) {
+      double *px = probe + solver->n;
+      for (UF_long i = 0; i < solver->n; ++i) {
+        probe[i] = 0.0;
+      }
+      for (UF_long j = 0; j < solver->n; ++j) {
+        for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
+             ++p) {
+          probe[solver->row_idx[p]] += numeric_values[p];
+        }
+      }
+      memcpy(px, probe, (size_t)solver->n * sizeof(*px));
+      if (trilinos_klu_l_solve(solver->symbolic, solver->numeric, solver->n,
+                               1, px, &solver->common) &&
+          solver->common.status >= TRILINOS_KLU_OK) {
+        double bmax = 0.0;
+        for (UF_long i = 0; i < solver->n; ++i) {
+          const double v = fabs(probe[i]);
+          bmax = bmax < v ? v : bmax;
+        }
+        for (UF_long j = 0; j < solver->n; ++j) {
+          const double xv = px[j];
+          if (xv == 0.0) {
+            continue;
+          }
+          for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
+               ++p) {
+            probe[solver->row_idx[p]] -= numeric_values[p] * xv;
+          }
+        }
+        double rmax = 0.0;
+        for (UF_long i = 0; i < solver->n; ++i) {
+          const double v = fabs(probe[i]);
+          rmax = rmax < v ? v : rmax;
+        }
+        probe_ok = rmax <= (bmax > 0.0 ? bmax : 1.0) * 1.0e-6;
+      }
+      free(probe);
+    }
+    if (probe_ok) {
+      solver->fp32_validated = 1;
+    } else {
+      solver->fp32_decision = -1;
+      solver->numeric_needs_refinement = 0;
+      egraph = kls_egraph_mapped_refactor(solver, numeric_values,
+                                          check_pivots);
+    }
+  }
   if (egraph >= 0) {
     kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_EGRAPH);
     if (egraph && check_pivots &&
@@ -111254,6 +111316,12 @@ static int kls_try_rebuild_current_numeric_with_kls_first(
    compute the first values with the ordinary refactorization; a pivot
    threshold check keeps the quality guarantees and any rejection falls
    back to the standard factorization. */
+static int kls_compare_uf_long_asc(const void *a, const void *b) {
+  const UF_long left = *(const UF_long *)a;
+  const UF_long right = *(const UF_long *)b;
+  return (left > right) - (left < right);
+}
+
 static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                               double *numeric_values,
                                               double *elapsed) {
@@ -111493,6 +111561,27 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
       }
     }
+    /* The union diagonal exists exactly where the block pattern has one:
+       check it before paying for the symmetrized union at all. */
+    {
+      UF_long diag_present = 0;
+      for (UF_long k = 0; k < nk; ++k) {
+        for (UF_long p = bcol_ptr[k]; p < bcol_ptr[k + 1u]; ++p) {
+          if (work_rows[p] == k) {
+            diag_present++;
+            break;
+          }
+        }
+      }
+      if (diag_present != nk) {
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr, "KLS predicted: diag precheck %ld/%ld\n",
+                  (long)diag_present, (long)nk);
+        }
+        ok = 0;
+        break;
+      }
+    }
     /* Symmetrize the block pattern: the symbolic Cholesky pattern of
        B | B' is the exact no-pivot LU bound (superset positions compute
        zeros), so mild asymmetry is absorbed instead of rejected.  Bail on
@@ -111540,6 +111629,12 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       for (UF_long k = 0; k < nk; ++k) {
         const UF_long lo = ucol_ptr[k];
         const UF_long hi = rowlen[k];
+        if (hi - lo > 48) {
+          /* Insertion sort is quadratic; spike columns in the union reach
+             hundreds of thousands of entries. */
+          qsort(urows + lo, (size_t)(hi - lo), sizeof(*urows),
+                kls_compare_uf_long_asc);
+        } else {
         for (UF_long a = lo + 1u; a < hi; ++a) {
           const UF_long v = urows[a];
           UF_long b = a;
@@ -111548,6 +111643,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
             b--;
           }
           urows[b] = v;
+        }
         }
         const UF_long dst = out;
         UF_long prev = KLS_KLU_EMPTY;
@@ -111801,7 +111897,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
             sched_done - map_done, (long)total_lnz, (long)total_unz);
   }
   UF_long refactor_ok = 0;
-  for (UF_long fill_round = 0; fill_round < 8u; ++fill_round) {
+  for (UF_long fill_round = 0; fill_round < 3u; ++fill_round) {
     refactor_ok = kls_parallel_refactor(solver, numeric_values, 0);
     UF_long k = KLS_KLU_EMPTY;
     if (refactor_ok && common->status >= TRILINOS_KLU_OK &&
@@ -112122,6 +112218,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     }
     if (refine_iters > 0) {
       solver->numeric_needs_refinement = 1;
+    }
+    if (solver->fp32_last_used) {
+      /* This probe just validated the reduced-precision fill. */
+      solver->fp32_validated = 1;
     }
   }
   solver->auto_scale_checked = 1;
@@ -112521,11 +112621,13 @@ static int solve_impl(kls_solver *solver,
       : solver->values;
     if (solver->solve_refine_workspace == NULL) {
       solver->solve_refine_workspace = (double *)malloc(
-        2u * (size_t)solver->n * sizeof(*solver->solve_refine_workspace));
+        3u * (size_t)solver->n * sizeof(*solver->solve_refine_workspace));
     }
     double *residual = solver->solve_refine_workspace;
     double *correction =
       residual != NULL ? residual + solver->n : NULL;
+    double *saved_x =
+      residual != NULL ? residual + 2u * (size_t)solver->n : NULL;
     const UF_long nloc = solver->n;
     for (int64_t rhs = 0; residual != NULL && rhs < nrhs; ++rhs) {
       const double *brhs = b + rhs * ldb;
@@ -112537,6 +112639,8 @@ static int solve_impl(kls_solver *solver,
       }
       const double target = (bmax > 0.0 ? bmax : 1.0) * 1.0e-12;
       double last_rmax = HUGE_VAL;
+      double initial_rmax = -1.0;
+      memcpy(saved_x, xrhs, (size_t)nloc * sizeof(*saved_x));
       for (int iter = 0; iter < 3; ++iter) {
         memcpy(residual, brhs, (size_t)nloc * sizeof(*residual));
         if (kernel_transpose) {
@@ -112565,7 +112669,17 @@ static int solve_impl(kls_solver *solver,
           const double av = fabs(residual[i]);
           rmax = rmax < av ? av : rmax;
         }
+        if (initial_rmax < 0.0) {
+          initial_rmax = rmax;
+        }
         if (rmax <= target || !(rmax < 0.5 * last_rmax)) {
+          if (initial_rmax >= 0.0 && rmax > initial_rmax) {
+            /* Refinement diverged: the factorization amplifies in this
+               direction.  Restore the unrefined solution and stop trading
+               refactorization precision on this numeric. */
+            memcpy(xrhs, saved_x, (size_t)nloc * sizeof(*saved_x));
+            solver->fp32_decision = -1;
+          }
           break;
         }
         last_rmax = rmax;
