@@ -325,6 +325,9 @@ struct kls_solver {
   UF_long pivot_nudge_count;
   UF_long pivot_nudge_capacity;
   double *solve_refine_workspace;
+  double *solve_refine_values;
+  double base_solve_seconds;
+  int fp32_decision;
   int numeric_needs_refinement;
   int in_solve_refinement;
   UF_long **refactor_l_indices;
@@ -335,6 +338,8 @@ struct kls_solver {
   int32_t **refactor_l_sorted_pos32;
   int32_t *refactor_l_sorted_pos32_storage;
   double **refactor_l_values;
+  float **refactor_l_values32;
+  float *refactor_l_values32_storage;
   double **refactor_l_sorted_values;
   double *refactor_l_sorted_values_storage;
   UF_long **refactor_u_indices;
@@ -2079,6 +2084,7 @@ typedef struct kls_egraph_refactor_shared {
   int supernode_algorithm5_payoff_direct_prefix_live_state;
   int algorithm5_prefactor_updates;
   int u_supernode_values;
+  int use_fp32_l_values;
   int u_supernode_ragged_l_updates;
   atomic_ulong supernode_consumer_plan_group_l_dense_writes;
   atomic_ulong supernode_consumer_plan_group_l_trailing_writes;
@@ -2664,6 +2670,31 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract_i32(
   }
   for (; p < length; ++p) {
     x[rows[p]] -= values[p] * scale;
+  }
+}
+
+static KLS_ALWAYS_INLINE void kls_scatter_subtract_i32_f32(
+  double *restrict x,
+  const int32_t *restrict rows,
+  const float *restrict values,
+  UF_long length,
+  double scale) {
+  if (scale == 0.0) {
+    return;
+  }
+  UF_long p = 0;
+  for (; p + 7u < length; p += 8u) {
+    x[rows[p]] -= (double)values[p] * scale;
+    x[rows[p + 1u]] -= (double)values[p + 1u] * scale;
+    x[rows[p + 2u]] -= (double)values[p + 2u] * scale;
+    x[rows[p + 3u]] -= (double)values[p + 3u] * scale;
+    x[rows[p + 4u]] -= (double)values[p + 4u] * scale;
+    x[rows[p + 5u]] -= (double)values[p + 5u] * scale;
+    x[rows[p + 6u]] -= (double)values[p + 6u] * scale;
+    x[rows[p + 7u]] -= (double)values[p + 7u] * scale;
+  }
+  for (; p < length; ++p) {
+    x[rows[p]] -= (double)values[p] * scale;
   }
 }
 
@@ -15125,6 +15156,8 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   free(solver->refactor_l_sorted_pos32);
   free(solver->refactor_l_sorted_pos32_storage);
   free(solver->refactor_l_values);
+  free(solver->refactor_l_values32);
+  free(solver->refactor_l_values32_storage);
   free(solver->refactor_l_sorted_values);
   free(solver->refactor_l_sorted_values_storage);
   free(solver->refactor_u_indices);
@@ -15165,6 +15198,8 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_l_sorted_pos32 = NULL;
   solver->refactor_l_sorted_pos32_storage = NULL;
   solver->refactor_l_values = NULL;
+  solver->refactor_l_values32 = NULL;
+  solver->refactor_l_values32_storage = NULL;
   solver->refactor_l_sorted_values = NULL;
   solver->refactor_l_sorted_values_storage = NULL;
   solver->refactor_u_indices = NULL;
@@ -20705,6 +20740,8 @@ static void free_pivot_nudges(kls_solver *solver) {
 
 static void free_numeric(kls_solver *solver) {
   solver->numeric_needs_refinement = 0;
+  solver->fp32_decision = 0;
+  solver->base_solve_seconds = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   destroy_egraph_refactor_pool(solver);
@@ -20731,6 +20768,8 @@ static void free_numeric(kls_solver *solver) {
    derived from the old numeric's pattern or storage is now stale and must
    be dropped, or later refactorizations read freed or mismatched LU data. */
 static void kls_numeric_replaced_invalidate(kls_solver *solver) {
+  solver->fp32_decision = 0;
+  solver->base_solve_seconds = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   free_egraph_algorithm5_payoff_queue(solver);
@@ -20797,6 +20836,7 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->values);
   free(solver->solve_perm_workspace);
   free(solver->solve_refine_workspace);
+  free(solver->solve_refine_values);
   free_refactor_map(solver);
   free_refactor_schedule(solver);
   solver->col_ptr = NULL;
@@ -20808,6 +20848,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->values = NULL;
   solver->solve_perm_workspace = NULL;
   solver->solve_refine_workspace = NULL;
+  solver->solve_refine_values = NULL;
   solver->solve_perm_workspace_n = 0;
   solver->n = 0;
   solver->nnz = 0;
@@ -30864,7 +30905,9 @@ static double *ensure_solve_perm_workspace(kls_solver *solver) {
   }
   free(solver->solve_perm_workspace);
   free(solver->solve_refine_workspace);
+  free(solver->solve_refine_values);
   solver->solve_refine_workspace = NULL;
+  solver->solve_refine_values = NULL;
   solver->solve_perm_workspace = NULL;
   solver->solve_perm_workspace_n = 0;
   solver->solve_perm_workspace =
@@ -39503,6 +39546,99 @@ static int kls_build_refactor_btf_scalar_run_groups(kls_solver *solver) {
   }
   (void)kls_build_refactor_btf_scalar_run_group_wake_index(solver);
   free(items);
+  return 1;
+}
+
+static int kls_fp32_refactor_env_state(void) {
+  const char *value = getenv("KLS_ENABLE_FP32_REFACTOR");
+  if (value == NULL || value[0] == '\0') {
+    return 0; /* auto */
+  }
+  return (value[0] == '0' && value[1] == '\0') ? -1 : 1;
+}
+
+/* Float-mirrored values trade one refined solve for a faster
+   refactorization; in the transient cycle both terms repeat, so the mode
+   only pays when the refactorization dominates the solve.  Fill size is
+   the routing proxy: the giant-class matrices it targets stream far more
+   factor values than right-hand-side entries. */
+static int kls_fp32_refactor_wanted(kls_solver *solver) {
+  const int env = kls_fp32_refactor_env_state();
+  if (env != 0) {
+    return env > 0;
+  }
+  if (solver == NULL || solver->numeric == NULL) {
+    return 0;
+  }
+  if (solver->fp32_decision != 0) {
+    return solver->fp32_decision > 0;
+  }
+  /* Decide from measured times once an unrefined solve exists: the mode
+     gains a fifth of the refactorization and pays roughly one extra solve,
+     so it needs the refactorization to dominate.  Lock the verdict per
+     numeric to keep the mode from oscillating once refined solves inflate
+     the solve time. */
+  if (solver->base_solve_seconds > 0.0 &&
+      solver->stats.refactor_seconds > 0.0) {
+    solver->fp32_decision =
+      solver->stats.refactor_seconds > 8.0 * solver->base_solve_seconds
+        ? 1
+        : -1;
+    return solver->fp32_decision > 0;
+  }
+  /* No clean measurements yet: decide from the work profile.  Flops per
+     stored value is the average reuse of each factor entry, which is the
+     refactorization-to-solve cost ratio the mode trades on; the fill floor
+     keeps small systems, whose refined solve is proportionally dearer, in
+     double precision. */
+  {
+    const double fill =
+      (double)solver->numeric->lnz + (double)solver->numeric->unz;
+    return fill >= 3.0e7 && solver->common.flops >= 150.0 * fill;
+  }
+}
+
+/* Single-precision mirror of the L column values.  The refactorization
+   tail updates stream producer columns tens of times each, so halving the
+   value bytes halves the dominant memory traffic; accumulation stays in
+   double and iterative refinement recovers the lost factor accuracy. */
+static int kls_ensure_refactor_l_values32_cache(kls_solver *solver) {
+  if (solver == NULL || solver->numeric == NULL || solver->symbolic == NULL ||
+      solver->numeric->Llen == NULL ||
+      solver->refactor_lu_pointer_count != solver->n ||
+      solver->refactor_l_indices == NULL || solver->n <= 0) {
+    return 0;
+  }
+  if (solver->refactor_l_values32 != NULL) {
+    return 1;
+  }
+  UF_long entries = 0;
+  for (UF_long col = 0; col < solver->n; ++col) {
+    if (solver->refactor_l_indices[col] == NULL) {
+      continue;
+    }
+    entries += solver->numeric->Llen[col];
+  }
+  float **values32 =
+    (float **)calloc((size_t)solver->n, sizeof(*values32));
+  float *storage = entries > 0
+    ? (float *)malloc((size_t)entries * sizeof(*storage))
+    : NULL;
+  if (values32 == NULL || (entries > 0 && storage == NULL)) {
+    free(values32);
+    free(storage);
+    return 0;
+  }
+  UF_long cursor = 0;
+  for (UF_long col = 0; col < solver->n; ++col) {
+    if (solver->refactor_l_indices[col] == NULL) {
+      continue;
+    }
+    values32[col] = storage + cursor;
+    cursor += solver->numeric->Llen[col];
+  }
+  solver->refactor_l_values32 = values32;
+  solver->refactor_l_values32_storage = storage;
   return 1;
 }
 
@@ -62804,11 +62940,25 @@ static inline void kls_egraph_store_l_column_from_workspace(
     solver != NULL && solver->refactor_l_indices32 != NULL
       ? solver->refactor_l_indices32[column]
       : NULL;
+  float *values32 =
+    solver != NULL && solver->refactor_l_values32 != NULL
+      ? solver->refactor_l_values32[column]
+      : NULL;
   if (rows32 != NULL || length == 0u) {
+    if (values32 != NULL) {
+      for (UF_long p = 0; p < length; ++p) {
+        const UF_long i = (UF_long)rows32[p];
+        const double v = x[i] / pivot;
+        values[p] = v;
+        values32[p] = (float)v;
+        x[i] = 0.0;
+      }
+    } else {
     for (UF_long p = 0; p < length; ++p) {
       const UF_long i = (UF_long)rows32[p];
       values[p] = x[i] / pivot;
       x[i] = 0.0;
+    }
     }
     if (solver != NULL && solver->refactor_l_sorted_values != NULL &&
         solver->refactor_l_sorted_pos32 != NULL) {
@@ -62822,10 +62972,20 @@ static inline void kls_egraph_store_l_column_from_workspace(
     }
     return;
   }
+  if (values32 != NULL) {
+    for (UF_long p = 0; p < length; ++p) {
+      const UF_long i = rows[p];
+      const double v = x[i] / pivot;
+      values[p] = v;
+      values32[p] = (float)v;
+      x[i] = 0.0;
+    }
+  } else {
   for (UF_long p = 0; p < length; ++p) {
     const UF_long i = rows[p];
     values[p] = x[i] / pivot;
     x[i] = 0.0;
+  }
   }
   if (solver != NULL && solver->refactor_l_sorted_values != NULL &&
       solver->refactor_l_sorted_pos32 != NULL) {
@@ -68324,6 +68484,128 @@ static UF_long kls_snode_batch_consume_cached(
   return t;
 }
 
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+__attribute__((target_clones("default", "arch=x86-64-v3")))
+#endif
+static UF_long kls_snode_batch_consume_cached_f32(
+  UF_long *const *l_indices,
+  const int32_t *const *l_indices32,
+  float *const *l_values32,
+  const UF_long *llen_local,
+  const UF_long *ui,
+  const int32_t *ui32,
+  double *ux,
+  UF_long ucol_len,
+  UF_long up,
+  double *restrict x,
+  UF_long k1,
+  UF_long producer_limit,
+  const UF_long *snode_run_end,
+  const kls_egraph_refactor_shared *shared,
+  int wait_for_dependencies,
+  const unsigned char *applied) {
+  const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+  const UF_long run_end = snode_run_end[k1 + j];
+  if (run_end <= k1 + j + 1u) {
+    return 0;
+  }
+  UF_long tmax = run_end - (k1 + j);
+  if (tmax > KLS_SNODE_MAX_BATCH) {
+    tmax = KLS_SNODE_MAX_BATCH;
+  }
+  if (tmax > ucol_len - up) {
+    tmax = ucol_len - up;
+  }
+  UF_long t = 1;
+  if (ui32 != NULL) {
+    while (t < tmax && (UF_long)ui32[up + t] == j + t) {
+      t++;
+    }
+  } else {
+    while (t < tmax && ui[up + t] == j + t) {
+      t++;
+    }
+  }
+  if (applied != NULL) {
+    UF_long limit = 0;
+    while (limit < t && !applied[up + limit]) {
+      limit++;
+    }
+    t = limit;
+  }
+  if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
+    return 0;
+  }
+  if (wait_for_dependencies) {
+    for (UF_long i = 0; i < t; ++i) {
+      if (!kls_egraph_refactor_dependency_done_now(shared, k1 + j + i)) {
+        return 0;
+      }
+    }
+  }
+  const int32_t *tli32 =
+    l_indices32 != NULL ? l_indices32[k1 + j + t - 1u] : NULL;
+  const UF_long *tli = l_indices[k1 + j + t - 1u];
+  const UF_long tlen = llen_local[j + t - 1u];
+  if ((tli == NULL && tli32 == NULL) ||
+      t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
+    return 0;
+  }
+  double xs[KLS_SNODE_MAX_BATCH];
+  const float *lx_arr[KLS_SNODE_MAX_BATCH];
+  for (UF_long i = 0; i < t; ++i) {
+    lx_arr[i] = l_values32[k1 + j + i];
+    if (lx_arr[i] == NULL) {
+      return 0;
+    }
+    xs[i] = x[j + i];
+  }
+  for (UF_long i = 0; i < t; ++i) {
+    x[j + i] = 0.0;
+  }
+  for (UF_long i = 0; i < t; ++i) {
+    const double u = xs[i];
+    ux[up + i] = u;
+    const float *lxi = lx_arr[i];
+    for (UF_long r0 = 0; r0 + i + 1u < t; ++r0) {
+      xs[i + 1u + r0] -= (double)lxi[r0] * u;
+    }
+  }
+  const float *tlx = lx_arr[t - 1u];
+  for (UF_long p0 = 0; p0 < tlen; p0 += KLS_SNODE_TAIL_CHUNK) {
+    const UF_long pc = tlen - p0 < KLS_SNODE_TAIL_CHUNK
+                         ? tlen - p0
+                         : KLS_SNODE_TAIL_CHUNK;
+    double acc[KLS_SNODE_TAIL_CHUNK];
+    {
+      const float *src = tlx + p0;
+      const double u = xs[t - 1u];
+      for (UF_long p = 0; p < pc; ++p) {
+        acc[p] = (double)src[p] * u;
+      }
+    }
+    for (UF_long i = 0; i + 1u < t; ++i) {
+      const float *src = lx_arr[i] + (t - 1u - i) + p0;
+      const double u = xs[i];
+      for (UF_long p = 0; p < pc; ++p) {
+        acc[p] += (double)src[p] * u;
+      }
+    }
+    if (tli32 != NULL) {
+      for (UF_long p = 0; p < pc; ++p) {
+        x[tli32[p0 + p]] -= acc[p];
+      }
+    } else {
+      for (UF_long p = 0; p < pc; ++p) {
+        x[tli[p0 + p]] -= acc[p];
+      }
+    }
+  }
+  kls_snode_trace_batched_producers += t;
+  kls_snode_trace_batched_tail_entries += t * tlen;
+  return t;
+}
+
 static int kls_egraph_refactor_column_owned_now(
   const kls_egraph_refactor_shared *shared,
   UF_long col) {
@@ -68465,7 +68747,12 @@ static void kls_egraph_refactor_apply_btf_scalar_dep(
       l_indices32 != NULL ? l_indices32[dep_global] : NULL;
     double *lx = l_values[dep_global];
     UF_long lcol_len = llen[dep_local];
-    if (li32 != NULL || lcol_len == 0u) {
+    const float *lx32 =
+      shared->use_fp32_l_values && li32 != NULL
+        ? shared->solver->refactor_l_values32[dep_global] : NULL;
+    if (lx32 != NULL) {
+      kls_scatter_subtract_i32_f32(x, li32, lx32, lcol_len, ujk);
+    } else if (li32 != NULL || lcol_len == 0u) {
       kls_scatter_subtract_i32(x, li32, lx, lcol_len, ujk);
     } else {
       kls_scatter_subtract(x, li, lx, lcol_len, ujk);
@@ -69044,10 +69331,16 @@ static int kls_egraph_refactor_single_unscaled_column(
       }
     }
     if (snode_batches_allowed) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
-        l_indices, l_values, numeric->Llen, ui, ui32, ux, ucol_len, up, x,
-        0u, k, solver->snode_run_end, shared, wait_for_dependencies,
-        algorithm5_prefactor_applied);
+      const UF_long consumed = shared->use_fp32_l_values
+        ? kls_snode_batch_consume_cached_f32(
+            l_indices, (const int32_t *const *)solver->refactor_l_indices32,
+            solver->refactor_l_values32, numeric->Llen, ui, ui32, ux,
+            ucol_len, up, x, 0u, k, solver->snode_run_end, shared,
+            wait_for_dependencies, algorithm5_prefactor_applied)
+        : kls_snode_batch_consume_cached(
+            l_indices, l_values, numeric->Llen, ui, ui32, ux, ucol_len, up, x,
+            0u, k, solver->snode_run_end, shared, wait_for_dependencies,
+            algorithm5_prefactor_applied);
       if (consumed != 0u) {
         if (algorithm5_prefactor_applied != NULL) {
           memset(algorithm5_prefactor_applied + up, 1, (size_t)consumed);
@@ -69092,7 +69385,17 @@ static int kls_egraph_refactor_single_unscaled_column(
       UF_long *li = l_indices[j];
       double *lx = l_values[j];
       UF_long lcol_len = numeric->Llen[j];
-      kls_scatter_subtract_refactor_l(solver, x, j, li, lx, lcol_len, ujk);
+      const int32_t *li32 =
+        solver->refactor_l_indices32 != NULL
+          ? solver->refactor_l_indices32[j] : NULL;
+      const float *lx32 =
+        shared->use_fp32_l_values && li32 != NULL
+          ? solver->refactor_l_values32[j] : NULL;
+      if (lx32 != NULL) {
+        kls_scatter_subtract_i32_f32(x, li32, lx32, lcol_len, ujk);
+      } else {
+        kls_scatter_subtract_refactor_l(solver, x, j, li, lx, lcol_len, ujk);
+      }
     }
     if (algorithm5_prefactor_applied != NULL) {
       algorithm5_prefactor_applied[up] = 1u;
@@ -69283,10 +69586,16 @@ static int kls_egraph_refactor_single_scaled_column(
       }
     }
     if (snode_batches_allowed) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
-        l_indices, l_values, numeric->Llen, ui, ui32, ux, ucol_len, up, x,
-        0u, k, solver->snode_run_end, shared, wait_for_dependencies,
-        algorithm5_prefactor_applied);
+      const UF_long consumed = shared->use_fp32_l_values
+        ? kls_snode_batch_consume_cached_f32(
+            l_indices, (const int32_t *const *)solver->refactor_l_indices32,
+            solver->refactor_l_values32, numeric->Llen, ui, ui32, ux,
+            ucol_len, up, x, 0u, k, solver->snode_run_end, shared,
+            wait_for_dependencies, algorithm5_prefactor_applied)
+        : kls_snode_batch_consume_cached(
+            l_indices, l_values, numeric->Llen, ui, ui32, ux, ucol_len, up, x,
+            0u, k, solver->snode_run_end, shared, wait_for_dependencies,
+            algorithm5_prefactor_applied);
       if (consumed != 0u) {
         if (algorithm5_prefactor_applied != NULL) {
           memset(algorithm5_prefactor_applied + up, 1, (size_t)consumed);
@@ -69550,10 +69859,17 @@ static int kls_egraph_refactor_btf_unscaled_column(
           }
         }
         if (snode_batches_allowed) {
-          const UF_long consumed = kls_snode_batch_consume_cached(
-            l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
-            local_k, solver->snode_run_end, shared, 1,
-            algorithm5_prefactor_applied);
+          const UF_long consumed = shared->use_fp32_l_values
+            ? kls_snode_batch_consume_cached_f32(
+                l_indices,
+                (const int32_t *const *)solver->refactor_l_indices32,
+                solver->refactor_l_values32, llen, ui, ui32, ux, ucol_len,
+                up, x, k1, local_k, solver->snode_run_end, shared, 1,
+                algorithm5_prefactor_applied)
+            : kls_snode_batch_consume_cached(
+                l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
+                local_k, solver->snode_run_end, shared, 1,
+                algorithm5_prefactor_applied);
           if (consumed != 0u) {
             if (algorithm5_prefactor_applied != NULL) {
               memset(algorithm5_prefactor_applied + up, 1, (size_t)consumed);
@@ -69639,9 +69955,15 @@ static int kls_egraph_refactor_btf_unscaled_column(
     } else {
       while (up < ucol_len) {
         if (snode_batches_allowed) {
-          const UF_long consumed = kls_snode_batch_consume_cached(
-            l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
-            local_k, solver->snode_run_end, shared, 0, NULL);
+          const UF_long consumed = shared->use_fp32_l_values
+            ? kls_snode_batch_consume_cached_f32(
+                l_indices,
+                (const int32_t *const *)solver->refactor_l_indices32,
+                solver->refactor_l_values32, llen, ui, ui32, ux, ucol_len,
+                up, x, k1, local_k, solver->snode_run_end, shared, 0, NULL)
+            : kls_snode_batch_consume_cached(
+                l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
+                local_k, solver->snode_run_end, shared, 0, NULL);
           if (consumed != 0u) {
             up += consumed;
             continue;
@@ -69817,7 +70139,12 @@ static int kls_egraph_refactor_btf_unscaled_column(
           l_indices32 != NULL ? l_indices32[k1 + j] : NULL;
         double *lx = l_values[k1 + j];
         UF_long lcol_len = llen[j];
-        if (li32 != NULL || lcol_len == 0u) {
+        const float *lx32 =
+          shared->use_fp32_l_values && li32 != NULL
+            ? solver->refactor_l_values32[k1 + j] : NULL;
+        if (lx32 != NULL) {
+          kls_scatter_subtract_i32_f32(x, li32, lx32, lcol_len, ujk);
+        } else if (li32 != NULL || lcol_len == 0u) {
           kls_scatter_subtract_i32(x, li32, lx, lcol_len, ujk);
         } else {
           kls_scatter_subtract(x, li, lx, lcol_len, ujk);
@@ -70126,10 +70453,16 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
       }
     }
     if (snode_batches_allowed) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
-        l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
-        local_k, solver->snode_run_end, shared, wait_for_dependencies,
-        algorithm5_prefactor_applied);
+      const UF_long consumed = shared->use_fp32_l_values
+        ? kls_snode_batch_consume_cached_f32(
+            l_indices, (const int32_t *const *)solver->refactor_l_indices32,
+            solver->refactor_l_values32, llen, ui, ui32, ux, ucol_len, up,
+            x, k1, local_k, solver->snode_run_end, shared,
+            wait_for_dependencies, algorithm5_prefactor_applied)
+        : kls_snode_batch_consume_cached(
+            l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
+            local_k, solver->snode_run_end, shared, wait_for_dependencies,
+            algorithm5_prefactor_applied);
       if (consumed != 0u) {
         if (algorithm5_prefactor_applied != NULL) {
           memset(algorithm5_prefactor_applied + up, 1, (size_t)consumed);
@@ -82641,6 +82974,20 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->u_supernode_values = u_supernode_values ? 1 : 0;
   shared->u_supernode_ragged_l_updates =
     u_supernode_ragged_l_updates ? 1 : 0;
+  /* Float-mirrored L values halve the dominant refactorization traffic;
+     iterative refinement in the solve recovers the factor accuracy, so the
+     mode requires the shapes refinement supports. */
+  shared->use_fp32_l_values = 0;
+  if (solver->row_perm == NULL && solver->row_scale == NULL &&
+      solver->col_scale == NULL && kls_fp32_refactor_wanted(solver)) {
+    if (solver->refactor_l_values32 == NULL) {
+      (void)kls_ensure_refactor_l_values32_cache(solver);
+    }
+    shared->use_fp32_l_values = solver->refactor_l_values32 != NULL;
+  }
+  if (shared->use_fp32_l_values) {
+    solver->numeric_needs_refinement = 1;
+  }
   shared->pipeline_ready_queue = use_pipeline_ready_queue;
   shared->pipeline_ready_cols =
     use_pipeline_ready_queue ? solver->refactor_pipeline_ready_cols : NULL;
@@ -86116,6 +86463,21 @@ static void maybe_prepare_refactor_schedule(kls_solver *solver,
 static UF_long kls_parallel_refactor(kls_solver *solver,
                                      double *numeric_values,
                                      int check_pivots) {
+  /* Refinement computes residuals against the true input values, which for
+     pass-through CSC inputs are not otherwise retained past this call. */
+  if ((solver->numeric_needs_refinement || kls_fp32_refactor_wanted(solver) ||
+       solver->pivot_nudge_count > 0) &&
+      numeric_values != solver->pivot_nudge_values &&
+      numeric_values != solver->solve_refine_values) {
+    if (solver->solve_refine_values == NULL) {
+      solver->solve_refine_values = (double *)malloc(
+        (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
+    }
+    if (solver->solve_refine_values != NULL) {
+      memcpy(solver->solve_refine_values, numeric_values,
+             (size_t)solver->nnz * sizeof(*numeric_values));
+    }
+  }
   if (solver->pivot_nudge_count > 0 && solver->pivot_nudge_values != NULL &&
       numeric_values != solver->pivot_nudge_values) {
     memcpy(solver->pivot_nudge_values, numeric_values,
@@ -112130,17 +112492,33 @@ static int solve_impl(kls_solver *solver,
       }
     }
   }
+  if (!solver->in_solve_refinement) {
+    solver->base_solve_seconds = kls_now_seconds() - start;
+  }
   /* Iterative refinement recovers full double-precision accuracy from a
      reduced-accuracy factorization (float-stored values, nudged pivots) at
      the cost of one residual pass and one extra solve per iteration.  It
      runs in the caller's coordinates against the stored matrix, so it is
      restricted to shapes without static row permutation or scaling. */
+  if (getenv("KLS_TRACE_REFINE") != NULL && !solver->in_solve_refinement) {
+    fprintf(stderr,
+            "KLS refine gate: ok=%d status=%d needs=%d row_perm=%d"
+            " scales=%d%d values=%d b_is_x=%d\n",
+            ok, (int)solver->common.status,
+            solver->numeric_needs_refinement, solver->row_perm != NULL,
+            solver->row_scale != NULL, solver->col_scale != NULL,
+            solver->values != NULL, b == x);
+  }
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
       (solver->numeric_needs_refinement ||
        getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL) &&
       solver->row_perm == NULL && solver->row_scale == NULL &&
-      solver->col_scale == NULL && solver->values != NULL &&
+      solver->col_scale == NULL &&
+      (solver->solve_refine_values != NULL || solver->values != NULL) &&
       solver->col_ptr != NULL && solver->row_idx != NULL) {
+    const double *refine_a = solver->solve_refine_values != NULL
+      ? solver->solve_refine_values
+      : solver->values;
     if (solver->solve_refine_workspace == NULL) {
       solver->solve_refine_workspace = (double *)malloc(
         2u * (size_t)solver->n * sizeof(*solver->solve_refine_workspace));
@@ -112157,7 +112535,7 @@ static int solve_impl(kls_solver *solver,
         const double av = fabs(brhs[i]);
         bmax = bmax < av ? av : bmax;
       }
-      const double target = (bmax > 0.0 ? bmax : 1.0) * 1.0e-13;
+      const double target = (bmax > 0.0 ? bmax : 1.0) * 1.0e-12;
       double last_rmax = HUGE_VAL;
       for (int iter = 0; iter < 3; ++iter) {
         memcpy(residual, brhs, (size_t)nloc * sizeof(*residual));
@@ -112166,7 +112544,7 @@ static int solve_impl(kls_solver *solver,
             double acc = 0.0;
             for (UF_long p = solver->col_ptr[col];
                  p < solver->col_ptr[col + 1u]; ++p) {
-              acc += solver->values[p] * xrhs[solver->row_idx[p]];
+              acc += refine_a[p] * xrhs[solver->row_idx[p]];
             }
             residual[col] -= acc;
           }
@@ -112178,7 +112556,7 @@ static int solve_impl(kls_solver *solver,
             }
             for (UF_long p = solver->col_ptr[col];
                  p < solver->col_ptr[col + 1u]; ++p) {
-              residual[solver->row_idx[p]] -= solver->values[p] * xv;
+              residual[solver->row_idx[p]] -= refine_a[p] * xv;
             }
           }
         }
