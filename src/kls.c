@@ -111611,6 +111611,9 @@ static int kls_compare_uf_long_asc(const void *a, const void *b) {
   return (left > right) - (left < right);
 }
 
+static int kls_predicted_pivoting_fill(kls_solver *solver,
+                                       const double *numeric_values);
+
 static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                               double *numeric_values,
                                               double *elapsed) {
@@ -112186,6 +112189,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
             sched_done - map_done, (long)total_lnz, (long)total_unz);
   }
   UF_long refactor_ok = 0;
+  if (getenv("KLS_FORCE_PIVOT_FILL") != NULL) {
+    refactor_ok = 0;
+    common->status = TRILINOS_KLU_SINGULAR;
+  } else
   for (UF_long fill_round = 0; fill_round < 3u; ++fill_round) {
     refactor_ok = kls_parallel_refactor(solver, numeric_values, 0);
     UF_long k = KLS_KLU_EMPTY;
@@ -112205,7 +112212,12 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       const double tolv = common->tol > 0.0 ? common->tol : 0.001;
       UF_long batch_nudged = 0;
       int batch_failed = 0;
-      for (UF_long block = 0; block < nblocks && !batch_failed; ++block) {
+      /* Front-first: violations cascade downstream, so fix only the
+         leading window each round; later columns are re-judged on sane
+         upstream values in the next round. */
+      for (UF_long block = 0;
+           block < nblocks && !batch_failed && batch_nudged < 32u;
+           ++block) {
         const UF_long bk1 = R[block];
         const UF_long bk2 = R[block + 1u];
         if (bk2 - bk1 <= 1u) {
@@ -112215,7 +112227,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         const UF_long *lip = numeric->Lip + bk1;
         const UF_long *llen = numeric->Llen + bk1;
         const double *udiag = (const double *)numeric->Udiag;
-        for (UF_long kk = 0; kk < bk2 - bk1; ++kk) {
+        for (UF_long kk = 0; kk < bk2 - bk1 && batch_nudged < 32u; ++kk) {
           UF_long *li = NULL;
           double *lx = NULL;
           UF_long lcol_len = 0;
@@ -112241,10 +112253,9 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           for (UF_long p = solver->col_ptr[goldcol];
                p < solver->col_ptr[goldcol + 1u]; ++p) {
             const double av = fabs(numeric_values[p]);
+            gdiag_pos = numeric->Pinv[solver->row_idx[p]] == gk
+              ? p : gdiag_pos;
             gcolmax = gcolmax < av ? av : gcolmax;
-            if (numeric->Pinv[solver->row_idx[p]] == gk) {
-              gdiag_pos = p;
-            }
           }
           const double gpivot = fabs(udiag[gk]);
           double sigma = bad || gpivot == 0.0
@@ -112319,6 +112330,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
                 (long)batch_nudged, (long)solver->pivot_nudge_count,
                 (long)fill_round);
       }
+      free_refactor_map(solver);
+      free_refactor_schedule(solver);
+      maybe_prepare_refactor_map(solver, elapsed);
+      maybe_prepare_refactor_schedule(solver, elapsed);
       common->status = TRILINOS_KLU_OK;
       refactor_ok = 0;
       continue;
@@ -112402,6 +112417,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     fprintf(stderr, "KLS predicted: build=%.2fs first_values=%.2fs\n",
             build_done - start, kls_now_seconds() - build_done);
   }
+  int pivot_fill_used = 0;
   if (!refactor_ok || common->status < TRILINOS_KLU_OK ||
       common->status == TRILINOS_KLU_SINGULAR) {
     if (getenv("KLS_TRACE_PREDICTED") != NULL) {
@@ -112410,17 +112426,36 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
               (long)refactor_ok, (int)common->status,
               (long)common->singular_col);
     }
-    free_numeric(solver);
     common->status = TRILINOS_KLU_OK;
-    common->scale = saved_scale;
-    *elapsed += kls_now_seconds() - start;
-    return 0;
+    common->numerical_rank = KLS_KLU_EMPTY;
+    common->singular_col = KLS_KLU_EMPTY;
+    free_pivot_nudges(solver);
+    if (getenv("KLS_ENABLE_PIVOT_FILL") == NULL ||
+        !kls_predicted_pivoting_fill(solver, numeric_values)) {
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr, "KLS predicted: pivoting fill reject status=%d\n",
+                (int)common->status);
+      }
+      free_numeric(solver);
+      common->status = TRILINOS_KLU_OK;
+      common->scale = saved_scale;
+      *elapsed += kls_now_seconds() - start;
+      return 0;
+    }
+    pivot_fill_used = 1;
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS predicted: pivoting fill accepted structurally\n");
+    }
+    free_refactor_map(solver);
+    free_refactor_schedule(solver);
+    maybe_prepare_refactor_map(solver, elapsed);
+    maybe_prepare_refactor_schedule(solver, elapsed);
   }
   /* Reject numerically unstable no-pivot factorizations directly: solve
      A x = A e and require a small true residual.  Per-column multiplier
      bounds cannot stop growth from compounding across elimination levels
      (Freescale1 passes them yet yields a 5e-3 residual). */
-  {
+  for (int probe_attempt = 0; probe_attempt < 2; ++probe_attempt) {
     double *probe_b =
       (double *)malloc(2u * (size_t)n * sizeof(*probe_b));
     if (probe_b == NULL) {
@@ -112499,6 +112534,20 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
               residual, refine_iters);
     }
     if (!(residual < 1e-9)) {
+      if (probe_attempt == 0 && !pivot_fill_used &&
+          getenv("KLS_ENABLE_PIVOT_FILL") != NULL &&
+          kls_predicted_pivoting_fill(solver, numeric_values)) {
+        pivot_fill_used = 1;
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr,
+                  "KLS predicted: probe retry after pivoting fill\n");
+        }
+        free_refactor_map(solver);
+        free_refactor_schedule(solver);
+        maybe_prepare_refactor_map(solver, elapsed);
+        maybe_prepare_refactor_schedule(solver, elapsed);
+        continue;
+      }
       free_numeric(solver);
       common->status = TRILINOS_KLU_OK;
       common->scale = saved_scale;
@@ -112512,9 +112561,371 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       /* This probe just validated the reduced-precision fill. */
       solver->fp32_validated = 1;
     }
+    break;
   }
   solver->auto_scale_checked = 1;
   *elapsed += kls_now_seconds() - start;
+  return 1;
+}
+
+
+/* Serial pivoting fill for a predicted-pattern numeric: one left-looking
+   pass per block with threshold partial pivoting confined to the fixed
+   symbolic pattern.  A row swap relabels two not-yet-pivotal pattern slots:
+   the workspace entries, the pending input scatter (through cur_slot), and
+   the already-stored L values at those slots in earlier columns (found
+   through the pattern's row lists) all swap, exactly as in dense getrf.
+   The solve probe remains the arbiter for the rare pivot that the bound
+   cannot express. */
+static int kls_predicted_pivoting_fill(kls_solver *solver,
+                                       const double *numeric_values) {
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_common *common = &solver->common;
+  if (numeric == NULL || symbolic == NULL ||
+      symbolic->maxblock > 200000 || common->scale > 0 ||
+      numeric->Rs != NULL) {
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS predicted: pivot fill gate1 maxblock=%ld\n",
+              symbolic != NULL ? (long)symbolic->maxblock : -1L);
+    }
+    return 0;
+  }
+  if (!kls_build_refactor_map(solver) ||
+      solver->refactor_col_ptr == NULL ||
+      (symbolic->nblocks > 1u && solver->refactor_block_start == NULL) ||
+      solver->refactor_row_idx == NULL ||
+      solver->refactor_input_pos == NULL) {
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS predicted: pivot fill gate2 map=%d %d %d %d\n",
+              solver->refactor_col_ptr != NULL,
+              solver->refactor_block_start != NULL,
+              solver->refactor_row_idx != NULL,
+              solver->refactor_input_pos != NULL);
+    }
+    return 0;
+  }
+  const UF_long *map_block_start =
+    symbolic->nblocks == 1u ? solver->refactor_col_ptr
+                            : solver->refactor_block_start;
+  const UF_long n = solver->n;
+  const UF_long nblocks = symbolic->nblocks;
+  const UF_long *R = symbolic->R;
+  const UF_long *Q = symbolic->Q;
+  const UF_long maxblock = symbolic->maxblock;
+  const double tol = common->tol > 0.0 ? common->tol : 0.001;
+
+  double *x = (double *)calloc((size_t)maxblock, sizeof(*x));
+  UF_long *cur_slot = (UF_long *)malloc((size_t)maxblock * sizeof(*cur_slot));
+  UF_long *row_cols_ptr =
+    (UF_long *)malloc(((size_t)maxblock + 1u) * sizeof(*row_cols_ptr));
+  UF_long *row_cols = NULL;
+  UF_long row_cols_capacity = 0;
+  if (x == NULL || cur_slot == NULL || row_cols_ptr == NULL) {
+    free(x);
+    free(cur_slot);
+    free(row_cols_ptr);
+    return 0;
+  }
+
+  int ok = 1;
+  for (UF_long block = 0; block < nblocks && ok; ++block) {
+    const UF_long k1 = R[block];
+    const UF_long k2 = R[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (nk == 1u) {
+      const UF_long gk = k1;
+      UF_long poff = numeric->Offp[gk];
+      const UF_long poff_end = numeric->Offp[gk + 1u];
+      double s = 0.0;
+      for (UF_long p = solver->refactor_col_ptr[gk];
+           p < map_block_start[gk]; ++p) {
+        if (poff >= poff_end) {
+          ok = 0;
+          break;
+        }
+        ((double *)numeric->Offx)[poff++] =
+          numeric_values[solver->refactor_input_pos[p]];
+      }
+      for (UF_long p = map_block_start[gk];
+           ok && p < solver->refactor_col_ptr[gk + 1u]; ++p) {
+        s = numeric_values[solver->refactor_input_pos[p]];
+      }
+      ((double *)numeric->Udiag)[gk] = s;
+      continue;
+    }
+    double *lu = (double *)numeric->LUbx[block];
+    const UF_long *lip = numeric->Lip + k1;
+    const UF_long *llen = numeric->Llen + k1;
+    const UF_long *uip = numeric->Uip + k1;
+    const UF_long *ulen = numeric->Ulen + k1;
+    if (lu == NULL) {
+      ok = 0;
+      break;
+    }
+    /* Row lists of the L pattern: which columns contain each slot. */
+    memset(row_cols_ptr, 0, ((size_t)nk + 1u) * sizeof(*row_cols_ptr));
+    UF_long lnz_block = 0;
+    for (UF_long k = 0; k < nk; ++k) {
+      UF_long *li = NULL;
+      double *lx = NULL;
+      UF_long len = 0;
+      kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &len);
+      (void)lx;
+      for (UF_long p = 0; p < len; ++p) {
+        row_cols_ptr[li[p] + 1u]++;
+      }
+      lnz_block += len;
+    }
+    for (UF_long i = 0; i < nk; ++i) {
+      row_cols_ptr[i + 1u] += row_cols_ptr[i];
+    }
+    if (lnz_block > row_cols_capacity) {
+      free(row_cols);
+      row_cols = (UF_long *)malloc((size_t)lnz_block * sizeof(*row_cols));
+      row_cols_capacity = row_cols != NULL ? lnz_block : 0;
+      if (row_cols == NULL) {
+        ok = 0;
+        break;
+      }
+    }
+    {
+      UF_long *cursor = cur_slot; /* scratch before its real use */
+      memcpy(cursor, row_cols_ptr, (size_t)nk * sizeof(*cursor));
+      for (UF_long k = 0; k < nk; ++k) {
+        UF_long *li = NULL;
+        double *lx = NULL;
+        UF_long len = 0;
+        kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &len);
+        (void)lx;
+        for (UF_long p = 0; p < len; ++p) {
+          row_cols[cursor[li[p]]++] = k;
+        }
+      }
+    }
+    for (UF_long i = 0; i < nk; ++i) {
+      cur_slot[i] = i;
+    }
+
+    for (UF_long k = 0; k < nk && ok; ++k) {
+      const UF_long gk = k1 + k;
+      /* Scatter the input column through the current slot relabeling. */
+      UF_long poff = numeric->Offp[gk];
+      const UF_long poff_end = numeric->Offp[gk + 1u];
+      for (UF_long p = solver->refactor_col_ptr[gk];
+           p < map_block_start[gk]; ++p) {
+        if (poff >= poff_end) {
+          ok = 0;
+          break;
+        }
+        ((double *)numeric->Offx)[poff++] =
+          numeric_values[solver->refactor_input_pos[p]];
+      }
+      if (!ok) {
+        break;
+      }
+      for (UF_long p = map_block_start[gk];
+           p < solver->refactor_col_ptr[gk + 1u]; ++p) {
+        const UF_long slot0 = solver->refactor_row_idx[p] - k1;
+        x[cur_slot[slot0]] =
+          numeric_values[solver->refactor_input_pos[p]];
+      }
+      /* Left-looking updates over the fixed U pattern. */
+      UF_long *ui = NULL;
+      double *ux = NULL;
+      UF_long ucol_len = 0;
+      kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+      for (UF_long up = 0; up < ucol_len; ++up) {
+        const UF_long j = ui[up];
+        const double ujk = x[j];
+        x[j] = 0.0;
+        ux[up] = ujk;
+        if (ujk != 0.0) {
+          UF_long *li = NULL;
+          double *lx = NULL;
+          UF_long lcol_len = 0;
+          kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
+          for (UF_long p = 0; p < lcol_len; ++p) {
+            x[li[p]] -= lx[p] * ujk;
+          }
+        }
+      }
+      /* Threshold pivot within the pattern column. */
+      UF_long *li = NULL;
+      double *lx = NULL;
+      UF_long lcol_len = 0;
+      kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
+      double ukk = x[k];
+      double cmax = fabs(ukk);
+      UF_long best = KLS_KLU_EMPTY;
+      /* Candidates stay inside the supernode run: path closure of the
+         symmetrized bound guarantees any earlier column containing one of
+         the run's rows contains those above it, so an in-run swap never
+         moves a stored value outside a column's pattern.  Rows beyond the
+         run offer no such guarantee and measurably destroy the factor. */
+      UF_long run_end_local = nk;
+      if (solver->snode_run_end != NULL) {
+        run_end_local = solver->snode_run_end[gk] - k1;
+        if (run_end_local <= k || run_end_local > nk) {
+          run_end_local = k + 1u;
+        }
+      }
+      for (UF_long p = 0; p < lcol_len; ++p) {
+        if (li[p] >= run_end_local) {
+          break;
+        }
+        const double av = fabs(x[li[p]]);
+        if (av > cmax) {
+          cmax = av;
+          best = li[p];
+        }
+      }
+      /* The tolerance still weighs the whole column. */
+      double colmax_all = cmax;
+      for (UF_long p = 0; p < lcol_len; ++p) {
+        const double av = fabs(x[li[p]]);
+        colmax_all = colmax_all < av ? av : colmax_all;
+      }
+      cmax = colmax_all;
+      if (best != KLS_KLU_EMPTY && fabs(ukk) < tol * cmax) {
+        /* A swap is only performed when every earlier column carries both
+           slots or neither: a one-sided column would have to drop a stored
+           value outside its fixed pattern, corrupting the factor. */
+        int vetoed = 0;
+        {
+          UF_long va = row_cols_ptr[k];
+          const UF_long va_end = row_cols_ptr[k + 1u];
+          UF_long vb = row_cols_ptr[best];
+          const UF_long vb_end = row_cols_ptr[best + 1u];
+          while (va < va_end || vb < vb_end) {
+            const UF_long ca = va < va_end ? row_cols[va] : nk;
+            const UF_long cb = vb < vb_end ? row_cols[vb] : nk;
+            const UF_long col = ca < cb ? ca : cb;
+            if (col >= k) {
+              break;
+            }
+            const int in_a = va < va_end && ca == col;
+            const int in_b = vb < vb_end && cb == col;
+            if (in_a != in_b) {
+              vetoed = 1;
+              break;
+            }
+            va += in_a;
+            vb += in_b;
+          }
+        }
+        if (vetoed) {
+          best = KLS_KLU_EMPTY;
+        }
+      }
+      if (best != KLS_KLU_EMPTY && fabs(ukk) < tol * cmax) {
+        /* Swap slots k and best: workspace, pending scatters, and the
+           already-stored L values of earlier columns at those slots. */
+        const double tmp = x[k];
+        x[k] = x[best];
+        x[best] = tmp;
+        for (UF_long i = 0; i < nk; ++i) {
+          if (cur_slot[i] == k) {
+            cur_slot[i] = best;
+          } else if (cur_slot[i] == best) {
+            cur_slot[i] = k;
+          }
+        }
+        const UF_long gbest = k1 + best;
+        const UF_long pk = numeric->Pnum[gk];
+        numeric->Pnum[gk] = numeric->Pnum[gbest];
+        numeric->Pnum[gbest] = pk;
+        numeric->Pinv[numeric->Pnum[gk]] = gk;
+        numeric->Pinv[numeric->Pnum[gbest]] = gbest;
+        /* Prior columns holding either slot swap their stored values. */
+        UF_long pa = row_cols_ptr[k];
+        const UF_long pa_end = row_cols_ptr[k + 1u];
+        UF_long pb = row_cols_ptr[best];
+        const UF_long pb_end = row_cols_ptr[best + 1u];
+        while (pa < pa_end || pb < pb_end) {
+          UF_long col;
+          if (pa < pa_end && (pb >= pb_end || row_cols[pa] <= row_cols[pb])) {
+            col = row_cols[pa];
+          } else {
+            col = row_cols[pb];
+          }
+          if (col >= k) {
+            break;
+          }
+          UF_long *cli = NULL;
+          double *clx = NULL;
+          UF_long clen = 0;
+          kls_klu_get_pointer(lu, lip, llen, col, &cli, &clx, &clen);
+          UF_long ia = KLS_KLU_EMPTY;
+          UF_long ib = KLS_KLU_EMPTY;
+          if (pa < pa_end && row_cols[pa] == col) {
+            UF_long lo = 0;
+            UF_long hi = clen;
+            while (lo < hi) {
+              const UF_long mid = (lo + hi) / 2u;
+              if (cli[mid] < k) {
+                lo = mid + 1u;
+              } else {
+                hi = mid;
+              }
+            }
+            if (lo < clen && cli[lo] == k) {
+              ia = lo;
+            }
+            pa++;
+          }
+          if (pb < pb_end && row_cols[pb] == col) {
+            UF_long lo = 0;
+            UF_long hi = clen;
+            while (lo < hi) {
+              const UF_long mid = (lo + hi) / 2u;
+              if (cli[mid] < best) {
+                lo = mid + 1u;
+              } else {
+                hi = mid;
+              }
+            }
+            if (lo < clen && cli[lo] == best) {
+              ib = lo;
+            }
+            pb++;
+          }
+          if (ia != KLS_KLU_EMPTY && ib != KLS_KLU_EMPTY) {
+            const double tv = clx[ia];
+            clx[ia] = clx[ib];
+            clx[ib] = tv;
+          } else if (ia != KLS_KLU_EMPTY || ib != KLS_KLU_EMPTY) {
+            /* The veto pass excluded one-sided columns; reaching here means
+               the row lists and patterns disagree. */
+            ok = 0;
+            break;
+          }
+        }
+        ukk = x[k];
+      }
+      x[k] = 0.0;
+      if (ukk == 0.0) {
+        common->status = TRILINOS_KLU_SINGULAR;
+        common->numerical_rank = gk;
+        common->singular_col = Q[gk];
+        ok = 0;
+        break;
+      }
+      ((double *)numeric->Udiag)[gk] = ukk;
+      for (UF_long p = 0; p < lcol_len; ++p) {
+        lx[p] = x[li[p]] / ukk;
+        x[li[p]] = 0.0;
+      }
+    }
+  }
+  free(x);
+  free(cur_slot);
+  free(row_cols_ptr);
+  free(row_cols);
+  if (!ok) {
+    return 0;
+  }
+  common->status = TRILINOS_KLU_OK;
   return 1;
 }
 
