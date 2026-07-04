@@ -324,6 +324,9 @@ struct kls_solver {
   double *pivot_nudge_values;
   UF_long pivot_nudge_count;
   UF_long pivot_nudge_capacity;
+  double *solve_refine_workspace;
+  int numeric_needs_refinement;
+  int in_solve_refinement;
   UF_long **refactor_l_indices;
   int32_t **refactor_l_indices32;
   int32_t *refactor_l_indices32_storage;
@@ -20684,6 +20687,11 @@ static void free_snode_panels(kls_solver *solver) {
    A plus a tiny explicit diagonal correction: every refactorization applies
    the same correction, so zero pivots stay rescued across the whole cycle
    while the solve probe measured the honest residual against A itself. */
+static void free_solve_refine_workspace(kls_solver *solver) {
+  free(solver->solve_refine_workspace);
+  solver->solve_refine_workspace = NULL;
+}
+
 static void free_pivot_nudges(kls_solver *solver) {
   free(solver->pivot_nudge_pos);
   free(solver->pivot_nudge_sigma);
@@ -20696,6 +20704,7 @@ static void free_pivot_nudges(kls_solver *solver) {
 }
 
 static void free_numeric(kls_solver *solver) {
+  solver->numeric_needs_refinement = 0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   destroy_egraph_refactor_pool(solver);
@@ -20787,6 +20796,7 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->col_scale);
   free(solver->values);
   free(solver->solve_perm_workspace);
+  free(solver->solve_refine_workspace);
   free_refactor_map(solver);
   free_refactor_schedule(solver);
   solver->col_ptr = NULL;
@@ -20797,6 +20807,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->col_scale = NULL;
   solver->values = NULL;
   solver->solve_perm_workspace = NULL;
+  solver->solve_refine_workspace = NULL;
   solver->solve_perm_workspace_n = 0;
   solver->n = 0;
   solver->nnz = 0;
@@ -30852,6 +30863,8 @@ static double *ensure_solve_perm_workspace(kls_solver *solver) {
     return solver->solve_perm_workspace;
   }
   free(solver->solve_perm_workspace);
+  free(solver->solve_refine_workspace);
+  solver->solve_refine_workspace = NULL;
   solver->solve_perm_workspace = NULL;
   solver->solve_perm_workspace_n = 0;
   solver->solve_perm_workspace =
@@ -111498,8 +111511,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           if (solver->pivot_nudge_count + batch_nudged >=
               (solver->pivot_nudge_capacity > 0
                  ? solver->pivot_nudge_capacity : 1024u)) {
-            batch_failed = 1;
-            break;
+            continue;
           }
           if (solver->pivot_nudge_values == NULL) {
             solver->pivot_nudge_values = (double *)malloc(
@@ -111525,14 +111537,15 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
             }
           }
           if (slot != KLS_KLU_EMPTY) {
-            const double escalated = solver->pivot_nudge_sigma[slot] * 32.0;
-            solver->pivot_nudge_sigma[slot] =
-              sigma > escalated ? sigma : escalated;
-            if (!(fabs(solver->pivot_nudge_sigma[slot]) <=
-                  (gcolmax > 0.0 ? gcolmax : 1.0))) {
-              batch_failed = 1;
-              break;
+            const double cap = gcolmax > 0.0 ? gcolmax : 1.0;
+            double escalated = solver->pivot_nudge_sigma[slot] * 32.0;
+            escalated = sigma > escalated ? sigma : escalated;
+            if (!(fabs(escalated) <= cap)) {
+              /* Escalation exhausted: keep the capped correction and let
+                 the refining solve probe judge the numeric as a whole. */
+              continue;
             }
+            solver->pivot_nudge_sigma[slot] = escalated;
           } else {
             solver->pivot_nudge_pos[solver->pivot_nudge_count] = gdiag_pos;
             solver->pivot_nudge_sigma[solver->pivot_nudge_count] = sigma;
@@ -111680,31 +111693,63 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         probe_b[solver->row_idx[p]] += numeric_values[p];
       }
     }
+    double *probe_r = (double *)malloc((size_t)n * sizeof(*probe_r));
     memcpy(probe_x, probe_b, (size_t)n * sizeof(*probe_x));
     double residual = HUGE_VAL;
-    if (trilinos_klu_l_solve(symbolic, numeric, n, 1, probe_x, common) &&
+    int refine_iters = 0;
+    if (probe_r != NULL &&
+        trilinos_klu_l_solve(symbolic, numeric, n, 1, probe_x, common) &&
         common->status >= TRILINOS_KLU_OK) {
       double bmax = 0.0;
       for (UF_long i = 0; i < n; ++i) {
         const double v = fabs(probe_b[i]);
         bmax = bmax < v ? v : bmax;
       }
-      for (UF_long j = 0; j < n; ++j) {
-        for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
-             ++p) {
-          probe_b[solver->row_idx[p]] -= numeric_values[p] * probe_x[j];
+      const double bscale = bmax > 0.0 ? bmax : 1.0;
+      /* Refine while it helps: a reduced-accuracy factorization (nudged or
+         waived pivots) that converges under refinement is still usable,
+         with production solves flagged to refine the same way. */
+      for (int iter = 0; iter <= 3; ++iter) {
+        memcpy(probe_r, probe_b, (size_t)n * sizeof(*probe_r));
+        for (UF_long j = 0; j < n; ++j) {
+          const double xv = probe_x[j];
+          if (xv == 0.0) {
+            continue;
+          }
+          for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
+               ++p) {
+            probe_r[solver->row_idx[p]] -= numeric_values[p] * xv;
+          }
         }
+        double rmax = 0.0;
+        for (UF_long i = 0; i < n; ++i) {
+          const double v = fabs(probe_r[i]);
+          rmax = rmax < v ? v : rmax;
+        }
+        const double rel = rmax / bscale;
+        if (!(rel < residual * 0.5) || rel < 1.0e-13 || iter == 3) {
+          residual = rel < residual ? rel : residual;
+          break;
+        }
+        residual = rel;
+        if (rel < 1.0e-9 && iter > 0) {
+          break;
+        }
+        if (!trilinos_klu_l_solve(symbolic, numeric, n, 1, probe_r, common) ||
+            common->status < TRILINOS_KLU_OK) {
+          break;
+        }
+        for (UF_long i = 0; i < n; ++i) {
+          probe_x[i] += probe_r[i];
+        }
+        refine_iters = iter + 1;
       }
-      double rmax = 0.0;
-      for (UF_long i = 0; i < n; ++i) {
-        const double v = fabs(probe_b[i]);
-        rmax = rmax < v ? v : rmax;
-      }
-      residual = bmax > 0.0 ? rmax / bmax : rmax;
     }
+    free(probe_r);
     free(probe_b);
     if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: probe_residual=%.3e\n", residual);
+      fprintf(stderr, "KLS predicted: probe_residual=%.3e refine_iters=%d\n",
+              residual, refine_iters);
     }
     if (!(residual < 1e-9)) {
       free_numeric(solver);
@@ -111712,6 +111757,9 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       common->scale = saved_scale;
       *elapsed += kls_now_seconds() - start;
       return 0;
+    }
+    if (refine_iters > 0) {
+      solver->numeric_needs_refinement = 1;
     }
   }
   solver->auto_scale_checked = 1;
@@ -112082,6 +112130,82 @@ static int solve_impl(kls_solver *solver,
       }
     }
   }
+  /* Iterative refinement recovers full double-precision accuracy from a
+     reduced-accuracy factorization (float-stored values, nudged pivots) at
+     the cost of one residual pass and one extra solve per iteration.  It
+     runs in the caller's coordinates against the stored matrix, so it is
+     restricted to shapes without static row permutation or scaling. */
+  if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
+      (solver->numeric_needs_refinement ||
+       getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL) &&
+      solver->row_perm == NULL && solver->row_scale == NULL &&
+      solver->col_scale == NULL && solver->values != NULL &&
+      solver->col_ptr != NULL && solver->row_idx != NULL) {
+    if (solver->solve_refine_workspace == NULL) {
+      solver->solve_refine_workspace = (double *)malloc(
+        2u * (size_t)solver->n * sizeof(*solver->solve_refine_workspace));
+    }
+    double *residual = solver->solve_refine_workspace;
+    double *correction =
+      residual != NULL ? residual + solver->n : NULL;
+    const UF_long nloc = solver->n;
+    for (int64_t rhs = 0; residual != NULL && rhs < nrhs; ++rhs) {
+      const double *brhs = b + rhs * ldb;
+      double *xrhs = x + rhs * ldx;
+      double bmax = 0.0;
+      for (UF_long i = 0; i < nloc; ++i) {
+        const double av = fabs(brhs[i]);
+        bmax = bmax < av ? av : bmax;
+      }
+      const double target = (bmax > 0.0 ? bmax : 1.0) * 1.0e-13;
+      double last_rmax = HUGE_VAL;
+      for (int iter = 0; iter < 3; ++iter) {
+        memcpy(residual, brhs, (size_t)nloc * sizeof(*residual));
+        if (kernel_transpose) {
+          for (UF_long col = 0; col < nloc; ++col) {
+            double acc = 0.0;
+            for (UF_long p = solver->col_ptr[col];
+                 p < solver->col_ptr[col + 1u]; ++p) {
+              acc += solver->values[p] * xrhs[solver->row_idx[p]];
+            }
+            residual[col] -= acc;
+          }
+        } else {
+          for (UF_long col = 0; col < nloc; ++col) {
+            const double xv = xrhs[col];
+            if (xv == 0.0) {
+              continue;
+            }
+            for (UF_long p = solver->col_ptr[col];
+                 p < solver->col_ptr[col + 1u]; ++p) {
+              residual[solver->row_idx[p]] -= solver->values[p] * xv;
+            }
+          }
+        }
+        double rmax = 0.0;
+        for (UF_long i = 0; i < nloc; ++i) {
+          const double av = fabs(residual[i]);
+          rmax = rmax < av ? av : rmax;
+        }
+        if (rmax <= target || !(rmax < 0.5 * last_rmax)) {
+          break;
+        }
+        last_rmax = rmax;
+        solver->in_solve_refinement = 1;
+        const int solve_status =
+          solve_impl(solver, transpose, 1, residual, nloc, correction, nloc);
+        solver->in_solve_refinement = 0;
+        if (solve_status != KLS_OK) {
+          break;
+        }
+        for (UF_long i = 0; i < nloc; ++i) {
+          xrhs[i] += correction[i];
+        }
+      }
+    }
+    solver->stats.solve_seconds = kls_now_seconds() - start;
+  }
+
   solver->stats.solve_seconds = kls_now_seconds() - start;
   solver->stats.last_kernel_status = (int)solver->common.status;
   solver->stats.memory_bytes = solver->common.memusage;
