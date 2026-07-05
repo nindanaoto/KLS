@@ -2470,6 +2470,12 @@ typedef struct kls_row_permuted_entry {
   double value;
 } kls_row_permuted_entry;
 
+static int kls_build_block_structured_order(UF_long n,
+                                            const UF_long *col_ptr,
+                                            const UF_long *row_idx,
+                                            UF_long **perm_out,
+                                            UF_long **comp_out);
+
 static int choose_symbolic_for_pattern(UF_long n,
                                        UF_long *col_ptr,
                                        UF_long *row_idx,
@@ -27574,6 +27580,44 @@ static int choose_symbolic_for_pattern(UF_long n,
     }
     return status;
   }
+
+#ifdef KLS_HAVE_SPRAL_SCALING
+  {
+    /* Block-structured candidates (repeated physics blocks behind dense
+       couplers) get replaced by the factor-time block trial once values
+       confirm the matched diagonal; the ND trials below would be thrown
+       away.  Analyze with AMD only - its estimate doubles as the trial's
+       acceptance baseline. */
+    const char *bs_env = getenv("KLS_ENABLE_BLOCK_ORDERING");
+    const int bs_enabled =
+      !(bs_env != NULL && bs_env[0] == '0' && bs_env[1] == '\0');
+    if (bs_enabled && options->static_pivoting && options->scale <= 0 &&
+        n >= 50000) {
+      /* Below ~50k the ND analyses cost almost nothing and their scores
+         steer orientation/scale heuristics the factor-time trial relies
+         on; only shortcut where the analysis itself is the cost. */
+      UF_long *bs_perm = NULL;
+      UF_long *bs_comp = NULL;
+      if (kls_build_block_structured_order(n, col_ptr, row_idx, &bs_perm,
+                                           &bs_comp)) {
+        free(bs_perm);
+        free(bs_comp);
+        int status = analyze_with_ordering(n, col_ptr, row_idx, options,
+                                           KLS_ORDERING_AMD, symbolic_out,
+                                           common_out, separator_out);
+        if (status == KLS_OK) {
+          *selected_ordering_out = KLS_ORDERING_AMD;
+          *score_out = symbolic_score(*symbolic_out);
+          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+            fprintf(stderr,
+                    "KLS block: analysis shortcut (AMD baseline)\n");
+          }
+          return KLS_OK;
+        }
+      }
+    }
+  }
+#endif
 
 #ifdef KLS_HAVE_METIS
   if (is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
@@ -113822,6 +113866,17 @@ static int kls_build_block_structured_order(UF_long n,
     }
     write += tail;
   }
+  /* Repeated-physics-block signature: the near-equal-size components must
+     carry most of the matrix.  Irregular component profiles (hvdc2's
+     40632/34723/30926..., circuit_4's 28k fragments) factor better under
+     the regular orderings and only waste a trial here. */
+  UF_long equal_mass = 0;
+  for (UF_long c = 0; c < ncomp; ++c) {
+    const UF_long sz = comp_start[c + 1u] - comp_start[c];
+    if ((double)sz >= 0.95 * (double)max_comp) {
+      equal_mass += sz;
+    }
+  }
   free(comp_start);
   free(comp_order);
   free(placed);
@@ -113836,7 +113891,7 @@ static int kls_build_block_structured_order(UF_long n,
   free(queue);
   const int usable =
     write == n && ncomp >= 3u && covered * 10u >= n * 6u &&
-    max_comp * 2u <= n;
+    max_comp * 2u <= n && equal_mass * 2u >= n;
   if (!usable) {
     free(perm);
     free(comp);
@@ -114172,7 +114227,28 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     goto done;
   }
   trial_common.scale = -1;
-  trial_common.tol = solver->common.tol;
+  /* The matched diagonal is the pivot policy: a low threshold keeps
+     partial pivoting on it through elimination-phase value drift (at the
+     default 1e-3 KLU wanders off and fill explodes ~7x); the solve probe
+     and refinement police the numerics. */
+  trial_common.tol =
+    solver->common.tol < 1.0e-4 ? solver->common.tol : 1.0e-4;
+  if (solver->symbolic != NULL && solver->symbolic->lnz > 0.0 &&
+      solver->symbolic->unz > 0.0 && trial_symbolic->lnz > 0.0 &&
+      trial_symbolic->unz > 0.0 &&
+      trial_symbolic->lnz + trial_symbolic->unz >
+        4.0 * (solver->symbolic->lnz + solver->symbolic->unz)) {
+    /* The trial's own symbolic bound already dwarfs the baseline estimate;
+       factoring it just to reject on exact fill wastes seconds.  Real fill
+       runs below the bound, so keep a generous margin. */
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr,
+              "KLS block: trial skipped, est=%.3g > 4x base est=%.3g\n",
+              trial_symbolic->lnz + trial_symbolic->unz,
+              solver->symbolic->lnz + solver->symbolic->unz);
+    }
+    goto done;
+  }
 
   {
     trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
@@ -114279,6 +114355,7 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
         trilinos_klu_l_free_numeric(&solver->numeric, &solver->common);
         solver->numeric = NULL;
         kls_numeric_replaced_invalidate(solver);
+        solver->numeric_is_predicted = 0;
         factored = 0;
       }
     }
