@@ -302,6 +302,7 @@ struct kls_solver {
   UF_long *row_idx;
   UF_long *input_to_csc;
   UF_long *row_perm;
+  UF_long *user_col_perm;
   double *row_scale;
   double *col_scale;
   double *values;
@@ -20838,6 +20839,7 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->row_idx);
   free(solver->input_to_csc);
   free(solver->row_perm);
+  free(solver->user_col_perm);
   free(solver->row_scale);
   free(solver->col_scale);
   free(solver->values);
@@ -20850,6 +20852,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->row_idx = NULL;
   solver->input_to_csc = NULL;
   solver->row_perm = NULL;
+  solver->user_col_perm = NULL;
   solver->row_scale = NULL;
   solver->col_scale = NULL;
   solver->values = NULL;
@@ -82986,8 +82989,9 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      iterative refinement in the solve recovers the factor accuracy, so the
      mode requires the shapes refinement supports. */
   shared->use_fp32_l_values = 0;
-  if (solver->row_perm == NULL && solver->row_scale == NULL &&
-      solver->col_scale == NULL && kls_fp32_refactor_wanted(solver)) {
+  if (solver->row_perm == NULL && solver->user_col_perm == NULL &&
+      solver->row_scale == NULL && solver->col_scale == NULL &&
+      kls_fp32_refactor_wanted(solver)) {
     if (solver->refactor_l_values32 == NULL) {
       (void)kls_ensure_refactor_l_values32_cache(solver);
     }
@@ -111767,6 +111771,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
          numeric->Llen != NULL && numeric->Ulen != NULL &&
          numeric->LUsize != NULL && numeric->LUbx != NULL &&
          numeric->Udiag != NULL && numeric->Work != NULL;
+    if (!ok && getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS predicted: skeleton alloc failed status=%d\n",
+              (int)common->status);
+    }
     if (ok) {
       for (UF_long block = 0; block < nblocks; ++block) {
         numeric->LUbx[block] = NULL;
@@ -111800,6 +111808,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           numeric->Offi[poff++] = newrow;
         }
       }
+    }
+    if (ok && getenv("KLS_TRACE_PREDICTED") != NULL &&
+        solver->block_trial_active) {
+      fprintf(stderr, "KLS predicted: off section done\n");
     }
     if (ok) {
       numeric->Offp[n] = poff;
@@ -111890,7 +111902,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           }
         }
       }
-      if (diag_present != nk) {
+      if (diag_present != nk && !solver->block_trial_active) {
         if (getenv("KLS_TRACE_PREDICTED") != NULL) {
           fprintf(stderr, "KLS predicted: diag precheck %ld/%ld\n",
                   (long)diag_present, (long)nk);
@@ -111943,6 +111955,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       /* sort + dedupe each column of the union */
       UF_long out = 0;
       UF_long diag_seen = 0;
+      const int force_diag = solver->block_trial_active;
       for (UF_long k = 0; k < nk; ++k) {
         const UF_long lo = ucol_ptr[k];
         const UF_long hi = rowlen[k];
@@ -111964,18 +111977,33 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
         const UF_long dst = out;
         UF_long prev = KLS_KLU_EMPTY;
+        int have_diag = 0;
         for (UF_long p = lo; p < hi; ++p) {
           if (urows[p] != prev) {
+            if (force_diag && !have_diag && urows[p] > k) {
+              urows[out++] = k;
+              have_diag = 1;
+            }
             prev = urows[p];
             urows[out++] = prev;
             if (prev == k) {
               diag_seen++;
+              have_diag = 1;
             }
           }
+        }
+        if (force_diag && !have_diag) {
+          urows[out++] = k;
         }
         ucol_ptr[k] = dst;
       }
       ucol_ptr[nk] = out;
+      if (solver->block_trial_active) {
+        /* The trial's symmetric relabel has no matched diagonal; the
+           pattern carries it explicitly (a bound of A+A'+I) and the
+           pivoting fill provides the numeric pivots. */
+        diag_seen = nk;
+      }
       if (diag_seen != nk || out > 2u * bnz + nk) {
         if (getenv("KLS_TRACE_PREDICTED") != NULL) {
           fprintf(stderr,
@@ -112038,6 +112066,17 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       }
       rowlen[k] = len;
       block_lnz += len;
+    }
+    if (solver->block_trial_active && getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS predicted: block %ld exact lnz=%ld\n",
+              (long)block, (long)block_lnz);
+    }
+    if (solver->block_trial_active &&
+        block_lnz > 16 * (UF_long)solver->nnz) {
+      /* The blocked ordering only pays when the bound stays near the
+         input size; a blowup here means the structure was misjudged. */
+      ok = 0;
+      break;
     }
     /* Layout and allocation for this block. */
     size_t lusize = 0;
@@ -112621,8 +112660,13 @@ static int kls_predicted_suffix_close_numeric(kls_solver *solver) {
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_common *common = &solver->common;
-  if (numeric == NULL || symbolic == NULL || solver->snode_run_end == NULL) {
+  if (numeric == NULL || symbolic == NULL) {
     return 0;
+  }
+  if (solver->snode_run_end == NULL) {
+    /* No supernode runs detected: nothing to close; the pivoting fill's
+       per-swap legality vetoes carry the burden alone. */
+    return 1;
   }
   const UF_long nblocks = symbolic->nblocks;
   const UF_long *R = symbolic->R;
@@ -113086,6 +113130,10 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
         if (run_end_local <= k || run_end_local > nk) {
           run_end_local = k + 1u;
         }
+      } else {
+        /* No runs: any pattern row may serve; the veto pass rejects the
+           structurally illegal ones swap by swap. */
+        run_end_local = nk;
       }
       UF_long in_run_len = 0;
       while (in_run_len < lcol_len && li[in_run_len] < run_end_local) {
@@ -113342,6 +113390,18 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
 }
 
 
+typedef struct kls_block_trial_entry {
+  UF_long row;
+  UF_long base_pos;
+  double value;
+} kls_block_trial_entry;
+
+static int kls_block_trial_entry_cmp(const void *a, const void *b) {
+  const kls_block_trial_entry *ea = (const kls_block_trial_entry *)a;
+  const kls_block_trial_entry *eb = (const kls_block_trial_entry *)b;
+  return (ea->row > eb->row) - (ea->row < eb->row);
+}
+
 /* Block-structured ordering: circuit families such as TSOPF repeat a
    physics block (one power network per contingency) that generic orderings
    interleave, forcing the pivots that inflate fill.  Detect the blocks as
@@ -113352,8 +113412,10 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
 static int kls_build_block_structured_order(UF_long n,
                                             const UF_long *col_ptr,
                                             const UF_long *row_idx,
-                                            UF_long **perm_out) {
+                                            UF_long **perm_out,
+                                            UF_long **comp_out) {
   *perm_out = NULL;
+  *comp_out = NULL;
   if (n < 10000 || n > 2000000) {
     return 0;
   }
@@ -113486,16 +113548,17 @@ static int kls_build_block_structured_order(UF_long n,
   free(deg);
   free(xadj);
   free(adj);
-  free(comp);
   free(queue);
   const int usable =
     write == n && ncomp >= 3u && covered * 10u >= n * 6u &&
     max_comp * 2u <= n;
   if (!usable) {
     free(perm);
+    free(comp);
     return 0;
   }
   *perm_out = perm;
+  *comp_out = comp;
   return 1;
 }
 
@@ -113505,6 +113568,7 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
                                                    const double *values) {
   if (solver == NULL || !solver->options.static_pivoting ||
       solver->numeric != NULL || solver->row_perm != NULL ||
+      solver->user_col_perm != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->options.scale > 0) {
@@ -113512,8 +113576,10 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
   }
   const double start = kls_now_seconds();
   UF_long *block_perm = NULL;
+  UF_long *block_comp = NULL;
   if (!kls_build_block_structured_order(solver->n, solver->col_ptr,
-                                        solver->row_idx, &block_perm)) {
+                                        solver->row_idx, &block_perm,
+                                        &block_comp)) {
     *elapsed += kls_now_seconds() - start;
     return;
   }
@@ -113521,138 +113587,289 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     fprintf(stderr, "KLS block: structure detected\n");
   }
 
-  UF_long *row_perm = NULL;
-  UF_long matched = 0;
-  double *row_scale = NULL;
-  double *col_scale = NULL;
-  UF_long *rp_col_ptr = NULL;
-  UF_long *rp_row_idx = NULL;
-  UF_long *rp_input = NULL;
-  double *rp_values = NULL;
+  const UF_long n = solver->n;
+  const UF_long nnz = solver->nnz;
+  UF_long *row_pos = NULL;      /* user row -> internal position */
   UF_long *trial_col_ptr = NULL;
   UF_long *trial_row_idx = NULL;
   UF_long *trial_input = NULL;
   double *trial_values = NULL;
   UF_long *trial_row_perm = NULL;
+  UF_long *trial_col_perm = NULL;
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_common trial_common;
-  kls_separator_analysis trial_separator;
-  memset(&trial_separator, 0, sizeof(trial_separator));
   (void)trilinos_klu_l_defaults(&trial_common);
   int accepted = 0;
-  const UF_long n = solver->n;
-  const UF_long nnz = solver->nnz;
 
-  if (build_spral_hungarian_row_match_scaling(n, nnz, solver->col_ptr,
-                                              solver->row_idx, values,
-                                              &row_perm, &matched,
-                                              &row_scale, &col_scale)
-        != KLS_OK ||
-      matched != n) {
-    goto done;
+  /* Band-capped Hungarian: only entries within a fixed distance of the
+     blocked diagonal participate (couplers exempt), with proximity
+     weights.  The matched diagonal is then banded by construction - the
+     degenerate value-optimal matchings that scramble the band are simply
+     not in the graph - and the restricted pivoting fill supplies the
+     numerics afterwards. */
+  {
+    int64_t *sp_col_ptr =
+      (int64_t *)malloc(((size_t)n + 1u) * sizeof(*sp_col_ptr));
+    int *sp_row_idx = (int *)malloc((size_t)nnz * sizeof(*sp_row_idx));
+    double *sp_values = (double *)malloc((size_t)nnz * sizeof(*sp_values));
+    int *sp_match = (int *)malloc((size_t)n * sizeof(*sp_match));
+    double *sp_rs = (double *)malloc((size_t)n * sizeof(*sp_rs));
+    double *sp_cs = (double *)malloc((size_t)n * sizeof(*sp_cs));
+    UF_long *pos_of = (UF_long *)malloc((size_t)n * sizeof(*pos_of));
+    if (sp_col_ptr == NULL || sp_row_idx == NULL || sp_values == NULL ||
+        sp_match == NULL || sp_rs == NULL || sp_cs == NULL ||
+        pos_of == NULL || n > (UF_long)INT_MAX) {
+      free(sp_col_ptr);
+      free(sp_row_idx);
+      free(sp_values);
+      free(sp_match);
+      free(sp_rs);
+      free(sp_cs);
+      free(pos_of);
+      goto done;
+    }
+    for (UF_long k = 0; k < n; ++k) {
+      pos_of[block_perm[k]] = k;
+    }
+    UF_long count = 0;
+    for (UF_long k = 0; k < n; ++k) {
+      const UF_long oldcol = block_perm[k];
+      sp_col_ptr[k] = (int64_t)count;
+      for (UF_long p = solver->col_ptr[oldcol];
+           p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long r = solver->row_idx[p];
+        const int row_dense = block_comp[r] == KLS_KLU_EMPTY;
+        const int col_dense = block_comp[oldcol] == KLS_KLU_EMPTY;
+        if (row_dense != col_dense) {
+          /* A dense row matched into the band fills everything below it;
+             mixed pairs stay out and the columns this starves move to the
+             tail below. */
+          continue;
+        }
+        if (!row_dense) {
+          if (block_comp[r] != block_comp[oldcol] || values[p] == 0.0) {
+            continue;
+          }
+          const UF_long dist =
+            pos_of[r] > k ? pos_of[r] - k : k - pos_of[r];
+          if (dist > 128u) {
+            continue;
+          }
+          sp_row_idx[count] = (int)r;
+          sp_values[count] = 1.0 / (1.0 + (double)dist);
+          count++;
+        } else {
+          sp_row_idx[count] = (int)r;
+          sp_values[count] = 1.0;
+          count++;
+        }
+      }
+    }
+    sp_col_ptr[n] = (int64_t)count;
+    free(pos_of);
+    struct spral_scaling_hungarian_options sp_options;
+    struct spral_scaling_hungarian_inform sp_inform;
+    spral_scaling_hungarian_default_options(&sp_options);
+    sp_options.array_base = 0;
+    sp_options.scale_if_singular = false;
+    spral_scaling_hungarian_unsym_long((int)n, (int)n, sp_col_ptr,
+                                       sp_row_idx, sp_values, sp_rs, sp_cs,
+                                       sp_match, &sp_options, &sp_inform);
+    free(sp_col_ptr);
+    free(sp_row_idx);
+    free(sp_values);
+    free(sp_rs);
+    free(sp_cs);
+    if (sp_inform.flag != 0 && sp_inform.flag != -2) {
+      free(sp_match);
+      goto done;
+    }
+    row_pos = (UF_long *)malloc((size_t)n * sizeof(*row_pos));
+    if (row_pos == NULL) {
+      free(sp_match);
+      goto done;
+    }
+    UF_long matched = 0;
+    for (UF_long r = 0; r < n; ++r) {
+      const int pos = sp_match[r];
+      if (pos >= 0 && pos < (int)n) {
+        row_pos[r] = (UF_long)pos;
+        matched++;
+      } else {
+        row_pos[r] = KLS_KLU_EMPTY;
+      }
+    }
+    free(sp_match);
+    if (matched < n - n / 50u) {
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr, "KLS block: match failed (%ld/%ld)\n",
+                (long)matched, (long)n);
+      }
+      goto done;
+    }
+    if (matched != n) {
+      /* Phase two: the starved columns (unmatchable without a dense row)
+         and the unmatched rows both move to the tail, keeping the band
+         intact ahead of them. */
+      unsigned char *col_matched =
+        (unsigned char *)calloc((size_t)n, sizeof(*col_matched));
+      UF_long *new_perm = (UF_long *)malloc((size_t)n * sizeof(*new_perm));
+      if (col_matched == NULL || new_perm == NULL) {
+        free(col_matched);
+        free(new_perm);
+        goto done;
+      }
+      for (UF_long r = 0; r < n; ++r) {
+        if (row_pos[r] != KLS_KLU_EMPTY) {
+          col_matched[row_pos[r]] = 1;
+        }
+      }
+      UF_long w = 0;
+      for (UF_long k = 0; k < n; ++k) {
+        if (col_matched[k]) {
+          new_perm[w++] = block_perm[k];
+        }
+      }
+      const UF_long tail_start = w;
+      for (UF_long k = 0; k < n; ++k) {
+        if (!col_matched[k]) {
+          new_perm[w++] = block_perm[k];
+        }
+      }
+      /* remap matched rows to the compacted positions */
+      UF_long *pos_map = (UF_long *)malloc((size_t)n * sizeof(*pos_map));
+      if (pos_map == NULL) {
+        free(col_matched);
+        free(new_perm);
+        goto done;
+      }
+      UF_long w2 = 0;
+      for (UF_long k = 0; k < n; ++k) {
+        if (col_matched[k]) {
+          pos_map[k] = w2++;
+        } else {
+          pos_map[k] = KLS_KLU_EMPTY;
+        }
+      }
+      for (UF_long r = 0; r < n; ++r) {
+        if (row_pos[r] != KLS_KLU_EMPTY) {
+          row_pos[r] = pos_map[row_pos[r]];
+        }
+      }
+      /* unmatched rows fill the tail positions in order */
+      UF_long next_tail = tail_start;
+      for (UF_long r = 0; r < n; ++r) {
+        if (row_pos[r] == KLS_KLU_EMPTY) {
+          row_pos[r] = next_tail++;
+        }
+      }
+      memcpy(block_perm, new_perm, (size_t)n * sizeof(*new_perm));
+      free(col_matched);
+      free(new_perm);
+      free(pos_map);
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr, "KLS block: %ld starved columns moved to tail\n",
+                (long)(n - matched));
+      }
+    }
   }
-  /* Matched scaling stays unused: the class this targets factors unscaled
-     and the probe arbitrates. */
-  free(row_scale);
-  free(col_scale);
-  row_scale = NULL;
-  col_scale = NULL;
-  if (build_sorted_row_permuted_pattern(n, nnz, solver->col_ptr,
-                                        solver->row_idx, values, row_perm,
-                                        solver->input_to_csc, &rp_col_ptr,
-                                        &rp_row_idx, &rp_values,
-                                        &rp_input) != KLS_OK) {
-    goto done;
-  }
-  /* Column-permute by the blocked order; rows relabel with the same
-     permutation so the block spans align on both sides. */
+
+  /* Physical position-space matrix: internal entry (row_pos[r], k) for the
+     user entry (r, block_perm[k]) - byte for byte what the validated
+     file-based prototype factored. */
   trial_col_ptr = (UF_long *)malloc(((size_t)n + 1u) * sizeof(*trial_col_ptr));
   trial_row_idx = (UF_long *)malloc((size_t)nnz * sizeof(*trial_row_idx));
   trial_input = (UF_long *)malloc((size_t)nnz * sizeof(*trial_input));
   trial_values = (double *)malloc((size_t)nnz * sizeof(*trial_values));
-  trial_row_perm = (UF_long *)malloc((size_t)n * sizeof(*trial_row_perm));
   if (trial_col_ptr == NULL || trial_row_idx == NULL || trial_input == NULL ||
-      trial_values == NULL || trial_row_perm == NULL) {
+      trial_values == NULL) {
     goto done;
   }
   {
-    UF_long *inv = (UF_long *)malloc((size_t)n * sizeof(*inv));
-    if (inv == NULL) {
+    UF_long *base_to_trial =
+      (UF_long *)malloc((size_t)nnz * sizeof(*base_to_trial));
+    kls_block_trial_entry *col_buf = NULL;
+    UF_long col_buf_capacity = 0;
+    if (base_to_trial == NULL) {
       goto done;
-    }
-    for (UF_long k = 0; k < n; ++k) {
-      inv[block_perm[k]] = k;
     }
     UF_long count = 0;
     for (UF_long k = 0; k < n; ++k) {
       const UF_long oldcol = block_perm[k];
       trial_col_ptr[k] = count;
-      for (UF_long p = rp_col_ptr[oldcol]; p < rp_col_ptr[oldcol + 1u]; ++p) {
-        trial_row_idx[count] = inv[rp_row_idx[p]];
-        trial_values[count] = rp_values[p];
-        trial_input[count] =
-          rp_input != NULL ? rp_input[p] : p;
+      const UF_long len =
+        solver->col_ptr[oldcol + 1u] - solver->col_ptr[oldcol];
+      if (len > col_buf_capacity) {
+        free(col_buf);
+        col_buf = (kls_block_trial_entry *)malloc(
+          (size_t)len * sizeof(*col_buf));
+        col_buf_capacity = col_buf != NULL ? len : 0;
+        if (col_buf == NULL) {
+          free(base_to_trial);
+          goto done;
+        }
+      }
+      for (UF_long t = 0; t < len; ++t) {
+        const UF_long p = solver->col_ptr[oldcol] + t;
+        col_buf[t].row = row_pos[solver->row_idx[p]];
+        col_buf[t].base_pos = p;
+        col_buf[t].value = values[p];
+      }
+      qsort(col_buf, (size_t)len, sizeof(*col_buf),
+            kls_block_trial_entry_cmp);
+      for (UF_long t = 0; t < len; ++t) {
+        trial_row_idx[count] = col_buf[t].row;
+        trial_values[count] = col_buf[t].value;
+        base_to_trial[col_buf[t].base_pos] = count;
         count++;
       }
-      /* sort the column by new row index (insertion; columns are short) */
-      for (UF_long a = trial_col_ptr[k] + 1u; a < count; ++a) {
-        const UF_long vi = trial_row_idx[a];
-        const double vv = trial_values[a];
-        const UF_long vp = trial_input[a];
-        UF_long b = a;
-        while (b > trial_col_ptr[k] && trial_row_idx[b - 1u] > vi) {
-          trial_row_idx[b] = trial_row_idx[b - 1u];
-          trial_values[b] = trial_values[b - 1u];
-          trial_input[b] = trial_input[b - 1u];
-          b--;
-        }
-        trial_row_idx[b] = vi;
-        trial_values[b] = vv;
-        trial_input[b] = vp;
+    }
+    free(col_buf);
+    trial_col_ptr[n] = count;
+    /* compose the input-to-internal map */
+    if (solver->input_to_csc != NULL) {
+      for (UF_long q = 0; q < nnz; ++q) {
+        trial_input[q] = base_to_trial[solver->input_to_csc[q]];
+      }
+    } else {
+      for (UF_long q = 0; q < nnz; ++q) {
+        trial_input[q] = base_to_trial[q];
       }
     }
-    trial_col_ptr[n] = count;
-    /* total row movement = blocked relabel after the match */
-    for (UF_long r = 0; r < n; ++r) {
-      trial_row_perm[r] = inv[row_perm[r]];
-    }
-    free(inv);
+    free(base_to_trial);
   }
+  trial_row_perm = row_pos;
+  row_pos = NULL;
+  trial_col_perm = block_perm;
+  block_perm = NULL;
 
   {
-    const char *dump = getenv("KLS_DUMP_BLOCK_TRIAL");
+    const char *dump = getenv("KLS_DUMP_BLOCK_PERMS");
     if (dump != NULL) {
       FILE *df = fopen(dump, "w");
       if (df != NULL) {
-        fprintf(df, "%ld %ld\n", (long)n, (long)nnz);
-        for (UF_long k = 0; k <= n; ++k) {
-          fprintf(df, "%ld\n", (long)trial_col_ptr[k]);
-        }
-        for (UF_long p = 0; p < nnz; ++p) {
-          fprintf(df, "%ld\n", (long)trial_row_idx[p]);
+        fprintf(df, "%ld\n", (long)n);
+        for (UF_long k = 0; k < n; ++k) {
+          fprintf(df, "%ld %ld\n", (long)trial_col_perm[k],
+                  (long)trial_row_perm[k]);
         }
         fclose(df);
       }
     }
   }
-  {
-    kls_options trial_options = solver->options;
-    trial_options.ordering = KLS_ORDERING_NATURAL;
-    kls_ordering trial_ordering = KLS_ORDERING_NATURAL;
-    double trial_score = 0.0;
-    if (choose_symbolic_for_pattern(n, trial_col_ptr, trial_row_idx,
-                                    &trial_options, &trial_symbolic,
-                                    &trial_common, &trial_ordering,
-                                    &trial_score, &trial_separator)
-          != KLS_OK) {
-      goto done;
+  trial_symbolic = trilinos_klu_l_analyze_given(n, trial_col_ptr,
+                                                trial_row_idx, NULL, NULL,
+                                                &trial_common);
+  if (trial_symbolic == NULL || trial_common.status < TRILINOS_KLU_OK) {
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS block: analyze failed status=%d\n",
+              (int)trial_common.status);
     }
+    goto done;
   }
   trial_common.scale = -1;
   trial_common.tol = solver->common.tol;
 
-  /* Provisional adoption; the predicted factorization with the pivoting
-     rescue is the trial factor, and its solve probe is the judge. */
   {
     trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
     trilinos_klu_l_common old_common = solver->common;
@@ -113660,14 +113877,13 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     UF_long *old_row_idx = solver->row_idx;
     UF_long *old_input = solver->input_to_csc;
     double *old_values_arr = solver->values;
-    kls_orientation old_orientation = solver->orientation;
 
     solver->col_ptr = trial_col_ptr;
     solver->row_idx = trial_row_idx;
     solver->input_to_csc = trial_input;
     solver->row_perm = trial_row_perm;
+    solver->user_col_perm = trial_col_perm;
     solver->values = trial_values;
-    solver->orientation = KLS_ORIENTATION_NORMAL;
     solver->symbolic = trial_symbolic;
     solver->common = trial_common;
     kls_invalidate_factor_etree_stats(solver);
@@ -113680,7 +113896,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     if (factored && solver->numeric != NULL) {
       solver->exact_matching_selected = 1;
       solver->spral_matching_selected = 1;
-      kls_separator_analysis_move(&solver->separator, &trial_separator);
       solver->stats.selected_ordering = KLS_ORDERING_NATURAL;
       solver->stats.selected_orientation = solver->orientation;
       solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
@@ -113698,6 +113913,7 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       trial_input = NULL;
       trial_values = NULL;
       trial_row_perm = NULL;
+      trial_col_perm = NULL;
       trial_symbolic = NULL;
       accepted = 1;
       if (getenv("KLS_TRACE_PREDICTED") != NULL) {
@@ -113708,8 +113924,8 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       solver->row_idx = old_row_idx;
       solver->input_to_csc = old_input;
       solver->row_perm = NULL;
+      solver->user_col_perm = NULL;
       solver->values = old_values_arr;
-      solver->orientation = old_orientation;
       solver->symbolic = old_symbolic;
       solver->common = old_common;
       kls_invalidate_factor_etree_stats(solver);
@@ -113726,16 +113942,11 @@ done:
     free(trial_input);
     free(trial_values);
     free(trial_row_perm);
+    free(trial_col_perm);
   }
-  kls_separator_analysis_clear(&trial_separator);
-  free(rp_col_ptr);
-  free(rp_row_idx);
-  free(rp_input);
-  free(rp_values);
-  free(row_perm);
-  free(row_scale);
-  free(col_scale);
+  free(row_pos);
   free(block_perm);
+  free(block_comp);
   *elapsed += kls_now_seconds() - start;
 }
 #endif
@@ -113752,7 +113963,10 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
       solver->numeric == NULL || solver->symbolic == NULL) {
     return 0;
   }
-  const double est_total = solver->symbolic->lnz + solver->symbolic->unz;
+  const double est_total =
+    solver->block_trial_active
+      ? -1.0
+      : solver->symbolic->lnz + solver->symbolic->unz;
   if (est_total > 0.0 &&
       (double)(solver->numeric->lnz + solver->numeric->unz) >
         1.2 * est_total) {
@@ -113762,9 +113976,6 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
     free_snode_panels(solver);
     solver->snode_numeric_pre_sorted = 1;
     kls_maybe_prepare_snode_panels(solver, elapsed);
-    if (solver->snode_run_end == NULL) {
-      return 0;
-    }
   }
   if (!kls_predicted_suffix_close_numeric(solver)) {
     return 0;
@@ -114099,6 +114310,24 @@ static int solve_impl(kls_solver *solver,
     return KLS_ERR_OUT_OF_MEMORY;
   }
 
+  if (solver->user_col_perm != NULL && kernel_transpose) {
+    double *cw = perm_workspace != NULL
+      ? perm_workspace
+      : ensure_solve_perm_workspace(solver);
+    if (cw == NULL) {
+      return KLS_ERR_OUT_OF_MEMORY;
+    }
+    for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
+      const double *src = b + rhs * ldb;
+      double *dst = x + rhs * ldx;
+      for (UF_long k = 0; k < solver->n; ++k) {
+        cw[k] = src[solver->user_col_perm[k]];
+      }
+      memcpy(dst, cw, (size_t)solver->n * sizeof(double));
+    }
+    b = x;
+    ldb = ldx;
+  }
   if (solver->row_perm != NULL && !kernel_transpose) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       const double *src = b + rhs * ldb;
@@ -114157,6 +114386,27 @@ static int solve_impl(kls_solver *solver,
       }
     }
   }
+  if (ok && solver->user_col_perm != NULL && !kernel_transpose) {
+    /* Internal column position k solves for the user's variable
+       user_col_perm[k]. */
+    double *cw = solver->solve_perm_workspace != NULL
+      ? solver->solve_perm_workspace
+      : perm_workspace;
+    if (cw == NULL) {
+      cw = ensure_solve_perm_workspace(solver);
+    }
+    if (cw == NULL) {
+      ok = 0;
+    } else {
+      for (int64_t rhs = 0; rhs < nrhs && ok; ++rhs) {
+        double *dst = x + rhs * ldx;
+        for (UF_long k = 0; k < solver->n; ++k) {
+          cw[solver->user_col_perm[k]] = dst[k];
+        }
+        memcpy(dst, cw, (size_t)solver->n * sizeof(double));
+      }
+    }
+  }
   if (ok && solver->row_perm != NULL && kernel_transpose) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       double *dst = x + rhs * ldx;
@@ -114195,8 +114445,8 @@ static int solve_impl(kls_solver *solver,
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
       (solver->numeric_needs_refinement ||
        getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL) &&
-      solver->row_perm == NULL && solver->row_scale == NULL &&
-      solver->col_scale == NULL &&
+      solver->row_perm == NULL && solver->user_col_perm == NULL &&
+      solver->row_scale == NULL && solver->col_scale == NULL &&
       (solver->solve_refine_values != NULL || solver->values != NULL) &&
       solver->col_ptr != NULL && solver->row_idx != NULL) {
     const double *refine_a = solver->solve_refine_values != NULL
