@@ -327,6 +327,7 @@ struct kls_solver {
   UF_long pivot_nudge_capacity;
   double *solve_refine_workspace;
   double *solve_refine_values;
+  UF_long *solve_refine_rinv;
   double base_solve_seconds;
   int fp32_decision;
   int fp32_last_used;
@@ -20729,6 +20730,8 @@ static void free_snode_panels(kls_solver *solver) {
 static void free_solve_refine_workspace(kls_solver *solver) {
   free(solver->solve_refine_workspace);
   solver->solve_refine_workspace = NULL;
+  free(solver->solve_refine_rinv);
+  solver->solve_refine_rinv = NULL;
 }
 
 static void free_pivot_nudges(kls_solver *solver) {
@@ -112590,7 +112593,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           rmax = rmax < v ? v : rmax;
         }
         const double rel = rmax / bscale;
-        if (!(rel < residual * 0.5) || rel < 1.0e-13 ||
+        if (!(rel < residual * 0.5) ||
+            rel < (solver->block_trial_active ? 3.0e-10 : 1.0e-13) ||
             iter == probe_iter_cap) {
           residual = rel < residual ? rel : residual;
           break;
@@ -114092,10 +114096,23 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver->options.fast_factor && solver->numeric != NULL &&
       solver->numeric_is_predicted &&
       (solver->pivot_nudge_count > 0 || solver->user_col_perm != NULL)) {
-    /* A nudged predicted numeric carries weak pivots by construction; the
-       checked fast factorization rejects them and its repair machinery
-       churns unboundedly.  The plain refactorization replays the pivots
-       and the KLU fallback below stays bounded. */
+    /* A nudged or block-ordered predicted numeric carries weak pivots by
+       construction: the checked fast factorization rejects them and its
+       repair machinery churns unboundedly, and a full KLU fallback
+       re-pivots the blocked matrix into orders of magnitude more fill.
+       Replay the pivot sequence with the plain refactorization instead;
+       the refining solves police accuracy. */
+    const double start = kls_now_seconds();
+    const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
+    elapsed += kls_now_seconds() - start;
+    if (ok && solver->common.status >= 0 &&
+        solver->common.status != TRILINOS_KLU_SINGULAR) {
+      kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FAST_REFACTOR);
+      solver->stats.factor_seconds = elapsed;
+      kls_update_numeric_diagnostics(solver, 1);
+      fill_numeric_stats(solver);
+      return KLS_OK;
+    }
   } else if (solver->options.fast_factor && solver->numeric != NULL) {
     const int dominant_btf_guard =
       kls_dominant_btf_fast_factor_repair_is_risky(solver);
@@ -114471,13 +114488,26 @@ static int solve_impl(kls_solver *solver,
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
       (solver->numeric_needs_refinement ||
        getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL) &&
-      solver->row_perm == NULL && solver->user_col_perm == NULL &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
       (solver->solve_refine_values != NULL || solver->values != NULL) &&
       solver->col_ptr != NULL && solver->row_idx != NULL) {
     const double *refine_a = solver->solve_refine_values != NULL
       ? solver->solve_refine_values
       : solver->values;
+    if (solver->row_perm != NULL && solver->solve_refine_rinv == NULL) {
+      solver->solve_refine_rinv = (UF_long *)malloc(
+        (size_t)solver->n * sizeof(*solver->solve_refine_rinv));
+      if (solver->solve_refine_rinv != NULL) {
+        for (UF_long r = 0; r < solver->n; ++r) {
+          solver->solve_refine_rinv[solver->row_perm[r]] = r;
+        }
+      }
+    }
+    const UF_long *rinv = solver->solve_refine_rinv;
+    const UF_long *cmap = solver->user_col_perm;
+    if (solver->row_perm != NULL && rinv == NULL) {
+      goto refine_skip;
+    }
     if (solver->solve_refine_workspace == NULL) {
       solver->solve_refine_workspace = (double *)malloc(
         3u * (size_t)solver->n * sizeof(*solver->solve_refine_workspace));
@@ -114507,19 +114537,21 @@ static int solve_impl(kls_solver *solver,
             double acc = 0.0;
             for (UF_long p = solver->col_ptr[col];
                  p < solver->col_ptr[col + 1u]; ++p) {
-              acc += refine_a[p] * xrhs[solver->row_idx[p]];
+              const UF_long ir = solver->row_idx[p];
+              acc += refine_a[p] * xrhs[rinv != NULL ? rinv[ir] : ir];
             }
-            residual[col] -= acc;
+            residual[cmap != NULL ? cmap[col] : col] -= acc;
           }
         } else {
           for (UF_long col = 0; col < nloc; ++col) {
-            const double xv = xrhs[col];
+            const double xv = xrhs[cmap != NULL ? cmap[col] : col];
             if (xv == 0.0) {
               continue;
             }
             for (UF_long p = solver->col_ptr[col];
                  p < solver->col_ptr[col + 1u]; ++p) {
-              residual[solver->row_idx[p]] -= refine_a[p] * xv;
+              const UF_long ir = solver->row_idx[p];
+              residual[rinv != NULL ? rinv[ir] : ir] -= refine_a[p] * xv;
             }
           }
         }
@@ -114556,6 +114588,7 @@ static int solve_impl(kls_solver *solver,
     }
     solver->stats.solve_seconds = kls_now_seconds() - start;
   }
+refine_skip:;
 
   solver->stats.solve_seconds = kls_now_seconds() - start;
   solver->stats.last_kernel_status = (int)solver->common.status;
