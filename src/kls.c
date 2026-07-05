@@ -111529,6 +111529,12 @@ static int kls_try_rebuild_current_numeric_with_kls_first_mode(
   double *numeric_values,
   double *elapsed,
   int force) {
+  if (solver != NULL && solver->numeric_is_predicted) {
+    /* Predicted numerics reject to the bounded KLU fallback; the row-first
+       rebuild pipelines assume KLU-built state and churn unboundedly on
+       these shapes. */
+    return 0;
+  }
   if (solver == NULL || numeric_values == NULL || solver->numeric == NULL ||
       (force ? kls_first_factor_env_disabled()
              : !kls_should_try_first_factor(solver))) {
@@ -112258,7 +112264,9 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   }
   UF_long refactor_ok = 0;
   int saw_singular = 0;
-  if (getenv("KLS_FORCE_PIVOT_FILL") != NULL) {
+  if (getenv("KLS_FORCE_PIVOT_FILL") != NULL || solver->block_trial_active) {
+    /* The block trial's matched diagonal is structurally incomplete by
+       design; the pivoting fill is its intended factorization. */
     refactor_ok = 0;
     common->status = TRILINOS_KLU_SINGULAR;
   } else
@@ -112563,7 +112571,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       /* Refine while it helps: a reduced-accuracy factorization (nudged or
          waived pivots) that converges under refinement is still usable,
          with production solves flagged to refine the same way. */
-      for (int iter = 0; iter <= 3; ++iter) {
+      const int probe_iter_cap = solver->block_trial_active ? 10 : 3;
+      for (int iter = 0; iter <= probe_iter_cap; ++iter) {
         memcpy(probe_r, probe_b, (size_t)n * sizeof(*probe_r));
         for (UF_long j = 0; j < n; ++j) {
           const double xv = probe_x[j];
@@ -112581,7 +112590,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           rmax = rmax < v ? v : rmax;
         }
         const double rel = rmax / bscale;
-        if (!(rel < residual * 0.5) || rel < 1.0e-13 || iter == 3) {
+        if (!(rel < residual * 0.5) || rel < 1.0e-13 ||
+            iter == probe_iter_cap) {
           residual = rel < residual ? rel : residual;
           break;
         }
@@ -113574,6 +113584,15 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       solver->options.scale > 0) {
     return;
   }
+  {
+    const char *value = getenv("KLS_ENABLE_BLOCK_ORDERING");
+    if (value == NULL || value[0] == '\0' ||
+        (value[0] == '0' && value[1] == '\0')) {
+      /* Off by default until the post-adoption refactor routing matches
+         the prototype's throughput. */
+      return;
+    }
+  }
   const double start = kls_now_seconds();
   UF_long *block_perm = NULL;
   UF_long *block_comp = NULL;
@@ -114070,7 +114089,14 @@ int kls_factor(kls_solver *solver, const double *values) {
                                                             : KLS_OK;
     }
   }
-  if (solver->options.fast_factor && solver->numeric != NULL) {
+  if (solver->options.fast_factor && solver->numeric != NULL &&
+      solver->numeric_is_predicted &&
+      (solver->pivot_nudge_count > 0 || solver->user_col_perm != NULL)) {
+    /* A nudged predicted numeric carries weak pivots by construction; the
+       checked fast factorization rejects them and its repair machinery
+       churns unboundedly.  The plain refactorization replays the pivots
+       and the KLU fallback below stays bounded. */
+  } else if (solver->options.fast_factor && solver->numeric != NULL) {
     const int dominant_btf_guard =
       kls_dominant_btf_fast_factor_repair_is_risky(solver);
     const int pipeline_refactor_guard =
