@@ -19977,6 +19977,18 @@ static UF_long kls_snode_trace_batched_producers = 0;
 static UF_long kls_snode_trace_decline_norun = 0;
 static UF_long kls_snode_trace_decline_short = 0;
 static UF_long kls_snode_trace_decline_work = 0;
+
+/* Every EGraph worker hits the consume declines millions of times per
+   refactor; unconditional writes to shared counters ping-pong the cache
+   line across threads (measured 6x on rajat31's refactor).  Resolve the
+   trace env once and skip the writes entirely when tracing is off. */
+static int kls_snode_trace_enabled(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    cached = getenv("KLS_TRACE_SNODE") != NULL;
+  }
+  return cached;
+}
 static UF_long kls_snode_trace_batched_tail_entries = 0;
 
 __attribute__((destructor)) static void kls_snode_trace_report(void) {
@@ -20018,7 +20030,9 @@ static UF_long kls_snode_batch_consume(
   const UF_long j = ui[up];
   const UF_long run_end = snode_run_end[k1 + j];
   if (run_end <= k1 + j + 1u) {
-    kls_snode_trace_decline_norun++;
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_norun++;
+    }
     return 0;
   }
   UF_long tmax = run_end - (k1 + j);
@@ -20033,7 +20047,9 @@ static UF_long kls_snode_batch_consume(
     t++;
   }
   if (t < KLS_SNODE_MIN_BATCH) {
-    kls_snode_trace_decline_short++;
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_short++;
+    }
     return 0;
   }
   UF_long *tli = NULL;
@@ -20044,7 +20060,9 @@ static UF_long kls_snode_batch_consume(
   if (t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
     /* Short shared tails lose to the scalar path; only pay the panel
        staging when the batched update amortizes it. */
-    kls_snode_trace_decline_work++;
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_work++;
+    }
     return 0;
   }
   double xs[KLS_SNODE_MAX_BATCH];
@@ -20090,8 +20108,10 @@ static UF_long kls_snode_batch_consume(
       x[tli[p0 + p]] -= acc[p];
     }
   }
-  kls_snode_trace_batched_producers += t;
-  kls_snode_trace_batched_tail_entries += t * tlen;
+  if (kls_snode_trace_enabled()) {
+    kls_snode_trace_batched_producers += t;
+    kls_snode_trace_batched_tail_entries += t * tlen;
+  }
   return t;
 }
 
@@ -27353,12 +27373,12 @@ static int maybe_select_auto_scale(kls_solver *solver,
 }
 
 static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
-  if (solver != NULL &&
-      (solver->numeric_is_predicted || solver->user_col_perm != NULL)) {
-    /* A predicted or block-ordered numeric proved its pivot policy through
-       the solve probe; a serial trial factorization at another tolerance
-       re-pivots the matrix (for block orderings, into orders of magnitude
-       more fill). */
+  if (solver != NULL && solver->user_col_perm != NULL) {
+    /* A block-ordered numeric proved its pivot policy through the solve
+       probe; a serial trial factorization at another tolerance re-pivots
+       the blocked matrix into orders of magnitude more fill.  Regular
+       predicted numerics stay eligible - giants rely on this promotion
+       (rajat31 refactor 79s->11s via the metis/tolerance replacement). */
     return 0;
   }
   if (solver->auto_pivot_checked || solver->numeric == NULL || solver->n < 30000 ||
@@ -27481,11 +27501,12 @@ static int metis_numeric_is_better(const kls_solver *solver,
 static int maybe_promote_auto_metis(kls_solver *solver,
                                     double *elapsed,
                                     const double *numeric_values) {
-  if (solver != NULL &&
-      (solver->numeric_is_predicted || solver->user_col_perm != NULL)) {
-    /* A predicted or block-ordered numeric settled its ordering through
-       the solve probe; a serial METIS trial factorization re-pivots the
-       matrix (for block orderings, into orders of magnitude more fill). */
+  if (solver != NULL && solver->user_col_perm != NULL) {
+    /* A block-ordered numeric settled its ordering through the solve
+       probe; a serial METIS trial factorization re-pivots the blocked
+       matrix into orders of magnitude more fill.  Regular predicted
+       numerics stay eligible - the metis promotion is where giants get
+       their small-fill refactor numeric (rajat31 184M->118M). */
     return 0;
   }
   if (!should_try_auto_metis(solver)) {
@@ -68477,7 +68498,9 @@ static UF_long kls_snode_batch_consume_cached(
   const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
   const UF_long run_end = snode_run_end[k1 + j];
   if (run_end <= k1 + j + 1u) {
-    kls_snode_trace_decline_norun++;
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_norun++;
+    }
     return 0;
   }
   UF_long tmax = run_end - (k1 + j);
@@ -68507,7 +68530,9 @@ static UF_long kls_snode_batch_consume_cached(
     t = limit;
   }
   if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
-    kls_snode_trace_decline_short++;
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_short++;
+    }
     return 0;
   }
   if (wait_for_dependencies) {
@@ -68522,7 +68547,9 @@ static UF_long kls_snode_batch_consume_cached(
   if (tli == NULL || t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
     /* Short shared tails lose to the 32-bit-index scalar path; only pay the
        panel staging when the batched update amortizes it. */
-    kls_snode_trace_decline_work++;
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_work++;
+    }
     return 0;
   }
   double xs[KLS_SNODE_MAX_BATCH];
@@ -68569,8 +68596,10 @@ static UF_long kls_snode_batch_consume_cached(
       x[tli[p0 + p]] -= acc[p];
     }
   }
-  kls_snode_trace_batched_producers += t;
-  kls_snode_trace_batched_tail_entries += t * tlen;
+  if (kls_snode_trace_enabled()) {
+    kls_snode_trace_batched_producers += t;
+    kls_snode_trace_batched_tail_entries += t * tlen;
+  }
   return t;
 }
 
@@ -68597,7 +68626,9 @@ static UF_long kls_snode_batch_consume_cached_f32(
   const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
   const UF_long run_end = snode_run_end[k1 + j];
   if (run_end <= k1 + j + 1u) {
-    kls_snode_trace_decline_norun++;
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_norun++;
+    }
     return 0;
   }
   UF_long tmax = run_end - (k1 + j);
@@ -68625,7 +68656,9 @@ static UF_long kls_snode_batch_consume_cached_f32(
     t = limit;
   }
   if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
-    kls_snode_trace_decline_short++;
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_short++;
+    }
     return 0;
   }
   if (wait_for_dependencies) {
@@ -68693,8 +68726,10 @@ static UF_long kls_snode_batch_consume_cached_f32(
       }
     }
   }
-  kls_snode_trace_batched_producers += t;
-  kls_snode_trace_batched_tail_entries += t * tlen;
+  if (kls_snode_trace_enabled()) {
+    kls_snode_trace_batched_producers += t;
+    kls_snode_trace_batched_tail_entries += t * tlen;
+  }
   return t;
 }
 
