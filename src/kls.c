@@ -27333,6 +27333,12 @@ static int maybe_select_auto_scale(kls_solver *solver,
 }
 
 static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
+  if (solver != NULL && solver->numeric_is_predicted) {
+    /* A predicted numeric proved its pivot policy through the solve probe;
+       a serial trial factorization at another tolerance re-pivots the
+       matrix (for block orderings, into orders of magnitude more fill). */
+    return 0;
+  }
   if (solver->auto_pivot_checked || solver->numeric == NULL || solver->n < 30000 ||
       fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
       fabs(solver->common.tol - 0.001) > 1.0e-12 ||
@@ -27453,6 +27459,12 @@ static int metis_numeric_is_better(const kls_solver *solver,
 static int maybe_promote_auto_metis(kls_solver *solver,
                                     double *elapsed,
                                     const double *numeric_values) {
+  if (solver != NULL && solver->numeric_is_predicted) {
+    /* A predicted numeric settled its ordering through the solve probe; a
+       serial METIS trial factorization re-pivots the matrix (for block
+       orderings, into orders of magnitude more fill). */
+    return 0;
+  }
   if (!should_try_auto_metis(solver)) {
     return 0;
   }
@@ -113696,7 +113708,8 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     return;
   }
   if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr, "KLS block: structure detected\n");
+    fprintf(stderr, "KLS block: structure detected %.2fs\n",
+            kls_now_seconds() - start);
   }
 
   const UF_long n = solver->n;
@@ -113969,9 +113982,17 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       }
     }
   }
+  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+    fprintf(stderr, "KLS block: match+build done %.2fs\n",
+            kls_now_seconds() - start);
+  }
   trial_symbolic = trilinos_klu_l_analyze_given(n, trial_col_ptr,
                                                 trial_row_idx, NULL, NULL,
                                                 &trial_common);
+  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+    fprintf(stderr, "KLS block: analyze done %.2fs\n",
+            kls_now_seconds() - start);
+  }
   if (trial_symbolic == NULL || trial_common.status < TRILINOS_KLU_OK) {
     if (getenv("KLS_TRACE_PREDICTED") != NULL) {
       fprintf(stderr, "KLS block: analyze failed status=%d\n",
@@ -114004,6 +114025,10 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     const int factored =
       kls_predicted_pattern_first_factor(solver, trial_values, elapsed);
     solver->block_trial_active = 0;
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS block: trial factor done %.2fs\n",
+              kls_now_seconds() - start);
+    }
 
     if (factored && solver->numeric != NULL) {
       solver->exact_matching_selected = 1;
