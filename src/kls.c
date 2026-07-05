@@ -112670,7 +112670,15 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
    veto cases entirely, so the pivoting fill can swap any weak pivot with
    any in-run candidate.  Values are left uninitialized; the pivoting fill
    rewrites every pattern position. */
+static int kls_predicted_suffix_close_numeric_mode(
+  kls_solver *solver, const unsigned char *span_full);
+
 static int kls_predicted_suffix_close_numeric(kls_solver *solver) {
+  return kls_predicted_suffix_close_numeric_mode(solver, NULL);
+}
+
+static int kls_predicted_suffix_close_numeric_mode(
+  kls_solver *solver, const unsigned char *span_full) {
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_common *common = &solver->common;
@@ -112750,6 +112758,37 @@ static int kls_predicted_suffix_close_numeric(kls_solver *solver) {
       /* running (suffix) merge: column k sees the union of U lists of
          span columns up to and including itself, plus the dense range */
       UF_long union_len = 0;
+      /* A full span pre-accumulates its whole union; the per-column
+         merges below are then idempotent and every emit sees the full
+         span, which is exactly the closure the vetoed swaps need. */
+      if (span_full != NULL && span_full[k1 + s]) {
+        UF_long full_len = 0;
+        for (UF_long k = s; k < e; ++k) {
+          UF_long *ui = NULL;
+          double *ux = NULL;
+          UF_long ucol_len = 0;
+          kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+          (void)ux;
+          UF_long a = 0;
+          UF_long b = 0;
+          UF_long w = 0;
+          while (a < full_len || b < ucol_len) {
+            const UF_long va = a < full_len ? merge[a] : nk;
+            const UF_long vb = b < ucol_len ? ui[b] : nk;
+            UF_long v = va < vb ? va : vb;
+            if (va == v) {
+              a++;
+            }
+            if (vb == v) {
+              b++;
+            }
+            merge_next[w++] = v;
+          }
+          memcpy(merge, merge_next, (size_t)w * sizeof(*merge));
+          full_len = w;
+        }
+        union_len = full_len;
+      }
       for (UF_long k = s; k < e; ++k) {
         UF_long *ui = NULL;
         double *ux = NULL;
@@ -112846,6 +112885,37 @@ static int kls_predicted_suffix_close_numeric(kls_solver *solver) {
         e = s + 1u;
       }
       UF_long union_len = 0;
+      /* A full span pre-accumulates its whole union; the per-column
+         merges below are then idempotent and every emit sees the full
+         span, which is exactly the closure the vetoed swaps need. */
+      if (span_full != NULL && span_full[k1 + s]) {
+        UF_long full_len = 0;
+        for (UF_long k = s; k < e; ++k) {
+          UF_long *ui = NULL;
+          double *ux = NULL;
+          UF_long ucol_len = 0;
+          kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+          (void)ux;
+          UF_long a = 0;
+          UF_long b = 0;
+          UF_long w = 0;
+          while (a < full_len || b < ucol_len) {
+            const UF_long va = a < full_len ? merge[a] : nk;
+            const UF_long vb = b < ucol_len ? ui[b] : nk;
+            UF_long v = va < vb ? va : vb;
+            if (va == v) {
+              a++;
+            }
+            if (vb == v) {
+              b++;
+            }
+            merge_next[w++] = v;
+          }
+          memcpy(merge, merge_next, (size_t)w * sizeof(*merge));
+          full_len = w;
+        }
+        union_len = full_len;
+      }
       for (UF_long k = s; k < e; ++k) {
         UF_long *ui = NULL;
         double *ux = NULL;
@@ -112946,8 +113016,18 @@ static int kls_predicted_suffix_close_numeric(kls_solver *solver) {
   return 1;
 }
 
+static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
+                                           const double *numeric_values,
+                                           unsigned char *span_hot);
+
 static int kls_predicted_pivoting_fill(kls_solver *solver,
                                        const double *numeric_values) {
+  return kls_predicted_pivoting_fill_hot(solver, numeric_values, NULL);
+}
+
+static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
+                                           const double *numeric_values,
+                                           unsigned char *span_hot) {
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_common *common = &solver->common;
@@ -113215,6 +113295,15 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
         }
         if (vetoed) {
           veto_count++;
+          if (span_hot != NULL && solver->snode_run_end != NULL) {
+            /* mark the span so the targeted closure can open it fully */
+            UF_long ss = k;
+            while (ss > 0 &&
+                   k1 + ss < solver->snode_run_end[k1 + ss - 1u]) {
+              ss--;
+            }
+            span_hot[k1 + ss] = 1;
+          }
           /* next candidate by magnitude */
           double best_av = fabs(ukk);
           best = KLS_KLU_EMPTY;
@@ -114023,7 +114112,44 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
   free_refactor_lu_pointer_cache(solver);
   free_refactor_map(solver);
   free_refactor_schedule(solver);
-  const int filled = kls_predicted_pivoting_fill(solver, numeric_values);
+  unsigned char *span_hot =
+    (unsigned char *)calloc((size_t)solver->n, sizeof(*span_hot));
+  int filled =
+    kls_predicted_pivoting_fill_hot(solver, numeric_values, span_hot);
+  if (filled && span_hot != NULL) {
+    UF_long weak_pivot = KLS_KLU_EMPTY;
+    UF_long weak_col = KLS_KLU_EMPTY;
+    int any_hot = 0;
+    for (UF_long k = 0; k < solver->n && !any_hot; ++k) {
+      any_hot = span_hot[k];
+    }
+    if (any_hot &&
+        !kls_numeric_pivots_pass_threshold(solver, &weak_pivot, &weak_col)) {
+      /* Weak pivots survive behind structural vetoes: open the veto-hot
+         spans fully - the minimal closure that legalizes their swaps -
+         and refill once. */
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        UF_long hot_count = 0;
+        for (UF_long k = 0; k < solver->n; ++k) {
+          hot_count += span_hot[k];
+        }
+        fprintf(stderr,
+                "KLS predicted: opening %ld veto-hot spans fully\n",
+                (long)hot_count);
+      }
+      free_refactor_lu_pointer_cache(solver);
+      free_refactor_map(solver);
+      free_refactor_schedule(solver);
+      if (kls_predicted_suffix_close_numeric_mode(solver, span_hot)) {
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr, "KLS predicted: reclosed fill=%ld+%ld\n",
+                  (long)solver->numeric->lnz, (long)solver->numeric->unz);
+        }
+        filled = kls_predicted_pivoting_fill(solver, numeric_values);
+      }
+    }
+  }
+  free(span_hot);
   free_snode_panels(solver);
   solver->snode_numeric_pre_sorted = 1;
   kls_maybe_prepare_snode_panels(solver, elapsed);
@@ -114526,7 +114652,8 @@ static int solve_impl(kls_solver *solver,
         const double av = fabs(brhs[i]);
         bmax = bmax < av ? av : bmax;
       }
-      const double target = (bmax > 0.0 ? bmax : 1.0) * 1.0e-12;
+      const double target = (bmax > 0.0 ? bmax : 1.0) *
+        (solver->user_col_perm != NULL ? 1.0e-10 : 1.0e-12);
       double last_rmax = HUGE_VAL;
       double initial_rmax = -1.0;
       memcpy(saved_x, xrhs, (size_t)nloc * sizeof(*saved_x));
