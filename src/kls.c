@@ -113861,10 +113861,7 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
   }
   {
     const char *value = getenv("KLS_ENABLE_BLOCK_ORDERING");
-    if (value == NULL || value[0] == '\0' ||
-        (value[0] == '0' && value[1] == '\0')) {
-      /* Off by default until the post-adoption refactor routing matches
-         the prototype's throughput. */
+    if (value != NULL && value[0] == '0' && value[1] == '\0') {
       return;
     }
   }
@@ -114261,6 +114258,30 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
               kls_now_seconds() - start);
     }
 
+    if (factored && solver->numeric != NULL) {
+      /* Acceptance guard: the baseline ordering's symbolic estimate is the
+         fill the cycle would have paid without the block trial; a trial
+         numeric denser than that estimate loses every refactorization and
+         must not replace it. */
+      const double base_est = old_symbolic != NULL &&
+                              old_symbolic->lnz > 0.0 &&
+                              old_symbolic->unz > 0.0
+                                ? old_symbolic->lnz + old_symbolic->unz
+                                : -1.0;
+      const double trial_fill =
+        (double)(solver->numeric->lnz + solver->numeric->unz);
+      if (base_est > 0.0 && trial_fill > base_est) {
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr,
+                  "KLS block: adoption rejected fill=%.3g > base est=%.3g\n",
+                  trial_fill, base_est);
+        }
+        trilinos_klu_l_free_numeric(&solver->numeric, &solver->common);
+        solver->numeric = NULL;
+        kls_numeric_replaced_invalidate(solver);
+        factored = 0;
+      }
+    }
     if (factored && solver->numeric != NULL) {
       solver->exact_matching_selected = 1;
       solver->spral_matching_selected = 1;
