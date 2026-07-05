@@ -113583,6 +113583,12 @@ static int kls_block_trial_entry_cmp(const void *a, const void *b) {
    order each component contiguously (reverse Cuthill-McKee inside), append
    the couplers last, and let the predicted factorization with restricted
    pivoting run on the aligned spans. */
+static int kls_ufl_cmp(const void *a, const void *b) {
+  const UF_long x = *(const UF_long *)a;
+  const UF_long y = *(const UF_long *)b;
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
 static int kls_build_block_structured_order(UF_long n,
                                             const UF_long *col_ptr,
                                             const UF_long *row_idx,
@@ -113636,9 +113642,28 @@ static int kls_build_block_structured_order(UF_long n,
   for (UF_long v = 0; v < n; ++v) {
     deg[v] = xadj[v + 1u] - xadj[v];
   }
-  double avg = (double)xadj[n] / (double)n;
-  UF_long dense_floor =
-    (UF_long)(avg * 8.0) > 100u ? (UF_long)(avg * 8.0) : 100u;
+  /* Coupler vertices sit orders of magnitude above the block-interior
+     degrees (TSOPF b9: interiors p99=14, couplers 34..7210); a floor
+     relative to the p99 degree separates them where absolute thresholds
+     miss the low-degree couplers. */
+  UF_long dense_floor = 24;
+  {
+    UF_long *deg_sorted = (UF_long *)malloc((size_t)n * sizeof(*deg_sorted));
+    if (deg_sorted != NULL) {
+      memcpy(deg_sorted, deg, (size_t)n * sizeof(*deg_sorted));
+      qsort(deg_sorted, (size_t)n, sizeof(*deg_sorted), kls_ufl_cmp);
+      const UF_long p99 = deg_sorted[(size_t)((double)(n - 1) * 0.99)];
+      if (2u * p99 > dense_floor) {
+        dense_floor = 2u * p99;
+      }
+      free(deg_sorted);
+    } else {
+      const double avg = (double)xadj[n] / (double)n;
+      if ((UF_long)(avg * 8.0) > dense_floor) {
+        dense_floor = (UF_long)(avg * 8.0);
+      }
+    }
+  }
   {
     const char *floor_env = getenv("KLS_BLOCK_DENSE_FLOOR");
     if (floor_env != NULL && floor_env[0] != '\0') {
