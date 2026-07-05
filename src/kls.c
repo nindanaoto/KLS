@@ -26794,14 +26794,15 @@ static int kls_trace_pre_static_enabled(void) {
 static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               double *elapsed,
                                               const double *numeric_values) {
+  const int forced_match = getenv("KLS_FORCE_STATIC_MATCH") != NULL;
   if (solver == NULL || !solver->options.static_pivoting ||
       solver->numeric != NULL || solver->row_perm != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
-      solver->options.ordering != KLS_ORDERING_AUTO ||
+      (solver->options.ordering != KLS_ORDERING_AUTO && !forced_match) ||
       solver->n < 3000) {
     return;
   }
-  if (kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
+  if (!forced_match && kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
     return;
   }
 #ifdef KLS_HAVE_METIS
