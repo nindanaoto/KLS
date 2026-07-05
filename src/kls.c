@@ -330,6 +330,7 @@ struct kls_solver {
   int fp32_decision;
   int fp32_last_used;
   int fp32_validated;
+  int block_trial_active;
   int numeric_needs_refinement;
   int in_solve_refinement;
   UF_long **refactor_l_indices;
@@ -111622,8 +111623,13 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                               double *numeric_values,
                                               double *elapsed) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric != NULL ||
-      numeric_values == NULL || solver->n < 20000 ||
+      numeric_values == NULL ||
+      (solver->n < 20000 && !solver->block_trial_active) ||
       solver->options.pivot_tolerance <= 0.0) {
+    if (solver != NULL && solver->block_trial_active &&
+        getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS block: predicted gate1\n");
+    }
     return 0;
   }
   if (solver->common.scale > 0 &&
@@ -111639,6 +111645,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   const UF_long *Q = symbolic->Q;
   const UF_long *R = symbolic->R;
   if (P == NULL || Q == NULL || R == NULL || maxblock < 2) {
+    if (solver->block_trial_active && getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS block: predicted gate2 maxblock=%ld nblocks=%ld\n",
+              (long)maxblock, (long)nblocks);
+    }
     return 0;
   }
   /* The KLU first factorization only becomes pattern-discovery bound at
@@ -111646,6 +111656,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
      more than it saves and the symmetrized pattern can carry extra fill
      into every refactorization. */
   if (n < 500000 && !(symbolic->lnz >= 5.0e6) &&
+      !solver->block_trial_active &&
       getenv("KLS_FORCE_PIVOT_FILL") == NULL) {
     if (getenv("KLS_TRACE_PREDICTED") != NULL) {
       fprintf(stderr, "KLS predicted: skipped n=%ld est_lnz=%.3e\n",
@@ -111779,6 +111790,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         const UF_long newrow = pinv[solver->row_idx[p]];
         if (newrow < k1) {
           if (poff >= symbolic->nzoff) {
+            if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+              fprintf(stderr, "KLS predicted: off overflow at col %ld\n",
+                      (long)k);
+            }
             ok = 0;
             break;
           }
@@ -111800,6 +111815,11 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     const UF_long k1 = R[block];
     const UF_long k2 = R[block + 1u];
     const UF_long nk = k2 - k1;
+    if (solver->block_trial_active && getenv("KLS_TRACE_PREDICTED") != NULL &&
+        nk >= 2) {
+      fprintf(stderr, "KLS predicted: constructing block %ld nk=%ld\n",
+              (long)block, (long)nk);
+    }
     if (nk < 2) {
       numeric->Lip[k1] = 0;
       numeric->Uip[k1] = 0;
@@ -112101,6 +112121,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       }
       for (UF_long k = 0; k < nk && ok; ++k) {
         if (rowpat_ptr[k] != (UF_long)numeric->Llen[k1 + k]) {
+          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+            fprintf(stderr, "KLS predicted: rowpat mismatch col %ld\n",
+                    (long)(k1 + k));
+          }
           ok = 0;
         }
       }
@@ -113318,6 +113342,404 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
 }
 
 
+/* Block-structured ordering: circuit families such as TSOPF repeat a
+   physics block (one power network per contingency) that generic orderings
+   interleave, forcing the pivots that inflate fill.  Detect the blocks as
+   connected components after setting aside the dense coupling vertices,
+   order each component contiguously (reverse Cuthill-McKee inside), append
+   the couplers last, and let the predicted factorization with restricted
+   pivoting run on the aligned spans. */
+static int kls_build_block_structured_order(UF_long n,
+                                            const UF_long *col_ptr,
+                                            const UF_long *row_idx,
+                                            UF_long **perm_out) {
+  *perm_out = NULL;
+  if (n < 10000 || n > 2000000) {
+    return 0;
+  }
+  const UF_long nnz = col_ptr[n];
+  UF_long *deg = (UF_long *)calloc((size_t)n, sizeof(*deg));
+  if (deg == NULL) {
+    return 0;
+  }
+  for (UF_long j = 0; j < n; ++j) {
+    for (UF_long p = col_ptr[j]; p < col_ptr[j + 1u]; ++p) {
+      const UF_long i = row_idx[p];
+      if (i == j) {
+        continue;
+      }
+      deg[i]++;
+      deg[j]++;
+    }
+  }
+  UF_long *xadj = (UF_long *)malloc(((size_t)n + 1u) * sizeof(*xadj));
+  UF_long *adj = (UF_long *)malloc(2u * (size_t)nnz * sizeof(*adj));
+  if (xadj == NULL || adj == NULL) {
+    free(deg);
+    free(xadj);
+    free(adj);
+    return 0;
+  }
+  xadj[0] = 0;
+  for (UF_long v = 0; v < n; ++v) {
+    xadj[v + 1u] = xadj[v] + deg[v];
+    deg[v] = xadj[v];
+  }
+  for (UF_long j = 0; j < n; ++j) {
+    for (UF_long p = col_ptr[j]; p < col_ptr[j + 1u]; ++p) {
+      const UF_long i = row_idx[p];
+      if (i == j) {
+        continue;
+      }
+      adj[deg[i]++] = j;
+      adj[deg[j]++] = i;
+    }
+  }
+  /* degrees again (deg was reused as cursor); duplicates in adj are
+     harmless for BFS/RCM */
+  for (UF_long v = 0; v < n; ++v) {
+    deg[v] = xadj[v + 1u] - xadj[v];
+  }
+  double avg = (double)xadj[n] / (double)n;
+  const UF_long dense_floor =
+    (UF_long)(avg * 8.0) > 100u ? (UF_long)(avg * 8.0) : 100u;
+  UF_long dense_count = 0;
+  for (UF_long v = 0; v < n; ++v) {
+    if (deg[v] > dense_floor) {
+      dense_count++;
+    }
+  }
+  if (dense_count == 0 || dense_count > n / 100u) {
+    free(deg);
+    free(xadj);
+    free(adj);
+    return 0;
+  }
+  UF_long *comp = (UF_long *)malloc((size_t)n * sizeof(*comp));
+  UF_long *queue = (UF_long *)malloc((size_t)n * sizeof(*queue));
+  UF_long *perm = (UF_long *)malloc((size_t)n * sizeof(*perm));
+  if (comp == NULL || queue == NULL || perm == NULL) {
+    free(deg);
+    free(xadj);
+    free(adj);
+    free(comp);
+    free(queue);
+    free(perm);
+    return 0;
+  }
+  for (UF_long v = 0; v < n; ++v) {
+    comp[v] = KLS_KLU_EMPTY;
+  }
+  UF_long ncomp = 0;
+  UF_long covered = 0;
+  UF_long max_comp = 0;
+  UF_long write = 0;
+  for (UF_long v = 0; v < n; ++v) {
+    if (comp[v] != KLS_KLU_EMPTY || deg[v] > dense_floor) {
+      continue;
+    }
+    /* Reverse Cuthill-McKee: breadth-first from the component's entry with
+       each vertex's undiscovered neighbours enqueued in ascending degree,
+       then the whole order reversed.  The degree sorting is what keeps the
+       component banded; without it the no-pivot fill bound explodes. */
+    UF_long head = 0;
+    UF_long tail = 0;
+    queue[tail++] = v;
+    comp[v] = ncomp;
+    while (head < tail) {
+      const UF_long u = queue[head++];
+      const UF_long first = tail;
+      for (UF_long p = xadj[u]; p < xadj[u + 1u]; ++p) {
+        const UF_long w = adj[p];
+        if (comp[w] != KLS_KLU_EMPTY || deg[w] > dense_floor) {
+          continue;
+        }
+        comp[w] = ncomp;
+        queue[tail++] = w;
+      }
+      for (UF_long a = first + 1u; a < tail; ++a) {
+        const UF_long w = queue[a];
+        UF_long b = a;
+        while (b > first && deg[queue[b - 1u]] > deg[w]) {
+          queue[b] = queue[b - 1u];
+          b--;
+        }
+        queue[b] = w;
+      }
+    }
+    /* reverse the BFS order (RCM) */
+    for (UF_long p = 0; p < tail; ++p) {
+      perm[write + p] = queue[tail - 1u - p];
+    }
+    write += tail;
+    covered += tail;
+    if (tail > max_comp) {
+      max_comp = tail;
+    }
+    ncomp++;
+  }
+  for (UF_long v = 0; v < n; ++v) {
+    if (deg[v] > dense_floor) {
+      perm[write++] = v;
+    }
+  }
+  free(deg);
+  free(xadj);
+  free(adj);
+  free(comp);
+  free(queue);
+  const int usable =
+    write == n && ncomp >= 3u && covered * 10u >= n * 6u &&
+    max_comp * 2u <= n;
+  if (!usable) {
+    free(perm);
+    return 0;
+  }
+  *perm_out = perm;
+  return 1;
+}
+
+#ifdef KLS_HAVE_SPRAL_SCALING
+static void maybe_select_block_structured_ordering(kls_solver *solver,
+                                                   double *elapsed,
+                                                   const double *values) {
+  if (solver == NULL || !solver->options.static_pivoting ||
+      solver->numeric != NULL || solver->row_perm != NULL ||
+      solver->input_format != KLS_INPUT_CSC ||
+      solver->options.ordering != KLS_ORDERING_AUTO ||
+      solver->options.scale > 0) {
+    return;
+  }
+  const double start = kls_now_seconds();
+  UF_long *block_perm = NULL;
+  if (!kls_build_block_structured_order(solver->n, solver->col_ptr,
+                                        solver->row_idx, &block_perm)) {
+    *elapsed += kls_now_seconds() - start;
+    return;
+  }
+  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+    fprintf(stderr, "KLS block: structure detected\n");
+  }
+
+  UF_long *row_perm = NULL;
+  UF_long matched = 0;
+  double *row_scale = NULL;
+  double *col_scale = NULL;
+  UF_long *rp_col_ptr = NULL;
+  UF_long *rp_row_idx = NULL;
+  UF_long *rp_input = NULL;
+  double *rp_values = NULL;
+  UF_long *trial_col_ptr = NULL;
+  UF_long *trial_row_idx = NULL;
+  UF_long *trial_input = NULL;
+  double *trial_values = NULL;
+  UF_long *trial_row_perm = NULL;
+  trilinos_klu_l_symbolic *trial_symbolic = NULL;
+  trilinos_klu_l_common trial_common;
+  kls_separator_analysis trial_separator;
+  memset(&trial_separator, 0, sizeof(trial_separator));
+  (void)trilinos_klu_l_defaults(&trial_common);
+  int accepted = 0;
+  const UF_long n = solver->n;
+  const UF_long nnz = solver->nnz;
+
+  if (build_spral_hungarian_row_match_scaling(n, nnz, solver->col_ptr,
+                                              solver->row_idx, values,
+                                              &row_perm, &matched,
+                                              &row_scale, &col_scale)
+        != KLS_OK ||
+      matched != n) {
+    goto done;
+  }
+  /* Matched scaling stays unused: the class this targets factors unscaled
+     and the probe arbitrates. */
+  free(row_scale);
+  free(col_scale);
+  row_scale = NULL;
+  col_scale = NULL;
+  if (build_sorted_row_permuted_pattern(n, nnz, solver->col_ptr,
+                                        solver->row_idx, values, row_perm,
+                                        solver->input_to_csc, &rp_col_ptr,
+                                        &rp_row_idx, &rp_values,
+                                        &rp_input) != KLS_OK) {
+    goto done;
+  }
+  /* Column-permute by the blocked order; rows relabel with the same
+     permutation so the block spans align on both sides. */
+  trial_col_ptr = (UF_long *)malloc(((size_t)n + 1u) * sizeof(*trial_col_ptr));
+  trial_row_idx = (UF_long *)malloc((size_t)nnz * sizeof(*trial_row_idx));
+  trial_input = (UF_long *)malloc((size_t)nnz * sizeof(*trial_input));
+  trial_values = (double *)malloc((size_t)nnz * sizeof(*trial_values));
+  trial_row_perm = (UF_long *)malloc((size_t)n * sizeof(*trial_row_perm));
+  if (trial_col_ptr == NULL || trial_row_idx == NULL || trial_input == NULL ||
+      trial_values == NULL || trial_row_perm == NULL) {
+    goto done;
+  }
+  {
+    UF_long *inv = (UF_long *)malloc((size_t)n * sizeof(*inv));
+    if (inv == NULL) {
+      goto done;
+    }
+    for (UF_long k = 0; k < n; ++k) {
+      inv[block_perm[k]] = k;
+    }
+    UF_long count = 0;
+    for (UF_long k = 0; k < n; ++k) {
+      const UF_long oldcol = block_perm[k];
+      trial_col_ptr[k] = count;
+      for (UF_long p = rp_col_ptr[oldcol]; p < rp_col_ptr[oldcol + 1u]; ++p) {
+        trial_row_idx[count] = inv[rp_row_idx[p]];
+        trial_values[count] = rp_values[p];
+        trial_input[count] =
+          rp_input != NULL ? rp_input[p] : p;
+        count++;
+      }
+      /* sort the column by new row index (insertion; columns are short) */
+      for (UF_long a = trial_col_ptr[k] + 1u; a < count; ++a) {
+        const UF_long vi = trial_row_idx[a];
+        const double vv = trial_values[a];
+        const UF_long vp = trial_input[a];
+        UF_long b = a;
+        while (b > trial_col_ptr[k] && trial_row_idx[b - 1u] > vi) {
+          trial_row_idx[b] = trial_row_idx[b - 1u];
+          trial_values[b] = trial_values[b - 1u];
+          trial_input[b] = trial_input[b - 1u];
+          b--;
+        }
+        trial_row_idx[b] = vi;
+        trial_values[b] = vv;
+        trial_input[b] = vp;
+      }
+    }
+    trial_col_ptr[n] = count;
+    /* total row movement = blocked relabel after the match */
+    for (UF_long r = 0; r < n; ++r) {
+      trial_row_perm[r] = inv[row_perm[r]];
+    }
+    free(inv);
+  }
+
+  {
+    const char *dump = getenv("KLS_DUMP_BLOCK_TRIAL");
+    if (dump != NULL) {
+      FILE *df = fopen(dump, "w");
+      if (df != NULL) {
+        fprintf(df, "%ld %ld\n", (long)n, (long)nnz);
+        for (UF_long k = 0; k <= n; ++k) {
+          fprintf(df, "%ld\n", (long)trial_col_ptr[k]);
+        }
+        for (UF_long p = 0; p < nnz; ++p) {
+          fprintf(df, "%ld\n", (long)trial_row_idx[p]);
+        }
+        fclose(df);
+      }
+    }
+  }
+  {
+    kls_options trial_options = solver->options;
+    trial_options.ordering = KLS_ORDERING_NATURAL;
+    kls_ordering trial_ordering = KLS_ORDERING_NATURAL;
+    double trial_score = 0.0;
+    if (choose_symbolic_for_pattern(n, trial_col_ptr, trial_row_idx,
+                                    &trial_options, &trial_symbolic,
+                                    &trial_common, &trial_ordering,
+                                    &trial_score, &trial_separator)
+          != KLS_OK) {
+      goto done;
+    }
+  }
+  trial_common.scale = -1;
+  trial_common.tol = solver->common.tol;
+
+  /* Provisional adoption; the predicted factorization with the pivoting
+     rescue is the trial factor, and its solve probe is the judge. */
+  {
+    trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
+    trilinos_klu_l_common old_common = solver->common;
+    UF_long *old_col_ptr = solver->col_ptr;
+    UF_long *old_row_idx = solver->row_idx;
+    UF_long *old_input = solver->input_to_csc;
+    double *old_values_arr = solver->values;
+    kls_orientation old_orientation = solver->orientation;
+
+    solver->col_ptr = trial_col_ptr;
+    solver->row_idx = trial_row_idx;
+    solver->input_to_csc = trial_input;
+    solver->row_perm = trial_row_perm;
+    solver->values = trial_values;
+    solver->orientation = KLS_ORIENTATION_NORMAL;
+    solver->symbolic = trial_symbolic;
+    solver->common = trial_common;
+    kls_invalidate_factor_etree_stats(solver);
+
+    solver->block_trial_active = 1;
+    const int factored =
+      kls_predicted_pattern_first_factor(solver, trial_values, elapsed);
+    solver->block_trial_active = 0;
+
+    if (factored && solver->numeric != NULL) {
+      solver->exact_matching_selected = 1;
+      solver->spral_matching_selected = 1;
+      kls_separator_analysis_move(&solver->separator, &trial_separator);
+      solver->stats.selected_ordering = KLS_ORDERING_NATURAL;
+      solver->stats.selected_orientation = solver->orientation;
+      solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
+      solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
+      solver->stats.structural_rank =
+        (int64_t)solver->symbolic->structural_rank;
+      solver->stats.estimated_flops = solver->symbolic->est_flops;
+      trilinos_klu_l_free_symbolic(&old_symbolic, &old_common);
+      free(old_col_ptr);
+      free(old_row_idx);
+      free(old_input);
+      free(old_values_arr);
+      trial_col_ptr = NULL;
+      trial_row_idx = NULL;
+      trial_input = NULL;
+      trial_values = NULL;
+      trial_row_perm = NULL;
+      trial_symbolic = NULL;
+      accepted = 1;
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr, "KLS block: ordering adopted\n");
+      }
+    } else {
+      solver->col_ptr = old_col_ptr;
+      solver->row_idx = old_row_idx;
+      solver->input_to_csc = old_input;
+      solver->row_perm = NULL;
+      solver->values = old_values_arr;
+      solver->orientation = old_orientation;
+      solver->symbolic = old_symbolic;
+      solver->common = old_common;
+      kls_invalidate_factor_etree_stats(solver);
+    }
+  }
+
+done:
+  if (!accepted) {
+    if (trial_symbolic != NULL) {
+      trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
+    }
+    free(trial_col_ptr);
+    free(trial_row_idx);
+    free(trial_input);
+    free(trial_values);
+    free(trial_row_perm);
+  }
+  kls_separator_analysis_clear(&trial_separator);
+  free(rp_col_ptr);
+  free(rp_row_idx);
+  free(rp_input);
+  free(rp_values);
+  free(row_perm);
+  free(row_scale);
+  free(col_scale);
+  free(block_perm);
+  *elapsed += kls_now_seconds() - start;
+}
+#endif
+
 /* Rescue path: suffix-close the pattern, rebuild the derived structures on
    it, and refactor with pattern-restricted pivoting.  The closed fill must
    stay near the ordering estimate, or the pivoted KLU factorization is the
@@ -113325,8 +113747,9 @@ static int kls_predicted_pivoting_fill(kls_solver *solver,
 static int kls_predicted_pivot_rescue(kls_solver *solver,
                                       const double *numeric_values,
                                       double *elapsed) {
-  if (getenv("KLS_ENABLE_PIVOT_FILL") == NULL || solver->numeric == NULL ||
-      solver->symbolic == NULL) {
+  if ((getenv("KLS_ENABLE_PIVOT_FILL") == NULL &&
+       !solver->block_trial_active) ||
+      solver->numeric == NULL || solver->symbolic == NULL) {
     return 0;
   }
   const double est_total = solver->symbolic->lnz + solver->symbolic->unz;
@@ -113488,7 +113911,19 @@ int kls_factor(kls_solver *solver, const double *values) {
     elapsed += kls_now_seconds() - start;
   }
   if (!kls_first_factor_used) {
-    if (!had_numeric &&
+#ifdef KLS_HAVE_SPRAL_SCALING
+    if (!had_numeric && solver->numeric == NULL) {
+      maybe_select_block_structured_ordering(solver, &elapsed,
+                                             numeric_values);
+      if (solver->numeric != NULL) {
+        /* adoption replaced the prepared values buffer */
+        numeric_values = solver->values;
+      }
+    }
+#endif
+    if (solver->numeric != NULL) {
+      kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
+    } else if (!had_numeric &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
