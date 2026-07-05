@@ -19968,14 +19968,21 @@ static int kls_checked_refactor_best_reject_candidate(
 }
 
 static UF_long kls_snode_trace_batched_producers = 0;
+static UF_long kls_snode_trace_decline_norun = 0;
+static UF_long kls_snode_trace_decline_short = 0;
+static UF_long kls_snode_trace_decline_work = 0;
 static UF_long kls_snode_trace_batched_tail_entries = 0;
 
 __attribute__((destructor)) static void kls_snode_trace_report(void) {
-  if (getenv("KLS_TRACE_SNODE") != NULL &&
-      kls_snode_trace_batched_producers != 0u) {
-    fprintf(stderr, "KLS snode: batched_producers=%ld tail_entries=%ld\n",
+  if (getenv("KLS_TRACE_SNODE") != NULL) {
+    fprintf(stderr,
+            "KLS snode: batched_producers=%ld tail_entries=%ld "
+            "decline_norun=%ld decline_short=%ld decline_work=%ld\n",
             (long)kls_snode_trace_batched_producers,
-            (long)kls_snode_trace_batched_tail_entries);
+            (long)kls_snode_trace_batched_tail_entries,
+            (long)kls_snode_trace_decline_norun,
+            (long)kls_snode_trace_decline_short,
+            (long)kls_snode_trace_decline_work);
   }
 }
 
@@ -20005,6 +20012,7 @@ static UF_long kls_snode_batch_consume(
   const UF_long j = ui[up];
   const UF_long run_end = snode_run_end[k1 + j];
   if (run_end <= k1 + j + 1u) {
+    kls_snode_trace_decline_norun++;
     return 0;
   }
   UF_long tmax = run_end - (k1 + j);
@@ -20019,6 +20027,7 @@ static UF_long kls_snode_batch_consume(
     t++;
   }
   if (t < KLS_SNODE_MIN_BATCH) {
+    kls_snode_trace_decline_short++;
     return 0;
   }
   UF_long *tli = NULL;
@@ -20029,6 +20038,7 @@ static UF_long kls_snode_batch_consume(
   if (t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
     /* Short shared tails lose to the scalar path; only pay the panel
        staging when the batched update amortizes it. */
+    kls_snode_trace_decline_work++;
     return 0;
   }
   double xs[KLS_SNODE_MAX_BATCH];
@@ -20713,15 +20723,19 @@ static void free_symbolic(kls_solver *solver) {
   kls_invalidate_factor_etree_stats(solver);
 }
 
-static void free_snode_panels(kls_solver *solver) {
+static void free_snode_panels_impl(kls_solver *solver, int line) {
   if (solver == NULL) {
     return;
+  }
+  if (solver->snode_run_end != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
+    fprintf(stderr, "KLS snode: panels freed from line %d\n", line);
   }
   free(solver->snode_run_end);
   solver->snode_run_end = NULL;
   solver->snode_prepared = 0;
   solver->snode_numeric_pre_sorted = 0;
 }
+#define free_snode_panels(s) free_snode_panels_impl((s), __LINE__)
 
 /* Diagonal nudges make an accepted predicted numeric the exact factor of
    A plus a tiny explicit diagonal correction: every refactorization applies
@@ -27333,10 +27347,12 @@ static int maybe_select_auto_scale(kls_solver *solver,
 }
 
 static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
-  if (solver != NULL && solver->numeric_is_predicted) {
-    /* A predicted numeric proved its pivot policy through the solve probe;
-       a serial trial factorization at another tolerance re-pivots the
-       matrix (for block orderings, into orders of magnitude more fill). */
+  if (solver != NULL &&
+      (solver->numeric_is_predicted || solver->user_col_perm != NULL)) {
+    /* A predicted or block-ordered numeric proved its pivot policy through
+       the solve probe; a serial trial factorization at another tolerance
+       re-pivots the matrix (for block orderings, into orders of magnitude
+       more fill). */
     return 0;
   }
   if (solver->auto_pivot_checked || solver->numeric == NULL || solver->n < 30000 ||
@@ -27459,10 +27475,11 @@ static int metis_numeric_is_better(const kls_solver *solver,
 static int maybe_promote_auto_metis(kls_solver *solver,
                                     double *elapsed,
                                     const double *numeric_values) {
-  if (solver != NULL && solver->numeric_is_predicted) {
-    /* A predicted numeric settled its ordering through the solve probe; a
-       serial METIS trial factorization re-pivots the matrix (for block
-       orderings, into orders of magnitude more fill). */
+  if (solver != NULL &&
+      (solver->numeric_is_predicted || solver->user_col_perm != NULL)) {
+    /* A predicted or block-ordered numeric settled its ordering through
+       the solve probe; a serial METIS trial factorization re-pivots the
+       matrix (for block orderings, into orders of magnitude more fill). */
     return 0;
   }
   if (!should_try_auto_metis(solver)) {
@@ -68416,6 +68433,7 @@ static UF_long kls_snode_batch_consume_cached(
   const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
   const UF_long run_end = snode_run_end[k1 + j];
   if (run_end <= k1 + j + 1u) {
+    kls_snode_trace_decline_norun++;
     return 0;
   }
   UF_long tmax = run_end - (k1 + j);
@@ -68445,6 +68463,7 @@ static UF_long kls_snode_batch_consume_cached(
     t = limit;
   }
   if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
+    kls_snode_trace_decline_short++;
     return 0;
   }
   if (wait_for_dependencies) {
@@ -68459,6 +68478,7 @@ static UF_long kls_snode_batch_consume_cached(
   if (tli == NULL || t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
     /* Short shared tails lose to the 32-bit-index scalar path; only pay the
        panel staging when the batched update amortizes it. */
+    kls_snode_trace_decline_work++;
     return 0;
   }
   double xs[KLS_SNODE_MAX_BATCH];
@@ -68533,6 +68553,7 @@ static UF_long kls_snode_batch_consume_cached_f32(
   const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
   const UF_long run_end = snode_run_end[k1 + j];
   if (run_end <= k1 + j + 1u) {
+    kls_snode_trace_decline_norun++;
     return 0;
   }
   UF_long tmax = run_end - (k1 + j);
@@ -68560,6 +68581,7 @@ static UF_long kls_snode_batch_consume_cached_f32(
     t = limit;
   }
   if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
+    kls_snode_trace_decline_short++;
     return 0;
   }
   if (wait_for_dependencies) {
@@ -85643,6 +85665,11 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
       solver->numeric->LUbx == NULL || solver->symbolic->R == NULL ||
       solver->n < 4000u || solver->common.flops < 5.0e6 ||
       kls_snode_panel_env_disabled()) {
+    if (solver != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
+      fprintf(stderr,
+              "KLS snode: prep declined A prepared=%d flops=%.3g\n",
+              solver->snode_prepared, solver->common.flops);
+    }
     return;
   }
   /* Sorting reorders every L/U column's packed storage, so no
@@ -85654,6 +85681,17 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
       solver->row_refactor_group_count != 0u ||
       solver->row_refactor_values_ready ||
       solver->stats.last_factor_path == KLS_FACTOR_PATH_KLS_FIRST) {
+    if (getenv("KLS_TRACE_SNODE") != NULL) {
+      fprintf(stderr,
+              "KLS snode: prep declined B map=%d lvl=%d l32=%d rowg=%ld "
+              "rowv=%d path=%d\n",
+              solver->refactor_col_ptr != NULL,
+              solver->refactor_level_ptr != NULL,
+              solver->refactor_l_indices32 != NULL,
+              (long)solver->row_refactor_group_count,
+              solver->row_refactor_values_ready,
+              (int)solver->stats.last_factor_path);
+    }
     return;
   }
   const double start = kls_now_seconds();
@@ -85721,8 +85759,29 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
     solver->snode_run_end = run_end;
   }
   if (getenv("KLS_TRACE_SNODE") != NULL) {
-    fprintf(stderr, "KLS snode: sorted=1 covered_cols=%ld accepted=%d\n",
-            (long)covered, solver->snode_run_end != NULL);
+    long hist[7] = {0, 0, 0, 0, 0, 0, 0};
+    long nrun = 0;
+    if (solver->snode_run_end != NULL) {
+      for (UF_long c = 0; c < solver->n;) {
+        const UF_long re = run_end[c];
+        if (re <= c + 1u) {
+          c++;
+          continue;
+        }
+        const UF_long w = re - c;
+        int b = w <= 2 ? 0 : w <= 4 ? 1 : w <= 8 ? 2 : w <= 16 ? 3
+                : w <= 32 ? 4 : w <= 64 ? 5 : 6;
+        hist[b]++;
+        nrun++;
+        c = re;
+      }
+    }
+    fprintf(stderr,
+            "KLS snode: sorted=1 covered_cols=%ld accepted=%d runs=%ld "
+            "w2=%ld w3_4=%ld w5_8=%ld w9_16=%ld w17_32=%ld w33_64=%ld "
+            "w65+=%ld\n",
+            (long)covered, solver->snode_run_end != NULL, nrun, hist[0],
+            hist[1], hist[2], hist[3], hist[4], hist[5], hist[6]);
   }
   *elapsed += kls_now_seconds() - start;
 }
@@ -113578,8 +113637,17 @@ static int kls_build_block_structured_order(UF_long n,
     deg[v] = xadj[v + 1u] - xadj[v];
   }
   double avg = (double)xadj[n] / (double)n;
-  const UF_long dense_floor =
+  UF_long dense_floor =
     (UF_long)(avg * 8.0) > 100u ? (UF_long)(avg * 8.0) : 100u;
+  {
+    const char *floor_env = getenv("KLS_BLOCK_DENSE_FLOOR");
+    if (floor_env != NULL && floor_env[0] != '\0') {
+      const long parsed = atol(floor_env);
+      if (parsed > 0) {
+        dense_floor = (UF_long)parsed;
+      }
+    }
+  }
   UF_long dense_count = 0;
   for (UF_long v = 0; v < n; ++v) {
     if (deg[v] > dense_floor) {
@@ -113610,51 +113678,128 @@ static int kls_build_block_structured_order(UF_long n,
   UF_long ncomp = 0;
   UF_long covered = 0;
   UF_long max_comp = 0;
-  UF_long write = 0;
+  /* Pass 1: collect components contiguously into queue[] so they can be
+     emitted largest-first; a big leading component anchors the band and
+     the matched diagonal downstream. */
+  UF_long *comp_start =
+    (UF_long *)malloc(((size_t)n + 1u) * sizeof(*comp_start));
+  UF_long *comp_order = (UF_long *)malloc((size_t)n * sizeof(*comp_order));
+  unsigned char *placed = (unsigned char *)calloc((size_t)n, 1u);
+  if (comp_start == NULL || comp_order == NULL || placed == NULL) {
+    free(comp_start);
+    free(comp_order);
+    free(placed);
+    free(deg);
+    free(xadj);
+    free(adj);
+    free(comp);
+    free(queue);
+    free(perm);
+    return 0;
+  }
+  UF_long fill_ptr = 0;
   for (UF_long v = 0; v < n; ++v) {
     if (comp[v] != KLS_KLU_EMPTY || deg[v] > dense_floor) {
       continue;
     }
-    /* Reverse Cuthill-McKee: breadth-first from the component's entry with
-       each vertex's undiscovered neighbours enqueued in ascending degree,
-       then the whole order reversed.  The degree sorting is what keeps the
-       component banded; without it the no-pivot fill bound explodes. */
-    UF_long head = 0;
-    UF_long tail = 0;
-    queue[tail++] = v;
+    comp_start[ncomp] = fill_ptr;
+    UF_long head = fill_ptr;
+    queue[fill_ptr++] = v;
     comp[v] = ncomp;
-    while (head < tail) {
+    while (head < fill_ptr) {
       const UF_long u = queue[head++];
-      const UF_long first = tail;
       for (UF_long p = xadj[u]; p < xadj[u + 1u]; ++p) {
         const UF_long w = adj[p];
         if (comp[w] != KLS_KLU_EMPTY || deg[w] > dense_floor) {
           continue;
         }
         comp[w] = ncomp;
-        queue[tail++] = w;
-      }
-      for (UF_long a = first + 1u; a < tail; ++a) {
-        const UF_long w = queue[a];
-        UF_long b = a;
-        while (b > first && deg[queue[b - 1u]] > deg[w]) {
-          queue[b] = queue[b - 1u];
-          b--;
-        }
-        queue[b] = w;
+        queue[fill_ptr++] = w;
       }
     }
-    /* reverse the BFS order (RCM) */
-    for (UF_long p = 0; p < tail; ++p) {
-      perm[write + p] = queue[tail - 1u - p];
-    }
-    write += tail;
-    covered += tail;
-    if (tail > max_comp) {
-      max_comp = tail;
+    const UF_long sz = fill_ptr - comp_start[ncomp];
+    covered += sz;
+    if (sz > max_comp) {
+      max_comp = sz;
     }
     ncomp++;
   }
+  comp_start[ncomp] = fill_ptr;
+  for (UF_long c = 0; c < ncomp; ++c) {
+    comp_order[c] = c;
+  }
+  for (UF_long a = 1; a < ncomp; ++a) {
+    const UF_long c = comp_order[a];
+    const UF_long csz = comp_start[c + 1u] - comp_start[c];
+    UF_long b = a;
+    while (b > 0 &&
+           comp_start[comp_order[b - 1u] + 1u] -
+             comp_start[comp_order[b - 1u]] < csz) {
+      comp_order[b] = comp_order[b - 1u];
+      b--;
+    }
+    comp_order[b] = c;
+  }
+  /* Pass 2, largest component first: Reverse Cuthill-McKee from the
+     component's minimum-degree member with each vertex's undiscovered
+     neighbours enqueued in ascending degree, then the whole order
+     reversed.  The degree sorting is what keeps the component banded;
+     without it the no-pivot fill bound explodes. */
+  UF_long write = 0;
+  UF_long *rcm_queue = comp_order + 0; /* reuse below via perm scratch */
+  (void)rcm_queue;
+  for (UF_long ci = 0; ci < ncomp; ++ci) {
+    const UF_long c = comp_order[ci];
+    const UF_long ms = comp_start[c];
+    const UF_long me = comp_start[c + 1u];
+    UF_long start = queue[ms];
+    for (UF_long p = ms; p < me; ++p) {
+      if (deg[queue[p]] < deg[start]) {
+        start = queue[p];
+      }
+    }
+    UF_long head = 0;
+    UF_long tail = 0;
+    UF_long *cq = perm + write; /* RCM order built in place, reversed after */
+    cq[tail++] = start;
+    placed[start] = 1;
+    while (head < tail) {
+      const UF_long u = cq[head++];
+      const UF_long first = tail;
+      for (UF_long p = xadj[u]; p < xadj[u + 1u]; ++p) {
+        const UF_long w = adj[p];
+        if (placed[w] || comp[w] != c) {
+          continue;
+        }
+        placed[w] = 1;
+        cq[tail++] = w;
+      }
+      for (UF_long a = first + 1u; a < tail; ++a) {
+        const UF_long w = cq[a];
+        UF_long b = a;
+        while (b > first && deg[cq[b - 1u]] > deg[w]) {
+          cq[b] = cq[b - 1u];
+          b--;
+        }
+        cq[b] = w;
+      }
+    }
+    for (UF_long p = ms; p < me; ++p) {
+      if (!placed[queue[p]]) {
+        placed[queue[p]] = 1;
+        cq[tail++] = queue[p];
+      }
+    }
+    for (UF_long a = 0; a < tail / 2u; ++a) {
+      const UF_long tmp = cq[a];
+      cq[a] = cq[tail - 1u - a];
+      cq[tail - 1u - a] = tmp;
+    }
+    write += tail;
+  }
+  free(comp_start);
+  free(comp_order);
+  free(placed);
   for (UF_long v = 0; v < n; ++v) {
     if (deg[v] > dense_floor) {
       perm[write++] = v;
@@ -113763,31 +113908,17 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       for (UF_long p = solver->col_ptr[oldcol];
            p < solver->col_ptr[oldcol + 1u]; ++p) {
         const UF_long r = solver->row_idx[p];
-        const int row_dense = block_comp[r] == KLS_KLU_EMPTY;
-        const int col_dense = block_comp[oldcol] == KLS_KLU_EMPTY;
-        if (row_dense != col_dense) {
-          /* A dense row matched into the band fills everything below it;
-             mixed pairs stay out and the columns this starves move to the
-             tail below. */
+        if (values[p] == 0.0) {
           continue;
         }
-        if (!row_dense) {
-          if (block_comp[r] != block_comp[oldcol] || values[p] == 0.0) {
-            continue;
-          }
-          const UF_long dist =
-            pos_of[r] > k ? pos_of[r] - k : k - pos_of[r];
-          if (dist > 128u) {
-            continue;
-          }
-          sp_row_idx[count] = (int)r;
-          sp_values[count] = 1.0 / (1.0 + (double)dist);
-          count++;
-        } else {
-          sp_row_idx[count] = (int)r;
-          sp_values[count] = 1.0;
-          count++;
-        }
+        /* Raw value-optimal matching: with the largest-first min-degree
+           RCM column order the value-optimal diagonal follows the physics
+           of the blocks, and the band emerges without a distance cap.
+           (Band-capped proximity weights were compensating for a weaker
+           column order and block the same matching now.) */
+        sp_row_idx[count] = (int)r;
+        sp_values[count] = fabs(values[p]);
+        count++;
       }
     }
     sp_col_ptr[n] = (int64_t)count;
@@ -113969,6 +114100,24 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
   block_perm = NULL;
 
   {
+    const char *dumpm = getenv("KLS_DUMP_BLOCK_TRIAL");
+    if (dumpm != NULL) {
+      FILE *df = fopen(dumpm, "w");
+      if (df != NULL) {
+        fprintf(df, "%%%%MatrixMarket matrix coordinate real general\n");
+        fprintf(df, "%ld %ld %ld\n", (long)n, (long)n, (long)nnz);
+        for (UF_long k = 0; k < n; ++k) {
+          for (UF_long p = trial_col_ptr[k]; p < trial_col_ptr[k + 1u];
+               ++p) {
+            fprintf(df, "%ld %ld %.17g\n", (long)trial_row_idx[p] + 1,
+                    (long)k + 1, trial_values[p]);
+          }
+        }
+        fclose(df);
+      }
+    }
+  }
+  {
     const char *dump = getenv("KLS_DUMP_BLOCK_PERMS");
     if (dump != NULL) {
       FILE *df = fopen(dump, "w");
@@ -114022,8 +114171,65 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     kls_invalidate_factor_etree_stats(solver);
 
     solver->block_trial_active = 1;
-    const int factored =
-      kls_predicted_pattern_first_factor(solver, trial_values, elapsed);
+    int factored = 0;
+    /* With a clean value-matched diagonal, real partial pivoting stays on
+       it and the actual fill runs far below the predicted pattern's etree
+       bound; every one of the cycle's refactorizations then pays the
+       smaller pattern.  Weak or missing diagonals fall through to the
+       predicted trial, whose restricted pivoting handles them. */
+    {
+      UF_long weak = 0;
+      for (UF_long k = 0; k < n && weak == 0; ++k) {
+        double colmax = 0.0;
+        double diag = -1.0;
+        for (UF_long p = trial_col_ptr[k]; p < trial_col_ptr[k + 1u];
+             ++p) {
+          const double av = fabs(trial_values[p]);
+          colmax = colmax < av ? av : colmax;
+          if (trial_row_idx[p] == k) {
+            diag = av;
+          }
+        }
+        if (diag < 0.0 || diag < 1.0e-3 * colmax) {
+          weak = 1;
+        }
+      }
+      if (weak == 0) {
+        const double plain_start = kls_now_seconds();
+        trilinos_klu_l_numeric *plain =
+          trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
+                                solver->symbolic, &solver->common);
+        if (plain != NULL && solver->common.status >= TRILINOS_KLU_OK &&
+            solver->common.status != TRILINOS_KLU_SINGULAR &&
+            plain->lnz + plain->unz <= 6 * (UF_long)nnz) {
+          solver->numeric = plain;
+          solver->numeric_is_predicted = 0;
+          factored = 1;
+          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+            fprintf(stderr,
+                    "KLS block: plain KLU trial lnz=%ld unz=%ld %.2fs\n",
+                    (long)plain->lnz, (long)plain->unz,
+                    kls_now_seconds() - plain_start);
+          }
+        } else {
+          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+            fprintf(stderr,
+                    "KLS block: plain KLU trial rejected status=%d "
+                    "fill=%ld\n",
+                    (int)solver->common.status,
+                    plain != NULL ? (long)(plain->lnz + plain->unz) : -1L);
+          }
+          if (plain != NULL) {
+            trilinos_klu_l_free_numeric(&plain, &solver->common);
+          }
+          solver->common.status = TRILINOS_KLU_OK;
+        }
+      }
+    }
+    if (!factored) {
+      factored =
+        kls_predicted_pattern_first_factor(solver, trial_values, elapsed);
+    }
     solver->block_trial_active = 0;
     if (getenv("KLS_TRACE_PREDICTED") != NULL) {
       fprintf(stderr, "KLS block: trial factor done %.2fs\n",
@@ -114175,11 +114381,15 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
     }
   }
   free(span_hot);
+  /* The refill's own post-preps rebuilt the refactor map, and snode panel
+     preparation declines while position-based retained structure exists;
+     drop the map first so the closed pattern gets its run detection, then
+     rebuild the map against the sorted storage. */
+  free_refactor_map(solver);
+  free_refactor_schedule(solver);
   free_snode_panels(solver);
   solver->snode_numeric_pre_sorted = 1;
   kls_maybe_prepare_snode_panels(solver, elapsed);
-  free_refactor_map(solver);
-  free_refactor_schedule(solver);
   maybe_prepare_refactor_map(solver, elapsed);
   maybe_prepare_refactor_schedule(solver, elapsed);
   return filled;
@@ -114245,14 +114455,13 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
   }
   if (solver->options.fast_factor && solver->numeric != NULL &&
-      solver->numeric_is_predicted &&
-      (solver->pivot_nudge_count > 0 || solver->user_col_perm != NULL)) {
-    /* A nudged or block-ordered predicted numeric carries weak pivots by
-       construction: the checked fast factorization rejects them and its
-       repair machinery churns unboundedly, and a full KLU fallback
-       re-pivots the blocked matrix into orders of magnitude more fill.
-       Replay the pivot sequence with the plain refactorization instead;
-       the refining solves police accuracy. */
+      ((solver->numeric_is_predicted && solver->pivot_nudge_count > 0) ||
+       solver->user_col_perm != NULL)) {
+    /* A nudged or block-ordered numeric carries pivots the checked fast
+       factorization would reject: its repair machinery churns unboundedly,
+       and a full KLU fallback re-pivots the blocked matrix into orders of
+       magnitude more fill.  Replay the pivot sequence with the plain
+       refactorization instead; the refining solves police accuracy. */
     const double start = kls_now_seconds();
     const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
     elapsed += kls_now_seconds() - start;
