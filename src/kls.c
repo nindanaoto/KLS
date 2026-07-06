@@ -87531,8 +87531,11 @@ static int kls_snb_try_refactor(kls_solver *solver,
                     : kls_snb_refactor(solver, numeric_values);
       snb_seconds = kls_now_seconds() - t0;
     }
+    /* single-sample timings on a busy box swing ~20-30%; only adopt
+       decisive wins so a thermally unlucky incumbent sample cannot hand
+       the matrix to a genuinely slower engine */
     solver->snb_decision =
-      snb_ok && snb_seconds < 0.97 * solver->snb_incumbent_seconds ? 1 : -1;
+      snb_ok && snb_seconds < 0.75 * solver->snb_incumbent_seconds ? 1 : -1;
     if (kls_snb_trace_enabled()) {
       fprintf(stderr,
               "KLS snb: acceptance incumbent %.3fms snb %.3fms t%d -> %s\n",
