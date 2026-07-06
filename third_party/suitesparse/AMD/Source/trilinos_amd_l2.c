@@ -18,6 +18,16 @@
 #define DLONG 1
 
 #include "trilinos_amd_internal.h"
+#include <math.h>
+
+/* KLS: approximate-minimum-fill scoring (task #11).  When set, pivot
+ * selection buckets supervariables by an approximate deficiency
+ * (Rothberg/Eisenstat-style clique-discounted fill estimate) instead of
+ * the approximate external degree.  Degree[] keeps its usual meaning so
+ * the degree approximations are unchanged; a side array records which
+ * list each variable sits in.  Not thread-safe: KLS's ordering
+ * competition runs analyses serially. */
+GLOBAL Int trilinos_amd_l2_amf = 0 ;
 
 /* ========================================================================= */
 /* === clear_flag ========================================================== */
@@ -466,6 +476,9 @@ GLOBAL void TRILINOS_AMD_2
 	nvi, nvj, nvpiv, slenme, wbig, we, wflg, wnvi, ok, ndense, ncmpa,
 	dense, aggressive ;
 
+    Int *amf_bucket = NULL, *amf_cliq = NULL ;
+    Int amf_cliq_i = 0 ;
+
     unsigned Int hash ;	    /* unsigned, so that hash % n is well defined.*/
 
 /*
@@ -579,6 +592,14 @@ GLOBAL void TRILINOS_AMD_2
     dmax = 1 ;
     me = TRILINOS_AMD_EMPTY ;
 
+    if (trilinos_amd_l2_amf)
+    {
+	amf_bucket = (Int *) malloc (2 * (size_t) n * sizeof (Int)) ;
+	if (amf_bucket != NULL)
+	{
+	    amf_cliq = amf_bucket + n ;
+	}
+    }
     mindeg = 0 ;
     ncmpa = 0 ;
     nel = 0 ;
@@ -690,6 +711,7 @@ GLOBAL void TRILINOS_AMD_2
 	    if (inext != TRILINOS_AMD_EMPTY) Last [inext] = i ;
 	    Next [i] = inext ;
 	    Head [deg] = i ;
+	    if (amf_bucket != NULL) amf_bucket [i] = deg ;
 
 	}
     }
@@ -809,7 +831,8 @@ GLOBAL void TRILINOS_AMD_2
 		    {
 			/* i is at the head of the degree list */
 			ASSERT (Degree [i] >= 0 && Degree [i] < n) ;
-			Head [Degree [i]] = inext ;
+			Head [amf_bucket != NULL ? amf_bucket [i]
+			                         : Degree [i]] = inext ;
 		    }
 		}
 	    }
@@ -968,7 +991,8 @@ GLOBAL void TRILINOS_AMD_2
 			{
 			    /* i is at the head of the degree list */
 			    ASSERT (Degree [i] >= 0 && Degree [i] < n) ;
-			    Head [Degree [i]] = inext ;
+			    Head [amf_bucket != NULL ? amf_bucket [i]
+			                             : Degree [i]] = inext ;
 			}
 		    }
 		}
@@ -1093,6 +1117,7 @@ GLOBAL void TRILINOS_AMD_2
 	    pn = p1 ;
 	    hash = 0 ;
 	    deg = 0 ;
+	    amf_cliq_i = 0 ;
 	    ASSERT (p1 >= 0 && p1 < iwlen && p2 >= -1 && p2 < iwlen) ;
 
 	    /* ------------------------------------------------------------- */
@@ -1115,6 +1140,7 @@ GLOBAL void TRILINOS_AMD_2
 			if (dext > 0)
 			{
 			    deg += dext ;
+			    amf_cliq_i += (dext * (dext - 1)) / 2 ;
 			    Iw [pn++] = e ;
 			    hash += e ;
 			    TRILINOS_AMD_DEBUG4 ((" e: "ID" hash = "ID"\n",e,hash)) ;
@@ -1144,6 +1170,7 @@ GLOBAL void TRILINOS_AMD_2
 			dext = we - wflg ;
 			ASSERT (dext >= 0) ;
 			deg += dext ;
+			amf_cliq_i += (dext * (dext - 1)) / 2 ;
 			Iw [pn++] = e ;
 			hash += e ;
 			TRILINOS_AMD_DEBUG4 (("	e: "ID" hash = "ID"\n",e,hash)) ;
@@ -1153,6 +1180,7 @@ GLOBAL void TRILINOS_AMD_2
 
 	    /* count the number of elements in i (including me): */
 	    Elen [i] = pn - p1 + 1 ;
+	    if (amf_cliq != NULL) amf_cliq [i] = amf_cliq_i ;
 
 	    /* ------------------------------------------------------------- */
 	    /* scan the supervariables in the list associated with i */
@@ -1467,21 +1495,44 @@ GLOBAL void TRILINOS_AMD_2
 		ASSERT (IMPLIES (aggressive, deg > 0) && deg >= 0 && deg < n) ;
 
 		/* --------------------------------------------------------- */
-		/* place the supervariable at the head of the degree list */
+		/* place the supervariable at the head of its list */
 		/* --------------------------------------------------------- */
 
-		inext = Head [deg] ;
-		ASSERT (inext >= TRILINOS_AMD_EMPTY && inext < n) ;
-		if (inext != TRILINOS_AMD_EMPTY) Last [inext] = i ;
-		Next [i] = inext ;
-		Last [i] = TRILINOS_AMD_EMPTY ;
-		Head [deg] = i ;
+		{
+		    Int bucket = deg ;
+		    if (amf_bucket != NULL)
+		    {
+			/* approximate deficiency: pairs among the (approx)
+			 * degree, discounted by pairs already inside the
+			 * adjacent cliques (current element + unabsorbed
+			 * elements seen in scan 2).  sqrt maps the O(d^2)
+			 * score back onto the O(n) bucket range without
+			 * changing its order. */
+			Int dme = degme - nvi ;
+			double def ;
+			if (dme < 0) dme = 0 ;
+			def = 0.5 * (double) deg * ((double) deg - 1.0)
+			    - (double) amf_cliq [i]
+			    - 0.5 * (double) dme * ((double) dme - 1.0) ;
+			if (def < 0.0) def = 0.0 ;
+			bucket = (Int) sqrt (2.0 * def) ;
+			if (bucket > deg) bucket = deg ;
+			ASSERT (bucket >= 0 && bucket < n) ;
+			amf_bucket [i] = bucket ;
+		    }
+		    inext = Head [bucket] ;
+		    ASSERT (inext >= TRILINOS_AMD_EMPTY && inext < n) ;
+		    if (inext != TRILINOS_AMD_EMPTY) Last [inext] = i ;
+		    Next [i] = inext ;
+		    Last [i] = TRILINOS_AMD_EMPTY ;
+		    Head [bucket] = i ;
 
-		/* --------------------------------------------------------- */
-		/* save the new degree, and find the minimum degree */
-		/* --------------------------------------------------------- */
+		    /* ----------------------------------------------------- */
+		    /* save the new degree, and find the minimum score */
+		    /* ----------------------------------------------------- */
 
-		mindeg = MIN (mindeg, deg) ;
+		    mindeg = MIN (mindeg, bucket) ;
+		}
 		Degree [i] = deg ;
 
 		/* --------------------------------------------------------- */
@@ -1842,4 +1893,6 @@ GLOBAL void TRILINOS_AMD_2
 	Last [k] = i ;
 	TRILINOS_AMD_DEBUG2 (("   perm ["ID"] = "ID"\n", k, i)) ;
     }
+
+    free (amf_bucket) ;
 }

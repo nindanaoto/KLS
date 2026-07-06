@@ -33,7 +33,8 @@ typedef enum kls_ordering {
   KLS_ORDERING_COLAMD = 2,
   KLS_ORDERING_NATURAL = 3,
   KLS_ORDERING_METIS = 4,
-  KLS_ORDERING_SCOTCH = 5
+  KLS_ORDERING_SCOTCH = 5,
+  KLS_ORDERING_AMF = 6
 } kls_ordering;
 
 typedef enum kls_orientation {

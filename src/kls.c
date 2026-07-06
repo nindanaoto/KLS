@@ -23269,6 +23269,15 @@ static int analyze_with_ordering(UF_long n,
 #else
     return KLS_ERR_UNSUPPORTED;
 #endif
+  } else if (ordering == KLS_ORDERING_AMF) {
+    /* vendored AMD with approximate-deficiency pivot scoring; the flag
+       is a serial-analysis global (the ordering competition never runs
+       analyses concurrently) */
+    extern UF_long trilinos_amd_l2_amf;
+    trilinos_amd_l2_amf = 1;
+    common.ordering = 0;
+    symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
+    trilinos_amd_l2_amf = 0;
   } else {
     common.ordering = (ordering == KLS_ORDERING_COLAMD) ? 1 : 0;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
@@ -27807,6 +27816,16 @@ static int choose_symbolic_for_pattern(UF_long n,
     return KLS_ERR_ANALYZE_FAILED;
   }
 
+  /* AMF (approximate minimum fill) rides the same quotient graph as AMD
+     at similar analysis cost; try it whenever AMD won the base round and
+     keep it only on a clear estimate win (task #11: must only win where
+     estimates say so). */
+  if (best_ordering == KLS_ORDERING_AMD && best_score < DBL_MAX) {
+    maybe_promote_symbolic_ordering(
+      n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
+      &best_symbolic, &best_common, &best_ordering, &best_score, 0.95,
+      &best_separator);
+  }
 #ifdef KLS_HAVE_METIS
   if (should_try_symbolic_nested_dissection_before_numeric(
         n, best_symbolic, best_ordering, KLS_ORDERING_METIS, best_score)) {
@@ -27846,7 +27865,7 @@ static int validate_options(const kls_options *options) {
   if (options->threads <= 0) {
     return 0;
   }
-  if (options->ordering < KLS_ORDERING_AUTO || options->ordering > KLS_ORDERING_SCOTCH) {
+  if (options->ordering < KLS_ORDERING_AUTO || options->ordering > KLS_ORDERING_AMF) {
     return 0;
   }
   if (options->orientation < KLS_ORIENTATION_AUTO ||
@@ -115243,6 +115262,7 @@ const char *kls_ordering_name(kls_ordering ordering) {
     case KLS_ORDERING_NATURAL: return "natural";
     case KLS_ORDERING_METIS: return "metis";
     case KLS_ORDERING_SCOTCH: return "scotch";
+    case KLS_ORDERING_AMF: return "amf";
     default: return "unknown";
   }
 }

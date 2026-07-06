@@ -288,6 +288,7 @@ static kls_ordering parse_ordering(const char *s) {
   if (strcmp(s, "natural") == 0) return KLS_ORDERING_NATURAL;
   if (strcmp(s, "metis") == 0) return KLS_ORDERING_METIS;
   if (strcmp(s, "scotch") == 0) return KLS_ORDERING_SCOTCH;
+  if (strcmp(s, "amf") == 0) return KLS_ORDERING_AMF;
   return KLS_ORDERING_AUTO;
 }
 
