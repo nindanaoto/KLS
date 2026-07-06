@@ -85877,6 +85877,7 @@ typedef struct kls_snb_block {
   int64_t panel_doubles;
   int32_t *writeback;   /* per LU entry (block walk order): panel index */
   int64_t *wb_col_off;  /* per local column: offset into writeback[] */
+  _Atomic int32_t *published; /* per snode: getrf columns finalized */
 } kls_snb_block;
 
 typedef struct kls_snb_entry {
@@ -85905,6 +85906,9 @@ typedef struct kls_snb_state {
   int64_t *slevel_ptr;     /* level -> range in slevel_tasks */
   int32_t *slevel_block;   /* task -> block id */
   int32_t *slevel_snode;   /* task -> snode id within block */
+  int64_t seg_count;       /* pipelined segments between coop levels */
+  int64_t *seg_ptr;        /* segment -> range in the task list */
+  unsigned char *seg_coop; /* segment is a single cooperative snode */
   _Atomic int64_t singular_rank; /* min singular pivot seen this refactor */
   _Atomic int failed;            /* halt_if_singular tripped */
   double par_work_share; /* fraction of panel work the t4 executor can
@@ -85936,6 +85940,7 @@ static void kls_snb_free(kls_solver *solver) {
       free(blk->panels);
       free(blk->writeback);
       free(blk->wb_col_off);
+      free((void *)blk->published);
     }
     free(st->blocks);
   }
@@ -85953,6 +85958,8 @@ static void kls_snb_free(kls_solver *solver) {
   free(st->slevel_ptr);
   free(st->slevel_block);
   free(st->slevel_snode);
+  free(st->seg_ptr);
+  free(st->seg_coop);
   free(st);
   solver->snb = NULL;
   solver->snb_decision = 0;
@@ -86477,6 +86484,66 @@ static int kls_snb_prepare(kls_solver *solver) {
       st->par_work_share = total > 0.0 ? (coop + wide) / total : 0.0;
       st->coop_work_share = total > 0.0 ? coop / total : 0.0;
     }
+    /* pipelined segments: split the topological task list at cooperative
+       levels; inside a segment cross-level dependencies are enforced by
+       the per-edge published-column spins, so no barriers are needed */
+    if (st->slevel_ptr != NULL && st->slevel_count > 0) {
+      st->seg_ptr = (int64_t *)malloc(((size_t)st->slevel_count * 2u + 2u) *
+                                      sizeof(int64_t));
+      st->seg_coop = (unsigned char *)malloc((size_t)st->slevel_count + 1u);
+      if (st->seg_ptr != NULL && st->seg_coop != NULL) {
+        int64_t nseg = 0;
+        int64_t open_start = -1;
+        for (int64_t l = 0; l < st->slevel_count; ++l) {
+          const int64_t begin = st->slevel_ptr[l];
+          const int64_t end = st->slevel_ptr[l + 1];
+          int is_coop = 0;
+          if (end - begin == 1) {
+            const kls_snb_snode *sn =
+              &st->blocks[st->slevel_block[begin]]
+                 .snodes[st->slevel_snode[begin]];
+            is_coop = (int64_t)sn->height * sn->width >=
+                      KLS_SNB_COOP_MIN_DOUBLES;
+          }
+          if (is_coop) {
+            if (open_start >= 0) {
+              st->seg_ptr[2 * nseg] = open_start;
+              st->seg_ptr[2 * nseg + 1] = begin;
+              st->seg_coop[nseg] = 0;
+              nseg++;
+              open_start = -1;
+            }
+            st->seg_ptr[2 * nseg] = begin;
+            st->seg_ptr[2 * nseg + 1] = end;
+            st->seg_coop[nseg] = 1;
+            nseg++;
+          } else if (open_start < 0) {
+            open_start = begin;
+          }
+        }
+        if (open_start >= 0) {
+          st->seg_ptr[2 * nseg] = open_start;
+          st->seg_ptr[2 * nseg + 1] =
+            st->slevel_ptr[st->slevel_count];
+          st->seg_coop[nseg] = 0;
+          nseg++;
+        }
+        st->seg_count = nseg;
+      } else {
+        free(st->seg_ptr);
+        free(st->seg_coop);
+        st->seg_ptr = NULL;
+        st->seg_coop = NULL;
+        st->seg_count = 0;
+      }
+    }
+    for (UF_long b = 0; ok && b < st->nblocks; ++b) {
+      kls_snb_block *blk = &st->blocks[b];
+      if (blk->nk < 2u || blk->snode_count <= 0) continue;
+      blk->published = (_Atomic int32_t *)calloc(
+        (size_t)blk->snode_count, sizeof(_Atomic int32_t));
+      if (blk->published == NULL) ok = 0;
+    }
   }
 
   /* cost gate: at t4 the trial+materialization cost must stay small
@@ -86691,7 +86758,7 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
                                    kls_snb_block *blk, int64_t s,
                                    const double *az, const double *rs,
                                    int scale, double *ub_scratch,
-                                   double *gemm_scratch) {
+                                   double *gemm_scratch, int pipelined) {
   const UF_long k1 = blk->k1;
   double *panels = blk->panels;
   double *offx = (double *)solver->numeric->Offx;
@@ -86731,6 +86798,15 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
     const int32_t pld = ps->height;
     const double *Ldiag = Lp + ps->uw;
     const double *Lbelow = Lp + ps->uw + pw;
+    if (pipelined) {
+      /* the producer publishes each getrf column right after its
+         division; this edge only reads columns <= sub[sc-1] */
+      const int32_t need = sub[sc - 1] + 1;
+      while (atomic_load_explicit(&blk->published[edges[e].producer],
+                                  memory_order_acquire) < need) {
+        kls_cpu_relax();
+      }
+    }
     if (sc < wnarrow) {
       for (int32_t c = 0; c < w; ++c) {
         double *Wc = W + (size_t)c * H;
@@ -86825,6 +86901,10 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
       const int32_t hrem = H - uw - i - 1;
       double *lsub = ci + i + 1;
       for (int32_t r = 0; r < hrem; ++r) lsub[r] /= pivot;
+      if (pipelined) {
+        atomic_store_explicit(&blk->published[s], i + 1,
+                              memory_order_release);
+      }
       for (int32_t j = i + 1; j < w; ++j) {
         double *cj = diag + (size_t)j * H;
         const double u = cj[i];
@@ -86947,7 +87027,7 @@ static UF_long kls_snb_refactor(kls_solver *solver,
     if (blk->nk < 2u) continue;
     for (int64_t s = 0; s < blk->snode_count; ++s) {
       kls_snb_process_target(solver, st, blk, s, numeric_values, rs, scale,
-                             st->ub_w[0], st->gemm_w[0]);
+                             st->ub_w[0], st->gemm_w[0], 0);
       if (atomic_load_explicit(&st->failed, memory_order_acquire)) {
         return 0;
       }
@@ -87230,6 +87310,10 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
       double *lsub = ci + i + 1;
       for (int32_t r = r0; r < r1; ++r) lsub[r] /= pivot;
       kls_snb_spin_barrier_wait(&ctx->coop, crew);
+      if (tid == 0) {
+        atomic_store_explicit(&blk->published[s], i + 1,
+                              memory_order_release);
+      }
       for (int32_t j = i + 1; j < w; ++j) {
         double *cj = diag + (size_t)j * H;
         const double u = cj[i];
@@ -87285,28 +87369,29 @@ static void *kls_snb_par_worker(void *argp) {
   if (go != 1) {
     return NULL;
   }
-  for (int64_t level = 0; level < st->slevel_count; ++level) {
-    if (arg->tid == 0) {
-      atomic_store_explicit(&ctx->cursor, st->slevel_ptr[level],
-                            memory_order_relaxed);
-    }
-    (void)pthread_barrier_wait(&ctx->barrier);
-    const int64_t begin = st->slevel_ptr[level];
-    const int64_t end = st->slevel_ptr[level + 1];
-    if (end - begin == 1) {
+  for (int64_t seg = 0; seg < st->seg_count; ++seg) {
+    const int64_t begin = st->seg_ptr[2 * seg];
+    const int64_t end = st->seg_ptr[2 * seg + 1];
+    if (st->seg_coop[seg]) {
+      /* single big snode: whole crew cooperates (rendezvous barrier) */
+      (void)pthread_barrier_wait(&ctx->barrier);
       kls_snb_block *blk = &st->blocks[st->slevel_block[begin]];
       const int64_t s = (int64_t)st->slevel_snode[begin];
-      const kls_snb_snode *sn = &blk->snodes[s];
-      if ((int64_t)sn->height * sn->width >= KLS_SNB_COOP_MIN_DOUBLES) {
-        kls_snb_process_target_coop(ctx, blk, s, arg->tid);
-      } else if (arg->tid == 0) {
-        kls_snb_process_target(ctx->solver, st, blk, s, ctx->values,
-                               ctx->rs, ctx->scale, st->ub_w[0],
-                               st->gemm_w[0]);
+      kls_snb_process_target_coop(ctx, blk, s, arg->tid);
+      if (arg->tid == 0) {
+        atomic_store_explicit(&blk->published[s],
+                              blk->snodes[s].width,
+                              memory_order_release);
       }
       (void)pthread_barrier_wait(&ctx->barrier);
       continue;
     }
+    /* pipelined segment: claims in topological order, dependencies
+       enforced by per-edge spins on published getrf columns */
+    if (arg->tid == 0) {
+      atomic_store_explicit(&ctx->cursor, begin, memory_order_relaxed);
+    }
+    (void)pthread_barrier_wait(&ctx->barrier);
     for (;;) {
       const int64_t idx = atomic_fetch_add_explicit(&ctx->cursor, 1,
                                                     memory_order_relaxed);
@@ -87317,7 +87402,7 @@ static void *kls_snb_par_worker(void *argp) {
       kls_snb_process_target(ctx->solver, st, blk,
                              (int64_t)st->slevel_snode[idx], ctx->values,
                              ctx->rs, ctx->scale, st->ub_w[arg->tid],
-                             st->gemm_w[arg->tid]);
+                             st->gemm_w[arg->tid], 1);
     }
     (void)pthread_barrier_wait(&ctx->barrier);
   }
@@ -87331,8 +87416,16 @@ static UF_long kls_snb_refactor_parallel(kls_solver *solver,
                                          const double *numeric_values,
                                          int nthreads) {
   kls_snb_state *st = solver->snb;
-  if (st->slevel_ptr == NULL || st->slevel_count <= 0) {
+  if (st->slevel_ptr == NULL || st->slevel_count <= 0 ||
+      st->seg_ptr == NULL || st->seg_count <= 0) {
     return kls_snb_refactor(solver, numeric_values);
+  }
+  for (UF_long b = 0; b < st->nblocks; ++b) {
+    kls_snb_block *blk = &st->blocks[b];
+    if (blk->published == NULL) continue;
+    for (int64_t s = 0; s < blk->snode_count; ++s) {
+      atomic_store_explicit(&blk->published[s], 0, memory_order_relaxed);
+    }
   }
   if (nthreads > st->nworkers) {
     nthreads = st->nworkers;
@@ -87438,6 +87531,7 @@ static void kls_snb_maybe_accept(kls_solver *solver,
     solver->snode_numeric_pre_sorted = 1;
   }
   if (solver->options.threads > 1 &&
+      getenv("KLS_SNB_FORCE_TRIAL") == NULL &&
       (solver->snb_factor_start <= 0.0 ||
        kls_now_seconds() - solver->snb_factor_start < 4.0)) {
     /* t4: prep+trial cost only amortizes on matrices whose factor is
