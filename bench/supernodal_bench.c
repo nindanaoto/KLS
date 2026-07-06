@@ -530,6 +530,8 @@ typedef struct snb_block {
   int32_t *subcols;            /* concatenated producer-local col lists */
   int32_t *edge_dsts;          /* precomputed per-edge scatter targets */
   double *panels;              /* all panels, column-major per snode */
+  float *panels32;             /* fp32 panels (round 7), when enabled */
+  float *lmirror;              /* fp32 mirror of L regions (round 7b) */
   int64_t panel_doubles;
   int32_t *map;                /* block-local row -> slot (setup/verify) */
 } snb_block;
@@ -547,6 +549,7 @@ typedef struct snb_state {
   int scale;
   int status;
   int wnarrow;
+  int fp32;
   /* scratch */
   double *gemm_temp;   /* max below x wmax */
   double *ub;          /* wmax x wmax, column-major, then row-major copy */
@@ -648,6 +651,8 @@ static void snb_free(snb_state *st) {
       free(blk->subcols);
       free(blk->edge_dsts);
       free(blk->panels);
+      free(blk->panels32);
+      free(blk->lmirror);
       free(blk->map);
     }
     free(st->blocks);
@@ -903,8 +908,23 @@ static void snb_setup(snb_state *st, double zeta, int wmax) {
     }
     free(inset);
     blk->panel_doubles = panel_doubles;
-    blk->panels = (double *)xmalloc((size_t)panel_doubles * sizeof(double));
-    memset(blk->panels, 0, (size_t)panel_doubles * sizeof(double));
+    /* malloc+memset (not calloc): committed, hugepage-friendly pages;
+     * lazily-faulted calloc pages measured ~20% slower GEMM streaming */
+    if (st->fp32) {
+      blk->panels32 =
+        (float *)xmalloc((size_t)panel_doubles * sizeof(float));
+      memset(blk->panels32, 0, (size_t)panel_doubles * sizeof(float));
+      blk->panels = (double *)xmalloc(sizeof(double));
+      blk->panels[0] = 0.0;
+    } else {
+      blk->panels =
+        (double *)xmalloc((size_t)panel_doubles * sizeof(double));
+      memset(blk->panels, 0, (size_t)panel_doubles * sizeof(double));
+    }
+#ifdef SNB_FP32L_BUILD
+    blk->lmirror = (float *)xmalloc((size_t)panel_doubles * sizeof(float));
+    memset(blk->lmirror, 0, (size_t)panel_doubles * sizeof(float));
+#endif
     blk->map = (int32_t *)xmalloc((size_t)nk * sizeof(int32_t));
     memset(blk->map, 0xff, (size_t)nk * sizeof(int32_t));
     /* precomputed per-edge scatter destinations (round 3: the refactor
@@ -932,6 +952,11 @@ static void snb_setup(snb_state *st, double zeta, int wmax) {
         int32_t *dsts = blk->edge_dsts + edges[e].dst_off;
         for (int32_t r = 0; r < ps->below; ++r) {
           dsts[r] = blk->map[prows[r]];
+          if (dsts[r] >= 0) {
+            st->scatter_hit++;
+          } else {
+            st->scatter_miss++;
+          }
         }
       }
       snb_map_clear(blk, sn);
@@ -991,237 +1016,28 @@ static void snb_map_clear(const snb_block *blk, const snb_snode *sn) {
   }
 }
 
-static int snb_refactor(snb_state *st, int trace) {
-  const matrix *a = st->a;
-  st->status = 0;
-  st->scatter_hit = 0;
-  st->scatter_miss = 0;
+/* fp32 panels are a compile-time variant (-DSNB_FP32_BUILD): keeping
+ * both instantiations in one binary measurably degrades the f64 hot
+ * loops (~16% on rajat25), so each binary carries exactly one. */
+#ifdef SNB_FP32L_BUILD
+#define SNB_L_MIRROR 1
+#endif
+#ifdef SNB_FP32_BUILD
+#define SNB_REAL float
+#define SNB_NAME snb_refactor_active
+#define SNB_PANELS panels32
+#else
+#define SNB_REAL double
+#define SNB_NAME snb_refactor_active
+#define SNB_PANELS panels
+#endif
+#include "snb_refactor_impl.h"
+#undef SNB_REAL
+#undef SNB_NAME
+#undef SNB_PANELS
 
-  if (st->scale > 0) {
-    double *rs = st->rs;
-    const int64_t n = a->n;
-    for (int64_t i = 0; i < n; ++i) rs[i] = 0.0;
-    for (int64_t c = 0; c < n; ++c) {
-      for (int64_t p = a->col_ptr[c]; p < a->col_ptr[c + 1]; ++p) {
-        const double v = fabs(a->values[p]);
-        if (st->scale == 1) {
-          rs[a->row_idx[p]] += v;
-        } else if (v > rs[a->row_idx[p]]) {
-          rs[a->row_idx[p]] = v;
-        }
-      }
-    }
-    for (int64_t i = 0; i < n; ++i) {
-      if (rs[i] == 0.0) rs[i] = 1.0;
-    }
-  }
-  const double *rs = st->rs;
-  const double *az = a->values;
-  const scatter_program *sp = &st->sp;
-  const int wnarrow = st->wnarrow;
-
-  for (UF_long block = 0; block < st->nblocks; ++block) {
-    snb_block *blk = &st->blocks[block];
-    const UF_long k1 = blk->k1;
-    const UF_long nk = blk->nk;
-    if (nk == 1) {
-      double s = 0.0;
-      for (int64_t p = sp->col_off_ptr[k1]; p < sp->col_off_ptr[k1 + 1];
-           ++p) {
-        st->offx[sp->off[p].dst] =
-          st->scale > 0 ? az[sp->off[p].src] / rs[sp->off[p].oldrow]
-                        : az[sp->off[p].src];
-      }
-      for (int64_t p = sp->col_blk_ptr[k1]; p < sp->col_blk_ptr[k1 + 1];
-           ++p) {
-        s = st->scale > 0 ? az[sp->blk[p].src] / rs[sp->blk[p].oldrow]
-                          : az[sp->blk[p].src];
-      }
-      st->udiag[k1] = s;
-      continue;
-    }
-    double *panels = blk->panels;
-    const int prof = st->profile;
-    for (int64_t s = 0; s < blk->snode_count; ++s) {
-      const snb_snode *sn = &blk->snodes[s];
-      const int32_t w = sn->width;
-      const int32_t H = sn->height;
-      const int32_t uw = sn->uw;
-      double *W = panels + sn->panel;
-      uint64_t t0 = prof ? snb_tsc() : 0;
-      memset(W, 0, (size_t)H * (size_t)w * sizeof(double));
-      /* scatter A columns (program dst = local panel index incl. col) */
-      for (int32_t c = 0; c < w; ++c) {
-        const UF_long gk = k1 + sn->start + c;
-        for (int64_t p = sp->col_off_ptr[gk]; p < sp->col_off_ptr[gk + 1];
-             ++p) {
-          st->offx[sp->off[p].dst] =
-            st->scale > 0 ? az[sp->off[p].src] / rs[sp->off[p].oldrow]
-                          : az[sp->off[p].src];
-        }
-        for (int64_t p = sp->col_blk_ptr[gk]; p < sp->col_blk_ptr[gk + 1];
-             ++p) {
-          W[sp->blk[p].dst] =
-            st->scale > 0 ? az[sp->blk[p].src] / rs[sp->blk[p].oldrow]
-                          : az[sp->blk[p].src];
-        }
-      }
-      if (prof) {
-        const uint64_t t1 = snb_tsc();
-        st->phase_cycles[0] += t1 - t0;
-        t0 = t1;
-      }
-      /* edges, ascending producer */
-      const snb_edge *edges = blk->edges + sn->edges_off;
-      for (int32_t e = 0; e < sn->edge_count; ++e) {
-        const snb_snode *ps = &blk->snodes[edges[e].producer];
-        const int32_t pw = ps->width;
-        const int32_t ph = ps->below;
-        const int32_t sc = edges[e].sub_count;
-        const int32_t *sub = blk->subcols + edges[e].sub_off;
-        const int32_t *dsts = blk->edge_dsts + edges[e].dst_off;
-        const int32_t ustart = edges[e].u_start;
-        const double *Lp = panels + ps->panel;   /* producer panel */
-        const int32_t pld = ps->height;
-        const int32_t puw = ps->uw;
-        const double *Ldiag = Lp + puw;          /* pw x pw diag block */
-        const double *Lbelow = Lp + puw + pw;    /* ph x pw below block */
-        if (sc < wnarrow) {
-          /* hybrid scalar path: register u, immediate scatter, u==0
-           * skip; precomputed dsts replace the map (round 3) */
-          for (int32_t c = 0; c < w; ++c) {
-            double *Wc = W + (size_t)c * H;
-            for (int32_t i = 0; i < sc; ++i) {
-              const double u = Wc[ustart + i];
-              if (u == 0.0) continue;
-              const double *lcol = Ldiag + (size_t)sub[i] * pld;
-              for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-                Wc[ustart + i2] -= lcol[sub[i2]] * u;
-              }
-              const double *lb = Lbelow + (size_t)sub[i] * pld;
-              for (int32_t r = 0; r < ph; ++r) {
-                const int32_t dst = dsts[r];
-                if (dst >= 0) {
-                  Wc[dst] -= lb[r] * u;
-                }
-              }
-            }
-          }
-          if (prof) {
-            const uint64_t t1 = snb_tsc();
-            st->phase_cycles[1] += t1 - t0;
-            t0 = t1;
-          }
-          continue;
-        }
-        /* gather UB (sc x w), TRSM restricted to the touched producer
-         * columns (untouched ones carry exact zeros), writeback */
-        double *B = st->ub;                    /* column-major sc x w */
-        for (int32_t c = 0; c < w; ++c) {
-          const double *Wc = W + (size_t)c * H + ustart;
-          double *Bc = B + (size_t)c * sc;
-          for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
-        }
-        for (int32_t i = 0; i < sc; ++i) {
-          const double *lcol = Ldiag + (size_t)sub[i] * pld;
-          for (int32_t c = 0; c < w; ++c) {
-            double *Bc = B + (size_t)c * sc;
-            const double u = Bc[i];
-            if (u == 0.0) continue;
-            for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-              Bc[i2] -= lcol[sub[i2]] * u;
-            }
-          }
-        }
-        for (int32_t c = 0; c < w; ++c) {
-          double *Wc = W + (size_t)c * H + ustart;
-          const double *Bc = B + (size_t)c * sc;
-          for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
-        }
-        if (prof) {
-          const uint64_t t1 = snb_tsc();
-          st->phase_cycles[2] += t1 - t0;
-          t0 = t1;
-        }
-        if (ph == 0) continue;
-        /* block path: GEMM into row-major temp (long contiguous streams,
-         * independent FMAs -- measured faster than a fused accumulate),
-         * then row scatter through the precomputed dsts */
-        double *Brow = st->ub + (size_t)sc * w; /* row-major mirror */
-        for (int32_t c = 0; c < w; ++c) {
-          const double *Bc = B + (size_t)c * sc;
-          for (int32_t i = 0; i < sc; ++i) {
-            Brow[(size_t)i * w + c] = Bc[i];
-          }
-        }
-        double *T = st->gemm_temp;
-        {
-          const double *lb = Lbelow + (size_t)sub[0] * pld;
-          const double *br = Brow;
-          for (int32_t r = 0; r < ph; ++r) {
-            const double l = lb[r];
-            double *tr = T + (size_t)r * w;
-            for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
-          }
-          for (int32_t i = 1; i < sc; ++i) {
-            const double *lbi = Lbelow + (size_t)sub[i] * pld;
-            const double *bri = Brow + (size_t)i * w;
-            for (int32_t r = 0; r < ph; ++r) {
-              const double l = lbi[r];
-              double *tr = T + (size_t)r * w;
-              for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
-            }
-          }
-        }
-        for (int32_t r = 0; r < ph; ++r) {
-          const int32_t dst = dsts[r];
-          const double *tr = T + (size_t)r * w;
-          if (dst >= 0) {
-            double *Wd = W + dst;
-            for (int32_t c = 0; c < w; ++c) {
-              Wd[(size_t)c * H] -= tr[c];
-            }
-            if (trace) st->scatter_hit++;
-          } else if (trace) {
-            st->scatter_miss++;
-          }
-        }
-        if (prof) {
-          const uint64_t t1 = snb_tsc();
-          st->phase_cycles[3] += t1 - t0;
-          t0 = t1;
-        }
-      }
-      /* fused no-pivot getrf/TRSM on rows [uw, H) */
-      {
-        double *diag = W + uw;
-        for (int32_t i = 0; i < w; ++i) {
-          double *ci = diag + (size_t)i * H;
-          const double pivot = ci[i];
-          st->udiag[k1 + sn->start + i] = pivot;
-          if (pivot == 0.0) st->status = 1;
-          const int32_t hrem = H - uw - i - 1;
-          double *sub = ci + i + 1;
-          /* division (not reciprocal) to match KLU's roundoff */
-          for (int32_t r = 0; r < hrem; ++r) sub[r] /= pivot;
-          for (int32_t j = i + 1; j < w; ++j) {
-            double *cj = diag + (size_t)j * H;
-            const double u = cj[i];
-            if (u == 0.0) continue;
-            double *dstv = cj + i + 1;
-            for (int32_t r = 0; r < hrem; ++r) {
-              dstv[r] -= sub[r] * u;
-            }
-          }
-        }
-      }
-      if (prof) {
-        const uint64_t t1 = snb_tsc();
-        st->phase_cycles[4] += t1 - t0;
-      }
-    }
-  }
-  return 1;
+static int snb_refactor(snb_state *st) {
+  return snb_refactor_active(st);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1429,13 +1245,19 @@ static double reconstruction_error(const matrix *a,
     double *lu = lu_by_block[block];
     for (UF_long k = 0; k < nk; ++k) {
       const UF_long gk = k1 + k;
+      double colmax = 0.0;
       for (int64_t p = sp->col_blk_ptr[gk]; p < sp->col_blk_ptr[gk + 1];
            ++p) {
         const double v = scale > 0 ? az[sp->blk[p].src] / rs[sp->blk[p].oldrow]
                                    : az[sp->blk[p].src];
         x[sp->blk[p].dst] += v;
         xa[sp->blk[p].dst] += fabs(v);
+        if (fabs(v) > colmax) colmax = fabs(v);
       }
+      /* contributions this far below the column's own scale are beyond
+       * any meaningful precision (fp32 underflow of already-negligible
+       * products); don't let them dominate a relative test */
+      const double floor_abs = 1e-24 * colmax;
       UF_long *ui;
       double *ux;
       UF_long uclen;
@@ -1468,10 +1290,11 @@ static double reconstruction_error(const matrix *a,
         xa[li[p]] += fabs(t);
       }
       /* score and reset the touched rows */
+      const double worst_before = worst;
       for (int64_t p = sp->col_blk_ptr[gk]; p < sp->col_blk_ptr[gk + 1];
            ++p) {
         const int64_t r = sp->blk[p].dst;
-        if (xa[r] > 0.0 && fabs(x[r]) / xa[r] > worst) {
+        if (xa[r] > floor_abs && fabs(x[r]) / xa[r] > worst) {
           worst = fabs(x[r]) / xa[r];
         }
         x[r] = 0.0;
@@ -1479,7 +1302,7 @@ static double reconstruction_error(const matrix *a,
       }
       for (UF_long up = 0; up < uclen; ++up) {
         const UF_long j = ui[up];
-        if (xa[j] > 0.0 && fabs(x[j]) / xa[j] > worst) {
+        if (xa[j] > floor_abs && fabs(x[j]) / xa[j] > worst) {
           worst = fabs(x[j]) / xa[j];
         }
         x[j] = 0.0;
@@ -1490,31 +1313,42 @@ static double reconstruction_error(const matrix *a,
         lu_get(lu, lip, llen, j, &li2, &lx2, &lclen2);
         for (UF_long p = 0; p < lclen2; ++p) {
           const UF_long r = li2[p];
-          if (xa[r] > 0.0 && fabs(x[r]) / xa[r] > worst) {
+          if (xa[r] > floor_abs && fabs(x[r]) / xa[r] > worst) {
             worst = fabs(x[r]) / xa[r];
           }
           x[r] = 0.0;
           xa[r] = 0.0;
         }
       }
-      if (xa[k] > 0.0 && fabs(x[k]) / xa[k] > worst) {
+      if (xa[k] > floor_abs && fabs(x[k]) / xa[k] > worst) {
         worst = fabs(x[k]) / xa[k];
       }
       x[k] = 0.0;
       xa[k] = 0.0;
       for (UF_long p = 0; p < lclen; ++p) {
         const UF_long r = li[p];
-        if (xa[r] > 0.0 && fabs(x[r]) / xa[r] > worst) {
+        if (xa[r] > floor_abs && fabs(x[r]) / xa[r] > worst) {
           worst = fabs(x[r]) / xa[r];
         }
         x[r] = 0.0;
         xa[r] = 0.0;
+      }
+      if (worst > worst_before && worst > 0.5 &&
+          getenv("SNB_RESID_DEBUG") != NULL) {
+        fprintf(stderr,
+                "resid jump: block %ld col %ld (nk %ld) worst %.3g\n",
+                (long)block, (long)k, (long)nk, worst);
       }
     }
   }
   free(x);
   free(xa);
   return worst;
+}
+
+static inline double snb_panel_get(const snb_state *st,
+                                   const snb_block *blk, int64_t idx) {
+  return st->fp32 ? (double)blk->panels32[idx] : blk->panels[idx];
 }
 
 /* export snb panel values into a klu-layout value copy so the
@@ -1536,7 +1370,7 @@ static void snb_export(const snb_state *st, double *const *lu_out) {
       const int32_t s = blk->col2snode[k];
       const snb_snode *sn = &blk->snodes[s];
       const int32_t c = (int32_t)(k - sn->start);
-      const double *W = blk->panels + sn->panel + (size_t)c * sn->height;
+      const int64_t Wb = sn->panel + (int64_t)c * sn->height;
       UF_long *ri;
       double *rv;
       UF_long rl;
@@ -1544,7 +1378,7 @@ static void snb_export(const snb_state *st, double *const *lu_out) {
       for (UF_long p = 0; p < rl; ++p) {
         const UF_long row = ri[p];
         if (row < (UF_long)(sn->start + sn->width)) {
-          rv[p] = W[sn->uw + (row - sn->start)];
+          rv[p] = snb_panel_get(st, blk, Wb + sn->uw + (row - sn->start));
         } else {
           const int32_t *rows = blk->below_rows + sn->rows_off;
           int32_t lo = 0, hi = sn->below - 1;
@@ -1555,7 +1389,7 @@ static void snb_export(const snb_state *st, double *const *lu_out) {
             } else if (rows[mid] > (int32_t)row) {
               hi = mid - 1;
             } else {
-              rv[p] = W[sn->uw + sn->width + mid];
+              rv[p] = snb_panel_get(st, blk, Wb + sn->uw + sn->width + mid);
               break;
             }
           }
@@ -1565,7 +1399,7 @@ static void snb_export(const snb_state *st, double *const *lu_out) {
       for (UF_long p = 0; p < rl; ++p) {
         const UF_long row = ri[p];
         if (row >= (UF_long)sn->start) {
-          rv[p] = W[sn->uw + (row - sn->start)];
+          rv[p] = snb_panel_get(st, blk, Wb + sn->uw + (row - sn->start));
         } else {
           const int32_t prod = blk->col2snode[row];
           const snb_edge *edges = blk->edges + sn->edges_off;
@@ -1582,7 +1416,8 @@ static void snb_export(const snb_state *st, double *const *lu_out) {
                 } else if (sub[mid] > want) {
                   hi = mid - 1;
                 } else {
-                  rv[p] = W[edges[e2].u_start + mid];
+                  rv[p] =
+                    snb_panel_get(st, blk, Wb + edges[e2].u_start + mid);
                   break;
                 }
               }
@@ -1684,7 +1519,7 @@ static void verify_snb(const snb_state *st, verify_result *out) {
       const int32_t s = blk->col2snode[k];
       const snb_snode *sn = &blk->snodes[s];
       const int32_t c = (int32_t)(k - sn->start);
-      const double *W = blk->panels + sn->panel + (size_t)c * sn->height;
+      const int64_t Wb = sn->panel + (int64_t)c * sn->height;
       UF_long *ri;
       double *rv;
       UF_long rl;
@@ -1698,7 +1533,7 @@ static void verify_snb(const snb_state *st, verify_result *out) {
         const UF_long row = ri[p];
         double mine;
         if (row < (UF_long)(sn->start + sn->width)) {
-          mine = W[sn->uw + (row - sn->start)];
+          mine = snb_panel_get(st, blk, Wb + sn->uw + (row - sn->start));
         } else {
           const int32_t *rows = blk->below_rows + sn->rows_off;
           int32_t lo = 0, hi = sn->below - 1, at = -1;
@@ -1717,7 +1552,7 @@ static void verify_snb(const snb_state *st, verify_result *out) {
             fprintf(stderr, "verify: L row missing from panel\n");
             exit(EXIT_FAILURE);
           }
-          mine = W[sn->uw + sn->width + at];
+          mine = snb_panel_get(st, blk, Wb + sn->uw + sn->width + at);
         }
         const double r = rel_diff(mine, rv[p], cn);
         if (r > out->max_rel) out->max_rel = r;
@@ -1732,7 +1567,7 @@ static void verify_snb(const snb_state *st, verify_result *out) {
         const UF_long row = ri[p];
         double mine = 0.0;
         if (row >= (UF_long)sn->start) {
-          mine = W[sn->uw + (row - sn->start)];
+          mine = snb_panel_get(st, blk, Wb + sn->uw + (row - sn->start));
         } else {
           const int32_t prod = blk->col2snode[row];
           const snb_edge *edges = blk->edges + sn->edges_off;
@@ -1750,7 +1585,7 @@ static void verify_snb(const snb_state *st, verify_result *out) {
                 } else if (sub[mid] > want) {
                   hi = mid - 1;
                 } else {
-                  mine = W[edges[e2].u_start + mid];
+                  mine = snb_panel_get(st, blk, Wb + edges[e2].u_start + mid);
                   found = 1;
                   break;
                 }
@@ -2039,6 +1874,11 @@ int main(int argc, char **argv) {
   snb.scale = scale;
   snb.wnarrow = wnarrow;
   snb.profile = getenv("SNB_PROFILE") != NULL;
+#ifdef SNB_FP32_BUILD
+  snb.fp32 = 1;
+#else
+  snb.fp32 = 0;
+#endif
   snb.udiag = (double *)xcalloc((size_t)a.n, sizeof(double));
   snb.offx = (double *)xcalloc(
     (size_t)(symbolic->nzoff > 0 ? symbolic->nzoff : 1), sizeof(double));
@@ -2084,7 +1924,7 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   landed_refactor(&landed);
-  snb_refactor(&snb, 1);
+  snb_refactor(&snb);
   verify_result vl, vs;
   verify_landed(&landed, &vl);
   verify_snb(&snb, &vs);
@@ -2136,12 +1976,17 @@ int main(int argc, char **argv) {
     free(klu_lu);
     free(rs_unperm);
   }
-  printf("# residual klu %.3g landed %.3g snb %.3g\n", err_klu, err_landed,
-         err_snb);
+  printf("# residual klu %.3g landed %.3g snb %.3g%s\n", err_klu,
+         err_landed, err_snb, snb.fp32 ? " (snb fp32)" : "");
   const double tol = 1e-9;
-  if (err_landed > tol || err_snb > tol) {
+#ifdef SNB_FP32L_BUILD
+  const double tol_snb = 1e-4;
+#else
+  const double tol_snb = snb.fp32 ? 1e-4 : tol;
+#endif
+  if (err_landed > tol || err_snb > tol_snb) {
     fprintf(stderr, "VERIFICATION FAILED (residual tol %g, klu floor %g)\n",
-            tol, err_klu);
+            tol_snb, err_klu);
     return EXIT_FAILURE;
   }
 
@@ -2154,7 +1999,7 @@ int main(int argc, char **argv) {
     double t1 = now_seconds();
     landed_refactor(&landed);
     double t2 = now_seconds();
-    snb_refactor(&snb, 0);
+    snb_refactor(&snb);
     double t3 = now_seconds();
     const double dk = t1 - t0, dl = t2 - t1, ds = t3 - t2;
     if (dk < best_klu) best_klu = dk;
