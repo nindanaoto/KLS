@@ -87646,9 +87646,12 @@ static int kls_snb_try_refactor(kls_solver *solver,
     }
     /* single-sample timings on a busy box swing ~20-30%; only adopt
        decisive wins so a thermally unlucky incumbent sample cannot hand
-       the matrix to a genuinely slower engine */
+       the matrix to a genuinely slower engine.  0.6 keeps the measured
+       adopters (pre2 0.55, mc2depi t1 0.49, mac_econ t1 0.37) and shuts
+       out parity-class flip-flops (mac_econ t4 sits at 0.73-0.93
+       depending on machine load and regressed suite rows when it won). */
     solver->snb_decision =
-      snb_ok && snb_seconds < 0.75 * solver->snb_incumbent_seconds ? 1 : -1;
+      snb_ok && snb_seconds < 0.60 * solver->snb_incumbent_seconds ? 1 : -1;
     if (kls_snb_trace_enabled()) {
       fprintf(stderr,
               "KLS snb: acceptance incumbent %.3fms snb %.3fms t%d -> %s\n",
