@@ -504,6 +504,8 @@ typedef struct snb_edge {
   int32_t u_start;    /* target-panel local row of this edge's U rows */
   int32_t sub_count;  /* # producer columns touched by the target */
   int64_t sub_off;    /* offset into block subcols[] */
+  int64_t dst_off;    /* offset into block edge_dsts[] (producer below
+                         rows -> target panel rows, -1 = miss) */
 } snb_edge;
 
 typedef struct snb_snode {
@@ -526,9 +528,10 @@ typedef struct snb_block {
   int32_t *below_rows;         /* concatenated below-row lists */
   snb_edge *edges;             /* concatenated edge lists */
   int32_t *subcols;            /* concatenated producer-local col lists */
+  int32_t *edge_dsts;          /* precomputed per-edge scatter targets */
   double *panels;              /* all panels, column-major per snode */
   int64_t panel_doubles;
-  int32_t *map;                /* block-local row -> current target slot */
+  int32_t *map;                /* block-local row -> slot (setup/verify) */
 } snb_block;
 
 typedef struct snb_state {
@@ -552,13 +555,29 @@ typedef struct snb_state {
   int64_t scatter_miss;
   int64_t gemm_flops;
   int64_t scalar_flops;
+  /* SNB_PROFILE=1 rdtsc phase attribution */
+  int profile;
+  uint64_t phase_cycles[5]; /* scatter, narrow, trsm, gemm, getrf */
 } snb_state;
+
+static inline uint64_t snb_tsc(void) {
+#if defined(__x86_64__)
+  unsigned lo, hi;
+  __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+  return ((uint64_t)hi << 32) | lo;
+#else
+  return 0;
+#endif
+}
 
 static int cmp_uf(const void *x, const void *y) {
   const UF_long a = *(const UF_long *)x;
   const UF_long b = *(const UF_long *)y;
   return a < b ? -1 : (a > b ? 1 : 0);
 }
+
+static void snb_map_set(const snb_block *blk, const snb_snode *sn);
+static void snb_map_clear(const snb_block *blk, const snb_snode *sn);
 
 /* Greedy consecutive amalgamation with zeta padding budget.
  * Patterns must be sorted (klu_l_sort done).  Returns snode count. */
@@ -627,6 +646,7 @@ static void snb_free(snb_state *st) {
       free(blk->below_rows);
       free(blk->edges);
       free(blk->subcols);
+      free(blk->edge_dsts);
       free(blk->panels);
       free(blk->map);
     }
@@ -887,6 +907,35 @@ static void snb_setup(snb_state *st, double zeta, int wmax) {
     memset(blk->panels, 0, (size_t)panel_doubles * sizeof(double));
     blk->map = (int32_t *)xmalloc((size_t)nk * sizeof(int32_t));
     memset(blk->map, 0xff, (size_t)nk * sizeof(int32_t));
+    /* precomputed per-edge scatter destinations (round 3: the refactor
+     * map analogue) -- replaces map set/clear + random lookups in the
+     * refactor hot loop with a sequential read */
+    int64_t dsts_total = 0;
+    for (int64_t s = 0; s < ns; ++s) {
+      const snb_snode *sn = &blk->snodes[s];
+      snb_edge *edges = blk->edges + sn->edges_off;
+      for (int32_t e = 0; e < sn->edge_count; ++e) {
+        edges[e].dst_off = dsts_total;
+        dsts_total += blk->snodes[edges[e].producer].below;
+      }
+    }
+    blk->edge_dsts =
+      (int32_t *)xmalloc((size_t)(dsts_total > 0 ? dsts_total : 1) *
+                         sizeof(int32_t));
+    for (int64_t s = 0; s < ns; ++s) {
+      const snb_snode *sn = &blk->snodes[s];
+      snb_map_set(blk, sn);
+      const snb_edge *edges = blk->edges + sn->edges_off;
+      for (int32_t e = 0; e < sn->edge_count; ++e) {
+        const snb_snode *ps = &blk->snodes[edges[e].producer];
+        const int32_t *prows = blk->below_rows + ps->rows_off;
+        int32_t *dsts = blk->edge_dsts + edges[e].dst_off;
+        for (int32_t r = 0; r < ps->below; ++r) {
+          dsts[r] = blk->map[prows[r]];
+        }
+      }
+      snb_map_clear(blk, sn);
+    }
   }
   free(union_rows);
   free(merge_tmp);
@@ -992,13 +1041,14 @@ static int snb_refactor(snb_state *st, int trace) {
       continue;
     }
     double *panels = blk->panels;
-    int32_t *map = blk->map;
+    const int prof = st->profile;
     for (int64_t s = 0; s < blk->snode_count; ++s) {
       const snb_snode *sn = &blk->snodes[s];
       const int32_t w = sn->width;
       const int32_t H = sn->height;
       const int32_t uw = sn->uw;
       double *W = panels + sn->panel;
+      uint64_t t0 = prof ? snb_tsc() : 0;
       memset(W, 0, (size_t)H * (size_t)w * sizeof(double));
       /* scatter A columns (program dst = local panel index incl. col) */
       for (int32_t c = 0; c < w; ++c) {
@@ -1016,7 +1066,11 @@ static int snb_refactor(snb_state *st, int trace) {
                           : az[sp->blk[p].src];
         }
       }
-      snb_map_set(blk, sn);
+      if (prof) {
+        const uint64_t t1 = snb_tsc();
+        st->phase_cycles[0] += t1 - t0;
+        t0 = t1;
+      }
       /* edges, ascending producer */
       const snb_edge *edges = blk->edges + sn->edges_off;
       for (int32_t e = 0; e < sn->edge_count; ++e) {
@@ -1025,15 +1079,16 @@ static int snb_refactor(snb_state *st, int trace) {
         const int32_t ph = ps->below;
         const int32_t sc = edges[e].sub_count;
         const int32_t *sub = blk->subcols + edges[e].sub_off;
+        const int32_t *dsts = blk->edge_dsts + edges[e].dst_off;
         const int32_t ustart = edges[e].u_start;
         const double *Lp = panels + ps->panel;   /* producer panel */
         const int32_t pld = ps->height;
         const int32_t puw = ps->uw;
         const double *Ldiag = Lp + puw;          /* pw x pw diag block */
         const double *Lbelow = Lp + puw + pw;    /* ph x pw below block */
-        const int32_t *prows = blk->below_rows + ps->rows_off;
         if (sc < wnarrow) {
-          /* hybrid scalar path: contiguous panel-column reads */
+          /* hybrid scalar path: register u, immediate scatter, u==0
+           * skip; precomputed dsts replace the map (round 3) */
           for (int32_t c = 0; c < w; ++c) {
             double *Wc = W + (size_t)c * H;
             for (int32_t i = 0; i < sc; ++i) {
@@ -1045,28 +1100,28 @@ static int snb_refactor(snb_state *st, int trace) {
               }
               const double *lb = Lbelow + (size_t)sub[i] * pld;
               for (int32_t r = 0; r < ph; ++r) {
-                const int32_t dst = map[prows[r]];
+                const int32_t dst = dsts[r];
                 if (dst >= 0) {
                   Wc[dst] -= lb[r] * u;
-                } else if (trace) {
-                  st->scatter_miss++;
                 }
               }
             }
           }
+          if (prof) {
+            const uint64_t t1 = snb_tsc();
+            st->phase_cycles[1] += t1 - t0;
+            t0 = t1;
+          }
           continue;
         }
-        /* block path: gather UB (sc x w), TRSM over touched producer
-         * columns, writeback, GEMM, scatter */
+        /* gather UB (sc x w), TRSM restricted to the touched producer
+         * columns (untouched ones carry exact zeros), writeback */
         double *B = st->ub;                    /* column-major sc x w */
-        double *Brow = st->ub + (size_t)sc * w; /* row-major mirror */
         for (int32_t c = 0; c < w; ++c) {
           const double *Wc = W + (size_t)c * H + ustart;
           double *Bc = B + (size_t)c * sc;
           for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
         }
-        /* unit-lower TRSM restricted to the touched columns (untouched
-         * producer columns carry exact zeros for these targets) */
         for (int32_t i = 0; i < sc; ++i) {
           const double *lcol = Ldiag + (size_t)sub[i] * pld;
           for (int32_t c = 0; c < w; ++c) {
@@ -1078,17 +1133,27 @@ static int snb_refactor(snb_state *st, int trace) {
             }
           }
         }
-        /* writeback U values + row-major mirror */
         for (int32_t c = 0; c < w; ++c) {
           double *Wc = W + (size_t)c * H + ustart;
           const double *Bc = B + (size_t)c * sc;
+          for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
+        }
+        if (prof) {
+          const uint64_t t1 = snb_tsc();
+          st->phase_cycles[2] += t1 - t0;
+          t0 = t1;
+        }
+        if (ph == 0) continue;
+        /* block path: GEMM into row-major temp (long contiguous streams,
+         * independent FMAs -- measured faster than a fused accumulate),
+         * then row scatter through the precomputed dsts */
+        double *Brow = st->ub + (size_t)sc * w; /* row-major mirror */
+        for (int32_t c = 0; c < w; ++c) {
+          const double *Bc = B + (size_t)c * sc;
           for (int32_t i = 0; i < sc; ++i) {
-            Wc[i] = Bc[i];
             Brow[(size_t)i * w + c] = Bc[i];
           }
         }
-        if (ph == 0) continue;
-        /* GEMM into row-major temp: T (ph x w) = Lbelow(:,sub) x B */
         double *T = st->gemm_temp;
         {
           const double *lb = Lbelow + (size_t)sub[0] * pld;
@@ -1108,9 +1173,8 @@ static int snb_refactor(snb_state *st, int trace) {
             }
           }
         }
-        /* row scatter into the target panel */
         for (int32_t r = 0; r < ph; ++r) {
-          const int32_t dst = map[prows[r]];
+          const int32_t dst = dsts[r];
           const double *tr = T + (size_t)r * w;
           if (dst >= 0) {
             double *Wd = W + dst;
@@ -1121,6 +1185,11 @@ static int snb_refactor(snb_state *st, int trace) {
           } else if (trace) {
             st->scatter_miss++;
           }
+        }
+        if (prof) {
+          const uint64_t t1 = snb_tsc();
+          st->phase_cycles[3] += t1 - t0;
+          t0 = t1;
         }
       }
       /* fused no-pivot getrf/TRSM on rows [uw, H) */
@@ -1146,7 +1215,10 @@ static int snb_refactor(snb_state *st, int trace) {
           }
         }
       }
-      snb_map_clear(blk, sn);
+      if (prof) {
+        const uint64_t t1 = snb_tsc();
+        st->phase_cycles[4] += t1 - t0;
+      }
     }
   }
   return 1;
@@ -1726,6 +1798,7 @@ int main(int argc, char **argv) {
   const double zeta = argc > 3 ? atof(argv[3]) : 0.2;
   const int wnarrow = argc > 4 ? atoi(argv[4]) : 4;
   const int wmax = argc > 5 ? atoi(argv[5]) : 32;
+  const int postorder = argc > 6 ? atoi(argv[6]) : 0;
   const int scale = getenv("SNB_SCALE") ? atoi(getenv("SNB_SCALE")) : 2;
   const int btf = getenv("SNB_BTF") ? atoi(getenv("SNB_BTF")) : 1;
   const int ordering =
@@ -1765,6 +1838,112 @@ int main(int argc, char **argv) {
   if (!trilinos_klu_l_sort(symbolic, numeric, &common)) {
     fprintf(stderr, "sort failed\n");
     return EXIT_FAILURE;
+  }
+
+  /* Round 4: etree-postorder amalgamation.  Recompute the ordering so
+   * that every L-etree child is adjacent to its parent, then re-analyze
+   * with the composed permutations and re-factor.  Widens supernodes
+   * from the same fill pattern (nested patterns become consecutive). */
+  if (postorder) {
+    const UF_long n = a.n;
+    UF_long *puser = (UF_long *)xmalloc((size_t)n * sizeof(UF_long));
+    UF_long *quser = (UF_long *)xmalloc((size_t)n * sizeof(UF_long));
+    UF_long *parent = (UF_long *)xmalloc((size_t)n * sizeof(UF_long));
+    UF_long *first_child = (UF_long *)xmalloc((size_t)n * sizeof(UF_long));
+    UF_long *next_sibling = (UF_long *)xmalloc((size_t)n * sizeof(UF_long));
+    UF_long *stack = (UF_long *)xmalloc((size_t)n * sizeof(UF_long));
+    UF_long *perm = (UF_long *)xmalloc((size_t)n * sizeof(UF_long));
+    const int64_t old_lnz = numeric->lnz;
+    const UF_long old_nblocks = symbolic->nblocks;
+    for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+      const UF_long k1 = symbolic->R[block];
+      const UF_long k2 = symbolic->R[block + 1];
+      const UF_long nk = k2 - k1;
+      if (nk < 2 || numeric->LUbx[block] == NULL) {
+        for (UF_long k = k1; k < k2; ++k) {
+          puser[k] = numeric->Pnum[k];
+          quser[k] = symbolic->Q[k];
+        }
+        continue;
+      }
+      const UF_long *lip = numeric->Lip + k1;
+      const UF_long *llen = numeric->Llen + k1;
+      double *lu = (double *)numeric->LUbx[block];
+      for (UF_long k = 0; k < nk; ++k) {
+        UF_long *li;
+        double *lx;
+        UF_long len;
+        lu_get(lu, lip, llen, k, &li, &lx, &len);
+        parent[k] = len > 0 ? li[0] : -1; /* sorted: first below row */
+        first_child[k] = -1;
+        next_sibling[k] = -1;
+      }
+      /* child lists in increasing order (walk columns backwards) */
+      for (UF_long k = nk; k-- > 0;) {
+        const UF_long p = parent[k];
+        if (p >= 0) {
+          next_sibling[k] = first_child[p];
+          first_child[p] = k;
+        }
+      }
+      /* iterative DFS postorder over the forest, roots ascending */
+      UF_long out = 0;
+      for (UF_long root = 0; root < nk; ++root) {
+        if (parent[root] >= 0) continue;
+        UF_long top = 0;
+        stack[top] = root;
+        while (top != (UF_long)-1) {
+          const UF_long v = stack[top];
+          const UF_long child = first_child[v];
+          if (child >= 0) {
+            first_child[v] = next_sibling[child]; /* consume */
+            stack[++top] = child;
+          } else {
+            perm[out++] = v;
+            top--;
+          }
+        }
+      }
+      if (out != nk) {
+        fprintf(stderr, "postorder: block %ld covered %ld of %ld cols\n",
+                (long)block, (long)out, (long)nk);
+        return EXIT_FAILURE;
+      }
+      for (UF_long i = 0; i < nk; ++i) {
+        puser[k1 + i] = numeric->Pnum[k1 + perm[i]];
+        quser[k1 + i] = symbolic->Q[k1 + perm[i]];
+      }
+    }
+    trilinos_klu_l_free_numeric(&numeric, &common);
+    trilinos_klu_l_free_symbolic(&symbolic, &common);
+    symbolic = trilinos_klu_l_analyze_given(a.n, ap, ai, puser, quser,
+                                            &common);
+    if (symbolic == NULL) {
+      fprintf(stderr, "postorder analyze_given failed (%ld)\n",
+              (long)common.status);
+      return EXIT_FAILURE;
+    }
+    numeric = trilinos_klu_l_factor(ap, ai, a.values, symbolic, &common);
+    if (numeric == NULL) {
+      fprintf(stderr, "postorder factor failed (%ld)\n",
+              (long)common.status);
+      return EXIT_FAILURE;
+    }
+    if (!trilinos_klu_l_sort(symbolic, numeric, &common)) {
+      fprintf(stderr, "postorder sort failed\n");
+      return EXIT_FAILURE;
+    }
+    printf("# postorder: nblocks %ld -> %ld, lnz %ld -> %ld (%+.1f%%)\n",
+           (long)old_nblocks, (long)symbolic->nblocks, (long)old_lnz,
+           (long)numeric->lnz,
+           100.0 * ((double)numeric->lnz / (double)old_lnz - 1.0));
+    free(puser);
+    free(quser);
+    free(parent);
+    free(first_child);
+    free(next_sibling);
+    free(stack);
+    free(perm);
   }
   const double t_setup = now_seconds();
 
@@ -1859,6 +2038,7 @@ int main(int argc, char **argv) {
   snb.numeric = numeric;
   snb.scale = scale;
   snb.wnarrow = wnarrow;
+  snb.profile = getenv("SNB_PROFILE") != NULL;
   snb.udiag = (double *)xcalloc((size_t)a.n, sizeof(double));
   snb.offx = (double *)xcalloc(
     (size_t)(symbolic->nzoff > 0 ? symbolic->nzoff : 1), sizeof(double));
@@ -1988,6 +2168,19 @@ int main(int argc, char **argv) {
          path, best_klu, best_landed, best_snb,
          best_snb > 0 ? best_landed / best_snb : 0.0,
          best_snb > 0 ? best_klu / best_snb : 0.0);
+  if (snb.profile) {
+    uint64_t total = 0;
+    for (int i = 0; i < 5; ++i) total += snb.phase_cycles[i];
+    if (total > 0) {
+      printf("# snb phases: scatter %.1f%% narrow %.1f%% trsm %.1f%% "
+             "gemm %.1f%% getrf %.1f%%\n",
+             100.0 * (double)snb.phase_cycles[0] / (double)total,
+             100.0 * (double)snb.phase_cycles[1] / (double)total,
+             100.0 * (double)snb.phase_cycles[2] / (double)total,
+             100.0 * (double)snb.phase_cycles[3] / (double)total,
+             100.0 * (double)snb.phase_cycles[4] / (double)total);
+    }
+  }
 
   /* cleanup */
   for (UF_long k = 0; k < a.n; ++k) {
