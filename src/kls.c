@@ -85889,6 +85889,12 @@ typedef struct kls_snb_state {
   double *gemm_temp;       /* max_below x wmax scratch */
   double *rs_tmp;          /* n scratch for the Rs permute */
   int wnarrow;
+  /* snode-level schedule for the EGraph integration (rock 1): levels of
+   * the per-block snode DAGs, merged across independent blocks */
+  int64_t slevel_count;
+  int64_t *slevel_ptr;     /* level -> range in slevel_tasks */
+  int32_t *slevel_block;   /* task -> block id */
+  int32_t *slevel_snode;   /* task -> snode id within block */
 } kls_snb_state;
 
 #define KLS_SNB_WMAX 32
@@ -85921,6 +85927,9 @@ static void kls_snb_free(kls_solver *solver) {
   free(st->ub);
   free(st->gemm_temp);
   free(st->rs_tmp);
+  free(st->slevel_ptr);
+  free(st->slevel_block);
+  free(st->slevel_snode);
   free(st);
   solver->snb = NULL;
   solver->snb_decision = 0;
@@ -86463,6 +86472,86 @@ static int kls_snb_prepare(kls_solver *solver) {
     solver->snb_declined = 1;
     return 0;
   }
+  /* snode-level schedule: level(s) = 1 + max(level of producers); blocks
+   * are independent so their levels merge directly */
+  {
+    int64_t total_snodes = 0;
+    int64_t max_level = 0;
+    for (UF_long b = 0; b < st->nblocks; ++b) {
+      if (st->blocks[b].nk >= 2u) total_snodes += st->blocks[b].snode_count;
+    }
+    int32_t *levels = NULL;
+    int64_t *counts = NULL;
+    if (total_snodes > 0) {
+      levels = (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
+    }
+    if (levels != NULL) {
+      int64_t base = 0;
+      for (UF_long b = 0; b < st->nblocks; ++b) {
+        const kls_snb_block *blk = &st->blocks[b];
+        if (blk->nk < 2u) continue;
+        for (int64_t s = 0; s < blk->snode_count; ++s) {
+          const kls_snb_snode *sn = &blk->snodes[s];
+          const kls_snb_edge *edges = blk->edges + sn->edges_off;
+          int32_t lv = 0;
+          for (int32_t e = 0; e < sn->edge_count; ++e) {
+            const int32_t pl = levels[base + edges[e].producer];
+            if (pl + 1 > lv) lv = pl + 1;
+          }
+          levels[base + s] = lv;
+          if (lv > max_level) max_level = lv;
+        }
+        base += blk->snode_count;
+      }
+      st->slevel_count = max_level + 1;
+      counts = (int64_t *)calloc((size_t)st->slevel_count + 1u,
+                                 sizeof(int64_t));
+      st->slevel_ptr = (int64_t *)calloc((size_t)st->slevel_count + 1u,
+                                         sizeof(int64_t));
+      st->slevel_block =
+        (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
+      st->slevel_snode =
+        (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
+      if (counts != NULL && st->slevel_ptr != NULL &&
+          st->slevel_block != NULL && st->slevel_snode != NULL) {
+        base = 0;
+        for (UF_long b = 0; b < st->nblocks; ++b) {
+          const kls_snb_block *blk = &st->blocks[b];
+          if (blk->nk < 2u) continue;
+          for (int64_t s = 0; s < blk->snode_count; ++s) {
+            counts[levels[base + s] + 1]++;
+          }
+          base += blk->snode_count;
+        }
+        for (int64_t l = 0; l < st->slevel_count; ++l) {
+          st->slevel_ptr[l + 1] = st->slevel_ptr[l] + counts[l + 1];
+        }
+        memcpy(counts, st->slevel_ptr,
+               ((size_t)st->slevel_count + 1u) * sizeof(int64_t));
+        base = 0;
+        for (UF_long b = 0; b < st->nblocks; ++b) {
+          const kls_snb_block *blk = &st->blocks[b];
+          if (blk->nk < 2u) continue;
+          for (int64_t s = 0; s < blk->snode_count; ++s) {
+            const int64_t at = counts[levels[base + s]]++;
+            st->slevel_block[at] = (int32_t)b;
+            st->slevel_snode[at] = (int32_t)s;
+          }
+          base += blk->snode_count;
+        }
+      } else {
+        free(st->slevel_ptr);
+        free(st->slevel_block);
+        free(st->slevel_snode);
+        st->slevel_ptr = NULL;
+        st->slevel_block = NULL;
+        st->slevel_snode = NULL;
+        st->slevel_count = 0;
+      }
+      free(counts);
+      free(levels);
+    }
+  }
   solver->snb = st;
   if (kls_snb_trace_enabled()) {
     int64_t snodes = 0, cols = 0, panels = 0;
@@ -86473,8 +86562,10 @@ static int kls_snb_prepare(kls_solver *solver) {
       panels += st->blocks[b].panel_doubles;
     }
     fprintf(stderr,
-            "KLS snb: prepared %ld snodes over %ld cols, %.1f MB panels\n",
-            (long)snodes, (long)cols, (double)panels * 8.0 / 1048576.0);
+            "KLS snb: prepared %ld snodes over %ld cols, %.1f MB panels, "
+            "%ld snode levels\n",
+            (long)snodes, (long)cols, (double)panels * 8.0 / 1048576.0,
+            (long)st->slevel_count);
   }
   return 1;
 }
