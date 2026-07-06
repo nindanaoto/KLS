@@ -319,6 +319,9 @@ struct kls_solver {
   UF_long *snode_run_end;
   int snode_prepared;
   int snode_numeric_pre_sorted;
+  struct kls_snb_state *snb;
+  int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
+  int snb_declined;      /* prep declined; do not retry */
   int numeric_is_predicted;
   UF_long *pivot_nudge_pos;
   double *pivot_nudge_sigma;
@@ -20798,10 +20801,14 @@ static void free_symbolic(kls_solver *solver) {
   kls_invalidate_factor_etree_stats(solver);
 }
 
+static void kls_snb_free(kls_solver *solver);
+
 static void free_snode_panels_impl(kls_solver *solver, int line) {
   if (solver == NULL) {
     return;
   }
+  kls_snb_free(solver);
+  solver->snb_declined = 0;
   if (solver->snode_run_end != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
     fprintf(stderr, "KLS snode: panels freed from line %d\n", line);
   }
@@ -85815,6 +85822,979 @@ static int kls_serial_checked_scaled_refactor(kls_solver *solver,
                                                        0u);
 }
 
+
+/* ====================================================================== */
+/* Supernodal dense-panel refactor (task #12 port, refactor path only).   */
+/*                                                                        */
+/* Prototype: bench/supernodal_bench.c.  Amalgamated supernodes over the  */
+/* sorted numeric; column-major dense panels [exact U rows | diag block | */
+/* below-row union]; per-edge exact producer-column sublists and          */
+/* precomputed scatter destinations; per-edge UB gather + restricted      */
+/* unit-lower TRSM + GEMM into a row-major temp + row scatter; fused      */
+/* no-pivot getrf.  Values are written back into the packed KLU numeric   */
+/* through per-block position lists so solves and every downstream        */
+/* consumer see an ordinary refactored numeric.  Serial engine; adopted   */
+/* per matrix only after beating the incumbent serial path on a timed     */
+/* first call (permanent fallback otherwise).                             */
+/* ====================================================================== */
+
+typedef struct kls_snb_edge {
+  int32_t producer;
+  int32_t u_start;
+  int32_t sub_count;
+  int64_t sub_off;
+  int64_t dst_off;
+} kls_snb_edge;
+
+typedef struct kls_snb_snode {
+  int64_t start;
+  int32_t width;
+  int32_t below;
+  int64_t panel;
+  int32_t height;
+  int32_t uw;
+  int64_t rows_off;
+  int64_t edges_off;
+  int32_t edge_count;
+} kls_snb_snode;
+
+typedef struct kls_snb_block {
+  UF_long k1, nk;
+  int64_t snode_count;
+  kls_snb_snode *snodes;
+  int32_t *col2snode;
+  int32_t *below_rows;
+  kls_snb_edge *edges;
+  int32_t *subcols;
+  int32_t *edge_dsts;
+  double *panels;
+  int64_t panel_doubles;
+  int32_t *writeback;   /* per LU entry (block walk order): panel index */
+} kls_snb_block;
+
+typedef struct kls_snb_entry {
+  int64_t dst;
+  int64_t src;
+  int64_t oldrow;
+} kls_snb_entry;
+
+typedef struct kls_snb_state {
+  kls_snb_block *blocks;
+  UF_long nblocks;
+  kls_snb_entry *off;      /* off-diagonal scatter entries, Offx order */
+  kls_snb_entry *blk;      /* in-panel scatter entries */
+  int64_t *col_off_ptr;    /* per global col: range in off[] */
+  int64_t *col_blk_ptr;    /* per global col: range in blk[] */
+  double *ub;              /* wmax x wmax x 2 scratch */
+  double *gemm_temp;       /* max_below x wmax scratch */
+  double *rs_tmp;          /* n scratch for the Rs permute */
+  int wnarrow;
+} kls_snb_state;
+
+#define KLS_SNB_WMAX 32
+#define KLS_SNB_ZETA 0.2
+#define KLS_SNB_MAX_ENTRIES 150000000
+
+static void kls_snb_free(kls_solver *solver) {
+  kls_snb_state *st = solver->snb;
+  if (st == NULL) {
+    return;
+  }
+  if (st->blocks != NULL) {
+    for (UF_long b = 0; b < st->nblocks; ++b) {
+      kls_snb_block *blk = &st->blocks[b];
+      free(blk->snodes);
+      free(blk->col2snode);
+      free(blk->below_rows);
+      free(blk->edges);
+      free(blk->subcols);
+      free(blk->edge_dsts);
+      free(blk->panels);
+      free(blk->writeback);
+    }
+    free(st->blocks);
+  }
+  free(st->off);
+  free(st->blk);
+  free(st->col_off_ptr);
+  free(st->col_blk_ptr);
+  free(st->ub);
+  free(st->gemm_temp);
+  free(st->rs_tmp);
+  free(st);
+  solver->snb = NULL;
+  solver->snb_decision = 0;
+}
+
+static int kls_snb_trace_enabled(void) {
+  const char *value = getenv("KLS_TRACE_SNB");
+  return value != NULL && value[0] == '1';
+}
+
+/* Build the supernodal structures from the sorted numeric.  Returns 1 on
+ * success; on failure or decline the solver is marked so we never retry. */
+static int kls_snb_prepare(kls_solver *solver) {
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  if (solver->snb != NULL) {
+    return 1;
+  }
+  if (solver->snb_declined) {
+    return 0;
+  }
+  if (symbolic == NULL || numeric == NULL || numeric->LUbx == NULL ||
+      !solver->snode_prepared) {
+    /* the sorted-numeric prep has not run yet; retry on a later call */
+    return 0;
+  }
+  if ((double)(numeric->lnz + numeric->unz) >
+      (double)KLS_SNB_MAX_ENTRIES) {
+    solver->snb_declined = 1;
+    return 0;
+  }
+  kls_snb_state *st = (kls_snb_state *)calloc(1u, sizeof(*st));
+  if (st == NULL) {
+    solver->snb_declined = 1;
+    return 0;
+  }
+  st->wnarrow = 8;
+  {
+    const char *wn = getenv("KLS_SNB_WNARROW");
+    if (wn != NULL && wn[0] != '\0') {
+      st->wnarrow = atoi(wn);
+    }
+  }
+  st->nblocks = symbolic->nblocks;
+  st->blocks =
+    (kls_snb_block *)calloc((size_t)st->nblocks, sizeof(*st->blocks));
+  const UF_long maxblock = symbolic->maxblock;
+  UF_long *union_rows =
+    (UF_long *)malloc((size_t)maxblock * sizeof(*union_rows));
+  UF_long *merge_tmp =
+    (UF_long *)malloc((size_t)maxblock * sizeof(*merge_tmp));
+  int64_t *starts = (int64_t *)malloc((size_t)maxblock * sizeof(*starts));
+  int32_t *map = (int32_t *)malloc((size_t)maxblock * sizeof(*map));
+  unsigned char *inset = (unsigned char *)calloc((size_t)maxblock, 1u);
+  int64_t max_below = 0;
+  int ok = st->blocks != NULL && union_rows != NULL && merge_tmp != NULL &&
+           starts != NULL && map != NULL && inset != NULL;
+  if (ok) {
+    memset(map, 0xff, (size_t)maxblock * sizeof(*map));
+  }
+
+  for (UF_long block = 0; ok && block < st->nblocks; ++block) {
+    const UF_long k1 = symbolic->R[block];
+    const UF_long k2 = symbolic->R[block + 1u];
+    const UF_long nk = k2 - k1;
+    kls_snb_block *blk = &st->blocks[block];
+    blk->k1 = k1;
+    blk->nk = nk;
+    if (nk < 2u || numeric->LUbx[block] == NULL) {
+      continue;
+    }
+    const UF_long *lip = numeric->Lip + k1;
+    const UF_long *llen = numeric->Llen + k1;
+    const UF_long *uip = numeric->Uip + k1;
+    const UF_long *ulen = numeric->Ulen + k1;
+    double *lu = (double *)numeric->LUbx[block];
+
+    /* greedy zeta amalgamation over sorted L patterns */
+    blk->col2snode = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+    if (blk->col2snode == NULL) { ok = 0; break; }
+    int64_t ns = 0;
+    {
+      UF_long c = 0;
+      while (c < nk) {
+        UF_long *li; double *lx; UF_long len;
+        kls_klu_get_pointer(lu, lip, llen, c, &li, &lx, &len);
+        UF_long ulen_cur = len;
+        memcpy(union_rows, li, (size_t)len * sizeof(UF_long));
+        int64_t true_entries = len;
+        UF_long w = 1;
+        while (c + w < nk && w < (UF_long)KLS_SNB_WMAX) {
+          UF_long *li2; double *lx2; UF_long len2;
+          kls_klu_get_pointer(lu, lip, llen, c + w, &li2, &lx2, &len2);
+          UF_long i = 0, j = 0, m = 0;
+          while (i < ulen_cur && j < len2) {
+            const UF_long ri = union_rows[i];
+            const UF_long rj = li2[j];
+            const UF_long r = ri < rj ? ri : rj;
+            if (ri == r) i++;
+            if (rj == r) j++;
+            merge_tmp[m++] = r;
+          }
+          while (i < ulen_cur) merge_tmp[m++] = union_rows[i++];
+          while (j < len2) merge_tmp[m++] = li2[j++];
+          UF_long below = 0;
+          for (UF_long t = 0; t < m; ++t) {
+            if (merge_tmp[t] > c + w) below++;
+          }
+          const UF_long nw = w + 1u;
+          const double dense = (double)nw * (double)below +
+                               (double)nw * (double)(nw - 1u) / 2.0;
+          const double truth = (double)(true_entries + (int64_t)len2);
+          if (dense > (1.0 + KLS_SNB_ZETA) * truth) {
+            break;
+          }
+          memcpy(union_rows, merge_tmp, (size_t)m * sizeof(UF_long));
+          ulen_cur = m;
+          true_entries += len2;
+          w++;
+        }
+        starts[ns] = (int64_t)c;
+        for (UF_long i = 0; i < w; ++i) {
+          blk->col2snode[c + i] = (int32_t)ns;
+        }
+        ns++;
+        c += w;
+      }
+    }
+    blk->snode_count = ns;
+    blk->snodes =
+      (kls_snb_snode *)calloc((size_t)ns, sizeof(*blk->snodes));
+    if (blk->snodes == NULL) { ok = 0; break; }
+    for (int64_t s = 0; s < ns; ++s) {
+      blk->snodes[s].start = starts[s];
+      const int64_t end = s + 1 < ns ? starts[s + 1] : (int64_t)nk;
+      blk->snodes[s].width = (int32_t)(end - starts[s]);
+    }
+
+    /* below-row unions */
+    int64_t rows_total = 0;
+    for (int pass = 0; pass < 2 && ok; ++pass) {
+      int64_t cursor = 0;
+      for (int64_t s = 0; s < ns; ++s) {
+        kls_snb_snode *sn = &blk->snodes[s];
+        const int64_t end = sn->start + sn->width;
+        UF_long ulen_cur = 0;
+        for (int64_t c = sn->start; c < end; ++c) {
+          UF_long *li; double *lx; UF_long len;
+          kls_klu_get_pointer(lu, lip, llen, c, &li, &lx, &len);
+          UF_long i = 0, j = 0, m = 0;
+          while (i < ulen_cur && j < len) {
+            const UF_long ri = union_rows[i];
+            const UF_long rj = li[j];
+            const UF_long r = ri < rj ? ri : rj;
+            if (ri == r) i++;
+            if (rj == r) j++;
+            merge_tmp[m++] = r;
+          }
+          while (i < ulen_cur) merge_tmp[m++] = union_rows[i++];
+          while (j < len) merge_tmp[m++] = li[j++];
+          memcpy(union_rows, merge_tmp, (size_t)m * sizeof(UF_long));
+          ulen_cur = m;
+        }
+        int64_t below = 0;
+        for (UF_long t = 0; t < ulen_cur; ++t) {
+          if (union_rows[t] >= (UF_long)end) {
+            if (pass == 1) {
+              blk->below_rows[cursor + below] = (int32_t)union_rows[t];
+            }
+            below++;
+          }
+        }
+        if (pass == 0) {
+          sn->below = (int32_t)below;
+          sn->rows_off = rows_total;
+          rows_total += below;
+          if (below > max_below) max_below = below;
+        }
+        cursor += below;
+      }
+      if (pass == 0) {
+        blk->below_rows = (int32_t *)malloc(
+          (size_t)(rows_total > 0 ? rows_total : 1) * sizeof(int32_t));
+        if (blk->below_rows == NULL) { ok = 0; }
+      }
+    }
+    if (!ok) break;
+
+    /* exact U-row unions -> edges with producer-column sublists */
+    int64_t edges_total = 0;
+    int64_t subs_total = 0;
+    for (int pass = 0; pass < 2 && ok; ++pass) {
+      int64_t sub_cursor = 0;
+      int64_t edge_cursor = 0;
+      for (int64_t s = 0; s < ns; ++s) {
+        kls_snb_snode *sn = &blk->snodes[s];
+        const int64_t end = sn->start + sn->width;
+        int64_t m = 0;
+        for (int64_t c = sn->start; c < end; ++c) {
+          UF_long *ui; double *ux; UF_long len;
+          kls_klu_get_pointer(lu, uip, ulen, c, &ui, &ux, &len);
+          for (UF_long p = 0; p < len; ++p) {
+            const UF_long j = ui[p];
+            if (j >= (UF_long)sn->start) continue;
+            if (!inset[j]) {
+              inset[j] = 1;
+              union_rows[m++] = j;
+            }
+          }
+        }
+        for (int64_t t = 0; t < m; ++t) inset[union_rows[t]] = 0;
+        if (m > 1) {
+          int sorted = 1;
+          for (int64_t t = 1; t < m; ++t) {
+            if (union_rows[t - 1] > union_rows[t]) { sorted = 0; break; }
+          }
+          if (!sorted) {
+            for (int64_t i2 = 1; i2 < m; ++i2) {
+              const UF_long v = union_rows[i2];
+              int64_t j2 = i2 - 1;
+              while (j2 >= 0 && union_rows[j2] > v) {
+                union_rows[j2 + 1] = union_rows[j2];
+                j2--;
+              }
+              union_rows[j2 + 1] = v;
+            }
+          }
+        }
+        int64_t cnt = 0;
+        int32_t last_prod = -1;
+        for (int64_t t = 0; t < m; ++t) {
+          const int32_t prod = blk->col2snode[union_rows[t]];
+          if (prod != last_prod) {
+            if (pass == 1) {
+              kls_snb_edge *e = &blk->edges[edge_cursor + cnt];
+              e->producer = prod;
+              e->u_start = (int32_t)t;
+              e->sub_count = 0;
+              e->sub_off = sub_cursor + t;
+            }
+            cnt++;
+            last_prod = prod;
+          }
+          if (pass == 1) {
+            blk->edges[edge_cursor + cnt - 1].sub_count++;
+            blk->subcols[sub_cursor + t] =
+              (int32_t)(union_rows[t] - blk->snodes[prod].start);
+          }
+        }
+        if (pass == 0) {
+          sn->edge_count = (int32_t)cnt;
+          sn->edges_off = edges_total;
+          edges_total += cnt;
+          subs_total += m;
+          sn->uw = (int32_t)m;
+        }
+        sub_cursor += m;
+        edge_cursor += cnt;
+      }
+      if (pass == 0) {
+        blk->edges = (kls_snb_edge *)malloc(
+          (size_t)(edges_total > 0 ? edges_total : 1) * sizeof(kls_snb_edge));
+        blk->subcols = (int32_t *)malloc(
+          (size_t)(subs_total > 0 ? subs_total : 1) * sizeof(int32_t));
+        if (blk->edges == NULL || blk->subcols == NULL) { ok = 0; }
+      }
+    }
+    if (!ok) break;
+
+    /* panel layout */
+    int64_t panel_doubles = 0;
+    for (int64_t s = 0; s < ns; ++s) {
+      kls_snb_snode *sn = &blk->snodes[s];
+      sn->height = sn->uw + sn->width + sn->below;
+      sn->panel = panel_doubles;
+      panel_doubles += (int64_t)sn->height * sn->width;
+    }
+    if (panel_doubles > KLS_SNB_MAX_ENTRIES) { ok = 0; break; }
+    blk->panel_doubles = panel_doubles;
+    blk->panels = (double *)malloc((size_t)panel_doubles * sizeof(double));
+    if (blk->panels == NULL) { ok = 0; break; }
+    memset(blk->panels, 0, (size_t)panel_doubles * sizeof(double));
+
+    /* per-edge scatter destinations via a transient row map */
+    int64_t dsts_total = 0;
+    for (int64_t s = 0; s < ns; ++s) {
+      kls_snb_snode *sn = &blk->snodes[s];
+      kls_snb_edge *edges = blk->edges + sn->edges_off;
+      for (int32_t e = 0; e < sn->edge_count; ++e) {
+        edges[e].dst_off = dsts_total;
+        dsts_total += blk->snodes[edges[e].producer].below;
+      }
+    }
+    blk->edge_dsts = (int32_t *)malloc(
+      (size_t)(dsts_total > 0 ? dsts_total : 1) * sizeof(int32_t));
+    if (blk->edge_dsts == NULL) { ok = 0; break; }
+    for (int64_t s = 0; s < ns; ++s) {
+      kls_snb_snode *sn = &blk->snodes[s];
+      const kls_snb_edge *edges = blk->edges + sn->edges_off;
+      for (int32_t e = 0; e < sn->edge_count; ++e) {
+        const kls_snb_snode *ps = &blk->snodes[edges[e].producer];
+        const int32_t *sub = blk->subcols + edges[e].sub_off;
+        for (int32_t i = 0; i < edges[e].sub_count; ++i) {
+          map[ps->start + sub[i]] = edges[e].u_start + i;
+        }
+      }
+      for (int32_t i = 0; i < sn->width; ++i) {
+        map[sn->start + i] = sn->uw + i;
+      }
+      {
+        const int32_t *rows = blk->below_rows + sn->rows_off;
+        for (int32_t i = 0; i < sn->below; ++i) {
+          map[rows[i]] = sn->uw + sn->width + i;
+        }
+      }
+      for (int32_t e = 0; e < sn->edge_count; ++e) {
+        const kls_snb_snode *ps = &blk->snodes[edges[e].producer];
+        const int32_t *prows = blk->below_rows + ps->rows_off;
+        int32_t *dsts = blk->edge_dsts + edges[e].dst_off;
+        for (int32_t r = 0; r < ps->below; ++r) {
+          dsts[r] = map[prows[r]];
+        }
+      }
+      /* clear */
+      for (int32_t e = 0; e < sn->edge_count; ++e) {
+        const kls_snb_snode *ps = &blk->snodes[edges[e].producer];
+        const int32_t *sub = blk->subcols + edges[e].sub_off;
+        for (int32_t i = 0; i < edges[e].sub_count; ++i) {
+          map[ps->start + sub[i]] = -1;
+        }
+      }
+      for (int32_t i = 0; i < sn->width; ++i) map[sn->start + i] = -1;
+      {
+        const int32_t *rows = blk->below_rows + sn->rows_off;
+        for (int32_t i = 0; i < sn->below; ++i) map[rows[i]] = -1;
+      }
+    }
+
+    /* writeback lists: for each column, panel index per packed L then U
+     * entry (block walk order matches the refactor's writeback loop) */
+    {
+      int64_t wb_total = 0;
+      for (UF_long k = 0; k < nk; ++k) {
+        wb_total += llen[k] + ulen[k];
+      }
+      blk->writeback = (int32_t *)malloc(
+        (size_t)(wb_total > 0 ? wb_total : 1) * sizeof(int32_t));
+      if (blk->writeback == NULL) { ok = 0; break; }
+      int64_t wb = 0;
+      for (UF_long k = 0; ok && k < nk; ++k) {
+        const int32_t s = blk->col2snode[k];
+        const kls_snb_snode *sn = &blk->snodes[s];
+        const int32_t c = (int32_t)(k - sn->start);
+        UF_long *ri; double *rv; UF_long rl;
+        kls_klu_get_pointer(lu, lip, llen, k, &ri, &rv, &rl);
+        for (UF_long p = 0; p < rl; ++p) {
+          const UF_long row = ri[p];
+          int32_t lr = -1;
+          if (row < (UF_long)(sn->start + sn->width)) {
+            lr = sn->uw + (int32_t)(row - sn->start);
+          } else {
+            const int32_t *rows = blk->below_rows + sn->rows_off;
+            int32_t lo = 0, hi = sn->below - 1;
+            while (lo <= hi) {
+              const int32_t mid = (lo + hi) >> 1;
+              if (rows[mid] < (int32_t)row) lo = mid + 1;
+              else if (rows[mid] > (int32_t)row) hi = mid - 1;
+              else { lr = sn->uw + sn->width + mid; break; }
+            }
+          }
+          if (lr < 0) { ok = 0; break; }
+          blk->writeback[wb++] = (int32_t)((int64_t)c * sn->height + lr);
+        }
+        kls_klu_get_pointer(lu, uip, ulen, k, &ri, &rv, &rl);
+        for (UF_long p = 0; ok && p < rl; ++p) {
+          const UF_long row = ri[p];
+          int32_t lr = -1;
+          if (row >= (UF_long)sn->start) {
+            lr = sn->uw + (int32_t)(row - sn->start);
+          } else {
+            const int32_t prod = blk->col2snode[row];
+            const kls_snb_edge *edges = blk->edges + sn->edges_off;
+            for (int32_t e2 = 0; e2 < sn->edge_count; ++e2) {
+              if (edges[e2].producer == prod) {
+                const int32_t *sub = blk->subcols + edges[e2].sub_off;
+                const int32_t want = (int32_t)(row - blk->snodes[prod].start);
+                int32_t lo = 0, hi = edges[e2].sub_count - 1;
+                while (lo <= hi) {
+                  const int32_t mid = (lo + hi) >> 1;
+                  if (sub[mid] < want) lo = mid + 1;
+                  else if (sub[mid] > want) hi = mid - 1;
+                  else { lr = edges[e2].u_start + mid; break; }
+                }
+                break;
+              }
+            }
+          }
+          if (lr < 0) { ok = 0; break; }
+          blk->writeback[wb++] = (int32_t)((int64_t)c * sn->height + lr);
+        }
+      }
+    }
+  }
+
+  /* A-scatter program (klu_l_refactor walk order) */
+  if (ok) {
+    const UF_long n = symbolic->n;
+    const UF_long nzoff = symbolic->nzoff;
+    const UF_long *pinv = numeric->Pinv;
+    int64_t off_count = 0;
+    int64_t blk_count = 0;
+    {
+      int64_t poff = 0;
+      for (UF_long block = 0; block < st->nblocks; ++block) {
+        const UF_long k1 = symbolic->R[block];
+        const UF_long k2 = symbolic->R[block + 1u];
+        for (UF_long k = k1; k < k2; ++k) {
+          const UF_long oldcol = symbolic->Q[k];
+          for (UF_long p = solver->col_ptr[oldcol];
+               p < solver->col_ptr[oldcol + 1u]; ++p) {
+            const UF_long newrow = pinv[solver->row_idx[p]] - k1;
+            if (newrow < 0 && poff < (int64_t)nzoff) {
+              off_count++;
+              poff++;
+            } else {
+              blk_count++;
+            }
+          }
+        }
+      }
+    }
+    st->off = (kls_snb_entry *)malloc(
+      (size_t)(off_count > 0 ? off_count : 1) * sizeof(kls_snb_entry));
+    st->blk = (kls_snb_entry *)malloc(
+      (size_t)(blk_count > 0 ? blk_count : 1) * sizeof(kls_snb_entry));
+    st->col_off_ptr = (int64_t *)calloc((size_t)n + 1u, sizeof(int64_t));
+    st->col_blk_ptr = (int64_t *)calloc((size_t)n + 1u, sizeof(int64_t));
+    ok = st->off != NULL && st->blk != NULL && st->col_off_ptr != NULL &&
+         st->col_blk_ptr != NULL;
+    if (ok) {
+      int64_t poff = 0;
+      int64_t pblk = 0;
+      for (UF_long block = 0; ok && block < st->nblocks; ++block) {
+        const UF_long k1 = symbolic->R[block];
+        const UF_long k2 = symbolic->R[block + 1u];
+        const kls_snb_block *blk = &st->blocks[block];
+        for (UF_long k = k1; ok && k < k2; ++k) {
+          st->col_off_ptr[k] = poff;
+          st->col_blk_ptr[k] = pblk;
+          const UF_long oldcol = symbolic->Q[k];
+          for (UF_long p = solver->col_ptr[oldcol];
+               p < solver->col_ptr[oldcol + 1u]; ++p) {
+            const UF_long oldrow = solver->row_idx[p];
+            const UF_long newrow = pinv[oldrow] - k1;
+            if (newrow < 0 && poff < (int64_t)nzoff) {
+              st->off[poff].dst = poff;
+              st->off[poff].src = (int64_t)p;
+              st->off[poff].oldrow = (int64_t)oldrow;
+              poff++;
+              continue;
+            }
+            int64_t dst = 0;
+            if (blk->nk >= 2u) {
+              const int32_t s = blk->col2snode[k - k1];
+              const kls_snb_snode *sn = &blk->snodes[s];
+              const int32_t c = (int32_t)(k - k1 - sn->start);
+              int32_t lr = -1;
+              if (newrow >= sn->start &&
+                  newrow < sn->start + sn->width) {
+                lr = sn->uw + (int32_t)(newrow - sn->start);
+              } else if (newrow >= sn->start + sn->width) {
+                const int32_t *rows = blk->below_rows + sn->rows_off;
+                int32_t lo = 0, hi = sn->below - 1;
+                while (lo <= hi) {
+                  const int32_t mid = (lo + hi) >> 1;
+                  if (rows[mid] < (int32_t)newrow) lo = mid + 1;
+                  else if (rows[mid] > (int32_t)newrow) hi = mid - 1;
+                  else { lr = sn->uw + sn->width + mid; break; }
+                }
+              } else {
+                const int32_t prod = blk->col2snode[newrow];
+                const kls_snb_edge *edges = blk->edges + sn->edges_off;
+                for (int32_t e2 = 0; e2 < sn->edge_count; ++e2) {
+                  if (edges[e2].producer == prod) {
+                    const int32_t *sub = blk->subcols + edges[e2].sub_off;
+                    const int32_t want =
+                      (int32_t)(newrow - blk->snodes[prod].start);
+                    int32_t lo = 0, hi = edges[e2].sub_count - 1;
+                    while (lo <= hi) {
+                      const int32_t mid = (lo + hi) >> 1;
+                      if (sub[mid] < want) lo = mid + 1;
+                      else if (sub[mid] > want) hi = mid - 1;
+                      else { lr = edges[e2].u_start + mid; break; }
+                    }
+                    break;
+                  }
+                }
+              }
+              if (lr < 0) { ok = 0; break; }
+              dst = sn->panel + (int64_t)c * sn->height + lr;
+            }
+            st->blk[pblk].dst = dst;
+            st->blk[pblk].src = (int64_t)p;
+            st->blk[pblk].oldrow = (int64_t)oldrow;
+            pblk++;
+          }
+        }
+      }
+      st->col_off_ptr[n] = poff;
+      st->col_blk_ptr[n] = pblk;
+    }
+  }
+
+  if (ok) {
+    int64_t gmax_below = max_below > 0 ? max_below : 1;
+    st->ub = (double *)malloc(2u * (size_t)KLS_SNB_WMAX *
+                              (size_t)KLS_SNB_WMAX * sizeof(double));
+    st->gemm_temp = (double *)malloc((size_t)gmax_below *
+                                     (size_t)KLS_SNB_WMAX * sizeof(double));
+    st->rs_tmp = (double *)malloc((size_t)symbolic->n * sizeof(double));
+    ok = st->ub != NULL && st->gemm_temp != NULL && st->rs_tmp != NULL;
+  }
+
+  free(union_rows);
+  free(merge_tmp);
+  free(starts);
+  free(map);
+  free(inset);
+  if (!ok) {
+    solver->snb = st;
+    kls_snb_free(solver);
+    solver->snb_declined = 1;
+    return 0;
+  }
+  solver->snb = st;
+  if (kls_snb_trace_enabled()) {
+    int64_t snodes = 0, cols = 0, panels = 0;
+    for (UF_long b = 0; b < st->nblocks; ++b) {
+      if (st->blocks[b].nk < 2u) continue;
+      snodes += st->blocks[b].snode_count;
+      cols += st->blocks[b].nk;
+      panels += st->blocks[b].panel_doubles;
+    }
+    fprintf(stderr,
+            "KLS snb: prepared %ld snodes over %ld cols, %.1f MB panels\n",
+            (long)snodes, (long)cols, (double)panels * 8.0 / 1048576.0);
+  }
+  return 1;
+}
+
+/* Serial supernodal refactor with klu_l_refactor semantics: recompute Rs
+ * when scaling, fill Offx in walk order, record the first singular pivot,
+ * permute Rs to pivot order at the end, and write the packed numeric. */
+static UF_long kls_snb_refactor(kls_solver *solver,
+                                const double *numeric_values) {
+  kls_snb_state *st = solver->snb;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  trilinos_klu_l_common *common = &solver->common;
+  const int scale = (int)common->scale;
+  common->status = TRILINOS_KLU_OK;
+  common->numerical_rank = KLS_KLU_EMPTY;
+  common->singular_col = KLS_KLU_EMPTY;
+
+  if (scale > 0) {
+    if (numeric->Rs == NULL ||
+        !trilinos_klu_l_scale((UF_long)scale, solver->n, solver->col_ptr,
+                              solver->row_idx, (double *)numeric_values,
+                              numeric->Rs, NULL, common)) {
+      return 0;
+    }
+  }
+  const double *rs = numeric->Rs;
+  const double *az = numeric_values;
+  double *offx = (double *)numeric->Offx;
+  double *udiag = (double *)numeric->Udiag;
+  const int wnarrow = st->wnarrow;
+
+  for (UF_long block = 0; block < st->nblocks; ++block) {
+    kls_snb_block *blk = &st->blocks[block];
+    const UF_long k1 = blk->k1;
+    const UF_long nk = blk->nk;
+    if (nk == 1u) {
+      double sv = 0.0;
+      for (int64_t p = st->col_off_ptr[k1]; p < st->col_off_ptr[k1 + 1u];
+           ++p) {
+        offx[st->off[p].dst] =
+          scale > 0 ? az[st->off[p].src] / rs[st->off[p].oldrow]
+                    : az[st->off[p].src];
+      }
+      for (int64_t p = st->col_blk_ptr[k1]; p < st->col_blk_ptr[k1 + 1u];
+           ++p) {
+        sv = scale > 0 ? az[st->blk[p].src] / rs[st->blk[p].oldrow]
+                       : az[st->blk[p].src];
+      }
+      udiag[k1] = sv;
+      if (sv == 0.0 && common->numerical_rank == KLS_KLU_EMPTY) {
+        common->status = TRILINOS_KLU_SINGULAR;
+        common->numerical_rank = k1;
+        common->singular_col = symbolic->Q[k1];
+        if (common->halt_if_singular) return 0;
+      }
+      continue;
+    }
+    double *panels = blk->panels;
+    for (int64_t s = 0; s < blk->snode_count; ++s) {
+      const kls_snb_snode *sn = &blk->snodes[s];
+      const int32_t w = sn->width;
+      const int32_t H = sn->height;
+      const int32_t uw = sn->uw;
+      double *W = panels + sn->panel;
+      memset(W, 0, (size_t)H * (size_t)w * sizeof(double));
+      for (int32_t c = 0; c < w; ++c) {
+        const UF_long gk = k1 + sn->start + c;
+        for (int64_t p = st->col_off_ptr[gk]; p < st->col_off_ptr[gk + 1u];
+             ++p) {
+          offx[st->off[p].dst] =
+            scale > 0 ? az[st->off[p].src] / rs[st->off[p].oldrow]
+                      : az[st->off[p].src];
+        }
+        for (int64_t p = st->col_blk_ptr[gk]; p < st->col_blk_ptr[gk + 1u];
+             ++p) {
+          panels[st->blk[p].dst] =
+            scale > 0 ? az[st->blk[p].src] / rs[st->blk[p].oldrow]
+                      : az[st->blk[p].src];
+        }
+      }
+      const kls_snb_edge *edges = blk->edges + sn->edges_off;
+      for (int32_t e = 0; e < sn->edge_count; ++e) {
+        const kls_snb_snode *ps = &blk->snodes[edges[e].producer];
+        const int32_t pw = ps->width;
+        const int32_t ph = ps->below;
+        const int32_t sc = edges[e].sub_count;
+        const int32_t *sub = blk->subcols + edges[e].sub_off;
+        const int32_t *dsts = blk->edge_dsts + edges[e].dst_off;
+        const int32_t ustart = edges[e].u_start;
+        const double *Lp = panels + ps->panel;
+        const int32_t pld = ps->height;
+        const double *Ldiag = Lp + ps->uw;
+        const double *Lbelow = Lp + ps->uw + pw;
+        if (sc < wnarrow) {
+          for (int32_t c = 0; c < w; ++c) {
+            double *Wc = W + (size_t)c * H;
+            for (int32_t i = 0; i < sc; ++i) {
+              const double u = Wc[ustart + i];
+              if (u == 0.0) continue;
+              const double *lcol = Ldiag + (size_t)sub[i] * pld;
+              for (int32_t i2 = i + 1; i2 < sc; ++i2) {
+                Wc[ustart + i2] -= lcol[sub[i2]] * u;
+              }
+              const double *lb = Lbelow + (size_t)sub[i] * pld;
+              for (int32_t r = 0; r < ph; ++r) {
+                const int32_t dst = dsts[r];
+                if (dst >= 0) {
+                  Wc[dst] -= lb[r] * u;
+                }
+              }
+            }
+          }
+          continue;
+        }
+        double *B = st->ub;
+        for (int32_t c = 0; c < w; ++c) {
+          const double *Wc = W + (size_t)c * H + ustart;
+          double *Bc = B + (size_t)c * sc;
+          for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
+        }
+        for (int32_t i = 0; i < sc; ++i) {
+          const double *lcol = Ldiag + (size_t)sub[i] * pld;
+          for (int32_t c = 0; c < w; ++c) {
+            double *Bc = B + (size_t)c * sc;
+            const double u = Bc[i];
+            if (u == 0.0) continue;
+            for (int32_t i2 = i + 1; i2 < sc; ++i2) {
+              Bc[i2] -= lcol[sub[i2]] * u;
+            }
+          }
+        }
+        for (int32_t c = 0; c < w; ++c) {
+          double *Wc = W + (size_t)c * H + ustart;
+          const double *Bc = B + (size_t)c * sc;
+          for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
+        }
+        if (ph == 0) continue;
+        double *Brow = st->ub + (size_t)sc * w;
+        for (int32_t c = 0; c < w; ++c) {
+          const double *Bc = B + (size_t)c * sc;
+          for (int32_t i = 0; i < sc; ++i) {
+            Brow[(size_t)i * w + c] = Bc[i];
+          }
+        }
+        double *T = st->gemm_temp;
+        {
+          const double *lb = Lbelow + (size_t)sub[0] * pld;
+          const double *br = Brow;
+          for (int32_t r = 0; r < ph; ++r) {
+            const double l = lb[r];
+            double *tr = T + (size_t)r * w;
+            for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
+          }
+          for (int32_t i = 1; i < sc; ++i) {
+            const double *lbi = Lbelow + (size_t)sub[i] * pld;
+            const double *bri = Brow + (size_t)i * w;
+            for (int32_t r = 0; r < ph; ++r) {
+              const double l = lbi[r];
+              double *tr = T + (size_t)r * w;
+              for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
+            }
+          }
+        }
+        for (int32_t r = 0; r < ph; ++r) {
+          const int32_t dst = dsts[r];
+          const double *tr = T + (size_t)r * w;
+          if (dst >= 0) {
+            double *Wd = W + dst;
+            for (int32_t c = 0; c < w; ++c) {
+              Wd[(size_t)c * H] -= tr[c];
+            }
+          }
+        }
+      }
+      /* fused no-pivot getrf/TRSM */
+      {
+        double *diag = W + uw;
+        for (int32_t i = 0; i < w; ++i) {
+          double *ci = diag + (size_t)i * H;
+          const double pivot = ci[i];
+          udiag[k1 + sn->start + i] = pivot;
+          if (pivot == 0.0) {
+            if (common->numerical_rank == KLS_KLU_EMPTY) {
+              common->status = TRILINOS_KLU_SINGULAR;
+              common->numerical_rank = k1 + sn->start + i;
+              common->singular_col = symbolic->Q[k1 + sn->start + i];
+            }
+            if (common->halt_if_singular) return 0;
+          }
+          const int32_t hrem = H - uw - i - 1;
+          double *lsub = ci + i + 1;
+          for (int32_t r = 0; r < hrem; ++r) lsub[r] /= pivot;
+          for (int32_t j = i + 1; j < w; ++j) {
+            double *cj = diag + (size_t)j * H;
+            const double u = cj[i];
+            if (u == 0.0) continue;
+            double *dstv = cj + i + 1;
+            for (int32_t r = 0; r < hrem; ++r) {
+              dstv[r] -= lsub[r] * u;
+            }
+          }
+        }
+      }
+    }
+    /* write the packed numeric back (values only; patterns unchanged) */
+    {
+      const UF_long *lip = numeric->Lip + k1;
+      const UF_long *llen = numeric->Llen + k1;
+      const UF_long *uip = numeric->Uip + k1;
+      const UF_long *ulen = numeric->Ulen + k1;
+      double *lu = (double *)numeric->LUbx[block];
+      const int32_t *wb = blk->writeback;
+      int64_t wc = 0;
+      for (UF_long k = 0; k < nk; ++k) {
+        const int32_t s = blk->col2snode[k];
+        const double *base = panels + blk->snodes[s].panel;
+        UF_long *ri; double *rv; UF_long rl;
+        kls_klu_get_pointer(lu, lip, llen, k, &ri, &rv, &rl);
+        for (UF_long p = 0; p < rl; ++p) {
+          rv[p] = base[wb[wc++]];
+        }
+        kls_klu_get_pointer(lu, uip, ulen, k, &ri, &rv, &rl);
+        for (UF_long p = 0; p < rl; ++p) {
+          rv[p] = base[wb[wc++]];
+        }
+      }
+    }
+  }
+
+  if (scale > 0) {
+    double *rs_tmp = st->rs_tmp;
+    for (UF_long k = 0; k < solver->n; ++k) {
+      rs_tmp[k] = numeric->Rs[numeric->Pnum[k]];
+    }
+    memcpy(numeric->Rs, rs_tmp, (size_t)solver->n * sizeof(double));
+  }
+  return 1;
+}
+
+static int kls_snb_env_disabled(void) {
+  const char *value = getenv("KLS_DISABLE_SNB_REFACTOR");
+  return value != NULL && value[0] == '1';
+}
+
+/* Try the supernodal refactor.  Returns 1 when it handled the call (with
+ * *ok_out as the refactor status), 0 when the caller should proceed with
+ * the incumbent path.  On the first eligible call the incumbent serial
+ * path runs first and both are timed; the engine is adopted per matrix
+ * only on a clear win. */
+static int kls_snb_try_refactor(kls_solver *solver,
+                                const double *numeric_values,
+                                int check_pivots,
+                                UF_long *ok_out) {
+  if (check_pivots || kls_snb_env_disabled() ||
+      solver->fp32_decision > 0 || solver->numeric == NULL ||
+      solver->symbolic == NULL) {
+    return 0;
+  }
+  if (solver->snb_decision < 0) {
+    return 0;
+  }
+  if (solver->snb == NULL) {
+    if (!kls_snb_prepare(solver)) {
+      if (solver->snb_declined) {
+        solver->snb_decision = -1;
+      }
+      return 0;
+    }
+  }
+  if (solver->snb_decision > 0) {
+    *ok_out = kls_snb_refactor(solver, numeric_values);
+    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_SNB);
+    return 1;
+  }
+  /* undecided: time the incumbent, then the supernodal engine (its
+     writeback leaves the numeric it produced, so its values win) */
+  const double t0 = kls_now_seconds();
+  const int mapped =
+    kls_mapped_refactor(solver, (double *)numeric_values, 0);
+  double landed_seconds;
+  if (mapped < 0) {
+    const UF_long klu_ok =
+      trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
+                              (double *)numeric_values, solver->symbolic,
+                              solver->numeric, &solver->common);
+    landed_seconds = kls_now_seconds() - t0;
+    if (!klu_ok) {
+      /* incumbent failed; report through the normal path untimed */
+      *ok_out = klu_ok;
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
+      solver->snb_decision = -1;
+      return 1;
+    }
+  } else {
+    landed_seconds = kls_now_seconds() - t0;
+    if (!mapped) {
+      *ok_out = 0;
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
+      solver->snb_decision = -1;
+      return 1;
+    }
+  }
+  const double t1 = kls_now_seconds();
+  const UF_long snb_ok = kls_snb_refactor(solver, numeric_values);
+  const double snb_seconds = kls_now_seconds() - t1;
+  if (!snb_ok) {
+    solver->snb_decision = -1;
+    *ok_out = snb_ok;
+    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_SNB);
+    return 1;
+  }
+  solver->snb_decision = snb_seconds < 0.97 * landed_seconds ? 1 : -1;
+  if (kls_snb_trace_enabled()) {
+    fprintf(stderr,
+            "KLS snb: acceptance landed %.3fms snb %.3fms -> %s\n",
+            landed_seconds * 1e3, snb_seconds * 1e3,
+            solver->snb_decision > 0 ? "adopted" : "rejected");
+  }
+  if (solver->snb_decision < 0) {
+    kls_snb_free(solver);
+    solver->snb_declined = 1;
+  }
+  *ok_out = snb_ok;
+  kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_SNB);
+  return 1;
+}
+
 static int kls_snode_panel_env_disabled(void) {
   const char *value = getenv("KLS_DISABLE_SNODE_PANEL_REFACTOR");
   return value != NULL && value[0] == '1';
@@ -87089,6 +88069,13 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
        measured four-thread crossover on the paper set sits near 1e8-2e8
        flops.  Prefer the serial mapped refactor when it is eligible and
        keep the EGraph for shapes it cannot cover. */
+    {
+      UF_long snb_ok = 0;
+      if (kls_snb_try_refactor(solver, numeric_values, check_pivots,
+                               &snb_ok)) {
+        return snb_ok;
+      }
+    }
     const int mapped = kls_mapped_refactor(solver, numeric_values,
                                            check_pivots);
     if (mapped >= 0) {
@@ -87174,6 +88161,13 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   }
 
   if (!kls_parallel_refactor_is_eligible(solver)) {
+    {
+      UF_long snb_ok = 0;
+      if (kls_snb_try_refactor(solver, numeric_values, check_pivots,
+                               &snb_ok)) {
+        return snb_ok;
+      }
+    }
     const int mapped = kls_mapped_refactor(solver, numeric_values, check_pivots);
     if (mapped >= 0) {
       kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
@@ -87241,6 +88235,13 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     thread_count = (int)symbolic->nblocks;
   }
   if (thread_count < 2) {
+    {
+      UF_long snb_ok = 0;
+      if (kls_snb_try_refactor(solver, numeric_values, check_pivots,
+                               &snb_ok)) {
+        return snb_ok;
+      }
+    }
     const UF_long ok =
       trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
                               numeric_values, solver->symbolic,
@@ -115297,6 +116298,7 @@ const char *kls_refactor_path_name(kls_refactor_path path) {
     case KLS_REFACTOR_PATH_MAPPED: return "mapped";
     case KLS_REFACTOR_PATH_POOL: return "pool";
     case KLS_REFACTOR_PATH_KLU: return "klu_refactor";
+    case KLS_REFACTOR_PATH_SNB: return "snb";
     default: return "unknown";
   }
 }
