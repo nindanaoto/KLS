@@ -85900,6 +85900,7 @@ typedef struct kls_snb_state {
   int nworkers;
   double *rs_tmp;          /* n scratch for the Rs permute */
   int wnarrow;
+  int wmax;
   /* snode-level schedule for the EGraph integration (rock 1): levels of
    * the per-block snode DAGs, merged across independent blocks */
   int64_t slevel_count;
@@ -86003,6 +86004,16 @@ static int kls_snb_prepare(kls_solver *solver) {
       st->wnarrow = atoi(wn);
     }
   }
+  st->wmax = KLS_SNB_WMAX;
+  {
+    const char *wm = getenv("KLS_SNB_WMAX");
+    if (wm != NULL && wm[0] != '\0') {
+      const int parsed = atoi(wm);
+      if (parsed >= 4 && parsed <= 128) {
+        st->wmax = parsed;
+      }
+    }
+  }
   st->nblocks = symbolic->nblocks;
   st->blocks =
     (kls_snb_block *)calloc((size_t)st->nblocks, sizeof(*st->blocks));
@@ -86058,7 +86069,7 @@ static int kls_snb_prepare(kls_solver *solver) {
         memcpy(union_rows, li, (size_t)len * sizeof(UF_long));
         int64_t true_entries = len;
         UF_long w = 1;
-        while (c + w < nk && w < (UF_long)KLS_SNB_WMAX) {
+        while (c + w < nk && w < (UF_long)st->wmax) {
           UF_long *li2; double *lx2; UF_long len2;
           kls_klu_get_pointer(lu, lip, llen, c + w, &li2, &lx2, &len2);
           UF_long i = 0, j = 0, m = 0;
@@ -86691,10 +86702,10 @@ static int kls_snb_prepare(kls_solver *solver) {
     st->rs_tmp = (double *)malloc((size_t)symbolic->n * sizeof(double));
     ok = st->ub_w != NULL && st->gemm_w != NULL && st->rs_tmp != NULL;
     for (int t = 0; ok && t < nworkers; ++t) {
-      st->ub_w[t] = (double *)malloc(2u * (size_t)KLS_SNB_WMAX *
-                                     (size_t)KLS_SNB_WMAX * sizeof(double));
+      st->ub_w[t] = (double *)malloc(2u * (size_t)st->wmax *
+                                     (size_t)st->wmax * sizeof(double));
       st->gemm_w[t] = (double *)malloc((size_t)gmax_below *
-                                       (size_t)KLS_SNB_WMAX *
+                                       (size_t)st->wmax *
                                        sizeof(double));
       ok = st->ub_w[t] != NULL && st->gemm_w[t] != NULL;
     }
@@ -87537,8 +87548,9 @@ static void kls_snb_maybe_accept(kls_solver *solver,
     /* t4: prep+trial cost only amortizes on matrices whose factor is
        already expensive (the adopters measure 18s+); cheap-factor rows
        are the pipelined incumbent's territory and the trial would tax
-       the once-charged term for nothing. */
-    solver->snb_declined = 1;
+       the once-charged term for nothing.  Not a permanent decline: a
+       later accept site in the same (or a future) factor may sit past
+       the threshold. */
     *elapsed += kls_now_seconds() - accept_start;
     return;
   }
