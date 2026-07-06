@@ -114311,8 +114311,13 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
        smaller pattern.  Weak or missing diagonals fall through to the
        predicted trial, whose restricted pivoting handles them. */
     {
+      /* Threshold pivoting at the trial's tol=1e-4 stays on any diagonal
+         at least that strong; a handful of weak columns just pivot
+         off-diagonal locally, so only a weak *population* forces the
+         predicted trial. */
+      const UF_long weak_cap = n / 1024u > 4u ? n / 1024u : 4u;
       UF_long weak = 0;
-      for (UF_long k = 0; k < n && weak == 0; ++k) {
+      for (UF_long k = 0; k < n && weak <= weak_cap; ++k) {
         double colmax = 0.0;
         double diag = -1.0;
         for (UF_long p = trial_col_ptr[k]; p < trial_col_ptr[k + 1u];
@@ -114323,11 +114328,11 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
             diag = av;
           }
         }
-        if (diag < 0.0 || diag < 1.0e-3 * colmax) {
-          weak = 1;
+        if (diag < 0.0 || diag < 1.0e-4 * colmax) {
+          weak++;
         }
       }
-      if (weak == 0) {
+      if (weak <= weak_cap) {
         const double plain_start = kls_now_seconds();
         trilinos_klu_l_numeric *plain =
           trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
