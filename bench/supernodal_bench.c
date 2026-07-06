@@ -519,6 +519,7 @@ typedef struct snb_snode {
   int32_t uw;         /* widened U rows */
   int64_t rows_off;   /* offset into block row-list storage (below rows) */
   int64_t edges_off;  /* offset into block edge storage */
+  int64_t urows_off;  /* offset into block urows[] (U-region row ids) */
   int32_t edge_count;
 } snb_snode;
 
@@ -530,6 +531,7 @@ typedef struct snb_block {
   int32_t *below_rows;         /* concatenated below-row lists */
   snb_edge *edges;             /* concatenated edge lists */
   int32_t *subcols;            /* concatenated producer-local col lists */
+  int32_t *urows;              /* concatenated U-region row ids (narrow path) */
   int32_t *edge_dsts;          /* precomputed per-edge scatter targets */
   double *panels;              /* all panels, column-major per snode */
   float *panels32;             /* fp32 panels (round 7), when enabled */
@@ -552,6 +554,9 @@ typedef struct snb_state {
   int scale;
   int status;
   int wnarrow;
+  int tnarrow;               /* targets narrower than this go through X */
+  const scatter_program *sp_rows; /* landed-layout program (dst = row) */
+  double **x_w;              /* per-worker dense X (maxblock) */
   int fp32;
   int threads;
   /* parallel run state (round 5) */
@@ -662,6 +667,7 @@ static void snb_free(snb_state *st) {
       free(blk->below_rows);
       free(blk->edges);
       free(blk->subcols);
+      free(blk->urows);
       free(blk->edge_dsts);
       free(blk->panels);
       free(blk->panels32);
@@ -674,9 +680,11 @@ static void snb_free(snb_state *st) {
   for (int t = 0; t < st->nworkers; ++t) {
     free(st->gemm_w[t]);
     free(st->ub_w[t]);
+    if (st->x_w != NULL) free(st->x_w[t]);
   }
   free(st->gemm_w);
   free(st->ub_w);
+  free(st->x_w);
   free(st->task_block);
   free(st->task_snode);
   scatter_program_free(&st->sp);
@@ -868,6 +876,9 @@ static void snb_setup(snb_state *st, double zeta, int wmax) {
     blk->edges = (snb_edge *)xmalloc((size_t)edges_total * sizeof(snb_edge));
     blk->subcols =
       (int32_t *)xmalloc((size_t)subs_total * sizeof(int32_t));
+    blk->urows =
+      (int32_t *)xmalloc((size_t)(subs_total > 0 ? subs_total : 1) *
+                         sizeof(int32_t));
     int64_t panel_doubles = 0;
     int64_t sub_cursor = 0;
     for (int64_t s = 0; s < ns; ++s) {
@@ -907,6 +918,7 @@ static void snb_setup(snb_state *st, double zeta, int wmax) {
       snb_edge *edges = blk->edges + sn->edges_off;
       int64_t cnt = -1;
       int32_t last_prod = -1;
+      sn->urows_off = sub_cursor;
       for (int64_t t = 0; t < m; ++t) {
         const int32_t prod = blk->col2snode[urows[t]];
         if (prod != last_prod) {
@@ -920,6 +932,7 @@ static void snb_setup(snb_state *st, double zeta, int wmax) {
         edges[cnt].sub_count++;
         blk->subcols[sub_cursor + t] =
           (int32_t)(urows[t] - blk->snodes[prod].start);
+        blk->urows[sub_cursor + t] = (int32_t)urows[t];
       }
       sub_cursor += m;
       sn->height = sn->uw + sn->width + sn->below;
@@ -995,6 +1008,11 @@ static void snb_setup(snb_state *st, double zeta, int wmax) {
                         (size_t)wmax * sizeof(double));
     st->ub_w[t] = (double *)xmalloc(2u * (size_t)wmax * (size_t)wmax *
                                     sizeof(double));
+  }
+  st->x_w = (double **)xcalloc((size_t)nworkers, sizeof(double *));
+  for (int t = 0; t < nworkers; ++t) {
+    st->x_w[t] = (double *)xcalloc((size_t)st->symbolic->maxblock,
+                                   sizeof(double));
   }
   st->gemm_temp = st->gemm_w[0];
   st->ub = st->ub_w[0];
@@ -1928,6 +1946,7 @@ int main(int argc, char **argv) {
   snb.wnarrow = wnarrow;
   snb.profile = getenv("SNB_PROFILE") != NULL;
   snb.threads = getenv("SNB_THREADS") ? atoi(getenv("SNB_THREADS")) : 1;
+  snb.tnarrow = getenv("SNB_TNARROW") ? atoi(getenv("SNB_TNARROW")) : 0;
   if (snb.threads < 1) snb.threads = 1;
   if (snb.threads > 64) snb.threads = 64;
 #ifdef SNB_FP32_BUILD
@@ -1944,6 +1963,7 @@ int main(int argc, char **argv) {
   const double t_snb1 = now_seconds();
 
   build_scatter_programs(&a, symbolic, numeric, &snb, &landed.sp, &snb.sp);
+  snb.sp_rows = &landed.sp;
 
   /* supernode stats */
   {

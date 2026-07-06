@@ -18,7 +18,8 @@
 #define SNB_WORKER_FN SNB_GLUE(SNB_NAME, _worker)
 
 static void SNB_TARGET_FN(snb_state *st, snb_block *blk, int64_t s,
-                          double *ub_scratch, double *gemm_scratch) {
+                          double *ub_scratch, double *gemm_scratch,
+                          double *x_scratch) {
   const double *rs = st->rs;
   const double *az = st->a->values;
   const scatter_program *sp = &st->sp;
@@ -35,6 +36,81 @@ static void SNB_TARGET_FN(snb_state *st, snb_block *blk, int64_t s,
       const int32_t uw = sn->uw;
       SNB_REAL *W = panels + sn->panel;
       uint64_t t0 = prof ? snb_tsc() : 0;
+      if (w < st->tnarrow) {
+        /* narrow-target path (from the original round-3 prototype):
+         * classic left-looking through a dense X vector, reading producer
+         * L columns straight from their panels with lv!=0 skips (padding
+         * zeros never touch X, preserving the cleared invariant).  U and
+         * L values are still stored into this target's panel so later
+         * consumers, the export, and an eventual solve can read them. */
+        double *X = x_scratch;
+        const scatter_program *spr = st->sp_rows;
+        const int32_t *turows = blk->urows + sn->urows_off;
+        for (int32_t c = 0; c < w; ++c) {
+          const UF_long gk = k1 + sn->start + c;
+          for (int64_t p = spr->col_off_ptr[gk];
+               p < spr->col_off_ptr[gk + 1]; ++p) {
+            st->offx[spr->off[p].dst] =
+              st->scale > 0 ? az[spr->off[p].src] / rs[spr->off[p].oldrow]
+                            : az[spr->off[p].src];
+          }
+          for (int64_t p = spr->col_blk_ptr[gk];
+               p < spr->col_blk_ptr[gk + 1]; ++p) {
+            X[spr->blk[p].dst] =
+              st->scale > 0 ? az[spr->blk[p].src] / rs[spr->blk[p].oldrow]
+                            : az[spr->blk[p].src];
+          }
+          SNB_REAL *Wc = W + (size_t)c * H;
+          const int32_t tot = uw + c;
+          for (int32_t t = 0; t < tot; ++t) {
+            const int32_t j =
+              t < uw ? turows[t] : (int32_t)(sn->start + (t - uw));
+            const double u = X[j];
+            Wc[t] = (SNB_REAL)u;
+            if (u == 0.0) continue;
+            X[j] = 0.0;
+            const snb_snode *ps2 = &blk->snodes[blk->col2snode[j]];
+            const int32_t cc = j - (int32_t)ps2->start;
+            const int32_t pw2 = ps2->width;
+#ifdef SNB_L_MIRROR
+            const float *pcol =
+              blk->lmirror + ps2->panel + (size_t)cc * ps2->height;
+#else
+            const SNB_REAL *pcol =
+              panels + ps2->panel + (size_t)cc * ps2->height;
+#endif
+            const int32_t pbase = ps2->uw;
+            for (int32_t r = cc + 1; r < pw2; ++r) {
+              const double lv = (double)pcol[pbase + r];
+              if (lv != 0.0) X[ps2->start + r] -= lv * u;
+            }
+            const int32_t *prows2 = blk->below_rows + ps2->rows_off;
+            for (int32_t r = 0; r < ps2->below; ++r) {
+              const double lv = (double)pcol[pbase + pw2 + r];
+              if (lv != 0.0) X[prows2[r]] -= lv * u;
+            }
+          }
+          const double ukk = X[sn->start + c];
+          X[sn->start + c] = 0.0;
+          st->udiag[k1 + sn->start + c] = ukk;
+          if (ukk == 0.0) st->status = 1;
+          Wc[uw + c] = (SNB_REAL)ukk;
+          for (int32_t r = c + 1; r < w; ++r) {
+            const int32_t row = (int32_t)(sn->start + r);
+            Wc[uw + r] = (SNB_REAL)(X[row] / ukk);
+            X[row] = 0.0;
+          }
+          const int32_t *brows = blk->below_rows + sn->rows_off;
+          for (int32_t r = 0; r < sn->below; ++r) {
+            Wc[uw + w + r] = (SNB_REAL)(X[brows[r]] / ukk);
+            X[brows[r]] = 0.0;
+          }
+        }
+        if (prof) {
+          st->phase_cycles[1] += snb_tsc() - t0;
+        }
+        return;
+      }
       memset(W, 0, (size_t)H * (size_t)w * sizeof(SNB_REAL));
       /* scatter A columns (program dst = local panel index incl. col) */
       for (int32_t c = 0; c < w; ++c) {
@@ -254,7 +330,8 @@ static void *SNB_WORKER_FN(void *argp) {
         __builtin_ia32_pause();
       }
     }
-    SNB_TARGET_FN(st, blk, s, ub_scratch, gemm_scratch);
+    SNB_TARGET_FN(st, blk, s, ub_scratch, gemm_scratch,
+                  st->x_w[warg->id]);
     atomic_store_explicit(&blk->done[s], gen, memory_order_release);
   }
   return NULL;
@@ -311,7 +388,8 @@ static int SNB_NAME(snb_state *st) {
       snb_block *blk = &st->blocks[block];
       if (blk->nk < 2) continue;
       for (int64_t s = 0; s < blk->snode_count; ++s) {
-        SNB_TARGET_FN(st, blk, s, st->ub_w[0], st->gemm_w[0]);
+        SNB_TARGET_FN(st, blk, s, st->ub_w[0], st->gemm_w[0],
+                      st->x_w[0]);
       }
     }
     return 1;
