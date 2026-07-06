@@ -38,6 +38,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <time.h>
 
 /* ------------------------------------------------------------------ */
@@ -534,6 +536,7 @@ typedef struct snb_block {
   float *lmirror;              /* fp32 mirror of L regions (round 7b) */
   int64_t panel_doubles;
   int32_t *map;                /* block-local row -> slot (setup/verify) */
+  _Atomic uint32_t *done;      /* per-snode completion generation */
 } snb_block;
 
 typedef struct snb_state {
@@ -550,9 +553,19 @@ typedef struct snb_state {
   int status;
   int wnarrow;
   int fp32;
-  /* scratch */
-  double *gemm_temp;   /* max below x wmax */
-  double *ub;          /* wmax x wmax, column-major, then row-major copy */
+  int threads;
+  /* parallel run state (round 5) */
+  int32_t *task_block;
+  int32_t *task_snode;
+  int64_t task_count;
+  _Atomic int64_t task_cursor;
+  uint32_t generation;
+  /* per-worker scratch */
+  double **ub_w;
+  double **gemm_w;
+  int nworkers;
+  double *gemm_temp;   /* worker 0 aliases (legacy fields) */
+  double *ub;
   /* waste counters (round 3 diagnostics) */
   int64_t scatter_hit;
   int64_t scatter_miss;
@@ -653,12 +666,19 @@ static void snb_free(snb_state *st) {
       free(blk->panels);
       free(blk->panels32);
       free(blk->lmirror);
+      free((void *)blk->done);
       free(blk->map);
     }
     free(st->blocks);
   }
-  free(st->gemm_temp);
-  free(st->ub);
+  for (int t = 0; t < st->nworkers; ++t) {
+    free(st->gemm_w[t]);
+    free(st->ub_w[t]);
+  }
+  free(st->gemm_w);
+  free(st->ub_w);
+  free(st->task_block);
+  free(st->task_snode);
   scatter_program_free(&st->sp);
 }
 
@@ -965,10 +985,43 @@ static void snb_setup(snb_state *st, double zeta, int wmax) {
   free(union_rows);
   free(merge_tmp);
   free(starts);
-  st->gemm_temp = (double *)xmalloc((size_t)(max_below > 0 ? max_below : 1) *
-                                    (size_t)wmax * sizeof(double));
-  st->ub = (double *)xmalloc(2u * (size_t)wmax * (size_t)wmax *
-                             sizeof(double));
+  const int nworkers = st->threads > 1 ? st->threads : 1;
+  st->nworkers = nworkers;
+  st->ub_w = (double **)xcalloc((size_t)nworkers, sizeof(double *));
+  st->gemm_w = (double **)xcalloc((size_t)nworkers, sizeof(double *));
+  for (int t = 0; t < nworkers; ++t) {
+    st->gemm_w[t] =
+      (double *)xmalloc((size_t)(max_below > 0 ? max_below : 1) *
+                        (size_t)wmax * sizeof(double));
+    st->ub_w[t] = (double *)xmalloc(2u * (size_t)wmax * (size_t)wmax *
+                                    sizeof(double));
+  }
+  st->gemm_temp = st->gemm_w[0];
+  st->ub = st->ub_w[0];
+  /* flattened (block, snode) task list + per-snode done flags */
+  int64_t task_count = 0;
+  for (UF_long b = 0; b < st->nblocks; ++b) {
+    if (st->blocks[b].nk >= 2) task_count += st->blocks[b].snode_count;
+  }
+  st->task_count = task_count;
+  st->task_block =
+    (int32_t *)xmalloc((size_t)(task_count > 0 ? task_count : 1) *
+                       sizeof(int32_t));
+  st->task_snode =
+    (int32_t *)xmalloc((size_t)(task_count > 0 ? task_count : 1) *
+                       sizeof(int32_t));
+  int64_t cursor = 0;
+  for (UF_long b = 0; b < st->nblocks; ++b) {
+    snb_block *blk2 = &st->blocks[b];
+    if (blk2->nk < 2) continue;
+    blk2->done = (_Atomic uint32_t *)xcalloc((size_t)blk2->snode_count,
+                                             sizeof(_Atomic uint32_t));
+    for (int64_t s2 = 0; s2 < blk2->snode_count; ++s2) {
+      st->task_block[cursor] = (int32_t)b;
+      st->task_snode[cursor] = (int32_t)s2;
+      cursor++;
+    }
+  }
 }
 
 /* map maintenance: set the target's rows, returns nothing.  Slots:
@@ -1874,6 +1927,9 @@ int main(int argc, char **argv) {
   snb.scale = scale;
   snb.wnarrow = wnarrow;
   snb.profile = getenv("SNB_PROFILE") != NULL;
+  snb.threads = getenv("SNB_THREADS") ? atoi(getenv("SNB_THREADS")) : 1;
+  if (snb.threads < 1) snb.threads = 1;
+  if (snb.threads > 64) snb.threads = 64;
 #ifdef SNB_FP32_BUILD
   snb.fp32 = 1;
 #else

@@ -12,56 +12,23 @@
 #define SNB_LPTR SNB_REAL
 #endif
 
-static int SNB_NAME(snb_state *st) {
-  const matrix *a = st->a;
-  st->status = 0;
+#define SNB_GLUE2(a, b) a##b
+#define SNB_GLUE(a, b) SNB_GLUE2(a, b)
+#define SNB_TARGET_FN SNB_GLUE(SNB_NAME, _target)
+#define SNB_WORKER_FN SNB_GLUE(SNB_NAME, _worker)
 
-  if (st->scale > 0) {
-    double *rs = st->rs;
-    const int64_t n = a->n;
-    for (int64_t i = 0; i < n; ++i) rs[i] = 0.0;
-    for (int64_t c = 0; c < n; ++c) {
-      for (int64_t p = a->col_ptr[c]; p < a->col_ptr[c + 1]; ++p) {
-        const double v = fabs(a->values[p]);
-        if (st->scale == 1) {
-          rs[a->row_idx[p]] += v;
-        } else if (v > rs[a->row_idx[p]]) {
-          rs[a->row_idx[p]] = v;
-        }
-      }
-    }
-    for (int64_t i = 0; i < n; ++i) {
-      if (rs[i] == 0.0) rs[i] = 1.0;
-    }
-  }
+static void SNB_TARGET_FN(snb_state *st, snb_block *blk, int64_t s,
+                          double *ub_scratch, double *gemm_scratch) {
   const double *rs = st->rs;
-  const double *az = a->values;
+  const double *az = st->a->values;
   const scatter_program *sp = &st->sp;
   const int wnarrow = st->wnarrow;
+  const UF_long k1 = blk->k1;
+  SNB_REAL *panels = blk->SNB_PANELS;
+  const int prof = st->profile && st->threads <= 1;
 
-  for (UF_long block = 0; block < st->nblocks; ++block) {
-    snb_block *blk = &st->blocks[block];
-    const UF_long k1 = blk->k1;
-    const UF_long nk = blk->nk;
-    if (nk == 1) {
-      double s = 0.0;
-      for (int64_t p = sp->col_off_ptr[k1]; p < sp->col_off_ptr[k1 + 1];
-           ++p) {
-        st->offx[sp->off[p].dst] =
-          st->scale > 0 ? az[sp->off[p].src] / rs[sp->off[p].oldrow]
-                        : az[sp->off[p].src];
-      }
-      for (int64_t p = sp->col_blk_ptr[k1]; p < sp->col_blk_ptr[k1 + 1];
-           ++p) {
-        s = st->scale > 0 ? az[sp->blk[p].src] / rs[sp->blk[p].oldrow]
-                          : az[sp->blk[p].src];
-      }
-      st->udiag[k1] = s;
-      continue;
-    }
-    SNB_REAL *panels = blk->SNB_PANELS;
-    const int prof = st->profile;
-    for (int64_t s = 0; s < blk->snode_count; ++s) {
+  {
+    {
       const snb_snode *sn = &blk->snodes[s];
       const int32_t w = sn->width;
       const int32_t H = sn->height;
@@ -141,7 +108,7 @@ static int SNB_NAME(snb_state *st) {
         }
         /* gather UB (sc x w), TRSM restricted to the touched producer
          * columns (untouched ones carry exact zeros), writeback */
-        SNB_REAL *B = (SNB_REAL *)st->ub;      /* column-major sc x w */
+        SNB_REAL *B = (SNB_REAL *)ub_scratch;  /* column-major sc x w */
         for (int32_t c = 0; c < w; ++c) {
           const SNB_REAL *Wc = W + (size_t)c * H + ustart;
           SNB_REAL *Bc = B + (size_t)c * sc;
@@ -173,14 +140,14 @@ static int SNB_NAME(snb_state *st) {
          * independent FMAs -- measured faster than a fused accumulate),
          * then row scatter through the precomputed dsts */
         SNB_REAL *Brow =
-          (SNB_REAL *)st->ub + (size_t)sc * w;  /* row-major mirror */
+          (SNB_REAL *)ub_scratch + (size_t)sc * w; /* row-major mirror */
         for (int32_t c = 0; c < w; ++c) {
           const SNB_REAL *Bc = B + (size_t)c * sc;
           for (int32_t i = 0; i < sc; ++i) {
             Brow[(size_t)i * w + c] = Bc[i];
           }
         }
-        SNB_REAL *T = (SNB_REAL *)st->gemm_temp;
+        SNB_REAL *T = (SNB_REAL *)gemm_scratch;
         {
           const SNB_LPTR *lb = Lbelow + (size_t)sub[0] * pld;
           const SNB_REAL *br = Brow;
@@ -258,6 +225,119 @@ static int SNB_NAME(snb_state *st) {
       }
     }
   }
+}
+
+typedef struct SNB_GLUE(SNB_NAME, _worker_arg) {
+  snb_state *st;
+  int id;
+} SNB_GLUE(SNB_NAME, _worker_arg);
+
+static void *SNB_WORKER_FN(void *argp) {
+  SNB_GLUE(SNB_NAME, _worker_arg) *warg =
+    (SNB_GLUE(SNB_NAME, _worker_arg) *)argp;
+  snb_state *st = warg->st;
+  double *ub_scratch = st->ub_w[warg->id];
+  double *gemm_scratch = st->gemm_w[warg->id];
+  const uint32_t gen = st->generation;
+  const int64_t count = st->task_count;
+  for (;;) {
+    const int64_t idx =
+      atomic_fetch_add_explicit(&st->task_cursor, 1, memory_order_relaxed);
+    if (idx >= count) break;
+    snb_block *blk = &st->blocks[st->task_block[idx]];
+    const int64_t s = st->task_snode[idx];
+    const snb_snode *sn = &blk->snodes[s];
+    const snb_edge *edges = blk->edges + sn->edges_off;
+    for (int32_t e = 0; e < sn->edge_count; ++e) {
+      while (atomic_load_explicit(&blk->done[edges[e].producer],
+                                  memory_order_acquire) != gen) {
+        __builtin_ia32_pause();
+      }
+    }
+    SNB_TARGET_FN(st, blk, s, ub_scratch, gemm_scratch);
+    atomic_store_explicit(&blk->done[s], gen, memory_order_release);
+  }
+  return NULL;
+}
+
+static int SNB_NAME(snb_state *st) {
+  const matrix *a = st->a;
+  st->status = 0;
+
+  if (st->scale > 0) {
+    double *rs = st->rs;
+    const int64_t n = a->n;
+    for (int64_t i = 0; i < n; ++i) rs[i] = 0.0;
+    for (int64_t c = 0; c < n; ++c) {
+      for (int64_t p = a->col_ptr[c]; p < a->col_ptr[c + 1]; ++p) {
+        const double v = fabs(a->values[p]);
+        if (st->scale == 1) {
+          rs[a->row_idx[p]] += v;
+        } else if (v > rs[a->row_idx[p]]) {
+          rs[a->row_idx[p]] = v;
+        }
+      }
+    }
+    for (int64_t i = 0; i < n; ++i) {
+      if (rs[i] == 0.0) rs[i] = 1.0;
+    }
+  }
+  const double *rs = st->rs;
+  const double *az = a->values;
+  const scatter_program *sp = &st->sp;
+
+  /* singleton blocks (trivial copies) run serially up front */
+  for (UF_long block = 0; block < st->nblocks; ++block) {
+    snb_block *blk = &st->blocks[block];
+    const UF_long k1 = blk->k1;
+    if (blk->nk != 1) continue;
+    double sval = 0.0;
+    for (int64_t p = sp->col_off_ptr[k1]; p < sp->col_off_ptr[k1 + 1];
+         ++p) {
+      st->offx[sp->off[p].dst] =
+        st->scale > 0 ? az[sp->off[p].src] / rs[sp->off[p].oldrow]
+                      : az[sp->off[p].src];
+    }
+    for (int64_t p = sp->col_blk_ptr[k1]; p < sp->col_blk_ptr[k1 + 1];
+         ++p) {
+      sval = st->scale > 0 ? az[sp->blk[p].src] / rs[sp->blk[p].oldrow]
+                           : az[sp->blk[p].src];
+    }
+    st->udiag[k1] = sval;
+  }
+
+  if (st->threads <= 1) {
+    for (UF_long block = 0; block < st->nblocks; ++block) {
+      snb_block *blk = &st->blocks[block];
+      if (blk->nk < 2) continue;
+      for (int64_t s = 0; s < blk->snode_count; ++s) {
+        SNB_TARGET_FN(st, blk, s, st->ub_w[0], st->gemm_w[0]);
+      }
+    }
+    return 1;
+  }
+
+  st->generation++;
+  atomic_store_explicit(&st->task_cursor, 0, memory_order_relaxed);
+  const int nthreads = st->threads;
+  pthread_t tids[64];
+  SNB_GLUE(SNB_NAME, _worker_arg) wargs[64];
+  for (int t = 1; t < nthreads; ++t) {
+    wargs[t].st = st;
+    wargs[t].id = t;
+    pthread_create(&tids[t], NULL, SNB_WORKER_FN, &wargs[t]);
+  }
+  wargs[0].st = st;
+  wargs[0].id = 0;
+  SNB_WORKER_FN(&wargs[0]);
+  for (int t = 1; t < nthreads; ++t) {
+    pthread_join(tids[t], NULL);
+  }
   return 1;
 }
+
 #undef SNB_LPTR
+#undef SNB_GLUE2
+#undef SNB_GLUE
+#undef SNB_TARGET_FN
+#undef SNB_WORKER_FN
