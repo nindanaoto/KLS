@@ -112902,6 +112902,12 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
      scale; below it the prediction attempt (build + fill + probe) costs
      more than it saves and the symmetrized pattern can carry extra fill
      into every refactorization. */
+  {
+    const char *dis = getenv("KLS_DISABLE_PREDICTED_FIRST");
+    if (dis != NULL && dis[0] == '1') {
+      return 0;
+    }
+  }
   if (n < 500000 && !(symbolic->lnz >= 5.0e6) &&
       !solver->block_trial_active &&
       getenv("KLS_FORCE_PIVOT_FILL") == NULL) {
