@@ -319,6 +319,11 @@ struct kls_solver {
   UF_long *snode_run_end;
   int snode_prepared;
   int snode_numeric_pre_sorted;
+  int32_t *i32solve_l;      /* flat i32 L row streams (solve fast path) */
+  int32_t *i32solve_u;
+  int64_t *i32solve_loff;   /* per global column offsets into the streams */
+  int64_t *i32solve_uoff;
+  int i32solve_state;       /* 0 unbuilt, 1 ready, -1 declined */
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
@@ -2290,6 +2295,7 @@ typedef struct kls_match_entry {
 } kls_match_entry;
 
 static int kls_build_refactor_schedule(kls_solver *solver);
+static int kls_i32_solve_ready(kls_solver *solver);
 static void kls_update_factor_etree_stats(kls_solver *solver);
 static int kls_refactor_supernode_panel_block_info(
   const kls_solver *solver,
@@ -20817,6 +20823,17 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->snb_declined = 0;
   solver->snb_incumbent_seconds = 0.0;
   solver->snb_trial_seconds = 0.0;
+  /* a later sort would reorder the packed columns under the i32 solve
+     streams; they share the sorted-numeric lifecycle */
+  free(solver->i32solve_l);
+  free(solver->i32solve_u);
+  free(solver->i32solve_loff);
+  free(solver->i32solve_uoff);
+  solver->i32solve_l = NULL;
+  solver->i32solve_u = NULL;
+  solver->i32solve_loff = NULL;
+  solver->i32solve_uoff = NULL;
+  solver->i32solve_state = 0;
   if (solver->snode_run_end != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
     fprintf(stderr, "KLS snode: panels freed from line %d\n", line);
   }
@@ -20850,6 +20867,15 @@ static void free_pivot_nudges(kls_solver *solver) {
 }
 
 static void free_numeric(kls_solver *solver) {
+  free(solver->i32solve_l);
+  free(solver->i32solve_u);
+  free(solver->i32solve_loff);
+  free(solver->i32solve_uoff);
+  solver->i32solve_l = NULL;
+  solver->i32solve_u = NULL;
+  solver->i32solve_loff = NULL;
+  solver->i32solve_uoff = NULL;
+  solver->i32solve_state = 0;
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
   solver->fp32_decision = 0;
@@ -114395,6 +114421,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   const double build_done = kls_now_seconds();
   kls_maybe_prepare_snode_panels(solver, elapsed);
   kls_snb_maybe_accept(solver, numeric_values, elapsed);
+  (void)kls_i32_solve_ready(solver);
   const double snode_done = kls_now_seconds();
   maybe_prepare_refactor_map(solver, elapsed);
   const double map_done = kls_now_seconds();
@@ -116490,6 +116517,7 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
     solver->snode_numeric_pre_sorted = 1;
     kls_maybe_prepare_snode_panels(solver, elapsed);
   kls_snb_maybe_accept(solver, numeric_values, elapsed);
+  (void)kls_i32_solve_ready(solver);
   }
   if (!kls_predicted_suffix_close_numeric(solver)) {
     return 0;
@@ -116562,9 +116590,200 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
   solver->snode_numeric_pre_sorted = 1;
   kls_maybe_prepare_snode_panels(solver, elapsed);
   kls_snb_maybe_accept(solver, numeric_values, elapsed);
+  (void)kls_i32_solve_ready(solver);
   maybe_prepare_refactor_map(solver, elapsed);
   maybe_prepare_refactor_schedule(solver, elapsed);
   return filled;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* i32-stream solve (hard core 2, brick 1).  klu_l_solve walks 16     */
+/* bytes per factor entry (UF_long index + double); the row indices   */
+/* never change across refactorizations, so a solver-lifetime int32   */
+/* mirror cuts the solve's index traffic in half while values are     */
+/* still read straight from the packed numeric.  Semantics replicate  */
+/* trilinos_klu_l_solve for one right-hand side.                      */
+/* ------------------------------------------------------------------ */
+
+static int kls_i32_solve_ready(kls_solver *solver) {
+  if (solver->i32solve_state != 0) {
+    return solver->i32solve_state > 0;
+  }
+  {
+    const char *dis = getenv("KLS_DISABLE_I32_SOLVE");
+    if (dis != NULL && dis[0] == '1') {
+      solver->i32solve_state = -1;
+      return 0;
+    }
+  }
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  if (symbolic == NULL || numeric == NULL || numeric->LUbx == NULL ||
+      solver->n > (UF_long)INT32_MAX ||
+      (double)(numeric->lnz + numeric->unz) > 4.0e9) {
+    solver->i32solve_state = -1;
+    return 0;
+  }
+  const UF_long n = symbolic->n;
+  solver->i32solve_loff =
+    (int64_t *)malloc(((size_t)n + 1u) * sizeof(int64_t));
+  solver->i32solve_uoff =
+    (int64_t *)malloc(((size_t)n + 1u) * sizeof(int64_t));
+  solver->i32solve_l =
+    (int32_t *)malloc((size_t)(numeric->lnz > 0 ? numeric->lnz : 1) *
+                      sizeof(int32_t));
+  solver->i32solve_u =
+    (int32_t *)malloc((size_t)(numeric->unz > 0 ? numeric->unz : 1) *
+                      sizeof(int32_t));
+  if (solver->i32solve_loff == NULL || solver->i32solve_uoff == NULL ||
+      solver->i32solve_l == NULL || solver->i32solve_u == NULL) {
+    free(solver->i32solve_l);
+    free(solver->i32solve_u);
+    free(solver->i32solve_loff);
+    free(solver->i32solve_uoff);
+    solver->i32solve_l = NULL;
+    solver->i32solve_u = NULL;
+    solver->i32solve_loff = NULL;
+    solver->i32solve_uoff = NULL;
+    solver->i32solve_state = -1;
+    return 0;
+  }
+  int64_t lcur = 0;
+  int64_t ucur = 0;
+  int ok = 1;
+  for (UF_long block = 0; ok && block < symbolic->nblocks; ++block) {
+    const UF_long k1 = symbolic->R[block];
+    const UF_long k2 = symbolic->R[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (nk < 2u || numeric->LUbx[block] == NULL) {
+      for (UF_long k = k1; k < k2; ++k) {
+        solver->i32solve_loff[k] = lcur;
+        solver->i32solve_uoff[k] = ucur;
+      }
+      continue;
+    }
+    const UF_long *lip = numeric->Lip + k1;
+    const UF_long *llen = numeric->Llen + k1;
+    const UF_long *uip = numeric->Uip + k1;
+    const UF_long *ulen = numeric->Ulen + k1;
+    double *lu = (double *)numeric->LUbx[block];
+    for (UF_long k = 0; k < nk; ++k) {
+      solver->i32solve_loff[k1 + k] = lcur;
+      solver->i32solve_uoff[k1 + k] = ucur;
+      UF_long *ri; double *rv; UF_long rl;
+      kls_klu_get_pointer(lu, lip, llen, k, &ri, &rv, &rl);
+      if (lcur + (int64_t)rl > numeric->lnz) { ok = 0; break; }
+      for (UF_long p = 0; p < rl; ++p) {
+        solver->i32solve_l[lcur++] = (int32_t)ri[p];
+      }
+      kls_klu_get_pointer(lu, uip, ulen, k, &ri, &rv, &rl);
+      if (ucur + (int64_t)rl > numeric->unz) { ok = 0; break; }
+      for (UF_long p = 0; p < rl; ++p) {
+        solver->i32solve_u[ucur++] = (int32_t)ri[p];
+      }
+    }
+  }
+  solver->i32solve_loff[n] = lcur;
+  solver->i32solve_uoff[n] = ucur;
+  if (!ok) {
+    free(solver->i32solve_l);
+    free(solver->i32solve_u);
+    free(solver->i32solve_loff);
+    free(solver->i32solve_uoff);
+    solver->i32solve_l = NULL;
+    solver->i32solve_u = NULL;
+    solver->i32solve_loff = NULL;
+    solver->i32solve_uoff = NULL;
+    solver->i32solve_state = -1;
+    return 0;
+  }
+  solver->i32solve_state = 1;
+  return 1;
+}
+
+/* One-rhs solve with klu_l_solve semantics over the i32 streams. */
+static UF_long kls_i32_solve(kls_solver *solver, double *b) {
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const UF_long n = symbolic->n;
+  const UF_long *Q = symbolic->Q;
+  const UF_long *R = symbolic->R;
+  const UF_long *pnum = numeric->Pnum;
+  const UF_long *offp = numeric->Offp;
+  const UF_long *offi = numeric->Offi;
+  const double *offx = (const double *)numeric->Offx;
+  const double *udiag = (const double *)numeric->Udiag;
+  const double *rs = numeric->Rs;
+  double *X = (double *)numeric->Xwork;
+  if (X == NULL) {
+    return 0;
+  }
+  if (rs == NULL) {
+    for (UF_long k = 0; k < n; ++k) {
+      X[k] = b[pnum[k]];
+    }
+  } else {
+    for (UF_long k = 0; k < n; ++k) {
+      X[k] = b[pnum[k]] / rs[k];
+    }
+  }
+  for (UF_long block = symbolic->nblocks; block-- > 0;) {
+    const UF_long k1 = R[block];
+    const UF_long k2 = R[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (nk == 1u) {
+      X[k1] /= udiag[k1];
+    } else {
+      const UF_long *lip = numeric->Lip + k1;
+      const UF_long *llen = numeric->Llen + k1;
+      const UF_long *uip = numeric->Uip + k1;
+      const UF_long *ulen = numeric->Ulen + k1;
+      double *lu = (double *)numeric->LUbx[block];
+      double *Xb = X + k1;
+      /* L-sweep, unit diagonal, block-local indices */
+      for (UF_long k = 0; k < nk; ++k) {
+        const double xk = Xb[k];
+        if (xk != 0.0) {
+          const UF_long len = llen[k];
+          const double *lx = lu + lip[k] + kls_klu_units_for_indices(len);
+          const int32_t *li =
+            solver->i32solve_l + solver->i32solve_loff[k1 + k];
+          for (UF_long p = 0; p < len; ++p) {
+            Xb[li[p]] -= lx[p] * xk;
+          }
+        }
+      }
+      /* U-sweep, descending, dividing by the diagonal */
+      for (UF_long k = nk; k-- > 0;) {
+        const double xk = Xb[k] / udiag[k1 + k];
+        Xb[k] = xk;
+        if (xk != 0.0) {
+          const UF_long len = ulen[k];
+          const double *ux = lu + uip[k] + kls_klu_units_for_indices(len);
+          const int32_t *ui =
+            solver->i32solve_u + solver->i32solve_uoff[k1 + k];
+          for (UF_long p = 0; p < len; ++p) {
+            Xb[ui[p]] -= ux[p] * xk;
+          }
+        }
+      }
+    }
+    if (block > 0) {
+      for (UF_long k = k1; k < k2; ++k) {
+        const double xk = X[k];
+        if (xk == 0.0) continue;
+        const UF_long pend = offp[k + 1u];
+        for (UF_long p = offp[k]; p < pend; ++p) {
+          X[offi[p]] -= offx[p] * xk;
+        }
+      }
+    }
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    b[Q[k]] = X[k];
+  }
+  return 1;
 }
 
 int kls_factor(kls_solver *solver, const double *values) {
@@ -116618,6 +116837,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       }
       kls_maybe_prepare_snode_panels(solver, &elapsed);
       kls_snb_maybe_accept(solver, numeric_values, &elapsed);
+      (void)kls_i32_solve_ready(solver);
       kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
       maybe_prepare_refactor_map(solver, &elapsed);
       maybe_prepare_refactor_schedule(solver, &elapsed);
@@ -116800,6 +117020,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   kls_maybe_prepare_snode_panels(solver, &elapsed);
       kls_snb_maybe_accept(solver, numeric_values, &elapsed);
+      (void)kls_i32_solve_ready(solver);
   kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
   maybe_prepare_refactor_map(solver, &elapsed);
   maybe_prepare_refactor_schedule(solver, &elapsed);
@@ -116950,11 +117171,18 @@ static int solve_impl(kls_solver *solver,
       solver->stats.memory_peak_bytes = solver->common.mempeak;
       return KLS_ERR_SOLVE_FAILED;
     }
-    ok = kernel_transpose
-      ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric, (UF_long)ldx,
-                              (UF_long)nrhs, x, &solver->common)
-      : trilinos_klu_l_solve(solver->symbolic, solver->numeric, (UF_long)ldx,
-                             (UF_long)nrhs, x, &solver->common);
+    if (!kernel_transpose && nrhs == 1 && kls_i32_solve_ready(solver)) {
+      solver->common.status = TRILINOS_KLU_OK;
+      ok = kls_i32_solve(solver, x);
+    } else {
+      ok = kernel_transpose
+        ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric,
+                                (UF_long)ldx, (UF_long)nrhs, x,
+                                &solver->common)
+        : trilinos_klu_l_solve(solver->symbolic, solver->numeric,
+                               (UF_long)ldx, (UF_long)nrhs, x,
+                               &solver->common);
+    }
   }
   if (ok && !kernel_transpose && has_col_scale) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
