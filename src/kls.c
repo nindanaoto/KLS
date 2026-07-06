@@ -86896,16 +86896,320 @@ static UF_long kls_snb_refactor(kls_solver *solver,
   return kls_snb_refactor_epilogue(solver);
 }
 
+/* Reusable spin barrier for the cooperative (within-snode) phases: the
+ * participating crew is fixed per refactor and phases are microseconds
+ * apart, so futex round trips would dominate a pthread barrier. */
+typedef struct kls_snb_spin_barrier {
+  _Atomic int arrived;
+  _Atomic unsigned generation;
+} kls_snb_spin_barrier;
+
+static void kls_snb_spin_barrier_wait(kls_snb_spin_barrier *b, int crew) {
+  const unsigned gen =
+    atomic_load_explicit(&b->generation, memory_order_acquire);
+  if (atomic_fetch_add_explicit(&b->arrived, 1, memory_order_acq_rel) ==
+      crew - 1) {
+    atomic_store_explicit(&b->arrived, 0, memory_order_relaxed);
+    atomic_fetch_add_explicit(&b->generation, 1u, memory_order_release);
+    return;
+  }
+  while (atomic_load_explicit(&b->generation, memory_order_acquire) == gen) {
+    kls_cpu_relax();
+  }
+}
+
 typedef struct kls_snb_par_ctx {
   kls_solver *solver;
   kls_snb_state *st;
   const double *values;
   const double *rs;
   int scale;
+  int nthreads;
   pthread_barrier_t barrier;
+  kls_snb_spin_barrier coop;
   _Atomic int64_t cursor;
   _Atomic int go; /* 0 = hold, 1 = run, 2 = abort (spawn failed) */
 } kls_snb_par_ctx;
+
+/* Work threshold above which a lone task on a level is executed by the
+ * whole crew (column-sliced edges, row-sliced GEMM/scatter and getrf). */
+#define KLS_SNB_COOP_MIN_DOUBLES 32768
+
+
+/* Cooperative processing of one large supernode by the whole crew.
+ * Edge updates: tid 0 gathers/TRSMs/writes back the (small) UB block,
+ * then every worker computes and scatters a disjoint row slice of the
+ * GEMM (producer below-rows split across the crew; the shared B row
+ * mirror is read-only).  Narrow edges are cheap and stay on tid 0.
+ * getrf: i-steps run row-sliced with a spin barrier per step so row i
+ * is fully updated before the crew reads it.  Writeback: column-sliced.
+ * All slices are disjoint; the only shared writes are the barrier. */
+static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
+                                        kls_snb_block *blk, int64_t s,
+                                        int tid) {
+  kls_solver *solver = ctx->solver;
+  kls_snb_state *st = ctx->st;
+  const int crew = ctx->nthreads;
+  const double *az = ctx->values;
+  const double *rs = ctx->rs;
+  const int scale = ctx->scale;
+  const UF_long k1 = blk->k1;
+  double *panels = blk->panels;
+  double *offx = (double *)solver->numeric->Offx;
+  double *udiag = (double *)solver->numeric->Udiag;
+  const int wnarrow = st->wnarrow;
+  const kls_snb_snode *sn = &blk->snodes[s];
+  const int32_t w = sn->width;
+  const int32_t H = sn->height;
+  const int32_t uw = sn->uw;
+  double *W = panels + sn->panel;
+  /* memset + A-scatter: column-sliced */
+  for (int32_t c = tid; c < w; c += crew) {
+    memset(W + (size_t)c * H, 0, (size_t)H * sizeof(double));
+  }
+  kls_snb_spin_barrier_wait(&ctx->coop, crew);
+  for (int32_t c = tid; c < w; c += crew) {
+    const UF_long gk = k1 + sn->start + c;
+    for (int64_t p = st->col_off_ptr[gk]; p < st->col_off_ptr[gk + 1u];
+         ++p) {
+      offx[st->off[p].dst] =
+        scale > 0 ? az[st->off[p].src] / rs[st->off[p].oldrow]
+                  : az[st->off[p].src];
+    }
+    for (int64_t p = st->col_blk_ptr[gk]; p < st->col_blk_ptr[gk + 1u];
+         ++p) {
+      panels[st->blk[p].dst] =
+        scale > 0 ? az[st->blk[p].src] / rs[st->blk[p].oldrow]
+                  : az[st->blk[p].src];
+    }
+  }
+  kls_snb_spin_barrier_wait(&ctx->coop, crew);
+  const kls_snb_edge *edges = blk->edges + sn->edges_off;
+  for (int32_t e = 0; e < sn->edge_count; ++e) {
+    const kls_snb_snode *ps = &blk->snodes[edges[e].producer];
+    const int32_t pw = ps->width;
+    const int32_t ph = ps->below;
+    const int32_t sc = edges[e].sub_count;
+    const int32_t *sub = blk->subcols + edges[e].sub_off;
+    const int32_t *dsts = blk->edge_dsts + edges[e].dst_off;
+    const int32_t ustart = edges[e].u_start;
+    const double *Lp = panels + ps->panel;
+    const int32_t pld = ps->height;
+    const double *Ldiag = Lp + ps->uw;
+    const double *Lbelow = Lp + ps->uw + pw;
+    if (sc < wnarrow || (int64_t)ph * w < KLS_SNB_COOP_MIN_DOUBLES) {
+      /* small edge: tid 0 runs the ordinary serial edge body */
+      if (tid == 0) {
+        double *B = st->ub_w[0];
+        if (sc < wnarrow) {
+          for (int32_t c = 0; c < w; ++c) {
+            double *Wc = W + (size_t)c * H;
+            for (int32_t i = 0; i < sc; ++i) {
+              const double u = Wc[ustart + i];
+              if (u == 0.0) continue;
+              const double *lcol = Ldiag + (size_t)sub[i] * pld;
+              for (int32_t i2 = i + 1; i2 < sc; ++i2) {
+                Wc[ustart + i2] -= lcol[sub[i2]] * u;
+              }
+              const double *lb = Lbelow + (size_t)sub[i] * pld;
+              for (int32_t r = 0; r < ph; ++r) {
+                const int32_t dst = dsts[r];
+                if (dst >= 0) {
+                  Wc[dst] -= lb[r] * u;
+                }
+              }
+            }
+          }
+        } else {
+          for (int32_t c = 0; c < w; ++c) {
+            const double *Wc = W + (size_t)c * H + ustart;
+            double *Bc = B + (size_t)c * sc;
+            for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
+          }
+          for (int32_t i = 0; i < sc; ++i) {
+            const double *lcol = Ldiag + (size_t)sub[i] * pld;
+            for (int32_t c = 0; c < w; ++c) {
+              double *Bc = B + (size_t)c * sc;
+              const double u = Bc[i];
+              if (u == 0.0) continue;
+              for (int32_t i2 = i + 1; i2 < sc; ++i2) {
+                Bc[i2] -= lcol[sub[i2]] * u;
+              }
+            }
+          }
+          for (int32_t c = 0; c < w; ++c) {
+            double *Wc = W + (size_t)c * H + ustart;
+            const double *Bc = B + (size_t)c * sc;
+            for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
+          }
+          double *Brow = st->ub_w[0] + (size_t)sc * w;
+          for (int32_t c = 0; c < w; ++c) {
+            const double *Bc = B + (size_t)c * sc;
+            for (int32_t i = 0; i < sc; ++i) {
+              Brow[(size_t)i * w + c] = Bc[i];
+            }
+          }
+          double *T = st->gemm_w[0];
+          {
+            const double *lb = Lbelow + (size_t)sub[0] * pld;
+            const double *br = Brow;
+            for (int32_t r = 0; r < ph; ++r) {
+              const double l = lb[r];
+              double *tr = T + (size_t)r * w;
+              for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
+            }
+            for (int32_t i = 1; i < sc; ++i) {
+              const double *lbi = Lbelow + (size_t)sub[i] * pld;
+              const double *bri = Brow + (size_t)i * w;
+              for (int32_t r = 0; r < ph; ++r) {
+                const double l = lbi[r];
+                double *tr = T + (size_t)r * w;
+                for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
+              }
+            }
+          }
+          for (int32_t r = 0; r < ph; ++r) {
+            const int32_t dst = dsts[r];
+            const double *tr = T + (size_t)r * w;
+            if (dst >= 0) {
+              double *Wd = W + dst;
+              for (int32_t c = 0; c < w; ++c) {
+                Wd[(size_t)c * H] -= tr[c];
+              }
+            }
+          }
+        }
+      }
+      kls_snb_spin_barrier_wait(&ctx->coop, crew);
+      continue;
+    }
+    /* big edge: stage A on tid 0 (gather + TRSM + writeback + row
+       mirror into ub_w[0]), stage B row-sliced across the crew */
+    double *B = st->ub_w[0];
+    double *Brow = st->ub_w[0] + (size_t)sc * w;
+    if (tid == 0) {
+      for (int32_t c = 0; c < w; ++c) {
+        const double *Wc = W + (size_t)c * H + ustart;
+        double *Bc = B + (size_t)c * sc;
+        for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
+      }
+      for (int32_t i = 0; i < sc; ++i) {
+        const double *lcol = Ldiag + (size_t)sub[i] * pld;
+        for (int32_t c = 0; c < w; ++c) {
+          double *Bc = B + (size_t)c * sc;
+          const double u = Bc[i];
+          if (u == 0.0) continue;
+          for (int32_t i2 = i + 1; i2 < sc; ++i2) {
+            Bc[i2] -= lcol[sub[i2]] * u;
+          }
+        }
+      }
+      for (int32_t c = 0; c < w; ++c) {
+        double *Wc = W + (size_t)c * H + ustart;
+        const double *Bc = B + (size_t)c * sc;
+        for (int32_t i = 0; i < sc; ++i) {
+          Wc[i] = Bc[i];
+          Brow[(size_t)i * w + c] = Bc[i];
+        }
+      }
+    }
+    kls_snb_spin_barrier_wait(&ctx->coop, crew);
+    {
+      const int32_t chunk = (ph + crew - 1) / crew;
+      const int32_t r0 = tid * chunk;
+      int32_t r1 = r0 + chunk;
+      if (r1 > ph) r1 = ph;
+      if (r0 < r1) {
+        double *T = st->gemm_w[tid];
+        {
+          const double *lb = Lbelow + (size_t)sub[0] * pld;
+          for (int32_t r = r0; r < r1; ++r) {
+            const double l = lb[r];
+            double *tr = T + (size_t)(r - r0) * w;
+            for (int32_t c = 0; c < w; ++c) tr[c] = l * Brow[c];
+          }
+          for (int32_t i = 1; i < sc; ++i) {
+            const double *lbi = Lbelow + (size_t)sub[i] * pld;
+            const double *bri = Brow + (size_t)i * w;
+            for (int32_t r = r0; r < r1; ++r) {
+              const double l = lbi[r];
+              double *tr = T + (size_t)(r - r0) * w;
+              for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
+            }
+          }
+        }
+        for (int32_t r = r0; r < r1; ++r) {
+          const int32_t dst = dsts[r];
+          const double *tr = T + (size_t)(r - r0) * w;
+          if (dst >= 0) {
+            double *Wd = W + dst;
+            for (int32_t c = 0; c < w; ++c) {
+              Wd[(size_t)c * H] -= tr[c];
+            }
+          }
+        }
+      }
+    }
+    kls_snb_spin_barrier_wait(&ctx->coop, crew);
+  }
+  /* fused getrf: i-steps row-sliced with a barrier per step */
+  {
+    double *diag = W + uw;
+    for (int32_t i = 0; i < w; ++i) {
+      double *ci = diag + (size_t)i * H;
+      const double pivot = ci[i];
+      if (tid == 0) {
+        udiag[k1 + sn->start + i] = pivot;
+        if (pivot == 0.0) {
+          kls_snb_record_singular(st, solver, k1 + sn->start + i);
+        }
+      }
+      const int32_t hrem = H - uw - i - 1;
+      const int32_t chunk = (hrem + crew - 1) / crew;
+      const int32_t r0 = tid * chunk;
+      int32_t r1 = r0 + chunk;
+      if (r1 > hrem) r1 = hrem;
+      double *lsub = ci + i + 1;
+      for (int32_t r = r0; r < r1; ++r) lsub[r] /= pivot;
+      kls_snb_spin_barrier_wait(&ctx->coop, crew);
+      for (int32_t j = i + 1; j < w; ++j) {
+        double *cj = diag + (size_t)j * H;
+        const double u = cj[i];
+        if (u == 0.0) continue;
+        double *dstv = cj + i + 1;
+        for (int32_t r = r0; r < r1; ++r) {
+          dstv[r] -= lsub[r] * u;
+        }
+      }
+      kls_snb_spin_barrier_wait(&ctx->coop, crew);
+    }
+  }
+  /* writeback: column-sliced */
+  {
+    trilinos_klu_l_numeric *numeric = solver->numeric;
+    const UF_long *lip = numeric->Lip + k1;
+    const UF_long *llen = numeric->Llen + k1;
+    const UF_long *uip = numeric->Uip + k1;
+    const UF_long *ulen = numeric->Ulen + k1;
+    double *lu = (double *)numeric->LUbx[blk - st->blocks];
+    const double *base = panels + sn->panel;
+    for (int64_t k = sn->start + tid; k < sn->start + sn->width;
+         k += crew) {
+      const int32_t *wb = blk->writeback + blk->wb_col_off[k];
+      int64_t wc = 0;
+      UF_long *ri; double *rv; UF_long rl;
+      kls_klu_get_pointer(lu, lip, llen, (UF_long)k, &ri, &rv, &rl);
+      for (UF_long p = 0; p < rl; ++p) {
+        rv[p] = base[wb[wc++]];
+      }
+      kls_klu_get_pointer(lu, uip, ulen, (UF_long)k, &ri, &rv, &rl);
+      for (UF_long p = 0; p < rl; ++p) {
+        rv[p] = base[wb[wc++]];
+      }
+    }
+  }
+  kls_snb_spin_barrier_wait(&ctx->coop, crew);
+}
 
 typedef struct kls_snb_par_arg {
   kls_snb_par_ctx *ctx;
@@ -86929,7 +87233,22 @@ static void *kls_snb_par_worker(void *argp) {
                             memory_order_relaxed);
     }
     (void)pthread_barrier_wait(&ctx->barrier);
+    const int64_t begin = st->slevel_ptr[level];
     const int64_t end = st->slevel_ptr[level + 1];
+    if (end - begin == 1) {
+      kls_snb_block *blk = &st->blocks[st->slevel_block[begin]];
+      const int64_t s = (int64_t)st->slevel_snode[begin];
+      const kls_snb_snode *sn = &blk->snodes[s];
+      if ((int64_t)sn->height * sn->width >= KLS_SNB_COOP_MIN_DOUBLES) {
+        kls_snb_process_target_coop(ctx, blk, s, arg->tid);
+      } else if (arg->tid == 0) {
+        kls_snb_process_target(ctx->solver, st, blk, s, ctx->values,
+                               ctx->rs, ctx->scale, st->ub_w[0],
+                               st->gemm_w[0]);
+      }
+      (void)pthread_barrier_wait(&ctx->barrier);
+      continue;
+    }
     for (;;) {
       const int64_t idx = atomic_fetch_add_explicit(&ctx->cursor, 1,
                                                     memory_order_relaxed);
@@ -86972,8 +87291,11 @@ static UF_long kls_snb_refactor_parallel(kls_solver *solver,
   ctx.values = numeric_values;
   ctx.rs = solver->numeric->Rs;
   ctx.scale = (int)solver->common.scale;
+  ctx.nthreads = nthreads;
   atomic_init(&ctx.cursor, 0);
   atomic_init(&ctx.go, 0);
+  atomic_init(&ctx.coop.arrived, 0);
+  atomic_init(&ctx.coop.generation, 0u);
   if (pthread_barrier_init(&ctx.barrier, NULL, (unsigned)nthreads) != 0) {
     return kls_snb_refactor(solver, numeric_values);
   }
