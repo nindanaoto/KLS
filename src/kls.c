@@ -327,10 +327,13 @@ struct kls_solver {
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
+  int snb_trial_verdict; /* -1: a real timed trial rejected on this
+                            symbolic; persists across numeric rebuilds */
   double snb_incumbent_seconds; /* 0 none, -1 armed, >0 measured */
   double snb_trial_seconds;     /* >0: factor-time engine trial result */
   double snb_trial_budget;      /* 0 = unlimited (serial); else max est cost */
   double snb_factor_start;      /* wall stamp at kls_factor entry */
+  double snb_trial_stamp;       /* factor_start of the last engine trial */
   int numeric_is_predicted;
   UF_long *pivot_nudge_pos;
   double *pivot_nudge_sigma;
@@ -20809,6 +20812,7 @@ static void free_symbolic(kls_solver *solver) {
     trilinos_klu_l_free_symbolic(&solver->symbolic, &solver->common);
     solver->symbolic = NULL;
   }
+  solver->snb_trial_verdict = 0;
   kls_separator_analysis_clear(&solver->separator);
   kls_invalidate_factor_etree_stats(solver);
 }
@@ -86595,13 +86599,22 @@ static int kls_snb_prepare(kls_solver *solver) {
      parallelizable shape; serial trials are always worth it (the mapped
      incumbents they race are far slower than any prep). */
   if (ok && solver->snb_trial_budget > 0.0) {
-    /* t4: panels win where the flop mass sits in cooperative fat-chain
-       snodes (mac_econ, pre2); wide levels of tiny snodes are the
-       pipelined incumbent's home turf and the trial+prep would only
-       tax the factor term. */
+    /* t4: with the 0.6 decisive-adoption margin, the only measured
+       adopter is pre2 (coop share 0.58); chain giants with tiny snodes
+       (memchip 1.5-wide) and scattered shapes always reject, and their
+       trial+panels would tax the once-charged factor term ~4s each.
+       Gate on the cooperative work share computed from the schedule. */
     if (kls_snb_trace_enabled()) {
       fprintf(stderr, "KLS snb: shares coop %.2f par %.2f\n",
               st->coop_work_share, st->par_work_share);
+    }
+    if (st->coop_work_share < 0.50 &&
+        getenv("KLS_SNB_FORCE_TRIAL") == NULL) {
+      if (kls_snb_trace_enabled()) {
+        fprintf(stderr, "KLS snb: t4 gated off (coop %.2f)\n",
+                st->coop_work_share);
+      }
+      ok = 0;
     }
   }
   if (ok) {
@@ -87544,6 +87557,7 @@ static void kls_snb_maybe_accept(kls_solver *solver,
                                  const double *numeric_values,
                                  double *elapsed) {
   if (solver == NULL || solver->snb_decision != 0 || solver->snb_declined ||
+      solver->snb_trial_verdict < 0 ||
       solver->snb != NULL || kls_snb_env_disabled() ||
       solver->fp32_decision > 0 || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->numeric->LUbx == NULL ||
@@ -87577,7 +87591,7 @@ static void kls_snb_maybe_accept(kls_solver *solver,
   if (solver->options.threads > 1 &&
       getenv("KLS_SNB_FORCE_TRIAL") == NULL &&
       (solver->snb_factor_start <= 0.0 ||
-       kls_now_seconds() - solver->snb_factor_start < 4.0)) {
+       kls_now_seconds() - solver->snb_factor_start < 30.0)) {
     /* t4: prep+trial cost only amortizes on matrices whose factor is
        already expensive (the adopters measure 18s+); cheap-factor rows
        are the pipelined incumbent's territory and the trial would tax
@@ -87600,6 +87614,13 @@ static void kls_snb_maybe_accept(kls_solver *solver,
   if (numeric_values == NULL) {
     numeric_values = solver->values;
   }
+  if (numeric_values != NULL &&
+      solver->snb_trial_stamp == solver->snb_factor_start) {
+    /* a numeric rebuild inside this same kls_factor already paid for a
+       trial; do not pay again (the refactor-time hooks simply see no
+       engine and fall through to the incumbent) */
+    numeric_values = NULL;
+  }
   if (numeric_values != NULL) {
     /* run the engine once now: the one-time trial cost lands in the
        once-charged factor term instead of the 99x-charged refactor
@@ -87612,6 +87633,7 @@ static void kls_snb_maybe_accept(kls_solver *solver,
         ? kls_snb_refactor_parallel(solver, numeric_values, threads)
         : kls_snb_refactor(solver, numeric_values);
     const double trial = kls_now_seconds() - t0;
+    solver->snb_trial_stamp = solver->snb_factor_start;
     if (snb_ok) {
       solver->snb_trial_seconds = trial;
     } else {
@@ -87639,7 +87661,7 @@ static int kls_snb_try_refactor(kls_solver *solver,
   if (check_pivots || kls_snb_env_disabled() ||
       solver->fp32_decision > 0 || solver->numeric == NULL ||
       solver->symbolic == NULL || solver->snb == NULL ||
-      solver->snb_decision < 0) {
+      solver->snb_decision < 0 || solver->snb_trial_verdict < 0) {
     return 0;
   }
   const int threads = solver->options.threads;
@@ -87685,6 +87707,7 @@ static int kls_snb_try_refactor(kls_solver *solver,
               threads, solver->snb_decision > 0 ? "adopted" : "rejected");
     }
     if (solver->snb_decision < 0) {
+      solver->snb_trial_verdict = -1;
       kls_snb_free(solver);
       solver->snb_declined = 1;
       if (solver->snb_trial_seconds > 0.0 || !snb_ok) {
