@@ -322,6 +322,7 @@ struct kls_solver {
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
+  double snb_incumbent_seconds; /* 0 none, -1 armed, >0 measured */
   int numeric_is_predicted;
   UF_long *pivot_nudge_pos;
   double *pivot_nudge_sigma;
@@ -20809,6 +20810,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   }
   kls_snb_free(solver);
   solver->snb_declined = 0;
+  solver->snb_incumbent_seconds = 0.0;
   if (solver->snode_run_end != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
     fprintf(stderr, "KLS snode: panels freed from line %d\n", line);
   }
@@ -85870,6 +85872,7 @@ typedef struct kls_snb_block {
   double *panels;
   int64_t panel_doubles;
   int32_t *writeback;   /* per LU entry (block walk order): panel index */
+  int64_t *wb_col_off;  /* per local column: offset into writeback[] */
 } kls_snb_block;
 
 typedef struct kls_snb_entry {
@@ -85885,8 +85888,11 @@ typedef struct kls_snb_state {
   kls_snb_entry *blk;      /* in-panel scatter entries */
   int64_t *col_off_ptr;    /* per global col: range in off[] */
   int64_t *col_blk_ptr;    /* per global col: range in blk[] */
-  double *ub;              /* wmax x wmax x 2 scratch */
-  double *gemm_temp;       /* max_below x wmax scratch */
+  double *ub;              /* worker-0 aliases */
+  double *gemm_temp;
+  double **ub_w;           /* per-worker scratch */
+  double **gemm_w;
+  int nworkers;
   double *rs_tmp;          /* n scratch for the Rs permute */
   int wnarrow;
   /* snode-level schedule for the EGraph integration (rock 1): levels of
@@ -85895,6 +85901,8 @@ typedef struct kls_snb_state {
   int64_t *slevel_ptr;     /* level -> range in slevel_tasks */
   int32_t *slevel_block;   /* task -> block id */
   int32_t *slevel_snode;   /* task -> snode id within block */
+  _Atomic int64_t singular_rank; /* min singular pivot seen this refactor */
+  _Atomic int failed;            /* halt_if_singular tripped */
 } kls_snb_state;
 
 #define KLS_SNB_WMAX 32
@@ -85917,6 +85925,7 @@ static void kls_snb_free(kls_solver *solver) {
       free(blk->edge_dsts);
       free(blk->panels);
       free(blk->writeback);
+      free(blk->wb_col_off);
     }
     free(st->blocks);
   }
@@ -85924,8 +85933,12 @@ static void kls_snb_free(kls_solver *solver) {
   free(st->blk);
   free(st->col_off_ptr);
   free(st->col_blk_ptr);
-  free(st->ub);
-  free(st->gemm_temp);
+  for (int t = 0; t < st->nworkers; ++t) {
+    if (st->ub_w != NULL) free(st->ub_w[t]);
+    if (st->gemm_w != NULL) free(st->gemm_w[t]);
+  }
+  free(st->ub_w);
+  free(st->gemm_w);
   free(st->rs_tmp);
   free(st->slevel_ptr);
   free(st->slevel_block);
@@ -86285,9 +86298,15 @@ static int kls_snb_prepare(kls_solver *solver) {
       }
       blk->writeback = (int32_t *)malloc(
         (size_t)(wb_total > 0 ? wb_total : 1) * sizeof(int32_t));
-      if (blk->writeback == NULL) { ok = 0; break; }
+      blk->wb_col_off =
+        (int64_t *)malloc(((size_t)nk + 1u) * sizeof(int64_t));
+      if (blk->writeback == NULL || blk->wb_col_off == NULL) {
+        ok = 0;
+        break;
+      }
       int64_t wb = 0;
       for (UF_long k = 0; ok && k < nk; ++k) {
+        blk->wb_col_off[k] = wb;
         const int32_t s = blk->col2snode[k];
         const kls_snb_snode *sn = &blk->snodes[s];
         const int32_t c = (int32_t)(k - sn->start);
@@ -86338,6 +86357,9 @@ static int kls_snb_prepare(kls_solver *solver) {
           if (lr < 0) { ok = 0; break; }
           blk->writeback[wb++] = (int32_t)((int64_t)c * sn->height + lr);
         }
+      }
+      if (ok) {
+        blk->wb_col_off[nk] = wb;
       }
     }
   }
@@ -86452,13 +86474,27 @@ static int kls_snb_prepare(kls_solver *solver) {
   }
 
   if (ok) {
-    int64_t gmax_below = max_below > 0 ? max_below : 1;
-    st->ub = (double *)malloc(2u * (size_t)KLS_SNB_WMAX *
-                              (size_t)KLS_SNB_WMAX * sizeof(double));
-    st->gemm_temp = (double *)malloc((size_t)gmax_below *
-                                     (size_t)KLS_SNB_WMAX * sizeof(double));
+    const int64_t gmax_below = max_below > 0 ? max_below : 1;
+    int nworkers = solver->options.threads;
+    if (nworkers < 1) nworkers = 1;
+    if (nworkers > 64) nworkers = 64;
+    st->nworkers = nworkers;
+    st->ub_w = (double **)calloc((size_t)nworkers, sizeof(double *));
+    st->gemm_w = (double **)calloc((size_t)nworkers, sizeof(double *));
     st->rs_tmp = (double *)malloc((size_t)symbolic->n * sizeof(double));
-    ok = st->ub != NULL && st->gemm_temp != NULL && st->rs_tmp != NULL;
+    ok = st->ub_w != NULL && st->gemm_w != NULL && st->rs_tmp != NULL;
+    for (int t = 0; ok && t < nworkers; ++t) {
+      st->ub_w[t] = (double *)malloc(2u * (size_t)KLS_SNB_WMAX *
+                                     (size_t)KLS_SNB_WMAX * sizeof(double));
+      st->gemm_w[t] = (double *)malloc((size_t)gmax_below *
+                                       (size_t)KLS_SNB_WMAX *
+                                       sizeof(double));
+      ok = st->ub_w[t] != NULL && st->gemm_w[t] != NULL;
+    }
+    if (ok) {
+      st->ub = st->ub_w[0];
+      st->gemm_temp = st->gemm_w[0];
+    }
   }
 
   free(union_rows);
@@ -86570,20 +86606,213 @@ static int kls_snb_prepare(kls_solver *solver) {
   return 1;
 }
 
-/* Serial supernodal refactor with klu_l_refactor semantics: recompute Rs
- * when scaling, fill Offx in walk order, record the first singular pivot,
- * permute Rs to pivot order at the end, and write the packed numeric. */
-static UF_long kls_snb_refactor(kls_solver *solver,
-                                const double *numeric_values) {
+/* Record the first (lowest-index) singular pivot seen this refactor. */
+static void kls_snb_record_singular(kls_snb_state *st, kls_solver *solver,
+                                    UF_long gk) {
+  int64_t seen = atomic_load_explicit(&st->singular_rank,
+                                      memory_order_relaxed);
+  while ((seen < 0 || (int64_t)gk < seen) &&
+         !atomic_compare_exchange_weak_explicit(&st->singular_rank, &seen,
+                                                (int64_t)gk,
+                                                memory_order_relaxed,
+                                                memory_order_relaxed)) {
+  }
+  if (solver->common.halt_if_singular) {
+    atomic_store_explicit(&st->failed, 1, memory_order_release);
+  }
+}
+
+/* Process one supernode: panel compute (memset, A-scatter program, edge
+ * updates, fused no-pivot getrf) followed by an immediate writeback of
+ * its member columns into the packed numeric, so consumers that read
+ * LUbx (including a future pipelined tail) always see finished columns.
+ * Thread-safe across distinct snodes of one level. */
+static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
+                                   kls_snb_block *blk, int64_t s,
+                                   const double *az, const double *rs,
+                                   int scale, double *ub_scratch,
+                                   double *gemm_scratch) {
+  const UF_long k1 = blk->k1;
+  double *panels = blk->panels;
+  double *offx = (double *)solver->numeric->Offx;
+  double *udiag = (double *)solver->numeric->Udiag;
+  const int wnarrow = st->wnarrow;
+  const kls_snb_snode *sn = &blk->snodes[s];
+  const int32_t w = sn->width;
+  const int32_t H = sn->height;
+  const int32_t uw = sn->uw;
+  double *W = panels + sn->panel;
+  memset(W, 0, (size_t)H * (size_t)w * sizeof(double));
+  for (int32_t c = 0; c < w; ++c) {
+    const UF_long gk = k1 + sn->start + c;
+    for (int64_t p = st->col_off_ptr[gk]; p < st->col_off_ptr[gk + 1u];
+         ++p) {
+      offx[st->off[p].dst] =
+        scale > 0 ? az[st->off[p].src] / rs[st->off[p].oldrow]
+                  : az[st->off[p].src];
+    }
+    for (int64_t p = st->col_blk_ptr[gk]; p < st->col_blk_ptr[gk + 1u];
+         ++p) {
+      panels[st->blk[p].dst] =
+        scale > 0 ? az[st->blk[p].src] / rs[st->blk[p].oldrow]
+                  : az[st->blk[p].src];
+    }
+  }
+  const kls_snb_edge *edges = blk->edges + sn->edges_off;
+  for (int32_t e = 0; e < sn->edge_count; ++e) {
+    const kls_snb_snode *ps = &blk->snodes[edges[e].producer];
+    const int32_t pw = ps->width;
+    const int32_t ph = ps->below;
+    const int32_t sc = edges[e].sub_count;
+    const int32_t *sub = blk->subcols + edges[e].sub_off;
+    const int32_t *dsts = blk->edge_dsts + edges[e].dst_off;
+    const int32_t ustart = edges[e].u_start;
+    const double *Lp = panels + ps->panel;
+    const int32_t pld = ps->height;
+    const double *Ldiag = Lp + ps->uw;
+    const double *Lbelow = Lp + ps->uw + pw;
+    if (sc < wnarrow) {
+      for (int32_t c = 0; c < w; ++c) {
+        double *Wc = W + (size_t)c * H;
+        for (int32_t i = 0; i < sc; ++i) {
+          const double u = Wc[ustart + i];
+          if (u == 0.0) continue;
+          const double *lcol = Ldiag + (size_t)sub[i] * pld;
+          for (int32_t i2 = i + 1; i2 < sc; ++i2) {
+            Wc[ustart + i2] -= lcol[sub[i2]] * u;
+          }
+          const double *lb = Lbelow + (size_t)sub[i] * pld;
+          for (int32_t r = 0; r < ph; ++r) {
+            const int32_t dst = dsts[r];
+            if (dst >= 0) {
+              Wc[dst] -= lb[r] * u;
+            }
+          }
+        }
+      }
+      continue;
+    }
+    double *B = ub_scratch;
+    for (int32_t c = 0; c < w; ++c) {
+      const double *Wc = W + (size_t)c * H + ustart;
+      double *Bc = B + (size_t)c * sc;
+      for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
+    }
+    for (int32_t i = 0; i < sc; ++i) {
+      const double *lcol = Ldiag + (size_t)sub[i] * pld;
+      for (int32_t c = 0; c < w; ++c) {
+        double *Bc = B + (size_t)c * sc;
+        const double u = Bc[i];
+        if (u == 0.0) continue;
+        for (int32_t i2 = i + 1; i2 < sc; ++i2) {
+          Bc[i2] -= lcol[sub[i2]] * u;
+        }
+      }
+    }
+    for (int32_t c = 0; c < w; ++c) {
+      double *Wc = W + (size_t)c * H + ustart;
+      const double *Bc = B + (size_t)c * sc;
+      for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
+    }
+    if (ph == 0) continue;
+    double *Brow = ub_scratch + (size_t)sc * w;
+    for (int32_t c = 0; c < w; ++c) {
+      const double *Bc = B + (size_t)c * sc;
+      for (int32_t i = 0; i < sc; ++i) {
+        Brow[(size_t)i * w + c] = Bc[i];
+      }
+    }
+    double *T = gemm_scratch;
+    {
+      const double *lb = Lbelow + (size_t)sub[0] * pld;
+      const double *br = Brow;
+      for (int32_t r = 0; r < ph; ++r) {
+        const double l = lb[r];
+        double *tr = T + (size_t)r * w;
+        for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
+      }
+      for (int32_t i = 1; i < sc; ++i) {
+        const double *lbi = Lbelow + (size_t)sub[i] * pld;
+        const double *bri = Brow + (size_t)i * w;
+        for (int32_t r = 0; r < ph; ++r) {
+          const double l = lbi[r];
+          double *tr = T + (size_t)r * w;
+          for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
+        }
+      }
+    }
+    for (int32_t r = 0; r < ph; ++r) {
+      const int32_t dst = dsts[r];
+      const double *tr = T + (size_t)r * w;
+      if (dst >= 0) {
+        double *Wd = W + dst;
+        for (int32_t c = 0; c < w; ++c) {
+          Wd[(size_t)c * H] -= tr[c];
+        }
+      }
+    }
+  }
+  /* fused no-pivot getrf/TRSM */
+  {
+    double *diag = W + uw;
+    for (int32_t i = 0; i < w; ++i) {
+      double *ci = diag + (size_t)i * H;
+      const double pivot = ci[i];
+      udiag[k1 + sn->start + i] = pivot;
+      if (pivot == 0.0) {
+        kls_snb_record_singular(st, solver, k1 + sn->start + i);
+      }
+      const int32_t hrem = H - uw - i - 1;
+      double *lsub = ci + i + 1;
+      for (int32_t r = 0; r < hrem; ++r) lsub[r] /= pivot;
+      for (int32_t j = i + 1; j < w; ++j) {
+        double *cj = diag + (size_t)j * H;
+        const double u = cj[i];
+        if (u == 0.0) continue;
+        double *dstv = cj + i + 1;
+        for (int32_t r = 0; r < hrem; ++r) {
+          dstv[r] -= lsub[r] * u;
+        }
+      }
+    }
+  }
+  /* immediate writeback of this snode's columns */
+  {
+    trilinos_klu_l_numeric *numeric = solver->numeric;
+    const UF_long *lip = numeric->Lip + k1;
+    const UF_long *llen = numeric->Llen + k1;
+    const UF_long *uip = numeric->Uip + k1;
+    const UF_long *ulen = numeric->Ulen + k1;
+    double *lu = (double *)numeric->LUbx[blk - st->blocks];
+    const double *base = panels + sn->panel;
+    for (int64_t k = sn->start; k < sn->start + sn->width; ++k) {
+      const int32_t *wb = blk->writeback + blk->wb_col_off[k];
+      int64_t wc = 0;
+      UF_long *ri; double *rv; UF_long rl;
+      kls_klu_get_pointer(lu, lip, llen, (UF_long)k, &ri, &rv, &rl);
+      for (UF_long p = 0; p < rl; ++p) {
+        rv[p] = base[wb[wc++]];
+      }
+      kls_klu_get_pointer(lu, uip, ulen, (UF_long)k, &ri, &rv, &rl);
+      for (UF_long p = 0; p < rl; ++p) {
+        rv[p] = base[wb[wc++]];
+      }
+    }
+  }
+}
+
+/* Shared prelude: scale recompute + singleton blocks + state reset. */
+static int kls_snb_refactor_prelude(kls_solver *solver,
+                                    const double *numeric_values) {
   kls_snb_state *st = solver->snb;
-  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_numeric *numeric = solver->numeric;
   trilinos_klu_l_common *common = &solver->common;
   const int scale = (int)common->scale;
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
-
+  atomic_store_explicit(&st->singular_rank, -1, memory_order_relaxed);
+  atomic_store_explicit(&st->failed, 0, memory_order_relaxed);
   if (scale > 0) {
     if (numeric->Rs == NULL ||
         !trilinos_klu_l_scale((UF_long)scale, solver->n, solver->col_ptr,
@@ -86596,207 +86825,46 @@ static UF_long kls_snb_refactor(kls_solver *solver,
   const double *az = numeric_values;
   double *offx = (double *)numeric->Offx;
   double *udiag = (double *)numeric->Udiag;
-  const int wnarrow = st->wnarrow;
-
   for (UF_long block = 0; block < st->nblocks; ++block) {
     kls_snb_block *blk = &st->blocks[block];
+    if (blk->nk != 1u) continue;
     const UF_long k1 = blk->k1;
-    const UF_long nk = blk->nk;
-    if (nk == 1u) {
-      double sv = 0.0;
-      for (int64_t p = st->col_off_ptr[k1]; p < st->col_off_ptr[k1 + 1u];
-           ++p) {
-        offx[st->off[p].dst] =
-          scale > 0 ? az[st->off[p].src] / rs[st->off[p].oldrow]
-                    : az[st->off[p].src];
-      }
-      for (int64_t p = st->col_blk_ptr[k1]; p < st->col_blk_ptr[k1 + 1u];
-           ++p) {
-        sv = scale > 0 ? az[st->blk[p].src] / rs[st->blk[p].oldrow]
-                       : az[st->blk[p].src];
-      }
-      udiag[k1] = sv;
-      if (sv == 0.0 && common->numerical_rank == KLS_KLU_EMPTY) {
-        common->status = TRILINOS_KLU_SINGULAR;
-        common->numerical_rank = k1;
-        common->singular_col = symbolic->Q[k1];
-        if (common->halt_if_singular) return 0;
-      }
-      continue;
+    double sv = 0.0;
+    for (int64_t p = st->col_off_ptr[k1]; p < st->col_off_ptr[k1 + 1u];
+         ++p) {
+      offx[st->off[p].dst] =
+        scale > 0 ? az[st->off[p].src] / rs[st->off[p].oldrow]
+                  : az[st->off[p].src];
     }
-    double *panels = blk->panels;
-    for (int64_t s = 0; s < blk->snode_count; ++s) {
-      const kls_snb_snode *sn = &blk->snodes[s];
-      const int32_t w = sn->width;
-      const int32_t H = sn->height;
-      const int32_t uw = sn->uw;
-      double *W = panels + sn->panel;
-      memset(W, 0, (size_t)H * (size_t)w * sizeof(double));
-      for (int32_t c = 0; c < w; ++c) {
-        const UF_long gk = k1 + sn->start + c;
-        for (int64_t p = st->col_off_ptr[gk]; p < st->col_off_ptr[gk + 1u];
-             ++p) {
-          offx[st->off[p].dst] =
-            scale > 0 ? az[st->off[p].src] / rs[st->off[p].oldrow]
-                      : az[st->off[p].src];
-        }
-        for (int64_t p = st->col_blk_ptr[gk]; p < st->col_blk_ptr[gk + 1u];
-             ++p) {
-          panels[st->blk[p].dst] =
-            scale > 0 ? az[st->blk[p].src] / rs[st->blk[p].oldrow]
-                      : az[st->blk[p].src];
-        }
-      }
-      const kls_snb_edge *edges = blk->edges + sn->edges_off;
-      for (int32_t e = 0; e < sn->edge_count; ++e) {
-        const kls_snb_snode *ps = &blk->snodes[edges[e].producer];
-        const int32_t pw = ps->width;
-        const int32_t ph = ps->below;
-        const int32_t sc = edges[e].sub_count;
-        const int32_t *sub = blk->subcols + edges[e].sub_off;
-        const int32_t *dsts = blk->edge_dsts + edges[e].dst_off;
-        const int32_t ustart = edges[e].u_start;
-        const double *Lp = panels + ps->panel;
-        const int32_t pld = ps->height;
-        const double *Ldiag = Lp + ps->uw;
-        const double *Lbelow = Lp + ps->uw + pw;
-        if (sc < wnarrow) {
-          for (int32_t c = 0; c < w; ++c) {
-            double *Wc = W + (size_t)c * H;
-            for (int32_t i = 0; i < sc; ++i) {
-              const double u = Wc[ustart + i];
-              if (u == 0.0) continue;
-              const double *lcol = Ldiag + (size_t)sub[i] * pld;
-              for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-                Wc[ustart + i2] -= lcol[sub[i2]] * u;
-              }
-              const double *lb = Lbelow + (size_t)sub[i] * pld;
-              for (int32_t r = 0; r < ph; ++r) {
-                const int32_t dst = dsts[r];
-                if (dst >= 0) {
-                  Wc[dst] -= lb[r] * u;
-                }
-              }
-            }
-          }
-          continue;
-        }
-        double *B = st->ub;
-        for (int32_t c = 0; c < w; ++c) {
-          const double *Wc = W + (size_t)c * H + ustart;
-          double *Bc = B + (size_t)c * sc;
-          for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
-        }
-        for (int32_t i = 0; i < sc; ++i) {
-          const double *lcol = Ldiag + (size_t)sub[i] * pld;
-          for (int32_t c = 0; c < w; ++c) {
-            double *Bc = B + (size_t)c * sc;
-            const double u = Bc[i];
-            if (u == 0.0) continue;
-            for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-              Bc[i2] -= lcol[sub[i2]] * u;
-            }
-          }
-        }
-        for (int32_t c = 0; c < w; ++c) {
-          double *Wc = W + (size_t)c * H + ustart;
-          const double *Bc = B + (size_t)c * sc;
-          for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
-        }
-        if (ph == 0) continue;
-        double *Brow = st->ub + (size_t)sc * w;
-        for (int32_t c = 0; c < w; ++c) {
-          const double *Bc = B + (size_t)c * sc;
-          for (int32_t i = 0; i < sc; ++i) {
-            Brow[(size_t)i * w + c] = Bc[i];
-          }
-        }
-        double *T = st->gemm_temp;
-        {
-          const double *lb = Lbelow + (size_t)sub[0] * pld;
-          const double *br = Brow;
-          for (int32_t r = 0; r < ph; ++r) {
-            const double l = lb[r];
-            double *tr = T + (size_t)r * w;
-            for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
-          }
-          for (int32_t i = 1; i < sc; ++i) {
-            const double *lbi = Lbelow + (size_t)sub[i] * pld;
-            const double *bri = Brow + (size_t)i * w;
-            for (int32_t r = 0; r < ph; ++r) {
-              const double l = lbi[r];
-              double *tr = T + (size_t)r * w;
-              for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
-            }
-          }
-        }
-        for (int32_t r = 0; r < ph; ++r) {
-          const int32_t dst = dsts[r];
-          const double *tr = T + (size_t)r * w;
-          if (dst >= 0) {
-            double *Wd = W + dst;
-            for (int32_t c = 0; c < w; ++c) {
-              Wd[(size_t)c * H] -= tr[c];
-            }
-          }
-        }
-      }
-      /* fused no-pivot getrf/TRSM */
-      {
-        double *diag = W + uw;
-        for (int32_t i = 0; i < w; ++i) {
-          double *ci = diag + (size_t)i * H;
-          const double pivot = ci[i];
-          udiag[k1 + sn->start + i] = pivot;
-          if (pivot == 0.0) {
-            if (common->numerical_rank == KLS_KLU_EMPTY) {
-              common->status = TRILINOS_KLU_SINGULAR;
-              common->numerical_rank = k1 + sn->start + i;
-              common->singular_col = symbolic->Q[k1 + sn->start + i];
-            }
-            if (common->halt_if_singular) return 0;
-          }
-          const int32_t hrem = H - uw - i - 1;
-          double *lsub = ci + i + 1;
-          for (int32_t r = 0; r < hrem; ++r) lsub[r] /= pivot;
-          for (int32_t j = i + 1; j < w; ++j) {
-            double *cj = diag + (size_t)j * H;
-            const double u = cj[i];
-            if (u == 0.0) continue;
-            double *dstv = cj + i + 1;
-            for (int32_t r = 0; r < hrem; ++r) {
-              dstv[r] -= lsub[r] * u;
-            }
-          }
-        }
-      }
+    for (int64_t p = st->col_blk_ptr[k1]; p < st->col_blk_ptr[k1 + 1u];
+         ++p) {
+      sv = scale > 0 ? az[st->blk[p].src] / rs[st->blk[p].oldrow]
+                     : az[st->blk[p].src];
     }
-    /* write the packed numeric back (values only; patterns unchanged) */
-    {
-      const UF_long *lip = numeric->Lip + k1;
-      const UF_long *llen = numeric->Llen + k1;
-      const UF_long *uip = numeric->Uip + k1;
-      const UF_long *ulen = numeric->Ulen + k1;
-      double *lu = (double *)numeric->LUbx[block];
-      const int32_t *wb = blk->writeback;
-      int64_t wc = 0;
-      for (UF_long k = 0; k < nk; ++k) {
-        const int32_t s = blk->col2snode[k];
-        const double *base = panels + blk->snodes[s].panel;
-        UF_long *ri; double *rv; UF_long rl;
-        kls_klu_get_pointer(lu, lip, llen, k, &ri, &rv, &rl);
-        for (UF_long p = 0; p < rl; ++p) {
-          rv[p] = base[wb[wc++]];
-        }
-        kls_klu_get_pointer(lu, uip, ulen, k, &ri, &rv, &rl);
-        for (UF_long p = 0; p < rl; ++p) {
-          rv[p] = base[wb[wc++]];
-        }
-      }
+    udiag[k1] = sv;
+    if (sv == 0.0) {
+      kls_snb_record_singular(st, solver, k1);
     }
   }
+  return 1;
+}
 
-  if (scale > 0) {
+/* Shared epilogue: singular reporting + the pivot-order Rs permute. */
+static UF_long kls_snb_refactor_epilogue(kls_solver *solver) {
+  kls_snb_state *st = solver->snb;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  trilinos_klu_l_common *common = &solver->common;
+  const int64_t rank = atomic_load_explicit(&st->singular_rank,
+                                            memory_order_relaxed);
+  if (rank >= 0) {
+    common->status = TRILINOS_KLU_SINGULAR;
+    common->numerical_rank = (UF_long)rank;
+    common->singular_col = solver->symbolic->Q[rank];
+    if (common->halt_if_singular) {
+      return 0;
+    }
+  }
+  if ((int)common->scale > 0) {
     double *rs_tmp = st->rs_tmp;
     for (UF_long k = 0; k < solver->n; ++k) {
       rs_tmp[k] = numeric->Rs[numeric->Pnum[k]];
@@ -86804,6 +86872,144 @@ static UF_long kls_snb_refactor(kls_solver *solver,
     memcpy(numeric->Rs, rs_tmp, (size_t)solver->n * sizeof(double));
   }
   return 1;
+}
+
+static UF_long kls_snb_refactor(kls_solver *solver,
+                                const double *numeric_values) {
+  kls_snb_state *st = solver->snb;
+  const int scale = (int)solver->common.scale;
+  if (!kls_snb_refactor_prelude(solver, numeric_values)) {
+    return 0;
+  }
+  const double *rs = solver->numeric->Rs;
+  for (UF_long block = 0; block < st->nblocks; ++block) {
+    kls_snb_block *blk = &st->blocks[block];
+    if (blk->nk < 2u) continue;
+    for (int64_t s = 0; s < blk->snode_count; ++s) {
+      kls_snb_process_target(solver, st, blk, s, numeric_values, rs, scale,
+                             st->ub_w[0], st->gemm_w[0]);
+      if (atomic_load_explicit(&st->failed, memory_order_acquire)) {
+        return 0;
+      }
+    }
+  }
+  return kls_snb_refactor_epilogue(solver);
+}
+
+typedef struct kls_snb_par_ctx {
+  kls_solver *solver;
+  kls_snb_state *st;
+  const double *values;
+  const double *rs;
+  int scale;
+  pthread_barrier_t barrier;
+  _Atomic int64_t cursor;
+  _Atomic int go; /* 0 = hold, 1 = run, 2 = abort (spawn failed) */
+} kls_snb_par_ctx;
+
+typedef struct kls_snb_par_arg {
+  kls_snb_par_ctx *ctx;
+  int tid;
+} kls_snb_par_arg;
+
+static void *kls_snb_par_worker(void *argp) {
+  kls_snb_par_arg *arg = (kls_snb_par_arg *)argp;
+  kls_snb_par_ctx *ctx = arg->ctx;
+  kls_snb_state *st = ctx->st;
+  int go;
+  while ((go = atomic_load_explicit(&ctx->go, memory_order_acquire)) == 0) {
+    kls_cpu_relax();
+  }
+  if (go != 1) {
+    return NULL;
+  }
+  for (int64_t level = 0; level < st->slevel_count; ++level) {
+    if (arg->tid == 0) {
+      atomic_store_explicit(&ctx->cursor, st->slevel_ptr[level],
+                            memory_order_relaxed);
+    }
+    (void)pthread_barrier_wait(&ctx->barrier);
+    const int64_t end = st->slevel_ptr[level + 1];
+    for (;;) {
+      const int64_t idx = atomic_fetch_add_explicit(&ctx->cursor, 1,
+                                                    memory_order_relaxed);
+      if (idx >= end) {
+        break;
+      }
+      kls_snb_block *blk = &st->blocks[st->slevel_block[idx]];
+      kls_snb_process_target(ctx->solver, st, blk,
+                             (int64_t)st->slevel_snode[idx], ctx->values,
+                             ctx->rs, ctx->scale, st->ub_w[arg->tid],
+                             st->gemm_w[arg->tid]);
+    }
+    (void)pthread_barrier_wait(&ctx->barrier);
+  }
+  return NULL;
+}
+
+/* Level-scheduled parallel supernodal refactor: workers claim whole
+ * snodes within a level of the snode DAG (blocks merged; they are
+ * independent), with immediate per-snode writeback. */
+static UF_long kls_snb_refactor_parallel(kls_solver *solver,
+                                         const double *numeric_values,
+                                         int nthreads) {
+  kls_snb_state *st = solver->snb;
+  if (st->slevel_ptr == NULL || st->slevel_count <= 0) {
+    return kls_snb_refactor(solver, numeric_values);
+  }
+  if (nthreads > st->nworkers) {
+    nthreads = st->nworkers;
+  }
+  if (nthreads < 2) {
+    return kls_snb_refactor(solver, numeric_values);
+  }
+  if (!kls_snb_refactor_prelude(solver, numeric_values)) {
+    return 0;
+  }
+  kls_snb_par_ctx ctx;
+  ctx.solver = solver;
+  ctx.st = st;
+  ctx.values = numeric_values;
+  ctx.rs = solver->numeric->Rs;
+  ctx.scale = (int)solver->common.scale;
+  atomic_init(&ctx.cursor, 0);
+  atomic_init(&ctx.go, 0);
+  if (pthread_barrier_init(&ctx.barrier, NULL, (unsigned)nthreads) != 0) {
+    return kls_snb_refactor(solver, numeric_values);
+  }
+  pthread_t tids[64];
+  kls_snb_par_arg args[64];
+  int spawned = 0;
+  for (int t = 1; t < nthreads; ++t) {
+    args[t].ctx = &ctx;
+    args[t].tid = t;
+    if (pthread_create(&tids[t], NULL, kls_snb_par_worker, &args[t]) != 0) {
+      break;
+    }
+    spawned = t;
+  }
+  if (spawned != nthreads - 1) {
+    /* could not build the crew: release the spawned workers without
+       letting anyone touch the barrier, then run serially */
+    atomic_store_explicit(&ctx.go, 2, memory_order_release);
+    for (int t = 1; t <= spawned; ++t) {
+      pthread_join(tids[t], NULL);
+    }
+    pthread_barrier_destroy(&ctx.barrier);
+    return kls_snb_refactor(solver, numeric_values);
+  }
+  atomic_store_explicit(&ctx.go, 1, memory_order_release);
+  args[0].ctx = &ctx;
+  args[0].tid = 0;
+  (void)kls_snb_par_worker(&args[0]);
+  for (int t = 1; t <= spawned; ++t) {
+    pthread_join(tids[t], NULL);
+  }
+  pthread_barrier_destroy(&ctx.barrier);
+  if (atomic_load_explicit(&st->failed, memory_order_acquire)) {
+    return 0;
+  }
+  return kls_snb_refactor_epilogue(solver);
 }
 
 static int kls_snb_env_disabled(void) {
@@ -86819,9 +87025,9 @@ static int kls_snb_env_disabled(void) {
  * and TSOPF-class fused-block rows live down there. */
 static void kls_snb_maybe_accept(kls_solver *solver, double *elapsed) {
   if (solver == NULL || solver->snb_decision != 0 || solver->snb_declined ||
-      kls_snb_env_disabled() || solver->fp32_decision > 0 ||
-      solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->numeric->LUbx == NULL || solver->values == NULL ||
+      solver->snb != NULL || kls_snb_env_disabled() ||
+      solver->fp32_decision > 0 || solver->symbolic == NULL ||
+      solver->numeric == NULL || solver->numeric->LUbx == NULL ||
       solver->common.status == TRILINOS_KLU_SINGULAR) {
     return;
   }
@@ -86853,44 +87059,8 @@ static void kls_snb_maybe_accept(kls_solver *solver, double *elapsed) {
     if (solver->snb_declined) {
       solver->snb_decision = -1;
     }
-    *elapsed += kls_now_seconds() - accept_start;
-    return;
   }
-  const double *values = solver->values;
-  const double t0 = kls_now_seconds();
-  const int mapped = kls_mapped_refactor(solver, (double *)values, 0);
-  double landed_seconds = kls_now_seconds() - t0;
-  int landed_ok = mapped > 0;
-  if (mapped < 0) {
-    const UF_long klu_ok =
-      trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
-                              (double *)values, solver->symbolic,
-                              solver->numeric, &solver->common);
-    landed_seconds = kls_now_seconds() - t0;
-    landed_ok = klu_ok != 0;
-  }
-  if (!landed_ok) {
-    solver->snb_decision = -1;
-    kls_snb_free(solver);
-    solver->snb_declined = 1;
-    *elapsed += kls_now_seconds() - accept_start;
-    return;
-  }
-  const double t1 = kls_now_seconds();
-  const UF_long snb_ok = kls_snb_refactor(solver, values);
-  const double snb_seconds = kls_now_seconds() - t1;
-  solver->snb_decision =
-    snb_ok && snb_seconds < 0.97 * landed_seconds ? 1 : -1;
-  if (kls_snb_trace_enabled()) {
-    fprintf(stderr,
-            "KLS snb: factor-time acceptance landed %.3fms snb %.3fms -> %s\n",
-            landed_seconds * 1e3, snb_seconds * 1e3,
-            solver->snb_decision > 0 ? "adopted" : "rejected");
-  }
-  if (solver->snb_decision < 0) {
-    kls_snb_free(solver);
-    solver->snb_declined = 1;
-  }
+  solver->snb_incumbent_seconds = 0.0;
   *elapsed += kls_now_seconds() - accept_start;
 }
 
@@ -86905,74 +87075,55 @@ static int kls_snb_try_refactor(kls_solver *solver,
                                 UF_long *ok_out) {
   if (check_pivots || kls_snb_env_disabled() ||
       solver->fp32_decision > 0 || solver->numeric == NULL ||
-      solver->symbolic == NULL) {
+      solver->symbolic == NULL || solver->snb == NULL ||
+      solver->snb_decision < 0) {
     return 0;
   }
-  if (solver->snb_decision < 0) {
-    return 0;
-  }
-  if (solver->snb == NULL) {
-    if (!kls_snb_prepare(solver)) {
-      if (solver->snb_declined) {
-        solver->snb_decision = -1;
+  const int threads = solver->options.threads;
+  if (solver->snb_decision == 0) {
+    /* Event-driven acceptance: the incumbent path runs (and is timed by
+       kls_refactor's wrapper) on one call, the engine runs timed on the
+       next, and the better one keeps the matrix.  No call ever runs two
+       engines, so incumbent statistics stay untouched and the one-time
+       cost is bounded by a single refactor. */
+    if (solver->snb_incumbent_seconds == 0.0) {
+      solver->snb_incumbent_seconds = -1.0;
+      return 0; /* let the incumbent run this call */
+    }
+    if (solver->snb_incumbent_seconds < 0.0) {
+      if (solver->stats.refactor_seconds <= 0.0) {
+        return 0; /* wrapper timing unavailable; keep waiting */
       }
-      return 0;
+      solver->snb_incumbent_seconds = solver->stats.refactor_seconds;
     }
-  }
-  if (solver->snb_decision > 0) {
-    *ok_out = kls_snb_refactor(solver, numeric_values);
-    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_SNB);
-    return 1;
-  }
-  /* undecided: time the incumbent, then the supernodal engine (its
-     writeback leaves the numeric it produced, so its values win) */
-  const double t0 = kls_now_seconds();
-  const int mapped =
-    kls_mapped_refactor(solver, (double *)numeric_values, 0);
-  double landed_seconds;
-  if (mapped < 0) {
-    const UF_long klu_ok =
-      trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
-                              (double *)numeric_values, solver->symbolic,
-                              solver->numeric, &solver->common);
-    landed_seconds = kls_now_seconds() - t0;
-    if (!klu_ok) {
-      /* incumbent failed; report through the normal path untimed */
-      *ok_out = klu_ok;
-      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
-      solver->snb_decision = -1;
-      return 1;
+    const double t0 = kls_now_seconds();
+    const UF_long snb_ok =
+      threads > 1 ? kls_snb_refactor_parallel(solver, numeric_values,
+                                              threads)
+                  : kls_snb_refactor(solver, numeric_values);
+    const double snb_seconds = kls_now_seconds() - t0;
+    solver->snb_decision =
+      snb_ok && snb_seconds < 0.97 * solver->snb_incumbent_seconds ? 1 : -1;
+    if (kls_snb_trace_enabled()) {
+      fprintf(stderr,
+              "KLS snb: acceptance incumbent %.3fms snb %.3fms t%d -> %s\n",
+              solver->snb_incumbent_seconds * 1e3, snb_seconds * 1e3,
+              threads, solver->snb_decision > 0 ? "adopted" : "rejected");
     }
-  } else {
-    landed_seconds = kls_now_seconds() - t0;
-    if (!mapped) {
-      *ok_out = 0;
-      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
-      solver->snb_decision = -1;
-      return 1;
+    if (solver->snb_decision < 0) {
+      kls_snb_free(solver);
+      solver->snb_declined = 1;
+      if (!snb_ok) {
+        return 0; /* engine failed; let the incumbent redo this call */
+      }
     }
-  }
-  const double t1 = kls_now_seconds();
-  const UF_long snb_ok = kls_snb_refactor(solver, numeric_values);
-  const double snb_seconds = kls_now_seconds() - t1;
-  if (!snb_ok) {
-    solver->snb_decision = -1;
     *ok_out = snb_ok;
     kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_SNB);
     return 1;
   }
-  solver->snb_decision = snb_seconds < 0.97 * landed_seconds ? 1 : -1;
-  if (kls_snb_trace_enabled()) {
-    fprintf(stderr,
-            "KLS snb: acceptance landed %.3fms snb %.3fms -> %s\n",
-            landed_seconds * 1e3, snb_seconds * 1e3,
-            solver->snb_decision > 0 ? "adopted" : "rejected");
-  }
-  if (solver->snb_decision < 0) {
-    kls_snb_free(solver);
-    solver->snb_declined = 1;
-  }
-  *ok_out = snb_ok;
+  *ok_out = threads > 1
+    ? kls_snb_refactor_parallel(solver, numeric_values, threads)
+    : kls_snb_refactor(solver, numeric_values);
   kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_SNB);
   return 1;
 }
@@ -88275,6 +88426,13 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
         solver->common.status);
     }
     return serial_ok;
+  }
+  if (!check_pivots) {
+    UF_long snb_ok = 0;
+    if (kls_snb_try_refactor(solver, numeric_values, check_pivots,
+                             &snb_ok)) {
+      return snb_ok;
+    }
   }
   int egraph =
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
