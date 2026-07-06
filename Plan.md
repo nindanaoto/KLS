@@ -5,113 +5,92 @@ SPICE-cycle metric `analysis + init_factor + solve + 99*(refactor+solve)` at 4
 threads): **generally and meaningfully faster than both CKTSO and SubtreeLU,
 worst case within 2x of both.**
 
-## Current standings (paired suite #9, 2026-07-06, commit 1246c73)
+NOTE: this container is not the machine that produced suite #9; absolute
+ratios re-baselined here.  Suite #10 (post busy-wait pool + AMF, commit
+3a0bf56) is running into `results/suite10_*.jsonl` — read it before starting
+new work.  CKTSO needs `cktso.lic` next to `libcktso.so` or every row fails.
 
-- vs CKTSO: geomean **0.838**, wins 53/106, over-2x = 6
-  (rajat03 3.32†, ASIC_320ks 2.13, transient 2.09†, pre2 2.07, rajat28 2.01†,
-  mac_econ 2.00)
-- vs SubtreeLU: geomean **0.963** (first sub-1.0), wins 54/104, over-2x = 11
-  (rajat31 2.94, TSOPF_FS_b9_c1 2.93, circuit5M_dc 2.83, mac_econ 2.69,
-  memchip 2.59, Freescale1 2.54, rajat03 2.37†, ASIC_320ks 2.32, coupled
-  2.14†, rajat28 2.13†, circuit5M 2.07)
-- † = 0.05–3.5s cycles that churn ±30% between suites on identical binaries;
-  re-verify with PASSES=3–4 before spending engineering on them.
+## Landed this round (2026-07-06, commits cc6b907..3a0bf56)
 
-Every non-noise row above traces to one mechanism: the refactor kernel is
-2–3x behind SubtreeLU on KLU's scattered column storage.  Three retrofit
-designs (dense mirror + GEMV, joint consumer-run, compact-row microkernel)
-were prototyped and measured slower than the landed per-column batch kernel —
-the fix requires supernodal storage (task #12 below).
+- **Supernodal prototype rebuilt in-tree** as `bench/supernodal_bench.c` +
+  `bench/snb_refactor_impl.h` (rounds 2–7 of task #12).  Serial t1 vs the
+  landed-kernel replica, same-moment: mc2depi 1.42–1.70x, ASIC_320ks
+  1.01–1.18x (+9% more with fp32-L), rajat25 1.05–1.12x.  Design verdicts in
+  memory note `kls-supernodal-findings` (exact U-row sublists, residual-gated
+  verify, row-major GEMM temp, per-edge dst lists, postorder fill gate,
+  fp32-L mirror; snode-pool parallelism is flat without pipelining).
+- **Busy-wait BTF refactor pool** (queued #2): atomics/spin dispatch;
+  coupled t4 refactor −5%, rajat03 neutral.
+- **AMF ordering** (task #11): deficiency scoring inside vendored AMD,
+  `--ordering amf` + auto-promotion when AMD wins the base round and AMF's
+  estimate is ≥5% better.  Forced-AMF: ASIC_320ks −24% flops/−18% refactor;
+  auto currently still prefers METIS there, so suite impact rides on
+  AMD-selected rows.
+- **Denoise pass** (queued #1): this-machine KLS/SubtreeLU min-cycle ratios:
+  TSOPF_FS_b9_c1 3.39, mac_econ 2.81, coupled 2.12, rajat03 2.12,
+  rajat28 1.87, transient 1.38.
 
-## Task #12 — supernodal dense-panel storage rebuild (IN PROGRESS)
+## Task #12 — in-tree port of the supernodal refactor (NEXT, the big one)
 
-Prototype: `scratchpad/supernodal_bench.c` (round 2; round-1 backup
-`supernodal_bench_r1.c.bak`).  Amalgamated supernodes (greedy zeta-padding,
-wmax 32), COLUMN-major dense L panels as primary storage, per-edge UB gather
-+ unit-lower TRSM + GEMM into row-major temp + column scatter, fused
-no-pivot getrf/TRSM, hybrid scalar path for narrow supernodes (w < 4,
-contiguous panel-column reads).  Verified vs klu_l_refactor to roundoff.
+Port bar (1.3x on 2/3 proxies) formally unmet — mc2depi 1.7x but ASIC ~1.2x,
+rajat25 ~1.1x — however nothing regresses and the dominant gap rows
+(rajat31, memchip, circuit5M, Freescale1) are mc2depi-class giants where the
+win is 1.5–1.7x serial.  Port refactor path only, per-matrix gated like every
+other KLS feature.  Design (validated in the prototype):
 
-Serial t1 vs the landed production kernel (same-day interleaved):
+1. Build panels after first factor+sort where `snode_prepared`-style guards
+   pass (mirror `kls_maybe_prepare_snode_panels`, kls.c:85765): greedy zeta
+   amalgamation (zeta 0.2 default), exact per-edge U-row sublists, per-edge
+   scatter-dst lists, panel = [U rows | diag | below rows] column-major.
+2. Refactor execution replaces the per-column loop for prepared matrices:
+   memset panel → A-scatter program → edges (scalar path for sub_count <
+   WNARROW≈8, else gather/TRSM/writeback + GEMM into row-major temp + row
+   scatter) → fused no-pivot getrf.  No prefetch in panel scatters (measured
+   loss).  Keep the two kernel instantiations in separate TUs (codegen
+   interference, ~16%).
+3. Acceptance: first supernodal refactor is compared against the landed
+   kernel (interleaved timing or reconstruction-residual check + time); fall
+   back permanently on loss, like block-ordering guards.
+4. Etree postorder behind a fill-acceptance gate (re-analyze via
+   analyze_given with composed Pnum/Q; reject on lnz growth — rajat25 +767%).
+5. Parallel: run panels through the EGraph pool with column-level pipelining
+   (prototype showed snode-granularity task claiming alone is flat).
+6. fp32-L mirror written in the getrf epilogue, behind the existing fp32
+   validation machinery (full-fp32 panels are numerically unsafe on circuit
+   value ranges).
+7. Supernodal solve (round 6) after the refactor path lands, on the same
+   panels — solve is charged 99x; 10–20% of cycle on mc2depi/memchip/G3/
+   rajat31.
 
-| shape | round 1 | round 2 | note |
-|---|---|---|---|
-| mc2depi (long chains, avg_w 4) | 1.06x | **1.25x WIN** | giant-class proxy |
-| ASIC_320ks (avg 8-entry cols) | 0.87x | 0.77x | structure resists amalgamation |
-| rajat25 (spike rows, 640-entry cols) | 0.38x | 0.44x | wide-path edge overheads |
+## Queued behind the port
 
-### Remaining rounds
-
-- **Round 3 (started):** memset elimination landed (first producer column
-  initializes the temp) — measured NOT to be rajat25's bottleneck.  Next
-  diagnostic in flight: waste counters (GEMM rows whose scatter misses the
-  consumer pattern → edge-level padding).  If hit-rate is low, precompute
-  per-edge row intersection lists (the "refactor map" analogue) or accumulate
-  directly into W columns per producer column with hoisted positions.  Also:
-  UB gather/writeback are strided W accesses — hoistable.  Tune WNARROW
-  (CLI arg 4) per shape.
-- **Round 4: etree-postorder amalgamation.**  The greedy merge only takes
-  *consecutive* columns; postordering the elimination tree (children adjacent
-  to parents) is the standard way to widen supernodes from the same pattern.
-  Target: ASIC_320ks avg width 2.9 → 6+, flipping its 0.77x.
-- **Round 5: parallelize** at supernode granularity (the EGraph pool pattern;
-  our t4 scaling is 2.6x vs SubtreeLU's ~3.2–3.9x; t8 shows 4.8x headroom).
-- **Round 6: supernodal triangular solve** on the same panels (solve is
-  charged 99x; 10–20% of cycle on mc2depi/memchip/G3/rajat31).
-- **Round 7: FP32 panels** (dense layout doubles SIMD width in GEMM; the
-  existing fp32 refinement/validation machinery applies).
-- **Porting bar:** ≥1.3x over the landed kernel on 2 of the 3 proxy shapes
-  before in-tree work begins.  In-tree port order: refactor path first
-  (pattern fixed, no pivoting complications), factor and solve after.
-
-## Task #11 — AMF ordering (AFTER #12 rounds, per direction 2026-07-06)
-
-Approximate-minimum-fill ordering candidate: modify vendored AMD's
-quotient-graph pivot scoring from approximate degree to approximate
-deficiency; wire as `KLS_ORDERING_AMF` into the auto-ordering competition
-(`choose_symbolic_for_pattern` candidates + promotion paths); validate on
-both manifests (must only win where estimates say so).
-
-Evidence for: mac_econ carries 1.46x SubtreeLU's flops at equal fill; the
-rajat2x mid-family has similar ordering slack.  Caution: every AMD-family
-variant tested on mac_econ (COLAMD, Scotch) was *worse* than METIS, and
-SubtreeLU's advantage there is elimination *structure* at equal fill — a
-minimum-fill score may not capture it.  Re-check the target list against a
-denoised suite before starting.
-
-## Queued behind those
-
-1. **PASSES=3–4 denoising suite** for the † rows (cheap; run while
-   prototyping — machine is otherwise idle).
-2. **Busy-wait BTF pool** for small fragmented-BTF matrices (rajat03,
-   coupled): convert `kls_refactor_pool` worker (~line 20250) + dispatch
-   (~20544) to the atomics/spin pattern the EGraph pool uses; blocks are
-   independent, dispatch latency dominates at 1ms scale.
-3. **Predicted-METIS init race** (measured: ~140s off rajat31's init; only
-   matters once #12 shrinks its refactor term — sequence after the port).
-4. **mac_econ init/analysis trim** (48s of one-time cost vs SubtreeLU's 5.3s)
-   — same dependency on #12 for the row to cross 2x.
+1. **Predicted-METIS init race** (measured ~140s off rajat31's init on the
+   old machine; matters once the port shrinks its refactor term).
+2. **mac_econ init/analysis trim** (48s one-time vs SubtreeLU 5.3s on the
+   old machine) — mac_econ's remaining gap is init + elimination structure;
+   METIS stays its ordering (AMD-family, incl. AMF, times out there).
+3. Re-check AMF's suite-wide effect in suite #10; consider widening the
+   promotion beyond AMD-won rounds only if estimate quality proves out.
 
 ## Settled questions (do not revisit without new evidence)
 
-- GEMM retrofits on KLU scattered storage: three designs measured slower
-  than the landed batch kernel (details in memory: dense-endgame-design).
-- TSOPF_FS_b9_c1 block detection: its 9-bus blocks stay fused after dense
-  vertex removal at any floor (interiors interconnect; one component of
-  2447/2454).  It is a #12-class row, not a detection-class row.
-- mac_econ orderings: METIS best available (COLAMD 110M fill; AMD/Scotch
-  timeout).
-- Udiag comparisons on mc2depi/rajat25 are chaotic for ALL kernels
-  (summation order on ill-conditioned chains; landed kernel shows 1.58e+0
-  too).  Verify those matrices by residual, not Udiag.
+- GEMM retrofits on KLU scattered storage lose to the landed batch kernel.
+- TSOPF_FS_b9_c1 block detection cannot crack the fused 9-bus blocks; it is
+  a task-#12-class row.
+- mac_econ orderings: METIS best available (COLAMD 110M fill; AMD, Scotch,
+  and AMF all time out / lose).
+- Udiag/value comparisons on mc2depi/rajat25 are chaotic for ALL kernels —
+  verify by (noise-floored componentwise reconstruction) residual.
 - b9_c6/case9/c19/c30, gemat11/12: cleared by block ordering + plain-KLU
-  trial + small-class trims (suites #8/#9); block ordering is default-on
-  with acceptance guards.
+  trial + small-class trims; block ordering default-on with guards.
+- Full-fp32 panels; fused GEMM-scatter; scatter prefetch in panel kernels;
+  snode-granularity-only parallelism: all measured losses in the prototype.
 
 ## Measurement discipline
 
 - `scripts/run_paired_suite.sh` PASSES≥2, medium TIMEOUT=200 / large 900;
   scorer = per-matrix min cycle across passes; never rebuild `build/` while
-  a suite runs; only same-run ratios are comparable across sessions.
-- Machine drifts ~20% thermally: A/B claims require interleaved same-moment
-  runs.
+  a suite runs (use a second build dir); only same-run ratios are comparable
+  across sessions.  Machine drifts ~20% thermally: A/B claims require
+  interleaved same-moment runs (landed-vs-snb inside supernodal_bench is the
+  drift-immune comparison).
