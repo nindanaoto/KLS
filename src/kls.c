@@ -323,6 +323,9 @@ struct kls_solver {
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
   double snb_incumbent_seconds; /* 0 none, -1 armed, >0 measured */
+  double snb_trial_seconds;     /* >0: factor-time engine trial result */
+  double snb_trial_budget;      /* 0 = unlimited (serial); else max est cost */
+  double snb_factor_start;      /* wall stamp at kls_factor entry */
   int numeric_is_predicted;
   UF_long *pivot_nudge_pos;
   double *pivot_nudge_sigma;
@@ -20811,6 +20814,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   kls_snb_free(solver);
   solver->snb_declined = 0;
   solver->snb_incumbent_seconds = 0.0;
+  solver->snb_trial_seconds = 0.0;
   if (solver->snode_run_end != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
     fprintf(stderr, "KLS snode: panels freed from line %d\n", line);
   }
@@ -85903,11 +85907,17 @@ typedef struct kls_snb_state {
   int32_t *slevel_snode;   /* task -> snode id within block */
   _Atomic int64_t singular_rank; /* min singular pivot seen this refactor */
   _Atomic int failed;            /* halt_if_singular tripped */
+  double par_work_share; /* fraction of panel work the t4 executor can
+                            actually parallelize (coop + wide levels) */
+  double coop_work_share; /* fraction in cooperative fat-chain snodes */
 } kls_snb_state;
 
 #define KLS_SNB_WMAX 32
 #define KLS_SNB_ZETA 0.2
 #define KLS_SNB_MAX_ENTRIES 150000000
+/* Work threshold above which a lone task on a level is executed by the
+ * whole crew (column-sliced edges, row-sliced GEMM/scatter and getrf). */
+#define KLS_SNB_COOP_MIN_DOUBLES 32768
 
 static void kls_snb_free(kls_solver *solver) {
   kls_snb_state *st = solver->snb;
@@ -86230,9 +86240,7 @@ static int kls_snb_prepare(kls_solver *solver) {
     }
     if (panel_doubles > KLS_SNB_MAX_ENTRIES) { ok = 0; break; }
     blk->panel_doubles = panel_doubles;
-    blk->panels = (double *)malloc((size_t)panel_doubles * sizeof(double));
-    if (blk->panels == NULL) { ok = 0; break; }
-    memset(blk->panels, 0, (size_t)panel_doubles * sizeof(double));
+    /* panels materialize after the schedule/cost gate below */
 
     /* per-edge scatter destinations via a transient row map */
     int64_t dsts_total = 0;
@@ -86361,6 +86369,138 @@ static int kls_snb_prepare(kls_solver *solver) {
       if (ok) {
         blk->wb_col_off[nk] = wb;
       }
+    }
+  }
+
+
+  /* snode-level schedule: level(s) = 1 + max(level of producers); blocks
+   * are independent so their levels merge directly */
+  if (ok) {
+    int64_t total_snodes = 0;
+    int64_t max_level = 0;
+    for (UF_long b = 0; b < st->nblocks; ++b) {
+      if (st->blocks[b].nk >= 2u) total_snodes += st->blocks[b].snode_count;
+    }
+    int32_t *levels = NULL;
+    int64_t *counts = NULL;
+    if (total_snodes > 0) {
+      levels = (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
+    }
+    if (levels != NULL) {
+      int64_t base = 0;
+      for (UF_long b = 0; b < st->nblocks; ++b) {
+        const kls_snb_block *blk = &st->blocks[b];
+        if (blk->nk < 2u) continue;
+        for (int64_t s = 0; s < blk->snode_count; ++s) {
+          const kls_snb_snode *sn = &blk->snodes[s];
+          const kls_snb_edge *edges = blk->edges + sn->edges_off;
+          int32_t lv = 0;
+          for (int32_t e = 0; e < sn->edge_count; ++e) {
+            const int32_t pl = levels[base + edges[e].producer];
+            if (pl + 1 > lv) lv = pl + 1;
+          }
+          levels[base + s] = lv;
+          if (lv > max_level) max_level = lv;
+        }
+        base += blk->snode_count;
+      }
+      st->slevel_count = max_level + 1;
+      counts = (int64_t *)calloc((size_t)st->slevel_count + 1u,
+                                 sizeof(int64_t));
+      st->slevel_ptr = (int64_t *)calloc((size_t)st->slevel_count + 1u,
+                                         sizeof(int64_t));
+      st->slevel_block =
+        (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
+      st->slevel_snode =
+        (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
+      if (counts != NULL && st->slevel_ptr != NULL &&
+          st->slevel_block != NULL && st->slevel_snode != NULL) {
+        base = 0;
+        for (UF_long b = 0; b < st->nblocks; ++b) {
+          const kls_snb_block *blk = &st->blocks[b];
+          if (blk->nk < 2u) continue;
+          for (int64_t s = 0; s < blk->snode_count; ++s) {
+            counts[levels[base + s] + 1]++;
+          }
+          base += blk->snode_count;
+        }
+        for (int64_t l = 0; l < st->slevel_count; ++l) {
+          st->slevel_ptr[l + 1] = st->slevel_ptr[l] + counts[l + 1];
+        }
+        memcpy(counts, st->slevel_ptr,
+               ((size_t)st->slevel_count + 1u) * sizeof(int64_t));
+        base = 0;
+        for (UF_long b = 0; b < st->nblocks; ++b) {
+          const kls_snb_block *blk = &st->blocks[b];
+          if (blk->nk < 2u) continue;
+          for (int64_t s = 0; s < blk->snode_count; ++s) {
+            const int64_t at = counts[levels[base + s]]++;
+            st->slevel_block[at] = (int32_t)b;
+            st->slevel_snode[at] = (int32_t)s;
+          }
+          base += blk->snode_count;
+        }
+      } else {
+        free(st->slevel_ptr);
+        free(st->slevel_block);
+        free(st->slevel_snode);
+        st->slevel_ptr = NULL;
+        st->slevel_block = NULL;
+        st->slevel_snode = NULL;
+        st->slevel_count = 0;
+      }
+      free(counts);
+      free(levels);
+    }
+    if (st->slevel_ptr != NULL && st->slevel_count > 0) {
+      double coop = 0.0, wide = 0.0, total = 0.0;
+      for (int64_t l = 0; l < st->slevel_count; ++l) {
+        const int64_t begin = st->slevel_ptr[l];
+        const int64_t end = st->slevel_ptr[l + 1];
+        double level_work = 0.0;
+        double level_max = 0.0;
+        for (int64_t t = begin; t < end; ++t) {
+          const kls_snb_snode *sn =
+            &st->blocks[st->slevel_block[t]].snodes[st->slevel_snode[t]];
+          const double wk = (double)sn->height * (double)sn->width;
+          level_work += wk;
+          if (wk > level_max) level_max = wk;
+        }
+        total += level_work;
+        if (end - begin == 1 &&
+            level_max >= (double)KLS_SNB_COOP_MIN_DOUBLES) {
+          coop += level_work;
+        } else if (end - begin >= 4) {
+          wide += level_work;
+        }
+      }
+      st->par_work_share = total > 0.0 ? (coop + wide) / total : 0.0;
+      st->coop_work_share = total > 0.0 ? coop / total : 0.0;
+    }
+  }
+
+  /* cost gate: at t4 the trial+materialization cost must stay small
+     relative to the factor already paid, and the schedule must have
+     parallelizable shape; serial trials are always worth it (the mapped
+     incumbents they race are far slower than any prep). */
+  if (ok && solver->snb_trial_budget > 0.0) {
+    /* t4: panels win where the flop mass sits in cooperative fat-chain
+       snodes (mac_econ, pre2); wide levels of tiny snodes are the
+       pipelined incumbent's home turf and the trial+prep would only
+       tax the factor term. */
+    if (kls_snb_trace_enabled()) {
+      fprintf(stderr, "KLS snb: shares coop %.2f par %.2f\n",
+              st->coop_work_share, st->par_work_share);
+    }
+  }
+  if (ok) {
+    for (UF_long b = 0; b < st->nblocks; ++b) {
+      kls_snb_block *blk = &st->blocks[b];
+      if (blk->nk < 2u || blk->panel_doubles <= 0) continue;
+      blk->panels =
+        (double *)malloc((size_t)blk->panel_doubles * sizeof(double));
+      if (blk->panels == NULL) { ok = 0; break; }
+      memset(blk->panels, 0, (size_t)blk->panel_doubles * sizeof(double));
     }
   }
 
@@ -86508,86 +86648,6 @@ static int kls_snb_prepare(kls_solver *solver) {
     solver->snb_declined = 1;
     return 0;
   }
-  /* snode-level schedule: level(s) = 1 + max(level of producers); blocks
-   * are independent so their levels merge directly */
-  {
-    int64_t total_snodes = 0;
-    int64_t max_level = 0;
-    for (UF_long b = 0; b < st->nblocks; ++b) {
-      if (st->blocks[b].nk >= 2u) total_snodes += st->blocks[b].snode_count;
-    }
-    int32_t *levels = NULL;
-    int64_t *counts = NULL;
-    if (total_snodes > 0) {
-      levels = (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
-    }
-    if (levels != NULL) {
-      int64_t base = 0;
-      for (UF_long b = 0; b < st->nblocks; ++b) {
-        const kls_snb_block *blk = &st->blocks[b];
-        if (blk->nk < 2u) continue;
-        for (int64_t s = 0; s < blk->snode_count; ++s) {
-          const kls_snb_snode *sn = &blk->snodes[s];
-          const kls_snb_edge *edges = blk->edges + sn->edges_off;
-          int32_t lv = 0;
-          for (int32_t e = 0; e < sn->edge_count; ++e) {
-            const int32_t pl = levels[base + edges[e].producer];
-            if (pl + 1 > lv) lv = pl + 1;
-          }
-          levels[base + s] = lv;
-          if (lv > max_level) max_level = lv;
-        }
-        base += blk->snode_count;
-      }
-      st->slevel_count = max_level + 1;
-      counts = (int64_t *)calloc((size_t)st->slevel_count + 1u,
-                                 sizeof(int64_t));
-      st->slevel_ptr = (int64_t *)calloc((size_t)st->slevel_count + 1u,
-                                         sizeof(int64_t));
-      st->slevel_block =
-        (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
-      st->slevel_snode =
-        (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
-      if (counts != NULL && st->slevel_ptr != NULL &&
-          st->slevel_block != NULL && st->slevel_snode != NULL) {
-        base = 0;
-        for (UF_long b = 0; b < st->nblocks; ++b) {
-          const kls_snb_block *blk = &st->blocks[b];
-          if (blk->nk < 2u) continue;
-          for (int64_t s = 0; s < blk->snode_count; ++s) {
-            counts[levels[base + s] + 1]++;
-          }
-          base += blk->snode_count;
-        }
-        for (int64_t l = 0; l < st->slevel_count; ++l) {
-          st->slevel_ptr[l + 1] = st->slevel_ptr[l] + counts[l + 1];
-        }
-        memcpy(counts, st->slevel_ptr,
-               ((size_t)st->slevel_count + 1u) * sizeof(int64_t));
-        base = 0;
-        for (UF_long b = 0; b < st->nblocks; ++b) {
-          const kls_snb_block *blk = &st->blocks[b];
-          if (blk->nk < 2u) continue;
-          for (int64_t s = 0; s < blk->snode_count; ++s) {
-            const int64_t at = counts[levels[base + s]]++;
-            st->slevel_block[at] = (int32_t)b;
-            st->slevel_snode[at] = (int32_t)s;
-          }
-          base += blk->snode_count;
-        }
-      } else {
-        free(st->slevel_ptr);
-        free(st->slevel_block);
-        free(st->slevel_snode);
-        st->slevel_ptr = NULL;
-        st->slevel_block = NULL;
-        st->slevel_snode = NULL;
-        st->slevel_count = 0;
-      }
-      free(counts);
-      free(levels);
-    }
-  }
   solver->snb = st;
   if (kls_snb_trace_enabled()) {
     int64_t snodes = 0, cols = 0, panels = 0;
@@ -86599,9 +86659,9 @@ static int kls_snb_prepare(kls_solver *solver) {
     }
     fprintf(stderr,
             "KLS snb: prepared %ld snodes over %ld cols, %.1f MB panels, "
-            "%ld snode levels\n",
+            "%ld snode levels, par share %.2f\n",
             (long)snodes, (long)cols, (double)panels * 8.0 / 1048576.0,
-            (long)st->slevel_count);
+            (long)st->slevel_count, st->par_work_share);
   }
   return 1;
 }
@@ -86931,9 +86991,7 @@ typedef struct kls_snb_par_ctx {
   _Atomic int go; /* 0 = hold, 1 = run, 2 = abort (spawn failed) */
 } kls_snb_par_ctx;
 
-/* Work threshold above which a lone task on a level is executed by the
- * whole crew (column-sliced edges, row-sliced GEMM/scatter and getrf). */
-#define KLS_SNB_COOP_MIN_DOUBLES 32768
+
 
 
 /* Cooperative processing of one large supernode by the whole crew.
@@ -87345,7 +87403,9 @@ static int kls_snb_env_disabled(void) {
  * (99x-charged) refactor.  Also lets snb sort the numeric below the
  * snode-panel flops floor: panels have no batch-run floor of their own,
  * and TSOPF-class fused-block rows live down there. */
-static void kls_snb_maybe_accept(kls_solver *solver, double *elapsed) {
+static void kls_snb_maybe_accept(kls_solver *solver,
+                                 const double *numeric_values,
+                                 double *elapsed) {
   if (solver == NULL || solver->snb_decision != 0 || solver->snb_declined ||
       solver->snb != NULL || kls_snb_env_disabled() ||
       solver->fp32_decision > 0 || solver->symbolic == NULL ||
@@ -87377,12 +87437,54 @@ static void kls_snb_maybe_accept(kls_solver *solver, double *elapsed) {
     }
     solver->snode_numeric_pre_sorted = 1;
   }
+  if (solver->options.threads > 1 &&
+      (solver->snb_factor_start <= 0.0 ||
+       kls_now_seconds() - solver->snb_factor_start < 4.0)) {
+    /* t4: prep+trial cost only amortizes on matrices whose factor is
+       already expensive (the adopters measure 18s+); cheap-factor rows
+       are the pipelined incumbent's territory and the trial would tax
+       the once-charged term for nothing. */
+    solver->snb_declined = 1;
+    *elapsed += kls_now_seconds() - accept_start;
+    return;
+  }
+  solver->snb_trial_budget = solver->options.threads > 1 ? 1.0 : 0.0;
   if (!kls_snb_prepare(solver)) {
     if (solver->snb_declined) {
       solver->snb_decision = -1;
     }
+    *elapsed += kls_now_seconds() - accept_start;
+    return;
   }
   solver->snb_incumbent_seconds = 0.0;
+  solver->snb_trial_seconds = 0.0;
+  if (numeric_values == NULL) {
+    numeric_values = solver->values;
+  }
+  if (numeric_values != NULL) {
+    /* run the engine once now: the one-time trial cost lands in the
+       once-charged factor term instead of the 99x-charged refactor
+       average; the incumbent is captured on the first refactor call and
+       the decision falls on the second. */
+    const int threads = solver->options.threads;
+    const double t0 = kls_now_seconds();
+    const UF_long snb_ok =
+      threads > 1
+        ? kls_snb_refactor_parallel(solver, numeric_values, threads)
+        : kls_snb_refactor(solver, numeric_values);
+    const double trial = kls_now_seconds() - t0;
+    if (snb_ok) {
+      solver->snb_trial_seconds = trial;
+    } else {
+      solver->snb_decision = -1;
+      kls_snb_free(solver);
+      solver->snb_declined = 1;
+    }
+    if (kls_snb_trace_enabled()) {
+      fprintf(stderr, "KLS snb: factor-time trial %.3fms t%d ok=%ld\n",
+              trial * 1e3, threads, (long)snb_ok);
+    }
+  }
   *elapsed += kls_now_seconds() - accept_start;
 }
 
@@ -87418,12 +87520,17 @@ static int kls_snb_try_refactor(kls_solver *solver,
       }
       solver->snb_incumbent_seconds = solver->stats.refactor_seconds;
     }
-    const double t0 = kls_now_seconds();
-    const UF_long snb_ok =
-      threads > 1 ? kls_snb_refactor_parallel(solver, numeric_values,
-                                              threads)
-                  : kls_snb_refactor(solver, numeric_values);
-    const double snb_seconds = kls_now_seconds() - t0;
+    UF_long snb_ok = 1;
+    double snb_seconds = solver->snb_trial_seconds;
+    if (snb_seconds <= 0.0) {
+      /* no factor-time trial (values not retained there): trial now */
+      const double t0 = kls_now_seconds();
+      snb_ok =
+        threads > 1 ? kls_snb_refactor_parallel(solver, numeric_values,
+                                                threads)
+                    : kls_snb_refactor(solver, numeric_values);
+      snb_seconds = kls_now_seconds() - t0;
+    }
     solver->snb_decision =
       snb_ok && snb_seconds < 0.97 * solver->snb_incumbent_seconds ? 1 : -1;
     if (kls_snb_trace_enabled()) {
@@ -87435,8 +87542,21 @@ static int kls_snb_try_refactor(kls_solver *solver,
     if (solver->snb_decision < 0) {
       kls_snb_free(solver);
       solver->snb_declined = 1;
+      if (solver->snb_trial_seconds > 0.0 || !snb_ok) {
+        return 0; /* nothing computed this call; incumbent runs it */
+      }
+    }
+    if (solver->snb_decision > 0 && solver->snb_trial_seconds > 0.0) {
+      /* decided from the stored trial: compute this call with the engine */
+      snb_ok =
+        threads > 1 ? kls_snb_refactor_parallel(solver, numeric_values,
+                                                threads)
+                    : kls_snb_refactor(solver, numeric_values);
       if (!snb_ok) {
-        return 0; /* engine failed; let the incumbent redo this call */
+        solver->snb_decision = -1;
+        kls_snb_free(solver);
+        solver->snb_declined = 1;
+        return 0;
       }
     }
     *ok_out = snb_ok;
@@ -114155,7 +114275,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   kls_update_numeric_diagnostics(solver, 0);
   const double build_done = kls_now_seconds();
   kls_maybe_prepare_snode_panels(solver, elapsed);
-  kls_snb_maybe_accept(solver, elapsed);
+  kls_snb_maybe_accept(solver, numeric_values, elapsed);
   const double snode_done = kls_now_seconds();
   maybe_prepare_refactor_map(solver, elapsed);
   const double map_done = kls_now_seconds();
@@ -116235,7 +116355,7 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
     free_snode_panels(solver);
     solver->snode_numeric_pre_sorted = 1;
     kls_maybe_prepare_snode_panels(solver, elapsed);
-  kls_snb_maybe_accept(solver, elapsed);
+  kls_snb_maybe_accept(solver, numeric_values, elapsed);
   }
   if (!kls_predicted_suffix_close_numeric(solver)) {
     return 0;
@@ -116307,7 +116427,7 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
   free_snode_panels(solver);
   solver->snode_numeric_pre_sorted = 1;
   kls_maybe_prepare_snode_panels(solver, elapsed);
-  kls_snb_maybe_accept(solver, elapsed);
+  kls_snb_maybe_accept(solver, numeric_values, elapsed);
   maybe_prepare_refactor_map(solver, elapsed);
   maybe_prepare_refactor_schedule(solver, elapsed);
   return filled;
@@ -116317,6 +116437,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+  solver->snb_factor_start = kls_now_seconds();
   kls_set_last_factor_path(solver, KLS_FACTOR_PATH_NONE);
   kls_clear_fast_reject_stats(solver);
   kls_clear_tail_last_stats(solver);
@@ -116362,7 +116483,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         }
       }
       kls_maybe_prepare_snode_panels(solver, &elapsed);
-      kls_snb_maybe_accept(solver, &elapsed);
+      kls_snb_maybe_accept(solver, numeric_values, &elapsed);
       kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
       maybe_prepare_refactor_map(solver, &elapsed);
       maybe_prepare_refactor_schedule(solver, &elapsed);
@@ -116544,7 +116665,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     elapsed += kls_now_seconds() - start;
   }
   kls_maybe_prepare_snode_panels(solver, &elapsed);
-      kls_snb_maybe_accept(solver, &elapsed);
+      kls_snb_maybe_accept(solver, numeric_values, &elapsed);
   kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
   maybe_prepare_refactor_map(solver, &elapsed);
   maybe_prepare_refactor_schedule(solver, &elapsed);
