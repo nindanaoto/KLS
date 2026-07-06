@@ -85999,6 +85999,14 @@ static int kls_snb_prepare(kls_solver *solver) {
     double *lu = (double *)numeric->LUbx[block];
 
     /* greedy zeta amalgamation over sorted L patterns */
+    double snb_zeta = KLS_SNB_ZETA;
+    {
+      const char *z = getenv("KLS_SNB_ZETA");
+      if (z != NULL && z[0] != '\0') {
+        const double parsed = atof(z);
+        if (parsed >= 0.0 && parsed <= 16.0) snb_zeta = parsed;
+      }
+    }
     blk->col2snode = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
     if (blk->col2snode == NULL) { ok = 0; break; }
     int64_t ns = 0;
@@ -86033,7 +86041,7 @@ static int kls_snb_prepare(kls_solver *solver) {
           const double dense = (double)nw * (double)below +
                                (double)nw * (double)(nw - 1u) / 2.0;
           const double truth = (double)(true_entries + (int64_t)len2);
-          if (dense > (1.0 + KLS_SNB_ZETA) * truth) {
+          if (dense > (1.0 + snb_zeta) * truth) {
             break;
           }
           memcpy(union_rows, merge_tmp, (size_t)m * sizeof(UF_long));
@@ -86710,6 +86718,89 @@ static UF_long kls_snb_refactor(kls_solver *solver,
 static int kls_snb_env_disabled(void) {
   const char *value = getenv("KLS_DISABLE_SNB_REFACTOR");
   return value != NULL && value[0] == '1';
+}
+
+
+/* Run the supernodal acceptance at factor time so its one-time A/B cost
+ * lands in the once-charged factor term instead of inflating the first
+ * (99x-charged) refactor.  Also lets snb sort the numeric below the
+ * snode-panel flops floor: panels have no batch-run floor of their own,
+ * and TSOPF-class fused-block rows live down there. */
+static void kls_snb_maybe_accept(kls_solver *solver, double *elapsed) {
+  if (solver == NULL || solver->snb_decision != 0 || solver->snb_declined ||
+      kls_snb_env_disabled() || solver->fp32_decision > 0 ||
+      solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->numeric->LUbx == NULL || solver->values == NULL ||
+      solver->common.status == TRILINOS_KLU_SINGULAR) {
+    return;
+  }
+  const double accept_start = kls_now_seconds();
+  if (!solver->snode_prepared) {
+    /* relaxed sort: same safety guards as the snode-panel prep, lower
+       size floor (no retained position-based structures may exist) */
+    if (solver->n < 2000u || solver->common.flops < 5.0e5 ||
+        solver->refactor_col_ptr != NULL ||
+        solver->refactor_level_ptr != NULL ||
+        solver->refactor_l_indices32 != NULL ||
+        solver->row_refactor_group_count != 0u ||
+        solver->row_refactor_values_ready ||
+        solver->stats.last_factor_path == KLS_FACTOR_PATH_KLS_FIRST) {
+      *elapsed += kls_now_seconds() - accept_start;
+      return;
+    }
+    solver->snode_prepared = 1;
+    if (!solver->snode_numeric_pre_sorted &&
+        !trilinos_klu_l_sort(solver->symbolic, solver->numeric,
+                             &solver->common)) {
+      solver->snb_declined = 1;
+      *elapsed += kls_now_seconds() - accept_start;
+      return;
+    }
+    solver->snode_numeric_pre_sorted = 1;
+  }
+  if (!kls_snb_prepare(solver)) {
+    if (solver->snb_declined) {
+      solver->snb_decision = -1;
+    }
+    *elapsed += kls_now_seconds() - accept_start;
+    return;
+  }
+  const double *values = solver->values;
+  const double t0 = kls_now_seconds();
+  const int mapped = kls_mapped_refactor(solver, (double *)values, 0);
+  double landed_seconds = kls_now_seconds() - t0;
+  int landed_ok = mapped > 0;
+  if (mapped < 0) {
+    const UF_long klu_ok =
+      trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
+                              (double *)values, solver->symbolic,
+                              solver->numeric, &solver->common);
+    landed_seconds = kls_now_seconds() - t0;
+    landed_ok = klu_ok != 0;
+  }
+  if (!landed_ok) {
+    solver->snb_decision = -1;
+    kls_snb_free(solver);
+    solver->snb_declined = 1;
+    *elapsed += kls_now_seconds() - accept_start;
+    return;
+  }
+  const double t1 = kls_now_seconds();
+  const UF_long snb_ok = kls_snb_refactor(solver, values);
+  const double snb_seconds = kls_now_seconds() - t1;
+  solver->snb_decision =
+    snb_ok && snb_seconds < 0.97 * landed_seconds ? 1 : -1;
+  if (kls_snb_trace_enabled()) {
+    fprintf(stderr,
+            "KLS snb: factor-time acceptance landed %.3fms snb %.3fms -> %s\n",
+            landed_seconds * 1e3, snb_seconds * 1e3,
+            solver->snb_decision > 0 ? "adopted" : "rejected");
+  }
+  if (solver->snb_decision < 0) {
+    kls_snb_free(solver);
+    solver->snb_declined = 1;
+  }
+  *elapsed += kls_now_seconds() - accept_start;
 }
 
 /* Try the supernodal refactor.  Returns 1 when it handled the call (with
@@ -113493,6 +113584,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   kls_update_numeric_diagnostics(solver, 0);
   const double build_done = kls_now_seconds();
   kls_maybe_prepare_snode_panels(solver, elapsed);
+  kls_snb_maybe_accept(solver, elapsed);
   const double snode_done = kls_now_seconds();
   maybe_prepare_refactor_map(solver, elapsed);
   const double map_done = kls_now_seconds();
@@ -115572,6 +115664,7 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
     free_snode_panels(solver);
     solver->snode_numeric_pre_sorted = 1;
     kls_maybe_prepare_snode_panels(solver, elapsed);
+  kls_snb_maybe_accept(solver, elapsed);
   }
   if (!kls_predicted_suffix_close_numeric(solver)) {
     return 0;
@@ -115643,6 +115736,7 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
   free_snode_panels(solver);
   solver->snode_numeric_pre_sorted = 1;
   kls_maybe_prepare_snode_panels(solver, elapsed);
+  kls_snb_maybe_accept(solver, elapsed);
   maybe_prepare_refactor_map(solver, elapsed);
   maybe_prepare_refactor_schedule(solver, elapsed);
   return filled;
@@ -115697,6 +115791,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         }
       }
       kls_maybe_prepare_snode_panels(solver, &elapsed);
+      kls_snb_maybe_accept(solver, &elapsed);
       kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
       maybe_prepare_refactor_map(solver, &elapsed);
       maybe_prepare_refactor_schedule(solver, &elapsed);
@@ -115878,6 +115973,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     elapsed += kls_now_seconds() - start;
   }
   kls_maybe_prepare_snode_panels(solver, &elapsed);
+      kls_snb_maybe_accept(solver, &elapsed);
   kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
   maybe_prepare_refactor_map(solver, &elapsed);
   maybe_prepare_refactor_schedule(solver, &elapsed);
