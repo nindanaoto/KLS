@@ -1,0 +1,506 @@
+/* Prototype: amalgamated-supernode left-looking LU refactor with dense
+ * row-major L panels as primary storage.
+ *
+ * detect: greedy amalgamation over the sorted KLU numeric's column patterns
+ *   (padding budget zeta, width cap WMAX).
+ * refactor: per supernode S, gather A into a full-height panel W
+ *   [rows(S) x w] (U rows + diag block + L rows); for each producer
+ *   supernode P ascending: gather U_blk from W via row positions, unit-lower
+ *   TRSM against P's diag block, then fused GEMM-scatter of P's below rows
+ *   into W; factor S's diag block (no pivoting) and TRSM the below rows.
+ *   The panel below the diag IS the L storage the next refactor's consumers
+ *   read.  Verified against klu_l_refactor Udiag. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
+#include "trilinos_klu_decl.h"
+typedef long I;
+#define WMAX 32
+static double now_sec(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec + 1e-9 * ts.tv_nsec;
+}
+static inline void get_ptr(double *lu, const I *xip, const I *xlen, I k,
+                           I **xi, double **xx, I *len) {
+  double *xp = lu + xip[k];
+  *len = xlen[k];
+  *xi = (I *)xp;
+  *xx = xp + *len;
+}
+#include "read_mtx.inc"
+
+typedef struct {
+  I g, e;         /* local col range [g,e) */
+  I nrows;        /* rows in panel = |U-union| + w + |L-union| */
+  I dpos;         /* panel row index of column g (diag block start) */
+  I *rows;        /* local row indices, ascending, length nrows */
+  double *panel;  /* row-major [nrows][w] */
+  I nprod;        /* producer supernodes */
+  I *prod;        /* producer supernode ids, ascending */
+} snode;
+
+typedef struct {
+  I nsn;
+  snode *sn;
+  I *sn_of;       /* local col -> supernode id */
+} sn_block;
+
+/* greedy amalgamation for one BTF block over sorted patterns */
+static void build_snodes(I nk, I k1, trilinos_klu_l_numeric *num, I block,
+                         double zeta, sn_block *out) {
+  I *Lip = num->Lip + k1;
+  I *Llen = num->Llen + k1;
+  I *Uip = num->Uip + k1;
+  I *Ulen = num->Ulen + k1;
+  double *LU = (double *)num->LUbx[block];
+  out->sn = malloc((size_t)nk * sizeof(snode));
+  out->sn_of = malloc((size_t)nk * sizeof(I));
+  out->nsn = 0;
+  I *lunion = malloc((size_t)nk * sizeof(I));   /* current L union */
+  I *ltmp = malloc((size_t)nk * sizeof(I));
+  I *uunion = malloc((size_t)nk * sizeof(I));   /* current U union */
+  I *utmp = malloc((size_t)nk * sizeof(I));
+  I g = 0;
+  while (g < nk) {
+    I lu_len = 0, uu_len = 0;
+    double actual = 0.0;
+    {
+      I *li; double *lx; I ll;
+      get_ptr(LU, Lip, Llen, g, &li, &lx, &ll);
+      memcpy(lunion, li, (size_t)ll * sizeof(I));
+      lu_len = ll;
+      actual = ll;
+      I *ui; double *ux; I ul;
+      get_ptr(LU, Uip, Ulen, g, &ui, &ux, &ul);
+      memcpy(uunion, ui, (size_t)ul * sizeof(I));
+      uu_len = ul;
+    }
+    I e = g + 1;
+    while (e < nk && e - g < WMAX) {
+      I *li; double *lx; I ll;
+      get_ptr(LU, Lip, Llen, e, &li, &lx, &ll);
+      /* candidate L union = (lunion minus row e) merge li */
+      I nl = 0;
+      {
+        I a = 0, b = 0;
+        while (a < lu_len && b < ll) {
+          I ra = lunion[a], rb = li[b];
+          if (ra == e) { a++; continue; }
+          if (ra < rb) { ltmp[nl++] = ra; a++; }
+          else if (rb < ra) { ltmp[nl++] = rb; b++; }
+          else { ltmp[nl++] = ra; a++; b++; }
+        }
+        while (a < lu_len) { if (lunion[a] != e) ltmp[nl++] = lunion[a]; a++; }
+        while (b < ll) { ltmp[nl++] = li[b++]; }
+      }
+      const I w = e - g + 1;
+      const double cand_actual = actual + ll;
+      /* dense panel entries below diag (incl. unit triangle) */
+      const double dense = (double)nl * w + (double)w * (w - 1) / 2.0;
+      if (dense > (1.0 + zeta) * cand_actual) {
+        break;
+      }
+      /* accept e into the supernode */
+      memcpy(lunion, ltmp, (size_t)nl * sizeof(I));
+      lu_len = nl;
+      actual = cand_actual;
+      I *ui; double *ux; I ul;
+      get_ptr(LU, Uip, Ulen, e, &ui, &ux, &ul);
+      I nu = 0;
+      {
+        I a = 0, b = 0;
+        while (a < uu_len && b < ul) {
+          I ra = uunion[a], rb = ui[b];
+          if (ra < rb) { utmp[nu++] = ra; a++; }
+          else if (rb < ra) { utmp[nu++] = rb; b++; }
+          else { utmp[nu++] = ra; a++; b++; }
+        }
+        while (a < uu_len) utmp[nu++] = uunion[a++];
+        while (b < ul) utmp[nu++] = ui[b++];
+      }
+      memcpy(uunion, utmp, (size_t)nu * sizeof(I));
+      uu_len = nu;
+      e++;
+    }
+    /* U union minus in-supernode rows (>= g) */
+    I uu_ext = 0;
+    for (I p = 0; p < uu_len; ++p) {
+      if (uunion[p] < g) uu_ext++;
+    }
+    snode *s = &out->sn[out->nsn];
+    s->g = g; s->e = e;
+    const I w = e - g;
+    s->dpos = uu_ext;
+    s->nrows = uu_ext + w + lu_len;
+    s->rows = malloc((size_t)s->nrows * sizeof(I));
+    I c = 0;
+    for (I p = 0; p < uu_len; ++p) {
+      if (uunion[p] < g) s->rows[c++] = uunion[p];
+    }
+    for (I m = g; m < e; ++m) s->rows[c++] = m;
+    for (I p = 0; p < lu_len; ++p) {
+      if (lunion[p] >= e) s->rows[c++] = lunion[p];
+    }
+    s->nrows = c;
+    s->panel = calloc((size_t)c * (size_t)w, sizeof(double));
+    s->prod = NULL; s->nprod = 0;
+    for (I m = g; m < e; ++m) out->sn_of[m] = out->nsn;
+    out->nsn++;
+    g = e;
+  }
+  /* producer lists */
+  I *stampv = calloc((size_t)out->nsn, sizeof(I));
+  I *plist = malloc((size_t)out->nsn * sizeof(I));
+  for (I si = 0; si < out->nsn; ++si) {
+    snode *s = &out->sn[si];
+    I np = 0;
+    for (I m = s->g; m < s->e; ++m) {
+      I *ui; double *ux; I ul;
+      get_ptr(LU, Uip, Ulen, m, &ui, &ux, &ul);
+      for (I p = 0; p < ul; ++p) {
+        if (ui[p] >= s->g) break;
+        const I pid = out->sn_of[ui[p]];
+        if (stampv[pid] != si + 1) {
+          stampv[pid] = si + 1;
+          plist[np++] = pid;
+        }
+      }
+    }
+    /* ascending by construction? U lists ascending per col but merged across
+       cols; sort */
+    for (I a = 1; a < np; ++a) {
+      I v = plist[a]; I b = a;
+      while (b > 0 && plist[b - 1] > v) { plist[b] = plist[b - 1]; b--; }
+      plist[b] = v;
+    }
+    s->nprod = np;
+    s->prod = malloc((size_t)(np > 0 ? np : 1) * sizeof(I));
+    memcpy(s->prod, plist, (size_t)np * sizeof(I));
+  }
+  free(stampv); free(plist);
+  free(lunion); free(ltmp); free(uunion); free(utmp);
+}
+
+#define WNARROW 4
+/* scalar path for a narrow supernode: classic left-looking through a dense
+ * X array, reading producer L columns from their dense panels (strided). */
+static int sn_refactor_narrow(const snode *s, I k1, const I *Ap, const I *Ai,
+                              const double *Az, const I *Q, const I *Pinv,
+                              double *Udiag_out, const sn_block *sb,
+                              double *X, double *Offx, I *poff, I nzoff) {
+  const I w = s->e - s->g;
+  for (I m = s->g; m < s->e; ++m) {
+    const I oldcol = Q[m + k1];
+    for (I p = Ap[oldcol]; p < Ap[oldcol + 1]; ++p) {
+      const I newrow = Pinv[Ai[p]] - k1;
+      if (newrow < 0) {
+        if (*poff < nzoff) Offx[(*poff)++] = Az[p];
+        continue;
+      }
+      X[newrow] = Az[p];
+    }
+    /* consume producers ascending: all rows of s->rows below m's position
+       that are < m are producers (external or in-supernode) */
+    for (I ri2 = 0; ri2 < s->nrows; ++ri2) {
+      const I j = s->rows[ri2];
+      if (j >= m) break;
+      const double u = X[j];
+      /* u belongs to col m's U pattern or is structurally 0 */
+      if (u == 0.0) continue;
+      X[j] = 0.0;
+      /* record u implicitly; scatter producer column j */
+      const snode *P = &sb->sn[sb->sn_of[j]];
+      const I wp = P->e - P->g;
+      const I cc = j - P->g;
+      const double *panel = P->panel;
+      /* diag-block rows below j within P */
+      const I jd = P->dpos + cc;
+      for (I r = jd + 1; r < P->dpos + wp; ++r) {
+        const double lv = panel[(size_t)r * wp + cc];
+        if (lv != 0.0) X[P->rows[r]] -= lv * u;
+      }
+      for (I r = P->dpos + wp; r < P->nrows; ++r) {
+        const double lv = panel[(size_t)r * wp + cc];
+        if (lv != 0.0) X[P->rows[r]] -= lv * u;
+      }
+      /* stash u into this snode's own panel U row for m */
+      /* (prototype: not stored; only Udiag verified) */
+    }
+    const double ukk = X[m];
+    X[m] = 0.0;
+    if (ukk == 0.0) return 0;
+    Udiag_out[m + k1] = ukk;
+    /* store L column m into s panel (column m - s->g), and clear X */
+    {
+      const I cc = m - s->g;
+      double *panel = s->panel;
+      for (I r = s->dpos + (m - s->g) + 1; r < s->nrows; ++r) {
+        const I row = s->rows[r];
+        panel[(size_t)r * w + cc] = X[row] / ukk;
+        X[row] = 0.0;
+      }
+    }
+  }
+  return 1;
+}
+
+/* supernodal refactor for one block; rpos is an n-sized scratch (-1 filled) */
+static int sn_refactor_block(I nk, I k1, const I *Ap, const I *Ai,
+                             const double *Az, const I *Q, const I *Pinv,
+                             double *Udiag_out, sn_block *sb, I *rpos,
+                             double *ub_buf, double *Offx, I *poff, I nzoff,
+                             double *Xdense) {
+  for (I si = 0; si < sb->nsn; ++si) {
+    snode *s = &sb->sn[si];
+    const I w = s->e - s->g;
+    const I nr = s->nrows;
+    if (w < WNARROW) {
+      if (!sn_refactor_narrow(s, k1, Ap, Ai, Az, Q, Pinv, Udiag_out, sb,
+                              Xdense, Offx, poff, nzoff)) {
+        return 0;
+      }
+      continue;
+    }
+    double *W = s->panel;
+    memset(W, 0, (size_t)nr * (size_t)w * sizeof(double));
+    for (I i = 0; i < nr; ++i) rpos[s->rows[i]] = i;
+    /* gather A columns */
+    for (I m = s->g; m < s->e; ++m) {
+      const I oldcol = Q[m + k1];
+      const I cc = m - s->g;
+      for (I p = Ap[oldcol]; p < Ap[oldcol + 1]; ++p) {
+        const I newrow = Pinv[Ai[p]] - k1;
+        if (newrow < 0) {
+          if (*poff < nzoff) Offx[(*poff)++] = Az[p];
+          continue;
+        }
+        const I pos = rpos[newrow];
+        if (pos >= 0) W[(size_t)pos * w + cc] = Az[p];
+        /* rows outside the panel pattern are structural zeros of L/U */
+      }
+    }
+    /* external producer supernodes ascending */
+    for (I pi = 0; pi < s->nprod; ++pi) {
+      const snode *P = &sb->sn[s->prod[pi]];
+      const I wp = P->e - P->g;
+      /* gather U block [wp][w] from W rows of P's columns */
+      double *UB = ub_buf;
+      int any = 0;
+      for (I i = 0; i < wp; ++i) {
+        const I pos = rpos[P->g + i];
+        if (pos >= 0) {
+          memcpy(UB + (size_t)i * w, W + (size_t)pos * w,
+                 (size_t)w * sizeof(double));
+          for (I m2 = 0; m2 < w; ++m2) any |= UB[(size_t)i * w + m2] != 0.0;
+        } else {
+          memset(UB + (size_t)i * w, 0, (size_t)w * sizeof(double));
+        }
+      }
+      /* in-P unit-lower TRSM: UB = unitlower(P diag)^-1 UB.
+         P's diag block rows are P->panel[dpos + i], columns 0..i-1 hold the
+         multipliers below the unit diagonal (row-major). */
+      const double *PD = P->panel + (size_t)P->dpos * wp;
+      for (I i = 1; i < wp; ++i) {
+        const double *prow = PD + (size_t)i * wp;
+        double *ubi = UB + (size_t)i * w;
+        for (I k = 0; k < i; ++k) {
+          const double lv = prow[k];
+          if (lv == 0.0) continue;
+          const double *ubk = UB + (size_t)k * w;
+          for (I m2 = 0; m2 < w; ++m2) ubi[m2] -= lv * ubk[m2];
+        }
+      }
+      if (!any) {
+        /* still must write the u values back (zeros already there) */
+      }
+      /* write resolved u values back into W rows (they are U(:,S) values) */
+      for (I i = 0; i < wp; ++i) {
+        const I pos = rpos[P->g + i];
+        if (pos >= 0) {
+          memcpy(W + (size_t)pos * w, UB + (size_t)i * w,
+                 (size_t)w * sizeof(double));
+        }
+      }
+      /* fused GEMM-scatter: W[rows(P below) in S] -= L_P[below] * UB */
+      const I pb0 = P->dpos + wp;
+      for (I r = pb0; r < P->nrows; ++r) {
+        const I pos = rpos[P->rows[r]];
+        if (pos < 0) continue;
+        const double *lrow = P->panel + (size_t)r * wp;
+        double *wrow = W + (size_t)pos * w;
+        for (I k = 0; k < wp; ++k) {
+          const double lv = lrow[k];
+          if (lv == 0.0) continue;
+          const double *ubk = UB + (size_t)k * w;
+          for (I m2 = 0; m2 < w; ++m2) wrow[m2] -= lv * ubk[m2];
+        }
+      }
+    }
+    /* factor the diag block (no pivoting) and TRSM below rows */
+    double *D = W + (size_t)s->dpos * w;
+    for (I k = 0; k < w; ++k) {
+      double *dk = D + (size_t)k * w;
+      const double ukk = dk[k];
+      if (ukk == 0.0) { for (I i = 0; i < nr; ++i) rpos[s->rows[i]] = -1; return 0; }
+      Udiag_out[s->g + k + k1] = ukk;
+      for (I i = k + 1; i < w; ++i) {
+        double *di = D + (size_t)i * w;
+        const double m = di[k] / ukk;
+        di[k] = m;
+        for (I j = k + 1; j < w; ++j) di[j] -= m * dk[j];
+      }
+    }
+    /* below rows: solve x * U = wrow (upper-tri U in D) */
+    for (I r = s->dpos + w; r < nr; ++r) {
+      double *wrow = W + (size_t)r * w;
+      for (I j = 0; j < w; ++j) {
+        double v = wrow[j];
+        for (I k = 0; k < j; ++k) v -= wrow[k] * D[(size_t)k * w + j];
+        wrow[j] = v / D[(size_t)j * w + j];
+      }
+    }
+    for (I i = 0; i < nr; ++i) rpos[s->rows[i]] = -1;
+  }
+  return 1;
+}
+
+int main(int argc, char **argv) {
+  I n, *cp, *ri; double *vx;
+  int reps = argc > 2 ? atoi(argv[2]) : 10;
+  double zeta = argc > 3 ? atof(argv[3]) : 0.2;
+  if (!read_mtx(argv[1], &n, &cp, &ri, &vx)) { fprintf(stderr, "read fail\n"); return 1; }
+  trilinos_klu_l_common common;
+  trilinos_klu_l_defaults(&common);
+  common.scale = 0;
+  trilinos_klu_l_symbolic *sym = trilinos_klu_l_analyze(n, cp, ri, &common);
+  trilinos_klu_l_numeric *num = trilinos_klu_l_factor(cp, ri, vx, sym, &common);
+  if (!num) { fprintf(stderr, "factor fail\n"); return 1; }
+  trilinos_klu_l_flops(sym, num, &common);
+  trilinos_klu_l_sort(sym, num, &common);
+  const I *R = sym->R;
+  const I *Q = sym->Q;
+  const I *Pinv = num->Pinv;
+  sn_block *blocks = calloc((size_t)sym->nblocks, sizeof(sn_block));
+  double dense_entries = 0, sparse_entries = 0;
+  I nsn_total = 0, wmax_seen = 0;
+  double wsum = 0;
+  for (I b = 0; b < sym->nblocks; ++b) {
+    I k1 = R[b], k2 = R[b + 1], nk = k2 - k1;
+    if (nk < 2) continue;
+    build_snodes(nk, k1, num, b, zeta, &blocks[b]);
+    for (I si = 0; si < blocks[b].nsn; ++si) {
+      snode *s = &blocks[b].sn[si];
+      const I w = s->e - s->g;
+      dense_entries += (double)(s->nrows - s->dpos) * w;
+      if (w > wmax_seen) wmax_seen = w;
+      wsum += w;
+    }
+    nsn_total += blocks[b].nsn;
+    for (I k = 0; k < nk; ++k) sparse_entries += num->Llen[k1 + k] + num->Ulen[k1 + k] + 1;
+  }
+  printf("n=%ld flops=%.3e nsn=%ld avg_w=%.1f wmax=%ld dense/sparse entries %.3e/%.3e (pad %.1f%%)\n",
+         (long)n, common.flops, (long)nsn_total, wsum / (nsn_total > 0 ? nsn_total : 1),
+         (long)wmax_seen, dense_entries, sparse_entries,
+         100.0 * (dense_entries - sparse_entries) / (sparse_entries > 0 ? sparse_entries : 1));
+  I *rpos = malloc((size_t)n * sizeof(I));
+  for (I i = 0; i < n; ++i) rpos[i] = -1;
+  double *ub_buf = malloc((size_t)WMAX * WMAX * 8 * sizeof(double));
+  double *Xd = calloc((size_t)sym->maxblock, sizeof(double));
+  double *ud_ref = malloc((size_t)n * sizeof(double));
+  double *ud_mine = malloc((size_t)n * sizeof(double));
+  trilinos_klu_l_refactor(cp, ri, vx, sym, num, &common);
+  memcpy(ud_ref, num->Udiag, (size_t)n * sizeof(double));
+  /* one supernodal pass for verification */
+  {
+    I poff = 0;
+    memcpy(ud_mine, num->Udiag, (size_t)n * sizeof(double));
+    for (I b = 0; b < sym->nblocks; ++b) {
+      I k1 = R[b], k2 = R[b + 1], nk = k2 - k1;
+      if (nk < 2) {
+        I oldcol = Q[k1];
+        double sdiag = 0.0;
+        for (I p = cp[oldcol]; p < cp[oldcol + 1]; ++p) {
+          I newrow = Pinv[ri[p]] - k1;
+          if (newrow < 0 && poff < num->nzoff) ((double *)num->Offx)[poff++] = vx[p];
+          else sdiag = vx[p];
+        }
+        ud_mine[k1] = sdiag;
+        continue;
+      }
+      if (!sn_refactor_block(nk, k1, cp, ri, vx, Q, Pinv, ud_mine, &blocks[b],
+                             rpos, ub_buf, (double *)num->Offx, &poff,
+                             num->nzoff, Xd)) {
+        fprintf(stderr, "sn refactor singular\n");
+        return 1;
+      }
+    }
+  }
+  double mr = 0;
+  I first_bad = -1;
+  for (I i = 0; i < n; ++i) {
+    double d = fabs(ud_mine[i] - ud_ref[i]);
+    double sden = fabs(ud_ref[i]) > 1e-300 ? fabs(ud_ref[i]) : 1.0;
+    if (d / sden > 1e-6 && first_bad < 0) first_bad = i;
+    if (d / sden > mr) mr = d / sden;
+  }
+  printf("supernodal udiag max rel diff: %.2e first_bad=%ld\n", mr,
+         (long)first_bad);
+  if (first_bad >= 0) {
+    /* locate block and supernode */
+    for (I b = 0; b < sym->nblocks; ++b) {
+      I k1 = R[b], k2 = R[b + 1];
+      if (first_bad < k1 || first_bad >= k2) continue;
+      I lk = first_bad - k1;
+      printf("  in block %ld (k1=%ld nk=%ld)\n", (long)b, (long)k1,
+             (long)(k2 - k1));
+      if (k2 - k1 >= 2 && blocks[b].sn_of != NULL) {
+        snode *s = &blocks[b].sn[blocks[b].sn_of[lk]];
+        printf("  snode g=%ld e=%ld nrows=%ld dpos=%ld nprod=%ld\n",
+               (long)s->g, (long)s->e, (long)s->nrows, (long)s->dpos,
+               (long)s->nprod);
+        I *Uip = num->Uip + k1; I *Ulen = num->Ulen + k1;
+        double *LUb = (double *)num->LUbx[b];
+        I *ui; double *ux; I ul;
+        get_ptr(LUb, Uip, Ulen, lk, &ui, &ux, &ul);
+        printf("  col local=%ld Ulen=%ld upattern:", (long)lk, (long)ul);
+        for (I p = 0; p < ul && p < 12; ++p) printf(" %ld", (long)ui[p]);
+        printf("\n  mine=%.17g ref=%.17g\n", ud_mine[first_bad],
+               ud_ref[first_bad]);
+      }
+      break;
+    }
+  }
+  double t0 = now_sec();
+  for (int r = 0; r < reps; ++r) trilinos_klu_l_refactor(cp, ri, vx, sym, num, &common);
+  double t1 = now_sec();
+  double klu_ms = (t1 - t0) * 1000.0 / reps;
+  t0 = now_sec();
+  for (int r = 0; r < reps; ++r) {
+    I poff = 0;
+    for (I b = 0; b < sym->nblocks; ++b) {
+      I k1 = R[b], k2 = R[b + 1], nk = k2 - k1;
+      if (nk < 2) {
+        I oldcol = Q[k1];
+        double sdiag = 0.0;
+        for (I p = cp[oldcol]; p < cp[oldcol + 1]; ++p) {
+          I newrow = Pinv[ri[p]] - k1;
+          if (newrow < 0 && poff < num->nzoff) ((double *)num->Offx)[poff++] = vx[p];
+          else sdiag = vx[p];
+        }
+        ud_mine[k1] = sdiag;
+        continue;
+      }
+      sn_refactor_block(nk, k1, cp, ri, vx, Q, Pinv, ud_mine, &blocks[b],
+                        rpos, ub_buf, (double *)num->Offx, &poff, num->nzoff,
+                        Xd);
+    }
+  }
+  t1 = now_sec();
+  double sn_ms = (t1 - t0) * 1000.0 / reps;
+  printf("refactor ms/iter: klu=%.2f supernodal=%.2f (%.2fx vs klu)\n",
+         klu_ms, sn_ms, klu_ms / sn_ms);
+  return 0;
+}
