@@ -1847,10 +1847,10 @@ typedef struct kls_parallel_refactor_shared {
   int halt_if_singular;
   int check_pivots;
   double pivot_tolerance;
-  UF_long next_block;
+  atomic_ulong next_block;
   UF_long block_chunk;
   unsigned char *block_done;
-  int stop;
+  atomic_int stop;
   pthread_mutex_t lock;
 } kls_parallel_refactor_shared;
 
@@ -2263,11 +2263,12 @@ struct kls_refactor_pool {
   unsigned char *block_done;
   UF_long block_done_capacity;
   UF_long maxblock;
-  unsigned long generation;
+  atomic_ulong generation;
   int thread_count;
   int created_count;
-  int active_workers;
-  int shutdown;
+  atomic_int active_workers;
+  atomic_int shutdown;
+  int busy_wait;
   int scratch_dirty;
   int conds_initialized;
   int lock_initialized;
@@ -20361,39 +20362,57 @@ static void *kls_refactor_pool_worker_main(void *arg) {
   kls_parallel_refactor_shared *shared = worker->shared;
   unsigned long seen_generation = 0;
 
-  pthread_mutex_lock(&shared->lock);
   for (;;) {
-    while (!pool->shutdown && pool->generation == seen_generation) {
-      pthread_cond_wait(&pool->work_cond, &shared->lock);
-    }
-    if (pool->shutdown) {
-      pthread_mutex_unlock(&shared->lock);
-      return NULL;
-    }
-    seen_generation = pool->generation;
-    pthread_mutex_unlock(&shared->lock);
-
+    /* Spin briefly for the next generation before sleeping: repeated
+       SPICE refactors arrive back to back, and at BTF-fragment scale
+       (~1ms per refactor) the futex round trips dominate dispatch. */
+    unsigned long generation;
+    unsigned spin = 0;
     for (;;) {
-      pthread_mutex_lock(&shared->lock);
-      if (shared->stop || shared->next_block >= shared->symbolic->nblocks) {
-        pthread_mutex_unlock(&shared->lock);
+      if (atomic_load_explicit(&pool->shutdown, memory_order_acquire)) {
+        return NULL;
+      }
+      generation =
+        atomic_load_explicit(&pool->generation, memory_order_acquire);
+      if (generation != seen_generation) {
         break;
       }
-      const UF_long begin = shared->next_block;
-      UF_long end = begin + shared->block_chunk;
-      if (end < begin || end > shared->symbolic->nblocks) {
-        end = shared->symbolic->nblocks;
+      if (pool->busy_wait && spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
+        spin++;
+        kls_cpu_relax();
+        continue;
       }
-      shared->next_block = end;
+      pthread_mutex_lock(&shared->lock);
+      while (!atomic_load_explicit(&pool->shutdown, memory_order_acquire) &&
+             atomic_load_explicit(&pool->generation, memory_order_acquire) ==
+               seen_generation) {
+        pthread_cond_wait(&pool->work_cond, &shared->lock);
+      }
       pthread_mutex_unlock(&shared->lock);
+      spin = 0;
+    }
+    seen_generation = generation;
 
+    const UF_long nblocks = shared->symbolic->nblocks;
+    const UF_long chunk = shared->block_chunk > 0 ? shared->block_chunk : 1u;
+    for (;;) {
+      if (atomic_load_explicit(&shared->stop, memory_order_acquire)) {
+        break;
+      }
+      const UF_long begin = (UF_long)atomic_fetch_add_explicit(
+        &shared->next_block, (unsigned long)chunk, memory_order_acq_rel);
+      if (begin >= nblocks) {
+        break;
+      }
+      UF_long end = begin + chunk;
+      if (end < begin || end > nblocks) {
+        end = nblocks;
+      }
       for (UF_long block = begin; block < end; ++block) {
         kls_parallel_refactor_block(worker, block);
         if (worker->invalid || worker->pivot_rejected ||
             (worker->singular && shared->halt_if_singular)) {
-          pthread_mutex_lock(&shared->lock);
-          shared->stop = 1;
-          pthread_mutex_unlock(&shared->lock);
+          atomic_store_explicit(&shared->stop, 1, memory_order_release);
           break;
         }
         if (shared->block_done != NULL) {
@@ -20406,10 +20425,11 @@ static void *kls_refactor_pool_worker_main(void *arg) {
       }
     }
 
-    pthread_mutex_lock(&shared->lock);
-    pool->active_workers--;
-    if (pool->active_workers == 0) {
+    if (atomic_fetch_sub_explicit(&pool->active_workers, 1,
+                                  memory_order_acq_rel) == 1) {
+      pthread_mutex_lock(&shared->lock);
       pthread_cond_signal(&pool->done_cond);
+      pthread_mutex_unlock(&shared->lock);
     }
   }
 }
@@ -20470,6 +20490,13 @@ static int ensure_refactor_pool(kls_solver *solver, int thread_count) {
   }
   pool->thread_count = thread_count;
   pool->maxblock = solver->symbolic->maxblock;
+  atomic_init(&pool->generation, 0ul);
+  atomic_init(&pool->active_workers, 0);
+  atomic_init(&pool->shutdown, 0);
+  {
+    const char *busy = getenv("KLS_DISABLE_REFACTOR_POOL_BUSY_WAIT");
+    pool->busy_wait = !(busy != NULL && busy[0] == '1');
+  }
   pool->threads = (pthread_t *)calloc((size_t)thread_count, sizeof(*pool->threads));
   pool->workers =
     (kls_parallel_refactor_worker *)calloc((size_t)thread_count, sizeof(*pool->workers));
@@ -20665,9 +20692,21 @@ static int run_refactor_pool(kls_solver *solver,
   }
   pool->scratch_dirty = 0;
 
-  pool->generation++;
+  atomic_fetch_add_explicit(&pool->generation, 1ul, memory_order_release);
   pthread_cond_broadcast(&pool->work_cond);
-  while (pool->active_workers > 0) {
+  pthread_mutex_unlock(&shared->lock);
+  if (pool->busy_wait) {
+    unsigned spin = 0;
+    while (atomic_load_explicit(&pool->active_workers,
+                                memory_order_acquire) > 0 &&
+           spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
+      spin++;
+      kls_cpu_relax();
+    }
+  }
+  pthread_mutex_lock(&shared->lock);
+  while (atomic_load_explicit(&pool->active_workers,
+                              memory_order_acquire) > 0) {
     pthread_cond_wait(&pool->done_cond, &shared->lock);
   }
   pthread_mutex_unlock(&shared->lock);
