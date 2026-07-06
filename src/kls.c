@@ -1809,6 +1809,7 @@ struct kls_solver {
   int kls_first_auto_skipped_scaled_single_block;
   UF_long kls_first_auto_skipped_scaled_single_block_count;
   int factor_etree_stats_valid;
+  int parallel_model_stats_valid;
   kls_separator_analysis separator;
 };
 
@@ -18581,6 +18582,7 @@ static void kls_invalidate_factor_etree_stats(kls_solver *solver) {
     return;
   }
   solver->factor_etree_stats_valid = 0;
+  solver->parallel_model_stats_valid = 0;
   solver->stats.factor_etree_block_start = -1;
   solver->stats.factor_etree_block_size = 0;
   solver->stats.factor_etree_levels = 0;
@@ -25373,7 +25375,13 @@ static int build_greedy_numeric_row_match(UF_long n,
       }
       if (matched == n) {
         improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
-        improve_numeric_row_match_by_paths(n, &graph, row_perm, col_match);
+        if (n > 20000u) {
+          /* The cycle-path search costs a quarter of a small matrix's
+             whole initialization; the downstream acceptance comparison
+             guards match quality either way (a weaker match that loses
+             just keeps the baseline factor). */
+          improve_numeric_row_match_by_paths(n, &graph, row_perm, col_match);
+        }
       }
 #ifdef KLS_HAVE_SPRAL_SCALING
       if (matched < n && n >= 4000u && n <= 150000u && nnz <= 1500000u) {
@@ -28491,8 +28499,14 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     solver->stats.nnz_l = (int64_t)solver->symbolic->lnz;
     solver->stats.nnz_u = (int64_t)solver->symbolic->unz;
   }
-  kls_update_parallel_model_stats(solver, 0);
-  kls_update_nicslu_task_flow_model_stats(solver);
+  if (!solver->parallel_model_stats_valid) {
+    /* Both models read only the numeric's pattern and the thread count;
+       recomputing them on every refactorization costs ~10% of a small
+       matrix's refactor. */
+    kls_update_parallel_model_stats(solver, 0);
+    kls_update_nicslu_task_flow_model_stats(solver);
+    solver->parallel_model_stats_valid = 1;
+  }
   kls_update_factor_etree_stats(solver);
   solver->stats.memory_bytes = solver->common.memusage;
   solver->stats.memory_peak_bytes = solver->common.mempeak;
@@ -28563,8 +28577,11 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->stats.nnz_l = (int64_t)solver->numeric->lnz;
     solver->stats.nnz_u = (int64_t)solver->numeric->unz;
   }
-  kls_update_parallel_model_stats(solver, 1);
-  kls_update_nicslu_task_flow_model_stats(solver);
+  if (!solver->parallel_model_stats_valid) {
+    kls_update_parallel_model_stats(solver, 1);
+    kls_update_nicslu_task_flow_model_stats(solver);
+    solver->parallel_model_stats_valid = 1;
+  }
   kls_update_factor_etree_stats(solver);
   solver->stats.refactor_dependency_levels =
     (int64_t)solver->refactor_level_count;
