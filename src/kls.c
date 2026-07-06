@@ -2634,6 +2634,10 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract(
   }
   UF_long p = 0;
   for (; p + 7u < length; p += 8u) {
+    if (p + 24u < length) {
+      __builtin_prefetch(&x[rows[p + 16u]], 1, 1);
+      __builtin_prefetch(&x[rows[p + 24u]], 1, 1);
+    }
     x[rows[p]] -= values[p] * scale;
     x[rows[p + 1u]] -= values[p + 1u] * scale;
     x[rows[p + 2u]] -= values[p + 2u] * scale;
@@ -2665,6 +2669,10 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract_i32(
   }
   UF_long p = 0;
   for (; p + 7u < length; p += 8u) {
+    if (p + 24u < length) {
+      __builtin_prefetch(&x[rows[p + 16u]], 1, 1);
+      __builtin_prefetch(&x[rows[p + 24u]], 1, 1);
+    }
     x[rows[p]] -= values[p] * scale;
     x[rows[p + 1u]] -= values[p + 1u] * scale;
     x[rows[p + 2u]] -= values[p + 2u] * scale;
