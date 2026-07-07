@@ -20048,7 +20048,8 @@ __attribute__((destructor)) static void kls_snode_trace_report(void) {
  * update with a single index stream.  The chunked tail update only pays for
  * itself when it vectorizes, so the function is multi-versioned and the
  * AVX2/FMA clone is selected at load time on capable hosts. */
-#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__) && \
+    !defined(__AVX512F__)
 __attribute__((target_clones("default", "arch=x86-64-v3")))
 #endif
 static UF_long kls_snode_batch_consume(
@@ -69060,7 +69061,8 @@ static int kls_egraph_refactor_dependency_done_now(
  * only taken when every producer in it is already published; otherwise the
  * scalar path performs its usual blocking wait.  Returns the number of
  * producers consumed (0 = no batch at position up). */
-#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__) && \
+    !defined(__AVX512F__)
 __attribute__((target_clones("default", "arch=x86-64-v3")))
 #endif
 static UF_long kls_snode_batch_consume_cached(
@@ -69187,7 +69189,8 @@ static UF_long kls_snode_batch_consume_cached(
   return t;
 }
 
-#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__) && \
+    !defined(__AVX512F__)
 __attribute__((target_clones("default", "arch=x86-64-v3")))
 #endif
 static UF_long kls_snode_batch_consume_cached_f32(
