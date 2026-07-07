@@ -24057,11 +24057,17 @@ static void kls_update_numeric_diagnostics(kls_solver *solver,
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
     return;
   }
+  const double t0 = kls_now_seconds();
   (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric,
                              &solver->common);
+  const double t1 = kls_now_seconds();
   if (include_rcond) {
     (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric,
                                &solver->common);
+  }
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS diag: flops %.3fs rcond %.3fs\n", t1 - t0,
+            kls_now_seconds() - t1);
   }
 }
 
@@ -27707,6 +27713,31 @@ struct kls_metis_race_s {
 };
 typedef struct kls_metis_race_s kls_metis_race;
 
+typedef struct {
+  kls_metis_race *race;
+  int slot;
+  int candidate;
+} kls_scale_trial_arg;
+
+static void *kls_scale_trial_main(void *argp) {
+  kls_scale_trial_arg *a = (kls_scale_trial_arg *)argp;
+  kls_metis_race *race = a->race;
+  kls_options trial_options = race->options;
+  trial_options.scale = a->candidate;
+  trilinos_klu_l_common trial_common;
+  if (apply_options_to_common(&trial_common, &trial_options) != KLS_OK) {
+    return NULL;
+  }
+  trilinos_klu_l_numeric *trial_numeric =
+    trilinos_klu_l_factor(race->col_ptr, race->row_idx, race->values_copy,
+                          (trilinos_klu_l_symbolic *)race->scale_symbolic,
+                          &trial_common);
+  race->scale_cand[a->slot] = a->candidate;
+  race->scale_common[a->slot] = trial_common;
+  race->scale_numeric[a->slot] = trial_numeric;
+  return NULL;
+}
+
 static void *kls_metis_race_main(void *arg) {
   kls_metis_race *race = (kls_metis_race *)arg;
   if (race->metis_wanted) {
@@ -27728,28 +27759,41 @@ static void *kls_metis_race_main(void *arg) {
     return NULL;
   }
   if (race->scale_wanted && race->scale_symbolic != NULL) {
+    /* the candidates are independent serial factors; run them
+       concurrently so the promotion's spin never outlives the
+       longest single trial */
     const int candidates[] = {-1, 1, 2};
+    kls_scale_trial_arg targs[3];
+    pthread_t ttids[3];
+    int spawned[3] = {0, 0, 0};
+    int nt = 0;
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]);
          ++i) {
       if (candidates[i] == race->options_base_scale) {
         continue;
       }
-      kls_options trial_options = race->options;
-      trial_options.scale = candidates[i];
-      trilinos_klu_l_common trial_common;
-      if (apply_options_to_common(&trial_common, &trial_options) !=
-          KLS_OK) {
-        continue;
+      targs[nt].race = race;
+      targs[nt].slot = nt;
+      targs[nt].candidate = candidates[i];
+      race->scale_cand[nt] = candidates[i];
+      race->scale_numeric[nt] = NULL;
+      nt++;
+    }
+    race->scale_count = nt;
+    for (int t = 1; t < nt; ++t) {
+      spawned[t] =
+        pthread_create(&ttids[t], NULL, kls_scale_trial_main,
+                       &targs[t]) == 0;
+    }
+    if (nt > 0) {
+      (void)kls_scale_trial_main(&targs[0]);
+    }
+    for (int t = 1; t < nt; ++t) {
+      if (spawned[t]) {
+        pthread_join(ttids[t], NULL);
+      } else {
+        (void)kls_scale_trial_main(&targs[t]);
       }
-      trilinos_klu_l_numeric *trial_numeric =
-        trilinos_klu_l_factor(race->col_ptr, race->row_idx,
-                              race->values_copy, race->scale_symbolic,
-                              &trial_common);
-      const int slot = race->scale_count;
-      race->scale_cand[slot] = candidates[i];
-      race->scale_common[slot] = trial_common;
-      race->scale_numeric[slot] = trial_numeric;
-      race->scale_count = slot + 1;
     }
   }
   atomic_store_explicit(&race->scale_done, 1, memory_order_release);
@@ -118790,6 +118834,91 @@ static int kls_i32_solve_ready(kls_solver *solver) {
             lruns > 0 ? (double)lcur / (double)lruns : 0.0,
             (long long)ucur, (long long)uruns,
             uruns > 0 ? (double)ucur / (double)uruns : 0.0);
+    /* dense trailing-suffix profile: largest d where the suffix
+       [d,n) of the dominant block has fill density >= 0.5, plus the
+       flop share carried by columns >= d */
+    if (getenv("KLS_TRACE_TAIL") != NULL) {
+      const trilinos_klu_l_symbolic *sym = solver->symbolic;
+      UF_long bbest = 0, bnk = 0;
+      for (UF_long b = 0; b < sym->nblocks; ++b) {
+        const UF_long w = sym->R[b + 1] - sym->R[b];
+        if (w > bnk) { bnk = w; bbest = b; }
+      }
+      const UF_long bk1 = sym->R[bbest];
+      const UF_long *bllen = solver->numeric->Llen + bk1;
+      const UF_long *bulen = solver->numeric->Ulen + bk1;
+      /* per-column flops: sum of llen over U deps */
+      double total_flops = 0.0;
+      double *colflops =
+        (double *)calloc((size_t)bnk, sizeof(double));
+      if (colflops != NULL) {
+        for (UF_long k = 0; k < bnk; ++k) {
+          const int32_t *ui =
+            solver->i32solve_u + solver->i32solve_uoff[bk1 + k];
+          double fl = 0.0;
+          for (UF_long p = 0; p < bulen[k]; ++p) {
+            fl += (double)bllen[ui[p]];
+          }
+          colflops[k] = fl;
+          total_flops += fl;
+        }
+        /* scan candidate suffix starts from the end */
+        double sufx_entries = 0.0, sufx_flops = 0.0;
+        UF_long best_d = bnk;
+        double best_share = 0.0, best_density = 0.0;
+        for (UF_long d = bnk; d-- > 0;) {
+          /* entries in suffix square: all below-diag L of col d land
+             below d; U rows >= d need a count */
+          UF_long uge = 0;
+          const int32_t *ui =
+            solver->i32solve_u + solver->i32solve_uoff[bk1 + d];
+          for (UF_long p = bulen[d]; p-- > 0;) {
+            if (ui[p] >= (int32_t)d) uge++; else break;
+          }
+          sufx_entries += (double)(bllen[d] + uge + 1u);
+          sufx_flops += colflops[d];
+          const double w = (double)(bnk - d);
+          const double density = sufx_entries / (w * w);
+          if (density >= 0.5) {
+            best_d = d;
+            best_share = sufx_flops / (total_flops > 0 ? total_flops : 1);
+            best_density = density;
+          } else if (w > 4096) {
+            break;
+          }
+        }
+        fprintf(stderr,
+                "KLS tail: block=%ld nk=%ld dense-suffix width=%ld"
+                " density=%.2f flop_share=%.1f%%\n",
+                (long)bbest, (long)bnk, (long)(bnk - best_d),
+                best_density, 100.0 * best_share);
+        /* border density: how full are the tail segments (rows >= d)
+           of the below-d columns that reach the tail window */
+        if (best_d < bnk) {
+          const UF_long d = best_d;
+          const double w = (double)(bnk - d);
+          int64_t bcols = 0, bentries = 0;
+          for (UF_long j = 0; j < d; ++j) {
+            const int32_t *li =
+              solver->i32solve_l + solver->i32solve_loff[bk1 + j];
+            const UF_long ll = bllen[j];
+            UF_long ge = 0;
+            for (UF_long p = ll; p-- > 0;) {
+              if (li[p] >= (int32_t)d) ge++; else break;
+            }
+            if (ge > 0) { bcols++; bentries += ge; }
+          }
+          fprintf(stderr,
+                  "KLS tail: border cols=%lld entries=%lld density=%.2f"
+                  " pad_factor=%.1f\n",
+                  (long long)bcols, (long long)bentries,
+                  bcols > 0 ? (double)bentries / ((double)bcols * w) : 0.0,
+                  bentries > 0 ? ((double)bcols * w) / (double)bentries
+                               : 0.0);
+        }
+        free(colflops);
+      }
+    }
     /* gap-merge simulation: pad segments across gaps <= G */
     {
       const int gaps[4] = {2, 4, 8, 16};
