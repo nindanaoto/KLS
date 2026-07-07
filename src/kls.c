@@ -27686,6 +27686,11 @@ struct kls_metis_race_s {
   int options_base_scale;
   const trilinos_klu_l_symbolic *scale_symbolic; /* solver-owned */
   int metis_wanted;
+  /* stage handshake: the METIS analyze needs only the pattern and can
+     start at analyze time; the scale trials and the trial factor wait
+     for the values (0 wait, 1 go, 2 abort) */
+  _Atomic int stage2;
+  int values_signaled;
   int analyze_status;
   trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_common common;
@@ -27704,6 +27709,24 @@ typedef struct kls_metis_race_s kls_metis_race;
 
 static void *kls_metis_race_main(void *arg) {
   kls_metis_race *race = (kls_metis_race *)arg;
+  if (race->metis_wanted) {
+    race->analyze_status = analyze_with_ordering(race->n, race->col_ptr,
+                                                 race->row_idx,
+                                                 &race->options,
+                                                 KLS_ORDERING_METIS,
+                                                 &race->symbolic,
+                                                 &race->common,
+                                                 &race->separator);
+  }
+  int stage2;
+  while ((stage2 = atomic_load_explicit(&race->stage2,
+                                        memory_order_acquire)) == 0) {
+    kls_cpu_relax();
+  }
+  if (stage2 != 1) {
+    atomic_store_explicit(&race->scale_done, 1, memory_order_release);
+    return NULL;
+  }
   if (race->scale_wanted && race->scale_symbolic != NULL) {
     const int candidates[] = {-1, 1, 2};
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]);
@@ -27730,15 +27753,8 @@ static void *kls_metis_race_main(void *arg) {
     }
   }
   atomic_store_explicit(&race->scale_done, 1, memory_order_release);
-  if (!race->metis_wanted) {
-    return NULL;
-  }
-  race->analyze_status = analyze_with_ordering(race->n, race->col_ptr,
-                                               race->row_idx, &race->options,
-                                               KLS_ORDERING_METIS,
-                                               &race->symbolic, &race->common,
-                                               &race->separator);
-  if (race->analyze_status != KLS_OK || race->symbolic == NULL) {
+  if (!race->metis_wanted || race->analyze_status != KLS_OK ||
+      race->symbolic == NULL) {
     return NULL;
   }
   race->numeric = trilinos_klu_l_factor(race->col_ptr, race->row_idx,
@@ -27756,6 +27772,9 @@ static kls_metis_race *kls_metis_race_take(kls_solver *solver,
   solver->metis_race = NULL;
   if (race->active) {
     const double start = kls_now_seconds();
+    if (!race->values_signaled) {
+      atomic_store_explicit(&race->stage2, 2, memory_order_release);
+    }
     pthread_join(race->thread, NULL);
     race->active = 0;
     if (elapsed != NULL) {
@@ -27794,8 +27813,11 @@ static void kls_metis_race_abandon(kls_solver *solver) {
   kls_metis_race_free(kls_metis_race_take(solver, NULL));
 }
 
-static void kls_maybe_start_metis_race(kls_solver *solver,
-                                       const double *numeric_values) {
+/* Analyze-time start: the METIS analyze stage needs only the pattern,
+   so the worker launches when the analysis finishes and overlaps both
+   the caller's gap to kls_factor and the whole main-side first factor.
+   kls_signal_metis_race_values releases the value-dependent stages. */
+static void kls_maybe_start_metis_race(kls_solver *solver) {
   if (solver->metis_race != NULL || solver->auto_metis_checked ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->user_col_perm != NULL || solver->symbolic == NULL ||
@@ -27827,34 +27849,85 @@ static void kls_maybe_start_metis_race(kls_solver *solver,
   if (race == NULL) {
     return;
   }
-  race->values_copy =
-    (double *)malloc((size_t)solver->nnz * sizeof(*race->values_copy));
-  if (race->values_copy == NULL) {
-    free(race);
-    return;
-  }
-  memcpy(race->values_copy, numeric_values,
-         (size_t)solver->nnz * sizeof(*race->values_copy));
   race->n = solver->n;
   race->col_ptr = solver->col_ptr;
   race->row_idx = solver->row_idx;
   race->options = solver->options;
   race->options.ordering = KLS_ORDERING_METIS;
-  race->options.scale = (int)solver->common.scale;
   race->options.use_btf = solver->symbolic->do_btf ? 1 : 0;
-  race->options_base_scale = (int)solver->common.scale;
   race->scale_symbolic = solver->symbolic;
   race->metis_wanted = metis_wanted;
   race->scale_wanted = scale_wanted;
   atomic_init(&race->scale_done, 0);
-  race->analyze_status = KLS_ERR_FACTOR_FAILED;
+  atomic_init(&race->stage2, 0);
+  race->analyze_status =
+    metis_wanted ? KLS_ERR_FACTOR_FAILED : KLS_OK;
   if (pthread_create(&race->thread, NULL, kls_metis_race_main, race) != 0) {
-    free(race->values_copy);
     free(race);
     return;
   }
   race->active = 1;
   solver->metis_race = race;
+}
+
+/* Giant-class early start: the pattern is fixed as soon as the
+   orientation heuristic skips the transpose candidate, so the METIS
+   analyze can overlap the main AMD/BTF analysis itself.  Symbolic
+   estimates do not exist yet; the n floor selects the class where the
+   race is always worth a core, and the promotion gate discards the
+   result if the analysis ends up choosing METIS on its own. */
+static void kls_start_metis_race_early(kls_solver *solver,
+                                       const kls_options *options,
+                                       UF_long n,
+                                       UF_long *col_ptr,
+                                       UF_long *row_idx) {
+  if (solver->metis_race != NULL || options->ordering != KLS_ORDERING_AUTO ||
+      n < 1000000 || getenv("KLS_DISABLE_METIS_RACE") != NULL) {
+    return;
+  }
+  kls_metis_race *race = (kls_metis_race *)calloc(1, sizeof(*race));
+  if (race == NULL) {
+    return;
+  }
+  race->n = n;
+  race->col_ptr = col_ptr;
+  race->row_idx = row_idx;
+  race->options = *options;
+  race->options.ordering = KLS_ORDERING_METIS;
+  race->scale_symbolic = NULL;
+  race->metis_wanted = 1;
+  race->scale_wanted = 0;
+  atomic_init(&race->scale_done, 0);
+  atomic_init(&race->stage2, 0);
+  race->analyze_status = KLS_ERR_FACTOR_FAILED;
+  if (pthread_create(&race->thread, NULL, kls_metis_race_main, race) != 0) {
+    free(race);
+    return;
+  }
+  race->active = 1;
+  solver->metis_race = race;
+}
+
+/* Values are known: copy them, capture the settled scale, and release
+   the worker's value-dependent stages. */
+static void kls_signal_metis_race_values(kls_solver *solver,
+                                         const double *numeric_values) {
+  kls_metis_race *race = solver->metis_race;
+  if (race == NULL || race->values_signaled) {
+    return;
+  }
+  race->values_signaled = 1;
+  race->values_copy =
+    (double *)malloc((size_t)solver->nnz * sizeof(*race->values_copy));
+  if (race->values_copy == NULL) {
+    atomic_store_explicit(&race->stage2, 2, memory_order_release);
+    return;
+  }
+  memcpy(race->values_copy, numeric_values,
+         (size_t)solver->nnz * sizeof(*race->values_copy));
+  race->options.scale = (int)solver->common.scale;
+  race->options_base_scale = (int)solver->common.scale;
+  atomic_store_explicit(&race->stage2, 1, memory_order_release);
 }
 
 static int should_try_auto_scale(const kls_solver *solver) {
@@ -31796,6 +31869,14 @@ int kls_analyze_csc(kls_solver *solver,
       return status;
     }
   }
+  if ((prefer_auto_normal ||
+       normalized.orientation == KLS_ORIENTATION_NORMAL) &&
+      normal.col_ptr != NULL) {
+    /* the normal candidate is the chosen pattern; adopt_candidate
+       transfers these arrays by pointer so they outlive the race */
+    kls_start_metis_race_early(solver, &normalized, normal.n,
+                               normal.col_ptr, normal.row_idx);
+  }
 
   status = select_candidate(&normal,
                             (normalized.orientation == KLS_ORIENTATION_NORMAL ||
@@ -31803,14 +31884,15 @@ int kls_analyze_csc(kls_solver *solver,
                             &normalized, &chosen);
   const double elapsed = kls_now_seconds() - start;
   if (status != KLS_OK) {
+    clear_matrix(solver);
     free_candidate(&transpose);
     free_candidate(&normal);
-    clear_matrix(solver);
     return status;
   }
 
   adopt_candidate(solver, chosen);
   fill_symbolic_stats(solver, elapsed);
+  kls_maybe_start_metis_race(solver);
   free_candidate(&transpose);
   free_candidate(&normal);
   return KLS_OK;
@@ -31874,9 +31956,15 @@ int kls_analyze_csr(kls_solver *solver,
   const int prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO && normal.col_ptr != NULL &&
     auto_orientation_prefers_normal(normal.n, normal.col_ptr, normal.row_idx);
+  const double kls_ana_sel_start = kls_now_seconds();
   status = select_candidate(normal.col_ptr == NULL ? NULL : &normal,
                             prefer_auto_normal ? NULL : &transpose,
                             &normalized, &chosen);
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS analyze: select %.2fs (both=%d)\n",
+            kls_now_seconds() - kls_ana_sel_start,
+            normal.col_ptr != NULL && !prefer_auto_normal);
+  }
   const double elapsed = kls_now_seconds() - start;
   if (status != KLS_OK) {
     free_candidate(&normal);
@@ -31887,6 +31975,7 @@ int kls_analyze_csr(kls_solver *solver,
 
   adopt_candidate(solver, chosen);
   fill_symbolic_stats(solver, elapsed);
+  kls_maybe_start_metis_race(solver);
   free_candidate(&normal);
   free_candidate(&transpose);
   return KLS_OK;
@@ -118842,7 +118931,11 @@ int kls_factor(kls_solver *solver, const double *values) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   solver->snb_factor_start = kls_now_seconds();
-  kls_metis_race_abandon(solver);
+  if (solver->metis_race != NULL && solver->metis_race->values_signaled) {
+    /* stale race from a factor attempt that never reached its
+       promotion point; a fresh analyze-stage race stays alive */
+    kls_metis_race_abandon(solver);
+  }
   kls_set_last_factor_path(solver, KLS_FACTOR_PATH_NONE);
   kls_clear_fast_reject_stats(solver);
   kls_clear_tail_last_stats(solver);
@@ -118968,7 +119061,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (!had_numeric) {
     solver->common.scale = choose_auto_scale_from_values(solver, numeric_values);
     solver->common.tol = choose_initial_auto_pivot_tolerance(solver);
-    kls_maybe_start_metis_race(solver, numeric_values);
+    kls_signal_metis_race_values(solver, numeric_values);
   }
   KLS_ENTRY_PHASE("auto_scale")
   int kls_first_factor_used = 0;
