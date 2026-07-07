@@ -324,6 +324,7 @@ struct kls_solver {
   int64_t *i32solve_loff;   /* per global column offsets into the streams */
   int64_t *i32solve_uoff;
   int i32solve_state;       /* 0 unbuilt, 1 ready, -1 declined */
+  struct kls_pts_s *pts;    /* subtree partition for the parallel solve */
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
@@ -2300,6 +2301,7 @@ typedef struct kls_match_entry {
 
 static int kls_build_refactor_schedule(kls_solver *solver);
 static int kls_i32_solve_ready(kls_solver *solver);
+static void kls_pts_free(kls_solver *solver);
 static UF_long kls_parallel_lu_sort(kls_solver *solver);
 static void kls_update_factor_etree_stats(kls_solver *solver);
 static int kls_refactor_supernode_panel_block_info(
@@ -20840,6 +20842,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->i32solve_loff = NULL;
   solver->i32solve_uoff = NULL;
   solver->i32solve_state = 0;
+  kls_pts_free(solver);
   if (solver->snode_run_end != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
     fprintf(stderr, "KLS snode: panels freed from line %d\n", line);
   }
@@ -20882,6 +20885,7 @@ static void free_numeric(kls_solver *solver) {
   solver->i32solve_loff = NULL;
   solver->i32solve_uoff = NULL;
   solver->i32solve_state = 0;
+  kls_pts_free(solver);
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
   solver->fp32_decision = 0;
@@ -116954,6 +116958,555 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
 /* trilinos_klu_l_solve for one right-hand side.                      */
 /* ------------------------------------------------------------------ */
 
+
+/* ---------------------------------------------------------------------
+   Subtree-partitioned parallel triangular solve (hard core C, brick 2).
+
+   Built once per i32-stream build for the largest BTF block.  The block
+   etree is derived from the streams themselves (parent = min over the
+   L(:,j) off-diagonal rows and the U row constraints) and every stream
+   entry is verified against it with Euler-tour intervals: row i of
+   L(:,k) must be an ancestor of k, row i of U(:,k) a descendant of k.
+   Any violation, unsorted stream, or unbalanced partition declines to
+   the serial i32 sweep, so the structural assumptions are checked, not
+   trusted.  Columns are partitioned into per-thread bins of disjoint
+   subtrees; scatter targets outside the own chunk are provably in the
+   shared ancestor "top" set, accumulated privately, and merged before
+   the serial top sweeps.  Backward U needs no accumulation at all: its
+   scatter targets are descendants, which stay inside the own chunk.  */
+#define KLS_PTS_MAX_THREADS 16
+
+typedef struct kls_pts_s {
+  UF_long block;                    /* BTF block this partition covers */
+  UF_long k1;
+  UF_long nk;
+  int nthreads;
+  int32_t *tcols;                   /* per-bin ascending column lists */
+  int64_t tcols_off[KLS_PTS_MAX_THREADS + 1];
+  int32_t *top_cols;                /* ascending shared-ancestor columns */
+  int64_t ntop;
+  int32_t *top_map;                 /* nk: compact top slot or -1 */
+  int32_t *lsplit;                  /* nk: in-chunk L stream prefix */
+  double *top_acc;                  /* nthreads * ntop, kept zeroed */
+} kls_pts;
+
+static void kls_pts_free(kls_solver *solver) {
+  kls_pts *pts = solver->pts;
+  if (pts == NULL) {
+    return;
+  }
+  free(pts->tcols);
+  free(pts->top_cols);
+  free(pts->top_map);
+  free(pts->lsplit);
+  free(pts->top_acc);
+  free(pts);
+  solver->pts = NULL;
+}
+
+typedef struct {
+  double work;
+  int32_t root;
+} kls_pts_chunk;
+
+static int kls_pts_chunk_cmp(const void *a, const void *b) {
+  const double wa = ((const kls_pts_chunk *)a)->work;
+  const double wb = ((const kls_pts_chunk *)b)->work;
+  return wa < wb ? 1 : (wa > wb ? -1 : 0);
+}
+
+static void kls_pts_try_build(kls_solver *solver) {
+  kls_pts_free(solver);
+  {
+    const char *dis = getenv("KLS_DISABLE_PTS");
+    if (dis != NULL && dis[0] == '1') {
+      return;
+    }
+  }
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const int trace = getenv("KLS_TRACE_PTS") != NULL;
+  int nthreads = (int)solver->options.threads;
+  if (nthreads > KLS_PTS_MAX_THREADS) {
+    nthreads = KLS_PTS_MAX_THREADS;
+  }
+  if (nthreads < 2) {
+    return;
+  }
+  UF_long best = -1;
+  UF_long best_nk = 0;
+  for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+    const UF_long nk = symbolic->R[block + 1u] - symbolic->R[block];
+    if (nk > best_nk && nk >= 2u && numeric->LUbx[block] != NULL) {
+      best_nk = nk;
+      best = block;
+    }
+  }
+  if (best < 0 || best_nk < 65536u) {
+    return;
+  }
+  const UF_long k1 = symbolic->R[best];
+  const UF_long nk = best_nk;
+  const UF_long *llen = numeric->Llen + k1;
+  const UF_long *ulen = numeric->Ulen + k1;
+  const int64_t *loff = solver->i32solve_loff + k1;
+  const int64_t *uoff = solver->i32solve_uoff + k1;
+  const int32_t *i32l = solver->i32solve_l;
+  const int32_t *i32u = solver->i32solve_u;
+
+  int32_t *parent = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  int32_t *head = (int32_t *)malloc(((size_t)nk + 1u) * sizeof(int32_t));
+  int32_t *next = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  int32_t *tin = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  int32_t *tout = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  int32_t *dfs_order = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  int32_t *cursor = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  int32_t *stack = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  double *swork = (double *)malloc((size_t)nk * sizeof(double));
+  int32_t *owner = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  int32_t *croot = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  kls_pts_chunk *chunks = NULL;
+  kls_pts *pts = NULL;
+  int ok = parent != NULL && head != NULL && next != NULL && tin != NULL &&
+           tout != NULL && dfs_order != NULL && cursor != NULL &&
+           stack != NULL && swork != NULL && owner != NULL && croot != NULL;
+
+  /* parent = min over the ancestor constraints; streams must be
+     strictly ascending block-local indices */
+  if (ok) {
+    for (UF_long k = 0; k < nk; ++k) {
+      parent[k] = (int32_t)nk;
+    }
+    for (UF_long k = 0; ok && k < nk; ++k) {
+      const int32_t *li = i32l + loff[k];
+      const UF_long ll = llen[k];
+      int32_t prev = (int32_t)k;
+      for (UF_long p = 0; p < ll; ++p) {
+        const int32_t i = li[p];
+        if (i <= prev || i >= (int32_t)nk) {
+          ok = 0;
+          break;
+        }
+        prev = i;
+      }
+      if (ok && ll > 0 && li[0] < parent[k]) {
+        parent[k] = li[0];
+      }
+      const int32_t *ui = i32u + uoff[k];
+      const UF_long ul = ulen[k];
+      prev = -1;
+      for (UF_long p = 0; ok && p < ul; ++p) {
+        const int32_t i = ui[p];
+        if (i <= prev || i >= (int32_t)k) {
+          ok = 0;
+          break;
+        }
+        prev = i;
+        if ((int32_t)k < parent[i]) {
+          parent[i] = (int32_t)k;
+        }
+      }
+    }
+  }
+
+  /* children lists, then iterative DFS: Euler intervals + subtree work */
+  if (ok) {
+    for (UF_long k = 0; k <= nk; ++k) {
+      head[k] = -1;
+    }
+    for (UF_long k = nk; k-- > 0;) {
+      next[k] = head[parent[k]];
+      head[parent[k]] = (int32_t)k;
+    }
+    int32_t counter = 0;
+    for (int32_t root = head[nk]; root != -1; root = next[root]) {
+      int32_t sp = 0;
+      stack[sp++] = root;
+      tin[root] = counter;
+      dfs_order[counter++] = root;
+      swork[root] = (double)(llen[root] + ulen[root] + 4u);
+      cursor[root] = head[root];
+      while (sp > 0) {
+        const int32_t v = stack[sp - 1];
+        const int32_t c = cursor[v];
+        if (c != -1) {
+          cursor[v] = next[c];
+          stack[sp++] = c;
+          tin[c] = counter;
+          dfs_order[counter++] = c;
+          swork[c] = (double)(llen[c] + ulen[c] + 4u);
+          cursor[c] = head[c];
+        } else {
+          tout[v] = counter;
+          sp--;
+          if (sp > 0) {
+            swork[stack[sp - 1]] += swork[v];
+          }
+        }
+      }
+    }
+    ok = counter == (int32_t)nk;
+  }
+
+  /* verify every stream entry against the tree */
+  if (ok) {
+    for (UF_long k = 0; ok && k < nk; ++k) {
+      const int32_t *li = i32l + loff[k];
+      const UF_long ll = llen[k];
+      for (UF_long p = 0; p < ll; ++p) {
+        const int32_t i = li[p];
+        if (!(tin[i] <= tin[k] && tin[k] < tout[i])) {
+          ok = 0;
+          break;
+        }
+      }
+      const int32_t *ui = i32u + uoff[k];
+      const UF_long ul = ulen[k];
+      for (UF_long p = 0; ok && p < ul; ++p) {
+        const int32_t i = ui[p];
+        if (!(tin[k] <= tin[i] && tin[i] < tout[k])) {
+          ok = 0;
+          break;
+        }
+      }
+    }
+  }
+
+  /* maximal subtree cuts, LPT bin packing, owners via DFS intervals */
+  int64_t ntop = 0;
+  double total = 0.0;
+  double top_work = 0.0;
+  double bin_work[KLS_PTS_MAX_THREADS];
+  if (ok) {
+    for (int32_t root = head[nk]; root != -1; root = next[root]) {
+      total += swork[root];
+    }
+    const double cut_max = total / (2.0 * (double)nthreads);
+    int64_t nchunks = 0;
+    for (UF_long k = 0; k < nk; ++k) {
+      if (swork[k] <= cut_max &&
+          (parent[k] == (int32_t)nk || swork[parent[k]] > cut_max)) {
+        nchunks++;
+      }
+    }
+    chunks = (kls_pts_chunk *)malloc(
+      (size_t)(nchunks > 0 ? nchunks : 1) * sizeof(*chunks));
+    ok = chunks != NULL && nchunks > 0;
+    if (ok) {
+      int64_t c = 0;
+      for (UF_long k = 0; k < nk; ++k) {
+        if (swork[k] <= cut_max &&
+            (parent[k] == (int32_t)nk || swork[parent[k]] > cut_max)) {
+          chunks[c].work = swork[k];
+          chunks[c].root = (int32_t)k;
+          c++;
+        }
+      }
+      qsort(chunks, (size_t)nchunks, sizeof(*chunks), kls_pts_chunk_cmp);
+      for (int t = 0; t < nthreads; ++t) {
+        bin_work[t] = 0.0;
+      }
+      for (UF_long k = 0; k < nk; ++k) {
+        owner[k] = -1;
+        croot[k] = -1;
+      }
+      for (int64_t c2 = 0; c2 < nchunks; ++c2) {
+        int lightest = 0;
+        for (int t = 1; t < nthreads; ++t) {
+          if (bin_work[t] < bin_work[lightest]) {
+            lightest = t;
+          }
+        }
+        bin_work[lightest] += chunks[c2].work;
+        const int32_t r = chunks[c2].root;
+        for (int32_t idx = tin[r]; idx < tout[r]; ++idx) {
+          owner[dfs_order[idx]] = lightest;
+          croot[dfs_order[idx]] = r;
+        }
+      }
+      double max_bin = 0.0;
+      for (int t = 0; t < nthreads; ++t) {
+        if (bin_work[t] > max_bin) {
+          max_bin = bin_work[t];
+        }
+      }
+      for (UF_long k = 0; k < nk; ++k) {
+        if (owner[k] < 0) {
+          ntop++;
+          top_work += (double)(llen[k] + ulen[k] + 4u);
+        }
+      }
+      ok = ntop <= (int64_t)(nk / 4u) && top_work <= 0.2 * total &&
+           max_bin <= 0.6 * total;
+      if (trace) {
+        fprintf(stderr,
+                "KLS pts build block=%ld nk=%ld chunks=%ld ntop=%ld"
+                " topw=%.2f%% maxbin=%.2f%% -> %s\n",
+                (long)best, (long)nk, (long)nchunks, (long)ntop,
+                100.0 * top_work / total, 100.0 * max_bin / total,
+                ok ? "adopt" : "decline");
+      }
+    }
+  } else if (trace) {
+    fprintf(stderr, "KLS pts build block=%ld nk=%ld -> tree reject\n",
+            (long)best, (long)nk);
+  }
+
+  /* assemble the persistent partition */
+  if (ok) {
+    pts = (kls_pts *)calloc(1, sizeof(*pts));
+    ok = pts != NULL;
+  }
+  if (ok) {
+    pts->block = best;
+    pts->k1 = k1;
+    pts->nk = nk;
+    pts->nthreads = nthreads;
+    pts->ntop = ntop;
+    pts->tcols = (int32_t *)malloc(
+      (size_t)(nk - (UF_long)ntop > 0 ? nk - (UF_long)ntop : 1u) *
+      sizeof(int32_t));
+    pts->top_cols = (int32_t *)malloc(
+      (size_t)(ntop > 0 ? ntop : 1) * sizeof(int32_t));
+    pts->top_map = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+    pts->lsplit = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+    pts->top_acc = (double *)calloc(
+      (size_t)nthreads * (size_t)(ntop > 0 ? ntop : 1), sizeof(double));
+    ok = pts->tcols != NULL && pts->top_cols != NULL &&
+         pts->top_map != NULL && pts->lsplit != NULL &&
+         pts->top_acc != NULL;
+  }
+  if (ok) {
+    int64_t bin_count[KLS_PTS_MAX_THREADS];
+    for (int t = 0; t < nthreads; ++t) {
+      bin_count[t] = 0;
+    }
+    for (UF_long k = 0; k < nk; ++k) {
+      if (owner[k] >= 0) {
+        bin_count[owner[k]]++;
+      }
+    }
+    pts->tcols_off[0] = 0;
+    for (int t = 0; t < nthreads; ++t) {
+      pts->tcols_off[t + 1] = pts->tcols_off[t] + bin_count[t];
+      bin_count[t] = pts->tcols_off[t];
+    }
+    int64_t topc = 0;
+    for (UF_long k = 0; k < nk; ++k) {
+      if (owner[k] >= 0) {
+        pts->tcols[bin_count[owner[k]]++] = (int32_t)k;
+        /* in-chunk L prefix: rows <= chunk root stay private */
+        const int32_t *li = i32l + loff[k];
+        const UF_long ll = llen[k];
+        const int32_t r = croot[k];
+        UF_long lo = 0;
+        UF_long hi = ll;
+        while (lo < hi) {
+          const UF_long mid = (lo + hi) / 2u;
+          if (li[mid] <= r) {
+            lo = mid + 1u;
+          } else {
+            hi = mid;
+          }
+        }
+        pts->lsplit[k] = (int32_t)lo;
+        pts->top_map[k] = -1;
+      } else {
+        pts->lsplit[k] = 0;
+        pts->top_map[k] = (int32_t)topc;
+        pts->top_cols[topc++] = (int32_t)k;
+      }
+    }
+    solver->pts = pts;
+    pts = NULL;
+  }
+  if (pts != NULL) {
+    free(pts->tcols);
+    free(pts->top_cols);
+    free(pts->top_map);
+    free(pts->lsplit);
+    free(pts->top_acc);
+    free(pts);
+  }
+  free(parent);
+  free(head);
+  free(next);
+  free(tin);
+  free(tout);
+  free(dfs_order);
+  free(cursor);
+  free(stack);
+  free(swork);
+  free(owner);
+  free(croot);
+  free(chunks);
+}
+
+typedef struct {
+  kls_pts *pts;
+  double *Xb;
+  double *lu;
+  const UF_long *lip;
+  const UF_long *llen;
+  const UF_long *uip;
+  const UF_long *ulen;
+  const double *udiag_b;
+  const int32_t *i32l;
+  const int32_t *i32u;
+  const int64_t *loff;
+  const int64_t *uoff;
+  pthread_barrier_t *barrier;
+  _Atomic int *go;
+  int tid;
+} kls_pts_arg;
+
+static void kls_pts_worker_body(kls_pts_arg *a) {
+  kls_pts *pts = a->pts;
+  const int64_t b0 = pts->tcols_off[a->tid];
+  const int64_t b1 = pts->tcols_off[a->tid + 1];
+  double *acc = pts->top_acc + (int64_t)a->tid * pts->ntop;
+  double *Xb = a->Xb;
+  /* forward L over the own subtrees; fringe rows accumulate privately */
+  for (int64_t q = b0; q < b1; ++q) {
+    const int32_t k = pts->tcols[q];
+    const double xk = Xb[k];
+    if (xk != 0.0) {
+      const UF_long len = a->llen[k];
+      const double *lx = a->lu + a->lip[k] + kls_klu_units_for_indices(len);
+      const int32_t *li = a->i32l + a->loff[k];
+      const UF_long split = (UF_long)pts->lsplit[k];
+      for (UF_long p = 0; p < split; ++p) {
+        Xb[li[p]] -= lx[p] * xk;
+      }
+      for (UF_long p = split; p < len; ++p) {
+        acc[pts->top_map[li[p]]] += lx[p] * xk;
+      }
+    }
+  }
+  (void)pthread_barrier_wait(a->barrier);
+  if (a->tid == 0) {
+    const int64_t ntop = pts->ntop;
+    const int32_t *top_cols = pts->top_cols;
+    for (int t = 0; t < pts->nthreads; ++t) {
+      double *at = pts->top_acc + (int64_t)t * ntop;
+      for (int64_t j = 0; j < ntop; ++j) {
+        Xb[top_cols[j]] -= at[j];
+        at[j] = 0.0;
+      }
+    }
+    /* serial top: ascending L, then descending U */
+    for (int64_t j = 0; j < ntop; ++j) {
+      const int32_t k = top_cols[j];
+      const double xk = Xb[k];
+      if (xk != 0.0) {
+        const UF_long len = a->llen[k];
+        const double *lx =
+          a->lu + a->lip[k] + kls_klu_units_for_indices(len);
+        const int32_t *li = a->i32l + a->loff[k];
+        for (UF_long p = 0; p < len; ++p) {
+          Xb[li[p]] -= lx[p] * xk;
+        }
+      }
+    }
+    for (int64_t j = ntop; j-- > 0;) {
+      const int32_t k = top_cols[j];
+      const double xk = Xb[k] / a->udiag_b[k];
+      Xb[k] = xk;
+      if (xk != 0.0) {
+        const UF_long len = a->ulen[k];
+        const double *ux =
+          a->lu + a->uip[k] + kls_klu_units_for_indices(len);
+        const int32_t *ui = a->i32u + a->uoff[k];
+        for (UF_long p = 0; p < len; ++p) {
+          Xb[ui[p]] -= ux[p] * xk;
+        }
+      }
+    }
+  }
+  (void)pthread_barrier_wait(a->barrier);
+  /* backward U over the own subtrees; targets stay in-chunk */
+  for (int64_t q = b1; q-- > b0;) {
+    const int32_t k = pts->tcols[q];
+    const double xk = Xb[k] / a->udiag_b[k];
+    Xb[k] = xk;
+    if (xk != 0.0) {
+      const UF_long len = a->ulen[k];
+      const double *ux = a->lu + a->uip[k] + kls_klu_units_for_indices(len);
+      const int32_t *ui = a->i32u + a->uoff[k];
+      for (UF_long p = 0; p < len; ++p) {
+        Xb[ui[p]] -= ux[p] * xk;
+      }
+    }
+  }
+}
+
+static void *kls_pts_worker(void *argp) {
+  kls_pts_arg *a = (kls_pts_arg *)argp;
+  int go;
+  while ((go = atomic_load_explicit(a->go, memory_order_acquire)) == 0) {
+    kls_cpu_relax();
+  }
+  if (go == 1) {
+    kls_pts_worker_body(a);
+  }
+  return NULL;
+}
+
+static int kls_pts_solve_block(kls_solver *solver, double *Xb, double *lu,
+                               const UF_long *lip, const UF_long *llen,
+                               const UF_long *uip, const UF_long *ulen,
+                               const double *udiag_b) {
+  kls_pts *pts = solver->pts;
+  const int nthreads = pts->nthreads;
+  pthread_barrier_t barrier;
+  if (pthread_barrier_init(&barrier, NULL, (unsigned)nthreads) != 0) {
+    return 0;
+  }
+  _Atomic int go;
+  atomic_init(&go, 0);
+  kls_pts_arg args[KLS_PTS_MAX_THREADS];
+  pthread_t tids[KLS_PTS_MAX_THREADS];
+  for (int t = 0; t < nthreads; ++t) {
+    args[t].pts = pts;
+    args[t].Xb = Xb;
+    args[t].lu = lu;
+    args[t].lip = lip;
+    args[t].llen = llen;
+    args[t].uip = uip;
+    args[t].ulen = ulen;
+    args[t].udiag_b = udiag_b;
+    args[t].i32l = solver->i32solve_l;
+    args[t].i32u = solver->i32solve_u;
+    args[t].loff = solver->i32solve_loff + pts->k1;
+    args[t].uoff = solver->i32solve_uoff + pts->k1;
+    args[t].barrier = &barrier;
+    args[t].go = &go;
+    args[t].tid = t;
+  }
+  int spawned = 0;
+  for (int t = 1; t < nthreads; ++t) {
+    if (pthread_create(&tids[t], NULL, kls_pts_worker, &args[t]) != 0) {
+      break;
+    }
+    spawned++;
+  }
+  if (spawned != nthreads - 1) {
+    atomic_store_explicit(&go, 2, memory_order_release);
+    for (int t = 1; t <= spawned; ++t) {
+      pthread_join(tids[t], NULL);
+    }
+    pthread_barrier_destroy(&barrier);
+    return 0;
+  }
+  atomic_store_explicit(&go, 1, memory_order_release);
+  kls_pts_worker_body(&args[0]);
+  for (int t = 1; t < nthreads; ++t) {
+    pthread_join(tids[t], NULL);
+  }
+  pthread_barrier_destroy(&barrier);
+  return 1;
+}
+
 static int kls_i32_solve_ready(kls_solver *solver) {
   if (solver->i32solve_state != 0) {
     return solver->i32solve_state > 0;
@@ -117047,6 +117600,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     return 0;
   }
   solver->i32solve_state = 1;
+  kls_pts_try_build(solver);
   return 1;
 }
 
@@ -117089,6 +117643,21 @@ static UF_long kls_i32_solve(kls_solver *solver, double *b) {
       const UF_long *ulen = numeric->Ulen + k1;
       double *lu = (double *)numeric->LUbx[block];
       double *Xb = X + k1;
+      if (solver->pts != NULL && solver->pts->block == block &&
+          kls_pts_solve_block(solver, Xb, lu, lip, llen, uip, ulen,
+                              udiag + k1)) {
+        if (block > 0) {
+          for (UF_long k = k1; k < k2; ++k) {
+            const double xk = X[k];
+            if (xk == 0.0) continue;
+            const UF_long pend = offp[k + 1u];
+            for (UF_long p = offp[k]; p < pend; ++p) {
+              X[offi[p]] -= offx[p] * xk;
+            }
+          }
+        }
+        continue;
+      }
       /* L-sweep, unit diagonal, block-local indices */
       for (UF_long k = 0; k < nk; ++k) {
         const double xk = Xb[k];
