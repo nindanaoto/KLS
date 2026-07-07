@@ -261,6 +261,22 @@ int main(int argc, char **argv) {
           std::fclose(f);
           std::fprintf(stderr, "perm dumped to %s\n", dump);
         }
+        std::fprintf(stderr,
+                     "extracted factors: lp[n]=%d up[n]=%d (claimed L %lld"
+                     " U %lld)\n",
+                     lp[a.n], up[a.n], lnnz, unnz);
+        {
+          long long maxbw = 0, offdiag = 0;
+          for (int64_t i = 0; i < a.n; ++i) {
+            for (int p = lp[i]; p < lp[i + 1]; ++p) {
+              const long long bw = (long long)li[p] - i;
+              if (bw > maxbw) maxbw = bw;
+              if (bw != 0) offdiag++;
+            }
+          }
+          std::fprintf(stderr, "L maxrow-dist %lld offdiag %lld\n", maxbw,
+                       offdiag);
+        }
       } else {
         std::fprintf(stderr, "extract_factors failed\n");
       }
