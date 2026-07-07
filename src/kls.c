@@ -88665,6 +88665,100 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
             "w65+=%ld\n",
             (long)covered, solver->snode_run_end != NULL, nrun, hist[0],
             hist[1], hist[2], hist[3], hist[4], hist[5], hist[6]);
+    /* relaxed-run simulation: continue while the next column's pattern
+       is a SUBSET of the current union tail (dropped rows = padding) */
+    {
+      UF_long rcovered = 0;
+      int64_t rentries = 0;
+      int64_t rpad = 0;
+      int64_t rruns = 0;
+      int64_t total_entries = 0;
+      for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+        const UF_long k1 = symbolic->R[block];
+        const UF_long k2 = symbolic->R[block + 1u];
+        const UF_long nk = k2 - k1;
+        if (nk < 2u || numeric->LUbx[block] == NULL) {
+          continue;
+        }
+        UF_long *lip = numeric->Lip + k1;
+        UF_long *llen = numeric->Llen + k1;
+        double *lu = (double *)numeric->LUbx[block];
+        UF_long rstart = 0;
+        UF_long *uni = NULL;
+        UF_long uni_len = 0;
+        for (UF_long k = 0; k < nk; ++k) {
+          UF_long *li = NULL;
+          double *lx = NULL;
+          UF_long ll = 0;
+          kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &ll);
+          total_entries += ll;
+          int extends = 0;
+          if (k + 1u < nk && k > rstart - 1u) {
+            /* union tail = uni minus leading diag hits; next col must
+               start with k+1 and be a subset */
+            UF_long *li2 = NULL;
+            double *lx2 = NULL;
+            UF_long l2 = 0;
+            kls_klu_get_pointer(lu, lip, llen, k + 1u, &li2, &lx2, &l2);
+            const UF_long *base = uni != NULL ? uni : li;
+            const UF_long blen = uni != NULL ? uni_len : ll;
+            /* advance past rows <= k+1 in base; li2 must all be found */
+            UF_long bi = 0;
+            while (bi < blen && base[bi] <= k + 1u) bi++;
+            /* subset test: also require li2[0..] to include nothing new
+               and next col to be reached (base contains k+1) */
+            int has_diag = 0;
+            for (UF_long q = 0; q < blen && base[q] <= k + 1u; ++q) {
+              if (base[q] == k + 1u) has_diag = 1;
+            }
+            if (has_diag && l2 <= blen - bi) {
+              UF_long p2 = 0;
+              UF_long q = bi;
+              while (p2 < l2 && q < blen) {
+                if (base[q] == li2[p2]) { p2++; q++; }
+                else if (base[q] < li2[p2]) q++;
+                else break;
+              }
+              if (p2 == l2) extends = 1;
+            }
+            if (extends && uni == NULL) {
+              uni = li;
+              uni_len = ll;
+            }
+          }
+          if (!extends) {
+            if (uni != NULL && k > rstart) {
+              const UF_long w = k - rstart + 1u;
+              rruns++;
+              rcovered += w;
+              /* panel entries = w * (uni tail length per col approx) */
+              for (UF_long c = rstart; c <= k; ++c) {
+                UF_long *lic; double *lxc; UF_long llc;
+                kls_klu_get_pointer(lu, lip, llen, c, &lic, &lxc, &llc);
+                rentries += llc;
+              }
+              /* pad = union positions minus real entries */
+              UF_long below = 0;
+              for (UF_long q = 0; q < uni_len; ++q) {
+                if (uni[q] > k) below++;
+              }
+              rpad += (int64_t)(below + w) * w - ((int64_t)0);
+            }
+            uni = NULL;
+            uni_len = 0;
+            rstart = k + 1u;
+          }
+        }
+      }
+      fprintf(stderr,
+              "KLS snode relaxed: runs=%lld cols=%ld entries=%lld/%lld"
+              " (%.1f%%) panel_cells~%lld\n",
+              (long long)rruns, (long)rcovered, (long long)rentries,
+              (long long)total_entries,
+              total_entries > 0
+                ? 100.0 * (double)rentries / (double)total_entries : 0.0,
+              (long long)rpad);
+    }
   }
   *elapsed += kls_now_seconds() - start;
 }
