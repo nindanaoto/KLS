@@ -328,6 +328,9 @@ struct kls_solver {
   int64_t *i32solve_uoff;
   int i32solve_state;       /* 0 unbuilt, 1 ready, -1 declined */
   struct kls_pts_s *pts;    /* subtree partition for the parallel solve */
+  int pts_ref_decision;     /* 0 untried, 1 adopted, -1 rejected */
+  double pts_ref_incumbent_seconds;
+  double pts_ref_trial_seconds;   /* factor-time trial, charged once */
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
@@ -2307,6 +2310,9 @@ static int kls_i32_solve_ready(kls_solver *solver);
 static void kls_pts_free(kls_solver *solver);
 static int kls_pts_mapped_refactor(kls_solver *solver,
                                    double *numeric_values);
+static int kls_pts_try_refactor_timed(kls_solver *solver,
+                                      double *numeric_values,
+                                      UF_long *ok_out);
 static UF_long kls_parallel_lu_sort(kls_solver *solver);
 static void kls_update_factor_etree_stats(kls_solver *solver);
 static int kls_refactor_supernode_panel_block_info(
@@ -21193,6 +21199,9 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->snb_trial_verdict = 0;
   solver->snb_trial_seconds = 0.0;
   solver->snb_incumbent_seconds = 0.0;
+  solver->pts_ref_decision = 0;
+  solver->pts_ref_incumbent_seconds = 0.0;
+  solver->pts_ref_trial_seconds = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   free_egraph_algorithm5_payoff_queue(solver);
@@ -90169,12 +90178,11 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                              &snb_ok)) {
       return snb_ok;
     }
-    if (solver->options.threads > 1 &&
-        getenv("KLS_FORCE_PTS_REFACTOR") != NULL) {
-      const int ptsref = kls_pts_mapped_refactor(solver, numeric_values);
-      if (ptsref >= 0) {
+    {
+      UF_long pts_ok = 0;
+      if (kls_pts_try_refactor_timed(solver, numeric_values, &pts_ok)) {
         kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
-        return (UF_long)ptsref;
+        return pts_ok;
       }
     }
   }
@@ -118717,6 +118725,103 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   return 1;
 }
 
+/* Event-driven acceptance for the subtree refactor above the egraph
+   floor (the below-floor dispatch keeps using it unconditionally): the
+   incumbent runs on one call and is timed by kls_refactor's wrapper,
+   the subtree engine runs timed on the next, and only a decisive win
+   keeps the matrix -- the same shape as the snb acceptance, so no
+   per-benchmark tuning is involved.  Verdicts are per numeric and
+   reset when the numeric is replaced. */
+static int kls_pts_try_refactor_timed(kls_solver *solver,
+                                      double *numeric_values,
+                                      UF_long *ok_out) {
+  if (solver->pts == NULL || solver->pts_ref_decision < 0 ||
+      solver->options.threads <= 1) {
+    return 0;
+  }
+  if (solver->pts_ref_decision > 0) {
+    const int ok = kls_pts_mapped_refactor(solver, numeric_values);
+    if (ok < 0) {
+      solver->pts_ref_decision = -1;
+      return 0;
+    }
+    *ok_out = (UF_long)ok;
+    return 1;
+  }
+  if (solver->pts_ref_incumbent_seconds == 0.0) {
+    solver->pts_ref_incumbent_seconds = -1.0;
+    return 0; /* incumbent runs this call; the wrapper times it */
+  }
+  if (solver->pts_ref_incumbent_seconds < 0.0) {
+    if (solver->stats.refactor_seconds <= 0.0) {
+      return 0;
+    }
+    solver->pts_ref_incumbent_seconds = solver->stats.refactor_seconds;
+  }
+  int computed = 0;
+  double t = solver->pts_ref_trial_seconds;
+  if (t <= 0.0) {
+    /* no factor-time trial (values were not eligible there): trial now */
+    const double t0 = kls_now_seconds();
+    const int ok = kls_pts_mapped_refactor(solver, numeric_values);
+    if (ok < 0) {
+      solver->pts_ref_decision = -1;
+      return 0;
+    }
+    t = kls_now_seconds() - t0;
+    computed = ok;
+  }
+  solver->pts_ref_decision =
+    t < 0.75 * solver->pts_ref_incumbent_seconds ? 1 : -1;
+  if (getenv("KLS_TRACE_PTS") != NULL) {
+    fprintf(stderr,
+            "KLS pts refactor acceptance incumbent %.3fms pts %.3fms -> %s\n",
+            solver->pts_ref_incumbent_seconds * 1e3, t * 1e3,
+            solver->pts_ref_decision > 0 ? "adopted" : "rejected");
+  }
+  if (computed) {
+    *ok_out = (UF_long)computed;
+    return 1;
+  }
+  if (solver->pts_ref_decision > 0) {
+    const int ok = kls_pts_mapped_refactor(solver, numeric_values);
+    if (ok < 0) {
+      solver->pts_ref_decision = -1;
+      return 0;
+    }
+    *ok_out = (UF_long)ok;
+    return 1;
+  }
+  return 0;
+}
+
+/* Factor-time warm-up: recomputes the just-factored numeric through
+   the subtree engine so its buffers, maps, and mirrors take their
+   first-touch faults here, charged once to the factor.  The timing
+   decision happens at refactor time under steady-state conditions --
+   a one-shot cold sample measured 1.5x slower than steady state and
+   biased the acceptance. */
+static void kls_pts_maybe_trial(kls_solver *solver,
+                                double *numeric_values,
+                                double *elapsed) {
+  if (solver->pts == NULL || solver->pts_ref_decision != 0 ||
+      solver->pts_ref_trial_seconds != 0.0 ||
+      solver->options.threads <= 1 || numeric_values == NULL ||
+      solver->common.flops <
+        KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+          (double)solver->options.threads) {
+    return;
+  }
+  const double t0 = kls_now_seconds();
+  (void)kls_build_refactor_lu_pointer_cache(solver);
+  const int ok = kls_pts_mapped_refactor(solver, numeric_values);
+  if (ok <= 0) {
+    solver->pts_ref_decision = -1;
+  }
+  solver->pts_ref_trial_seconds = -1.0; /* warmed; no stored sample */
+  *elapsed += kls_now_seconds() - t0;
+}
+
 static int kls_i32_solve_ready(kls_solver *solver) {
   if (solver->i32solve_state != 0) {
     return solver->i32solve_state > 0;
@@ -119338,6 +119443,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     kls_snb_maybe_accept(solver, numeric_values, &elapsed);
     KLS_PHASE("snb")
     (void)kls_i32_solve_ready(solver);
+    kls_pts_maybe_trial(solver, numeric_values, &elapsed);
     KLS_PHASE("i32")
     kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
     KLS_PHASE("row_seed")

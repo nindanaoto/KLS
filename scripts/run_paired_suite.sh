@@ -31,14 +31,14 @@ while IFS= read -r name; do
   for side in $passes_sides; do
     if [ "$side" = kls ]; then
       out=$(timeout "$TIMEOUT" "$KLS_BENCH" "$matrix" --orientation auto \
-        --repeat 1 --refactor-repeat 3 --threads "$THREADS" --json 2>/dev/null)
+        --repeat 1 --refactor-repeat 10 --threads "$THREADS" --json 2>/dev/null)
       dst=$OUT_KLS
     elif [ "$side" = ck ]; then
-      out=$(timeout "$TIMEOUT" "$CKTSO_COMPARE" "$matrix" "$THREADS" 1 3 \
+      out=$(timeout "$TIMEOUT" "$CKTSO_COMPARE" "$matrix" "$THREADS" 1 10 \
         2>/dev/null)
       dst=$OUT_CK
     else
-      out=$(timeout "$TIMEOUT" "$SUBTREELU_COMPARE" "$matrix" "$THREADS" 1 3 \
+      out=$(timeout "$TIMEOUT" "$SUBTREELU_COMPARE" "$matrix" "$THREADS" 1 10 \
         2>/dev/null)
       dst=$OUT_ST
     fi
