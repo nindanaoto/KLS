@@ -23214,6 +23214,16 @@ static UF_long kls_metis_order(UF_long n,
     options[METIS_OPTION_CTYPE] = METIS_CTYPE_RM;
   }
 
+  {
+    const char *niter = getenv("KLS_METIS_NITER");
+    if (niter != NULL && niter[0] != '\0') {
+      options[METIS_OPTION_NITER] = atoi(niter);
+    }
+    const char *nseps = getenv("KLS_METIS_NSEPS");
+    if (nseps != NULL && nseps[0] != '\0') {
+      options[METIS_OPTION_NSEPS] = atoi(nseps);
+    }
+  }
   idx_t nvtxs = (idx_t)n;
   const int metis_status =
     metis_ndp_npes > 1
@@ -117905,8 +117915,10 @@ static void kls_pts_try_build(kls_solver *solver) {
     ok = pts != NULL;
   }
   if (ok) {
+    /* Amdahl at 4 threads still nets with a ~30% serial top; the
+       spawn overhead is guarded by the 65536-column dispatch floor */
     pts->solve_ok =
-      ntop <= (int64_t)(nk / 4u) && top_work <= 0.2 * total;
+      ntop <= (int64_t)(nk / 4u) && top_work <= 0.30 * total;
     pts->block = best;
     pts->k1 = k1;
     pts->nk = nk;
