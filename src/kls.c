@@ -175,7 +175,10 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_SNODE_MAX_BATCH 64
 #define KLS_SNODE_TAIL_CHUNK 32
 #define KLS_SNODE_MIN_BATCH_WORK 192
-#define KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD 1.5e7
+/* Re-measured 2026-07 with the busy-wait pool: the egraph now beats the
+   serial mapped kernel down to ~1e6 total flops (rajat03 3.96e6: 803 ->
+   595us; coupled 2.4e7: 2393 -> 1651us; add32 4.8e4 stays mapped). */
+#define KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD 2.5e5
 #define KLS_EGRAPH_POOL_SPIN_ITERS 200000u
 #define KLS_METIS_NDP_MIN_LEAF_ROWS 200u
 #define KLS_METIS_NDP_TARGET_DIVISOR 1000u
@@ -90134,12 +90137,11 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   if (!check_pivots && solver->common.flops > 0.0 &&
       solver->common.flops <
         egraph_floor * (double)solver->options.threads) {
-    /* Below roughly 5e7 factor flops per thread the EGraph's per-column
-       synchronization costs more than it saves, and the sorted-supernode
-       panel updates made the serial mapped kernel faster still; the
-       measured four-thread crossover on the paper set sits near 1e8-2e8
-       flops.  Prefer the serial mapped refactor when it is eligible and
-       keep the EGraph for shapes it cannot cover. */
+    /* Below the per-thread flop floor the pool dispatch costs more than
+       it saves; the busy-wait pool moved the measured four-thread
+       crossover down to ~1e6 total flops (re-measured 2026-07).  Prefer
+       the serial mapped refactor under it and keep the EGraph for
+       shapes it cannot cover. */
     {
       UF_long snb_ok = 0;
       if (kls_snb_try_refactor(solver, numeric_values, check_pivots,
