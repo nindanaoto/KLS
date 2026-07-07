@@ -2302,6 +2302,8 @@ typedef struct kls_match_entry {
 static int kls_build_refactor_schedule(kls_solver *solver);
 static int kls_i32_solve_ready(kls_solver *solver);
 static void kls_pts_free(kls_solver *solver);
+static int kls_pts_mapped_refactor(kls_solver *solver,
+                                   double *numeric_values);
 static UF_long kls_parallel_lu_sort(kls_solver *solver);
 static void kls_update_factor_etree_stats(kls_solver *solver);
 static int kls_refactor_supernode_panel_block_info(
@@ -20378,6 +20380,185 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
   }
 }
 
+/* PTS-partitioned mapped refactor: the up-looking column body
+   carries no cross-column workspace state, so the verified subtree
+   partition makes bins fully independent -- every dependency of an
+   in-chunk column is a descendant, finalized earlier by the same
+   thread.  Identical per-column semantics to
+   kls_parallel_refactor_block; only the iteration set differs. */
+static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
+                                        UF_long block,
+                                        const int32_t *cols,
+                                        int64_t ncols) {
+  kls_parallel_refactor_shared *shared = worker->shared;
+  const UF_long *ap = shared->col_ptr;
+  const UF_long *ai = shared->row_idx;
+  const UF_long *map_col_ptr = shared->map_col_ptr;
+  const UF_long *map_row_idx = shared->map_row_idx;
+  const UF_long *map_input_pos = shared->map_input_pos;
+  const UF_long *map_block_start = shared->map_block_start;
+  const double *ax = shared->values;
+  const trilinos_klu_l_symbolic *symbolic = shared->symbolic;
+  trilinos_klu_l_numeric *numeric = shared->numeric;
+  const UF_long *q = symbolic->Q;
+  const UF_long *r = symbolic->R;
+  const UF_long *pinv = numeric->Pinv;
+  const UF_long *offp = numeric->Offp;
+  double *offx = (double *)numeric->Offx;
+  double *udiag = (double *)numeric->Udiag;
+  double *x = worker->x;
+
+  const UF_long k1 = r[block];
+  const UF_long k2 = r[block + 1u];
+  const UF_long nk = k2 - k1;
+
+  UF_long *lip = numeric->Lip + k1;
+  UF_long *llen = numeric->Llen + k1;
+  UF_long *uip = numeric->Uip + k1;
+  UF_long *ulen = numeric->Ulen + k1;
+  double *lu = (double *)numeric->LUbx[block];
+  if (lu == NULL) {
+    worker->invalid = 1;
+    return;
+  }
+
+  (void)nk;
+  for (int64_t kq = 0; kq < ncols; ++kq) {
+    const UF_long k = (UF_long)cols[kq];
+    const UF_long global_col = k + k1;
+    const UF_long oldcol = q[global_col];
+    UF_long poff = offp[global_col];
+    const UF_long poff_end = offp[global_col + 1u];
+
+    if (map_col_ptr != NULL && map_block_start != NULL) {
+      for (UF_long p = map_col_ptr[global_col];
+           p < map_block_start[global_col]; ++p) {
+        if (poff >= poff_end) {
+          worker->invalid = 1;
+          return;
+        }
+        const UF_long input_pos = map_input_pos[p];
+        double value = 0.0;
+        if (!kls_parallel_refactor_mapped_value(shared, input_pos, &value)) {
+          worker->invalid = 1;
+          return;
+        }
+        offx[poff++] = value;
+      }
+      for (UF_long p = map_block_start[global_col];
+           p < map_col_ptr[global_col + 1u]; ++p) {
+        const UF_long global_row = map_row_idx[p];
+        if (global_row < k1 || global_row >= k2) {
+          worker->invalid = 1;
+          return;
+        }
+        const UF_long input_pos = map_input_pos[p];
+        double value = 0.0;
+        if (!kls_parallel_refactor_mapped_value(shared, input_pos, &value)) {
+          worker->invalid = 1;
+          return;
+        }
+        x[global_row - k1] = value;
+      }
+    } else {
+      const UF_long pend = ap[oldcol + 1u];
+      for (UF_long p = ap[oldcol]; p < pend; ++p) {
+        const UF_long oldrow = ai[p];
+        double value = 0.0;
+        if (!kls_parallel_refactor_value(shared, oldrow, ax[p], &value)) {
+          worker->invalid = 1;
+          return;
+        }
+        const UF_long global_row = pinv[oldrow];
+        if (global_row < k1) {
+          if (poff >= poff_end) {
+            worker->invalid = 1;
+            return;
+          }
+          offx[poff++] = value;
+        } else if (global_row < k2) {
+          x[global_row - k1] = value;
+        } else {
+          worker->invalid = 1;
+          return;
+        }
+      }
+    }
+
+    UF_long *ui = NULL;
+    double *ux = NULL;
+    UF_long ucol_len = 0;
+    kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+    const UF_long *snode_run_end = shared->snode_run_end;
+    UF_long up = 0;
+    while (up < ucol_len) {
+      const UF_long j = ui[up];
+      if (snode_run_end != NULL) {
+        const UF_long consumed = kls_snode_batch_consume(
+          lu, lip, llen, ui, ux, ucol_len, up, x, k1, snode_run_end);
+        if (consumed != 0u) {
+          up += consumed;
+          continue;
+        }
+      }
+      const double ujk = x[j];
+      x[j] = 0.0;
+      ux[up] = ujk;
+
+      if (ujk != 0.0) {
+        UF_long *li = NULL;
+        double *lx = NULL;
+        UF_long lcol_len = 0;
+        kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
+        kls_scatter_subtract_refactor_l(shared->solver, x, k1 + j, li, lx,
+                                        lcol_len, ujk);
+      }
+      up++;
+    }
+
+    const double ukk = x[k];
+    x[k] = 0.0;
+    if (ukk == 0.0) {
+      kls_worker_record_singular(worker, global_col, q[global_col]);
+      if (shared->halt_if_singular) {
+        return;
+      }
+    }
+    udiag[global_col] = ukk;
+
+    UF_long *li = NULL;
+    double *lx = NULL;
+    UF_long lcol_len = 0;
+    kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
+    UF_long rejected_row = KLS_KLU_EMPTY;
+    UF_long rejected_local_row = KLS_KLU_EMPTY;
+    double rejected_multiplier_abs = -1.0;
+    double rejected_pivot_abs = -1.0;
+    double rejected_candidate_abs = -1.0;
+    if (shared->check_pivots &&
+        kls_checked_refactor_best_reject_candidate(
+          li, lcol_len, x, ukk, shared->pivot_tolerance, k1,
+          &rejected_row, &rejected_local_row, &rejected_multiplier_abs,
+          &rejected_pivot_abs, &rejected_candidate_abs)) {
+      worker->pivot_rejected = 1;
+      worker->rejected_pivot = global_col;
+      worker->rejected_pivot_col = q[global_col];
+      worker->rejected_row = rejected_row;
+      worker->rejected_multiplier_abs = rejected_multiplier_abs;
+      worker->rejected_pivot_abs = rejected_pivot_abs;
+      worker->rejected_candidate_abs = rejected_candidate_abs;
+      x[rejected_local_row] = 0.0;
+      return;
+    }
+    for (UF_long p = 0; p < lcol_len; ++p) {
+      const UF_long i = li[p];
+      const double lij = x[i] / ukk;
+      lx[p] = lij;
+      x[i] = 0.0;
+    }
+  }
+}
+
 static void *kls_refactor_pool_worker_main(void *arg) {
   kls_parallel_refactor_worker *worker = (kls_parallel_refactor_worker *)arg;
   kls_refactor_pool *pool = worker->pool;
@@ -26973,7 +27154,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       solver->numeric != NULL || solver->row_perm != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       (solver->options.ordering != KLS_ORDERING_AUTO && !forced_match) ||
-      solver->n < 3000) {
+      (solver->n < 3000 && !forced_match)) {
     return;
   }
   if (!forced_match && kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
@@ -89539,6 +89720,13 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
         return snb_ok;
       }
     }
+    if (!check_pivots && solver->options.threads > 1) {
+      const int ptsref = kls_pts_mapped_refactor(solver, numeric_values);
+      if (ptsref >= 0) {
+        kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
+        return (UF_long)ptsref;
+      }
+    }
     const int mapped = kls_mapped_refactor(solver, numeric_values,
                                            check_pivots);
     if (mapped >= 0) {
@@ -117179,6 +117367,8 @@ typedef struct kls_pts_s {
   int32_t *top_map;                 /* nk: compact top slot or -1 */
   int32_t *lsplit;                  /* nk: in-chunk L stream prefix */
   double *top_acc;                  /* nthreads * ntop, kept zeroed */
+  double *xwork;                    /* nthreads * nk, lazy, kept zeroed */
+  int solve_ok;                     /* tight top gate for the solve */
 } kls_pts;
 
 static void kls_pts_free(kls_solver *solver) {
@@ -117191,6 +117381,7 @@ static void kls_pts_free(kls_solver *solver) {
   free(pts->top_map);
   free(pts->lsplit);
   free(pts->top_acc);
+  free(pts->xwork);
   free(pts);
   solver->pts = NULL;
 }
@@ -117233,7 +117424,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       best = block;
     }
   }
-  if (best < 0 || best_nk < 65536u) {
+  if (best < 0 || best_nk < 4096u) {
     return;
   }
   const UF_long k1 = symbolic->R[best];
@@ -117427,7 +117618,9 @@ static void kls_pts_try_build(kls_solver *solver) {
           top_work += (double)(llen[k] + ulen[k] + 4u);
         }
       }
-      ok = ntop <= (int64_t)(nk / 4u) && top_work <= 0.2 * total &&
+      /* the refactor tolerates a fatter serial top (Amdahl on 99
+         repeated calls still pays); the solve keeps the tight gate */
+      ok = ntop <= (int64_t)(nk / 3u) && top_work <= 0.40 * total &&
            max_bin <= 0.6 * total;
       if (trace) {
         fprintf(stderr,
@@ -117449,6 +117642,8 @@ static void kls_pts_try_build(kls_solver *solver) {
     ok = pts != NULL;
   }
   if (ok) {
+    pts->solve_ok =
+      ntop <= (int64_t)(nk / 4u) && top_work <= 0.2 * total;
     pts->block = best;
     pts->k1 = k1;
     pts->nk = nk;
@@ -117726,6 +117921,206 @@ static int kls_pts_solve_block(kls_solver *solver, double *Xb, double *lu,
   return 1;
 }
 
+typedef struct {
+  kls_parallel_refactor_shared *shared;
+  kls_pts *pts;
+  UF_long block;
+  _Atomic int *go;
+  kls_parallel_refactor_worker worker;
+  int tid;
+} kls_pts_ref_arg;
+
+static void kls_pts_ref_worker_body(kls_pts_ref_arg *a) {
+  kls_pts *pts = a->pts;
+  a->worker.shared = a->shared;
+  a->worker.x = pts->xwork + (int64_t)a->tid * pts->nk;
+  kls_pts_refactor_block_cols(&a->worker, a->block,
+                              pts->tcols + pts->tcols_off[a->tid],
+                              pts->tcols_off[a->tid + 1] -
+                                pts->tcols_off[a->tid]);
+}
+
+static void *kls_pts_ref_worker(void *argp) {
+  kls_pts_ref_arg *a = (kls_pts_ref_arg *)argp;
+  int go;
+  while ((go = atomic_load_explicit(a->go, memory_order_acquire)) == 0) {
+    kls_cpu_relax();
+  }
+  if (go == 1) {
+    kls_pts_ref_worker_body(a);
+  }
+  return NULL;
+}
+
+/* Subtree-parallel mapped refactor for the serial-mapped flop regime:
+   BTF blocks are mutually independent under refactorization, so the
+   small blocks run serially, the partitioned block's bins run on the
+   crew, and the shared-ancestor top columns finish serially after the
+   join.  -1 = ineligible (caller falls through to the serial path). */
+static int kls_pts_mapped_refactor(kls_solver *solver,
+                                   double *numeric_values) {
+  kls_pts *pts = solver->pts;
+  trilinos_klu_l_common *common = &solver->common;
+  if (pts == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->numeric->Xwork == NULL ||
+      getenv("KLS_DISABLE_PTS_REFACTOR") != NULL) {
+    return -1;
+  }
+  const int scaled = common->scale > 0;
+  if (scaled && (solver->numeric->Rs == NULL || solver->numeric->Pnum == NULL ||
+                 solver->symbolic->nblocks == 1u)) {
+    return -1;
+  }
+  if (!scaled && solver->numeric->Rs != NULL) {
+    return -1;
+  }
+  if (!kls_build_refactor_map(solver)) {
+    return -1;
+  }
+  const int nthreads = pts->nthreads;
+  if (pts->xwork == NULL) {
+    pts->xwork = (double *)calloc((size_t)nthreads * (size_t)pts->nk,
+                                  sizeof(double));
+    if (pts->xwork == NULL) {
+      return -1;
+    }
+  }
+  common->status = TRILINOS_KLU_OK;
+  common->numerical_rank = KLS_KLU_EMPTY;
+  common->singular_col = KLS_KLU_EMPTY;
+  common->nrealloc = 0;
+
+  kls_parallel_refactor_shared shared;
+  memset(&shared, 0, sizeof(shared));
+  shared.solver = solver;
+  shared.col_ptr = solver->col_ptr;
+  shared.row_idx = solver->row_idx;
+  shared.nnz = solver->nnz;
+  shared.map_col_ptr = solver->refactor_col_ptr;
+  shared.map_row_idx = solver->refactor_row_idx;
+  shared.map_input_pos = solver->refactor_input_pos;
+  shared.map_block_start = solver->refactor_block_start;
+  shared.snode_run_end = solver->snode_run_end;
+  shared.values = numeric_values;
+  shared.symbolic = solver->symbolic;
+  shared.numeric = solver->numeric;
+  shared.rs = scaled ? solver->numeric->Rs : NULL;
+  shared.n = solver->n;
+  shared.scale = (int)common->scale;
+  shared.halt_if_singular = common->halt_if_singular;
+  shared.check_pivots = 0;
+  shared.pivot_tolerance = common->tol;
+
+  kls_pts_ref_arg args[KLS_PTS_MAX_THREADS];
+  pthread_t tids[KLS_PTS_MAX_THREADS];
+  _Atomic int go;
+  atomic_init(&go, 0);
+  for (int t = 0; t < nthreads; ++t) {
+    memset(&args[t], 0, sizeof(args[t]));
+    args[t].shared = &shared;
+    args[t].pts = pts;
+    args[t].block = pts->block;
+    args[t].go = &go;
+    args[t].tid = t;
+    args[t].worker.rejected_pivot = KLS_KLU_EMPTY;
+    args[t].worker.rejected_pivot_col = KLS_KLU_EMPTY;
+    args[t].worker.rejected_row = KLS_KLU_EMPTY;
+  }
+  int spawned = 0;
+  for (int t = 1; t < nthreads; ++t) {
+    if (pthread_create(&tids[t], NULL, kls_pts_ref_worker, &args[t]) != 0) {
+      break;
+    }
+    spawned++;
+  }
+  if (spawned != nthreads - 1) {
+    atomic_store_explicit(&go, 2, memory_order_release);
+    for (int t = 1; t <= spawned; ++t) {
+      pthread_join(tids[t], NULL);
+    }
+    return -1;
+  }
+  atomic_store_explicit(&go, 1, memory_order_release);
+
+  /* tid 0: all the other BTF blocks, serially, then its own bin */
+  kls_parallel_refactor_worker sworker;
+  memset(&sworker, 0, sizeof(sworker));
+  sworker.shared = &shared;
+  sworker.x = pts->xwork;
+  int failed = 0;
+  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    if (block == pts->block) {
+      continue;
+    }
+    kls_parallel_refactor_block(&sworker, block);
+    if (sworker.invalid ||
+        (sworker.singular && common->halt_if_singular)) {
+      failed = 1;
+      break;
+    }
+  }
+  if (!failed) {
+    kls_pts_ref_worker_body(&args[0]);
+  }
+  for (int t = 1; t < nthreads; ++t) {
+    pthread_join(tids[t], NULL);
+  }
+  /* top columns: dependencies are descendants, all bins joined */
+  if (!failed && pts->ntop > 0) {
+    int bins_bad = sworker.invalid || args[0].worker.invalid;
+    for (int t = 1; t < nthreads && !bins_bad; ++t) {
+      bins_bad = args[t].worker.invalid;
+    }
+    if (!bins_bad) {
+      kls_pts_refactor_block_cols(&args[0].worker, pts->block,
+                                  pts->top_cols, pts->ntop);
+    }
+  }
+
+  int invalid = sworker.invalid;
+  int singular = sworker.singular;
+  UF_long rank = sworker.singular ? sworker.numerical_rank : KLS_KLU_EMPTY;
+  UF_long scol = sworker.singular ? sworker.singular_col : KLS_KLU_EMPTY;
+  for (int t = 0; t < nthreads; ++t) {
+    const kls_parallel_refactor_worker *w = &args[t].worker;
+    invalid = invalid || w->invalid;
+    if (w->singular &&
+        (rank == KLS_KLU_EMPTY || w->numerical_rank < rank)) {
+      singular = 1;
+      rank = w->numerical_rank;
+      scol = w->singular_col;
+    }
+  }
+  if (invalid || failed) {
+    memset(pts->xwork, 0,
+           (size_t)nthreads * (size_t)pts->nk * sizeof(double));
+    if (invalid) {
+      kls_record_fast_factor_failure(
+        solver, KLS_FAST_FACTOR_FAIL_MAPPED_INVALID, TRILINOS_KLU_INVALID);
+      common->status = TRILINOS_KLU_INVALID;
+      return 0;
+    }
+  }
+  if (singular) {
+    common->status = TRILINOS_KLU_SINGULAR;
+    common->numerical_rank = rank;
+    common->singular_col = scol;
+    if (common->halt_if_singular) {
+      memset(pts->xwork, 0,
+             (size_t)nthreads * (size_t)pts->nk * sizeof(double));
+      return 0;
+    }
+  }
+  if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+  if (!singular) {
+    common->status = TRILINOS_KLU_OK;
+  }
+  return 1;
+}
+
 static int kls_i32_solve_ready(kls_solver *solver) {
   if (solver->i32solve_state != 0) {
     return solver->i32solve_state > 0;
@@ -117863,6 +118258,7 @@ static UF_long kls_i32_solve(kls_solver *solver, double *b) {
       double *lu = (double *)numeric->LUbx[block];
       double *Xb = X + k1;
       if (solver->pts != NULL && solver->pts->block == block &&
+          solver->pts->nk >= 65536u && solver->pts->solve_ok &&
           kls_pts_solve_block(solver, Xb, lu, lip, llen, uip, ulen,
                               udiag + k1)) {
         if (block > 0) {
