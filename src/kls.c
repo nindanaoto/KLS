@@ -2299,6 +2299,7 @@ typedef struct kls_match_entry {
 
 static int kls_build_refactor_schedule(kls_solver *solver);
 static int kls_i32_solve_ready(kls_solver *solver);
+static UF_long kls_parallel_lu_sort(kls_solver *solver);
 static void kls_update_factor_etree_stats(kls_solver *solver);
 static int kls_refactor_supernode_panel_block_info(
   const kls_solver *solver,
@@ -87580,8 +87581,7 @@ static void kls_snb_maybe_accept(kls_solver *solver,
     }
     solver->snode_prepared = 1;
     if (!solver->snode_numeric_pre_sorted &&
-        !trilinos_klu_l_sort(solver->symbolic, solver->numeric,
-                             &solver->common)) {
+        !kls_parallel_lu_sort(solver)) {
       solver->snb_declined = 1;
       *elapsed += kls_now_seconds() - accept_start;
       return;
@@ -87743,6 +87743,178 @@ static int kls_snode_panel_env_disabled(void) {
   return value != NULL && value[0] == '1';
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Parallel packed-LU column sort (hard core D, brick 1).  The         */
+/* vendored TRILINOS_KLU_sort is a serial double transpose; columns    */
+/* sort independently, so a crew with an atomic column cursor does the */
+/* same job at memory speed.  Semantics identical: every L and U       */
+/* column of every block ends ascending by row index with values       */
+/* permuted along.                                                     */
+/* ------------------------------------------------------------------ */
+
+typedef struct kls_par_sort_pair {
+  UF_long row;
+  double val;
+} kls_par_sort_pair;
+
+static int kls_par_sort_pair_cmp(const void *a, const void *b) {
+  const UF_long ra = ((const kls_par_sort_pair *)a)->row;
+  const UF_long rb = ((const kls_par_sort_pair *)b)->row;
+  return ra < rb ? -1 : (ra > rb ? 1 : 0);
+}
+
+static int kls_par_sort_column(UF_long *xi, double *xx, UF_long len,
+                               kls_par_sort_pair **buf, UF_long *cap) {
+  if (len < 2) {
+    return 1;
+  }
+  int sorted = 1;
+  for (UF_long p = 1; p < len; ++p) {
+    if (xi[p - 1] > xi[p]) {
+      sorted = 0;
+      break;
+    }
+  }
+  if (sorted) {
+    return 1;
+  }
+  if (len <= 40u) {
+    for (UF_long p = 1; p < len; ++p) {
+      const UF_long ri = xi[p];
+      const double vi = xx[p];
+      UF_long q = p;
+      while (q > 0 && xi[q - 1] > ri) {
+        xi[q] = xi[q - 1];
+        xx[q] = xx[q - 1];
+        q--;
+      }
+      xi[q] = ri;
+      xx[q] = vi;
+    }
+    return 1;
+  }
+  if (*cap < len) {
+    UF_long next = *cap > 0 ? *cap : 4096u;
+    while (next < len) next *= 2u;
+    kls_par_sort_pair *grown =
+      (kls_par_sort_pair *)realloc(*buf, (size_t)next * sizeof(**buf));
+    if (grown == NULL) {
+      return 0;
+    }
+    *buf = grown;
+    *cap = next;
+  }
+  kls_par_sort_pair *pairs = *buf;
+  for (UF_long p = 0; p < len; ++p) {
+    pairs[p].row = xi[p];
+    pairs[p].val = xx[p];
+  }
+  qsort(pairs, (size_t)len, sizeof(*pairs), kls_par_sort_pair_cmp);
+  for (UF_long p = 0; p < len; ++p) {
+    xi[p] = pairs[p].row;
+    xx[p] = pairs[p].val;
+  }
+  return 1;
+}
+
+typedef struct kls_par_sort_ctx {
+  trilinos_klu_l_symbolic *symbolic;
+  trilinos_klu_l_numeric *numeric;
+  _Atomic int64_t cursor;   /* global column index across all blocks */
+  _Atomic int failed;
+} kls_par_sort_ctx;
+
+static void *kls_par_sort_worker(void *argp) {
+  kls_par_sort_ctx *ctx = (kls_par_sort_ctx *)argp;
+  trilinos_klu_l_symbolic *symbolic = ctx->symbolic;
+  trilinos_klu_l_numeric *numeric = ctx->numeric;
+  const UF_long n = symbolic->n;
+  kls_par_sort_pair *buf = NULL;
+  UF_long cap = 0;
+  for (;;) {
+    const int64_t start =
+      atomic_fetch_add_explicit(&ctx->cursor, 256, memory_order_relaxed);
+    if (start >= (int64_t)n) {
+      break;
+    }
+    int64_t end = start + 256;
+    if (end > (int64_t)n) end = (int64_t)n;
+    for (int64_t gk = start; gk < end; ++gk) {
+      /* locate the block (blocks are few; linear from R would be slow —
+         binary search) */
+      UF_long lo = 0, hi = (UF_long)symbolic->nblocks;
+      while (lo + 1u < hi) {
+        const UF_long mid = (lo + hi) >> 1;
+        if (symbolic->R[mid] <= (UF_long)gk) lo = mid;
+        else hi = mid;
+      }
+      const UF_long block = lo;
+      const UF_long k1 = symbolic->R[block];
+      const UF_long nk = symbolic->R[block + 1u] - k1;
+      if (nk < 2u || numeric->LUbx[block] == NULL) {
+        continue;
+      }
+      double *lu = (double *)numeric->LUbx[block];
+      const UF_long k = (UF_long)gk - k1;
+      UF_long *xi; double *xx; UF_long len;
+      kls_klu_get_pointer(lu, numeric->Lip + k1, numeric->Llen + k1, k,
+                          &xi, &xx, &len);
+      if (!kls_par_sort_column(xi, xx, len, &buf, &cap)) {
+        atomic_store_explicit(&ctx->failed, 1, memory_order_release);
+        break;
+      }
+      kls_klu_get_pointer(lu, numeric->Uip + k1, numeric->Ulen + k1, k,
+                          &xi, &xx, &len);
+      if (!kls_par_sort_column(xi, xx, len, &buf, &cap)) {
+        atomic_store_explicit(&ctx->failed, 1, memory_order_release);
+        break;
+      }
+    }
+    if (atomic_load_explicit(&ctx->failed, memory_order_acquire)) {
+      break;
+    }
+  }
+  free(buf);
+  return NULL;
+}
+
+/* Drop-in for trilinos_klu_l_sort: parallel when it can be, vendored
+ * serial otherwise.  Returns nonzero on success like the original. */
+static UF_long kls_parallel_lu_sort(kls_solver *solver) {
+  int nt = solver->options.threads;
+  if (nt > 16) nt = 16;
+  if (nt < 2 || solver->n < 100000u ||
+      getenv("KLS_DISABLE_PARALLEL_SORT") != NULL) {
+    return trilinos_klu_l_sort(solver->symbolic, solver->numeric,
+                               &solver->common);
+  }
+  kls_par_sort_ctx ctx;
+  ctx.symbolic = solver->symbolic;
+  ctx.numeric = solver->numeric;
+  atomic_init(&ctx.cursor, 0);
+  atomic_init(&ctx.failed, 0);
+  pthread_t tids[16];
+  int spawned = 0;
+  for (int t = 1; t < nt; ++t) {
+    if (pthread_create(&tids[t], NULL, kls_par_sort_worker, &ctx) != 0) {
+      break;
+    }
+    spawned = t;
+  }
+  (void)kls_par_sort_worker(&ctx);
+  for (int t = 1; t <= spawned; ++t) {
+    pthread_join(tids[t], NULL);
+  }
+  if (atomic_load_explicit(&ctx.failed, memory_order_acquire)) {
+    /* allocation failure mid-sort leaves some columns sorted, some not;
+       the vendored sort is order-insensitive, run it to finish */
+    return trilinos_klu_l_sort(solver->symbolic, solver->numeric,
+                               &solver->common);
+  }
+  return 1;
+}
+
 static void kls_maybe_prepare_snode_panels(kls_solver *solver,
                                            double *elapsed) {
   if (solver == NULL || elapsed == NULL || solver->snode_prepared ||
@@ -87782,8 +87954,7 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
   const double start = kls_now_seconds();
   solver->snode_prepared = 1;
   if (!solver->snode_numeric_pre_sorted &&
-      !trilinos_klu_l_sort(solver->symbolic, solver->numeric,
-                           &solver->common)) {
+      !kls_parallel_lu_sort(solver)) {
     *elapsed += kls_now_seconds() - start;
     return;
   }
