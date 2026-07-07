@@ -25,6 +25,9 @@
 #include <errno.h>
 #include <float.h>
 #include <inttypes.h>
+#if defined(__GNUC__) && defined(__x86_64__)
+#include <immintrin.h>
+#endif
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
@@ -2683,6 +2686,73 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract(
   }
 }
 
+/* Optional AVX-512 gather/scatter path for the indexed-RMW scatter
+   loops the autovectorizer cannot touch.  Compiled with function-level
+   target attributes so the translation unit still builds and runs on
+   AVX2-only machines; a cached __builtin_cpu_supports check dispatches
+   at runtime.  The row indices within one L column are distinct, so
+   gather-modify-scatter over 8-lane blocks is exact.  Off by default:
+   Intel gathers cost ~3-4 cycles/element, so this only wins where the
+   scalar path is x-latency-bound -- enable with KLS_AVX512_SCATTER=1
+   and judge per machine. */
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+#define KLS_HAVE_AVX512_KERNELS 1
+static int kls_avx512_scatter_enabled(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *env = getenv("KLS_AVX512_SCATTER");
+    cached = env != NULL && env[0] == '1' && env[1] == '\0' &&
+             __builtin_cpu_supports("avx512f") ? 1 : 0;
+  }
+  return cached;
+}
+
+__attribute__((target("avx512f"), noinline)) static void
+kls_scatter_subtract_i32_avx512(double *restrict x,
+                                const int32_t *restrict rows,
+                                const double *restrict values,
+                                UF_long length,
+                                double scale) {
+  const __m512d vs = _mm512_set1_pd(scale);
+  UF_long p = 0;
+  for (; p + 8u <= length; p += 8u) {
+    const __m256i idx =
+      _mm256_loadu_si256((const __m256i *)(const void *)(rows + p));
+    const __m512d vals = _mm512_loadu_pd(values + p);
+    __m512d xv = _mm512_i32gather_pd(idx, x, 8);
+    xv = _mm512_fnmadd_pd(vals, vs, xv);
+    _mm512_i32scatter_pd(x, idx, xv, 8);
+  }
+  for (; p < length; ++p) {
+    x[rows[p]] -= values[p] * scale;
+  }
+}
+
+__attribute__((target("avx512f"), noinline)) static void
+kls_scatter_subtract_i32_f32_avx512(double *restrict x,
+                                    const int32_t *restrict rows,
+                                    const float *restrict values,
+                                    UF_long length,
+                                    double scale) {
+  const __m512d vs = _mm512_set1_pd(scale);
+  UF_long p = 0;
+  for (; p + 8u <= length; p += 8u) {
+    const __m256i idx =
+      _mm256_loadu_si256((const __m256i *)(const void *)(rows + p));
+    const __m512d vals =
+      _mm512_cvtps_pd(_mm256_loadu_ps(values + p));
+    __m512d xv = _mm512_i32gather_pd(idx, x, 8);
+    xv = _mm512_fnmadd_pd(vals, vs, xv);
+    _mm512_i32scatter_pd(x, idx, xv, 8);
+  }
+  for (; p < length; ++p) {
+    x[rows[p]] -= (double)values[p] * scale;
+  }
+}
+#else
+#define KLS_HAVE_AVX512_KERNELS 0
+#endif
+
 static KLS_ALWAYS_INLINE void kls_scatter_subtract_i32(
   double *restrict x,
   const int32_t *restrict rows,
@@ -2692,6 +2762,12 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract_i32(
   if (scale == 0.0) {
     return;
   }
+#if KLS_HAVE_AVX512_KERNELS
+  if (length >= 16u && kls_avx512_scatter_enabled()) {
+    kls_scatter_subtract_i32_avx512(x, rows, values, length, scale);
+    return;
+  }
+#endif
   UF_long p = 0;
   for (; p + 7u < length; p += 8u) {
     if (p + 24u < length) {
@@ -2727,6 +2803,12 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract_i32_f32(
   if (scale == 0.0) {
     return;
   }
+#if KLS_HAVE_AVX512_KERNELS
+  if (length >= 16u && kls_avx512_scatter_enabled()) {
+    kls_scatter_subtract_i32_f32_avx512(x, rows, values, length, scale);
+    return;
+  }
+#endif
   UF_long p = 0;
   for (; p + 7u < length; p += 8u) {
     x[rows[p]] -= (double)values[p] * scale;
@@ -20048,9 +20130,8 @@ __attribute__((destructor)) static void kls_snode_trace_report(void) {
  * update with a single index stream.  The chunked tail update only pays for
  * itself when it vectorizes, so the function is multi-versioned and the
  * AVX2/FMA clone is selected at load time on capable hosts. */
-#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__) && \
-    !defined(__AVX512F__)
-__attribute__((target_clones("default", "arch=x86-64-v3")))
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+__attribute__((target_clones("default", "arch=x86-64-v3", "arch=x86-64-v4")))
 #endif
 static UF_long kls_snode_batch_consume(
   double *lu,
@@ -69061,9 +69142,8 @@ static int kls_egraph_refactor_dependency_done_now(
  * only taken when every producer in it is already published; otherwise the
  * scalar path performs its usual blocking wait.  Returns the number of
  * producers consumed (0 = no batch at position up). */
-#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__) && \
-    !defined(__AVX512F__)
-__attribute__((target_clones("default", "arch=x86-64-v3")))
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+__attribute__((target_clones("default", "arch=x86-64-v3", "arch=x86-64-v4")))
 #endif
 static UF_long kls_snode_batch_consume_cached(
   UF_long *const *l_indices,
@@ -69189,9 +69269,8 @@ static UF_long kls_snode_batch_consume_cached(
   return t;
 }
 
-#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__) && \
-    !defined(__AVX512F__)
-__attribute__((target_clones("default", "arch=x86-64-v3")))
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+__attribute__((target_clones("default", "arch=x86-64-v3", "arch=x86-64-v4")))
 #endif
 static UF_long kls_snode_batch_consume_cached_f32(
   UF_long *const *l_indices,
