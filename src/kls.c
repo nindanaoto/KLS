@@ -118383,6 +118383,32 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     solver->i32solve_state = -1;
     return 0;
   }
+  if (getenv("KLS_TRACE_RUNS") != NULL) {
+    int64_t lruns = 0, uruns = 0;
+    for (UF_long g = 0; g < n; ++g) {
+      for (int64_t p = solver->i32solve_loff[g];
+           p < solver->i32solve_loff[g + 1]; ++p) {
+        if (p == solver->i32solve_loff[g] ||
+            solver->i32solve_l[p] != solver->i32solve_l[p - 1] + 1) {
+          lruns++;
+        }
+      }
+      for (int64_t p = solver->i32solve_uoff[g];
+           p < solver->i32solve_uoff[g + 1]; ++p) {
+        if (p == solver->i32solve_uoff[g] ||
+            solver->i32solve_u[p] != solver->i32solve_u[p - 1] + 1) {
+          uruns++;
+        }
+      }
+    }
+    fprintf(stderr,
+            "KLS runs: L %lld entries / %lld runs (avg %.2f), "
+            "U %lld/%lld (avg %.2f)\n",
+            (long long)lcur, (long long)lruns,
+            lruns > 0 ? (double)lcur / (double)lruns : 0.0,
+            (long long)ucur, (long long)uruns,
+            uruns > 0 ? (double)ucur / (double)uruns : 0.0);
+  }
   solver->i32solve_state = 1;
   kls_pts_try_build(solver);
   return 1;
