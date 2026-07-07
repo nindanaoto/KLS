@@ -117858,7 +117858,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       best = block;
     }
   }
-  if (best < 0 || best_nk < 4096u) {
+  if (best < 0 || best_nk < 2048u) {
     return;
   }
   const UF_long k1 = symbolic->R[best];
