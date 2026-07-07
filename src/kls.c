@@ -117436,6 +117436,7 @@ static void kls_pts_try_build(kls_solver *solver) {
   const int32_t *i32l = solver->i32solve_l;
   const int32_t *i32u = solver->i32solve_u;
 
+  const char *reject_stage = "none";
   int32_t *parent = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
   int32_t *head = (int32_t *)malloc(((size_t)nk + 1u) * sizeof(int32_t));
   int32_t *next = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
@@ -117453,12 +117454,16 @@ static void kls_pts_try_build(kls_solver *solver) {
            tout != NULL && dfs_order != NULL && cursor != NULL &&
            stack != NULL && swork != NULL && owner != NULL && croot != NULL;
 
-  /* parent = min over the ancestor constraints; streams must be
-     strictly ascending block-local indices */
+  /* Liu-style forest over the ancestor constraints (L(i,k): i must be
+     an ancestor of k; U(i,k): k must be an ancestor of i), processed in
+     ascending target order with path compression, so closure holds by
+     construction on any pattern -- exact LU patterns form DAGs the
+     min-parent shortcut cannot always embed.  Streams must still be
+     strictly ascending block-local indices. */
+  int32_t *aroot = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  ok = ok && aroot != NULL;
   if (ok) {
-    for (UF_long k = 0; k < nk; ++k) {
-      parent[k] = (int32_t)nk;
-    }
+    /* validate stream order and count L rows for the row grouping */
     for (UF_long k = 0; ok && k < nk; ++k) {
       const int32_t *li = i32l + loff[k];
       const UF_long ll = llen[k];
@@ -117467,12 +117472,10 @@ static void kls_pts_try_build(kls_solver *solver) {
         const int32_t i = li[p];
         if (i <= prev || i >= (int32_t)nk) {
           ok = 0;
+          reject_stage = "L-order";
           break;
         }
         prev = i;
-      }
-      if (ok && ll > 0 && li[0] < parent[k]) {
-        parent[k] = li[0];
       }
       const int32_t *ui = i32u + uoff[k];
       const UF_long ul = ulen[k];
@@ -117481,14 +117484,81 @@ static void kls_pts_try_build(kls_solver *solver) {
         const int32_t i = ui[p];
         if (i <= prev || i >= (int32_t)k) {
           ok = 0;
+          reject_stage = "U-order";
           break;
         }
         prev = i;
-        if ((int32_t)k < parent[i]) {
-          parent[i] = (int32_t)k;
+      }
+    }
+  }
+  if (ok) {
+    /* group L entries by row via counting sort, storing source columns */
+    const int64_t lnz_total = loff[nk] - loff[0];
+    int64_t *lrow_ptr = (int64_t *)malloc(((size_t)nk + 1u) *
+                                          sizeof(int64_t));
+    int32_t *lrow_col = (int32_t *)malloc(
+      (size_t)(lnz_total > 0 ? lnz_total : 1) * sizeof(int32_t));
+    ok = lrow_ptr != NULL && lrow_col != NULL;
+    if (ok) {
+      memset(lrow_ptr, 0, ((size_t)nk + 1u) * sizeof(int64_t));
+      for (UF_long k = 0; k < nk; ++k) {
+        const int32_t *li = i32l + loff[k];
+        const UF_long ll = llen[k];
+        for (UF_long p = 0; p < ll; ++p) {
+          lrow_ptr[li[p] + 1]++;
+        }
+      }
+      for (UF_long t = 0; t < nk; ++t) {
+        lrow_ptr[t + 1] += lrow_ptr[t];
+      }
+      for (UF_long k = 0; k < nk; ++k) {
+        const int32_t *li = i32l + loff[k];
+        const UF_long ll = llen[k];
+        for (UF_long p = 0; p < ll; ++p) {
+          lrow_col[lrow_ptr[li[p]]++] = (int32_t)k;
+        }
+      }
+      for (UF_long t = nk; t-- > 0;) {
+        lrow_ptr[t + 1] = lrow_ptr[t];
+      }
+      lrow_ptr[0] = 0;
+      for (UF_long k = 0; k < nk; ++k) {
+        parent[k] = (int32_t)nk;
+        aroot[k] = (int32_t)k;
+      }
+      for (UF_long t = 0; t < nk; ++t) {
+        /* L sources: columns j with L(t,j) != 0 */
+        for (int64_t p = lrow_ptr[t]; p < lrow_ptr[t + 1]; ++p) {
+          int32_t r = lrow_col[p];
+          while (aroot[r] != r) {
+            const int32_t nxt = aroot[r];
+            aroot[r] = (int32_t)t;
+            r = nxt;
+          }
+          if (r != (int32_t)t) {
+            parent[r] = (int32_t)t;
+            aroot[r] = (int32_t)t;
+          }
+        }
+        /* U sources: rows of U(:,t) */
+        const int32_t *ui = i32u + uoff[t];
+        const UF_long ul = ulen[t];
+        for (UF_long p = 0; p < ul; ++p) {
+          int32_t r = ui[p];
+          while (aroot[r] != r) {
+            const int32_t nxt = aroot[r];
+            aroot[r] = (int32_t)t;
+            r = nxt;
+          }
+          if (r != (int32_t)t) {
+            parent[r] = (int32_t)t;
+            aroot[r] = (int32_t)t;
+          }
         }
       }
     }
+    free(lrow_ptr);
+    free(lrow_col);
   }
 
   /* children lists, then iterative DFS: Euler intervals + subtree work */
@@ -117539,6 +117609,7 @@ static void kls_pts_try_build(kls_solver *solver) {
         const int32_t i = li[p];
         if (!(tin[i] <= tin[k] && tin[k] < tout[i])) {
           ok = 0;
+          reject_stage = "L-anc";
           break;
         }
       }
@@ -117548,6 +117619,7 @@ static void kls_pts_try_build(kls_solver *solver) {
         const int32_t i = ui[p];
         if (!(tin[k] <= tin[i] && tin[i] < tout[k])) {
           ok = 0;
+          reject_stage = "U-desc";
           break;
         }
       }
@@ -117632,8 +117704,8 @@ static void kls_pts_try_build(kls_solver *solver) {
       }
     }
   } else if (trace) {
-    fprintf(stderr, "KLS pts build block=%ld nk=%ld -> tree reject\n",
-            (long)best, (long)nk);
+    fprintf(stderr, "KLS pts build block=%ld nk=%ld -> tree reject (%s)\n",
+            (long)best, (long)nk, reject_stage);
   }
 
   /* assemble the persistent partition */
@@ -117715,6 +117787,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     free(pts);
   }
   free(parent);
+  free(aroot);
   free(head);
   free(next);
   free(tin);
