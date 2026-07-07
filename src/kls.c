@@ -118408,6 +118408,36 @@ static int kls_i32_solve_ready(kls_solver *solver) {
             lruns > 0 ? (double)lcur / (double)lruns : 0.0,
             (long long)ucur, (long long)uruns,
             uruns > 0 ? (double)ucur / (double)uruns : 0.0);
+    /* gap-merge simulation: pad segments across gaps <= G */
+    {
+      const int gaps[4] = {2, 4, 8, 16};
+      for (int gi = 0; gi < 4; ++gi) {
+        const int G = gaps[gi];
+        int64_t segs = 0;
+        int64_t padded = 0;
+        for (UF_long g = 0; g < n; ++g) {
+          int32_t seg_end = INT32_MIN;
+          for (int64_t p = solver->i32solve_loff[g];
+               p < solver->i32solve_loff[g + 1]; ++p) {
+            const int32_t i = solver->i32solve_l[p];
+            if (seg_end == INT32_MIN || i - seg_end > G) {
+              segs++;
+              if (seg_end != INT32_MIN) {
+              }
+              seg_end = i;
+            } else {
+              padded += i - seg_end - 1;
+              seg_end = i;
+            }
+          }
+        }
+        fprintf(stderr,
+                "KLS runs: L gap<=%d: %lld segs avg %.2f pad %.1f%%\n",
+                G, (long long)segs,
+                segs > 0 ? (double)(lcur + padded) / (double)segs : 0.0,
+                lcur > 0 ? 100.0 * (double)padded / (double)lcur : 0.0);
+      }
+    }
   }
   solver->i32solve_state = 1;
   kls_pts_try_build(solver);

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -200,20 +201,30 @@ int main(int argc, char **argv) {
   long long factor_total = 0;
   long long refactor_total = 0;
   long long solve_total = 0;
+  long long refactor_wall_total = 0;
+  long long solve_wall_total = 0;
   for (int i = 0; i < repeat; ++i) {
     ret = solver.factorize(a.values.data());
     if (ret != subtree_lu::E_OK) break;
     factor_total += parm[subtree_lu::O_FACTORIZE_TIME];
   }
   for (int i = 0; i < refactor_repeat && ret == subtree_lu::E_OK; ++i) {
+    const auto w0 = std::chrono::steady_clock::now();
     ret = solver.refactorize(a.values.data());
+    const auto w1 = std::chrono::steady_clock::now();
     if (ret != subtree_lu::E_OK) break;
     refactor_total += parm[subtree_lu::O_FACTORIZE_TIME];
+    refactor_wall_total +=
+      std::chrono::duration_cast<std::chrono::microseconds>(w1 - w0).count();
   }
   for (int i = 0; i < repeat && ret == subtree_lu::E_OK; ++i) {
+    const auto w0 = std::chrono::steady_clock::now();
     ret = solver.solve(b.data(), x.data());
+    const auto w1 = std::chrono::steady_clock::now();
     if (ret != subtree_lu::E_OK) break;
     solve_total += parm[subtree_lu::O_SOLVE_TIME];
+    solve_wall_total +=
+      std::chrono::duration_cast<std::chrono::microseconds>(w1 - w0).count();
   }
   if (ret != subtree_lu::E_OK) {
     std::fprintf(stderr, "SubtreeLU run failed: %d\n", ret);
@@ -228,6 +239,13 @@ int main(int argc, char **argv) {
   const double spice_cycle_seconds =
     1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
               solve_us_avg + 99.0 * (refactor_us_avg + solve_us_avg));
+  std::fprintf(stderr,
+               "subtreelu wall: refactor %.1fus (reported %.1fus) "
+               "solve %.1fus (reported %.1fus)\n",
+               refactor_repeat > 0
+                 ? (double)refactor_wall_total / refactor_repeat : 0.0,
+               refactor_us_avg,
+               (double)solve_wall_total / repeat, solve_us_avg);
   double relative_residual = 0.0;
   const double residual_l2 = residual(a, x, b, &relative_residual);
 
