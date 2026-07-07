@@ -1638,6 +1638,7 @@ struct kls_solver {
   trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_numeric *numeric;
   kls_refactor_pool *refactor_pool;
+  struct kls_metis_race_s *metis_race;
   int auto_metis_checked;
   int auto_pivot_checked;
   int auto_scale_checked;
@@ -20964,7 +20965,10 @@ static void fill_build_stats(kls_stats *stats) {
 #endif
 }
 
+static void kls_metis_race_abandon(kls_solver *solver);
+
 static void clear_matrix(kls_solver *solver) {
+  kls_metis_race_abandon(solver);
   destroy_refactor_pool(solver);
   free_numeric(solver);
   free_egraph_worker_scratch(solver);
@@ -27577,6 +27581,134 @@ static int maybe_select_auto_pivot_tolerance(kls_solver *solver,
 }
 
 #ifdef KLS_HAVE_METIS
+/* Factor-time METIS promotion race (hard core D, brick 2): the serial
+   METIS analyze + trial factorization that maybe_promote_auto_metis runs
+   on giant-class matrices costs 10-13s and executes after the predicted
+   first factorization has already spent 8s building a numeric the
+   promotion then throws away.  Both sides only read the immutable
+   pattern arrays and a private copy of the values, so the trial runs on
+   a background thread launched before the first numeric is built and is
+   joined at the promotion point, hiding the shorter side entirely. */
+struct kls_metis_race_s {
+  pthread_t thread;
+  int active;
+  UF_long n;
+  UF_long *col_ptr;
+  UF_long *row_idx;
+  double *values_copy;
+  kls_options options;
+  int analyze_status;
+  trilinos_klu_l_symbolic *symbolic;
+  trilinos_klu_l_common common;
+  kls_separator_analysis separator;
+  trilinos_klu_l_numeric *numeric;
+};
+typedef struct kls_metis_race_s kls_metis_race;
+
+static void *kls_metis_race_main(void *arg) {
+  kls_metis_race *race = (kls_metis_race *)arg;
+  race->analyze_status = analyze_with_ordering(race->n, race->col_ptr,
+                                               race->row_idx, &race->options,
+                                               KLS_ORDERING_METIS,
+                                               &race->symbolic, &race->common,
+                                               &race->separator);
+  if (race->analyze_status != KLS_OK || race->symbolic == NULL) {
+    return NULL;
+  }
+  race->numeric = trilinos_klu_l_factor(race->col_ptr, race->row_idx,
+                                        race->values_copy, race->symbolic,
+                                        &race->common);
+  return NULL;
+}
+
+static kls_metis_race *kls_metis_race_take(kls_solver *solver,
+                                           double *elapsed) {
+  kls_metis_race *race = solver != NULL ? solver->metis_race : NULL;
+  if (race == NULL) {
+    return NULL;
+  }
+  solver->metis_race = NULL;
+  if (race->active) {
+    const double start = kls_now_seconds();
+    pthread_join(race->thread, NULL);
+    race->active = 0;
+    if (elapsed != NULL) {
+      *elapsed += kls_now_seconds() - start;
+    }
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr, "KLS metis race join wait %.3fs\n",
+              kls_now_seconds() - start);
+    }
+  }
+  return race;
+}
+
+static void kls_metis_race_free(kls_metis_race *race) {
+  if (race == NULL) {
+    return;
+  }
+  if (race->numeric != NULL) {
+    trilinos_klu_l_free_numeric(&race->numeric, &race->common);
+  }
+  if (race->symbolic != NULL) {
+    trilinos_klu_l_free_symbolic(&race->symbolic, &race->common);
+  }
+  kls_separator_analysis_clear(&race->separator);
+  free(race->values_copy);
+  free(race);
+}
+
+static void kls_metis_race_abandon(kls_solver *solver) {
+  kls_metis_race_free(kls_metis_race_take(solver, NULL));
+}
+
+static void kls_maybe_start_metis_race(kls_solver *solver,
+                                       const double *numeric_values) {
+  if (solver->metis_race != NULL || solver->auto_metis_checked ||
+      solver->options.ordering != KLS_ORDERING_AUTO ||
+      solver->stats.selected_ordering == KLS_ORDERING_METIS ||
+      solver->user_col_perm != NULL || solver->symbolic == NULL ||
+      solver->n < 20000 || getenv("KLS_DISABLE_METIS_RACE") != NULL) {
+    return;
+  }
+  /* Giant class only: the race copies the values (memchip: 118MB) and
+     burns a core, which only pays when the serial trial would cost
+     seconds.  Mid-size rows keep the serial promotion path. */
+  const double est_fill = solver->symbolic->lnz + solver->symbolic->unz;
+  const double est_flops = solver->symbolic->est_flops;
+  if (est_fill < 1.0e7 ||
+      !(est_flops >= 1.0e9 || (est_flops <= 0.0 && est_fill >= 3.0e7))) {
+    return;
+  }
+  kls_metis_race *race = (kls_metis_race *)calloc(1, sizeof(*race));
+  if (race == NULL) {
+    return;
+  }
+  race->values_copy =
+    (double *)malloc((size_t)solver->nnz * sizeof(*race->values_copy));
+  if (race->values_copy == NULL) {
+    free(race);
+    return;
+  }
+  memcpy(race->values_copy, numeric_values,
+         (size_t)solver->nnz * sizeof(*race->values_copy));
+  race->n = solver->n;
+  race->col_ptr = solver->col_ptr;
+  race->row_idx = solver->row_idx;
+  race->options = solver->options;
+  race->options.ordering = KLS_ORDERING_METIS;
+  race->options.scale = (int)solver->common.scale;
+  race->options.use_btf = solver->symbolic->do_btf ? 1 : 0;
+  race->analyze_status = KLS_ERR_FACTOR_FAILED;
+  if (pthread_create(&race->thread, NULL, kls_metis_race_main, race) != 0) {
+    free(race->values_copy);
+    free(race);
+    return;
+  }
+  race->active = 1;
+  solver->metis_race = race;
+}
+
 static int should_try_auto_metis(const kls_solver *solver) {
   if (solver->auto_metis_checked || solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->stats.selected_ordering == KLS_ORDERING_METIS ||
@@ -27611,47 +27743,69 @@ static int metis_numeric_is_better(const kls_solver *solver,
 
 static int maybe_promote_auto_metis(kls_solver *solver,
                                     double *elapsed,
-                                    const double *numeric_values) {
+                                    const double *numeric_values,
+                                    int race_invalid) {
+  kls_metis_race *race = kls_metis_race_take(solver, elapsed);
   if (solver != NULL && solver->user_col_perm != NULL) {
     /* A block-ordered numeric settled its ordering through the solve
        probe; a serial METIS trial factorization re-pivots the blocked
        matrix into orders of magnitude more fill.  Regular predicted
        numerics stay eligible - the metis promotion is where giants get
        their small-fill refactor numeric (rajat31 184M->118M). */
+    kls_metis_race_free(race);
     return 0;
   }
   if (!should_try_auto_metis(solver)) {
+    kls_metis_race_free(race);
     return 0;
   }
   solver->auto_metis_checked = 1;
-
-  kls_options metis_options = solver->options;
-  metis_options.ordering = KLS_ORDERING_METIS;
-  metis_options.scale = (int)solver->common.scale;
-  if (solver->symbolic != NULL) {
-    metis_options.use_btf = solver->symbolic->do_btf ? 1 : 0;
-  }
 
   trilinos_klu_l_symbolic *metis_symbolic = NULL;
   trilinos_klu_l_common metis_common;
   kls_separator_analysis metis_separator;
   memset(&metis_separator, 0, sizeof(metis_separator));
-  double start = kls_now_seconds();
-  int status = analyze_with_ordering(solver->n, solver->col_ptr, solver->row_idx,
-                                     &metis_options, KLS_ORDERING_METIS,
-                                     &metis_symbolic, &metis_common,
-                                     &metis_separator);
-  *elapsed += kls_now_seconds() - start;
-  if (status != KLS_OK) {
-    kls_separator_analysis_clear(&metis_separator);
-    return 0;
+  trilinos_klu_l_numeric *metis_numeric = NULL;
+  if (race != NULL && !race_invalid) {
+    /* An earlier promotion swapping the values or scale would leave the
+       raced trial factoring stale inputs; race_invalid routes those rare
+       flows back through the serial trial below. */
+    if (race->analyze_status != KLS_OK || race->symbolic == NULL) {
+      kls_metis_race_free(race);
+      return 0;
+    }
+    metis_symbolic = race->symbolic;
+    race->symbolic = NULL;
+    metis_common = race->common;
+    kls_separator_analysis_move(&metis_separator, &race->separator);
+    metis_numeric = race->numeric;
+    race->numeric = NULL;
+    kls_metis_race_free(race);
+  } else {
+    kls_metis_race_free(race);
+    kls_options metis_options = solver->options;
+    metis_options.ordering = KLS_ORDERING_METIS;
+    metis_options.scale = (int)solver->common.scale;
+    if (solver->symbolic != NULL) {
+      metis_options.use_btf = solver->symbolic->do_btf ? 1 : 0;
+    }
+    double start = kls_now_seconds();
+    int status = analyze_with_ordering(solver->n, solver->col_ptr,
+                                       solver->row_idx, &metis_options,
+                                       KLS_ORDERING_METIS, &metis_symbolic,
+                                       &metis_common, &metis_separator);
+    *elapsed += kls_now_seconds() - start;
+    if (status != KLS_OK) {
+      kls_separator_analysis_clear(&metis_separator);
+      return 0;
+    }
+    start = kls_now_seconds();
+    metis_numeric =
+      trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,
+                            (double *)numeric_values, metis_symbolic,
+                            &metis_common);
+    *elapsed += kls_now_seconds() - start;
   }
-
-  start = kls_now_seconds();
-  trilinos_klu_l_numeric *metis_numeric =
-    trilinos_klu_l_factor(solver->col_ptr, solver->row_idx, (double *)numeric_values,
-                          metis_symbolic, &metis_common);
-  *elapsed += kls_now_seconds() - start;
   if (metis_numeric == NULL || metis_common.status < 0 ||
       metis_common.status == TRILINOS_KLU_SINGULAR) {
     if (metis_numeric != NULL) {
@@ -116985,6 +117139,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
   solver->snb_factor_start = kls_now_seconds();
+  kls_metis_race_abandon(solver);
   kls_set_last_factor_path(solver, KLS_FACTOR_PATH_NONE);
   kls_clear_fast_reject_stats(solver);
   kls_clear_tail_last_stats(solver);
@@ -116993,10 +117148,20 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->stats.row_refactor_auto_model_attempted = 0;
   solver->stats.row_refactor_auto_model_accepted = 0;
   double *numeric_values = NULL;
+  const int kls_trace_entry = getenv("KLS_TRACE_FACTOR_PHASES") != NULL;
+  double kls_entry_ph = kls_now_seconds();
+#define KLS_ENTRY_PHASE(tag)                                              \
+  if (kls_trace_entry) {                                                  \
+    const double t_now = kls_now_seconds();                               \
+    fprintf(stderr, "KLS entry phase %-12s %.3fs\n", tag,                \
+            t_now - kls_entry_ph);                                        \
+    kls_entry_ph = t_now;                                                 \
+  }
   int status = prepare_numeric_values(solver, values, &numeric_values);
   if (status != KLS_OK) {
     return status;
   }
+  KLS_ENTRY_PHASE("prep_values")
 
   double elapsed = 0.0;
   if (solver->row_refactor_values_dirty) {
@@ -117011,6 +117176,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   const int had_numeric = solver->numeric != NULL;
   if (!had_numeric) {
     maybe_select_pre_static_row_match(solver, &elapsed, numeric_values);
+    KLS_ENTRY_PHASE("prestatic")
     if (solver->numeric != NULL) {
       numeric_values = solver->values != NULL ? solver->values : numeric_values;
       const int kls_first_factor_used =
@@ -117099,7 +117265,9 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (!had_numeric) {
     solver->common.scale = choose_auto_scale_from_values(solver, numeric_values);
     solver->common.tol = choose_initial_auto_pivot_tolerance(solver);
+    kls_maybe_start_metis_race(solver, numeric_values);
   }
+  KLS_ENTRY_PHASE("auto_scale")
   int kls_first_factor_used = 0;
   if (!had_numeric && kls_should_try_first_factor(solver)) {
     const double start = kls_now_seconds();
@@ -117112,11 +117280,13 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
     elapsed += kls_now_seconds() - start;
   }
+  KLS_ENTRY_PHASE("kls_first")
   if (!kls_first_factor_used) {
 #ifdef KLS_HAVE_SPRAL_SCALING
     if (!had_numeric && solver->numeric == NULL) {
       maybe_select_block_structured_ordering(solver, &elapsed,
                                              numeric_values);
+      KLS_ENTRY_PHASE("block_order")
       if (solver->numeric != NULL) {
         /* adoption replaced the prepared values buffer */
         numeric_values = solver->values;
@@ -117128,6 +117298,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     } else if (!had_numeric &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
+      KLS_ENTRY_PHASE("predicted")
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
     } else {
       const double start = kls_now_seconds();
@@ -117149,6 +117320,7 @@ int kls_factor(kls_solver *solver, const double *values) {
                                                           : KLS_ERR_FACTOR_FAILED;
   }
   kls_update_numeric_diagnostics(solver, 1);
+  KLS_ENTRY_PHASE("diag_full")
   int diagnostics_have_flops = 1;
   int diagnostics_have_rcond = 1;
   int promoted_numeric = 0;
@@ -117159,14 +117331,17 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
+  KLS_ENTRY_PHASE("auto_rowmatch")
   if (maybe_select_auto_scale(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
   }
+  KLS_ENTRY_PHASE("auto_rescale")
 #ifdef KLS_HAVE_METIS
-  if (maybe_promote_auto_metis(solver, &elapsed, numeric_values)) {
+  if (maybe_promote_auto_metis(solver, &elapsed, numeric_values,
+                               promoted_numeric)) {
     kls_first_factor_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
@@ -117178,12 +117353,14 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
+  KLS_ENTRY_PHASE("auto_metis")
   if (maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
+  KLS_ENTRY_PHASE("auto_pivtol")
 #ifdef KLS_HAVE_SPRAL_SCALING
   if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
                                              numeric_values)) {
@@ -117194,6 +117371,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_rcond = 1;
   }
 #endif
+  KLS_ENTRY_PHASE("auto_spralhun")
   if (promoted_numeric && !kls_first_factor_used &&
       kls_should_try_first_factor(solver)) {
     if (kls_try_rebuild_current_numeric_with_kls_first(solver, numeric_values,
@@ -117204,21 +117382,47 @@ int kls_factor(kls_solver *solver, const double *values) {
       diagnostics_have_rcond = 0;
     }
   }
-  if (!diagnostics_have_flops || !diagnostics_have_rcond) {
-    kls_update_numeric_diagnostics(solver, 1);
+  KLS_ENTRY_PHASE("rebuild_first")
+  {
+    const int trace_phases = getenv("KLS_TRACE_FACTOR_PHASES") != NULL;
+    double t_ph = kls_now_seconds();
+#define KLS_PHASE(tag)                                                    \
+    if (trace_phases) {                                                   \
+      const double t_now = kls_now_seconds();                             \
+      fprintf(stderr, "KLS factor phase %-10s %.3fs\n", tag,             \
+              t_now - t_ph);                                              \
+      t_ph = t_now;                                                       \
+    }
+    if (!diagnostics_have_flops || !diagnostics_have_rcond) {
+      kls_update_numeric_diagnostics(solver, 1);
+    }
+    KLS_PHASE("diag")
+    if (kls_first_factor_used && solver->common.status >= TRILINOS_KLU_OK) {
+      const double start = kls_now_seconds();
+      (void)kls_prepare_auto_row_refactor_from_numeric(solver);
+      elapsed += kls_now_seconds() - start;
+    }
+    KLS_PHASE("row_auto")
+    kls_maybe_prepare_snode_panels(solver, &elapsed);
+    KLS_PHASE("snode")
+    kls_snb_maybe_accept(solver, numeric_values, &elapsed);
+    KLS_PHASE("snb")
+    (void)kls_i32_solve_ready(solver);
+    KLS_PHASE("i32")
+    kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
+    KLS_PHASE("row_seed")
+    maybe_prepare_refactor_map(solver, &elapsed);
+    KLS_PHASE("map")
+    maybe_prepare_refactor_schedule(solver, &elapsed);
+    KLS_PHASE("sched")
+    kls_maybe_prepare_model_row_refactor_from_numeric(solver, &elapsed);
+    KLS_PHASE("row_model")
+#undef KLS_PHASE
+    if (trace_phases) {
+      fprintf(stderr, "KLS factor exit elapsed=%.3fs wall=%.3fs\n", elapsed,
+              kls_now_seconds() - solver->snb_factor_start);
+    }
   }
-  if (kls_first_factor_used && solver->common.status >= TRILINOS_KLU_OK) {
-    const double start = kls_now_seconds();
-    (void)kls_prepare_auto_row_refactor_from_numeric(solver);
-    elapsed += kls_now_seconds() - start;
-  }
-  kls_maybe_prepare_snode_panels(solver, &elapsed);
-      kls_snb_maybe_accept(solver, numeric_values, &elapsed);
-      (void)kls_i32_solve_ready(solver);
-  kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
-  maybe_prepare_refactor_map(solver, &elapsed);
-  maybe_prepare_refactor_schedule(solver, &elapsed);
-  kls_maybe_prepare_model_row_refactor_from_numeric(solver, &elapsed);
   solver->stats.factor_seconds = elapsed;
   fill_numeric_stats(solver);
   if (solver->common.status == TRILINOS_KLU_SINGULAR) {
