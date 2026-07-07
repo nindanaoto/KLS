@@ -28259,8 +28259,10 @@ static int choose_symbolic_for_pattern(UF_long n,
     const char *bs_env = getenv("KLS_ENABLE_BLOCK_ORDERING");
     const int bs_enabled =
       !(bs_env != NULL && bs_env[0] == '0' && bs_env[1] == '\0');
+    const int bs_forced =
+      bs_env != NULL && bs_env[0] == '1' && bs_env[1] == '\0';
     if (bs_enabled && options->static_pivoting && options->scale <= 0 &&
-        n >= 50000) {
+        (n >= 50000 || bs_forced)) {
       /* Below ~50k the ND analyses cost almost nothing and their scores
          steer orientation/scale heuristics the factor-time trial relies
          on; only shortcut where the analysis itself is the cost. */

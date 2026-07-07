@@ -239,6 +239,33 @@ int main(int argc, char **argv) {
   const double spice_cycle_seconds =
     1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
               solve_us_avg + 99.0 * (refactor_us_avg + solve_us_avg));
+  {
+    const char *dump = std::getenv("ST_DUMP_PERM");
+    if (dump != nullptr) {
+      const long long lnnz = parm[subtree_lu::O_LNNZ];
+      const long long unnz = parm[subtree_lu::O_UNNZ];
+      std::vector<int> lp(a.n + 1), up(a.n + 1), perm_rp(a.n),
+        perm_cp(a.n);
+      std::vector<int> li(lnnz > 0 ? lnnz : 1), ui(unnz > 0 ? unnz : 1);
+      std::vector<double> lx(lnnz > 0 ? lnnz : 1),
+        ux(unnz > 0 ? unnz : 1);
+      if (solver.extract_factors(lp.data(), li.data(), lx.data(),
+                                 up.data(), ui.data(), ux.data(),
+                                 perm_rp.data(), perm_cp.data()) ==
+          subtree_lu::E_OK) {
+        std::FILE *f = std::fopen(dump, "w");
+        if (f != nullptr) {
+          for (int64_t i = 0; i < a.n; ++i) {
+            std::fprintf(f, "%d %d\n", perm_rp[i], perm_cp[i]);
+          }
+          std::fclose(f);
+          std::fprintf(stderr, "perm dumped to %s\n", dump);
+        }
+      } else {
+        std::fprintf(stderr, "extract_factors failed\n");
+      }
+    }
+  }
   std::fprintf(stderr,
                "subtreelu wall: refactor %.1fus (reported %.1fus) "
                "solve %.1fus (reported %.1fus)\n",
