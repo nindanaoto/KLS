@@ -5,6 +5,15 @@ project(KLS
   DESCRIPTION "Standalone sparse direct solver for SPICE-style repeated linear solves"
   LANGUAGES C)
 
+option(KLS_NATIVE_ARCH "Compile for the build machine's CPU (-march=native)" ON)
+if(KLS_NATIVE_ARCH)
+  include(CheckCCompilerFlag)
+  check_c_compiler_flag("-march=native" KLS_HAVE_MARCH_NATIVE)
+  if(KLS_HAVE_MARCH_NATIVE)
+    add_compile_options(-march=native)
+  endif()
+endif()
+
 option(KLS_BUILD_TESTS "Build KLS tests" ON)
 option(KLS_BUILD_BENCHMARKS "Build KLS benchmark tools" ON)
 option(KLS_BUILD_CKTSO_COMPARE "Build optional CKTSO comparison tool" OFF)
