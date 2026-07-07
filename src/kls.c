@@ -89952,6 +89952,14 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
                              &snb_ok)) {
       return snb_ok;
     }
+    if (solver->options.threads > 1 &&
+        getenv("KLS_FORCE_PTS_REFACTOR") != NULL) {
+      const int ptsref = kls_pts_mapped_refactor(solver, numeric_values);
+      if (ptsref >= 0) {
+        kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
+        return (UF_long)ptsref;
+      }
+    }
   }
   int egraph =
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
@@ -118204,6 +118212,12 @@ typedef struct {
   _Atomic int *go;
   kls_parallel_refactor_worker worker;
   int tid;
+  /* pipelined top (phase 2): ascending claims with per-dep spins */
+  pthread_barrier_t *barrier;
+  _Atomic int64_t *top_cursor;
+  _Atomic unsigned char *top_done;
+  _Atomic int *failed;
+  const kls_solver *solver;
 } kls_pts_ref_arg;
 
 static void kls_pts_ref_worker_body(kls_pts_ref_arg *a) {
@@ -118214,6 +118228,51 @@ static void kls_pts_ref_worker_body(kls_pts_ref_arg *a) {
                               pts->tcols + pts->tcols_off[a->tid],
                               pts->tcols_off[a->tid + 1] -
                                 pts->tcols_off[a->tid]);
+  if (a->barrier == NULL) {
+    return;
+  }
+  if (a->worker.invalid ||
+      (a->worker.singular && a->shared->halt_if_singular)) {
+    atomic_store_explicit(a->failed, 1, memory_order_release);
+  }
+  (void)pthread_barrier_wait(a->barrier);
+  if (atomic_load_explicit(a->failed, memory_order_acquire)) {
+    return;
+  }
+  /* phase 2: the shared-ancestor top, claimed ascending; bin
+     dependencies are complete (barrier), only top-resident
+     dependencies need the spin */
+  const UF_long k1 = pts->k1;
+  const kls_solver *solver = a->solver;
+  const int64_t *uoff = solver->i32solve_uoff + k1;
+  const int32_t *i32u = solver->i32solve_u;
+  const UF_long *ulen = solver->numeric->Ulen + k1;
+  for (;;) {
+    const int64_t idx = atomic_fetch_add_explicit(a->top_cursor, 1,
+                                                  memory_order_relaxed);
+    if (idx >= pts->ntop) {
+      break;
+    }
+    const int32_t k = pts->top_cols[idx];
+    const int32_t *ui = i32u + uoff[k];
+    const UF_long ul = ulen[k];
+    for (UF_long p = 0; p < ul; ++p) {
+      const int32_t j = ui[p];
+      if (pts->top_map[j] >= 0) {
+        while (!atomic_load_explicit(a->top_done + j,
+                                     memory_order_acquire)) {
+          kls_cpu_relax();
+        }
+      }
+    }
+    kls_pts_refactor_block_cols(&a->worker, a->block,
+                                &pts->top_cols[idx], 1);
+    atomic_store_explicit(a->top_done + k, 1, memory_order_release);
+    if (a->worker.invalid) {
+      atomic_store_explicit(a->failed, 1, memory_order_release);
+      break;
+    }
+  }
 }
 
 static void *kls_pts_ref_worker(void *argp) {
@@ -118287,6 +118346,28 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   shared.check_pivots = 0;
   shared.pivot_tolerance = common->tol;
 
+  /* pipelined top: every worker joins phase 2 instead of a serial
+     top pass; the dense separator tail then runs concurrently with
+     ascending claims (the paper's pipeline queue) */
+  const int pipe_top =
+    getenv("KLS_PTS_PIPE_TOP") != NULL && pts->ntop > 0;
+  pthread_barrier_t pipe_barrier;
+  _Atomic int64_t top_cursor;
+  _Atomic int pipe_failed;
+  _Atomic unsigned char *top_done = NULL;
+  if (pipe_top) {
+    if (pthread_barrier_init(&pipe_barrier, NULL,
+                             (unsigned)nthreads) != 0) {
+      return -1;
+    }
+    top_done = (_Atomic unsigned char *)calloc((size_t)pts->nk, 1u);
+    if (top_done == NULL) {
+      pthread_barrier_destroy(&pipe_barrier);
+      return -1;
+    }
+    atomic_init(&top_cursor, 0);
+    atomic_init(&pipe_failed, 0);
+  }
   kls_pts_ref_arg args[KLS_PTS_MAX_THREADS];
   pthread_t tids[KLS_PTS_MAX_THREADS];
   _Atomic int go;
@@ -118301,6 +118382,13 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
     args[t].worker.rejected_pivot = KLS_KLU_EMPTY;
     args[t].worker.rejected_pivot_col = KLS_KLU_EMPTY;
     args[t].worker.rejected_row = KLS_KLU_EMPTY;
+    if (pipe_top) {
+      args[t].barrier = &pipe_barrier;
+      args[t].top_cursor = &top_cursor;
+      args[t].top_done = top_done;
+      args[t].failed = &pipe_failed;
+      args[t].solver = solver;
+    }
   }
   int spawned = 0;
   for (int t = 1; t < nthreads; ++t) {
@@ -118313,6 +118401,10 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
     atomic_store_explicit(&go, 2, memory_order_release);
     for (int t = 1; t <= spawned; ++t) {
       pthread_join(tids[t], NULL);
+    }
+    if (pipe_top) {
+      pthread_barrier_destroy(&pipe_barrier);
+      free((void *)top_done);
     }
     return -1;
   }
@@ -118335,14 +118427,25 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
       break;
     }
   }
-  if (!failed) {
+  if (failed && pipe_top) {
+    atomic_store_explicit(&pipe_failed, 1, memory_order_release);
+  }
+  if (!failed || pipe_top) {
+    /* pipe mode must reach the barrier even on failure so the
+       workers can drain; the failed flag skips their phase 2 */
     kls_pts_ref_worker_body(&args[0]);
   }
   for (int t = 1; t < nthreads; ++t) {
     pthread_join(tids[t], NULL);
   }
-  /* top columns: dependencies are descendants, all bins joined */
-  if (!failed && pts->ntop > 0) {
+  if (pipe_top) {
+    failed = failed || atomic_load_explicit(&pipe_failed,
+                                            memory_order_acquire);
+    pthread_barrier_destroy(&pipe_barrier);
+    free((void *)top_done);
+  }
+  /* serial top when not pipelined */
+  if (!pipe_top && !failed && pts->ntop > 0) {
     int bins_bad = sworker.invalid || args[0].worker.invalid;
     for (int t = 1; t < nthreads && !bins_bad; ++t) {
       bins_bad = args[t].worker.invalid;
