@@ -334,6 +334,15 @@ struct kls_solver {
   int pts_ref_decision;     /* 0 untried, 1 adopted, -1 rejected */
   double pts_ref_incumbent_seconds;
   double pts_ref_trial_seconds;   /* factor-time trial, charged once */
+  int row_accept_decision;      /* 0 undecided, 1 row engine, -1 column */
+  double row_trial_deadline;    /* trial budget in seconds; 0 = none */
+  int row_accept_warmup;        /* early refactors skipped: other engines'
+                                   own trials and lazy builds inflate them */
+  int row_accept_pending_side;  /* 0 none, 1 column, 2 row: awaiting solve */
+  double row_accept_ref_seconds[2];    /* [0] column, [1] row */
+  double row_accept_solve_seconds[2];
+  int row_accept_ref_samples[2];
+  int row_accept_solve_samples[2];
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
@@ -1939,6 +1948,8 @@ typedef struct kls_egraph_refactor_shared {
   _Atomic int dense_help_fail;
   _Atomic int dense_help_owner_lock;
   _Atomic int dense_help_idle_inflight;
+  double trial_deadline_seconds;   /* 0 = disarmed; wall deadline */
+  _Atomic int trial_deadline_hit;
   atomic_uint *pipeline_done;
   atomic_uint *pipeline_claimed;
   unsigned int pipeline_generation;
@@ -21254,6 +21265,17 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->pts_ref_decision = 0;
   solver->pts_ref_incumbent_seconds = 0.0;
   solver->pts_ref_trial_seconds = 0.0;
+  solver->row_accept_decision = 0;
+  solver->row_accept_warmup = 0;
+  solver->row_accept_pending_side = 0;
+  memset(solver->row_accept_ref_seconds, 0,
+         sizeof(solver->row_accept_ref_seconds));
+  memset(solver->row_accept_solve_seconds, 0,
+         sizeof(solver->row_accept_solve_seconds));
+  memset(solver->row_accept_ref_samples, 0,
+         sizeof(solver->row_accept_ref_samples));
+  memset(solver->row_accept_solve_samples, 0,
+         sizeof(solver->row_accept_solve_samples));
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   free_egraph_algorithm5_payoff_queue(solver);
@@ -50847,6 +50869,148 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
          kls_auto_row_refactor_cost_allows(solver);
 }
 
+/* Measured per-numeric adoption of the row-refactor engine. Analytic
+   models mispredict the cooperative engine (memchip: modeled hopeless,
+   measured faster with half the solve time), so alternate real
+   refactors between the column and row engines, pair each with its
+   following solve, and decide on the measured refactor+solve pair —
+   the quantity a SPICE cycle actually pays. */
+static int kls_row_refactor_acceptance_structurally_ready(
+  const kls_solver *solver) {
+  return solver != NULL && !solver->numeric_is_predicted &&
+         !kls_row_refactor_env_disabled() &&
+         solver->row_refactor_auto_enabled &&
+         solver->row_refactor_pattern_n == solver->n &&
+         solver->options.threads > 1;
+}
+
+static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
+  solver->row_trial_deadline = 0.0;
+  if (kls_row_refactor_env_enabled()) {
+    return 1;
+  }
+  if (!kls_row_refactor_acceptance_structurally_ready(solver)) {
+    return 0;
+  }
+  if (solver->row_accept_decision != 0) {
+    return solver->row_accept_decision > 0;
+  }
+  const int row_n = solver->row_accept_ref_samples[1];
+  const int col_n = solver->row_accept_ref_samples[0];
+  int want;
+  if (row_n == col_n) {
+    want = kls_auto_row_refactor_cost_allows(solver) ? 1 : 0;
+  } else {
+    want = row_n < col_n;
+  }
+  if (want) {
+    /* Bound the trial: a pathological row schedule (mac_econ-class runs
+       100x the column time at equal flops) must cost at most a few
+       column refactors before the verdict settles on the column side. */
+    const double base = solver->stats.refactor_seconds > 0.0
+      ? solver->stats.refactor_seconds
+      : 0.5 * solver->stats.factor_seconds;
+    solver->row_trial_deadline = base > 0.0 ? 4.0 * base + 0.010 : 0.0;
+  }
+  return want;
+}
+
+static void kls_row_refactor_acceptance_try_decide(kls_solver *solver) {
+  if (solver->row_accept_decision != 0) {
+    return;
+  }
+  const int col_refs = solver->row_accept_ref_samples[0];
+  const int row_refs = solver->row_accept_ref_samples[1];
+  const int col_solves = solver->row_accept_solve_samples[0];
+  const int row_solves = solver->row_accept_solve_samples[1];
+  if (col_refs >= 2 && row_refs >= 2 && col_solves >= 2 && row_solves >= 2) {
+    const double col_pair =
+      solver->row_accept_ref_seconds[0] / (double)col_refs +
+      solver->row_accept_solve_seconds[0] / (double)col_solves;
+    const double row_pair =
+      solver->row_accept_ref_seconds[1] / (double)row_refs +
+      solver->row_accept_solve_seconds[1] / (double)row_solves;
+    solver->row_accept_decision = row_pair < col_pair * 0.98 ? 1 : -1;
+  } else if (col_refs + row_refs >= 8 && col_refs >= 2 && row_refs >= 2) {
+    /* Solves never arrived (pure refactor burst): adopt only on a
+       decisive refactor margin, mirroring the pts_ref precedent. */
+    const double col_ref =
+      solver->row_accept_ref_seconds[0] / (double)col_refs;
+    const double row_ref =
+      solver->row_accept_ref_seconds[1] / (double)row_refs;
+    solver->row_accept_decision = row_ref < col_ref * 0.75 ? 1 : -1;
+  }
+  if (solver->row_accept_decision != 0 &&
+      getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
+    fprintf(stderr,
+            "KLS row-accept: %s (ref %.3f/%.3f ms over %d/%d,"
+            " solve %.3f/%.3f ms over %d/%d)\n",
+            solver->row_accept_decision > 0 ? "ROW" : "COLUMN",
+            col_refs > 0
+              ? 1e3 * solver->row_accept_ref_seconds[0] / col_refs : 0.0,
+            row_refs > 0
+              ? 1e3 * solver->row_accept_ref_seconds[1] / row_refs : 0.0,
+            col_refs, row_refs,
+            col_solves > 0
+              ? 1e3 * solver->row_accept_solve_seconds[0] / col_solves : 0.0,
+            row_solves > 0
+              ? 1e3 * solver->row_accept_solve_seconds[1] / row_solves : 0.0,
+            col_solves, row_solves);
+  }
+}
+
+static void kls_row_refactor_acceptance_record_refactor(kls_solver *solver,
+                                                        double seconds) {
+  if (solver == NULL || solver->row_accept_decision != 0 ||
+      kls_row_refactor_env_enabled() ||
+      !kls_row_refactor_acceptance_structurally_ready(solver) ||
+      solver->common.status < TRILINOS_KLU_OK ||
+      solver->common.status == TRILINOS_KLU_SINGULAR) {
+    return;
+  }
+  if (solver->row_accept_warmup < 3) {
+    solver->row_accept_warmup++;
+    return;
+  }
+  const int side =
+    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW ? 1 : 0;
+  if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
+    fprintf(stderr, "KLS row-accept sample: %s ref %.3f ms (path %d)\n",
+            side ? "row" : "column", 1e3 * seconds,
+            (int)solver->stats.last_refactor_path);
+  }
+  solver->row_accept_ref_seconds[side] += seconds;
+  solver->row_accept_ref_samples[side]++;
+  solver->row_accept_pending_side = side + 1;
+  if (side == 1 && solver->row_accept_ref_samples[0] > 0) {
+    /* One decisively losing row refactor ends the experiment before a
+       second slow trial is paid. */
+    const double col_mean = solver->row_accept_ref_seconds[0] /
+                            (double)solver->row_accept_ref_samples[0];
+    const double row_mean = solver->row_accept_ref_seconds[1] /
+                            (double)solver->row_accept_ref_samples[1];
+    if (row_mean > 2.0 * col_mean) {
+      solver->row_accept_decision = -1;
+      solver->row_accept_pending_side = 0;
+      return;
+    }
+  }
+  kls_row_refactor_acceptance_try_decide(solver);
+}
+
+static void kls_row_refactor_acceptance_record_solve(kls_solver *solver,
+                                                     double seconds) {
+  if (solver == NULL || solver->row_accept_decision != 0 ||
+      solver->row_accept_pending_side == 0) {
+    return;
+  }
+  const int side = solver->row_accept_pending_side - 1;
+  solver->row_accept_solve_seconds[side] += seconds;
+  solver->row_accept_solve_samples[side]++;
+  solver->row_accept_pending_side = 0;
+  kls_row_refactor_acceptance_try_decide(solver);
+}
+
 static int kls_row_refactor_should_defer_value_scatter(
   const kls_solver *solver,
   int check_pivots) {
@@ -51105,7 +51269,14 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
     if (kls_estimate_row_refactor_lower_bound_work(solver,
                                                    &lower_bound_work)) {
       solver->row_refactor_auto_lower_bound_work = lower_bound_work;
-      if (lower_bound_work > solver->refactor_dependency_work) {
+      double lower_bound_allowance = solver->refactor_dependency_work;
+      if (solver->options.threads > 1) {
+        /* The bound is serial work; the cooperative row engine recovers
+           up to thread_count of it, so keep candidates inside that
+           envelope alive and let measured trials decide. */
+        lower_bound_allowance *= (double)solver->options.threads;
+      }
+      if (lower_bound_work > lower_bound_allowance) {
         solver->row_refactor_auto_enabled = 0;
         solver->row_refactor_auto_native_row_panel = 0;
         solver->row_refactor_values_ready = 0;
@@ -51360,6 +51531,7 @@ static void kls_maybe_reseed_auto_row_refactor_values(kls_solver *solver,
   if (solver == NULL || elapsed == NULL ||
       !solver->row_refactor_auto_enabled ||
       solver->row_refactor_values_ready ||
+      solver->row_accept_decision != 0 ||
       !kls_auto_row_refactor_cost_allows(solver) ||
       solver->numeric == NULL ||
       solver->common.status < TRILINOS_KLU_OK ||
@@ -53711,6 +53883,9 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   solver->row_refactor_values_ready = 1;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
+  solver->fp32_last_used = 0;
+  solver->numeric_needs_refinement = 0;
+  solver->solve_refine_single_shot = 0;
   kls_maybe_disable_native_row_panel_auto(
     solver, check_pivots, native_row_panel_state,
     native_row_panel_count_before, compact_supernode_update_count_before,
@@ -63809,6 +63984,12 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->kernel = KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 1;
+  shared->trial_deadline_seconds =
+    solver->row_trial_deadline > 0.0
+      ? kls_now_seconds() + solver->row_trial_deadline
+      : 0.0;
+  atomic_store_explicit(&shared->trial_deadline_hit, 0,
+                        memory_order_relaxed);
   shared->row_solve_mode = 0;
   shared->row_solve_view = NULL;
   shared->row_solve_work = NULL;
@@ -63993,6 +64174,23 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   if (shared->pivot_rejected && pipeline_done != NULL && scratch[0] != NULL) {
     kls_row_refactor_refresh_missing_prefix(shared, scratch[0]);
   }
+  shared->trial_deadline_seconds = 0.0;
+  if (atomic_load_explicit(&shared->trial_deadline_hit,
+                           memory_order_acquire)) {
+    /* Trial budget exhausted: hand the refactor to the column engine
+       and settle the verdict. The column engine rewrites every factor
+       value, so the partially updated numeric is safe to abandon. */
+    solver->row_accept_decision = -1;
+    solver->row_refactor_values_ready = 0;
+    solver->row_refactor_solve_direct_ready = 0;
+    solver->row_refactor_solve_validated = 0;
+    solver->egraph_worker_scratch_dirty = 1;
+    common->status = TRILINOS_KLU_OK;
+    if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
+      fprintf(stderr, "KLS row-accept: trial deadline hit -> COLUMN\n");
+    }
+    return -1;
+  }
   if (shared->invalid) {
     kls_record_fast_factor_failure(
       solver, KLS_FAST_FACTOR_FAIL_EGRAPH_INVALID, TRILINOS_KLU_INVALID);
@@ -64072,6 +64270,11 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   solver->row_refactor_values_ready = published_for_solve ? 0 : 1;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
+  /* Full fp64 factors: clear any fp32 refinement debt left by a prior
+     column-engine refactor so solves stop paying the correction pass. */
+  solver->fp32_last_used = 0;
+  solver->numeric_needs_refinement = 0;
+  solver->solve_refine_single_shot = 0;
   kls_maybe_disable_native_row_panel_auto(
     solver, check_pivots, native_row_panel_state,
     native_row_panel_count_before, compact_supernode_update_count_before,
@@ -64235,7 +64438,17 @@ static void kls_egraph_refactor_record_singular(
 
 static int kls_egraph_refactor_should_stop(
   kls_egraph_refactor_shared *shared) {
-  return atomic_load_explicit(&shared->stop, memory_order_acquire) != 0;
+  if (atomic_load_explicit(&shared->stop, memory_order_acquire) != 0) {
+    return 1;
+  }
+  if (shared->trial_deadline_seconds != 0.0 &&
+      kls_now_seconds() > shared->trial_deadline_seconds) {
+    atomic_store_explicit(&shared->trial_deadline_hit, 1,
+                          memory_order_release);
+    atomic_store_explicit(&shared->stop, 1, memory_order_release);
+    return 1;
+  }
+  return 0;
 }
 
 static int kls_egraph_refactor_value(kls_egraph_refactor_shared *shared,
@@ -86722,18 +86935,26 @@ static int kls_mapped_refactor(kls_solver *solver,
       if (row_status >= 0) {
         return row_status;
       }
-    } else if (!check_pivots && kls_row_refactor_env_enabled()) {
+    } else if (!check_pivots &&
+               kls_row_refactor_acceptance_wants_row(solver)) {
       if (solver->options.threads > 1) {
         const int parallel_row_status =
           kls_threaded_row_refactor_numeric(solver, numeric_values, 0);
         if (parallel_row_status >= 0) {
+          kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
           return parallel_row_status;
         }
       }
-      const int row_status =
-        kls_serial_row_refactor_numeric(solver, numeric_values, 0);
-      if (row_status >= 0) {
-        return row_status;
+      if (kls_row_refactor_env_enabled()) {
+        const int row_status =
+          kls_serial_row_refactor_numeric(solver, numeric_values, 0);
+        if (row_status >= 0) {
+          kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
+          return row_status;
+        }
+      } else if (solver->row_accept_decision == 0) {
+        /* threaded trial infeasible: settle on the column engine */
+        solver->row_accept_decision = -1;
       }
     }
     return kls_single_block_mapped_refactor(solver, numeric_values, check_pivots);
@@ -90721,7 +90942,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       return (UF_long)row_status;
     }
   } else if (!check_pivots &&
-             (kls_row_refactor_env_enabled() ||
+             (kls_row_refactor_acceptance_wants_row(solver) ||
               auto_row_refactor)) {
     if (solver->options.threads > 1) {
       const int parallel_row_status =
@@ -90731,11 +90952,16 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
         return (UF_long)parallel_row_status;
       }
     }
-    const int row_status =
-      kls_serial_row_refactor_numeric(solver, numeric_values, 0);
-    if (row_status >= 0) {
-      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
-      return (UF_long)row_status;
+    if (kls_row_refactor_env_enabled() || auto_row_refactor) {
+      const int row_status =
+        kls_serial_row_refactor_numeric(solver, numeric_values, 0);
+      if (row_status >= 0) {
+        kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
+        return (UF_long)row_status;
+      }
+    } else if (solver->row_accept_decision == 0) {
+      /* threaded trial infeasible: settle on the column engine */
+      solver->row_accept_decision = -1;
     }
   }
   if (!kls_publish_row_refactor_values(solver)) {
@@ -120190,6 +120416,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
   }
   solver->stats.refactor_seconds = elapsed;
+  if (ok && solver->common.status >= 0) {
+    kls_row_refactor_acceptance_record_refactor(solver, elapsed);
+  }
   fill_numeric_stats(solver);
   if (!ok || solver->common.status < 0) {
     return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
@@ -120297,9 +120526,18 @@ static int solve_impl(kls_solver *solver,
   }
 
   UF_long ok = 0;
+  const int trace_solve_path = getenv("KLS_TRACE_SOLVE_PATH") != NULL;
   if (kls_try_row_refactor_solve(solver, kernel_transpose, nrhs, x, ldx)) {
     ok = 1;
+    if (trace_solve_path) {
+      fprintf(stderr, "KLS solve path: row t=%d\n", kernel_transpose);
+    }
   } else {
+    if (trace_solve_path) {
+      fprintf(stderr, "KLS solve path: column i32=%d dirty=%d ready=%d t=%d\n",
+              solver->i32solve_state, solver->row_refactor_values_dirty,
+              solver->row_refactor_values_ready, kernel_transpose);
+    }
     if (!kls_publish_row_refactor_values(solver)) {
       solver->stats.solve_seconds = kls_now_seconds() - start;
       solver->stats.last_kernel_status = (int)solver->common.status;
@@ -120495,6 +120733,10 @@ static int solve_impl(kls_solver *solver,
 refine_skip:;
 
   solver->stats.solve_seconds = kls_now_seconds() - start;
+  if (ok && !kernel_transpose && nrhs == 1) {
+    kls_row_refactor_acceptance_record_solve(solver,
+                                             solver->stats.solve_seconds);
+  }
   solver->stats.last_kernel_status = (int)solver->common.status;
   solver->stats.memory_bytes = solver->common.memusage;
   solver->stats.memory_peak_bytes = solver->common.mempeak;

@@ -1016,6 +1016,10 @@ int main(int argc, char **argv) {
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     refactor_total += stats.refactor_seconds;
+    /* SPICE-shaped: every refactor is followed by a solve so adaptive
+       engines can weigh the true refactor+solve pair. Not counted in
+       refactor_total; solve_avg is measured separately below. */
+    status = kls_solve(solver, 1, b, 0, x, 0);
   }
   if (bench_env_enabled("KLS_BENCH_PROF")) {
     kls_prof_stop_report();
