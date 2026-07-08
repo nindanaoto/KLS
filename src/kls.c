@@ -24029,6 +24029,10 @@ static int metis_start_should_skip_no_btf_retry(UF_long n,
    ordering gates can see whether a background METIS race already covers
    the nested-dissection trial. */
 static _Thread_local const kls_solver *kls_analyze_nd_race_solver;
+/* Candidate-scoring phase of a two-orientation analyze: defer every
+   nested-dissection trial; the chosen orientation re-analyzes once with
+   the full path afterwards, so only the winner pays NodeND. */
+static _Thread_local int kls_analyze_defer_nd;
 
 static int should_try_symbolic_nested_dissection_before_numeric(
   UF_long n,
@@ -24038,6 +24042,9 @@ static int should_try_symbolic_nested_dissection_before_numeric(
   double score) {
   if (selected_ordering == trial_ordering || symbolic == NULL ||
       n < 200000) {
+    return 0;
+  }
+  if (kls_analyze_defer_nd) {
     return 0;
   }
   if (trial_ordering == KLS_ORDERING_METIS &&
@@ -28602,7 +28609,8 @@ static int choose_symbolic_for_pattern(UF_long n,
 #endif
 
 #ifdef KLS_HAVE_METIS
-  if (is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
+  if (!kls_analyze_defer_nd &&
+      is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
     kls_options metis_options = *options;
     metis_options.use_btf = 0;
     int status = analyze_with_ordering(n, col_ptr, row_idx, &metis_options,
@@ -28632,7 +28640,8 @@ static int choose_symbolic_for_pattern(UF_long n,
   }
 
 #ifdef KLS_HAVE_METIS
-  if (!(kls_analyze_nd_race_solver != NULL &&
+  if (!kls_analyze_defer_nd &&
+      !(kls_analyze_nd_race_solver != NULL &&
         kls_analyze_nd_race_solver->metis_race != NULL) &&
       should_start_auto_with_metis(n, col_ptr, row_idx,
                                    large_spiked_metis_no_btf)) {
@@ -28917,6 +28926,19 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
                                      &candidate->separator);
 }
 
+struct kls_candidate_analyze_job {
+  kls_pattern_candidate *candidate;
+  const kls_options *options;
+  int status;
+};
+
+static void *kls_candidate_analyze_main(void *arg) {
+  struct kls_candidate_analyze_job *job =
+    (struct kls_candidate_analyze_job *)arg;
+  job->status = analyze_candidate(job->candidate, job->options);
+  return NULL;
+}
+
 static int auto_orientation_prefers_transpose(UF_long n) {
   /* On small and medium SPICE-like matrices, the second symbolic analysis
      usually costs more than the normal-vs-transpose fill estimate saves. */
@@ -28986,8 +29008,32 @@ static int select_candidate(kls_pattern_candidate *normal,
     }
     return status;
   }
-  const int normal_status = analyze_candidate(normal, options);
-  const int transpose_status = analyze_candidate(transpose, options);
+  /* Both orientations run the identical analysis; on the classes where
+     the nested-dissection trials dominate the cost, run the transpose
+     side on a worker thread - the comparison and results are unchanged,
+     only the wall time halves. */
+  int normal_status;
+  int transpose_status;
+  {
+    struct kls_candidate_analyze_job transpose_job;
+    transpose_job.candidate = transpose;
+    transpose_job.options = options;
+    transpose_job.status = KLS_ERR_FACTOR_FAILED;
+    pthread_t transpose_thread;
+    int threaded = 0;
+    if (normal->n >= 200000 &&
+        pthread_create(&transpose_thread, NULL, kls_candidate_analyze_main,
+                       &transpose_job) == 0) {
+      threaded = 1;
+    }
+    normal_status = analyze_candidate(normal, options);
+    if (threaded) {
+      pthread_join(transpose_thread, NULL);
+      transpose_status = transpose_job.status;
+    } else {
+      transpose_status = analyze_candidate(transpose, options);
+    }
+  }
   if (normal_status == KLS_OK && transpose_status == KLS_OK) {
     *chosen_out = (transpose->score < normal->score) ? transpose : normal;
     return KLS_OK;
