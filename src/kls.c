@@ -335,6 +335,7 @@ struct kls_solver {
   double pts_ref_incumbent_seconds;
   double pts_ref_trial_seconds;   /* factor-time trial, charged once */
   int row_accept_decision;      /* 0 undecided, 1 row engine, -1 column */
+  int row_accept_publish_preferred; /* measured: column solve beats row solve */
   double row_trial_deadline;    /* trial budget in seconds; 0 = none */
   int row_accept_warmup;        /* early refactors skipped: other engines'
                                    own trials and lazy builds inflate them */
@@ -21266,6 +21267,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->pts_ref_incumbent_seconds = 0.0;
   solver->pts_ref_trial_seconds = 0.0;
   solver->row_accept_decision = 0;
+  solver->row_accept_publish_preferred = 0;
   solver->row_accept_warmup = 0;
   solver->row_accept_pending_side = 0;
   memset(solver->row_accept_ref_seconds, 0,
@@ -50931,6 +50933,17 @@ static void kls_row_refactor_acceptance_try_decide(kls_solver *solver) {
       solver->row_accept_ref_seconds[1] / (double)row_refs +
       solver->row_accept_solve_seconds[1] / (double)row_solves;
     solver->row_accept_decision = row_pair < col_pair * 0.98 ? 1 : -1;
+    if (solver->row_accept_decision > 0) {
+      /* The verdict pairs also measured both solve routes: when the
+         published column solve decisively beat the row-value solve,
+         publish even where the structural gate would keep row values
+         (pre2: row solve 168ms vs column 64ms at +~20ms publish). */
+      const double col_solve =
+        solver->row_accept_solve_seconds[0] / (double)col_solves;
+      const double row_solve =
+        solver->row_accept_solve_seconds[1] / (double)row_solves;
+      solver->row_accept_publish_preferred = col_solve < 0.8 * row_solve;
+    }
   } else if (col_refs + row_refs >= 8 && col_refs >= 2 && row_refs >= 2) {
     /* Solves never arrived (pure refactor burst): adopt only on a
        decisive refactor margin, mirroring the pts_ref precedent. */
@@ -63535,6 +63548,11 @@ static int kls_row_refactor_should_publish_for_solve(
   if (solver == NULL || solver->symbolic == NULL ||
       solver->options.threads <= 1) {
     return 0;
+  }
+  if (solver->row_accept_publish_preferred) {
+    /* Trial solves measured the column route decisively faster; that
+       measurement is the evidence, whichever column path produced it. */
+    return 1;
   }
   if (solver->symbolic->nblocks == 1u && solver->row_solve_partition_ready) {
     return 0;
