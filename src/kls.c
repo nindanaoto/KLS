@@ -28101,6 +28101,12 @@ static void kls_start_metis_race_early(kls_solver *solver,
                                        UF_long n,
                                        UF_long *col_ptr,
                                        UF_long *row_idx) {
+  /* Extending this floor to the 200k sync-ND class measurably helps
+     ASIC_320ks' ana and refactor but loses more on init (post-promotion
+     re-scale) and solve (fp32-class refinement on the promoted
+     numeric); net negative until the promotion itself becomes timed
+     acceptance with the incumbent kept alive. KLS_METIS_RACE_FLOOR
+     overrides for experiments. */
   UF_long race_floor = 1000000;
   {
     const char *env = getenv("KLS_METIS_RACE_FLOOR");
@@ -28126,6 +28132,9 @@ static void kls_start_metis_race_early(kls_solver *solver,
   race->options.ordering = KLS_ORDERING_METIS;
   race->scale_symbolic = NULL;
   race->metis_wanted = 1;
+  /* Ordering only: the race's scale trials use different acceptance
+     criteria than the sync selection and can override a better scale
+     verdict (ASIC_320k: -1 -> 0, refactor +12%). */
   race->scale_wanted = 0;
   atomic_init(&race->scale_done, 0);
   atomic_init(&race->stage2, 0);
@@ -28623,7 +28632,9 @@ static int choose_symbolic_for_pattern(UF_long n,
   }
 
 #ifdef KLS_HAVE_METIS
-  if (should_start_auto_with_metis(n, col_ptr, row_idx,
+  if (!(kls_analyze_nd_race_solver != NULL &&
+        kls_analyze_nd_race_solver->metis_race != NULL) &&
+      should_start_auto_with_metis(n, col_ptr, row_idx,
                                    large_spiked_metis_no_btf)) {
     int status = analyze_with_ordering(n, col_ptr, row_idx, symbolic_options,
                                        KLS_ORDERING_METIS, symbolic_out,
@@ -120692,6 +120703,16 @@ int kls_refactor(kls_solver *solver, const double *values) {
   solver->stats.refactor_seconds = elapsed;
   if (ok && solver->common.status >= 0) {
     kls_row_refactor_acceptance_record_refactor(solver, elapsed);
+  }
+  if (ok && solver->common.status >= 0 &&
+      solver->common.status != TRILINOS_KLU_SINGULAR &&
+      !solver->fp32_last_used && solver->pivot_nudge_count == 0) {
+    /* The factor values were just recomputed at full precision with no
+       diagonal corrections: any fp32 refinement debt left by an earlier
+       trial or promotion numeric is stale, and each solve would pay a
+       needless correction pass (2.3x on ASIC-class). */
+    solver->numeric_needs_refinement = 0;
+    solver->solve_refine_single_shot = 0;
   }
   fill_numeric_stats(solver);
   if (!ok || solver->common.status < 0) {
