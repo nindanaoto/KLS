@@ -23342,6 +23342,14 @@ static UF_long kls_metis_order(UF_long n,
     if (nseps != NULL && nseps[0] != '\0') {
       options[METIS_OPTION_NSEPS] = atoi(nseps);
     }
+    const char *ufactor = getenv("KLS_METIS_UFACTOR");
+    if (ufactor != NULL && ufactor[0] != '\0') {
+      options[METIS_OPTION_UFACTOR] = atoi(ufactor);
+    }
+    const char *ctype = getenv("KLS_METIS_CTYPE");
+    if (ctype != NULL && ctype[0] == 'r') {
+      options[METIS_OPTION_CTYPE] = METIS_CTYPE_RM;
+    }
   }
   idx_t nvtxs = (idx_t)n;
   const int metis_status =
@@ -82564,6 +82572,12 @@ static int kls_egraph_compact_large_dominant_btf_shape(
 }
 
 static UF_long kls_egraph_refactor_size_floor(const kls_solver *solver) {
+  {
+    const char *env = getenv("KLS_EGRAPH_SIZE_FLOOR");
+    if (env != NULL && env[0] != '\0') {
+      return (UF_long)atol(env);
+    }
+  }
   if (kls_egraph_all_pipeline_huge_single_shape(solver)) {
     return 100000u;
   }
