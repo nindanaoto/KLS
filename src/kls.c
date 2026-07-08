@@ -118986,6 +118986,52 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     return 0;
   }
   if (getenv("KLS_TRACE_RUNS") != NULL) {
+    /* stored-zero census: exact cancellations in the factor values */
+    {
+      trilinos_klu_l_numeric *num2 = solver->numeric;
+      const trilinos_klu_l_symbolic *sym2 = solver->symbolic;
+      int64_t zl = 0, zu = 0, tl = 0, tu = 0, tinyl = 0, tinyu = 0;
+      for (UF_long b = 0; b < sym2->nblocks; ++b) {
+        const UF_long bk1 = sym2->R[b];
+        const UF_long bnk = sym2->R[b + 1] - bk1;
+        if (bnk < 2u || num2->LUbx[b] == NULL) {
+          continue;
+        }
+        UF_long *blip = num2->Lip + bk1;
+        UF_long *bllen = num2->Llen + bk1;
+        UF_long *buip = num2->Uip + bk1;
+        UF_long *bulen = num2->Ulen + bk1;
+        double *blu = (double *)num2->LUbx[b];
+        for (UF_long k = 0; k < bnk; ++k) {
+          UF_long *ri;
+          double *rv;
+          UF_long rl;
+          kls_klu_get_pointer(blu, blip, bllen, k, &ri, &rv, &rl);
+          for (UF_long p = 0; p < rl; ++p) {
+            tl++;
+            if (rv[p] == 0.0) {
+              zl++;
+            } else if (fabs(rv[p]) < 1e-14) {
+              tinyl++;
+            }
+          }
+          kls_klu_get_pointer(blu, buip, bulen, k, &ri, &rv, &rl);
+          for (UF_long p = 0; p < rl; ++p) {
+            tu++;
+            if (rv[p] == 0.0) {
+              zu++;
+            } else if (fabs(rv[p]) < 1e-14) {
+              tinyu++;
+            }
+          }
+        }
+      }
+      fprintf(stderr,
+              "KLS zeros: L %lld/%lld exact + %lld tiny, U %lld/%lld"
+              " exact + %lld tiny\n",
+              (long long)zl, (long long)tl, (long long)tinyl,
+              (long long)zu, (long long)tu, (long long)tinyu);
+    }
     int64_t lruns = 0, uruns = 0;
     for (UF_long g = 0; g < n; ++g) {
       for (int64_t p = solver->i32solve_loff[g];
