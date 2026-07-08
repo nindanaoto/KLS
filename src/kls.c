@@ -20108,6 +20108,15 @@ static UF_long kls_snode_trace_decline_work = 0;
    refactor; unconditional writes to shared counters ping-pong the cache
    line across threads (measured 6x on rajat31's refactor).  Resolve the
    trace env once and skip the writes entirely when tracing is off. */
+static int kls_batch_consume_disabled(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *env = getenv("KLS_DISABLE_BATCH_CONSUME");
+    cached = env != NULL && env[0] == '1' && env[1] == '\0';
+  }
+  return cached;
+}
+
 static int kls_snode_trace_enabled(void) {
   static int cached = -1;
   if (cached < 0) {
@@ -20430,7 +20439,7 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
     UF_long up = 0;
     while (up < ucol_len) {
       const UF_long j = ui[up];
-      if (snode_run_end != NULL) {
+      if (snode_run_end != NULL && !kls_batch_consume_disabled()) {
         const UF_long consumed = kls_snode_batch_consume(
           lu, lip, llen, ui, ux, ucol_len, up, x, k1, snode_run_end);
         if (consumed != 0u) {
@@ -20609,7 +20618,7 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
     UF_long up = 0;
     while (up < ucol_len) {
       const UF_long j = ui[up];
-      if (snode_run_end != NULL) {
+      if (snode_run_end != NULL && !kls_batch_consume_disabled()) {
         const UF_long consumed = kls_snode_batch_consume(
           lu, lip, llen, ui, ux, ucol_len, up, x, k1, snode_run_end);
         if (consumed != 0u) {
@@ -70223,7 +70232,7 @@ static int kls_egraph_refactor_single_unscaled_column(
     shared->supernode_algorithm5_payoff_direct_prefix_current_state ||
     shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
   const int snode_batches_allowed =
-    solver->snode_run_end != NULL && !u_supernode_values;
+    !kls_batch_consume_disabled() && solver->snode_run_end != NULL && !u_supernode_values;
   unsigned char *algorithm5_prefactor_applied = NULL;
   if (algorithm5_seed_active) {
     const int advance_seed_status =
@@ -70478,7 +70487,7 @@ static int kls_egraph_refactor_single_scaled_column(
     shared->supernode_algorithm5_payoff_direct_prefix_current_state ||
     shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
   const int snode_batches_allowed =
-    solver->snode_run_end != NULL && !u_supernode_values;
+    !kls_batch_consume_disabled() && solver->snode_run_end != NULL && !u_supernode_values;
   unsigned char *algorithm5_prefactor_applied = NULL;
   if (algorithm5_seed_active) {
     const int advance_seed_status =
@@ -70747,7 +70756,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
   const int plain_scalar_updates =
     !supernode_numeric_updates && !consumer_plan_group_l_updates &&
     !u_supernode_ragged_l_updates && !u_supernode_values;
-  const int snode_batches_allowed = solver->snode_run_end != NULL;
+  const int snode_batches_allowed = !kls_batch_consume_disabled() && solver->snode_run_end != NULL;
   const UF_long *llen = numeric->Llen + k1;
   const int complete_status =
     shared->supernode_algorithm5_payoff_direct_prefix_complete
@@ -71345,7 +71354,7 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     shared->supernode_algorithm5_payoff_direct_prefix_current_state ||
     shared->supernode_algorithm5_payoff_direct_prefix_advance_seed;
   const int snode_batches_allowed =
-    solver->snode_run_end != NULL && !u_supernode_values;
+    !kls_batch_consume_disabled() && solver->snode_run_end != NULL && !u_supernode_values;
   unsigned char *algorithm5_prefactor_applied = NULL;
   if (algorithm5_seed_active) {
     const int advance_seed_status =
