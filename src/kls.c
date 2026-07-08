@@ -28469,6 +28469,10 @@ static int metis_numeric_is_better(const kls_solver *solver,
 static UF_long kls_parallel_refactor(kls_solver *solver,
                                      double *numeric_values,
                                      int check_pivots);
+static int kls_snb_try_refactor(kls_solver *solver,
+                                const double *numeric_values,
+                                int check_pivots,
+                                UF_long *ok_out);
 
 static int maybe_promote_auto_metis(kls_solver *solver,
                                     double *elapsed,
@@ -87383,8 +87387,16 @@ static int kls_mapped_refactor(kls_solver *solver,
       if (row_status >= 0) {
         return row_status;
       }
-    } else if (!check_pivots &&
-               kls_row_refactor_acceptance_wants_row(solver)) {
+    } else if (!check_pivots) {
+      /* The snb engine's per-matrix acceptance must see refactor calls
+         even where the row engine adopted: its timed comparison uses
+         the wrapper-recorded incumbent (whichever engine that is) and
+         adopts only decisive wins (pre2: snb 3.2s vs row 8.1s). */
+      UF_long snb_ok = 0;
+      if (kls_snb_try_refactor(solver, numeric_values, 0, &snb_ok)) {
+        return (int)snb_ok;
+      }
+      if (kls_row_refactor_acceptance_wants_row(solver)) {
       if (solver->options.threads > 1) {
         const int parallel_row_status =
           kls_threaded_row_refactor_numeric(solver, numeric_values, 0);
@@ -87403,6 +87415,7 @@ static int kls_mapped_refactor(kls_solver *solver,
       } else if (solver->row_accept_decision == 0) {
         /* threaded trial infeasible: settle on the column engine */
         solver->row_accept_decision = -1;
+      }
       }
     }
     return kls_single_block_mapped_refactor(solver, numeric_values, check_pivots);
@@ -89815,8 +89828,22 @@ static int kls_snb_try_refactor(kls_solver *solver,
   if (check_pivots || kls_snb_env_disabled() ||
       solver->numeric == NULL ||
       solver->symbolic == NULL || solver->snb == NULL ||
-      (solver->fp32_decision > 0 && !solver->snb->fp32) ||
       solver->snb_decision < 0 || solver->snb_trial_verdict < 0) {
+    /* No fp32 conjunct here: a fp64 snb build is strictly more accurate
+       and the 0.60 timed acceptance already arbitrates speed (pre2: the
+       fp32-decided pipeline sat at 8.5s while the fp64 snb trial
+       measured 3.1s and was vetoed by the flag alone). */
+    if (kls_snb_trace_enabled()) {
+      fprintf(stderr,
+              "KLS snb try gate: cp=%d dis=%d num=%d sym=%d snb=%d fp32=%d"
+              " dec=%d verd=%d\n",
+              check_pivots, kls_snb_env_disabled(),
+              solver->numeric == NULL, solver->symbolic == NULL,
+              solver->snb == NULL,
+              solver->fp32_decision > 0 &&
+                (solver->snb == NULL || !solver->snb->fp32),
+              solver->snb_decision, solver->snb_trial_verdict);
+    }
     return 0;
   }
   const int threads = solver->options.threads;
@@ -91389,9 +91416,15 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
       return (UF_long)row_status;
     }
-  } else if (!check_pivots &&
-             (kls_row_refactor_acceptance_wants_row(solver) ||
-              auto_row_refactor)) {
+  } else if (!check_pivots) {
+    {
+      UF_long snb_ok = 0;
+      if (kls_snb_try_refactor(solver, numeric_values, 0, &snb_ok)) {
+        return snb_ok;
+      }
+    }
+    if (kls_row_refactor_acceptance_wants_row(solver) ||
+        auto_row_refactor) {
     if (solver->options.threads > 1) {
       const int parallel_row_status =
         kls_threaded_row_refactor_numeric(solver, numeric_values, 0);
@@ -91410,6 +91443,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     } else if (solver->row_accept_decision == 0) {
       /* threaded trial infeasible: settle on the column engine */
       solver->row_accept_decision = -1;
+    }
     }
   }
   if (!kls_publish_row_refactor_values(solver)) {
