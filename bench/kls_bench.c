@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
 #include "kls/kls.h"
@@ -15,6 +16,7 @@
 #if defined(__has_include)
 #if __has_include(<valgrind/callgrind.h>)
 #include <valgrind/callgrind.h>
+
 #define KLS_BENCH_HAVE_CALLGRIND 1
 #endif
 #endif
@@ -54,6 +56,83 @@ typedef struct bench_index_view {
   int32_t *col_ptr32;
   int32_t *row_idx32;
 } bench_index_view;
+
+
+/* env-gated in-process sampling profiler (ptrace/perf blocked in this
+   container): SIGPROF at 2ms captures only the interrupted instruction
+   pointer from the ucontext (fully async-signal-safe; in-handler
+   unwinding dumps core on this code).  PCs are reported as offsets
+   into the executable for offline addr2line resolution. */
+#include <signal.h>
+#include <sys/time.h>
+#include <ucontext.h>
+#include <dlfcn.h>
+#define KLS_BENCH_PROF_MAX 200000
+static void *kls_prof_pcs[KLS_BENCH_PROF_MAX];
+static volatile long kls_prof_n;
+static void kls_prof_handler(int sig, siginfo_t *si, void *uctx) {
+  (void)sig;
+  (void)si;
+  ucontext_t *uc = (ucontext_t *)uctx;
+  const long i = __sync_fetch_and_add(&kls_prof_n, 1);
+  if (i < KLS_BENCH_PROF_MAX) {
+#if defined(__x86_64__)
+    kls_prof_pcs[i] = (void *)uc->uc_mcontext.gregs[REG_RIP];
+#else
+    kls_prof_pcs[i] = NULL;
+#endif
+  }
+}
+static void kls_prof_start(void) {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_sigaction = kls_prof_handler;
+  sa.sa_flags = SA_RESTART | SA_SIGINFO;
+  sigaction(SIGPROF, &sa, NULL);
+  struct itimerval it;
+  it.it_interval.tv_sec = 0;
+  it.it_interval.tv_usec = 2000;
+  it.it_value = it.it_interval;
+  setitimer(ITIMER_PROF, &it, NULL);
+}
+static int kls_prof_cmp(const void *a, const void *b) {
+  const void *pa = *(void *const *)a;
+  const void *pb = *(void *const *)b;
+  return pa < pb ? -1 : (pa > pb ? 1 : 0);
+}
+static void kls_prof_stop_report(void) {
+  struct itimerval off;
+  memset(&off, 0, sizeof(off));
+  setitimer(ITIMER_PROF, &off, NULL);
+  long n = kls_prof_n < KLS_BENCH_PROF_MAX ? kls_prof_n
+                                           : KLS_BENCH_PROF_MAX;
+  if (n <= 0) {
+    return;
+  }
+  Dl_info info;
+  void *base = NULL;
+  if (dladdr((void *)&kls_prof_stop_report, &info) && info.dli_fbase) {
+    base = info.dli_fbase;
+  }
+  qsort(kls_prof_pcs, (size_t)n, sizeof(void *), kls_prof_cmp);
+  /* bucket by 256-byte regions to group loop bodies */
+  long i = 0;
+  fprintf(stderr, "PROFTOTAL %ld base %p\n", n, base);
+  while (i < n) {
+    const unsigned long bucket =
+      ((unsigned long)kls_prof_pcs[i]) >> 8;
+    long j = i;
+    while (j < n && (((unsigned long)kls_prof_pcs[j]) >> 8) == bucket) {
+      j++;
+    }
+    if (j - i >= n / 200 + 2) {
+      fprintf(stderr, "PROFPC 0x%lx %ld\n",
+              (unsigned long)kls_prof_pcs[i] - (unsigned long)base,
+              j - i);
+    }
+    i = j;
+  }
+}
 
 static int bench_env_enabled(const char *name) {
   const char *value = getenv(name);
@@ -925,6 +1004,9 @@ int main(int argc, char **argv) {
     kls_get_stats(solver, &stats);
     factor_total += stats.factor_seconds;
   }
+  if (bench_env_enabled("KLS_BENCH_PROF")) {
+    kls_prof_start();
+  }
   if (callgrind_refactor) {
     CALLGRIND_START_INSTRUMENTATION;
     CALLGRIND_ZERO_STATS;
@@ -934,6 +1016,9 @@ int main(int argc, char **argv) {
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     refactor_total += stats.refactor_seconds;
+  }
+  if (bench_env_enabled("KLS_BENCH_PROF")) {
+    kls_prof_stop_report();
   }
   if (callgrind_refactor) {
     CALLGRIND_DUMP_STATS;

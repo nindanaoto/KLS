@@ -20116,6 +20116,10 @@ static int kls_snode_trace_enabled(void) {
   return cached;
 }
 static UF_long kls_snode_trace_batched_tail_entries = 0;
+static UF_long kls_snode_trace_batches = 0;
+static UF_long kls_snode_trace_t_hist[7];
+static UF_long kls_snode_trace_tlen_sum = 0;
+static UF_long kls_snode_trace_tlen_max = 0;
 
 __attribute__((destructor)) static void kls_snode_trace_report(void) {
   if (getenv("KLS_TRACE_SNODE") != NULL) {
@@ -20127,6 +20131,20 @@ __attribute__((destructor)) static void kls_snode_trace_report(void) {
             (long)kls_snode_trace_decline_norun,
             (long)kls_snode_trace_decline_short,
             (long)kls_snode_trace_decline_work);
+    fprintf(stderr,
+            "KLS snode: batches=%ld avg_t=%.1f avg_tlen=%.1f max_tlen=%ld"
+            " t:2-3=%ld 4-7=%ld 8-15=%ld 16-31=%ld 32-63=%ld 64+=%ld\n",
+            (long)kls_snode_trace_batches,
+            kls_snode_trace_batches
+              ? (double)kls_snode_trace_batched_producers /
+                  (double)kls_snode_trace_batches : 0.0,
+            kls_snode_trace_batches
+              ? (double)kls_snode_trace_tlen_sum /
+                  (double)kls_snode_trace_batches : 0.0,
+            (long)kls_snode_trace_tlen_max,
+            (long)kls_snode_trace_t_hist[1], (long)kls_snode_trace_t_hist[2],
+            (long)kls_snode_trace_t_hist[3], (long)kls_snode_trace_t_hist[4],
+            (long)kls_snode_trace_t_hist[5], (long)kls_snode_trace_t_hist[6]);
   }
 }
 
@@ -20237,6 +20255,13 @@ static UF_long kls_snode_batch_consume(
   if (kls_snode_trace_enabled()) {
     kls_snode_trace_batched_producers += t;
     kls_snode_trace_batched_tail_entries += t * tlen;
+    kls_snode_trace_batches++;
+    kls_snode_trace_t_hist[t >= 64 ? 6 : t >= 32 ? 5 : t >= 16 ? 4
+                           : t >= 8 ? 3 : t >= 4 ? 2 : 1]++;
+    kls_snode_trace_tlen_sum += tlen;
+    if ((UF_long)tlen > kls_snode_trace_tlen_max) {
+      kls_snode_trace_tlen_max = tlen;
+    }
   }
   return t;
 }
