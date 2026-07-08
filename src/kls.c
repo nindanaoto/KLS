@@ -23910,12 +23910,14 @@ static void maybe_retry_without_btf(UF_long n,
   const int single_block =
     n >= 12000u && allow_single_block &&
     (*symbolic)->nblocks == 1 && (*symbolic)->maxblock == n;
-  /* A degenerate BTF (one block holding all but a sliver of the matrix)
-     cannot move the fill estimate by the 20% the dominant-block retry
-     demands: removing under 1% of rows leaves the same ordering problem,
-     so the retry re-runs the whole nested dissection for nothing. */
+  /* A near-degenerate BTF cannot move the fill estimate by the 20% the
+     dominant-block retry demands: with the dominant block holding all
+     but a fraction f of the rows, the no-BTF ordering problem differs
+     by O(f), so f below 1/8 leaves the 0.80x adoption margin
+     unreachable (pre2: f=4.5%, three retries all land within 4%) and
+     the retry re-runs the whole nested dissection for nothing. */
   const int btf_degenerate =
-    (*symbolic)->nblocks > 1 && (*symbolic)->maxblock >= n - n / 128;
+    (*symbolic)->nblocks > 1 && (*symbolic)->maxblock >= n - n / 8;
   const int dominant_block =
     !btf_degenerate && btf_dominant_block_retry_shape_is_allowed(n, *symbolic);
   const int inflated_many_block =
@@ -23953,6 +23955,11 @@ static void maybe_retry_without_btf(UF_long n,
 
   const double no_btf_score = symbolic_score(no_btf_symbolic);
   const double current_score = *score;
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS retry-no-btf: score %.4e vs %.4e (need 0.80x=%d)\n",
+            no_btf_score, current_score,
+            no_btf_score <= 0.80 * current_score);
+  }
   const int current_score_known =
     isfinite(current_score) && current_score < DBL_MAX / 4.0;
   if ((single_block && no_btf_score <= 1.02 * current_score) ||
@@ -28611,6 +28618,9 @@ static int choose_symbolic_for_pattern(UF_long n,
 #ifdef KLS_HAVE_METIS
   if (!kls_analyze_defer_nd &&
       is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr, "KLS choose: low-degree METIS branch n=%ld\n", (long)n);
+    }
     kls_options metis_options = *options;
     metis_options.use_btf = 0;
     int status = analyze_with_ordering(n, col_ptr, row_idx, &metis_options,
@@ -28645,6 +28655,10 @@ static int choose_symbolic_for_pattern(UF_long n,
         kls_analyze_nd_race_solver->metis_race != NULL) &&
       should_start_auto_with_metis(n, col_ptr, row_idx,
                                    large_spiked_metis_no_btf)) {
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr, "KLS choose: METIS-start branch n=%ld btf=%d\n",
+              (long)n, symbolic_options->use_btf);
+    }
     int status = analyze_with_ordering(n, col_ptr, row_idx, symbolic_options,
                                        KLS_ORDERING_METIS, symbolic_out,
                                        common_out, separator_out);
@@ -28737,6 +28751,9 @@ static int choose_symbolic_for_pattern(UF_long n,
 #ifdef KLS_HAVE_METIS
   if (should_try_symbolic_nested_dissection_before_numeric(
         n, best_symbolic, best_ordering, KLS_ORDERING_METIS, best_score)) {
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr, "KLS choose: ND-promote METIS n=%ld\n", (long)n);
+    }
     maybe_promote_symbolic_ordering(
       n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_METIS,
       &best_symbolic, &best_common, &best_ordering, &best_score, 0.90,
