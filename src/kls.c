@@ -117830,6 +117830,7 @@ typedef struct kls_pts_s {
   double *top_acc;                  /* nthreads * ntop, kept zeroed */
   double *xwork;                    /* nthreads * nk, lazy, kept zeroed */
   int solve_ok;                     /* tight top gate for the solve */
+  int refactor_ok;                  /* flop-weighted top gate */
 } kls_pts;
 
 static void kls_pts_free(kls_solver *solver) {
@@ -118179,6 +118180,32 @@ static void kls_pts_try_build(kls_solver *solver) {
        spawn overhead is guarded by the 65536-column dispatch floor */
     pts->solve_ok =
       ntop <= (int64_t)(nk / 4u) && top_work <= 0.30 * total;
+    /* flop-weighted top share: refactor flops concentrate quadratically
+       in the separator top, so entry-weighted balance can look fine
+       while the top strangles the refactor (the ASIC_320ks failure
+       mode); gate the refactor trial on the flop measure */
+    {
+      double top_flops = 0.0;
+      double total_flops = 0.0;
+      for (UF_long k = 0; k < nk; ++k) {
+        const int32_t *ui2 = i32u + uoff[k];
+        double fl = 0.0;
+        for (UF_long p = 0; p < ulen[k]; ++p) {
+          fl += (double)llen[ui2[p]];
+        }
+        total_flops += fl;
+        if (owner[k] < 0) {
+          top_flops += fl;
+        }
+      }
+      pts->refactor_ok =
+        total_flops <= 0.0 || top_flops <= 0.45 * total_flops;
+      if (trace) {
+        fprintf(stderr, "KLS pts flop-topw %.1f%% -> refactor %s\n",
+                total_flops > 0.0 ? 100.0 * top_flops / total_flops : 0.0,
+                pts->refactor_ok ? "eligible" : "gated off");
+      }
+    }
     pts->block = best;
     pts->k1 = k1;
     pts->nk = nk;
@@ -118548,7 +118575,8 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
                                    double *numeric_values) {
   kls_pts *pts = solver->pts;
   trilinos_klu_l_common *common = &solver->common;
-  if (pts == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+  if (pts == NULL || !pts->refactor_ok || solver->symbolic == NULL ||
+      solver->numeric == NULL ||
       solver->numeric->Xwork == NULL ||
       getenv("KLS_DISABLE_PTS_REFACTOR") != NULL) {
     return -1;
@@ -118762,7 +118790,8 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
 static int kls_pts_try_refactor_timed(kls_solver *solver,
                                       double *numeric_values,
                                       UF_long *ok_out) {
-  if (solver->pts == NULL || solver->pts_ref_decision < 0 ||
+  if (solver->pts == NULL || !solver->pts->refactor_ok ||
+      solver->pts_ref_decision < 0 ||
       solver->options.threads <= 1) {
     return 0;
   }
@@ -118831,7 +118860,8 @@ static int kls_pts_try_refactor_timed(kls_solver *solver,
 static void kls_pts_maybe_trial(kls_solver *solver,
                                 double *numeric_values,
                                 double *elapsed) {
-  if (solver->pts == NULL || solver->pts_ref_decision != 0 ||
+  if (solver->pts == NULL || !solver->pts->refactor_ok ||
+      solver->pts_ref_decision != 0 ||
       solver->pts_ref_trial_seconds != 0.0 ||
       solver->options.threads <= 1 || numeric_values == NULL ||
       solver->common.flops <
