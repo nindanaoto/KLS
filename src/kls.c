@@ -1927,6 +1927,18 @@ typedef struct kls_egraph_refactor_shared {
   UF_long numerical_rank;
   UF_long singular_col;
   pthread_mutex_t lock;
+  /* dense-group help: idle pipeline workers contribute batch-row
+     slices of the dense supernode GEMM instead of spinning (the row
+     engine measured 63.7% idle with 95% of flops chained through the
+     dense groups) */
+  _Atomic int dense_help_active;
+  _Atomic int dense_help_inflight;
+  _Atomic long dense_help_cursor;
+  _Atomic long dense_help_done;
+  const struct kls_dense_help_ctx *dense_help_ctx;
+  _Atomic int dense_help_fail;
+  _Atomic int dense_help_owner_lock;
+  _Atomic int dense_help_idle_inflight;
   atomic_uint *pipeline_done;
   atomic_uint *pipeline_claimed;
   unsigned int pipeline_generation;
@@ -2205,6 +2217,7 @@ typedef struct kls_egraph_refactor_shared {
   int row_refactor_compact_supernode_trsv;
   int row_refactor_native_row_panel_active;
   int row_solve_mode;
+  int row_publish_mode;
   int row_solve_upper;
   const kls_row_solve_factor_view *row_solve_view;
   double *row_solve_work;
@@ -2237,6 +2250,7 @@ typedef struct kls_egraph_refactor_worker {
   kls_egraph_refactor_pool *pool;
   int tid;
   double *x;
+  double *help_x;
   double *segment_panel;
   UF_long segment_panel_size;
   double *supernode_workspace;
@@ -2340,6 +2354,7 @@ static double kls_row_refactor_dense_group_panel_entries(
 static int kls_row_refactor_prefers_compact_dense_panel(UF_long width,
                                                         UF_long trailing_len);
 static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x);
+static int kls_pts_solve_available(const kls_solver *solver);
 static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
                                                         double *x);
 static int kls_independent_row_l_pos_is_run_start(
@@ -50835,6 +50850,10 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
 static int kls_row_refactor_should_defer_value_scatter(
   const kls_solver *solver,
   int check_pivots) {
+  const char *env = getenv("KLS_ROW_REFACTOR_DEFER");
+  if (env != NULL && *env != '\0') {
+    return atoi(env) != 0;
+  }
   if (!check_pivots) {
     return 1;
   }
@@ -52525,6 +52544,12 @@ static UF_long kls_row_refactor_compact_panel_solve_value_count(
 }
 
 static int kls_row_refactor_solve_is_eligible(const kls_solver *solver) {
+  {
+    const char *env = getenv("KLS_ROW_SOLVE_CLAIM");
+    if (env != NULL && *env != '\0' && atoi(env) == 0) {
+      return 0;
+    }
+  }
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       (!solver->row_refactor_values_ready &&
        !kls_row_refactor_solve_uses_direct_values(solver)) ||
@@ -56679,6 +56704,111 @@ static int kls_compact_dense_panel_factor_cblas_unchecked(
 
 static UF_long kls_work_to_uflong(double work);
 
+enum kls_dense_help_kind {
+  KLS_DENSE_HELP_ASSEMBLE = 0,
+  KLS_DENSE_HELP_PANEL_STEP = 1
+};
+
+struct kls_dense_help_ctx {
+  int kind;
+  UF_long group;
+  UF_long row_begin;
+  UF_long row_end;
+  UF_long trailing_len;
+  const UF_long *trailing_cols;
+  double *dense_panel;
+  double *trailing_panel;
+  int wait_for_dependencies;
+  /* KLS_DENSE_HELP_PANEL_STEP: current block columns [k, kb) of the
+     width*width dense panel; cursor claims local panel rows in
+     [kb, width). */
+  UF_long panel_k;
+  UF_long panel_kb;
+};
+
+/* One row of a blocked dense-panel factorization step: solve the row's
+   L values against block columns [k, kb) (rows above kb are final),
+   then apply the block's outer-product update to the row's remaining
+   dense and trailing targets. Rows are independent within a step. */
+static void kls_compact_dense_panel_block_step_row(
+  double *dense_panel,
+  double *trailing_panel,
+  const double *udiag_base,
+  UF_long width,
+  UF_long trailing_len,
+  UF_long k,
+  UF_long kb,
+  UF_long row) {
+  double *row_dense_panel = dense_panel + row * width;
+  for (UF_long dep = k; dep < kb; ++dep) {
+    double value = row_dense_panel[dep];
+    for (UF_long prev = k; prev < dep; ++prev) {
+      value -= row_dense_panel[prev] * dense_panel[prev * width + dep];
+    }
+    row_dense_panel[dep] = value / udiag_base[dep];
+  }
+  for (UF_long target = kb; target < width; ++target) {
+    double update = 0.0;
+    for (UF_long dep = k; dep < kb; ++dep) {
+      update += row_dense_panel[dep] * dense_panel[dep * width + target];
+    }
+    row_dense_panel[target] -= update;
+  }
+  if (trailing_len > 0u) {
+    double *row_panel = trailing_panel + row * trailing_len;
+    for (UF_long offset = 0; offset < trailing_len; ++offset) {
+      double update = 0.0;
+      for (UF_long dep = k; dep < kb; ++dep) {
+        update += row_dense_panel[dep] *
+                  trailing_panel[dep * trailing_len + offset];
+      }
+      row_panel[offset] -= update;
+    }
+  }
+}
+
+static int kls_row_refactor_assemble_compact_dense_row(
+  kls_egraph_refactor_worker *worker,
+  UF_long group,
+  UF_long row_begin,
+  UF_long row_end,
+  UF_long trailing_len,
+  const UF_long *trailing_cols,
+  double *dense_panel,
+  double *trailing_panel,
+  int wait_for_dependencies,
+  UF_long row);
+
+static int kls_dense_help_enabled(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *env = getenv("KLS_DENSE_HELP");
+    cached = (env == NULL || *env == '\0') ? 1 : (atoi(env) != 0);
+  }
+  return cached;
+}
+
+static _Thread_local kls_egraph_refactor_worker *kls_dense_help_self;
+static _Thread_local int kls_dense_help_busy;
+/* Lowest row the current thread might still produce: the first row of the
+   group it is processing. Rows below it are finished or owned by other
+   threads, so groups ending at or before the floor are safe to help.
+   Defaults to 0 (help nothing) until a worker enters a group. */
+static _Thread_local long kls_dense_help_row_floor;
+
+/* Assemble rows of another worker's dense group while blocked on it.
+   row_bound is the smallest row the caller might still produce: helping
+   is restricted to groups that end at or before it, so every dependency
+   of a helped row lies strictly below any row the caller has in flight
+   (wait chains strictly decrease in row order and cannot cycle). The
+   helper runs on a private scratch vector so the caller's in-progress
+   row accumulation in worker->x stays intact. Returns nonzero when at
+   least one row was assembled. */
+static _Atomic long kls_dense_help_stat_active;
+static _Atomic long kls_dense_help_stat_self;
+static _Atomic long kls_dense_help_stat_bound;
+static _Atomic long kls_dense_help_stat_enter;
+
 static int kls_compact_dense_panel_factor_blocked_unchecked(
   kls_egraph_refactor_worker *worker,
   UF_long group,
@@ -56712,6 +56842,28 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
   double *udiag = (double *)solver->numeric->Udiag;
   for (UF_long i = 0; i < width; ++i) {
     dense_panel[i * width + i] = udiag[row_begin + i];
+  }
+
+  int panel_coop = 0;
+  struct kls_dense_help_ctx panel_ctx;
+  if (shared->thread_count > 1 && width >= 16 && kls_dense_help_enabled()) {
+    int expected = 0;
+    if (atomic_compare_exchange_strong_explicit(
+          &shared->dense_help_owner_lock, &expected, 1,
+          memory_order_acq_rel, memory_order_relaxed)) {
+      panel_coop = 1;
+      panel_ctx.kind = KLS_DENSE_HELP_PANEL_STEP;
+      panel_ctx.group = group;
+      panel_ctx.row_begin = row_begin;
+      panel_ctx.row_end = row_end;
+      panel_ctx.trailing_len = trailing_len;
+      panel_ctx.trailing_cols = NULL;
+      panel_ctx.dense_panel = dense_panel;
+      panel_ctx.trailing_panel = trailing_panel;
+      panel_ctx.wait_for_dependencies = 0;
+      panel_ctx.panel_k = 0;
+      panel_ctx.panel_kb = 0;
+    }
   }
 
   double update_work = 0.0;
@@ -56749,12 +56901,58 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
         kls_egraph_refactor_record_singular(shared, row_begin + i,
                                             solver->symbolic->Q[row_begin + i]);
         if (solver->common.halt_if_singular) {
+          if (panel_coop) {
+            atomic_store_explicit(&shared->dense_help_owner_lock, 0,
+                                  memory_order_release);
+          }
           return -1;
         }
       }
     }
 
     if (kb >= width) {
+      continue;
+    }
+
+    const double step_flops =
+      (double)(width - kb) *
+      ((double)block * (double)(width - kb + trailing_len) +
+       0.5 * (double)block * (double)block);
+    if (panel_coop && step_flops >= 16384.0) {
+      panel_ctx.panel_k = k;
+      panel_ctx.panel_kb = kb;
+      shared->dense_help_ctx = &panel_ctx;
+      atomic_store_explicit(&shared->dense_help_cursor, (long)kb,
+                            memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_done, 0,
+                            memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_fail, 0,
+                            memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_active, 1,
+                            memory_order_release);
+      for (;;) {
+        const long claim = atomic_fetch_add_explicit(
+          &shared->dense_help_cursor, 1, memory_order_relaxed);
+        if (claim >= (long)width) {
+          break;
+        }
+        kls_compact_dense_panel_block_step_row(
+          dense_panel, trailing_panel, udiag + row_begin, width,
+          trailing_len, k, kb, (UF_long)claim);
+        atomic_fetch_add_explicit(&shared->dense_help_done, 1,
+                                  memory_order_release);
+      }
+      atomic_store_explicit(&shared->dense_help_active, 0,
+                            memory_order_release);
+      while (atomic_load_explicit(&shared->dense_help_inflight,
+                                  memory_order_acquire) != 0 ||
+             atomic_load_explicit(&shared->dense_help_done,
+                                  memory_order_acquire) <
+               (long)(width - kb)) {
+        kls_cpu_relax();
+      }
+      shared->dense_help_ctx = NULL;
+      update_work += step_flops;
       continue;
     }
 
@@ -56794,6 +56992,11 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
         update_work += (double)block * (double)trailing_len;
       }
     }
+  }
+
+  if (panel_coop) {
+    atomic_store_explicit(&shared->dense_help_owner_lock, 0,
+                          memory_order_release);
   }
 
   for (UF_long row = row_begin; row < row_end; ++row) {
@@ -57235,6 +57438,142 @@ static UF_long kls_compact_dense_group_ragged_supernode_end(
     *dep_rows_out = kls_work_to_uflong(total_dep_rows);
   }
   return batch_end;
+}
+
+static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
+                              long row_bound,
+                              int idle) {
+  if (!atomic_load_explicit(&shared->dense_help_active,
+                            memory_order_acquire)) {
+    return 0;
+  }
+  atomic_fetch_add_explicit(&kls_dense_help_stat_active, 1,
+                            memory_order_relaxed);
+  kls_egraph_refactor_worker *self = kls_dense_help_self;
+  if (self == NULL || self->shared != shared || kls_dense_help_busy) {
+    atomic_fetch_add_explicit(&kls_dense_help_stat_self, 1,
+                              memory_order_relaxed);
+    return 0;
+  }
+  {
+    const struct kls_dense_help_ctx *peek = shared->dense_help_ctx;
+    if (peek == NULL ||
+        (peek->kind == KLS_DENSE_HELP_ASSEMBLE &&
+         (long)peek->row_end > row_bound)) {
+      atomic_fetch_add_explicit(&kls_dense_help_stat_bound, 1,
+                                memory_order_relaxed);
+      return 0;
+    }
+    if (peek->kind == KLS_DENSE_HELP_ASSEMBLE && self->help_x == NULL) {
+      kls_solver *solver = shared->solver;
+      if (solver == NULL) {
+        return 0;
+      }
+      self->help_x = (double *)calloc((size_t)solver->n, sizeof(double));
+      if (self->help_x == NULL) {
+        return 0;
+      }
+    }
+  }
+  atomic_fetch_add_explicit(&kls_dense_help_stat_enter, 1,
+                            memory_order_relaxed);
+  int did = 0;
+  atomic_fetch_add_explicit(&shared->dense_help_inflight, 1,
+                            memory_order_acq_rel);
+  if (atomic_load_explicit(&shared->dense_help_active,
+                           memory_order_acquire) &&
+      !atomic_load_explicit(&shared->dense_help_fail,
+                            memory_order_acquire)) {
+    const struct kls_dense_help_ctx *c = shared->dense_help_ctx;
+    if (c != NULL && c->kind == KLS_DENSE_HELP_PANEL_STEP) {
+      /* Panel-step rows read only finalized panel rows and write only
+         the claimed row: no waits, so any blocked or idle thread may
+         join regardless of its own position in the pipeline. */
+      const UF_long panel_width = c->row_end - c->row_begin;
+      const double *udiag_base =
+        (const double *)shared->solver->numeric->Udiag + c->row_begin;
+      kls_dense_help_busy = 1;
+      for (;;) {
+        const long row = atomic_fetch_add_explicit(
+          &shared->dense_help_cursor, 1, memory_order_relaxed);
+        if (row >= (long)panel_width) {
+          break;
+        }
+        kls_compact_dense_panel_block_step_row(
+          c->dense_panel, c->trailing_panel, udiag_base, panel_width,
+          c->trailing_len, c->panel_k, c->panel_kb, (UF_long)row);
+        atomic_fetch_add_explicit(&shared->dense_help_done, 1,
+                                  memory_order_release);
+        did = 1;
+        if (!atomic_load_explicit(&shared->dense_help_active,
+                                  memory_order_acquire)) {
+          break;
+        }
+      }
+      kls_dense_help_busy = 0;
+      atomic_fetch_sub_explicit(&shared->dense_help_inflight, 1,
+                                memory_order_release);
+      return did;
+    }
+    int allowed = c != NULL && c->kind == KLS_DENSE_HELP_ASSEMBLE &&
+                  (long)c->row_end <= row_bound && self->help_x != NULL;
+    int idle_counted = 0;
+    if (allowed && idle && c->wait_for_dependencies) {
+      /* Helped rows may block on unfinished dependencies. Keep at least
+         one idle thread free to claim newly ready groups so a blocking
+         group cannot sit unclaimed while every thread helps. */
+      const int idlers = atomic_fetch_add_explicit(
+        &shared->dense_help_idle_inflight, 1, memory_order_acq_rel) + 1;
+      if (idlers > shared->thread_count - 2) {
+        atomic_fetch_sub_explicit(&shared->dense_help_idle_inflight, 1,
+                                  memory_order_release);
+        allowed = 0;
+      } else {
+        idle_counted = 1;
+      }
+    }
+    if (allowed) {
+      double *saved_x = self->x;
+      self->x = self->help_x;
+      kls_dense_help_busy = 1;
+      for (;;) {
+        const long row = atomic_fetch_add_explicit(
+          &shared->dense_help_cursor, 1, memory_order_relaxed);
+        if (row >= (long)c->row_end) {
+          break;
+        }
+        const int ok = kls_row_refactor_assemble_compact_dense_row(
+          self, c->group, c->row_begin, c->row_end, c->trailing_len,
+          c->trailing_cols, c->dense_panel, c->trailing_panel,
+          c->wait_for_dependencies, (UF_long)row);
+        atomic_fetch_add_explicit(&shared->dense_help_done, 1,
+                                  memory_order_release);
+        did = 1;
+        if (!ok) {
+          atomic_store_explicit(&shared->dense_help_fail, 1,
+                                memory_order_release);
+          memset(self->help_x, 0,
+                 (size_t)shared->solver->n * sizeof(*self->help_x));
+          break;
+        }
+        if (atomic_load_explicit(&shared->dense_help_fail,
+                                 memory_order_acquire) ||
+            !atomic_load_explicit(&shared->dense_help_active,
+                                  memory_order_acquire)) {
+          break;
+        }
+      }
+      kls_dense_help_busy = 0;
+      self->x = saved_x;
+    }
+    if (idle_counted) {
+      atomic_fetch_sub_explicit(&shared->dense_help_idle_inflight, 1,
+                                memory_order_release);
+    }
+  }
+  atomic_fetch_sub_explicit(&shared->dense_help_inflight, 1,
+                            memory_order_release);
+  return did;
 }
 
 static int kls_compact_dense_group_try_batched_supernode_update(
@@ -57696,15 +58035,18 @@ static int kls_compact_dense_group_try_batched_supernode_update(
     } else
 #endif
     {
-      for (UF_long batch_local = 0; batch_local < batch_rows; ++batch_local) {
-        double *row_updates = updates + batch_local * run->trailing_len;
+      for (long batch_local = 0; batch_local < (long)batch_rows;
+           ++batch_local) {
+        double *row_updates =
+          updates + (size_t)batch_local * run->trailing_len;
         const double *row_multipliers =
-          multipliers + batch_local * external_len + run->external_offset;
+          multipliers + (size_t)batch_local * external_len +
+          run->external_offset;
         for (UF_long local_dep = 0; local_dep < run->dep_rows; ++local_dep) {
           const double lij = row_multipliers[local_dep];
           const double *dep_panel =
             run->trailing_panel +
-            (run->suffix_begin + local_dep) * run->trailing_len;
+            (size_t)(run->suffix_begin + local_dep) * run->trailing_len;
           for (UF_long offset = 0; offset < run->trailing_len; ++offset) {
             row_updates[offset] += lij * dep_panel[offset];
           }
@@ -59293,6 +59635,136 @@ static int kls_parallel_row_refactor_process_dense_group_compact_checked(
   return 1;
 }
 
+static int kls_row_refactor_assemble_compact_dense_row(
+  kls_egraph_refactor_worker *worker,
+  UF_long group,
+  UF_long row_begin,
+  UF_long row_end,
+  UF_long trailing_len,
+  const UF_long *trailing_cols,
+  double *dense_panel,
+  double *trailing_panel,
+  int wait_for_dependencies,
+  UF_long row) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  double *x = worker->x;
+  double *udiag = (double *)solver->numeric->Udiag;
+  const UF_long width = row_end - row_begin;
+  const UF_long local_row = row - row_begin;
+  double *row_dense_panel = dense_panel + local_row * width;
+  double *row_panel = trailing_panel != NULL
+    ? trailing_panel + local_row * trailing_len : NULL;
+  const int direct_input =
+    kls_parallel_row_refactor_load_compact_dense_input_row(
+      shared, x, row_begin, row_end, trailing_len, trailing_cols,
+      dense_panel, trailing_panel, row);
+  if (direct_input < 0) {
+    return 0;
+  }
+  if (!direct_input &&
+      !kls_parallel_row_refactor_load_input_row(shared, x, row)) {
+    return 0;
+  }
+
+  const UF_long l_begin = solver->row_refactor_l_ptr[row];
+  UF_long lp = l_begin;
+  const UF_long l_internal = solver->row_refactor_l_internal_ptr[row];
+  const UF_long l_end = solver->row_refactor_l_ptr[row + 1u];
+  while (lp < l_internal) {
+    const int compact_status =
+      kls_row_refactor_try_compact_supernode_update(
+        worker, row, group, &lp, l_begin, l_internal,
+        wait_for_dependencies, NULL);
+    if (compact_status < 0) {
+      x[row] = 0.0;
+      return 0;
+    }
+    if (compact_status > 0) {
+      continue;
+    }
+    const UF_long dep = solver->row_refactor_l_cols[lp];
+    if (wait_for_dependencies &&
+        !kls_egraph_refactor_wait_done(shared, dep)) {
+      x[dep] = 0.0;
+      return 0;
+    }
+    const double candidate = x[dep];
+    const double lij = candidate / udiag[dep];
+    if (kls_parallel_row_refactor_rejects_multiplier(
+          worker, row, dep, candidate, lij)) {
+      x[dep] = 0.0;
+      return 0;
+    }
+    solver->row_refactor_l_row_values[lp] = lij;
+    if (!shared->row_refactor_defer_value_scatter) {
+      *solver->row_refactor_l_values[lp] = lij;
+    }
+    x[dep] = 0.0;
+    if (!kls_row_refactor_try_compact_panel_scalar_update(
+          shared, x, group, dep, lij)) {
+      const UF_long u_begin = solver->row_refactor_u_ptr[dep];
+      const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
+      const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
+      const double *u_values =
+        solver->row_refactor_u_row_values + u_begin;
+      for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
+        x[u_cols[offset]] -= lij * u_values[offset];
+      }
+    }
+    lp++;
+  }
+
+  for (UF_long dep = row_begin; dep < row; ++dep, ++lp) {
+    if (lp >= l_end || solver->row_refactor_l_cols[lp] != dep) {
+      kls_egraph_refactor_record_invalid(shared);
+      return 0;
+    }
+    if (direct_input) {
+      row_dense_panel[dep - row_begin] += x[dep];
+    } else {
+      row_dense_panel[dep - row_begin] = x[dep];
+    }
+    x[dep] = 0.0;
+  }
+  if (lp != l_end) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+
+  udiag[row] =
+    direct_input ? row_dense_panel[local_row] + x[row] : x[row];
+  x[row] = 0.0;
+
+  const UF_long dense_len = row_end - row - 1u;
+  const UF_long u_begin = solver->row_refactor_u_ptr[row];
+  const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
+  if (u_end - u_begin != dense_len + trailing_len) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  for (UF_long offset = 0; offset < dense_len; ++offset) {
+    const UF_long col = row + 1u + offset;
+    if (direct_input) {
+      row_dense_panel[local_row + 1u + offset] += x[col];
+    } else {
+      row_dense_panel[local_row + 1u + offset] = x[col];
+    }
+    x[col] = 0.0;
+  }
+  for (UF_long offset = 0; offset < trailing_len; ++offset) {
+    const UF_long col = trailing_cols[offset];
+    if (direct_input) {
+      row_panel[offset] += x[col];
+    } else {
+      row_panel[offset] = x[col];
+    }
+    x[col] = 0.0;
+  }
+  kls_clear_row_refactor_input_residuals(solver, x, row);
+  return 1;
+}
+
 static int kls_parallel_row_refactor_process_dense_group_compact(
   kls_egraph_refactor_worker *worker,
   UF_long group,
@@ -59353,178 +59825,166 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
   }
 
   {
-    UF_long row = row_begin;
-    while (row < row_end) {
-      const UF_long batch_end =
-        kls_compact_dense_group_external_pattern_end(
-          solver, row_begin, row_end, row);
-      if (batch_end > row + 1u) {
-        kls_record_row_refactor_compact_supernode_batch_pattern(
-          solver, batch_end - row);
-        const int batched_status =
-          kls_compact_dense_group_try_batched_supernode_update(
-            worker, group, row_begin, row_end, row, batch_end, trailing_len,
-            trailing_cols, dense_panel, trailing_panel);
-        if (batched_status < 0) {
-          return 0;
+    int coop = 0;
+    if (shared->thread_count > 1 && width >= 8 && kls_dense_help_enabled()) {
+      int expected = 0;
+      if (atomic_compare_exchange_strong_explicit(
+            &shared->dense_help_owner_lock, &expected, 1,
+            memory_order_acq_rel, memory_order_relaxed)) {
+        coop = 1;
+      }
+    }
+    if (coop) {
+      struct kls_dense_help_ctx help_ctx;
+      help_ctx.kind = KLS_DENSE_HELP_ASSEMBLE;
+      help_ctx.group = group;
+      help_ctx.row_begin = row_begin;
+      help_ctx.row_end = row_end;
+      help_ctx.trailing_len = trailing_len;
+      help_ctx.trailing_cols = trailing_cols;
+      help_ctx.dense_panel = dense_panel;
+      help_ctx.trailing_panel = trailing_panel;
+      help_ctx.wait_for_dependencies = wait_for_dependencies;
+      help_ctx.panel_k = 0;
+      help_ctx.panel_kb = 0;
+      shared->dense_help_ctx = &help_ctx;
+      atomic_store_explicit(&shared->dense_help_cursor, (long)row_begin,
+                            memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_done, 0,
+                            memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_fail, 0,
+                            memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_active, 1,
+                            memory_order_release);
+      long owner_rows = 0;
+      for (;;) {
+        if (atomic_load_explicit(&shared->dense_help_fail,
+                                 memory_order_acquire)) {
+          break;
         }
-        if (batched_status > 0) {
-          row = batch_end;
-          continue;
+        const long claim = atomic_fetch_add_explicit(
+          &shared->dense_help_cursor, 1, memory_order_relaxed);
+        if (claim >= (long)row_end) {
+          break;
+        }
+        const int ok = kls_row_refactor_assemble_compact_dense_row(
+          worker, group, row_begin, row_end, trailing_len, trailing_cols,
+          dense_panel, trailing_panel, wait_for_dependencies,
+          (UF_long)claim);
+        atomic_fetch_add_explicit(&shared->dense_help_done, 1,
+                                  memory_order_release);
+        owner_rows++;
+        if (!ok) {
+          atomic_store_explicit(&shared->dense_help_fail, 1,
+                                memory_order_release);
+          break;
         }
       }
-      {
-        UF_long fragmented_end = row;
-        const int fragmented_status =
-          kls_compact_dense_group_try_fragmented_supernode_update(
-            worker, group, row_begin, row_end, row, &fragmented_end,
-            trailing_len, trailing_cols, dense_panel, trailing_panel,
-            wait_for_dependencies);
-        if (fragmented_status < 0) {
-          return 0;
+      atomic_store_explicit(&shared->dense_help_active, 0,
+                            memory_order_release);
+      for (;;) {
+        const long done = atomic_load_explicit(&shared->dense_help_done,
+                                               memory_order_acquire);
+        const int failed = atomic_load_explicit(&shared->dense_help_fail,
+                                                memory_order_acquire);
+        if (atomic_load_explicit(&shared->dense_help_inflight,
+                                 memory_order_acquire) == 0 &&
+            (failed || done >= (long)width)) {
+          break;
         }
-        if (fragmented_status > 0 && fragmented_end > row) {
-          row = fragmented_end;
-          continue;
-        }
+        kls_cpu_relax();
       }
-      {
-        UF_long ragged_dep_group = KLS_KLU_EMPTY;
-        double ragged_work = 0.0;
-        double ragged_copied_entries = 0.0;
-        UF_long ragged_dep_rows = 0;
-        const UF_long ragged_end =
-          kls_compact_dense_group_ragged_supernode_end(
-            solver, group, row_begin, row_end, row, &ragged_dep_group,
-            &ragged_work, &ragged_copied_entries, &ragged_dep_rows);
-        if (ragged_end > row + 1u) {
-          const int ragged_status =
-            kls_compact_dense_group_try_ragged_supernode_update(
-              worker, group, row_begin, row_end, row, ragged_end,
-              ragged_dep_group, ragged_work, ragged_copied_entries,
-              ragged_dep_rows, trailing_len, trailing_cols, dense_panel,
-              trailing_panel);
-          if (ragged_status < 0) {
+      shared->dense_help_ctx = NULL;
+      const int final_failed = atomic_load_explicit(
+        &shared->dense_help_fail, memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_owner_lock, 0,
+                            memory_order_release);
+      if (getenv("KLS_TRACE_DENSE_HELP") != NULL) {
+        fprintf(stderr,
+                "DH group=%ld width=%ld owner=%ld helped=%ld%s"
+                " act=%ld self=%ld bound=%ld enter=%ld\n",
+                (long)group, (long)width, owner_rows,
+                (long)width - owner_rows, final_failed ? " FAIL" : "",
+                atomic_load_explicit(&kls_dense_help_stat_active,
+                                     memory_order_relaxed),
+                atomic_load_explicit(&kls_dense_help_stat_self,
+                                     memory_order_relaxed),
+                atomic_load_explicit(&kls_dense_help_stat_bound,
+                                     memory_order_relaxed),
+                atomic_load_explicit(&kls_dense_help_stat_enter,
+                                     memory_order_relaxed));
+      }
+      if (final_failed) {
+        return 0;
+      }
+    } else {
+      UF_long row = row_begin;
+      while (row < row_end) {
+        const UF_long batch_end =
+          kls_compact_dense_group_external_pattern_end(
+            solver, row_begin, row_end, row);
+        if (batch_end > row + 1u) {
+          kls_record_row_refactor_compact_supernode_batch_pattern(
+            solver, batch_end - row);
+          const int batched_status =
+            kls_compact_dense_group_try_batched_supernode_update(
+              worker, group, row_begin, row_end, row, batch_end, trailing_len,
+              trailing_cols, dense_panel, trailing_panel);
+          if (batched_status < 0) {
             return 0;
           }
-          if (ragged_status > 0) {
-            row = ragged_end;
+          if (batched_status > 0) {
+            row = batch_end;
             continue;
           }
         }
-      }
-      const UF_long local_row = row - row_begin;
-      double *row_dense_panel = dense_panel + local_row * width;
-      double *row_panel = trailing_panel != NULL
-        ? trailing_panel + local_row * trailing_len : NULL;
-      const int direct_input =
-        kls_parallel_row_refactor_load_compact_dense_input_row(
-          shared, x, row_begin, row_end, trailing_len, trailing_cols,
-          dense_panel, trailing_panel, row);
-      if (direct_input < 0) {
-        return 0;
-      }
-      if (!direct_input &&
-          !kls_parallel_row_refactor_load_input_row(shared, x, row)) {
-        return 0;
-      }
-
-      const UF_long l_begin = solver->row_refactor_l_ptr[row];
-      UF_long lp = l_begin;
-      const UF_long l_internal = solver->row_refactor_l_internal_ptr[row];
-      const UF_long l_end = solver->row_refactor_l_ptr[row + 1u];
-      while (lp < l_internal) {
-        const int compact_status =
-          kls_row_refactor_try_compact_supernode_update(
-            worker, row, group, &lp, l_begin, l_internal,
-            wait_for_dependencies, NULL);
-        if (compact_status < 0) {
-          x[row] = 0.0;
-          return 0;
-        }
-        if (compact_status > 0) {
-          continue;
-        }
-        const UF_long dep = solver->row_refactor_l_cols[lp];
-        if (wait_for_dependencies &&
-            !kls_egraph_refactor_wait_done(shared, dep)) {
-          x[dep] = 0.0;
-          return 0;
-        }
-        const double candidate = x[dep];
-        const double lij = candidate / udiag[dep];
-        if (kls_parallel_row_refactor_rejects_multiplier(
-              worker, row, dep, candidate, lij)) {
-          x[dep] = 0.0;
-          return 0;
-        }
-        solver->row_refactor_l_row_values[lp] = lij;
-        if (!shared->row_refactor_defer_value_scatter) {
-          *solver->row_refactor_l_values[lp] = lij;
-        }
-        x[dep] = 0.0;
-        if (!kls_row_refactor_try_compact_panel_scalar_update(
-              shared, x, group, dep, lij)) {
-          const UF_long u_begin = solver->row_refactor_u_ptr[dep];
-          const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
-          const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
-          const double *u_values =
-            solver->row_refactor_u_row_values + u_begin;
-          for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
-            x[u_cols[offset]] -= lij * u_values[offset];
+        {
+          UF_long fragmented_end = row;
+          const int fragmented_status =
+            kls_compact_dense_group_try_fragmented_supernode_update(
+              worker, group, row_begin, row_end, row, &fragmented_end,
+              trailing_len, trailing_cols, dense_panel, trailing_panel,
+              wait_for_dependencies);
+          if (fragmented_status < 0) {
+            return 0;
+          }
+          if (fragmented_status > 0 && fragmented_end > row) {
+            row = fragmented_end;
+            continue;
           }
         }
-        lp++;
-      }
-
-      for (UF_long dep = row_begin; dep < row; ++dep, ++lp) {
-        if (lp >= l_end || solver->row_refactor_l_cols[lp] != dep) {
-          kls_egraph_refactor_record_invalid(shared);
+        {
+          UF_long ragged_dep_group = KLS_KLU_EMPTY;
+          double ragged_work = 0.0;
+          double ragged_copied_entries = 0.0;
+          UF_long ragged_dep_rows = 0;
+          const UF_long ragged_end =
+            kls_compact_dense_group_ragged_supernode_end(
+              solver, group, row_begin, row_end, row, &ragged_dep_group,
+              &ragged_work, &ragged_copied_entries, &ragged_dep_rows);
+          if (ragged_end > row + 1u) {
+            const int ragged_status =
+              kls_compact_dense_group_try_ragged_supernode_update(
+                worker, group, row_begin, row_end, row, ragged_end,
+                ragged_dep_group, ragged_work, ragged_copied_entries,
+                ragged_dep_rows, trailing_len, trailing_cols, dense_panel,
+                trailing_panel);
+            if (ragged_status < 0) {
+              return 0;
+            }
+            if (ragged_status > 0) {
+              row = ragged_end;
+              continue;
+            }
+          }
+        }
+        if (!kls_row_refactor_assemble_compact_dense_row(
+              worker, group, row_begin, row_end, trailing_len, trailing_cols,
+              dense_panel, trailing_panel, wait_for_dependencies, row)) {
           return 0;
         }
-        if (direct_input) {
-          row_dense_panel[dep - row_begin] += x[dep];
-        } else {
-          row_dense_panel[dep - row_begin] = x[dep];
-        }
-        x[dep] = 0.0;
+        row++;
       }
-      if (lp != l_end) {
-        kls_egraph_refactor_record_invalid(shared);
-        return 0;
-      }
-
-      udiag[row] =
-        direct_input ? row_dense_panel[local_row] + x[row] : x[row];
-      x[row] = 0.0;
-
-      const UF_long dense_len = row_end - row - 1u;
-      const UF_long u_begin = solver->row_refactor_u_ptr[row];
-      const UF_long u_end = solver->row_refactor_u_ptr[row + 1u];
-      if (u_end - u_begin != dense_len + trailing_len) {
-        kls_egraph_refactor_record_invalid(shared);
-        return 0;
-      }
-      for (UF_long offset = 0; offset < dense_len; ++offset) {
-        const UF_long col = row + 1u + offset;
-        if (direct_input) {
-          row_dense_panel[local_row + 1u + offset] += x[col];
-        } else {
-          row_dense_panel[local_row + 1u + offset] = x[col];
-        }
-        x[col] = 0.0;
-      }
-      for (UF_long offset = 0; offset < trailing_len; ++offset) {
-        const UF_long col = trailing_cols[offset];
-        if (direct_input) {
-          row_panel[offset] += x[col];
-        } else {
-          row_panel[offset] = x[col];
-        }
-        x[col] = 0.0;
-      }
-      kls_clear_row_refactor_input_residuals(solver, x, row);
-      row++;
     }
   }
 
@@ -61922,6 +62382,7 @@ static int kls_parallel_row_refactor_process_group(
     kls_egraph_refactor_record_invalid(shared);
     return 0;
   }
+  kls_dense_help_row_floor = (long)row_begin;
   const UF_long width = row_end - row_begin;
   const kls_row_refactor_group_kind group_kind =
     kls_row_refactor_group_kind_for(solver, group, width);
@@ -62390,6 +62851,10 @@ static int kls_row_refactor_pop_ready_group(
       atomic_load_explicit(&shared->row_pipeline_ready_tail,
                            memory_order_acquire);
     if (head >= tail) {
+      if ((spin & 63u) == 1u && kls_dense_help_try(shared, LONG_MAX, 1)) {
+        continue;
+      }
+      kls_cpu_relax();
       if ((spin++ & 1023u) == 0u &&
           kls_egraph_refactor_should_stop(shared)) {
         return 0;
@@ -62610,10 +63075,16 @@ static int kls_row_refactor_wait_private_group_ready(
     kls_egraph_refactor_record_invalid(shared);
     return 0;
   }
+  const long help_bound =
+    shared->solver->row_refactor_group_ptr != NULL
+      ? (long)shared->solver->row_refactor_group_ptr[group] : -1;
   unsigned spin = 0;
   while (atomic_load_explicit(&shared->row_pipeline_remaining_preds[group],
                               memory_order_acquire) != 0ul) {
-                                kls_cpu_relax();
+    if ((spin & 63u) == 1u && kls_dense_help_try(shared, help_bound, 0)) {
+      continue;
+    }
+    kls_cpu_relax();
     if ((spin++ & 1023u) == 0u &&
         kls_egraph_refactor_should_stop(shared)) {
       return 0;
@@ -62764,6 +63235,8 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
   }
+  kls_dense_help_self = worker;
+  kls_dense_help_row_floor = LONG_MAX;
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
   if (solver == NULL) {
@@ -62869,6 +63342,70 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
     }
 
     (void)pthread_barrier_wait(&shared->barrier);
+  }
+}
+
+/* Publish deferred row-major refactor values into the packed column
+   factors when the follow-up solves are better served by the column
+   engine (pts/i32) than by the row-value solve. The parallel row solve
+   requires a single BTF block; with many blocks the serial row solve is
+   the only row-value option, while pts still covers the dominant block
+   at column orientation. Scale-free: keys on machinery availability. */
+static int kls_row_refactor_should_publish_for_solve(
+  const kls_solver *solver) {
+  const char *env = getenv("KLS_ROW_REFACTOR_PUBLISH");
+  if (env != NULL && *env != '\0') {
+    return atoi(env) != 0;
+  }
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->options.threads <= 1) {
+    return 0;
+  }
+  if (solver->symbolic->nblocks == 1u && solver->row_solve_partition_ready) {
+    return 0;
+  }
+  return kls_pts_solve_available(solver);
+}
+
+/* Scatter row-major refactor values into the packed column factors in
+   parallel: entries are partitioned by position, so slices are
+   disjoint. */
+static void kls_row_publish_worker_run(kls_egraph_refactor_worker *worker) {
+  if (worker == NULL || worker->shared == NULL) {
+    return;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL || solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_u_ptr == NULL) {
+    return;
+  }
+  const UF_long tid = (UF_long)worker->tid;
+  const UF_long threads = (UF_long)shared->thread_count;
+  if (threads == 0u || tid >= threads) {
+    return;
+  }
+  const UF_long l_nnz = solver->row_refactor_l_ptr[solver->n];
+  if (l_nnz > 0u && solver->row_refactor_l_values != NULL &&
+      solver->row_refactor_l_row_values != NULL) {
+    const UF_long begin = l_nnz * tid / threads;
+    const UF_long end = l_nnz * (tid + 1u) / threads;
+    double *const *values = solver->row_refactor_l_values;
+    const double *row_values = solver->row_refactor_l_row_values;
+    for (UF_long p = begin; p < end; ++p) {
+      *values[p] = row_values[p];
+    }
+  }
+  const UF_long u_nnz = solver->row_refactor_u_ptr[solver->n];
+  if (u_nnz > 0u && solver->row_refactor_u_values != NULL &&
+      solver->row_refactor_u_row_values != NULL) {
+    const UF_long begin = u_nnz * tid / threads;
+    const UF_long end = u_nnz * (tid + 1u) / threads;
+    double *const *values = solver->row_refactor_u_values;
+    const double *row_values = solver->row_refactor_u_row_values;
+    for (UF_long p = begin; p < end; ++p) {
+      *values[p] = row_values[p];
+    }
   }
 }
 
@@ -63505,8 +64042,21 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   } else {
     common->status = TRILINOS_KLU_OK;
   }
+  int published_for_solve = 0;
   if (shared->row_refactor_defer_value_scatter) {
-    if (shared->row_refactor_lazy_value_scatter) {
+    if (shared->row_refactor_lazy_value_scatter &&
+        kls_row_refactor_should_publish_for_solve(solver)) {
+      pthread_mutex_lock(&shared->lock);
+      shared->row_refactor_mode = 0;
+      shared->row_publish_mode = 1;
+      kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
+      shared->row_publish_mode = 0;
+      shared->row_refactor_mode = 1;
+      pthread_mutex_unlock(&shared->lock);
+      solver->row_refactor_values_dirty = 0;
+      solver->stats.row_refactor_values_dirty = 0;
+      published_for_solve = 1;
+    } else if (shared->row_refactor_lazy_value_scatter) {
       kls_record_row_refactor_lazy_value_scatter_run(solver);
     } else if (!kls_scatter_row_refactor_l_values(solver) ||
                !kls_scatter_row_refactor_u_values(solver)) {
@@ -63519,7 +64069,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
-  solver->row_refactor_values_ready = 1;
+  solver->row_refactor_values_ready = published_for_solve ? 0 : 1;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
   kls_maybe_disable_native_row_panel_auto(
@@ -64090,6 +64640,10 @@ static int kls_egraph_refactor_wait_done(
   unsigned spin = 0;
   while (atomic_load_explicit(&shared->pipeline_done[col],
                               memory_order_acquire) != generation) {
+    if ((spin & 63u) == 1u &&
+        kls_dense_help_try(shared, kls_dense_help_row_floor, 0)) {
+      continue;
+    }
     kls_cpu_relax();
     if ((spin++ & 1023u) == 0u &&
         kls_egraph_refactor_should_stop(shared)) {
@@ -81266,7 +81820,9 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
     }
     seen_generation = generation;
 
-    if (shared->row_solve_mode) {
+    if (shared->row_publish_mode) {
+      kls_row_publish_worker_run(worker);
+    } else if (shared->row_solve_mode) {
       kls_row_solve_worker_run(worker);
     } else if (shared->row_refactor_mode) {
       kls_row_refactor_worker_run(worker);
@@ -81342,6 +81898,7 @@ static void destroy_egraph_refactor_pool(kls_solver *solver) {
   }
   if (pool->workers != NULL) {
     for (int i = 0; i < pool->thread_count; ++i) {
+      free(pool->workers[i].help_x);
       free(pool->workers[i].segment_panel);
       free(pool->workers[i].supernode_workspace);
       free(pool->workers[i].index_workspace);
@@ -117870,6 +118427,10 @@ typedef struct kls_pts_s {
   int solve_ok;                     /* tight top gate for the solve */
   int refactor_ok;                  /* flop-weighted top gate */
 } kls_pts;
+
+static int kls_pts_solve_available(const kls_solver *solver) {
+  return solver != NULL && solver->pts != NULL && solver->pts->solve_ok;
+}
 
 static void kls_pts_free(kls_solver *solver) {
   kls_pts *pts = solver->pts;
