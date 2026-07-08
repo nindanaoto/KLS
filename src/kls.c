@@ -336,6 +336,8 @@ struct kls_solver {
   double pts_ref_trial_seconds;   /* factor-time trial, charged once */
   int row_accept_decision;      /* 0 undecided, 1 row engine, -1 column */
   int row_accept_publish_preferred; /* measured: column solve beats row solve */
+  int prestatic_adopted_unfactored; /* matched pattern installed, numeric
+                                       deferred to the parallel first factor */
   double row_trial_deadline;    /* trial budget in seconds; 0 = none */
   int row_accept_warmup;        /* early refactors skipped: other engines'
                                    own trials and lazy builds inflate them */
@@ -24008,6 +24010,11 @@ static int metis_start_should_skip_no_btf_retry(UF_long n,
 #endif
 
 #if defined(KLS_HAVE_METIS) || defined(KLS_HAVE_SCOTCH)
+/* Set for the duration of the top-level analyze so the pattern-level
+   ordering gates can see whether a background METIS race already covers
+   the nested-dissection trial. */
+static _Thread_local const kls_solver *kls_analyze_nd_race_solver;
+
 static int should_try_symbolic_nested_dissection_before_numeric(
   UF_long n,
   const trilinos_klu_l_symbolic *symbolic,
@@ -24016,6 +24023,13 @@ static int should_try_symbolic_nested_dissection_before_numeric(
   double score) {
   if (selected_ordering == trial_ordering || symbolic == NULL ||
       n < 200000) {
+    return 0;
+  }
+  if (trial_ordering == KLS_ORDERING_METIS &&
+      kls_analyze_nd_race_solver != NULL &&
+      kls_analyze_nd_race_solver->metis_race != NULL) {
+    /* The race computes the METIS ordering off the critical path and
+       the factor-time promotion adopts it under timed acceptance. */
     return 0;
   }
   if (trial_ordering == KLS_ORDERING_METIS &&
@@ -27663,6 +27677,40 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
             (int)trial_ordering, (long)trial_common.scale, trial_common.tol,
             trial_score);
   }
+  int skip_trial_factor = 0;
+  if (getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL) {
+    /* Experimental: when the matched, scaled diagonal is statically
+       strong (the block trial's criterion), adopt without the serial
+       pivoted trial factor and let the predicted parallel first factor
+       build the numeric on the normal path. */
+    /* Same tolerance the trial-factor quality gate applies to actual
+       pivot deviations: columns whose matched diagonal is still weak
+       are the ones at risk of deviating, and the predicted path's
+       rescue + probe + serial fallback police real failures. */
+    const UF_long weak_cap = weak / 20u + 16u;
+    UF_long post_weak = 0;
+    for (UF_long k = 0; k < solver->n && post_weak <= weak_cap; ++k) {
+      double colmax = 0.0;
+      double diag = -1.0;
+      for (UF_long p = trial_col_ptr[k]; p < trial_col_ptr[k + 1u]; ++p) {
+        const double av = fabs(trial_values[p]);
+        colmax = colmax < av ? av : colmax;
+        if (trial_row_idx[p] == k) {
+          diag = av;
+        }
+      }
+      if (diag < 0.0 || diag < 1.0e-4 * colmax) {
+        post_weak++;
+      }
+    }
+    skip_trial_factor = post_weak <= weak_cap;
+    if (kls_trace_pre_static_enabled()) {
+      fprintf(stderr,
+              "KLS pre-static: post-match weak=%ld cap=%ld skip=%d\n",
+              (long)post_weak, (long)weak_cap, skip_trial_factor);
+    }
+  }
+  if (!skip_trial_factor) {
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
                           trial_symbolic, &trial_common);
@@ -27703,7 +27751,11 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
     goto done;
   }
+  }
 
+  /* The early METIS race reads the pattern arrays this adoption frees:
+     join and discard it first. */
+  kls_metis_race_abandon(solver);
   trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
   trilinos_klu_l_common old_common = solver->common;
   free(solver->col_ptr);
@@ -27753,6 +27805,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   free(match_col_scale);
   match_row_scale = NULL;
   match_col_scale = NULL;
+  solver->prestatic_adopted_unfactored = solver->numeric == NULL;
   accepted = 1;
 
 done:
@@ -32030,10 +32083,12 @@ int kls_analyze_csc(kls_solver *solver,
                                normal.col_ptr, normal.row_idx);
   }
 
+  kls_analyze_nd_race_solver = solver;
   status = select_candidate(&normal,
                             (normalized.orientation == KLS_ORIENTATION_NORMAL ||
                              prefer_auto_normal) ? NULL : &transpose,
                             &normalized, &chosen);
+  kls_analyze_nd_race_solver = NULL;
   const double elapsed = kls_now_seconds() - start;
   if (status != KLS_OK) {
     clear_matrix(solver);
@@ -56894,7 +56949,8 @@ static UF_long kls_work_to_uflong(double work);
 
 enum kls_dense_help_kind {
   KLS_DENSE_HELP_ASSEMBLE = 0,
-  KLS_DENSE_HELP_PANEL_STEP = 1
+  KLS_DENSE_HELP_PANEL_STEP = 1,
+  KLS_DENSE_HELP_PANEL_BLOCK_TAIL = 2
 };
 
 struct kls_dense_help_ctx {
@@ -56913,6 +56969,49 @@ struct kls_dense_help_ctx {
   UF_long panel_k;
   UF_long panel_kb;
 };
+
+#define KLS_DENSE_HELP_TAIL_SLICE 128u
+
+/* Diagonal-block row tails of a blocked dense-panel factorization form
+   a forward substitution: row i's tail update reads the FINAL tails of
+   rows k..i-1, so rows are sequential — but every tail column is
+   independent. Each participant runs the whole row-sequential
+   substitution on a disjoint column slice; the element-wise operation
+   order matches the serial code exactly. Offsets [0, width-kb) map to
+   the dense targets, the rest to the trailing panel. */
+static void kls_compact_dense_panel_block_tail_slice(
+  double *dense_panel,
+  double *trailing_panel,
+  UF_long width,
+  UF_long trailing_len,
+  UF_long k,
+  UF_long kb,
+  UF_long off_begin,
+  UF_long off_end) {
+  const UF_long dense_tail = width - kb;
+  const UF_long dense_end = off_end < dense_tail ? off_end : dense_tail;
+  const UF_long trail_begin =
+    off_begin > dense_tail ? off_begin - dense_tail : 0u;
+  const UF_long trail_end = off_end > dense_tail ? off_end - dense_tail : 0u;
+  for (UF_long i = k + 1u; i < kb; ++i) {
+    double *row_dense_panel = dense_panel + i * width;
+    double *row_panel = trailing_len > 0u
+      ? trailing_panel + i * trailing_len : NULL;
+    for (UF_long dep = k; dep < i; ++dep) {
+      const double lij = row_dense_panel[dep];
+      const double *dep_dense_panel = dense_panel + dep * width;
+      for (UF_long off = off_begin; off < dense_end; ++off) {
+        row_dense_panel[kb + off] -= lij * dep_dense_panel[kb + off];
+      }
+      if (trail_end > trail_begin) {
+        const double *dep_panel = trailing_panel + dep * trailing_len;
+        for (UF_long t = trail_begin; t < trail_end; ++t) {
+          row_panel[t] -= lij * dep_panel[t];
+        }
+      }
+    }
+  }
+}
 
 /* One row of a blocked dense-panel factorization step: solve the row's
    L values against block columns [k, kb) (rows above kb are final),
@@ -57062,20 +57161,26 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
     }
     const UF_long kb = k + block;
 
+    const double tail_flops =
+      0.5 * (double)block * (double)block *
+      (double)(width - kb + trailing_len);
+    const int coop_block_tail = panel_coop && kb < width &&
+                                tail_flops >= 16384.0;
     for (UF_long i = k; i < kb; ++i) {
       double *row_dense_panel = dense_panel + i * width;
       double *row_panel = trailing_len > 0u
         ? trailing_panel + i * trailing_len : NULL;
+      const UF_long triangle_end = coop_block_tail ? kb : width;
       for (UF_long dep = k; dep < i; ++dep) {
         const double pivot = udiag[row_begin + dep];
         const double lij = row_dense_panel[dep] / pivot;
         row_dense_panel[dep] = lij;
         const double *dep_dense_panel = dense_panel + dep * width;
-        for (UF_long target = dep + 1u; target < width; ++target) {
+        for (UF_long target = dep + 1u; target < triangle_end; ++target) {
           row_dense_panel[target] -= lij * dep_dense_panel[target];
         }
         update_work += (double)(width - dep - 1u);
-        if (trailing_len > 0u) {
+        if (trailing_len > 0u && !coop_block_tail) {
           const double *dep_panel = trailing_panel + dep * trailing_len;
           for (UF_long offset = 0; offset < trailing_len; ++offset) {
             row_panel[offset] -= lij * dep_panel[offset];
@@ -57096,6 +57201,52 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
           return -1;
         }
       }
+    }
+    if (coop_block_tail) {
+      /* Block-row tails: a forward substitution across the block rows,
+         parallel by disjoint column slices. */
+      const UF_long tail_total = width - kb + trailing_len;
+      const long slice_count =
+        (long)((tail_total + KLS_DENSE_HELP_TAIL_SLICE - 1u) /
+               KLS_DENSE_HELP_TAIL_SLICE);
+      panel_ctx.kind = KLS_DENSE_HELP_PANEL_BLOCK_TAIL;
+      panel_ctx.panel_k = k;
+      panel_ctx.panel_kb = kb;
+      shared->dense_help_ctx = &panel_ctx;
+      atomic_store_explicit(&shared->dense_help_cursor, 0,
+                            memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_done, 0,
+                            memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_active, 1,
+                            memory_order_release);
+      for (;;) {
+        const long claim = atomic_fetch_add_explicit(
+          &shared->dense_help_cursor, 1, memory_order_relaxed);
+        if (claim >= slice_count) {
+          break;
+        }
+        const UF_long off_begin =
+          (UF_long)claim * KLS_DENSE_HELP_TAIL_SLICE;
+        const UF_long off_end =
+          off_begin + KLS_DENSE_HELP_TAIL_SLICE < tail_total
+            ? off_begin + KLS_DENSE_HELP_TAIL_SLICE : tail_total;
+        kls_compact_dense_panel_block_tail_slice(
+          dense_panel, trailing_panel, width, trailing_len, k, kb,
+          off_begin, off_end);
+        atomic_fetch_add_explicit(&shared->dense_help_done, 1,
+                                  memory_order_release);
+      }
+      atomic_store_explicit(&shared->dense_help_active, 0,
+                            memory_order_release);
+      while (atomic_load_explicit(&shared->dense_help_inflight,
+                                  memory_order_acquire) != 0 ||
+             atomic_load_explicit(&shared->dense_help_done,
+                                  memory_order_acquire) < slice_count) {
+        kls_cpu_relax();
+      }
+      shared->dense_help_ctx = NULL;
+      panel_ctx.kind = KLS_DENSE_HELP_PANEL_STEP;
+      update_work += tail_flops;
     }
 
     if (kb >= width) {
@@ -57673,23 +57824,42 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
       !atomic_load_explicit(&shared->dense_help_fail,
                             memory_order_acquire)) {
     const struct kls_dense_help_ctx *c = shared->dense_help_ctx;
-    if (c != NULL && c->kind == KLS_DENSE_HELP_PANEL_STEP) {
-      /* Panel-step rows read only finalized panel rows and write only
-         the claimed row: no waits, so any blocked or idle thread may
-         join regardless of its own position in the pipeline. */
+    if (c != NULL && (c->kind == KLS_DENSE_HELP_PANEL_STEP ||
+                      c->kind == KLS_DENSE_HELP_PANEL_BLOCK_TAIL)) {
+      /* Panel rows read only finalized panel rows and write only the
+         claimed row: no waits, so any blocked or idle thread may join
+         regardless of its own position in the pipeline. */
+      const int block_tail = c->kind == KLS_DENSE_HELP_PANEL_BLOCK_TAIL;
       const UF_long panel_width = c->row_end - c->row_begin;
+      const UF_long tail_total = block_tail
+        ? panel_width - c->panel_kb + c->trailing_len : 0u;
+      const long claim_limit = block_tail
+        ? (long)((tail_total + KLS_DENSE_HELP_TAIL_SLICE - 1u) /
+                 KLS_DENSE_HELP_TAIL_SLICE)
+        : (long)panel_width;
       const double *udiag_base =
         (const double *)shared->solver->numeric->Udiag + c->row_begin;
       kls_dense_help_busy = 1;
       for (;;) {
         const long row = atomic_fetch_add_explicit(
           &shared->dense_help_cursor, 1, memory_order_relaxed);
-        if (row >= (long)panel_width) {
+        if (row >= claim_limit) {
           break;
         }
-        kls_compact_dense_panel_block_step_row(
-          c->dense_panel, c->trailing_panel, udiag_base, panel_width,
-          c->trailing_len, c->panel_k, c->panel_kb, (UF_long)row);
+        if (block_tail) {
+          const UF_long off_begin =
+            (UF_long)row * KLS_DENSE_HELP_TAIL_SLICE;
+          const UF_long off_end =
+            off_begin + KLS_DENSE_HELP_TAIL_SLICE < tail_total
+              ? off_begin + KLS_DENSE_HELP_TAIL_SLICE : tail_total;
+          kls_compact_dense_panel_block_tail_slice(
+            c->dense_panel, c->trailing_panel, panel_width,
+            c->trailing_len, c->panel_k, c->panel_kb, off_begin, off_end);
+        } else {
+          kls_compact_dense_panel_block_step_row(
+            c->dense_panel, c->trailing_panel, udiag_base, panel_width,
+            c->trailing_len, c->panel_k, c->panel_kb, (UF_long)row);
+        }
         atomic_fetch_add_explicit(&shared->dense_help_done, 1,
                                   memory_order_release);
         did = 1;
@@ -120153,6 +120323,12 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (!had_numeric) {
     maybe_select_pre_static_row_match(solver, &elapsed, numeric_values);
     KLS_ENTRY_PHASE("prestatic")
+    if (solver->numeric == NULL && solver->prestatic_adopted_unfactored &&
+        solver->values != NULL) {
+      /* Adoption replaced the pattern and values; the deferred numeric
+         is built by the parallel first factor below on those values. */
+      numeric_values = solver->values;
+    }
     if (solver->numeric != NULL) {
       numeric_values = solver->values != NULL ? solver->values : numeric_values;
       const int kls_first_factor_used =
@@ -120238,7 +120414,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
 
   free_numeric(solver);
-  if (!had_numeric) {
+  if (!had_numeric && !solver->prestatic_adopted_unfactored) {
     solver->common.scale = choose_auto_scale_from_values(solver, numeric_values);
     solver->common.tol = choose_initial_auto_pivot_tolerance(solver);
     kls_signal_metis_race_values(solver, numeric_values);
