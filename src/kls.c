@@ -23267,6 +23267,12 @@ static UF_long kls_metis_order(UF_long n,
   idx_t *metis_iperm = (idx_t *)malloc(nsize * sizeof(*metis_iperm));
   idx_t metis_ndp_npes =
     metis_context != NULL && metis_context->npes > 1 ? metis_context->npes : 0;
+  {
+    const char *npes_env = getenv("KLS_METIS_NDP_NPES");
+    if (npes_env != NULL && npes_env[0] != '\0') {
+      metis_ndp_npes = (idx_t)atol(npes_env);
+    }
+  }
   if (n < KLS_METIS_NDP_MIN_ROWS) {
     metis_ndp_npes = 0;
   }
@@ -23359,14 +23365,23 @@ static UF_long kls_metis_order(UF_long n,
     if (ctype != NULL && ctype[0] == 'r') {
       options[METIS_OPTION_CTYPE] = METIS_CTYPE_RM;
     }
+    const char *dbg = getenv("KLS_METIS_DBGLVL");
+    if (dbg != NULL && dbg[0] != '\0') {
+      options[METIS_OPTION_DBGLVL] = atoi(dbg);
+    }
   }
   idx_t nvtxs = (idx_t)n;
+  const double kls_metis_t0 = kls_now_seconds();
   const int metis_status =
     metis_ndp_npes > 1
       ? METIS_NodeNDP(nvtxs, xadj, adjncy, NULL, metis_ndp_npes, options,
                       metis_perm, metis_iperm, metis_ndp_sizes)
       : METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options,
                      metis_perm, metis_iperm);
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS metis: NodeND %.3fs (ndp=%d)\n",
+            kls_now_seconds() - kls_metis_t0, (int)metis_ndp_npes);
+  }
   UF_long order_lnz = 0;
   if (metis_status == METIS_OK) {
     UF_long camd_group_size =
