@@ -1947,10 +1947,11 @@ typedef struct kls_egraph_refactor_shared {
   _Atomic int dense_help_inflight;
   _Atomic long dense_help_cursor;
   _Atomic long dense_help_done;
-  const struct kls_dense_help_ctx *dense_help_ctx;
+  const struct kls_dense_help_ctx *_Atomic dense_help_ctx;
   _Atomic int dense_help_fail;
   _Atomic int dense_help_owner_lock;
   _Atomic int dense_help_idle_inflight;
+  long dense_help_epoch_seq;   /* owner-lock protected session counter */
   double trial_deadline_seconds;   /* 0 = disarmed; wall deadline */
   _Atomic int trial_deadline_hit;
   atomic_uint *pipeline_done;
@@ -23909,8 +23910,14 @@ static void maybe_retry_without_btf(UF_long n,
   const int single_block =
     n >= 12000u && allow_single_block &&
     (*symbolic)->nblocks == 1 && (*symbolic)->maxblock == n;
+  /* A degenerate BTF (one block holding all but a sliver of the matrix)
+     cannot move the fill estimate by the 20% the dominant-block retry
+     demands: removing under 1% of rows leaves the same ordering problem,
+     so the retry re-runs the whole nested dissection for nothing. */
+  const int btf_degenerate =
+    (*symbolic)->nblocks > 1 && (*symbolic)->maxblock >= n - n / 128;
   const int dominant_block =
-    btf_dominant_block_retry_shape_is_allowed(n, *symbolic);
+    !btf_degenerate && btf_dominant_block_retry_shape_is_allowed(n, *symbolic);
   const int inflated_many_block =
     btf_inflated_many_block_retry_shape_is_allowed(n, *symbolic);
   const int fragmented_block =
@@ -23923,6 +23930,14 @@ static void maybe_retry_without_btf(UF_long n,
     return;
   }
 
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr,
+            "KLS retry-no-btf: nblocks=%ld maxblock=%ld/%ld single=%d"
+            " dominant=%d inflated=%d fragmented=%d low_work=%d\n",
+            (long)(*symbolic)->nblocks, (long)(*symbolic)->maxblock, (long)n,
+            single_block, dominant_block, inflated_many_block,
+            fragmented_block, low_work_many_block);
+  }
   kls_options no_btf_options = *options;
   no_btf_options.use_btf = 0;
   trilinos_klu_l_symbolic *no_btf_symbolic = NULL;
@@ -28086,8 +28101,18 @@ static void kls_start_metis_race_early(kls_solver *solver,
                                        UF_long n,
                                        UF_long *col_ptr,
                                        UF_long *row_idx) {
+  UF_long race_floor = 1000000;
+  {
+    const char *env = getenv("KLS_METIS_RACE_FLOOR");
+    if (env != NULL && env[0] != '\0') {
+      const long parsed = atol(env);
+      if (parsed > 0) {
+        race_floor = (UF_long)parsed;
+      }
+    }
+  }
   if (solver->metis_race != NULL || options->ordering != KLS_ORDERING_AUTO ||
-      n < 1000000 || getenv("KLS_DISABLE_METIS_RACE") != NULL) {
+      n < race_floor || getenv("KLS_DISABLE_METIS_RACE") != NULL) {
     return;
   }
   kls_metis_race *race = (kls_metis_race *)calloc(1, sizeof(*race));
@@ -56954,6 +56979,7 @@ enum kls_dense_help_kind {
 };
 
 struct kls_dense_help_ctx {
+  long epoch;   /* written last before publish; claims bind to it */
   int kind;
   UF_long group;
   UF_long row_begin;
@@ -57075,6 +57101,35 @@ static int kls_dense_help_enabled(void) {
   return cached;
 }
 
+/* Claim the next work index of the current help session. The cursor
+   packs (epoch << 32 | index); a claim succeeds only when the caller's
+   session epoch matches, so a participant holding a stale view of the
+   session (acquire loads may lag; only RMWs are guaranteed fresh) backs
+   off WITHOUT consuming an index. A plain fetch-add here loses one
+   index to exactly that straggler and deadlocks the owner drain on
+   done < target (observed live: cursor exhausted, inflight 0, done one
+   short). Returns the claimed index or -1. */
+static long kls_dense_help_claim(kls_egraph_refactor_shared *shared,
+                                 long epoch,
+                                 long limit) {
+  long v = atomic_load_explicit(&shared->dense_help_cursor,
+                                memory_order_acquire);
+  for (;;) {
+    if ((v >> 32) != epoch) {
+      return -1;
+    }
+    const long idx = v & 0xffffffffl;
+    if (idx >= limit) {
+      return -1;
+    }
+    if (atomic_compare_exchange_weak_explicit(
+          &shared->dense_help_cursor, &v, v + 1,
+          memory_order_acq_rel, memory_order_acquire)) {
+      return idx;
+    }
+  }
+}
+
 static _Thread_local kls_egraph_refactor_worker *kls_dense_help_self;
 static _Thread_local int kls_dense_help_busy;
 /* Lowest row the current thread might still produce: the first row of the
@@ -57132,24 +57187,32 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
   }
 
   int panel_coop = 0;
-  struct kls_dense_help_ctx panel_ctx;
+  /* One ctx per session kind: helpers hold a published pointer, so a
+     struct must never be written again once its session went active -
+     the compiler is free to hoist plain stores for the NEXT session
+     above the current drain loop otherwise (observed as a lost claim
+     and a hung drain). */
+  struct kls_dense_help_ctx panel_step_ctx;
+  struct kls_dense_help_ctx panel_tail_ctx;
   if (shared->thread_count > 1 && width >= 16 && kls_dense_help_enabled()) {
     int expected = 0;
     if (atomic_compare_exchange_strong_explicit(
           &shared->dense_help_owner_lock, &expected, 1,
           memory_order_acq_rel, memory_order_relaxed)) {
       panel_coop = 1;
-      panel_ctx.kind = KLS_DENSE_HELP_PANEL_STEP;
-      panel_ctx.group = group;
-      panel_ctx.row_begin = row_begin;
-      panel_ctx.row_end = row_end;
-      panel_ctx.trailing_len = trailing_len;
-      panel_ctx.trailing_cols = NULL;
-      panel_ctx.dense_panel = dense_panel;
-      panel_ctx.trailing_panel = trailing_panel;
-      panel_ctx.wait_for_dependencies = 0;
-      panel_ctx.panel_k = 0;
-      panel_ctx.panel_kb = 0;
+      panel_step_ctx.kind = KLS_DENSE_HELP_PANEL_STEP;
+      panel_step_ctx.group = group;
+      panel_step_ctx.row_begin = row_begin;
+      panel_step_ctx.row_end = row_end;
+      panel_step_ctx.trailing_len = trailing_len;
+      panel_step_ctx.trailing_cols = NULL;
+      panel_step_ctx.dense_panel = dense_panel;
+      panel_step_ctx.trailing_panel = trailing_panel;
+      panel_step_ctx.wait_for_dependencies = 0;
+      panel_step_ctx.panel_k = 0;
+      panel_step_ctx.panel_kb = 0;
+      panel_tail_ctx = panel_step_ctx;
+      panel_tail_ctx.kind = KLS_DENSE_HELP_PANEL_BLOCK_TAIL;
     }
   }
 
@@ -57209,20 +57272,22 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
       const long slice_count =
         (long)((tail_total + KLS_DENSE_HELP_TAIL_SLICE - 1u) /
                KLS_DENSE_HELP_TAIL_SLICE);
-      panel_ctx.kind = KLS_DENSE_HELP_PANEL_BLOCK_TAIL;
-      panel_ctx.panel_k = k;
-      panel_ctx.panel_kb = kb;
-      shared->dense_help_ctx = &panel_ctx;
-      atomic_store_explicit(&shared->dense_help_cursor, 0,
+      panel_tail_ctx.panel_k = k;
+      panel_tail_ctx.panel_kb = kb;
+      const long tail_epoch = ++shared->dense_help_epoch_seq;
+      panel_tail_ctx.epoch = tail_epoch;
+      atomic_store_explicit(&shared->dense_help_ctx, &panel_tail_ctx,
                             memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_cursor, tail_epoch << 32,
+                            memory_order_release);
       atomic_store_explicit(&shared->dense_help_done, 0,
                             memory_order_relaxed);
       atomic_store_explicit(&shared->dense_help_active, 1,
                             memory_order_release);
       for (;;) {
-        const long claim = atomic_fetch_add_explicit(
-          &shared->dense_help_cursor, 1, memory_order_relaxed);
-        if (claim >= slice_count) {
+        const long claim =
+          kls_dense_help_claim(shared, tail_epoch, slice_count);
+        if (claim < 0) {
           break;
         }
         const UF_long off_begin =
@@ -57244,8 +57309,8 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
                                   memory_order_acquire) < slice_count) {
         kls_cpu_relax();
       }
-      shared->dense_help_ctx = NULL;
-      panel_ctx.kind = KLS_DENSE_HELP_PANEL_STEP;
+      atomic_store_explicit(&shared->dense_help_ctx, NULL,
+                            memory_order_release);
       update_work += tail_flops;
     }
 
@@ -57258,11 +57323,15 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
       ((double)block * (double)(width - kb + trailing_len) +
        0.5 * (double)block * (double)block);
     if (panel_coop && step_flops >= 16384.0) {
-      panel_ctx.panel_k = k;
-      panel_ctx.panel_kb = kb;
-      shared->dense_help_ctx = &panel_ctx;
-      atomic_store_explicit(&shared->dense_help_cursor, (long)kb,
+      panel_step_ctx.panel_k = k;
+      panel_step_ctx.panel_kb = kb;
+      const long step_epoch = ++shared->dense_help_epoch_seq;
+      panel_step_ctx.epoch = step_epoch;
+      atomic_store_explicit(&shared->dense_help_ctx, &panel_step_ctx,
                             memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_cursor,
+                            (step_epoch << 32) | (long)kb,
+                            memory_order_release);
       atomic_store_explicit(&shared->dense_help_done, 0,
                             memory_order_relaxed);
       atomic_store_explicit(&shared->dense_help_fail, 0,
@@ -57270,9 +57339,9 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
       atomic_store_explicit(&shared->dense_help_active, 1,
                             memory_order_release);
       for (;;) {
-        const long claim = atomic_fetch_add_explicit(
-          &shared->dense_help_cursor, 1, memory_order_relaxed);
-        if (claim >= (long)width) {
+        const long claim =
+          kls_dense_help_claim(shared, step_epoch, (long)width);
+        if (claim < 0) {
           break;
         }
         kls_compact_dense_panel_block_step_row(
@@ -57290,7 +57359,8 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
                (long)(width - kb)) {
         kls_cpu_relax();
       }
-      shared->dense_help_ctx = NULL;
+      atomic_store_explicit(&shared->dense_help_ctx, NULL,
+                            memory_order_release);
       update_work += step_flops;
       continue;
     }
@@ -57795,7 +57865,8 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
     return 0;
   }
   {
-    const struct kls_dense_help_ctx *peek = shared->dense_help_ctx;
+    const struct kls_dense_help_ctx *peek =
+      atomic_load_explicit(&shared->dense_help_ctx, memory_order_acquire);
     if (peek == NULL ||
         (peek->kind == KLS_DENSE_HELP_ASSEMBLE &&
          (long)peek->row_end > row_bound)) {
@@ -57803,7 +57874,8 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
                                 memory_order_relaxed);
       return 0;
     }
-    if (peek->kind == KLS_DENSE_HELP_ASSEMBLE && self->help_x == NULL) {
+    if (peek != NULL && peek->kind == KLS_DENSE_HELP_ASSEMBLE &&
+        self->help_x == NULL) {
       kls_solver *solver = shared->solver;
       if (solver == NULL) {
         return 0;
@@ -57823,7 +57895,8 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
                            memory_order_acquire) &&
       !atomic_load_explicit(&shared->dense_help_fail,
                             memory_order_acquire)) {
-    const struct kls_dense_help_ctx *c = shared->dense_help_ctx;
+    const struct kls_dense_help_ctx *c =
+      atomic_load_explicit(&shared->dense_help_ctx, memory_order_acquire);
     if (c != NULL && (c->kind == KLS_DENSE_HELP_PANEL_STEP ||
                       c->kind == KLS_DENSE_HELP_PANEL_BLOCK_TAIL)) {
       /* Panel rows read only finalized panel rows and write only the
@@ -57840,10 +57913,11 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
       const double *udiag_base =
         (const double *)shared->solver->numeric->Udiag + c->row_begin;
       kls_dense_help_busy = 1;
+      const long panel_epoch = c->epoch;
       for (;;) {
-        const long row = atomic_fetch_add_explicit(
-          &shared->dense_help_cursor, 1, memory_order_relaxed);
-        if (row >= claim_limit) {
+        const long row =
+          kls_dense_help_claim(shared, panel_epoch, claim_limit);
+        if (row < 0) {
           break;
         }
         if (block_tail) {
@@ -57894,10 +57968,11 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
       double *saved_x = self->x;
       self->x = self->help_x;
       kls_dense_help_busy = 1;
+      const long assemble_epoch = c->epoch;
       for (;;) {
-        const long row = atomic_fetch_add_explicit(
-          &shared->dense_help_cursor, 1, memory_order_relaxed);
-        if (row >= (long)c->row_end) {
+        const long row =
+          kls_dense_help_claim(shared, assemble_epoch, (long)c->row_end);
+        if (row < 0) {
           break;
         }
         const int ok = kls_row_refactor_assemble_compact_dense_row(
@@ -60205,9 +60280,13 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
       help_ctx.wait_for_dependencies = wait_for_dependencies;
       help_ctx.panel_k = 0;
       help_ctx.panel_kb = 0;
-      shared->dense_help_ctx = &help_ctx;
-      atomic_store_explicit(&shared->dense_help_cursor, (long)row_begin,
+      const long assemble_epoch = ++shared->dense_help_epoch_seq;
+      help_ctx.epoch = assemble_epoch;
+      atomic_store_explicit(&shared->dense_help_ctx, &help_ctx,
                             memory_order_relaxed);
+      atomic_store_explicit(&shared->dense_help_cursor,
+                            (assemble_epoch << 32) | (long)row_begin,
+                            memory_order_release);
       atomic_store_explicit(&shared->dense_help_done, 0,
                             memory_order_relaxed);
       atomic_store_explicit(&shared->dense_help_fail, 0,
@@ -60220,9 +60299,9 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
                                  memory_order_acquire)) {
           break;
         }
-        const long claim = atomic_fetch_add_explicit(
-          &shared->dense_help_cursor, 1, memory_order_relaxed);
-        if (claim >= (long)row_end) {
+        const long claim =
+          kls_dense_help_claim(shared, assemble_epoch, (long)row_end);
+        if (claim < 0) {
           break;
         }
         const int ok = kls_row_refactor_assemble_compact_dense_row(
@@ -60252,7 +60331,8 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
         }
         kls_cpu_relax();
       }
-      shared->dense_help_ctx = NULL;
+      atomic_store_explicit(&shared->dense_help_ctx, NULL,
+                            memory_order_release);
       const int final_failed = atomic_load_explicit(
         &shared->dense_help_fail, memory_order_relaxed);
       atomic_store_explicit(&shared->dense_help_owner_lock, 0,
