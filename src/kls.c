@@ -2273,6 +2273,7 @@ typedef struct kls_egraph_refactor_worker {
   int tid;
   double *x;
   double *help_x;
+  double *pair_x;
   double *segment_panel;
   UF_long segment_panel_size;
   double *supernode_workspace;
@@ -20149,6 +20150,17 @@ static int kls_batch_consume_disabled(void) {
   static int cached = -1;
   if (cached < 0) {
     const char *env = getenv("KLS_DISABLE_BATCH_CONSUME");
+    cached = env != NULL && env[0] == '1' && env[1] == '\0';
+  }
+  return cached;
+}
+
+/* Fused two-consumer pipeline dispatch (KLS_ENABLE_PAIR_DISPATCH=1).
+   Default off while the mechanism is validated. */
+static int kls_pair_dispatch_enabled(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *env = getenv("KLS_ENABLE_PAIR_DISPATCH");
     cached = env != NULL && env[0] == '1' && env[1] == '\0';
   }
   return cached;
@@ -70903,6 +70915,135 @@ static UF_long kls_snode_batch_consume_cached(
   return t;
 }
 
+/* Fused two-consumer batch consume: one pass over the producer run's tail
+   panel feeds two consumer SPAs (the panel stream is the per-core wall;
+   sharing it halves the dominant refactor traffic).  Both consumers must
+   hold the run contiguously at their current U positions; the run's shared
+   tail pattern (last member) is producer-side structure and thus consumer
+   independent.  Per-consumer arithmetic order matches the single kernel
+   exactly, so paired columns are bit-identical to single dispatch.
+   Returns producers consumed from BOTH positions, or 0 to fall back. */
+static UF_long kls_snode_batch_consume_cached_pair(
+  UF_long *const *l_indices,
+  double *const *l_values,
+  const UF_long *llen_local,
+  const UF_long *uia,
+  const int32_t *uia32,
+  double *uxa,
+  UF_long ulen_a,
+  UF_long upa,
+  double *restrict xa,
+  const UF_long *uib,
+  const int32_t *uib32,
+  double *uxb,
+  UF_long ulen_b,
+  UF_long upb,
+  double *restrict xb,
+  UF_long k1,
+  UF_long producer_limit,
+  const UF_long *snode_run_end,
+  const kls_egraph_refactor_shared *shared,
+  int wait_for_dependencies) {
+  const UF_long j = uia32 != NULL ? (UF_long)uia32[upa] : uia[upa];
+  const UF_long run_end = snode_run_end[k1 + j];
+  if (run_end <= k1 + j + 1u) {
+    return 0;
+  }
+  UF_long tmax = run_end - (k1 + j);
+  if (tmax > KLS_SNODE_MAX_BATCH) {
+    tmax = KLS_SNODE_MAX_BATCH;
+  }
+  if (tmax > ulen_a - upa) {
+    tmax = ulen_a - upa;
+  }
+  if (tmax > ulen_b - upb) {
+    tmax = ulen_b - upb;
+  }
+  UF_long t = 1;
+  while (t < tmax &&
+         (uia32 != NULL ? (UF_long)uia32[upa + t] : uia[upa + t]) == j + t &&
+         (uib32 != NULL ? (UF_long)uib32[upb + t] : uib[upb + t]) == j + t) {
+    t++;
+  }
+  if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
+    return 0;
+  }
+  if (wait_for_dependencies) {
+    for (UF_long i = 0; i < t; ++i) {
+      if (!kls_egraph_refactor_dependency_done_now(shared, k1 + j + i)) {
+        return 0;
+      }
+    }
+  }
+  const UF_long *tli = l_indices[k1 + j + t - 1u];
+  const UF_long tlen = llen_local[j + t - 1u];
+  if (tli == NULL || 2u * t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
+    return 0;
+  }
+  double xsa[KLS_SNODE_MAX_BATCH];
+  double xsb[KLS_SNODE_MAX_BATCH];
+  const double *lx_arr[KLS_SNODE_MAX_BATCH];
+  for (UF_long i = 0; i < t; ++i) {
+    lx_arr[i] = l_values[k1 + j + i];
+    if (lx_arr[i] == NULL) {
+      return 0;
+    }
+    xsa[i] = xa[j + i];
+    xsb[i] = xb[j + i];
+  }
+  for (UF_long i = 0; i < t; ++i) {
+    xa[j + i] = 0.0;
+    xb[j + i] = 0.0;
+  }
+  for (UF_long i = 0; i < t; ++i) {
+    const double ua = xsa[i];
+    const double ub = xsb[i];
+    uxa[upa + i] = ua;
+    uxb[upb + i] = ub;
+    const double *lxi = lx_arr[i];
+    for (UF_long r0 = 0; r0 + i + 1u < t; ++r0) {
+      xsa[i + 1u + r0] -= lxi[r0] * ua;
+      xsb[i + 1u + r0] -= lxi[r0] * ub;
+    }
+  }
+  const double *tlx = lx_arr[t - 1u];
+  for (UF_long p0 = 0; p0 < tlen; p0 += KLS_SNODE_TAIL_CHUNK) {
+    const UF_long pc = tlen - p0 < KLS_SNODE_TAIL_CHUNK
+                         ? tlen - p0
+                         : KLS_SNODE_TAIL_CHUNK;
+    double acca[KLS_SNODE_TAIL_CHUNK];
+    double accb[KLS_SNODE_TAIL_CHUNK];
+    {
+      const double *src = tlx + p0;
+      const double ua = xsa[t - 1u];
+      const double ub = xsb[t - 1u];
+      for (UF_long p = 0; p < pc; ++p) {
+        acca[p] = src[p] * ua;
+        accb[p] = src[p] * ub;
+      }
+    }
+    for (UF_long i = 0; i + 1u < t; ++i) {
+      const double *src = lx_arr[i] + (t - 1u - i) + p0;
+      const double ua = xsa[i];
+      const double ub = xsb[i];
+      for (UF_long p = 0; p < pc; ++p) {
+        acca[p] += src[p] * ua;
+        accb[p] += src[p] * ub;
+      }
+    }
+    for (UF_long p = 0; p < pc; ++p) {
+      const UF_long row = tli[p0 + p];
+      xa[row] -= acca[p];
+      xb[row] -= accb[p];
+    }
+  }
+  if (kls_snode_trace_enabled()) {
+    kls_snode_trace_batched_producers += 2u * t;
+    kls_snode_trace_batched_tail_entries += 2u * t * tlen;
+  }
+  return t;
+}
+
 #if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
 __attribute__((target_clones("default", "arch=x86-64-v3", "arch=x86-64-v4")))
 #endif
@@ -71879,6 +72020,145 @@ static int kls_egraph_refactor_single_unscaled_column(
   if (supernode_numeric_updates) {
     kls_egraph_publish_supernode_panel_column(shared, k);
   }
+  return 1;
+}
+
+/* Two READY pipeline columns (readiness implies mutual independence)
+   processed with one merged dependency walk so producer runs shared by
+   both U patterns stream their tail panels once.  Plain configuration
+   only; kls_egraph_pair_dispatch_allowed gates the call. */
+static int kls_egraph_refactor_single_unscaled_column_pair(
+  kls_egraph_refactor_worker *worker,
+  UF_long ka,
+  UF_long kb) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  double *xa = worker->x;
+  double *xb = worker->pair_x;
+  double *udiag = (double *)numeric->Udiag;
+  UF_long **l_indices = solver->refactor_l_indices;
+  double **l_values = solver->refactor_l_values;
+  UF_long **u_indices = solver->refactor_u_indices;
+  double **u_values = solver->refactor_u_values;
+  if (solver->refactor_lu_pointer_count != solver->n ||
+      l_indices == NULL || l_values == NULL ||
+      u_indices == NULL || u_values == NULL || xb == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  kls_egraph_scatter_unscaled_input(solver, shared->values, xa,
+                                    solver->refactor_col_ptr[ka],
+                                    solver->refactor_col_ptr[ka + 1u]);
+  kls_egraph_scatter_unscaled_input(solver, shared->values, xb,
+                                    solver->refactor_col_ptr[kb],
+                                    solver->refactor_col_ptr[kb + 1u]);
+
+  UF_long *uia = u_indices[ka];
+  UF_long *uib = u_indices[kb];
+  const int32_t *uia32 = solver->refactor_u_indices32 != NULL
+    ? solver->refactor_u_indices32[ka] : NULL;
+  const int32_t *uib32 = solver->refactor_u_indices32 != NULL
+    ? solver->refactor_u_indices32[kb] : NULL;
+  double *uxa = u_values[ka];
+  double *uxb = u_values[kb];
+  const UF_long ulen_a = numeric->Ulen[ka];
+  const UF_long ulen_b = numeric->Ulen[kb];
+  UF_long upa = 0;
+  UF_long upb = 0;
+  const UF_long producer_limit = ka < kb ? ka : kb;
+
+  while (upa < ulen_a || upb < ulen_b) {
+    const UF_long ja = upa < ulen_a
+      ? (uia32 != NULL ? (UF_long)uia32[upa] : uia[upa])
+      : (UF_long)UF_long_max;
+    const UF_long jb = upb < ulen_b
+      ? (uib32 != NULL ? (UF_long)uib32[upb] : uib[upb])
+      : (UF_long)UF_long_max;
+    if (ja == jb && upa < ulen_a && upb < ulen_b) {
+      const UF_long consumed = kls_snode_batch_consume_cached_pair(
+        l_indices, l_values, numeric->Llen, uia, uia32, uxa, ulen_a, upa,
+        xa, uib, uib32, uxb, ulen_b, upb, xb, 0u, producer_limit,
+        solver->snode_run_end, shared, 1);
+      if (consumed != 0u) {
+        upa += consumed;
+        upb += consumed;
+        continue;
+      }
+    }
+    if (ja <= jb) {
+      const UF_long consumed = kls_snode_batch_consume_cached(
+        l_indices, l_values, numeric->Llen, uia, uia32, uxa, ulen_a, upa,
+        xa, 0u, ka, solver->snode_run_end, shared, 1, NULL);
+      if (consumed != 0u) {
+        upa += consumed;
+        continue;
+      }
+      if (!kls_egraph_refactor_wait_done(shared, ja)) {
+        return 0;
+      }
+      const double ujk = xa[ja];
+      xa[ja] = 0.0;
+      uxa[upa] = ujk;
+      if (ujk != 0.0) {
+        kls_scatter_subtract_refactor_l(solver, xa, ja, l_indices[ja],
+                                        l_values[ja], numeric->Llen[ja],
+                                        ujk);
+      }
+      upa++;
+    } else {
+      const UF_long consumed = kls_snode_batch_consume_cached(
+        l_indices, l_values, numeric->Llen, uib, uib32, uxb, ulen_b, upb,
+        xb, 0u, kb, solver->snode_run_end, shared, 1, NULL);
+      if (consumed != 0u) {
+        upb += consumed;
+        continue;
+      }
+      if (!kls_egraph_refactor_wait_done(shared, jb)) {
+        return 0;
+      }
+      const double ujk = xb[jb];
+      xb[jb] = 0.0;
+      uxb[upb] = ujk;
+      if (ujk != 0.0) {
+        kls_scatter_subtract_refactor_l(solver, xb, jb, l_indices[jb],
+                                        l_values[jb], numeric->Llen[jb],
+                                        ujk);
+      }
+      upb++;
+    }
+  }
+
+  const double ukka = xa[ka];
+  xa[ka] = 0.0;
+  if (ukka == 0.0) {
+    kls_egraph_refactor_record_singular(shared, ka, symbolic->Q[ka]);
+    if (solver->common.halt_if_singular) {
+      return 0;
+    }
+  }
+  udiag[ka] = ukka;
+  kls_egraph_store_l_column_from_workspace(solver, xa, ka, l_indices[ka],
+                                           l_values[ka], numeric->Llen[ka],
+                                           ukka);
+  kls_egraph_publish_u_supernode_l_column(shared, ka);
+  kls_egraph_publish_consumer_plan_group_l_column(shared, ka);
+
+  const double ukkb = xb[kb];
+  xb[kb] = 0.0;
+  if (ukkb == 0.0) {
+    kls_egraph_refactor_record_singular(shared, kb, symbolic->Q[kb]);
+    if (solver->common.halt_if_singular) {
+      return 0;
+    }
+  }
+  udiag[kb] = ukkb;
+  kls_egraph_store_l_column_from_workspace(solver, xb, kb, l_indices[kb],
+                                           l_values[kb], numeric->Llen[kb],
+                                           ukkb);
+  kls_egraph_publish_u_supernode_l_column(shared, kb);
+  kls_egraph_publish_consumer_plan_group_l_column(shared, kb);
   return 1;
 }
 
@@ -82234,12 +82514,88 @@ static int kls_egraph_refactor_publish_ready_successors(
   return 1;
 }
 
+/* Single-attempt pop: returns 0 immediately when no column is ready.
+   Once the head CAS succeeds the slot is owned and must be consumed. */
+static int kls_egraph_refactor_try_pop_ready_column(
+  kls_egraph_refactor_shared *shared,
+  UF_long *col_out) {
+  if (col_out != NULL) {
+    *col_out = 0u;
+  }
+  if (shared == NULL || shared->pipeline_ready_cols == NULL ||
+      shared->pipeline_ready_slots == NULL ||
+      shared->pipeline_generation == 0u) {
+    return 0;
+  }
+  for (;;) {
+    if (kls_egraph_refactor_should_stop(shared)) {
+      return 0;
+    }
+    unsigned long head =
+      atomic_load_explicit(&shared->pipeline_ready_head,
+                           memory_order_acquire);
+    const unsigned long tail =
+      atomic_load_explicit(&shared->pipeline_ready_tail,
+                           memory_order_acquire);
+    if (head >= tail) {
+      return 0;
+    }
+    if (atomic_compare_exchange_weak_explicit(
+          &shared->pipeline_ready_head, &head, head + 1ul,
+          memory_order_acq_rel, memory_order_acquire)) {
+      if ((UF_long)head >= shared->pipeline_ready_capacity) {
+        kls_egraph_refactor_record_invalid(shared);
+        return 0;
+      }
+      unsigned spin = 0;
+      while (atomic_load_explicit(&shared->pipeline_ready_slots[head],
+                                  memory_order_acquire) !=
+             shared->pipeline_generation) {
+        kls_cpu_relax();
+        if (kls_egraph_refactor_should_stop(shared)) {
+          return 0;
+        }
+        kls_egraph_pipeline_pause(&spin);
+      }
+      if (col_out != NULL) {
+        *col_out = shared->pipeline_ready_cols[head];
+      }
+      return 1;
+    }
+  }
+}
+
+/* The fused pair path supports only the plain single-block unscaled
+   configuration; every special mode falls back to single dispatch. */
+static int kls_egraph_pair_dispatch_allowed(
+  const kls_egraph_refactor_shared *shared) {
+  return kls_pair_dispatch_enabled() &&
+         shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED &&
+         !shared->check_pivots &&
+         !shared->supernode_numeric_updates &&
+         !shared->supernode_consumer_plan_group_l_exec &&
+         !shared->u_supernode_ragged_l_updates &&
+         !shared->u_supernode_values &&
+         !shared->algorithm5_prefactor_updates &&
+         !shared->supernode_algorithm5_payoff_direct_prefix_current_state &&
+         !shared->supernode_algorithm5_payoff_direct_prefix_advance_seed &&
+         !shared->use_fp32_l_values &&
+         shared->solver != NULL &&
+         shared->solver->snode_run_end != NULL &&
+         !kls_batch_consume_disabled();
+}
+
 static void kls_egraph_refactor_worker_run_ready_pipeline(
   kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
   }
   kls_egraph_refactor_shared *shared = worker->shared;
+  const int pair_allowed = kls_egraph_pair_dispatch_allowed(shared);
+  if (pair_allowed && worker->pair_x == NULL && shared->solver != NULL) {
+    worker->pair_x =
+      (double *)calloc((size_t)shared->solver->n, sizeof(double));
+  }
   for (;;) {
     UF_long col = 0u;
     if (!kls_egraph_refactor_pop_ready_column(shared, &col)) {
@@ -82258,6 +82614,46 @@ static void kls_egraph_refactor_worker_run_ready_pipeline(
         break;
       }
       atomic_fetch_add_explicit(&shared->pipeline_ready_completed, 1ul,
+                                memory_order_acq_rel);
+      continue;
+    }
+    UF_long col2 = 0u;
+    int have_pair = 0;
+    if (pair_allowed && worker->pair_x != NULL &&
+        kls_egraph_refactor_try_pop_ready_column(shared, &col2)) {
+      const int claimed2 =
+        kls_egraph_refactor_try_skip_claimed_column(worker, col2);
+      if (claimed2 < 0) {
+        if (!kls_egraph_refactor_should_stop(shared)) {
+          kls_egraph_refactor_record_invalid(shared);
+        }
+        break;
+      }
+      if (claimed2 > 0) {
+        if (!kls_egraph_refactor_publish_ready_successors(worker, col2)) {
+          break;
+        }
+        atomic_fetch_add_explicit(&shared->pipeline_ready_completed, 1ul,
+                                  memory_order_acq_rel);
+      } else {
+        have_pair = 1;
+      }
+    }
+    if (have_pair) {
+      if (!kls_egraph_refactor_single_unscaled_column_pair(worker, col,
+                                                           col2)) {
+        if (!kls_egraph_refactor_should_stop(shared)) {
+          kls_egraph_refactor_record_invalid(shared);
+        }
+        break;
+      }
+      kls_egraph_refactor_mark_done(shared, col);
+      kls_egraph_refactor_mark_done(shared, col2);
+      if (!kls_egraph_refactor_publish_ready_successors(worker, col) ||
+          !kls_egraph_refactor_publish_ready_successors(worker, col2)) {
+        break;
+      }
+      atomic_fetch_add_explicit(&shared->pipeline_ready_completed, 2ul,
                                 memory_order_acq_rel);
       continue;
     }
@@ -82775,6 +83171,7 @@ static void destroy_egraph_refactor_pool(kls_solver *solver) {
   if (pool->workers != NULL) {
     for (int i = 0; i < pool->thread_count; ++i) {
       free(pool->workers[i].help_x);
+      free(pool->workers[i].pair_x);
       free(pool->workers[i].segment_panel);
       free(pool->workers[i].supernode_workspace);
       free(pool->workers[i].index_workspace);
