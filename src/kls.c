@@ -27592,6 +27592,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     free_candidate(&normal);
   }
 
+  const double kls_ps_t0 = kls_now_seconds();
   UF_long missing_diagonal = 0;
   const UF_long weak =
     count_weak_diagonal_rows(solver->n, base_col_ptr, base_row_idx,
@@ -27670,6 +27671,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     exact_matching = 0;
     exact_matching_scaling = 0;
     spral_matching = status == KLS_OK;
+    if (kls_trace_pre_static_enabled()) {
+      fprintf(stderr, "KLS pre-static: spral match %.3fs\n",
+              kls_now_seconds() - kls_ps_t0);
+    }
   } else
 #else
   int status = KLS_OK;
@@ -27856,6 +27861,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                    &trial_row_scale, &trial_col_scale,
                                    &trial_numeric, &trial_common);
   if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr, "KLS pre-static: stages total-so-far %.3fs\n",
+            kls_now_seconds() - kls_ps_t0);
     fprintf(stderr,
             "KLS pre-static: trial numeric lnz=%ld unz=%ld noffdiag=%ld "
             "rcond=%.3e flops=%.3e\n",
