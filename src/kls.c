@@ -91875,6 +91875,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long *first_successor = NULL;
   uint64_t *row_hash1 = NULL;
   uint64_t *row_hash2 = NULL;
+  uint64_t *pair_hash = NULL;
   double *column_work = NULL;
   UF_long *counts = NULL;
   UF_long *level_ptr = NULL;
@@ -91903,6 +91904,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     free(first_successor); \
     free(row_hash1); \
     free(row_hash2); \
+    free(pair_hash); \
     free(column_work); \
     free(counts); \
     free(level_ptr); \
@@ -91927,6 +91929,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     (UF_long *)malloc((size_t)solver->n * sizeof(*first_successor));
   row_hash1 = (uint64_t *)calloc((size_t)solver->n, sizeof(*row_hash1));
   row_hash2 = (uint64_t *)calloc((size_t)solver->n, sizeof(*row_hash2));
+  if (getenv("KLS_TRACE_PAIR_HASH") != NULL) {
+    pair_hash = (uint64_t *)calloc((size_t)solver->n, sizeof(*pair_hash));
+  }
   column_work =
     (double *)calloc((size_t)solver->n, sizeof(*column_work));
   supernode_pipeline_end =
@@ -92015,6 +92020,11 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
         }
         row_hash1[global_dep] += kls_supernode_hash1(global_col);
         row_hash2[global_dep] += kls_supernode_hash2(global_col);
+        if (pair_hash != NULL) {
+          pair_hash[global_col] +=
+            kls_supernode_hash1(global_dep) ^
+            (kls_supernode_hash2(global_dep) << 1);
+        }
         const UF_long dep_level = levels[global_dep] + 1u;
         if (dep_level > level) {
           level = dep_level;
@@ -92297,11 +92307,76 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     }
   }
 
+  if (pair_hash != NULL && level_ptr != NULL && level_cols != NULL) {
+    typedef struct { uint64_t h; UF_long len; } kls_pair_sig;
+    const UF_long pbegin = level_ptr[cluster_levels];
+    const UF_long pcount = solver->n > pbegin ? solver->n - pbegin : 0u;
+    kls_pair_sig *sigs = pcount > 0u
+      ? (kls_pair_sig *)malloc((size_t)pcount * sizeof(*sigs)) : NULL;
+    if (sigs != NULL) {
+      UF_long m = 0;
+      double total_w = 0.0;
+      for (UF_long pos = pbegin; pos < solver->n; ++pos) {
+        const UF_long col = level_cols[pos];
+        const UF_long ul = solver->numeric->Ulen[col];
+        if (ul >= 8u) {
+          sigs[m].h = pair_hash[col];
+          sigs[m].len = ul;
+          m++;
+          total_w += (double)ul;
+        }
+      }
+      int cmp(const void *a, const void *b);
+      /* local qsort comparator not allowed portably; simple shell sort */
+      for (UF_long gap = m / 2u; gap > 0u; gap /= 2u) {
+        for (UF_long i = gap; i < m; ++i) {
+          kls_pair_sig tmp = sigs[i];
+          UF_long jj = i;
+          while (jj >= gap &&
+                 (sigs[jj - gap].h > tmp.h ||
+                  (sigs[jj - gap].h == tmp.h && sigs[jj - gap].len > tmp.len))) {
+            sigs[jj] = sigs[jj - gap];
+            jj -= gap;
+          }
+          sigs[jj] = tmp;
+        }
+      }
+      UF_long dup_cols = 0;
+      UF_long max_group = 0;
+      double dup_w = 0.0;
+      UF_long i = 0;
+      while (i < m) {
+        UF_long jrun = i;
+        double gw = 0.0;
+        while (jrun < m && sigs[jrun].h == sigs[i].h &&
+               sigs[jrun].len == sigs[i].len) {
+          gw += (double)sigs[jrun].len;
+          jrun++;
+        }
+        const UF_long g = jrun - i;
+        if (g >= 2u) {
+          dup_cols += g;
+          dup_w += gw;
+          if (g > max_group) {
+            max_group = g;
+          }
+        }
+        i = jrun;
+      }
+      fprintf(stderr,
+              "KLS pairhash: pipeline_cols %ld (ulen>=8: %ld) dup_cols %ld"
+              " max_group %ld dup_work %.2f%%\n",
+              (long)pcount, (long)m, (long)dup_cols, (long)max_group,
+              total_w > 0.0 ? 100.0 * dup_w / total_w : 0.0);
+      free(sigs);
+    }
+  }
   free(levels);
   free(successor_counts);
   free(first_successor);
   free(row_hash1);
   free(row_hash2);
+  free(pair_hash);
   free(column_work);
   free(counts);
   free(supernode_consumer_start);
