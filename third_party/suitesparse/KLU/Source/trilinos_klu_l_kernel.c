@@ -626,6 +626,210 @@ static void prune
 /* === TRILINOS_KLU_kernel =========================================================== */
 /* ========================================================================== */
 
+
+/* ========================================================================== */
+/* === KLS per-column step API ============================================== */
+/* ========================================================================== */
+
+/* The factorization loop body, exposed one column at a time so an external
+ * (level-scheduled, eventually parallel) driver can run it.  The classic
+ * TRILINOS_KLU_kernel below is rewritten as init + loop{step} + finish over
+ * this state, so every existing caller validates the extraction. */
+
+typedef struct KLS_KLU_KERNEL_STATE_STRUCT
+{
+    Int n ;
+    Int *Ap ;
+    Int *Ai ;
+    Entry *Ax ;
+    Int *Q ;
+    size_t lusize ;
+    Int *Pinv ;
+    Int *P ;
+    Unit *LU ;
+    Entry *Udiag ;
+    Int *Llen ;
+    Int *Ulen ;
+    Int *Lip ;
+    Int *Uip ;
+    Int lnz ;
+    Int unz ;
+    Entry *X ;
+    Int *Stack ;
+    Int *Flag ;
+    Int *Ap_pos ;
+    Int *Lpend ;
+    Int k1 ;
+    Int *PSinv ;
+    double *Rs ;
+    Int *Offp ;
+    Int *Offi ;
+    Entry *Offx ;
+    TRILINOS_KLU_common *Common ;
+    Int firstrow ;
+    Int lup ;
+    Int scale ;
+    double tol ;
+    double memgrow ;
+    Int no_prune ;   /* parallel drivers: finalized columns stay immutable */
+} KLS_KLU_KERNEL_STATE ;
+
+void KLS_KLU_KERNEL_INIT
+(
+    KLS_KLU_KERNEL_STATE *S
+)
+{
+    Int k ;
+    S->firstrow = 0 ;
+    S->lup = 0 ;
+    S->lnz = 0 ;
+    S->unz = 0 ;
+    for (k = 0 ; k < S->n ; k++)
+    {
+	CLEAR (S->X [k]) ;
+	S->Flag [k] = TRILINOS_KLU_EMPTY ;
+	S->Lpend [k] = TRILINOS_KLU_EMPTY ;
+    }
+    for (k = 0 ; k < S->n ; k++)
+    {
+	S->P [k] = k ;
+	S->Pinv [k] = FLIP (k) ;
+    }
+    S->Offp [0] = 0 ;
+}
+
+/* returns 0 on success, -1 on fatal (status set), 1 on singular-halt */
+Int KLS_KLU_KERNEL_STEP
+(
+    KLS_KLU_KERNEL_STATE *S,
+    Int k
+)
+{
+    Entry pivot ;
+    double abs_pivot, xsize, nunits ;
+    Entry *Ux ;
+    Int *Li, *Ui ;
+    Unit *LU = S->LU ;
+    Int p, i, j, pivrow = TRILINOS_KLU_EMPTY, kbar, diagrow, top, len ;
+    size_t newlusize ;
+    const Int n = S->n ;
+    Int *Pinv = S->Pinv ;
+    Int *Llen = S->Llen ;
+    Int *Lip = S->Lip ;
+    TRILINOS_KLU_common *Common = S->Common ;
+
+    nunits = DUNITS (Int, n - k) + DUNITS (Int, k) +
+	     DUNITS (Entry, n - k) + DUNITS (Entry, k) ;
+    xsize = ((double) S->lup) + nunits ;
+    if (xsize > (double) S->lusize)
+    {
+	xsize = (S->memgrow * ((double) S->lusize) + 4*n + 1) ;
+	if (INT_OVERFLOW (xsize))
+	{
+	    Common->status = TRILINOS_KLU_TOO_LARGE ;
+	    return (-1) ;
+	}
+	newlusize = S->memgrow * S->lusize + 2*n + 1 ;
+	LU = (Unit*) TRILINOS_KLU_realloc (newlusize, S->lusize, sizeof (Unit),
+					   LU, Common) ;
+	Common->nrealloc++ ;
+	S->LU = LU ;
+	if (Common->status == TRILINOS_KLU_OUT_OF_MEMORY)
+	{
+	    return (-1) ;
+	}
+	S->lusize = newlusize ;
+    }
+
+    Lip [k] = S->lup ;
+
+    top = lsolve_symbolic (n, k, S->Ap, S->Ai, S->Q, Pinv, S->Stack, S->Flag,
+		S->Lpend, S->Ap_pos, LU, S->lup, Llen, Lip, S->k1, S->PSinv) ;
+
+    construct_column (k, S->Ap, S->Ai, S->Ax, S->Q, S->X,
+	S->k1, S->PSinv, S->Rs, S->scale, S->Offp, S->Offi, S->Offx) ;
+
+    lsolve_numeric (Pinv, LU, S->Stack, Lip, top, n, Llen, S->X) ;
+
+    diagrow = S->P [k] ;
+
+    if (!lpivot (diagrow, &pivrow, &pivot, &abs_pivot, S->tol, S->X, LU, Lip,
+		Llen, k, n, Pinv, &S->firstrow, Common))
+    {
+	Common->status = TRILINOS_KLU_SINGULAR ;
+	if (Common->numerical_rank == TRILINOS_KLU_EMPTY)
+	{
+	    Common->numerical_rank = k + S->k1 ;
+	    Common->singular_col = S->Q [k + S->k1] ;
+	}
+	if (Common->halt_if_singular)
+	{
+	    return (1) ;
+	}
+    }
+
+    S->Uip [k] = Lip [k] + UNITS (Int, Llen [k]) + UNITS (Entry, Llen [k]) ;
+    S->lup += UNITS (Int, Llen [k]) + UNITS (Entry, Llen [k]) ;
+    S->Ulen [k] = n - top ;
+
+    GET_POINTER (LU, S->Uip, S->Ulen, Ui, Ux, k, len) ;
+    for (p = top, i = 0 ; p < n ; p++, i++)
+    {
+	j = S->Stack [p] ;
+	Ui [i] = Pinv [j] ;
+	Ux [i] = S->X [j] ;
+	CLEAR (S->X [j]) ;
+    }
+    S->lup += UNITS (Int, S->Ulen [k]) + UNITS (Entry, S->Ulen [k]) ;
+
+    S->Udiag [k] = pivot ;
+
+    if (pivrow != diagrow)
+    {
+	Common->noffdiag++ ;
+	if (Pinv [diagrow] < 0)
+	{
+	    kbar = FLIP (Pinv [pivrow]) ;
+	    S->P [kbar] = diagrow ;
+	    Pinv [diagrow] = FLIP (kbar) ;
+	}
+    }
+    S->P [k] = pivrow ;
+    Pinv [pivrow] = k ;
+
+    if (!S->no_prune)
+    {
+	prune (S->Lpend, Pinv, k, pivrow, LU, S->Uip, Lip, S->Ulen, Llen) ;
+    }
+
+    S->lnz += Llen [k] + 1 ;
+    S->unz += S->Ulen [k] + 1 ;
+    return (0) ;
+}
+
+size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
+(
+    KLS_KLU_KERNEL_STATE *S
+)
+{
+    Int p, i ;
+    Int *Li ;
+    size_t newlusize ;
+    for (p = 0 ; p < S->n ; p++)
+    {
+	Li = (Int *) (S->LU + S->Lip [p]) ;
+	for (i = 0 ; i < S->Llen [p] ; i++)
+	{
+	    Li [i] = S->Pinv [Li [i]] ;
+	}
+    }
+    newlusize = S->lup ;
+    S->LU = (Unit*) TRILINOS_KLU_realloc (newlusize, S->lusize, sizeof (Unit),
+					  S->LU, S->Common) ;
+    S->lusize = newlusize ;
+    return (newlusize) ;
+}
+
 size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 (
     /* input, not modified */
@@ -673,339 +877,59 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     TRILINOS_KLU_common *Common
 )
 {
-    Entry pivot ;
-    double abs_pivot, xsize, nunits, tol, memgrow ;
-    Entry *Ux ;
-    Int *Li, *Ui ;
-    Unit *LU ;		/* LU factors (pattern and values) */
-    Int k, p, i, j, pivrow, kbar, diagrow, firstrow, lup, top, scale, len ;
-    size_t newlusize ;
-
-#ifndef NDEBUG
-    Entry *Lx ;
-#endif
+    KLS_KLU_KERNEL_STATE S ;
+    Int k, result ;
+    size_t final_size ;
 
     ASSERT (Common != NULL) ;
-    scale = Common->scale ;
-    tol = Common->tol ;
-    memgrow = Common->memgrow ;
-    *lnz = 0 ;
-    *unz = 0 ;
+    S.n = n ;
+    S.Ap = Ap ;
+    S.Ai = Ai ;
+    S.Ax = Ax ;
+    S.Q = Q ;
+    S.lusize = lusize ;
+    S.Pinv = Pinv ;
+    S.P = P ;
+    S.LU = *p_LU ;
+    S.Udiag = Udiag ;
+    S.Llen = Llen ;
+    S.Ulen = Ulen ;
+    S.Lip = Lip ;
+    S.Uip = Uip ;
+    S.X = X ;
+    S.Stack = Stack ;
+    S.Flag = Flag ;
+    S.Ap_pos = Ap_pos ;
+    S.Lpend = Lpend ;
+    S.k1 = k1 ;
+    S.PSinv = PSinv ;
+    S.Rs = Rs ;
+    S.Offp = Offp ;
+    S.Offi = Offi ;
+    S.Offx = Offx ;
+    S.Common = Common ;
+    S.scale = Common->scale ;
+    S.tol = Common->tol ;
+    S.memgrow = Common->memgrow ;
+    S.no_prune = 0 ;
 
-    /* ---------------------------------------------------------------------- */
-    /* get initial Li, Lx, Ui, and Ux */
-    /* ---------------------------------------------------------------------- */
-
-    PRINTF (("input: lusize %d \n", lusize)) ;
-    ASSERT (lusize > 0) ;
-    LU = *p_LU ;
-
-    /* ---------------------------------------------------------------------- */
-    /* initializations */
-    /* ---------------------------------------------------------------------- */
-
-    firstrow = 0 ;
-    lup = 0 ;
-
-    for (k = 0 ; k < n ; k++)
-    {
-	/* X [k] = 0 ; */
-	CLEAR (X [k]) ;
-	Flag [k] = TRILINOS_KLU_EMPTY ;
-	Lpend [k] = TRILINOS_KLU_EMPTY ;	/* flag k as not pruned */
-    }
-
-    /* ---------------------------------------------------------------------- */
-    /* mark all rows as non-pivotal and determine initial diagonal mapping */
-    /* ---------------------------------------------------------------------- */
-
-    /* PSinv does the symmetric permutation, so don't do it here */
-    for (k = 0 ; k < n ; k++)
-    {
-	P [k] = k ;
-	Pinv [k] = FLIP (k) ;	/* mark all rows as non-pivotal */
-    }
-    /* initialize the construction of the off-diagonal matrix */
-    Offp [0] = 0 ;
-
-    /* P [k] = row means that UNFLIP (Pinv [row]) = k, and visa versa.
-     * If row is pivotal, then Pinv [row] >= 0.  A row is initially "flipped"
-     * (Pinv [k] < TRILINOS_KLU_EMPTY), and then marked "unflipped" when it becomes
-     * pivotal. */
-
-#ifndef NDEBUG
-    for (k = 0 ; k < n ; k++)
-    {
-	PRINTF (("Initial P [%d] = %d\n", k, P [k])) ;
-    }
-#endif
-
-    /* ---------------------------------------------------------------------- */
-    /* factorize */
-    /* ---------------------------------------------------------------------- */
+    KLS_KLU_KERNEL_INIT (&S) ;
 
     for (k = 0 ; k < n ; k++)
     {
-
-	PRINTF (("\n\n==================================== k: %d\n", k)) ;
-
-	/* ------------------------------------------------------------------ */
-	/* determine if LU factors have grown too big */
-	/* ------------------------------------------------------------------ */
-
-	/* (n - k) entries for L and k entries for U */
-	nunits = DUNITS (Int, n - k) + DUNITS (Int, k) +
-		 DUNITS (Entry, n - k) + DUNITS (Entry, k) ;
-
-        /* LU can grow by at most 'nunits' entries if the column is dense */
-        PRINTF (("lup %d lusize %g lup+nunits: %g\n", lup, (double) lusize,
-	    lup+nunits));
-	xsize = ((double) lup) + nunits ;
-	if (xsize > (double) lusize)
-        {
-            /* check here how much to grow */
-	    xsize = (memgrow * ((double) lusize) + 4*n + 1) ;
-            if (INT_OVERFLOW (xsize))
-            {
-                PRINTF (("Matrix is too large (Int overflow)\n")) ;
-		Common->status = TRILINOS_KLU_TOO_LARGE ;
-                return (lusize) ;
-            }
-            newlusize = memgrow * lusize + 2*n + 1 ;
-	    /* Future work: retry mechanism in case of malloc failure */
-	    LU = (Unit*) TRILINOS_KLU_realloc (newlusize, lusize, sizeof (Unit), LU, Common) ;
-	    Common->nrealloc++ ;
-            *p_LU = LU ;
-            if (Common->status == TRILINOS_KLU_OUT_OF_MEMORY)
-            {
-                PRINTF (("Matrix is too large (LU)\n")) ;
-                return (lusize) ;
-            }
-	    lusize = newlusize ;
-            PRINTF (("inc LU to %d done\n", lusize)) ;
-        }
-
-	/* ------------------------------------------------------------------ */
-	/* start the kth column of L and U */
-	/* ------------------------------------------------------------------ */
-
-	Lip [k] = lup ;
-
-	/* ------------------------------------------------------------------ */
-	/* compute the nonzero pattern of the kth column of L and U */
-	/* ------------------------------------------------------------------ */
-
-#ifndef NDEBUG
-	for (i = 0 ; i < n ; i++)
+	result = KLS_KLU_KERNEL_STEP (&S, k) ;
+	if (result != 0)
 	{
-	    ASSERT (Flag [i] < k) ;
-	    /* ASSERT (X [i] == 0) ; */
-	    ASSERT (IS_ZERO (X [i])) ;
-	}
-#endif
-
-	top = lsolve_symbolic (n, k, Ap, Ai, Q, Pinv, Stack, Flag,
-		    Lpend, Ap_pos, LU, lup, Llen, Lip, k1, PSinv) ;
-
-#ifndef NDEBUG
-	PRINTF (("--- in U:\n")) ;
-	for (p = top ; p < n ; p++)
-	{
-	    PRINTF (("pattern of X for U: %d : %d pivot row: %d\n",
-		p, Stack [p], Pinv [Stack [p]])) ;
-	    ASSERT (Flag [Stack [p]] == k) ;
-	}
-	PRINTF (("--- in L:\n")) ;
-	Li = (Int *) (LU + Lip [k]);
-	for (p = 0 ; p < Llen [k] ; p++)
-	{
-	    PRINTF (("pattern of X in L: %d : %d pivot row: %d\n",
-		p, Li [p], Pinv [Li [p]])) ;
-	    ASSERT (Flag [Li [p]] == k) ;
-	}
-	p = 0 ;
-	for (i = 0 ; i < n ; i++)
-	{
-	    ASSERT (Flag [i] <= k) ;
-	    if (Flag [i] == k) p++ ;
-	}
-#endif
-
-	/* ------------------------------------------------------------------ */
-	/* get the column of the matrix to factorize and scatter into X */
-	/* ------------------------------------------------------------------ */
-
-	construct_column (k, Ap, Ai, Ax, Q, X,
-	    k1, PSinv, Rs, scale, Offp, Offi, Offx) ;
-
-	/* ------------------------------------------------------------------ */
-	/* compute the numerical values of the kth column (s = L \ A (:,k)) */
-	/* ------------------------------------------------------------------ */
-
-	lsolve_numeric (Pinv, LU, Stack, Lip, top, n, Llen, X) ;
-
-#ifndef NDEBUG
-	for (p = top ; p < n ; p++)
-	{
-	    PRINTF (("X for U %d : ",  Stack [p])) ;
-	    PRINT_ENTRY (X [Stack [p]]) ;
-	}
-	Li = (Int *) (LU + Lip [k]) ;
-	for (p = 0 ; p < Llen [k] ; p++)
-	{
-	    PRINTF (("X for L %d : ", Li [p])) ;
-	    PRINT_ENTRY (X [Li [p]]) ;
-	}
-#endif
-
-	/* ------------------------------------------------------------------ */
-	/* partial pivoting with diagonal preference */
-	/* ------------------------------------------------------------------ */
-
-	/* determine what the "diagonal" is */
-	diagrow = P [k] ;   /* might already be pivotal */
-	PRINTF (("k %d, diagrow = %d, UNFLIP (diagrow) = %d\n",
-	    k, diagrow, UNFLIP (diagrow))) ;
-
-	/* find a pivot and scale the pivot column */
-	if (!lpivot (diagrow, &pivrow, &pivot, &abs_pivot, tol, X, LU, Lip,
-		    Llen, k, n, Pinv, &firstrow, Common))
-	{
-	    /* matrix is structurally or numerically singular */
-	    Common->status = TRILINOS_KLU_SINGULAR ;
-	    if (Common->numerical_rank == TRILINOS_KLU_EMPTY)
-	    {
-		Common->numerical_rank = k+k1 ;
-		Common->singular_col = Q [k+k1] ;
-	    }
-	    if (Common->halt_if_singular)
-	    {
-		/* do not continue the factorization */
-		return (lusize) ;
-	    }
-	}
-
-	/* we now have a valid pivot row, even if the column has NaN's or
-	 * has no entries on or below the diagonal at all. */
-	PRINTF (("\nk %d : Pivot row %d : ", k, pivrow)) ;
-	PRINT_ENTRY (pivot) ;
-	ASSERT (pivrow >= 0 && pivrow < n) ;
-	ASSERT (Pinv [pivrow] < 0) ;
-
-	/* set the Uip pointer */
-	Uip [k] = Lip [k] + UNITS (Int, Llen [k]) + UNITS (Entry, Llen [k]) ;
-
-        /* move the lup pointer to the position where indices of U
-         * should be stored */
-        lup += UNITS (Int, Llen [k]) + UNITS (Entry, Llen [k]) ;
-
-        Ulen [k] = n - top ;
-
-        /* extract Stack [top..n-1] to Ui and the values to Ux and clear X */
-	GET_POINTER (LU, Uip, Ulen, Ui, Ux, k, len) ;
-        for (p = top, i = 0 ; p < n ; p++, i++)
-        {
-	    j = Stack [p] ;
-	    Ui [i] = Pinv [j] ;
-	    Ux [i] = X [j] ;
-	    CLEAR (X [j]) ;
-        }
-
-        /* position the lu index at the starting point for next column */
-        lup += UNITS (Int, Ulen [k]) + UNITS (Entry, Ulen [k]) ;
-
-	/* U(k,k) = pivot */
-	Udiag [k] = pivot ;
-
-	/* ------------------------------------------------------------------ */
-	/* log the pivot permutation */
-	/* ------------------------------------------------------------------ */
-
-	ASSERT (UNFLIP (Pinv [diagrow]) < n) ;
-	ASSERT (P [UNFLIP (Pinv [diagrow])] == diagrow) ;
-
-	if (pivrow != diagrow)
-	{
-	    /* an off-diagonal pivot has been chosen */
-	    Common->noffdiag++ ;
-	    PRINTF ((">>>>>>>>>>>>>>>>> pivrow %d k %d off-diagonal\n",
-			pivrow, k)) ;
-	    if (Pinv [diagrow] < 0)
-	    {
-		/* the former diagonal row index, diagrow, has not yet been
-		 * chosen as a pivot row.  Log this diagrow as the "diagonal"
-		 * entry in the column kbar for which the chosen pivot row,
-		 * pivrow, was originally logged as the "diagonal" */
-		kbar = FLIP (Pinv [pivrow]) ;
-		P [kbar] = diagrow ;
-		Pinv [diagrow] = FLIP (kbar) ;
-	    }
-	}
-	P [k] = pivrow ;
-	Pinv [pivrow] = k ;
-
-#ifndef NDEBUG
-	for (i = 0 ; i < n ; i++) { ASSERT (IS_ZERO (X [i])) ;}
-	GET_POINTER (LU, Uip, Ulen, Ui, Ux, k, len) ;
-	for (p = 0 ; p < len ; p++)
-	{
-	    PRINTF (("Column %d of U: %d : ", k, Ui [p])) ;
-	    PRINT_ENTRY (Ux [p]) ;
-	}
-	GET_POINTER (LU, Lip, Llen, Li, Lx, k, len) ;
-	for (p = 0 ; p < len ; p++)
-	{
-	    PRINTF (("Column %d of L: %d : ", k, Li [p])) ;
-	    PRINT_ENTRY (Lx [p]) ;
-	}
-#endif
-
-	/* ------------------------------------------------------------------ */
-	/* symmetric pruning */
-	/* ------------------------------------------------------------------ */
-
-	prune (Lpend, Pinv, k, pivrow, LU, Uip, Lip, Ulen, Llen) ;
-
-	*lnz += Llen [k] + 1 ; /* 1 added to lnz for diagonal */
-	*unz += Ulen [k] + 1 ; /* 1 added to unz for diagonal */
-    }
-
-    /* ---------------------------------------------------------------------- */
-    /* finalize column pointers for L and U, and put L in the pivotal order */
-    /* ---------------------------------------------------------------------- */
-
-    for (p = 0 ; p < n ; p++)
-    {
-	Li = (Int *) (LU + Lip [p]) ;
-	for (i = 0 ; i < Llen [p] ; i++)
-	{
-	    Li [i] = Pinv [Li [i]] ;
+	    *p_LU = S.LU ;
+	    *lnz = S.lnz ;
+	    *unz = S.unz ;
+	    return (S.lusize) ;
 	}
     }
 
-#ifndef NDEBUG
-    for (i = 0 ; i < n ; i++)
-    {
-	PRINTF (("P [%d] = %d   Pinv [%d] = %d\n", i, P [i], i, Pinv [i])) ;
-    }
-    for (i = 0 ; i < n ; i++)
-    {
-	ASSERT (Pinv [i] >= 0 && Pinv [i] < n) ;
-	ASSERT (P [i] >= 0 && P [i] < n) ;
-	ASSERT (P [Pinv [i]] == i) ;
-	ASSERT (IS_ZERO (X [i])) ;
-    }
-#endif
-
-    /* ---------------------------------------------------------------------- */
-    /* shrink the LU factors to just the required size */
-    /* ---------------------------------------------------------------------- */
-
-    newlusize = lup ;
-    ASSERT ((size_t) newlusize <= lusize) ;
-
-    /* this cannot fail, since the block is descreasing in size */
-    LU = (Unit*) TRILINOS_KLU_realloc (newlusize, lusize, sizeof (Unit), LU, Common) ;
-    *p_LU = LU ;
-    return (newlusize) ;
+    final_size = KLS_KLU_KERNEL_FINISH (&S) ;
+    *p_LU = S.LU ;
+    *lnz = S.lnz ;
+    *unz = S.unz ;
+    return (final_size) ;
 }
