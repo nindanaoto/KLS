@@ -651,6 +651,75 @@ static void prune
  * and RETRY is returned so the column defers to the serial cleanup.
  * Distinct columns own distinct diagonal rows, so accepted claims are
  * collision-free without atomics. */
+/* colptr-aware symmetric pruning: identical to prune() but addresses
+ * columns through the chunked per-column pointers.  Callers must be
+ * single-threaded phases (serial super-levels with the other workers
+ * parked at the barrier, or the cleanup): pruning reorders finalized
+ * columns in place. */
+static void kls_prune_chunked
+(
+    Unit *const *Colptr,
+    Int Lpend [ ],
+    Int Pinv [ ],
+    Int k,
+    Int pivrow,
+    Int Uip [ ],
+    Int Lip [ ],
+    Int Ulen [ ],
+    Int Llen [ ]
+)
+{
+    Entry x ;
+    Entry *Lx, *Ux ;
+    Int *Li, *Ui ;
+    Int p, i, j, p2, phead, ptail, llen, ulen ;
+    {
+	Unit *xp = Colptr [k] + Uip [k] ;
+	ulen = Ulen [k] ;
+	Ui = (Int *) xp ;
+	Ux = (Entry *) (xp + UNITS (Int, ulen)) ;
+    }
+    (void) Ux ;
+    for (p = 0 ; p < ulen ; p++)
+    {
+	j = Ui [p] ;
+	if (Lpend [j] == TRILINOS_KLU_EMPTY)
+	{
+	    Unit *xp = Colptr [j] + Lip [j] ;
+	    llen = Llen [j] ;
+	    Li = (Int *) xp ;
+	    Lx = (Entry *) (xp + UNITS (Int, llen)) ;
+	    for (p2 = 0 ; p2 < llen ; p2++)
+	    {
+		if (pivrow == Li [p2])
+		{
+		    phead = 0 ;
+		    ptail = llen ;
+		    while (phead < ptail)
+		    {
+			i = Li [phead] ;
+			if (Pinv [i] >= 0)
+			{
+			    phead++ ;
+			}
+			else
+			{
+			    ptail-- ;
+			    Li [phead] = Li [ptail] ;
+			    Li [ptail] = i ;
+			    x = Lx [phead] ;
+			    Lx [phead] = Lx [ptail] ;
+			    Lx [ptail] = x ;
+			}
+		    }
+		    Lpend [j] = ptail ;
+		    break ;
+		}
+	    }
+	}
+    }
+}
+
 #define KLS_PIVOT_RETRY (-2)
 static Int kls_lpivot_diag_claim
 (
@@ -809,6 +878,7 @@ typedef struct KLS_KLU_KERNEL_STATE_STRUCT
     double memgrow ;
     Int no_prune ;   /* parallel drivers: finalized columns stay immutable */
     Int diag_claim ; /* parallel phase: only diagonal pivots; else defer */
+    Int chunked_prune ; /* single-threaded phases may prune chunked cols */
     /* chunked storage (parallel drivers): stable per-column pointers,
        arena chunks never realloc once a column is published */
     Unit **colptr ;         /* size n, or NULL for classic base+offset */
@@ -1012,6 +1082,11 @@ Int KLS_KLU_KERNEL_STEP
 	}
 	S->P [k] = diagrow ;
 	Pinv [diagrow] = k ;
+	if (S->chunked_prune)
+	{
+	    kls_prune_chunked (S->colptr, S->Lpend, Pinv, k, diagrow,
+			       S->Uip, Lip, S->Ulen, Llen) ;
+	}
 	S->lnz += Llen [k] + 1 ;
 	S->unz += S->Ulen [k] + 1 ;
 	S->cols_done = k + 1 ;
@@ -1075,6 +1150,8 @@ Int KLS_KLU_KERNEL_STEP
 
     if (S->colptr != NULL)
     {
+	Int do_prune_after = S->chunked_prune ;
+	(void) do_prune_after ;
 	/* publish: exact-size copy out of the scratch buffer */
 	size_t used = (size_t) (UNITS (Int, Llen [k]) +
 				UNITS (Entry, Llen [k]) +
@@ -1088,6 +1165,11 @@ Int KLS_KLU_KERNEL_STEP
 	}
 	memcpy (col, S->scratch, used * sizeof (Unit)) ;
 	S->colptr [k] = col ;
+	if (S->chunked_prune)
+	{
+	    kls_prune_chunked (S->colptr, S->Lpend, Pinv, k, pivrow,
+			       S->Uip, Lip, S->Ulen, Llen) ;
+	}
     }
 
     S->lnz += Llen [k] + 1 ;
@@ -1278,6 +1360,7 @@ static void *kls_klu_par_worker_main (void *arg)
 	    pthread_barrier_wait (&sh->barrier) ;
 	    continue ;
 	}
+	W->S.chunked_prune = serial ;
 	if (!atomic_load_explicit (&sh->abort_flag, memory_order_acquire))
 	{
 	    for (pos = serial ? pos0 : pos0 + W->tid ;
@@ -1444,6 +1527,7 @@ size_t KLS_KLU_KERNEL_LEVELS
     S.memgrow = Common->memgrow ;
     S.no_prune = 1 ;
     S.diag_claim = 0 ;
+    S.chunked_prune = 0 ;
     S.pack_keep_row_indices = 0 ;
     S.chunk_head = NULL ; S.chunk_used = 0 ; S.chunk_size = 0 ;
     S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) * sizeof (Unit)) ;
@@ -1635,6 +1719,7 @@ size_t KLS_KLU_KERNEL_LEVELS
 		{
 		    Int saved_halt = Common->halt_if_singular ;
 		    Common->halt_if_singular = 0 ;
+		    S.chunked_prune = 1 ;
 		    for (k = 0 ; k < n ; k++)
 		    {
 			if (!atomic_load_explicit (&sh.defer [k],
@@ -1851,6 +1936,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     S.memgrow = Common->memgrow ;
     S.no_prune = 0 ;
     S.diag_claim = 0 ;
+    S.chunked_prune = 0 ;
     S.pack_keep_row_indices = 0 ;
     S.colptr = NULL ;
     S.scratch = NULL ;
