@@ -22503,7 +22503,8 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
     return 1.0e-5;
   }
   if (solver->options.ordering == KLS_ORDERING_AUTO &&
-      solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+      (solver->stats.selected_ordering == KLS_ORDERING_METIS ||
+       solver->stats.selected_ordering == KLS_ORDERING_AMF) &&
       solver->symbolic->do_btf && solver->symbolic->nblocks <= 4u &&
       (double)solver->symbolic->maxblock >= 0.95 * (double)solver->n &&
       ((solver->common.scale == 1 &&
@@ -22512,7 +22513,12 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
        (solver->common.scale == 0 &&
         is_small_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
                                              solver->row_idx)))) {
-    return 1.0e-4;
+    /* Deficiency orderings explode under loose threshold pivoting on
+       these classes (TSOPF: first factor 9.2e5 fill at 1e-4 vs 6.4e4 at
+       1e-8); they are selected for their tight-tolerance factor and the
+       config-derived refine gate (tol < 1e-6) polices the accuracy. */
+    return solver->stats.selected_ordering == KLS_ORDERING_AMF ? 1.0e-8
+                                                               : 1.0e-4;
   }
 #endif
 
@@ -23755,9 +23761,13 @@ static int analyze_with_ordering(UF_long n,
        analyses concurrently) */
     extern UF_long trilinos_amd_l2_amf;
     {
+      /* mean-local-fill scoring (Rothberg-Eisenstat AMMF) dominates the
+         plain deficiency in every measured estimate (ASIC_320k 9.7e8 vs
+         1.24e9, TSOPF 1.31e5 vs METIS 1.50e5 fill); the old scoring
+         stays reachable for comparisons */
       const char *amf_mode = getenv("KLS_AMF_MODE");
       trilinos_amd_l2_amf =
-        amf_mode != NULL && amf_mode[0] == '2' ? 2 : 1;
+        amf_mode != NULL && amf_mode[0] == '1' ? 1 : 2;
     }
     common.ordering = 0;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
@@ -28957,6 +28967,28 @@ static int choose_symbolic_for_pattern(UF_long n,
       fprintf(stderr, "KLS choose: METIS-start branch n=%ld btf=%d\n",
               (long)n, symbolic_options->use_btf);
     }
+    if (n <= 30000u &&
+        is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
+      /* Fused dense blocks behind spikes: deficiency ordering dominates
+         nested dissection here (TSOPF: est fill 1.31e5 vs 1.50e5,
+         tight-tol factor 6.4e4 vs 8.0e4) and skipping NodeND saves most
+         of the analysis (13.5 -> ~7ms).  Fall through to METIS if the
+         AMF analysis fails. */
+      int amf_status = analyze_with_ordering(
+        n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
+        symbolic_out, common_out, separator_out);
+      if (amf_status == KLS_OK) {
+        const double amf_score = symbolic_score(*symbolic_out);
+        if (isfinite(amf_score) && amf_score > 0.0 &&
+            amf_score < DBL_MAX / 4.0) {
+          *selected_ordering_out = KLS_ORDERING_AMF;
+          *score_out = amf_score;
+          return KLS_OK;
+        }
+        trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+        kls_separator_analysis_clear(separator_out);
+      }
+    }
     int status = analyze_with_ordering(n, col_ptr, row_idx, symbolic_options,
                                        KLS_ORDERING_METIS, symbolic_out,
                                        common_out, separator_out);
@@ -28967,6 +28999,17 @@ static int choose_symbolic_for_pattern(UF_long n,
         maybe_retry_without_btf(n, col_ptr, row_idx, symbolic_options,
                                 KLS_ORDERING_METIS, symbolic_out, common_out,
                                 &selected_score, 0, separator_out);
+      }
+      if (n <= 30000u) {
+        /* Deficiency ordering often beats nested dissection on the
+           small spiked/fused-block circuit classes routed here (TSOPF:
+           est fill 1.31e5 vs METIS 1.50e5, post-tight-tol factor 6.4e4
+           vs 8.0e4); the extra analyze costs ~1ms at this size and the
+           promotion keeps the strict-estimate margin. */
+        maybe_promote_symbolic_ordering(
+          n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
+          symbolic_out, common_out, selected_ordering_out,
+          &selected_score, 0.90, separator_out);
       }
 #ifdef KLS_HAVE_SCOTCH
       if (should_try_symbolic_nested_dissection_before_numeric(
