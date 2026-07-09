@@ -23754,7 +23754,11 @@ static int analyze_with_ordering(UF_long n,
        is a serial-analysis global (the ordering competition never runs
        analyses concurrently) */
     extern UF_long trilinos_amd_l2_amf;
-    trilinos_amd_l2_amf = 1;
+    {
+      const char *amf_mode = getenv("KLS_AMF_MODE");
+      trilinos_amd_l2_amf =
+        amf_mode != NULL && amf_mode[0] == '2' ? 2 : 1;
+    }
     common.ordering = 0;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
     trilinos_amd_l2_amf = 0;

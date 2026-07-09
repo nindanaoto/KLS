@@ -1515,6 +1515,13 @@ GLOBAL void TRILINOS_AMD_2
 			    - (double) amf_cliq [i]
 			    - 0.5 * (double) dme * ((double) dme - 1.0) ;
 			if (def < 0.0) def = 0.0 ;
+			if (trilinos_amd_l2_amf == 2 && nvi > 1)
+			{
+			    /* approximate minimum MEAN local fill (Rothberg-
+			     * Eisenstat AMMF): amortize the deficiency over the
+			     * nvi pivots eliminated with this supervariable */
+			    def /= (double) nvi ;
+			}
 			bucket = (Int) sqrt (2.0 * def) ;
 			if (bucket > deg) bucket = deg ;
 			ASSERT (bucket >= 0 && bucket < n) ;
