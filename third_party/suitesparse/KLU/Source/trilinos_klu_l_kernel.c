@@ -961,6 +961,219 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
     return (newlusize) ;
 }
 
+
+/* ========================================================================== */
+/* === KLS level-scheduled kernel =========================================== */
+/* ========================================================================== */
+
+/* Column elimination tree of the block view (Liu's algorithm on A'A,
+ * CSparse cs_etree ata-style): bounds every pivoting-time dependency
+ * (George/Ng), so a level schedule over it stays valid regardless of the
+ * runtime pivot choices. */
+static int kls_klu_block_coletree
+(
+    Int n,
+    Int Ap [ ],
+    Int Ai [ ],
+    Int Q [ ],
+    Int k1,
+    Int PSinv [ ],
+    Int parent [ ],     /* size n out */
+    Int ancestor [ ],   /* size n workspace */
+    Int prev [ ]        /* size n workspace (per block row) */
+)
+{
+    Int k, p, i, jroot, next ;
+    for (k = 0 ; k < n ; k++)
+    {
+	parent [k] = TRILINOS_KLU_EMPTY ;
+	ancestor [k] = TRILINOS_KLU_EMPTY ;
+	prev [k] = TRILINOS_KLU_EMPTY ;
+    }
+    for (k = 0 ; k < n ; k++)
+    {
+	Int oldcol = Q [k + k1] ;
+	for (p = Ap [oldcol] ; p < Ap [oldcol+1] ; p++)
+	{
+	    i = PSinv [Ai [p]] - k1 ;
+	    if (i < 0 || i >= n)
+	    {
+		continue ;      /* off-block entry */
+	    }
+	    jroot = prev [i] ;
+	    prev [i] = k ;
+	    while (jroot != TRILINOS_KLU_EMPTY && jroot < k)
+	    {
+		next = ancestor [jroot] ;
+		ancestor [jroot] = k ;
+		if (next == TRILINOS_KLU_EMPTY)
+		{
+		    parent [jroot] = k ;
+		    break ;
+		}
+		jroot = next ;
+	    }
+	}
+    }
+    return (1) ;
+}
+
+/* Level-scheduled factorization: same contract as TRILINOS_KLU_kernel.
+ * v0 runs the schedule serially through the chunked step (validates the
+ * schedule and storage); the worker pool lands on top of this. */
+size_t KLS_KLU_KERNEL_LEVELS
+(
+    Int n, Int Ap [ ], Int Ai [ ], Entry Ax [ ], Int Q [ ], size_t lusize,
+    Int Pinv [ ], Int P [ ], Unit **p_LU, Entry Udiag [ ],
+    Int Llen [ ], Int Ulen [ ], Int Lip [ ], Int Uip [ ],
+    Int *lnz, Int *unz, Entry X [ ],
+    Int Stack [ ], Int Flag [ ], Int Ap_pos [ ], Int Lpend [ ],
+    Int k1, Int PSinv [ ], double Rs [ ],
+    Int Offp [ ], Int Offi [ ], Entry Offx [ ],
+    TRILINOS_KLU_common *Common
+)
+{
+    KLS_KLU_KERNEL_STATE S ;
+    Int k, lev, result ;
+    size_t final_size ;
+    Int *parent, *anc, *prevrow, *level, *level_ptr, *level_cols ;
+    Int nlevels, poff ;
+
+    parent = (Int *) TRILINOS_KLU_malloc ((size_t) (6*n + 2), sizeof (Int),
+					  Common) ;
+    if (parent == NULL)
+    {
+	Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
+	return (lusize) ;
+    }
+    anc = parent + n ;
+    prevrow = anc + n ;
+    level = prevrow + n ;
+    level_ptr = level + n ;         /* n+1 slots */
+    level_cols = level_ptr + n + 1 ;
+
+    kls_klu_block_coletree (n, Ap, Ai, Q, k1, PSinv, parent, anc, prevrow) ;
+
+    /* levels: parent[k] > k, one ascending pass */
+    nlevels = 0 ;
+    for (k = 0 ; k < n ; k++)
+    {
+	level [k] = 0 ;
+    }
+    for (k = 0 ; k < n ; k++)
+    {
+	if (parent [k] != TRILINOS_KLU_EMPTY &&
+	    level [k] + 1 > level [parent [k]])
+	{
+	    level [parent [k]] = level [k] + 1 ;
+	}
+	if (level [k] + 1 > nlevels)
+	{
+	    nlevels = level [k] + 1 ;
+	}
+    }
+    for (lev = 0 ; lev <= n ; lev++)
+    {
+	level_ptr [lev] = 0 ;
+    }
+    for (k = 0 ; k < n ; k++)
+    {
+	level_ptr [level [k] + 1]++ ;
+    }
+    for (lev = 0 ; lev < n ; lev++)
+    {
+	level_ptr [lev + 1] += level_ptr [lev] ;
+    }
+    {
+	Int *cursor = anc ;   /* reuse workspace */
+	for (lev = 0 ; lev < nlevels ; lev++)
+	{
+	    cursor [lev] = level_ptr [lev] ;
+	}
+	for (k = 0 ; k < n ; k++)
+	{
+	    level_cols [cursor [level [k]]++] = k ;
+	}
+    }
+
+    /* Offp prefix so column writes are disjoint under any order */
+    poff = Offp [k1] ;
+    for (k = 0 ; k < n ; k++)
+    {
+	Int oldcol = Q [k + k1] ;
+	Int p2 ;
+	Offp [k + k1] = poff ;
+	for (p2 = Ap [oldcol] ; p2 < Ap [oldcol+1] ; p2++)
+	{
+	    if (PSinv [Ai [p2]] - k1 < 0)
+	    {
+		poff++ ;
+	    }
+	}
+    }
+    Offp [n + k1] = poff ;
+
+    S.n = n ;
+    S.Ap = Ap ; S.Ai = Ai ; S.Ax = Ax ; S.Q = Q ;
+    S.lusize = lusize ;
+    S.Pinv = Pinv ; S.P = P ;
+    S.LU = *p_LU ;
+    S.Udiag = Udiag ;
+    S.Llen = Llen ; S.Ulen = Ulen ; S.Lip = Lip ; S.Uip = Uip ;
+    S.X = X ; S.Stack = Stack ; S.Flag = Flag ;
+    S.Ap_pos = Ap_pos ; S.Lpend = Lpend ;
+    S.k1 = k1 ; S.PSinv = PSinv ; S.Rs = Rs ;
+    S.Offp = Offp ; S.Offi = Offi ; S.Offx = Offx ;
+    S.Common = Common ;
+    S.scale = Common->scale ;
+    S.tol = Common->tol ;
+    S.memgrow = Common->memgrow ;
+    S.no_prune = 1 ;
+    S.pack_keep_row_indices = 0 ;
+    S.chunk_head = NULL ; S.chunk_used = 0 ; S.chunk_size = 0 ;
+    S.colptr = (Unit **) TRILINOS_KLU_malloc ((size_t) n, sizeof (Unit *),
+					      Common) ;
+    if (S.colptr == NULL)
+    {
+	TRILINOS_KLU_free (parent, (size_t) (6*n + 2), sizeof (Int), Common) ;
+	Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
+	return (lusize) ;
+    }
+
+    KLS_KLU_KERNEL_INIT (&S) ;
+
+    for (lev = 0 ; lev < nlevels ; lev++)
+    {
+	Int pos ;
+	for (pos = level_ptr [lev] ; pos < level_ptr [lev + 1] ; pos++)
+	{
+	    k = level_cols [pos] ;
+	    result = KLS_KLU_KERNEL_STEP (&S, k) ;
+	    if (result != 0)
+	    {
+		S.pack_keep_row_indices = 1 ;
+		final_size = KLS_KLU_KERNEL_FINISH (&S) ;
+		TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *),
+				   Common) ;
+		TRILINOS_KLU_free (parent, (size_t) (6*n + 2), sizeof (Int),
+				   Common) ;
+		*p_LU = S.LU ;
+		*lnz = S.lnz ;
+		*unz = S.unz ;
+		return (final_size) ;
+	    }
+	}
+    }
+
+    final_size = KLS_KLU_KERNEL_FINISH (&S) ;
+    TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *), Common) ;
+    TRILINOS_KLU_free (parent, (size_t) (6*n + 2), sizeof (Int), Common) ;
+    *p_LU = S.LU ;
+    *lnz = S.lnz ;
+    *unz = S.unz ;
+    return (final_size) ;
+}
+
 size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 (
     /* input, not modified */
@@ -1013,6 +1226,12 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     size_t final_size ;
 
     ASSERT (Common != NULL) ;
+    if (n >= 512 && getenv ("KLS_KLU_LEVELS") != NULL)
+    {
+	return (KLS_KLU_KERNEL_LEVELS (n, Ap, Ai, Ax, Q, lusize, Pinv, P,
+	    p_LU, Udiag, Llen, Ulen, Lip, Uip, lnz, unz, X, Stack, Flag,
+	    Ap_pos, Lpend, k1, PSinv, Rs, Offp, Offi, Offx, Common)) ;
+    }
     S.n = n ;
     S.Ap = Ap ;
     S.Ai = Ai ;
