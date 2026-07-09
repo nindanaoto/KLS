@@ -21259,9 +21259,8 @@ static void free_numeric(kls_solver *solver) {
   solver->fp32_probe_retry_used = 0;
   solver->fp32_redo_pass = 0;
   solver->fp32_mirror_fresh = 0;
-  solver->metis_race_deferred = 0;
-  solver->metis_race_deferred_invalid = 0;
-  solver->prestatic_deferred = 0;
+  /* deferral flags are solver-level intent (the consult re-validates);
+     mid-factor numeric replacements must not wipe them */
   solver->base_solve_seconds = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
@@ -27463,15 +27462,28 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               const double *numeric_values,
                                               int deferred) {
   const int forced_match = getenv("KLS_FORCE_STATIC_MATCH") != NULL;
+  const int trace_gates =
+    deferred && kls_trace_pre_static_enabled();
   if (solver == NULL || !solver->options.static_pivoting ||
       (solver->numeric != NULL && !deferred) ||
       solver->row_perm != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       (solver->options.ordering != KLS_ORDERING_AUTO && !forced_match) ||
       (solver->n < 3000 && !forced_match)) {
+    if (trace_gates) {
+      fprintf(stderr,
+              "KLS pre-static defer: entry gate declined sp=%d perm=%d"
+              " fmt=%d ord=%d n=%ld\n",
+              solver->options.static_pivoting, solver->row_perm != NULL,
+              (int)solver->input_format, (int)solver->options.ordering,
+              (long)solver->n);
+    }
     return;
   }
   if (!forced_match && kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
+    if (trace_gates) {
+      fprintf(stderr, "KLS pre-static defer: low-work-amd gate declined\n");
+    }
     return;
   }
 #ifdef KLS_HAVE_METIS
