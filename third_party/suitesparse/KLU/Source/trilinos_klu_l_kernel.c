@@ -18,6 +18,10 @@
 
 /* Does a depth-first-search, starting at node j. */
 
+/* chunked mode: stable per-column storage; classic mode: base+offset */
+#define KLS_COL_BASE(Colptr,LU,Lip,j) \
+    ((Colptr) != NULL ? (Colptr)[j] : (LU) + (Lip)[j])
+
 static Int dfs
 (
     /* input, not modified on output: */
@@ -36,6 +40,7 @@ static Int dfs
     Int Lpend [ ],	/* for symmetric pruning */
     Int top,		/* top of stack on input*/
     Unit LU [],
+    Unit *const *Colptr,	/* chunked per-column storage, or NULL */
     Int *Lik,		/* Li row index array of the kth column */
     Int *plength,
 
@@ -70,7 +75,7 @@ static Int dfs
 
 	/* add the adjacent nodes to the recursive stack by iterating through
 	 * until finding another non-visited pivotal node */
-	Li = (Int *) (LU + Lip [jnew]) ;
+	Li = (Int *) KLS_COL_BASE (Colptr, LU, Lip, jnew) ;
 	for (pos = --Ap_pos [head] ; pos >= 0 ; --pos)
 	{
 	    i = Li [pos] ;
@@ -130,6 +135,7 @@ static Int lsolve_symbolic
     Int Ap [ ],
     Int Ai [ ],
     Int Q [ ],
+    Unit *const *Colptr,	/* chunked per-column storage, or NULL */
     Int Pinv [ ],	/* Pinv [i] = k if i is kth pivot row, or TRILINOS_KLU_EMPTY if row i
 			 * is not yet pivotal.  */
 
@@ -182,7 +188,7 @@ static Int lsolve_symbolic
 	    if (Pinv [i] >= 0)
 	    {
 		top = dfs (i, k, Pinv, Llen, Lip, Stack, Flag,
-			   Lpend, top, LU, Lik, &l_length, Ap_pos) ;
+			   Lpend, top, LU, Colptr, Lik, &l_length, Ap_pos) ;
 	    }
 	    else
 	    {
@@ -311,6 +317,7 @@ static void lsolve_numeric
     Int Pinv [ ],	/* Pinv [i] = k if i is kth pivot row, or TRILINOS_KLU_EMPTY if row i
 			 * is not yet pivotal.  */
     Unit *LU,		/* LU factors (pattern and values) */
+    Unit *const *Colptr,	/* chunked per-column storage, or NULL */
     Int Stack [ ],	/* stack for dfs */
     Int Lip [ ],	/* size n, Lip [k] is position in LU of column k of L */
     Int top,		/* top of stack on input */
@@ -337,7 +344,12 @@ static void lsolve_numeric
 	jnew = Pinv [j] ;
 	ASSERT (jnew >= 0) ;
 	xj = X [j] ;
-	GET_POINTER (LU, Lip, Llen, Li, Lx, jnew, len) ;
+	{
+	    Unit *xp = KLS_COL_BASE (Colptr, LU, Lip, jnew) ;
+	    len = Llen [jnew] ;
+	    Li = (Int *) xp ;
+	    Lx = (Entry *) (xp + UNITS (Int, len)) ;
+	}
 	ASSERT (Lip [jnew] <= Lip [jnew+1]) ;
 	for (p = 0 ; p < len ; p++)
 	{
@@ -672,7 +684,50 @@ typedef struct KLS_KLU_KERNEL_STATE_STRUCT
     double tol ;
     double memgrow ;
     Int no_prune ;   /* parallel drivers: finalized columns stay immutable */
+    /* chunked storage (parallel drivers): stable per-column pointers,
+       arena chunks never realloc once a column is published */
+    Unit **colptr ;         /* size n, or NULL for classic base+offset */
+    Unit *chunk_head ;      /* current chunk (first Unit links to prev) */
+    size_t chunk_used ;
+    size_t chunk_size ;
 } KLS_KLU_KERNEL_STATE ;
+
+/* allocate nunits from the state's chunk arena (never moves memory) */
+static Unit *kls_klu_chunk_alloc (KLS_KLU_KERNEL_STATE *S, size_t nunits)
+{
+    Unit *col ;
+    if (S->chunk_head == NULL || S->chunk_used + nunits > S->chunk_size)
+    {
+	size_t want = S->chunk_size > 0 ? S->chunk_size : (size_t) 1 << 18 ;
+	Unit *chunk ;
+	while (want < nunits + 1) want *= 2 ;
+	chunk = (Unit *) TRILINOS_KLU_malloc (want, sizeof (Unit), S->Common) ;
+	if (chunk == NULL)
+	{
+	    return (NULL) ;
+	}
+	*((Unit **) chunk) = S->chunk_head ;   /* link previous */
+	S->chunk_head = chunk ;
+	S->chunk_used = 1 ;
+	S->chunk_size = want ;
+    }
+    col = S->chunk_head + S->chunk_used ;
+    S->chunk_used += nunits ;
+    return (col) ;
+}
+
+void KLS_KLU_KERNEL_CHUNKS_FREE (KLS_KLU_KERNEL_STATE *S)
+{
+    Unit *chunk = S->chunk_head ;
+    while (chunk != NULL)
+    {
+	Unit *prev = *((Unit **) chunk) ;
+	TRILINOS_KLU_free (chunk, S->chunk_size, sizeof (Unit), S->Common) ;
+	chunk = prev ;
+    }
+    S->chunk_head = NULL ;
+    S->chunk_used = 0 ;
+}
 
 void KLS_KLU_KERNEL_INIT
 (
@@ -720,6 +775,22 @@ Int KLS_KLU_KERNEL_STEP
 
     nunits = DUNITS (Int, n - k) + DUNITS (Int, k) +
 	     DUNITS (Entry, n - k) + DUNITS (Entry, k) ;
+    if (S->colptr != NULL)
+    {
+	/* chunked: reserve the dense-column upper bound up front; the
+	   column's storage never moves, so readers hold stable pointers */
+	Unit *col = kls_klu_chunk_alloc (S, (size_t) nunits + 1) ;
+	if (col == NULL)
+	{
+	    Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
+	    return (-1) ;
+	}
+	S->colptr [k] = col ;
+	Lip [k] = 0 ;
+	LU = col ;   /* own-column accesses go through the column base */
+    }
+    else
+    {
     xsize = ((double) S->lup) + nunits ;
     if (xsize > (double) S->lusize)
     {
@@ -742,14 +813,17 @@ Int KLS_KLU_KERNEL_STEP
     }
 
     Lip [k] = S->lup ;
+    }
 
-    top = lsolve_symbolic (n, k, S->Ap, S->Ai, S->Q, Pinv, S->Stack, S->Flag,
-		S->Lpend, S->Ap_pos, LU, S->lup, Llen, Lip, S->k1, S->PSinv) ;
+    top = lsolve_symbolic (n, k, S->Ap, S->Ai, S->Q, S->colptr, Pinv,
+		S->Stack, S->Flag, S->Lpend, S->Ap_pos, LU,
+		S->colptr != NULL ? 0 : S->lup, Llen, Lip, S->k1, S->PSinv) ;
 
     construct_column (k, S->Ap, S->Ai, S->Ax, S->Q, S->X,
 	S->k1, S->PSinv, S->Rs, S->scale, S->Offp, S->Offi, S->Offx) ;
 
-    lsolve_numeric (Pinv, LU, S->Stack, Lip, top, n, Llen, S->X) ;
+    lsolve_numeric (Pinv, LU, S->colptr, S->Stack, Lip, top, n, Llen,
+		    S->X) ;
 
     diagrow = S->P [k] ;
 
@@ -769,7 +843,10 @@ Int KLS_KLU_KERNEL_STEP
     }
 
     S->Uip [k] = Lip [k] + UNITS (Int, Llen [k]) + UNITS (Entry, Llen [k]) ;
-    S->lup += UNITS (Int, Llen [k]) + UNITS (Entry, Llen [k]) ;
+    if (S->colptr == NULL)
+    {
+	S->lup += UNITS (Int, Llen [k]) + UNITS (Entry, Llen [k]) ;
+    }
     S->Ulen [k] = n - top ;
 
     GET_POINTER (LU, S->Uip, S->Ulen, Ui, Ux, k, len) ;
@@ -780,7 +857,10 @@ Int KLS_KLU_KERNEL_STEP
 	Ux [i] = S->X [j] ;
 	CLEAR (S->X [j]) ;
     }
-    S->lup += UNITS (Int, S->Ulen [k]) + UNITS (Entry, S->Ulen [k]) ;
+    if (S->colptr == NULL)
+    {
+	S->lup += UNITS (Int, S->Ulen [k]) + UNITS (Entry, S->Ulen [k]) ;
+    }
 
     S->Udiag [k] = pivot ;
 
@@ -797,7 +877,7 @@ Int KLS_KLU_KERNEL_STEP
     S->P [k] = pivrow ;
     Pinv [pivrow] = k ;
 
-    if (!S->no_prune)
+    if (!S->no_prune && S->colptr == NULL)
     {
 	prune (S->Lpend, Pinv, k, pivrow, LU, S->Uip, Lip, S->Ulen, Llen) ;
     }
@@ -815,6 +895,48 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
     Int p, i ;
     Int *Li ;
     size_t newlusize ;
+    if (S->colptr != NULL)
+    {
+	/* pack the chunked columns into one contiguous LU in column
+	   order, rebasing Lip/Uip and converting L row indices to
+	   pivotal indices */
+	size_t total = 0, off ;
+	Unit *packed ;
+	for (p = 0 ; p < S->n ; p++)
+	{
+	    total += UNITS (Int, S->Llen [p]) + UNITS (Entry, S->Llen [p]) +
+		     UNITS (Int, S->Ulen [p]) + UNITS (Entry, S->Ulen [p]) ;
+	}
+	packed = (Unit *) TRILINOS_KLU_realloc (total, S->lusize,
+						sizeof (Unit), S->LU,
+						S->Common) ;
+	if (packed == NULL || S->Common->status == TRILINOS_KLU_OUT_OF_MEMORY)
+	{
+	    return (S->lusize) ;
+	}
+	off = 0 ;
+	for (p = 0 ; p < S->n ; p++)
+	{
+	    size_t lunits = UNITS (Int, S->Llen [p]) +
+			    UNITS (Entry, S->Llen [p]) ;
+	    size_t uunits = UNITS (Int, S->Ulen [p]) +
+			    UNITS (Entry, S->Ulen [p]) ;
+	    memcpy (packed + off, S->colptr [p],
+		    (lunits + uunits) * sizeof (Unit)) ;
+	    S->Lip [p] = (Int) off ;
+	    S->Uip [p] = (Int) (off + lunits) ;
+	    Li = (Int *) (packed + off) ;
+	    for (i = 0 ; i < S->Llen [p] ; i++)
+	    {
+		Li [i] = S->Pinv [Li [i]] ;
+	    }
+	    off += lunits + uunits ;
+	}
+	KLS_KLU_KERNEL_CHUNKS_FREE (S) ;
+	S->LU = packed ;
+	S->lusize = total ;
+	return (total) ;
+    }
     for (p = 0 ; p < S->n ; p++)
     {
 	Li = (Int *) (S->LU + S->Lip [p]) ;
@@ -912,6 +1034,10 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     S.tol = Common->tol ;
     S.memgrow = Common->memgrow ;
     S.no_prune = 0 ;
+    S.colptr = NULL ;
+    S.chunk_head = NULL ;
+    S.chunk_used = 0 ;
+    S.chunk_size = 0 ;
 
     KLS_KLU_KERNEL_INIT (&S) ;
 
