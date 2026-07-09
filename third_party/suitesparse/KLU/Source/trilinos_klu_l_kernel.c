@@ -1244,6 +1244,11 @@ typedef struct kls_klu_par_shared_s
     Int *parent ;
     _Atomic char *defer ;
     _Atomic int abort_flag ;
+    _Atomic long defer_count ;
+    long defer_limit ;   /* heavy deferral: not a diagonal-claimable
+			    matrix; abort and let the caller retry
+			    serially instead of grinding the no-prune
+			    cleanup (mac_econ: 37s wasted attempt) */
     pthread_barrier_t barrier ;
     int nthreads ;
 } kls_klu_par_shared ;
@@ -1276,10 +1281,12 @@ static void *kls_klu_par_worker_main (void *arg)
 		r = KLS_KLU_KERNEL_STEP (&W->S, k) ;
 		if (r == 2)
 		{
+		    long marked = 0 ;
 		    /* defer this column and its etree ancestor path:
 		       every dependent of k is one of k's ancestors */
 		    atomic_store_explicit (&sh->defer [k], 1,
 					   memory_order_release) ;
+		    marked++ ;
 		    for (j = sh->parent [k] ; j != TRILINOS_KLU_EMPTY ;
 			 j = sh->parent [j])
 		    {
@@ -1290,6 +1297,15 @@ static void *kls_klu_par_worker_main (void *arg)
 			}
 			atomic_store_explicit (&sh->defer [j], 1,
 					       memory_order_release) ;
+			marked++ ;
+		    }
+		    if (atomic_fetch_add_explicit (&sh->defer_count, marked,
+						   memory_order_relaxed) +
+			marked > sh->defer_limit)
+		    {
+			atomic_store_explicit (&sh->abort_flag, 1,
+					       memory_order_release) ;
+			break ;
 		    }
 		}
 		else if (r != 0)
@@ -1463,6 +1479,8 @@ size_t KLS_KLU_KERNEL_LEVELS
 	    sh.parent = parent ;
 	    sh.defer = (_Atomic char *) calloc ((size_t) n, 1) ;
 	    atomic_init (&sh.abort_flag, 0) ;
+	    atomic_init (&sh.defer_count, 0) ;
+	    sh.defer_limit = (long) n / 10 + 64 ;
 	    sh.nthreads = nthreads ;
 	    if (sh.defer == NULL ||
 		pthread_barrier_init (&sh.barrier, NULL,
@@ -1723,9 +1741,21 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     ASSERT (Common != NULL) ;
     if (n >= 512 && getenv ("KLS_KLU_LEVELS") != NULL)
     {
-	return (KLS_KLU_KERNEL_LEVELS (n, Ap, Ai, Ax, Q, lusize, Pinv, P,
-	    p_LU, Udiag, Llen, Ulen, Lip, Uip, lnz, unz, X, Stack, Flag,
-	    Ap_pos, Lpend, k1, PSinv, Rs, Offp, Offi, Offx, Common)) ;
+	size_t par_size = KLS_KLU_KERNEL_LEVELS (n, Ap, Ai, Ax, Q, lusize,
+	    Pinv, P, p_LU, Udiag, Llen, Ulen, Lip, Uip, lnz, unz, X, Stack,
+	    Flag, Ap_pos, Lpend, k1, PSinv, Rs, Offp, Offi, Offx, Common) ;
+	if (Common->status == TRILINOS_KLU_OK)
+	{
+	    return (par_size) ;
+	}
+	/* pivot starvation (diagonal claims can strand a deferred
+	   column) or another parallel-path failure: retry the block
+	   with the classic serial kernel on the same (possibly
+	   repacked) LU allocation */
+	Common->status = TRILINOS_KLU_OK ;
+	Common->numerical_rank = TRILINOS_KLU_EMPTY ;
+	Common->singular_col = TRILINOS_KLU_EMPTY ;
+	lusize = par_size ;
     }
     S.n = n ;
     S.Ap = Ap ;
