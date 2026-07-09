@@ -20175,6 +20175,9 @@ static int kls_snode_trace_enabled(void) {
 }
 static UF_long kls_snode_trace_batched_tail_entries = 0;
 static UF_long kls_snode_trace_batches = 0;
+static UF_long kls_snode_trace_pair_batches = 0;
+static UF_long kls_snode_trace_pair_producers = 0;
+static UF_long kls_snode_trace_pair_columns = 0;
 static UF_long kls_snode_trace_t_hist[7];
 static UF_long kls_snode_trace_tlen_sum = 0;
 static UF_long kls_snode_trace_tlen_max = 0;
@@ -20183,12 +20186,16 @@ __attribute__((destructor)) static void kls_snode_trace_report(void) {
   if (getenv("KLS_TRACE_SNODE") != NULL) {
     fprintf(stderr,
             "KLS snode: batched_producers=%ld tail_entries=%ld "
-            "decline_norun=%ld decline_short=%ld decline_work=%ld\n",
+            "decline_norun=%ld decline_short=%ld decline_work=%ld"
+            " pair_batches=%ld pair_producers=%ld pair_columns=%ld\n",
             (long)kls_snode_trace_batched_producers,
             (long)kls_snode_trace_batched_tail_entries,
             (long)kls_snode_trace_decline_norun,
             (long)kls_snode_trace_decline_short,
-            (long)kls_snode_trace_decline_work);
+            (long)kls_snode_trace_decline_work,
+            (long)kls_snode_trace_pair_batches,
+            (long)kls_snode_trace_pair_producers,
+            (long)kls_snode_trace_pair_columns);
     fprintf(stderr,
             "KLS snode: batches=%ld avg_t=%.1f avg_tlen=%.1f max_tlen=%ld"
             " t:2-3=%ld 4-7=%ld 8-15=%ld 16-31=%ld 32-63=%ld 64+=%ld\n",
@@ -71040,6 +71047,8 @@ static UF_long kls_snode_batch_consume_cached_pair(
   if (kls_snode_trace_enabled()) {
     kls_snode_trace_batched_producers += 2u * t;
     kls_snode_trace_batched_tail_entries += 2u * t * tlen;
+    kls_snode_trace_pair_batches += 1u;
+    kls_snode_trace_pair_producers += t;
   }
   return t;
 }
@@ -72944,6 +72953,181 @@ static int kls_egraph_refactor_btf_unscaled_column(
   }
   if (supernode_numeric_updates) {
     kls_egraph_publish_supernode_panel_column(shared, k);
+  }
+  return 1;
+}
+
+/* BTF twin of the single-unscaled pair: two leased same-block columns
+   walked cooperatively so shared producer runs stream once.  The group
+   state machinery is informed via the existing dispatch-bypass branch;
+   the fp64 scalar-run exec is skipped (it either blocks or assumes done
+   dependencies) - declined batch positions go through done_now-gated
+   scalars.  Caller guarantees the plain flag surface and same block. */
+static int kls_egraph_refactor_btf_unscaled_column_pair(
+  kls_egraph_refactor_worker *worker,
+  UF_long ka,
+  UF_long kb) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  double *xa = worker->x;
+  double *xb = worker->pair_x;
+  double *udiag = (double *)numeric->Udiag;
+  UF_long **l_indices = solver->refactor_l_indices;
+  int32_t **l_indices32 = solver->refactor_l_indices32;
+  double **l_values = solver->refactor_l_values;
+  UF_long **u_indices = solver->refactor_u_indices;
+  double **u_values = solver->refactor_u_values;
+  if (solver->refactor_lu_pointer_count != solver->n ||
+      l_indices == NULL || l_values == NULL ||
+      u_indices == NULL || u_values == NULL || xb == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  const UF_long block = solver->refactor_col_block[ka];
+  const UF_long k1 = symbolic->R[block];
+  const UF_long local_a = ka - k1;
+  const UF_long local_b = kb - k1;
+  const UF_long *llen = numeric->Llen + k1;
+
+  UF_long poff = numeric->Offp[ka];
+  double *offx = (double *)numeric->Offx;
+  if (!kls_egraph_copy_unscaled_offblock_input(
+        solver, shared->values, offx, &poff, numeric->Offp[ka + 1u],
+        solver->refactor_col_ptr[ka], solver->refactor_block_start[ka])) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  poff = numeric->Offp[kb];
+  if (!kls_egraph_copy_unscaled_offblock_input(
+        solver, shared->values, offx, &poff, numeric->Offp[kb + 1u],
+        solver->refactor_col_ptr[kb], solver->refactor_block_start[kb])) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  kls_egraph_record_btf_scalar_run_group_state_exec_dispatch_bypass(worker,
+                                                                    ka);
+  kls_egraph_record_btf_scalar_run_group_state_exec_dispatch_bypass(worker,
+                                                                    kb);
+  kls_egraph_scatter_btf_unscaled_input(
+    solver, shared->values, xa, k1, solver->refactor_block_start[ka],
+    solver->refactor_col_ptr[ka + 1u]);
+  kls_egraph_scatter_btf_unscaled_input(
+    solver, shared->values, xb, k1, solver->refactor_block_start[kb],
+    solver->refactor_col_ptr[kb + 1u]);
+
+  UF_long *uia = u_indices[ka];
+  UF_long *uib = u_indices[kb];
+  const int32_t *uia32 = solver->refactor_u_indices32 != NULL
+    ? solver->refactor_u_indices32[ka] : NULL;
+  const int32_t *uib32 = solver->refactor_u_indices32 != NULL
+    ? solver->refactor_u_indices32[kb] : NULL;
+  double *uxa = u_values[ka];
+  double *uxb = u_values[kb];
+  const UF_long ulen_a = numeric->Ulen[ka];
+  const UF_long ulen_b = numeric->Ulen[kb];
+  UF_long upa = 0;
+  UF_long upb = 0;
+  const UF_long producer_limit = local_a < local_b ? local_a : local_b;
+
+  int a_done = 0;
+  int b_done = 0;
+  unsigned spin = 0;
+  while (!a_done || !b_done) {
+    if (kls_egraph_refactor_should_stop(shared)) {
+      return 0;
+    }
+    int progress = 0;
+    if (upa < ulen_a && upb < ulen_b) {
+      const UF_long ja = uia32 != NULL ? (UF_long)uia32[upa] : uia[upa];
+      const UF_long jb = uib32 != NULL ? (UF_long)uib32[upb] : uib[upb];
+      if (ja == jb) {
+        const UF_long consumed = kls_snode_batch_consume_cached_pair(
+          l_indices, l_values, llen, uia, uia32, uxa, ulen_a, upa, xa,
+          uib, uib32, uxb, ulen_b, upb, xb, k1, producer_limit,
+          solver->snode_run_end, shared, 1);
+        if (consumed != 0u) {
+          upa += consumed;
+          upb += consumed;
+          progress = 1;
+        }
+      }
+    }
+    if (!progress && upa < ulen_a) {
+      const UF_long consumed = kls_snode_batch_consume_cached(
+        l_indices, l_values, llen, uia, uia32, uxa, ulen_a, upa, xa, k1,
+        local_a, solver->snode_run_end, shared, 1, NULL);
+      if (consumed != 0u) {
+        upa += consumed;
+        progress = 1;
+      } else {
+        const UF_long ja = uia32 != NULL ? (UF_long)uia32[upa] : uia[upa];
+        if (kls_egraph_refactor_dependency_done_now(shared, k1 + ja)) {
+          kls_egraph_refactor_apply_btf_scalar_dep(
+            shared, k1, ka, ja, upa, uxa, l_indices, l_indices32, l_values,
+            llen, xa, 0);
+          upa++;
+          progress = 1;
+        }
+      }
+    }
+    if (!progress && upb < ulen_b) {
+      const UF_long consumed = kls_snode_batch_consume_cached(
+        l_indices, l_values, llen, uib, uib32, uxb, ulen_b, upb, xb, k1,
+        local_b, solver->snode_run_end, shared, 1, NULL);
+      if (consumed != 0u) {
+        upb += consumed;
+        progress = 1;
+      } else {
+        const UF_long jb = uib32 != NULL ? (UF_long)uib32[upb] : uib[upb];
+        if (kls_egraph_refactor_dependency_done_now(shared, k1 + jb)) {
+          kls_egraph_refactor_apply_btf_scalar_dep(
+            shared, k1, kb, jb, upb, uxb, l_indices, l_indices32, l_values,
+            llen, xb, 0);
+          upb++;
+          progress = 1;
+        }
+      }
+    }
+    if (!a_done && upa >= ulen_a) {
+      const double ukka = xa[local_a];
+      xa[local_a] = 0.0;
+      if (ukka == 0.0) {
+        kls_egraph_refactor_record_singular(shared, ka, symbolic->Q[ka]);
+        if (solver->common.halt_if_singular) {
+          return 0;
+        }
+      }
+      udiag[ka] = ukka;
+      kls_egraph_store_l_column_from_workspace(solver, xa, ka,
+                                               l_indices[ka], l_values[ka],
+                                               llen[local_a], ukka);
+      kls_egraph_refactor_mark_done(shared, ka);
+      a_done = 1;
+      progress = 1;
+    }
+    if (!b_done && upb >= ulen_b) {
+      const double ukkb = xb[local_b];
+      xb[local_b] = 0.0;
+      if (ukkb == 0.0) {
+        kls_egraph_refactor_record_singular(shared, kb, symbolic->Q[kb]);
+        if (solver->common.halt_if_singular) {
+          return 0;
+        }
+      }
+      udiag[kb] = ukkb;
+      kls_egraph_store_l_column_from_workspace(solver, xb, kb,
+                                               l_indices[kb], l_values[kb],
+                                               llen[local_b], ukkb);
+      kls_egraph_refactor_mark_done(shared, kb);
+      b_done = 1;
+      progress = 1;
+    }
+    if (!progress) {
+      kls_cpu_relax();
+      kls_egraph_pipeline_pause(&spin);
+    }
   }
   return 1;
 }
@@ -82600,19 +82784,54 @@ static int kls_egraph_refactor_try_pop_ready_column(
 static int kls_egraph_pair_dispatch_allowed(
   const kls_egraph_refactor_shared *shared) {
   return kls_pair_dispatch_enabled() &&
-         shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED &&
+         (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED ||
+          shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED) &&
          !shared->check_pivots &&
          !shared->supernode_numeric_updates &&
          !shared->supernode_consumer_plan_group_l_exec &&
+         !shared->supernode_consumer_plan_group_l_values &&
          !shared->u_supernode_ragged_l_updates &&
          !shared->u_supernode_values &&
          !shared->algorithm5_prefactor_updates &&
          !shared->supernode_algorithm5_payoff_direct_prefix_current_state &&
          !shared->supernode_algorithm5_payoff_direct_prefix_advance_seed &&
+         !shared->supernode_algorithm5_payoff_direct_prefix_complete &&
          !shared->use_fp32_l_values &&
          shared->solver != NULL &&
          shared->solver->snode_run_end != NULL &&
          !kls_batch_consume_disabled();
+}
+
+/* Route a leased/popped column pair to the kernel-matched pair walk.
+   Returns 1 on success, 0 on failure (caller records invalid), and -1
+   when this pair cannot be fused (caller dispatches both singly). */
+static int kls_egraph_refactor_dispatch_pair(
+  kls_egraph_refactor_worker *worker,
+  UF_long col,
+  UF_long col2) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  if (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED) {
+    return kls_egraph_refactor_single_unscaled_column_pair(worker, col,
+                                                           col2);
+  }
+  if (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED) {
+    const kls_solver *solver = shared->solver;
+    const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+    if (solver->refactor_col_block == NULL ||
+        solver->refactor_col_block[col] !=
+          solver->refactor_col_block[col2]) {
+      return -1;
+    }
+    const UF_long block = solver->refactor_col_block[col];
+    if (symbolic->R[block + 1u] - symbolic->R[block] <= 1u) {
+      return -1;
+    }
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_pair_columns += 2u;
+    }
+    return kls_egraph_refactor_btf_unscaled_column_pair(worker, col, col2);
+  }
+  return -1;
 }
 
 static void kls_egraph_refactor_worker_run_ready_pipeline(
@@ -82670,12 +82889,24 @@ static void kls_egraph_refactor_worker_run_ready_pipeline(
       }
     }
     if (have_pair) {
-      if (!kls_egraph_refactor_single_unscaled_column_pair(worker, col,
-                                                           col2)) {
+      const int pair_status =
+        kls_egraph_refactor_dispatch_pair(worker, col, col2);
+      if (pair_status == 0) {
         if (!kls_egraph_refactor_should_stop(shared)) {
           kls_egraph_refactor_record_invalid(shared);
         }
         break;
+      }
+      if (pair_status < 0) {
+        if (!kls_egraph_refactor_dispatch_column(worker, col, 1) ||
+            (kls_egraph_refactor_mark_done(shared, col),
+             !kls_egraph_refactor_dispatch_column(worker, col2, 1))) {
+          if (!kls_egraph_refactor_should_stop(shared)) {
+            kls_egraph_refactor_record_invalid(shared);
+          }
+          break;
+        }
+        kls_egraph_refactor_mark_done(shared, col2);
       }
       if (!kls_egraph_refactor_publish_ready_successors(worker, col) ||
           !kls_egraph_refactor_publish_ready_successors(worker, col2)) {
@@ -82906,12 +83137,29 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           }
         }
         if (lease_status > 0 && lease2 > 0) {
-          if (!kls_egraph_refactor_single_unscaled_column_pair(worker, col,
-                                                               col2)) {
+          const int pair_status =
+            kls_egraph_refactor_dispatch_pair(worker, col, col2);
+          if (pair_status == 0) {
             if (!kls_egraph_refactor_should_stop(shared)) {
               kls_egraph_refactor_record_invalid(shared);
             }
             break;
+          }
+          if (pair_status < 0) {
+            if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
+              if (!kls_egraph_refactor_should_stop(shared)) {
+                kls_egraph_refactor_record_invalid(shared);
+              }
+              break;
+            }
+            kls_egraph_refactor_mark_done(shared, col);
+            if (!kls_egraph_refactor_dispatch_column(worker, col2, 1)) {
+              if (!kls_egraph_refactor_should_stop(shared)) {
+                kls_egraph_refactor_record_invalid(shared);
+              }
+              break;
+            }
+            kls_egraph_refactor_mark_done(shared, col2);
           }
           if (kls_egraph_refactor_after_pipeline_column_done(worker,
                                                              col) < 0 ||
