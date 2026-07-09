@@ -379,6 +379,7 @@ struct kls_solver {
   int metis_race_deferred;
   int metis_race_deferred_invalid;
   int prestatic_deferred;
+  int factor_preps_deferred;
   int block_trial_active;
   int numeric_needs_refinement;
   int in_solve_refinement;
@@ -122190,6 +122191,15 @@ int kls_factor(kls_solver *solver, const double *values) {
       kls_update_numeric_diagnostics(solver, 1);
     }
     KLS_PHASE("diag")
+    if (solver->n >= 1000000 && getenv("KLS_DEFER_FACTOR_PREPS") != NULL) {
+      /* Giant-class engine/solve preps (row patterns, solve transpose
+         plans, pts trials, panel sorts: ~23% of memchip's factor CPU)
+         only pay off across repeated refactors; run them from the first
+         refactorization so the one-shot factor path stays lean.  Solves
+         before any refactor take the plain paths. */
+      solver->factor_preps_deferred = 1;
+      goto factor_preps_deferred_exit;
+    }
     if (kls_first_factor_used && solver->common.status >= TRILINOS_KLU_OK) {
       const double start = kls_now_seconds();
       (void)kls_prepare_auto_row_refactor_from_numeric(solver);
@@ -122211,6 +122221,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     KLS_PHASE("sched")
     kls_maybe_prepare_model_row_refactor_from_numeric(solver, &elapsed);
     KLS_PHASE("row_model")
+factor_preps_deferred_exit:;
 #undef KLS_PHASE
     if (trace_phases) {
       fprintf(stderr, "KLS factor exit elapsed=%.3fs wall=%.3fs\n", elapsed,
@@ -122242,6 +122253,22 @@ int kls_refactor(kls_solver *solver, const double *values) {
     double prestatic_elapsed = 0.0;
     maybe_select_pre_static_row_match(solver, &prestatic_elapsed,
                                       numeric_values, 1);
+  }
+  if (solver->factor_preps_deferred) {
+    solver->factor_preps_deferred = 0;
+    double preps_elapsed = 0.0;
+    if (solver->common.status >= TRILINOS_KLU_OK) {
+      (void)kls_prepare_auto_row_refactor_from_numeric(solver);
+    }
+    kls_maybe_prepare_snode_panels(solver, &preps_elapsed);
+    kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
+    (void)kls_i32_solve_ready(solver);
+    kls_pts_maybe_trial(solver, numeric_values, &preps_elapsed);
+    kls_maybe_seed_row_solve_values_from_numeric(solver, &preps_elapsed);
+    maybe_prepare_refactor_map(solver, &preps_elapsed);
+    maybe_prepare_refactor_schedule(solver, &preps_elapsed);
+    kls_maybe_prepare_model_row_refactor_from_numeric(solver,
+                                                      &preps_elapsed);
   }
 #ifdef KLS_HAVE_METIS
   if (solver->metis_race_deferred && kls_metis_race_ready(solver)) {
