@@ -21262,6 +21262,11 @@ static void free_numeric(kls_solver *solver) {
   solver->fp32_mirror_fresh = 0;
   /* deferral flags are solver-level intent (the consult re-validates);
      mid-factor numeric replacements must not wipe them */
+  if (solver->n >= 1000000 && getenv("KLS_DEFER_FACTOR_PREPS") != NULL) {
+    /* the panels/seeds freed below must be re-prepped by the next
+       refactorization's consult */
+    solver->factor_preps_deferred = 1;
+  }
   solver->base_solve_seconds = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
