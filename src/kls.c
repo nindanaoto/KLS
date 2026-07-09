@@ -21299,6 +21299,13 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
     /* the numeric this consult would compare against is being replaced */
     solver->metis_race_deferred_invalid = 1;
   }
+  if (solver->n >= 1000000 && getenv("KLS_DEFER_FACTOR_PREPS") != NULL) {
+    /* deferred-preps regime: a replacement wipes the engine prep state
+       (panels, run ends, seeds), exactly like mid-factor replacements do
+       before the sync exit block re-preps; re-arm the consult so the
+       next refactorization rebuilds them */
+    solver->factor_preps_deferred = 1;
+  }
   solver->base_solve_seconds = 0.0;
   /* the snb verdicts describe the OLD numeric's pattern; a replacement
      (METIS promotion, scale/row-match adoption) is a different engine
