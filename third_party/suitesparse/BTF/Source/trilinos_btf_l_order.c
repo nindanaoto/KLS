@@ -62,6 +62,43 @@ Int TRILINOS_BTF(order)	    /* returns number of blocks found */
     /* compute the maximum matching */
     /* ---------------------------------------------------------------------- */
 
+    /* Zero-free diagonal quick check: a full structural diagonal is already
+     * a maximum matching, and every maximum matching yields the same block
+     * triangular form.  The cheap-match phase in maxtrans assigns the first
+     * unmatched row of each column, so full-diagonal circuit matrices would
+     * otherwise pay an augmenting-path repair for nearly every column. */
+    {
+	Int diag_full = 1 ;
+	for (j = 0 ; diag_full && j < n ; j++)
+	{
+	    Int p ;
+	    Int found = 0 ;
+	    for (p = Ap [j] ; p < Ap [j+1] ; p++)
+	    {
+		if (Ai [p] == j)
+		{
+		    found = 1 ;
+		    break ;
+		}
+	    }
+	    diag_full = found ;
+	}
+	if (diag_full)
+	{
+	    for (i = 0 ; i < n ; i++)
+	    {
+		Q [i] = i ;
+	    }
+	    *nmatch = n ;
+	    if (work != NULL)
+	    {
+		*work = 0 ;
+	    }
+	    nblocks = TRILINOS_BTF(strongcomp) (n, Ap, Ai, Q, P, R, Work) ;
+	    return (nblocks) ;
+	}
+    }
+
     /* if maxwork > 0, then a maximum matching might not be found */
 
     *nmatch = TRILINOS_BTF(maxtrans) (n, n, Ap, Ai, maxwork, work, Q, Work) ;
