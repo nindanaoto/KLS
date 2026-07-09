@@ -23761,13 +23761,19 @@ static int analyze_with_ordering(UF_long n,
        analyses concurrently) */
     extern UF_long trilinos_amd_l2_amf;
     {
-      /* mean-local-fill scoring (Rothberg-Eisenstat AMMF) dominates the
-         plain deficiency in every measured estimate (ASIC_320k 9.7e8 vs
-         1.24e9, TSOPF 1.31e5 vs METIS 1.50e5 fill); the old scoring
-         stays reachable for comparisons */
+      /* mean-local-fill scoring (Rothberg-Eisenstat AMMF) wins on the
+         small classes (TSOPF est 1.31e5 vs METIS 1.50e5) but its lower
+         fill estimates SERIALIZE the pipelined refactor at scale
+         (ASIC_320ks: AMMF bootstrap beat the race-METIS promotion on
+         est flops 6.8e8 vs 9.4e8 yet refactors at 66 vs 43ms, suite
+         2.42x) - keep the old scoring above the small-matrix line
+         until ordering acceptance is timing-aware. */
       const char *amf_mode = getenv("KLS_AMF_MODE");
-      trilinos_amd_l2_amf =
-        amf_mode != NULL && amf_mode[0] == '1' ? 1 : 2;
+      if (amf_mode != NULL && amf_mode[0] != '\0') {
+        trilinos_amd_l2_amf = amf_mode[0] == '1' ? 1 : 2;
+      } else {
+        trilinos_amd_l2_amf = n <= 30000 ? 2 : 1;
+      }
     }
     common.ordering = 0;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
