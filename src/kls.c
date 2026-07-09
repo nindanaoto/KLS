@@ -51905,7 +51905,11 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
   }
   solver->stats.row_refactor_auto_model_recommended = 1;
   if (solver->refactor_level_ptr == NULL ||
-      solver->refactor_dependency_work <= 0.0) {
+      solver->refactor_dependency_work < 1.0e7) {
+    /* Below ~1e7 dependency work the plan build (~4ms on rajat03)
+       exceeds anything the row engine could win back, and the timed
+       acceptance has never adopted at that scale; the adopters all
+       measure >=1e8. */
     return;
   }
 
