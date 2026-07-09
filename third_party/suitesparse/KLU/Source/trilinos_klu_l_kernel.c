@@ -1114,6 +1114,10 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
 	const Int ncols = S->cols_done ;
 	for (p = 0 ; p < ncols ; p++)
 	{
+	    if (S->colptr [p] == NULL)
+	    {
+		continue ;   /* never processed (parallel failure path) */
+	    }
 	    total += UNITS (Int, S->Llen [p]) + UNITS (Entry, S->Llen [p]) +
 		     UNITS (Int, S->Ulen [p]) + UNITS (Entry, S->Ulen [p]) ;
 	}
@@ -1127,7 +1131,16 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
 	off = 0 ;
 	for (p = 0 ; p < ncols ; p++)
 	{
-	    size_t lunits = UNITS (Int, S->Llen [p]) +
+	    size_t lunits ;
+	    if (S->colptr [p] == NULL)
+	    {
+		S->Lip [p] = 0 ;
+		S->Uip [p] = 0 ;
+		S->Llen [p] = 0 ;
+		S->Ulen [p] = 0 ;
+		continue ;
+	    }
+	    lunits = UNITS (Int, S->Llen [p]) +
 			    UNITS (Entry, S->Llen [p]) ;
 	    size_t uunits = UNITS (Int, S->Ulen [p]) +
 			    UNITS (Entry, S->Ulen [p]) ;
@@ -1407,8 +1420,7 @@ size_t KLS_KLU_KERNEL_LEVELS
     S.pack_keep_row_indices = 0 ;
     S.chunk_head = NULL ; S.chunk_used = 0 ; S.chunk_size = 0 ;
     S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) * sizeof (Unit)) ;
-    S.colptr = (Unit **) TRILINOS_KLU_malloc ((size_t) n, sizeof (Unit *),
-					      Common) ;
+    S.colptr = (Unit **) calloc ((size_t) n, sizeof (Unit *)) ;
     if (S.colptr == NULL)
     {
 	TRILINOS_KLU_free (parent, (size_t) (6*n + 2), sizeof (Int), Common) ;
@@ -1536,20 +1548,31 @@ size_t KLS_KLU_KERNEL_LEVELS
 		    S.lnz += workers [t].S.lnz ;
 		    S.unz += workers [t].S.unz ;
 		}
-		/* serial cleanup: deferred columns in ascending order */
-		for (k = 0 ; k < n ; k++)
+		/* serial cleanup: deferred columns in ascending order.
+		   Diagonal claims can assign rows differently than the
+		   classic pivot order would, so a deferred column may
+		   find its candidates taken; that is pivot STARVATION,
+		   not singularity - take the zero-pivot rescue (the
+		   caller's probe/nudge/refinement machinery arbitrates,
+		   as on the predicted path) instead of halting. */
 		{
-		    if (!atomic_load_explicit (&sh.defer [k],
-					       memory_order_acquire))
+		    Int saved_halt = Common->halt_if_singular ;
+		    Common->halt_if_singular = 0 ;
+		    for (k = 0 ; k < n ; k++)
 		    {
-			continue ;
+			if (!atomic_load_explicit (&sh.defer [k],
+						   memory_order_acquire))
+			{
+			    continue ;
+			}
+			result = KLS_KLU_KERNEL_STEP (&S, k) ;
+			if (result != 0)
+			{
+			    cleanup_failed = 1 ;
+			    break ;
+			}
 		    }
-		    result = KLS_KLU_KERNEL_STEP (&S, k) ;
-		    if (result != 0)
-		    {
-			cleanup_failed = 1 ;
-			break ;
-		    }
+		    Common->halt_if_singular = saved_halt ;
 		}
 		S.cols_done = cleanup_failed ? S.cols_done : n ;
 		for (t = 1 ; t < nthreads ; t++)
@@ -1580,8 +1603,7 @@ size_t KLS_KLU_KERNEL_LEVELS
 		    free (workers [t].S.scratch) ;
 		}
 		free ((void *) sh.defer) ;
-		TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *),
-				   Common) ;
+		free (S.colptr) ;
 		TRILINOS_KLU_free (parent, (size_t) (6*n + 2), sizeof (Int),
 				   Common) ;
 		*p_LU = S.LU ;
@@ -1625,8 +1647,8 @@ size_t KLS_KLU_KERNEL_LEVELS
 	    {
 		S.pack_keep_row_indices = 1 ;
 		final_size = KLS_KLU_KERNEL_FINISH (&S) ;
-		TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *),
-				   Common) ;
+		free (S.scratch) ;
+		free (S.colptr) ;
 		TRILINOS_KLU_free (parent, (size_t) (6*n + 2), sizeof (Int),
 				   Common) ;
 		*p_LU = S.LU ;
@@ -1639,7 +1661,7 @@ size_t KLS_KLU_KERNEL_LEVELS
 
     final_size = KLS_KLU_KERNEL_FINISH (&S) ;
     free (S.scratch) ;
-    TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *), Common) ;
+    free (S.colptr) ;
     TRILINOS_KLU_free (parent, (size_t) (6*n + 2), sizeof (Int), Common) ;
     *p_LU = S.LU ;
     *lnz = S.lnz ;
