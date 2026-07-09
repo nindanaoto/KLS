@@ -9,6 +9,7 @@
 /* This file should make the long int version of KLU */
 #define DLONG 1
 
+#include <stdlib.h>
 #include "trilinos_klu_internal.h"
 
 /* ========================================================================== */
@@ -150,7 +151,33 @@ static Int analyze_worker	/* returns TRILINOS_KLU_OK or < 0 if error */
 	    /* order the block with AMD (C+C') */
 	    /* -------------------------------------------------------------- */
 
-	    result = TRILINOS_AMD_order (nk, Cp, Ci, Pblk, NULL, amd_Info) ;
+	    /* KLS: optional AMD variant knobs for ordering trials */
+	    {
+		double kls_amd_control [TRILINOS_AMD_CONTROL] ;
+		double *kls_amd_control_ptr = NULL ;
+		const char *kls_amd_dense = getenv ("KLS_AMD_DENSE") ;
+		const char *kls_amd_aggr = getenv ("KLS_AMD_AGGRESSIVE") ;
+		if (kls_amd_dense != NULL || kls_amd_aggr != NULL)
+		{
+		    /* defaults per trilinos_amd.h; the defaults object is not
+		       compiled into this build */
+		    kls_amd_control [TRILINOS_AMD_DENSE] = 10.0 ;
+		    kls_amd_control [TRILINOS_AMD_AGGRESSIVE] = 1.0 ;
+		    if (kls_amd_dense != NULL)
+		    {
+			kls_amd_control [TRILINOS_AMD_DENSE] =
+			    atof (kls_amd_dense) ;
+		    }
+		    if (kls_amd_aggr != NULL)
+		    {
+			kls_amd_control [TRILINOS_AMD_AGGRESSIVE] =
+			    atof (kls_amd_aggr) ;
+		    }
+		    kls_amd_control_ptr = kls_amd_control ;
+		}
+		result = TRILINOS_AMD_order (nk, Cp, Ci, Pblk,
+		    kls_amd_control_ptr, amd_Info) ;
+	    }
 	    ok = (result >= TRILINOS_AMD_OK) ;
 	    if (result == TRILINOS_AMD_OUT_OF_MEMORY)
 	    {
