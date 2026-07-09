@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 /* ========================================================================== */
 /* === TRILINOS_KLU_kernel =========================================================== */
 /* ========================================================================== */
@@ -17,6 +18,10 @@
 /* ========================================================================== */
 
 /* Does a depth-first-search, starting at node j. */
+
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdlib.h>
 
 /* chunked mode: stable per-column storage; classic mode: base+offset */
 #define KLS_COL_BASE(Colptr,LU,Lip,j) \
@@ -640,6 +645,125 @@ static void prune
 
 
 /* ========================================================================== */
+/* Diagonal-claim pivot for the parallel phase: identical selection to
+ * lpivot, but if the threshold test would choose an off-diagonal pivot
+ * (or the column is structurally singular), all effects are rolled back
+ * and RETRY is returned so the column defers to the serial cleanup.
+ * Distinct columns own distinct diagonal rows, so accepted claims are
+ * collision-free without atomics. */
+#define KLS_PIVOT_RETRY (-2)
+static Int kls_lpivot_diag_claim
+(
+    Int diagrow,
+    Int *p_pivrow,
+    Entry *p_pivot,
+    double *p_abs_pivot,
+    double tol,
+    Entry X [ ],
+    Unit *LU,
+    Int Lip [ ],
+    Int Llen [ ],
+    Int k,
+    Int n
+)
+{
+    Entry x, pivot, *Lx ;
+    double abs_pivot, xabs ;
+    Int p, i, pdiag, *Li, last_row_index, len ;
+
+    if (Llen [k] == 0)
+    {
+	return (KLS_PIVOT_RETRY) ;   /* structurally singular: serial path */
+    }
+    i = Llen [k] - 1 ;
+    GET_POINTER (LU, Lip, Llen, Li, Lx, k, len) ;
+    last_row_index = Li [i] ;
+    Llen [k] = i ;
+    GET_POINTER (LU, Lip, Llen, Li, Lx, k, len) ;
+
+    pdiag = TRILINOS_KLU_EMPTY ;
+    abs_pivot = 0 ;
+    for (p = 0 ; p < len ; p++)
+    {
+	i = Li [p] ;
+	x = X [i] ;
+	Lx [p] = x ;    /* gather (X preserved for possible rollback) */
+	ABS (xabs, x) ;
+	if (i == diagrow)
+	{
+	    pdiag = p ;
+	}
+	if (xabs > abs_pivot)
+	{
+	    abs_pivot = xabs ;
+	}
+    }
+    ABS (xabs, X [last_row_index]) ;
+    if (xabs > abs_pivot)
+    {
+	abs_pivot = xabs ;
+    }
+
+    if (last_row_index == diagrow)
+    {
+	ABS (xabs, X [last_row_index]) ;
+	if (!(xabs >= tol * abs_pivot) || xabs == 0)
+	{
+	    /* the gather's Lx[0] clobbered Li[len] (same unit): restore */
+	    Li [len] = last_row_index ;
+	    Llen [k] = len + 1 ;
+	    return (KLS_PIVOT_RETRY) ;
+	}
+	pivot = X [last_row_index] ;
+	abs_pivot = xabs ;
+	/* diagonal is the dropped last entry: keep L as gathered */
+	for (p = 0 ; p < len ; p++)
+	{
+	    CLEAR (X [Li [p]]) ;
+	}
+	CLEAR (X [last_row_index]) ;
+    }
+    else if (pdiag != TRILINOS_KLU_EMPTY)
+    {
+	ABS (xabs, Lx [pdiag]) ;
+	if (!(xabs >= tol * abs_pivot) || xabs == 0)
+	{
+	    /* the gather's Lx[0] clobbered Li[len] (same unit): restore */
+	    Li [len] = last_row_index ;
+	    Llen [k] = len + 1 ;
+	    return (KLS_PIVOT_RETRY) ;
+	}
+	pivot = Lx [pdiag] ;
+	abs_pivot = xabs ;
+	/* swap the dropped last entry into the diagonal slot */
+	Li [pdiag] = last_row_index ;
+	Lx [pdiag] = X [last_row_index] ;
+	for (p = 0 ; p < len ; p++)
+	{
+	    CLEAR (X [Li [p]]) ;
+	}
+	CLEAR (X [diagrow]) ;
+	CLEAR (X [last_row_index]) ;
+    }
+    else
+    {
+	/* diagonal not present in the column */
+	Li [len] = last_row_index ;
+	Llen [k] = len + 1 ;
+	return (KLS_PIVOT_RETRY) ;
+    }
+
+    for (p = 0 ; p < len ; p++)
+    {
+	DIV (Lx [p], Lx [p], pivot) ;
+    }
+    *p_pivrow = diagrow ;
+    *p_pivot = pivot ;
+    *p_abs_pivot = abs_pivot ;
+    return (TRUE) ;
+}
+
+/* ========================================================================== */
 /* === KLS per-column step API ============================================== */
 /* ========================================================================== */
 
@@ -684,9 +808,15 @@ typedef struct KLS_KLU_KERNEL_STATE_STRUCT
     double tol ;
     double memgrow ;
     Int no_prune ;   /* parallel drivers: finalized columns stay immutable */
+    Int diag_claim ; /* parallel phase: only diagonal pivots; else defer */
     /* chunked storage (parallel drivers): stable per-column pointers,
        arena chunks never realloc once a column is published */
     Unit **colptr ;         /* size n, or NULL for classic base+offset */
+    Unit *scratch ;         /* chunked: per-worker column build buffer
+			       (size 2n+4 units); columns copy to exact-
+			       size chunks at publish, so the arena holds
+			       only real fill instead of the O(n^2) dense
+			       bound */
     Int cols_done ;         /* columns completed (chunked pack bound) */
     Int pack_keep_row_indices ; /* early-return pack: match the classic
 				   mid-factor layout (no Pinv convert) */
@@ -704,7 +834,9 @@ static Unit *kls_klu_chunk_alloc (KLS_KLU_KERNEL_STATE *S, size_t nunits)
 	size_t want = S->chunk_size > 0 ? S->chunk_size : (size_t) 1 << 18 ;
 	Unit *chunk ;
 	while (want < nunits + 1) want *= 2 ;
-	chunk = (Unit *) TRILINOS_KLU_malloc (want, sizeof (Unit), S->Common) ;
+	/* raw malloc: concurrent workers must not touch Common's
+	   memusage counters */
+	chunk = (Unit *) malloc (want * sizeof (Unit)) ;
 	if (chunk == NULL)
 	{
 	    return (NULL) ;
@@ -725,7 +857,7 @@ void KLS_KLU_KERNEL_CHUNKS_FREE (KLS_KLU_KERNEL_STATE *S)
     while (chunk != NULL)
     {
 	Unit *prev = *((Unit **) chunk) ;
-	TRILINOS_KLU_free (chunk, S->chunk_size, sizeof (Unit), S->Common) ;
+	free (chunk) ;
 	chunk = prev ;
     }
     S->chunk_head = NULL ;
@@ -781,17 +913,12 @@ Int KLS_KLU_KERNEL_STEP
 	     DUNITS (Entry, n - k) + DUNITS (Entry, k) ;
     if (S->colptr != NULL)
     {
-	/* chunked: reserve the dense-column upper bound up front; the
-	   column's storage never moves, so readers hold stable pointers */
-	Unit *col = kls_klu_chunk_alloc (S, (size_t) nunits + 1) ;
-	if (col == NULL)
-	{
-	    Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
-	    return (-1) ;
-	}
-	S->colptr [k] = col ;
+	/* chunked: build the column in the worker's scratch buffer and
+	   copy it to an exact-size chunk at publish time (the dense
+	   bound would make the arena O(n^2) on large blocks) */
+	(void) nunits ;
 	Lip [k] = 0 ;
-	LU = col ;   /* own-column accesses go through the column base */
+	LU = S->scratch ;
     }
     else
     {
@@ -830,6 +957,66 @@ Int KLS_KLU_KERNEL_STEP
 		    S->X) ;
 
     diagrow = S->P [k] ;
+
+    if (S->diag_claim)
+    {
+	Int claim = kls_lpivot_diag_claim (diagrow, &pivrow, &pivot,
+					   &abs_pivot, S->tol, S->X, LU, Lip,
+					   Llen, k, n) ;
+	if (claim == KLS_PIVOT_RETRY)
+	{
+	    /* roll back: clear the U-part scatter (L part is preserved by
+	       the claim's own rollback) and defer to the serial cleanup */
+	    for (p = top ; p < n ; p++)
+	    {
+		CLEAR (S->X [S->Stack [p]]) ;
+	    }
+	    {
+		/* the column is not published yet: it lives in the local
+		   build buffer (scratch in chunked mode) */
+		Int *Lik = (Int *) (LU + Lip [k]) ;
+		for (p = 0 ; p < Llen [k] ; p++)
+		{
+		    CLEAR (S->X [Lik [p]]) ;
+		}
+	    }
+	    return (2) ;
+	}
+	/* accepted diagonal claim: distinct rows, no race */
+	S->Uip [k] = Lip [k] + UNITS (Int, Llen [k]) +
+		     UNITS (Entry, Llen [k]) ;
+	S->Ulen [k] = n - top ;
+	GET_POINTER (LU, S->Uip, S->Ulen, Ui, Ux, k, len) ;
+	for (p = top, i = 0 ; p < n ; p++, i++)
+	{
+	    j = S->Stack [p] ;
+	    Ui [i] = Pinv [j] ;
+	    Ux [i] = S->X [j] ;
+	    CLEAR (S->X [j]) ;
+	}
+	S->Udiag [k] = pivot ;
+	{
+	    /* publish: exact-size copy out of the scratch buffer */
+	    size_t used = (size_t) (UNITS (Int, Llen [k]) +
+				    UNITS (Entry, Llen [k]) +
+				    UNITS (Int, S->Ulen [k]) +
+				    UNITS (Entry, S->Ulen [k])) ;
+	    Unit *col = kls_klu_chunk_alloc (S, used) ;
+	    if (col == NULL)
+	    {
+		Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
+		return (-1) ;
+	    }
+	    memcpy (col, S->scratch, used * sizeof (Unit)) ;
+	    S->colptr [k] = col ;
+	}
+	S->P [k] = diagrow ;
+	Pinv [diagrow] = k ;
+	S->lnz += Llen [k] + 1 ;
+	S->unz += S->Ulen [k] + 1 ;
+	S->cols_done = k + 1 ;
+	return (0) ;
+    }
 
     if (!lpivot (diagrow, &pivrow, &pivot, &abs_pivot, S->tol, S->X, LU, Lip,
 		Llen, k, n, Pinv, &S->firstrow, Common))
@@ -884,6 +1071,23 @@ Int KLS_KLU_KERNEL_STEP
     if (!S->no_prune && S->colptr == NULL)
     {
 	prune (S->Lpend, Pinv, k, pivrow, LU, S->Uip, Lip, S->Ulen, Llen) ;
+    }
+
+    if (S->colptr != NULL)
+    {
+	/* publish: exact-size copy out of the scratch buffer */
+	size_t used = (size_t) (UNITS (Int, Llen [k]) +
+				UNITS (Entry, Llen [k]) +
+				UNITS (Int, S->Ulen [k]) +
+				UNITS (Entry, S->Ulen [k])) ;
+	Unit *col = kls_klu_chunk_alloc (S, used) ;
+	if (col == NULL)
+	{
+	    Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
+	    return (-1) ;
+	}
+	memcpy (col, S->scratch, used * sizeof (Unit)) ;
+	S->colptr [k] = col ;
     }
 
     S->lnz += Llen [k] + 1 ;
@@ -1018,6 +1222,76 @@ static int kls_klu_block_coletree
     return (1) ;
 }
 
+typedef struct kls_klu_par_shared_s
+{
+    Int *level_ptr ;
+    Int *level_cols ;
+    Int nlevels ;
+    Int n ;
+    Int *parent ;
+    _Atomic char *defer ;
+    _Atomic int abort_flag ;
+    pthread_barrier_t barrier ;
+    int nthreads ;
+} kls_klu_par_shared ;
+
+typedef struct kls_klu_par_worker_s
+{
+    KLS_KLU_KERNEL_STATE S ;
+    kls_klu_par_shared *sh ;
+    int tid ;
+} kls_klu_par_worker ;
+
+static void *kls_klu_par_worker_main (void *arg)
+{
+    kls_klu_par_worker *W = (kls_klu_par_worker *) arg ;
+    kls_klu_par_shared *sh = W->sh ;
+    Int lev, pos, k, r, j ;
+    for (lev = 0 ; lev < sh->nlevels ; lev++)
+    {
+	if (!atomic_load_explicit (&sh->abort_flag, memory_order_acquire))
+	{
+	    for (pos = sh->level_ptr [lev] + W->tid ;
+		 pos < sh->level_ptr [lev + 1] ; pos += sh->nthreads)
+	    {
+		k = sh->level_cols [pos] ;
+		if (atomic_load_explicit (&sh->defer [k],
+					  memory_order_acquire))
+		{
+		    continue ;
+		}
+		r = KLS_KLU_KERNEL_STEP (&W->S, k) ;
+		if (r == 2)
+		{
+		    /* defer this column and its etree ancestor path:
+		       every dependent of k is one of k's ancestors */
+		    atomic_store_explicit (&sh->defer [k], 1,
+					   memory_order_release) ;
+		    for (j = sh->parent [k] ; j != TRILINOS_KLU_EMPTY ;
+			 j = sh->parent [j])
+		    {
+			if (atomic_load_explicit (&sh->defer [j],
+						  memory_order_relaxed))
+			{
+			    break ;
+			}
+			atomic_store_explicit (&sh->defer [j], 1,
+					       memory_order_release) ;
+		    }
+		}
+		else if (r != 0)
+		{
+		    atomic_store_explicit (&sh->abort_flag, 1,
+					   memory_order_release) ;
+		    break ;
+		}
+	    }
+	}
+	pthread_barrier_wait (&sh->barrier) ;
+    }
+    return (NULL) ;
+}
+
 /* Level-scheduled factorization: same contract as TRILINOS_KLU_kernel.
  * v0 runs the schedule serially through the chunked step (validates the
  * schedule and storage); the worker pool lands on top of this. */
@@ -1129,8 +1403,10 @@ size_t KLS_KLU_KERNEL_LEVELS
     S.tol = Common->tol ;
     S.memgrow = Common->memgrow ;
     S.no_prune = 1 ;
+    S.diag_claim = 0 ;
     S.pack_keep_row_indices = 0 ;
     S.chunk_head = NULL ; S.chunk_used = 0 ; S.chunk_size = 0 ;
+    S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) * sizeof (Unit)) ;
     S.colptr = (Unit **) TRILINOS_KLU_malloc ((size_t) n, sizeof (Unit *),
 					      Common) ;
     if (S.colptr == NULL)
@@ -1141,6 +1417,202 @@ size_t KLS_KLU_KERNEL_LEVELS
     }
 
     KLS_KLU_KERNEL_INIT (&S) ;
+
+    {
+	int nthreads = 1 ;
+	{
+	    const char *tenv = getenv ("KLS_KLU_LEVELS") ;
+	    if (tenv != NULL && tenv [0] != '\0')
+	    {
+		nthreads = atoi (tenv) ;
+	    }
+	    if (nthreads < 1)
+	    {
+		nthreads = 1 ;
+	    }
+	    if (nthreads > 16)
+	    {
+		nthreads = 16 ;
+	    }
+	}
+	if (nthreads > 1)
+	{
+	    /* parallel phase: diagonal claims only; deferred columns and
+	       their ancestor paths fall to the serial cleanup below */
+	    kls_klu_par_shared sh ;
+	    kls_klu_par_worker workers [16] ;
+	    pthread_t tids [16] ;
+	    int t, spawn_failed = 0 ;
+	    Int cleanup_failed = 0 ;
+	    sh.level_ptr = level_ptr ;
+	    sh.level_cols = level_cols ;
+	    sh.nlevels = nlevels ;
+	    sh.n = n ;
+	    sh.parent = parent ;
+	    sh.defer = (_Atomic char *) calloc ((size_t) n, 1) ;
+	    atomic_init (&sh.abort_flag, 0) ;
+	    sh.nthreads = nthreads ;
+	    if (sh.defer == NULL ||
+		pthread_barrier_init (&sh.barrier, NULL,
+				      (unsigned) nthreads) != 0)
+	    {
+		free ((void *) sh.defer) ;
+		nthreads = 1 ;
+	    }
+	    else
+	    {
+	    for (t = 0 ; t < nthreads ; t++)
+	    {
+		kls_klu_par_worker *W = &workers [t] ;
+		W->S = S ;
+		W->sh = &sh ;
+		W->tid = t ;
+		W->S.diag_claim = 1 ;
+		W->S.chunk_head = NULL ;
+		W->S.chunk_used = 0 ;
+		W->S.chunk_size = 0 ;
+		W->S.lnz = 0 ;
+		W->S.unz = 0 ;
+		W->S.firstrow = 0 ;
+		if (t > 0)
+		{
+		    W->S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) *
+						    sizeof (Unit)) ;
+		    if (W->S.scratch == NULL)
+		    {
+			spawn_failed = 1 ;
+			break ;
+		    }
+		    Int q ;
+		    W->S.X = (Entry *) malloc ((size_t) n * sizeof (Entry)) ;
+		    W->S.Stack = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		    W->S.Flag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		    W->S.Ap_pos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		    W->S.Lpend = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		    if (W->S.X == NULL || W->S.Stack == NULL ||
+			W->S.Flag == NULL || W->S.Ap_pos == NULL ||
+			W->S.Lpend == NULL)
+		    {
+			spawn_failed = 1 ;
+			break ;
+		    }
+		    for (q = 0 ; q < n ; q++)
+		    {
+			CLEAR (W->S.X [q]) ;
+			W->S.Flag [q] = TRILINOS_KLU_EMPTY ;
+			W->S.Lpend [q] = TRILINOS_KLU_EMPTY ;
+		    }
+		}
+	    }
+	    if (!spawn_failed)
+	    {
+		for (t = 1 ; t < nthreads ; t++)
+		{
+		    if (pthread_create (&tids [t], NULL,
+					kls_klu_par_worker_main,
+					&workers [t]) != 0)
+		    {
+			atomic_store (&sh.abort_flag, 1) ;
+			spawn_failed = 1 ;
+			nthreads = t ;   /* join only the created ones */
+			break ;
+		    }
+		}
+		kls_klu_par_worker_main (&workers [0]) ;
+		for (t = 1 ; t < nthreads ; t++)
+		{
+		    pthread_join (tids [t], NULL) ;
+		}
+	    }
+	    pthread_barrier_destroy (&sh.barrier) ;
+	    if (!spawn_failed &&
+		!atomic_load_explicit (&sh.abort_flag, memory_order_acquire))
+	    {
+		/* merge worker tallies; the template arena is worker 0's */
+		S = workers [0].S ;
+		S.diag_claim = 0 ;
+		for (t = 1 ; t < nthreads ; t++)
+		{
+		    S.lnz += workers [t].S.lnz ;
+		    S.unz += workers [t].S.unz ;
+		}
+		/* serial cleanup: deferred columns in ascending order */
+		for (k = 0 ; k < n ; k++)
+		{
+		    if (!atomic_load_explicit (&sh.defer [k],
+					       memory_order_acquire))
+		    {
+			continue ;
+		    }
+		    result = KLS_KLU_KERNEL_STEP (&S, k) ;
+		    if (result != 0)
+		    {
+			cleanup_failed = 1 ;
+			break ;
+		    }
+		}
+		S.cols_done = cleanup_failed ? S.cols_done : n ;
+		for (t = 1 ; t < nthreads ; t++)
+		{
+		    if (workers [t].S.X != NULL)
+		    {
+			/* pack first needs the chunks alive; only the
+			   scratch arrays can go now */
+		    }
+		}
+		if (!cleanup_failed)
+		{
+		    final_size = KLS_KLU_KERNEL_FINISH (&S) ;
+		}
+		else
+		{
+		    S.pack_keep_row_indices = 1 ;
+		    final_size = KLS_KLU_KERNEL_FINISH (&S) ;
+		}
+		for (t = 1 ; t < nthreads ; t++)
+		{
+		    KLS_KLU_KERNEL_CHUNKS_FREE (&workers [t].S) ;
+		    free (workers [t].S.X) ;
+		    free (workers [t].S.Stack) ;
+		    free (workers [t].S.Flag) ;
+		    free (workers [t].S.Ap_pos) ;
+		    free (workers [t].S.Lpend) ;
+		    free (workers [t].S.scratch) ;
+		}
+		free ((void *) sh.defer) ;
+		TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *),
+				   Common) ;
+		TRILINOS_KLU_free (parent, (size_t) (6*n + 2), sizeof (Int),
+				   Common) ;
+		*p_LU = S.LU ;
+		*lnz = S.lnz ;
+		*unz = S.unz ;
+		if (cleanup_failed)
+		{
+		    return (final_size) ;
+		}
+		return (final_size) ;
+	    }
+	    /* spawn/abort: free worker scratch and fall through serial */
+	    for (t = 1 ; t < nthreads ; t++)
+	    {
+		KLS_KLU_KERNEL_CHUNKS_FREE (&workers [t].S) ;
+		free (workers [t].S.X) ;
+		free (workers [t].S.Stack) ;
+		free (workers [t].S.Flag) ;
+		free (workers [t].S.Ap_pos) ;
+		free (workers [t].S.Lpend) ;
+		free (workers [t].S.scratch) ;
+	    }
+	    KLS_KLU_KERNEL_CHUNKS_FREE (&workers [0].S) ;
+	    free ((void *) sh.defer) ;
+	    KLS_KLU_KERNEL_INIT (&S) ;
+	    S.chunk_head = NULL ;
+	    S.chunk_used = 0 ;
+	    S.chunk_size = 0 ;
+	    }
+	}
+    }
 
     for (lev = 0 ; lev < nlevels ; lev++)
     {
@@ -1166,6 +1638,7 @@ size_t KLS_KLU_KERNEL_LEVELS
     }
 
     final_size = KLS_KLU_KERNEL_FINISH (&S) ;
+    free (S.scratch) ;
     TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *), Common) ;
     TRILINOS_KLU_free (parent, (size_t) (6*n + 2), sizeof (Int), Common) ;
     *p_LU = S.LU ;
@@ -1262,8 +1735,10 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     S.tol = Common->tol ;
     S.memgrow = Common->memgrow ;
     S.no_prune = 0 ;
+    S.diag_claim = 0 ;
     S.pack_keep_row_indices = 0 ;
     S.colptr = NULL ;
+    S.scratch = NULL ;
     S.chunk_head = NULL ;
     S.chunk_used = 0 ;
     S.chunk_size = 0 ;
@@ -1273,9 +1748,21 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 	   storage + pack path the parallel driver will use */
 	S.colptr = (Unit **) TRILINOS_KLU_malloc ((size_t) n,
 						  sizeof (Unit *), Common) ;
-	if (S.colptr != NULL)
+	S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) * sizeof (Unit)) ;
+	if (S.colptr != NULL && S.scratch != NULL)
 	{
 	    S.no_prune = 1 ;
+	}
+	else
+	{
+	    if (S.colptr != NULL)
+	    {
+		TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *),
+				   Common) ;
+	    }
+	    free (S.scratch) ;
+	    S.colptr = NULL ;
+	    S.scratch = NULL ;
 	}
     }
 
@@ -1316,6 +1803,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     if (S.colptr != NULL)
     {
 	TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *), Common) ;
+	free (S.scratch) ;
     }
     *p_LU = S.LU ;
     *lnz = S.lnz ;
