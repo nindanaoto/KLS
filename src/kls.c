@@ -27988,6 +27988,7 @@ struct kls_metis_race_s {
      for the values (0 wait, 1 go, 2 abort) */
   _Atomic int stage2;
   _Atomic int finished;   /* worker set, last store before thread exit */
+  _Atomic int analyze_done; /* worker set right after the METIS analyze */
   int values_signaled;
   int analyze_status;
   trilinos_klu_l_symbolic *symbolic;
@@ -28041,6 +28042,7 @@ static void *kls_metis_race_main(void *arg) {
                                                  &race->common,
                                                  &race->separator);
   }
+  atomic_store_explicit(&race->analyze_done, 1, memory_order_release);
   int stage2;
   while ((stage2 = atomic_load_explicit(&race->stage2,
                                         memory_order_acquire)) == 0) {
@@ -118210,8 +118212,24 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
        design; the pivoting fill is its intended factorization. */
     refactor_ok = 0;
     common->status = TRILINOS_KLU_SINGULAR;
+  }
+  UF_long fill_round_cap = 3u;
+  {
+    const char *rounds_env = getenv("KLS_PREDICTED_NUDGE_ROUNDS");
+    if (rounds_env != NULL && rounds_env[0] != '\0') {
+      const long parsed = atol(rounds_env);
+      if (parsed > 0 && parsed <= 64) {
+        fill_round_cap = (UF_long)parsed;
+      }
+    }
+  }
+  if (refactor_ok == 0 &&
+      common->status == TRILINOS_KLU_SINGULAR &&
+      (getenv("KLS_FORCE_PIVOT_FILL") != NULL ||
+       solver->block_trial_active)) {
+    /* forced-fill path set above: skip the value rounds */
   } else
-  for (UF_long fill_round = 0; fill_round < 3u; ++fill_round) {
+  for (UF_long fill_round = 0; fill_round < fill_round_cap; ++fill_round) {
     const double first_values_t0 = kls_now_seconds();
     refactor_ok = kls_parallel_refactor(solver, numeric_values, 0);
     if (getenv("KLS_TRACE_PREDICTED") != NULL) {
@@ -122038,11 +122056,62 @@ int kls_factor(kls_solver *solver, const double *values) {
       KLS_ENTRY_PHASE("predicted")
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
     } else {
-      if (!had_numeric && solver->metis_race != NULL) {
-        /* The bootstrap ordering rejected its predicted fill (an
-           exploded pattern, mac_econ-class on AMD): a serial factor on
-           it costs minutes. Join the race and take its factorization
-           as the first numeric instead. */
+      if (!had_numeric && solver->metis_race != NULL &&
+          getenv("KLS_RACE_FULL_JOIN") == NULL) {
+        /* Symbolic-only join: wait for the worker's analyze, abort its
+           serial trial factor, and build the numeric here with the
+           parallel predicted machinery on the raced METIS ordering
+           (mac_econ: the old full join waited ~20s for NodeND + a
+           serial klu factor; the predicted build at t4 takes ~2s). */
+        kls_metis_race *race = solver->metis_race;
+        const double sym_wait0 = kls_now_seconds();
+        unsigned spin = 0;
+        while (!atomic_load_explicit(&race->analyze_done,
+                                     memory_order_acquire)) {
+          kls_cpu_relax();
+          kls_egraph_pipeline_pause(&spin);
+        }
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr, "KLS race symbolic join wait %.3fs status=%d\n",
+                  kls_now_seconds() - sym_wait0, race->analyze_status);
+        }
+        elapsed += kls_now_seconds() - sym_wait0;
+        if (race->analyze_status == KLS_OK && race->symbolic != NULL) {
+          race = kls_metis_race_take(solver, &elapsed); /* aborts factor */
+          if (race != NULL) {
+            trilinos_klu_l_common old_common = solver->common;
+            trilinos_klu_l_free_symbolic(&solver->symbolic, &old_common);
+            solver->symbolic = race->symbolic;
+            race->symbolic = NULL;
+            kls_separator_analysis_clear(&solver->separator);
+            kls_separator_analysis_move(&solver->separator,
+                                        &race->separator);
+            kls_invalidate_factor_etree_stats(solver);
+            solver->common = race->common;
+            solver->auto_metis_checked = 1;
+            solver->metis_promotion_validated = 1;
+            solver->stats.selected_ordering = KLS_ORDERING_METIS;
+            solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
+            solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
+            solver->stats.structural_rank =
+              (int64_t)solver->symbolic->structural_rank;
+            solver->stats.estimated_flops = solver->symbolic->est_flops;
+            kls_metis_race_free(race);
+            if (kls_predicted_pattern_first_factor(solver, numeric_values,
+                                                   &elapsed)) {
+              kls_set_last_factor_path(solver,
+                                       KLS_FACTOR_PATH_PREDICTED_FIRST);
+              if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+                fprintf(stderr,
+                        "KLS race symbolic join: predicted built\n");
+              }
+            }
+            /* on predicted failure solver->numeric stays NULL and the
+               serial klu fallback below factors the METIS symbolic */
+          }
+        }
+      } else if (!had_numeric && solver->metis_race != NULL) {
+        /* full join (KLS_RACE_FULL_JOIN=1): take the worker's numeric */
         kls_metis_race *race = kls_metis_race_take(solver, &elapsed);
         if (race != NULL && race->analyze_status == KLS_OK &&
             race->symbolic != NULL && race->numeric != NULL &&
