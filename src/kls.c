@@ -378,6 +378,7 @@ struct kls_solver {
   int fp32_mirror_fresh;
   int metis_race_deferred;
   int metis_race_deferred_invalid;
+  int prestatic_deferred;
   int block_trial_active;
   int numeric_needs_refinement;
   int in_solve_refinement;
@@ -21260,6 +21261,7 @@ static void free_numeric(kls_solver *solver) {
   solver->fp32_mirror_fresh = 0;
   solver->metis_race_deferred = 0;
   solver->metis_race_deferred_invalid = 0;
+  solver->prestatic_deferred = 0;
   solver->base_solve_seconds = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
@@ -27458,10 +27460,12 @@ static int kls_trace_pre_static_enabled(void) {
 
 static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               double *elapsed,
-                                              const double *numeric_values) {
+                                              const double *numeric_values,
+                                              int deferred) {
   const int forced_match = getenv("KLS_FORCE_STATIC_MATCH") != NULL;
   if (solver == NULL || !solver->options.static_pivoting ||
-      solver->numeric != NULL || solver->row_perm != NULL ||
+      (solver->numeric != NULL && !deferred) ||
+      solver->row_perm != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       (solver->options.ordering != KLS_ORDERING_AUTO && !forced_match) ||
       (solver->n < 3000 && !forced_match)) {
@@ -27848,6 +27852,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   kls_metis_race_abandon(solver);
   trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
   trilinos_klu_l_common old_common = solver->common;
+  if (solver->numeric != NULL) {
+    /* deferred adoption replaces a live numeric */
+    trilinos_klu_l_free_numeric(&solver->numeric, &old_common);
+  }
   free(solver->col_ptr);
   free(solver->row_idx);
   free(solver->input_to_csc);
@@ -121856,7 +121864,17 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   const int had_numeric = solver->numeric != NULL;
   if (!had_numeric) {
-    maybe_select_pre_static_row_match(solver, &elapsed, numeric_values);
+    if (getenv("KLS_PRESTATIC_DEFER") != NULL && solver->numeric == NULL &&
+        solver->row_perm == NULL && solver->options.static_pivoting) {
+      /* Run the match trial from the first refactor instead: its cost
+         (rajat25 0.83s, pre2 13.4s Hungarian) lands in one 99x-amortized
+         refactor and leaves the one-shot factor path untouched; the
+         cycle is neutral (the same seconds move columns). */
+      solver->prestatic_deferred = 1;
+    } else {
+      maybe_select_pre_static_row_match(solver, &elapsed, numeric_values,
+                                        0);
+    }
     KLS_ENTRY_PHASE("prestatic")
     if (solver->numeric == NULL && solver->prestatic_adopted_unfactored &&
         solver->values != NULL) {
@@ -122206,6 +122224,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
   int status = prepare_numeric_values(solver, values, &numeric_values);
   if (status != KLS_OK) {
     return status;
+  }
+  if (solver->prestatic_deferred) {
+    solver->prestatic_deferred = 0;
+    double prestatic_elapsed = 0.0;
+    maybe_select_pre_static_row_match(solver, &prestatic_elapsed,
+                                      numeric_values, 1);
   }
 #ifdef KLS_HAVE_METIS
   if (solver->metis_race_deferred && kls_metis_race_ready(solver)) {
