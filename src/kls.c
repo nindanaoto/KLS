@@ -122261,6 +122261,18 @@ int kls_refactor(kls_solver *solver, const double *values) {
     maybe_select_pre_static_row_match(solver, &prestatic_elapsed,
                                       numeric_values, 1);
   }
+#ifdef KLS_HAVE_METIS
+  if (solver->metis_race_deferred && kls_metis_race_ready(solver)) {
+    /* the factor-exit promotion was deferred so the first factor never
+       blocked on the race worker; run the comparison now that the trial
+       is done (its cost lands in one refactor, charged once) */
+    solver->metis_race_deferred = 0;
+    double promo_elapsed = 0.0;
+    (void)maybe_promote_auto_metis(solver, &promo_elapsed, numeric_values,
+                                   solver->metis_race_deferred_invalid);
+    solver->metis_race_deferred_invalid = 0;
+  }
+#endif
   if (solver->factor_preps_deferred) {
     solver->factor_preps_deferred = 0;
     double preps_elapsed = 0.0;
@@ -122277,18 +122289,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_maybe_prepare_model_row_refactor_from_numeric(solver,
                                                       &preps_elapsed);
   }
-#ifdef KLS_HAVE_METIS
-  if (solver->metis_race_deferred && kls_metis_race_ready(solver)) {
-    /* the factor-exit promotion was deferred so the first factor never
-       blocked on the race worker; run the comparison now that the trial
-       is done (its cost lands in one refactor, charged once) */
-    solver->metis_race_deferred = 0;
-    double promo_elapsed = 0.0;
-    (void)maybe_promote_auto_metis(solver, &promo_elapsed, numeric_values,
-                                   solver->metis_race_deferred_invalid);
-    solver->metis_race_deferred_invalid = 0;
-  }
-#endif
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
