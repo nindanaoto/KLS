@@ -376,6 +376,8 @@ struct kls_solver {
   int fp32_probe_retry_used;
   int fp32_redo_pass;
   int fp32_mirror_fresh;
+  int metis_race_deferred;
+  int metis_race_deferred_invalid;
   int block_trial_active;
   int numeric_needs_refinement;
   int in_solve_refinement;
@@ -21256,6 +21258,8 @@ static void free_numeric(kls_solver *solver) {
   solver->fp32_probe_retry_used = 0;
   solver->fp32_redo_pass = 0;
   solver->fp32_mirror_fresh = 0;
+  solver->metis_race_deferred = 0;
+  solver->metis_race_deferred_invalid = 0;
   solver->base_solve_seconds = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
@@ -21289,6 +21293,10 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->fp32_probe_retry_used = 0;
   solver->fp32_redo_pass = 0;
   solver->fp32_mirror_fresh = 0;
+  if (solver->metis_race_deferred) {
+    /* the numeric this consult would compare against is being replaced */
+    solver->metis_race_deferred_invalid = 1;
+  }
   solver->base_solve_seconds = 0.0;
   /* the snb verdicts describe the OLD numeric's pattern; a replacement
      (METIS promotion, scale/row-match adoption) is a different engine
@@ -27939,6 +27947,7 @@ struct kls_metis_race_s {
      start at analyze time; the scale trials and the trial factor wait
      for the values (0 wait, 1 go, 2 abort) */
   _Atomic int stage2;
+  _Atomic int finished;   /* worker set, last store before thread exit */
   int values_signaled;
   int analyze_status;
   trilinos_klu_l_symbolic *symbolic;
@@ -28042,12 +28051,26 @@ static void *kls_metis_race_main(void *arg) {
   atomic_store_explicit(&race->scale_done, 1, memory_order_release);
   if (!race->metis_wanted || race->analyze_status != KLS_OK ||
       race->symbolic == NULL) {
+    atomic_store_explicit(&race->finished, 1, memory_order_release);
     return NULL;
   }
   race->numeric = trilinos_klu_l_factor(race->col_ptr, race->row_idx,
                                         race->values_copy, race->symbolic,
                                         &race->common);
+  atomic_store_explicit(&race->finished, 1, memory_order_release);
   return NULL;
+}
+
+/* Non-blocking: has the race worker produced its trial factorization?
+   The factor-time promotion skips (leaving the race alive) instead of
+   joining when the worker is still running; the refactor wrapper
+   consults again once this reads true, so the first factor never
+   blocks on NodeND (ASIC_320ks: 0.69s of a 1.46s init was this join). */
+static int kls_metis_race_ready(const kls_solver *solver) {
+  return solver != NULL && solver->metis_race != NULL &&
+         (!solver->metis_race->active ||
+          atomic_load_explicit(&solver->metis_race->finished,
+                               memory_order_acquire) != 0);
 }
 
 static kls_metis_race *kls_metis_race_take(kls_solver *solver,
@@ -122012,8 +122035,15 @@ int kls_factor(kls_solver *solver, const double *values) {
   KLS_ENTRY_PHASE("auto_rowmatch")
   solver->metis_promotion_validated = 0;
 #ifdef KLS_HAVE_METIS
-  if (maybe_promote_auto_metis(solver, &elapsed, numeric_values,
-                               promoted_numeric)) {
+  if (solver->metis_race != NULL && !kls_metis_race_ready(solver)) {
+    /* the race worker is still inside NodeND/the trial factor; joining
+       here would serialize the first factor on it (ASIC_320ks: 0.69s of
+       a 1.46s init).  Consult again from the refactor wrapper once the
+       worker signals completion. */
+    solver->metis_race_deferred = 1;
+    solver->metis_race_deferred_invalid = promoted_numeric;
+  } else if (maybe_promote_auto_metis(solver, &elapsed, numeric_values,
+                                      promoted_numeric)) {
     kls_first_factor_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
@@ -122030,7 +122060,11 @@ int kls_factor(kls_solver *solver, const double *values) {
     /* The promotion verdict predates this scale: give METIS one more
        shot against the rescaled incumbent. */
     solver->auto_metis_checked = 0;
-    if (maybe_promote_auto_metis(solver, &elapsed, numeric_values, 1)) {
+    if (solver->metis_race != NULL && !kls_metis_race_ready(solver)) {
+      solver->metis_race_deferred = 1;
+      solver->metis_race_deferred_invalid = 1;
+    } else if (maybe_promote_auto_metis(solver, &elapsed, numeric_values,
+                                        1)) {
       kls_first_factor_used = 0;
       diagnostics_have_flops = 1;
       diagnostics_have_rcond = 0;
@@ -122144,6 +122178,18 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (status != KLS_OK) {
     return status;
   }
+#ifdef KLS_HAVE_METIS
+  if (solver->metis_race_deferred && kls_metis_race_ready(solver)) {
+    /* the factor-exit promotion was deferred so the first factor never
+       blocked on the race worker; run the comparison now that the trial
+       is done (its cost lands in one refactor, charged once) */
+    solver->metis_race_deferred = 0;
+    double promo_elapsed = 0.0;
+    (void)maybe_promote_auto_metis(solver, &promo_elapsed, numeric_values,
+                                   solver->metis_race_deferred_invalid);
+    solver->metis_race_deferred_invalid = 0;
+  }
+#endif
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
