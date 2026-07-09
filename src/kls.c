@@ -121340,10 +121340,12 @@ static int solve_impl(kls_solver *solver,
   }
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
       (solver->numeric_needs_refinement ||
-       /* near-diagonal factors (tight pivot tolerance) always carry the
-          correction; derived from the config so no flag lifecycle can
-          drop it */
-       solver->common.tol < 1.0e-4 ||
+       /* near-diagonal factors (tight-tolerance adoption at 1e-8) always
+          carry the correction; derived from the config so no flag
+          lifecycle can drop it. The 1e-6 line stays below the 1e-5/1e-4
+          initial-tolerance heuristics whose factors are accurate without
+          corrections (mac_econ-class regressed 2x on solves at 1e-4). */
+       solver->common.tol < 1.0e-6 ||
        getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL) &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
       (solver->solve_refine_values != NULL || solver->values != NULL) &&
@@ -121443,7 +121445,7 @@ static int solve_impl(kls_solver *solver,
           xrhs[i] += correction[i];
         }
         if (solver->solve_refine_single_shot ||
-            solver->common.tol < 1.0e-4) {
+            solver->common.tol < 1.0e-6) {
           /* tight-tolerance factors validate one correction with the
              adoption probe; skip the verification sweep */
           break;
