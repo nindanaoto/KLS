@@ -118172,7 +118172,14 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     common->status = TRILINOS_KLU_SINGULAR;
   } else
   for (UF_long fill_round = 0; fill_round < 3u; ++fill_round) {
+    const double first_values_t0 = kls_now_seconds();
     refactor_ok = kls_parallel_refactor(solver, numeric_values, 0);
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr,
+              "KLS predicted: value pass %.2fs path=%d ok=%ld\n",
+              kls_now_seconds() - first_values_t0,
+              (int)solver->stats.last_refactor_path, (long)refactor_ok);
+    }
     UF_long k = KLS_KLU_EMPTY;
     if (refactor_ok && common->status >= TRILINOS_KLU_OK &&
         common->status != TRILINOS_KLU_SINGULAR) {
