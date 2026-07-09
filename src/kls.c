@@ -373,6 +373,9 @@ struct kls_solver {
   int fp32_decision;
   int fp32_last_used;
   int fp32_validated;
+  int fp32_probe_retry_used;
+  int fp32_redo_pass;
+  int fp32_mirror_fresh;
   int block_trial_active;
   int numeric_needs_refinement;
   int in_solve_refinement;
@@ -21231,6 +21234,9 @@ static void free_numeric(kls_solver *solver) {
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
   solver->fp32_validated = 0;
+  solver->fp32_probe_retry_used = 0;
+  solver->fp32_redo_pass = 0;
+  solver->fp32_mirror_fresh = 0;
   solver->base_solve_seconds = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
@@ -21261,6 +21267,9 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
   solver->fp32_validated = 0;
+  solver->fp32_probe_retry_used = 0;
+  solver->fp32_redo_pass = 0;
+  solver->fp32_mirror_fresh = 0;
   solver->base_solve_seconds = 0.0;
   /* the snb verdicts describe the OLD numeric's pattern; a replacement
      (METIS promotion, scale/row-match adoption) is a different engine
@@ -41021,7 +41030,19 @@ static int kls_fp32_refactor_wanted(kls_solver *solver) {
       solver->stats.refactor_seconds > 8.0 * solver->base_solve_seconds
         ? 1
         : -1;
+    if (getenv("KLS_TRACE_REFINE") != NULL) {
+      fprintf(stderr, "KLS fp32 wanted: measured ref %.4f solve %.4f -> %d\n",
+              solver->stats.refactor_seconds, solver->base_solve_seconds,
+              solver->fp32_decision);
+    }
     return solver->fp32_decision > 0;
+  }
+  if (getenv("KLS_TRACE_REFINE") != NULL) {
+    fprintf(stderr,
+            "KLS fp32 wanted: profile fill %.3e flops %.3e ref %.4f solve %.4f\n",
+            (double)solver->numeric->lnz + (double)solver->numeric->unz,
+            solver->common.flops, solver->stats.refactor_seconds,
+            solver->base_solve_seconds);
   }
   /* No clean measurements yet: decide from the work profile.  Flops per
      stored value is the average reuse of each factor entry, which is the
@@ -41044,6 +41065,13 @@ static int kls_ensure_refactor_l_values32_cache(kls_solver *solver) {
       solver->numeric->Llen == NULL ||
       solver->refactor_lu_pointer_count != solver->n ||
       solver->refactor_l_indices == NULL || solver->n <= 0) {
+    if (solver != NULL && getenv("KLS_TRACE_REFINE") != NULL) {
+      fprintf(stderr,
+              "KLS fp32 cache: decline llen=%d ptrcount=%ld/%ld lidx=%d\n",
+              solver->numeric == NULL || solver->numeric->Llen == NULL,
+              (long)solver->refactor_lu_pointer_count, (long)solver->n,
+              solver->refactor_l_indices == NULL);
+    }
     return 0;
   }
   if (solver->refactor_l_values32 != NULL) {
@@ -41077,6 +41105,33 @@ static int kls_ensure_refactor_l_values32_cache(kls_solver *solver) {
   solver->refactor_l_values32 = values32;
   solver->refactor_l_values32_storage = storage;
   return 1;
+}
+
+/* The float mirror is maintained by the store path, but double passes
+   reach some columns through paths that do not mirror (measured: any
+   fp32 pass directly after a non-fp32 pass reads stale/uninitialized
+   floats and fails the validation probe at rmax ~3e-2 on ASIC_320k,
+   while fp32-after-fp32 validates at 2e-10).  Refill the whole mirror
+   from the current double numeric when engaging the mode after a
+   non-fp32 pass; the sweep costs one pass over nnz(L) floats. */
+static void kls_refresh_refactor_l_values32_from_numeric(
+  kls_solver *solver) {
+  if (solver == NULL || solver->refactor_l_values32 == NULL ||
+      solver->refactor_l_values == NULL || solver->numeric == NULL ||
+      solver->numeric->Llen == NULL) {
+    return;
+  }
+  for (UF_long col = 0; col < solver->n; ++col) {
+    float *dst = solver->refactor_l_values32[col];
+    const double *src = solver->refactor_l_values[col];
+    if (dst == NULL || src == NULL) {
+      continue;
+    }
+    const UF_long len = solver->numeric->Llen[col];
+    for (UF_long p = 0; p < len; ++p) {
+      dst[p] = (float)src[p];
+    }
+  }
 }
 
 /* A retained pointer cache must describe the numeric the solver holds NOW.
@@ -85361,11 +85416,25 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->use_fp32_l_values = 0;
   if (solver->row_perm == NULL && solver->user_col_perm == NULL &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
-      kls_fp32_refactor_wanted(solver)) {
+      !solver->fp32_redo_pass && kls_fp32_refactor_wanted(solver)) {
     if (solver->refactor_l_values32 == NULL) {
       (void)kls_ensure_refactor_l_values32_cache(solver);
     }
     shared->use_fp32_l_values = solver->refactor_l_values32 != NULL;
+  }
+  if (shared->use_fp32_l_values) {
+    if (!solver->fp32_mirror_fresh) {
+      kls_refresh_refactor_l_values32_from_numeric(solver);
+      solver->fp32_mirror_fresh = 1;
+    }
+  } else {
+    solver->fp32_mirror_fresh = 0;
+  }
+  if (getenv("KLS_TRACE_REFINE") != NULL) {
+    fprintf(stderr, "KLS fp32 engage: use=%d perms=%d%d scales=%d%d\n",
+            shared->use_fp32_l_values, solver->row_perm != NULL,
+            solver->user_col_perm != NULL, solver->row_scale != NULL,
+            solver->col_scale != NULL);
   }
   solver->fp32_last_used = shared->use_fp32_l_values;
   if (shared->use_fp32_l_values) {
@@ -91680,9 +91749,17 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
        prove the factorization on A e before trusting the mode; on failure
        redo this pass in double precision and lock the mode off. */
     int probe_ok = 0;
-    double *probe = (double *)malloc(2u * (size_t)solver->n * sizeof(*probe));
+    /* The mode's contract is float factors plus one refinement shot per
+       solve, so probe what it delivers: solve A x = A e, apply one
+       correction, and judge the corrected residual.  Judging the raw
+       solve rejects float-cancellation columns the correction absorbs
+       (ASIC_320k: six of 6.9M L entries off at 1e-2 raw, corrected
+       solves at 2e-15). */
+    double *probe =
+      (double *)malloc(3u * (size_t)solver->n * sizeof(*probe));
     if (probe != NULL) {
       double *px = probe + solver->n;
+      double *pc = px + solver->n;
       for (UF_long i = 0; i < solver->n; ++i) {
         probe[i] = 0.0;
       }
@@ -91692,41 +91769,81 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
           probe[solver->row_idx[p]] += numeric_values[p];
         }
       }
+      double bmax = 0.0;
+      for (UF_long i = 0; i < solver->n; ++i) {
+        const double v = fabs(probe[i]);
+        bmax = bmax < v ? v : bmax;
+      }
       memcpy(px, probe, (size_t)solver->n * sizeof(*px));
       if (trilinos_klu_l_solve(solver->symbolic, solver->numeric, solver->n,
                                1, px, &solver->common) &&
           solver->common.status >= TRILINOS_KLU_OK) {
-        double bmax = 0.0;
-        for (UF_long i = 0; i < solver->n; ++i) {
-          const double v = fabs(probe[i]);
-          bmax = bmax < v ? v : bmax;
-        }
-        for (UF_long j = 0; j < solver->n; ++j) {
-          const double xv = px[j];
-          if (xv == 0.0) {
-            continue;
-          }
-          for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
-               ++p) {
-            probe[solver->row_idx[p]] -= numeric_values[p] * xv;
-          }
-        }
+        int step_ok = 1;
         double rmax = 0.0;
-        for (UF_long i = 0; i < solver->n; ++i) {
-          const double v = fabs(probe[i]);
-          rmax = rmax < v ? v : rmax;
+        for (int step = 0; step < 2 && step_ok; ++step) {
+          memcpy(pc, probe, (size_t)solver->n * sizeof(*pc));
+          for (UF_long j = 0; j < solver->n; ++j) {
+            const double xv = px[j];
+            if (xv == 0.0) {
+              continue;
+            }
+            for (UF_long p = solver->col_ptr[j];
+                 p < solver->col_ptr[j + 1u]; ++p) {
+              pc[solver->row_idx[p]] -= numeric_values[p] * xv;
+            }
+          }
+          rmax = 0.0;
+          for (UF_long i = 0; i < solver->n; ++i) {
+            const double v = fabs(pc[i]);
+            rmax = rmax < v ? v : rmax;
+          }
+          if (getenv("KLS_TRACE_REFINE") != NULL) {
+            fprintf(stderr,
+                    "KLS fp32 probe: step %d rmax %.3e bmax %.3e\n",
+                    step, rmax, bmax);
+          }
+          if (step == 0) {
+            step_ok =
+              trilinos_klu_l_solve(solver->symbolic, solver->numeric,
+                                   solver->n, 1, pc, &solver->common) &&
+              solver->common.status >= TRILINOS_KLU_OK;
+            if (step_ok) {
+              for (UF_long i = 0; i < solver->n; ++i) {
+                px[i] += pc[i];
+              }
+            }
+          }
         }
-        probe_ok = rmax <= (bmax > 0.0 ? bmax : 1.0) * 1.0e-6;
+        /* Bar chosen against the fleet: healthy fp32 adopters land
+           their corrected residual at 1e-14..1e-9 relative (memchip
+           7.7e-12/5e2, Freescale1 1.4e-8/8.1); the ASIC_320k failure
+           mode sits at 3e-3.  1e-8 keeps the adopters and rejects the
+           unrecoverable state by five orders. */
+        probe_ok =
+          step_ok && rmax <= (bmax > 0.0 ? bmax : 1.0) * 1.0e-8;
       }
       free(probe);
+    }
+    if (getenv("KLS_TRACE_REFINE") != NULL) {
+      fprintf(stderr, "KLS fp32 probe: ok=%d\n", probe_ok);
     }
     if (probe_ok) {
       solver->fp32_validated = 1;
     } else {
-      solver->fp32_decision = -1;
+      /* The first float pass over a factor-built numeric fails this
+         probe deterministically (ASIC_320k: rmax 3e-2) while the next
+         pass validates at float accuracy; the failed pass is replaced
+         by the double redo below, so give the mode one retry per
+         numeric before locking it off. */
+      if (solver->fp32_probe_retry_used) {
+        solver->fp32_decision = -1;
+      }
+      solver->fp32_probe_retry_used = 1;
       solver->numeric_needs_refinement = 0;
+      solver->fp32_redo_pass = 1;
       egraph = kls_egraph_mapped_refactor(solver, numeric_values,
                                           check_pivots);
+      solver->fp32_redo_pass = 0;
     }
   }
   if (egraph >= 0) {
