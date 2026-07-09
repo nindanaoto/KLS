@@ -28008,6 +28008,7 @@ static void *kls_metis_race_main(void *arg) {
   }
   if (stage2 != 1) {
     atomic_store_explicit(&race->scale_done, 1, memory_order_release);
+    atomic_store_explicit(&race->finished, 1, memory_order_release);
     return NULL;
   }
   if (race->scale_wanted && race->scale_symbolic != NULL) {
@@ -122035,11 +122036,15 @@ int kls_factor(kls_solver *solver, const double *values) {
   KLS_ENTRY_PHASE("auto_rowmatch")
   solver->metis_promotion_validated = 0;
 #ifdef KLS_HAVE_METIS
-  if (solver->metis_race != NULL && !kls_metis_race_ready(solver)) {
+  if (solver->n < 1000000 && solver->metis_race != NULL &&
+      !kls_metis_race_ready(solver)) {
     /* the race worker is still inside NodeND/the trial factor; joining
        here would serialize the first factor on it (ASIC_320ks: 0.69s of
        a 1.46s init).  Consult again from the refactor wrapper once the
-       worker signals completion. */
+       worker signals completion.  Giant-class races keep the blocking
+       join: deferred, they run 3-4x longer against the refactor loop's
+       thread contention and the bootstrap-rate window costs far more
+       than the join (Freescale1 suite 1.50 -> 3.15). */
     solver->metis_race_deferred = 1;
     solver->metis_race_deferred_invalid = promoted_numeric;
   } else if (maybe_promote_auto_metis(solver, &elapsed, numeric_values,
@@ -122060,7 +122065,8 @@ int kls_factor(kls_solver *solver, const double *values) {
     /* The promotion verdict predates this scale: give METIS one more
        shot against the rescaled incumbent. */
     solver->auto_metis_checked = 0;
-    if (solver->metis_race != NULL && !kls_metis_race_ready(solver)) {
+    if (solver->n < 1000000 && solver->metis_race != NULL &&
+        !kls_metis_race_ready(solver)) {
       solver->metis_race_deferred = 1;
       solver->metis_race_deferred_invalid = 1;
     } else if (maybe_promote_auto_metis(solver, &elapsed, numeric_values,
