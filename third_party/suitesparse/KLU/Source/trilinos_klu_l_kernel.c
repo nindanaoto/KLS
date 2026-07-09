@@ -687,6 +687,9 @@ typedef struct KLS_KLU_KERNEL_STATE_STRUCT
     /* chunked storage (parallel drivers): stable per-column pointers,
        arena chunks never realloc once a column is published */
     Unit **colptr ;         /* size n, or NULL for classic base+offset */
+    Int cols_done ;         /* columns completed (chunked pack bound) */
+    Int pack_keep_row_indices ; /* early-return pack: match the classic
+				   mid-factor layout (no Pinv convert) */
     Unit *chunk_head ;      /* current chunk (first Unit links to prev) */
     size_t chunk_used ;
     size_t chunk_size ;
@@ -735,6 +738,7 @@ void KLS_KLU_KERNEL_INIT
 )
 {
     Int k ;
+    S->cols_done = 0 ;
     S->firstrow = 0 ;
     S->lup = 0 ;
     S->lnz = 0 ;
@@ -884,6 +888,7 @@ Int KLS_KLU_KERNEL_STEP
 
     S->lnz += Llen [k] + 1 ;
     S->unz += S->Ulen [k] + 1 ;
+    S->cols_done = k + 1 ;
     return (0) ;
 }
 
@@ -902,7 +907,8 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
 	   pivotal indices */
 	size_t total = 0, off ;
 	Unit *packed ;
-	for (p = 0 ; p < S->n ; p++)
+	const Int ncols = S->cols_done ;
+	for (p = 0 ; p < ncols ; p++)
 	{
 	    total += UNITS (Int, S->Llen [p]) + UNITS (Entry, S->Llen [p]) +
 		     UNITS (Int, S->Ulen [p]) + UNITS (Entry, S->Ulen [p]) ;
@@ -915,7 +921,7 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
 	    return (S->lusize) ;
 	}
 	off = 0 ;
-	for (p = 0 ; p < S->n ; p++)
+	for (p = 0 ; p < ncols ; p++)
 	{
 	    size_t lunits = UNITS (Int, S->Llen [p]) +
 			    UNITS (Entry, S->Llen [p]) ;
@@ -925,10 +931,13 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
 		    (lunits + uunits) * sizeof (Unit)) ;
 	    S->Lip [p] = (Int) off ;
 	    S->Uip [p] = (Int) (off + lunits) ;
-	    Li = (Int *) (packed + off) ;
-	    for (i = 0 ; i < S->Llen [p] ; i++)
+	    if (!S->pack_keep_row_indices)
 	    {
-		Li [i] = S->Pinv [Li [i]] ;
+		Li = (Int *) (packed + off) ;
+		for (i = 0 ; i < S->Llen [p] ; i++)
+		{
+		    Li [i] = S->Pinv [Li [i]] ;
+		}
 	    }
 	    off += lunits + uunits ;
 	}
@@ -1034,10 +1043,22 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     S.tol = Common->tol ;
     S.memgrow = Common->memgrow ;
     S.no_prune = 0 ;
+    S.pack_keep_row_indices = 0 ;
     S.colptr = NULL ;
     S.chunk_head = NULL ;
     S.chunk_used = 0 ;
     S.chunk_size = 0 ;
+    if (getenv ("KLS_KLU_CHUNKED") != NULL)
+    {
+	/* validation mode: run every factorization through the chunked
+	   storage + pack path the parallel driver will use */
+	S.colptr = (Unit **) TRILINOS_KLU_malloc ((size_t) n,
+						  sizeof (Unit *), Common) ;
+	if (S.colptr != NULL)
+	{
+	    S.no_prune = 1 ;
+	}
+    }
 
     KLS_KLU_KERNEL_INIT (&S) ;
 
@@ -1046,14 +1067,37 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 	result = KLS_KLU_KERNEL_STEP (&S, k) ;
 	if (result != 0)
 	{
+	    size_t partial = S.lusize ;
+	    if (S.colptr != NULL)
+	    {
+		/* leave a classic-layout partial LU for the restart and
+		   diagnostic paths (row indices, as mid-factor); the
+		   failed column's L pattern is valid and inspected by
+		   the restart heuristics - include it with an empty U */
+		if (S.cols_done == k && k < n)
+		{
+		    S.Ulen [k] = 0 ;
+		    S.Uip [k] = S.Lip [k] + UNITS (Int, S.Llen [k]) +
+				UNITS (Entry, S.Llen [k]) ;
+		    S.cols_done = k + 1 ;
+		}
+		S.pack_keep_row_indices = 1 ;
+		partial = KLS_KLU_KERNEL_FINISH (&S) ;
+		TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *),
+				   Common) ;
+	    }
 	    *p_LU = S.LU ;
 	    *lnz = S.lnz ;
 	    *unz = S.unz ;
-	    return (S.lusize) ;
+	    return (partial) ;
 	}
     }
 
     final_size = KLS_KLU_KERNEL_FINISH (&S) ;
+    if (S.colptr != NULL)
+    {
+	TRILINOS_KLU_free (S.colptr, (size_t) n, sizeof (Unit *), Common) ;
+    }
     *p_LU = S.LU ;
     *lnz = S.lnz ;
     *unz = S.unz ;
