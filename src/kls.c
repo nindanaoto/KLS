@@ -72957,6 +72957,40 @@ static int kls_egraph_refactor_btf_unscaled_column(
   return 1;
 }
 
+/* One L-column stream feeding two consumer SPAs: the scalar-dep twin of
+   the fused batch (2 fmas per streamed value + one shared index load). */
+static KLS_ALWAYS_INLINE void kls_scatter_subtract_pair_i32(
+  double *restrict xa,
+  double *restrict xb,
+  const int32_t *restrict rows,
+  const double *restrict values,
+  UF_long length,
+  double ua,
+  double ub) {
+  for (UF_long p = 0; p < length; ++p) {
+    const UF_long row = (UF_long)rows[p];
+    const double v = values[p];
+    xa[row] -= ua * v;
+    xb[row] -= ub * v;
+  }
+}
+
+static KLS_ALWAYS_INLINE void kls_scatter_subtract_pair(
+  double *restrict xa,
+  double *restrict xb,
+  const UF_long *restrict rows,
+  const double *restrict values,
+  UF_long length,
+  double ua,
+  double ub) {
+  for (UF_long p = 0; p < length; ++p) {
+    const UF_long row = rows[p];
+    const double v = values[p];
+    xa[row] -= ua * v;
+    xb[row] -= ub * v;
+  }
+}
+
 /* BTF twin of the single-unscaled pair: two leased same-block columns
    walked cooperatively so shared producer runs stream once.  The group
    state machinery is informed via the existing dispatch-bypass branch;
@@ -73050,6 +73084,34 @@ static int kls_egraph_refactor_btf_unscaled_column_pair(
         if (consumed != 0u) {
           upa += consumed;
           upb += consumed;
+          progress = 1;
+        } else if (kls_egraph_refactor_dependency_done_now(shared,
+                                                           k1 + ja)) {
+          const double ua = xa[ja];
+          const double ub = xb[ja];
+          xa[ja] = 0.0;
+          xb[ja] = 0.0;
+          uxa[upa] = ua;
+          uxb[upb] = ub;
+          if (ua != 0.0 || ub != 0.0) {
+            const UF_long dep_global = k1 + ja;
+            const int32_t *li32 =
+              l_indices32 != NULL ? l_indices32[dep_global] : NULL;
+            const double *lx = l_values[dep_global];
+            const UF_long lcol_len = llen[ja];
+            if (li32 != NULL || lcol_len == 0u) {
+              kls_scatter_subtract_pair_i32(xa, xb, li32, lx, lcol_len, ua,
+                                            ub);
+            } else {
+              kls_scatter_subtract_pair(xa, xb, l_indices[dep_global], lx,
+                                        lcol_len, ua, ub);
+            }
+            if (kls_snode_trace_enabled()) {
+              kls_snode_trace_pair_producers += 1u;
+            }
+          }
+          upa++;
+          upb++;
           progress = 1;
         }
       }
