@@ -1240,6 +1240,9 @@ typedef struct kls_klu_par_shared_s
     Int *level_ptr ;
     Int *level_cols ;
     Int nlevels ;
+    Int *super_ptr ;     /* super-level boundaries (level indices) */
+    char *super_serial ; /* 1: narrow batch, tid 0 runs it alone */
+    Int nsuper ;
     Int n ;
     Int *parent ;
     _Atomic char *defer ;
@@ -1264,13 +1267,21 @@ static void *kls_klu_par_worker_main (void *arg)
 {
     kls_klu_par_worker *W = (kls_klu_par_worker *) arg ;
     kls_klu_par_shared *sh = W->sh ;
-    Int lev, pos, k, r, j ;
-    for (lev = 0 ; lev < sh->nlevels ; lev++)
+    Int sl, pos, k, r, j ;
+    for (sl = 0 ; sl < sh->nsuper ; sl++)
     {
+	const Int pos0 = sh->level_ptr [sh->super_ptr [sl]] ;
+	const Int pos1 = sh->level_ptr [sh->super_ptr [sl + 1]] ;
+	const int serial = sh->super_serial [sl] ;
+	if (serial && W->tid != 0)
+	{
+	    pthread_barrier_wait (&sh->barrier) ;
+	    continue ;
+	}
 	if (!atomic_load_explicit (&sh->abort_flag, memory_order_acquire))
 	{
-	    for (pos = sh->level_ptr [lev] + W->tid ;
-		 pos < sh->level_ptr [lev + 1] ; pos += sh->nthreads)
+	    for (pos = serial ? pos0 : pos0 + W->tid ;
+		 pos < pos1 ; pos += serial ? 1 : sh->nthreads)
 	    {
 		k = sh->level_cols [pos] ;
 		if (atomic_load_explicit (&sh->defer [k],
@@ -1472,21 +1483,69 @@ size_t KLS_KLU_KERNEL_LEVELS
 	    pthread_t tids [16] ;
 	    int t, spawn_failed = 0 ;
 	    Int cleanup_failed = 0 ;
+	    Int *super_ptr = NULL ;
+	    char *super_serial = NULL ;
 	    sh.level_ptr = level_ptr ;
 	    sh.level_cols = level_cols ;
 	    sh.nlevels = nlevels ;
 	    sh.n = n ;
 	    sh.parent = parent ;
+	    /* batch consecutive narrow levels into single-thread
+	       super-levels: chain-heavy etrees otherwise pay a barrier
+	       per near-empty level (rajat25: parallel 1.55s vs serial
+	       0.87 was almost pure barrier churn) */
+	    super_ptr = (Int *) malloc (((size_t) nlevels + 1) *
+					sizeof (Int)) ;
+	    super_serial = (char *) malloc ((size_t) nlevels + 1) ;
+	    if (super_ptr != NULL && super_serial != NULL)
+	    {
+		const Int wide = 4 * nthreads ;
+		Int lev2 = 0, ns = 0 ;
+		while (lev2 < nlevels)
+		{
+		    Int width = level_ptr [lev2 + 1] - level_ptr [lev2] ;
+		    super_ptr [ns] = lev2 ;
+		    if (width >= wide)
+		    {
+			super_serial [ns] = 0 ;
+			lev2++ ;
+		    }
+		    else
+		    {
+			super_serial [ns] = 1 ;
+			while (lev2 < nlevels &&
+			       level_ptr [lev2 + 1] - level_ptr [lev2] <
+				 wide)
+			{
+			    lev2++ ;
+			}
+		    }
+		    ns++ ;
+		}
+		super_ptr [ns] = nlevels ;
+		sh.super_ptr = super_ptr ;
+		sh.super_serial = super_serial ;
+		sh.nsuper = ns ;
+	    }
+	    else
+	    {
+		free (super_ptr) ;
+		free (super_serial) ;
+		super_ptr = NULL ;
+		super_serial = NULL ;
+	    }
 	    sh.defer = (_Atomic char *) calloc ((size_t) n, 1) ;
 	    atomic_init (&sh.abort_flag, 0) ;
 	    atomic_init (&sh.defer_count, 0) ;
 	    sh.defer_limit = (long) n / 10 + 64 ;
 	    sh.nthreads = nthreads ;
-	    if (sh.defer == NULL ||
+	    if (sh.defer == NULL || super_ptr == NULL ||
 		pthread_barrier_init (&sh.barrier, NULL,
 				      (unsigned) nthreads) != 0)
 	    {
 		free ((void *) sh.defer) ;
+		free (super_ptr) ;
+		free (super_serial) ;
 		nthreads = 1 ;
 	    }
 	    else
@@ -1621,6 +1680,8 @@ size_t KLS_KLU_KERNEL_LEVELS
 		    free (workers [t].S.scratch) ;
 		}
 		free ((void *) sh.defer) ;
+		free (super_ptr) ;
+		free (super_serial) ;
 		free (S.colptr) ;
 		TRILINOS_KLU_free (parent, (size_t) (6*n + 2), sizeof (Int),
 				   Common) ;
@@ -1646,6 +1707,8 @@ size_t KLS_KLU_KERNEL_LEVELS
 	    }
 	    KLS_KLU_KERNEL_CHUNKS_FREE (&workers [0].S) ;
 	    free ((void *) sh.defer) ;
+	    free (super_ptr) ;
+	    free (super_serial) ;
 	    KLS_KLU_KERNEL_INIT (&S) ;
 	    S.chunk_head = NULL ;
 	    S.chunk_used = 0 ;
