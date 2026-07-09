@@ -28207,6 +28207,10 @@ static void kls_start_metis_race_early(kls_solver *solver,
       }
     }
   }
+  /* Sub-floor race measured OUT (2026-07-09): rajat03 bootstraps a
+     7x-fill AMD-class first factor (20ms) to hide a 17ms NodeND and
+     pays AMD-rate refactors until adoption — both metrics regressed.
+     The race pays only where NodeND dwarfs the bootstrap factor. */
   if (solver->metis_race != NULL || options->ordering != KLS_ORDERING_AUTO ||
       n < race_floor || getenv("KLS_DISABLE_METIS_RACE") != NULL) {
     return;
@@ -32567,6 +32571,12 @@ int kls_analyze_csc(kls_solver *solver,
     return status;
   }
 
+  if (solver->metis_race != NULL &&
+      chosen->col_ptr != solver->metis_race->col_ptr) {
+    /* selection fell back to the other orientation candidate: the raced
+       pattern arrays are about to be freed under the worker */
+    kls_metis_race_abandon(solver);
+  }
   adopt_candidate(solver, chosen);
   fill_symbolic_stats(solver, elapsed);
   kls_maybe_start_metis_race(solver);
@@ -32650,6 +32660,12 @@ int kls_analyze_csr(kls_solver *solver,
     return status;
   }
 
+  if (solver->metis_race != NULL &&
+      chosen->col_ptr != solver->metis_race->col_ptr) {
+    /* selection fell back to the other orientation candidate: the raced
+       pattern arrays are about to be freed under the worker */
+    kls_metis_race_abandon(solver);
+  }
   adopt_candidate(solver, chosen);
   fill_symbolic_stats(solver, elapsed);
   kls_maybe_start_metis_race(solver);
