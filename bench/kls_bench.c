@@ -998,6 +998,13 @@ int main(int argc, char **argv) {
   const int callgrind_refactor =
       bench_env_enabled("KLS_BENCH_CALLGRIND_REFACTOR");
 
+  {
+    const char *prof_env = getenv("KLS_BENCH_PROF");
+    if (prof_env != NULL && prof_env[0] == '2') {
+      /* profile the factor phase too (first-pass warm-up analysis) */
+      kls_prof_start();
+    }
+  }
   for (int i = 0; i < repeat; ++i) {
     status = kls_factor(solver, run_values);
     if (status != KLS_OK) break;
@@ -1005,7 +1012,10 @@ int main(int argc, char **argv) {
     factor_total += stats.factor_seconds;
   }
   if (bench_env_enabled("KLS_BENCH_PROF")) {
-    kls_prof_start();
+    const char *prof_env = getenv("KLS_BENCH_PROF");
+    if (prof_env == NULL || prof_env[0] != '2') {
+      kls_prof_start();
+    }
   }
   if (callgrind_refactor) {
     CALLGRIND_START_INSTRUMENTATION;
