@@ -340,6 +340,8 @@ struct kls_solver {
                                        deferred to the parallel first factor */
   int metis_promotion_validated;    /* timed promotion measured this numeric;
                                        unmeasured scale re-trials stand down */
+  int tight_tol_refine;             /* near-diagonal factor adopted; solves
+                                       must keep the refinement correction */
   double row_trial_deadline;    /* trial budget in seconds; 0 = none */
   int row_accept_warmup;        /* early refactors skipped: other engines'
                                    own trials and lazy builds inflate them */
@@ -21271,6 +21273,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->pts_ref_decision = 0;
   solver->pts_ref_incumbent_seconds = 0.0;
   solver->pts_ref_trial_seconds = 0.0;
+  solver->tight_tol_refine = 0;
   solver->row_accept_decision = 0;
   solver->row_accept_publish_preferred = 0;
   solver->row_accept_warmup = 0;
@@ -28430,6 +28433,159 @@ static int maybe_select_auto_pivot_tolerance(kls_solver *solver,
   kls_numeric_replaced_invalidate(solver);
   solver->common = trial_common;
   trilinos_klu_l_free_numeric(&old_numeric, &old_common);
+  return 1;
+}
+
+/* Pivot-inflated factors: when threshold pivoting inflates the fill
+   well past the symbolic (diagonal-order) estimate, a near-diagonal
+   factorization with refinement-policed solves is often both faster
+   and more accurate (TSOPF-class: fill 125k -> 80k, refactor+solve
+   0.73 -> 0.45 ms/iter, residual e-12 -> e-16 with one correction).
+   Adopt only on a decisive fill win validated by an honest two-solve
+   probe against A itself. */
+static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
+                                              double *elapsed,
+                                              const double *numeric_values) {
+  if (solver == NULL || solver->numeric == NULL || solver->symbolic == NULL ||
+      numeric_values == NULL || solver->numeric_is_predicted ||
+      solver->pivot_nudge_count > 0 ||
+      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
+      solver->row_scale != NULL || solver->col_scale != NULL ||
+      solver->row_perm != NULL || solver->user_col_perm != NULL ||
+      solver->col_ptr == NULL || solver->row_idx == NULL ||
+      solver->common.status < TRILINOS_KLU_OK ||
+      solver->common.status == TRILINOS_KLU_SINGULAR) {
+    return 0;
+  }
+  /* The symbolic lnz/unz are upper bounds (TSOPF: est 149k vs actual
+     125k), so pivot inflation is not detectable from them. Gate on
+     pivoting being ACTIVE (the existing selector's noffdiag signal)
+     plus a bounded trial cost; the 0.75 fill margin and the honest
+     probe below make the actual decision. */
+  const double actual =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  if (solver->common.noffdiag < 16 || !(solver->common.flops > 0.0) ||
+      solver->common.flops > 1.0e8) {
+    return 0;
+  }
+
+  kls_options trial_options = solver->options;
+  trial_options.scale = (int)solver->common.scale;
+  trial_options.pivot_tolerance = 1.0e-8;
+  trilinos_klu_l_common trial_common;
+  if (apply_options_to_common(&trial_common, &trial_options) != KLS_OK) {
+    return 0;
+  }
+  const double start = kls_now_seconds();
+  trilinos_klu_l_numeric *trial_numeric =
+    trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,
+                          (double *)numeric_values, solver->symbolic,
+                          &trial_common);
+  if (trial_numeric == NULL || trial_common.status < 0 ||
+      trial_common.status == TRILINOS_KLU_SINGULAR ||
+      (double)(trial_numeric->lnz + trial_numeric->unz) > 0.75 * actual) {
+    if (trial_numeric != NULL) {
+      trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
+    }
+    *elapsed += kls_now_seconds() - start;
+    return 0;
+  }
+
+  /* Honest probe: solve A x = A e with one refinement correction and
+     require a machine-class residual before trusting the weak pivots. */
+  const UF_long n = solver->n;
+  double *work = (double *)malloc(4u * (size_t)n * sizeof(*work));
+  if (work == NULL) {
+    trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
+    *elapsed += kls_now_seconds() - start;
+    return 0;
+  }
+  double *b = work;
+  double *x = work + n;
+  double *r = work + 2u * (size_t)n;
+  double *dx = work + 3u * (size_t)n;
+  for (UF_long i = 0; i < n; ++i) {
+    b[i] = 0.0;
+  }
+  for (UF_long j = 0; j < n; ++j) {
+    for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u]; ++p) {
+      b[solver->row_idx[p]] += numeric_values[p];
+    }
+  }
+  memcpy(x, b, (size_t)n * sizeof(*x));
+  int probe_ok =
+    trilinos_klu_l_solve(solver->symbolic, trial_numeric, n, 1, x,
+                         &trial_common) != 0;
+  if (probe_ok) {
+    memcpy(r, b, (size_t)n * sizeof(*r));
+    for (UF_long j = 0; j < n; ++j) {
+      const double xj = x[j];
+      if (xj == 0.0) {
+        continue;
+      }
+      for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
+           ++p) {
+        r[solver->row_idx[p]] -= numeric_values[p] * xj;
+      }
+    }
+    memcpy(dx, r, (size_t)n * sizeof(*dx));
+    probe_ok =
+      trilinos_klu_l_solve(solver->symbolic, trial_numeric, n, 1, dx,
+                           &trial_common) != 0;
+  }
+  if (probe_ok) {
+    double bmax = 0.0;
+    double rmax = 0.0;
+    for (UF_long i = 0; i < n; ++i) {
+      x[i] += dx[i];
+      const double ab = fabs(b[i]);
+      if (ab > bmax) {
+        bmax = ab;
+      }
+    }
+    memcpy(r, b, (size_t)n * sizeof(*r));
+    for (UF_long j = 0; j < n; ++j) {
+      const double xj = x[j];
+      if (xj == 0.0) {
+        continue;
+      }
+      for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
+           ++p) {
+        r[solver->row_idx[p]] -= numeric_values[p] * xj;
+      }
+    }
+    for (UF_long i = 0; i < n; ++i) {
+      const double ar = fabs(r[i]);
+      if (ar > rmax) {
+        rmax = ar;
+      }
+    }
+    probe_ok = bmax > 0.0 && rmax <= 1.0e-12 * bmax;
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS tight-tol: fill %.3e -> %.3e probe %.2e -> %s\n",
+              actual, (double)(trial_numeric->lnz + trial_numeric->unz),
+              bmax > 0.0 ? rmax / bmax : -1.0,
+              probe_ok ? "adopt" : "reject");
+    }
+  }
+  free(work);
+  if (!probe_ok) {
+    trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
+    *elapsed += kls_now_seconds() - start;
+    return 0;
+  }
+
+  trilinos_klu_l_numeric *old_numeric = solver->numeric;
+  trilinos_klu_l_common old_common = solver->common;
+  solver->numeric = trial_numeric;
+  kls_numeric_replaced_invalidate(solver);
+  solver->common = trial_common;
+  solver->tight_tol_refine = 1;
+  solver->numeric_needs_refinement = 1;
+  solver->solve_refine_single_shot = 1;
+  trilinos_klu_l_free_numeric(&old_numeric, &old_common);
+  *elapsed += kls_now_seconds() - start;
   return 1;
 }
 
@@ -120865,6 +121021,12 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
+  if (maybe_select_tight_pivot_tolerance(solver, &elapsed, numeric_values)) {
+    kls_first_factor_used = 0;
+    promoted_numeric = 1;
+    diagnostics_have_flops = 1;
+    diagnostics_have_rcond = 0;
+  }
   KLS_ENTRY_PHASE("auto_pivtol")
 #ifdef KLS_HAVE_SPRAL_SCALING
   if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
@@ -120963,7 +121125,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR &&
-      !solver->fp32_last_used && solver->pivot_nudge_count == 0) {
+      !solver->fp32_last_used && solver->pivot_nudge_count == 0 &&
+      !solver->tight_tol_refine) {
     /* The factor values were just recomputed at full precision with no
        diagonal corrections: any fp32 refinement debt left by an earlier
        trial or promotion numeric is stale, and each solve would pay a
@@ -121177,6 +121340,10 @@ static int solve_impl(kls_solver *solver,
   }
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
       (solver->numeric_needs_refinement ||
+       /* near-diagonal factors (tight pivot tolerance) always carry the
+          correction; derived from the config so no flag lifecycle can
+          drop it */
+       solver->common.tol < 1.0e-4 ||
        getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL) &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
       (solver->solve_refine_values != NULL || solver->values != NULL) &&
@@ -121275,7 +121442,10 @@ static int solve_impl(kls_solver *solver,
         for (UF_long i = 0; i < nloc; ++i) {
           xrhs[i] += correction[i];
         }
-        if (solver->solve_refine_single_shot) {
+        if (solver->solve_refine_single_shot ||
+            solver->common.tol < 1.0e-4) {
+          /* tight-tolerance factors validate one correction with the
+             adoption probe; skip the verification sweep */
           break;
         }
       }
