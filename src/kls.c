@@ -21262,7 +21262,7 @@ static void free_numeric(kls_solver *solver) {
   solver->fp32_mirror_fresh = 0;
   /* deferral flags are solver-level intent (the consult re-validates);
      mid-factor numeric replacements must not wipe them */
-  if (solver->n >= 1000000 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+  if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
     /* the panels/seeds freed below must be re-prepped by the next
        refactorization's consult */
     solver->factor_preps_deferred = 1;
@@ -21304,7 +21304,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
     /* the numeric this consult would compare against is being replaced */
     solver->metis_race_deferred_invalid = 1;
   }
-  if (solver->n >= 1000000 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+  if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
     /* deferred-preps regime: a replacement wipes the engine prep state
        (panels, run ends, seeds), exactly like mid-factor replacements do
        before the sync exit block re-preps; re-arm the consult so the
@@ -122279,12 +122279,12 @@ int kls_factor(kls_solver *solver, const double *values) {
       kls_update_numeric_diagnostics(solver, 1);
     }
     KLS_PHASE("diag")
-    if (solver->n >= 1000000 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
-      /* Giant-class engine/solve preps (row patterns, solve transpose
-         plans, pts trials, panel sorts: ~23% of memchip's factor CPU)
-         only pay off across repeated refactors; run them from the first
-         refactorization so the one-shot factor path stays lean.  Solves
-         before any refactor take the plain paths. */
+    if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+      /* Engine/solve preps (row patterns, solve transpose plans, pts
+         trials, panel sorts: ~23% of memchip's factor CPU, ~20% of
+         rajat25's) only pay off across repeated refactors; run them
+         from the first refactorization so the one-shot factor path
+         stays lean.  Solves before any refactor take the plain paths. */
       solver->factor_preps_deferred = 1;
       goto factor_preps_deferred_exit;
     }

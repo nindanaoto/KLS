@@ -21,6 +21,14 @@
 
 #include <pthread.h>
 #include <stdatomic.h>
+#include <time.h>
+
+static double kls_klu_now (void)
+{
+    struct timespec ts ;
+    clock_gettime (CLOCK_MONOTONIC, &ts) ;
+    return ((double) ts.tv_sec + 1e-9 * (double) ts.tv_nsec) ;
+}
 #include <stdlib.h>
 
 /* chunked mode: stable per-column storage; classic mode: base+offset */
@@ -1336,6 +1344,8 @@ typedef struct kls_klu_par_shared_s
 			    cleanup (mac_econ: 37s wasted attempt) */
     pthread_barrier_t barrier ;
     int nthreads ;
+    int prof ;           /* KLS_KLU_LEVELS_PROF: worker 0 buckets wall */
+    double wide_secs, serial_secs ;
 } kls_klu_par_shared ;
 
 typedef struct kls_klu_par_worker_s
@@ -1355,6 +1365,7 @@ static void *kls_klu_par_worker_main (void *arg)
 	const Int pos0 = sh->level_ptr [sh->super_ptr [sl]] ;
 	const Int pos1 = sh->level_ptr [sh->super_ptr [sl + 1]] ;
 	const int serial = sh->super_serial [sl] ;
+	const double t0 = (sh->prof && W->tid == 0) ? kls_klu_now () : 0 ;
 	if (serial && W->tid != 0)
 	{
 	    pthread_barrier_wait (&sh->barrier) ;
@@ -1411,6 +1422,12 @@ static void *kls_klu_par_worker_main (void *arg)
 	    }
 	}
 	pthread_barrier_wait (&sh->barrier) ;
+	if (sh->prof && W->tid == 0)
+	{
+	    double dt = kls_klu_now () - t0 ;
+	    if (serial) { sh->serial_secs += dt ; }
+	    else        { sh->wide_secs += dt ; }
+	}
     }
     return (NULL) ;
 }
@@ -1435,6 +1452,8 @@ size_t KLS_KLU_KERNEL_LEVELS
     size_t final_size ;
     Int *parent, *anc, *prevrow, *level, *level_ptr, *level_cols ;
     Int nlevels, poff ;
+    const int prof = (getenv ("KLS_KLU_LEVELS_PROF") != NULL) ;
+    double t_sched0 = prof ? kls_klu_now () : 0, t_sched = 0 ;
 
     parent = (Int *) TRILINOS_KLU_malloc ((size_t) (6*n + 2), sizeof (Int),
 					  Common) ;
@@ -1530,6 +1549,10 @@ size_t KLS_KLU_KERNEL_LEVELS
     S.chunked_prune = 0 ;
     S.pack_keep_row_indices = 0 ;
     S.chunk_head = NULL ; S.chunk_used = 0 ; S.chunk_size = 0 ;
+    if (prof)
+    {
+	t_sched = kls_klu_now () - t_sched0 ;
+    }
     S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) * sizeof (Unit)) ;
     S.colptr = (Unit **) calloc ((size_t) n, sizeof (Unit *)) ;
     if (S.colptr == NULL)
@@ -1623,6 +1646,30 @@ size_t KLS_KLU_KERNEL_LEVELS
 	    atomic_init (&sh.defer_count, 0) ;
 	    sh.defer_limit = (long) n / 10 + 64 ;
 	    sh.nthreads = nthreads ;
+	    sh.prof = prof ;
+	    sh.wide_secs = 0 ;
+	    sh.serial_secs = 0 ;
+	    if (prof && super_ptr != NULL)
+	    {
+		Int nw = 0, cw = 0, maxw = 0, sl2 ;
+		for (sl2 = 0 ; sl2 < sh.nsuper ; sl2++)
+		{
+		    Int c = level_ptr [super_ptr [sl2 + 1]] -
+			    level_ptr [super_ptr [sl2]] ;
+		    if (!super_serial [sl2]) { nw++ ; cw += c ; }
+		}
+		for (sl2 = 0 ; sl2 < nlevels ; sl2++)
+		{
+		    Int w = level_ptr [sl2 + 1] - level_ptr [sl2] ;
+		    if (w > maxw) { maxw = w ; }
+		}
+		fprintf (stderr, "LEVELSPROF n=%ld nlev=%ld nsuper=%ld "
+			 "wide_supers=%ld wide_cols=%ld serial_cols=%ld "
+			 "maxwidth=%ld sched=%.3fs\n",
+			 (long) n, (long) nlevels, (long) sh.nsuper,
+			 (long) nw, (long) cw, (long) (n - cw), (long) maxw,
+			 t_sched) ;
+	    }
 	    if (sh.defer == NULL || super_ptr == NULL ||
 		pthread_barrier_init (&sh.barrier, NULL,
 				      (unsigned) nthreads) != 0)
@@ -1718,6 +1765,7 @@ size_t KLS_KLU_KERNEL_LEVELS
 		   as on the predicted path) instead of halting. */
 		{
 		    Int saved_halt = Common->halt_if_singular ;
+		    double t_cl0 = prof ? kls_klu_now () : 0 ;
 		    Common->halt_if_singular = 0 ;
 		    S.chunked_prune = 1 ;
 		    for (k = 0 ; k < n ; k++)
@@ -1735,6 +1783,15 @@ size_t KLS_KLU_KERNEL_LEVELS
 			}
 		    }
 		    Common->halt_if_singular = saved_halt ;
+		    if (prof)
+		    {
+			fprintf (stderr, "LEVELSPROF wide=%.3fs serial=%.3fs "
+				 "cleanup=%.3fs deferred=%ld failed=%ld\n",
+				 sh.wide_secs, sh.serial_secs,
+				 kls_klu_now () - t_cl0,
+				 (long) atomic_load (&sh.defer_count),
+				 (long) cleanup_failed) ;
+		    }
 		}
 		S.cols_done = cleanup_failed ? S.cols_done : n ;
 		for (t = 1 ; t < nthreads ; t++)
@@ -1778,6 +1835,13 @@ size_t KLS_KLU_KERNEL_LEVELS
 		    return (final_size) ;
 		}
 		return (final_size) ;
+	    }
+	    if (prof)
+	    {
+		fprintf (stderr, "LEVELSPROF ABORT spawn_failed=%d "
+			 "deferred=%ld limit=%ld wide=%.3fs serial=%.3fs\n",
+			 spawn_failed, (long) atomic_load (&sh.defer_count),
+			 sh.defer_limit, sh.wide_secs, sh.serial_secs) ;
 	    }
 	    /* spawn/abort: free worker scratch and fall through serial */
 	    for (t = 1 ; t < nthreads ; t++)

@@ -16023,6 +16023,10 @@ static int test_transpose_row_solve_from_numeric_parallel(void) {
                         "analyze transpose parallel row solve")) ok = 0;
   if (ok && !require_ok(kls_factor(solver, ax),
                         "factor transpose parallel row solve")) ok = 0;
+  /* engine/solve preps are deferred to the first refactorization; the
+     seeded partition is part of that contract */
+  if (ok && !require_ok(kls_refactor(solver, ax),
+                        "refactor transpose parallel row solve")) ok = 0;
 
   kls_stats stats;
   stats.struct_size = sizeof(stats);
