@@ -23985,6 +23985,14 @@ static int btf_low_work_many_block_retry_shape_is_allowed(
          200.0 * (double)diagonal >= 191.0 * (double)n;
 }
 
+/* Once a no-btf retry loses DECISIVELY on this pattern (>2x the btf
+   score against a 0.80x adoption bar), further retries with other
+   orderings are hopeless - the missing block structure, not the
+   ordering, is what loses (twotone: both retries lose 6.7x, one per
+   candidate, ~40% of each analyze side).  Reset per analyzed pattern;
+   thread-local so the two orientation sides stay independent. */
+static _Thread_local int kls_no_btf_retry_hopeless;
+
 static void maybe_retry_without_btf(UF_long n,
                                     UF_long *col_ptr,
                                     UF_long *row_idx,
@@ -23996,7 +24004,8 @@ static void maybe_retry_without_btf(UF_long n,
                                     int allow_single_block,
                                     kls_separator_analysis *separator_io) {
   if (options == NULL || !options->use_btf || n < 4000 || symbolic == NULL ||
-      *symbolic == NULL || common == NULL || score == NULL) {
+      *symbolic == NULL || common == NULL || score == NULL ||
+      kls_no_btf_retry_hopeless) {
     return;
   }
 
@@ -24074,6 +24083,10 @@ static void maybe_retry_without_btf(UF_long n,
     return;
   }
 
+  if (current_score_known && isfinite(no_btf_score) &&
+      no_btf_score > 2.0 * current_score) {
+    kls_no_btf_retry_hopeless = 1;
+  }
   trilinos_klu_l_free_symbolic(&no_btf_symbolic, &no_btf_common);
   kls_separator_analysis_clear(&no_btf_separator);
 }
@@ -29122,6 +29135,7 @@ static int choose_symbolic_for_pattern(UF_long n,
   }
 #endif
 
+  kls_no_btf_retry_hopeless = 0;
   kls_options auto_options = *options;
   const kls_options *symbolic_options = options;
 #ifdef KLS_HAVE_METIS
