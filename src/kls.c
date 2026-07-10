@@ -28269,16 +28269,38 @@ static void kls_start_metis_race_early(kls_solver *solver,
      pays AMD-rate refactors until adoption — both metrics regressed.
      The race pays only where NodeND dwarfs the bootstrap factor. */
   if (solver->metis_race != NULL || options->ordering != KLS_ORDERING_AUTO ||
-      n < race_floor || getenv("KLS_DISABLE_METIS_RACE") != NULL) {
+      getenv("KLS_DISABLE_METIS_RACE") != NULL) {
     return;
   }
 #ifdef KLS_HAVE_METIS
-  if (n < 1000000 &&
+  if (n < race_floor) {
+    /* Small METIS-start class (n <= 30000): the synchronous NodeND is
+       most of the analysis (rajat03: 20.5 of 22ms) while deficiency
+       ordering measures at refactor parity (0.63 vs 0.67ms); analyze
+       selects AMF and the race's timed factor-time promotion arbitrates
+       the ND comparison off the critical path.  The spiked class keeps
+       its raceless AMF-first route. */
+    const int small_metis_start =
+      n <= 30000 &&
+      should_start_auto_with_metis(
+        n, col_ptr, row_idx,
+        is_large_nearly_diagonal_spiked_metis_pattern(n, col_ptr,
+                                                      row_idx)) &&
+      !is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx);
+    if (!small_metis_start) {
+      return;
+    }
+  }
+  if (n >= race_floor && n < 1000000 &&
       !is_large_diagonal_metis_start_pattern(n, col_ptr, row_idx)) {
     /* Below the giant class only the ASIC-style strong-diagonal circuit
        shape benefits: matching-class matrices (mac_econ) route through
        the pre-static selector where the race only adds contention, and
        their bootstrap orderings explode. */
+    return;
+  }
+#else
+  if (n < race_floor) {
     return;
   }
 #endif
@@ -29049,6 +29071,30 @@ static int choose_symbolic_for_pattern(UF_long n,
   }
 
 #ifdef KLS_HAVE_METIS
+  if (n <= 30000u && !kls_analyze_defer_nd &&
+      kls_analyze_nd_race_solver != NULL &&
+      kls_analyze_nd_race_solver->metis_race != NULL &&
+      should_start_auto_with_metis(n, col_ptr, row_idx,
+                                   large_spiked_metis_no_btf)) {
+    /* The background race covers the NodeND trial for this small
+       METIS-start matrix: deficiency ordering carries the first numeric
+       (measured refactor parity on this class) and the factor-time
+       timed promotion arbitrates the ND comparison. */
+    int amf_status = analyze_with_ordering(
+      n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
+      symbolic_out, common_out, separator_out);
+    if (amf_status == KLS_OK) {
+      const double amf_score = symbolic_score(*symbolic_out);
+      if (isfinite(amf_score) && amf_score > 0.0 &&
+          amf_score < DBL_MAX / 4.0) {
+        *selected_ordering_out = KLS_ORDERING_AMF;
+        *score_out = amf_score;
+        return KLS_OK;
+      }
+      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+      kls_separator_analysis_clear(separator_out);
+    }
+  }
   if (!kls_analyze_defer_nd &&
       !(kls_analyze_nd_race_solver != NULL &&
         kls_analyze_nd_race_solver->metis_race != NULL) &&
@@ -32612,6 +32658,14 @@ int kls_analyze_csc(kls_solver *solver,
        transfers these arrays by pointer so they outlive the race */
     kls_start_metis_race_early(solver, &normalized, normal.n,
                                normal.col_ptr, normal.row_idx);
+  } else if (normalized.orientation == KLS_ORIENTATION_AUTO &&
+             transpose.col_ptr != NULL &&
+             auto_orientation_prefers_transpose(transpose.n)) {
+    /* small auto-orientation matrices analyze the transpose candidate
+       first and adopt it outright when it succeeds; race that pattern
+       (the selection-mismatch abandon below covers the fallback) */
+    kls_start_metis_race_early(solver, &normalized, transpose.n,
+                               transpose.col_ptr, transpose.row_idx);
   }
 
   kls_analyze_nd_race_solver = solver;
@@ -122145,7 +122199,12 @@ int kls_factor(kls_solver *solver, const double *values) {
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
     } else {
       if (!had_numeric && solver->metis_race != NULL &&
+          solver->symbolic != NULL && solver->symbolic->est_flops >= 1.0e8 &&
           getenv("KLS_RACE_FULL_JOIN") == NULL) {
+        /* Join only when the serial first factor on the current symbolic
+           would dwarf the NodeND wait (mac_econ-class); small raced
+           matrices factor on the incumbent ordering now and the deferred
+           refactor-time consult arbitrates with timed acceptance. */
         /* Symbolic-only join: wait for the worker's analyze, abort its
            serial trial factor, and build the numeric here with the
            parallel predicted machinery on the raced METIS ordering
@@ -122198,8 +122257,14 @@ int kls_factor(kls_solver *solver, const double *values) {
                serial klu fallback below factors the METIS symbolic */
           }
         }
-      } else if (!had_numeric && solver->metis_race != NULL) {
-        /* full join (KLS_RACE_FULL_JOIN=1): take the worker's numeric */
+      } else if (!had_numeric && solver->metis_race != NULL &&
+                 (getenv("KLS_RACE_FULL_JOIN") != NULL ||
+                  solver->symbolic == NULL ||
+                  solver->symbolic->est_flops >= 1.0e8)) {
+        /* full join (KLS_RACE_FULL_JOIN=1, or the giant-class fallback
+           when the predicted build failed): take the worker's numeric.
+           Small raced matrices skip both joins; the deferred consult at
+           the first refactorization arbitrates with timed acceptance. */
         kls_metis_race *race = kls_metis_race_take(solver, &elapsed);
         if (race != NULL && race->analyze_status == KLS_OK &&
             race->symbolic != NULL && race->numeric != NULL &&
