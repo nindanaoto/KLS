@@ -2095,6 +2095,91 @@ static void *kls_klu_pipe_worker_main (void *arg)
     return (NULL) ;
 }
 
+/* ========================================================================== */
+/* === supernodal panel factor (phase 1b) ================================== */
+/* ========================================================================== */
+
+/* Dense panel LU with threshold row pivoting over a gathered row set:
+ * A is row-major R x W (R >= W), rows carry global identities in
+ * rowids[].  On return the first W entries of rowids are the chosen
+ * pivot rows (panel-internal partial pivoting with the klu-style
+ * diagonal preference: prefer diagrow when |x_diag| >= tol * |x_max|),
+ * A holds L\U packed in place (unit lower within the top W x W, the
+ * multipliers below), and the routine reports the number of columns
+ * factored (== W unless a column of the remaining row set is exactly
+ * zero).  diagrows[j] names the preferred pivot row of column j
+ * (TRILINOS_KLU_EMPTY for none). */
+Int KLS_SN_PANEL_FACTOR
+(
+    double *A,          /* row-major R x W, modified in place */
+    Int R,
+    Int W,
+    Int rowids [ ],     /* size R, permuted alongside */
+    const Int diagrows [ ],  /* size W or NULL */
+    double tol
+)
+{
+    Int j, r, p, best ;
+    for (j = 0 ; j < W ; j++)
+    {
+	double amax = 0.0, adiag = -1.0 ;
+	Int rdiag = -1 ;
+	best = -1 ;
+	for (r = j ; r < R ; r++)
+	{
+	    double v = A [r * W + j] ;
+	    v = v < 0 ? -v : v ;
+	    if (v > amax)
+	    {
+		amax = v ;
+		best = r ;
+	    }
+	    if (diagrows != NULL && diagrows [j] >= 0 &&
+		rowids [r] == diagrows [j])
+	    {
+		rdiag = r ;
+		adiag = v ;
+	    }
+	}
+	if (best < 0 || amax == 0.0)
+	{
+	    return (j) ;    /* structurally/numerically dead column */
+	}
+	if (rdiag >= 0 && adiag >= tol * amax)
+	{
+	    best = rdiag ;
+	}
+	if (best != j)
+	{
+	    Int tid = rowids [best] ;
+	    rowids [best] = rowids [j] ;
+	    rowids [j] = tid ;
+	    for (p = 0 ; p < W ; p++)
+	    {
+		double tv = A [best * W + p] ;
+		A [best * W + p] = A [j * W + p] ;
+		A [j * W + p] = tv ;
+	    }
+	}
+	{
+	    double piv = A [j * W + j] ;
+	    for (r = j + 1 ; r < R ; r++)
+	    {
+		double m = A [r * W + j] / piv ;
+		A [r * W + j] = m ;
+		if (m != 0.0)
+		{
+		    for (p = j + 1 ; p < W ; p++)
+		    {
+			A [r * W + p] -= m * A [j * W + p] ;
+		    }
+		}
+	    }
+	}
+    }
+    return (W) ;
+}
+
 /* Pipelined factorization entry: same contract as TRILINOS_KLU_kernel.
  * On any worker abort (singular, OOM) the caller retries serially. */
 size_t KLS_KLU_KERNEL_PIPE

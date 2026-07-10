@@ -16245,7 +16245,80 @@ static int test_kls_first_reseeds_after_pivot_repair(void) {
   return ok;
 }
 
+
+/* supernodal panel factor (phase 1b): random R x W panels, verify
+   P.A = L.U to 1e-11 with the row-map permutation */
+extern long KLS_SN_PANEL_FACTOR(double *A, long R, long W, long *rowids,
+                                const long *diagrows, double tol);
+
+static int run_sn_panel_factor_test(void) {
+  unsigned int seed = 12345u;
+  int trial;
+  for (trial = 0; trial < 20; ++trial) {
+    long R = 4 + (long)(rand_r(&seed) % 60);
+    long W = 1 + (long)(rand_r(&seed) % (R < 32 ? R : 32));
+    long i, j, k;
+    double *A = (double *)malloc((size_t)(R * W) * sizeof(double));
+    double *orig = (double *)malloc((size_t)(R * W) * sizeof(double));
+    long *rowids = (long *)malloc((size_t)R * sizeof(long));
+    long *origids = (long *)malloc((size_t)R * sizeof(long));
+    if (A == NULL || orig == NULL || rowids == NULL || origids == NULL) {
+      free(A); free(orig); free(rowids); free(origids);
+      return 0;
+    }
+    for (i = 0; i < R; ++i) {
+      rowids[i] = origids[i] = i;
+      for (j = 0; j < W; ++j) {
+        A[i * W + j] =
+          ((double)(rand_r(&seed) % 2000) - 1000.0) / 97.0;
+      }
+    }
+    memcpy(orig, A, (size_t)(R * W) * sizeof(double));
+    if (KLS_SN_PANEL_FACTOR(A, R, W, rowids, NULL, 0.001) != W) {
+      /* exact zero column is possible but vanishingly unlikely here */
+      free(A); free(orig); free(rowids); free(origids);
+      continue;
+    }
+    /* verify: for each factored position, orig[rowids[i]][j] ==
+       sum_k L[i][k] * U[k][j] (L unit lower incl. multipliers below,
+       U upper W x W) */
+    for (i = 0; i < R; ++i) {
+      for (j = 0; j < W; ++j) {
+        double acc = 0.0;
+        for (k = 0; k < W && k <= j; ++k) {
+          double l;
+          if (i < W && k > i) break;
+          l = (i == k) ? 1.0 : (k < i || i >= W ? A[i * W + k] : 0.0);
+          if (k > i && i < W) l = 0.0;
+          acc += l * A[k * W + j];
+        }
+        {
+          double ref = orig[rowids[i] * W + j];
+          double d = acc - ref;
+          if (d < 0) d = -d;
+          double scale = ref < 0 ? -ref : ref;
+          if (scale < 1.0) scale = 1.0;
+          if (d / scale > 1e-11) {
+            fprintf(stderr,
+                    "sn panel mismatch trial %d (%ld x %ld) i=%ld j=%ld "
+                    "acc=%g ref=%g\n", trial, R, W, i, j, acc, ref);
+            free(A); free(orig); free(rowids); free(origids);
+            return 0;
+          }
+        }
+      }
+    }
+    free(A); free(orig); free(rowids); free(origids);
+  }
+  return 1;
+}
+
 int main(void) {
+  if (!run_sn_panel_factor_test()) {
+    fprintf(stderr, "sn panel factor test failed\n");
+    return EXIT_FAILURE;
+  }
+
   if (!test_csc()) {
     return EXIT_FAILURE;
   }
