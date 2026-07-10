@@ -118486,6 +118486,11 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       }
       saw_singular = 1;
       k = (UF_long)common->numerical_rank;
+      if (k == KLS_KLU_EMPTY || k >= n) {
+        /* not every refactor path records numerical_rank; the singular
+           column is the same failing pivot */
+        k = (UF_long)common->singular_col;
+      }
     }
     if (k == KLS_KLU_EMPTY || k >= n ||
         solver->pivot_nudge_count >= nudge_slot_cap) {
@@ -118503,6 +118508,24 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       }
     }
     if (diag_pos == KLS_KLU_EMPTY) {
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr,
+                "KLS predicted: zp diag missing k=%ld oldcol=%ld "
+                "symP[k]=%ld Pnum[k]=%ld collen=%ld\n",
+                (long)k, (long)oldcol, (long)symbolic->P[k],
+                (long)numeric->Pnum[k],
+                (long)(solver->col_ptr[oldcol + 1u] -
+                       solver->col_ptr[oldcol]));
+        for (UF_long p = solver->col_ptr[oldcol];
+             p < solver->col_ptr[oldcol + 1u] &&
+             p < solver->col_ptr[oldcol] + 8; ++p) {
+          fprintf(stderr,
+                  "KLS predicted:   row %ld pinv %ld val %.3e\n",
+                  (long)solver->row_idx[p],
+                  (long)numeric->Pinv[solver->row_idx[p]],
+                  numeric_values[p]);
+        }
+      }
       break;
     }
     if (solver->pivot_nudge_values == NULL) {
@@ -118531,6 +118554,14 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     if (existing != KLS_KLU_EMPTY) {
       solver->pivot_nudge_sigma[existing] *= 32.0;
       if (!(fabs(solver->pivot_nudge_sigma[existing]) <= base)) {
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr,
+                  "KLS predicted: zp escalation exhausted k=%ld "
+                  "sigma=%.3e base=%.3e udiag=%.6e a_kk=%.6e\n",
+                  (long)k, solver->pivot_nudge_sigma[existing], base,
+                  ((const double *)numeric->Udiag)[k],
+                  numeric_values[diag_pos]);
+        }
         break;
       }
     } else {
