@@ -2891,6 +2891,41 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     size_t final_size ;
 
     ASSERT (Common != NULL) ;
+    if (n >= 4096 && getenv ("KLS_SN_STATS") != NULL)
+    {
+	/* supernodal-first-factor feasibility probe: fundamental
+	   supernode partition over the column etree (parent[j]==j+1
+	   chains, width cap 128).  Statistics only; no behavior. */
+	Int *sp = (Int *) malloc ((size_t) (3 * n) * sizeof (Int)) ;
+	if (sp != NULL)
+	{
+	    Int *par = sp, *anc = sp + n, *prv = sp + 2*n ;
+	    Int k, nsn = 0, width = 1, singles = 0, maxw = 1 ;
+	    long wsum = 0, w2sum = 0 ;
+	    kls_klu_block_coletree (n, Ap, Ai, Q, k1, PSinv, par, anc, prv) ;
+	    for (k = 1 ; k <= n ; k++)
+	    {
+		if (k < n && par [k-1] == k && width < 128)
+		{
+		    width++ ;
+		    continue ;
+		}
+		nsn++ ;
+		wsum += width ;
+		w2sum += (long) width * width ;
+		if (width > maxw) maxw = width ;
+		if (width == 1) singles++ ;
+		width = 1 ;
+	    }
+	    fprintf (stderr, "KLS snstats: n=%ld nsn=%ld avgw=%.1f "
+		     "rmsw=%.1f maxw=%ld singles=%ld (%.0f%%)\n",
+		     (long) n, (long) nsn, (double) wsum / (nsn > 0 ? nsn : 1),
+		     nsn > 0 ? __builtin_sqrt ((double) w2sum / nsn) : 0.0,
+		     (long) maxw, (long) singles,
+		     100.0 * singles / (nsn > 0 ? nsn : 1)) ;
+	    free (sp) ;
+	}
+    }
     if (n >= 512 &&
 	(getenv ("KLS_KLU_PIPE") != NULL || kls_klu_pipe_threads > 0))
     {
