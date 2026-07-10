@@ -120,14 +120,14 @@ if(KLS_ENABLE_METIS)
         _POSIX_C_SOURCE=200809L
         NDEBUG
         NDEBUG2)
-    # USE_GKRAND (thread-local MT19937 in gklib random.c) makes all
-    # METIS orderings deterministic under concurrent analyze calls and
-    # unlocks default det-ndp routing (rajat25 one-shot 2.54->2.15x,
-    # better fill).  Blocked only by the kls_smoke separator-queue
-    # fixture losing its supernode panel-update coverage under the new
-    # orderings - re-enable together with a fixture that exercises the
-    # panel path for MT19937 separators.
-    option(KLS_GKRAND "thread-local MT19937 RNG for bundled GKlib" OFF)
+    # USE_GKRAND: thread-local MT19937 in gklib random.c.  Concurrent
+    # METIS calls (raced/speculative analyzes, deterministic parallel
+    # NodeNDP leaves) corrupt each other's streams under the stock
+    # process-global srand/rand, making orderings run-to-run
+    # nondeterministic; with MT19937 each call seeds its own
+    # thread-local stream at entry, so every ordering is deterministic
+    # under any interleaving.
+    option(KLS_GKRAND "thread-local MT19937 RNG for bundled GKlib" ON)
     if(KLS_GKRAND)
       target_compile_definitions(kls_gklib PUBLIC USE_GKRAND)
     endif()

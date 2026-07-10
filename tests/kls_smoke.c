@@ -13235,11 +13235,17 @@ static int test_default_keeps_kls_first_factor_off(void) {
 }
 
 static int test_kls_first_separator_queue_plan(void) {
+  /* banded matrix, halfband 16: any reasonable nested-dissection
+     separator of a band graph is ~bandwidth wide, so the separator
+     pipeline segment carries supernode panels for EVERY ordering the
+     RNG produces (the previous tridiagonal fixture only exercised the
+     panel path when an imperfect separator happened to be fat). */
   const int32_t n = 30000;
-  const int32_t nnz = 3 * n - 2;
+  const int32_t half_band = 16;
+  const int32_t nnz_cap = (2 * half_band + 1) * n;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
-  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
-  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz_cap * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz_cap * sizeof(*ax));
   double *b = (double *)calloc((size_t)n, sizeof(*b));
   double *x = (double *)calloc((size_t)n, sizeof(*x));
   double *expected = (double *)malloc((size_t)n * sizeof(*expected));
@@ -13258,23 +13264,19 @@ static int test_kls_first_separator_queue_plan(void) {
   for (int32_t col = 0; col < n; ++col) {
     ap[col] = p;
     expected[col] = 1.0 + (double)(col % 5);
-    if (col > 0) {
-      ai[p] = col - 1;
-      ax[p] = -1.0;
-      p++;
-    }
-    ai[p] = col;
-    ax[p] = 4.0;
-    p++;
-    if (col + 1 < n) {
-      ai[p] = col + 1;
-      ax[p] = -1.0;
+    const int32_t lo = col - half_band < 0 ? 0 : col - half_band;
+    const int32_t hi =
+      col + half_band >= n ? n - 1 : col + half_band;
+    for (int32_t row = lo; row <= hi; ++row) {
+      ai[p] = row;
+      /* diagonally dominant: |diag| > 2*half_band*|offdiag| */
+      ax[p] = row == col ? 40.0 : -1.0;
       p++;
     }
   }
   ap[n] = p;
-  if (p != nnz) {
-    fprintf(stderr, "unexpected separator queue nnz: %d/%d\n", p, nnz);
+  if (p > nnz_cap) {
+    fprintf(stderr, "unexpected separator queue nnz: %d/%d\n", p, nnz_cap);
     free(ap);
     free(ai);
     free(ax);
@@ -13866,6 +13868,15 @@ static int test_kls_first_separator_pipeline_pivot_epoch(void) {
     perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
     ok = 0;
   }
+  /* deterministic pivot-tail coverage: whether the ordering's
+     separator happens to intersect the weak cross is RNG-dependent,
+     so force every 8th pipeline commit through the real pivot
+     exchange + tail restart path (see
+     kls_row_first_debug_force_pivot_every) */
+  if (ok && setenv("KLS_DEBUG_FORCE_ROW_PIPELINE_PIVOT", "8", 1) != 0) {
+    perror("setenv KLS_DEBUG_FORCE_ROW_PIPELINE_PIVOT");
+    ok = 0;
+  }
   if (ok && !require_ok(kls_create(&solver),
                         "create separator pivot epoch")) {
     ok = 0;
@@ -13924,8 +13935,8 @@ static int test_kls_first_separator_pipeline_pivot_epoch(void) {
                0 ||
              factor_stats.kls_first_last_separator_queue_pipeline_supernode_panel_update_rows <=
                0 ||
-             factor_stats.kls_first_last_separator_queue_pipeline_pivot_serial_rows !=
-               0)) {
+             factor_stats.kls_first_last_separator_queue_pipeline_pivot_serial_rows * 2 >
+               factor_stats.kls_first_last_separator_queue_pipeline_rows)) {
     fprintf(stderr,
             "unexpected separator pivot epoch stats: metis=%d"
             ", path=%s, sep_rows=%" PRId64
@@ -14009,6 +14020,7 @@ static int test_kls_first_separator_pipeline_pivot_epoch(void) {
   }
 
 cleanup:
+  unsetenv("KLS_DEBUG_FORCE_ROW_PIPELINE_PIVOT");
   if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
                          saved_first)) {
     ok = 0;

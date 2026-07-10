@@ -24209,16 +24209,15 @@ static UF_long kls_metis_order_inner(UF_long n,
 #ifdef KLS_HAVE_MTMETIS
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
       n >= 50000 && kls_metis_order_threads >= (int)metis_ndp_npes &&
-      getenv("KLS_DET_NDP") != NULL) {
+      getenv("KLS_DISABLE_DET_NDP") == NULL) {
     /* deterministic parallel NodeNDP: serial METIS separators (the
        forest structure the pipeline engines read stays serial-METIS
        shaped) with the leaves ordered by concurrent serial NodeND.
-       Deterministic ONLY with KLS_GKRAND (thread-local MT19937);
-       with the stock process-global rand() the concurrent leaves
-       corrupt each other's streams.  Opt-in via KLS_DET_NDP until the
-       smoke separator fixture regains panel coverage under GKRAND;
-       ordering quality is arbitrated downstream by the candidate
-       competition's measured fill/flops gates. */
+       Deterministic because KLS_GKRAND (default ON) gives each
+       METIS call its own seeded thread-local MT19937 stream; the
+       concurrent leaves cannot perturb each other.  Ordering quality
+       is arbitrated downstream by the candidate competition's
+       measured fill/flops gates. */
     par_nd_done = kls_mtmetis_ndp(n, xadj, adjncy, metis_ndp_npes,
                                   metis_perm, metis_iperm,
                                   metis_ndp_sizes, 1);
@@ -101592,6 +101591,29 @@ static int kls_row_first_partial_apply_ready_until(
   return 1;
 }
 
+/* test-only fault injection: treat every k-th pipeline commit row's
+   diagonal as unusable so the separator pipeline's pivot tail/restart
+   machinery is exercised deterministically on any ordering.  The
+   injected pivot is the row's legitimate strongest candidate, so the
+   factorization stays numerically valid (residuals police it); row-id
+   modulo keeps the injection independent of worker interleaving.
+   Zero cost when the env is unset. */
+static UF_long kls_row_first_debug_force_pivot_every(void) {
+  static _Thread_local UF_long cached = -1;
+  if (cached < 0) {
+    const char *value = getenv("KLS_DEBUG_FORCE_ROW_PIPELINE_PIVOT");
+    cached = 0;
+    if (value != NULL && value[0] != '\0') {
+      char *end = NULL;
+      const long parsed = strtol(value, &end, 10);
+      if (end != value && (end == NULL || *end == '\0') && parsed > 0) {
+        cached = (UF_long)parsed;
+      }
+    }
+  }
+  return cached;
+}
+
 static int kls_row_first_partial_finish(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
@@ -101646,6 +101668,29 @@ static int kls_row_first_partial_finish(
       *pivot_needed_out = 1;
     }
     return 0;
+  }
+  if (allow_pivot && !pivot_needed && ctx->use_separator_for_block) {
+    const UF_long force_every = kls_row_first_debug_force_pivot_every();
+    if (force_every > 0 && i % force_every == 0) {
+      const UF_long alt_col =
+        pivot_choice.scope_enabled
+          ? pivot_choice.scoped_col
+          : (pivot_choice.limit_enabled ? pivot_choice.limited_col
+                                        : pivot_choice.global_col);
+      const double alt_abs =
+        pivot_choice.scope_enabled
+          ? pivot_choice.scoped_abs
+          : (pivot_choice.limit_enabled ? pivot_choice.limited_abs
+                                        : pivot_choice.global_abs);
+      if (alt_col != KLS_KLU_EMPTY && alt_col != i && alt_abs > 0.0) {
+        pivot_needed = 1;
+        selected_col = alt_col;
+        if (pivot_choice.scope_enabled) {
+          selected_separator_exact = pivot_choice.scoped_col_exact;
+          selected_separator_extent = !pivot_choice.scoped_col_exact;
+        }
+      }
+    }
   }
   if (pivot_needed) {
     if (pivot_needed_out != NULL) {
@@ -117387,6 +117432,18 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
               ? &row_supernode_panel_cache : NULL,
             &u_entries, u_row_ptr, u_row_end, udiag_values, nk,
             &row_stats, &row_open_panel_start, &row_open_panel_end, i);
+        }
+      }
+      if (getenv("KLS_DUMP_SEP_PIPE_ROWS") != NULL) {
+        /* fixture-regeneration aid: the separator pipeline suffix's
+           block-local row ids and their q_order images, one per line */
+        for (UF_long iter = block_separator_private_rows; iter < nk;
+             ++iter) {
+          fprintf(stderr, "KLS sep-pipe row %ld q %ld\n",
+                  (long)row_order[iter],
+                  row_ctx.q_order != NULL
+                    ? (long)row_ctx.q_order[row_order[iter]]
+                    : -1L);
         }
       }
       if (block_separator_pipeline_rows > 0u) {
