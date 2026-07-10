@@ -22,6 +22,12 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <time.h>
+#if defined(__x86_64__) || defined(__i386__)
+#include <immintrin.h>
+#define KLS_KLU_CPU_RELAX() _mm_pause ()
+#else
+#define KLS_KLU_CPU_RELAX() do { } while (0)
+#endif
 
 static double kls_klu_now (void)
 {
@@ -1432,6 +1438,600 @@ static void *kls_klu_par_worker_main (void *arg)
     return (NULL) ;
 }
 
+/* ========================================================================== */
+/* === pipelined pivoted factorization ===================================== */
+/* ========================================================================== */
+
+/* Software-pipelined left-looking factorization with real partial
+ * pivoting.  Columns are claimed in order; PUBLICATION IS IN ORDER (a
+ * column pivots only once every earlier column has published), which
+ * keeps pivot choices collision-free and makes the final phase of each
+ * column exactly the serial algorithm.  The overlap is the update
+ * pre-accumulation: while waiting for its predecessors, a column
+ * eliminates through already-published pivot columns in rounds.  Round
+ * r eliminates pivots in [P_{r-1}, P_r); contributions to a pivotal
+ * row only ever come from strictly smaller pivot columns, so per-round
+ * immediate elimination and U extraction preserve serial semantics.
+ * No pruning (concurrent readers), as in the level-scheduled kernel. */
+
+typedef struct kls_klu_pipe_shared_s
+{
+    _Atomic Int next_col ;
+    _Atomic Int prefix ;      /* all columns < prefix are published */
+    _Atomic int abort_flag ;
+    Int n ;
+    int nthreads ;
+} kls_klu_pipe_shared ;
+
+typedef struct kls_klu_pipe_worker_s
+{
+    KLS_KLU_KERNEL_STATE S ;
+    kls_klu_pipe_shared *sh ;
+    Int *ubuf_i ;             /* per-round U pattern accumulation */
+    Entry *ubuf_x ;
+    int tid ;
+} kls_klu_pipe_worker ;
+
+/* DFS from node i (row of the block), eliminating only through pivot
+ * columns < plimit; rows pivotal at >= plimit (or not pivotal) are L
+ * candidates.  Identical in shape to dfs() but without pruning and
+ * with the prefix filter.  Returns the new top; Stack[top..oldtop-1]
+ * is the round's topological segment. */
+static Int kls_pipe_dfs
+(
+    Int j,                    /* node at which to start the DFS */
+    Int k,                    /* mark value for Flag */
+    Int plimit,               /* eliminate only through pivots < plimit */
+    Int Pinv [ ],
+    Int Llen [ ],
+    Int Lip [ ],
+    Int Stack [ ],
+    Int Flag [ ],
+    Int top,
+    Unit LU [ ],
+    Unit *const *Colptr,
+    Int *Lik,
+    Int *plength,
+    Int Ap_pos [ ]
+)
+{
+    Int i, pos, jnew, head, l_length ;
+    Int *Li ;
+
+    l_length = *plength ;
+
+    head = 0 ;
+    Stack [0] = j ;
+    ASSERT (Flag [j] != k) ;
+
+    while (head >= 0)
+    {
+	j = Stack [head] ;
+	jnew = Pinv [j] ;
+	if (Flag [j] != k)
+	{
+	    /* first time j has been visited */
+	    Flag [j] = k ;
+	    /* set Ap_pos [head] to one past the last entry in col j to scan */
+	    Ap_pos [head] = (jnew < 0 || jnew >= plimit) ? 0 : Llen [jnew] ;
+	}
+
+	/* add the adjacent nodes to the recursive stack by iterating through
+	 * until finding another non-visited pivotal node */
+	if (jnew >= 0 && jnew < plimit)
+	{
+	    Unit *xp = KLS_COL_BASE (Colptr, LU, Lip, jnew) ;
+	    Li = (Int *) xp ;
+	    for (pos = --Ap_pos [head] ; pos >= 0 ; --pos)
+	    {
+		i = Li [pos] ;
+		if (Flag [i] != k)
+		{
+		    /* node i is not yet visited */
+		    if (Pinv [i] >= 0 && Pinv [i] < plimit)
+		    {
+			/* keep track of where we left off in the scan of the
+			 * adjacency list of node j so we can restart j where we
+			 * left off. */
+			Ap_pos [head] = pos ;
+
+			/* node i is pivotal; push onto recursive stack */
+			Stack [++head] = i ;
+			break ;
+		    }
+		    else
+		    {
+			/* i is an L candidate for column k of the block */
+			Flag [i] = k ;
+			Lik [l_length] = i ;
+			l_length++ ;
+		    }
+		}
+	    }
+	    if (pos >= 0)
+	    {
+		continue ;
+	    }
+	}
+
+	/* pop off the recursive stack and push j in the output stack */
+	head-- ;
+	if (jnew >= 0 && jnew < plimit)
+	{
+	    Stack [--top] = j ;
+	}
+	else
+	{
+	    /* j itself is an L candidate (promoted-root case is handled by
+	       the caller; roots reaching here were classified above) */
+	}
+    }
+
+    *plength = l_length ;
+    return (top) ;
+}
+
+/* One elimination round for column k of the block: symbolic (from the
+ * given roots) + numeric + U-segment extraction, eliminating only
+ * through pivots < plimit.  root_rows==NULL means round 1 (roots are
+ * A(:,k)'s block rows); otherwise roots are promoted former candidates
+ * (already flagged, already pivotal).  Returns 0 on success. */
+static void kls_pipe_round
+(
+    KLS_KLU_KERNEL_STATE *S,
+    Int k,
+    Int plimit,
+    const Int *root_rows,
+    Int nroots,
+    Unit *LU,                 /* local scratch base */
+    Int *Lik,
+    Int *plength,
+    Int *ubuf_i,
+    Entry *ubuf_x,
+    Int *pucount
+)
+{
+    const Int n = S->n ;
+    Int *Pinv = S->Pinv ;
+    Int top = n ;
+    Int r, i, p, s ;
+
+    if (root_rows == NULL)
+    {
+	/* round 1: roots are the block rows of A(:,k) */
+	Int kglobal = k + S->k1 ;
+	Int oldcol = S->Q [kglobal] ;
+	Int pend = S->Ap [oldcol+1] ;
+	for (p = S->Ap [oldcol] ; p < pend ; p++)
+	{
+	    i = S->PSinv [S->Ai [p]] - S->k1 ;
+	    if (i < 0) continue ;
+	    if (S->Flag [i] != k)
+	    {
+		if (Pinv [i] >= 0 && Pinv [i] < plimit)
+		{
+		    top = kls_pipe_dfs (i, k, plimit, Pinv, S->Llen, S->Lip,
+					S->Stack, S->Flag, top, LU, S->colptr,
+					Lik, plength, S->Ap_pos) ;
+		}
+		else
+		{
+		    S->Flag [i] = k ;
+		    Lik [*plength] = i ;
+		    (*plength)++ ;
+		}
+	    }
+	}
+    }
+    else
+    {
+	/* later round: roots are promoted candidates (flagged, pivotal).
+	   Push each through the DFS expansion of its pivot column. */
+	for (r = 0 ; r < nroots ; r++)
+	{
+	    i = root_rows [r] ;
+	    /* the root is already flagged; expand it like dfs would after
+	       marking: temporarily unflag so kls_pipe_dfs takes it */
+	    S->Flag [i] = TRILINOS_KLU_EMPTY ;
+	    top = kls_pipe_dfs (i, k, plimit, Pinv, S->Llen, S->Lip,
+				S->Stack, S->Flag, top, LU, S->colptr,
+				Lik, plength, S->Ap_pos) ;
+	}
+    }
+
+    /* numeric for this round's topological segment */
+    lsolve_numeric (Pinv, LU, S->colptr, S->Stack, S->Lip, top, n,
+		    S->Llen, S->X) ;
+
+    /* extract this round's U segment: values are final (contributions
+       to a pivotal row come only from smaller pivot columns, all of
+       which are eliminated by this or an earlier round) */
+    for (s = top ; s < n ; s++)
+    {
+	Int j = S->Stack [s] ;
+	ubuf_i [*pucount] = Pinv [j] ;
+	ubuf_x [*pucount] = S->X [j] ;
+	CLEAR (S->X [j]) ;
+	(*pucount)++ ;
+    }
+}
+
+static void *kls_klu_pipe_worker_main (void *arg)
+{
+    kls_klu_pipe_worker *W = (kls_klu_pipe_worker *) arg ;
+    kls_klu_pipe_shared *sh = W->sh ;
+    KLS_KLU_KERNEL_STATE *S = &W->S ;
+    const Int n = S->n ;
+    Int *promoted = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+    if (promoted == NULL)
+    {
+	atomic_store_explicit (&sh->abort_flag, 1, memory_order_release) ;
+	return (NULL) ;
+    }
+
+    for ( ; ; )
+    {
+	Int k = atomic_fetch_add_explicit (&sh->next_col, 1,
+					   memory_order_relaxed) ;
+	if (k >= n ||
+	    atomic_load_explicit (&sh->abort_flag, memory_order_acquire))
+	{
+	    break ;
+	}
+
+	Unit *LU = S->scratch ;
+	Int *Lik ;
+	Int l_length = 0, ucount = 0, plimit, done_limit ;
+	Entry pivot ;
+	double abs_pivot ;
+	Int pivrow = TRILINOS_KLU_EMPTY, diagrow, i, p ;
+
+	S->Lip [k] = 0 ;
+	Lik = (Int *) LU ;
+
+	construct_column (k, S->Ap, S->Ai, S->Ax, S->Q, S->X,
+			  S->k1, S->PSinv, S->Rs, S->scale,
+			  S->Offp, S->Offi, S->Offx) ;
+
+	/* round 1 against the prefix at claim time */
+	plimit = atomic_load_explicit (&sh->prefix, memory_order_acquire) ;
+	if (plimit > k)
+	{
+	    plimit = k ;
+	}
+	kls_pipe_round (S, k, plimit, NULL, 0, LU, Lik, &l_length,
+			W->ubuf_i, W->ubuf_x, &ucount) ;
+
+	/* later rounds as the prefix advances toward k */
+	while (plimit < k)
+	{
+	    Int newlimit ;
+	    do
+	    {
+		if (atomic_load_explicit (&sh->abort_flag,
+					  memory_order_acquire))
+		{
+		    free (promoted) ;
+		    return (NULL) ;
+		}
+		KLS_KLU_CPU_RELAX () ;
+		newlimit = atomic_load_explicit (&sh->prefix,
+						 memory_order_acquire) ;
+	    } while (newlimit <= plimit) ;
+	    if (newlimit > k)
+	    {
+		newlimit = k ;
+	    }
+	    /* collect candidates promoted into [plimit, newlimit) and
+	       compact the candidate list */
+	    {
+		Int npromoted = 0, w = 0 ;
+		for (p = 0 ; p < l_length ; p++)
+		{
+		    i = Lik [p] ;
+		    if (S->Pinv [i] >= 0 && S->Pinv [i] < newlimit)
+		    {
+			promoted [npromoted++] = i ;
+		    }
+		    else
+		    {
+			Lik [w++] = i ;
+		    }
+		}
+		l_length = w ;
+		if (npromoted > 0)
+		{
+		    kls_pipe_round (S, k, newlimit, promoted, npromoted, LU,
+				    Lik, &l_length, W->ubuf_i, W->ubuf_x,
+				    &ucount) ;
+		}
+	    }
+	    plimit = newlimit ;
+	}
+
+	S->Llen [k] = l_length ;
+
+	/* prefix == k: the final state is exactly the serial algorithm's */
+	diagrow = S->P [k] ;
+	if (!lpivot (diagrow, &pivrow, &pivot, &abs_pivot, S->tol, S->X, LU,
+		     S->Lip, S->Llen, k, n, S->Pinv, &S->firstrow,
+		     S->Common))
+	{
+	    /* singular: match the serial kernel's bookkeeping, then abort
+	       to the serial fallback (halt semantics are the caller's) */
+	    S->Common->status = TRILINOS_KLU_SINGULAR ;
+	    if (S->Common->numerical_rank == TRILINOS_KLU_EMPTY)
+	    {
+		S->Common->numerical_rank = k + S->k1 ;
+		S->Common->singular_col = S->Q [k + S->k1] ;
+	    }
+	    atomic_store_explicit (&sh->abort_flag, 1, memory_order_release) ;
+	    break ;
+	}
+
+	/* assemble and publish the exact-size column: [Li|Lx] is already
+	   in the scratch (lpivot gathered it); append [Ui|Ux] */
+	{
+	    Int llen = S->Llen [k] ;
+	    size_t lpart = (size_t) (UNITS (Int, llen) + UNITS (Entry, llen)) ;
+	    size_t used = lpart + (size_t) (UNITS (Int, ucount) +
+					    UNITS (Entry, ucount)) ;
+	    Unit *col = kls_klu_chunk_alloc (S, used) ;
+	    Int *Ui ;
+	    Entry *Ux ;
+	    if (col == NULL)
+	    {
+		S->Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
+		atomic_store_explicit (&sh->abort_flag, 1,
+				       memory_order_release) ;
+		break ;
+	    }
+	    memcpy (col, S->scratch, lpart * sizeof (Unit)) ;
+	    S->Uip [k] = (Int) lpart ;
+	    S->Ulen [k] = ucount ;
+	    Ui = (Int *) (col + lpart) ;
+	    Ux = (Entry *) (col + lpart + UNITS (Int, ucount)) ;
+	    for (p = 0 ; p < ucount ; p++)
+	    {
+		Ui [p] = W->ubuf_i [p] ;
+		Ux [p] = W->ubuf_x [p] ;
+	    }
+	    S->colptr [k] = col ;
+	}
+	S->Udiag [k] = pivot ;
+	if (pivrow != diagrow)
+	{
+	    S->Common->noffdiag++ ;
+	    if (S->Pinv [diagrow] < 0)
+	    {
+		Int kbar = FLIP (S->Pinv [pivrow]) ;
+		S->P [kbar] = diagrow ;
+		S->Pinv [diagrow] = FLIP (kbar) ;
+	    }
+	}
+	S->P [k] = pivrow ;
+	S->Pinv [pivrow] = k ;
+	S->lnz += S->Llen [k] + 1 ;
+	S->unz += S->Ulen [k] + 1 ;
+	S->cols_done = k + 1 ;
+
+	/* publish in order */
+	done_limit = k + 1 ;
+	atomic_store_explicit (&sh->prefix, done_limit,
+			       memory_order_release) ;
+    }
+    free (promoted) ;
+    return (NULL) ;
+}
+
+/* Pipelined factorization entry: same contract as TRILINOS_KLU_kernel.
+ * On any worker abort (singular, OOM) the caller retries serially. */
+size_t KLS_KLU_KERNEL_PIPE
+(
+    Int n, Int Ap [ ], Int Ai [ ], Entry Ax [ ], Int Q [ ], size_t lusize,
+    Int Pinv [ ], Int P [ ], Unit **p_LU, Entry Udiag [ ],
+    Int Llen [ ], Int Ulen [ ], Int Lip [ ], Int Uip [ ],
+    Int *lnz, Int *unz, Entry X [ ],
+    Int Stack [ ], Int Flag [ ], Int Ap_pos [ ], Int Lpend [ ],
+    Int k1, Int PSinv [ ], double Rs [ ],
+    Int Offp [ ], Int Offi [ ], Entry Offx [ ],
+    TRILINOS_KLU_common *Common,
+    int nthreads
+)
+{
+    KLS_KLU_KERNEL_STATE S ;
+    kls_klu_pipe_shared sh ;
+    kls_klu_pipe_worker workers [16] ;
+    pthread_t tids [16] ;
+    int t, spawn_failed = 0 ;
+    Int k, poff ;
+    size_t final_size ;
+
+    if (nthreads < 1) nthreads = 1 ;
+    if (nthreads > 16) nthreads = 16 ;
+
+    /* Offp prefix so construct_column's off-diagonal writes are disjoint
+       and idempotent under any completion order */
+    poff = Offp [k1] ;
+    for (k = 0 ; k < n ; k++)
+    {
+	Int oldcol = Q [k + k1] ;
+	Int p2 ;
+	Offp [k + k1] = poff ;
+	for (p2 = Ap [oldcol] ; p2 < Ap [oldcol+1] ; p2++)
+	{
+	    if (PSinv [Ai [p2]] - k1 < 0)
+	    {
+		poff++ ;
+	    }
+	}
+    }
+    Offp [n + k1] = poff ;
+
+    S.n = n ;
+    S.Ap = Ap ; S.Ai = Ai ; S.Ax = Ax ; S.Q = Q ;
+    S.lusize = lusize ;
+    S.Pinv = Pinv ; S.P = P ;
+    S.LU = *p_LU ;
+    S.Udiag = Udiag ;
+    S.Llen = Llen ; S.Ulen = Ulen ; S.Lip = Lip ; S.Uip = Uip ;
+    S.X = X ; S.Stack = Stack ; S.Flag = Flag ;
+    S.Ap_pos = Ap_pos ; S.Lpend = Lpend ;
+    S.k1 = k1 ; S.PSinv = PSinv ; S.Rs = Rs ;
+    S.Offp = Offp ; S.Offi = Offi ; S.Offx = Offx ;
+    S.Common = Common ;
+    S.scale = Common->scale ;
+    S.tol = Common->tol ;
+    S.memgrow = Common->memgrow ;
+    S.no_prune = 1 ;
+    S.diag_claim = 0 ;
+    S.chunked_prune = 0 ;
+    S.pack_keep_row_indices = 0 ;
+    S.chunk_head = NULL ; S.chunk_used = 0 ; S.chunk_size = 0 ;
+    S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) * sizeof (Unit)) ;
+    S.colptr = (Unit **) calloc ((size_t) n, sizeof (Unit *)) ;
+    if (S.scratch == NULL || S.colptr == NULL)
+    {
+	free (S.scratch) ;
+	free (S.colptr) ;
+	Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
+	return (lusize) ;
+    }
+
+    KLS_KLU_KERNEL_INIT (&S) ;
+
+    atomic_init (&sh.next_col, 0) ;
+    atomic_init (&sh.prefix, 0) ;
+    atomic_init (&sh.abort_flag, 0) ;
+    sh.n = n ;
+    sh.nthreads = nthreads ;
+
+    for (t = 0 ; t < nthreads ; t++)
+    {
+	kls_klu_pipe_worker *W = &workers [t] ;
+	W->S = S ;
+	W->sh = &sh ;
+	W->tid = t ;
+	W->S.chunk_head = NULL ;
+	W->S.chunk_used = 0 ;
+	W->S.chunk_size = 0 ;
+	W->S.lnz = 0 ;
+	W->S.unz = 0 ;
+	W->S.firstrow = 0 ;
+	W->ubuf_i = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	W->ubuf_x = (Entry *) malloc ((size_t) n * sizeof (Entry)) ;
+	if (W->ubuf_i == NULL || W->ubuf_x == NULL)
+	{
+	    spawn_failed = 1 ;
+	}
+	if (t > 0 && !spawn_failed)
+	{
+	    Int q ;
+	    W->S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) *
+					    sizeof (Unit)) ;
+	    W->S.X = (Entry *) malloc ((size_t) n * sizeof (Entry)) ;
+	    W->S.Stack = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	    W->S.Flag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	    W->S.Ap_pos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	    if (W->S.scratch == NULL || W->S.X == NULL ||
+		W->S.Stack == NULL || W->S.Flag == NULL ||
+		W->S.Ap_pos == NULL)
+	    {
+		spawn_failed = 1 ;
+	    }
+	    else
+	    {
+		for (q = 0 ; q < n ; q++)
+		{
+		    CLEAR (W->S.X [q]) ;
+		    W->S.Flag [q] = TRILINOS_KLU_EMPTY ;
+		}
+	    }
+	}
+    }
+    if (!spawn_failed)
+    {
+	for (t = 1 ; t < nthreads ; t++)
+	{
+	    if (pthread_create (&tids [t], NULL, kls_klu_pipe_worker_main,
+				&workers [t]) != 0)
+	    {
+		atomic_store (&sh.abort_flag, 1) ;
+		nthreads = t ;
+		spawn_failed = 1 ;
+		break ;
+	    }
+	}
+	kls_klu_pipe_worker_main (&workers [0]) ;
+	for (t = 1 ; t < nthreads ; t++)
+	{
+	    pthread_join (tids [t], NULL) ;
+	}
+    }
+    else
+    {
+	atomic_store (&sh.abort_flag, 1) ;
+    }
+
+    if (!spawn_failed &&
+	!atomic_load_explicit (&sh.abort_flag, memory_order_acquire) &&
+	atomic_load_explicit (&sh.prefix, memory_order_acquire) == n)
+    {
+	/* merge tallies; worker 0's state owns the template arena */
+	S = workers [0].S ;
+	for (t = 1 ; t < nthreads ; t++)
+	{
+	    S.lnz += workers [t].S.lnz ;
+	    S.unz += workers [t].S.unz ;
+	}
+	S.cols_done = n ;
+	final_size = KLS_KLU_KERNEL_FINISH (&S) ;
+	for (t = 0 ; t < nthreads ; t++)
+	{
+	    if (t > 0)
+	    {
+		KLS_KLU_KERNEL_CHUNKS_FREE (&workers [t].S) ;
+		free (workers [t].S.scratch) ;
+		free (workers [t].S.X) ;
+		free (workers [t].S.Stack) ;
+		free (workers [t].S.Flag) ;
+		free (workers [t].S.Ap_pos) ;
+	    }
+	    free (workers [t].ubuf_i) ;
+	    free (workers [t].ubuf_x) ;
+	}
+	free (S.colptr) ;
+	*p_LU = S.LU ;
+	*lnz = S.lnz ;
+	*unz = S.unz ;
+	return (final_size) ;
+    }
+
+    /* abort: free everything and signal the caller to retry serially */
+    for (t = 0 ; t < nthreads ; t++)
+    {
+	if (t > 0)
+	{
+	    KLS_KLU_KERNEL_CHUNKS_FREE (&workers [t].S) ;
+	    free (workers [t].S.scratch) ;
+	    free (workers [t].S.X) ;
+	    free (workers [t].S.Stack) ;
+	    free (workers [t].S.Flag) ;
+	    free (workers [t].S.Ap_pos) ;
+	}
+	free (workers [t].ubuf_i) ;
+	free (workers [t].ubuf_x) ;
+    }
+    KLS_KLU_KERNEL_CHUNKS_FREE (&workers [0].S) ;
+    free (S.scratch) ;
+    free (S.colptr) ;
+    if (Common->status == TRILINOS_KLU_OK)
+    {
+	Common->status = TRILINOS_KLU_SINGULAR ;
+    }
+    return (lusize) ;
+}
+
 /* Level-scheduled factorization: same contract as TRILINOS_KLU_kernel.
  * v0 runs the schedule serially through the chunked step (validates the
  * schedule and storage); the worker pool lands on top of this. */
@@ -1951,6 +2551,26 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     size_t final_size ;
 
     ASSERT (Common != NULL) ;
+    if (n >= 512 && getenv ("KLS_KLU_PIPE") != NULL)
+    {
+	int pipe_threads = atoi (getenv ("KLS_KLU_PIPE")) ;
+	size_t pipe_size = KLS_KLU_KERNEL_PIPE (n, Ap, Ai, Ax, Q, lusize,
+	    Pinv, P, p_LU, Udiag, Llen, Ulen, Lip, Uip, lnz, unz, X, Stack,
+	    Flag, Ap_pos, Lpend, k1, PSinv, Rs, Offp, Offi, Offx, Common,
+	    pipe_threads) ;
+	if (Common->status == TRILINOS_KLU_OK)
+	{
+	    return (pipe_size) ;
+	}
+	/* singular or resource failure in the pipeline: retry the block
+	   with the classic serial kernel (X/Flag state is clean; the
+	   pipeline frees its own arenas on abort) */
+	Common->status = TRILINOS_KLU_OK ;
+	Common->numerical_rank = TRILINOS_KLU_EMPTY ;
+	Common->singular_col = TRILINOS_KLU_EMPTY ;
+	/* the serial path below re-runs KLS_KLU_KERNEL_INIT, which
+	   restores X/Flag/Lpend and the P/Pinv flipped identity */
+    }
     if (n >= 512 && getenv ("KLS_KLU_LEVELS") != NULL)
     {
 	size_t par_size = KLS_KLU_KERNEL_LEVELS (n, Ap, Ai, Ax, Q, lusize,
