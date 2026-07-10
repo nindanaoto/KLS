@@ -3008,6 +3008,108 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 		     nsn > 0 ? __builtin_sqrt ((double) w2sum / nsn) : 0.0,
 		     (long) maxw, (long) singles,
 		     100.0 * singles / (nsn > 0 ? nsn : 1)) ;
+	    /* A'A-bound fill count (Gilbert-Ng-Peyton over the column
+	       etree with row subtrees): the panel-pivoting bound's
+	       affordability vs the true LU fill.  Skeleton-free upper
+	       variant: count col j's bound rows as the union of row
+	       subtrees - via the classic prevleaf/first-descendant LCA
+	       skip counts. */
+	    {
+		Int *first = (Int *) malloc ((size_t) (4 * n) * sizeof (Int)) ;
+		if (first != NULL)
+		{
+		    Int *prevleaf = first + n ;
+		    Int *setparent = first + 2*n ;
+		    Int *count = first + 3*n ;
+		    Int j, kk, p2 ;
+		    double bound_fill = 0.0 ;
+		    /* first descendant via postorder-free approximation:
+		       process columns ascending (etree children < parent
+		       for the column etree of an ordered matrix) */
+		    for (j = 0 ; j < n ; j++)
+		    {
+			first [j] = j ;
+			prevleaf [j] = TRILINOS_KLU_EMPTY ;
+			setparent [j] = j ;
+			count [j] = 1 ;  /* diagonal */
+		    }
+		    for (j = 0 ; j < n ; j++)
+		    {
+			if (par [j] != TRILINOS_KLU_EMPTY &&
+			    first [par [j]] > first [j])
+			{
+			    first [par [j]] = first [j] ;
+			}
+		    }
+		    /* rows: each structural entry (i in column j of the
+		       permuted block) contributes count increments at
+		       LCA skips along row i's subtree leaves */
+		    for (j = 0 ; j < n ; j++)
+		    {
+			Int kglobal = j + k1 ;
+			Int oldcol = Q [kglobal] ;
+			for (p2 = Ap [oldcol] ; p2 < Ap [oldcol+1] ; p2++)
+			{
+			    Int i = PSinv [Ai [p2]] - k1 ;
+			    if (i < 0 || j <= i)
+			    {
+				continue ;   /* upper/diag or off-block */
+			    }
+			    /* column j sees row i (i < j): leaf j in row
+			       i's subtree.  Skip-count: add path from j
+			       up to the previous leaf's LCA */
+			    {
+				Int q = prevleaf [i] ;
+				Int lca ;
+				if (q == TRILINOS_KLU_EMPTY)
+				{
+				    lca = i ;
+				}
+				else
+				{
+				    /* find root of q's set */
+				    Int r0 = q ;
+				    while (setparent [r0] != r0)
+				    {
+					r0 = setparent [r0] ;
+				    }
+				    lca = r0 ;
+				    /* path compress */
+				    while (setparent [q] != r0)
+				    {
+					Int nx = setparent [q] ;
+					setparent [q] = r0 ;
+					q = nx ;
+				    }
+				}
+				{
+				    Int t ;
+				    for (t = j ; t != lca &&
+					 t != TRILINOS_KLU_EMPTY ;
+					 t = par [t])
+				    {
+					count [t]++ ;
+				    }
+				}
+				prevleaf [i] = j ;
+			    }
+			}
+			/* union j into parent's set after processing */
+			if (par [j] != TRILINOS_KLU_EMPTY)
+			{
+			    setparent [j] = par [j] ;
+			}
+		    }
+		    for (j = 0 ; j < n ; j++)
+		    {
+			bound_fill += (double) count [j] ;
+		    }
+		    fprintf (stderr,
+			     "KLS snstats: ata-bound fill %.3e\n",
+			     bound_fill) ;
+		    free (first) ;
+		}
+	    }
 	    free (sp) ;
 	}
     }
