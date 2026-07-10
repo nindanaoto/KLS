@@ -23390,6 +23390,16 @@ static int kls_mtmetis_nd(UF_long n, const idx_t *xadj, const idx_t *adjncy,
     }
     opts[MTMETIS_OPTION_NTHREADS] = (double)threads;
     opts[MTMETIS_OPTION_SEED] = 0.0;
+    if (getenv("KLS_MT_ND_METIS") != NULL) {
+      /* hybrid: serial-METIS quality on the subproblems, threaded top */
+      opts[MTMETIS_OPTION_METIS] = 1.0;
+    }
+    {
+      const char *nr = getenv("KLS_MT_ND_NRUNS");
+      if (nr != NULL && nr[0] != '\0') {
+        opts[MTMETIS_OPTION_NRUNS] = (double)atoi(nr);
+      }
+    }
     if (getenv("KLS_MT_ND_TRACE") != NULL) {
       UF_long bad = 0, j;
       for (j = 0; j < n; ++j) {
