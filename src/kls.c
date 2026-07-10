@@ -29569,6 +29569,26 @@ static int select_candidate(kls_pattern_candidate *normal,
     }
     return status;
   }
+  /* Exactly pattern-symmetric input: the transpose candidate is the
+     identical pattern, its analyze returns the identical score, and
+     the equal-score tie-break below picks normal - skip the redundant
+     second analyze outright (behavior-identical by construction; the
+     values still differ, but the selection outcome does not). */
+  if (normal->nnz == transpose->nnz && normal->n == transpose->n &&
+      memcmp(normal->col_ptr, transpose->col_ptr,
+             ((size_t)normal->n + 1u) * sizeof(UF_long)) == 0 &&
+      memcmp(normal->row_idx, transpose->row_idx,
+             (size_t)normal->nnz * sizeof(UF_long)) == 0) {
+    int status = analyze_candidate(normal, options);
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr, "KLS select: pattern-symmetric, single analyze\n");
+    }
+    if (status == KLS_OK) {
+      *chosen_out = normal;
+      return KLS_OK;
+    }
+    return status;
+  }
   /* Both orientations run the identical analysis; on the classes where
      the nested-dissection trials dominate the cost, run the transpose
      side on a worker thread - the comparison and results are unchanged,
