@@ -1475,6 +1475,8 @@ typedef struct kls_klu_pipe_worker_s
     Int *ubuf_i ;             /* per-round U pattern accumulation */
     Entry *ubuf_x ;
     int tid ;
+    double t_work, t_spin, t_final ;   /* KLS_KLU_PIPE_PROF buckets */
+    long n_cols, n_rounds ;
 } kls_klu_pipe_worker ;
 
 /* DFS from node i (row of the block), eliminating only through pivot
@@ -1667,6 +1669,8 @@ static void *kls_klu_pipe_worker_main (void *arg)
     kls_klu_pipe_shared *sh = W->sh ;
     KLS_KLU_KERNEL_STATE *S = &W->S ;
     const Int n = S->n ;
+    const int prof = getenv ("KLS_KLU_PIPE_PROF") != NULL ;
+    double t0 = 0 ;
     Int *promoted = (Int *) malloc ((size_t) n * sizeof (Int)) ;
     if (promoted == NULL)
     {
@@ -1687,6 +1691,7 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	Unit *LU = S->scratch ;
 	Int *Lik ;
 	Int l_length = 0, ucount = 0, plimit, done_limit ;
+	if (prof) { t0 = kls_klu_now () ; W->n_cols++ ; }
 	Entry pivot ;
 	double abs_pivot ;
 	Int pivrow = TRILINOS_KLU_EMPTY, diagrow, i, p ;
@@ -1711,6 +1716,12 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	while (plimit < k)
 	{
 	    Int newlimit ;
+	    if (prof)
+	    {
+		double ts = kls_klu_now () ;
+		W->t_work += ts - t0 ;
+		t0 = ts ;
+	    }
 	    do
 	    {
 		if (atomic_load_explicit (&sh->abort_flag,
@@ -1723,6 +1734,13 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		newlimit = atomic_load_explicit (&sh->prefix,
 						 memory_order_acquire) ;
 	    } while (newlimit <= plimit) ;
+	    if (prof)
+	    {
+		double ts = kls_klu_now () ;
+		W->t_spin += ts - t0 ;
+		t0 = ts ;
+		W->n_rounds++ ;
+	    }
 	    if (newlimit > k)
 	    {
 		newlimit = k ;
@@ -1754,6 +1772,12 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	    plimit = newlimit ;
 	}
 
+	if (prof)
+	{
+	    double ts = kls_klu_now () ;
+	    W->t_work += ts - t0 ;
+	    t0 = ts ;
+	}
 	S->Llen [k] = l_length ;
 
 	/* prefix == k: the final state is exactly the serial algorithm's */
@@ -1850,6 +1874,17 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	done_limit = k + 1 ;
 	atomic_store_explicit (&sh->prefix, done_limit,
 			       memory_order_release) ;
+	if (prof)
+	{
+	    W->t_final += kls_klu_now () - t0 ;
+	}
+    }
+    if (prof)
+    {
+	fprintf (stderr, "KLS pipe prof tid=%d cols=%ld rounds=%ld "
+		 "work=%.2fs spin=%.2fs final=%.2fs\n",
+		 W->tid, W->n_cols, W->n_rounds,
+		 W->t_work, W->t_spin, W->t_final) ;
     }
     free (promoted) ;
     return (NULL) ;
@@ -1951,6 +1986,8 @@ size_t KLS_KLU_KERNEL_PIPE
 	W->S.firstrow = 0 ;
 	W->ubuf_i = (Int *) malloc ((size_t) n * sizeof (Int)) ;
 	W->ubuf_x = (Entry *) malloc ((size_t) n * sizeof (Entry)) ;
+	W->t_work = 0 ; W->t_spin = 0 ; W->t_final = 0 ;
+	W->n_cols = 0 ; W->n_rounds = 0 ;
 	if (W->ubuf_i == NULL || W->ubuf_x == NULL)
 	{
 	    spawn_failed = 1 ;
