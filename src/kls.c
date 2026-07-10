@@ -29534,9 +29534,17 @@ static int select_candidate(kls_pattern_candidate *normal,
     transpose_job.status = KLS_ERR_FACTOR_FAILED;
     pthread_t transpose_thread;
     int threaded = 0;
-    if (normal->n >= 200000 &&
+    if ((normal->n >= 200000 ||
+         (normal->n >= 30000 &&
+          options->ordering == KLS_ORDERING_AUTO)) &&
         pthread_create(&transpose_thread, NULL, kls_candidate_analyze_main,
                        &transpose_job) == 0) {
+      /* the two sides are independent full analyzes; above the small
+         class the per-side cost (twotone: 1.5-2.9s at n=121k) dwarfs
+         the spawn, so overlap them (was gated at n>=200000; the
+         30k-200k extension covers the auto-ordering class only - an
+         explicit-METIS smoke matrix at n=30600 changes its separator
+         verdict under the threaded analyze, unresolved) */
       threaded = 1;
     }
     normal_status = analyze_candidate(normal, options);
