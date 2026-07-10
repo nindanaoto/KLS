@@ -27894,18 +27894,27 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
   }
   if (!skip_trial_factor) {
+  {
+    /* the prestatic trial classes carry the columns the pipelined
+       kernel wants: large-spral (pre2: init 57.4 -> 31.6s) and the
+       medium matched class (onetone1: 12% init win, rajat25 parity);
+       est_flops is EMPTY for given orderings so the class flags are
+       the routing signal.  mac_econ-like light-column matrices never
+       reach this trial (pattern classifiers). */
+    int pipe_route = medium_weak_candidate &&
+                     solver->nnz >= 8u * solver->n;
+    /* density floor: at avg degree ~7 (rajat25) the trial's columns
+       are light enough that the pipeline's round machinery costs ~7%;
+       the winners measure 9.5+ (onetone1, twotone) */
 #ifdef KLS_HAVE_SPRAL_SCALING
-  /* the large-spral prestatic class (pre2: n>150k, mostly-missing
-     diagonal) has the heavy columns the pipelined kernel wants (init
-     57.4 -> 31.6s); est_flops is EMPTY for given orderings so the
-     class flag is the routing signal.  mac_econ-like light-column
-     matrices never reach this trial (pattern classifiers). */
-  if (use_large_spral_match && solver->options.threads >= 2 &&
-      getenv("KLS_DISABLE_PIPE_ROUTE") == NULL) {
-    kls_klu_pipe_threads = solver->options.threads > 16
-      ? 16 : solver->options.threads;
-  }
+    pipe_route = pipe_route || use_large_spral_match;
 #endif
+    if (pipe_route && solver->options.threads >= 2 &&
+        getenv("KLS_DISABLE_PIPE_ROUTE") == NULL) {
+      kls_klu_pipe_threads = solver->options.threads > 16
+        ? 16 : solver->options.threads;
+    }
+  }
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
                           trial_symbolic, &trial_common);
