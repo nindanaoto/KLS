@@ -118447,8 +118447,21 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         break;
       }
     } else {
-      const double tol_sigma =
+      double tol_sigma =
         (common->tol > 0.0 ? common->tol : 0.001) * base;
+      {
+        /* Smaller sigma lowers the perturbation floor the probe's
+           refinement converges to (it scales with |E|); growth in the
+           unpivoted factor scales inversely.  pre2 stalls at 3.8e-8
+           with the 1e-3 default. */
+        const char *se = getenv("KLS_PREDICTED_NUDGE_SIGMA_SCALE");
+        if (se != NULL && se[0] != '\0') {
+          const double parsed = atof(se);
+          if (parsed > 0.0 && parsed <= 1.0) {
+            tol_sigma *= parsed;
+          }
+        }
+      }
       solver->pivot_nudge_pos[solver->pivot_nudge_count] = diag_pos;
       solver->pivot_nudge_sigma[solver->pivot_nudge_count] = tol_sigma;
       solver->pivot_nudge_count++;
