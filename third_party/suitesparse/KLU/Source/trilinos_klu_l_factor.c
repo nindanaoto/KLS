@@ -9,7 +9,11 @@
 /* This file should make the long int version of KLU */
 #define DLONG 1
 
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 199309L
+#endif
 #include "trilinos_klu_internal.h"
+#include <time.h>
 
 /* ========================================================================== */
 /* === KLU_factor2 ========================================================== */
@@ -28,6 +32,7 @@ static void factor2
     TRILINOS_KLU_common *Common
 )
 {
+    struct timespec kls_t0, kls_t1 ;
     double lsize ;
     double *Lnz, *Rs ;
     Int *P, *Q, *R, *Pnum, *Offp, *Offi, *Pblock, *Pinv, *Iwork,
@@ -41,6 +46,8 @@ static void factor2
     /* ---------------------------------------------------------------------- */
     /* initializations */
     /* ---------------------------------------------------------------------- */
+
+    clock_gettime (CLOCK_MONOTONIC, &kls_t0) ;
 
     /* get the contents of the Symbolic object */
     n = Symbolic->n ;
@@ -299,6 +306,15 @@ static void factor2
     Numeric->unz = unz ;
     Numeric->max_lnz_block = max_lnz_block ;
     Numeric->max_unz_block = max_unz_block ;
+
+    if (getenv ("KLS_TRACE_FILL") != NULL)
+    {
+	clock_gettime (CLOCK_MONOTONIC, &kls_t1) ;
+	fprintf (stderr, "KLS fill: n=%ld lnz=%ld unz=%ld nzoff=%ld wall=%.3fs\n",
+	    (long) n, (long) lnz, (long) unz, (long) nzoff,
+	    (double) (kls_t1.tv_sec - kls_t0.tv_sec) +
+	    1e-9 * (double) (kls_t1.tv_nsec - kls_t0.tv_nsec)) ;
+    }
 
     /* compute the inverse of Pnum */
 #ifndef NDEBUG

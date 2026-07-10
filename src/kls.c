@@ -27793,6 +27793,26 @@ static int reactive_static_match_setup_is_unlikely_to_pay(
 }
 
 #ifdef KLS_HAVE_METIS
+/* the pattern-only half of the refinement gate: everything knowable
+   before the trial factor runs (the flops floor is checked at join) */
+static int pre_static_metis_refinement_pattern_ok(
+  UF_long n,
+  UF_long nnz,
+  UF_long weak_diagonal,
+  const trilinos_klu_l_symbolic *symbolic,
+  kls_ordering selected_ordering) {
+  if (selected_ordering == KLS_ORDERING_METIS || symbolic == NULL ||
+      n < 50000u || n > 150000u ||
+      nnz > 1500000u || weak_diagonal * 100u < n ||
+      !symbolic->do_btf || symbolic->nblocks < 1024u ||
+      symbolic->maxblock == 0u ||
+      symbolic->maxblock < (UF_long)(0.90 * (double)n) ||
+      symbolic->maxblock >= (UF_long)(0.99 * (double)n)) {
+    return 0;
+  }
+  return 1;
+}
+
 static int pre_static_metis_refinement_is_worthwhile(
   UF_long n,
   UF_long nnz,
@@ -27800,17 +27820,60 @@ static int pre_static_metis_refinement_is_worthwhile(
   const trilinos_klu_l_symbolic *symbolic,
   const trilinos_klu_l_common *common,
   kls_ordering selected_ordering) {
-  if (selected_ordering == KLS_ORDERING_METIS || symbolic == NULL ||
-      common == NULL || n < 50000u || n > 150000u ||
-      nnz > 1500000u || weak_diagonal * 100u < n ||
-      !symbolic->do_btf || symbolic->nblocks < 1024u ||
-      symbolic->maxblock == 0u ||
-      symbolic->maxblock < (UF_long)(0.90 * (double)n) ||
-      symbolic->maxblock >= (UF_long)(0.99 * (double)n) ||
-      common->flops < 1.0e8) {
+  if (common == NULL || common->flops < 1.0e8 ||
+      !pre_static_metis_refinement_pattern_ok(n, nnz, weak_diagonal,
+                                              symbolic, selected_ordering)) {
     return 0;
   }
   return 1;
+}
+
+/* Speculative nested-dissection analysis for the pre-static METIS
+   refinement: the serial NodeND+CAMD dominates the refinement cost and
+   has no dependency on the trial factor's numeric results, so it can
+   run on a worker concurrently with the trial factorization.  The join
+   in maybe_refine_pre_static_with_metis applies the full (flops-aware)
+   gate before using the result. */
+typedef struct kls_psmetis_spec {
+  pthread_t thread;
+  int launched;
+  int status;
+  UF_long n;
+  UF_long *col_ptr;
+  UF_long *row_idx;
+  kls_options options;
+  trilinos_klu_l_symbolic *symbolic;
+  trilinos_klu_l_common common;
+  kls_separator_analysis separator;
+} kls_psmetis_spec;
+
+static void *kls_psmetis_spec_main(void *arg) {
+  kls_psmetis_spec *spec = (kls_psmetis_spec *)arg;
+  spec->status = analyze_with_ordering(spec->n, spec->col_ptr,
+                                       spec->row_idx, &spec->options,
+                                       KLS_ORDERING_METIS, &spec->symbolic,
+                                       &spec->common, &spec->separator);
+  return NULL;
+}
+
+static void kls_psmetis_spec_join(kls_psmetis_spec *spec) {
+  if (spec != NULL && spec->launched) {
+    pthread_join(spec->thread, NULL);
+    spec->launched = 0;
+  }
+}
+
+static void kls_psmetis_spec_discard(kls_psmetis_spec *spec) {
+  if (spec == NULL) {
+    return;
+  }
+  kls_psmetis_spec_join(spec);
+  if (spec->status == KLS_OK && spec->symbolic != NULL) {
+    trilinos_klu_l_free_symbolic(&spec->symbolic, &spec->common);
+  }
+  kls_separator_analysis_clear(&spec->separator);
+  spec->symbolic = NULL;
+  spec->status = KLS_ERR_FACTOR_FAILED;
 }
 
 static int maybe_refine_pre_static_with_metis(
@@ -27826,7 +27889,8 @@ static int maybe_refine_pre_static_with_metis(
   trilinos_klu_l_common *trial_common_io,
   kls_ordering *trial_ordering_io,
   double *trial_score_io,
-  kls_separator_analysis *trial_separator_io) {
+  kls_separator_analysis *trial_separator_io,
+  kls_psmetis_spec *spec) {
   if (trial_col_ptr == NULL || trial_row_idx == NULL ||
       trial_values == NULL || trial_options == NULL ||
       trial_symbolic_io == NULL || *trial_symbolic_io == NULL ||
@@ -27836,25 +27900,38 @@ static int maybe_refine_pre_static_with_metis(
       !pre_static_metis_refinement_is_worthwhile(
         n, nnz, weak_diagonal, *trial_symbolic_io, trial_common_io,
         *trial_ordering_io)) {
+    kls_psmetis_spec_discard(spec);
     return 0;
   }
-
-  kls_options metis_options = *trial_options;
-  metis_options.ordering = KLS_ORDERING_METIS;
-  metis_options.scale = (int)trial_common_io->scale;
-  metis_options.pivot_tolerance = trial_common_io->tol;
 
   trilinos_klu_l_symbolic *metis_symbolic = NULL;
   trilinos_klu_l_common metis_common;
   kls_separator_analysis metis_separator;
   memset(&metis_separator, 0, sizeof(metis_separator));
-  int status = analyze_with_ordering(n, trial_col_ptr, trial_row_idx,
-                                     &metis_options, KLS_ORDERING_METIS,
-                                     &metis_symbolic, &metis_common,
-                                     &metis_separator);
-  if (status != KLS_OK) {
-    kls_separator_analysis_clear(&metis_separator);
-    return 0;
+  if (spec != NULL && (spec->launched || spec->symbolic != NULL)) {
+    kls_psmetis_spec_join(spec);
+    if (spec->status != KLS_OK || spec->symbolic == NULL) {
+      kls_psmetis_spec_discard(spec);
+      return 0;
+    }
+    metis_symbolic = spec->symbolic;
+    metis_common = spec->common;
+    kls_separator_analysis_move(&metis_separator, &spec->separator);
+    spec->symbolic = NULL;
+  } else {
+    kls_options metis_options = *trial_options;
+    metis_options.ordering = KLS_ORDERING_METIS;
+    metis_options.scale = (int)trial_common_io->scale;
+    metis_options.pivot_tolerance = trial_common_io->tol;
+
+    int status = analyze_with_ordering(n, trial_col_ptr, trial_row_idx,
+                                       &metis_options, KLS_ORDERING_METIS,
+                                       &metis_symbolic, &metis_common,
+                                       &metis_separator);
+    if (status != KLS_OK) {
+      kls_separator_analysis_clear(&metis_separator);
+      return 0;
+    }
   }
 
   trilinos_klu_l_numeric *metis_numeric =
@@ -28289,6 +28366,11 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   memset(&trial_separator, 0, sizeof(trial_separator));
   (void)trilinos_klu_l_defaults(&trial_common);
   int accepted = 0;
+#ifdef KLS_HAVE_METIS
+  kls_psmetis_spec psmetis_spec;
+  memset(&psmetis_spec, 0, sizeof(psmetis_spec));
+  psmetis_spec.status = KLS_ERR_FACTOR_FAILED;
+#endif
 
   if (solver->orientation == KLS_ORIENTATION_TRANSPOSE) {
     if (solver->input_to_csc == NULL) {
@@ -28587,6 +28669,31 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
   }
   if (!skip_trial_factor) {
+#ifdef KLS_HAVE_METIS
+  /* Speculative METIS refinement analysis: the refinement's serial
+     NodeND+CAMD dominates its cost and depends only on the trial
+     pattern and the scale/tol just decided, so start it on a worker
+     before the trial factor.  The join inside the refinement applies
+     the flops-aware half of the gate; a losing speculation is joined
+     and discarded there (or at done: on trial rejection). */
+  if (solver->options.threads >= 2 &&
+      getenv("KLS_DISABLE_PSMETIS_SPEC") == NULL &&
+      pre_static_metis_refinement_pattern_ok(solver->n, solver->nnz, weak,
+                                             trial_symbolic,
+                                             trial_ordering)) {
+    psmetis_spec.n = solver->n;
+    psmetis_spec.col_ptr = trial_col_ptr;
+    psmetis_spec.row_idx = trial_row_idx;
+    psmetis_spec.options = trial_options;
+    psmetis_spec.options.ordering = KLS_ORDERING_METIS;
+    psmetis_spec.options.scale = (int)trial_common.scale;
+    psmetis_spec.options.pivot_tolerance = trial_common.tol;
+    if (pthread_create(&psmetis_spec.thread, NULL, kls_psmetis_spec_main,
+                       &psmetis_spec) == 0) {
+      psmetis_spec.launched = 1;
+    }
+  }
+#endif
   {
     /* the prestatic trial classes carry the columns the pipelined
        kernel wants: large-spral (pre2: init 57.4 -> 31.6s) and the
@@ -28627,7 +28734,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   (void)maybe_refine_pre_static_with_metis(
     solver->n, solver->nnz, weak, trial_col_ptr, trial_row_idx, trial_values,
     &trial_options, &trial_symbolic, &trial_numeric, &trial_common,
-    &trial_ordering, &trial_score, &trial_separator);
+    &trial_ordering, &trial_score, &trial_separator, &psmetis_spec);
 #endif
   maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
                                    trial_row_idx, &solver->options,
@@ -28713,6 +28820,11 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   accepted = 1;
 
 done:
+#ifdef KLS_HAVE_METIS
+  /* the speculative refinement analysis reads the trial pattern
+     arrays freed below: join and discard any still-pending run */
+  kls_psmetis_spec_discard(&psmetis_spec);
+#endif
   if (!accepted) {
     if (trial_numeric != NULL) {
       trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
