@@ -1765,6 +1765,12 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		S->Common->numerical_rank = k + S->k1 ;
 		S->Common->singular_col = S->Q [k + S->k1] ;
 	    }
+	    if (getenv ("KLS_KLU_PIPE_TRACE") != NULL)
+	    {
+		fprintf (stderr, "KLS pipe: singular k=%ld k1=%ld llen=%ld "
+			 "tid=%d\n", (long) k, (long) S->k1,
+			 (long) S->Llen [k], W->tid) ;
+	    }
 	    atomic_store_explicit (&sh->abort_flag, 1, memory_order_release) ;
 	    break ;
 	}
@@ -1791,6 +1797,26 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	    S->Ulen [k] = ucount ;
 	    Ui = (Int *) (col + lpart) ;
 	    Ux = (Entry *) (col + lpart + UNITS (Int, ucount)) ;
+	    /* sort ascending by pivot index: the multi-round concatenation
+	       is a valid topological order but downstream consumers of the
+	       stored pattern (refactor map/schedule builders) mis-handle
+	       it on multi-round columns; ascending is the consumer-blessed
+	       canonical order (the predicted builder's convention) */
+	    {
+		Int a, b ;
+		for (a = 1 ; a < ucount ; a++)
+		{
+		    Int vi = W->ubuf_i [a] ;
+		    Entry vx = W->ubuf_x [a] ;
+		    for (b = a ; b > 0 && W->ubuf_i [b-1] > vi ; b--)
+		    {
+			W->ubuf_i [b] = W->ubuf_i [b-1] ;
+			W->ubuf_x [b] = W->ubuf_x [b-1] ;
+		    }
+		    W->ubuf_i [b] = vi ;
+		    W->ubuf_x [b] = vx ;
+		}
+	    }
 	    for (p = 0 ; p < ucount ; p++)
 	    {
 		Ui [p] = W->ubuf_i [p] ;
