@@ -2564,6 +2564,7 @@ static int kls_build_block_structured_order(UF_long n,
                                             UF_long **perm_out,
                                             UF_long **comp_out);
 
+
 static int choose_symbolic_for_pattern(UF_long n,
                                        UF_long *col_ptr,
                                        UF_long *row_idx,
@@ -23799,7 +23800,7 @@ static int analyze_with_ordering(UF_long n,
     /* vendored AMD with approximate-deficiency pivot scoring; the flag
        is a serial-analysis global (the ordering competition never runs
        analyses concurrently) */
-    extern UF_long trilinos_amd_l2_amf;
+    extern _Thread_local UF_long trilinos_amd_l2_amf;
     {
       /* mean-local-fill scoring (Rothberg-Eisenstat AMMF) wins on the
          small classes (TSOPF est 1.31e5 vs METIS 1.50e5) but its lower
@@ -29054,6 +29055,43 @@ static int maybe_promote_auto_metis(kls_solver *solver,
 }
 #endif
 
+/* speculative AMF trial run concurrently with the AMD base analyze:
+   the promotion decision needs both scores, and the AMF analyze
+   depends only on the pattern.  use_btf is speculated from the entry
+   options; the join discards the trial if the base retry switched the
+   btf mode (rare). */
+struct kls_amf_spec_job {
+  UF_long n;
+  UF_long *col_ptr;
+  UF_long *row_idx;
+  kls_options options;
+  trilinos_klu_l_symbolic *symbolic;
+  trilinos_klu_l_common common;
+  kls_separator_analysis separator;
+  double score;
+  int status;
+};
+
+static void *kls_amf_spec_main(void *arg) {
+  struct kls_amf_spec_job *job = (struct kls_amf_spec_job *)arg;
+  memset(&job->separator, 0, sizeof(job->separator));
+  job->symbolic = NULL;
+  job->status = analyze_with_ordering(job->n, job->col_ptr, job->row_idx,
+                                      &job->options, KLS_ORDERING_AMF,
+                                      &job->symbolic, &job->common,
+                                      &job->separator);
+  if (job->status == KLS_OK) {
+    job->score = symbolic_score(job->symbolic);
+    maybe_retry_without_btf(job->n, job->col_ptr, job->row_idx,
+                            &job->options, KLS_ORDERING_AMF,
+                            &job->symbolic, &job->common, &job->score, 0,
+                            &job->separator);
+  } else {
+    job->score = DBL_MAX;
+  }
+  return NULL;
+}
+
 static int choose_symbolic_for_pattern(UF_long n,
                                        UF_long *col_ptr,
                                        UF_long *row_idx,
@@ -29244,6 +29282,20 @@ static int choose_symbolic_for_pattern(UF_long n,
   }
 #endif
 
+  struct kls_amf_spec_job amf_spec;
+  pthread_t amf_spec_tid;
+  int amf_spec_spawned = 0;
+  if (n >= 30000 && options->threads >= 2 &&
+      getenv("KLS_DISABLE_AMF_SPEC") == NULL) {
+    amf_spec.n = n;
+    amf_spec.col_ptr = col_ptr;
+    amf_spec.row_idx = row_idx;
+    amf_spec.options = *symbolic_options;
+    if (pthread_create(&amf_spec_tid, NULL, kls_amf_spec_main,
+                       &amf_spec) == 0) {
+      amf_spec_spawned = 1;
+    }
+  }
   const kls_ordering candidates[] = {KLS_ORDERING_AMD, KLS_ORDERING_COLAMD};
   trilinos_klu_l_symbolic *best_symbolic = NULL;
   trilinos_klu_l_common best_common;
@@ -29293,18 +29345,65 @@ static int choose_symbolic_for_pattern(UF_long n,
   }
 
   if (!any_ok) {
+    if (amf_spec_spawned) {
+      pthread_join(amf_spec_tid, NULL);
+      if (amf_spec.status == KLS_OK) {
+        trilinos_klu_l_free_symbolic(&amf_spec.symbolic, &amf_spec.common);
+      }
+      kls_separator_analysis_clear(&amf_spec.separator);
+    }
     return KLS_ERR_ANALYZE_FAILED;
   }
 
   /* AMF (approximate minimum fill) rides the same quotient graph as AMD
      at similar analysis cost; try it whenever AMD won the base round and
      keep it only on a clear estimate win (task #11: must only win where
-     estimates say so). */
-  if (best_ordering == KLS_ORDERING_AMD && best_score < DBL_MAX) {
-    maybe_promote_symbolic_ordering(
-      n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
-      &best_symbolic, &best_common, &best_ordering, &best_score, 0.95,
-      &best_separator);
+     estimates say so).  The speculative trial ran concurrently with the
+     base analyze; the promotion comparison is unchanged. */
+  {
+    int amf_done = 0;
+    if (amf_spec_spawned) {
+      pthread_join(amf_spec_tid, NULL);
+      const int promotable =
+        best_ordering == KLS_ORDERING_AMD && best_score < DBL_MAX &&
+        isfinite(best_score) && best_score > 0.0;
+      const int spec_valid =
+        amf_spec.status == KLS_OK && amf_spec.symbolic != NULL &&
+        promotable &&
+        (amf_spec.options.use_btf ? 1 : 0) ==
+          (best_symbolic->do_btf ? 1 : 0);
+      if (spec_valid) {
+        if (isfinite(amf_spec.score) &&
+            amf_spec.score <= 0.95 * best_score) {
+          trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
+          best_symbolic = amf_spec.symbolic;
+          best_common = amf_spec.common;
+          best_ordering = KLS_ORDERING_AMF;
+          best_score = amf_spec.score;
+          kls_separator_analysis_clear(&best_separator);
+          kls_separator_analysis_move(&best_separator,
+                                      &amf_spec.separator);
+        } else {
+          trilinos_klu_l_free_symbolic(&amf_spec.symbolic,
+                                       &amf_spec.common);
+          kls_separator_analysis_clear(&amf_spec.separator);
+        }
+        amf_done = 1;
+      } else {
+        if (amf_spec.status == KLS_OK && amf_spec.symbolic != NULL) {
+          trilinos_klu_l_free_symbolic(&amf_spec.symbolic,
+                                       &amf_spec.common);
+        }
+        kls_separator_analysis_clear(&amf_spec.separator);
+      }
+    }
+    if (!amf_done && best_ordering == KLS_ORDERING_AMD &&
+        best_score < DBL_MAX) {
+      maybe_promote_symbolic_ordering(
+        n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
+        &best_symbolic, &best_common, &best_ordering, &best_score, 0.95,
+        &best_separator);
+    }
   }
 #ifdef KLS_HAVE_METIS
   if (should_try_symbolic_nested_dissection_before_numeric(
@@ -29506,6 +29605,7 @@ struct kls_candidate_analyze_job {
   const kls_options *options;
   int status;
 };
+
 
 static void *kls_candidate_analyze_main(void *arg) {
   struct kls_candidate_analyze_job *job =

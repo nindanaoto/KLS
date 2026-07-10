@@ -27,7 +27,7 @@
  * the degree approximations are unchanged; a side array records which
  * list each variable sits in.  Not thread-safe: KLS's ordering
  * competition runs analyses serially. */
-GLOBAL Int trilinos_amd_l2_amf = 0 ;
+GLOBAL _Thread_local Int trilinos_amd_l2_amf = 0 ;
 
 /* ========================================================================= */
 /* === clear_flag ========================================================== */
