@@ -364,6 +364,14 @@ struct kls_solver {
   UF_long *pivot_nudge_pos;
   double *pivot_nudge_sigma;
   double *pivot_nudge_values;
+  /* predicted-fill zero-pivot collection: non-NULL only during a
+     halt-off fill pass; workers append pivot indices of exact-zero
+     pivots (the Inf/NaN cascade downstream of a zero never records
+     falsely - NaN != 0 - so one pass yields the frontier of
+     independent zeros) */
+  UF_long *zero_pivot_collect;
+  _Atomic long zero_pivot_collect_count;
+  long zero_pivot_collect_cap;
   UF_long pivot_nudge_count;
   UF_long pivot_nudge_capacity;
   double *solve_refine_workspace;
@@ -18328,6 +18336,16 @@ static void kls_worker_record_singular(kls_parallel_refactor_worker *worker,
     worker->singular = 1;
     worker->numerical_rank = numerical_rank;
     worker->singular_col = singular_col;
+  }
+  {
+    kls_solver *solver = worker->shared->solver;
+    if (solver->zero_pivot_collect != NULL) {
+      const long slot = atomic_fetch_add_explicit(
+        &solver->zero_pivot_collect_count, 1, memory_order_relaxed);
+      if (slot < solver->zero_pivot_collect_cap) {
+        solver->zero_pivot_collect[slot] = numerical_rank;
+      }
+    }
   }
 }
 
@@ -65324,6 +65342,13 @@ static void kls_egraph_refactor_record_singular(
     atomic_store_explicit(&shared->stop, 1, memory_order_release);
   }
   pthread_mutex_unlock(&shared->lock);
+  if (shared->solver->zero_pivot_collect != NULL) {
+    const long slot = atomic_fetch_add_explicit(
+      &shared->solver->zero_pivot_collect_count, 1, memory_order_relaxed);
+    if (slot < shared->solver->zero_pivot_collect_cap) {
+      shared->solver->zero_pivot_collect[slot] = numerical_rank;
+    }
+  }
 }
 
 static int kls_egraph_refactor_should_stop(
@@ -90037,6 +90062,13 @@ static void kls_snb_record_singular(kls_snb_state *st, kls_solver *solver,
   }
   if (solver->common.halt_if_singular) {
     atomic_store_explicit(&st->failed, 1, memory_order_release);
+  }
+  if (solver->zero_pivot_collect != NULL) {
+    const long slot = atomic_fetch_add_explicit(
+      &solver->zero_pivot_collect_count, 1, memory_order_relaxed);
+    if (slot < solver->zero_pivot_collect_cap) {
+      solver->zero_pivot_collect[slot] = gk;
+    }
   }
 }
 
@@ -116882,6 +116914,14 @@ static void kls_pivot_first_parallel_record_singular(
     shared->singular_rank = rank;
     shared->singular_col = col;
   }
+  if (shared->solver != NULL &&
+      shared->solver->zero_pivot_collect != NULL) {
+    const long slot = atomic_fetch_add_explicit(
+      &shared->solver->zero_pivot_collect_count, 1, memory_order_relaxed);
+    if (slot < shared->solver->zero_pivot_collect_cap) {
+      shared->solver->zero_pivot_collect[slot] = rank;
+    }
+  }
 }
 
 static int kls_pivot_first_parallel_commit_block(
@@ -118306,6 +118346,24 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       }
     }
   }
+  const int zp_collect_mode =
+    getenv("KLS_PREDICTED_COLLECT_ZEROS") != NULL &&
+    !solver->block_trial_active;
+  const Int zp_saved_halt = common->halt_if_singular;
+  if (zp_collect_mode) {
+    /* Batch zero-pivot collection: run each fill pass with the halt
+       off so every worker records its exact-zero pivots (downstream
+       Inf/NaN never compares equal to 0.0, so one pass collects the
+       frontier of independent zeros; mac_econ: 507 one-per-pass
+       rounds collapse to the dependency depth). */
+    solver->zero_pivot_collect_cap = 4096;
+    solver->zero_pivot_collect = (UF_long *)malloc(
+      (size_t)solver->zero_pivot_collect_cap *
+      sizeof(*solver->zero_pivot_collect));
+    if (solver->zero_pivot_collect != NULL) {
+      common->halt_if_singular = 0;
+    }
+  }
   if (refactor_ok == 0 &&
       common->status == TRILINOS_KLU_SINGULAR &&
       (getenv("KLS_FORCE_PIVOT_FILL") != NULL ||
@@ -118314,7 +118372,20 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   } else
   for (UF_long fill_round = 0; fill_round < fill_round_cap; ++fill_round) {
     const double first_values_t0 = kls_now_seconds();
+    if (solver->zero_pivot_collect != NULL) {
+      atomic_store_explicit(&solver->zero_pivot_collect_count, 0,
+                            memory_order_relaxed);
+    }
     refactor_ok = kls_parallel_refactor(solver, numeric_values, 0);
+    if (solver->zero_pivot_collect != NULL &&
+        atomic_load_explicit(&solver->zero_pivot_collect_count,
+                             memory_order_relaxed) > 0) {
+      /* halt-off passes complete and their join reports neither a
+         failed ok nor a singular status; the recorded zeros are the
+         verdict */
+      refactor_ok = 0;
+      common->status = TRILINOS_KLU_SINGULAR;
+    }
     if (getenv("KLS_TRACE_PREDICTED") != NULL) {
       fprintf(stderr,
               "KLS predicted: value pass %.2fs path=%d ok=%ld\n",
@@ -118482,6 +118553,13 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
          refactorization factors the same nudged matrix, and the solve probe
          below still measures the residual against the original values. */
       if (common->status != TRILINOS_KLU_SINGULAR) {
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr,
+                  "KLS predicted: pass failed status=%d path=%d "
+                  "round=%ld (not singular)\n",
+                  (int)common->status,
+                  (int)solver->stats.last_refactor_path, (long)fill_round);
+        }
         break;
       }
       saw_singular = 1;
@@ -118492,8 +118570,27 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         k = (UF_long)common->singular_col;
       }
     }
+    long zp_count = 0;
+    if (solver->zero_pivot_collect != NULL) {
+      zp_count = atomic_load_explicit(&solver->zero_pivot_collect_count,
+                                      memory_order_relaxed);
+      if (zp_count > solver->zero_pivot_collect_cap) {
+        zp_count = solver->zero_pivot_collect_cap;
+      }
+      if (zp_count > 1 && getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr, "KLS predicted: zp batch %ld zeros round=%ld\n",
+                zp_count, (long)fill_round);
+      }
+    }
+    int zp_fatal = 0;
+    for (long zp_i = 0; zp_i < (zp_count > 0 ? zp_count : 1) && !zp_fatal;
+         ++zp_i) {
+    if (zp_count > 0) {
+      k = solver->zero_pivot_collect[zp_i];
+    }
     if (k == KLS_KLU_EMPTY || k >= n ||
         solver->pivot_nudge_count >= nudge_slot_cap) {
+      zp_fatal = 1;
       break;
     }
     const UF_long oldcol = Q[k];
@@ -118526,6 +118623,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
                   numeric_values[p]);
         }
       }
+      zp_fatal = 1;
       break;
     }
     if (solver->pivot_nudge_values == NULL) {
@@ -118539,6 +118637,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           solver->pivot_nudge_pos == NULL ||
           solver->pivot_nudge_sigma == NULL) {
         free_pivot_nudges(solver);
+        zp_fatal = 1;
         break;
       }
       solver->pivot_nudge_capacity = nudge_slot_cap;
@@ -118562,6 +118661,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
                   ((const double *)numeric->Udiag)[k],
                   numeric_values[diag_pos]);
         }
+        zp_fatal = 1;
         break;
       }
     } else {
@@ -118593,10 +118693,20 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                           : solver->pivot_nudge_count - 1u],
               (long)fill_round);
     }
+    }
+    if (zp_fatal) {
+      break;
+    }
     common->status = TRILINOS_KLU_OK;
     common->numerical_rank = KLS_KLU_EMPTY;
     common->singular_col = KLS_KLU_EMPTY;
     refactor_ok = 0;
+  }
+  common->halt_if_singular = zp_saved_halt;
+  if (solver->zero_pivot_collect != NULL) {
+    free(solver->zero_pivot_collect);
+    solver->zero_pivot_collect = NULL;
+    solver->zero_pivot_collect_cap = 0;
   }
   if (getenv("KLS_TRACE_PREDICTED") != NULL) {
     fprintf(stderr, "KLS predicted: build=%.2fs first_values=%.2fs\n",
@@ -118656,10 +118766,14 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     for (UF_long i = 0; i < n; ++i) {
       probe_b[i] = 0.0;
     }
+    /* Varied test solution: probing A x = A e is degenerate on matrices
+       whose rows sum to zero exactly (mac_econ accounting identities:
+       b = 0, x = 0, residual 0 for ANY nonsingular factor). */
     for (UF_long j = 0; j < n; ++j) {
+      const double xj = 1.0 + (double)(j % 17) * 0.01;
       for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
            ++p) {
-        probe_b[solver->row_idx[p]] += numeric_values[p];
+        probe_b[solver->row_idx[p]] += numeric_values[p] * xj;
       }
     }
     double *probe_r = (double *)malloc((size_t)n * sizeof(*probe_r));
@@ -118704,11 +118818,18 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           }
         }
         double rmax = 0.0;
+        int r_finite = 1;
         for (UF_long i = 0; i < n; ++i) {
           const double v = fabs(probe_r[i]);
+          if (!isfinite(v)) {
+            /* max-abs with NaN comparisons would silently keep 0.0 and
+               accept a poisoned solve as a perfect residual */
+            r_finite = 0;
+            break;
+          }
           rmax = rmax < v ? v : rmax;
         }
-        const double rel = rmax / bscale;
+        const double rel = r_finite ? rmax / bscale : HUGE_VAL;
         if (iter == 0) {
           raw_residual = rel;
         }
@@ -122226,6 +122347,23 @@ int kls_factor(kls_solver *solver, const double *values) {
     } else if (!had_numeric &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
+      if (kls_trace_entry) {
+        fprintf(stderr, "KLS predicted accepted status=%ld\n",
+                (long)solver->common.status);
+        const double *ud = (const double *)solver->numeric->Udiag;
+        long zc = 0;
+        for (UF_long zk = 0; zk < solver->n; ++zk) {
+          if (ud[zk] == 0.0) {
+            if (zc < 6) {
+              fprintf(stderr, "KLS predicted: zero udiag at %ld\n",
+                      (long)zk);
+            }
+            zc++;
+          }
+        }
+        fprintf(stderr, "KLS predicted: zero udiag count %ld of %ld\n",
+                zc, (long)solver->n);
+      }
       KLS_ENTRY_PHASE("predicted")
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
     } else {
@@ -122496,8 +122634,9 @@ int kls_factor(kls_solver *solver, const double *values) {
 factor_preps_deferred_exit:;
 #undef KLS_PHASE
     if (trace_phases) {
-      fprintf(stderr, "KLS factor exit elapsed=%.3fs wall=%.3fs\n", elapsed,
-              kls_now_seconds() - solver->snb_factor_start);
+      fprintf(stderr, "KLS factor exit elapsed=%.3fs wall=%.3fs status=%ld\n",
+              elapsed, kls_now_seconds() - solver->snb_factor_start,
+              (long)solver->common.status);
     }
   }
   solver->stats.factor_seconds = elapsed;
