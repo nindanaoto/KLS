@@ -22577,6 +22577,16 @@ static int apply_options_to_common(trilinos_klu_l_common *common, const kls_opti
     common->memgrow = options->memory_growth;
   }
   common->halt_if_singular = options->halt_if_singular ? 1 : 0;
+  {
+    /* bounded-effort BTF matching: mac_econ's 89%-missing diagonal
+       drives Duff's maxtrans into ~9s of augmenting-path work (of a
+       10.5s analysis); a work cap yields an incomplete matching the
+       analyze already supports. */
+    const char *mw = getenv("KLS_BTF_MAXWORK");
+    if (mw != NULL && mw[0] != '\0') {
+      common->maxwork = atof(mw);
+    }
+  }
   return KLS_OK;
 }
 
@@ -23301,6 +23311,24 @@ static UF_long kls_metis_refine_with_camd(UF_long n,
     : (UF_long)-1;
 }
 
+static UF_long kls_metis_order_inner(UF_long n, UF_long *col_ptr,
+                                     UF_long *row_idx, UF_long *perm_out,
+                                     trilinos_klu_l_common *common);
+
+static UF_long kls_metis_order(UF_long n,
+                               UF_long *col_ptr,
+                               UF_long *row_idx,
+                               UF_long *perm_out,
+                               trilinos_klu_l_common *common) {
+  const double t0 = kls_now_seconds();
+  UF_long r = kls_metis_order_inner(n, col_ptr, row_idx, perm_out, common);
+  if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
+    fprintf(stderr, "KLS metis: user_order total n=%ld %.3fs\n",
+            (long)n, kls_now_seconds() - t0);
+  }
+  return r;
+}
+
 static UF_long kls_metis_camd_group_size(UF_long n,
                                          const UF_long *col_ptr,
                                          const UF_long *row_idx) {
@@ -23319,7 +23347,139 @@ static UF_long kls_metis_camd_group_size(UF_long n,
   return 0;
 }
 
-static UF_long kls_metis_order(UF_long n,
+struct kls_par_nd_half {
+  idx_t nv;
+  idx_t *xadj;
+  idx_t *adjncy;
+  idx_t *perm;   /* local iperm-style: new order of local vertex */
+  idx_t *iperm;
+  idx_t *options;
+  int status;
+};
+
+static void *kls_par_nd_half_main(void *arg) {
+  struct kls_par_nd_half *h = (struct kls_par_nd_half *)arg;
+  idx_t nv = h->nv;
+  h->status = nv > 0
+    ? METIS_NodeND(&nv, h->xadj, h->adjncy, NULL, h->options, h->perm,
+                   h->iperm)
+    : METIS_OK;
+  return NULL;
+}
+
+/* One threaded top level of nested dissection.  Returns 1 on success
+   with metis_perm/metis_iperm filled (NodeND conventions: iperm[v] =
+   position of v in the elimination order, perm = its inverse). */
+static int kls_metis_parallel_nd(idx_t nvtxs, const idx_t *xadj,
+                                 const idx_t *adjncy, idx_t *options,
+                                 idx_t *metis_perm, idx_t *metis_iperm) {
+  const size_t nz = (size_t)xadj[nvtxs];
+  idx_t *part = (idx_t *)malloc((size_t)nvtxs * sizeof(idx_t));
+  idx_t *local = (idx_t *)malloc((size_t)nvtxs * sizeof(idx_t));
+  idx_t *gx = (idx_t *)malloc((size_t)nvtxs * sizeof(idx_t));
+  if (part == NULL || local == NULL || gx == NULL) {
+    free(part); free(local); free(gx);
+    return 0;
+  }
+  idx_t sepsize = 0;
+  idx_t nv = nvtxs;
+  /* the separator call mutates nothing but part/sepsize */
+  int st = METIS_ComputeVertexSeparator(&nv, (idx_t *)xadj,
+                                        (idx_t *)adjncy, NULL, NULL,
+                                        &sepsize, part);
+  if (st != METIS_OK || sepsize <= 0 || sepsize >= nvtxs / 2) {
+    free(part); free(local); free(gx);
+    return 0;
+  }
+  idx_t cnt[3] = {0, 0, 0};
+  for (idx_t v = 0; v < nvtxs; ++v) {
+    idx_t p = part[v];
+    if (p < 0 || p > 2) { p = 2; part[v] = 2; }
+    local[v] = cnt[p]++;
+  }
+  if (cnt[0] == 0 || cnt[1] == 0) {
+    free(part); free(local); free(gx);
+    return 0;
+  }
+  struct kls_par_nd_half h[2];
+  memset(h, 0, sizeof(h));
+  int ok = 1;
+  for (int side = 0; side < 2 && ok; ++side) {
+    idx_t hn = cnt[side];
+    h[side].nv = hn;
+    h[side].options = options;
+    h[side].xadj = (idx_t *)malloc(((size_t)hn + 1u) * sizeof(idx_t));
+    h[side].adjncy = (idx_t *)malloc((nz + 1u) * sizeof(idx_t));
+    h[side].perm = (idx_t *)malloc((size_t)hn * sizeof(idx_t));
+    h[side].iperm = (idx_t *)malloc((size_t)hn * sizeof(idx_t));
+    h[side].status = METIS_ERROR;
+    if (h[side].xadj == NULL || h[side].adjncy == NULL ||
+        h[side].perm == NULL || h[side].iperm == NULL) {
+      ok = 0;
+      break;
+    }
+    idx_t w = 0, lv = 0;
+    for (idx_t v = 0; v < nvtxs; ++v) {
+      if (part[v] != side) continue;
+      h[side].xadj[lv] = w;
+      for (idx_t p = xadj[v]; p < xadj[v + 1]; ++p) {
+        idx_t u = adjncy[p];
+        if (part[u] == side) {
+          h[side].adjncy[w++] = local[u];
+        }
+      }
+      lv++;
+    }
+    h[side].xadj[lv] = w;
+  }
+  if (ok) {
+    pthread_t tid;
+    int threaded = pthread_create(&tid, NULL, kls_par_nd_half_main,
+                                  &h[1]) == 0;
+    kls_par_nd_half_main(&h[0]);
+    if (threaded) {
+      pthread_join(tid, NULL);
+    } else {
+      kls_par_nd_half_main(&h[1]);
+    }
+    ok = h[0].status == METIS_OK && h[1].status == METIS_OK;
+  }
+  if (ok) {
+    /* global elimination positions: half0 first, half1, separator
+       last (separator kept in input order - CAMD refinement below
+       polishes it) */
+    idx_t base1 = cnt[0];
+    idx_t base2 = cnt[0] + cnt[1];
+    idx_t sep_seen = 0;
+    for (idx_t v = 0; v < nvtxs; ++v) {
+      idx_t pos;
+      if (part[v] == 0) {
+        pos = h[0].iperm[local[v]];
+      } else if (part[v] == 1) {
+        pos = base1 + h[1].iperm[local[v]];
+      } else {
+        pos = base2 + sep_seen++;
+      }
+      metis_iperm[v] = pos;
+      gx[pos] = v;
+    }
+    for (idx_t k = 0; k < nvtxs; ++k) {
+      metis_perm[k] = gx[k];
+    }
+  }
+  for (int side = 0; side < 2; ++side) {
+    free(h[side].xadj);
+    free(h[side].adjncy);
+    free(h[side].perm);
+    free(h[side].iperm);
+  }
+  free(part);
+  free(local);
+  free(gx);
+  return ok;
+}
+
+static UF_long kls_metis_order_inner(UF_long n,
                                UF_long *col_ptr,
                                UF_long *row_idx,
                                UF_long *perm_out,
@@ -23494,12 +23654,30 @@ static UF_long kls_metis_order(UF_long n,
   }
   idx_t nvtxs = (idx_t)n;
   const double kls_metis_t0 = kls_now_seconds();
-  const int metis_status =
-    metis_ndp_npes > 1
-      ? METIS_NodeNDP(nvtxs, xadj, adjncy, NULL, metis_ndp_npes, options,
-                      metis_perm, metis_iperm, metis_ndp_sizes)
-      : METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options,
-                     metis_perm, metis_iperm);
+  int metis_status = METIS_ERROR;
+  int par_nd_done = 0;
+  if (metis_ndp_npes <= 1 && n >= 200000 &&
+      getenv("KLS_PAR_ND") != NULL) {
+    /* one manual top level of nested dissection: METIS's own vertex
+       separator, then the two halves NodeND'd CONCURRENTLY (NodeND is
+       serial; this is its own recursion with the top level threaded).
+       Composed order: half 0, half 1, separator last - the same shape
+       NodeND produces.  Quality is arbitrated downstream by the
+       ordering competition's fill scores. */
+    par_nd_done = kls_metis_parallel_nd(nvtxs, xadj, adjncy, options,
+                                        metis_perm, metis_iperm);
+    if (par_nd_done) {
+      metis_status = METIS_OK;
+    }
+  }
+  if (!par_nd_done) {
+    metis_status =
+      metis_ndp_npes > 1
+        ? METIS_NodeNDP(nvtxs, xadj, adjncy, NULL, metis_ndp_npes, options,
+                        metis_perm, metis_iperm, metis_ndp_sizes)
+        : METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options,
+                       metis_perm, metis_iperm);
+  }
   if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
     fprintf(stderr, "KLS metis: NodeND %.3fs (ndp=%d)\n",
             kls_now_seconds() - kls_metis_t0, (int)metis_ndp_npes);
@@ -23517,10 +23695,15 @@ static UF_long kls_metis_order(UF_long n,
          unknown estimate for the whole ordering. */
       camd_group_size = 1;
     }
+    const double kls_camd_t0 = kls_now_seconds();
     UF_long camd_lnz =
       kls_metis_refine_with_camd(n, col_ptr, row_idx, metis_perm,
                                  camd_group_size,
                                  perm_out);
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr, "KLS metis: camd-refine %.3fs (groups=%ld)\n",
+              kls_now_seconds() - kls_camd_t0, (long)camd_group_size);
+    }
     if (camd_lnz == 0) {
       for (UF_long i = 0; i < n; ++i) {
         perm_out[i] = (UF_long)metis_perm[i];
@@ -23808,7 +23991,7 @@ static int analyze_with_ordering(UF_long n,
     metis_context.separator = separator_out;
     metis_context_active = 1;
     common.ordering = 3;
-    common.user_order = kls_metis_order;
+    common.user_order = kls_metis_order;  /* timing wrapper */
     common.user_data = &metis_context;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
     common.user_data = NULL;
@@ -23866,6 +24049,11 @@ static int analyze_with_ordering(UF_long n,
 
 #ifdef KLS_HAVE_METIS
   if (metis_context_active) {
+    const double kls_sep_t0 = kls_now_seconds();
+    if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
+      fprintf(stderr, "KLS metis: pre-forest %.3fs\n",
+              kls_sep_t0 - kls_awo_t0);
+    }
     if (!kls_build_metis_separator_forest(symbolic, &metis_context,
                                           separator_out)) {
       kls_metis_order_context_move_largest_separator(&metis_context,
@@ -23873,6 +24061,10 @@ static int analyze_with_ordering(UF_long n,
       kls_finalize_separator_global_range(symbolic, separator_out);
     }
     kls_metis_order_context_clear(&metis_context);
+    if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
+      fprintf(stderr, "KLS metis: forest %.3fs\n",
+              kls_now_seconds() - kls_sep_t0);
+    }
   } else
 #endif
   {
