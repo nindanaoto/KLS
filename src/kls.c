@@ -118640,6 +118640,46 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     }
     return 0;
   }
+  {
+    /* Static-diagonal prediction requires the pivot diagonal to be
+       structurally PRESENT under the symbolic's P/Q: patterns whose
+       diagonals are mostly missing (mac_econ: 89% under the raced
+       METIS symbolic) factor to exact-cancellation zero pivots and the
+       honest probe measures e+33 - the whole attempt (~1.5s of build,
+       preps and passes) is a priori hopeless.  O(nnz) scan. */
+    UF_long missing = 0;
+    UF_long k, p;
+    const UF_long *P = symbolic->P;
+    UF_long *pinv_probe = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+    if (pinv_probe != NULL) {
+      for (k = 0; k < n; ++k) {
+        pinv_probe[P[k]] = k;
+      }
+      for (k = 0; k < n; ++k) {
+        const UF_long oldcol = Q[k];
+        int found = 0;
+        for (p = solver->col_ptr[oldcol]; p < solver->col_ptr[oldcol + 1u];
+             ++p) {
+          if (pinv_probe[solver->row_idx[p]] == k) {
+            found = 1;
+            break;
+          }
+        }
+        if (!found) {
+          missing++;
+        }
+      }
+      free(pinv_probe);
+      if (missing * 4u > (UF_long)n) {
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr,
+                  "KLS predicted: skipped, structural diagonal missing "
+                  "%ld of %ld\n", (long)missing, (long)n);
+        }
+        return 0;
+      }
+    }
+  }
   const double start = kls_now_seconds();
   /* The predicted factorization runs unscaled: the solve probe proves the
      result, and every strong-diagonal candidate that reaches this path
