@@ -23358,6 +23358,15 @@ static UF_long kls_metis_camd_group_size(UF_long n,
    its own internal thread team. */
 static pthread_mutex_t kls_mtmetis_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* per-thread routing request from the analyze level: the mostly-
+   missing-diagonal low-degree class (mac_econ) pays a pathological
+   serial NodeND while its egraph refactor engine has no separator-
+   structure dependence - the measured safe class for threaded ND.
+   pre2-like matrices are prestatic-routed before ordering and their
+   pipeline engines NEED serial NodeNDP structure (measured 14.9 vs
+   2.2s refactor) - never routed here. */
+static _Thread_local int kls_mt_nd_class;
+
 /* forest-aware threaded ND: replicates METIS_NodeNDP's output contract
    (perm/iperm + the reversed-index sizes tree consumed by
    kls_metis_append_separator_component: right subtree first, then
@@ -24079,7 +24088,9 @@ static UF_long kls_metis_order_inner(UF_long n,
   int metis_status = METIS_ERROR;
   int par_nd_done = 0;
 #ifdef KLS_HAVE_MTMETIS
-  if (n >= 200000 && getenv("KLS_MT_ND") != NULL) {
+  if (n >= 200000 &&
+      (getenv("KLS_MT_ND") != NULL ||
+       (kls_mt_nd_class && getenv("KLS_MT_ND_CLASS") != NULL))) {
     /* threaded ND (mt-metis, MIT).  With a leaf-count request the
        forest-aware path replicates NodeNDP's sizes contract so the
        separator forest (and the pipeline refactor engines that read
@@ -29842,6 +29853,11 @@ static int kls_choose_symbolic_inner(UF_long n,
 #endif
 
   kls_no_btf_retry_hopeless = 0;
+#if defined(KLS_HAVE_MTMETIS) && defined(KLS_HAVE_METIS)
+  kls_mt_nd_class =
+    n >= 200000 &&
+    is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx);
+#endif
   kls_options auto_options = *options;
   const kls_options *symbolic_options = options;
 #ifdef KLS_HAVE_METIS
