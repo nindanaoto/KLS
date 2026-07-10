@@ -27483,6 +27483,32 @@ done:
   return accepted;
 }
 
+/* pipelined first-factor routing (see trilinos_klu_l_kernel.c): the
+   pipeline wins on heavy columns (pre2: 160k flops/col, init 57->32s)
+   and loses on light ones (mac_econ 24k: 1.9x round overhead, plus
+   cancellation-pivot fragility); route foreground first factors with
+   est work/column above a floor.  Thread-local, so race workers and
+   other background factors never engage it. */
+extern _Thread_local int kls_klu_pipe_threads;
+
+static int kls_pipe_first_factor_threads(const kls_solver *solver,
+                                         const trilinos_klu_l_symbolic *sym) {
+  if (solver == NULL || sym == NULL || solver->options.threads < 2 ||
+      getenv("KLS_DISABLE_PIPE_ROUTE") != NULL) {
+    return 0;
+  }
+  const double est = sym->est_flops;
+  const double n = (double)sym->n;
+  if (getenv("KLS_TRACE_PIPE_ROUTE") != NULL) {
+    fprintf(stderr, "KLS pipe route: est=%.3e n=%.0f per=%.0f\n",
+            est, n, n > 0.0 ? est / n : -1.0);
+  }
+  if (!(est > 5.0e9) || n <= 0.0 || !(est / n >= 1.0e5)) {
+    return 0;
+  }
+  return solver->options.threads > 16 ? 16 : solver->options.threads;
+}
+
 static int kls_trace_pre_static_enabled(void) {
   const char *value = getenv("KLS_TRACE_PRESTATIC");
   return value != NULL && value[0] == '1';
@@ -27868,9 +27894,22 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
   }
   if (!skip_trial_factor) {
+#ifdef KLS_HAVE_SPRAL_SCALING
+  /* the large-spral prestatic class (pre2: n>150k, mostly-missing
+     diagonal) has the heavy columns the pipelined kernel wants (init
+     57.4 -> 31.6s); est_flops is EMPTY for given orderings so the
+     class flag is the routing signal.  mac_econ-like light-column
+     matrices never reach this trial (pattern classifiers). */
+  if (use_large_spral_match && solver->options.threads >= 2 &&
+      getenv("KLS_DISABLE_PIPE_ROUTE") == NULL) {
+    kls_klu_pipe_threads = solver->options.threads > 16
+      ? 16 : solver->options.threads;
+  }
+#endif
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
                           trial_symbolic, &trial_common);
+  kls_klu_pipe_threads = 0;
   if (trial_numeric == NULL || trial_common.status < 0 ||
       trial_common.status == TRILINOS_KLU_SINGULAR) {
     if (kls_trace_pre_static_enabled()) {
@@ -122478,11 +122517,14 @@ int kls_factor(kls_solver *solver, const double *values) {
       kls_set_last_factor_path(solver,
                                had_numeric ? KLS_FACTOR_PATH_KLU_FALLBACK
                                            : KLS_FACTOR_PATH_KLU_FIRST);
+      kls_klu_pipe_threads =
+        kls_pipe_first_factor_threads(solver, solver->symbolic);
       solver->numeric = trilinos_klu_l_factor(solver->col_ptr,
                                               solver->row_idx,
                                               numeric_values,
                                               solver->symbolic,
                                               &solver->common);
+      kls_klu_pipe_threads = 0;
       elapsed += kls_now_seconds() - start;
       }
     }

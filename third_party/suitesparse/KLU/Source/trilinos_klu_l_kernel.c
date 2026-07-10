@@ -734,6 +734,11 @@ static void kls_prune_chunked
     }
 }
 
+/* Per-thread routing request from the solver layer: heavy-column
+ * foreground first factors opt in; background/race threads see 0.
+ * The KLS_KLU_PIPE env overrides for experiments. */
+_Thread_local int kls_klu_pipe_threads = 0 ;
+
 #define KLS_PIVOT_RETRY (-2)
 static Int kls_lpivot_diag_claim
 (
@@ -2011,6 +2016,38 @@ size_t KLS_KLU_KERNEL_PIPE
 	    S.unz += workers [t].S.unz ;
 	}
 	S.cols_done = n ;
+	{
+	    const char *dump = getenv ("KLS_KLU_PIPE_DUMP") ;
+	    if (dump != NULL)
+	    {
+		FILE *f = fopen (dump, "a") ;
+		if (f != NULL)
+		{
+		    Int dk, dp ;
+		    for (dk = 0 ; dk < n ; dk++)
+		    {
+			long lsum = 0, usum = 0 ;
+			Unit *xp = S.colptr [dk] ;
+			Int *dLi = (Int *) xp ;
+			Int *dUi = (Int *) (xp + UNITS (Int, S.Llen [dk]) +
+					    UNITS (Entry, S.Llen [dk])) ;
+			for (dp = 0 ; dp < S.Llen [dk] ; dp++)
+			{
+			    lsum += dLi [dp] ;
+			}
+			for (dp = 0 ; dp < S.Ulen [dk] ; dp++)
+			{
+			    usum += dUi [dp] ;
+			}
+			fprintf (f, "%ld p=%ld l=%ld u=%ld ls=%ld us=%ld\n",
+				 (long) (dk + k1), (long) S.P [dk],
+				 (long) S.Llen [dk], (long) S.Ulen [dk],
+				 lsum, usum) ;
+		    }
+		    fclose (f) ;
+		}
+	    }
+	}
 	final_size = KLS_KLU_KERNEL_FINISH (&S) ;
 	for (t = 0 ; t < nthreads ; t++)
 	{
@@ -2577,9 +2614,12 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     size_t final_size ;
 
     ASSERT (Common != NULL) ;
-    if (n >= 512 && getenv ("KLS_KLU_PIPE") != NULL)
+    if (n >= 512 &&
+	(getenv ("KLS_KLU_PIPE") != NULL || kls_klu_pipe_threads > 0))
     {
-	int pipe_threads = atoi (getenv ("KLS_KLU_PIPE")) ;
+	int pipe_threads = getenv ("KLS_KLU_PIPE") != NULL
+	    ? atoi (getenv ("KLS_KLU_PIPE"))
+	    : kls_klu_pipe_threads ;
 	size_t pipe_size = KLS_KLU_KERNEL_PIPE (n, Ap, Ai, Ax, Q, lusize,
 	    Pinv, P, p_LU, Udiag, Llen, Ulen, Lip, Uip, lnz, unz, X, Stack,
 	    Flag, Ap_pos, Lpend, k1, PSinv, Rs, Offp, Offi, Offx, Common,
