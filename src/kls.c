@@ -27945,6 +27945,12 @@ typedef struct kls_psmetis_spec {
   UF_long n;
   UF_long *col_ptr;
   UF_long *row_idx;
+  double *values;           /* read-only during the speculation */
+  int do_factor;            /* also run the METIS trial factor on the
+                               worker (only when the main-side trial
+                               is serial, keeping the thread budget) */
+  int factor_attempted;
+  trilinos_klu_l_numeric *numeric;
   kls_options options;
   trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_common common;
@@ -27957,6 +27963,20 @@ static void *kls_psmetis_spec_main(void *arg) {
                                        spec->row_idx, &spec->options,
                                        KLS_ORDERING_METIS, &spec->symbolic,
                                        &spec->common, &spec->separator);
+  if (spec->status == KLS_OK && spec->symbolic != NULL &&
+      spec->do_factor && spec->values != NULL) {
+    spec->factor_attempted = 1;
+    spec->numeric = trilinos_klu_l_factor(spec->col_ptr, spec->row_idx,
+                                          spec->values, spec->symbolic,
+                                          &spec->common);
+    if (spec->numeric != NULL && spec->common.status >= 0 &&
+        spec->common.status != TRILINOS_KLU_SINGULAR) {
+      (void)trilinos_klu_l_flops(spec->symbolic, spec->numeric,
+                                 &spec->common);
+      (void)trilinos_klu_l_rcond(spec->symbolic, spec->numeric,
+                                 &spec->common);
+    }
+  }
   return NULL;
 }
 
@@ -27972,11 +27992,15 @@ static void kls_psmetis_spec_discard(kls_psmetis_spec *spec) {
     return;
   }
   kls_psmetis_spec_join(spec);
+  if (spec->numeric != NULL) {
+    trilinos_klu_l_free_numeric(&spec->numeric, &spec->common);
+  }
   if (spec->status == KLS_OK && spec->symbolic != NULL) {
     trilinos_klu_l_free_symbolic(&spec->symbolic, &spec->common);
   }
   kls_separator_analysis_clear(&spec->separator);
   spec->symbolic = NULL;
+  spec->numeric = NULL;
   spec->status = KLS_ERR_FACTOR_FAILED;
 }
 
@@ -28011,6 +28035,8 @@ static int maybe_refine_pre_static_with_metis(
   trilinos_klu_l_symbolic *metis_symbolic = NULL;
   trilinos_klu_l_common metis_common;
   kls_separator_analysis metis_separator;
+  trilinos_klu_l_numeric *spec_numeric = NULL;
+  int spec_factored = 0;
   memset(&metis_separator, 0, sizeof(metis_separator));
   if (spec != NULL && (spec->launched || spec->symbolic != NULL)) {
     kls_psmetis_spec_join(spec);
@@ -28018,10 +28044,21 @@ static int maybe_refine_pre_static_with_metis(
       kls_psmetis_spec_discard(spec);
       return 0;
     }
+    if (spec->factor_attempted &&
+        (spec->numeric == NULL || spec->common.status < 0 ||
+         spec->common.status == TRILINOS_KLU_SINGULAR)) {
+      /* the worker already ran the trial factor and it failed: same
+         verdict the inline factor below would reach */
+      kls_psmetis_spec_discard(spec);
+      return 0;
+    }
     metis_symbolic = spec->symbolic;
     metis_common = spec->common;
     kls_separator_analysis_move(&metis_separator, &spec->separator);
     spec->symbolic = NULL;
+    spec_numeric = spec->numeric;
+    spec_factored = spec->factor_attempted && spec_numeric != NULL;
+    spec->numeric = NULL;
   } else {
     kls_options metis_options = *trial_options;
     metis_options.ordering = KLS_ORDERING_METIS;
@@ -28038,9 +28075,12 @@ static int maybe_refine_pre_static_with_metis(
     }
   }
 
-  trilinos_klu_l_numeric *metis_numeric =
-    trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
-                          metis_symbolic, &metis_common);
+  trilinos_klu_l_numeric *metis_numeric = spec_numeric;
+  if (metis_numeric == NULL) {
+    metis_numeric =
+      trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
+                            metis_symbolic, &metis_common);
+  }
   if (metis_numeric == NULL || metis_common.status < 0 ||
       metis_common.status == TRILINOS_KLU_SINGULAR) {
     if (metis_numeric != NULL) {
@@ -28051,8 +28091,12 @@ static int maybe_refine_pre_static_with_metis(
     return 0;
   }
 
-  (void)trilinos_klu_l_flops(metis_symbolic, metis_numeric, &metis_common);
-  (void)trilinos_klu_l_rcond(metis_symbolic, metis_numeric, &metis_common);
+  if (!spec_factored) {
+    (void)trilinos_klu_l_flops(metis_symbolic, metis_numeric,
+                               &metis_common);
+    (void)trilinos_klu_l_rcond(metis_symbolic, metis_numeric,
+                               &metis_common);
+  }
   if (!numeric_candidate_is_better(trial_common_io, *trial_numeric_io,
                                    &metis_common, metis_numeric) ||
       (trial_common_io->rcond > 0.0 && metis_common.rcond > 0.0 &&
@@ -28773,31 +28817,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
   }
   if (!skip_trial_factor) {
-#ifdef KLS_HAVE_METIS
-  /* Speculative METIS refinement analysis: the refinement's serial
-     NodeND+CAMD dominates its cost and depends only on the trial
-     pattern and the scale/tol just decided, so start it on a worker
-     before the trial factor.  The join inside the refinement applies
-     the flops-aware half of the gate; a losing speculation is joined
-     and discarded there (or at done: on trial rejection). */
-  if (solver->options.threads >= 2 &&
-      getenv("KLS_DISABLE_PSMETIS_SPEC") == NULL &&
-      pre_static_metis_refinement_pattern_ok(solver->n, solver->nnz, weak,
-                                             trial_symbolic,
-                                             trial_ordering)) {
-    psmetis_spec.n = solver->n;
-    psmetis_spec.col_ptr = trial_col_ptr;
-    psmetis_spec.row_idx = trial_row_idx;
-    psmetis_spec.options = trial_options;
-    psmetis_spec.options.ordering = KLS_ORDERING_METIS;
-    psmetis_spec.options.scale = (int)trial_common.scale;
-    psmetis_spec.options.pivot_tolerance = trial_common.tol;
-    if (pthread_create(&psmetis_spec.thread, NULL, kls_psmetis_spec_main,
-                       &psmetis_spec) == 0) {
-      psmetis_spec.launched = 1;
-    }
-  }
-#endif
   {
     /* the prestatic trial classes carry the columns the pipelined
        kernel wants: large-spral (pre2: init 57.4 -> 31.6s) and the
@@ -28818,6 +28837,40 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       kls_klu_pipe_threads = solver->options.threads > 16
         ? 16 : solver->options.threads;
     }
+#ifdef KLS_HAVE_METIS
+    /* Speculative METIS refinement: the refinement's serial
+       NodeND+CAMD dominates its cost and depends only on the trial
+       pattern and the scale/tol just decided, so start it on a worker
+       before the trial factor.  When the main-side trial is serial
+       (no pipe routing) the worker also runs the METIS trial factor
+       and its diagnostics - the whole refinement then joins ready.
+       The join inside the refinement applies the flops-aware half of
+       the gate; a losing speculation is joined and discarded there
+       (or at done: on trial rejection). */
+    if (solver->options.threads >= 2 &&
+        getenv("KLS_DISABLE_PSMETIS_SPEC") == NULL &&
+        pre_static_metis_refinement_pattern_ok(solver->n, solver->nnz,
+                                               weak, trial_symbolic,
+                                               trial_ordering)) {
+      psmetis_spec.n = solver->n;
+      psmetis_spec.col_ptr = trial_col_ptr;
+      psmetis_spec.row_idx = trial_row_idx;
+      psmetis_spec.values = trial_values;
+      /* worker-side trial factor measured +0.03s on rajat25 (the
+         factor is on the critical path either way and runs cold on
+         the worker): analyze-only unless explicitly requested */
+      psmetis_spec.do_factor = kls_klu_pipe_threads == 0 &&
+                               getenv("KLS_PSMETIS_SPEC_FACTOR") != NULL;
+      psmetis_spec.options = trial_options;
+      psmetis_spec.options.ordering = KLS_ORDERING_METIS;
+      psmetis_spec.options.scale = (int)trial_common.scale;
+      psmetis_spec.options.pivot_tolerance = trial_common.tol;
+      if (pthread_create(&psmetis_spec.thread, NULL,
+                         kls_psmetis_spec_main, &psmetis_spec) == 0) {
+        psmetis_spec.launched = 1;
+      }
+    }
+#endif
   }
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
@@ -123498,13 +123551,28 @@ int kls_factor(kls_solver *solver, const double *values) {
           elapsed += kls_now_seconds() - row_start;
         }
       }
-      kls_maybe_prepare_snode_panels(solver, &elapsed);
-      kls_snb_maybe_accept(solver, numeric_values, &elapsed);
-      (void)kls_i32_solve_ready(solver);
-      kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
-      maybe_prepare_refactor_map(solver, &elapsed);
-      maybe_prepare_refactor_schedule(solver, &elapsed);
-      kls_maybe_prepare_model_row_refactor_from_numeric(solver, &elapsed);
+      if (solver->n >= 512 && !solver->spral_matching_selected &&
+          getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+        /* same contract as the main path's deferral below: engine and
+           solve preps only pay off across repeated refactors, so run
+           them from the first refactorization's consult instead (the
+           model-row prep alone is 0.06s of rajat25's 0.59s one-shot
+           init).  Solves before any refactor take the plain paths.
+           The spral-matched large class (pre2) keeps inline preps:
+           its deferred consult runs the full prep list including the
+           pts trial this branch never paid, and that combination
+           stalls on the 74M-entry factor. */
+        solver->factor_preps_deferred = 1;
+      } else {
+        kls_maybe_prepare_snode_panels(solver, &elapsed);
+        kls_snb_maybe_accept(solver, numeric_values, &elapsed);
+        (void)kls_i32_solve_ready(solver);
+        kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
+        maybe_prepare_refactor_map(solver, &elapsed);
+        maybe_prepare_refactor_schedule(solver, &elapsed);
+        kls_maybe_prepare_model_row_refactor_from_numeric(solver,
+                                                          &elapsed);
+      }
       solver->stats.factor_seconds = elapsed;
       fill_numeric_stats(solver);
       return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
