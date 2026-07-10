@@ -1466,6 +1466,12 @@ typedef struct kls_klu_pipe_shared_s
     _Atomic int abort_flag ;
     Int n ;
     int nthreads ;
+    /* concurrent-safe symmetric pruning (KLS_KLU_PIPE_PRUNE): finals
+       are serialized by in-order publication, so pruning is single-
+       writer; readers use per-column seqlocks.  Lpend[j] != EMPTY
+       bounds the DFS scan of column j to its pivotal prefix. */
+    _Atomic Int *lpend ;
+    _Atomic unsigned *colver ;
 } kls_klu_pipe_shared ;
 
 typedef struct kls_klu_pipe_worker_s
@@ -1474,6 +1480,8 @@ typedef struct kls_klu_pipe_worker_s
     kls_klu_pipe_shared *sh ;
     Int *ubuf_i ;             /* per-round U pattern accumulation */
     Entry *ubuf_x ;
+    unsigned *ap_ver ;        /* seqlock snapshots for resumable scans */
+    Unit *copybuf ;           /* seqlock column copies for the numeric */
     int tid ;
     double t_work, t_spin, t_final ;   /* KLS_KLU_PIPE_PROF buckets */
     long n_cols, n_rounds ;
@@ -1481,9 +1489,12 @@ typedef struct kls_klu_pipe_worker_s
 
 /* DFS from node i (row of the block), eliminating only through pivot
  * columns < plimit; rows pivotal at >= plimit (or not pivotal) are L
- * candidates.  Identical in shape to dfs() but without pruning and
- * with the prefix filter.  Returns the new top; Stack[top..oldtop-1]
- * is the round's topological segment. */
+ * candidates.  Identical in shape to dfs() but with the prefix filter.
+ * With sh non-NULL, scans are bounded by the shared Lpend and guarded
+ * by per-column seqlocks: a scan (or a resume after descending) whose
+ * column version changed restarts that column's scan - marked rows
+ * dedup, so restarts only recover misses.  Returns the new top;
+ * Stack[top..oldtop-1] is the round's topological segment. */
 static Int kls_pipe_dfs
 (
     Int j,                    /* node at which to start the DFS */
@@ -1499,7 +1510,9 @@ static Int kls_pipe_dfs
     Unit *const *Colptr,
     Int *Lik,
     Int *plength,
-    Int Ap_pos [ ]
+    Int Ap_pos [ ],
+    const kls_klu_pipe_shared *sh,
+    unsigned Ap_ver [ ]
 )
 {
     Int i, pos, jnew, head, l_length ;
@@ -1520,7 +1533,52 @@ static Int kls_pipe_dfs
 	    /* first time j has been visited */
 	    Flag [j] = k ;
 	    /* set Ap_pos [head] to one past the last entry in col j to scan */
-	    Ap_pos [head] = (jnew < 0 || jnew >= plimit) ? 0 : Llen [jnew] ;
+	    if (jnew < 0 || jnew >= plimit)
+	    {
+		Ap_pos [head] = 0 ;
+	    }
+	    else if (sh != NULL && sh->lpend != NULL)
+	    {
+		unsigned v ;
+		Int bound ;
+		do
+		{
+		    v = atomic_load_explicit (&sh->colver [jnew],
+					      memory_order_acquire) ;
+		    KLS_KLU_CPU_RELAX () ;
+		} while (v & 1u) ;
+		bound = atomic_load_explicit (&sh->lpend [jnew],
+					      memory_order_acquire) ;
+		Ap_pos [head] = (bound == TRILINOS_KLU_EMPTY)
+		    ? Llen [jnew] : bound ;
+		Ap_ver [head] = v ;
+	    }
+	    else
+	    {
+		Ap_pos [head] = Llen [jnew] ;
+	    }
+	}
+	else if (sh != NULL && sh->lpend != NULL &&
+		 jnew >= 0 && jnew < plimit &&
+		 atomic_load_explicit (&sh->colver [jnew],
+				       memory_order_acquire) !=
+		   Ap_ver [head])
+	{
+	    /* resumed a column whose rows were pruned mid-descent:
+	       restart its scan under the new version (dedup recovers) */
+	    unsigned v ;
+	    Int bound ;
+	    do
+	    {
+		v = atomic_load_explicit (&sh->colver [jnew],
+					  memory_order_acquire) ;
+		KLS_KLU_CPU_RELAX () ;
+	    } while (v & 1u) ;
+	    bound = atomic_load_explicit (&sh->lpend [jnew],
+					  memory_order_acquire) ;
+	    Ap_pos [head] = (bound == TRILINOS_KLU_EMPTY)
+		? Llen [jnew] : bound ;
+	    Ap_ver [head] = v ;
 	}
 
 	/* add the adjacent nodes to the recursive stack by iterating through
@@ -1562,6 +1620,14 @@ static Int kls_pipe_dfs
 	}
 
 	/* pop off the recursive stack and push j in the output stack */
+	if (sh != NULL && sh->lpend != NULL && jnew >= 0 && jnew < plimit &&
+	    atomic_load_explicit (&sh->colver [jnew],
+				  memory_order_acquire) != Ap_ver [head])
+	{
+	    /* the column was pruned during its final partial scan:
+	       rescan under the new version before retiring it */
+	    continue ;
+	}
 	head-- ;
 	if (jnew >= 0 && jnew < plimit)
 	{
@@ -1577,6 +1643,13 @@ static Int kls_pipe_dfs
     *plength = l_length ;
     return (top) ;
 }
+
+static void kls_pipe_lsolve_numeric
+(
+    Int Pinv [ ], Unit *LU, Unit *const *Colptr, Int Stack [ ],
+    Int Lip [ ], Int top, Int n, Int Llen [ ], Entry X [ ],
+    const kls_klu_pipe_shared *sh, Unit *copybuf
+) ;
 
 /* One elimination round for column k of the block: symbolic (from the
  * given roots) + numeric + U-segment extraction, eliminating only
@@ -1595,7 +1668,10 @@ static void kls_pipe_round
     Int *plength,
     Int *ubuf_i,
     Entry *ubuf_x,
-    Int *pucount
+    Int *pucount,
+    const kls_klu_pipe_shared *sh,
+    unsigned *Ap_ver,
+    Unit *copybuf
 )
 {
     const Int n = S->n ;
@@ -1619,7 +1695,7 @@ static void kls_pipe_round
 		{
 		    top = kls_pipe_dfs (i, k, plimit, Pinv, S->Llen, S->Lip,
 					S->Stack, S->Flag, top, LU, S->colptr,
-					Lik, plength, S->Ap_pos) ;
+					Lik, plength, S->Ap_pos, sh, Ap_ver) ;
 		}
 		else
 		{
@@ -1642,13 +1718,13 @@ static void kls_pipe_round
 	    S->Flag [i] = TRILINOS_KLU_EMPTY ;
 	    top = kls_pipe_dfs (i, k, plimit, Pinv, S->Llen, S->Lip,
 				S->Stack, S->Flag, top, LU, S->colptr,
-				Lik, plength, S->Ap_pos) ;
+				Lik, plength, S->Ap_pos, sh, Ap_ver) ;
 	}
     }
 
     /* numeric for this round's topological segment */
-    lsolve_numeric (Pinv, LU, S->colptr, S->Stack, S->Lip, top, n,
-		    S->Llen, S->X) ;
+    kls_pipe_lsolve_numeric (Pinv, LU, S->colptr, S->Stack, S->Lip, top, n,
+			     S->Llen, S->X, sh, copybuf) ;
 
     /* extract this round's U segment: values are final (contributions
        to a pivotal row come only from smaller pivot columns, all of
@@ -1660,6 +1736,73 @@ static void kls_pipe_round
 	ubuf_x [*pucount] = S->X [j] ;
 	CLEAR (S->X [j]) ;
 	(*pucount)++ ;
+    }
+}
+
+/* lsolve_numeric with seqlock column copies: x -= Lx*xj is not
+ * retryable, so each applied column is copied to scratch under its
+ * version check and applied from the copy. */
+static void kls_pipe_lsolve_numeric
+(
+    Int Pinv [ ],
+    Unit *LU,
+    Unit *const *Colptr,
+    Int Stack [ ],
+    Int Lip [ ],
+    Int top,
+    Int n,
+    Int Llen [ ],
+    Entry X [ ],
+    const kls_klu_pipe_shared *sh,
+    Unit *copybuf
+)
+{
+    Entry xj ;
+    Entry *Lx ;
+    Int *Li ;
+    Int p, s, j, jnew, len ;
+
+    if (sh == NULL || sh->lpend == NULL)
+    {
+	lsolve_numeric (Pinv, LU, Colptr, Stack, Lip, top, n, Llen, X) ;
+	return ;
+    }
+    for (s = top ; s < n ; s++)
+    {
+	j = Stack [s] ;
+	jnew = Pinv [j] ;
+	ASSERT (jnew >= 0) ;
+	xj = X [j] ;
+	{
+	    Unit *xp = KLS_COL_BASE (Colptr, LU, Lip, jnew) ;
+	    size_t units ;
+	    unsigned v0, v1 ;
+	    len = Llen [jnew] ;
+	    units = (size_t) (UNITS (Int, len) + UNITS (Entry, len)) ;
+	    for ( ; ; )
+	    {
+		do
+		{
+		    v0 = atomic_load_explicit (&sh->colver [jnew],
+					       memory_order_acquire) ;
+		    KLS_KLU_CPU_RELAX () ;
+		} while (v0 & 1u) ;
+		memcpy (copybuf, xp, units * sizeof (Unit)) ;
+		atomic_thread_fence (memory_order_acquire) ;
+		v1 = atomic_load_explicit (&sh->colver [jnew],
+					   memory_order_acquire) ;
+		if (v1 == v0)
+		{
+		    break ;
+		}
+	    }
+	    Li = (Int *) copybuf ;
+	    Lx = (Entry *) (copybuf + UNITS (Int, len)) ;
+	}
+	for (p = 0 ; p < len ; p++)
+	{
+	    MULT_SUB (X [Li [p]], Lx [p], xj) ;
+	}
     }
 }
 
@@ -1710,7 +1853,8 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	    plimit = k ;
 	}
 	kls_pipe_round (S, k, plimit, NULL, 0, LU, Lik, &l_length,
-			W->ubuf_i, W->ubuf_x, &ucount) ;
+			W->ubuf_i, W->ubuf_x, &ucount, sh, W->ap_ver,
+			W->copybuf) ;
 
 	/* later rounds as the prefix advances toward k */
 	while (plimit < k)
@@ -1766,7 +1910,7 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		{
 		    kls_pipe_round (S, k, newlimit, promoted, npromoted, LU,
 				    Lik, &l_length, W->ubuf_i, W->ubuf_x,
-				    &ucount) ;
+				    &ucount, sh, W->ap_ver, W->copybuf) ;
 		}
 	    }
 	    plimit = newlimit ;
@@ -1866,6 +2010,67 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	}
 	S->P [k] = pivrow ;
 	S->Pinv [pivrow] = k ;
+	if (sh->lpend != NULL)
+	{
+	    /* symmetric pruning, serialized by in-order finals: for each
+	       U column j of k not yet pruned, if pivrow appears in j's
+	       published L rows, partition them pivotal-first under j's
+	       seqlock and set the shared scan bound. */
+	    Int up, jcol ;
+	    for (up = 0 ; up < ucount ; up++)
+	    {
+		jcol = W->ubuf_i [up] ;
+		if (atomic_load_explicit (&sh->lpend [jcol],
+					  memory_order_relaxed) !=
+		    TRILINOS_KLU_EMPTY)
+		{
+		    continue ;
+		}
+		{
+		    Unit *xp = S->colptr [jcol] ;
+		    Int jlen = S->Llen [jcol] ;
+		    Int *Lij = (Int *) xp ;
+		    Entry *Lxj = (Entry *) (xp + UNITS (Int, jlen)) ;
+		    Int p2, found = 0 ;
+		    for (p2 = 0 ; p2 < jlen ; p2++)
+		    {
+			if (Lij [p2] == pivrow)
+			{
+			    found = 1 ;
+			    break ;
+			}
+		    }
+		    if (found)
+		    {
+			Int phead = 0, ptail = jlen ;
+			atomic_fetch_add_explicit (&sh->colver [jcol], 1,
+						   memory_order_acq_rel) ;
+			while (phead < ptail)
+			{
+			    Int row = Lij [phead] ;
+			    if (S->Pinv [row] >= 0)
+			    {
+				phead++ ;
+			    }
+			    else
+			    {
+				Entry xtmp ;
+				ptail-- ;
+				Lij [phead] = Lij [ptail] ;
+				Lij [ptail] = row ;
+				xtmp = Lxj [phead] ;
+				Lxj [phead] = Lxj [ptail] ;
+				Lxj [ptail] = xtmp ;
+			    }
+			}
+			atomic_store_explicit (&sh->lpend [jcol], ptail,
+					       memory_order_release) ;
+			atomic_fetch_add_explicit (&sh->colver [jcol], 1,
+						   memory_order_acq_rel) ;
+		    }
+		}
+	    }
+	}
 	S->lnz += S->Llen [k] + 1 ;
 	S->unz += S->Ulen [k] + 1 ;
 	S->cols_done = k + 1 ;
@@ -1966,11 +2171,35 @@ size_t KLS_KLU_KERNEL_PIPE
 
     KLS_KLU_KERNEL_INIT (&S) ;
 
+    /* shared struct is initialized before worker setup */
     atomic_init (&sh.next_col, 0) ;
     atomic_init (&sh.prefix, 0) ;
     atomic_init (&sh.abort_flag, 0) ;
     sh.n = n ;
     sh.nthreads = nthreads ;
+    sh.lpend = NULL ;
+    sh.colver = NULL ;
+    if (getenv ("KLS_KLU_PIPE_NOPRUNE") == NULL)
+    {
+	Int q ;
+	sh.lpend = (_Atomic Int *) malloc ((size_t) n * sizeof (Int)) ;
+	sh.colver = (_Atomic unsigned *) calloc ((size_t) n,
+						 sizeof (unsigned)) ;
+	if (sh.lpend == NULL || sh.colver == NULL)
+	{
+	    free ((void *) sh.lpend) ;
+	    free ((void *) sh.colver) ;
+	    sh.lpend = NULL ;
+	    sh.colver = NULL ;
+	}
+	else
+	{
+	    for (q = 0 ; q < n ; q++)
+	    {
+		atomic_init (&sh.lpend [q], TRILINOS_KLU_EMPTY) ;
+	    }
+	}
+    }
 
     for (t = 0 ; t < nthreads ; t++)
     {
@@ -1986,9 +2215,14 @@ size_t KLS_KLU_KERNEL_PIPE
 	W->S.firstrow = 0 ;
 	W->ubuf_i = (Int *) malloc ((size_t) n * sizeof (Int)) ;
 	W->ubuf_x = (Entry *) malloc ((size_t) n * sizeof (Entry)) ;
+	W->ap_ver = (unsigned *) malloc ((size_t) n * sizeof (unsigned)) ;
+	W->copybuf = sh.lpend != NULL
+	    ? (Unit *) malloc ((2 * (size_t) n + 4) * sizeof (Unit))
+	    : NULL ;
 	W->t_work = 0 ; W->t_spin = 0 ; W->t_final = 0 ;
 	W->n_cols = 0 ; W->n_rounds = 0 ;
-	if (W->ubuf_i == NULL || W->ubuf_x == NULL)
+	if (W->ubuf_i == NULL || W->ubuf_x == NULL || W->ap_ver == NULL ||
+	    (sh.lpend != NULL && W->copybuf == NULL))
 	{
 	    spawn_failed = 1 ;
 	}
@@ -2099,7 +2333,11 @@ size_t KLS_KLU_KERNEL_PIPE
 	    }
 	    free (workers [t].ubuf_i) ;
 	    free (workers [t].ubuf_x) ;
+	    free (workers [t].ap_ver) ;
+	    free (workers [t].copybuf) ;
 	}
+	free ((void *) sh.lpend) ;
+	free ((void *) sh.colver) ;
 	free (S.colptr) ;
 	*p_LU = S.LU ;
 	*lnz = S.lnz ;
@@ -2121,6 +2359,8 @@ size_t KLS_KLU_KERNEL_PIPE
 	}
 	free (workers [t].ubuf_i) ;
 	free (workers [t].ubuf_x) ;
+	free (workers [t].ap_ver) ;
+	free (workers [t].copybuf) ;
     }
     KLS_KLU_KERNEL_CHUNKS_FREE (&workers [0].S) ;
     free (S.scratch) ;
