@@ -23358,6 +23358,10 @@ static UF_long kls_metis_camd_group_size(UF_long n,
    its own internal thread team. */
 static pthread_mutex_t kls_mtmetis_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* thread budget the analyze level was invoked with, for the ordering
+   layer's concurrency decisions (set in analyze_with_ordering) */
+static _Thread_local int kls_metis_order_threads;
+
 /* per-thread routing request from the analyze level: the mostly-
    missing-diagonal low-degree class (mac_econ) pays a pathological
    serial NodeND while its egraph refactor engine has no separator-
@@ -23420,6 +23424,11 @@ struct kls_mtnd_ctx {
   UF_long n;
   UF_long *scratch_local;   /* size n: global -> local id map */
   int mt_threads;
+  int serial_sep;           /* internal separators via serial METIS:
+                               deterministic (mt-metis's parallel
+                               coarsening is not seed-pinnable), with
+                               the parallelism kept in the concurrent
+                               serial leaf orderings */
 };
 
 static int kls_mtnd_split(struct kls_mtnd_ctx *C, idx_t cpos,
@@ -23482,6 +23491,75 @@ static int kls_mtnd_split(struct kls_mtnd_ctx *C, idx_t cpos,
     return 1;
   }
   /* internal: vertex separator on this component */
+  if (C->serial_sep) {
+    idx_t snv = (idx_t)nv;
+    idx_t *lx = (idx_t *)malloc(((size_t)nv + 1u) * sizeof(idx_t));
+    idx_t *la = NULL;
+    idx_t *lwhere =
+      (idx_t *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(idx_t));
+    idx_t sepsize = 0;
+    size_t edges = 0;
+    UF_long v, q, w = 0;
+    int st;
+    UF_long *partA, *partB, *partS;
+    UF_long na = 0, nb = 0, nsep = 0;
+    if (lx == NULL || lwhere == NULL) {
+      free(lx); free(lwhere);
+      return 0;
+    }
+    for (v = 0; v < nv; ++v) {
+      C->scratch_local[vertices[v]] = v;
+    }
+    for (v = 0; v < nv; ++v) {
+      edges += (size_t)(C->xadj[vertices[v] + 1] - C->xadj[vertices[v]]);
+    }
+    la = (idx_t *)malloc((edges + 1u) * sizeof(idx_t));
+    if (la == NULL) { free(lx); free(lwhere); return 0; }
+    for (v = 0; v < nv; ++v) {
+      UF_long gv = vertices[v];
+      lx[v] = (idx_t)w;
+      for (q = C->xadj[gv]; q < C->xadj[gv + 1]; ++q) {
+        UF_long gu = (UF_long)C->adjncy[q];
+        if (C->scratch_local[gu] < nv &&
+            vertices[C->scratch_local[gu]] == gu) {
+          la[w++] = (idx_t)C->scratch_local[gu];
+        }
+      }
+    }
+    lx[nv] = (idx_t)w;
+    /* serial METIS separator: deterministic for fixed inputs */
+    st = METIS_ComputeVertexSeparator(&snv, lx, la, NULL, NULL,
+                                      &sepsize, lwhere);
+    free(lx); free(la);
+    if (st != METIS_OK) { free(lwhere); return 0; }
+    partA = (UF_long *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(UF_long));
+    partB = (UF_long *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(UF_long));
+    partS = (UF_long *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(UF_long));
+    if (partA == NULL || partB == NULL || partS == NULL) {
+      free(lwhere); free(partA); free(partB); free(partS);
+      return 0;
+    }
+    for (v = 0; v < nv; ++v) {
+      if (lwhere[v] == 2) partS[nsep++] = vertices[v];
+      else if (lwhere[v] == 0) partA[na++] = vertices[v];
+      else partB[nb++] = vertices[v];
+    }
+    free(lwhere);
+    C->sizes[ridx] = (idx_t)nsep;
+    /* right child (2*cpos+2) = partB first, then left = partA */
+    if (!kls_mtnd_split(C, 2 * cpos + 2, partB, nb) ||
+        !kls_mtnd_split(C, 2 * cpos + 1, partA, na)) {
+      free(partA); free(partB); free(partS);
+      return 0;
+    }
+    /* the separator segment follows both subtrees */
+    C->segs[C->nsegs].leaf = -1;
+    C->segs[C->nsegs].vertices = partS;
+    C->segs[C->nsegs].count = nsep;
+    C->nsegs++;
+    free(partA); free(partB);
+    return 1;
+  }
   {
     mtmetis_vtx_type mn = (mtmetis_vtx_type)nv;
     mtmetis_adj_type *mx =
@@ -23559,10 +23637,12 @@ static int kls_mtnd_split(struct kls_mtnd_ctx *C, idx_t cpos,
 }
 
 /* forest-aware entry: NodeNDP replacement producing perm/iperm and
-   NodeNDP-format sizes.  Returns 1 on success. */
+   NodeNDP-format sizes.  serial_sep=1 keeps every separator serial
+   METIS (fully deterministic; parallelism from concurrent leaves
+   only).  Returns 1 on success. */
 static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
                            idx_t npes, idx_t *metis_perm, idx_t *metis_iperm,
-                           idx_t *sizes) {
+                           idx_t *sizes, int serial_sep) {
   struct kls_mtnd_ctx C;
   UF_long *all = (UF_long *)malloc((size_t)n * sizeof(UF_long));
   int nleaves = (int)npes;
@@ -23574,6 +23654,7 @@ static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
   C.npes = npes;
   C.sizes = sizes;
   C.n = n;
+  C.serial_sep = serial_sep;
   C.mt_threads = 4;
   {
     const char *te = getenv("KLS_MT_ND");
@@ -24098,7 +24179,7 @@ static UF_long kls_metis_order_inner(UF_long n,
     if (metis_ndp_npes > 1 && metis_ndp_sizes != NULL) {
       par_nd_done = kls_mtmetis_ndp(n, xadj, adjncy, metis_ndp_npes,
                                     metis_perm, metis_iperm,
-                                    metis_ndp_sizes);
+                                    metis_ndp_sizes, 0);
     } else {
       par_nd_done = kls_mtmetis_nd(n, xadj, adjncy, metis_perm,
                                    metis_iperm);
@@ -24125,6 +24206,27 @@ static UF_long kls_metis_order_inner(UF_long n,
       metis_status = METIS_OK;
     }
   }
+#ifdef KLS_HAVE_MTMETIS
+  if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
+      n >= 50000 && kls_metis_order_threads >= (int)metis_ndp_npes &&
+      getenv("KLS_DET_NDP") != NULL) {
+    /* deterministic parallel NodeNDP: serial METIS separators (the
+       forest structure the pipeline engines read stays serial-METIS
+       shaped) with the leaves ordered by concurrent serial NodeND.
+       Deterministic ONLY with KLS_GKRAND (thread-local MT19937);
+       with the stock process-global rand() the concurrent leaves
+       corrupt each other's streams.  Opt-in via KLS_DET_NDP until the
+       smoke separator fixture regains panel coverage under GKRAND;
+       ordering quality is arbitrated downstream by the candidate
+       competition's measured fill/flops gates. */
+    par_nd_done = kls_mtmetis_ndp(n, xadj, adjncy, metis_ndp_npes,
+                                  metis_perm, metis_iperm,
+                                  metis_ndp_sizes, 1);
+    if (par_nd_done) {
+      metis_status = METIS_OK;
+    }
+  }
+#endif
   if (!par_nd_done) {
     metis_status =
       metis_ndp_npes > 1
@@ -24409,6 +24511,9 @@ static int analyze_with_ordering(UF_long n,
                                  trilinos_klu_l_common *common_out,
                                  kls_separator_analysis *separator_out) {
   kls_separator_analysis_clear(separator_out);
+#ifdef KLS_HAVE_MTMETIS
+  kls_metis_order_threads = options != NULL ? options->threads : 1;
+#endif
   const double kls_awo_t0 =
     getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
   trilinos_klu_l_common common;
