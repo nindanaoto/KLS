@@ -23358,6 +23358,317 @@ static UF_long kls_metis_camd_group_size(UF_long n,
    its own internal thread team. */
 static pthread_mutex_t kls_mtmetis_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* forest-aware threaded ND: replicates METIS_NodeNDP's output contract
+   (perm/iperm + the reversed-index sizes tree consumed by
+   kls_metis_append_separator_component: right subtree first, then
+   left, then the separator).  Top separators via mt-metis (mutex-
+   serialized; internally threaded), leaves via concurrent serial
+   METIS_NodeND. */
+struct kls_mtnd_leaf {
+  idx_t nv;
+  idx_t *xadj;
+  idx_t *adjncy;
+  idx_t *perm;
+  idx_t *iperm;
+  idx_t *options;
+  int status;
+};
+
+static void *kls_mtnd_leaf_main(void *arg) {
+  struct kls_mtnd_leaf *L = (struct kls_mtnd_leaf *)arg;
+  idx_t nv = L->nv;
+  if (nv > 0) {
+    L->status = METIS_NodeND(&nv, L->xadj, L->adjncy, NULL, L->options,
+                             L->perm, L->iperm);
+  } else {
+    L->status = METIS_OK;
+  }
+  return NULL;
+}
+
+/* recursive splitter: fills emit[] (vertex ids in NodeNDP emission
+   order), sizes[] (reversed index), and leaf job structs for deferred
+   concurrent leaf ordering.  vertices/nv = this component's vertex
+   ids (global).  Returns 0 on failure. */
+struct kls_mtnd_seg {
+  int leaf;                 /* leaf index, or -1 for a separator */
+  UF_long *vertices;        /* owned for separators; leaf lists live in
+                               leaf_vtx */
+  UF_long count;
+};
+
+struct kls_mtnd_ctx {
+  const idx_t *xadj;
+  const idx_t *adjncy;
+  idx_t npes;
+  idx_t *sizes;
+  struct kls_mtnd_seg *segs;
+  int nsegs;
+  struct kls_mtnd_leaf *leaves;
+  UF_long *leaf_vtx;        /* concatenated leaf vertex lists */
+  UF_long *leaf_vtx_start;
+  UF_long leaf_vtx_used;
+  UF_long n;
+  UF_long *scratch_local;   /* size n: global -> local id map */
+  int mt_threads;
+};
+
+static int kls_mtnd_split(struct kls_mtnd_ctx *C, idx_t cpos,
+                          UF_long *vertices, UF_long nv) {
+  const idx_t component_count = 2 * C->npes - 1;
+  const idx_t ridx = component_count - 1 - cpos;
+  if (cpos >= C->npes - 1) {
+    /* leaf: record for deferred concurrent serial ND */
+    int li = (int)(cpos - (C->npes - 1));
+    C->leaves[li].nv = (idx_t)nv;
+    C->leaf_vtx_start[li] = C->leaf_vtx_used;
+    C->leaf_vtx_used += nv;
+    C->segs[C->nsegs].leaf = li;
+    C->segs[C->nsegs].vertices = NULL;
+    C->segs[C->nsegs].count = nv;
+    C->nsegs++;
+    /* build the leaf subgraph (local ids) */
+    {
+      UF_long v, q, w = 0;
+      idx_t *lx = (idx_t *)malloc(((size_t)nv + 1u) * sizeof(idx_t));
+      idx_t *la = NULL;
+      size_t edges = 0;
+      if (lx == NULL) return 0;
+      for (v = 0; v < nv; ++v) {
+        C->scratch_local[vertices[v]] = v;
+      }
+      for (v = 0; v < nv; ++v) {
+        edges += (size_t)(C->xadj[vertices[v] + 1] - C->xadj[vertices[v]]);
+      }
+      la = (idx_t *)malloc((edges + 1u) * sizeof(idx_t));
+      if (la == NULL) { free(lx); return 0; }
+      for (v = 0; v < nv; ++v) {
+        UF_long gv = vertices[v];
+        lx[v] = (idx_t)w;
+        for (q = C->xadj[gv]; q < C->xadj[gv + 1]; ++q) {
+          UF_long gu = (UF_long)C->adjncy[q];
+          /* neighbor is in this leaf iff it appears in vertices[]:
+             mark via scratch_local + membership stamp */
+          if (C->scratch_local[gu] < nv &&
+              vertices[C->scratch_local[gu]] == gu) {
+            la[w++] = (idx_t)C->scratch_local[gu];
+          }
+        }
+      }
+      lx[nv] = (idx_t)w;
+      C->leaves[li].xadj = lx;
+      C->leaves[li].adjncy = la;
+      C->leaves[li].perm = (idx_t *)malloc((size_t)(nv > 0 ? nv : 1) *
+                                           sizeof(idx_t));
+      C->leaves[li].iperm = (idx_t *)malloc((size_t)(nv > 0 ? nv : 1) *
+                                            sizeof(idx_t));
+      if (C->leaves[li].perm == NULL || C->leaves[li].iperm == NULL) {
+        return 0;
+      }
+      /* remember the vertex list location for the emit phase */
+      memcpy(C->leaf_vtx + C->leaf_vtx_start[li], vertices,
+             (size_t)nv * sizeof(UF_long));
+    }
+    C->sizes[ridx] = (idx_t)nv;
+    return 1;
+  }
+  /* internal: vertex separator on this component */
+  {
+    mtmetis_vtx_type mn = (mtmetis_vtx_type)nv;
+    mtmetis_adj_type *mx =
+      (mtmetis_adj_type *)malloc(((size_t)nv + 1u) * sizeof(*mx));
+    mtmetis_vtx_type *ma = NULL;
+    mtmetis_pid_type *mwhere =
+      (mtmetis_pid_type *)malloc((size_t)nv * sizeof(*mwhere));
+    mtmetis_wgt_type msep = 0;
+    double *opts = mtmetis_init_options();
+    size_t edges = 0;
+    UF_long v, q, w = 0;
+    int st;
+    UF_long *partA, *partB, *partS;
+    UF_long na = 0, nb = 0, nsep = 0;
+    if (mx == NULL || mwhere == NULL || opts == NULL) {
+      free(mx); free(mwhere); free(opts);
+      return 0;
+    }
+    for (v = 0; v < nv; ++v) {
+      C->scratch_local[vertices[v]] = v;
+    }
+    for (v = 0; v < nv; ++v) {
+      edges += (size_t)(C->xadj[vertices[v] + 1] - C->xadj[vertices[v]]);
+    }
+    ma = (mtmetis_vtx_type *)malloc((edges + 1u) * sizeof(*ma));
+    if (ma == NULL) { free(mx); free(mwhere); free(opts); return 0; }
+    for (v = 0; v < nv; ++v) {
+      UF_long gv = vertices[v];
+      mx[v] = (mtmetis_adj_type)w;
+      for (q = C->xadj[gv]; q < C->xadj[gv + 1]; ++q) {
+        UF_long gu = (UF_long)C->adjncy[q];
+        if (C->scratch_local[gu] < nv &&
+            vertices[C->scratch_local[gu]] == gu) {
+          ma[w++] = (mtmetis_vtx_type)C->scratch_local[gu];
+        }
+      }
+    }
+    mx[nv] = (mtmetis_adj_type)w;
+    opts[MTMETIS_OPTION_NTHREADS] = (double)C->mt_threads;
+    opts[MTMETIS_OPTION_SEED] = 0.0;
+    pthread_mutex_lock(&kls_mtmetis_lock);
+    st = MTMETIS_ComputeVertexSeparator(&mn, mx, ma, NULL, opts, &msep,
+                                        mwhere);
+    pthread_mutex_unlock(&kls_mtmetis_lock);
+    free(mx); free(ma); free(opts);
+    if (st != MTMETIS_SUCCESS) { free(mwhere); return 0; }
+    partA = (UF_long *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(UF_long));
+    partB = (UF_long *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(UF_long));
+    partS = (UF_long *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(UF_long));
+    if (partA == NULL || partB == NULL || partS == NULL) {
+      free(mwhere); free(partA); free(partB); free(partS);
+      return 0;
+    }
+    for (v = 0; v < nv; ++v) {
+      if (mwhere[v] == MTMETIS_VSEP_SEP) partS[nsep++] = vertices[v];
+      else if (mwhere[v] == MTMETIS_VSEP_PARTA) partA[na++] = vertices[v];
+      else partB[nb++] = vertices[v];
+    }
+    free(mwhere);
+    C->sizes[ridx] = (idx_t)nsep;
+    /* right child (2*cpos+2) = partB first, then left = partA */
+    if (!kls_mtnd_split(C, 2 * cpos + 2, partB, nb) ||
+        !kls_mtnd_split(C, 2 * cpos + 1, partA, na)) {
+      free(partA); free(partB); free(partS);
+      return 0;
+    }
+    /* the separator segment follows both subtrees */
+    C->segs[C->nsegs].leaf = -1;
+    C->segs[C->nsegs].vertices = partS;
+    C->segs[C->nsegs].count = nsep;
+    C->nsegs++;
+    free(partA); free(partB);
+    return 1;
+  }
+}
+
+/* forest-aware entry: NodeNDP replacement producing perm/iperm and
+   NodeNDP-format sizes.  Returns 1 on success. */
+static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
+                           idx_t npes, idx_t *metis_perm, idx_t *metis_iperm,
+                           idx_t *sizes) {
+  struct kls_mtnd_ctx C;
+  UF_long *all = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  int nleaves = (int)npes;
+  int ok = 0, i;
+  UF_long v;
+  memset(&C, 0, sizeof(C));
+  C.xadj = xadj;
+  C.adjncy = adjncy;
+  C.npes = npes;
+  C.sizes = sizes;
+  C.n = n;
+  C.mt_threads = 4;
+  {
+    const char *te = getenv("KLS_MT_ND");
+    if (te != NULL && te[0] != '\0') {
+      int p = atoi(te);
+      if (p >= 1 && p <= 32) C.mt_threads = p;
+    }
+  }
+  C.segs = (struct kls_mtnd_seg *)calloc((size_t)(2 * npes), sizeof(*C.segs));
+  C.leaves = (struct kls_mtnd_leaf *)calloc((size_t)nleaves,
+                                            sizeof(*C.leaves));
+  C.leaf_vtx = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  C.leaf_vtx_start = (UF_long *)calloc((size_t)nleaves,
+                                       sizeof(*C.leaf_vtx_start));
+  C.scratch_local = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  if (all == NULL || C.segs == NULL || C.leaves == NULL ||
+      C.leaf_vtx == NULL || C.leaf_vtx_start == NULL ||
+      C.scratch_local == NULL) {
+    goto cleanup;
+  }
+  for (v = 0; v < n; ++v) {
+    all[v] = v;
+    C.scratch_local[v] = (UF_long)n;
+  }
+  if (!kls_mtnd_split(&C, 0, all, n)) {
+    goto cleanup;
+  }
+  /* leaf orderings, concurrently (serial METIS is safe across calls) */
+  {
+    idx_t lopts[METIS_NOPTIONS];
+    pthread_t tids[64];
+    int spawned[64];
+    METIS_SetDefaultOptions(lopts);
+    lopts[METIS_OPTION_NUMBERING] = 0;
+    lopts[METIS_OPTION_SEED] = 0;
+    for (i = 0; i < nleaves; ++i) {
+      C.leaves[i].options = lopts;
+      spawned[i] = i > 0 &&
+        pthread_create(&tids[i], NULL, kls_mtnd_leaf_main,
+                       &C.leaves[i]) == 0;
+    }
+    kls_mtnd_leaf_main(&C.leaves[0]);
+    ok = C.leaves[0].status == METIS_OK;
+    for (i = 1; i < nleaves; ++i) {
+      if (spawned[i]) {
+        pthread_join(tids[i], NULL);
+      } else {
+        kls_mtnd_leaf_main(&C.leaves[i]);
+      }
+      ok = ok && C.leaves[i].status == METIS_OK;
+    }
+  }
+  if (ok) {
+    /* compose the global order from the traversal segments */
+    UF_long pos = 0;
+    int si;
+    for (si = 0; si < C.nsegs; ++si) {
+      struct kls_mtnd_seg *g = &C.segs[si];
+      if (g->leaf >= 0) {
+        struct kls_mtnd_leaf *L = &C.leaves[g->leaf];
+        UF_long base = C.leaf_vtx_start[g->leaf];
+        UF_long k;
+        for (k = 0; k < g->count; ++k) {
+          UF_long gv = C.leaf_vtx[base + (UF_long)L->perm[k]];
+          metis_iperm[gv] = (idx_t)pos;
+          metis_perm[pos] = (idx_t)gv;
+          pos++;
+        }
+      } else {
+        UF_long k;
+        for (k = 0; k < g->count; ++k) {
+          UF_long gv = g->vertices[k];
+          metis_iperm[gv] = (idx_t)pos;
+          metis_perm[pos] = (idx_t)gv;
+          pos++;
+        }
+      }
+    }
+    ok = pos == n;
+  }
+cleanup:
+  if (C.segs != NULL) {
+    for (i = 0; i < C.nsegs; ++i) {
+      free(C.segs[i].vertices);
+    }
+  }
+  if (C.leaves != NULL) {
+    for (i = 0; i < nleaves; ++i) {
+      free(C.leaves[i].xadj);
+      free(C.leaves[i].adjncy);
+      free(C.leaves[i].perm);
+      free(C.leaves[i].iperm);
+    }
+  }
+  free(C.segs);
+  free(C.leaves);
+  free(C.leaf_vtx);
+  free(C.leaf_vtx_start);
+  free(C.scratch_local);
+  free(all);
+  return ok;
+}
+
+
 static int kls_mtmetis_nd(UF_long n, const idx_t *xadj, const idx_t *adjncy,
                           idx_t *metis_perm, idx_t *metis_iperm) {
   const size_t nz = (size_t)xadj[n];
@@ -23769,14 +24080,23 @@ static UF_long kls_metis_order_inner(UF_long n,
   int par_nd_done = 0;
 #ifdef KLS_HAVE_MTMETIS
   if (n >= 200000 && getenv("KLS_MT_ND") != NULL) {
-    /* threaded NodeND (mt-metis, MIT): 32-bit boundary copies; plain
-       ND semantics (no NodeNDP sizes - the separator context falls
-       back to move-largest-separator).  Experiment gate; quality is
-       arbitrated by the ordering competition downstream. */
-    par_nd_done = kls_mtmetis_nd(n, xadj, adjncy, metis_perm, metis_iperm);
+    /* threaded ND (mt-metis, MIT).  With a leaf-count request the
+       forest-aware path replicates NodeNDP's sizes contract so the
+       separator forest (and the pipeline refactor engines that read
+       it) stay intact; otherwise the plain bridge. */
+    if (metis_ndp_npes > 1 && metis_ndp_sizes != NULL) {
+      par_nd_done = kls_mtmetis_ndp(n, xadj, adjncy, metis_ndp_npes,
+                                    metis_perm, metis_iperm,
+                                    metis_ndp_sizes);
+    } else {
+      par_nd_done = kls_mtmetis_nd(n, xadj, adjncy, metis_perm,
+                                   metis_iperm);
+      if (par_nd_done) {
+        metis_ndp_npes = 0;
+      }
+    }
     if (par_nd_done) {
       metis_status = METIS_OK;
-      metis_ndp_npes = 0;
     }
   }
 #endif
