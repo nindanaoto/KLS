@@ -23754,6 +23754,8 @@ static int analyze_with_ordering(UF_long n,
                                  trilinos_klu_l_common *common_out,
                                  kls_separator_analysis *separator_out) {
   kls_separator_analysis_clear(separator_out);
+  const double kls_awo_t0 =
+    getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
   trilinos_klu_l_common common;
   int status = apply_options_to_common(&common, options);
   if (status != KLS_OK) {
@@ -23850,6 +23852,11 @@ static int analyze_with_ordering(UF_long n,
 #endif
   {
     kls_finalize_separator_global_range(symbolic, separator_out);
+  }
+  if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
+    fprintf(stderr, "KLS awo: ord=%d btf=%d n=%ld %.3fs\n",
+            (int)ordering, options != NULL && options->use_btf ? 1 : 0,
+            (long)n, kls_now_seconds() - kls_awo_t0);
   }
   *symbolic_out = symbolic;
   *common_out = common;
