@@ -2,3 +2,4 @@ build*/
 data/
 *.jsonl
 results/
+third_party/mtmetis/build/

@@ -414,6 +414,27 @@ if(KLS_ENABLE_METIS)
   target_link_libraries(kls
     PRIVATE
       kls_metis)
+  # optional prebuilt mt-metis (threaded NodeND experiment, env-gated
+  # at runtime via KLS_MT_ND); build it once with its own configure/make
+  set(KLS_MTMETIS_LIB
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mtmetis/build/Linux-x86_64/lib/libmtmetis_hidden.o")
+  if(EXISTS "${KLS_MTMETIS_LIB}")
+    add_library(kls_mtmetis INTERFACE)
+    target_include_directories(kls_mtmetis
+      INTERFACE
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mtmetis/include")
+    find_package(OpenMP REQUIRED COMPONENTS C)
+    target_link_libraries(kls_mtmetis
+      INTERFACE
+        "${KLS_MTMETIS_LIB}"
+        OpenMP::OpenMP_C)
+    target_compile_definitions(kls_mtmetis
+      INTERFACE
+        KLS_HAVE_MTMETIS=1)
+    target_link_libraries(kls
+      PRIVATE
+        kls_mtmetis)
+  endif()
 endif()
 if(KLS_ENABLE_SCOTCH)
   target_link_libraries(kls

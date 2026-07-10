@@ -23347,6 +23347,107 @@ static UF_long kls_metis_camd_group_size(UF_long n,
   return 0;
 }
 
+#ifdef KLS_HAVE_MTMETIS
+#include <mtmetis.h>
+
+/* mt-metis NodeND bridge: converts the 64-bit idx graph to mt-metis's
+   default 32-bit types, runs the threaded ND, converts back.
+   mt-metis's dlthread communicators are process-global: concurrent
+   calls from two orientation-analyze threads crash in its reduction
+   buffers (pre2), so calls serialize on a mutex - each still runs
+   its own internal thread team. */
+static pthread_mutex_t kls_mtmetis_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int kls_mtmetis_nd(UF_long n, const idx_t *xadj, const idx_t *adjncy,
+                          idx_t *metis_perm, idx_t *metis_iperm) {
+  const size_t nz = (size_t)xadj[n];
+  mtmetis_adj_type *mx =
+    (mtmetis_adj_type *)malloc(((size_t)n + 1u) * sizeof(*mx));
+  mtmetis_vtx_type *ma =
+    (mtmetis_vtx_type *)malloc((nz + 1u) * sizeof(*ma));
+  mtmetis_pid_type *mp =
+    (mtmetis_pid_type *)malloc((size_t)n * sizeof(*mp));
+  mtmetis_pid_type *mi =
+    (mtmetis_pid_type *)malloc((size_t)n * sizeof(*mi));
+  double *opts = mtmetis_init_options();
+  int ok = 0;
+  if (mx != NULL && ma != NULL && mp != NULL && mi != NULL &&
+      opts != NULL) {
+    UF_long i;
+    int threads = 4;
+    const char *te = getenv("KLS_MT_ND");
+    if (te != NULL && te[0] != '\0') {
+      int p = atoi(te);
+      if (p >= 1 && p <= 32) {
+        threads = p;
+      }
+    }
+    for (i = 0; i <= n; ++i) {
+      mx[i] = (mtmetis_adj_type)xadj[i];
+    }
+    for (i = 0; i < (UF_long)nz; ++i) {
+      ma[i] = (mtmetis_vtx_type)adjncy[i];
+    }
+    opts[MTMETIS_OPTION_NTHREADS] = (double)threads;
+    opts[MTMETIS_OPTION_SEED] = 0.0;
+    if (getenv("KLS_MT_ND_TRACE") != NULL) {
+      UF_long bad = 0, j;
+      for (j = 0; j < n; ++j) {
+        if (xadj[j] > xadj[j + 1]) bad++;
+      }
+      for (j = 0; j < (UF_long)nz; ++j) {
+        if (adjncy[j] < 0 || adjncy[j] >= (idx_t)n) bad++;
+      }
+      {
+        UF_long iso = 0;
+        for (j = 0; j < n; ++j) {
+          if (xadj[j] == xadj[j + 1]) iso++;
+        }
+        fprintf(stderr,
+                "KLS mtnd: n=%ld nz=%zu bad=%ld iso=%ld threads=%d\n",
+                (long)n, nz, (long)bad, (long)iso, threads);
+        {
+          const char *dump = getenv("KLS_MT_ND_DUMP");
+          if (dump != NULL) {
+            FILE *f = fopen(dump, "w");
+            if (f != NULL) {
+              UF_long v, q;
+              fprintf(f, "%ld %zu\n", (long)n, nz / 2u);
+              for (v = 0; v < n; ++v) {
+                for (q = xadj[v]; q < xadj[v + 1]; ++q) {
+                  fprintf(f, "%ld ", (long)adjncy[q] + 1);
+                }
+                fputc('\n', f);
+              }
+              fclose(f);
+            }
+          }
+        }
+      }
+    }
+    {
+      mtmetis_vtx_type mn = (mtmetis_vtx_type)n;
+      pthread_mutex_lock(&kls_mtmetis_lock);
+      ok = MTMETIS_NodeND(&mn, mx, ma, NULL, opts, mp, mi) ==
+           MTMETIS_SUCCESS;
+      pthread_mutex_unlock(&kls_mtmetis_lock);
+    }
+    if (ok) {
+      for (i = 0; i < n; ++i) {
+        metis_perm[i] = (idx_t)mp[i];
+        metis_iperm[i] = (idx_t)mi[i];
+      }
+    }
+  }
+  free(mx);
+  free(ma);
+  free(mp);
+  free(mi);
+  free(opts);
+  return ok;
+}
+#endif
+
 struct kls_par_nd_half {
   idx_t nv;
   idx_t *xadj;
@@ -23656,6 +23757,19 @@ static UF_long kls_metis_order_inner(UF_long n,
   const double kls_metis_t0 = kls_now_seconds();
   int metis_status = METIS_ERROR;
   int par_nd_done = 0;
+#ifdef KLS_HAVE_MTMETIS
+  if (n >= 200000 && getenv("KLS_MT_ND") != NULL) {
+    /* threaded NodeND (mt-metis, MIT): 32-bit boundary copies; plain
+       ND semantics (no NodeNDP sizes - the separator context falls
+       back to move-largest-separator).  Experiment gate; quality is
+       arbitrated by the ordering competition downstream. */
+    par_nd_done = kls_mtmetis_nd(n, xadj, adjncy, metis_perm, metis_iperm);
+    if (par_nd_done) {
+      metis_status = METIS_OK;
+      metis_ndp_npes = 0;
+    }
+  }
+#endif
   if (metis_ndp_npes <= 1 && n >= 200000 &&
       getenv("KLS_PAR_ND") != NULL) {
     /* one manual top level of nested dissection: METIS's own vertex
