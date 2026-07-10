@@ -27601,8 +27601,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                              base_values, solver->common.tol,
                              &missing_diagonal);
   const int prefer_unscaled_static_match =
-    static_match_prefers_unscaled(solver->n, solver->nnz, weak,
-                                  missing_diagonal);
+    getenv("KLS_STATIC_MATCH_SCALED") != NULL
+      ? 0
+      : static_match_prefers_unscaled(solver->n, solver->nnz, weak,
+                                      missing_diagonal);
 #ifdef KLS_HAVE_SPRAL_SCALING
   int use_large_spral_match = 0;
 #endif
@@ -27804,6 +27806,17 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
             trial_score);
   }
   int skip_trial_factor = 0;
+  if (getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL &&
+      trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match &&
+      trial_row_scale != NULL && trial_col_scale != NULL) {
+    /* The trial path applies the matching equilibration inside its own
+       numeric comparison; the skip path must scale the adopted values
+       directly so the static diagonal the predicted fill pivots on is
+       the equilibrated (dominant) one.  Solves and later input
+       preparation compensate through the adopted scale arrays. */
+    apply_value_scaling(solver->n, trial_col_ptr, trial_row_idx,
+                        trial_row_scale, trial_col_scale, trial_values);
+  }
   if (getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL) {
     /* Experimental: when the matched, scaled diagonal is statically
        strong (the block trial's criterion), adopt without the serial
@@ -118216,6 +118229,20 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     common->status = TRILINOS_KLU_SINGULAR;
   }
   UF_long fill_round_cap = 3u;
+  const UF_long nudge_slot_cap =
+    getenv("KLS_PREDICTED_NUDGE_SLOTS_8K") != NULL ? 8192u : 1024u;
+  const int batch_fast_rounds =
+    getenv("KLS_PREDICTED_BATCH_FAST") != NULL;
+  UF_long batch_window = 32u;
+  {
+    const char *we = getenv("KLS_PREDICTED_BATCH_WINDOW");
+    if (we != NULL && we[0] != '\0') {
+      const long parsed = atol(we);
+      if (parsed > 0) {
+        batch_window = (UF_long)parsed;
+      }
+    }
+  }
   {
     const char *rounds_env = getenv("KLS_PREDICTED_NUDGE_ROUNDS");
     if (rounds_env != NULL && rounds_env[0] != '\0') {
@@ -118268,7 +118295,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
          leading window each round; later columns are re-judged on sane
          upstream values in the next round. */
       for (UF_long block = 0;
-           block < nblocks && !batch_failed && batch_nudged < 32u;
+           block < nblocks && !batch_failed && batch_nudged < batch_window;
            ++block) {
         const UF_long bk1 = R[block];
         const UF_long bk2 = R[block + 1u];
@@ -118279,7 +118306,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         const UF_long *lip = numeric->Lip + bk1;
         const UF_long *llen = numeric->Llen + bk1;
         const double *udiag = (const double *)numeric->Udiag;
-        for (UF_long kk = 0; kk < bk2 - bk1 && batch_nudged < 32u; ++kk) {
+        for (UF_long kk = 0; kk < bk2 - bk1 && batch_nudged < batch_window;
+             ++kk) {
           UF_long *li = NULL;
           double *lx = NULL;
           UF_long lcol_len = 0;
@@ -118320,16 +118348,16 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           }
           if (solver->pivot_nudge_count + batch_nudged >=
               (solver->pivot_nudge_capacity > 0
-                 ? solver->pivot_nudge_capacity : 1024u)) {
+                 ? solver->pivot_nudge_capacity : nudge_slot_cap)) {
             continue;
           }
           if (solver->pivot_nudge_values == NULL) {
             solver->pivot_nudge_values = (double *)malloc(
               (size_t)solver->nnz * sizeof(*solver->pivot_nudge_values));
             solver->pivot_nudge_pos = (UF_long *)malloc(
-              1024u * sizeof(*solver->pivot_nudge_pos));
+              nudge_slot_cap * sizeof(*solver->pivot_nudge_pos));
             solver->pivot_nudge_sigma = (double *)malloc(
-              1024u * sizeof(*solver->pivot_nudge_sigma));
+              nudge_slot_cap * sizeof(*solver->pivot_nudge_sigma));
             if (solver->pivot_nudge_values == NULL ||
                 solver->pivot_nudge_pos == NULL ||
                 solver->pivot_nudge_sigma == NULL) {
@@ -118337,7 +118365,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
               batch_failed = 1;
               break;
             }
-            solver->pivot_nudge_capacity = 1024u;
+            solver->pivot_nudge_capacity = nudge_slot_cap;
           }
           UF_long slot = KLS_KLU_EMPTY;
           for (UF_long i = 0; i < solver->pivot_nudge_count; ++i) {
@@ -118382,10 +118410,15 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
                 (long)batch_nudged, (long)solver->pivot_nudge_count,
                 (long)fill_round);
       }
-      free_refactor_map(solver);
-      free_refactor_schedule(solver);
-      maybe_prepare_refactor_map(solver, elapsed);
-      maybe_prepare_refactor_schedule(solver, elapsed);
+      if (!batch_fast_rounds) {
+        /* nudges change values, not pattern; the rebuild costs ~14s per
+           round at pre2 scale and is skipped under
+           KLS_PREDICTED_BATCH_FAST */
+        free_refactor_map(solver);
+        free_refactor_schedule(solver);
+        maybe_prepare_refactor_map(solver, elapsed);
+        maybe_prepare_refactor_schedule(solver, elapsed);
+      }
       common->status = TRILINOS_KLU_OK;
       refactor_ok = 0;
       continue;
@@ -118401,7 +118434,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       k = (UF_long)common->numerical_rank;
     }
     if (k == KLS_KLU_EMPTY || k >= n ||
-        solver->pivot_nudge_count >= 1024u) {
+        solver->pivot_nudge_count >= nudge_slot_cap) {
       break;
     }
     const UF_long oldcol = Q[k];
@@ -118422,16 +118455,16 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       solver->pivot_nudge_values = (double *)malloc(
         (size_t)solver->nnz * sizeof(*solver->pivot_nudge_values));
       solver->pivot_nudge_pos = (UF_long *)malloc(
-        1024u * sizeof(*solver->pivot_nudge_pos));
+        nudge_slot_cap * sizeof(*solver->pivot_nudge_pos));
       solver->pivot_nudge_sigma = (double *)malloc(
-        1024u * sizeof(*solver->pivot_nudge_sigma));
+        nudge_slot_cap * sizeof(*solver->pivot_nudge_sigma));
       if (solver->pivot_nudge_values == NULL ||
           solver->pivot_nudge_pos == NULL ||
           solver->pivot_nudge_sigma == NULL) {
         free_pivot_nudges(solver);
         break;
       }
-      solver->pivot_nudge_capacity = 1024u;
+      solver->pivot_nudge_capacity = nudge_slot_cap;
     }
     const double base = colmax > 0.0 ? colmax : 1.0;
     UF_long existing = KLS_KLU_EMPTY;
