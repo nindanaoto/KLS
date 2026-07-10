@@ -27500,11 +27500,13 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     return;
   }
 #ifdef KLS_HAVE_METIS
-  if (is_small_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
+  if (!forced_match &&
+      is_small_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
                                            solver->row_idx)) {
     return;
   }
-  if (is_large_sparse_diagonal_low_degree_pattern(solver->n, solver->col_ptr,
+  if (!forced_match &&
+      is_large_sparse_diagonal_low_degree_pattern(solver->n, solver->col_ptr,
                                                   solver->row_idx)) {
     return;
   }
@@ -117602,7 +117604,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     }
   }
   if (n < 500000 && !(symbolic->lnz >= 5.0e6) &&
-      !solver->block_trial_active &&
+      !solver->block_trial_active && !solver->prestatic_adopted_unfactored &&
       (solver->metis_race == NULL || n >= 1000000) &&
       getenv("KLS_FORCE_PIVOT_FILL") == NULL) {
     /* With a METIS race pending this numeric is a bootstrap the
@@ -118218,7 +118220,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     const char *rounds_env = getenv("KLS_PREDICTED_NUDGE_ROUNDS");
     if (rounds_env != NULL && rounds_env[0] != '\0') {
       const long parsed = atol(rounds_env);
-      if (parsed > 0 && parsed <= 64) {
+      if (parsed > 0 && parsed <= 2048) {
         fill_round_cap = (UF_long)parsed;
       }
     }
@@ -118255,6 +118257,13 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       const double tolv = common->tol > 0.0 ? common->tol : 0.001;
       UF_long batch_nudged = 0;
       int batch_failed = 0;
+      if (getenv("KLS_PREDICTED_THRESHOLD_WAIVE") != NULL) {
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr,
+                  "KLS predicted: threshold waived by env, probe arbitrates\n");
+        }
+        break;
+      }
       /* Front-first: violations cascade downstream, so fix only the
          leading window each round; later columns are re-judged on sane
          upstream values in the next round. */
@@ -118391,7 +118400,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       saw_singular = 1;
       k = (UF_long)common->numerical_rank;
     }
-    if (k == KLS_KLU_EMPTY || k >= n || solver->pivot_nudge_count >= 64u) {
+    if (k == KLS_KLU_EMPTY || k >= n ||
+        solver->pivot_nudge_count >= 1024u) {
       break;
     }
     const UF_long oldcol = Q[k];
@@ -118538,7 +118548,18 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       /* Refine while it helps: a reduced-accuracy factorization (nudged or
          waived pivots) that converges under refinement is still usable,
          with production solves flagged to refine the same way. */
-      const int probe_iter_cap = solver->block_trial_active ? 10 : 3;
+      int probe_iter_cap = solver->block_trial_active ? 10 : 3;
+      double probe_stall_factor = 0.5;
+      {
+        const char *pe = getenv("KLS_PREDICTED_PROBE_ITERS");
+        if (pe != NULL && pe[0] != '\0') {
+          const long parsed = atol(pe);
+          if (parsed > 0 && parsed <= 30) {
+            probe_iter_cap = (int)parsed;
+            probe_stall_factor = 0.75;
+          }
+        }
+      }
       for (int iter = 0; iter <= probe_iter_cap; ++iter) {
         memcpy(probe_r, probe_b, (size_t)n * sizeof(*probe_r));
         for (UF_long j = 0; j < n; ++j) {
@@ -118560,7 +118581,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         if (iter == 0) {
           raw_residual = rel;
         }
-        if (!(rel < residual * 0.5) ||
+        if (!(rel < residual * probe_stall_factor) ||
             rel < (solver->block_trial_active ? 3.0e-10 : 1.0e-13) ||
             iter == probe_iter_cap) {
           residual = rel < residual ? rel : residual;
@@ -118587,7 +118608,9 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
               residual, refine_iters);
     }
     if (!(residual < 1e-9)) {
-      if (0 && probe_attempt == 0 && !pivot_fill_used &&
+      if ((getenv("KLS_ENABLE_PIVOT_FILL") != NULL ||
+           solver->block_trial_active) &&
+          probe_attempt == 0 && !pivot_fill_used &&
           kls_predicted_pivot_rescue(solver, numeric_values, elapsed)) {
         pivot_fill_used = 1;
         if (getenv("KLS_TRACE_PREDICTED") != NULL) {
@@ -120313,22 +120336,29 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
   kls_snb_maybe_accept(solver, numeric_values, elapsed);
   (void)kls_i32_solve_ready(solver);
   }
-  if (!kls_predicted_suffix_close_numeric(solver)) {
-    return 0;
-  }
-  if (est_total > 0.0 &&
-      (double)(solver->numeric->lnz + solver->numeric->unz) >
-        1.6 * est_total) {
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: closure fill reject %.3e vs est %.3e\n",
-              (double)(solver->numeric->lnz + solver->numeric->unz),
-              est_total);
+  if (solver->block_trial_active) {
+    /* Block trials swap into structurally absent slots by design: the
+       full closure is their legalization.  The probe-retry path instead
+       fills first with vetoes and opens only the veto-hot spans - the
+       full closure explodes on spiked patterns (rajat25: 11x est). */
+    if (!kls_predicted_suffix_close_numeric(solver)) {
+      return 0;
     }
-    return 0;
-  }
-  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr, "KLS predicted: closed fill=%ld+%ld\n",
-            (long)solver->numeric->lnz, (long)solver->numeric->unz);
+    if (est_total > 0.0 &&
+        (double)(solver->numeric->lnz + solver->numeric->unz) >
+          1.6 * est_total) {
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr,
+                "KLS predicted: closure fill reject %.3e vs est %.3e\n",
+                (double)(solver->numeric->lnz + solver->numeric->unz),
+                est_total);
+      }
+      return 0;
+    }
+    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+      fprintf(stderr, "KLS predicted: closed fill=%ld+%ld\n",
+              (long)solver->numeric->lnz, (long)solver->numeric->unz);
+    }
   }
   /* The fill must pivot within the very spans the closure guaranteed, so
      the pre-closure run partition stays live through it; the wider runs of
@@ -120369,7 +120399,19 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
           fprintf(stderr, "KLS predicted: reclosed fill=%ld+%ld\n",
                   (long)solver->numeric->lnz, (long)solver->numeric->unz);
         }
-        filled = kls_predicted_pivoting_fill(solver, numeric_values);
+        if (est_total > 0.0 &&
+            (double)(solver->numeric->lnz + solver->numeric->unz) >
+              1.6 * est_total) {
+          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+            fprintf(stderr,
+                    "KLS predicted: reclose fill reject %.3e vs est %.3e\n",
+                    (double)(solver->numeric->lnz + solver->numeric->unz),
+                    est_total);
+          }
+          filled = 0;
+        } else {
+          filled = kls_predicted_pivoting_fill(solver, numeric_values);
+        }
       }
     }
   }
