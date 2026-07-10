@@ -118686,7 +118686,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
       }
       free(pinv_probe);
-      if (missing * 4u > (UF_long)n) {
+      if (missing * 4u > (UF_long)n &&
+          getenv("KLS_PREDICTED_TRY_SCALED") == NULL) {
         if (getenv("KLS_TRACE_PREDICTED") != NULL) {
           fprintf(stderr,
                   "KLS predicted: skipped, structural diagonal missing "
@@ -118702,7 +118703,14 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
      settles on the unscaled mode in the auto-scale trials anyway.  Restore
      the mode on any rejection. */
   const UF_long saved_scale = solver->common.scale;
-  solver->common.scale = -1;
+  if (getenv("KLS_PREDICTED_TRY_SCALED") == NULL) {
+    solver->common.scale = -1;
+  } else if (solver->common.scale <= 0) {
+    /* scaled-static experiment: row scaling changes the addends of the
+       exact cancellations that produce the zero pivots (missing-
+       diagonal columns' pivots are pure update sums) */
+    solver->common.scale = 1;
+  }
 
   UF_long *pinv = (UF_long *)malloc((size_t)n * sizeof(*pinv));
   UF_long *col_block = (UF_long *)malloc((size_t)n * sizeof(*col_block));
