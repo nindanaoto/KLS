@@ -230,6 +230,16 @@ typedef struct trilinos_klu_l_common_struct /* 64-bit version (otherwise same as
     double flops, rcond, condest, rgrowth, work ;
     size_t memusage, mempeak ;
 
+    /* KLS extension: precomputed BTF shared across ordering candidates
+       of one analyze competition (pattern-only, identical for every
+       candidate).  When kls_btf_R is non-NULL and btf is requested,
+       analyze copies these instead of re-running maxtrans+strongcomp. */
+    const UF_long *kls_btf_P ;
+    const UF_long *kls_btf_Q ;
+    const UF_long *kls_btf_R ;
+    UF_long kls_btf_nblocks ;
+    UF_long kls_btf_structural_rank ;
+
 } trilinos_klu_l_common ;
 
 /* -------------------------------------------------------------------------- */

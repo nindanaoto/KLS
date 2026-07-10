@@ -23745,6 +23745,23 @@ static UF_long kls_scotch_order(UF_long n,
 }
 #endif
 
+/* precomputed-BTF stash: the block triangular form depends only on the
+   pattern, so one competition's candidates (AMD, AMF, METIS, retries)
+   share it through the vendored Common instead of each re-running
+   maxtrans+strongcomp (twotone: 0.75-1.46s per with-btf analyze).
+   Thread-local: orientation sides and the AMF spec thread each carry
+   their own. */
+struct kls_btf_stash_s {
+  const UF_long *P;
+  const UF_long *Q;
+  const UF_long *R;
+  UF_long nblocks;
+  UF_long rank;
+  UF_long n;
+  int active;
+};
+static _Thread_local struct kls_btf_stash_s kls_btf_stash;
+
 static int analyze_with_ordering(UF_long n,
                                  UF_long *col_ptr,
                                  UF_long *row_idx,
@@ -23760,6 +23777,14 @@ static int analyze_with_ordering(UF_long n,
   int status = apply_options_to_common(&common, options);
   if (status != KLS_OK) {
     return status;
+  }
+  if (kls_btf_stash.active && kls_btf_stash.n == n &&
+      options != NULL && options->use_btf) {
+    common.kls_btf_P = kls_btf_stash.P;
+    common.kls_btf_Q = kls_btf_stash.Q;
+    common.kls_btf_R = kls_btf_stash.R;
+    common.kls_btf_nblocks = kls_btf_stash.nblocks;
+    common.kls_btf_structural_rank = kls_btf_stash.rank;
   }
 
 #ifdef KLS_HAVE_METIS
@@ -29099,7 +29124,7 @@ static void *kls_amf_spec_main(void *arg) {
   return NULL;
 }
 
-static int choose_symbolic_for_pattern(UF_long n,
+static int kls_choose_symbolic_inner(UF_long n,
                                        UF_long *col_ptr,
                                        UF_long *row_idx,
                                        const kls_options *options,
@@ -29440,6 +29465,64 @@ static int choose_symbolic_for_pattern(UF_long n,
   *score_out = best_score;
   kls_separator_analysis_move(separator_out, &best_separator);
   return KLS_OK;
+}
+
+static int choose_symbolic_for_pattern(UF_long n,
+                                       UF_long *col_ptr,
+                                       UF_long *row_idx,
+                                       const kls_options *options,
+                                       trilinos_klu_l_symbolic **symbolic_out,
+                                       trilinos_klu_l_common *common_out,
+                                       kls_ordering *selected_ordering_out,
+                                       double *score_out,
+                                       kls_separator_analysis *separator_out) {
+  UF_long *bp = NULL, *bq = NULL, *br = NULL, *bwork = NULL;
+  struct kls_btf_stash_s saved = kls_btf_stash;
+  if (n >= 30000 && options != NULL && options->use_btf &&
+      getenv("KLS_ENABLE_BTF_REUSE") != NULL) {
+    /* measured NET LOSS with the concurrent AMF spec (twotone ana
+       1.5 -> 2.8): pre-reuse each candidate's internal BTF ran hidden
+       inside the parallel AMD||AMF pair, while the shared stash
+       serializes one BTF ahead of both.  AMD-only paths win hugely
+       (0.755 -> 0.043) - re-enable if the spec is ever off. */
+    bp = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+    bq = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+    br = (UF_long *)malloc(((size_t)n + 1u) * sizeof(UF_long));
+    bwork = (UF_long *)malloc(5u * (size_t)n * sizeof(UF_long));
+    if (bp != NULL && bq != NULL && br != NULL && bwork != NULL) {
+      double btf_work = 0.0;
+      UF_long nmatch = 0;
+      UF_long nblocks = trilinos_btf_l_order(n, col_ptr, row_idx, 0.0,
+                                             &btf_work, bp, bq, br, &nmatch,
+                                             bwork);
+      if (nblocks > 0) {
+        if (nmatch < n) {
+          UF_long k;
+          for (k = 0; k < n; ++k) {
+            bq[k] = bq[k] < 0 ? -bq[k] - 2 : bq[k];
+          }
+        }
+        kls_btf_stash.P = bp;
+        kls_btf_stash.Q = bq;
+        kls_btf_stash.R = br;
+        kls_btf_stash.nblocks = nblocks;
+        kls_btf_stash.rank = nmatch;
+        kls_btf_stash.n = n;
+        kls_btf_stash.active = 1;
+      }
+    }
+    free(bwork);
+    bwork = NULL;
+  }
+  int status = kls_choose_symbolic_inner(n, col_ptr, row_idx, options,
+                                         symbolic_out, common_out,
+                                         selected_ordering_out, score_out,
+                                         separator_out);
+  kls_btf_stash = saved;
+  free(bp);
+  free(bq);
+  free(br);
+  return status;
 }
 
 static int validate_index_base(int index_base) {

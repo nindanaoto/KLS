@@ -58,6 +58,11 @@ Int TRILINOS_KLU_defaults
 
     Common->memusage = 0 ;
     Common->mempeak = 0 ;
+    Common->kls_btf_P = NULL ;
+    Common->kls_btf_Q = NULL ;
+    Common->kls_btf_R = NULL ;
+    Common->kls_btf_nblocks = 0 ;
+    Common->kls_btf_structural_rank = -1 ;
 
     return (TRUE) ;
 }

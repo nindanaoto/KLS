@@ -372,7 +372,30 @@ static TRILINOS_KLU_symbolic *order_and_analyze	/* returns NULL if error, or a v
 
     Common->work = 0 ;
 
-    if (do_btf)
+    if (do_btf && Common->kls_btf_R != NULL)
+    {
+	/* precomputed BTF (KLS): identical for every ordering candidate
+	   of one competition; copy instead of recomputing */
+	for (k = 0 ; k < n ; k++)
+	{
+	    Pbtf [k] = Common->kls_btf_P [k] ;
+	    Qbtf [k] = Common->kls_btf_Q [k] ;
+	}
+	nblocks = Common->kls_btf_nblocks ;
+	for (block = 0 ; block <= nblocks ; block++)
+	{
+	    R [block] = Common->kls_btf_R [block] ;
+	}
+	Symbolic->structural_rank = Common->kls_btf_structural_rank ;
+	Common->structural_rank = Symbolic->structural_rank ;
+	maxblock = 1 ;
+	for (block = 0 ; block < nblocks ; block++)
+	{
+	    nk = R [block+1] - R [block] ;
+	    maxblock = MAX (maxblock, nk) ;
+	}
+    }
+    else if (do_btf)
     {
 	Work = (Int*) TRILINOS_KLU_malloc (5*n, sizeof (Int), Common) ;
 	if (Common->status < TRILINOS_KLU_OK)
