@@ -28887,9 +28887,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   if (kls_trace_pre_static_enabled()) {
     fprintf(stderr,
             "KLS pre-static: trial factor start ordering=%d scale=%ld "
-            "tol=%g score=%.3e\n",
+            "tol=%g score=%.3e t=%.3fs\n",
             (int)trial_ordering, (long)trial_common.scale, trial_common.tol,
-            trial_score);
+            trial_score, kls_now_seconds() - kls_ps_t0);
   }
   int skip_trial_factor = 0;
   if (getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL &&
@@ -28995,6 +28995,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
                           trial_symbolic, &trial_common);
   kls_klu_pipe_threads = 0;
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr, "KLS pre-static: stage klu_factor done %.3fs\n",
+            kls_now_seconds() - kls_ps_t0);
+  }
   if (trial_numeric == NULL || trial_common.status < 0 ||
       trial_common.status == TRILINOS_KLU_SINGULAR) {
     if (kls_trace_pre_static_enabled()) {
@@ -29006,11 +29010,19 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
   (void)trilinos_klu_l_flops(trial_symbolic, trial_numeric, &trial_common);
   (void)trilinos_klu_l_rcond(trial_symbolic, trial_numeric, &trial_common);
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr, "KLS pre-static: stage flops+rcond done %.3fs\n",
+            kls_now_seconds() - kls_ps_t0);
+  }
 #ifdef KLS_HAVE_METIS
   (void)maybe_refine_pre_static_with_metis(
     solver->n, solver->nnz, weak, trial_col_ptr, trial_row_idx, trial_values,
     &trial_options, &trial_symbolic, &trial_numeric, &trial_common,
     &trial_ordering, &trial_score, &trial_separator, &psmetis_spec);
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr, "KLS pre-static: stage metis_refine done %.3fs\n",
+            kls_now_seconds() - kls_ps_t0);
+  }
 #endif
   maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
                                    trial_row_idx, &solver->options,

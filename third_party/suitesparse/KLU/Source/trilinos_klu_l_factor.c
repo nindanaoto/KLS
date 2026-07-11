@@ -119,7 +119,18 @@ static void factor2
 	 * the scale factors are permuted according to the final pivot row
 	 * permutation, so that Rs [k] is the scale factor for the kth row of
 	 * A(p,q) where p and q are the final row and column permutations. */
-	TRILINOS_KLU_scale (scale, n, Ap, Ai, (double *) Ax, Rs, Pnum, Common) ;
+	{
+	    struct timespec kls_ts0, kls_ts1 ;
+	    clock_gettime (CLOCK_MONOTONIC, &kls_ts0) ;
+	    TRILINOS_KLU_scale (scale, n, Ap, Ai, (double *) Ax, Rs, Pnum, Common) ;
+	    if (getenv ("KLS_TRACE_FILL") != NULL)
+	    {
+		clock_gettime (CLOCK_MONOTONIC, &kls_ts1) ;
+		fprintf (stderr, "KLS factor2: scale %.3fs\n",
+		    (double) (kls_ts1.tv_sec - kls_ts0.tv_sec) +
+		    1e-9 * (double) (kls_ts1.tv_nsec - kls_ts0.tv_nsec)) ;
+	    }
+	}
 	if (Common->status < TRILINOS_KLU_OK)
 	{
 	    /* matrix is invalid */
@@ -138,6 +149,16 @@ static void factor2
     /* factor each block using klu */
     /* ---------------------------------------------------------------------- */
 
+    {
+	struct timespec kls_tb ;
+	clock_gettime (CLOCK_MONOTONIC, &kls_tb) ;
+	if (getenv ("KLS_TRACE_FILL") != NULL)
+	{
+	    fprintf (stderr, "KLS factor2: blocks start %.3fs\n",
+		(double) (kls_tb.tv_sec - kls_t0.tv_sec) +
+		1e-9 * (double) (kls_tb.tv_nsec - kls_t0.tv_nsec)) ;
+	}
+    }
     for (block = 0 ; block < nblocks ; block++)
     {
 
@@ -298,6 +319,16 @@ static void factor2
 	    }
 
 	    /* the local pivot row permutation Pblock is no longer needed */
+	}
+    }
+    {
+	struct timespec kls_tb ;
+	clock_gettime (CLOCK_MONOTONIC, &kls_tb) ;
+	if (getenv ("KLS_TRACE_FILL") != NULL)
+	{
+	    fprintf (stderr, "KLS factor2: blocks end %.3fs\n",
+		(double) (kls_tb.tv_sec - kls_t0.tv_sec) +
+		1e-9 * (double) (kls_tb.tv_nsec - kls_t0.tv_nsec)) ;
 	}
     }
     ASSERT (nzoff == Offp [n]) ;

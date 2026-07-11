@@ -1576,6 +1576,7 @@ typedef struct kls_klu_pipe_worker_s
     Entry *pUbuf_x [32] ;
     Int *pPFlag ;             /* union dedup marks (panel generation) */
     Int *pUlist ;             /* union source list (the DFS owns Stack) */
+    Int pColCap ;             /* per-column pattern/ubuf capacity */
     Int *pFlagW [32] ;        /* per-column DFS marks: sibling columns'
                                  interleaved collections must not
                                  overwrite each other's marks */
@@ -1909,6 +1910,7 @@ static void kls_pipe_lsolve_numeric
 	    if (kls_pipe_phase_prof)
 	    {
 		kls_pipe_madds += len ;
+		kls_construct_calls++ ;      /* source applies (avg len) */
 	    }
 	}
 	for (p = 0 ; p < len ; p++)
@@ -1922,6 +1924,255 @@ static void kls_pipe_lsolve_numeric
 /* ========================================================================== */
 /* === supernodal-pipe lockstep panel body (step b) ========================= */
 /* ========================================================================== */
+
+
+/* Final phase of one pipeline column: pivot, prune, assemble, publish.
+ * Candidates are in the scratch head (l_length of them), the U segment
+ * in W->ubuf_i/x (ucount), values in S->X.  Shared by the per-column
+ * body and the panel cascade.  Returns 1 on abort (flag set). */
+static int kls_pipe_finalize_column
+(
+    kls_klu_pipe_worker *W,
+    Int k,
+    Int l_length,
+    Int ucount
+)
+{
+    kls_klu_pipe_shared *sh = W->sh ;
+    KLS_KLU_KERNEL_STATE *S = &W->S ;
+    const Int n = S->n ;
+    Unit *LU = S->scratch ;
+    Int *Lik = (Int *) LU ;
+    Entry pivot ;
+    double abs_pivot ;
+    Int pivrow = TRILINOS_KLU_EMPTY, diagrow, i, p, done_limit ;
+    (void) Lik ;
+    (void) i ;
+
+    S->Llen [k] = l_length ;   /* the body sets this above its call;
+                                  the cascade relies on it here */
+	/* prefix == k: the final state is exactly the serial algorithm's */
+	diagrow = S->P [k] ;
+	if (!lpivot (diagrow, &pivrow, &pivot, &abs_pivot, S->tol, S->X, LU,
+		     S->Lip, S->Llen, k, n, S->Pinv, &S->firstrow,
+		     S->Common))
+	{
+	    /* singular: match the serial kernel's bookkeeping, then abort
+	       to the serial fallback (halt semantics are the caller's) */
+	    S->Common->status = TRILINOS_KLU_SINGULAR ;
+	    if (S->Common->numerical_rank == TRILINOS_KLU_EMPTY)
+	    {
+		S->Common->numerical_rank = k + S->k1 ;
+		S->Common->singular_col = S->Q [k + S->k1] ;
+	    }
+	    if (getenv ("KLS_KLU_PIPE_TRACE") != NULL)
+	    {
+		fprintf (stderr, "KLS pipe: singular k=%ld k1=%ld llen=%ld "
+			 "tid=%d\n", (long) k, (long) S->k1,
+			 (long) S->Llen [k], W->tid) ;
+	    }
+	    atomic_store_explicit (&sh->abort_flag, 1, memory_order_release) ;
+	    return (1) ;
+	}
+
+	/* assemble and publish the exact-size column: [Li|Lx] is already
+	   in the scratch (lpivot gathered it); append [Ui|Ux] */
+	{
+	    Int llen = S->Llen [k] ;
+	    size_t lpart = KLS_UNITS32 (llen) + (size_t) UNITS (Entry, llen) ;
+	    size_t used = lpart + KLS_UNITS32 (ucount) +
+			  (size_t) UNITS (Entry, ucount) ;
+	    Unit *col = kls_klu_chunk_alloc (S, used) ;
+	    int32_t *Ui ;
+	    Entry *Ux ;
+	    if (col == NULL)
+	    {
+		S->Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
+		atomic_store_explicit (&sh->abort_flag, 1,
+				       memory_order_release) ;
+		return (1) ;
+	    }
+	    /* narrow the L indices while copying out of the scratch
+	       (block-local rows always fit int32: the pipe requires
+	       n < 2^31) */
+	    {
+		Int *sLi = (Int *) S->scratch ;
+		Entry *sLx = (Entry *) (S->scratch + UNITS (Int, llen)) ;
+		int32_t *dLi = (int32_t *) col ;
+		Entry *dLx = (Entry *) (col + KLS_UNITS32 (llen)) ;
+		for (p = 0 ; p < llen ; p++)
+		{
+		    dLi [p] = (int32_t) sLi [p] ;
+		    dLx [p] = sLx [p] ;
+		}
+	    }
+	    S->Uip [k] = (Int) lpart ;
+	    S->Ulen [k] = ucount ;
+	    Ui = (int32_t *) (col + lpart) ;
+	    Ux = (Entry *) (col + lpart + KLS_UNITS32 (ucount)) ;
+	    /* sort ascending by pivot index: the multi-round concatenation
+	       is a valid topological order but downstream consumers of the
+	       stored pattern (refactor map/schedule builders) mis-handle
+	       it on multi-round columns; ascending is the consumer-blessed
+	       canonical order (the predicted builder's convention) */
+	    {
+		Int a, b ;
+		for (a = 1 ; a < ucount ; a++)
+		{
+		    Int vi = W->ubuf_i [a] ;
+		    Entry vx = W->ubuf_x [a] ;
+		    for (b = a ; b > 0 && W->ubuf_i [b-1] > vi ; b--)
+		    {
+			W->ubuf_i [b] = W->ubuf_i [b-1] ;
+			W->ubuf_x [b] = W->ubuf_x [b-1] ;
+		    }
+		    W->ubuf_i [b] = vi ;
+		    W->ubuf_x [b] = vx ;
+		}
+	    }
+	    for (p = 0 ; p < ucount ; p++)
+	    {
+		Ui [p] = (int32_t) W->ubuf_i [p] ;
+		Ux [p] = W->ubuf_x [p] ;
+	    }
+	    S->colptr [k] = col ;
+	}
+	S->Udiag [k] = pivot ;
+	if (pivrow != diagrow)
+	{
+	    S->Common->noffdiag++ ;
+	    if (S->Pinv [diagrow] < 0)
+	    {
+		Int kbar = FLIP (S->Pinv [pivrow]) ;
+		if (kbar < 0 || kbar >= n)
+		{
+		    fprintf (stderr, "KLS pipe: BAD kbar=%ld k=%ld pivrow=%ld"
+			     " Pinv[pivrow]=%ld diagrow=%ld tid=%d\n",
+			     (long) kbar, (long) k, (long) pivrow,
+			     (long) S->Pinv [pivrow], (long) diagrow,
+			     W->tid) ;
+		    atomic_store_explicit (&sh->abort_flag, 1,
+					   memory_order_release) ;
+		    return (1) ;
+		}
+		S->P [kbar] = diagrow ;
+		S->Pinv [diagrow] = FLIP (kbar) ;
+	    }
+	}
+	S->P [k] = pivrow ;
+	S->Pinv [pivrow] = k ;
+	if (sh->lpend != NULL)
+	{
+	    /* symmetric pruning, serialized by in-order finals: for each
+	       U column j of k not yet pruned, if pivrow appears in j's
+	       published L rows, partition them pivotal-first under j's
+	       seqlock and set the shared scan bound. */
+	    Int up, jcol ;
+	    for (up = 0 ; up < ucount ; up++)
+	    {
+		jcol = W->ubuf_i [up] ;
+		if (atomic_load_explicit (&sh->lpend [jcol],
+					  memory_order_relaxed) !=
+		    TRILINOS_KLU_EMPTY)
+		{
+		    continue ;
+		}
+		{
+		    Unit *xp = (Unit *) __atomic_load_n (
+			(Unit **) &S->colptr [jcol], __ATOMIC_ACQUIRE) ;
+		    Int jlen = S->Llen [jcol] ;
+		    const int32_t *Lij = (const int32_t *) xp ;
+		    Int p2, found = 0 ;
+		    for (p2 = 0 ; p2 < jlen ; p2++)
+		    {
+			if ((Int) Lij [p2] == pivrow)
+			{
+			    found = 1 ;
+			    break ;
+			}
+		    }
+		    if (found)
+		    {
+			/* copy-on-prune: partition a fresh copy of the
+			   whole packed column and swap the pointer.
+			   Readers holding the old pointer keep a
+			   consistent (index,value) pairing forever (the
+			   chunk arenas outlive the factorization), so
+			   the numeric consumers need no copy and no
+			   seqlock retry.  The swap loop below replays
+			   the exact in-place partition order so the
+			   published arrangement stays bit-identical to
+			   the previous algorithm. */
+			Int julen = S->Ulen [jcol] ;
+			size_t lpart = KLS_UNITS32 (jlen) +
+			    (size_t) UNITS (Entry, jlen) ;
+			size_t used = lpart + KLS_UNITS32 (julen) +
+			    (size_t) UNITS (Entry, julen) ;
+			Unit *newcol = kls_klu_chunk_alloc (S, used) ;
+			if (newcol != NULL)
+			{
+			    int32_t *nLi = (int32_t *) newcol ;
+			    Entry *nLx =
+				(Entry *) (newcol + KLS_UNITS32 (jlen)) ;
+			    Int phead = 0, ptail = jlen ;
+			    memcpy (newcol, xp, used * sizeof (Unit)) ;
+			    while (phead < ptail)
+			    {
+				int32_t row = nLi [phead] ;
+				if (S->Pinv [row] >= 0)
+				{
+				    phead++ ;
+				}
+				else
+				{
+				    Entry xtmp ;
+				    ptail-- ;
+				    nLi [phead] = nLi [ptail] ;
+				    nLi [ptail] = row ;
+				    xtmp = nLx [phead] ;
+				    nLx [phead] = nLx [ptail] ;
+				    nLx [ptail] = xtmp ;
+				}
+			    }
+			    atomic_fetch_add_explicit (&sh->colver [jcol],
+						       1,
+						       memory_order_acq_rel) ;
+			    __atomic_store_n ((Unit **) &S->colptr [jcol],
+					      newcol, __ATOMIC_RELEASE) ;
+			    atomic_store_explicit (&sh->lpend [jcol], ptail,
+						   memory_order_release) ;
+			    atomic_fetch_add_explicit (&sh->colver [jcol],
+						       1,
+						       memory_order_acq_rel) ;
+			}
+			/* allocation failure: skip the prune (it is an
+			   optimization; unpruned scans stay correct) */
+		    }
+		}
+	    }
+	}
+	{
+	    /* assembly-time flop sum: in-order publication makes
+	       S->Llen of every U column final here (same invariant as
+	       the serial kernel's accumulation) */
+	    double kfl = 0.0 ;
+	    Int up2 ;
+	    for (up2 = 0 ; up2 < ucount ; up2++)
+	    {
+		kfl += (double) S->Llen [W->ubuf_i [up2]] ;
+	    }
+	    W->kflops += 2.0 * kfl + (double) S->Llen [k] ;
+	}
+	S->lnz += S->Llen [k] + 1 ;
+	S->unz += S->Ulen [k] + 1 ;
+	S->cols_done = k + 1 ;
+
+	/* publish in order */
+	done_limit = k + 1 ;
+	atomic_store_explicit (&sh->prefix, done_limit,
+			       memory_order_release) ;
+    return (0) ;
+}
 
 /* Processes the panel's W columns in lockstep: external sources are
  * applied through ONE masked union pass per round (each source column
@@ -2022,245 +2273,299 @@ static int kls_pipe_panel_lockstep
 	W->pLik [0] = Lik0 ;
     }
 
-    /* phase B: external rounds against the shared prefix, windowed at
-       k0 (intra-panel dependencies resolve in phase C) */
-    plimit = atomic_load_explicit (&sh->prefix, memory_order_acquire) ;
-    if (plimit > k0)
+    /* unified rounds + cascade: windows advance with the prefix up to
+       the next unfinalized column; when the window reaches it, that
+       column finalizes (publish advances the boundary) and one more
+       cascade round lets every remaining sibling absorb the fresh
+       column and the external subtree it unlocks - all through the
+       buffered union apply. */
     {
-	plimit = k0 ;
-    }
-    for ( ; ; )
-    {
-	/* per-column DFS collections for this window */
-	ulen = 0 ;
-	for (w = 0 ; w < PW ; w++)
+	Int next_final = 0 ;
+	plimit = atomic_load_explicit (&sh->prefix,
+				       memory_order_acquire) ;
+	if (plimit > k0)
 	{
-	    Int top = n ;
-	    Int kw = k0 + w ;
-	    if (seg_done [w] == 0)
-	    {
-		/* round-1 roots: A(:,kw) block rows */
-		Int kglobal = kw + S->k1 ;
-		Int oldcol = S->Q [kglobal] ;
-		Int pend = S->Ap [oldcol+1] ;
-		for (p = S->Ap [oldcol] ; p < pend ; p++)
+	    plimit = k0 ;
+	}
+	for ( ; ; )
+	{
+		/* per-column DFS collections for this window */
+		ulen = 0 ;
+		for (w = next_final ; w < PW ; w++)
 		{
-		    Int i = S->PSinv [S->Ai [p]] - S->k1 ;
-		    if (i < 0) continue ;
-		    if (W->pFlagW [w][i] != kw)
+		    Int top = n ;
+		    Int kw = k0 + w ;
+		    if (seg_done [w] == 0)
 		    {
-			if (S->Pinv [i] >= 0 && S->Pinv [i] < plimit)
+			/* round-1 roots: A(:,kw) block rows */
+			Int kglobal = kw + S->k1 ;
+			Int oldcol = S->Q [kglobal] ;
+			Int pend = S->Ap [oldcol+1] ;
+			for (p = S->Ap [oldcol] ; p < pend ; p++)
 			{
-			    top = kls_pipe_dfs (i, kw, plimit, S->Pinv,
-						S->Llen, S->Lip, S->Stack,
-						W->pFlagW [w], top, NULL,
-						S->colptr, W->pLik [w],
-						&l_len [w], S->Ap_pos, sh,
-						W->ap_ver) ;
+			    Int i = S->PSinv [S->Ai [p]] - S->k1 ;
+			    if (i < 0) continue ;
+			    if (W->pFlagW [w][i] != kw)
+			    {
+				if (S->Pinv [i] >= 0 && S->Pinv [i] < plimit)
+				{
+				    top = kls_pipe_dfs (i, kw, plimit, S->Pinv,
+							S->Llen, S->Lip, S->Stack,
+							W->pFlagW [w], top, NULL,
+							S->colptr, W->pLik [w],
+							&l_len [w], S->Ap_pos, sh,
+							W->ap_ver) ;
+				}
+				else
+				{
+				    W->pFlagW [w][i] = kw ;
+				    W->pLik [w][l_len [w]] = i ;
+				    l_len [w]++ ;
+				}
+			    }
 			}
-			else
-			{
-			    W->pFlagW [w][i] = kw ;
-			    W->pLik [w][l_len [w]] = i ;
-			    l_len [w]++ ;
-			}
-		    }
-		}
-		seg_done [w] = 1 ;
-	    }
-	    else
-	    {
-		/* later round: promoted candidates of column w */
-		Int npromoted = 0, cw = 0 ;
-		for (p = 0 ; p < l_len [w] ; p++)
-		{
-		    Int i = W->pLik [w][p] ;
-		    if (S->Pinv [i] >= 0 && S->Pinv [i] < plimit)
-		    {
-			promoted [npromoted++] = i ;
+			seg_done [w] = 1 ;
 		    }
 		    else
 		    {
-			W->pLik [w][cw++] = i ;
-		    }
-		}
-		l_len [w] = cw ;
-		for (p = 0 ; p < npromoted ; p++)
-		{
-		    Int i = promoted [p] ;
-		    W->pFlagW [w][i] = TRILINOS_KLU_EMPTY ;
-		    top = kls_pipe_dfs (i, kw, plimit, S->Pinv, S->Llen,
-					S->Lip, S->Stack, W->pFlagW [w],
-					top, NULL, S->colptr, W->pLik [w],
-					&l_len [w], S->Ap_pos, sh,
-					W->ap_ver) ;
-		}
-	    }
-	    /* merge this column's topological segment into the union
-	       (first occurrence keeps a globally topological order) */
-	    for (p = top ; p < n ; p++)
-	    {
-		j = S->Stack [p] ;
-		if (W->pPFlag [j] == TRILINOS_KLU_EMPTY)
-		{
-		    W->pPFlag [j] = (Int) 1 << w ;
-		    ulist [ulen++] = j ;
-		}
-		else
-		{
-		    W->pPFlag [j] |= (Int) 1 << w ;
-		}
-	    }
-	}
-	/* union apply: each source streamed once.  With the panel-major
-	   buffer the inner loop is branch-free and contiguous in w
-	   (non-member lanes get xj forced to zero - exact no-ops). */
-	for (p = 0 ; p < ulen ; p++)
-	{
-	    Int mask ;
-	    Int jnew ;
-	    Entry xj [32] ;
-	    j = ulist [p] ;
-	    mask = W->pPFlag [j] ;
-	    jnew = S->Pinv [j] ;
-	    {
-		Unit *xp = (Unit *) __atomic_load_n (
-		    (Unit **) &S->colptr [jnew], __ATOMIC_ACQUIRE) ;
-		Int len = S->Llen [jnew] ;
-		const int32_t *Li32 = (const int32_t *) xp ;
-		const Entry *Lx = (const Entry *) (xp +
-						   KLS_UNITS32 (len)) ;
-		Int q ;
-		if (use_buf)
-		{
-		    Int jpos ;
-		    KLS_PANEL_ROWPOS (j, jpos) ;
-		    for (w = 0 ; w < PW ; w++)
-		    {
-			xj [w] = (mask & ((Int) 1 << w))
-			    ? W->pB [(size_t) jpos * PW + w] : 0.0 ;
-		    }
-		    for (q = 0 ; q < len ; q++)
-		    {
-			const Int r = (Int) Li32 [q] ;
-			const Entry v = Lx [q] ;
-			Entry *brow ;
-			Int rpos, w2 ;
-			KLS_PANEL_ROWPOS (r, rpos) ;
-			brow = W->pB + (size_t) rpos * PW ;
-			for (w2 = 0 ; w2 < PW ; w2++)
+			/* later round: promoted candidates of column w */
+			Int npromoted = 0, cw = 0 ;
+			for (p = 0 ; p < l_len [w] ; p++)
 			{
-			    brow [w2] -= v * xj [w2] ;
+			    Int i = W->pLik [w][p] ;
+			    if (S->Pinv [i] >= 0 && S->Pinv [i] < plimit)
+			    {
+				promoted [npromoted++] = i ;
+			    }
+			    else
+			    {
+				W->pLik [w][cw++] = i ;
+			    }
+			}
+			l_len [w] = cw ;
+			for (p = 0 ; p < npromoted ; p++)
+			{
+			    Int i = promoted [p] ;
+			    W->pFlagW [w][i] = TRILINOS_KLU_EMPTY ;
+			    top = kls_pipe_dfs (i, kw, plimit, S->Pinv, S->Llen,
+						S->Lip, S->Stack, W->pFlagW [w],
+						top, NULL, S->colptr, W->pLik [w],
+						&l_len [w], S->Ap_pos, sh,
+						W->ap_ver) ;
+			}
+		    }
+		    /* merge this column's topological segment into the union
+		       (first occurrence keeps a globally topological order) */
+		    for (p = top ; p < n ; p++)
+		    {
+			j = S->Stack [p] ;
+			if (W->pPFlag [j] == TRILINOS_KLU_EMPTY)
+			{
+			    W->pPFlag [j] = (Int) 1 << w ;
+			    ulist [ulen++] = j ;
+			}
+			else
+			{
+			    W->pPFlag [j] |= (Int) 1 << w ;
 			}
 		    }
 		}
-		else
+		/* pivot order is a topological order of the L-DAG (an edge
+		   l->j implies Pinv[l] < Pinv[j]); the concatenation of
+		   per-column segments is not, so sort the round's union */
+		for (p = 1 ; p < ulen ; p++)
 		{
+		    Int jj = ulist [p] ;
+		    Int pv = S->Pinv [jj] ;
+		    Int q2 = p ;
+		    while (q2 > 0 && S->Pinv [ulist [q2-1]] > pv)
+		    {
+			ulist [q2] = ulist [q2-1] ;
+			q2-- ;
+		    }
+		    ulist [q2] = jj ;
+		}
+		/* union apply: each source streamed once, executing only the
+		   member lanes (compressed) - useful madds only */
+		for (p = 0 ; p < ulen ; p++)
+		{
+		    Int mask ;
+		    Int jnew ;
+		    Entry xj [32] ;
+		    j = ulist [p] ;
+		    mask = W->pPFlag [j] ;
+		    jnew = S->Pinv [j] ;
+		    {
+			Unit *xp = (Unit *) __atomic_load_n (
+			    (Unit **) &S->colptr [jnew], __ATOMIC_ACQUIRE) ;
+			Int len = S->Llen [jnew] ;
+			const int32_t *Li32 = (const int32_t *) xp ;
+			const Entry *Lx = (const Entry *) (xp +
+							   KLS_UNITS32 (len)) ;
+			Int q ;
+			if (use_buf)
+			{
+			    Int jpos ;
+			    Int mw [32] ;
+			    Int nm = 0 ;
+			    KLS_PANEL_ROWPOS (j, jpos) ;
+			    for (w = 0 ; w < PW ; w++)
+			    {
+				if (mask & ((Int) 1 << w))
+				{
+				    xj [nm] = W->pB [(size_t) jpos * PW + w] ;
+				    mw [nm++] = w ;
+				}
+			    }
+			    for (q = 0 ; q < len ; q++)
+			    {
+				const Int r = (Int) Li32 [q] ;
+				const Entry v = Lx [q] ;
+				Entry *brow ;
+				Int rpos, m ;
+				KLS_PANEL_ROWPOS (r, rpos) ;
+				brow = W->pB + (size_t) rpos * PW ;
+				for (m = 0 ; m < nm ; m++)
+				{
+				    brow [mw [m]] -= v * xj [m] ;
+				}
+			    }
+			}
+			else
+			{
+			    Int mw [32] ;
+			    Int nm = 0 ;
+			    for (w = 0 ; w < PW ; w++)
+			    {
+				if (mask & ((Int) 1 << w))
+				{
+				    xj [nm] = W->pX [w][j] ;
+				    mw [nm++] = w ;
+				}
+			    }
+			    for (q = 0 ; q < len ; q++)
+			    {
+				const Int r = (Int) Li32 [q] ;
+				const Entry v = Lx [q] ;
+				Int m ;
+				for (m = 0 ; m < nm ; m++)
+				{
+				    W->pX [mw [m]][r] -= v * xj [m] ;
+				}
+			    }
+			}
+		    }
+		    if (kls_pipe_phase_prof)
+		    {
+			Int nb = 0 ;
+			for (w = 0 ; w < PW ; w++) nb += (mask >> w) & 1 ;
+			kls_pipe_madds += (long) S->Llen [jnew] * nb ;
+			kls_pipe_copy_bytes += (long) S->Llen [jnew] * 12 ;
+			/* streamed source bytes (12B/entry, once per source) */
+			kls_construct_calls++ ;          /* union sources */
+			kls_construct_entries += nb ;    /* popcount sum */
+		    }
+		}
+		/* U extraction per member column, then clear */
+		for (p = 0 ; p < ulen ; p++)
+		{
+		    Int mask ;
+		    Int jpos = -1 ;
+		    j = ulist [p] ;
+		    mask = W->pPFlag [j] ;
+		    if (use_buf)
+		    {
+			KLS_PANEL_ROWPOS (j, jpos) ;
+		    }
 		    for (w = 0 ; w < PW ; w++)
 		    {
 			if (mask & ((Int) 1 << w))
 			{
-			    xj [w] = W->pX [w][j] ;
-			}
-		    }
-		    for (q = 0 ; q < len ; q++)
-		    {
-			const Int r = (Int) Li32 [q] ;
-			const Entry v = Lx [q] ;
-			for (w = 0 ; w < PW ; w++)
-			{
-			    if (mask & ((Int) 1 << w))
+			    Int *ubi = w == 0 ? W->ubuf_i : W->pUbuf_i [w] ;
+			    Entry *ubx = w == 0 ? W->ubuf_x : W->pUbuf_x [w] ;
+			    ubi [u_cnt [w]] = S->Pinv [j] ;
+			    if (use_buf)
 			    {
-				W->pX [w][r] -= v * xj [w] ;
+				ubx [u_cnt [w]] = W->pB [(size_t) jpos * PW + w] ;
+				W->pB [(size_t) jpos * PW + w] = 0.0 ;
 			    }
+			    else
+			    {
+				ubx [u_cnt [w]] = W->pX [w][j] ;
+				W->pX [w][j] = 0.0 ;
+			    }
+			    u_cnt [w]++ ;
+			}
+		    }
+		    W->pPFlag [j] = TRILINOS_KLU_EMPTY ;
+		}
+
+	    if (plimit == k0 + next_final)
+	    {
+		/* this column's window is complete: finalize it */
+		const Int kf = k0 + next_final ;
+		const Int wf = next_final ;
+		Int *lik_src = wf == 0 ? (Int *) S->scratch
+				       : W->pLik [wf] ;
+		if (use_buf)
+		{
+		    for (p = 0 ; p < l_len [wf] ; p++)
+		    {
+			Int i = lik_src [p] ;
+			if (W->pRowGen [i] == W->pGen)
+			{
+			    S->X [i] =
+				W->pB [(size_t) W->pRowPos [i] * PW + wf] ;
 			}
 		    }
 		}
-	    }
-	    if (kls_pipe_phase_prof)
-	    {
-		Int nb = 0 ;
-		for (w = 0 ; w < PW ; w++) nb += (mask >> w) & 1 ;
-		kls_pipe_madds += (long) S->Llen [jnew] * nb ;
-		kls_pipe_copy_bytes += (long) S->Llen [jnew] * 12 ;
-		/* streamed source bytes (12B/entry, once per source) */
-		kls_construct_calls++ ;          /* union sources */
-		kls_construct_entries += nb ;    /* popcount sum */
-	    }
-	}
-	/* U extraction per member column, then clear */
-	for (p = 0 ; p < ulen ; p++)
-	{
-	    Int mask ;
-	    Int jpos = -1 ;
-	    j = ulist [p] ;
-	    mask = W->pPFlag [j] ;
-	    if (use_buf)
-	    {
-		KLS_PANEL_ROWPOS (j, jpos) ;
-	    }
-	    for (w = 0 ; w < PW ; w++)
-	    {
-		if (mask & ((Int) 1 << w))
+		if (wf > 0)
 		{
-		    Int *ubi = w == 0 ? W->ubuf_i : W->pUbuf_i [w] ;
-		    Entry *ubx = w == 0 ? W->ubuf_x : W->pUbuf_x [w] ;
-		    ubi [u_cnt [w]] = S->Pinv [j] ;
-		    if (use_buf)
-		    {
-			ubx [u_cnt [w]] = W->pB [(size_t) jpos * PW + w] ;
-			W->pB [(size_t) jpos * PW + w] = 0.0 ;
-		    }
-		    else
-		    {
-			ubx [u_cnt [w]] = W->pX [w][j] ;
-			W->pX [w][j] = 0.0 ;
-		    }
-		    u_cnt [w]++ ;
+		    memcpy ((Int *) S->scratch, W->pLik [wf],
+			    (size_t) l_len [wf] * sizeof (Int)) ;
+		    memcpy (W->ubuf_i, W->pUbuf_i [wf],
+			    (size_t) u_cnt [wf] * sizeof (Int)) ;
+		    memcpy (W->ubuf_x, W->pUbuf_x [wf],
+			    (size_t) u_cnt [wf] * sizeof (Entry)) ;
 		}
+		if (kls_pipe_finalize_column (W, kf, l_len [wf],
+					      u_cnt [wf]))
+		{
+		    return (1) ;
+		}
+		next_final++ ;
+		if (next_final == PW)
+		{
+		    break ;
+		}
+		plimit = k0 + next_final ;
+		continue ;
 	    }
-	    W->pPFlag [j] = TRILINOS_KLU_EMPTY ;
-	}
-	if (plimit >= k0)
-	{
-	    break ;
-	}
-	/* wait for the prefix to advance */
-	do
-	{
-	    if (atomic_load_explicit (&sh->abort_flag,
-				      memory_order_acquire))
+	    /* wait for the prefix to advance the external window */
 	    {
-		return (1) ;
+		Int newlimit2 ;
+		do
+		{
+		    if (atomic_load_explicit (&sh->abort_flag,
+					      memory_order_acquire))
+		    {
+			return (1) ;
+		    }
+		    KLS_KLU_CPU_RELAX () ;
+		    newlimit2 = atomic_load_explicit (&sh->prefix,
+						      memory_order_acquire) ;
+		} while (newlimit2 <= plimit) ;
+		if (newlimit2 > k0 + next_final)
+		{
+		    newlimit2 = k0 + next_final ;
+		}
+		plimit = newlimit2 ;
+		if (kls_pipe_phase_prof) { W->n_rounds++ ; }
 	    }
-	    KLS_KLU_CPU_RELAX () ;
-	    newlimit = atomic_load_explicit (&sh->prefix,
-					     memory_order_acquire) ;
-	} while (newlimit <= plimit) ;
-	if (newlimit > k0)
-	{
-	    newlimit = k0 ;
 	}
-	plimit = newlimit ;
-	if (kls_pipe_phase_prof) { W->n_rounds++ ; }
     }
-    /* gather each column's candidate values back into its X so the
-       injected continuation (intra-panel rounds + lpivot) sees them */
     if (use_buf)
     {
-	for (w = 0 ; w < PW ; w++)
-	{
-	    Int *lik = w == 0 ? (Int *) S->scratch : W->pLik [w] ;
-	    for (p = 0 ; p < l_len [w] ; p++)
-	    {
-		Int i = lik [p] ;
-		if (W->pRowGen [i] == W->pGen)
-		{
-		    W->pX [w][i] =
-			W->pB [(size_t) W->pRowPos [i] * PW + w] ;
-		}
-	    }
-	}
 	W->pGen++ ;
     }
     for (w = 0 ; w < PW ; w++)
@@ -2271,6 +2576,7 @@ static int kls_pipe_panel_lockstep
     return (0) ;
 }
 #undef KLS_PANEL_ROWPOS
+
 
 static void *kls_klu_pipe_worker_main (void *arg)
 {
@@ -2319,7 +2625,10 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		    free (promoted) ;
 		    return (NULL) ;
 		}
-		panel_inject = 1 ;
+		/* the cascade finalized and published every panel
+		   column: claim the next panel */
+		if (prof) { W->n_cols += kp_end - k ; }
+		continue ;
 	    }
 	}
 	else
@@ -2486,226 +2795,10 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	}
 	S->Llen [k] = l_length ;
 
-	/* prefix == k: the final state is exactly the serial algorithm's */
-	diagrow = S->P [k] ;
-	if (!lpivot (diagrow, &pivrow, &pivot, &abs_pivot, S->tol, S->X, LU,
-		     S->Lip, S->Llen, k, n, S->Pinv, &S->firstrow,
-		     S->Common))
+	if (kls_pipe_finalize_column (W, k, l_length, ucount))
 	{
-	    /* singular: match the serial kernel's bookkeeping, then abort
-	       to the serial fallback (halt semantics are the caller's) */
-	    S->Common->status = TRILINOS_KLU_SINGULAR ;
-	    if (S->Common->numerical_rank == TRILINOS_KLU_EMPTY)
-	    {
-		S->Common->numerical_rank = k + S->k1 ;
-		S->Common->singular_col = S->Q [k + S->k1] ;
-	    }
-	    if (getenv ("KLS_KLU_PIPE_TRACE") != NULL)
-	    {
-		fprintf (stderr, "KLS pipe: singular k=%ld k1=%ld llen=%ld "
-			 "tid=%d\n", (long) k, (long) S->k1,
-			 (long) S->Llen [k], W->tid) ;
-	    }
-	    atomic_store_explicit (&sh->abort_flag, 1, memory_order_release) ;
 	    break ;
 	}
-
-	/* assemble and publish the exact-size column: [Li|Lx] is already
-	   in the scratch (lpivot gathered it); append [Ui|Ux] */
-	{
-	    Int llen = S->Llen [k] ;
-	    size_t lpart = KLS_UNITS32 (llen) + (size_t) UNITS (Entry, llen) ;
-	    size_t used = lpart + KLS_UNITS32 (ucount) +
-			  (size_t) UNITS (Entry, ucount) ;
-	    Unit *col = kls_klu_chunk_alloc (S, used) ;
-	    int32_t *Ui ;
-	    Entry *Ux ;
-	    if (col == NULL)
-	    {
-		S->Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
-		atomic_store_explicit (&sh->abort_flag, 1,
-				       memory_order_release) ;
-		break ;
-	    }
-	    /* narrow the L indices while copying out of the scratch
-	       (block-local rows always fit int32: the pipe requires
-	       n < 2^31) */
-	    {
-		Int *sLi = (Int *) S->scratch ;
-		Entry *sLx = (Entry *) (S->scratch + UNITS (Int, llen)) ;
-		int32_t *dLi = (int32_t *) col ;
-		Entry *dLx = (Entry *) (col + KLS_UNITS32 (llen)) ;
-		for (p = 0 ; p < llen ; p++)
-		{
-		    dLi [p] = (int32_t) sLi [p] ;
-		    dLx [p] = sLx [p] ;
-		}
-	    }
-	    S->Uip [k] = (Int) lpart ;
-	    S->Ulen [k] = ucount ;
-	    Ui = (int32_t *) (col + lpart) ;
-	    Ux = (Entry *) (col + lpart + KLS_UNITS32 (ucount)) ;
-	    /* sort ascending by pivot index: the multi-round concatenation
-	       is a valid topological order but downstream consumers of the
-	       stored pattern (refactor map/schedule builders) mis-handle
-	       it on multi-round columns; ascending is the consumer-blessed
-	       canonical order (the predicted builder's convention) */
-	    {
-		Int a, b ;
-		for (a = 1 ; a < ucount ; a++)
-		{
-		    Int vi = W->ubuf_i [a] ;
-		    Entry vx = W->ubuf_x [a] ;
-		    for (b = a ; b > 0 && W->ubuf_i [b-1] > vi ; b--)
-		    {
-			W->ubuf_i [b] = W->ubuf_i [b-1] ;
-			W->ubuf_x [b] = W->ubuf_x [b-1] ;
-		    }
-		    W->ubuf_i [b] = vi ;
-		    W->ubuf_x [b] = vx ;
-		}
-	    }
-	    for (p = 0 ; p < ucount ; p++)
-	    {
-		Ui [p] = (int32_t) W->ubuf_i [p] ;
-		Ux [p] = W->ubuf_x [p] ;
-	    }
-	    S->colptr [k] = col ;
-	}
-	S->Udiag [k] = pivot ;
-	if (pivrow != diagrow)
-	{
-	    S->Common->noffdiag++ ;
-	    if (S->Pinv [diagrow] < 0)
-	    {
-		Int kbar = FLIP (S->Pinv [pivrow]) ;
-		if (kbar < 0 || kbar >= n)
-		{
-		    fprintf (stderr, "KLS pipe: BAD kbar=%ld k=%ld pivrow=%ld"
-			     " Pinv[pivrow]=%ld diagrow=%ld tid=%d\n",
-			     (long) kbar, (long) k, (long) pivrow,
-			     (long) S->Pinv [pivrow], (long) diagrow,
-			     W->tid) ;
-		    atomic_store_explicit (&sh->abort_flag, 1,
-					   memory_order_release) ;
-		    break ;
-		}
-		S->P [kbar] = diagrow ;
-		S->Pinv [diagrow] = FLIP (kbar) ;
-	    }
-	}
-	S->P [k] = pivrow ;
-	S->Pinv [pivrow] = k ;
-	if (sh->lpend != NULL)
-	{
-	    /* symmetric pruning, serialized by in-order finals: for each
-	       U column j of k not yet pruned, if pivrow appears in j's
-	       published L rows, partition them pivotal-first under j's
-	       seqlock and set the shared scan bound. */
-	    Int up, jcol ;
-	    for (up = 0 ; up < ucount ; up++)
-	    {
-		jcol = W->ubuf_i [up] ;
-		if (atomic_load_explicit (&sh->lpend [jcol],
-					  memory_order_relaxed) !=
-		    TRILINOS_KLU_EMPTY)
-		{
-		    continue ;
-		}
-		{
-		    Unit *xp = (Unit *) __atomic_load_n (
-			(Unit **) &S->colptr [jcol], __ATOMIC_ACQUIRE) ;
-		    Int jlen = S->Llen [jcol] ;
-		    const int32_t *Lij = (const int32_t *) xp ;
-		    Int p2, found = 0 ;
-		    for (p2 = 0 ; p2 < jlen ; p2++)
-		    {
-			if ((Int) Lij [p2] == pivrow)
-			{
-			    found = 1 ;
-			    break ;
-			}
-		    }
-		    if (found)
-		    {
-			/* copy-on-prune: partition a fresh copy of the
-			   whole packed column and swap the pointer.
-			   Readers holding the old pointer keep a
-			   consistent (index,value) pairing forever (the
-			   chunk arenas outlive the factorization), so
-			   the numeric consumers need no copy and no
-			   seqlock retry.  The swap loop below replays
-			   the exact in-place partition order so the
-			   published arrangement stays bit-identical to
-			   the previous algorithm. */
-			Int julen = S->Ulen [jcol] ;
-			size_t lpart = KLS_UNITS32 (jlen) +
-			    (size_t) UNITS (Entry, jlen) ;
-			size_t used = lpart + KLS_UNITS32 (julen) +
-			    (size_t) UNITS (Entry, julen) ;
-			Unit *newcol = kls_klu_chunk_alloc (S, used) ;
-			if (newcol != NULL)
-			{
-			    int32_t *nLi = (int32_t *) newcol ;
-			    Entry *nLx =
-				(Entry *) (newcol + KLS_UNITS32 (jlen)) ;
-			    Int phead = 0, ptail = jlen ;
-			    memcpy (newcol, xp, used * sizeof (Unit)) ;
-			    while (phead < ptail)
-			    {
-				int32_t row = nLi [phead] ;
-				if (S->Pinv [row] >= 0)
-				{
-				    phead++ ;
-				}
-				else
-				{
-				    Entry xtmp ;
-				    ptail-- ;
-				    nLi [phead] = nLi [ptail] ;
-				    nLi [ptail] = row ;
-				    xtmp = nLx [phead] ;
-				    nLx [phead] = nLx [ptail] ;
-				    nLx [ptail] = xtmp ;
-				}
-			    }
-			    atomic_fetch_add_explicit (&sh->colver [jcol],
-						       1,
-						       memory_order_acq_rel) ;
-			    __atomic_store_n ((Unit **) &S->colptr [jcol],
-					      newcol, __ATOMIC_RELEASE) ;
-			    atomic_store_explicit (&sh->lpend [jcol], ptail,
-						   memory_order_release) ;
-			    atomic_fetch_add_explicit (&sh->colver [jcol],
-						       1,
-						       memory_order_acq_rel) ;
-			}
-			/* allocation failure: skip the prune (it is an
-			   optimization; unpruned scans stay correct) */
-		    }
-		}
-	    }
-	}
-	{
-	    /* assembly-time flop sum: in-order publication makes
-	       S->Llen of every U column final here (same invariant as
-	       the serial kernel's accumulation) */
-	    double kfl = 0.0 ;
-	    Int up2 ;
-	    for (up2 = 0 ; up2 < ucount ; up2++)
-	    {
-		kfl += (double) S->Llen [W->ubuf_i [up2]] ;
-	    }
-	    W->kflops += 2.0 * kfl + (double) S->Llen [k] ;
-	}
-	S->lnz += S->Llen [k] + 1 ;
-	S->unz += S->Ulen [k] + 1 ;
-	S->cols_done = k + 1 ;
-
-	/* publish in order */
-	done_limit = k + 1 ;
-	atomic_store_explicit (&sh->prefix, done_limit,
-			       memory_order_release) ;
 	if (prof)
 	{
 	    W->t_final += kls_klu_now () - t0 ;
@@ -2846,6 +2939,9 @@ size_t KLS_KLU_KERNEL_PIPE
     size_t final_size ;
     Int *panel_start = NULL ;
     Int npanels = 0 ;
+    const int kls_wall_prof = getenv ("KLS_KLU_PIPE_PROF") != NULL ;
+    double kls_wall_t0 = kls_wall_prof ? kls_klu_now () : 0.0 ;
+    double kls_wall_t1 = 0.0, kls_wall_t2 = 0.0 ;
 
     if (nthreads < 1) nthreads = 1 ;
     if (nthreads > 16) nthreads = 16 ;
@@ -2934,6 +3030,21 @@ size_t KLS_KLU_KERNEL_PIPE
 		memcpy (panel_start, pst, (size_t) (np + 1) * sizeof (Int)) ;
 		npanels = np ;
 	    }
+	    if (getenv ("KLS_KLU_PIPE_PROF") != NULL)
+	    {
+		Int s1 = 0, wmax = 0, pp ;
+		for (pp = 0 ; pp < np ; pp++)
+		{
+		    Int wd = pst [pp+1] - pst [pp] ;
+		    if (wd == 1) s1++ ;
+		    if (wd > wmax) wmax = wd ;
+		}
+		fprintf (stderr, "KLS pipe panels: n=%ld npanels=%ld"
+			 " avgw=%.1f singles=%ld (%.0f%%) maxw=%ld\n",
+			 (long) n, (long) np,
+			 np > 0 ? (double) n / np : 0.0, (long) s1,
+			 np > 0 ? 100.0 * s1 / np : 0.0, (long) wmax) ;
+	    }
 	    free (sp) ;
 	}
     }
@@ -3011,8 +3122,9 @@ size_t KLS_KLU_KERNEL_PIPE
 	    W->pGen = 0 ;
 	    if (panel_start != NULL)
 	    {
-		size_t per_col = (size_t) n * (sizeof (Entry) * 2 +
-					       sizeof (Int) * 2) ;
+size_t col_cap = (size_t) n / 4 + 16 ;
+		size_t per_col = (size_t) n * sizeof (Entry) +
+		    col_cap * (sizeof (Entry) + 2 * sizeof (Int)) ;
 		wcap = (Int) (((size_t) 128 << 20) / (per_col > 0 ?
 						      per_col : 1)) ;
 		if (wcap > 32) wcap = 32 ;
@@ -3023,11 +3135,11 @@ size_t KLS_KLU_KERNEL_PIPE
 		    {
 			W->pX [w] = (Entry *) calloc ((size_t) n,
 						      sizeof (Entry)) ;
-			W->pLik [w] = (Int *) malloc ((size_t) n *
+			W->pLik [w] = (Int *) malloc (col_cap *
 						      sizeof (Int)) ;
-			W->pUbuf_i [w] = (Int *) malloc ((size_t) n *
+			W->pUbuf_i [w] = (Int *) malloc (col_cap *
 							 sizeof (Int)) ;
-			W->pUbuf_x [w] = (Entry *) malloc ((size_t) n *
+			W->pUbuf_x [w] = (Entry *) malloc (col_cap *
 							   sizeof (Entry)) ;
 			if (W->pX [w] == NULL || W->pLik [w] == NULL ||
 			    W->pUbuf_i [w] == NULL ||
@@ -3054,18 +3166,22 @@ size_t KLS_KLU_KERNEL_PIPE
 		}
 		W->pPFlag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
 		W->pUlist = (Int *) malloc ((size_t) n * sizeof (Int)) ;
-		W->pBcap = 4096 ;
-		W->pB = (Entry *) malloc (W->pBcap * (size_t) wcap *
-					  sizeof (Entry)) ;
-		W->pRowPos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
-		W->pRowGen = (Int *) calloc ((size_t) n, sizeof (Int)) ;
-		W->pGen = 1 ;   /* calloc'd generations are 0: never match */
-		if (W->pB == NULL || W->pRowPos == NULL ||
-		    W->pRowGen == NULL)
+		W->pColCap = (Int) col_cap ;
+		if (getenv ("KLS_KLU_PIPE_NOBUF") == NULL)
 		{
-		    free (W->pB) ; W->pB = NULL ;
-		    free (W->pRowPos) ; W->pRowPos = NULL ;
-		    free (W->pRowGen) ; W->pRowGen = NULL ;
+		    W->pBcap = 4096 ;
+		    W->pB = (Entry *) malloc (W->pBcap * (size_t) wcap *
+					      sizeof (Entry)) ;
+		    W->pRowPos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		    W->pRowGen = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+		    W->pGen = 1 ;   /* calloc'd generations are 0 */
+		    if (W->pB == NULL || W->pRowPos == NULL ||
+			W->pRowGen == NULL)
+		    {
+			free (W->pB) ; W->pB = NULL ;
+			free (W->pRowPos) ; W->pRowPos = NULL ;
+			free (W->pRowGen) ; W->pRowGen = NULL ;
+		    }
 		}
 		if (W->pUlist == NULL)
 		{
@@ -3086,6 +3202,18 @@ size_t KLS_KLU_KERNEL_PIPE
 		}
 	    }
 	    W->pW = wcap ;
+	    if (t == 0 && panel_start != NULL &&
+		getenv ("KLS_KLU_PIPE_PROF") != NULL)
+	    {
+		Int fb = 0, pp ;
+		for (pp = 0 ; pp < npanels ; pp++)
+		{
+		    if (panel_start [pp+1] - panel_start [pp] > wcap) fb++ ;
+		}
+		fprintf (stderr, "KLS pipe pW=%ld fallback_panels=%ld/%ld"
+			 " buf=%d\n", (long) wcap, (long) fb,
+			 (long) npanels, W->pB != NULL) ;
+	    }
 	}
 	if (W->ubuf_i == NULL || W->ubuf_x == NULL || W->ap_ver == NULL ||
 	    (sh.lpend != NULL && W->copybuf == NULL))
@@ -3119,6 +3247,7 @@ size_t KLS_KLU_KERNEL_PIPE
     }
     if (!spawn_failed)
     {
+	if (kls_wall_prof) { kls_wall_t1 = kls_klu_now () ; }
 	for (t = 1 ; t < nthreads ; t++)
 	{
 	    if (pthread_create (&tids [t], NULL, kls_klu_pipe_worker_main,
@@ -3190,7 +3319,14 @@ size_t KLS_KLU_KERNEL_PIPE
 		}
 	    }
 	}
+	if (kls_wall_prof) { kls_wall_t2 = kls_klu_now () ; }
 	final_size = KLS_KLU_KERNEL_FINISH (&S) ;
+	if (kls_wall_prof)
+	{
+	    fprintf (stderr, "KLS pipe wall: setup=%.2fs workers=%.2fs"
+		     " finish=%.2fs\n", kls_wall_t1 - kls_wall_t0,
+		     kls_wall_t2 - kls_wall_t1, kls_klu_now () - kls_wall_t2) ;
+	}
 	for (t = 0 ; t < nthreads ; t++)
 	{
 	    if (t > 0)
