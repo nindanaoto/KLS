@@ -123627,6 +123627,9 @@ static UF_long kls_i32_solve(kls_solver *solver, double *b) {
   return 1;
 }
 
+static void kls_run_deferred_factor_preps(kls_solver *solver,
+                                           const double *numeric_values);
+
 int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -123708,18 +123711,18 @@ int kls_factor(kls_solver *solver, const double *values) {
           elapsed += kls_now_seconds() - row_start;
         }
       }
-      if (solver->n >= 512 && !solver->spral_matching_selected &&
+      if (solver->n >= 512 &&
           getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
         /* same contract as the main path's deferral below: engine and
            solve preps only pay off across repeated refactors, so run
            them from the first refactorization's consult instead (the
            model-row prep alone is 0.06s of rajat25's 0.59s one-shot
            init).  Solves before any refactor take the plain paths.
-           The spral-matched class (pre2) keeps inline preps: its
-           deferred consult stalls even with the pts trial skipped
-           (measured Jul 11; the free+re-prep cycle against the
-           74M-entry factor is the suspect) - do not re-unlock without
-           instrumenting the consult. */
+           The historical spral-class stall was NOT in the consult:
+           a second factor call arriving with the preps still deferred
+           livelocked the separator-pipeline fast paths - fixed by
+           running the consult at that entry too (pre2 inline preps
+           were 5.3s of init, model-row alone 4.6s). */
         solver->factor_preps_deferred = 1;
       } else {
         kls_maybe_prepare_snode_panels(solver, &elapsed);
@@ -123736,6 +123739,14 @@ int kls_factor(kls_solver *solver, const double *values) {
       return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
                                                             : KLS_OK;
     }
+  }
+  /* a second factor call may arrive with the engine preps still
+     deferred from the first (the fast paths below assume prepared
+     structures; the spral separator-pipeline class livelocks without
+     them) - run the consult first, exactly as the first
+     refactorization would */
+  if (solver->numeric != NULL && solver->factor_preps_deferred) {
+    kls_run_deferred_factor_preps(solver, numeric_values);
   }
   if (solver->options.fast_factor && solver->numeric != NULL &&
       ((solver->numeric_is_predicted && solver->pivot_nudge_count > 0) ||
@@ -124151,6 +124162,53 @@ factor_preps_deferred_exit:;
   return KLS_OK;
 }
 
+static void kls_run_deferred_factor_preps(kls_solver *solver,
+                                           const double *numeric_values) {
+  if (solver->factor_preps_deferred) {
+    solver->factor_preps_deferred = 0;
+    double preps_elapsed = 0.0;
+    const int kls_trace_consult =
+      getenv("KLS_TRACE_PREP_CONSULT") != NULL;
+    double kls_pc_t = kls_trace_consult ? kls_now_seconds() : 0.0;
+#define KLS_PC_MARK(name)     if (kls_trace_consult) {       const double tn = kls_now_seconds();       fprintf(stderr, "KLS consult %s %.3fs\n", name, tn - kls_pc_t);       kls_pc_t = tn;     }
+    /* sync exit order: snode panels must precede anything that builds
+       position-retained structures (row groups tripped the sort guard).
+       On a re-prep after a replacement, earlier consults' own retained
+       structures block the sort guard - free the rebuild-on-demand
+       caches first, exactly what the invalidate does. */
+    if (solver->snode_run_end == NULL && !solver->snode_prepared) {
+      free_row_refactor_pattern(solver);
+      solver->row_refactor_auto_enabled = 0;
+      free_refactor_lu_pointer_cache(solver);
+      free_refactor_map(solver);
+      free_refactor_schedule(solver);
+    }
+    KLS_PC_MARK("frees")
+    kls_maybe_prepare_snode_panels(solver, &preps_elapsed);
+    KLS_PC_MARK("snode_panels")
+    kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
+    KLS_PC_MARK("snb")
+    (void)kls_i32_solve_ready(solver);
+    KLS_PC_MARK("i32")
+    if (!solver->spral_matching_selected) {
+      /* the spral-matched prestatic class never paid the pts trial
+         inline and it stalls against 74M-entry factors (pre2) */
+      kls_pts_maybe_trial(solver, numeric_values, &preps_elapsed);
+    }
+    KLS_PC_MARK("pts")
+    kls_maybe_seed_row_solve_values_from_numeric(solver, &preps_elapsed);
+    KLS_PC_MARK("seed_row")
+    maybe_prepare_refactor_map(solver, &preps_elapsed);
+    KLS_PC_MARK("map")
+    maybe_prepare_refactor_schedule(solver, &preps_elapsed);
+    KLS_PC_MARK("schedule")
+    kls_maybe_prepare_model_row_refactor_from_numeric(solver,
+                                                      &preps_elapsed);
+    KLS_PC_MARK("model_row")
+#undef KLS_PC_MARK
+  }
+}
+
 int kls_refactor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -124181,35 +124239,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->metis_race_deferred_invalid = 0;
   }
 #endif
-  if (solver->factor_preps_deferred) {
-    solver->factor_preps_deferred = 0;
-    double preps_elapsed = 0.0;
-    /* sync exit order: snode panels must precede anything that builds
-       position-retained structures (row groups tripped the sort guard).
-       On a re-prep after a replacement, earlier consults' own retained
-       structures block the sort guard - free the rebuild-on-demand
-       caches first, exactly what the invalidate does. */
-    if (solver->snode_run_end == NULL && !solver->snode_prepared) {
-      free_row_refactor_pattern(solver);
-      solver->row_refactor_auto_enabled = 0;
-      free_refactor_lu_pointer_cache(solver);
-      free_refactor_map(solver);
-      free_refactor_schedule(solver);
-    }
-    kls_maybe_prepare_snode_panels(solver, &preps_elapsed);
-    kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
-    (void)kls_i32_solve_ready(solver);
-    if (!solver->spral_matching_selected) {
-      /* the spral-matched prestatic class never paid the pts trial
-         inline and it stalls against 74M-entry factors (pre2) */
-      kls_pts_maybe_trial(solver, numeric_values, &preps_elapsed);
-    }
-    kls_maybe_seed_row_solve_values_from_numeric(solver, &preps_elapsed);
-    maybe_prepare_refactor_map(solver, &preps_elapsed);
-    maybe_prepare_refactor_schedule(solver, &preps_elapsed);
-    kls_maybe_prepare_model_row_refactor_from_numeric(solver,
-                                                      &preps_elapsed);
-  }
+  kls_run_deferred_factor_preps(solver, numeric_values);
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
