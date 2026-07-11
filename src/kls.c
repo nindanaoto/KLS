@@ -30735,6 +30735,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
 struct kls_candidate_analyze_job {
   kls_pattern_candidate *candidate;
   const kls_options *options;
+  int defer_nd;   /* propagate the caller's defer-ND mode (TL) */
   int status;
 };
 
@@ -30742,7 +30743,9 @@ struct kls_candidate_analyze_job {
 static void *kls_candidate_analyze_main(void *arg) {
   struct kls_candidate_analyze_job *job =
     (struct kls_candidate_analyze_job *)arg;
+  kls_analyze_defer_nd = job->defer_nd;
   job->status = analyze_candidate(job->candidate, job->options);
+  kls_analyze_defer_nd = 0;
   return NULL;
 }
 
@@ -30763,10 +30766,10 @@ static int auto_orientation_prefers_normal(UF_long n,
   return is_large_diagonal_circuit_like_pattern(n, col_ptr, row_idx);
 }
 
-static int select_candidate(kls_pattern_candidate *normal,
-                            kls_pattern_candidate *transpose,
-                            const kls_options *options,
-                            kls_pattern_candidate **chosen_out) {
+static int select_candidate_inner(kls_pattern_candidate *normal,
+                                  kls_pattern_candidate *transpose,
+                                  const kls_options *options,
+                                  kls_pattern_candidate **chosen_out) {
   *chosen_out = NULL;
   if (options->orientation == KLS_ORIENTATION_NORMAL) {
     if (normal == NULL) {
@@ -30845,6 +30848,7 @@ static int select_candidate(kls_pattern_candidate *normal,
     struct kls_candidate_analyze_job transpose_job;
     transpose_job.candidate = transpose;
     transpose_job.options = options;
+    transpose_job.defer_nd = kls_analyze_defer_nd;
     transpose_job.status = KLS_ERR_FACTOR_FAILED;
     pthread_t transpose_thread;
     int threaded = 0;
@@ -30882,6 +30886,38 @@ static int select_candidate(kls_pattern_candidate *normal,
     return KLS_OK;
   }
   return normal_status != KLS_OK ? normal_status : transpose_status;
+}
+
+static int select_candidate(kls_pattern_candidate *normal,
+                            kls_pattern_candidate *transpose,
+                            const kls_options *options,
+                            kls_pattern_candidate **chosen_out) {
+  /* The pre-static large-spral class replaces the analyze-time
+     symbolic wholesale at factor time (matched pattern, its own METIS
+     analysis), so its analyze never needs to pay nested dissection:
+     engage the (previously dormant) defer-ND mode for the whole
+     analyze.  pre2: two concurrent 3.7s METIS analyses -> AMD-class
+     scoring only.  If the pre-static trial rejects, the factor-time
+     METIS race/promotion machinery recovers nested dissection under
+     timed acceptance as on any other auto-path matrix. */
+  const kls_pattern_candidate *ref = normal != NULL ? normal : transpose;
+  int defer = 0;
+  if (ref != NULL && options != NULL && options->static_pivoting &&
+      options->ordering == KLS_ORDERING_AUTO &&
+      ref->n > 150000u && ref->n <= 750000u && ref->nnz <= 8000000u &&
+      !is_large_sparse_diagonal_low_degree_pattern(ref->n, ref->col_ptr,
+                                                   ref->row_idx) &&
+      getenv("KLS_DISABLE_ANA_ND_DEFER") == NULL) {
+    defer = 1;
+  }
+  const int saved = kls_analyze_defer_nd;
+  if (defer) {
+    kls_analyze_defer_nd = 1;
+  }
+  const int status = select_candidate_inner(normal, transpose, options,
+                                            chosen_out);
+  kls_analyze_defer_nd = saved;
+  return status;
 }
 
 static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate) {
