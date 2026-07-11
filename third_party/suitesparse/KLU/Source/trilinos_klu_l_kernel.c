@@ -1135,12 +1135,19 @@ Int KLS_KLU_KERNEL_STEP
     S->Ulen [k] = n - top ;
 
     GET_POINTER (LU, S->Uip, S->Ulen, Ui, Ux, k, len) ;
-    for (p = top, i = 0 ; p < n ; p++, i++)
     {
-	j = S->Stack [p] ;
-	Ui [i] = Pinv [j] ;
-	Ux [i] = S->X [j] ;
-	CLEAR (S->X [j]) ;
+	/* accumulate the TRILINOS_KLU_flops sum while the U pattern is
+	   hot: Llen of every source column is final once it pivots */
+	double kls_fl = 0.0 ;
+	for (p = top, i = 0 ; p < n ; p++, i++)
+	{
+	    j = S->Stack [p] ;
+	    Ui [i] = Pinv [j] ;
+	    Ux [i] = S->X [j] ;
+	    CLEAR (S->X [j]) ;
+	    kls_fl += (double) Llen [Ui [i]] ;
+	}
+	Common->kls_kernel_flops += 2.0 * kls_fl + (double) Llen [k] ;
     }
     if (S->colptr == NULL)
     {

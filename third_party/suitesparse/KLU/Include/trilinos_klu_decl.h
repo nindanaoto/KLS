@@ -240,6 +240,15 @@ typedef struct trilinos_klu_l_common_struct /* 64-bit version (otherwise same as
     UF_long kls_btf_nblocks ;
     UF_long kls_btf_structural_rank ;
 
+    /* KLS extension: flop count accumulated by the factorization
+       kernel at column assembly (same formula as TRILINOS_KLU_flops,
+       computed while the U pattern is hot).  Reset per factor call;
+       TRILINOS_KLU_flops uses it when positive instead of the cold
+       post-factor walk (~2s on 77M-entry factors).  Kernels that do
+       not accumulate (the pipelined path) leave it 0 and the walk
+       runs as before. */
+    double kls_kernel_flops ;
+
 } trilinos_klu_l_common ;
 
 /* -------------------------------------------------------------------------- */

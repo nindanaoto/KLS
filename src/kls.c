@@ -23369,6 +23369,12 @@ static _Thread_local int kls_metis_order_threads;
    (pre2: 5x refactor loss under the parallel splitter's forest) */
 static _Thread_local int kls_det_ndp_requested;
 
+/* pattern-classified det-ndp routing, refreshed per analyze call:
+   the mostly-missing-diagonal low-degree class (mac_econ) has no
+   separator-structure-dependent refactor engine and measured ana
+   1.5 -> 0.74s + a better factor ordering under det-ndp in v11 */
+static _Thread_local int kls_lowdeg_ndp_class;
+
 /* per-thread routing request from the analyze level: the mostly-
    missing-diagonal low-degree class (mac_econ) pays a pathological
    serial NodeND while its egraph refactor engine has no separator-
@@ -24216,7 +24222,7 @@ static UF_long kls_metis_order_inner(UF_long n,
 #ifdef KLS_HAVE_MTMETIS
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
       n >= 50000 && kls_metis_order_threads >= (int)metis_ndp_npes &&
-      kls_det_ndp_requested &&
+      (kls_det_ndp_requested || kls_lowdeg_ndp_class) &&
       getenv("KLS_DISABLE_DET_NDP") == NULL) {
     /* deterministic parallel NodeNDP: serial METIS separators with
        the leaves ordered by concurrent serial NodeND.  Deterministic
@@ -24535,8 +24541,19 @@ static int analyze_with_ordering(UF_long n,
        analyze call from the same pattern bounds the prestatic class
        gate uses. */
     extern void gk_set_legacy_rand(int enable);
+    /* the mostly-missing-diagonal low-degree class (mac_econ) is
+       excluded from the legacy RNG (its egraph refactor engine has no
+       separator-structure dependence; MT19937 orderings measured
+       better, v11 2.359 -> 2.025) and instead requests det-ndp (ana
+       1.5 -> 0.74s in v11) */
+    const int kls_lowdeg =
+      n > 150000u && col_ptr != NULL &&
+      is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx);
     gk_set_legacy_rand(n > 150000u && n <= 750000u && col_ptr != NULL &&
-                       (UF_long)col_ptr[n] <= 8000000);
+                       (UF_long)col_ptr[n] <= 8000000 && !kls_lowdeg);
+#ifdef KLS_HAVE_MTMETIS
+    kls_lowdeg_ndp_class = kls_lowdeg;
+#endif
   }
 #endif
   const double kls_awo_t0 =

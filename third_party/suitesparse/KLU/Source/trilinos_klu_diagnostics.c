@@ -440,6 +440,14 @@ Int TRILINOS_KLU_flops		/* return TRUE if successful, FALSE otherwise */
     }
     Common->status = TRILINOS_KLU_OK ;
 
+    if (Common->kls_kernel_flops > 0)
+    {
+	/* the factorization kernel accumulated the identical sum at
+	   column assembly; skip the cold walk over the U patterns */
+	Common->flops = Common->kls_kernel_flops ;
+	return (TRUE) ;
+    }
+
     /* ---------------------------------------------------------------------- */
     /* get the contents of the Symbolic object */
     /* ---------------------------------------------------------------------- */

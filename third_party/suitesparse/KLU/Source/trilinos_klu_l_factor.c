@@ -49,6 +49,8 @@ static void factor2
 
     clock_gettime (CLOCK_MONOTONIC, &kls_t0) ;
 
+    Common->kls_kernel_flops = 0 ;
+
     /* get the contents of the Symbolic object */
     n = Symbolic->n ;
     P = Symbolic->P ;
