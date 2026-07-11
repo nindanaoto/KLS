@@ -123621,10 +123621,11 @@ int kls_factor(kls_solver *solver, const double *values) {
            them from the first refactorization's consult instead (the
            model-row prep alone is 0.06s of rajat25's 0.59s one-shot
            init).  Solves before any refactor take the plain paths.
-           The spral-matched large class (pre2) keeps inline preps:
-           its deferred consult runs the full prep list including the
-           pts trial this branch never paid, and that combination
-           stalls on the 74M-entry factor. */
+           The spral-matched class (pre2) keeps inline preps: its
+           deferred consult stalls even with the pts trial skipped
+           (measured Jul 11; the free+re-prep cycle against the
+           74M-entry factor is the suspect) - do not re-unlock without
+           instrumenting the consult. */
         solver->factor_preps_deferred = 1;
       } else {
         kls_maybe_prepare_snode_panels(solver, &elapsed);
@@ -124104,7 +124105,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_maybe_prepare_snode_panels(solver, &preps_elapsed);
     kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
     (void)kls_i32_solve_ready(solver);
-    kls_pts_maybe_trial(solver, numeric_values, &preps_elapsed);
+    if (!solver->spral_matching_selected) {
+      /* the spral-matched prestatic class never paid the pts trial
+         inline and it stalls against 74M-entry factors (pre2) */
+      kls_pts_maybe_trial(solver, numeric_values, &preps_elapsed);
+    }
     kls_maybe_seed_row_solve_values_from_numeric(solver, &preps_elapsed);
     maybe_prepare_refactor_map(solver, &preps_elapsed);
     maybe_prepare_refactor_schedule(solver, &preps_elapsed);
