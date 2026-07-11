@@ -23369,11 +23369,15 @@ static _Thread_local int kls_metis_order_threads;
    (pre2: 5x refactor loss under the parallel splitter's forest) */
 static _Thread_local int kls_det_ndp_requested;
 
-/* pattern-classified det-ndp routing, refreshed per analyze call:
-   the mostly-missing-diagonal low-degree class (mac_econ) has no
-   separator-structure-dependent refactor engine and measured ana
-   1.5 -> 0.74s + a better factor ordering under det-ndp in v11 */
+/* pattern-classified det-ndp routing, refreshed per analyze call.
+   v12 measured the refine-only det-ndp scoping reverting v11's broad
+   one-shot wins (Freescale1 0.886->1.477, circuit5M_dc 0.962->1.650,
+   memchip 1.535->1.908): det-ndp routes for every analyze EXCEPT the
+   legacy-RNG large-spral class (pre2), whose separator-pipeline
+   engine needs the serial-NodeNDP legacy forests (cycle 0.787 with
+   the containment vs 1.76 without). */
 static _Thread_local int kls_lowdeg_ndp_class;
+static _Thread_local int kls_detndp_class_ok;
 
 /* per-thread routing request from the analyze level: the mostly-
    missing-diagonal low-degree class (mac_econ) pays a pathological
@@ -24222,7 +24226,8 @@ static UF_long kls_metis_order_inner(UF_long n,
 #ifdef KLS_HAVE_MTMETIS
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
       n >= 50000 && kls_metis_order_threads >= (int)metis_ndp_npes &&
-      (kls_det_ndp_requested || kls_lowdeg_ndp_class) &&
+      (kls_det_ndp_requested || kls_lowdeg_ndp_class ||
+       kls_detndp_class_ok) &&
       getenv("KLS_DISABLE_DET_NDP") == NULL) {
     /* deterministic parallel NodeNDP: serial METIS separators with
        the leaves ordered by concurrent serial NodeND.  Deterministic
@@ -24549,10 +24554,13 @@ static int analyze_with_ordering(UF_long n,
     const int kls_lowdeg =
       n > 150000u && col_ptr != NULL &&
       is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx);
-    gk_set_legacy_rand(n > 150000u && n <= 750000u && col_ptr != NULL &&
-                       (UF_long)col_ptr[n] <= 8000000 && !kls_lowdeg);
+    const int kls_legacy_class =
+      n > 150000u && n <= 750000u && col_ptr != NULL &&
+      (UF_long)col_ptr[n] <= 8000000 && !kls_lowdeg;
+    gk_set_legacy_rand(kls_legacy_class);
 #ifdef KLS_HAVE_MTMETIS
     kls_lowdeg_ndp_class = kls_lowdeg;
+    kls_detndp_class_ok = !kls_legacy_class;
 #endif
   }
 #endif
