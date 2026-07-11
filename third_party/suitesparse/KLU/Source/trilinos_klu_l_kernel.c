@@ -1565,6 +1565,17 @@ typedef struct kls_klu_pipe_worker_s
     int tid ;
     double t_work, t_spin, t_final ;   /* KLS_KLU_PIPE_PROF buckets */
     long n_cols, n_rounds ;
+    /* supernodal-pipe step (b): per-panel multi-column workspace.
+       pX[w] is the wth panel column's dense accumulator (pX[0] aliases
+       S.X); pLik/pUbuf_i/pUbuf_x are the per-column pattern and
+       U-segment builds; pW is the panel width cap this worker can
+       afford (memory-bounded at allocation). */
+    Entry *pX [32] ;
+    Int *pLik [32] ;
+    Int *pUbuf_i [32] ;
+    Entry *pUbuf_x [32] ;
+    Int *pPFlag ;             /* union dedup marks (panel generation) */
+    Int pW ;
 } kls_klu_pipe_worker ;
 
 /* DFS from node i (row of the block), eliminating only through pivot
@@ -2529,6 +2540,56 @@ size_t KLS_KLU_KERNEL_PIPE
 	W->t_work = 0 ; W->t_spin = 0 ; W->t_final = 0 ;
 	W->n_cols = 0 ; W->n_rounds = 0 ;
 	W->kflops = 0.0 ;
+	/* panel-mode workspace: width capped by a ~128MB/worker budget;
+	   slot 0 aliases the worker's own X/ubuf/scratch pattern space */
+	{
+	    Int w, wcap = 1 ;
+	    memset (W->pX, 0, sizeof (W->pX)) ;
+	    memset (W->pLik, 0, sizeof (W->pLik)) ;
+	    memset (W->pUbuf_i, 0, sizeof (W->pUbuf_i)) ;
+	    memset (W->pUbuf_x, 0, sizeof (W->pUbuf_x)) ;
+	    W->pPFlag = NULL ;
+	    if (panel_start != NULL)
+	    {
+		size_t per_col = (size_t) n * (sizeof (Entry) * 2 +
+					       sizeof (Int) * 2) ;
+		wcap = (Int) (((size_t) 128 << 20) / (per_col > 0 ?
+						      per_col : 1)) ;
+		if (wcap > 32) wcap = 32 ;
+		if (wcap < 1) wcap = 1 ;
+		for (w = 1 ; w < wcap ; w++)
+		{
+		    W->pX [w] = (Entry *) calloc ((size_t) n,
+						  sizeof (Entry)) ;
+		    W->pLik [w] = (Int *) malloc ((size_t) n *
+						  sizeof (Int)) ;
+		    W->pUbuf_i [w] = (Int *) malloc ((size_t) n *
+						     sizeof (Int)) ;
+		    W->pUbuf_x [w] = (Entry *) malloc ((size_t) n *
+						       sizeof (Entry)) ;
+		    if (W->pX [w] == NULL || W->pLik [w] == NULL ||
+			W->pUbuf_i [w] == NULL || W->pUbuf_x [w] == NULL)
+		    {
+			wcap = w ;
+			break ;
+		    }
+		}
+		W->pPFlag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		if (W->pPFlag != NULL)
+		{
+		    Int q2 ;
+		    for (q2 = 0 ; q2 < n ; q2++)
+		    {
+			W->pPFlag [q2] = TRILINOS_KLU_EMPTY ;
+		    }
+		}
+		else
+		{
+		    wcap = 1 ;
+		}
+	    }
+	    W->pW = wcap ;
+	}
 	if (W->ubuf_i == NULL || W->ubuf_x == NULL || W->ap_ver == NULL ||
 	    (sh.lpend != NULL && W->copybuf == NULL))
 	{
@@ -2648,6 +2709,17 @@ size_t KLS_KLU_KERNEL_PIPE
 	    free (workers [t].ubuf_x) ;
 	    free (workers [t].ap_ver) ;
 	    free (workers [t].copybuf) ;
+	{
+	    Int w ;
+	    for (w = 1 ; w < workers [t].pW ; w++)
+	    {
+		free (workers [t].pX [w]) ;
+		free (workers [t].pLik [w]) ;
+		free (workers [t].pUbuf_i [w]) ;
+		free (workers [t].pUbuf_x [w]) ;
+	    }
+	    free (workers [t].pPFlag) ;
+	}
 	}
 	free ((void *) sh.lpend) ;
     free (panel_start) ;
@@ -2675,6 +2747,17 @@ size_t KLS_KLU_KERNEL_PIPE
 	free (workers [t].ubuf_x) ;
 	free (workers [t].ap_ver) ;
 	free (workers [t].copybuf) ;
+	{
+	    Int w ;
+	    for (w = 1 ; w < workers [t].pW ; w++)
+	    {
+		free (workers [t].pX [w]) ;
+		free (workers [t].pLik [w]) ;
+		free (workers [t].pUbuf_i [w]) ;
+		free (workers [t].pUbuf_x [w]) ;
+	    }
+	    free (workers [t].pPFlag) ;
+	}
     }
     KLS_KLU_KERNEL_CHUNKS_FREE (&workers [0].S) ;
     free (S.scratch) ;
