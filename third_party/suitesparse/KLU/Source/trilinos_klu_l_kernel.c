@@ -1487,6 +1487,8 @@ typedef struct kls_klu_pipe_worker_s
     kls_klu_pipe_shared *sh ;
     Int *ubuf_i ;             /* per-round U pattern accumulation */
     Entry *ubuf_x ;
+    double kflops ;           /* assembly-time flop sum of the columns
+                                 this worker published */
     unsigned *ap_ver ;        /* seqlock snapshots for resumable scans */
     Unit *copybuf ;           /* seqlock column copies for the numeric */
     int tid ;
@@ -2078,6 +2080,18 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		}
 	    }
 	}
+	{
+	    /* assembly-time flop sum: in-order publication makes
+	       S->Llen of every U column final here (same invariant as
+	       the serial kernel's accumulation) */
+	    double kfl = 0.0 ;
+	    Int up2 ;
+	    for (up2 = 0 ; up2 < ucount ; up2++)
+	    {
+		kfl += (double) S->Llen [W->ubuf_i [up2]] ;
+	    }
+	    W->kflops += 2.0 * kfl + (double) S->Llen [k] ;
+	}
 	S->lnz += S->Llen [k] + 1 ;
 	S->unz += S->Ulen [k] + 1 ;
 	S->cols_done = k + 1 ;
@@ -2313,6 +2327,7 @@ size_t KLS_KLU_KERNEL_PIPE
 	    : NULL ;
 	W->t_work = 0 ; W->t_spin = 0 ; W->t_final = 0 ;
 	W->n_cols = 0 ; W->n_rounds = 0 ;
+	W->kflops = 0.0 ;
 	if (W->ubuf_i == NULL || W->ubuf_x == NULL || W->ap_ver == NULL ||
 	    (sh.lpend != NULL && W->copybuf == NULL))
 	{
@@ -2377,6 +2392,10 @@ size_t KLS_KLU_KERNEL_PIPE
 	{
 	    S.lnz += workers [t].S.lnz ;
 	    S.unz += workers [t].S.unz ;
+	}
+	for (t = 0 ; t < nthreads ; t++)
+	{
+	    Common->kls_kernel_flops += workers [t].kflops ;
 	}
 	S.cols_done = n ;
 	{
@@ -3132,15 +3151,10 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 	    pipe_threads) ;
 	if (Common->status == TRILINOS_KLU_OK)
 	{
-	    /* the pipeline does not accumulate the per-column flop sum:
-	       poison the field (sticky negative - later serial blocks
-	       add block sums that must not re-positivize it) so
-	       TRILINOS_KLU_flops runs its walk instead of trusting a
-	       partial value */
-	    Common->kls_kernel_flops = -1e300 ;
 	    return (pipe_size) ;
 	}
-	Common->kls_kernel_flops = -1e300 ;
+	/* failed pipe run: drop any partial worker sums; the serial
+	   retry below re-accumulates this block completely */
 	/* singular or resource failure in the pipeline: retry the block
 	   with the classic serial kernel (X/Flag state is clean; the
 	   pipeline frees its own arenas on abort) */
