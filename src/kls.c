@@ -30133,6 +30133,7 @@ struct kls_amf_spec_job {
   UF_long n;
   UF_long *col_ptr;
   UF_long *row_idx;
+  kls_ordering ordering;   /* which ordering to analyze (AMF default) */
   kls_options options;
   trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_common common;
@@ -30146,13 +30147,13 @@ static void *kls_amf_spec_main(void *arg) {
   memset(&job->separator, 0, sizeof(job->separator));
   job->symbolic = NULL;
   job->status = analyze_with_ordering(job->n, job->col_ptr, job->row_idx,
-                                      &job->options, KLS_ORDERING_AMF,
+                                      &job->options, job->ordering,
                                       &job->symbolic, &job->common,
                                       &job->separator);
   if (job->status == KLS_OK) {
     job->score = symbolic_score(job->symbolic);
     maybe_retry_without_btf(job->n, job->col_ptr, job->row_idx,
-                            &job->options, KLS_ORDERING_AMF,
+                            &job->options, job->ordering,
                             &job->symbolic, &job->common, &job->score, 0,
                             &job->separator);
   } else {
@@ -30201,6 +30202,9 @@ static int kls_choose_symbolic_inner(UF_long n,
          on; only shortcut where the analysis itself is the cost. */
       UF_long *bs_perm = NULL;
       UF_long *bs_comp = NULL;
+      if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+        fprintf(stderr, "KLS choose: bs-shortcut probe n=%ld\n", (long)n);
+      }
       if (kls_build_block_structured_order(n, col_ptr, row_idx, &bs_perm,
                                            &bs_comp)) {
         free(bs_perm);
@@ -30261,6 +30265,97 @@ static int kls_choose_symbolic_inner(UF_long n,
     auto_options.use_btf = 0;
     symbolic_options = &auto_options;
   }
+
+#ifdef KLS_HAVE_METIS
+  if (kls_prestatic_ordering_ctx && options->threads >= 3 &&
+      n > 150000u && n <= 750000u && (UF_long)col_ptr[n] <= 8000000 &&
+      getenv("KLS_DISABLE_PS_CHOOSE_PAR") == NULL &&
+      !is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx)) {
+    /* pre-static choose for the legacy-RNG class: METIS (the measured
+       class-wide winner) analyzes on THIS thread so the only legacy
+       libc-rand drawer stays serial, while AMD and AMF analyze on
+       workers.  The comparisons replay in the canonical order at the
+       join with the standard margins (AMF 0.95 vs the AMD base,
+       METIS 0.90 vs the base winner). */
+    struct kls_amf_spec_job amd_job, amf_job;
+    pthread_t amd_tid, amf_tid;
+    amd_job.n = n; amd_job.col_ptr = col_ptr; amd_job.row_idx = row_idx;
+    amd_job.ordering = KLS_ORDERING_AMD;
+    amd_job.options = *symbolic_options;
+    amf_job = amd_job; amf_job.ordering = KLS_ORDERING_AMF;
+    const int amd_sp =
+      pthread_create(&amd_tid, NULL, kls_amf_spec_main, &amd_job) == 0;
+    const int amf_sp =
+      pthread_create(&amf_tid, NULL, kls_amf_spec_main, &amf_job) == 0;
+    trilinos_klu_l_symbolic *m_sym = NULL;
+    trilinos_klu_l_common m_common;
+    kls_separator_analysis m_sep;
+    memset(&m_sep, 0, sizeof(m_sep));
+    const int m_status = analyze_with_ordering(n, col_ptr, row_idx,
+                                               symbolic_options,
+                                               KLS_ORDERING_METIS, &m_sym,
+                                               &m_common, &m_sep);
+    if (amd_sp) pthread_join(amd_tid, NULL);
+    if (amf_sp) pthread_join(amf_tid, NULL);
+    trilinos_klu_l_symbolic *b_sym = NULL;
+    trilinos_klu_l_common b_common;
+    kls_separator_analysis b_sep;
+    kls_ordering b_ord = KLS_ORDERING_AMD;
+    double b_score = DBL_MAX;
+    int b_ok = 0;
+    memset(&b_sep, 0, sizeof(b_sep));
+    if (amd_sp && amd_job.status == KLS_OK && amd_job.symbolic != NULL) {
+      b_sym = amd_job.symbolic; b_common = amd_job.common;
+      b_score = amd_job.score; b_ok = 1;
+      kls_separator_analysis_move(&b_sep, &amd_job.separator);
+    }
+    if (amf_sp && amf_job.status == KLS_OK && amf_job.symbolic != NULL) {
+      if (b_ok && isfinite(amf_job.score) && b_score < DBL_MAX &&
+          amf_job.score <= 0.95 * b_score) {
+        trilinos_klu_l_free_symbolic(&b_sym, &b_common);
+        kls_separator_analysis_clear(&b_sep);
+        b_sym = amf_job.symbolic; b_common = amf_job.common;
+        b_ord = KLS_ORDERING_AMF; b_score = amf_job.score;
+        kls_separator_analysis_move(&b_sep, &amf_job.separator);
+      } else if (!b_ok) {
+        b_sym = amf_job.symbolic; b_common = amf_job.common;
+        b_ord = KLS_ORDERING_AMF; b_score = amf_job.score; b_ok = 1;
+        kls_separator_analysis_move(&b_sep, &amf_job.separator);
+      } else {
+        trilinos_klu_l_free_symbolic(&amf_job.symbolic, &amf_job.common);
+        kls_separator_analysis_clear(&amf_job.separator);
+      }
+    }
+    if (m_status == KLS_OK && m_sym != NULL) {
+      const double m_score = symbolic_score(m_sym);
+      if (!b_ok ||
+          (isfinite(m_score) && m_score > 0.0 && b_score < DBL_MAX &&
+           m_score <= 0.90 * b_score)) {
+        if (b_ok) {
+          trilinos_klu_l_free_symbolic(&b_sym, &b_common);
+          kls_separator_analysis_clear(&b_sep);
+        }
+        b_sym = m_sym; b_common = m_common;
+        b_ord = KLS_ORDERING_METIS; b_score = m_score; b_ok = 1;
+        kls_separator_analysis_move(&b_sep, &m_sep);
+      } else {
+        trilinos_klu_l_free_symbolic(&m_sym, &m_common);
+        kls_separator_analysis_clear(&m_sep);
+      }
+    } else {
+      kls_separator_analysis_clear(&m_sep);
+    }
+    if (b_ok) {
+      *symbolic_out = b_sym;
+      *common_out = b_common;
+      *selected_ordering_out = b_ord;
+      *score_out = b_score;
+      kls_separator_analysis_move(separator_out, &b_sep);
+      return KLS_OK;
+    }
+    /* every candidate failed: fall through to the standard path */
+  }
+#endif
 
 #ifdef KLS_HAVE_METIS
   if (n <= 30000u && !kls_analyze_defer_nd &&
@@ -30364,11 +30459,15 @@ static int kls_choose_symbolic_inner(UF_long n,
     amf_spec.n = n;
     amf_spec.col_ptr = col_ptr;
     amf_spec.row_idx = row_idx;
+    amf_spec.ordering = KLS_ORDERING_AMF;
     amf_spec.options = *symbolic_options;
     if (pthread_create(&amf_spec_tid, NULL, kls_amf_spec_main,
                        &amf_spec) == 0) {
       amf_spec_spawned = 1;
     }
+  }
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS choose: base loop n=%ld\n", (long)n);
   }
   const kls_ordering candidates[] = {KLS_ORDERING_AMD, KLS_ORDERING_COLAMD};
   trilinos_klu_l_symbolic *best_symbolic = NULL;
@@ -30914,8 +31013,14 @@ static int select_candidate(kls_pattern_candidate *normal,
   if (defer) {
     kls_analyze_defer_nd = 1;
   }
-  const int status = select_candidate_inner(normal, transpose, options,
-                                            chosen_out);
+  /* the pre-static adoption forces the NORMAL orientation for this
+     class, overriding whatever the two-orientation comparison picks:
+     skip the transpose side entirely (a class member that fails the
+     pre-static trial falls back to the normal orientation - correct,
+     at worst slower, and policed by the same measured acceptance) */
+  const int status = select_candidate_inner(
+    normal, defer && normal != NULL ? NULL : transpose, options,
+    chosen_out);
   kls_analyze_defer_nd = saved;
   return status;
 }
