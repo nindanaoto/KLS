@@ -23379,6 +23379,15 @@ static _Thread_local int kls_det_ndp_requested;
 static _Thread_local int kls_lowdeg_ndp_class;
 static _Thread_local int kls_detndp_class_ok;
 
+/* set around the pre-static ordering choice: the legacy libc RNG is
+   scoped to exactly the analyses whose forests the separator-pipeline
+   refactor engines consume (the prestatic-adopted ones).  The ana
+   phase's two-orientation analyzes then use thread-local MT19937
+   (deterministic under concurrency); the process-global libc rand was
+   cross-corrupted by those concurrent analyzes - pre2's true
+   run-to-run variance source. */
+static _Thread_local int kls_prestatic_ordering_ctx;
+
 /* per-thread routing request from the analyze level: the mostly-
    missing-diagonal low-degree class (mac_econ) pays a pathological
    serial NodeND while its egraph refactor engine has no separator-
@@ -24557,7 +24566,7 @@ static int analyze_with_ordering(UF_long n,
     const int kls_legacy_class =
       n > 150000u && n <= 750000u && col_ptr != NULL &&
       (UF_long)col_ptr[n] <= 8000000 && !kls_lowdeg;
-    gk_set_legacy_rand(kls_legacy_class);
+    gk_set_legacy_rand(kls_legacy_class && kls_prestatic_ordering_ctx);
 #ifdef KLS_HAVE_MTMETIS
     kls_lowdeg_ndp_class = kls_lowdeg;
     kls_detndp_class_ok = !kls_legacy_class;
@@ -28632,6 +28641,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
 
   const double kls_ps_t0 = kls_now_seconds();
+#ifdef KLS_HAVE_METIS
+  kls_prestatic_ordering_ctx = 1;
+#endif
   UF_long missing_diagonal = 0;
   const UF_long weak =
     count_weak_diagonal_rows(solver->n, base_col_ptr, base_row_idx,
@@ -28781,7 +28793,12 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   double trial_score = 0.0;
 #if defined(KLS_HAVE_METIS) && defined(KLS_HAVE_SPRAL_SCALING)
   if (use_large_spral_match && solver->options.threads >= 2 &&
+      !(solver->n > 150000u && solver->n <= 750000u &&
+        solver->nnz <= 8000000u) &&
       getenv("KLS_DISABLE_PSMETIS_SPEC") == NULL) {
+    /* the legacy-RNG class is excluded: its worker analyze would draw
+       the process-global libc rand concurrently with choose's METIS
+       (nondeterminism), and its choose picks METIS anyway */
     psmetis_est_spec.n = solver->n;
     psmetis_est_spec.col_ptr = trial_col_ptr;
     psmetis_est_spec.row_idx = trial_row_idx;
@@ -29080,6 +29097,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
 done:
 #ifdef KLS_HAVE_METIS
+  kls_prestatic_ordering_ctx = 0;
   /* the speculative refinement/estimate analyses read the trial
      pattern arrays freed below: join and discard any pending runs */
   kls_psmetis_spec_discard(&psmetis_spec);
