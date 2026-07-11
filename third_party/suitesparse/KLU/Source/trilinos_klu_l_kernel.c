@@ -1612,7 +1612,10 @@ static Int kls_pipe_dfs
 	 * until finding another non-visited pivotal node */
 	if (jnew >= 0 && jnew < plimit)
 	{
-	    Unit *xp = KLS_COL_BASE (Colptr, LU, Lip, jnew) ;
+	    Unit *xp = (sh != NULL && sh->lpend != NULL)
+		? (Unit *) __atomic_load_n ((Unit **) &Colptr [jnew],
+					    __ATOMIC_ACQUIRE)
+		: KLS_COL_BASE (Colptr, LU, Lip, jnew) ;
 	    Li = (Int *) xp ;
 	    for (pos = --Ap_pos [head] ; pos >= 0 ; --pos)
 	    {
@@ -1814,33 +1817,19 @@ static void kls_pipe_lsolve_numeric
 	ASSERT (jnew >= 0) ;
 	xj = X [j] ;
 	{
-	    Unit *xp = KLS_COL_BASE (Colptr, LU, Lip, jnew) ;
-	    size_t units ;
-	    unsigned v0, v1 ;
+	    /* copy-on-prune makes every published column snapshot
+	       immutable: one atomic pointer load pins a consistent
+	       (index,value) pairing - the pre-prune and post-prune
+	       arrangements are permutations of the same multiset, and
+	       the scatter below is order-independent (distinct rows).
+	       No copy, no seqlock retry. */
+	    Unit *xp = (Unit *) __atomic_load_n (
+		(Unit **) &Colptr [jnew], __ATOMIC_ACQUIRE) ;
 	    len = Llen [jnew] ;
-	    units = (size_t) (UNITS (Int, len) + UNITS (Entry, len)) ;
-	    for ( ; ; )
-	    {
-		do
-		{
-		    v0 = atomic_load_explicit (&sh->colver [jnew],
-					       memory_order_acquire) ;
-		    KLS_KLU_CPU_RELAX () ;
-		} while (v0 & 1u) ;
-		memcpy (copybuf, xp, units * sizeof (Unit)) ;
-		atomic_thread_fence (memory_order_acquire) ;
-		v1 = atomic_load_explicit (&sh->colver [jnew],
-					   memory_order_acquire) ;
-		if (v1 == v0)
-		{
-		    break ;
-		}
-	    }
-	    Li = (Int *) copybuf ;
-	    Lx = (Entry *) (copybuf + UNITS (Int, len)) ;
+	    Li = (Int *) xp ;
+	    Lx = (Entry *) (xp + UNITS (Int, len)) ;
 	    if (kls_pipe_phase_prof)
 	    {
-		kls_pipe_copy_bytes += (long) (units * sizeof (Unit)) ;
 		kls_pipe_madds += len ;
 	    }
 	}
@@ -2072,10 +2061,10 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		    continue ;
 		}
 		{
-		    Unit *xp = S->colptr [jcol] ;
+		    Unit *xp = (Unit *) __atomic_load_n (
+			(Unit **) &S->colptr [jcol], __ATOMIC_ACQUIRE) ;
 		    Int jlen = S->Llen [jcol] ;
 		    Int *Lij = (Int *) xp ;
-		    Entry *Lxj = (Entry *) (xp + UNITS (Int, jlen)) ;
 		    Int p2, found = 0 ;
 		    for (p2 = 0 ; p2 < jlen ; p2++)
 		    {
@@ -2087,31 +2076,61 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		    }
 		    if (found)
 		    {
-			Int phead = 0, ptail = jlen ;
-			atomic_fetch_add_explicit (&sh->colver [jcol], 1,
-						   memory_order_acq_rel) ;
-			while (phead < ptail)
+			/* copy-on-prune: partition a fresh copy of the
+			   whole packed column and swap the pointer.
+			   Readers holding the old pointer keep a
+			   consistent (index,value) pairing forever (the
+			   chunk arenas outlive the factorization), so
+			   the numeric consumers need no copy and no
+			   seqlock retry.  The swap loop below replays
+			   the exact in-place partition order so the
+			   published arrangement stays bit-identical to
+			   the previous algorithm. */
+			Int julen = S->Ulen [jcol] ;
+			size_t lpart = (size_t) (UNITS (Int, jlen) +
+						 UNITS (Entry, jlen)) ;
+			size_t used = lpart +
+			    (size_t) (UNITS (Int, julen) +
+				      UNITS (Entry, julen)) ;
+			Unit *newcol = kls_klu_chunk_alloc (S, used) ;
+			if (newcol != NULL)
 			{
-			    Int row = Lij [phead] ;
-			    if (S->Pinv [row] >= 0)
+			    Int *nLi = (Int *) newcol ;
+			    Entry *nLx =
+				(Entry *) (newcol + UNITS (Int, jlen)) ;
+			    Int phead = 0, ptail = jlen ;
+			    memcpy (newcol, xp, used * sizeof (Unit)) ;
+			    while (phead < ptail)
 			    {
-				phead++ ;
+				Int row = nLi [phead] ;
+				if (S->Pinv [row] >= 0)
+				{
+				    phead++ ;
+				}
+				else
+				{
+				    Entry xtmp ;
+				    ptail-- ;
+				    nLi [phead] = nLi [ptail] ;
+				    nLi [ptail] = row ;
+				    xtmp = nLx [phead] ;
+				    nLx [phead] = nLx [ptail] ;
+				    nLx [ptail] = xtmp ;
+				}
 			    }
-			    else
-			    {
-				Entry xtmp ;
-				ptail-- ;
-				Lij [phead] = Lij [ptail] ;
-				Lij [ptail] = row ;
-				xtmp = Lxj [phead] ;
-				Lxj [phead] = Lxj [ptail] ;
-				Lxj [ptail] = xtmp ;
-			    }
+			    atomic_fetch_add_explicit (&sh->colver [jcol],
+						       1,
+						       memory_order_acq_rel) ;
+			    __atomic_store_n ((Unit **) &S->colptr [jcol],
+					      newcol, __ATOMIC_RELEASE) ;
+			    atomic_store_explicit (&sh->lpend [jcol], ptail,
+						   memory_order_release) ;
+			    atomic_fetch_add_explicit (&sh->colver [jcol],
+						       1,
+						       memory_order_acq_rel) ;
 			}
-			atomic_store_explicit (&sh->lpend [jcol], ptail,
-					       memory_order_release) ;
-			atomic_fetch_add_explicit (&sh->colver [jcol], 1,
-						   memory_order_acq_rel) ;
+			/* allocation failure: skip the prune (it is an
+			   optimization; unpruned scans stay correct) */
 		    }
 		}
 	    }
