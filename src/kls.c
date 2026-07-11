@@ -123730,6 +123730,13 @@ int kls_factor(kls_solver *solver, const double *values) {
     if (solver->numeric != NULL) {
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
     } else if (!had_numeric &&
+        /* same class gate as the race symbolic-join site: the
+           mostly-missing-diagonal low-degree class pivots numerically
+           and the predicted attempt fill-rejects every time (~0.9s
+           wasted on mac_econ's one-shot) */
+        (!is_large_sparse_diagonal_low_degree_pattern(
+            solver->n, solver->col_ptr, solver->row_idx) ||
+         getenv("KLS_PREDICTED_TRY_LOWDEG") != NULL) &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
       if (kls_trace_entry) {
