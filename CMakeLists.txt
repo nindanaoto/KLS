@@ -398,6 +398,13 @@ add_library(kls_suitesparse STATIC
   ${KLS_VENDOR_SOURCES})
 set_target_properties(kls_suitesparse PROPERTIES
   POSITION_INDEPENDENT_CODE ON)
+# Pin hot-loop alignment in the factorization kernels: the serial
+# scatter loop's wall time swings up to 15% with link-order code
+# layout (identical binaries for the kernel TU measured 13.1 vs 15.1s
+# on mac_econ when an unrelated kls.c commit shifted addresses).
+target_compile_options(kls_suitesparse PRIVATE
+  $<$<C_COMPILER_ID:GNU,Clang>:-falign-functions=64 -falign-loops=32>)
+
 target_include_directories(kls_suitesparse
   PUBLIC
     ${KLS_SUITESPARSE_INCLUDE_DIRS})
