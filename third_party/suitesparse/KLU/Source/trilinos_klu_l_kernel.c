@@ -2997,12 +2997,15 @@ size_t KLS_KLU_KERNEL_PIPE
 
     KLS_KLU_KERNEL_INIT (&S) ;
 
-    /* fundamental-supernode panels over the column etree.  Claim
-       granularity alone (step a) SERIALIZES the pipe (in-order
-       publication at 32-column claim grain: pre2 trial 12 -> 34s), so
-       panels stay env-gated until the multi-column apply (step b)
-       restores the economics. */
-    if (getenv ("KLS_KLU_PIPE_PANELS") != NULL)
+    /* fundamental-supernode panels over the column etree, processed
+       lockstep with the panel-major buffer.  The partition width is
+       capped at the per-worker workspace width so NO panel falls back
+       to serialized per-column claims: fallback panels were the
+       measured catastrophe (pre2 42s with 62% fallback vs 13s at full
+       coverage; column mode 17.7s).  The win is the buffer: union
+       applies land in a compact L2-resident panel-major block instead
+       of the 5MB X vector (pre2 workers 12.0 -> 7.2s). */
+    if (getenv ("KLS_KLU_PIPE_NOPANELS") == NULL)
     {
 	Int *sp = (Int *) malloc ((size_t) (4 * n + 2) * sizeof (Int)) ;
 	if (sp != NULL)
@@ -3010,12 +3013,32 @@ size_t KLS_KLU_KERNEL_PIPE
 	    Int *par = sp, *anc = sp + n, *prv = sp + 2*n ;
 	    Int *pst = sp + 3*n ;   /* worst case n+1 panel offsets */
 	    Int kk, width = 1, np = 0 ;
+	    Int wcap_env ;
+	    {
+		/* same budget formula as the worker workspace below */
+		size_t col_cap = (size_t) n / 4 + 16 ;
+		size_t per_col = (size_t) n * sizeof (Entry) +
+		    col_cap * (sizeof (Entry) + 2 * sizeof (Int)) ;
+		wcap_env = (Int) (((size_t) 128 << 20) /
+				  (per_col > 0 ? per_col : 1)) ;
+		if (wcap_env > 32) wcap_env = 32 ;
+		if (wcap_env < 2) wcap_env = 2 ;
+	    }
+	    {
+		const char *we = getenv ("KLS_KLU_PIPE_PANELW") ;
+		if (we != NULL)
+		{
+		    wcap_env = atol (we) ;
+		    if (wcap_env < 2) wcap_env = 2 ;
+		    if (wcap_env > 32) wcap_env = 32 ;
+		}
+	    }
 	    kls_klu_block_coletree (n, Ap, Ai, Q, k1, PSinv, par, anc,
 				    prv) ;
 	    pst [0] = 0 ;
 	    for (kk = 1 ; kk <= n ; kk++)
 	    {
-		if (kk < n && par [kk-1] == kk && width < 32)
+		if (kk < n && par [kk-1] == kk && width < wcap_env)
 		{
 		    width++ ;
 		    continue ;
