@@ -28581,6 +28581,13 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   kls_psmetis_spec psmetis_spec;
   memset(&psmetis_spec, 0, sizeof(psmetis_spec));
   psmetis_spec.status = KLS_ERR_FACTOR_FAILED;
+  /* large-spral estimate speculation: the METIS estimate analyze can
+     overlap choose_symbolic_for_pattern (the base candidates draw no
+     GKlib rand, so the legacy-RNG class's orderings stay
+     deterministic with the worker as the only rand consumer) */
+  kls_psmetis_spec psmetis_est_spec;
+  memset(&psmetis_est_spec, 0, sizeof(psmetis_est_spec));
+  psmetis_est_spec.status = KLS_ERR_FACTOR_FAILED;
 #endif
 
   if (solver->orientation == KLS_ORIENTATION_TRANSPOSE) {
@@ -28772,6 +28779,20 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
   kls_ordering trial_ordering = KLS_ORDERING_AUTO;
   double trial_score = 0.0;
+#if defined(KLS_HAVE_METIS) && defined(KLS_HAVE_SPRAL_SCALING)
+  if (use_large_spral_match && solver->options.threads >= 2 &&
+      getenv("KLS_DISABLE_PSMETIS_SPEC") == NULL) {
+    psmetis_est_spec.n = solver->n;
+    psmetis_est_spec.col_ptr = trial_col_ptr;
+    psmetis_est_spec.row_idx = trial_row_idx;
+    psmetis_est_spec.options = trial_options;
+    psmetis_est_spec.options.ordering = KLS_ORDERING_METIS;
+    if (pthread_create(&psmetis_est_spec.thread, NULL,
+                       kls_psmetis_spec_main, &psmetis_est_spec) == 0) {
+      psmetis_est_spec.launched = 1;
+    }
+  }
+#endif
   status = choose_symbolic_for_pattern(solver->n, trial_col_ptr, trial_row_idx,
                                        &trial_options, &trial_symbolic,
                                        &trial_common, &trial_ordering,
@@ -28794,11 +28815,29 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     trilinos_klu_l_symbolic *metis_symbolic = NULL;
     trilinos_klu_l_common metis_common;
     kls_separator_analysis metis_separator;
+    int metis_est_ok = 0;
     memset(&metis_separator, 0, sizeof(metis_separator));
-    if (analyze_with_ordering(solver->n, trial_col_ptr, trial_row_idx,
-                              &metis_options, KLS_ORDERING_METIS,
-                              &metis_symbolic, &metis_common,
-                              &metis_separator) == KLS_OK) {
+    if (psmetis_est_spec.launched || psmetis_est_spec.symbolic != NULL) {
+      kls_psmetis_spec_join(&psmetis_est_spec);
+      if (psmetis_est_spec.status == KLS_OK &&
+          psmetis_est_spec.symbolic != NULL) {
+        metis_symbolic = psmetis_est_spec.symbolic;
+        metis_common = psmetis_est_spec.common;
+        kls_separator_analysis_move(&metis_separator,
+                                    &psmetis_est_spec.separator);
+        psmetis_est_spec.symbolic = NULL;
+        metis_est_ok = 1;
+      } else {
+        kls_psmetis_spec_discard(&psmetis_est_spec);
+      }
+    } else if (analyze_with_ordering(solver->n, trial_col_ptr,
+                                     trial_row_idx, &metis_options,
+                                     KLS_ORDERING_METIS, &metis_symbolic,
+                                     &metis_common,
+                                     &metis_separator) == KLS_OK) {
+      metis_est_ok = 1;
+    }
+    if (metis_est_ok) {
       const double metis_score = symbolic_score(metis_symbolic);
       if (kls_trace_pre_static_enabled()) {
         fprintf(stderr,
@@ -29041,9 +29080,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
 done:
 #ifdef KLS_HAVE_METIS
-  /* the speculative refinement analysis reads the trial pattern
-     arrays freed below: join and discard any still-pending run */
+  /* the speculative refinement/estimate analyses read the trial
+     pattern arrays freed below: join and discard any pending runs */
   kls_psmetis_spec_discard(&psmetis_spec);
+  kls_psmetis_spec_discard(&psmetis_est_spec);
 #endif
   if (!accepted) {
     if (trial_numeric != NULL) {
