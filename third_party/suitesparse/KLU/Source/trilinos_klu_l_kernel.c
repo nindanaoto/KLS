@@ -29,6 +29,12 @@
 #define KLS_KLU_CPU_RELAX() do { } while (0)
 #endif
 
+_Thread_local double kls_pipe_t_sym ;
+_Thread_local double kls_pipe_t_num ;
+_Thread_local long kls_pipe_copy_bytes ;
+_Thread_local long kls_pipe_madds ;
+static int kls_pipe_phase_prof ;
+
 _Thread_local double kls_construct_secs ;
 _Thread_local long kls_construct_calls ;
 _Thread_local long kls_construct_entries ;
@@ -1699,6 +1705,7 @@ static void kls_pipe_round
     Int *Pinv = S->Pinv ;
     Int top = n ;
     Int r, i, p, s ;
+    const double kls_rd_t0 = kls_pipe_phase_prof ? kls_klu_now () : 0.0 ;
 
     if (root_rows == NULL)
     {
@@ -1743,9 +1750,21 @@ static void kls_pipe_round
 	}
     }
 
+    if (kls_pipe_phase_prof)
+    {
+	kls_pipe_t_sym += kls_klu_now () - kls_rd_t0 ;
+    }
     /* numeric for this round's topological segment */
-    kls_pipe_lsolve_numeric (Pinv, LU, S->colptr, S->Stack, S->Lip, top, n,
-			     S->Llen, S->X, sh, copybuf) ;
+    {
+	const double kls_ph_t0 = kls_pipe_phase_prof ? kls_klu_now () : 0.0 ;
+	kls_pipe_lsolve_numeric (Pinv, LU, S->colptr, S->Stack, S->Lip, top,
+				 n, S->Llen, S->X, sh, copybuf) ;
+	if (kls_pipe_phase_prof)
+	{
+	    const double kls_ph_t1 = kls_klu_now () ;
+	    kls_pipe_t_num += kls_ph_t1 - kls_ph_t0 ;
+	}
+    }
 
     /* extract this round's U segment: values are final (contributions
        to a pivotal row come only from smaller pivot columns, all of
@@ -1819,6 +1838,11 @@ static void kls_pipe_lsolve_numeric
 	    }
 	    Li = (Int *) copybuf ;
 	    Lx = (Entry *) (copybuf + UNITS (Int, len)) ;
+	    if (kls_pipe_phase_prof)
+	    {
+		kls_pipe_copy_bytes += (long) (units * sizeof (Unit)) ;
+		kls_pipe_madds += len ;
+	    }
 	}
 	for (p = 0 ; p < len ; p++)
 	{
@@ -2120,11 +2144,14 @@ static void *kls_klu_pipe_worker_main (void *arg)
     if (prof)
     {
 	fprintf (stderr, "KLS pipe prof tid=%d cols=%ld rounds=%ld "
-		 "work=%.2fs spin=%.2fs final=%.2fs construct=%.2fs/%ld/%ld\n",
+		 "work=%.2fs spin=%.2fs final=%.2fs construct=%.2fs/%ld/%ld"
+		 " sym=%.2fs num=%.2fs copyMB=%ld madds=%ld\n",
 		 W->tid, W->n_cols, W->n_rounds,
 		 W->t_work, W->t_spin, W->t_final,
 		 kls_construct_secs, kls_construct_calls,
-		 kls_construct_entries) ;
+		 kls_construct_entries,
+		 kls_pipe_t_sym, kls_pipe_t_num,
+		 kls_pipe_copy_bytes >> 20, kls_pipe_madds) ;
     }
     free (promoted) ;
     return (NULL) ;
@@ -3017,6 +3044,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 
     ASSERT (Common != NULL) ;
     kls_construct_prof = getenv ("KLS_CONSTRUCT_PROF") != NULL ;
+    kls_pipe_phase_prof = getenv ("KLS_KLU_PIPE_PHASES") != NULL ;
     if (n >= 4096 && getenv ("KLS_SN_STATS") != NULL)
     {
 	/* supernodal-first-factor feasibility probe: fundamental
