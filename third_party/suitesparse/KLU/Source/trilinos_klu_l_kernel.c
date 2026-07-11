@@ -1576,6 +1576,9 @@ typedef struct kls_klu_pipe_worker_s
     Entry *pUbuf_x [32] ;
     Int *pPFlag ;             /* union dedup marks (panel generation) */
     Int *pUlist ;             /* union source list (the DFS owns Stack) */
+    Int *pFlagW [32] ;        /* per-column DFS marks: sibling columns'
+                                 interleaved collections must not
+                                 overwrite each other's marks */
     Int pW ;
 } kls_klu_pipe_worker ;
 
@@ -1989,20 +1992,20 @@ static int kls_pipe_panel_lockstep
 		{
 		    Int i = S->PSinv [S->Ai [p]] - S->k1 ;
 		    if (i < 0) continue ;
-		    if (S->Flag [i] != kw)
+		    if (W->pFlagW [w][i] != kw)
 		    {
 			if (S->Pinv [i] >= 0 && S->Pinv [i] < plimit)
 			{
 			    top = kls_pipe_dfs (i, kw, plimit, S->Pinv,
 						S->Llen, S->Lip, S->Stack,
-						S->Flag, top, NULL,
+						W->pFlagW [w], top, NULL,
 						S->colptr, W->pLik [w],
 						&l_len [w], S->Ap_pos, sh,
 						W->ap_ver) ;
 			}
 			else
 			{
-			    S->Flag [i] = kw ;
+			    W->pFlagW [w][i] = kw ;
 			    W->pLik [w][l_len [w]] = i ;
 			    l_len [w]++ ;
 			}
@@ -2030,10 +2033,10 @@ static int kls_pipe_panel_lockstep
 		for (p = 0 ; p < npromoted ; p++)
 		{
 		    Int i = promoted [p] ;
-		    S->Flag [i] = TRILINOS_KLU_EMPTY ;
+		    W->pFlagW [w][i] = TRILINOS_KLU_EMPTY ;
 		    top = kls_pipe_dfs (i, kw, plimit, S->Pinv, S->Llen,
-					S->Lip, S->Stack, S->Flag, top,
-					NULL, S->colptr, W->pLik [w],
+					S->Lip, S->Stack, W->pFlagW [w],
+					top, NULL, S->colptr, W->pLik [w],
 					&l_len [w], S->Ap_pos, sh,
 					W->ap_ver) ;
 		}
@@ -2240,6 +2243,24 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	    const Int w = k - panel_k0 ;
 	    l_length = panel_l [w] ;
 	    ucount = panel_u [w] ;
+	    /* transfer this column's lockstep marks into the shared
+	       Flag: candidates from the pattern list, applied sources
+	       via their pivot rows (P[u]) - the continuation's rounds
+	       must not re-visit (candidates would duplicate, sources
+	       would double-apply) */
+	    {
+		Int q4 ;
+		for (q4 = 0 ; q4 < l_length ; q4++)
+		{
+		    S->Flag [w > 0 ? W->pLik [w][q4]
+				   : ((Int *) S->scratch) [q4]] = k ;
+		}
+		for (q4 = 0 ; q4 < ucount ; q4++)
+		{
+		    Int uv = w > 0 ? W->pUbuf_i [w][q4] : W->ubuf_i [q4] ;
+		    S->Flag [S->P [uv]] = k ;
+		}
+	    }
 	    if (w > 0)
 	    {
 		memcpy (Lik, W->pLik [w], (size_t) l_length * sizeof (Int)) ;
@@ -2254,12 +2275,11 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		    W->pX [w] = tmp ;
 		}
 	    }
-	    plimit = atomic_load_explicit (&sh->prefix,
-					   memory_order_acquire) ;
-	    if (plimit > k)
-	    {
-		plimit = k ;
-	    }
+	    /* the lockstep covered exactly the external window [0, k0):
+	       resume from there so the promotion rounds process the
+	       intra-panel window (k0, k) - the earlier panel columns'
+	       pivots and updates arrive like any published column */
+	    plimit = panel_k0 ;
 	}
 	else
 	{
@@ -2439,6 +2459,17 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	    if (S->Pinv [diagrow] < 0)
 	    {
 		Int kbar = FLIP (S->Pinv [pivrow]) ;
+		if (kbar < 0 || kbar >= n)
+		{
+		    fprintf (stderr, "KLS pipe: BAD kbar=%ld k=%ld pivrow=%ld"
+			     " Pinv[pivrow]=%ld diagrow=%ld tid=%d\n",
+			     (long) kbar, (long) k, (long) pivrow,
+			     (long) S->Pinv [pivrow], (long) diagrow,
+			     W->tid) ;
+		    atomic_store_explicit (&sh->abort_flag, 1,
+					   memory_order_release) ;
+		    break ;
+		}
 		S->P [kbar] = diagrow ;
 		S->Pinv [diagrow] = FLIP (kbar) ;
 	    }
@@ -2558,6 +2589,15 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	if (prof)
 	{
 	    W->t_final += kls_klu_now () - t0 ;
+	}
+	if (panel_inject && k - panel_k0 > 0)
+	{
+	    /* restore the ownership swap: the worker's own X returns to
+	       S->X so the cleanup frees exactly the buffers it
+	       allocated (the caller owns the template X) */
+	    Entry *tmp = S->X ;
+	    S->X = W->pX [k - panel_k0] ;
+	    W->pX [k - panel_k0] = tmp ;
 	}
 	}   /* panel column loop */
     }
@@ -2841,6 +2881,7 @@ size_t KLS_KLU_KERNEL_PIPE
 	    memset (W->pLik, 0, sizeof (W->pLik)) ;
 	    memset (W->pUbuf_i, 0, sizeof (W->pUbuf_i)) ;
 	    memset (W->pUbuf_x, 0, sizeof (W->pUbuf_x)) ;
+	    memset (W->pFlagW, 0, sizeof (W->pFlagW)) ;
 	    W->pPFlag = NULL ;
 	    W->pUlist = NULL ;
 	    if (panel_start != NULL)
@@ -2851,21 +2892,39 @@ size_t KLS_KLU_KERNEL_PIPE
 						      per_col : 1)) ;
 		if (wcap > 32) wcap = 32 ;
 		if (wcap < 1) wcap = 1 ;
-		for (w = 1 ; w < wcap ; w++)
+		for (w = 0 ; w < wcap ; w++)
 		{
-		    W->pX [w] = (Entry *) calloc ((size_t) n,
-						  sizeof (Entry)) ;
-		    W->pLik [w] = (Int *) malloc ((size_t) n *
-						  sizeof (Int)) ;
-		    W->pUbuf_i [w] = (Int *) malloc ((size_t) n *
-						     sizeof (Int)) ;
-		    W->pUbuf_x [w] = (Entry *) malloc ((size_t) n *
-						       sizeof (Entry)) ;
-		    if (W->pX [w] == NULL || W->pLik [w] == NULL ||
-			W->pUbuf_i [w] == NULL || W->pUbuf_x [w] == NULL)
+		    if (w > 0)
 		    {
-			wcap = w ;
+			W->pX [w] = (Entry *) calloc ((size_t) n,
+						      sizeof (Entry)) ;
+			W->pLik [w] = (Int *) malloc ((size_t) n *
+						      sizeof (Int)) ;
+			W->pUbuf_i [w] = (Int *) malloc ((size_t) n *
+							 sizeof (Int)) ;
+			W->pUbuf_x [w] = (Entry *) malloc ((size_t) n *
+							   sizeof (Entry)) ;
+			if (W->pX [w] == NULL || W->pLik [w] == NULL ||
+			    W->pUbuf_i [w] == NULL ||
+			    W->pUbuf_x [w] == NULL)
+			{
+			    wcap = w ;
+			    break ;
+			}
+		    }
+		    W->pFlagW [w] = (Int *) malloc ((size_t) n *
+						    sizeof (Int)) ;
+		    if (W->pFlagW [w] == NULL)
+		    {
+			wcap = w > 0 ? w : 1 ;
 			break ;
+		    }
+		    {
+			Int q3 ;
+			for (q3 = 0 ; q3 < n ; q3++)
+			{
+			    W->pFlagW [w][q3] = TRILINOS_KLU_EMPTY ;
+			}
 		    }
 		}
 		W->pPFlag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
@@ -3011,12 +3070,16 @@ size_t KLS_KLU_KERNEL_PIPE
 	    free (workers [t].copybuf) ;
 	{
 	    Int w ;
-	    for (w = 1 ; w < workers [t].pW ; w++)
+	    for (w = 0 ; w < workers [t].pW ; w++)
 	    {
-		free (workers [t].pX [w]) ;
-		free (workers [t].pLik [w]) ;
-		free (workers [t].pUbuf_i [w]) ;
-		free (workers [t].pUbuf_x [w]) ;
+		if (w > 0)
+		{
+		    free (workers [t].pX [w]) ;
+		    free (workers [t].pLik [w]) ;
+		    free (workers [t].pUbuf_i [w]) ;
+		    free (workers [t].pUbuf_x [w]) ;
+		}
+		free (workers [t].pFlagW [w]) ;
 	    }
 	    free (workers [t].pPFlag) ;
 	    free (workers [t].pUlist) ;
