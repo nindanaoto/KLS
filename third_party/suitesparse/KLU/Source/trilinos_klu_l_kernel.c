@@ -1543,6 +1543,13 @@ typedef struct kls_klu_pipe_shared_s
        bounds the DFS scan of column j to its pivotal prefix. */
     _Atomic Int *lpend ;
     _Atomic unsigned *colver ;
+    /* panel claiming (supernodal-pipe step a): workers claim whole
+       fundamental supernodes; the per-column processing and in-order
+       publication are unchanged, so results are bit-identical to
+       column claiming - panels only group the claim order. */
+    _Atomic Int next_panel ;
+    const Int *panel_start ;  /* npanels+1 offsets, or NULL */
+    Int npanels ;
 } kls_klu_pipe_shared ;
 
 typedef struct kls_klu_pipe_worker_s
@@ -1905,12 +1912,41 @@ static void *kls_klu_pipe_worker_main (void *arg)
 
     for ( ; ; )
     {
-	Int k = atomic_fetch_add_explicit (&sh->next_col, 1,
-					   memory_order_relaxed) ;
-	if (k >= n ||
-	    atomic_load_explicit (&sh->abort_flag, memory_order_acquire))
+	Int k, kp_end ;
+	if (sh->panel_start != NULL)
 	{
-	    break ;
+	    /* claim a whole fundamental supernode; the per-column body
+	       below is unchanged (bit-identical results - panels only
+	       group the claim order) */
+	    Int pnl = atomic_fetch_add_explicit (&sh->next_panel, 1,
+						 memory_order_relaxed) ;
+	    if (pnl >= sh->npanels ||
+		atomic_load_explicit (&sh->abort_flag,
+				      memory_order_acquire))
+	    {
+		break ;
+	    }
+	    k = sh->panel_start [pnl] ;
+	    kp_end = sh->panel_start [pnl + 1] ;
+	}
+	else
+	{
+	    k = atomic_fetch_add_explicit (&sh->next_col, 1,
+					   memory_order_relaxed) ;
+	    if (k >= n ||
+		atomic_load_explicit (&sh->abort_flag,
+				      memory_order_acquire))
+	    {
+		break ;
+	    }
+	    kp_end = k + 1 ;
+	}
+	for ( ; k < kp_end ; k++)
+	{
+	if (atomic_load_explicit (&sh->abort_flag, memory_order_acquire))
+	{
+	    free (promoted) ;
+	    return (NULL) ;
 	}
 
 	Unit *LU = S->scratch ;
@@ -2219,6 +2255,7 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	{
 	    W->t_final += kls_klu_now () - t0 ;
 	}
+	}   /* panel column loop */
     }
     if (prof)
     {
@@ -2343,6 +2380,8 @@ size_t KLS_KLU_KERNEL_PIPE
     int t, spawn_failed = 0 ;
     Int k, poff ;
     size_t final_size ;
+    Int *panel_start = NULL ;
+    Int npanels = 0 ;
 
     if (nthreads < 1) nthreads = 1 ;
     if (nthreads > 16) nthreads = 16 ;
@@ -2398,10 +2437,50 @@ size_t KLS_KLU_KERNEL_PIPE
 
     KLS_KLU_KERNEL_INIT (&S) ;
 
+    /* fundamental-supernode panels over the column etree.  Claim
+       granularity alone (step a) SERIALIZES the pipe (in-order
+       publication at 32-column claim grain: pre2 trial 12 -> 34s), so
+       panels stay env-gated until the multi-column apply (step b)
+       restores the economics. */
+    if (getenv ("KLS_KLU_PIPE_PANELS") != NULL)
+    {
+	Int *sp = (Int *) malloc ((size_t) (4 * n + 2) * sizeof (Int)) ;
+	if (sp != NULL)
+	{
+	    Int *par = sp, *anc = sp + n, *prv = sp + 2*n ;
+	    Int *pst = sp + 3*n ;   /* worst case n+1 panel offsets */
+	    Int kk, width = 1, np = 0 ;
+	    kls_klu_block_coletree (n, Ap, Ai, Q, k1, PSinv, par, anc,
+				    prv) ;
+	    pst [0] = 0 ;
+	    for (kk = 1 ; kk <= n ; kk++)
+	    {
+		if (kk < n && par [kk-1] == kk && width < 32)
+		{
+		    width++ ;
+		    continue ;
+		}
+		np++ ;
+		pst [np] = kk ;
+		width = 1 ;
+	    }
+	    panel_start = (Int *) malloc ((size_t) (np + 1) * sizeof (Int)) ;
+	    if (panel_start != NULL)
+	    {
+		memcpy (panel_start, pst, (size_t) (np + 1) * sizeof (Int)) ;
+		npanels = np ;
+	    }
+	    free (sp) ;
+	}
+    }
+
     /* shared struct is initialized before worker setup */
     atomic_init (&sh.next_col, 0) ;
     atomic_init (&sh.prefix, 0) ;
     atomic_init (&sh.abort_flag, 0) ;
+    atomic_init (&sh.next_panel, 0) ;
+    sh.panel_start = panel_start ;
+    sh.npanels = npanels ;
     sh.n = n ;
     sh.nthreads = nthreads ;
     sh.lpend = NULL ;
@@ -2415,6 +2494,7 @@ size_t KLS_KLU_KERNEL_PIPE
 	if (sh.lpend == NULL || sh.colver == NULL)
 	{
 	    free ((void *) sh.lpend) ;
+    free (panel_start) ;
 	    free ((void *) sh.colver) ;
 	    sh.lpend = NULL ;
 	    sh.colver = NULL ;
@@ -2570,6 +2650,7 @@ size_t KLS_KLU_KERNEL_PIPE
 	    free (workers [t].copybuf) ;
 	}
 	free ((void *) sh.lpend) ;
+    free (panel_start) ;
 	free ((void *) sh.colver) ;
 	free (S.colptr) ;
 	*p_LU = S.LU ;
