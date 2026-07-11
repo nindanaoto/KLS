@@ -1575,6 +1575,7 @@ typedef struct kls_klu_pipe_worker_s
     Int *pUbuf_i [32] ;
     Entry *pUbuf_x [32] ;
     Int *pPFlag ;             /* union dedup marks (panel generation) */
+    Int *pUlist ;             /* union source list (the DFS owns Stack) */
     Int pW ;
 } kls_klu_pipe_worker ;
 
@@ -1906,6 +1907,248 @@ static void kls_pipe_lsolve_numeric
     }
 }
 
+
+/* ========================================================================== */
+/* === supernodal-pipe lockstep panel body (step b) ========================= */
+/* ========================================================================== */
+
+/* Processes the panel's W columns in lockstep: external sources are
+ * applied through ONE masked union pass per round (each source column
+ * streamed once for all panel columns that discovered it - the
+ * membership bitmask in W->pPFlag guards against partially-updated
+ * future dependencies), then the columns run their normal final
+ * phases in order as the prefix advances through the panel.  Returns
+ * 0 on success, 1 on abort (abort_flag already set). */
+static int kls_pipe_panel_lockstep
+(
+    kls_klu_pipe_worker *W,
+    Int k0,
+    Int kend,
+    Int *promoted,
+    Int l_out [ ],
+    Int u_out [ ]
+)
+{
+    kls_klu_pipe_shared *sh = W->sh ;
+    KLS_KLU_KERNEL_STATE *S = &W->S ;
+    const Int n = S->n ;
+    const Int PW = kend - k0 ;
+    Int w, k, j, p ;
+    Int l_len [32] ;
+    Int u_cnt [32] ;
+    Int seg_done [32] ;
+    Int plimit, newlimit ;
+    Int *ulist = W->pUlist ;
+    Int ulen = 0 ;
+
+    /* slot 0 aliases the worker's own arrays */
+    W->pX [0] = S->X ;
+    W->pLik [0] = NULL ;      /* column 0 pattern lives in scratch head */
+
+    /* phase A: construct every panel column into its own accumulator */
+    for (w = 0 ; w < PW ; w++)
+    {
+	l_len [w] = 0 ;
+	u_cnt [w] = 0 ;
+	seg_done [w] = 0 ;
+	S->Lip [k0 + w] = 0 ;
+	construct_column (k0 + w, S->Ap, S->Ai, S->Ax, S->Q, W->pX [w],
+			  S->k1, S->PSinv, S->Rs, S->scale,
+			  S->Offp, S->Offi, S->Offx) ;
+    }
+
+    /* pattern lists: column 0 uses the scratch head (the final block
+       below expects Lik there); columns 1.. use the panel arrays */
+    {
+	Int *Lik0 = (Int *) S->scratch ;
+	W->pLik [0] = Lik0 ;
+    }
+
+    /* phase B: external rounds against the shared prefix, windowed at
+       k0 (intra-panel dependencies resolve in phase C) */
+    plimit = atomic_load_explicit (&sh->prefix, memory_order_acquire) ;
+    if (plimit > k0)
+    {
+	plimit = k0 ;
+    }
+    for ( ; ; )
+    {
+	/* per-column DFS collections for this window */
+	ulen = 0 ;
+	for (w = 0 ; w < PW ; w++)
+	{
+	    Int top = n ;
+	    Int kw = k0 + w ;
+	    if (seg_done [w] == 0)
+	    {
+		/* round-1 roots: A(:,kw) block rows */
+		Int kglobal = kw + S->k1 ;
+		Int oldcol = S->Q [kglobal] ;
+		Int pend = S->Ap [oldcol+1] ;
+		for (p = S->Ap [oldcol] ; p < pend ; p++)
+		{
+		    Int i = S->PSinv [S->Ai [p]] - S->k1 ;
+		    if (i < 0) continue ;
+		    if (S->Flag [i] != kw)
+		    {
+			if (S->Pinv [i] >= 0 && S->Pinv [i] < plimit)
+			{
+			    top = kls_pipe_dfs (i, kw, plimit, S->Pinv,
+						S->Llen, S->Lip, S->Stack,
+						S->Flag, top, NULL,
+						S->colptr, W->pLik [w],
+						&l_len [w], S->Ap_pos, sh,
+						W->ap_ver) ;
+			}
+			else
+			{
+			    S->Flag [i] = kw ;
+			    W->pLik [w][l_len [w]] = i ;
+			    l_len [w]++ ;
+			}
+		    }
+		}
+		seg_done [w] = 1 ;
+	    }
+	    else
+	    {
+		/* later round: promoted candidates of column w */
+		Int npromoted = 0, cw = 0 ;
+		for (p = 0 ; p < l_len [w] ; p++)
+		{
+		    Int i = W->pLik [w][p] ;
+		    if (S->Pinv [i] >= 0 && S->Pinv [i] < plimit)
+		    {
+			promoted [npromoted++] = i ;
+		    }
+		    else
+		    {
+			W->pLik [w][cw++] = i ;
+		    }
+		}
+		l_len [w] = cw ;
+		for (p = 0 ; p < npromoted ; p++)
+		{
+		    Int i = promoted [p] ;
+		    S->Flag [i] = TRILINOS_KLU_EMPTY ;
+		    top = kls_pipe_dfs (i, kw, plimit, S->Pinv, S->Llen,
+					S->Lip, S->Stack, S->Flag, top,
+					NULL, S->colptr, W->pLik [w],
+					&l_len [w], S->Ap_pos, sh,
+					W->ap_ver) ;
+		}
+	    }
+	    /* merge this column's topological segment into the union
+	       (first occurrence keeps a globally topological order) */
+	    for (p = top ; p < n ; p++)
+	    {
+		j = S->Stack [p] ;
+		if (W->pPFlag [j] == TRILINOS_KLU_EMPTY)
+		{
+		    W->pPFlag [j] = (Int) 1 << w ;
+		    ulist [ulen++] = j ;
+		}
+		else
+		{
+		    W->pPFlag [j] |= (Int) 1 << w ;
+		}
+	    }
+	}
+	/* masked union apply: each source streamed once */
+	for (p = 0 ; p < ulen ; p++)
+	{
+	    Int mask ;
+	    Int jnew ;
+	    Entry xj [32] ;
+	    j = ulist [p] ;
+	    mask = W->pPFlag [j] ;
+	    jnew = S->Pinv [j] ;
+	    {
+		Unit *xp = (Unit *) __atomic_load_n (
+		    (Unit **) &S->colptr [jnew], __ATOMIC_ACQUIRE) ;
+		Int len = S->Llen [jnew] ;
+		const int32_t *Li32 = (const int32_t *) xp ;
+		const Entry *Lx = (const Entry *) (xp +
+						   KLS_UNITS32 (len)) ;
+		Int q ;
+		for (w = 0 ; w < PW ; w++)
+		{
+		    if (mask & ((Int) 1 << w))
+		    {
+			xj [w] = W->pX [w][j] ;
+		    }
+		}
+		for (q = 0 ; q < len ; q++)
+		{
+		    const Int r = (Int) Li32 [q] ;
+		    const Entry v = Lx [q] ;
+		    for (w = 0 ; w < PW ; w++)
+		    {
+			if (mask & ((Int) 1 << w))
+			{
+			    W->pX [w][r] -= v * xj [w] ;
+			}
+		    }
+		}
+	    }
+	    if (kls_pipe_phase_prof)
+	    {
+		Int nb = 0 ;
+		for (w = 0 ; w < PW ; w++) nb += (mask >> w) & 1 ;
+		kls_pipe_madds += (long) S->Llen [jnew] * nb ;
+	    }
+	}
+	/* U extraction per member column, then clear */
+	for (p = 0 ; p < ulen ; p++)
+	{
+	    Int mask ;
+	    j = ulist [p] ;
+	    mask = W->pPFlag [j] ;
+	    for (w = 0 ; w < PW ; w++)
+	    {
+		if (mask & ((Int) 1 << w))
+		{
+		    Int *ubi = w == 0 ? W->ubuf_i : W->pUbuf_i [w] ;
+		    Entry *ubx = w == 0 ? W->ubuf_x : W->pUbuf_x [w] ;
+		    ubi [u_cnt [w]] = S->Pinv [j] ;
+		    ubx [u_cnt [w]] = W->pX [w][j] ;
+		    W->pX [w][j] = 0.0 ;
+		    u_cnt [w]++ ;
+		}
+	    }
+	    W->pPFlag [j] = TRILINOS_KLU_EMPTY ;
+	}
+	if (plimit >= k0)
+	{
+	    break ;
+	}
+	/* wait for the prefix to advance */
+	do
+	{
+	    if (atomic_load_explicit (&sh->abort_flag,
+				      memory_order_acquire))
+	    {
+		return (1) ;
+	    }
+	    KLS_KLU_CPU_RELAX () ;
+	    newlimit = atomic_load_explicit (&sh->prefix,
+					     memory_order_acquire) ;
+	} while (newlimit <= plimit) ;
+	if (newlimit > k0)
+	{
+	    newlimit = k0 ;
+	}
+	plimit = newlimit ;
+	if (kls_pipe_phase_prof) { W->n_rounds++ ; }
+    }
+    for (w = 0 ; w < PW ; w++)
+    {
+	l_out [w] = l_len [w] ;
+	u_out [w] = u_cnt [w] ;
+    }
+    return (0) ;
+}
+
 static void *kls_klu_pipe_worker_main (void *arg)
 {
     kls_klu_pipe_worker *W = (kls_klu_pipe_worker *) arg ;
@@ -1914,6 +2157,9 @@ static void *kls_klu_pipe_worker_main (void *arg)
     const Int n = S->n ;
     const int prof = getenv ("KLS_KLU_PIPE_PROF") != NULL ;
     double t0 = 0 ;
+    Int panel_l [32], panel_u [32] ;
+    Int panel_k0 = 0 ;
+    int panel_inject = 0 ;
     Int *promoted = (Int *) malloc ((size_t) n * sizeof (Int)) ;
     if (promoted == NULL)
     {
@@ -1939,6 +2185,19 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	    }
 	    k = sh->panel_start [pnl] ;
 	    kp_end = sh->panel_start [pnl + 1] ;
+	    panel_inject = 0 ;
+	    panel_k0 = k ;
+	    if (kp_end - k > 1 && kp_end - k <= W->pW &&
+		sh->lpend != NULL && W->pPFlag != NULL)
+	    {
+		if (kls_pipe_panel_lockstep (W, k, kp_end, promoted,
+					     panel_l, panel_u))
+		{
+		    free (promoted) ;
+		    return (NULL) ;
+		}
+		panel_inject = 1 ;
+	    }
 	}
 	else
 	{
@@ -1971,6 +2230,39 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	S->Lip [k] = 0 ;
 	Lik = (Int *) LU ;
 
+	if (panel_inject)
+	{
+	    /* lockstep already constructed, ran the external rounds and
+	       extracted their U segments for this column: inject that
+	       state and let the normal promotion rounds + final phase
+	       finish the column (intra-panel sources arrive through the
+	       prefix like any published column) */
+	    const Int w = k - panel_k0 ;
+	    l_length = panel_l [w] ;
+	    ucount = panel_u [w] ;
+	    if (w > 0)
+	    {
+		memcpy (Lik, W->pLik [w], (size_t) l_length * sizeof (Int)) ;
+		memcpy (W->ubuf_i, W->pUbuf_i [w],
+			(size_t) ucount * sizeof (Int)) ;
+		memcpy (W->ubuf_x, W->pUbuf_x [w],
+			(size_t) ucount * sizeof (Entry)) ;
+		/* the column's accumulator: swap the panel X in */
+		{
+		    Entry *tmp = S->X ;
+		    S->X = W->pX [w] ;
+		    W->pX [w] = tmp ;
+		}
+	    }
+	    plimit = atomic_load_explicit (&sh->prefix,
+					   memory_order_acquire) ;
+	    if (plimit > k)
+	    {
+		plimit = k ;
+	    }
+	}
+	else
+	{
 	construct_column (k, S->Ap, S->Ai, S->Ax, S->Q, S->X,
 			  S->k1, S->PSinv, S->Rs, S->scale,
 			  S->Offp, S->Offi, S->Offx) ;
@@ -1984,6 +2276,7 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	kls_pipe_round (S, k, plimit, NULL, 0, LU, Lik, &l_length,
 			W->ubuf_i, W->ubuf_x, &ucount, sh, W->ap_ver,
 			W->copybuf) ;
+	}
 
 	/* later rounds as the prefix advances toward k */
 	while (plimit < k)
@@ -2549,6 +2842,7 @@ size_t KLS_KLU_KERNEL_PIPE
 	    memset (W->pUbuf_i, 0, sizeof (W->pUbuf_i)) ;
 	    memset (W->pUbuf_x, 0, sizeof (W->pUbuf_x)) ;
 	    W->pPFlag = NULL ;
+	    W->pUlist = NULL ;
 	    if (panel_start != NULL)
 	    {
 		size_t per_col = (size_t) n * (sizeof (Entry) * 2 +
@@ -2575,6 +2869,12 @@ size_t KLS_KLU_KERNEL_PIPE
 		    }
 		}
 		W->pPFlag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		W->pUlist = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		if (W->pUlist == NULL)
+		{
+		    free (W->pPFlag) ;
+		    W->pPFlag = NULL ;
+		}
 		if (W->pPFlag != NULL)
 		{
 		    Int q2 ;
@@ -2719,6 +3019,7 @@ size_t KLS_KLU_KERNEL_PIPE
 		free (workers [t].pUbuf_x [w]) ;
 	    }
 	    free (workers [t].pPFlag) ;
+	    free (workers [t].pUlist) ;
 	}
 	}
 	free ((void *) sh.lpend) ;
