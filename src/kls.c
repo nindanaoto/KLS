@@ -28493,7 +28493,8 @@ static int kls_pipe_first_factor_threads(const kls_solver *solver,
     fprintf(stderr, "KLS pipe route: est=%.3e n=%.0f per=%.0f\n",
             est, n, n > 0.0 ? est / n : -1.0);
   }
-  if (!(est > 5.0e9) || n <= 0.0 || !(est / n >= 1.0e5)) {
+  if (getenv("KLS_KLU_PIPE_FORCE") == NULL &&
+      (!(est > 5.0e9) || n <= 0.0 || !(est / n >= 1.0e5))) {
     return 0;
   }
   return solver->options.threads > 16 ? 16 : solver->options.threads;
@@ -119201,6 +119202,144 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
                                       const double *numeric_values,
                                       double *elapsed);
 
+
+/* Parallel predicted-pattern build for one large block: the etree reach
+   walks and especially the 66M-scale random L-scatter of pass 2 are
+   DRAM-latency-bound and column-independent.  Threads own contiguous
+   column ranges with private mark arrays; pass 1 retains per-thread
+   partial column counts so pass 2 threads write L entries at exclusive
+   pre-scanned cursors - the ascending-k append order (and every byte of
+   the result) is identical to the serial build. */
+typedef struct kls_pred_build_ctx {
+  UF_long nk;
+  UF_long k1;
+  const UF_long *ucol_ptr;
+  const UF_long *urows;
+  const UF_long *parent;
+  UF_long *rowlen;             /* out: per-column U reach length */
+  int32_t **count_partial;     /* [t][nk] pass-1 partial col counts */
+  UF_long *thread_lnz;         /* [t] */
+  double *lu;                  /* pass 2: block LU area */
+  trilinos_klu_l_numeric *numeric;
+  UF_long **lcursor;           /* [t][nk] pass-2 L write cursors */
+  int nthreads;
+  int phase;                   /* 1 = counts, 2 = fill */
+  int failed;
+} kls_pred_build_ctx;
+
+typedef struct kls_pred_build_job {
+  kls_pred_build_ctx *ctx;
+  UF_long lo, hi;
+  int tid;
+  pthread_t thread;
+} kls_pred_build_job;
+
+static void *kls_pred_build_worker(void *arg) {
+  kls_pred_build_job *job = (kls_pred_build_job *)arg;
+  kls_pred_build_ctx *ctx = job->ctx;
+  const UF_long nk = ctx->nk;
+  const UF_long *ucol_ptr = ctx->ucol_ptr;
+  const UF_long *urows = ctx->urows;
+  const UF_long *parent = ctx->parent;
+  int32_t *mark = (int32_t *)malloc((size_t)nk * sizeof(*mark));
+  UF_long *urow = NULL;
+  if (mark == NULL) {
+    ctx->failed = 1;
+    return NULL;
+  }
+  memset(mark, 0xff, (size_t)nk * sizeof(*mark));
+  if (ctx->phase == 1) {
+    int32_t *count = ctx->count_partial[job->tid];
+    UF_long lnz = 0;
+    for (UF_long k = job->lo; k < job->hi; ++k) {
+      mark[k] = (int32_t)k;
+      UF_long len = 0;
+      for (UF_long p = ucol_ptr[k]; p < ucol_ptr[k + 1u]; ++p) {
+        UF_long i = urows[p];
+        while (i < k && mark[i] != (int32_t)k) {
+          mark[i] = (int32_t)k;
+          count[i]++;
+          len++;
+          i = parent[i];
+          if (i == KLS_KLU_EMPTY) {
+            break;
+          }
+        }
+      }
+      ctx->rowlen[k] = len;
+      lnz += len;
+    }
+    ctx->thread_lnz[job->tid] = lnz;
+  } else {
+    double *lu = ctx->lu;
+    trilinos_klu_l_numeric *numeric = ctx->numeric;
+    const UF_long k1 = ctx->k1;
+    UF_long *lcur = ctx->lcursor[job->tid];
+    urow = (UF_long *)malloc((size_t)nk * sizeof(*urow));
+    if (urow == NULL) {
+      ctx->failed = 1;
+      free(mark);
+      return NULL;
+    }
+    for (UF_long k = job->lo; k < job->hi; ++k) {
+      mark[k] = (int32_t)k;
+      UF_long len = 0;
+      for (UF_long p = ucol_ptr[k]; p < ucol_ptr[k + 1u]; ++p) {
+        UF_long i = urows[p];
+        while (i < k && mark[i] != (int32_t)k) {
+          mark[i] = (int32_t)k;
+          urow[len++] = i;
+          i = parent[i];
+          if (i == KLS_KLU_EMPTY) {
+            break;
+          }
+        }
+      }
+      for (UF_long a = 1u; a < len; ++a) {
+        const UF_long v = urow[a];
+        UF_long b = a;
+        while (b > 0u && urow[b - 1u] > v) {
+          urow[b] = urow[b - 1u];
+          b--;
+        }
+        urow[b] = v;
+      }
+      UF_long *ui = (UF_long *)(lu + numeric->Uip[k1 + k]);
+      for (UF_long p = 0; p < len; ++p) {
+        ui[p] = urow[p];
+        const UF_long j = urow[p];
+        UF_long *li = (UF_long *)(lu + numeric->Lip[k1 + j]);
+        li[lcur[j]++] = k;
+      }
+    }
+  }
+  free(urow);
+  free(mark);
+  return NULL;
+}
+
+/* Run one phase across nthreads-1 spawned workers plus the caller.
+   Returns 0 on any spawn or allocation failure (caller falls back). */
+static int kls_pred_build_run(kls_pred_build_ctx *ctx,
+                              kls_pred_build_job *jobs) {
+  const int nt = ctx->nthreads;
+  for (int t = 1; t < nt; ++t) {
+    if (pthread_create(&jobs[t].thread, NULL, kls_pred_build_worker,
+                       &jobs[t]) != 0) {
+      ctx->failed = 1;
+      for (int u = 1; u < t; ++u) {
+        pthread_join(jobs[u].thread, NULL);
+      }
+      return 0;
+    }
+  }
+  kls_pred_build_worker(&jobs[0]);
+  for (int t = 1; t < nt; ++t) {
+    pthread_join(jobs[t].thread, NULL);
+  }
+  return ctx->failed == 0;
+}
+
 static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                               double *numeric_values,
                                               double *elapsed) {
@@ -119460,10 +119599,13 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     }
   }
 
+  double kls_bp_union = 0.0, kls_bp_p1 = 0.0, kls_bp_lay = 0.0,
+         kls_bp_p2 = 0.0;
   for (UF_long block = 0; block < nblocks && ok; ++block) {
     const UF_long k1 = R[block];
     const UF_long k2 = R[block + 1u];
     const UF_long nk = k2 - k1;
+    double kls_bp_t = kls_now_seconds();
     if (solver->block_trial_active && getenv("KLS_TRACE_PREDICTED") != NULL &&
         nk >= 2) {
       fprintf(stderr, "KLS predicted: constructing block %ld nk=%ld\n",
@@ -119679,13 +119821,73 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
       }
     }
+    kls_bp_union += kls_now_seconds() - kls_bp_t;
+    kls_bp_t = kls_now_seconds();
     /* Pass 1: row reach counts give Ulen (row pattern length) and column
-       counts give Llen. */
+       counts give Llen.  Large blocks run the byte-identical parallel
+       build (reach walks and the pass-2 L-scatter are DRAM-latency-bound
+       and column-independent). */
+    UF_long block_lnz = 0;
+    int pb_used = 0;
+    kls_pred_build_ctx pb_ctx;
+    kls_pred_build_job pb_jobs[16];
+    int32_t *pb_partial[16] = {NULL};
+    UF_long *pb_lcur[16] = {NULL};
+    UF_long pb_tlnz[16] = {0};
+    int pb_nt = solver->options.threads > 16 ? 16 : solver->options.threads;
+    if (nk >= 65536 && pb_nt >= 2 &&
+        getenv("KLS_DISABLE_PARALLEL_PREDICTED_BUILD") == NULL) {
+      int alloc_ok = 1;
+      for (int t = 0; t < pb_nt; ++t) {
+        pb_partial[t] = (int32_t *)calloc((size_t)nk, sizeof(int32_t));
+        if (pb_partial[t] == NULL) {
+          alloc_ok = 0;
+          break;
+        }
+      }
+      if (alloc_ok) {
+        memset(&pb_ctx, 0, sizeof(pb_ctx));
+        pb_ctx.nk = nk;
+        pb_ctx.k1 = k1;
+        pb_ctx.ucol_ptr = bcol_ptr_union;
+        pb_ctx.urows = work_rows_union;
+        pb_ctx.parent = parent;
+        pb_ctx.rowlen = rowlen;
+        pb_ctx.count_partial = pb_partial;
+        pb_ctx.thread_lnz = pb_tlnz;
+        pb_ctx.nthreads = pb_nt;
+        pb_ctx.phase = 1;
+        pb_ctx.failed = 0;
+        for (int t = 0; t < pb_nt; ++t) {
+          pb_jobs[t].ctx = &pb_ctx;
+          pb_jobs[t].lo = nk * (UF_long)t / pb_nt;
+          pb_jobs[t].hi = nk * (UF_long)(t + 1) / pb_nt;
+          pb_jobs[t].tid = t;
+        }
+        if (kls_pred_build_run(&pb_ctx, pb_jobs)) {
+          memset(colcount, 0, (size_t)nk * sizeof(*colcount));
+          for (int t = 0; t < pb_nt; ++t) {
+            const int32_t *part = pb_partial[t];
+            for (UF_long i = 0; i < nk; ++i) {
+              colcount[i] += part[i];
+            }
+            block_lnz += pb_tlnz[t];
+          }
+          pb_used = 1;
+        }
+      }
+      if (!pb_used) {
+        for (int t = 0; t < pb_nt; ++t) {
+          free(pb_partial[t]);
+          pb_partial[t] = NULL;
+        }
+      }
+    }
+    if (!pb_used) {
     memset(colcount, 0, (size_t)nk * sizeof(*colcount));
     for (UF_long k = 0; k < nk; ++k) {
       mark[k] = -1;
     }
-    UF_long block_lnz = 0;
     for (UF_long k = 0; k < nk; ++k) {
       mark[k] = k;
       UF_long len = 0;
@@ -119704,6 +119906,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       rowlen[k] = len;
       block_lnz += len;
     }
+    }
     if (solver->block_trial_active && getenv("KLS_TRACE_PREDICTED") != NULL) {
       fprintf(stderr, "KLS predicted: block %ld exact lnz=%ld\n",
               (long)block, (long)block_lnz);
@@ -119715,6 +119918,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       ok = 0;
       break;
     }
+    kls_bp_p1 += kls_now_seconds() - kls_bp_t;
+    kls_bp_t = kls_now_seconds();
     /* Layout and allocation for this block. */
     size_t lusize = 0;
     for (UF_long k = 0; k < nk; ++k) {
@@ -119735,6 +119940,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       ok = 0;
       break;
     }
+    kls_bp_lay += kls_now_seconds() - kls_bp_t;
+    kls_bp_t = kls_now_seconds();
     /* Pass 2: fill sorted index areas.  U column k receives the sorted row
        reach of k directly; L columns receive k appended in ascending order
        as rows are visited. */
@@ -119748,9 +119955,11 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
       }
       /* per-column L write cursors reuse colcount as cursor after reset */
+      if (!pb_used) {
       for (UF_long k = 0; k < nk; ++k) {
         rowpat_ptr[k] = 0;
         mark[k] = -1;
+      }
       }
       if (rowpat == NULL || (UF_long)block_lnz > 0) {
         free(rowpat);
@@ -119762,6 +119971,47 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
       }
       (void)rowpat;
+      if (pb_used) {
+        /* exclusive per-thread cursor bases from the pass-1 partials:
+           thread ranges ascend, so per-column appends keep the exact
+           serial ascending-k order */
+        int pb2_ok = 1;
+        for (int t = 0; t < pb_nt && pb2_ok; ++t) {
+          pb_lcur[t] = (UF_long *)malloc((size_t)nk * sizeof(UF_long));
+          if (pb_lcur[t] == NULL) {
+            pb2_ok = 0;
+          }
+        }
+        if (pb2_ok) {
+          for (UF_long i = 0; i < nk; ++i) {
+            pb_lcur[0][i] = 0;
+          }
+          for (int t = 1; t < pb_nt; ++t) {
+            const int32_t *part = pb_partial[t - 1];
+            const UF_long *prevc = pb_lcur[t - 1];
+            UF_long *cur = pb_lcur[t];
+            for (UF_long i = 0; i < nk; ++i) {
+              cur[i] = prevc[i] + (UF_long)part[i];
+            }
+          }
+          pb_ctx.lu = lu;
+          pb_ctx.numeric = numeric;
+          pb_ctx.lcursor = pb_lcur;
+          pb_ctx.phase = 2;
+          pb_ctx.failed = 0;
+          pb2_ok = kls_pred_build_run(&pb_ctx, pb_jobs);
+        }
+        for (int t = 0; t < pb_nt; ++t) {
+          free(pb_partial[t]);
+          free(pb_lcur[t]);
+          pb_partial[t] = NULL;
+          pb_lcur[t] = NULL;
+        }
+        if (!pb2_ok) {
+          ok = 0;
+          break;
+        }
+      } else
       for (UF_long k = 0; k < nk; ++k) {
         mark[k] = k;
         UF_long len = 0;
@@ -119795,7 +120045,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           li[rowpat_ptr[j]++] = k;
         }
       }
-      for (UF_long k = 0; k < nk && ok; ++k) {
+      for (UF_long k = 0; !pb_used && k < nk && ok; ++k) {
         if (rowpat_ptr[k] != (UF_long)numeric->Llen[k1 + k]) {
           if (getenv("KLS_TRACE_PREDICTED") != NULL) {
             fprintf(stderr, "KLS predicted: rowpat mismatch col %ld\n",
@@ -119805,6 +120055,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
       }
     }
+    kls_bp_p2 += kls_now_seconds() - kls_bp_t;
     total_lnz += block_lnz + nk;
     {
       UF_long block_unz = 0;
@@ -119821,6 +120072,11 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     }
   }
 
+  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+    fprintf(stderr,
+            "KLS predicted: build phases union=%.2f p1=%.2f layout=%.2f"
+            " p2=%.2f\n", kls_bp_union, kls_bp_p1, kls_bp_lay, kls_bp_p2);
+  }
   free(work_rows);
   free(bcol_ptr);
   free(parent);
