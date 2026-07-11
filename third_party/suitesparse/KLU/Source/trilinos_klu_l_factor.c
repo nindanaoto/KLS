@@ -312,10 +312,21 @@ static void factor2
     if (getenv ("KLS_TRACE_FILL") != NULL)
     {
 	clock_gettime (CLOCK_MONOTONIC, &kls_t1) ;
-	fprintf (stderr, "KLS fill: n=%ld lnz=%ld unz=%ld nzoff=%ld wall=%.3fs\n",
-	    (long) n, (long) lnz, (long) unz, (long) nzoff,
-	    (double) (kls_t1.tv_sec - kls_t0.tv_sec) +
-	    1e-9 * (double) (kls_t1.tv_nsec - kls_t0.tv_nsec)) ;
+	{
+	    extern _Thread_local double kls_construct_secs ;
+	    extern _Thread_local long kls_construct_calls ;
+	    extern _Thread_local long kls_construct_entries ;
+	    fprintf (stderr, "KLS fill: n=%ld lnz=%ld unz=%ld nzoff=%ld"
+		" wall=%.3fs construct=%.2fs/%ld/%ld\n",
+		(long) n, (long) lnz, (long) unz, (long) nzoff,
+		(double) (kls_t1.tv_sec - kls_t0.tv_sec) +
+		1e-9 * (double) (kls_t1.tv_nsec - kls_t0.tv_nsec),
+		kls_construct_secs, kls_construct_calls,
+		kls_construct_entries) ;
+	    kls_construct_secs = 0.0 ;
+	    kls_construct_calls = 0 ;
+	    kls_construct_entries = 0 ;
+	}
     }
 
     /* compute the inverse of Pnum */

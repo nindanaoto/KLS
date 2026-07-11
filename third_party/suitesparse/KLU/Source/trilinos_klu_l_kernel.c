@@ -29,6 +29,11 @@
 #define KLS_KLU_CPU_RELAX() do { } while (0)
 #endif
 
+_Thread_local double kls_construct_secs ;
+_Thread_local long kls_construct_calls ;
+_Thread_local long kls_construct_entries ;
+static int kls_construct_prof ;
+
 static double kls_klu_now (void)
 {
     struct timespec ts ;
@@ -261,6 +266,7 @@ static void construct_column
 {
     Entry aik ;
     Int i, p, pend, oldcol, kglobal, poff, oldrow ;
+    const double kls_cc_t0 = kls_construct_prof ? kls_klu_now () : 0.0 ;
 
     /* ---------------------------------------------------------------------- */
     /* Scale and scatter the column into X. */
@@ -318,6 +324,12 @@ static void construct_column
     }
 
     Offp [kglobal+1] = poff ;   /* start of the next col of off-diag part */
+    if (kls_construct_prof)
+    {
+	kls_construct_secs += kls_klu_now () - kls_cc_t0 ;
+	kls_construct_calls++ ;
+	kls_construct_entries += pend - Ap [oldcol] ;
+    }
 }
 
 
@@ -2108,9 +2120,11 @@ static void *kls_klu_pipe_worker_main (void *arg)
     if (prof)
     {
 	fprintf (stderr, "KLS pipe prof tid=%d cols=%ld rounds=%ld "
-		 "work=%.2fs spin=%.2fs final=%.2fs\n",
+		 "work=%.2fs spin=%.2fs final=%.2fs construct=%.2fs/%ld/%ld\n",
 		 W->tid, W->n_cols, W->n_rounds,
-		 W->t_work, W->t_spin, W->t_final) ;
+		 W->t_work, W->t_spin, W->t_final,
+		 kls_construct_secs, kls_construct_calls,
+		 kls_construct_entries) ;
     }
     free (promoted) ;
     return (NULL) ;
@@ -3002,6 +3016,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     size_t final_size ;
 
     ASSERT (Common != NULL) ;
+    kls_construct_prof = getenv ("KLS_CONSTRUCT_PROF") != NULL ;
     if (n >= 4096 && getenv ("KLS_SN_STATS") != NULL)
     {
 	/* supernodal-first-factor feasibility probe: fundamental
