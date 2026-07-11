@@ -123798,8 +123798,22 @@ int kls_factor(kls_solver *solver, const double *values) {
               (int64_t)solver->symbolic->structural_rank;
             solver->stats.estimated_flops = solver->symbolic->est_flops;
             kls_metis_race_free(race);
-            if (kls_predicted_pattern_first_factor(solver, numeric_values,
-                                                   &elapsed)) {
+            if (is_large_sparse_diagonal_low_degree_pattern(
+                  solver->n, solver->col_ptr, solver->row_idx) &&
+                getenv("KLS_PREDICTED_TRY_LOWDEG") == NULL) {
+              /* the mostly-missing-diagonal low-degree class factors
+                 with numeric pivoting the predicted pattern cannot
+                 represent: the attempt measures ~1.5s (preps + value
+                 passes + nudges + build) and ends in the pivoting
+                 fill reject every time (mac_econ, deterministic
+                 orderings).  Go straight to the serial factor. */
+              if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+                fprintf(stderr,
+                        "KLS race symbolic join: predicted skipped"
+                        " (low-degree pivoting class)\n");
+              }
+            } else if (kls_predicted_pattern_first_factor(
+                         solver, numeric_values, &elapsed)) {
               kls_set_last_factor_path(solver,
                                        KLS_FACTOR_PATH_PREDICTED_FIRST);
               if (getenv("KLS_TRACE_PREDICTED") != NULL) {
