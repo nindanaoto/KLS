@@ -13,6 +13,11 @@ OUT_ST=${8:-}
 THREADS=${THREADS:-4}
 TIMEOUT=${TIMEOUT:-120}
 PASSES=${PASSES:-1}
+# 5 refactors suffice: the harnesses report the first refactor (which
+# carries KLS's deferred engine preps) separately from the steady-state
+# average, so the 99-iteration SPICE cycle is reconstructed exactly as
+# shot + (first + solve) + 98*(steady + solve).
+REFACTOR_REPEAT=${REFACTOR_REPEAT:-5}
 : > "$OUT_KLS"
 : > "$OUT_CK"
 [ -n "$OUT_ST" ] && : > "$OUT_ST"
@@ -31,14 +36,14 @@ while IFS= read -r name; do
   for side in $passes_sides; do
     if [ "$side" = kls ]; then
       out=$(timeout "$TIMEOUT" "$KLS_BENCH" "$matrix" --orientation auto \
-        --repeat 1 --refactor-repeat 99 --threads "$THREADS" --json 2>/dev/null)
+        --repeat 1 --refactor-repeat "$REFACTOR_REPEAT" --threads "$THREADS" --json 2>/dev/null)
       dst=$OUT_KLS
     elif [ "$side" = ck ]; then
-      out=$(timeout "$TIMEOUT" "$CKTSO_COMPARE" "$matrix" "$THREADS" 1 99 \
+      out=$(timeout "$TIMEOUT" "$CKTSO_COMPARE" "$matrix" "$THREADS" 1 "$REFACTOR_REPEAT" \
         2>/dev/null)
       dst=$OUT_CK
     else
-      out=$(timeout "$TIMEOUT" "$SUBTREELU_COMPARE" "$matrix" "$THREADS" 1 99 \
+      out=$(timeout "$TIMEOUT" "$SUBTREELU_COMPARE" "$matrix" "$THREADS" 1 "$REFACTOR_REPEAT" \
         2>/dev/null)
       dst=$OUT_ST
     fi

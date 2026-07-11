@@ -1021,11 +1021,19 @@ int main(int argc, char **argv) {
     CALLGRIND_START_INSTRUMENTATION;
     CALLGRIND_ZERO_STATS;
   }
+  double refactor_first = 0.0;
   for (int i = 0; i < refactor_repeat && status == KLS_OK; ++i) {
     status = kls_refactor(solver, run_values);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     refactor_total += stats.refactor_seconds;
+    if (i == 0) {
+      /* the first refactorization carries the deferred engine preps;
+         reporting it separately lets short suites reconstruct the
+         99-iteration SPICE cycle exactly:
+         cycle = shot + (first + solve) + 98*(steady + solve) */
+      refactor_first = stats.refactor_seconds;
+    }
     /* SPICE-shaped: every refactor is followed by a solve so adaptive
        engines can weigh the true refactor+solve pair. Not counted in
        refactor_total; solve_avg is measured separately below. */
@@ -1086,6 +1094,9 @@ int main(int argc, char **argv) {
       residual_norm_values(&a, run_values, x, b, &rel_residual);
   const double factor_avg = factor_total / (double)repeat;
   const double refactor_avg = refactor_repeat > 0 ? refactor_total / (double)refactor_repeat : 0.0;
+  const double refactor_steady_avg = refactor_repeat > 1
+    ? (refactor_total - refactor_first) / (double)(refactor_repeat - 1)
+    : refactor_first;
   const double solve_avg = solve_total / (double)repeat;
   const double tsolve_avg = tsolve_total / (double)repeat;
 
@@ -1232,6 +1243,7 @@ int main(int argc, char **argv) {
            ",\"kls_first_auto_skipped_scaled_single_block\":%d"
            ",\"kls_first_auto_skipped_scaled_single_block_count\":%" PRId64
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
+           ",\"refactor_first_seconds\":%.9g,\"refactor_steady_seconds_avg\":%.9g"
            ",\"solve_seconds_avg\":%.9g,\"transpose_solve_seconds_avg\":%.9g"
            ",\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g"
            ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
@@ -1284,7 +1296,9 @@ int main(int argc, char **argv) {
            stats.kls_first_parallel_btf_block_count,
            stats.kls_first_auto_skipped_scaled_single_block,
            stats.kls_first_auto_skipped_scaled_single_block_count,
-           factor_avg, refactor_avg, solve_avg, tsolve_avg,
+           factor_avg, refactor_avg,
+           refactor_first, refactor_steady_avg,
+           solve_avg, tsolve_avg,
            residual, rel_residual, stats.nblocks, stats.max_block,
            stats.structural_rank, stats.numerical_rank,
            stats.offdiag_pivots, stats.reallocations,

@@ -208,6 +208,7 @@ int main(int argc, char **argv) {
 
   long long factor_total = 0;
   long long refactor_total = 0;
+  long long refactor_first = 0;
   long long solve_total = 0;
   for (int i = 0; i < repeat; ++i) {
     ret = CKTSO_Factorize(inst, a.values.data(), true);
@@ -218,6 +219,7 @@ int main(int argc, char **argv) {
     ret = CKTSO_Refactorize(inst, a.values.data());
     if (ret < 0) break;
     refactor_total += oparm[1];
+    if (i == 0) refactor_first = oparm[1];
   }
   for (int i = 0; i < repeat && ret >= 0; ++i) {
     ret = CKTSO_Solve(inst, b.data(), x.data(), false, true);
@@ -234,6 +236,10 @@ int main(int argc, char **argv) {
   const double refactor_us_avg = refactor_repeat > 0
     ? static_cast<double>(refactor_total) / static_cast<double>(refactor_repeat)
     : 0.0;
+  const double refactor_steady_us_avg = refactor_repeat > 1
+    ? static_cast<double>(refactor_total - refactor_first) /
+        static_cast<double>(refactor_repeat - 1)
+    : static_cast<double>(refactor_first);
   const double solve_us_avg = static_cast<double>(solve_total) / static_cast<double>(repeat);
   const double spice_cycle_seconds =
     1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
@@ -249,6 +255,7 @@ int main(int argc, char **argv) {
               "\"analysis_seconds\":%.9g,\"initial_factor_seconds\":%.9g,"
               "\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g,"
               "\"solve_seconds_avg\":%.9g,\"spice_cycle_seconds\":%.9g,"
+              "\"refactor_first_seconds\":%.9g,\"refactor_steady_seconds_avg\":%.9g,"
               "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
               "\"nnz_l\":%lld,\"nnz_u\":%lld,"
               "\"memory_bytes\":%lld,\"memory_peak_bytes\":%lld}\n",
@@ -259,6 +266,8 @@ int main(int argc, char **argv) {
               1.0e-6 * static_cast<double>(initial_factor_us),
               1.0e-6 * factor_us_avg, 1.0e-6 * refactor_us_avg,
               1.0e-6 * solve_us_avg, spice_cycle_seconds,
+              1.0e-6 * static_cast<double>(refactor_first),
+              1.0e-6 * refactor_steady_us_avg,
               residual_l2, relative_residual, oparm[5], oparm[6],
               oparm[12], oparm[13]);
   CKTSO_DestroySolver(inst);
