@@ -3132,8 +3132,15 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 	    pipe_threads) ;
 	if (Common->status == TRILINOS_KLU_OK)
 	{
+	    /* the pipeline does not accumulate the per-column flop sum:
+	       poison the field (sticky negative - later serial blocks
+	       add block sums that must not re-positivize it) so
+	       TRILINOS_KLU_flops runs its walk instead of trusting a
+	       partial value */
+	    Common->kls_kernel_flops = -1e300 ;
 	    return (pipe_size) ;
 	}
+	Common->kls_kernel_flops = -1e300 ;
 	/* singular or resource failure in the pipeline: retry the block
 	   with the classic serial kernel (X/Flag state is clean; the
 	   pipeline frees its own arenas on abort) */
