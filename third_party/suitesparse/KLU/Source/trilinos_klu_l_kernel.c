@@ -1579,6 +1579,14 @@ typedef struct kls_klu_pipe_worker_s
     Int *pFlagW [32] ;        /* per-column DFS marks: sibling columns'
                                  interleaved collections must not
                                  overwrite each other's marks */
+    /* panel-major dense accumulator: B[rowpos*W + w] keeps the panel's
+       numeric updates contiguous in w (one-two cachelines per source
+       entry instead of W scattered full-size vectors) */
+    Entry *pB ;
+    size_t pBcap ;            /* rows currently allocated */
+    Int *pRowPos ;            /* row -> buffer position (gen-tagged) */
+    Int *pRowGen ;
+    Int pGen ;
     Int pW ;
 } kls_klu_pipe_worker ;
 
@@ -1936,7 +1944,38 @@ static int kls_pipe_panel_lockstep
     KLS_KLU_KERNEL_STATE *S = &W->S ;
     const Int n = S->n ;
     const Int PW = kend - k0 ;
+    const int use_buf = W->pB != NULL ;
+    Int nbrows = 0 ;
     Int w, k, j, p ;
+#define KLS_PANEL_ROWPOS(r, out_pos)                                   \
+    do                                                                 \
+    {                                                                  \
+	if (W->pRowGen [r] != W->pGen)                                 \
+	{                                                              \
+	    Int zw ;                                                   \
+	    W->pRowGen [r] = W->pGen ;                                 \
+	    if ((size_t) nbrows >= W->pBcap)                           \
+	    {                                                          \
+		size_t ncap = W->pBcap * 2 ;                           \
+		Entry *nb = (Entry *) realloc (W->pB,                  \
+		    ncap * (size_t) W->pW * sizeof (Entry)) ;          \
+		if (nb == NULL)                                        \
+		{                                                      \
+		    atomic_store_explicit (&sh->abort_flag, 1,         \
+					   memory_order_release) ;     \
+		    return (1) ;                                       \
+		}                                                      \
+		W->pB = nb ;                                           \
+		W->pBcap = ncap ;                                      \
+	    }                                                          \
+	    W->pRowPos [r] = nbrows++ ;                                \
+	    for (zw = 0 ; zw < PW ; zw++)                              \
+	    {                                                          \
+		W->pB [(size_t) W->pRowPos [r] * PW + zw] = 0.0 ;      \
+	    }                                                          \
+	}                                                              \
+	(out_pos) = W->pRowPos [r] ;                                   \
+    } while (0)
     Int l_len [32] ;
     Int u_cnt [32] ;
     Int seg_done [32] ;
@@ -1958,6 +1997,22 @@ static int kls_pipe_panel_lockstep
 	construct_column (k0 + w, S->Ap, S->Ai, S->Ax, S->Q, W->pX [w],
 			  S->k1, S->PSinv, S->Rs, S->scale,
 			  S->Offp, S->Offi, S->Offx) ;
+	if (use_buf)
+	{
+	    /* migrate the in-block seeds into the panel-major buffer */
+	    Int kglobal = k0 + w + S->k1 ;
+	    Int oldcol = S->Q [kglobal] ;
+	    Int pend = S->Ap [oldcol+1] ;
+	    for (p = S->Ap [oldcol] ; p < pend ; p++)
+	    {
+		Int i = S->PSinv [S->Ai [p]] - S->k1 ;
+		Int pos ;
+		if (i < 0) continue ;
+		KLS_PANEL_ROWPOS (i, pos) ;
+		W->pB [(size_t) pos * PW + w] = W->pX [w][i] ;
+		W->pX [w][i] = 0.0 ;
+	    }
+	}
     }
 
     /* pattern lists: column 0 uses the scratch head (the final block
@@ -2057,7 +2112,9 @@ static int kls_pipe_panel_lockstep
 		}
 	    }
 	}
-	/* masked union apply: each source streamed once */
+	/* union apply: each source streamed once.  With the panel-major
+	   buffer the inner loop is branch-free and contiguous in w
+	   (non-member lanes get xj forced to zero - exact no-ops). */
 	for (p = 0 ; p < ulen ; p++)
 	{
 	    Int mask ;
@@ -2074,22 +2131,48 @@ static int kls_pipe_panel_lockstep
 		const Entry *Lx = (const Entry *) (xp +
 						   KLS_UNITS32 (len)) ;
 		Int q ;
-		for (w = 0 ; w < PW ; w++)
+		if (use_buf)
 		{
-		    if (mask & ((Int) 1 << w))
+		    Int jpos ;
+		    KLS_PANEL_ROWPOS (j, jpos) ;
+		    for (w = 0 ; w < PW ; w++)
 		    {
-			xj [w] = W->pX [w][j] ;
+			xj [w] = (mask & ((Int) 1 << w))
+			    ? W->pB [(size_t) jpos * PW + w] : 0.0 ;
+		    }
+		    for (q = 0 ; q < len ; q++)
+		    {
+			const Int r = (Int) Li32 [q] ;
+			const Entry v = Lx [q] ;
+			Entry *brow ;
+			Int rpos, w2 ;
+			KLS_PANEL_ROWPOS (r, rpos) ;
+			brow = W->pB + (size_t) rpos * PW ;
+			for (w2 = 0 ; w2 < PW ; w2++)
+			{
+			    brow [w2] -= v * xj [w2] ;
+			}
 		    }
 		}
-		for (q = 0 ; q < len ; q++)
+		else
 		{
-		    const Int r = (Int) Li32 [q] ;
-		    const Entry v = Lx [q] ;
 		    for (w = 0 ; w < PW ; w++)
 		    {
 			if (mask & ((Int) 1 << w))
 			{
-			    W->pX [w][r] -= v * xj [w] ;
+			    xj [w] = W->pX [w][j] ;
+			}
+		    }
+		    for (q = 0 ; q < len ; q++)
+		    {
+			const Int r = (Int) Li32 [q] ;
+			const Entry v = Lx [q] ;
+			for (w = 0 ; w < PW ; w++)
+			{
+			    if (mask & ((Int) 1 << w))
+			    {
+				W->pX [w][r] -= v * xj [w] ;
+			    }
 			}
 		    }
 		}
@@ -2099,14 +2182,23 @@ static int kls_pipe_panel_lockstep
 		Int nb = 0 ;
 		for (w = 0 ; w < PW ; w++) nb += (mask >> w) & 1 ;
 		kls_pipe_madds += (long) S->Llen [jnew] * nb ;
+		kls_pipe_copy_bytes += (long) S->Llen [jnew] * 12 ;
+		/* streamed source bytes (12B/entry, once per source) */
+		kls_construct_calls++ ;          /* union sources */
+		kls_construct_entries += nb ;    /* popcount sum */
 	    }
 	}
 	/* U extraction per member column, then clear */
 	for (p = 0 ; p < ulen ; p++)
 	{
 	    Int mask ;
+	    Int jpos = -1 ;
 	    j = ulist [p] ;
 	    mask = W->pPFlag [j] ;
+	    if (use_buf)
+	    {
+		KLS_PANEL_ROWPOS (j, jpos) ;
+	    }
 	    for (w = 0 ; w < PW ; w++)
 	    {
 		if (mask & ((Int) 1 << w))
@@ -2114,8 +2206,16 @@ static int kls_pipe_panel_lockstep
 		    Int *ubi = w == 0 ? W->ubuf_i : W->pUbuf_i [w] ;
 		    Entry *ubx = w == 0 ? W->ubuf_x : W->pUbuf_x [w] ;
 		    ubi [u_cnt [w]] = S->Pinv [j] ;
-		    ubx [u_cnt [w]] = W->pX [w][j] ;
-		    W->pX [w][j] = 0.0 ;
+		    if (use_buf)
+		    {
+			ubx [u_cnt [w]] = W->pB [(size_t) jpos * PW + w] ;
+			W->pB [(size_t) jpos * PW + w] = 0.0 ;
+		    }
+		    else
+		    {
+			ubx [u_cnt [w]] = W->pX [w][j] ;
+			W->pX [w][j] = 0.0 ;
+		    }
 		    u_cnt [w]++ ;
 		}
 	    }
@@ -2144,6 +2244,25 @@ static int kls_pipe_panel_lockstep
 	plimit = newlimit ;
 	if (kls_pipe_phase_prof) { W->n_rounds++ ; }
     }
+    /* gather each column's candidate values back into its X so the
+       injected continuation (intra-panel rounds + lpivot) sees them */
+    if (use_buf)
+    {
+	for (w = 0 ; w < PW ; w++)
+	{
+	    Int *lik = w == 0 ? (Int *) S->scratch : W->pLik [w] ;
+	    for (p = 0 ; p < l_len [w] ; p++)
+	    {
+		Int i = lik [p] ;
+		if (W->pRowGen [i] == W->pGen)
+		{
+		    W->pX [w][i] =
+			W->pB [(size_t) W->pRowPos [i] * PW + w] ;
+		}
+	    }
+	}
+	W->pGen++ ;
+    }
     for (w = 0 ; w < PW ; w++)
     {
 	l_out [w] = l_len [w] ;
@@ -2151,6 +2270,7 @@ static int kls_pipe_panel_lockstep
     }
     return (0) ;
 }
+#undef KLS_PANEL_ROWPOS
 
 static void *kls_klu_pipe_worker_main (void *arg)
 {
@@ -2884,6 +3004,11 @@ size_t KLS_KLU_KERNEL_PIPE
 	    memset (W->pFlagW, 0, sizeof (W->pFlagW)) ;
 	    W->pPFlag = NULL ;
 	    W->pUlist = NULL ;
+	    W->pB = NULL ;
+	    W->pBcap = 0 ;
+	    W->pRowPos = NULL ;
+	    W->pRowGen = NULL ;
+	    W->pGen = 0 ;
 	    if (panel_start != NULL)
 	    {
 		size_t per_col = (size_t) n * (sizeof (Entry) * 2 +
@@ -2929,6 +3054,19 @@ size_t KLS_KLU_KERNEL_PIPE
 		}
 		W->pPFlag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
 		W->pUlist = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		W->pBcap = 4096 ;
+		W->pB = (Entry *) malloc (W->pBcap * (size_t) wcap *
+					  sizeof (Entry)) ;
+		W->pRowPos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		W->pRowGen = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+		W->pGen = 1 ;   /* calloc'd generations are 0: never match */
+		if (W->pB == NULL || W->pRowPos == NULL ||
+		    W->pRowGen == NULL)
+		{
+		    free (W->pB) ; W->pB = NULL ;
+		    free (W->pRowPos) ; W->pRowPos = NULL ;
+		    free (W->pRowGen) ; W->pRowGen = NULL ;
+		}
 		if (W->pUlist == NULL)
 		{
 		    free (W->pPFlag) ;
@@ -3083,6 +3221,9 @@ size_t KLS_KLU_KERNEL_PIPE
 	    }
 	    free (workers [t].pPFlag) ;
 	    free (workers [t].pUlist) ;
+	    free (workers [t].pB) ;
+	    free (workers [t].pRowPos) ;
+	    free (workers [t].pRowGen) ;
 	}
 	}
 	free ((void *) sh.lpend) ;
