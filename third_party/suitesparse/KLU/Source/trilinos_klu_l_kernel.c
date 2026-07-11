@@ -29,6 +29,12 @@
 #define KLS_KLU_CPU_RELAX() do { } while (0)
 #endif
 
+#include <stdint.h>
+#include <string.h>
+/* units occupied by an int32 index array in the chunked column layout */
+#define KLS_UNITS32(len) \
+    (((size_t) (len) * sizeof (int32_t) + sizeof (Unit) - 1) / sizeof (Unit))
+
 _Thread_local double kls_pipe_t_sym ;
 _Thread_local double kls_pipe_t_num ;
 _Thread_local long kls_pipe_copy_bytes ;
@@ -916,6 +922,9 @@ typedef struct KLS_KLU_KERNEL_STATE_STRUCT
     Int no_prune ;   /* parallel drivers: finalized columns stay immutable */
     Int diag_claim ; /* parallel phase: only diagonal pivots; else defer */
     Int chunked_prune ; /* single-threaded phases may prune chunked cols */
+    Int idx32 ;         /* chunked columns store int32 row/pivot indices
+                           (pipe-published layout; KERNEL_FINISH widens
+                           to Int while packing) */
     /* chunked storage (parallel drivers): stable per-column pointers,
        arena chunks never realloc once a column is published */
     Unit **colptr ;         /* size n, or NULL for classic base+offset */
@@ -1270,6 +1279,43 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
 			    UNITS (Entry, S->Llen [p]) ;
 	    size_t uunits = UNITS (Int, S->Ulen [p]) +
 			    UNITS (Entry, S->Ulen [p]) ;
+	    if (S->idx32)
+	    {
+		/* widen the pipe's int32 column to the standard Int
+		   layout while packing (converting L rows to pivotal
+		   indices in the same pass) */
+		const Unit *src = S->colptr [p] ;
+		const int32_t *sLi = (const int32_t *) src ;
+		const Entry *sLx =
+		    (const Entry *) (src + KLS_UNITS32 (S->Llen [p])) ;
+		const size_t slpart =
+		    KLS_UNITS32 (S->Llen [p]) + UNITS (Entry, S->Llen [p]) ;
+		const int32_t *sUi = (const int32_t *) (src + slpart) ;
+		const Entry *sUx =
+		    (const Entry *) (src + slpart +
+				     KLS_UNITS32 (S->Ulen [p])) ;
+		Int *dLi = (Int *) (packed + off) ;
+		Entry *dLx =
+		    (Entry *) (packed + off + UNITS (Int, S->Llen [p])) ;
+		Int *dUi = (Int *) (packed + off + lunits) ;
+		Entry *dUx = (Entry *) (packed + off + lunits +
+					UNITS (Int, S->Ulen [p])) ;
+		for (i = 0 ; i < S->Llen [p] ; i++)
+		{
+		    dLi [i] = S->pack_keep_row_indices
+			? (Int) sLi [i] : S->Pinv [sLi [i]] ;
+		    dLx [i] = sLx [i] ;
+		}
+		for (i = 0 ; i < S->Ulen [p] ; i++)
+		{
+		    dUi [i] = (Int) sUi [i] ;
+		    dUx [i] = sUx [i] ;
+		}
+		S->Lip [p] = (Int) off ;
+		S->Uip [p] = (Int) (off + lunits) ;
+		off += lunits + uunits ;
+		continue ;
+	    }
 	    memcpy (packed + off, S->colptr [p],
 		    (lunits + uunits) * sizeof (Unit)) ;
 	    S->Lip [p] = (Int) off ;
@@ -1612,14 +1658,16 @@ static Int kls_pipe_dfs
 	 * until finding another non-visited pivotal node */
 	if (jnew >= 0 && jnew < plimit)
 	{
-	    Unit *xp = (sh != NULL && sh->lpend != NULL)
+	    const int kls_pipe_cols = sh != NULL && sh->lpend != NULL ;
+	    Unit *xp = kls_pipe_cols
 		? (Unit *) __atomic_load_n ((Unit **) &Colptr [jnew],
 					    __ATOMIC_ACQUIRE)
 		: KLS_COL_BASE (Colptr, LU, Lip, jnew) ;
+	    const int32_t *Li32 = (const int32_t *) xp ;
 	    Li = (Int *) xp ;
 	    for (pos = --Ap_pos [head] ; pos >= 0 ; --pos)
 	    {
-		i = Li [pos] ;
+		i = kls_pipe_cols ? (Int) Li32 [pos] : Li [pos] ;
 		if (Flag [i] != k)
 		{
 		    /* node i is not yet visited */
@@ -1802,7 +1850,7 @@ static void kls_pipe_lsolve_numeric
 {
     Entry xj ;
     Entry *Lx ;
-    Int *Li ;
+    const int32_t *Li32 ;
     Int p, s, j, jnew, len ;
 
     if (sh == NULL || sh->lpend == NULL)
@@ -1826,8 +1874,8 @@ static void kls_pipe_lsolve_numeric
 	    Unit *xp = (Unit *) __atomic_load_n (
 		(Unit **) &Colptr [jnew], __ATOMIC_ACQUIRE) ;
 	    len = Llen [jnew] ;
-	    Li = (Int *) xp ;
-	    Lx = (Entry *) (xp + UNITS (Int, len)) ;
+	    Li32 = (const int32_t *) xp ;
+	    Lx = (Entry *) (xp + KLS_UNITS32 (len)) ;
 	    if (kls_pipe_phase_prof)
 	    {
 		kls_pipe_madds += len ;
@@ -1835,7 +1883,7 @@ static void kls_pipe_lsolve_numeric
 	}
 	for (p = 0 ; p < len ; p++)
 	{
-	    MULT_SUB (X [Li [p]], Lx [p], xj) ;
+	    MULT_SUB (X [Li32 [p]], Lx [p], xj) ;
 	}
     }
 }
@@ -1986,11 +2034,11 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	   in the scratch (lpivot gathered it); append [Ui|Ux] */
 	{
 	    Int llen = S->Llen [k] ;
-	    size_t lpart = (size_t) (UNITS (Int, llen) + UNITS (Entry, llen)) ;
-	    size_t used = lpart + (size_t) (UNITS (Int, ucount) +
-					    UNITS (Entry, ucount)) ;
+	    size_t lpart = KLS_UNITS32 (llen) + (size_t) UNITS (Entry, llen) ;
+	    size_t used = lpart + KLS_UNITS32 (ucount) +
+			  (size_t) UNITS (Entry, ucount) ;
 	    Unit *col = kls_klu_chunk_alloc (S, used) ;
-	    Int *Ui ;
+	    int32_t *Ui ;
 	    Entry *Ux ;
 	    if (col == NULL)
 	    {
@@ -1999,11 +2047,24 @@ static void *kls_klu_pipe_worker_main (void *arg)
 				       memory_order_release) ;
 		break ;
 	    }
-	    memcpy (col, S->scratch, lpart * sizeof (Unit)) ;
+	    /* narrow the L indices while copying out of the scratch
+	       (block-local rows always fit int32: the pipe requires
+	       n < 2^31) */
+	    {
+		Int *sLi = (Int *) S->scratch ;
+		Entry *sLx = (Entry *) (S->scratch + UNITS (Int, llen)) ;
+		int32_t *dLi = (int32_t *) col ;
+		Entry *dLx = (Entry *) (col + KLS_UNITS32 (llen)) ;
+		for (p = 0 ; p < llen ; p++)
+		{
+		    dLi [p] = (int32_t) sLi [p] ;
+		    dLx [p] = sLx [p] ;
+		}
+	    }
 	    S->Uip [k] = (Int) lpart ;
 	    S->Ulen [k] = ucount ;
-	    Ui = (Int *) (col + lpart) ;
-	    Ux = (Entry *) (col + lpart + UNITS (Int, ucount)) ;
+	    Ui = (int32_t *) (col + lpart) ;
+	    Ux = (Entry *) (col + lpart + KLS_UNITS32 (ucount)) ;
 	    /* sort ascending by pivot index: the multi-round concatenation
 	       is a valid topological order but downstream consumers of the
 	       stored pattern (refactor map/schedule builders) mis-handle
@@ -2026,7 +2087,7 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	    }
 	    for (p = 0 ; p < ucount ; p++)
 	    {
-		Ui [p] = W->ubuf_i [p] ;
+		Ui [p] = (int32_t) W->ubuf_i [p] ;
 		Ux [p] = W->ubuf_x [p] ;
 	    }
 	    S->colptr [k] = col ;
@@ -2064,11 +2125,11 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		    Unit *xp = (Unit *) __atomic_load_n (
 			(Unit **) &S->colptr [jcol], __ATOMIC_ACQUIRE) ;
 		    Int jlen = S->Llen [jcol] ;
-		    Int *Lij = (Int *) xp ;
+		    const int32_t *Lij = (const int32_t *) xp ;
 		    Int p2, found = 0 ;
 		    for (p2 = 0 ; p2 < jlen ; p2++)
 		    {
-			if (Lij [p2] == pivrow)
+			if ((Int) Lij [p2] == pivrow)
 			{
 			    found = 1 ;
 			    break ;
@@ -2087,22 +2148,21 @@ static void *kls_klu_pipe_worker_main (void *arg)
 			   published arrangement stays bit-identical to
 			   the previous algorithm. */
 			Int julen = S->Ulen [jcol] ;
-			size_t lpart = (size_t) (UNITS (Int, jlen) +
-						 UNITS (Entry, jlen)) ;
-			size_t used = lpart +
-			    (size_t) (UNITS (Int, julen) +
-				      UNITS (Entry, julen)) ;
+			size_t lpart = KLS_UNITS32 (jlen) +
+			    (size_t) UNITS (Entry, jlen) ;
+			size_t used = lpart + KLS_UNITS32 (julen) +
+			    (size_t) UNITS (Entry, julen) ;
 			Unit *newcol = kls_klu_chunk_alloc (S, used) ;
 			if (newcol != NULL)
 			{
-			    Int *nLi = (Int *) newcol ;
+			    int32_t *nLi = (int32_t *) newcol ;
 			    Entry *nLx =
-				(Entry *) (newcol + UNITS (Int, jlen)) ;
+				(Entry *) (newcol + KLS_UNITS32 (jlen)) ;
 			    Int phead = 0, ptail = jlen ;
 			    memcpy (newcol, xp, used * sizeof (Unit)) ;
 			    while (phead < ptail)
 			    {
-				Int row = nLi [phead] ;
+				int32_t row = nLi [phead] ;
 				if (S->Pinv [row] >= 0)
 				{
 				    phead++ ;
@@ -2323,6 +2383,7 @@ size_t KLS_KLU_KERNEL_PIPE
     S.no_prune = 1 ;
     S.diag_claim = 0 ;
     S.chunked_prune = 0 ;
+    S.idx32 = 1 ;  /* pipe columns publish int32 indices */
     S.pack_keep_row_indices = 0 ;
     S.chunk_head = NULL ; S.chunk_used = 0 ; S.chunk_size = 0 ;
     S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) * sizeof (Unit)) ;
@@ -2470,9 +2531,10 @@ size_t KLS_KLU_KERNEL_PIPE
 		    {
 			long lsum = 0, usum = 0 ;
 			Unit *xp = S.colptr [dk] ;
-			Int *dLi = (Int *) xp ;
-			Int *dUi = (Int *) (xp + UNITS (Int, S.Llen [dk]) +
-					    UNITS (Entry, S.Llen [dk])) ;
+			const int32_t *dLi = (const int32_t *) xp ;
+			const int32_t *dUi = (const int32_t *)
+			    (xp + KLS_UNITS32 (S.Llen [dk]) +
+			     UNITS (Entry, S.Llen [dk])) ;
 			for (dp = 0 ; dp < S.Llen [dk] ; dp++)
 			{
 			    lsum += dLi [dp] ;
@@ -2658,6 +2720,7 @@ size_t KLS_KLU_KERNEL_LEVELS
     S.no_prune = 1 ;
     S.diag_claim = 0 ;
     S.chunked_prune = 0 ;
+    S.idx32 = 0 ;
     S.pack_keep_row_indices = 0 ;
     S.chunk_head = NULL ; S.chunk_used = 0 ; S.chunk_size = 0 ;
     if (prof)
@@ -3201,7 +3264,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 	    free (sp) ;
 	}
     }
-    if (n >= 512 &&
+    if (n >= 512 && n < 2147483647 &&
 	(getenv ("KLS_KLU_PIPE") != NULL || kls_klu_pipe_threads > 0))
     {
 	int pipe_threads = getenv ("KLS_KLU_PIPE") != NULL
@@ -3276,6 +3339,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     S.no_prune = 0 ;
     S.diag_claim = 0 ;
     S.chunked_prune = 0 ;
+    S.idx32 = 0 ;
     S.pack_keep_row_indices = 0 ;
     S.colptr = NULL ;
     S.scratch = NULL ;
