@@ -23362,6 +23362,13 @@ static pthread_mutex_t kls_mtmetis_lock = PTHREAD_MUTEX_INITIALIZER;
    layer's concurrency decisions (set in analyze_with_ordering) */
 static _Thread_local int kls_metis_order_threads;
 
+/* callers that measured a win from the deterministic parallel NodeNDP
+   set this around their analyze (currently the pre-static METIS
+   refinement); everything else keeps serial NodeNDP's forest, which
+   the separator-pipeline refactor engines are structure-sensitive to
+   (pre2: 5x refactor loss under the parallel splitter's forest) */
+static _Thread_local int kls_det_ndp_requested;
+
 /* per-thread routing request from the analyze level: the mostly-
    missing-diagonal low-degree class (mac_econ) pays a pathological
    serial NodeND while its egraph refactor engine has no separator-
@@ -24209,15 +24216,20 @@ static UF_long kls_metis_order_inner(UF_long n,
 #ifdef KLS_HAVE_MTMETIS
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
       n >= 50000 && kls_metis_order_threads >= (int)metis_ndp_npes &&
+      kls_det_ndp_requested &&
       getenv("KLS_DISABLE_DET_NDP") == NULL) {
-    /* deterministic parallel NodeNDP: serial METIS separators (the
-       forest structure the pipeline engines read stays serial-METIS
-       shaped) with the leaves ordered by concurrent serial NodeND.
-       Deterministic because KLS_GKRAND (default ON) gives each
-       METIS call its own seeded thread-local MT19937 stream; the
-       concurrent leaves cannot perturb each other.  Ordering quality
-       is arbitrated downstream by the candidate competition's
-       measured fill/flops gates. */
+    /* deterministic parallel NodeNDP: serial METIS separators with
+       the leaves ordered by concurrent serial NodeND.  Deterministic
+       because KLS_GKRAND (default ON) gives each METIS call its own
+       seeded thread-local MT19937 stream; the concurrent leaves
+       cannot perturb each other.  Scoped to callers that request it
+       (the pre-static METIS refinement, where it measured a win):
+       v11 measured pre2's separator-pipeline refactor 5x slower when
+       its analyze-time forest came from this splitter instead of
+       serial NodeNDP - the same structure-sensitivity that rejected
+       mt-metis forests there.  Ordering quality is arbitrated
+       downstream by the candidate competition's measured fill/flops
+       gates. */
     par_nd_done = kls_mtmetis_ndp(n, xadj, adjncy, metis_ndp_npes,
                                   metis_perm, metis_iperm,
                                   metis_ndp_sizes, 1);
@@ -24512,6 +24524,20 @@ static int analyze_with_ordering(UF_long n,
   kls_separator_analysis_clear(separator_out);
 #ifdef KLS_HAVE_MTMETIS
   kls_metis_order_threads = options != NULL ? options->threads : 1;
+#endif
+#ifdef KLS_HAVE_METIS
+  {
+    /* the large-spral separator-pipeline class (pre2): its refactor
+       engine is structure-sensitive to the exact serial-NodeNDP
+       forests the pre-GKRAND libc RNG produced (v11: 0.17s -> 7-9.6s
+       refactor under MT19937 orderings), so this class keeps the
+       legacy RNG for its ordering calls.  Thread-local: set per
+       analyze call from the same pattern bounds the prestatic class
+       gate uses. */
+    extern void gk_set_legacy_rand(int enable);
+    gk_set_legacy_rand(n > 150000u && n <= 750000u && col_ptr != NULL &&
+                       (UF_long)col_ptr[n] <= 8000000);
+  }
 #endif
   const double kls_awo_t0 =
     getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
@@ -27959,10 +27985,16 @@ typedef struct kls_psmetis_spec {
 
 static void *kls_psmetis_spec_main(void *arg) {
   kls_psmetis_spec *spec = (kls_psmetis_spec *)arg;
+#ifdef KLS_HAVE_MTMETIS
+  kls_det_ndp_requested = 1;
+#endif
   spec->status = analyze_with_ordering(spec->n, spec->col_ptr,
                                        spec->row_idx, &spec->options,
                                        KLS_ORDERING_METIS, &spec->symbolic,
                                        &spec->common, &spec->separator);
+#ifdef KLS_HAVE_MTMETIS
+  kls_det_ndp_requested = 0;
+#endif
   if (spec->status == KLS_OK && spec->symbolic != NULL &&
       spec->do_factor && spec->values != NULL) {
     spec->factor_attempted = 1;
@@ -28065,10 +28097,16 @@ static int maybe_refine_pre_static_with_metis(
     metis_options.scale = (int)trial_common_io->scale;
     metis_options.pivot_tolerance = trial_common_io->tol;
 
+#ifdef KLS_HAVE_MTMETIS
+    kls_det_ndp_requested = 1;
+#endif
     int status = analyze_with_ordering(n, trial_col_ptr, trial_row_idx,
                                        &metis_options, KLS_ORDERING_METIS,
                                        &metis_symbolic, &metis_common,
                                        &metis_separator);
+#ifdef KLS_HAVE_MTMETIS
+    kls_det_ndp_requested = 0;
+#endif
     if (status != KLS_OK) {
       kls_separator_analysis_clear(&metis_separator);
       return 0;
