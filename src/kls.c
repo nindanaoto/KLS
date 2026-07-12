@@ -2353,6 +2353,11 @@ struct kls_refactor_pool {
   int lock_initialized;
 };
 
+extern _Thread_local int kls_klu_pipe_threads;
+extern _Thread_local int kls_klu_pipe_det;
+static int kls_pipe_first_factor_threads(const kls_solver *solver,
+                                         const trilinos_klu_l_symbolic *sym);
+
 typedef struct kls_match_entry {
   double weight;
   UF_long row;
@@ -31702,9 +31707,16 @@ static int maybe_select_auto_row_match(kls_solver *solver,
                                                       &trial_options,
                                                       trial_values);
 
+  /* the trial factor is the largest single cost of the prestatic
+     one-shot (pre2: 3.4s of the 8.9s init); the deterministic pipe
+     factors it in parallel with identical acceptance semantics */
+  kls_klu_pipe_threads =
+    kls_pipe_first_factor_threads(solver, trial_symbolic);
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
                           trial_symbolic, &trial_common);
+  kls_klu_pipe_threads = 0;
+  kls_klu_pipe_det = 0;
   if (trial_numeric == NULL || trial_common.status < 0 ||
       trial_common.status == TRILINOS_KLU_SINGULAR) {
     goto done;
@@ -31817,8 +31829,6 @@ done:
    cancellation-pivot fragility); route foreground first factors with
    est work/column above a floor.  Thread-local, so race workers and
    other background factors never engage it. */
-extern _Thread_local int kls_klu_pipe_threads;
-extern _Thread_local int kls_klu_pipe_det;
 
 /* Worker count scaled to the estimated factor work: each pipe worker
    pays workspace setup (n-sized flag/X arrays) and pointer-chase
