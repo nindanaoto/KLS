@@ -1163,6 +1163,11 @@ Int KLS_KLU_KERNEL_STEP
 	Common->status = TRILINOS_KLU_SINGULAR ;
 	if (Common->numerical_rank == TRILINOS_KLU_EMPTY)
 	{
+	    if (getenv ("KLS_KLU_ROW_PROF") != NULL)
+	    {
+		fprintf (stderr, "KLS kernel: singular col k=%ld k1=%ld\n",
+			 (long) k, (long) S->k1) ;
+	    }
 	    Common->numerical_rank = k + S->k1 ;
 	    Common->singular_col = S->Q [k + S->k1] ;
 	}
@@ -4693,6 +4698,697 @@ size_t KLS_KLU_KERNEL_LEVELS
     return (final_size) ;
 }
 
+/* ========================================================================== */
+/* === KLS row-first static-GESP kernel (PTS pipeline) ===================== */
+/* ========================================================================== */
+
+/* Static-pivot up-looking row factorization over a precomputed George/Ng
+ * superset structure (chol(A+A') row patterns via etree row subtrees),
+ * numerically executed by a pipelined parallel pass with per-row
+ * completion flags.  Every pivot is the natural (block) diagonal;
+ * exactly-cancelled diagonals take a sqrt(eps)*blockmax perturbation
+ * (GESP; downstream refinement polices the accuracy contract).  Emission
+ * packs the value-compacted transpose into the classic column layout, so
+ * solve / refactor / off-diagonal handling are untouched.  On any
+ * failure the caller retries the classic serial kernel. */
+
+typedef struct
+{
+    Int n ;
+    const Int *rp, *rc ;	/* block CSR pattern */
+    const Entry *rv ;		/* block CSR values (scaled) */
+    const Int *tp, *tc ;	/* CSR transpose pattern */
+    const Int *parent ;		/* etree of A+A' */
+    Int *l_start, *l_cnt, *l_steps ;
+    Int *u_start, *u_cnt, *u_cols ;
+    Entry *l_vals, *u_vals ;
+    Entry *udiag ;
+    Entry perturb ;
+    volatile unsigned char *val_done ;
+    Int **u_local ;
+    int nthreads ;
+    int phase ;
+    Int chunk ;
+    Int bound [65] ;
+    volatile int failed ;
+    long perturbed [64] ;
+} kls_rowk_shared ;
+
+typedef struct
+{
+    kls_rowk_shared *sh ;
+    int tid ;
+    Int *mark ;
+    Entry *x ;
+} kls_rowk_worker ;
+
+/* symbolic phases: 1 = subtree count, 2 = emit + transpose count,
+ * 3 = U-pattern emit; then the numeric pipeline (phase 4) */
+static void *kls_rowk_main (void *arg)
+{
+    kls_rowk_worker *w = (kls_rowk_worker *) arg ;
+    kls_rowk_shared *sh = w->sh ;
+    const Int n = sh->n ;
+    Int r0, r1, i ;
+    if (sh->phase == 1)
+    {
+	r0 = (Int) w->tid * sh->chunk ;
+	r1 = r0 + sh->chunk ;
+	if (r1 > n) r1 = n ;
+    }
+    else
+    {
+	r0 = sh->bound [w->tid] ;
+	r1 = sh->bound [w->tid + 1] ;
+    }
+    if (sh->phase == 1)
+    {
+	for (i = r0 ; i < r1 ; i++)
+	{
+	    const Int tag = i + 1 ;
+	    Int cnt = 0 ;
+	    int dir ;
+	    for (dir = 0 ; dir < 2 ; dir++)
+	    {
+		const Int *ptr = dir == 0 ? sh->rp : sh->tp ;
+		const Int *col = dir == 0 ? sh->rc : sh->tc ;
+		Int p ;
+		for (p = ptr [i] ; p < ptr [i+1] ; p++)
+		{
+		    Int k = col [p] ;
+		    while (k < i && w->mark [k] != tag)
+		    {
+			w->mark [k] = tag ;
+			cnt++ ;
+			k = sh->parent [k] ;
+		    }
+		}
+	    }
+	    sh->l_cnt [i] = cnt ;
+	}
+    }
+    else if (sh->phase == 2)
+    {
+	Int *ucl = sh->u_local [w->tid] ;
+	for (i = r0 ; i < r1 ; i++)
+	{
+	    const Int tag = n + i + 1 ;	/* disjoint from phase 1 */
+	    Int wp = sh->l_start [i] ;
+	    const Int s0 = wp ;
+	    Int a3, q ;
+	    int dir ;
+	    for (dir = 0 ; dir < 2 ; dir++)
+	    {
+		const Int *ptr = dir == 0 ? sh->rp : sh->tp ;
+		const Int *col = dir == 0 ? sh->rc : sh->tc ;
+		Int p ;
+		for (p = ptr [i] ; p < ptr [i+1] ; p++)
+		{
+		    Int k = col [p] ;
+		    while (k < i && w->mark [k] != tag)
+		    {
+			w->mark [k] = tag ;
+			sh->l_steps [wp++] = k ;
+			k = sh->parent [k] ;
+		    }
+		}
+	    }
+	    /* ascending source order for the numeric chain */
+	    for (a3 = s0 + 1 ; a3 < wp ; a3++)
+	    {
+		const Int v = sh->l_steps [a3] ;
+		Int b3 = a3 ;
+		while (b3 > s0 && sh->l_steps [b3-1] > v)
+		{
+		    sh->l_steps [b3] = sh->l_steps [b3-1] ;
+		    b3-- ;
+		}
+		sh->l_steps [b3] = v ;
+	    }
+	    for (q = s0 ; q < wp ; q++)
+	    {
+		ucl [sh->l_steps [q]]++ ;
+	    }
+	}
+    }
+    else if (sh->phase == 3)
+    {
+	Int *cur = sh->u_local [w->tid] ;	/* now cursors */
+	for (i = r0 ; i < r1 ; i++)
+	{
+	    Int q ;
+	    sh->u_cols [sh->u_start [i]] = i ;	/* diagonal first */
+	    for (q = sh->l_start [i] ; q < sh->l_start [i] + sh->l_cnt [i] ;
+		 q++)
+	    {
+		const Int st = sh->l_steps [q] ;
+		sh->u_cols [cur [st]++] = i ;
+	    }
+	}
+    }
+    else
+    {
+	/* numeric pipeline: round-robin rows, per-row val_done flags */
+	long nperturb = 0 ;
+	for (i = (Int) w->tid ; i < n ; i += sh->nthreads)
+	{
+	    Int p, t ;
+	    Entry dv ;
+	    const Int ls = sh->l_start [i] ;
+	    const Int us = sh->u_start [i] ;
+	    if (sh->failed)
+	    {
+		sh->val_done [i] = 1 ;
+		continue ;
+	    }
+	    for (p = sh->rp [i] ; p < sh->rp [i+1] ; p++)
+	    {
+		w->x [sh->rc [p]] = sh->rv [p] ;
+	    }
+	    for (t = 0 ; t < sh->l_cnt [i] ; t++)
+	    {
+		const Int st = sh->l_steps [ls + t] ;
+		Entry lij ;
+		while (!sh->val_done [st])
+		{
+		    __asm__ __volatile__ ("pause") ;
+		}
+		lij = w->x [st] / sh->udiag [st] ;
+		if (!isfinite (lij) && getenv ("KLS_KLU_ROW_PROF") != NULL)
+		{
+		    static volatile int kls_rowk_nan_once = 0 ;
+		    if (__sync_fetch_and_add (&kls_rowk_nan_once, 1) == 0)
+		    {
+			fprintf (stderr, "KLS rowk NaN: i=%ld st=%ld"
+				 " x=%g udiag=%g\n", (long) i, (long) st,
+				 w->x [st], sh->udiag [st]) ;
+		    }
+		}
+		w->x [st] = 0.0 ;
+		sh->l_vals [ls + t] = lij ;
+		if (lij != 0.0)
+		{
+		    const Int qs = sh->u_start [st] ;
+		    const Int qe = qs + sh->u_cnt [st] ;
+		    Int q ;
+		    for (q = qs ; q < qe ; q++)
+		    {
+			w->x [sh->u_cols [q]] -= lij * sh->u_vals [q] ;
+		    }
+		}
+	    }
+	    dv = w->x [i] ;
+	    if (fabs (dv) < sh->perturb)
+	    {
+		/* GESP: replace tiny pivots (not only exact zeros) so
+		   multipliers stay bounded; refinement recovers */
+		dv = dv < 0.0 ? -sh->perturb : sh->perturb ;
+		w->x [i] = dv ;
+		nperturb++ ;
+	    }
+	    sh->udiag [i] = dv ;
+	    for (t = 0 ; t < sh->u_cnt [i] ; t++)
+	    {
+		const Int c = sh->u_cols [us + t] ;
+		sh->u_vals [us + t] = w->x [c] ;
+		w->x [c] = 0.0 ;
+	    }
+	    __sync_synchronize () ;
+	    sh->val_done [i] = 1 ;
+	}
+	sh->perturbed [w->tid] = nperturb ;
+    }
+    return (NULL) ;
+}
+
+static void kls_rowk_run (kls_rowk_shared *sh, kls_rowk_worker *wk,
+			  int phase)
+{
+    pthread_t th [64] ;
+    int t ;
+    sh->phase = phase ;
+    for (t = 1 ; t < sh->nthreads ; t++)
+    {
+	pthread_create (&th [t], NULL, kls_rowk_main, &wk [t]) ;
+    }
+    kls_rowk_main (&wk [0]) ;
+    for (t = 1 ; t < sh->nthreads ; t++)
+    {
+	pthread_join (th [t], NULL) ;
+    }
+}
+
+/* etree of A+A' (Liu); returns 0 on OOM */
+static int kls_rowk_etree (Int n, const Int *rp, const Int *rc,
+			   const Int *tp, const Int *tc, Int *parent,
+			   Int *anc)
+{
+    Int i ;
+    for (i = 0 ; i < n ; i++)
+    {
+	parent [i] = TRILINOS_KLU_EMPTY ;
+	anc [i] = TRILINOS_KLU_EMPTY ;
+    }
+    for (i = 0 ; i < n ; i++)
+    {
+	int dir ;
+	for (dir = 0 ; dir < 2 ; dir++)
+	{
+	    const Int *ptr = dir == 0 ? rp : tp ;
+	    const Int *col = dir == 0 ? rc : tc ;
+	    Int p ;
+	    for (p = ptr [i] ; p < ptr [i+1] ; p++)
+	    {
+		Int j = col [p] ;
+		if (j >= i) continue ;
+		while (anc [j] != TRILINOS_KLU_EMPTY && anc [j] != i)
+		{
+		    const Int t2 = anc [j] ;
+		    anc [j] = i ;
+		    j = t2 ;
+		}
+		if (anc [j] == TRILINOS_KLU_EMPTY)
+		{
+		    anc [j] = i ;
+		    parent [j] = i ;
+		}
+	    }
+	}
+    }
+    return (1) ;
+}
+
+size_t KLS_KLU_KERNEL_ROW
+(
+    Int n, Int Ap [ ], Int Ai [ ], Entry Ax [ ], Int Q [ ], size_t lusize,
+    Int Pinv [ ], Int P [ ], Unit **p_LU, Entry Udiag [ ],
+    Int Llen [ ], Int Ulen [ ], Int Lip [ ], Int Uip [ ],
+    Int *lnz, Int *unz,
+    Int k1, Int PSinv [ ], double Rs [ ],
+    Int Offp [ ], Int Offi [ ], Entry Offx [ ],
+    TRILINOS_KLU_common *Common,
+    int nthreads
+)
+{
+    const int prof = getenv ("KLS_KLU_ROW_PROF") != NULL ;
+    const Int scale = Common->scale ;
+    Int *rp = NULL, *rc = NULL, *tp = NULL, *tc = NULL ;
+    Entry *rv = NULL ;
+    Int *parent = NULL, *anc = NULL ;
+    kls_rowk_shared sh ;
+    kls_rowk_worker wk [64] ;
+    Int *ulocal [64] ;
+    Int nnzb = 0, i, k, p ;
+    Entry bmax = 0.0 ;
+    size_t lf = 0, uf = 0, need ;
+    int ok = 1, t ;
+    double t0 = prof ? kls_klu_now () : 0.0, t1 = 0.0, t2 = 0.0,
+	t3 = 0.0 ;
+
+    if (nthreads < 1) nthreads = 1 ;
+    if (nthreads > 32) nthreads = 32 ;
+
+    memset (&sh, 0, sizeof (sh)) ;
+    memset (wk, 0, sizeof (wk)) ;
+    memset (ulocal, 0, sizeof (ulocal)) ;
+
+    /* ---- block CSR + off-diagonal part (construct_column semantics) - */
+    rp = (Int *) calloc ((size_t) n + 1, sizeof (Int)) ;
+    if (rp == NULL) { ok = 0 ; }
+    for (k = 0 ; k < n && ok ; k++)
+    {
+	const Int oldcol = Q [k + k1] ;
+	for (p = Ap [oldcol] ; p < Ap [oldcol+1] ; p++)
+	{
+	    const Int newrow = PSinv [Ai [p]] - k1 ;
+	    if (newrow >= 0)
+	    {
+		rp [newrow + 1]++ ;
+		nnzb++ ;
+	    }
+	}
+    }
+    if (ok)
+    {
+	for (i = 0 ; i < n ; i++)
+	{
+	    rp [i+1] += rp [i] ;
+	}
+	rc = (Int *) malloc ((size_t) (nnzb > 0 ? nnzb : 1) *
+			     sizeof (Int)) ;
+	rv = (Entry *) malloc ((size_t) (nnzb > 0 ? nnzb : 1) *
+			       sizeof (Entry)) ;
+	ok = rc != NULL && rv != NULL ;
+    }
+    if (ok)
+    {
+	Int *cur = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	Int poff = Offp [k1] ;
+	ok = cur != NULL ;
+	if (ok)
+	{
+	    memcpy (cur, rp, (size_t) n * sizeof (Int)) ;
+	    for (k = 0 ; k < n ; k++)
+	    {
+		const Int oldcol = Q [k + k1] ;
+		Offp [k + k1] = poff ;
+		for (p = Ap [oldcol] ; p < Ap [oldcol+1] ; p++)
+		{
+		    const Int oldrow = Ai [p] ;
+		    const Int newrow = PSinv [oldrow] - k1 ;
+		    Entry aik = Ax [p] ;
+		    if (scale > 0)
+		    {
+			SCALE_DIV (aik, Rs [oldrow]) ;
+		    }
+		    if (newrow < 0)
+		    {
+			Offi [poff] = oldrow ;
+			Offx [poff] = aik ;
+			poff++ ;
+		    }
+		    else
+		    {
+			const Int dst = cur [newrow]++ ;
+			rc [dst] = k ;
+			rv [dst] = aik ;
+			if (fabs (aik) > bmax)
+			{
+			    bmax = fabs (aik) ;
+			}
+		    }
+		}
+	    }
+	    Offp [n + k1] = poff ;
+	    free (cur) ;
+	}
+    }
+
+    /* ---- transpose pattern + etree ---------------------------------- */
+    if (ok)
+    {
+	tp = (Int *) calloc ((size_t) n + 1, sizeof (Int)) ;
+	tc = (Int *) malloc ((size_t) (nnzb > 0 ? nnzb : 1) *
+			     sizeof (Int)) ;
+	parent = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	anc = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	ok = tp != NULL && tc != NULL && parent != NULL && anc != NULL ;
+    }
+    if (ok)
+    {
+	Int *cur ;
+	for (p = 0 ; p < nnzb ; p++)
+	{
+	    tp [rc [p] + 1]++ ;
+	}
+	for (i = 0 ; i < n ; i++)
+	{
+	    tp [i+1] += tp [i] ;
+	}
+	cur = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	ok = cur != NULL ;
+	if (ok)
+	{
+	    memcpy (cur, tp, (size_t) n * sizeof (Int)) ;
+	    for (i = 0 ; i < n ; i++)
+	    {
+		for (p = rp [i] ; p < rp [i+1] ; p++)
+		{
+		    tc [cur [rc [p]]++] = i ;
+		}
+	    }
+	    free (cur) ;
+	    kls_rowk_etree (n, rp, rc, tp, tc, parent, anc) ;
+	}
+    }
+    free (anc) ;
+    anc = NULL ;
+    if (prof) t1 = kls_klu_now () ;
+
+    /* ---- parallel superset symbolic --------------------------------- */
+    sh.n = n ;
+    sh.rp = rp ; sh.rc = rc ; sh.rv = rv ;
+    sh.tp = tp ; sh.tc = tc ;
+    sh.parent = parent ;
+    sh.nthreads = nthreads ;
+    sh.chunk = (n + nthreads - 1) / nthreads ;
+    sh.u_local = ulocal ;
+    sh.perturb = 1.49e-8 * (bmax > 0.0 ? bmax : 1.0) ;
+    if (ok)
+    {
+	sh.l_cnt = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+	sh.l_start = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	sh.u_cnt = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+	sh.u_start = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	sh.udiag = (Entry *) malloc ((size_t) n * sizeof (Entry)) ;
+	sh.val_done = (volatile unsigned char *)
+	    calloc ((size_t) n, 1) ;
+	ok = sh.l_cnt != NULL && sh.l_start != NULL && sh.u_cnt != NULL &&
+	    sh.u_start != NULL && sh.udiag != NULL && sh.val_done != NULL ;
+    }
+    for (t = 0 ; t < nthreads && ok ; t++)
+    {
+	wk [t].sh = &sh ;
+	wk [t].tid = t ;
+	wk [t].mark = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+	wk [t].x = (Entry *) calloc ((size_t) n, sizeof (Entry)) ;
+	ulocal [t] = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+	ok = wk [t].mark != NULL && wk [t].x != NULL &&
+	    ulocal [t] != NULL ;
+    }
+    if (ok)
+    {
+	kls_rowk_run (&sh, wk, 1) ;
+	for (i = 0 ; i < n ; i++)
+	{
+	    sh.l_start [i] = (Int) lf ;
+	    lf += (size_t) sh.l_cnt [i] ;
+	}
+	{
+	    Int i2 = 0 ;
+	    sh.bound [0] = 0 ;
+	    for (t = 1 ; t < nthreads ; t++)
+	    {
+		const size_t target = lf * (size_t) t / (size_t) nthreads ;
+		while (i2 < n && (size_t) sh.l_start [i2] < target)
+		{
+		    i2++ ;
+		}
+		sh.bound [t] = i2 ;
+	    }
+	    sh.bound [nthreads] = n ;
+	}
+	sh.l_steps = (Int *) malloc ((lf > 0 ? lf : 1) * sizeof (Int)) ;
+	sh.l_vals = (Entry *) malloc ((lf > 0 ? lf : 1) *
+				      sizeof (Entry)) ;
+	ok = sh.l_steps != NULL && sh.l_vals != NULL ;
+    }
+    if (ok)
+    {
+	kls_rowk_run (&sh, wk, 2) ;
+	for (i = 0 ; i < n ; i++)
+	{
+	    Int c = 1 ;
+	    for (t = 0 ; t < nthreads ; t++)
+	    {
+		c += ulocal [t] [i] ;
+	    }
+	    sh.u_cnt [i] = c ;
+	}
+	for (i = 0 ; i < n ; i++)
+	{
+	    sh.u_start [i] = (Int) uf ;
+	    uf += (size_t) sh.u_cnt [i] ;
+	}
+	for (i = 0 ; i < n ; i++)
+	{
+	    Int base = sh.u_start [i] + 1 ;
+	    for (t = 0 ; t < nthreads ; t++)
+	    {
+		const Int c = ulocal [t] [i] ;
+		ulocal [t] [i] = base ;
+		base += c ;
+	    }
+	}
+	sh.u_cols = (Int *) malloc ((uf > 0 ? uf : 1) * sizeof (Int)) ;
+	sh.u_vals = (Entry *) malloc ((uf > 0 ? uf : 1) *
+				      sizeof (Entry)) ;
+	ok = sh.u_cols != NULL && sh.u_vals != NULL ;
+    }
+    if (ok)
+    {
+	kls_rowk_run (&sh, wk, 3) ;
+    }
+    if (prof) t2 = kls_klu_now () ;
+
+    /* ---- numeric pipeline -------------------------------------------- */
+    if (ok)
+    {
+	kls_rowk_run (&sh, wk, 4) ;
+	ok = !sh.failed ;
+	if (ok)
+	{
+	    long nperturb = 0 ;
+	    for (t = 0 ; t < nthreads ; t++)
+	    {
+		nperturb += sh.perturbed [t] ;
+	    }
+	    Common->kls_perturb_count += nperturb ;
+	}
+    }
+    if (prof) t3 = kls_klu_now () ;
+
+    /* ---- value-compacted transpose into the classic column layout --- */
+    if (ok)
+    {
+	size_t lup = 0 ;
+	double dmin = -1.0, dmax = 0.0 ;
+	for (k = 0 ; k < n ; k++)
+	{
+	    Llen [k] = 0 ;
+	    Ulen [k] = 0 ;
+	}
+	for (i = 0 ; i < n ; i++)
+	{
+	    const Int ls = sh.l_start [i] ;
+	    const Int us = sh.u_start [i] ;
+	    for (p = 0 ; p < sh.l_cnt [i] ; p++)
+	    {
+		if (sh.l_vals [ls + p] != 0.0)
+		{
+		    Llen [sh.l_steps [ls + p]]++ ;
+		}
+	    }
+	    for (p = 1 ; p < sh.u_cnt [i] ; p++)	/* skip diagonal */
+	    {
+		if (sh.u_vals [us + p] != 0.0)
+		{
+		    Ulen [sh.u_cols [us + p]]++ ;
+		}
+	    }
+	}
+	for (k = 0 ; k < n ; k++)
+	{
+	    Lip [k] = (Int) lup ;
+	    lup += UNITS (Int, Llen [k]) + UNITS (Entry, Llen [k]) ;
+	    Uip [k] = (Int) lup ;
+	    lup += UNITS (Int, Ulen [k]) + UNITS (Entry, Ulen [k]) ;
+	}
+	need = lup > 0 ? lup : 1 ;
+	if (need > lusize)
+	{
+	    Unit *nlu = (Unit *) TRILINOS_KLU_realloc (need, lusize,
+		sizeof (Unit), *p_LU, Common) ;
+	    if (nlu == NULL || Common->status == TRILINOS_KLU_OUT_OF_MEMORY)
+	    {
+		ok = 0 ;
+	    }
+	    else
+	    {
+		*p_LU = nlu ;
+		lusize = need ;
+	    }
+	}
+	if (ok)
+	{
+	    Unit *LU = *p_LU ;
+	    Int *curc = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+	    ok = curc != NULL ;
+	    if (ok)
+	    {
+		Int lsum = 0, usum = 0 ;
+		for (i = 0 ; i < n ; i++)
+		{
+		    const Int ls = sh.l_start [i] ;
+		    for (p = 0 ; p < sh.l_cnt [i] ; p++)
+		    {
+			const Entry lv = sh.l_vals [ls + p] ;
+			if (lv != 0.0)
+			{
+			    const Int st = sh.l_steps [ls + p] ;
+			    Int *Li = (Int *) (LU + Lip [st]) ;
+			    Entry *Lx = (Entry *) (LU + Lip [st] +
+				UNITS (Int, Llen [st])) ;
+			    const Int d = curc [st]++ ;
+			    Li [d] = i ;
+			    Lx [d] = lv ;
+			}
+		    }
+		}
+		memset (curc, 0, (size_t) n * sizeof (Int)) ;
+		for (i = 0 ; i < n ; i++)
+		{
+		    const Int us = sh.u_start [i] ;
+		    for (p = 1 ; p < sh.u_cnt [i] ; p++)
+		    {
+			const Entry uv = sh.u_vals [us + p] ;
+			if (uv != 0.0)
+			{
+			    const Int c = sh.u_cols [us + p] ;
+			    Int *Ui = (Int *) (LU + Uip [c]) ;
+			    Entry *Ux = (Entry *) (LU + Uip [c] +
+				UNITS (Int, Ulen [c])) ;
+			    const Int d = curc [c]++ ;
+			    Ui [d] = i ;
+			    Ux [d] = uv ;
+			}
+		    }
+		}
+		free (curc) ;
+		for (k = 0 ; k < n ; k++)
+		{
+		    const double ad = fabs (sh.udiag [k]) ;
+		    Udiag [k] = sh.udiag [k] ;
+		    P [k] = k ;
+		    Pinv [k] = k ;
+		    lsum += Llen [k] + 1 ;
+		    usum += Ulen [k] + 1 ;
+		    if (dmin < 0.0 || ad < dmin) dmin = ad ;
+		    if (ad > dmax) dmax = ad ;
+		}
+		*lnz = lsum ;
+		*unz = usum ;
+		(void) dmin ;
+		(void) dmax ;
+	    }
+	}
+	if (ok && prof)
+	{
+	    fprintf (stderr, "KLS row-kernel: n=%ld nnzb=%ld sym=%.3fs"
+		     " num=%.3fs pack=%.3fs lf %ld uf %ld lnz %ld"
+		     " unz %ld perturbed=%ld nt=%d\n",
+		     (long) n, (long) nnzb, t2 - t1, t3 - t2,
+		     kls_klu_now () - t3, (long) lf, (long) uf,
+		     (long) *lnz, (long) *unz,
+		     (long) Common->kls_perturb_count, nthreads) ;
+	}
+    }
+
+    for (t = 0 ; t < nthreads ; t++)
+    {
+	free (wk [t].mark) ;
+	free (wk [t].x) ;
+	free (ulocal [t]) ;
+    }
+    free (rp) ; free (rc) ; free (rv) ; free (tp) ; free (tc) ;
+    free (parent) ;
+    free (sh.l_cnt) ; free (sh.l_start) ; free (sh.l_steps) ;
+    free (sh.l_vals) ;
+    free (sh.u_cnt) ; free (sh.u_start) ; free (sh.u_cols) ;
+    free (sh.u_vals) ;
+    free (sh.udiag) ; free ((void *) sh.val_done) ;
+    if (!ok)
+    {
+	if (Common->status == TRILINOS_KLU_OK)
+	{
+	    Common->status = TRILINOS_KLU_SINGULAR ;
+	}
+	return (lusize) ;
+    }
+    Common->status = TRILINOS_KLU_OK ;
+    return (lusize) ;
+}
+
 size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 (
     /* input, not modified */
@@ -4886,6 +5582,25 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 	    }
 	    free (sp) ;
 	}
+    }
+    if (n >= 512 && getenv ("KLS_KLU_ROW") != NULL)
+    {
+	int row_threads = atoi (getenv ("KLS_KLU_ROW")) ;
+	size_t row_size = KLS_KLU_KERNEL_ROW (n, Ap, Ai, Ax, Q, lusize,
+	    Pinv, P, p_LU, Udiag, Llen, Ulen, Lip, Uip, lnz, unz,
+	    k1, PSinv, Rs, Offp, Offi, Offx, Common,
+	    row_threads > 0 ? row_threads : 1) ;
+	if (Common->status == TRILINOS_KLU_OK)
+	{
+	    return (row_size) ;
+	}
+	/* engine failure: retry the block with the classic serial
+	   kernel below (the row kernel frees its own arenas; Offp
+	   prefix entries it wrote are recomputed by construct_column) */
+	Common->status = TRILINOS_KLU_OK ;
+	Common->numerical_rank = TRILINOS_KLU_EMPTY ;
+	Common->singular_col = TRILINOS_KLU_EMPTY ;
+	lusize = row_size ;
     }
     if (n >= 512 && n < 2147483647 &&
 	(getenv ("KLS_KLU_PIPE") != NULL || kls_klu_pipe_threads > 0))

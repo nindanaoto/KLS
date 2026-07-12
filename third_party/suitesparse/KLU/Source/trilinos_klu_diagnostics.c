@@ -549,6 +549,11 @@ Int TRILINOS_KLU_rcond		/* return TRUE if successful, FALSE otherwise */
 	if (SCALAR_IS_NAN (ukk) || SCALAR_IS_ZERO (ukk))
 	{
 	    /* if NaN, or zero, the rcond is zero */
+	    if (getenv ("KLS_KLU_ROW_PROF") != NULL)
+	    {
+		fprintf (stderr, "KLS rcond: zero/nan Udiag j=%ld"
+			 " val=%g\n", (long) j, Udiag [j]) ;
+	    }
 	    Common->rcond = 0 ;
 	    Common->status = TRILINOS_KLU_SINGULAR ;
 	    return (TRUE) ;
