@@ -52,6 +52,7 @@ _Thread_local double kls_construct_secs ;
 _Thread_local long kls_pipe_inversions ;
 static FILE *kls_pipe_pivlog ;
 static Int kls_trace_row_a = -1, kls_trace_row_b = -1 ;
+
 static _Thread_local unsigned long long kls_lane_fp_src [32] ;
 static _Thread_local unsigned long long kls_lane_fp_full [32] ;
 static _Thread_local unsigned long long kls_fin_fp_src ;
@@ -981,6 +982,136 @@ typedef struct KLS_KLU_KERNEL_STATE_STRUCT
     size_t chunk_size ;
 } KLS_KLU_KERNEL_STATE ;
 
+_Thread_local int kls_pipe_finish_threads = 1 ;
+
+/* sort a stack segment ascending by Pinv: pack key|value into one
+   64-bit word (Pinv and row both < 2^31), qsort, unpack */
+static int kls_seg_cmp (const void *a, const void *b)
+{
+    const unsigned long long x = *(const unsigned long long *) a ;
+    const unsigned long long y = *(const unsigned long long *) b ;
+    return x < y ? -1 : (x > y ? 1 : 0) ;
+}
+static void kls_pipe_sort_seg (Int *seg, Int len, const Int *Pinv)
+{
+    unsigned long long buf [4096] ;
+    unsigned long long *w = buf ;
+    Int i ;
+    if (len > 4096)
+    {
+	w = (unsigned long long *) malloc ((size_t) len * 8) ;
+	if (w == NULL)
+	{
+	    /* fall back to insertion (rare) */
+	    for (i = 1 ; i < len ; i++)
+	    {
+		Int jj = seg [i] ;
+		Int pv = Pinv [jj] ;
+		Int q2 = i ;
+		while (q2 > 0 && Pinv [seg [q2-1]] > pv)
+		{
+		    seg [q2] = seg [q2-1] ;
+		    q2-- ;
+		}
+		seg [q2] = jj ;
+	    }
+	    return ;
+	}
+    }
+    for (i = 0 ; i < len ; i++)
+    {
+	w [i] = ((unsigned long long) (unsigned) Pinv [seg [i]] << 32) |
+		(unsigned long long) (unsigned) seg [i] ;
+    }
+    qsort (w, (size_t) len, 8, kls_seg_cmp) ;
+    for (i = 0 ; i < len ; i++)
+    {
+	seg [i] = (Int) (unsigned) (w [i] & 0xFFFFFFFFu) ;
+    }
+    if (w != buf)
+    {
+	free (w) ;
+    }
+}
+
+typedef struct
+{
+    KLS_KLU_KERNEL_STATE *S ;
+    Unit *packed ;
+    Int ncols ;
+    int nthreads ;
+} kls_finish_copy_ctx ;
+
+typedef struct
+{
+    kls_finish_copy_ctx *ctx ;
+    int tid ;
+} kls_finish_copy_job ;
+
+static void *kls_finish_copy_main (void *arg)
+{
+    kls_finish_copy_job *job = (kls_finish_copy_job *) arg ;
+    kls_finish_copy_ctx *fc = job->ctx ;
+    KLS_KLU_KERNEL_STATE *S = fc->S ;
+    Unit *packed = fc->packed ;
+    Int p, i ;
+    for (p = (Int) job->tid ; p < fc->ncols ; p += fc->nthreads)
+    {
+	size_t off, lunits ;
+	if (S->colptr [p] == NULL)
+	{
+	    continue ;
+	}
+	off = (size_t) S->Lip [p] ;
+	lunits = UNITS (Int, S->Llen [p]) + UNITS (Entry, S->Llen [p]) ;
+	if (S->idx32)
+	{
+	    const Unit *src = S->colptr [p] ;
+	    const int32_t *sLi = (const int32_t *) src ;
+	    const Entry *sLx =
+		(const Entry *) (src + KLS_UNITS32 (S->Llen [p])) ;
+	    const size_t slpart =
+		KLS_UNITS32 (S->Llen [p]) + UNITS (Entry, S->Llen [p]) ;
+	    const int32_t *sUi = (const int32_t *) (src + slpart) ;
+	    const Entry *sUx =
+		(const Entry *) (src + slpart + KLS_UNITS32 (S->Ulen [p])) ;
+	    Int *dLi = (Int *) (packed + off) ;
+	    Entry *dLx = (Entry *) (packed + off + UNITS (Int, S->Llen [p])) ;
+	    Int *dUi = (Int *) (packed + off + lunits) ;
+	    Entry *dUx = (Entry *) (packed + off + lunits +
+				    UNITS (Int, S->Ulen [p])) ;
+	    for (i = 0 ; i < S->Llen [p] ; i++)
+	    {
+		dLi [i] = S->pack_keep_row_indices
+		    ? (Int) sLi [i] : S->Pinv [sLi [i]] ;
+		dLx [i] = sLx [i] ;
+	    }
+	    for (i = 0 ; i < S->Ulen [p] ; i++)
+	    {
+		dUi [i] = (Int) sUi [i] ;
+		dUx [i] = sUx [i] ;
+	    }
+	}
+	else
+	{
+	    size_t uunits = UNITS (Int, S->Ulen [p]) +
+			    UNITS (Entry, S->Ulen [p]) ;
+	    memcpy (packed + off, S->colptr [p],
+		    (lunits + uunits) * sizeof (Unit)) ;
+	    if (!S->pack_keep_row_indices)
+	    {
+		Int *Li2 = (Int *) (packed + off) ;
+		for (i = 0 ; i < S->Llen [p] ; i++)
+		{
+		    Li2 [i] = S->Pinv [Li2 [i]] ;
+		}
+	    }
+	}
+    }
+    return (NULL) ;
+}
+
+
 /* allocate nunits from the state's chunk arena (never moves memory) */
 static Unit *kls_klu_chunk_alloc (KLS_KLU_KERNEL_STATE *S, size_t nunits)
 {
@@ -1336,10 +1467,11 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
 	{
 	    return (S->lusize) ;
 	}
+	/* pass 1 (serial): column offsets */
 	off = 0 ;
 	for (p = 0 ; p < ncols ; p++)
 	{
-	    size_t lunits ;
+	    size_t lunits, uunits ;
 	    if (S->colptr [p] == NULL)
 	    {
 		S->Lip [p] = 0 ;
@@ -1348,60 +1480,58 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
 		S->Ulen [p] = 0 ;
 		continue ;
 	    }
-	    lunits = UNITS (Int, S->Llen [p]) +
-			    UNITS (Entry, S->Llen [p]) ;
-	    size_t uunits = UNITS (Int, S->Ulen [p]) +
-			    UNITS (Entry, S->Ulen [p]) ;
-	    if (S->idx32)
-	    {
-		/* widen the pipe's int32 column to the standard Int
-		   layout while packing (converting L rows to pivotal
-		   indices in the same pass) */
-		const Unit *src = S->colptr [p] ;
-		const int32_t *sLi = (const int32_t *) src ;
-		const Entry *sLx =
-		    (const Entry *) (src + KLS_UNITS32 (S->Llen [p])) ;
-		const size_t slpart =
-		    KLS_UNITS32 (S->Llen [p]) + UNITS (Entry, S->Llen [p]) ;
-		const int32_t *sUi = (const int32_t *) (src + slpart) ;
-		const Entry *sUx =
-		    (const Entry *) (src + slpart +
-				     KLS_UNITS32 (S->Ulen [p])) ;
-		Int *dLi = (Int *) (packed + off) ;
-		Entry *dLx =
-		    (Entry *) (packed + off + UNITS (Int, S->Llen [p])) ;
-		Int *dUi = (Int *) (packed + off + lunits) ;
-		Entry *dUx = (Entry *) (packed + off + lunits +
-					UNITS (Int, S->Ulen [p])) ;
-		for (i = 0 ; i < S->Llen [p] ; i++)
-		{
-		    dLi [i] = S->pack_keep_row_indices
-			? (Int) sLi [i] : S->Pinv [sLi [i]] ;
-		    dLx [i] = sLx [i] ;
-		}
-		for (i = 0 ; i < S->Ulen [p] ; i++)
-		{
-		    dUi [i] = (Int) sUi [i] ;
-		    dUx [i] = sUx [i] ;
-		}
-		S->Lip [p] = (Int) off ;
-		S->Uip [p] = (Int) (off + lunits) ;
-		off += lunits + uunits ;
-		continue ;
-	    }
-	    memcpy (packed + off, S->colptr [p],
-		    (lunits + uunits) * sizeof (Unit)) ;
+	    lunits = UNITS (Int, S->Llen [p]) + UNITS (Entry, S->Llen [p]) ;
+	    uunits = UNITS (Int, S->Ulen [p]) + UNITS (Entry, S->Ulen [p]) ;
 	    S->Lip [p] = (Int) off ;
 	    S->Uip [p] = (Int) (off + lunits) ;
-	    if (!S->pack_keep_row_indices)
+	    off += lunits + uunits ;
+	}
+	/* pass 2 (parallel): copy/widen the chunks - columns are
+	   independent and the loop is memory-bound (0.22s serial on
+	   mac's 800MB factor) */
+	{
+	    kls_finish_copy_ctx fc ;
+	    pthread_t fth [16] ;
+	    kls_finish_copy_job fjobs [16] ;
+	    int nt = kls_pipe_finish_threads ;
+	    int t ;
+	    if (nt < 1) nt = 1 ;
+	    if (nt > 16) nt = 16 ;
+	    fc.S = S ;
+	    fc.packed = packed ;
+	    fc.ncols = ncols ;
+	    fc.nthreads = nt ;
+	    for (t = 0 ; t < nt ; t++)
 	    {
-		Li = (Int *) (packed + off) ;
-		for (i = 0 ; i < S->Llen [p] ; i++)
+		fjobs [t].ctx = &fc ;
+		fjobs [t].tid = t ;
+	    }
+	    for (t = 1 ; t < nt ; t++)
+	    {
+		if (pthread_create (&fth [t], NULL, kls_finish_copy_main,
+				    &fjobs [t]) != 0)
 		{
-		    Li [i] = S->Pinv [Li [i]] ;
+		    /* fall back: this thread covers the range too */
+		    fjobs [t].tid = -1 ;
 		}
 	    }
-	    off += lunits + uunits ;
+	    kls_finish_copy_main (&fjobs [0]) ;
+	    for (t = 1 ; t < nt ; t++)
+	    {
+		if (fjobs [t].tid != -1)
+		{
+		    pthread_join (fth [t], NULL) ;
+		}
+	    }
+	    /* threads that failed to spawn: cover serially */
+	    for (t = 1 ; t < nt ; t++)
+	    {
+		if (fjobs [t].tid == -1)
+		{
+		    fjobs [t].tid = t ;
+		    kls_finish_copy_main (&fjobs [t]) ;
+		}
+	    }
 	}
 	KLS_KLU_KERNEL_CHUNKS_FREE (S) ;
 	S->LU = packed ;
@@ -1930,6 +2060,15 @@ static void kls_pipe_round
        sequence deterministic (mac amplifies any ulp reorder to e0
        through its cancellation rows). */
     {
+	const Int seglen = n - top ;
+	if (seglen > 48)
+	{
+	    /* long segments (the dense tail): comparison sort keyed by
+	       Pinv - pack (Pinv,row) pairs to sort without a global
+	       key array indirection */
+	    kls_pipe_sort_seg (S->Stack + top, seglen, Pinv) ;
+	}
+	else
 	for (s = top + 1 ; s < n ; s++)
 	{
 	    Int jj = S->Stack [s] ;
@@ -3783,6 +3922,7 @@ size_t KLS_KLU_KERNEL_PIPE
 
     if (nthreads < 1) nthreads = 1 ;
     if (nthreads > 16) nthreads = 16 ;
+    kls_pipe_finish_threads = nthreads ;
     {
 	const char *lp = getenv ("KLS_PIPE_PIVLOG") ;
 	if (lp != NULL && kls_pipe_pivlog == NULL)

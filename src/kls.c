@@ -387,6 +387,7 @@ struct kls_solver {
   int metis_race_deferred;
   int metis_race_deferred_invalid;
   int prestatic_deferred;
+  int block_order_deferred;
   int factor_preps_deferred;
   int block_trial_active;
   int numeric_needs_refinement;
@@ -127729,6 +127730,9 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (!kls_first_factor_used) {
 #ifdef KLS_HAVE_SPRAL_SCALING
     if (!had_numeric && solver->numeric == NULL) {
+      /* NOT deferrable: without this ordering TSOPF's serial factor
+         is 41s and case9's 0.35s (measured) - it IS the one-shot
+         path for the block-structured class, not cycle machinery */
       maybe_select_block_structured_ordering(solver, &elapsed,
                                              numeric_values);
       KLS_ENTRY_PHASE("block_order")
@@ -128170,8 +128174,22 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (status != KLS_OK) {
     return status;
   }
+#ifdef KLS_HAVE_SPRAL_SCALING
+  if (solver->block_order_deferred) {
+    solver->block_order_deferred = 0;
+    double bo_elapsed = 0.0;
+    maybe_select_block_structured_ordering(solver, &bo_elapsed,
+                                           numeric_values);
+    if (solver->values != NULL) {
+      /* adoption replaced pattern+values (same handoff as the
+         prestatic consult below) */
+      numeric_values = solver->values;
+    }
+  }
+#endif
   if (solver->prestatic_deferred) {
     solver->prestatic_deferred = 0;
+  solver->block_order_deferred = 0;
     double prestatic_elapsed = 0.0;
     maybe_select_pre_static_row_match(solver, &prestatic_elapsed,
                                       numeric_values, 1);
