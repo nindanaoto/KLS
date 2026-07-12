@@ -2836,6 +2836,9 @@ typedef struct kls_rowuf_s {
   UF_long *pattern;        /* collected source steps, sorted */
   double *x;               /* column-id indexed workspace */
   double tol;
+  double perturb;           /* >0: replace all-zero pivot rows with
+                               this magnitude (refinement recovers) */
+  UF_long perturbed;
 } kls_rowuf;
 
 static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
@@ -2967,7 +2970,23 @@ static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
       }
     }
     if (best == KLS_KLU_EMPTY || amax == 0.0) {
-      return -1;             /* numerically singular row */
+      if (rf->perturb > 0.0 && ucount > 0) {
+        /* exact cancellation wiped every candidate: perturb (the
+           SuperLU_DIST recipe); prefer the natural diagonal */
+        best = rf->u_ptr[i];
+        for (UF_long q = rf->u_ptr[i]; q < rf->u_ptr[i] + ucount;
+             ++q) {
+          if (rf->u_cols[q] == i) {
+            best = q;
+            break;
+          }
+        }
+        rf->x[rf->u_cols[best]] = rf->perturb;
+        rf->perturbed++;
+        amax = rf->perturb;
+      } else {
+        return -1;           /* numerically singular row */
+      }
     }
     /* diagonal preference: analyze column id == i (the natural
        diagonal of the permuted matrix) */
@@ -2999,8 +3018,18 @@ static double kls_now_seconds(void);
    through the row symbolic; per-row L/U counts must equal the
    factored structure exactly (reach is exact; pruning affects search
    order, not patterns).  Env KLS_VALIDATE_ROW_SYMBOLIC, n <= 4096. */
-static void kls_row_symbolic_validate(kls_solver *solver) {
+static void kls_row_symbolic_validate(kls_solver *solver,
+                                      const double *fvals) {
   const int trial_mode = getenv("KLS_ROW_ENGINE_TRIAL") != NULL;
+  if (trial_mode && solver != NULL && solver->numeric != NULL &&
+      solver->symbolic != NULL) {
+    fprintf(stderr, "KLS row-trial entry: n=%ld nblocks=%ld lu0=%p"
+            " Rs=%p values=%p\n", (long)solver->n,
+            (long)solver->symbolic->nblocks,
+            solver->numeric->LUbx != NULL ? solver->numeric->LUbx[0]
+                                          : NULL,
+            (void *)solver->numeric->Rs, (void *)solver->values);
+  }
   if (solver == NULL || solver->numeric == NULL ||
       solver->symbolic == NULL ||
       (solver->n > 4096 && !trial_mode) ||
@@ -3021,7 +3050,7 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
         bk1 = R[b2];
       }
     }
-    if (bnk < 2 || solver->values == NULL) {
+    if (bnk < 2 || fvals == NULL) {
       return;
     }
     const UF_long *q0 = solver->symbolic->Q;
@@ -3065,7 +3094,7 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
             const UF_long dst = cur[r3 - bk1]++;
             bc[dst] = k;
             bv[dst] = rs0 != NULL
-              ? solver->values[pp] / rs0[r3] : solver->values[pp];
+              ? fvals[pp] / rs0[r3] : fvals[pp];
           }
         }
       }
@@ -3079,6 +3108,16 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
       rf.csr_col = bc;
       rf.csr_val = bv;
       rf.tol = solver->common.tol > 0.0 ? solver->common.tol : 0.001;
+      {
+        double bmax = 0.0;
+        for (UF_long p3 = 0; p3 < bp[bnk]; ++p3) {
+          const double av = fabs(bv[p3]);
+          if (av > bmax) {
+            bmax = av;
+          }
+        }
+        rf.perturb = 1.49e-8 * (bmax > 0.0 ? bmax : 1.0);
+      }
       rf.u_cap = (size_t)(solver->numeric->unz + bnk + 1);
       rf.l_cap = (size_t)(solver->numeric->lnz + bnk + 1);
       rf.u_ptr = (UF_long *)malloc(((size_t)bnk + 1) *
@@ -3113,8 +3152,12 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
           bvec2[i2] = sum;
         }
         const double t0 = kls_now_seconds();
+        UF_long fail_row = KLS_KLU_EMPTY;
         for (UF_long i2 = 0; i2 < bnk && engine_ok > 0; ++i2) {
           engine_ok = kls_rowuf_row(&rf, i2);
+          if (engine_ok <= 0) {
+            fail_row = i2;
+          }
         }
         const double t1 = kls_now_seconds();
         if (engine_ok > 0) {
@@ -3150,12 +3193,17 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
           }
           fprintf(stderr,
                   "KLS row-engine BLOCK trial: nk=%ld max|x-1| %.3e"
-                  " lnz %ld unz %ld factor %.3fs\n", (long)bnk,
-                  maxerr, (long)rf.l_len, (long)rf.u_len, t1 - t0);
+                  " lnz %ld unz %ld factor %.3fs perturbed=%ld\n",
+                  (long)bnk, maxerr, (long)rf.l_len, (long)rf.u_len,
+                  t1 - t0, (long)rf.perturbed);
         } else {
-          fprintf(stderr, "KLS row-engine BLOCK: %s (nk=%ld)\n",
+          fprintf(stderr, "KLS row-engine BLOCK: %s (nk=%ld row=%ld"
+                  " arow=%ld..%ld)\n",
                   engine_ok == 0 ? "capacity" : "singular",
-                  (long)bnk);
+                  (long)bnk, (long)fail_row,
+                  fail_row != KLS_KLU_EMPTY ? (long)bp[fail_row] : -1L,
+                  fail_row != KLS_KLU_EMPTY
+                    ? (long)bp[fail_row + 1] : -1L);
         }
       }
       free(rf.u_ptr); free(rf.u_cols); free(rf.u_vals); free(rf.pos);
@@ -3192,7 +3240,7 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
   rs.pattern = (UF_long *)malloc((size_t)n * sizeof(UF_long));
   double *csr_val = NULL;
   const double *rs_scale = solver->numeric->Rs;   /* pivot-order */
-  if (solver->values != NULL) {
+  if (fvals != NULL) {
     /* unscaled factor: run the numeric replay too */
     csr_val = (double *)malloc((size_t)solver->nnz * sizeof(double));
     rs.u_vals = (double *)malloc(rs.u_cap * sizeof(double));
@@ -3254,8 +3302,8 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
         csr_col[dst] = k;
         if (csr_val != NULL) {
           csr_val[dst] = rs_scale != NULL
-            ? solver->values[pp] / rs_scale[r3]
-            : solver->values[pp];
+            ? fvals[pp] / rs_scale[r3]
+            : fvals[pp];
         }
       }
     }
@@ -125375,7 +125423,7 @@ int kls_factor(kls_solver *solver, const double *values) {
                                                           : KLS_ERR_FACTOR_FAILED;
   }
   kls_update_numeric_diagnostics(solver, 1);
-  kls_row_symbolic_validate(solver);
+  kls_row_symbolic_validate(solver, numeric_values);
   KLS_ENTRY_PHASE("diag_full")
   int diagnostics_have_flops = 1;
   int diagnostics_have_rcond = 1;
