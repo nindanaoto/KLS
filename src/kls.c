@@ -124948,6 +124948,14 @@ static int solve_impl(kls_solver *solver,
   if (trace_x) {
     fprintf(stderr, "TX pre t=%d: %.17g %.17g %.17g\n", kernel_transpose,
             x[0], x[1], solver->n > 2 ? x[2] : 0.0);
+    if (solver->values != NULL) {
+      for (UF_long tv = 0; tv < solver->nnz && tv < 12; ++tv) {
+        fprintf(stderr, "TXV %ld %.17g i2c=%ld\n", (long)tv,
+                solver->values[tv],
+                solver->input_to_csc != NULL
+                  ? (long)solver->input_to_csc[tv] : -1L);
+      }
+    }
     for (UF_long tk = 0; tk < solver->n; ++tk) {
       fprintf(stderr,
               "TXN k=%ld Pnum=%ld Lip=%ld Llen=%ld Uip=%ld Ulen=%ld"
