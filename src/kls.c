@@ -32452,9 +32452,21 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
     trial_common.kls_static_perturb = 1.49e-8 * amax;
   }
+  if (getenv("KLS_PRESTATIC_SKIP_TRIAL") != NULL) {
+    /* probe: adopt the matched pattern UNFACTORED and let the main
+       path's parallel first-factor machinery build the numeric on
+       these coordinates (the serial trial is pre2's largest cost) */
+    trial_numeric = NULL;
+    goto kls_adopt_unfactored;
+  }
+  kls_klu_pipe_threads =
+    kls_pipe_first_factor_threads(solver, trial_symbolic);
+  kls_klu_pipe_det = 0;
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
                           trial_symbolic, &trial_common);
+  kls_klu_pipe_threads = 0;
+  kls_klu_pipe_det = 0;
   kls_klu_pipe_threads = 0;
   if (kls_trace_pre_static_enabled()) {
     fprintf(stderr, "KLS pre-static: stage klu_factor done %.3fs"
@@ -32511,6 +32523,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
   }
 
+adopt_unfactored:;
+kls_adopt_unfactored:;
   /* The early METIS race reads the pattern arrays this adoption frees:
      join and discard it first. */
   kls_metis_race_abandon(solver);
