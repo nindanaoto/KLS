@@ -3004,8 +3004,167 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
   if (solver == NULL || solver->numeric == NULL ||
       solver->symbolic == NULL ||
       (solver->n > 4096 && !trial_mode) ||
-      solver->symbolic->nblocks != 1 ||
+      (solver->symbolic->nblocks != 1 && !trial_mode) ||
       (getenv("KLS_VALIDATE_ROW_SYMBOLIC") == NULL && !trial_mode)) {
+    return;
+  }
+  if (trial_mode && solver->symbolic->nblocks != 1) {
+    /* multi-block trial: run the engine on the LARGEST block only
+       (the timing that matters); block-local CSR in factored
+       coordinates */
+    const UF_long nb = solver->symbolic->nblocks;
+    const UF_long *R = solver->symbolic->R;
+    UF_long bk1 = 0, bnk = 0;
+    for (UF_long b2 = 0; b2 < nb; ++b2) {
+      if (R[b2 + 1] - R[b2] > bnk) {
+        bnk = R[b2 + 1] - R[b2];
+        bk1 = R[b2];
+      }
+    }
+    if (bnk < 2 || solver->values == NULL) {
+      return;
+    }
+    const UF_long *q0 = solver->symbolic->Q;
+    const UF_long *pinv0 = solver->numeric->Pinv;
+    const double *rs0 = solver->numeric->Rs;
+    UF_long *bp = (UF_long *)calloc((size_t)bnk + 1, sizeof(UF_long));
+    UF_long *bc = (UF_long *)malloc((size_t)solver->nnz *
+                                    sizeof(UF_long));
+    double *bv = (double *)malloc((size_t)solver->nnz *
+                                  sizeof(double));
+    if (bp == NULL || bc == NULL || bv == NULL) {
+      free(bp); free(bc); free(bv);
+      return;
+    }
+    for (UF_long k = 0; k < bnk; ++k) {
+      const UF_long oldcol = q0[bk1 + k];
+      for (UF_long pp = solver->col_ptr[oldcol];
+           pp < solver->col_ptr[oldcol + 1]; ++pp) {
+        const UF_long r3 = pinv0[solver->row_idx[pp]];
+        if (r3 >= bk1 && r3 < bk1 + bnk) {
+          bp[r3 - bk1 + 1]++;
+        }
+      }
+    }
+    for (UF_long r3 = 0; r3 < bnk; ++r3) {
+      bp[r3 + 1] += bp[r3];
+    }
+    {
+      UF_long *cur = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+      if (cur == NULL) {
+        free(bp); free(bc); free(bv);
+        return;
+      }
+      memcpy(cur, bp, (size_t)bnk * sizeof(UF_long));
+      for (UF_long k = 0; k < bnk; ++k) {
+        const UF_long oldcol = q0[bk1 + k];
+        for (UF_long pp = solver->col_ptr[oldcol];
+             pp < solver->col_ptr[oldcol + 1]; ++pp) {
+          const UF_long r3 = pinv0[solver->row_idx[pp]];
+          if (r3 >= bk1 && r3 < bk1 + bnk) {
+            const UF_long dst = cur[r3 - bk1]++;
+            bc[dst] = k;
+            bv[dst] = rs0 != NULL
+              ? solver->values[pp] / rs0[r3] : solver->values[pp];
+          }
+        }
+      }
+      free(cur);
+    }
+    {
+      kls_rowuf rf;
+      memset(&rf, 0, sizeof(rf));
+      rf.n = bnk;
+      rf.csr_ptr = bp;
+      rf.csr_col = bc;
+      rf.csr_val = bv;
+      rf.tol = solver->common.tol > 0.0 ? solver->common.tol : 0.001;
+      rf.u_cap = (size_t)(solver->numeric->unz + bnk + 1);
+      rf.l_cap = (size_t)(solver->numeric->lnz + bnk + 1);
+      rf.u_ptr = (UF_long *)malloc(((size_t)bnk + 1) *
+                                   sizeof(UF_long));
+      rf.u_cols = (UF_long *)malloc(rf.u_cap * sizeof(UF_long));
+      rf.u_vals = (double *)malloc(rf.u_cap * sizeof(double));
+      rf.pos = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+      rf.piv_col = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+      rf.udiag = (double *)malloc((size_t)bnk * sizeof(double));
+      rf.l_ptr = (UF_long *)malloc(((size_t)bnk + 1) *
+                                   sizeof(UF_long));
+      rf.l_steps = (UF_long *)malloc(rf.l_cap * sizeof(UF_long));
+      rf.l_vals = (double *)malloc(rf.l_cap * sizeof(double));
+      rf.mark = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+      rf.stack = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+      rf.pattern = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+      rf.x = (double *)calloc((size_t)bnk, sizeof(double));
+      double *bvec2 = (double *)malloc((size_t)bnk * sizeof(double));
+      double *yz2 = (double *)calloc((size_t)bnk, sizeof(double));
+      if (rf.u_ptr && rf.u_cols && rf.u_vals && rf.pos && rf.piv_col &&
+          rf.udiag && rf.l_ptr && rf.l_steps && rf.l_vals && rf.mark &&
+          rf.stack && rf.pattern && rf.x && bvec2 && yz2) {
+        int engine_ok = 1;
+        for (UF_long c = 0; c < bnk; ++c) {
+          rf.pos[c] = KLS_KLU_EMPTY;
+        }
+        for (UF_long i2 = 0; i2 < bnk; ++i2) {
+          double sum = 0.0;
+          for (UF_long p2 = bp[i2]; p2 < bp[i2 + 1]; ++p2) {
+            sum += bv[p2];
+          }
+          bvec2[i2] = sum;
+        }
+        const double t0 = kls_now_seconds();
+        for (UF_long i2 = 0; i2 < bnk && engine_ok > 0; ++i2) {
+          engine_ok = kls_rowuf_row(&rf, i2);
+        }
+        const double t1 = kls_now_seconds();
+        if (engine_ok > 0) {
+          for (UF_long i2 = 0; i2 < bnk; ++i2) {
+            double acc = bvec2[i2];
+            for (UF_long p2 = rf.l_ptr[i2]; p2 < rf.l_ptr[i2 + 1];
+                 ++p2) {
+              acc -= rf.l_vals[p2] * yz2[rf.l_steps[p2]];
+            }
+            yz2[i2] = acc;
+          }
+          double *z = bvec2;
+          for (UF_long c = 0; c < bnk; ++c) {
+            z[c] = 0.0;
+          }
+          for (UF_long st = bnk; st-- > 0;) {
+            double acc = yz2[st];
+            const UF_long pc = rf.piv_col[st];
+            for (UF_long q2 = rf.u_ptr[st]; q2 < rf.u_ptr[st + 1];
+                 ++q2) {
+              if (rf.u_cols[q2] != pc) {
+                acc -= rf.u_vals[q2] * z[rf.u_cols[q2]];
+              }
+            }
+            z[pc] = acc / rf.udiag[st];
+          }
+          double maxerr = 0.0;
+          for (UF_long c = 0; c < bnk; ++c) {
+            const double e = fabs(z[c] - 1.0);
+            if (e > maxerr) {
+              maxerr = e;
+            }
+          }
+          fprintf(stderr,
+                  "KLS row-engine BLOCK trial: nk=%ld max|x-1| %.3e"
+                  " lnz %ld unz %ld factor %.3fs\n", (long)bnk,
+                  maxerr, (long)rf.l_len, (long)rf.u_len, t1 - t0);
+        } else {
+          fprintf(stderr, "KLS row-engine BLOCK: %s (nk=%ld)\n",
+                  engine_ok == 0 ? "capacity" : "singular",
+                  (long)bnk);
+        }
+      }
+      free(rf.u_ptr); free(rf.u_cols); free(rf.u_vals); free(rf.pos);
+      free(rf.piv_col); free(rf.udiag); free(rf.l_ptr);
+      free(rf.l_steps); free(rf.l_vals); free(rf.mark);
+      free(rf.stack); free(rf.pattern); free(rf.x);
+      free(bvec2); free(yz2);
+    }
+    free(bp); free(bc); free(bv);
     return;
   }
   const UF_long n = solver->n;
