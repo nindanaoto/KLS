@@ -2805,6 +2805,166 @@ static int kls_row_symbolic_row(kls_row_symbolic *rs,
 }
 
 
+/* ==== assembly component 3: standalone pivoting engine ====
+   Up-looking first factor with inline threshold COLUMN pivoting
+   (row order fixed; the pivot at step i is a column choice - CKTSO
+   Alg.1).  Everything runs in analyze column ids with pos[c] = pivot
+   step of column c (EMPTY while unpivoted); U rows are indexed by
+   step, storing column ids.  Validation: factor + one solve, report
+   the residual (a column-pivoted factorization legitimately differs
+   from klu's row-pivoted one). */
+typedef struct kls_rowuf_s {
+  UF_long n;
+  const UF_long *csr_ptr;
+  const UF_long *csr_col;
+  const double *csr_val;
+  UF_long *u_ptr;          /* by step */
+  UF_long *u_cols;         /* analyze column ids */
+  double *u_vals;
+  size_t u_cap;
+  UF_long u_len;
+  UF_long *pos;            /* column id -> pivot step or EMPTY */
+  UF_long *piv_col;        /* step -> column id */
+  double *udiag;           /* by step */
+  UF_long *l_ptr;          /* by step (row) */
+  UF_long *l_steps;        /* L(i,:) as source steps */
+  double *l_vals;
+  size_t l_cap;
+  UF_long l_len;
+  UF_long *mark;           /* column id marks, tag = i+1 */
+  UF_long *stack;
+  UF_long *pattern;        /* collected source steps, sorted */
+  double *x;               /* column-id indexed workspace */
+  double tol;
+} kls_rowuf;
+
+static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
+  const UF_long tag = i + 1;
+  UF_long l_count = 0;
+  UF_long top = 0;
+  /* symbolic: reach over pivoted columns; collect source STEPS */
+  for (UF_long p = rf->csr_ptr[i]; p < rf->csr_ptr[i + 1]; ++p) {
+    const UF_long c0 = rf->csr_col[p];
+    if (rf->mark[c0] == tag) {
+      continue;
+    }
+    rf->mark[c0] = tag;
+    if (rf->pos[c0] == KLS_KLU_EMPTY) {
+      continue;              /* unpivoted: U candidate, no traversal */
+    }
+    rf->stack[top++] = rf->pos[c0];
+    while (top > 0) {
+      const UF_long st = rf->stack[--top];
+      rf->pattern[l_count++] = st;
+      for (UF_long q = rf->u_ptr[st]; q < rf->u_ptr[st + 1]; ++q) {
+        const UF_long k = rf->u_cols[q];
+        if (rf->mark[k] == tag) {
+          continue;
+        }
+        rf->mark[k] = tag;
+        if (rf->pos[k] != KLS_KLU_EMPTY) {
+          rf->stack[top++] = rf->pos[k];
+        }
+      }
+    }
+  }
+  /* numeric: ascending source steps (topological: an edge from step
+     s to a column pivoted at step s2 has s < s2) */
+  for (UF_long a3 = 1; a3 < l_count; ++a3) {
+    const UF_long v = rf->pattern[a3];
+    UF_long b3 = a3;
+    while (b3 > 0 && rf->pattern[b3 - 1] > v) {
+      rf->pattern[b3] = rf->pattern[b3 - 1];
+      b3--;
+    }
+    rf->pattern[b3] = v;
+  }
+  for (UF_long p = rf->csr_ptr[i]; p < rf->csr_ptr[i + 1]; ++p) {
+    rf->x[rf->csr_col[p]] = rf->csr_val[p];
+  }
+  if (rf->l_len + l_count + 1 > (UF_long)rf->l_cap ||
+      rf->u_len + rf->n > (UF_long)rf->u_cap) {
+    return 0;
+  }
+  rf->l_ptr[i] = rf->l_len;
+  for (UF_long t = 0; t < l_count; ++t) {
+    const UF_long st = rf->pattern[t];
+    const UF_long pc = rf->piv_col[st];
+    const double lij = rf->x[pc] / rf->udiag[st];
+    rf->x[pc] = 0.0;
+    rf->l_steps[rf->l_len] = st;
+    rf->l_vals[rf->l_len] = lij;
+    rf->l_len++;
+    if (lij != 0.0) {
+      for (UF_long q = rf->u_ptr[st]; q < rf->u_ptr[st + 1]; ++q) {
+        rf->x[rf->u_cols[q]] -= lij * rf->u_vals[q];
+      }
+    }
+  }
+  rf->l_ptr[i + 1] = rf->l_len;
+  /* pivot: threshold rule over the marked UNPIVOTED columns */
+  {
+    UF_long best = KLS_KLU_EMPTY;
+    double amax = 0.0;
+    UF_long ucount = 0;
+    rf->u_ptr[i] = rf->u_len;
+    /* collect U candidates: marked unpivoted columns; walk the A row
+       and the consumed sources' U rows with a second tag */
+    const UF_long utag = tag + rf->n; /* disjoint tag space */
+    for (UF_long p = rf->csr_ptr[i]; p < rf->csr_ptr[i + 1]; ++p) {
+      const UF_long c = rf->csr_col[p];
+      if (rf->pos[c] == KLS_KLU_EMPTY && rf->mark[c] != (UF_long)-utag) {
+        rf->mark[c] = (UF_long)-utag;
+        rf->u_cols[rf->u_len++] = c;
+        ucount++;
+      }
+    }
+    for (UF_long t = 0; t < l_count; ++t) {
+      const UF_long st = rf->pattern[t];
+      for (UF_long q = rf->u_ptr[st]; q < rf->u_ptr[st + 1]; ++q) {
+        const UF_long c = rf->u_cols[q];
+        if (rf->pos[c] == KLS_KLU_EMPTY &&
+            rf->mark[c] != (UF_long)-utag) {
+          rf->mark[c] = (UF_long)-utag;
+          rf->u_cols[rf->u_len++] = c;
+          ucount++;
+        }
+      }
+    }
+    for (UF_long q = rf->u_ptr[i]; q < rf->u_ptr[i] + ucount; ++q) {
+      const double av = fabs(rf->x[rf->u_cols[q]]);
+      if (av > amax) {
+        amax = av;
+        best = q;
+      }
+    }
+    if (best == KLS_KLU_EMPTY || amax == 0.0) {
+      return -1;             /* numerically singular row */
+    }
+    /* diagonal preference: analyze column id == i (the natural
+       diagonal of the permuted matrix) */
+    for (UF_long q = rf->u_ptr[i]; q < rf->u_ptr[i] + ucount; ++q) {
+      if (rf->u_cols[q] == i &&
+          fabs(rf->x[i]) >= rf->tol * amax) {
+        best = q;
+        break;
+      }
+    }
+    {
+      const UF_long pc = rf->u_cols[best];
+      rf->pos[pc] = i;
+      rf->piv_col[i] = pc;
+      rf->udiag[i] = rf->x[pc];
+      for (UF_long q = rf->u_ptr[i]; q < rf->u_ptr[i] + ucount; ++q) {
+        rf->u_vals[q] = rf->x[rf->u_cols[q]];
+        rf->x[rf->u_cols[q]] = 0.0;
+      }
+      rf->u_ptr[i + 1] = rf->u_len;
+    }
+  }
+  return 1;
+}
+
 /* Validation: replay a completed single-block factor's coordinates
    through the row symbolic; per-row L/U counts must equal the
    factored structure exactly (reach is exact; pruning affects search
@@ -2969,6 +3129,96 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
       fprintf(stderr, "KLS row-numeric validate: max Udiag rel diff"
               " %.3e\n", maxrel);
     }
+    if (csr_val != NULL && bad == 0) {
+      /* component 3: the standalone pivoting engine, end to end -
+         factor with inline column pivoting, then solve L U z = b for
+         b = A*ones; report max |x - 1| */
+      kls_rowuf rf;
+      memset(&rf, 0, sizeof(rf));
+      rf.n = n;
+      rf.csr_ptr = csr_ptr;
+      rf.csr_col = csr_col;
+      rf.csr_val = csr_val;
+      rf.tol = solver->common.tol > 0.0 ? solver->common.tol : 0.001;
+      rf.u_cap = rs.u_cap * 2u + (size_t)n;
+      rf.l_cap = rf.u_cap;
+      rf.u_ptr = (UF_long *)malloc(((size_t)n + 1) * sizeof(UF_long));
+      rf.u_cols = (UF_long *)malloc(rf.u_cap * sizeof(UF_long));
+      rf.u_vals = (double *)malloc(rf.u_cap * sizeof(double));
+      rf.pos = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+      rf.piv_col = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+      rf.udiag = (double *)malloc((size_t)n * sizeof(double));
+      rf.l_ptr = (UF_long *)malloc(((size_t)n + 1) * sizeof(UF_long));
+      rf.l_steps = (UF_long *)malloc(rf.l_cap * sizeof(UF_long));
+      rf.l_vals = (double *)malloc(rf.l_cap * sizeof(double));
+      rf.mark = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+      rf.stack = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+      rf.pattern = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+      rf.x = (double *)calloc((size_t)n, sizeof(double));
+      double *bvec = (double *)malloc((size_t)n * sizeof(double));
+      double *yz = (double *)calloc((size_t)n, sizeof(double));
+      if (rf.u_ptr && rf.u_cols && rf.u_vals && rf.pos && rf.piv_col &&
+          rf.udiag && rf.l_ptr && rf.l_steps && rf.l_vals && rf.mark &&
+          rf.stack && rf.pattern && rf.x && bvec && yz) {
+        int engine_ok = 1;
+        for (UF_long c = 0; c < n; ++c) {
+          rf.pos[c] = KLS_KLU_EMPTY;
+        }
+        for (UF_long i2 = 0; i2 < n; ++i2) {
+          double sum = 0.0;
+          for (UF_long p2 = csr_ptr[i2]; p2 < csr_ptr[i2 + 1]; ++p2) {
+            sum += csr_val[p2];
+          }
+          bvec[i2] = sum;
+        }
+        for (UF_long i2 = 0; i2 < n && engine_ok > 0; ++i2) {
+          engine_ok = kls_rowuf_row(&rf, i2);
+        }
+        if (engine_ok > 0) {
+          /* forward: y[i] = b[i] - sum L(i,step) y[step] (unit L) */
+          for (UF_long i2 = 0; i2 < n; ++i2) {
+            double acc = bvec[i2];
+            for (UF_long p2 = rf.l_ptr[i2]; p2 < rf.l_ptr[i2 + 1];
+                 ++p2) {
+              acc -= rf.l_vals[p2] * yz[rf.l_steps[p2]];
+            }
+            yz[i2] = acc;
+          }
+          /* backward over steps descending: z[column] */
+          double *z = bvec; /* reuse */
+          for (UF_long c = 0; c < n; ++c) {
+            z[c] = 0.0;
+          }
+          for (UF_long st = n; st-- > 0;) {
+            double acc = yz[st];
+            const UF_long pc = rf.piv_col[st];
+            for (UF_long q = rf.u_ptr[st]; q < rf.u_ptr[st + 1]; ++q) {
+              if (rf.u_cols[q] != pc) {
+                acc -= rf.u_vals[q] * z[rf.u_cols[q]];
+              }
+            }
+            z[pc] = acc / rf.udiag[st];
+          }
+          double maxerr = 0.0;
+          for (UF_long c = 0; c < n; ++c) {
+            const double e = fabs(z[c] - 1.0);
+            if (e > maxerr) {
+              maxerr = e;
+            }
+          }
+          fprintf(stderr, "KLS row-engine validate: n=%ld max|x-1|"
+                  " %.3e (lnz %ld unz %ld)\n", (long)n, maxerr,
+                  (long)rf.l_len, (long)rf.u_len);
+        } else {
+          fprintf(stderr, "KLS row-engine: %s at some row (n=%ld)\n",
+                  engine_ok == 0 ? "capacity" : "singular", (long)n);
+        }
+      }
+      free(rf.u_ptr); free(rf.u_cols); free(rf.u_vals); free(rf.pos);
+      free(rf.piv_col); free(rf.udiag); free(rf.l_ptr);
+      free(rf.l_steps); free(rf.l_vals); free(rf.mark); free(rf.stack);
+      free(rf.pattern); free(rf.x); free(bvec); free(yz);
+    }
   }
 done:
   free(row_l);
@@ -2985,6 +3235,8 @@ done:
   free(rs.stack);
   free(rs.pattern);
 }
+
+
 
 static double kls_now_seconds(void) {
   /* KLS_FAKE_CLOCK: deterministic counter clock for flushing out
