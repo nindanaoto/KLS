@@ -2893,7 +2893,7 @@ static int kls_pipe_panel_lockstep
 		}
 
 	    if (kls_pipe_dense_panels && use_buf && next_final == 0 &&
-		plimit == k0)
+		PW >= 4 && plimit == k0)
 	    {
 		/* dense within-panel finalize: all external sources are
 		   applied and extracted; the remaining work is the

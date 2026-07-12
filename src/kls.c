@@ -34994,6 +34994,21 @@ static int kls_ensure_fast_reject_tail_plan_storage(kls_solver *solver,
     free(marks);
     return 0;
   }
+  /* the tail-repair consumers index tail_parent by rows the per-column
+     scan may never have visited: fill the whole array with EMPTY (-1,
+     the same value the per-column init writes) so unvisited slots are
+     inert instead of heap garbage (measured: the 3x3 smoke transpose
+     solve flipped with heap layout through a garbage in-bounds parent) */
+  memset(tail_parent, 0xff,
+         (size_t)capacity * sizeof(*solver->fast_reject_tail_parent));
+  memset(cols, 0xff,
+         (size_t)capacity * sizeof(*solver->fast_reject_tail_cols));
+  memset(seed_cols, 0xff,
+         (size_t)capacity * sizeof(*solver->fast_reject_tail_seed_cols));
+  memset(child_count, 0,
+         (size_t)capacity * sizeof(*solver->fast_reject_tail_child_count));
+  memset(level, 0xff,
+         (size_t)capacity * sizeof(*solver->fast_reject_tail_level));
   free(solver->fast_reject_tail_cols);
   free(solver->fast_reject_tail_seed_cols);
   free(solver->fast_reject_tail_parent);
