@@ -27666,6 +27666,11 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   kls_separator_analysis_move(&solver->separator, &trial_separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
+  if (trial_common.kls_perturb_count > 0) {
+    /* the hard-static factor is a nearby matrix's exact LU; the
+       enrolled solve refinement recovers the accuracy contract */
+    solver->numeric_needs_refinement = 1;
+  }
   kls_numeric_replaced_invalidate(solver);
   solver->common = trial_common;
   solver->stats.selected_ordering = trial_ordering;
@@ -29012,13 +29017,26 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
 #endif
   }
+  if (getenv("KLS_STATIC_PERTURB") != NULL) {
+    /* hard-static regime: keep the matched diagonal everywhere and
+       perturb tiny pivots (SuperLU_DIST recipe); refinement recovers
+       the contract.  sqrt(eps) x amax bounds growth at ~1e8. */
+    double amax = 0.0;
+    for (UF_long pz = 0; pz < (UF_long)solver->nnz; ++pz) {
+      const double av = fabs(trial_values[pz]);
+      if (av > amax) amax = av;
+    }
+    trial_common.kls_static_perturb = 1.49e-8 * amax;
+  }
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
                           trial_symbolic, &trial_common);
   kls_klu_pipe_threads = 0;
   if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr, "KLS pre-static: stage klu_factor done %.3fs\n",
-            kls_now_seconds() - kls_ps_t0);
+    fprintf(stderr, "KLS pre-static: stage klu_factor done %.3fs"
+            " perturbed=%ld\n",
+            kls_now_seconds() - kls_ps_t0,
+            (long)trial_common.kls_perturb_count);
   }
   if (trial_numeric == NULL || trial_common.status < 0 ||
       trial_common.status == TRILINOS_KLU_SINGULAR) {

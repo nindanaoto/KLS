@@ -546,6 +546,17 @@ static Int lpivot
     }
     CLEAR (X [last_row_index]) ;
 
+    if (Common->kls_static_perturb > 0 && !IS_ZERO (pivot) &&
+	abs_pivot < Common->kls_static_perturb)
+    {
+	/* hard-static small-pivot perturbation (SuperLU_DIST style):
+	   bounded growth in exchange for a factorization of a nearby
+	   matrix; the enrolled solve refinement recovers the contract */
+	pivot = pivot < 0 ? -Common->kls_static_perturb
+			  : Common->kls_static_perturb ;
+	abs_pivot = Common->kls_static_perturb ;
+	Common->kls_perturb_count++ ;
+    }
     *p_pivrow = pivrow ;
     *p_pivot = pivot ;
     *p_abs_pivot = abs_pivot ;

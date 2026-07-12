@@ -251,6 +251,10 @@ typedef struct trilinos_klu_l_common_struct /* 64-bit version (otherwise same as
     int kls_dense_panels ;      /* set when the pipelined factor used the
                                    dense within-panel finalize (reduced-
                                    stability regime: enroll refinement) */
+    double kls_static_perturb ; /* >0: replace nonzero pivots below this
+                                   magnitude (hard-static factorization;
+                                   refinement recovers accuracy) */
+    long kls_perturb_count ;    /* pivots perturbed in the last factor */
 
 } trilinos_klu_l_common ;
 

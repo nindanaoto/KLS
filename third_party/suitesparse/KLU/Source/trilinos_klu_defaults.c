@@ -56,5 +56,7 @@ Int TRILINOS_KLU_defaults
     Common->memusage = 0 ;
     Common->mempeak = 0 ;
 
+    Common->kls_static_perturb = 0 ;
+    Common->kls_perturb_count = 0 ;
     return (TRUE) ;
 }
