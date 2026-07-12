@@ -3421,8 +3421,19 @@ size_t KLS_KLU_KERNEL_PIPE
 		size_t col_cap = (size_t) n / 4 + 16 ;
 		size_t per_col = (size_t) n * sizeof (Entry) +
 		    col_cap * (sizeof (Entry) + 2 * sizeof (Int)) ;
-		wcap_env = (Int) (((size_t) 128 << 20) /
-				  (per_col > 0 ? per_col : 1)) ;
+		size_t budget = (size_t) 128 << 20 ;
+		{
+		    const char *be = getenv ("KLS_KLU_PIPE_BUDGET_MB") ;
+		    if (be != NULL && be [0] != '\0')
+		    {
+			long bm = atol (be) ;
+			if (bm >= 64 && bm <= 4096)
+			{
+			    budget = (size_t) bm << 20 ;
+			}
+		    }
+		}
+		wcap_env = (Int) (budget / (per_col > 0 ? per_col : 1)) ;
 		if (wcap_env > 32) wcap_env = 32 ;
 		if (wcap_env < 2) wcap_env = 2 ;
 	    }
@@ -3438,6 +3449,29 @@ size_t KLS_KLU_KERNEL_PIPE
 	    kls_klu_block_coletree (n, Ap, Ai, Q, k1, PSinv, par, anc,
 				    prv) ;
 	    pst [0] = 0 ;
+	    {
+	    /* relaxed merge: continue a panel across an etree-chain
+	       break when the adjacent columns' A patterns differ by at
+	       most KLS_KLU_PIPE_RELAX rows - grid-like matrices carry
+	       near-identical adjacent columns whose fundamental chains
+	       are shorter than the profitable dense-panel width */
+	    Int relax = 0 ;
+	    Int *rflag = NULL ;
+	    {
+		const char *re = getenv ("KLS_KLU_PIPE_RELAX") ;
+		if (re != NULL && re [0] != '\0')
+		{
+		    relax = atol (re) ;
+		    if (relax > 0)
+		    {
+			rflag = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+			if (rflag == NULL)
+			{
+			    relax = 0 ;
+			}
+		    }
+		}
+	    }
 	    for (kk = 1 ; kk <= n ; kk++)
 	    {
 		if (kk < n && par [kk-1] == kk && width < wcap_env)
@@ -3445,9 +3479,36 @@ size_t KLS_KLU_KERNEL_PIPE
 		    width++ ;
 		    continue ;
 		}
+		if (kk < n && relax > 0 && width < wcap_env)
+		{
+		    /* symmetric difference of block-local A patterns */
+		    Int oc1 = Q [kk - 1 + k1], oc2 = Q [kk + k1] ;
+		    Int p1, d = 0, n1 = 0 ;
+		    for (p1 = Ap [oc1] ; p1 < Ap [oc1+1] ; p1++)
+		    {
+			Int i2 = PSinv [Ai [p1]] - k1 ;
+			if (i2 >= 0) { rflag [i2] = kk ; n1++ ; }
+		    }
+		    for (p1 = Ap [oc2] ; p1 < Ap [oc2+1] ; p1++)
+		    {
+			Int i2 = PSinv [Ai [p1]] - k1 ;
+			if (i2 >= 0)
+			{
+			    if (rflag [i2] == kk) { n1-- ; }
+			    else { d++ ; }
+			}
+		    }
+		    if (d + n1 <= relax)
+		    {
+			width++ ;
+			continue ;
+		    }
+		}
 		np++ ;
 		pst [np] = kk ;
 		width = 1 ;
+	    }
+	    free (rflag) ;
 	    }
 	    panel_start = (Int *) malloc ((size_t) (np + 1) * sizeof (Int)) ;
 	    if (panel_start != NULL)
@@ -3551,8 +3612,19 @@ size_t KLS_KLU_KERNEL_PIPE
 size_t col_cap = (size_t) n / 4 + 16 ;
 		size_t per_col = (size_t) n * sizeof (Entry) +
 		    col_cap * (sizeof (Entry) + 2 * sizeof (Int)) ;
-		wcap = (Int) (((size_t) 128 << 20) / (per_col > 0 ?
-						      per_col : 1)) ;
+		size_t budget = (size_t) 128 << 20 ;
+		{
+		    const char *be = getenv ("KLS_KLU_PIPE_BUDGET_MB") ;
+		    if (be != NULL && be [0] != '\0')
+		    {
+			long bm = atol (be) ;
+			if (bm >= 64 && bm <= 4096)
+			{
+			    budget = (size_t) bm << 20 ;
+			}
+		    }
+		}
+		wcap = (Int) (budget / (per_col > 0 ? per_col : 1)) ;
 		if (wcap > 32) wcap = 32 ;
 		if (wcap < 1) wcap = 1 ;
 		for (w = 0 ; w < wcap ; w++)
