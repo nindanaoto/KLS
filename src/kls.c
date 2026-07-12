@@ -3017,6 +3017,955 @@ static double kls_now_seconds(void);
    through the row symbolic; per-row L/U counts must equal the
    factored structure exactly (reach is exact; pruning affects search
    order, not patterns).  Env KLS_VALIDATE_ROW_SYMBOLIC, n <= 4096. */
+/* Parallel static-pivot row engine (PTS level scheduling).
+
+   Correctness contract: every pivot is the natural diagonal (value,
+   or perturbation when numerically wiped; the diagonal candidate is
+   inserted when structurally absent).  Under diagonal elimination
+   the L/U row reach is contained in the A+A' Cholesky pattern, so
+   all of row i's sources are etree descendants of i; rows on the
+   same etree level touch disjoint state (their reaches cannot cross)
+   and levels are separated by barriers.  Storage is span-reserved
+   with atomic counters; no reallocation (concurrent readers). */
+typedef struct {
+  UF_long n;
+  const UF_long *csr_ptr;
+  const UF_long *csr_col;
+  const double *csr_val;
+  double perturb;
+  UF_long *u_start, *u_cnt, *u_cols;
+  double *u_vals;
+  UF_long *l_start, *l_cnt, *l_steps;
+  double *l_vals;
+  double *udiag;
+  size_t u_cap, l_cap;
+  long u_len, l_len;          /* atomic span reservation */
+  long perturbed;
+  int failed;
+  const UF_long *level_rows;
+  const UF_long *level_ptr;
+  UF_long nlevels;
+  int nthreads;
+  int pipe_mode;              /* per-row flags instead of barriers */
+  volatile unsigned char *pat_done, *val_done;
+  pthread_barrier_t bar;
+} kls_rowmt;
+
+typedef struct {
+  kls_rowmt *sh;
+  int tid;
+  UF_long *mark, *stack, *pattern, *cand;
+  double *x;
+  double t_wait;
+} kls_rowmt_worker;
+
+static int kls_rowmt_row(kls_rowmt *sh, kls_rowmt_worker *w,
+                         UF_long i) {
+  const UF_long tag = i + 1;
+  UF_long l_count = 0;
+  UF_long top = 0;
+  UF_long ucount = 0;
+  int have_diag = 0;
+  /* symbolic: DFS over pivoted columns; terminals are U candidates */
+  for (UF_long p = sh->csr_ptr[i]; p < sh->csr_ptr[i + 1]; ++p) {
+    const UF_long c0 = sh->csr_col[p];
+    if (w->mark[c0] == tag) {
+      continue;
+    }
+    w->mark[c0] = tag;
+    if (c0 >= i) {           /* unpivoted: diagonal pivots only */
+      w->cand[ucount++] = c0;
+      have_diag |= (c0 == i);
+      continue;
+    }
+    w->stack[top++] = c0;
+    while (top > 0) {
+      const UF_long st = w->stack[--top];
+      w->pattern[l_count++] = st;
+      if (sh->pipe_mode) {
+        while (!sh->pat_done[st]) {
+          if (sh->failed) {
+            return 0;
+          }
+          __asm__ __volatile__("pause");
+        }
+      }
+      const UF_long qs = sh->u_start[st];
+      const UF_long qe = qs + sh->u_cnt[st];
+      for (UF_long q = qs; q < qe; ++q) {
+        const UF_long k = sh->u_cols[q];
+        if (w->mark[k] == tag) {
+          continue;
+        }
+        w->mark[k] = tag;
+        if (k < i) {
+          w->stack[top++] = k;
+        } else {
+          w->cand[ucount++] = k;
+          have_diag |= (k == i);
+        }
+      }
+    }
+  }
+  if (!have_diag) {
+    w->cand[ucount++] = i;   /* inserted diagonal (perturbation slot) */
+  }
+  /* span reservation */
+  const long ub = __sync_fetch_and_add(&sh->u_len, (long)ucount);
+  const long lb = __sync_fetch_and_add(&sh->l_len, (long)l_count);
+  if ((size_t)(ub + ucount) > sh->u_cap ||
+      (size_t)(lb + l_count) > sh->l_cap) {
+    return 0;
+  }
+  /* ascending source order for the numeric */
+  for (UF_long a3 = 1; a3 < l_count; ++a3) {
+    const UF_long v = w->pattern[a3];
+    UF_long b3 = a3;
+    while (b3 > 0 && w->pattern[b3 - 1] > v) {
+      w->pattern[b3] = w->pattern[b3 - 1];
+      b3--;
+    }
+    w->pattern[b3] = v;
+  }
+  if (sh->pipe_mode) {
+    /* publish the U pattern before the numeric: dependents' DFS
+       needs only columns; values follow under val_done */
+    for (UF_long t = 0; t < ucount; ++t) {
+      sh->u_cols[ub + t] = w->cand[t];
+    }
+    sh->u_start[i] = (UF_long)ub;
+    sh->u_cnt[i] = ucount;
+    __sync_synchronize();
+    sh->pat_done[i] = 1;
+  }
+  for (UF_long p = sh->csr_ptr[i]; p < sh->csr_ptr[i + 1]; ++p) {
+    w->x[sh->csr_col[p]] = sh->csr_val[p];
+  }
+  sh->l_start[i] = (UF_long)lb;
+  for (UF_long t = 0; t < l_count; ++t) {
+    const UF_long st = w->pattern[t];
+    if (sh->pipe_mode) {
+      while (!sh->val_done[st]) {
+        if (sh->failed) {
+          return 0;
+        }
+        __asm__ __volatile__("pause");
+      }
+    }
+    const double lij = w->x[st] / sh->udiag[st];
+    w->x[st] = 0.0;
+    sh->l_steps[lb + t] = st;
+    sh->l_vals[lb + t] = lij;
+    if (lij != 0.0) {
+      const UF_long qs = sh->u_start[st];
+      const UF_long qe = qs + sh->u_cnt[st];
+      for (UF_long q = qs; q < qe; ++q) {
+        w->x[sh->u_cols[q]] -= lij * sh->u_vals[q];
+      }
+    }
+  }
+  sh->l_cnt[i] = l_count;
+  /* static pivot: the diagonal, perturbed if wiped */
+  double dv = w->x[i];
+  if (dv == 0.0) {
+    dv = sh->perturb;
+    w->x[i] = dv;
+    __sync_fetch_and_add(&sh->perturbed, 1L);
+  }
+  sh->udiag[i] = dv;
+  if (!sh->pipe_mode) {
+    sh->u_start[i] = (UF_long)ub;
+  }
+  for (UF_long t = 0; t < ucount; ++t) {
+    const UF_long c = w->cand[t];
+    sh->u_cols[ub + t] = c;
+    sh->u_vals[ub + t] = w->x[c];
+    w->x[c] = 0.0;
+  }
+  if (!sh->pipe_mode) {
+    sh->u_cnt[i] = ucount;
+  } else {
+    __sync_synchronize();
+    sh->val_done[i] = 1;
+  }
+  return 1;
+}
+
+typedef struct {
+  kls_rowmt *sh;
+  int tid;
+  double *x;
+} kls_rowmt_replay;
+
+static void *kls_rowmt_replay_main(void *arg) {
+  kls_rowmt_replay *w = (kls_rowmt_replay *)arg;
+  kls_rowmt *sh = w->sh;
+  for (UF_long i = (UF_long)w->tid; i < sh->n; i += sh->nthreads) {
+    for (UF_long p = sh->csr_ptr[i]; p < sh->csr_ptr[i + 1]; ++p) {
+      w->x[sh->csr_col[p]] = sh->csr_val[p];
+    }
+    const UF_long ls = sh->l_start[i];
+    for (UF_long t = 0; t < sh->l_cnt[i]; ++t) {
+      const UF_long st = sh->l_steps[ls + t];
+      while (!sh->val_done[st]) {
+        __asm__ __volatile__("pause");
+      }
+      const double lij = w->x[st] / sh->udiag[st];
+      w->x[st] = 0.0;
+      sh->l_vals[ls + t] = lij;
+      if (lij != 0.0) {
+        const UF_long qs = sh->u_start[st];
+        const UF_long qe = qs + sh->u_cnt[st];
+        for (UF_long q = qs; q < qe; ++q) {
+          w->x[sh->u_cols[q]] -= lij * sh->u_vals[q];
+        }
+      }
+    }
+    double dv = w->x[i];
+    if (dv == 0.0) {
+      dv = sh->perturb;
+      w->x[i] = dv;
+    }
+    sh->udiag[i] = dv;
+    const UF_long us = sh->u_start[i];
+    for (UF_long t = 0; t < sh->u_cnt[i]; ++t) {
+      const UF_long c = sh->u_cols[us + t];
+      sh->u_vals[us + t] = w->x[c];
+      w->x[c] = 0.0;
+    }
+    __sync_synchronize();
+    sh->val_done[i] = 1;
+  }
+  return NULL;
+}
+
+static void *kls_rowmt_main(void *arg) {
+  kls_rowmt_worker *w = (kls_rowmt_worker *)arg;
+  kls_rowmt *sh = w->sh;
+  if (sh->pipe_mode) {
+    for (UF_long i = (UF_long)w->tid; i < sh->n;
+         i += sh->nthreads) {
+      if (sh->failed || !kls_rowmt_row(sh, w, i)) {
+        sh->failed = 1;
+        sh->pat_done[i] = 1;   /* release spinners on failure */
+        sh->val_done[i] = 1;
+        return NULL;
+      }
+    }
+    return NULL;
+  }
+  for (UF_long lv = 0; lv < sh->nlevels; ++lv) {
+    const UF_long e0 = sh->level_ptr[lv];
+    const UF_long e1 = sh->level_ptr[lv + 1];
+    for (UF_long e = e0 + w->tid; e < e1; e += sh->nthreads) {
+      if (!kls_rowmt_row(sh, w, sh->level_rows[e])) {
+        sh->failed = 1;
+        break;
+      }
+    }
+    const double bw0 = kls_now_seconds();
+    pthread_barrier_wait(&sh->bar);
+    w->t_wait += kls_now_seconds() - bw0;
+    if (sh->failed) {
+      return NULL;
+    }
+  }
+  return NULL;
+}
+
+/* Etree of A+A' via Liu's algorithm; returns parent[] or NULL. */
+static UF_long *kls_rowmt_etree(UF_long n, const UF_long *bp,
+                                const UF_long *bc) {
+  UF_long *parent = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  UF_long *anc = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  UF_long *tp = (UF_long *)calloc((size_t)n + 1, sizeof(UF_long));
+  UF_long *tc = (UF_long *)malloc((size_t)bp[n] * sizeof(UF_long));
+  if (parent == NULL || anc == NULL || tp == NULL || tc == NULL) {
+    free(parent); free(anc); free(tp); free(tc);
+    return NULL;
+  }
+  for (UF_long p = 0; p < bp[n]; ++p) {
+    tp[bc[p] + 1]++;
+  }
+  for (UF_long c = 0; c < n; ++c) {
+    tp[c + 1] += tp[c];
+  }
+  {
+    UF_long *cur = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+    if (cur == NULL) {
+      free(parent); free(anc); free(tp); free(tc);
+      return NULL;
+    }
+    memcpy(cur, tp, (size_t)n * sizeof(UF_long));
+    for (UF_long r = 0; r < n; ++r) {
+      for (UF_long p = bp[r]; p < bp[r + 1]; ++p) {
+        tc[cur[bc[p]]++] = r;
+      }
+    }
+    free(cur);
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    parent[i] = KLS_KLU_EMPTY;
+    anc[i] = KLS_KLU_EMPTY;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    for (int dir = 0; dir < 2; ++dir) {
+      const UF_long *ptr = dir == 0 ? bp : tp;
+      const UF_long *col = dir == 0 ? bc : tc;
+      for (UF_long p = ptr[i]; p < ptr[i + 1]; ++p) {
+        UF_long j = col[p];
+        if (j >= i) {
+          continue;
+        }
+        while (anc[j] != KLS_KLU_EMPTY && anc[j] != i) {
+          const UF_long t = anc[j];
+          anc[j] = i;
+          j = t;
+        }
+        if (anc[j] == KLS_KLU_EMPTY) {
+          anc[j] = i;
+          parent[j] = i;
+        }
+      }
+    }
+  }
+  free(anc); free(tp); free(tc);
+  return parent;
+}
+
+/* George/Ng superset structure: chol(A+A') row patterns via etree
+   row subtrees.  L rows = climbing paths (excl. diagonal); U rows =
+   diagonal + transpose of L.  True L/U of any diagonal-pivot
+   factorization are contained; extra entries carry exact zeros. */
+static int kls_rowmt_cholsym(UF_long n, const UF_long *bp,
+                             const UF_long *bc,
+                             const UF_long *parent,
+                             UF_long **lsp, UF_long **lcp,
+                             UF_long **lst,
+                             UF_long **usp, UF_long **ucp,
+                             UF_long **uco,
+                             size_t *lfill, size_t *ufill) {
+  UF_long *tp = (UF_long *)calloc((size_t)n + 1, sizeof(UF_long));
+  UF_long *tc = (UF_long *)malloc((size_t)bp[n] * sizeof(UF_long));
+  UF_long *mark = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+  UF_long *l_cnt = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+  if (tp == NULL || tc == NULL || mark == NULL || l_cnt == NULL) {
+    free(tp); free(tc); free(mark); free(l_cnt);
+    return 0;
+  }
+  for (UF_long p = 0; p < bp[n]; ++p) {
+    tp[bc[p] + 1]++;
+  }
+  for (UF_long c = 0; c < n; ++c) {
+    tp[c + 1] += tp[c];
+  }
+  {
+    UF_long *cur = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+    if (cur == NULL) {
+      free(tp); free(tc); free(mark); free(l_cnt);
+      return 0;
+    }
+    memcpy(cur, tp, (size_t)n * sizeof(UF_long));
+    for (UF_long r = 0; r < n; ++r) {
+      for (UF_long p = bp[r]; p < bp[r + 1]; ++p) {
+        tc[cur[bc[p]]++] = r;
+      }
+    }
+    free(cur);
+  }
+  /* pass 1: count row-subtree sizes */
+  for (UF_long i = 0; i < n; ++i) {
+    const UF_long tag = i + 1;
+    for (int dir = 0; dir < 2; ++dir) {
+      const UF_long *ptr = dir == 0 ? bp : tp;
+      const UF_long *col = dir == 0 ? bc : tc;
+      for (UF_long p = ptr[i]; p < ptr[i + 1]; ++p) {
+        UF_long k = col[p];
+        while (k < i && mark[k] != tag) {
+          mark[k] = tag;
+          l_cnt[i]++;
+          k = parent[k];
+        }
+      }
+    }
+  }
+  size_t lf = 0;
+  for (UF_long i = 0; i < n; ++i) {
+    lf += (size_t)l_cnt[i];
+  }
+  UF_long *l_start = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  UF_long *l_steps = (UF_long *)malloc((lf > 0 ? lf : 1) *
+                                       sizeof(UF_long));
+  UF_long *u_cnt = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+  if (l_start == NULL || l_steps == NULL || u_cnt == NULL) {
+    free(tp); free(tc); free(mark); free(l_cnt);
+    free(l_start); free(l_steps); free(u_cnt);
+    return 0;
+  }
+  {
+    size_t acc = 0;
+    for (UF_long i = 0; i < n; ++i) {
+      l_start[i] = (UF_long)acc;
+      acc += (size_t)l_cnt[i];
+    }
+  }
+  /* pass 2: emit patterns (ascending via insertion at consume time
+     is avoided: emit then sort each row - subtree paths are short) */
+  memset(mark, 0, (size_t)n * sizeof(UF_long));
+  for (UF_long i = 0; i < n; ++i) {
+    const UF_long tag = i + 1;
+    UF_long w = l_start[i];
+    for (int dir = 0; dir < 2; ++dir) {
+      const UF_long *ptr = dir == 0 ? bp : tp;
+      const UF_long *col = dir == 0 ? bc : tc;
+      for (UF_long p = ptr[i]; p < ptr[i + 1]; ++p) {
+        UF_long k = col[p];
+        while (k < i && mark[k] != tag) {
+          mark[k] = tag;
+          l_steps[w++] = k;
+          k = parent[k];
+        }
+      }
+    }
+    /* ascending source order for the numeric chain */
+    const UF_long s0 = l_start[i];
+    for (UF_long a3 = s0 + 1; a3 < w; ++a3) {
+      const UF_long v = l_steps[a3];
+      UF_long b3 = a3;
+      while (b3 > s0 && l_steps[b3 - 1] > v) {
+        l_steps[b3] = l_steps[b3 - 1];
+        b3--;
+      }
+      l_steps[b3] = v;
+    }
+    for (UF_long q = s0; q < w; ++q) {
+      u_cnt[l_steps[q]]++;      /* transpose count (excl. diag) */
+    }
+  }
+  /* U rows: diagonal first, then transpose of L */
+  size_t uf = 0;
+  UF_long *u_start = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  if (u_start == NULL) {
+    free(tp); free(tc); free(mark); free(l_cnt);
+    free(l_start); free(l_steps); free(u_cnt);
+    return 0;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    u_start[i] = (UF_long)uf;
+    uf += (size_t)u_cnt[i] + 1u;
+  }
+  UF_long *u_cols = (UF_long *)malloc((uf > 0 ? uf : 1) *
+                                      sizeof(UF_long));
+  UF_long *ucur = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  if (u_cols == NULL || ucur == NULL) {
+    free(tp); free(tc); free(mark); free(l_cnt);
+    free(l_start); free(l_steps); free(u_cnt); free(u_start);
+    free(u_cols); free(ucur);
+    return 0;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    u_cols[u_start[i]] = i;     /* diagonal */
+    ucur[i] = u_start[i] + 1;
+    u_cnt[i]++;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    for (UF_long q = l_start[i]; q < l_start[i] + l_cnt[i]; ++q) {
+      const UF_long st = l_steps[q];
+      u_cols[ucur[st]++] = i;
+    }
+  }
+  free(tp); free(tc); free(mark); free(ucur);
+  *lsp = l_start;
+  *lcp = l_cnt;
+  *lst = l_steps;
+  *usp = u_start;
+  *ucp = u_cnt;
+  *uco = u_cols;
+  *lfill = lf;
+  *ufill = uf;
+  return 1;
+}
+
+/* Etree (A+A') heights + level buckets; returns nlevels or -1. */
+static UF_long kls_rowmt_levels(UF_long n, const UF_long *bp,
+                                const UF_long *bc,
+                                UF_long **rows_out,
+                                UF_long **lptr_out) {
+  UF_long *parent = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  UF_long *anc = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  UF_long *tp = (UF_long *)calloc((size_t)n + 1, sizeof(UF_long));
+  UF_long *tc = (UF_long *)malloc((size_t)bp[n] * sizeof(UF_long));
+  UF_long *height = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+  if (parent == NULL || anc == NULL || tp == NULL || tc == NULL ||
+      height == NULL) {
+    free(parent); free(anc); free(tp); free(tc); free(height);
+    return -1;
+  }
+  /* transpose pattern (upper adjacency by rows) */
+  for (UF_long p = 0; p < bp[n]; ++p) {
+    tp[bc[p] + 1]++;
+  }
+  for (UF_long c = 0; c < n; ++c) {
+    tp[c + 1] += tp[c];
+  }
+  {
+    UF_long *cur = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+    if (cur == NULL) {
+      free(parent); free(anc); free(tp); free(tc); free(height);
+      return -1;
+    }
+    memcpy(cur, tp, (size_t)n * sizeof(UF_long));
+    for (UF_long r = 0; r < n; ++r) {
+      for (UF_long p = bp[r]; p < bp[r + 1]; ++p) {
+        tc[cur[bc[p]]++] = r;
+      }
+    }
+    free(cur);
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    parent[i] = KLS_KLU_EMPTY;
+    anc[i] = KLS_KLU_EMPTY;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    for (int dir = 0; dir < 2; ++dir) {
+      const UF_long *ptr = dir == 0 ? bp : tp;
+      const UF_long *col = dir == 0 ? bc : tc;
+      for (UF_long p = ptr[i]; p < ptr[i + 1]; ++p) {
+        UF_long j = col[p];
+        if (j >= i) {
+          continue;
+        }
+        while (anc[j] != KLS_KLU_EMPTY && anc[j] != i) {
+          const UF_long t = anc[j];
+          anc[j] = i;
+          j = t;
+        }
+        if (anc[j] == KLS_KLU_EMPTY) {
+          anc[j] = i;
+          parent[j] = i;
+        }
+      }
+    }
+  }
+  UF_long nlev = 0;
+  for (UF_long i = 0; i < n; ++i) {
+    if (parent[i] != KLS_KLU_EMPTY) {
+      const UF_long h = height[i] + 1;
+      if (h > height[parent[i]]) {
+        height[parent[i]] = h;
+      }
+    }
+    if (height[i] + 1 > nlev) {
+      nlev = height[i] + 1;
+    }
+  }
+  UF_long *lptr = (UF_long *)calloc((size_t)nlev + 1, sizeof(UF_long));
+  UF_long *rows = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  if (lptr == NULL || rows == NULL) {
+    free(parent); free(anc); free(tp); free(tc); free(height);
+    free(lptr); free(rows);
+    return -1;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    lptr[height[i] + 1]++;
+  }
+  for (UF_long lv = 0; lv < nlev; ++lv) {
+    lptr[lv + 1] += lptr[lv];
+  }
+  {
+    UF_long *cur = (UF_long *)malloc((size_t)nlev * sizeof(UF_long));
+    if (cur == NULL) {
+      free(parent); free(anc); free(tp); free(tc); free(height);
+      free(lptr); free(rows);
+      return -1;
+    }
+    memcpy(cur, lptr, (size_t)nlev * sizeof(UF_long));
+    for (UF_long i = 0; i < n; ++i) {
+      rows[cur[height[i]]++] = i;
+    }
+    free(cur);
+  }
+  free(parent); free(anc); free(tp); free(tc); free(height);
+  *rows_out = rows;
+  *lptr_out = lptr;
+  return nlev;
+}
+
+static void kls_rowmt_trial(UF_long bnk, const UF_long *bp,
+                            const UF_long *bc, const double *bv,
+                            long ref_lnz, long ref_unz) {
+  const char *pe = getenv("KLS_ROW_ENGINE_PAR");
+  if (pe == NULL) {
+    return;
+  }
+  double perturb = 0.0;
+  for (UF_long p = 0; p < bp[bnk]; ++p) {
+    const double av = fabs(bv[p]);
+    if (av > perturb) {
+      perturb = av;
+    }
+  }
+  perturb = 1.49e-8 * (perturb > 0.0 ? perturb : 1.0);
+  double *bvec_ones = (double *)malloc((size_t)bnk * sizeof(double));
+  if (bvec_ones == NULL) {
+    return;
+  }
+  for (UF_long i = 0; i < bnk; ++i) {
+    double sum = 0.0;
+    for (UF_long p = bp[i]; p < bp[i + 1]; ++p) {
+      sum += bv[p];
+    }
+    bvec_ones[i] = sum;
+  }
+  int nt = atoi(pe);
+  if (nt < 1) {
+    nt = 1;
+  }
+  if (nt > 64) {
+    nt = 64;
+  }
+  const int pipe_mode = getenv("KLS_ROW_ENGINE_PIPE") != NULL;
+  UF_long *rows = NULL, *lptr = NULL;
+  const double ts0 = kls_now_seconds();
+  const UF_long nlev = pipe_mode
+    ? 0 : kls_rowmt_levels(bnk, bp, bc, &rows, &lptr);
+  const double ts1 = kls_now_seconds();
+  if (nlev < 0) {
+    free(bvec_ones);
+    return;
+  }
+  kls_rowmt sh;
+  memset(&sh, 0, sizeof(sh));
+  sh.n = bnk;
+  sh.csr_ptr = bp;
+  sh.csr_col = bc;
+  sh.csr_val = bv;
+  sh.perturb = perturb;
+  sh.u_cap = (size_t)(ref_unz > 0 ? ref_unz : bp[bnk]) * 2u +
+             (size_t)bnk * 2u;
+  sh.l_cap = (size_t)(ref_lnz > 0 ? ref_lnz : bp[bnk]) * 2u +
+             (size_t)bnk * 2u;
+  sh.level_rows = rows;
+  sh.level_ptr = lptr;
+  sh.nlevels = nlev;
+  sh.nthreads = nt;
+  sh.pipe_mode = pipe_mode;
+  sh.pat_done = pipe_mode
+    ? (volatile unsigned char *)calloc((size_t)bnk, 1) : NULL;
+  sh.val_done = pipe_mode
+    ? (volatile unsigned char *)calloc((size_t)bnk, 1) : NULL;
+  sh.u_start = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  sh.u_cnt = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+  sh.u_cols = (UF_long *)malloc(sh.u_cap * sizeof(UF_long));
+  sh.u_vals = (double *)malloc(sh.u_cap * sizeof(double));
+  sh.l_start = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  sh.l_cnt = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+  sh.l_steps = (UF_long *)malloc(sh.l_cap * sizeof(UF_long));
+  sh.l_vals = (double *)malloc(sh.l_cap * sizeof(double));
+  sh.udiag = (double *)malloc((size_t)bnk * sizeof(double));
+  kls_rowmt_worker wk[64];
+  memset(wk, 0, sizeof(wk));
+  int wok = sh.u_start && sh.u_cnt && sh.u_cols && sh.u_vals &&
+            sh.l_start && sh.l_cnt && sh.l_steps && sh.l_vals &&
+            sh.udiag &&
+            (!pipe_mode || (sh.pat_done && sh.val_done));
+  for (int t = 0; t < nt && wok; ++t) {
+    wk[t].sh = &sh;
+    wk[t].tid = t;
+    wk[t].mark = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+    wk[t].stack = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    wk[t].pattern = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    wk[t].cand = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    wk[t].x = (double *)calloc((size_t)bnk, sizeof(double));
+    wok = wk[t].mark && wk[t].stack && wk[t].pattern && wk[t].cand &&
+          wk[t].x != NULL;
+  }
+  if (wok) {
+    pthread_barrier_init(&sh.bar, NULL, (unsigned)nt);
+    pthread_t th[64];
+    const double t0 = kls_now_seconds();
+    for (int t = 1; t < nt; ++t) {
+      pthread_create(&th[t], NULL, kls_rowmt_main, &wk[t]);
+    }
+    kls_rowmt_main(&wk[0]);
+    for (int t = 1; t < nt; ++t) {
+      pthread_join(th[t], NULL);
+    }
+    const double t1 = kls_now_seconds();
+    pthread_barrier_destroy(&sh.bar);
+    if (!sh.failed) {
+      /* residual: L (unit) forward then U backward, x ?= ones */
+      double *y = (double *)malloc((size_t)bnk * sizeof(double));
+      double *z = (double *)calloc((size_t)bnk, sizeof(double));
+      if (y != NULL && z != NULL) {
+        for (UF_long i = 0; i < bnk; ++i) {
+          double acc = bvec_ones[i];
+          const UF_long ps = sh.l_start[i];
+          for (UF_long p = ps; p < ps + sh.l_cnt[i]; ++p) {
+            acc -= sh.l_vals[p] * y[sh.l_steps[p]];
+          }
+          y[i] = acc;
+        }
+        for (UF_long st = bnk; st-- > 0;) {
+          double acc = y[st];
+          const UF_long qs = sh.u_start[st];
+          for (UF_long q = qs; q < qs + sh.u_cnt[st]; ++q) {
+            if (sh.u_cols[q] != st) {
+              acc -= sh.u_vals[q] * z[sh.u_cols[q]];
+            }
+          }
+          z[st] = acc / sh.udiag[st];
+        }
+        double maxerr = 0.0;
+        for (UF_long c = 0; c < bnk; ++c) {
+          const double e = fabs(z[c] - 1.0);
+          if (e > maxerr) {
+            maxerr = e;
+          }
+        }
+        double wait_max = 0.0;
+        for (int t = 0; t < nt; ++t) {
+          if (wk[t].t_wait > wait_max) {
+            wait_max = wk[t].t_wait;
+          }
+        }
+        UF_long wmax = 0;
+        for (UF_long lv = 0; lv < nlev; ++lv) {
+          if (lptr[lv + 1] - lptr[lv] > wmax) {
+            wmax = lptr[lv + 1] - lptr[lv];
+          }
+        }
+        const char *mode_tag = pipe_mode ? "pipe" : "level";
+        if (!pipe_mode) {
+          /* work distribution by level width */
+          double w_wide = 0.0, w_mid = 0.0, w_narrow = 0.0;
+          UF_long lv_wide = 0, lv_mid = 0, lv_narrow = 0;
+          for (UF_long lv = 0; lv < nlev; ++lv) {
+            const UF_long lw = lptr[lv + 1] - lptr[lv];
+            double wsum = 0.0;
+            for (UF_long e = lptr[lv]; e < lptr[lv + 1]; ++e) {
+              const UF_long r = rows[e];
+              wsum += (double)(sh.l_cnt[r] + sh.u_cnt[r]);
+            }
+            if (lw >= 8 * (UF_long)nt) {
+              w_wide += wsum; lv_wide++;
+            } else if (lw >= (UF_long)nt) {
+              w_mid += wsum; lv_mid++;
+            } else {
+              w_narrow += wsum; lv_narrow++;
+            }
+          }
+          fprintf(stderr, "KLS row-engine PAR widthwork:"
+                  " wide(>=%d) %ldlv %.0fM mid %ldlv %.0fM"
+                  " narrow(<%d) %ldlv %.0fM\n",
+                  8 * nt, (long)lv_wide, w_wide * 1e-6,
+                  (long)lv_mid, w_mid * 1e-6,
+                  nt, (long)lv_narrow, w_narrow * 1e-6);
+        }
+        fprintf(stderr,
+                "KLS row-engine PAR trial(%s): nt=%d nlev=%ld"
+                " wmax=%ld"
+                " etree=%.2fs max|x-1| %.3e lnz %ld unz %ld"
+                " factor %.3fs perturbed=%ld wait=%.1fs\n",
+                mode_tag, nt, (long)nlev, (long)wmax, ts1 - ts0,
+                maxerr,
+                (long)sh.l_len, (long)sh.u_len, t1 - t0,
+                sh.perturbed, wait_max);
+      }
+      free(y); free(z);
+      if (pipe_mode && getenv("KLS_ROW_ENGINE_REPLAY") != NULL) {
+        /* numeric-only pipeline over the recorded structure: the
+           critical-path floor if the symbolic left the chain */
+        kls_rowmt_replay rp[64];
+        memset(rp, 0, sizeof(rp));
+        int rok = 1;
+        for (int t = 0; t < nt && rok; ++t) {
+          rp[t].sh = &sh;
+          rp[t].tid = t;
+          rp[t].x = (double *)calloc((size_t)bnk, sizeof(double));
+          rok = rp[t].x != NULL;
+        }
+        if (rok) {
+          memset((void *)sh.val_done, 0, (size_t)bnk);
+          const double r0 = kls_now_seconds();
+          pthread_t th2[64];
+          for (int t = 1; t < nt; ++t) {
+            pthread_create(&th2[t], NULL, kls_rowmt_replay_main,
+                           &rp[t]);
+          }
+          kls_rowmt_replay_main(&rp[0]);
+          for (int t = 1; t < nt; ++t) {
+            pthread_join(th2[t], NULL);
+          }
+          const double r1 = kls_now_seconds();
+          double *y2 = (double *)malloc((size_t)bnk *
+                                        sizeof(double));
+          double *z2 = (double *)calloc((size_t)bnk,
+                                        sizeof(double));
+          double maxerr2 = -1.0;
+          if (y2 != NULL && z2 != NULL) {
+            for (UF_long i = 0; i < bnk; ++i) {
+              double acc = bvec_ones[i];
+              const UF_long ps = sh.l_start[i];
+              for (UF_long p2 = ps; p2 < ps + sh.l_cnt[i]; ++p2) {
+                acc -= sh.l_vals[p2] * y2[sh.l_steps[p2]];
+              }
+              y2[i] = acc;
+            }
+            for (UF_long st = bnk; st-- > 0;) {
+              double acc = y2[st];
+              const UF_long qs = sh.u_start[st];
+              for (UF_long q = qs; q < qs + sh.u_cnt[st]; ++q) {
+                if (sh.u_cols[q] != st) {
+                  acc -= sh.u_vals[q] * z2[sh.u_cols[q]];
+                }
+              }
+              z2[st] = acc / sh.udiag[st];
+            }
+            maxerr2 = 0.0;
+            for (UF_long c = 0; c < bnk; ++c) {
+              const double e = fabs(z2[c] - 1.0);
+              if (e > maxerr2) {
+                maxerr2 = e;
+              }
+            }
+          }
+          free(y2); free(z2);
+          fprintf(stderr, "KLS row-engine REPLAY(num-only):"
+                  " nt=%d max|x-1| %.3e factor %.3fs\n",
+                  nt, maxerr2, r1 - r0);
+        }
+        for (int t = 0; t < nt; ++t) {
+          free(rp[t].x);
+        }
+      }
+      if (pipe_mode && getenv("KLS_ROW_ENGINE_CHOLSYM") != NULL) {
+        /* precomputed George/Ng superset structure + numeric-only
+           pipeline: the production shape (no per-row DFS at all) */
+        const double c0t = kls_now_seconds();
+        UF_long *par2 = kls_rowmt_etree(bnk, bp, bc);
+        UF_long *ls2 = NULL, *lc2 = NULL, *lt2 = NULL;
+        UF_long *us2 = NULL, *uc2 = NULL, *uo2 = NULL;
+        size_t lf2 = 0, uf2 = 0;
+        int bok = par2 != NULL &&
+                  kls_rowmt_cholsym(bnk, bp, bc, par2, &ls2, &lc2,
+                                    &lt2, &us2, &uc2, &uo2, &lf2,
+                                    &uf2);
+        const double c1t = kls_now_seconds();
+        double *lv2 = bok
+          ? (double *)malloc((lf2 > 0 ? lf2 : 1) * sizeof(double))
+          : NULL;
+        double *uv2 = bok
+          ? (double *)malloc((uf2 > 0 ? uf2 : 1) * sizeof(double))
+          : NULL;
+        double *ud2 = bok
+          ? (double *)malloc((size_t)bnk * sizeof(double)) : NULL;
+        volatile unsigned char *vd2 = bok
+          ? (volatile unsigned char *)calloc((size_t)bnk, 1) : NULL;
+        if (bok && lv2 != NULL && uv2 != NULL && ud2 != NULL &&
+            vd2 != NULL) {
+          kls_rowmt sh2;
+          memset(&sh2, 0, sizeof(sh2));
+          sh2.n = bnk;
+          sh2.csr_ptr = bp;
+          sh2.csr_col = bc;
+          sh2.csr_val = bv;
+          sh2.perturb = sh.perturb;
+          sh2.nthreads = nt;
+          sh2.l_start = ls2;
+          sh2.l_cnt = lc2;
+          sh2.l_steps = lt2;
+          sh2.l_vals = lv2;
+          sh2.u_start = us2;
+          sh2.u_cnt = uc2;
+          sh2.u_cols = uo2;
+          sh2.u_vals = uv2;
+          sh2.udiag = ud2;
+          sh2.val_done = vd2;
+          kls_rowmt_replay rp2[64];
+          memset(rp2, 0, sizeof(rp2));
+          int rok2 = 1;
+          for (int t = 0; t < nt && rok2; ++t) {
+            rp2[t].sh = &sh2;
+            rp2[t].tid = t;
+            rp2[t].x = (double *)calloc((size_t)bnk,
+                                        sizeof(double));
+            rok2 = rp2[t].x != NULL;
+          }
+          if (rok2) {
+            const double r0 = kls_now_seconds();
+            pthread_t th3[64];
+            for (int t = 1; t < nt; ++t) {
+              pthread_create(&th3[t], NULL, kls_rowmt_replay_main,
+                             &rp2[t]);
+            }
+            kls_rowmt_replay_main(&rp2[0]);
+            for (int t = 1; t < nt; ++t) {
+              pthread_join(th3[t], NULL);
+            }
+            const double r1 = kls_now_seconds();
+            double *y3 = (double *)malloc((size_t)bnk *
+                                          sizeof(double));
+            double *z3 = (double *)calloc((size_t)bnk,
+                                          sizeof(double));
+            double maxerr3 = -1.0;
+            if (y3 != NULL && z3 != NULL) {
+              for (UF_long i = 0; i < bnk; ++i) {
+                double acc = bvec_ones[i];
+                const UF_long ps = sh2.l_start[i];
+                for (UF_long p2 = ps; p2 < ps + sh2.l_cnt[i];
+                     ++p2) {
+                  acc -= sh2.l_vals[p2] * y3[sh2.l_steps[p2]];
+                }
+                y3[i] = acc;
+              }
+              for (UF_long st = bnk; st-- > 0;) {
+                double acc = y3[st];
+                const UF_long qs = sh2.u_start[st];
+                for (UF_long q = qs; q < qs + sh2.u_cnt[st]; ++q) {
+                  if (sh2.u_cols[q] != st) {
+                    acc -= sh2.u_vals[q] * z3[sh2.u_cols[q]];
+                  }
+                }
+                z3[st] = acc / sh2.udiag[st];
+              }
+              maxerr3 = 0.0;
+              for (UF_long c = 0; c < bnk; ++c) {
+                const double e = fabs(z3[c] - 1.0);
+                if (e > maxerr3) {
+                  maxerr3 = e;
+                }
+              }
+            }
+            free(y3); free(z3);
+            fprintf(stderr, "KLS row-engine CHOLSYM: nt=%d"
+                    " build=%.3fs lfill %ld ufill %ld"
+                    " max|x-1| %.3e factor %.3fs total=%.3fs\n",
+                    nt, c1t - c0t, (long)lf2, (long)uf2, maxerr3,
+                    r1 - r0, (c1t - c0t) + (r1 - r0));
+          }
+          for (int t = 0; t < nt; ++t) {
+            free(rp2[t].x);
+          }
+        }
+        free(par2); free(ls2); free(lc2); free(lt2);
+        free(us2); free(uc2); free(uo2);
+        free(lv2); free(uv2); free(ud2); free((void *)vd2);
+      }
+    } else {
+      fprintf(stderr, "KLS row-engine PAR: capacity fail\n");
+    }
+  }
+  for (int t = 0; t < nt; ++t) {
+    free(wk[t].mark); free(wk[t].stack); free(wk[t].pattern);
+    free(wk[t].cand); free(wk[t].x);
+  }
+  free(sh.u_start); free(sh.u_cnt); free(sh.u_cols); free(sh.u_vals);
+  free(sh.l_start); free(sh.l_cnt); free(sh.l_steps); free(sh.l_vals);
+  free(sh.udiag); free(rows); free(lptr); free(bvec_ones);
+  free((void *)sh.pat_done); free((void *)sh.val_done);
+}
+
 static void kls_row_symbolic_validate(kls_solver *solver,
                                       const double *fvals) {
   const int trial_mode = getenv("KLS_ROW_ENGINE_TRIAL") != NULL;
@@ -3217,6 +4166,9 @@ static void kls_row_symbolic_validate(kls_solver *solver,
       free(rf.stack); free(rf.pattern); free(rf.x);
       free(bvec2); free(yz2);
     }
+    kls_rowmt_trial(bnk, bp, bc, bv,
+                    (long)solver->numeric->max_lnz_block,
+                    (long)solver->numeric->max_unz_block);
     free(bp); free(bc); free(bv);
     return;
   }
