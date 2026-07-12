@@ -49,6 +49,8 @@ Int KLS_SN_PANEL_FACTOR (double *A, Int R, Int W, Int rowids [ ],
 			 const Int diagrows [ ], double tol) ;
 
 _Thread_local double kls_construct_secs ;
+_Thread_local long kls_pipe_inversions ;
+static FILE *kls_pipe_pivlog ;
 _Thread_local double kls_step_sym, kls_step_cc, kls_step_num ;
 _Thread_local long kls_construct_calls ;
 _Thread_local long kls_construct_entries ;
@@ -2023,6 +2025,11 @@ static int kls_pipe_emit_dense_column
     }
     S->P [k] = pivrow ;
     S->Pinv [pivrow] = k ;
+    if (kls_pipe_pivlog != NULL)
+    {
+	fprintf (kls_pipe_pivlog, "D %ld %ld\n", (long) k,
+		 (long) pivrow) ;
+    }
     if (sh->lpend != NULL)
     {
 	Int up, jcol ;
@@ -2319,6 +2326,11 @@ static int kls_pipe_finalize_column
 	}
 	S->P [k] = pivrow ;
 	S->Pinv [pivrow] = k ;
+	if (kls_pipe_pivlog != NULL)
+	{
+	    fprintf (kls_pipe_pivlog, "F %ld %ld\n", (long) k,
+		     (long) pivrow) ;
+	}
 	if (sh->lpend != NULL)
 	{
 	    /* symmetric pruning, serialized by in-order finals: for each
@@ -2647,6 +2659,27 @@ static int kls_pipe_panel_lockstep
 		/* union apply: each source streamed once, executing only the
 		   member lanes (compressed) - useful madds only.  Batched
 		   block consume (brick 4b): see the retained-panel registry. */
+		if (kls_pipe_phase_prof && ulen > 0)
+		{
+		    /* ordering probe: the applied sequence must ascend in
+		       Pinv across rounds for determinism */
+		    static _Thread_local Int kls_last_panel = -1 ;
+		    static _Thread_local Int kls_last_pinv = -1 ;
+		    if (kls_last_panel != k0)
+		    {
+			kls_last_panel = k0 ;
+			kls_last_pinv = -1 ;
+		    }
+		    for (p = 0 ; p < ulen ; p++)
+		    {
+			Int pv2 = S->Pinv [ulist [p]] ;
+			if (pv2 < kls_last_pinv)
+			{
+			    kls_pipe_inversions++ ;
+			}
+			kls_last_pinv = pv2 ;
+		    }
+		}
 		for (p = 0 ; p < ulen ; p++)
 		{
 		    Int mask ;
@@ -3482,8 +3515,9 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		 kls_pipe_t_sym, kls_pipe_t_num,
 		 kls_pipe_copy_bytes >> 20, kls_pipe_madds) ;
 	fprintf (stderr, "KLS pipe batch tid=%d batched=%ld batches=%ld"
-		 " scalar=%ld\n", W->tid, kls_pipe_batched,
-		 kls_pipe_batches, kls_pipe_scalar_src) ;
+		 " scalar=%ld inversions=%ld\n", W->tid, kls_pipe_batched,
+		 kls_pipe_batches, kls_pipe_scalar_src,
+		 kls_pipe_inversions) ;
     }
     free (promoted) ;
     return (NULL) ;
@@ -3622,6 +3656,13 @@ size_t KLS_KLU_KERNEL_PIPE
 
     if (nthreads < 1) nthreads = 1 ;
     if (nthreads > 16) nthreads = 16 ;
+    {
+	const char *lp = getenv ("KLS_PIPE_PIVLOG") ;
+	if (lp != NULL && kls_pipe_pivlog == NULL)
+	{
+	    kls_pipe_pivlog = fopen (lp, "w") ;
+	}
+    }
 
     /* Offp prefix so construct_column's off-diagonal writes are disjoint
        and idempotent under any completion order */
