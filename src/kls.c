@@ -4444,6 +4444,109 @@ static void kls_row_symbolic_validate(kls_solver *solver,
     kls_rowmt_trial(bnk, bp, bc, bv,
                     (long)solver->numeric->max_lnz_block,
                     (long)solver->numeric->max_unz_block);
+    if (getenv("KLS_ROW_ENGINE_ATA") != NULL) {
+      /* viability probe for the pivoted engine: chol(A*A') bounds the
+         row-factorization pattern under ANY within-row column pivot
+         choice (George/Ng mirror).  Build the AA' adjacency with
+         column cliques capped at 64 rows (dense columns need engine-
+         side special handling regardless), then count the chol fill
+         via the superset builder's phase-1 subtree walks. */
+      const double a0 = kls_now_seconds();
+      const UF_long cap = 64;
+      /* block CSC from the CSR (bp/bc is row-form) */
+      UF_long *cp = (UF_long *)calloc((size_t)bnk + 1, sizeof(UF_long));
+      UF_long *ci = (UF_long *)malloc((size_t)bp[bnk] * sizeof(UF_long));
+      size_t pairs = 0;
+      UF_long capped = 0;
+      if (cp != NULL && ci != NULL) {
+        for (UF_long p3 = 0; p3 < bp[bnk]; ++p3) {
+          cp[bc[p3] + 1]++;
+        }
+        for (UF_long c = 0; c < bnk; ++c) {
+          cp[c + 1] += cp[c];
+        }
+        UF_long *cur = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+        if (cur != NULL) {
+          memcpy(cur, cp, (size_t)bnk * sizeof(UF_long));
+          for (UF_long r3 = 0; r3 < bnk; ++r3) {
+            for (UF_long p3 = bp[r3]; p3 < bp[r3 + 1]; ++p3) {
+              ci[cur[bc[p3]]++] = r3;
+            }
+          }
+          free(cur);
+          for (UF_long c = 0; c < bnk; ++c) {
+            const UF_long len = cp[c + 1] - cp[c];
+            if (len > cap) {
+              capped++;
+            } else {
+              pairs += (size_t)len * (size_t)(len - 1);
+            }
+          }
+          /* AA' adjacency rows: for each kept column, full clique */
+          UF_long *ap2 = (UF_long *)calloc((size_t)bnk + 1,
+                                           sizeof(UF_long));
+          UF_long *ai2 = (UF_long *)malloc((pairs > 0 ? pairs : 1) *
+                                           sizeof(UF_long));
+          if (ap2 != NULL && ai2 != NULL) {
+            for (UF_long c = 0; c < bnk; ++c) {
+              const UF_long len = cp[c + 1] - cp[c];
+              if (len > cap) continue;
+              for (UF_long q = cp[c]; q < cp[c + 1]; ++q) {
+                ap2[ci[q] + 1] += len - 1;
+              }
+            }
+            for (UF_long r3 = 0; r3 < bnk; ++r3) {
+              ap2[r3 + 1] += ap2[r3];
+            }
+            UF_long *cur2 = (UF_long *)malloc((size_t)bnk *
+                                              sizeof(UF_long));
+            if (cur2 != NULL) {
+              memcpy(cur2, ap2, (size_t)bnk * sizeof(UF_long));
+              for (UF_long c = 0; c < bnk; ++c) {
+                const UF_long len = cp[c + 1] - cp[c];
+                if (len > cap) continue;
+                for (UF_long q = cp[c]; q < cp[c + 1]; ++q) {
+                  for (UF_long q2 = cp[c]; q2 < cp[c + 1]; ++q2) {
+                    if (q2 != q) {
+                      ai2[cur2[ci[q]]++] = ci[q2];
+                    }
+                  }
+                }
+              }
+              free(cur2);
+              UF_long *par3 = kls_rowmt_etree(bnk, ap2, ai2);
+              if (par3 != NULL) {
+                UF_long *ls3 = NULL, *lc3 = NULL, *lt3 = NULL;
+                UF_long *us3 = NULL, *uc3 = NULL, *uo3 = NULL;
+                size_t lf3 = 0, uf3 = 0;
+                double tph3[4];
+                /* phase-1 count only would suffice; the builder is
+                   cheap enough to run whole for the probe */
+                if (kls_rowmt_cholsym_par(bnk, ap2, ai2, par3, 8,
+                                          &ls3, &lc3, &lt3, &us3,
+                                          &uc3, &uo3, &lf3, &uf3,
+                                          tph3)) {
+                  fprintf(stderr,
+                          "KLS ATA probe: nk=%ld nnzb=%ld pairs=%zu"
+                          " capped_cols=%ld chol_lf=%zu chol_uf=%zu"
+                          " ref_fill=%ld t=%.2fs\n",
+                          (long)bnk, (long)bp[bnk], pairs,
+                          (long)capped, lf3, uf3,
+                          (long)(solver->numeric->max_lnz_block +
+                                 solver->numeric->max_unz_block),
+                          kls_now_seconds() - a0);
+                  free(ls3); free(lc3); free(lt3);
+                  free(us3); free(uc3); free(uo3);
+                }
+                free(par3);
+              }
+            }
+          }
+          free(ap2); free(ai2);
+        }
+      }
+      free(cp); free(ci);
+    }
     free(bp); free(bc); free(bv);
     return;
   }
