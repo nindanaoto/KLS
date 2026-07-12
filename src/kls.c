@@ -98234,6 +98234,13 @@ static int kls_row_first_workspace_reserve_supernode(
   if (grown == NULL) {
     return 0;
   }
+  /* consumers accumulate into this buffer assuming zeroed lanes; the
+     realloc'd tail is recycled heap whose stale bytes (another
+     solver's freed values) entered sums silently - the task #21
+     wrong-solve vehicle.  Zero the grown region. */
+  memset(grown + workspace->supernode_workspace_capacity, 0,
+         (size_t)(entry_count - workspace->supernode_workspace_capacity) *
+           sizeof(*grown));
   workspace->supernode_workspace = grown;
   workspace->supernode_workspace_capacity = entry_count;
   return 1;
@@ -98248,7 +98255,12 @@ static int kls_row_first_workspace_init(
       nk > (UF_long)(SIZE_MAX / sizeof(*workspace->pattern))) {
     return 0;
   }
-  memset(workspace, 0, sizeof(*workspace));
+  /* re-init used to memset the struct BEFORE freeing: every second
+     init leaked the old buffers as live memory, and any retained view
+     of them read stale-but-live data (the cross-solver wrong-solve
+     family, task #21).  Free first - retained views then dangle to
+     freed memory, which ASAN reports instead of silently mis-solving. */
+  kls_row_first_workspace_free(workspace);
   workspace->x = (double *)calloc((size_t)nk, sizeof(*workspace->x));
   workspace->mark =
     (unsigned int *)calloc((size_t)nk, sizeof(*workspace->mark));
@@ -115339,13 +115351,9 @@ cleanup:
   kls_row_first_entries_free(&trial_l_entries);
   kls_row_first_entries_free(&trial_u_entries);
   kls_row_first_supernode_panel_cache_free(&trial_panel_cache);
-  free(trial_workspace.x);
-  free(trial_workspace.supernode_workspace);
-  free(trial_workspace.mark);
-  free(trial_workspace.pattern);
-  free(trial_workspace.dep_heap);
-  free(trial_workspace.u_row_ptr);
-  free(trial_workspace.u_row_end);
+  /* the manual list missed supernode_fit_status (leaked) and left the
+     struct un-zeroed; use the canonical free */
+  kls_row_first_workspace_free(&trial_workspace);
   free(trial_udiag);
   free(trial_row_done);
   return ok;
