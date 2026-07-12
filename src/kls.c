@@ -124222,6 +124222,12 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (status != KLS_OK) {
     return status;
   }
+  if (solver->n <= 8 && getenv("KLS_TRACE_X") != NULL) {
+    for (UF_long fv = 0; fv < solver->nnz && fv < 12; ++fv) {
+      fprintf(stderr, "FXV %ld %.17g user=%.17g\n", (long)fv,
+              numeric_values[fv], values[fv]);
+    }
+  }
   KLS_ENTRY_PHASE("prep_values")
 
   double elapsed = 0.0;
