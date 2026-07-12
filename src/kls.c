@@ -121743,6 +121743,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
            mark != NULL && rowlen != NULL && colcount != NULL;
 
   trilinos_klu_l_numeric *numeric = NULL;
+  int numeric_adopted = 0;      /* solver->numeric aliases the local */
   UF_long total_lnz = 0;
   UF_long total_unz = 0;
   UF_long max_lnz_block = 1;
@@ -122363,7 +122364,34 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       fprintf(stderr, "KLS predicted: construction rejected\n");
     }
     solver->common.scale = saved_scale;
+    if (numeric_adopted) {
+      /* the local aliases solver->numeric; failure paths inside the
+         value machinery may have freed it already (free_numeric NULLs
+         the solver field) - never re-free through the stale alias */
+      if (solver->numeric != NULL) {
+        free_numeric(solver);
+      }
+      numeric = NULL;
+    }
     if (numeric != NULL) {
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr,
+                "KLS predicted reject dump: n=%ld nzoff=%ld nblocks=%ld"
+                " Pnum=%p Offp=%p Offi=%p Offx=%p Lip=%p LUsize=%p"
+                " LUbx=%p Udiag=%p Rs=%p Pinv=%p Work=%p\n",
+                (long)numeric->n, (long)numeric->nzoff,
+                (long)numeric->nblocks, (void *)numeric->Pnum,
+                (void *)numeric->Offp, (void *)numeric->Offi,
+                (void *)numeric->Offx, (void *)numeric->Lip,
+                (void *)numeric->LUsize, (void *)numeric->LUbx,
+                (void *)numeric->Udiag, (void *)numeric->Rs,
+                (void *)numeric->Pinv, (void *)numeric->Work);
+        for (UF_long b2 = 0; b2 < numeric->nblocks && b2 < 8; ++b2) {
+          fprintf(stderr, "KLS predicted reject blk %ld LUbx=%p size=%zu\n",
+                  (long)b2, numeric->LUbx ? numeric->LUbx[b2] : NULL,
+                  numeric->LUsize ? numeric->LUsize[b2] : 0u);
+        }
+      }
       trilinos_klu_l_free_numeric(&numeric, common);
     }
     *elapsed += kls_now_seconds() - start;
@@ -122382,6 +122410,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
      magnitude faster than the serial KLU refactorization. */
   common->status = TRILINOS_KLU_OK;
   solver->numeric = numeric;
+  numeric_adopted = 1;
   solver->numeric_is_predicted = 1;
   /* The pattern was written in ascending row order, so the supernode
      preparation can skip its sorting pass. */
@@ -126339,7 +126368,15 @@ int kls_factor(kls_solver *solver, const double *values) {
   const int had_numeric = solver->numeric != NULL;
   if (!had_numeric) {
     if (getenv("KLS_PRESTATIC_DEFER") != NULL && solver->numeric == NULL &&
+        solver->n <= 150000u &&
         solver->row_perm == NULL && solver->options.static_pivoting) {
+      /* scope: small/medium trial candidates only.  The large-spral
+         class (pre2: n 659K Hungarian) NEEDS the prestatic ordering
+         structurally - deferring it routes the one-shot into the
+         predicted attempt, which both wastes 13.7s and trips a latent
+         double free in the pivot-rescue recursion (block_trial re-
+         entry frees the outer invocation's adopted numeric through
+         free_numeric while the outer local still aliases it). */
       /* Run the match trial from the first refactor instead: its cost
          (rajat25 0.83s, pre2 13.4s Hungarian) lands in one 99x-amortized
          refactor and leaves the one-shot factor path untouched; the
