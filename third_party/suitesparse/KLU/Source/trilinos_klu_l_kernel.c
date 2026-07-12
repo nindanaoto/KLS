@@ -49,6 +49,7 @@ Int KLS_SN_PANEL_FACTOR (double *A, Int R, Int W, Int rowids [ ],
 			 const Int diagrows [ ], double tol) ;
 
 _Thread_local double kls_construct_secs ;
+_Thread_local double kls_step_sym, kls_step_cc, kls_step_num ;
 _Thread_local long kls_construct_calls ;
 _Thread_local long kls_construct_entries ;
 static int kls_construct_prof ;
@@ -1080,13 +1081,27 @@ Int KLS_KLU_KERNEL_STEP
     Lip [k] = S->lup ;
     }
 
+    const int kls_sp = kls_construct_prof ;
+    double kls_sp_t = kls_sp ? kls_klu_now () : 0.0 ;
     top = lsolve_symbolic (n, k, S->Ap, S->Ai, S->Q, S->colptr, Pinv,
 		S->Stack, S->Flag, S->Lpend, S->Ap_pos, LU,
 		S->colptr != NULL ? 0 : S->lup, Llen, Lip, S->k1, S->PSinv) ;
 
+    if (kls_sp)
+    {
+	const double t2 = kls_klu_now () ;
+	kls_step_sym += t2 - kls_sp_t ;
+	kls_sp_t = t2 ;
+    }
     construct_column (k, S->Ap, S->Ai, S->Ax, S->Q, S->X,
 	S->k1, S->PSinv, S->Rs, S->scale, S->Offp, S->Offi, S->Offx) ;
 
+    if (kls_sp)
+    {
+	const double t2 = kls_klu_now () ;
+	kls_step_cc += t2 - kls_sp_t ;
+	kls_sp_t = t2 ;
+    }
     lsolve_numeric (Pinv, LU, S->colptr, S->Stack, Lip, top, n, Llen,
 		    S->X) ;
 
@@ -1094,6 +1109,12 @@ Int KLS_KLU_KERNEL_STEP
 
     if (S->diag_claim)
     {
+    if (kls_sp)
+    {
+	const double t2 = kls_klu_now () ;
+	kls_step_num += t2 - kls_sp_t ;
+	kls_sp_t = t2 ;
+    }
 	Int claim = kls_lpivot_diag_claim (diagrow, &pivrow, &pivot,
 					   &abs_pivot, S->tol, S->X, LU, Lip,
 					   Llen, k, n) ;
@@ -1259,6 +1280,14 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
     KLS_KLU_KERNEL_STATE *S
 )
 {
+    if (kls_construct_prof)
+    {
+	fprintf (stderr, "KLS serial step prof: sym=%.4fs cc=%.4fs"
+		 " num=%.4fs construct=%.4fs/%ld\n", kls_step_sym,
+		 kls_step_cc, kls_step_num, kls_construct_secs,
+		 kls_construct_calls) ;
+    }
+
     Int p, i ;
     Int *Li ;
     size_t newlusize ;
