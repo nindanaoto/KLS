@@ -27934,6 +27934,8 @@ static int analyze_with_ordering(UF_long n,
 
   trilinos_klu_l_symbolic *symbolic = NULL;
   if (ordering == KLS_ORDERING_NATURAL) {
+    const double kls_ag_t0 =
+      getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
     symbolic = trilinos_klu_l_analyze_given(n, col_ptr, row_idx, NULL, NULL,
                                             &common);
   } else if (ordering == KLS_ORDERING_METIS) {
@@ -27949,7 +27951,13 @@ static int analyze_with_ordering(UF_long n,
     common.ordering = 3;
     common.user_order = kls_metis_order;  /* timing wrapper */
     common.user_data = &metis_context;
+    const double kls_aa_t0 =
+      getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
+    if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
+      fprintf(stderr, "KLS awo: klu_analyze %.3fs\n",
+              kls_now_seconds() - kls_aa_t0);
+    }
     common.user_data = NULL;
 #else
     return KLS_ERR_UNSUPPORTED;
@@ -27986,8 +27994,14 @@ static int analyze_with_ordering(UF_long n,
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
     trilinos_amd_l2_amf = 0;
   } else {
+    const double kls_ad_t0 =
+      getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
     common.ordering = (ordering == KLS_ORDERING_COLAMD) ? 1 : 0;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
+    if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
+      fprintf(stderr, "KLS awo: amd_analyze %.3fs\n",
+              kls_now_seconds() - kls_ad_t0);
+    }
   }
 
   if (symbolic == NULL || common.status < 0) {
@@ -34084,6 +34098,33 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        kls_ordering *selected_ordering_out,
                                        double *score_out,
                                        kls_separator_analysis *separator_out) {
+  if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
+      options->static_pivoting && n <= 200000 && n >= 64 &&
+      col_ptr[n] <= 2000000) {
+    /* block-structured systems (TSOPF, case9) adopt their own
+       ordering at factor time via the block trial; ordering scoring
+       here is one-shot overhead for them.  Pattern-only detector. */
+    UF_long *bs_perm = NULL, *bs_comp = NULL;
+    if (kls_build_block_structured_order(n, col_ptr, row_idx, &bs_perm,
+                                         &bs_comp)) {
+      free(bs_perm);
+      free(bs_comp);
+      kls_options amd_opts = *options;
+      amd_opts.ordering = KLS_ORDERING_AMD;
+      /* BTF's maximum transversal is pathological on these patterns
+         (case9: 20ms of a 23ms analyze at n=14K) and the block
+         ordering supersedes the block-triangular form anyway */
+      amd_opts.use_btf = 0;
+      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+        fprintf(stderr, "KLS choose: block structure detected -"
+                " AMD placeholder, no BTF, scoring skipped\n");
+      }
+      return choose_symbolic_for_pattern(n, col_ptr, row_idx, &amd_opts,
+                                         symbolic_out, common_out,
+                                         selected_ordering_out, score_out,
+                                         separator_out);
+    }
+  }
   UF_long *bp = NULL, *bq = NULL, *br = NULL, *bwork = NULL;
   struct kls_btf_stash_s saved = kls_btf_stash;
   if (n >= 30000 && options != NULL && options->use_btf &&
