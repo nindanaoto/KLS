@@ -2666,6 +2666,10 @@ typedef struct kls_row_symbolic_s {
   const UF_long *csr_col;
   UF_long *u_ptr;           /* growing U rows, row-major */
   UF_long *u_cols;
+  double *u_vals;           /* numeric component: values beside cols */
+  double *x;                /* full-n numeric workspace */
+  double *udiag;            /* per-row pivot values */
+  const double *csr_val;    /* values beside csr_col */
   size_t u_cap;
   UF_long u_len;
   UF_long *mark;            /* per-row DFS marks (row id + 1) */
@@ -2744,6 +2748,59 @@ static int kls_row_symbolic_row(kls_row_symbolic *rs,
     *l_count_out = l_count;
     *u_count_out = u_count;   /* includes the diagonal */
   }
+  /* numeric (CKTSO Alg.1 lines 3-5): x = A(i,:); consume L(i,:)
+     sources ASCENDING (index order is topological for the row DAG:
+     every edge j->k has j<k); each source row is FINAL - the
+     serial-identical arithmetic that makes the engine cancellation-
+     safe under any schedule. */
+  if (rs->x != NULL) {
+    double *x = rs->x;
+    for (UF_long p = rs->csr_ptr[i]; p < rs->csr_ptr[i + 1]; ++p) {
+      x[rs->csr_col[p]] = rs->csr_val[p];
+    }
+    /* ascending sort of the collected L pattern (small rows:
+       insertion; the DFS emits reverse-topological segments) */
+    for (UF_long a3 = 1; a3 < l_count; ++a3) {
+      const UF_long v = rs->pattern[a3];
+      UF_long b3 = a3;
+      while (b3 > 0 && rs->pattern[b3 - 1] > v) {
+        rs->pattern[b3] = rs->pattern[b3 - 1];
+        b3--;
+      }
+      rs->pattern[b3] = v;
+    }
+    for (UF_long t = 0; t < l_count; ++t) {
+      const UF_long j = rs->pattern[t];
+      const double lij = x[j] / rs->udiag[j];
+      x[j] = lij;             /* L value retained in x for callers */
+      for (UF_long q = rs->u_ptr[j]; q < rs->u_ptr[j + 1]; ++q) {
+        if (rs->u_cols[q] != j) {   /* skip the pivot itself */
+          x[rs->u_cols[q]] -= lij * rs->u_vals[q];
+        }
+      }
+    }
+    /* emit U(i,:) values from x; the diagonal is u row i's first
+       occurrence of column i (emission order above put A-seeds
+       first, then fill - locate it) */
+    rs->udiag[i] = 0.0;
+    for (UF_long q = rs->u_ptr[i]; q < rs->u_ptr[i + 1]; ++q) {
+      const UF_long k = rs->u_cols[q];
+      rs->u_vals[q] = x[k];
+      if (k == i) {
+        rs->udiag[i] = x[k];
+      }
+    }
+    /* clear the touched workspace (L pattern + U row + A row) */
+    for (UF_long t = 0; t < l_count; ++t) {
+      x[rs->pattern[t]] = 0.0;
+    }
+    for (UF_long q = rs->u_ptr[i]; q < rs->u_ptr[i + 1]; ++q) {
+      x[rs->u_cols[q]] = 0.0;
+    }
+    for (UF_long p = rs->csr_ptr[i]; p < rs->csr_ptr[i + 1]; ++p) {
+      x[rs->csr_col[p]] = 0.0;
+    }
+  }
   return 1;
 }
 
@@ -2782,6 +2839,22 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
   rs.mark = (UF_long *)calloc((size_t)n, sizeof(UF_long));
   rs.stack = (UF_long *)malloc((size_t)n * sizeof(UF_long));
   rs.pattern = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  double *csr_val = NULL;
+  if (solver->numeric->Rs == NULL && solver->values != NULL) {
+    /* unscaled factor: run the numeric replay too */
+    csr_val = (double *)malloc((size_t)solver->nnz * sizeof(double));
+    rs.u_vals = (double *)malloc(rs.u_cap * sizeof(double));
+    rs.x = (double *)calloc((size_t)n, sizeof(double));
+    rs.udiag = (double *)malloc((size_t)n * sizeof(double));
+    if (csr_val == NULL || rs.u_vals == NULL || rs.x == NULL ||
+        rs.udiag == NULL) {
+      free(csr_val);
+      csr_val = NULL;
+      free(rs.u_vals); rs.u_vals = NULL;
+      free(rs.x); rs.x = NULL;
+      free(rs.udiag); rs.udiag = NULL;
+    }
+  }
   if (row_l == NULL || row_u == NULL || csr_ptr == NULL ||
       csr_col == NULL || rs.u_ptr == NULL || rs.u_cols == NULL ||
       rs.mark == NULL || rs.stack == NULL || rs.pattern == NULL) {
@@ -2824,7 +2897,11 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
       const UF_long oldcol = q[k];
       for (UF_long pp = solver->col_ptr[oldcol];
            pp < solver->col_ptr[oldcol + 1]; ++pp) {
-        csr_col[cur[pinv[solver->row_idx[pp]]]++] = k;
+        const UF_long dst = cur[pinv[solver->row_idx[pp]]]++;
+        csr_col[dst] = k;
+        if (csr_val != NULL) {
+          csr_val[dst] = solver->values[pp];
+        }
       }
     }
     free(cur);
@@ -2832,6 +2909,7 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
   }
   rs.csr_ptr = csr_ptr;
   rs.csr_col = csr_col;
+  rs.csr_val = csr_val;
   {
     UF_long bad = 0;
     for (UF_long i = 0; i < n; ++i) {
@@ -2878,6 +2956,19 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
     fprintf(stderr, "KLS row-symbolic validate: n=%ld mismatches=%ld"
             " (u fill %ld vs unz %ld)\n", (long)n, (long)bad,
             (long)rs.u_len, (long)(solver->numeric->unz));
+    if (rs.x != NULL && bad == 0) {
+      const double *fud = (const double *)solver->numeric->Udiag;
+      double maxrel = 0.0;
+      for (UF_long i2 = 0; i2 < n; ++i2) {
+        const double denom = fabs(fud[i2]) > 0.0 ? fabs(fud[i2]) : 1.0;
+        const double rel = fabs(rs.udiag[i2] - fud[i2]) / denom;
+        if (rel > maxrel) {
+          maxrel = rel;
+        }
+      }
+      fprintf(stderr, "KLS row-numeric validate: max Udiag rel diff"
+              " %.3e\n", maxrel);
+    }
   }
 done:
   free(row_l);
@@ -2886,6 +2977,10 @@ done:
   free(csr_col);
   free(rs.u_ptr);
   free(rs.u_cols);
+  free(rs.u_vals);
+  free(rs.x);
+  free(rs.udiag);
+  free(csr_val);
   free(rs.mark);
   free(rs.stack);
   free(rs.pattern);
