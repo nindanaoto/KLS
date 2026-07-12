@@ -2608,13 +2608,146 @@ static int kls_pipe_panel_lockstep
 		    ulist [q2] = jj ;
 		}
 		/* union apply: each source streamed once, executing only the
-		   member lanes (compressed) - useful madds only */
+		   member lanes (compressed) - useful madds only.  Batched
+		   block consume (brick 4b): see the retained-panel registry. */
 		for (p = 0 ; p < ulen ; p++)
 		{
 		    Int mask ;
 		    Int jnew ;
 		    Entry xj [32] ;
 		    j = ulist [p] ;
+		    if (use_buf && sh->blk_k0 != NULL)
+		    {
+			Int q0 = S->Pinv [j] ;
+			Int k0b = q0 >= 0 && q0 < n ? sh->blk_k0 [q0]
+						    : TRILINOS_KLU_EMPTY ;
+			if (k0b != TRILINOS_KLU_EMPTY)
+			{
+			    Entry *BA = __atomic_load_n (&sh->blk_a [k0b],
+							 __ATOMIC_ACQUIRE) ;
+			    Int *BR = __atomic_load_n (
+				&sh->blk_rowids [k0b], __ATOMIC_ACQUIRE) ;
+			    if (BA != NULL && BR != NULL)
+			    {
+				const Int BW = sh->blk_w [k0b] ;
+				const Int BRr = sh->blk_rows [k0b] ;
+				Int K = 1 ;
+				while (p + K < ulen && K < 32)
+				{
+				    Int qn = S->Pinv [ulist [p + K]] ;
+				    if (qn < k0b || qn >= k0b + BW)
+				    {
+					break ;
+				    }
+				    K++ ;
+				}
+				if (K >= 2)
+				{
+				    Int bpos [32] ;
+				    Entry bx [32][32] ;
+				    Int kq, m2, p2 ;
+				    for (kq = 0 ; kq < K ; kq++)
+				    {
+					Int jq = ulist [p + kq] ;
+					Int jpos2 ;
+					bpos [kq] = S->Pinv [jq] - k0b ;
+					KLS_PANEL_ROWPOS (jq, jpos2) ;
+					for (m2 = 0 ; m2 < PW ; m2++)
+					{
+					    bx [kq][m2] = W->pB [
+						(size_t) jpos2 * PW + m2] ;
+					}
+				    }
+				    for (kq = 1 ; kq < K ; kq++)
+				    {
+					Int kk2 ;
+					for (kk2 = 0 ; kk2 < kq ; kk2++)
+					{
+					    const Entry mv = BA [
+						(size_t) bpos [kq] * BW +
+						bpos [kk2]] ;
+					    if (mv != 0.0)
+					    {
+						for (m2 = 0 ; m2 < PW ; m2++)
+						{
+						    bx [kq][m2] -=
+							mv * bx [kk2][m2] ;
+						}
+					    }
+					}
+				    }
+				    for (kq = 0 ; kq < K ; kq++)
+				    {
+					Int jq = ulist [p + kq] ;
+					Int jpos2 ;
+					KLS_PANEL_ROWPOS (jq, jpos2) ;
+					for (m2 = 0 ; m2 < PW ; m2++)
+					{
+					    W->pB [(size_t) jpos2 * PW + m2]
+						= bx [kq][m2] ;
+					}
+				    }
+				    for (p2 = 0 ; p2 < BRr ; p2++)
+				    {
+					Int rrow, rpos2 ;
+					Entry acc [32] ;
+					Int any = 0 ;
+					for (kq = 0 ; kq < K ; kq++)
+					{
+					    if (p2 > bpos [kq])
+					    {
+						const Entry mv = BA [
+						    (size_t) p2 * BW +
+						    bpos [kq]] ;
+						if (mv != 0.0)
+						{
+						    if (!any)
+						    {
+							for (m2 = 0 ; m2 < PW ;
+							     m2++)
+							{
+							    acc [m2] = 0.0 ;
+							}
+							any = 1 ;
+						    }
+						    for (m2 = 0 ; m2 < PW ; m2++)
+						    {
+							acc [m2] +=
+							    mv * bx [kq][m2] ;
+						    }
+						}
+					    }
+					}
+					if (any)
+					{
+					    Int skip = 0 ;
+					    for (kq = 0 ; kq < K ; kq++)
+					    {
+						if (p2 == bpos [kq])
+						{
+						    skip = 1 ;
+						}
+					    }
+					    if (!skip)
+					    {
+						Entry *brow2 ;
+						rrow = BR [p2] ;
+						KLS_PANEL_ROWPOS (rrow, rpos2) ;
+						brow2 = W->pB +
+						    (size_t) rpos2 * PW ;
+						for (m2 = 0 ; m2 < PW ; m2++)
+						{
+						    brow2 [m2] -= acc [m2] ;
+						}
+					    }
+					}
+				    }
+				    p += K - 1 ;
+				    continue ;
+				}
+			    }
+			}
+		    }
 		    mask = W->pPFlag [j] ;
 		    jnew = S->Pinv [j] ;
 		    {

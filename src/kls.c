@@ -114043,7 +114043,7 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
       free(active_rank);
       return 0;
     }
-    if (parent < ctx->nk && active_mask[parent] != 0u) {
+    if (parent >= 0 && parent < ctx->nk && active_mask[parent] != 0u) {
       const UF_long parent_rank = active_rank[parent];
       if (parent_rank == KLS_KLU_EMPTY || parent_rank <= pos) {
         free(active_rank);
