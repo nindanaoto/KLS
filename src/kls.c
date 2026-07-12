@@ -124946,7 +124946,10 @@ static int solve_impl(kls_solver *solver,
     kls_dbg_check_numeric(solver, "solve entry");
   }
   if (trace_x) {
-    fprintf(stderr, "TX pre t=%d: %.17g %.17g %.17g\n", kernel_transpose,
+    fprintf(stderr, "TX pre t=%d path=%d nudges=%ld pred=%d: %.17g %.17g %.17g\n",
+            kernel_transpose, (int)solver->stats.last_factor_path,
+            (long)solver->pivot_nudge_count,
+            solver->numeric_is_predicted,
             x[0], x[1], solver->n > 2 ? x[2] : 0.0);
     if (solver->values != NULL) {
       for (UF_long tv = 0; tv < solver->nnz && tv < 12; ++tv) {
