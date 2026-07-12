@@ -2839,12 +2839,16 @@ typedef struct kls_rowuf_s {
   double perturb;           /* >0: replace all-zero pivot rows with
                                this magnitude (refinement recovers) */
   UF_long perturbed;
+  double t_sym, t_num, t_piv;   /* phase accumulators (trial prof) */
 } kls_rowuf;
 
+static double kls_now_seconds(void);
 static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
   const UF_long tag = i + 1;
   UF_long l_count = 0;
   UF_long top = 0;
+  const double rt0 = kls_now_seconds();
+  double rt1 = 0.0;
   /* symbolic: reach over pivoted columns; collect source STEPS */
   for (UF_long p = rf->csr_ptr[i]; p < rf->csr_ptr[i + 1]; ++p) {
     const UF_long c0 = rf->csr_col[p];
@@ -2871,6 +2875,8 @@ static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
       }
     }
   }
+  rt1 = kls_now_seconds();
+  rf->t_sym += rt1 - rt0;
   /* numeric: ascending source steps (topological: an edge from step
      s to a column pivoted at step s2 has s < s2) */
   for (UF_long a3 = 1; a3 < l_count; ++a3) {
@@ -2933,6 +2939,11 @@ static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
     }
   }
   rf->l_ptr[i + 1] = rf->l_len;
+  {
+    const double rt2 = kls_now_seconds();
+    rf->t_num += rt2 - rt1;
+    rf->t_piv -= rt2;
+  }
   /* pivot: threshold rule over the marked UNPIVOTED columns */
   {
     UF_long best = KLS_KLU_EMPTY;
@@ -3009,6 +3020,7 @@ static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
       rf->u_ptr[i + 1] = rf->u_len;
     }
   }
+  rf->t_piv += kls_now_seconds();
   return 1;
 }
 
@@ -3193,9 +3205,11 @@ static void kls_row_symbolic_validate(kls_solver *solver,
           }
           fprintf(stderr,
                   "KLS row-engine BLOCK trial: nk=%ld max|x-1| %.3e"
-                  " lnz %ld unz %ld factor %.3fs perturbed=%ld\n",
+                  " lnz %ld unz %ld factor %.3fs perturbed=%ld"
+                  " sym=%.1fs num=%.1fs piv=%.1fs\n",
                   (long)bnk, maxerr, (long)rf.l_len, (long)rf.u_len,
-                  t1 - t0, (long)rf.perturbed);
+                  t1 - t0, (long)rf.perturbed, rf.t_sym, rf.t_num,
+                  rf.t_piv);
         } else {
           fprintf(stderr, "KLS row-engine BLOCK: %s (nk=%ld row=%ld"
                   " arow=%ld..%ld)\n",
