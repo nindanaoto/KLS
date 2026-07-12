@@ -2788,10 +2788,12 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
     goto done;
   }
   for (UF_long k = 0; k < n; ++k) {
-    const int32_t *li =
-      (const int32_t *)(lu + solver->numeric->Lip[k]);
-    const int32_t *ui =
-      (const int32_t *)(lu + solver->numeric->Uip[k]);
+    /* finished klu numerics store full-width Int indices (the int32
+       packing is only the pipe's intermediate publish format) */
+    const UF_long *li =
+      (const UF_long *)(lu + solver->numeric->Lip[k]);
+    const UF_long *ui =
+      (const UF_long *)(lu + solver->numeric->Uip[k]);
     for (UF_long pl = 0; pl < solver->numeric->Llen[k]; ++pl) {
       row_l[li[pl]]++;
     }
@@ -2840,7 +2842,31 @@ static void kls_row_symbolic_validate(kls_solver *solver) {
         goto done;
       }
       if (lc != row_l[i] || uc != row_u[i]) {
-        if (bad < 5) {
+        if (bad == 0 && n <= 64) {
+          fprintf(stderr,
+                  "KLS row-symbolic MISMATCH row %ld: L %ld vs %ld,"
+                  " U %ld vs %ld; mine U:", (long)i, (long)lc,
+                  (long)row_l[i], (long)uc, (long)row_u[i]);
+          for (UF_long d = rs.u_ptr[i]; d < rs.u_ptr[i + 1]; ++d) {
+            fprintf(stderr, " %ld", (long)rs.u_cols[d]);
+          }
+          fprintf(stderr, "; factor U row %ld:", (long)i);
+          for (UF_long k2 = 0; k2 < n; ++k2) {
+            const UF_long *ui2 =
+              (const UF_long *)(lu + solver->numeric->Uip[k2]);
+            for (UF_long pu2 = 0; pu2 < solver->numeric->Ulen[k2];
+                 ++pu2) {
+              if (ui2[pu2] == i) {
+                fprintf(stderr, " %ld", (long)k2);
+              }
+            }
+          }
+          fprintf(stderr, " %ld(diag); A row:", (long)i);
+          for (UF_long d = csr_ptr[i]; d < csr_ptr[i + 1]; ++d) {
+            fprintf(stderr, " %ld", (long)csr_col[d]);
+          }
+          fprintf(stderr, "\n");
+        } else if (bad < 5) {
           fprintf(stderr,
                   "KLS row-symbolic MISMATCH row %ld: L %ld vs %ld,"
                   " U %ld vs %ld\n", (long)i, (long)lc,
