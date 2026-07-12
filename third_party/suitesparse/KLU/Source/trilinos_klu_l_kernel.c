@@ -1565,6 +1565,18 @@ typedef struct kls_klu_pipe_shared_s
     _Atomic Int next_panel ;
     const Int *panel_start ;  /* npanels+1 offsets, or NULL */
     Int npanels ;
+    /* dense panel block registry (brick 4a of the batched-consume
+       program): the dense finalize retains its factored R x W block
+       so later consumers can batch a whole source panel as one
+       TRSM+GEMM instead of K scalar column streams.  blk_k0[c] = the
+       panel start for column c (or EMPTY); blocks are published with
+       release stores after the panel's last column publishes, so any
+       consumer that reads prefix > panel end sees the block. */
+    Entry * _Atomic *blk_a ;  /* per panel-start column: R x W values */
+    Int *blk_rows ;           /* R per panel-start column */
+    Int *blk_w ;              /* W per panel-start column */
+    Int * _Atomic *blk_rowids ; /* R global row ids (pivot-first) */
+    Int *blk_k0 ;             /* column -> owning panel start or EMPTY */
 } kls_klu_pipe_shared ;
 
 typedef struct kls_klu_pipe_worker_s
@@ -2908,11 +2920,34 @@ static int kls_pipe_panel_lockstep
 			    }
 			    free (inpat) ; free (pat) ; free (plen) ;
 			    free (tmpr) ; free (tmpx) ;
-			    free (A) ;
-			    free (rowids) ;
 			    if (aborted)
 			    {
+				free (A) ;
+				free (rowids) ;
 				return (1) ;
+			    }
+			    if (sh->blk_a != NULL)
+			    {
+				/* retain the factored block for batched
+				   consumers; publish after the panel's
+				   columns (the emit loop above already
+				   advanced the prefix past kend-1) */
+				Int q5 ;
+				for (q5 = 0 ; q5 < PW ; q5++)
+				{
+				    sh->blk_k0 [k0 + q5] = k0 ;
+				}
+				sh->blk_rows [k0] = R2 ;
+				sh->blk_w [k0] = PW ;
+				__atomic_store_n (&sh->blk_rowids [k0],
+						  rowids, __ATOMIC_RELEASE) ;
+				__atomic_store_n (&sh->blk_a [k0], A,
+						  __ATOMIC_RELEASE) ;
+			    }
+			    else
+			    {
+				free (A) ;
+				free (rowids) ;
 			    }
 			    S->Common->kls_dense_panels = 1 ;
 			    next_final = PW ;
@@ -3586,6 +3621,39 @@ size_t KLS_KLU_KERNEL_PIPE
     atomic_init (&sh.next_panel, 0) ;
     sh.panel_start = panel_start ;
     sh.npanels = npanels ;
+    sh.blk_a = NULL ;
+    sh.blk_rows = NULL ;
+    sh.blk_w = NULL ;
+    sh.blk_rowids = NULL ;
+    sh.blk_k0 = NULL ;
+    if (panel_start != NULL && kls_pipe_dense_panels &&
+	getenv ("KLS_KLU_PIPE_BLOCKS") != NULL)
+    {
+	sh.blk_a = (Entry * _Atomic *) calloc ((size_t) n,
+					       sizeof (Entry *)) ;
+	sh.blk_rows = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+	sh.blk_w = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+	sh.blk_rowids = (Int * _Atomic *) calloc ((size_t) n,
+						  sizeof (Int *)) ;
+	sh.blk_k0 = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	if (sh.blk_a == NULL || sh.blk_rows == NULL || sh.blk_w == NULL ||
+	    sh.blk_rowids == NULL || sh.blk_k0 == NULL)
+	{
+	    free ((void *) sh.blk_a) ; sh.blk_a = NULL ;
+	    free (sh.blk_rows) ; sh.blk_rows = NULL ;
+	    free (sh.blk_w) ; sh.blk_w = NULL ;
+	    free ((void *) sh.blk_rowids) ; sh.blk_rowids = NULL ;
+	    free (sh.blk_k0) ; sh.blk_k0 = NULL ;
+	}
+	else
+	{
+	    Int q5 ;
+	    for (q5 = 0 ; q5 < n ; q5++)
+	    {
+		sh.blk_k0 [q5] = TRILINOS_KLU_EMPTY ;
+	    }
+	}
+    }
     sh.n = n ;
     sh.nthreads = nthreads ;
     sh.lpend = NULL ;
@@ -3598,7 +3666,24 @@ size_t KLS_KLU_KERNEL_PIPE
 						 sizeof (unsigned)) ;
 	if (sh.lpend == NULL || sh.colver == NULL)
 	{
-	    free ((void *) sh.lpend) ;
+	    if (sh.blk_a != NULL)
+    {
+	Int q6 ;
+	for (q6 = 0 ; q6 < n ; q6++)
+	{
+	    Entry *ba = __atomic_load_n (&sh.blk_a [q6], __ATOMIC_ACQUIRE) ;
+	    Int *br = __atomic_load_n (&sh.blk_rowids [q6],
+				       __ATOMIC_ACQUIRE) ;
+	    free (ba) ;
+	    free (br) ;
+	}
+    }
+    free ((void *) sh.blk_a) ;
+    free (sh.blk_rows) ;
+    free (sh.blk_w) ;
+    free ((void *) sh.blk_rowids) ;
+    free (sh.blk_k0) ;
+    free ((void *) sh.lpend) ;
     free (panel_start) ;
 	    free ((void *) sh.colver) ;
 	    sh.lpend = NULL ;
@@ -3907,6 +3992,24 @@ size_t col_cap = (size_t) n / 4 + 16 ;
 	    free (workers [t].pRowList) ;
 	}
 	}
+	if (sh.blk_a != NULL)
+	{
+	    Int q6 ;
+	    for (q6 = 0 ; q6 < n ; q6++)
+	    {
+		Entry *ba = __atomic_load_n (&sh.blk_a [q6],
+					     __ATOMIC_ACQUIRE) ;
+		Int *br = __atomic_load_n (&sh.blk_rowids [q6],
+					   __ATOMIC_ACQUIRE) ;
+		free (ba) ;
+		free (br) ;
+	    }
+	}
+	free ((void *) sh.blk_a) ;
+	free (sh.blk_rows) ;
+	free (sh.blk_w) ;
+	free ((void *) sh.blk_rowids) ;
+	free (sh.blk_k0) ;
 	free ((void *) sh.lpend) ;
     free (panel_start) ;
 	free ((void *) sh.colver) ;
