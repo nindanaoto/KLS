@@ -2650,6 +2650,221 @@ static void kls_dbg_check_numeric(const kls_solver *solver, const char *where) {
   }
 }
 
+
+/* ==== row-first first-factor assembly, component 1: row symbolic ====
+   Up-looking row symbolic (CKTSO Alg.1 line 2): the pattern of row i
+   of L (columns < i) is the reach of A(i, :)'s sub-diagonal columns
+   over the U-rows-so-far graph: an edge j -> k exists when U(j, k) is
+   structurally nonzero (k > j).  Mirrors column Gilbert-Peierls with
+   rows and columns exchanged.  Validation contract: replaying a
+   completed pivoted factor's column order must reproduce its exact
+   per-row L/U counts (kls_row_symbolic_validate, env
+   KLS_VALIDATE_ROW_SYMBOLIC, n <= 4096). */
+typedef struct kls_row_symbolic_s {
+  UF_long n;
+  const UF_long *csr_ptr;   /* CSR of the permuted matrix */
+  const UF_long *csr_col;
+  UF_long *u_ptr;           /* growing U rows, row-major */
+  UF_long *u_cols;
+  size_t u_cap;
+  UF_long u_len;
+  UF_long *mark;            /* per-row DFS marks (row id + 1) */
+  UF_long *stack;           /* DFS stack */
+  UF_long *pattern;         /* row i's collected L pattern */
+} kls_row_symbolic;
+
+static int kls_row_symbolic_row(kls_row_symbolic *rs,
+                                UF_long i,
+                                UF_long *l_count_out,
+                                UF_long *u_count_out) {
+  /* DFS from each sub-diagonal column of row i of A; the reach over
+     U rows gives L(i, :)'s pattern; unreached columns >= i in A(i,:)
+     plus fill columns >= i from reached rows' U parts form U(i, :). */
+  const UF_long mark_tag = i + 1;
+  UF_long l_count = 0;
+  UF_long top = 0;
+  for (UF_long p = rs->csr_ptr[i]; p < rs->csr_ptr[i + 1]; ++p) {
+    const UF_long c0 = rs->csr_col[p];
+    if (rs->mark[c0] == mark_tag) {
+      continue;
+    }
+    rs->mark[c0] = mark_tag;
+    if (c0 >= i) {
+      continue;             /* diagonal/U seed: marked, not traversed */
+    }
+    /* iterative DFS over U-row edges c -> k (k > c) */
+    rs->stack[top++] = c0;
+    while (top > 0) {
+      const UF_long c = rs->stack[--top];
+      rs->pattern[l_count++] = c;
+      for (UF_long q = rs->u_ptr[c]; q < rs->u_ptr[c + 1]; ++q) {
+        const UF_long k = rs->u_cols[q];
+        if (rs->mark[k] == mark_tag) {
+          continue;
+        }
+        rs->mark[k] = mark_tag;
+        if (k < i) {
+          rs->stack[top++] = k;
+        }
+      }
+    }
+  }
+  /* U(i, :) = every marked column >= i; emit into the growing rows.
+     Count by scanning the marks via the collected sources' U rows +
+     the A seeds (all marked above).  For counting-only validation we
+     re-walk: A(i,:) seeds >= i plus U(c, :) entries >= i for each
+     collected c, deduped by the same marks - second tag pass. */
+  {
+    const UF_long utag = -(i + 2);
+    UF_long u_count = 0;
+    if (rs->u_len + rs->n > (UF_long)rs->u_cap) {
+      return 0;             /* caller grows; validation sizes amply */
+    }
+    rs->u_ptr[i] = rs->u_len;
+    for (UF_long p = rs->csr_ptr[i]; p < rs->csr_ptr[i + 1]; ++p) {
+      const UF_long c = rs->csr_col[p];
+      if (c >= i && rs->mark[c] != utag) {
+        rs->mark[c] = utag;
+        rs->u_cols[rs->u_len++] = c;
+        u_count++;
+      }
+    }
+    for (UF_long t = 0; t < l_count; ++t) {
+      const UF_long c = rs->pattern[t];
+      for (UF_long q = rs->u_ptr[c]; q < rs->u_ptr[c + 1]; ++q) {
+        const UF_long k = rs->u_cols[q];
+        if (k >= i && rs->mark[k] != utag) {
+          rs->mark[k] = utag;
+          rs->u_cols[rs->u_len++] = k;
+          u_count++;
+        }
+      }
+    }
+    rs->u_ptr[i + 1] = rs->u_len;
+    *l_count_out = l_count;
+    *u_count_out = u_count;   /* includes the diagonal */
+  }
+  return 1;
+}
+
+
+/* Validation: replay a completed single-block factor's coordinates
+   through the row symbolic; per-row L/U counts must equal the
+   factored structure exactly (reach is exact; pruning affects search
+   order, not patterns).  Env KLS_VALIDATE_ROW_SYMBOLIC, n <= 4096. */
+static void kls_row_symbolic_validate(kls_solver *solver) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->symbolic == NULL || solver->n > 4096 ||
+      solver->symbolic->nblocks != 1 ||
+      getenv("KLS_VALIDATE_ROW_SYMBOLIC") == NULL) {
+    return;
+  }
+  const UF_long n = solver->n;
+  const UF_long *q = solver->symbolic->Q;
+  const UF_long *pinv = solver->numeric->Pinv;
+  const double *lu = (const double *)solver->numeric->LUbx[0];
+  if (lu == NULL) {
+    return;
+  }
+  /* factored per-row counts from the packed column storage */
+  UF_long *row_l = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+  UF_long *row_u = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+  /* permuted-pattern CSR */
+  UF_long *csr_ptr = (UF_long *)calloc((size_t)n + 1, sizeof(UF_long));
+  UF_long *csr_col = (UF_long *)malloc((size_t)solver->nnz *
+                                       sizeof(UF_long));
+  kls_row_symbolic rs;
+  memset(&rs, 0, sizeof(rs));
+  rs.n = n;
+  rs.u_cap = (size_t)(solver->numeric->unz + n + 1) * 2u + (size_t)n;
+  rs.u_ptr = (UF_long *)malloc(((size_t)n + 1) * sizeof(UF_long));
+  rs.u_cols = (UF_long *)malloc(rs.u_cap * sizeof(UF_long));
+  rs.mark = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+  rs.stack = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  rs.pattern = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  if (row_l == NULL || row_u == NULL || csr_ptr == NULL ||
+      csr_col == NULL || rs.u_ptr == NULL || rs.u_cols == NULL ||
+      rs.mark == NULL || rs.stack == NULL || rs.pattern == NULL) {
+    goto done;
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    const int32_t *li =
+      (const int32_t *)(lu + solver->numeric->Lip[k]);
+    const int32_t *ui =
+      (const int32_t *)(lu + solver->numeric->Uip[k]);
+    for (UF_long pl = 0; pl < solver->numeric->Llen[k]; ++pl) {
+      row_l[li[pl]]++;
+    }
+    for (UF_long pu = 0; pu < solver->numeric->Ulen[k]; ++pu) {
+      row_u[ui[pu]]++;
+    }
+    row_u[k]++; /* diagonal */
+  }
+  {
+    UF_long fill = 0;
+    for (UF_long k = 0; k < n; ++k) {
+      const UF_long oldcol = q[k];
+      for (UF_long pp = solver->col_ptr[oldcol];
+           pp < solver->col_ptr[oldcol + 1]; ++pp) {
+        csr_ptr[pinv[solver->row_idx[pp]] + 1]++;
+        fill++;
+      }
+    }
+    for (UF_long r2 = 0; r2 < n; ++r2) {
+      csr_ptr[r2 + 1] += csr_ptr[r2];
+    }
+    UF_long *cur = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+    if (cur == NULL) {
+      goto done;
+    }
+    memcpy(cur, csr_ptr, (size_t)n * sizeof(UF_long));
+    for (UF_long k = 0; k < n; ++k) {
+      const UF_long oldcol = q[k];
+      for (UF_long pp = solver->col_ptr[oldcol];
+           pp < solver->col_ptr[oldcol + 1]; ++pp) {
+        csr_col[cur[pinv[solver->row_idx[pp]]]++] = k;
+      }
+    }
+    free(cur);
+    (void)fill;
+  }
+  rs.csr_ptr = csr_ptr;
+  rs.csr_col = csr_col;
+  {
+    UF_long bad = 0;
+    for (UF_long i = 0; i < n; ++i) {
+      UF_long lc = 0, uc = 0;
+      if (!kls_row_symbolic_row(&rs, i, &lc, &uc)) {
+        fprintf(stderr, "KLS row-symbolic: capacity at row %ld\n",
+                (long)i);
+        goto done;
+      }
+      if (lc != row_l[i] || uc != row_u[i]) {
+        if (bad < 5) {
+          fprintf(stderr,
+                  "KLS row-symbolic MISMATCH row %ld: L %ld vs %ld,"
+                  " U %ld vs %ld\n", (long)i, (long)lc,
+                  (long)row_l[i], (long)uc, (long)row_u[i]);
+        }
+        bad++;
+      }
+    }
+    fprintf(stderr, "KLS row-symbolic validate: n=%ld mismatches=%ld"
+            " (u fill %ld vs unz %ld)\n", (long)n, (long)bad,
+            (long)rs.u_len, (long)(solver->numeric->unz));
+  }
+done:
+  free(row_l);
+  free(row_u);
+  free(csr_ptr);
+  free(csr_col);
+  free(rs.u_ptr);
+  free(rs.u_cols);
+  free(rs.mark);
+  free(rs.stack);
+  free(rs.pattern);
+}
+
 static double kls_now_seconds(void) {
   /* KLS_FAKE_CLOCK: deterministic counter clock for flushing out
      timing-gated decisions that change results (task #21).  Timing
@@ -124589,6 +124804,7 @@ int kls_factor(kls_solver *solver, const double *values) {
                                                           : KLS_ERR_FACTOR_FAILED;
   }
   kls_update_numeric_diagnostics(solver, 1);
+  kls_row_symbolic_validate(solver);
   KLS_ENTRY_PHASE("diag_full")
   int diagnostics_have_flops = 1;
   int diagnostics_have_rcond = 1;
