@@ -122424,8 +122424,8 @@ static int kls_try_first_factor_with_pivoted_blocks(kls_solver *solver,
   /* tiny systems: growth reallocs cost more than the memory (rajat03:
      the 4.3ms serial factor pays mid-factor LU grows; 3x of a <1MB
      estimate is free) */
-  if (solver->n > 0 && solver->n <= 32768 && common->initmem_amd < 3.0) {
-    common->initmem_amd = 3.0;
+  if (solver->n > 0 && solver->n <= 32768 && common->initmem_amd < 1.5) {
+    common->initmem_amd = 1.5;
   }
   common->initmem = common->initmem > 1.0 ? common->initmem : 1.0;
   common->tol = common->tol < 1.0 ? common->tol : 1.0;
