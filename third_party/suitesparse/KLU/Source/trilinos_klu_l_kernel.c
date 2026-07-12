@@ -3901,6 +3901,199 @@ Int KLS_SN_PANEL_FACTOR
 
 /* Pipelined factorization entry: same contract as TRILINOS_KLU_kernel.
  * On any worker abort (singular, OOM) the caller retries serially. */
+typedef struct
+{
+    kls_klu_pipe_worker *W_self ;
+    const KLS_KLU_KERNEL_STATE *Stemplate ;
+    kls_klu_pipe_shared *sh ;
+    Int n ;
+    const Int *panel_start ;
+    Int npanels ;
+    int t ;
+    int failed ;
+    pthread_t th ;
+} kls_pipe_setup_job ;
+
+static void *kls_pipe_setup_one (void *arg)
+{
+    kls_pipe_setup_job *job = (kls_pipe_setup_job *) arg ;
+    const Int n = job->n ;
+	kls_klu_pipe_worker *W = job->W_self ;
+	W->S = *job->Stemplate ;
+	W->sh = job->sh ;
+	W->tid = job->t ;
+	W->S.chunk_head = NULL ;
+	W->S.chunk_used = 0 ;
+	W->S.chunk_size = 0 ;
+	W->S.lnz = 0 ;
+	W->S.unz = 0 ;
+	W->S.firstrow = 0 ;
+	W->ubuf_i = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	W->ubuf_x = (Entry *) malloc ((size_t) n * sizeof (Entry)) ;
+	W->ap_ver = (unsigned *) malloc ((size_t) n * sizeof (unsigned)) ;
+	W->copybuf = job->sh->lpend != NULL
+	    ? (Unit *) malloc ((2 * (size_t) n + 4) * sizeof (Unit))
+	    : NULL ;
+	W->t_work = 0 ; W->t_spin = 0 ; W->t_final = 0 ;
+	W->n_cols = 0 ; W->n_rounds = 0 ;
+	W->kflops = 0.0 ;
+	/* panel-mode workspace: width capped by a ~128MB/worker budget;
+	   slot 0 aliases the worker's own X/ubuf/scratch pattern space */
+	{
+	    Int w, wcap = 1 ;
+	    memset (W->pX, 0, sizeof (W->pX)) ;
+	    memset (W->pLik, 0, sizeof (W->pLik)) ;
+	    memset (W->pUbuf_i, 0, sizeof (W->pUbuf_i)) ;
+	    memset (W->pUbuf_x, 0, sizeof (W->pUbuf_x)) ;
+	    memset (W->pFlagW, 0, sizeof (W->pFlagW)) ;
+	    W->pPFlag = NULL ;
+	    W->pUlist = NULL ;
+	    W->pB = NULL ;
+	    W->pBcap = 0 ;
+	    W->pRowPos = NULL ;
+	    W->pRowGen = NULL ;
+	    W->pRowList = NULL ;
+	    W->pGen = 0 ;
+	    if (job->panel_start != NULL)
+	    {
+size_t col_cap = (size_t) n / 4 + 16 ;
+		size_t per_col = (size_t) n * sizeof (Entry) +
+		    col_cap * (sizeof (Entry) + 2 * sizeof (Int)) ;
+		size_t budget = (size_t) 128 << 20 ;
+		{
+		    const char *be = getenv ("KLS_KLU_PIPE_BUDGET_MB") ;
+		    if (be != NULL && be [0] != '\0')
+		    {
+			long bm = atol (be) ;
+			if (bm >= 64 && bm <= 4096)
+			{
+			    budget = (size_t) bm << 20 ;
+			}
+		    }
+		}
+		wcap = (Int) (budget / (per_col > 0 ? per_col : 1)) ;
+		if (wcap > 32) wcap = 32 ;
+		if (wcap < 1) wcap = 1 ;
+		for (w = 0 ; w < wcap ; w++)
+		{
+		    if (w > 0)
+		    {
+			W->pX [w] = (Entry *) calloc ((size_t) n,
+						      sizeof (Entry)) ;
+			W->pLik [w] = (Int *) malloc (col_cap *
+						      sizeof (Int)) ;
+			W->pUbuf_i [w] = (Int *) malloc (col_cap *
+							 sizeof (Int)) ;
+			W->pUbuf_x [w] = (Entry *) malloc (col_cap *
+							   sizeof (Entry)) ;
+			if (W->pX [w] == NULL || W->pLik [w] == NULL ||
+			    W->pUbuf_i [w] == NULL ||
+			    W->pUbuf_x [w] == NULL)
+			{
+			    wcap = w ;
+			    break ;
+			}
+		    }
+		    W->pFlagW [w] = (Int *) malloc ((size_t) n *
+						    sizeof (Int)) ;
+		    if (W->pFlagW [w] == NULL)
+		    {
+			wcap = w > 0 ? w : 1 ;
+			break ;
+		    }
+		    {
+			Int q3 ;
+			for (q3 = 0 ; q3 < n ; q3++)
+			{
+			    W->pFlagW [w][q3] = TRILINOS_KLU_EMPTY ;
+			}
+		    }
+		}
+		W->pPFlag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		W->pUlist = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		W->pColCap = (Int) col_cap ;
+		if (getenv ("KLS_KLU_PIPE_NOBUF") == NULL)
+		{
+		    W->pBcap = 4096 ;
+		    W->pB = (Entry *) malloc (W->pBcap * (size_t) wcap *
+					      sizeof (Entry)) ;
+		    W->pRowPos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		    W->pRowGen = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+		    W->pRowList = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+		    W->pGen = 1 ;   /* calloc'd generations are 0 */
+		    if (W->pB == NULL || W->pRowPos == NULL ||
+			W->pRowGen == NULL || W->pRowList == NULL)
+		    {
+			free (W->pB) ; W->pB = NULL ;
+			free (W->pRowPos) ; W->pRowPos = NULL ;
+			free (W->pRowGen) ; W->pRowGen = NULL ;
+			free (W->pRowList) ; W->pRowList = NULL ;
+		    }
+		}
+		if (W->pUlist == NULL)
+		{
+		    free (W->pPFlag) ;
+		    W->pPFlag = NULL ;
+		}
+		if (W->pPFlag != NULL)
+		{
+		    Int q2 ;
+		    for (q2 = 0 ; q2 < n ; q2++)
+		    {
+			W->pPFlag [q2] = TRILINOS_KLU_EMPTY ;
+		    }
+		}
+		else
+		{
+		    wcap = 1 ;
+		}
+	    }
+	    W->pW = wcap ;
+	    if (job->t == 0 && job->panel_start != NULL &&
+		getenv ("KLS_KLU_PIPE_PROF") != NULL)
+	    {
+		Int fb = 0, pp ;
+		for (pp = 0 ; pp < job->npanels ; pp++)
+		{
+		    if (job->panel_start [pp+1] - job->panel_start [pp] > wcap) fb++ ;
+		}
+		fprintf (stderr, "KLS pipe pW=%ld fallback_panels=%ld/%ld"
+			 " buf=%d\n", (long) wcap, (long) fb,
+			 (long) job->npanels, W->pB != NULL) ;
+	    }
+	}
+	if (W->ubuf_i == NULL || W->ubuf_x == NULL || W->ap_ver == NULL ||
+	    (job->sh->lpend != NULL && W->copybuf == NULL))
+	{
+	    job->failed = 1 ;
+	}
+	if (job->t > 0 && !job->failed)
+	{
+	    Int q ;
+	    W->S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) *
+					    sizeof (Unit)) ;
+	    W->S.X = (Entry *) malloc ((size_t) n * sizeof (Entry)) ;
+	    W->S.Stack = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	    W->S.Flag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	    W->S.Ap_pos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+	    if (W->S.scratch == NULL || W->S.X == NULL ||
+		W->S.Stack == NULL || W->S.Flag == NULL ||
+		W->S.Ap_pos == NULL)
+	    {
+		job->failed = 1 ;
+	    }
+	    else
+	    {
+		for (q = 0 ; q < n ; q++)
+		{
+		    CLEAR (W->S.X [q]) ;
+		    W->S.Flag [q] = TRILINOS_KLU_EMPTY ;
+		}
+	    }
+	}
+    return (NULL) ;
+}
+
 size_t KLS_KLU_KERNEL_PIPE
 (
     Int n, Int Ap [ ], Int Ai [ ], Entry Ax [ ], Int Q [ ], size_t lusize,
@@ -4223,179 +4416,48 @@ size_t KLS_KLU_KERNEL_PIPE
 	}
     }
 
-    for (t = 0 ; t < nthreads ; t++)
     {
-	kls_klu_pipe_worker *W = &workers [t] ;
-	W->S = S ;
-	W->sh = &sh ;
-	W->tid = t ;
-	W->S.chunk_head = NULL ;
-	W->S.chunk_used = 0 ;
-	W->S.chunk_size = 0 ;
-	W->S.lnz = 0 ;
-	W->S.unz = 0 ;
-	W->S.firstrow = 0 ;
-	W->ubuf_i = (Int *) malloc ((size_t) n * sizeof (Int)) ;
-	W->ubuf_x = (Entry *) malloc ((size_t) n * sizeof (Entry)) ;
-	W->ap_ver = (unsigned *) malloc ((size_t) n * sizeof (unsigned)) ;
-	W->copybuf = sh.lpend != NULL
-	    ? (Unit *) malloc ((2 * (size_t) n + 4) * sizeof (Unit))
-	    : NULL ;
-	W->t_work = 0 ; W->t_spin = 0 ; W->t_final = 0 ;
-	W->n_cols = 0 ; W->n_rounds = 0 ;
-	W->kflops = 0.0 ;
-	/* panel-mode workspace: width capped by a ~128MB/worker budget;
-	   slot 0 aliases the worker's own X/ubuf/scratch pattern space */
+	/* per-worker setup is independent and page-touches ~70MB each
+	   (panel accumulators): run it on the workers' own threads
+	   (mac: 0.16s serial -> ~0.03s) */
+	kls_pipe_setup_job sjobs [16] ;
+	for (t = 0 ; t < nthreads ; t++)
 	{
-	    Int w, wcap = 1 ;
-	    memset (W->pX, 0, sizeof (W->pX)) ;
-	    memset (W->pLik, 0, sizeof (W->pLik)) ;
-	    memset (W->pUbuf_i, 0, sizeof (W->pUbuf_i)) ;
-	    memset (W->pUbuf_x, 0, sizeof (W->pUbuf_x)) ;
-	    memset (W->pFlagW, 0, sizeof (W->pFlagW)) ;
-	    W->pPFlag = NULL ;
-	    W->pUlist = NULL ;
-	    W->pB = NULL ;
-	    W->pBcap = 0 ;
-	    W->pRowPos = NULL ;
-	    W->pRowGen = NULL ;
-	    W->pRowList = NULL ;
-	    W->pGen = 0 ;
-	    if (panel_start != NULL)
+	    sjobs [t].W_self = &workers [t] ;
+	    sjobs [t].Stemplate = &S ;
+	    sjobs [t].sh = &sh ;
+	    sjobs [t].n = n ;
+	    sjobs [t].panel_start = panel_start ;
+	    sjobs [t].npanels = npanels ;
+	    sjobs [t].t = t ;
+	    sjobs [t].failed = 0 ;
+	}
+	for (t = 1 ; t < nthreads ; t++)
+	{
+	    if (pthread_create (&sjobs [t].th, NULL, kls_pipe_setup_one,
+				&sjobs [t]) != 0)
 	    {
-size_t col_cap = (size_t) n / 4 + 16 ;
-		size_t per_col = (size_t) n * sizeof (Entry) +
-		    col_cap * (sizeof (Entry) + 2 * sizeof (Int)) ;
-		size_t budget = (size_t) 128 << 20 ;
-		{
-		    const char *be = getenv ("KLS_KLU_PIPE_BUDGET_MB") ;
-		    if (be != NULL && be [0] != '\0')
-		    {
-			long bm = atol (be) ;
-			if (bm >= 64 && bm <= 4096)
-			{
-			    budget = (size_t) bm << 20 ;
-			}
-		    }
-		}
-		wcap = (Int) (budget / (per_col > 0 ? per_col : 1)) ;
-		if (wcap > 32) wcap = 32 ;
-		if (wcap < 1) wcap = 1 ;
-		for (w = 0 ; w < wcap ; w++)
-		{
-		    if (w > 0)
-		    {
-			W->pX [w] = (Entry *) calloc ((size_t) n,
-						      sizeof (Entry)) ;
-			W->pLik [w] = (Int *) malloc (col_cap *
-						      sizeof (Int)) ;
-			W->pUbuf_i [w] = (Int *) malloc (col_cap *
-							 sizeof (Int)) ;
-			W->pUbuf_x [w] = (Entry *) malloc (col_cap *
-							   sizeof (Entry)) ;
-			if (W->pX [w] == NULL || W->pLik [w] == NULL ||
-			    W->pUbuf_i [w] == NULL ||
-			    W->pUbuf_x [w] == NULL)
-			{
-			    wcap = w ;
-			    break ;
-			}
-		    }
-		    W->pFlagW [w] = (Int *) malloc ((size_t) n *
-						    sizeof (Int)) ;
-		    if (W->pFlagW [w] == NULL)
-		    {
-			wcap = w > 0 ? w : 1 ;
-			break ;
-		    }
-		    {
-			Int q3 ;
-			for (q3 = 0 ; q3 < n ; q3++)
-			{
-			    W->pFlagW [w][q3] = TRILINOS_KLU_EMPTY ;
-			}
-		    }
-		}
-		W->pPFlag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
-		W->pUlist = (Int *) malloc ((size_t) n * sizeof (Int)) ;
-		W->pColCap = (Int) col_cap ;
-		if (getenv ("KLS_KLU_PIPE_NOBUF") == NULL)
-		{
-		    W->pBcap = 4096 ;
-		    W->pB = (Entry *) malloc (W->pBcap * (size_t) wcap *
-					      sizeof (Entry)) ;
-		    W->pRowPos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
-		    W->pRowGen = (Int *) calloc ((size_t) n, sizeof (Int)) ;
-		    W->pRowList = (Int *) malloc ((size_t) n * sizeof (Int)) ;
-		    W->pGen = 1 ;   /* calloc'd generations are 0 */
-		    if (W->pB == NULL || W->pRowPos == NULL ||
-			W->pRowGen == NULL || W->pRowList == NULL)
-		    {
-			free (W->pB) ; W->pB = NULL ;
-			free (W->pRowPos) ; W->pRowPos = NULL ;
-			free (W->pRowGen) ; W->pRowGen = NULL ;
-			free (W->pRowList) ; W->pRowList = NULL ;
-		    }
-		}
-		if (W->pUlist == NULL)
-		{
-		    free (W->pPFlag) ;
-		    W->pPFlag = NULL ;
-		}
-		if (W->pPFlag != NULL)
-		{
-		    Int q2 ;
-		    for (q2 = 0 ; q2 < n ; q2++)
-		    {
-			W->pPFlag [q2] = TRILINOS_KLU_EMPTY ;
-		    }
-		}
-		else
-		{
-		    wcap = 1 ;
-		}
-	    }
-	    W->pW = wcap ;
-	    if (t == 0 && panel_start != NULL &&
-		getenv ("KLS_KLU_PIPE_PROF") != NULL)
-	    {
-		Int fb = 0, pp ;
-		for (pp = 0 ; pp < npanels ; pp++)
-		{
-		    if (panel_start [pp+1] - panel_start [pp] > wcap) fb++ ;
-		}
-		fprintf (stderr, "KLS pipe pW=%ld fallback_panels=%ld/%ld"
-			 " buf=%d\n", (long) wcap, (long) fb,
-			 (long) npanels, W->pB != NULL) ;
+		sjobs [t].failed = 2 ;   /* not spawned: run inline */
 	    }
 	}
-	if (W->ubuf_i == NULL || W->ubuf_x == NULL || W->ap_ver == NULL ||
-	    (sh.lpend != NULL && W->copybuf == NULL))
+	kls_pipe_setup_one (&sjobs [0]) ;
+	for (t = 1 ; t < nthreads ; t++)
 	{
-	    spawn_failed = 1 ;
-	}
-	if (t > 0 && !spawn_failed)
-	{
-	    Int q ;
-	    W->S.scratch = (Unit *) malloc ((2 * (size_t) n + 4) *
-					    sizeof (Unit)) ;
-	    W->S.X = (Entry *) malloc ((size_t) n * sizeof (Entry)) ;
-	    W->S.Stack = (Int *) malloc ((size_t) n * sizeof (Int)) ;
-	    W->S.Flag = (Int *) malloc ((size_t) n * sizeof (Int)) ;
-	    W->S.Ap_pos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
-	    if (W->S.scratch == NULL || W->S.X == NULL ||
-		W->S.Stack == NULL || W->S.Flag == NULL ||
-		W->S.Ap_pos == NULL)
+	    if (sjobs [t].failed == 2)
 	    {
-		spawn_failed = 1 ;
+		sjobs [t].failed = 0 ;
+		kls_pipe_setup_one (&sjobs [t]) ;
 	    }
 	    else
 	    {
-		for (q = 0 ; q < n ; q++)
-		{
-		    CLEAR (W->S.X [q]) ;
-		    W->S.Flag [q] = TRILINOS_KLU_EMPTY ;
-		}
+		pthread_join (sjobs [t].th, NULL) ;
+	    }
+	}
+	for (t = 0 ; t < nthreads ; t++)
+	{
+	    if (sjobs [t].failed)
+	    {
+		spawn_failed = 1 ;
 	    }
 	}
     }
