@@ -3333,6 +3333,274 @@ static UF_long *kls_rowmt_etree(UF_long n, const UF_long *bp,
   return parent;
 }
 
+/* Parallel CHOLSYM build: subtree walks are per-row independent
+   given parent[]; U transpose via per-thread count matrices (no
+   atomics, deterministic span layout). */
+typedef struct {
+  UF_long n;
+  const UF_long *bp, *bc, *tp, *tc, *parent;
+  UF_long *l_start, *l_cnt, *l_steps;
+  UF_long *u_start, *u_cnt, *u_cols;
+  UF_long **u_local;          /* [t][st] count then cursor */
+  int nthreads;
+  int phase;                  /* 1 count, 2 emit, 3 u-emit */
+  UF_long chunk;
+  UF_long bound[65];          /* fill-balanced row ranges (ph 2/3) */
+} kls_cholpar;
+
+typedef struct {
+  kls_cholpar *sh;
+  int tid;
+  UF_long *mark;
+} kls_cholpar_worker;
+
+static void *kls_cholpar_main(void *arg) {
+  kls_cholpar_worker *w = (kls_cholpar_worker *)arg;
+  kls_cholpar *sh = w->sh;
+  const UF_long n = sh->n;
+  UF_long r0, r1;
+  if (sh->phase == 1) {
+    r0 = (UF_long)w->tid * sh->chunk;
+    r1 = r0 + sh->chunk;
+    if (r1 > n) {
+      r1 = n;
+    }
+  } else {
+    r0 = sh->bound[w->tid];
+    r1 = sh->bound[w->tid + 1];
+  }
+  if (sh->phase == 1) {
+    for (UF_long i = r0; i < r1; ++i) {
+      const UF_long tag = i + 1;
+      UF_long cnt = 0;
+      for (int dir = 0; dir < 2; ++dir) {
+        const UF_long *ptr = dir == 0 ? sh->bp : sh->tp;
+        const UF_long *col = dir == 0 ? sh->bc : sh->tc;
+        for (UF_long p = ptr[i]; p < ptr[i + 1]; ++p) {
+          UF_long k = col[p];
+          while (k < i && w->mark[k] != tag) {
+            w->mark[k] = tag;
+            cnt++;
+            k = sh->parent[k];
+          }
+        }
+      }
+      sh->l_cnt[i] = cnt;
+    }
+  } else if (sh->phase == 2) {
+    UF_long *ucl = sh->u_local[w->tid];
+    for (UF_long i = r0; i < r1; ++i) {
+      const UF_long tag = n + i + 1;   /* disjoint from phase 1 */
+      UF_long wp = sh->l_start[i];
+      const UF_long s0 = wp;
+      for (int dir = 0; dir < 2; ++dir) {
+        const UF_long *ptr = dir == 0 ? sh->bp : sh->tp;
+        const UF_long *col = dir == 0 ? sh->bc : sh->tc;
+        for (UF_long p = ptr[i]; p < ptr[i + 1]; ++p) {
+          UF_long k = col[p];
+          while (k < i && w->mark[k] != tag) {
+            w->mark[k] = tag;
+            sh->l_steps[wp++] = k;
+            k = sh->parent[k];
+          }
+        }
+      }
+      for (UF_long a3 = s0 + 1; a3 < wp; ++a3) {
+        const UF_long v = sh->l_steps[a3];
+        UF_long b3 = a3;
+        while (b3 > s0 && sh->l_steps[b3 - 1] > v) {
+          sh->l_steps[b3] = sh->l_steps[b3 - 1];
+          b3--;
+        }
+        sh->l_steps[b3] = v;
+      }
+      for (UF_long q = s0; q < wp; ++q) {
+        ucl[sh->l_steps[q]]++;
+      }
+    }
+  } else {
+    UF_long *cur = sh->u_local[w->tid];   /* converted to cursors */
+    for (UF_long i = r0; i < r1; ++i) {
+      sh->u_cols[sh->u_start[i]] = i;     /* diagonal */
+      for (UF_long q = sh->l_start[i];
+           q < sh->l_start[i] + sh->l_cnt[i]; ++q) {
+        const UF_long st = sh->l_steps[q];
+        sh->u_cols[cur[st]++] = i;
+      }
+    }
+  }
+  return NULL;
+}
+
+static void kls_cholpar_run(kls_cholpar *sh,
+                            kls_cholpar_worker *wk, int phase) {
+  pthread_t th[64];
+  sh->phase = phase;
+  for (int t = 1; t < sh->nthreads; ++t) {
+    pthread_create(&th[t], NULL, kls_cholpar_main, &wk[t]);
+  }
+  kls_cholpar_main(&wk[0]);
+  for (int t = 1; t < sh->nthreads; ++t) {
+    pthread_join(th[t], NULL);
+  }
+}
+
+static int kls_rowmt_cholsym_par(UF_long n, const UF_long *bp,
+                                 const UF_long *bc,
+                                 const UF_long *parent, int nt,
+                                 UF_long **lsp, UF_long **lcp,
+                                 UF_long **lst,
+                                 UF_long **usp, UF_long **ucp,
+                                 UF_long **uco,
+                                 size_t *lfill, size_t *ufill,
+                                 double *t_phase) {
+  if (nt < 1) {
+    nt = 1;
+  }
+  if (nt > 64) {
+    nt = 64;
+  }
+  const double p0 = kls_now_seconds();
+  UF_long *tp = (UF_long *)calloc((size_t)n + 1, sizeof(UF_long));
+  UF_long *tc = (UF_long *)malloc((size_t)bp[n] * sizeof(UF_long));
+  if (tp == NULL || tc == NULL) {
+    free(tp); free(tc);
+    return 0;
+  }
+  for (UF_long p = 0; p < bp[n]; ++p) {
+    tp[bc[p] + 1]++;
+  }
+  for (UF_long c = 0; c < n; ++c) {
+    tp[c + 1] += tp[c];
+  }
+  {
+    UF_long *cur = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+    if (cur == NULL) {
+      free(tp); free(tc);
+      return 0;
+    }
+    memcpy(cur, tp, (size_t)n * sizeof(UF_long));
+    for (UF_long r = 0; r < n; ++r) {
+      for (UF_long p = bp[r]; p < bp[r + 1]; ++p) {
+        tc[cur[bc[p]]++] = r;
+      }
+    }
+    free(cur);
+  }
+  kls_cholpar sh;
+  memset(&sh, 0, sizeof(sh));
+  sh.n = n;
+  sh.bp = bp;
+  sh.bc = bc;
+  sh.tp = tp;
+  sh.tc = tc;
+  sh.parent = parent;
+  sh.nthreads = nt;
+  sh.chunk = (n + nt - 1) / nt;
+  sh.l_cnt = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+  sh.l_start = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  sh.u_cnt = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+  sh.u_start = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  kls_cholpar_worker wk[64];
+  memset(wk, 0, sizeof(wk));
+  UF_long *ulocal[64];
+  memset(ulocal, 0, sizeof(ulocal));
+  sh.u_local = ulocal;
+  int ok = sh.l_cnt != NULL && sh.l_start != NULL &&
+           sh.u_cnt != NULL && sh.u_start != NULL;
+  for (int t = 0; t < nt && ok; ++t) {
+    wk[t].sh = &sh;
+    wk[t].tid = t;
+    wk[t].mark = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+    ulocal[t] = (UF_long *)calloc((size_t)n, sizeof(UF_long));
+    ok = wk[t].mark != NULL && ulocal[t] != NULL;
+  }
+  const double p1 = kls_now_seconds();
+  size_t lf = 0, uf = 0;
+  if (ok) {
+    kls_cholpar_run(&sh, wk, 1);
+    for (UF_long i = 0; i < n; ++i) {
+      sh.l_start[i] = (UF_long)lf;
+      lf += (size_t)sh.l_cnt[i];
+    }
+    {
+      /* fill-balanced ranges for the emission phases */
+      sh.bound[0] = 0;
+      UF_long i2 = 0;
+      for (int t = 1; t < nt; ++t) {
+        const size_t target = lf * (size_t)t / (size_t)nt;
+        while (i2 < n && (size_t)sh.l_start[i2] < target) {
+          i2++;
+        }
+        sh.bound[t] = i2;
+      }
+      sh.bound[nt] = n;
+    }
+    sh.l_steps = (UF_long *)malloc((lf > 0 ? lf : 1) *
+                                   sizeof(UF_long));
+    ok = sh.l_steps != NULL;
+  }
+  const double p2 = kls_now_seconds();
+  if (ok) {
+    kls_cholpar_run(&sh, wk, 2);
+    /* u_cnt reduce + spans + per-thread cursors */
+    for (UF_long st = 0; st < n; ++st) {
+      UF_long c = 1;                     /* diagonal */
+      for (int t = 0; t < nt; ++t) {
+        c += ulocal[t][st];
+      }
+      sh.u_cnt[st] = c;
+    }
+    for (UF_long st = 0; st < n; ++st) {
+      sh.u_start[st] = (UF_long)uf;
+      uf += (size_t)sh.u_cnt[st];
+    }
+    /* thread t's cursor for st = start + 1 + sum of earlier threads;
+       convert counts to cursors in place (ascending t) */
+    for (UF_long st = 0; st < n; ++st) {
+      UF_long base = sh.u_start[st] + 1;
+      for (int t = 0; t < nt; ++t) {
+        const UF_long c = ulocal[t][st];
+        ulocal[t][st] = base;
+        base += c;
+      }
+    }
+    sh.u_cols = (UF_long *)malloc((uf > 0 ? uf : 1) *
+                                  sizeof(UF_long));
+    ok = sh.u_cols != NULL;
+  }
+  const double p3 = kls_now_seconds();
+  if (ok) {
+    kls_cholpar_run(&sh, wk, 3);
+  }
+  const double p4 = kls_now_seconds();
+  for (int t = 0; t < nt; ++t) {
+    free(wk[t].mark);
+    free(ulocal[t]);
+  }
+  free(tp); free(tc);
+  if (!ok) {
+    free(sh.l_cnt); free(sh.l_start); free(sh.l_steps);
+    free(sh.u_cnt); free(sh.u_start); free(sh.u_cols);
+    return 0;
+  }
+  *lsp = sh.l_start;
+  *lcp = sh.l_cnt;
+  *lst = sh.l_steps;
+  *usp = sh.u_start;
+  *ucp = sh.u_cnt;
+  *uco = sh.u_cols;
+  *lfill = lf;
+  *ufill = uf;
+  if (t_phase != NULL) {
+    t_phase[0] = p1 - p0;   /* transpose + alloc */
+    t_phase[1] = p2 - p1;   /* count + prefix */
+    t_phase[2] = p3 - p2;   /* emit + reduce */
+    t_phase[3] = p4 - p3;   /* u emit */
+  }
+  return 1;
+}
+
 /* George/Ng superset structure: chol(A+A') row patterns via etree
    row subtrees.  L rows = climbing paths (excl. diagonal); U rows =
    diagonal + transpose of L.  True L/U of any diagonal-pivot
@@ -3844,14 +4112,21 @@ static void kls_rowmt_trial(UF_long bnk, const UF_long *bp,
            pipeline: the production shape (no per-row DFS at all) */
         const double c0t = kls_now_seconds();
         UF_long *par2 = kls_rowmt_etree(bnk, bp, bc);
+        const double cet = kls_now_seconds();
         UF_long *ls2 = NULL, *lc2 = NULL, *lt2 = NULL;
         UF_long *us2 = NULL, *uc2 = NULL, *uo2 = NULL;
         size_t lf2 = 0, uf2 = 0;
+        double tph[4] = {0.0, 0.0, 0.0, 0.0};
         int bok = par2 != NULL &&
-                  kls_rowmt_cholsym(bnk, bp, bc, par2, &ls2, &lc2,
-                                    &lt2, &us2, &uc2, &uo2, &lf2,
-                                    &uf2);
+                  kls_rowmt_cholsym_par(bnk, bp, bc, par2, nt, &ls2,
+                                        &lc2, &lt2, &us2, &uc2, &uo2,
+                                        &lf2, &uf2, tph);
         const double c1t = kls_now_seconds();
+        if (bok) {
+          fprintf(stderr, "KLS cholsym-par: etree=%.3fs xpose=%.3fs"
+                  " count=%.3fs emit=%.3fs uemit=%.3fs\n",
+                  cet - c0t, tph[0], tph[1], tph[2], tph[3]);
+        }
         double *lv2 = bok
           ? (double *)malloc((lf2 > 0 ? lf2 : 1) * sizeof(double))
           : NULL;
