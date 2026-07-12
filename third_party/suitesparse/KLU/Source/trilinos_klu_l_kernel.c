@@ -40,6 +40,9 @@ _Thread_local double kls_pipe_t_num ;
 _Thread_local long kls_pipe_copy_bytes ;
 _Thread_local long kls_pipe_madds ;
 static int kls_pipe_phase_prof ;
+static int kls_pipe_dense_panels ;
+Int KLS_SN_PANEL_FACTOR (double *A, Int R, Int W, Int rowids [ ],
+			 const Int diagrows [ ], double tol) ;
 
 _Thread_local double kls_construct_secs ;
 _Thread_local long kls_construct_calls ;
@@ -1587,6 +1590,7 @@ typedef struct kls_klu_pipe_worker_s
     size_t pBcap ;            /* rows currently allocated */
     Int *pRowPos ;            /* row -> buffer position (gen-tagged) */
     Int *pRowGen ;
+    Int *pRowList ;           /* buffer position -> row (dense finalize) */
     Int pGen ;
     Int pW ;
 } kls_klu_pipe_worker ;
@@ -1859,6 +1863,199 @@ static void kls_pipe_round
 	CLEAR (S->X [j]) ;
 	(*pucount)++ ;
     }
+}
+
+
+/* Publish one dense-panel column: identical to kls_pipe_finalize_column
+ * after lpivot, but the pivot and the L rows/values come from the dense
+ * within-panel factorization (KLS_SN_PANEL_FACTOR) instead of a scalar
+ * candidate scan.  U entries are already in W->ubuf_i/x (externals plus
+ * intra-panel siblings, unsorted).  Returns 1 on abort. */
+static int kls_pipe_emit_dense_column
+(
+    kls_klu_pipe_worker *W,
+    Int k,
+    const Int *Lrows,       /* llen global row ids (below the pivot) */
+    const double *Lvals,    /* llen multipliers, stride PW apart */
+    Int lstride,
+    Int llen,
+    Int pivrow,
+    Entry pivot,
+    Int ucount
+)
+{
+    kls_klu_pipe_shared *sh = W->sh ;
+    KLS_KLU_KERNEL_STATE *S = &W->S ;
+    const Int n = S->n ;
+    Int diagrow, p, done_limit ;
+
+    S->Llen [k] = llen ;
+    diagrow = S->P [k] ;
+    {
+	size_t lpart = KLS_UNITS32 (llen) + (size_t) UNITS (Entry, llen) ;
+	size_t used = lpart + KLS_UNITS32 (ucount) +
+		      (size_t) UNITS (Entry, ucount) ;
+	Unit *col = kls_klu_chunk_alloc (S, used) ;
+	int32_t *Ui ;
+	Entry *Ux ;
+	if (col == NULL)
+	{
+	    S->Common->status = TRILINOS_KLU_OUT_OF_MEMORY ;
+	    atomic_store_explicit (&sh->abort_flag, 1,
+				   memory_order_release) ;
+	    return (1) ;
+	}
+	{
+	    int32_t *dLi = (int32_t *) col ;
+	    Entry *dLx = (Entry *) (col + KLS_UNITS32 (llen)) ;
+	    for (p = 0 ; p < llen ; p++)
+	    {
+		dLi [p] = (int32_t) Lrows [p] ;
+		dLx [p] = Lvals [(size_t) p * lstride] ;
+	    }
+	}
+	S->Uip [k] = (Int) lpart ;
+	S->Ulen [k] = ucount ;
+	Ui = (int32_t *) (col + lpart) ;
+	Ux = (Entry *) (col + lpart + KLS_UNITS32 (ucount)) ;
+	{
+	    Int a, b ;
+	    for (a = 1 ; a < ucount ; a++)
+	    {
+		Int vi = W->ubuf_i [a] ;
+		Entry vx = W->ubuf_x [a] ;
+		for (b = a ; b > 0 && W->ubuf_i [b-1] > vi ; b--)
+		{
+		    W->ubuf_i [b] = W->ubuf_i [b-1] ;
+		    W->ubuf_x [b] = W->ubuf_x [b-1] ;
+		}
+		W->ubuf_i [b] = vi ;
+		W->ubuf_x [b] = vx ;
+	    }
+	}
+	for (p = 0 ; p < ucount ; p++)
+	{
+	    Ui [p] = (int32_t) W->ubuf_i [p] ;
+	    Ux [p] = W->ubuf_x [p] ;
+	}
+	S->colptr [k] = col ;
+    }
+    S->Udiag [k] = pivot ;
+    if (pivrow != diagrow)
+    {
+	S->Common->noffdiag++ ;
+	if (S->Pinv [diagrow] < 0)
+	{
+	    Int kbar = FLIP (S->Pinv [pivrow]) ;
+	    if (kbar < 0 || kbar >= n)
+	    {
+		fprintf (stderr, "KLS pipe: BAD dense kbar=%ld k=%ld"
+			 " pivrow=%ld tid=%d\n", (long) kbar, (long) k,
+			 (long) pivrow, W->tid) ;
+		atomic_store_explicit (&sh->abort_flag, 1,
+				       memory_order_release) ;
+		return (1) ;
+	    }
+	    S->P [kbar] = diagrow ;
+	    S->Pinv [diagrow] = FLIP (kbar) ;
+	}
+    }
+    S->P [k] = pivrow ;
+    S->Pinv [pivrow] = k ;
+    if (sh->lpend != NULL)
+    {
+	Int up, jcol ;
+	for (up = 0 ; up < ucount ; up++)
+	{
+	    jcol = W->ubuf_i [up] ;
+	    if (jcol >= k - 0)
+	    {
+		continue ;   /* intra-panel U columns: prune later cols only */
+	    }
+	    if (atomic_load_explicit (&sh->lpend [jcol],
+				      memory_order_relaxed) !=
+		TRILINOS_KLU_EMPTY)
+	    {
+		continue ;
+	    }
+	    {
+		Unit *xp = (Unit *) __atomic_load_n (
+		    (Unit **) &S->colptr [jcol], __ATOMIC_ACQUIRE) ;
+		Int jlen = S->Llen [jcol] ;
+		const int32_t *Lij = (const int32_t *) xp ;
+		Int p2, found = 0 ;
+		for (p2 = 0 ; p2 < jlen ; p2++)
+		{
+		    if ((Int) Lij [p2] == pivrow)
+		    {
+			found = 1 ;
+			break ;
+		    }
+		}
+		if (found)
+		{
+		    Int julen = S->Ulen [jcol] ;
+		    size_t lpart = KLS_UNITS32 (jlen) +
+			(size_t) UNITS (Entry, jlen) ;
+		    size_t used = lpart + KLS_UNITS32 (julen) +
+			(size_t) UNITS (Entry, julen) ;
+		    Unit *newcol = kls_klu_chunk_alloc (S, used) ;
+		    if (newcol != NULL)
+		    {
+			int32_t *nLi = (int32_t *) newcol ;
+			Entry *nLx =
+			    (Entry *) (newcol + KLS_UNITS32 (jlen)) ;
+			Int phead = 0, ptail = jlen ;
+			memcpy (newcol, xp, used * sizeof (Unit)) ;
+			while (phead < ptail)
+			{
+			    int32_t row = nLi [phead] ;
+			    if (S->Pinv [row] >= 0)
+			    {
+				phead++ ;
+			    }
+			    else
+			    {
+				Entry xtmp ;
+				ptail-- ;
+				nLi [phead] = nLi [ptail] ;
+				nLi [ptail] = row ;
+				xtmp = nLx [phead] ;
+				nLx [phead] = nLx [ptail] ;
+				nLx [ptail] = xtmp ;
+			    }
+			}
+			atomic_fetch_add_explicit (&sh->colver [jcol], 1,
+						   memory_order_acq_rel) ;
+			__atomic_store_n ((Unit **) &S->colptr [jcol],
+					  newcol, __ATOMIC_RELEASE) ;
+			atomic_store_explicit (&sh->lpend [jcol], ptail,
+					       memory_order_release) ;
+			atomic_fetch_add_explicit (&sh->colver [jcol], 1,
+						   memory_order_acq_rel) ;
+		    }
+		}
+	    }
+	}
+    }
+    {
+	double kfl = 0.0 ;
+	Int up2 ;
+	for (up2 = 0 ; up2 < ucount ; up2++)
+	{
+	    if (W->ubuf_i [up2] < k)
+	    {
+		kfl += (double) S->Llen [W->ubuf_i [up2]] ;
+	    }
+	}
+	W->kflops += 2.0 * kfl + (double) S->Llen [k] ;
+    }
+    S->lnz += S->Llen [k] + 1 ;
+    S->unz += S->Ulen [k] + 1 ;
+    S->cols_done = k + 1 ;
+    done_limit = k + 1 ;
+    atomic_store_explicit (&sh->prefix, done_limit, memory_order_release) ;
+    return (0) ;
 }
 
 /* lsolve_numeric with seqlock column copies: x -= Lx*xj is not
@@ -2219,6 +2416,7 @@ static int kls_pipe_panel_lockstep
 		W->pB = nb ;                                           \
 		W->pBcap = ncap ;                                      \
 	    }                                                          \
+	    W->pRowList [nbrows] = (r) ;                               \
 	    W->pRowPos [r] = nbrows++ ;                                \
 	    for (zw = 0 ; zw < PW ; zw++)                              \
 	    {                                                          \
@@ -2500,6 +2698,106 @@ static int kls_pipe_panel_lockstep
 		    W->pPFlag [j] = TRILINOS_KLU_EMPTY ;
 		}
 
+	    if (kls_pipe_dense_panels && use_buf && next_final == 0 &&
+		plimit == k0)
+	    {
+		/* dense within-panel finalize: all external sources are
+		   applied and extracted; the remaining work is the
+		   intra-panel elimination, done as one dense LU over the
+		   panel's non-pivotal row set (threshold pivoting with
+		   the same tol and per-column diagonal preference).  On
+		   any failure fall through to the scalar cascade - the
+		   buffer is copied, not consumed. */
+		Int R2 = 0, pos ;
+		for (pos = 0 ; pos < nbrows ; pos++)
+		{
+		    if (S->Pinv [W->pRowList [pos]] < 0)
+		    {
+			R2++ ;
+		    }
+		}
+		if (R2 >= PW)
+		{
+		    double *A = (double *) malloc ((size_t) R2 * PW *
+						   sizeof (double)) ;
+		    Int *rowids = (Int *) malloc ((size_t) R2 *
+						  sizeof (Int)) ;
+		    Int diagrows [32] ;
+		    if (A != NULL && rowids != NULL)
+		    {
+			Int c = 0, fac ;
+			for (pos = 0 ; pos < nbrows ; pos++)
+			{
+			    Int r = W->pRowList [pos] ;
+			    if (S->Pinv [r] < 0)
+			    {
+				memcpy (A + (size_t) c * PW,
+					W->pB + (size_t) pos * PW,
+					(size_t) PW * sizeof (double)) ;
+				rowids [c++] = r ;
+			    }
+			}
+			for (w = 0 ; w < PW ; w++)
+			{
+			    diagrows [w] = S->P [k0 + w] ;
+			}
+			/* threshold pivoting with the kernel tol; panel
+			   tol=1.0 measured 4x WORSE on mac_econ (off-
+			   diagonal pivots cascade into later panels'
+			   candidate sets - the "no fill cost" intuition
+			   only holds within one panel) */
+			fac = KLS_SN_PANEL_FACTOR (A, R2, PW, rowids,
+						   diagrows,
+						   getenv ("KLS_KLU_PIPE_DENSE_PP")
+						   != NULL ? 1.0 : S->tol) ;
+			if (fac == PW)
+			{
+			    int aborted = 0 ;
+			    for (w = 0 ; w < PW && !aborted ; w++)
+			    {
+				Int uc, jj ;
+				if (w > 0)
+				{
+				    memcpy (W->ubuf_i, W->pUbuf_i [w],
+					    (size_t) u_cnt [w] *
+					    sizeof (Int)) ;
+				    memcpy (W->ubuf_x, W->pUbuf_x [w],
+					    (size_t) u_cnt [w] *
+					    sizeof (Entry)) ;
+				}
+				uc = u_cnt [w] ;
+				for (jj = 0 ; jj < w ; jj++)
+				{
+				    W->ubuf_i [uc] = k0 + jj ;
+				    W->ubuf_x [uc] =
+					A [(size_t) jj * PW + w] ;
+				    uc++ ;
+				}
+				if (kls_pipe_emit_dense_column (W, k0 + w,
+					rowids + w + 1,
+					A + (size_t) (w + 1) * PW + w, PW,
+					R2 - 1 - w, rowids [w],
+					A [(size_t) w * PW + w], uc))
+				{
+				    aborted = 1 ;
+				}
+				l_len [w] = R2 - 1 - w ;
+				u_cnt [w] = uc ;
+			    }
+			    free (A) ;
+			    free (rowids) ;
+			    if (aborted)
+			    {
+				return (1) ;
+			    }
+			    next_final = PW ;
+			    break ;
+			}
+		    }
+		    free (A) ;
+		    free (rowids) ;
+		}
+	    }
 	    if (plimit == k0 + next_final)
 	    {
 		/* this column's window is complete: finalize it */
@@ -3146,6 +3444,7 @@ size_t KLS_KLU_KERNEL_PIPE
 	    W->pBcap = 0 ;
 	    W->pRowPos = NULL ;
 	    W->pRowGen = NULL ;
+	    W->pRowList = NULL ;
 	    W->pGen = 0 ;
 	    if (panel_start != NULL)
 	    {
@@ -3201,13 +3500,15 @@ size_t col_cap = (size_t) n / 4 + 16 ;
 					      sizeof (Entry)) ;
 		    W->pRowPos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
 		    W->pRowGen = (Int *) calloc ((size_t) n, sizeof (Int)) ;
+		    W->pRowList = (Int *) malloc ((size_t) n * sizeof (Int)) ;
 		    W->pGen = 1 ;   /* calloc'd generations are 0 */
 		    if (W->pB == NULL || W->pRowPos == NULL ||
-			W->pRowGen == NULL)
+			W->pRowGen == NULL || W->pRowList == NULL)
 		    {
 			free (W->pB) ; W->pB = NULL ;
 			free (W->pRowPos) ; W->pRowPos = NULL ;
 			free (W->pRowGen) ; W->pRowGen = NULL ;
+			free (W->pRowList) ; W->pRowList = NULL ;
 		    }
 		}
 		if (W->pUlist == NULL)
@@ -3387,6 +3688,7 @@ size_t col_cap = (size_t) n / 4 + 16 ;
 	    free (workers [t].pB) ;
 	    free (workers [t].pRowPos) ;
 	    free (workers [t].pRowGen) ;
+	    free (workers [t].pRowList) ;
 	}
 	}
 	free ((void *) sh.lpend) ;
@@ -3959,6 +4261,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     ASSERT (Common != NULL) ;
     kls_construct_prof = getenv ("KLS_CONSTRUCT_PROF") != NULL ;
     kls_pipe_phase_prof = getenv ("KLS_KLU_PIPE_PHASES") != NULL ;
+    kls_pipe_dense_panels = getenv ("KLS_KLU_PIPE_DENSE") != NULL ;
     if (n >= 4096 && getenv ("KLS_SN_STATS") != NULL)
     {
 	/* supernodal-first-factor feasibility probe: fundamental
