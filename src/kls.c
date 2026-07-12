@@ -122456,6 +122456,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       common->halt_if_singular = 0;
     }
   }
+  UF_long kls_prev_batch_nudged = 0;
   if (refactor_ok == 0 &&
       common->status == TRILINOS_KLU_SINGULAR &&
       (getenv("KLS_FORCE_PIVOT_FILL") != NULL ||
@@ -122627,6 +122628,20 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
                 (long)batch_nudged, (long)solver->pivot_nudge_count,
                 (long)fill_round);
       }
+      if (fill_round >= 1u &&
+          (UF_long)batch_nudged >= kls_prev_batch_nudged) {
+        /* non-converging nudges: each pass exposes as many new zero
+           pivots as the last (rajat25: 32 -> 30 -> 32 then a fill
+           reject anyway) - the class pivots numerically and the
+           diagonal replay cannot hold; reject now instead of paying
+           the remaining rounds and the fill check */
+        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
+          fprintf(stderr, "KLS predicted: nudge divergence reject\n");
+        }
+        refactor_ok = 0;
+        break;
+      }
+      kls_prev_batch_nudged = (UF_long)batch_nudged;
       if (!batch_fast_rounds) {
         /* nudges change values, not pattern; the rebuild costs ~14s per
            round at pre2 scale and is skipped under
@@ -126491,6 +126506,16 @@ int kls_factor(kls_solver *solver, const double *values) {
         (!is_large_sparse_diagonal_low_degree_pattern(
             solver->n, solver->col_ptr, solver->row_idx) ||
          getenv("KLS_PREDICTED_TRY_LOWDEG") != NULL) &&
+        /* one-shot-lean: the attempt's build cost scales with the
+           predicted fill while its win scales with the serial factor
+           work; shallow factors (few flops per fill entry) cannot pay
+           for the build even when accepted (rajat25: 0.17s attempt vs
+           0.15s serial klu) */
+        (getenv("KLS_PRESTATIC_DEFER") == NULL ||
+         solver->symbolic == NULL ||
+         !(solver->symbolic->est_flops <
+           10.0 * (double)(solver->symbolic->lnz +
+                           solver->symbolic->unz))) &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
       if (kls_trace_entry) {
@@ -126655,6 +126680,21 @@ int kls_factor(kls_solver *solver, const double *values) {
                                                           : KLS_ERR_FACTOR_FAILED;
   }
   kls_update_numeric_diagnostics(solver, 1);
+  if ((solver->numeric_needs_refinement ||
+       getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL) &&
+      numeric_values != NULL &&
+      solver->solve_refine_values == NULL && solver->values == NULL) {
+    /* refinement computes residuals against the true input values;
+       first factors flagged as reduced-stability must retain them
+       (the refactor path already does - kls_parallel_refactor) */
+    solver->solve_refine_values =
+      (double *)malloc((size_t)solver->nnz *
+                       sizeof(*solver->solve_refine_values));
+    if (solver->solve_refine_values != NULL) {
+      memcpy(solver->solve_refine_values, numeric_values,
+             (size_t)solver->nnz * sizeof(*numeric_values));
+    }
+  }
   kls_row_symbolic_validate(solver, numeric_values);
   KLS_ENTRY_PHASE("diag_full")
   int diagnostics_have_flops = 1;
@@ -126669,7 +126709,14 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   KLS_ENTRY_PHASE("auto_rowmatch")
   solver->metis_promotion_validated = 0;
+  const int kls_oneshot_lean = getenv("KLS_PRESTATIC_DEFER") != NULL;
 #ifdef KLS_HAVE_METIS
+  if (kls_oneshot_lean && solver->metis_race != NULL) {
+    /* one-shot-lean: the promotion consult is cycle-payoff work; run
+       it from the first refactor's consult like the other deferrals */
+    solver->metis_race_deferred = 1;
+    solver->metis_race_deferred_invalid = promoted_numeric;
+  } else
   if (solver->n < 1000000 && solver->metis_race != NULL &&
       !kls_metis_race_ready(solver)) {
     /* the race worker is still inside NodeND/the trial factor; joining
@@ -126722,13 +126769,15 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_rcond = 1;
   }
   KLS_ENTRY_PHASE("auto_metis")
-  if (maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values)) {
+  if (!kls_oneshot_lean &&
+      maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
-  if (maybe_select_tight_pivot_tolerance(solver, &elapsed, numeric_values)) {
+  if (!kls_oneshot_lean &&
+      maybe_select_tight_pivot_tolerance(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
@@ -127258,6 +127307,10 @@ static int solve_impl(kls_solver *solver,
         for (UF_long i = 0; i < nloc; ++i) {
           const double av = fabs(residual[i]);
           rmax = rmax < av ? av : rmax;
+        }
+        if (getenv("KLS_TRACE_REFINE") != NULL) {
+          fprintf(stderr, "KLS refine iter=%d rmax=%.3e target=%.3e\n",
+                  iter, rmax, target);
         }
         if (initial_rmax < 0.0) {
           initial_rmax = rmax;
