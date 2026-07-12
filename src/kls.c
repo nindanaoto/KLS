@@ -3859,6 +3859,572 @@ static UF_long kls_rowmt_levels(UF_long n, const UF_long *bp,
   return nlev;
 }
 
+/* Pivoted tree-scheduled row engine (trial).
+
+   Threshold column pivoting inside each row, scheduled by the etree
+   of A*A' with subtree-completion gates: a row starts only after all
+   its etree children's subtrees completed.  Any two concurrently
+   running rows are etree-unrelated, hence share no column (an AA'
+   edge forces an ancestor relation), so pos[]/x[] touches are
+   disjoint and every pos[] read observes final state - the engine is
+   deterministic under any execution order, with serial-identical
+   arithmetic per row. */
+typedef struct {
+  UF_long n;
+  const UF_long *csr_ptr, *csr_col;
+  const double *csr_val;
+  double tol, perturb;
+  UF_long *u_start, *u_cnt, *u_cols;
+  double *u_vals;
+  UF_long *l_start, *l_cnt, *l_steps;
+  double *l_vals;
+  UF_long *pos, *piv_col;
+  double *udiag;
+  size_t u_cap, l_cap;
+  long u_len, l_len;
+  long perturbed;
+  volatile int failed;
+  int subtree_check;
+  const UF_long *postmin;
+  volatile long violations;
+  /* schedule */
+  const UF_long *parent;
+  const UF_long *post;         /* postorder position (topological) */
+  UF_long *child_done;         /* atomic counters */
+  const UF_long *nchildren;
+  UF_long *ready;              /* ring of ready rows */
+  volatile long ready_head, ready_tail;
+  volatile long rows_done;
+  int nthreads;
+} kls_rowpv;
+
+typedef struct {
+  kls_rowpv *sh;
+  int tid;
+  UF_long *mark, *stack, *pattern, *cand;
+  double *x;
+  double t_sym, t_num;
+  long rows;
+} kls_rowpv_worker;
+
+/* etree of A*A' without forming it: rows sharing a column are linked
+   consecutively (Liu path compression; cs_etree ata mirror) */
+static UF_long *kls_rowpv_etree(UF_long n, const UF_long *bp,
+                                const UF_long *bc, UF_long nnz_hint) {
+  UF_long *parent = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  UF_long *anc = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  UF_long *prev_col = NULL;
+  UF_long maxcol = 0;
+  (void)nnz_hint;
+  if (parent == NULL || anc == NULL) {
+    free(parent); free(anc);
+    return NULL;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    for (UF_long p = bp[i]; p < bp[i + 1]; ++p) {
+      if (bc[p] + 1 > maxcol) {
+        maxcol = bc[p] + 1;
+      }
+    }
+  }
+  prev_col = (UF_long *)malloc((size_t)(maxcol > 0 ? maxcol : 1) *
+                               sizeof(UF_long));
+  if (prev_col == NULL) {
+    free(parent); free(anc);
+    return NULL;
+  }
+  for (UF_long c = 0; c < maxcol; ++c) {
+    prev_col[c] = KLS_KLU_EMPTY;
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    parent[i] = KLS_KLU_EMPTY;
+    anc[i] = KLS_KLU_EMPTY;
+    for (UF_long p = bp[i]; p < bp[i + 1]; ++p) {
+      const UF_long c = bc[p];
+      UF_long k = prev_col[c];
+      prev_col[c] = i;
+      while (k != KLS_KLU_EMPTY && k < i) {
+        const UF_long nxt = anc[k];
+        anc[k] = i;
+        if (nxt == KLS_KLU_EMPTY) {
+          parent[k] = i;
+          break;
+        }
+        k = nxt;
+      }
+    }
+  }
+  free(anc); free(prev_col);
+  return parent;
+}
+
+static int kls_rowpv_row(kls_rowpv *sh, kls_rowpv_worker *w,
+                         UF_long i) {
+  const UF_long tag = i + 1;
+  UF_long l_count = 0;
+  UF_long top = 0;
+  UF_long ucount = 0;
+  /* symbolic: DFS through pivoted columns; terminals are candidates */
+  for (UF_long p = sh->csr_ptr[i]; p < sh->csr_ptr[i + 1]; ++p) {
+    const UF_long c0 = sh->csr_col[p];
+    if (w->mark[c0] == tag) {
+      continue;
+    }
+    w->mark[c0] = tag;
+    if (sh->pos[c0] == KLS_KLU_EMPTY) {
+      w->cand[ucount++] = c0;
+      continue;
+    }
+    w->stack[top++] = sh->pos[c0];
+    while (top > 0) {
+      const UF_long st = w->stack[--top];
+      if (sh->subtree_check &&
+          !(sh->postmin[i] <= sh->post[st] &&
+            sh->post[st] <= sh->post[i])) {
+        __sync_fetch_and_add((long *)&sh->violations, 1L);
+      }
+      w->pattern[l_count++] = st;
+      const UF_long qs = sh->u_start[st];
+      const UF_long qe = qs + sh->u_cnt[st];
+      for (UF_long q = qs; q < qe; ++q) {
+        const UF_long k = sh->u_cols[q];
+        if (w->mark[k] == tag) {
+          continue;
+        }
+        w->mark[k] = tag;
+        if (sh->pos[k] != KLS_KLU_EMPTY) {
+          w->stack[top++] = sh->pos[k];
+        } else {
+          w->cand[ucount++] = k;
+        }
+      }
+    }
+  }
+  if (ucount == 0) {
+    return -1;                 /* structurally empty pivot row */
+  }
+  const long ub = __sync_fetch_and_add(&sh->u_len, (long)ucount);
+  const long lb = __sync_fetch_and_add(&sh->l_len, (long)l_count);
+  if ((size_t)(ub + ucount) > sh->u_cap ||
+      (size_t)(lb + l_count) > sh->l_cap) {
+    return 0;
+  }
+  /* sources must be consumed in ELIMINATION order: under the tree
+     schedule that is the postorder position, not the row index (a
+     dependency st1-of-st2 forces st1 into subtree(st2), hence
+     post[st1] < post[st2]) */
+  for (UF_long a3 = 1; a3 < l_count; ++a3) {
+    const UF_long v = w->pattern[a3];
+    const UF_long vp = sh->post[v];
+    UF_long b3 = a3;
+    while (b3 > 0 && sh->post[w->pattern[b3 - 1]] > vp) {
+      w->pattern[b3] = w->pattern[b3 - 1];
+      b3--;
+    }
+    w->pattern[b3] = v;
+  }
+  for (UF_long p = sh->csr_ptr[i]; p < sh->csr_ptr[i + 1]; ++p) {
+    w->x[sh->csr_col[p]] = sh->csr_val[p];
+  }
+  sh->l_start[i] = (UF_long)lb;
+  for (UF_long t = 0; t < l_count; ++t) {
+    const UF_long st = w->pattern[t];
+    const UF_long pc = sh->piv_col[st];
+    const double lij = w->x[pc] / sh->udiag[st];
+    w->x[pc] = 0.0;
+    sh->l_steps[lb + t] = st;
+    sh->l_vals[lb + t] = lij;
+    if (lij != 0.0) {
+      const UF_long qs = sh->u_start[st];
+      const UF_long qe = qs + sh->u_cnt[st];
+      for (UF_long q = qs; q < qe; ++q) {
+        w->x[sh->u_cols[q]] -= lij * sh->u_vals[q];
+      }
+    }
+  }
+  sh->l_cnt[i] = l_count;
+  /* threshold pivot with diagonal preference */
+  {
+    UF_long best = KLS_KLU_EMPTY;
+    double amax = 0.0;
+    for (UF_long t = 0; t < ucount; ++t) {
+      const double av = fabs(w->x[w->cand[t]]);
+      if (av > amax) {
+        amax = av;
+        best = t;
+      }
+    }
+    if (best == KLS_KLU_EMPTY || amax == 0.0) {
+      if (sh->perturb > 0.0) {
+        best = 0;
+        for (UF_long t = 0; t < ucount; ++t) {
+          if (w->cand[t] == i) {
+            best = t;
+            break;
+          }
+        }
+        w->x[w->cand[best]] = sh->perturb;
+        __sync_fetch_and_add(&sh->perturbed, 1L);
+        amax = sh->perturb;
+      } else {
+        return -1;
+      }
+    }
+    for (UF_long t = 0; t < ucount; ++t) {
+      if (w->cand[t] == i && fabs(w->x[i]) >= sh->tol * amax) {
+        best = t;
+        break;
+      }
+    }
+    const UF_long pc = w->cand[best];
+    sh->piv_col[i] = pc;
+    sh->udiag[i] = w->x[pc];
+    sh->u_start[i] = (UF_long)ub;
+    for (UF_long t = 0; t < ucount; ++t) {
+      const UF_long c = w->cand[t];
+      sh->u_cols[ub + t] = c;
+      sh->u_vals[ub + t] = w->x[c];
+      w->x[c] = 0.0;
+    }
+    sh->u_cnt[i] = ucount;
+    __sync_synchronize();
+    sh->pos[pc] = i;           /* publish last: DFS keys off pos */
+  }
+  return 1;
+}
+
+static void *kls_rowpv_main(void *arg) {
+  kls_rowpv_worker *w = (kls_rowpv_worker *)arg;
+  kls_rowpv *sh = w->sh;
+  const UF_long n = sh->n;
+  while (!sh->failed) {
+    long h = sh->ready_head;
+    if (h >= sh->ready_tail) {
+      if (sh->rows_done >= (long)n) {
+        return NULL;
+      }
+      __asm__ __volatile__("pause");
+      continue;
+    }
+    if (!__sync_bool_compare_and_swap(&sh->ready_head, h, h + 1)) {
+      continue;
+    }
+    while (sh->ready[h] == KLS_KLU_EMPTY) {
+      /* the producer reserved the slot before writing it */
+      __asm__ __volatile__("pause");
+    }
+    const UF_long i = sh->ready[h];
+    const double t0 = kls_now_seconds();
+    const int rc = kls_rowpv_row(sh, w, i);
+    w->t_num += kls_now_seconds() - t0;
+    w->rows++;
+    if (rc <= 0) {
+      fprintf(stderr, "KLS PV fail rc=%d row=%ld u_len=%ld l_len=%ld"
+              " ucap=%zu lcap=%zu\n", rc, (long)i, sh->u_len,
+              sh->l_len, sh->u_cap, sh->l_cap);
+      sh->failed = 1;
+      __sync_fetch_and_add((long *)&sh->rows_done, 1L);
+      return NULL;
+    }
+    /* completion cascade: enable the parent when its last child
+       subtree completes */
+    {
+      const UF_long par = sh->parent[i];
+      if (par != KLS_KLU_EMPTY && sh->ready_tail < (long)sh->n) {
+        const UF_long done =
+          (UF_long)__sync_add_and_fetch(&sh->child_done[par], 1L);
+        if (done == sh->nchildren[par]) {
+          const long slot = __sync_fetch_and_add(&sh->ready_tail, 1L);
+          if (slot < (long)sh->n) {
+            sh->ready[slot] = par;
+          }
+        }
+      }
+      __sync_fetch_and_add((long *)&sh->rows_done, 1L);
+    }
+  }
+  return NULL;
+}
+
+static void kls_rowpv_trial(UF_long bnk, const UF_long *bp,
+                            const UF_long *bc, const double *bv,
+                            long ref_lnz, long ref_unz) {
+  const char *pe = getenv("KLS_ROW_ENGINE_PV");
+  if (pe == NULL) {
+    return;
+  }
+  int nt = atoi(pe);
+  if (nt < 1) {
+    nt = 1;
+  }
+  if (nt > 64) {
+    nt = 64;
+  }
+  const double e0 = kls_now_seconds();
+  UF_long *parent = kls_rowpv_etree(bnk, bp, bc, bp[bnk]);
+  if (parent == NULL) {
+    return;
+  }
+  UF_long *nchild = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+  UF_long *cdone = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+  UF_long *ready = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  if (nchild == NULL || cdone == NULL || ready == NULL) {
+    free(parent); free(nchild); free(cdone); free(ready);
+    return;
+  }
+  UF_long nroots = 0, maxdep = 0;
+  {
+    for (UF_long i = 0; i < bnk; ++i) {
+      if (parent[i] != KLS_KLU_EMPTY) {
+        nchild[parent[i]]++;
+      } else {
+        nroots++;
+      }
+    }
+    UF_long *dep = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+    if (dep != NULL) {
+      for (UF_long i = 0; i < bnk; ++i) {
+        if (parent[i] != KLS_KLU_EMPTY) {
+          const UF_long d = dep[i] + 1;
+          if (d > dep[parent[i]]) {
+            dep[parent[i]] = d;
+          }
+        }
+        if (dep[i] > maxdep) {
+          maxdep = dep[i];
+        }
+      }
+      free(dep);
+    }
+  }
+  /* iterative postorder over children lists */
+  UF_long *post = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  UF_long *ord = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  {
+    UF_long *head = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    UF_long *next = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    UF_long *stk = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    if (post == NULL || ord == NULL || head == NULL || next == NULL ||
+        stk == NULL) {
+      free(parent); free(nchild); free(cdone); free(ready);
+      free(post); free(ord); free(head); free(next); free(stk);
+      return;
+    }
+    for (UF_long i = 0; i < bnk; ++i) {
+      head[i] = KLS_KLU_EMPTY;
+    }
+    for (UF_long i = bnk; i-- > 0;) {
+      if (parent[i] != KLS_KLU_EMPTY) {
+        next[i] = head[parent[i]];
+        head[parent[i]] = i;
+      }
+    }
+    UF_long np = 0;
+    for (UF_long r = 0; r < bnk; ++r) {
+      if (parent[r] != KLS_KLU_EMPTY) {
+        continue;
+      }
+      UF_long top2 = 0;
+      stk[top2++] = r;
+      while (top2 > 0) {
+        const UF_long v = stk[top2 - 1];
+        if (head[v] != KLS_KLU_EMPTY) {
+          const UF_long c = head[v];
+          head[v] = next[c];
+          stk[top2++] = c;
+        } else {
+          post[v] = np;
+          ord[np++] = v;
+          top2--;
+        }
+      }
+    }
+    free(head); free(next); free(stk);
+  }
+  UF_long *postmin = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  if (postmin == NULL) {
+    free(parent); free(nchild); free(cdone); free(ready);
+    free(post); free(ord);
+    return;
+  }
+  for (UF_long k2 = 0; k2 < bnk; ++k2) {
+    const UF_long v = ord[k2];
+    postmin[v] = post[v];
+  }
+  for (UF_long k2 = 0; k2 < bnk; ++k2) {
+    const UF_long v = ord[k2];
+    if (parent[v] != KLS_KLU_EMPTY &&
+        postmin[v] < postmin[parent[v]]) {
+      postmin[parent[v]] = postmin[v];
+    }
+  }
+  const double e1 = kls_now_seconds();
+  kls_rowpv sh;
+  memset(&sh, 0, sizeof(sh));
+  sh.n = bnk;
+  sh.csr_ptr = bp;
+  sh.csr_col = bc;
+  sh.csr_val = bv;
+  sh.tol = 0.001;
+  {
+    const char *te = getenv("KLS_ROW_ENGINE_PV_TOL");
+    if (te != NULL) {
+      sh.tol = atof(te);
+    }
+  }
+  {
+    double bmax = 0.0;
+    for (UF_long p = 0; p < bp[bnk]; ++p) {
+      const double av = fabs(bv[p]);
+      if (av > bmax) {
+        bmax = av;
+      }
+    }
+    sh.perturb = 1.49e-8 * (bmax > 0.0 ? bmax : 1.0);
+  }
+  sh.u_cap = (size_t)(ref_unz > 0 ? ref_unz : bp[bnk]) * 4u +
+             (size_t)bnk * 2u;
+  sh.l_cap = (size_t)(ref_lnz > 0 ? ref_lnz : bp[bnk]) * 4u +
+             (size_t)bnk * 2u;
+  sh.parent = parent;
+  sh.subtree_check = getenv("KLS_ROW_ENGINE_PV_CHECK") != NULL;
+  sh.post = post;
+  sh.postmin = postmin;
+  sh.child_done = cdone;
+  sh.nchildren = nchild;
+  sh.ready = ready;
+  sh.nthreads = nt;
+  sh.u_start = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  sh.u_cnt = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+  sh.u_cols = (UF_long *)malloc(sh.u_cap * sizeof(UF_long));
+  sh.u_vals = (double *)malloc(sh.u_cap * sizeof(double));
+  sh.l_start = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  sh.l_cnt = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+  sh.l_steps = (UF_long *)malloc(sh.l_cap * sizeof(UF_long));
+  sh.l_vals = (double *)malloc(sh.l_cap * sizeof(double));
+  sh.pos = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  sh.piv_col = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  sh.udiag = (double *)malloc((size_t)bnk * sizeof(double));
+  kls_rowpv_worker wk[64];
+  memset(wk, 0, sizeof(wk));
+  int ok = sh.u_start && sh.u_cnt && sh.u_cols && sh.u_vals &&
+           sh.l_start && sh.l_cnt && sh.l_steps && sh.l_vals &&
+           sh.pos && sh.piv_col && sh.udiag;
+  for (int t = 0; t < nt && ok; ++t) {
+    wk[t].sh = &sh;
+    wk[t].tid = t;
+    wk[t].mark = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+    wk[t].stack = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    wk[t].pattern = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    wk[t].cand = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    wk[t].x = (double *)calloc((size_t)bnk, sizeof(double));
+    ok = wk[t].mark && wk[t].stack && wk[t].pattern && wk[t].cand &&
+         wk[t].x != NULL;
+  }
+  if (ok) {
+    for (UF_long c = 0; c < bnk; ++c) {
+      sh.pos[c] = KLS_KLU_EMPTY;
+    }
+    for (UF_long i = 0; i < bnk; ++i) {
+      ready[i] = KLS_KLU_EMPTY;
+    }
+    long tail = 0;
+    if (getenv("KLS_ROW_ENGINE_PV_IDX") != NULL) {
+      /* identity order: also children-first (parent > child), and
+         nt=1 must then reproduce the serial engine byte-for-byte if
+         the subtree-state reasoning holds */
+      for (UF_long i = 0; i < bnk; ++i) {
+        ready[tail++] = i;
+      }
+    } else
+    for (UF_long i = 0; i < bnk; ++i) {
+      if (nchild[i] == 0) {
+        ready[tail++] = i;
+      }
+    }
+    sh.ready_tail = tail;
+    pthread_t th[64];
+    const double t0 = kls_now_seconds();
+    for (int t = 1; t < nt; ++t) {
+      pthread_create(&th[t], NULL, kls_rowpv_main, &wk[t]);
+    }
+    kls_rowpv_main(&wk[0]);
+    for (int t = 1; t < nt; ++t) {
+      pthread_join(th[t], NULL);
+    }
+    const double t1 = kls_now_seconds();
+    if (!sh.failed) {
+      /* residual: x ?= ones for b = A*ones */
+      double *bones = (double *)malloc((size_t)bnk * sizeof(double));
+      double *y = (double *)malloc((size_t)bnk * sizeof(double));
+      double *z = (double *)calloc((size_t)bnk, sizeof(double));
+      double maxerr = -1.0;
+      if (bones != NULL && y != NULL && z != NULL) {
+        for (UF_long i = 0; i < bnk; ++i) {
+          double sum = 0.0;
+          for (UF_long p = bp[i]; p < bp[i + 1]; ++p) {
+            sum += bv[p];
+          }
+          bones[i] = sum;
+        }
+        for (UF_long k2 = 0; k2 < bnk; ++k2) {
+          const UF_long i = ord[k2];
+          double acc = bones[i];
+          const UF_long ps = sh.l_start[i];
+          for (UF_long p = ps; p < ps + sh.l_cnt[i]; ++p) {
+            acc -= sh.l_vals[p] * y[sh.l_steps[p]];
+          }
+          y[i] = acc;
+        }
+        for (UF_long k2 = bnk; k2-- > 0;) {
+          const UF_long st = ord[k2];
+          double acc = y[st];
+          const UF_long pc = sh.piv_col[st];
+          const UF_long qs = sh.u_start[st];
+          for (UF_long q = qs; q < qs + sh.u_cnt[st]; ++q) {
+            if (sh.u_cols[q] != pc) {
+              acc -= sh.u_vals[q] * z[sh.u_cols[q]];
+            }
+          }
+          z[pc] = acc / sh.udiag[st];
+        }
+        maxerr = 0.0;
+        for (UF_long c = 0; c < bnk; ++c) {
+          const double e = fabs(z[c] - 1.0);
+          if (e > maxerr) {
+            maxerr = e;
+          }
+        }
+      }
+      free(bones); free(y); free(z);
+      double sym_max = 0.0;
+      for (int t = 0; t < nt; ++t) {
+        if (wk[t].t_num > sym_max) {
+          sym_max = wk[t].t_num;
+        }
+      }
+      fprintf(stderr,
+              "KLS row-engine PV trial: nt=%d etree=%.2fs roots=%ld"
+              " depth=%ld max|x-1| %.3e lnz %ld unz %ld factor %.3fs"
+              " busy_max=%.2fs perturbed=%ld violations=%ld\n",
+              nt, e1 - e0, (long)nroots, (long)maxdep, maxerr,
+              (long)sh.l_len, (long)sh.u_len, t1 - t0, sym_max,
+              sh.perturbed, sh.violations);
+    } else {
+      fprintf(stderr, "KLS row-engine PV: failed (capacity/singular)\n");
+    }
+  }
+  for (int t = 0; t < nt; ++t) {
+    free(wk[t].mark); free(wk[t].stack); free(wk[t].pattern);
+    free(wk[t].cand); free(wk[t].x);
+  }
+  free(sh.u_start); free(sh.u_cnt); free(sh.u_cols); free(sh.u_vals);
+  free(sh.l_start); free(sh.l_cnt); free(sh.l_steps); free(sh.l_vals);
+  free(sh.pos); free(sh.piv_col); free(sh.udiag);
+  free(parent); free(nchild); free(cdone); free(ready);
+  free(post); free(ord); free(postmin);
+}
+
 static void kls_rowmt_trial(UF_long bnk, const UF_long *bp,
                             const UF_long *bc, const double *bv,
                             long ref_lnz, long ref_unz) {
@@ -4444,6 +5010,9 @@ static void kls_row_symbolic_validate(kls_solver *solver,
     kls_rowmt_trial(bnk, bp, bc, bv,
                     (long)solver->numeric->max_lnz_block,
                     (long)solver->numeric->max_unz_block);
+    kls_rowpv_trial(bnk, bp, bc, bv,
+                    (long)solver->numeric->max_lnz_block,
+                    (long)solver->numeric->max_unz_block);
     if (getenv("KLS_ROW_ENGINE_ATA") != NULL) {
       /* viability probe for the pivoted engine: chol(A*A') bounds the
          row-factorization pattern under ANY within-row column pivot
@@ -4515,6 +5084,24 @@ static void kls_row_symbolic_validate(kls_solver *solver,
               }
               free(cur2);
               UF_long *par3 = kls_rowmt_etree(bnk, ap2, ai2);
+              if (par3 != NULL && getenv("KLS_ATA_VALIDATE") != NULL) {
+                UF_long *pv = kls_rowpv_etree(bnk, bp, bc, bp[bnk]);
+                if (pv != NULL) {
+                  UF_long mism = 0, first = -1;
+                  for (UF_long i2 = 0; i2 < bnk; ++i2) {
+                    if (pv[i2] != par3[i2]) {
+                      if (mism == 0) first = i2;
+                      mism++;
+                    }
+                  }
+                  fprintf(stderr, "KLS ATA validate: mism=%ld first=%ld"
+                          " (pv=%ld truth=%ld)\n", (long)mism,
+                          (long)first,
+                          first >= 0 ? (long)pv[first] : -1L,
+                          first >= 0 ? (long)par3[first] : -1L);
+                  free(pv);
+                }
+              }
               if (par3 != NULL) {
                 UF_long *ls3 = NULL, *lc3 = NULL, *lt3 = NULL;
                 UF_long *us3 = NULL, *uc3 = NULL, *uo3 = NULL;
