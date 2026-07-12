@@ -4179,6 +4179,7 @@ size_t col_cap = (size_t) n / 4 + 16 ;
 	free ((void *) sh.lpend) ;
     free (panel_start) ;
 	free ((void *) sh.colver) ;
+	free (S.scratch) ;
 	free (S.colptr) ;
 	*p_LU = S.LU ;
 	*lnz = S.lnz ;
