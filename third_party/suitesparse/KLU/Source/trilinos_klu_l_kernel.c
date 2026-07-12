@@ -2218,6 +2218,18 @@ static int kls_pipe_finalize_column
                                   the cascade relies on it here */
 	/* prefix == k: the final state is exactly the serial algorithm's */
 	diagrow = S->P [k] ;
+	{
+	    const char *pd = getenv ("KLS_PIPE_PIVDUMP") ;
+	    if (pd != NULL && (Int) atol (pd) == k)
+	    {
+		Int r1 = 9740, r2 = 9983 ;
+		fprintf (stderr, "KLS pivdump k=%ld X[%ld]=%.17g"
+			 " Pinv=%ld X[%ld]=%.17g Pinv=%ld llen=%ld\n",
+			 (long) k, (long) r1, S->X [r1],
+			 (long) S->Pinv [r1], (long) r2, S->X [r2],
+			 (long) S->Pinv [r2], (long) S->Llen [k]) ;
+	    }
+	}
 	if (!lpivot (diagrow, &pivrow, &pivot, &abs_pivot, S->tol, S->X, LU,
 		     S->Lip, S->Llen, k, n, S->Pinv, &S->firstrow,
 		     S->Common))
