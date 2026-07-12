@@ -52,6 +52,10 @@ _Thread_local double kls_construct_secs ;
 _Thread_local long kls_pipe_inversions ;
 static FILE *kls_pipe_pivlog ;
 static Int kls_trace_row_a = -1, kls_trace_row_b = -1 ;
+static _Thread_local unsigned long long kls_lane_fp_src [32] ;
+static _Thread_local unsigned long long kls_lane_fp_full [32] ;
+static _Thread_local unsigned long long kls_fin_fp_src ;
+static _Thread_local unsigned long long kls_fin_fp_full ;
 static Int kls_trace_colk = -1 ;
 #define KLS_TROW(r) ((r) == kls_trace_row_a || (r) == kls_trace_row_b)
 _Thread_local double kls_step_sym, kls_step_cc, kls_step_num ;
@@ -504,8 +508,14 @@ static Int lpivot
 	    pdiag = p ;
 	}
 
-	/* find the partial-pivoting choice */
-	if (xabs > abs_pivot)
+	/* find the partial-pivoting choice.  Ties break toward the
+	   smaller row index: the candidate list's storage order is
+	   timing-dependent under the pipelined kernel, and scan-order
+	   tie-breaks made the pivot sequence (hence the whole factor)
+	   nondeterministic on tie-rich cancellation rows (mac). */
+	if (xabs > abs_pivot ||
+	    (xabs == abs_pivot && ppivrow != TRILINOS_KLU_EMPTY &&
+	     xabs > 0 && i < Li [ppivrow]))
 	{
 	    abs_pivot = xabs ;
 	    ppivrow = p ;
@@ -514,7 +524,10 @@ static Int lpivot
 
     /* xabs = ABS (X [last_row_index]) ;*/
     ABS (xabs, X [last_row_index]) ;
-    if (xabs > abs_pivot)
+    if (xabs > abs_pivot ||
+	(xabs == abs_pivot && xabs > 0 &&
+	 ppivrow != TRILINOS_KLU_EMPTY &&
+	 last_row_index < Li [ppivrow]))
     {
         abs_pivot = xabs ;
         ppivrow = TRILINOS_KLU_EMPTY ;
@@ -786,6 +799,9 @@ static void kls_prune_chunked
  * foreground first factors opt in; background/race threads see 0.
  * The KLS_KLU_PIPE env overrides for experiments. */
 _Thread_local int kls_klu_pipe_threads = 0 ;
+_Thread_local int kls_klu_pipe_det = 0 ;    /* routed: force the
+    deterministic scalar configuration (no dense finalize, no batched
+    consume) until those paths are order-determinized */
 
 #define KLS_PIVOT_RETRY (-2)
 static Int kls_lpivot_diag_claim
@@ -1906,6 +1922,27 @@ static void kls_pipe_round
     {
 	kls_pipe_t_sym += kls_klu_now () - kls_rd_t0 ;
     }
+    /* determinism: the DFS emits the segment in traversal order, which
+       inherits the published patterns' storage order and the promoted-
+       candidate list order - both timing-dependent across runs.  Pivot
+       order is globally topological and the promotion windows ascend,
+       so sorting every segment by Pinv makes the full per-column apply
+       sequence deterministic (mac amplifies any ulp reorder to e0
+       through its cancellation rows). */
+    {
+	for (s = top + 1 ; s < n ; s++)
+	{
+	    Int jj = S->Stack [s] ;
+	    Int pv = Pinv [jj] ;
+	    Int q2 = s ;
+	    while (q2 > top && Pinv [S->Stack [q2-1]] > pv)
+	    {
+		S->Stack [q2] = S->Stack [q2-1] ;
+		q2-- ;
+	    }
+	    S->Stack [q2] = jj ;
+	}
+    }
     /* numeric for this round's topological segment */
     {
 	const double kls_ph_t0 = kls_pipe_phase_prof ? kls_klu_now () : 0.0 ;
@@ -2364,8 +2401,9 @@ static int kls_pipe_finalize_column
 		cks ^= vb ^ ((unsigned long long) Li2 [qq] * 0x9E3779B97F4A7C15ull) ;
 	    }
 	    fprintf (kls_pipe_pivlog, "VF %ld %llx llen=%ld ucnt=%ld"
-		     " piv=%ld pv=%.17g\n", (long) k, cks, (long) ll2,
-		     (long) ucount, (long) pivrow, pivot) ;
+		     " piv=%ld pv=%.17g fps=%llx fpf=%llx\n", (long) k,
+		     cks, (long) ll2, (long) ucount, (long) pivrow,
+		     pivot, kls_fin_fp_src, kls_fin_fp_full) ;
 	    if (k == kls_trace_colk)
 	    {
 		for (qq = 0 ; qq < ll2 ; qq++)
@@ -2556,6 +2594,8 @@ static int kls_pipe_panel_lockstep
     /* phase A: construct every panel column into its own accumulator */
     for (w = 0 ; w < PW ; w++)
     {
+	kls_lane_fp_src [w] = 0 ;
+	kls_lane_fp_full [w] = 0 ;
 	l_len [w] = 0 ;
 	u_cnt [w] = 0 ;
 	seg_done [w] = 0 ;
@@ -2893,6 +2933,21 @@ static int kls_pipe_panel_lockstep
 				{
 				    xj [nm] = W->pB [(size_t) jpos * PW + w] ;
 				    mw [nm++] = w ;
+				}
+			    }
+			    if (kls_pipe_pivlog != NULL)
+			    {
+				Int m3 ;
+				for (m3 = 0 ; m3 < nm ; m3++)
+				{
+				    unsigned long long hb ;
+				    unsigned long long hs =
+					(unsigned long long) jnew *
+					0x9E3779B97F4A7C15ull ;
+				    memcpy (&hb, &xj [m3], 8) ;
+				    kls_lane_fp_src [mw [m3]] ^= hs ;
+				    kls_lane_fp_full [mw [m3]] ^=
+					hs ^ (hb * 0xC2B2AE3D27D4EB4Full) ;
 				}
 			    }
 			    if (kls_pipe_apply_kahan)
@@ -3287,6 +3342,8 @@ static int kls_pipe_panel_lockstep
 		    memcpy (W->ubuf_x, W->pUbuf_x [wf],
 			    (size_t) u_cnt [wf] * sizeof (Entry)) ;
 		}
+		kls_fin_fp_src = kls_lane_fp_src [wf] ;
+		kls_fin_fp_full = kls_lane_fp_full [wf] ;
 		if (kls_pipe_finalize_column (W, kf, l_len [wf],
 					      u_cnt [wf]))
 		{
@@ -3947,6 +4004,7 @@ size_t KLS_KLU_KERNEL_PIPE
     sh.blk_rowids = NULL ;
     sh.blk_k0 = NULL ;
     if (panel_start != NULL && kls_pipe_dense_panels &&
+	!kls_klu_pipe_det &&
 	getenv ("KLS_KLU_PIPE_NOBLOCKS") == NULL)
     {
 	sh.blk_a = (Entry * _Atomic *) calloc ((size_t) n,
@@ -5592,7 +5650,8 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     ASSERT (Common != NULL) ;
     kls_construct_prof = getenv ("KLS_CONSTRUCT_PROF") != NULL ;
     kls_pipe_phase_prof = getenv ("KLS_KLU_PIPE_PHASES") != NULL ;
-    kls_pipe_dense_panels = getenv ("KLS_KLU_PIPE_NODENSE") == NULL ;
+    kls_pipe_dense_panels = getenv ("KLS_KLU_PIPE_NODENSE") == NULL &&
+	!kls_klu_pipe_det ;
     kls_pipe_apply_kahan = getenv ("KLS_KLU_PIPE_KAHAN") != NULL ;
     Common->kls_dense_panels = 0 ;
     if (n >= 4096 && getenv ("KLS_SN_STATS") != NULL)

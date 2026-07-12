@@ -31818,6 +31818,7 @@ done:
    est work/column above a floor.  Thread-local, so race workers and
    other background factors never engage it. */
 extern _Thread_local int kls_klu_pipe_threads;
+extern _Thread_local int kls_klu_pipe_det;
 
 /* Worker count scaled to the estimated factor work: each pipe worker
    pays workspace setup (n-sized flag/X arrays) and pointer-chase
@@ -31842,16 +31843,29 @@ static int kls_pipe_first_factor_threads(const kls_solver *solver,
       getenv("KLS_DISABLE_PIPE_ROUTE") != NULL) {
     return 0;
   }
-  const double est = sym->est_flops;
+  double est = sym->est_flops;
   const double n = (double)sym->n;
-  if (getenv("KLS_TRACE_PIPE_ROUTE") != NULL) {
-    fprintf(stderr, "KLS pipe route: est=%.3e n=%.0f per=%.0f\n",
-            est, n, n > 0.0 ? est / n : -1.0);
+  if (!(est > 0.0) && sym->lnz > 0.0 && sym->unz > 0.0) {
+    /* some analyze paths leave est_flops unset (mac: the orientation
+       trials); a fill-based proxy decides instead - flops scale
+       superlinearly in fill, and 3e7 estimated entries puts the
+       serial factor in the tens of seconds where the pipe pays */
+    est = (sym->lnz + sym->unz) > 3.0e7 ? 6.0e9 : 0.0;
   }
-  if (getenv("KLS_KLU_PIPE_FORCE") == NULL &&
-      (!(est > 5.0e9) || n <= 0.0 || !(est / n >= 1.0e5))) {
+  if (getenv("KLS_TRACE_PIPE_ROUTE") != NULL) {
+    fprintf(stderr, "KLS pipe route: est=%.3e n=%.0f fill=%.3e\n",
+            est, n, sym->lnz + sym->unz);
+  }
+  if (getenv("KLS_KLU_PIPE_FORCE") == NULL && !(est > 5.0e9)) {
+    /* the old est/n >= 1e5 companion guard existed to keep the pipe
+       away from the cancellation classes (mac) whose accuracy it
+       destroyed; that was the pivot-race/apply-order defect, fixed by
+       the segment sort + deterministic tie-break.  The routed pipe
+       runs the deterministic scalar configuration (kls_klu_pipe_det)
+       and the flops floor alone decides profitability. */
     return 0;
   }
+  kls_klu_pipe_det = 1;
   return kls_pipe_scale_threads(solver->options.threads, est);
 }
 
@@ -127884,6 +127898,7 @@ int kls_factor(kls_solver *solver, const double *values) {
                                               solver->symbolic,
                                               &solver->common);
       kls_klu_pipe_threads = 0;
+      kls_klu_pipe_det = 0;
       if (solver->common.kls_dense_panels) {
         /* dense within-panel pivoting is a reduced-stability regime;
            refinement recovers the contract at one extra solve/iter */
