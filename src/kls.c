@@ -34388,6 +34388,9 @@ static int auto_orientation_prefers_transpose(UF_long n) {
 static int auto_orientation_prefers_normal(UF_long n,
                                            const UF_long *col_ptr,
                                            const UF_long *row_idx) {
+  if (n <= 30000 && getenv("KLS_ORIENT_NORMAL_SMALL") != NULL) {
+    return 1;
+  }
 
 #ifdef KLS_HAVE_METIS
   if (is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx)) {
