@@ -51,6 +51,9 @@ Int KLS_SN_PANEL_FACTOR (double *A, Int R, Int W, Int rowids [ ],
 _Thread_local double kls_construct_secs ;
 _Thread_local long kls_pipe_inversions ;
 static FILE *kls_pipe_pivlog ;
+static Int kls_trace_row_a = -1, kls_trace_row_b = -1 ;
+static Int kls_trace_colk = -1 ;
+#define KLS_TROW(r) ((r) == kls_trace_row_a || (r) == kls_trace_row_b)
 _Thread_local double kls_step_sym, kls_step_cc, kls_step_num ;
 _Thread_local long kls_construct_calls ;
 _Thread_local long kls_construct_entries ;
@@ -2030,6 +2033,7 @@ static int kls_pipe_emit_dense_column
 	fprintf (kls_pipe_pivlog, "D %ld %ld\n", (long) k,
 		 (long) pivrow) ;
     }
+
     if (sh->lpend != NULL)
     {
 	Int up, jcol ;
@@ -2342,6 +2346,28 @@ static int kls_pipe_finalize_column
 	{
 	    fprintf (kls_pipe_pivlog, "F %ld %ld\n", (long) k,
 		     (long) pivrow) ;
+	}
+	if (kls_pipe_pivlog != NULL)
+	{
+	    /* scratch layout pre-publish: Int Li[len] then Entry Lx */
+	    double cks = 0.0 ;
+	    Int qq ;
+	    Int ll2 = S->Llen [k] ;
+	    const Int *Li2 = (const Int *) LU ;
+	    const Entry *Lx2 = (const Entry *) (LU + UNITS (Int, ll2)) ;
+	    for (qq = 0 ; qq < ll2 ; qq++)
+	    {
+		cks += fabs (Lx2 [qq]) ;
+	    }
+	    fprintf (kls_pipe_pivlog, "VF %ld %.17g\n", (long) k, cks) ;
+	    if (k == kls_trace_colk)
+	    {
+		for (qq = 0 ; qq < ll2 ; qq++)
+		{
+		    fprintf (kls_pipe_pivlog, "CD %ld %ld %.17g\n",
+			     (long) k, (long) Li2 [qq], Lx2 [qq]) ;
+		}
+	    }
 	}
 	if (sh->lpend != NULL)
 	{
@@ -2896,6 +2922,21 @@ static int kls_pipe_panel_lockstep
 				Int rpos, m ;
 				KLS_PANEL_ROWPOS (r, rpos) ;
 				brow = W->pB + (size_t) rpos * PW ;
+				if (KLS_TROW (r) && kls_trace_colk >= k0 &&
+				    kls_trace_colk < k0 + PW)
+				{
+				    for (m = 0 ; m < nm ; m++)
+				    {
+					if (k0 + mw [m] == kls_trace_colk)
+					{
+					    fprintf (stderr, "TR APL r=%ld"
+						     " src=%ld v=%.17g"
+						     " xj=%.17g\n",
+						     (long) r, (long) jnew,
+						     v, xj [m]) ;
+					}
+				    }
+				}
 				for (m = 0 ; m < nm ; m++)
 				{
 				    brow [mw [m]] -= v * xj [m] ;
@@ -3213,6 +3254,17 @@ static int kls_pipe_panel_lockstep
 		    for (p = 0 ; p < l_len [wf] ; p++)
 		    {
 			Int i = lik_src [p] ;
+			if (KLS_TROW (i) && kf == kls_trace_colk)
+			{
+			    fprintf (stderr, "TR FLUSH r=%ld gen=%s pB=%.17g"
+				     " X=%.17g\n", (long) i,
+				     W->pRowGen [i] == W->pGen ? "cur"
+							       : "STALE",
+				     W->pRowGen [i] == W->pGen
+				       ? W->pB [(size_t) W->pRowPos [i] * PW
+						+ wf] : 0.0,
+				     S->X [i]) ;
+			}
 			if (W->pRowGen [i] == W->pGen)
 			{
 			    S->X [i] =
@@ -3673,6 +3725,15 @@ size_t KLS_KLU_KERNEL_PIPE
 	if (lp != NULL && kls_pipe_pivlog == NULL)
 	{
 	    kls_pipe_pivlog = fopen (lp, "w") ;
+	}
+	{
+	    const char *tr = getenv ("KLS_PIPE_TRACE_ROWS") ;
+	    if (tr != NULL)
+	    {
+		sscanf (tr, "%ld,%ld,%ld", (long *) &kls_trace_row_a,
+			(long *) &kls_trace_row_b,
+			(long *) &kls_trace_colk) ;
+	    }
 	}
     }
 
