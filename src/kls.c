@@ -29308,9 +29308,16 @@ static void *kls_metis_race_main(void *arg) {
         race->options.threads > 16 ? 16 : race->options.threads;
     }
   }
-  race->numeric = trilinos_klu_l_factor(race->col_ptr, race->row_idx,
-                                        race->values_copy, race->symbolic,
-                                        &race->common);
+  {
+    const double kls_rf_t0 = kls_now_seconds();
+    race->numeric = trilinos_klu_l_factor(race->col_ptr, race->row_idx,
+                                          race->values_copy, race->symbolic,
+                                          &race->common);
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr, "KLS race trial factor %.3fs (pipe=%d)\n",
+              kls_now_seconds() - kls_rf_t0, kls_klu_pipe_threads);
+    }
+  }
   kls_klu_pipe_threads = 0;
   atomic_store_explicit(&race->finished, 1, memory_order_release);
   return NULL;
