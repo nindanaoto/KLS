@@ -248,6 +248,9 @@ typedef struct trilinos_klu_l_common_struct /* 64-bit version (otherwise same as
        not accumulate (the pipelined path) leave it 0 and the walk
        runs as before. */
     double kls_kernel_flops ;
+    int kls_dense_panels ;      /* set when the pipelined factor used the
+                                   dense within-panel finalize (reduced-
+                                   stability regime: enroll refinement) */
 
 } trilinos_klu_l_common ;
 

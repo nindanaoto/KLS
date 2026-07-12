@@ -2790,6 +2790,7 @@ static int kls_pipe_panel_lockstep
 			    {
 				return (1) ;
 			    }
+			    S->Common->kls_dense_panels = 1 ;
 			    next_final = PW ;
 			    break ;
 			}
@@ -4262,6 +4263,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     kls_construct_prof = getenv ("KLS_CONSTRUCT_PROF") != NULL ;
     kls_pipe_phase_prof = getenv ("KLS_KLU_PIPE_PHASES") != NULL ;
     kls_pipe_dense_panels = getenv ("KLS_KLU_PIPE_DENSE") != NULL ;
+    Common->kls_dense_panels = 0 ;
     if (n >= 4096 && getenv ("KLS_SN_STATS") != NULL)
     {
 	/* supernodal-first-factor feasibility probe: fundamental

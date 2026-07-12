@@ -124399,12 +124399,18 @@ int kls_factor(kls_solver *solver, const double *values) {
                                            : KLS_FACTOR_PATH_KLU_FIRST);
       kls_klu_pipe_threads =
         kls_pipe_first_factor_threads(solver, solver->symbolic);
+      solver->common.kls_dense_panels = 0;
       solver->numeric = trilinos_klu_l_factor(solver->col_ptr,
                                               solver->row_idx,
                                               numeric_values,
                                               solver->symbolic,
                                               &solver->common);
       kls_klu_pipe_threads = 0;
+      if (solver->common.kls_dense_panels) {
+        /* dense within-panel pivoting is a reduced-stability regime;
+           refinement recovers the contract at one extra solve/iter */
+        solver->numeric_needs_refinement = 1;
+      }
       elapsed += kls_now_seconds() - start;
       }
     }
