@@ -28498,7 +28498,7 @@ extern _Thread_local int kls_klu_pipe_threads;
 static int kls_pipe_scale_threads(int threads, double est_flops) {
   int cap = threads > 16 ? 16 : threads;
   if (est_flops > 0.0) {
-    const double by_work = est_flops / 2.5e8;
+    const double by_work = est_flops / 1.25e8;
     if (by_work < (double)cap) {
       cap = by_work < 2.0 ? 2 : (int)by_work;
     }
@@ -29337,6 +29337,11 @@ static void *kls_metis_race_main(void *arg) {
         getenv("KLS_DISABLE_PIPE_ROUTE") == NULL &&
         (getenv("KLS_KLU_PIPE_FORCE_RACE") != NULL ||
          (est > 5.0e9 && rn > 0.0 && est / rn >= 1.0e5))) {
+      /* default-on measured WORSE: giants pay 16 x O(n) workspace
+         setup on the race thread (circuit5M_dc +1.5s, Freescale1
+         +1.7s) and memchip's default-path run produced resid 1.0
+         (failed adoption; unreproduced under the force env - do not
+         re-default without solving that) */
       kls_klu_pipe_threads =
         race->options.threads > 16 ? 16 : race->options.threads;
     }
