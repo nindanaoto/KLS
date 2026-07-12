@@ -2839,6 +2839,7 @@ typedef struct kls_rowuf_s {
   double perturb;           /* >0: replace all-zero pivot rows with
                                this magnitude (refinement recovers) */
   UF_long perturbed;
+  int fully_static;         /* diagonal unconditionally when nonzero */
   double t_sym, t_num, t_piv;   /* phase accumulators (trial prof) */
 } kls_rowuf;
 
@@ -2988,7 +2989,8 @@ static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
        diagonal of the permuted matrix) */
     for (UF_long q = rf->u_ptr[i]; q < rf->u_ptr[i] + ucount; ++q) {
       if (rf->u_cols[q] == i &&
-          fabs(rf->x[i]) >= rf->tol * amax) {
+          (rf->fully_static ? rf->x[i] != 0.0
+                            : fabs(rf->x[i]) >= rf->tol * amax)) {
         best = q;
         break;
       }
@@ -3113,7 +3115,8 @@ static void kls_row_symbolic_validate(kls_solver *solver,
             bmax = av;
           }
         }
-        rf.perturb = 1.49e-8 * (bmax > 0.0 ? bmax : 1.0);
+        rf.fully_static = getenv("KLS_ROW_ENGINE_STATIC") != NULL;
+      rf.perturb = 1.49e-8 * (bmax > 0.0 ? bmax : 1.0);
       }
       rf.u_cap = (size_t)(solver->numeric->unz + bnk + 1);
       rf.l_cap = (size_t)(solver->numeric->lnz + bnk + 1);
@@ -3189,10 +3192,13 @@ static void kls_row_symbolic_validate(kls_solver *solver,
             }
           }
           fprintf(stderr,
-                  "KLS row-engine BLOCK trial: nk=%ld max|x-1| %.3e"
+                  "KLS row-engine BLOCK trial: nk=%ld ref_lnz %ld"
+                  " ref_unz %ld max|x-1| %.3e"
                   " lnz %ld unz %ld factor %.3fs perturbed=%ld"
                   " sym=%.1fs num=%.1fs piv=%.1fs\n",
-                  (long)bnk, maxerr, (long)rf.l_len, (long)rf.u_len,
+                  (long)bnk, (long)solver->numeric->max_lnz_block,
+                  (long)solver->numeric->max_unz_block,
+                  maxerr, (long)rf.l_len, (long)rf.u_len,
                   t1 - t0, (long)rf.perturbed, rf.t_sym, rf.t_num,
                   rf.t_piv);
         } else {
