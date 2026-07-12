@@ -33658,6 +33658,24 @@ static int kls_choose_symbolic_inner(UF_long n,
                                        double *score_out,
                                        kls_separator_analysis *separator_out) {
   kls_separator_analysis_clear(separator_out);
+  if (options->ordering == KLS_ORDERING_AUTO && n < 16384 &&
+      col_ptr[n] < 262144) {
+    /* tiny systems: the ordering competition (AMF/AMD scoring, spec
+       threads) costs ~0.5ms of a ~6ms one-shot while the fill deltas
+       at this scale are noise (rajat03: AMD 4.1ms factor vs AMF
+       4.2ms; the competition itself was the difference) */
+    kls_options amd_opts = *options;
+    amd_opts.ordering = KLS_ORDERING_AMD;
+    int status = analyze_with_ordering(n, col_ptr, row_idx, &amd_opts,
+                                       KLS_ORDERING_AMD, symbolic_out,
+                                       common_out, separator_out);
+    if (status == KLS_OK) {
+      *selected_ordering_out = KLS_ORDERING_AMD;
+      *score_out = symbolic_score(*symbolic_out);
+      return KLS_OK;
+    }
+    return status;
+  }
   if (options->ordering != KLS_ORDERING_AUTO) {
     int status = analyze_with_ordering(n, col_ptr, row_idx, options,
                                        options->ordering, symbolic_out,
