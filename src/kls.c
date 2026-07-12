@@ -388,6 +388,7 @@ struct kls_solver {
   int metis_race_deferred_invalid;
   int prestatic_deferred;
   int block_order_deferred;
+  int numeric_from_pipe;
   int factor_preps_deferred;
   int block_trial_active;
   int numeric_needs_refinement;
@@ -31893,7 +31894,11 @@ static int kls_pipe_first_factor_threads(const kls_solver *solver,
        and the flops floor alone decides profitability. */
     return 0;
   }
-  kls_klu_pipe_det = 1;
+  /* full configuration (dense + batched consume): one-shot draws
+     measured e-16..e-9 on mac, and with fp64 refactors (the
+     numeric_from_pipe gate) the end-to-end contract holds; the
+     deterministic-scalar pin predates those fixes */
+  kls_klu_pipe_det = 0;
   return kls_pipe_scale_threads(solver->options.threads, est);
 }
 
@@ -46237,6 +46242,15 @@ static int kls_fp32_refactor_env_state(void) {
    the routing proxy: the giant-class matrices it targets stream far more
    factor values than right-hand-side entries. */
 static int kls_fp32_refactor_wanted(kls_solver *solver) {
+  if (solver != NULL && solver->numeric_from_pipe &&
+      kls_fp32_refactor_env_state() == 0) {
+    /* pipe-produced numerics: fp64 refactors measured BETTER on both
+       speed (mac refavg 1.35-1.40 vs 1.5-1.6 fp32) and accuracy
+       (solve 0.066 rel 7.2e-7 without the IR sweep the fp32 mirror
+       requires; fp32 draws hit 2.9e-5..1.5e-4).  The fp32 mirrors
+       were validated on serial-kernel numerics. */
+    return 0;
+  }
   const int env = kls_fp32_refactor_env_state();
   if (env != 0) {
     return env > 0;
@@ -127961,6 +127975,7 @@ int kls_factor(kls_solver *solver, const double *values) {
                                               numeric_values,
                                               solver->symbolic,
                                               &solver->common);
+      solver->numeric_from_pipe = kls_klu_pipe_threads > 0;
       kls_klu_pipe_threads = 0;
       kls_klu_pipe_det = 0;
       if (solver->common.kls_dense_panels) {
@@ -128227,6 +128242,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
 #ifdef KLS_HAVE_SPRAL_SCALING
   if (solver->block_order_deferred) {
     solver->block_order_deferred = 0;
+  solver->numeric_from_pipe = 0;
     double bo_elapsed = 0.0;
     maybe_select_block_structured_ordering(solver, &bo_elapsed,
                                            numeric_values);
@@ -128240,6 +128256,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver->prestatic_deferred) {
     solver->prestatic_deferred = 0;
   solver->block_order_deferred = 0;
+  solver->numeric_from_pipe = 0;
     double prestatic_elapsed = 0.0;
     maybe_select_pre_static_row_match(solver, &prestatic_elapsed,
                                       numeric_values, 1);
@@ -128440,6 +128457,41 @@ static int solve_impl(kls_solver *solver,
       for (size_t tu = 0; tu < lus && tu < 24; ++tu) {
         fprintf(stderr, "TXU %zu %.17g\n", tu, lu[tu]);
       }
+    }
+  }
+  if (getenv("KLS_TRACE_SOLVE_PATH") != NULL) {
+    fprintf(stderr, "KLS burst gate: dec=%d pend=%d ready=%d direct=%d"
+            " s0=%d/%.3f s1=%d/%.3f\n",
+            solver->row_accept_decision, solver->row_accept_pending_side,
+            solver->row_refactor_values_ready,
+            kls_row_refactor_solve_uses_direct_values(solver),
+            solver->row_accept_solve_samples[0],
+            solver->row_accept_solve_samples[0] > 0
+              ? solver->row_accept_solve_seconds[0] /
+                solver->row_accept_solve_samples[0] : -1.0,
+            solver->row_accept_solve_samples[1],
+            solver->row_accept_solve_samples[1] > 0
+              ? solver->row_accept_solve_seconds[1] /
+                solver->row_accept_solve_samples[1] : -1.0);
+  }
+  if (solver->row_refactor_values_ready &&
+      !kls_row_refactor_solve_uses_direct_values(solver) &&
+      (solver->row_accept_decision < 0 ||
+       (solver->row_accept_decision == 0 &&
+        solver->row_accept_pending_side == 0 &&
+        solver->row_accept_solve_samples[0] >= 1 &&
+        solver->row_accept_solve_samples[1] >= 1 &&
+        solver->row_accept_solve_seconds[0] /
+            (double)solver->row_accept_solve_samples[0] <
+          0.9 * (solver->row_accept_solve_seconds[1] /
+                 (double)solver->row_accept_solve_samples[1])))) {
+    /* honor a COLUMN acceptance verdict (the decision machinery never
+       redirected the solve path: mac kept row-solving at 189ms after
+       deciding column/66ms), and during idle sampling publish when
+       both routes' samples already show column decisively faster.
+       Small systems where the row solve wins keep the old behavior. */
+    if (kls_publish_row_refactor_values(solver)) {
+      solver->row_refactor_values_ready = 0;
     }
   }
   if (kls_try_row_refactor_solve(solver, kernel_transpose, nrhs, x, ldx)) {
