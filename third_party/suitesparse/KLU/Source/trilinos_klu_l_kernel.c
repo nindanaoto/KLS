@@ -2903,6 +2903,24 @@ static int kls_pipe_panel_lockstep
 		   any failure fall through to the scalar cascade - the
 		   buffer is copied, not consumed. */
 		Int R2 = 0, pos ;
+		{
+		    /* candidates discovered by the DFS but never touched
+		       by a numeric update have no buffer row yet (sparse
+		       shapes; pre2's density masked this): map them so
+		       the compaction below covers every candidate (their
+		       lanes are correctly zero) */
+		    Int wq, pq, posq ;
+		    for (wq = 0 ; wq < PW ; wq++)
+		    {
+			Int *likq = wq == 0 ? (Int *) S->scratch
+					    : W->pLik [wq] ;
+			for (pq = 0 ; pq < l_len [wq] ; pq++)
+			{
+			    KLS_PANEL_ROWPOS (likq [pq], posq) ;
+			    (void) posq ;
+			}
+		    }
+		}
 		for (pos = 0 ; pos < nbrows ; pos++)
 		{
 		    if (S->Pinv [W->pRowList [pos]] < 0)
