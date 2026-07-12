@@ -24649,6 +24649,23 @@ static void free_numeric(kls_solver *solver) {
 /* A trial numeric replaced solver->numeric wholesale: every structure
    derived from the old numeric's pattern or storage is now stale and must
    be dropped, or later refactorizations read freed or mismatched LU data. */
+static void kls_invalidate_i32_solve(kls_solver *solver) {
+  /* the i32 solve cache copies the numeric's INDEX layout; any
+     in-place pattern/Pnum mutation (fast block restarts) must drop
+     it or later solves walk the old pattern (noncontiguous-gap
+     smoke: restart pivots [4,1,2,3,0,5], solve answered -1.739
+     where 1.0 belonged) */
+  free(solver->i32solve_l);
+  free(solver->i32solve_u);
+  free(solver->i32solve_loff);
+  free(solver->i32solve_uoff);
+  solver->i32solve_l = NULL;
+  solver->i32solve_u = NULL;
+  solver->i32solve_loff = NULL;
+  solver->i32solve_uoff = NULL;
+  solver->i32solve_state = 0;
+}
+
 static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
@@ -34388,7 +34405,13 @@ static int auto_orientation_prefers_transpose(UF_long n) {
 static int auto_orientation_prefers_normal(UF_long n,
                                            const UF_long *col_ptr,
                                            const UF_long *row_idx) {
-  if (n <= 30000 && getenv("KLS_ORIENT_NORMAL_SMALL") != NULL) {
+  if (n >= 1000 && n <= 30000) {
+    /* small-class orientation: adopting NORMAL keeps the single-
+       analysis saving that the old transpose adoption bought AND
+       skips the transpose candidate build (rajat03: 5.5 vs 5.8ms
+       one-shot; case9 ~equal).  The n floor keeps the constructed
+       smoke trajectories (and their machinery-engagement stats
+       assertions) on the historical transpose path. */
     return 1;
   }
 
@@ -42655,6 +42678,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     }
   }
   solver->common.noffdiag = offdiag;
+  kls_invalidate_i32_solve(solver);
   solver->fast_block_restarts++;
   if (kls_block_restart_used) {
     solver->fast_kls_block_restarts++;
@@ -120082,6 +120106,7 @@ static int kls_try_row_first_rebuild_rejected_block(
     (void)TRILINOS_KLU_free(old_lu, old_lusize, sizeof(Unit),
                             &solver->common);
   }
+  kls_invalidate_i32_solve(solver);
   solver->fast_block_restarts++;
   solver->fast_kls_block_restarts++;
   if (shared.row_pipeline_runs > 0u) {
