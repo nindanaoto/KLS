@@ -3212,6 +3212,13 @@ static int kls_pipe_panel_lockstep
 		    W->pPFlag [j] = TRILINOS_KLU_EMPTY ;
 		}
 
+	    if (kls_pipe_pivlog != NULL && kls_pipe_dense_panels &&
+		use_buf && PW >= 4 && plimit >= k0)
+	    {
+		fprintf (kls_pipe_pivlog, "DP %ld nf=%ld pl=%ld\n",
+			 (long) k0, (long) next_final,
+			 (long) (plimit - k0)) ;
+	    }
 	    if (kls_pipe_dense_panels && use_buf && next_final == 0 &&
 		PW >= 4 && plimit == k0)
 	    {
