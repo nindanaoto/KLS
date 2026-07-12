@@ -42,6 +42,9 @@ _Thread_local long kls_pipe_madds ;
 static int kls_pipe_phase_prof ;
 static int kls_pipe_dense_panels ;
 static int kls_pipe_apply_kahan ;
+static _Thread_local long kls_pipe_batched ;
+static _Thread_local long kls_pipe_batches ;
+static _Thread_local long kls_pipe_scalar_src ;
 Int KLS_SN_PANEL_FACTOR (double *A, Int R, Int W, Int rowids [ ],
 			 const Int diagrows [ ], double tol) ;
 
@@ -2644,6 +2647,11 @@ static int kls_pipe_panel_lockstep
 				if (K >= 2)
 				{
 				    Int bpos [32] ;
+				    if (kls_pipe_phase_prof)
+				    {
+					kls_pipe_batched += K ;
+					kls_pipe_batches++ ;
+				    }
 				    Entry bx [32][32] ;
 				    Int kq, m2, p2 ;
 				    for (kq = 0 ; kq < K ; kq++)
@@ -2747,6 +2755,10 @@ static int kls_pipe_panel_lockstep
 				}
 			    }
 			}
+		    }
+		    if (kls_pipe_phase_prof)
+		    {
+			kls_pipe_scalar_src++ ;
 		    }
 		    mask = W->pPFlag [j] ;
 		    jnew = S->Pinv [j] ;
@@ -3417,6 +3429,9 @@ static void *kls_klu_pipe_worker_main (void *arg)
 		 kls_construct_entries,
 		 kls_pipe_t_sym, kls_pipe_t_num,
 		 kls_pipe_copy_bytes >> 20, kls_pipe_madds) ;
+	fprintf (stderr, "KLS pipe batch tid=%d batched=%ld batches=%ld"
+		 " scalar=%ld\n", W->tid, kls_pipe_batched,
+		 kls_pipe_batches, kls_pipe_scalar_src) ;
     }
     free (promoted) ;
     return (NULL) ;
@@ -3760,7 +3775,7 @@ size_t KLS_KLU_KERNEL_PIPE
     sh.blk_rowids = NULL ;
     sh.blk_k0 = NULL ;
     if (panel_start != NULL && kls_pipe_dense_panels &&
-	getenv ("KLS_KLU_PIPE_BLOCKS") != NULL)
+	getenv ("KLS_KLU_PIPE_NOBLOCKS") == NULL)
     {
 	sh.blk_a = (Entry * _Atomic *) calloc ((size_t) n,
 					       sizeof (Entry *)) ;
@@ -4713,7 +4728,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     ASSERT (Common != NULL) ;
     kls_construct_prof = getenv ("KLS_CONSTRUCT_PROF") != NULL ;
     kls_pipe_phase_prof = getenv ("KLS_KLU_PIPE_PHASES") != NULL ;
-    kls_pipe_dense_panels = getenv ("KLS_KLU_PIPE_DENSE") != NULL ;
+    kls_pipe_dense_panels = getenv ("KLS_KLU_PIPE_NODENSE") == NULL ;
     kls_pipe_apply_kahan = getenv ("KLS_KLU_PIPE_KAHAN") != NULL ;
     Common->kls_dense_panels = 0 ;
     if (n >= 4096 && getenv ("KLS_SN_STATS") != NULL)
