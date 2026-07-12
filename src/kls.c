@@ -24267,8 +24267,9 @@ static UF_long kls_metis_order_inner(UF_long n,
                        metis_perm, metis_iperm);
   }
   if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS metis: NodeND %.3fs (ndp=%d)\n",
-            kls_now_seconds() - kls_metis_t0, (int)metis_ndp_npes);
+    fprintf(stderr, "KLS metis: NodeND %.3fs (ndp=%d par=%d)\n",
+            kls_now_seconds() - kls_metis_t0, (int)metis_ndp_npes,
+            (int)par_nd_done);
   }
   UF_long order_lnz = 0;
   if (metis_status == METIS_OK) {
@@ -29274,9 +29275,24 @@ static void *kls_metis_race_main(void *arg) {
     atomic_store_explicit(&race->finished, 1, memory_order_release);
     return NULL;
   }
+  {
+    /* the race trial is on the one-shot critical path for the
+       predicted giants; route it through the pipelined kernel under
+       the same est-flops floor as foreground first factors */
+    const double est = race->symbolic->est_flops;
+    const double rn = (double)race->symbolic->n;
+    if (race->options.threads >= 2 &&
+        getenv("KLS_DISABLE_PIPE_ROUTE") == NULL &&
+        (getenv("KLS_KLU_PIPE_FORCE_RACE") != NULL ||
+         (est > 5.0e9 && rn > 0.0 && est / rn >= 1.0e5))) {
+      kls_klu_pipe_threads =
+        race->options.threads > 16 ? 16 : race->options.threads;
+    }
+  }
   race->numeric = trilinos_klu_l_factor(race->col_ptr, race->row_idx,
                                         race->values_copy, race->symbolic,
                                         &race->common);
+  kls_klu_pipe_threads = 0;
   atomic_store_explicit(&race->finished, 1, memory_order_release);
   return NULL;
 }
