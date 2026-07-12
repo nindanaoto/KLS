@@ -30840,6 +30840,21 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       solver->nnz >= 5u * solver->n && solver->nnz <= 1000000 &&
       missing_diagonal * 100u <= 3u * solver->n &&
       weak >= 2000 && weak * 100u >= solver->n;
+    if (!deferred && getenv("KLS_PRESTATIC_DEFER") != NULL &&
+        solver->n <= 150000u && !majority_weak) {
+      /* one-shot-lean: a mostly-strong diagonal means the incumbent
+         ordering factors fine and the trial is a cycle-payoff bet
+         (rajat25: 0.53s trial vs 0.146s factor) - run it from the
+         first refactor's consult.  Majority-weak rows (onetone1,
+         twotone: the RF harmonic-balance class) stay inline: the
+         matched ordering is their fast one-shot path (onetone1
+         measured 0.17 prestatic vs 4.0 klu_first one-shot). */
+      solver->prestatic_deferred = 1;
+#ifdef KLS_HAVE_METIS
+      kls_prestatic_ordering_ctx = 0;
+#endif
+      return;
+    }
     int use_medium_gate = 1;
 #ifdef KLS_HAVE_SPRAL_SCALING
     if (!medium_weak_candidate) {
@@ -126367,25 +126382,11 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   const int had_numeric = solver->numeric != NULL;
   if (!had_numeric) {
-    if (getenv("KLS_PRESTATIC_DEFER") != NULL && solver->numeric == NULL &&
-        solver->n <= 150000u &&
-        solver->row_perm == NULL && solver->options.static_pivoting) {
-      /* scope: small/medium trial candidates only.  The large-spral
-         class (pre2: n 659K Hungarian) NEEDS the prestatic ordering
-         structurally - deferring it routes the one-shot into the
-         predicted attempt, which both wastes 13.7s and trips a latent
-         double free in the pivot-rescue recursion (block_trial re-
-         entry frees the outer invocation's adopted numeric through
-         free_numeric while the outer local still aliases it). */
-      /* Run the match trial from the first refactor instead: its cost
-         (rajat25 0.83s, pre2 13.4s Hungarian) lands in one 99x-amortized
-         refactor and leaves the one-shot factor path untouched; the
-         cycle is neutral (the same seconds move columns). */
-      solver->prestatic_deferred = 1;
-    } else {
-      maybe_select_pre_static_row_match(solver, &elapsed, numeric_values,
-                                        0);
-    }
+    /* one-shot-lean deferral decided inside the match entry once the
+       weak-diagonal census is known (majority-weak rows must stay
+       inline; see the gate there) */
+    maybe_select_pre_static_row_match(solver, &elapsed, numeric_values,
+                                      0);
     KLS_ENTRY_PHASE("prestatic")
     if (solver->numeric == NULL && solver->prestatic_adopted_unfactored &&
         solver->values != NULL) {
@@ -126969,6 +126970,19 @@ int kls_refactor(kls_solver *solver, const double *values) {
     double prestatic_elapsed = 0.0;
     maybe_select_pre_static_row_match(solver, &prestatic_elapsed,
                                       numeric_values, 1);
+    if (solver->values != NULL) {
+      /* adoption replaced the pattern with the trial's permuted+scaled
+         copy; refilling it with the caller's untransformed values
+         factors a different matrix (v22: rajat25/twotone singular at
+         the first refactor) */
+      numeric_values = solver->values;
+    }
+    if (getenv("KLS_TRACE_PRESTATIC") != NULL) {
+      fprintf(stderr, "KLS defer consult: values=%p row_perm=%p"
+              " numeric=%p status=%d\n",
+              (void *)solver->values, (void *)solver->row_perm,
+              (void *)solver->numeric, (int)solver->common.status);
+    }
   }
 #ifdef KLS_HAVE_METIS
   if (solver->metis_race_deferred && kls_metis_race_ready(solver)) {
