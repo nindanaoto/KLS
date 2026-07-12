@@ -2349,17 +2349,23 @@ static int kls_pipe_finalize_column
 	}
 	if (kls_pipe_pivlog != NULL)
 	{
-	    /* scratch layout pre-publish: Int Li[len] then Entry Lx */
-	    double cks = 0.0 ;
+	    /* scratch layout pre-publish: Int Li[len] then Entry Lx.
+	       order-independent exact fingerprint: XOR of per-entry
+	       (row ^ value-bits) - storage order varies benignly */
+	    unsigned long long cks = 0 ;
 	    Int qq ;
 	    Int ll2 = S->Llen [k] ;
 	    const Int *Li2 = (const Int *) LU ;
 	    const Entry *Lx2 = (const Entry *) (LU + UNITS (Int, ll2)) ;
 	    for (qq = 0 ; qq < ll2 ; qq++)
 	    {
-		cks += fabs (Lx2 [qq]) ;
+		unsigned long long vb ;
+		memcpy (&vb, &Lx2 [qq], 8) ;
+		cks ^= vb ^ ((unsigned long long) Li2 [qq] * 0x9E3779B97F4A7C15ull) ;
 	    }
-	    fprintf (kls_pipe_pivlog, "VF %ld %.17g\n", (long) k, cks) ;
+	    fprintf (kls_pipe_pivlog, "VF %ld %llx llen=%ld ucnt=%ld"
+		     " piv=%ld pv=%.17g\n", (long) k, cks, (long) ll2,
+		     (long) ucount, (long) pivrow, pivot) ;
 	    if (k == kls_trace_colk)
 	    {
 		for (qq = 0 ; qq < ll2 ; qq++)
