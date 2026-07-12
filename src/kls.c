@@ -2849,7 +2849,27 @@ static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
   UF_long top = 0;
   const double rt0 = kls_now_seconds();
   double rt1 = 0.0;
-  /* symbolic: reach over pivoted columns; collect source STEPS */
+  if (rf->u_len + rf->n > (UF_long)rf->u_cap) {
+    size_t ncap = rf->u_cap * 2u + (size_t)rf->n;
+    UF_long *nc = (UF_long *)realloc(rf->u_cols,
+                                     ncap * sizeof(UF_long));
+    double *nv = nc != NULL
+      ? (double *)realloc(rf->u_vals, ncap * sizeof(double)) : NULL;
+    if (nc == NULL || nv == NULL) {
+      if (nc != NULL) {
+        rf->u_cols = nc;
+      }
+      return 0;
+    }
+    rf->u_cols = nc;
+    rf->u_vals = nv;
+    rf->u_cap = ncap;
+  }
+  UF_long ucount_m = 0;
+  rf->u_ptr[i] = rf->u_len;
+  /* symbolic: reach over pivoted columns; collect source STEPS.
+     DFS terminals (unpivoted columns) ARE the U candidates - collect
+     them here where mark/pos are already loaded (free traffic). */
   for (UF_long p = rf->csr_ptr[i]; p < rf->csr_ptr[i + 1]; ++p) {
     const UF_long c0 = rf->csr_col[p];
     if (rf->mark[c0] == tag) {
@@ -2857,6 +2877,8 @@ static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
     }
     rf->mark[c0] = tag;
     if (rf->pos[c0] == KLS_KLU_EMPTY) {
+      rf->u_cols[rf->u_len++] = c0;
+      ucount_m++;
       continue;              /* unpivoted: U candidate, no traversal */
     }
     rf->stack[top++] = rf->pos[c0];
@@ -2871,6 +2893,9 @@ static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
         rf->mark[k] = tag;
         if (rf->pos[k] != KLS_KLU_EMPTY) {
           rf->stack[top++] = rf->pos[k];
+        } else {
+          rf->u_cols[rf->u_len++] = k;
+          ucount_m++;
         }
       }
     }
@@ -2907,22 +2932,6 @@ static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
     rf->l_vals = nv;
     rf->l_cap = ncap;
   }
-  if (rf->u_len + rf->n > (UF_long)rf->u_cap) {
-    size_t ncap = rf->u_cap * 2u + (size_t)rf->n;
-    UF_long *nc = (UF_long *)realloc(rf->u_cols,
-                                     ncap * sizeof(UF_long));
-    double *nv = nc != NULL
-      ? (double *)realloc(rf->u_vals, ncap * sizeof(double)) : NULL;
-    if (nc == NULL || nv == NULL) {
-      if (nc != NULL) {
-        rf->u_cols = nc;
-      }
-      return 0;
-    }
-    rf->u_cols = nc;
-    rf->u_vals = nv;
-    rf->u_cap = ncap;
-  }
   rf->l_ptr[i] = rf->l_len;
   for (UF_long t = 0; t < l_count; ++t) {
     const UF_long st = rf->pattern[t];
@@ -2948,31 +2957,7 @@ static int kls_rowuf_row(kls_rowuf *rf, UF_long i) {
   {
     UF_long best = KLS_KLU_EMPTY;
     double amax = 0.0;
-    UF_long ucount = 0;
-    rf->u_ptr[i] = rf->u_len;
-    /* collect U candidates: marked unpivoted columns; walk the A row
-       and the consumed sources' U rows with a second tag */
-    const UF_long utag = tag + rf->n; /* disjoint tag space */
-    for (UF_long p = rf->csr_ptr[i]; p < rf->csr_ptr[i + 1]; ++p) {
-      const UF_long c = rf->csr_col[p];
-      if (rf->pos[c] == KLS_KLU_EMPTY && rf->mark[c] != (UF_long)-utag) {
-        rf->mark[c] = (UF_long)-utag;
-        rf->u_cols[rf->u_len++] = c;
-        ucount++;
-      }
-    }
-    for (UF_long t = 0; t < l_count; ++t) {
-      const UF_long st = rf->pattern[t];
-      for (UF_long q = rf->u_ptr[st]; q < rf->u_ptr[st + 1]; ++q) {
-        const UF_long c = rf->u_cols[q];
-        if (rf->pos[c] == KLS_KLU_EMPTY &&
-            rf->mark[c] != (UF_long)-utag) {
-          rf->mark[c] = (UF_long)-utag;
-          rf->u_cols[rf->u_len++] = c;
-          ucount++;
-        }
-      }
-    }
+    const UF_long ucount = ucount_m;   /* collected in the symbolic */
     for (UF_long q = rf->u_ptr[i]; q < rf->u_ptr[i] + ucount; ++q) {
       const double av = fabs(rf->x[rf->u_cols[q]]);
       if (av > amax) {
