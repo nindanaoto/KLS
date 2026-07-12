@@ -2580,6 +2580,19 @@ static int transpose_candidate(const kls_pattern_candidate *source,
                                kls_pattern_candidate *candidate);
 
 static double kls_now_seconds(void) {
+  /* KLS_FAKE_CLOCK: deterministic counter clock for flushing out
+     timing-gated decisions that change results (task #21).  Timing
+     may choose speed, never results - any behavior difference under
+     the fake clock marks an invalid gate. */
+  static int fake_clock = -1;
+  if (fake_clock == -1) {
+    fake_clock = getenv("KLS_FAKE_CLOCK") != NULL;
+  }
+  if (fake_clock) {
+    static _Atomic long fake_ticks;
+    return 1e-7 * (double)atomic_fetch_add_explicit(&fake_ticks, 1,
+                                                    memory_order_relaxed);
+  }
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
