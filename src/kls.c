@@ -27600,6 +27600,7 @@ static int maybe_accept_spral_hungarian_numeric_trial(
     goto done;
   }
 
+
   kls_options trial_options = solver->options;
   kls_ordering trial_ordering = KLS_ORDERING_AUTO;
   double trial_score = 0.0;
@@ -27610,6 +27611,7 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   if (status != KLS_OK) {
     goto done;
   }
+
   trial_common.scale = choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
                                                       trial_row_idx,
                                                       &trial_options,
@@ -28496,7 +28498,7 @@ extern _Thread_local int kls_klu_pipe_threads;
 static int kls_pipe_scale_threads(int threads, double est_flops) {
   int cap = threads > 16 ? 16 : threads;
   if (est_flops > 0.0) {
-    const double by_work = est_flops / 5.0e8;
+    const double by_work = est_flops / 2.5e8;
     if (by_work < (double)cap) {
       cap = by_work < 2.0 ? 2 : (int)by_work;
     }
@@ -28785,6 +28787,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     goto done;
   }
 
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr, "KLS pre-static: match+gates done %.3fs\n",
+            kls_now_seconds() - kls_ps_t0);
+  }
   status = build_sorted_row_permuted_pattern(solver->n, solver->nnz,
                                              base_col_ptr, base_row_idx,
                                              base_values, row_perm,
@@ -28794,6 +28800,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                              &trial_input_to_csc);
   if (status != KLS_OK) {
     goto done;
+  }
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr, "KLS pre-static: pattern build done %.3fs\n",
+            kls_now_seconds() - kls_ps_t0);
   }
 
   kls_options trial_options = solver->options;
@@ -28834,12 +28844,17 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
   }
 #endif
+
   status = choose_symbolic_for_pattern(solver->n, trial_col_ptr, trial_row_idx,
                                        &trial_options, &trial_symbolic,
                                        &trial_common, &trial_ordering,
                                        &trial_score, &trial_separator);
   if (status != KLS_OK) {
     goto done;
+  }
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr, "KLS pre-static: choose done %.3fs\n",
+            kls_now_seconds() - kls_ps_t0);
   }
 #if defined(KLS_HAVE_METIS) && defined(KLS_HAVE_SPRAL_SCALING)
   if (use_large_spral_match && trial_ordering != KLS_ORDERING_METIS &&
