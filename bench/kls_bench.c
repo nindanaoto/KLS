@@ -67,6 +67,7 @@ typedef struct bench_index_view {
 #include <sys/time.h>
 #include <ucontext.h>
 #include <dlfcn.h>
+#include <unistd.h>
 #define KLS_BENCH_PROF_MAX 200000
 static void *kls_prof_pcs[KLS_BENCH_PROF_MAX];
 static volatile long kls_prof_n;
@@ -621,6 +622,20 @@ static void usage(const char *argv0) {
 }
 
 int main(int argc, char **argv) {
+  if (getenv("OPENBLAS_NUM_THREADS") == NULL &&
+      getenv("KLS_BENCH_NO_REEXEC") == NULL) {
+    /* This binary links the pthread OpenBLAS for KLS's serial cblas
+       calls.  Its constructor pre-spawns a 16-worker pool whose idle
+       loop sched_yields for the whole life of a short run (sampling:
+       78% of one-shot CPU in sched_yield; rajat03's 2.7ms serial
+       factor measured 4.1-16ms) - and the pool spawns before main so
+       no API call can prevent it.  Neither the CKTSO nor SubtreeLU
+       compare binaries link OpenBLAS, so this is purely self-inflicted
+       harness interference.  Re-exec with the pool disabled; KLS
+       schedules its own parallelism above serial BLAS calls. */
+    setenv("OPENBLAS_NUM_THREADS", "1", 1);
+    execv("/proc/self/exe", argv);
+  }
   if (argc < 2) {
     usage(argv[0]);
     return EXIT_FAILURE;

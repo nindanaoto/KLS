@@ -37890,10 +37890,39 @@ void kls_default_options(kls_options *options) {
   options->static_pivoting = 1;
 }
 
+#ifdef KLS_HAVE_CBLAS
+/* KLS schedules its own parallelism and calls BLAS from its worker
+   threads; OpenBLAS's internal pool only interferes.  Worse, that
+   pool spin-waits with sched_yield for tens of ms after every call:
+   sampling showed 78% of a small one-shot's CPU inside sched_yield,
+   and rajat03's serial 2.7ms first factor measured 4.1ms (16.3ms on
+   bad draws) with the pool enabled.  Serialize it once up front. */
+extern void openblas_set_num_threads(int);
+#pragma weak openblas_set_num_threads
+static void kls_serialize_blas_once(void) {
+  static int done = 0;
+  if (done || getenv("KLS_KEEP_BLAS_THREADS") != NULL) {
+    return;
+  }
+  done = 1;
+  if (openblas_set_num_threads != NULL) {
+    openblas_set_num_threads(1);
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr, "KLS blas: openblas pool serialized\n");
+    }
+  } else if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS blas: openblas_set_num_threads unresolved\n");
+  }
+}
+#endif
+
 int kls_create(kls_solver **solver_out) {
   if (solver_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+#ifdef KLS_HAVE_CBLAS
+  kls_serialize_blas_once();
+#endif
   kls_solver *solver = (kls_solver *)calloc(1, sizeof(*solver));
   if (solver == NULL) {
     return KLS_ERR_OUT_OF_MEMORY;
@@ -128307,12 +128336,27 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver->numeric_from_pipe = kls_klu_pipe_threads > 0;
       kls_klu_pipe_threads = 0;
       kls_klu_pipe_det = 0;
+      if (kls_trace_entry && solver->numeric != NULL) {
+        fprintf(stderr,
+                "KLS klu_first: lnz=%ld unz=%ld nblocks=%ld maxblock=%ld "
+                "noffdiag=%ld nrealloc=%ld scale=%ld tol=%g initmem=%g "
+                "t=%.3fms\n",
+                (long)solver->numeric->lnz, (long)solver->numeric->unz,
+                (long)solver->symbolic->nblocks,
+                (long)solver->symbolic->maxblock,
+                (long)solver->common.noffdiag,
+                (long)solver->common.nrealloc,
+                (long)solver->common.scale, solver->common.tol,
+                solver->common.initmem_amd,
+                1e3 * (kls_now_seconds() - start));
+      }
       if (solver->common.kls_dense_panels) {
         /* dense within-panel pivoting is a reduced-stability regime;
            refinement recovers the contract at one extra solve/iter */
         solver->numeric_needs_refinement = 1;
       }
       elapsed += kls_now_seconds() - start;
+      KLS_ENTRY_PHASE("klu_factor")
       }
     }
   }
@@ -128323,6 +128367,7 @@ int kls_factor(kls_solver *solver, const double *values) {
                                                           : KLS_ERR_FACTOR_FAILED;
   }
   kls_update_numeric_diagnostics(solver, 1);
+  KLS_ENTRY_PHASE("num_diag")
   if ((solver->numeric_needs_refinement ||
        getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL) &&
       numeric_values != NULL &&
@@ -128338,6 +128383,7 @@ int kls_factor(kls_solver *solver, const double *values) {
              (size_t)solver->nnz * sizeof(*numeric_values));
     }
   }
+  KLS_ENTRY_PHASE("refine_keep")
   kls_row_symbolic_validate(solver, numeric_values);
   KLS_ENTRY_PHASE("diag_full")
   int diagnostics_have_flops = 1;
