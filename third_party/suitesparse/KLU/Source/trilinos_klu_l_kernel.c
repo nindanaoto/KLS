@@ -41,6 +41,7 @@ _Thread_local long kls_pipe_copy_bytes ;
 _Thread_local long kls_pipe_madds ;
 static int kls_pipe_phase_prof ;
 static int kls_pipe_dense_panels ;
+static int kls_pipe_apply_kahan ;
 Int KLS_SN_PANEL_FACTOR (double *A, Int R, Int W, Int rowids [ ],
 			 const Int diagrows [ ], double tol) ;
 
@@ -2626,6 +2627,31 @@ static int kls_pipe_panel_lockstep
 				    mw [nm++] = w ;
 				}
 			    }
+			    if (kls_pipe_apply_kahan)
+			    {
+				/* compensated accumulation: order-driven
+				   rounding in the union sums is what the
+				   cancellation classes amplify through
+				   pivot choices (stability probe) */
+				for (q = 0 ; q < len ; q++)
+				{
+				    const Int r = (Int) Li32 [q] ;
+				    const Entry v = Lx [q] ;
+				    Entry *brow ;
+				    Int rpos, m ;
+				    KLS_PANEL_ROWPOS (r, rpos) ;
+				    brow = W->pB + (size_t) rpos * PW ;
+				    for (m = 0 ; m < nm ; m++)
+				    {
+					double y = -v * xj [m] ;
+					double a0 = brow [mw [m]] ;
+					double t = a0 + y ;
+					double e = (a0 - t) + y ;
+					brow [mw [m]] = t + e ;
+				    }
+				}
+			    }
+			    else
 			    for (q = 0 ; q < len ; q++)
 			    {
 				const Int r = (Int) Li32 [q] ;
@@ -3296,15 +3322,33 @@ Int KLS_SN_PANEL_FACTOR
 	}
 	{
 	    double piv = A [j * W + j] ;
+	    const int comp = getenv ("KLS_SN_PANEL_KAHAN") != NULL ;
 	    for (r = j + 1 ; r < R ; r++)
 	    {
 		double m = A [r * W + j] / piv ;
 		A [r * W + j] = m ;
 		if (m != 0.0)
 		{
+		    if (comp)
+		    {
+			/* compensated update: 2Sum of the subtraction so
+			   the elimination's own rounding cannot flip
+			   later pivot comparisons (stability probe) */
+			for (p = j + 1 ; p < W ; p++)
+			{
+			    double y = -m * A [j * W + p] ;
+			    double a0 = A [r * W + p] ;
+			    double t = a0 + y ;
+			    double e = (a0 - t) + y ;
+			    A [r * W + p] = t + e ;
+			}
+		    }
+		    else
+		    {
 		    for (p = j + 1 ; p < W ; p++)
 		    {
 			A [r * W + p] -= m * A [j * W + p] ;
+		    }
 		    }
 		}
 	    }
@@ -4434,6 +4478,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     kls_construct_prof = getenv ("KLS_CONSTRUCT_PROF") != NULL ;
     kls_pipe_phase_prof = getenv ("KLS_KLU_PIPE_PHASES") != NULL ;
     kls_pipe_dense_panels = getenv ("KLS_KLU_PIPE_DENSE") != NULL ;
+    kls_pipe_apply_kahan = getenv ("KLS_KLU_PIPE_KAHAN") != NULL ;
     Common->kls_dense_panels = 0 ;
     if (n >= 4096 && getenv ("KLS_SN_STATS") != NULL)
     {
