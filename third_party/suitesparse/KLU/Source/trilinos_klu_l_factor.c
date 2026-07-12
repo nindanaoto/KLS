@@ -279,10 +279,25 @@ static void factor2
 	    }
 
 	    /* allocates 1 arrays: LUbx [block] */
+	    {
+	    struct timespec kls_bt0, kls_bt1 ;
+	    const int kls_bprof = getenv ("KLS_TRACE_BLOCK_TIME") != NULL ;
+	    if (kls_bprof) clock_gettime (CLOCK_MONOTONIC, &kls_bt0) ;
 	    Numeric->LUsize [block] = TRILINOS_KLU_kernel_factor (nk, Ap, Ai, Ax, Q,
 		    lsize, &LUbx [block], Udiag + k1, Llen + k1, Ulen + k1,
 		    Lip + k1, Uip + k1, Pblock, &lnz_block, &unz_block,
 		    X, Iwork, k1, Pinv, Rs, Offp, Offi, Offx, Common) ;
+	    if (kls_bprof)
+	    {
+		double dt ;
+		clock_gettime (CLOCK_MONOTONIC, &kls_bt1) ;
+		dt = (double) (kls_bt1.tv_sec - kls_bt0.tv_sec) +
+		    1e-9 * (double) (kls_bt1.tv_nsec - kls_bt0.tv_nsec) ;
+		fprintf (stderr, "KLS blocktime: block %ld nk %ld %.4fs"
+			 " lnz %ld\n", (long) block, (long) nk, dt,
+			 (long) lnz_block) ;
+	    }
+	    }
 
 	    if (Common->status < TRILINOS_KLU_OK ||
 	       (Common->status == TRILINOS_KLU_SINGULAR && Common->halt_if_singular))

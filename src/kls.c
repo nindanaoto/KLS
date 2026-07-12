@@ -126543,16 +126543,18 @@ int kls_factor(kls_solver *solver, const double *values) {
         (!is_large_sparse_diagonal_low_degree_pattern(
             solver->n, solver->col_ptr, solver->row_idx) ||
          getenv("KLS_PREDICTED_TRY_LOWDEG") != NULL) &&
-        /* one-shot-lean: the attempt's build cost scales with the
-           predicted fill while its win scales with the serial factor
-           work; shallow factors (few flops per fill entry) cannot pay
-           for the build even when accepted (rajat25: 0.17s attempt vs
-           0.15s serial klu) */
+        /* one-shot-lean: the attempt has a ~0.13s fixed cost (union
+           walk, layout, first value pass, preps) while its payoff is
+           the serial factor time it replaces, which scales with fill
+           (~1e7 entries/s serial).  Below a few million estimated
+           entries the serial factor is cheaper than the attempt
+           itself (rajat25: 0.146s serial vs 0.17s rejected attempt;
+           flops estimates cannot express this - rajat25 estimates
+           deeper than accepted rows) */
         (getenv("KLS_PRESTATIC_DEFER") == NULL ||
          solver->symbolic == NULL ||
-         !(solver->symbolic->est_flops <
-           10.0 * (double)(solver->symbolic->lnz +
-                           solver->symbolic->unz))) &&
+         (double)(solver->symbolic->lnz + solver->symbolic->unz) >=
+           4.0e6) &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
       if (kls_trace_entry) {
