@@ -28482,6 +28482,23 @@ done:
    other background factors never engage it. */
 extern _Thread_local int kls_klu_pipe_threads;
 
+/* Worker count scaled to the estimated factor work: each pipe worker
+   pays workspace setup (n-sized flag/X arrays) and pointer-chase
+   startup that only amortizes over enough numeric work.  ~5e8 est
+   flops per worker keeps big factors at full width (pre2 1e11 -> 16)
+   while small matrices stop overspawning (onetone1 1.5e9 -> 3:
+   16 workers measured 0.221s vs 0.208 at 4). */
+static int kls_pipe_scale_threads(int threads, double est_flops) {
+  int cap = threads > 16 ? 16 : threads;
+  if (est_flops > 0.0) {
+    const double by_work = est_flops / 5.0e8;
+    if (by_work < (double)cap) {
+      cap = by_work < 2.0 ? 2 : (int)by_work;
+    }
+  }
+  return cap;
+}
+
 static int kls_pipe_first_factor_threads(const kls_solver *solver,
                                          const trilinos_klu_l_symbolic *sym) {
   if (solver == NULL || sym == NULL || solver->options.threads < 2 ||
@@ -28498,7 +28515,7 @@ static int kls_pipe_first_factor_threads(const kls_solver *solver,
       (!(est > 5.0e9) || n <= 0.0 || !(est / n >= 1.0e5))) {
     return 0;
   }
-  return solver->options.threads > 16 ? 16 : solver->options.threads;
+  return kls_pipe_scale_threads(solver->options.threads, est);
 }
 
 static int kls_trace_pre_static_enabled(void) {
@@ -28955,8 +28972,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 #endif
     if (pipe_route && solver->options.threads >= 2 &&
         getenv("KLS_DISABLE_PIPE_ROUTE") == NULL) {
-      kls_klu_pipe_threads = solver->options.threads > 16
-        ? 16 : solver->options.threads;
+      kls_klu_pipe_threads =
+        kls_pipe_scale_threads(solver->options.threads,
+                               trial_symbolic != NULL
+                                 ? trial_symbolic->est_flops : 0.0);
     }
 #ifdef KLS_HAVE_METIS
     /* Speculative METIS refinement: the refinement's serial

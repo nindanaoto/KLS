@@ -3005,8 +3005,12 @@ size_t KLS_KLU_KERNEL_PIPE
        coverage; column mode 17.7s).  The win is the buffer: union
        applies land in a compact L2-resident panel-major block instead
        of the 5MB X vector (pre2 workers 12.0 -> 7.2s). */
-    if (getenv ("KLS_KLU_PIPE_NOPANELS") == NULL)
+    if (getenv ("KLS_KLU_PIPE_NOPANELS") == NULL &&
+	(size_t) n * sizeof (Entry) > ((size_t) 1 << 20))
     {
+	/* the buffer's win is X-footprint compression into L2; when X
+	   already fits L2 the lockstep only adds synchronization
+	   (onetone1 measured +5%) */
 	Int *sp = (Int *) malloc ((size_t) (4 * n + 2) * sizeof (Int)) ;
 	if (sp != NULL)
 	{
