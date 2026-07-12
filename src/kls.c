@@ -29420,6 +29420,7 @@ static void *kls_metis_race_main(void *arg) {
     if (race->options.threads >= 2 &&
         getenv("KLS_DISABLE_PIPE_ROUTE") == NULL &&
         (getenv("KLS_KLU_PIPE_FORCE_RACE") != NULL ||
+         getenv("KLS_KLU_PIPE_RACE_DEFAULT") != NULL ||
          (est > 5.0e9 && rn > 0.0 && est / rn >= 1.0e5))) {
       /* default-on measured WORSE: giants pay 16 x O(n) workspace
          setup on the race thread (circuit5M_dc +1.5s, Freescale1
