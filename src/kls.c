@@ -31713,11 +31713,14 @@ static int maybe_select_auto_row_match(kls_solver *solver,
      factors it in parallel with identical acceptance semantics */
   kls_klu_pipe_threads =
     kls_pipe_first_factor_threads(solver, trial_symbolic);
+  /* the trial tolerates the full pipe (dense panels + batched
+     consume): its output is judged by the quality gates below and
+     the class's own dense-panel win is the point (pre2) */
+  kls_klu_pipe_det = 0;
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
                           trial_symbolic, &trial_common);
   kls_klu_pipe_threads = 0;
-  kls_klu_pipe_det = 0;
   if (trial_numeric == NULL || trial_common.status < 0 ||
       trial_common.status == TRILINOS_KLU_SINGULAR) {
     goto done;
