@@ -4425,6 +4425,493 @@ static void kls_rowpv_trial(UF_long bnk, const UF_long *bp,
   free(post); free(ord); free(postmin);
 }
 
+/* Column-space pivoted engine: classic GP column elimination with
+   threshold ROW pivoting, scheduled by the COLUMN etree (etree of
+   A'A) with subtree-completion gates.  George/Ng: under arbitrary
+   row pivoting, column k's structure depends only on columns in its
+   A'A-etree subtree - an order-independent bound (unlike the row/
+   column-pivot mirror, measured unsound).  Updates apply in
+   ascending column order (the pivot order - globally topological),
+   so the arithmetic is deterministic under any execution order. */
+typedef struct {
+  UF_long n;
+  const UF_long *cp, *ri;      /* block CSC */
+  const double *cv;
+  double tol, perturb;
+  UF_long *l_start, *l_cnt, *l_rows;   /* L spans per column */
+  double *l_vals;              /* unit-diag scaled */
+  UF_long *u_start, *u_cnt, *u_srcs;   /* U spans: source column ids */
+  double *u_vals;
+  UF_long *rowof;              /* row -> owning column (EMPTY if none) */
+  UF_long *pivrow;
+  double *udiag;
+  size_t l_cap, u_cap;
+  long l_len, u_len;
+  long perturbed;
+  volatile int failed;
+  const UF_long *parent;
+  UF_long *child_done;
+  const UF_long *nchildren;
+  UF_long *ready;
+  volatile long ready_head, ready_tail;
+  volatile long cols_done;
+  int nthreads;
+} kls_colpv;
+
+typedef struct {
+  kls_colpv *sh;
+  int tid;
+  UF_long *mark, *stack, *pattern, *cand;
+  double *x;
+  long cols;
+} kls_colpv_worker;
+
+/* etree of A'A: columns sharing a row, consecutive linking */
+static UF_long *kls_colpv_etree(UF_long n, UF_long nrow,
+                                const UF_long *cp, const UF_long *ri) {
+  UF_long *parent = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  UF_long *anc = (UF_long *)malloc((size_t)n * sizeof(UF_long));
+  UF_long *prev_row = (UF_long *)malloc((size_t)(nrow > 0 ? nrow : 1) *
+                                        sizeof(UF_long));
+  if (parent == NULL || anc == NULL || prev_row == NULL) {
+    free(parent); free(anc); free(prev_row);
+    return NULL;
+  }
+  for (UF_long r = 0; r < nrow; ++r) {
+    prev_row[r] = KLS_KLU_EMPTY;
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    parent[k] = KLS_KLU_EMPTY;
+    anc[k] = KLS_KLU_EMPTY;
+    for (UF_long p = cp[k]; p < cp[k + 1]; ++p) {
+      const UF_long r = ri[p];
+      UF_long j = prev_row[r];
+      prev_row[r] = k;
+      while (j != KLS_KLU_EMPTY && j < k) {
+        const UF_long nxt = anc[j];
+        anc[j] = k;
+        if (nxt == KLS_KLU_EMPTY) {
+          parent[j] = k;
+          break;
+        }
+        j = nxt;
+      }
+    }
+  }
+  free(anc); free(prev_row);
+  return parent;
+}
+
+static int kls_colpv_col(kls_colpv *sh, kls_colpv_worker *w,
+                         UF_long k) {
+  const UF_long tag = k + 1;
+  UF_long pat_count = 0;
+  UF_long top = 0;
+  UF_long lcount = 0;
+  /* symbolic: DFS through owning columns of reached rows */
+  for (UF_long p = sh->cp[k]; p < sh->cp[k + 1]; ++p) {
+    const UF_long r0 = sh->ri[p];
+    if (w->mark[r0] == tag) {
+      continue;
+    }
+    w->mark[r0] = tag;
+    if (sh->rowof[r0] == KLS_KLU_EMPTY) {
+      w->cand[lcount++] = r0;
+      continue;
+    }
+    w->stack[top++] = sh->rowof[r0];
+    while (top > 0) {
+      const UF_long j = w->stack[--top];
+      w->pattern[pat_count++] = j;
+      const UF_long qs = sh->l_start[j];
+      const UF_long qe = qs + sh->l_cnt[j];
+      for (UF_long q = qs; q < qe; ++q) {
+        const UF_long r = sh->l_rows[q];
+        if (w->mark[r] == tag) {
+          continue;
+        }
+        w->mark[r] = tag;
+        if (sh->rowof[r] != KLS_KLU_EMPTY) {
+          w->stack[top++] = sh->rowof[r];
+        } else {
+          w->cand[lcount++] = r;
+        }
+      }
+    }
+  }
+  /* reservation: L holds candidates (minus the pivot, kept anyway),
+     U holds one entry per consumed source column */
+  const long lb = __sync_fetch_and_add(&sh->l_len, (long)lcount);
+  const long ub = __sync_fetch_and_add(&sh->u_len, (long)pat_count);
+  if ((size_t)(lb + lcount) > sh->l_cap ||
+      (size_t)(ub + pat_count) > sh->u_cap) {
+    return 0;
+  }
+  /* ascending source columns = pivot order = topological */
+  for (UF_long a3 = 1; a3 < pat_count; ++a3) {
+    const UF_long v = w->pattern[a3];
+    UF_long b3 = a3;
+    while (b3 > 0 && w->pattern[b3 - 1] > v) {
+      w->pattern[b3] = w->pattern[b3 - 1];
+      b3--;
+    }
+    w->pattern[b3] = v;
+  }
+  for (UF_long p = sh->cp[k]; p < sh->cp[k + 1]; ++p) {
+    w->x[sh->ri[p]] = sh->cv[p];
+  }
+  sh->u_start[k] = (UF_long)ub;
+  for (UF_long t = 0; t < pat_count; ++t) {
+    const UF_long j = w->pattern[t];
+    const UF_long pr = sh->pivrow[j];
+    const double ukj = w->x[pr];
+    sh->u_srcs[ub + t] = j;
+    sh->u_vals[ub + t] = ukj;
+    w->x[pr] = 0.0;
+    if (ukj != 0.0) {
+      const UF_long qs = sh->l_start[j];
+      const UF_long qe = qs + sh->l_cnt[j];
+      for (UF_long q = qs; q < qe; ++q) {
+        w->x[sh->l_rows[q]] -= ukj * sh->l_vals[q];
+      }
+    }
+  }
+  sh->u_cnt[k] = pat_count;
+  /* threshold row pivot with diagonal preference (row id == k) */
+  {
+    UF_long best = KLS_KLU_EMPTY;
+    double amax = 0.0;
+    for (UF_long t = 0; t < lcount; ++t) {
+      const double av = fabs(w->x[w->cand[t]]);
+      if (av > amax) {
+        amax = av;
+        best = t;
+      }
+    }
+    if (best == KLS_KLU_EMPTY || amax == 0.0) {
+      if (sh->perturb > 0.0 && lcount > 0) {
+        best = 0;
+        for (UF_long t = 0; t < lcount; ++t) {
+          if (w->cand[t] == k) {
+            best = t;
+            break;
+          }
+        }
+        w->x[w->cand[best]] = sh->perturb;
+        __sync_fetch_and_add(&sh->perturbed, 1L);
+        amax = sh->perturb;
+      } else {
+        return -1;
+      }
+    }
+    for (UF_long t = 0; t < lcount; ++t) {
+      if (w->cand[t] == k && fabs(w->x[k]) >= sh->tol * amax) {
+        best = t;
+        break;
+      }
+    }
+    const UF_long pr = w->cand[best];
+    const double piv = w->x[pr];
+    sh->pivrow[k] = pr;
+    sh->udiag[k] = piv;
+    sh->l_start[k] = (UF_long)lb;
+    {
+      UF_long d = (UF_long)lb;
+      for (UF_long t = 0; t < lcount; ++t) {
+        const UF_long r = w->cand[t];
+        if (r == pr) {
+          w->x[r] = 0.0;
+          continue;
+        }
+        sh->l_rows[d] = r;
+        sh->l_vals[d] = w->x[r] / piv;
+        w->x[r] = 0.0;
+        d++;
+      }
+      sh->l_cnt[k] = d - (UF_long)lb;
+    }
+    __sync_synchronize();
+    sh->rowof[pr] = k;
+  }
+  return 1;
+}
+
+static void *kls_colpv_main(void *arg) {
+  kls_colpv_worker *w = (kls_colpv_worker *)arg;
+  kls_colpv *sh = w->sh;
+  const UF_long n = sh->n;
+  while (!sh->failed) {
+    long h = sh->ready_head;
+    if (h >= sh->ready_tail) {
+      if (sh->cols_done >= (long)n) {
+        return NULL;
+      }
+      __asm__ __volatile__("pause");
+      continue;
+    }
+    if (!__sync_bool_compare_and_swap(&sh->ready_head, h, h + 1)) {
+      continue;
+    }
+    while (sh->ready[h] == KLS_KLU_EMPTY) {
+      __asm__ __volatile__("pause");
+    }
+    const UF_long k = sh->ready[h];
+    const int rc = kls_colpv_col(sh, w, k);
+    w->cols++;
+    if (rc <= 0) {
+      fprintf(stderr, "KLS colPV fail rc=%d col=%ld l=%ld u=%ld\n",
+              rc, (long)k, sh->l_len, sh->u_len);
+      sh->failed = 1;
+      __sync_fetch_and_add((long *)&sh->cols_done, 1L);
+      return NULL;
+    }
+    {
+      const UF_long par = sh->parent[k];
+      if (par != KLS_KLU_EMPTY) {
+        const UF_long done =
+          (UF_long)__sync_add_and_fetch(&sh->child_done[par], 1L);
+        if (done == sh->nchildren[par]) {
+          const long slot = __sync_fetch_and_add(&sh->ready_tail, 1L);
+          if (slot < (long)sh->n) {
+            sh->ready[slot] = par;
+          }
+        }
+      }
+      __sync_fetch_and_add((long *)&sh->cols_done, 1L);
+    }
+  }
+  return NULL;
+}
+
+static void kls_colpv_trial(UF_long bnk, const UF_long *bp,
+                            const UF_long *bc, const double *bv,
+                            long ref_lnz, long ref_unz) {
+  const char *pe = getenv("KLS_ROW_ENGINE_CPV");
+  if (pe == NULL) {
+    return;
+  }
+  int nt = atoi(pe);
+  if (nt < 1) {
+    nt = 1;
+  }
+  if (nt > 64) {
+    nt = 64;
+  }
+  /* block CSC from the row-form CSR */
+  UF_long *cp = (UF_long *)calloc((size_t)bnk + 1, sizeof(UF_long));
+  UF_long *ci = (UF_long *)malloc((size_t)bp[bnk] * sizeof(UF_long));
+  double *cx = (double *)malloc((size_t)bp[bnk] * sizeof(double));
+  if (cp == NULL || ci == NULL || cx == NULL) {
+    free(cp); free(ci); free(cx);
+    return;
+  }
+  for (UF_long p = 0; p < bp[bnk]; ++p) {
+    cp[bc[p] + 1]++;
+  }
+  for (UF_long c = 0; c < bnk; ++c) {
+    cp[c + 1] += cp[c];
+  }
+  {
+    UF_long *cur = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    if (cur == NULL) {
+      free(cp); free(ci); free(cx);
+      return;
+    }
+    memcpy(cur, cp, (size_t)bnk * sizeof(UF_long));
+    for (UF_long r = 0; r < bnk; ++r) {
+      for (UF_long p = bp[r]; p < bp[r + 1]; ++p) {
+        const UF_long dst = cur[bc[p]]++;
+        ci[dst] = r;
+        cx[dst] = bv[p];
+      }
+    }
+    free(cur);
+  }
+  const double e0 = kls_now_seconds();
+  UF_long *parent = kls_colpv_etree(bnk, bnk, cp, ci);
+  if (parent == NULL) {
+    free(cp); free(ci); free(cx);
+    return;
+  }
+  UF_long *nchild = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+  UF_long *cdone = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+  UF_long *ready = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  if (nchild == NULL || cdone == NULL || ready == NULL) {
+    free(cp); free(ci); free(cx);
+    free(parent); free(nchild); free(cdone); free(ready);
+    return;
+  }
+  UF_long nroots = 0, maxdep = 0;
+  for (UF_long i = 0; i < bnk; ++i) {
+    if (parent[i] != KLS_KLU_EMPTY) {
+      nchild[parent[i]]++;
+    } else {
+      nroots++;
+    }
+  }
+  {
+    UF_long *dep = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+    if (dep != NULL) {
+      for (UF_long i = 0; i < bnk; ++i) {
+        if (parent[i] != KLS_KLU_EMPTY) {
+          const UF_long d = dep[i] + 1;
+          if (d > dep[parent[i]]) {
+            dep[parent[i]] = d;
+          }
+        }
+        if (dep[i] > maxdep) {
+          maxdep = dep[i];
+        }
+      }
+      free(dep);
+    }
+  }
+  const double e1 = kls_now_seconds();
+  kls_colpv sh;
+  memset(&sh, 0, sizeof(sh));
+  sh.n = bnk;
+  sh.cp = cp;
+  sh.ri = ci;
+  sh.cv = cx;
+  sh.tol = 0.001;
+  {
+    const char *te = getenv("KLS_ROW_ENGINE_CPV_TOL");
+    if (te != NULL) {
+      sh.tol = atof(te);
+    }
+  }
+  {
+    double bmax = 0.0;
+    for (UF_long p = 0; p < bp[bnk]; ++p) {
+      const double av = fabs(bv[p]);
+      if (av > bmax) {
+        bmax = av;
+      }
+    }
+    sh.perturb = 1.49e-8 * (bmax > 0.0 ? bmax : 1.0);
+  }
+  sh.l_cap = (size_t)(ref_lnz > 0 ? ref_lnz : bp[bnk]) * 3u +
+             (size_t)bnk * 2u;
+  sh.u_cap = (size_t)(ref_unz > 0 ? ref_unz : bp[bnk]) * 3u +
+             (size_t)bnk * 2u;
+  sh.parent = parent;
+  sh.child_done = cdone;
+  sh.nchildren = nchild;
+  sh.ready = ready;
+  sh.nthreads = nt;
+  sh.l_start = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  sh.l_cnt = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+  sh.l_rows = (UF_long *)malloc(sh.l_cap * sizeof(UF_long));
+  sh.l_vals = (double *)malloc(sh.l_cap * sizeof(double));
+  sh.u_start = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  sh.u_cnt = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+  sh.u_srcs = (UF_long *)malloc(sh.u_cap * sizeof(UF_long));
+  sh.u_vals = (double *)malloc(sh.u_cap * sizeof(double));
+  sh.rowof = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  sh.pivrow = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+  sh.udiag = (double *)malloc((size_t)bnk * sizeof(double));
+  kls_colpv_worker wk[64];
+  memset(wk, 0, sizeof(wk));
+  int ok = sh.l_start && sh.l_cnt && sh.l_rows && sh.l_vals &&
+           sh.u_start && sh.u_cnt && sh.u_srcs && sh.u_vals &&
+           sh.rowof && sh.pivrow && sh.udiag;
+  for (int t = 0; t < nt && ok; ++t) {
+    wk[t].sh = &sh;
+    wk[t].tid = t;
+    wk[t].mark = (UF_long *)calloc((size_t)bnk, sizeof(UF_long));
+    wk[t].stack = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    wk[t].pattern = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    wk[t].cand = (UF_long *)malloc((size_t)bnk * sizeof(UF_long));
+    wk[t].x = (double *)calloc((size_t)bnk, sizeof(double));
+    ok = wk[t].mark && wk[t].stack && wk[t].pattern && wk[t].cand &&
+         wk[t].x != NULL;
+  }
+  if (ok) {
+    for (UF_long r = 0; r < bnk; ++r) {
+      sh.rowof[r] = KLS_KLU_EMPTY;
+      ready[r] = KLS_KLU_EMPTY;
+    }
+    long tail = 0;
+    if (getenv("KLS_ROW_ENGINE_CPV_IDX") != NULL) {
+      for (UF_long i = 0; i < bnk; ++i) {
+        ready[tail++] = i;
+      }
+    } else {
+      for (UF_long i = 0; i < bnk; ++i) {
+        if (nchild[i] == 0) {
+          ready[tail++] = i;
+        }
+      }
+    }
+    sh.ready_tail = tail;
+    pthread_t th[64];
+    const double t0 = kls_now_seconds();
+    for (int t = 1; t < nt; ++t) {
+      pthread_create(&th[t], NULL, kls_colpv_main, &wk[t]);
+    }
+    kls_colpv_main(&wk[0]);
+    for (int t = 1; t < nt; ++t) {
+      pthread_join(th[t], NULL);
+    }
+    const double t1 = kls_now_seconds();
+    if (!sh.failed) {
+      /* solve LUx = b for b = A*ones; check x == ones */
+      double *b2 = (double *)calloc((size_t)bnk, sizeof(double));
+      double *y = (double *)malloc((size_t)bnk * sizeof(double));
+      double *z = (double *)calloc((size_t)bnk, sizeof(double));
+      double maxerr = -1.0;
+      if (b2 != NULL && y != NULL && z != NULL) {
+        for (UF_long kk = 0; kk < bnk; ++kk) {
+          for (UF_long p = cp[kk]; p < cp[kk + 1]; ++p) {
+            b2[ci[p]] += cx[p];
+          }
+        }
+        for (UF_long kk = 0; kk < bnk; ++kk) {
+          const double t = b2[sh.pivrow[kk]];
+          y[kk] = t;
+          const UF_long qs = sh.l_start[kk];
+          for (UF_long q = qs; q < qs + sh.l_cnt[kk]; ++q) {
+            b2[sh.l_rows[q]] -= sh.l_vals[q] * t;
+          }
+        }
+        for (UF_long kk = bnk; kk-- > 0;) {
+          const double xk = y[kk] / sh.udiag[kk];
+          z[kk] = xk;
+          const UF_long qs = sh.u_start[kk];
+          for (UF_long q = qs; q < qs + sh.u_cnt[kk]; ++q) {
+            y[sh.u_srcs[q]] -= sh.u_vals[q] * xk;
+          }
+        }
+        maxerr = 0.0;
+        for (UF_long c = 0; c < bnk; ++c) {
+          const double e = fabs(z[c] - 1.0);
+          if (e > maxerr) {
+            maxerr = e;
+          }
+        }
+      }
+      free(b2); free(y); free(z);
+      fprintf(stderr,
+              "KLS col-engine CPV trial: nt=%d etree=%.2fs roots=%ld"
+              " depth=%ld max|x-1| %.3e lnz %ld unz %ld factor %.3fs"
+              " perturbed=%ld\n",
+              nt, e1 - e0, (long)nroots, (long)maxdep, maxerr,
+              (long)sh.l_len, (long)sh.u_len, t1 - t0, sh.perturbed);
+    } else {
+      fprintf(stderr, "KLS col-engine CPV: failed\n");
+    }
+  }
+  for (int t = 0; t < nt; ++t) {
+    free(wk[t].mark); free(wk[t].stack); free(wk[t].pattern);
+    free(wk[t].cand); free(wk[t].x);
+  }
+  free(sh.l_start); free(sh.l_cnt); free(sh.l_rows); free(sh.l_vals);
+  free(sh.u_start); free(sh.u_cnt); free(sh.u_srcs); free(sh.u_vals);
+  free(sh.rowof); free(sh.pivrow); free(sh.udiag);
+  free(parent); free(nchild); free(cdone); free(ready);
+  free(cp); free(ci); free(cx);
+}
+
 static void kls_rowmt_trial(UF_long bnk, const UF_long *bp,
                             const UF_long *bc, const double *bv,
                             long ref_lnz, long ref_unz) {
@@ -5011,6 +5498,9 @@ static void kls_row_symbolic_validate(kls_solver *solver,
                     (long)solver->numeric->max_lnz_block,
                     (long)solver->numeric->max_unz_block);
     kls_rowpv_trial(bnk, bp, bc, bv,
+                    (long)solver->numeric->max_lnz_block,
+                    (long)solver->numeric->max_unz_block);
+    kls_colpv_trial(bnk, bp, bc, bv,
                     (long)solver->numeric->max_lnz_block,
                     (long)solver->numeric->max_unz_block);
     if (getenv("KLS_ROW_ENGINE_ATA") != NULL) {
