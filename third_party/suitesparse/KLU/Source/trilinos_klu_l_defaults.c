@@ -65,5 +65,9 @@ Int TRILINOS_KLU_defaults
     Common->kls_btf_structural_rank = -1 ;
     Common->kls_kernel_flops = 0 ;
 
+    Common->kls_kernel_flops = 0 ;
+    Common->kls_dense_panels = 0 ;
+    Common->kls_static_perturb = 0 ;
+    Common->kls_perturb_count = 0 ;
     return (TRUE) ;
 }

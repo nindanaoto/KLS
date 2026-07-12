@@ -124214,8 +124214,10 @@ int kls_factor(kls_solver *solver, const double *values) {
 #define KLS_ENTRY_PHASE(tag)                                              \
   if (kls_trace_entry) {                                                  \
     const double t_now = kls_now_seconds();                               \
-    fprintf(stderr, "KLS entry phase %-12s %.3fs\n", tag,                \
-            t_now - kls_entry_ph);                                        \
+    fprintf(stderr, "KLS entry phase %-12s %.3fs num=%p ud0=%.17g\n",    \
+            tag, t_now - kls_entry_ph, (void *)solver->numeric,           \
+            solver->numeric != NULL                                       \
+              ? ((const double *)solver->numeric->Udiag)[0] : -1.0);      \
     kls_entry_ph = t_now;                                                 \
   }
   int status = prepare_numeric_values(solver, values, &numeric_values);
@@ -124223,6 +124225,18 @@ int kls_factor(kls_solver *solver, const double *values) {
     return status;
   }
   if (solver->n <= 8 && getenv("KLS_TRACE_X") != NULL) {
+    fprintf(stderr, "FXC scale=%ld tol=%.17g btf=%ld ordering=%d init=%g\n",
+            (long)solver->common.scale, solver->common.tol,
+            (long)solver->common.btf, solver->options.ordering,
+            solver->common.initmem_amd);
+    for (UF_long fc = 0; fc <= solver->n; ++fc) {
+      fprintf(stderr, "FXP cp[%ld]=%ld\n", (long)fc,
+              (long)solver->col_ptr[fc]);
+    }
+    for (UF_long fr = 0; fr < solver->nnz && fr < 12; ++fr) {
+      fprintf(stderr, "FXR ri[%ld]=%ld\n", (long)fr,
+              (long)solver->row_idx[fr]);
+    }
     for (UF_long fv = 0; fv < solver->nnz && fv < 12; ++fv) {
       fprintf(stderr, "FXV %ld %.17g user=%.17g\n", (long)fv,
               numeric_values[fv], values[fv]);
