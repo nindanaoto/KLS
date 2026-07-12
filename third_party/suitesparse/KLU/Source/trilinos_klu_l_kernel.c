@@ -2752,10 +2752,79 @@ static int kls_pipe_panel_lockstep
 						   != NULL ? 1.0 : S->tol) ;
 			if (fac == PW)
 			{
+			    /* structural per-column emission: pattern_w =
+			       own candidates + patterns of earlier siblings
+			       whose pivot row lies in pattern_w (left-
+			       looking symbolic).  Every numerically nonzero
+			       dense multiplier is inside the structural
+			       pattern (numeric values only arise along
+			       structural paths), so the dropped
+			       outside-pattern lanes are exact zeros and the
+			       emitted factor equals the union emission with
+			       the padding removed. */
 			    int aborted = 0 ;
+			    char *inpat = (char *) malloc ((size_t) R2) ;
+			    Int *pat = (Int *) malloc ((size_t) PW * R2 *
+						       sizeof (Int)) ;
+			    Int *plen = (Int *) malloc ((size_t) PW *
+							sizeof (Int)) ;
+			    Int *tmpr = (Int *) malloc ((size_t) R2 *
+							sizeof (Int)) ;
+			    Entry *tmpx = (Entry *) malloc ((size_t) R2 *
+							    sizeof (Entry)) ;
+			    /* pRowPos is generation-tagged and this panel
+			       is done with the buffer map: safe scratch
+			       (pFlagW would collide with future DFS marks) */
+			    Int *rpos = W->pRowPos ;
+			    if (inpat == NULL || pat == NULL ||
+				plen == NULL || tmpr == NULL || tmpx == NULL)
+			    {
+				free (inpat) ; free (pat) ; free (plen) ;
+				free (tmpr) ; free (tmpx) ;
+				free (A) ; free (rowids) ;
+				goto kls_dense_bail ;
+			    }
+			    {
+				Int c ;
+				for (c = 0 ; c < R2 ; c++)
+				{
+				    rpos [rowids [c]] = c ;
+				}
+			    }
 			    for (w = 0 ; w < PW && !aborted ; w++)
 			    {
-				Int uc, jj ;
+				Int uc, jj, len2 = 0, q2 ;
+				Int *pw = pat + (size_t) w * R2 ;
+				Int *lik = w == 0 ? (Int *) S->scratch
+						  : W->pLik [w] ;
+				memset (inpat, 0, (size_t) R2) ;
+				for (q2 = 0 ; q2 < l_len [w] ; q2++)
+				{
+				    Int c = rpos [lik [q2]] ;
+				    if (!inpat [c])
+				    {
+					inpat [c] = 1 ;
+					pw [len2++] = c ;
+				    }
+				}
+				for (jj = 0 ; jj < w ; jj++)
+				{
+				    if (inpat [jj])
+				    {
+					const Int *pj = pat +
+					    (size_t) jj * R2 ;
+					for (q2 = 0 ; q2 < plen [jj] ; q2++)
+					{
+					    Int c = pj [q2] ;
+					    if (!inpat [c])
+					    {
+						inpat [c] = 1 ;
+						pw [len2++] = c ;
+					    }
+					}
+				    }
+				}
+				plen [w] = len2 ;
 				if (w > 0)
 				{
 				    memcpy (W->ubuf_i, W->pUbuf_i [w],
@@ -2768,22 +2837,40 @@ static int kls_pipe_panel_lockstep
 				uc = u_cnt [w] ;
 				for (jj = 0 ; jj < w ; jj++)
 				{
-				    W->ubuf_i [uc] = k0 + jj ;
-				    W->ubuf_x [uc] =
-					A [(size_t) jj * PW + w] ;
-				    uc++ ;
+				    if (inpat [jj])
+				    {
+					W->ubuf_i [uc] = k0 + jj ;
+					W->ubuf_x [uc] =
+					    A [(size_t) jj * PW + w] ;
+					uc++ ;
+				    }
 				}
-				if (kls_pipe_emit_dense_column (W, k0 + w,
-					rowids + w + 1,
-					A + (size_t) (w + 1) * PW + w, PW,
-					R2 - 1 - w, rowids [w],
-					A [(size_t) w * PW + w], uc))
 				{
-				    aborted = 1 ;
+				    Int llen2 = 0 ;
+				    for (q2 = 0 ; q2 < len2 ; q2++)
+				    {
+					Int c = pw [q2] ;
+					if (c > w)
+					{
+					    tmpr [llen2] = rowids [c] ;
+					    tmpx [llen2] =
+						A [(size_t) c * PW + w] ;
+					    llen2++ ;
+					}
+				    }
+				    if (kls_pipe_emit_dense_column (W,
+					    k0 + w, tmpr, tmpx, 1, llen2,
+					    rowids [w],
+					    A [(size_t) w * PW + w], uc))
+				    {
+					aborted = 1 ;
+				    }
+				    l_len [w] = llen2 ;
+				    u_cnt [w] = uc ;
 				}
-				l_len [w] = R2 - 1 - w ;
-				u_cnt [w] = uc ;
 			    }
+			    free (inpat) ; free (pat) ; free (plen) ;
+			    free (tmpr) ; free (tmpx) ;
 			    free (A) ;
 			    free (rowids) ;
 			    if (aborted)
@@ -2799,6 +2886,7 @@ static int kls_pipe_panel_lockstep
 		    free (rowids) ;
 		}
 	    }
+	    kls_dense_bail: ;
 	    if (plimit == k0 + next_final)
 	    {
 		/* this column's window is complete: finalize it */
