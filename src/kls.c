@@ -26722,6 +26722,18 @@ static _Thread_local int kls_metis_order_threads;
    the separator-pipeline refactor engines are structure-sensitive to
    (pre2: 5x refactor loss under the parallel splitter's forest) */
 static _Thread_local int kls_det_ndp_requested;
+/* pre-static choose for the separator-pipeline class (pre2): its
+   one-shot chain pays the class's serial NodeNDP (2.86s) on the
+   critical path, and the mt-metis forest-aware replacement measured
+   1.17s with identical downstream structure quality (score 1.01e8 vs
+   9.3e7, trial factor time unchanged, residual e-16).  Deterministic:
+   mt-metis separators run with a pinned seed under a global mutex and
+   the leaf NodeND workers consume thread-local MT19937 streams, so
+   the legacy libc stream the class's other ordering calls draw stays
+   single-threaded.  Cycle collateral measured and accepted: the
+   adopted forest raises pre2's separator-pipeline refactor from 2.65
+   to 3.66s while the one-shot drops 9.8 -> 8.0s. */
+static _Thread_local int kls_prestatic_mtnd_request;
 
 /* pattern-classified det-ndp routing, refreshed per analyze call.
    v12 measured the refine-only det-ndp scoping reverting v11's broad
@@ -26765,6 +26777,8 @@ struct kls_mtnd_leaf {
   idx_t *iperm;
   idx_t *options;
   int status;
+  UF_long *vtx;               /* this leaf's global vertex ids */
+  int vtx_owned;              /* freed here (task path) vs arena */
 };
 
 static void *kls_mtnd_leaf_main(void *arg) {
@@ -26809,6 +26823,7 @@ struct kls_mtnd_ctx {
                                coarsening is not seed-pinnable), with
                                the parallelism kept in the concurrent
                                serial leaf orderings */
+  idx_t *lopts;             /* shared leaf NodeND options (read-only) */
 };
 
 static int kls_mtnd_split(struct kls_mtnd_ctx *C, idx_t cpos,
@@ -26866,6 +26881,8 @@ static int kls_mtnd_split(struct kls_mtnd_ctx *C, idx_t cpos,
       /* remember the vertex list location for the emit phase */
       memcpy(C->leaf_vtx + C->leaf_vtx_start[li], vertices,
              (size_t)nv * sizeof(UF_long));
+      C->leaves[li].vtx = C->leaf_vtx + C->leaf_vtx_start[li];
+      C->leaves[li].vtx_owned = 0;
     }
     C->sizes[ridx] = (idx_t)nv;
     return 1;
@@ -27016,6 +27033,185 @@ static int kls_mtnd_split(struct kls_mtnd_ctx *C, idx_t cpos,
   }
 }
 
+/* Task-parallel variant of the serial_sep splitter: the level-L
+   separators are mutually independent given their parents, so each
+   internal node (and each leaf ordering) runs on a FRESH thread.
+   Determinism: a fresh thread's gklib MT19937 stream starts from the
+   thread-local default state and only that node's single METIS call
+   consumes it, so every node's result depends on its subgraph alone -
+   no call-order or interleaving dependence (the spawn-failure inline
+   fallback shares the parent's stream and can differ, but only under
+   thread exhaustion).  Segment order is preserved by construction:
+   each task returns its subtree's ordered segment list and the parent
+   concatenates right-subtree, left-subtree, own separator - the same
+   postorder the serial recursion emits.  sizes[] writes are disjoint
+   per node.  Each task carries its own global->local scratch (calloc:
+   a zero entry either names the true local id 0 or fails the
+   vertices[] membership double-check). */
+struct kls_mtnd_task {
+  struct kls_mtnd_ctx *C;
+  UF_long *vertices;          /* owned: leaf keeps, internal frees */
+  UF_long nv;
+  idx_t cpos;
+  struct kls_mtnd_seg *segs;  /* owned ordered subtree segments */
+  int nsegs;
+  int ok;
+};
+
+static void kls_mtnd_task_free_segs(struct kls_mtnd_task *T) {
+  int i;
+  for (i = 0; i < T->nsegs; ++i) {
+    free(T->segs[i].vertices);
+  }
+  T->nsegs = 0;
+}
+
+static void *kls_mtnd_task_main(void *arg) {
+  struct kls_mtnd_task *T = (struct kls_mtnd_task *)arg;
+  struct kls_mtnd_ctx *C = T->C;
+  const idx_t component_count = 2 * C->npes - 1;
+  const idx_t ridx = component_count - 1 - T->cpos;
+  const UF_long nv = T->nv;
+  UF_long *vertices = T->vertices;
+  UF_long v, q, w = 0;
+  size_t edges = 0;
+  T->ok = 0;
+  T->nsegs = 0;
+  T->segs = (struct kls_mtnd_seg *)calloc((size_t)(2 * C->npes),
+                                          sizeof(*T->segs));
+  UF_long *scratch = (UF_long *)calloc((size_t)C->n, sizeof(*scratch));
+  idx_t *lx = (idx_t *)malloc(((size_t)nv + 1u) * sizeof(idx_t));
+  idx_t *la = NULL;
+  if (T->segs == NULL || scratch == NULL || lx == NULL) {
+    free(scratch); free(lx);
+    return NULL;
+  }
+  for (v = 0; v < nv; ++v) {
+    scratch[vertices[v]] = v;
+  }
+  for (v = 0; v < nv; ++v) {
+    edges += (size_t)(C->xadj[vertices[v] + 1] - C->xadj[vertices[v]]);
+  }
+  la = (idx_t *)malloc((edges + 1u) * sizeof(idx_t));
+  if (la == NULL) {
+    free(scratch); free(lx);
+    return NULL;
+  }
+  for (v = 0; v < nv; ++v) {
+    UF_long gv = vertices[v];
+    lx[v] = (idx_t)w;
+    for (q = C->xadj[gv]; q < C->xadj[gv + 1]; ++q) {
+      UF_long gu = (UF_long)C->adjncy[q];
+      if (scratch[gu] < nv && vertices[scratch[gu]] == gu) {
+        la[w++] = (idx_t)scratch[gu];
+      }
+    }
+  }
+  lx[nv] = (idx_t)w;
+  free(scratch);
+  if (T->cpos >= C->npes - 1) {
+    /* leaf: order inline on this (fresh) thread */
+    int li = (int)(T->cpos - (C->npes - 1));
+    struct kls_mtnd_leaf *L = &C->leaves[li];
+    L->nv = (idx_t)nv;
+    L->xadj = lx;
+    L->adjncy = la;
+    L->perm = (idx_t *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(idx_t));
+    L->iperm = (idx_t *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(idx_t));
+    L->options = C->lopts;
+    L->vtx = vertices;
+    L->vtx_owned = 1;
+    T->vertices = NULL;       /* ownership moved to the leaf */
+    if (L->perm == NULL || L->iperm == NULL) {
+      return NULL;
+    }
+    kls_mtnd_leaf_main(L);
+    if (L->status != METIS_OK) {
+      return NULL;
+    }
+    T->segs[0].leaf = li;
+    T->segs[0].vertices = NULL;
+    T->segs[0].count = nv;
+    T->nsegs = 1;
+    C->sizes[ridx] = (idx_t)nv;
+    T->ok = 1;
+    return NULL;
+  }
+  {
+    idx_t snv = (idx_t)nv;
+    idx_t *lwhere =
+      (idx_t *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(idx_t));
+    idx_t sepsize = 0;
+    UF_long *partA, *partB, *partS;
+    UF_long na = 0, nb = 0, nsep = 0;
+    int st, i;
+    if (lwhere == NULL) {
+      free(lx); free(la);
+      return NULL;
+    }
+    st = METIS_ComputeVertexSeparator(&snv, lx, la, NULL, NULL,
+                                      &sepsize, lwhere);
+    free(lx); free(la);
+    if (st != METIS_OK) {
+      free(lwhere);
+      return NULL;
+    }
+    partA = (UF_long *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(UF_long));
+    partB = (UF_long *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(UF_long));
+    partS = (UF_long *)malloc((size_t)(nv > 0 ? nv : 1) * sizeof(UF_long));
+    if (partA == NULL || partB == NULL || partS == NULL) {
+      free(lwhere); free(partA); free(partB); free(partS);
+      return NULL;
+    }
+    for (v = 0; v < nv; ++v) {
+      if (lwhere[v] == 2) partS[nsep++] = vertices[v];
+      else if (lwhere[v] == 0) partA[na++] = vertices[v];
+      else partB[nb++] = vertices[v];
+    }
+    free(lwhere);
+    free(vertices);
+    T->vertices = NULL;
+    C->sizes[ridx] = (idx_t)nsep;
+    struct kls_mtnd_task right, left;
+    pthread_t rtid, ltid;
+    memset(&right, 0, sizeof(right));
+    memset(&left, 0, sizeof(left));
+    right.C = C; right.vertices = partB; right.nv = nb;
+    right.cpos = 2 * T->cpos + 2;
+    left.C = C; left.vertices = partA; left.nv = na;
+    left.cpos = 2 * T->cpos + 1;
+    const int r_sp = pthread_create(&rtid, NULL, kls_mtnd_task_main,
+                                    &right) == 0;
+    const int l_sp = pthread_create(&ltid, NULL, kls_mtnd_task_main,
+                                    &left) == 0;
+    if (!r_sp) kls_mtnd_task_main(&right);
+    if (!l_sp) kls_mtnd_task_main(&left);
+    if (r_sp) pthread_join(rtid, NULL);
+    if (l_sp) pthread_join(ltid, NULL);
+    if (!right.ok || !left.ok) {
+      kls_mtnd_task_free_segs(&right);
+      kls_mtnd_task_free_segs(&left);
+      free(right.segs); free(left.segs);
+      free(right.vertices); free(left.vertices);
+      free(partS);
+      return NULL;
+    }
+    for (i = 0; i < right.nsegs; ++i) {
+      T->segs[T->nsegs++] = right.segs[i];
+    }
+    for (i = 0; i < left.nsegs; ++i) {
+      T->segs[T->nsegs++] = left.segs[i];
+    }
+    free(right.segs); free(left.segs);
+    T->segs[T->nsegs].leaf = -1;
+    T->segs[T->nsegs].vertices = partS;
+    T->segs[T->nsegs].count = nsep;
+    T->nsegs++;
+    T->ok = 1;
+    return NULL;
+  }
+}
+
 /* forest-aware entry: NodeNDP replacement producing perm/iperm and
    NodeNDP-format sizes.  serial_sep=1 keeps every separator serial
    METIS (fully deterministic; parallelism from concurrent leaves
@@ -27059,17 +27255,49 @@ static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
     all[v] = v;
     C.scratch_local[v] = (UF_long)n;
   }
+  idx_t lopts[METIS_NOPTIONS];
+  METIS_SetDefaultOptions(lopts);
+  lopts[METIS_OPTION_NUMBERING] = 0;
+  lopts[METIS_OPTION_SEED] = 0;
+  C.lopts = lopts;
+  const double kls_mtnd_t0 = kls_now_seconds();
+  if (serial_sep && getenv("KLS_MTND_SERIAL_SPLIT") == NULL) {
+    /* task recursion: level-parallel separators + in-task leaves */
+    struct kls_mtnd_task root;
+    pthread_t rtid;
+    memset(&root, 0, sizeof(root));
+    root.C = &C;
+    root.vertices = all;
+    root.nv = n;
+    root.cpos = 0;
+    all = NULL;               /* ownership moved to the root task */
+    if (pthread_create(&rtid, NULL, kls_mtnd_task_main, &root) == 0) {
+      pthread_join(rtid, NULL);
+    } else {
+      kls_mtnd_task_main(&root);
+    }
+    ok = root.ok && root.nsegs <= 2 * (int)npes;
+    if (ok) {
+      memcpy(C.segs, root.segs,
+             (size_t)root.nsegs * sizeof(*root.segs));
+      C.nsegs = root.nsegs;
+    } else {
+      kls_mtnd_task_free_segs(&root);
+    }
+    free(root.segs);
+    free(root.vertices);
+    if (!ok) {
+      goto cleanup;
+    }
+  } else {
   if (!kls_mtnd_split(&C, 0, all, n)) {
     goto cleanup;
   }
+  const double kls_mtnd_t1 = kls_now_seconds();
   /* leaf orderings, concurrently (serial METIS is safe across calls) */
   {
-    idx_t lopts[METIS_NOPTIONS];
     pthread_t tids[64];
     int spawned[64];
-    METIS_SetDefaultOptions(lopts);
-    lopts[METIS_OPTION_NUMBERING] = 0;
-    lopts[METIS_OPTION_SEED] = 0;
     for (i = 0; i < nleaves; ++i) {
       C.leaves[i].options = lopts;
       spawned[i] = i > 0 &&
@@ -27087,6 +27315,16 @@ static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
       ok = ok && C.leaves[i].status == METIS_OK;
     }
   }
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS mtnd: split %.3fs leaves %.3fs (ss=%d npes=%d)\n",
+            kls_mtnd_t1 - kls_mtnd_t0, kls_now_seconds() - kls_mtnd_t1,
+            serial_sep, (int)npes);
+  }
+  }
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS mtnd: total %.3fs (ss=%d npes=%d)\n",
+            kls_now_seconds() - kls_mtnd_t0, serial_sep, (int)npes);
+  }
   if (ok) {
     /* compose the global order from the traversal segments */
     UF_long pos = 0;
@@ -27095,10 +27333,9 @@ static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
       struct kls_mtnd_seg *g = &C.segs[si];
       if (g->leaf >= 0) {
         struct kls_mtnd_leaf *L = &C.leaves[g->leaf];
-        UF_long base = C.leaf_vtx_start[g->leaf];
         UF_long k;
         for (k = 0; k < g->count; ++k) {
-          UF_long gv = C.leaf_vtx[base + (UF_long)L->perm[k]];
+          UF_long gv = L->vtx[(UF_long)L->perm[k]];
           metis_iperm[gv] = (idx_t)pos;
           metis_perm[pos] = (idx_t)gv;
           pos++;
@@ -27127,6 +27364,9 @@ cleanup:
       free(C.leaves[i].adjncy);
       free(C.leaves[i].perm);
       free(C.leaves[i].iperm);
+      if (C.leaves[i].vtx_owned) {
+        free(C.leaves[i].vtx);
+      }
     }
   }
   free(C.segs);
@@ -27550,7 +27790,7 @@ static UF_long kls_metis_order_inner(UF_long n,
   int par_nd_done = 0;
 #ifdef KLS_HAVE_MTMETIS
   if (n >= 200000 &&
-      (getenv("KLS_MT_ND") != NULL ||
+      (getenv("KLS_MT_ND") != NULL || kls_prestatic_mtnd_request ||
        (kls_mt_nd_class && getenv("KLS_MT_ND_CLASS") != NULL))) {
     /* threaded ND (mt-metis, MIT).  With a leaf-count request the
        forest-aware path replicates NodeNDP's sizes contract so the
@@ -32074,6 +32314,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       ? 0
       : static_match_prefers_unscaled(solver->n, solver->nnz, weak,
                                       missing_diagonal);
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr, "KLS pre-static: weak count done %.3fs\n",
+            kls_now_seconds() - kls_ps_t0);
+  }
 #ifdef KLS_HAVE_SPRAL_SCALING
   int use_large_spral_match = 0;
 #endif
@@ -32130,29 +32374,25 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 #ifdef KLS_HAVE_SPRAL_SCALING
   int status = KLS_OK;
   if (use_large_spral_match) {
-    status = build_spral_auction_row_match(
-      solver->n, solver->nnz, base_col_ptr, base_row_idx, base_values,
-      &row_perm, &matched, &match_row_scale, &match_col_scale);
-    if (status == KLS_OK && 1000u * matched < 995u * solver->n &&
-        missing_diagonal * 2u >= solver->n) {
-      /* Approximate auction matching can leave too many rows unmatched on
-         mostly-missing-diagonal circuit matrices, and an incomplete static
-         match is rejected below.  These matrices are exactly the ones whose
-         plain threshold-pivoting factorization can fail outright from
-         pivoting-induced fill, so escalate to the exact Hungarian matching
-         before giving up; the pre-static candidate size bounds keep the
-         exact-assignment cost acceptable for a one-time analysis step.
-         Matrices whose diagonal is mostly present factor fine without the
-         static match, so an incomplete auction match is left rejected there
-         instead of being completed into an accepted slower trial. */
-      free(row_perm);
-      free(match_row_scale);
-      free(match_col_scale);
-      row_perm = NULL;
-      match_row_scale = NULL;
-      match_col_scale = NULL;
-      matched = 0;
+    if (missing_diagonal * 2u >= solver->n) {
+      /* Approximate auction matching predictably leaves too many rows
+         unmatched when the diagonal is mostly absent (pre2: 96.1%
+         coverage, below the 99.5% acceptance floor), and the exact
+         Hungarian matching both completes and runs FASTER here (0.38s
+         vs the auction's 1.21s): with the diagonal missing, most rows
+         need augmenting paths and the auction's bidding rounds churn.
+         Go straight to the exact matching for this structural class
+         instead of paying for a discarded approximate pass; the
+         pre-static candidate size bounds keep the exact-assignment
+         cost acceptable for a one-time analysis step.  Matrices whose
+         diagonal is mostly present keep the cheap auction attempt,
+         and an incomplete match there is left rejected (they factor
+         fine without the static match). */
       status = build_spral_hungarian_row_match_scaling(
+        solver->n, solver->nnz, base_col_ptr, base_row_idx, base_values,
+        &row_perm, &matched, &match_row_scale, &match_col_scale);
+    } else {
+      status = build_spral_auction_row_match(
         solver->n, solver->nnz, base_col_ptr, base_row_idx, base_values,
         &row_perm, &matched, &match_row_scale, &match_col_scale);
     }
@@ -32459,8 +32699,15 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     trial_numeric = NULL;
     goto kls_adopt_unfactored;
   }
-  kls_klu_pipe_threads =
-    kls_pipe_first_factor_threads(solver, trial_symbolic);
+  if (kls_klu_pipe_threads == 0) {
+    /* the class pipe route above already decided for the matched
+       medium/large classes (est_flops is empty for given orderings, so
+       the fill-proxy gate here would wrongly unroute the medium class:
+       twotone's trial measured 0.49s serial vs 0.20s piped); only fill
+       in when no route fired */
+    kls_klu_pipe_threads =
+      kls_pipe_first_factor_threads(solver, trial_symbolic);
+  }
   kls_klu_pipe_det = 0;
   trial_numeric =
     trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
@@ -33826,10 +34073,23 @@ static int kls_choose_symbolic_inner(UF_long n,
     trilinos_klu_l_common m_common;
     kls_separator_analysis m_sep;
     memset(&m_sep, 0, sizeof(m_sep));
+#ifdef KLS_HAVE_MTMETIS
+    /* deterministic parallel NodeNDP for the class's choose-stage
+       METIS: serial METIS separators with concurrent fresh-thread
+       leaves, deterministic regardless of what ran before (the
+       mt-metis mode-0 bridge measured call-order-dependent forests:
+       its internal thread streams carry across calls, and the
+       first-call forest scored 1.343e8 vs the class AMD's 1.337e8,
+       losing the margin the same input won at 1.011e8 second-call). */
+    kls_det_ndp_requested = getenv("KLS_DISABLE_PS_MTND") == NULL;
+#endif
     const int m_status = analyze_with_ordering(n, col_ptr, row_idx,
                                                symbolic_options,
                                                KLS_ORDERING_METIS, &m_sym,
                                                &m_common, &m_sep);
+#ifdef KLS_HAVE_MTMETIS
+    kls_det_ndp_requested = 0;
+#endif
     if (amd_sp) pthread_join(amd_tid, NULL);
     if (amf_sp) pthread_join(amf_tid, NULL);
     trilinos_klu_l_symbolic *b_sym = NULL;
@@ -33860,6 +34120,14 @@ static int kls_choose_symbolic_inner(UF_long n,
         trilinos_klu_l_free_symbolic(&amf_job.symbolic, &amf_job.common);
         kls_separator_analysis_clear(&amf_job.separator);
       }
+    }
+    if (kls_trace_pre_static_enabled()) {
+      fprintf(stderr,
+              "KLS choose: ps-par m_status=%d m_sym=%d m_score=%.4e "
+              "b_ok=%d b_ord=%d b_score=%.4e\n",
+              m_status, m_sym != NULL,
+              m_sym != NULL ? symbolic_score(m_sym) : -1.0,
+              b_ok, (int)b_ord, b_score);
     }
     if (m_status == KLS_OK && m_sym != NULL) {
       const double m_score = symbolic_score(m_sym);
