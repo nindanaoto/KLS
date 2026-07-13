@@ -126044,6 +126044,14 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       return;
     }
   }
+  if (solver->n > 200000 ||
+      (solver->col_ptr != NULL && solver->col_ptr[solver->n] > 4000000)) {
+    /* class ceiling, same as the choose fast path and the race gate:
+       every block-structured adopter sits under 200K/4M, and the
+       detector walk has a bad worst case on large patterns (the
+       rajat29 lesson: 1.9s hunting a class the matrix cannot be) */
+    return;
+  }
   const double start = kls_now_seconds();
   UF_long *block_perm = NULL;
   UF_long *block_comp = NULL;
