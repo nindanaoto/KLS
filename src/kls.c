@@ -128864,8 +128864,15 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   KLS_ENTRY_PHASE("auto_pivtol")
 #ifdef KLS_HAVE_SPRAL_SCALING
-  if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
-                                             numeric_values)) {
+  if (!had_numeric && solver->n <= 16384u &&
+      getenv("KLS_PRESTATIC_DEFER") != NULL) {
+    /* lean tiny class: the post-factor Hungarian trial is the same
+       cycle-payoff family as the rowmatch trial (OPF_10000: 69ms of
+       an 89ms one-shot); the deferred consult runs it at the first
+       refactorization */
+    solver->rowmatch_deferred = 1;
+  } else if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
+                                                    numeric_values)) {
     kls_first_factor_used = 0;
     promoted_numeric = 1;
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
@@ -129051,6 +129058,13 @@ int kls_refactor(kls_solver *solver, const double *values) {
         solver->values != NULL) {
       numeric_values = solver->values;
     }
+#ifdef KLS_HAVE_SPRAL_SCALING
+    if (maybe_select_spral_hungarian_row_match(solver, &rowmatch_elapsed,
+                                               numeric_values) &&
+        solver->values != NULL) {
+      numeric_values = solver->values;
+    }
+#endif
   }
 #ifdef KLS_HAVE_METIS
   if (solver->metis_race_deferred && kls_metis_race_ready(solver)) {
