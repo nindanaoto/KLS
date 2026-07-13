@@ -387,6 +387,9 @@ struct kls_solver {
   int metis_race_deferred;
   int metis_race_deferred_invalid;
   int prestatic_deferred;
+  int rowmatch_deferred;      /* lean tiny class: the post-factor
+                                 Hungarian trial is cycle-payoff work
+                                 (gemat11: 7ms of a 10ms one-shot) */
   int block_order_deferred;
   int numeric_from_pipe;
   int factor_preps_deferred;
@@ -32364,6 +32367,21 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
   } else if (weak * 2u < solver->n) {
     goto done;
+  }
+  if (!deferred && small_candidate && solver->n <= 16384u &&
+      getenv("KLS_PRESTATIC_DEFER") != NULL) {
+    /* one-shot-lean, tiny class: the optimistic plain factor is ~1ms
+       and measured accurate even at 99.7% missing diagonal (gemat11:
+       3.2ms rel 3.9e-13 vs 6.7ms through the inline match+trial); a
+       singular plain factor is rescued at the factor exit by running
+       this consult inline, and the cycle still gets the deferred
+       consult at the first refactorization. */
+    solver->prestatic_deferred = 1;
+#ifdef KLS_HAVE_METIS
+    kls_prestatic_ordering_ctx = 0;
+#endif
+    *elapsed += kls_now_seconds() - start;
+    return;
   }
 
   UF_long matched = 0;
@@ -128706,6 +128724,20 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
   }
   solver->stats.factor_seconds = elapsed;
+  if ((solver->numeric == NULL || solver->common.status < 0) &&
+      solver->prestatic_deferred && !had_numeric) {
+    /* the optimistic tiny-class plain factor failed: run the deferred
+       pre-static consult now (its trial numeric adopts directly) */
+    solver->prestatic_deferred = 0;
+    solver->common.status = TRILINOS_KLU_OK;
+    solver->common.numerical_rank = KLS_KLU_EMPTY;
+    solver->common.singular_col = KLS_KLU_EMPTY;
+    maybe_select_pre_static_row_match(solver, &elapsed, numeric_values, 1);
+    if (solver->numeric != NULL && solver->values != NULL) {
+      numeric_values = solver->values;
+    }
+    solver->stats.factor_seconds = elapsed;
+  }
   if (solver->numeric == NULL || solver->common.status < 0) {
     fill_numeric_stats(solver);
     return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
@@ -128734,7 +128766,13 @@ int kls_factor(kls_solver *solver, const double *values) {
   int diagnostics_have_flops = 1;
   int diagnostics_have_rcond = 1;
   int promoted_numeric = 0;
-  if (maybe_select_auto_row_match(solver, &elapsed, numeric_values)) {
+  if (!had_numeric && solver->n <= 16384u &&
+      getenv("KLS_PRESTATIC_DEFER") != NULL) {
+    /* lean tiny class: run the post-factor match trial from the first
+       refactorization's consult like the other deferrals; the plain
+       factor already passed its quality gates */
+    solver->rowmatch_deferred = 1;
+  } else if (maybe_select_auto_row_match(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
     promoted_numeric = 1;
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
@@ -129003,6 +129041,15 @@ int kls_refactor(kls_solver *solver, const double *values) {
               " numeric=%p status=%d\n",
               (void *)solver->values, (void *)solver->row_perm,
               (void *)solver->numeric, (int)solver->common.status);
+    }
+  }
+  if (solver->rowmatch_deferred) {
+    solver->rowmatch_deferred = 0;
+    double rowmatch_elapsed = 0.0;
+    if (maybe_select_auto_row_match(solver, &rowmatch_elapsed,
+                                    numeric_values) &&
+        solver->values != NULL) {
+      numeric_values = solver->values;
     }
   }
 #ifdef KLS_HAVE_METIS
