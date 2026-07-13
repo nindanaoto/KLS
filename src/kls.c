@@ -26703,8 +26703,12 @@ static UF_long kls_pinned_order_fill_count(UF_long n,
       }
     }
   }
-  /* fill count via row-subtree walks (dedup per row with mark) */
-  const UF_long cap = (UF_long)1 << 30;
+  /* fill count via row-subtree walks (dedup per row with mark).  The
+     walk is O(fill): cap it at a few multiples of nnz - the caller
+     only needs "comparable to the competition or garbage", and dense-
+     fill pinned orders (TSOPF's fused-dense rows: fill ~n^2/2) would
+     otherwise grind for seconds counting exactly how bad they are. */
+  const UF_long cap = 8u * (nnz > (UF_long)n ? nnz : (UF_long)n);
   UF_long fill = 0;
   for (UF_long i = 0; i < n && fill < cap; ++i) {
     for (UF_long p = rp[i]; p < rp[i + 1u]; ++p) {
@@ -28005,8 +28009,33 @@ static UF_long kls_metis_order_inner(UF_long n,
       camd_group_size = 1;
     }
     const double kls_camd_t0 = kls_now_seconds();
+    int pinned_count_ok = 0;
+    if (camd_group_size == 1) {
+      /* the fully-pinned "refinement" only produces an lnz estimate.
+         On patterns WITHOUT dense rows CAMD's degree machinery tracks
+         the pinned order's fill and grinds (ss1's 109K block: 19-23s;
+         the etree count is exact and O(min(fill, 8*nnz))).  Patterns
+         WITH dense rows keep CAMD: it is fast there (it postpones the
+         dense rows) and the block-structured pipeline's downstream
+         gates are tuned to its estimates (TSOPF_FS_b39_c30 measured
+         0.67 -> 6.5s under the honest count). */
+      UF_long *rowdeg = (UF_long *)calloc((size_t)n, sizeof(*rowdeg));
+      if (rowdeg != NULL) {
+        UF_long maxdeg = 0;
+        for (UF_long p = 0; p < col_ptr[n]; ++p) {
+          rowdeg[row_idx[p]]++;
+        }
+        for (UF_long i = 0; i < n; ++i) {
+          const UF_long d =
+            rowdeg[i] + (col_ptr[i + 1u] - col_ptr[i]);
+          maxdeg = maxdeg < d ? d : maxdeg;
+        }
+        free(rowdeg);
+        pinned_count_ok = (double)maxdeg * (double)maxdeg < (double)n;
+      }
+    }
     UF_long camd_lnz =
-      camd_group_size == 1
+      pinned_count_ok
         ? kls_pinned_order_fill_count(n, col_ptr, row_idx, metis_perm,
                                       perm_out)
         : kls_metis_refine_with_camd(n, col_ptr, row_idx, metis_perm,
@@ -33239,7 +33268,8 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->n < 20000 || getenv("KLS_DISABLE_METIS_RACE") != NULL) {
     return;
   }
-  if (solver->n <= 200000 && solver->nnz <= 2000000 &&
+  if (solver->n <= 200000 && solver->col_ptr != NULL &&
+      solver->col_ptr[solver->n] <= 4000000 &&
       solver->options.static_pivoting) {
     /* the block-structured class (TSOPF/case9 family) adopts its own
        ordering at factor time and always discards the race - and on
@@ -33250,9 +33280,15 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
        path (~10ms at this size gate). */
     UF_long *bs_perm = NULL;
     UF_long *bs_comp = NULL;
-    if (kls_build_block_structured_order(solver->n, solver->col_ptr,
-                                         solver->row_idx, &bs_perm,
-                                         &bs_comp)) {
+    const int bs_hit =
+      kls_build_block_structured_order(solver->n, solver->col_ptr,
+                                       solver->row_idx, &bs_perm,
+                                       &bs_comp);
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr, "KLS race gate: block detector=%d n=%ld\n",
+              bs_hit, (long)solver->n);
+    }
+    if (bs_hit) {
       free(bs_perm);
       free(bs_comp);
       return;
@@ -33302,6 +33338,10 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
   }
   race->active = 1;
   solver->metis_race = race;
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS race: launched (maybe_start) n=%ld\n",
+            (long)solver->n);
+  }
 }
 
 /* Giant-class early start: the pattern is fixed as soon as the
@@ -33394,6 +33434,9 @@ static void kls_start_metis_race_early(kls_solver *solver,
   }
   race->active = 1;
   solver->metis_race = race;
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS race: launched (early) n=%ld\n", (long)n);
+  }
 }
 
 /* Values are known: copy them, capture the settled scale, and release
@@ -128495,13 +128538,19 @@ int kls_factor(kls_solver *solver, const double *values) {
          solver->symbolic == NULL ||
          (double)(solver->symbolic->lnz + solver->symbolic->unz) >=
            4.0e6) &&
-        /* a live race + a huge incumbent estimate: committing the
-           predicted build to this ordering risks tens of seconds on a
-           loser (ss1: AMD est 1.47e11 flops, 54s value passes, METIS
-           halves the flops) - fall through to the symbolic join and
-           let the predicted attempt run on the raced ordering */
+        /* a live race + an EXTREME per-row work density: committing
+           the predicted build to this ordering risks tens of seconds
+           on a loser (ss1: AMD est 1.47e11 flops = 717K flops/row,
+           54s value passes; METIS halves the flops) - fall through to
+           the symbolic join and build on the raced ordering.  The
+           density floor keeps the giants (memchip 4-40K flops/row)
+           on the immediate predicted start: a plain est>=1e10 gate
+           measured memchip 6.45->8.36, Freescale1/circuit5M_dc +2-3s
+           of NodeND join wait each. */
         !(solver->metis_race != NULL && solver->symbolic != NULL &&
-          solver->symbolic->est_flops >= 1.0e10) &&
+          solver->symbolic->est_flops >= 1.0e10 &&
+          solver->n > 0 &&
+          solver->symbolic->est_flops >= 2.0e5 * (double)solver->n) &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
       if (kls_trace_entry) {
