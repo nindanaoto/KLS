@@ -33271,7 +33271,7 @@ static void kls_start_metis_race_early(kls_solver *solver,
        the ND comparison off the critical path.  The spiked class keeps
        its raceless AMF-first route. */
     const int small_metis_start =
-      n <= 30000 &&
+      n <= 49152 &&
       should_start_auto_with_metis(
         n, col_ptr, row_idx,
         is_large_nearly_diagonal_spiked_metis_pattern(n, col_ptr,
@@ -34279,7 +34279,7 @@ static int kls_choose_symbolic_inner(UF_long n,
 #endif
 
 #ifdef KLS_HAVE_METIS
-  if (n <= 30000u && !kls_analyze_defer_nd &&
+  if (n <= 49152u && !kls_analyze_defer_nd &&
       kls_analyze_nd_race_solver != NULL &&
       kls_analyze_nd_race_solver->metis_race != NULL &&
       should_start_auto_with_metis(n, col_ptr, row_idx,
