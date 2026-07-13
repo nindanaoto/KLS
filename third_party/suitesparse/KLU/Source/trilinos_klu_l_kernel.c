@@ -1830,6 +1830,9 @@ static Int kls_pipe_dfs
     Unit *const *Colptr,
     Int *Lik,
     Int *plength,
+    Int lik_cap,              /* Lik capacity: on overflow return -1
+                                 (lockstep lanes are n/4-sized; rajat30
+                                 measured a heap overflow past them) */
     Int Ap_pos [ ],
     const kls_klu_pipe_shared *sh,
     unsigned Ap_ver [ ]
@@ -1932,6 +1935,11 @@ static Int kls_pipe_dfs
 		    else
 		    {
 			/* i is an L candidate for column k of the block */
+			if (l_length >= lik_cap)
+			{
+			    *plength = l_length ;
+			    return (-1) ;
+			}
 			Flag [i] = k ;
 			Lik [l_length] = i ;
 			l_length++ ;
@@ -2021,7 +2029,8 @@ static void kls_pipe_round
 		{
 		    top = kls_pipe_dfs (i, k, plimit, Pinv, S->Llen, S->Lip,
 					S->Stack, S->Flag, top, LU, S->colptr,
-					Lik, plength, S->Ap_pos, sh, Ap_ver) ;
+					Lik, plength, S->n, S->Ap_pos, sh,
+					Ap_ver) ;
 		}
 		else
 		{
@@ -2044,7 +2053,7 @@ static void kls_pipe_round
 	    S->Flag [i] = TRILINOS_KLU_EMPTY ;
 	    top = kls_pipe_dfs (i, k, plimit, Pinv, S->Llen, S->Lip,
 				S->Stack, S->Flag, top, LU, S->colptr,
-				Lik, plength, S->Ap_pos, sh, Ap_ver) ;
+				Lik, plength, S->n, S->Ap_pos, sh, Ap_ver) ;
 	}
     }
 
@@ -2689,6 +2698,8 @@ static int kls_pipe_panel_lockstep
     const int use_buf = W->pB != NULL ;
     Int nbrows = 0 ;
     Int w, k, j, p ;
+    Int lane_overflow = 0 ;
+    Int kls_finalized = 0 ;
 #define KLS_PANEL_ROWPOS(r, out_pos)                                   \
     do                                                                 \
     {                                                                  \
@@ -2807,11 +2818,22 @@ static int kls_pipe_panel_lockstep
 							S->Llen, S->Lip, S->Stack,
 							W->pFlagW [w], top, NULL,
 							S->colptr, W->pLik [w],
-							&l_len [w], S->Ap_pos, sh,
+							&l_len [w], W->pColCap,
+							S->Ap_pos, sh,
 							W->ap_ver) ;
+				    if (top < 0)
+				    {
+					lane_overflow = 1 ;
+					goto panel_refuse ;
+				    }
 				}
 				else
 				{
+				    if (l_len [w] >= W->pColCap)
+				    {
+					lane_overflow = 1 ;
+					goto panel_refuse ;
+				    }
 				    W->pFlagW [w][i] = kw ;
 				    W->pLik [w][l_len [w]] = i ;
 				    l_len [w]++ ;
@@ -2844,8 +2866,13 @@ static int kls_pipe_panel_lockstep
 			    top = kls_pipe_dfs (i, kw, plimit, S->Pinv, S->Llen,
 						S->Lip, S->Stack, W->pFlagW [w],
 						top, NULL, S->colptr, W->pLik [w],
-						&l_len [w], S->Ap_pos, sh,
-						W->ap_ver) ;
+						&l_len [w], W->pColCap,
+						S->Ap_pos, sh, W->ap_ver) ;
+			    if (top < 0)
+			    {
+				lane_overflow = 1 ;
+				goto panel_refuse ;
+			    }
 			}
 		    }
 		    /* merge this column's topological segment into the union
@@ -3178,7 +3205,18 @@ static int kls_pipe_panel_lockstep
 			kls_construct_entries += nb ;    /* popcount sum */
 		    }
 		}
-		/* U extraction per member column, then clear */
+		/* U extraction per member column, then clear: lanes
+		   w>0 stage into pColCap-sized buffers (lane 0 uses the
+		   n-sized worker ubuf) - refuse the panel before any
+		   append can run past them (rajat30: heap overflow) */
+		for (w = 1 ; w < PW ; w++)
+		{
+		    if (u_cnt [w] + ulen > W->pColCap)
+		    {
+			lane_overflow = 1 ;
+			goto panel_refuse ;
+		    }
+		}
 		for (p = 0 ; p < ulen ; p++)
 		{
 		    Int mask ;
@@ -3496,6 +3534,7 @@ static int kls_pipe_panel_lockstep
 		    return (1) ;
 		}
 		next_final++ ;
+		kls_finalized = next_final ;
 		if (next_final == PW)
 		{
 		    break ;
@@ -3536,6 +3575,21 @@ static int kls_pipe_panel_lockstep
 	u_out [w] = u_cnt [w] ;
     }
     return (0) ;
+
+panel_refuse:
+    /* a lane's pattern/ubuf capacity (pColCap = n/4+16) was exceeded:
+       a dense-ish column this panel machinery cannot stage.  Columns
+       already finalized went through the normal publish and stay
+       valid; the caller re-processes the unfinalized suffix through
+       the per-column path (which uses n-sized workspaces).  The
+       generation bump invalidates every buffered row. */
+    (void) lane_overflow ;
+    if (use_buf)
+    {
+	W->pGen++ ;
+    }
+    l_out [0] = kls_finalized ;
+    return (2) ;
 }
 #undef KLS_PANEL_ROWPOS
 
@@ -3581,16 +3635,28 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	    if (kp_end - k > 1 && kp_end - k <= W->pW &&
 		sh->lpend != NULL && W->pPFlag != NULL)
 	    {
-		if (kls_pipe_panel_lockstep (W, k, kp_end, promoted,
-					     panel_l, panel_u))
 		{
-		    free (promoted) ;
-		    return (NULL) ;
+		    const int kls_ls = kls_pipe_panel_lockstep (
+			W, k, kp_end, promoted, panel_l, panel_u) ;
+		    if (kls_ls == 1)
+		    {
+			free (promoted) ;
+			return (NULL) ;
+		    }
+		    if (kls_ls == 0)
+		    {
+			/* the cascade finalized and published every
+			   panel column: claim the next panel */
+			if (prof) { W->n_cols += kp_end - k ; }
+			continue ;
+		    }
+		    /* lane capacity refused the panel: panel_l[0]
+		       columns were finalized+published; the per-column
+		       loop below re-processes the owned remainder */
+		    if (prof) { W->n_cols += panel_l [0] ; }
+		    k += panel_l [0] ;
+		    panel_inject = 0 ;
 		}
-		/* the cascade finalized and published every panel
-		   column: claim the next panel */
-		if (prof) { W->n_cols += kp_end - k ; }
-		continue ;
 	    }
 	}
 	else
