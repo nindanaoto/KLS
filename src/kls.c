@@ -94370,6 +94370,12 @@ static int kls_mapped_refactor(kls_solver *solver,
           kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
           return parallel_row_status;
         }
+        /* structural decline: the attempt's schedule prep alone costs
+           ~1.4s on massively-blocked numerics (ASIC_680ks: 583,771
+           groups, 69% of a 20-refactor run's CPU re-prepping before
+           declining every time) - settle on the column engine for
+           this numeric instead of re-attempting */
+        solver->row_accept_decision = -1;
       }
       if (kls_row_refactor_env_enabled()) {
         const int row_status =
@@ -98480,6 +98486,9 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
         kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
         return (UF_long)parallel_row_status;
       }
+      /* structural decline: never re-prep (~1.4s on ASIC_680ks's
+         583K-group schedule) just to decline again on this numeric */
+      solver->row_accept_decision = -1;
     }
     if (kls_row_refactor_env_enabled() || auto_row_refactor) {
       const int row_status =
