@@ -128189,8 +128189,9 @@ int kls_factor(kls_solver *solver, const double *values) {
 #define KLS_ENTRY_PHASE(tag)                                              \
   if (kls_trace_entry) {                                                  \
     const double t_now = kls_now_seconds();                               \
-    fprintf(stderr, "KLS entry phase %-12s %.3fs num=%p ud0=%.17g\n",    \
-            tag, t_now - kls_entry_ph, (void *)solver->numeric,           \
+    fprintf(stderr, "KLS entry phase %-12s %.3fs @%.3f num=%p ud0=%.17g\n", \
+            tag, t_now - kls_entry_ph,                                    \
+            t_now - solver->snb_factor_start, (void *)solver->numeric,    \
             solver->numeric != NULL                                       \
               ? ((const double *)solver->numeric->Udiag)[0] : -1.0);      \
     kls_entry_ph = t_now;                                                 \
@@ -128761,6 +128762,13 @@ int kls_factor(kls_solver *solver, const double *values) {
        than the join (Freescale1 suite 1.50 -> 3.15). */
     solver->metis_race_deferred = 1;
     solver->metis_race_deferred_invalid = promoted_numeric;
+  } else if (solver->n <= 30000 &&
+             is_small_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
+                                                  solver->row_idx)) {
+    /* the small spiked class chose AMF deliberately (measured fill +
+       tight-tol trial: the TSOPF verdict); the synchronous METIS
+       promotion would re-run NodeND against that verdict on every
+       one-shot (TSOPF_FS_b9_c1: 22ms of a 31ms init) */
   } else if (maybe_promote_auto_metis(solver, &elapsed, numeric_values,
                                       promoted_numeric)) {
     kls_first_factor_used = 0;
