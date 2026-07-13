@@ -32867,9 +32867,17 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        medium/large classes (est_flops is empty for given orderings, so
        the fill-proxy gate here would wrongly unroute the medium class:
        twotone's trial measured 0.49s serial vs 0.20s piped); only fill
-       in when no route fired */
-    kls_klu_pipe_threads =
-      kls_pipe_first_factor_threads(solver, trial_symbolic);
+       in when no route fired.  Light-column non-lowdeg trials stay
+       serial regardless of the est: the pipe's round machinery is
+       pathological there (rajat30's probe-routed trial ground 21.6s
+       piped vs sub-second serial; mac_econ - the pipe's legitimate
+       light-column user - is lowdeg-classified) */
+    if (solver->col_ptr[solver->n] >= 8 * solver->n ||
+        is_large_sparse_diagonal_low_degree_pattern(
+          solver->n, solver->col_ptr, solver->row_idx)) {
+      kls_klu_pipe_threads =
+        kls_pipe_first_factor_threads(solver, trial_symbolic);
+    }
   }
   kls_klu_pipe_det = 0;
   trial_numeric =
@@ -34249,6 +34257,35 @@ static int kls_choose_symbolic_inner(UF_long n,
       n > 150000u && n <= 750000u && (UF_long)col_ptr[n] <= 8000000 &&
       getenv("KLS_DISABLE_PS_CHOOSE_PAR") == NULL &&
       !is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx)) {
+    if (col_ptr[n] < 8 * n) {
+      /* light-column matched pattern: the factor this ordering feeds
+         is bounded by ~1e7-1e8 flops (rajat29's trial: 1.25e7 =
+         0.11s serial), so the METIS/AMF candidates' own analyze cost
+         (~1-2.4s here) can never repay itself.  AMD alone; the
+         pre-static trial's quality gates police a bad draw (their
+         rejection redo rebuilds the full competition). */
+      trilinos_klu_l_symbolic *a_sym = NULL;
+      trilinos_klu_l_common a_common;
+      kls_separator_analysis a_sep;
+      memset(&a_sep, 0, sizeof(a_sep));
+      if (analyze_with_ordering(n, col_ptr, row_idx, symbolic_options,
+                                KLS_ORDERING_AMD, &a_sym, &a_common,
+                                &a_sep) == KLS_OK && a_sym != NULL) {
+        if (kls_trace_pre_static_enabled()) {
+          fprintf(stderr,
+                  "KLS choose: light-column AMD-only score=%.4e\n",
+                  symbolic_score(a_sym));
+        }
+        *symbolic_out = a_sym;
+        *common_out = a_common;
+        *selected_ordering_out = KLS_ORDERING_AMD;
+        *score_out = symbolic_score(a_sym);
+        kls_separator_analysis_move(separator_out, &a_sep);
+        return KLS_OK;
+      }
+      kls_separator_analysis_clear(&a_sep);
+      /* AMD failed: fall through to the full competition */
+    }
     /* pre-static choose for the legacy-RNG class: METIS (the measured
        class-wide winner) analyzes on THIS thread so the only legacy
        libc-rand drawer stays serial, while AMD and AMF analyze on
@@ -34636,16 +34673,27 @@ static int is_prestatic_bound_missing_diagonal_pattern(
     }
     missing += !has_diag;
   }
-  /* the mostly-missing arm only.  Extending to the partial-missing
-     arm (missing>=4096 && missing*200>=n, the rajat29/rajat30 band)
-     measured rajat29 5.2 -> 3.2s BUT exposed a heap corruption in
-     rajat30's probe-routed trial (scale=-1/AMD config it never ran
-     before) - and the siblings are structurally indistinguishable
-     (missing 9629 vs 9632 at the same n), so the extension cannot be
-     scoped honestly.  Root-cause the trial-path corruption before
-     retrying (rajat29's verdict would not flip anyway: CK 1.15s vs
-     the extension's 3.2s). */
-  return missing * 2 >= n;
+  /* two structural arms, mirroring the large-spral gate's missing-
+     diagonal arm exactly: the mostly-missing class (pre2) and the
+     partially-missing class (rajat29/rajat30, missing ~1.5% of n but
+     >=4096 rows - their prestatic adopts the matched coordinates the
+     same way, so the base candidate build is equally wasted).  The
+     partial arm ships only after its two blockers fell: the lockstep
+     lane overflow (edacd6a) and the light-column non-lowdeg trial
+     pipe routing (rajat30 21.6s piped vs sub-second serial). */
+  if (missing * 2 >= n) {
+    return 1;
+  }
+  /* partial-missing arm (missing ~1.5% of n, >=4096 rows): the
+     prestatic adopts matched coordinates the same way, so the base
+     candidate build is equally wasted.  Scoped to the light-column
+     members whose serial matched trial is proven sub-second
+     (rajat29 5.25 -> 3.2s); the denser members (rajat30, nnz/n=9.6)
+     stay on the full analyze until the pipe's dense-column
+     pathology is solved - probe-routed, its piped trial ground
+     21.5s against a 9.7s baseline. */
+  return missing >= 4096 && missing * 200 >= n &&
+         col_ptr[n] < 8 * n;
 }
 
 /* set while the prestatic rejection redo rebuilds a real ordering so
