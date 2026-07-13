@@ -34636,6 +34636,15 @@ static int is_prestatic_bound_missing_diagonal_pattern(
     }
     missing += !has_diag;
   }
+  /* the mostly-missing arm only.  Extending to the partial-missing
+     arm (missing>=4096 && missing*200>=n, the rajat29/rajat30 band)
+     measured rajat29 5.2 -> 3.2s BUT exposed a heap corruption in
+     rajat30's probe-routed trial (scale=-1/AMD config it never ran
+     before) - and the siblings are structurally indistinguishable
+     (missing 9629 vs 9632 at the same n), so the extension cannot be
+     scoped honestly.  Root-cause the trial-path corruption before
+     retrying (rajat29's verdict would not flip anyway: CK 1.15s vs
+     the extension's 3.2s). */
   return missing * 2 >= n;
 }
 
