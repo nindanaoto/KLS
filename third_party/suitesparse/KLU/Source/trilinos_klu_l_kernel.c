@@ -800,6 +800,10 @@ static void kls_prune_chunked
  * foreground first factors opt in; background/race threads see 0.
  * The KLS_KLU_PIPE env overrides for experiments. */
 _Thread_local int kls_klu_pipe_threads = 0 ;
+/* dense-tail hint from the routing layer: tail SIZE in block columns
+   (0 = off); the pipe entry applies it to blocks big enough to hold
+   a sparse prefix (n > 4*hint) */
+_Thread_local int kls_klu_dense_tail = 0 ;
 _Thread_local int kls_klu_pipe_det = 0 ;    /* routed: force the
     deterministic scalar configuration (no dense finalize, no batched
     consume) until those paths are order-determinized */
@@ -1753,6 +1757,12 @@ typedef struct kls_klu_pipe_shared_s
     _Atomic Int next_panel ;
     const Int *panel_start ;  /* npanels+1 offsets, or NULL */
     Int npanels ;
+    /* dense-tail finish: columns >= dense_tail_start are not claimed
+       by workers; after the prefix reaches it, the main thread
+       gathers them against the prefix, factors the trailing block
+       with one BLAS3 dgetrf, and emits through the dense-column
+       publisher.  n = disabled. */
+    Int dense_tail_start ;
     /* dense panel block registry (brick 4a of the batched-consume
        program): the dense finalize retains its factored R x W block
        so later consumers can batch a whole source panel as one
@@ -3630,6 +3640,14 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	    }
 	    k = sh->panel_start [pnl] ;
 	    kp_end = sh->panel_start [pnl + 1] ;
+	    if (k >= sh->dense_tail_start)
+	    {
+		break ;
+	    }
+	    if (kp_end > sh->dense_tail_start)
+	    {
+		kp_end = sh->dense_tail_start ;
+	    }
 	    panel_inject = 0 ;
 	    panel_k0 = k ;
 	    if (kp_end - k > 1 && kp_end - k <= W->pW &&
@@ -3663,7 +3681,7 @@ static void *kls_klu_pipe_worker_main (void *arg)
 	{
 	    k = atomic_fetch_add_explicit (&sh->next_col, 1,
 					   memory_order_relaxed) ;
-	    if (k >= n ||
+	    if (k >= sh->dense_tail_start ||
 		atomic_load_explicit (&sh->abort_flag,
 				      memory_order_acquire))
 	    {
@@ -3860,6 +3878,389 @@ static void *kls_klu_pipe_worker_main (void *arg)
     }
     free (promoted) ;
     return (NULL) ;
+}
+
+/* ========================================================================== */
+/* === dense-tail finish ==================================================== */
+/* ========================================================================== */
+
+/* Columns >= sh->dense_tail_start were never claimed by the workers.
+ * With the prefix fully published, gather each tail column against the
+ * prefix (the same construct + single bounded round the per-column body
+ * starts with), factor the trailing t x t block with one BLAS3 dgetrf
+ * (OpenBLAS re-threaded around the single call), and publish every
+ * tail column through the dense-column emitter, which owns the full
+ * P/Pinv/Udiag/prune/prefix contract.  Motivation: the extreme-fill
+ * shapes (ss1: fill/n=234) spend 20+ of 24 seconds in the scalar
+ * kernel's latency-bound tail at ~3 GF/s where dgetrf runs ~200. */
+extern void dgetrf_ (const int *m, const int *nn, double *a,
+		     const int *lda, int *ipiv, int *info) ;
+#pragma weak dgetrf_
+extern void openblas_set_num_threads (int) ;
+#pragma weak openblas_set_num_threads
+
+typedef struct
+{
+    kls_klu_pipe_worker *W ;
+    Int s ;                   /* tail start (block coords) */
+    Int c0, c1 ;              /* this worker's tail column range */
+    Int step ;                /* cyclic stride (cost rises with c) */
+    Int t ;
+    Entry *D ;                /* shared dense block, disjoint columns */
+    const Int *tailpos ;
+    Int *uidx ;               /* own prefix-U arena */
+    Entry *uval ;
+    Int *ulen ;               /* per column in [c0,c1) */
+    size_t ucap, uused ;
+    int ok ;
+} kls_tail_gather_job ;
+
+static void *kls_tail_gather_main (void *arg)
+{
+    kls_tail_gather_job *G = (kls_tail_gather_job *) arg ;
+    kls_klu_pipe_worker *W = G->W ;
+    kls_klu_pipe_shared *sh = W->sh ;
+    KLS_KLU_KERNEL_STATE *S = &W->S ;
+    const Int t = G->t ;
+    Int c, p ;
+    G->ok = 0 ;
+    for (c = G->c0 ; c < G->c1 ; c += G->step)
+    {
+	Unit *LU = S->scratch ;
+	Int *Lik = (Int *) LU ;
+	Int l_length = 0, ucount = 0 ;
+	construct_column (c, S->Ap, S->Ai, S->Ax, S->Q, S->X,
+			  S->k1, S->PSinv, S->Rs, S->scale,
+			  S->Offp, S->Offi, S->Offx) ;
+	kls_pipe_round (S, c, G->s, NULL, 0, LU, Lik, &l_length,
+			W->ubuf_i, W->ubuf_x, &ucount, sh, W->ap_ver,
+			W->copybuf) ;
+	if (G->uused + (size_t) ucount > G->ucap)
+	{
+	    Int *ni ; Entry *nv ;
+	    while (G->uused + (size_t) ucount > G->ucap)
+	    {
+		G->ucap *= 2 ;
+	    }
+	    ni = (Int *) realloc (G->uidx, G->ucap * sizeof (Int)) ;
+	    nv = (Entry *) realloc (G->uval, G->ucap * sizeof (Entry)) ;
+	    if (ni == NULL || nv == NULL)
+	    {
+		if (ni != NULL) G->uidx = ni ;
+		if (nv != NULL) G->uval = nv ;
+		return (NULL) ;
+	    }
+	    G->uidx = ni ;
+	    G->uval = nv ;
+	}
+	memcpy (G->uidx + G->uused, W->ubuf_i,
+		(size_t) ucount * sizeof (Int)) ;
+	memcpy (G->uval + G->uused, W->ubuf_x,
+		(size_t) ucount * sizeof (Entry)) ;
+	G->ulen [(c - G->c0) / G->step] = ucount ;
+	G->uused += (size_t) ucount ;
+	for (p = 0 ; p < l_length ; p++)
+	{
+	    Int i = Lik [p] ;
+	    G->D [(size_t) (c - G->s) * t + G->tailpos [i]] = S->X [i] ;
+	    CLEAR (S->X [i]) ;
+	}
+    }
+    G->ok = 1 ;
+    return (NULL) ;
+}
+
+static int kls_pipe_dense_tail (kls_klu_pipe_worker *W)
+{
+    kls_klu_pipe_shared *sh = W->sh ;
+    KLS_KLU_KERNEL_STATE *S = &W->S ;
+    const Int n = S->n ;
+    const Int s = sh->dense_tail_start ;
+    const Int t = n - s ;
+    Int *tail_rows = NULL, *tailpos = NULL, *lrows = NULL ;
+    Int *ustart = NULL, *uidx = NULL ;
+    int *ipiv = NULL ;
+    Entry *uval = NULL, *D = NULL, *lvals = NULL ;
+    Int c, i, p, j ;
+    size_t ucap = 65536, uused = 0 ;
+    int failed = 1 ;
+    const int trace = getenv ("KLS_TRACE_DENSE_TAIL") != NULL ;
+    double tt0 = kls_klu_now () ;
+    if (dgetrf_ == NULL || t <= 1 || t > 16384)
+    {
+	return (1) ;
+    }
+    D = (Entry *) calloc ((size_t) t * (size_t) t, sizeof (Entry)) ;
+    tail_rows = (Int *) malloc ((size_t) t * sizeof (Int)) ;
+    tailpos = (Int *) malloc ((size_t) n * sizeof (Int)) ;
+    lrows = (Int *) malloc ((size_t) t * sizeof (Int)) ;
+    lvals = (Entry *) malloc ((size_t) t * sizeof (Entry)) ;
+    ipiv = (int *) malloc ((size_t) t * sizeof (int)) ;
+    ustart = (Int *) malloc (((size_t) t + 1) * sizeof (Int)) ;
+    uidx = (Int *) malloc (ucap * sizeof (Int)) ;
+    uval = (Entry *) malloc (ucap * sizeof (Entry)) ;
+    if (D == NULL || tail_rows == NULL || tailpos == NULL ||
+	lrows == NULL || lvals == NULL || ipiv == NULL ||
+	ustart == NULL || uidx == NULL || uval == NULL)
+    {
+	goto cleanup ;
+    }
+    {
+	Int cnt = 0 ;
+	for (i = 0 ; i < n ; i++)
+	{
+	    if (S->Pinv [i] < 0)
+	    {
+		if (cnt >= t)
+		{
+		    goto cleanup ;
+		}
+		tailpos [i] = cnt ;
+		tail_rows [cnt++] = i ;
+	    }
+	}
+	if (cnt != t)
+	{
+	    goto cleanup ;
+	}
+    }
+    {
+	/* parallel gather: tail columns are independent against the
+	   fixed published prefix; each joined worker's private
+	   X/Flag/Stack/ubuf state is intact, so spread the ranges
+	   across them (serial gather measured 9.1s of the 11.1s
+	   ss1 tail; the columns split evenly) */
+	kls_klu_pipe_worker *workers = W ;   /* worker array base */
+	const int ng = sh->nthreads < 1 ? 1
+	    : (sh->nthreads > 16 ? 16 : sh->nthreads) ;
+	kls_tail_gather_job jobs [16] ;
+	pthread_t gtids [16] ;
+	int g, spawned [16] ;
+	Int per = (t + ng - 1) / ng ;
+	int all_ok = 1 ;
+	for (g = 0 ; g < ng ; g++)
+	{
+	    jobs [g].W = &workers [g] ;
+	    jobs [g].s = s ;
+	    jobs [g].c0 = s + (Int) g ;
+	    jobs [g].c1 = n ;
+	    if (jobs [g].c0 > n) jobs [g].c0 = n ;
+	    jobs [g].step = (Int) ng ;
+	    jobs [g].t = t ;
+	    jobs [g].D = D ;
+	    jobs [g].tailpos = tailpos ;
+	    jobs [g].ucap = 65536 ;
+	    jobs [g].uused = 0 ;
+	    jobs [g].uidx = (Int *) malloc (jobs [g].ucap * sizeof (Int)) ;
+	    jobs [g].uval = (Entry *) malloc (jobs [g].ucap *
+					      sizeof (Entry)) ;
+	    jobs [g].ulen = (Int *) calloc ((size_t) t / ng + 2,
+					    sizeof (Int)) ;
+	    jobs [g].ok = 0 ;
+	    if (jobs [g].uidx == NULL || jobs [g].uval == NULL ||
+		jobs [g].ulen == NULL)
+	    {
+		all_ok = 0 ;
+	    }
+	}
+	if (!all_ok)
+	{
+	    for (g = 0 ; g < ng ; g++)
+	    {
+		free (jobs [g].uidx) ;
+		free (jobs [g].uval) ;
+		free (jobs [g].ulen) ;
+	    }
+	    goto cleanup ;
+	}
+	for (g = 1 ; g < ng ; g++)
+	{
+	    spawned [g] = pthread_create (&gtids [g], NULL,
+					  kls_tail_gather_main,
+					  &jobs [g]) == 0 ;
+	}
+	kls_tail_gather_main (&jobs [0]) ;
+	for (g = 1 ; g < ng ; g++)
+	{
+	    if (spawned [g])
+	    {
+		pthread_join (gtids [g], NULL) ;
+	    }
+	    else
+	    {
+		kls_tail_gather_main (&jobs [g]) ;
+	    }
+	}
+	for (g = 0 ; g < ng ; g++)
+	{
+	    all_ok = all_ok && jobs [g].ok ;
+	}
+	/* stitch the per-worker U arenas into the flat arena in
+	   column order */
+	if (all_ok)
+	{
+	    size_t goffs [16] ;
+	    Int cc ;
+	    for (g = 0 ; g < ng ; g++)
+	    {
+		goffs [g] = 0 ;
+	    }
+	    uused = 0 ;
+	    for (cc = s ; cc < n && all_ok ; cc++)
+	    {
+	        {
+		    size_t goff ;
+		    Int lenc ;
+		    g = (int) ((cc - s) % ng) ;
+		    goff = goffs [g] ;
+		    lenc = jobs [g].ulen [(cc - jobs [g].c0) /
+					  jobs [g].step] ;
+		    if (uused + (size_t) lenc > ucap)
+		    {
+		        Int *ni ; Entry *nv ;
+		        while (uused + (size_t) lenc > ucap)
+		        {
+			    ucap *= 2 ;
+		        }
+		        ni = (Int *) realloc (uidx, ucap * sizeof (Int)) ;
+		        nv = (Entry *) realloc (uval,
+						ucap * sizeof (Entry)) ;
+		        if (ni == NULL || nv == NULL)
+		        {
+			    if (ni != NULL) uidx = ni ;
+			    if (nv != NULL) uval = nv ;
+			    all_ok = 0 ;
+			    break ;
+		        }
+		        uidx = ni ;
+		        uval = nv ;
+		    }
+		    memcpy (uidx + uused, jobs [g].uidx + goff,
+			    (size_t) lenc * sizeof (Int)) ;
+		    memcpy (uval + uused, jobs [g].uval + goff,
+			    (size_t) lenc * sizeof (Entry)) ;
+		    ustart [cc - s] = (Int) uused ;
+		    uused += (size_t) lenc ;
+		    goffs [g] = goff + (size_t) lenc ;
+	        }
+	    }
+	}
+	for (g = 0 ; g < ng ; g++)
+	{
+	    free (jobs [g].uidx) ;
+	    free (jobs [g].uval) ;
+	    free (jobs [g].ulen) ;
+	}
+	if (!all_ok)
+	{
+	    goto cleanup ;
+	}
+    }
+    ustart [t] = (Int) uused ;
+    if (trace)
+    {
+	fprintf (stderr, "KLS dense tail: gather %.3fs t=%ld upref=%ld\n",
+		 kls_klu_now () - tt0, (long) t, (long) uused) ;
+	tt0 = kls_klu_now () ;
+    }
+    {
+	int m32 = (int) t, info = 0 ;
+	if (openblas_set_num_threads != NULL)
+	{
+	    openblas_set_num_threads (sh->nthreads) ;
+	}
+	dgetrf_ (&m32, &m32, D, &m32, ipiv, &info) ;
+	if (openblas_set_num_threads != NULL)
+	{
+	    openblas_set_num_threads (1) ;
+	}
+	if (info != 0)
+	{
+	    if (trace)
+	    {
+		fprintf (stderr, "KLS dense tail: dgetrf info=%d\n", info) ;
+	    }
+	    if (info > 0)
+	    {
+		S->Common->status = TRILINOS_KLU_SINGULAR ;
+	    }
+	    goto cleanup ;
+	}
+    }
+    if (trace)
+    {
+	fprintf (stderr, "KLS dense tail: dgetrf %.3fs\n",
+		 kls_klu_now () - tt0) ;
+	tt0 = kls_klu_now () ;
+    }
+    for (j = 0 ; j < t ; j++)
+    {
+	Int other = (Int) ipiv [j] - 1 ;
+	if (other != j)
+	{
+	    Int tmp = tail_rows [j] ;
+	    tail_rows [j] = tail_rows [other] ;
+	    tail_rows [other] = tmp ;
+	}
+    }
+    for (j = 0 ; j < t ; j++)
+    {
+	const Int k = s + j ;
+	Int uc = ustart [j + 1] - ustart [j] ;
+	Int llen2 = 0 ;
+	Entry pivot = D [(size_t) j * t + j] ;
+	memcpy (W->ubuf_i, uidx + ustart [j],
+		(size_t) uc * sizeof (Int)) ;
+	memcpy (W->ubuf_x, uval + ustart [j],
+		(size_t) uc * sizeof (Entry)) ;
+	for (i = 0 ; i < j ; i++)
+	{
+	    Entry v = D [(size_t) j * t + i] ;
+	    if (v != 0.0)
+	    {
+		W->ubuf_i [uc] = s + i ;
+		W->ubuf_x [uc] = v ;
+		uc++ ;
+	    }
+	}
+	if (pivot == 0.0)
+	{
+	    S->Common->status = TRILINOS_KLU_SINGULAR ;
+	    goto cleanup ;
+	}
+	for (p = j + 1 ; p < t ; p++)
+	{
+	    Entry v = D [(size_t) j * t + p] ;
+	    if (v != 0.0)
+	    {
+		lrows [llen2] = tail_rows [p] ;
+		lvals [llen2] = v ;
+		llen2++ ;
+	    }
+	}
+	if (kls_pipe_emit_dense_column (W, k, lrows, lvals, 1, llen2,
+					tail_rows [j], pivot, uc))
+	{
+	    goto cleanup ;
+	}
+    }
+    if (trace)
+    {
+	fprintf (stderr, "KLS dense tail: emit %.3fs\n",
+		 kls_klu_now () - tt0) ;
+    }
+    failed = 0 ;
+cleanup:
+    free (D) ;
+    free (tail_rows) ;
+    free (tailpos) ;
+    free (lrows) ;
+    free (lvals) ;
+    free (ipiv) ;
+    free (ustart) ;
+    free (uidx) ;
+    free (uval) ;
+    return (failed) ;
 }
 
 /* ========================================================================== */
@@ -4402,6 +4803,24 @@ size_t KLS_KLU_KERNEL_PIPE
     atomic_init (&sh.prefix, 0) ;
     atomic_init (&sh.abort_flag, 0) ;
     atomic_init (&sh.next_panel, 0) ;
+    sh.dense_tail_start = n ;
+    if (kls_klu_dense_tail > 1 && kls_klu_dense_tail <= 16384 &&
+	n > 4 * (Int) kls_klu_dense_tail)
+    {
+	sh.dense_tail_start = n - (Int) kls_klu_dense_tail ;
+    }
+    {
+	const char *dt = getenv ("KLS_DENSE_TAIL") ;
+	if (dt != NULL && dt [0] != '\0')
+	{
+	    long v = atol (dt) ;
+	    if (v > 0 && v < (long) n && (long) n - v >= 2 &&
+		(long) n - v <= 16384)
+	    {
+		sh.dense_tail_start = (Int) v ;
+	    }
+	}
+    }
     sh.panel_start = panel_start ;
     sh.npanels = npanels ;
     sh.blk_a = NULL ;
@@ -4552,6 +4971,16 @@ size_t KLS_KLU_KERNEL_PIPE
 	atomic_store (&sh.abort_flag, 1) ;
     }
 
+    if (sh.dense_tail_start < n && !spawn_failed &&
+	!atomic_load_explicit (&sh.abort_flag, memory_order_acquire) &&
+	atomic_load_explicit (&sh.prefix, memory_order_acquire) ==
+	    sh.dense_tail_start)
+    {
+	if (kls_pipe_dense_tail (&workers [0]))
+	{
+	    atomic_store (&sh.abort_flag, 1) ;
+	}
+    }
     if (!spawn_failed &&
 	!atomic_load_explicit (&sh.abort_flag, memory_order_acquire) &&
 	atomic_load_explicit (&sh.prefix, memory_order_acquire) == n)

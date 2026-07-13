@@ -2363,6 +2363,7 @@ struct kls_refactor_pool {
 };
 
 extern _Thread_local int kls_klu_pipe_threads;
+extern _Thread_local int kls_klu_dense_tail;
 extern _Thread_local int kls_klu_pipe_det;
 static int kls_pipe_first_factor_threads(const kls_solver *solver,
                                          const trilinos_klu_l_symbolic *sym);
@@ -33069,6 +33070,11 @@ struct kls_metis_race_s {
   /* staged scale trials: published before the METIS stage so the
      earlier auto-scale promotion can consume them without joining */
   int scale_wanted;
+  int symbolic_only;         /* dense-tail class: the joiner wants the
+                                analyze only - skip the scale trials
+                                and the serial trial factor (ss1: an
+                                unabortable 26.8s klu trial held the
+                                take's join) */
   _Atomic int scale_done;
   int scale_count;
   int scale_cand[3];
@@ -33105,6 +33111,11 @@ static void *kls_scale_trial_main(void *argp) {
 static void *kls_metis_race_main(void *arg) {
   kls_metis_race *race = (kls_metis_race *)arg;
   if (race->metis_wanted) {
+#ifdef KLS_HAVE_MTMETIS
+    /* the symbolic-only (dense-tail class) joiner is on the one-shot
+       critical path waiting for this analyze */
+    kls_det_ndp_requested = race->symbolic_only;
+#endif
     race->analyze_status = analyze_with_ordering(race->n, race->col_ptr,
                                                  race->row_idx,
                                                  &race->options,
@@ -33112,6 +33123,9 @@ static void *kls_metis_race_main(void *arg) {
                                                  &race->symbolic,
                                                  &race->common,
                                                  &race->separator);
+#ifdef KLS_HAVE_MTMETIS
+    kls_det_ndp_requested = 0;
+#endif
   }
   atomic_store_explicit(&race->analyze_done, 1, memory_order_release);
   int stage2;
@@ -33119,7 +33133,7 @@ static void *kls_metis_race_main(void *arg) {
                                         memory_order_acquire)) == 0) {
     kls_cpu_relax();
   }
-  if (stage2 != 1) {
+  if (stage2 != 1 || race->symbolic_only) {
     atomic_store_explicit(&race->scale_done, 1, memory_order_release);
     atomic_store_explicit(&race->finished, 1, memory_order_release);
     return NULL;
@@ -33336,6 +33350,11 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
   race->scale_symbolic = solver->symbolic;
   race->metis_wanted = metis_wanted;
   race->scale_wanted = scale_wanted;
+  race->symbolic_only =
+    metis_wanted && solver->n >= 50000 &&
+    est_flops >= 2.0e5 * (double)solver->n &&
+    solver->col_ptr != NULL &&
+    solver->col_ptr[solver->n] < 8 * solver->n;
   atomic_init(&race->scale_done, 0);
   atomic_init(&race->stage2, 0);
   race->analyze_status =
@@ -128642,6 +128661,13 @@ int kls_factor(kls_solver *solver, const double *values) {
         solver->row_solve_self_check = 1;
       }
     } else {
+      const int kls_dense_tail_class =
+        !had_numeric && solver->metis_race != NULL &&
+        solver->symbolic != NULL && solver->n >= 50000 &&
+        solver->symbolic->est_flops >= 2.0e5 * (double)solver->n &&
+        solver->col_ptr != NULL &&
+        solver->col_ptr[solver->n] < 8 * solver->n &&
+        getenv("KLS_DISABLE_DENSE_TAIL") == NULL;
       if (!had_numeric && solver->metis_race != NULL &&
           solver->symbolic != NULL && solver->symbolic->est_flops >= 1.0e8 &&
           getenv("KLS_RACE_FULL_JOIN") == NULL) {
@@ -128688,7 +128714,20 @@ int kls_factor(kls_solver *solver, const double *values) {
               (int64_t)solver->symbolic->structural_rank;
             solver->stats.estimated_flops = solver->symbolic->est_flops;
             kls_metis_race_free(race);
-            if (is_large_sparse_diagonal_low_degree_pattern(
+            if (kls_dense_tail_class) {
+              /* dense-factor/light-input shape (ss1: fill/n=234 at
+                 nnz/n=4.1): the predicted closure doubles an already
+                 huge fill and its value passes crawl; route the pipe
+                 with a BLAS3 dense-tail finish instead (24.2 -> 2.6s
+                 forced; the scalar kernel runs this tail at ~3 GF/s
+                 where dgetrf runs ~1 TF/s) */
+              kls_klu_dense_tail = 4096;
+              kls_klu_pipe_threads =
+                solver->options.threads > 16 ? 16 : solver->options.threads;
+              if (getenv("KLS_TRACE_DENSE_TAIL") != NULL) {
+                fprintf(stderr, "KLS dense tail: routed\n");
+              }
+            } else if (is_large_sparse_diagonal_low_degree_pattern(
                   solver->n, solver->col_ptr, solver->row_idx) &&
                 getenv("KLS_PREDICTED_TRY_LOWDEG") == NULL) {
               /* the mostly-missing-diagonal low-degree class factors
@@ -128764,8 +128803,13 @@ int kls_factor(kls_solver *solver, const double *values) {
       kls_set_last_factor_path(solver,
                                had_numeric ? KLS_FACTOR_PATH_KLU_FALLBACK
                                            : KLS_FACTOR_PATH_KLU_FIRST);
-      kls_klu_pipe_threads =
-        kls_pipe_first_factor_threads(solver, solver->symbolic);
+      if (kls_klu_pipe_threads == 0) {
+        /* the dense-tail routing above may have set the route already
+           (its est is unset for the raced ordering, so the fill proxy
+           here would unroute it) */
+        kls_klu_pipe_threads =
+          kls_pipe_first_factor_threads(solver, solver->symbolic);
+      }
       solver->common.kls_dense_panels = 0;
       solver->numeric = trilinos_klu_l_factor(solver->col_ptr,
                                               solver->row_idx,
@@ -128775,6 +128819,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver->numeric_from_pipe = kls_klu_pipe_threads > 0;
       kls_klu_pipe_threads = 0;
       kls_klu_pipe_det = 0;
+      kls_klu_dense_tail = 0;
       if (kls_trace_entry && solver->numeric != NULL) {
         fprintf(stderr,
                 "KLS klu_first: lnz=%ld unz=%ld nblocks=%ld maxblock=%ld "
