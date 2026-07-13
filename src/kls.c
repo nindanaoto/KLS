@@ -400,6 +400,8 @@ struct kls_solver {
                                    (1 SpMV) and correct the rare bad
                                    publish (mac: 1-in-9 draws at 2e-4
                                    vs the 1e-6 contract) */
+  int predicted_entry_values_captured; /* solve_refine_values holds the
+                                   factor entry's prepared input */
   UF_long **refactor_l_indices;
   int32_t **refactor_l_indices32;
   int32_t *refactor_l_indices32_storage;
@@ -26609,6 +26611,122 @@ static int kls_build_metis_separator_forest(
   return 1;
 }
 
+/* Exact fill count of a PINNED elimination order: build the strictly-
+   lower pattern of P(A+A')P', its elimination tree (Liu, ancestor
+   compression), then count fill by row-subtree walks - O(fill) with a
+   runaway cap.  Replaces the fully-constrained CAMD call whose degree
+   machinery re-derives this same fill and grinds for tens of seconds
+   when the pinned order is poor (ss1's 109K block: 19-23s; the lnz
+   estimate is that call's only product).  Returns the L fill excluding
+   the diagonal (CAMD's LNZ convention), or 0 on allocation failure. */
+static UF_long kls_pinned_order_fill_count(UF_long n,
+                                           const UF_long *col_ptr,
+                                           const UF_long *row_idx,
+                                           const idx_t *metis_perm,
+                                           UF_long *perm_out) {
+  const UF_long nnz = col_ptr[n];
+  UF_long *rank = (UF_long *)malloc((size_t)n * sizeof(*rank));
+  UF_long *rp = (UF_long *)calloc((size_t)n + 1u, sizeof(*rp));
+  UF_long *rj = (UF_long *)malloc(((size_t)nnz + 1u) * sizeof(*rj));
+  UF_long *parent = (UF_long *)malloc((size_t)n * sizeof(*parent));
+  UF_long *ancestor = (UF_long *)malloc((size_t)n * sizeof(*ancestor));
+  UF_long *mark = (UF_long *)malloc((size_t)n * sizeof(*mark));
+  if (rank == NULL || rp == NULL || rj == NULL || parent == NULL ||
+      ancestor == NULL || mark == NULL) {
+    free(rank); free(rp); free(rj);
+    free(parent); free(ancestor); free(mark);
+    return 0;
+  }
+  int valid = 1;
+  for (UF_long k = 0; k < n; ++k) {
+    const idx_t vertex = metis_perm[k];
+    if (vertex < 0 || (uint64_t)vertex >= (uint64_t)n) {
+      valid = 0;
+      break;
+    }
+    rank[(size_t)vertex] = k;
+  }
+  if (!valid) {
+    free(rank); free(rp); free(rj);
+    free(parent); free(ancestor); free(mark);
+    return 0;
+  }
+  /* strictly-lower rows of P(A+A')P': entry (r,c) lands in row
+     max(rank) with column min(rank) */
+  for (UF_long c = 0; c < n; ++c) {
+    for (UF_long p = col_ptr[c]; p < col_ptr[c + 1u]; ++p) {
+      const UF_long pr = rank[row_idx[p]];
+      const UF_long pc = rank[c];
+      if (pr != pc) {
+        rp[(pr > pc ? pr : pc) + 1u]++;
+      }
+    }
+  }
+  for (UF_long i = 0; i < n; ++i) {
+    rp[i + 1u] += rp[i];
+  }
+  {
+    UF_long *cur = (UF_long *)malloc((size_t)n * sizeof(*cur));
+    if (cur == NULL) {
+      free(rank); free(rp); free(rj);
+      free(parent); free(ancestor); free(mark);
+      return 0;
+    }
+    memcpy(cur, rp, (size_t)n * sizeof(*cur));
+    for (UF_long c = 0; c < n; ++c) {
+      for (UF_long p = col_ptr[c]; p < col_ptr[c + 1u]; ++p) {
+        const UF_long pr = rank[row_idx[p]];
+        const UF_long pc = rank[c];
+        if (pr != pc) {
+          const UF_long i = pr > pc ? pr : pc;
+          rj[cur[i]++] = pr > pc ? pc : pr;
+        }
+      }
+    }
+    free(cur);
+  }
+  /* Liu etree with ancestor path compression */
+  for (UF_long i = 0; i < n; ++i) {
+    parent[i] = (UF_long)-1;
+    ancestor[i] = (UF_long)-1;
+    mark[i] = (UF_long)-1;
+    for (UF_long p = rp[i]; p < rp[i + 1u]; ++p) {
+      UF_long k = rj[p];
+      while (k != (UF_long)-1 && k < i) {
+        const UF_long next = ancestor[k];
+        ancestor[k] = i;
+        if (next == (UF_long)-1) {
+          parent[k] = i;
+          break;
+        }
+        k = next;
+      }
+    }
+  }
+  /* fill count via row-subtree walks (dedup per row with mark) */
+  const UF_long cap = (UF_long)1 << 30;
+  UF_long fill = 0;
+  for (UF_long i = 0; i < n && fill < cap; ++i) {
+    for (UF_long p = rp[i]; p < rp[i + 1u]; ++p) {
+      UF_long k = rj[p];
+      while (k < i && mark[k] != i) {
+        mark[k] = i;
+        fill++;
+        k = parent[k];
+        if (k == (UF_long)-1) {
+          break;
+        }
+      }
+    }
+  }
+  free(rank); free(rp); free(rj);
+  free(parent); free(ancestor); free(mark);
+  for (UF_long k = 0; k < n; ++k) {
+    perm_out[k] = (UF_long)metis_perm[k];
+  }
+  return fill > 0 ? fill : 1;
+}
+
 static UF_long kls_metis_refine_with_camd(UF_long n,
                                           UF_long *col_ptr,
                                           UF_long *row_idx,
@@ -27888,9 +28006,12 @@ static UF_long kls_metis_order_inner(UF_long n,
     }
     const double kls_camd_t0 = kls_now_seconds();
     UF_long camd_lnz =
-      kls_metis_refine_with_camd(n, col_ptr, row_idx, metis_perm,
-                                 camd_group_size,
-                                 perm_out);
+      camd_group_size == 1
+        ? kls_pinned_order_fill_count(n, col_ptr, row_idx, metis_perm,
+                                      perm_out)
+        : kls_metis_refine_with_camd(n, col_ptr, row_idx, metis_perm,
+                                     camd_group_size,
+                                     perm_out);
     if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
       fprintf(stderr, "KLS metis: camd-refine %.3fs (groups=%ld)\n",
               kls_now_seconds() - kls_camd_t0, (long)camd_group_size);
@@ -32645,7 +32766,12 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        are light enough that the pipeline's round machinery costs ~7%;
        the winners measure 9.5+ (onetone1, twotone) */
 #ifdef KLS_HAVE_SPRAL_SCALING
-    pipe_route = pipe_route || use_large_spral_match;
+    /* the same light-column density floor as the medium class: the
+       pipeline's round machinery is pathological at low entries/column
+       (rajat29, nnz/n=5.8: piped trial ground >16s where the serial
+       factor takes 0.11s; pre2 at 8.85 keeps the route) */
+    pipe_route = pipe_route ||
+                 (use_large_spral_match && solver->nnz >= 8u * solver->n);
 #endif
     if (pipe_route && solver->options.threads >= 2 &&
         getenv("KLS_DISABLE_PIPE_ROUTE") == NULL) {
@@ -33112,6 +33238,25 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->user_col_perm != NULL || solver->symbolic == NULL ||
       solver->n < 20000 || getenv("KLS_DISABLE_METIS_RACE") != NULL) {
     return;
+  }
+  if (solver->n <= 200000 && solver->nnz <= 2000000 &&
+      solver->options.static_pivoting) {
+    /* the block-structured class (TSOPF/case9 family) adopts its own
+       ordering at factor time and always discards the race - and on
+       its fused-dense-row patterns the race's NodeND grinds for tens
+       of seconds, which the adoption's pattern-lifetime join then
+       waits out on the one-shot path (TSOPF_FS_b39_c19: 54.5s of a
+       54.8s init).  Same pattern-only detector as the choose fast
+       path (~10ms at this size gate). */
+    UF_long *bs_perm = NULL;
+    UF_long *bs_comp = NULL;
+    if (kls_build_block_structured_order(solver->n, solver->col_ptr,
+                                         solver->row_idx, &bs_perm,
+                                         &bs_comp)) {
+      free(bs_perm);
+      free(bs_comp);
+      return;
+    }
   }
   /* Two race clients: the METIS promotion (giant class: the serial
      trial costs seconds) and the scale trials (mid class upward: three
@@ -126382,6 +126527,12 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       solver->stats.structural_rank =
         (int64_t)solver->symbolic->structural_rank;
       solver->stats.estimated_flops = solver->symbolic->est_flops;
+      /* The analyze-time METIS race and its scale-trial workers read
+         the pattern arrays freed below: join and discard them first,
+         exactly as the pre-static adoption does.  TSOPF_FS_b39_c19:
+         two scale-trial threads segfaulted in lsolve_symbolic on the
+         freed base pattern (16T runs corrupted into timeouts). */
+      kls_metis_race_abandon(solver);
       trilinos_klu_l_free_symbolic(&old_symbolic, &old_common);
       free(old_col_ptr);
       free(old_row_idx);
@@ -128073,6 +128224,23 @@ int kls_factor(kls_solver *solver, const double *values) {
      described; refining against stale values converges to the WRONG
      solution (smoke: 1.0042 vs 1.0) */
   solver->row_solve_self_check = 0;
+  solver->predicted_entry_values_captured = 0;
+  if (solver->numeric == NULL && solver->n >= 512 &&
+      solver->row_scale == NULL && solver->col_scale == NULL &&
+      numeric_values != NULL) {
+    /* reference copy of the prepared input, taken before any factor
+       machinery can touch it: the predicted-first acceptance arms the
+       per-solve self-check against THIS copy (see the arm site) */
+    if (solver->solve_refine_values == NULL) {
+      solver->solve_refine_values = (double *)malloc(
+        (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
+    }
+    if (solver->solve_refine_values != NULL) {
+      memcpy(solver->solve_refine_values, numeric_values,
+             (size_t)solver->nnz * sizeof(*numeric_values));
+      solver->predicted_entry_values_captured = 1;
+    }
+  }
   if (solver->n <= 8 && getenv("KLS_TRACE_X") != NULL) {
     fprintf(stderr, "FXC scale=%ld tol=%.17g btf=%ld ordering=%d init=%g\n",
             (long)solver->common.scale, solver->common.tol,
@@ -128327,6 +128495,13 @@ int kls_factor(kls_solver *solver, const double *values) {
          solver->symbolic == NULL ||
          (double)(solver->symbolic->lnz + solver->symbolic->unz) >=
            4.0e6) &&
+        /* a live race + a huge incumbent estimate: committing the
+           predicted build to this ordering risks tens of seconds on a
+           loser (ss1: AMD est 1.47e11 flops, 54s value passes, METIS
+           halves the flops) - fall through to the symbolic join and
+           let the predicted attempt run on the raced ordering */
+        !(solver->metis_race != NULL && solver->symbolic != NULL &&
+          solver->symbolic->est_flops >= 1.0e10) &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
       if (kls_trace_entry) {
@@ -128348,6 +128523,18 @@ int kls_factor(kls_solver *solver, const double *values) {
       }
       KLS_ENTRY_PHASE("predicted")
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
+      if (solver->predicted_entry_values_captured) {
+        /* The predicted numeric passed its acceptance probe, but a
+           16T-only corruption was measured AFTER the probe on ss1
+           (probe 2.5e-15, final solves 2.5e-3 on every solve route,
+           4T clean - a race, root cause open; the probe itself can be
+           fooled when the corruption hits the values array BEFORE it
+           runs, which is why the reference copy is taken at the
+           factor entry).  Arm the same per-solve residual self-check
+           the row-refactor path carries: good numerics pay one SpMV,
+           a corrupted one is refined back to the contract line. */
+        solver->row_solve_self_check = 1;
+      }
     } else {
       if (!had_numeric && solver->metis_race != NULL &&
           solver->symbolic != NULL && solver->symbolic->est_flops >= 1.0e8 &&
@@ -128413,6 +128600,11 @@ int kls_factor(kls_solver *solver, const double *values) {
                          solver, numeric_values, &elapsed)) {
               kls_set_last_factor_path(solver,
                                        KLS_FACTOR_PATH_PREDICTED_FIRST);
+              if (solver->predicted_entry_values_captured) {
+                /* same post-probe corruption net as the first-attempt
+                   site */
+                solver->row_solve_self_check = 1;
+              }
               if (getenv("KLS_TRACE_PREDICTED") != NULL) {
                 fprintf(stderr,
                         "KLS race symbolic join: predicted built\n");
