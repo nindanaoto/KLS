@@ -34419,6 +34419,42 @@ static int kls_choose_symbolic_inner(UF_long n,
   return KLS_OK;
 }
 
+/* The prestatic-bound structural class: a mostly-missing diagonal at
+   the large-spral size band (pre2).  These matrices route to the
+   pre-static exact matching at factor time and adopt its matched
+   coordinates and ordering, so the base analyze's candidate
+   competition (concurrent AMD+AMF, ~0.88s on pre2) is pure waste on
+   the one-shot critical path.  The bounds mirror
+   large_spral_candidate exactly. */
+static int is_prestatic_bound_missing_diagonal_pattern(
+    UF_long n, const UF_long *col_ptr, const UF_long *row_idx) {
+  if (n <= 150000 || n > 750000 || col_ptr == NULL || row_idx == NULL ||
+      col_ptr[n] > 8000000) {
+    return 0;
+  }
+#ifdef KLS_HAVE_METIS
+  if (is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx)) {
+    return 0;
+  }
+#endif
+  UF_long missing = 0;
+  for (UF_long col = 0; col < n; ++col) {
+    int has_diag = 0;
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      if (row_idx[p] == col) {
+        has_diag = 1;
+        break;
+      }
+    }
+    missing += !has_diag;
+  }
+  return missing * 2 >= n;
+}
+
+/* set while the prestatic rejection redo rebuilds a real ordering so
+   the probe below cannot re-fire */
+static _Thread_local int kls_ps_ana_probe_disable;
+
 static int choose_symbolic_for_pattern(UF_long n,
                                        UF_long *col_ptr,
                                        UF_long *row_idx,
@@ -34428,6 +34464,47 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        kls_ordering *selected_ordering_out,
                                        double *score_out,
                                        kls_separator_analysis *separator_out) {
+  if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
+      options->static_pivoting && options->use_btf &&
+      !kls_prestatic_ordering_ctx && !kls_ps_ana_probe_disable &&
+      getenv("KLS_DISABLE_PS_ANA_SKIP") == NULL &&
+      is_prestatic_bound_missing_diagonal_pattern(n, col_ptr, row_idx)) {
+    /* BTF-only probe: a NATURAL-ordering analyze gives the pre-static
+       gate the do_btf/maxblock signal it reads (BTF is
+       ordering-independent) at ~0.2s instead of the 0.88s candidate
+       competition whose winner the adoption replaces anyway.  The
+       one-giant-SCC test below keeps BTF-decomposable matrices on the
+       full competition (their factor may run on these coordinates).
+       A pre-static rejection rebuilds a real ordering at the factor
+       entry (kls_ps_ana_probe_disable). */
+    trilinos_klu_l_symbolic *probe_sym = NULL;
+    trilinos_klu_l_common probe_common;
+    kls_separator_analysis probe_sep;
+    memset(&probe_sep, 0, sizeof(probe_sep));
+    if (analyze_with_ordering(n, col_ptr, row_idx, options,
+                              KLS_ORDERING_NATURAL, &probe_sym,
+                              &probe_common, &probe_sep) == KLS_OK &&
+        probe_sym != NULL) {
+      if (probe_sym->maxblock * 4 >= n * 3) {
+        if (getenv("KLS_TRACE_PRESTATIC") != NULL) {
+          fprintf(stderr,
+                  "KLS choose: prestatic-bound probe adopted "
+                  "(maxblock=%ld)\n",
+                  (long)probe_sym->maxblock);
+        }
+        *symbolic_out = probe_sym;
+        *common_out = probe_common;
+        *selected_ordering_out = KLS_ORDERING_NATURAL;
+        *score_out = symbolic_score(probe_sym);
+        kls_separator_analysis_move(separator_out, &probe_sep);
+        return KLS_OK;
+      }
+      trilinos_klu_l_free_symbolic(&probe_sym, &probe_common);
+      kls_separator_analysis_clear(&probe_sep);
+    } else {
+      kls_separator_analysis_clear(&probe_sep);
+    }
+  }
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       options->static_pivoting && n <= 200000 && n >= 64 &&
       col_ptr[n] <= 2000000) {
@@ -34710,6 +34787,13 @@ static int auto_orientation_prefers_normal(UF_long n,
     return 1;
   }
 #endif
+  if (is_prestatic_bound_missing_diagonal_pattern(n, col_ptr, row_idx)) {
+    /* the pre-static adoption forces NORMAL and replaces the ordering
+       anyway; forced-normal reproduces the certified chain exactly
+       (pre2: identical trial score/lnz/unz/noffdiag) while skipping
+       the transpose candidate build */
+    return 1;
+  }
   return is_large_diagonal_circuit_like_pattern(n, col_ptr, row_idx);
 }
 
@@ -128026,6 +128110,51 @@ int kls_factor(kls_solver *solver, const double *values) {
        inline; see the gate there) */
     maybe_select_pre_static_row_match(solver, &elapsed, numeric_values,
                                       0);
+    if (solver->numeric == NULL && !solver->prestatic_adopted_unfactored &&
+        solver->symbolic != NULL &&
+        solver->stats.selected_ordering == KLS_ORDERING_NATURAL &&
+        solver->options.ordering == KLS_ORDERING_AUTO) {
+      /* the analyze-time BTF probe deferred the ordering competition
+         to the pre-static adoption; any bail-out means the factor
+         would run on NATURAL coordinates - rebuild a real ordering
+         (rare: the class's exact Hungarian match nearly always covers
+         and adopts) */
+      const double redo_start = kls_now_seconds();
+      trilinos_klu_l_symbolic *redo_sym = NULL;
+      trilinos_klu_l_common redo_common;
+      kls_ordering redo_ord = KLS_ORDERING_AUTO;
+      double redo_score = 0.0;
+      kls_separator_analysis redo_sep;
+      memset(&redo_sep, 0, sizeof(redo_sep));
+      kls_ps_ana_probe_disable = 1;
+      const int redo_status = choose_symbolic_for_pattern(
+        solver->n, solver->col_ptr, solver->row_idx, &solver->options,
+        &redo_sym, &redo_common, &redo_ord, &redo_score, &redo_sep);
+      kls_ps_ana_probe_disable = 0;
+      if (redo_status == KLS_OK && redo_sym != NULL) {
+        trilinos_klu_l_common old_common = solver->common;
+        trilinos_klu_l_free_symbolic(&solver->symbolic, &old_common);
+        solver->symbolic = redo_sym;
+        solver->common = redo_common;
+        kls_separator_analysis_clear(&solver->separator);
+        kls_separator_analysis_move(&solver->separator, &redo_sep);
+        kls_invalidate_factor_etree_stats(solver);
+        solver->stats.selected_ordering = redo_ord;
+        solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
+        solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
+        solver->stats.structural_rank =
+          (int64_t)solver->symbolic->structural_rank;
+        solver->stats.estimated_flops = solver->symbolic->est_flops;
+      } else {
+        kls_separator_analysis_clear(&redo_sep);
+      }
+      elapsed += kls_now_seconds() - redo_start;
+      if (kls_trace_pre_static_enabled()) {
+        fprintf(stderr, "KLS pre-static: probe rejection redo %.3fs "
+                "ordering=%d status=%d\n",
+                kls_now_seconds() - redo_start, (int)redo_ord, redo_status);
+      }
+    }
     KLS_ENTRY_PHASE("prestatic")
     if (solver->numeric == NULL && solver->prestatic_adopted_unfactored &&
         solver->values != NULL) {
