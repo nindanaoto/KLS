@@ -3620,154 +3620,6 @@ static int kls_rowmt_cholsym_par(UF_long n, const UF_long *bp,
    row subtrees.  L rows = climbing paths (excl. diagonal); U rows =
    diagonal + transpose of L.  True L/U of any diagonal-pivot
    factorization are contained; extra entries carry exact zeros. */
-static int kls_rowmt_cholsym(UF_long n, const UF_long *bp,
-                             const UF_long *bc,
-                             const UF_long *parent,
-                             UF_long **lsp, UF_long **lcp,
-                             UF_long **lst,
-                             UF_long **usp, UF_long **ucp,
-                             UF_long **uco,
-                             size_t *lfill, size_t *ufill) {
-  UF_long *tp = (UF_long *)calloc((size_t)n + 1, sizeof(UF_long));
-  UF_long *tc = (UF_long *)malloc((size_t)bp[n] * sizeof(UF_long));
-  UF_long *mark = (UF_long *)calloc((size_t)n, sizeof(UF_long));
-  UF_long *l_cnt = (UF_long *)calloc((size_t)n, sizeof(UF_long));
-  if (tp == NULL || tc == NULL || mark == NULL || l_cnt == NULL) {
-    free(tp); free(tc); free(mark); free(l_cnt);
-    return 0;
-  }
-  for (UF_long p = 0; p < bp[n]; ++p) {
-    tp[bc[p] + 1]++;
-  }
-  for (UF_long c = 0; c < n; ++c) {
-    tp[c + 1] += tp[c];
-  }
-  {
-    UF_long *cur = (UF_long *)malloc((size_t)n * sizeof(UF_long));
-    if (cur == NULL) {
-      free(tp); free(tc); free(mark); free(l_cnt);
-      return 0;
-    }
-    memcpy(cur, tp, (size_t)n * sizeof(UF_long));
-    for (UF_long r = 0; r < n; ++r) {
-      for (UF_long p = bp[r]; p < bp[r + 1]; ++p) {
-        tc[cur[bc[p]]++] = r;
-      }
-    }
-    free(cur);
-  }
-  /* pass 1: count row-subtree sizes */
-  for (UF_long i = 0; i < n; ++i) {
-    const UF_long tag = i + 1;
-    for (int dir = 0; dir < 2; ++dir) {
-      const UF_long *ptr = dir == 0 ? bp : tp;
-      const UF_long *col = dir == 0 ? bc : tc;
-      for (UF_long p = ptr[i]; p < ptr[i + 1]; ++p) {
-        UF_long k = col[p];
-        while (k < i && mark[k] != tag) {
-          mark[k] = tag;
-          l_cnt[i]++;
-          k = parent[k];
-        }
-      }
-    }
-  }
-  size_t lf = 0;
-  for (UF_long i = 0; i < n; ++i) {
-    lf += (size_t)l_cnt[i];
-  }
-  UF_long *l_start = (UF_long *)malloc((size_t)n * sizeof(UF_long));
-  UF_long *l_steps = (UF_long *)malloc((lf > 0 ? lf : 1) *
-                                       sizeof(UF_long));
-  UF_long *u_cnt = (UF_long *)calloc((size_t)n, sizeof(UF_long));
-  if (l_start == NULL || l_steps == NULL || u_cnt == NULL) {
-    free(tp); free(tc); free(mark); free(l_cnt);
-    free(l_start); free(l_steps); free(u_cnt);
-    return 0;
-  }
-  {
-    size_t acc = 0;
-    for (UF_long i = 0; i < n; ++i) {
-      l_start[i] = (UF_long)acc;
-      acc += (size_t)l_cnt[i];
-    }
-  }
-  /* pass 2: emit patterns (ascending via insertion at consume time
-     is avoided: emit then sort each row - subtree paths are short) */
-  memset(mark, 0, (size_t)n * sizeof(UF_long));
-  for (UF_long i = 0; i < n; ++i) {
-    const UF_long tag = i + 1;
-    UF_long w = l_start[i];
-    for (int dir = 0; dir < 2; ++dir) {
-      const UF_long *ptr = dir == 0 ? bp : tp;
-      const UF_long *col = dir == 0 ? bc : tc;
-      for (UF_long p = ptr[i]; p < ptr[i + 1]; ++p) {
-        UF_long k = col[p];
-        while (k < i && mark[k] != tag) {
-          mark[k] = tag;
-          l_steps[w++] = k;
-          k = parent[k];
-        }
-      }
-    }
-    /* ascending source order for the numeric chain */
-    const UF_long s0 = l_start[i];
-    for (UF_long a3 = s0 + 1; a3 < w; ++a3) {
-      const UF_long v = l_steps[a3];
-      UF_long b3 = a3;
-      while (b3 > s0 && l_steps[b3 - 1] > v) {
-        l_steps[b3] = l_steps[b3 - 1];
-        b3--;
-      }
-      l_steps[b3] = v;
-    }
-    for (UF_long q = s0; q < w; ++q) {
-      u_cnt[l_steps[q]]++;      /* transpose count (excl. diag) */
-    }
-  }
-  /* U rows: diagonal first, then transpose of L */
-  size_t uf = 0;
-  UF_long *u_start = (UF_long *)malloc((size_t)n * sizeof(UF_long));
-  if (u_start == NULL) {
-    free(tp); free(tc); free(mark); free(l_cnt);
-    free(l_start); free(l_steps); free(u_cnt);
-    return 0;
-  }
-  for (UF_long i = 0; i < n; ++i) {
-    u_start[i] = (UF_long)uf;
-    uf += (size_t)u_cnt[i] + 1u;
-  }
-  UF_long *u_cols = (UF_long *)malloc((uf > 0 ? uf : 1) *
-                                      sizeof(UF_long));
-  UF_long *ucur = (UF_long *)malloc((size_t)n * sizeof(UF_long));
-  if (u_cols == NULL || ucur == NULL) {
-    free(tp); free(tc); free(mark); free(l_cnt);
-    free(l_start); free(l_steps); free(u_cnt); free(u_start);
-    free(u_cols); free(ucur);
-    return 0;
-  }
-  for (UF_long i = 0; i < n; ++i) {
-    u_cols[u_start[i]] = i;     /* diagonal */
-    ucur[i] = u_start[i] + 1;
-    u_cnt[i]++;
-  }
-  for (UF_long i = 0; i < n; ++i) {
-    for (UF_long q = l_start[i]; q < l_start[i] + l_cnt[i]; ++q) {
-      const UF_long st = l_steps[q];
-      u_cols[ucur[st]++] = i;
-    }
-  }
-  free(tp); free(tc); free(mark); free(ucur);
-  *lsp = l_start;
-  *lcp = l_cnt;
-  *lst = l_steps;
-  *usp = u_start;
-  *ucp = u_cnt;
-  *uco = u_cols;
-  *lfill = lf;
-  *ufill = uf;
-  return 1;
-}
 
 /* Etree (A+A') heights + level buckets; returns nlevels or -1. */
 static UF_long kls_rowmt_levels(UF_long n, const UF_long *bp,
@@ -24789,7 +24641,9 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->col_scale);
   free(solver->values);
   free(solver->solve_perm_workspace);
-  free(solver->solve_refine_workspace);
+  free_solve_refine_workspace(solver);   /* incl. solve_refine_rinv:
+     it was only ever freed here-ish; a reused solver otherwise kept a
+     STALE row-perm inverse sized to the previous matrix */
   free(solver->solve_refine_values);
   free_refactor_map(solver);
   free_refactor_schedule(solver);
@@ -26853,18 +26707,6 @@ static _Thread_local int kls_metis_order_threads;
    the separator-pipeline refactor engines are structure-sensitive to
    (pre2: 5x refactor loss under the parallel splitter's forest) */
 static _Thread_local int kls_det_ndp_requested;
-/* pre-static choose for the separator-pipeline class (pre2): its
-   one-shot chain pays the class's serial NodeNDP (2.86s) on the
-   critical path, and the mt-metis forest-aware replacement measured
-   1.17s with identical downstream structure quality (score 1.01e8 vs
-   9.3e7, trial factor time unchanged, residual e-16).  Deterministic:
-   mt-metis separators run with a pinned seed under a global mutex and
-   the leaf NodeND workers consume thread-local MT19937 streams, so
-   the legacy libc stream the class's other ordering calls draw stays
-   single-threaded.  Cycle collateral measured and accepted: the
-   adopted forest raises pre2's separator-pipeline refactor from 2.65
-   to 3.66s while the one-shot drops 9.8 -> 8.0s. */
-static _Thread_local int kls_prestatic_mtnd_request;
 
 /* pattern-classified det-ndp routing, refreshed per analyze call.
    v12 measured the refine-only det-ndp scoping reverting v11's broad
@@ -27921,7 +27763,7 @@ static UF_long kls_metis_order_inner(UF_long n,
   int par_nd_done = 0;
 #ifdef KLS_HAVE_MTMETIS
   if (n >= 200000 &&
-      (getenv("KLS_MT_ND") != NULL || kls_prestatic_mtnd_request ||
+      (getenv("KLS_MT_ND") != NULL ||
        (kls_mt_nd_class && getenv("KLS_MT_ND_CLASS") != NULL))) {
     /* threaded ND (mt-metis, MIT).  With a leaf-count request the
        forest-aware path replicates NodeNDP's sizes contract so the
@@ -28351,8 +28193,6 @@ static int analyze_with_ordering(UF_long n,
 
   trilinos_klu_l_symbolic *symbolic = NULL;
   if (ordering == KLS_ORDERING_NATURAL) {
-    const double kls_ag_t0 =
-      getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
     symbolic = trilinos_klu_l_analyze_given(n, col_ptr, row_idx, NULL, NULL,
                                             &common);
   } else if (ordering == KLS_ORDERING_METIS) {
@@ -32942,7 +32782,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
   }
 
-adopt_unfactored:;
 kls_adopt_unfactored:;
   /* The early METIS race reads the pattern arrays this adoption frees:
      join and discard it first. */
@@ -34282,10 +34121,6 @@ static int kls_choose_symbolic_inner(UF_long n,
       n > 150000u && n <= 750000u && (UF_long)col_ptr[n] <= 8000000 &&
       getenv("KLS_DISABLE_PS_CHOOSE_PAR") == NULL &&
       !is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx)) {
-    if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr, "KLS choose: par-block entered %.6f\n",
-              kls_now_seconds());
-    }
     if (col_ptr[n] < 8 * n) {
       /* light-column matched pattern: the factor this ordering feeds
          is bounded by ~1e7-1e8 flops (rajat29's trial: 1.25e7 =
@@ -34302,8 +34137,8 @@ static int kls_choose_symbolic_inner(UF_long n,
                                 &a_sep) == KLS_OK && a_sym != NULL) {
         if (kls_trace_pre_static_enabled()) {
           fprintf(stderr,
-                  "KLS choose: light-column AMD-only score=%.4e t=%.6f\n",
-                  symbolic_score(a_sym), kls_now_seconds());
+                  "KLS choose: light-column AMD-only score=%.4e\n",
+                  symbolic_score(a_sym));
         }
         *symbolic_out = a_sym;
         *common_out = a_common;
@@ -38223,9 +38058,8 @@ static double *ensure_solve_perm_workspace(kls_solver *solver) {
     return solver->solve_perm_workspace;
   }
   free(solver->solve_perm_workspace);
-  free(solver->solve_refine_workspace);
+  free_solve_refine_workspace(solver);
   free(solver->solve_refine_values);
-  solver->solve_refine_workspace = NULL;
   solver->solve_refine_values = NULL;
   solver->solve_perm_workspace = NULL;
   solver->solve_perm_workspace_n = 0;
@@ -125463,7 +125297,6 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
   const UF_long *map_block_start =
     symbolic->nblocks == 1u ? solver->refactor_col_ptr
                             : solver->refactor_block_start;
-  const UF_long n = solver->n;
   const UF_long nblocks = symbolic->nblocks;
   const UF_long *R = symbolic->R;
   const UF_long *Q = symbolic->Q;
@@ -129089,7 +128922,11 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     if (!solver->spral_matching_selected) {
       /* the spral-matched prestatic class never paid the pts trial
          inline and it stalls against 74M-entry factors (pre2) */
-      kls_pts_maybe_trial(solver, numeric_values, &preps_elapsed);
+      /* the pts chain's historical calling convention is mutable
+         values (in-place scale variants); this path's buffer is
+         logically const and the mapped refactor only reads it */
+      kls_pts_maybe_trial(solver, (double *)(uintptr_t)numeric_values,
+                          &preps_elapsed);
     }
     KLS_PC_MARK("pts")
     kls_maybe_seed_row_solve_values_from_numeric(solver, &preps_elapsed);
@@ -129502,9 +129339,9 @@ static int solve_impl(kls_solver *solver,
      restricted to shapes without static row permutation or scaling. */
   if (getenv("KLS_TRACE_REFINE") != NULL && !solver->in_solve_refinement) {
     fprintf(stderr,
-            "KLS refine gate: ok=%d status=%d needs=%d ss=%d row_perm=%d"
+            "KLS refine gate: ok=%ld status=%d needs=%d ss=%d row_perm=%d"
             " scales=%d%d values=%d b_is_x=%d\n",
-            ok, (int)solver->common.status,
+            (long)ok, (int)solver->common.status,
             solver->numeric_needs_refinement,
             solver->solve_refine_single_shot, solver->row_perm != NULL,
             solver->row_scale != NULL, solver->col_scale != NULL,

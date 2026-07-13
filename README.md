@@ -17,6 +17,9 @@ This repository currently contains the first working KLS implementation:
 - Fast repeated factorization that reuses the existing numeric pattern, checks
   pivot quality, and can repair unscaled rejected BTF blocks before falling
   back to full pivoting factorization
+- A pipelined parallel first factorization for large blocks (deterministic
+  column pipeline with lockstep panels), with a BLAS3 dense-tail finish for
+  extreme-fill patterns
 - Value-aware static row pivoting and row/column equilibration trials for high
   off-diagonal-pivot cases
 - A MatrixMarket benchmark tool
@@ -95,9 +98,11 @@ matching to remove substantial pivoting pressure or materially reduce factor
 work/fill.
 
 For very large pre-static candidates, KLS uses SPRAL's auction
-matching/scaling path instead of exact Hungarian matching. This keeps the
-MC64-adjacent step on LGPL-compatible redistributed code while avoiding an
-unbounded exact-assignment setup cost on large circuit matrices.
+matching/scaling path instead of exact Hungarian matching, except on
+mostly-missing-diagonal patterns where the auction predictably falls short of
+the coverage floor and the exact Hungarian matching is both complete and
+faster; those go straight to the exact matching. Both keep the MC64-adjacent
+step on LGPL-compatible redistributed code.
 
 KLS keeps this as the only vendored MC64-adjacent external implementation.
 This is a license boundary, not an authorship boundary: existing MC64-style code
