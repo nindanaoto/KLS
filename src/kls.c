@@ -34016,12 +34016,15 @@ static int kls_choose_symbolic_inner(UF_long n,
                                        double *score_out,
                                        kls_separator_analysis *separator_out) {
   kls_separator_analysis_clear(separator_out);
-  if (options->ordering == KLS_ORDERING_AUTO && n < 16384 &&
+  if (options->ordering == KLS_ORDERING_AUTO && n < 49152 &&
       col_ptr[n] < 262144) {
-    /* tiny systems: the ordering competition (AMF/AMD scoring, spec
-       threads) costs ~0.5ms of a ~6ms one-shot while the fill deltas
-       at this scale are noise (rajat03: AMD 4.1ms factor vs AMF
-       4.2ms; the competition itself was the difference) */
+    /* tiny/sparse systems: the ordering competition (AMF/AMD scoring,
+       spec threads) costs more than the fill deltas it arbitrates at
+       this scale (rajat03: AMD 4.1ms factor vs AMF 4.2ms, the
+       competition itself was the difference; OPF_10000 at n=43.9K:
+       35ms of candidates for a 16ms factor).  The nnz cap keeps the
+       heavier mid-size classes (onetone1: 341K nnz) on the full
+       competition. */
     kls_options amd_opts = *options;
     amd_opts.ordering = KLS_ORDERING_AMD;
     int status = analyze_with_ordering(n, col_ptr, row_idx, &amd_opts,
@@ -128766,9 +128769,9 @@ int kls_factor(kls_solver *solver, const double *values) {
   int diagnostics_have_flops = 1;
   int diagnostics_have_rcond = 1;
   int promoted_numeric = 0;
-  if (!had_numeric && solver->n <= 16384u &&
+  if (!had_numeric && solver->n <= 65536u &&
       getenv("KLS_PRESTATIC_DEFER") != NULL) {
-    /* lean tiny class: run the post-factor match trial from the first
+    /* lean small class: run the post-factor match trial from the first
        refactorization's consult like the other deferrals; the plain
        factor already passed its quality gates */
     solver->rowmatch_deferred = 1;
@@ -128864,12 +128867,12 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   KLS_ENTRY_PHASE("auto_pivtol")
 #ifdef KLS_HAVE_SPRAL_SCALING
-  if (!had_numeric && solver->n <= 16384u &&
+  if (!had_numeric && solver->n <= 65536u &&
       getenv("KLS_PRESTATIC_DEFER") != NULL) {
-    /* lean tiny class: the post-factor Hungarian trial is the same
-       cycle-payoff family as the rowmatch trial (OPF_10000: 69ms of
-       an 89ms one-shot); the deferred consult runs it at the first
-       refactorization */
+    /* lean small class: the post-factor Hungarian trial is the same
+       cycle-payoff family as the rowmatch trial (OPF_10000, n=43.9K:
+       61ms of an 82ms one-shot); the deferred consult runs it at the
+       first refactorization */
     solver->rowmatch_deferred = 1;
   } else if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
                                                     numeric_values)) {
