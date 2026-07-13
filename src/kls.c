@@ -34201,7 +34201,13 @@ static int kls_choose_symbolic_inner(UF_long n,
     const int bs_forced =
       bs_env != NULL && bs_env[0] == '1' && bs_env[1] == '\0';
     if (bs_enabled && options->static_pivoting && options->scale <= 0 &&
-        (n >= 50000 || bs_forced)) {
+        (n >= 50000 || bs_forced) && n <= 200000 &&
+        col_ptr[n] <= 4000000) {
+      /* class ceiling: every block-structured adopter (TSOPF/case9
+         family) sits under 200K/4M - and the detector walk is
+         pathological on huge patterns with near-full rows (rajat29,
+         n=644K, rowdeg 454K: 1.9s of a 2.6s one-shot hunting a class
+         it cannot be) */
       /* Below ~50k the ND analyses cost almost nothing and their scores
          steer orientation/scale heuristics the factor-time trial relies
          on; only shortcut where the analysis itself is the cost. */
@@ -34276,6 +34282,10 @@ static int kls_choose_symbolic_inner(UF_long n,
       n > 150000u && n <= 750000u && (UF_long)col_ptr[n] <= 8000000 &&
       getenv("KLS_DISABLE_PS_CHOOSE_PAR") == NULL &&
       !is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx)) {
+    if (kls_trace_pre_static_enabled()) {
+      fprintf(stderr, "KLS choose: par-block entered %.6f\n",
+              kls_now_seconds());
+    }
     if (col_ptr[n] < 8 * n) {
       /* light-column matched pattern: the factor this ordering feeds
          is bounded by ~1e7-1e8 flops (rajat29's trial: 1.25e7 =
@@ -34292,8 +34302,8 @@ static int kls_choose_symbolic_inner(UF_long n,
                                 &a_sep) == KLS_OK && a_sym != NULL) {
         if (kls_trace_pre_static_enabled()) {
           fprintf(stderr,
-                  "KLS choose: light-column AMD-only score=%.4e\n",
-                  symbolic_score(a_sym));
+                  "KLS choose: light-column AMD-only score=%.4e t=%.6f\n",
+                  symbolic_score(a_sym), kls_now_seconds());
         }
         *symbolic_out = a_sym;
         *common_out = a_common;
