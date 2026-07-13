@@ -395,6 +395,11 @@ struct kls_solver {
   int in_solve_refinement;
   int solve_refine_single_shot; /* probe-validated: one correction, no
                                    post-verification sweep */
+  int row_solve_self_check;     /* row-engine-published values serve the
+                                   solves: verify each solve's residual
+                                   (1 SpMV) and correct the rare bad
+                                   publish (mac: 1-in-9 draws at 2e-4
+                                   vs the 1e-6 contract) */
   UF_long **refactor_l_indices;
   int32_t **refactor_l_indices32;
   int32_t *refactor_l_indices32_storage;
@@ -23181,7 +23186,10 @@ static UF_long kls_row_refactor_compact_panel_solve_value_count(
   const kls_solver *solver);
 
 static void kls_record_row_refactor_row_solve(kls_solver *solver) {
-  if (solver == NULL) {
+  if (solver == NULL || solver->in_solve_refinement) {
+    /* refinement's correction solves are internal machinery, not
+       user solves: counting them doubles the run counts and pollutes
+       the acceptance samples with correction-solve timings */
     return;
   }
   const UF_long compact_values =
@@ -127977,6 +127985,10 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (status != KLS_OK) {
     return status;
   }
+  /* a full factor replaces the numeric this flag's captured values
+     described; refining against stale values converges to the WRONG
+     solution (smoke: 1.0042 vs 1.0) */
+  solver->row_solve_self_check = 0;
   if (solver->n <= 8 && getenv("KLS_TRACE_X") != NULL) {
     fprintf(stderr, "FXC scale=%ld tol=%.17g btf=%ld ordering=%d init=%g\n",
             (long)solver->common.scale, solver->common.tol,
@@ -128685,6 +128697,30 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->numeric_needs_refinement = 0;
     solver->solve_refine_single_shot = 0;
   }
+  solver->row_solve_self_check = 0;
+  if (ok && solver->common.status >= 0 &&
+      solver->common.status != TRILINOS_KLU_SINGULAR &&
+      solver->row_refactor_values_ready &&
+      solver->row_scale == NULL && solver->col_scale == NULL &&
+      numeric_values != NULL) {
+    /* Solves will be served from the row engine's published replica
+       values.  That machinery's acceptance is timed, not
+       value-validated, and rare draws publish a reduced-accuracy
+       factor (mac_econ: ~1-in-9 runs at 2e-4 relative vs its 1e-6
+       contract; typical draws e-7..e-6).  Retain this refactor's
+       input values and verify every solve's residual - the refine
+       loop exits after one SpMV when the solve is already at target,
+       and corrects the bad publishes. */
+    if (solver->solve_refine_values == NULL) {
+      solver->solve_refine_values = (double *)malloc(
+        (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
+    }
+    if (solver->solve_refine_values != NULL) {
+      memcpy(solver->solve_refine_values, numeric_values,
+             (size_t)solver->nnz * sizeof(*numeric_values));
+      solver->row_solve_self_check = 1;
+    }
+  }
   fill_numeric_stats(solver);
   if (!ok || solver->common.status < 0) {
     return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
@@ -128721,14 +128757,18 @@ static int solve_impl(kls_solver *solver,
   }
 
   const double start = kls_now_seconds();
-  solver->row_refactor_last_row_solve = 0;
-  solver->row_refactor_last_compact_panel_solve_values = 0;
-  solver->row_refactor_last_compact_panel_group_solve_rows = 0;
-  solver->row_refactor_last_compact_panel_group_solve_entries = 0;
-  solver->stats.row_refactor_last_row_solve = 0;
-  solver->stats.row_refactor_last_compact_panel_solve_values = 0;
-  solver->stats.row_refactor_last_compact_panel_group_solve_rows = 0;
-  solver->stats.row_refactor_last_compact_panel_group_solve_entries = 0;
+  if (!solver->in_solve_refinement) {
+    /* refinement's internal correction solves must not clear the
+       user-visible last-solve stats of the solve they are refining */
+    solver->row_refactor_last_row_solve = 0;
+    solver->row_refactor_last_compact_panel_solve_values = 0;
+    solver->row_refactor_last_compact_panel_group_solve_rows = 0;
+    solver->row_refactor_last_compact_panel_group_solve_entries = 0;
+    solver->stats.row_refactor_last_row_solve = 0;
+    solver->stats.row_refactor_last_compact_panel_solve_values = 0;
+    solver->stats.row_refactor_last_compact_panel_group_solve_rows = 0;
+    solver->stats.row_refactor_last_compact_panel_group_solve_entries = 0;
+  }
   const int kernel_transpose =
     (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
   const int has_row_scale = solver->row_scale != NULL;
@@ -128980,7 +129020,7 @@ static int solve_impl(kls_solver *solver,
             solver->values != NULL, b == x);
   }
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
-      (solver->numeric_needs_refinement ||
+      (solver->numeric_needs_refinement || solver->row_solve_self_check ||
        /* near-diagonal factors (tight-tolerance adoption at 1e-8) always
           carry the correction; derived from the config so no flag
           lifecycle can drop it. The 1e-6 line stays below the 1e-5/1e-4
@@ -129026,8 +129066,19 @@ static int solve_impl(kls_solver *solver,
         const double av = fabs(brhs[i]);
         bmax = bmax < av ? av : bmax;
       }
+      const int self_check_only = solver->row_solve_self_check &&
+        !solver->numeric_needs_refinement &&
+        !(solver->common.tol < 1.0e-6) &&
+        getenv("KLS_ENABLE_SOLVE_REFINEMENT") == NULL;
+      /* The self-check enforces the solver contract (1e-9-relative
+         class), not maximal accuracy: a mac_econ-class solve at its
+         typical e-6 draw takes ONE correction to e-11..e-13 and exits
+         at the next residual pass, instead of iterating to the 1e-12
+         line (measured 0.26s vs 0.066s base solve).  Reduced-precision
+         factors under needs_refinement keep the tight target. */
       const double target = (bmax > 0.0 ? bmax : 1.0) *
-        (solver->user_col_perm != NULL ? 1.0e-10 : 1.0e-12);
+        (self_check_only ? 1.0e-9
+         : solver->user_col_perm != NULL ? 1.0e-10 : 1.0e-12);
       double last_rmax = HUGE_VAL;
       double initial_rmax = -1.0;
       memcpy(saved_x, xrhs, (size_t)nloc * sizeof(*saved_x));
@@ -129068,7 +129119,8 @@ static int solve_impl(kls_solver *solver,
         if (initial_rmax < 0.0) {
           initial_rmax = rmax;
         }
-        if (rmax <= target || !(rmax < 0.5 * last_rmax)) {
+        if (rmax <= target ||
+            !(rmax < (self_check_only ? 0.9 : 0.5) * last_rmax)) {
           if (initial_rmax >= 0.0 && rmax > initial_rmax) {
             /* Refinement diverged: the factorization amplifies in this
                direction.  Restore the unrefined solution and stop trading
@@ -129102,7 +129154,7 @@ static int solve_impl(kls_solver *solver,
 refine_skip:;
 
   solver->stats.solve_seconds = kls_now_seconds() - start;
-  if (ok && !kernel_transpose && nrhs == 1) {
+  if (ok && !kernel_transpose && nrhs == 1 && !solver->in_solve_refinement) {
     kls_row_refactor_acceptance_record_solve(solver,
                                              solver->stats.solve_seconds);
   }
