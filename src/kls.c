@@ -2343,6 +2343,7 @@ typedef struct kls_egraph_refactor_worker {
   double *x;
   double *help_x;
   double *pair_x;
+  double *fuse_x;   /* extra SPAs for k>2 fused dispatch (2 slices) */
   double *segment_panel;
   UF_long segment_panel_size;
   double *supernode_workspace;
@@ -77460,6 +77461,140 @@ static UF_long kls_snode_batch_consume_cached_pair(
   return t;
 }
 
+#define KLS_SNODE_MAX_FUSE 4
+
+/* Fused k-consumer batch consume (k <= KLS_SNODE_MAX_FUSE): one pass
+   over the producer run's tail panel feeds k consumer SPAs, dividing
+   the dominant panel-stream traffic by k. All consumers' cursors must
+   point at the run start (caller-checked) and hold it contiguously;
+   per-consumer arithmetic order matches the single kernel exactly, so
+   fused columns stay bit-identical to single dispatch. Returns
+   producers consumed from EVERY cursor, or 0 to fall back. */
+static UF_long kls_snode_batch_consume_cached_multi(
+  UF_long *const *l_indices,
+  double *const *l_values,
+  const UF_long *llen_local,
+  int nc,
+  const UF_long *const *ui,
+  const int32_t *const *ui32,
+  double *const *ux,
+  const UF_long *ulen,
+  const UF_long *up,
+  double *const *xv,
+  UF_long k1,
+  UF_long producer_limit,
+  const UF_long *snode_run_end,
+  const kls_egraph_refactor_shared *shared,
+  int wait_for_dependencies) {
+  const UF_long j =
+    ui32[0] != NULL ? (UF_long)ui32[0][up[0]] : ui[0][up[0]];
+  const UF_long run_end = snode_run_end[k1 + j];
+  if (run_end <= k1 + j + 1u) {
+    return 0;
+  }
+  UF_long tmax = run_end - (k1 + j);
+  if (tmax > KLS_SNODE_MAX_BATCH) {
+    tmax = KLS_SNODE_MAX_BATCH;
+  }
+  for (int c = 0; c < nc; ++c) {
+    if (tmax > ulen[c] - up[c]) {
+      tmax = ulen[c] - up[c];
+    }
+  }
+  UF_long t = 1;
+  for (; t < tmax; ++t) {
+    int aligned = 1;
+    for (int c = 0; c < nc; ++c) {
+      const UF_long jc = ui32[c] != NULL
+        ? (UF_long)ui32[c][up[c] + t] : ui[c][up[c] + t];
+      if (jc != j + t) {
+        aligned = 0;
+        break;
+      }
+    }
+    if (!aligned) {
+      break;
+    }
+  }
+  if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
+    return 0;
+  }
+  if (wait_for_dependencies) {
+    for (UF_long i = 0; i < t; ++i) {
+      if (!kls_egraph_refactor_dependency_done_now(shared, k1 + j + i)) {
+        return 0;
+      }
+    }
+  }
+  const UF_long *tli = l_indices[k1 + j + t - 1u];
+  const UF_long tlen = llen_local[j + t - 1u];
+  if (tli == NULL || (UF_long)nc * t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
+    return 0;
+  }
+  double xs[KLS_SNODE_MAX_FUSE][KLS_SNODE_MAX_BATCH];
+  const double *lx_arr[KLS_SNODE_MAX_BATCH];
+  for (UF_long i = 0; i < t; ++i) {
+    lx_arr[i] = l_values[k1 + j + i];
+    if (lx_arr[i] == NULL) {
+      return 0;
+    }
+    for (int c = 0; c < nc; ++c) {
+      xs[c][i] = xv[c][j + i];
+    }
+  }
+  for (UF_long i = 0; i < t; ++i) {
+    for (int c = 0; c < nc; ++c) {
+      xv[c][j + i] = 0.0;
+    }
+  }
+  for (UF_long i = 0; i < t; ++i) {
+    const double *lxi = lx_arr[i];
+    for (int c = 0; c < nc; ++c) {
+      const double u = xs[c][i];
+      ux[c][up[c] + i] = u;
+      for (UF_long r0 = 0; r0 + i + 1u < t; ++r0) {
+        xs[c][i + 1u + r0] -= lxi[r0] * u;
+      }
+    }
+  }
+  const double *tlx = lx_arr[t - 1u];
+  for (UF_long p0 = 0; p0 < tlen; p0 += KLS_SNODE_TAIL_CHUNK) {
+    const UF_long pc = tlen - p0 < KLS_SNODE_TAIL_CHUNK
+                         ? tlen - p0
+                         : KLS_SNODE_TAIL_CHUNK;
+    double acc[KLS_SNODE_MAX_FUSE][KLS_SNODE_TAIL_CHUNK];
+    {
+      const double *src = tlx + p0;
+      for (int c = 0; c < nc; ++c) {
+        const double u = xs[c][t - 1u];
+        for (UF_long p = 0; p < pc; ++p) {
+          acc[c][p] = src[p] * u;
+        }
+      }
+    }
+    for (UF_long i = 0; i + 1u < t; ++i) {
+      const double *src = lx_arr[i] + (t - 1u - i) + p0;
+      for (int c = 0; c < nc; ++c) {
+        const double u = xs[c][i];
+        for (UF_long p = 0; p < pc; ++p) {
+          acc[c][p] += src[p] * u;
+        }
+      }
+    }
+    for (UF_long p = 0; p < pc; ++p) {
+      const UF_long row = tli[p0 + p];
+      for (int c = 0; c < nc; ++c) {
+        xv[c][row] -= acc[c][p];
+      }
+    }
+  }
+  if (kls_snode_trace_enabled()) {
+    kls_snode_trace_batched_producers += (UF_long)nc * t;
+    kls_snode_trace_batched_tail_entries += (UF_long)nc * t * tlen;
+  }
+  return t;
+}
+
 #if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
 __attribute__((target_clones("default", "arch=x86-64-v3", "arch=x86-64-v4")))
 #endif
@@ -78599,6 +78734,164 @@ static int kls_egraph_refactor_single_unscaled_column_pair(
       kls_egraph_refactor_mark_done(shared, kb);
       b_done = 1;
       progress = 1;
+    }
+    if (!progress) {
+      kls_cpu_relax();
+      kls_egraph_pipeline_pause(&spin);
+    }
+  }
+  return 1;
+}
+
+/* k-way fused column walk (k <= KLS_SNODE_MAX_FUSE), the pair walk
+   generalized over per-side arrays. Same cooperative contract: leased
+   pipeline columns are not necessarily ready and may depend on each
+   other, so no step blocks; every side advances only through done_now
+   dependencies, aligned sides consume runs fused (panel read once for
+   k SPAs), and a completed side finalizes and marks done IMMEDIATELY
+   so chains through it keep moving. */
+static int kls_egraph_refactor_single_unscaled_column_multi(
+  kls_egraph_refactor_worker *worker,
+  const UF_long *cols,
+  int nc) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  double *udiag = (double *)numeric->Udiag;
+  UF_long **l_indices = solver->refactor_l_indices;
+  double **l_values = solver->refactor_l_values;
+  UF_long **u_indices = solver->refactor_u_indices;
+  double **u_values = solver->refactor_u_values;
+  double *xv[KLS_SNODE_MAX_FUSE];
+  if (solver->refactor_lu_pointer_count != solver->n ||
+      l_indices == NULL || l_values == NULL ||
+      u_indices == NULL || u_values == NULL || nc < 2 ||
+      nc > KLS_SNODE_MAX_FUSE || worker->pair_x == NULL ||
+      (nc > 2 && worker->fuse_x == NULL)) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+  xv[0] = worker->x;
+  xv[1] = worker->pair_x;
+  for (int c = 2; c < nc; ++c) {
+    xv[c] = worker->fuse_x + (size_t)(c - 2) * (size_t)solver->n;
+  }
+  const UF_long *ui[KLS_SNODE_MAX_FUSE];
+  const int32_t *ui32[KLS_SNODE_MAX_FUSE];
+  double *ux[KLS_SNODE_MAX_FUSE];
+  UF_long ulen[KLS_SNODE_MAX_FUSE];
+  UF_long up[KLS_SNODE_MAX_FUSE];
+  int done[KLS_SNODE_MAX_FUSE];
+  UF_long producer_limit = solver->n;
+  for (int c = 0; c < nc; ++c) {
+    const UF_long k = cols[c];
+    kls_egraph_scatter_unscaled_input(solver, shared->values, xv[c],
+                                      solver->refactor_col_ptr[k],
+                                      solver->refactor_col_ptr[k + 1u]);
+    ui[c] = u_indices[k];
+    ui32[c] = solver->refactor_u_indices32 != NULL
+      ? solver->refactor_u_indices32[k] : NULL;
+    ux[c] = u_values[k];
+    ulen[c] = numeric->Ulen[k];
+    up[c] = 0;
+    done[c] = 0;
+    if (k < producer_limit) {
+      producer_limit = k;
+    }
+  }
+  int remaining = nc;
+  unsigned spin = 0;
+  while (remaining > 0) {
+    if (kls_egraph_refactor_should_stop(shared)) {
+      return 0;
+    }
+    int progress = 0;
+    /* fused: consume a run shared by every side still at the same
+       producer (checked cheaply via equal current indices) */
+    int all_alive = 1;
+    for (int c = 0; c < nc; ++c) {
+      if (done[c] || up[c] >= ulen[c]) {
+        all_alive = 0;
+        break;
+      }
+    }
+    if (all_alive) {
+      const UF_long j0 = ui32[0] != NULL
+        ? (UF_long)ui32[0][up[0]] : ui[0][up[0]];
+      int aligned = 1;
+      for (int c = 1; c < nc; ++c) {
+        const UF_long jc = ui32[c] != NULL
+          ? (UF_long)ui32[c][up[c]] : ui[c][up[c]];
+        if (jc != j0) {
+          aligned = 0;
+          break;
+        }
+      }
+      if (aligned) {
+        const UF_long consumed = kls_snode_batch_consume_cached_multi(
+          l_indices, l_values, numeric->Llen, nc, ui, ui32, ux, ulen,
+          up, xv, 0u, producer_limit, solver->snode_run_end, shared, 1);
+        if (consumed != 0u) {
+          for (int c = 0; c < nc; ++c) {
+            up[c] += consumed;
+          }
+          progress = 1;
+        }
+      }
+    }
+    for (int c = 0; c < nc && !progress; ++c) {
+      if (done[c] || up[c] >= ulen[c]) {
+        continue;
+      }
+      const UF_long consumed = kls_snode_batch_consume_cached(
+        l_indices, l_values, numeric->Llen, ui[c], ui32[c], ux[c],
+        ulen[c], up[c], xv[c], 0u, cols[c], solver->snode_run_end,
+        shared, 1, NULL);
+      if (consumed != 0u) {
+        up[c] += consumed;
+        progress = 1;
+        break;
+      }
+      const UF_long jc = ui32[c] != NULL
+        ? (UF_long)ui32[c][up[c]] : ui[c][up[c]];
+      if (kls_egraph_refactor_dependency_done_now(shared, jc)) {
+        const double ujk = xv[c][jc];
+        xv[c][jc] = 0.0;
+        ux[c][up[c]] = ujk;
+        if (ujk != 0.0) {
+          kls_scatter_subtract_refactor_l(solver, xv[c], jc,
+                                          l_indices[jc], l_values[jc],
+                                          numeric->Llen[jc], ujk);
+        }
+        up[c]++;
+        progress = 1;
+        break;
+      }
+    }
+    for (int c = 0; c < nc; ++c) {
+      if (!done[c] && up[c] >= ulen[c]) {
+        const UF_long k = cols[c];
+        const double ukk = xv[c][k];
+        xv[c][k] = 0.0;
+        if (ukk == 0.0) {
+          kls_egraph_refactor_record_singular(shared, k, symbolic->Q[k]);
+          if (solver->common.halt_if_singular) {
+            return 0;
+          }
+        }
+        udiag[k] = ukk;
+        kls_egraph_store_l_column_from_workspace(solver, xv[c], k,
+                                                 l_indices[k],
+                                                 l_values[k],
+                                                 numeric->Llen[k], ukk);
+        kls_egraph_publish_u_supernode_l_column(shared, k);
+        kls_egraph_publish_consumer_plan_group_l_column(shared, k);
+        kls_egraph_refactor_mark_done(shared, k);
+        done[c] = 1;
+        remaining--;
+        progress = 1;
+      }
     }
     if (!progress) {
       kls_cpu_relax();
@@ -89574,7 +89867,17 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         worker->pair_x =
           (double *)calloc((size_t)solver->n, sizeof(double));
       }
+      const int quad_allowed = pair_allowed &&
+        shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED &&
+        getenv("KLS_ENABLE_QUAD_DISPATCH") != NULL;
+      if (quad_allowed && worker->fuse_x == NULL) {
+        worker->fuse_x = (double *)calloc(
+          (size_t)solver->n * (KLS_SNODE_MAX_FUSE - 2u), sizeof(double));
+      }
       const int try_pair = pair_allowed && worker->pair_x != NULL;
+      const unsigned long fuse_width =
+        quad_allowed && worker->fuse_x != NULL ? KLS_SNODE_MAX_FUSE
+        : try_pair ? 2ul : 1ul;
       for (;;) {
         if (kls_egraph_refactor_should_stop(shared)) {
           break;
@@ -89585,6 +89888,61 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           break;
         }
         if (queue_status > 0) {
+          continue;
+        }
+        if (fuse_width > 2ul) {
+          const UF_long qpos = (UF_long)atomic_fetch_add_explicit(
+            &shared->next_pipeline_pos, fuse_width, memory_order_relaxed);
+          if (qpos >= shared->pipeline_pos_end) {
+            break;
+          }
+          UF_long got[KLS_SNODE_MAX_FUSE];
+          int ng = 0;
+          int bail = 0;
+          for (unsigned long w = 0;
+               w < fuse_width && qpos + w < shared->pipeline_pos_end;
+               ++w) {
+            const UF_long qc = solver->refactor_level_cols[qpos + w];
+            const int ls =
+              kls_egraph_refactor_try_lease_pipeline_column(worker, qc);
+            if (ls < 0) {
+              bail = 1;
+              break;
+            }
+            if (ls > 0) {
+              got[ng++] = qc;
+            }
+          }
+          if (bail) {
+            break;
+          }
+          int ok2 = 1;
+          if (ng >= 2) {
+            ok2 = kls_egraph_refactor_single_unscaled_column_multi(
+              worker, got, ng);
+          } else if (ng == 1) {
+            ok2 = kls_egraph_refactor_dispatch_column(worker, got[0], 1);
+            if (ok2) {
+              kls_egraph_refactor_mark_done(shared, got[0]);
+            }
+          }
+          if (!ok2) {
+            if (!kls_egraph_refactor_should_stop(shared)) {
+              kls_egraph_refactor_record_invalid(shared);
+            }
+            break;
+          }
+          int after_fail = 0;
+          for (int g = 0; g < ng; ++g) {
+            if (kls_egraph_refactor_after_pipeline_column_done(
+                  worker, got[g]) < 0) {
+              after_fail = 1;
+              break;
+            }
+          }
+          if (after_fail) {
+            break;
+          }
           continue;
         }
         const UF_long pos =
@@ -89971,6 +90329,7 @@ static void destroy_egraph_refactor_pool(kls_solver *solver) {
     for (int i = 0; i < pool->thread_count; ++i) {
       free(pool->workers[i].help_x);
       free(pool->workers[i].pair_x);
+      free(pool->workers[i].fuse_x);
       free(pool->workers[i].segment_panel);
       free(pool->workers[i].supernode_workspace);
       free(pool->workers[i].index_workspace);
