@@ -10,6 +10,16 @@
 
 #include "trilinos_klu_internal.h"
 
+/* KLS dense-tail refactor: the trailing kls_klu_refactor_tail_skip
+ * columns of block kls_klu_refactor_tail_block were emitted by the
+ * pipelined first factor's BLAS3 dense finish; the caller refreshes
+ * them with a no-pivot blocked LU after this scalar walk.  Their
+ * off-diagonal entries must still be consumed here (poff runs
+ * sequentially over every column), but the block-entry scatter and the
+ * scalar consumption are skipped. */
+_Thread_local long kls_klu_refactor_tail_skip = 0 ;
+_Thread_local long kls_klu_refactor_tail_block = -1 ;
+
 
 /* ========================================================================== */
 /* === TRILINOS_KLU_refactor ========================================================= */
@@ -202,6 +212,26 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 		for (k = 0 ; k < nk ; k++)
 		{
 
+		    if (kls_klu_refactor_tail_skip > 0 &&
+			block == (Int) kls_klu_refactor_tail_block &&
+			k >= nk - (Int) kls_klu_refactor_tail_skip)
+		    {
+			/* dense-tail column: advance the off-diagonal walk,
+			 * leave the block entries to the BLAS3 refresh */
+			oldcol = Q [k+k1] ;
+			pend = Ap [oldcol+1] ;
+			for (p = Ap [oldcol] ; p < pend ; p++)
+			{
+			    newrow = Pinv [Ai [p]] - k1 ;
+			    if (newrow < 0 && poff < nzoff)
+			    {
+				Offx [poff] = Az [p] ;
+				poff++ ;
+			    }
+			}
+			continue ;
+		    }
+
 		    /* ------------------------------------------------------ */
 		    /* scatter kth column of the block into workspace X */
 		    /* ------------------------------------------------------ */
@@ -342,6 +372,28 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 
 		for (k = 0 ; k < nk ; k++)
 		{
+
+		    if (kls_klu_refactor_tail_skip > 0 &&
+			block == (Int) kls_klu_refactor_tail_block &&
+			k >= nk - (Int) kls_klu_refactor_tail_skip)
+		    {
+			/* dense-tail column: advance the off-diagonal walk,
+			 * leave the block entries to the BLAS3 refresh */
+			oldcol = Q [k+k1] ;
+			pend = Ap [oldcol+1] ;
+			for (p = Ap [oldcol] ; p < pend ; p++)
+			{
+			    oldrow = Ai [p] ;
+			    newrow = Pinv [oldrow] - k1 ;
+			    if (newrow < 0 && poff < nzoff)
+			    {
+				SCALE_DIV_ASSIGN (Offx [poff], Az [p],
+						  Rs [oldrow]) ;
+				poff++ ;
+			    }
+			}
+			continue ;
+		    }
 
 		    /* ------------------------------------------------------ */
 		    /* scatter kth column of the block into workspace X */
