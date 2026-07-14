@@ -16119,3 +16119,14 @@ walk itself — its columns carry ~4096-row dense bottoms — so the next
 stage excludes the tail from a parallel engine's schedule (or runs
 values-only pipe rounds) rather than the scalar walk; ss1 needs steady
 under ~2.5s to fit the suite timeout against CKTSO's 1.82s.
+
+Before building the lean up-looking consume for the small structureless
+cohort, the EXISTING serial row engine was measured on it
+(KLS_ENABLE_ROW_REFACTOR=1): it loses 2.4-3.8x against the column
+engines on every row (rajat16 3.7 -> 8.8ms, mimo46 284 -> 769us,
+zeros_nopss 264 -> 811us, bips98_1142 261 -> 991us, memplus 493 ->
+1477us) — that machinery is shaped for large dense-group numerics
+(dense-help, panels), and its per-row overheads swamp microsecond
+factors. The default env gate is measured-correct. The small-row build
+must be a NEW lean row-major consume (flat pattern walk, no group
+machinery), not a policy change on the existing engine.
