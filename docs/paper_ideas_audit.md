@@ -16098,3 +16098,24 @@ per-solve sweep. TSOPF_RS_b2383 solve 44 -> 37ms (cycle 1.01 vs CKTSO ->
 under parity), mac_econ solve 199 -> 130ms (1.28 -> ~1.21 vs CKTSO,
 residual 1.4e-9 vs the 1e-8 line), power197k and the healthy controls
 unchanged.
+
+The ss1 dense-tail refactorization landed in two proven stages. A
+validate harness first recomputed the 4096-wide tail through the planned
+math — per tail column, prefix-only consumption of the stored ascending
+U patterns, then a no-pivot blocked LU — and matched the stored factor
+to rounding (prefix-U exact, tail-U 3.5e-18, no unsorted patterns),
+which certified the gather order, the Rs frame (post-permute, indexed by
+pivotal row) and the pattern layout before any writeback. The production
+path then runs the vendor serial refactorization with the tail columns
+skipped (their off-diagonal entries still consumed so poff stays exact),
+gathers the updated trailing block with eight cyclic workers writing
+disjoint D columns and the prefix-U values in place, rebuilds the block
+with a no-pivot blocked LU (dgetrf would repivot; the refactor contract
+keeps P), and writes back through the stored dense patterns. ss1's
+steady refactor fell 24.2s -> 10.2s with the residual exact at 3.6e-16
+over twenty refactorizations; pre2/mac/rajat25/TSOPF/zeros paths read
+unchanged through the shared helper. The remaining 8-9s is the PREFIX
+walk itself — its columns carry ~4096-row dense bottoms — so the next
+stage excludes the tail from a parallel engine's schedule (or runs
+values-only pipe rounds) rather than the scalar walk; ss1 needs steady
+under ~2.5s to fit the suite timeout against CKTSO's 1.82s.
