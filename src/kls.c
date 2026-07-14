@@ -89894,18 +89894,35 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           continue;
         }
         if (fuse_width > 2ul) {
+          /* claim the deck as two SEPARATE pairs: concurrent workers'
+             interleaved claims space the halves apart, decorrelating
+             intra-deck dependencies (four consecutive positions in
+             topological order serialize the walk - rajat25 measured
+             -65% under adjacent quad leasing) */
           const UF_long qpos = (UF_long)atomic_fetch_add_explicit(
-            &shared->next_pipeline_pos, fuse_width, memory_order_relaxed);
+            &shared->next_pipeline_pos, 2ul, memory_order_relaxed);
           if (qpos >= shared->pipeline_pos_end) {
             break;
+          }
+          const UF_long qpos2 = (UF_long)atomic_fetch_add_explicit(
+            &shared->next_pipeline_pos, 2ul, memory_order_relaxed);
+          UF_long qp[KLS_SNODE_MAX_FUSE];
+          unsigned long nqp = 0;
+          for (unsigned long w = 0; w < 2ul; ++w) {
+            if (qpos + w < shared->pipeline_pos_end) {
+              qp[nqp++] = qpos + w;
+            }
+          }
+          for (unsigned long w = 0; w < 2ul; ++w) {
+            if (qpos2 + w < shared->pipeline_pos_end) {
+              qp[nqp++] = qpos2 + w;
+            }
           }
           UF_long got[KLS_SNODE_MAX_FUSE];
           int ng = 0;
           int bail = 0;
-          for (unsigned long w = 0;
-               w < fuse_width && qpos + w < shared->pipeline_pos_end;
-               ++w) {
-            const UF_long qc = solver->refactor_level_cols[qpos + w];
+          for (unsigned long w = 0; w < nqp; ++w) {
+            const UF_long qc = solver->refactor_level_cols[qp[w]];
             const int ls =
               kls_egraph_refactor_try_lease_pipeline_column(worker, qc);
             if (ls < 0) {
