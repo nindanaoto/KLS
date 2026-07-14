@@ -373,6 +373,9 @@ struct kls_solver {
   int eg_tt_counts[2];
   int eg_tt_samples[2];
   double eg_tt_min[2];
+  int eg_pair_choice;   /* fused pair dispatch: 0 undecided (probe once
+                           after the width verdict), 1 adopted, -1 off */
+  int eg_pair_pending;  /* probe refactor armed/outstanding */
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
@@ -24621,6 +24624,8 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   memset(solver->eg_tt_counts, 0, sizeof(solver->eg_tt_counts));
   memset(solver->eg_tt_samples, 0, sizeof(solver->eg_tt_samples));
   memset(solver->eg_tt_min, 0, sizeof(solver->eg_tt_min));
+  solver->eg_pair_choice = 0;
+  solver->eg_pair_pending = 0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   free_egraph_algorithm5_payoff_queue(solver);
@@ -89174,7 +89179,12 @@ static int kls_egraph_refactor_try_pop_ready_column(
    configuration; every special mode falls back to single dispatch. */
 static int kls_egraph_pair_dispatch_allowed(
   const kls_egraph_refactor_shared *shared) {
-  return kls_pair_dispatch_enabled() &&
+  /* forced by env, adopted by the per-matrix timed probe, or armed
+     for the probe refactor itself */
+  return (kls_pair_dispatch_enabled() ||
+          (shared->solver != NULL &&
+           (shared->solver->eg_pair_choice > 0 ||
+            shared->solver->eg_pair_pending))) &&
          (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED ||
           shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED) &&
          !shared->check_pivots &&
@@ -91294,6 +91304,12 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
     return thread_count;
   }
   if (solver->eg_tt_choice > 0) {
+    if (solver->eg_pair_choice == 0 && !solver->eg_pair_pending) {
+      /* width settled: spend one refactor probing fused pair dispatch
+         (rajat25 -31%, g2_circuit -11% measured; dc1 +39% - per-matrix
+         verdicts only) */
+      solver->eg_pair_pending = 1;
+    }
     return solver->eg_tt_choice <= thread_count ? solver->eg_tt_choice
                                                 : thread_count;
   }
@@ -91307,6 +91323,26 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
 
 static void kls_egraph_thread_trial_record(kls_solver *solver,
                                            double seconds) {
+  if (solver->eg_pair_pending) {
+    solver->eg_pair_pending = 0;
+    if (solver->eg_pair_choice == 0) {
+      const int side =
+        solver->eg_tt_choice == solver->eg_tt_counts[1] ? 1 : 0;
+      const double base = solver->eg_tt_min[side];
+      solver->eg_pair_choice =
+        solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH &&
+            base > 0.0 && seconds < 0.95 * base
+          ? 1 : -1;
+      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
+        fprintf(stderr,
+                "KLS egraph pair probe: %s (probe %.3f ms vs width-min"
+                " %.3f ms)\n",
+                solver->eg_pair_choice > 0 ? "ADOPT" : "off",
+                1e3 * seconds, 1e3 * base);
+      }
+    }
+    return;
+  }
   const int side = solver->eg_tt_pending - 1;
   solver->eg_tt_pending = 0;
   if (side < 0 || solver->eg_tt_choice != 0 ||
