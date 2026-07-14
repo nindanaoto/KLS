@@ -17,6 +17,7 @@ endif()
 option(KLS_BUILD_TESTS "Build KLS tests" ON)
 option(KLS_BUILD_BENCHMARKS "Build KLS benchmark tools" ON)
 option(KLS_BUILD_CKTSO_COMPARE "Build optional CKTSO comparison tool" OFF)
+option(KLS_BUILD_SUBTREELU_COMPARE "Build optional SubtreeLU comparison tool" OFF)
 option(KLS_BUILD_KLU2_COMPARE "Build optional Trilinos KLU2 comparison tool" OFF)
 option(KLS_ENABLE_METIS "Enable METIS nested-dissection ordering support" ON)
 option(KLS_USE_SYSTEM_METIS "Use a system METIS library instead of the bundled submodule" OFF)
@@ -27,6 +28,8 @@ option(KLS_USE_SYSTEM_SPRAL "Use a system SPRAL library instead of the bundled s
 option(KLS_SYSTEM_SPRAL_LGPL_COMPATIBLE "Acknowledge that the selected system SPRAL library is redistributable with LGPL KLS" OFF)
 option(KLS_ENABLE_CBLAS_SUPERNODE "Build optional CBLAS kernels for compact row-supernode experiments" OFF)
 set(CKTSO_ROOT "" CACHE PATH "Path to a local CKTSO distribution")
+set(SUBTREELU_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../SubtreeLU" CACHE PATH
+  "Path to a local SubtreeLU distribution")
 set(KLU2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/amesos2/src/KLU2" CACHE PATH "Path to a Trilinos Amesos2 KLU2 source directory")
 set(TEUCHOS_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Trilinos/packages/rol/src/compatibility/teuchos-lite" CACHE PATH "Path to Trilinos Teuchos-compatible headers for KLU2")
 set(KLS_SYSTEM_METIS_INCLUDE_DIR "" CACHE PATH "Path to a system METIS include directory")
@@ -483,6 +486,19 @@ if(KLS_BUILD_BENCHMARKS)
   target_compile_options(kls_bench PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
 
+  # Always provide a stock-KLU baseline from the exact vendored sources used
+  # by KLS.  This avoids making the paper benchmark depend on whichever
+  # SuiteSparse version happens to be installed on the host.
+  add_executable(klu_compare
+    bench/klu_width_compare.c)
+  target_compile_definitions(klu_compare PRIVATE KLS_VENDORED_KLU_ONLY=1)
+  target_link_libraries(klu_compare PRIVATE kls_suitesparse)
+  if(KLS_MATH_LIBRARY)
+    target_link_libraries(klu_compare PRIVATE "${KLS_MATH_LIBRARY}")
+  endif()
+  target_compile_options(klu_compare PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+
   find_path(KLS_SYSTEM_KLU_INCLUDE_DIR
     NAMES klu.h
     PATH_SUFFIXES suitesparse)
@@ -529,6 +545,29 @@ if(KLS_BUILD_CKTSO_COMPARE)
   target_link_libraries(cktso_compare PRIVATE "${CKTSO_LIBRARY}" m)
   target_compile_features(cktso_compare PRIVATE cxx_std_17)
   target_compile_options(cktso_compare PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+endif()
+
+if(KLS_BUILD_SUBTREELU_COMPARE)
+  if(NOT EXISTS "${SUBTREELU_ROOT}/include/subtree_lu.h")
+    message(FATAL_ERROR
+      "KLS_BUILD_SUBTREELU_COMPARE requires -DSUBTREELU_ROOT=/path/to/SubtreeLU")
+  endif()
+  enable_language(CXX)
+  find_library(SUBTREELU_LIBRARY
+    NAMES subtree_lu
+    PATHS "${SUBTREELU_ROOT}/lib"
+    NO_DEFAULT_PATH)
+  if(NOT SUBTREELU_LIBRARY)
+    message(FATAL_ERROR "Could not find libsubtree_lu under SUBTREELU_ROOT")
+  endif()
+  add_executable(subtreelu_compare
+    bench/subtreelu_compare.cpp)
+  target_include_directories(subtreelu_compare PRIVATE
+    "${SUBTREELU_ROOT}/include")
+  target_link_libraries(subtreelu_compare PRIVATE "${SUBTREELU_LIBRARY}" m)
+  target_compile_features(subtreelu_compare PRIVATE cxx_std_17)
+  target_compile_options(subtreelu_compare PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
 endif()
 

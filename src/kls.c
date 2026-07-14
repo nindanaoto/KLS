@@ -123470,8 +123470,12 @@ static int kls_pred_build_run(kls_pred_build_ctx *ctx,
 static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                               double *numeric_values,
                                               double *elapsed) {
+  /* Prediction is a parallel pattern-construction optimization.  In serial
+     it is slower than KLU on the ASIC class, and its suffix-closed storage
+     is not a valid input to the later mapped-refactor portfolio. */
   if (solver == NULL || solver->symbolic == NULL || solver->numeric != NULL ||
       numeric_values == NULL ||
+      solver->options.threads <= 1 ||
       (solver->n < 20000 && !solver->block_trial_active) ||
       solver->options.pivot_tolerance <= 0.0) {
     if (solver != NULL && solver->block_trial_active &&

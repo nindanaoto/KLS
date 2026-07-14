@@ -1,6 +1,32 @@
 #define _POSIX_C_SOURCE 200809L
 
+#ifdef KLS_VENDORED_KLU_ONLY
+#include "trilinos_klu_decl.h"
+#define klu_l_common trilinos_klu_l_common
+#define klu_l_symbolic trilinos_klu_l_symbolic
+#define klu_l_numeric trilinos_klu_l_numeric
+#define klu_l_defaults trilinos_klu_l_defaults
+#define klu_l_analyze trilinos_klu_l_analyze
+#define klu_l_factor trilinos_klu_l_factor
+#define klu_l_refactor trilinos_klu_l_refactor
+#define klu_l_solve trilinos_klu_l_solve
+#define klu_l_free_numeric trilinos_klu_l_free_numeric
+#define klu_l_free_symbolic trilinos_klu_l_free_symbolic
+#define KLU_OUT_OF_MEMORY TRILINOS_KLU_OUT_OF_MEMORY
+/* The vendored KLU has an optional KLS debug callback in free_numeric.
+   Stock-baseline runs do not enable that tracking facility. */
+void kls_numeric_free_log(const void *numeric, const void *lip,
+                          const void *llen, const void *uip,
+                          const void *ulen) {
+  (void)numeric;
+  (void)lip;
+  (void)llen;
+  (void)uip;
+  (void)ulen;
+}
+#else
 #include "klu.h"
+#endif
 
 #include <ctype.h>
 #include <errno.h>
@@ -32,9 +58,13 @@ typedef struct run_stats {
   double analysis_seconds;
   double initial_factor_seconds;
   double factor_seconds_avg;
+  double refactor_first_seconds;
+  double refactor_steady_seconds_avg;
   double refactor_seconds_avg;
   double solve_seconds_avg;
   double spice_cycle_seconds;
+  double residual_l2;
+  double relative_residual_l2;
   int status;
   int nblocks;
   int64_t nnz_l;
@@ -249,6 +279,7 @@ static void matvec(const matrix *a, const double *x, double *y) {
   }
 }
 
+#ifndef KLS_VENDORED_KLU_ONLY
 static int copy_int_arrays(const matrix *a, int **ap_out, int **ai_out) {
   if (a->n > INT_MAX || a->nnz > INT_MAX) return 0;
   int *ap = (int *)malloc(((size_t)a->n + 1u) * sizeof(*ap));
@@ -263,6 +294,30 @@ static int copy_int_arrays(const matrix *a, int **ap_out, int **ai_out) {
   *ap_out = ap;
   *ai_out = ai;
   return 1;
+}
+#endif
+
+static double residual_norm(const matrix *a, const double *x,
+                            const double *rhs, double *relative_out) {
+  double *ax = (double *)malloc((size_t)a->n * sizeof(*ax));
+  if (ax == NULL) {
+    if (relative_out != NULL) *relative_out = INFINITY;
+    return INFINITY;
+  }
+  matvec(a, x, ax);
+  double residual_sq = 0.0;
+  double rhs_sq = 0.0;
+  for (int64_t i = 0; i < a->n; ++i) {
+    const double r = ax[i] - rhs[i];
+    residual_sq += r * r;
+    rhs_sq += rhs[i] * rhs[i];
+  }
+  free(ax);
+  const double residual = sqrt(residual_sq);
+  if (relative_out != NULL) {
+    *relative_out = rhs_sq > 0.0 ? residual / sqrt(rhs_sq) : residual;
+  }
+  return residual;
 }
 
 static int copy_long_arrays(const matrix *a, int64_t **ap_out,
@@ -283,11 +338,14 @@ static int copy_long_arrays(const matrix *a, int64_t **ap_out,
 
 static double cycle_seconds(const run_stats *s) {
   return s->analysis_seconds + s->initial_factor_seconds + s->solve_seconds_avg +
-         99.0 * (s->refactor_seconds_avg + s->solve_seconds_avg);
+         s->refactor_first_seconds + s->solve_seconds_avg +
+         98.0 * (s->refactor_steady_seconds_avg + s->solve_seconds_avg);
 }
 
+#ifndef KLS_VENDORED_KLU_ONLY
 static int run_klu32(const matrix *a, const double *rhs, int repeat,
-                     int refactor_repeat, int ordering, int btf, int scale,
+                     int factor_repeat, int refactor_repeat, int ordering,
+                     int btf, int scale,
                      run_stats *out) {
   int *ap = NULL;
   int *ai = NULL;
@@ -326,35 +384,17 @@ static int run_klu32(const matrix *a, const double *rhs, int repeat,
   out->nnz_u = numeric->unz;
 
   double total = 0.0;
-  for (int i = 0; i < repeat; ++i) {
+  for (int i = 0; i < factor_repeat; ++i) {
     klu_free_numeric(&numeric, &common);
     const double start = now_seconds();
     numeric = klu_factor(ap, ai, a->values, symbolic, &common);
     total += now_seconds() - start;
     if (numeric == NULL || common.status < 0) break;
   }
-  out->factor_seconds_avg = total / (double)repeat;
+  out->factor_seconds_avg = factor_repeat > 0
+    ? total / (double)factor_repeat : out->initial_factor_seconds;
   if (numeric == NULL || common.status < 0) {
     out->status = common.status;
-    klu_free_symbolic(&symbolic, &common);
-    free(ap);
-    free(ai);
-    return 0;
-  }
-
-  total = 0.0;
-  for (int i = 0; i < refactor_repeat; ++i) {
-    const double start = now_seconds();
-    const int ok = klu_refactor(ap, ai, a->values, symbolic, numeric,
-                                         &common);
-    total += now_seconds() - start;
-    if (!ok || common.status < 0) break;
-  }
-  out->refactor_seconds_avg =
-    refactor_repeat > 0 ? total / (double)refactor_repeat : 0.0;
-  if (common.status < 0) {
-    out->status = common.status;
-    klu_free_numeric(&numeric, &common);
     klu_free_symbolic(&symbolic, &common);
     free(ap);
     free(ai);
@@ -371,6 +411,36 @@ static int run_klu32(const matrix *a, const double *rhs, int repeat,
     return 0;
   }
   total = 0.0;
+  for (int i = 0; i < refactor_repeat; ++i) {
+    const double start = now_seconds();
+    const int ok = klu_refactor(ap, ai, a->values, symbolic, numeric,
+                                         &common);
+    const double elapsed = now_seconds() - start;
+    total += elapsed;
+    if (i == 0) out->refactor_first_seconds = elapsed;
+    if (!ok || common.status < 0) break;
+    memcpy(work, rhs, (size_t)a->n * sizeof(*work));
+    if (!klu_solve(symbolic, numeric, (int)a->n, 1, work, &common) ||
+        common.status < 0) {
+      break;
+    }
+  }
+  out->refactor_seconds_avg =
+    refactor_repeat > 0 ? total / (double)refactor_repeat : 0.0;
+  out->refactor_steady_seconds_avg = refactor_repeat > 1
+    ? (total - out->refactor_first_seconds) / (double)(refactor_repeat - 1)
+    : out->refactor_first_seconds;
+  if (common.status < 0) {
+    out->status = common.status;
+    free(work);
+    klu_free_numeric(&numeric, &common);
+    klu_free_symbolic(&symbolic, &common);
+    free(ap);
+    free(ai);
+    return 0;
+  }
+
+  total = 0.0;
   for (int i = 0; i < repeat; ++i) {
     memcpy(work, rhs, (size_t)a->n * sizeof(*work));
     const double start = now_seconds();
@@ -380,6 +450,8 @@ static int run_klu32(const matrix *a, const double *rhs, int repeat,
     if (!ok || common.status < 0) break;
   }
   out->solve_seconds_avg = total / (double)repeat;
+  out->residual_l2 = residual_norm(a, work, rhs,
+                                   &out->relative_residual_l2);
   out->spice_cycle_seconds = cycle_seconds(out);
   out->status = common.status;
 
@@ -390,9 +462,11 @@ static int run_klu32(const matrix *a, const double *rhs, int repeat,
   free(ai);
   return out->status >= 0;
 }
+#endif
 
 static int run_klu64(const matrix *a, const double *rhs, int repeat,
-                     int refactor_repeat, int ordering, int btf, int scale,
+                     int factor_repeat, int refactor_repeat, int ordering,
+                     int btf, int scale,
                      run_stats *out) {
   int64_t *ap = NULL;
   int64_t *ai = NULL;
@@ -431,35 +505,17 @@ static int run_klu64(const matrix *a, const double *rhs, int repeat,
   out->nnz_u = (int64_t)numeric->unz;
 
   double total = 0.0;
-  for (int i = 0; i < repeat; ++i) {
+  for (int i = 0; i < factor_repeat; ++i) {
     klu_l_free_numeric(&numeric, &common);
     const double start = now_seconds();
     numeric = klu_l_factor(ap, ai, a->values, symbolic, &common);
     total += now_seconds() - start;
     if (numeric == NULL || common.status < 0) break;
   }
-  out->factor_seconds_avg = total / (double)repeat;
+  out->factor_seconds_avg = factor_repeat > 0
+    ? total / (double)factor_repeat : out->initial_factor_seconds;
   if (numeric == NULL || common.status < 0) {
     out->status = (int)common.status;
-    klu_l_free_symbolic(&symbolic, &common);
-    free(ap);
-    free(ai);
-    return 0;
-  }
-
-  total = 0.0;
-  for (int i = 0; i < refactor_repeat; ++i) {
-    const double start = now_seconds();
-    const int64_t ok =
-      klu_l_refactor(ap, ai, a->values, symbolic, numeric, &common);
-    total += now_seconds() - start;
-    if (!ok || common.status < 0) break;
-  }
-  out->refactor_seconds_avg =
-    refactor_repeat > 0 ? total / (double)refactor_repeat : 0.0;
-  if (common.status < 0) {
-    out->status = (int)common.status;
-    klu_l_free_numeric(&numeric, &common);
     klu_l_free_symbolic(&symbolic, &common);
     free(ap);
     free(ai);
@@ -476,6 +532,36 @@ static int run_klu64(const matrix *a, const double *rhs, int repeat,
     return 0;
   }
   total = 0.0;
+  for (int i = 0; i < refactor_repeat; ++i) {
+    const double start = now_seconds();
+    const int64_t ok =
+      klu_l_refactor(ap, ai, a->values, symbolic, numeric, &common);
+    const double elapsed = now_seconds() - start;
+    total += elapsed;
+    if (i == 0) out->refactor_first_seconds = elapsed;
+    if (!ok || common.status < 0) break;
+    memcpy(work, rhs, (size_t)a->n * sizeof(*work));
+    if (!klu_l_solve(symbolic, numeric, (int64_t)a->n, 1u, work,
+                     &common) || common.status < 0) {
+      break;
+    }
+  }
+  out->refactor_seconds_avg =
+    refactor_repeat > 0 ? total / (double)refactor_repeat : 0.0;
+  out->refactor_steady_seconds_avg = refactor_repeat > 1
+    ? (total - out->refactor_first_seconds) / (double)(refactor_repeat - 1)
+    : out->refactor_first_seconds;
+  if (common.status < 0) {
+    out->status = (int)common.status;
+    free(work);
+    klu_l_free_numeric(&numeric, &common);
+    klu_l_free_symbolic(&symbolic, &common);
+    free(ap);
+    free(ai);
+    return 0;
+  }
+
+  total = 0.0;
   for (int i = 0; i < repeat; ++i) {
     memcpy(work, rhs, (size_t)a->n * sizeof(*work));
     const double start = now_seconds();
@@ -486,6 +572,8 @@ static int run_klu64(const matrix *a, const double *rhs, int repeat,
     if (!ok || common.status < 0) break;
   }
   out->solve_seconds_avg = total / (double)repeat;
+  out->residual_l2 = residual_norm(a, work, rhs,
+                                   &out->relative_residual_l2);
   out->spice_cycle_seconds = cycle_seconds(out);
   out->status = (int)common.status;
 
@@ -504,21 +592,28 @@ static int parse_ordering(const char *name) {
   return -1;
 }
 
+#ifndef KLS_VENDORED_KLU_ONLY
 static void print_stats_json(const char *name, const run_stats *s) {
   printf("\"%s\":{\"status\":%d,\"analysis_seconds\":%.9g,"
          "\"initial_factor_seconds\":%.9g,\"factor_seconds_avg\":%.9g,"
+         "\"refactor_first_seconds\":%.9g,"
+         "\"refactor_steady_seconds_avg\":%.9g,"
          "\"refactor_seconds_avg\":%.9g,\"solve_seconds_avg\":%.9g,"
          "\"spice_cycle_seconds\":%.9g,\"nblocks\":%d,"
+         "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
          "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 "}",
          name, s->status, s->analysis_seconds, s->initial_factor_seconds,
-         s->factor_seconds_avg, s->refactor_seconds_avg, s->solve_seconds_avg,
-         s->spice_cycle_seconds, s->nblocks, s->nnz_l, s->nnz_u);
+         s->factor_seconds_avg, s->refactor_first_seconds,
+         s->refactor_steady_seconds_avg, s->refactor_seconds_avg,
+         s->solve_seconds_avg, s->spice_cycle_seconds, s->nblocks,
+         s->residual_l2, s->relative_residual_l2, s->nnz_l, s->nnz_u);
 }
+#endif
 
 int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr,
-            "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] "
+            "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] "
             "[--ordering amd|colamd|natural] [--scale -1|0|1|2] "
             "[--no-btf] [--json]\n",
             argv[0]);
@@ -527,6 +622,7 @@ int main(int argc, char **argv) {
 
   const char *path = argv[1];
   int repeat = 5;
+  int factor_repeat = -1;
   int refactor_repeat = 5;
   int ordering = 0;
   int btf = 1;
@@ -535,6 +631,8 @@ int main(int argc, char **argv) {
   for (int i = 2; i < argc; ++i) {
     if (strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) {
       repeat = atoi(argv[++i]);
+    } else if (strcmp(argv[i], "--factor-repeat") == 0 && i + 1 < argc) {
+      factor_repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--refactor-repeat") == 0 && i + 1 < argc) {
       refactor_repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--ordering") == 0 && i + 1 < argc) {
@@ -554,7 +652,8 @@ int main(int argc, char **argv) {
       return EXIT_FAILURE;
     }
   }
-  if (repeat <= 0 || refactor_repeat < 0 ||
+  if (factor_repeat < 0) factor_repeat = repeat;
+  if (repeat <= 0 || factor_repeat < 0 || refactor_repeat < 0 ||
       (scale != -1 && scale != 0 && scale != 1 && scale != 2)) {
     fprintf(stderr, "invalid repeat or scale argument\n");
     return EXIT_FAILURE;
@@ -564,7 +663,7 @@ int main(int argc, char **argv) {
   memset(&a, 0, sizeof(a));
   if (!read_matrix_market(path, &a)) return EXIT_FAILURE;
 
-  double *x_true = (double *)malloc((size_t)a.n * sizeof(*x_true));
+  double *x_true = (double *)calloc((size_t)a.n, sizeof(*x_true));
   double *rhs = (double *)malloc((size_t)a.n * sizeof(*rhs));
   if (x_true == NULL || rhs == NULL) {
     matrix_free(&a);
@@ -573,24 +672,51 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   for (int64_t i = 0; i < a.n; ++i) {
-    x_true[i] = 1.0 + (double)((i % 17) - 8) * 0.01;
+    x_true[i] = 1.0 + (double)(i % 17) * 0.01;
   }
   matvec(&a, x_true, rhs);
 
+#ifndef KLS_VENDORED_KLU_ONLY
   run_stats s32;
+#endif
   run_stats s64;
+#ifndef KLS_VENDORED_KLU_ONLY
   memset(&s32, 0, sizeof(s32));
+#endif
   memset(&s64, 0, sizeof(s64));
-  const int ok32 = run_klu32(&a, rhs, repeat, refactor_repeat, ordering, btf,
-                             scale, &s32);
-  const int ok64 = run_klu64(&a, rhs, repeat, refactor_repeat, ordering, btf,
-                             scale, &s64);
+#ifndef KLS_VENDORED_KLU_ONLY
+  const int ok32 = run_klu32(&a, rhs, repeat, factor_repeat,
+                             refactor_repeat, ordering, btf, scale, &s32);
+#endif
+  const int ok64 = run_klu64(&a, rhs, repeat, factor_repeat,
+                             refactor_repeat, ordering, btf, scale, &s64);
 
   if (json) {
+#ifdef KLS_VENDORED_KLU_ONLY
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
-           ",\"repeat\":%d,\"refactor_repeat\":%d,\"ordering\":%d,"
+           ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"
+           "\"ordering\":%d,"
+           "\"btf\":%s,\"scale\":%d,\"status\":%d,"
+           "\"analysis_seconds\":%.9g,\"initial_factor_seconds\":%.9g,"
+           "\"factor_seconds_avg\":%.9g,\"refactor_first_seconds\":%.9g,"
+           "\"refactor_steady_seconds_avg\":%.9g,"
+           "\"refactor_seconds_avg\":%.9g,\"solve_seconds_avg\":%.9g,"
+           "\"spice_cycle_seconds\":%.9g,\"residual_l2\":%.9g,"
+           "\"relative_residual_l2\":%.9g,\"nblocks\":%d,"
+           "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 "}\n",
+           path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat, ordering,
+           btf ? "true" : "false", scale, s64.status,
+           s64.analysis_seconds, s64.initial_factor_seconds,
+           s64.factor_seconds_avg, s64.refactor_first_seconds,
+           s64.refactor_steady_seconds_avg, s64.refactor_seconds_avg,
+           s64.solve_seconds_avg, s64.spice_cycle_seconds, s64.residual_l2,
+           s64.relative_residual_l2, s64.nblocks, s64.nnz_l, s64.nnz_u);
+#else
+    printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
+           ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"
+           "\"ordering\":%d,"
            "\"btf\":%s,\"scale\":%d,",
-           path, a.n, a.nnz, repeat, refactor_repeat, ordering,
+           path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat, ordering,
            btf ? "true" : "false", scale);
     print_stats_json("klu32", &s32);
     printf(",");
@@ -607,7 +733,14 @@ int main(int argc, char **argv) {
              s32.spice_cycle_seconds / s64.spice_cycle_seconds);
     }
     printf("}\n");
+#endif
   } else {
+#ifdef KLS_VENDORED_KLU_ONLY
+    printf("KLU64: analysis %.6f factor %.6f refactor %.6f solve %.6f cycle %.6f\n",
+           s64.analysis_seconds, s64.initial_factor_seconds,
+           s64.refactor_seconds_avg, s64.solve_seconds_avg,
+           s64.spice_cycle_seconds);
+#else
     printf("KLU32: analysis %.6f factor %.6f refactor %.6f solve %.6f cycle %.6f\n",
            s32.analysis_seconds, s32.initial_factor_seconds,
            s32.refactor_seconds_avg, s32.solve_seconds_avg,
@@ -616,10 +749,15 @@ int main(int argc, char **argv) {
            s64.analysis_seconds, s64.initial_factor_seconds,
            s64.refactor_seconds_avg, s64.solve_seconds_avg,
            s64.spice_cycle_seconds);
+#endif
   }
 
   matrix_free(&a);
   free(x_true);
   free(rhs);
+#ifdef KLS_VENDORED_KLU_ONLY
+  return ok64 ? EXIT_SUCCESS : EXIT_FAILURE;
+#else
   return (ok32 && ok64) ? EXIT_SUCCESS : EXIT_FAILURE;
+#endif
 }

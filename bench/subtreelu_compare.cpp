@@ -21,6 +21,9 @@ struct Matrix {
   std::vector<int> col_ptr;
   std::vector<int> row_idx;
   std::vector<double> values;
+  std::vector<int> row_ptr;
+  std::vector<int> col_idx;
+  std::vector<double> row_values;
 };
 
 static bool read_matrix_market(const char *path, Matrix &a) {
@@ -125,6 +128,26 @@ static bool read_matrix_market(const char *path, Matrix &a) {
     a.row_idx[static_cast<size_t>(dst)] = e.row;
     a.values[static_cast<size_t>(dst)] = e.value;
   }
+
+  // SubtreeLU's public interface requires CSR.  Keep CSC above for the
+  // independent residual calculation, and build the required CSR value order
+  // explicitly rather than passing a transposed view by accident.
+  a.row_ptr.assign(static_cast<size_t>(a.n) + 1u, 0);
+  a.col_idx.resize(unique.size());
+  a.row_values.resize(unique.size());
+  for (const Entry &e : unique) {
+    a.row_ptr[static_cast<size_t>(e.row) + 1u]++;
+  }
+  for (int row = 0; row < a.n; ++row) {
+    a.row_ptr[static_cast<size_t>(row) + 1u] +=
+      a.row_ptr[static_cast<size_t>(row)];
+  }
+  next = a.row_ptr;
+  for (const Entry &e : unique) {
+    const int dst = next[static_cast<size_t>(e.row)]++;
+    a.col_idx[static_cast<size_t>(dst)] = e.col;
+    a.row_values[static_cast<size_t>(dst)] = e.value;
+  }
   return true;
 }
 
@@ -161,13 +184,15 @@ static double residual(const Matrix &a,
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat]\n", argv[0]);
+    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat] [factor-repeat]\n", argv[0]);
     return EXIT_FAILURE;
   }
   const int threads = argc > 2 ? std::atoi(argv[2]) : 16;
   const int repeat = argc > 3 ? std::atoi(argv[3]) : 5;
   const int refactor_repeat = argc > 4 ? std::atoi(argv[4]) : repeat;
-  if (threads <= 0 || repeat <= 0 || refactor_repeat < 0) {
+  const int factor_repeat = argc > 5 ? std::atoi(argv[5]) : repeat;
+  if (threads <= 0 || repeat <= 0 || refactor_repeat < 0 ||
+      factor_repeat < 0) {
     std::fprintf(stderr, "threads/repeat arguments must be positive\n");
     return EXIT_FAILURE;
   }
@@ -177,21 +202,24 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   std::vector<double> x_true(static_cast<size_t>(a.n), 1.0);
+  for (int i = 0; i < a.n; ++i) {
+    x_true[static_cast<size_t>(i)] = 1.0 + static_cast<double>(i % 17) * 0.01;
+  }
   std::vector<double> b(static_cast<size_t>(a.n), 0.0);
   std::vector<double> x(static_cast<size_t>(a.n), 0.0);
   matvec(a, x_true, b);
 
   subtree_lu::SubtreeLU<int, double> solver;
   long long *parm = solver.parm;
-  int ret = solver.analyze(a.n, a.col_ptr.data(), a.row_idx.data(),
-                           a.values.data(), threads, nullptr, nullptr);
+  int ret = solver.analyze(a.n, a.row_ptr.data(), a.col_idx.data(),
+                           a.row_values.data(), threads, nullptr, nullptr);
   if (ret != subtree_lu::E_OK) {
     std::fprintf(stderr, "SubtreeLU analyze failed: %d\n", ret);
     return EXIT_FAILURE;
   }
   const long long analysis_us = parm[subtree_lu::O_ANALYZE_TIME];
 
-  ret = solver.factorize(a.values.data());
+  ret = solver.factorize(a.row_values.data());
   if (ret != subtree_lu::E_OK) {
     std::fprintf(stderr, "SubtreeLU initial factorize failed: %d\n", ret);
     return EXIT_FAILURE;
@@ -200,22 +228,27 @@ int main(int argc, char **argv) {
 
   long long factor_total = 0;
   long long refactor_total = 0;
+  long long refactor_first = 0;
   long long solve_total = 0;
   long long refactor_wall_total = 0;
   long long solve_wall_total = 0;
-  for (int i = 0; i < repeat; ++i) {
-    ret = solver.factorize(a.values.data());
+  for (int i = 0; i < factor_repeat; ++i) {
+    ret = solver.factorize(a.row_values.data());
     if (ret != subtree_lu::E_OK) break;
     factor_total += parm[subtree_lu::O_FACTORIZE_TIME];
   }
   for (int i = 0; i < refactor_repeat && ret == subtree_lu::E_OK; ++i) {
     const auto w0 = std::chrono::steady_clock::now();
-    ret = solver.refactorize(a.values.data());
+    ret = solver.refactorize(a.row_values.data());
     const auto w1 = std::chrono::steady_clock::now();
     if (ret != subtree_lu::E_OK) break;
     refactor_total += parm[subtree_lu::O_FACTORIZE_TIME];
+    if (i == 0) refactor_first = parm[subtree_lu::O_FACTORIZE_TIME];
     refactor_wall_total +=
       std::chrono::duration_cast<std::chrono::microseconds>(w1 - w0).count();
+    /* Mirror the refactor/solve cadence used by the other adaptive
+       harnesses; this warm solve is not included in solve_total. */
+    ret = solver.solve(b.data(), x.data());
   }
   for (int i = 0; i < repeat && ret == subtree_lu::E_OK; ++i) {
     const auto w0 = std::chrono::steady_clock::now();
@@ -231,14 +264,21 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  const double factor_us_avg = static_cast<double>(factor_total) / static_cast<double>(repeat);
+  const double factor_us_avg = factor_repeat > 0
+    ? static_cast<double>(factor_total) / static_cast<double>(factor_repeat)
+    : static_cast<double>(initial_factor_us);
   const double refactor_us_avg = refactor_repeat > 0
     ? static_cast<double>(refactor_total) / static_cast<double>(refactor_repeat)
     : 0.0;
+  const double refactor_steady_us_avg = refactor_repeat > 1
+    ? static_cast<double>(refactor_total - refactor_first) /
+        static_cast<double>(refactor_repeat - 1)
+    : static_cast<double>(refactor_first);
   const double solve_us_avg = static_cast<double>(solve_total) / static_cast<double>(repeat);
   const double spice_cycle_seconds =
     1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
-              solve_us_avg + 99.0 * (refactor_us_avg + solve_us_avg));
+              solve_us_avg + static_cast<double>(refactor_first) +
+              solve_us_avg + 98.0 * (refactor_steady_us_avg + solve_us_avg));
   {
     const char *dump = std::getenv("ST_DUMP_PERM");
     if (dump != nullptr) {
@@ -293,22 +333,28 @@ int main(int argc, char **argv) {
   const double residual_l2 = residual(a, x, b, &relative_residual);
 
   std::printf("{\"matrix\":\"%s\",\"n\":%d,\"nnz\":%d,"
-              "\"threads\":%d,\"repeat\":%d,\"refactor_repeat\":%d,"
+              "\"threads\":%d,\"repeat\":%d,\"factor_repeat\":%d,"
+              "\"refactor_repeat\":%d,"
               "\"analysis_us\":%lld,\"initial_factor_us\":%lld,"
               "\"factor_us_avg\":%.9g,\"refactor_us_avg\":%.9g,"
               "\"solve_us_avg\":%.9g,"
               "\"analysis_seconds\":%.9g,\"initial_factor_seconds\":%.9g,"
               "\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g,"
+              "\"refactor_first_seconds\":%.9g,"
+              "\"refactor_steady_seconds_avg\":%.9g,"
               "\"solve_seconds_avg\":%.9g,\"spice_cycle_seconds\":%.9g,"
               "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
               "\"nnz_l\":%lld,\"nnz_u\":%lld,"
               "\"nsupernodes\":%lld,\"factorize_flops\":%lld}\n",
               argv[1], a.n, a.col_ptr[static_cast<size_t>(a.n)], threads,
-              repeat, refactor_repeat, analysis_us, initial_factor_us,
+              repeat, factor_repeat, refactor_repeat, analysis_us,
+              initial_factor_us,
               factor_us_avg, refactor_us_avg, solve_us_avg,
               1.0e-6 * static_cast<double>(analysis_us),
               1.0e-6 * static_cast<double>(initial_factor_us),
               1.0e-6 * factor_us_avg, 1.0e-6 * refactor_us_avg,
+              1.0e-6 * static_cast<double>(refactor_first),
+              1.0e-6 * refactor_steady_us_avg,
               1.0e-6 * solve_us_avg, spice_cycle_seconds,
               residual_l2, relative_residual,
               parm[subtree_lu::O_LNNZ], parm[subtree_lu::O_UNNZ],

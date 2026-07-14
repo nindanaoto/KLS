@@ -617,7 +617,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -642,6 +642,7 @@ int main(int argc, char **argv) {
   }
   const char *path = argv[1];
   int repeat = 5;
+  int factor_repeat = -1;
   int refactor_repeat = 5;
   int json = 0;
   int analyze_only = 0;
@@ -661,6 +662,8 @@ int main(int argc, char **argv) {
       analyze_only = 1;
     } else if (strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) {
       repeat = atoi(argv[++i]);
+    } else if (strcmp(argv[i], "--factor-repeat") == 0 && i + 1 < argc) {
+      factor_repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--refactor-repeat") == 0 && i + 1 < argc) {
       refactor_repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
@@ -727,7 +730,9 @@ int main(int argc, char **argv) {
       return EXIT_FAILURE;
     }
   }
-  if (repeat <= 0 || refactor_repeat < 0 || options.threads <= 0) {
+  if (factor_repeat < 0) factor_repeat = repeat;
+  if (repeat <= 0 || factor_repeat < 0 || refactor_repeat < 0 ||
+      options.threads <= 0) {
     usage(argv[0]);
     return EXIT_FAILURE;
   }
@@ -1020,7 +1025,7 @@ int main(int argc, char **argv) {
       kls_prof_start();
     }
   }
-  for (int i = 0; i < repeat; ++i) {
+  for (int i = 0; i < factor_repeat; ++i) {
     status = kls_factor(solver, run_values);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
@@ -1107,7 +1112,8 @@ int main(int argc, char **argv) {
   double rel_residual = 0.0;
   const double residual =
       residual_norm_values(&a, run_values, x, b, &rel_residual);
-  const double factor_avg = factor_total / (double)repeat;
+  const double factor_avg = factor_repeat > 0
+    ? factor_total / (double)factor_repeat : initial_factor_seconds;
   const double refactor_avg = refactor_repeat > 0 ? refactor_total / (double)refactor_repeat : 0.0;
   const double refactor_steady_avg = refactor_repeat > 1
     ? (refactor_total - refactor_first) / (double)(refactor_repeat - 1)
@@ -1117,7 +1123,8 @@ int main(int argc, char **argv) {
 
   if (json) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
-           ",\"threads\":%d"
+           ",\"threads\":%d,\"repeat\":%d,\"factor_repeat\":%d"
+           ",\"refactor_repeat\":%d"
            ",\"build_has_metis\":%s"
            ",\"build_has_scotch\":%s"
            ",\"build_has_spral_scaling\":%s"
@@ -1179,7 +1186,8 @@ int main(int argc, char **argv) {
            ",\"kls_first_last_separator_queue_partitioned\":%d"
            ",\"kls_first_separator_queue_partitioned_count\":%" PRId64
            ",\"kls_first_last_separator_queue_split_components\":%" PRId64,
-           path, a.n, a.nnz, options.threads,
+           path, a.n, a.nnz, options.threads, repeat, factor_repeat,
+           refactor_repeat,
            stats.build_has_metis ? "true" : "false",
            stats.build_has_scotch ? "true" : "false",
            stats.build_has_spral_scaling ? "true" : "false",

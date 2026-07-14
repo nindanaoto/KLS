@@ -160,13 +160,15 @@ static double residual(const Matrix &a,
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat]\n", argv[0]);
+    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat] [factor-repeat]\n", argv[0]);
     return EXIT_FAILURE;
   }
   const int threads = argc > 2 ? std::atoi(argv[2]) : 16;
   const int repeat = argc > 3 ? std::atoi(argv[3]) : 5;
   const int refactor_repeat = argc > 4 ? std::atoi(argv[4]) : repeat;
-  if (threads <= 0 || repeat <= 0 || refactor_repeat < 0) {
+  const int factor_repeat = argc > 5 ? std::atoi(argv[5]) : repeat;
+  if (threads <= 0 || repeat <= 0 || refactor_repeat < 0 ||
+      factor_repeat < 0) {
     std::fprintf(stderr, "threads/repeat arguments must be positive\n");
     return EXIT_FAILURE;
   }
@@ -176,6 +178,9 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   std::vector<double> x_true(static_cast<size_t>(a.n), 1.0);
+  for (int i = 0; i < a.n; ++i) {
+    x_true[static_cast<size_t>(i)] = 1.0 + static_cast<double>(i % 17) * 0.01;
+  }
   std::vector<double> b(static_cast<size_t>(a.n), 0.0);
   std::vector<double> x(static_cast<size_t>(a.n), 0.0);
   matvec(a, x_true, b);
@@ -210,7 +215,7 @@ int main(int argc, char **argv) {
   long long refactor_total = 0;
   long long refactor_first = 0;
   long long solve_total = 0;
-  for (int i = 0; i < repeat; ++i) {
+  for (int i = 0; i < factor_repeat; ++i) {
     ret = CKTSO_Factorize(inst, a.values.data(), true);
     if (ret < 0) break;
     factor_total += oparm[1];
@@ -220,6 +225,9 @@ int main(int argc, char **argv) {
     if (ret < 0) break;
     refactor_total += oparm[1];
     if (i == 0) refactor_first = oparm[1];
+    /* Match a Newton loop and give adaptive solve paths the same one-solve
+       opportunity after every sampled refactor as KLS. */
+    ret = CKTSO_Solve(inst, b.data(), x.data(), false, true);
   }
   for (int i = 0; i < repeat && ret >= 0; ++i) {
     ret = CKTSO_Solve(inst, b.data(), x.data(), false, true);
@@ -232,7 +240,9 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  const double factor_us_avg = static_cast<double>(factor_total) / static_cast<double>(repeat);
+  const double factor_us_avg = factor_repeat > 0
+    ? static_cast<double>(factor_total) / static_cast<double>(factor_repeat)
+    : static_cast<double>(initial_factor_us);
   const double refactor_us_avg = refactor_repeat > 0
     ? static_cast<double>(refactor_total) / static_cast<double>(refactor_repeat)
     : 0.0;
@@ -243,12 +253,14 @@ int main(int argc, char **argv) {
   const double solve_us_avg = static_cast<double>(solve_total) / static_cast<double>(repeat);
   const double spice_cycle_seconds =
     1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
-              solve_us_avg + 99.0 * (refactor_us_avg + solve_us_avg));
+              solve_us_avg + static_cast<double>(refactor_first) +
+              solve_us_avg + 98.0 * (refactor_steady_us_avg + solve_us_avg));
   double relative_residual = 0.0;
   const double residual_l2 = residual(a, x, b, &relative_residual);
 
   std::printf("{\"matrix\":\"%s\",\"n\":%d,\"nnz\":%d,"
-              "\"threads\":%d,\"repeat\":%d,\"refactor_repeat\":%d,"
+              "\"threads\":%d,\"repeat\":%d,\"factor_repeat\":%d,"
+              "\"refactor_repeat\":%d,"
               "\"analysis_us\":%lld,\"initial_factor_us\":%lld,"
               "\"factor_us_avg\":%.9g,\"refactor_us_avg\":%.9g,"
               "\"solve_us_avg\":%.9g,"
@@ -260,7 +272,8 @@ int main(int argc, char **argv) {
               "\"nnz_l\":%lld,\"nnz_u\":%lld,"
               "\"memory_bytes\":%lld,\"memory_peak_bytes\":%lld}\n",
               argv[1], a.n, a.col_ptr[static_cast<size_t>(a.n)], threads,
-              repeat, refactor_repeat, analysis_us, initial_factor_us,
+              repeat, factor_repeat, refactor_repeat, analysis_us,
+              initial_factor_us,
               factor_us_avg, refactor_us_avg, solve_us_avg,
               1.0e-6 * static_cast<double>(analysis_us),
               1.0e-6 * static_cast<double>(initial_factor_us),
