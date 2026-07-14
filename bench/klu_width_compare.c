@@ -1,6 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
-#ifdef KLS_VENDORED_KLU_ONLY
+#if defined(KLS_VENDORED_KLU_ONLY) || defined(KLS_VENDORED_KLU_DUAL)
 #include "trilinos_klu_decl.h"
 #define klu_l_common trilinos_klu_l_common
 #define klu_l_symbolic trilinos_klu_l_symbolic
@@ -12,6 +12,18 @@
 #define klu_l_solve trilinos_klu_l_solve
 #define klu_l_free_numeric trilinos_klu_l_free_numeric
 #define klu_l_free_symbolic trilinos_klu_l_free_symbolic
+#ifdef KLS_VENDORED_KLU_DUAL
+#define klu_common trilinos_klu_common
+#define klu_symbolic trilinos_klu_symbolic
+#define klu_numeric trilinos_klu_numeric
+#define klu_defaults trilinos_klu_defaults
+#define klu_analyze trilinos_klu_analyze
+#define klu_factor trilinos_klu_factor
+#define klu_refactor trilinos_klu_refactor
+#define klu_solve trilinos_klu_solve
+#define klu_free_numeric trilinos_klu_free_numeric
+#define klu_free_symbolic trilinos_klu_free_symbolic
+#endif
 #define KLU_OUT_OF_MEMORY TRILINOS_KLU_OUT_OF_MEMORY
 /* The vendored KLU has an optional KLS debug callback in free_numeric.
    Stock-baseline runs do not enable that tracking facility. */
@@ -615,7 +627,7 @@ int main(int argc, char **argv) {
     fprintf(stderr,
             "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] "
             "[--ordering amd|colamd|natural] [--scale -1|0|1|2] "
-            "[--no-btf] [--json]\n",
+            "[--no-btf] [--width-order 32-first|64-first] [--json]\n",
             argv[0]);
     return EXIT_FAILURE;
   }
@@ -627,6 +639,7 @@ int main(int argc, char **argv) {
   int ordering = 0;
   int btf = 1;
   int scale = 2;
+  int width32_first = 1;
   int json = 0;
   for (int i = 2; i < argc; ++i) {
     if (strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) {
@@ -645,6 +658,16 @@ int main(int argc, char **argv) {
       scale = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--no-btf") == 0) {
       btf = 0;
+    } else if (strcmp(argv[i], "--width-order") == 0 && i + 1 < argc) {
+      const char *order = argv[++i];
+      if (strcmp(order, "32-first") == 0) {
+        width32_first = 1;
+      } else if (strcmp(order, "64-first") == 0) {
+        width32_first = 0;
+      } else {
+        fprintf(stderr, "unknown width order: %s\n", order);
+        return EXIT_FAILURE;
+      }
     } else if (strcmp(argv[i], "--json") == 0) {
       json = 1;
     } else {
@@ -685,17 +708,29 @@ int main(int argc, char **argv) {
 #endif
   memset(&s64, 0, sizeof(s64));
 #ifndef KLS_VENDORED_KLU_ONLY
-  const int ok32 = run_klu32(&a, rhs, repeat, factor_repeat,
-                             refactor_repeat, ordering, btf, scale, &s32);
-#endif
+  int ok32;
+  int ok64;
+  if (width32_first) {
+    ok32 = run_klu32(&a, rhs, repeat, factor_repeat,
+                     refactor_repeat, ordering, btf, scale, &s32);
+    ok64 = run_klu64(&a, rhs, repeat, factor_repeat,
+                     refactor_repeat, ordering, btf, scale, &s64);
+  } else {
+    ok64 = run_klu64(&a, rhs, repeat, factor_repeat,
+                     refactor_repeat, ordering, btf, scale, &s64);
+    ok32 = run_klu32(&a, rhs, repeat, factor_repeat,
+                     refactor_repeat, ordering, btf, scale, &s32);
+  }
+#else
   const int ok64 = run_klu64(&a, rhs, repeat, factor_repeat,
                              refactor_repeat, ordering, btf, scale, &s64);
+#endif
 
   if (json) {
 #ifdef KLS_VENDORED_KLU_ONLY
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"
-           "\"ordering\":%d,"
+           "\"ordering\":%d,\"width_order\":\"%s\","
            "\"btf\":%s,\"scale\":%d,\"status\":%d,"
            "\"analysis_seconds\":%.9g,\"initial_factor_seconds\":%.9g,"
            "\"factor_seconds_avg\":%.9g,\"refactor_first_seconds\":%.9g,"
@@ -705,6 +740,7 @@ int main(int argc, char **argv) {
            "\"relative_residual_l2\":%.9g,\"nblocks\":%d,"
            "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 "}\n",
            path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat, ordering,
+           width32_first ? "32-first" : "64-first",
            btf ? "true" : "false", scale, s64.status,
            s64.analysis_seconds, s64.initial_factor_seconds,
            s64.factor_seconds_avg, s64.refactor_first_seconds,
@@ -714,9 +750,10 @@ int main(int argc, char **argv) {
 #else
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"
-           "\"ordering\":%d,"
+           "\"ordering\":%d,\"width_order\":\"%s\","
            "\"btf\":%s,\"scale\":%d,",
            path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat, ordering,
+           width32_first ? "32-first" : "64-first",
            btf ? "true" : "false", scale);
     print_stats_json("klu32", &s32);
     printf(",");

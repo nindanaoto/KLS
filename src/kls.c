@@ -1884,6 +1884,9 @@ struct kls_solver {
   int factor_etree_stats_valid;
   int parallel_model_stats_valid;
   kls_separator_analysis separator;
+  /* Persist the private sample used by adaptive engine decisions.  Public
+     stats.refactor_seconds includes complete API-call overhead. */
+  double adaptive_refactor_seconds;
 };
 
 typedef struct kls_pattern_candidate {
@@ -28783,6 +28786,19 @@ static void kls_update_numeric_diagnostics(kls_solver *solver,
   }
 }
 
+static void kls_update_numeric_rcond(kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
+    return;
+  }
+  const double t0 = kls_now_seconds();
+  (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric,
+                             &solver->common);
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr, "KLS diag: flops 0.000s rcond %.3fs\n",
+            kls_now_seconds() - t0);
+  }
+}
+
 #ifdef KLS_HAVE_SPRAL_SCALING
 static int spral_hungarian_candidate_has_value(
   const trilinos_klu_l_common *current_common,
@@ -34745,7 +34761,73 @@ static int validate_options(const kls_options *options) {
   if (options->static_pivoting != 0 && options->static_pivoting != 1) {
     return 0;
   }
+  if (options->backend < KLS_BACKEND_AUTO ||
+      options->backend > KLS_BACKEND_SERIAL) {
+    return 0;
+  }
   return 1;
+}
+
+static int kls_normalize_options(kls_options *normalized,
+                                 const kls_options *options,
+                                 kls_input_format input_format) {
+  if (normalized == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  kls_default_options(normalized);
+  if (options != NULL) {
+    /* backend was appended in the original layout's tail padding, so the
+       public sizeof(kls_options) did not grow.  abi_version occupies older
+       interior padding and distinguishes a current initialized object from
+       an old object whose tail padding merely resembles a backend value. */
+    const size_t legacy_size = offsetof(kls_options, backend);
+    if (options->struct_size < legacy_size) {
+      return KLS_ERR_INVALID_ARGUMENT;
+    }
+    uint32_t supplied_abi = 0u;
+    if (options->struct_size >=
+        offsetof(kls_options, abi_version) + sizeof(supplied_abi)) {
+      memcpy(&supplied_abi,
+             (const unsigned char *)options +
+               offsetof(kls_options, abi_version),
+             sizeof(supplied_abi));
+    }
+    const int has_backend =
+      supplied_abi == KLS_OPTIONS_ABI_VERSION &&
+      options->struct_size >=
+        offsetof(kls_options, backend) + sizeof(options->backend);
+    const size_t advertised_size = has_backend
+      ? options->struct_size : legacy_size;
+    const size_t copy_size = advertised_size < sizeof(*normalized)
+      ? advertised_size : sizeof(*normalized);
+    memcpy(normalized, options, copy_size);
+    normalized->struct_size = sizeof(*normalized);
+    normalized->abi_version = KLS_OPTIONS_ABI_VERSION;
+    if (!has_backend) {
+      normalized->backend = KLS_BACKEND_AUTO;
+    }
+  }
+  if (!validate_options(normalized)) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  if (normalized->backend == KLS_BACKEND_SERIAL) {
+    if (normalized->threads != 1) {
+      return KLS_ERR_UNSUPPORTED;
+    }
+    if (normalized->ordering == KLS_ORDERING_AUTO) {
+      normalized->ordering = KLS_ORDERING_AMD;
+    }
+    if (normalized->ordering != KLS_ORDERING_AMD &&
+        normalized->ordering != KLS_ORDERING_COLAMD &&
+        normalized->ordering != KLS_ORDERING_NATURAL) {
+      return KLS_ERR_UNSUPPORTED;
+    }
+    if (normalized->orientation == KLS_ORIENTATION_AUTO) {
+      normalized->orientation = input_format == KLS_INPUT_CSR
+        ? KLS_ORIENTATION_TRANSPOSE : KLS_ORIENTATION_NORMAL;
+    }
+  }
+  return KLS_OK;
 }
 
 static int allocate_candidate(kls_pattern_candidate *candidate,
@@ -38104,11 +38186,13 @@ void kls_default_options(kls_options *options) {
   options->orientation = KLS_ORIENTATION_AUTO;
   options->use_btf = 1;
   options->scale = KLS_SCALE_AUTO;
+  options->abi_version = KLS_OPTIONS_ABI_VERSION;
   options->pivot_tolerance = 0.001;
   options->memory_growth = 1.5;
   options->halt_if_singular = 1;
   options->fast_factor = 1;
   options->static_pivoting = 1;
+  options->backend = KLS_BACKEND_AUTO;
 }
 
 #ifdef KLS_HAVE_CBLAS
@@ -38185,15 +38269,9 @@ int kls_analyze_csc(kls_solver *solver,
   }
 
   kls_options normalized;
-  kls_default_options(&normalized);
-  if (options != NULL) {
-    if (options->struct_size < sizeof(kls_options)) {
-      return KLS_ERR_INVALID_ARGUMENT;
-    }
-    normalized = *options;
-  }
-  if (!validate_options(&normalized)) {
-    return KLS_ERR_INVALID_ARGUMENT;
+  int status = kls_normalize_options(&normalized, options, KLS_INPUT_CSC);
+  if (status != KLS_OK) {
+    return status;
   }
 
   clear_matrix(solver);
@@ -38205,8 +38283,8 @@ int kls_analyze_csc(kls_solver *solver,
   kls_pattern_candidate transpose = {0};
   kls_pattern_candidate *chosen = NULL;
 
-  int status = copy_compressed_candidate(&normal, index_type, n, col_ptr, row_idx,
-                                         index_base, KLS_ORIENTATION_NORMAL);
+  status = copy_compressed_candidate(&normal, index_type, n, col_ptr, row_idx,
+                                     index_base, KLS_ORIENTATION_NORMAL);
   if (status != KLS_OK) {
     clear_matrix(solver);
     return status;
@@ -38284,15 +38362,9 @@ int kls_analyze_csr(kls_solver *solver,
   }
 
   kls_options normalized;
-  kls_default_options(&normalized);
-  if (options != NULL) {
-    if (options->struct_size < sizeof(kls_options)) {
-      return KLS_ERR_INVALID_ARGUMENT;
-    }
-    normalized = *options;
-  }
-  if (!validate_options(&normalized)) {
-    return KLS_ERR_INVALID_ARGUMENT;
+  int status = kls_normalize_options(&normalized, options, KLS_INPUT_CSR);
+  if (status != KLS_OK) {
+    return status;
   }
 
   clear_matrix(solver);
@@ -38304,8 +38376,8 @@ int kls_analyze_csr(kls_solver *solver,
   kls_pattern_candidate normal = {0};
   kls_pattern_candidate *chosen = NULL;
 
-  int status = copy_compressed_candidate(&transpose, index_type, n, row_ptr, col_idx,
-                                         index_base, KLS_ORIENTATION_TRANSPOSE);
+  status = copy_compressed_candidate(&transpose, index_type, n, row_ptr, col_idx,
+                                     index_base, KLS_ORIENTATION_TRANSPOSE);
   if (status != KLS_OK) {
     clear_matrix(solver);
     return status;
@@ -46845,14 +46917,14 @@ static int kls_fp32_refactor_wanted(kls_solver *solver) {
      numeric to keep the mode from oscillating once refined solves inflate
      the solve time. */
   if (solver->base_solve_seconds > 0.0 &&
-      solver->stats.refactor_seconds > 0.0) {
+      solver->adaptive_refactor_seconds > 0.0) {
     solver->fp32_decision =
-      solver->stats.refactor_seconds > 8.0 * solver->base_solve_seconds
+      solver->adaptive_refactor_seconds > 8.0 * solver->base_solve_seconds
         ? 1
         : -1;
     if (getenv("KLS_TRACE_REFINE") != NULL) {
       fprintf(stderr, "KLS fp32 wanted: measured ref %.4f solve %.4f -> %d\n",
-              solver->stats.refactor_seconds, solver->base_solve_seconds,
+              solver->adaptive_refactor_seconds, solver->base_solve_seconds,
               solver->fp32_decision);
     }
     return solver->fp32_decision > 0;
@@ -46861,7 +46933,7 @@ static int kls_fp32_refactor_wanted(kls_solver *solver) {
     fprintf(stderr,
             "KLS fp32 wanted: profile fill %.3e flops %.3e ref %.4f solve %.4f\n",
             (double)solver->numeric->lnz + (double)solver->numeric->unz,
-            solver->common.flops, solver->stats.refactor_seconds,
+            solver->common.flops, solver->adaptive_refactor_seconds,
             solver->base_solve_seconds);
   }
   /* No clean measurements yet: decide from the work profile.  Flops per
@@ -57204,8 +57276,8 @@ static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
     /* Bound the trial: a pathological row schedule (mac_econ-class runs
        100x the column time at equal flops) must cost at most a few
        column refactors before the verdict settles on the column side. */
-    const double base = solver->stats.refactor_seconds > 0.0
-      ? solver->stats.refactor_seconds
+    const double base = solver->adaptive_refactor_seconds > 0.0
+      ? solver->adaptive_refactor_seconds
       : 0.5 * solver->stats.factor_seconds;
     solver->row_trial_deadline = base > 0.0 ? 4.0 * base + 0.010 : 0.0;
   }
@@ -96556,6 +96628,25 @@ static void kls_snb_maybe_accept(kls_solver *solver,
       solver->common.status == TRILINOS_KLU_SINGULAR) {
     return;
   }
+  if (solver->options.backend == KLS_BACKEND_SERIAL &&
+      getenv("KLS_SNB_FORCE_TRIAL") == NULL) {
+    /* Keep the opt-in serial backend lean on cache-resident factors.  Its
+       mapped refactor needs only a cheap position map, whereas an SNB A/B
+       trial materializes panels and executes an extra refactor.  Once the
+       numeric value arrays alone exceed 32 MiB, the mapped walk is firmly
+       memory-bound.  Require a pivot-stable numeric and a dominant BTF block
+       as well: otherwise panel materialization is scattered work and its
+       trial is not safely amortizable.  These are factor-shape invariants,
+       independent of matrix names or benchmark membership. */
+    const double factor_value_bytes =
+      ((double)solver->numeric->lnz + (double)solver->numeric->unz) *
+      (double)sizeof(double);
+    if (factor_value_bytes < 32.0 * 1024.0 * 1024.0 ||
+        solver->common.noffdiag != 0u ||
+        (double)solver->symbolic->maxblock < 0.75 * (double)solver->n) {
+      return;
+    }
+  }
   const double accept_start = kls_now_seconds();
   if (getenv("KLS_TRACE_SNB") != NULL) {
     fprintf(stderr,
@@ -96692,10 +96783,10 @@ static int kls_snb_try_refactor(kls_solver *solver,
       return 0; /* let the incumbent run this call */
     }
     if (solver->snb_incumbent_seconds < 0.0) {
-      if (solver->stats.refactor_seconds <= 0.0) {
+      if (solver->adaptive_refactor_seconds <= 0.0) {
         return 0; /* wrapper timing unavailable; keep waiting */
       }
-      solver->snb_incumbent_seconds = solver->stats.refactor_seconds;
+      solver->snb_incumbent_seconds = solver->adaptive_refactor_seconds;
     }
     UF_long snb_ok = 1;
     double snb_seconds = solver->snb_trial_seconds;
@@ -96708,14 +96799,15 @@ static int kls_snb_try_refactor(kls_solver *solver,
                     : kls_snb_refactor(solver, numeric_values);
       snb_seconds = kls_now_seconds() - t0;
     }
-    /* single-sample timings on a busy box swing ~20-30%; only adopt
-       decisive wins so a thermally unlucky incumbent sample cannot hand
-       the matrix to a genuinely slower engine.  0.6 keeps the measured
-       adopters (pre2 0.55, mc2depi t1 0.49, mac_econ t1 0.37) and shuts
-       out parity-class flip-flops (mac_econ t4 sits at 0.73-0.93
-       depending on machine load and regressed suite rows when it won). */
+    /* Single-sample timings on a busy box swing ~20-30%.  The parallel
+       policy therefore retains its conservative 0.60 margin.  The serial
+       backend has already passed a narrow structural gate before paying for
+       this trial, so it retains any clear measured win (0.90). */
+    const double adoption_ratio =
+      solver->options.backend == KLS_BACKEND_SERIAL ? 0.90 : 0.60;
     solver->snb_decision =
-      snb_ok && snb_seconds < 0.60 * solver->snb_incumbent_seconds ? 1 : -1;
+      snb_ok && snb_seconds < adoption_ratio * solver->snb_incumbent_seconds
+        ? 1 : -1;
     if (kls_snb_trace_enabled()) {
       fprintf(stderr,
               "KLS snb: acceptance incumbent %.3fms snb %.3fms t%d -> %s\n",
@@ -127734,10 +127826,10 @@ static int kls_pts_try_refactor_timed(kls_solver *solver,
     return 0; /* incumbent runs this call; the wrapper times it */
   }
   if (solver->pts_ref_incumbent_seconds < 0.0) {
-    if (solver->stats.refactor_seconds <= 0.0) {
+    if (solver->adaptive_refactor_seconds <= 0.0) {
       return 0;
     }
-    solver->pts_ref_incumbent_seconds = solver->stats.refactor_seconds;
+    solver->pts_ref_incumbent_seconds = solver->adaptive_refactor_seconds;
   }
   int computed = 0;
   double t = solver->pts_ref_trial_seconds;
@@ -128191,6 +128283,92 @@ static UF_long kls_i32_solve(kls_solver *solver, double *b) {
 static void kls_run_deferred_factor_preps(kls_solver *solver,
                                            const double *numeric_values);
 
+static int kls_serial_factor(kls_solver *solver,
+                             double *numeric_values) {
+  if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+
+  const double start = kls_now_seconds();
+  free_numeric(solver);
+  solver->factor_preps_deferred = 0;
+  solver->numeric_from_pipe = 0;
+  solver->common.scale = solver->options.scale == KLS_SCALE_AUTO
+    ? -1 : solver->options.scale;
+  solver->common.tol = solver->options.pivot_tolerance;
+  solver->common.status = TRILINOS_KLU_OK;
+  solver->common.numerical_rank = KLS_KLU_EMPTY;
+  solver->common.singular_col = KLS_KLU_EMPTY;
+  solver->common.kls_dense_panels = 0;
+  kls_klu_pipe_threads = 0;
+  kls_klu_pipe_det = 0;
+  kls_klu_dense_tail = 0;
+  solver->numeric = trilinos_klu_l_factor(solver->col_ptr,
+                                          solver->row_idx,
+                                          numeric_values,
+                                          solver->symbolic,
+                                          &solver->common);
+
+  int diagnostics_have_flops = 0;
+  int unscaled_work_inflated = 0;
+  if (solver->options.scale == KLS_SCALE_AUTO && solver->numeric != NULL &&
+      solver->common.status >= 0 && solver->symbolic->est_flops > 0.0) {
+    diagnostics_have_flops =
+      trilinos_klu_l_flops(solver->symbolic, solver->numeric,
+                           &solver->common) != 0;
+    unscaled_work_inflated = diagnostics_have_flops &&
+      solver->common.flops > 1.50 * solver->symbolic->est_flops;
+  }
+
+  /* AUTO starts unscaled because that removes a full value pass and enables
+     the lean mapped representation.  A failed factor is retried scaled.  A
+     successful factor is also retried when threshold pivoting inflated its
+     measured work by more than 50% over the symbolic estimate: that signal
+     catches numerical fill explosions without a matrix-name or dimension
+     rule, before they poison every later refactor. */
+  if (solver->options.scale == KLS_SCALE_AUTO &&
+      solver->common.scale != 2 &&
+      (solver->numeric == NULL || solver->common.status < 0 ||
+       solver->common.status == TRILINOS_KLU_SINGULAR ||
+       unscaled_work_inflated)) {
+    free_numeric(solver);
+    solver->common.scale = 2;
+    solver->common.status = TRILINOS_KLU_OK;
+    solver->common.numerical_rank = KLS_KLU_EMPTY;
+    solver->common.singular_col = KLS_KLU_EMPTY;
+    diagnostics_have_flops = 0;
+    solver->numeric = trilinos_klu_l_factor(solver->col_ptr,
+                                            solver->row_idx,
+                                            numeric_values,
+                                            solver->symbolic,
+                                            &solver->common);
+  }
+
+  solver->stats.factor_seconds = kls_now_seconds() - start;
+  kls_set_last_factor_path(solver, KLS_FACTOR_PATH_SERIAL);
+  if (solver->numeric == NULL || solver->common.status < 0) {
+    fill_numeric_stats(solver);
+    return solver->common.status == TRILINOS_KLU_SINGULAR
+      ? KLS_ERR_SINGULAR : KLS_ERR_FACTOR_FAILED;
+  }
+  if (diagnostics_have_flops) {
+    /* The AUTO inflation guard just computed the final factor's flop count;
+       do not walk the numeric structure a second time. */
+    kls_update_numeric_rcond(solver);
+  } else {
+    kls_update_numeric_diagnostics(solver, 1);
+  }
+  if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+    /* Preserve the lean one-shot, then let the first refactor pay once for
+       the same mapped-pointer/index32 preparations used by native KLS. */
+    solver->factor_preps_deferred = 1;
+  }
+  solver->stats.factor_seconds = kls_now_seconds() - start;
+  fill_numeric_stats(solver);
+  return solver->common.status == TRILINOS_KLU_SINGULAR
+    ? KLS_ERR_SINGULAR : KLS_OK;
+}
+
 int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -128224,6 +128402,9 @@ int kls_factor(kls_solver *solver, const double *values) {
   int status = prepare_numeric_values(solver, values, &numeric_values);
   if (status != KLS_OK) {
     return status;
+  }
+  if (solver->options.backend == KLS_BACKEND_SERIAL) {
+    return kls_serial_factor(solver, numeric_values);
   }
   /* a full factor replaces the numeric this flag's captured values
      described; refining against stale values converges to the WRONG
@@ -129014,6 +129195,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+  const double refactor_call_start = kls_now_seconds();
   kls_clear_fast_reject_stats(solver);
   kls_clear_tail_last_stats(solver);
   kls_clear_row_refactor_last_stats(solver);
@@ -129089,12 +129271,18 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
+  solver->adaptive_refactor_seconds = elapsed;
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR) {
     kls_maybe_reseed_auto_row_refactor_values(solver, &elapsed);
     kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
   }
-  solver->stats.refactor_seconds = elapsed;
+  if (solver->options.backend != KLS_BACKEND_SERIAL) {
+    /* Preserve the adaptive KLS policy's historical sample, which included
+       its post-kernel row-value maintenance.  Serial SNB compares only the
+       competing refactor kernels so a one-time seed cannot bias adoption. */
+    solver->adaptive_refactor_seconds = elapsed;
+  }
   if (ok && solver->common.status >= 0) {
     kls_row_refactor_acceptance_record_refactor(solver, elapsed);
   }
@@ -129133,6 +129321,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->row_solve_self_check = 1;
     }
   }
+  /* Include deferred matching, engine preparation, and promotion work in the
+     user-visible timing.  The private adaptive sample above deliberately
+     excludes that consultation overhead; stats measures the complete call. */
+  solver->stats.refactor_seconds = kls_now_seconds() - refactor_call_start;
   fill_numeric_stats(solver);
   if (!ok || solver->common.status < 0) {
     return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
@@ -129648,6 +129840,15 @@ const char *kls_orientation_name(kls_orientation orientation) {
   }
 }
 
+const char *kls_backend_name(kls_backend backend) {
+  switch (backend) {
+    case KLS_BACKEND_AUTO: return "auto";
+    case KLS_BACKEND_KLS: return "kls";
+    case KLS_BACKEND_SERIAL: return "serial";
+    default: return "unknown";
+  }
+}
+
 const char *kls_factor_path_name(kls_factor_path path) {
   switch (path) {
     case KLS_FACTOR_PATH_NONE: return "none";
@@ -129657,6 +129858,7 @@ const char *kls_factor_path_name(kls_factor_path path) {
     case KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST: return "prestatic_klu_first";
     case KLS_FACTOR_PATH_KLS_FIRST: return "kls_first";
     case KLS_FACTOR_PATH_PREDICTED_FIRST: return "predicted_first";
+    case KLS_FACTOR_PATH_SERIAL: return "serial";
     default: return "unknown";
   }
 }

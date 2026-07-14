@@ -7,7 +7,9 @@
  * just finds the strongly-connected components). */
 
 /* This file should make the long int version of KLU */
+#ifndef KLS_KLU_INT_VARIANT
 #define DLONG 1
+#endif
 
 #include "trilinos_klu_internal.h"
 

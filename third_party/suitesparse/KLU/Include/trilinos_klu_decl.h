@@ -210,6 +210,20 @@ typedef struct trilinos_klu_common_struct
     size_t memusage ;	/* current memory usage, in bytes */
     size_t mempeak ;	/* peak memory usage, in bytes */
 
+    /* KLS extensions shared by the 32- and 64-bit kernel
+       instantiations.  The narrow backend does not currently seed the
+       optional BTF cache, but keeping the layouts feature-equivalent lets
+       both widths compile from the same optimized kernel sources. */
+    const int *kls_btf_P ;
+    const int *kls_btf_Q ;
+    const int *kls_btf_R ;
+    int kls_btf_nblocks ;
+    int kls_btf_structural_rank ;
+    double kls_kernel_flops ;
+    int kls_dense_panels ;
+    double kls_static_perturb ;
+    int kls_perturb_count ;
+
 } trilinos_klu_common ;
 
 typedef struct trilinos_klu_l_common_struct /* 64-bit version (otherwise same as above)*/

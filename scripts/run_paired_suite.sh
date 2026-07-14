@@ -13,6 +13,7 @@ OUT_ST=${8:-}
 KLU_COMPARE=${9:-}
 OUT_KLU=${10:-}
 THREADS=${THREADS:-4}
+KLS_BACKEND=${KLS_BACKEND:-auto}
 TIMEOUT=${TIMEOUT:-120}
 PASSES=${PASSES:-1}
 ROTATE_SIDES=${ROTATE_SIDES:-0}
@@ -61,7 +62,8 @@ while IFS= read -r name; do
     if [ "$side" = kls ]; then
       out=$(timeout "$TIMEOUT" "$KLS_BENCH" "$matrix" --orientation auto \
         --repeat 1 --factor-repeat "$FACTOR_REPEAT" \
-        --refactor-repeat "$REFACTOR_REPEAT" --threads "$THREADS" --json 2>/dev/null)
+        --refactor-repeat "$REFACTOR_REPEAT" --threads "$THREADS" \
+        --backend "$KLS_BACKEND" --json 2>/dev/null)
       dst=$OUT_KLS
     elif [ "$side" = ck ]; then
       out=$(timeout "$TIMEOUT" "$CKTSO_COMPARE" "$matrix" "$THREADS" 1 \

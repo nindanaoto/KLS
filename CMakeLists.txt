@@ -344,6 +344,27 @@ set(KLS_KLU_DLONG_SOURCES
 set_source_files_properties(${KLS_KLU_DLONG_SOURCES}
   PROPERTIES COMPILE_DEFINITIONS DLONG)
 
+# The production numeric object remains the long-index KLU variant.  Keep a
+# separately linked 32-bit KLU only for the opt-in width diagnostic.  Generic
+# KLU sources are already compiled as DLONG above; small wrapper translation
+# units include those sources without the global source property.
+set(KLS_KLU_INT_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_impl.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_analyze.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_analyze_given.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_defaults.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_factor.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_free_numeric.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_free_symbolic.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_kernel.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_memory.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_scale.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_solve.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_diagnostics.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_refactor.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_sort.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/vendor_klu32_tsolve.c")
+
 set(KLS_CAMD_DLONG_SOURCES
   "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_1.c"
   "${KLS_SUITESPARSE_ROOT}/CAMD/Source/trilinos_camd_aat.c"
@@ -413,6 +434,21 @@ target_include_directories(kls_suitesparse
     ${KLS_SUITESPARSE_INCLUDE_DIRS})
 if(KLS_MATH_LIBRARY)
   target_link_libraries(kls_suitesparse
+    PUBLIC
+      "${KLS_MATH_LIBRARY}")
+endif()
+
+add_library(kls_suitesparse32 STATIC EXCLUDE_FROM_ALL
+  ${KLS_KLU_INT_SOURCES})
+set_target_properties(kls_suitesparse32 PROPERTIES
+  POSITION_INDEPENDENT_CODE ON)
+target_compile_options(kls_suitesparse32 PRIVATE
+  $<$<C_COMPILER_ID:GNU,Clang>:-falign-functions=64 -falign-loops=32>)
+target_include_directories(kls_suitesparse32
+  PUBLIC
+    ${KLS_SUITESPARSE_INCLUDE_DIRS})
+if(KLS_MATH_LIBRARY)
+  target_link_libraries(kls_suitesparse32
     PUBLIC
       "${KLS_MATH_LIBRARY}")
 endif()
@@ -497,6 +533,23 @@ if(KLS_BUILD_BENCHMARKS)
     target_link_libraries(klu_compare PRIVATE "${KLS_MATH_LIBRARY}")
   endif()
   target_compile_options(klu_compare PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+
+  # Exact-source, dual-width diagnostic.  Unlike klu_width_compare below,
+  # this target does not depend on a system SuiteSparse installation.
+  add_executable(klu_width_compare_vendored EXCLUDE_FROM_ALL
+    bench/klu_width_compare.c)
+  target_compile_definitions(klu_width_compare_vendored
+    PRIVATE KLS_VENDORED_KLU_DUAL=1)
+  target_link_libraries(klu_width_compare_vendored
+    PRIVATE
+      kls_suitesparse32
+      kls_suitesparse)
+  if(KLS_MATH_LIBRARY)
+    target_link_libraries(klu_width_compare_vendored
+      PRIVATE "${KLS_MATH_LIBRARY}")
+  endif()
+  target_compile_options(klu_width_compare_vendored PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
 
   find_path(KLS_SYSTEM_KLU_INCLUDE_DIR

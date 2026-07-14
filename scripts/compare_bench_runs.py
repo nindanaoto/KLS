@@ -16,9 +16,12 @@ def spice_cycle_seconds(row: dict[str, object]) -> float:
         return float(row["spice_cycle_seconds"])
     analysis = float(row["analysis_seconds"])
     factor = float(row.get("initial_factor_seconds", row["factor_seconds_avg"]))
-    refactor = float(row["refactor_seconds_avg"])
     solve = float(row["solve_seconds_avg"])
-    return analysis + factor + solve + 99.0 * (refactor + solve)
+    first = float(row.get("refactor_first_seconds", row["refactor_seconds_avg"]))
+    steady = float(
+        row.get("refactor_steady_seconds_avg", row["refactor_seconds_avg"])
+    )
+    return analysis + factor + first + 98.0 * steady + 100.0 * solve
 
 
 def load_rows(path: pathlib.Path) -> dict[str, dict[str, object]]:

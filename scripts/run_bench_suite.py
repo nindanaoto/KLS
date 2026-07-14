@@ -17,9 +17,12 @@ from summarize_row_pipeline_trace import summarize as summarize_row_pipeline_tra
 def spice_cycle_seconds(row: dict[str, object]) -> float:
     analysis = float(row["analysis_seconds"])
     factor = float(row.get("initial_factor_seconds", row["factor_seconds_avg"]))
-    refactor = float(row["refactor_seconds_avg"])
     solve = float(row["solve_seconds_avg"])
-    return analysis + factor + solve + 99.0 * (refactor + solve)
+    first = float(row.get("refactor_first_seconds", row["refactor_seconds_avg"]))
+    steady = float(
+        row.get("refactor_steady_seconds_avg", row["refactor_seconds_avg"])
+    )
+    return analysis + factor + first + 98.0 * steady + 100.0 * solve
 
 
 def geometric_mean(values: list[float]) -> float:
@@ -48,6 +51,8 @@ def append_solver_options(cmd: list[str], args: argparse.Namespace) -> None:
         [
             "--threads",
             str(args.threads),
+            "--backend",
+            args.backend,
             "--ordering",
             args.ordering,
             "--orientation",
@@ -284,6 +289,9 @@ def main() -> int:
         help="run at most this many selected matrices",
     )
     parser.add_argument("--threads", type=int, default=1)
+    parser.add_argument(
+        "--backend", choices=["auto", "kls", "serial"], default="auto"
+    )
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural", "metis", "scotch"], default="auto")
     parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")

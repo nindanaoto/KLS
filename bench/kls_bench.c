@@ -378,6 +378,22 @@ static kls_orientation parse_orientation(const char *s) {
   return KLS_ORIENTATION_AUTO;
 }
 
+static int parse_backend(const char *s, kls_backend *backend_out) {
+  if (strcmp(s, "auto") == 0) {
+    *backend_out = KLS_BACKEND_AUTO;
+    return 1;
+  }
+  if (strcmp(s, "kls") == 0) {
+    *backend_out = KLS_BACKEND_KLS;
+    return 1;
+  }
+  if (strcmp(s, "serial") == 0) {
+    *backend_out = KLS_BACKEND_SERIAL;
+    return 1;
+  }
+  return 0;
+}
+
 static int parse_scale(const char *s, int *scale_out) {
   if (strcmp(s, "auto") == 0) {
     *scale_out = KLS_SCALE_AUTO;
@@ -617,7 +633,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--threads N] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -668,6 +684,11 @@ int main(int argc, char **argv) {
       refactor_repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
       options.threads = atoi(argv[++i]);
+    } else if (strcmp(argv[i], "--backend") == 0 && i + 1 < argc) {
+      if (!parse_backend(argv[++i], &options.backend)) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+      }
     } else if (strcmp(argv[i], "--ordering") == 0 && i + 1 < argc) {
       options.ordering = parse_ordering(argv[++i]);
     } else if (strcmp(argv[i], "--orientation") == 0 && i + 1 < argc) {
@@ -789,6 +810,7 @@ int main(int argc, char **argv) {
     if (json) {
       printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
              ",\"threads\":%d"
+             ",\"backend\":\"%s\""
              ",\"requested_input_index\":\"%s\""
              ",\"input_index_bytes\":%d"
              ",\"internal_index_bytes\":%d"
@@ -833,6 +855,7 @@ int main(int argc, char **argv) {
              ",\"parallel_task_flow_recommends_parallel\":%d"
              ",\"analyze_only\":true}\n",
              path, a.n, a.nnz, options.threads,
+             kls_backend_name(options.backend),
              index_mode_name(input_index_mode),
              input_index.bytes,
              stats.internal_index_bytes,
@@ -1125,6 +1148,7 @@ int main(int argc, char **argv) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"threads\":%d,\"repeat\":%d,\"factor_repeat\":%d"
            ",\"refactor_repeat\":%d"
+           ",\"backend\":\"%s\""
            ",\"build_has_metis\":%s"
            ",\"build_has_scotch\":%s"
            ",\"build_has_spral_scaling\":%s"
@@ -1188,6 +1212,7 @@ int main(int argc, char **argv) {
            ",\"kls_first_last_separator_queue_split_components\":%" PRId64,
            path, a.n, a.nnz, options.threads, repeat, factor_repeat,
            refactor_repeat,
+           kls_backend_name(options.backend),
            stats.build_has_metis ? "true" : "false",
            stats.build_has_scotch ? "true" : "false",
            stats.build_has_spral_scaling ? "true" : "false",

@@ -43,6 +43,16 @@ typedef enum kls_orientation {
   KLS_ORIENTATION_TRANSPOSE = 2
 } kls_orientation;
 
+typedef enum kls_backend {
+  /* Existing adaptive KLS policy.  AUTO currently aliases KLS so adding
+     an opt-in serial policy cannot change parallel behavior. */
+  KLS_BACKEND_AUTO = 0,
+  KLS_BACKEND_KLS = 1,
+  /* Lean, one-thread policy: direct orientation/order analysis, a single
+     pivoting factor, and KLS's mapped refactor when its invariants hold. */
+  KLS_BACKEND_SERIAL = 2
+} kls_backend;
+
 typedef enum kls_factor_path {
   KLS_FACTOR_PATH_NONE = 0,
   KLS_FACTOR_PATH_KLU_FIRST = 1,
@@ -50,7 +60,8 @@ typedef enum kls_factor_path {
   KLS_FACTOR_PATH_KLU_FALLBACK = 3,
   KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST = 4,
   KLS_FACTOR_PATH_KLS_FIRST = 5,
-  KLS_FACTOR_PATH_PREDICTED_FIRST = 6
+  KLS_FACTOR_PATH_PREDICTED_FIRST = 6,
+  KLS_FACTOR_PATH_SERIAL = 7
 } kls_factor_path;
 
 typedef enum kls_refactor_path {
@@ -65,6 +76,11 @@ typedef enum kls_refactor_path {
 
 #define KLS_SCALE_AUTO (-2)
 
+/* Written by kls_default_options.  It occupies padding in the original
+   options layout, allowing the appended backend field to be distinguished
+   from uninitialized tail padding in binaries built against older headers. */
+#define KLS_OPTIONS_ABI_VERSION UINT32_C(0x4b4c5302)
+
 typedef enum kls_fast_reject_refresh_state {
   KLS_FAST_REJECT_REFRESH_UNKNOWN = 0,
   KLS_FAST_REJECT_REFRESH_PREFIX = 1,
@@ -78,11 +94,13 @@ typedef struct kls_options {
   kls_orientation orientation;
   int use_btf;
   int scale;
+  uint32_t abi_version;
   double pivot_tolerance;
   double memory_growth;
   int halt_if_singular;
   int fast_factor;
   int static_pivoting;
+  kls_backend backend;
 } kls_options;
 
 typedef struct kls_stats {
@@ -1337,6 +1355,7 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats);
 const char *kls_status_string(int status);
 const char *kls_ordering_name(kls_ordering ordering);
 const char *kls_orientation_name(kls_orientation orientation);
+const char *kls_backend_name(kls_backend backend);
 const char *kls_factor_path_name(kls_factor_path path);
 const char *kls_refactor_path_name(kls_refactor_path path);
 

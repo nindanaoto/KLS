@@ -619,6 +619,135 @@ static int test_csr_and_refactor(void) {
   return ok;
 }
 
+static int test_serial_backend(void) {
+  const int32_t ap[] = {0, 2, 5, 7};
+  const int32_t ai[] = {0, 1, 0, 1, 2, 1, 2};
+  const double ax[] = {4.0, 2.0, 1.0, 3.0, 1.0, 1.0, 2.0};
+  const double csr_ax[] = {4.0, 1.0, 2.0, 3.0, 1.0, 1.0, 2.0};
+  const double b[] = {6.0, 11.0, 8.0};
+  double x[3] = {0.0, 0.0, 0.0};
+
+  kls_options options;
+  kls_default_options(&options);
+  options.backend = KLS_BACKEND_SERIAL;
+  options.threads = 2;
+  kls_solver *solver = NULL;
+  if (!require_ok(kls_create(&solver), "create serial reject")) return 0;
+  const int unsupported = kls_analyze_csc(
+    solver, KLS_INDEX_INT32, 3, ap, ai, 0, &options);
+  if (unsupported != KLS_ERR_UNSUPPORTED) {
+    fprintf(stderr, "serial backend accepted two threads: %d\n", unsupported);
+    kls_destroy(solver);
+    return 0;
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  kls_default_options(&options);
+  options.backend = KLS_BACKEND_SERIAL;
+  if (!require_ok(kls_create(&solver), "create serial")) return 0;
+  if (!require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0,
+                                  &options), "analyze serial")) return 0;
+  if (!require_ok(kls_factor(solver, ax), "factor serial")) return 0;
+  if (!require_ok(kls_refactor(solver, ax), "refactor serial")) return 0;
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0), "solve serial")) return 0;
+
+  kls_stats stats;
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats), "stats serial")) return 0;
+  const int ok = close_enough(x[0], 1.0) && close_enough(x[1], 2.0) &&
+                 close_enough(x[2], 3.0) &&
+                 stats.last_factor_path == KLS_FACTOR_PATH_SERIAL &&
+                 stats.selected_ordering == KLS_ORDERING_AMD &&
+                 stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+                 stats.selected_scale == -1 &&
+                 stats.factor_seconds > 0.0 &&
+                 stats.refactor_seconds > 0.0;
+  if (!ok) {
+    fprintf(stderr,
+            "unexpected serial result/path: x=%.17g %.17g %.17g path=%s "
+            "ordering=%s orientation=%s scale=%d factor=%g refactor=%g\n",
+            x[0], x[1], x[2],
+            kls_factor_path_name(stats.last_factor_path),
+            kls_ordering_name(stats.selected_ordering),
+            kls_orientation_name(stats.selected_orientation),
+            stats.selected_scale, stats.factor_seconds,
+            stats.refactor_seconds);
+  }
+  kls_destroy(solver);
+  if (!ok) return 0;
+
+  memset(x, 0, sizeof(x));
+  solver = NULL;
+  kls_default_options(&options);
+  options.backend = KLS_BACKEND_SERIAL;
+  if (!require_ok(kls_create(&solver), "create serial csr")) return 0;
+  if (!require_ok(kls_analyze_csr(solver, KLS_INDEX_INT32, 3, ap, ai, 0,
+                                  &options), "analyze serial csr")) return 0;
+  if (!require_ok(kls_factor(solver, csr_ax), "factor serial csr")) return 0;
+  if (!require_ok(kls_refactor(solver, csr_ax), "refactor serial csr")) return 0;
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0), "solve serial csr")) return 0;
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats), "stats serial csr")) return 0;
+  const int csr_ok =
+    close_enough(x[0], 1.0) && close_enough(x[1], 2.0) &&
+    close_enough(x[2], 3.0) &&
+    stats.selected_orientation == KLS_ORIENTATION_TRANSPOSE &&
+    stats.last_factor_path == KLS_FACTOR_PATH_SERIAL;
+  if (!csr_ok) {
+    fprintf(stderr,
+            "unexpected serial csr result/path: x=%.17g %.17g %.17g "
+            "path=%s orientation=%s\n",
+            x[0], x[1], x[2],
+            kls_factor_path_name(stats.last_factor_path),
+            kls_orientation_name(stats.selected_orientation));
+  }
+  kls_destroy(solver);
+  if (!csr_ok) return 0;
+
+  /* The backend field occupies the prior ABI's tail padding.  Model an old
+     binary with nonzero interior/tail padding and a realistic sizeof-based
+     struct_size: neither byte sequence may be mistaken for SERIAL. */
+  typedef struct legacy_kls_options {
+    size_t struct_size;
+    int threads;
+    kls_ordering ordering;
+    kls_orientation orientation;
+    int use_btf;
+    int scale;
+    double pivot_tolerance;
+    double memory_growth;
+    int halt_if_singular;
+    int fast_factor;
+    int static_pivoting;
+  } legacy_kls_options;
+  legacy_kls_options legacy_options;
+  memset(&legacy_options, 0xa5, sizeof(legacy_options));
+  legacy_options.struct_size = sizeof(legacy_options);
+  legacy_options.threads = 1;
+  legacy_options.ordering = KLS_ORDERING_NATURAL;
+  legacy_options.orientation = KLS_ORIENTATION_NORMAL;
+  legacy_options.use_btf = 0;
+  legacy_options.scale = -1;
+  legacy_options.pivot_tolerance = 0.001;
+  legacy_options.memory_growth = 1.5;
+  legacy_options.halt_if_singular = 1;
+  legacy_options.fast_factor = 1;
+  legacy_options.static_pivoting = 1;
+  solver = NULL;
+  if (sizeof(legacy_options) != sizeof(kls_options)) {
+    fprintf(stderr, "legacy options ABI size changed: %zu vs %zu\n",
+            sizeof(legacy_options), sizeof(kls_options));
+    return 0;
+  }
+  if (!require_ok(kls_create(&solver), "create legacy options")) return 0;
+  if (!require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3, ap, ai, 0,
+                                  (const kls_options *)&legacy_options),
+                  "analyze legacy options")) return 0;
+  kls_destroy(solver);
+  return 1;
+}
+
 static int test_sparse_diagonal_auto_scale(void) {
   const int32_t ap[] = {0, 1, 3, 4};
   const int32_t ai[] = {1, 0, 1, 2};
@@ -16337,6 +16466,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_csr_and_refactor()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_serial_backend()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_diagonal_auto_scale()) {

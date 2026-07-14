@@ -140,6 +140,36 @@ back to 64-bit otherwise; use `--input-index 64` or `--input-index 32` for
 forced A/B runs. Use `--analyze-only` to measure symbolic analysis and ordering
 decisions without running numeric factorization.
 
+### Opt-in lean serial backend
+
+For one-thread SPICE workloads, `KLS_BACKEND_SERIAL` skips the adaptive
+ordering/matching/promotion pipeline and uses a deliberately small policy:
+direct AMD analysis by default, an unscaled pivoting factor first, and retained
+mapped or structurally gated supernodal refactors. It is opt-in; `AUTO` and
+`KLS` retain the existing adaptive behavior, including at multiple threads.
+
+```c
+kls_options options;
+kls_default_options(&options);
+options.backend = KLS_BACKEND_SERIAL;
+options.threads = 1;
+```
+
+The same mode is available to the benchmark tools:
+
+```sh
+./build/kls_bench matrix.mtx --backend serial --threads 1 \
+  --repeat 1 --refactor-repeat 5 --json
+```
+
+Serial mode rejects more than one thread and supports AMD, COLAMD, or natural
+ordering. With automatic orientation it uses normal CSC and transpose CSR so
+it does not pay for an orientation race. With automatic scaling it tries the
+lean unscaled factor first and retries with row-sum scaling only after a factor
+failure/singularity or measured numerical work inflation. See
+[`docs/serial_backend.md`](docs/serial_backend.md) for the policy, validation
+split, limitations, and reproducible corpus results.
+
 When system SuiteSparse KLU headers and libraries are installed, the build also
 provides `klu_width_compare` to compare system `klu_*` and `klu_l_*` on the same
 MatrixMarket input. This is a diagnostic benchmark for deciding whether a
@@ -147,6 +177,15 @@ future 32-bit KLS backend is worth implementing:
 
 ```sh
 ./build/klu_width_compare matrix.mtx --repeat 3 --refactor-repeat 3 --json
+```
+
+An exact-source vendored 32/64-bit diagnostic is also available as an excluded
+target, so it does not affect ordinary builds:
+
+```sh
+cmake --build build --target klu_width_compare_vendored
+./build/klu_width_compare_vendored matrix.mtx --repeat 3 \
+  --refactor-repeat 3 --json
 ```
 
 JSON includes `initial_factor_path` and `last_factor_path`; values such as

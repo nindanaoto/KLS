@@ -7,7 +7,9 @@
  */
 
 /* This file should make the long int version of KLU */
+#ifndef KLS_KLU_INT_VARIANT
 #define DLONG 1
+#endif
 
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 199309L

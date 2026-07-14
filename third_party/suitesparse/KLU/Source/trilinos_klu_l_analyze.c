@@ -7,7 +7,9 @@
  * using a given ordering (use klu_analyze_given for that case). */
 
 /* This file should make the long int version of KLU */
+#ifndef KLS_KLU_INT_VARIANT
 #define DLONG 1
+#endif
 
 #include <stdlib.h>
 #include "trilinos_klu_internal.h"
