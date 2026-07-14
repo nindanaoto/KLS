@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Compare two kls_bench jsonl sides (A=pre, B=post) from ab_kls_pair.sh.
 
-Per-matrix minimum cycle across passes per side; prints per-row cycle,
+Per-matrix median valid cycle across passes per side; prints per-row cycle,
 steady-refactor and solve deltas plus path changes.
 Usage: ab_compare.py PRE.jsonl POST.jsonl
 """
 import math, sys
 sys.path.insert(0, __file__.rsplit('/', 1)[0])
-from score_paper_suite import load, gm
+from score_paper_suite import geometric_mean, load
 
 
 def main():
-    pre = load(sys.argv[1])
-    post = load(sys.argv[2])
+    pre, _ = load(sys.argv[1], 1e-8, "median")
+    post, _ = load(sys.argv[2], 1e-8, "median")
     rows = []
     for m in sorted(pre):
         a, b = pre.get(m), post.get(m)
@@ -21,7 +21,7 @@ def main():
             continue
         rows.append((b['cycle'] / a['cycle'], m, a, b))
     rows.sort()
-    print(f"\npost/pre cycle gm={gm([r[0] for r in rows]):.4f} "
+    print(f"\npost/pre cycle gm={geometric_mean([r[0] for r in rows]):.4f} "
           f"improved {sum(1 for r in rows if r[0] < 0.98)} "
           f"regressed {sum(1 for r in rows if r[0] > 1.02)} of {len(rows)}")
     print(f"{'matrix':16} {'cyc':>6} {'rs':>6} {'solve':>6}  pre-path -> post-path")

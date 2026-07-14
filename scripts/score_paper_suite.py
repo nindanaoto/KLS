@@ -1,71 +1,202 @@
 #!/usr/bin/env python3
-"""Score a paired paper-manifest run: per-row cycle + phase ratios vs CKTSO/SubtreeLU.
+"""Score paired paper-manifest runs against the 100-solve SPICE metric.
 
-cycle = ana + init + solve + (rf + solve) + (H-2)*(rs + solve), H=100 solves.
-Per-matrix minimum cycle across passes per side. Usage:
-  score_paper_suite.py KLS.jsonl CK.jsonl [ST.jsonl]
+T100 = analysis + initial factor + first refactor + 98 * steady refactor
+       + 100 * solve
+
+By default, each matrix is represented by the median valid pass. A pass is
+valid only when it completed and its reported relative residual is finite and
+at most 1e-8.
 """
-import json, math, sys
-from collections import defaultdict
 
-H = 100
-
-
-def load(path):
-    best = {}
-    for line in open(path):
-        line = line.strip()
-        if not line:
-            continue
-        d = json.loads(line)
-        name = d.get('matrix', '')
-        name = name.rsplit('/', 1)[-1].replace('.mtx', '').lower()
-        if d.get('timeout_or_fail') or 'analysis_seconds' not in d:
-            best.setdefault(name, None)
-            continue
-        ana = d['analysis_seconds']
-        init = d.get('initial_factor_seconds', d.get('factor_seconds', 0.0))
-        rf = d.get('refactor_first_seconds', d.get('refactor_seconds_avg', 0.0))
-        rs = d.get('refactor_steady_seconds_avg', d.get('refactor_seconds_avg', 0.0))
-        sv = d['solve_seconds_avg']
-        cyc = ana + init + sv + (rf + sv) + (H - 2) * (rs + sv)
-        rec = dict(cycle=cyc, ana=ana, init=init, rf=rf, rs=rs, solve=sv,
-                   resid=d.get('relative_residual_l2', d.get('max_relative_residual', 0.0)),
-                   path=d.get('last_refactor_path', ''), ordering=d.get('ordering', ''))
-        cur = best.get(name)
-        if cur is None or cyc < cur['cycle']:
-            best[name] = rec
-    return best
+import argparse
+import json
+import math
+from pathlib import Path
 
 
-def gm(xs):
-    xs = [x for x in xs if x and x > 0]
-    return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else float('nan')
+HORIZON = 100
+
+
+def matrix_name(record):
+    return Path(record.get("matrix", "")).stem.lower()
+
+
+def relative_residual(record):
+    value = record.get("relative_residual_l2")
+    if value is None:
+        value = record.get("max_relative_residual")
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def score_record(record, residual_threshold):
+    required = ("analysis_seconds", "solve_seconds_avg")
+    if record.get("timeout_or_fail") or any(key not in record for key in required):
+        return None, "timeout/fail"
+
+    residual = relative_residual(record)
+    if residual is None:
+        return None, "missing/non-finite residual"
+    if residual > residual_threshold:
+        return None, f"residual {residual:.3e} > {residual_threshold:.3e}"
+
+    try:
+        analysis = float(record["analysis_seconds"])
+        initial = float(
+            record.get("initial_factor_seconds", record.get("factor_seconds", 0.0))
+        )
+        first = float(
+            record.get("refactor_first_seconds", record.get("refactor_seconds_avg", 0.0))
+        )
+        steady = float(
+            record.get(
+                "refactor_steady_seconds_avg", record.get("refactor_seconds_avg", 0.0)
+            )
+        )
+        solve = float(record["solve_seconds_avg"])
+    except (TypeError, ValueError):
+        return None, "non-numeric timing"
+
+    timings = (analysis, initial, first, steady, solve)
+    if any(not math.isfinite(value) or value < 0.0 for value in timings):
+        return None, "invalid timing"
+
+    cycle = analysis + initial + first + (HORIZON - 2) * steady + HORIZON * solve
+    return {
+        "cycle": cycle,
+        "ana": analysis,
+        "init": initial,
+        "rf": first,
+        "rs": steady,
+        "solve": solve,
+        "resid": residual,
+        "path": record.get("last_refactor_path", ""),
+        "ordering": record.get("ordering", ""),
+    }, None
+
+
+def load(path, residual_threshold, selection):
+    samples = {}
+    failures = {}
+    with open(path, encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}:{line_number}: invalid JSON: {exc}") from exc
+            name = matrix_name(record)
+            if not name:
+                continue
+            scored, reason = score_record(record, residual_threshold)
+            if scored is None:
+                failures.setdefault(name, []).append(reason)
+            else:
+                samples.setdefault(name, []).append(scored)
+
+    selected = {}
+    for name in samples.keys() | failures.keys():
+        valid = sorted(samples.get(name, []), key=lambda item: item["cycle"])
+        if not valid:
+            selected[name] = None
+        elif selection == "min":
+            selected[name] = valid[0]
+        else:
+            selected[name] = valid[len(valid) // 2]
+    return selected, failures
+
+
+def geometric_mean(values):
+    values = [value for value in values if math.isfinite(value) and value > 0.0]
+    return (
+        math.exp(sum(math.log(value) for value in values) / len(values))
+        if values
+        else float("nan")
+    )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("kls", help="KLS JSONL run")
+    parser.add_argument("ck", help="CKTSO JSONL run")
+    parser.add_argument("st", nargs="?", help="optional SubtreeLU JSONL run")
+    parser.add_argument(
+        "--residual-threshold",
+        type=float,
+        default=1e-8,
+        help="maximum accepted relative residual (default: 1e-8)",
+    )
+    parser.add_argument(
+        "--selection",
+        choices=("median", "min"),
+        default="median",
+        help="pass selection per matrix (default: median)",
+    )
+    return parser.parse_args()
 
 
 def main():
-    kls = load(sys.argv[1])
-    comps = {'CK': load(sys.argv[2])}
-    if len(sys.argv) > 3:
-        comps['ST'] = load(sys.argv[3])
-    for cname, comp in comps.items():
+    args = parse_args()
+    kls, kls_failures = load(args.kls, args.residual_threshold, args.selection)
+    comparisons = {"CK": load(args.ck, args.residual_threshold, args.selection)}
+    if args.st:
+        comparisons["ST"] = load(args.st, args.residual_threshold, args.selection)
+
+    kls_valid = sum(record is not None for record in kls.values())
+    print(
+        f"KLS valid: {kls_valid}/{len(kls)} "
+        f"(selection={args.selection}, residual<={args.residual_threshold:.1e})"
+    )
+    for comparison_name, (comparison, comparison_failures) in comparisons.items():
+        comparison_valid = sum(record is not None for record in comparison.values())
+        print(f"{comparison_name} valid: {comparison_valid}/{len(comparison)}")
         rows = []
-        for m, k in sorted(kls.items()):
-            c = comp.get(m)
-            if k is None or c is None:
-                print(f"  {m}: SKIP (kls={'ok' if k else 'fail'} {cname.lower()}={'ok' if c else 'fail'})")
+        for name in sorted(kls.keys() | comparison.keys()):
+            candidate = kls.get(name)
+            reference = comparison.get(name)
+            if candidate is None or reference is None:
+                candidate_reason = ", ".join(kls_failures.get(name, ["missing"]))
+                reference_reason = ", ".join(
+                    comparison_failures.get(name, ["missing"])
+                )
+                print(
+                    f"  {name}: SKIP "
+                    f"(kls={'ok' if candidate else candidate_reason}; "
+                    f"{comparison_name.lower()}="
+                    f"{'ok' if reference else reference_reason})"
+                )
                 continue
-            rows.append((k['cycle'] / c['cycle'], m, k, c))
+            rows.append((candidate["cycle"] / reference["cycle"], name, candidate, reference))
+
         rows.sort(reverse=True)
-        print(f"\n== KLS vs {cname}: cycle gm={gm([r[0] for r in rows]):.3f} "
-              f"wins {sum(1 for r in rows if r[0] < 1)}/{len(rows)} ==")
-        print(f"{'matrix':16} {'cyc':>6} {'rs':>6} {'solve':>6} {'ana+init':>8}  path/ord      resid")
-        for rat, m, k, c in rows:
-            fe = (k['ana'] + k['init']) / max(c['ana'] + c['init'], 1e-12)
-            print(f"{m:16} {rat:6.2f} {k['rs']/max(c['rs'],1e-12):6.2f} "
-                  f"{k['solve']/max(c['solve'],1e-12):6.2f} {fe:8.2f}  "
-                  f"{k['path']}/{k['ordering']:6} {k['resid']:.1e}")
+        print(
+            f"\n== KLS vs {comparison_name}: "
+            f"cycle gm={geometric_mean([row[0] for row in rows]):.3f} "
+            f"wins {sum(row[0] < 1.0 for row in rows)}/{len(rows)} =="
+        )
+        print(
+            f"{'matrix':16} {'cyc':>6} {'rs':>6} {'solve':>6} "
+            f"{'ana+init':>8}  path/ord      resid"
+        )
+        for ratio, name, candidate, reference in rows:
+            front_end = (candidate["ana"] + candidate["init"]) / max(
+                reference["ana"] + reference["init"], 1e-12
+            )
+            print(
+                f"{name:16} {ratio:6.2f} "
+                f"{candidate['rs'] / max(reference['rs'], 1e-12):6.2f} "
+                f"{candidate['solve'] / max(reference['solve'], 1e-12):6.2f} "
+                f"{front_end:8.2f}  "
+                f"{candidate['path']}/{candidate['ordering']:6} "
+                f"{candidate['resid']:.1e}"
+            )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
