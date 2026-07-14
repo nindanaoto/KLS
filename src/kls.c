@@ -98232,6 +98232,65 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
     if (lu == NULL) {
       continue;
     }
+    /* Relaxed-run census (KLS_TRACE_RELAXED_SNODE=z): how much of the
+       scattered residue becomes batchable if column k+1 may differ
+       from column k's tail by up to z entries (padded to the union)?
+       Sizes the padded-supernode build's payoff. Measurement only. */
+    static long relaxed_z = -2;
+    if (relaxed_z == -2) {
+      const char *env = getenv("KLS_TRACE_RELAXED_SNODE");
+      relaxed_z = env != NULL ? atol(env) : -1;
+    }
+    if (relaxed_z >= 0) {
+      UF_long rel_runs = 0, rel_cols = 0, rel_run_len = 0, pad = 0,
+              entries = 0;
+      for (UF_long k = 0; k < nk; ++k) {
+        entries += llen[k];
+        int ext = 0;
+        UF_long mism = 0;
+        if (k + 1u < nk && llen[k] >= 1) {
+          UF_long *li, *li2;
+          double *lx, *lx2;
+          UF_long l1, l2;
+          kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &l1);
+          kls_klu_get_pointer(lu, lip, llen, k + 1u, &li2, &lx2, &l2);
+          /* merge walk over li tail (past the k+1 chain entry if
+             present) and li2: count symmetric difference */
+          UF_long a = li[0] == k + 1u ? 1u : 0u, b = 0;
+          while (a < l1 && b < l2) {
+            if (li[a] == li2[b]) {
+              a++;
+              b++;
+            } else if (li[a] < li2[b]) {
+              a++;
+              mism++;
+            } else {
+              b++;
+              mism++;
+            }
+          }
+          mism += (l1 - a) + (l2 - b);
+          ext = li[0] == k + 1u && mism <= (UF_long)relaxed_z;
+        }
+        if (ext) {
+          rel_run_len++;
+          pad += mism;
+        } else {
+          if (rel_run_len > 0) {
+            rel_runs++;
+            rel_cols += rel_run_len + 1u;
+          }
+          rel_run_len = 0;
+        }
+      }
+      fprintf(stderr,
+              "KLS relaxed-snode z=%ld block=%ld nk=%ld: runs=%ld"
+              " cols_in=%ld (%.1f%%) pad=%ld entries=%ld\n",
+              relaxed_z, (long)block, (long)nk, (long)rel_runs,
+              (long)rel_cols,
+              nk > 0 ? 100.0 * (double)rel_cols / (double)nk : 0.0,
+              (long)pad, (long)entries);
+    }
     UF_long start_col = 0;
     for (UF_long k = 0; k < nk; ++k) {
       int extends = 0;
