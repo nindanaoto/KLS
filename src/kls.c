@@ -453,6 +453,14 @@ struct kls_solver {
   int floor_wait;
   int floor_min_path;  /* engine the steady floor-min came from */
   double mapped_steady_min;
+  int lean_choice;     /* lean-row-walk trial (low-flop cohort):
+                          0 undecided, 1 lean, 2 lean-pair, -1 incumbent */
+  int lean_pending;    /* alternating three-arm probe refactors left */
+  int lean_wait;
+  int lean_probe_arm;  /* arm the NEXT refactor runs: 0 incumbent,
+                          1 lean, 2 lean-pair */
+  int lean_pair_active;
+  double lean_probe_min[3];
   int padded_choice;   /* padded-panel probe: 0 undecided, 1 adopted,
                           -1 declined (panels torn down) */
   int padded_pending;  /* probe refactors remaining (8, alternating) */
@@ -24864,6 +24872,12 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->floor_pending = 0;
   solver->floor_wait = 0;
   solver->floor_min_path = 0;
+  solver->lean_choice = 0;
+  solver->lean_pending = 0;
+  solver->lean_wait = 0;
+  solver->lean_probe_arm = 0;
+  solver->lean_pair_active = 0;
+  memset(solver->lean_probe_min, 0, sizeof(solver->lean_probe_min));
   solver->padded_choice = 0;
   solver->padded_pending = 0;
   solver->padded_probe_build = 0;
@@ -58176,7 +58190,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
       (xv)[j] = 0.0;                                                       \
     }                                                                      \
   } while (0)
-  const int pair_mode = getenv("KLS_LEAN_ROW_PAIR") != NULL &&
+  const int pair_mode = solver->lean_pair_active &&
     solver->row_refactor_level_ptr != NULL &&
     solver->row_refactor_level_rows != NULL &&
     solver->row_refactor_level_count > 0;
@@ -101042,7 +101056,11 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
        crossover down to ~1e6 total flops (re-measured 2026-07).  Prefer
        the serial mapped refactor under it and keep the EGraph for
        shapes it cannot cover. */
-    if (!check_pivots && getenv("KLS_ENABLE_LEAN_ROW_CONSUME") != NULL) {
+    if (!check_pivots &&
+        (solver->lean_probe_arm > 0 ||
+         getenv("KLS_ENABLE_LEAN_ROW_CONSUME") != NULL)) {
+      solver->lean_pair_active = solver->lean_probe_arm == 2 ||
+        getenv("KLS_LEAN_ROW_PAIR") != NULL;
       const int lean = kls_lean_row_refactor_numeric(solver, numeric_values);
       if (lean >= 0) {
         kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
@@ -131983,9 +132001,66 @@ int kls_refactor(kls_solver *solver, const double *values) {
   } else {
     solver->padded_active = solver->padded_choice > 0;
   }
+  /* lean-row-walk probe (seventh per-matrix probe): three alternating
+     arms — incumbent / lean / lean-pair — over the low-flop cohort
+     (memplus: lean-pair 244us vs incumbent 493, under CKTSO; mimo-class
+     keeps the incumbent).  Runs after the floor probe settles so the
+     incumbent arm samples its final configuration. */
+  if (solver->lean_choice == 0 && solver->lean_pending == 0 &&
+      solver->padded_pending == 0 &&
+      getenv("KLS_ENABLE_LEAN_PROBE") != NULL &&
+      (solver->floor_choice != 0 ||
+       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU) &&
+      (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED ||
+       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU ||
+       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW) &&
+      ++solver->lean_wait >= 4) {
+    /* MEASURED OUT as an in-steady probe for the microsecond cohort:
+       the lean prep (~1-3ms = 5-10 steady samples) lands inside the
+       rr=20 window and swamps any adopted saving, and mapped rows'
+       probe chain (floor -> padded -> lean) does not even fire by
+       sample 20.  The arms belong in the FIRST-REFACTOR CONSULT
+       (charged once, where the row-vs-column acceptance already
+       trials engines) — env-gated off until that integration. */
+    solver->lean_pending = 6;
+    memset(solver->lean_probe_min, 0, sizeof(solver->lean_probe_min));
+  }
+  if (solver->lean_pending > 0 && solver->lean_choice == 0) {
+    solver->lean_probe_arm = solver->lean_pending % 3;
+  } else {
+    solver->lean_probe_arm =
+      solver->lean_choice > 0 ? solver->lean_choice : 0;
+  }
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
+  if (solver->lean_pending > 0 && solver->lean_choice == 0) {
+    if (ok && solver->common.status >= 0) {
+      double *slot = &solver->lean_probe_min[solver->lean_probe_arm];
+      if (*slot <= 0.0 || elapsed < *slot) {
+        *slot = elapsed;
+      }
+    }
+    if (--solver->lean_pending == 0) {
+      const double inc = solver->lean_probe_min[0];
+      const double lean = solver->lean_probe_min[1];
+      const double pair = solver->lean_probe_min[2];
+      solver->lean_choice = -1;
+      if (inc > 0.0) {
+        if (pair > 0.0 && pair < 0.95 * inc &&
+            (lean <= 0.0 || pair <= lean)) {
+          solver->lean_choice = 2;
+        } else if (lean > 0.0 && lean < 0.95 * inc) {
+          solver->lean_choice = 1;
+        }
+      }
+      if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
+        fprintf(stderr,
+                "KLS lean probe: inc=%.3e lean=%.3e pair=%.3e -> %d\n",
+                inc, lean, pair, solver->lean_choice);
+      }
+    }
+  }
   if (solver->padded_pending > 0 && solver->padded_choice == 0) {
     if (ok && solver->common.status >= 0) {
       double *slot = solver->padded_active ? &solver->padded_probe_min

@@ -16158,3 +16158,17 @@ is per-matrix, i.e. the standard probe pattern: one lean-pair arm after
 the width verdict, adopt on margin. memplus sat at 1.09 worst-side
 (BAND) with steady refactor 2.17x — the 0.84x arm turns it into a
 crossing when the probe lands.
+
+The lean-arm probe (seventh per-matrix probe: incumbent / lean /
+lean-pair alternating at the refactor exit) adopts correctly at rr=40
+(memplus -> pair at 300 vs 480us, powersim -> lean, mimo/bips/rajat26
+decline) but is MEASURED OUT as an in-steady probe for the microsecond
+cohort at the suite's rr=20: the lean mirrors' one-time prep (~1-3ms =
+5-10 steady samples) lands inside the 19-sample window and swamps any
+adopted saving (mimo's declined-probe average read +60%), and mapped
+rows' probe chain (floor -> padded -> lean) does not even reach a
+verdict by sample 20.  The machinery stays behind KLS_ENABLE_LEAN_PROBE;
+the correct integration is the FIRST-REFACTOR CONSULT, where the
+row-vs-column acceptance already trials engines and the protocol
+charges the cost once — the lean/lean-pair arms ride that consult in
+the next pass.
