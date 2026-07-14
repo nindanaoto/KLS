@@ -376,6 +376,9 @@ struct kls_solver {
   int eg_pair_choice;   /* fused pair dispatch: 0 undecided (probe once
                            after the width verdict), 1 adopted, -1 off */
   int eg_pair_pending;  /* probe refactor armed/outstanding */
+  int egraph_tight_tol_state;  /* tight-tol numeric x egraph refactor:
+                                  0 unprobed, 1 factor probe passed,
+                                  -1 vetoed (Raj1-class value defect) */
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
@@ -2414,6 +2417,13 @@ typedef struct kls_match_entry {
 
 static int kls_build_refactor_schedule(kls_solver *solver);
 static int kls_i32_solve_ready(kls_solver *solver);
+static int solve_impl(kls_solver *solver,
+                      int transpose,
+                      int64_t nrhs,
+                      const double *b,
+                      int64_t ldb,
+                      double *x,
+                      int64_t ldx);
 static void kls_pts_free(kls_solver *solver);
 static int kls_pts_mapped_refactor(kls_solver *solver,
                                    double *numeric_values);
@@ -24626,6 +24636,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   memset(solver->eg_tt_min, 0, sizeof(solver->eg_tt_min));
   solver->eg_pair_choice = 0;
   solver->eg_pair_pending = 0;
+  solver->egraph_tight_tol_state = 0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   free_egraph_algorithm5_payoff_queue(solver);
@@ -91199,16 +91210,21 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
       solver->refactor_level_max_width < (UF_long)(4 * solver->options.threads)) {
     return 0;
   }
-  if (solver->stats.selected_pivot_tolerance > 0.0 &&
-      solver->stats.selected_pivot_tolerance <
-        solver->options.pivot_tolerance &&
-      getenv("KLS_ALLOW_EGRAPH_TIGHT_TOL") == NULL) {
-    /* Containment for an open engine defect: on Raj1's tight-tolerance
-       numeric (selected tol 1e-4) the egraph steady refactor returns
-       2.5e-04 residuals while the row and klu engines return e-16 on
-       the SAME numeric, deterministically. Until the value bug is
-       root-caused, tight-tol numerics refactor on the engines that are
-       measured correct (the row engine also wins them on speed). */
+  if (solver->egraph_tight_tol_state < 0 ||
+      (solver->stats.selected_pivot_tolerance > 0.0 &&
+       solver->stats.selected_pivot_tolerance <
+         solver->options.pivot_tolerance &&
+       getenv("KLS_ALLOW_EGRAPH_TIGHT_TOL") == NULL)) {
+    /* Open engine defect: on Raj1's tight-tolerance numeric the egraph
+       steady refactor deterministically returns a factor with 2.5e-04
+       residuals that refinement cannot repair, while the row and klu
+       engines are exact on the SAME numeric. Healthy tight-tol rows
+       (twotone/onetone2/rajat15) pay an engine downgrade until the
+       defect is root-caused - a hand-rolled post-refactor residual
+       probe was tried and mis-measures scaled/matched frames (read
+       the task ledger before re-attempting). KLS_ALLOW_EGRAPH_TIGHT_TOL=1
+       re-enables for the hunt; egraph_tight_tol_state is reserved for
+       the dynamic per-numeric verdict once in-frame validation lands. */
     return 0;
   }
   const int single_block = solver->symbolic->nblocks == 1u;
