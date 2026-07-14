@@ -16212,3 +16212,19 @@ g2_circuit's U averages 20.75-entry runs (L 5.44) and asic_100k sits at
 breakthrough instead: solve columns within one dependency level are
 independent, so level-order pair multiplexing of the L/U sweeps can hide
 the scatter latency that dominates both.
+
+Level-order pair multiplexing does NOT transfer from the refactorization
+to the solve: with strict dependency levels the interleaved L-sweep is
+correct but measures worse everywhere (memplus solve 89 -> 93us, b9_c1
+66 -> 70, activsg10k 186 -> 230) — solve columns average 1.15-2.2
+entries (the run census's numbers), far too small for a serial
+interleave to hide latency against the pairing bookkeeping, where the
+refactorization's k-steps each consumed a whole U-row.  Reverted
+unlanded.  TRAP for the record: the row engine's cached level structure
+is a SCHEDULING order whose intra-level sequence carries dependency
+meaning — pairing on it returned residuals up to 3.7e+9; strict levels
+must be recomputed from the L-row patterns (level = 1 + max over deps).
+The small-cohort solve gap now has one remaining framed lever: the
+17%-of-solve dispatch preamble, and beyond that the per-column fixed
+costs are the floor — CKTSO's edge there likely needs their exact
+mechanics read from the papers before more construction.
