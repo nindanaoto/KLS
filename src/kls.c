@@ -361,6 +361,13 @@ struct kls_solver {
                                       1 publish next refactor, 2 sample the
                                       column-route solve, 3 concluded */
   int row_snode_census_done;       /* KLS_TRACE_ROW_SNODE printed once */
+  int eg_tt_choice;   /* egraph steady thread trial: 0 undecided, else the
+                         adopted dispatch width (thread count is timing-only
+                         for the checkless refactor - results identical) */
+  int eg_tt_pending;  /* 0 none, 1 full-width sample out, 2 narrow */
+  int eg_tt_counts[2];
+  int eg_tt_samples[2];
+  double eg_tt_min[2];
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
@@ -24604,6 +24611,11 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->row_steady_solve_min = 0.0;
   solver->row_steady_solve_samples = 0;
   solver->row_publish_experiment = 0;
+  solver->eg_tt_choice = 0;
+  solver->eg_tt_pending = 0;
+  memset(solver->eg_tt_counts, 0, sizeof(solver->eg_tt_counts));
+  memset(solver->eg_tt_samples, 0, sizeof(solver->eg_tt_samples));
+  memset(solver->eg_tt_min, 0, sizeof(solver->eg_tt_min));
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   free_egraph_algorithm5_payoff_queue(solver);
@@ -91237,6 +91249,62 @@ static kls_egraph_refactor_kernel kls_egraph_refactor_kernel_for(
   return KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
 }
 
+/* Per-matrix steady dispatch-width trial for the pipelined egraph
+   refactor. Profiles show medium ND rows spend most of the 8T steady
+   refactor spinning on pipeline dependencies, and the best width is
+   row-dependent (rajat25/rajat20/dc1: half width 13-21%% faster;
+   onetone2/ASIC: full width wins). Alternate full and half width over
+   the first steady refactors, adopt the min-based winner. Width is
+   timing-only for the checkless refactor - results are identical. */
+static int kls_egraph_steady_thread_count(kls_solver *solver,
+                                          int thread_count,
+                                          int check_pivots) {
+  solver->eg_tt_pending = 0;
+  if (check_pivots || thread_count < 4 ||
+      getenv("KLS_DISABLE_EGRAPH_THREAD_TRIAL") != NULL) {
+    return thread_count;
+  }
+  if (solver->eg_tt_choice > 0) {
+    return solver->eg_tt_choice <= thread_count ? solver->eg_tt_choice
+                                                : thread_count;
+  }
+  const int half = thread_count / 2 < 2 ? 2 : thread_count / 2;
+  const int side =
+    (solver->eg_tt_samples[0] + solver->eg_tt_samples[1]) & 1;
+  solver->eg_tt_pending = side + 1;
+  solver->eg_tt_counts[side] = side ? half : thread_count;
+  return solver->eg_tt_counts[side];
+}
+
+static void kls_egraph_thread_trial_record(kls_solver *solver,
+                                           double seconds) {
+  const int side = solver->eg_tt_pending - 1;
+  solver->eg_tt_pending = 0;
+  if (side < 0 || solver->eg_tt_choice != 0 ||
+      solver->stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
+    return;
+  }
+  solver->eg_tt_samples[side]++;
+  if (solver->eg_tt_samples[side] == 1 ||
+      seconds < solver->eg_tt_min[side]) {
+    solver->eg_tt_min[side] = seconds;
+  }
+  if (solver->eg_tt_samples[0] >= 2 && solver->eg_tt_samples[1] >= 2) {
+    /* keep full width unless the narrow runs are decisively faster */
+    solver->eg_tt_choice =
+      solver->eg_tt_min[1] < 0.95 * solver->eg_tt_min[0]
+        ? solver->eg_tt_counts[1] : solver->eg_tt_counts[0];
+    if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
+      fprintf(stderr,
+              "KLS egraph thread trial: %d (full %d: %.3f ms,"
+              " narrow %d: %.3f ms)\n",
+              solver->eg_tt_choice, solver->eg_tt_counts[0],
+              1e3 * solver->eg_tt_min[0], solver->eg_tt_counts[1],
+              1e3 * solver->eg_tt_min[1]);
+    }
+  }
+}
+
 static int kls_egraph_mapped_refactor(kls_solver *solver,
                                       double *numeric_values,
                                       int check_pivots) {
@@ -91269,6 +91337,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   if (thread_count < 2) {
     return -1;
   }
+  thread_count =
+    kls_egraph_steady_thread_count(solver, thread_count, check_pivots);
   const int supernode_numeric_update_mode =
     kls_egraph_supernode_numeric_updates_env_mode();
   const int consumer_plan_exec_requested =
@@ -129689,6 +129759,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   if (ok && solver->common.status >= 0) {
     kls_row_refactor_acceptance_record_refactor(solver, elapsed);
+    kls_egraph_thread_trial_record(solver, elapsed);
   }
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR &&
