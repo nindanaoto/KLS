@@ -16259,3 +16259,17 @@ same cache regime, prep already paid) — briefed for the next pass.
 Coupled meanwhile adopts pair at its consult (steady 2.19-2.71ms vs
 ~2.4 incumbent) with residuals in class, and the memplus/b9_c1/powersim
 adoptions hold under the new caps.
+
+The alternating steady window for consult-declined mapped rows returned
+the deepest calibration lesson yet: rajat16/17/18's lean and incumbent
+arms TIE in the mixed regime (3.53 vs 3.56ms) — the env-forced "-14%"
+was an all-lean-regime artifact (the lean mirrors stay cache-resident
+only when every refactor is lean), and symmetrically the incumbent's
+consult advantage was its own cache-hot artifact.  A mixed window
+matches NEITHER adopted end-state, so it under-prices adoption for any
+cache-sensitive engine; block alternation (four consecutive samples per
+arm) is the only honest instrument, and the class's true adopted gain is
+bounded by the ~3.25 vs ~3.6-3.8ms end-state gap seen across regimes.
+The window was reverted (it costs ~3% on ties); the rajat1x class is
+PARKED as regime-tied pending a block-alternation pass, and the
+min-of-two consult from the previous commit stands as the adopter.
