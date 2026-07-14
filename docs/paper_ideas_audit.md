@@ -16201,3 +16201,14 @@ right.  The branch was reverted unlanded.  b9_c1's solve floor under
 the honest contract is base + SpMV + correction; its crossing rides the
 dense-segment i32 solve (81% of its solve time, both base and
 correction passes).
+
+The existing KLS_TRACE_RUNS census settles the dense-segment i32 solve's
+scope before construction: the small solve-losing cohort has essentially
+no run structure (L averages 1.15-2.2 entries per run on mimo46, zeros,
+memplus, b9_c1 - nothing for a contiguous-AXPY sweep to consume), while
+g2_circuit's U averages 20.75-entry runs (L 5.44) and asic_100k sits at
+4.28 - the dense-segment variant is a g2-class/DEEP lever, not the
+40-row cohort's. The cohort's solve lever mirrors the refactor
+breakthrough instead: solve columns within one dependency level are
+independent, so level-order pair multiplexing of the L/U sweeps can hide
+the scatter latency that dominates both.
