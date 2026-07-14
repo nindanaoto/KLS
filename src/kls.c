@@ -36,6 +36,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef __linux__
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 
 #if defined(__GNUC__) || defined(__clang__)
 #define KLS_ALWAYS_INLINE inline __attribute__((always_inline))
@@ -33000,7 +33005,22 @@ typedef struct {
   int candidate;
 } kls_scale_trial_arg;
 
+/* Race-side threads must never starve the foreground factor: the race
+   overlaps the first factorization by design, and at normal priority
+   its analyze + concurrent trial factors turn the serial prestatic
+   trial into a scheduling lottery (onetone1: identical 8.4e8-flop
+   trials measured 0.25s..18.3s under a live race; 0.12s flat with the
+   race disabled). Nice the race threads so the foreground preempts
+   them whenever it is runnable. */
+static void kls_race_thread_deprioritize(void) {
+#ifdef __linux__
+  errno = 0;
+  (void)setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 15);
+#endif
+}
+
 static void *kls_scale_trial_main(void *argp) {
+  kls_race_thread_deprioritize();
   kls_scale_trial_arg *a = (kls_scale_trial_arg *)argp;
   kls_metis_race *race = a->race;
   kls_options trial_options = race->options;
@@ -33020,6 +33040,7 @@ static void *kls_scale_trial_main(void *argp) {
 }
 
 static void *kls_metis_race_main(void *arg) {
+  kls_race_thread_deprioritize();
   kls_metis_race *race = (kls_metis_race *)arg;
   if (race->metis_wanted) {
 #ifdef KLS_HAVE_MTMETIS
@@ -33040,9 +33061,17 @@ static void *kls_metis_race_main(void *arg) {
   }
   atomic_store_explicit(&race->analyze_done, 1, memory_order_release);
   int stage2;
+  unsigned stage2_spin = 0;
   while ((stage2 = atomic_load_explicit(&race->stage2,
                                         memory_order_acquire)) == 0) {
-    kls_cpu_relax();
+    /* this wait spans the whole foreground first factor - a hot spin
+       here steals a core from it for seconds */
+    if (++stage2_spin > 1024u) {
+      struct timespec ts = {0, 200000};
+      nanosleep(&ts, NULL);
+    } else {
+      kls_cpu_relax();
+    }
   }
   if (stage2 != 1 || race->symbolic_only) {
     atomic_store_explicit(&race->scale_done, 1, memory_order_release);
