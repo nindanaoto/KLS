@@ -91289,10 +91289,13 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
       seconds < solver->eg_tt_min[side]) {
     solver->eg_tt_min[side] = seconds;
   }
-  if (solver->eg_tt_samples[0] >= 2 && solver->eg_tt_samples[1] >= 2) {
-    /* keep full width unless the narrow runs are decisively faster */
+  if (solver->eg_tt_samples[0] >= 1 && solver->eg_tt_samples[1] >= 1) {
+    /* One sample per side: the narrow probe is the trial's whole cost
+       (an ASIC-class narrow refactor runs 1.7x, and two of them put
+       +7% on a 20-refactor average), so deviate from full width only
+       on a decisive margin. */
     solver->eg_tt_choice =
-      solver->eg_tt_min[1] < 0.95 * solver->eg_tt_min[0]
+      solver->eg_tt_min[1] < 0.9 * solver->eg_tt_min[0]
         ? solver->eg_tt_counts[1] : solver->eg_tt_counts[0];
     if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
       fprintf(stderr,
