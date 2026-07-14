@@ -385,6 +385,8 @@ struct kls_solver {
   int egraph_tight_tol_state;  /* tight-tol numeric x egraph refactor:
                                   0 unprobed, 1 factor probe passed,
                                   -1 vetoed (Raj1-class value defect) */
+  double reftr_pre, reftr_kernel, reftr_post;  /* KLS_TRACE_REFACTOR_US */
+  int reftr_n;
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
@@ -130375,6 +130377,35 @@ int kls_refactor(kls_solver *solver, const double *values) {
      user-visible timing.  The private adaptive sample above deliberately
      excludes that consultation overhead; stats measures the complete call. */
   solver->stats.refactor_seconds = kls_now_seconds() - refactor_call_start;
+  {
+    static const char *trace_us;
+    static int trace_us_checked;
+    if (!trace_us_checked) {
+      trace_us = getenv("KLS_TRACE_REFACTOR_US");
+      trace_us_checked = 1;
+    }
+    if (trace_us != NULL) {
+      /* small-row overhead forensics: split the call into pre-kernel
+         (deferred preps, race checks), kernel, and post (recorders,
+         audits, publishes, stats) - the tiny-row family loses ~6-70us
+         per refactor somewhere in here, below sampler resolution */
+      solver->reftr_pre += start - refactor_call_start;
+      solver->reftr_kernel += elapsed;
+      solver->reftr_post +=
+        (solver->stats.refactor_seconds - (start - refactor_call_start)) -
+        elapsed;
+      if (++solver->reftr_n >= 512) {
+        fprintf(stderr,
+                "KLS refactor us/call over %d: pre=%.2f kernel=%.2f"
+                " post=%.2f\n",
+                solver->reftr_n, 1e6 * solver->reftr_pre / solver->reftr_n,
+                1e6 * solver->reftr_kernel / solver->reftr_n,
+                1e6 * solver->reftr_post / solver->reftr_n);
+        solver->reftr_pre = solver->reftr_kernel = solver->reftr_post = 0.0;
+        solver->reftr_n = 0;
+      }
+    }
+  }
   fill_numeric_stats(solver);
   if (!ok || solver->common.status < 0) {
     return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
