@@ -16172,3 +16172,19 @@ the correct integration is the FIRST-REFACTOR CONSULT, where the
 row-vs-column acceptance already trials engines and the protocol
 charges the cost once — the lean/lean-pair arms ride that consult in
 the next pass.
+
+The lean arms moved into the first-refactor consult: on a small
+numeric's first eligible refactorization (n in [512, 65536], fill <=
+500k, no nudges/perturbation, mapped/klu/row path), all arms run
+back-to-back inside that call — a clean incumbent re-sample, one
+discarded lean pass paying the mirror prep, then timed lean and
+lean-pair samples — and the verdict is immediate, charged where engine
+trials already live.  Default-on adoptions at rr=20: memplus -> pair
+(steady 493 -> 225us, 0.77x of CKTSO), TSOPF_FS_b9_c1 -> lean (mapped
+200 -> 100us, tail-cert cycle 0.745), powersim -> lean (158us), rajat12
+19us, TSOPF_RS_b9_c6 57us; qh1484/hamrle2/hcircuit decline cleanly.
+Twelve-row tail cert gm 1.0057 after the fill cap (coupled had paid a
+~15ms consult through its pre-settling mapped refactors and then gone
+egraph anyway — +51% cycle for a declined trial; the cap excludes it by
+construction).  The smoke suite's engine-stats expectations also forced
+the n >= 512 floor (a 3x3 adopting the lean path trips them).
