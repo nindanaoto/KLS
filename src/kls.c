@@ -448,6 +448,11 @@ struct kls_solver {
   int floor_wait;
   int floor_min_path;  /* engine the steady floor-min came from */
   double mapped_steady_min;
+  int padded_choice;   /* padded-panel probe: 0 undecided, 1 adopted,
+                          -1 declined (panels torn down) */
+  int padded_pending;  /* probe refactors remaining (4-sample min) */
+  int padded_probe_build;  /* builder force flag for the probe */
+  double padded_probe_min;
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_retrial;       /* near-miss rejection: 0 none, 1 armed for a
@@ -24799,6 +24804,10 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->floor_pending = 0;
   solver->floor_wait = 0;
   solver->floor_min_path = 0;
+  solver->padded_choice = 0;
+  solver->padded_pending = 0;
+  solver->padded_probe_build = 0;
+  solver->padded_probe_min = 0.0;
   solver->mapped_steady_min = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
@@ -98365,7 +98374,8 @@ static UF_long kls_padded_run_consume(const kls_solver *ps,
    bcircuit z=2 covers 79% of columns at +9.9%% pad. */
 static void kls_build_padded_panels(kls_solver *solver) {
   if (solver == NULL || solver->padded_run_of != NULL ||
-      getenv("KLS_ENABLE_PADDED_PANELS") == NULL ||
+      (getenv("KLS_ENABLE_PADDED_PANELS") == NULL &&
+       !solver->padded_probe_build) ||
       solver->symbolic == NULL || solver->numeric == NULL) {
     return;
   }
@@ -130933,9 +130943,68 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_snode_floor_batch_override = 2;
     kls_snode_floor_work_override = 48;
   }
+  if (solver->padded_choice == 0 && solver->padded_pending == 0 &&
+      solver->floor_choice != 0 && solver->padded_run_of == NULL &&
+      solver->mapped_steady_min > 0.0 &&
+      (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED ||
+       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH)) {
+    /* padded-panel probe (sixth per-matrix probe): build panels from
+       the current numeric and measure four padded refactors' minimum
+       against the settled steady floor */
+    solver->padded_probe_build = 1;
+    kls_build_padded_panels(solver);
+    solver->padded_probe_build = 0;
+    if (solver->padded_run_of != NULL) {
+      solver->padded_pending = 4;
+      solver->padded_probe_min = 0.0;
+    } else {
+      solver->padded_choice = -1;
+    }
+  }
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
+  if (solver->padded_pending > 0 && solver->padded_choice == 0) {
+    if (ok && solver->common.status >= 0 &&
+        (solver->padded_probe_min <= 0.0 ||
+         elapsed < solver->padded_probe_min)) {
+      solver->padded_probe_min = elapsed;
+    }
+    if (--solver->padded_pending == 0) {
+      solver->padded_choice =
+        solver->padded_probe_min > 0.0 &&
+            solver->padded_probe_min < 0.98 * solver->mapped_steady_min
+          ? 1 : -1;
+      if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
+        fprintf(stderr,
+                "KLS padded probe: %s (min %.3f ms vs steady %.3f ms)\n",
+                solver->padded_choice > 0 ? "ADOPT" : "decline+teardown",
+                1e3 * solver->padded_probe_min,
+                1e3 * solver->mapped_steady_min);
+      }
+      if (solver->padded_choice < 0) {
+        free(solver->padded_run_of);
+        free(solver->padded_run_start);
+        free(solver->padded_run_len);
+        free(solver->padded_union_ptr);
+        free(solver->padded_union_rows);
+        free(solver->padded_slot_ptr);
+        free(solver->padded_slots);
+        free(solver->padded_panel_ptr);
+        free(solver->padded_panel_values);
+        solver->padded_run_of = NULL;
+        solver->padded_run_start = NULL;
+        solver->padded_run_len = NULL;
+        solver->padded_union_ptr = NULL;
+        solver->padded_union_rows = NULL;
+        solver->padded_slot_ptr = NULL;
+        solver->padded_slots = NULL;
+        solver->padded_panel_ptr = NULL;
+        solver->padded_panel_values = NULL;
+        solver->padded_run_count = 0;
+      }
+    }
+  }
   if (kls_snode_floor_batch_override != 0) {
     kls_snode_floor_batch_override = 0;
     kls_snode_floor_work_override = 0;
