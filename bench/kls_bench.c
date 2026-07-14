@@ -1083,7 +1083,11 @@ int main(int argc, char **argv) {
     status = kls_solve(solver, 1, b, 0, x, 0);
   }
   if (bench_env_enabled("KLS_BENCH_PROF")) {
-    kls_prof_stop_report();
+    const char *prof_env = getenv("KLS_BENCH_PROF");
+    if (prof_env == NULL || prof_env[0] != '3') {
+      /* =3 keeps sampling through the measured solve loop below */
+      kls_prof_stop_report();
+    }
   }
   if (callgrind_refactor) {
     CALLGRIND_DUMP_STATS;
@@ -1094,6 +1098,12 @@ int main(int argc, char **argv) {
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     solve_total += stats.solve_seconds;
+  }
+  {
+    const char *prof_env = getenv("KLS_BENCH_PROF");
+    if (prof_env != NULL && prof_env[0] == '3') {
+      kls_prof_stop_report();
+    }
   }
   for (int i = 0; i < repeat && status == KLS_OK; ++i) {
     status = kls_solve_transpose(solver, 1, b, 0, x, 0);
