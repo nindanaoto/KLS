@@ -34073,8 +34073,7 @@ static int maybe_promote_auto_metis(kls_solver *solver,
                                     const double *numeric_values,
                                     int race_invalid) {
   kls_metis_race *race = kls_metis_race_take(solver, elapsed);
-  if (solver != NULL && solver->numeric_is_predicted &&
-      solver->common.scale <= 0 &&
+  if (solver != NULL && solver->common.scale <= 0 &&
       symbolic_is_fragmented_many_block_unscaled_candidate(
         solver->n, solver->symbolic)) {
     /* The race numeric is a serial, pivoted KLU factor, while this class's
@@ -34083,7 +34082,11 @@ static int maybe_promote_auto_metis(kls_solver *solver,
        scheduler noise ASIC_680ks once accepted a 2.22M/2.23M pivoted factor
        whose steady EGraph refactor then rose from about 23ms to 441ms.  Keep
        the already-probed predicted incumbent until the raced symbolic can be
-       rebuilt with the same predicted representation. */
+       rebuilt with the same predicted representation.  Do not key this
+       guard on numeric_is_predicted: a repeated factor call can fall back to
+       the compatible pivoted incumbent and clear that flag before the
+       deferred race consult, while the METIS representation remains the
+       same 20x refactor catastrophe. */
     solver->auto_metis_checked = 1;
     kls_metis_race_free(race);
     return 0;
