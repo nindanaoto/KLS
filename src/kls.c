@@ -24102,6 +24102,23 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
       lx[p] = lij;
       x[i] = 0.0;
     }
+    if (shared->padded_src != NULL) {
+      const kls_solver *ps = shared->padded_src;
+      const UF_long run1 = ps->padded_run_of[global_col];
+      if (run1 != 0u) {
+        const UF_long run = run1 - 1u;
+        const UF_long ulen_run =
+          ps->padded_union_ptr[run + 1u] - ps->padded_union_ptr[run];
+        double *panel_row = ps->padded_panel_values +
+          ps->padded_panel_ptr[run] +
+          (global_col - ps->padded_run_start[run]) * ulen_run;
+        const UF_long *slots =
+          ps->padded_slots + ps->padded_slot_ptr[global_col];
+        for (UF_long p = 0; p < lcol_len; ++p) {
+          panel_row[slots[p]] = lx[p];
+        }
+      }
+    }
   }
 }
 
