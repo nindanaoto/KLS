@@ -221,11 +221,16 @@ static UF_long kls_snode_min_batch_work(void) {
   }
   return cached;
 }
+
 /* Re-measured 2026-07 with the busy-wait pool: the egraph now beats the
    serial mapped kernel down to ~1e6 total flops (rajat03 3.96e6: 803 ->
    595us; coupled 2.4e7: 2393 -> 1651us; add32 4.8e4 stays mapped). */
 #define KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD 2.5e5
 #define KLS_EGRAPH_POOL_SPIN_ITERS 200000u
+/* EGraph's caller participates as worker zero. Background workers need only
+   a short grace period to catch back-to-back SPICE refactors; the old 200K
+   idle spin occupied every requested core during serial post/solve phases. */
+#define KLS_EGRAPH_WORKER_SPIN_ITERS 4096u
 #define KLS_METIS_NDP_MIN_LEAF_ROWS 200u
 #define KLS_METIS_NDP_TARGET_DIVISOR 1000u
 #define KLS_METIS_NDP_SUBTREE_THRESHOLD_MIN_ROWS 200000u
@@ -90525,6 +90530,20 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
   }
 }
 
+static KLS_ALWAYS_INLINE void kls_egraph_refactor_pool_run_worker(
+  kls_egraph_refactor_worker *worker) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  if (shared->row_publish_mode) {
+    kls_row_publish_worker_run(worker);
+  } else if (shared->row_solve_mode) {
+    kls_row_solve_worker_run(worker);
+  } else if (shared->row_refactor_mode) {
+    kls_row_refactor_worker_run(worker);
+  } else {
+    kls_egraph_refactor_worker_run(worker);
+  }
+}
+
 static void *kls_egraph_refactor_pool_worker_main(void *arg) {
   kls_egraph_refactor_worker *worker = (kls_egraph_refactor_worker *)arg;
   kls_egraph_refactor_pool *pool = worker->pool;
@@ -90543,7 +90562,7 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
       if (generation != seen_generation) {
         break;
       }
-      if (pool->busy_wait && spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
+      if (pool->busy_wait && spin < KLS_EGRAPH_WORKER_SPIN_ITERS) {
         spin++;
         kls_cpu_relax();
         continue;
@@ -90563,15 +90582,7 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
     }
     seen_generation = generation;
 
-    if (shared->row_publish_mode) {
-      kls_row_publish_worker_run(worker);
-    } else if (shared->row_solve_mode) {
-      kls_row_solve_worker_run(worker);
-    } else if (shared->row_refactor_mode) {
-      kls_row_refactor_worker_run(worker);
-    } else {
-      kls_egraph_refactor_worker_run(worker);
-    }
+    kls_egraph_refactor_pool_run_worker(worker);
 
     if (atomic_fetch_sub_explicit(&pool->active_workers, 1,
                                   memory_order_acq_rel) == 1) {
@@ -90582,28 +90593,21 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
   }
 }
 
-/* Publish a new pool generation and wait for the workers to finish.
-   Expects shared->lock held on entry and returns with it held; the wait
-   spins briefly before sleeping so sub-millisecond parallel refactors do
-   not pay two futex round trips per call. */
+/* Publish a new pool generation, run worker zero on the calling thread, and
+   wait for the N-1 background workers. This keeps an N-thread request at N
+   runnable threads while making the caller useful instead of spinning or
+   sleeping beside N workers. Expects shared->lock held on entry and returns
+   with it held. */
 static void kls_egraph_pool_dispatch_and_wait(
   kls_egraph_refactor_pool *pool,
   kls_egraph_refactor_shared *shared,
   int thread_count) {
-  atomic_store_explicit(&pool->active_workers, thread_count,
+  atomic_store_explicit(&pool->active_workers, thread_count - 1,
                         memory_order_relaxed);
   atomic_fetch_add_explicit(&pool->generation, 1ul, memory_order_release);
   pthread_cond_broadcast(&pool->work_cond);
   pthread_mutex_unlock(&shared->lock);
-  if (pool->busy_wait) {
-    unsigned spin = 0;
-    while (atomic_load_explicit(&pool->active_workers,
-                                memory_order_acquire) > 0 &&
-           spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
-      spin++;
-      kls_cpu_relax();
-    }
-  }
+  kls_egraph_refactor_pool_run_worker(&pool->workers[0]);
   pthread_mutex_lock(&shared->lock);
   while (atomic_load_explicit(&pool->active_workers,
                               memory_order_acquire) > 0) {
@@ -90981,14 +90985,16 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
     pool->workers[i].shared = &pool->shared;
     pool->workers[i].pool = pool;
     pool->workers[i].tid = i;
-    if (pthread_create(&pool->threads[i], NULL,
+  }
+  for (int i = 1; i < thread_count; ++i) {
+    if (pthread_create(&pool->threads[i - 1], NULL,
                        kls_egraph_refactor_pool_worker_main,
                        &pool->workers[i]) != 0) {
       break;
     }
     pool->created_count++;
   }
-  if (pool->created_count != thread_count) {
+  if (pool->created_count != thread_count - 1) {
     solver->egraph_pool = pool;
     destroy_egraph_refactor_pool(solver);
     return NULL;
