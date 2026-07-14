@@ -176,10 +176,39 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
 #define KLS_NICSLU_PARALLEL_R2_THRESHOLD 50.0
 #define KLS_NICSLU_TASK_FLOW_SYNC_COST 1.0
 #define KLS_METIS_NDP_MIN_ROWS 30000u
-#define KLS_SNODE_MIN_BATCH 3
+#define KLS_SNODE_MIN_BATCH kls_snode_min_batch()
 #define KLS_SNODE_MAX_BATCH 64
 #define KLS_SNODE_TAIL_CHUNK 32
-#define KLS_SNODE_MIN_BATCH_WORK 192
+#define KLS_SNODE_MIN_BATCH_WORK kls_snode_min_batch_work()
+
+/* Floors are env-tunable for kernel experiments: bcircuit's mapped
+   path declines 88% of consume events on these floors (850K on work,
+   963K on run length per 20 refactors) while its runs average t=122 -
+   the floors were tuned for big-factor panel staging economics and
+   may over-reject on cache-resident small factors. */
+static UF_long kls_snode_min_batch(void) {
+  static UF_long cached = -1;
+  if (cached < 0) {
+    const char *env = getenv("KLS_SNODE_MIN_BATCH_OVERRIDE");
+    cached = env != NULL ? (UF_long)atol(env) : 3;
+    if (cached < 2) {
+      cached = 2;
+    }
+  }
+  return cached;
+}
+
+static UF_long kls_snode_min_batch_work(void) {
+  static UF_long cached = -1;
+  if (cached < 0) {
+    const char *env = getenv("KLS_SNODE_MIN_BATCH_WORK_OVERRIDE");
+    cached = env != NULL ? (UF_long)atol(env) : 192;
+    if (cached < 1) {
+      cached = 1;
+    }
+  }
+  return cached;
+}
 /* Re-measured 2026-07 with the busy-wait pool: the egraph now beats the
    serial mapped kernel down to ~1e6 total flops (rajat03 3.96e6: 803 ->
    595us; coupled 2.4e7: 2393 -> 1651us; add32 4.8e4 stays mapped). */
