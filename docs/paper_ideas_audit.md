@@ -16321,3 +16321,11 @@ are washes.  A per-matrix alpha probe would need schedule rebuilds per
 arm for a 1-2 row, ~5-8%, no-crossing gain — declined; the override
 stays as a diagnostic knob with zero default impact.  The pipeline
 phase's lease/order design remains the phase-3 lever with real breadth.
+
+Width-trial observation on rajat25: the narrow arm beat full by 10.1%
+(10.843 vs 12.057ms) and missed adoption by 8 microseconds against the
+0.9 deviation margin.  The margin was set for probe-cost honesty at
+rr=20 and one draw does not justify softening it, but the class's
+near-misses are worth a margin-sensitivity pass (0.92) WITH a full
+paired A/B if the stall tier needs the last few percent — noted, not
+changed.
