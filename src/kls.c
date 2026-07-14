@@ -23444,12 +23444,15 @@ static int kls_parallel_refactor_mapped_value(
   const kls_parallel_refactor_shared *shared,
   UF_long input_pos,
   double *value_out) {
-  if (input_pos >= shared->nnz) {
-    return 0;
-  }
   if (shared->scale <= 0) {
+    /* Refactor-map construction already validates every stored source
+       position.  Keep the common unscaled path to one indexed load instead
+       of repeating the generic bounds and scaling checks for every entry. */
     *value_out = shared->values[input_pos];
     return 1;
+  }
+  if (input_pos >= shared->nnz) {
+    return 0;
   }
   return kls_parallel_refactor_value(shared, shared->row_idx[input_pos],
                                      shared->values[input_pos], value_out);
