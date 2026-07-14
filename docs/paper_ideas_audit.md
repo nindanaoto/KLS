@@ -16071,3 +16071,19 @@ environment's environ block is small enough that the linear scans cost
 well under a microsecond combined. The conversion was reverted unlanded;
 the small-row solve gap (88us vs CK ~40us on mimo-class) lives inside the
 solve kernels/preamble, not in flag reads.
+
+The scaled multi-block small rows (zeros_nopss_13k, bips07_1693,
+circuit204, qh1484, meg1, mult_dcop_02 — the whole `klu_refactor`-path
+cohort, steady refactor 2-4.7x vs CKTSO) looked like a mapped-engine
+eligibility problem: `kls_scaled_serial_mapped_btf_is_worthwhile` admits
+only one narrow shape (>=1024 blocks, one block covering >=95% of n,
+>=1e8 flops) and everything else falls to the serial KLU refactor. A
+widened-gate experiment (KLS_SCALED_MAPPED_WIDE, three interleaved
+passes at rr=20) measured the narrow gate CORRECT: the checked-scaling
+mapped path loses 7-29% on five of the six rows (zeros 261->292us,
+qh1484 28->36us, meg1 228->275us); only mult_dcop_02 wins (849->706us,
+-17%, its 7417-block shape). The experiment was reverted. The cohort's
+distance to CKTSO is the serial scaled refactor loop's per-entry rate,
+not path eligibility — kernel-family work, consistent with the earlier
+per-call funnel measurements. mult_dcop_02's win is bankable margin via
+a per-matrix probe if that row ever needs hardening (it stands at 0.70).
