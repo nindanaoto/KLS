@@ -378,9 +378,10 @@ struct kls_solver {
   int eg_tt_counts[2];
   int eg_tt_samples[2];
   double eg_tt_min[2];
-  int eg_pair_choice;   /* fused pair dispatch: 0 undecided (probe once
-                           after the width verdict), 1 adopted, -1 off */
-  int eg_pair_pending;  /* probe refactor armed/outstanding */
+  int eg_pair_choice;   /* fused dispatch: 0 undecided (probed after the
+                           width verdict), 1 pair, 2 quad, -1 off */
+  int eg_pair_pending;  /* probe refactor out: 1 pair arm, 2 quad arm */
+  double eg_fuse_min[2];  /* probe minima: [0] pair, [1] quad */
   int egraph_tight_tol_state;  /* tight-tol numeric x egraph refactor:
                                   0 unprobed, 1 factor probe passed,
                                   -1 vetoed (Raj1-class value defect) */
@@ -24645,6 +24646,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   memset(solver->eg_tt_min, 0, sizeof(solver->eg_tt_min));
   solver->eg_pair_choice = 0;
   solver->eg_pair_pending = 0;
+  memset(solver->eg_fuse_min, 0, sizeof(solver->eg_fuse_min));
   solver->egraph_tight_tol_state = 0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
@@ -89869,7 +89871,8 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
       }
       const int quad_allowed = pair_allowed &&
         shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED &&
-        getenv("KLS_ENABLE_QUAD_DISPATCH") != NULL;
+        (getenv("KLS_ENABLE_QUAD_DISPATCH") != NULL ||
+         solver->eg_pair_choice == 2 || solver->eg_pair_pending == 2);
       if (quad_allowed && worker->fuse_x == NULL) {
         worker->fuse_x = (double *)calloc(
           (size_t)solver->n * (KLS_SNODE_MAX_FUSE - 2u), sizeof(double));
@@ -91777,21 +91780,41 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
 static void kls_egraph_thread_trial_record(kls_solver *solver,
                                            double seconds) {
   if (solver->eg_pair_pending) {
+    const int probe = solver->eg_pair_pending;
     solver->eg_pair_pending = 0;
     if (solver->eg_pair_choice == 0) {
+      if (solver->stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
+        solver->eg_pair_choice = -1;
+        return;
+      }
+      solver->eg_fuse_min[probe - 1] = seconds;
+      if (probe == 1) {
+        /* quad probes next; on non-SINGLE_UNSCALED kernels it runs as
+           another pair refactor, and the strict better-than-pair
+           requirement below keeps a noise draw from adopting quad */
+        solver->eg_pair_pending = 2;
+        return;
+      }
       const int side =
         solver->eg_tt_choice == solver->eg_tt_counts[1] ? 1 : 0;
-      const double base = solver->eg_tt_min[side];
-      solver->eg_pair_choice =
-        solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH &&
-            base > 0.0 && seconds < 0.95 * base
-          ? 1 : -1;
+      const double none = solver->eg_tt_min[side];
+      const double pairm = solver->eg_fuse_min[0];
+      const double quadm = solver->eg_fuse_min[1];
+      int choice = -1;
+      if (none > 0.0 && pairm > 0.0 && pairm < 0.95 * none) {
+        choice = 1;
+      }
+      if (none > 0.0 && quadm > 0.0 && quadm < 0.95 * none &&
+          (pairm <= 0.0 || quadm < pairm)) {
+        choice = 2;
+      }
+      solver->eg_pair_choice = choice;
       if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
         fprintf(stderr,
-                "KLS egraph pair probe: %s (probe %.3f ms vs width-min"
-                " %.3f ms)\n",
-                solver->eg_pair_choice > 0 ? "ADOPT" : "off",
-                1e3 * seconds, 1e3 * base);
+                "KLS egraph fuse probe: %s (none %.3f, pair %.3f,"
+                " quad %.3f ms)\n",
+                choice == 2 ? "QUAD" : choice == 1 ? "PAIR" : "off",
+                1e3 * none, 1e3 * pairm, 1e3 * quadm);
       }
     }
     return;
