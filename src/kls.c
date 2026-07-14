@@ -91199,6 +91199,18 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
       solver->refactor_level_max_width < (UF_long)(4 * solver->options.threads)) {
     return 0;
   }
+  if (solver->stats.selected_pivot_tolerance > 0.0 &&
+      solver->stats.selected_pivot_tolerance <
+        solver->options.pivot_tolerance &&
+      getenv("KLS_ALLOW_EGRAPH_TIGHT_TOL") == NULL) {
+    /* Containment for an open engine defect: on Raj1's tight-tolerance
+       numeric (selected tol 1e-4) the egraph steady refactor returns
+       2.5e-04 residuals while the row and klu engines return e-16 on
+       the SAME numeric, deterministically. Until the value bug is
+       root-caused, tight-tol numerics refactor on the engines that are
+       measured correct (the row engine also wins them on speed). */
+    return 0;
+  }
   const int single_block = solver->symbolic->nblocks == 1u;
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
   const int all_pipeline_btf =
