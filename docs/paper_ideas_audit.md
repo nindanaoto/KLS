@@ -15950,3 +15950,70 @@ This does not make the shared owner a default CKTSO-gap closer by itself; it
 removes an artificial implementation ceiling so wider paper-shaped owner runs
 can be tested under the existing row, slot, scan, and payoff gates without
 turning producer membership into a linear scan over every selected dependency.
+
+The EGraph pool now counts the API caller as worker zero and creates only
+`threads - 1` background workers. Previously an eight-thread request created
+eight workers while the caller spun or slept beside them: spinning made nine
+runnable threads compete for eight pinned cores, while sleeping left useful
+caller capacity idle. Background workers also now use a bounded 4096-pause
+idle grace period instead of the common 200000-pause pool limit, preserving
+back-to-back refactor wake latency without occupying every core during serial
+post/solve work. The numeric column kernels and their arithmetic order are
+unchanged.
+
+The interleaved eight-core validation used the first ten rows of
+`bench/suitesparse_cktso_gap_manifest.txt`, three passes, and 30 refactors per
+pass. N-minus-one-plus-caller measured `0.854x` T100 geomean against the
+already-improved sleep-caller/short-spin pool and won 8/10 rows; `rajat25`,
+`rajat28`, and `rajat20` measured `0.497x`, `0.665x`, and `0.734x`. A wider
+one-pass 40-row gate (all current CKTSO-gap rows except the known `ss1`
+timeout) preserved exactly the same 38 residual-valid rows and measured
+`0.932x` overall T100 geomean, `0.902x` across the 27 EGraph rows, and `0.895x`
+steady-refactor geomean. `kls_smoke`, full `ctest`, and explicit 1/4/8-thread
+checks on `rajat25`, `G2_circuit`, `Raj1`, and `transient` stayed residual
+clean at the paper threshold.
+
+The fresh 93-medium and 17-large paper-union gates exposed a separate
+selection hazard. On `ASIC_680ks`, scheduler noise once let the asynchronous
+METIS race replace an exact predicted, unscaled, fragmented-many-block
+numeric with a similarly sized pivoted KLU numeric (about 2.22M versus 2.23M
+factor entries). Its steady EGraph refactor then rose from about 23ms to
+441ms. KLS now refuses that representation-changing promotion for this exact
+structural class; the raced symbolic can only become a candidate again after
+it can be rebuilt in the predicted representation. Five repeated
+`ASIC_680ks` checks retained the predicted path and stayed residual-valid.
+With the anomaly corrected, the fresh medium shared-valid gate was about
+`1.0514x` KLS/CKTSO over 88 rows and `1.1977x` KLS/SubtreeLU over 83 rows. The
+12-row shared-valid large gate measured `1.03293x` and `1.48416x`,
+respectively. These remain gap measurements, not a claim that the full union
+target is complete.
+
+An existing 32-bit refactor-map mirror looked attractive for the low-flop
+mapped cohort, but the first environment-gated A/B had an invalid control:
+the disabled side still paid a new per-entry pointer-selection branch. In
+that comparison the 32-bit side appeared `0.97869x` in steady refactor and
+`0.98747x` in T100 over 48 pairs. Rebuilding a byte-for-byte direct 64-bit-map
+baseline reversed the conclusion: the 32-bit consumer measured `1.01537x`
+steady and `1.00810x` T100, with only 6/48 steady wins. The consumer changes
+were fully reverted. This also rejects full mapped L/U 32-bit mirrors: the
+earlier portfolio probe inflated first-refactor setup and slowed the HVDC and
+Rommes cases by roughly 7--20%, despite a small TSOPF win.
+
+The useful mapped-kernel change was smaller. Refactor-map construction already
+proves every stored source position is in range, so the common unscaled value
+load no longer repeats the generic bounds check before every mapped entry;
+scaled maps retain the checked scaling path. Against the exact direct-map
+baseline, the eight-matrix development cohort measured `0.99113x` steady and
+`0.99380x` T100 over 48 order-balanced pairs. A disjoint holdout of all 38
+other residual-valid mapped/unscaled medium matrices was stronger:
+`0.97216x` steady and `0.97998x` T100 over 152 pairs, 131/152 paired steady
+wins, and 34/38 matrix-median steady wins. All residuals passed `1e-8`;
+scaled `rajat22` and `rajat27` spot checks remained correct at approximately
+`6.2e-15` and `3.3e-15` relative residual.
+
+Several nearby ideas were rejected before this fast path was retained.
+Transparent-huge-page scratch placement was neutral, forced FP32 scratch was
+slower, and exact-suffix plus generalized gapped-supernode producer fusion
+was neutral to about 1.4% slower after readiness/payoff gates; the broad
+ungated merge was about 58% slower. None of those prototypes or their
+environment switches remain in the source.
