@@ -616,6 +616,8 @@ struct kls_solver {
   atomic_ullong row_light_snode_runs;     /* light-run consume telemetry */
   atomic_ullong row_light_snode_entries;
   atomic_ullong row_scalar_dep_entries;   /* scalar-fallback U entries */
+  atomic_ullong lsn_decl_norun, lsn_decl_short, lsn_decl_wait,
+                lsn_consumed;             /* decline-reason census */
   UF_long *row_refactor_input_ptr;
   UF_long *row_refactor_input_cols;
   UF_long *row_refactor_input_pos;
@@ -53840,13 +53842,22 @@ static void kls_row_refactor_ensure_sn_end(kls_solver *solver) {
     const char *trace = getenv("KLS_TRACE_ROW_SNODE");
     if (trace != NULL && atoi(trace) >= 2) {
       fprintf(stderr,
-              "KLS light-snode: runs=%llu entries=%llu scalar=%llu\n",
+              "KLS light-snode: runs=%llu entries=%llu scalar=%llu"
+              " decl(norun=%llu short=%llu wait=%llu ok=%llu)\n",
               (unsigned long long)atomic_load_explicit(
                 &solver->row_light_snode_runs, memory_order_relaxed),
               (unsigned long long)atomic_load_explicit(
                 &solver->row_light_snode_entries, memory_order_relaxed),
               (unsigned long long)atomic_load_explicit(
-                &solver->row_scalar_dep_entries, memory_order_relaxed));
+                &solver->row_scalar_dep_entries, memory_order_relaxed),
+              (unsigned long long)atomic_load_explicit(
+                &solver->lsn_decl_norun, memory_order_relaxed),
+              (unsigned long long)atomic_load_explicit(
+                &solver->lsn_decl_short, memory_order_relaxed),
+              (unsigned long long)atomic_load_explicit(
+                &solver->lsn_decl_wait, memory_order_relaxed),
+              (unsigned long long)atomic_load_explicit(
+                &solver->lsn_consumed, memory_order_relaxed));
     }
   }
   if (solver->row_refactor_sn_end != NULL ||
@@ -61394,6 +61405,8 @@ static int kls_row_refactor_try_light_supernode_run(
   }
   const UF_long e = sn_end[dep0];
   if (e <= dep0) {
+    atomic_fetch_add_explicit(&solver->lsn_decl_norun, 1u,
+                              memory_order_relaxed);
     return 0;
   }
   UF_long q = p0 + 1u;
@@ -61404,12 +61417,16 @@ static int kls_row_refactor_try_light_supernode_run(
   }
   const UF_long run = q - p0;
   if (run < 2u) {
+    atomic_fetch_add_explicit(&solver->lsn_decl_short, 1u,
+                              memory_order_relaxed);
     return 0;
   }
   const UF_long d1 = dep0 + run - 1u;
   if (wait_for_dependencies) {
     for (UF_long r = dep0; r <= d1; ++r) {
       if (!kls_row_refactor_dependency_done_now(shared, r)) {
+        atomic_fetch_add_explicit(&solver->lsn_decl_wait, 1u,
+                                  memory_order_relaxed);
         return 0;
       }
     }
@@ -61421,6 +61438,8 @@ static int kls_row_refactor_try_light_supernode_run(
   const UF_long tail_begin = up[d1];
   const UF_long tail_len = up[d1 + 1u] - tail_begin;
   const UF_long *tail_cols = uc + tail_begin;
+  atomic_fetch_add_explicit(&solver->lsn_consumed, 1u,
+                            memory_order_relaxed);
   double *acc = NULL;
   if (tail_len > 0u) {
     acc = kls_egraph_worker_supernode_workspace(worker, tail_len);
