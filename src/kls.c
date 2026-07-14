@@ -100628,9 +100628,19 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   /* CKTSO uses a width threshold of alpha * threads with alpha=2.  Compact
      dominant-BTF schedules around one very large block retain enough tail work
      to benefit from a slightly earlier pipeline split in KLS's exact EGraph. */
+  double cluster_width_alpha =
+    kls_egraph_compact_large_dominant_btf_shape(solver) ? 4.0 : 2.0;
+  {
+    const char *env = getenv("KLS_CLUSTER_WIDTH_ALPHA");
+    if (env != NULL && env[0] != '\0') {
+      const double parsed = atof(env);
+      if (parsed > 0.0) {
+        cluster_width_alpha = parsed;
+      }
+    }
+  }
   const double cluster_width_limit =
-    (kls_egraph_compact_large_dominant_btf_shape(solver) ? 4.0 : 2.0) *
-    (double)solver->options.threads;
+    cluster_width_alpha * (double)solver->options.threads;
   for (UF_long level = 0; level < level_count; ++level) {
     const UF_long width = level_ptr[level + 1u] - level_ptr[level];
     if (width > max_width) {

@@ -16311,3 +16311,13 @@ kls_egraph_refactor_try_lease_pipeline_column) — that phase's body is
 the next read.  The barrier tail itself is bounded by the work
 estimate's error, measurable by comparing per-thread level times if a
 finer instrument is ever needed.
+
+The cluster-width cutoff (alpha x threads, CKTSO's alpha=2) swept per
+matrix via a new KLS_CLUSTER_WIDTH_ALPHA override: asic_100ks
+consistently prefers a LATER pipeline split (a=8: 13.3-13.9 vs
+14.2-15.5ms, 3/3) and ASIC_100k leans the same way, but rajat25
+consistently prefers a=2 (3/3, a=8 loses 6-12%), onetone2/320ks/680ks
+are washes.  A per-matrix alpha probe would need schedule rebuilds per
+arm for a 1-2 row, ~5-8%, no-crossing gain — declined; the override
+stays as a diagnostic knob with zero default impact.  The pipeline
+phase's lease/order design remains the phase-3 lever with real breadth.
