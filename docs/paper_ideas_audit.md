@@ -16146,3 +16146,15 @@ less fill. The engine stays in-tree behind KLS_ENABLE_LEAN_ROW_CONSUME
 as the substrate for the supernode-integrated row walk (SubtreeLU's
 actual rate mechanism per their paper), and the next diagnosis reads the
 NICSLU/CKTSO kernel sections in refs/ before more construction.
+
+Level-order pair multiplexing inside the lean up-looking walk (two rows
+from the same dependency level interleaved k-step by k-step, second
+workspace vector) confirms the scatter-latency hypothesis exactly where
+chains are long: memplus steady refactor 518 -> 244us — under CKTSO's
+292us for the first time (its column-engine best was 493us) — while the
+wide-level microsecond rows read worse (mimo46 305 -> 351us, zeros 269
+-> 328us: pair overhead plus level-order scatter locality). The verdict
+is per-matrix, i.e. the standard probe pattern: one lean-pair arm after
+the width verdict, adopt on margin. memplus sat at 1.09 worst-side
+(BAND) with steady refactor 2.17x — the 0.84x arm turns it into a
+crossing when the probe lands.

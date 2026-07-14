@@ -664,6 +664,8 @@ struct kls_solver {
   unsigned int *row_refactor_tail_marks;
   UF_long *row_refactor_level_ptr;
   UF_long *row_refactor_level_rows;
+  double *lean_row_x2;           /* second workspace for the lean walk's
+                                    level-order pair multiplexing */
   UF_long *row_refactor_group_ptr;
   UF_long *row_refactor_group_dep_ptr;
   UF_long *row_refactor_group_dep_rows;
@@ -19023,6 +19025,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_tail_marks);
   free(solver->row_refactor_level_ptr);
   free(solver->row_refactor_level_rows);
+  free(solver->lean_row_x2);
   free(solver->row_refactor_group_ptr);
   free(solver->row_refactor_group_dep_ptr);
   free(solver->row_refactor_group_dep_rows);
@@ -19078,6 +19081,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_tail_rows = NULL;
   solver->row_refactor_tail_marks = NULL;
   solver->row_refactor_level_ptr = NULL;
+  solver->lean_row_x2 = NULL;
   solver->row_refactor_level_rows = NULL;
   solver->row_refactor_group_ptr = NULL;
   solver->row_refactor_group_dep_ptr = NULL;
@@ -58130,46 +58134,129 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   }
   const double *rs = scaled ? numeric->Rs : NULL;
   const UF_long *pnum = numeric->Pnum;
-  for (UF_long i = 0; i < n; ++i) {
-    const double row_rs_inv =
-      rs != NULL ? 1.0 / rs[pnum[i]] : 1.0;
-    for (UF_long p = in_ptr[i]; p < in_ptr[i + 1u]; ++p) {
-      x[in_cols[p]] = numeric_values[in_pos[p]] * row_rs_inv;
+#define KLS_LEAN_ROW_SCATTER(row, xv)                                      \
+  do {                                                                     \
+    const double row_rs_inv =                                              \
+      rs != NULL ? 1.0 / rs[pnum[(row)]] : 1.0;                            \
+    for (UF_long p = in_ptr[(row)]; p < in_ptr[(row) + 1u]; ++p) {         \
+      (xv)[in_cols[p]] = numeric_values[in_pos[p]] * row_rs_inv;           \
+    }                                                                      \
+  } while (0)
+#define KLS_LEAN_ROW_KSTEP(pvar, xv)                                       \
+  do {                                                                     \
+    const UF_long k = l_cols[(pvar)];                                      \
+    const double lik = (xv)[k] / udiag[k];                                 \
+    (xv)[k] = 0.0;                                                         \
+    l_val[(pvar)] = lik;                                                   \
+    *l_lu[(pvar)] = lik;                                                   \
+    if (lik != 0.0) {                                                      \
+      for (UF_long q = u_ptr[k]; q < u_ptr[k + 1u]; ++q) {                 \
+        (xv)[u_cols[q]] -= lik * u_val[q];                                 \
+      }                                                                    \
+    }                                                                      \
+    (pvar)++;                                                              \
+  } while (0)
+#define KLS_LEAN_ROW_FINISH(row, xv)                                       \
+  do {                                                                     \
+    const double piv = (xv)[(row)];                                        \
+    (xv)[(row)] = 0.0;                                                     \
+    udiag[(row)] = piv;                                                    \
+    if (piv == 0.0) {                                                      \
+      common->status = TRILINOS_KLU_SINGULAR;                              \
+      if (common->numerical_rank == KLS_KLU_EMPTY) {                       \
+        common->numerical_rank = (row);                                    \
+        common->singular_col = (row);                                      \
+      }                                                                    \
+    }                                                                      \
+    for (UF_long q = u_ptr[(row)]; q < u_ptr[(row) + 1u]; ++q) {           \
+      const UF_long j = u_cols[q];                                         \
+      const double v = (xv)[j];                                            \
+      u_val[q] = v;                                                        \
+      *u_lu[q] = v;                                                        \
+      (xv)[j] = 0.0;                                                       \
+    }                                                                      \
+  } while (0)
+  const int pair_mode = getenv("KLS_LEAN_ROW_PAIR") != NULL &&
+    solver->row_refactor_level_ptr != NULL &&
+    solver->row_refactor_level_rows != NULL &&
+    solver->row_refactor_level_count > 0;
+  if (pair_mode) {
+    /* level-order pair multiplexing: rows within a level share no
+       dependencies, so interleaving two rows' k-steps overlaps their
+       scatter-latency chains (the stall campaign's depth-2 lesson
+       applied to the serial walk) */
+    if (solver->lean_row_x2 == NULL) {
+      solver->lean_row_x2 =
+        (double *)calloc((size_t)n, sizeof(*solver->lean_row_x2));
     }
-    for (UF_long p = l_ptr[i]; p < l_ptr[i + 1u]; ++p) {
-      const UF_long k = l_cols[p];
-      const double lik = x[k] / udiag[k];
-      x[k] = 0.0;
-      l_val[p] = lik;
-      *l_lu[p] = lik;
-      if (lik == 0.0) {
-        continue;
+    double *x2 = solver->lean_row_x2;
+    if (x2 == NULL) {
+      return -1;
+    }
+    const UF_long levels = solver->row_refactor_level_count;
+    for (UF_long lv = 0; lv < levels; ++lv) {
+      const UF_long b = solver->row_refactor_level_ptr[lv];
+      const UF_long e = solver->row_refactor_level_ptr[lv + 1u];
+      UF_long t = b;
+      for (; t + 1u < e; t += 2u) {
+        const UF_long i1 = solver->row_refactor_level_rows[t];
+        const UF_long i2 = solver->row_refactor_level_rows[t + 1u];
+        KLS_LEAN_ROW_SCATTER(i1, x);
+        KLS_LEAN_ROW_SCATTER(i2, x2);
+        UF_long p1 = l_ptr[i1];
+        const UF_long e1 = l_ptr[i1 + 1u];
+        UF_long p2 = l_ptr[i2];
+        const UF_long e2 = l_ptr[i2 + 1u];
+        while (p1 < e1 && p2 < e2) {
+          KLS_LEAN_ROW_KSTEP(p1, x);
+          KLS_LEAN_ROW_KSTEP(p2, x2);
+        }
+        while (p1 < e1) {
+          KLS_LEAN_ROW_KSTEP(p1, x);
+        }
+        while (p2 < e2) {
+          KLS_LEAN_ROW_KSTEP(p2, x2);
+        }
+        KLS_LEAN_ROW_FINISH(i1, x);
+        KLS_LEAN_ROW_FINISH(i2, x2);
+        if (common->status == TRILINOS_KLU_SINGULAR &&
+            common->halt_if_singular) {
+          return 0;
+        }
       }
-      for (UF_long q = u_ptr[k]; q < u_ptr[k + 1u]; ++q) {
-        x[u_cols[q]] -= lik * u_val[q];
+      for (; t < e; ++t) {
+        const UF_long i1 = solver->row_refactor_level_rows[t];
+        KLS_LEAN_ROW_SCATTER(i1, x);
+        UF_long p1 = l_ptr[i1];
+        const UF_long e1 = l_ptr[i1 + 1u];
+        while (p1 < e1) {
+          KLS_LEAN_ROW_KSTEP(p1, x);
+        }
+        KLS_LEAN_ROW_FINISH(i1, x);
+        if (common->status == TRILINOS_KLU_SINGULAR &&
+            common->halt_if_singular) {
+          return 0;
+        }
       }
     }
-    const double piv = x[i];
-    x[i] = 0.0;
-    udiag[i] = piv;
-    if (piv == 0.0) {
-      common->status = TRILINOS_KLU_SINGULAR;
-      if (common->numerical_rank == KLS_KLU_EMPTY) {
-        common->numerical_rank = i;
-        common->singular_col = i;
+  } else {
+    for (UF_long i = 0; i < n; ++i) {
+      KLS_LEAN_ROW_SCATTER(i, x);
+      UF_long p = l_ptr[i];
+      const UF_long pe = l_ptr[i + 1u];
+      while (p < pe) {
+        KLS_LEAN_ROW_KSTEP(p, x);
       }
-      if (common->halt_if_singular) {
+      KLS_LEAN_ROW_FINISH(i, x);
+      if (common->status == TRILINOS_KLU_SINGULAR &&
+          common->halt_if_singular) {
         return 0;
       }
     }
-    for (UF_long q = u_ptr[i]; q < u_ptr[i + 1u]; ++q) {
-      const UF_long j = u_cols[q];
-      const double v = x[j];
-      u_val[q] = v;
-      *u_lu[q] = v;
-      x[j] = 0.0;
-    }
   }
+#undef KLS_LEAN_ROW_SCATTER
+#undef KLS_LEAN_ROW_KSTEP
+#undef KLS_LEAN_ROW_FINISH
   if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
     common->status = TRILINOS_KLU_INVALID;
     return 0;
