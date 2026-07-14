@@ -132020,41 +132020,62 @@ int kls_refactor(kls_solver *solver, const double *values) {
      samples at rr=20).  memplus: pair 244us vs incumbent 493 — under
      CKTSO's 292; mimo-class correctly keeps the incumbent. */
   if (ok && solver->common.status >= 0 && solver->lean_choice == 0 &&
-      solver->n >= 512u && solver->n <= 65536u &&
+      solver->n >= 512u && solver->n <= 131072u &&
       solver->padded_pending == 0 &&
       solver->pivot_nudge_count == 0 &&
       solver->common.kls_perturb_count == 0 &&
       (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED ||
        solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU ||
        solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW) &&
-      solver->numeric->lnz + solver->numeric->unz <= 500000 &&
+      solver->numeric->lnz + solver->numeric->unz <= 1000000 &&
       /* fill cap: coupled (1.36M fill) paid a ~15ms consult through its
          pre-settling mapped refactors and then went egraph anyway —
-         +51% cycle for a declined trial; the lean cohort tops out well
-         under this line */
+         +51% cycle for a declined trial; the rajat16/18 class (n~94K,
+         fill ~760K, lean -14%) sits inside these caps */
       solver->lean_wait++ == 0 &&
       getenv("KLS_DISABLE_LEAN_PROBE") == NULL) {
     double t_inc = 0.0;
     double t_lean = 0.0;
     double t_pair = 0.0;
-    double t0 = kls_now_seconds();
-    const UF_long inc_ok = kls_parallel_refactor(solver, numeric_values, 0);
-    t_inc = kls_now_seconds() - t0;
+    double t0;
+    UF_long inc_ok = 1;
+    for (int s = 0; s < 2 && inc_ok; ++s) {
+      /* min of two samples per arm: single samples drew the lean arm
+         cold after its prep while the incumbent re-ran warm — rajat16's
+         real -14% was declined and coupled adopted off a wild
+         mid-settling incumbent draw */
+      t0 = kls_now_seconds();
+      inc_ok = kls_parallel_refactor(solver, numeric_values, 0);
+      const double t = kls_now_seconds() - t0;
+      if (t_inc <= 0.0 || t < t_inc) {
+        t_inc = t;
+      }
+    }
     solver->lean_choice = -1;
     if (inc_ok && solver->common.status >= 0) {
       solver->lean_pair_active = 0;
       const int prep_ok =
         kls_lean_row_refactor_numeric(solver, numeric_values);
       if (prep_ok > 0) {
-        t0 = kls_now_seconds();
-        const int lean_ok =
-          kls_lean_row_refactor_numeric(solver, numeric_values);
-        t_lean = kls_now_seconds() - t0;
+        int lean_ok = 1;
+        int pair_ok = 1;
+        for (int s = 0; s < 2 && lean_ok > 0; ++s) {
+          t0 = kls_now_seconds();
+          lean_ok = kls_lean_row_refactor_numeric(solver, numeric_values);
+          const double t = kls_now_seconds() - t0;
+          if (lean_ok > 0 && (t_lean <= 0.0 || t < t_lean)) {
+            t_lean = t;
+          }
+        }
         solver->lean_pair_active = 1;
-        t0 = kls_now_seconds();
-        const int pair_ok =
-          kls_lean_row_refactor_numeric(solver, numeric_values);
-        t_pair = kls_now_seconds() - t0;
+        for (int s = 0; s < 2 && pair_ok > 0; ++s) {
+          t0 = kls_now_seconds();
+          pair_ok = kls_lean_row_refactor_numeric(solver, numeric_values);
+          const double t = kls_now_seconds() - t0;
+          if (pair_ok > 0 && (t_pair <= 0.0 || t < t_pair)) {
+            t_pair = t;
+          }
+        }
         solver->lean_pair_active = 0;
         if (lean_ok > 0 && t_lean > 0.0 && t_inc > 0.0 &&
             t_lean < 0.95 * t_inc &&

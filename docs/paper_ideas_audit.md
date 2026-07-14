@@ -16243,3 +16243,19 @@ remaining levers are STRUCTURAL only — the ~17% dispatch preamble, a
 threaded solve for rows above the PTS floor, and supernodal solves on
 real panel substrates — plus reading CKTSO's solve mechanics from the
 papers before constructing anything further.
+
+The lean consult's caps widened to n <= 131072 / fill <= 1M after
+env-forced steady runs measured the lean walk -14% on rajat16/rajat18
+(3.78 -> 3.25ms, 3.90 -> 3.38ms), and the arms moved to min-of-two
+samples.  The consult still declines that class: its back-to-back
+samples run the mapped incumbent cache-hot (2.88ms at consult vs its
+3.61-3.78ms solve-interleaved steady truth) — the ledger's
+trial-vs-steady bimodality precisely.  A one-sample steady re-audit
+mis-measures the other way (the lean mirrors run cold after twelve
+mapped refactors: 4.66ms vs the lean's true 3.25 steady) and was
+reverted.  The honest instrument for the rajat1x class is an
+ALTERNATING steady window after the consult (both arms sampling the
+same cache regime, prep already paid) — briefed for the next pass.
+Coupled meanwhile adopts pair at its consult (steady 2.19-2.71ms vs
+~2.4 incumbent) with residuals in class, and the memplus/b9_c1/powersim
+adoptions hold under the new caps.
