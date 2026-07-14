@@ -71933,8 +71933,7 @@ static inline void kls_padded_refresh_column(const kls_solver *solver,
                                              UF_long column,
                                              const double *values,
                                              UF_long length) {
-  if (solver == NULL || solver->padded_run_of == NULL ||
-      solver->symbolic == NULL || solver->symbolic->nblocks != 1u) {
+  if (solver == NULL || solver->padded_run_of == NULL) {
     return;
   }
   /* refresh runs on EVERY refactor while panels exist - a skipped
@@ -79575,6 +79574,31 @@ static int kls_egraph_refactor_btf_unscaled_column(
             }
             up += consumed;
             continue;
+          }
+        }
+        if (snode_batches_allowed && solver->padded_run_of != NULL &&
+            solver->padded_active &&
+            algorithm5_prefactor_applied == NULL) {
+          const UF_long j0 = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+          const UF_long r1 = solver->padded_run_of[k1 + j0];
+          int run_ready = r1 != 0u;
+          if (run_ready) {
+            const UF_long re0 = solver->padded_run_start[r1 - 1u] +
+                                solver->padded_run_len[r1 - 1u];
+            for (UF_long c = k1 + j0; c < re0; ++c) {
+              if (!kls_egraph_refactor_dependency_done_now(shared, c)) {
+                run_ready = 0;
+                break;
+              }
+            }
+          }
+          if (run_ready) {
+            const UF_long consumed = kls_padded_run_consume(
+              solver, k1, j0, ui, ux, ucol_len, up, x);
+            if (consumed != 0u) {
+              up += consumed;
+              continue;
+            }
           }
         }
         const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
