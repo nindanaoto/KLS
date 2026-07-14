@@ -129857,6 +129857,20 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_row_refactor_acceptance_record_refactor(solver, elapsed);
     kls_egraph_thread_trial_record(solver, elapsed);
   }
+  {
+    const char *dump = getenv("KLS_DUMP_UDIAG");
+    if (dump != NULL && *dump != '\0' && ok &&
+        solver->numeric != NULL && solver->numeric->Udiag != NULL) {
+      /* frame-free factor diffing for engine-defect hunts: overwrite
+         per refactor so the file holds the last steady factor */
+      FILE *f = fopen(dump, "wb");
+      if (f != NULL) {
+        fwrite(solver->numeric->Udiag, sizeof(double),
+               (size_t)solver->n, f);
+        fclose(f);
+      }
+    }
+  }
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR &&
       !solver->fp32_last_used && solver->pivot_nudge_count == 0 &&
