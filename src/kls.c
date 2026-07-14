@@ -34315,24 +34315,30 @@ static void *kls_amf_spec_main(void *arg) {
 }
 
 static int kls_choose_symbolic_inner(UF_long n,
-                                       UF_long *col_ptr,
-                                       UF_long *row_idx,
-                                       const kls_options *options,
-                                       trilinos_klu_l_symbolic **symbolic_out,
-                                       trilinos_klu_l_common *common_out,
-                                       kls_ordering *selected_ordering_out,
-                                       double *score_out,
-                                       kls_separator_analysis *separator_out) {
+                                     UF_long *col_ptr,
+                                     UF_long *row_idx,
+                                     const kls_options *options,
+                                     trilinos_klu_l_symbolic **symbolic_out,
+                                     trilinos_klu_l_common *common_out,
+                                     kls_ordering *selected_ordering_out,
+                                     double *score_out,
+                                     kls_separator_analysis *separator_out) {
   kls_separator_analysis_clear(separator_out);
+  int small_spiked_ordering_class = 0;
+#ifdef KLS_HAVE_METIS
+  small_spiked_ordering_class =
+    is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx);
+#endif
   if (options->ordering == KLS_ORDERING_AUTO && n < 49152 &&
-      col_ptr[n] < 262144) {
+      col_ptr[n] < 262144 && !small_spiked_ordering_class) {
     /* tiny/sparse systems: the ordering competition (AMF/AMD scoring,
        spec threads) costs more than the fill deltas it arbitrates at
        this scale (rajat03: AMD 4.1ms factor vs AMF 4.2ms, the
        competition itself was the difference; OPF_10000 at n=43.9K:
        35ms of candidates for a 16ms factor).  The nnz cap keeps the
        heavier mid-size classes (onetone1: 341K nnz) on the full
-       competition. */
+       competition.  Keep the small spiked class on its downstream AMF
+       rule: TSOPF_FS_b9_c1's AMD factor has 2.6x the fill. */
     kls_options amd_opts = *options;
     amd_opts.ordering = KLS_ORDERING_AMD;
     int status = analyze_with_ordering(n, col_ptr, row_idx, &amd_opts,
