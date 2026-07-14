@@ -535,6 +535,13 @@ struct kls_solver {
                                    apply the correction and skip the
                                    verification sweep (the single-shot
                                    trade; b2383: solve 44 -> ~36ms) */
+  UF_long dense_tail_cols;      /* pipe-emitted dense-tail numeric: the
+                                   trailing block width the first factor
+                                   finished with one dgetrf (ss1: 4096).
+                                   Refactorizations refresh that block
+                                   with a no-pivot BLAS3 LU instead of
+                                   the scalar scatter walk (24.2s -> ~1s) */
+  UF_long dense_tail_block;     /* BTF block index holding the tail */
   int predicted_entry_values_captured; /* solve_refine_values holds the
                                    factor entry's prepared input */
   UF_long **refactor_l_indices;
@@ -24780,6 +24787,8 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
      refinement runs against a stale matrix */
   solver->solve_contract_probe = 0;
   solver->solve_contract_verified = 0;
+  solver->dense_tail_cols = 0;
+  solver->dense_tail_block = 0;
   free(solver->solve_refine_values);
   solver->solve_refine_values = NULL;
   solver->predicted_entry_values_captured = 0;
@@ -95643,6 +95652,210 @@ static int kls_supernodal_mapped_refactor(kls_solver *solver,
   return 1;
 }
 
+#ifdef KLS_HAVE_CBLAS
+/* No-pivot right-looking blocked LU of the t x t column-major block D.
+   The refactorization contract keeps the first factor's pivot order, so
+   the trailing dense block refreshes values-only (dgetrf would repivot).
+   On return D's strictly-lower part holds the unit-L multipliers and its
+   upper part (with diagonal) holds U — the layout the tail columns'
+   stored patterns want back. */
+static int kls_dense_tail_nopivot_lu(double *D, UF_long t) {
+  const UF_long nb = 128;
+  for (UF_long j0 = 0; j0 < t; j0 += nb) {
+    const UF_long jb = t - j0 < nb ? t - j0 : nb;
+    for (UF_long j = j0; j < j0 + jb; ++j) {
+      const double piv = D[j * t + j];
+      if (piv == 0.0) {
+        return 0;
+      }
+      const double pinv = 1.0 / piv;
+      for (UF_long i = j + 1; i < j0 + jb; ++i) {
+        D[j * t + i] *= pinv;
+      }
+      for (UF_long k = j + 1; k < j0 + jb; ++k) {
+        const double u = D[k * t + j];
+        if (u == 0.0) {
+          continue;
+        }
+        for (UF_long i = j + 1; i < j0 + jb; ++i) {
+          D[k * t + i] -= D[j * t + i] * u;
+        }
+      }
+    }
+    const UF_long rest = t - j0 - jb;
+    if (rest > 0) {
+      cblas_dtrsm(CblasColMajor, CblasRight, CblasUpper, CblasNoTrans,
+                  CblasNonUnit, (int)rest, (int)jb, 1.0,
+                  &D[j0 * t + j0], (int)t,
+                  &D[j0 * t + j0 + jb], (int)t);
+      cblas_dtrsm(CblasColMajor, CblasLeft, CblasLower, CblasNoTrans,
+                  CblasUnit, (int)jb, (int)rest, 1.0,
+                  &D[j0 * t + j0], (int)t,
+                  &D[(j0 + jb) * t + j0], (int)t);
+      cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                  (int)rest, (int)rest, (int)jb, -1.0,
+                  &D[j0 * t + j0 + jb], (int)t,
+                  &D[(j0 + jb) * t + j0], (int)t, 1.0,
+                  &D[(j0 + jb) * t + j0 + jb], (int)t);
+    }
+  }
+  return 1;
+}
+
+/* Stage-A harness (KLS_VERIFY_DENSE_TAIL_REFACTOR): recompute the dense
+   tail from the current values through the planned refactor math — per
+   tail column, prefix-only consumption of the stored U pattern, then a
+   no-pivot LU of the gathered block — and compare against the factor
+   values the serial refactorization just stored.  Agreement to rounding
+   proves the gather, the ascending-pattern assumption, the Rs frame and
+   the LU before any writeback ships. */
+static void kls_dense_tail_refactor_validate(kls_solver *solver,
+                                             const double *numeric_values) {
+  if (solver == NULL || solver->dense_tail_cols <= 0 ||
+      solver->numeric == NULL || solver->symbolic == NULL ||
+      numeric_values == NULL ||
+      getenv("KLS_VERIFY_DENSE_TAIL_REFACTOR") == NULL) {
+    return;
+  }
+  const trilinos_klu_l_symbolic *sym = solver->symbolic;
+  trilinos_klu_l_numeric *num = solver->numeric;
+  const UF_long b = solver->dense_tail_block;
+  const UF_long k1 = sym->R[b];
+  const UF_long nk = sym->R[b + 1] - k1;
+  const UF_long t = solver->dense_tail_cols;
+  const UF_long s = nk - t;
+  if (s <= 0 || num->LUbx == NULL || num->LUbx[b] == NULL) {
+    return;
+  }
+  double *lu = (double *)num->LUbx[b];
+  UF_long *lip = num->Lip + k1;
+  UF_long *llen = num->Llen + k1;
+  UF_long *uip = num->Uip + k1;
+  UF_long *ulen_arr = num->Ulen + k1;
+  const double *udiag = ((const double *)num->Udiag) + k1;
+  const double *rs = num->Rs;
+  const UF_long *pinv = num->Pinv;
+  const UF_long *q = sym->Q;
+  double *X = (double *)calloc((size_t)nk, sizeof(*X));
+  double *D = (double *)calloc((size_t)t * (size_t)t, sizeof(*D));
+  if (X == NULL || D == NULL) {
+    free(X);
+    free(D);
+    return;
+  }
+  double max_prefix_u = 0.0;
+  long unsorted = 0;
+  const double start = kls_now_seconds();
+  for (UF_long c = s; c < nk; ++c) {
+    const UF_long oldcol = q[k1 + c];
+    for (UF_long p = solver->col_ptr[oldcol]; p < solver->col_ptr[oldcol + 1];
+         ++p) {
+      const UF_long oldrow = solver->row_idx[p];
+      const UF_long newrow = pinv[oldrow] - k1;
+      if (newrow < 0 || newrow >= nk) {
+        continue; /* off-block entry: owned by the Offx walk */
+      }
+      X[newrow] = rs != NULL ? numeric_values[p] / rs[k1 + newrow]
+                             : numeric_values[p];
+    }
+    UF_long *ui;
+    double *ux;
+    UF_long ul;
+    kls_klu_get_pointer(lu, uip, ulen_arr, c, &ui, &ux, &ul);
+    UF_long up = 0;
+    for (; up < ul; ++up) {
+      const UF_long j = ui[up];
+      if (j >= s) {
+        break;
+      }
+      const double ujk = X[j];
+      X[j] = 0.0;
+      const double ref = ux[up];
+      const double denom = fabs(ref) > 1.0 ? fabs(ref) : 1.0;
+      const double diff = fabs(ujk - ref) / denom;
+      max_prefix_u = max_prefix_u > diff ? max_prefix_u : diff;
+      if (ujk == 0.0) {
+        continue;
+      }
+      UF_long *li;
+      double *lx;
+      UF_long ll;
+      kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &ll);
+      for (UF_long lp = 0; lp < ll; ++lp) {
+        X[li[lp]] -= lx[lp] * ujk;
+      }
+    }
+    for (UF_long rest = up; rest < ul; ++rest) {
+      if (ui[rest] < s) {
+        unsorted++;
+      }
+    }
+    for (UF_long r = s; r < nk; ++r) {
+      D[(size_t)(c - s) * t + (r - s)] = X[r];
+      X[r] = 0.0;
+    }
+    for (UF_long r = 0; r < s; ++r) {
+      X[r] = 0.0; /* defensive: clear any unconsumed prefix residue */
+    }
+  }
+  const double gather_seconds = kls_now_seconds() - start;
+  const int lu_ok = kls_dense_tail_nopivot_lu(D, t);
+  const double lu_seconds = kls_now_seconds() - start - gather_seconds;
+  double max_tail_u = 0.0;
+  double max_udiag = 0.0;
+  double max_tail_l = 0.0;
+  if (lu_ok) {
+    for (UF_long c = s; c < nk; ++c) {
+      UF_long *ui;
+      double *ux;
+      UF_long ul;
+      kls_klu_get_pointer(lu, uip, ulen_arr, c, &ui, &ux, &ul);
+      for (UF_long up = 0; up < ul; ++up) {
+        const UF_long j = ui[up];
+        if (j < s) {
+          continue;
+        }
+        const double mine = D[(size_t)(c - s) * t + (j - s)];
+        const double ref = ux[up];
+        const double denom = fabs(ref) > 1.0 ? fabs(ref) : 1.0;
+        const double diff = fabs(mine - ref) / denom;
+        max_tail_u = max_tail_u > diff ? max_tail_u : diff;
+      }
+      {
+        const double mine = D[(size_t)(c - s) * t + (c - s)];
+        const double ref = udiag[c];
+        const double denom = fabs(ref) > 1.0 ? fabs(ref) : 1.0;
+        const double diff = fabs(mine - ref) / denom;
+        max_udiag = max_udiag > diff ? max_udiag : diff;
+      }
+      UF_long *li;
+      double *lx;
+      UF_long ll;
+      kls_klu_get_pointer(lu, lip, llen, c, &li, &lx, &ll);
+      for (UF_long lp = 0; lp < ll; ++lp) {
+        const UF_long r = li[lp];
+        if (r < s) {
+          continue;
+        }
+        const double mine = D[(size_t)(c - s) * t + (r - s)];
+        const double ref = lx[lp];
+        const double denom = fabs(ref) > 1.0 ? fabs(ref) : 1.0;
+        const double diff = fabs(mine - ref) / denom;
+        max_tail_l = max_tail_l > diff ? max_tail_l : diff;
+      }
+    }
+  }
+  fprintf(stderr,
+          "KLS dense-tail refactor validate: t=%ld s=%ld lu_ok=%d "
+          "unsorted=%ld prefixU=%.3e tailU=%.3e udiag=%.3e tailL=%.3e "
+          "gather=%.3fs lu=%.3fs\n",
+          (long)t, (long)s, lu_ok, unsorted, max_prefix_u, max_tail_u,
+          max_udiag, max_tail_l, gather_seconds, lu_seconds);
+  free(X);
+  free(D);
+}
+#endif /* KLS_HAVE_CBLAS */
+
 static int kls_mapped_refactor(kls_solver *solver,
                                double *numeric_values,
                                int check_pivots) {
@@ -130174,6 +130387,8 @@ static int kls_serial_factor(kls_solver *solver,
   kls_klu_pipe_threads = 0;
   kls_klu_pipe_det = 0;
   kls_klu_dense_tail = 0;
+  solver->dense_tail_cols = 0;
+  solver->dense_tail_block = 0;
   solver->numeric = trilinos_klu_l_factor(solver->col_ptr,
                                           solver->row_idx,
                                           numeric_values,
@@ -130803,6 +131018,7 @@ int kls_factor(kls_solver *solver, const double *values) {
           kls_pipe_first_factor_threads(solver, solver->symbolic);
       }
       solver->common.kls_dense_panels = 0;
+      const UF_long dense_tail_req = (UF_long)kls_klu_dense_tail;
       solver->numeric = trilinos_klu_l_factor(solver->col_ptr,
                                               solver->row_idx,
                                               numeric_values,
@@ -130812,6 +131028,31 @@ int kls_factor(kls_solver *solver, const double *values) {
       kls_klu_pipe_threads = 0;
       kls_klu_pipe_det = 0;
       kls_klu_dense_tail = 0;
+      solver->dense_tail_cols = 0;
+      solver->dense_tail_block = 0;
+      if (solver->numeric != NULL && dense_tail_req > 1 &&
+          solver->common.status >= 0 && solver->symbolic != NULL) {
+        /* record the (single) block the pipe finished with the BLAS3
+           dense tail: its refactorizations refresh that block's tail
+           with a no-pivot LU instead of the 24s scalar scatter walk.
+           The kernel engages per block when nk > 4*tail (kernel.c
+           ~:4810); require exactly one qualifying block. */
+        UF_long hits = 0;
+        UF_long hit_block = 0;
+        for (UF_long b = 0; b + 1 <= (UF_long)solver->symbolic->nblocks;
+             ++b) {
+          const UF_long nk =
+            solver->symbolic->R[b + 1] - solver->symbolic->R[b];
+          if (nk > 4 * dense_tail_req) {
+            hits++;
+            hit_block = b;
+          }
+        }
+        if (hits == 1) {
+          solver->dense_tail_cols = dense_tail_req;
+          solver->dense_tail_block = hit_block;
+        }
+      }
       if (kls_trace_entry && solver->numeric != NULL) {
         fprintf(stderr,
                 "KLS klu_first: lnz=%ld unz=%ld nblocks=%ld maxblock=%ld "
@@ -131340,6 +131581,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
        numeric, off the solve path; numeric_values is the prepared
        internal-frame array, current for THIS call */
     kls_solve_contract_classify(solver, numeric_values);
+#ifdef KLS_HAVE_CBLAS
+    kls_dense_tail_refactor_validate(solver, numeric_values);
+#endif
     if (solver->solve_contract_probe == 2 && solver->row_perm == NULL &&
         solver->row_scale == NULL && solver->col_scale == NULL &&
         numeric_values != NULL && solver->nnz > 0) {
