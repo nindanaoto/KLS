@@ -58062,6 +58062,129 @@ static int kls_row_refactor_should_lazy_value_scatter(int check_pivots) {
   return !check_pivots;
 }
 
+/* Lean serial up-looking refactorization over the row mirrors: one flat
+   two-stream walk per row (ST Alg.1 refactor mode), no group machinery,
+   no workspaces beyond Xwork, values written straight through the
+   LUbx-pointer mirrors.  Built for the microsecond factors where the
+   full row engine's per-row overheads lose 2.4-3.8x to the column
+   engines and the column walk itself runs ~2x off CKTSO's rate.
+   Returns 1 ok, 0 factor failure (status set), -1 decline. */
+static int kls_lean_row_refactor_numeric(kls_solver *solver,
+                                         double *numeric_values) {
+  if (solver == NULL || solver->numeric_is_predicted) {
+    return -1;
+  }
+  const int scaled = solver->common.scale > 0;
+  if (numeric_values == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || solver->symbolic->nblocks == 0u ||
+      (scaled && (solver->numeric->Rs == NULL ||
+                  solver->numeric->Pnum == NULL)) ||
+      (!scaled && solver->numeric->Rs != NULL) ||
+      solver->numeric->Udiag == NULL || solver->numeric->Xwork == NULL ||
+      !kls_build_row_refactor_pattern(solver)) {
+    return -1;
+  }
+  if (solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_l_cols == NULL ||
+      solver->row_refactor_l_values == NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_cols == NULL ||
+      solver->row_refactor_u_values == NULL ||
+      solver->row_refactor_input_ptr == NULL ||
+      solver->row_refactor_input_cols == NULL ||
+      solver->row_refactor_input_pos == NULL) {
+    return -1;
+  }
+  trilinos_klu_l_common *common = &solver->common;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const UF_long n = solver->n;
+  if (scaled &&
+      !trilinos_klu_l_scale((UF_long)common->scale, n,
+                            solver->col_ptr, solver->row_idx,
+                            numeric_values, numeric->Rs, NULL, common)) {
+    return 0;
+  }
+  if (!kls_refresh_row_refactor_offdiag_values(solver, numeric_values)) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+  common->status = TRILINOS_KLU_OK;
+  common->numerical_rank = KLS_KLU_EMPTY;
+  common->singular_col = KLS_KLU_EMPTY;
+  double *x = (double *)numeric->Xwork;
+  memset(x, 0, (size_t)n * sizeof(*x));
+  const UF_long *in_ptr = solver->row_refactor_input_ptr;
+  const UF_long *in_cols = solver->row_refactor_input_cols;
+  const UF_long *in_pos = solver->row_refactor_input_pos;
+  const UF_long *l_ptr = solver->row_refactor_l_ptr;
+  const UF_long *l_cols = solver->row_refactor_l_cols;
+  double *l_val = solver->row_refactor_l_row_values;
+  double **l_lu = solver->row_refactor_l_values;
+  const UF_long *u_ptr = solver->row_refactor_u_ptr;
+  const UF_long *u_cols = solver->row_refactor_u_cols;
+  double *u_val = solver->row_refactor_u_row_values;
+  double **u_lu = solver->row_refactor_u_values;
+  double *udiag = (double *)numeric->Udiag;
+  if (l_val == NULL || u_val == NULL || l_lu == NULL || u_lu == NULL) {
+    return -1;
+  }
+  const double *rs = scaled ? numeric->Rs : NULL;
+  const UF_long *pnum = numeric->Pnum;
+  for (UF_long i = 0; i < n; ++i) {
+    const double row_rs_inv =
+      rs != NULL ? 1.0 / rs[pnum[i]] : 1.0;
+    for (UF_long p = in_ptr[i]; p < in_ptr[i + 1u]; ++p) {
+      x[in_cols[p]] = numeric_values[in_pos[p]] * row_rs_inv;
+    }
+    for (UF_long p = l_ptr[i]; p < l_ptr[i + 1u]; ++p) {
+      const UF_long k = l_cols[p];
+      const double lik = x[k] / udiag[k];
+      x[k] = 0.0;
+      l_val[p] = lik;
+      *l_lu[p] = lik;
+      if (lik == 0.0) {
+        continue;
+      }
+      for (UF_long q = u_ptr[k]; q < u_ptr[k + 1u]; ++q) {
+        x[u_cols[q]] -= lik * u_val[q];
+      }
+    }
+    const double piv = x[i];
+    x[i] = 0.0;
+    udiag[i] = piv;
+    if (piv == 0.0) {
+      common->status = TRILINOS_KLU_SINGULAR;
+      if (common->numerical_rank == KLS_KLU_EMPTY) {
+        common->numerical_rank = i;
+        common->singular_col = i;
+      }
+      if (common->halt_if_singular) {
+        return 0;
+      }
+    }
+    for (UF_long q = u_ptr[i]; q < u_ptr[i + 1u]; ++q) {
+      const UF_long j = u_cols[q];
+      const double v = x[j];
+      u_val[q] = v;
+      *u_lu[q] = v;
+      x[j] = 0.0;
+    }
+  }
+  if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
+    common->status = TRILINOS_KLU_INVALID;
+    return 0;
+  }
+  /* dual stores: the flat mirrors serve this walk's own consumes (each
+     entry is re-read flops/fill times — the reuse pays for the extra
+     store) while LUbx stays current so solves keep their fast column
+     paths */
+  solver->row_refactor_values_ready = 0;
+  solver->row_refactor_solve_direct_ready = 0;
+  solver->row_refactor_solve_validated = 0;
+  solver->fp32_last_used = 0;
+  return 1;
+}
+
 static int kls_scatter_row_refactor_l_prefix_values(kls_solver *solver,
                                                     UF_long end_row) {
   if (solver == NULL || solver->row_refactor_l_ptr == NULL ||
@@ -100832,6 +100955,13 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
        crossover down to ~1e6 total flops (re-measured 2026-07).  Prefer
        the serial mapped refactor under it and keep the EGraph for
        shapes it cannot cover. */
+    if (!check_pivots && getenv("KLS_ENABLE_LEAN_ROW_CONSUME") != NULL) {
+      const int lean = kls_lean_row_refactor_numeric(solver, numeric_values);
+      if (lean >= 0) {
+        kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
+        return (UF_long)lean;
+      }
+    }
     {
       UF_long snb_ok = 0;
       if (kls_snb_try_refactor(solver, numeric_values, check_pivots,

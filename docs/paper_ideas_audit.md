@@ -16130,3 +16130,19 @@ zeros_nopss 264 -> 811us, bips98_1142 261 -> 991us, memplus 493 ->
 factors. The default env gate is measured-correct. The small-row build
 must be a NEW lean row-major consume (flat pattern walk, no group
 machinery), not a policy change on the existing engine.
+
+A lean serial up-looking refactorization (ST Alg.1 refactor mode over the
+row engine's existing global mirrors — flat two-stream walk, no group
+machinery) was built and measured in three variants on the microsecond
+cohort: LUbx-pointer stores (wash vs the column engines: mimo46 296 vs
+284us), flat-mirror stores with publish-on-demand (small refactor wins
+but the row-solve routing tripled the 100x-charged solves — net worse),
+and dual stores with flat consumes (solves recover, refactor back to
+wash). Verdict: the up-looking walk lands at parity with the column
+engines in every configuration; the remaining ~2x to CKTSO on these rows
+is not walk direction or value layout — both walks share the scatter
+dependency into the working vector, and CKTSO additionally carries ~1.2x
+less fill. The engine stays in-tree behind KLS_ENABLE_LEAN_ROW_CONSUME
+as the substrate for the supernode-integrated row walk (SubtreeLU's
+actual rate mechanism per their paper), and the next diagnosis reads the
+NICSLU/CKTSO kernel sections in refs/ before more construction.
