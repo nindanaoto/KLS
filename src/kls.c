@@ -98394,6 +98394,9 @@ static UF_long kls_parallel_lu_sort(kls_solver *solver) {
    tail accumulates chunked over contiguous panel rows - the strict
    batch kernel's shape at relaxed coverage, pad slots contributing
    exact zeros. Returns producers consumed or 0. */
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
+__attribute__((target_clones("default", "arch=x86-64-v3", "arch=x86-64-v4")))
+#endif
 static UF_long kls_padded_run_consume(const kls_solver *ps,
                                       UF_long k1,
                                       UF_long j,
