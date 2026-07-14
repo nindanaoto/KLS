@@ -450,9 +450,11 @@ struct kls_solver {
   double mapped_steady_min;
   int padded_choice;   /* padded-panel probe: 0 undecided, 1 adopted,
                           -1 declined (panels torn down) */
-  int padded_pending;  /* probe refactors remaining (4-sample min) */
+  int padded_pending;  /* probe refactors remaining (8, alternating) */
   int padded_probe_build;  /* builder force flag for the probe */
+  int padded_active;   /* refresh+consume enabled this refactor */
   double padded_probe_min;
+  double padded_probe_min_off;
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_retrial;       /* near-miss rejection: 0 none, 1 armed for a
@@ -23864,7 +23866,7 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
           continue;
         }
       }
-      if (shared->padded_src != NULL) {
+      if (shared->padded_src != NULL && shared->padded_src->padded_active) {
         const UF_long consumed = kls_padded_run_consume(
           shared->padded_src, k1, j, ui, ux, ucol_len, up, x);
         if (consumed != 0u) {
@@ -24068,7 +24070,7 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
           continue;
         }
       }
-      if (shared->padded_src != NULL) {
+      if (shared->padded_src != NULL && shared->padded_src->padded_active) {
         const UF_long consumed = kls_padded_run_consume(
           shared->padded_src, k1, j, ui, ux, ucol_len, up, x);
         if (consumed != 0u) {
@@ -24807,7 +24809,9 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->padded_choice = 0;
   solver->padded_pending = 0;
   solver->padded_probe_build = 0;
+  solver->padded_active = 0;
   solver->padded_probe_min = 0.0;
+  solver->padded_probe_min_off = 0.0;
   solver->mapped_steady_min = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
@@ -71922,6 +71926,38 @@ static inline int kls_egraph_scatter_refactor_input(
   return 1;
 }
 
+/* egraph-side padded panel refresh: values[] is the packed column in
+   the numeric's li order (the padded slot maps were built from that
+   same order). Single-block kernels only - local row frame == global. */
+static inline void kls_padded_refresh_column(const kls_solver *solver,
+                                             UF_long column,
+                                             const double *values,
+                                             UF_long length) {
+  if (solver == NULL || solver->padded_run_of == NULL ||
+      solver->symbolic == NULL || solver->symbolic->nblocks != 1u) {
+    return;
+  }
+  /* refresh runs on EVERY refactor while panels exist - a skipped
+     refresh leaves stale panels that a later consume would read as
+     wrong values under changing-value SPICE (invisible to the
+     identical-values bench); padded_active gates only the consume */
+  const UF_long run1 = solver->padded_run_of[column];
+  if (run1 == 0u) {
+    return;
+  }
+  const UF_long run = run1 - 1u;
+  const UF_long ulen_run =
+    solver->padded_union_ptr[run + 1u] - solver->padded_union_ptr[run];
+  double *panel_row = solver->padded_panel_values +
+    solver->padded_panel_ptr[run] +
+    (column - solver->padded_run_start[run]) * ulen_run;
+  const UF_long *slots =
+    solver->padded_slots + solver->padded_slot_ptr[column];
+  for (UF_long p = 0; p < length; ++p) {
+    panel_row[slots[p]] = values[p];
+  }
+}
+
 static inline void kls_egraph_store_l_column_from_workspace(
   const kls_solver *solver,
   double *restrict x,
@@ -71964,6 +72000,7 @@ static inline void kls_egraph_store_l_column_from_workspace(
         }
       }
     }
+    kls_padded_refresh_column(solver, column, values, length);
     return;
   }
   if (values32 != NULL) {
@@ -71991,6 +72028,7 @@ static inline void kls_egraph_store_l_column_from_workspace(
       }
     }
   }
+  kls_padded_refresh_column(solver, column, values, length);
 }
 
 static int kls_egraph_refactor_mark_done_once(
@@ -78631,6 +78669,32 @@ static int kls_egraph_refactor_single_unscaled_column(
         continue;
       }
     }
+    if (snode_batches_allowed && solver->padded_run_of != NULL &&
+        solver->padded_active && symbolic->nblocks == 1u &&
+        algorithm5_prefactor_deps == 0u &&
+        algorithm5_prefactor_applied == NULL) {
+      const UF_long j0 = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+      const UF_long r1 = solver->padded_run_of[j0];
+      int run_ready = r1 != 0u;
+      if (run_ready && wait_for_dependencies) {
+        const UF_long re0 = solver->padded_run_start[r1 - 1u] +
+                            solver->padded_run_len[r1 - 1u];
+        for (UF_long c = j0; c < re0; ++c) {
+          if (!kls_egraph_refactor_dependency_done_now(shared, c)) {
+            run_ready = 0;
+            break;
+          }
+        }
+      }
+      if (run_ready) {
+        const UF_long consumed = kls_padded_run_consume(
+          solver, 0u, j0, ui, ux, ucol_len, up, x);
+        if (consumed != 0u) {
+          up += consumed;
+          continue;
+        }
+      }
+    }
     const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
     if (algorithm5_prefactor_enabled &&
         !kls_egraph_refactor_dependency_done_now(shared, j)) {
@@ -79211,6 +79275,32 @@ static int kls_egraph_refactor_single_scaled_column(
         }
         up += consumed;
         continue;
+      }
+    }
+    if (snode_batches_allowed && solver->padded_run_of != NULL &&
+        solver->padded_active && symbolic->nblocks == 1u &&
+        algorithm5_prefactor_deps == 0u &&
+        algorithm5_prefactor_applied == NULL) {
+      const UF_long j0 = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+      const UF_long r1 = solver->padded_run_of[j0];
+      int run_ready = r1 != 0u;
+      if (run_ready && wait_for_dependencies) {
+        const UF_long re0 = solver->padded_run_start[r1 - 1u] +
+                            solver->padded_run_len[r1 - 1u];
+        for (UF_long c = j0; c < re0; ++c) {
+          if (!kls_egraph_refactor_dependency_done_now(shared, c)) {
+            run_ready = 0;
+            break;
+          }
+        }
+      }
+      if (run_ready) {
+        const UF_long consumed = kls_padded_run_consume(
+          solver, 0u, j0, ui, ux, ucol_len, up, x);
+        if (consumed != 0u) {
+          up += consumed;
+          continue;
+        }
       }
     }
     const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
@@ -130955,32 +131045,46 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_build_padded_panels(solver);
     solver->padded_probe_build = 0;
     if (solver->padded_run_of != NULL) {
-      solver->padded_pending = 4;
+      solver->padded_pending = 8;
       solver->padded_probe_min = 0.0;
+      solver->padded_probe_min_off = 0.0;
     } else {
       solver->padded_choice = -1;
     }
+  }
+  if (solver->padded_pending > 0 && solver->padded_choice == 0) {
+    /* alternate padded/unpadded so both arms sample the same thermal
+       and warmup window (onetone2 false-adopted against a colder
+       steady min before this) */
+    solver->padded_active = (solver->padded_pending & 1) != 0;
+  } else {
+    solver->padded_active = solver->padded_choice > 0;
   }
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
   if (solver->padded_pending > 0 && solver->padded_choice == 0) {
-    if (ok && solver->common.status >= 0 &&
-        (solver->padded_probe_min <= 0.0 ||
-         elapsed < solver->padded_probe_min)) {
-      solver->padded_probe_min = elapsed;
+    if (ok && solver->common.status >= 0) {
+      double *slot = solver->padded_active ? &solver->padded_probe_min
+                                           : &solver->padded_probe_min_off;
+      if (*slot <= 0.0 || elapsed < *slot) {
+        *slot = elapsed;
+      }
     }
     if (--solver->padded_pending == 0) {
       solver->padded_choice =
         solver->padded_probe_min > 0.0 &&
-            solver->padded_probe_min < 0.98 * solver->mapped_steady_min
+            solver->padded_probe_min_off > 0.0 &&
+            solver->padded_probe_min <
+              0.98 * solver->padded_probe_min_off
           ? 1 : -1;
       if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
         fprintf(stderr,
-                "KLS padded probe: %s (min %.3f ms vs steady %.3f ms)\n",
+                "KLS padded probe: %s (padded %.3f ms vs unpadded"
+                " %.3f ms)\n",
                 solver->padded_choice > 0 ? "ADOPT" : "decline+teardown",
                 1e3 * solver->padded_probe_min,
-                1e3 * solver->mapped_steady_min);
+                1e3 * solver->padded_probe_min_off);
       }
       if (solver->padded_choice < 0) {
         free(solver->padded_run_of);
