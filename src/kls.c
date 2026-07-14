@@ -129257,11 +129257,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   KLS_ENTRY_PHASE("auto_rescale")
   if (!diagnostics_have_flops || !diagnostics_have_rcond) {
-    if (diagnostics_have_flops && solver->metis_race == NULL) {
-      kls_update_numeric_rcond(solver);
-    } else {
-      kls_update_numeric_diagnostics(solver, 1);
-    }
+    kls_update_numeric_diagnostics(solver, 1);
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
@@ -129321,11 +129317,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       t_ph = t_now;                                                       \
     }
     if (!diagnostics_have_flops || !diagnostics_have_rcond) {
-      if (diagnostics_have_flops && solver->metis_race == NULL) {
-        kls_update_numeric_rcond(solver);
-      } else {
-        kls_update_numeric_diagnostics(solver, 1);
-      }
+      kls_update_numeric_diagnostics(solver, 1);
     }
     KLS_PHASE("diag")
     if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
