@@ -16060,3 +16060,14 @@ stale (the egraph-blocked smoke case failed at `3e-3` relative until the
 probe was restricted to structurally-flagged shapes whose frames are
 refreshed per refactorization — matched, scaled, nudged, perturbed,
 predicted, reduced-precision).
+
+The per-solve `getenv` inventory looked like a cheap solve-term win — the
+solve path reads up to eight environment flags per call and no cached-flag
+idiom existed — but a three-pass interleaved A/B on the microsecond cohort
+(mimo8x8, zeros_nopss_13k, qh1484, memplus, rajat12) measured the cached
+version flat to slightly WORSE (memplus solve 98 -> 110us consistently:
+code-layout movement, the documented alignment roulette). This benchmark
+environment's environ block is small enough that the linear scans cost
+well under a microsecond combined. The conversion was reverted unlanded;
+the small-row solve gap (88us vs CK ~40us on mimo-class) lives inside the
+solve kernels/preamble, not in flag reads.
