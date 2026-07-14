@@ -360,6 +360,7 @@ struct kls_solver {
   int row_publish_experiment;      /* fallback-adoption probe: 0 idle,
                                       1 publish next refactor, 2 sample the
                                       column-route solve, 3 concluded */
+  int row_snode_census_done;       /* KLS_TRACE_ROW_SNODE printed once */
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
@@ -18956,6 +18957,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_dense_producer_target_kind = NULL;
   solver->row_refactor_dense_producer_target_pos = NULL;
   solver->row_refactor_pattern_n = 0;
+  solver->row_snode_census_done = 0;
   solver->row_refactor_group_count = 0;
   solver->row_refactor_group_single_count = 0;
   solver->row_refactor_group_batch_count = 0;
@@ -53462,6 +53464,124 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   return 1;
 }
 
+/* Diagnostic census of SubtreeLU-style strict row-supernodes over the
+   row engine's U row patterns (KLS_TRACE_ROW_SNODE=1): consecutive rows
+   where row i's U pattern equals row i-1's minus its leading entry i
+   (diagonal-chain shift). Also measures dependency-segment coverage —
+   how many of each row's L-dep updates arrive as complete supernode
+   segments, i.e. the dense-consume batching a supernodal kernel gets. */
+static void kls_row_snode_census(const kls_solver *solver) {
+  const UF_long n = solver->n;
+  const UF_long *up = solver->row_refactor_u_ptr;
+  const UF_long *uc = solver->row_refactor_u_cols;
+  const UF_long *lp = solver->row_refactor_l_ptr;
+  const UF_long *lc = solver->row_refactor_l_cols;
+  if (n == 0u || up == NULL || uc == NULL || lp == NULL || lc == NULL) {
+    return;
+  }
+  UF_long *sn_of = (UF_long *)malloc((size_t)n * sizeof(*sn_of));
+  UF_long *sn_end = (UF_long *)malloc((size_t)n * sizeof(*sn_end));
+  if (sn_of == NULL || sn_end == NULL) {
+    free(sn_of);
+    free(sn_end);
+    return;
+  }
+  UF_long unsorted = 0, diag_first = 0;
+  for (UF_long i = 0; i < n; ++i) {
+    UF_long b = up[i], e = up[i + 1u];
+    if (e > b && uc[b] == i) {
+      diag_first++;
+    }
+    for (UF_long p = b + 1u; p < e; ++p) {
+      if (uc[p] <= uc[p - 1u]) {
+        unsorted++;
+        break;
+      }
+    }
+  }
+  UF_long nsn = 0, rows_in = 0, max_h = 0, u_in = 0, u_total = 0;
+  UF_long start = 0;
+  for (UF_long i = 0; i <= n; ++i) {
+    int joins = 0;
+    if (i > 0u && i < n) {
+      const UF_long pb = up[i - 1u], pe = up[i];
+      const UF_long cb = up[i], ce = up[i + 1u];
+      const UF_long plen = pe - pb, clen = ce - cb;
+      joins = plen == clen + 1u && plen > 0u && uc[pb] == i &&
+              (clen == 0u ||
+               memcmp(uc + pb + 1u, uc + cb,
+                      (size_t)clen * sizeof(*uc)) == 0);
+    }
+    if (!joins && i > 0u) {
+      const UF_long h = i - start;
+      if (h >= 2u) {
+        nsn++;
+        rows_in += h;
+        if (h > max_h) {
+          max_h = h;
+        }
+        for (UF_long r = start; r < i; ++r) {
+          u_in += up[r + 1u] - up[r];
+        }
+      }
+      for (UF_long r = start; r < i; ++r) {
+        sn_of[r] = start;
+        sn_end[r] = i - 1u;
+      }
+      start = i;
+    }
+  }
+  u_total = up[n];
+  /* dependency-segment coverage: consume calls now (one per dep row)
+     vs with supernode segments (one per maximal in-supernode run) */
+  double dep_entries = 0.0, dep_in_runs = 0.0;
+  double calls_now = 0.0, calls_sn = 0.0;
+  for (UF_long i = 0; i < n; ++i) {
+    const UF_long b = lp[i], e = lp[i + 1u];
+    UF_long p = b;
+    while (p < e) {
+      const UF_long k = lc[p];
+      UF_long q = p + 1u;
+      if (k < n && sn_end[k] > k) {
+        while (q < e && lc[q] == lc[q - 1u] + 1u && lc[q] <= sn_end[k] &&
+               sn_of[lc[q]] == sn_of[k]) {
+          q++;
+        }
+      }
+      const UF_long run = q - p;
+      double seg_entries = 0.0;
+      for (UF_long t = p; t < q; ++t) {
+        if (lc[t] < n) {
+          seg_entries += (double)(up[lc[t] + 1u] - up[lc[t]]);
+        }
+      }
+      dep_entries += seg_entries;
+      calls_now += (double)run;
+      calls_sn += 1.0;
+      if (run >= 2u) {
+        dep_in_runs += seg_entries;
+      }
+      p = q;
+    }
+  }
+  fprintf(stderr,
+          "KLS row-snode census: n=%ld usn=%ld rows_in=%ld (%.1f%%)"
+          " mean_h=%.2f max_h=%ld u_in=%.1f%% of %ld |"
+          " deps: entries=%.3g in_runs=%.1f%% calls %.3g->%.3g (%.2fx)"
+          " | unsorted=%ld diag_first=%ld\n",
+          (long)n, (long)nsn, (long)rows_in,
+          n > 0u ? 100.0 * (double)rows_in / (double)n : 0.0,
+          nsn > 0u ? (double)rows_in / (double)nsn : 0.0, (long)max_h,
+          u_total > 0u ? 100.0 * (double)u_in / (double)u_total : 0.0,
+          (long)u_total, dep_entries,
+          dep_entries > 0.0 ? 100.0 * dep_in_runs / dep_entries : 0.0,
+          calls_now, calls_sn,
+          calls_sn > 0.0 ? calls_now / calls_sn : 0.0,
+          (long)unsorted, (long)diag_first);
+  free(sn_of);
+  free(sn_end);
+}
+
 static int kls_build_row_refactor_pattern(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->nblocks == 0u || solver->symbolic->R == NULL) {
@@ -53498,6 +53618,11 @@ static int kls_build_row_refactor_pattern(kls_solver *solver) {
       (solver->row_refactor_segment_input_cleanup_entries == 0u ||
        (solver->row_refactor_segment_input_cleanup_ptr != NULL &&
         solver->row_refactor_segment_input_cleanup_cols != NULL))) {
+    if (!solver->row_snode_census_done &&
+        getenv("KLS_TRACE_ROW_SNODE") != NULL) {
+      solver->row_snode_census_done = 1;
+      kls_row_snode_census(solver);
+    }
     return 1;
   }
   if (!kls_build_refactor_map(solver) ||
