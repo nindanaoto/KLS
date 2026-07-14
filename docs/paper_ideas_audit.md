@@ -16188,3 +16188,16 @@ Twelve-row tail cert gm 1.0057 after the fill cap (coupled had paid a
 egraph anyway — +51% cycle for a declined trial; the cap excludes it by
 construction).  The smoke suite's engine-stats expectations also forced
 the n >= 512 floor (a 3x3 adopting the lean path trips them).
+
+A verification-only mode for tight-tolerance numerics whose growth
+classification measured clean (drop the unconditional per-solve
+correction, keep the residual check) has an EMPTY population: the
+spiked class's raw factors miss the contract line by four-plus orders
+at every tolerance tried (b9_c1: rgrowth 1.8e-12, raw rmax 3.6e-5 at
+tol 1e-8; 8.3e-6 at 1e-10; 3.0e-2 at 1e-12 with the final residual
+degrading to 3e-10) — the near-diagonal factorization's correction is
+permanently load-bearing, and the always-correct contract is exactly
+right.  The branch was reverted unlanded.  b9_c1's solve floor under
+the honest contract is base + SpMV + correction; its crossing rides the
+dense-segment i32 solve (81% of its solve time, both base and
+correction passes).
