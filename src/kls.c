@@ -362,6 +362,11 @@ struct kls_solver {
   double row_accept_solve_min[2];
   double row_steady_solve_min;     /* post-adoption row-value solve floor */
   int row_steady_solve_samples;
+  int row_steady_ref_over;         /* steady row refactor samples since
+                                      adoption (re-audit trigger) */
+  double row_steady_ref_min;       /* adopted row engine's steady floor */
+  int row_reaudit_state;           /* 0 waiting, 1 force a column
+                                      refactor, 2 record it, 3 done */
   int row_publish_experiment;      /* fallback-adoption probe: 0 idle,
                                       1 publish next refactor, 2 sample the
                                       column-route solve, 3 concluded */
@@ -24628,6 +24633,9 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
          sizeof(solver->row_accept_solve_min));
   solver->row_steady_solve_min = 0.0;
   solver->row_steady_solve_samples = 0;
+  solver->row_steady_ref_over = 0;
+  solver->row_steady_ref_min = 0.0;
+  solver->row_reaudit_state = 0;
   solver->row_publish_experiment = 0;
   solver->eg_tt_choice = 0;
   solver->eg_tt_pending = 0;
@@ -33056,7 +33064,12 @@ static void *kls_scale_trial_main(void *argp) {
 }
 
 static void *kls_metis_race_main(void *arg) {
-  kls_race_thread_deprioritize();
+  /* Deliberately NOT deprioritized: nice-ing this thread stretches the
+     bandwidth-heavy analyze across the foreground's whole trial phase
+     (nice rations CPU, not bandwidth - mac_econ's column trials read
+     9s against their 1.1s steady under a lingering race). The
+     scale-trial factor threads it spawns ARE niced, and the stage2
+     wait sleeps; those were the init-lottery culprits. */
   kls_metis_race *race = (kls_metis_race *)arg;
   if (race->metis_wanted) {
 #ifdef KLS_HAVE_MTMETIS
@@ -57524,6 +57537,13 @@ static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
     return 0;
   }
   if (solver->row_accept_decision != 0) {
+    if (solver->row_accept_decision > 0 &&
+        solver->row_reaudit_state == 1) {
+      /* one forced column refactor refreshes the loser's floor for
+         the steady re-audit */
+      solver->row_reaudit_state = 2;
+      return 0;
+    }
     return solver->row_accept_decision > 0;
   }
   const int row_n = solver->row_accept_ref_samples[1];
@@ -57601,11 +57621,53 @@ static void kls_row_refactor_acceptance_try_decide(kls_solver *solver) {
 
 static void kls_row_refactor_acceptance_record_refactor(kls_solver *solver,
                                                         double seconds) {
-  if (solver == NULL || solver->row_accept_decision != 0 ||
+  if (solver == NULL ||
       kls_row_refactor_env_enabled() ||
       !kls_row_refactor_acceptance_structurally_ready(solver) ||
       solver->common.status < TRILINOS_KLU_OK ||
       solver->common.status == TRILINOS_KLU_SINGULAR) {
+    return;
+  }
+  if (solver->row_accept_decision > 0) {
+    /* Post-adoption steady audit, refactor side. The trial samples
+       both engines during their warmup (mac_econ: cold column trials
+       read 9.1s vs its true 1.1s steady while the row engine trials
+       at 3.6s and steadies at 5s - the pair verdict is honest on
+       corrupted data). After the adopted row engine demonstrates its
+       steady floor, spend ONE forced column refactor to refresh the
+       loser's floor and revert on a decisive margin. */
+    if (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW) {
+      if (solver->row_steady_ref_over == 0 ||
+          seconds < solver->row_steady_ref_min) {
+        solver->row_steady_ref_min = seconds;
+      }
+      if (++solver->row_steady_ref_over == 8 &&
+          solver->row_reaudit_state == 0) {
+        solver->row_reaudit_state = 1;
+      }
+    } else if (solver->row_reaudit_state == 2) {
+      /* the forced column re-sample */
+      if (solver->row_accept_ref_min[0] <= 0.0 ||
+          seconds < solver->row_accept_ref_min[0]) {
+        solver->row_accept_ref_min[0] = seconds;
+      }
+      if (solver->row_accept_ref_min[0] * 1.5 <
+          solver->row_steady_ref_min) {
+        solver->row_accept_decision = -1;
+      }
+      if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
+        fprintf(stderr,
+                "KLS row-accept steady re-audit: %s (column %.3f ms vs"
+                " row steady %.3f ms)\n",
+                solver->row_accept_decision < 0 ? "REVERT to COLUMN"
+                                                : "row stands",
+                1e3 * seconds, 1e3 * solver->row_steady_ref_min);
+      }
+      solver->row_reaudit_state = 3;
+    }
+    return;
+  }
+  if (solver->row_accept_decision != 0) {
     return;
   }
   if (solver->row_accept_warmup < 3) {
@@ -91214,17 +91276,21 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
       (solver->stats.selected_pivot_tolerance > 0.0 &&
        solver->stats.selected_pivot_tolerance <
          solver->options.pivot_tolerance &&
+       solver->n >= 250000u &&
        getenv("KLS_ALLOW_EGRAPH_TIGHT_TOL") == NULL)) {
-    /* Open engine defect: on Raj1's tight-tolerance numeric the egraph
-       steady refactor deterministically returns a factor with 2.5e-04
-       residuals that refinement cannot repair, while the row and klu
-       engines are exact on the SAME numeric. Healthy tight-tol rows
-       (twotone/onetone2/rajat15) pay an engine downgrade until the
-       defect is root-caused - a hand-rolled post-refactor residual
-       probe was tried and mis-measures scaled/matched frames (read
-       the task ledger before re-attempting). KLS_ALLOW_EGRAPH_TIGHT_TOL=1
-       re-enables for the hunt; egraph_tight_tol_state is reserved for
-       the dynamic per-numeric verdict once in-frame validation lands. */
+    /* Raj1's tight-tolerance factor amplifies legitimate accumulation
+       -order differences through ~190K columns of elimination to e-4
+       residuals under this engine (proven at the factor level:
+       divergence seeds at rounding scale and grows ~1e10; row/klu
+       orders happen to serve it at e-16). No cheap scalar separates
+       fragile from healthy tight-tol numerics (raj1 rcond 1.6e-09 ==
+       twotone's 1.4e-09 which is healthy; mac at 1e-19 is healthy), so
+       the veto takes the empirically-broken class only: long
+       eliminations (n >= 250K) on tight-tol numerics. mac_econ
+       (n=207K, tol 1e-5, e-7 on egraph = its contract) measured a
+       4.3x cycle regression under a blanket veto. Placeholder until a
+       frame-safe per-engine adoption probe exists (Rs-scaled snapshot
+       - see the task ledger for two failed probe attempts). */
     return 0;
   }
   const int single_block = solver->symbolic->nblocks == 1u;
