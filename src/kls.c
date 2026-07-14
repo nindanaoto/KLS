@@ -513,6 +513,12 @@ struct kls_solver {
   UF_long *row_refactor_u_cols;
   double **row_refactor_u_values;
   double *row_refactor_u_row_values;
+  UF_long *row_refactor_sn_end;  /* per row: last row of its strict
+                                    U-row supernode (shift-equal
+                                    patterns); row itself if height 1 */
+  atomic_ullong row_light_snode_runs;     /* light-run consume telemetry */
+  atomic_ullong row_light_snode_entries;
+  atomic_ullong row_scalar_dep_entries;   /* scalar-fallback U entries */
   UF_long *row_refactor_input_ptr;
   UF_long *row_refactor_input_cols;
   UF_long *row_refactor_input_pos;
@@ -18852,6 +18858,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_u_cols);
   free(solver->row_refactor_u_values);
   free(solver->row_refactor_u_row_values);
+  free(solver->row_refactor_sn_end);
   free(solver->row_refactor_input_ptr);
   free(solver->row_refactor_input_cols);
   free(solver->row_refactor_input_pos);
@@ -18907,6 +18914,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_u_cols = NULL;
   solver->row_refactor_u_values = NULL;
   solver->row_refactor_u_row_values = NULL;
+  solver->row_refactor_sn_end = NULL;
   solver->row_refactor_input_ptr = NULL;
   solver->row_refactor_input_cols = NULL;
   solver->row_refactor_input_pos = NULL;
@@ -53582,6 +53590,62 @@ static void kls_row_snode_census(const kls_solver *solver) {
   free(sn_end);
 }
 
+/* Strict U-row supernode map for the light-run consume: rows i-1 and i
+   share a supernode when row i's U pattern equals row i-1's minus its
+   leading entry i (diagonal-chain shift, the SubtreeLU/NICSLU strict
+   criterion). Rebuilt with the pattern; single-threaded callers only. */
+static void kls_row_refactor_ensure_sn_end(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  {
+    const char *trace = getenv("KLS_TRACE_ROW_SNODE");
+    if (trace != NULL && atoi(trace) >= 2) {
+      fprintf(stderr,
+              "KLS light-snode: runs=%llu entries=%llu scalar=%llu\n",
+              (unsigned long long)atomic_load_explicit(
+                &solver->row_light_snode_runs, memory_order_relaxed),
+              (unsigned long long)atomic_load_explicit(
+                &solver->row_light_snode_entries, memory_order_relaxed),
+              (unsigned long long)atomic_load_explicit(
+                &solver->row_scalar_dep_entries, memory_order_relaxed));
+    }
+  }
+  if (solver->row_refactor_sn_end != NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_cols == NULL || solver->n == 0u ||
+      getenv("KLS_DISABLE_ROW_LIGHT_SNODE") != NULL) {
+    return;
+  }
+  const UF_long n = solver->n;
+  const UF_long *up = solver->row_refactor_u_ptr;
+  const UF_long *uc = solver->row_refactor_u_cols;
+  UF_long *sn_end = (UF_long *)malloc((size_t)n * sizeof(*sn_end));
+  if (sn_end == NULL) {
+    return;
+  }
+  UF_long start = 0;
+  for (UF_long i = 1; i <= n; ++i) {
+    int joins = 0;
+    if (i < n) {
+      const UF_long pb = up[i - 1u], pe = up[i];
+      const UF_long cb = up[i], ce = up[i + 1u];
+      const UF_long plen = pe - pb, clen = ce - cb;
+      joins = plen == clen + 1u && plen > 0u && uc[pb] == i &&
+              (clen == 0u ||
+               memcmp(uc + pb + 1u, uc + cb,
+                      (size_t)clen * sizeof(*uc)) == 0);
+    }
+    if (!joins) {
+      for (UF_long r = start; r < i; ++r) {
+        sn_end[r] = i - 1u;
+      }
+      start = i;
+    }
+  }
+  solver->row_refactor_sn_end = sn_end;
+}
+
 static int kls_build_row_refactor_pattern(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->nblocks == 0u || solver->symbolic->R == NULL) {
@@ -60294,6 +60358,7 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
       !kls_build_row_refactor_pattern(solver)) {
     return -1;
   }
+  kls_row_refactor_ensure_sn_end(solver);
 
   trilinos_klu_l_common *common = &solver->common;
   trilinos_klu_l_numeric *numeric = solver->numeric;
@@ -61009,6 +61074,106 @@ static int kls_row_refactor_prefactor_dep_safe(
     solver, shared, l_begin, pos, pos, applied, dep);
 }
 
+/* Light strict-supernode run consume: a maximal run of consecutive dep
+   rows inside one strict U-row supernode updates x as h short
+   triangular steps plus h contiguous AXPYs over the shared tail,
+   gathered once into a dense accumulator. Replaces h scattered
+   index-walked row updates (the strict-shift pattern guarantees row r
+   holds columns r+1..d1 first, then row d1's tail, contiguously in
+   u_row_values). Census: 93-99%% of dep entries on the paper-set gap
+   rows arrive in such runs. Steady checkless refactors only. */
+static int kls_row_refactor_try_light_supernode_run(
+  kls_egraph_refactor_worker *worker,
+  UF_long row,
+  UF_long *p_io,
+  UF_long l_begin,
+  UF_long l_end,
+  int wait_for_dependencies,
+  const unsigned char *applied,
+  double *x) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  const UF_long *sn_end = solver->row_refactor_sn_end;
+  if (sn_end == NULL || shared->check_pivots ||
+      solver->row_refactor_l_row_values == NULL ||
+      solver->row_refactor_l_values == NULL) {
+    return 0;
+  }
+  const UF_long p0 = *p_io;
+  const UF_long *l_cols = solver->row_refactor_l_cols;
+  const UF_long dep0 = l_cols[p0];
+  if (dep0 >= row || dep0 >= solver->n) {
+    return 0;
+  }
+  const UF_long e = sn_end[dep0];
+  if (e <= dep0) {
+    return 0;
+  }
+  UF_long q = p0 + 1u;
+  while (q < l_end && l_cols[q] == l_cols[q - 1u] + 1u &&
+         l_cols[q] <= e &&
+         (applied == NULL || !applied[q - l_begin])) {
+    q++;
+  }
+  const UF_long run = q - p0;
+  if (run < 2u) {
+    return 0;
+  }
+  const UF_long d1 = dep0 + run - 1u;
+  if (wait_for_dependencies) {
+    for (UF_long r = dep0; r <= d1; ++r) {
+      if (!kls_row_refactor_dependency_done_now(shared, r)) {
+        return 0;
+      }
+    }
+  }
+  const UF_long *up = solver->row_refactor_u_ptr;
+  const UF_long *uc = solver->row_refactor_u_cols;
+  const double *uvals = solver->row_refactor_u_row_values;
+  const double *udiag = (const double *)solver->numeric->Udiag;
+  const UF_long tail_begin = up[d1];
+  const UF_long tail_len = up[d1 + 1u] - tail_begin;
+  const UF_long *tail_cols = uc + tail_begin;
+  double *acc = NULL;
+  if (tail_len > 0u) {
+    acc = kls_egraph_worker_supernode_workspace(worker, tail_len);
+    if (acc == NULL) {
+      return 0;
+    }
+    for (UF_long t = 0; t < tail_len; ++t) {
+      acc[t] = x[tail_cols[t]];
+    }
+  }
+  const int scatter_values = !shared->row_refactor_defer_value_scatter;
+  for (UF_long r = dep0, p = p0; r <= d1; ++r, ++p) {
+    const double lij = x[r] / udiag[r];
+    solver->row_refactor_l_row_values[p] = lij;
+    if (scatter_values) {
+      *solver->row_refactor_l_values[p] = lij;
+    }
+    x[r] = 0.0;
+    const double *uv = uvals + up[r];
+    const UF_long tri = d1 - r;
+    for (UF_long t = 0; t < tri; ++t) {
+      x[uc[up[r] + t]] -= lij * uv[t];
+    }
+    const double *tv = uv + tri;
+    for (UF_long t = 0; t < tail_len; ++t) {
+      acc[t] -= lij * tv[t];
+    }
+  }
+  for (UF_long t = 0; t < tail_len; ++t) {
+    x[tail_cols[t]] = acc[t];
+  }
+  atomic_fetch_add_explicit(&solver->row_light_snode_runs, 1u,
+                            memory_order_relaxed);
+  atomic_fetch_add_explicit(&solver->row_light_snode_entries,
+                            (unsigned long long)(up[d1 + 1u] - up[dep0]),
+                            memory_order_relaxed);
+  *p_io = q;
+  return 1;
+}
+
 static int kls_parallel_row_refactor_apply_scalar_dep(
   kls_egraph_refactor_worker *worker,
   UF_long row,
@@ -61047,6 +61212,9 @@ static int kls_parallel_row_refactor_apply_scalar_dep(
     for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
       x[u_cols[offset]] -= lij * u_values[offset];
     }
+    atomic_fetch_add_explicit(&solver->row_scalar_dep_entries,
+                              (unsigned long long)(u_end - u_begin),
+                              memory_order_relaxed);
   }
   return 1;
 }
@@ -61400,6 +61568,15 @@ static int kls_parallel_row_refactor_process_row(
     }
     if (compact_status > 0) {
       if (applied != NULL && p > compact_begin && p <= l_end) {
+        memset(applied + (compact_begin - l_begin), 1,
+               (size_t)(p - compact_begin));
+      }
+      continue;
+    }
+    if (kls_row_refactor_try_light_supernode_run(
+          worker, row, &p, l_begin, l_end, wait_for_dependencies,
+          applied, x)) {
+      if (applied != NULL && p > compact_begin) {
         memset(applied + (compact_begin - l_begin), 1,
                (size_t)(p - compact_begin));
       }
@@ -70384,6 +70561,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       solver->row_refactor_level_max_width < 2u) {
     return -1;
   }
+  kls_row_refactor_ensure_sn_end(solver);
 
   int thread_count = solver->options.threads;
   if ((UF_long)thread_count > solver->row_refactor_level_max_width) {
