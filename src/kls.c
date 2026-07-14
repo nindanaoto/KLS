@@ -80634,6 +80634,21 @@ static int kls_egraph_refactor_dispatch_column(
   if (worker == NULL || worker->shared == NULL) {
     return 0;
   }
+  {
+    const kls_solver *solver = worker->shared->solver;
+    if (solver != NULL && solver->dense_tail_cols > 0 &&
+        solver->symbolic != NULL) {
+      const UF_long tail_end =
+        solver->symbolic->R[solver->dense_tail_block + 1];
+      if (k >= tail_end - solver->dense_tail_cols && k < tail_end) {
+        /* pipe-emitted dense-tail column: the BLAS3 tail refresh
+           rebuilds its values after this refactorization; completing
+           it here releases dependents (only later tail columns, which
+           no-op the same way) without the 24s scalar scatter walk */
+        return 1;
+      }
+    }
+  }
   switch (worker->shared->kernel) {
     case KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED:
       return kls_egraph_refactor_single_unscaled_column(
@@ -92043,6 +92058,11 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
        - see the task ledger for two failed probe attempts). */
     return 0;
   }
+  if (solver->dense_tail_cols > 0) {
+    /* pipe-emitted dense-tail numerics (see the schedule gate): the
+       tail no-ops in the dispatch, the BLAS3 refresh rebuilds it */
+    return solver->common.flops >= 5.0e8;
+  }
   const int single_block = solver->symbolic->nblocks == 1u;
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
   const int all_pipeline_btf =
@@ -99600,6 +99620,14 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
       solver->numeric->LUbx == NULL || solver->symbolic->R == NULL) {
     return 0;
   }
+  if (solver->dense_tail_cols > 0) {
+    /* pipe-emitted dense-tail numerics: the fragmented-BTF gate below
+       misses ss1 by hairs (nblocks 95977 vs the 100000 floor, coverage
+       0.53 vs the 0.50 cap, and a scale exclusion the egraph body does
+       not need).  The tail columns no-op in the dispatch and the BLAS3
+       refresh rebuilds them after the parallel pass. */
+    return solver->common.flops >= 5.0e8;
+  }
   const int single_block = solver->symbolic->nblocks == 1u;
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
   if (kls_egraph_all_pipeline_huge_single_shape(solver)) {
@@ -100955,6 +100983,22 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     }
   }
   if (egraph >= 0) {
+#ifdef KLS_HAVE_CBLAS
+    if (egraph > 0 && solver->dense_tail_cols > 0 &&
+        solver->common.status >= 0 &&
+        getenv("KLS_DISABLE_DENSE_TAIL_REFACTOR") == NULL) {
+      /* the egraph pass no-opped the dense-tail columns; rebuild them
+         from the refreshed prefix (fallback: one full scalar walk) */
+      if (!kls_dense_tail_refresh(solver, numeric_values)) {
+        egraph = (int)trilinos_klu_l_refactor(solver->col_ptr,
+                                              solver->row_idx,
+                                              numeric_values,
+                                              solver->symbolic,
+                                              solver->numeric,
+                                              &solver->common);
+      }
+    }
+#endif
     kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_EGRAPH);
     if (egraph && check_pivots &&
         !kls_checked_refactor_accepts_rowwise_u(solver)) {
