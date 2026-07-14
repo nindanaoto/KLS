@@ -16297,3 +16297,17 @@ first factor ~2ms.  CKTSO's whole front is ~3.2ms — closing further
 means knowing what THEIR 3.2ms contains (does their front skip a trial
 factor? faster matching?), a papers/CK-trace question, not another KLS
 gate.  The class is parked at its measurement floor.
+
+LPT intra-level ordering for the egraph's barriered level phase was
+demoted BEFORE construction by structural reading: level-phase columns
+never wait intra-level (dependencies live in prior levels, separated by
+barriers) and the per-level thread partitions already split contiguous
+slices by the column-work estimate — heaviest-first ordering could only
+smooth estimate error at the barrier tail.  The profile's 10% wait_done
+plus 4% lease overhead live in the PIPELINE phase (levels narrower than
+the 2x-threads cluster cutoff), so stall phase-3's real levers are the
+pipeline's processing order and lease design (pipeline_natural_order,
+kls_egraph_refactor_try_lease_pipeline_column) — that phase's body is
+the next read.  The barrier tail itself is bounded by the work
+estimate's error, measurable by comparing per-thread level times if a
+finer instrument is ever needed.
