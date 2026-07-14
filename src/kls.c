@@ -428,10 +428,11 @@ struct kls_solver {
                                   -1 vetoed (Raj1-class value defect) */
   double reftr_pre, reftr_kernel, reftr_post;  /* KLS_TRACE_REFACTOR_US */
   int reftr_n;
-  int floor_choice;    /* batch-floor trial for mapped-path rows:
+  int floor_choice;    /* batch-floor trial (mapped/egraph rows):
                           0 undecided, 1 low floors, -1 defaults */
   int floor_pending;   /* low-floor probe refactor outstanding */
   int floor_wait;
+  int floor_min_path;  /* engine the steady floor-min came from */
   double mapped_steady_min;
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
@@ -24704,6 +24705,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->floor_choice = 0;
   solver->floor_pending = 0;
   solver->floor_wait = 0;
+  solver->floor_min_path = 0;
   solver->mapped_steady_min = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
@@ -130418,7 +130420,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_snode_floor_batch_override = 2;
     kls_snode_floor_work_override = 48;
   } else if (solver->floor_choice == 0 && !solver->floor_pending &&
-             solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
+             (solver->stats.last_refactor_path ==
+                KLS_REFACTOR_PATH_MAPPED ||
+              solver->stats.last_refactor_path ==
+                KLS_REFACTOR_PATH_EGRAPH) &&
              solver->mapped_steady_min > 0.0 &&
              ++solver->floor_wait >= 8) {
     solver->floor_pending = 1;
@@ -130437,23 +130442,28 @@ int kls_refactor(kls_solver *solver, const double *values) {
     if (solver->floor_choice == 0) {
       solver->floor_choice =
         ok && solver->common.status >= 0 &&
-            solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
+            (int)solver->stats.last_refactor_path ==
+              solver->floor_min_path &&
             elapsed < 0.95 * solver->mapped_steady_min
           ? 1 : -1;
       if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
         fprintf(stderr,
-                "KLS batch-floor probe: %s (low %.3f ms vs mapped min"
+                "KLS batch-floor probe: %s (low %.3f ms vs steady min"
                 " %.3f ms)\n",
                 solver->floor_choice > 0 ? "LOW" : "default",
                 1e3 * elapsed, 1e3 * solver->mapped_steady_min);
       }
     }
   } else if (ok && solver->common.status >= 0 &&
-             solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
+             (solver->stats.last_refactor_path ==
+                KLS_REFACTOR_PATH_MAPPED ||
+              solver->stats.last_refactor_path ==
+                KLS_REFACTOR_PATH_EGRAPH) &&
              solver->floor_choice == 0) {
     if (solver->mapped_steady_min <= 0.0 ||
         elapsed < solver->mapped_steady_min) {
       solver->mapped_steady_min = elapsed;
+      solver->floor_min_path = (int)solver->stats.last_refactor_path;
     }
   }
   solver->adaptive_refactor_seconds = elapsed;
