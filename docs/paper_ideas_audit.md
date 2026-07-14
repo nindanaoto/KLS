@@ -16017,3 +16017,46 @@ slower, and exact-suffix plus generalized gapped-supernode producer fusion
 was neutral to about 1.4% slower after readiness/payoff gates; the broad
 ungated merge was about 58% slower. None of those prototypes or their
 environment switches remain in the source.
+
+The union gate carried five KLS-invalid rows; three shared one root class:
+the solve-side accuracy contract had no coverage for factors whose RAW
+solves miss the `1e-8` validity line. `TSOPF_RS_b2383`/`_c1` solve at a
+deterministic `1.53e-8` (threshold-pivoted factor, reciprocal pivot growth
+`1.3e-7`, no refinement armed — not tight-tolerance, no self-check, no debt
+flags, and forcing fp32 off changes nothing). `power197k` reads `6.6e-8`
+and could not be refined at all: the refinement gate excluded every scaled
+shape because its residual pass ran in caller coordinates against the
+internal-frame stored matrix. `mac_econ_fwd500` draws `e-7..e-6` across
+passes from its egraph-published factor, and its solver holds NO values
+array on that path, so no residual machinery could even run.
+
+Three mechanisms landed together. First, the untransposed refinement path
+computes the user-frame residual directly from the internal frame:
+`r_user[r] = b[r] - sum_k A_int[rp[r],k] * (x[cmap[k]]/cs[k]) / rs[rp[r]]`,
+with a cached `1/rs` vector rebuilt on row-scale pointer moves; the
+transposed path keeps the unscaled-only restriction. power197k: `6.6e-8 →
+3.7e-15`. Second, a once-per-numeric contract classification at
+refactorization exit, where `prepare_numeric_values` guarantees a current
+internal-frame array: one `klu_rgrowth` pass (charged to that single
+refactorization, never to solves); reciprocal growth under `1e-6`
+(`KLS_CONTRACT_RGROWTH`) arms the numeric — every solve then carries the
+`1e-9·|b|_max`-line correction — and anything else is recorded clean and
+never pays again. The verdict is a property of the pivot sequence: it
+survives refactorizations and resets on numeric replacement. Third, armed
+plain-frame numerics re-capture the refactorization's input values every
+call, and numeric replacement now frees the captured array (and the
+predicted-capture flag), so refinement can never run against a dead
+matrix. b2383 pair: `1.53e-8 → 1.17e-14`; mac_econ: `e-6 → 8.0e-12`
+(mac's growth also scans under the line; its solve pays the correction —
+about 3x — which the scoreboard prices as a NEAR-tier row instead of an
+automatic loss).
+
+Two signals were measured out on the way. A `|Udiag|` min/max spread scan
+cannot separate the failing class from healthy factors (rajat25 spans
+3.1e-9, b2383 7.2e-9, rajat18 3.4e-13 — all healthy but the middle one),
+and probing unclassified plain-frame numerics at solve time against
+`solver->values` corrupts engine-published cases whose stored values are
+stale (the egraph-blocked smoke case failed at `3e-3` relative until the
+probe was restricted to structurally-flagged shapes whose frames are
+refreshed per refactorization — matched, scaled, nudged, perturbed,
+predicted, reduced-precision).

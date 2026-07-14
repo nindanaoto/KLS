@@ -490,6 +490,10 @@ struct kls_solver {
   double *solve_refine_workspace;
   double *solve_refine_values;
   UF_long *solve_refine_rinv;
+  double *solve_refine_rs_inv;  /* 1/row_scale in internal row index space;
+                                   rebuilt when row_scale moves (pointer
+                                   identity tracks adoption swaps) */
+  const double *solve_refine_rs_inv_src;
   double base_solve_seconds;
   int fp32_decision;
   int fp32_last_used;
@@ -516,6 +520,16 @@ struct kls_solver {
                                    (1 SpMV) and correct the rare bad
                                    publish (mac: 1-in-9 draws at 2e-4
                                    vs the 1e-6 contract) */
+  int solve_contract_probe;     /* accuracy-risk numerics (matched/scaled,
+                                   static-pivoted, nudged, predicted): the
+                                   first solve probes the residual against
+                                   the contract line.  0 = unprobed,
+                                   1 = probed clean (no further cost),
+                                   2 = armed (raw factor misses the line;
+                                   refine every solve), 3 = refinement
+                                   diverges on this numeric (skip).  A
+                                   property of the pivot sequence: reset on
+                                   numeric replacement, NOT per refactor. */
   int predicted_entry_values_captured; /* solve_refine_values holds the
                                    factor entry's prepared input */
   UF_long **refactor_l_indices;
@@ -24667,6 +24681,9 @@ static void free_solve_refine_workspace(kls_solver *solver) {
   solver->solve_refine_workspace = NULL;
   free(solver->solve_refine_rinv);
   solver->solve_refine_rinv = NULL;
+  free(solver->solve_refine_rs_inv);
+  solver->solve_refine_rs_inv = NULL;
+  solver->solve_refine_rs_inv_src = NULL;
 }
 
 static void free_pivot_nudges(kls_solver *solver) {
@@ -24693,6 +24710,7 @@ static void free_numeric(kls_solver *solver) {
   kls_pts_free(solver);
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
+  solver->solve_contract_probe = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
   solver->fp32_validated = 0;
@@ -24750,6 +24768,14 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
 }
 
 static void kls_numeric_replaced_invalidate(kls_solver *solver) {
+  /* a replacement is a new pivot sequence: its contract accuracy is
+     unknown until the next classification, and any captured refine
+     values describe the DEAD numeric's input — drop them so no later
+     refinement runs against a stale matrix */
+  solver->solve_contract_probe = 0;
+  free(solver->solve_refine_values);
+  solver->solve_refine_values = NULL;
+  solver->predicted_entry_values_captured = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
   solver->fp32_validated = 0;
@@ -130207,6 +130233,52 @@ static int kls_serial_factor(kls_solver *solver,
     ? KLS_ERR_SINGULAR : KLS_OK;
 }
 
+/* Classify the current numeric's solve-accuracy risk once, from pivot
+   growth (one A+U pass over the internal-frame values, charged to the
+   refactorization that ran it, never to the solves).  Plain-frame
+   factors only: matched, scaled, nudged, perturbed, predicted and
+   reduced-precision numerics carry structural risk flags and probe
+   their first solve instead.  The Udiag-spread scan measured OUT as a
+   signal: healthy rajat25 spans 3.1e-9 while the failing b2383 spans
+   7.2e-9 — no threshold separates them; reciprocal pivot growth does
+   (b2383 reads 1.3e-7). */
+static void kls_solve_contract_classify(kls_solver *solver,
+                                        const double *numeric_values) {
+  if (solver == NULL || solver->solve_contract_probe != 0 ||
+      solver->row_perm != NULL || solver->row_scale != NULL ||
+      solver->col_scale != NULL || solver->pivot_nudge_count > 0 ||
+      solver->common.kls_perturb_count > 0 ||
+      solver->numeric_is_predicted || solver->fp32_last_used ||
+      solver->numeric == NULL || solver->symbolic == NULL ||
+      numeric_values == NULL || solver->col_ptr == NULL ||
+      solver->row_idx == NULL ||
+      getenv("KLS_DISABLE_SOLVE_CONTRACT_PROBE") != NULL) {
+    return;
+  }
+  trilinos_klu_l_common growth_common = solver->common;
+  if (!trilinos_klu_l_rgrowth(solver->col_ptr, solver->row_idx,
+                              (double *)numeric_values, solver->symbolic,
+                              solver->numeric, &growth_common)) {
+    return;
+  }
+  double thresh = 1.0e-6;
+  {
+    const char *env = getenv("KLS_CONTRACT_RGROWTH");
+    if (env != NULL && env[0] != '\0') {
+      const double parsed = atof(env);
+      if (parsed > 0.0) {
+        thresh = parsed;
+      }
+    }
+  }
+  solver->solve_contract_probe =
+    growth_common.rgrowth < thresh && growth_common.rgrowth >= 0.0 ? 2 : 1;
+  if (getenv("KLS_TRACE_REFINE") != NULL) {
+    fprintf(stderr, "KLS contract classify: rgrowth=%.3e -> probe=%d\n",
+            growth_common.rgrowth, solver->solve_contract_probe);
+  }
+}
+
 int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -131248,6 +131320,28 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_row_refactor_acceptance_record_refactor(solver, elapsed);
     kls_egraph_thread_trial_record(solver, elapsed);
   }
+  if (ok && solver->common.status >= 0) {
+    /* classify each numeric on its first refactorization — once per
+       numeric, off the solve path; numeric_values is the prepared
+       internal-frame array, current for THIS call */
+    kls_solve_contract_classify(solver, numeric_values);
+    if (solver->solve_contract_probe == 2 && solver->row_perm == NULL &&
+        solver->row_scale == NULL && solver->col_scale == NULL &&
+        numeric_values != NULL && solver->nnz > 0) {
+      /* armed plain-frame numerics refine every solve: the residual must
+         run against THIS refactorization's input values — solver->values
+         holds the analyze-time array, which goes stale under changing
+         values (the documented stale-refinement hazard) */
+      if (solver->solve_refine_values == NULL) {
+        solver->solve_refine_values = (double *)malloc(
+          (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
+      }
+      if (solver->solve_refine_values != NULL) {
+        memcpy(solver->solve_refine_values, numeric_values,
+               (size_t)solver->nnz * sizeof(*numeric_values));
+      }
+    }
+  }
   {
     const char *dump = getenv("KLS_DUMP_UDIAG");
     if (dump != NULL && *dump != '\0' && ok &&
@@ -131654,18 +131748,39 @@ static int solve_impl(kls_solver *solver,
   }
   /* Iterative refinement recovers full double-precision accuracy from a
      reduced-accuracy factorization (float-stored values, nudged pivots) at
-     the cost of one residual pass and one extra solve per iteration.  It
-     runs in the caller's coordinates against the stored matrix, so it is
-     restricted to shapes without static row permutation or scaling. */
+     the cost of one residual pass and one extra solve per iteration.  The
+     residual pass runs against the stored internal-frame matrix; scaled
+     shapes are supported on the untransposed path by folding the row and
+     column scales into the accumulation (the transposed path keeps the
+     unscaled-only restriction). */
+  /* Unclassified numerics reaching a solve probe their first residual
+     against the contract line ONLY when a structural risk flag says the
+     shape has failure precedent (matched, scaled, nudged, perturbed,
+     predicted, reduced-precision) — those paths keep refine_a current
+     (per-refactor frame transforms or explicit captures).  Plain-frame
+     numerics are classified from pivot growth at factor/refactorization
+     exit; probing them here against solver->values corrupted the
+     egraph-blocked smoke case (stale values -> garbage correction). */
+  const int contract_structural_risk = solver->row_perm != NULL ||
+    solver->row_scale != NULL || solver->col_scale != NULL ||
+    solver->pivot_nudge_count > 0 || solver->common.kls_perturb_count > 0 ||
+    solver->numeric_is_predicted || solver->fp32_last_used;
+  const int contract_probe_wanted = !solver->in_solve_refinement &&
+    nrhs == 1 && b != x && solver->solve_contract_probe == 0 &&
+    contract_structural_risk &&
+    getenv("KLS_DISABLE_SOLVE_CONTRACT_PROBE") == NULL;
+  const int contract_armed = solver->solve_contract_probe == 2 &&
+    !solver->in_solve_refinement && nrhs == 1 && b != x;
   if (getenv("KLS_TRACE_REFINE") != NULL && !solver->in_solve_refinement) {
     fprintf(stderr,
             "KLS refine gate: ok=%ld status=%d needs=%d ss=%d row_perm=%d"
-            " scales=%d%d values=%d b_is_x=%d\n",
+            " scales=%d%d values=%d b_is_x=%d probe=%d/%d\n",
             (long)ok, (int)solver->common.status,
             solver->numeric_needs_refinement,
             solver->solve_refine_single_shot, solver->row_perm != NULL,
             solver->row_scale != NULL, solver->col_scale != NULL,
-            solver->values != NULL, b == x);
+            solver->values != NULL, b == x,
+            solver->solve_contract_probe, contract_probe_wanted);
   }
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
       (solver->numeric_needs_refinement || solver->row_solve_self_check ||
@@ -131675,8 +131790,14 @@ static int solve_impl(kls_solver *solver,
           initial-tolerance heuristics whose factors are accurate without
           corrections (mac_econ-class regressed 2x on solves at 1e-4). */
        solver->common.tol < 1.0e-6 ||
-       getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL) &&
-      solver->row_scale == NULL && solver->col_scale == NULL &&
+       getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL ||
+       contract_probe_wanted || contract_armed) &&
+      (solver->row_scale == NULL && solver->col_scale == NULL
+         ? 1
+         /* scaled shapes: the in-frame residual is implemented for the
+            untransposed orientation only, and b==x would have destroyed
+            the right-hand side the residual needs */
+         : (!kernel_transpose && b != x)) &&
       (solver->solve_refine_values != NULL || solver->values != NULL) &&
       solver->col_ptr != NULL && solver->row_idx != NULL) {
     const double *refine_a = solver->solve_refine_values != NULL
@@ -131694,6 +131815,25 @@ static int solve_impl(kls_solver *solver,
     const UF_long *rinv = solver->solve_refine_rinv;
     const UF_long *cmap = solver->user_col_perm;
     if (solver->row_perm != NULL && rinv == NULL) {
+      goto refine_skip;
+    }
+    if (solver->row_scale != NULL &&
+        solver->solve_refine_rs_inv_src != solver->row_scale) {
+      if (solver->solve_refine_rs_inv == NULL) {
+        solver->solve_refine_rs_inv = (double *)malloc(
+          (size_t)solver->n * sizeof(*solver->solve_refine_rs_inv));
+      }
+      if (solver->solve_refine_rs_inv != NULL) {
+        for (UF_long r = 0; r < solver->n; ++r) {
+          solver->solve_refine_rs_inv[r] = 1.0 / solver->row_scale[r];
+        }
+        solver->solve_refine_rs_inv_src = solver->row_scale;
+      }
+    }
+    const double *rs_inv =
+      solver->row_scale != NULL ? solver->solve_refine_rs_inv : NULL;
+    const double *cs = solver->col_scale;
+    if (solver->row_scale != NULL && rs_inv == NULL) {
       goto refine_skip;
     }
     if (solver->solve_refine_workspace == NULL) {
@@ -131714,7 +131854,8 @@ static int solve_impl(kls_solver *solver,
         const double av = fabs(brhs[i]);
         bmax = bmax < av ? av : bmax;
       }
-      const int self_check_only = solver->row_solve_self_check &&
+      const int self_check_only = (solver->row_solve_self_check ||
+                                   contract_probe_wanted || contract_armed) &&
         !solver->numeric_needs_refinement &&
         !(solver->common.tol < 1.0e-6) &&
         getenv("KLS_ENABLE_SOLVE_REFINEMENT") == NULL;
@@ -131743,15 +131884,31 @@ static int solve_impl(kls_solver *solver,
             residual[cmap != NULL ? cmap[col] : col] -= acc;
           }
         } else {
+          /* internal frame: A_int = Rs P A_user Cs, so the user-frame
+             residual is b_user[r] - sum_k A_int[rp[r],k]
+             * (x_user[cmap[k]]/cs[k]) / rs[rp[r]]; rinv maps internal
+             rows back to user rows exactly as in the unscaled case */
           for (UF_long col = 0; col < nloc; ++col) {
-            const double xv = xrhs[cmap != NULL ? cmap[col] : col];
+            double xv = xrhs[cmap != NULL ? cmap[col] : col];
+            if (cs != NULL) {
+              xv /= cs[col];
+            }
             if (xv == 0.0) {
               continue;
             }
-            for (UF_long p = solver->col_ptr[col];
-                 p < solver->col_ptr[col + 1u]; ++p) {
-              const UF_long ir = solver->row_idx[p];
-              residual[rinv != NULL ? rinv[ir] : ir] -= refine_a[p] * xv;
+            if (rs_inv != NULL) {
+              for (UF_long p = solver->col_ptr[col];
+                   p < solver->col_ptr[col + 1u]; ++p) {
+                const UF_long ir = solver->row_idx[p];
+                residual[rinv != NULL ? rinv[ir] : ir] -=
+                  refine_a[p] * xv * rs_inv[ir];
+              }
+            } else {
+              for (UF_long p = solver->col_ptr[col];
+                   p < solver->col_ptr[col + 1u]; ++p) {
+                const UF_long ir = solver->row_idx[p];
+                residual[rinv != NULL ? rinv[ir] : ir] -= refine_a[p] * xv;
+              }
             }
           }
         }
@@ -131775,6 +131932,15 @@ static int solve_impl(kls_solver *solver,
                refactorization precision on this numeric. */
             memcpy(xrhs, saved_x, (size_t)nloc * sizeof(*saved_x));
             solver->fp32_decision = -1;
+            if (contract_probe_wanted || contract_armed) {
+              solver->solve_contract_probe = 3;
+            }
+          } else if (contract_probe_wanted) {
+            /* first-solve verdict for this numeric: clean factors meet
+               the line on the raw solve and never pay again; misses stay
+               armed so every solve carries its correction */
+            solver->solve_contract_probe =
+              (iter == 0 && rmax <= target) ? 1 : 2;
           }
           break;
         }
@@ -131795,6 +131961,10 @@ static int solve_impl(kls_solver *solver,
              adoption probe; skip the verification sweep */
           break;
         }
+      }
+      if (contract_probe_wanted && solver->solve_contract_probe == 0) {
+        /* the loop exhausted its iterations still correcting: armed */
+        solver->solve_contract_probe = 2;
       }
     }
     solver->stats.solve_seconds = kls_now_seconds() - start;
