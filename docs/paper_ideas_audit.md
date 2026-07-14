@@ -16228,3 +16228,18 @@ The small-cohort solve gap now has one remaining framed lever: the
 17%-of-solve dispatch preamble, and beyond that the per-column fixed
 costs are the floor — CKTSO's edge there likely needs their exact
 mechanics read from the papers before more construction.
+
+The run-consuming U-sweep closes the solve micro-lever space: an in-loop
+run detector with contiguous inner consumption measures WORSE everywhere
+including its target class (g2_circuit solve 16.0 -> 20.2ms despite
+20.75-entry average runs; asic_100k 4.3 -> 5.8ms; mimo46 93 -> 154us) —
+the detector's serialized index-compare chain costs more than the
+scatter it replaces, and the contiguous loop cannot vectorize without
+aliasing guarantees the frame does not offer.  Reverted unlanded.
+Combined with the pair-multiplexed solve negative, every micro-variant
+of the i32 sweeps now measures at or behind the plain scatter: the
+scalar solve is at its latency floor on this hardware.  The solve term's
+remaining levers are STRUCTURAL only — the ~17% dispatch preamble, a
+threaded solve for rows above the PTS floor, and supernodal solves on
+real panel substrates — plus reading CKTSO's solve mechanics from the
+papers before constructing anything further.
