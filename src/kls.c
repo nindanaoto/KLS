@@ -92107,7 +92107,18 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
     return solver->eg_tt_choice <= thread_count ? solver->eg_tt_choice
                                                 : thread_count;
   }
-  const int half = thread_count / 2 < 2 ? 2 : thread_count / 2;
+  /* With worker zero on the caller, the eight-core paper cohort selected
+     full width on every multi-block numeric (29/30 overall); the one narrow
+     winner, ACTIVSg70K, is single-block.  Keep that single-block trial, but
+     make the multi-block comparison a second full-width sample so it cannot
+     inject a known-slow half-width refactor into the measured SPICE cycle.
+     The following pair/quad dispatch trial still uses the winning full-width
+     sample as its incumbent. */
+  const int half =
+    thread_count == 8 && solver->symbolic != NULL &&
+      solver->symbolic->nblocks > 1u
+      ? thread_count
+      : (thread_count / 2 < 2 ? 2 : thread_count / 2);
   const int side =
     (solver->eg_tt_samples[0] + solver->eg_tt_samples[1]) & 1;
   solver->eg_tt_pending = side + 1;
