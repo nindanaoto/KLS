@@ -186,7 +186,16 @@ static KLS_ALWAYS_INLINE void kls_accumulate_scaled_dense(
    963K on run length per 20 refactors) while its runs average t=122 -
    the floors were tuned for big-factor panel staging economics and
    may over-reject on cache-resident small factors. */
+/* Per-refactor floor overrides: written by the refactor driver before
+   worker dispatch (single writer, constant during the parallel
+   region), read by the consume kernels. 0 = use env/default. */
+static UF_long kls_snode_floor_batch_override = 0;
+static UF_long kls_snode_floor_work_override = 0;
+
 static UF_long kls_snode_min_batch(void) {
+  if (kls_snode_floor_batch_override > 0) {
+    return kls_snode_floor_batch_override;
+  }
   static UF_long cached = -1;
   if (cached < 0) {
     const char *env = getenv("KLS_SNODE_MIN_BATCH_OVERRIDE");
@@ -199,6 +208,9 @@ static UF_long kls_snode_min_batch(void) {
 }
 
 static UF_long kls_snode_min_batch_work(void) {
+  if (kls_snode_floor_work_override > 0) {
+    return kls_snode_floor_work_override;
+  }
   static UF_long cached = -1;
   if (cached < 0) {
     const char *env = getenv("KLS_SNODE_MIN_BATCH_WORK_OVERRIDE");
@@ -416,6 +428,11 @@ struct kls_solver {
                                   -1 vetoed (Raj1-class value defect) */
   double reftr_pre, reftr_kernel, reftr_post;  /* KLS_TRACE_REFACTOR_US */
   int reftr_n;
+  int floor_choice;    /* batch-floor trial for mapped-path rows:
+                          0 undecided, 1 low floors, -1 defaults */
+  int floor_pending;   /* low-floor probe refactor outstanding */
+  int floor_wait;
+  double mapped_steady_min;
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_retrial;       /* near-miss rejection: 0 none, 1 armed for a
@@ -24684,6 +24701,10 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->eg_pair_pending = 0;
   memset(solver->eg_fuse_min, 0, sizeof(solver->eg_fuse_min));
   solver->egraph_tight_tol_state = 0;
+  solver->floor_choice = 0;
+  solver->floor_pending = 0;
+  solver->floor_wait = 0;
+  solver->mapped_steady_min = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   free_egraph_algorithm5_payoff_queue(solver);
@@ -130390,9 +130411,51 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
 #endif
   kls_run_deferred_factor_preps(solver, numeric_values);
+  /* batch-floor trial for mapped-path rows (bcircuit: low floors
+     measured -13.3% steady; hamrle2 -7% - per-matrix verdicts only).
+     Probe once at steady state, adopt on a decisive margin. */
+  if (solver->floor_choice > 0) {
+    kls_snode_floor_batch_override = 2;
+    kls_snode_floor_work_override = 48;
+  } else if (solver->floor_choice == 0 && !solver->floor_pending &&
+             solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
+             solver->mapped_steady_min > 0.0 &&
+             ++solver->floor_wait >= 8) {
+    solver->floor_pending = 1;
+    kls_snode_floor_batch_override = 2;
+    kls_snode_floor_work_override = 48;
+  }
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
+  if (kls_snode_floor_batch_override != 0) {
+    kls_snode_floor_batch_override = 0;
+    kls_snode_floor_work_override = 0;
+  }
+  if (solver->floor_pending) {
+    solver->floor_pending = 0;
+    if (solver->floor_choice == 0) {
+      solver->floor_choice =
+        ok && solver->common.status >= 0 &&
+            solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
+            elapsed < 0.95 * solver->mapped_steady_min
+          ? 1 : -1;
+      if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
+        fprintf(stderr,
+                "KLS batch-floor probe: %s (low %.3f ms vs mapped min"
+                " %.3f ms)\n",
+                solver->floor_choice > 0 ? "LOW" : "default",
+                1e3 * elapsed, 1e3 * solver->mapped_steady_min);
+      }
+    }
+  } else if (ok && solver->common.status >= 0 &&
+             solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
+             solver->floor_choice == 0) {
+    if (solver->mapped_steady_min <= 0.0 ||
+        elapsed < solver->mapped_steady_min) {
+      solver->mapped_steady_min = elapsed;
+    }
+  }
   solver->adaptive_refactor_seconds = elapsed;
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR) {
