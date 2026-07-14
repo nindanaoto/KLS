@@ -16273,3 +16273,16 @@ bounded by the ~3.25 vs ~3.6-3.8ms end-state gap seen across regimes.
 The window was reverted (it costs ~3% on ties); the rajat1x class is
 PARKED as regime-tied pending a block-alternation pass, and the
 min-of-two consult from the previous commit stands as the adopter.
+
+gemat12's 3.8x front-end decomposed: 12-13ms of pre-static entry work =
+match 4ms (load-bearing: 4920 of 4929 diagonals missing) + pattern 2ms
++ CHOOSE ~7ms + trial ~2ms, against CKTSO's ~3.2ms whole front.  The
+small-matched-class extension of the light-column AMD-only diet did NOT
+engage — the matched pattern's choose runs through a different function
+than the parallel-choose site carrying that diet (the small unmatched
+AMD-direct fast path in kls_choose_symbolic_inner also does not cover
+it); the edit was reverted as a dead gate.  OPEN: locate the choose
+entry the pre-static matched path actually calls for n~5k (the
+KLS_TRACE_PRESTATIC 'choose done' stage) and apply the same economics
+there — the class (gemat11/12, OPF_3754, opf_10000's 36ms analyze)
+carries 4-30ms of candidate work against 2-16ms trial factors.
