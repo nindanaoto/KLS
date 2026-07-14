@@ -350,6 +350,16 @@ struct kls_solver {
   double row_accept_solve_seconds[2];
   int row_accept_ref_samples[2];
   int row_accept_solve_samples[2];
+  double row_accept_ref_min[2];    /* fastest sample per side: engines warm
+                                      at different rates, so two-sample means
+                                      freeze cold-start noise into the
+                                      thousand-solve verdict */
+  double row_accept_solve_min[2];
+  double row_steady_solve_min;     /* post-adoption row-value solve floor */
+  int row_steady_solve_samples;
+  int row_publish_experiment;      /* fallback-adoption probe: 0 idle,
+                                      1 publish next refactor, 2 sample the
+                                      column-route solve, 3 concluded */
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_declined;      /* prep declined; do not retry */
@@ -24578,6 +24588,12 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
          sizeof(solver->row_accept_ref_samples));
   memset(solver->row_accept_solve_samples, 0,
          sizeof(solver->row_accept_solve_samples));
+  memset(solver->row_accept_ref_min, 0, sizeof(solver->row_accept_ref_min));
+  memset(solver->row_accept_solve_min, 0,
+         sizeof(solver->row_accept_solve_min));
+  solver->row_steady_solve_min = 0.0;
+  solver->row_steady_solve_samples = 0;
+  solver->row_publish_experiment = 0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   free_egraph_algorithm5_payoff_queue(solver);
@@ -57293,32 +57309,30 @@ static void kls_row_refactor_acceptance_try_decide(kls_solver *solver) {
   const int col_solves = solver->row_accept_solve_samples[0];
   const int row_solves = solver->row_accept_solve_samples[1];
   if (col_refs >= 2 && row_refs >= 2 && col_solves >= 2 && row_solves >= 2) {
+    /* Decide on per-side minima: the sides' engines warm at different
+       rates (a cold egraph sample can run 4x its steady rate), and a
+       mean over two samples freezes that noise into the verdict. The
+       minimum is each side's demonstrated steady rate. */
     const double col_pair =
-      solver->row_accept_ref_seconds[0] / (double)col_refs +
-      solver->row_accept_solve_seconds[0] / (double)col_solves;
+      solver->row_accept_ref_min[0] + solver->row_accept_solve_min[0];
     const double row_pair =
-      solver->row_accept_ref_seconds[1] / (double)row_refs +
-      solver->row_accept_solve_seconds[1] / (double)row_solves;
+      solver->row_accept_ref_min[1] + solver->row_accept_solve_min[1];
     solver->row_accept_decision = row_pair < col_pair * 0.98 ? 1 : -1;
     if (solver->row_accept_decision > 0) {
       /* The verdict pairs also measured both solve routes: when the
          published column solve decisively beat the row-value solve,
          publish even where the structural gate would keep row values
          (pre2: row solve 168ms vs column 64ms at +~20ms publish). */
-      const double col_solve =
-        solver->row_accept_solve_seconds[0] / (double)col_solves;
-      const double row_solve =
-        solver->row_accept_solve_seconds[1] / (double)row_solves;
-      solver->row_accept_publish_preferred = col_solve < 0.8 * row_solve;
+      solver->row_accept_publish_preferred =
+        solver->row_accept_solve_min[0] <
+          0.8 * solver->row_accept_solve_min[1];
     }
   } else if (col_refs + row_refs >= 8 && col_refs >= 2 && row_refs >= 2) {
     /* Solves never arrived (pure refactor burst): adopt only on a
        decisive refactor margin, mirroring the pts_ref precedent. */
-    const double col_ref =
-      solver->row_accept_ref_seconds[0] / (double)col_refs;
-    const double row_ref =
-      solver->row_accept_ref_seconds[1] / (double)row_refs;
-    solver->row_accept_decision = row_ref < col_ref * 0.75 ? 1 : -1;
+    solver->row_accept_decision =
+      solver->row_accept_ref_min[1] < solver->row_accept_ref_min[0] * 0.75
+        ? 1 : -1;
   }
   if (solver->row_accept_decision != 0 &&
       getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
@@ -57361,6 +57375,10 @@ static void kls_row_refactor_acceptance_record_refactor(kls_solver *solver,
   }
   solver->row_accept_ref_seconds[side] += seconds;
   solver->row_accept_ref_samples[side]++;
+  if (solver->row_accept_ref_samples[side] == 1 ||
+      seconds < solver->row_accept_ref_min[side]) {
+    solver->row_accept_ref_min[side] = seconds;
+  }
   solver->row_accept_pending_side = side + 1;
   if (side == 1 && solver->row_accept_ref_samples[0] > 0) {
     /* One decisively losing row refactor ends the experiment before a
@@ -57387,8 +57405,81 @@ static void kls_row_refactor_acceptance_record_solve(kls_solver *solver,
   const int side = solver->row_accept_pending_side - 1;
   solver->row_accept_solve_seconds[side] += seconds;
   solver->row_accept_solve_samples[side]++;
+  if (solver->row_accept_solve_samples[side] == 1 ||
+      seconds < solver->row_accept_solve_min[side]) {
+    solver->row_accept_solve_min[side] = seconds;
+  }
   solver->row_accept_pending_side = 0;
   kls_row_refactor_acceptance_try_decide(solver);
+}
+
+/* Post-adoption audit of the row-value solve. The pair verdict is two
+   samples per side; the steady row solve can later cost multiples of
+   the column route (solve-partition mode shifts, pool dispatch at high
+   thread counts) with nothing left to correct it — and the solve is
+   the term a SPICE cycle charges 99x. Watch the adopted row solve's
+   floor: flip to publish-for-solve when the measured column route
+   stays decisively cheaper, and when the verdict never saw column
+   solves, pay for one published refactor to measure the column route
+   before letting the row solve stand. */
+static void kls_row_solve_steady_audit(kls_solver *solver, double seconds) {
+  if (solver == NULL || solver->row_accept_decision <= 0 ||
+      solver->row_accept_publish_preferred ||
+      solver->row_publish_experiment == 3 ||
+      kls_row_refactor_env_enabled()) {
+    return;
+  }
+  const int trace = getenv("KLS_TRACE_ROW_ACCEPT") != NULL;
+  if (solver->row_refactor_last_row_solve) {
+    solver->row_steady_solve_samples++;
+    if (solver->row_steady_solve_samples == 1 ||
+        seconds < solver->row_steady_solve_min) {
+      solver->row_steady_solve_min = seconds;
+    }
+    if (solver->row_steady_solve_samples < 3 ||
+        solver->row_publish_experiment != 0) {
+      return;
+    }
+    if (solver->row_accept_solve_samples[0] > 0) {
+      if (solver->row_accept_solve_min[0] <
+          0.8 * solver->row_steady_solve_min) {
+        solver->row_accept_publish_preferred = 1;
+      }
+      solver->row_publish_experiment = 3;
+      if (trace) {
+        fprintf(stderr,
+                "KLS row-solve audit: %s (row steady %.3f ms over %d,"
+                " column trial %.3f ms)\n",
+                solver->row_accept_publish_preferred
+                  ? "PUBLISH" : "row stands",
+                1e3 * solver->row_steady_solve_min,
+                solver->row_steady_solve_samples,
+                1e3 * solver->row_accept_solve_min[0]);
+      }
+    } else {
+      solver->row_publish_experiment = 1;
+      if (trace) {
+        fprintf(stderr,
+                "KLS row-solve audit: probing column route"
+                " (row steady %.3f ms over %d, no column samples)\n",
+                1e3 * solver->row_steady_solve_min,
+                solver->row_steady_solve_samples);
+      }
+    }
+  } else if (solver->row_publish_experiment == 2) {
+    /* this solve ran the column route off the published values */
+    solver->row_accept_publish_preferred =
+      seconds < 0.9 * solver->row_steady_solve_min;
+    solver->row_publish_experiment = 3;
+    if (trace) {
+      fprintf(stderr,
+              "KLS row-solve audit: %s (column probe %.3f ms vs row"
+              " steady %.3f ms)\n",
+              solver->row_accept_publish_preferred
+                ? "PUBLISH" : "row stands",
+              1e3 * seconds, 1e3 * solver->row_steady_solve_min);
+    }
+  }
 }
 
 static int kls_row_refactor_should_defer_value_scatter(
@@ -70095,6 +70186,13 @@ static int kls_row_refactor_should_publish_for_solve(
        measurement is the evidence, whichever column path produced it. */
     return 1;
   }
+  if (solver->row_publish_experiment == 1 ||
+      solver->row_publish_experiment == 2) {
+    /* the steady audit needs one column-route solve to compare against
+       an adoption that never measured its solves; keep publishing until
+       that solve lands and concludes the probe */
+    return 1;
+  }
   if (solver->symbolic->nblocks == 1u && solver->row_solve_partition_ready) {
     return 0;
   }
@@ -70813,6 +70911,9 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       solver->row_refactor_values_dirty = 0;
       solver->stats.row_refactor_values_dirty = 0;
       published_for_solve = 1;
+      if (solver->row_publish_experiment == 1) {
+        solver->row_publish_experiment = 2;
+      }
     } else if (shared->row_refactor_lazy_value_scatter) {
       kls_record_row_refactor_lazy_value_scatter_run(solver);
     } else if (!kls_scatter_row_refactor_l_values(solver) ||
@@ -129031,7 +129132,11 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   KLS_ENTRY_PHASE("auto_rescale")
   if (!diagnostics_have_flops || !diagnostics_have_rcond) {
-    kls_update_numeric_diagnostics(solver, 1);
+    if (diagnostics_have_flops && solver->metis_race == NULL) {
+      kls_update_numeric_rcond(solver);
+    } else {
+      kls_update_numeric_diagnostics(solver, 1);
+    }
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
@@ -129091,7 +129196,11 @@ int kls_factor(kls_solver *solver, const double *values) {
       t_ph = t_now;                                                       \
     }
     if (!diagnostics_have_flops || !diagnostics_have_rcond) {
-      kls_update_numeric_diagnostics(solver, 1);
+      if (diagnostics_have_flops && solver->metis_race == NULL) {
+        kls_update_numeric_rcond(solver);
+      } else {
+        kls_update_numeric_diagnostics(solver, 1);
+      }
     }
     KLS_PHASE("diag")
     if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
@@ -129761,6 +129870,7 @@ refine_skip:;
   if (ok && !kernel_transpose && nrhs == 1 && !solver->in_solve_refinement) {
     kls_row_refactor_acceptance_record_solve(solver,
                                              solver->stats.solve_seconds);
+    kls_row_solve_steady_audit(solver, solver->stats.solve_seconds);
   }
   solver->stats.last_kernel_status = (int)solver->common.status;
   solver->stats.memory_bytes = solver->common.memusage;
