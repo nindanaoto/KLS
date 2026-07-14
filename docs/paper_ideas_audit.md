@@ -16286,3 +16286,14 @@ entry the pre-static matched path actually calls for n~5k (the
 KLS_TRACE_PRESTATIC 'choose done' stage) and apply the same economics
 there — the class (gemat11/12, OPF_3754, opf_10000's 36ms analyze)
 carries 4-30ms of candidate work against 2-16ms trial factors.
+
+Correction to the gemat12 anatomy: the pre-static 'choose' stage is ~4ms
+and is ALREADY the dieted path — the small fast path in the inner
+chooser fires on the matched (full-diagonal) pattern and the time is one
+AMD+BTF analyze on 33K nonzeros, not a candidate competition.  gemat12's
+12ms front decomposes irreducibly at the current architecture: match 4ms
+(4920 missing diagonals, load-bearing), analyze ~4ms, trial factor ~2ms,
+first factor ~2ms.  CKTSO's whole front is ~3.2ms — closing further
+means knowing what THEIR 3.2ms contains (does their front skip a trial
+factor? faster matching?), a papers/CK-trace question, not another KLS
+gate.  The class is parked at its measurement floor.
