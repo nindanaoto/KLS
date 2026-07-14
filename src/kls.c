@@ -369,6 +369,20 @@ struct kls_solver {
   UF_long *refactor_block_start;
   UF_long *refactor_col_block;
   UF_long *snode_run_end;
+  /* padded-supernode panels (B'-CORE stage 1, KLS_ENABLE_PADDED_PANELS):
+     relaxed runs' union patterns, per-column slot maps, and panel value
+     storage refreshed by the mapped kernel at column finalize. Write-side
+     only until the stage-2 consume lands; numeric-lifetime state. */
+  UF_long padded_run_count;
+  UF_long *padded_run_of;      /* per column: run id + 1, or 0 */
+  UF_long *padded_run_start;   /* run -> first global column */
+  UF_long *padded_run_len;
+  UF_long *padded_union_ptr;   /* run -> [.,.) into padded_union_rows */
+  UF_long *padded_union_rows;  /* sorted union patterns (global rows) */
+  UF_long *padded_slot_ptr;    /* per column: offset into padded_slots */
+  UF_long *padded_slots;       /* per L entry: union slot index */
+  UF_long *padded_panel_ptr;   /* run -> offset into panel values */
+  double *padded_panel_values;
   int snode_prepared;
   int snode_numeric_pre_sorted;
   int32_t *i32solve_l;      /* flat i32 L row streams (solve fast path) */
@@ -2008,6 +2022,7 @@ typedef struct kls_parallel_refactor_shared {
   const UF_long *map_input_pos;
   const UF_long *map_block_start;
   const UF_long *snode_run_end;
+  const struct kls_solver *padded_src;  /* padded-panel refresh source */
   const double *values;
   const trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_numeric *numeric;
@@ -23891,6 +23906,23 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
       lx[p] = lij;
       x[i] = 0.0;
     }
+    if (shared->padded_src != NULL) {
+      const kls_solver *ps = shared->padded_src;
+      const UF_long run1 = ps->padded_run_of[global_col];
+      if (run1 != 0u) {
+        const UF_long run = run1 - 1u;
+        const UF_long ulen_run =
+          ps->padded_union_ptr[run + 1u] - ps->padded_union_ptr[run];
+        double *panel_row = ps->padded_panel_values +
+          ps->padded_panel_ptr[run] +
+          (global_col - ps->padded_run_start[run]) * ulen_run;
+        const UF_long *slots =
+          ps->padded_slots + ps->padded_slot_ptr[global_col];
+        for (UF_long p = 0; p < lcol_len; ++p) {
+          panel_row[slots[p]] = lx[p];
+        }
+      }
+    }
   }
 }
 
@@ -24374,6 +24406,7 @@ static int run_refactor_pool(kls_solver *solver,
   shared->map_input_pos = solver->refactor_input_pos;
   shared->map_block_start = solver->refactor_block_start;
   shared->snode_run_end = solver->snode_run_end;
+  shared->padded_src = solver->padded_run_of != NULL ? solver : NULL;
   shared->values = numeric_values;
   shared->symbolic = solver->symbolic;
   shared->numeric = solver->numeric;
@@ -24543,6 +24576,25 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   }
   free(solver->snode_run_end);
   solver->snode_run_end = NULL;
+  free(solver->padded_run_of);
+  free(solver->padded_run_start);
+  free(solver->padded_run_len);
+  free(solver->padded_union_ptr);
+  free(solver->padded_union_rows);
+  free(solver->padded_slot_ptr);
+  free(solver->padded_slots);
+  free(solver->padded_panel_ptr);
+  free(solver->padded_panel_values);
+  solver->padded_run_of = NULL;
+  solver->padded_run_start = NULL;
+  solver->padded_run_len = NULL;
+  solver->padded_union_ptr = NULL;
+  solver->padded_union_rows = NULL;
+  solver->padded_slot_ptr = NULL;
+  solver->padded_slots = NULL;
+  solver->padded_panel_ptr = NULL;
+  solver->padded_panel_values = NULL;
+  solver->padded_run_count = 0;
   solver->snode_prepared = 0;
   solver->snode_numeric_pre_sorted = 0;
 }
@@ -95282,6 +95334,7 @@ static int kls_supernodal_mapped_refactor(kls_solver *solver,
   shared.map_input_pos = solver->refactor_input_pos;
   shared.map_block_start = solver->refactor_block_start;
   shared.snode_run_end = solver->snode_run_end;
+  shared.padded_src = solver->padded_run_of != NULL ? solver : NULL;
   shared.values = numeric_values;
   shared.symbolic = solver->symbolic;
   shared.numeric = solver->numeric;
@@ -95446,6 +95499,7 @@ static int kls_mapped_refactor(kls_solver *solver,
   shared.map_input_pos = solver->refactor_input_pos;
   shared.map_block_start = solver->refactor_block_start;
   shared.snode_run_end = solver->snode_run_end;
+  shared.padded_src = solver->padded_run_of != NULL ? solver : NULL;
   shared.values = numeric_values;
   shared.symbolic = solver->symbolic;
   shared.numeric = solver->numeric;
@@ -98168,6 +98222,248 @@ static UF_long kls_parallel_lu_sort(kls_solver *solver) {
   return 1;
 }
 
+/* B'-CORE stage 1 build: relaxed runs (column k+1 within z symmetric-
+   difference entries of column k's tail, chain entry required), their
+   sorted union patterns, per-column slot maps, and zeroed panel value
+   storage. Write-side only: the mapped kernel refreshes panel rows at
+   column finalize; the stage-2 consume reads them. Census (09bd408):
+   bcircuit z=2 covers 79% of columns at +9.9%% pad. */
+static void kls_build_padded_panels(kls_solver *solver) {
+  if (solver == NULL || solver->padded_run_of != NULL ||
+      getenv("KLS_ENABLE_PADDED_PANELS") == NULL ||
+      solver->symbolic == NULL || solver->numeric == NULL) {
+    return;
+  }
+  const char *zenv = getenv("KLS_PADDED_Z");
+  const UF_long z = zenv != NULL ? (UF_long)atol(zenv) : 2u;
+  const UF_long n = solver->n;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const UF_long union_cap = 4096u;
+  UF_long *run_of = (UF_long *)calloc((size_t)n, sizeof(*run_of));
+  UF_long *slot_ptr = (UF_long *)calloc((size_t)n + 1u, sizeof(*slot_ptr));
+  UF_long *mark = (UF_long *)calloc((size_t)n, sizeof(*mark));
+  UF_long *ulist = (UF_long *)malloc((size_t)n * sizeof(*ulist));
+  if (run_of == NULL || slot_ptr == NULL || mark == NULL || ulist == NULL) {
+    goto fail;
+  }
+  {
+    /* pass A: detect runs, count unions/slots/panel size */
+    UF_long nruns = 0, union_total = 0, slot_total = 0;
+    double panel_total = 0.0;
+    const double lnz_total = (double)numeric->lnz + 1.0;
+    for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+      const UF_long k1 = symbolic->R[block];
+      const UF_long nk = symbolic->R[block + 1u] - k1;
+      if (nk < 2u) {
+        continue;
+      }
+      UF_long *lip = numeric->Lip + k1;
+      UF_long *llen = numeric->Llen + k1;
+      double *lu = (double *)numeric->LUbx[block];
+      if (lu == NULL) {
+        continue;
+      }
+      UF_long s = 0;
+      for (UF_long k = 0; k < nk; ++k) {
+        int ext = 0;
+        if (k + 1u < nk && llen[k] >= 1) {
+          UF_long *li, *li2;
+          double *lx, *lx2;
+          UF_long l1, l2;
+          kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &l1);
+          kls_klu_get_pointer(lu, lip, llen, k + 1u, &li2, &lx2, &l2);
+          UF_long a = li[0] == k + 1u ? 1u : 0u, b = 0, mism = 0;
+          if (li[0] == k + 1u) {
+            while (a < l1 && b < l2) {
+              if (li[a] == li2[b]) {
+                a++, b++;
+              } else if (li[a] < li2[b]) {
+                a++, mism++;
+              } else {
+                b++, mism++;
+              }
+            }
+            mism += (l1 - a) + (l2 - b);
+            ext = mism <= z;
+          }
+        }
+        if (!ext) {
+          if (k > s) {
+            /* run [s..k]: union via marks */
+            UF_long ulen_run = 0;
+            int over = 0;
+            for (UF_long c = s; c <= k && !over; ++c) {
+              UF_long *li;
+              double *lx;
+              UF_long l1;
+              kls_klu_get_pointer(lu, lip, llen, c, &li, &lx, &l1);
+              for (UF_long p = 0; p < l1; ++p) {
+                if (mark[li[p]] == 0u) {
+                  mark[li[p]] = 1u;
+                  if (ulen_run >= union_cap) {
+                    over = 1;
+                    break;
+                  }
+                  ulist[ulen_run++] = li[p];
+                }
+              }
+            }
+            for (UF_long u = 0; u < ulen_run; ++u) {
+              mark[ulist[u]] = 0u;
+            }
+            if (!over) {
+              const UF_long len = k - s + 1u;
+              panel_total += (double)len * (double)ulen_run;
+              if (panel_total > 2.5 * lnz_total) {
+                goto fail; /* padding economics out of budget */
+              }
+              nruns++;
+              union_total += ulen_run;
+              for (UF_long c = s; c <= k; ++c) {
+                run_of[k1 + c] = nruns; /* 1-based */
+                slot_total += llen[c];
+              }
+            }
+          }
+          s = k + 1u;
+        }
+      }
+    }
+    if (nruns == 0u) {
+      goto fail;
+    }
+    solver->padded_run_count = nruns;
+    solver->padded_run_start =
+      (UF_long *)malloc((size_t)nruns * sizeof(UF_long));
+    solver->padded_run_len =
+      (UF_long *)malloc((size_t)nruns * sizeof(UF_long));
+    solver->padded_union_ptr =
+      (UF_long *)calloc((size_t)nruns + 1u, sizeof(UF_long));
+    solver->padded_union_rows =
+      (UF_long *)malloc((size_t)union_total * sizeof(UF_long));
+    solver->padded_slots =
+      (UF_long *)malloc((size_t)slot_total * sizeof(UF_long));
+    solver->padded_panel_ptr =
+      (UF_long *)calloc((size_t)nruns + 1u, sizeof(UF_long));
+    solver->padded_panel_values =
+      (double *)calloc((size_t)panel_total, sizeof(double));
+    if (solver->padded_run_start == NULL || solver->padded_run_len == NULL ||
+        solver->padded_union_ptr == NULL ||
+        solver->padded_union_rows == NULL || solver->padded_slots == NULL ||
+        solver->padded_panel_ptr == NULL ||
+        solver->padded_panel_values == NULL) {
+      goto fail_arrays;
+    }
+    /* pass B: fill (same detection; runs enumerate identically) */
+    UF_long run = 0, upos = 0, spos = 0;
+    double ppos = 0.0;
+    for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+      const UF_long k1 = symbolic->R[block];
+      const UF_long nk = symbolic->R[block + 1u] - k1;
+      if (nk < 2u) {
+        continue;
+      }
+      UF_long *lip = numeric->Lip + k1;
+      UF_long *llen = numeric->Llen + k1;
+      double *lu = (double *)numeric->LUbx[block];
+      if (lu == NULL) {
+        continue;
+      }
+      for (UF_long k = 0; k < nk; ++k) {
+        if (run_of[k1 + k] != run + 1u || (k > 0 && run_of[k1 + k - 1u] == run + 1u)) {
+          continue; /* only handle each run at its first column */
+        }
+        UF_long e = k;
+        while (e + 1u < nk && run_of[k1 + e + 1u] == run + 1u) {
+          e++;
+        }
+        UF_long ulen_run = 0;
+        for (UF_long c = k; c <= e; ++c) {
+          UF_long *li;
+          double *lx;
+          UF_long l1;
+          kls_klu_get_pointer(lu, lip, llen, c, &li, &lx, &l1);
+          for (UF_long p = 0; p < l1; ++p) {
+            if (mark[li[p]] == 0u) {
+              mark[li[p]] = 1u;
+              ulist[ulen_run++] = li[p];
+            }
+          }
+        }
+        /* sort the union (insertion into sorted output via simple qsort) */
+        for (UF_long i = 1; i < ulen_run; ++i) {
+          const UF_long v = ulist[i];
+          UF_long j2 = i;
+          while (j2 > 0 && ulist[j2 - 1u] > v) {
+            ulist[j2] = ulist[j2 - 1u];
+            j2--;
+          }
+          ulist[j2] = v;
+        }
+        for (UF_long u = 0; u < ulen_run; ++u) {
+          mark[ulist[u]] = (UF_long)(u + 1u); /* slot+1 while filling */
+          solver->padded_union_rows[upos + u] = ulist[u];
+        }
+        solver->padded_run_start[run] = k1 + k;
+        solver->padded_run_len[run] = e - k + 1u;
+        solver->padded_union_ptr[run + 1u] = upos + ulen_run;
+        solver->padded_panel_ptr[run + 1u] =
+          (UF_long)(ppos + (double)(e - k + 1u) * (double)ulen_run);
+        for (UF_long c = k; c <= e; ++c) {
+          UF_long *li;
+          double *lx;
+          UF_long l1;
+          kls_klu_get_pointer(lu, lip, llen, c, &li, &lx, &l1);
+          slot_ptr[k1 + c] = spos;
+          for (UF_long p = 0; p < l1; ++p) {
+            solver->padded_slots[spos++] = mark[li[p]] - 1u;
+          }
+        }
+        for (UF_long u = 0; u < ulen_run; ++u) {
+          mark[ulist[u]] = 0u;
+        }
+        upos += ulen_run;
+        ppos += (double)(e - k + 1u) * (double)ulen_run;
+        run++;
+      }
+    }
+    solver->padded_slot_ptr = slot_ptr;
+    solver->padded_run_of = run_of;
+    free(mark);
+    free(ulist);
+    if (getenv("KLS_TRACE_SNODE") != NULL) {
+      fprintf(stderr,
+              "KLS padded panels: z=%ld runs=%ld unions=%ld slots=%ld"
+              " panel_doubles=%.3g\n",
+              (long)z, (long)nruns, (long)union_total, (long)slot_total,
+              ppos);
+    }
+    return;
+  }
+fail_arrays:
+  free(solver->padded_run_start);
+  free(solver->padded_run_len);
+  free(solver->padded_union_ptr);
+  free(solver->padded_union_rows);
+  free(solver->padded_slots);
+  free(solver->padded_panel_ptr);
+  free(solver->padded_panel_values);
+  solver->padded_run_start = NULL;
+  solver->padded_run_len = NULL;
+  solver->padded_union_ptr = NULL;
+  solver->padded_union_rows = NULL;
+  solver->padded_slots = NULL;
+  solver->padded_panel_ptr = NULL;
+  solver->padded_panel_values = NULL;
+  solver->padded_run_count = 0;
+fail:
+  free(run_of);
+  free(slot_ptr);
+  free(mark);
+  free(ulist);
+}
+
 static void kls_maybe_prepare_snode_panels(kls_solver *solver,
                                            double *elapsed) {
   if (solver == NULL || elapsed == NULL || solver->snode_prepared ||
@@ -98326,6 +98622,7 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
   } else {
     solver->snode_run_end = run_end;
   }
+  kls_build_padded_panels(solver);
   if (getenv("KLS_TRACE_SNODE") != NULL) {
     long hist[7] = {0, 0, 0, 0, 0, 0, 0};
     long nrun = 0;
@@ -128837,6 +129134,7 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   shared.map_input_pos = solver->refactor_input_pos;
   shared.map_block_start = solver->refactor_block_start;
   shared.snode_run_end = solver->snode_run_end;
+  shared.padded_src = solver->padded_run_of != NULL ? solver : NULL;
   shared.values = numeric_values;
   shared.symbolic = solver->symbolic;
   shared.numeric = solver->numeric;
@@ -130594,6 +130892,45 @@ int kls_refactor(kls_solver *solver, const double *values) {
      user-visible timing.  The private adaptive sample above deliberately
      excludes that consultation overhead; stats measures the complete call. */
   solver->stats.refactor_seconds = kls_now_seconds() - refactor_call_start;
+  if (ok && solver->common.status >= 0 && solver->padded_run_of != NULL &&
+      getenv("KLS_VERIFY_PADDED_PANELS") != NULL) {
+    /* stage-1 harness: every refreshed panel row must equal its
+       column's values on its slots, zeros elsewhere */
+    long bad = 0, checked = 0;
+    const trilinos_klu_l_symbolic *sym = solver->symbolic;
+    for (UF_long run = 0; run < solver->padded_run_count; ++run) {
+      const UF_long gs = solver->padded_run_start[run];
+      const UF_long len = solver->padded_run_len[run];
+      const UF_long ulen_run =
+        solver->padded_union_ptr[run + 1u] - solver->padded_union_ptr[run];
+      UF_long block = 0;
+      while (sym->R[block + 1u] <= gs) {
+        block++;
+      }
+      const UF_long k1 = sym->R[block];
+      double *lu = (double *)solver->numeric->LUbx[block];
+      for (UF_long c = 0; c < len; ++c) {
+        UF_long *li;
+        double *lx;
+        UF_long l1;
+        kls_klu_get_pointer(lu, solver->numeric->Lip + k1,
+                            solver->numeric->Llen + k1, gs + c - k1,
+                            &li, &lx, &l1);
+        const double *row = solver->padded_panel_values +
+          solver->padded_panel_ptr[run] + c * ulen_run;
+        const UF_long *slots =
+          solver->padded_slots + solver->padded_slot_ptr[gs + c];
+        for (UF_long p = 0; p < l1; ++p) {
+          checked++;
+          if (row[slots[p]] != lx[p]) {
+            bad++;
+          }
+        }
+      }
+    }
+    fprintf(stderr, "KLS padded verify: %ld checked %ld BAD\n",
+            checked, bad);
+  }
   {
     static const char *trace_us;
     static int trace_us_checked;
