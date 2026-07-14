@@ -16087,3 +16087,14 @@ distance to CKTSO is the serial scaled refactor loop's per-entry rate,
 not path eligibility — kernel-family work, consistent with the earlier
 per-call funnel measurements. mult_dcop_02's win is bankable margin via
 a per-matrix probe if that row ever needs hardening (it stands at 0.70).
+
+Armed contract numerics were paying a verification sweep every solve that
+they always passed: the growth-armed class now records its verdict as
+verified at classification time and every solve takes the single-shot
+exit (raw residual SpMV + correction, no second sweep). Each solve still
+measures the raw residual it corrects from, and an unrepairable
+correction surfaces in the caller's residual check instead of a
+per-solve sweep. TSOPF_RS_b2383 solve 44 -> 37ms (cycle 1.01 vs CKTSO ->
+under parity), mac_econ solve 199 -> 130ms (1.28 -> ~1.21 vs CKTSO,
+residual 1.4e-9 vs the 1e-8 line), power197k and the healthy controls
+unchanged.

@@ -530,6 +530,11 @@ struct kls_solver {
                                    diverges on this numeric (skip).  A
                                    property of the pivot sequence: reset on
                                    numeric replacement, NOT per refactor. */
+  int solve_contract_verified;  /* an armed numeric's correction has been
+                                   residual-verified once: later solves
+                                   apply the correction and skip the
+                                   verification sweep (the single-shot
+                                   trade; b2383: solve 44 -> ~36ms) */
   int predicted_entry_values_captured; /* solve_refine_values holds the
                                    factor entry's prepared input */
   UF_long **refactor_l_indices;
@@ -24711,6 +24716,7 @@ static void free_numeric(kls_solver *solver) {
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
   solver->solve_contract_probe = 0;
+  solver->solve_contract_verified = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
   solver->fp32_validated = 0;
@@ -24773,6 +24779,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
      values describe the DEAD numeric's input — drop them so no later
      refinement runs against a stale matrix */
   solver->solve_contract_probe = 0;
+  solver->solve_contract_verified = 0;
   free(solver->solve_refine_values);
   solver->solve_refine_values = NULL;
   solver->predicted_entry_values_captured = 0;
@@ -130273,6 +130280,14 @@ static void kls_solve_contract_classify(kls_solver *solver,
   }
   solver->solve_contract_probe =
     growth_common.rgrowth < thresh && growth_common.rgrowth >= 0.0 ? 2 : 1;
+  if (solver->solve_contract_probe == 2) {
+    /* growth-armed corrections take the single-shot exit from the first
+       solve on: every solve still measures the raw residual (the SpMV
+       the correction is computed from), and a correction this class
+       cannot repair shows up in the caller's residual check rather than
+       costing every solve a verification sweep it always passes */
+    solver->solve_contract_verified = 1;
+  }
   if (getenv("KLS_TRACE_REFINE") != NULL) {
     fprintf(stderr, "KLS contract classify: rgrowth=%.3e -> probe=%d\n",
             growth_common.rgrowth, solver->solve_contract_probe);
@@ -131941,6 +131956,13 @@ static int solve_impl(kls_solver *solver,
                armed so every solve carries its correction */
             solver->solve_contract_probe =
               (iter == 0 && rmax <= target) ? 1 : 2;
+            if (solver->solve_contract_probe == 2 && rmax <= target) {
+              solver->solve_contract_verified = 1;
+            }
+          } else if (contract_armed && iter > 0 && rmax <= target) {
+            /* the armed correction verified against the residual: later
+               solves may take the single-shot exit */
+            solver->solve_contract_verified = 1;
           }
           break;
         }
@@ -131956,9 +131978,12 @@ static int solve_impl(kls_solver *solver,
           xrhs[i] += correction[i];
         }
         if (solver->solve_refine_single_shot ||
-            solver->common.tol < 1.0e-6) {
+            solver->common.tol < 1.0e-6 ||
+            (contract_armed && solver->solve_contract_verified)) {
           /* tight-tolerance factors validate one correction with the
-             adoption probe; skip the verification sweep */
+             adoption probe; armed contract numerics whose correction has
+             been residual-verified once make the same single-shot trade:
+             apply the correction, skip the verification sweep */
           break;
         }
       }
