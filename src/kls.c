@@ -2491,6 +2491,14 @@ typedef struct kls_match_entry {
 
 static int kls_build_refactor_schedule(kls_solver *solver);
 static int kls_i32_solve_ready(kls_solver *solver);
+static UF_long kls_padded_run_consume(const kls_solver *ps,
+                                      UF_long k1,
+                                      UF_long j,
+                                      const UF_long *ui,
+                                      double *ux,
+                                      UF_long ucol_len,
+                                      UF_long up,
+                                      double *restrict x);
 static int solve_impl(kls_solver *solver,
                       int transpose,
                       int64_t nrhs,
@@ -23851,6 +23859,14 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
           continue;
         }
       }
+      if (shared->padded_src != NULL) {
+        const UF_long consumed = kls_padded_run_consume(
+          shared->padded_src, k1, j, ui, ux, ucol_len, up, x);
+        if (consumed != 0u) {
+          up += consumed;
+          continue;
+        }
+      }
       const double ujk = x[j];
       x[j] = 0.0;
       ux[up] = ujk;
@@ -24042,6 +24058,14 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
       if (snode_run_end != NULL && !kls_batch_consume_disabled()) {
         const UF_long consumed = kls_snode_batch_consume(
           lu, lip, llen, ui, ux, ucol_len, up, x, k1, snode_run_end);
+        if (consumed != 0u) {
+          up += consumed;
+          continue;
+        }
+      }
+      if (shared->padded_src != NULL) {
+        const UF_long consumed = kls_padded_run_consume(
+          shared->padded_src, k1, j, ui, ux, ucol_len, up, x);
         if (consumed != 0u) {
           up += consumed;
           continue;
@@ -98239,6 +98263,100 @@ static UF_long kls_parallel_lu_sort(kls_solver *solver) {
   return 1;
 }
 
+/* B'-CORE stage 2: dense consume over a padded run. The consumer's U
+   positions must hold the run contiguously from producer j to the run
+   end. Multipliers are computed sequentially using the panel's
+   within-run slots (the sorted union's first (len-1) rows are exactly
+   s+1..e by the chain property, so row r's slot is r-s-1), then the
+   tail accumulates chunked over contiguous panel rows - the strict
+   batch kernel's shape at relaxed coverage, pad slots contributing
+   exact zeros. Returns producers consumed or 0. */
+static UF_long kls_padded_run_consume(const kls_solver *ps,
+                                      UF_long k1,
+                                      UF_long j,
+                                      const UF_long *ui,
+                                      double *ux,
+                                      UF_long ucol_len,
+                                      UF_long up,
+                                      double *restrict x) {
+  const UF_long run1 = ps->padded_run_of[k1 + j];
+  if (run1 == 0u) {
+    return 0;
+  }
+  const UF_long run = run1 - 1u;
+  const UF_long s = ps->padded_run_start[run] - k1;
+  const UF_long len = ps->padded_run_len[run];
+  const UF_long e = s + len - 1u;
+  UF_long tmax = e - j + 1u;
+  if (tmax > ucol_len - up) {
+    tmax = ucol_len - up;
+  }
+  if (tmax > 64u) {
+    tmax = 64u;
+  }
+  UF_long t = 1;
+  while (t < tmax && ui[up + t] == j + t) {
+    t++;
+  }
+  if (t < 2u) {
+    return 0;
+  }
+  const UF_long ubase = ps->padded_union_ptr[run];
+  const UF_long ulen_run = ps->padded_union_ptr[run + 1u] - ubase;
+  if (t * ulen_run < 192u) {
+    return 0;
+  }
+  const UF_long *urows = ps->padded_union_rows + ubase;
+  const double *panel =
+    ps->padded_panel_values + ps->padded_panel_ptr[run];
+  const UF_long within = len - 1u; /* union rows s+1..e occupy [0,within) */
+  double xs[64];
+  for (UF_long i = 0; i < t; ++i) {
+    xs[i] = x[j + i];
+    x[j + i] = 0.0;
+  }
+  for (UF_long i = 0; i < t; ++i) {
+    const double u = xs[i];
+    ux[up + i] = u;
+    if (u == 0.0) {
+      continue;
+    }
+    const double *row = panel + (j + i - s) * ulen_run;
+    /* within-run updates: slots of rows j+i+1..e are contiguous;
+       rows beyond the consumed prefix update the live workspace */
+    for (UF_long r = j + i + 1u; r <= e; ++r) {
+      const double v = u * row[r - s - 1u];
+      if (r < j + t) {
+        xs[r - j] -= v;
+      } else {
+        x[r] -= v;
+      }
+    }
+  }
+  /* shared tail: union slots [within, ulen_run) */
+  for (UF_long q0 = within; q0 < ulen_run; q0 += 32u) {
+    const UF_long qc = ulen_run - q0 < 32u ? ulen_run - q0 : 32u;
+    double acc[32];
+    for (UF_long q = 0; q < qc; ++q) {
+      acc[q] = 0.0;
+    }
+    for (UF_long i = 0; i < t; ++i) {
+      const double u = xs[i];
+      if (u == 0.0) {
+        continue;
+      }
+      const double *row = panel + (j + i - s) * ulen_run + q0;
+      for (UF_long q = 0; q < qc; ++q) {
+        acc[q] += row[q] * u;
+      }
+    }
+    for (UF_long q = 0; q < qc; ++q) {
+      x[urows[q0 + q]] -= acc[q];
+    }
+  }
+  return t;
+}
+
 /* B'-CORE stage 1 build: relaxed runs (column k+1 within z symmetric-
    difference entries of column k's tail, chain entry required), their
    sorted union patterns, per-column slot maps, and zeroed panel value
@@ -98331,15 +98449,26 @@ static void kls_build_padded_panels(kls_solver *solver) {
             }
             if (!over) {
               const UF_long len = k - s + 1u;
-              panel_total += (double)len * (double)ulen_run;
-              if (panel_total > 2.5 * lnz_total) {
-                goto fail; /* padding economics out of budget */
+              static UF_long min_work = 0;
+              if (min_work == 0u) {
+                const char *we = getenv("KLS_PADDED_MIN_WORK");
+                min_work = we != NULL ? (UF_long)atol(we) : 1024u;
               }
-              nruns++;
-              union_total += ulen_run;
-              for (UF_long c = s; c <= k; ++c) {
-                run_of[k1 + c] = nruns; /* 1-based */
-                slot_total += llen[c];
+              /* materialize only runs whose consume work amortizes
+                 the per-refactor panel refresh (the refresh tax
+                 cancels scrap-coverage wins: bcircuit all-runs read
+                 +20%) */
+              if (len * ulen_run >= min_work) {
+                panel_total += (double)len * (double)ulen_run;
+                if (panel_total > 2.5 * lnz_total) {
+                  goto fail; /* padding economics out of budget */
+                }
+                nruns++;
+                union_total += ulen_run;
+                for (UF_long c = s; c <= k; ++c) {
+                  run_of[k1 + c] = nruns; /* 1-based */
+                  slot_total += llen[c];
+                }
               }
             }
           }
