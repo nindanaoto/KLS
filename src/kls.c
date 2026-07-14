@@ -389,6 +389,9 @@ struct kls_solver {
   int reftr_n;
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
+  int snb_retrial;       /* near-miss rejection: 0 none, 1 armed for a
+                            steady re-trial, 2 concluded */
+  int snb_retrial_wait;
   int snb_declined;      /* prep declined; do not retry */
   int snb_trial_verdict; /* -1: a real timed trial rejected on this
                             symbolic; persists across numeric rebuilds */
@@ -24616,6 +24619,8 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->snb_trial_verdict = 0;
   solver->snb_trial_seconds = 0.0;
   solver->snb_incumbent_seconds = 0.0;
+  solver->snb_retrial = 0;
+  solver->snb_retrial_wait = 0;
   solver->pts_ref_decision = 0;
   solver->pts_ref_incumbent_seconds = 0.0;
   solver->pts_ref_trial_seconds = 0.0;
@@ -97787,6 +97792,45 @@ static int kls_snb_try_refactor(kls_solver *solver,
                                 const double *numeric_values,
                                 int check_pivots,
                                 UF_long *ok_out) {
+  if (!check_pivots && solver->snb_retrial == 1 && solver->snb != NULL &&
+      solver->snb_decision < 0 && !kls_snb_env_disabled() &&
+      solver->numeric != NULL && solver->symbolic != NULL &&
+      ++solver->snb_retrial_wait >= 8 &&
+      solver->adaptive_refactor_seconds > 0.0) {
+    /* steady re-trial of a near-miss rejection: the incumbent's rate
+       is now its true steady (updated every refactor) */
+    solver->snb_retrial = 2;
+    const double t0 = kls_now_seconds();
+    const UF_long rok = solver->options.threads > 1
+      ? kls_snb_refactor_parallel(solver, numeric_values,
+                                  solver->options.threads)
+      : kls_snb_refactor(solver, numeric_values);
+    const double dt = kls_now_seconds() - t0;
+    if (kls_snb_trace_enabled()) {
+      fprintf(stderr,
+              "KLS snb steady re-trial: snb %.3fms vs incumbent %.3fms"
+              " -> %s\n", dt * 1e3,
+              solver->adaptive_refactor_seconds * 1e3,
+              rok && dt < 0.85 * solver->adaptive_refactor_seconds
+                ? "adopted" : "rejected");
+    }
+    if (rok && dt < 0.85 * solver->adaptive_refactor_seconds) {
+      solver->snb_decision = 1;
+      *ok_out = rok;
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_SNB);
+      return 1;
+    }
+    solver->snb_trial_verdict = -1;
+    kls_snb_free(solver);
+    solver->snb_declined = 1;
+    if (rok) {
+      /* the re-trial computed valid values; use them for this call */
+      *ok_out = rok;
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_SNB);
+      return 1;
+    }
+    return 0;
+  }
   if (check_pivots || kls_snb_env_disabled() ||
       solver->numeric == NULL ||
       solver->symbolic == NULL || solver->snb == NULL ||
@@ -97852,9 +97896,21 @@ static int kls_snb_try_refactor(kls_solver *solver,
               threads, solver->snb_decision > 0 ? "adopted" : "rejected");
     }
     if (solver->snb_decision < 0) {
-      solver->snb_trial_verdict = -1;
-      kls_snb_free(solver);
-      solver->snb_declined = 1;
+      if (snb_ok && snb_seconds < solver->snb_incumbent_seconds &&
+          solver->snb_retrial == 0) {
+        /* Near miss: the engine measured absolutely faster but not by
+           the conservative margin - and both samples are warm-up era
+           (bcircuit: trial incumbent 4.9ms vs its 1.57ms steady). Keep
+           the engine and re-run the comparison once at steady state,
+           when adaptive_refactor_seconds carries the incumbent's true
+           rate. */
+        solver->snb_retrial = 1;
+        solver->snb_retrial_wait = 0;
+      } else {
+        solver->snb_trial_verdict = -1;
+        kls_snb_free(solver);
+        solver->snb_declined = 1;
+      }
       if (solver->snb_trial_seconds > 0.0 || !snb_ok) {
         return 0; /* nothing computed this call; incumbent runs it */
       }
