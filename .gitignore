@@ -3,3 +3,5 @@ data/
 *.jsonl
 results/
 third_party/mtmetis/build/
+__pycache__/
+*.pyc
