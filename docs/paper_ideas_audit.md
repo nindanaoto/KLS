@@ -16338,3 +16338,16 @@ exists, the 0.9 default stands, and the override stays as a diagnostic.
 The per-row structure (some rows' narrow arm is genuinely 5-10% better,
 others' full width is) would need a second trial sample to separate,
 which is exactly the probe-cost trade the 0.9 margin was set to avoid.
+
+The forward-height pipeline-priority experiment closes BY ANALYSIS: the
+default lease pipeline spins on dependencies (wait_for_dependencies=1),
+so its processing order must remain topological — an arbitrary
+descending-height sort can deadlock every worker on unclaimed producers
+— and the only freedom is WITHIN levels, which in the pipeline region
+are narrow by definition (width below 2x threads: fewer ready columns
+than workers IS the stall, by pigeonhole).  The egraph medium class's
+remaining stall is therefore structural to its dependency shape at 8T;
+its crossing weight rides per-column rate (the B'/panel and batched
+consume work, plus the already-adopted depth-2 pair multiplexing) and
+the front-end share, not scheduling.  Stall phase-3 is closed as a
+scheduling campaign.
