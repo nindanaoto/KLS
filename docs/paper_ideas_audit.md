@@ -16367,3 +16367,14 @@ already adopts where panels fit), front-end shares, and margin
 hardening — grind economics, no silver bullet.  Three major builds have
 now been priced out before construction this session; the measurement
 cost each time was under five minutes.
+
+The egraph tight-tolerance veto lifted to default-off: raj1's historic
+e-4 defect traced to the era's refinement running against STALE
+analyze-time values — the contract machinery's per-refactorization
+value capture repaired the repair path, and raj1's egraph now measures
+e-16..e-14 across ten runs (7 exploratory + 3 at the lifted default)
+with every tight-tolerance solve carrying its policed correction.
+raj1's steady refactor drops 66 -> 40ms (-40%; DEEP 2.94 projected to
+~1.9-2.0).  The veto's population was effectively raj1 alone (n>=250K
+tight-tolerance), the twelve-row tail cert reads gm 1.0008, and
+KLS_VETO_EGRAPH_TIGHT_TOL restores the ban if the class regresses.

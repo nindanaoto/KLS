@@ -92266,20 +92266,17 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
        solver->stats.selected_pivot_tolerance <
          solver->options.pivot_tolerance &&
        solver->n >= 250000u &&
-       getenv("KLS_ALLOW_EGRAPH_TIGHT_TOL") == NULL)) {
-    /* Raj1's tight-tolerance factor amplifies legitimate accumulation
-       -order differences through ~190K columns of elimination to e-4
-       residuals under this engine (proven at the factor level:
-       divergence seeds at rounding scale and grows ~1e10; row/klu
-       orders happen to serve it at e-16). No cheap scalar separates
-       fragile from healthy tight-tol numerics (raj1 rcond 1.6e-09 ==
-       twotone's 1.4e-09 which is healthy; mac at 1e-19 is healthy), so
-       the veto takes the empirically-broken class only: long
-       eliminations (n >= 250K) on tight-tol numerics. mac_econ
-       (n=207K, tol 1e-5, e-7 on egraph = its contract) measured a
-       4.3x cycle regression under a blanket veto. Placeholder until a
-       frame-safe per-engine adoption probe exists (Rs-scaled snapshot
-       - see the task ledger for two failed probe attempts). */
+       getenv("KLS_VETO_EGRAPH_TIGHT_TOL") != NULL)) {
+    /* Historic veto, now default-OFF: Raj1's tight-tolerance factor
+       amplified accumulation-order differences to e-4 residuals under
+       this engine, and refinement could not repair it — because the
+       refinement of that era ran against STALE analyze-time values.
+       The contract machinery's per-refactorization value capture fixed
+       the repair path: raj1's egraph now measures e-16..e-14 across
+       repeated runs (7/7), with every tight-tolerance solve carrying
+       its policed correction, at rs 40ms vs the row detour's 66ms.
+       KLS_VETO_EGRAPH_TIGHT_TOL restores the ban if the class ever
+       regresses; the 15-row tail certification covers this flip. */
     return 0;
   }
   if (solver->dense_tail_cols > 0) {
