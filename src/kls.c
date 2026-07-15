@@ -667,6 +667,8 @@ struct kls_solver {
   UF_long *row_refactor_sn_end;  /* per row: last row of its strict
                                     U-row supernode (shift-equal
                                     patterns); row itself if height 1 */
+  unsigned char *lean_snode_run; /* at each L-row position: complete
+                                    short-supernode suffix length, else 0 */
   atomic_ullong row_light_snode_runs;     /* light-run consume telemetry */
   atomic_ullong row_light_snode_entries;
   atomic_ullong row_scalar_dep_entries;   /* scalar-fallback U entries */
@@ -19035,6 +19037,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_u_values);
   free(solver->row_refactor_u_row_values);
   free(solver->row_refactor_sn_end);
+  free(solver->lean_snode_run);
   free(solver->row_refactor_input_ptr);
   free(solver->row_refactor_input_cols);
   free(solver->row_refactor_input_pos);
@@ -19092,6 +19095,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_u_values = NULL;
   solver->row_refactor_u_row_values = NULL;
   solver->row_refactor_sn_end = NULL;
+  solver->lean_snode_run = NULL;
   solver->row_refactor_input_ptr = NULL;
   solver->row_refactor_input_cols = NULL;
   solver->row_refactor_input_pos = NULL;
@@ -54133,6 +54137,71 @@ static void kls_row_refactor_ensure_sn_end(kls_solver *solver) {
   solver->row_refactor_sn_end = sn_end;
 }
 
+static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
+  if (solver == NULL || solver->lean_snode_run != NULL ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_l_cols == NULL) {
+    return;
+  }
+  kls_row_refactor_ensure_sn_end(solver);
+  if (solver->row_refactor_sn_end == NULL) {
+    return;
+  }
+  const UF_long l_nnz = solver->row_refactor_l_ptr[solver->n];
+  if (l_nnz == 0u || (uintmax_t)l_nnz > (uintmax_t)SIZE_MAX) {
+    return;
+  }
+  unsigned char *runs = (unsigned char *)calloc((size_t)l_nnz,
+                                                 sizeof(*runs));
+  if (runs == NULL) {
+    return;
+  }
+  const UF_long *l_ptr = solver->row_refactor_l_ptr;
+  const UF_long *l_cols = solver->row_refactor_l_cols;
+  const UF_long *sn_end = solver->row_refactor_sn_end;
+  const int only_width2 = getenv("KLS_LEAN_SNODE2_ONLY") != NULL;
+  UF_long run_count[9] = {0};
+  UF_long run_targets[9] = {0};
+  for (UF_long row = 0u; row < solver->n; ++row) {
+    UF_long p = l_ptr[row];
+    const UF_long p_end = l_ptr[row + 1u];
+    while (p < p_end) {
+      const UF_long dep0 = l_cols[p];
+      UF_long run = 1u;
+      while (run < 8u && run < p_end - p &&
+             dep0 + run <= sn_end[dep0] &&
+             l_cols[p + run] == dep0 + run) {
+        run++;
+      }
+      const int complete = run >= 2u && (!only_width2 || run == 2u);
+      if (complete) {
+        const UF_long dep_end = dep0 + run - 1u;
+        runs[p] = (unsigned char)run;
+        run_count[run]++;
+        run_targets[run] +=
+          solver->row_refactor_u_ptr[dep_end + 1u] -
+          solver->row_refactor_u_ptr[dep_end];
+        p += run;
+      } else {
+        p++;
+      }
+    }
+  }
+  solver->lean_snode_run = runs;
+  if (getenv("KLS_TRACE_LEAN_SNODE") != NULL) {
+    fprintf(stderr,
+            "KLS lean snode runs: 2=%ld/%ld 3=%ld/%ld 4=%ld/%ld"
+            " 5=%ld/%ld 6=%ld/%ld 7=%ld/%ld 8=%ld/%ld\n",
+            (long)run_count[2], (long)run_targets[2],
+            (long)run_count[3], (long)run_targets[3],
+            (long)run_count[4], (long)run_targets[4],
+            (long)run_count[5], (long)run_targets[5],
+            (long)run_count[6], (long)run_targets[6],
+            (long)run_count[7], (long)run_targets[7],
+            (long)run_count[8], (long)run_targets[8]);
+  }
+}
+
 static int kls_build_row_refactor_pattern(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->nblocks == 0u || solver->symbolic->R == NULL) {
@@ -58224,6 +58293,122 @@ static int kls_row_refactor_should_lazy_value_scatter(int check_pivots) {
   return !check_pivots;
 }
 
+/* Consume a complete suffix of a strict row supernode in one target-major
+   pass.  The scalar row walk writes every workspace target once per
+   dependency; this is the compact-row equivalent of SubtreeLU's trsv+gemv
+   update and keeps the short (2-8 row) circuit supernodes in registers. */
+static UF_long kls_lean_row_refactor_snode_step(
+  UF_long p,
+  UF_long run,
+  UF_long dep0,
+  double *restrict x,
+  double *restrict l_values,
+  double **restrict l_lu,
+  const UF_long *restrict u_ptr,
+  const UF_long *restrict u_cols,
+  const double *restrict u_values,
+  const double *restrict udiag) {
+  if (run < 2u || run > 8u) {
+    return 0u;
+  }
+  const UF_long dep_end = dep0 + run - 1u;
+
+  double multipliers[8];
+  const double *trailing_values[8];
+  for (UF_long local = 0u; local < run; ++local) {
+    const UF_long dep = dep0 + local;
+    double candidate = x[dep];
+    for (UF_long previous = 0u; previous < local; ++previous) {
+      candidate -= multipliers[previous] *
+        u_values[u_ptr[dep0 + previous] + local - previous - 1u];
+    }
+    const double multiplier = candidate / udiag[dep];
+    multipliers[local] = multiplier;
+    l_values[p + local] = multiplier;
+    *l_lu[p + local] = multiplier;
+    x[dep] = 0.0;
+    trailing_values[local] =
+      u_values + u_ptr[dep] + dep_end - dep;
+  }
+
+  const UF_long trailing_begin = u_ptr[dep_end];
+  const UF_long trailing_len = u_ptr[dep_end + 1u] - trailing_begin;
+#define KLS_LEAN_SNODE_TARGET_LOOP(...)                                   \
+  do {                                                                    \
+    for (UF_long offset = 0u; offset < trailing_len; ++offset) {          \
+      const UF_long target = u_cols[trailing_begin + offset];             \
+      double value = x[target];                                           \
+      __VA_ARGS__                                                         \
+      x[target] = value;                                                  \
+    }                                                                     \
+  } while (0)
+  /* Dispatch once per producer supernode.  Keeping a distinct target loop
+     for each short width lets the compiler retain all multipliers and row
+     pointers in registers, matching CKTSO's width-specialized kernels. */
+  switch (run) {
+    case 2u:
+      KLS_LEAN_SNODE_TARGET_LOOP(
+        value -= multipliers[0] * trailing_values[0][offset];
+        value -= multipliers[1] * trailing_values[1][offset];);
+      break;
+    case 3u:
+      KLS_LEAN_SNODE_TARGET_LOOP(
+        value -= multipliers[0] * trailing_values[0][offset];
+        value -= multipliers[1] * trailing_values[1][offset];
+        value -= multipliers[2] * trailing_values[2][offset];);
+      break;
+    case 4u:
+      KLS_LEAN_SNODE_TARGET_LOOP(
+        value -= multipliers[0] * trailing_values[0][offset];
+        value -= multipliers[1] * trailing_values[1][offset];
+        value -= multipliers[2] * trailing_values[2][offset];
+        value -= multipliers[3] * trailing_values[3][offset];);
+      break;
+    case 5u:
+      KLS_LEAN_SNODE_TARGET_LOOP(
+        value -= multipliers[0] * trailing_values[0][offset];
+        value -= multipliers[1] * trailing_values[1][offset];
+        value -= multipliers[2] * trailing_values[2][offset];
+        value -= multipliers[3] * trailing_values[3][offset];
+        value -= multipliers[4] * trailing_values[4][offset];);
+      break;
+    case 6u:
+      KLS_LEAN_SNODE_TARGET_LOOP(
+        value -= multipliers[0] * trailing_values[0][offset];
+        value -= multipliers[1] * trailing_values[1][offset];
+        value -= multipliers[2] * trailing_values[2][offset];
+        value -= multipliers[3] * trailing_values[3][offset];
+        value -= multipliers[4] * trailing_values[4][offset];
+        value -= multipliers[5] * trailing_values[5][offset];);
+      break;
+    case 7u:
+      KLS_LEAN_SNODE_TARGET_LOOP(
+        value -= multipliers[0] * trailing_values[0][offset];
+        value -= multipliers[1] * trailing_values[1][offset];
+        value -= multipliers[2] * trailing_values[2][offset];
+        value -= multipliers[3] * trailing_values[3][offset];
+        value -= multipliers[4] * trailing_values[4][offset];
+        value -= multipliers[5] * trailing_values[5][offset];
+        value -= multipliers[6] * trailing_values[6][offset];);
+      break;
+    case 8u:
+      KLS_LEAN_SNODE_TARGET_LOOP(
+        value -= multipliers[0] * trailing_values[0][offset];
+        value -= multipliers[1] * trailing_values[1][offset];
+        value -= multipliers[2] * trailing_values[2][offset];
+        value -= multipliers[3] * trailing_values[3][offset];
+        value -= multipliers[4] * trailing_values[4][offset];
+        value -= multipliers[5] * trailing_values[5][offset];
+        value -= multipliers[6] * trailing_values[6][offset];
+        value -= multipliers[7] * trailing_values[7][offset];);
+      break;
+    default:
+      return 0u;
+  }
+#undef KLS_LEAN_SNODE_TARGET_LOOP
+  return run;
+}
+
 /* Lean serial up-looking refactorization over the row mirrors: one flat
    two-stream walk per row (ST Alg.1 refactor mode), no group machinery,
    no workspaces beyond Xwork, values written straight through the
@@ -58290,6 +58475,13 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   if (l_val == NULL || u_val == NULL || l_lu == NULL || u_lu == NULL) {
     return -1;
   }
+  const int supernode_values =
+    getenv("KLS_ENABLE_LEAN_SNODE") != NULL;
+  if (supernode_values) {
+    kls_lean_row_refactor_ensure_snode_runs(solver);
+  }
+  const unsigned char *snode_runs = supernode_values
+    ? solver->lean_snode_run : NULL;
   const double *rs = scaled ? numeric->Rs : NULL;
   const UF_long *pnum = numeric->Pnum;
 #define KLS_LEAN_ROW_SCATTER(row, xv)                                      \
@@ -58313,6 +58505,48 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
       }                                                                    \
     }                                                                      \
     (pvar)++;                                                              \
+  } while (0)
+#define KLS_LEAN_ROW_SNODE2(pvar, xv)                                      \
+  do {                                                                     \
+    const UF_long dep0 = l_cols[(pvar)];                                   \
+    const UF_long dep1 = dep0 + 1u;                                        \
+    const double multiplier0 = (xv)[dep0] / udiag[dep0];                  \
+    const double multiplier1 =                                            \
+      ((xv)[dep1] - multiplier0 * u_val[u_ptr[dep0]]) / udiag[dep1];      \
+    (xv)[dep0] = 0.0;                                                      \
+    (xv)[dep1] = 0.0;                                                      \
+    l_val[(pvar)] = multiplier0;                                           \
+    l_val[(pvar) + 1u] = multiplier1;                                      \
+    *l_lu[(pvar)] = multiplier0;                                           \
+    *l_lu[(pvar) + 1u] = multiplier1;                                      \
+    const UF_long trailing_begin = u_ptr[dep1];                            \
+    const UF_long trailing_end = u_ptr[dep1 + 1u];                         \
+    const double *restrict u0 = u_val + u_ptr[dep0] + 1u;                 \
+    const double *restrict u1 = u_val + trailing_begin;                    \
+    for (UF_long q = trailing_begin; q < trailing_end; ++q) {             \
+      const UF_long target = u_cols[q];                                    \
+      const UF_long offset = q - trailing_begin;                           \
+      double value = (xv)[target];                                         \
+      value -= multiplier0 * u0[offset];                                   \
+      value -= multiplier1 * u1[offset];                                   \
+      (xv)[target] = value;                                                \
+    }                                                                      \
+    (pvar) += 2u;                                                          \
+  } while (0)
+#define KLS_LEAN_ROW_STEP(pvar, xv)                                        \
+  do {                                                                     \
+    const UF_long snode_run =                                              \
+      snode_runs != NULL ? (UF_long)snode_runs[(pvar)] : 0u;              \
+    if (snode_run == 2u) {                                                 \
+      KLS_LEAN_ROW_SNODE2((pvar), (xv));                                   \
+    } else if (snode_run > 0u) {                                           \
+      (void)kls_lean_row_refactor_snode_step(                              \
+        (pvar), snode_run, l_cols[(pvar)], (xv), l_val, l_lu,             \
+        u_ptr, u_cols, u_val, udiag);                                      \
+      (pvar) += snode_run;                                                 \
+    } else {                                                               \
+      KLS_LEAN_ROW_KSTEP((pvar), (xv));                                    \
+    }                                                                      \
   } while (0)
 #define KLS_LEAN_ROW_FINISH(row, xv)                                       \
   do {                                                                     \
@@ -58366,14 +58600,14 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
         UF_long p2 = l_ptr[i2];
         const UF_long e2 = l_ptr[i2 + 1u];
         while (p1 < e1 && p2 < e2) {
-          KLS_LEAN_ROW_KSTEP(p1, x);
-          KLS_LEAN_ROW_KSTEP(p2, x2);
+          KLS_LEAN_ROW_STEP(p1, x);
+          KLS_LEAN_ROW_STEP(p2, x2);
         }
         while (p1 < e1) {
-          KLS_LEAN_ROW_KSTEP(p1, x);
+          KLS_LEAN_ROW_STEP(p1, x);
         }
         while (p2 < e2) {
-          KLS_LEAN_ROW_KSTEP(p2, x2);
+          KLS_LEAN_ROW_STEP(p2, x2);
         }
         KLS_LEAN_ROW_FINISH(i1, x);
         KLS_LEAN_ROW_FINISH(i2, x2);
@@ -58388,7 +58622,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
         UF_long p1 = l_ptr[i1];
         const UF_long e1 = l_ptr[i1 + 1u];
         while (p1 < e1) {
-          KLS_LEAN_ROW_KSTEP(p1, x);
+          KLS_LEAN_ROW_STEP(p1, x);
         }
         KLS_LEAN_ROW_FINISH(i1, x);
         if (common->status == TRILINOS_KLU_SINGULAR &&
@@ -58403,7 +58637,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
       UF_long p = l_ptr[i];
       const UF_long pe = l_ptr[i + 1u];
       while (p < pe) {
-        KLS_LEAN_ROW_KSTEP(p, x);
+        KLS_LEAN_ROW_STEP(p, x);
       }
       KLS_LEAN_ROW_FINISH(i, x);
       if (common->status == TRILINOS_KLU_SINGULAR &&
@@ -58414,6 +58648,8 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   }
 #undef KLS_LEAN_ROW_SCATTER
 #undef KLS_LEAN_ROW_KSTEP
+#undef KLS_LEAN_ROW_SNODE2
+#undef KLS_LEAN_ROW_STEP
 #undef KLS_LEAN_ROW_FINISH
   if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
     common->status = TRILINOS_KLU_INVALID;
