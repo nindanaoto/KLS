@@ -16408,3 +16408,12 @@ and the adopters' higher solve RATIOS against clean references reflect
 CKTSO's faster clean draws plus the small preamble delta.  circuit_2's
 crossing = any few percent: the preamble delta, an rs margin, or the
 next reference draw.
+
+The row-adopted solve preamble delta dissolves under the profiler:
+20000-solve profiles of circuit_2 with the lean consult on versus off
+are statistically identical (345 vs 344 samples, same i32/solve_impl
+bucket shape) — the +3-5us seen at rr=20 was small-sample warmup noise,
+not a per-solve cost.  The line-band adopters (circuit_2 at 1.00,
+powersim/qh1484/rajat13/rajat23/memplus at 0.93-0.97 thin) are at their
+current floors: their crossings ride future kernel-family margins or
+reference draws, with no cheap blocker hiding in the solve path.
