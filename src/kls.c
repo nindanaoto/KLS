@@ -132440,8 +132440,13 @@ int kls_refactor(kls_solver *solver, const double *values) {
       kls_prepare_unchanged_solve_contract(solver, values)) {
     /* The current numeric already factors this exact input.  In particular,
        do this before transformed-value preparation and deferred refactor
-       engine consults: neither can improve the mathematical result, while
-       solve-specific index streams still build lazily on the first solve. */
+       engine consults: neither can improve the mathematical result.  Do
+       retain the compact solve-index preparation that a normal first
+       refactor consult performs; otherwise large exact-repeat factors fall
+       back to the 64-bit triangular walk on every subsequent solve. */
+    double solve_prep_elapsed = 0.0;
+    kls_maybe_prepare_snode_panels(solver, &solve_prep_elapsed);
+    (void)kls_i32_solve_ready(solver);
     kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_UNCHANGED);
     solver->stats.refactor_seconds =
       kls_now_seconds() - refactor_call_start;
