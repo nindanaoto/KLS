@@ -16495,3 +16495,28 @@ e-15 x3, rajat15 37k e-13 x3, TSOPF_FS_b39_c30 120k e-14 x3) and
 keeps the engine.  Boundary is measured, not name-based.  Post-veto:
 mac_econ row path 5.2e-11/5.7e-10.  Raj1 joins the tail manifest —
 the cert that would have caught the veto-lift's landmine.
+
+EGRAPH TIGHT-TOL CORRUPTION ROOT-CAUSED AND FIXED. Watchpoint hunt on
+raj1 (KLS_ALLOW_EGRAPH_TIGHT_TOL=1, t2): the "corrupt" Udiag values
+were bit-exact to a DIFFERENT, legitimate factorization — the fast
+factor's rejected-pivot restart (tiny tight-tol pivot at col 150123)
+rebuilt the block via the row-first parallel engine with 28 dynamic
+column pivots, freeing the old LU and packing a new layout — and the
+only invalidation on that path was kls_invalidate_i32_solve.  The
+egraph's LU pointer cache dangled into freed memory, the refactor map
+scattered inputs by the dead pivot order, and refactor+solve produced
+e-4 residuals (nondeterministic set: malloc reuse + which engine
+consumed the stale state; the row engine re-derives pointers from the
+live numeric per run, hence its stable e-16).  FIX: after a
+successful kls_pivot_restart_rejected_block, free exactly the
+column-engine caches (LU pointer cache, refactor map, dependency
+schedule, snode panels, dense-tail bookkeeping), reset the accuracy
+contract, re-arm the deferred consult.  The FULL replacement hammer
+is NOT safe there — it also frees the row structures the restart's
+own checked-row tail refresh runs on (the dense checked-row smoke
+encodes that contract; the hammer version failed it).  Adversarial
+verification, veto lifted: raj1 6/6 draws clean (t2 mapped
+3.7-5.1e-16, t8 EGRAPH 1.35-1.40e-16).  The tight-tol veto stays
+default-on pending an adversarial re-lift cert (raj1 + mac_econ,
+multiple thread counts and repeat depths) — mechanism + 6 draws
+support the re-lift; the 7/7-lucky-draws lesson says measure more.

@@ -101570,6 +101570,37 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
           solver, numeric_values, rejected_pivot)) {
       return 0;
     }
+    /* The restart re-pivoted and reallocated block storage (the
+       row-first rebuild path frees the old LU and packs a fresh one
+       with its own dynamic column pivots): the COLUMN-engine caches
+       built for the old layout — LU pointer cache, refactor map,
+       dependency schedule, snode panels, dense-tail bookkeeping —
+       dangle into freed memory, and the egraph consuming them
+       measured raj1 at e-4 residuals with values bit-exact to the
+       WRONG factorization (2026-07-15).  Free exactly those; the
+       retry below runs schedule-less (serial/row-checked) and the
+       deferred consult re-preps on the next refactorization.  The
+       ROW structures deliberately survive: they are the repair
+       vehicle (the tail refresh below runs the checked row engine on
+       them — the dense checked-row smoke encodes that contract) and
+       re-derive their pointers from the live numeric per run.  The
+       full replacement hammer is NOT safe here for the same reason.
+       Contract state is reset: the rebuilt pivot sequence's accuracy
+       is unclassified, and any captured refine values describe the
+       dead numeric. */
+    free_refactor_lu_pointer_cache(solver);
+    free_refactor_map(solver);
+    free_refactor_schedule(solver);
+    free_snode_panels(solver);
+    solver->dense_tail_cols = 0;
+    solver->dense_tail_block = 0;
+    solver->solve_contract_probe = 0;
+    solver->solve_contract_verified = 0;
+    free(solver->solve_refine_values);
+    solver->solve_refine_values = NULL;
+    if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+      solver->factor_preps_deferred = 1;
+    }
     if (solver->fast_kls_rebuild_restarts >
         kls_rebuild_restarts_before) {
       UF_long next_rejected_pivot = KLS_KLU_EMPTY;
