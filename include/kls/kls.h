@@ -71,7 +71,8 @@ typedef enum kls_refactor_path {
   KLS_REFACTOR_PATH_MAPPED = 3,
   KLS_REFACTOR_PATH_POOL = 4,
   KLS_REFACTOR_PATH_KLU = 5,
-  KLS_REFACTOR_PATH_SNB = 6
+  KLS_REFACTOR_PATH_SNB = 6,
+  KLS_REFACTOR_PATH_UNCHANGED = 7
 } kls_refactor_path;
 
 #define KLS_SCALE_AUTO (-2)

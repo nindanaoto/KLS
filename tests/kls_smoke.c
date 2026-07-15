@@ -16456,9 +16456,119 @@ static int run_sn_panel_factor_test(void) {
   return 1;
 }
 
+static int test_exact_unchanged_refactor_reuse(void) {
+  const int32_t n = 3;
+  const int32_t ap[4] = {0, 2, 5, 7};
+  const int32_t ai[7] = {0, 1, 0, 1, 2, 1, 2};
+  double ax[7] = {4.0, 2.0, 1.0, 5.0, 3.0, 1.0, 6.0};
+  const double expected[3] = {1.0, 2.0, 3.0};
+  double b[3] = {0.0, 0.0, 0.0};
+  double x[3] = {0.0, 0.0, 0.0};
+  const char *saved_value = getenv("KLS_DISABLE_UNCHANGED_REFACTOR");
+  char *saved = saved_value != NULL ? strdup(saved_value) : NULL;
+  const int had_saved = saved_value != NULL;
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = 1;
+
+  if (had_saved && saved == NULL) {
+    return 0;
+  }
+  if (unsetenv("KLS_DISABLE_UNCHANGED_REFACTOR") != 0) {
+    perror("unsetenv KLS_DISABLE_UNCHANGED_REFACTOR");
+    free(saved);
+    return 0;
+  }
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.scale = -1;
+  options.use_btf = 0;
+  options.static_pivoting = 0;
+
+  if (!require_ok(kls_create(&solver), "create unchanged-refactor")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
+                                        0, &options),
+                        "analyze unchanged-refactor")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor unchanged-refactor")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, ax),
+                        "reuse unchanged factor")) ok = 0;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats unchanged factor")) ok = 0;
+  if (ok && stats.last_refactor_path != KLS_REFACTOR_PATH_UNCHANGED) {
+    fprintf(stderr, "unchanged refactor did not reuse factor: %s\n",
+            kls_refactor_path_name(stats.last_refactor_path));
+    ok = 0;
+  }
+
+  /* Change the final entry in place so the exact comparison must inspect the
+     whole array, then verify that the changed matrix is actually factored. */
+  ax[6] = 7.0;
+  for (int col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax[p] * expected[col];
+    }
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax),
+                        "changed after unchanged refactor")) ok = 0;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats changed after unchanged")) ok = 0;
+  if (ok && stats.last_refactor_path == KLS_REFACTOR_PATH_UNCHANGED) {
+    fprintf(stderr, "changed values incorrectly reused factor\n");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve changed after unchanged")) ok = 0;
+  for (int i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "changed-after-unchanged solution mismatch at %d: %.17g\n",
+              i, x[i]);
+      ok = 0;
+    }
+  }
+
+  /* Once repetition was observed, a changed step refreshes the snapshot and
+     the following identical step is eligible again. */
+  if (ok && !require_ok(kls_refactor(solver, ax),
+                        "reuse changed snapshot")) ok = 0;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats reused changed snapshot")) ok = 0;
+  if (ok && stats.last_refactor_path != KLS_REFACTOR_PATH_UNCHANGED) {
+    fprintf(stderr, "refreshed unchanged snapshot was not reused: %s\n",
+            kls_refactor_path_name(stats.last_refactor_path));
+    ok = 0;
+  }
+
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_DISABLE_UNCHANGED_REFACTOR", had_saved,
+                         saved != NULL ? saved : "")) {
+    ok = 0;
+  }
+  free(saved);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
+    return EXIT_FAILURE;
+  }
+
+  if (!test_exact_unchanged_refactor_reuse()) {
+    return EXIT_FAILURE;
+  }
+  /* The remaining smoke cases deliberately assert individual refactor-engine
+     counters.  Keep their fixtures exercising those engines; exact-reuse has
+     its own changing/in-place coverage above. */
+  if (setenv("KLS_DISABLE_UNCHANGED_REFACTOR", "1", 1) != 0) {
+    perror("setenv KLS_DISABLE_UNCHANGED_REFACTOR=1");
     return EXIT_FAILURE;
   }
 
