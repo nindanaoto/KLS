@@ -28147,9 +28147,9 @@ static UF_long kls_metis_order_inner(UF_long n,
                        metis_perm, metis_iperm);
   }
   if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS metis: NodeND %.3fs (ndp=%d par=%d)\n",
+    fprintf(stderr, "KLS metis: NodeND %.3fs (ndp=%d par=%d tid=%ld)\n",
             kls_now_seconds() - kls_metis_t0, (int)metis_ndp_npes,
-            (int)par_nd_done);
+            (int)par_nd_done, (long)syscall(SYS_gettid));
   }
   UF_long order_lnz = 0;
   if (metis_status == METIS_OK) {
@@ -34178,6 +34178,21 @@ static int maybe_promote_auto_metis(kls_solver *solver,
        raced trial factoring stale inputs; race_invalid routes those rare
        flows back through the serial trial below. */
     if (race->analyze_status != KLS_OK || race->symbolic == NULL) {
+      if (race->scale_wanted && race->scale_count > 0 &&
+          solver->metis_race == NULL) {
+        /* Scale-only race (the metis stage never ran): the worker's
+           pre-factored candidates are still valid for the incumbent
+           symbolic — re-attach them for maybe_select_auto_scale, which
+           runs right after this decline.  Freeing them here forced
+           three serial foreground re-factors of the same candidates
+           (Raj1: ~0.7s of a 2.66s init).  The next take — the
+           post-scale re-shot always arrives with race_invalid=1 —
+           frees it.  The other decline paths above (fragmented guard,
+           user_col_perm, should_try) keep today's free: their classes
+           carry their own verdict topology, unmeasured here. */
+        solver->metis_race = race;
+        return 0;
+      }
       kls_metis_race_free(race);
       return 0;
     }
@@ -58579,6 +58594,8 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
   return 1;
 }
 
+static int kls_egraph_refactor_is_eligible(const kls_solver *solver);
+
 static void kls_maybe_prepare_model_row_refactor_from_numeric(
   kls_solver *solver,
   double *elapsed) {
@@ -58610,16 +58627,31 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
   solver->stats.row_refactor_auto_model_recommended = 1;
   if (solver->refactor_level_ptr == NULL) {
     /* No dependency schedule: the egraph and scheduled column engines
-       cannot run here, so the steady path is mapped/serial.  Admit the
-       prepare only when no engine already claimed the row (b9_c1's
-       dense-help groups sit at ~100us; an unconditional re-enable
-       displaced them 8x in its tail cert) and the factor is large
-       enough for the alternating acceptance trials to amortize.  The
-       fill floor also structurally excludes every lean-consult row
-       (lean caps at 1M fill).  b2383 class: serial steady 240-305ms,
-       measured row acceptance 156ms — the deferred-consult wipe used
-       to strand it on serial with no re-prepare. */
+       cannot run off it here, so the steady path is mapped/serial —
+       with an explicit egraph-eligibility check as defense in depth
+       against transiently-absent schedules.  Admit the prepare only
+       when no engine already claimed the row (b9_c1's dense-help
+       groups sit at ~100us; an unconditional re-enable displaced them
+       8x in its tail cert) and the factor is large enough for the
+       alternating acceptance trials to amortize.  The fill floor also
+       structurally excludes every lean-consult row (lean caps at 1M
+       fill).  b2383 class: serial steady 240-305ms, measured row
+       acceptance 156ms — the deferred-consult wipe used to strand it
+       on serial with no re-prepare. */
+    if (getenv("KLS_TRACE_ROW_MODEL_GATE") != NULL) {
+      fprintf(stderr,
+              "KLS row-model gate: levels=NULL groups=%ld egraph=%d "
+              "fill=%ld -> %s\n",
+              (long)solver->row_refactor_group_count,
+              kls_egraph_refactor_is_eligible(solver),
+              (long)(solver->numeric->lnz + solver->numeric->unz),
+              (solver->row_refactor_group_count > 0 ||
+               kls_egraph_refactor_is_eligible(solver) ||
+               solver->numeric->lnz + solver->numeric->unz < 2000000)
+                ? "skip" : "ADMIT");
+    }
     if (solver->row_refactor_group_count > 0 ||
+        kls_egraph_refactor_is_eligible(solver) ||
         solver->numeric->lnz + solver->numeric->unz < 2000000) {
       return;
     }
@@ -92279,18 +92311,35 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
       (solver->stats.selected_pivot_tolerance > 0.0 &&
        solver->stats.selected_pivot_tolerance <
          solver->options.pivot_tolerance &&
-       solver->n >= 250000u &&
-       getenv("KLS_VETO_EGRAPH_TIGHT_TOL") != NULL)) {
-    /* Historic veto, now default-OFF: Raj1's tight-tolerance factor
-       amplified accumulation-order differences to e-4 residuals under
-       this engine, and refinement could not repair it — because the
-       refinement of that era ran against STALE analyze-time values.
-       The contract machinery's per-refactorization value capture fixed
-       the repair path: raj1's egraph now measures e-16..e-14 across
-       repeated runs (7/7), with every tight-tolerance solve carrying
-       its policed correction, at rs 40ms vs the row detour's 66ms.
-       KLS_VETO_EGRAPH_TIGHT_TOL restores the ban if the class ever
-       regresses; the 15-row tail certification covers this flip. */
+       solver->n >= 200000u &&
+       solver->row_perm == NULL && solver->user_col_perm == NULL &&
+       !solver->spral_matching_selected &&
+       getenv("KLS_ALLOW_EGRAPH_TIGHT_TOL") == NULL)) {
+    /* Tight-tolerance veto, RESTORED (2026-07-15): Raj1's 1e-4-pivoted
+       numeric under this engine solves at a constant 2.5e-4 relative
+       residual — 12 digits beyond what its measured rgrowth (3.3e-4)
+       can explain, i.e. the refactorization writes corrupt values, not
+       merely growth-degraded ones.  The 2026-07-15 veto lift believed
+       the P1 per-refactor value capture had repaired this via policed
+       corrections; in fact the repair only engages when the contract
+       classifier arms, and whether it arms is a pivot-draw lottery:
+       the same corruption reads rgrowth 1.3e-7 on some draws (armed,
+       corrected to e-14 — the 7/7 cert run) and 3.3e-4 on others
+       ("healthy", uncorrected, e-4 — every run on 2026-07-15's box).
+       No rgrowth threshold separates them.  The row engine on the same
+       symbolic and tolerance solves at e-16 (the corruption is in this
+       engine's consumption of tight-tol patterns).  mac_econ (n=206.5k,
+       tol 1e-5) rides the same lottery with corrections armed: draws
+       span 7.9e-11..2.75e-8 — one of three ABOVE the 1e-8 validity
+       bar — while its forced-row run reads a stable 4.3e-10.  The
+       200000 floor covers both; ckt11752_dc_1 (49.7k), rajat15 (37k)
+       and b39_c30 (120k) measure stable e-13..e-15 across draws and
+       keep the engine.  PLAIN FRAME ONLY: matched/prestatic classes
+       (pre2: spral-matched 659k, tight-tol egraph at a stable 1.8e-16)
+       police accuracy through their structural-risk first-solve
+       probes, not the rgrowth lottery, and their row-path fallback is
+       timeout-class at giant scale — they keep the engine.
+       KLS_ALLOW_EGRAPH_TIGHT_TOL re-lifts for defect hunting. */
     return 0;
   }
   if (solver->dense_tail_cols > 0) {
@@ -131731,6 +131780,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_rcond = 0;
   }
 #endif
+  KLS_ENTRY_PHASE("metis_promo")
   if (maybe_select_auto_scale(solver, &elapsed, numeric_values,
                               promoted_numeric)) {
     kls_first_factor_used = 0;

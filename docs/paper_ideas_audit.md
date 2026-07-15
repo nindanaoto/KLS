@@ -16449,3 +16449,49 @@ the factor-time row prep for the snode sort guard and nothing
 re-prepared it — the model consult was the natural re-prep site but
 its level_ptr==NULL early-return stranded schedule-less rows on serial
 forever.
+
+EGRAPH TIGHT-TOL VETO RESTORED (2026-07-15). The veto lift's premise is
+disproven by direct measurement: raj1's 1e-4-pivoted numeric under the
+egraph solves at a constant 2.5e-4 relative residual, 12 digits beyond
+what its measured rgrowth (3.3e-4) explains — the refactorization
+writes corrupt values on this class, and the row engine on the SAME
+symbolic and tolerance solves e-16.  Whether the P1 contract repairs
+it is a pivot-draw lottery: the corruption reads rgrowth 1.3e-7 on
+some draws (< the 1e-6 arming threshold -> corrected to e-14; the
+7/7 veto-lift cert sampled only these) and 3.3e-4 on others
+("healthy" -> uncorrected e-4; every 2026-07-15 draw).  No threshold
+separates the two readings of the SAME defect, so classification
+cannot save this class — the veto returns (KLS_ALLOW_EGRAPH_TIGHT_TOL
+re-lifts for hunting).  raj1: e-16 x3 restored on the row path.
+METHODOLOGY TRAP (recorded): a residual-validity certification is a
+lottery sample, not a proof — 7/7 clean draws certified a defect as
+repaired.  Certs for accuracy-adjacent flips need adversarial draws
+(vary box load/repeat counts) or a mechanism argument.
+ALSO: a false bisect — two same-code binaries drew e-16 vs e-4 on
+single runs; only gdb-slowed re-runs (both e-4) exposed the lottery.
+Single-run bisects on lottery-class defects mislead.
+
+RAJ1 FRONT DECOMPOSED + SCALE-RACE RE-ATTACH LANDED. The 1.909s
+auto_rescale block: the factor-exit METIS promotion takes the race
+first (kls_metis_race_take nulls solver->metis_race), and for a
+SCALE-ONLY race (Raj1: est_fill 7.5e6 < the 1e7 metis floor) its
+early-out freed the worker's 2-3 pre-factored scale candidates
+unconsumed; maybe_select_auto_scale then re-factored the same
+candidates serially in the foreground (~0.7s), and the post-scale
+re-shot paid a fresh foreground NodeND+camd+factor (~1.1s).  Fix: the
+promotion's scale-only early-out re-attaches the race (scale_wanted &&
+scale_count>0) instead of freeing; the scale consult consumes the
+raced candidates; the re-shot's take (race_invalid=1) frees it.
+Raj1 init 2.66 -> 1.94s measured (front share of its worst-side loss
+drops accordingly).  The re-shot's 0.74s foreground NodeND remains the
+next front lever (worker analyze + perm-cache reuse, or defer).
+
+VETO SCOPE WIDENED TO n>=200000: mac_econ (206.5k, seltol 1e-5) rides
+the same tight-tol egraph lottery WITH corrections armed — three draws
+read 7.9e-11 / 3.8e-10 / 2.75e-8, the last ABOVE the 1e-8 validity
+bar, while its forced-row engine reads a stable 4.3e-10.  Below the
+floor the class measures clean across draws (ckt11752_dc_1 49.7k
+e-15 x3, rajat15 37k e-13 x3, TSOPF_FS_b39_c30 120k e-14 x3) and
+keeps the engine.  Boundary is measured, not name-based.  Post-veto:
+mac_econ row path 5.2e-11/5.7e-10.  Raj1 joins the tail manifest —
+the cert that would have caught the veto-lift's landmine.
