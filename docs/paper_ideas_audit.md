@@ -16417,3 +16417,18 @@ not a per-solve cost.  The line-band adopters (circuit_2 at 1.00,
 powersim/qh1484/rajat13/rajat23/memplus at 0.93-0.97 thin) are at their
 current floors: their crossings ride future kernel-family margins or
 reference draws, with no cheap blocker hiding in the solve path.
+
+The b2383 consult-ordering 'fix' (re-running the auto-row prepare after
+the deferred consult's snode prep) is REVERTED by its own tail cert:
+gm 1.2236 with tsopf_fs_b9_c1 destroyed (cycle 4.82, rs 8.10 — the
+re-enabled acceptance overrode its lean adoption) and rajat03 at 2.30
+(rs 2.64 WITHOUT adopting row — the prepare's state alone degrades its
+egraph steady, the exact hazard the original disable protected).  The
+wipe is load-bearing for the lean-adopter and egraph classes.  b2383's
+two crossings (0.83/0.10 measured with the fix) remain real but blocked
+on a NARROW re-enable that (a) never runs where lean_choice > 0, (b)
+leaves values_ready/solve-path state untouched for egraph rows, and
+(c) probably keys on the model_recommended + fill/density signature of
+the b2383 class specifically.  The acceptance, the lean consult, and
+the egraph do not know about each other's adoptions — that three-way
+interplay is the real design work, flagged fresh-context.
