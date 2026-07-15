@@ -16397,3 +16397,14 @@ so the lever is genuinely moving it off the critical path (race-worker
 execution with a consult join, or deferral with a rescue), not skipping
 it.  The phase-marker semantics correction (markers are segment ends)
 and this verdict complete raj1's front-end brief.
+
+circuit_2's exactly-1.00 standing decomposed by a lean-consult on/off:
+the adoption is the reason it is AT the line at all — lean rs 51-58us
+vs the column engine's 144 (cycle nearly halved; it stood ~1.7 before
+the consult) — while solves pay +3-5us (~10%, the row-adopted state's
+per-solve preamble) on the correct fast i32 path.  The 'solve-routing
+regression' hypothesis from the BAND survey dies: nothing is misrouted,
+and the adopters' higher solve RATIOS against clean references reflect
+CKTSO's faster clean draws plus the small preamble delta.  circuit_2's
+crossing = any few percent: the preamble delta, an rs margin, or the
+next reference draw.
