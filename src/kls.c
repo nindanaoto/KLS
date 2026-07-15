@@ -58608,8 +58608,22 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
     return;
   }
   solver->stats.row_refactor_auto_model_recommended = 1;
-  if (solver->refactor_level_ptr == NULL ||
-      solver->refactor_dependency_work < 1.0e7) {
+  if (solver->refactor_level_ptr == NULL) {
+    /* No dependency schedule: the egraph and scheduled column engines
+       cannot run here, so the steady path is mapped/serial.  Admit the
+       prepare only when no engine already claimed the row (b9_c1's
+       dense-help groups sit at ~100us; an unconditional re-enable
+       displaced them 8x in its tail cert) and the factor is large
+       enough for the alternating acceptance trials to amortize.  The
+       fill floor also structurally excludes every lean-consult row
+       (lean caps at 1M fill).  b2383 class: serial steady 240-305ms,
+       measured row acceptance 156ms — the deferred-consult wipe used
+       to strand it on serial with no re-prepare. */
+    if (solver->row_refactor_group_count > 0 ||
+        solver->numeric->lnz + solver->numeric->unz < 2000000) {
+      return;
+    }
+  } else if (solver->refactor_dependency_work < 1.0e7) {
     /* Below ~1e7 dependency work the plan build (~4ms on rajat03)
        exceeds anything the row engine could win back, and the timed
        acceptance has never adopted at that scale; the adopters all

@@ -16432,3 +16432,20 @@ leaves values_ready/solve-path state untouched for egraph rows, and
 the b2383 class specifically.  The acceptance, the lean consult, and
 the egraph do not know about each other's adoptions — that three-way
 interplay is the real design work, flagged fresh-context.
+
+NARROW b2383 re-enable LANDED: instead of re-running the row-auto
+prepare unconditionally in the deferred consult (reverted by its tail
+cert: b9_c1 8x, rajat03 2.6x), the model consult's early-return now
+splits by schedule presence.  level_ptr==NULL rows (no egraph or
+scheduled engine possible) admit the prepare when no engine claimed
+the row (row_refactor_group_count==0 guards b9_c1's dense-help groups)
+and fill >= 2M (amortizes acceptance trials; structurally excludes the
+lean cohort, capped at 1M fill).  Scheduled rows keep the 1e7
+dependency-work floor verbatim (rajat03's protection).  b2383 adopts
+through the full model->attempt->accept chain (resid 3.9e-15).  Tail
+cert gm 1.0031, no code-path regressions; b9_c1 0.957 with the guard
+holding.  Root defect for the record: the deferred-consult wipe frees
+the factor-time row prep for the snode sort guard and nothing
+re-prepared it — the model consult was the natural re-prep site but
+its level_ptr==NULL early-return stranded schedule-less rows on serial
+forever.
