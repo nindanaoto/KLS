@@ -16378,3 +16378,14 @@ raj1's steady refactor drops 66 -> 40ms (-40%; DEEP 2.94 projected to
 ~1.9-2.0).  The veto's population was effectively raj1 alone (n>=250K
 tight-tolerance), the twelve-row tail cert reads gm 1.0008, and
 KLS_VETO_EGRAPH_TIGHT_TOL restores the ban if the class regresses.
+
+raj1's foreground auto_rescale (1.92s, 73% of its init) does not move
+off the critical path by widening the race's scale_wanted gate alone —
+the entry-phase rescale consult runs its own trials regardless and does
+not consume the race worker's scale results on this path (the coupling
+that exists for the ASIC-class consult sites does not reach it).  The
+env widening was reverted as a no-op; the real integration is finding
+where race scale verdicts land versus where the auto_rescale phase
+consults, and joining them for the n>250K matched class — or deferring
+the rescale trials to the first-refactor consult with a singular-rescue
+analog.  raj1's projected 2.19 -> ~1.85 rides on that plumbing.
