@@ -45,6 +45,27 @@ One-shot results must be collected in a separate process with zero preliminary
 factor/refactor repetitions. Otherwise the measured solve may use caches or
 layouts prepared by a preceding refactor and is not a cold H1 measurement.
 
+## Cross-solver reporting protocol
+
+The primary comparison with the previous works uses their released-demo shape:
+
+1. analyze and perform one initial factorization;
+2. call `Factorize` 100 times with the unchanged values array;
+3. call `Refactorize` 100 times with that same array; and
+4. report the average repeated-factor and repeated-refactor times separately.
+
+There is no sleep, cache flush, or artificial delay between calls. A combined
+100-iteration SPICE horizon is a useful KLS deployment metric, but it is not a
+replacement for the two separate timing columns used by the previous works.
+Use `scripts/score_repeated_factorization.py` with
+`--min-factor-repeat 100 --min-refactor-repeat 100` to enforce this protocol;
+the scorer rejects zero-repeat records so it cannot silently compare a cold
+initial factor against a warm repeated-factor average.
+
+The deterministic changed-value check remains secondary. It tests whether an
+optimization that benefits the byte-identical released loops still performs
+real numeric work correctly, rather than redefining the published comparison.
+
 ## Local primary material
 
 - `../../refs/CKTSO_High-Performance_Parallel_Sparse_Linear_Solver_for_General_Circuit_Simulations.pdf`, Sections I, IV, and VI.

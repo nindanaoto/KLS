@@ -92,6 +92,8 @@ def collect_analyze_failure_diagnostic(
         "--analyze-only",
         "--json",
     ]
+    if args.factor_repeat is not None:
+        cmd.extend(["--factor-repeat", str(args.factor_repeat)])
     append_solver_options(cmd, args)
     try:
         proc = subprocess.run(
@@ -274,6 +276,12 @@ def main() -> int:
     parser.add_argument("--manifest", type=pathlib.Path)
     parser.add_argument("--jsonl", type=pathlib.Path)
     parser.add_argument("--repeat", type=int, default=5)
+    parser.add_argument(
+        "--factor-repeat",
+        type=int,
+        default=None,
+        help="extra full factors after the initial factor (default: bench follows --repeat)",
+    )
     parser.add_argument("--refactor-repeat", type=int, default=5)
     parser.add_argument("--passes", type=int, default=1)
     parser.add_argument(
@@ -381,6 +389,11 @@ def main() -> int:
     if args.passes <= 0:
         print("--passes must be positive", file=sys.stderr)
         return 1
+    if args.repeat <= 0 or args.refactor_repeat < 0 or (
+        args.factor_repeat is not None and args.factor_repeat < 0
+    ):
+        print("repeat arguments are invalid", file=sys.stderr)
+        return 1
     if args.skip < 0:
         print("--skip must be non-negative", file=sys.stderr)
         return 1
@@ -428,6 +441,8 @@ def main() -> int:
                     str(args.refactor_repeat),
                     "--json",
                 ]
+                if args.factor_repeat is not None:
+                    cmd.extend(["--factor-repeat", str(args.factor_repeat)])
                 append_solver_options(cmd, args)
                 try:
                     proc = subprocess.run(

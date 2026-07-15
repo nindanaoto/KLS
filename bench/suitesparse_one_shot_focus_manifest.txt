@@ -1,0 +1,19 @@
+# Initial cold-H1 losses against at least one valid paper competitor.
+# Keep this focused set as a fast regression gate while first-factor policy
+# and kernels are tuned; the full medium+large union remains the final gate.
+rajat30
+rajat31
+nxp1
+rajat15
+g2_circuit
+tsopf_fs_b9_c1
+mc2depi
+asic_100k
+circuit5m
+memchip
+ss1
+htc_336_4438
+asic_100ks
+g3_circuit
+opf_10000
+onetone2
