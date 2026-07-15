@@ -16351,3 +16351,19 @@ its crossing weight rides per-column rate (the B'/panel and batched
 consume work, plus the already-adopted depth-2 pair multiplexing) and
 the front-end share, not scheduling.  Stall phase-3 is closed as a
 scheduling campaign.
+
+The lean+panel composition was PRICED OUT before construction by the
+decisive measurement it implied: the serial row engine WITH its dense
+panel machinery — the composition's ceiling — runs 1.75x behind the
+egraph on onetone2 (10.2 vs 5.8ms) and 3.5x behind on dc1 (17.4 vs
+5.0ms, residual degrading to 2.5e-11).  Eight parallel workers at 47%
+stall still beat any serial walk on the dense-covered class, and the
+small rows where serial paths win have 7-33% panel coverage — nothing
+to compose.  The supernode-integrated serial walk is therefore closed
+as a class lever (it remains only as the consult's per-row adopter
+where it already wins).  The stall/medium tier's honest remaining
+levers are egraph-INTERNAL consume-rate increments (the B' egraph port
+already adopts where panels fit), front-end shares, and margin
+hardening — grind economics, no silver bullet.  Three major builds have
+now been priced out before construction this session; the measurement
+cost each time was under five minutes.
