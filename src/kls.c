@@ -33529,6 +33529,20 @@ static void kls_metis_race_abandon(kls_solver *solver) {
   kls_metis_race_free(kls_metis_race_take(solver, NULL));
 }
 
+/* The foreground can build a predicted numeric directly from the raced
+   symbolic.  For sparse, exceptionally high-work incumbents this is both
+   much faster and safer than letting the race enter its serial trial factor
+   before the symbolic join (rajat31: 10s predicted METIS build versus a
+   roughly 38s race-side KLU trial). */
+static int kls_metis_race_symbolic_join_shape(const kls_solver *solver) {
+  return solver != NULL && solver->metis_race != NULL &&
+         solver->symbolic != NULL && solver->n > 0u &&
+         solver->col_ptr != NULL &&
+         (double)solver->col_ptr[solver->n] < 8.0 * (double)solver->n &&
+         solver->symbolic->est_flops >= 1.0e10 &&
+         solver->symbolic->est_flops >= 1.0e5 * (double)solver->n;
+}
+
 /* Analyze-time start: the METIS analyze stage needs only the pattern,
    so the worker launches when the analysis finishes and overlaps both
    the caller's gap to kls_factor and the whole main-side first factor.
@@ -33725,6 +33739,13 @@ static void kls_signal_metis_race_values(kls_solver *solver,
     return;
   }
   race->values_signaled = 1;
+  if (kls_metis_race_symbolic_join_shape(solver)) {
+    /* The acquire of stage2 in the worker publishes this plain flag before
+       it decides whether to start the value-dependent trial factor. */
+    race->symbolic_only = 1;
+    atomic_store_explicit(&race->stage2, 1, memory_order_release);
+    return;
+  }
   race->values_copy =
     (double *)malloc((size_t)solver->nnz * sizeof(*race->values_copy));
   if (race->values_copy == NULL) {
@@ -131848,19 +131869,19 @@ int kls_factor(kls_solver *solver, const double *values) {
          solver->symbolic == NULL ||
          (double)(solver->symbolic->lnz + solver->symbolic->unz) >=
            4.0e6) &&
-        /* a live race + an EXTREME per-row work density: committing
+        /* A live race plus extreme per-row work density: committing
            the predicted build to this ordering risks tens of seconds
            on a loser (ss1: AMD est 1.47e11 flops = 717K flops/row,
-           54s value passes; METIS halves the flops) - fall through to
-           the symbolic join and build on the raced ordering.  The
-           density floor keeps the giants (memchip 4-40K flops/row)
-           on the immediate predicted start: a plain est>=1e10 gate
-           measured memchip 6.45->8.36, Freescale1/circuit5M_dc +2-3s
-           of NodeND join wait each. */
-        !(solver->metis_race != NULL && solver->symbolic != NULL &&
-          solver->symbolic->est_flops >= 1.0e10 &&
-          solver->n > 0 &&
-          solver->symbolic->est_flops >= 2.0e5 * (double)solver->n) &&
+           54s value passes; METIS halves the flops).  Rajat31 is the
+           lower edge of the same failure mode: 104K flops/row makes
+           the AMD predicted build take 29.5s, while the raced METIS
+           pattern builds and factors in about 10s.  Fall through to
+           the symbolic join and build on that raced ordering.  The
+           100K density floor still keeps the ordinary giants (memchip
+           4-40K flops/row) on the immediate predicted start: a plain
+           est>=1e10 gate measured memchip 6.45->8.36 and added 2-3s
+           of NodeND join wait to Freescale1/circuit5M_dc. */
+        !kls_metis_race_symbolic_join_shape(solver) &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
       if (kls_trace_entry) {
@@ -132147,11 +132168,12 @@ int kls_factor(kls_solver *solver, const double *values) {
   int diagnostics_have_flops = 1;
   int diagnostics_have_rcond = 1;
   int promoted_numeric = 0;
-  if (!had_numeric && solver->n <= 65536u &&
-      kls_defer_cycle_trials_enabled()) {
-    /* lean small class: run the post-factor match trial from the first
-       refactorization's consult like the other deferrals; the plain
-       factor already passed its quality gates */
+  if (!had_numeric && kls_defer_cycle_trials_enabled()) {
+    /* A reactive post-factor match can only repay its matching, reanalysis,
+       and trial-factor cost across later numeric iterations.  The incumbent
+       factor has already passed its quality gates, so keep H1 cold and run
+       this policy consult only when a caller supplies changed values.  An
+       exact-repeat refactor needs neither a new numeric nor this trial. */
     solver->rowmatch_deferred = 1;
   } else if (maybe_select_auto_row_match(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
@@ -132248,12 +132270,11 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   KLS_ENTRY_PHASE("auto_pivtol")
 #ifdef KLS_HAVE_SPRAL_SCALING
-  if (!had_numeric && solver->n <= 65536u &&
-      kls_defer_cycle_trials_enabled()) {
-    /* lean small class: the post-factor Hungarian trial is the same
-       cycle-payoff family as the rowmatch trial (OPF_10000, n=43.9K:
-       61ms of an 82ms one-shot); the deferred consult runs it at the
-       first refactorization */
+  if (!had_numeric && kls_defer_cycle_trials_enabled()) {
+    /* The exact Hungarian trial belongs to the same cycle-payoff family as
+       the cheaper row-match trial above (OPF_10000: 61ms of an 82ms cold
+       factor).  The shared deferred consult runs both, but only after a
+       genuinely changed input makes a numeric refactor necessary. */
     solver->rowmatch_deferred = 1;
   } else if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
                                                     numeric_values)) {
