@@ -92314,32 +92314,26 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
        solver->n >= 200000u &&
        solver->row_perm == NULL && solver->user_col_perm == NULL &&
        !solver->spral_matching_selected &&
-       getenv("KLS_ALLOW_EGRAPH_TIGHT_TOL") == NULL)) {
-    /* Tight-tolerance veto, RESTORED (2026-07-15): Raj1's 1e-4-pivoted
-       numeric under this engine solves at a constant 2.5e-4 relative
-       residual — 12 digits beyond what its measured rgrowth (3.3e-4)
-       can explain, i.e. the refactorization writes corrupt values, not
-       merely growth-degraded ones.  The 2026-07-15 veto lift believed
-       the P1 per-refactor value capture had repaired this via policed
-       corrections; in fact the repair only engages when the contract
-       classifier arms, and whether it arms is a pivot-draw lottery:
-       the same corruption reads rgrowth 1.3e-7 on some draws (armed,
-       corrected to e-14 — the 7/7 cert run) and 3.3e-4 on others
-       ("healthy", uncorrected, e-4 — every run on 2026-07-15's box).
-       No rgrowth threshold separates them.  The row engine on the same
-       symbolic and tolerance solves at e-16 (the corruption is in this
-       engine's consumption of tight-tol patterns).  mac_econ (n=206.5k,
-       tol 1e-5) rides the same lottery with corrections armed: draws
-       span 7.9e-11..2.75e-8 — one of three ABOVE the 1e-8 validity
-       bar — while its forced-row run reads a stable 4.3e-10.  The
-       200000 floor covers both; ckt11752_dc_1 (49.7k), rajat15 (37k)
-       and b39_c30 (120k) measure stable e-13..e-15 across draws and
-       keep the engine.  PLAIN FRAME ONLY: matched/prestatic classes
-       (pre2: spral-matched 659k, tight-tol egraph at a stable 1.8e-16)
-       police accuracy through their structural-risk first-solve
-       probes, not the rgrowth lottery, and their row-path fallback is
-       timeout-class at giant scale — they keep the engine.
-       KLS_ALLOW_EGRAPH_TIGHT_TOL re-lifts for defect hunting. */
+       getenv("KLS_VETO_EGRAPH_TIGHT_TOL") != NULL)) {
+    /* Historic tight-tolerance veto, default-OFF again (2026-07-15,
+       third and final flip — full story in docs/paper_ideas_audit.md).
+       The "tight-tol egraph corruption" (raj1 constant 2.5e-4,
+       mac_econ 1-in-3 draws above the 1e-8 bar) was never this
+       engine's arithmetic: tiny tight-tol pivots trigger the fast
+       factor's rejected-pivot block restart, whose row-first rebuild
+       reallocates and re-pivots the block, and the only invalidation
+       was the i32 mirror — this engine then consumed a dangling LU
+       pointer cache and a refactor map ordered by the dead pivot
+       sequence (watchpoint-proven: its values were bit-exact to the
+       WRONG factorization).  The row engine re-derives pointers from
+       the live numeric per run, which is why every veto-era
+       engine-swap comparison blamed the egraph.  Fixed at the restart
+       call site (565e4ea): the column-engine caches are freed and the
+       deferred consult re-armed.  Re-lift evidence: raj1 15 draws
+       clean across t2/t4/t8 x rr3/rr20 (t8 egraph 1.35-1.40e-16),
+       mac_econ 6/6 valid (1.1e-10..4.4e-9 corrected band).
+       KLS_VETO_EGRAPH_TIGHT_TOL restores the ban (plain-frame,
+       n>=200k) if the class ever regresses. */
     return 0;
   }
   if (solver->dense_tail_cols > 0) {
@@ -132322,13 +132316,20 @@ int kls_refactor(kls_solver *solver, const double *values) {
 #ifdef KLS_HAVE_CBLAS
     kls_dense_tail_refactor_validate(solver, numeric_values);
 #endif
-    if (solver->solve_contract_probe == 2 && solver->row_perm == NULL &&
+    if ((solver->solve_contract_probe == 2 ||
+         (solver->stats.selected_pivot_tolerance > 0.0 &&
+          solver->stats.selected_pivot_tolerance <
+            solver->options.pivot_tolerance)) &&
+        solver->row_perm == NULL &&
         solver->row_scale == NULL && solver->col_scale == NULL &&
         numeric_values != NULL && solver->nnz > 0) {
       /* armed plain-frame numerics refine every solve: the residual must
          run against THIS refactorization's input values — solver->values
          holds the analyze-time array, which goes stale under changing
-         values (the documented stale-refinement hazard) */
+         values (the documented stale-refinement hazard).  The
+         tolerance-promoted class (selected tol < requested) captures
+         the same way: its solves carry the config-derived self-check
+         (see the solve-side gate), which starves without values. */
       if (solver->solve_refine_values == NULL) {
         solver->solve_refine_values = (double *)malloc(
           (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
@@ -132779,6 +132780,16 @@ static int solve_impl(kls_solver *solver,
             solver->values != NULL, b == x,
             solver->solve_contract_probe, contract_probe_wanted);
   }
+  const int tight_tol_selected =
+    solver->stats.selected_pivot_tolerance > 0.0 &&
+    solver->stats.selected_pivot_tolerance <
+      solver->options.pivot_tolerance &&
+    /* plain frames only, mirroring the per-refactor value capture:
+       matched/scaled classes (pre2) have no capture here, so this
+       gate would refine them against the stale analyze-time values —
+       the documented P1 hazard; they police via first-solve probes */
+    solver->row_perm == NULL && solver->row_scale == NULL &&
+    solver->col_scale == NULL;
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
       (solver->numeric_needs_refinement || solver->row_solve_self_check ||
        /* near-diagonal factors (tight-tolerance adoption at 1e-8) always
@@ -132787,6 +132798,15 @@ static int solve_impl(kls_solver *solver,
           initial-tolerance heuristics whose factors are accurate without
           corrections (mac_econ-class regressed 2x on solves at 1e-4). */
        solver->common.tol < 1.0e-6 ||
+       /* tolerance-promoted numerics (auto-pivtol 1e-4/1e-5 fill
+          adoptions) carry the SELF-CHECK contract the same
+          config-derived way: their accuracy is a pivot-draw lottery
+          the rgrowth classifier cannot separate (mac_econ drew
+          7.9e-11..3.2e-8 across 2026-07-15 certs — some draws above
+          the 1e-8 validity bar with the classifier reading healthy).
+          Self-check semantics, not needs_refinement: one residual
+          SpMV per solve, correction only when above the 1e-9 line. */
+       tight_tol_selected ||
        getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL ||
        contract_probe_wanted || contract_armed) &&
       (solver->row_scale == NULL && solver->col_scale == NULL
@@ -132852,6 +132872,7 @@ static int solve_impl(kls_solver *solver,
         bmax = bmax < av ? av : bmax;
       }
       const int self_check_only = (solver->row_solve_self_check ||
+                                   tight_tol_selected ||
                                    contract_probe_wanted || contract_armed) &&
         !solver->numeric_needs_refinement &&
         !(solver->common.tol < 1.0e-6) &&
@@ -132863,7 +132884,13 @@ static int solve_impl(kls_solver *solver,
          line (measured 0.26s vs 0.066s base solve).  Reduced-precision
          factors under needs_refinement keep the tight target. */
       const double target = (bmax > 0.0 ? bmax : 1.0) *
-        (self_check_only ? 1.0e-9
+        (self_check_only
+           /* the tolerance-promoted class targets one notch tighter:
+              its 1e-9 max-norm exits still drew 1.15e-8 on the
+              l2-relative validity metric (sqrt-n normalization gap on
+              mac_econ's 206k vector) — one extra halving iteration on
+              the bad draws only */
+           ? (tight_tol_selected ? 1.0e-10 : 1.0e-9)
          : solver->user_col_perm != NULL ? 1.0e-10 : 1.0e-12);
       double last_rmax = HUGE_VAL;
       double initial_rmax = -1.0;

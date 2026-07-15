@@ -16520,3 +16520,14 @@ verification, veto lifted: raj1 6/6 draws clean (t2 mapped
 default-on pending an adversarial re-lift cert (raj1 + mac_econ,
 multiple thread counts and repeat depths) — mechanism + 6 draws
 support the re-lift; the 7/7-lucky-draws lesson says measure more.
+
+VETO RE-LIFTED (third flip, now with mechanism + adversarial draws):
+the restart-staleness fix (565e4ea) removes the corruption class the
+veto guarded.  Re-lift cert: raj1 15 draws clean across t2/t4/t8 x
+rr3/rr20 (t8 egraph 1.35-1.40e-16; one unreproduced RUNFAIL draw was
+a timeout-class lottery — raj1's tol-1e-3 fallback class predates
+everything, 4/4 clean reproductions after), mac_econ 6/6 valid
+(1.1e-10..4.4e-9 corrected band — margin thin, tracked as a P2
+refinement-strength item, but its 4.3x row-path price is gone).
+KLS_VETO_EGRAPH_TIGHT_TOL (plain-frame n>=200k) restores the ban if
+the class regresses.  raj1 and mac_econ re-tier on their fast engines.
