@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Score paired paper-manifest runs against the 100-solve SPICE metric.
+"""Score paired paper-manifest runs at a requested solve horizon.
 
+H1   = analysis + initial factor + solve
 T100 = analysis + initial factor + first refactor + 98 * steady refactor
        + 100 * solve
 
@@ -33,7 +34,7 @@ def relative_residual(record):
     return value if math.isfinite(value) else None
 
 
-def score_record(record, residual_threshold):
+def score_record(record, residual_threshold, horizon=HORIZON):
     required = ("analysis_seconds", "solve_seconds_avg")
     if record.get("timeout_or_fail") or any(key not in record for key in required):
         return None, "timeout/fail"
@@ -65,7 +66,10 @@ def score_record(record, residual_threshold):
     if any(not math.isfinite(value) or value < 0.0 for value in timings):
         return None, "invalid timing"
 
-    cycle = analysis + initial + first + (HORIZON - 2) * steady + HORIZON * solve
+    if horizon == 1:
+        cycle = analysis + initial + solve
+    else:
+        cycle = analysis + initial + first + (horizon - 2) * steady + horizon * solve
     return {
         "cycle": cycle,
         "ana": analysis,
@@ -79,7 +83,7 @@ def score_record(record, residual_threshold):
     }, None
 
 
-def load(path, residual_threshold, selection):
+def load(path, residual_threshold, selection, horizon=HORIZON):
     samples = {}
     failures = {}
     with open(path, encoding="utf-8") as stream:
@@ -94,7 +98,7 @@ def load(path, residual_threshold, selection):
             name = matrix_name(record)
             if not name:
                 continue
-            scored, reason = score_record(record, residual_threshold)
+            scored, reason = score_record(record, residual_threshold, horizon)
             if scored is None:
                 failures.setdefault(name, []).append(reason)
             else:
@@ -138,15 +142,29 @@ def parse_args():
         default="median",
         help="pass selection per matrix (default: median)",
     )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=HORIZON,
+        help="number of solve iterations to score; 1 is a cold one-shot (default: 100)",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    kls, kls_failures = load(args.kls, args.residual_threshold, args.selection)
-    comparisons = {"CK": load(args.ck, args.residual_threshold, args.selection)}
+    if args.horizon < 1:
+        raise SystemExit("--horizon must be at least 1")
+    kls, kls_failures = load(
+        args.kls, args.residual_threshold, args.selection, args.horizon
+    )
+    comparisons = {
+        "CK": load(args.ck, args.residual_threshold, args.selection, args.horizon)
+    }
     if args.st:
-        comparisons["ST"] = load(args.st, args.residual_threshold, args.selection)
+        comparisons["ST"] = load(
+            args.st, args.residual_threshold, args.selection, args.horizon
+        )
 
     kls_valid = sum(record is not None for record in kls.values())
     print(
@@ -177,11 +195,11 @@ def main():
         rows.sort(reverse=True)
         print(
             f"\n== KLS vs {comparison_name}: "
-            f"cycle gm={geometric_mean([row[0] for row in rows]):.3f} "
+            f"H{args.horizon} gm={geometric_mean([row[0] for row in rows]):.3f} "
             f"wins {sum(row[0] < 1.0 for row in rows)}/{len(rows)} =="
         )
         print(
-            f"{'matrix':16} {'cyc':>6} {'rs':>6} {'solve':>6} "
+            f"{'matrix':16} {f'H{args.horizon}':>6} {'rs':>6} {'solve':>6} "
             f"{'ana+init':>8}  path/ord      resid"
         )
         for ratio, name, candidate, reference in rows:

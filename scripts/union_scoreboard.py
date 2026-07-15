@@ -2,7 +2,7 @@
 """Union-goal scoreboard: beat BOTH CKTSO and SubtreeLU on every row.
 
 Joins one or more (kls, ck, st) jsonl triples, computes each row's worst-side
-T100 cycle ratio (CK everywhere, ST only where ST is residual-valid), and
+requested-horizon ratio (CK everywhere, ST only where ST is residual-valid), and
 tiers the rows:
 
   WON   worst < 1.0        (margin-hardened when worst <= 0.90)
@@ -47,20 +47,17 @@ def tier_of(worst):
     return "DEEP"
 
 
-def dominant_term(kls, ref):
-    """Which weighted term contributes most excess cycle time vs ref."""
-    weights = (
-        ("rs", HORIZON - 2),
-        ("solve", HORIZON),
-        ("front", 1.0),
-    )
-    kls_front = kls["ana"] + kls["init"] + kls["rf"]
-    ref_front = ref["ana"] + ref["init"] + ref["rf"]
+def dominant_term(kls, ref, horizon):
+    """Which weighted term contributes most excess time vs ref."""
+    kls_front = kls["ana"] + kls["init"]
+    ref_front = ref["ana"] + ref["init"]
     excess = {
-        "rs": (kls["rs"] - ref["rs"]) * (HORIZON - 2),
-        "solve": (kls["solve"] - ref["solve"]) * HORIZON,
+        "solve": (kls["solve"] - ref["solve"]) * horizon,
         "front": kls_front - ref_front,
     }
+    if horizon > 1:
+        excess["front"] += kls["rf"] - ref["rf"]
+        excess["rs"] = (kls["rs"] - ref["rs"]) * (horizon - 2)
     return max(excess, key=excess.get)
 
 
@@ -92,20 +89,30 @@ def parse_args():
         default=0.90,
         help="worst-side ratio at or under which a win counts as hardened",
     )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=HORIZON,
+        help="number of solve iterations to score; 1 is a cold one-shot (default: 100)",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    if args.horizon < 1:
+        raise SystemExit("--horizon must be at least 1")
     rows = {}          # name -> dict
     blocked = {}       # name -> reason
     dispositions = []  # all-solvers-fail
     default_wins = []  # kls valid, both competitors invalid
 
     for label, kls_path, ck_path, st_path in args.sets:
-        kls, kls_fail = load(kls_path, args.residual_threshold, args.selection)
-        ck, _ = load(ck_path, args.residual_threshold, args.selection)
-        st, _ = load(st_path, args.residual_threshold, args.selection)
+        kls, kls_fail = load(
+            kls_path, args.residual_threshold, args.selection, args.horizon
+        )
+        ck, _ = load(ck_path, args.residual_threshold, args.selection, args.horizon)
+        st, _ = load(st_path, args.residual_threshold, args.selection, args.horizon)
         for name in kls.keys() | ck.keys() | st.keys():
             k, c, s = kls.get(name), ck.get(name), st.get(name)
             if k is None:
@@ -133,7 +140,7 @@ def main():
                 "rs": ratio(k, ref, "rs"),
                 "solve": ratio(k, ref, "solve"),
                 "front": ratio(k, ref, "front"),
-                "dom": dominant_term(k, ref) if worst >= 1.0 else "",
+                "dom": dominant_term(k, ref, args.horizon) if worst >= 1.0 else "",
                 "path": f"{k['path']}/{k['ordering']}",
                 "resid": k["resid"],
             }
@@ -145,7 +152,7 @@ def main():
     total = len(rows) + len(blocked) + len(dispositions) + len(default_wins)
     won = len(by_tier["WON"]) + len(default_wins)
     remaining = len(rows) - len(by_tier["WON"]) + len(blocked)
-    print(f"UNION SCOREBOARD  rows={total}  won={won}  remaining={remaining}  "
+    print(f"UNION SCOREBOARD H{args.horizon}  rows={total}  won={won}  remaining={remaining}  "
           f"dispositions={len(dispositions)}  "
           f"(selection={args.selection}, resid<={args.residual_threshold:.0e})")
     ck_all = [r["ck"] for r in rows.values() if r["ck"]]
