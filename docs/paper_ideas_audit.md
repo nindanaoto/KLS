@@ -16389,3 +16389,11 @@ where race scale verdicts land versus where the auto_rescale phase
 consults, and joining them for the n>250K matched class — or deferring
 the rescale trials to the first-refactor consult with a singular-rescue
 analog.  raj1's projected 2.19 -> ~1.85 rides on that plumbing.
+
+raj1's scale-promotion waste hypothesis tested and rejected in one run:
+the promotion adopts scale=1 and the final configuration keeps it
+(scale=1, tol 1e-4) — the 1.93s is load-bearing for the adopted config,
+so the lever is genuinely moving it off the critical path (race-worker
+execution with a consult join, or deferral with a rescue), not skipping
+it.  The phase-marker semantics correction (markers are segment ends)
+and this verdict complete raj1's front-end brief.
