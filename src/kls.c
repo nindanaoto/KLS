@@ -92477,9 +92477,27 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
     /* One sample per side: the narrow probe is the trial's whole cost
        (an ASIC-class narrow refactor runs 1.7x, and two of them put
        +7% on a 20-refactor average), so deviate from full width only
-       on a decisive margin. */
+       on a decisive margin.  rajat25 measured an 8us near-miss at 0.9
+       (narrow -10.1%); KLS_EGRAPH_WIDTH_MARGIN overrides for the
+       sensitivity pass. */
+    double width_margin = 0.9;
+    {
+      static int margin_cached = 0;
+      static double margin_value = 0.9;
+      if (!margin_cached) {
+        const char *env = getenv("KLS_EGRAPH_WIDTH_MARGIN");
+        if (env != NULL && env[0] != '\0') {
+          const double parsed = atof(env);
+          if (parsed > 0.0 && parsed < 1.0) {
+            margin_value = parsed;
+          }
+        }
+        margin_cached = 1;
+      }
+      width_margin = margin_value;
+    }
     solver->eg_tt_choice =
-      solver->eg_tt_min[1] < 0.9 * solver->eg_tt_min[0]
+      solver->eg_tt_min[1] < width_margin * solver->eg_tt_min[0]
         ? solver->eg_tt_counts[1] : solver->eg_tt_counts[0];
     if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
       fprintf(stderr,

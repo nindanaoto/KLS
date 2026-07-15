@@ -16329,3 +16329,12 @@ rr=20 and one draw does not justify softening it, but the class's
 near-misses are worth a margin-sensitivity pass (0.92) WITH a full
 paired A/B if the stall tier needs the last few percent — noted, not
 changed.
+
+The width-margin sensitivity pass (KLS_EGRAPH_WIDTH_MARGIN override,
+0.90 vs 0.93, two interleaved passes over the stall class): trans5
+gains ~6% at 0.93 and rajat25 leans that way, but dc1 loses ~6%
+symmetric and rajat20/onetone2 wash — no uniform margin improvement
+exists, the 0.9 default stands, and the override stays as a diagnostic.
+The per-row structure (some rows' narrow arm is genuinely 5-10% better,
+others' full width is) would need a second trial sample to separate,
+which is exactly the probe-cost trade the 0.9 margin was set to avoid.
