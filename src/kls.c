@@ -28918,9 +28918,11 @@ static int should_start_auto_with_metis(UF_long n,
                                                            row_idx)) {
     return 1;
   }
-  if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
-    return 1;
-  }
+  /* The 30K--45K dense-diagonal class is cheap enough that NodeND cannot
+     repay its own latency.  Rajat15's AMD factor/refactor/solve all beat the
+     METIS choice, while the METIS analyze alone costs about 0.20s versus a
+     0.04s AMD numeric.  Keep the classifier for scale/BTF policy below, but
+     let the ordinary minimum-degree competition select its ordering. */
   if (is_medium_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
     return 1;
   }
@@ -131930,9 +131932,10 @@ int kls_factor(kls_solver *solver, const double *values) {
            would dwarf the NodeND wait (mac_econ-class); small raced
            matrices factor on the incumbent ordering now and the deferred
            refactor-time consult arbitrates with timed acceptance. */
-        /* Symbolic-only join: wait for the worker's analyze, abort its
-           serial trial factor, and build the numeric here with the
-           parallel predicted machinery on the raced METIS ordering
+        /* Symbolic join: wait for the worker's analyze, request a
+           symbolic-only result for the extreme-work class, and build the
+           numeric here with the parallel predicted machinery on the raced
+           METIS ordering
            (mac_econ: the old full join waited ~20s for NodeND + a
            serial klu factor; the predicted build at t4 takes ~2s). */
         kls_metis_race *race = solver->metis_race;
@@ -131968,7 +131971,6 @@ int kls_factor(kls_solver *solver, const double *values) {
             solver->stats.structural_rank =
               (int64_t)solver->symbolic->structural_rank;
             solver->stats.estimated_flops = solver->symbolic->est_flops;
-            kls_metis_race_free(race);
             if (kls_dense_tail_class) {
               /* dense-factor/light-input shape (ss1: fill/n=234 at
                  nnz/n=4.1): the predicted closure doubles an already
@@ -132010,8 +132012,28 @@ int kls_factor(kls_solver *solver, const double *values) {
                         "KLS race symbolic join: predicted built\n");
               }
             }
-            /* on predicted failure solver->numeric stays NULL and the
-               serial klu fallback below factors the METIS symbolic */
+            if (solver->numeric == NULL && race->numeric != NULL &&
+                race->common.status >= TRILINOS_KLU_OK &&
+                race->common.status != TRILINOS_KLU_SINGULAR) {
+              /* Some patterns reject the static predicted pattern before
+                 construction (nxp1 has 668 structurally missing diagonal
+                 positions).  The join has already waited for the worker's
+                 valid KLU numeric in this case; adopt it instead of paying
+                 for the identical foreground factor a second time. */
+              solver->numeric = race->numeric;
+              race->numeric = NULL;
+              solver->common = race->common;
+              solver->numeric_from_pipe = 0;
+              kls_numeric_replaced_invalidate(solver);
+              kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLU_FIRST);
+              if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+                fprintf(stderr,
+                        "KLS race symbolic join: adopted completed numeric\n");
+              }
+            }
+            kls_metis_race_free(race);
+            /* If neither prediction nor the raced numeric succeeded, the
+               serial KLU fallback below factors the METIS symbolic. */
           }
         }
       } else if (!had_numeric && solver->metis_race != NULL &&
