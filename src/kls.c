@@ -131436,17 +131436,19 @@ static int kls_serial_factor(kls_solver *solver,
       solver->common.flops > 1.50 * solver->symbolic->est_flops;
   }
 
-  /* AUTO starts unscaled because that removes a full value pass and enables
-     the lean mapped representation.  A failed factor is retried scaled.  A
-     successful factor is also retried when threshold pivoting inflated its
-     measured work by more than 50% over the symbolic estimate: that signal
-     catches numerical fill explosions without a matrix-name or dimension
-     rule, before they poison every later refactor. */
+  /* A failed factor always gets KLU's robust sum-scaled retry.  Do not throw
+     away a successful unscaled numeric on the flop-estimate warning alone:
+     inflated scalar work can still expose a much faster mapped Horizon
+     cycle.  Require AUTO's independent value/structure policy to agree that
+     sum scaling is appropriate before paying for and adopting a replacement. */
+  const int scale_policy_confirms_retry =
+    unscaled_work_inflated &&
+    choose_auto_scale_from_values(solver, numeric_values) == 2;
   if (solver->options.scale == KLS_SCALE_AUTO &&
       solver->common.scale != 2 &&
       (solver->numeric == NULL || solver->common.status < 0 ||
        solver->common.status == TRILINOS_KLU_SINGULAR ||
-       unscaled_work_inflated)) {
+       scale_policy_confirms_retry)) {
     free_numeric(solver);
     solver->common.scale = 2;
     solver->common.status = TRILINOS_KLU_OK;
@@ -131468,8 +131470,8 @@ static int kls_serial_factor(kls_solver *solver,
       ? KLS_ERR_SINGULAR : KLS_ERR_FACTOR_FAILED;
   }
   if (diagnostics_have_flops) {
-    /* The AUTO inflation guard just computed the final factor's flop count;
-       do not walk the numeric structure a second time. */
+    /* The inflation guard already computed the retained factor's flop count;
+       only reciprocal condition estimation remains. */
     kls_update_numeric_rcond(solver);
   } else {
     kls_update_numeric_diagnostics(solver, 1);
