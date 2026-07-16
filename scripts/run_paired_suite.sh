@@ -22,6 +22,15 @@ ROTATE_SIDES=${ROTATE_SIDES:-0}
 # average, so the 99-iteration SPICE cycle is reconstructed exactly as
 # shot + (first + solve) + 98*(steady + solve).
 REFACTOR_REPEAT=${REFACTOR_REPEAT:-5}
+# Keep the released-demo-compatible unchanged loop as the default.  Set
+# REFACTOR_VALUES=rank-preserving for the nonlinear-SPICE validity check; all
+# harnesses then receive the same A_g = D_row(g) A_0 D_col(g) sequence.
+REFACTOR_VALUES=${REFACTOR_VALUES:-unchanged}
+REFACTOR_VALUE_AMPLITUDE=${REFACTOR_VALUE_AMPLITUDE:-0.001}
+case "$REFACTOR_VALUES" in
+  unchanged|rank-preserving) ;;
+  *) echo "invalid REFACTOR_VALUES: $REFACTOR_VALUES" >&2; exit 2;;
+esac
 # The measured cycle starts at the initial factorization.  Extra full-factor
 # timing passes would mutate numeric state before the first refactor and are
 # therefore disabled for this paired experiment.
@@ -63,21 +72,27 @@ while IFS= read -r name; do
       out=$(timeout "$TIMEOUT" "$KLS_BENCH" "$matrix" --orientation auto \
         --repeat 1 --factor-repeat "$FACTOR_REPEAT" \
         --refactor-repeat "$REFACTOR_REPEAT" --threads "$THREADS" \
+        --refactor-values "$REFACTOR_VALUES" \
+        --refactor-value-amplitude "$REFACTOR_VALUE_AMPLITUDE" \
         --backend "$KLS_BACKEND" --json 2>/dev/null)
       dst=$OUT_KLS
     elif [ "$side" = ck ]; then
       out=$(timeout "$TIMEOUT" "$CKTSO_COMPARE" "$matrix" "$THREADS" 1 \
         "$REFACTOR_REPEAT" "$FACTOR_REPEAT" \
+        "$REFACTOR_VALUES" "$REFACTOR_VALUE_AMPLITUDE" \
         2>/dev/null)
       dst=$OUT_CK
     elif [ "$side" = st ]; then
       out=$(timeout "$TIMEOUT" "$SUBTREELU_COMPARE" "$matrix" "$THREADS" 1 \
         "$REFACTOR_REPEAT" "$FACTOR_REPEAT" \
+        "$REFACTOR_VALUES" "$REFACTOR_VALUE_AMPLITUDE" \
         2>/dev/null)
       dst=$OUT_ST
     else
       out=$(timeout "$TIMEOUT" "$KLU_COMPARE" "$matrix" --repeat 1 \
         --factor-repeat "$FACTOR_REPEAT" --refactor-repeat "$REFACTOR_REPEAT" \
+        --refactor-values "$REFACTOR_VALUES" \
+        --refactor-value-amplitude "$REFACTOR_VALUE_AMPLITUDE" \
         --json 2>/dev/null)
       dst=$OUT_KLU
     fi

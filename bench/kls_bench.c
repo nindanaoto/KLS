@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "kls/kls.h"
+#include "bench_value_sequence.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -343,6 +344,18 @@ static void matvec_values(const matrix *a, const double *values,
   }
 }
 
+static void make_refactor_values(const matrix *a, const double *base_values,
+                                 uint64_t generation, double amplitude,
+                                 double *values_out) {
+  for (int64_t col = 0; col < a->n; ++col) {
+    for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
+      values_out[p] = bench_refactor_value(
+        base_values[p], (uint64_t)a->row_idx[p], (uint64_t)col,
+        generation, amplitude);
+    }
+  }
+}
+
 static double residual_norm_values(const matrix *a, const double *values,
                                    const double *x, const double *b,
                                    double *relative_out) {
@@ -633,7 +646,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--refactor-values unchanged|rank-preserving] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -662,6 +675,9 @@ int main(int argc, char **argv) {
   int refactor_repeat = 5;
   int json = 0;
   int analyze_only = 0;
+  bench_refactor_value_mode refactor_value_mode =
+    BENCH_REFACTOR_VALUES_UNCHANGED;
+  double refactor_value_amplitude = 1.0e-3;
   double stress_diagonal_scale = 1.0;
   int64_t stress_diagonal_column = -1;
   const char *row_refactor_control = "env";
@@ -682,6 +698,18 @@ int main(int argc, char **argv) {
       factor_repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--refactor-repeat") == 0 && i + 1 < argc) {
       refactor_repeat = atoi(argv[++i]);
+    } else if (strcmp(argv[i], "--refactor-values") == 0 &&
+               i + 1 < argc) {
+      if (!bench_parse_refactor_value_mode(argv[++i], &refactor_value_mode)) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+      }
+    } else if (strcmp(argv[i], "--refactor-value-amplitude") == 0 &&
+               i + 1 < argc) {
+      if (!parse_nonnegative_double(argv[++i], &refactor_value_amplitude)) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+      }
     } else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
       options.threads = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--backend") == 0 && i + 1 < argc) {
@@ -753,7 +781,9 @@ int main(int argc, char **argv) {
   }
   if (factor_repeat < 0) factor_repeat = repeat;
   if (repeat <= 0 || factor_repeat < 0 || refactor_repeat < 0 ||
-      options.threads <= 0) {
+      options.threads <= 0 || refactor_value_amplitude >= 1.0 ||
+      (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING &&
+       refactor_value_amplitude <= 0.0)) {
     usage(argv[0]);
     return EXIT_FAILURE;
   }
@@ -1014,7 +1044,7 @@ int main(int argc, char **argv) {
                              &options);
   }
   if (status == KLS_OK) {
-    status = kls_factor(solver, a.values);
+    status = kls_factor(solver, run_values);
   }
   if (status != KLS_OK) {
     fprintf(stderr, "KLS setup failed: %s (%d)\n", kls_status_string(status), status);
@@ -1033,6 +1063,23 @@ int main(int argc, char **argv) {
   kls_get_stats(solver, &stats);
   const double initial_factor_seconds = stats.factor_seconds;
   const kls_factor_path initial_factor_path = stats.last_factor_path;
+
+  double *generated_values = NULL;
+  const double *current_values = run_values;
+  if (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING) {
+    generated_values =
+      (double *)malloc((size_t)a.nnz * sizeof(*generated_values));
+    if (generated_values == NULL) {
+      kls_destroy(solver);
+      bench_index_view_free(&input_index);
+      matrix_free(&a);
+      free(stressed_values);
+      free(x_true);
+      free(b);
+      free(x);
+      return EXIT_FAILURE;
+    }
+  }
 
   double factor_total = 0.0;
   double refactor_total = 0.0;
@@ -1066,7 +1113,13 @@ int main(int argc, char **argv) {
   }
   double refactor_first = 0.0;
   for (int i = 0; i < refactor_repeat && status == KLS_OK; ++i) {
-    status = kls_refactor(solver, run_values);
+    if (generated_values != NULL) {
+      make_refactor_values(&a, run_values, (uint64_t)i + 1u,
+                           refactor_value_amplitude, generated_values);
+      current_values = generated_values;
+      matvec_values(&a, current_values, x_true, b);
+    }
+    status = kls_refactor(solver, current_values);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     refactor_total += stats.refactor_seconds;
@@ -1122,6 +1175,7 @@ int main(int argc, char **argv) {
     bench_index_view_free(&input_index);
     matrix_free(&a);
     free(stressed_values);
+    free(generated_values);
     free(x_true);
     free(b);
     free(x);
@@ -1135,6 +1189,7 @@ int main(int argc, char **argv) {
     bench_index_view_free(&input_index);
     matrix_free(&a);
     free(stressed_values);
+    free(generated_values);
     free(x_true);
     free(b);
     free(x);
@@ -1144,7 +1199,7 @@ int main(int argc, char **argv) {
 
   double rel_residual = 0.0;
   const double residual =
-      residual_norm_values(&a, run_values, x, b, &rel_residual);
+      residual_norm_values(&a, current_values, x, b, &rel_residual);
   const double factor_avg = factor_repeat > 0
     ? factor_total / (double)factor_repeat : initial_factor_seconds;
   const double refactor_avg = refactor_repeat > 0 ? refactor_total / (double)refactor_repeat : 0.0;
@@ -1158,6 +1213,8 @@ int main(int argc, char **argv) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"threads\":%d,\"repeat\":%d,\"factor_repeat\":%d"
            ",\"refactor_repeat\":%d"
+           ",\"refactor_value_mode\":\"%s\""
+           ",\"refactor_value_amplitude\":%.9g"
            ",\"backend\":\"%s\""
            ",\"build_has_metis\":%s"
            ",\"build_has_scotch\":%s"
@@ -1222,6 +1279,9 @@ int main(int argc, char **argv) {
            ",\"kls_first_last_separator_queue_split_components\":%" PRId64,
            path, a.n, a.nnz, options.threads, repeat, factor_repeat,
            refactor_repeat,
+           bench_refactor_value_mode_name(refactor_value_mode),
+           refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
+             ? refactor_value_amplitude : 0.0,
            kls_backend_name(options.backend),
            stats.build_has_metis ? "true" : "false",
            stats.build_has_scotch ? "true" : "false",
@@ -3999,6 +4059,10 @@ int main(int argc, char **argv) {
     printf("matrix: %s\n", path);
     printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
     printf("threads: %d\n", options.threads);
+    printf("refactor values: %s (amplitude %.6g)\n",
+           bench_refactor_value_mode_name(refactor_value_mode),
+           refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
+             ? refactor_value_amplitude : 0.0);
     printf("build features: METIS %s, SCOTCH %s, SPRAL scaling %s, CBLAS %s\n",
            stats.build_has_metis ? "on" : "off",
            stats.build_has_scotch ? "on" : "off",
@@ -5620,6 +5684,7 @@ int main(int argc, char **argv) {
   bench_index_view_free(&input_index);
   matrix_free(&a);
   free(stressed_values);
+  free(generated_values);
   free(x_true);
   free(b);
   free(x);

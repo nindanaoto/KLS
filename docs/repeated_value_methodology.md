@@ -66,6 +66,32 @@ The deterministic changed-value check remains secondary. It tests whether an
 optimization that benefits the byte-identical released loops still performs
 real numeric work correctly, rather than redefining the published comparison.
 
+Run it with:
+
+```sh
+REFACTOR_VALUES=rank-preserving \
+REFACTOR_VALUE_AMPLITUDE=0.001 \
+  scripts/run_paired_suite.sh ...
+```
+
+At refactor generation `g`, every harness constructs the identical matrix
+
+`A_g = D_row(g) A_0 D_col(g)`.
+
+The diagonal multipliers are deterministic coordinate/generation hashes in
+`[1-a, 1+a]`, where `a` is the amplitude. Because the command-line interface
+requires `0 < a < 1`, both diagonal matrices are nonsingular and `A_g` has
+exactly the same rank as `A_0`. The sequence is independent of matrix names,
+values, dimensions, and the corpus. Each harness rebuilds the known-solution
+right-hand side outside the solver timer before refactorization. This avoids
+giving any solver credit for benchmark value generation while checking the
+final residual against the actual final-generation matrix.
+
+The default remains `REFACTOR_VALUES=unchanged`, preserving direct parity with
+the released CKTSO and SubtreeLU demo loops. JSON output records both
+`refactor_value_mode` and the effective amplitude so changed- and unchanged-
+value records cannot be confused during review.
+
 ## Local primary material
 
 - `../../refs/CKTSO_High-Performance_Parallel_Sparse_Linear_Solver_for_General_Circuit_Simulations.pdf`, Sections I, IV, and VI.

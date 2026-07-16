@@ -1,4 +1,5 @@
 #include "subtree_lu.h"
+#include "bench_value_sequence.h"
 
 #include <algorithm>
 #include <cmath>
@@ -162,6 +163,31 @@ static void matvec(const Matrix &a, const std::vector<double> &x, std::vector<do
   }
 }
 
+static void make_refactor_values(
+    Matrix &a, const std::vector<double> &base_values,
+    const std::vector<double> &base_row_values, uint64_t generation,
+    double amplitude) {
+  for (int col = 0; col < a.n; ++col) {
+    for (int p = a.col_ptr[static_cast<size_t>(col)];
+         p < a.col_ptr[static_cast<size_t>(col) + 1u]; ++p) {
+      a.values[static_cast<size_t>(p)] = bench_refactor_value(
+        base_values[static_cast<size_t>(p)],
+        static_cast<uint64_t>(a.row_idx[static_cast<size_t>(p)]),
+        static_cast<uint64_t>(col), generation, amplitude);
+    }
+  }
+  for (int row = 0; row < a.n; ++row) {
+    for (int p = a.row_ptr[static_cast<size_t>(row)];
+         p < a.row_ptr[static_cast<size_t>(row) + 1u]; ++p) {
+      a.row_values[static_cast<size_t>(p)] = bench_refactor_value(
+        base_row_values[static_cast<size_t>(p)],
+        static_cast<uint64_t>(row),
+        static_cast<uint64_t>(a.col_idx[static_cast<size_t>(p)]),
+        generation, amplitude);
+    }
+  }
+}
+
 static double residual(const Matrix &a,
                        const std::vector<double> &x,
                        const std::vector<double> &b,
@@ -184,15 +210,26 @@ static double residual(const Matrix &a,
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat] [factor-repeat]\n", argv[0]);
+    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat] [factor-repeat] [unchanged|rank-preserving] [amplitude]\n", argv[0]);
     return EXIT_FAILURE;
   }
   const int threads = argc > 2 ? std::atoi(argv[2]) : 16;
   const int repeat = argc > 3 ? std::atoi(argv[3]) : 5;
   const int refactor_repeat = argc > 4 ? std::atoi(argv[4]) : repeat;
   const int factor_repeat = argc > 5 ? std::atoi(argv[5]) : repeat;
+  bench_refactor_value_mode refactor_value_mode =
+    BENCH_REFACTOR_VALUES_UNCHANGED;
+  if (argc > 6 &&
+      !bench_parse_refactor_value_mode(argv[6], &refactor_value_mode)) {
+    std::fprintf(stderr, "unknown refactor value mode: %s\n", argv[6]);
+    return EXIT_FAILURE;
+  }
+  const double refactor_value_amplitude = argc > 7 ? std::atof(argv[7]) : 1.0e-3;
   if (threads <= 0 || repeat <= 0 || refactor_repeat < 0 ||
-      factor_repeat < 0) {
+      factor_repeat < 0 || !std::isfinite(refactor_value_amplitude) ||
+      refactor_value_amplitude < 0.0 || refactor_value_amplitude >= 1.0 ||
+      (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING &&
+       refactor_value_amplitude <= 0.0)) {
     std::fprintf(stderr, "threads/repeat arguments must be positive\n");
     return EXIT_FAILURE;
   }
@@ -201,6 +238,8 @@ int main(int argc, char **argv) {
   if (!read_matrix_market(argv[1], a)) {
     return EXIT_FAILURE;
   }
+  const std::vector<double> base_values = a.values;
+  const std::vector<double> base_row_values = a.row_values;
   std::vector<double> x_true(static_cast<size_t>(a.n), 1.0);
   for (int i = 0; i < a.n; ++i) {
     x_true[static_cast<size_t>(i)] = 1.0 + static_cast<double>(i % 17) * 0.01;
@@ -238,6 +277,12 @@ int main(int argc, char **argv) {
     factor_total += parm[subtree_lu::O_FACTORIZE_TIME];
   }
   for (int i = 0; i < refactor_repeat && ret == subtree_lu::E_OK; ++i) {
+    if (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING) {
+      make_refactor_values(a, base_values, base_row_values,
+                           static_cast<uint64_t>(i) + 1u,
+                           refactor_value_amplitude);
+      matvec(a, x_true, b);
+    }
     const auto w0 = std::chrono::steady_clock::now();
     ret = solver.refactorize(a.row_values.data());
     const auto w1 = std::chrono::steady_clock::now();
@@ -335,6 +380,8 @@ int main(int argc, char **argv) {
   std::printf("{\"matrix\":\"%s\",\"n\":%d,\"nnz\":%d,"
               "\"threads\":%d,\"repeat\":%d,\"factor_repeat\":%d,"
               "\"refactor_repeat\":%d,"
+              "\"refactor_value_mode\":\"%s\","
+              "\"refactor_value_amplitude\":%.9g,"
               "\"analysis_us\":%lld,\"initial_factor_us\":%lld,"
               "\"factor_us_avg\":%.9g,\"refactor_us_avg\":%.9g,"
               "\"solve_us_avg\":%.9g,"
@@ -347,7 +394,11 @@ int main(int argc, char **argv) {
               "\"nnz_l\":%lld,\"nnz_u\":%lld,"
               "\"nsupernodes\":%lld,\"factorize_flops\":%lld}\n",
               argv[1], a.n, a.col_ptr[static_cast<size_t>(a.n)], threads,
-              repeat, factor_repeat, refactor_repeat, analysis_us,
+              repeat, factor_repeat, refactor_repeat,
+              bench_refactor_value_mode_name(refactor_value_mode),
+              refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
+                ? refactor_value_amplitude : 0.0,
+              analysis_us,
               initial_factor_us,
               factor_us_avg, refactor_us_avg, solve_us_avg,
               1.0e-6 * static_cast<double>(analysis_us),

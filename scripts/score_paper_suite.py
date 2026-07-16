@@ -19,6 +19,38 @@ from pathlib import Path
 HORIZON = 100
 
 
+def value_protocol(path):
+    protocols = set()
+    with open(path, encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}:{line_number}: invalid JSON: {exc}") from exc
+            if record.get("timeout_or_fail") or "analysis_seconds" not in record:
+                continue
+            mode = record.get("refactor_value_mode", "unchanged")
+            try:
+                amplitude = float(record.get("refactor_value_amplitude", 0.0))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"{path}:{line_number}: invalid refactor value amplitude"
+                ) from exc
+            if mode not in ("unchanged", "rank-preserving") or not math.isfinite(
+                amplitude
+            ):
+                raise ValueError(
+                    f"{path}:{line_number}: invalid refactor value protocol"
+                )
+            protocols.add((mode, amplitude))
+    if len(protocols) > 1:
+        rendered = ", ".join(f"{mode}@{amplitude:g}" for mode, amplitude in sorted(protocols))
+        raise ValueError(f"{path}: mixed refactor value protocols: {rendered}")
+    return next(iter(protocols), None)
+
+
 def matrix_name(record):
     return Path(record.get("matrix", "")).stem.lower()
 
@@ -155,6 +187,19 @@ def main():
     args = parse_args()
     if args.horizon < 1:
         raise SystemExit("--horizon must be at least 1")
+    protocol_paths = [("KLS", args.kls), ("CK", args.ck)]
+    if args.st:
+        protocol_paths.append(("ST", args.st))
+    protocols = [(name, value_protocol(path)) for name, path in protocol_paths]
+    present_protocols = {protocol for _, protocol in protocols if protocol is not None}
+    if len(present_protocols) > 1:
+        rendered = ", ".join(
+            f"{name}={protocol[0]}@{protocol[1]:g}"
+            for name, protocol in protocols
+            if protocol is not None
+        )
+        raise SystemExit(f"refactor value protocol mismatch: {rendered}")
+    protocol = next(iter(present_protocols), ("unknown", 0.0))
     kls, kls_failures = load(
         args.kls, args.residual_threshold, args.selection, args.horizon
     )
@@ -169,7 +214,8 @@ def main():
     kls_valid = sum(record is not None for record in kls.values())
     print(
         f"KLS valid: {kls_valid}/{len(kls)} "
-        f"(selection={args.selection}, residual<={args.residual_threshold:.1e})"
+        f"(selection={args.selection}, residual<={args.residual_threshold:.1e}, "
+        f"values={protocol[0]}@{protocol[1]:g})"
     )
     for comparison_name, (comparison, comparison_failures) in comparisons.items():
         comparison_valid = sum(record is not None for record in comparison.values())

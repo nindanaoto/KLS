@@ -40,6 +40,8 @@ void kls_numeric_free_log(const void *numeric, const void *lip,
 #include "klu.h"
 #endif
 
+#include "bench_value_sequence.h"
+
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -291,6 +293,17 @@ static void matvec(const matrix *a, const double *x, double *y) {
   }
 }
 
+static void make_refactor_values(matrix *a, const double *base_values,
+                                 uint64_t generation, double amplitude) {
+  for (int64_t col = 0; col < a->n; ++col) {
+    for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
+      a->values[p] = bench_refactor_value(
+        base_values[p], (uint64_t)a->row_idx[p], (uint64_t)col,
+        generation, amplitude);
+    }
+  }
+}
+
 #ifndef KLS_VENDORED_KLU_ONLY
 static int copy_int_arrays(const matrix *a, int **ap_out, int **ai_out) {
   if (a->n > INT_MAX || a->nnz > INT_MAX) return 0;
@@ -355,10 +368,15 @@ static double cycle_seconds(const run_stats *s) {
 }
 
 #ifndef KLS_VENDORED_KLU_ONLY
-static int run_klu32(const matrix *a, const double *rhs, int repeat,
+static int run_klu32(matrix *a, const double *base_values,
+                     const double *x_true, double *rhs, int repeat,
                      int factor_repeat, int refactor_repeat, int ordering,
                      int btf, int scale,
+                     bench_refactor_value_mode refactor_value_mode,
+                     double refactor_value_amplitude,
                      run_stats *out) {
+  memcpy(a->values, base_values, (size_t)a->nnz * sizeof(*a->values));
+  matvec(a, x_true, rhs);
   int *ap = NULL;
   int *ai = NULL;
   if (!copy_int_arrays(a, &ap, &ai)) return 0;
@@ -424,6 +442,11 @@ static int run_klu32(const matrix *a, const double *rhs, int repeat,
   }
   total = 0.0;
   for (int i = 0; i < refactor_repeat; ++i) {
+    if (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING) {
+      make_refactor_values(a, base_values, (uint64_t)i + 1u,
+                           refactor_value_amplitude);
+      matvec(a, x_true, rhs);
+    }
     const double start = now_seconds();
     const int ok = klu_refactor(ap, ai, a->values, symbolic, numeric,
                                          &common);
@@ -476,10 +499,15 @@ static int run_klu32(const matrix *a, const double *rhs, int repeat,
 }
 #endif
 
-static int run_klu64(const matrix *a, const double *rhs, int repeat,
+static int run_klu64(matrix *a, const double *base_values,
+                     const double *x_true, double *rhs, int repeat,
                      int factor_repeat, int refactor_repeat, int ordering,
                      int btf, int scale,
+                     bench_refactor_value_mode refactor_value_mode,
+                     double refactor_value_amplitude,
                      run_stats *out) {
+  memcpy(a->values, base_values, (size_t)a->nnz * sizeof(*a->values));
+  matvec(a, x_true, rhs);
   int64_t *ap = NULL;
   int64_t *ai = NULL;
   if (!copy_long_arrays(a, &ap, &ai)) return 0;
@@ -545,6 +573,11 @@ static int run_klu64(const matrix *a, const double *rhs, int repeat,
   }
   total = 0.0;
   for (int i = 0; i < refactor_repeat; ++i) {
+    if (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING) {
+      make_refactor_values(a, base_values, (uint64_t)i + 1u,
+                           refactor_value_amplitude);
+      matvec(a, x_true, rhs);
+    }
     const double start = now_seconds();
     const int64_t ok =
       klu_l_refactor(ap, ai, a->values, symbolic, numeric, &common);
@@ -626,6 +659,7 @@ int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr,
             "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] "
+            "[--refactor-values unchanged|rank-preserving] [--refactor-value-amplitude A] "
             "[--ordering amd|colamd|natural] [--scale -1|0|1|2] "
             "[--no-btf] [--width-order 32-first|64-first] [--json]\n",
             argv[0]);
@@ -641,6 +675,9 @@ int main(int argc, char **argv) {
   int scale = 2;
   int width32_first = 1;
   int json = 0;
+  bench_refactor_value_mode refactor_value_mode =
+    BENCH_REFACTOR_VALUES_UNCHANGED;
+  double refactor_value_amplitude = 1.0e-3;
   for (int i = 2; i < argc; ++i) {
     if (strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) {
       repeat = atoi(argv[++i]);
@@ -648,6 +685,21 @@ int main(int argc, char **argv) {
       factor_repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--refactor-repeat") == 0 && i + 1 < argc) {
       refactor_repeat = atoi(argv[++i]);
+    } else if (strcmp(argv[i], "--refactor-values") == 0 && i + 1 < argc) {
+      if (!bench_parse_refactor_value_mode(argv[++i], &refactor_value_mode)) {
+        fprintf(stderr, "unknown refactor value mode\n");
+        return EXIT_FAILURE;
+      }
+    } else if (strcmp(argv[i], "--refactor-value-amplitude") == 0 &&
+               i + 1 < argc) {
+      char *end = NULL;
+      errno = 0;
+      refactor_value_amplitude = strtod(argv[++i], &end);
+      if (errno != 0 || end == argv[i] || *end != '\0' ||
+          !isfinite(refactor_value_amplitude)) {
+        fprintf(stderr, "invalid refactor value amplitude\n");
+        return EXIT_FAILURE;
+      }
     } else if (strcmp(argv[i], "--ordering") == 0 && i + 1 < argc) {
       ordering = parse_ordering(argv[++i]);
       if (ordering < 0) {
@@ -677,7 +729,10 @@ int main(int argc, char **argv) {
   }
   if (factor_repeat < 0) factor_repeat = repeat;
   if (repeat <= 0 || factor_repeat < 0 || refactor_repeat < 0 ||
-      (scale != -1 && scale != 0 && scale != 1 && scale != 2)) {
+      (scale != -1 && scale != 0 && scale != 1 && scale != 2) ||
+      refactor_value_amplitude < 0.0 || refactor_value_amplitude >= 1.0 ||
+      (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING &&
+       refactor_value_amplitude <= 0.0)) {
     fprintf(stderr, "invalid repeat or scale argument\n");
     return EXIT_FAILURE;
   }
@@ -686,10 +741,19 @@ int main(int argc, char **argv) {
   memset(&a, 0, sizeof(a));
   if (!read_matrix_market(path, &a)) return EXIT_FAILURE;
 
+  double *base_values =
+    (double *)malloc((size_t)a.nnz * sizeof(*base_values));
+  if (base_values == NULL) {
+    matrix_free(&a);
+    return EXIT_FAILURE;
+  }
+  memcpy(base_values, a.values, (size_t)a.nnz * sizeof(*base_values));
+
   double *x_true = (double *)calloc((size_t)a.n, sizeof(*x_true));
   double *rhs = (double *)malloc((size_t)a.n * sizeof(*rhs));
   if (x_true == NULL || rhs == NULL) {
     matrix_free(&a);
+    free(base_values);
     free(x_true);
     free(rhs);
     return EXIT_FAILURE;
@@ -711,25 +775,33 @@ int main(int argc, char **argv) {
   int ok32;
   int ok64;
   if (width32_first) {
-    ok32 = run_klu32(&a, rhs, repeat, factor_repeat,
-                     refactor_repeat, ordering, btf, scale, &s32);
-    ok64 = run_klu64(&a, rhs, repeat, factor_repeat,
-                     refactor_repeat, ordering, btf, scale, &s64);
+    ok32 = run_klu32(&a, base_values, x_true, rhs, repeat, factor_repeat,
+                     refactor_repeat, ordering, btf, scale,
+                     refactor_value_mode, refactor_value_amplitude, &s32);
+    ok64 = run_klu64(&a, base_values, x_true, rhs, repeat, factor_repeat,
+                     refactor_repeat, ordering, btf, scale,
+                     refactor_value_mode, refactor_value_amplitude, &s64);
   } else {
-    ok64 = run_klu64(&a, rhs, repeat, factor_repeat,
-                     refactor_repeat, ordering, btf, scale, &s64);
-    ok32 = run_klu32(&a, rhs, repeat, factor_repeat,
-                     refactor_repeat, ordering, btf, scale, &s32);
+    ok64 = run_klu64(&a, base_values, x_true, rhs, repeat, factor_repeat,
+                     refactor_repeat, ordering, btf, scale,
+                     refactor_value_mode, refactor_value_amplitude, &s64);
+    ok32 = run_klu32(&a, base_values, x_true, rhs, repeat, factor_repeat,
+                     refactor_repeat, ordering, btf, scale,
+                     refactor_value_mode, refactor_value_amplitude, &s32);
   }
 #else
-  const int ok64 = run_klu64(&a, rhs, repeat, factor_repeat,
-                             refactor_repeat, ordering, btf, scale, &s64);
+  const int ok64 = run_klu64(
+    &a, base_values, x_true, rhs, repeat, factor_repeat, refactor_repeat,
+    ordering, btf, scale, refactor_value_mode, refactor_value_amplitude,
+    &s64);
 #endif
 
   if (json) {
 #ifdef KLS_VENDORED_KLU_ONLY
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"
+           "\"refactor_value_mode\":\"%s\","
+           "\"refactor_value_amplitude\":%.9g,"
            "\"ordering\":%d,\"width_order\":\"%s\","
            "\"btf\":%s,\"scale\":%d,\"status\":%d,"
            "\"analysis_seconds\":%.9g,\"initial_factor_seconds\":%.9g,"
@@ -739,7 +811,11 @@ int main(int argc, char **argv) {
            "\"spice_cycle_seconds\":%.9g,\"residual_l2\":%.9g,"
            "\"relative_residual_l2\":%.9g,\"nblocks\":%d,"
            "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 "}\n",
-           path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat, ordering,
+           path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat,
+           bench_refactor_value_mode_name(refactor_value_mode),
+           refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
+             ? refactor_value_amplitude : 0.0,
+           ordering,
            width32_first ? "32-first" : "64-first",
            btf ? "true" : "false", scale, s64.status,
            s64.analysis_seconds, s64.initial_factor_seconds,
@@ -750,9 +826,15 @@ int main(int argc, char **argv) {
 #else
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"
+           "\"refactor_value_mode\":\"%s\","
+           "\"refactor_value_amplitude\":%.9g,"
            "\"ordering\":%d,\"width_order\":\"%s\","
            "\"btf\":%s,\"scale\":%d,",
-           path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat, ordering,
+           path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat,
+           bench_refactor_value_mode_name(refactor_value_mode),
+           refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
+             ? refactor_value_amplitude : 0.0,
+           ordering,
            width32_first ? "32-first" : "64-first",
            btf ? "true" : "false", scale);
     print_stats_json("klu32", &s32);
@@ -790,6 +872,7 @@ int main(int argc, char **argv) {
   }
 
   matrix_free(&a);
+  free(base_values);
   free(x_true);
   free(rhs);
 #ifdef KLS_VENDORED_KLU_ONLY
