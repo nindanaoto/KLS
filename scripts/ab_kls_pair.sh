@@ -8,6 +8,9 @@ THREADS=${THREADS:-8}
 TIMEOUT=${TIMEOUT:-120}
 PASSES=${PASSES:-2}
 RR=${REFACTOR_REPEAT:-20}
+FR=${FACTOR_REPEAT:-1}
+REFACTOR_VALUES=${REFACTOR_VALUES:-unchanged}
+REFACTOR_VALUE_AMPLITUDE=${REFACTOR_VALUE_AMPLITUDE:-0.001}
 SKIP=${SKIP:-}
 : > "$OUT_A"; : > "$OUT_B"
 pass=1
@@ -20,7 +23,9 @@ while [ "$pass" -le "$PASSES" ]; do
     for side in A B; do
       if [ "$side" = A ]; then bin=$BIN_A; out=$OUT_A; else bin=$BIN_B; out=$OUT_B; fi
       res=$(timeout "$TIMEOUT" "$bin" "$matrix" --orientation auto \
-        --repeat 1 --factor-repeat 1 --refactor-repeat "$RR" \
+        --repeat 1 --factor-repeat "$FR" --refactor-repeat "$RR" \
+        --refactor-values "$REFACTOR_VALUES" \
+        --refactor-value-amplitude "$REFACTOR_VALUE_AMPLITUDE" \
         --threads "$THREADS" --json 2>/dev/null)
       if [ -n "$res" ]; then
         printf '%s\n' "$res" >> "$out"

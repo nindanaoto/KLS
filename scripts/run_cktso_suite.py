@@ -75,6 +75,16 @@ def main() -> int:
         help="extra Factorize calls after the initial factor (default: follows --repeat)",
     )
     parser.add_argument("--refactor-repeat", type=int, default=5)
+    parser.add_argument(
+        "--refactor-values",
+        choices=("unchanged", "rank-preserving"),
+        default="unchanged",
+    )
+    parser.add_argument(
+        "--refactor-value-amplitude",
+        type=float,
+        default=1.0e-3,
+    )
     parser.add_argument("--timeout", type=float)
     parser.add_argument(
         "--skip",
@@ -103,6 +113,13 @@ def main() -> int:
         or args.repeat <= 0
         or args.refactor_repeat < 0
         or (args.factor_repeat is not None and args.factor_repeat < 0)
+        or not math.isfinite(args.refactor_value_amplitude)
+        or args.refactor_value_amplitude < 0.0
+        or args.refactor_value_amplitude >= 1.0
+        or (
+            args.refactor_values == "rank-preserving"
+            and args.refactor_value_amplitude <= 0.0
+        )
     ):
         print("threads and repeat arguments are invalid", file=sys.stderr)
         return 1
@@ -137,9 +154,14 @@ def main() -> int:
                 str(args.threads),
                 str(args.repeat),
                 str(args.refactor_repeat),
+                str(
+                    args.factor_repeat
+                    if args.factor_repeat is not None
+                    else args.repeat
+                ),
+                args.refactor_values,
+                f"{args.refactor_value_amplitude:.17g}",
             ]
-            if args.factor_repeat is not None:
-                cmd.append(str(args.factor_repeat))
             try:
                 proc = subprocess.run(
                     cmd,
