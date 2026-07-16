@@ -58591,15 +58591,12 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
       (xv)[j] = 0.0;                                                       \
     }                                                                      \
   } while (0)
-  const int pair_mode = solver->lean_pair_active &&
-    solver->row_refactor_level_ptr != NULL &&
-    solver->row_refactor_level_rows != NULL &&
-    solver->row_refactor_level_count > 0;
+  const int pair_mode = solver->lean_pair_active;
   if (pair_mode) {
-    /* level-order pair multiplexing: rows within a level share no
-       dependencies, so interleaving two rows' k-steps overlaps their
-       scatter-latency chains (the stall campaign's depth-2 lesson
-       applied to the serial walk) */
+    /* Keep the numeric row order: the fixed L pattern is sufficient for
+       the scalar walk but is not a safe topological schedule for every
+       transformed input frame.  Adjacent rows can still be multiplexed
+       when the second row has no direct dependency on the first. */
     if (solver->lean_row_x2 == NULL) {
       solver->lean_row_x2 =
         (double *)calloc((size_t)n, sizeof(*solver->lean_row_x2));
@@ -58608,14 +58605,20 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     if (x2 == NULL) {
       return -1;
     }
-    const UF_long levels = solver->row_refactor_level_count;
-    for (UF_long lv = 0; lv < levels; ++lv) {
-      const UF_long b = solver->row_refactor_level_ptr[lv];
-      const UF_long e = solver->row_refactor_level_ptr[lv + 1u];
-      UF_long t = b;
-      for (; t + 1u < e; t += 2u) {
-        const UF_long i1 = solver->row_refactor_level_rows[t];
-        const UF_long i2 = solver->row_refactor_level_rows[t + 1u];
+    memset(x2, 0, (size_t)n * sizeof(*x2));
+    UF_long i1 = 0u;
+    while (i1 < n) {
+      const UF_long i2 = i1 + 1u;
+      int independent = i2 < n;
+      if (independent) {
+        for (UF_long p = l_ptr[i2]; p < l_ptr[i2 + 1u]; ++p) {
+          if (l_cols[p] == i1) {
+            independent = 0;
+            break;
+          }
+        }
+      }
+      if (independent) {
         KLS_LEAN_ROW_SCATTER(i1, x);
         KLS_LEAN_ROW_SCATTER(i2, x2);
         UF_long p1 = l_ptr[i1];
@@ -58634,13 +58637,8 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
         }
         KLS_LEAN_ROW_FINISH(i1, x);
         KLS_LEAN_ROW_FINISH(i2, x2);
-        if (common->status == TRILINOS_KLU_SINGULAR &&
-            common->halt_if_singular) {
-          return 0;
-        }
-      }
-      for (; t < e; ++t) {
-        const UF_long i1 = solver->row_refactor_level_rows[t];
+        i1 += 2u;
+      } else {
         KLS_LEAN_ROW_SCATTER(i1, x);
         UF_long p1 = l_ptr[i1];
         const UF_long e1 = l_ptr[i1 + 1u];
@@ -58648,10 +58646,11 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
           KLS_LEAN_ROW_STEP(p1, x);
         }
         KLS_LEAN_ROW_FINISH(i1, x);
-        if (common->status == TRILINOS_KLU_SINGULAR &&
-            common->halt_if_singular) {
-          return 0;
-        }
+        i1++;
+      }
+      if (common->status == TRILINOS_KLU_SINGULAR &&
+          common->halt_if_singular) {
+        return 0;
       }
     }
   } else {

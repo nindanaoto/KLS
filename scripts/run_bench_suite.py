@@ -61,6 +61,10 @@ def append_solver_options(cmd: list[str], args: argparse.Namespace) -> None:
             args.scale,
             "--input-index",
             args.input_index,
+            "--refactor-values",
+            args.refactor_values,
+            "--refactor-value-amplitude",
+            str(args.refactor_value_amplitude),
         ]
     )
     if args.no_btf:
@@ -283,6 +287,12 @@ def main() -> int:
         help="extra full factors after the initial factor (default: bench follows --repeat)",
     )
     parser.add_argument("--refactor-repeat", type=int, default=5)
+    parser.add_argument(
+        "--refactor-values",
+        choices=["unchanged", "rank-preserving"],
+        default="unchanged",
+    )
+    parser.add_argument("--refactor-value-amplitude", type=float, default=0.001)
     parser.add_argument("--passes", type=int, default=1)
     parser.add_argument(
         "--skip",
@@ -393,6 +403,12 @@ def main() -> int:
         args.factor_repeat is not None and args.factor_repeat < 0
     ):
         print("repeat arguments are invalid", file=sys.stderr)
+        return 1
+    if not 0.0 <= args.refactor_value_amplitude < 1.0 or (
+        args.refactor_values == "rank-preserving"
+        and args.refactor_value_amplitude <= 0.0
+    ):
+        print("--refactor-value-amplitude must be in (0, 1) for changed values", file=sys.stderr)
         return 1
     if args.skip < 0:
         print("--skip must be non-negative", file=sys.stderr)
