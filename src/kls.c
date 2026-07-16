@@ -131003,6 +131003,13 @@ static void kls_pts_maybe_trial(kls_solver *solver,
   *elapsed += kls_now_seconds() - t0;
 }
 
+static int kls_serial_mapped_prefers_vendor_solve(
+  const kls_solver *solver) {
+  return solver != NULL &&
+    solver->options.backend == KLS_BACKEND_SERIAL &&
+    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED;
+}
+
 static int kls_i32_solve_ready(kls_solver *solver) {
   if (solver->i32solve_state != 0) {
     return solver->i32solve_state > 0;
@@ -133169,9 +133176,14 @@ static int solve_impl(kls_solver *solver,
       fprintf(stderr, "KLS solve path: row t=%d\n", kernel_transpose);
     }
   } else {
+    const int serial_mapped_vendor_solve =
+      kls_serial_mapped_prefers_vendor_solve(solver);
     if (trace_solve_path) {
-      fprintf(stderr, "KLS solve path: column i32=%d dirty=%d ready=%d t=%d\n",
-              solver->i32solve_state, solver->row_refactor_values_dirty,
+      fprintf(stderr,
+              "KLS solve path: column i32=%d vendor=%d dirty=%d ready=%d"
+              " t=%d\n",
+              solver->i32solve_state, serial_mapped_vendor_solve,
+              solver->row_refactor_values_dirty,
               solver->row_refactor_values_ready, kernel_transpose);
     }
     if (!kls_publish_row_refactor_values(solver)) {
@@ -133181,7 +133193,9 @@ static int solve_impl(kls_solver *solver,
       solver->stats.memory_peak_bytes = solver->common.mempeak;
       return KLS_ERR_SOLVE_FAILED;
     }
-    if (!kernel_transpose && nrhs == 1 && kls_i32_solve_ready(solver)) {
+    if (!kernel_transpose && nrhs == 1 &&
+        !serial_mapped_vendor_solve &&
+        kls_i32_solve_ready(solver)) {
       solver->common.status = TRILINOS_KLU_OK;
       ok = kls_i32_solve(solver, x);
       if (trace_x) {
