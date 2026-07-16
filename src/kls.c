@@ -132633,8 +132633,17 @@ int kls_refactor(kls_solver *solver, const double *values) {
      The whole trial is charged where engine trials already live
      (in-steady probing measured out: the prep alone costs 5-10 steady
      samples at rr=20).  memplus: pair 244us vs incumbent 493 — under
-     CKTSO's 292; mimo-class correctly keeps the incumbent. */
+     CKTSO's 292; mimo-class correctly keeps the incumbent.
+
+     Do not run this adaptive consultation in the opt-in serial backend.
+     That backend targets a bounded H100 workload and deliberately minimizes
+     policy overhead.  Even when a lean arm wins its isolated kernel sample,
+     preparing and timing all three arms commonly costs more than the next 98
+     calls can recover.  The mapped incumbent remains available unchanged;
+     AUTO/KLS (including every multi-thread execution) retains the adaptive
+     probe. */
   if (ok && solver->common.status >= 0 && solver->lean_choice == 0 &&
+      solver->options.backend != KLS_BACKEND_SERIAL &&
       solver->n >= 512u && solver->n <= 131072u &&
       solver->padded_pending == 0 &&
       solver->pivot_nudge_count == 0 &&
