@@ -131617,6 +131617,17 @@ static void kls_solve_contract_classify(kls_solver *solver,
       getenv("KLS_DISABLE_SOLVE_CONTRACT_PROBE") != NULL) {
     return;
   }
+  if (solver->options.backend == KLS_BACKEND_SERIAL &&
+      solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU) {
+    /* Explicit serial KLU-refactor mode keeps base KLU solve semantics.
+       The factor and refactor are the same full-precision KLU operations;
+       arming KLS's adaptive residual correction here turns every solve into
+       an SpMV plus two triangular solves.  AUTO/KLS paths retain that extra
+       contract protection, including every multi-thread execution. */
+    solver->solve_contract_probe = 1;
+    solver->solve_contract_verified = 1;
+    return;
+  }
   trilinos_klu_l_common growth_common = solver->common;
   if (!trilinos_klu_l_rgrowth(solver->col_ptr, solver->row_idx,
                               (double *)numeric_values, solver->symbolic,
