@@ -131397,6 +131397,97 @@ static UF_long kls_i32_solve(kls_solver *solver, double *b) {
 static void kls_run_deferred_factor_preps(kls_solver *solver,
                                            const double *numeric_values);
 
+/* KLU's threshold pivoting prefers the symbolic diagonal when it is at least
+   tol times the largest active-column entry.  Model max-row scaling in the
+   actual symbolic BTF frame and count crossings of that same tolerance.  A
+   positive net crossing is a numerical reason to scale before factorization,
+   independent of matrix identity, dimension, or a fitted work threshold. */
+static int kls_serial_scaled_pivots_preferred(const kls_solver *solver,
+                                              const double *numeric_values) {
+  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
+      solver->row_idx == NULL || numeric_values == NULL ||
+      solver->options.pivot_tolerance <= 0.0) {
+    return 0;
+  }
+  const UF_long n = solver->n;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  double *row_max = (double *)calloc((size_t)n, sizeof(*row_max));
+  UF_long *pinv = (UF_long *)malloc((size_t)n * sizeof(*pinv));
+  if (row_max == NULL || pinv == NULL) {
+    free(row_max);
+    free(pinv);
+    return 0;
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    pinv[symbolic->P[k]] = k;
+  }
+  for (UF_long col = 0; col < n; ++col) {
+    for (UF_long p = solver->col_ptr[col]; p < solver->col_ptr[col + 1u];
+         ++p) {
+      const UF_long row = solver->row_idx[p];
+      const double a = fabs(numeric_values[p]);
+      if (isfinite(a) && a > row_max[row]) {
+        row_max[row] = a;
+      }
+    }
+  }
+
+  UF_long improved = 0;
+  UF_long harmed = 0;
+  for (UF_long block = 0; block < symbolic->nblocks; ++block) {
+    const UF_long k1 = symbolic->R[block];
+    const UF_long k2 = symbolic->R[block + 1u];
+    if (k2 - k1 <= 1u) {
+      continue;
+    }
+    for (UF_long k = k1; k < k2; ++k) {
+      const UF_long oldcol = symbolic->Q[k];
+      const UF_long olddiagrow = symbolic->P[k];
+      double diag = 0.0;
+      double raw_col_max = 0.0;
+      double scaled_col_max = 0.0;
+      for (UF_long p = solver->col_ptr[oldcol];
+           p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long oldrow = solver->row_idx[p];
+        const UF_long newrow = pinv[oldrow];
+        if (newrow < k1 || newrow >= k2) {
+          continue;
+        }
+        const double a = fabs(numeric_values[p]);
+        if (a > raw_col_max) {
+          raw_col_max = a;
+        }
+        if (row_max[oldrow] > 0.0) {
+          const double scaled = a / row_max[oldrow];
+          if (scaled > scaled_col_max) {
+            scaled_col_max = scaled;
+          }
+        }
+        if (oldrow == olddiagrow && a > diag) {
+          diag = a;
+        }
+      }
+      const double raw_ratio = raw_col_max > 0.0 ? diag / raw_col_max : 0.0;
+      const double scaled_diag = row_max[olddiagrow] > 0.0
+        ? diag / row_max[olddiagrow] : 0.0;
+      const double scaled_ratio = scaled_col_max > 0.0
+        ? scaled_diag / scaled_col_max : 0.0;
+      const int raw_weak = raw_ratio < solver->options.pivot_tolerance;
+      const int scaled_weak = scaled_ratio < solver->options.pivot_tolerance;
+      improved += (UF_long)(raw_weak && !scaled_weak);
+      harmed += (UF_long)(!raw_weak && scaled_weak);
+    }
+  }
+  free(row_max);
+  free(pinv);
+  if (getenv("KLS_TRACE_SERIAL_SCALE_PIVOTS") != NULL) {
+    fprintf(stderr,
+            "KLS serial scale pivots: improve=%ld harm=%ld prefer=%d\n",
+            (long)improved, (long)harmed, improved > harmed);
+  }
+  return improved > harmed;
+}
+
 static int kls_serial_factor(kls_solver *solver,
                              double *numeric_values) {
   if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL) {
@@ -131407,8 +131498,19 @@ static int kls_serial_factor(kls_solver *solver,
   free_numeric(solver);
   solver->factor_preps_deferred = 0;
   solver->numeric_from_pipe = 0;
+  int auto_scale_policy = solver->options.scale;
+  int auto_scale_policy_known = solver->options.scale != KLS_SCALE_AUTO;
+  const int scaled_pivots_preferred =
+    solver->options.scale == KLS_SCALE_AUTO &&
+    kls_serial_scaled_pivots_preferred(solver, numeric_values);
+  if (scaled_pivots_preferred) {
+    auto_scale_policy = choose_auto_scale_from_values(solver, numeric_values);
+    auto_scale_policy_known = 1;
+  }
+  const int preselect_max_scale =
+    scaled_pivots_preferred && auto_scale_policy == 2;
   solver->common.scale = solver->options.scale == KLS_SCALE_AUTO
-    ? -1 : solver->options.scale;
+    ? (preselect_max_scale ? 2 : -1) : solver->options.scale;
   solver->common.tol = solver->options.pivot_tolerance;
   solver->common.status = TRILINOS_KLU_OK;
   solver->common.numerical_rank = KLS_KLU_EMPTY;
@@ -131427,7 +131529,8 @@ static int kls_serial_factor(kls_solver *solver,
 
   int diagnostics_have_flops = 0;
   int unscaled_work_inflated = 0;
-  if (solver->options.scale == KLS_SCALE_AUTO && solver->numeric != NULL &&
+  if (solver->options.scale == KLS_SCALE_AUTO && solver->common.scale != 2 &&
+      solver->numeric != NULL &&
       solver->common.status >= 0 && solver->symbolic->est_flops > 0.0) {
     diagnostics_have_flops =
       trilinos_klu_l_flops(solver->symbolic, solver->numeric,
@@ -131436,14 +131539,19 @@ static int kls_serial_factor(kls_solver *solver,
       solver->common.flops > 1.50 * solver->symbolic->est_flops;
   }
 
-  /* A failed factor always gets KLU's robust sum-scaled retry.  Do not throw
-     away a successful unscaled numeric on the flop-estimate warning alone:
+  /* A failed factor always gets KLU's robust max-row-scaled retry.  Do not
+     throw away a successful unscaled numeric on the flop-estimate warning:
      inflated scalar work can still expose a much faster mapped Horizon
      cycle.  Require AUTO's independent value/structure policy to agree that
-     sum scaling is appropriate before paying for and adopting a replacement. */
+     max-row scaling is appropriate before paying for and adopting a
+     replacement. */
+  if (unscaled_work_inflated && !auto_scale_policy_known) {
+    auto_scale_policy = choose_auto_scale_from_values(solver, numeric_values);
+    auto_scale_policy_known = 1;
+  }
   const int scale_policy_confirms_retry =
-    unscaled_work_inflated &&
-    choose_auto_scale_from_values(solver, numeric_values) == 2;
+    unscaled_work_inflated && auto_scale_policy_known &&
+    auto_scale_policy == 2;
   if (solver->options.scale == KLS_SCALE_AUTO &&
       solver->common.scale != 2 &&
       (solver->numeric == NULL || solver->common.status < 0 ||
