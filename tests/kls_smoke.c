@@ -16555,6 +16555,150 @@ static int test_exact_unchanged_refactor_reuse(void) {
   return ok;
 }
 
+static int test_diagonal_equivalent_refactor(void) {
+  const int32_t n = 3;
+  const int32_t ap[4] = {0, 3, 6, 9};
+  const int32_t ai[9] = {0, 1, 2, 0, 1, 2, 0, 1, 2};
+  const double ax0[9] = {4.0, 2.0, 1.0,
+                         1.0, 5.0, 2.0,
+                         2.0, 1.0, 6.0};
+  const double row_scale[3] = {2.0, 0.5, 1.5};
+  const double col_scale[3] = {0.75, 1.25, 0.8};
+  const double expected[3] = {1.0, -2.0, 0.5};
+  const double expected_transpose[3] = {-1.0, 0.25, 2.0};
+  double ax1[9];
+  double ax2[9];
+  double b[3] = {0.0, 0.0, 0.0};
+  double bt[3] = {0.0, 0.0, 0.0};
+  double x[3] = {0.0, 0.0, 0.0};
+  const char *saved_enable_value =
+    getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR");
+  char *saved_enable =
+    saved_enable_value != NULL ? strdup(saved_enable_value) : NULL;
+  const int had_enable = saved_enable_value != NULL;
+  const char *saved_disable_value = getenv("KLS_DISABLE_UNCHANGED_REFACTOR");
+  char *saved_disable =
+    saved_disable_value != NULL ? strdup(saved_disable_value) : NULL;
+  const int had_disable = saved_disable_value != NULL;
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = 1;
+
+  if ((had_enable && saved_enable == NULL) ||
+      (had_disable && saved_disable == NULL)) {
+    free(saved_enable);
+    free(saved_disable);
+    return 0;
+  }
+  if (setenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR", "1", 1) != 0 ||
+      setenv("KLS_DISABLE_UNCHANGED_REFACTOR", "1", 1) != 0) {
+    perror("setenv diagonal-equivalent refactor test");
+    ok = 0;
+  }
+
+  for (int col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      ax1[p] = ax0[p] * row_scale[ai[p]] * col_scale[col];
+      b[ai[p]] += ax1[p] * expected[col];
+      bt[col] += ax1[p] * expected_transpose[ai[p]];
+    }
+  }
+  memcpy(ax2, ax1, sizeof(ax2));
+
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.scale = -1;
+  options.use_btf = 0;
+  options.static_pivoting = 0;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create diagonal-equivalent refactor")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
+                                        0, &options),
+                        "analyze diagonal-equivalent refactor")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor diagonal-equivalent reference")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "certify diagonal-equivalent update")) ok = 0;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats diagonal-equivalent update")) ok = 0;
+  if (ok && stats.last_refactor_path !=
+              KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT) {
+    fprintf(stderr, "diagonal-equivalent update used path %s\n",
+            kls_refactor_path_name(stats.last_refactor_path));
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve diagonal-equivalent update")) ok = 0;
+  for (int i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr, "diagonal-equivalent solve mismatch at %d: %.17g\n",
+              i, x[i]);
+      ok = 0;
+    }
+  }
+
+  memset(x, 0, sizeof(x));
+  if (ok && !require_ok(kls_solve_transpose(solver, 1, bt, 0, x, 0),
+                        "transpose solve diagonal-equivalent update")) {
+    ok = 0;
+  }
+  for (int i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected_transpose[i])) {
+      fprintf(stderr,
+              "diagonal-equivalent transpose mismatch at %d: %.17g\n",
+              i, x[i]);
+      ok = 0;
+    }
+  }
+
+  /* Break one fundamental cycle.  Certification must reject the retained
+     factor and the ordinary numeric path must solve the actual matrix. */
+  ax2[8] *= 1.01;
+  memset(b, 0, sizeof(b));
+  memset(x, 0, sizeof(x));
+  for (int col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax2[p] * expected[col];
+    }
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax2),
+                        "reject nonseparable update")) ok = 0;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats nonseparable fallback")) ok = 0;
+  if (ok && stats.last_refactor_path ==
+              KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT) {
+    fprintf(stderr, "nonseparable update incorrectly retained factor\n");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve nonseparable fallback")) ok = 0;
+  for (int i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr, "nonseparable fallback mismatch at %d: %.17g\n",
+              i, x[i]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR",
+                         had_enable, saved_enable != NULL ? saved_enable : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_UNCHANGED_REFACTOR", had_disable,
+                         saved_disable != NULL ? saved_disable : "")) {
+    ok = 0;
+  }
+  free(saved_enable);
+  free(saved_disable);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -16562,6 +16706,9 @@ int main(void) {
   }
 
   if (!test_exact_unchanged_refactor_reuse()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_diagonal_equivalent_refactor()) {
     return EXIT_FAILURE;
   }
   /* The remaining smoke cases deliberately assert individual refactor-engine

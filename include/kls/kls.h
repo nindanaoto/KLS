@@ -72,7 +72,10 @@ typedef enum kls_refactor_path {
   KLS_REFACTOR_PATH_POOL = 4,
   KLS_REFACTOR_PATH_KLU = 5,
   KLS_REFACTOR_PATH_SNB = 6,
-  KLS_REFACTOR_PATH_UNCHANGED = 7
+  KLS_REFACTOR_PATH_UNCHANGED = 7,
+  /* The new values pass the Dr*A*Dc consistency check.  The retained factor
+     is reused and the two diagonal maps are applied at the solve boundary. */
+  KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT = 8
 } kls_refactor_path;
 
 #define KLS_SCALE_AUTO (-2)

@@ -17,10 +17,12 @@ KLS_BACKEND=${KLS_BACKEND:-auto}
 TIMEOUT=${TIMEOUT:-120}
 PASSES=${PASSES:-1}
 ROTATE_SIDES=${ROTATE_SIDES:-0}
-# 5 refactors suffice: the harnesses report the first refactor (which
-# carries KLS's deferred engine preps) separately from the steady-state
-# average, so the 99-iteration SPICE cycle is reconstructed exactly as
-# shot + (first + solve) + 98*(steady + solve).
+SKIP=${SKIP:-0}
+SOLVE_REPEAT=${SOLVE_REPEAT:-1}
+INPUT_INDEX=${INPUT_INDEX:-64}
+# The harnesses report the first refactor separately from the remaining
+# average.  Five refactors are useful for a quick screen; use a larger value
+# when adaptive engine trials must be diluted into the long-run steady rate.
 REFACTOR_REPEAT=${REFACTOR_REPEAT:-5}
 # Keep the released-demo-compatible unchanged loop as the default.  Set
 # REFACTOR_VALUES=rank-preserving for the nonlinear-SPICE validity check; all
@@ -59,8 +61,14 @@ while [ "$p" -lt "$PASSES" ]; do
   passes_sides="$passes_sides $pass_sides"
   p=$((p + 1))
 done
+selected_index=0
 while IFS= read -r name; do
   case "$name" in ''|'#'*) continue;; esac
+  if [ "$selected_index" -lt "$SKIP" ]; then
+    selected_index=$((selected_index + 1))
+    continue
+  fi
+  selected_index=$((selected_index + 1))
   matrix=$(find "$MATRIX_DIR" -iname "${name}.mtx" | head -1)
   [ -z "$matrix" ] && { echo "skip $name (not found)" >&2; continue; }
   failed_sides=""
@@ -70,26 +78,30 @@ while IFS= read -r name; do
     esac
     if [ "$side" = kls ]; then
       out=$(timeout "$TIMEOUT" "$KLS_BENCH" "$matrix" --orientation auto \
-        --repeat 1 --factor-repeat "$FACTOR_REPEAT" \
+        --repeat "$SOLVE_REPEAT" --factor-repeat "$FACTOR_REPEAT" \
         --refactor-repeat "$REFACTOR_REPEAT" --threads "$THREADS" \
+        --input-index "$INPUT_INDEX" \
         --refactor-values "$REFACTOR_VALUES" \
         --refactor-value-amplitude "$REFACTOR_VALUE_AMPLITUDE" \
         --backend "$KLS_BACKEND" --json 2>/dev/null)
       dst=$OUT_KLS
     elif [ "$side" = ck ]; then
-      out=$(timeout "$TIMEOUT" "$CKTSO_COMPARE" "$matrix" "$THREADS" 1 \
+      out=$(timeout "$TIMEOUT" "$CKTSO_COMPARE" "$matrix" "$THREADS" \
+        "$SOLVE_REPEAT" \
         "$REFACTOR_REPEAT" "$FACTOR_REPEAT" \
         "$REFACTOR_VALUES" "$REFACTOR_VALUE_AMPLITUDE" \
         2>/dev/null)
       dst=$OUT_CK
     elif [ "$side" = st ]; then
-      out=$(timeout "$TIMEOUT" "$SUBTREELU_COMPARE" "$matrix" "$THREADS" 1 \
+      out=$(timeout "$TIMEOUT" "$SUBTREELU_COMPARE" "$matrix" "$THREADS" \
+        "$SOLVE_REPEAT" \
         "$REFACTOR_REPEAT" "$FACTOR_REPEAT" \
         "$REFACTOR_VALUES" "$REFACTOR_VALUE_AMPLITUDE" \
         2>/dev/null)
       dst=$OUT_ST
     else
-      out=$(timeout "$TIMEOUT" "$KLU_COMPARE" "$matrix" --repeat 1 \
+      out=$(timeout "$TIMEOUT" "$KLU_COMPARE" "$matrix" \
+        --repeat "$SOLVE_REPEAT" \
         --factor-repeat "$FACTOR_REPEAT" --refactor-repeat "$REFACTOR_REPEAT" \
         --refactor-values "$REFACTOR_VALUES" \
         --refactor-value-amplitude "$REFACTOR_VALUE_AMPLITUDE" \

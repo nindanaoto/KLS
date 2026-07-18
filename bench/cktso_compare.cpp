@@ -237,6 +237,12 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   const long long initial_factor_us = oparm[1];
+  long long factor_flops = -1;
+  long long solve_flops = -1;
+  long long factor_mem = -1;
+  long long solve_mem = -1;
+  (void)CKTSO_Statistics(inst, &factor_flops, &solve_flops,
+                         &factor_mem, &solve_mem, true, -1, false);
 
   long long factor_total = 0;
   long long refactor_total = 0;
@@ -304,6 +310,12 @@ int main(int argc, char **argv) {
               "\"refactor_first_seconds\":%.9g,\"refactor_steady_seconds_avg\":%.9g,"
               "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
               "\"nnz_l\":%lld,\"nnz_u\":%lld,"
+              "\"selected_ordering\":%lld,\"supernodes\":%lld,"
+              "\"offdiagonal_pivots\":%lld,"
+              "\"predicted_nnz\":%lld,\"predicted_flops\":%lld,"
+              "\"factor_flops\":%lld,\"solve_flops\":%lld,"
+              "\"factor_memory_access_bytes\":%lld,"
+              "\"solve_memory_access_bytes\":%lld,"
               "\"memory_bytes\":%lld,\"memory_peak_bytes\":%lld}\n",
               argv[1], a.n, a.col_ptr[static_cast<size_t>(a.n)], threads,
               repeat, factor_repeat, refactor_repeat,
@@ -320,6 +332,8 @@ int main(int argc, char **argv) {
               1.0e-6 * static_cast<double>(refactor_first),
               1.0e-6 * refactor_steady_us_avg,
               residual_l2, relative_residual, oparm[5], oparm[6],
+              oparm[8], oparm[7], oparm[4], oparm[16], oparm[17],
+              factor_flops, solve_flops, factor_mem, solve_mem,
               oparm[12], oparm[13]);
   CKTSO_DestroySolver(inst);
   return EXIT_SUCCESS;

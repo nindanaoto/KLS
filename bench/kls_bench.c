@@ -120,11 +120,14 @@ static void kls_prof_stop_report(void) {
   /* bucket by 256-byte regions to group loop bodies */
   long i = 0;
   fprintf(stderr, "PROFTOTAL %ld base %p\n", n, base);
+  const unsigned int bucket_shift =
+      getenv("KLS_BENCH_PROF_FINE") != NULL ? 4u : 8u;
   while (i < n) {
     const unsigned long bucket =
-      ((unsigned long)kls_prof_pcs[i]) >> 8;
+      ((unsigned long)kls_prof_pcs[i]) >> bucket_shift;
     long j = i;
-    while (j < n && (((unsigned long)kls_prof_pcs[j]) >> 8) == bucket) {
+    while (j < n &&
+           (((unsigned long)kls_prof_pcs[j]) >> bucket_shift) == bucket) {
       j++;
     }
     if (j - i >= n / 200 + 2) {
@@ -370,6 +373,33 @@ static double residual_norm_values(const matrix *a, const double *values,
     b2 += b[i] * b[i];
   }
   free(ax);
+  const double rn = sqrt(r2);
+  *relative_out = (b2 > 0.0) ? rn / sqrt(b2) : rn;
+  return rn;
+}
+
+static double transpose_residual_norm_values(const matrix *a,
+                                             const double *values,
+                                             const double *x,
+                                             const double *b,
+                                             double *relative_out) {
+  double *atx = (double *)calloc((size_t)a->n, sizeof(double));
+  if (atx == NULL) return INFINITY;
+  for (int64_t col = 0; col < a->n; ++col) {
+    double sum = 0.0;
+    for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
+      sum += values[p] * x[a->row_idx[p]];
+    }
+    atx[col] = sum;
+  }
+  double r2 = 0.0;
+  double b2 = 0.0;
+  for (int64_t i = 0; i < a->n; ++i) {
+    const double r = atx[i] - b[i];
+    r2 += r * r;
+    b2 += b[i] * b[i];
+  }
+  free(atx);
   const double rn = sqrt(r2);
   *relative_out = (b2 > 0.0) ? rn / sqrt(b2) : rn;
   return rn;
@@ -1085,6 +1115,9 @@ int main(int argc, char **argv) {
   double refactor_total = 0.0;
   double solve_total = 0.0;
   double tsolve_total = 0.0;
+  double refactor_max_relative_residual = 0.0;
+  const int verify_each_refactor =
+      bench_env_enabled("KLS_BENCH_VERIFY_EACH_REFACTOR");
   const int callgrind_refactor =
       bench_env_enabled("KLS_BENCH_CALLGRIND_REFACTOR");
 
@@ -1103,7 +1136,8 @@ int main(int argc, char **argv) {
   }
   if (bench_env_enabled("KLS_BENCH_PROF")) {
     const char *prof_env = getenv("KLS_BENCH_PROF");
-    if (prof_env == NULL || prof_env[0] != '2') {
+    if (prof_env == NULL ||
+        (prof_env[0] != '2' && prof_env[0] != '4')) {
       kls_prof_start();
     }
   }
@@ -1134,6 +1168,22 @@ int main(int argc, char **argv) {
        engines can weigh the true refactor+solve pair. Not counted in
        refactor_total; solve_avg is measured separately below. */
     status = kls_solve(solver, 1, b, 0, x, 0);
+    if (status == KLS_OK && verify_each_refactor) {
+      double relative = 0.0;
+      (void)residual_norm_values(&a, current_values, x, b, &relative);
+      if (relative > refactor_max_relative_residual) {
+        refactor_max_relative_residual = relative;
+      }
+    }
+    {
+      const char *prof_env = getenv("KLS_BENCH_PROF");
+      if (prof_env != NULL && prof_env[0] == '4' && i == 0 &&
+          status == KLS_OK) {
+        /* Profile only steady refactors: the first call builds deferred
+           row/egraph metadata and otherwise hides the numeric hot path. */
+        kls_prof_start();
+      }
+    }
   }
   if (bench_env_enabled("KLS_BENCH_PROF")) {
     const char *prof_env = getenv("KLS_BENCH_PROF");
@@ -1169,6 +1219,15 @@ int main(int argc, char **argv) {
     kls_get_stats(solver, &stats);
     tsolve_total += stats.solve_seconds;
   }
+  if (status == KLS_OK && repeat > 0 && tsolve_total >= 0.0 &&
+      bench_env_enabled("KLS_BENCH_VERIFY_TRANSPOSE")) {
+    double transpose_relative = 0.0;
+    const double transpose_residual = transpose_residual_norm_values(
+      &a, current_values, x, b, &transpose_relative);
+    fprintf(stderr,
+            "KLS transpose residual: %.17g, relative: %.17g\n",
+            transpose_residual, transpose_relative);
+  }
   if (status != KLS_OK) {
     fprintf(stderr, "KLS benchmark failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
@@ -1180,6 +1239,10 @@ int main(int argc, char **argv) {
     free(b);
     free(x);
     return EXIT_FAILURE;
+  }
+  if (verify_each_refactor) {
+    fprintf(stderr, "KLS refactor max relative residual: %.17g\n",
+            refactor_max_relative_residual);
   }
 
   status = kls_solve(solver, 1, b, 0, x, 0);
