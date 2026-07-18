@@ -2341,6 +2341,28 @@ static int kls_medium_partial_static_metis_adopted(
     solver->orientation == KLS_ORIENTATION_NORMAL;
 }
 
+/* The predicted symmetric numeric for ss1 is an unusual corner of the
+   giant single-block cohort: more than 200 factor entries per row but fewer
+   than five input entries per row.  Float mirrors double its EGraph time,
+   while its separator forest has a profitable solve partition with a wider
+   serial top.  Keep the policy structural and deliberately narrow. */
+static int kls_extreme_symmetric_single_block_cycle(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->options.threads != 8 || solver->symbolic->nblocks != 1u ||
+      solver->n < 180000u || solver->n > 250000u ||
+      solver->nnz > 5u * solver->n || solver->common.scale > 0 ||
+      solver->numeric->Rs != NULL ||
+      solver->stats.selected_ordering != KLS_ORDERING_METIS ||
+      solver->numeric->lnz != solver->numeric->unz) {
+    return 0;
+  }
+  const double fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return fill >= 200.0 * (double)solver->n &&
+         solver->common.flops >= 5.0e10;
+}
+
 typedef struct kls_pattern_candidate {
   UF_long n;
   UF_long nnz;
@@ -50765,6 +50787,13 @@ static int kls_fp32_refactor_wanted(kls_solver *solver) {
   const int env = kls_fp32_refactor_env_state();
   if (env != 0) {
     return env > 0;
+  }
+  if (kls_extreme_symmetric_single_block_cycle(solver)) {
+    /* The mirrored-float walk measures about twice the full-precision EGraph
+       pass on this highly symmetric factor and also turns every solve into a
+       refinement solve. */
+    solver->fp32_decision = -1;
+    return 0;
   }
   if (solver == NULL || solver->numeric == NULL) {
     return 0;
@@ -103721,11 +103750,12 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
     return thread_count;
   }
   if (solver->medium_spike_minfill_path ||
-      kls_medium_partial_static_metis_adopted(solver)) {
-    /* Both multi-block width arms use full width here, while pair and quad
-       fusion each measured about 8.7ms versus a 5.2ms plain dispatch.  Settle
-       the timing-only choice immediately so the 99-step horizon does not pay
-       two known-losing probes. */
+      kls_medium_partial_static_metis_adopted(solver) ||
+      kls_extreme_symmetric_single_block_cycle(solver)) {
+    /* These retained numeric classes have already selected full width, while
+       pair/quad fusion is slower (roughly 2x on the extreme symmetric
+       single block).  Settle the timing-only choices immediately so the
+       99-step horizon does not pay known-losing probes. */
     solver->eg_tt_choice = thread_count;
     solver->eg_pair_choice = -1;
     return thread_count;
@@ -141679,9 +141709,10 @@ static void kls_pts_try_build(kls_solver *solver) {
   const int very_wide_top_trial =
     getenv("KLS_ENABLE_VERY_WIDE_TOP_PTS") != NULL ||
     (getenv("KLS_DISABLE_VERY_WIDE_TOP_PTS") == NULL &&
-     solver->common.scale <= 0 &&
-     symbolic_is_fragmented_many_block_unscaled_candidate(
-       solver->n, symbolic));
+     (kls_extreme_symmetric_single_block_cycle(solver) ||
+      (solver->common.scale <= 0 &&
+       symbolic_is_fragmented_many_block_unscaled_candidate(
+         solver->n, symbolic))));
   const int wide_top_trial =
     very_wide_top_trial || getenv("KLS_ENABLE_WIDE_TOP_PTS") != NULL ||
     kls_medium_partial_static_metis_adopted(solver) ||
@@ -141888,10 +141919,12 @@ static void kls_pts_try_build(kls_solver *solver) {
       }
     }
     solver->pts = pts;
-    if (kls_medium_partial_static_metis_adopted(solver) && pts->solve_ok) {
-      /* The retained METIS forest has a verified 40% top-work plan and its
-         PTS solve is roughly twice as fast.  Select it directly so four
-         solve-probe dispatches do not perturb the neighboring refactors. */
+    if ((kls_medium_partial_static_metis_adopted(solver) ||
+         kls_extreme_symmetric_single_block_cycle(solver)) &&
+        pts->solve_ok) {
+      /* The retained METIS forest has a verified PTS plan that is materially
+         faster on these narrow classes.  Select it directly so four solve
+         probes do not perturb the neighboring refactors. */
       pts->solve_decision = 1;
     }
     if (solver->large_bounded_no_btf_amf_path && pts->refactor_ok &&
@@ -146924,12 +146957,14 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   if ((getenv("KLS_DISABLE_BATCH_FLOOR_PROBE") != NULL ||
        kls_egraph_hybrid_huge_single_shape(solver) ||
+       kls_extreme_symmetric_single_block_cycle(solver) ||
        kls_fragmented_medium_dominant_btf_shape(solver)) &&
       solver->floor_choice == 0) {
     solver->floor_choice = -1;
   }
   if ((getenv("KLS_DISABLE_PADDED_PANEL_PROBE") != NULL ||
        kls_egraph_hybrid_huge_single_shape(solver) ||
+       kls_extreme_symmetric_single_block_cycle(solver) ||
        kls_fragmented_medium_dominant_btf_shape(solver)) &&
       solver->padded_choice == 0) {
     solver->padded_choice = -1;
