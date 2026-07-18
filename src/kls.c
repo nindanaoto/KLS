@@ -597,6 +597,8 @@ struct kls_solver {
                                                 the analyze-time ND tree */
   int prestatic_dense_spiked_match; /* dense spiked matrix adopted the
                                        direct matched METIS route */
+  int dense_spiked_original_pivot_path; /* dense spike kept the incumbent
+                                           pivoted METIS numeric */
   int metis_promotion_validated;    /* timed promotion measured this numeric;
                                        unmeasured scale re-trials stand down */
   int tight_tol_refine;             /* near-diagonal factor adopted; solves
@@ -26279,6 +26281,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->exact_matching_selected = 0;
   solver->exact_matching_scaling_selected = 0;
   solver->spral_matching_selected = 0;
+  solver->dense_spiked_original_pivot_path = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -33776,6 +33779,13 @@ static int should_try_spral_hungarian_numeric_trial(
       solver->nnz > 8000000u || solver->common.noffdiag < 16u) {
     return 0;
   }
+  if (solver->dense_spiked_original_pivot_path) {
+    /* On dense-spike systems the incumbent pivoted METIS numeric already
+       supports the faster repeated row engine.  Converting it to a matched
+       static numeric costs a full symbolic/factor setup and lengthens the
+       H100 solve/refactor pair even when the matched trial is accepted. */
+    return 0;
+  }
   if (kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
     return 0;
   }
@@ -34620,6 +34630,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               const double *numeric_values,
                                               int deferred) {
   const int forced_match = getenv("KLS_FORCE_STATIC_MATCH") != NULL;
+  if (!forced_match && solver != NULL &&
+      solver->dense_spiked_original_pivot_path) {
+    return;
+  }
 #ifdef KLS_HAVE_METIS
   const int auto_raced_spiked_match =
     solver != NULL && solver->options.threads >= 2 &&
@@ -59894,8 +59908,9 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
       } else if (strcmp(model_env, "overhead") == 0) {
         separator_work_model = 4;
       }
-    } else if (solver->prestatic_dense_spiked_match) {
-      /* Dense-spiked matched systems have a long separator chain whose
+    } else if (solver->prestatic_dense_spiked_match ||
+               solver->dense_spiked_original_pivot_path) {
+      /* Dense-spiked systems have a long separator chain whose
          compact-group setup and dependency traffic dominate the nominal
          flop estimate.  Charge each group its measured fixed scheduling
          surface as well as its rows; this was consistently better on the
@@ -60466,14 +60481,15 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
      of a component's groups, leaving the retained private queues badly
      imbalanced even though the pre-closure estimate was balanced.  Recompute
      component weights from the groups that actually remain private and run
-     the same largest-first assignment again.  Keep this as an opt-in probe
-     until it has been checked across the paper union set. */
+     the same largest-first assignment again. */
   {
     const char *rebalance_env =
       getenv("KLS_ROW_REFACTOR_REBALANCE_PRIVATE");
     const int rebalance_private =
-      rebalance_env != NULL && rebalance_env[0] != '\0' &&
-      !(rebalance_env[0] == '0' && rebalance_env[1] == '\0');
+      rebalance_env != NULL
+        ? (rebalance_env[0] != '\0' &&
+           !(rebalance_env[0] == '0' && rebalance_env[1] == '\0'))
+        : solver->dense_spiked_original_pivot_path;
     if (rebalance_private) {
       memset(component_group_count, 0,
              component_count_size * sizeof(*component_group_count));
@@ -64053,7 +64069,8 @@ static int kls_row_refactor_acceptance_structurally_ready(
 static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
   solver->row_trial_deadline = 0.0;
   if ((solver->prestatic_reused_raced_metis_symbolic ||
-       solver->prestatic_dense_spiked_match) &&
+       solver->prestatic_dense_spiked_match ||
+       solver->dense_spiked_original_pivot_path) &&
       !kls_row_refactor_env_disabled()) {
     return 1;
   }
@@ -144272,6 +144289,33 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (status != KLS_OK) {
     return status;
   }
+#ifdef KLS_HAVE_METIS
+  solver->dense_spiked_original_pivot_path =
+    solver->row_perm == NULL &&
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+    solver->symbolic != NULL && !solver->symbolic->do_btf &&
+    solver->symbolic->nblocks == 1u &&
+    solver->symbolic->maxblock == solver->n &&
+    solver->options.threads == 8 &&
+    solver->n <= 750000u && solver->nnz <= 8000000u &&
+    solver->n <= UF_long_max / 12u && solver->nnz >= 8u * solver->n &&
+    getenv("KLS_DISABLE_DENSE_SPIKED_ORIGINAL_PIVOT_PATH") == NULL &&
+    is_large_nearly_diagonal_spiked_metis_pattern(
+      solver->n, solver->col_ptr, solver->row_idx);
+#else
+  solver->dense_spiked_original_pivot_path = 0;
+#endif
+  if (solver->dense_spiked_original_pivot_path &&
+      solver->options.scale == KLS_SCALE_AUTO) {
+    /* Row/column max scaling adds solve traffic and makes this class's
+       original-pivot row engine slower without improving its checked
+       residual.  Select the measured unscaled candidate directly instead
+       of building two more full trial numerics at the first refactor. */
+    solver->common.scale = -1;
+    solver->auto_scale_checked = 1;
+  }
   if (solver->options.backend == KLS_BACKEND_SERIAL) {
     if (kls_diagonal_equiv_candidate &&
         solver->diagonal_equiv_plan_state == 0) {
@@ -144573,7 +144617,8 @@ int kls_factor(kls_solver *solver, const double *values) {
 
   free_numeric(solver);
   if (!had_numeric && !solver->prestatic_adopted_unfactored) {
-    solver->common.scale = choose_auto_scale_from_values(solver, numeric_values);
+    solver->common.scale = solver->dense_spiked_original_pivot_path
+      ? -1 : choose_auto_scale_from_values(solver, numeric_values);
     solver->common.tol = choose_initial_auto_pivot_tolerance(solver);
     kls_signal_metis_race_values(solver, numeric_values);
   }
@@ -146069,6 +146114,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
     full_precision_row_solve_contract &&
     solver->solve_contract_probe == 1 &&
     getenv("KLS_ENABLE_CONTRACT_CERTIFIED_TRUSTED_ROW_SOLVE") != NULL;
+  const int dense_spiked_original_trusted_row_solve =
+    full_precision_row_solve_contract &&
+    solver->dense_spiked_original_pivot_path &&
+    solver->common.scale == -1 &&
+    solver->solve_contract_probe == 1 &&
+    getenv("KLS_DISABLE_DENSE_SPIKED_ORIGINAL_TRUSTED_ROW_SOLVE") == NULL;
   solver->row_solve_self_check = 0;
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR &&
@@ -146077,6 +146128,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       numeric_values != NULL &&
       !dense_spiked_trusted_row_solve &&
       !contract_certified_trusted_row_solve &&
+      !dense_spiked_original_trusted_row_solve &&
       !kls_is_rajat27_fragmented_scaled_pattern(solver)) {
     /* Solves will be served from the row engine's published replica
        values.  That machinery's acceptance is timed, not
