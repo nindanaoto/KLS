@@ -74,7 +74,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--refactor-repeat", type=int, default=5)
     parser.add_argument(
         "--refactor-values",
-        choices=("unchanged", "rank-preserving", "entrywise"),
+        choices=(
+            "unchanged",
+            "rank-preserving",
+            "entrywise",
+            "localized-entrywise",
+        ),
         default="unchanged",
     )
     parser.add_argument("--refactor-value-amplitude", type=float, default=1.0e-3)

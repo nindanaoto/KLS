@@ -77,7 +77,12 @@ def main() -> int:
     parser.add_argument("--refactor-repeat", type=int, default=5)
     parser.add_argument(
         "--refactor-values",
-        choices=("unchanged", "rank-preserving", "entrywise"),
+        choices=(
+            "unchanged",
+            "rank-preserving",
+            "entrywise",
+            "localized-entrywise",
+        ),
         default="unchanged",
     )
     parser.add_argument(

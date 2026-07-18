@@ -26,11 +26,12 @@ INPUT_INDEX=${INPUT_INDEX:-64}
 REFACTOR_REPEAT=${REFACTOR_REPEAT:-5}
 # Keep the released-demo-compatible unchanged loop as the default.  Set
 # REFACTOR_VALUES=rank-preserving for the separable nonlinear-SPICE check, or
-# entrywise for a deterministic certificate-rejection counter-workload.
+# entrywise for a deterministic certificate-rejection counter-workload, or
+# localized-entrywise for a fixed one-in-1024 cyclic column window.
 REFACTOR_VALUES=${REFACTOR_VALUES:-unchanged}
 REFACTOR_VALUE_AMPLITUDE=${REFACTOR_VALUE_AMPLITUDE:-0.001}
 case "$REFACTOR_VALUES" in
-  unchanged|rank-preserving|entrywise) ;;
+  unchanged|rank-preserving|entrywise|localized-entrywise) ;;
   *) echo "invalid REFACTOR_VALUES: $REFACTOR_VALUES" >&2; exit 2;;
 esac
 # The measured cycle starts at the initial factorization.  Extra full-factor

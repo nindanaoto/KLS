@@ -300,7 +300,7 @@ static void make_refactor_values(matrix *a, const double *base_values,
     for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
       a->values[p] = bench_generated_refactor_value(
         mode, base_values[p], (uint64_t)a->row_idx[p], (uint64_t)col,
-        generation, amplitude);
+        (uint64_t)a->n, generation, amplitude);
     }
   }
 }
@@ -662,7 +662,7 @@ int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr,
             "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] "
-            "[--refactor-values unchanged|rank-preserving|entrywise] [--refactor-value-amplitude A] "
+            "[--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] "
             "[--ordering amd|colamd|natural] [--scale -1|0|1|2] "
             "[--no-btf] [--width-order 32-first|64-first] [--json]\n",
             argv[0]);

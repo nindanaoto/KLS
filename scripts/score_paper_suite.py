@@ -38,9 +38,13 @@ def value_protocol(path):
                 raise ValueError(
                     f"{path}:{line_number}: invalid refactor value amplitude"
                 ) from exc
-            if mode not in ("unchanged", "rank-preserving", "entrywise") or not math.isfinite(
-                amplitude
-            ):
+            valid_modes = (
+                "unchanged",
+                "rank-preserving",
+                "entrywise",
+                "localized-entrywise",
+            )
+            if mode not in valid_modes or not math.isfinite(amplitude):
                 raise ValueError(
                     f"{path}:{line_number}: invalid refactor value protocol"
                 )

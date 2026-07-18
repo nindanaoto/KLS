@@ -520,6 +520,22 @@ struct kls_solver {
   int diagonal_equiv_active;
   uint32_t diagonal_equiv_reject_streak;
   uint32_t diagonal_equiv_retry_countdown;
+  /* Opt-in block-local update plan.  Each stored input entry maps either to
+     its independent diagonal BTF block or to one Offx slot.  The reference
+     is in the same final internal CSC frame as the retained numeric. */
+  double *partial_btf_reference_values;
+  uint32_t *partial_btf_entry_block;
+  uint32_t *partial_btf_entry_offx;
+  uint32_t *partial_btf_changed_entries;
+  unsigned char *partial_btf_changed_blocks;
+  const UF_long *partial_btf_col_ptr_identity;
+  const UF_long *partial_btf_row_idx_identity;
+  const trilinos_klu_l_symbolic *partial_btf_symbolic_identity;
+  const trilinos_klu_l_numeric *partial_btf_numeric_identity;
+  UF_long partial_btf_nblocks;
+  int partial_btf_reference_valid;
+  uint32_t partial_btf_decline_streak;
+  int partial_btf_gated;
   double *solve_perm_workspace;
   UF_long solve_perm_workspace_n;
   kls_egraph_refactor_pool *egraph_pool;
@@ -24908,6 +24924,402 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Opt-in partial BTF refactorization                                         */
+/* -------------------------------------------------------------------------- */
+
+static void kls_partial_btf_clear_plan(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->partial_btf_reference_values);
+  free(solver->partial_btf_entry_block);
+  free(solver->partial_btf_entry_offx);
+  free(solver->partial_btf_changed_entries);
+  free(solver->partial_btf_changed_blocks);
+  solver->partial_btf_reference_values = NULL;
+  solver->partial_btf_entry_block = NULL;
+  solver->partial_btf_entry_offx = NULL;
+  solver->partial_btf_changed_entries = NULL;
+  solver->partial_btf_changed_blocks = NULL;
+  solver->partial_btf_col_ptr_identity = NULL;
+  solver->partial_btf_row_idx_identity = NULL;
+  solver->partial_btf_symbolic_identity = NULL;
+  solver->partial_btf_numeric_identity = NULL;
+  solver->partial_btf_nblocks = 0u;
+  solver->partial_btf_reference_valid = 0;
+  solver->partial_btf_decline_streak = 0u;
+  solver->partial_btf_gated = 0;
+}
+
+static int kls_partial_btf_base_eligible(const kls_solver *solver) {
+  return solver != NULL &&
+    getenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR") != NULL &&
+    solver->symbolic != NULL && solver->numeric != NULL &&
+    solver->col_ptr != NULL && solver->row_idx != NULL &&
+    solver->symbolic->Q != NULL && solver->symbolic->R != NULL &&
+    solver->numeric->Pinv != NULL && solver->numeric->Offp != NULL &&
+    solver->numeric->Llen != NULL && solver->numeric->Ulen != NULL &&
+    solver->numeric->Udiag != NULL && solver->numeric->LUbx != NULL &&
+    solver->symbolic->nblocks > 1u &&
+    solver->symbolic->nblocks <= (UF_long)UINT32_MAX &&
+    solver->nnz <= (UF_long)UINT32_MAX &&
+    solver->nnz <= (UF_long)(SIZE_MAX / sizeof(double)) &&
+    solver->common.status >= TRILINOS_KLU_OK &&
+    solver->common.status != TRILINOS_KLU_SINGULAR &&
+    solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
+    solver->pivot_nudge_count == 0u &&
+    solver->common.kls_perturb_count == 0u &&
+    !solver->numeric_is_predicted && !solver->fp32_last_used &&
+    !solver->numeric_needs_refinement;
+}
+
+static int kls_partial_btf_plan_matches(const kls_solver *solver) {
+  return kls_partial_btf_base_eligible(solver) &&
+    solver->partial_btf_reference_valid &&
+    solver->partial_btf_reference_values != NULL &&
+    solver->partial_btf_entry_block != NULL &&
+    solver->partial_btf_entry_offx != NULL &&
+    solver->partial_btf_changed_entries != NULL &&
+    solver->partial_btf_changed_blocks != NULL &&
+    solver->partial_btf_col_ptr_identity == solver->col_ptr &&
+    solver->partial_btf_row_idx_identity == solver->row_idx &&
+    solver->partial_btf_symbolic_identity == solver->symbolic &&
+    solver->partial_btf_numeric_identity == solver->numeric &&
+    solver->partial_btf_nblocks == solver->symbolic->nblocks;
+}
+
+/* Build a direct entry-to-block/Offx map in KLU's final BTF coordinates.
+   Pivoting is constrained within each diagonal block, so Pinv assigns every
+   stored entry either to exactly one independent block or to the strictly
+   off-diagonal F region used only during block back substitution. */
+static int kls_partial_btf_build_plan(kls_solver *solver,
+                                      const double *values) {
+  if (!kls_partial_btf_base_eligible(solver) || values == NULL) {
+    kls_partial_btf_clear_plan(solver);
+    return 0;
+  }
+  const UF_long nnz = solver->nnz;
+  const UF_long nblocks = solver->symbolic->nblocks;
+  const size_t entry_count = (size_t)(nnz > 0u ? nnz : 1u);
+  double *reference =
+    (double *)malloc(entry_count * sizeof(*reference));
+  uint32_t *entry_block =
+    (uint32_t *)malloc(entry_count * sizeof(*entry_block));
+  uint32_t *entry_offx =
+    (uint32_t *)malloc(entry_count * sizeof(*entry_offx));
+  uint32_t *changed_entries =
+    (uint32_t *)malloc(entry_count * sizeof(*changed_entries));
+  unsigned char *changed_blocks =
+    (unsigned char *)calloc((size_t)nblocks, sizeof(*changed_blocks));
+  if (reference == NULL || entry_block == NULL || entry_offx == NULL ||
+      changed_entries == NULL || changed_blocks == NULL) {
+    free(reference);
+    free(entry_block);
+    free(entry_offx);
+    free(changed_entries);
+    free(changed_blocks);
+    kls_partial_btf_clear_plan(solver);
+    return 0;
+  }
+  for (UF_long p = 0u; p < nnz; ++p) {
+    entry_block[p] = UINT32_MAX;
+    entry_offx[p] = UINT32_MAX;
+  }
+
+  const UF_long *q = solver->symbolic->Q;
+  const UF_long *r = solver->symbolic->R;
+  const UF_long *pinv = solver->numeric->Pinv;
+  const UF_long *offp = solver->numeric->Offp;
+  int valid = r[0] == 0u && r[nblocks] == solver->n;
+  for (UF_long block = 0u; block < nblocks && valid; ++block) {
+    const UF_long k1 = r[block];
+    const UF_long k2 = r[block + 1u];
+    if (k1 > k2 || k2 > solver->n) {
+      valid = 0;
+      break;
+    }
+    for (UF_long k = k1; k < k2 && valid; ++k) {
+      const UF_long oldcol = q[k];
+      if (oldcol >= solver->n || offp[k] > offp[k + 1u] ||
+          offp[k + 1u] > solver->symbolic->nzoff) {
+        valid = 0;
+        break;
+      }
+      UF_long poff = offp[k];
+      for (UF_long p = solver->col_ptr[oldcol];
+           p < solver->col_ptr[oldcol + 1u]; ++p) {
+        const UF_long oldrow = solver->row_idx[p];
+        if (oldrow >= solver->n || pinv[oldrow] >= solver->n) {
+          valid = 0;
+          break;
+        }
+        const UF_long newrow = pinv[oldrow];
+        if (newrow < k1) {
+          if (poff >= offp[k + 1u] || poff > (UF_long)UINT32_MAX) {
+            valid = 0;
+            break;
+          }
+          entry_offx[p] = (uint32_t)poff++;
+        } else if (newrow < k2) {
+          entry_block[p] = (uint32_t)block;
+        } else {
+          /* A valid upper BTF has no entry below its diagonal block. */
+          valid = 0;
+          break;
+        }
+      }
+      if (poff != offp[k + 1u]) {
+        valid = 0;
+      }
+    }
+  }
+  for (UF_long p = 0u; p < nnz && valid; ++p) {
+    valid = entry_block[p] != UINT32_MAX || entry_offx[p] != UINT32_MAX;
+  }
+  if (!valid) {
+    free(reference);
+    free(entry_block);
+    free(entry_offx);
+    free(changed_entries);
+    free(changed_blocks);
+    kls_partial_btf_clear_plan(solver);
+    return 0;
+  }
+  if (nnz > 0u) {
+    memcpy(reference, values, (size_t)nnz * sizeof(*reference));
+  }
+
+  kls_partial_btf_clear_plan(solver);
+  solver->partial_btf_reference_values = reference;
+  solver->partial_btf_entry_block = entry_block;
+  solver->partial_btf_entry_offx = entry_offx;
+  solver->partial_btf_changed_entries = changed_entries;
+  solver->partial_btf_changed_blocks = changed_blocks;
+  solver->partial_btf_col_ptr_identity = solver->col_ptr;
+  solver->partial_btf_row_idx_identity = solver->row_idx;
+  solver->partial_btf_symbolic_identity = solver->symbolic;
+  solver->partial_btf_numeric_identity = solver->numeric;
+  solver->partial_btf_nblocks = nblocks;
+  solver->partial_btf_reference_valid = 1;
+  return 1;
+}
+
+/* Call only after a successful full or partial numeric update. */
+static void kls_partial_btf_update_reference(kls_solver *solver,
+                                             const double *values) {
+  if (solver == NULL || values == NULL ||
+      getenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR") == NULL) {
+    return;
+  }
+  if (solver->partial_btf_gated) {
+    return;
+  }
+  if (!kls_partial_btf_plan_matches(solver)) {
+    (void)kls_partial_btf_build_plan(solver, values);
+    return;
+  }
+  if (solver->partial_btf_reference_valid == 2) {
+    /* The successful partial walk already copied exactly its changed list. */
+    solver->partial_btf_reference_valid = 1;
+    return;
+  }
+  if (solver->nnz > 0u) {
+    memcpy(solver->partial_btf_reference_values, values,
+           (size_t)solver->nnz * sizeof(*values));
+  }
+  solver->partial_btf_reference_valid = 1;
+}
+
+static double kls_partial_btf_max_work_fraction(void) {
+  double fraction = 0.50;
+  const char *env = getenv("KLS_PARTIAL_BTF_MAX_WORK_FRACTION");
+  if (env != NULL && env[0] != '\0') {
+    const double parsed = atof(env);
+    if (parsed > 0.0 && parsed < 1.0) {
+      fraction = parsed;
+    }
+  }
+  return fraction;
+}
+
+/* Return 1 only when a complete, solve-ready partial update was published.
+   Any structural decline or failed block refresh returns 0; the caller then
+   runs its ordinary full refactor, which overwrites any tentative values. */
+static int kls_try_partial_btf_refactor(kls_solver *solver,
+                                        double *values,
+                                        int check_pivots) {
+  if (solver == NULL || values == NULL || check_pivots ||
+      solver->partial_btf_gated ||
+      !kls_partial_btf_plan_matches(solver) ||
+      solver->row_refactor_values_ready ||
+      solver->row_refactor_values_dirty) {
+    return 0;
+  }
+  const UF_long nblocks = solver->symbolic->nblocks;
+  unsigned char *changed = solver->partial_btf_changed_blocks;
+  memset(changed, 0, (size_t)nblocks * sizeof(*changed));
+  UF_long changed_block_count = 0u;
+  UF_long changed_entry_count = 0u;
+  UF_long changed_offdiag_count = 0u;
+  uint32_t *changed_entries = solver->partial_btf_changed_entries;
+  for (UF_long p = 0u; p < solver->nnz; ++p) {
+    if (memcmp(values + p, solver->partial_btf_reference_values + p,
+               sizeof(*values)) == 0) {
+      continue;
+    }
+    changed_entries[changed_entry_count++] = (uint32_t)p;
+    const uint32_t block = solver->partial_btf_entry_block[p];
+    if (block != UINT32_MAX) {
+      if (block >= nblocks) {
+        return 0;
+      }
+      if (!changed[block]) {
+        changed[block] = 1u;
+        changed_block_count++;
+      }
+    } else if (solver->partial_btf_entry_offx[p] != UINT32_MAX) {
+      changed_offdiag_count++;
+    } else {
+      return 0;
+    }
+  }
+
+  long double total_work = 0.0L;
+  long double changed_work = 0.0L;
+  for (UF_long block = 0u; block < nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    long double work = 0.0L;
+    if (k2 - k1 == 1u) {
+      work = 1.0L;
+    }
+    for (UF_long k = k1; k < k2 && k2 - k1 > 1u; ++k) {
+      /* Stored factor entries are a stable per-block work proxy.  KLU does
+         not initialize packed L/U metadata for singleton blocks, which are
+         represented only by Udiag, so those blocks take the unit estimate. */
+      work += 1.0L + (long double)solver->numeric->Llen[k] +
+              (long double)solver->numeric->Ulen[k];
+    }
+    total_work += work;
+    if (changed[block]) {
+      changed_work += work;
+    }
+  }
+  const double max_fraction = kls_partial_btf_max_work_fraction();
+  if (changed_block_count == nblocks ||
+      (changed_block_count > 0u && total_work > 0.0L &&
+       changed_work > (long double)max_fraction * total_work)) {
+    if (solver->partial_btf_decline_streak < UINT32_MAX) {
+      solver->partial_btf_decline_streak++;
+    }
+    if (solver->partial_btf_decline_streak >= 2u &&
+        getenv("KLS_DISABLE_PARTIAL_BTF_REJECTION_GATE") == NULL) {
+      /* A stable localized workload normally touches the same SCCs.  After
+         two over-budget observations, stop both the comparison scan and the
+         O(nnz) reference copy until an explicit factor starts a new epoch. */
+      solver->partial_btf_gated = 1;
+    }
+    if (getenv("KLS_TRACE_PARTIAL_BTF") != NULL) {
+      fprintf(stderr,
+              "KLS partial BTF decline: entries=%ld blocks=%ld/%ld"
+              " work=%.3Lf/%.3Lf max=%.3f gated=%d\n",
+              (long)changed_entry_count, (long)changed_block_count,
+              (long)nblocks, changed_work, total_work, max_fraction,
+              solver->partial_btf_gated);
+    }
+    return 0;
+  }
+
+  /* Off-diagonal entries never enter a diagonal block factor.  Publish only
+     changed couplings; unchanged Offx slots already describe the reference. */
+  double *offx = (double *)solver->numeric->Offx;
+  for (UF_long q = 0u; q < changed_entry_count; ++q) {
+    const UF_long p = (UF_long)changed_entries[q];
+    const uint32_t off = solver->partial_btf_entry_offx[p];
+    if (off != UINT32_MAX) {
+      if (off >= solver->symbolic->nzoff || offx == NULL) {
+        return 0;
+      }
+      offx[off] = values[p];
+    }
+  }
+
+  kls_parallel_refactor_shared shared;
+  memset(&shared, 0, sizeof(shared));
+  shared.solver = solver;
+  shared.n = solver->n;
+  shared.nnz = solver->nnz;
+  shared.col_ptr = solver->col_ptr;
+  shared.row_idx = solver->row_idx;
+  shared.map_col_ptr = solver->refactor_col_ptr;
+  shared.map_row_idx = solver->refactor_row_idx;
+  shared.map_input_pos = solver->refactor_input_pos;
+  shared.map_block_start = solver->refactor_block_start;
+  shared.snode_run_end = kls_refactor_snode_run_end(solver);
+  shared.padded_src = solver->padded_run_of != NULL ? solver : NULL;
+  shared.values = values;
+  shared.symbolic = solver->symbolic;
+  shared.numeric = solver->numeric;
+  shared.scale = -1;
+  shared.halt_if_singular = solver->common.halt_if_singular;
+  shared.check_pivots = 0;
+
+  kls_parallel_refactor_worker worker;
+  memset(&worker, 0, sizeof(worker));
+  worker.shared = &shared;
+  worker.rejected_pivot = KLS_KLU_EMPTY;
+  worker.rejected_pivot_col = KLS_KLU_EMPTY;
+  worker.rejected_row = KLS_KLU_EMPTY;
+  worker.numerical_rank = UF_long_max;
+  worker.singular_col = KLS_KLU_EMPTY;
+  worker.x = (double *)calloc(
+    (size_t)(solver->symbolic->maxblock > 0u
+               ? solver->symbolic->maxblock : 1u),
+    sizeof(*worker.x));
+  if (worker.x == NULL) {
+    return 0;
+  }
+
+  solver->common.status = TRILINOS_KLU_OK;
+  solver->common.numerical_rank = KLS_KLU_EMPTY;
+  solver->common.singular_col = KLS_KLU_EMPTY;
+  solver->common.nrealloc = 0;
+  for (UF_long block = 0u; block < nblocks; ++block) {
+    if (!changed[block]) {
+      continue;
+    }
+    kls_parallel_refactor_block(&worker, block);
+    if (worker.invalid || worker.pivot_rejected || worker.singular) {
+      break;
+    }
+  }
+  free(worker.x);
+  if (worker.invalid || worker.pivot_rejected || worker.singular) {
+    /* The normal full refactor below restores a coherent numeric and reports
+       singularity through the established API path. */
+    solver->common.status = TRILINOS_KLU_OK;
+    return 0;
+  }
+
+  for (UF_long q = 0u; q < changed_entry_count; ++q) {
+    const UF_long p = (UF_long)changed_entries[q];
+    solver->partial_btf_reference_values[p] = values[p];
+  }
+  solver->partial_btf_reference_valid = 2;
+  solver->partial_btf_decline_streak = 0u;
+
+  if (getenv("KLS_TRACE_PARTIAL_BTF") != NULL) {
+    fprintf(stderr,
+            "KLS partial BTF accepted: entries=%ld offdiag=%ld"
+            " blocks=%ld/%ld work=%.3Lf/%.3Lf\n",
+            (long)changed_entry_count, (long)changed_offdiag_count,
+            (long)changed_block_count, (long)nblocks,
+            changed_work, total_work);
+  }
+  return 1;
+}
+
 static void *kls_refactor_pool_worker_main(void *arg) {
   kls_parallel_refactor_worker *worker = (kls_parallel_refactor_worker *)arg;
   kls_refactor_pool *pool = worker->pool;
@@ -25774,6 +26186,11 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->diagonal_equiv_scales);
   free(solver->diagonal_equiv_public_scales);
   free(solver->diagonal_equiv_rhs_workspace);
+  free(solver->partial_btf_reference_values);
+  free(solver->partial_btf_entry_block);
+  free(solver->partial_btf_entry_offx);
+  free(solver->partial_btf_changed_entries);
+  free(solver->partial_btf_changed_blocks);
   free(solver->lean_scale_input_snapshot);
   free(solver->lean_scale_rs_snapshot);
   free(solver->solve_perm_workspace);
@@ -25825,6 +26242,19 @@ static void clear_matrix(kls_solver *solver) {
   solver->diagonal_equiv_active = 0;
   solver->diagonal_equiv_reject_streak = 0u;
   solver->diagonal_equiv_retry_countdown = 0u;
+  solver->partial_btf_reference_values = NULL;
+  solver->partial_btf_entry_block = NULL;
+  solver->partial_btf_entry_offx = NULL;
+  solver->partial_btf_changed_entries = NULL;
+  solver->partial_btf_changed_blocks = NULL;
+  solver->partial_btf_col_ptr_identity = NULL;
+  solver->partial_btf_row_idx_identity = NULL;
+  solver->partial_btf_symbolic_identity = NULL;
+  solver->partial_btf_numeric_identity = NULL;
+  solver->partial_btf_nblocks = 0u;
+  solver->partial_btf_reference_valid = 0;
+  solver->partial_btf_decline_streak = 0u;
+  solver->partial_btf_gated = 0;
   solver->lean_scale_input_snapshot = NULL;
   solver->lean_scale_rs_snapshot = NULL;
   solver->lean_scale_input_state = 0;
@@ -111184,6 +111614,11 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
   if (!check_pivots &&
+      kls_try_partial_btf_refactor(solver, numeric_values, check_pivots)) {
+    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_PARTIAL_BTF);
+    return 1;
+  }
+  if (!check_pivots &&
       (solver->lean_probe_arm > 0 ||
        getenv("KLS_ENABLE_LEAN_ROW_CONSUME") != NULL)) {
     /* A positive arm is an already-settled engine decision.  Dispatch it
@@ -143163,6 +143598,12 @@ static void kls_diagonal_equiv_update_reference(kls_solver *solver,
   solver->diagonal_equiv_active = 0;
 }
 
+static void kls_update_structured_references(kls_solver *solver,
+                                             const double *values) {
+  kls_partial_btf_update_reference(solver, values);
+  kls_diagonal_equiv_update_reference(solver, values);
+}
+
 static void kls_diagonal_equiv_record_rejection(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -143684,6 +144125,8 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->diagonal_equiv_validation_hint = UINT32_MAX;
   solver->diagonal_equiv_reject_streak = 0u;
   solver->diagonal_equiv_retry_countdown = 0u;
+  solver->partial_btf_decline_streak = 0u;
+  solver->partial_btf_gated = 0;
   solver->snb_factor_start = kls_now_seconds();
   if (solver->diagonal_equiv_plan_state == 2) {
     solver->diagonal_equiv_plan_state = 1;
@@ -143737,7 +144180,9 @@ int kls_factor(kls_solver *solver, const double *values) {
     status = kls_serial_factor(solver, numeric_values);
     if (status == KLS_OK) {
       kls_arm_unchanged_refactor_cache(solver, values);
-      kls_diagonal_equiv_update_reference(solver, numeric_values);
+      {
+        kls_update_structured_references(solver, numeric_values);
+      }
       solver->stats.factor_seconds =
         kls_now_seconds() - solver->snb_factor_start;
       fill_numeric_stats(solver);
@@ -143938,7 +144383,11 @@ int kls_factor(kls_solver *solver, const double *values) {
         kls_arm_unchanged_refactor_cache(solver, values);
         elapsed += kls_now_seconds() - snapshot_start;
       }
-      kls_diagonal_equiv_update_reference(solver, numeric_values);
+      {
+        const double structured_start = kls_now_seconds();
+        kls_update_structured_references(solver, numeric_values);
+        elapsed += kls_now_seconds() - structured_start;
+      }
       solver->stats.factor_seconds = elapsed;
       fill_numeric_stats(solver);
       return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
@@ -143970,7 +144419,11 @@ int kls_factor(kls_solver *solver, const double *values) {
       const double snapshot_start = kls_now_seconds();
       kls_arm_unchanged_refactor_cache(solver, values);
       elapsed += kls_now_seconds() - snapshot_start;
-      kls_diagonal_equiv_update_reference(solver, numeric_values);
+      {
+        const double structured_start = kls_now_seconds();
+        kls_update_structured_references(solver, numeric_values);
+        elapsed += kls_now_seconds() - structured_start;
+      }
       solver->stats.factor_seconds = elapsed;
       kls_update_numeric_diagnostics(solver, 1);
       fill_numeric_stats(solver);
@@ -144000,7 +144453,11 @@ int kls_factor(kls_solver *solver, const double *values) {
         const double snapshot_start = kls_now_seconds();
         kls_arm_unchanged_refactor_cache(solver, values);
         elapsed += kls_now_seconds() - snapshot_start;
-        kls_diagonal_equiv_update_reference(solver, numeric_values);
+        {
+          const double structured_start = kls_now_seconds();
+          kls_update_structured_references(solver, numeric_values);
+          elapsed += kls_now_seconds() - structured_start;
+        }
         solver->stats.factor_seconds = elapsed;
         fill_numeric_stats(solver);
         return KLS_OK;
@@ -144654,12 +145111,18 @@ factor_preps_deferred_exit:;
     kls_arm_unchanged_refactor_cache(solver, values);
     elapsed += kls_now_seconds() - snapshot_start;
   }
-  solver->stats.factor_seconds = elapsed;
-  fill_numeric_stats(solver);
   if (solver->common.status == TRILINOS_KLU_SINGULAR) {
+    solver->stats.factor_seconds = elapsed;
+    fill_numeric_stats(solver);
     return KLS_ERR_SINGULAR;
   }
-  kls_diagonal_equiv_update_reference(solver, numeric_values);
+  {
+    const double structured_start = kls_now_seconds();
+    kls_update_structured_references(solver, numeric_values);
+    elapsed += kls_now_seconds() - structured_start;
+  }
+  solver->stats.factor_seconds = elapsed;
+  fill_numeric_stats(solver);
   return KLS_OK;
 }
 
@@ -145626,13 +146089,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver->common.status == TRILINOS_KLU_SINGULAR) {
     return KLS_ERR_SINGULAR;
   }
-  if (solver->diagonal_equiv_plan_state == 1) {
-    if (kls_diagonal_equiv_plan_matches_pattern(solver)) {
-      kls_diagonal_equiv_update_reference(solver, numeric_values);
-    } else {
-      kls_diagonal_equiv_reset_plan(solver);
-    }
+  if (solver->diagonal_equiv_plan_state == 1 &&
+      !kls_diagonal_equiv_plan_matches_pattern(solver)) {
+    kls_diagonal_equiv_reset_plan(solver);
   }
+  kls_update_structured_references(solver, numeric_values);
   return KLS_OK;
 }
 
@@ -146511,6 +146972,7 @@ const char *kls_refactor_path_name(kls_refactor_path path) {
     case KLS_REFACTOR_PATH_UNCHANGED: return "unchanged";
     case KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT:
       return "diagonal_equivalent";
+    case KLS_REFACTOR_PATH_PARTIAL_BTF: return "partial_btf";
     default: return "unknown";
   }
 }

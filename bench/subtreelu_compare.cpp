@@ -173,7 +173,8 @@ static void make_refactor_values(
       a.values[static_cast<size_t>(p)] = bench_generated_refactor_value(
         mode, base_values[static_cast<size_t>(p)],
         static_cast<uint64_t>(a.row_idx[static_cast<size_t>(p)]),
-        static_cast<uint64_t>(col), generation, amplitude);
+        static_cast<uint64_t>(col), static_cast<uint64_t>(a.n), generation,
+        amplitude);
     }
   }
   for (int row = 0; row < a.n; ++row) {
@@ -183,7 +184,7 @@ static void make_refactor_values(
         mode, base_row_values[static_cast<size_t>(p)],
         static_cast<uint64_t>(row),
         static_cast<uint64_t>(a.col_idx[static_cast<size_t>(p)]),
-        generation, amplitude);
+        static_cast<uint64_t>(a.n), generation, amplitude);
     }
   }
 }
@@ -210,7 +211,7 @@ static double residual(const Matrix &a,
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat] [factor-repeat] [unchanged|rank-preserving|entrywise] [amplitude]\n", argv[0]);
+    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat] [factor-repeat] [unchanged|rank-preserving|entrywise|localized-entrywise] [amplitude]\n", argv[0]);
     return EXIT_FAILURE;
   }
   const int threads = argc > 2 ? std::atoi(argv[2]) : 16;

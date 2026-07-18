@@ -7,7 +7,8 @@
 typedef enum bench_refactor_value_mode {
   BENCH_REFACTOR_VALUES_UNCHANGED = 0,
   BENCH_REFACTOR_VALUES_RANK_PRESERVING = 1,
-  BENCH_REFACTOR_VALUES_ENTRYWISE = 2
+  BENCH_REFACTOR_VALUES_ENTRYWISE = 2,
+  BENCH_REFACTOR_VALUES_LOCALIZED_ENTRYWISE = 3
 } bench_refactor_value_mode;
 
 static inline int bench_parse_refactor_value_mode(
@@ -25,6 +26,10 @@ static inline int bench_parse_refactor_value_mode(
     *mode_out = BENCH_REFACTOR_VALUES_ENTRYWISE;
     return 1;
   }
+  if (strcmp(name, "localized-entrywise") == 0) {
+    *mode_out = BENCH_REFACTOR_VALUES_LOCALIZED_ENTRYWISE;
+    return 1;
+  }
   return 0;
 }
 
@@ -35,6 +40,8 @@ static inline const char *bench_refactor_value_mode_name(
       return "rank-preserving";
     case BENCH_REFACTOR_VALUES_ENTRYWISE:
       return "entrywise";
+    case BENCH_REFACTOR_VALUES_LOCALIZED_ENTRYWISE:
+      return "localized-entrywise";
     default:
       return "unchanged";
   }
@@ -102,8 +109,21 @@ static inline double bench_refactor_value_entrywise(
 
 static inline double bench_generated_refactor_value(
     bench_refactor_value_mode mode, double base_value, uint64_t row,
-    uint64_t col, uint64_t generation, double amplitude) {
-  return mode == BENCH_REFACTOR_VALUES_ENTRYWISE
+    uint64_t col, uint64_t dimension, uint64_t generation,
+    double amplitude) {
+  if (mode == BENCH_REFACTOR_VALUES_LOCALIZED_ENTRYWISE) {
+    /* A fixed cyclic window changes across the whole sequence, modeling a
+       stable localized nonlinear-device region without consulting any
+       solver's ordering or decomposition. */
+    if (dimension == 0u) return base_value;
+    const uint64_t width = (dimension + UINT64_C(1023)) / UINT64_C(1024);
+    const uint64_t start =
+      bench_value_mix64(UINT64_C(0x6a09e667f3bcc909)) % dimension;
+    const uint64_t distance = (col + dimension - start) % dimension;
+    if (distance >= width) return base_value;
+  }
+  return mode == BENCH_REFACTOR_VALUES_ENTRYWISE ||
+         mode == BENCH_REFACTOR_VALUES_LOCALIZED_ENTRYWISE
     ? bench_refactor_value_entrywise(base_value, row, col, generation,
                                      amplitude)
     : bench_refactor_value(base_value, row, col, generation, amplitude);
