@@ -74,7 +74,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--refactor-repeat", type=int, default=5)
     parser.add_argument(
         "--refactor-values",
-        choices=("unchanged", "rank-preserving"),
+        choices=("unchanged", "rank-preserving", "entrywise"),
         default="unchanged",
     )
     parser.add_argument("--refactor-value-amplitude", type=float, default=1.0e-3)
@@ -99,7 +99,7 @@ def main() -> int:
         or args.refactor_value_amplitude < 0.0
         or args.refactor_value_amplitude >= 1.0
         or (
-            args.refactor_values == "rank-preserving"
+            args.refactor_values != "unchanged"
             and args.refactor_value_amplitude <= 0.0
         )
     ):

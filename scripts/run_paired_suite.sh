@@ -25,12 +25,12 @@ INPUT_INDEX=${INPUT_INDEX:-64}
 # when adaptive engine trials must be diluted into the long-run steady rate.
 REFACTOR_REPEAT=${REFACTOR_REPEAT:-5}
 # Keep the released-demo-compatible unchanged loop as the default.  Set
-# REFACTOR_VALUES=rank-preserving for the nonlinear-SPICE validity check; all
-# harnesses then receive the same A_g = D_row(g) A_0 D_col(g) sequence.
+# REFACTOR_VALUES=rank-preserving for the separable nonlinear-SPICE check, or
+# entrywise for a deterministic certificate-rejection counter-workload.
 REFACTOR_VALUES=${REFACTOR_VALUES:-unchanged}
 REFACTOR_VALUE_AMPLITUDE=${REFACTOR_VALUE_AMPLITUDE:-0.001}
 case "$REFACTOR_VALUES" in
-  unchanged|rank-preserving) ;;
+  unchanged|rank-preserving|entrywise) ;;
   *) echo "invalid REFACTOR_VALUES: $REFACTOR_VALUES" >&2; exit 2;;
 esac
 # The measured cycle starts at the initial factorization.  Extra full-factor

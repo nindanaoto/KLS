@@ -6,7 +6,8 @@
 
 typedef enum bench_refactor_value_mode {
   BENCH_REFACTOR_VALUES_UNCHANGED = 0,
-  BENCH_REFACTOR_VALUES_RANK_PRESERVING = 1
+  BENCH_REFACTOR_VALUES_RANK_PRESERVING = 1,
+  BENCH_REFACTOR_VALUES_ENTRYWISE = 2
 } bench_refactor_value_mode;
 
 static inline int bench_parse_refactor_value_mode(
@@ -20,13 +21,23 @@ static inline int bench_parse_refactor_value_mode(
     *mode_out = BENCH_REFACTOR_VALUES_RANK_PRESERVING;
     return 1;
   }
+  if (strcmp(name, "entrywise") == 0) {
+    *mode_out = BENCH_REFACTOR_VALUES_ENTRYWISE;
+    return 1;
+  }
   return 0;
 }
 
 static inline const char *bench_refactor_value_mode_name(
     bench_refactor_value_mode mode) {
-  return mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
-           ? "rank-preserving" : "unchanged";
+  switch (mode) {
+    case BENCH_REFACTOR_VALUES_RANK_PRESERVING:
+      return "rank-preserving";
+    case BENCH_REFACTOR_VALUES_ENTRYWISE:
+      return "entrywise";
+    default:
+      return "unchanged";
+  }
 }
 
 static inline uint64_t bench_value_mix64(uint64_t value) {
@@ -66,6 +77,36 @@ static inline double bench_refactor_value(double base_value,
   const double col_scale = bench_axis_multiplier(
     col, generation, UINT64_C(0x8ebc6af09c88c6e3), amplitude);
   return (base_value * row_scale) * col_scale;
+}
+
+/*
+ * Perturb each stored entry independently of the row/column product model.
+ * This deterministic counter-workload normally rejects a diagonal-equivalence
+ * certificate and exercises the ordinary numeric-refactor fallback.  Small
+ * amplitudes are recommended because, unlike the separable generator above,
+ * entrywise perturbation does not preserve rank by construction.
+ */
+static inline double bench_refactor_value_entrywise(
+    double base_value, uint64_t row, uint64_t col, uint64_t generation,
+    double amplitude) {
+  const uint64_t key =
+    (row + UINT64_C(1)) * UINT64_C(0xd6e8feb86659fd93) ^
+    (col + UINT64_C(1)) * UINT64_C(0xa0761d6478bd642f) ^
+    (generation + UINT64_C(1)) * UINT64_C(0xe7037ed1a0b428db) ^
+    UINT64_C(0x8ebc6af09c88c6e3);
+  const uint64_t bucket = bench_value_mix64(key) >> 48;
+  const double signed_unit =
+    ((double)bucket - 32767.5) * (1.0 / 32767.5);
+  return base_value * (1.0 + amplitude * signed_unit);
+}
+
+static inline double bench_generated_refactor_value(
+    bench_refactor_value_mode mode, double base_value, uint64_t row,
+    uint64_t col, uint64_t generation, double amplitude) {
+  return mode == BENCH_REFACTOR_VALUES_ENTRYWISE
+    ? bench_refactor_value_entrywise(base_value, row, col, generation,
+                                     amplitude)
+    : bench_refactor_value(base_value, row, col, generation, amplitude);
 }
 
 #endif

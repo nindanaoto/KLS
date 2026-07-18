@@ -92,6 +92,13 @@ the released CKTSO and SubtreeLU demo loops. JSON output records both
 `refactor_value_mode` and the effective amplitude so changed- and unchanged-
 value records cannot be confused during review.
 
+For a deterministic rejection workload, use
+`REFACTOR_VALUES=entrywise`.  It applies an independent coordinate/generation
+multiplier to every stored entry, so it is generally not expressible as
+`D_row A_0 D_col`.  This mode exercises certificate rejection and ordinary
+numeric fallback.  Unlike the rank-preserving mode, it does not guarantee
+rank preservation; use a small amplitude and retain residual/status filters.
+
 ## Local primary material
 
 - `../../refs/CKTSO_High-Performance_Parallel_Sparse_Linear_Solver_for_General_Circuit_Simulations.pdf`, Sections I, IV, and VI.

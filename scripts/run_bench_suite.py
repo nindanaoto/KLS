@@ -289,7 +289,7 @@ def main() -> int:
     parser.add_argument("--refactor-repeat", type=int, default=5)
     parser.add_argument(
         "--refactor-values",
-        choices=["unchanged", "rank-preserving"],
+        choices=["unchanged", "rank-preserving", "entrywise"],
         default="unchanged",
     )
     parser.add_argument("--refactor-value-amplitude", type=float, default=0.001)
@@ -405,7 +405,7 @@ def main() -> int:
         print("repeat arguments are invalid", file=sys.stderr)
         return 1
     if not 0.0 <= args.refactor_value_amplitude < 1.0 or (
-        args.refactor_values == "rank-preserving"
+        args.refactor_values != "unchanged"
         and args.refactor_value_amplitude <= 0.0
     ):
         print("--refactor-value-amplitude must be in (0, 1) for changed values", file=sys.stderr)

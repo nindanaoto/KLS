@@ -141,12 +141,13 @@ static void matvec(const Matrix &a, const std::vector<double> &x, std::vector<do
 
 static void make_refactor_values(Matrix &a,
                                  const std::vector<double> &base_values,
+                                 bench_refactor_value_mode mode,
                                  uint64_t generation, double amplitude) {
   for (int col = 0; col < a.n; ++col) {
     for (int p = a.col_ptr[static_cast<size_t>(col)];
          p < a.col_ptr[static_cast<size_t>(col) + 1u]; ++p) {
-      a.values[static_cast<size_t>(p)] = bench_refactor_value(
-        base_values[static_cast<size_t>(p)],
+      a.values[static_cast<size_t>(p)] = bench_generated_refactor_value(
+        mode, base_values[static_cast<size_t>(p)],
         static_cast<uint64_t>(a.row_idx[static_cast<size_t>(p)]),
         static_cast<uint64_t>(col), generation, amplitude);
     }
@@ -175,7 +176,7 @@ static double residual(const Matrix &a,
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat] [factor-repeat] [unchanged|rank-preserving] [amplitude]\n", argv[0]);
+    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat] [factor-repeat] [unchanged|rank-preserving|entrywise] [amplitude]\n", argv[0]);
     return EXIT_FAILURE;
   }
   const int threads = argc > 2 ? std::atoi(argv[2]) : 16;
@@ -193,7 +194,7 @@ int main(int argc, char **argv) {
   if (threads <= 0 || repeat <= 0 || refactor_repeat < 0 ||
       factor_repeat < 0 || !std::isfinite(refactor_value_amplitude) ||
       refactor_value_amplitude < 0.0 || refactor_value_amplitude >= 1.0 ||
-      (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING &&
+      (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED &&
        refactor_value_amplitude <= 0.0)) {
     std::fprintf(stderr, "threads/repeat arguments must be positive\n");
     return EXIT_FAILURE;
@@ -254,8 +255,9 @@ int main(int argc, char **argv) {
     factor_total += oparm[1];
   }
   for (int i = 0; i < refactor_repeat && ret >= 0; ++i) {
-    if (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING) {
-      make_refactor_values(a, base_values, static_cast<uint64_t>(i) + 1u,
+    if (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED) {
+      make_refactor_values(a, base_values, refactor_value_mode,
+                           static_cast<uint64_t>(i) + 1u,
                            refactor_value_amplitude);
       matvec(a, x_true, b);
     }
@@ -320,7 +322,7 @@ int main(int argc, char **argv) {
               argv[1], a.n, a.col_ptr[static_cast<size_t>(a.n)], threads,
               repeat, factor_repeat, refactor_repeat,
               bench_refactor_value_mode_name(refactor_value_mode),
-              refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
+              refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
                 ? refactor_value_amplitude : 0.0,
               analysis_us,
               initial_factor_us,

@@ -348,12 +348,13 @@ static void matvec_values(const matrix *a, const double *values,
 }
 
 static void make_refactor_values(const matrix *a, const double *base_values,
+                                 bench_refactor_value_mode mode,
                                  uint64_t generation, double amplitude,
                                  double *values_out) {
   for (int64_t col = 0; col < a->n; ++col) {
     for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
-      values_out[p] = bench_refactor_value(
-        base_values[p], (uint64_t)a->row_idx[p], (uint64_t)col,
+      values_out[p] = bench_generated_refactor_value(
+        mode, base_values[p], (uint64_t)a->row_idx[p], (uint64_t)col,
         generation, amplitude);
     }
   }
@@ -676,7 +677,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--refactor-values unchanged|rank-preserving] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--refactor-values unchanged|rank-preserving|entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -812,7 +813,7 @@ int main(int argc, char **argv) {
   if (factor_repeat < 0) factor_repeat = repeat;
   if (repeat <= 0 || factor_repeat < 0 || refactor_repeat < 0 ||
       options.threads <= 0 || refactor_value_amplitude >= 1.0 ||
-      (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING &&
+      (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED &&
        refactor_value_amplitude <= 0.0)) {
     usage(argv[0]);
     return EXIT_FAILURE;
@@ -1096,7 +1097,7 @@ int main(int argc, char **argv) {
 
   double *generated_values = NULL;
   const double *current_values = run_values;
-  if (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING) {
+  if (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED) {
     generated_values =
       (double *)malloc((size_t)a.nnz * sizeof(*generated_values));
     if (generated_values == NULL) {
@@ -1148,7 +1149,8 @@ int main(int argc, char **argv) {
   double refactor_first = 0.0;
   for (int i = 0; i < refactor_repeat && status == KLS_OK; ++i) {
     if (generated_values != NULL) {
-      make_refactor_values(&a, run_values, (uint64_t)i + 1u,
+      make_refactor_values(&a, run_values, refactor_value_mode,
+                           (uint64_t)i + 1u,
                            refactor_value_amplitude, generated_values);
       current_values = generated_values;
       matvec_values(&a, current_values, x_true, b);
@@ -1343,7 +1345,7 @@ int main(int argc, char **argv) {
            path, a.n, a.nnz, options.threads, repeat, factor_repeat,
            refactor_repeat,
            bench_refactor_value_mode_name(refactor_value_mode),
-           refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
+           refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
              ? refactor_value_amplitude : 0.0,
            kls_backend_name(options.backend),
            stats.build_has_metis ? "true" : "false",
@@ -4124,7 +4126,7 @@ int main(int argc, char **argv) {
     printf("threads: %d\n", options.threads);
     printf("refactor values: %s (amplitude %.6g)\n",
            bench_refactor_value_mode_name(refactor_value_mode),
-           refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
+           refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
              ? refactor_value_amplitude : 0.0);
     printf("build features: METIS %s, SCOTCH %s, SPRAL scaling %s, CBLAS %s\n",
            stats.build_has_metis ? "on" : "off",

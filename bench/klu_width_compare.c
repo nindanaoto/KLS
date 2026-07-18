@@ -294,11 +294,12 @@ static void matvec(const matrix *a, const double *x, double *y) {
 }
 
 static void make_refactor_values(matrix *a, const double *base_values,
+                                 bench_refactor_value_mode mode,
                                  uint64_t generation, double amplitude) {
   for (int64_t col = 0; col < a->n; ++col) {
     for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
-      a->values[p] = bench_refactor_value(
-        base_values[p], (uint64_t)a->row_idx[p], (uint64_t)col,
+      a->values[p] = bench_generated_refactor_value(
+        mode, base_values[p], (uint64_t)a->row_idx[p], (uint64_t)col,
         generation, amplitude);
     }
   }
@@ -442,8 +443,9 @@ static int run_klu32(matrix *a, const double *base_values,
   }
   total = 0.0;
   for (int i = 0; i < refactor_repeat; ++i) {
-    if (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING) {
-      make_refactor_values(a, base_values, (uint64_t)i + 1u,
+    if (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED) {
+      make_refactor_values(a, base_values, refactor_value_mode,
+                           (uint64_t)i + 1u,
                            refactor_value_amplitude);
       matvec(a, x_true, rhs);
     }
@@ -573,8 +575,9 @@ static int run_klu64(matrix *a, const double *base_values,
   }
   total = 0.0;
   for (int i = 0; i < refactor_repeat; ++i) {
-    if (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING) {
-      make_refactor_values(a, base_values, (uint64_t)i + 1u,
+    if (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED) {
+      make_refactor_values(a, base_values, refactor_value_mode,
+                           (uint64_t)i + 1u,
                            refactor_value_amplitude);
       matvec(a, x_true, rhs);
     }
@@ -659,7 +662,7 @@ int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr,
             "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] "
-            "[--refactor-values unchanged|rank-preserving] [--refactor-value-amplitude A] "
+            "[--refactor-values unchanged|rank-preserving|entrywise] [--refactor-value-amplitude A] "
             "[--ordering amd|colamd|natural] [--scale -1|0|1|2] "
             "[--no-btf] [--width-order 32-first|64-first] [--json]\n",
             argv[0]);
@@ -731,7 +734,7 @@ int main(int argc, char **argv) {
   if (repeat <= 0 || factor_repeat < 0 || refactor_repeat < 0 ||
       (scale != -1 && scale != 0 && scale != 1 && scale != 2) ||
       refactor_value_amplitude < 0.0 || refactor_value_amplitude >= 1.0 ||
-      (refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING &&
+      (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED &&
        refactor_value_amplitude <= 0.0)) {
     fprintf(stderr, "invalid repeat or scale argument\n");
     return EXIT_FAILURE;
@@ -813,7 +816,7 @@ int main(int argc, char **argv) {
            "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 "}\n",
            path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat,
            bench_refactor_value_mode_name(refactor_value_mode),
-           refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
+           refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
              ? refactor_value_amplitude : 0.0,
            ordering,
            width32_first ? "32-first" : "64-first",
@@ -832,7 +835,7 @@ int main(int argc, char **argv) {
            "\"btf\":%s,\"scale\":%d,",
            path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat,
            bench_refactor_value_mode_name(refactor_value_mode),
-           refactor_value_mode == BENCH_REFACTOR_VALUES_RANK_PRESERVING
+           refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
              ? refactor_value_amplitude : 0.0,
            ordering,
            width32_first ? "32-first" : "64-first",
